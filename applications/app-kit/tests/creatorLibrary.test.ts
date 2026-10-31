@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  creatorChannel, deleteCreatorAsset, getCreatorFiles, hashChunks, listCreatorAssets, memoryBackend, putCreatorAsset,
-  renameCreatorAsset, resetCreatorChannel, setCreatorBackend, type CreatorMessage,
+  creatorChannel, deleteCreatorAsset, duplicateCreatorAsset, getCreatorAsset, getCreatorFiles, hashChunks, listCreatorAssets, memoryBackend,
+  moveCreatorAsset, putCreatorAsset, renameCreatorAsset, resetCreatorChannel, setCreatorBackend, type CreatorMessage,
 } from '../src/creatorLibrary';
 
 const file = (name: string, text: string) => ({ name, mime: 'text/plain', blob: new Blob([text]) });
@@ -50,6 +50,32 @@ describe('Creator library', () => {
     expect(heard.at(-1)).toEqual({ type: 'delete', id: 'foliage_a', revision: 3 });
     // Saving it again revives it at a later revision.
     expect((await putCreatorAsset(input()))!.revision).toBe(4);
+  });
+
+  it('files assets in folders and keeps thumbnails without new revisions', async () => {
+    await putCreatorAsset(input({ thumbnail: 'data:a' }));
+    await moveCreatorAsset('foliage_a', '/Trees//Conifers/');
+    let meta = (await getCreatorAsset('foliage_a'))!;
+    expect(meta.folder).toBe('Trees/Conifers');
+    expect(meta.revision).toBe(1);
+    // A new picture alone is stored but is not a revision; a real change keeps folder and picture.
+    expect(await putCreatorAsset(input({ thumbnail: 'data:b' }))).toBeNull();
+    expect((await getCreatorAsset('foliage_a'))!.thumbnail).toBe('data:b');
+    meta = (await putCreatorAsset(input({ contentHash: 'h2' })))!;
+    expect(meta.folder).toBe('Trees/Conifers');
+    expect(meta.thumbnail).toBe('data:b');
+  });
+
+  it('duplicates an asset with its files, folder and picture', async () => {
+    await putCreatorAsset(input({ thumbnail: 'data:a', privateFiles: [file('override/bark', 'img')] }));
+    await moveCreatorAsset('foliage_a', 'Trees');
+    const copy = (await duplicateCreatorAsset('foliage_a', 'Pine copy'))!;
+    expect(copy.id).not.toBe('foliage_a');
+    expect(copy.name).toBe('Pine copy');
+    expect(copy.folder).toBe('Trees');
+    expect(copy.thumbnail).toBe('data:a');
+    expect((await getCreatorFiles(copy.id)).map(f => f.name)).toEqual(['pine_LOD0.glb', 'pine.foliage.json']);
+    expect((await getCreatorFiles(copy.id, ['override/bark'])).length).toBe(1);
   });
 
   it('hashes chunk boundaries', () => {

@@ -162,10 +162,11 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             expect(l1, layer.name).toBeLessThan(lod0);
             expect(l2, layer.name).toBeLessThan(l1);
             if (layer.name.includes('Grass')) {
-                // A clump of blades, then fewer blades, then three crossed cards.
+                // A clump of blades, then fewer, then a few: blades all the way, never a billboard card.
                 expect(layer.cullDistance, layer.name).toBeLessThanOrEqual(30);
                 expect(lod0, layer.name).toBeGreaterThan(200);
-                expect(l2, layer.name).toBeLessThanOrEqual(12);
+                expect(l2, layer.name).toBeGreaterThan(6);   // three crossed cards would be 6
+                expect(layer.lods.flatMap((l: any) => l.models).some((m: any) => /card/i.test(JSON.stringify(m.material ?? m.materialId ?? ''))), layer.name).toBe(false);
                 expect(layer.billboard, layer.name).toBeUndefined();
             } else if (/Undergrowth|Boxwood|Shrub|Juniper/.test(layer.name)) {
                 // Bushes: walked through, no impostor, culled well short of the trees.
@@ -203,15 +204,15 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const byName = new Map(library('materials').map((m: any) => [m.name, m.material]));
         // Leaves, needles and grass glow back-lit (Material translucency), double-sided so the back face
         // draws; bark and rock do not. The Creator's materials, named "<plant> <material>".
-        for (const name of ['Meadow Grass A Grass', 'Scots Pine A Needles', 'Spruce Needles',
+        for (const name of ['Meadow Grass A Grass', 'Spruce A Needles', 'Highland Spruce Needles', 'Oak Leaves',
                             'Shrub A Leaves', 'Juniper Needles', 'Forest Undergrowth A Leaves']) {
             const m = byName.get(name);
             expect(m?.translucency, name).toBeGreaterThan(0);
             expect(m?.config.side, name).toBe('double');
         }
         // Cards cut out on their base colour's alpha (no separate mask).
-        for (const name of ['Scots Pine A Needles', 'Spruce Needles', 'Shrub A Leaves']) expect(byName.get(name)?.alphaCutoff, name).toBe(0.5);
-        for (const name of ['Scots Pine A Bark', 'Spruce Bark', 'Shrub A Bark', 'Moss Rock'])
+        for (const name of ['Spruce A Needles', 'Oak Leaves', 'Shrub A Leaves']) expect(byName.get(name)?.alphaCutoff, name).toBe(0.5);
+        for (const name of ['Spruce A Bark', 'Oak Bark', 'Shrub A Bark', 'Moss Rock'])
             expect(byName.get(name)?.translucency ?? 0, name).toBe(0);
     });
 
@@ -221,7 +222,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             const f = new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
             const count = f.length / 5;
             // Trees and bushes stand on the small valley floor; everything else numbers in the hundreds.
-            expect(count, layer.name).toBeGreaterThan(/Shrub|Juniper|Boxwood/.test(layer.name) ? 10 : 100);
+            expect(count, layer.name).toBeGreaterThan(/Oak|Shrub|Juniper|Boxwood/.test(layer.name) ? 10 : /Spruce/.test(layer.name) ? 50 : 100);
             expect(count, layer.name).toBeLessThan(MAX_INSTANCES);
             for (let i = 0; i < f.length; i += 5 * 37) {
                 const [x, y, z] = [f[i], f[i + 1], f[i + 2]];

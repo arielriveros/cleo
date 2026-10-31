@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { WIND_PRESETS } from 'cleo';
 import { ParamForm } from '@cleo/app-kit/params/ParamForm';
 import type { GenericParamSpec } from '@cleo/app-kit/params/ParamField';
 import { MaterialFields } from '@cleo/app-kit/materials/MaterialFields';
@@ -28,7 +29,7 @@ const LOD0_BUDGET: Record<FoliageKind, number> = { grass: 1500, rock: 6000, tree
 
 /** The textures each material samples, in slot order (base colour first). */
 const MATERIAL_TEXTURES: Record<MaterialKey, TextureKey[]> = {
-  grass: ['grass'], grassCard: ['grassCard'], rock: ['rockAlbedo', 'rockNormal'], leaves: ['leaves'],
+  grass: ['grass'], grassCard: ['grassCard'], rock: ['rockAlbedo', 'rockNormal'], leaves: ['leaves', 'leavesNormal'],
   bark: ['bark', 'barkNormal', 'barkOrm', 'barkAo', 'barkRoughness', 'barkMetallic'],
 };
 /** Single-channel slots: no texture of their own, they replace one channel of the packed ARM map. */
@@ -270,7 +271,16 @@ const STAGE_SPECS: GenericParamSpec[] = [
   { key: 'ambientLux', label: 'Ambient light', kind: 'float', min: 0, max: 40000, step: 100, unit: 'lx' },
 ];
 
-/** Left dock: presets, seeds, saved variants and the preview's sun. */
+/** The preview's wind: the stage's WindNode, which a swaying preview is drawn through (foliageStage.ts). */
+const WIND_SPECS: GenericParamSpec[] = [
+  { key: 'wind', label: 'Wind', kind: 'bool', hint: 'Sway the preview as a foliage layer does in a level. Off (or wireframe) shows it still.' },
+  { key: 'windDirection', label: 'Direction', kind: 'float', min: 0, max: 360, step: 1, unit: '°', when: p => !!p.wind },
+  { key: 'windStrength', label: 'Strength', kind: 'float', min: 0, max: 3, step: 0.01, when: p => !!p.wind },
+  { key: 'windGustScale', label: 'Gust size', kind: 'float', min: 1, max: 100, step: 0.5, unit: 'm', when: p => !!p.wind },
+  { key: 'windGustSpeed', label: 'Gust speed', kind: 'float', min: 0, max: 20, step: 0.1, unit: 'm/s', when: p => !!p.wind },
+];
+
+/** Left dock: presets, seeds, saved variants, the preview's sun and its wind. */
 export function VariantsPanel() {
   const { doc, setDoc, variants, setVariants, seedHistory, stage, setStage } = useFoliage();
   const [label, setLabel] = useState('');
@@ -318,6 +328,21 @@ export function VariantsPanel() {
       <Collapsable title='Sun & sky' persistKey='cleo_creator_foliage_variants_stage'>
         <ParamForm schema={STAGE_SPECS} values={stage as unknown as Record<string, unknown>}
                    onChange={patch => setStage({ ...stage, ...(patch as Partial<StageSettings>) })} />
+      </Collapsable>
+      <Collapsable title='Wind' persistKey='cleo_creator_foliage_variants_wind'>
+        <ParamForm schema={WIND_SPECS} values={stage as unknown as Record<string, unknown>}
+                   onChange={patch => setStage({ ...stage, ...(patch as Partial<StageSettings>) })} />
+        {stage.wind && (
+          <div className='flex flex-col pt-1'>
+            {WIND_PRESETS.map(p => (
+              <ListRow key={p.id} selected={stage.windPreset === p.id} title={p.description} caption={p.description}
+                       onClick={() => setStage({ ...stage, windPreset: p.id, windStrength: p.options.strength ?? stage.windStrength,
+                                                 windGustScale: p.options.gustScale ?? stage.windGustScale, windGustSpeed: p.options.gustSpeed ?? stage.windGustSpeed })}>
+                {p.label}
+              </ListRow>
+            ))}
+          </div>
+        )}
       </Collapsable>
     </PanelBody>
   );

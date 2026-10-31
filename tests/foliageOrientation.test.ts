@@ -90,3 +90,19 @@ describe('foliage orientation', () => {
         expect(ups(layer).some(u => u[1] < 0.9)).toBe(true);
     });
 });
+
+describe('pushInstance', () => {
+    it('keeps an exact yaw and scale when given, and draws them when not', () => {
+        const layer = layerWith(undefined, 0);
+        layer.pushInstance(1, 2, 3, 0.5, 1.75);
+        layer.pushInstance(4, 0, 0);
+        layer.commit();
+        const out: number[] = [];
+        expect(layer.instanceAt(0, out)).toBe(true);
+        expect(out).toEqual([1, 2, 3, 0.5, 1.75]);
+        layer.instanceAt(1, out);
+        expect(out[4]).toBe(1);                         // minScale = maxScale = 1
+        expect(out[3]).toBeGreaterThanOrEqual(0);
+        expect(out[3]).toBeLessThan(Math.PI * 2);
+    });
+});

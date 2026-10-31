@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { safeExec, useSyncTreeToStore } from '@cleo/app-kit/assets/fileManagerSync'
 import type { IApi } from '@svar-ui/react-filemanager'
 import { Logger } from 'cleo'
 import { startTask, StepStatus } from '@cleo/app-kit/feedback/progressStore'
@@ -410,25 +411,8 @@ function thumbFingerprint(entry: VfsEntry, deps: ReturnType<typeof useVfs>['deps
 }
 
 /**
- * Run a store action without letting a failure escape.
- * `api.exec` is async, so a throw inside a handler surfaces as an unhandled rejection rather than at the
- * call site; for `delete-files` that leaves SVAR's tree half-mutated. Both shapes are caught here.
- */
-function safeExec(api: IApi, action: string, cfg: any): void {
-  try {
-    const result = api.exec(action, cfg) as unknown
-    if (result && typeof (result as Promise<unknown>).catch === 'function') {
-      (result as Promise<unknown>).catch(err =>
-        Logger.error(`Asset explorer: "${action}" failed — ${err}`, 'Editor'))
-    }
-  } catch (err) {
-    Logger.error(`Asset explorer: "${action}" failed — ${err}`, 'Editor')
-  }
-}
-
-/**
- * Push changes the explorer didn't make into SVAR's tree. Diffing against the live tree rather than
- * re-passing `data` keeps the sidebar's open folders and the current path intact.
+ * Push changes the explorer didn't make into SVAR's tree (the shared diff: app-kit fileManagerSync), with
+ * each asset's thumbnail fingerprinted so a re-rendered one is picked up.
  */
 function useSyncVfsToStore(
   apiRef: React.MutableRefObject<IApi | null>,
@@ -437,71 +421,9 @@ function useSyncVfsToStore(
   pathIndexRef: ReturnType<typeof useVfs>['pathIndexRef'],
   depsRef: ReturnType<typeof useVfs>['depsRef'],
 ) {
-  const thumbsRef = useRef(new Map<string, string>())
-
-  useEffect(() => {
-    const api = apiRef.current
-    if (!api) return
-
-    const want = buildFileManagerData(vfs, libs)
-    let have = new Set((api.serialize('/') ?? []).map(e => e.id))
-
-    const create = (id: string, file: Record<string, unknown>) => {
-      // A node `getFile` resolves but `serialize` never listed is an orphan in SVAR's id pool; creating
-      // over it renames ours to '<name>.new' and loops create/delete forever. Reclaim it instead.
-      if (api.getFile(id)) safeExec(api, 'delete-files', { ids: [id], skipProvider: true })
-
-      const cfg: any = { file, parent: dirOf(id), skipProvider: true }
-      safeExec(api, 'create-file', cfg)
-      if (cfg.newId && cfg.newId !== id)
-        Logger.warn(`Asset explorer: "${id}" collided in the tree and landed on "${cfg.newId}"`, 'Editor')
-      have.add(cfg.newId ?? id)
-    }
-
-    // FileTree.add dereferences the parent with no guard (`byId(parent).data`), so a file whose folder is
-    // not in the tree throws. Create the ancestors on the spot.
-    const ensureFolders = (id: string) => {
-      for (const folder of ancestorsOf(id)) {
-        if (have.has(folder)) continue
-        create(folder, { name: baseOf(folder), type: 'folder' })
-      }
-    }
-
-    const add = (e: (typeof want)[number]) => {
-      ensureFolders(e.id)
-      if (have.has(e.id)) return
-      create(e.id, { name: baseOf(e.id), type: e.type, size: e.size, date: e.date })
-    }
-
-    for (const e of want.filter(e => !have.has(e.id))) add(e)
-
-    // A folder holding something in `want` is wanted too even when the index forgot to list it, or the
-    // sweep below deletes the parent of the files this pass just created.
-    const wanted = new Set([...want.map(e => e.id), ...want.flatMap(e => ancestorsOf(e.id))])
-    // Top-most, still-resolvable ids only: DataTree.remove purges a folder's subtree from its pool, then
-    // dereferences the next id blind.
-    const stale = topMostIds(Array.from(have).filter(id => !wanted.has(id))).filter(id => !!api.getFile(id))
-    if (stale.length) {
-      safeExec(api, 'delete-files', { ids: stale, skipProvider: true })
-      have = new Set((api.serialize('/') ?? []).map(e => e.id)) // subtrees went with their folders
-    }
-
-    // SVAR memoizes a card's preview against the entity object's identity; swap the entity out so a
-    // re-rendered thumbnail is picked up.
-    const thumbs = thumbsRef.current
-    for (const e of want) {
-      if (e.type !== 'file') continue
-      const entry = pathIndexRef.current.get(e.id)
-      if (!entry) continue
-      const fp = thumbFingerprint(entry, depsRef.current)
-      const previous = thumbs.get(e.id)
-      thumbs.set(e.id, fp)
-      if (previous !== undefined && previous !== fp && have.has(e.id)) {
-        if (api.getFile(e.id)) safeExec(api, 'delete-files', { ids: [e.id], skipProvider: true })
-        have.delete(e.id)
-        add(e)
-      }
-    }
-    for (const id of Array.from(thumbs.keys())) if (!wanted.has(id)) thumbs.delete(id)
-  }, [apiRef, vfs, libs, pathIndexRef, depsRef])
+  const want = useMemo(() => buildFileManagerData(vfs, libs), [vfs, libs])
+  useSyncTreeToStore(apiRef, want, id => {
+    const entry = pathIndexRef.current.get(id)
+    return entry ? thumbFingerprint(entry, depsRef.current) : undefined
+  })
 }

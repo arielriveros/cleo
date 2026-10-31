@@ -19,7 +19,11 @@ export default mergeConfig(engineConfig, defineConfig({
     resolve: {
         // The Hollow Keep scripts import each other by their path in the example's Assets tree
         // ('@/Core/Scripts/SoulsMath'); on disk they all sit flat in examples/scripts/.
-        alias: [{ find: /^@\/(?:[^'"]*\/)?Scripts\/(Souls\w+)$/, replacement: fileURLToPath(new URL('./examples/scripts/', import.meta.url)) + '$1.ts' }],
+        alias: [
+            { find: /^@\/(?:[^'"]*\/)?Scripts\/(Souls\w+)$/, replacement: fileURLToPath(new URL('./examples/scripts/', import.meta.url)) + '$1.ts' },
+            // The example tests reach editor utilities (utils/vfs.ts), which import the app-kit by its alias.
+            { find: /^@cleo\/app-kit\/(.+)$/, replacement: fileURLToPath(new URL('./applications/app-kit/src/', import.meta.url)) + '$1' },
+        ],
     },
     test: {
         include: ['tests/**/*.test.ts'],

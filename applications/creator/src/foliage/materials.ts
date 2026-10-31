@@ -38,25 +38,26 @@ export function materialLabel(doc: FoliageDoc, key: MaterialKey): string {
 /** Whether a kind's material is generated at all (a tree with leafKind 'none' has no leaves). */
 export function hasMaterial(doc: FoliageDoc, key: MaterialKey): boolean {
   if (key === 'leaves') return doc[doc.kind as 'tree' | 'bush'].leafKind !== 'none';
+  if (key === 'grassCard') return doc.kind === 'grass' && doc.grass.lod2Kind !== 'blades';
   return MATERIAL_KEYS[doc.kind].includes(key);
 }
 
-type Linked = 'roughness' | 'translucency' | 'windStrength' | 'windStiffness' | 'windFlutter';
+type Linked = 'roughness' | 'translucency' | 'translucencyColor' | 'translucencyBlend' | 'windStrength' | 'windStiffness' | 'windFlutter';
 
 /** Fields linked to a kind's parameters: material field -> parameter key. */
 const LINKS: Record<FoliageKind, Partial<Record<MaterialKey, Partial<Record<Linked, string>>>>> = {
   grass: {
-    grass: { roughness: 'roughness', translucency: 'translucency', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter' },
-    grassCard: { roughness: 'roughness', translucency: 'translucency', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter' },
+    grass: { roughness: 'roughness', translucency: 'translucency', translucencyColor: 'translucencyColor', translucencyBlend: 'translucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter' },
+    grassCard: { roughness: 'roughness', translucency: 'translucency', translucencyColor: 'translucencyColor', translucencyBlend: 'translucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter' },
   },
   rock: { rock: { roughness: 'roughness' } },
   tree: {
     bark: { roughness: 'barkRoughness', windStrength: 'windStrength', windStiffness: 'windStiffness' },
-    leaves: { roughness: 'leafRoughness', translucency: 'leafTranslucency', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter' },
+    leaves: { roughness: 'leafRoughness', translucency: 'leafTranslucency', translucencyColor: 'leafTranslucencyColor', translucencyBlend: 'leafTranslucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter' },
   },
   bush: {
     bark: { roughness: 'barkRoughness', windStrength: 'windStrength', windStiffness: 'windStiffness' },
-    leaves: { roughness: 'leafRoughness', translucency: 'leafTranslucency', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter' },
+    leaves: { roughness: 'leafRoughness', translucency: 'leafTranslucency', translucencyColor: 'leafTranslucencyColor', translucencyBlend: 'leafTranslucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter' },
   },
 };
 
@@ -79,6 +80,8 @@ export function materialValues(doc: FoliageDoc, key: MaterialKey): MaterialField
     metallic: o.metallic ?? 0,
     roughness: linked('roughness'),
     translucency: linked('translucency'),
+    translucencyColor: links.translucencyColor ? (p[links.translucencyColor] as number[]).slice(0, 3) as Rgb : undefined,
+    translucencyBlend: linked('translucencyBlend'),
     emissive: o.emissive ?? [0, 0, 0],
     emissiveIntensity: o.emissiveIntensity ?? 1,
     alphaCutoff: DEFAULT_CUTOFF[key] !== undefined ? o.alphaCutoff ?? DEFAULT_CUTOFF[key] : undefined,
@@ -98,7 +101,9 @@ export function applyMaterialPatch(doc: FoliageDoc, key: MaterialKey, patch: Mat
   for (const [field, value] of Object.entries(patch) as [keyof MaterialPatch, unknown][]) {
     if (value === undefined) continue;
     const link = links[field as Linked] ?? (field === 'windFlutter' ? 'windFlutter' : undefined);
-    if (link) p[link] = value;
+    // A colour parameter is an Rgba; the editor hands back an Rgb.
+    if (link && field === 'translucencyColor') p[link] = [...(value as number[]).slice(0, 3), 1];
+    else if (link) p[link] = value;
     else if (field === 'baseColor' || field === 'emissive') o[field] = value as Rgb;
     else if (field === 'metallic' || field === 'emissiveIntensity' || field === 'alphaCutoff') o[field] = value as number;
     else if (field === 'windRole') o.windRole = value as WindRole;

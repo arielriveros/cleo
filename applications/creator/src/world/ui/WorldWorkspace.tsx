@@ -7,6 +7,7 @@ import { CreatorWorkspace, ListRow, PanelBody, PanelHeader, ViewportOverlay } fr
 import { downloadAll } from '../../core/download';
 import { useGeneration } from '../../core/useGeneration';
 import { AssetBar, useCreatorAsset } from '../../core/useCreatorAsset';
+import { useStageCapture } from '../../core/stageCapture';
 import { exportWorld, generateWorld, type WorldOutput } from '../generateWorld';
 import { MASK_KINDS } from '../masks';
 import { pipeErosionGpu } from '../pipeErosionGpu';
@@ -114,7 +115,8 @@ export function WorldWorkspace() {
 
   // --- The saved asset: once edits pause, the world is generated at full resolution and published to the
   // Creator library, which the editor follows (its landscapes offer to re-apply it). ---
-  const asset = useCreatorAsset<WorldDoc>('world', doc, d => { setDoc(d); select(null); });
+  const capture = useStageCapture();
+  const asset = useCreatorAsset<WorldDoc>('world', doc, d => { setDoc(d); select(null); }, undefined, capture);
   const publishedFrom = useRef<WorldDoc | null>(null);
   useEffect(() => {
     if (!asset.active || publishedFrom.current === doc) return;

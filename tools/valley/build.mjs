@@ -841,6 +841,8 @@ function creatorMaterial({ spec, manifest, dir }, key, m) {
     side: m.doubleSided ? 'double' : 'front', castShadow: spec.rule.castShadows, wind: m.wind,
     ...(m.alphaCutoff ? { alphaCutoff: m.alphaCutoff } : {}),
     ...(m.translucency ? { translucency: m.translucency } : {}),
+    // The colour back-lit leaves and blades glow in (Material translucencyTint), as the Creator set it.
+    ...(m.translucency && m.translucencyTint?.[3] ? { translucencyTint: m.translucencyTint } : {}),
     ...(m.metallic ? { metallic: m.metallic } : {}),
     ...(m.emissive ? { emissiveFactor: m.emissive, emissiveIntensity: m.emissiveIntensity ?? 1 } : {}),
   }))
@@ -911,7 +913,7 @@ log('cliff distance field')
 const inPlazaZone = (x, z) => z < -100 && Math.abs(x) < 20
 
 /**
- * Forest tracks: dead ends off the roads into the pine belt. Each starts on a road 35-80 m from the cliff
+ * Forest tracks: dead ends off the roads into the spruce belt. Each starts on a road 35-80 m from the cliff
  * foot (three such points, at least 60 m apart) and walks downhill on the cliff distance, toward the
  * cliffs, in 2 m steps until it is among the trees or the ground steepens.
  */
@@ -983,7 +985,7 @@ const clear = (x, z, pad = 0) => keepClear.every(c => Math.hypot(x - c.x, z - c.
 const inPlaza = (x, z) => z < -112 && Math.abs(x) < 16
 const inValley = (x, z) => heights.heightAt(x, z) < 25 && Math.hypot(x, z) < 200 && cliffDistance(x, z) > 2
 
-/** Every tree in the valley (pines in the belt, the stands and about the hamlet), for the forest volumes. */
+/** Every tree in the valley (spruce in the belt and the stands, oaks about the hamlet), for the forest volumes. */
 const TREE_POINTS = []
 
 /** `points` dealt among `kinds` at random, weighted by each one's rule density. */
@@ -1005,45 +1007,47 @@ function scatter() {
     counts[kinds[k].name] = pts.length
     layers.push({ proto: kinds[k], points: pts, seed: seed + k, sink })
   })
-  // Pines FIRST: the forest floor is painted where they stand, and everything after reads that mask.
-  // A dense belt at the cliff foot and a few stands in the valley (the pine variants, dealt at random),
-  // and sparse spruce beyond the rim.
+  // Trees FIRST: the forest floor is painted where they stand, and everything after reads that mask.
+  // A dense spruce belt at the cliff foot and a few stands in the valley (the spruce variants, dealt at
+  // random), sparse spruce beyond the rim, and oaks about the hamlet and the pond.
   {
     const random = rng(0x914e)
-    const pines = ofGroup('pine'), highland = ofGroup('highland')
-    const allowed = onGround(math, terrainMaterial, mask, heights, pines[0].name)
+    const forest = ofGroup('forest'), highland = ofGroup('highland'), village = ofGroup('village')
+    const allowed = onGround(math, terrainMaterial, mask, heights, forest[0].name)
+    const villageAllowed = onGround(math, terrainMaterial, mask, heights, village[0].name)
     const highAllowed = onGround(math, terrainMaterial, mask, heights, highland[0].name)
     const roadsClear = (x, z, d) => pathDistance(x, z) > d
-    const belt = jitteredCandidates(random, { minX: -280, maxX: 280, minZ: -280, maxZ: 280 }, 0.02, (x, z) => {
+    const belt = jitteredCandidates(random, { minX: -280, maxX: 280, minZ: -280, maxZ: 280 }, 0.012, (x, z) => {
       const d = cliffDistance(x, z)
       return d >= 8 && d <= 30 && heights.heightAt(x, z) < 45 && heights.slopeAt(x, z) < 32
         && Math.hypot(x, z) < rimRadius(x, z) + 60 && clear(x, z, 6) && !inPlaza(x, z) && roadsClear(x, z, 6) && allowed(x, z)
     })
-    const stands = jitteredCandidates(random, { minX: -160, maxX: 160, minZ: -160, maxZ: 160 }, 0.0025, (x, z) =>
+    const stands = jitteredCandidates(random, { minX: -160, maxX: 160, minZ: -160, maxZ: 160 }, 0.0015, (x, z) =>
       inValley(x, z) && cliffDistance(x, z) > 30 && clear(x, z, 12) && roadsClear(x, z, 9) && !inPlaza(x, z)
         && Math.hypot(x - SPAWN.x, z - SPAWN.z) > 18 && allowed(x, z))
-    const beyond = jitteredCandidates(random, { minX: -650, maxX: 650, minZ: -650, maxZ: 650 }, 0.0014, (x, z) => {
+    const beyond = jitteredCandidates(random, { minX: -650, maxX: 650, minZ: -650, maxZ: 650 }, 0.0009, (x, z) => {
       const h = heights.heightAt(x, z)
       return h > 55 && h < 210 && cliffDistance(x, z) > 6 && heights.slopeAt(x, z) < 28 && highAllowed(x, z)
     })
     const pts = [...belt, ...stands]
 
-    // More pines about the hamlet and the pond, among the meadows the stands leave open, and up the lower
-    // slopes around them (the valley floor proper is small). A fine candidate grid, thinned by a spacing
-    // test, so the valley's small floor still gets its trees.
+    // Oaks about the hamlet and the pond, among the meadows the stands leave open, and up the lower slopes
+    // around them (the valley floor proper is small). A fine candidate grid, thinned by a spacing test, so
+    // the valley's small floor still gets its trees.
     const placed = []
     jitteredCandidates(rng(0x1ac0), { minX: -170, maxX: 170, minZ: -170, maxZ: 170 }, 0.02, (x, z, r) =>
       r() < 0.5 && heights.heightAt(x, z) < 45 && heights.slopeAt(x, z) < 24 && cliffDistance(x, z) > 10
         && clear(x, z, 6) && roadsClear(x, z, 6) && !inPlaza(x, z)
         && Math.min(Math.hypot(x - HAMLET.x, z - HAMLET.z), Math.hypot(x - POND.x, z - POND.z)) < 130
         && Math.hypot(x - SPAWN.x, z - SPAWN.z) > 18 && pts.every(([px, pz]) => Math.hypot(x - px, z - pz) > 8)
-        && placed.every(([jx, jz]) => Math.hypot(x - jx, z - jz) > 10) && allowed(x, z) && placed.push([x, z]) > 0)
+        && placed.every(([jx, jz]) => Math.hypot(x - jx, z - jz) > 14) && villageAllowed(x, z) && placed.push([x, z]) > 0)
 
     TREE_POINTS.push(...pts, ...placed)
-    add(pines, deal([...pts, ...placed], pines, rng(0x9151)), 0x9150, 0.25)
+    add(forest, deal(pts, forest, rng(0x9151)), 0x9150, 0.25)
     add(highland, deal(beyond, highland, rng(0x9161)), 0x9160, 0.25)
-    counts.pines = `belt ${belt.length}, valley ${stands.length + placed.length}, beyond ${beyond.length}`
-    // The needle litter under them: the Forest Floor surface's mask channel.
+    add(village, deal(placed, village, rng(0x1ac2)), 0x1ac1, 0.2)
+    counts.trees = `spruce belt ${belt.length}, stands ${stands.length}, beyond ${beyond.length}, village oaks ${placed.length}`
+    // The litter under them: the Forest Floor surface's mask channel; a wider crown, a wider litter.
     paintForestFloor(mask, [...pts, ...beyond])
     paintForestFloor(mask, placed, 3.5, 7.5)
   }
@@ -1480,7 +1484,7 @@ function valleyProbe() {
 
 /**
  * The navmesh, baked as the editor's Bake button would: the terrain inside the volume at a 2 m step (the
- * full 2049-sample landscape would be eight million triangles), the static colliders, and every pine
+ * full 2049-sample landscape would be eight million triangles), the static colliders, and every tree
  * trunk and building carved out. Floaters (dynamic) and characters are left out.
  *
  * Not 4 m: the fog-gate notch is about 4 m wide, and a 4 m grid samples its cliff walls into the floor
@@ -1708,7 +1712,7 @@ function valleyScene() {
   // More cloud than Sunny's scattered puffs, lit softer: a weaker silver lining and forward lobe, so the
   // clouds round the sun do not burn white when you look up.
   clouds.clouds = { ...clouds.clouds, ...PRESETS.clouds, coverage: 0.5, silverIntensity: 0.3, phaseG: 0.4, sunIntensity: 9, useSceneWind: true }
-  // One wind for the whole valley: the grass and pines sway with it, and the clouds drift the same way.
+  // One wind for the whole valley: the grass and trees sway with it, and the clouds drift the same way.
   // The fade distances are the foliage's performance budget, not a look, so they stay the valley's.
   const wind = node('Wind', 'wind', {
     id: id('wind'),
@@ -1841,8 +1845,8 @@ function valleyScene() {
     // A 2 km valley seen to 3 km: four detailed cascades over the first 150 m, then the far cascade
     // carries the ridges' and hills' shadows out to 1.5 km.
     shadowMapResolution: 4096, shadowCascades: 4, shadowDistance: 150, shadowFarDistance: 1500,
-    // Pine shadows stop at 110 m: past that a tree's shadow is a few texels of the last cascade, and the
-    // pines are what the foliage shadow pass spends its triangles on. The trees themselves still draw.
+    // Tree shadows stop at 110 m: past that a tree's shadow is a few texels of the last cascade, and the
+    // trees are what the foliage shadow pass spends its triangles on. The trees themselves still draw.
     foliageShadowDistance: 110,
   })
   return { scene: root, textures: [], ui: { version: 1, elements: [] }, config, assetHashes: {}, assetHashVersion: ASSET_HASH_VERSION, savedAt: souls.CREATED_AT }
@@ -1882,7 +1886,7 @@ const result = souls.writeProject({
   buildScene: valleyScene,
   example: {
     name: PROJECT_NAME,
-    description: 'A souls-like on a 2 km mountain valley with a day and night cycle: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass, pine and spruce forest and bushes made with the Foliage Creator, a torch-lit hamlet with breakable barrels, and a skull cave down into a three-level dungeon with a boss in its throne arena.',
+    description: 'A souls-like on a 2 km mountain valley with a day and night cycle: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass, spruce forest, oaks about the hamlet and bushes made with the Foliage Creator, a torch-lit hamlet with breakable barrels, and a skull cave down into a three-level dungeon with a boss in its throne arena.',
     order: 0,
   },
   models: [...CHARACTER_MODELS, ...propAssets, ...foliageAssets, ...dungeon.models],

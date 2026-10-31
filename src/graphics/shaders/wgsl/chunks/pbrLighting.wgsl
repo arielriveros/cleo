@@ -569,24 +569,33 @@ fn evaluateSpotLight(light: SpotLight, fragPos: vec3<f32>, N: vec3<f32>, V: vec3
 }
 
 /**
- * Thin-surface diffuse transmission: the light that passes THROUGH a leaf or a grass blade and leaves
- * its unlit side. glTF's KHR_materials_diffuse_transmission, reduced to its thin-walled case: a Lambert
- * lobe about `-N`, tinted by the surface's own albedo (the transmission colour is the base colour).
+ * Thin-surface transmission: the light that passes THROUGH a leaf or a grass blade and leaves its unlit
+ * side, tinted by `albedo` (the surface colour, already blended toward its translucency tint).
+ *
+ * A thin leaf scatters what it transmits mostly FORWARD, so the glow is something you see when you look
+ * through the leaves toward the light: bright with the sun behind the canopy, faint from the side, barely
+ * there with the sun at your back. Modelled as a small Lambert leak about `-N` plus a forward lobe about
+ * the light's direction as seen from the camera. The lobe must carry the effect: a lobe about `-N` alone
+ * is view-independent, and with foliage cards' outward-bent normals it lit the whole anti-sun half of every
+ * crown from every angle -- a glow painted on the leaves rather than seen through them. The lobe still
+ * wants the light on the far side, softened, because a bent card normal is only a rough orientation.
  *
  * ADDITIVE, as game foliage models are (Unreal's Two Sided Foliage): the front face keeps its full diffuse
  * and this adds the back-lit glow on top. Not strictly energy conserving, but `t` then never changes how
  * the sun-lit side looks — splitting the albedo by `1 - t` read as shadow on lit leaves. Adds nothing for
  * an opaque surface, so callers branch on `t > 0` and every other pixel pays only that test.
- *
- * A small forward-scattering lift toward the light (the sun glowing through a canopy) is folded in:
- * real leaves scatter forward, and a pure Lambert lobe reads flat when looking straight into the sun.
  */
-const TRANSMISSION_FORWARD: f32 = 0.6;
+const TRANSMISSION_DIFFUSE: f32 = 0.2;      // leaks through whatever the view
+const TRANSMISSION_FORWARD: f32 = 3.0;      // looking through the leaf at the light
+const TRANSMISSION_SHARPNESS: f32 = 6.0;    // the forward lobe's width: ~35 degrees to half strength
+/** The sky's light seen through the back of a translucent surface, as a share of its full fill. */
+const TRANSMISSION_AMBIENT: f32 = 0.35;
 
 fn thinTransmission(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, albedo: vec3<f32>, t: f32) -> vec3<f32> {
     let back = saturate(-dot(N, L));
-    let forward = pow(saturate(dot(-V, L)), 8.0) * TRANSMISSION_FORWARD;
-    return albedo * (t * back * (1.0 + forward) / PI);
+    let lobe = pow(saturate(dot(-V, L)), TRANSMISSION_SHARPNESS);
+    let glow = TRANSMISSION_DIFFUSE * back + TRANSMISSION_FORWARD * lobe * (0.35 + 0.65 * back);
+    return albedo * (t * glow / PI);
 }
 
 /** {@link thinTransmission} for the sun. `visibility` is the shadow term, as for the reflected lobe. */

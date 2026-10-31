@@ -70,7 +70,10 @@ fn fs_main(in: VertexOutput) -> GBuffer {
 
     var out: GBuffer;
     out.gAlbedoMetallic = vec4<f32>(clamp(albedo, vec3<f32>(0.0), vec3<f32>(1.0)), select(clamp(metallic, 0.0, 1.0), -translucency, translucency > 0.0));
-    out.gNormalRoughness = vec4<f32>(oct.x, oct.y, g1.b, clamp(roughness, 0.0, 1.0));
+    // A translucent texel's blue channel is its packed transmission tint (chunks/translucencyTint.wgsl), not a
+    // reflectance; where the decal covers it fully it stops being translucent, and gets the default back.
+    let reflectanceOrTint = select(g1.b, 0.5, g0.a < 0.0 && translucency <= 0.0);
+    out.gNormalRoughness = vec4<f32>(oct.x, oct.y, reflectanceOrTint, clamp(roughness, 0.0, 1.0));
     out.gEmissiveAO = vec4<f32>(g2.rgb, clamp(ao, 0.0, 1.0));
     return out;
 }

@@ -14,6 +14,7 @@
 #include "./chunks/pbrLighting.wgsl"
 #include "./chunks/clusteredLights.wgsl"
 #include "./chunks/octNormal.wgsl"
+#include "./chunks/translucencyTint.wgsl"
 
 const MAX_REFLECTION_LOD: f32 = 4.0;
 /** Relative depth difference beyond which an AO/SSIL neighbour is treated as a different surface. */
@@ -293,12 +294,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // `1 - translucency` (energy conserving) made sun-lit leaves read as shadowed.
     let translucency = max(-albedoMetallic.a, 0.0);
     let metallic = max(albedoMetallic.a, 0.0);
-    let surfaceAlbedo = albedoMetallic.rgb;
-    let albedo = surfaceAlbedo;
+    let albedo = albedoMetallic.rgb;
+    // A translucent texel stores its transmission tint where reflectance goes (chunks/translucencyTint.wgsl):
+    // what comes through the back is the albedo blended toward it, and its specular is the default level.
+    let tint = select(vec4<f32>(1.0, 1.0, 1.0, 0.0), unpackTranslucencyTint(normalRoughness.b), translucency > 0.0);
+    let surfaceAlbedo = transmissionAlbedo(albedo, tint.rgb, tint.a);
     // Two channels, not three — see chunks/octNormal.wgsl. The third now carries the dielectric
     // specular level, which is why every non-metal in the scene no longer has identical reflectivity.
     let N = octDecode(vec2<f32>(normalRoughness.x, normalRoughness.y));
-    let reflectance = normalRoughness.b;
+    let reflectance = select(normalRoughness.b, 0.5, translucency > 0.0);
     let roughness = normalRoughness.a;
     let emissive = emissiveAO.rgb;
     let ao = emissiveAO.a;
@@ -324,7 +328,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // A translucent surface also takes the fill arriving at its BACK face, through itself.
     if (translucency > 0.0) {
         indirect.diffuse += (u_lighting.u_sceneAmbient + skyIrradiance(u_lighting.u_skyLight, -N))
-                          * surfaceAlbedo * translucency;
+                          * surfaceAlbedo * (translucency * TRANSMISSION_AMBIENT);
     }
     indirect.specular = vec3<f32>(0.0);
     if (u_lighting.u_useEnvMap != 0) {

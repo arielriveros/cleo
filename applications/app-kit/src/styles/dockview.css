@@ -1,5 +1,5 @@
 /* Dockview skin for the Cleo editor.
-   Same idiom as features/assets/filemanager.css: import the vendor stylesheet first so it lands
+   Same idiom as assets/filemanager.css: import the vendor stylesheet first so it lands
    ahead of these rules in the bundle (deterministic cascade), then bridge the editor's RGB-channel
    design tokens (index.css) into dockview's --dv-* variables. Variable names are copied from the
    shipped `.dockview-theme-dark` / `.dockview-theme-abyss` blocks in

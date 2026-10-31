@@ -14,6 +14,7 @@
 
 import type { CrownShape, TreeParams } from '../foliageParams';
 import { add, cross, dot, length, normalize, perpendicular, rotateAxis, scale, sub, type V3 } from '../mesh';
+import { fbm3, noiseSeed } from '../noise';
 import { stream, type Rng } from '../rng';
 
 export interface Stem {
@@ -42,7 +43,8 @@ export interface LeafCard {
   key: number;
 }
 
-export interface Skeleton { stems: Stem[]; leaves: LeafCard[] }
+/** `seed` keys the mesher's bark bumps, so they are the same at every level of detail. */
+export interface Skeleton { stems: Stem[]; leaves: LeafCard[]; seed?: number }
 
 const DEG = Math.PI / 180;
 const UP: V3 = [0, 1, 0];
@@ -108,6 +110,51 @@ function grow(r: Rng, start: V3, dir: V3, len: number, segments: number, curveDe
   return pts;
 }
 
+/**
+ * Wobble: a smooth sideways wander along a spine, from coherent noise (gnarliness is per-step jitter,
+ * which reads as kinks). In place. The base stays put, so a branch still leaves its parent where it
+ * forked; the amplitude grows with the stem's length. Keyed by the stem's own index on its own noise,
+ * so it never draws from the growth streams and one level's stems do not move another's.
+ */
+function wobble(points: V3[], seed: number, key: number, amount: number, reach = 0.06): void {
+  if (amount <= 0 || points.length < 3) return;
+  const total = arcLength(points);
+  const s0 = noiseSeed(seed, 'wobble');
+  const amp = amount * total * reach;
+  const orig = points.map(p => [...p] as V3);
+  let walked = 0;
+  for (let i = 1; i < orig.length; i++) {
+    walked += length(sub(orig[i], orig[i - 1]));
+    const t = walked / total;
+    const d = normalize(sub(orig[i], orig[i - 1]));
+    const a = perpendicular(d), b = cross(d, a);
+    const ramp = Math.min(1, t / 0.2);
+    // A slow bend, plus a quicker octave so even a short stem is not ruler-straight.
+    const x = fbm3(s0, t * 2.2, key * 13.37, 0.5, 3) + 0.35 * fbm3(s0 + 7, t * 7, key * 13.37, 3.5, 2);
+    const y = fbm3(s0 + 101, t * 2.2, key * 13.37, 7.5, 3) + 0.35 * fbm3(s0 + 107, t * 7, key * 13.37, 9.5, 2);
+    points[i] = add(orig[i], add(scale(a, x * amp * ramp), scale(b, y * amp * ramp)));
+  }
+}
+
+/**
+ * Kinks: up to three elbows along a spine, where the rest of it turns 10-25 degrees about a random
+ * perpendicular, as a branch does where it lost its leader and a side shoot took over. In place, on its
+ * own keyed stream (never the growth streams), so it moves no other stem.
+ */
+function kink(points: V3[], seed: number, key: number, amount: number): void {
+  const count = Math.round(amount * 3);
+  if (count <= 0 || points.length < 4) return;
+  const r = stream(seed, 'kink', key);
+  for (let j = 0; j < count; j++) {
+    const at = Math.min(points.length - 2, Math.max(1, Math.round((0.2 + 0.6 * r.next()) * (points.length - 1))));
+    const d = normalize(sub(points[at + 1], points[at]));
+    const axis = normalize(rotateAxis(perpendicular(d), d, r.next() * Math.PI * 2));
+    const angle = (10 + 15 * r.next()) * DEG * Math.min(1, amount * 1.5);
+    const pivot = points[at];
+    for (let i = at + 1; i < points.length; i++) points[i] = add(pivot, rotateAxis(sub(points[i], pivot), axis, angle));
+  }
+}
+
 function arcLength(points: V3[]): number {
   let l = 0;
   for (let i = 1; i < points.length; i++) l += length(sub(points[i], points[i - 1]));
@@ -129,6 +176,14 @@ function taper(points: V3[], r0: number, tip: number, flare = 0): number[] {
 
 const LEVEL_SEGMENTS = [14, 7, 5, 3];
 
+/** A branch level's imperfections (the trunk's are the Trunk section's own). */
+export function levelImperfections(p: TreeParams, level: number): { gnarl: number; wobble: number; bumps: number; kinks: number } {
+  if (level <= 0) return { gnarl: 1, wobble: p.branchWobble ?? 0, bumps: p.barkBumps ?? 0, kinks: 0 };
+  const n = Math.min(3, level) as 1 | 2 | 3;
+  const q = p as unknown as Record<string, number | undefined>;
+  return { gnarl: q[`gnarl${n}`] ?? 1, wobble: q[`wobble${n}`] ?? 0, bumps: q[`bumps${n}`] ?? 0, kinks: q[`kinks${n}`] ?? 0 };
+}
+
 export function buildSkeleton(seed: number, p: TreeParams): Skeleton {
   const stems: Stem[] = [];
   const push = (s: Omit<Stem, 'length' | 'children'>) => { stems.push({ ...s, length: arcLength(s.points), children: 0 }); return stems.length - 1; };
@@ -139,6 +194,7 @@ export function buildSkeleton(seed: number, p: TreeParams): Skeleton {
   const trunkLen = p.height * split;
   const segs0 = Math.max(4, Math.round(LEVEL_SEGMENTS[0] * split));
   const trunkPts = grow(rt, [0, 0, 0], UP, trunkLen, segs0, 0, 0, p.gnarliness * 0.6);
+  wobble(trunkPts, seed, 0, (p.branchWobble ?? 0) * 0.5);
   const trunk = push({ level: 0, points: trunkPts, radii: taper(trunkPts, p.trunkRadius, split < 1 ? 1 - 0.35 * split : 0.08, p.flare), parent: -1 });
   /** Level-0 stems and the global height fraction each one spans. */
   const leaders: { stem: number; h0: number; h1: number }[] = [{ stem: trunk, h0: 0, h1: split }];
@@ -150,6 +206,7 @@ export function buildSkeleton(seed: number, p: TreeParams): Skeleton {
       const side: V3 = [Math.cos(az + k * Math.PI), 0, Math.sin(az + k * Math.PI)];
       const dir = normalize(add(UP, scale(side, Math.tan((22 + rt.signed() * 6) * DEG))));
       const pts = grow(stream(seed, 'leader', k), top, dir, p.height * (1 - split) * 1.04, Math.max(3, Math.round(LEVEL_SEGMENTS[0] * (1 - split))), 0, p.attractionUp * 0.5, p.gnarliness * 0.6);
+      wobble(pts, seed, stems.length, (p.branchWobble ?? 0) * 0.6);
       leaders.push({ stem: push({ level: 0, points: pts, radii: taper(pts, rTop * 0.78, 0.08), parent: trunk }), h0: split, h1: 1 });
     }
     stems[trunk].children += 2;
@@ -208,7 +265,10 @@ export function buildSkeleton(seed: number, p: TreeParams): Skeleton {
         const dir = normalize(add(scale(at.d, Math.cos(down)), scale(side, Math.sin(down))));
         // Pipe model: thinner than the parent at the fork, more so for short children.
         const r0 = Math.max(0.003, Math.min(at.r * 0.85, at.r * p.ratio * Math.sqrt(Math.min(1, len / Math.max(1e-6, parent.length)) * 1.4)));
-        const pts = grow(r, at.p, dir, len, LEVEL_SEGMENTS[level], lp.curve * r.vary(1, 0.3), p.attractionUp * (0.6 + 0.4 * level), p.gnarliness);
+        const imp = levelImperfections(p, level);
+        const pts = grow(r, at.p, dir, len, LEVEL_SEGMENTS[level], lp.curve * r.vary(1, 0.3), p.attractionUp * (0.6 + 0.4 * level), p.gnarliness * imp.gnarl);
+        wobble(pts, seed, stems.length, imp.wobble, 0.09);
+        kink(pts, seed, stems.length, imp.kinks);
         const index = push({ level, points: pts, radii: taper(pts, r0, 0.12), parent: parentIndex });
         parent.children++;
         next.push(index);
@@ -218,7 +278,7 @@ export function buildSkeleton(seed: number, p: TreeParams): Skeleton {
     parents = next;
   }
 
-  return { stems, leaves: placeLeaves(seed, p, stems) };
+  return { stems, leaves: placeLeaves(seed, p, stems), seed };
 }
 
 function placeLeaves(seed: number, p: TreeParams, stems: Stem[]): LeafCard[] {

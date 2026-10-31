@@ -94,6 +94,53 @@ describe('Foliage Creator generation', () => {
     }
   });
 
+  it('bumps the bark without changing its topology, and closes the seam', () => {
+    const still = { branchWobble: 0, wobble1: 0, wobble2: 0, wobble3: 0, kinks1: 0, kinks2: 0, kinks3: 0 };
+    const smooth = doc('tree', {}); smooth.tree = { ...smooth.tree, ...still, barkBumps: 0, bumps1: 0, bumps2: 0, bumps3: 0 };
+    const rough = doc('tree', {}); rough.tree = { ...rough.tree, ...still, barkBumps: 0.8, bumps1: 0.8, bumps2: 0.8, bumps3: 0.8 };
+    const [a, b] = [buildFoliage(smooth), buildFoliage(rough)];
+    const barkOf = (m: FoliageModel) => m.levels[0].parts.find(p => p.material === 'bark')!.buffers;
+    const [sa, sb] = [barkOf(a), barkOf(b)];
+    expect(sb.indices.length).toBe(sa.indices.length);
+    expect(sb.positions.length).toBe(sa.positions.length);
+    let moved = 0;
+    for (let i = 0; i < sa.positions.length; i++) if (Math.abs(sa.positions[i] - sb.positions[i]) > 1e-4) moved++;
+    expect(moved).toBeGreaterThan(sa.positions.length / 4);
+    // The trunk's first ring: 11 vertices (10 sides + the seam column), the seam column on the first.
+    for (let k = 0; k < 3; k++) expect(sb.positions[10 * 3 + k]).toBeCloseTo(sb.positions[k], 5);
+  });
+
+  it('kinks and per-level wobble move branches, never the trunk or the growth streams', () => {
+    const plain = doc('tree'); plain.tree = { ...plain.tree, kinks1: 0, kinks2: 0, kinks3: 0 };
+    const bent = doc('tree'); bent.tree = { ...bent.tree, kinks1: 1, kinks2: 1, kinks3: 1 };
+    const [a, b] = [buildSkeleton(4, plain.tree), buildSkeleton(4, bent.tree)];
+    expect(b.stems[0].points).toEqual(a.stems[0].points);
+    expect(b.stems.length).toBe(a.stems.length);
+    expect(b.stems[1].points.at(-1)).not.toEqual(a.stems[1].points.at(-1));
+    expect(buildSkeleton(4, bent.tree).stems[1].points).toEqual(b.stems[1].points);
+  });
+
+  it('wobbles branches without moving the trunk base', () => {
+    const still = doc('tree'); still.tree = { ...still.tree, branchWobble: 0 };
+    const wavy = doc('tree'); wavy.tree = { ...wavy.tree, branchWobble: 1 };
+    const [a, b] = [buildSkeleton(1, still.tree), buildSkeleton(1, wavy.tree)];
+    expect(b.stems[0].points[0]).toEqual(a.stems[0].points[0]);
+    expect(b.stems[1].points.at(-1)).not.toEqual(a.stems[1].points.at(-1));
+  });
+
+  it('folds leaf cards on LOD 0 and 1, and keeps LOD 2 flat', () => {
+    const flat = doc('tree'); flat.tree = { ...flat.tree, leafFold: 0, leafCurl: 0, leafTwist: 0, leafWave: 0 };
+    const folded = doc('tree'); folded.tree = { ...folded.tree, leafFold: 0.5, leafCurl: 0.3, leafSegments: 2, leafFoldShape: 'v' };
+    const leafTris = (m: FoliageModel, l: number) => (m.levels[l].parts.find(p => p.material === 'leaves')?.buffers.indices.length ?? 0) / 3;
+    const [a, b] = [buildFoliage(flat), buildFoliage(folded)];
+    expect(leafTris(b, 0)).toBe(leafTris(a, 0) * 4);      // 2 rows x 2 columns, 2 triangles each
+    expect(leafTris(b, 1)).toBe(leafTris(a, 1) * 2);      // half the rows: 1 row x 2 columns
+    // Cupped cards are 4 across; 4 segments make 4 rows.
+    const cupped = doc('tree'); cupped.tree = { ...cupped.tree, leafFold: 0.5, leafSegments: 4, leafFoldShape: 'cupped' };
+    expect(leafTris(buildFoliage(cupped), 0)).toBe(leafTris(a, 0) * 16);
+    expect(leafTris(b, 2)).toBe(leafTris(a, 2));
+  });
+
   it('draws schemas whose keys exist on the records', () => {
     const d = normaliseFoliage(DEFAULT_DOC);
     for (const kind of ['grass', 'rock', 'tree', 'bush'] as const)
@@ -146,6 +193,30 @@ describe('Foliage textures', () => {
     // Dilated: the transparent texels carry leaf colour, not black.
     expect(blackClear / clear).toBeLessThan(0.01);
   });
+
+  for (const kind of ['broadleaf', 'needles'] as const) {
+    it(`gives ${kind} cards a normal map: relief under the leaves, flat around them`, async () => {
+      const d = doc('tree'); d.tree = { ...d.tree, leafKind: kind };
+      const m = buildFoliage(d);
+      const albedo = m.textures.leaves!, normal = m.textures.leavesNormal!;
+      expect(normal.width).toBe(albedo.width);
+      let tilted = 0, opaque = 0, flatClear = 0, clear = 0;
+      for (let i = 0; i < albedo.width * albedo.height; i++) {
+        const nx = normal.data[i * 4] - 128, ny = normal.data[i * 4 + 1] - 128;
+        const isTilted = Math.abs(nx) > 6 || Math.abs(ny) > 6;
+        if (albedo.data[i * 4 + 3] >= 250) { opaque++; if (isTilted) tilted++; }
+        // Well clear of any leaf (alpha 0 and a 2-texel margin).
+        else if (albedo.data[i * 4 + 3] === 0) { clear++; if (!isTilted) flatClear++; }
+      }
+      expect(tilted / opaque).toBeGreaterThan(0.15);
+      expect(flatClear / clear).toBeGreaterThan(0.6);
+      expect(m.materials.leaves!.normalTexture).toBe('leavesNormal');
+      const files = await encodeFoliage(m);
+      const parsed = await new GLTFLoader().parseDescriptorsFromFiles([new File([files.glbs[0] as BlobPart], 'tree_LOD0.glb')], false);
+      const leaves = parsed.materials.find(mt => mt.name === (kind === 'needles' ? 'Needles' : 'Leaves'))!;
+      expect(leaves.textures.normalMap).toBeDefined();
+    });
+  }
 });
 
 describe('Foliage export', () => {
@@ -322,5 +393,43 @@ describe('Bark ORM map', () => {
     end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
     const out = await readZip(new Uint8Array(Buffer.concat([...locals, cd, end])));
     expect(out.map(e => [e.name, new TextDecoder().decode(e.bytes)])).toEqual([['textures/a.txt', 'stored'], ['textures/b.txt', 'deflated '.repeat(50)]]);
+  });
+});
+
+describe('Translucency tint', () => {
+  it('writes the leaves’ transmission colour into the .glb, where the engine reads it back', async () => {
+    const d = doc('tree'); d.tree = { ...d.tree, leafTranslucencyColor: [0.9, 0.5, 0.1, 1], leafTranslucencyBlend: 0.6 };
+    const m = buildFoliage(d);
+    expect(m.materials.leaves!.translucencyTint).toEqual([0.9, 0.5, 0.1, 0.6]);
+    const files = await encodeFoliage(m);
+    const parsed = await new GLTFLoader().parseDescriptorsFromFiles([new File([files.glbs[0] as BlobPart], 'tree_LOD0.glb')], false);
+    expect(parsed.materials.find(mt => mt.name === 'Leaves')!.translucencyTint).toEqual([0.9, 0.5, 0.1, 0.6]);
+    // Linked to the Materials tab's fields.
+    const v = materialValues(d, 'leaves');
+    expect(v.translucencyColor).toEqual([0.9, 0.5, 0.1]);
+    expect(v.translucencyBlend).toBe(0.6);
+    expect(applyMaterialPatch(d, 'leaves', { translucencyColor: [0.2, 0.4, 0.6] }).tree.leafTranslucencyColor).toEqual([0.2, 0.4, 0.6, 1]);
+  });
+});
+
+describe('Grass LOD 2 without billboards', () => {
+  it('draws a few real blades instead of the clump cards, and drops the card material', () => {
+    const d = doc('grass'); d.grass = { ...d.grass, lod2Kind: 'blades', lod2Blades: 0.15 };
+    const m = buildFoliage(d);
+    const tris = levelStats(m).map(s => s.triangles);
+    expect(tris[2]).toBeGreaterThan(6);                     // not three crossed cards
+    expect(tris[2]).toBeLessThan(tris[1]);
+    expect(m.levels[2].parts.every(p => p.material === 'grass')).toBe(true);
+    expect(m.materials.grassCard).toBeUndefined();
+    expect(m.textures.grassCard).toBeUndefined();
+  });
+});
+
+describe('Creator panels', () => {
+  it('leaves out a schema group whose every field is hidden (Twigs on a two-level tree)', async () => {
+    const { visibleGroups } = await import('../src/app/workspace');
+    const twigs = FOLIAGE_SCHEMAS.tree.find(g => g.title === 'Twigs')!;
+    expect(visibleGroups([twigs], { levels: 2 })).toEqual([]);
+    expect(visibleGroups([twigs], { levels: 3 })).toEqual([twigs]);
   });
 });

@@ -224,10 +224,18 @@ fierce in the dark like any other light; lower values hold it closer to one look
 for a rune or a magic effect that must read the same at noon and in a cave. The base colour multiplies a
 base-colour texture, and the section warns when a texture sits under a non-white colour.
 **Translucency** (PBR) is how much light passes through a thin surface: a leaf or a grass blade with
-the sun behind it glows in its own colour instead of going dark. 0 (the default) is opaque; 0.3–0.6
-suits foliage. A translucent surface is always shaded as a non-metal. glTF files carry it as
+the sun behind it glows in its own colour instead of going dark. Like a real leaf it scatters that light
+forward, so the glow is something you see through it: bright looking through the leaves toward the sun
+or a light, faint from the side, gone with the light at your back; a little of the sky shows through
+the back as well. 0 (the default) is opaque; 0.3–0.6 suits foliage. A translucent surface is always shaded as a non-metal. glTF files carry it as
 `KHR_materials_diffuse_transmission`, which the importer reads. A foliage layer's far impostor carries
 the translucency of its coarsest level's leaves, so a back-lit tree keeps its glow at any distance.
+**Translucency colour** and **Colour blend** tint the light that comes through: real back-lit leaves
+lose their blues and glow yellow-green, autumn ones orange. The glow blends toward the colour by the
+blend amount; only its hue counts, matched to the surface's own brightness, so Translucency stays the
+intensity. Blend 0 (the default) glows in the surface's own colour. glTF carries it as the extension's
+`diffuseTransmissionColorFactor`, and Cleo's own exports carry the exact value. The far impostor of a
+foliage layer glows untinted.
 
 **Textures** — one slot per map. Drop a texture on a slot, or pick one.
 

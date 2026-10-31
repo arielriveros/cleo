@@ -22,6 +22,8 @@ export type Rgba = [number, number, number, number];
 
 // --- Grass ---------------------------------------------------------------------------------------
 
+export type GrassLod2Kind = 'cards' | 'blades';
+
 export interface GrassParams {
   // Clump
   blades: number;
@@ -53,6 +55,9 @@ export interface GrassParams {
   rootShade: number;
   roughness: number;
   translucency: number;
+  /** The colour transmitted light blends toward (back-lit blades go yellow-green), and how far. */
+  translucencyColor: Rgba;
+  translucencyBlend: number;
   // Wind
   windStrength: number;
   windStiffness: number;
@@ -62,6 +67,10 @@ export interface GrassParams {
   /** Share of blades LOD 1 keeps (each widened to cover the gap). */
   lod1Blades: number;
   lod2Distance: number;
+  /** LOD 2: three crossed cards with a picture of the clump, or a few real blades (no billboard). */
+  lod2Kind: GrassLod2Kind;
+  /** Share of blades LOD 2 keeps when it is blades. */
+  lod2Blades: number;
   cullDistance: number;
   // Export
   textureSize: number;
@@ -74,9 +83,9 @@ export const DEFAULT_GRASS: GrassParams = {
   height: 0.5, heightVariance: 0.35, width: 0.03, taper: 0.9, bend: 0.3, curvature: 1.8, tilt: 14, segments: 4,
   normalRounding: 0.45,
   baseColor: [0.09, 0.2, 0.04, 1], tipColor: [0.33, 0.45, 0.12, 1], dryness: 0.12, dryColor: [0.52, 0.45, 0.22, 1],
-  rootShade: 0.6, roughness: 0.8, translucency: 0.45,
+  rootShade: 0.6, roughness: 0.8, translucency: 0.45, translucencyColor: [0.62, 0.7, 0.16, 1], translucencyBlend: 0.3,
   windStrength: 0.25, windStiffness: 1, windFlutter: 0.3,
-  lod1Distance: 6, lod1Blades: 0.45, lod2Distance: 15, cullDistance: 25,
+  lod1Distance: 6, lod1Blades: 0.45, lod2Distance: 15, lod2Kind: 'cards', lod2Blades: 0.15, cullDistance: 25,
   textureSize: 256,
 };
 
@@ -147,6 +156,8 @@ export type LeafKind = 'broadleaf' | 'needles' | 'none';
 export type LeafShape = 'ovate' | 'elliptic' | 'lanceolate' | 'round' | 'lobed';
 export type BarkPattern = 'furrowed' | 'plated' | 'smooth' | 'papery';
 
+export type LeafFoldShape = 'v' | 'cupped';
+
 export interface TreeParams {
   // Trunk
   height: number;
@@ -157,6 +168,12 @@ export interface TreeParams {
   flare: number;
   /** 0..1: the trunk's wander. */
   gnarliness: number;
+  /** 0..1: burls, knots and flutes on every stem (radial noise, in proportion to the radius). */
+  barkBumps: number;
+  /** Metres: the size of one bump. */
+  barkBumpScale: number;
+  /** 0..1: a smooth sideways wander along every stem (coherent noise, unlike gnarliness's jitter). */
+  branchWobble: number;
   /** Whether the trunk splits once into two leaders (a deciduous habit). */
   trunkSplit: number;
   // Crown
@@ -173,6 +190,10 @@ export interface TreeParams {
   branches1: number; length1: number; angle1: number; curve1: number;
   branches2: number; length2: number; angle2: number; curve2: number;
   branches3: number; length3: number; angle3: number; curve3: number;
+  /** Per branch level: gnarliness multiplier, smooth wander, radial relief, sharp elbows (0..1 but gnarl, 0..3). */
+  gnarl1: number; wobble1: number; bumps1: number; kinks1: number;
+  gnarl2: number; wobble2: number; bumps2: number; kinks2: number;
+  gnarl3: number; wobble3: number; bumps3: number; kinks3: number;
   // Leaves
   leafKind: LeafKind;
   leafShape: LeafShape;
@@ -185,11 +206,28 @@ export interface TreeParams {
   leafStart: number;
   /** 0..1: how far card normals are bent outward from the crown centre (shades the canopy as a volume). */
   leafNormalBend: number;
+  /** 0..1: each card folds along its midline into a V (LOD 0 and 1), so it is not a flat sheet. */
+  leafFold: number;
+  /** 0..1: each card curls along its length (LOD 0). */
+  leafCurl: number;
+  /** Rows along a card on LOD 0 (1..4): every row folds, twists and waves on its own. */
+  leafSegments: number;
+  /** V: a crease along the midrib; cupped: rounded across. */
+  leafFoldShape: LeafFoldShape;
+  /** 0..1: the card's cross-section turns about its length. */
+  leafTwist: number;
+  /** 0..1: a ripple along the card. */
+  leafWave: number;
+  /** 0..1: per-card randomness on fold, twist and wave. */
+  leafJitter: number;
   leafColor: Rgba;
   leafColorVariation: number;
   /** 0..1: blend toward autumn colours. */
   autumn: number;
   leafTranslucency: number;
+  /** The colour transmitted light blends toward (back-lit leaves go yellow-green), and how far. */
+  leafTranslucencyColor: Rgba;
+  leafTranslucencyBlend: number;
   leafRoughness: number;
   // Bark
   barkPattern: BarkPattern;
@@ -221,13 +259,18 @@ export interface TreeParams {
 
 export const DEFAULT_TREE: TreeParams = {
   height: 9, trunkRadius: 0.24, baseSize: 0.28, flare: 0.5, gnarliness: 0.25, trunkSplit: 0,
+  barkBumps: 0.35, barkBumpScale: 0.35, branchWobble: 0.3,
   crownShape: 'tendFlame', levels: 2, rotate: 137.5, attractionUp: 0.25, ratio: 0.55,
   branches1: 26, length1: 0.42, angle1: 52, curve1: 18,
   branches2: 8, length2: 0.45, angle2: 42, curve2: 14,
   branches3: 4, length3: 0.4, angle3: 40, curve3: 10,
+  gnarl1: 1, wobble1: 0.4, bumps1: 0.4, kinks1: 0.25,
+  gnarl2: 1, wobble2: 0.5, bumps2: 0.35, kinks2: 0.3,
+  gnarl3: 1, wobble3: 0.5, bumps3: 0.3, kinks3: 0.3,
   leafKind: 'broadleaf', leafShape: 'ovate', leavesPerBranch: 9, leafSize: 0.55, leafSizeVariance: 0.25, leafStart: 0.25,
-  leafNormalBend: 0.6, leafColor: [0.12, 0.26, 0.05, 1], leafColorVariation: 0.3, autumn: 0,
-  leafTranslucency: 0.5, leafRoughness: 0.7,
+  leafNormalBend: 0.6, leafFold: 0.45, leafCurl: 0.25,
+  leafSegments: 3, leafFoldShape: 'v', leafTwist: 0.3, leafWave: 0.25, leafJitter: 0.5, leafColor: [0.12, 0.26, 0.05, 1], leafColorVariation: 0.3, autumn: 0,
+  leafTranslucency: 0.5, leafTranslucencyColor: [0.66, 0.72, 0.14, 1], leafTranslucencyBlend: 0.35, leafRoughness: 0.7,
   barkPattern: 'furrowed', barkColor: [0.23, 0.18, 0.14, 1], barkRoughness: 0.92, barkScale: 1.2,
   windStrength: 0.1, windStiffness: 1.4, windFlutter: 0.45,
   lod1Distance: 15, lod1Leaves: 0.45, lod2Distance: 35, lod2Leaves: 0.16,
@@ -255,6 +298,9 @@ export interface BushParams {
   /** Fraction of each stem's height with no branches. */
   baseSize: number;
   gnarliness: number;
+  barkBumps: number;
+  barkBumpScale: number;
+  branchWobble: number;
   // Crown
   crownShape: CrownShape;
   levels: number;
@@ -264,6 +310,10 @@ export interface BushParams {
   branches1: number; length1: number; angle1: number; curve1: number;
   branches2: number; length2: number; angle2: number; curve2: number;
   branches3: number; length3: number; angle3: number; curve3: number;
+  /** Per branch level: gnarliness multiplier, smooth wander, radial relief, sharp elbows (0..1 but gnarl, 0..3). */
+  gnarl1: number; wobble1: number; bumps1: number; kinks1: number;
+  gnarl2: number; wobble2: number; bumps2: number; kinks2: number;
+  gnarl3: number; wobble3: number; bumps3: number; kinks3: number;
   // Leaves
   leafKind: LeafKind;
   leafShape: LeafShape;
@@ -272,10 +322,24 @@ export interface BushParams {
   leafSizeVariance: number;
   leafStart: number;
   leafNormalBend: number;
+  leafFold: number;
+  leafCurl: number;
+  /** Rows along a card on LOD 0 (1..4): every row folds, twists and waves on its own. */
+  leafSegments: number;
+  leafFoldShape: LeafFoldShape;
+  /** 0..1: the card's cross-section turns about its length. */
+  leafTwist: number;
+  /** 0..1: a ripple along the card. */
+  leafWave: number;
+  /** 0..1: per-card randomness on fold, twist and wave. */
+  leafJitter: number;
   leafColor: Rgba;
   leafColorVariation: number;
   autumn: number;
   leafTranslucency: number;
+  /** The colour transmitted light blends toward (back-lit leaves go yellow-green), and how far. */
+  leafTranslucencyColor: Rgba;
+  leafTranslucencyBlend: number;
   leafRoughness: number;
   // Bark
   barkPattern: BarkPattern;
@@ -301,13 +365,18 @@ export interface BushParams {
 
 export const DEFAULT_BUSH: BushParams = {
   stems: 7, spread: 0.18, height: 1.4, heightVariance: 0.3, lean: 28, stemRadius: 0.025, baseSize: 0.12, gnarliness: 0.3,
+  barkBumps: 0.3, barkBumpScale: 0.12, branchWobble: 0.3,
   crownShape: 'spherical', levels: 2, rotate: 137.5, attractionUp: 0.2, ratio: 0.6,
   branches1: 7, length1: 0.42, angle1: 48, curve1: 10,
   branches2: 3, length2: 0.5, angle2: 42, curve2: 8,
   branches3: 3, length3: 0.4, angle3: 40, curve3: 6,
+  gnarl1: 1, wobble1: 0.4, bumps1: 0.3, kinks1: 0.3,
+  gnarl2: 1, wobble2: 0.5, bumps2: 0.3, kinks2: 0.3,
+  gnarl3: 1, wobble3: 0.5, bumps3: 0.25, kinks3: 0.3,
   leafKind: 'broadleaf', leafShape: 'elliptic', leavesPerBranch: 6, leafSize: 0.36, leafSizeVariance: 0.25, leafStart: 0.15,
-  leafNormalBend: 0.7, leafColor: [0.1, 0.22, 0.05, 1], leafColorVariation: 0.3, autumn: 0,
-  leafTranslucency: 0.45, leafRoughness: 0.7,
+  leafNormalBend: 0.7, leafFold: 0.45, leafCurl: 0.2,
+  leafSegments: 2, leafFoldShape: 'v', leafTwist: 0.3, leafWave: 0.2, leafJitter: 0.5, leafColor: [0.1, 0.22, 0.05, 1], leafColorVariation: 0.3, autumn: 0,
+  leafTranslucency: 0.45, leafTranslucencyColor: [0.66, 0.72, 0.14, 1], leafTranslucencyBlend: 0.35, leafRoughness: 0.7,
   barkPattern: 'smooth', barkColor: [0.24, 0.19, 0.14, 1], barkRoughness: 0.9, barkScale: 0.4,
   windStrength: 0.18, windStiffness: 1.2, windFlutter: 0.5,
   lod1Distance: 8, lod1Leaves: 0.45, lod2Distance: 20, lod2Leaves: 0.18, cullDistance: 70,
@@ -339,6 +408,10 @@ const clamp = (v: unknown, lo: number, hi: number, fallback: number) => {
   return Math.min(hi, Math.max(lo, n));
 };
 const int = (v: unknown, lo: number, hi: number, fallback: number) => Math.round(clamp(v, lo, hi, fallback));
+/** An Rgba made safe: four numbers in 0..1, else the fallback. */
+const rgba = (v: unknown, fallback: Rgba): Rgba =>
+  Array.isArray(v) && v.length >= 3 && v.slice(0, 3).every(x => typeof x === 'number' && Number.isFinite(x))
+    ? [clamp(v[0], 0, 1, 0), clamp(v[1], 0, 1, 0), clamp(v[2], 0, 1, 0), clamp(v[3] ?? 1, 0, 1, 1)] : fallback;
 const pow2 = (v: unknown, fallback: number) => {
   const n = Number(v);
   return [128, 256, 512, 1024, 2048].includes(n) ? n : fallback;
@@ -361,6 +434,10 @@ export function normaliseFoliage(raw: Partial<FoliageDoc> | null | undefined): F
   g.lod2Distance = Math.max(g.lod1Distance + 0.5, clamp(g.lod2Distance, 0.5, 2000, DEFAULT_GRASS.lod2Distance));
   g.cullDistance = Math.max(g.lod2Distance + 0.5, clamp(g.cullDistance, 1, 5000, DEFAULT_GRASS.cullDistance));
   g.lod1Blades = clamp(g.lod1Blades, 0.05, 1, DEFAULT_GRASS.lod1Blades);
+  g.lod2Kind = g.lod2Kind === 'blades' ? 'blades' : 'cards';
+  g.lod2Blades = Math.min(g.lod1Blades, clamp(g.lod2Blades, 0.02, 1, DEFAULT_GRASS.lod2Blades));
+  g.translucencyColor = rgba(g.translucencyColor, DEFAULT_GRASS.translucencyColor);
+  g.translucencyBlend = clamp(g.translucencyBlend, 0, 1, DEFAULT_GRASS.translucencyBlend);
   g.materials = normaliseOverrides(g.materials, 'grass');
 
   const r: RockParams = { ...DEFAULT_ROCK, ...(d.rock ?? {}) };
@@ -394,6 +471,24 @@ export function normaliseFoliage(raw: Partial<FoliageDoc> | null | undefined): F
   t.lod2Distance = Math.max(t.lod1Distance + 0.5, clamp(t.lod2Distance, 0.5, 4000, DEFAULT_TREE.lod2Distance));
   t.impostorDistance = Math.max(t.lod2Distance + 0.5, clamp(t.impostorDistance, 1, 8000, DEFAULT_TREE.impostorDistance));
   t.cullDistance = Math.max((t.impostor ? t.impostorDistance : t.lod2Distance) + 0.5, clamp(t.cullDistance, 1, 20000, DEFAULT_TREE.cullDistance));
+  t.barkBumps = clamp(t.barkBumps, 0, 1, DEFAULT_TREE.barkBumps);
+  t.barkBumpScale = clamp(t.barkBumpScale, 0.02, 5, DEFAULT_TREE.barkBumpScale);
+  t.branchWobble = clamp(t.branchWobble, 0, 1, DEFAULT_TREE.branchWobble);
+  t.leafFold = clamp(t.leafFold, 0, 1, DEFAULT_TREE.leafFold);
+  t.leafCurl = clamp(t.leafCurl, 0, 1, DEFAULT_TREE.leafCurl);
+  for (const n of [1, 2, 3] as const) {
+    (t as any)[`gnarl${n}`] = clamp((t as any)[`gnarl${n}`], 0, 3, (DEFAULT_TREE as any)[`gnarl${n}`]);
+    (t as any)[`wobble${n}`] = clamp((t as any)[`wobble${n}`], 0, 1, (DEFAULT_TREE as any)[`wobble${n}`]);
+    (t as any)[`bumps${n}`] = clamp((t as any)[`bumps${n}`], 0, 1, (DEFAULT_TREE as any)[`bumps${n}`]);
+    (t as any)[`kinks${n}`] = clamp((t as any)[`kinks${n}`], 0, 1, (DEFAULT_TREE as any)[`kinks${n}`]);
+  }
+  t.leafSegments = int(t.leafSegments, 1, 4, DEFAULT_TREE.leafSegments);
+  t.leafFoldShape = t.leafFoldShape === 'cupped' ? 'cupped' : 'v';
+  t.leafTwist = clamp(t.leafTwist, 0, 1, DEFAULT_TREE.leafTwist);
+  t.leafWave = clamp(t.leafWave, 0, 1, DEFAULT_TREE.leafWave);
+  t.leafJitter = clamp(t.leafJitter, 0, 1, DEFAULT_TREE.leafJitter);
+  t.leafTranslucencyColor = rgba(t.leafTranslucencyColor, DEFAULT_TREE.leafTranslucencyColor);
+  t.leafTranslucencyBlend = clamp(t.leafTranslucencyBlend, 0, 1, DEFAULT_TREE.leafTranslucencyBlend);
   t.materials = normaliseOverrides(t.materials, 'tree');
 
   const b: BushParams = { ...DEFAULT_BUSH, ...(d.bush ?? {}) };
@@ -410,6 +505,24 @@ export function normaliseFoliage(raw: Partial<FoliageDoc> | null | undefined): F
   b.lod1Distance = clamp(b.lod1Distance, 0.5, 1000, DEFAULT_BUSH.lod1Distance);
   b.lod2Distance = Math.max(b.lod1Distance + 0.5, clamp(b.lod2Distance, 0.5, 2000, DEFAULT_BUSH.lod2Distance));
   b.cullDistance = Math.max(b.lod2Distance + 0.5, clamp(b.cullDistance, 1, 5000, DEFAULT_BUSH.cullDistance));
+  b.barkBumps = clamp(b.barkBumps, 0, 1, DEFAULT_BUSH.barkBumps);
+  b.barkBumpScale = clamp(b.barkBumpScale, 0.02, 5, DEFAULT_BUSH.barkBumpScale);
+  b.branchWobble = clamp(b.branchWobble, 0, 1, DEFAULT_BUSH.branchWobble);
+  b.leafFold = clamp(b.leafFold, 0, 1, DEFAULT_BUSH.leafFold);
+  b.leafCurl = clamp(b.leafCurl, 0, 1, DEFAULT_BUSH.leafCurl);
+  for (const n of [1, 2, 3] as const) {
+    (b as any)[`gnarl${n}`] = clamp((b as any)[`gnarl${n}`], 0, 3, (DEFAULT_BUSH as any)[`gnarl${n}`]);
+    (b as any)[`wobble${n}`] = clamp((b as any)[`wobble${n}`], 0, 1, (DEFAULT_BUSH as any)[`wobble${n}`]);
+    (b as any)[`bumps${n}`] = clamp((b as any)[`bumps${n}`], 0, 1, (DEFAULT_BUSH as any)[`bumps${n}`]);
+    (b as any)[`kinks${n}`] = clamp((b as any)[`kinks${n}`], 0, 1, (DEFAULT_BUSH as any)[`kinks${n}`]);
+  }
+  b.leafSegments = int(b.leafSegments, 1, 4, DEFAULT_BUSH.leafSegments);
+  b.leafFoldShape = b.leafFoldShape === 'cupped' ? 'cupped' : 'v';
+  b.leafTwist = clamp(b.leafTwist, 0, 1, DEFAULT_BUSH.leafTwist);
+  b.leafWave = clamp(b.leafWave, 0, 1, DEFAULT_BUSH.leafWave);
+  b.leafJitter = clamp(b.leafJitter, 0, 1, DEFAULT_BUSH.leafJitter);
+  b.leafTranslucencyColor = rgba(b.leafTranslucencyColor, DEFAULT_BUSH.leafTranslucencyColor);
+  b.leafTranslucencyBlend = clamp(b.leafTranslucencyBlend, 0, 1, DEFAULT_BUSH.leafTranslucencyBlend);
   b.materials = normaliseOverrides(b.materials, 'bush');
 
   const seed = int(d.seed, 0, 0x7fffffff, DEFAULT_DOC.seed);
@@ -449,7 +562,10 @@ export const GRASS_SCHEMA: FoliageGroup[] = [
   { title: 'Levels', side: 'lod', specs: [
     { key: 'lod1Distance', label: 'LOD 1 distance', kind: 'float', min: 0.5, max: 200, step: 0.5, unit: 'm' },
     { key: 'lod1Blades', label: 'LOD 1 blades', kind: 'float', min: 0.05, max: 1, step: 0.01 },
-    { key: 'lod2Distance', label: 'LOD 2 distance', kind: 'float', min: 0.5, max: 400, step: 0.5, unit: 'm', hint: 'LOD 2 is three crossed cards carrying a picture of the clump.' },
+    { key: 'lod2Distance', label: 'LOD 2 distance', kind: 'float', min: 0.5, max: 400, step: 0.5, unit: 'm' },
+    { key: 'lod2Kind', label: 'LOD 2', kind: 'enum', options: enumOf<GrassLod2Kind>([['cards', 'Cards (billboard)'], ['blades', 'Blades']]),
+      hint: 'Cards: three crossed cards carrying a picture of the clump. Blades: a few real blades, no billboard.' },
+    { key: 'lod2Blades', label: 'LOD 2 blades', kind: 'float', min: 0.02, max: 1, step: 0.01, when: p => p.lod2Kind === 'blades' },
     { key: 'cullDistance', label: 'Cull distance', kind: 'float', min: 1, max: 1000, step: 1, unit: 'm' },
   ] },
   { title: 'Textures', side: 'export', specs: [
@@ -501,6 +617,10 @@ const level = (n: 1 | 2 | 3, title: string, max = n === 1 ? 120 : n === 2 ? 40 :
     { key: `length${n}`, label: 'Length', kind: 'float', min: 0.05, max: 1.5, step: 0.01, hint: 'Relative to the parent.', when: p => Number(p.levels) >= n },
     { key: `angle${n}`, label: 'Angle', kind: 'float', min: 0, max: 150, step: 1, unit: '°', hint: 'Down from the parent\'s direction.', when: p => Number(p.levels) >= n },
     { key: `curve${n}`, label: 'Curve', kind: 'float', min: -90, max: 90, step: 1, unit: '°', when: p => Number(p.levels) >= n },
+    { key: `gnarl${n}`, label: 'Gnarliness', kind: 'float', min: 0, max: 3, step: 0.01, hint: 'Times the trunk\u2019s gnarliness.', when: p => Number(p.levels) >= n },
+    { key: `wobble${n}`, label: 'Wobble', kind: 'float', min: 0, max: 1, step: 0.01, when: p => Number(p.levels) >= n },
+    { key: `bumps${n}`, label: 'Bumps', kind: 'float', min: 0, max: 1, step: 0.01, when: p => Number(p.levels) >= n },
+    { key: `kinks${n}`, label: 'Kinks', kind: 'float', min: 0, max: 1, step: 0.01, when: p => Number(p.levels) >= n },
   ],
 });
 
@@ -517,6 +637,13 @@ const PLANT_LOOK: FoliageGroup[] = [
     { key: 'leafSizeVariance', label: 'Size variance', kind: 'float', min: 0, max: 0.9, step: 0.01, when: p => p.leafKind !== 'none' },
     { key: 'leafStart', label: 'Leaf start', kind: 'float', min: 0, max: 0.95, step: 0.01, when: p => p.leafKind !== 'none' },
     { key: 'leafNormalBend', label: 'Normal bend', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.leafKind !== 'none' },
+    { key: 'leafFold', label: 'Fold', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.leafKind !== 'none' },
+    { key: 'leafCurl', label: 'Curl', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.leafKind !== 'none' },
+    { key: 'leafSegments', label: 'Segments', kind: 'int', min: 1, max: 4, when: p => p.leafKind !== 'none' },
+    { key: 'leafFoldShape', label: 'Fold shape', kind: 'enum', options: enumOf<LeafFoldShape>([['v', 'V crease'], ['cupped', 'Cupped']]), when: p => p.leafKind !== 'none' },
+    { key: 'leafTwist', label: 'Twist', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.leafKind !== 'none' },
+    { key: 'leafWave', label: 'Wave', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.leafKind !== 'none' },
+    { key: 'leafJitter', label: 'Jitter', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.leafKind !== 'none' },
   ] },
   { title: 'Leaf texture', side: 'material', material: 'leaves', specs: [
     { key: 'leafShape', label: 'Leaf shape', kind: 'enum', when: p => p.leafKind === 'broadleaf', options: enumOf<LeafShape>([
@@ -540,6 +667,9 @@ export const TREE_SCHEMA: FoliageGroup[] = [
     { key: 'baseSize', label: 'Bare trunk', kind: 'float', min: 0, max: 0.95, step: 0.01, hint: 'Fraction of the height with no branches.' },
     { key: 'flare', label: 'Root flare', kind: 'float', min: 0, max: 2, step: 0.01 },
     { key: 'gnarliness', label: 'Gnarliness', kind: 'float', min: 0, max: 1, step: 0.01 },
+    { key: 'branchWobble', label: 'Wobble', kind: 'float', min: 0, max: 1, step: 0.01 },
+    { key: 'barkBumps', label: 'Bumps', kind: 'float', min: 0, max: 1, step: 0.01 },
+    { key: 'barkBumpScale', label: 'Bump size', kind: 'float', min: 0.02, max: 5, step: 0.01, unit: 'm' },
     { key: 'trunkSplit', label: 'Trunk split', kind: 'float', min: 0, max: 0.9, step: 0.01, hint: 'Where the trunk forks into two leaders, as a fraction of the height; 0 never.' },
   ] },
   { title: 'Crown', specs: [
@@ -582,6 +712,9 @@ export const BUSH_SCHEMA: FoliageGroup[] = [
     { key: 'stemRadius', label: 'Stem radius', kind: 'float', min: 0.003, max: 0.3, step: 0.001, unit: 'm' },
     { key: 'baseSize', label: 'Bare stem', kind: 'float', min: 0, max: 0.9, step: 0.01, hint: 'Fraction of each stem with no branches.' },
     { key: 'gnarliness', label: 'Gnarliness', kind: 'float', min: 0, max: 1, step: 0.01 },
+    { key: 'branchWobble', label: 'Wobble', kind: 'float', min: 0, max: 1, step: 0.01 },
+    { key: 'barkBumps', label: 'Bumps', kind: 'float', min: 0, max: 1, step: 0.01 },
+    { key: 'barkBumpScale', label: 'Bump size', kind: 'float', min: 0.02, max: 5, step: 0.01, unit: 'm' },
   ] },
   { title: 'Crown', specs: [
     { key: 'crownShape', label: 'Crown shape', kind: 'enum', options: CROWN_SHAPES },

@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Logger } from 'cleo'
 import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
-import { Filemanager, WillowDark, getMenuOptions } from '@svar-ui/react-filemanager'
-import type { IFileMenuOption, IParsedEntity, TContextMenuType, TMode } from '@svar-ui/react-filemanager'
-// filemanager.css @imports the SVAR stylesheet itself, so the skin's rules deterministically follow it.
-import './filemanager.css'
+import { getMenuOptions } from '@svar-ui/react-filemanager'
+import type { IFileMenuOption, IParsedEntity, TContextMenuType } from '@svar-ui/react-filemanager'
+import { AssetExplorer } from '@cleo/app-kit/assets/AssetExplorer'
 import { installBadgeStyles } from './badgeStyles'
 
 import { useCleoEngine } from '../EngineContext'
@@ -16,16 +15,18 @@ import { badgeStyles, folderIconFor, iconFor, thumbnailOf } from './assetKinds'
 import MissingAssetsPopover from './MissingAssetsPopover'
 import AssetGraphModal from './AssetGraphModal'
 import { useAssetGraph } from './AssetGraphContext'
-import { baseOf, buildFileManagerData, extOf, kindOfExt, findMissingFromExplorer, findOrphanEntries } from '../../utils/vfs'
+import { buildFileManagerData, extOf, kindOfExt, findMissingFromExplorer, findOrphanEntries } from '../../utils/vfs'
 import { readDroppedEntries } from '../../utils/importGrouping'
 import { buildTemplateFromNode } from '../../utils/templates'
 import { buildControllerAsset } from '../../utils/animationControllers'
 import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
-import { Button, MenuItem, TextInput } from '@cleo/app-kit/ui'
+import { Button, MenuItem } from '@cleo/app-kit/ui'
 
 // The bottom bar's single "Assets" tab: one file-manager view over all five asset libraries, with real
 // folders. Folder layout lives in VfsContext, SVAR's store owns what is on screen, useFileManagerBridge
-// stitches them together. Creation and import stay in our toolbar: SVAR's performAction is a closed switch.
+// stitches them together. The view itself (SVAR in the Cleo skin, search, details, view modes) is the
+// app-kit's AssetExplorer, shared with Cleo Creator; creation, import and the audits are the editor's own
+// toolbar items. Creation and import stay in our toolbar: SVAR's performAction is a closed switch.
 
 // The per-kind card badges. Generated from the icon and extension tables rather than written into
 // filemanager.css, so they cannot drift from the icons they mirror — see `badgeStyles`.
@@ -115,34 +116,6 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey) }
   }, [addOpen])
-
-  // Built once, on mount: re-passing `data` makes SVAR call store.init() and collapse every open folder.
-  const initialData = useMemo(() => buildFileManagerData(vfs, libs), [])
-  const initialMode = useMemo<TMode>(() => {
-    try { return (localStorage.getItem(FM_MODE_KEY) as TMode) || 'cards' } catch { return 'cards' }
-  }, [])
-
-  // SVAR's own toolbar is hidden (filemanager.css); these mirror its state and drive it through the
-  // store's actions.
-  const [previewOpen, setPreviewOpen] = useState(false)
-  const [viewMode, setViewMode] = useState<TMode>(initialMode)
-  const [search, setSearch] = useState('')
-  const searchStartedRef = useRef(false)
-  useEffect(() => {
-    if (!searchStartedRef.current) { searchStartedRef.current = true; return }
-    const t = window.setTimeout(() => apiRef.current?.exec('filter-files', { text: search }), 200)
-    return () => window.clearTimeout(t)
-  }, [search, apiRef])
-
-  const togglePreview = () => {
-    const next = !previewOpen
-    setPreviewOpen(next)
-    apiRef.current?.exec('show-preview', { mode: next })
-  }
-  const setMode = (mode: TMode) => {
-    setViewMode(mode)
-    apiRef.current?.exec('set-mode', { mode }) // the bridge persists it to localStorage
-  }
 
   // --- import ---------------------------------------------------------------------------------------
   const runImport = useCallback(async (files: File[]) => {
@@ -272,24 +245,6 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     return () => { el.removeEventListener('mouseover', onOver); el.removeEventListener('mouseout', onOut); hoveredScriptStore.set(null) }
   }, [pathIndexRef])
 
-  // A card label is ellipsized at 80px and SVAR renders no title of its own. Written on hover, not up
-  // front: card elements are React-reused across renames and would keep a stale title.
-  useEffect(() => {
-    const el = wrapperRef.current
-    if (!el) return
-    const onOver = (e: Event) => {
-      const card = (e.target as HTMLElement | null)?.closest?.('.wx-cards .wx-item[data-id]') as HTMLElement | null
-      if (!card || card.closest('.wx-breadcrumbs')) return // the breadcrumb bar reuses .wx-item
-      const raw = card.getAttribute('data-id') ?? ''
-      const path = raw.startsWith(':') ? raw.slice(1) : raw // setID prefixes every DOM id with ':'
-      if (!path.startsWith('/')) return
-      const name = baseOf(path)
-      if (card.getAttribute('title') !== name) card.setAttribute('title', name)
-    }
-    el.addEventListener('mouseover', onOver)
-    return () => el.removeEventListener('mouseover', onOver)
-  }, [])
-
   // --- file-manager rendering hooks -------------------------------------------------------------------
   // Stable identities: SVAR memoizes its `templates` object and a changing `data`/config prop re-inits
   // the store, so everything these need is read through refs.
@@ -334,17 +289,12 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     return options
   }, [pathIndexRef])
 
-  // SVAR's context menu portals to <body> and its performAction is a closed switch over built-in action
-  // ids, so a custom option's click goes nowhere. Catch it at the document level.
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      if ((e.target as HTMLElement).closest?.('[data-id=":cleo-new-folder"]')) newFolder()
-      if ((e.target as HTMLElement).closest?.('[data-id=":cleo-create-variant"]') && menuTemplateRef.current)
-        depsRef.current.createTemplateVariant(menuTemplateRef.current)
-    }
-    document.addEventListener('click', onClick, true)
-    return () => document.removeEventListener('click', onClick, true)
-  }, [newFolder, depsRef])
+  // SVAR's performAction is a closed switch over built-in action ids, so a custom option's click runs
+  // through the shared view's document-level catch (AssetExplorer `menuActions`).
+  const menuActions = useMemo(() => ({
+    'cleo-new-folder': () => { newFolder() },
+    'cleo-create-variant': () => { if (menuTemplateRef.current) depsRef.current.createTemplateVariant(menuTemplateRef.current) },
+  }), [newFolder, depsRef])
 
   // The explorer's entire chrome is ONE 28px row; every saved pixel goes to the card area below, which at
   // a 30vh bottom bar has only ~130px for a full card row.
@@ -384,14 +334,18 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
       title: 'Import models, textures and sounds',
     },
   ]
-  const modeButtons: { mode: TMode; title: string; icon: React.ReactNode }[] = [
-    { mode: 'table', title: 'Table view', icon: <svg className='w-3 h-3' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round'><path d='M4 6h16M4 12h16M4 18h16' /></svg> },
-    { mode: 'cards', title: 'Cards view', icon: <svg className='w-3 h-3' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2'><rect x='3' y='3' width='7' height='7' rx='1' /><rect x='14' y='3' width='7' height='7' rx='1' /><rect x='3' y='14' width='7' height='7' rx='1' /><rect x='14' y='14' width='7' height='7' rx='1' /></svg> },
-    { mode: 'panels', title: 'Split view', icon: <svg className='w-3 h-3' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2'><rect x='3' y='4' width='8' height='16' rx='1' /><rect x='13' y='4' width='8' height='16' rx='1' /></svg> },
-  ]
-  return (
-    <div className='w-full h-full flex flex-col text-ui'>
-      <div className='h-[28px] flex items-center gap-1.5 px-2 border-b border-border-subtle shrink-0 bg-surface-sunken'>
+  return (<>
+    <AssetExplorer
+      data={buildFileManagerData(vfs, libs)}
+      apiRef={apiRef}
+      init={init}
+      modeKey={FM_MODE_KEY}
+      previews={previews}
+      icons={icons}
+      menuOptions={menuOptions}
+      menuActions={menuActions}
+      wrapperRef={wrapperRef}
+      toolbarStart={<>
         <div className='relative shrink-0' ref={addMenuRef}>
           <Button
             variant='success'
@@ -447,14 +401,8 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
             if (files.length) void importAnimationFiles(files)
           }} />
 
-        <TextInput
-          id='asset-search'
-          className='shrink min-w-[80px] w-[200px] h-[20px] py-0 text-ui-sm placeholder:text-dim'
-          placeholder='Search'
-          value={search}
-          onChange={setSearch}
-        />
-
+      </>}
+      toolbarEnd={<>
         {importing && <span className='shrink-0 text-ui-sm text-warning whitespace-nowrap'>Importing…</span>}
 
         <span className='ml-auto min-w-0 truncate text-ui-sm text-dim hidden xl:inline'>
@@ -511,50 +459,8 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
           )}
         </Button>
 
-        <Button
-          id='asset-preview-toggle'
-          variant='ghost'
-          size='icon'
-          active={previewOpen}
-          className='shrink-0 w-[24px] h-[20px] p-0'
-          onClick={togglePreview}
-          title='Show the details pane for the selected asset'>
-          <svg className='w-3.5 h-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
-            <path d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z' /><circle cx='12' cy='12' r='3' />
-          </svg>
-        </Button>
-
-        <div id='asset-view-modes' className='shrink-0 flex items-center gap-0.5 p-[2px] rounded bg-surface border border-border-subtle'>
-          {modeButtons.map(b => (
-            <Button key={b.mode}
-              data-mode={b.mode}
-              variant='ghost'
-              size='icon'
-              active={viewMode === b.mode}
-              className='w-[24px] h-[16px] p-0 rounded-sm'
-              onClick={() => setMode(b.mode)}
-              title={b.title}>
-              {b.icon}
-            </Button>
-          ))}
-        </div>
-      </div>
-
-      {graphOpen && <AssetGraphModal onClose={() => setGraphOpen(false)} />}
-
-      <div ref={wrapperRef} className='cleo-fm relative flex-1 min-h-0'>
-        <WillowDark fonts={false}>
-          <Filemanager
-            data={initialData}
-            mode={initialMode}
-            preview={false}
-            previews={previews}
-            icons={icons}
-            menuOptions={menuOptions}
-            init={init}
-          />
-        </WillowDark>
-      </div>
-    </div>
-  )
+      </>}
+    />
+    {graphOpen && <AssetGraphModal onClose={() => setGraphOpen(false)} />}
+  </>)
 }

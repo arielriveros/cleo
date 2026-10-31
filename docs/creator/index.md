@@ -30,7 +30,10 @@ Every tool is laid out the same way, so what you learn in one carries to the oth
   **Frame** top-right. **F** frames the asset in every tool.
 - **Right dock** — **Parameters** first, with the preset name, **Reset** and **Presets ▾** at its top,
   then the tool's other tabs: Materials, LOD, Bake, Export.
-- **Bottom** — the **Console**, with the World's **Map** beside it.
+- **Bottom** — **Assets** and the **Console**, with the World's **Map** beside them. Assets is the editor's
+  own asset explorer, browsing the [saved assets](#saved-assets) of every tool under `/Foliage`, `/FX`
+  and `/World`: double-click one to open it in its tool; rename, duplicate, move into folders or delete it
+  there. Cards show a picture of the stage taken when the asset last changed.
 - **Status bar** — the running job's progress and Cancel, or a summary of the last result.
 
 ## Saved assets

@@ -24,6 +24,9 @@ export interface MaterialFieldValues {
   /** Dielectric specular level, 0.5 neutral. */
   reflectance?: number;
   translucency?: number;
+  /** The colour light comes through in (back-lit leaves go yellow-green), and how far it blends toward it. */
+  translucencyColor?: Rgb;
+  translucencyBlend?: number;
   opacity?: number;
   emissive?: Rgb;
   emissiveIntensity?: number;
@@ -85,6 +88,10 @@ export function PbrPropertiesSection({ value: v, onChange, tintsTexture = false 
             // Thin-surface light transmission (leaves, grass, paper). Stored in the G-buffer as a negative
             // metallic, so a translucent surface is always shaded as a dielectric.
             [has(v.translucency), d => <PropertyRow key='translucency' label='Translucency' divider={d}><Slider min={0} max={1} step={0.01} value={v.translucency!} onChange={x => onChange({ translucency: x })} /></PropertyRow>],
+            // The transmitted light's colour: a back-lit leaf glows yellow-green, an autumn one orange. Hue
+            // only -- matched to the surface's brightness -- so Translucency stays the intensity.
+            [has(v.translucencyColor) && (v.translucency ?? 0) > 0, d => <PropertyRow key='translucencyColor' label='Translucency colour' divider={d}><ColorInput color={hex(v.translucencyColor)} onChange={c => onChange({ translucencyColor: c })} /></PropertyRow>],
+            [has(v.translucencyBlend) && (v.translucency ?? 0) > 0, d => <PropertyRow key='translucencyBlend' label='Colour blend' divider={d}><Slider min={0} max={1} step={0.01} value={v.translucencyBlend!} onChange={x => onChange({ translucencyBlend: x })} /></PropertyRow>],
             [has(v.opacity), d => <PropertyRow key='opacity' label='Opacity' divider={d}><Slider min={0} max={1} step={0.01} value={v.opacity!} onChange={x => onChange({ opacity: x })} /></PropertyRow>],
             [has(v.emissive), d => <PropertyRow key='emissive' label='Emissive' divider={d}><ColorInput color={hex(v.emissive)} onChange={c => onChange({ emissive: c })} /></PropertyRow>],
             // The colour is a hex picker and cannot exceed 1 per channel, below where bloom starts. The

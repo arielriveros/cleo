@@ -30,6 +30,8 @@ export interface GlbMaterial {
   alphaCutoff?: number;
   doubleSided?: boolean;
   translucency?: number;
+  /** [r, g, b, blend]: written as the standard diffuseTransmissionColorFactor and, exactly, in extras.cleo. */
+  translucencyTint?: [number, number, number, number];
   emissive?: [number, number, number];
   /** Multiplies `emissive` (KHR_materials_emissive_strength). */
   emissiveIntensity?: number;
@@ -117,7 +119,13 @@ export function writeGlb(meshes: readonly GlbMesh[], materials: readonly GlbMate
     const extensions: Record<string, unknown> = {};
     if (m.translucency && m.translucency > 0) {
       usesTransmission = true;
-      extensions.KHR_materials_diffuse_transmission = { diffuseTransmissionFactor: m.translucency };
+      const t = m.translucencyTint;
+      // The standard field is a multiplier, the nearest glTF has to "blend toward a colour": the tint at its
+      // blend. Cleo reads the exact value back from extras.cleo.translucencyTint.
+      extensions.KHR_materials_diffuse_transmission = {
+        diffuseTransmissionFactor: m.translucency,
+        ...(t && t[3] > 0 ? { diffuseTransmissionColorFactor: [0, 1, 2].map(i => 1 + (t[i] - 1) * t[3]) } : {}),
+      };
     }
     if (m.emissive && m.emissive.some(c => c > 0)) {
       out.emissiveFactor = m.emissive;
@@ -127,7 +135,10 @@ export function writeGlb(meshes: readonly GlbMesh[], materials: readonly GlbMate
       }
     }
     if (Object.keys(extensions).length) out.extensions = extensions;
-    if (m.wind) out.extras = { cleo: { wind: m.wind } };
+    const cleo: Record<string, unknown> = {};
+    if (m.wind) cleo.wind = m.wind;
+    if (m.translucencyTint && m.translucencyTint[3] > 0 && m.translucency) cleo.translucencyTint = m.translucencyTint;
+    if (Object.keys(cleo).length) out.extras = { cleo };
     return out;
   });
 

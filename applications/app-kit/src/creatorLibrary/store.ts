@@ -144,6 +144,8 @@ export interface CreatorAssetInput {
   privateFiles?: CreatorFile[];
   /** Of the files and the document; equal to the stored one -> nothing is written or announced. */
   contentHash: string;
+  /** A new thumbnail; absent keeps the stored one. Never part of the hash. */
+  thumbnail?: string;
 }
 
 /**
@@ -153,12 +155,18 @@ export interface CreatorAssetInput {
 export async function putCreatorAsset(input: CreatorAssetInput): Promise<CreatorAssetMeta | null> {
   const b = current();
   const prev = await b.get(input.id);
-  if (prev && !prev.deleted && prev.contentHash === input.contentHash && prev.name === input.name) return null;
+  if (prev && !prev.deleted && prev.contentHash === input.contentHash && prev.name === input.name) {
+    // Only the picture changed: stored quietly, no new revision (nothing the editor imports moved).
+    if (input.thumbnail && input.thumbnail !== prev.thumbnail) await b.write({ ...prev, thumbnail: input.thumbnail }, [], []);
+    return null;
+  }
   const privateFiles = input.privateFiles ?? [];
   const meta: CreatorAssetMeta = {
     id: input.id, kind: input.kind, name: input.name, doc: input.doc,
     revision: (prev?.revision ?? 0) + 1, contentHash: input.contentHash, updatedAt: Date.now(),
     sidecar: input.sidecar, fileNames: input.files.map(f => f.name), privateFileNames: privateFiles.map(f => f.name),
+    ...(prev?.folder ? { folder: prev.folder } : {}),
+    ...(input.thumbnail ?? prev?.thumbnail ? { thumbnail: input.thumbnail ?? prev?.thumbnail } : {}),
   };
   const keep = new Set([...meta.fileNames, ...meta.privateFileNames]);
   const drop = prev ? [...prev.fileNames, ...prev.privateFileNames].filter(n => !keep.has(n)) : [];
@@ -176,6 +184,35 @@ export async function renameCreatorAsset(id: string, name: string): Promise<Crea
   await b.write(meta, [], []);
   creatorChannel().post({ type: 'upsert', id, revision: meta.revision });
   return meta;
+}
+
+/**
+ * File an asset in a folder of the Creator explorer ('' for the tool's root). Only the explorer cares, so
+ * no new revision: an editor project does not re-import the asset for it. Announced so other windows'
+ * explorers follow.
+ */
+export async function moveCreatorAsset(id: string, folder: string): Promise<void> {
+  const b = current();
+  const prev = await b.get(id);
+  const clean = folder.split('/').filter(Boolean).join('/');
+  if (!prev || prev.deleted || (prev.folder ?? '') === clean) return;
+  await b.write({ ...prev, folder: clean || undefined }, [], []);
+  creatorChannel().post({ type: 'upsert', id, revision: prev.revision });
+}
+
+/** A copy of an asset under a new name and id, in the same folder: its document, files and thumbnail. */
+export async function duplicateCreatorAsset(id: string, name: string): Promise<CreatorAssetMeta | null> {
+  const b = current();
+  const prev = await b.get(id);
+  if (!prev || prev.deleted) return null;
+  const files = await b.files(id, prev.fileNames);
+  const privateFiles = await b.files(id, prev.privateFileNames);
+  const copy = await putCreatorAsset({
+    id: newCreatorAssetId(prev.kind), kind: prev.kind, name, doc: prev.doc, sidecar: prev.sidecar,
+    files, privateFiles, contentHash: prev.contentHash, thumbnail: prev.thumbnail,
+  });
+  if (copy && prev.folder) await moveCreatorAsset(copy.id, prev.folder);
+  return copy ? (await b.get(copy.id)) : null;
 }
 
 /** Delete an asset: its files go, a tombstone stays so every project learns it is gone. */

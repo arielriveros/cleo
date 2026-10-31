@@ -93,3 +93,30 @@ describe('glTF KHR_materials_diffuse_transmission', () => {
         expect(windConfigOf(m).windStrength).toBeCloseTo(0.3);
     });
 });
+
+describe('PBR translucency tint', () => {
+    it('defaults to no tint, round-trips when it blends, and is clamped', () => {
+        const plain = Material.PBR({ translucency: 0.4 });
+        expect(plain.properties.get('translucencyTint')).toEqual([1, 1, 1, 0]);
+        expect('translucencyTint' in (plain.serialize() as any)).toBe(false);
+        const leaf = Material.PBR({ translucency: 0.4, translucencyTint: [0.7, 0.75, 0.1, 0.35] });
+        const back = Material.parse(leaf.serialize());
+        expect(back.properties.get('translucencyTint')).toEqual([0.7, 0.75, 0.1, 0.35]);
+        expect(Material.PBR({ translucencyTint: [2, -1, 0.5, 9] }).properties.get('translucencyTint')).toEqual([1, 0, 0.5, 1]);
+        expect(Material.PBR({ translucencyTint: [1, 2] as any }).properties.get('translucencyTint')).toEqual([1, 1, 1, 0]);
+    });
+
+    it('reads Cleo’s exact tint, or the standard colour factor as a full blend', async () => {
+        const own = await new GLTFLoader().parseDescriptorsFromFiles([glb({
+            extensions: { KHR_materials_diffuse_transmission: { diffuseTransmissionFactor: 0.4, diffuseTransmissionColorFactor: [0.9, 0.9, 0.7] } },
+            extras: { cleo: { translucencyTint: [0.7, 0.75, 0.1, 0.35] } },
+        })], false);
+        expect(own.materials[0].translucencyTint).toEqual([0.7, 0.75, 0.1, 0.35]);
+        const std = await new GLTFLoader().parseDescriptorsFromFiles([glb({
+            extensions: { KHR_materials_diffuse_transmission: { diffuseTransmissionFactor: 0.4, diffuseTransmissionColorFactor: [0.9, 0.8, 0.2] } },
+        })], false);
+        expect(std.materials[0].translucencyTint).toEqual([0.9, 0.8, 0.2, 1]);
+        const none = await new GLTFLoader().parseDescriptorsFromFiles([glb({})], false);
+        expect(none.materials[0].translucencyTint).toBeUndefined();
+    });
+});

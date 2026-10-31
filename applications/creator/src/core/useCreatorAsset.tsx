@@ -15,6 +15,7 @@ import { confirmDialog, promptDialog } from '@cleo/app-kit/feedback/dialogStore'
 import { toast } from '@cleo/app-kit/feedback/toastStore';
 import { Button, Select } from '@cleo/app-kit/ui';
 import type { ExportFile } from './generator';
+import { subscribeOpen, takeOpen } from './creatorOpen';
 
 const PUBLISH_DEBOUNCE_MS = 800;
 const activeKey = (kind: CreatorAssetKind) => `cleo_creator_active_${kind}`;
@@ -63,7 +64,11 @@ function sidecarOf(files: ExportFile[]): Record<string, unknown> | null {
  * back an opened asset's private files (texture overrides) so the mode can re-apply them.
  */
 export function useCreatorAsset<D>(kind: CreatorAssetKind, doc: D, setDoc: (d: D) => void,
-                                   restore?: (files: CreatorFile[]) => void): CreatorAssetState<D> {
+                                   restore?: (files: CreatorFile[]) => void,
+                                   /** A small PNG data URL of the stage, for the Assets explorer's card. */
+                                   capture?: () => Promise<string>): CreatorAssetState<D> {
+  const captureRef = useRef(capture);
+  captureRef.current = capture;
   const [assets, setAssets] = useState<CreatorAssetMeta[]>([]);
   const [activeId, setActiveId] = useState<string | null>(() => localStorage.getItem(activeKey(kind)));
   const [syncedRevision, setSynced] = useState<number | null>(null);
@@ -106,10 +111,12 @@ export function useCreatorAsset<D>(kind: CreatorAssetKind, doc: D, setDoc: (d: D
     const docJson = new TextEncoder().encode(JSON.stringify(docRef.current));
     const contentHash = hashChunks([docJson, ...files.map(f => new TextEncoder().encode(f.name)), ...files.map(f => f.bytes),
                                     ...privateFiles.map(f => f.bytes)]);
+    let thumbnail: string | undefined;
+    try { thumbnail = await captureRef.current?.() || undefined; } catch { /* a missing picture is fine */ }
     try {
       const written = await putCreatorAsset({
         id: meta.id, kind, name: meta.name, doc: docRef.current, sidecar: sidecarOf(files),
-        files: files.map(toFile), privateFiles: privateFiles.map(toFile), contentHash,
+        files: files.map(toFile), privateFiles: privateFiles.map(toFile), contentHash, thumbnail,
       });
       setSynced(written?.revision ?? meta.revision);
     } catch (e) {
@@ -124,6 +131,14 @@ export function useCreatorAsset<D>(kind: CreatorAssetKind, doc: D, setDoc: (d: D
   }, [activeId, flush]);
   // Leaving the mode (or the page) writes what is queued rather than dropping it.
   useEffect(() => () => { if (timer.current) { clearTimeout(timer.current); void flush(); } }, [flush]);
+
+  // An asset the Assets explorer asked this tool to open: one waiting from before it mounted, or a later one.
+  const openRef = useRef<(id: string | null) => Promise<void>>(async () => {});
+  useEffect(() => {
+    const take = () => { const id = takeOpen(kind); if (id) void openRef.current(id); };
+    take();
+    return subscribeOpen(take);
+  }, [kind]);
 
   const askName = (title: string, defaultValue: string) => promptDialog({
     title, defaultValue, confirmLabel: 'Save',
@@ -151,6 +166,8 @@ export function useCreatorAsset<D>(kind: CreatorAssetKind, doc: D, setDoc: (d: D
     if (meta.doc) setDoc(meta.doc as D);
     if (restore && meta.privateFileNames.length) restore(await getCreatorFiles(id, meta.privateFileNames));
   };
+
+  openRef.current = open;
 
   const rename = async () => {
     if (!active) return;

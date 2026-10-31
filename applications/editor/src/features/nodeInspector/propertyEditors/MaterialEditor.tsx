@@ -250,6 +250,8 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     roughness: live.get('roughness') ?? 1,
     reflectance: live.get('reflectance') ?? 0.5,
     translucency: live.get('translucency') ?? 0,
+    translucencyColor: (live.get('translucencyTint') ?? [1, 1, 1, 0]).slice(0, 3) as [number, number, number],
+    translucencyBlend: (live.get('translucencyTint') ?? [1, 1, 1, 0])[3] ?? 0,
     opacity: live.get('opacity') ?? 1,
     emissive: live.get('emissiveFactor') ?? [0, 0, 0],
     emissiveIntensity: live.get('emissiveIntensity') ?? 1,
@@ -268,6 +270,13 @@ export default function MaterialEditor(props: {node: ModelNode}) {
       if (key === 'emissiveWeight') setEmissiveExposureWeight(model.material, value as number);
       else if (key === 'emissive') live.set('emissiveFactor', value);
       else if (key === 'alphaCutoff') { live.set('alphaCutoff', value); setAlphaCutoff(value as number); }
+      // One engine property, [r, g, b, blend], behind the two rows.
+      else if (key === 'translucencyColor' || key === 'translucencyBlend') {
+        const t = [...(live.get('translucencyTint') ?? [1, 1, 1, 0])];
+        if (key === 'translucencyColor') t.splice(0, 3, ...(value as number[]));
+        else t[3] = value as number;
+        live.set('translucencyTint', t);
+      }
       // A role switch carries the flutter along only when the material has none yet.
       else if (key === 'windFlutter' && 'windRole' in patch && live.has('windFlutter')) continue;
       else live.set(key, value);

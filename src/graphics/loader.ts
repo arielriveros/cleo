@@ -335,6 +335,7 @@ export class Loader {
                 opacity: d.opacity,
                 alphaCutoff: d.alphaCutoff ?? 0,
                 translucency: d.translucency ?? 0,
+                translucencyTint: d.translucencyTint,
                 emissiveFactor: d.emissiveFactor,
                 emissiveIntensity: d.emissiveIntensity ?? 1,
                 textures

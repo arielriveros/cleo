@@ -8874,6 +8874,9 @@ export class Renderer {
         // inherit the last leaf's, and carry it into the G-buffer as a negative metallic.
         if (material.type === 'pbr' && !material.properties.has('translucency'))
             this._shaderManager.setUniform('u_material.translucency', 0);
+        // Same for its tint: a leaf's would otherwise recolour the next hand-built material's glow.
+        if (material.type === 'pbr' && !material.properties.has('translucencyTint'))
+            this._shaderManager.setUniform('u_material.translucencyTint', [1, 1, 1, 0]);
         this._shaderManager.setUniform('u_material.viewPos', this._activeCamera.position);
         this._shaderManager.setUniform('u_material.sunDirection', this._sunDirection);
         // The parallax hit's pixel depth offset (`parallaxDepth`). Built from the camera being drawn

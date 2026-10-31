@@ -24,7 +24,7 @@ The source art in `build/` is gitignored, so this generator is run by hand and i
 | `terrain_textures/clay_plaster_1k`, `coast_sand_02_1k` | Pond Clay under the water and Shore Sand on the bank, painted from the heights about the waterline. |
 | `terrain_textures/concrete_rock_path_1k` | Stone Path: from each building to the main road, and paving round the bonfire. |
 | `foliage/rock_moss_set_02_1k.gltf` | The dungeon's rubble (four moss rocks). |
-| `pine_bark_1k.zip`, `jolcham_oak_bark_01_1k.zip` | Scanned bark (colour, normal, ARM) worn by the pines and spruce (the oak set is prepared but no Valley tree wears it now); `prepare.py` writes them to `bark_pine_*` / `bark_oak_*`. |
+| `pine_bark_1k.zip`, `jolcham_oak_bark_01_1k.zip` | Scanned bark (colour, normal, ARM) worn by the spruce (pine bark) and the oaks (oak bark); `prepare.py` writes them to `bark_pine_*` / `bark_oak_*`. |
 
 The Poly Haven downloads may arrive as `.zip` beside these paths; `prepare.py` extracts each once.
 
@@ -32,8 +32,8 @@ The Poly Haven downloads may arrive as `.zip` beside these paths; `prepare.py` e
 
 No plant is an input: every tree, bush and grass clump is made with the Foliage Creator
 (`applications/creator`). `creatorFoliage.mjs` lists them, each a Creator preset with a seed and a few
-settings: two Scots pines (the belt, the valley stands and about the hamlet and the pond), spruce
-(beyond the rim), two meadow grasses and tall grass, two shrubs and a juniper (forest edges,
+settings: two spruces (the belt at the cliff foot and the valley stands), a highland spruce (beyond
+the rim), an oak (about the hamlet and the pond), two meadow grasses and tall grass, two shrubs and a juniper (forest edges,
 walls and fences), and the Forest Floor's undergrowth (two leafy bushes and boxwood). `genFoliage.ts`
 generates them headless through `vite-node`, with the Creator's own generator, materials and octahedral
 impostor bake, and caches the result in `build/valley_creator/`, keyed by the spec and the generator's

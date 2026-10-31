@@ -16,14 +16,14 @@ import { DEFAULT_CUTOFF } from './materials';
 import { boundsOf, triangles, vertices, type FoliageLevel, type MaterialKey, type V3 } from './mesh';
 import { buildRock } from './rock';
 import { barkTextures } from './textures/bark';
-import { leafAtlas } from './textures/leaves';
+import { leafTextures } from './textures/leaves';
 import { ormMap } from './textures/orm';
 import { resample, type Image } from './textures/image';
 import { buildSkeleton } from './tree/skeleton';
 import { treeLevels } from './tree/treeMesh';
 
 /** Every texture a foliage asset can carry. */
-export type TextureKey = 'grass' | 'grassCard' | 'rockAlbedo' | 'rockNormal' | 'bark' | 'barkNormal' | 'barkOrm' | 'leaves'
+export type TextureKey = 'grass' | 'grassCard' | 'rockAlbedo' | 'rockNormal' | 'bark' | 'barkNormal' | 'barkOrm' | 'leaves' | 'leavesNormal'
   // Override-only: single channels of the bark's ORM map, packed into `barkOrm` (textures/orm.ts).
   | 'barkAo' | 'barkRoughness' | 'barkMetallic';
 
@@ -37,6 +37,7 @@ const PLANT_SLOTS: OverrideSlot[] = [
   { key: 'barkRoughness', label: 'Bark roughness', hint: 'Greyscale. Replaces the ARM map’s green channel; Roughness above scales it.' },
   { key: 'barkMetallic', label: 'Bark metallic', hint: 'Greyscale. Replaces the ARM map’s blue channel.' },
   { key: 'leaves', label: 'Leaves', hint: 'A 2×2 atlas of sprig cards with alpha; each card is anchored at the middle of its bottom edge.' },
+  { key: 'leavesNormal', label: 'Leaves normal', hint: 'Tangent space, OpenGL (+Y up), laid out like the leaf atlas.' },
 ];
 
 /** The textures a user may replace with an image of their own, per kind. */
@@ -52,7 +53,7 @@ export const OVERRIDE_SLOTS: Record<FoliageKind, OverrideSlot[]> = {
 
 export const TEXTURE_LABELS: Record<TextureKey, string> = {
   grass: 'Blades', grassCard: 'Clump card', rockAlbedo: 'Albedo', rockNormal: 'Normal', bark: 'Bark', barkNormal: 'Bark normal', barkOrm: 'Bark ARM',
-  barkAo: 'Bark AO', barkRoughness: 'Bark roughness', barkMetallic: 'Bark metallic', leaves: 'Leaves',
+  barkAo: 'Bark AO', barkRoughness: 'Bark roughness', barkMetallic: 'Bark metallic', leaves: 'Leaves', leavesNormal: 'Leaves normal',
 };
 
 export interface MaterialSpec {
@@ -69,6 +70,8 @@ export interface MaterialSpec {
   alphaCutoff?: number;
   doubleSided?: boolean;
   translucency?: number;
+  /** [r, g, b, blend]: the colour transmitted light blends toward. */
+  translucencyTint?: [number, number, number, number];
   wind?: GlbMaterial['wind'];
 }
 
@@ -142,14 +145,15 @@ function generate(doc: FoliageDoc, overrides: Overrides): FoliageModel {
     const p = doc.grass;
     const g = buildGrass(seed, p, sized('grass', p.textureSize));
     const wind = { windStrength: p.windStrength, windStiffness: p.windStiffness, windRole: 'plant' as const, windFlutter: p.windFlutter };
+    const tint: [number, number, number, number] = [p.translucencyColor[0], p.translucencyColor[1], p.translucencyColor[2], p.translucencyBlend];
     const all = g.levels.flatMap(l => l.parts);
     return {
       kind: 'grass', name: doc.name, levels: g.levels,
       materials: {
-        grass: { name: 'Grass', baseColor: WHITE, roughness: p.roughness, baseColorTexture: 'grass', doubleSided: true, translucency: p.translucency, wind },
-        grassCard: { name: 'Grass card', baseColor: WHITE, roughness: p.roughness, baseColorTexture: 'grassCard', alphaCutoff: 0.5, doubleSided: true, translucency: p.translucency, wind },
+        grass: { name: 'Grass', baseColor: WHITE, roughness: p.roughness, baseColorTexture: 'grass', doubleSided: true, translucency: p.translucency, translucencyTint: tint, wind },
+        ...(g.cardTexture ? { grassCard: { name: 'Grass card', baseColor: WHITE, roughness: p.roughness, baseColorTexture: 'grassCard' as const, alphaCutoff: 0.5, doubleSided: true, translucency: p.translucency, translucencyTint: tint, wind } } : {}),
       },
-      textures: { grass: g.bladeTexture, grassCard: g.cardTexture },
+      textures: { grass: g.bladeTexture, ...(g.cardTexture ? { grassCard: g.cardTexture } : {}) },
       cullDistance: p.cullDistance, impostor: null, collider: null, bounds: boundsOf(all),
     };
   }
@@ -195,7 +199,7 @@ function generate(doc: FoliageDoc, overrides: Overrides): FoliageModel {
 }
 
 type PlantLook = Pick<TreeParams, 'barkTextureSize' | 'barkPattern' | 'barkColor' | 'barkRoughness' | 'leafKind' | 'leafTextureSize' | 'leafShape'
-  | 'leafColor' | 'leafColorVariation' | 'autumn' | 'leafRoughness' | 'leafTranslucency' | 'windStrength' | 'windStiffness' | 'windFlutter'>;
+  | 'leafColor' | 'leafColorVariation' | 'autumn' | 'leafRoughness' | 'leafTranslucency' | 'leafTranslucencyColor' | 'leafTranslucencyBlend' | 'windStrength' | 'windStiffness' | 'windFlutter'>;
 
 /** How deep the generated bark's cavities occlude: deep in plated and furrowed bark, shallow in smooth skin. */
 const BARK_AO = { plated: 0.6, furrowed: 0.65, smooth: 0.25, papery: 0.3 } as const;
@@ -229,9 +233,12 @@ function plantLook(seed: number, p: PlantLook, barkMetallic: number,
       seed, size: p.leafTextureSize, kind: p.leafKind, shape: p.leafShape, color: p.leafColor,
       variation: p.leafColorVariation, autumn: p.leafKind === 'broadleaf' ? p.autumn : 0,
     };
-    textures.leaves = sized('leaves', p.leafTextureSize) ?? cached(JSON.stringify(['leaves', atlas]), () => leafAtlas(atlas));
-    materials.leaves = { name: p.leafKind === 'needles' ? 'Needles' : 'Leaves', baseColor: WHITE, roughness: p.leafRoughness, baseColorTexture: 'leaves', alphaCutoff: 0.5,
+    const generated = cached(JSON.stringify(['leaves', atlas]), () => leafTextures(atlas));
+    textures.leaves = sized('leaves', p.leafTextureSize) ?? generated.albedo;
+    textures.leavesNormal = sized('leavesNormal', p.leafTextureSize) ?? generated.normal;
+    materials.leaves = { name: p.leafKind === 'needles' ? 'Needles' : 'Leaves', baseColor: WHITE, roughness: p.leafRoughness, baseColorTexture: 'leaves', normalTexture: 'leavesNormal', alphaCutoff: 0.5,
                          doubleSided: true, translucency: p.leafTranslucency,
+                         translucencyTint: [p.leafTranslucencyColor[0], p.leafTranslucencyColor[1], p.leafTranslucencyColor[2], p.leafTranslucencyBlend],
                          wind: { windStrength: p.windStrength, windStiffness: p.windStiffness, windRole: 'leaves', windFlutter: p.windFlutter } };
   }
   return { materials, textures };
@@ -301,7 +308,7 @@ export function levelGlb(model: FoliageModel, level: number, pngs: Partial<Recor
         roughness: orm !== undefined ? 1 : spec.roughness, metallic: orm !== undefined ? 1 : spec.metallic,
         emissive: spec.emissive, emissiveIntensity: spec.emissiveIntensity,
         baseColorImage: image(spec.baseColorTexture), normalImage: image(spec.normalTexture), ormImage: orm,
-        alphaCutoff: spec.alphaCutoff, doubleSided: spec.doubleSided, translucency: spec.translucency, wind: spec.wind,
+        alphaCutoff: spec.alphaCutoff, doubleSided: spec.doubleSided, translucency: spec.translucency, translucencyTint: spec.translucencyTint, wind: spec.wind,
       });
       materialIndex.set(part.material, m);
     }
@@ -360,7 +367,7 @@ export function overrideSize(doc: FoliageDoc, key: TextureKey): number {
   if (key === 'grass') return d.grass.textureSize;
   if (key === 'rockAlbedo' || key === 'rockNormal') return d.rock.textureSize;
   const plant = d.kind === 'bush' ? d.bush : d.tree;
-  if (key === 'leaves') return plant.leafTextureSize;
+  if (key === 'leaves' || key === 'leavesNormal') return plant.leafTextureSize;
   // Every bark map -- colour, normal, ARM and its single channels -- is resized to the bark's size.
   return plant.barkTextureSize;
 }

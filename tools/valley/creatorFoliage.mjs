@@ -7,9 +7,9 @@
 // colour, normal and ARM maps in the library material, and its colour in the impostor bake.
 //
 // `group` says where build.mjs scatters a prototype:
-//   pine        the belt at the cliff foot, the stands in the valley and the trees about the hamlet and
-//               the pond (split between the variants)
-//   highland    the sparse forest beyond the rim
+//   forest      the spruce belt at the cliff foot and the stands in the valley (split between the variants)
+//   village     the oaks about the hamlet and the pond
+//   highland    the sparse spruce forest beyond the rim
 //   grass       the meadow, weighted by `rule.density`
 //   undergrowth the Forest Floor surface (its own foliageInclude)
 //   bush        forest edges, building walls and fences
@@ -31,28 +31,38 @@ const TREE_IMPOSTOR_PARAMS = { impostor: true, impostorDistance: TREE_IMPOSTOR, 
 const PLANT_TEXTURES = { barkTextureSize: 512, leafTextureSize: 512 }
 
 export const CREATOR_FOLIAGE = [
-  // --- Trees, all conifers. A tall pine sways a few percent of its height at full gust.
+  // --- Trees: spruce forest, oaks about the village. A tall conifer sways a few percent of its height at
+  // full gust, a broadleaf a little more.
   ...[['a', 11], ['b', 23]].map(([v, seed]) => ({
-    key: `pine-${v}`, name: `Scots Pine ${v.toUpperCase()}`, kind: 'tree', preset: 'pine', seed, group: 'pine', bark: 'bark_pine',
-    params: { ...TREE_IMPOSTOR_PARAMS, ...PLANT_TEXTURES, windStrength: 0.03, windStiffness: 2.2, windFlutter: 0.4 },
-    rule: { density: 0.004, minScale: 0.6, maxScale: 0.95, castShadows: true, cameraDither: true }, cellSize: 40,
+    key: `spruce-${v}`, name: `Spruce ${v.toUpperCase()}`, kind: 'tree', preset: 'spruce', seed, group: 'forest', bark: 'bark_pine',
+    // A bare stretch of trunk under the crown, so the belt reads as a forest you can see into.
+    params: { ...TREE_IMPOSTOR_PARAMS, ...PLANT_TEXTURES, baseSize: 0.28, windStrength: 0.03, windStiffness: 2.2, windFlutter: 0.3 },
+    rule: { density: 0.0025, minScale: 0.7, maxScale: 1.1, castShadows: true, cameraDither: true }, cellSize: 40,
   })),
   {
-    key: 'spruce', name: 'Spruce', kind: 'tree', preset: 'spruce', seed: 5, group: 'highland', bark: 'bark_pine',
-    params: { ...TREE_IMPOSTOR_PARAMS, ...PLANT_TEXTURES, windStrength: 0.03, windStiffness: 2.2 },
-    rule: { density: 0.0014, minScale: 0.7, maxScale: 1.05, castShadows: true, cameraDither: true }, cellSize: 40,
+    key: 'spruce-high', name: 'Highland Spruce', kind: 'tree', preset: 'spruce', seed: 5, group: 'highland', bark: 'bark_pine',
+    params: { ...TREE_IMPOSTOR_PARAMS, ...PLANT_TEXTURES, baseSize: 0.28, windStrength: 0.03, windStiffness: 2.2 },
+    rule: { density: 0.0009, minScale: 0.7, maxScale: 1.05, castShadows: true, cameraDither: true }, cellSize: 40,
+  },
+  {
+    key: 'oak', name: 'Oak', kind: 'tree', preset: 'oak', seed: 7, group: 'village', bark: 'bark_oak',
+    // One scanned bark repeat about a metre of trunk.
+    params: { ...TREE_IMPOSTOR_PARAMS, ...PLANT_TEXTURES, windStrength: 0.04, windStiffness: 2, barkScale: 1 },
+    rule: { density: 0.0008, minScale: 0.8, maxScale: 1.15, castShadows: true, cameraDither: true }, cellSize: 40,
   },
 
-  // --- Grass: two meadow variants and a sprinkle of tall grass through them.
+  // --- Grass: two meadow variants and a sprinkle of tall grass through them. No billboards: the farthest
+  // level is a few real blades rather than the Creator's crossed clump cards, so the meadow never turns to
+  // flat pictures as it thins out.
   ...[['a', 1], ['b', 2]].map(([v, seed]) => ({
     key: `grass-${v}`, name: `Meadow Grass ${v.toUpperCase()}`, kind: 'grass', preset: 'meadow', seed, group: 'grass',
-    params: { cullDistance: 22 },
-    rule: { density: 0.5, minScale: 0.8, maxScale: 1.25, castShadows: false }, cellSize: 13,
+    params: { cullDistance: 22, lod2Kind: 'blades', lod2Blades: 0.25 },
+    rule: { density: 0.85, minScale: 0.8, maxScale: 1.25, castShadows: false }, cellSize: 13,
   })),
   {
     key: 'grass-tall', name: 'Tall Grass', kind: 'grass', preset: 'tallGrass', seed: 4, group: 'grass',
-    params: { cullDistance: 30 },
-    rule: { density: 0.12, minScale: 0.75, maxScale: 1.1, castShadows: false }, cellSize: 13,
+    params: { cullDistance: 30, lod2Kind: 'blades', lod2Blades: 0.25 },
+    rule: { density: 0.2, minScale: 0.75, maxScale: 1.1, castShadows: false }, cellSize: 13,
   },
 
   // --- The undergrowth of the Forest Floor.
@@ -70,12 +80,13 @@ export const CREATOR_FOLIAGE = [
   // --- Bushes on the ground: at the forest's edge, against the buildings and along the fences.
   ...[['a', 4], ['b', 9]].map(([v, seed]) => ({
     key: `shrub-${v}`, name: `Shrub ${v.toUpperCase()}`, kind: 'bush', preset: 'shrub', seed, group: 'bush',
-    params: { leafTextureSize: 256, barkTextureSize: 256, cullDistance: 90 },
+    // One folded row per card: hundreds of these are scattered, and they are seen from a few metres.
+    params: { leafTextureSize: 256, barkTextureSize: 256, cullDistance: 90, leafSegments: 1 },
     rule: { density: 0.004, minScale: 0.85, maxScale: 1.35, castShadows: true }, cellSize: 24,
   })),
   {
     key: 'juniper', name: 'Juniper', kind: 'bush', preset: 'juniper', seed: 2, group: 'bush',
-    params: { leafTextureSize: 256, barkTextureSize: 256, cullDistance: 90 },
+    params: { leafTextureSize: 256, barkTextureSize: 256, cullDistance: 90, leafSegments: 1 },
     rule: { density: 0.004, minScale: 0.85, maxScale: 1.3, castShadows: true }, cellSize: 24,
   },
 ]

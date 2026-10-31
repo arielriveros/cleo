@@ -845,13 +845,14 @@ export class FoliageLayer {
         this._rebuild();
     }
 
-    /** Append one instance at an exact position (random yaw + scale from params) without rebuilding.
-     *  Call {@link commit} once after a batch of pushes. Returns false when the instance ceiling is
-     *  reached, so callers can report the clipping instead of silently dropping the request. */
-    public pushInstance(x: number, y: number, z: number): boolean {
+    /** Append one instance at an exact position without rebuilding: `yaw` (radians) and `scale` as given,
+     *  else random (scale from the params' range). Call {@link commit} once after a batch of pushes.
+     *  Returns false when the instance ceiling is reached, so callers can report the clipping instead of
+     *  silently dropping the request. */
+    public pushInstance(x: number, y: number, z: number, yaw?: number, scale?: number): boolean {
         if (this._instances.length / 5 >= MAX_INSTANCES) return false;
-        const yaw = Math.random() * Math.PI * 2;
-        const scale = this.params.minScale + Math.random() * (this.params.maxScale - this.params.minScale);
+        yaw ??= Math.random() * Math.PI * 2;
+        scale ??= this.params.minScale + Math.random() * (this.params.maxScale - this.params.minScale);
         this._instances.push(x, y, z, yaw, scale);
         this._dirty = true;
         return true;

@@ -8,6 +8,7 @@ import type { GenericParamSpec } from '@cleo/app-kit/params/ParamField';
 import { Button, Collapsable, DocScope, PresetMenu, VisibilityMenu, cn, type PresetMenuEntry, type VisibilityItem } from '@cleo/app-kit/ui';
 import type { GenerationStatus } from '../core/useGeneration';
 import { GenerationBar } from './StatusBar';
+import { AssetsPanel } from './AssetsPanel';
 
 // The one layout every Creator mode is built from, so World, FX and Foliage read the same:
 //
@@ -15,7 +16,7 @@ import { GenerationBar } from './StatusBar';
 //   left dock    what is being built (layers, scene, variants), 280 px
 //   viewport     the live 3D preview: a stats readout top-left; visibility, mode controls and Frame top-right
 //   right dock   Parameters first, then the mode's other tabs (Materials, LOD, Bake, Export), 340 px
-//   bottom       Console (and any mode extras as tabs beside it)
+//   bottom       Assets (the shared library, app/AssetsPanel.tsx) and Console, and any mode extras beside them
 //   status bar   the running job's progress, or the last result's summary
 //
 // Panels draw through `PanelHeader` (kind · preset name, Reset, Presets ▾), `SchemaSections` (one
@@ -62,7 +63,7 @@ export interface CreatorWorkspaceProps {
 }
 
 /** Bumped when the default layout changes, so stored layouts are rebuilt. */
-const LAYOUT_VERSION = 10;
+const LAYOUT_VERSION = 11;
 const LEFT_WIDTH = 280;
 const RIGHT_WIDTH = 340;
 
@@ -79,13 +80,14 @@ export function CreatorWorkspace(props: CreatorWorkspaceProps) {
   const renderers: Record<string, () => ReactNode> = {
     viewport: () => <ViewportHost viewportRef={viewportRef}>{viewport}</ViewportHost>,
     console: () => <ConsolePanel />,
+    assets: () => <AssetsPanel />,
   };
   for (const p of [left, ...right, ...bottom]) renderers[p.id] = p.render;
 
   // Dockview wants a stable component map and layout builder; both follow only the panel ids and titles.
   const shape = JSON.stringify([left, right, bottom].map(g => (Array.isArray(g) ? g : [g]).map(p => [p.id, p.title])));
   const components = useMemo(() => {
-    const ids = ['viewport', 'console', left.id, ...right.map(p => p.id), ...bottom.map(p => p.id)];
+    const ids = ['viewport', 'console', 'assets', left.id, ...right.map(p => p.id), ...bottom.map(p => p.id)];
     return Object.fromEntries(ids.map(pid => [pid, (_: IDockviewPanelProps) => <PanelSlot id={pid} />]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shape]);
@@ -96,9 +98,9 @@ export function CreatorWorkspace(props: CreatorWorkspaceProps) {
       id: p.id, component: p.id, title: p.title, initialWidth: RIGHT_WIDTH,
       position: i === 0 ? { referencePanel: 'viewport', direction: 'right' } : { referencePanel: right[0].id, direction: 'within' },
     }));
-    const below = [...bottom, { id: 'console', title: 'Console' }];
+    const below = [...bottom, { id: 'assets', title: 'Assets' }, { id: 'console', title: 'Console' }];
     below.forEach((p, i) => api.addPanel({
-      id: p.id, component: p.id, title: p.title, initialHeight: bottom.length ? 300 : 160,
+      id: p.id, component: p.id, title: p.title, initialHeight: bottom.length ? 300 : 220,
       position: i === 0 ? { referencePanel: 'viewport', direction: 'below' } : { referencePanel: below[0].id, direction: 'within' },
     }));
     if (right[0]) api.getPanel(right[0].id)?.api.setActive();
@@ -181,6 +183,12 @@ export function PanelHeader<P extends PresetMenuEntry>({ kind, name, onReset, pr
 
 export interface SchemaGroup { title: string; specs: GenericParamSpec[] }
 
+/** The groups with at least one field showing for these values: a group whose every field is hidden
+ *  (Twigs on a two-level tree) is left out rather than drawn as an empty header. */
+export function visibleGroups<G extends SchemaGroup>(groups: readonly G[], values: Record<string, unknown>): G[] {
+  return groups.filter(g => g.specs.some(spec => !spec.when || spec.when(values)));
+}
+
 /** One collapsable per schema group, each a ParamForm over the same values. */
 export function SchemaSections({ groups, values, onChange, persist, right }: {
   groups: readonly SchemaGroup[];
@@ -192,7 +200,7 @@ export function SchemaSections({ groups, values, onChange, persist, right }: {
   right?: (title: string) => ReactNode;
 }) {
   return (<>
-    {groups.map(group => (
+    {visibleGroups(groups, values).map(group => (
       <Collapsable key={group.title} title={group.title} persistKey={`${persist}_${group.title}`} right={right?.(group.title)}>
         <ParamForm schema={group.specs} values={values} onChange={onChange} />
       </Collapsable>

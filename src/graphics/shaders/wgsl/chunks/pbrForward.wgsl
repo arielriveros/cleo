@@ -1,4 +1,5 @@
 #include "./alphaCutout.wgsl"
+#include "./translucencyTint.wgsl"
 // Forward PBR (metallic-roughness) shading, shared by the plain and skinned programs.
 //
 // Computes the same Cook-Torrance result as deferredLighting.wgsl from the same light structures — the
@@ -51,6 +52,8 @@ struct PBRMaterial {
     alphaCutoff: f32,
     /** Thin-surface diffuse transmission, 0..1. See the same member in chunks/pbrGBuffer.wgsl. */
     translucency: f32,
+    /** The transmitted light's tint (rgb) and blend (a). See chunks/translucencyTint.wgsl. */
+    translucencyTint: vec4<f32>,
     // Every flag is an i32: WGSL forbids bool in a uniform buffer. Call sites still pass booleans.
     hasBaseColorTexture: i32,
     // Occlusion, roughness and metallic are authored as separate maps and combined into ONE texture by
@@ -364,13 +367,14 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     // the transmission adds the glow through the unlit side. Scaling the front by `1 - t` made sun-lit
     // leaves read as shadowed.
     let translucency = saturate(u_material.translucency);
-    let surfaceAlbedo = albedo;
+    // What comes through the back: the surface's colour, blended toward its transmission tint.
+    let surfaceAlbedo = transmissionAlbedo(albedo, u_material.translucencyTint.rgb, u_material.translucencyTint.a);
     let frontAlbedo = albedo;
     var ambientDiffuse = (u_lighting.u_sceneAmbient
                           + skyIrradiance(u_lighting.u_skyLight, N)) * frontAlbedo;
     if (translucency > 0.0) {
         ambientDiffuse += (u_lighting.u_sceneAmbient + skyIrradiance(u_lighting.u_skyLight, -N))
-                        * surfaceAlbedo * translucency;
+                        * surfaceAlbedo * (translucency * TRANSMISSION_AMBIENT);
     }
     var ambientSpecular = vec3<f32>(0.0);
     if (u_lighting.u_useEnvMap != 0) {

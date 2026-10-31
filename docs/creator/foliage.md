@@ -46,6 +46,23 @@ The light the preview is shown in. None of it reaches the export.
 | **Sun illuminance** | Sunlight in lux; 60 000–100 000 is a clear day. |
 | **Ambient light** | The flat fill under the sky, in lux. |
 
+## Wind
+
+A wind on the stage, so the preview sways as the asset will in a level. With it on, the asset is drawn
+as a foliage layer, the path a game's foliage rules use, with the materials' wind response; off (or with
+Wireframe on, which that path does not draw) it is shown still, as nodes. The viewport's readout says
+which. None of it reaches the export.
+
+| Field | Meaning |
+|---|---|
+| **Wind** | On or off. Also in the viewport's visibility menu. |
+| **Direction** | Where the wind blows toward, degrees counter-clockwise from +X. |
+| **Strength** | How hard: multiplies every material's lean. |
+| **Gust size** | The size of a gust, in metres. |
+| **Gust speed** | How fast gusts travel. |
+
+The presets below (Calm to Storm) set strength and gusts as the engine's wind presets do.
+
 ## Clump
 
 A grass clump is the unit a foliage rule scatters: one instance, many blades.
@@ -141,6 +158,9 @@ culled before an impostor would pay.
 | **Stem radius** | A stem's radius at the ground. |
 | **Bare stem** | Fraction of each stem with no branches. |
 | **Gnarliness** | How much every stem wanders. |
+| **Wobble** | A smooth sideways wander along the trunk (each branch level has its own), from coherent noise: long gentle bends, where Gnarliness gives short kinks. |
+| **Bumps** | Burls, knots and vertical flutes on the trunk (each branch level has its own), pushed out of the bark surface in proportion to its radius. The same relief at every level of detail, and the bark's shading follows it. |
+| **Bump size** | The size of one bump, in metres. |
 
 ## Trunk
 
@@ -151,6 +171,9 @@ culled before an impostor would pay.
 | **Bare trunk** | Fraction of the height with no branches. |
 | **Root flare** | How much wider the base gets. |
 | **Gnarliness** | How much every stem wanders. |
+| **Wobble** | A smooth sideways wander along the trunk (each branch level has its own), from coherent noise: long gentle bends, where Gnarliness gives short kinks. |
+| **Bumps** | Burls, knots and vertical flutes on the trunk (each branch level has its own), pushed out of the bark surface in proportion to its radius. The same relief at every level of detail, and the bark's shading follows it. |
+| **Bump size** | The size of one bump, in metres. |
 | **Trunk split** | Where the trunk forks into two leaders, as a fraction of the height; 0 never forks. |
 
 ## Crown
@@ -174,6 +197,12 @@ with the same fields.
 | **Length** | Relative to the parent. First-level lengths also follow the crown shape. |
 | **Angle** | The angle down from the parent's direction. |
 | **Curve** | How much each branch bends along its length: positive up, negative down. |
+| **Gnarliness** | The level's jitter, times the trunk's Gnarliness. |
+| **Wobble** | A smooth wander along each branch of the level, with a quicker ripple on top so short branches are not ruler-straight. |
+| **Bumps** | Knots, burls and lumps along each branch, at the branch's own scale (a few radii across, never trunk-sized). |
+| **Kinks** | Up to three elbows per branch, where it turns 10–25° as if a side shoot had taken over. |
+
+Every branch also swells into a collar where it leaves its parent, the bark ridge a real fork has.
 
 ## Sub-branches
 
@@ -197,11 +226,20 @@ texture** in the Materials tab.
 | **Size variance** | How much card sizes vary. |
 | **Leaf start** | How far along an end branch leaves begin. |
 | **Normal bend** | How far card normals lean outward from the crown's centre, so the canopy shades as one volume instead of a scatter of flat cards. |
+| **Fold** | Each card folds along its midline into a shallow V, each half shaded on its own, so leaves catch the light instead of reading as flat sheets. LOD 0 and 1; LOD 2 stays flat (2 triangles a card more on LOD 1). |
+| **Curl** | Each card's tip curls back along its length. |
+| **Segments** | Rows along each card (1–4). Every row folds, twists and ripples on its own, so a card bends instead of hinging once. LOD 0 uses them all, LOD 1 half, LOD 2 keeps flat cards; a card costs 2 triangles per row and column. |
+| **Fold shape** | V crease along the midrib (2 columns), or cupped across the blade (4 columns). |
+| **Twist** | The card's cross-section turns about its length, up to about 40° at the tip. |
+| **Wave** | A ripple along the card. |
+| **Jitter** | How differently each card folds, twists and ripples, so a crown is not one card repeated. |
 
 ## Leaf texture
 
-Trees and bushes: the leaf (or needle) atlas, generated from these settings. Edited in the **Materials**
-tab, under Leaves or Needles.
+Trees and bushes: the leaf (or needle) atlas, generated from these settings, and its normal map, drawn
+with it: each leaf a gentle dome with its midrib and veins sunk in, each needle and twig a rounded ridge.
+Edited in the **Materials** tab, under Leaves or Needles, where either texture can be replaced by an
+image (or a whole texture set).
 
 | Field | Meaning |
 |---|---|
@@ -228,7 +266,9 @@ on grass, Rock on a rock -- edited with the Editor's own material sections: **Pr
 **Textures**, **Cutout** and **Wind** (see [the material editor](../editor/models-and-materials.md#the-material-editor)).
 What is set here is written into the `.glb` files, so the model arrives in the Editor looking the same.
 
-Roughness, translucency and the wind are the generator's own settings: a preset sets them, and a bush's
+Roughness, translucency (its colour and blend too: back-lit leaves and blades glow yellow-green by default, the
+autumn maple orange; the glow shows looking through the leaves toward the sun, so put the preview's sun
+low behind the plant to see it) and the wind are the generator's own settings: a preset sets them, and a bush's
 bark and leaves share one wind strength and stiffness, because a plant bends as one. The rest --
 a tint over the texture, metallic, emission, the cutout threshold, whether the bark rides the wind
 rigidly or flutters with the leaves -- is kept per material; **Reset** at the top returns a material to
@@ -249,7 +289,7 @@ fills the metallic channel when no map gives one. **Load texture set…** takes 
 a PBR set was downloaded in, and puts each map in its slot by its file name (`diff`, `nor_gl`, `arm`, `ao`,
 `rough`, `metal`...). A DirectX normal map (`nor_dx`) is used with its green flipped when no OpenGL one
 is in the set. Height and displacement maps are skipped: foliage has no parallax. Wind is
-written into the materials so the asset sways in a foliage rule; the Creator's preview does not sway.
+written into the materials so the asset sways in a foliage rule, and in the preview with [Wind](#wind) on.
 
 ## Levels
 
@@ -262,7 +302,9 @@ Editor switches levels.
 | **LOD 1 blades** | Grass: the share of blades LOD 1 keeps (at half the segments), widened to cover. |
 | **LOD 1 leaves** | Tree and bush: the share of leaf cards LOD 1 keeps, grown to cover. LOD 1 also drops the twig level and halves branch sides. |
 | **LOD 1 triangles** | Rock: LOD 1's triangles as a fraction of LOD 0. |
-| **LOD 2 distance** | Where LOD 2 takes over. Grass's LOD 2 is three crossed cards showing a picture of the clump. |
+| **LOD 2 distance** | Where LOD 2 takes over. |
+| **LOD 2** | Grass: **Cards**, three crossed cards showing a picture of the clump (a billboard, the cheapest), or **Blades**, a few real blades of one segment each, so the clump never turns into a flat picture. |
+| **LOD 2 blades** | Grass with Blades: the share of blades LOD 2 keeps, widened to cover. |
 | **LOD 2 leaves** | Tree and bush: the share of cards LOD 2 keeps. LOD 2 keeps only the trunk (or stems) and first-level branches. |
 | **LOD 2 triangles** | Rock: LOD 2's triangles as a fraction of LOD 0. |
 | **Cull distance** | Beyond this nothing is drawn. |

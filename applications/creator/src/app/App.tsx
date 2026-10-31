@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType } from 'react';
+import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import Topbar from '@cleo/app-kit/ui/Topbar';
 import LoadingScreen from '@cleo/app-kit/feedback/LoadingScreen';
 import { beginLoad } from '@cleo/app-kit/feedback/loadingStore';
@@ -8,7 +8,7 @@ import { readBackendPreference, writeBackendPreference } from '@cleo/app-kit/ren
 import { CreatorEngineProvider, useCreatorEngine } from './CreatorEngine';
 import { bootLoad, booting, finishIfSettled } from './bootLoad';
 
-type Tool = 'world' | 'fx' | 'foliage';
+import { CreatorShellContext, type Tool } from './shell';
 const TOOL_KEY = 'cleo_creator_tool';
 
 // Each sub-application is its own code chunk, fetched the first time it is selected: World Creator's
@@ -101,8 +101,10 @@ function Shell() {
   const [tool, setTool] = useState<Tool>(storedTool);
   const { Component, error: toolError } = useToolComponent(tool);
   const choose = (t: Tool) => { setTool(t); localStorage.setItem(TOOL_KEY, t); };
+  const shell = useMemo(() => ({ tool, choose }), [tool]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
+    <CreatorShellContext.Provider value={shell}>
     <div className='flex flex-col h-screen w-screen overflow-hidden'>
       <Topbar>
         <span className='px-3 font-semibold tracking-[0.25em] text-ui'>CLEO CREATOR</span>
@@ -123,6 +125,7 @@ function Shell() {
         <LoadingScreen variant='overlay' subtitle='Creator' />
       </div>
     </div>
+    </CreatorShellContext.Provider>
   );
 }
 

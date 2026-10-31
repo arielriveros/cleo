@@ -1,5 +1,7 @@
 // The leaf atlas: a 2 x 2 grid of sprig cards -- a twig carrying several leaves, or a brush of needles --
-// drawn as signed-distance shapes, with an alpha cutout and colour dilated under it.
+// drawn as signed-distance shapes, with an alpha cutout and colour dilated under it, and a normal map read
+// off a height field drawn alongside: each leaf a gentle dome with a sunken midrib and veins, each needle
+// and twig a rounded ridge.
 //
 // A card per sprig rather than a card per leaf is the standard trade (SpeedTree's leaf clusters): ten
 // to twenty leaves for two triangles. Every card is anchored at the MIDDLE OF ITS BOTTOM EDGE, where the
@@ -7,7 +9,7 @@
 
 import type { LeafShape, Rgba } from '../foliageParams';
 import { stream } from '../rng';
-import { createImage, dilateColor, mixRgb, putLinear, rgb, scaleRgb, shiftHue, type Image, type Rgb } from './image';
+import { createImage, dilateColor, mixRgb, normalFromHeight, putLinear, rgb, scaleRgb, shiftHue, type Image, type Rgb } from './image';
 
 export const ATLAS_CELLS = 2;
 
@@ -35,6 +37,17 @@ export interface LeafAtlasOptions {
   autumn: number;
 }
 
+/**
+ * The relief drawn with the colour, 0..1 per pixel: what the leaf normal map is read from. Module state for
+ * the length of one `leafTextures` call (the drawing helpers are called from one place, synchronously).
+ */
+let relief: Float32Array | null = null;
+
+/** Lay `h` over a pixel's relief with the same coverage the colour gets. */
+function raise(i: number, h: number, a: number): void {
+  if (relief && a > 0) relief[i] = h * a + relief[i] * (1 - a);
+}
+
 /** Accumulate a straight-alpha colour over what a pixel already holds ("over", in linear terms). */
 function over(acc: Float32Array, i: number, c: Rgb, a: number): void {
   if (a <= 0) return;
@@ -57,7 +70,10 @@ function stroke(acc: Float32Array, w: number, h: number, x0: number, y0: number,
     const t = Math.min(1, Math.max(0, (px * dx + py * dy) / len2));
     const d = Math.hypot(px - dx * t, py - dy * t);
     const half = (w0 + (w1 - w0) * t) * 0.5;
-    over(acc, y * w + x, color, smoothstep(half + 0.7, half - 0.7, d));
+    const a = smoothstep(half + 0.7, half - 0.7, d);
+    over(acc, y * w + x, color, a);
+    // A rounded ridge across the stroke: a needle or a twig is a cylinder.
+    raise(y * w + x, 0.55 + 0.45 * Math.sqrt(Math.max(0, 1 - (d / Math.max(0.5, half)) ** 2)), a);
   }
 }
 
@@ -92,13 +108,36 @@ function leaf(acc: Float32Array, w: number, h: number, bx: number, by: number, d
     // A soft light-to-dark across the blade, as a leaf's curl catches the light.
     c = scaleRgb(c, 0.88 + 0.24 * (0.5 - t / Math.max(hw, 1e-3) * 0.5));
     over(acc, y * w + x, c, a);
+    // Relief: a dome across the blade, the midrib and veins sunk into it, the rim turned up a touch.
+    const across = Math.min(1, at / Math.max(hw, 1e-3));
+    raise(y * w + x, 0.45 + 0.35 * (1 - across * across) - 0.22 * midrib - 0.1 * veins + 0.08 * rimK, a);
   }
 }
 
+export interface LeafTextures { albedo: Image; normal: Image }
+
+/** The atlas alone (its colour and cutout). */
 export function leafAtlas(o: LeafAtlasOptions): Image {
+  return leafTextures(o).albedo;
+}
+
+/** The atlas and its tangent-space normal map (OpenGL, flat outside the leaves). */
+export function leafTextures(o: LeafAtlasOptions): LeafTextures {
   const size = o.size;
   const cell = size / ATLAS_CELLS;
   const acc = new Float32Array(size * size * 4);
+  relief = new Float32Array(size * size);
+  try {
+    const albedo = drawAtlas(o, size, cell, acc);
+    // Outside every leaf the relief is 0 and so flat; at an edge the cutout hides the step.
+    const normal = normalFromHeight(relief, size, size, o.kind === 'needles' ? 0.8 : 1.4, false);
+    return { albedo, normal };
+  } finally {
+    relief = null;
+  }
+}
+
+function drawAtlas(o: LeafAtlasOptions, size: number, cell: number, acc: Float32Array): Image {
   const base = rgb(o.color);
   const autumnA: Rgb = [0.62, 0.22, 0.02], autumnB: Rgb = [0.48, 0.06, 0.03], autumnC: Rgb = [0.7, 0.5, 0.05];
   const stemColor: Rgb = o.kind === 'needles' ? [0.12, 0.08, 0.05] : [0.16, 0.13, 0.06];

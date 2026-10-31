@@ -1,4 +1,4 @@
-/* Project-browser tweaks on top of the shared file-manager skin (assets/filemanager.css).
+/* Project-browser tweaks on top of the shared file-manager skin (app-kit/src/assets/filemanager.css).
  *
  * Every rule here is an extra class deep (.cleo-fm.cleo-projects …, 0-3-0) so it wins on SPECIFICITY rather
  * than on source order — the two stylesheets are separate loader tags and their order across rebuilds is not

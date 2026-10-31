@@ -38,6 +38,10 @@ export interface CreatorAssetMeta {
   fileNames: string[];
   /** Files only the Creator reads back (a user's texture overrides): kept with the asset, never imported. */
   privateFileNames: string[];
+  /** The Creator explorer's folder under the tool's root ('' or absent: the root), '/'-separated. */
+  folder?: string;
+  /** A small PNG data URL of the asset, for the explorer's cards. Not part of the content hash. */
+  thumbnail?: string;
   deleted?: true;
 }
 

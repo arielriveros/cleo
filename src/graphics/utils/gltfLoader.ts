@@ -97,13 +97,26 @@ interface GLTFMaterial {
      * Engine settings glTF has no field for, written by Cleo's own exporters (the Creator's Foliage
      * mode). Read back so a generated plant arrives already swaying.
      */
-    extras?: { cleo?: { wind?: WindConfig } };
+    extras?: { cleo?: { wind?: WindConfig; translucencyTint?: number[] } };
 }
 
 /** `KHR_materials_diffuse_transmission`'s factor, clamped; 0 when the material does not use it. */
 function translucencyOf(m: GLTFMaterial): number {
     const t = m.extensions?.KHR_materials_diffuse_transmission?.diffuseTransmissionFactor;
     return typeof t === 'number' && Number.isFinite(t) ? Math.min(1, Math.max(0, t)) : 0;
+}
+
+/**
+ * The transmission tint: Cleo's own `extras.cleo.translucencyTint` ([r, g, b, blend]) when a Cleo exporter
+ * wrote one, else the standard `diffuseTransmissionColorFactor` read as a full blend toward that colour.
+ */
+function translucencyTintOf(m: GLTFMaterial): number[] | undefined {
+    const own = m.extras?.cleo?.translucencyTint;
+    if (Array.isArray(own) && own.length === 4 && own.every(x => typeof x === 'number' && Number.isFinite(x))) return own;
+    const c = (m.extensions?.KHR_materials_diffuse_transmission as any)?.diffuseTransmissionColorFactor;
+    if (Array.isArray(c) && c.length === 3 && c.every((x: unknown) => typeof x === 'number' && Number.isFinite(x)) && c.some((x: number) => x !== 1))
+        return [c[0], c[1], c[2], 1];
+    return undefined;
 }
 
 /** The Cleo wind block in a material's extras, or undefined. Never trusted beyond being an object. */
@@ -254,6 +267,8 @@ export interface GltfMaterialDescriptor {
     alphaCutoff?: number;
     /** KHR_materials_diffuse_transmission, 0 when absent. */
     translucency?: number;
+    /** The transmission tint, [r, g, b, blend], when the file carries one. */
+    translucencyTint?: number[];
     /** `extras.cleo.wind`, when a Cleo exporter wrote one. */
     wind?: WindConfig;
     textures: {
@@ -728,6 +743,7 @@ export class GLTFLoader {
             // 0.5 is the glTF default for MASK; 0 disables the cutout for every other alpha mode.
             alphaCutoff: gltfMaterial.alphaMode === 'MASK' ? (gltfMaterial.alphaCutoff ?? 0.5) : 0,
             translucency: translucencyOf(gltfMaterial),
+            translucencyTint: translucencyTintOf(gltfMaterial),
             wind: windOf(gltfMaterial),
             textures,
             name: gltfMaterial.name,
@@ -1092,6 +1108,7 @@ export class GLTFLoader {
             // See describeMaterial: MASK is a cutout, not transparency.
             alphaCutoff: gltfMaterial.alphaMode === 'MASK' ? (gltfMaterial.alphaCutoff ?? 0.5) : 0,
             translucency: translucencyOf(gltfMaterial),
+            translucencyTint: translucencyTintOf(gltfMaterial),
             emissiveFactor,
             emissiveIntensity:
                 gltfMaterial.extensions?.KHR_materials_emissive_strength?.emissiveStrength ?? 1,

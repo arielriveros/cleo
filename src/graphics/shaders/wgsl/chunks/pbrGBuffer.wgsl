@@ -1,4 +1,5 @@
 #include "./alphaCutout.wgsl"
+#include "./translucencyTint.wgsl"
 // The PBR G-buffer fragment stage, shared by the plain, skinned and instanced geometry programs.
 //
 // It uses VertexOutput and tbnOf() without including chunks/modelVarying.wgsl itself: whichever
@@ -60,6 +61,11 @@ struct PBRMaterial {
      * splits the sign back out. Same member in chunks/pbrForward.wgsl.
      */
     translucency: f32,
+    /**
+     * The colour transmitted light blends toward (rgb) and how far (a). A translucent texel stores it, packed,
+     * where reflectance would go -- see chunks/translucencyTint.wgsl. Same member in chunks/pbrForward.wgsl.
+     */
+    translucencyTint: vec4<f32>,
     // Every flag is an i32, not a bool: WGSL forbids bool in a uniform buffer (not host-shareable).
     // Call sites still pass JavaScript booleans — the std140 writer converts them, because the
     // reflected member type is integer.
@@ -441,12 +447,14 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     // straddle silhouettes, sampling two unrelated surfaces into one variance estimate and painting a
     // rim of blur around every object. Here the derivative is taken across one triangle's own normal.
     let octN = octEncode(N);
+    // A translucent texel carries its transmission tint where reflectance goes (chunks/translucencyTint.wgsl).
+    let reflectanceOrTint = select(u_material.reflectance, packTranslucencyTint(u_material.translucencyTint), translucency > 0.0);
 #if CLEO_LEAN
     // No geometric specular AA on the lean foliage path: it takes two more derivative pairs per fragment,
     // and foliage is rough enough that its specular barely aliases.
-    out.gNormalRoughness = vec4<f32>(octN.x, octN.y, u_material.reflectance, roughness);
+    out.gNormalRoughness = vec4<f32>(octN.x, octN.y, reflectanceOrTint, roughness);
 #else
-    out.gNormalRoughness = vec4<f32>(octN.x, octN.y, u_material.reflectance,
+    out.gNormalRoughness = vec4<f32>(octN.x, octN.y, reflectanceOrTint,
                                      filterSpecularRoughness(roughness, N, u_material.specularAA));
 #endif
     out.gEmissiveAO = vec4<f32>(emissive, ao);

@@ -183,7 +183,8 @@ function cardMesh(halfWidth: number, height: number): FoliagePart {
 export interface GrassBuild {
   levels: FoliageLevel[];
   bladeTexture: Image;
-  cardTexture: Image;
+  /** Null when LOD 2 is blades, not cards. */
+  cardTexture: Image | null;
 }
 
 export function buildGrass(seed: number, p: GrassParams, bladeTexture?: Image): GrassBuild {
@@ -191,6 +192,18 @@ export function buildGrass(seed: number, p: GrassParams, bladeTexture?: Image): 
   const all = blades(seed, p);
   const lod0 = bladeMesh(seed, p, all, p.segments, 1);
   const lod1 = bladeMesh(seed, p, all, Math.max(1, Math.ceil(p.segments / 2)), p.lod1Blades);
+  // No billboard: LOD 2 is a few real blades, one segment each.
+  if (p.lod2Kind === 'blades') {
+    return {
+      levels: [
+        { parts: [lod0], distance: 0 },
+        { parts: [lod1], distance: p.lod1Distance },
+        { parts: [bladeMesh(seed, p, all, 1, p.lod2Blades)], distance: p.lod2Distance },
+      ],
+      bladeTexture: texture,
+      cardTexture: null,
+    };
+  }
 
   // The card spans the clump's widest extent and its tallest blade.
   let halfWidth = 0.05, height = 0.05;

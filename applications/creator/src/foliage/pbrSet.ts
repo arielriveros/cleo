@@ -11,6 +11,7 @@ export type PbrRole = 'color' | 'normal' | 'arm' | 'ao' | 'roughness' | 'metalli
 export const PBR_SLOTS: Partial<Record<MaterialKey, Partial<Record<PbrRole, TextureKey>>>> = {
   bark: { color: 'bark', normal: 'barkNormal', arm: 'barkOrm', ao: 'barkAo', roughness: 'barkRoughness', metallic: 'barkMetallic' },
   rock: { color: 'rockAlbedo', normal: 'rockNormal' },
+  leaves: { color: 'leaves', normal: 'leavesNormal' },
 };
 
 /** Name tokens per role, checked in this order (an `_arm` map is not read as its parts). */

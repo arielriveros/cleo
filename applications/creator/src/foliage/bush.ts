@@ -21,7 +21,7 @@ const UP: V3 = [0, 1, 0];
  */
 function bushLods(p: BushParams): LodSpec[] {
   return [
-    { maxLevel: 3, sides: [5, 4, 3, 3], stride: 2, strides: [2, 2, 3, 3], leafShare: 1 },
+    { maxLevel: 3, sides: [5, 4, 3, 3], stride: 2, strides: [2, 2, 3, 3], leafShare: 1, leafRows: 2 },
     { maxLevel: p.levels >= 3 ? 2 : 3, sides: [4, 3, 3, 3], stride: 3, strides: [3, 3, 4, 4], leafShare: p.lod1Leaves },
     { maxLevel: 1, sides: [3, 3, 3, 3], stride: 4, strides: [4, 4, 4, 4], leafShare: p.lod2Leaves },
   ];
@@ -64,7 +64,7 @@ export function buildBushSkeleton(seed: number, p: BushParams): Skeleton {
       leaves.push({ ...c, anchor: place(c.anchor), up: turn(c.up), side: turn(c.side), normal: turn(c.normal) });
   }
   bendLeafNormals(leaves, p.leafNormalBend);
-  return { stems, leaves };
+  return { stems, leaves, seed };
 }
 
 export function bushLevels(skeleton: Skeleton, p: BushParams): FoliageLevel[] {

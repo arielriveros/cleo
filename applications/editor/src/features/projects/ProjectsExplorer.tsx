@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Logger } from 'cleo'
 import { Filemanager, WillowDark, getMenuOptions } from '@svar-ui/react-filemanager'
 import type { IApi, IFileMenuOption, IParsedEntity, TContextMenuType, TMode } from '@svar-ui/react-filemanager'
-import '../assets/filemanager.css'
+import '@cleo/app-kit/assets/filemanager.css'
 import './projects.css'
 import { iconFor } from '../assets/assetKinds'
 

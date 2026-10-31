@@ -5,6 +5,7 @@ import { useCreatorEngine } from '../../app/CreatorEngine';
 import { CreatorWorkspace, ViewportOverlay } from '../../app/workspace';
 import { downloadAll } from '../../core/download';
 import { AssetBar, useCreatorAsset } from '../../core/useCreatorAsset';
+import { useStageCapture } from '../../core/stageCapture';
 import type { CreatorFile } from '@cleo/app-kit/creatorLibrary';
 import type { ExportFile } from '../../core/generator';
 import { useGeneration } from '../../core/useGeneration';
@@ -197,7 +198,8 @@ export function FoliageWorkspace() {
       void setOverride(key as TextureKey, new File([f.blob], name.join('/'), { type: f.mime }), { flipGreen: flip === 'dx' });
     }
   };
-  const asset = useCreatorAsset<FoliageDoc>('foliage', doc, d => { impostorBake.current = null; setDoc(normaliseFoliage(d)); }, restoreOverrides);
+  const capture = useStageCapture();
+  const asset = useCreatorAsset<FoliageDoc>('foliage', doc, d => { impostorBake.current = null; setDoc(normaliseFoliage(d)); }, restoreOverrides, capture);
   const wantsImpostor = (d: FoliageDoc) => d.kind === 'tree' && d.tree.impostor;
   function publishBuild(result: FoliageBuild, from: FoliageDoc) {
     if (!asset.active) return;
@@ -268,13 +270,15 @@ export function FoliageWorkspace() {
     <ViewportOverlay
       readout={build && <>
         {KIND_LABELS[build.summary.kind]} · {build.summary.levels.map((l, i) => `LOD${i} ${l.triangles.toLocaleString()}`).join(' · ')} tris
-        {active ? ` · showing ${active.culled ? 'nothing (culled)' : `LOD ${active.level}`}` : ''} · {build.ms.toFixed(0)} ms
+        {active ? ` · showing ${active.culled ? 'nothing (culled)' : `LOD ${active.level}`}` : ''}
+        {stage.wind && !stage.wireframe ? ' · swaying' : ' · still'} · {build.ms.toFixed(0)} ms
       </>}
       visibility={[
         { key: 'grid', label: 'Grid', checked: stage.grid },
         { key: 'ground', label: 'Floor', checked: stage.ground },
         { key: 'sky', label: 'Sky', checked: stage.sky },
         ...(doc.kind === 'grass' ? [{ key: 'patch', label: 'Patch of clumps', checked: stage.patch }] : []),
+        { key: 'wind', label: 'Wind', checked: stage.wind },
         { key: 'wireframe', label: 'Wireframe', checked: stage.wireframe },
       ].map(item => ({ ...item, onChange: (v: boolean) => setStage({ ...stage, [item.key]: v }) }))}
       controls={(

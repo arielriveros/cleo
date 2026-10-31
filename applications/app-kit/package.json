@@ -11,6 +11,7 @@
   "author": "Ariel Riveros",
   "license": "ISC",
   "dependencies": {
+    "@svar-ui/react-filemanager": "^2.6.0",
     "class-variance-authority": "^0.7.1",
     "cleo": "file:../../dist",
     "clsx": "^2.1.1",

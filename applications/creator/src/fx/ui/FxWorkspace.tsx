@@ -8,6 +8,7 @@ import { sectionPresets } from './sectionPresets';
 import { downloadAll } from '../../core/download';
 import { useGeneration } from '../../core/useGeneration';
 import { AssetBar, useCreatorAsset } from '../../core/useCreatorAsset';
+import { useStageCapture } from '../../core/stageCapture';
 import { fluidDims } from '../fluidCpu';
 import { gpuBackend } from '../fluidGpu';
 import { DEFAULT_FX, FX_PRESETS, FX_SCHEMA, normaliseFx, type FxParams } from '../fxParams';
@@ -221,7 +222,8 @@ export function FxWorkspace() {
 
   // --- The saved asset: every bake of it goes to the Creator library, which the editor follows. A saved
   // asset re-bakes on its own once edits pause (Auto-bake), so the editor's flipbook keeps up. ---
-  const asset = useCreatorAsset<FxParams>('fx', params, p => setParams(normaliseFx(p)));
+  const capture = useStageCapture();
+  const asset = useCreatorAsset<FxParams>('fx', params, p => setParams(normaliseFx(p)), undefined, capture);
   /** The parameters the shown bake was made from. */
   const outputFrom = useRef<FxParams | null>(null);
   const [autoBake, setAutoBake] = useState(true);
