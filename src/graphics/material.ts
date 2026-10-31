@@ -445,6 +445,44 @@ function windJson(material: Material): WindConfig {
 }
 
 /**
+ * How a material answers what moves THROUGH it (graphics/foliageInteraction.ts): a character walking
+ * through grass, a body rolling into a bush, a blast. Like wind, a foliage layer bends as ONE plant, so the
+ * strongest of a prototype's materials speaks for all of its parts.
+ *
+ * `interactBend` is how far it gives way, 0..1 (0 = rigid, the default and what every existing asset
+ * means; tall grass ~0.8, a bush ~0.6, a tree ~0.05). `interactRecovery` is how long it takes to spring
+ * back once the pusher has gone, in seconds (the bend fades as exp(-age / recovery)).
+ */
+export interface InteractionConfig {
+    interactBend?: number;
+    interactRecovery?: number;
+}
+
+const INTERACT_RECOVERY_DEFAULT = 1;
+
+export function applyInteraction(material: Material, cfg: InteractionConfig): void {
+    material.properties.set('interactBend', Math.min(1, Math.max(0, finiteOr(cfg.interactBend, 0))));
+    material.properties.set('interactRecovery', Math.min(10, Math.max(0.1, finiteOr(cfg.interactRecovery, INTERACT_RECOVERY_DEFAULT))));
+}
+
+/** A material's interaction response, defaults filled in. */
+export function interactionConfigOf(material: Material): Required<InteractionConfig> {
+    return {
+        interactBend: Number(material.properties.get('interactBend') ?? 0) || 0,
+        interactRecovery: Number(material.properties.get('interactRecovery') ?? INTERACT_RECOVERY_DEFAULT) || INTERACT_RECOVERY_DEFAULT,
+    };
+}
+
+/** Interaction as serialized JSON: only what differs from the defaults. */
+function interactionJson(material: Material): InteractionConfig {
+    const c = interactionConfigOf(material);
+    const out: InteractionConfig = {};
+    if (c.interactBend !== 0) out.interactBend = c.interactBend;
+    if (c.interactRecovery !== INTERACT_RECOVERY_DEFAULT) out.interactRecovery = c.interactRecovery;
+    return out;
+}
+
+/**
  * How much of the camera's exposure an emissive surface takes, 0..1 (HDRP's emission "exposure weight",
  * the same as `Sprite.exposureWeight`). 1, the default, is physical: the glow is a luminance like any
  * other, so it is faint at noon and fierce in a cave. Lower weights hold it closer to one look in every
@@ -768,6 +806,7 @@ export class Material {
                 invertHeight: this.properties.get('invertHeight'),
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 ...windJson(this),
+                ...interactionJson(this),
                 ...emissiveWeightJson(this),
                 textures: {
                     texture: this.textures.get('texture'),
@@ -800,6 +839,7 @@ export class Material {
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 ...uvJson(this),
                 ...windJson(this),
+                ...interactionJson(this),
                 ...emissiveWeightJson(this),
                 // Fixed keys, not a dump of the map: that keeps the derived `ormTexture` out of assets.
                 textures: {
@@ -836,6 +876,7 @@ export class Material {
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 ...uvJson(this),
                 ...windJson(this),
+                ...interactionJson(this),
                 ...emissiveWeightJson(this),
                 // The AUTHORING spellings, which differ from the runtime map keys (`base` vs
                 // `baseTexture`, `ramp` vs `rampMap`, `mask` vs `maskMap`) exactly as the Basic and
@@ -866,6 +907,7 @@ export class Material {
                 clipSilhouette: this.properties.get('clipSilhouette'),
                 ...uvJson(this),
                 ...windJson(this),
+                ...interactionJson(this),
                 ...emissiveWeightJson(this),
                 textures: {
                     base: this.textures.get('baseTexture'),
@@ -887,6 +929,7 @@ export class Material {
         // Every shading model can answer the wind; written only when the asset carries it.
         if (m && (m.windStrength !== undefined || m.windStiffness !== undefined
                   || m.windRole !== undefined || m.windFlutter !== undefined)) applyWind(material, m);
+        if (m && (m.interactBend !== undefined || m.interactRecovery !== undefined)) applyInteraction(material, m);
         if (m && m.emissiveExposureWeight !== undefined) setEmissiveExposureWeight(material, m.emissiveExposureWeight);
         return material;
     }

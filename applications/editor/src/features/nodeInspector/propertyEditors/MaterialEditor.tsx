@@ -8,7 +8,7 @@ import TextureInspector from './TextureInspector';
 import CustomMaterialEditor from './CustomMaterialEditor';
 import UvMappingSection from './UvMappingSection';
 import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section, DocScope } from '@cleo/app-kit/ui';
-import { CutoutSection, PbrPropertiesSection, WindSection, type MaterialFieldValues, type MaterialPatch } from '@cleo/app-kit/materials/MaterialFields';
+import { CutoutSection, InteractionSection, PbrPropertiesSection, WindSection, type MaterialFieldValues, type MaterialPatch } from '@cleo/app-kit/materials/MaterialFields';
 import { MaterialIcon } from '../sectionIcons';
 
 export default function MaterialEditor(props: {node: ModelNode}) {
@@ -263,6 +263,8 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     windStiffness: live.get('windStiffness') ?? 1,
     windRole: live.get('windRole') === 'leaves' ? 'leaves' : 'plant',
     windFlutter: live.get('windFlutter') ?? 0.5,
+    interactBend: live.get('interactBend') ?? 0,
+    interactRecovery: live.get('interactRecovery') ?? 1,
   };
   const applyShared = (patch: MaterialPatch) => {
     for (const [key, value] of Object.entries(patch)) {
@@ -575,7 +577,10 @@ export default function MaterialEditor(props: {node: ModelNode}) {
         )}
 
         {!isTerrain && (
-          <WindSection value={windValues} onChange={applyShared} />
+          <>
+            <WindSection value={windValues} onChange={applyShared} />
+            <InteractionSection value={windValues} onChange={applyShared} />
+          </>
         )}
 
         <Section title='Options'>

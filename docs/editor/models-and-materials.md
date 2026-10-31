@@ -262,6 +262,13 @@ sprig sway and **Flutter**, more toward the outside of the canopy. Read by folia
 scene has a Wind node; a tree's materials bend as one, the strongest setting the lean. Not on terrain
 materials.
 
+**Interaction** — how a plant wearing this material gives way to what moves through it — characters,
+moving physics bodies and radial force fields such as a blast — and springs back after: **Bend** (0 is
+rigid; tall grass ~0.8, a bush ~0.6, a tree ~0.05) and **Recovery**, the seconds it takes to stand up
+again. The grass a character walked through stays parted along its path for a moment. Read by terrain
+foliage only, with or without a Wind node; a plant bends by the strongest of its materials. Scripts
+can add their own pushers with `scene.addFoliageInteractor({ position, radius, strength })`.
+
 **Options** — side (front / back / both), transparency, shadow casting, probe participation,
 wireframe.
 

@@ -73,6 +73,7 @@ export interface MaterialSpec {
   /** [r, g, b, blend]: the colour transmitted light blends toward. */
   translucencyTint?: [number, number, number, number];
   wind?: GlbMaterial['wind'];
+  interaction?: GlbMaterial['interaction'];
 }
 
 export interface FoliageModel {
@@ -145,13 +146,14 @@ function generate(doc: FoliageDoc, overrides: Overrides): FoliageModel {
     const p = doc.grass;
     const g = buildGrass(seed, p, sized('grass', p.textureSize));
     const wind = { windStrength: p.windStrength, windStiffness: p.windStiffness, windRole: 'plant' as const, windFlutter: p.windFlutter };
+    const interaction = { interactBend: p.interactBend, interactRecovery: p.interactRecovery };
     const tint: [number, number, number, number] = [p.translucencyColor[0], p.translucencyColor[1], p.translucencyColor[2], p.translucencyBlend];
     const all = g.levels.flatMap(l => l.parts);
     return {
       kind: 'grass', name: doc.name, levels: g.levels,
       materials: {
-        grass: { name: 'Grass', baseColor: WHITE, roughness: p.roughness, baseColorTexture: 'grass', doubleSided: true, translucency: p.translucency, translucencyTint: tint, wind },
-        ...(g.cardTexture ? { grassCard: { name: 'Grass card', baseColor: WHITE, roughness: p.roughness, baseColorTexture: 'grassCard' as const, alphaCutoff: 0.5, doubleSided: true, translucency: p.translucency, translucencyTint: tint, wind } } : {}),
+        grass: { name: 'Grass', baseColor: WHITE, roughness: p.roughness, baseColorTexture: 'grass', doubleSided: true, translucency: p.translucency, translucencyTint: tint, wind, interaction },
+        ...(g.cardTexture ? { grassCard: { name: 'Grass card', baseColor: WHITE, roughness: p.roughness, baseColorTexture: 'grassCard' as const, alphaCutoff: 0.5, doubleSided: true, translucency: p.translucency, translucencyTint: tint, wind, interaction } } : {}),
       },
       textures: { grass: g.bladeTexture, ...(g.cardTexture ? { grassCard: g.cardTexture } : {}) },
       cullDistance: p.cullDistance, impostor: null, collider: null, bounds: boundsOf(all),
@@ -199,7 +201,7 @@ function generate(doc: FoliageDoc, overrides: Overrides): FoliageModel {
 }
 
 type PlantLook = Pick<TreeParams, 'barkTextureSize' | 'barkPattern' | 'barkColor' | 'barkRoughness' | 'leafKind' | 'leafTextureSize' | 'leafShape'
-  | 'leafColor' | 'leafColorVariation' | 'autumn' | 'leafRoughness' | 'leafTranslucency' | 'leafTranslucencyColor' | 'leafTranslucencyBlend' | 'windStrength' | 'windStiffness' | 'windFlutter'>;
+  | 'leafColor' | 'leafColorVariation' | 'autumn' | 'leafRoughness' | 'leafTranslucency' | 'leafTranslucencyColor' | 'leafTranslucencyBlend' | 'windStrength' | 'windStiffness' | 'windFlutter' | 'interactBend' | 'interactRecovery'>;
 
 /** How deep the generated bark's cavities occlude: deep in plated and furrowed bark, shallow in smooth skin. */
 const BARK_AO = { plated: 0.6, furrowed: 0.65, smooth: 0.25, papery: 0.3 } as const;
@@ -223,10 +225,12 @@ function plantLook(seed: number, p: PlantLook, barkMetallic: number,
   };
   // Bark and leaves bend with ONE wind shape (the prototype's bounds), so they share strength and
   // stiffness; only the leaves flutter.
+  // A plant gives way as one too: bark and leaves carry the same interaction response.
+  const interaction = { interactBend: p.interactBend, interactRecovery: p.interactRecovery };
   const materials: FoliageModel['materials'] = {
     bark: { name: 'Bark', baseColor: WHITE, roughness: p.barkRoughness, metallic: barkMetallic,
             baseColorTexture: 'bark', normalTexture: 'barkNormal', ormTexture: 'barkOrm',
-            wind: { windStrength: p.windStrength, windStiffness: p.windStiffness, windRole: 'plant', windFlutter: 0 } },
+            wind: { windStrength: p.windStrength, windStiffness: p.windStiffness, windRole: 'plant', windFlutter: 0 }, interaction },
   };
   if (p.leafKind !== 'none') {
     const atlas = {
@@ -239,7 +243,7 @@ function plantLook(seed: number, p: PlantLook, barkMetallic: number,
     materials.leaves = { name: p.leafKind === 'needles' ? 'Needles' : 'Leaves', baseColor: WHITE, roughness: p.leafRoughness, baseColorTexture: 'leaves', normalTexture: 'leavesNormal', alphaCutoff: 0.5,
                          doubleSided: true, translucency: p.leafTranslucency,
                          translucencyTint: [p.leafTranslucencyColor[0], p.leafTranslucencyColor[1], p.leafTranslucencyColor[2], p.leafTranslucencyBlend],
-                         wind: { windStrength: p.windStrength, windStiffness: p.windStiffness, windRole: 'leaves', windFlutter: p.windFlutter } };
+                         wind: { windStrength: p.windStrength, windStiffness: p.windStiffness, windRole: 'leaves', windFlutter: p.windFlutter }, interaction };
   }
   return { materials, textures };
 }
@@ -308,7 +312,7 @@ export function levelGlb(model: FoliageModel, level: number, pngs: Partial<Recor
         roughness: orm !== undefined ? 1 : spec.roughness, metallic: orm !== undefined ? 1 : spec.metallic,
         emissive: spec.emissive, emissiveIntensity: spec.emissiveIntensity,
         baseColorImage: image(spec.baseColorTexture), normalImage: image(spec.normalTexture), ormImage: orm,
-        alphaCutoff: spec.alphaCutoff, doubleSided: spec.doubleSided, translucency: spec.translucency, translucencyTint: spec.translucencyTint, wind: spec.wind,
+        alphaCutoff: spec.alphaCutoff, doubleSided: spec.doubleSided, translucency: spec.translucency, translucencyTint: spec.translucencyTint, wind: spec.wind, interaction: spec.interaction,
       });
       materialIndex.set(part.material, m);
     }

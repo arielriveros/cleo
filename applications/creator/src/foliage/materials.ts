@@ -42,22 +42,22 @@ export function hasMaterial(doc: FoliageDoc, key: MaterialKey): boolean {
   return MATERIAL_KEYS[doc.kind].includes(key);
 }
 
-type Linked = 'roughness' | 'translucency' | 'translucencyColor' | 'translucencyBlend' | 'windStrength' | 'windStiffness' | 'windFlutter';
+type Linked = 'roughness' | 'translucency' | 'translucencyColor' | 'translucencyBlend' | 'windStrength' | 'windStiffness' | 'windFlutter' | 'interactBend' | 'interactRecovery';
 
 /** Fields linked to a kind's parameters: material field -> parameter key. */
 const LINKS: Record<FoliageKind, Partial<Record<MaterialKey, Partial<Record<Linked, string>>>>> = {
   grass: {
-    grass: { roughness: 'roughness', translucency: 'translucency', translucencyColor: 'translucencyColor', translucencyBlend: 'translucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter' },
-    grassCard: { roughness: 'roughness', translucency: 'translucency', translucencyColor: 'translucencyColor', translucencyBlend: 'translucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter' },
+    grass: { roughness: 'roughness', translucency: 'translucency', translucencyColor: 'translucencyColor', translucencyBlend: 'translucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter', interactBend: 'interactBend', interactRecovery: 'interactRecovery' },
+    grassCard: { roughness: 'roughness', translucency: 'translucency', translucencyColor: 'translucencyColor', translucencyBlend: 'translucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter', interactBend: 'interactBend', interactRecovery: 'interactRecovery' },
   },
   rock: { rock: { roughness: 'roughness' } },
   tree: {
-    bark: { roughness: 'barkRoughness', windStrength: 'windStrength', windStiffness: 'windStiffness' },
-    leaves: { roughness: 'leafRoughness', translucency: 'leafTranslucency', translucencyColor: 'leafTranslucencyColor', translucencyBlend: 'leafTranslucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter' },
+    bark: { roughness: 'barkRoughness', windStrength: 'windStrength', windStiffness: 'windStiffness', interactBend: 'interactBend', interactRecovery: 'interactRecovery' },
+    leaves: { roughness: 'leafRoughness', translucency: 'leafTranslucency', translucencyColor: 'leafTranslucencyColor', translucencyBlend: 'leafTranslucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter', interactBend: 'interactBend', interactRecovery: 'interactRecovery' },
   },
   bush: {
-    bark: { roughness: 'barkRoughness', windStrength: 'windStrength', windStiffness: 'windStiffness' },
-    leaves: { roughness: 'leafRoughness', translucency: 'leafTranslucency', translucencyColor: 'leafTranslucencyColor', translucencyBlend: 'leafTranslucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter' },
+    bark: { roughness: 'barkRoughness', windStrength: 'windStrength', windStiffness: 'windStiffness', interactBend: 'interactBend', interactRecovery: 'interactRecovery' },
+    leaves: { roughness: 'leafRoughness', translucency: 'leafTranslucency', translucencyColor: 'leafTranslucencyColor', translucencyBlend: 'leafTranslucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter', interactBend: 'interactBend', interactRecovery: 'interactRecovery' },
   },
 };
 
@@ -90,6 +90,8 @@ export function materialValues(doc: FoliageDoc, key: MaterialKey): MaterialField
     windRole: role,
     // Flutter belongs to leaves; bark only has it when it is set to move as leaves.
     windFlutter: linked('windFlutter') ?? (role === 'leaves' ? Number(p.windFlutter ?? 0.5) : undefined),
+    interactBend: linked('interactBend'),
+    interactRecovery: linked('interactRecovery'),
   };
 }
 

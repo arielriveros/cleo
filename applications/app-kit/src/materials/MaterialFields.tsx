@@ -37,6 +37,9 @@ export interface MaterialFieldValues {
   windStiffness?: number;
   windRole?: WindRole;
   windFlutter?: number;
+  /** How far a plant gives way to what moves through it (0 = rigid), and how long it takes to spring back. */
+  interactBend?: number;
+  interactRecovery?: number;
 }
 
 export type MaterialPatch = Partial<MaterialFieldValues>;
@@ -156,6 +159,30 @@ export function WindSection({ value: v, onChange }: SectionProps) {
   );
 }
 
+/**
+ * Interaction: how a plant wearing the material gives way to what moves through it -- characters, moving
+ * bodies, blasts -- and springs back. Read by instanced foliage only, like Wind.
+ */
+export function InteractionSection({ value: v, onChange }: SectionProps) {
+  if (!has(v.interactBend)) return null;
+  return (
+    <DocScope page={DOC_PAGE}>
+      <Section title='Interaction'>
+        <PropertyTable columns={['40%', '60%']}>
+          <PropertyRow label='Bend' hint='How far a plant gives way to a character or body passing through. 0 = rigid. Tall grass ~0.8, a bush ~0.6, a tree ~0.05.'>
+            <Slider min={0} max={1} step={0.01} value={v.interactBend!} onChange={x => onChange({ interactBend: x })} />
+          </PropertyRow>
+          {(v.interactBend ?? 0) > 0 && (
+            <PropertyRow label='Recovery' divider={false} hint='Seconds to spring back once it has passed. Grass ~1.5, a stiff bush ~1.'>
+              <Slider min={0.1} max={10} step={0.1} value={v.interactRecovery ?? 1} onChange={x => onChange({ interactRecovery: x })} />
+            </PropertyRow>
+          )}
+        </PropertyTable>
+      </Section>
+    </DocScope>
+  );
+}
+
 export interface MaterialFieldsProps extends SectionProps {
   /** Drawn as the Textures section, between Properties and Cutout. */
   textures?: ReactNode;
@@ -165,13 +192,14 @@ export interface MaterialFieldsProps extends SectionProps {
   tintsTexture?: boolean;
 }
 
-/** A PBR material's whole panel: Properties, Textures, Cutout, Wind. */
+/** A PBR material's whole panel: Properties, Textures, Cutout, Wind, Interaction. */
 export function MaterialFields({ value, onChange, textures, mask, tintsTexture }: MaterialFieldsProps) {
   return (<>
     <PbrPropertiesSection value={value} onChange={onChange} tintsTexture={tintsTexture} />
     {textures && <DocScope page={DOC_PAGE}><Section title='Textures'>{textures}</Section></DocScope>}
     <CutoutSection value={value} onChange={onChange} mask={mask} />
     <WindSection value={value} onChange={onChange} />
+    <InteractionSection value={value} onChange={onChange} />
   </>);
 }
 

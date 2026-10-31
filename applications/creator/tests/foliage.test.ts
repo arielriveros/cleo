@@ -315,6 +315,26 @@ describe('Foliage materials', () => {
     }
   });
 
+  it('links Interaction to the kind parameters and exports it in extras.cleo', async () => {
+    // Grass and bushes give way to what walks through them; a tree barely does.
+    expect(doc('grass').grass.interactBend).toBeGreaterThan(0.5);
+    expect(doc('bush').bush.interactBend).toBeGreaterThan(0.3);
+    expect(doc('tree').tree.interactBend).toBeLessThan(0.1);
+    let d = applyMaterialPatch(doc('grass'), 'grass', { interactBend: 0.7, interactRecovery: 2.5 });
+    expect([d.grass.interactBend, d.grass.interactRecovery]).toEqual([0.7, 2.5]);
+    expect(materialValues(d, 'grass').interactRecovery).toBe(2.5);
+    expect(normaliseFoliage({ kind: 'grass', grass: { interactBend: 5, interactRecovery: -1 } as any }).grass)
+      .toMatchObject({ interactBend: 1, interactRecovery: 0.1 });
+    const files = await encodeFoliage(buildFoliage(d));
+    const parsed = await new GLTFLoader().parseDescriptorsFromFiles([new File([files.glbs[0] as BlobPart], 'grass_LOD0.glb')], false);
+    expect(parsed.materials.find(mt => mt.name === 'Grass')!.interaction).toEqual({ interactBend: 0.7, interactRecovery: 2.5 });
+    // A rigid plant writes nothing: the engine's default is rigid.
+    d = applyMaterialPatch(doc('bush'), 'leaves', { interactBend: 0 });
+    const rigid = await encodeFoliage(buildFoliage(d));
+    const bush = await new GLTFLoader().parseDescriptorsFromFiles([new File([rigid.glbs[0] as BlobPart], 'bush_LOD0.glb')], false);
+    expect(bush.materials.every(mt => mt.interaction === undefined)).toBe(true);
+  });
+
   it('survives a stored document with junk overrides', () => {
     const d = normaliseFoliage({ kind: 'grass', grass: { materials: { grass: { metallic: 9, baseColor: 'red', bogus: 1 }, rock: { metallic: 0.5 } } } as any });
     expect(d.grass.materials).toEqual({ grass: { metallic: 1 } });

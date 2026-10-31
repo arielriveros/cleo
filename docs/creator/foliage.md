@@ -60,6 +60,7 @@ which. None of it reaches the export.
 | **Strength** | How hard: multiplies every material's lean. |
 | **Gust size** | The size of a gust, in metres. |
 | **Gust speed** | How fast gusts travel. |
+| **Walk-through** | Someone walks back and forth through the preview, so you can see how the plant gives way and springs back: the materials' **Interaction**. Draws the asset as a foliage layer too, with or without wind. |
 
 The presets below (Calm to Storm) set strength and gusts as the engine's wind presets do.
 
@@ -263,13 +264,16 @@ stems. Edited in the **Materials** tab, under Bark.
 
 Every material the asset carries -- Bark and Leaves (or Needles) on a tree or bush, Blades and Clump card
 on grass, Rock on a rock -- edited with the Editor's own material sections: **Properties**,
-**Textures**, **Cutout** and **Wind** (see [the material editor](../editor/models-and-materials.md#the-material-editor)).
+**Textures**, **Cutout**, **Wind** and **Interaction** (see [the material editor](../editor/models-and-materials.md#the-material-editor)).
 What is set here is written into the `.glb` files, so the model arrives in the Editor looking the same.
 
 Roughness, translucency (its colour and blend too: back-lit leaves and blades glow yellow-green by default, the
 autumn maple orange; the glow shows looking through the leaves toward the sun, so put the preview's sun
 low behind the plant to see it) and the wind are the generator's own settings: a preset sets them, and a bush's
-bark and leaves share one wind strength and stiffness, because a plant bends as one. The rest --
+bark and leaves share one wind strength and stiffness, because a plant bends as one. So does
+**Interaction** -- how far the plant gives way to a character or a rolling body passing through, and how
+many seconds it takes to stand up again: grass bends most (0.8, 1.5 s), a bush less (0.6, 1 s), a tree
+hardly at all. Turn on [Walk-through](#wind) to watch it. The rest --
 a tint over the texture, metallic, emission, the cutout threshold, whether the bark rides the wind
 rigidly or flutters with the leaves -- is kept per material; **Reset** at the top returns a material to
 what the generator chose.

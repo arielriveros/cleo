@@ -1,4 +1,5 @@
 import { CleoEngine } from "../engine";
+import type { FoliageInteractor } from "../../graphics/foliageInteraction";
 import { Texture } from "../../graphics/texture";
 import { TextureManager } from "../../graphics/systems/textureManager";
 import { Node } from "./nodes/node";
@@ -1132,6 +1133,23 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._particleSystems;
+    }
+
+    /**
+     * Extra things that push foliage aside (graphics/foliageInteraction.ts), beyond the characters, moving
+     * bodies and radial force fields the renderer finds on its own: a script's sword sweep, a tool's
+     * preview walker. Keyed by whatever the caller removes it with.
+     */
+    public readonly foliageInteractors = new Map<object, FoliageInteractor>();
+
+    /** Push foliage aside from `interactor` until removed. `key` defaults to the interactor itself. */
+    public addFoliageInteractor(interactor: FoliageInteractor, key: object = interactor): object {
+        this.foliageInteractors.set(key, interactor);
+        return key;
+    }
+
+    public removeFoliageInteractor(key: object): void {
+        this.foliageInteractors.delete(key);
     }
 
     /** Every force field in the scene, which particle emitters with the Force Fields module respond to. */

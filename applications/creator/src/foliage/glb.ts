@@ -11,6 +11,7 @@
 //     read it too;
 //   - `emissiveFactor` + `KHR_materials_emissive_strength` for emission above 1;
 //   - `extras.cleo.wind`, the engine's foliage wind response, which glTF has no field for.
+//   - `extras.cleo.interaction`, how far it gives way to characters and bodies moving through it.
 
 import type { PartBuffers } from './mesh';
 
@@ -36,6 +37,8 @@ export interface GlbMaterial {
   /** Multiplies `emissive` (KHR_materials_emissive_strength). */
   emissiveIntensity?: number;
   wind?: { windStrength: number; windStiffness: number; windRole: 'plant' | 'leaves'; windFlutter: number };
+  /** How the plant gives way to what moves through it; written only when it bends at all. */
+  interaction?: { interactBend: number; interactRecovery: number };
 }
 
 export interface GlbMesh { name: string; buffers: PartBuffers; material: number }
@@ -137,6 +140,7 @@ export function writeGlb(meshes: readonly GlbMesh[], materials: readonly GlbMate
     if (Object.keys(extensions).length) out.extensions = extensions;
     const cleo: Record<string, unknown> = {};
     if (m.wind) cleo.wind = m.wind;
+    if (m.interaction && m.interaction.interactBend > 0) cleo.interaction = m.interaction;
     if (m.translucencyTint && m.translucencyTint[3] > 0 && m.translucency) cleo.translucencyTint = m.translucencyTint;
     if (Object.keys(cleo).length) out.extras = { cleo };
     return out;

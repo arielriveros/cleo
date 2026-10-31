@@ -843,6 +843,8 @@ function creatorMaterial({ spec, manifest, dir }, key, m) {
     ...(m.translucency ? { translucency: m.translucency } : {}),
     // The colour back-lit leaves and blades glow in (Material translucencyTint), as the Creator set it.
     ...(m.translucency && m.translucencyTint?.[3] ? { translucencyTint: m.translucencyTint } : {}),
+    // How the plant gives way to the knight and to what rolls through it (Material interactBend/Recovery).
+    ...(m.interaction?.interactBend ? m.interaction : {}),
     ...(m.metallic ? { metallic: m.metallic } : {}),
     ...(m.emissive ? { emissiveFactor: m.emissive, emissiveIntensity: m.emissiveIntensity ?? 1 } : {}),
   }))

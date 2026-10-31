@@ -19,6 +19,10 @@ struct InstancedTransform {
     u_windResponse: vec4<f32>,
     u_windShape: vec4<f32>,
     u_windCamera: vec4<f32>,
+    // Foliage interaction (interactLean): x = stamps, y = bend, z = recovery (s), w = plant radius; and
+    // the stamps themselves, two vec4s each (graphics/foliageInteraction.ts).
+    u_interact: vec4<f32>,
+    u_interactStamps: array<vec4<f32>, 32>,
     // Foliage LOD crossfade, per instance. Band: x..y fade-in ramp, z..w fade-out ramp (metres from
     // the camera; an empty ramp means no fade on that side). Camera: xyz = position, w = mode (0 off,
     // 1 dithered dissolve, 2 shrink — grass). Frame: x = dither phase.
@@ -69,7 +73,8 @@ fn vs_main(
 #if CLEO_WIND
     let wind = WindParams(u_transform.u_windGlobal, u_transform.u_windTime, u_transform.u_windResponse,
                           u_transform.u_windShape, u_transform.u_windCamera);
-    out.fragPos = windDisplace(out.fragPos, position, out.normal, model, u_transform.u_windTime.x, wind);
+    let push = interactLean(model[3].xyz, u_transform.u_windTime.x, u_transform.u_interact, u_transform.u_interactStamps);
+    out.fragPos = windDisplace(out.fragPos, position, out.normal, model, u_transform.u_windTime.x, wind, push);
 #endif
     cameraHoleVarying(&out, u_transform.u_camHole, u_transform.u_camHolePivot, u_transform.u_lodFrame.x);
     // From fragPos, which IS model * position unless the wind moved it.

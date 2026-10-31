@@ -198,6 +198,7 @@ import {
 } from '../terrain/foliage';
 import type { FoliageBatch, FoliageLayer, FoliageBand } from '../terrain/foliage';
 import { FoliageGpuCuller, type GpuCullBucket, type GpuFoliageSegment } from './foliageGpuCulling';
+import { FoliageInteraction, gatherFoliageInteractors } from './foliageInteraction';
 
 // The context now lives in its own leaf module (see glContext.ts); re-exported here so every existing
 // `import { gl } from './renderer'` keeps working.
@@ -2589,6 +2590,9 @@ export class Renderer {
         // Kept for per-draw lookups (forward light-probe selection) that don't receive the scene.
         this._currentScene = scene;
         this._advanceWindTime();
+        // What is pushing foliage aside this frame (characters, moving bodies, blasts): stamps for the
+        // instanced foliage programs, aged against the same clock as the wind.
+        this._foliageInteraction.update(gatherFoliageInteractors(scene), this._windTime, this._activeCamera.position);
 
         // Everything from here to the sky bake runs BEFORE `_statsT0`, so none of it is inside the
         // `Render (CPU)` figure the HUD shows — it lands in "Unattributed" instead. That exclusion is
@@ -4733,6 +4737,8 @@ export class Renderer {
     /** Last frame's `_windTime`, for the motion vectors. */
     private _windTimePrev: number = 0;
     private _windClock: number = -1;
+    /** This frame's foliage interaction stamps (graphics/foliageInteraction.ts). */
+    private readonly _foliageInteraction = new FoliageInteraction();
     /** A layer prototype's [base height, plant height] in object space, keyed on its first model. */
     private readonly _windShapes = new WeakMap<Model, [number, number, number]>();
 
@@ -4745,22 +4751,32 @@ export class Renderer {
     }
 
     /**
-     * How `layer` answers the scene's wind, or null when it does not sway: no (visible) WindNode, or no
-     * material of the prototype with a `windStrength`.
+     * How `layer` answers the scene's wind and what moves through it, or null when it does neither: no
+     * visible WindNode (or no material with a `windStrength`), and nothing pushing it (no stamps, or no
+     * material with an `interactBend`). A layer that only interacts still takes the wind programs, with
+     * the wind's strength at 0.
      *
      * Per LAYER, never per sub-model. A tree's bark and needles are separate models, and they stay
      * attached only if they bend by exactly the same function — so the strongest material speaks for
      * the whole prototype, and the bend is measured against the whole prototype's height.
      */
     private _foliageWind(scene: Scene, layer: FoliageLayer):
-        { lean: number; stiffness: number; minY: number; height: number; radius: number; fadeEnd: number } | null {
+        { lean: number; stiffness: number; minY: number; height: number; radius: number; fadeEnd: number;
+          bend: number; recovery: number } | null {
         const node = scene.wind;
-        if (!node || !node.visible || !(node.strength > 0)) return null;
+        const windOn = !!node && node.visible && node.strength > 0;
+        const pushed = this._foliageInteraction.count > 0;
+        if (!windOn && !pushed) return null;
         const models = layer.kind === 'billboard' ? [layer.model] : layer.levels[0]?.models ?? [];
         if (models.length === 0) return null;
-        let lean = 0, stiffness = 1, flutters = false;
+        let lean = 0, stiffness = 1, flutters = false, bend = 0, recovery = 1;
         for (const model of models)
             for (const material of model.materials) {
+                const give = Number(material.properties.get('interactBend') ?? 0);
+                if (give > bend) {
+                    bend = give;
+                    recovery = Number(material.properties.get('interactRecovery') ?? 1) || 1;
+                }
                 const strength = Number(material.properties.get('windStrength') ?? 0);
                 if (strength > lean) {
                     lean = strength;
@@ -4770,7 +4786,9 @@ export class Renderer {
                     flutters = true;
             }
         // Leaves that flutter on a plant that does not lean still move: the trunk simply stays put.
-        if (!(lean > 0) && !flutters) return null;
+        if (!windOn) { lean = 0; flutters = false; }
+        if (!pushed) bend = 0;
+        if (!(lean > 0) && !flutters && !(bend > 0)) return null;
         let shape = this._windShapes.get(models[0]);
         if (!shape) {
             let minY = Infinity, maxY = -Infinity, radius = 0;
@@ -4786,7 +4804,9 @@ export class Renderer {
             shape = Number.isFinite(minY) && maxY > minY ? [minY, maxY - minY, radius] : [0, 1, 0];
             this._windShapes.set(models[0], shape);
         }
-        return { lean, stiffness, minY: shape[0], height: shape[1], radius: shape[2], fadeEnd: node.fadeEnd };
+        // Interaction alone sways only as far as stamps are made (foliageInteraction INTERACT_RANGE).
+        const fadeEnd = windOn ? Math.max(node!.fadeEnd, pushed ? 45 : 0) : 45;
+        return { lean, stiffness, minY: shape[0], height: shape[1], radius: shape[2], fadeEnd, bend, recovery };
     }
 
     private readonly _windVec: number[][] = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
@@ -4795,26 +4815,33 @@ export class Renderer {
      * The vertex-stage wind block of the program just bound; see WindParams in foliageWind.wgsl. Per
      * MODEL: the bend is the layer's, but whether these surfaces add leaf motion is their material's.
      */
-    private _setWindUniforms(scene: Scene, w: { lean: number; stiffness: number; minY: number; height: number; radius: number },
+    private _setWindUniforms(scene: Scene, w: { lean: number; stiffness: number; minY: number; height: number; radius: number;
+                                                fadeEnd: number; bend: number; recovery: number },
                              material: Material): void {
-        const node = scene.wind!;
-        const [dx, dz] = node.directionXZ;
+        const node = scene.wind;
+        const windOn = !!node && node.visible && node.strength > 0;
+        const [dx, dz] = windOn ? node!.directionXZ : [1, 0];
         const cam = this._activeCamera.position;
         const [g, t, r, sh, c] = this._windVec;
-        g[0] = dx; g[1] = dz; g[2] = node.strength; g[3] = node.gustScale;
-        t[0] = this._windTime; t[1] = this._windTimePrev; t[2] = node.gustSpeed; t[3] = node.fadeEnd;
+        g[0] = dx; g[1] = dz; g[2] = windOn ? node!.strength : 0; g[3] = windOn ? node!.gustScale : 18;
+        t[0] = this._windTime; t[1] = this._windTimePrev; t[2] = windOn ? node!.gustSpeed : 4; t[3] = w.fadeEnd;
         r[0] = w.lean; r[1] = w.stiffness;
         const leaves = material.properties.get('windRole') === 'leaves';
         r[2] = leaves ? Math.max(0, Number(material.properties.get('windFlutter') ?? 0.5) || 0) : 0;
         r[3] = leaves ? 1 : 0;
-        sh[0] = w.minY; sh[1] = w.height; sh[2] = node.fadeStart; sh[3] = w.radius;
+        sh[0] = w.minY; sh[1] = w.height; sh[2] = windOn ? Math.min(node!.fadeStart, w.fadeEnd - 1) : w.fadeEnd - 10; sh[3] = w.radius;
         c[0] = cam[0]; c[1] = cam[1]; c[2] = cam[2];
         this._shaderManager.setUniform('u_windGlobal', g);
         this._shaderManager.setUniform('u_windTime', t);
         this._shaderManager.setUniform('u_windResponse', r);
         this._shaderManager.setUniform('u_windShape', sh);
         this._shaderManager.setUniform('u_windCamera', c);
+        const ix = this._interactVec;
+        ix[0] = w.bend > 0 ? this._foliageInteraction.count : 0; ix[1] = w.bend; ix[2] = w.recovery; ix[3] = w.radius;
+        this._shaderManager.setUniform('u_interact', ix);
+        this._shaderManager.setUniform('u_interactStamps', this._foliageInteraction.stamps);
     }
+    private readonly _interactVec: number[] = [0, 0, 0, 0];
 
     /** Each foliage layer's per-bucket fade bands, as `_prepareFoliage` last computed them. */
     private readonly _foliageBands = new WeakMap<FoliageLayer, (FoliageBand | null)[]>();

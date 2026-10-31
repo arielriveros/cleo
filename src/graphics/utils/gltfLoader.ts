@@ -1,5 +1,5 @@
 import { Geometry } from "../../core/geometry";
-import { Material, applyWind, type WindConfig } from "../material";
+import { Material, applyInteraction, applyWind, type InteractionConfig, type WindConfig } from "../material";
 import { TextureManager } from "../systems/textureManager";
 import { AnimatedModel, Skin, Animation, AnimationSampler, AnimationChannel } from "../../animation/animatedModel";
 import { bakeClipCubicSplines } from "../../animation/samplerBake";
@@ -97,7 +97,7 @@ interface GLTFMaterial {
      * Engine settings glTF has no field for, written by Cleo's own exporters (the Creator's Foliage
      * mode). Read back so a generated plant arrives already swaying.
      */
-    extras?: { cleo?: { wind?: WindConfig; translucencyTint?: number[] } };
+    extras?: { cleo?: { wind?: WindConfig; translucencyTint?: number[]; interaction?: InteractionConfig } };
 }
 
 /** `KHR_materials_diffuse_transmission`'s factor, clamped; 0 when the material does not use it. */
@@ -117,6 +117,12 @@ function translucencyTintOf(m: GLTFMaterial): number[] | undefined {
     if (Array.isArray(c) && c.length === 3 && c.every((x: unknown) => typeof x === 'number' && Number.isFinite(x)) && c.some((x: number) => x !== 1))
         return [c[0], c[1], c[2], 1];
     return undefined;
+}
+
+/** The Cleo interaction block in a material's extras (`interactBend`, `interactRecovery`), or undefined. */
+function interactionOf(m: GLTFMaterial): InteractionConfig | undefined {
+    const i = m.extras?.cleo?.interaction;
+    return i && typeof i === 'object' ? i : undefined;
 }
 
 /** The Cleo wind block in a material's extras, or undefined. Never trusted beyond being an object. */
@@ -271,6 +277,8 @@ export interface GltfMaterialDescriptor {
     translucencyTint?: number[];
     /** `extras.cleo.wind`, when a Cleo exporter wrote one. */
     wind?: WindConfig;
+    /** `extras.cleo.interaction`, when a Cleo exporter wrote one. */
+    interaction?: InteractionConfig;
     textures: {
         baseColorTexture?: number;
         metallicRoughnessTexture?: number;
@@ -745,6 +753,7 @@ export class GLTFLoader {
             translucency: translucencyOf(gltfMaterial),
             translucencyTint: translucencyTintOf(gltfMaterial),
             wind: windOf(gltfMaterial),
+            interaction: interactionOf(gltfMaterial),
             textures,
             name: gltfMaterial.name,
         };
@@ -1119,6 +1128,8 @@ export class GLTFLoader {
         });
         const wind = windOf(gltfMaterial);
         if (wind) applyWind(material, wind);
+        const interaction = interactionOf(gltfMaterial);
+        if (interaction) applyInteraction(material, interaction);
         this.materialCache.set(materialIndex, material);
         return material;
     }

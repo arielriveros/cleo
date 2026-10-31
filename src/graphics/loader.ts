@@ -1,5 +1,5 @@
 import { Geometry } from "../core/geometry";
-import { Material, applyWind } from "./material";
+import { Material, applyInteraction, applyWind } from "./material";
 import { OutputMaterial, AssimpParseResult, AssimpTextureSlots, loadAssimpModel, parseMaterial, convertToGltf2FromFiles, parseAssimpFiles } from "./utils/assimpLoader";
 import { GLTFLoader, ImportTransform, GltfParseResult } from "./utils/gltfLoader";
 // A cycle (model.ts imports Loader), but benign: Model is only referenced inside method bodies.
@@ -344,6 +344,7 @@ export class Loader {
                 transparent: d.transparent,
             });
             if (d.wind) applyWind(material, d.wind);
+            if (d.interaction) applyInteraction(material, d.interaction);
             return material;
         });
 

@@ -1,6 +1,6 @@
 import {
   DirectionalLight, FoliageLayer, Geometry, GLTFLoader, LandscapeNode, Loader, LodGroupNode, Material, Model, ModelNode, Node,
-  SkyAtmosphereNode, SkyLightNode, Terrain, TextureManager, WindNode, type CleoEngine, type LightNode, type Scene,
+  SkyAtmosphereNode, SkyLightNode, Terrain, TextureManager, WindNode, type CleoEngine, type FoliageInteractor, type LightNode, type Scene,
 } from 'cleo';
 import { vec3 } from 'gl-matrix';
 import { aimSun } from '../../fx/ui/fxPreview';
@@ -45,13 +45,24 @@ export interface StageSettings {
   windStrength: number;
   windGustScale: number;
   windGustSpeed: number;
+  /**
+   * Someone walking back and forth through the asset, so the preview shows how it gives way and springs
+   * back (the material's Interaction). Draws the asset as terrain foliage, like Wind.
+   */
+  walk: boolean;
 }
 
 export const DEFAULT_STAGE: StageSettings = {
   grid: true, ground: true, sky: true, patch: true, wireframe: false,
   sunYaw: 35, sunElevation: 40, sunLux: 60000, ambientLux: 6000,
   wind: true, windPreset: 'breezy', windDirection: 30, windStrength: 1, windGustScale: 18, windGustSpeed: 4,
+  walk: false,
 };
+
+/** The walker: a person-sized capsule at walking pace. */
+const WALK_SPEED = 1.3;
+const WALK_RADIUS = 0.4;
+const WALK_HEIGHT = 1.7;
 
 /**
  * The host terrain sits at the stage's origin: a 2 m patch whose chunks never draw and cast nothing. Not
@@ -74,6 +85,8 @@ export class FoliageStage {
   private copies: [number, number, number][] = [];
   private assetName = '';
   private windOn = false;
+  private walkOn = false;
+  private walker: { node: ModelNode; interactor: FoliageInteractor; raf: number } | null = null;
   private materials: Material[] = [];
   private textureIds: string[] = [];
   private distances: number[] = [0];
@@ -139,14 +152,62 @@ export class FoliageStage {
     }
     const before = this.mode();
     this.windOn = s.wind;
+    this.walkOn = s.walk;
     this.wireframe = s.wireframe;
     if (this.mode() !== before) this.present();
     this.setWireframe(s.wireframe);
+    if (s.walk && !this.walker) this.startWalk();
+    else if (!s.walk && this.walker) this.stopWalk();
+  }
+
+  /**
+   * A capsule walking a straight line through the asset and back, registered as a foliage interactor --
+   * the same push a character makes in a level -- so the plants part around it and spring back behind.
+   */
+  private startWalk(): void {
+    const body = new ModelNode(PREFIX + 'walker', new Model(Geometry.Capsule(16, WALK_RADIUS * 0.6, WALK_HEIGHT - WALK_RADIUS * 1.2),
+                                                             Material.PBR({ baseColor: [0.55, 0.5, 0.45], roughness: 0.7 })));
+    this.world.addNode(body);
+    const interactor: FoliageInteractor = { position: [0, 0, 0], radius: WALK_RADIUS, strength: 1, velocity: [0, 0, 0] };
+    this.world.addFoliageInteractor(interactor);
+    const walker = { node: body, interactor, raf: 0 };
+    const t0 = performance.now();
+    const step = () => {
+      // A triangle wave across the patch: out to one side, back to the other, at a steady pace.
+      const span = this.walkSpan();
+      const d = ((performance.now() - t0) / 1000) * WALK_SPEED;
+      const leg = Math.floor(d / (2 * span));
+      const u = d - leg * 2 * span;
+      const dir = leg % 2 === 0 ? 1 : -1;
+      const x = dir * (u - span);
+      const z = 0.25;
+      interactor.position = [x, 0, z];
+      interactor.velocity = [dir * WALK_SPEED, 0, 0];
+      body.setPosition([x, WALK_HEIGHT / 2, z]);
+      walker.raf = requestAnimationFrame(step);
+    };
+    this.walker = walker;
+    step();
+  }
+
+  private stopWalk(): void {
+    const w = this.walker;
+    if (!w) return;
+    cancelAnimationFrame(w.raf);
+    this.world.removeFoliageInteractor(w.interactor);
+    this.world.removeNode(w.node);
+    this.walker = null;
+  }
+
+  /** Half the walk: past the farthest copy, so the walker starts and ends clear of the plants. */
+  private walkSpan(): number {
+    const far = this.copies.reduce((m, o) => Math.max(m, Math.abs(o[0])), 0);
+    return Math.max(2.5, far + 1.5);
   }
 
   /** How the asset is drawn: as swaying foliage, or as still nodes (see the header). */
   mode(): 'foliage' | 'nodes' {
-    return this.windOn && !this.wireframe ? 'foliage' : 'nodes';
+    return (this.windOn || this.walkOn) && !this.wireframe ? 'foliage' : 'nodes';
   }
 
   /**
@@ -311,6 +372,7 @@ export class FoliageStage {
 
   dispose(): void {
     this.generation++;
+    this.stopWalk();
     this.clear();
     const world = this.world;
     for (const n of [this.ground, this.sky, this.skyLight, this.wind]) if (n) world.removeNode(n);

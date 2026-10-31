@@ -280,6 +280,11 @@ const WIND_SPECS: GenericParamSpec[] = [
   { key: 'windGustSpeed', label: 'Gust speed', kind: 'float', min: 0, max: 20, step: 0.1, unit: 'm/s', when: p => !!p.wind },
 ];
 
+/** The preview's walker: something moving through the asset, to show its Interaction. */
+const WALK_SPECS: GenericParamSpec[] = [
+  { key: 'walk', label: 'Walk-through', kind: 'bool', hint: 'Walk someone back and forth through the preview, to see how the plant gives way and springs back (the material’s Interaction).' },
+];
+
 /** Left dock: presets, seeds, saved variants, the preview's sun and its wind. */
 export function VariantsPanel() {
   const { doc, setDoc, variants, setVariants, seedHistory, stage, setStage } = useFoliage();
@@ -331,6 +336,8 @@ export function VariantsPanel() {
       </Collapsable>
       <Collapsable title='Wind' persistKey='cleo_creator_foliage_variants_wind'>
         <ParamForm schema={WIND_SPECS} values={stage as unknown as Record<string, unknown>}
+                   onChange={patch => setStage({ ...stage, ...(patch as Partial<StageSettings>) })} />
+        <ParamForm schema={WALK_SPECS} values={stage as unknown as Record<string, unknown>}
                    onChange={patch => setStage({ ...stage, ...(patch as Partial<StageSettings>) })} />
         {stage.wind && (
           <div className='flex flex-col pt-1'>

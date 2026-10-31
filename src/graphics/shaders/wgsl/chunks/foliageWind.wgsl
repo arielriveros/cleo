@@ -20,6 +20,12 @@
 // Both vanish at the trunk axis and at the root, so the needles move on their branches without leaving
 // them: the trunk sways like a tree while the canopy moves like grass.
 //
+// INTERACTION rides the same bend: what moves through the foliage (graphics/foliageInteraction.ts) arrives
+// as a few stamps -- spheres with a direction, a strength and a birth time -- and `interactLean` leans each
+// plant away from the stamps around it, folded a little along the way they were going. The bend dies out
+// as exp(-age / recovery), the LAYER's material recovery, so the grass springs back after the walker has
+// gone. It joins the wind lean before the arc renormalisation, so a parted blade arcs over like a gusted one.
+//
 // Included by chunks/instancedVertex.wgsl and chunks/instancedDepthVertex.wgsl, so a plant and its
 // shadow sway together.
 
@@ -87,6 +93,42 @@ fn windLean(origin: vec3<f32>, t: f32, w: WindParams) -> f32 {
     return lean * windFade(origin, w);
 }
 
+/** How many stamps `u_interactStamps` carries (graphics/foliageInteraction.ts MAX_INTERACT_STAMPS). */
+const INTERACT_STAMPS: i32 = 16;
+
+/**
+ * The lean (xz, in units of the plant's height) pushed into a plant at `origin` by the interaction stamps.
+ * `params`: x = stamps in use, y = the layer's bend (Material interactBend, 0 rigid), z = its recovery
+ * time (s), w = the plant's radius (a stamp reaches the plant's edge, not just its stem). `stamps` holds
+ * two vec4s per stamp: [x, y, z, radius] and [dirX, dirZ, strength, birth time].
+ */
+fn interactLean(origin: vec3<f32>, t: f32, params: vec4<f32>, stamps: array<vec4<f32>, 32>) -> vec2<f32> {
+    if (params.y <= 0.0 || params.x < 0.5) { return vec2<f32>(0.0); }
+    var lean = vec2<f32>(0.0);
+    let n = min(i32(params.x + 0.5), INTERACT_STAMPS);
+    for (var i = 0; i < INTERACT_STAMPS; i++) {
+        if (i >= n) { break; }
+        let a = stamps[2 * i];
+        let b = stamps[2 * i + 1];
+        let reach = a.w + params.w;
+        let d = origin.xz - a.xz;
+        let dist = length(d);
+        // Out of reach across the ground, or far above or below it (a body flying over the meadow).
+        if (dist >= reach || abs(a.y - origin.y) > a.w + 2.5) { continue; }
+        let fade = exp(-max(t - b.w, 0.0) / max(params.z, 0.05));
+        let w = 1.0 - smoothstep(0.0, reach, dist);
+        // Away from the centre, folded a little along the way it was moving.
+        let away = select(vec2<f32>(b.x, b.y), d / max(dist, 1e-4), dist > 1e-3);
+        let along = vec2<f32>(b.x, b.y);
+        let dir = away * 0.75 + along * 0.35;
+        let dl = length(dir);
+        lean += select(vec2<f32>(0.0), dir / dl, dl > 1e-4) * (w * b.z * fade);
+    }
+    // Never bent past lying down, however many stamps overlap.
+    let l = length(lean);
+    return select(lean, lean * (1.3 / l), l > 1.3) * params.y;
+}
+
 /** A smoothed triangle wave in [-1, 1] with period 1: the cheap stand-in for sin (GPU Gems 3 ch.16). */
 fn windWave(x: f32) -> f32 {
     let f = abs(fract(x + 0.5) * 2.0 - 1.0);
@@ -125,11 +167,12 @@ fn windLeafOffset(obj: vec3<f32>, normalW: vec3<f32>, origin: vec3<f32>, h: f32,
 }
 
 /**
- * `world` (a vertex already through its instance matrix) displaced by the wind at time `t`. `obj` is
- * the object-space vertex, `normalW` its unit world normal and `model` its instance matrix.
+ * `world` (a vertex already through its instance matrix) displaced by the wind at time `t`, and by `push`,
+ * the interaction lean from `interactLean`. `obj` is the object-space vertex, `normalW` its unit world
+ * normal and `model` its instance matrix.
  */
 fn windDisplace(world: vec3<f32>, obj: vec3<f32>, normalW: vec3<f32>, model: mat4x4<f32>, t: f32,
-                w: WindParams) -> vec3<f32> {
+                w: WindParams, push: vec2<f32>) -> vec3<f32> {
     let origin = model[3].xyz;
     let base = (model * vec4<f32>(0.0, w.shape.x, 0.0, 1.0)).xyz;
     let heightW = max(w.shape.y, 1e-4) * length(model[1].xyz);
@@ -139,8 +182,8 @@ fn windDisplace(world: vec3<f32>, obj: vec3<f32>, normalW: vec3<f32>, model: mat
     let rel = world - base;
     let len = length(rel);
     var bent = rel;
-    bent.x += w.dirStrength.x * bend;
-    bent.z += w.dirStrength.y * bend;
+    bent.x += w.dirStrength.x * bend + push.x * h * h * heightW;
+    bent.z += w.dirStrength.y * bend + push.y * h * h * heightW;
     // Back to the original length: the tip sweeps an arc instead of the plant growing as it leans.
     let bl = length(bent);
     let trunk = base + select(rel, bent * (len / bl), bl > 1e-5);

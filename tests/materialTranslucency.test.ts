@@ -80,10 +80,18 @@ describe('glTF KHR_materials_diffuse_transmission', () => {
         expect(d.doubleSided).toBe(true);
     });
 
+    it('reads the Cleo interaction extras into the descriptor', async () => {
+        const parsed = await new GLTFLoader().parseDescriptorsFromFiles([glb({
+            extras: { cleo: { interaction: { interactBend: 0.6, interactRecovery: 2 } } },
+        })], false);
+        expect(parsed.materials[0].interaction).toEqual({ interactBend: 0.6, interactRecovery: 2 });
+    });
+
     it('reads 0 when the extension is absent', async () => {
         const parsed = await new GLTFLoader().parseDescriptorsFromFiles([glb({})], false);
         expect(parsed.materials[0].translucency).toBe(0);
         expect(parsed.materials[0].wind).toBeUndefined();
+        expect(parsed.materials[0].interaction).toBeUndefined();
     });
 
     it('wind extras apply through applyWind', () => {
