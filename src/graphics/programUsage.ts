@@ -161,12 +161,15 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
         case 'landscape':
             for (const n of ['terrain', 'terrainGeometry', 'foliageBillboardInstanced', 'foliageImpostorInstanced', 'blinn_phongGeometryInstanced',
                              'pbrGeometryInstanced', 'pbrGeometryInstancedLean', 'shadowMapInstanced', 'shadowMapInstancedCutout',
-                             'shadowMapImpostorInstanced']) add(n);
+                             'shadowMapImpostorInstanced',
+                             // Foliage materials on its foliage layers (Material.Foliage): with or without wind,
+                             // they draw through the foliage variants (variation, weather, interaction).
+                             'pbrGeometryInstancedFoliage', 'pbrGeometryInstancedLeanFoliage',
+                             'shadowMapInstancedFoliage', 'shadowMapInstancedCutoutFoliage']) add(n);
             break;
-        // The wind variants of the foliage programs: built only for a game that has a Wind node.
+        // The far cards' wind: built only for a game that has a Wind node.
         case 'wind':
-            for (const n of ['pbrGeometryInstancedWind', 'pbrGeometryInstancedLeanWind', 'blinn_phongGeometryInstancedWind', 'foliageBillboardInstancedWind',
-                             'shadowMapInstancedWind', 'shadowMapInstancedCutoutWind']) add(n);
+            for (const n of ['foliageBillboardInstancedWind', 'shadowMapInstancedCutoutWind']) add(n);
             break;
         case 'tilemap': add('tilemap'); break;
         case 'decal': add('decalSurface'); add('decalResolve'); add('decalColor'); break;
@@ -229,8 +232,8 @@ export function usageFromRenderSettings(settings: Partial<RenderSettings> | null
     if (blur) add('motionBlurTileMax', 'motionBlurNeighborMax', 'motionBlur');
     // The foliage depth prepass is opt-in and off by default, so only a game that turns it on ships it.
     if (s.foliagePrepass === true)
-        add('pbrGeometryInstancedPrepass', 'pbrGeometryInstancedPrepassWind',
-            'pbrGeometryInstancedLeanOpaque', 'pbrGeometryInstancedLeanOpaqueWind');
+        add('pbrGeometryInstancedPrepass', 'pbrGeometryInstancedPrepassFoliage',
+            'pbrGeometryInstancedLeanOpaque', 'pbrGeometryInstancedLeanOpaqueFoliage');
 }
 
 /** Logical names the velocity pass needs only when TAA or motion blur runs. */

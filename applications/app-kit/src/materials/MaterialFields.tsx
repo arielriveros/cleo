@@ -40,6 +40,17 @@ export interface MaterialFieldValues {
   /** How far a plant gives way to what moves through it (0 = rigid), and how long it takes to spring back. */
   interactBend?: number;
   interactRecovery?: number;
+  /** Foliage materials only: per-plant variation, weather response and gust effects (Material.Foliage). */
+  variationHue?: number;
+  variationValue?: number;
+  variationDry?: number;
+  dryColor?: Rgb;
+  wetResponse?: number;
+  snowCover?: number;
+  weightDroop?: number;
+  rippleSheen?: number;
+  leafFlip?: number;
+  undersideColor?: Rgb;
 }
 
 export type MaterialPatch = Partial<MaterialFieldValues>;
@@ -183,6 +194,95 @@ export function InteractionSection({ value: v, onChange }: SectionProps) {
   );
 }
 
+/** Variation: a field of one asset varies plant by plant. Foliage materials only. */
+export function VariationSection({ value: v, onChange }: SectionProps) {
+  if (!has(v.variationHue)) return null;
+  const dry = (v.variationDry ?? 0) > 0;
+  return (
+    <DocScope page={DOC_PAGE}>
+      <Section title='Variation'>
+        <PropertyTable columns={['40%', '60%']}>
+          <PropertyRow label='Hue' hint='How far each plant&#39;s hue turns either way, as a fraction of the colour wheel. ~0.03 is subtle.'>
+            <Slider min={0} max={0.5} step={0.005} value={v.variationHue!} onChange={x => onChange({ variationHue: x })} />
+          </PropertyRow>
+          <PropertyRow label='Brightness' hint='How much lighter or darker a plant can be than the next.'>
+            <Slider min={0} max={1} step={0.01} value={v.variationValue ?? 0} onChange={x => onChange({ variationValue: x })} />
+          </PropertyRow>
+          <PropertyRow label='Dry share' divider={dry} hint='The share of plants that turn toward the dry colour.'>
+            <Slider min={0} max={1} step={0.01} value={v.variationDry ?? 0} onChange={x => onChange({ variationDry: x })} />
+          </PropertyRow>
+          {dry && (
+            <PropertyRow label='Dry colour' divider={false}>
+              <ColorInput color={hex(v.dryColor)} onChange={c => onChange({ dryColor: c })} />
+            </PropertyRow>
+          )}
+        </PropertyTable>
+      </Section>
+    </DocScope>
+  );
+}
+
+/** Weather: how the plant answers the scene's Weather (rain, snow). Foliage materials only. */
+export function WeatherSection({ value: v, onChange }: SectionProps) {
+  if (!has(v.wetResponse)) return null;
+  return (
+    <DocScope page={DOC_PAGE}>
+      <Section title='Weather'>
+        <PropertyTable columns={['40%', '60%']}>
+          <PropertyRow label='Wet response' hint='How much rain darkens the plant and makes it glossy.'>
+            <Slider min={0} max={1} step={0.01} value={v.wetResponse!} onChange={x => onChange({ wetResponse: x })} />
+          </PropertyRow>
+          <PropertyRow label='Snow cover' hint='How much snow settles on its up-facing surfaces. Needles hold it well, grass blades less.'>
+            <Slider min={0} max={1} step={0.01} value={v.snowCover ?? 0} onChange={x => onChange({ snowCover: x })} />
+          </PropertyRow>
+          <PropertyRow label='Weight droop' divider={false} hint='How far rain or snow weighs it down, as a fraction of its height.'>
+            <Slider min={0} max={1} step={0.01} value={v.weightDroop ?? 0} onChange={x => onChange({ weightDroop: x })} />
+          </PropertyRow>
+        </PropertyTable>
+      </Section>
+    </DocScope>
+  );
+}
+
+/** Gusts: what the wind's gusts do to the surface. Foliage materials only. */
+export function GustSection({ value: v, onChange }: SectionProps) {
+  if (!has(v.rippleSheen)) return null;
+  const leaves = v.windRole === 'leaves';
+  const flips = leaves && (v.leafFlip ?? 0) > 0;
+  return (
+    <DocScope page={DOC_PAGE}>
+      <Section title='Gusts'>
+        <PropertyTable columns={['40%', '60%']}>
+          <PropertyRow label='Ripple sheen' divider={leaves} hint='How much a passing gust brightens the plant: the waves that roll across a meadow.'>
+            <Slider min={0} max={1} step={0.01} value={v.rippleSheen!} onChange={x => onChange({ rippleSheen: x })} />
+          </PropertyRow>
+          {leaves && (
+            <PropertyRow label='Leaf flip' divider={flips} hint='How much gusts turn the leaves over to show their paler undersides.'>
+              <Slider min={0} max={1} step={0.01} value={v.leafFlip ?? 0} onChange={x => onChange({ leafFlip: x })} />
+            </PropertyRow>
+          )}
+          {flips && (
+            <PropertyRow label='Underside colour' divider={false}>
+              <ColorInput color={hex(v.undersideColor)} onChange={c => onChange({ undersideColor: c })} />
+            </PropertyRow>
+          )}
+        </PropertyTable>
+      </Section>
+    </DocScope>
+  );
+}
+
+/** Everything only a foliage material has: Wind, Interaction, Variation, Weather, Gusts. */
+export function FoliageSections({ value, onChange }: SectionProps) {
+  return (<>
+    <WindSection value={value} onChange={onChange} />
+    <InteractionSection value={value} onChange={onChange} />
+    <VariationSection value={value} onChange={onChange} />
+    <WeatherSection value={value} onChange={onChange} />
+    <GustSection value={value} onChange={onChange} />
+  </>);
+}
+
 export interface MaterialFieldsProps extends SectionProps {
   /** Drawn as the Textures section, between Properties and Cutout. */
   textures?: ReactNode;
@@ -192,14 +292,13 @@ export interface MaterialFieldsProps extends SectionProps {
   tintsTexture?: boolean;
 }
 
-/** A PBR material's whole panel: Properties, Textures, Cutout, Wind, Interaction. */
+/** A PBR material's whole panel: Properties, Textures, Cutout, and a foliage material's own sections. */
 export function MaterialFields({ value, onChange, textures, mask, tintsTexture }: MaterialFieldsProps) {
   return (<>
     <PbrPropertiesSection value={value} onChange={onChange} tintsTexture={tintsTexture} />
     {textures && <DocScope page={DOC_PAGE}><Section title='Textures'>{textures}</Section></DocScope>}
     <CutoutSection value={value} onChange={onChange} mask={mask} />
-    <WindSection value={value} onChange={onChange} />
-    <InteractionSection value={value} onChange={onChange} />
+    <FoliageSections value={value} onChange={onChange} />
   </>);
 }
 

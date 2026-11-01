@@ -74,6 +74,7 @@ export type { VolumetricCloudsPreset } from "./core/scene/nodes/volumetricClouds
 // One-click presets: a table per node / render section, all applied through `applyPreset`.
 export { applyPreset, definePresets, type Preset } from "./core/presets";
 export { WIND_PRESETS, type WindPreset } from "./core/scene/nodes/windPresets";
+export { WEATHER_PRESETS, type WeatherPreset } from "./core/scene/nodes/weatherPresets";
 export { WATER_VOLUME_PRESETS, type WaterVolumePreset } from "./core/scene/nodes/waterVolumePresets";
 export { FORCE_FIELD_PRESETS, type ForceFieldPreset } from "./core/scene/nodes/forceFieldPresets";
 export { SKY_ATMOSPHERE_PRESETS, type SkyAtmospherePreset } from "./core/scene/nodes/skyAtmospherePresets";
@@ -98,6 +99,7 @@ export { SkyAtmosphereNode } from "./core/scene/nodes/skyAtmosphereNode";
 export type { SkyAtmosphereOptions } from "./core/scene/nodes/skyAtmosphereNode";
 export { SkyLightNode } from "./core/scene/nodes/skyLightNode";
 export { WindNode, WIND_DEFAULTS, type WindOptions } from "./core/scene/nodes/windNode";
+export { WeatherNode, WEATHER_DEFAULTS, type WeatherOptions } from "./core/scene/nodes/weatherNode";
 export { OccluderNode } from "./core/scene/nodes/occluderNode";
 export { OcclusionBuffer } from "./graphics/occlusion/occlusionBuffer";
 export { TerrainOccluder } from "./graphics/occlusion/terrainOccluder";
@@ -247,7 +249,7 @@ export type { NavPath, RepathPolicy, RepathState } from "./ai/navPath";
 export { HistoryManager } from "./core/history";
 export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";
-export { applyUvMapping, uvConfigOf, applyWind, windConfigOf, applyInteraction, interactionConfigOf, type InteractionConfig, emissiveExposureWeightOf, setEmissiveExposureWeight, type WindConfig } from "./graphics/material";
+export { applyUvMapping, uvConfigOf, applyWind, windConfigOf, applyInteraction, interactionConfigOf, type InteractionConfig, applyFoliageSurface, foliageSurfaceOf, foliageSurfaceJson, FOLIAGE_STARTER, isFoliageMaterial, setFoliage, type FoliageSurfaceConfig, emissiveExposureWeightOf, setEmissiveExposureWeight, type WindConfig } from "./graphics/material";
 export type { UvConfig, UvProjection, UvSpace } from "./graphics/material";
 export { Material, TerrainMaterial, CustomMaterial, FOLIAGE_DENSITY_UNIT, DEFAULT_FOLIAGE_DENSITY, FOLIAGE_ORIENTATIONS, migrateFoliageRule, foliageRuleKey, newTerrainSlotId, legacyHeightBlendToRule, setTerrainSurfaceFrom, shallowCloneTerrainMaterial, terrainFoliageRules, allTerrainFoliageRules, type TerrainFoliageScope } from "./graphics/material";
 export type { TerrainBaseType, TerrainFoliageRule, TerrainMaterialSlot, FoliageCollision, FoliageOrientation, CustomBaseType, CustomRenderMode, CustomUniform, CustomUniformType } from "./graphics/material";

@@ -42,22 +42,24 @@ export function hasMaterial(doc: FoliageDoc, key: MaterialKey): boolean {
   return MATERIAL_KEYS[doc.kind].includes(key);
 }
 
-type Linked = 'roughness' | 'translucency' | 'translucencyColor' | 'translucencyBlend' | 'windStrength' | 'windStiffness' | 'windFlutter' | 'interactBend' | 'interactRecovery';
+type Linked = 'roughness' | 'translucency' | 'translucencyColor' | 'translucencyBlend' | 'windStrength' | 'windStiffness' | 'windFlutter' | 'interactBend' | 'interactRecovery'
+  | 'variationHue' | 'variationValue' | 'variationDry' | 'dryColor' | 'wetResponse' | 'snowCover' | 'weightDroop' | 'rippleSheen'
+  | 'leafFlip' | 'undersideColor';
 
 /** Fields linked to a kind's parameters: material field -> parameter key. */
 const LINKS: Record<FoliageKind, Partial<Record<MaterialKey, Partial<Record<Linked, string>>>>> = {
   grass: {
-    grass: { roughness: 'roughness', translucency: 'translucency', translucencyColor: 'translucencyColor', translucencyBlend: 'translucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter', interactBend: 'interactBend', interactRecovery: 'interactRecovery' },
-    grassCard: { roughness: 'roughness', translucency: 'translucency', translucencyColor: 'translucencyColor', translucencyBlend: 'translucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter', interactBend: 'interactBend', interactRecovery: 'interactRecovery' },
+    grass: { roughness: 'roughness', translucency: 'translucency', translucencyColor: 'translucencyColor', translucencyBlend: 'translucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter', interactBend: 'interactBend', interactRecovery: 'interactRecovery', variationHue: 'variationHue', variationValue: 'variationValue', variationDry: 'variationDry', wetResponse: 'wetResponse', snowCover: 'snowCover', weightDroop: 'weightDroop', rippleSheen: 'rippleSheen', dryColor: 'dryColor' },
+    grassCard: { roughness: 'roughness', translucency: 'translucency', translucencyColor: 'translucencyColor', translucencyBlend: 'translucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter', interactBend: 'interactBend', interactRecovery: 'interactRecovery', variationHue: 'variationHue', variationValue: 'variationValue', variationDry: 'variationDry', wetResponse: 'wetResponse', snowCover: 'snowCover', weightDroop: 'weightDroop', rippleSheen: 'rippleSheen', dryColor: 'dryColor' },
   },
   rock: { rock: { roughness: 'roughness' } },
   tree: {
-    bark: { roughness: 'barkRoughness', windStrength: 'windStrength', windStiffness: 'windStiffness', interactBend: 'interactBend', interactRecovery: 'interactRecovery' },
-    leaves: { roughness: 'leafRoughness', translucency: 'leafTranslucency', translucencyColor: 'leafTranslucencyColor', translucencyBlend: 'leafTranslucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter', interactBend: 'interactBend', interactRecovery: 'interactRecovery' },
+    bark: { roughness: 'barkRoughness', windStrength: 'windStrength', windStiffness: 'windStiffness', interactBend: 'interactBend', interactRecovery: 'interactRecovery', variationHue: 'variationHue', variationValue: 'variationValue', variationDry: 'variationDry', wetResponse: 'wetResponse', snowCover: 'snowCover', weightDroop: 'weightDroop', rippleSheen: 'rippleSheen' },
+    leaves: { roughness: 'leafRoughness', translucency: 'leafTranslucency', translucencyColor: 'leafTranslucencyColor', translucencyBlend: 'leafTranslucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter', interactBend: 'interactBend', interactRecovery: 'interactRecovery', variationHue: 'variationHue', variationValue: 'variationValue', variationDry: 'variationDry', wetResponse: 'wetResponse', snowCover: 'snowCover', weightDroop: 'weightDroop', rippleSheen: 'rippleSheen', leafFlip: 'leafFlip', undersideColor: 'leafUndersideColor' },
   },
   bush: {
-    bark: { roughness: 'barkRoughness', windStrength: 'windStrength', windStiffness: 'windStiffness', interactBend: 'interactBend', interactRecovery: 'interactRecovery' },
-    leaves: { roughness: 'leafRoughness', translucency: 'leafTranslucency', translucencyColor: 'leafTranslucencyColor', translucencyBlend: 'leafTranslucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter', interactBend: 'interactBend', interactRecovery: 'interactRecovery' },
+    bark: { roughness: 'barkRoughness', windStrength: 'windStrength', windStiffness: 'windStiffness', interactBend: 'interactBend', interactRecovery: 'interactRecovery', variationHue: 'variationHue', variationValue: 'variationValue', variationDry: 'variationDry', wetResponse: 'wetResponse', snowCover: 'snowCover', weightDroop: 'weightDroop', rippleSheen: 'rippleSheen' },
+    leaves: { roughness: 'leafRoughness', translucency: 'leafTranslucency', translucencyColor: 'leafTranslucencyColor', translucencyBlend: 'leafTranslucencyBlend', windStrength: 'windStrength', windStiffness: 'windStiffness', windFlutter: 'windFlutter', interactBend: 'interactBend', interactRecovery: 'interactRecovery', variationHue: 'variationHue', variationValue: 'variationValue', variationDry: 'variationDry', wetResponse: 'wetResponse', snowCover: 'snowCover', weightDroop: 'weightDroop', rippleSheen: 'rippleSheen', leafFlip: 'leafFlip', undersideColor: 'leafUndersideColor' },
   },
 };
 
@@ -92,6 +94,16 @@ export function materialValues(doc: FoliageDoc, key: MaterialKey): MaterialField
     windFlutter: linked('windFlutter') ?? (role === 'leaves' ? Number(p.windFlutter ?? 0.5) : undefined),
     interactBend: linked('interactBend'),
     interactRecovery: linked('interactRecovery'),
+    variationHue: linked('variationHue'),
+    variationValue: linked('variationValue'),
+    variationDry: linked('variationDry'),
+    dryColor: links.dryColor ? (p[links.dryColor] as number[]).slice(0, 3) as Rgb : undefined,
+    wetResponse: linked('wetResponse'),
+    snowCover: linked('snowCover'),
+    weightDroop: linked('weightDroop'),
+    rippleSheen: linked('rippleSheen'),
+    leafFlip: linked('leafFlip'),
+    undersideColor: links.undersideColor ? (p[links.undersideColor] as number[]).slice(0, 3) as Rgb : undefined,
   };
 }
 
@@ -104,7 +116,7 @@ export function applyMaterialPatch(doc: FoliageDoc, key: MaterialKey, patch: Mat
     if (value === undefined) continue;
     const link = links[field as Linked] ?? (field === 'windFlutter' ? 'windFlutter' : undefined);
     // A colour parameter is an Rgba; the editor hands back an Rgb.
-    if (link && field === 'translucencyColor') p[link] = [...(value as number[]).slice(0, 3), 1];
+    if (link && (field === 'translucencyColor' || field === 'dryColor' || field === 'undersideColor')) p[link] = [...(value as number[]).slice(0, 3), 1];
     else if (link) p[link] = value;
     else if (field === 'baseColor' || field === 'emissive') o[field] = value as Rgb;
     else if (field === 'metallic' || field === 'emissiveIntensity' || field === 'alphaCutoff') o[field] = value as number;

@@ -130,7 +130,6 @@ describe('leaf wiring', () => {
 
     it('the role and flutter are set per MODEL, the bend per LAYER', () => {
         expect(renderer).toContain("this._setWindUniforms(scene, wind!, model.material)");
-        expect(renderer).toContain("this._setWindUniforms(scene, wind, model.material)");
         expect(renderer).toContain("const leaves = material.properties.get('windRole') === 'leaves';");
     });
 
@@ -188,17 +187,20 @@ async function compile(file: string, defines: object) {
 }
 
 describe('wind variants', () => {
-    const FILES = ['geometryPBRInstanced.wgsl', 'geometryBlinnPhongInstanced.wgsl', 'geometryFoliageBillboard.wgsl',
-                   'shadowMapInstanced.wgsl', 'shadowMapInstancedCutout.wgsl'];
+    // The variant each program sways through: FOLIAGE materials' (wind, interaction, weather) on the mesh
+    // programs, the far cards' wind on the billboard. Blinn-Phong has none: foliage is a PBR material.
+    const FILES: [string, string][] = [['geometryPBRInstanced.wgsl', 'foliage'], ['geometryFoliageBillboard.wgsl', 'wind'],
+                   ['shadowMapInstanced.wgsl', 'foliage'], ['shadowMapInstancedCutout.wgsl', 'foliage'], ['shadowMapInstancedCutout.wgsl', 'wind']];
 
-    it('every instanced foliage program (colour AND shadow) declares a wind variant', () => {
-        for (const f of FILES)
-            expect((listVariants(read(f)) as { tag: string }[]).map(v => v.tag), f).toContain('wind');
+    it('every instanced foliage program (colour AND shadow) declares its swaying variant', () => {
+        for (const [f, tag] of FILES)
+            expect((listVariants(read(f)) as { tag: string }[]).map(v => v.tag), f).toContain(tag);
+        expect((listVariants(read('geometryBlinnPhongInstanced.wgsl')) as { tag: string }[]).map(v => v.tag)).not.toContain('wind');
     });
 
-    it('only the wind variant reads the wind time; the base program has it compiled out', async () => {
-        for (const f of FILES) {
-            const variant = (listVariants(read(f)) as { tag: string; defines: object }[]).find(v => v.tag === 'wind')!;
+    it('only the swaying variant reads the wind time; the base program has it compiled out', async () => {
+        for (const [f, tag] of FILES) {
+            const variant = (listVariants(read(f)) as { tag: string; defines: object }[]).find(v => v.tag === tag)!;
             const windy = await compile(f, variant.defines);
             const still = await compile(f, {});
             expect(windy.vertex, f).toMatch(/u_windTime/);
@@ -221,7 +223,8 @@ describe('renderer wiring', () => {
     const renderer = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
 
     it('never sways the impostor bucket, and only buckets that start inside the fade', () => {
-        expect(renderer).toContain('const windy = !!wind && slot < billboardBucket && layer.levels[slot].distance < wind.fadeEnd;');
+        expect(renderer).toContain('const real = !!wind && slot < billboardBucket;');
+        expect(renderer).toContain('const windy = real && layer.levels[slot].distance < wind!.fadeEnd;');
     });
 
     it('sways only the nearest shadow cascade', () => {

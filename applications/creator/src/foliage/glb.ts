@@ -12,6 +12,8 @@
 //   - `emissiveFactor` + `KHR_materials_emissive_strength` for emission above 1;
 //   - `extras.cleo.wind`, the engine's foliage wind response, which glTF has no field for.
 //   - `extras.cleo.interaction`, how far it gives way to characters and bodies moving through it.
+//   - `extras.cleo.materialType: 'foliage'` and `extras.cleo.foliage`: a FOLIAGE material (variation,
+//     weather, gusts), which the engine imports as Material.Foliage; any other reader sees plain PBR.
 
 import type { PartBuffers } from './mesh';
 
@@ -39,6 +41,12 @@ export interface GlbMaterial {
   wind?: { windStrength: number; windStiffness: number; windRole: 'plant' | 'leaves'; windFlutter: number };
   /** How the plant gives way to what moves through it; written only when it bends at all. */
   interaction?: { interactBend: number; interactRecovery: number };
+  /** Present: a foliage material, with these surface settings (engine FoliageSurfaceConfig). */
+  foliage?: {
+    variationHue?: number; variationValue?: number; variationDry?: number; dryColor?: [number, number, number];
+    wetResponse?: number; snowCover?: number; weightDroop?: number; rippleSheen?: number;
+    leafFlip?: number; undersideColor?: [number, number, number];
+  };
 }
 
 export interface GlbMesh { name: string; buffers: PartBuffers; material: number }
@@ -141,6 +149,7 @@ export function writeGlb(meshes: readonly GlbMesh[], materials: readonly GlbMate
     const cleo: Record<string, unknown> = {};
     if (m.wind) cleo.wind = m.wind;
     if (m.interaction && m.interaction.interactBend > 0) cleo.interaction = m.interaction;
+    if (m.foliage) { cleo.materialType = 'foliage'; cleo.foliage = m.foliage; }
     if (m.translucencyTint && m.translucencyTint[3] > 0 && m.translucency) cleo.translucencyTint = m.translucencyTint;
     if (Object.keys(cleo).length) out.extras = { cleo };
     return out;

@@ -271,7 +271,7 @@ export function FoliageWorkspace() {
       readout={build && <>
         {KIND_LABELS[build.summary.kind]} · {build.summary.levels.map((l, i) => `LOD${i} ${l.triangles.toLocaleString()}`).join(' · ')} tris
         {active ? ` · showing ${active.culled ? 'nothing (culled)' : `LOD ${active.level}`}` : ''}
-        {stage.wind && !stage.wireframe ? ' · swaying' : ' · still'} · {build.ms.toFixed(0)} ms
+        {stage.wireframe ? ' · still' : stage.wind ? ' · swaying' : ' · as foliage'} · {build.ms.toFixed(0)} ms
       </>}
       visibility={[
         { key: 'grid', label: 'Grid', checked: stage.grid },

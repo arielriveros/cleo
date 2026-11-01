@@ -1,7 +1,6 @@
 // Deferred geometry pass for Blinn-Phong materials, instanced.
 
-// Build-time variant: the foliage wind (chunks/foliageWind.wgsl) compiled in.
-// @variant wind CLEO_WIND=1
+// No foliage variant: foliage is a PBR material (Material.Foliage), so a Blinn-Phong layer never sways.
 
 #include "./chunks/instancedVertex.wgsl"
 #include "./chunks/blinnPhongGBuffer.wgsl"

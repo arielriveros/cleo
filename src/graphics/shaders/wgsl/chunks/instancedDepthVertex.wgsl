@@ -29,6 +29,8 @@ struct InstancedDepthUniforms {
     // Foliage interaction, as in chunks/instancedVertex.wgsl: the shadow parts with the grass.
     u_interact: vec4<f32>,
     u_interactStamps: array<vec4<f32>, 32>,
+    // As in chunks/instancedVertex.wgsl: x = the weather's droop.
+    u_foliageDroop: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> u_depth: InstancedDepthUniforms;
 
@@ -53,9 +55,15 @@ fn vs_main(
     let wind = WindParams(u_depth.u_windGlobal, u_depth.u_windTime, u_depth.u_windResponse,
                           u_depth.u_windShape, u_depth.u_windCamera);
     let nw = (instanceModel * vec4<f32>(normal, 0.0)).xyz;
+#if CLEO_FOLIAGE
     let push = interactLean(instanceModel[3].xyz, u_depth.u_windTime.x, u_depth.u_interact, u_depth.u_interactStamps);
+    let droop = u_depth.u_foliageDroop.x;
+#else
+    let push = vec2<f32>(0.0);
+    let droop = 0.0;
+#endif
     world = windDisplace(world, position, nw * inverseSqrt(max(dot(nw, nw), 1e-12)), instanceModel,
-                         u_depth.u_windTime.x, wind, push);
+                         u_depth.u_windTime.x, wind, push, droop);
 #endif
     out.position = u_depth.u_lightSpace * vec4<f32>(world, 1.0);
     return out;

@@ -162,7 +162,7 @@ import BRDFProgram from './shaders/wgsl/brdf.wgsl'
 import { GLState } from './systems/glState';
 import { Texture } from './texture';
 import { CubeFramebuffer } from './cubeFramebuffer';
-import { Material, CustomMaterial } from './material';
+import { Material, CustomMaterial, isFoliageMaterial } from './material';
 import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources, usedResources } from './systems/customShaders';
 import { TexturePacker, DILATED_BASE_SLOT } from './systems/texturePacker';
 import { ParticleRenderer, PARTICLE_PROGRAMS, setParticleSimVariants, type ParticleSimFrame, type ParticleDrawFrame } from './particles/particleRenderer';
@@ -182,7 +182,7 @@ import type { PipelineRecipe } from './shaderOptimizer';
 import { OcclusionBuffer } from './occlusion/occlusionBuffer';
 import { TerrainOccluder, type OccluderGrid } from './occlusion/terrainOccluder';
 import type { Terrain } from '../terrain/terrain';
-import { physicalFor, splitPhysical, logicalNamesFor, usesParallax, opaqueEligible, EXTRA_LOGICAL_NAMES, LAZY_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
+import { physicalFor, splitPhysical, logicalNamesFor, usesParallax, opaqueEligible, foliageProgramFor, EXTRA_LOGICAL_NAMES, LAZY_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
 import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
 import { cpuProfiler } from './cpuProfiler';
 import { ssilTraceShape } from './ssilSettings';
@@ -793,6 +793,17 @@ interface FoliageCellGrid {
     reach: number;
     start: Int32Array;
     items: Int32Array;
+}
+
+/** How a foliage layer moves and looks this frame (Renderer._foliageWind). */
+interface FoliageState {
+    /** Whether its foliage materials draw through the foliage variants (false: a billboard's wind alone). */
+    foliage: boolean;
+    lean: number; stiffness: number; minY: number; height: number; radius: number; fadeEnd: number;
+    bend: number; recovery: number;
+    /** The weather's weight, as a fraction of the plant's height. */
+    droop: number;
+    wet: number; snow: number;
 }
 
 export class Renderer {
@@ -4424,7 +4435,10 @@ export class Renderer {
                 for (const cell of visible) hash = mixNumber(hash, cell.index);
                 for (const model of models)
                     hash = mixNumber(mixNumber(hash, this._objectId(model.mesh)), model.mesh.activeIndexCount);
-                if (cascade === 0 && this._foliageWind(scene, layer)) hash = mixNumber(hash, this._windTime);
+                if (cascade === 0) {
+                    const w = this._foliageWind(scene, layer);
+                    if (w) hash = mixNumber(mixNumber(hash, this._windTime), w.droop);
+                }
             }
         }
         this._impostorModels[0] = undefined!;
@@ -4693,7 +4707,11 @@ export class Renderer {
                     // A cut-out caster culls nothing — its shape is in the texture and its card is
                     // two-sided; a solid prop keeps the FRONT-face culling the rest of the shadow pass
                     // uses to push acne out of view.
-                    const program = (cutout ? 'shadowMapInstancedCutout' : 'shadowMapInstanced') + (wind ? 'Wind' : '');
+                    // A foliage material moves its shadow (wind, interaction, droop); a billboard's card sways
+                    // with its rule's wind; anything else on the layer casts still.
+                    const moves = !!wind && (billboard ? !wind.foliage : wind.foliage && isFoliageMaterial(model.material));
+                    const program = (cutout ? 'shadowMapInstancedCutout' : 'shadowMapInstanced')
+                        + (!moves ? '' : billboard ? 'Wind' : 'Foliage');
                     const pipeline = this._pipelineFor(
                         program,
                         cutout ? ShadowMapInstancedCutoutProgram : ShadowMapInstancedProgram, {
@@ -4705,7 +4723,7 @@ export class Renderer {
                     });
                     pass.setPipeline(pipeline);
                     this._shaderManager.setUniform('u_lightSpace', this._clipProjection(lightSpace));
-                    if (wind) this._setWindUniforms(scene, wind, model.material);
+                    if (moves) this._setWindUniforms(scene, wind!, model.material);
                     if (cutout) {
                         this._shaderManager.setUniform('u_cutoff', cut!.cutoff);
                         this._shaderManager.setUniform('u_useRed', cut!.useRed);
@@ -4751,27 +4769,31 @@ export class Renderer {
     }
 
     /**
-     * How `layer` answers the scene's wind and what moves through it, or null when it does neither: no
-     * visible WindNode (or no material with a `windStrength`), and nothing pushing it (no stamps, or no
-     * material with an `interactBend`). A layer that only interacts still takes the wind programs, with
-     * the wind's strength at 0.
+     * How `layer` moves and looks this frame, or null when nothing of it runs the foliage path.
+     *
+     * A MESH layer answers only through its FOLIAGE materials (Material.Foliage): with none it is null, and
+     * no foliage code runs for it at all. With any, `foliage` is true and its foliage models draw through
+     * the foliage variants -- wind (0 without a WindNode), interaction (0 without stamps), the weather's
+     * droop, and the surface's variation and weather. A BILLBOARD layer (far cards, a foliage rule's own
+     * wind) takes the wind-only variant, and only while it actually sways.
      *
      * Per LAYER, never per sub-model. A tree's bark and needles are separate models, and they stay
      * attached only if they bend by exactly the same function — so the strongest material speaks for
      * the whole prototype, and the bend is measured against the whole prototype's height.
      */
-    private _foliageWind(scene: Scene, layer: FoliageLayer):
-        { lean: number; stiffness: number; minY: number; height: number; radius: number; fadeEnd: number;
-          bend: number; recovery: number } | null {
+    private _foliageWind(scene: Scene, layer: FoliageLayer): FoliageState | null {
         const node = scene.wind;
         const windOn = !!node && node.visible && node.strength > 0;
         const pushed = this._foliageInteraction.count > 0;
-        if (!windOn && !pushed) return null;
-        const models = layer.kind === 'billboard' ? [layer.model] : layer.levels[0]?.models ?? [];
+        const billboard = layer.kind === 'billboard';
+        const models = billboard ? [layer.model] : layer.levels[0]?.models ?? [];
         if (models.length === 0) return null;
-        let lean = 0, stiffness = 1, flutters = false, bend = 0, recovery = 1;
+        let lean = 0, stiffness = 1, flutters = false, bend = 0, recovery = 1, droop = 0, foliage = false;
         for (const model of models)
             for (const material of model.materials) {
+                // A billboard's card carries its rule's wind; a mesh layer listens to foliage materials only.
+                if (!billboard && !isFoliageMaterial(material)) continue;
+                foliage = foliage || !billboard;
                 const give = Number(material.properties.get('interactBend') ?? 0);
                 if (give > bend) {
                     bend = give;
@@ -4784,11 +4806,17 @@ export class Renderer {
                 }
                 if (material.properties.get('windRole') === 'leaves' && Number(material.properties.get('windFlutter') ?? 0.5) > 0)
                     flutters = true;
+                droop = Math.max(droop, Number(material.properties.get('weightDroop') ?? 0) || 0);
             }
         // Leaves that flutter on a plant that does not lean still move: the trunk simply stays put.
         if (!windOn) { lean = 0; flutters = false; }
         if (!pushed) bend = 0;
-        if (!(lean > 0) && !flutters && !(bend > 0)) return null;
+        const weather = scene.weather;
+        const wet = weather && weather.visible ? weather.wetness : 0;
+        const snow = weather && weather.visible ? weather.snow : 0;
+        // Water weighs a plant down less than a load of snow does.
+        droop *= Math.max(wet * 0.4, snow);
+        if (!foliage && !(lean > 0) && !flutters) return null;
         let shape = this._windShapes.get(models[0]);
         if (!shape) {
             let minY = Infinity, maxY = -Infinity, radius = 0;
@@ -4800,13 +4828,15 @@ export class Renderer {
                 radius = Math.max(radius, Math.abs(box.min[0]), Math.abs(box.max[0]), Math.abs(box.min[2]), Math.abs(box.max[2]));
             }
             // A billboard card has no trunk: radius 0 tells the shader to weight its flutter by height alone.
-            if (layer.kind === 'billboard') radius = 0;
+            if (billboard) radius = 0;
             shape = Number.isFinite(minY) && maxY > minY ? [minY, maxY - minY, radius] : [0, 1, 0];
             this._windShapes.set(models[0], shape);
         }
-        // Interaction alone sways only as far as stamps are made (foliageInteraction INTERACT_RANGE).
+        // The motion fades by the wind's own distances; interaction alone, as far as stamps are made
+        // (foliageInteraction INTERACT_RANGE).
         const fadeEnd = windOn ? Math.max(node!.fadeEnd, pushed ? 45 : 0) : 45;
-        return { lean, stiffness, minY: shape[0], height: shape[1], radius: shape[2], fadeEnd, bend, recovery };
+        return { foliage, lean, stiffness, minY: shape[0], height: shape[1], radius: shape[2], fadeEnd, bend, recovery,
+                 droop, wet, snow };
     }
 
     private readonly _windVec: number[][] = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
@@ -4814,10 +4844,9 @@ export class Renderer {
     /**
      * The vertex-stage wind block of the program just bound; see WindParams in foliageWind.wgsl. Per
      * MODEL: the bend is the layer's, but whether these surfaces add leaf motion is their material's.
+     * A foliage program also gets the interaction stamps, the droop and (for the surface) the weather.
      */
-    private _setWindUniforms(scene: Scene, w: { lean: number; stiffness: number; minY: number; height: number; radius: number;
-                                                fadeEnd: number; bend: number; recovery: number },
-                             material: Material): void {
+    private _setWindUniforms(scene: Scene, w: FoliageState, material: Material): void {
         const node = scene.wind;
         const windOn = !!node && node.visible && node.strength > 0;
         const [dx, dz] = windOn ? node!.directionXZ : [1, 0];
@@ -4836,11 +4865,21 @@ export class Renderer {
         this._shaderManager.setUniform('u_windResponse', r);
         this._shaderManager.setUniform('u_windShape', sh);
         this._shaderManager.setUniform('u_windCamera', c);
+        if (!w.foliage) return;
         const ix = this._interactVec;
         ix[0] = w.bend > 0 ? this._foliageInteraction.count : 0; ix[1] = w.bend; ix[2] = w.recovery; ix[3] = w.radius;
         this._shaderManager.setUniform('u_interact', ix);
         this._shaderManager.setUniform('u_interactStamps', this._foliageInteraction.stamps);
+        this._droopVec[0] = w.droop;
+        this._shaderManager.setUniform('u_foliageDroop', this._droopVec);
     }
+    private readonly _droopVec: number[] = [0, 0, 0, 0];
+    /** The surface half of the weather (chunks/foliageSurface.wgsl), after the material block is written. */
+    private _setFoliageWeather(w: FoliageState): void {
+        this._weatherVec[0] = w.wet; this._weatherVec[1] = w.snow;
+        this._shaderManager.setUniform('u_material.foliageWeather', this._weatherVec);
+    }
+    private readonly _weatherVec: number[] = [0, 0, 0, 0];
     private readonly _interactVec: number[] = [0, 0, 0, 0];
 
     /** Each foliage layer's per-bucket fade bands, as `_prepareFoliage` last computed them. */
@@ -4964,10 +5003,10 @@ export class Renderer {
                     const cells = layer.buckets[slot];
                     const chunks = this._colourChunks(layer, slot);
                     if (!cells?.length || !chunks?.length) continue;
-                    const sway = !!wind && layer.levels[slot].distance < wind.fadeEnd;
                     for (const model of layer.levels[slot].models) {
                         if (!prepassed(model, slot)) continue;
-                        const shaderType = sway ? 'pbrGeometryInstancedPrepassWind' : 'pbrGeometryInstancedPrepass';
+                        const sway = !!wind?.foliage && isFoliageMaterial(model.material);
+                        const shaderType = sway ? 'pbrGeometryInstancedPrepassFoliage' : 'pbrGeometryInstancedPrepass';
                         this._shaderManager.bind(shaderType);
                         this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
                         this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
@@ -4981,6 +5020,7 @@ export class Renderer {
                         });
                         pass.setPipeline(pipeline);
                         this._applyMaterialProperties(model.material);
+                        if (sway) this._setFoliageWeather(wind!);
                         pass.setBindGroup(0, this._materialBindGroup(pipeline, model.material));
                         let all = true;
                         for (const batch of chunks) {
@@ -4999,13 +5039,18 @@ export class Renderer {
                     if (!chunks || chunks.length === 0) return;
                     frameStats.foliageCells += cells.length;
 
-                    // Wind only on real levels that start inside the fade: the impostor never sways, and a
-                    // level that begins past the fade end would compute a displacement of exactly zero.
-                    const windy = !!wind && slot < billboardBucket && layer.levels[slot].distance < wind.fadeEnd;
+                    // Real levels only: the impostor never sways. A billboard layer's cards sway with their rule's
+                    // wind while a level starts inside the fade (past it the displacement is exactly zero).
+                    const real = !!wind && slot < billboardBucket;
+                    const windy = real && layer.levels[slot].distance < wind!.fadeEnd;
                     for (const model of models) {
                         const parallax = !billboard && model.material.type === 'pbr' && usesParallax(model.materials);
-                        // A marching (POM) prop has no wind variant; it stays still rather than drop its relief.
-                        const sway = windy && !parallax;
+                        // FOLIAGE materials take the foliage variants at every real level: variation and weather
+                        // are part of how they look, not only motion, so they must not pop off with distance.
+                        // A marching (POM) foliage prop stays still and plain rather than drop its relief.
+                        const foliage = real && !billboard && wind!.foliage && isFoliageMaterial(model.material)
+                            && model.material.type === 'pbr' && !parallax;
+                        const sway = billboard ? windy && !wind!.foliage : foliage;
                         // A mesh-uv PBR prop takes the LEAN program: no projection charts, no parallax frame,
                         // no specular AA — the derivative work every foliage fragment paid for nothing.
                         const lean = !parallax && Renderer._meshUvOnly(model.materials);
@@ -5013,12 +5058,8 @@ export class Renderer {
                         // which is what lets this one keep early-Z and shade each pixel once.
                         const afterPrepass = !billboard && prepassed(model, slot)
                             && depthWritten.has(slot * 4096 + models.indexOf(model));
-                        const shaderType = billboard ? (sway ? 'foliageBillboardInstancedWind' : 'foliageBillboardInstanced')
-                            : model.material.type !== 'pbr' ? (sway ? 'blinn_phongGeometryInstancedWind' : 'blinn_phongGeometryInstanced')
-                            : parallax ? 'pbrGeometryInstancedPom'
-                            : afterPrepass ? (sway ? 'pbrGeometryInstancedLeanOpaqueWind' : 'pbrGeometryInstancedLeanOpaque')
-                            : lean ? (sway ? 'pbrGeometryInstancedLeanWind' : 'pbrGeometryInstancedLean')
-                            : sway ? 'pbrGeometryInstancedWind' : 'pbrGeometryInstanced';
+                        const shaderType = foliageProgramFor({ billboard, sway, foliage, parallax, afterPrepass, lean,
+                                                               pbr: model.material.type === 'pbr' });
                         const reflection = billboard ? GeometryFoliageBillboardProgram
                                                      : Renderer._GEOMETRY_PROGRAMS[shaderType];
                         this._shaderManager.bind(shaderType);
@@ -5047,6 +5088,7 @@ export class Renderer {
                                                                        [tex ?? this._fallbackTexture]));
                         } else {
                             this._applyMaterialProperties(model.material);
+                            if (foliage) this._setFoliageWeather(wind!);
                             pass.setBindGroup(0, this._materialBindGroup(pipeline, model.material));
                         }
 
@@ -5399,17 +5441,16 @@ export class Renderer {
         pbrGeometryPom: GeometryPBRProgram,
         pbrGeometrySkinnedPom: GeometryPBRSkinnedProgram,
         pbrGeometryInstancedPom: GeometryPBRInstancedProgram,
-        pbrGeometryInstancedWind: GeometryPBRInstancedProgram,
+        pbrGeometryInstancedFoliage: GeometryPBRInstancedProgram,
         pbrGeometryOpaque: GeometryPBRProgram,
         pbrGeometrySkinnedOpaque: GeometryPBRSkinnedProgram,
         pbrGeometryInstancedOpaque: GeometryPBRInstancedProgram,
         pbrGeometryInstancedLean: GeometryPBRInstancedProgram,
-        pbrGeometryInstancedLeanWind: GeometryPBRInstancedProgram,
+        pbrGeometryInstancedLeanFoliage: GeometryPBRInstancedProgram,
         pbrGeometryInstancedPrepass: GeometryPBRInstancedProgram,
-        pbrGeometryInstancedPrepassWind: GeometryPBRInstancedProgram,
+        pbrGeometryInstancedPrepassFoliage: GeometryPBRInstancedProgram,
         pbrGeometryInstancedLeanOpaque: GeometryPBRInstancedProgram,
-        pbrGeometryInstancedLeanOpaqueWind: GeometryPBRInstancedProgram,
-        blinn_phongGeometryInstancedWind: GeometryBlinnPhongInstancedProgram,
+        pbrGeometryInstancedLeanOpaqueFoliage: GeometryPBRInstancedProgram,
         terrainGeometry: GeometryTerrainProgram,
         basicGeometry: GeometryBasicProgram,
         basicGeometrySkinned: GeometryBasicSkinnedProgram,

@@ -17,7 +17,7 @@ import { useStableActions } from "@cleo/app-kit/utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
 import { resetScriptModules, addScriptModuleSources, nextFrame } from "cleo";
-import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
+import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, FOLIAGE_STARTER, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener, RenderSettings } from "cleo";
 import NullImage from '../images/null.png';
 import EventEmitter from "@cleo/app-kit/utils/eventEmitter";
@@ -264,6 +264,8 @@ const EngineContext = createContext<{
   editingTemplateVariant: { id: string; baseName: string; base: Template; diff: TemplateDiff } | null;
   templateRootId: string | null;
   enterMaterialEditor: (materialId?: string) => void;
+  /** A brand-new FOLIAGE material (Material.Foliage) in a material tab. */
+  enterFoliageMaterialEditor: () => void;
   createMaterialForNode: (node: Node, submesh?: number) => void;
   editingMaterialName: string | null;
   setActiveMaterialName: (name: string) => void;
@@ -652,6 +654,7 @@ const EngineContext = createContext<{
     editingTemplateVariant: null,
     templateRootId: null,
     enterMaterialEditor: () => {},
+    enterFoliageMaterialEditor: () => {},
     createMaterialForNode: () => {},
     editingMaterialName: null,
     setActiveMaterialName: () => {},
@@ -3829,7 +3832,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Build a material editor tab: a throwaway preview scene whose sphere carries the material to edit
   // (from `asset`, else a fresh PBR material for a brand-new one). Taking the asset object directly (not
   // an id) lets callers open a just-created asset without waiting for the `materials` state to commit.
-  const openMaterialTab = (asset: MaterialAsset | null, adoptTabId?: string) => {
+  const openMaterialTab = (asset: MaterialAsset | null, adoptTabId?: string, seed?: 'foliage') => {
     // Disarm dirty-tracking before building the preview scene: SCENE_CHANGED names no scene, so mark()
     // can only blame the ACTIVE tab. The tab-activate effect re-arms once the new tab is showing.
     dirtyArmedRef.current = false;
@@ -3843,7 +3846,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         if (t?.id && !TextureManager.Instance.getTexture(t.id)) TextureManager.Instance.addTextureFromBase64(t.data, t.config, t.id);
       }
     }
-    const material: Material = asset ? Material.parse(asset.material) : Material.PBR({});
+    // A new material is PBR, or a foliage material seeded with the starter values (sways, gives way, varies).
+    const material: Material = asset ? Material.parse(asset.material)
+      : seed === 'foliage' ? Material.Foliage({ roughness: 0.75, translucency: 0.4 }, { side: 'double' }, FOLIAGE_STARTER)
+      : Material.PBR({});
     const sphere = new ModelNode('preview', new Model(previewSphereGeometry(), material));
     scene.addNode(sphere);
     // On the shape last chosen for material previews. The node is the same either way — the tab saves
@@ -3859,7 +3865,13 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const tabId = adoptTabId ?? cryptoRandomId();
     tabRuntimeRef.current.set(tabId, { scene, rootId: sphere.id });
     // the activate effect swaps the engine scene + selects the sphere
-    commitTab({ id: tabId, kind: 'material', title: asset?.name ?? 'New Material', materialId: asset?.id ?? null }, adoptTabId);
+    commitTab({ id: tabId, kind: 'material', title: asset?.name ?? (seed === 'foliage' ? 'New Foliage Material' : 'New Material'),
+                materialId: asset?.id ?? null }, adoptTabId);
+  };
+
+  const enterFoliageMaterialEditor = () => {
+    if (!instanceRef.current) return;
+    openMaterialTab(null, undefined, 'foliage');
   };
 
   // Open (or focus) the editor for a library material, or a brand-new one when called with no id.
@@ -6826,7 +6838,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   const sessionActions = useStableActions({
     enterTemplateEditor, createTemplateVariant, revertVariantChanges, createVariantFromInstance, rebaseTemplateVariant,
-    enterMaterialEditor, createMaterialForNode, setActiveMaterialName,
+    enterMaterialEditor, enterFoliageMaterialEditor, createMaterialForNode, setActiveMaterialName,
     enterTerrainMaterialEditor, refreshTerrainMaterialPreview, setActiveTerrainMaterialName,
     setPreviewShape, previewElevationLegend,
     enterStateMachineEditor, commitAnimationStateMachine, registerAnimationApply, registerTilesetApply,
@@ -6927,6 +6939,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       editingTemplateVariant,
       templateRootId,
       enterMaterialEditor,
+      enterFoliageMaterialEditor,
       createMaterialForNode,
       editingMaterialName,
       setActiveMaterialName,

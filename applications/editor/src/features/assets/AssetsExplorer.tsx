@@ -51,7 +51,7 @@ export default function AssetsExplorer({ active = true }: { active?: boolean }) 
 
 function AssetsExplorerHost({ active }: { active: boolean }) {
   const {
-    enterMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor, createScriptModule, createTilesetFromImage, importAnimationFiles,
+    enterMaterialEditor, enterFoliageMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor, createScriptModule, createTilesetFromImage, importAnimationFiles,
     enterAiBrainEditor, enterParticleSystemEditor, addAnimController,
     importModelFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter, scriptAssets,
   } = useCleoEngine()
@@ -300,6 +300,7 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
   // a 30vh bottom bar has only ~130px for a full card row.
   const addItems: { label: string; icon: React.ReactNode; run: () => void; title: string }[] = [
     { label: 'Material', icon: <img src={iconFor('material')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterMaterialEditor(), title: 'Create a new material asset' },
+    { label: 'Foliage Material', icon: <img src={iconFor('material')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterFoliageMaterialEditor(), title: 'Create a new foliage material: PBR that sways in the wind, parts for what walks through, and answers the weather (on landscape foliage)' },
     { label: 'Landscape Material', icon: <img src={iconFor('terrainMaterial')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTerrainMaterialEditor(), title: 'Create a new landscape material asset: a surface for a landscape’s base or paint layers' },
     { label: 'Template', icon: <img src={iconFor('template')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTemplateEditor(), title: 'Author a new template in a dedicated empty scene' },
     { label: 'Script', icon: <img src={iconFor('script')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterScriptEditor(), title: 'Create a new class-based script asset' },

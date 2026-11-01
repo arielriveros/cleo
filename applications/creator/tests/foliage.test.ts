@@ -335,6 +335,23 @@ describe('Foliage materials', () => {
     expect(bush.materials.every(mt => mt.interaction === undefined)).toBe(true);
   });
 
+  it('exports plant materials as Foliage materials, with their surface settings; a rock stays PBR', async () => {
+    const tree = buildFoliage(doc('tree'));
+    const files = await encodeFoliage(tree);
+    const parsed = await new GLTFLoader().parseDescriptorsFromFiles([new File([files.glbs[0] as BlobPart], 'tree_LOD0.glb')], false);
+    const leaves = parsed.materials.find(mt => mt.name === 'Leaves')!;
+    expect(leaves.foliage).toMatchObject({ variationHue: doc('tree').tree.variationHue, leafFlip: doc('tree').tree.leafFlip, snowCover: doc('tree').tree.snowCover });
+    expect(parsed.materials.find(mt => mt.name === 'Bark')!.foliage?.leafFlip).toBeUndefined();
+    let g = applyMaterialPatch(doc('grass'), 'grass', { rippleSheen: 0.9, dryColor: [0.7, 0.6, 0.3] });
+    expect(g.grass.rippleSheen).toBe(0.9);
+    expect(materialValues(g, 'grass').dryColor).toEqual([0.7, 0.6, 0.3]);
+    const grass = await new GLTFLoader().parseDescriptorsFromFiles([new File([(await encodeFoliage(buildFoliage(g))).glbs[0] as BlobPart], 'g.glb')], false);
+    expect(grass.materials[0].foliage).toMatchObject({ rippleSheen: 0.9, dryColor: [0.7, 0.6, 0.3] });
+    const rock = await new GLTFLoader().parseDescriptorsFromFiles([new File([(await encodeFoliage(buildFoliage(doc('rock')))).glbs[0] as BlobPart], 'r.glb')], false);
+    expect(rock.materials.every(mt => mt.foliage === undefined)).toBe(true);
+    expect(materialValues(doc('rock'), 'rock').rippleSheen).toBeUndefined();
+  });
+
   it('survives a stored document with junk overrides', () => {
     const d = normaliseFoliage({ kind: 'grass', grass: { materials: { grass: { metallic: 9, baseColor: 'red', bogus: 1 }, rock: { metallic: 0.5 } } } as any });
     expect(d.grass.materials).toEqual({ grass: { metallic: 1 } });

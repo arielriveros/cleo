@@ -236,12 +236,18 @@ on the rim.
 
 #### Wind
 
-One wind for the whole scene. Plants sway only where their material (its
-[Wind](models-and-materials.md#sections) section) or a billboard foliage rule has a wind strength
-above 0; this node sets the direction, how strong every plant's lean is, and how gusts travel across
+One wind for the whole scene. Plants sway only where their [Foliage material](models-and-materials.md#foliage-materials)
+or a billboard foliage rule has a wind strength above 0; this node sets the direction, how strong every plant's lean is, and how gusts travel across
 the landscape. Past **Fade end** plants stop moving, and distant foliage then uses the cheaper still
 shaders. **Presets** set the strength and gusts and leave the direction alone. Volumetric clouds can
 follow it too.
+
+#### Weather
+
+The scene's weather: **Wetness** (0 dry, 1 soaked) and **Snow** (0 none, 1 thick). Foliage materials
+answer it by their [Weather](models-and-materials.md#foliage-materials) settings — rain darkens and
+glosses leaves and blades, snow settles on what faces up, and both weigh plants down. **Presets** go
+from Dry through Rain to Snowed In. A scene without one is dry.
 
 #### Water Volume
 

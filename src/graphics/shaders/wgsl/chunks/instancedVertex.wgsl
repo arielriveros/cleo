@@ -23,6 +23,8 @@ struct InstancedTransform {
     // the stamps themselves, two vec4s each (graphics/foliageInteraction.ts).
     u_interact: vec4<f32>,
     u_interactStamps: array<vec4<f32>, 32>,
+    // Foliage weather (CLEO_FOLIAGE): x = droop, the weather's weight as a fraction of the plant's height.
+    u_foliageDroop: vec4<f32>,
     // Foliage LOD crossfade, per instance. Band: x..y fade-in ramp, z..w fade-out ramp (metres from
     // the camera; an empty ramp means no fade on that side). Camera: xyz = position, w = mode (0 off,
     // 1 dithered dissolve, 2 shrink — grass). Frame: x = dither phase.
@@ -73,8 +75,20 @@ fn vs_main(
 #if CLEO_WIND
     let wind = WindParams(u_transform.u_windGlobal, u_transform.u_windTime, u_transform.u_windResponse,
                           u_transform.u_windShape, u_transform.u_windCamera);
+#if CLEO_FOLIAGE
     let push = interactLean(model[3].xyz, u_transform.u_windTime.x, u_transform.u_interact, u_transform.u_interactStamps);
-    out.fragPos = windDisplace(out.fragPos, position, out.normal, model, u_transform.u_windTime.x, wind, push);
+    let droop = u_transform.u_foliageDroop.x;
+    // For the surface (chunks/foliageSurface.wgsl): the plant's hash, the gust it is in, whether it is leaves.
+    let origin = model[3].xyz;
+    out.foliage = vec4<f32>(windHash(origin.xz * 1.37 + vec2<f32>(origin.y, 0.0)),
+                            windGust(origin, u_transform.u_windTime.x, wind) * wind.dirStrength.z * windFade(origin, wind),
+                            u_transform.u_windResponse.w, 0.0);
+#else
+    // The far cards: wind alone.
+    let push = vec2<f32>(0.0);
+    let droop = 0.0;
+#endif
+    out.fragPos = windDisplace(out.fragPos, position, out.normal, model, u_transform.u_windTime.x, wind, push, droop);
 #endif
     cameraHoleVarying(&out, u_transform.u_camHole, u_transform.u_camHolePivot, u_transform.u_lodFrame.x);
     // From fragPos, which IS model * position unless the wind moved it.

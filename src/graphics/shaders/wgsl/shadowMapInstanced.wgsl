@@ -1,6 +1,8 @@
 // Depth-only pass for instanced foliage. Solid geometry — no alpha test, so nothing is discarded.
 
-// Build-time variant: the foliage wind (chunks/foliageWind.wgsl) compiled in.
+// Build-time variants: the FOLIAGE material's bend (chunks/foliageWind.wgsl: wind, interaction, weather
+// droop), so a plant's shadow moves with it; and the far-card wind alone, for billboard layers.
+// @variant foliage CLEO_WIND=1 CLEO_FOLIAGE=1
 // @variant wind CLEO_WIND=1
 
 #include "./chunks/instancedDepthVertex.wgsl"

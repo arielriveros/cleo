@@ -1,20 +1,21 @@
 import {
   DirectionalLight, FoliageLayer, Geometry, GLTFLoader, LandscapeNode, Loader, LodGroupNode, Material, Model, ModelNode, Node,
-  SkyAtmosphereNode, SkyLightNode, Terrain, TextureManager, WindNode, type CleoEngine, type FoliageInteractor, type LightNode, type Scene,
+  SkyAtmosphereNode, SkyLightNode, Terrain, TextureManager, WeatherNode, WindNode, type CleoEngine, type FoliageInteractor, type LightNode, type Scene,
 } from 'cleo';
 import { vec3 } from 'gl-matrix';
 import { aimSun } from '../../fx/ui/fxPreview';
 import type { FoliageBuild } from '../foliageClient';
 
-// The Foliage Creator's preview stage: a ground, the sun, an optional physical sky, a wind, and the
-// generated asset -- shown one of two ways:
+// The Foliage Creator's preview stage: a ground, the sun, an optional physical sky, a wind, the weather,
+// and the generated asset -- shown one of two ways:
 //
-//   foliage  (Wind on) as instances of a terrain foliage layer, the path a game draws a foliage rule
-//            with, so the asset sways with the stage's WindNode exactly as it will in a level. The layer
+//   foliage  (the default) as instances of a terrain foliage layer, the path a game draws a foliage rule
+//            with, so the asset's foliage materials sway with the stage's WindNode, part for the walker,
+//            vary plant by plant and answer the WeatherNode exactly as they will in a level. The layer
 //            lives on a tiny hidden host terrain: its ground never draws and casts nothing, but the
 //            landscape node itself stays visible, which is what admits its foliage.
-//   nodes    (Wind off, or wireframe, which the instanced path does not draw) as a real LodGroupNode per
-//            copy -- one child per level, switched by the renderer exactly as in a game, but still.
+//   nodes    (wireframe, which the instanced path does not draw) as a real LodGroupNode per copy -- one
+//            child per level, switched by the renderer exactly as in a game, but still and plain.
 //
 // The asset arrives as the very .glb files the export writes and is loaded through the engine's own glTF
 // importer, so the preview is the import: cutout, double-siding, translucency and wind settings included.
@@ -50,13 +51,16 @@ export interface StageSettings {
    * back (the material's Interaction). Draws the asset as terrain foliage, like Wind.
    */
   walk: boolean;
+  /** The stage's WeatherNode: how wet (0..1) and how much snow (0..1); the foliage materials answer it. */
+  wetness: number;
+  snow: number;
 }
 
 export const DEFAULT_STAGE: StageSettings = {
   grid: true, ground: true, sky: true, patch: true, wireframe: false,
   sunYaw: 35, sunElevation: 40, sunLux: 60000, ambientLux: 6000,
   wind: true, windPreset: 'breezy', windDirection: 30, windStrength: 1, windGustScale: 18, windGustSpeed: 4,
-  walk: false,
+  walk: false, wetness: 0, snow: 0,
 };
 
 /** The walker: a person-sized capsule at walking pace. */
@@ -87,6 +91,7 @@ export class FoliageStage {
   private windOn = false;
   private walkOn = false;
   private walker: { node: ModelNode; interactor: FoliageInteractor; raf: number } | null = null;
+  private weather: WeatherNode | null = null;
   private materials: Material[] = [];
   private textureIds: string[] = [];
   private distances: number[] = [0];
@@ -150,6 +155,13 @@ export class FoliageStage {
       this.wind.gustScale = s.windGustScale;
       this.wind.gustSpeed = s.windGustSpeed;
     }
+    // --- Weather ---
+    if (!this.weather) {
+      this.weather = new WeatherNode(PREFIX + 'weather');
+      world.addNode(this.weather);
+    }
+    this.weather.wetness = s.wetness ?? 0;
+    this.weather.snow = s.snow ?? 0;
     const before = this.mode();
     this.windOn = s.wind;
     this.walkOn = s.walk;
@@ -205,9 +217,9 @@ export class FoliageStage {
     return Math.max(2.5, far + 1.5);
   }
 
-  /** How the asset is drawn: as swaying foliage, or as still nodes (see the header). */
+  /** How the asset is drawn: as foliage, or (wireframe) as still nodes (see the header). */
   mode(): 'foliage' | 'nodes' {
-    return (this.windOn || this.walkOn) && !this.wireframe ? 'foliage' : 'nodes';
+    return !this.wireframe ? 'foliage' : 'nodes';
   }
 
   /**
@@ -375,7 +387,8 @@ export class FoliageStage {
     this.stopWalk();
     this.clear();
     const world = this.world;
-    for (const n of [this.ground, this.sky, this.skyLight, this.wind]) if (n) world.removeNode(n);
+    for (const n of [this.ground, this.sky, this.skyLight, this.wind, this.weather]) if (n) world.removeNode(n);
+    this.weather = null;
     this.ground = this.sky = this.skyLight = null;
     this.wind = null;
     const s = this.saved;

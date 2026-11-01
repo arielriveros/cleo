@@ -216,13 +216,22 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             expect(byName.get(name)?.translucency ?? 0, name).toBe(0);
     });
 
-    it('parts the grass and bushes for whoever walks through, and barely moves the trees', () => {
+    it('makes every plant a foliage material: grass and bushes part, trees barely move, all vary and weather', () => {
         const byName = new Map(library('materials').map((m: any) => [m.name, m.material]));
         // Material interactBend / interactRecovery, as the Creator set them (foliageInteraction.ts).
         for (const name of ['Meadow Grass A Grass', 'Tall Grass Grass', 'Shrub A Leaves', 'Juniper Needles', 'Forest Undergrowth A Leaves'])
             expect(byName.get(name)?.interactBend ?? 0, name).toBeGreaterThan(0.3);
         for (const name of ['Spruce A Needles', 'Oak Leaves'])
             expect(byName.get(name)?.interactBend ?? 0, name).toBeLessThan(0.1);
+        // Only FOLIAGE materials run any of it (Material.Foliage): every plant's are, the rock's is not.
+        for (const name of ['Meadow Grass A Grass', 'Spruce A Needles', 'Spruce A Bark', 'Oak Leaves', 'Shrub A Leaves', 'Juniper Needles'])
+            expect(byName.get(name)?.type, name).toBe('foliage');
+        expect(byName.get('Moss Rock')?.type).toBe('pbr');
+        // Grass varies plant by plant and shows gusts as waves; broad leaves flip in gusts, needles do not.
+        expect(byName.get('Meadow Grass A Grass')?.variationValue ?? 0).toBeGreaterThan(0);
+        expect(byName.get('Meadow Grass A Grass')?.rippleSheen ?? 0).toBeGreaterThan(0);
+        expect(byName.get('Oak Leaves')?.leafFlip ?? 0).toBeGreaterThan(0);
+        expect(byName.get('Spruce A Needles')?.leafFlip ?? 0).toBe(0);
     });
 
     it('stands every plant on the surface, keeps grass off the roads, and stays under the layer cap', () => {

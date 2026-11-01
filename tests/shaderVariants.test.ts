@@ -79,8 +79,8 @@ describe('shader variants are drop-in replacements for their base program', () =
      */
     const FRAGMENT_OUTPUTS = ['GBuffer', 'PomForwardOut'];
 
-    /** Variant tags that change the vertex stage by design (foliage wind displaces positions). */
-    const VERTEX_VARIANTS = new Set(['wind', 'leanWind', 'prepassWind', 'leanOpaqueWind']);
+    /** Variant tags that change the vertex stage by design (foliage wind and weather displace positions). */
+    const VERTEX_VARIANTS = new Set(['wind', 'foliage', 'leanFoliage', 'prepassFoliage', 'leanOpaqueFoliage']);
     const vertexOf = (glsl: string | undefined) => (glsl ?? '').replace(
         new RegExp(String.raw`struct (${FRAGMENT_OUTPUTS.join('|')}) \{[^}]*\};\r?\n`, 'g'), '');
 

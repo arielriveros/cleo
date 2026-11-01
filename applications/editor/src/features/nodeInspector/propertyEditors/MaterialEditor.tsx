@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useReducer } from 'react';
-import { ModelNode, Material, CustomMaterial, TERRAIN_RELIEF_ENABLED, emissiveExposureWeightOf, setEmissiveExposureWeight } from 'cleo';
+import { ModelNode, Material, CustomMaterial, TERRAIN_RELIEF_ENABLED, emissiveExposureWeightOf, setEmissiveExposureWeight,
+         FOLIAGE_STARTER, applyFoliageSurface, applyInteraction, applyWind, foliageSurfaceOf, isFoliageMaterial, setFoliage } from 'cleo';
 import { useEventBus } from '../../EventBusContext';
 import { vec3ToHex } from '../../../utils/UtilFunctions';
 import { newCustomMaterial } from '../../../utils/customMaterials';
@@ -8,7 +9,7 @@ import TextureInspector from './TextureInspector';
 import CustomMaterialEditor from './CustomMaterialEditor';
 import UvMappingSection from './UvMappingSection';
 import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section, DocScope } from '@cleo/app-kit/ui';
-import { CutoutSection, InteractionSection, PbrPropertiesSection, WindSection, type MaterialFieldValues, type MaterialPatch } from '@cleo/app-kit/materials/MaterialFields';
+import { CutoutSection, FoliageSections, PbrPropertiesSection, type MaterialFieldValues, type MaterialPatch } from '@cleo/app-kit/materials/MaterialFields';
 import { MaterialIcon } from '../sectionIcons';
 
 export default function MaterialEditor(props: {node: ModelNode}) {
@@ -28,16 +29,22 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   const isTerrain = (material as any).terrainMaterial === true
     || (material as any).foliageInclude !== undefined;
 
-  type ShaderType = 'basic' | 'blinn_phong' | 'pbr' | 'cel' | 'custom';
+  // 'foliage' is a PBR material that also runs the foliage behaviour (Material.Foliage): in memory its
+  // shading type stays 'pbr', and the flag `material.foliage` is what makes it foliage.
+  type ShaderType = 'basic' | 'blinn_phong' | 'pbr' | 'foliage' | 'cel' | 'custom';
   // ORDER MATTERS. `basic` is the fallthrough, so every type that is not basic must be matched before
   // it: a 'cel' material read as basic would have `material.type` rewritten to 'basic' by the seeding
   // effect below, destroying it just by opening the inspector. `custom` stays first because a
   // `custom:<hash>` key is base36 and can itself contain the substring 'cel'.
-  const detectShaderType = (t: string): ShaderType =>
-    t.startsWith('custom') ? 'custom'
-    : (t.includes('blinn_phong') || t.includes('default')) ? 'blinn_phong' : t.includes('pbr') ? 'pbr'
-    : (!isTerrain && t.includes('cel')) ? 'cel' : 'basic';
-  const [shaderType, setShaderType] = useState<ShaderType>(detectShaderType(material.type as string));
+  const detectShaderType = (m: Material): ShaderType => {
+    const t = m.type as string;
+    return t.startsWith('custom') ? 'custom'
+      : (t.includes('blinn_phong') || t.includes('default')) ? 'blinn_phong'
+      : t.includes('pbr') ? (!isTerrain && isFoliageMaterial(m) ? 'foliage' : 'pbr')
+      : (!isTerrain && t.includes('cel')) ? 'cel' : 'basic';
+  };
+  const isPbrLike = (t: ShaderType) => t === 'pbr' || t === 'foliage';
+  const [shaderType, setShaderType] = useState<ShaderType>(detectShaderType(material));
 
   const [diffuse, setDiffuse] = useState(vec3ToHex(material.properties.get('diffuse')));
   const [specular, setSpecular] = useState(vec3ToHex(material.properties.get('specular')));
@@ -106,7 +113,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   });
 
   useEffect(() => {
-    setShaderType(detectShaderType(material.type as string));
+    setShaderType(detectShaderType(material));
 
     setDiffuse(vec3ToHex(material.properties.get('diffuse')));
     setSpecular(vec3ToHex(material.properties.get('specular')));
@@ -134,7 +141,16 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     // CustomMaterial happens in handleShaderTypeChange.
     if (shaderType === 'custom') return;
 
-    material.type = shaderType as any;
+    material.type = (shaderType === 'foliage' ? 'pbr' : shaderType) as any;
+    // Foliage on or off. A material turned into foliage with no wind or interaction of its own -- not an
+    // older PBR material that carried them -- starts from the foliage starter values.
+    const becomesFoliage = shaderType === 'foliage' && !isFoliageMaterial(material);
+    if (becomesFoliage && !material.properties.has('windStrength') && !material.properties.has('interactBend')) {
+      applyWind(material, FOLIAGE_STARTER);
+      applyInteraction(material, FOLIAGE_STARTER);
+      applyFoliageSurface(material, FOLIAGE_STARTER);
+    }
+    setFoliage(material, shaderType === 'foliage');
 
     if (shaderType === 'basic') {
       const carried = material.properties.get('color') || material.properties.get('baseColor') || material.properties.get('diffuse') || [1,1,1];
@@ -151,7 +167,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
       if (material.properties.get('shininess') === undefined) material.properties.set('shininess', 32.0);
       if (material.properties.get('opacity') === undefined) material.properties.set('opacity', 1.0);
       if (material.properties.get('reflectivity') === undefined) material.properties.set('reflectivity', 0.0);
-    } else if (shaderType === 'pbr') {
+    } else if (isPbrLike(shaderType)) {
       // Carry the main color/emissive over from default/basic so the object keeps its look.
       const carried = material.properties.get('baseColor') || material.properties.get('diffuse') || material.properties.get('color') || [1,1,1];
       material.properties.set('baseColor', carried);
@@ -214,7 +230,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   // Switching to or from 'custom' swaps the material INSTANCE, carrying the config across; built-in to
   // built-in stays on the same instance. Read model.material fresh each render so the swap is picked up.
   const handleShaderTypeChange = (next: ShaderType) => {
-    const cur = detectShaderType(model.material.type as string);
+    const cur = detectShaderType(model.material);
     if (next === cur) return;
     const cfg = { ...model.material.config };
     if (next === 'custom') {
@@ -222,6 +238,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     } else if (cur === 'custom') {
       model.material = next === 'basic' ? Material.Basic({}, cfg)
         : next === 'pbr' ? Material.PBR({}, cfg)
+        : next === 'foliage' ? Material.Foliage({}, cfg, FOLIAGE_STARTER)
         : next === 'cel' ? Material.Cel({}, cfg)
         : Material.Default({}, cfg);
     }
@@ -265,7 +282,12 @@ export default function MaterialEditor(props: {node: ModelNode}) {
     windFlutter: live.get('windFlutter') ?? 0.5,
     interactBend: live.get('interactBend') ?? 0,
     interactRecovery: live.get('interactRecovery') ?? 1,
+    ...foliageSurfaceOf(model.material) as Partial<MaterialFieldValues>,
   };
+  // A PBR material from before Foliage materials existed, still carrying the wind or bend it had then:
+  // those do nothing on PBR now, so offer the switch that brings them back.
+  const legacyFoliage = shaderType === 'pbr' && !isTerrain
+    && (Number(live.get('windStrength') ?? 0) > 0 || Number(live.get('interactBend') ?? 0) > 0);
   const applyShared = (patch: MaterialPatch) => {
     for (const [key, value] of Object.entries(patch)) {
       if (value === undefined) continue;
@@ -412,6 +434,8 @@ export default function MaterialEditor(props: {node: ModelNode}) {
             <option value='basic'>Basic</option>
             <option value='blinn_phong'>Blinn-Phong</option>
             <option value='pbr'>PBR</option>
+            {/* PBR plus wind, contact, variation, weather and gusts -- on terrain foliage only. */}
+            {!isTerrain && <option value='foliage'>Foliage</option>}
             {/* Terrain is deferred-only and cel is forward-only, so a cel paint layer would silently
                 render as PBR. The Terrain Material inspector mounts this editor whole, which is the
                 only way that option would ever be reachable. */}
@@ -552,7 +576,15 @@ export default function MaterialEditor(props: {node: ModelNode}) {
           </>
         )}
 
-        {shaderType === 'pbr' && (
+        {legacyFoliage && (
+          <div className='text-ui-xs text-warning px-1 pb-2'>
+            Has wind settings from before Foliage materials, which PBR ignores —{' '}
+            <button type='button' className='underline' onClick={() => handleShaderTypeChange('foliage')}>switch to Foliage</button>
+            {' '}to use them.
+          </div>
+        )}
+
+        {isPbrLike(shaderType) && (
           <>
             <PbrPropertiesSection value={pbrValues} onChange={applyShared} tintsTexture={!!material.textures.get('baseColorTexture')} />
             <Section title='Textures'>
@@ -576,12 +608,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
           </>
         )}
 
-        {!isTerrain && (
-          <>
-            <WindSection value={windValues} onChange={applyShared} />
-            <InteractionSection value={windValues} onChange={applyShared} />
-          </>
-        )}
+        {shaderType === 'foliage' && <FoliageSections value={windValues} onChange={applyShared} />}
 
         <Section title='Options'>
           <div className='flex flex-col gap-1.5'>

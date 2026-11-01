@@ -1,5 +1,8 @@
 #include "./alphaCutout.wgsl"
 #include "./translucencyTint.wgsl"
+#if CLEO_FOLIAGE
+#include "./foliageSurface.wgsl"
+#endif
 // The PBR G-buffer fragment stage, shared by the plain, skinned and instanced geometry programs.
 //
 // It uses VertexOutput and tbnOf() without including chunks/modelVarying.wgsl itself: whichever
@@ -183,6 +186,21 @@ struct PBRMaterial {
     uvSpace: i32,
     uvWorldSize: f32,
     uvBlend: f32,
+    /**
+     * The FOLIAGE material (chunks/foliageSurface.wgsl), read only by the foliage variants. Declared for every
+     * PBR program so the block's layout never depends on the variant.
+     */
+    variationHue: f32,
+    variationValue: f32,
+    variationDry: f32,
+    dryColor: vec3<f32>,
+    wetResponse: f32,
+    snowCover: f32,
+    rippleSheen: f32,
+    leafFlip: f32,
+    undersideColor: vec3<f32>,
+    /** The scene's weather (WeatherNode): x = wetness, y = snow. Renderer state, written per foliage draw. */
+    foliageWeather: vec4<f32>,
 };
 @group(1) @binding(1) var<uniform> u_material: PBRMaterial;
 
@@ -417,6 +435,10 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     }
 
     let N = normalize(getNormal(in, front, su, uv));
+#if CLEO_FOLIAGE
+    var foliageTranslucency = saturate(u_material.translucency);
+    foliageShade(&albedo, &roughness, &foliageTranslucency, N, in.fragPos, in.foliage);
+#endif
 
     var out: GBuffer;
     // The parallax self-shadow is folded into ALBEDO - an approximation the G-buffer forces. There is
@@ -440,7 +462,11 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     //
     // chunks/pbrForward.wgsl, which has the light list, applies the same term properly.
     // A translucent surface stores `-translucency` where metallic would be (see the struct member).
+#if CLEO_FOLIAGE
+    let translucency = foliageTranslucency;
+#else
     let translucency = saturate(u_material.translucency);
+#endif
     out.gAlbedoMetallic = vec4<f32>(albedo * selfShadow, select(metallic, -translucency, translucency > 0.0));
     // The roughness written here is FILTERED — see filterSpecularRoughness. It has to happen in this
     // pass and not in deferredLighting: taking dpdx of the G-buffer normal in a fullscreen pass would

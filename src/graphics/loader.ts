@@ -1,5 +1,5 @@
 import { Geometry } from "../core/geometry";
-import { Material, applyInteraction, applyWind } from "./material";
+import { Material, applyFoliageSurface, applyInteraction, applyWind, setFoliage } from "./material";
 import { OutputMaterial, AssimpParseResult, AssimpTextureSlots, loadAssimpModel, parseMaterial, convertToGltf2FromFiles, parseAssimpFiles } from "./utils/assimpLoader";
 import { GLTFLoader, ImportTransform, GltfParseResult } from "./utils/gltfLoader";
 // A cycle (model.ts imports Loader), but benign: Model is only referenced inside method bodies.
@@ -345,6 +345,7 @@ export class Loader {
             });
             if (d.wind) applyWind(material, d.wind);
             if (d.interaction) applyInteraction(material, d.interaction);
+            if (d.foliage) { setFoliage(material, true); applyFoliageSurface(material, d.foliage); }
             return material;
         });
 

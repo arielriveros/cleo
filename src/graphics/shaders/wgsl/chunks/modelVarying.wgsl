@@ -43,6 +43,10 @@ struct VertexOutput {
     @location(8) camHole: vec4<f32>,
     // x = how much of a blocking surface is dithered away (0 = this draw has no hole), y = dither phase.
     @location(9) camHoleParams: vec2<f32>,
+#if CLEO_FOLIAGE
+    // The foliage surface (chunks/foliageSurface.wgsl): x = the plant's hash, y = its gust, z = leaves.
+    @location(10) foliage: vec4<f32>,
+#endif
 };
 
 #include "./cameraHole.wgsl"

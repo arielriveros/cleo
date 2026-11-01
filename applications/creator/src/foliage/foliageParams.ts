@@ -65,6 +65,14 @@ export interface GrassParams {
   // Interaction: how far it gives way to what moves through it (0 = rigid), and seconds to spring back.
   interactBend: number;
   interactRecovery: number;
+  // The foliage material's surface (engine Material.Foliage): per-plant variation, weather, gusts.
+  variationHue: number;
+  variationValue: number;
+  variationDry: number;
+  wetResponse: number;
+  snowCover: number;
+  weightDroop: number;
+  rippleSheen: number;
   // LOD
   lod1Distance: number;
   /** Share of blades LOD 1 keeps (each widened to cover the gap). */
@@ -88,6 +96,7 @@ export const DEFAULT_GRASS: GrassParams = {
   baseColor: [0.09, 0.2, 0.04, 1], tipColor: [0.33, 0.45, 0.12, 1], dryness: 0.12, dryColor: [0.52, 0.45, 0.22, 1],
   rootShade: 0.6, roughness: 0.8, translucency: 0.45, translucencyColor: [0.62, 0.7, 0.16, 1], translucencyBlend: 0.3,
   windStrength: 0.25, windStiffness: 1, windFlutter: 0.3, interactBend: 0.8, interactRecovery: 1.5,
+  variationHue: 0.04, variationValue: 0.15, variationDry: 0.15, wetResponse: 0.6, snowCover: 0.5, weightDroop: 0.5, rippleSheen: 0.6,
   lod1Distance: 6, lod1Blades: 0.45, lod2Distance: 15, lod2Kind: 'cards', lod2Blades: 0.15, cullDistance: 25,
   textureSize: 256,
 };
@@ -245,6 +254,17 @@ export interface TreeParams {
   // Interaction: how far it gives way to what moves through it (0 = rigid), and seconds to spring back.
   interactBend: number;
   interactRecovery: number;
+  // The foliage material's surface (engine Material.Foliage): per-plant variation, weather, gusts.
+  variationHue: number;
+  variationValue: number;
+  variationDry: number;
+  wetResponse: number;
+  snowCover: number;
+  weightDroop: number;
+  rippleSheen: number;
+  /** Leaves only: how far gusts turn them over to show their paler undersides, and that colour. */
+  leafFlip: number;
+  leafUndersideColor: Rgba;
   // LOD
   lod1Distance: number;
   /** Share of leaf cards LOD 1 keeps (grown to cover). */
@@ -279,6 +299,8 @@ export const DEFAULT_TREE: TreeParams = {
   leafTranslucency: 0.5, leafTranslucencyColor: [0.66, 0.72, 0.14, 1], leafTranslucencyBlend: 0.35, leafRoughness: 0.7,
   barkPattern: 'furrowed', barkColor: [0.23, 0.18, 0.14, 1], barkRoughness: 0.92, barkScale: 1.2,
   windStrength: 0.1, windStiffness: 1.4, windFlutter: 0.45, interactBend: 0.05, interactRecovery: 1,
+  variationHue: 0.03, variationValue: 0.12, variationDry: 0.05, wetResponse: 0.5, snowCover: 0.6, weightDroop: 0.08, rippleSheen: 0.15,
+  leafFlip: 0.4, leafUndersideColor: [0.62, 0.7, 0.5, 1],
   lod1Distance: 15, lod1Leaves: 0.45, lod2Distance: 35, lod2Leaves: 0.16,
   impostor: true, impostorDistance: 60, cullDistance: 450, impostorFrames: 8, impostorFrameSize: 128,
   barkTextureSize: 512, leafTextureSize: 512,
@@ -359,6 +381,17 @@ export interface BushParams {
   // Interaction: how far it gives way to what moves through it (0 = rigid), and seconds to spring back.
   interactBend: number;
   interactRecovery: number;
+  // The foliage material's surface (engine Material.Foliage): per-plant variation, weather, gusts.
+  variationHue: number;
+  variationValue: number;
+  variationDry: number;
+  wetResponse: number;
+  snowCover: number;
+  weightDroop: number;
+  rippleSheen: number;
+  /** Leaves only: how far gusts turn them over to show their paler undersides, and that colour. */
+  leafFlip: number;
+  leafUndersideColor: Rgba;
   // LOD
   lod1Distance: number;
   lod1Leaves: number;
@@ -388,6 +421,8 @@ export const DEFAULT_BUSH: BushParams = {
   leafTranslucency: 0.45, leafTranslucencyColor: [0.66, 0.72, 0.14, 1], leafTranslucencyBlend: 0.35, leafRoughness: 0.7,
   barkPattern: 'smooth', barkColor: [0.24, 0.19, 0.14, 1], barkRoughness: 0.9, barkScale: 0.4,
   windStrength: 0.18, windStiffness: 1.2, windFlutter: 0.5, interactBend: 0.6, interactRecovery: 1,
+  variationHue: 0.03, variationValue: 0.12, variationDry: 0.08, wetResponse: 0.5, snowCover: 0.6, weightDroop: 0.3, rippleSheen: 0.2,
+  leafFlip: 0.35, leafUndersideColor: [0.62, 0.7, 0.5, 1],
   lod1Distance: 8, lod1Leaves: 0.45, lod2Distance: 20, lod2Leaves: 0.18, cullDistance: 70,
   barkTextureSize: 256, leafTextureSize: 512,
 };
@@ -449,6 +484,13 @@ export function normaliseFoliage(raw: Partial<FoliageDoc> | null | undefined): F
   g.translucencyBlend = clamp(g.translucencyBlend, 0, 1, DEFAULT_GRASS.translucencyBlend);
   g.interactBend = clamp(g.interactBend, 0, 1, DEFAULT_GRASS.interactBend);
   g.interactRecovery = clamp(g.interactRecovery, 0.1, 10, DEFAULT_GRASS.interactRecovery);
+  g.variationHue = clamp(g.variationHue, 0, 0.5, DEFAULT_GRASS.variationHue);
+  g.variationValue = clamp(g.variationValue, 0, 1, DEFAULT_GRASS.variationValue);
+  g.variationDry = clamp(g.variationDry, 0, 1, DEFAULT_GRASS.variationDry);
+  g.wetResponse = clamp(g.wetResponse, 0, 1, DEFAULT_GRASS.wetResponse);
+  g.snowCover = clamp(g.snowCover, 0, 1, DEFAULT_GRASS.snowCover);
+  g.weightDroop = clamp(g.weightDroop, 0, 1, DEFAULT_GRASS.weightDroop);
+  g.rippleSheen = clamp(g.rippleSheen, 0, 1, DEFAULT_GRASS.rippleSheen);
   g.materials = normaliseOverrides(g.materials, 'grass');
 
   const r: RockParams = { ...DEFAULT_ROCK, ...(d.rock ?? {}) };
@@ -502,6 +544,15 @@ export function normaliseFoliage(raw: Partial<FoliageDoc> | null | undefined): F
   t.leafTranslucencyBlend = clamp(t.leafTranslucencyBlend, 0, 1, DEFAULT_TREE.leafTranslucencyBlend);
   t.interactBend = clamp(t.interactBend, 0, 1, DEFAULT_TREE.interactBend);
   t.interactRecovery = clamp(t.interactRecovery, 0.1, 10, DEFAULT_TREE.interactRecovery);
+  t.variationHue = clamp(t.variationHue, 0, 0.5, DEFAULT_TREE.variationHue);
+  t.variationValue = clamp(t.variationValue, 0, 1, DEFAULT_TREE.variationValue);
+  t.variationDry = clamp(t.variationDry, 0, 1, DEFAULT_TREE.variationDry);
+  t.wetResponse = clamp(t.wetResponse, 0, 1, DEFAULT_TREE.wetResponse);
+  t.snowCover = clamp(t.snowCover, 0, 1, DEFAULT_TREE.snowCover);
+  t.weightDroop = clamp(t.weightDroop, 0, 1, DEFAULT_TREE.weightDroop);
+  t.rippleSheen = clamp(t.rippleSheen, 0, 1, DEFAULT_TREE.rippleSheen);
+  t.leafFlip = clamp(t.leafFlip, 0, 1, DEFAULT_TREE.leafFlip);
+  t.leafUndersideColor = rgba(t.leafUndersideColor, DEFAULT_TREE.leafUndersideColor);
   t.materials = normaliseOverrides(t.materials, 'tree');
 
   const b: BushParams = { ...DEFAULT_BUSH, ...(d.bush ?? {}) };
@@ -532,6 +583,15 @@ export function normaliseFoliage(raw: Partial<FoliageDoc> | null | undefined): F
   b.leafSegments = int(b.leafSegments, 1, 4, DEFAULT_BUSH.leafSegments);
   b.interactBend = clamp(b.interactBend, 0, 1, DEFAULT_BUSH.interactBend);
   b.interactRecovery = clamp(b.interactRecovery, 0.1, 10, DEFAULT_BUSH.interactRecovery);
+  b.variationHue = clamp(b.variationHue, 0, 0.5, DEFAULT_BUSH.variationHue);
+  b.variationValue = clamp(b.variationValue, 0, 1, DEFAULT_BUSH.variationValue);
+  b.variationDry = clamp(b.variationDry, 0, 1, DEFAULT_BUSH.variationDry);
+  b.wetResponse = clamp(b.wetResponse, 0, 1, DEFAULT_BUSH.wetResponse);
+  b.snowCover = clamp(b.snowCover, 0, 1, DEFAULT_BUSH.snowCover);
+  b.weightDroop = clamp(b.weightDroop, 0, 1, DEFAULT_BUSH.weightDroop);
+  b.rippleSheen = clamp(b.rippleSheen, 0, 1, DEFAULT_BUSH.rippleSheen);
+  b.leafFlip = clamp(b.leafFlip, 0, 1, DEFAULT_BUSH.leafFlip);
+  b.leafUndersideColor = rgba(b.leafUndersideColor, DEFAULT_BUSH.leafUndersideColor);
   b.leafFoldShape = b.leafFoldShape === 'cupped' ? 'cupped' : 'v';
   b.leafTwist = clamp(b.leafTwist, 0, 1, DEFAULT_BUSH.leafTwist);
   b.leafWave = clamp(b.leafWave, 0, 1, DEFAULT_BUSH.leafWave);

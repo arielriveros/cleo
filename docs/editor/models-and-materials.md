@@ -208,6 +208,7 @@ scene's grading.
 | **Basic** | Unlit. UI-ish things, effects, anything that should not react to light. |
 | **Blinn-Phong** | Cheap classical shading. Specular is genuine `pow(NdotH, shininess)`. |
 | **PBR** | The default choice. Metallic-roughness. |
+| **Foliage** | PBR that moves and weathers: grass, leaves, needles, bark of plants scattered on a landscape. See [Foliage materials](#foliage-materials). |
 | **Cel (toon)** | Banded shading. **Forward only.** |
 | **Custom (shader)** | Your own GLSL/WGSL fragment shader with declared uniforms. |
 
@@ -255,22 +256,60 @@ See [UV mapping](#uv-mapping-textures-that-dont-stretch).
 **Height** — a height map turned into parallax relief on PBR, with its depth in world units, an
 invert for depth maps and clipping at the UV border. See [Height and parallax](#height-and-parallax).
 
+**Wind**, **Interaction**, **Variation**, **Weather**, **Gusts** — Foliage only; see
+[Foliage materials](#foliage-materials).
+
+**Options** — side (front / back / both), transparency, shadow casting, probe participation,
+wireframe.
+
+### Foliage materials
+
+A **Foliage** material is a PBR material — the same properties, textures and look — that also moves
+and weathers. Make one with **Add ▸ Foliage Material** in the asset explorer, or switch a material's
+**Shader** to Foliage. It does all of this only on plants scattered by a landscape's foliage rules; on
+a model placed by hand it renders as plain PBR. No other material runs any of it: the work lives in
+shader variants only foliage materials draw with, so a rock or a wall pays nothing.
+
+![A foliage material's Wind, Interaction, Variation, Weather and Gusts sections](../media/foliage-material.jpg)
+
+![Grass parting around a walker and springing back (the Foliage Creator's Walk-through)](../media/foliage-walkthrough.gif)
+
 **Wind** — how a plant wearing this material sways in the scene's [Wind](node-inspector.md#wind):
 **Strength** (the lean at full gust, as a fraction of the plant's height), **Stiffness**, and **Moves
 as** — **Whole plant** rides the sway rigidly, like a trunk; **Leaves** follows it and adds its own
-sprig sway and **Flutter**, more toward the outside of the canopy. Read by foliage only, while the
-scene has a Wind node; a tree's materials bend as one, the strongest setting the lean. Not on terrain
-materials.
+sprig sway and **Flutter**, more toward the outside of the canopy. A tree's materials bend as one, the
+strongest setting the lean.
 
 **Interaction** — how a plant wearing this material gives way to what moves through it — characters,
 moving physics bodies and radial force fields such as a blast — and springs back after: **Bend** (0 is
 rigid; tall grass ~0.8, a bush ~0.6, a tree ~0.05) and **Recovery**, the seconds it takes to stand up
-again. The grass a character walked through stays parted along its path for a moment. Read by terrain
-foliage only, with or without a Wind node; a plant bends by the strongest of its materials. Scripts
-can add their own pushers with `scene.addFoliageInteractor({ position, radius, strength })`.
+again. The grass a character walked through stays parted along its path for a moment. Works with or
+without a Wind node; a plant bends by the strongest of its materials. Scripts can add their own
+pushers with `scene.addFoliageInteractor({ position, radius, strength })`.
 
-**Options** — side (front / back / both), transparency, shadow casting, probe participation,
-wireframe.
+**Variation** — so a field of one asset does not read as copies. Each plant, by where it stands,
+turns its **Hue** a little either way, is a little lighter or darker (**Brightness**), and a **Dry
+share** of them turn toward the **Dry colour**.
+
+**Weather** — how the plant answers the scene's [Weather](node-inspector.md#weather): **Wet response**
+darkens it and makes it glossy in rain, **Snow cover** is how much snow settles on its up-facing
+surfaces (and how much less light then comes through), and **Weight droop** is how far rain or snow
+bows it down, as a fraction of its height.
+
+**Gusts** — what the wind's gusts do to the surface. **Ripple sheen** brightens a plant as a gust
+passes over it, so gusts show as waves rolling across a meadow. On a **Leaves** material, **Leaf
+flip** turns leaves over in the gusts to show their paler **Underside colour**.
+
+A PBR material from before Foliage materials existed may still carry wind or bend settings; they do
+nothing on PBR, and the Properties section offers **switch to Foliage**, which brings them back as they
+were.
+
+**More foliage behaviour to come.** Ideas researched for later: a persistent trample map, so walked
+grass stays flat for minutes and mown or burnt areas stay that way; burning and charring with regrowth;
+branch-by-branch sway from pivot data baked by the Creator; plants growing in when they spawn; a
+seasonal cycle of leaf colour and leaf fall; kelp and reeds swaying with water currents; flowers that
+turn to the sun and close at night; saplings that snap under heavy bodies; and fireflies, pollen and
+falling leaves emitted from foliage rules.
 
 ### UV mapping: textures that don't stretch
 

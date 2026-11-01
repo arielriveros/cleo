@@ -3,6 +3,8 @@
 Generate grass clumps, bushes, trees and rocks from parameters, each with its levels of detail and its
 materials, and export them as glTF models ready for a foliage rule.
 
+![The Foliage Creator on the Oak preset: presets and seeds, the live preview, and the parameters](../media/creator-foliage.jpg)
+
 Pick **Grass**, **Bush**, **Tree** or **Rock** in the toolbar. Each kind keeps its own parameters, so switching
 back and forth loses nothing. Every edit regenerates the asset in a background worker, and the
 **Viewport** shows it as a real LOD group, switching levels by distance exactly as a game does. The
@@ -48,10 +50,10 @@ The light the preview is shown in. None of it reaches the export.
 
 ## Wind
 
-A wind on the stage, so the preview sways as the asset will in a level. With it on, the asset is drawn
-as a foliage layer, the path a game's foliage rules use, with the materials' wind response; off (or with
-Wireframe on, which that path does not draw) it is shown still, as nodes. The viewport's readout says
-which. None of it reaches the export.
+A wind on the stage, so the preview sways as the asset will in a level. The asset is drawn as a foliage
+layer, the path a game's foliage rules use, so its foliage materials sway, vary and weather as they will
+in a level; with Wireframe on (which that path does not draw) it is shown still, as nodes. The
+viewport's readout says which. None of it reaches the export.
 
 | Field | Meaning |
 |---|---|
@@ -63,6 +65,17 @@ which. None of it reaches the export.
 | **Walk-through** | Someone walks back and forth through the preview, so you can see how the plant gives way and springs back: the materials' **Interaction**. Draws the asset as a foliage layer too, with or without wind. |
 
 The presets below (Calm to Storm) set strength and gusts as the engine's wind presets do.
+
+![Walk-through on a grass patch: the blades part around the walker and spring back](../media/foliage-walkthrough.gif)
+
+## Weather
+
+The stage's weather, to see the materials' **Weather** settings at work. None of it reaches the export.
+
+| Field | Meaning |
+|---|---|
+| **Wetness** | How wet the stage is: leaves and blades darken, turn glossy and bow under the water. |
+| **Snow** | How much snow lies on the plant: it settles on what faces up and weighs the plant down. |
 
 ## Clump
 
@@ -264,8 +277,10 @@ stems. Edited in the **Materials** tab, under Bark.
 
 Every material the asset carries -- Bark and Leaves (or Needles) on a tree or bush, Blades and Clump card
 on grass, Rock on a rock -- edited with the Editor's own material sections: **Properties**,
-**Textures**, **Cutout**, **Wind** and **Interaction** (see [the material editor](../editor/models-and-materials.md#the-material-editor)).
-What is set here is written into the `.glb` files, so the model arrives in the Editor looking the same.
+**Textures**, **Cutout**, and -- every plant material is a [Foliage material](../editor/models-and-materials.md#foliage-materials)
+-- **Wind**, **Interaction**, **Variation**, **Weather** and **Gusts**. A rock's material is plain PBR.
+What is set here is written into the `.glb` files, so the model arrives in the Editor looking the same,
+as Foliage materials.
 
 Roughness, translucency (its colour and blend too: back-lit leaves and blades glow yellow-green by default, the
 autumn maple orange; the glow shows looking through the leaves toward the sun, so put the preview's sun
@@ -273,7 +288,9 @@ low behind the plant to see it) and the wind are the generator's own settings: a
 bark and leaves share one wind strength and stiffness, because a plant bends as one. So does
 **Interaction** -- how far the plant gives way to a character or a rolling body passing through, and how
 many seconds it takes to stand up again: grass bends most (0.8, 1.5 s), a bush less (0.6, 1 s), a tree
-hardly at all. Turn on [Walk-through](#wind) to watch it. The rest --
+hardly at all. Turn on [Walk-through](#wind) to watch it. Variation, weather and gust sheen are the
+kind's too: grass varies most, goes dry in patches, bows under rain and snow and shows gusts as waves;
+broad leaves flip over in gusts to their paler undersides (needles do not). The rest --
 a tint over the texture, metallic, emission, the cutout threshold, whether the bark rides the wind
 rigidly or flutters with the leaves -- is kept per material; **Reset** at the top returns a material to
 what the generator chose.

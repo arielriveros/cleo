@@ -26,8 +26,11 @@
 // as exp(-age / recovery), the LAYER's material recovery, so the grass springs back after the walker has
 // gone. It joins the wind lean before the arc renormalisation, so a parted blade arcs over like a gusted one.
 //
+// DROOP is the weather's weight (Material weightDroop x the WeatherNode's rain and snow): the plant bows
+// outward from its own axis, through the same arc, so a wet meadow and a snowed-on bush hang lower.
+//
 // Included by chunks/instancedVertex.wgsl and chunks/instancedDepthVertex.wgsl, so a plant and its
-// shadow sway together.
+// shadow sway together. Only the FOLIAGE variants (Material.Foliage) and the far-card billboards run it.
 
 struct WindParams {
     /** xy = unit wind direction in world XZ, z = global strength, w = gust wavelength (m). */
@@ -167,12 +170,13 @@ fn windLeafOffset(obj: vec3<f32>, normalW: vec3<f32>, origin: vec3<f32>, h: f32,
 }
 
 /**
- * `world` (a vertex already through its instance matrix) displaced by the wind at time `t`, and by `push`,
- * the interaction lean from `interactLean`. `obj` is the object-space vertex, `normalW` its unit world
- * normal and `model` its instance matrix.
+ * `world` (a vertex already through its instance matrix) displaced by the wind at time `t`, by `push`,
+ * the interaction lean from `interactLean`, and by `droop`, the weather's weight as a fraction of the
+ * plant's height. `obj` is the object-space vertex, `normalW` its unit world normal and `model` its
+ * instance matrix.
  */
 fn windDisplace(world: vec3<f32>, obj: vec3<f32>, normalW: vec3<f32>, model: mat4x4<f32>, t: f32,
-                w: WindParams, push: vec2<f32>) -> vec3<f32> {
+                w: WindParams, push: vec2<f32>, droop: f32) -> vec3<f32> {
     let origin = model[3].xyz;
     let base = (model * vec4<f32>(0.0, w.shape.x, 0.0, 1.0)).xyz;
     let heightW = max(w.shape.y, 1e-4) * length(model[1].xyz);
@@ -184,6 +188,16 @@ fn windDisplace(world: vec3<f32>, obj: vec3<f32>, normalW: vec3<f32>, model: mat
     var bent = rel;
     bent.x += w.dirStrength.x * bend + push.x * h * h * heightW;
     bent.z += w.dirStrength.y * bend + push.y * h * h * heightW;
+    if (droop > 0.0) {
+        // Outward from the plant's own axis (a card with no axis: a direction of its own), and through the
+        // arc below, so the tips bow down rather than stretch out.
+        let out2 = rel.xz;
+        let ol = length(out2);
+        let a = windHash(origin.xz) * 6.2831853;
+        let away = select(vec2<f32>(cos(a), sin(a)), out2 / max(ol, 1e-4), ol > 0.02 * heightW);
+        bent.x += away.x * droop * h * h * heightW;
+        bent.z += away.y * droop * h * h * heightW;
+    }
     // Back to the original length: the tip sweeps an arc instead of the plant growing as it leans.
     let bl = length(bent);
     let trunk = base + select(rel, bent * (len / bl), bl > 1e-5);

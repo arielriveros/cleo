@@ -119,6 +119,10 @@ export const SkyLightIcon = () => (
 export const WindIcon = () => (
   <S><path d="M3 8h11a3 3 0 1 0-3-3" /><path d="M3 12h15a3 3 0 1 1-3 3" /><path d="M3 16h7" /></S>
 );
+/** Weather: a cloud with rain falling from it. */
+export const WeatherIcon = () => (
+  <S><path d="M7 14.5h10a3.5 3.5 0 0 0 .5-6.96 5 5 0 0 0-9.6-1A3.5 3.5 0 0 0 7 14.5Z" /><path d="M8 17.5l-1 2.5M12 17.5l-1 2.5M16 17.5l-1 2.5" /></S>
+);
 /** Volumetric clouds. */
 export const CloudsIcon = () => (
   <S><path d="M7 18.5h10a4 4 0 0 0 .6-7.95 5.5 5.5 0 0 0-10.5-1.2A3.9 3.9 0 0 0 7 18.5Z" /></S>

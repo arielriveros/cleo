@@ -24,6 +24,7 @@ import {
   SkyAtmosphereNode,
   SkyLightNode,
   WindNode,
+  WeatherNode,
   TilemapNode,
   Tilemap,
   Scene,
@@ -66,7 +67,7 @@ import {
   EmptyIcon, TriggerIcon, CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon,
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon, ExposureVolumeIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
-  SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon,
+  SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon, WeatherIcon,
   SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OccluderIcon, ClothIcon,
 } from './nodeIcons'
 import { createLandscapeNode } from '../../utils/landscapeSlots'
@@ -418,6 +419,11 @@ export const ADD_ITEMS: AddItem[] = [
     // Scene-wide, so unplaceable. Plants only sway where their material asks for it.
     id: 'wind', label: 'Wind', icon: WindIcon, category: 'environment', placeable: false,
     create: async () => new WindNode('wind'),
+  },
+  {
+    // Scene-wide, so unplaceable. Foliage materials answer it by their Weather settings.
+    id: 'weather', label: 'Weather', icon: WeatherIcon, category: 'environment', placeable: false,
+    create: async () => new WeatherNode('weather'),
   },
   {
     id: 'volumetricClouds', label: 'Clouds', icon: CloudsIcon, category: 'environment', placeable: false,

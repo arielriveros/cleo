@@ -25,6 +25,7 @@ import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./nodes/skyAtmosphereNode";
 import { SkyLightNode } from "./nodes/skyLightNode";
 import { WindNode } from "./nodes/windNode";
+import { WeatherNode } from "./nodes/weatherNode";
 import { CameraNode } from "./nodes/cameraNode";
 import { SpriteNode } from "./nodes/spriteNode";
 import { UINode } from "./nodes/ui/uiNode";
@@ -141,6 +142,7 @@ export class Scene {
     private _skyAtmosphere: SkyAtmosphereNode | null = null;
     private _skyLight: SkyLightNode | null = null;
     private _wind: WindNode | null = null;
+    private _weather: WeatherNode | null = null;
     private _environmentMap: Texture | null = null;
     /**
      * Scene-wide indirect fill, in LUX. What every surface receives from nothing in particular.
@@ -209,6 +211,7 @@ export class Scene {
         this._skyAtmosphere = null;
         this._skyLight = null;
         this._wind = null;
+        this._weather = null;
 
         // TODO: Move this to a LightManager class
         this._numPointLights = 0;
@@ -810,6 +813,7 @@ export class Scene {
         this._skyAtmosphere = null;
         this._skyLight = null;
         this._wind = null;
+        this._weather = null;
         this._nodesByName = new Map();
         this._nodesById = new Map();
         for (const node of this._nodes) {
@@ -867,6 +871,8 @@ export class Scene {
                 this._skyLight = node;
             if (node instanceof WindNode)
                 this._wind = node;
+            if (node instanceof WeatherNode)
+                this._weather = node;
             if (node instanceof CameraNode)
                 this._cameras.add(node);
             // A root is also a UINode and lands in both sets: _uiRoots drives the layout pass, _uiNodes is
@@ -1238,6 +1244,13 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._wind;
+    }
+
+    /** The scene's weather (wetness, snow), or null — in which case it is dry. */
+    public get weather(): WeatherNode | null {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._weather;
     }
 
     public get skyLight(): SkyLightNode | null {

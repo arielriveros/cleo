@@ -273,11 +273,17 @@ const STAGE_SPECS: GenericParamSpec[] = [
 
 /** The preview's wind: the stage's WindNode, which a swaying preview is drawn through (foliageStage.ts). */
 const WIND_SPECS: GenericParamSpec[] = [
-  { key: 'wind', label: 'Wind', kind: 'bool', hint: 'Sway the preview as a foliage layer does in a level. Off (or wireframe) shows it still.' },
+  { key: 'wind', label: 'Wind', kind: 'bool', hint: 'Sway the preview as a foliage layer does in a level. Off, it stands still.' },
   { key: 'windDirection', label: 'Direction', kind: 'float', min: 0, max: 360, step: 1, unit: '°', when: p => !!p.wind },
   { key: 'windStrength', label: 'Strength', kind: 'float', min: 0, max: 3, step: 0.01, when: p => !!p.wind },
   { key: 'windGustScale', label: 'Gust size', kind: 'float', min: 1, max: 100, step: 0.5, unit: 'm', when: p => !!p.wind },
   { key: 'windGustSpeed', label: 'Gust speed', kind: 'float', min: 0, max: 20, step: 0.1, unit: 'm/s', when: p => !!p.wind },
+];
+
+/** The preview's weather: how the foliage materials answer rain and snow (their Weather settings). */
+const WEATHER_SPECS: GenericParamSpec[] = [
+  { key: 'wetness', label: 'Wetness', kind: 'float', min: 0, max: 1, step: 0.01, hint: 'How wet the stage is: darker, glossier, bowed leaves and blades.' },
+  { key: 'snow', label: 'Snow', kind: 'float', min: 0, max: 1, step: 0.01, hint: 'How much snow lies on the plant: it settles on what faces up, and weighs it down.' },
 ];
 
 /** The preview's walker: something moving through the asset, to show its Interaction. */
@@ -350,6 +356,10 @@ export function VariantsPanel() {
             ))}
           </div>
         )}
+      </Collapsable>
+      <Collapsable title='Weather' persistKey='cleo_creator_foliage_variants_weather'>
+        <ParamForm schema={WEATHER_SPECS} values={stage as unknown as Record<string, unknown>}
+                   onChange={patch => setStage({ ...stage, ...(patch as Partial<StageSettings>) })} />
       </Collapsable>
     </PanelBody>
   );

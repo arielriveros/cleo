@@ -1,5 +1,5 @@
 import { Geometry } from "../../core/geometry";
-import { Material, applyInteraction, applyWind, type InteractionConfig, type WindConfig } from "../material";
+import { Material, applyFoliageSurface, applyInteraction, applyWind, setFoliage, type FoliageSurfaceConfig, type InteractionConfig, type WindConfig } from "../material";
 import { TextureManager } from "../systems/textureManager";
 import { AnimatedModel, Skin, Animation, AnimationSampler, AnimationChannel } from "../../animation/animatedModel";
 import { bakeClipCubicSplines } from "../../animation/samplerBake";
@@ -97,7 +97,8 @@ interface GLTFMaterial {
      * Engine settings glTF has no field for, written by Cleo's own exporters (the Creator's Foliage
      * mode). Read back so a generated plant arrives already swaying.
      */
-    extras?: { cleo?: { wind?: WindConfig; translucencyTint?: number[]; interaction?: InteractionConfig } };
+    extras?: { cleo?: { wind?: WindConfig; translucencyTint?: number[]; interaction?: InteractionConfig;
+                        materialType?: string; foliage?: FoliageSurfaceConfig } };
 }
 
 /** `KHR_materials_diffuse_transmission`'s factor, clamped; 0 when the material does not use it. */
@@ -123,6 +124,16 @@ function translucencyTintOf(m: GLTFMaterial): number[] | undefined {
 function interactionOf(m: GLTFMaterial): InteractionConfig | undefined {
     const i = m.extras?.cleo?.interaction;
     return i && typeof i === 'object' ? i : undefined;
+}
+
+/**
+ * The Cleo foliage block (`extras.cleo.materialType: 'foliage'` + `extras.cleo.foliage`): the material is a
+ * FOLIAGE material, with these surface settings. Undefined for any other material.
+ */
+function foliageOf(m: GLTFMaterial): FoliageSurfaceConfig | undefined {
+    if (m.extras?.cleo?.materialType !== 'foliage') return undefined;
+    const f = m.extras.cleo.foliage;
+    return f && typeof f === 'object' ? f : {};
 }
 
 /** The Cleo wind block in a material's extras, or undefined. Never trusted beyond being an object. */
@@ -279,6 +290,8 @@ export interface GltfMaterialDescriptor {
     wind?: WindConfig;
     /** `extras.cleo.interaction`, when a Cleo exporter wrote one. */
     interaction?: InteractionConfig;
+    /** A FOLIAGE material (`extras.cleo.materialType: 'foliage'`): its surface settings, else undefined. */
+    foliage?: FoliageSurfaceConfig;
     textures: {
         baseColorTexture?: number;
         metallicRoughnessTexture?: number;
@@ -754,6 +767,7 @@ export class GLTFLoader {
             translucencyTint: translucencyTintOf(gltfMaterial),
             wind: windOf(gltfMaterial),
             interaction: interactionOf(gltfMaterial),
+            foliage: foliageOf(gltfMaterial),
             textures,
             name: gltfMaterial.name,
         };
@@ -1130,6 +1144,8 @@ export class GLTFLoader {
         if (wind) applyWind(material, wind);
         const interaction = interactionOf(gltfMaterial);
         if (interaction) applyInteraction(material, interaction);
+        const foliage = foliageOf(gltfMaterial);
+        if (foliage) { setFoliage(material, true); applyFoliageSurface(material, foliage); }
         this.materialCache.set(materialIndex, material);
         return material;
     }

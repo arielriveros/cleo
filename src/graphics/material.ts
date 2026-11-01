@@ -483,6 +483,113 @@ function interactionJson(material: Material): InteractionConfig {
 }
 
 /**
+ * The rest of a FOLIAGE material's behaviour (Material.Foliage), beside wind and interaction. All of it runs
+ * only in the foliage shader variants (chunks/foliageSurface.wgsl), so no other material pays for it.
+ *
+ * Variation -- a field of one asset should not look like copies: per plant (hashed from where it stands),
+ * `variationHue` turns the hue by up to that many turns either way, `variationValue` brightens or darkens by
+ * up to that fraction, and `variationDry` is the share of plants that go toward `dryColor`.
+ *
+ * Weather (from the scene's WeatherNode) -- `wetResponse` is how much rain darkens the plant and makes it
+ * glossy, `snowCover` how much snow settles on its up-facing surfaces, `weightDroop` how far wet or snow
+ * weighs it down (a fraction of its height).
+ *
+ * Gusts -- `rippleSheen` brightens a field where a gust front passes (the waves across a meadow);
+ * `leafFlip` turns leaves in the gusts to show `undersideColor`, their paler backs (leaves only).
+ */
+export interface FoliageSurfaceConfig {
+    variationHue?: number;
+    variationValue?: number;
+    variationDry?: number;
+    dryColor?: number[];
+    wetResponse?: number;
+    snowCover?: number;
+    weightDroop?: number;
+    rippleSheen?: number;
+    leafFlip?: number;
+    undersideColor?: number[];
+}
+
+const FOLIAGE_SURFACE_DEFAULTS: Required<FoliageSurfaceConfig> = {
+    variationHue: 0, variationValue: 0, variationDry: 0, dryColor: [0.55, 0.47, 0.24],
+    wetResponse: 0, snowCover: 0, weightDroop: 0, rippleSheen: 0, leafFlip: 0, undersideColor: [0.72, 0.78, 0.6],
+};
+const FOLIAGE_SURFACE_RANGES: Record<string, [number, number]> = {
+    variationHue: [0, 0.5], variationValue: [0, 1], variationDry: [0, 1], wetResponse: [0, 1],
+    snowCover: [0, 1], weightDroop: [0, 1], rippleSheen: [0, 1], leafFlip: [0, 1],
+};
+const rgbOr = (v: unknown, fallback: number[]): number[] =>
+    Array.isArray(v) && v.length >= 3 && v.slice(0, 3).every(x => typeof x === 'number' && Number.isFinite(x))
+        ? v.slice(0, 3).map(x => Math.min(1, Math.max(0, x as number))) : [...fallback];
+
+/** Set the foliage surface values that `cfg` carries (absent ones keep what the material has). */
+export function applyFoliageSurface(material: Material, cfg: FoliageSurfaceConfig): void {
+    for (const [key, [lo, hi]] of Object.entries(FOLIAGE_SURFACE_RANGES)) {
+        const v = (cfg as any)[key];
+        if (v !== undefined) material.properties.set(key, Math.min(hi, Math.max(lo, finiteOr(v, (FOLIAGE_SURFACE_DEFAULTS as any)[key]))));
+    }
+    if (cfg.dryColor !== undefined) material.properties.set('dryColor', rgbOr(cfg.dryColor, FOLIAGE_SURFACE_DEFAULTS.dryColor));
+    if (cfg.undersideColor !== undefined) material.properties.set('undersideColor', rgbOr(cfg.undersideColor, FOLIAGE_SURFACE_DEFAULTS.undersideColor));
+}
+
+/** A material's foliage surface values, defaults filled in. */
+export function foliageSurfaceOf(material: Material): Required<FoliageSurfaceConfig> {
+    const out: any = {};
+    for (const key of Object.keys(FOLIAGE_SURFACE_RANGES)) {
+        const v = material.properties.get(key);
+        out[key] = typeof v === 'number' && Number.isFinite(v) ? v : (FOLIAGE_SURFACE_DEFAULTS as any)[key];
+    }
+    out.dryColor = rgbOr(material.properties.get('dryColor'), FOLIAGE_SURFACE_DEFAULTS.dryColor);
+    out.undersideColor = rgbOr(material.properties.get('undersideColor'), FOLIAGE_SURFACE_DEFAULTS.undersideColor);
+    return out;
+}
+
+/** The foliage surface as serialized JSON: only what differs from the defaults. */
+export function foliageSurfaceJson(material: Material): FoliageSurfaceConfig {
+    const c = foliageSurfaceOf(material);
+    const out: any = {};
+    for (const [key, value] of Object.entries(c)) {
+        const d = (FOLIAGE_SURFACE_DEFAULTS as any)[key];
+        if (Array.isArray(value) ? value.some((x, i) => x !== d[i]) : value !== d) out[key] = value;
+    }
+    return out;
+}
+
+/**
+ * What a NEW foliage material starts with in the editor: sways a little, gives way, varies, answers the
+ * weather. (A parsed one starts from the engine defaults -- all off -- and takes what its JSON carries.)
+ */
+export const FOLIAGE_STARTER: WindConfig & InteractionConfig & FoliageSurfaceConfig = {
+    windStrength: 0.2, windStiffness: 1, windRole: 'plant', windFlutter: 0.3,
+    interactBend: 0.6, interactRecovery: 1.2,
+    variationHue: 0.03, variationValue: 0.12, variationDry: 0.1,
+    wetResponse: 0.5, snowCover: 0.5, weightDroop: 0.3, rippleSheen: 0.4,
+};
+
+/**
+ * Whether this material runs the foliage behaviour (wind, interaction, variation, weather, gusts): a
+ * FOLIAGE material. Its shading `type` stays 'pbr' -- it draws through every PBR program unchanged -- and
+ * only terrain foliage layers look at this, to pick the foliage variants.
+ */
+export function isFoliageMaterial(m: { foliage?: boolean; type?: string } | null | undefined): boolean {
+    return !!m && m.foliage === true && m.type === 'pbr';
+}
+
+/**
+ * Make a PBR material a FOLIAGE material, or back. Turning it into foliage fills every foliage surface value
+ * it lacks with the (off) default: they are uniforms, and a missing one would inherit the previous foliage
+ * draw's. Its wind and interaction settings, kept on any material, come back into effect as they were.
+ */
+export function setFoliage(material: Material, on: boolean): void {
+    material.foliage = on && material.type === 'pbr';
+    if (!material.foliage) return;
+    const missing: any = {};
+    for (const [key, value] of Object.entries(FOLIAGE_SURFACE_DEFAULTS))
+        if (!material.properties.has(key)) missing[key] = value;
+    applyFoliageSurface(material, missing);
+}
+
+/**
  * How much of the camera's exposure an emissive surface takes, 0..1 (HDRP's emission "exposure weight",
  * the same as `Sprite.exposureWeight`). 1, the default, is physical: the glow is a luminance like any
  * other, so it is faint at noon and fierce in a cave. Lower weights hold it closer to one look in every
@@ -558,6 +665,12 @@ export function translucencyTintOf(v: unknown): number[] {
 
 export class Material {
     public type: MaterialType = MaterialType.Basic;
+    /**
+     * A FOLIAGE material (Material.Foliage): PBR shading plus the foliage behaviour, which only the foliage
+     * shader variants of terrain foliage layers run. Serialized as `type: 'foliage'`; in memory the shading
+     * type stays PBR so every PBR path draws it unchanged. Meaningful on PBR materials only.
+     */
+    public foliage = false;
     public properties: Map<string, any>;
     public textures: Map<string, string>;
     public config: MaterialConfig;
@@ -760,6 +873,21 @@ export class Material {
     }
 
     /**
+     * A FOLIAGE material: shades exactly as PBR (same properties, same G-buffer), and is the one material
+     * type terrain foliage layers draw through the foliage variants -- wind, interaction, per-plant variation,
+     * weather and gusts. `foliage` carries those settings; absent ones stay off.
+     */
+    public static Foliage(properties: PBRProperties = {}, config?: MaterialConfig,
+                          foliage: WindConfig & InteractionConfig & FoliageSurfaceConfig = {}): Material {
+        const material = Material.PBR(properties, config);
+        setFoliage(material, true);
+        applyWind(material, foliage);
+        applyInteraction(material, foliage);
+        applyFoliageSurface(material, foliage);
+        return material;
+    }
+
+    /**
      * The landscape's composite material: its layer stack (a base and paint layers, up to
      * MAX_TERRAIN_SURFACES surfaces) composited by chunks/terrainStack.wgsl. Seeds an EMPTY stack — every
      * surface uniform zero, so the flat base colour shows — and `TerrainLayerStack.sync` writes the rest
@@ -795,6 +923,7 @@ export class Material {
             : t === 'blinn_phongSkinned' ? 'blinn_phong'
             : t === 'celSkinned' ? 'cel' : t;
         const type = normalizeType(this.type as any);
+        const isFoliage = type === 'pbr' && this.foliage;
 
         if (type === 'basic') {
             return {
@@ -817,7 +946,7 @@ export class Material {
             };
         } else if (type === 'pbr') {
             return {
-                type,
+                type: isFoliage ? 'foliage' : type,
                 baseColor: this.properties.get('baseColor'),
                 metallic: this.properties.get('metallic'),
                 roughness: this.properties.get('roughness'),
@@ -840,6 +969,7 @@ export class Material {
                 ...uvJson(this),
                 ...windJson(this),
                 ...interactionJson(this),
+                ...(isFoliage ? foliageSurfaceJson(this) : {}),
                 ...emissiveWeightJson(this),
                 // Fixed keys, not a dump of the map: that keeps the derived `ormTexture` out of assets.
                 textures: {
@@ -931,6 +1061,7 @@ export class Material {
                   || m.windRole !== undefined || m.windFlutter !== undefined)) applyWind(material, m);
         if (m && (m.interactBend !== undefined || m.interactRecovery !== undefined)) applyInteraction(material, m);
         if (m && m.emissiveExposureWeight !== undefined) setEmissiveExposureWeight(material, m.emissiveExposureWeight);
+        if (material.foliage) applyFoliageSurface(material, m);
         return material;
     }
 
@@ -964,8 +1095,8 @@ export class Material {
                 invertHeight: !!m.invertHeight,
                 clipSilhouette: !!m.clipSilhouette,
             }, config);
-        } else if (type === 'pbr') {
-            return Material.PBR({
+        } else if (type === 'pbr' || type === 'foliage') {
+            const pbr = Material.PBR({
                 ...uvFieldsOf(m),
                 baseColor: m.baseColor || [1, 1, 1],
                 metallic: m.metallic ?? 0.0,
@@ -1005,6 +1136,10 @@ export class Material {
                     mask: m.textures?.mask
                 }
             }, config);
+            // Foliage shades as PBR; the type is what routes it to the foliage variants. Its foliage
+            // surface values are read in `parse`, after the wind and interaction.
+            if (type === 'foliage') setFoliage(pbr, true);
+            return pbr;
         } else if (type === 'cel') {
             const texData = m.textures || {};
             return Material.Cel({

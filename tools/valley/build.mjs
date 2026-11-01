@@ -845,6 +845,9 @@ function creatorMaterial({ spec, manifest, dir }, key, m) {
     ...(m.translucency && m.translucencyTint?.[3] ? { translucencyTint: m.translucencyTint } : {}),
     // How the plant gives way to the knight and to what rolls through it (Material interactBend/Recovery).
     ...(m.interaction?.interactBend ? m.interaction : {}),
+    // Every Creator plant material is a FOLIAGE material (engine Material.Foliage): it alone sways, parts,
+    // varies plant by plant and answers the weather. A rock's stays PBR.
+    ...(m.foliage ? { type: 'foliage', ...m.foliage } : {}),
     ...(m.metallic ? { metallic: m.metallic } : {}),
     ...(m.emissive ? { emissiveFactor: m.emissive, emissiveIntensity: m.emissiveIntensity ?? 1 } : {}),
   }))

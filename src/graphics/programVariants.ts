@@ -54,17 +54,19 @@ const RULES: Readonly<Record<string, Rule>> = {
     pbrGeometryInstancedOpaque: fixed('pbrGeometryInstanced', 'opaque'),
     // The lean foliage programs (chunks/pbrGBuffer.wgsl, CLEO_LEAN): mesh-uv materials on terrain foliage.
     pbrGeometryInstancedLean: fixed('pbrGeometryInstanced', 'lean'),
-    pbrGeometryInstancedLeanWind: fixed('pbrGeometryInstanced', 'leanWind'),
+    pbrGeometryInstancedLeanFoliage: fixed('pbrGeometryInstanced', 'leanFoliage'),
     // The foliage depth prepass and the no-discard colour pass after it (Renderer.foliagePrepass).
     pbrGeometryInstancedPrepass: fixed('pbrGeometryInstanced', 'prepass'),
-    pbrGeometryInstancedPrepassWind: fixed('pbrGeometryInstanced', 'prepassWind'),
+    pbrGeometryInstancedPrepassFoliage: fixed('pbrGeometryInstanced', 'prepassFoliage'),
     pbrGeometryInstancedLeanOpaque: fixed('pbrGeometryInstanced', 'leanOpaque'),
-    pbrGeometryInstancedLeanOpaqueWind: fixed('pbrGeometryInstanced', 'leanOpaqueWind'),
-    // Foliage wind (chunks/foliageWind.wgsl): the instanced programs with the displacement compiled in.
-    pbrGeometryInstancedWind: fixed('pbrGeometryInstanced', 'wind'),
-    blinn_phongGeometryInstancedWind: fixed('blinn_phongGeometryInstanced', 'wind'),
+    pbrGeometryInstancedLeanOpaqueFoliage: fixed('pbrGeometryInstanced', 'leanOpaqueFoliage'),
+    // FOLIAGE materials (Material.Foliage): wind, interaction, weather and the foliage surface compiled in
+    // (chunks/foliageWind.wgsl, chunks/foliageSurface.wgsl). No other material draws through these.
+    pbrGeometryInstancedFoliage: fixed('pbrGeometryInstanced', 'foliage'),
+    shadowMapInstancedFoliage: fixed('shadowMapInstanced', 'foliage'),
+    shadowMapInstancedCutoutFoliage: fixed('shadowMapInstancedCutout', 'foliage'),
+    // The far cards of a foliage rule: the wind alone.
     foliageBillboardInstancedWind: fixed('foliageBillboardInstanced', 'wind'),
-    shadowMapInstancedWind: fixed('shadowMapInstanced', 'wind'),
     shadowMapInstancedCutoutWind: fixed('shadowMapInstancedCutout', 'wind'),
 };
 
@@ -84,16 +86,16 @@ export const EXTRA_LOGICAL_NAMES: Readonly<Record<string, string>> = {
     pbrGeometrySkinnedOpaque: 'pbrGeometrySkinned',
     pbrGeometryInstancedOpaque: 'pbrGeometryInstanced',
     pbrGeometryInstancedLean: 'pbrGeometryInstanced',
-    pbrGeometryInstancedLeanWind: 'pbrGeometryInstanced',
+    pbrGeometryInstancedLeanFoliage: 'pbrGeometryInstanced',
     pbrGeometryInstancedPrepass: 'pbrGeometryInstanced',
-    pbrGeometryInstancedPrepassWind: 'pbrGeometryInstanced',
+    pbrGeometryInstancedPrepassFoliage: 'pbrGeometryInstanced',
     pbrGeometryInstancedLeanOpaque: 'pbrGeometryInstanced',
-    pbrGeometryInstancedLeanOpaqueWind: 'pbrGeometryInstanced',
-    // Wind names likewise always mean their `wind` variant: the base programs have it compiled out.
-    pbrGeometryInstancedWind: 'pbrGeometryInstanced',
-    blinn_phongGeometryInstancedWind: 'blinn_phongGeometryInstanced',
+    pbrGeometryInstancedLeanOpaqueFoliage: 'pbrGeometryInstanced',
+    // Foliage and wind names likewise always mean their variant: the base programs have it compiled out.
+    pbrGeometryInstancedFoliage: 'pbrGeometryInstanced',
+    shadowMapInstancedFoliage: 'shadowMapInstanced',
+    shadowMapInstancedCutoutFoliage: 'shadowMapInstancedCutout',
     foliageBillboardInstancedWind: 'foliageBillboardInstanced',
-    shadowMapInstancedWind: 'shadowMapInstanced',
     shadowMapInstancedCutoutWind: 'shadowMapInstancedCutout',
 };
 
@@ -103,8 +105,8 @@ export const EXTRA_LOGICAL_NAMES: Readonly<Record<string, string>> = {
  * compiles them in the background while the family's base program stands in (Renderer._buildOnDemand).
  */
 export const LAZY_LOGICAL_NAMES: ReadonlySet<string> = new Set([
-    'pbrGeometryInstancedPrepass', 'pbrGeometryInstancedPrepassWind',
-    'pbrGeometryInstancedLeanOpaque', 'pbrGeometryInstancedLeanOpaqueWind',
+    'pbrGeometryInstancedPrepass', 'pbrGeometryInstancedPrepassFoliage',
+    'pbrGeometryInstancedLeanOpaque', 'pbrGeometryInstancedLeanOpaqueFoliage',
 ]);
 
 /** Logical names whose program depends on the shadow filter. */
@@ -164,3 +166,21 @@ export function particleSimProgram(stripMask: number): string {
 /** Precomputed: asked for on every simulation step, where a template string would be garbage per step. */
 const PARTICLE_SIM_NAMES: readonly string[] =
     Array.from({ length: 16 }, (_unused, mask) => mask > 0 ? `particleSim~s${mask}` : 'particleSim');
+
+/**
+ * The program a terrain foliage layer draws one model with (Renderer._foliagePass). `foliage`: the model's
+ * material is a FOLIAGE material and the layer runs the foliage path -- the only way into the `…Foliage`
+ * variants, so no other material compiles or runs wind, interaction, variation or weather. `sway` is the
+ * far cards' wind (billboards only). `pbr`: a PBR-shaded material (foliage included); anything else draws
+ * through the Blinn-Phong program, still.
+ */
+export function foliageProgramFor(o: { billboard: boolean; sway: boolean; foliage: boolean; parallax: boolean;
+                                       afterPrepass: boolean; lean: boolean; pbr: boolean }): string {
+    if (o.billboard) return o.sway ? 'foliageBillboardInstancedWind' : 'foliageBillboardInstanced';
+    if (!o.pbr) return 'blinn_phongGeometryInstanced';
+    if (o.parallax) return 'pbrGeometryInstancedPom';
+    const suffix = o.foliage ? 'Foliage' : '';
+    if (o.afterPrepass) return 'pbrGeometryInstancedLeanOpaque' + suffix;
+    if (o.lean) return 'pbrGeometryInstancedLean' + suffix;
+    return 'pbrGeometryInstanced' + suffix;
+}
