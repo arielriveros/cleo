@@ -1383,6 +1383,8 @@ function enemyNode(spec) {
     walkSpeed: spec.moveSpeed, runSpeed: spec.moveSpeed, turnSpeed: 300, turnThreshold: 170,
     acceleration: 12, facingMode: 'velocity', directionSmoothing: 0.15, jumpSpeed: 0,
     body: capsuleBody(spec.radius ?? 0.3 * s, 1.78 * s, spec.mass ?? 70),
+    // Past it the enemy (model, weapon, bar) stops drawing and posing; its brain and body keep running.
+    ...(ENEMY_DRAW_DISTANCE > 0 ? { drawDistance: ENEMY_DRAW_DISTANCE } : {}),
   }), spec.script)
 }
 
@@ -1405,6 +1407,8 @@ function enemyHealthBar(key, anchorId) {
  */
 /** Per enemy type name, a project's own character: `{ placement(key), weaponPart? }` (writeProject). */
 let ENEMY_MODELS = {}
+/** Metres past which every enemy stops drawing (Node.drawDistance); 0 = never (writeProject). */
+let ENEMY_DRAW_DISTANCE = 0
 
 const ENEMY_BASE = { key: 'base', name: 'Enemy', script: 'SoulsEnemy', material: MAT.hollow, scale: 1, moveSpeed: 3, attacks: [] }
 
@@ -2365,8 +2369,12 @@ export function writeProject({
   // Enemy types played by the project's own characters instead of the mannequin, by type name:
   // { 'Hollow': { placement(key) -> model node, weaponPart? } } (see tools/exampleKit/character.mjs).
   enemyModels = {},
+  // Camera distance past which enemies stop rendering and posing (Node.drawDistance on each type's root,
+  // so the base template and every variant carry it). 0 = drawn at any distance.
+  enemyDrawDistance = 0,
 }) {
   ENEMY_MODELS = enemyModels
+  ENEMY_DRAW_DISTANCE = enemyDrawDistance
   fs.rmSync(out, { recursive: true, force: true })
   fs.mkdirSync(path.join(out, 'libraries'), { recursive: true })
   fs.mkdirSync(path.join(out, 'scenes'), { recursive: true })

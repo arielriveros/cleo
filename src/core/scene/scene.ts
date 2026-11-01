@@ -107,6 +107,7 @@ export class Scene {
     private _landscapes: Set<LandscapeNode>;
     private _tilemaps: Set<TilemapNode> = new Set();
     private _lodGroups: Set<LodGroupNode> = new Set();
+    private _drawDistanceNodes: Set<Node> = new Set();
     private _cameraRigs: Set<CameraRigNode> = new Set();
     // Nodes pinned to a skeleton socket, in traversal order (a follower under a follower comes after it),
     // with the model each one resolved to. Rebuilt with the other derived lists; null owner = unresolved.
@@ -792,6 +793,7 @@ export class Scene {
         this._landscapes = new Set();
         this._tilemaps = new Set();
         this._lodGroups = new Set();
+        this._drawDistanceNodes = new Set();
         this._cameraRigs = new Set();
         this._socketFollowers = new Map();
         this._characters = new Set();
@@ -833,6 +835,8 @@ export class Scene {
                 this._cameraRigs.add(node);
             if (node.socketAttachment)
                 this._socketFollowers.set(node, null);
+            if (node.drawDistance > 0)
+                this._drawDistanceNodes.add(node);
             if (node instanceof CharacterNode)
                 this._characters.add(node);
             if (node instanceof ControllerNode)
@@ -1079,6 +1083,13 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._lodGroups;
+    }
+
+    /** Nodes with a {@link Node.drawDistance}: the renderer distance-culls them each frame. */
+    public get drawDistanceNodes(): Set<Node> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._drawDistanceNodes;
     }
 
     public get cameraRigs(): Set<CameraRigNode> {

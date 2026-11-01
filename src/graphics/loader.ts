@@ -241,7 +241,7 @@ export class Loader {
          * hard. A uv seam always splits regardless — averaging a tangent across one is wrong.
          */
         weldCreaseDeg: number = 0
-    ): { name: string, model: Model | AnimatedModel, transform?: ImportTransform }[] {
+    ): { name: string, model: Model | AnimatedModel, transform?: ImportTransform, bone?: { node: number; name?: string; offset: number[] } }[] {
         const cfg = { wrapping: 'repeat' as const };
 
         // Which material/slot first referenced each image, so an unresolved one can name its origin.
@@ -390,7 +390,7 @@ export class Loader {
                     jointIndices, jointWeights, parsed.animations)
                 : new Model(geometry, material);
 
-            return { name: mesh.name, model, transform: mesh.transform };
+            return { name: mesh.name, model, transform: mesh.transform, ...(mesh.bone ? { bone: mesh.bone } : {}) };
         });
     }
 

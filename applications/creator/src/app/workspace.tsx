@@ -63,7 +63,7 @@ export interface CreatorWorkspaceProps {
 }
 
 /** Bumped when the default layout changes, so stored layouts are rebuilt. */
-const LAYOUT_VERSION = 11;
+const LAYOUT_VERSION = 12;
 const LEFT_WIDTH = 280;
 const RIGHT_WIDTH = 340;
 

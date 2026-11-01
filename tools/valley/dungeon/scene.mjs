@@ -9,6 +9,7 @@
 
 import path from 'path'
 import { boundsOf, decimate } from '../meshes.mjs'
+import { addLods, placeableCopy } from '../lods.mjs'
 import { loadStructure, chunkParts, doorFrames, openDoorways, removePieces } from './structure.mjs'
 import { buildColliders, chunkBoxes, reachability, walkableSoup } from './collision.mjs'
 import { fitOccluders } from '../occluders.mjs'
@@ -119,16 +120,24 @@ export function buildDungeon(kit) {
     axe: ['wooden_axe', 'Wooden Axe'], saber: ['wooden_handle_saber', 'Wooden Saber'],
   }
 
+  // LOD levels and cull distances (lods.mjs). Indoors nothing is seen from far: furniture drops to two
+  // decimated levels and is gone past 45 m, small things keep one level and go at 30 m. A hand-built
+  // prop whose planks are all tiny gets no level, only its cull.
+  const LARGE_LODS = { levels: [{ ratio: 0.45, distance: 12 }, { ratio: 0.15, distance: 25 }], cullDistance: 45 }
+  const SMALL_LODS = { levels: [{ ratio: 0.35, distance: 10 }], cullDistance: 30 }
+
   /** A model asset from `[part, materialId]` pairs; its nodes link their materials as the editor's do. */
   const assets = []
   const folders = {}
-  function libraryModel(key, name, list, collider = null) {
+  function libraryModel(key, name, list, collider = null, lods = LARGE_LODS) {
     const assetId = id(`model:dungeon:${key}`)
     const children = list.map(([part, materialId], i) => modelNode(`model:dungeon:${key}:${i}`, i ? `${name} ${i + 1}` : name, part, materialId))
     const nodeJson = node(name, 'node', { id: id(`model:dungeon:${key}:root`), children })
     const materialIds = [...new Set(list.map(([, m]) => m))]
     const textureIds = [...new Set(materialIds.flatMap(m => kit.texIdsOf(kit.matJson(m))))]
     const asset = { id: assetId, name, nodeJson, textureIds, materialIds, thumbnail: '' }
+    const tris = addLods(kit.ROOT, asset, lods, id)
+    log(`dungeon ${name}: LOD triangles ${tris.join(' / ')}${asset.cullDistance ? `, cull ${asset.cullDistance} m` : ''}`)
     assets.push(asset)
     folders[name] = `${DP}/Models`
     const b = boundsOf(list.map(([p]) => p))
@@ -148,10 +157,10 @@ export function buildDungeon(kit) {
     table: (() => { const t = buildTable(); return libraryModel('table', 'Table', t.parts.map(p => [p, BOARDS]), { type: 'box', size: t.size }) })(),
     'table:short': (() => { const t = buildTable(1.4, 0.8); return libraryModel('table-short', 'Small Table', t.parts.map(p => [p, BOARDS]), { type: 'box', size: t.size }) })(),
     bench: (() => { const b = buildBench(); return libraryModel('bench', 'Bench', b.parts.map(p => [p, BOARDS]), { type: 'box', size: b.size }) })(),
-    'bench:short': (() => { const b = buildBench(1.3); return libraryModel('bench-short', 'Stool Bench', b.parts.map(p => [p, BOARDS]), { type: 'box', size: b.size }) })(),
+    'bench:short': (() => { const b = buildBench(1.3); return libraryModel('bench-short', 'Stool Bench', b.parts.map(p => [p, BOARDS]), { type: 'box', size: b.size }, SMALL_LODS) })(),
     rack: (() => { const r = buildRack(); return libraryModel('rack', 'Weapon Rack', r.parts.map(p => [p, BOARDS])) })(),
     ladder: (() => { const l = buildLadder(L.LADDER.ceiling); return libraryModel('ladder', 'Ladder', l.parts.map(p => [p, BOARDS])) })(),
-    chain: libraryModel('chain', 'Chain', buildChain().parts.map(p => [p, kit.CAGE_MAT])),
+    chain: libraryModel('chain', 'Chain', buildChain().parts.map(p => [p, kit.CAGE_MAT]), null, SMALL_LODS),
     coldFire: libraryModel('cold-fire', 'Cold Campfire', kit.campfire.parts.map(p => [p, kit.CAMPFIRE_MATS[p.material]]), { type: 'cylinder', radius: 0.75, height: 0.4 }),
   }
   for (const [key, [file, name]] of Object.entries(WEAPONS)) {
@@ -160,11 +169,11 @@ export function buildDungeon(kit) {
     // The souls weapons are these same scans: their materials (and textures) are reused, not made twice.
     const mat = souls.materials.find(m => m.name === name)?.id
     if (!mat) throw new Error(`no souls weapon material "${name}"`)
-    MODELS[key] = libraryModel(`weapon-${key}`, name, w.parts.map(p => [p, mat]))
+    MODELS[key] = libraryModel(`weapon-${key}`, name, w.parts.map(p => [p, mat]), null, SMALL_LODS)
     MODELS[key].weapon = w
   }
   kit.mossRocks.forEach((r, i) => {
-    MODELS[`rock:${i}`] = libraryModel(`rock-${i}`, `Rubble ${'ABCD'[i]}`, [[r.part, kit.MOSS_ROCK_MAT]], { type: 'box', size: boundsOf([r.part]).size })
+    MODELS[`rock:${i}`] = libraryModel(`rock-${i}`, `Rubble ${'ABCD'[i]}`, [[r.part, kit.MOSS_ROCK_MAT]], { type: 'box', size: boundsOf([r.part]).size }, SMALL_LODS)
   })
 
   /** World-space AABB boxes of a placed prop's collider, for the reachability check. */
@@ -172,7 +181,8 @@ export function buildDungeon(kit) {
   let placed = 0
   /** A placed copy of a library model: its subtree re-keyed, linked by `__modelId`, a static collider. */
   function placeModel(model, key, position, rotation = [0, 0, 0], scale = [1, 1, 1]) {
-    const copy = souls.clone(model.asset.nodeJson)
+    // The LOD wrapper when the asset has levels or a cull (lods.mjs): transform, link and body go on it.
+    const copy = placeableCopy(model.asset)
     let i = 0
     const rekey = (n) => { n.id = id(`dungeon:placed:${key}:${i++}`); (n.children ?? []).forEach(rekey) }
     rekey(copy)

@@ -155,6 +155,14 @@ export class Node {
   // separate from _visible: that setter emits SCENE_CHANGED and, on ModelNode, writes castShadow.
   protected _lodVisible: boolean = true;
 
+  // Draw distance (metres, 0 = never): past it the renderer hides this node's whole subtree, and animated
+  // models in it stop posing. Authored (inspector + serialized). `_drawCulled` is this node's own verdict;
+  // `_drawCullDepth` counts how many of this node and its ancestors are currently culled, so nested draw
+  // distances and children attached later all agree. Like _lodVisible, never touches _visible.
+  protected _drawDistance = 0;
+  protected _drawCulled = false;
+  protected _drawCullDepth = 0;
+
   // Gradual despawn (see {@link remove}). `_despawnFade` is this node's own dissolve factor, 1 = solid; the
   // renderer multiplies it down the parent chain. `_despawnFading` is the dissolve in progress, if any.
   protected _despawnFade: number = 1;
@@ -349,6 +357,8 @@ export class Node {
     node.parent = this;
     if (index === undefined || index < 0 || index >= this._children.length) this._children.push(node);
     else this._children.splice(index, 0, node);
+    // A child attached under a distance-culled node (a weapon spawned into a far enemy) is hidden with it.
+    if (this._drawCullDepth) node._shiftDrawCull(this._drawCullDepth);
 
     // Scene FIRST, then the handlers: onStart routinely calls this.after/this.every, which go through
     // `this.scene`, and start() below reads `scene.spawnRulesEnabled`.
@@ -409,6 +419,7 @@ export class Node {
     node.parent = null;
     node.scene = null;
     this._children.splice(index, 1);
+    if (this._drawCullDepth) node._shiftDrawCull(-this._drawCullDepth);
     // The detach half of a re-parent is flagged so a recorder can ignore it — the addChild that follows
     // describes the same move in full.
     engineEventBus.emit('SCENE_CHANGED', {
@@ -876,6 +887,7 @@ export class Node {
       spawnOnStart: this._spawnOnStart,
       ...(this._motionBlur !== 'full' ? { motionBlur: this._motionBlur } : {}),
       ...(this._cameraDither ? { cameraDither: true } : {}),
+      ...(this._drawDistance > 0 ? { drawDistance: this._drawDistance } : {}),
       ...(this._socketAttachment ? { socketAttachment: { ...this._socketAttachment } } : {}),
       ...(await this._serializePayload()),
     };
@@ -918,6 +930,7 @@ export class Node {
     // through the setter: the setter fans out to children, and this node has none yet.
     if (json.motionBlur === 'objectOnly' || json.motionBlur === 'none') node._motionBlur = json.motionBlur;
     if (json.cameraDither === true) node._cameraDither = true;
+    if (typeof json.drawDistance === 'number' && json.drawDistance > 0) node._drawDistance = json.drawDistance;
 
     if (json.socketAttachment && typeof json.socketAttachment.socket === 'string') {
       node._socketAttachment = {
@@ -1269,6 +1282,49 @@ export class Node {
 
   /** The socket this node is pinned to, or null. See {@link SocketAttachment}. */
   public get socketAttachment(): SocketAttachment | null { return this._socketAttachment; }
+  /**
+   * Camera distance (metres, to the node's origin) past which this node and everything under it stop
+   * rendering, and animated models under it stop posing. 0 = always drawn. Scripts, physics and AI keep
+   * running; see {@link drawCulled}.
+   */
+  public get drawDistance(): number { return this._drawDistance; }
+  public set drawDistance(value: number) {
+    const prev = this._drawDistance;
+    this._drawDistance = Number.isFinite(value) && value > 0 ? value : 0;
+    if (this._drawDistance === 0) this.setDrawCulled(false);
+    // The scene keeps the list of draw-distance nodes with its other derived node lists.
+    this._scene?.invalidateNodeLists();
+    this._notifyChange('component', 'drawDistance', prev, this._drawDistance);
+  }
+
+  /** Whether this node is hidden by its own or an ancestor's {@link drawDistance} right now. */
+  public get drawCulled(): boolean { return this._drawCullDepth > 0; }
+
+  /**
+   * Renderer-driven, once per frame: cull past {@link drawDistance} from `eye`, return only once inside
+   * ×0.9 of it so a node on the boundary does not flicker.
+   */
+  public updateDrawCull(eye: ArrayLike<number>): void {
+    const limit = this._drawDistance;
+    if (limit <= 0) { this.setDrawCulled(false); return; }
+    const p = this.worldTransform;
+    const dx = p[12] - eye[0], dy = p[13] - eye[1], dz = p[14] - eye[2];
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    this.setDrawCulled(this._drawCulled ? d > limit * 0.9 : d > limit);
+  }
+
+  /** This node's own draw-distance verdict. Event-less, like {@link setLodVisible}. */
+  public setDrawCulled(culled: boolean): void {
+    if (culled === this._drawCulled) return;
+    this._drawCulled = culled;
+    this._shiftDrawCull(culled ? 1 : -1);
+  }
+
+  private _shiftDrawCull(delta: number): void {
+    this._drawCullDepth += delta;
+    for (const child of this._children) child._shiftDrawCull(delta);
+  }
+
   public set socketAttachment(value: SocketAttachment | null) {
     const prev = this._socketAttachment;
     this._socketAttachment = value && value.socket ? { target: value.target || 'parent', socket: value.socket } : null;
@@ -2112,7 +2168,7 @@ export class Node {
    * Whether this node renders. Reflects both the authored flag and renderer-driven LOD/distance
    * culling, so it can read `false` on a node you never hid — see {@link setLodVisible}.
    */
-  public get visible(): boolean { return this._visible && this._lodVisible; }
+  public get visible(): boolean { return this._visible && this._lodVisible && this._drawCullDepth === 0; }
   /** Sets authored visibility, recursively for every descendant. */
   public set visible(value: boolean) {
     const changed = this._visible !== value;

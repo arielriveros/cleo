@@ -97,6 +97,29 @@ describe('animation LOD', () => {
         for (let i = 0; i < 16; i++) expect(a[i]).toBeCloseTo(b[i], 9);
     });
 
+    it('stops posing while draw-distance culled, keeps the clock, and poses on the frame it returns', () => {
+        Animator.lod.enabled = false;   // the culled tier must hold even with the stride LOD off
+        const full = makeAnimator();
+        const culled = makeAnimator();
+        let posed = 0, last = mat4.clone(culled.getFinalBoneMatrices()[0]);
+        for (let frame = 0; frame < 30; frame++) {
+            full.setLod(true, 0);
+            culled.setLod(false, 100, true);
+            full.update(1 / 60);
+            culled.update(1 / 60);
+            expect(culled.currentTime).toBeCloseTo(full.currentTime, 9);
+            const m = culled.getFinalBoneMatrices()[0];
+            if (!mat4.exactEquals(m, last)) { posed++; last = mat4.clone(m); }
+        }
+        expect(posed).toBeLessThanOrEqual(1);   // at most the one pose on the tier change
+        culled.setLod(true, 0);
+        full.setLod(true, 0);
+        culled.update(1 / 60);
+        full.update(1 / 60);
+        const a = culled.getFinalBoneMatrices()[0], b = full.getFinalBoneMatrices()[0];
+        for (let i = 0; i < 16; i++) expect(a[i]).toBeCloseTo(b[i], 9);
+    });
+
     it('poses every frame when exempt or disabled', () => {
         const a = makeAnimator();
         a.lodExempt = true;

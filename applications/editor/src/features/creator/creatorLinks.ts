@@ -17,6 +17,11 @@ export interface CreatorLink {
   folder: string
   modelId?: string
   particleSystemId?: string
+  /** A Motion Creator clip's `.anim` asset. */
+  animationId?: string
+  /** A Character's clips (one `.anim` each) and its pose library. */
+  animationIds?: string[]
+  poseAssetId?: string
   materialIds: string[]
   /** Every texture the sync registered for the asset (garbage-collected when a revision drops one). */
   textureIds: string[]
@@ -53,7 +58,7 @@ export function planCreatorSync(assets: readonly CreatorAssetMeta[], links: Read
   return { upsert, retire }
 }
 
-const KIND_FOLDER: Record<CreatorAssetKind, string> = { foliage: 'Foliage', fx: 'FX', world: 'World' }
+const KIND_FOLDER: Record<CreatorAssetKind, string> = { foliage: 'Foliage', fx: 'FX', world: 'World', motion: 'Motion', character: 'Characters' }
 
 /** A name safe as one path segment. */
 export function folderSafe(name: string): string {
@@ -73,6 +78,10 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(
 export const creatorIds = {
   model: (cid: string) => `cr_${cid}`,
   particleSystem: (cid: string) => `cr_${cid}`,
+  animation: (cid: string) => `cr_${cid}`,
+  /** One `.anim` per kept clip of a Character, by clip name. */
+  characterClip: (cid: string, clip: string) => `cr_${cid}_${slug(clip)}`,
+  poseAsset: (cid: string) => `cr_${cid}_poses`,
   /** One material per mesh part ("Bark", "Leaves"), so a level that adds or drops a part cannot shift them. */
   material: (cid: string, part: string) => `cr_${cid}_${slug(part)}`,
   /** A texture the sync registers from a file of the asset: `fx_flipbook.png` -> `cr_<cid>_fx_flipbook`. */

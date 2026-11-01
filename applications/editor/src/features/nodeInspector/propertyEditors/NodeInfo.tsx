@@ -3,7 +3,7 @@ import type { MotionBlurMode } from 'cleo'
 import { useState, useEffect } from 'react';
 import { useCleoEngine } from '../../EngineContext';
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { PropertyTable, PropertyRow, TextInput, ButtonWithConfirm, Toggle, Hint, SegmentedControl, Select } from '@cleo/app-kit/ui'
+import { PropertyTable, PropertyRow, TextInput, ButtonWithConfirm, Toggle, Hint, SegmentedControl, Select, NumberInput } from '@cleo/app-kit/ui'
 import { InfoIcon } from '../sectionIcons'
 import { validateNodeName } from '../../../utils/nodeNames'
 import { modelNodeOf } from '../../../utils/models'
@@ -33,6 +33,7 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
   const [spawnOnStart, setSpawnOnStart] = useState(props.node.spawnOnStart);
   const [motionBlur, setMotionBlur] = useState<MotionBlurMode>(props.node.motionBlur);
   const [cameraDither, setCameraDither] = useState(props.node.cameraDither);
+  const [drawDistance, setDrawDistance] = useState(props.node.drawDistance);
   const [converting, setConverting] = useState(false);
 
   useEffect(() => {
@@ -40,6 +41,7 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
     setSpawnOnStart(props.node.spawnOnStart);
     setMotionBlur(props.node.motionBlur);
     setCameraDither(props.node.cameraDither);
+    setDrawDistance(props.node.drawDistance);
   }, [props.node]);
 
   // The scene tree's inline rename mutates the same node object, so the effect above never re-runs for it.
@@ -71,6 +73,14 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
   const handleCameraDitherChange = (value: boolean) => {
     setCameraDither(value);
     props.node.cameraDither = value;
+    eventEmitter.emit('SCENE_CHANGED');
+  }
+
+  // Not a fan-out: the renderer culls the whole subtree from this one node's distance.
+  const handleDrawDistanceChange = (value: number) => {
+    const next = Math.max(0, value);
+    setDrawDistance(next);
+    props.node.drawDistance = next;
     eventEmitter.emit('SCENE_CHANGED');
   }
 
@@ -218,6 +228,12 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
             <PropertyRow label='See-through to camera' divider={false}
               hint='When a camera rig in Dither collision mode has this node between its camera and the player, the part that blocks the view is dithered see-through instead of the camera pulling in. Shadows are unaffected. Applies to the whole subtree.'>
               <Toggle checked={cameraDither} disabled={props.readOnly} onChange={handleCameraDitherChange} />
+            </PropertyRow>
+          }
+          {props.node.name !== 'root' && hasGeometry &&
+            <PropertyRow label='Draw distance' divider={false}
+              hint='Metres from the camera to this node past which it and everything under it stop drawing and casting shadows; animated models in it also stop posing. It comes back once the camera is within 90% of the distance. Scripts, AI and physics keep running. 0 draws at any distance.'>
+              <NumberInput value={drawDistance} min={0} step={5} disabled={props.readOnly} onChange={handleDrawDistanceChange} />
             </PropertyRow>
           }
         </PropertyTable>

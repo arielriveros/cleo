@@ -8,18 +8,25 @@ import {
   renameCreatorAsset, type CreatorAssetKind, type CreatorAssetMeta,
 } from '@cleo/app-kit/creatorLibrary';
 import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore';
+import { beginLoad } from '@cleo/app-kit/feedback/loadingStore';
+import { Button, MenuItem } from '@cleo/app-kit/ui';
+import { RIGGED_ACCEPT, isModelFile } from '../core/riggedImport';
+import { importCharacter } from '../motion/characterImport';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
 import { requestOpen } from '../core/creatorOpen';
-import { useCreatorShell } from './shell';
+import { useCreatorShell, type Tool } from './shell';
 
 // The Creator's Assets tab: the editor's asset explorer (app-kit AssetExplorer), browsing the shared
-// Creator library -- every saved asset, under a root per tool (/Foliage, /FX, /World) and the folders
-// filed in it. Opening an asset switches to its tool and loads it; rename, duplicate, move and delete
+// Creator library -- every saved asset, under a root per tool (/Foliage, /FX, /World, /Motion, and
+// /Characters for uploaded rigged models) and the folders filed in it. **+ Add** uploads a rigged model
+// as a Character (motion/characterImport.ts), the way the editor's + Add imports one. Opening an asset switches to its tool and loads it; rename, duplicate, move and delete
 // act on the library itself, so the editor's /Creator mirror follows. Kept live from the library's
 // channel, so a save in this or another window shows up at once.
 
-const ROOT: Record<CreatorAssetKind, string> = { foliage: '/Foliage', fx: '/FX', world: '/World' };
-const EXT: Record<CreatorAssetKind, string> = { foliage: '.foliage', fx: '.fx', world: '.world' };
+const ROOT: Record<CreatorAssetKind, string> = { foliage: '/Foliage', fx: '/FX', world: '/World', motion: '/Motion', character: '/Characters' };
+const EXT: Record<CreatorAssetKind, string> = { foliage: '.foliage', fx: '.fx', world: '.world', motion: '.motion', character: '.character' };
+/** The tool that opens each kind: a Character is the subject the Motion Creator animates. */
+const TOOL_OF: Record<CreatorAssetKind, Tool> = { foliage: 'foliage', fx: 'fx', world: 'world', motion: 'motion', character: 'motion' };
 const FOLDERS_KEY = 'cleo_creator_explorer_folders';
 const MODE_KEY = 'cleo_creator_explorer_mode';
 
@@ -38,6 +45,8 @@ const ICONS: Record<CreatorAssetKind | 'folder', string> = {
   foliage: glyph("<path d='M12 21V11'/><path d='M12 11c-4 0-7-3-7-7 4 0 7 3 7 7z'/><path d='M12 14c3 0 6-2 6-6-3 0-6 2-6 6z'/>", '#7fc77a'),
   fx: glyph("<path d='M12 3c1 4 5 6 5 11a5 5 0 0 1-10 0c0-3 2-4 2-7 1 1 2 2 3 4 0-3-1-5 0-8z'/>", '#f0a24a'),
   world: glyph("<path d='M3 19l6-9 4 6 3-4 5 7z'/><circle cx='17' cy='6' r='2'/>", '#79a9e8'),
+  motion: glyph("<circle cx='13' cy='4' r='2'/><path d='M9 21l3-7 3 2v5'/><path d='M7 11l4-3 4 3 3-1'/><path d='M12 8v6'/>", '#d58bd8'),
+  character: glyph("<circle cx='12' cy='5' r='2.5'/><path d='M12 8v7'/><path d='M7 11h10'/><path d='M9 21l3-6 3 6'/>", '#e6c26a'),
   folder: glyph("<path d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/>", '#c9b47a'),
 };
 
@@ -89,7 +98,7 @@ export function AssetsPanel() {
     const a = byPathRef.current.get(path);
     if (!a) return;
     requestOpen(a.kind, a.id);
-    if (shell.tool !== a.kind) shell.choose(a.kind);
+    if (shell.tool !== TOOL_OF[a.kind]) shell.choose(TOOL_OF[a.kind]);
   };
 
   const init = useCallback((api: IApi) => {
@@ -97,7 +106,7 @@ export function AssetsPanel() {
     api.intercept('create-file', (cfg: any) => {
       if (cfg.skipProvider) return true;
       if (cfg.file?.type !== 'folder' || !placeOf(cfg.parent ?? '/')) {
-        toast.info('Make folders inside /Foliage, /FX or /World. Assets are made in their tool, with Save as asset.');
+        toast.info('Make folders inside /Foliage, /FX, /World, /Motion or /Characters. Assets are made in their tool, with Save as asset, or added with + Add.');
         return false;
       }
       return true;
@@ -179,11 +188,65 @@ export function AssetsPanel() {
     return a ? ICONS[a.kind] : ICONS.folder;
   }, []);
 
+  // --- + Add ---
+  const [addOpen, setAddOpen] = useState(false);
+  const addRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!addOpen) return;
+    const away = (e: MouseEvent) => { if (!addRef.current?.contains(e.target as globalThis.Node)) setAddOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setAddOpen(false); };
+    window.addEventListener('mousedown', away);
+    window.addEventListener('keydown', esc);
+    return () => { window.removeEventListener('mousedown', away); window.removeEventListener('keydown', esc); };
+  }, [addOpen]);
+  const addCharacter = async (files: File[]) => {
+    if (!files.some(f => isModelFile(f.name))) { toast.info('Pick a .fbx, .glb or .gltf file (with its .bin and textures, if it has them).'); return; }
+    const load = beginLoad('Adding a character', [{ id: 'read', label: 'Reading the model' }], 'overlay', { showAfterMs: 120 });
+    const step = load.step('read').start(files.find(f => isModelFile(f.name))!.name);
+    try {
+      const { id, name, clips } = await importCharacter(files);
+      step.done(name);
+      toast.success(`${name} is in /Characters${clips ? ` with ${clips} clip${clips === 1 ? '' : 's'}` : ''}. The Motion Creator opens it.`);
+      requestOpen('character', id);
+      if (shell.tool !== 'motion') shell.choose('motion');
+    } catch (e) {
+      step.fail(String((e as Error)?.message ?? e));
+      toast.error(String((e as Error)?.message ?? e), { title: 'Could not add the character' });
+    } finally {
+      load.finish();
+      void refresh();
+    }
+  };
+  const addItems = [
+    { label: 'Rigged character…', title: 'Upload a rigged model (.fbx, .glb, .gltf): the Motion Creator can animate it, and its clips and poses sync to the editor',
+      run: () => document.getElementById('creator-character-import')?.click() },
+  ];
+
   if (!ready) return <div className='w-full h-full flex items-center justify-center text-ui text-muted'>Loading the library…</div>;
   return (
     <AssetExplorer
       data={data} apiRef={apiRef} init={init} modeKey={MODE_KEY} idPrefix='creator-asset'
       previews={previews} icons={icons}
+      toolbarStart={<>
+        <div className='relative shrink-0' ref={addRef}>
+          <Button variant='success' size='sm' className='shrink-0 gap-0 h-[20px] text-ui-sm font-semibold leading-none whitespace-nowrap'
+                  onClick={() => setAddOpen(v => !v)} title='Add an asset to the Creator library'>
+            + Add <span className='ml-1 text-ui-2xs'>▾</span>
+          </Button>
+          {addOpen && (
+            <div className='absolute left-0 top-[22px] z-20 min-w-[160px] p-1 bg-surface-raised border border-border rounded shadow-lg'>
+              {addItems.map(item => (
+                <MenuItem key={item.label} className='items-center text-ui-sm whitespace-nowrap' title={item.title}
+                          onClick={() => { setAddOpen(false); item.run(); }}>
+                  {item.label}
+                </MenuItem>
+              ))}
+            </div>
+          )}
+        </div>
+        <input id='creator-character-import' className='hidden' type='file' multiple accept={RIGGED_ACCEPT}
+               onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; if (files.length) void addCharacter(files); }} />
+      </>}
       toolbarEnd={<span className='ml-auto min-w-0 truncate text-ui-sm text-dim hidden lg:inline'>
         Saved assets of every tool · double-click to open · they appear in the editor under /Creator
       </span>}

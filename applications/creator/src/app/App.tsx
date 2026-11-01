@@ -17,6 +17,7 @@ const TOOLS: Record<Tool, { label: string; load: () => Promise<ComponentType> }>
   world: { label: 'World Creator', load: () => import('../world/ui/WorldWorkspace').then(m => m.WorldWorkspace) },
   fx: { label: 'FX Creator', load: () => import('../fx/ui/FxWorkspace').then(m => m.FxWorkspace) },
   foliage: { label: 'Foliage Creator', load: () => import('../foliage/ui/FoliageWorkspace').then(m => m.FoliageWorkspace) },
+  motion: { label: 'Motion Creator', load: () => import('../motion/ui/MotionWorkspace').then(m => m.MotionWorkspace) },
 };
 
 /** The stored tool, or World when nothing (or something no longer offered) is stored. */
@@ -112,6 +113,7 @@ function Shell() {
           { value: 'world', label: 'World Creator', title: 'Landscape heightmaps from landforms and erosion' },
           { value: 'fx', label: 'FX Creator', title: 'Fire and smoke flipbooks from a volumetric fluid simulation' },
           { value: 'foliage', label: 'Foliage Creator', title: 'Grass, rocks and trees with LODs, exported as glTF' },
+          { value: 'motion', label: 'Motion Creator', title: 'Character animation from a few key poses, exported as an .anim clip' },
         ]} />
         <BackendSwitch />
         <div className='flex-1' />

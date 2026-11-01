@@ -5177,10 +5177,12 @@ export class Renderer {
     }
 
     // Distance-based model LOD: every LodGroupNode picks its visible level subtree, or hides past its
-    // cull distance. Visibility flags are rewritten only on a transition.
+    // cull distance; every node with a drawDistance hides its subtree past it (×0.9 hysteresis on the
+    // way back, like the LOD groups). Visibility flags are rewritten only on a transition.
     private _updateModelLOD(scene: Scene): void {
-        if (scene.lodGroups.size === 0) return;
-        for (const group of scene.lodGroups) group.updateLod(this._activeCamera.position);
+        const eye = this._activeCamera.position;
+        for (const group of scene.lodGroups) group.updateLod(eye);
+        for (const node of scene.drawDistanceNodes) node.updateDrawCull(eye);
     }
 
     /** Squared distance from point `p` to the closest point of the AABB [min, max] (0 if inside). */
@@ -9142,6 +9144,9 @@ export class Renderer {
     private _capturePrevTransforms(scene: Scene): void {
         if (!this._velocityWanted()) return;
         for (const node of scene.models) {
+            // A distance-culled model is not drawn and not posed; its stale stamp reads as "no history"
+            // (zero velocity) on the frame it returns, which is the right answer for a pop-in.
+            if (node.drawCulled) continue;
             let entry = this._prevXform.get(node);
             if (entry === undefined) {
                 entry = { world: mat4.create(), bones: null, frame: this._frameIndex };

@@ -13,8 +13,7 @@ import type { AssimpParseResult, AssimpTextureSlots } from 'cleo/graphics/utils/
 import type { GltfParseResult } from 'cleo/graphics/utils/gltfLoader'
 import type { Animation, Skin } from 'cleo/animation/animatedModel'
 import { Geometry } from 'cleo/core/geometry'
-import { readFbxTextures, isBinaryFbx, stripFbxEmbeddedContent, fbxBaseName } from 'cleo/graphics/utils/fbxEmbedded'
-import type { FbxTextureInfo } from 'cleo/graphics/utils/fbxEmbedded'
+import { readFbxSource, bindEmbeddedImages, slotsFromFbx, decodeDataUriImages } from 'cleo/graphics/utils/fbxEmbedded'
 
 /** Non-glTF formats (.obj/.fbx/.glb) — assimp's WASM converter. */
 export interface ParseModelJob {
@@ -163,55 +162,6 @@ export async function runImportJob(job: ImportJob, onProgress: ProgressSink = ()
 }
 
 /**
- * The first binary .fbx among `files`: its texture info, and a copy without its embedded images for
- * assimp (null when it had none to strip). Null for no .fbx, an ASCII one, or one that cannot be read.
- */
-async function readFbxSource(files: File[]): Promise<{ file: File; info: FbxTextureInfo; stripped: Uint8Array | null } | null> {
-  const file = files.find(f => f.name.toLowerCase().endsWith('.fbx'))
-  if (!file) return null
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  if (!isBinaryFbx(bytes)) return null
-  const info = readFbxTextures(bytes)
-  if (!info) return null
-  return { file, info, stripped: info.embedded.length ? stripFbxEmbeddedContent(bytes) : null }
-}
-
-/**
- * Point the glTF's own image references at the embedded images. With the images stripped before
- * conversion, assimp writes each one as a file reference (the authoring path), which the reader could
- * not find among the uploads; the bytes are right here, by the same file name.
- */
-export function bindEmbeddedImages(parsed: GltfParseResult, info: FbxTextureInfo): void {
-  const byName = new Map(info.embedded.map(e => [e.name.toLowerCase(), e]))
-  parsed.images = parsed.images.map(image => {
-    const ref = image.kind === 'missing' || image.kind === 'path' ? image.uri : image.kind === 'file' ? image.fileName : undefined
-    const hit = ref ? byName.get(fbxBaseName(decodeURIComponent(ref)).toLowerCase()) : undefined
-    return hit ? { kind: 'bytes', bytes: hit.bytes, mime: hit.mime } : image
-  })
-}
-
-/**
- * The FBX material slots as the assembler's recovered slots, aligned to the glTF materials BY NAME (assimp
- * keeps the names; the glTF reader renumbers materials by first use, so position is not reliable). Falls
- * back to position only when the names do not line up at all.
- */
-export function slotsFromFbx(fbx: FbxTextureInfo, parsed: GltfParseResult): AssimpTextureSlots[] {
-  const byName = new Map(fbx.materials.map(m => [m.name, m]))
-  const named = parsed.materials.some(d => d.name && byName.has(d.name))
-  return parsed.materials.map((d, i) => {
-    const m = named ? (d.name ? byName.get(d.name) : undefined) : fbx.materials[i]
-    if (!m) return {}
-    const s = m.slots
-    return {
-      baseColorTexture: s.DiffuseColor,
-      normalMap: s.NormalMap ?? s.Bump,
-      occlusionMap: s.AmbientColor,
-      metallicRoughnessTexture: s.SpecularColor ?? s.SpecularFactor,
-    }
-  })
-}
-
-/**
  * Weld every mesh in place: geometry, rebuilt tangents and — for a skinned mesh — its joint indices and
  * weights, carried into the welded vertex order (an un-carried skin explodes the mesh when animated).
  */
@@ -229,17 +179,4 @@ export function weldDescriptors(parsed: GltfParseResult, creaseDeg: number): voi
     }
     if (skinned) [mesh.jointIndices, mesh.jointWeights] = attributes
   }
-}
-
-/** Replace base64 `data:` image URIs with decoded bytes, so the main thread receives transferable bytes. */
-function decodeDataUriImages(parsed: GltfParseResult): void {
-  parsed.images = parsed.images.map(image => {
-    if (image.kind !== 'dataUri') return image
-    const match = /^data:([^;,]+);base64,/.exec(image.uri)
-    if (!match) return image
-    const binary = atob(image.uri.slice(match[0].length))
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    return { kind: 'bytes', bytes, mime: match[1] }
-  })
 }

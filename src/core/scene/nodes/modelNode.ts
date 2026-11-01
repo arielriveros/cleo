@@ -306,7 +306,7 @@ export class ModelNode extends Node {
         // meshes hold their bind pose.
         if (this._animator && this._scene?.animationsEnabled !== false) {
             const start = sceneStatsDetail.enabled ? performance.now() : 0;
-            this._animator.setLod(this.cameraVisible, this.cameraDistance);
+            this._animator.setLod(this.cameraVisible, this.cameraDistance, this.drawCulled);
             this._animator.checkTriggers();
             this._animator.update(delta);
             if (sceneStatsDetail.enabled) sceneStats.animatorMs += performance.now() - start;

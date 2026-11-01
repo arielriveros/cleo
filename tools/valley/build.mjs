@@ -39,6 +39,7 @@ import {
 import { CREATOR_FOLIAGE, TREE_CULL, generateCreatorFoliage } from './creatorFoliage.mjs'
 import { buildProps } from './props.mjs'
 import { houseColliders } from './houses.mjs'
+import { addLods, placeableCopy } from './lods.mjs'
 import { fitOccluders } from './occluders.mjs'
 import { buildKnight } from './knight.mjs'
 import { buildHollow, buildStrongKnight } from './enemies.mjs'
@@ -751,8 +752,15 @@ function propModelAsset(p) {
   const nodeJson = node(p.name, 'node', { id: id(`model:${p.key}:root`), children })
   const materialIds = [...new Set([...p.parts, ...(p.sails ?? [])].map(x => SURFACES[x.surface]))]
   const textureIds = [...new Set(materialIds.flatMap(m => texIdsOf(matJson(m))))]
-  return { id: assetId, name: p.name, nodeJson, textureIds, materialIds, thumbnail: '' }
+  const asset = { id: assetId, name: p.name, nodeJson, textureIds, materialIds, thumbnail: '' }
+  // Landmarks, seen from across the valley: two decimated levels and no cull (the Playable camera's far
+  // plane is 100 m anyway). The windmill's sails are decimated with the rest and keep their script on
+  // every level, so a level switch never stops them turning.
+  const tris = addLods(ROOT, asset, { levels: BUILDING_LODS }, id)
+  log(`building ${p.name}: LOD triangles ${tris.join(' / ')}`)
+  return asset
 }
+const BUILDING_LODS = [{ ratio: 0.4, distance: 40 }, { ratio: 0.15, distance: 80 }]
 const propAssets = props.map(propModelAsset)
 
 /**
@@ -760,7 +768,9 @@ const propAssets = props.map(propModelAsset)
  * roof boxes (in the prop's own space, which is the node's); anything else a convex collider over its body.
  */
 function placedBuilding(b, asset) {
-  const copy = clone(asset.nodeJson)
+  // The LOD wrapper (lods.mjs): the body, the transform and the links go on it, and its levels keep the
+  // asset root's identity transform, so the collider shapes stay in the prop's own space.
+  const copy = placeableCopy(asset)
   let i = 0
   const rekey = (n) => { n.id = id(`placed:${b.key}:${i++}`); (n.children ?? []).forEach(rekey) }
   rekey(copy)
@@ -1897,6 +1907,9 @@ const result = souls.writeProject({
   models: [...CHARACTER_MODELS, ...propAssets, ...foliageAssets, ...dungeon.models],
   rigs: [knight.rig, hollow.rig, strongKnight.rig],
   enemyModels: ENEMY_MODELS,
+  // Enemies across the valley stop drawing and posing past 60 m (the camera's far plane is 100 m); in the
+  // dungeon the walls and the occlusion culling already hide most of them well inside that.
+  enemyDrawDistance: 60,
   templates: [BARREL_TEMPLATE, DEBRIS_TEMPLATE, CAVE_TEMPLATE, ...Object.values(FIRE_TEMPLATES)],
   excludeTemplates: [LEVEL.torch.id, LEVEL.bonfire.id],
   tilesets: [FIRE_TILESET],

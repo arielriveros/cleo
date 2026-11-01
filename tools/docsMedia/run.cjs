@@ -16,6 +16,9 @@
 //   POST /canvas?out=F    the engine canvas's own pixels (full render size) to PNG F.
 //   POST /frames?dir=D&n=N&fps=F[&crop=…]   N PNG frames into D, F per second (for a GIF).
 //   POST /record?dir=D&seconds=S   a screencast: S seconds of frames as JPEGs in D, with frames.json (times).
+//   POST /click?x=X&y=Y   a real left click at CSS pixel (X, Y).
+//   POST /drag?x1=&y1=&x2=&y2=[&steps=N]   a real left-button drag between two CSS pixels.
+//   POST /files?selector=S&path=F[&path=…]   files picked into the <input type=file> matching S.
 //   POST /reload, POST /quit
 //
 // tools/docsMedia/README.md lists every shot and the calls that take it.
@@ -164,6 +167,34 @@ function control() {
                 frames.forEach((f, i) => fs.writeFileSync(path.join(dir, `f${String(i).padStart(4, '0')}.jpg`), Buffer.from(f.data, 'base64')));
                 fs.writeFileSync(path.join(dir, 'frames.json'), JSON.stringify(frames.map(f => f.t - t0)));
                 out = { dir, frames: frames.length, seconds: frames.length ? frames[frames.length - 1].t - t0 : 0 };
+            } else if (url.pathname === '/click') {
+                // A real left click at CSS pixel (x, y): libraries that ignore synthetic DOM events
+                // (dockview's tabs) see it as a user's.
+                const x = Number(url.searchParams.get('x')), y = Number(url.searchParams.get('y'));
+                for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased'])
+                    await cdp('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 });
+                out = true;
+            } else if (url.pathname === '/drag') {
+                // A real left-button drag from (x1, y1) to (x2, y2) in `steps` moves, then a release.
+                const n = (k) => Number(url.searchParams.get(k));
+                const [x1, y1, x2, y2] = [n('x1'), n('y1'), n('x2'), n('y2')];
+                const steps = Math.max(1, n('steps') || 12);
+                await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x1, y: y1, buttons: 0 });
+                await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: x1, y: y1, button: 'left', buttons: 1, clickCount: 1 });
+                for (let i = 1; i <= steps; i++) {
+                    const t = i / steps;
+                    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t, button: 'left', buttons: 1 });
+                    await sleep(16);
+                }
+                await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x2, y: y2, button: 'left', buttons: 0, clickCount: 1 });
+                out = true;
+            } else if (url.pathname === '/files') {
+                // Pick files into an <input type=file>, as the file dialog would: ?selector=CSS&path=F (repeatable).
+                const { root } = await cdp('DOM.getDocument', { depth: 0 });
+                const { nodeId } = await cdp('DOM.querySelector', { nodeId: root.nodeId, selector: url.searchParams.get('selector') });
+                if (!nodeId) throw new Error(`no element for ${url.searchParams.get('selector')}`);
+                await cdp('DOM.setFileInputFiles', { nodeId, files: url.searchParams.getAll('path') });
+                out = true;
             } else if (url.pathname === '/reload') { await cdp('Page.reload', { ignoreCache: true }); out = true; }
             else if (url.pathname === '/quit') {
                 res.end('{}');
@@ -188,7 +219,9 @@ function control() {
         `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${PROFILE}`, '--no-first-run', '--no-default-browser-check',
         '--enable-unsafe-webgpu', '--force-device-scale-factor=1', `--window-size=${WIDTH + 16},${HEIGHT + 140}`,
         '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
-        `http://localhost:${EDITOR_PORT}/`,
+        // DOCS_MEDIA_START=creator opens Cleo Creator (on the editor origin) instead of the editor, which
+        // would otherwise open its last project first -- the Valley's load holds the page for minutes.
+        process.env.DOCS_MEDIA_START === 'creator' ? `http://localhost:${EDITOR_PORT}/creator/` : `http://localhost:${EDITOR_PORT}/`,
     ], { stdio: 'ignore' });
     children.push(chrome);
     await connect();

@@ -1572,12 +1572,21 @@ export class Animator {
     /** Wall-clock time since foot IK last ran, so its smoothing keeps real time across skipped frames. */
     private _ikDelta = 0;
 
-    /** Pick the LOD tier from what the camera saw last frame. Called by ModelNode before each update. */
-    public setLod(visible: boolean, distance: number): void {
+    /**
+     * Pick the LOD tier from what the camera saw last frame. Called by ModelNode before each update.
+     * `culled`: the model is hidden by a draw distance (Node.drawDistance) — no pose at all until it is
+     * back. Honoured even with `lod.enabled` off, since nothing that shows the pose is drawn.
+     */
+    public setLod(visible: boolean, distance: number, culled = false): void {
         const lod = Animator.lod;
         let stride = 1;
         let ik = true;
-        if (lod.enabled && !this.lodExempt) {
+        if (culled && !this.lodExempt) {
+            // Infinite stride: one pose on the tier change (countdown 1), then none until the tier changes
+            // back, which again poses on the very next frame.
+            stride = Number.POSITIVE_INFINITY;
+            ik = false;
+        } else if (lod.enabled && !this.lodExempt) {
             if (visible) {
                 if (distance > lod.fullDistance) stride = 2;
             } else {

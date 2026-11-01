@@ -3,7 +3,7 @@ import { createContext, useContext } from 'react';
 // The Creator's tool switch, for panels that move between tools (the Assets explorer opens a saved asset
 // in the tool that made it).
 
-export type Tool = 'world' | 'fx' | 'foliage';
+export type Tool = 'world' | 'fx' | 'foliage' | 'motion';
 
 export interface CreatorShell {
   tool: Tool;

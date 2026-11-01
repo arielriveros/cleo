@@ -5199,6 +5199,28 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       removeModel: id => { modelsRef.current = modelsRef.current.filter(m => m.id !== id); removeModel(id); },
       removeMaterial: id => { materialsRef.current = materialsRef.current.filter(m => m.id !== id); removeMaterial(id); },
       removeParticleSystem: id => { particleSystemsRef.current = particleSystemsRef.current.filter(p => p.id !== id); removeParticleSystem(id); },
+      animations: () => animationsRef.current,
+      putAnimation: asset => {
+        // The ref first: linkAnimationToRig looks the asset up in it, this same tick.
+        const exists = animationsRef.current.some(a => a.id === asset.id);
+        animationsRef.current = exists ? animationsRef.current.map(a => (a.id === asset.id ? asset : a)) : [...animationsRef.current, asset];
+        if (exists) updateAnimation(asset.id, asset); else addAnimation(asset);
+        // A new bake of a clip already linked: every placement re-resolves it.
+        invalidateAnimationCache(asset.id);
+        if (exists) {
+          for (const r of rigsRef.current) if (r.animationIds?.includes(asset.id)) applyRigLinks(r.id);
+          eventEmitter.current.emit('ANIM_CLIPS_CHANGED');
+        }
+      },
+      removeAnimation: id => { animationsRef.current = animationsRef.current.filter(a => a.id !== id); removeAnimation(id); },
+      ensureRig: (skin, name) => ensureRig(skin, name),
+      putPoseAsset: asset => {
+        const exists = poseAssetsRef.current.some(p => p.id === asset.id);
+        poseAssetsRef.current = exists ? poseAssetsRef.current.map(p => (p.id === asset.id ? asset : p)) : [...poseAssetsRef.current, asset];
+        if (exists) updatePoseAsset(asset.id, asset); else addPoseAsset(asset);
+      },
+      removePoseAsset: id => { poseAssetsRef.current = poseAssetsRef.current.filter(p => p.id !== id); removePoseAsset(id); },
+      linkAnimationToRig: (rigId, animationId) => withoutDirty(() => linkAnimationToRig(rigId, animationId)),
       isUsed: (kind, id, ignore) => {
         if (assetGraph.incoming(assetKey(kind, id)).some(e => !ignore?.has(e.from))) return true;
         const scenes = liveScenes();

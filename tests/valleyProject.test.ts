@@ -306,6 +306,38 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(sails.script).toContain('class ValleyWindmillNode');
     });
 
+    it('places the buildings as LOD groups whose levels are the asset’s, decimated (lods.mjs)', () => {
+        const models = library('models');
+        const tris = (n: any) => allNodes(n).reduce((t, x) => t + (x.type === 'model' ? x.model.geometry.indices.length / 3 : 0), 0);
+        for (const b of nodes().find(n => n.name === 'Buildings').children) {
+            const asset = models.find((m: any) => m.id === b.variables.__modelId.value);
+            // The wrapper instantiateModelAsset builds: lodGroup, one child per level, no cull for landmarks.
+            expect(b.type, b.name).toBe('lodGroup');
+            expect(b.distances, b.name).toEqual([0, ...asset.lods.map((l: any) => l.distance)]);
+            expect(b.children.length, b.name).toBe(asset.lods.length + 1);
+            expect(asset.lods.every((l: any) => l.generated), b.name).toBe(true);
+            expect(asset.cullDistance ?? 0, b.name).toBe(0);
+            // Each level fewer triangles than the last, and linked by level links, never __materialId.
+            const counts = b.children.map(tris);
+            for (let i = 1; i < counts.length; i++) expect(counts[i], `${b.name} level ${i}`).toBeLessThan(counts[i - 1]);
+            for (const level of b.children.slice(1)) for (const m of allNodes(level).filter(x => x.type === 'model')) {
+                expect(m.variables.__materialId, m.name).toBeUndefined();
+                expect(m.variables.__lodMaterialId?.value, m.name).toBeTruthy();
+            }
+        }
+        // Every windmill level keeps its turning sails, so a level switch never stops them.
+        const windmill = nodes().find(n => n.name === 'Windmill' && n.type === 'lodGroup');
+        for (const level of windmill.children)
+            expect(allNodes(level).find(n => n.name === 'Sails')?.script, level.name).toContain('class ValleyWindmillNode');
+    });
+
+    it('gives every enemy type a draw distance on its root, the base template and each variant alike', () => {
+        const enemies = library('templates').filter((t: any) => t.nodeJson?.type === 'character' && t.name !== 'Player');
+        expect(enemies.length).toBeGreaterThanOrEqual(3);
+        for (const t of enemies) expect(t.nodeJson.drawDistance, t.name).toBe(60);
+        expect(library('templates').find((t: any) => t.name === 'Player').nodeJson.drawDistance).toBeUndefined();
+    });
+
     it('fills the pond with water that stays below every bank, under a probe it reflects', () => {
         const water = nodes().find(n => n.name === 'Pond Water');
         const [px, level, pz] = water.position;
@@ -434,6 +466,25 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         // The cave and the ladder name each other, so a trip down and back ends where it began.
         expect(exit.scriptVars.exitTo).toBe('Skull Cave Entrance');
         expect(nodes().find(n => n.name === 'Skull Cave Entrance').scriptVars.exitTo).toBe('Way Out');
+    });
+
+    it('places the dungeon props as LOD groups that cull with distance', () => {
+        const models = new Map(library('models').map((m: any) => [m.id, m]));
+        const placed = dungeonNodes().filter(n => {
+            const m: any = models.get(n.variables?.__modelId?.value);
+            return m && (m.lods?.length || m.cullDistance);
+        });
+        expect(placed.length).toBeGreaterThan(20);
+        for (const n of placed) {
+            const m: any = models.get(n.variables.__modelId.value);
+            expect(n.type, n.name).toBe('lodGroup');
+            expect(n.cullDistance, n.name).toBe(m.cullDistance);
+            expect(n.cullDistance, n.name).toBeGreaterThan(0);
+            expect(n.children.length, n.name).toBe((m.lods?.length ?? 0) + 1);
+        }
+        // The scanned props really have levels; the bookcase and the weapons are the big ones.
+        for (const name of ['Bookcase', 'Ornate Mace', 'Barrel'])
+            expect([...models.values()].find((m: any) => m.name === name)?.lods?.length, name).toBeGreaterThan(0);
     });
 
     it('builds the dungeon from the medieval structure, chunked, every glb material mapped', () => {

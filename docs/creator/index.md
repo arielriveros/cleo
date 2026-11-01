@@ -5,13 +5,14 @@ Editor and a published game, so a preview looks the way the asset will in play, 
 same app-kit (`applications/app-kit`): the same panels, docking, console, tooltips and renderer
 settings.
 
-It has three tools, switched in the top bar:
+It has four tools, switched in the top bar:
 
 | Tool | Makes | Exports |
 |---|---|---|
 | **World Creator** | Landscapes from landform layers and erosion | A 16-bit heightmap (PNG and RAW), slope/curvature/flow/wetness masks, and a JSON sidecar |
 | **FX Creator** | Fire, smoke and explosions from a volumetric fluid simulation | A tileset flipbook (RGBA atlas PNG), a `.tileset` asset, and a JSON sidecar with the particle flipbook settings |
 | **Foliage Creator** | Grass clumps, bushes, trees and rocks from parameters, each with an LOD ladder and its materials | One `.glb` per level (textures embedded), impostor atlases for trees, and a JSON sidecar with the LOD distances |
+| **[Motion Creator](motion.md)** | Character animation from a few key poses: eased in-betweens, overlapping action, IK-planted hands and feet | An `.anim.json` clip with its skeleton, and a JSON sidecar |
 
 Open it from the Editor's menu bar (**Creator**), or run `npm run dev:all` at the repository root and go
 to `http://localhost:8080/creator/`. It lives on the Editor's origin, under `/creator/`, so the two
@@ -31,9 +32,9 @@ Every tool is laid out the same way, so what you learn in one carries to the oth
 - **Right dock** — **Parameters** first, with the preset name, **Reset** and **Presets ▾** at its top,
   then the tool's other tabs: Materials, LOD, Bake, Export.
 - **Bottom** — **Assets** and the **Console**, with the World's **Map** beside them. Assets is the editor's
-  own asset explorer, browsing the [saved assets](#saved-assets) of every tool under `/Foliage`, `/FX`
-  and `/World`: double-click one to open it in its tool; rename, duplicate, move into folders or delete it
-  there. Cards show a picture of the stage taken when the asset last changed.
+  own asset explorer, browsing the [saved assets](#saved-assets) of every tool under `/Foliage`, `/FX`,
+  `/World`, `/Motion` and `/Characters`: double-click one to open it in its tool; rename, duplicate, move into folders or delete it
+  there. **+ Add ▸ Rigged character…** uploads a rigged model as a [character](motion.md#characters). Cards show a picture of the stage taken when the asset last changed.
 - **Status bar** — the running job's progress and Cancel, or a summary of the last result.
 
 ## Saved assets

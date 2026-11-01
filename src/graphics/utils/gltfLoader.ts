@@ -316,6 +316,12 @@ export interface GltfMeshDescriptor {
     geometry: GltfGeometryDescriptor;
     materialIndex: number;
     transform?: ImportTransform;
+    /**
+     * An UNSKINNED mesh under a skeleton bone (an eye, a helmet, a sword in the hand): that bone's node,
+     * and the mesh's transform relative to it at rest (column-major mat4), so a viewer can carry the mesh
+     * with the posed bone. Absent for skinned meshes and meshes outside any skeleton.
+     */
+    bone?: { node: number; name?: string; offset: number[] };
     /** Present only for skinned primitives parsed in animated mode. */
     jointIndices?: Float32Array;
     jointWeights?: Float32Array;
@@ -897,6 +903,7 @@ export class GLTFLoader {
                         geometry: this.describeGeometry(primitive),
                         materialIndex: materialSlot(primitive.material),
                         transform: instance.transform,
+                        ...(instance.bone ? { bone: instance.bone } : {}),
                     };
 
                     if (animated && primitive.attributes.JOINTS_0 !== undefined && primitive.attributes.WEIGHTS_0 !== undefined) {
@@ -1015,9 +1022,11 @@ export class GLTFLoader {
 
     // One entry per scene-node -> mesh reference with the node's world TRS, so a multi-part file places
     // as authored. Falls back to one identity instance per mesh when no node references any.
-    private getMeshInstances(): { meshIndex: number; name?: string; transform?: ImportTransform; skinIndex?: number }[] {
-        const instances: { meshIndex: number; name?: string; transform?: ImportTransform; skinIndex?: number }[] = [];
+    private getMeshInstances(): { meshIndex: number; name?: string; transform?: ImportTransform; skinIndex?: number; bone?: { node: number; name?: string; offset: number[] } }[] {
+        const instances: { meshIndex: number; name?: string; transform?: ImportTransform; skinIndex?: number; bone?: { node: number; name?: string; offset: number[] } }[] = [];
         const nodes = this.gltf.nodes;
+        const jointNodes = new Set<number>();
+        for (const skin of this.gltf.skins ?? []) for (const j of skin?.joints ?? []) jointNodes.add(j);
         if (nodes && nodes.length) {
             let roots: number[] | undefined = this.gltf.scenes?.[this.gltf.scene ?? 0]?.nodes;
             if (!roots || !roots.length) {
@@ -1026,7 +1035,8 @@ export class GLTFLoader {
                 for (const n of nodes) for (const c of n?.children ?? []) hasParent.add(c);
                 roots = nodes.map((_: any, i: number) => i).filter((i: number) => !hasParent.has(i));
             }
-            const visit = (nodeIndex: number, parentWorld: mat4) => {
+            // `bone`: the nearest joint above this node and its world matrix, for unskinned meshes it carries.
+            const visit = (nodeIndex: number, parentWorld: mat4, bone?: { node: number; world: mat4 }) => {
                 const node = nodes[nodeIndex];
                 if (!node) return;
                 const local = mat4.create();
@@ -1054,9 +1064,13 @@ export class GLTFLoader {
                             scale: [s[0], s[1], s[2]],
                         } : undefined,
                         skinIndex: node.skin,
+                        ...(node.skin === undefined && bone ? {
+                            bone: { node: bone.node, name: nodes[bone.node]?.name, offset: Array.from(mat4.multiply(mat4.create(), mat4.invert(mat4.create(), bone.world) ?? mat4.create(), world)) },
+                        } : {}),
                     });
                 }
-                for (const c of node.children ?? []) visit(c, world);
+                const under = jointNodes.has(nodeIndex) ? { node: nodeIndex, world } : bone;
+                for (const c of node.children ?? []) visit(c, world, under);
             };
             for (const r of roots) visit(r, mat4.create());
         }

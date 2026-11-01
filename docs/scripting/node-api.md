@@ -213,6 +213,21 @@ Lets a camera rig whose `collisionMode` is `'dither'` see through this node: whe
 the camera and the player, the blocking part is dithered away instead of the camera pulling in. The
 setter fans out to children. Foliage rules have the same switch (`cameraDither` on the rule).
 
+## Draw distance
+
+```ts
+get drawDistance: number ; set drawDistance(v)   // metres, 0 = always drawn
+get drawCulled: boolean                           // hidden by its own or an ancestor's draw distance now
+```
+
+Past `drawDistance` from the camera (measured to the node's origin), the renderer hides this node and
+everything under it in every pass, shadows included, and animated models under it stop posing. It
+comes back once the camera is inside 90% of the distance. The clock, state machine, events and root
+motion still advance, so the pose is right on the frame it returns. Scripts, AI and physics keep
+running. `visible` reads `false` while culled; the authored flag is untouched. Put it on a character's
+root to cull the model, its weapons and its health bar together. Static models with LOD levels have
+their own `cullDistance` on the LOD group instead.
+
 ## Sockets
 
 Any node can be pinned to a **socket** — a named attach point on a character's bone, authored on the
