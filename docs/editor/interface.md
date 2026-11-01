@@ -2,6 +2,8 @@
 
 The shell: a menu bar, a strip of document tabs, and a dockable workspace of panels.
 
+![The editor with the Valley example open: scene tree, viewport, inspector and asset explorer](../media/editor-overview.jpg)
+
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │ Projects  Save  Save All  Import  Export  VSCode  Publish ▾  Creator │

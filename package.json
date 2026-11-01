@@ -7,6 +7,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "docs:media": "node tools/docsMedia/run.cjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "jsdoc:gaps": "node tools/jsdoc-gaps.mjs",
     "watch:types": "node tools/watchTypes.mjs",

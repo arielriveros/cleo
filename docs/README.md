@@ -4,6 +4,8 @@ Cleo is a WebGL2 / WebGPU game engine with an integrated editor. You build a gam
 **scene** out of **nodes** in the editor, attaching **scripts** written in TypeScript, and
 publishing the result as a self-contained web page or desktop application.
 
+![The knight in the Valley example's village: physical sky, terrain foliage, translucent leaves](media/valley-hero.jpg)
+
 **Engine version:** v1.1.2.4 — see the [changelog](../CHANGELOG.md)
 ([release notes](https://github.com/arielriveros/cleo/releases/tag/v1.1.2.4))
 
@@ -14,6 +16,22 @@ publishing the result as a self-contained web page or desktop application.
 > the **Character Animation workspace** and **Animate** wizard, shared **Animator**, **Bone Mask**
 > and **Pose** assets, animator layers, action slots, clip events and bone sockets. The published-game player contract
 > is at **8** on this branch; the last tagged release shipped 6.
+
+---
+
+## What it looks like
+
+Every picture here is the bundled **Valley** example and its **Dungeon** scene (Projects ▸ Examples),
+captured from the editor and from Play on WebGPU. [tools/docsMedia](../tools/docsMedia/README.md) retakes them.
+
+| | |
+|---|---|
+| ![Running through the Valley: foliage, wind, motion blur and the third-person camera rig](media/valley-run.gif) | ![The Dungeon in Play: torch light, shadows, a roll](media/dungeon-run.gif) |
+| *The Valley in Play: a Character with a Controller, terrain foliage swaying in the Wind, motion blur.* | *The Dungeon: point lights from torches and fire, shadowed stone, the roll.* |
+| ![The editor with the Valley open](media/editor-overview.jpg) | ![Landscape mode: sculpt tools and the layer stack](media/landscape-editor.jpg) |
+| *The [editor](editor/interface.md): scene tree, viewport, inspector and asset explorer.* | *[Landscape mode](editor/terrain.md): sculpt, paint and foliage tools over a 2 km terrain.* |
+| ![Grass parting around a walker in the Foliage Creator](media/foliage-walkthrough.gif) | ![The renderer's debug channels](media/debug-views.jpg) |
+| *[Foliage materials](editor/models-and-materials.md#foliage-materials) give way to what walks through them.* | *The deferred renderer's [channels](editor/rendering.md#channels): final, albedo, normals, shadow cascades.* |
 
 ---
 

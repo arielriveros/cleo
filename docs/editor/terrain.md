@@ -5,6 +5,8 @@ Landscapes are heightfields with a layered surface and scattered foliage. Add on
 
 Landscape mode is only available in **3D scenes**.
 
+![Landscape mode on the Valley: the sculpt tools, the brush and the layer stack](../media/landscape-editor.jpg)
+
 ## The node versus the brushes
 
 Two different places, and the split matters:

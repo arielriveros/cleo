@@ -6,6 +6,8 @@ Each scene keeps its own: when a game switches scenes, the scene it loads brings
 and post with it, in the editor's Play and in a published game alike. Changes made during Play are
 undone by **Stop**, whether a script made them or the panel did.
 
+![The Valley example's Dungeon in Play: torch and fire point lights, shadows, bloom](../media/dungeon-torches.jpg)
+
 Every field with its type and default is in [Render settings](../reference/render-settings.md); this
 page is about using them.
 
@@ -28,6 +30,8 @@ this look wrong":
 
 **Final, Lit Scene, Albedo, Metallic, Normal, Roughness, Emissive, AO, Depth, SSAO, Indirect, Shadow,
 Cascades, Bloom, Bloom Mask, Velocity, TAA History, Overdraw.**
+
+![Final, Albedo, Normal and Cascades on the same view of the Valley](../media/debug-views.jpg)
 
 **SSAO** is the screen-space occlusion; **Indirect** is the bounce light the same pass gathers, before
 it is multiplied by each surface's colour.
