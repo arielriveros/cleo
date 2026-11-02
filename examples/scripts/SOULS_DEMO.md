@@ -134,7 +134,7 @@ SoulsCharacter            hp, defence, team, receiveHit, weapons spawned from te
     └── SoulsHollowWarden       its stats + its phase two
 
 SoulsWeapon               stats, blade hitbox, moves, attackRating, strike
-├── SoulsStraightSword  ├── SoulsGreatsword  ├── SoulsClub  ├── SoulsStaff  └── SoulsHalberd
+├── SoulsLongsword  ├── SoulsGreatsword  ├── SoulsClub  ├── SoulsStaff  └── SoulsHalberd
 ```
 
 | Script | Node | Role |
@@ -205,7 +205,7 @@ changed that value itself.
 
 | Base | Variants | What a variant changes |
 |---|---|---|
-| `Weapons/Weapon` (root + empty `Mesh`) | `Straight Sword`, `Greatsword`, `Club`, `Sorcerer Staff`, `Halberd` | its script (`SoulsStraightSword` …), the grip and parts inside `Mesh`, its moves (`Light1` … `Heavy`) |
+| `Weapons/Weapon` (root + empty `Mesh`) | `Longsword`, `Greatsword`, `Club`, `Sorcerer Staff`, `Halberd` | its script (`SoulsLongsword` …), the grip and parts inside `Mesh`, its moves (`Light1` … `Heavy`) |
 | `Enemies/Enemy` (mannequin, anchors, empty `Weapons`, `Attacks`, health bar, brain) | `Hollow`, `Hollow Sorcerer`, `Elite Knight`, `Hollow Warden` | its script (`SoulsHollow` …), size and tint, anchors, sight, its attacks; the Warden drops the health bar and adds `PhaseAura` |
 
 **When an enemy dies it drops its weapon**: the weapon leaves the hand for the world and becomes a physics
@@ -214,7 +214,7 @@ takes the weapon with it. `dropWeaponOnDeath` and `droppedWeaponMass` on the ene
 fighter does it on demand.
 
 Characters do not hold their weapons in their own template. Each names them in `weaponTemplates`
-(`Straight Sword, Greatsword` on the player, `Club` on the Hollow) and **spawns them on start** into its
+(`Longsword, Greatsword` on the player, `Club` on the Hollow) and **spawns them on start** into its
 `Weapons` group, attached to the right hand. The Elite Knight wields the very `Greatsword` template the
 player does: change it once, both get it. While authoring, the hands are therefore empty; press Play to
 see the weapons held.
@@ -298,7 +298,7 @@ weapon stays where it is, and its swings hit nothing until you add the socket.
 
 | Placeholder | Where | Replace with |
 |---|---|---|
-| Three boxes: blade, guard and grip | Template **Straight Sword**: `Mesh` | Straight sword mesh |
+| A built blade, crossguard, grip and pommel | Template **Longsword**: `Mesh` | Two-handed sword mesh (the right hand at the guard, the left 11 cm below) |
 | Three boxes | Template **Greatsword**: `Mesh` | Greatsword mesh (the player's and the Elite Knight's) |
 | A cylinder | Template **Club**: `Mesh` | The Hollows' club |
 | A cylinder and an orb | Template **Sorcerer Staff**: `Mesh` | The sorcerer's staff |
@@ -352,6 +352,15 @@ There are two controllers on the `Mannequin` rig, alike except for their `Dead` 
 - Walking and strafing keep the guard pose.
 - Attacks, rolls and hit reactions are actions, which play over every layer.
 
+**The player in a fight.** The player's machine adds a bool parameter, `InCombat`, which `SoulsPlayer` sets
+while it is locked on, while any enemy is engaged with it (`SoulsEnemy.engagedWith`), and for
+`combatLinger` seconds (5) after it lands or takes a blow:
+- **CombatIdle** (`Souls_LS_Stance`, looping) replaces Idle: the Longsword's guard, both hands on the hilt.
+  Idle ⇄ CombatIdle trade on the flag; Locomotion stops into whichever one the flag calls for.
+- A **Guard** layer on the **Arms** mask (both shoulders and below) plays `Souls_LS_Guard` while moving in
+  a fight, so the hands stay on the hilt over the legs' footwork. At a sprint (Speed above 4.7) it gives way
+  to the sword run.
+
 ### Clips the player uses
 
 **The combat clips are Mixamo downloads.** These come from `build/animations/`:
@@ -372,10 +381,32 @@ swing's fastest moment gets a short window around it. Pin any time the measureme
 The downloads are slow next to a souls swing, so the moves play them faster with `playSpeed` 1.15–1.6.
 The generator derives the moves' fallback timings, their `lungeStart` and their tracking from the markers.
 
+**The Longsword's clips are made in the Motion Creator.** They are the documents in
+`tools/soulsDemo/longsword/*.motion.json`. Open one in Cleo Creator ▸ Motion ▸ **Open…**, edit it,
+**Download**, and put the `.motion.json` back. Then run:
+
+```
+npx vite-node --config applications/creator/vitest.config.ts tools/soulsDemo/longsword.ts bake
+```
+
+This bakes them with the Creator's own baker into `tools/soulsDemo/longswordClips.json`. `longsword.ts author`
+rewrites the documents from the choreography in that file, overwriting edits made in the Creator.
+
+**The light combo is one clip.** `Souls_LS_Combo` holds all three attacks back to back:
+- each ends on a `next` event;
+- each `Light` move plays its segment, `clipStart` to `clipEnd`;
+- one press plays the first attack and blends back to the guard; pressing again during the swing plays on
+  into the next attack without restarting anything.
+
+The attacks **step**. The feet move and the hips travel, and the moves use `rootMotion`, so the body moves
+exactly as far as the feet do. There is no lunge.
+
 | Clip (placeholder name) | Length | Required events | Referenced by |
 |---|---|---|---|
-| `Souls_Sword_L1` / `L2` / `L3` | 0.9 / 0.9 / 1.1 s | `hit`, `combo`, `recover` | `Weapon_StraightSword/Light1..3` → `clip` |
-| `Souls_Sword_Heavy` | 1.4 s | `hit`, `recover` | `Weapon_StraightSword/Heavy` → `clip` |
+| `Souls_LS_Combo` | 3.1 s (three segments) | per attack: `hit`, `hitEnd, combo`, `recover`, then `next` | `Longsword/Light1..3` → `clip`, `clipStart`, `clipEnd` |
+| `Souls_LS_Heavy` | 1.8 s | `hit`, `hitEnd`, `combo`, `recover` | `Longsword/Heavy` → `clip` |
+| `Souls_LS_Stance` / `Souls_LS_Guard` | 2.4 / 1.8 s, loop | — | the player's `CombatIdle` state / `Guard` layer |
+| `Souls_Sword_L1` / `L2` / `L3`, `Souls_Sword_Heavy` | 0.9–1.4 s | `hit`, `combo`, `recover` | unused since the Longsword replaced the Straight Sword; kept in the library |
 | `Souls_GS_L1` / `L2` | 1.4 s | `hit`, `combo`, `recover` | `Weapon_Greatsword/Light1..2` → `clip` |
 | `Souls_GS_Heavy` | 2.0 s | `hit`, `recover` | `Weapon_Greatsword/Heavy` → `clip` |
 | `Souls_Roll` | 0.7 s | — | `Player` → `rollClip` |
@@ -604,7 +635,7 @@ plays every mannequin clip once its rig is set to **Mannequin** (§11.6).
 
 ### 11.3 Point a move or attack at a new clip
 
-- **Player attack:** open the weapon's template (**Assets ▸ Templates ▸ Weapons ▸ Straight Sword**) and
+- **Player attack:** open the weapon's template (**Assets ▸ Templates ▸ Weapons ▸ Longsword**) and
   select `Light1` (or `Heavy`, …). In **Scripts**, set `clip`. Tune `playSpeed`, `staminaCost` and the `lunge*` fields to suit the motion. Reach comes from
   the blade itself: if the new swing misses, lengthen the lunge or the weapon's `bladeEnd`/`bladeRadius`.
 - **Player one-shots:** select `Player` and set `rollClip`, `drinkClip`, `hitLightClip` and the other
@@ -655,7 +686,7 @@ The scripts find the model automatically: it is the first **Model** child that h
 
 **Replace:**
 1. Import the weapon model (§11.1).
-2. Open the weapon's template (**Assets ▸ Templates ▸ Weapons ▸ Straight Sword**). Under `Mesh`, delete
+2. Open the weapon's template (**Assets ▸ Templates ▸ Weapons ▸ Longsword**). Under `Mesh`, delete
    the placeholder boxes and drag your weapon model in as a child of `Mesh`.
 3. Play, and adjust `Mesh`'s rotation and position until the grip sits in the hand. The weapon root
    cannot be moved while it is attached.
@@ -665,7 +696,7 @@ The scripts find the model automatically: it is the first **Model** child that h
 **Add a new weapon:**
 1. Right-click the **Weapon** template ▸ **Create Variant**. Rename it (e.g. `Battle Axe`).
 2. Give it its look under `Mesh`, and its moves: duplicate the `Light1`/`Heavy` move nodes from the
-   Straight Sword, or add `SoulsMove` nodes, each naming its clip.
+   Longsword, or add `SoulsMove` nodes, each naming its clip.
 3. For its own stats as code, write `SoulsBattleAxe.ts` extending the base weapon and only setting
    defaults, and attach it to the variant's root:
    ```ts
@@ -677,7 +708,7 @@ The scripts find the model automatically: it is the first **Model** child that h
    }
    ```
    (Or keep the base script and set the values on the variant's root — both work.)
-4. Hand it to someone: add its name to their `weaponTemplates` (`Straight Sword, Greatsword, Battle Axe`).
+4. Hand it to someone: add its name to their `weaponTemplates` (`Longsword, Greatsword, Battle Axe`).
    Weapon swap cycles every weapon the player carries.
 
 ### 11.8 Level art
@@ -752,7 +783,7 @@ what the scripts read, so rename an action only together with the script that re
 
 | Weapon | Base | Scaling | Requirements | Poise |
 |---|---|---|---|---|
-| Straight Sword | 100 | STR 0.2 / DEX 0.8 | STR 8, DEX 10 | 15 |
+| Longsword | 112 | STR 0.5 / DEX 0.5 | STR 10, DEX 10 | 20 |
 | Greatsword | 165 | STR 1.0 / DEX 0.15 | STR 16 (starting STR is 10, so it begins penalised) | 32 |
 
 | Moves | Stamina | Damage multiplier |

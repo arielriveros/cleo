@@ -30,6 +30,8 @@ export interface MotionState {
   playing: boolean;
   togglePlay: () => void;
   onExport: () => void;
+  /** Replace the motion being edited with one read from a file. */
+  openMotion: (doc: MotionDoc) => void;
   exporting: boolean;
   /** The key selected on the timeline: its blend (the way into it) is the one being edited. */
   keyId: string | null;

@@ -24,7 +24,7 @@ import { bladeCapsule } from '@/Core/Scripts/SoulsHitbox'
  *
  * ## Weapons
  *
- * A character names its weapons by TEMPLATE in `weaponTemplates` (['Straight Sword', 'Greatsword']) and
+ * A character names its weapons by TEMPLATE in `weaponTemplates` (['Longsword', 'Greatsword']) and
  * spawns them on start under its `Weapons` group (or itself), attached to `weaponSocket`. The first is
  * equipped; `equipWeapon(i)` shows one and hides the rest. The weapon brings its own stats, hitbox and
  * moveset — see SoulsWeapon.

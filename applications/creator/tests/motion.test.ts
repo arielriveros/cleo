@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { buildRig, modelPose } from '../src/motion/motionRig';
-import { bakeMotion, editorPoseBones, limbTip, mirrorPose, poseFromClip, poseLocals, solvedPoseLocals } from '../src/motion/bakeMotion';
+import { bakeMotion, editorPoseBones, gripFrom, limbTip, mirrorPose, poseFromClip, poseLocals, solvedPoseLocals } from '../src/motion/bakeMotion';
 import { exportCharacter, newCharacter, normaliseCharacter } from '../src/motion/character';
 import { parseRiggedDescriptors, riggedSkeleton } from '../src/core/riggedImport';
-import { DEFAULT_MOTION, eulerToQuat, normaliseMotion, presetBlend, quatToEuler, type MotionDoc, type MotionPose } from '../src/motion/motionDoc';
+import { DEFAULT_MOTION, eulerToQuat, motionFromFile, normaliseMotion, presetBlend, quatToEuler, type MotionDoc, type MotionPose } from '../src/motion/motionDoc';
 import { BUILTIN_PRESETS, builtinPreset, evalBlend, normaliseCurve, presetOf, toKeys } from '../src/motion/blendCurve';
 import { GLTFLoader } from 'cleo/graphics/utils/gltfLoader';
 import { chainOf, dragJoint, fabrik, jointPosition, rotateBone } from '../src/motion/poseDrag';
@@ -350,5 +350,134 @@ describe('posing in the viewport', () => {
     const got = modelPose(rig.bones, poseLocals(rig, posed)).rot[fore];
     // 2·acos|dot|, clamped: getAngle is NaN when float error puts the dot a hair over 1.
     expect(2 * Math.acos(Math.min(1, Math.abs(quat.dot(got, want))))).toBeLessThan(1e-3);
+  });
+});
+
+describe('two-handed holds', () => {
+  const idx = (n: string) => rig.byName.get(`mixamorig:${n}`)!;
+  const model = (p: MotionPose) => modelPose(rig.bones, solvedPoseLocals(rig, p));
+  const angle = (a: quat, b: quat) => 2 * Math.acos(Math.min(1, Math.abs(quat.dot(a, b))));
+  /** Model space at time t of a baked clip. */
+  const frameAt = (clip: ReturnType<typeof bakeMotion>, t: number) => modelPose(rig.bones, poseLocals(rig, poseFromClip(rig, clip as any, t)));
+
+  it('an IK goal with a rotation gives the hand that model rotation', () => {
+    const want = quat.setAxisAngle(quat.create(), [0, 1, 0], 0.8);
+    quat.multiply(want, want, rig.restModel.rot[idx('RightHand')]);
+    const p = pose('p', {}, { handR: { pos: [-0.35, 1.25, 0.25], rot: quatToEuler(want) } });
+    const m = model(p);
+    expect(vec3.distance(m.pos[idx('RightHand')], [-0.35, 1.25, 0.25])).toBeLessThan(1e-3);
+    expect(angle(m.rot[idx('RightHand')], want)).toBeLessThan(1e-3);
+  });
+
+  it('a gripping hand rides the lead hand through every baked frame, between the keys too', () => {
+    const lead = (pos: [number, number, number], yaw: number) => ({ pos, rot: quatToEuler(quat.multiply(quat.create(), quat.setAxisAngle(quat.create(), [0, 1, 0], yaw), rig.restModel.rot[idx('RightHand')])) });
+    const a = pose('a', {}, { handR: lead([-0.3, 1.2, 0.3], 0) });
+    const grip = gripFrom(rig, { ...a, ik: { ...a.ik, handL: { pos: [-0.2, 1.1, 0.3] } } }, 'handL', 'handR')!;
+    expect(grip.follow).toBe('handR');
+    const held = (p: MotionPose): MotionPose => ({ ...p, ik: { ...p.ik, handL: { pos: [0, 1, 0], grip } } });
+    const b = pose('b', {}, { handR: lead([-0.1, 1.35, 0.2], 1.2) });
+    const d = doc([held(a), held(b)], [{ id: 'k1', poseId: 'a', time: 0, ...presetBlend('linear') }, { id: 'k2', poseId: 'b', time: 1, ...presetBlend('smooth') }]);
+    const clip = bakeMotion(rig, d);
+    const R = idx('RightHand'), L = idx('LeftHand');
+    for (let t = 0; t <= 1; t += 0.1) {
+      const m = frameAt(clip, t);
+      const want = vec3.add(vec3.create(), m.pos[R], vec3.transformQuat(vec3.create(), grip.offset as unknown as vec3, m.rot[R]));
+      expect(vec3.distance(m.pos[L], want)).toBeLessThan(0.01);
+    }
+  });
+
+  it('dragging or turning the gripping hand moves the hand it holds', () => {
+    const p = pose('p', {}, { handR: { pos: [-0.3, 1.2, 0.3] }, handL: { pos: [0, 1, 0], grip: { follow: 'handR', offset: [0, 0.1, 0], rot: [0, 0, 0] } } });
+    const now = jointPosition(rig, p, idx('LeftHand'));
+    const dragged = dragJoint(rig, p, idx('LeftHand'), vec3.add(vec3.create(), now, [0, 0.1, 0]), { chain: 0, keepLengths: true });
+    expect(dragged.ik!.handR!.pos[1]).toBeCloseTo(1.3, 4);
+    expect(dragged.ik!.handL!.grip).toEqual(p.ik!.handL!.grip);
+    const turned = rotateBone(rig, p, idx('LeftHand'), quat.setAxisAngle(quat.create(), [1, 0, 0], 0.5));
+    expect(turned.ik!.handR!.rot).toBeDefined();
+  });
+
+  it('mirrors a held pose onto the other side', () => {
+    const p = pose('p', {}, {
+      handR: { pos: [-0.3, 1.2, 0.3], rot: quatToEuler(rig.restModel.rot[idx('RightHand')]) },
+      handL: { pos: [0, 1, 0], grip: { follow: 'handR', offset: [0.02, 0.1, 0.01], rot: [0, 10, 0] } },
+    });
+    const m = mirrorPose(rig, p);
+    expect(m.ik!.handL!.pos[0]).toBeCloseTo(0.3, 4);
+    expect(m.ik!.handR!.grip!.follow).toBe('handL');
+    // The mirrored hold puts the right hand where the mirrored left hand was.
+    const a = model(p), b = model(m);
+    const mirrored = vec3.clone(a.pos[idx('LeftHand')]); mirrored[0] = -mirrored[0];
+    expect(vec3.distance(b.pos[idx('RightHand')], mirrored)).toBeLessThan(0.01);
+  });
+
+  it('a key may fire several events; a sidecar opens as its motion', () => {
+    const p = pose('p', {});
+    const d = doc([p], [{ id: 'a', poseId: 'p', time: 0, ...presetBlend() }, { id: 'b', poseId: 'p', time: 0.5, ...presetBlend(), event: 'combo, recover' }]);
+    expect(bakeMotion(rig, d).events).toEqual([{ time: 0.5, name: 'combo' }, { time: 0.5, name: 'recover' }]);
+    expect(motionFromFile({ generator: 'motion', creatorVersion: 1, seed: 1, params: d, output: {} })).toEqual(d);
+    expect(motionFromFile(d)).toEqual(d);
+    expect(motionFromFile({ generator: 'terrain', params: {} })).toBeNull();
+  });
+});
+
+describe('the Valley Longsword motions (tools/soulsDemo/longsword)', () => {
+  it('bake on the souls mannequin with the hands on the hilt and the events inside the clip', async () => {
+    const { readFileSync, readdirSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = join(__dirname, '..', '..', '..', 'tools', 'soulsDemo');
+    const models = JSON.parse(readFileSync(join(root, 'seed', 'models.json'), 'utf8'));
+    const r = buildRig(models[0].nodeJson.children[0].model.skin);
+    const files = readdirSync(join(root, 'longsword')).filter(f => f.endsWith('.motion.json'));
+    expect(files.length).toBeGreaterThanOrEqual(4);
+    expect(files).toContain('Souls_LS_Combo.motion.json');
+    const R = r.bySlot.get('hand.R')!, L = r.bySlot.get('hand.L')!;
+    for (const f of files) {
+      const d = motionFromFile(JSON.parse(readFileSync(join(root, 'longsword', f), 'utf8')))!;
+      const clip = bakeMotion(r, d);
+      const end = clip.samplers[0].input.at(-1)!;
+      expect(clip.samplers.every(s => s.output.every(Number.isFinite))).toBe(true);
+      for (const e of clip.events ?? []) expect(e.time).toBeLessThanOrEqual(end);
+      if (!d.loop) {
+        // Each attack (a combo's segments, between its `next` events): hit, then hitEnd, then combo and recover.
+        const ev = clip.events ?? [];
+        const cuts = [0, ...ev.filter(e => e.name === 'next').map(e => e.time), end + 1];
+        for (let k = 0; k + 1 < cuts.length; k++) {
+          const seg = ev.filter(e => e.time > cuts[k] - 1e-6 && e.time < cuts[k + 1] - 1e-6 && e.name !== 'next');
+          const at = (n: string) => seg.find(e => e.name === n)?.time ?? NaN;
+          expect(at('hit'), `${d.name} attack ${k + 1}`).toBeLessThan(at('hitEnd'));
+          expect(at('hitEnd')).toBeLessThanOrEqual(at('combo'));
+          expect(at('recover')).toBeGreaterThanOrEqual(at('combo'));
+        }
+      }
+      if (d.name === 'Souls_LS_Combo') {
+        // The attacks step: the body ends the combo well forward, and a foot leaves the ground on the way.
+        const hipsZ = (t: number) => modelPose(r.bones, poseLocals(r, poseFromClip(r, clip as any, t))).pos[r.hips][2];
+        expect(hipsZ(end) - hipsZ(0)).toBeGreaterThan(0.7);
+        const footL = r.bySlot.get('foot.L')!;
+        const lifts = Array.from({ length: Math.ceil(end * 15) }, (_, k) => modelPose(r.bones, poseLocals(r, poseFromClip(r, clip as any, k / 15))).pos[footL][1]);
+        expect(Math.max(...lifts) - Math.min(...lifts)).toBeGreaterThan(0.05);
+      }
+      const grip = d.poses[0].ik!.handL!.grip!;
+      for (let t = 0; t <= end; t += 1 / 15) {
+        const m = modelPose(r.bones, poseLocals(r, poseFromClip(r, clip as any, t)));
+        const want = vec3.add(vec3.create(), m.pos[R], vec3.transformQuat(vec3.create(), grip.offset as unknown as vec3, m.rot[R]));
+        expect(vec3.distance(m.pos[L], want), `${d.name} at ${t.toFixed(2)} s`).toBeLessThan(0.02);
+      }
+    }
+  }, 60000);
+});
+
+describe('elbow and knee poles', () => {
+  it('bends the elbow toward its pole', () => {
+    const idx = (n: string) => rig.byName.get(`mixamorig:${n}`)!;
+    const goal = { pos: [0.35, 1.05, 0.25] as [number, number, number] };
+    const elbowX = (pole?: [number, number, number]) =>
+      modelPose(rig.bones, solvedPoseLocals(rig, pose('p', {}, { handL: { ...goal, ...(pole ? { pole } : {}) } }))).pos[idx('LeftForeArm')];
+    const out = elbowX([1.2, 1.2, -0.2]), down = elbowX([0.3, 0.2, 0.1]);
+    expect(out[0]).toBeGreaterThan(down[0] + 0.05);
+    expect(out[1]).toBeGreaterThan(down[1]);
+    // Mirrored with the pose.
+    const m = mirrorPose(rig, pose('p', {}, { handL: { ...goal, pole: [1.2, 1.2, -0.2] } }));
+    expect(m.ik!.handR!.pole![0]).toBeCloseTo(-1.2, 4);
   });
 });

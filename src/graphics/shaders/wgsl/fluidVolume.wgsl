@@ -96,7 +96,7 @@ struct FluidVolumeUniforms {
     u_hasLut: i32,
     u_hasOccupancy: i32,
 };
-@group(1) @binding(4) var<uniform> u_volume: FluidVolumeUniforms;
+@group(1) @binding(4) var<uniform> u_fluid: FluidVolumeUniforms;   // not `u_volume`: GLSL names the u_volume_texture sampler that, and the two would clash
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -137,7 +137,7 @@ fn value_noise(p: vec3<f32>) -> f32 {
 }
 
 fn unproject(uv: vec2<f32>, depth: f32) -> vec3<f32> {
-    let w = u_volume.u_invViewProj * vec4<f32>(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    let w = u_fluid.u_invViewProj * vec4<f32>(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
     return w.xyz / w.w;
 }
 
@@ -151,8 +151,8 @@ fn phase_scale(cos_theta: f32, g: f32) -> f32 {
 /** The sun's share of a smoke sample's light, with Wrenninge's multiple-scattering octaves. */
 fn sun_scatter(t: f32, cos_theta: f32) -> f32 {
     var sum = 0.0; var a = 1.0; var b = 1.0; var c = 1.0;
-    for (var k = 0; k < max(1, u_volume.u_scatterOctaves); k = k + 1) {
-        sum = sum + a * pow(t, b) * phase_scale(cos_theta, u_volume.u_anisotropy * c);
+    for (var k = 0; k < max(1, u_fluid.u_scatterOctaves); k = k + 1) {
+        sum = sum + a * pow(t, b) * phase_scale(cos_theta, u_fluid.u_anisotropy * c);
         a = a * 0.5; b = b * 0.5; c = c * 0.5;
     }
     return sum;
@@ -160,9 +160,9 @@ fn sun_scatter(t: f32, cos_theta: f32) -> f32 {
 
 fn sample_volume(uvw: vec3<f32>) -> vec4<f32> {
     let cur = textureSampleLevel(u_volume_texture, u_volume_sampler, uvw, 0.0);
-    if (u_volume.u_blend >= 1.0) { return cur; }
+    if (u_fluid.u_blend >= 1.0) { return cur; }
     let prev = textureSampleLevel(u_prevVolume_texture, u_prevVolume_sampler, uvw, 0.0);
-    return mix(prev, cur, u_volume.u_blend);
+    return mix(prev, cur, u_fluid.u_blend);
 }
 
 /** Two tap positions (voxel-index space) and their weights along one axis of a cubic B-spline. */
@@ -179,7 +179,7 @@ fn bspline_axis(x: f32) -> vec4<f32> {
 
 /** Tricubic B-spline sampling from 8 trilinear taps (Sigg & Hadwiger, GPU Gems 2 ch. 20). */
 fn sample_smooth(uvw: vec3<f32>) -> vec4<f32> {
-    let n = u_volume.u_voxels;
+    let n = u_fluid.u_voxels;
     let x = uvw * n - vec3<f32>(0.5);
     let ax = bspline_axis(x.x); let ay = bspline_axis(x.y); let az = bspline_axis(x.z);
     var acc = vec4<f32>(0.0);
@@ -197,8 +197,8 @@ const FIRE_EMIT: f32 = 0.6;
 
 /** True when the brick around `uvw` holds nothing. */
 fn brick_empty(uvw: vec3<f32>) -> bool {
-    if (u_volume.u_hasOccupancy == 0) { return false; }
-    let b = clamp(vec3<i32>(floor(uvw * u_volume.u_bricks)), vec3<i32>(0), vec3<i32>(u_volume.u_bricks) - vec3<i32>(1));
+    if (u_fluid.u_hasOccupancy == 0) { return false; }
+    let b = clamp(vec3<i32>(floor(uvw * u_fluid.u_bricks)), vec3<i32>(0), vec3<i32>(u_fluid.u_bricks) - vec3<i32>(1));
     return textureLoad(u_occupancy_texture, b, 0).r <= 0.0;
 }
 
@@ -207,7 +207,7 @@ fn fs_main(in: VertexOutput) -> TraceOutput {
     var out: TraceOutput;
     out.color = vec4<f32>(0.0);
     out.depth = vec4<f32>(0.0);
-    let uv = (in.position.xy + u_volume.u_traceJitter) / u_volume.u_targetSize;
+    let uv = (in.position.xy + u_fluid.u_traceJitter) / u_fluid.u_targetSize;
     // The view ray as a segment from the near plane to the far plane, parameterised t in 0..1. Valid
     // for perspective and orthographic cameras alike.
     let o = unproject(uv, 0.0);
@@ -218,7 +218,7 @@ fn fs_main(in: VertexOutput) -> TraceOutput {
     let tScene = select(dot(unproject(uv, sceneDepth) - o, d) / max(dot(d, d), 1e-20), 1.0, sceneDepth >= 1.0);
 
     // Into the unit box, and slab-clip there.
-    let inv = u_volume.u_volumeInvModel;
+    let inv = u_fluid.u_volumeInvModel;
     let lo = (inv * vec4<f32>(o, 1.0)).xyz;
     let ld = (inv * vec4<f32>(d, 0.0)).xyz;
     let safe = select(ld, vec3<f32>(1e-9), abs(ld) < vec3<f32>(1e-9));
@@ -231,23 +231,23 @@ fn fs_main(in: VertexOutput) -> TraceOutput {
     if (t1 <= t0) { return out; }
 
     // One step is `stepScale` voxels long, whatever the box's aspect and the ray's direction.
-    let voxelsPerT = length(ld * u_volume.u_voxels);
-    let stepVox = max(u_volume.u_stepScale, 0.05);
+    let voxelsPerT = length(ld * u_fluid.u_voxels);
+    let stepVox = max(u_fluid.u_stepScale, 0.05);
     let dt = stepVox / max(voxelsPerT, 1e-6);
-    let jitter = fract(ign(in.position.xy) + f32(u_volume.u_jitterSlot) * 0.61803398875);
+    let jitter = fract(ign(in.position.xy) + f32(u_fluid.u_jitterSlot) * 0.61803398875);
     var t = t0 + dt * jitter;
-    let sun = u_volume.u_sunColor * INV_PI;
-    let smoke = u_volume.u_smokeColor;
+    let sun = u_fluid.u_sunColor * INV_PI;
+    let smoke = u_fluid.u_smokeColor;
     // Scattering angle: between the ray and the direction toward the light, in the box's frame.
-    let cos_theta = dot(normalize(ld), u_volume.u_sunDir);
-    let plain = u_volume.u_anisotropy == 0.0 && u_volume.u_scatterOctaves <= 1;
+    let cos_theta = dot(normalize(ld), u_fluid.u_sunDir);
+    let plain = u_fluid.u_anisotropy == 0.0 && u_fluid.u_scatterOctaves <= 1;
     var glow_rgb = vec3<f32>(1.0, 0.5, 0.15);
-    if (u_volume.u_hasLut != 0) {
+    if (u_fluid.u_hasLut != 0) {
         glow_rgb = textureSampleLevel(u_fireLut_texture, u_fireLut_sampler, vec2<f32>(0.5, 0.5), 0.0).rgb;
     }
-    let detail_s = u_volume.u_detailScale / 10.0;
+    let detail_s = u_fluid.u_detailScale / 10.0;
 
-    let kx = u_volume.u_absorptionScale;
+    let kx = u_fluid.u_absorptionScale;
     var T = vec3<f32>(1.0);
     var col = vec3<f32>(0.0);
     var depthSum = 0.0;
@@ -256,8 +256,8 @@ fn fs_main(in: VertexOutput) -> TraceOutput {
         let uvw = lo + ld * t + vec3<f32>(0.5);
         // Empty-space skipping: jump to where the ray leaves this brick.
         if (brick_empty(uvw)) {
-            let bmin = floor(uvw * u_volume.u_bricks) / u_volume.u_bricks;
-            let bmax = bmin + vec3<f32>(1.0) / u_volume.u_bricks;
+            let bmin = floor(uvw * u_fluid.u_bricks) / u_fluid.u_bricks;
+            let bmax = bmin + vec3<f32>(1.0) / u_fluid.u_bricks;
             let q0 = (bmin - vec3<f32>(0.5) - lo) / safe;
             let q1 = (bmax - vec3<f32>(0.5) - lo) / safe;
             let exitT = min(min(max(q0.x, q1.x), max(q0.y, q1.y)), max(q0.z, q1.z));
@@ -266,63 +266,63 @@ fn fs_main(in: VertexOutput) -> TraceOutput {
             continue;
         }
         var s: vec4<f32>;
-        if (u_volume.u_smoothSampling != 0) { s = sample_smooth(uvw); } else { s = sample_volume(uvw); }
-        if (u_volume.u_detailStrength > 0.0) {
+        if (u_fluid.u_smoothSampling != 0) { s = sample_smooth(uvw); } else { s = sample_volume(uvw); }
+        if (u_fluid.u_detailStrength > 0.0) {
             var n = 0.0;
-            if (u_volume.u_hasDetail != 0) {
+            if (u_fluid.u_hasDetail != 0) {
                 // The noise rides the flow: sample it where this gas came from, two sets cross-faded.
                 let ca = textureSampleLevel(u_detailA_texture, u_detailA_sampler, uvw, 0.0).xyz;
                 let cb = textureSampleLevel(u_detailB_texture, u_detailB_sampler, uvw, 0.0).xyz;
-                n = mix(value_noise(cb * detail_s), value_noise(ca * detail_s), u_volume.u_detailBlend);
+                n = mix(value_noise(cb * detail_s), value_noise(ca * detail_s), u_fluid.u_detailBlend);
             } else {
-                let pv = uvw * u_volume.u_voxels;
-                n = value_noise(vec3<f32>(pv.x * detail_s, pv.y * detail_s - u_volume.u_time * 1.5, pv.z * detail_s));
+                let pv = uvw * u_fluid.u_voxels;
+                n = value_noise(vec3<f32>(pv.x * detail_s, pv.y * detail_s - u_fluid.u_time * 1.5, pv.z * detail_s));
             }
-            s.r = s.r * max(0.0, 1.0 - u_volume.u_detailStrength * n);
+            s.r = s.r * max(0.0, 1.0 - u_fluid.u_detailStrength * n);
         }
         // Density contrast: thinner below half a unit, denser above.
-        if (u_volume.u_sharpen > 0.0 && s.r > 0.0) { s.r = s.r * min(4.0, pow(s.r / 0.5, u_volume.u_sharpen)); }
-        let e = clamp((s.g - u_volume.u_ignition) / max(u_volume.u_emissionRange, 1e-4), 0.0, 1.0);
+        if (u_fluid.u_sharpen > 0.0 && s.r > 0.0) { s.r = s.r * min(4.0, pow(s.r / 0.5, u_fluid.u_sharpen)); }
+        let e = clamp((s.g - u_fluid.u_ignition) / max(u_fluid.u_emissionRange, 1e-4), 0.0, 1.0);
         if (s.r > 1e-4 || e > 0.0) {
-            let aSmoke = vec3<f32>(1.0) - exp(-max(s.r, 0.0) * u_volume.u_absorption * stepVox * kx);
+            let aSmoke = vec3<f32>(1.0) - exp(-max(s.r, 0.0) * u_fluid.u_absorption * stepVox * kx);
             // The fire hides what is behind it by its opacity, and gives light by FIRE_EMIT, independently.
             var aFire = 0.0;
             var aEmit = 0.0;
             if (e > 0.0) {
-                aFire = 1.0 - exp(-e * u_volume.u_emission * u_volume.u_fireOpacity * stepVox);
-                aEmit = 1.0 - exp(-e * u_volume.u_emission * FIRE_EMIT * stepVox);
+                aFire = 1.0 - exp(-e * u_fluid.u_emission * u_fluid.u_fireOpacity * stepVox);
+                aEmit = 1.0 - exp(-e * u_fluid.u_emission * FIRE_EMIT * stepVox);
             }
             // The sunlight reaching here crossed the smoke toward the sun: tinted by it too.
             let tl = max(clamp(s.b, 0.0, 1.0), 1e-6);
             var sunShare = vec3<f32>(pow(tl, kx.x), pow(tl, kx.y), pow(tl, kx.z));
             if (!plain) { sunShare = vec3<f32>(sun_scatter(sunShare.x, cos_theta), sun_scatter(sunShare.y, cos_theta), sun_scatter(sunShare.z, cos_theta)); }
             // Beer-Powder: thin sunlit edges of dense smoke read darker than Beer's law alone.
-            if (u_volume.u_powder > 0.0) {
-                sunShare = sunShare * (1.0 - u_volume.u_powder + u_volume.u_powder * (1.0 - exp(-2.0 * max(s.r, 0.0) * u_volume.u_absorption)));
+            if (u_fluid.u_powder > 0.0) {
+                sunShare = sunShare * (1.0 - u_fluid.u_powder + u_fluid.u_powder * (1.0 - exp(-2.0 * max(s.r, 0.0) * u_fluid.u_absorption)));
             }
             // Sky occlusion: the gas above (three taps up the box) shades the sky light reaching here.
             var sky = 1.0;
-            if (u_volume.u_skyOcclusion > 0.0) {
-                let up = vec3<f32>(0.0, 1.0 / max(u_volume.u_voxels.y, 1.0), 0.0);
+            if (u_fluid.u_skyOcclusion > 0.0) {
+                let up = vec3<f32>(0.0, 1.0 / max(u_fluid.u_voxels.y, 1.0), 0.0);
                 let above = sample_volume(uvw + up * 2.0).r + sample_volume(uvw + up * 5.0).r + sample_volume(uvw + up * 10.0).r;
-                sky = 1.0 - u_volume.u_skyOcclusion * (1.0 - exp(-u_volume.u_absorption * 2.5 * max(above, 0.0)));
+                sky = 1.0 - u_fluid.u_skyOcclusion * (1.0 - exp(-u_fluid.u_absorption * 2.5 * max(above, 0.0)));
             }
-            var lit = u_volume.u_albedo * (sun * (u_volume.u_ambient * sky + (1.0 - u_volume.u_ambient) * sunShare) + u_volume.u_sunAmbient * sky);
+            var lit = u_fluid.u_albedo * (sun * (u_fluid.u_ambient * sky + (1.0 - u_fluid.u_ambient) * sunShare) + u_fluid.u_sunAmbient * sky);
             // The fire's light on the smoke around it, at the fire's own (exposure-compensated) scale.
-            lit = lit + glow_rgb * (u_volume.u_albedo * u_volume.u_fireGlow * u_volume.u_emission * max(s.a, 0.0) * u_volume.u_fireScale);
+            lit = lit + glow_rgb * (u_fluid.u_albedo * u_fluid.u_fireGlow * u_fluid.u_emission * max(s.a, 0.0) * u_fluid.u_fireScale);
             var fire = vec3<f32>(1.0);
-            if (u_volume.u_hasLut != 0) {
+            if (u_fluid.u_hasLut != 0) {
                 fire = textureSampleLevel(u_fireLut_texture, u_fireLut_sampler, vec2<f32>((e * 255.0 + 0.5) / 256.0, 0.5), 0.0).rgb;
             }
             // Soot masking: fire inside dense smoke is dimmed by it, so glow shows through the gaps.
             var soot = 1.0;
-            if (u_volume.u_sootMask > 0.0) { soot = exp(-u_volume.u_sootMask * max(s.r, 0.0) * u_volume.u_absorption); }
-            let fireK = u_volume.u_emission * u_volume.u_fireScale * u_volume.u_fireIntensity;
+            if (u_fluid.u_sootMask > 0.0) { soot = exp(-u_fluid.u_sootMask * max(s.r, 0.0) * u_fluid.u_absorption); }
+            let fireK = u_fluid.u_emission * u_fluid.u_fireScale * u_fluid.u_fireIntensity;
             var glow = fire * (e * fireK * soot);
             // The blue core: the reaction zone (packed as negative A), hidden behind soot.
-            if (u_volume.u_blueCore > 0.0 && s.a < 0.0) {
-                let bc = -s.a * exp(-2.0 * max(s.r, 0.0) * u_volume.u_absorption);
-                glow = glow + u_volume.u_blueCoreColor * (u_volume.u_blueCore * bc * fireK);
+            if (u_fluid.u_blueCore > 0.0 && s.a < 0.0) {
+                let bc = -s.a * exp(-2.0 * max(s.r, 0.0) * u_fluid.u_absorption);
+                glow = glow + u_fluid.u_blueCoreColor * (u_fluid.u_blueCore * bc * fireK);
             }
             let Tm = (T.x + T.y + T.z) / 3.0;
             let contribution = Tm * (1.0 - (1.0 - (aSmoke.x + aSmoke.y + aSmoke.z) / 3.0) * (1.0 - aFire));

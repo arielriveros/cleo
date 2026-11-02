@@ -5,7 +5,9 @@ Editor and a published game, so a preview looks the way the asset will in play, 
 same app-kit (`applications/app-kit`): the same panels, docking, console, tooltips and renderer
 settings.
 
-It has four tools, switched in the top bar:
+It opens on its **home page**, which lists four tools as cards, the way the Editor's project launcher lists
+projects. Click one to open it. While a tool is open, the top bar shows its name and a **Home** button
+that goes back to the home page. A reload keeps the tool that was open; a new window starts at home.
 
 | Tool | Makes | Exports |
 |---|---|---|
@@ -34,7 +36,9 @@ Every tool is laid out the same way, so what you learn in one carries to the oth
 - **Bottom** — **Assets** and the **Console**, with the World's **Map** beside them. Assets is the editor's
   own asset explorer, browsing the [saved assets](#saved-assets) of every tool under `/Foliage`, `/FX`,
   `/World`, `/Motion` and `/Characters`: double-click one to open it in its tool; rename, duplicate, move into folders or delete it
-  there. **+ Add ▸ Rigged character…** uploads a rigged model as a [character](motion.md#characters). Cards show a picture of the stage taken when the asset last changed.
+  there. **+ Add ▸ Rigged character…**, or **Import** beside it, uploads a rigged model as a
+  [character](motion.md#characters). The toolbar is the Editor's: the same **+ Add** menu, opening upward,
+  and the same **Import** button. Cards show a picture of the stage taken when the asset last changed.
 - **Status bar** — the running job's progress and Cancel, or a summary of the last result.
 
 ## Saved assets

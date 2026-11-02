@@ -40,6 +40,16 @@ move the goal, and the arm or leg bends to reach it. A goal stays where it is wh
 so a planted foot does not slide. That is the point of using IK for steps and for hands on a ledge.
 **Release** lets the limb go back to its rotations.
 
+A planted goal has three more options:
+- **Hold rotation** — the hand or foot keeps the turn you give it (the **Turn** sliders), however the arm
+  or leg bends: a blade held at one angle, a foot flat on the floor. The rotate rings on a planted hand
+  turn this.
+- **Point the elbow** / **Point the knee** — the middle joint bends toward this point. Use it to open the
+  elbows out to the sides, or to turn a knee over the toes.
+- **Grip with the other hand** — for a two-handed weapon. The hand holds on to the other one where it is
+  now, and rides it on every frame of the clip, between the keys too, so the hands never come apart.
+  Move or turn either hand and the grip moves with it; the **Grip** sliders shift the hold.
+
 ### Viewport
 
 The quickest way to pose is in the viewport, on the skeleton drawn over the character:
@@ -92,7 +102,8 @@ The shaded part of the ruler past the last key is the overlap tail: the trailing
 ### Key
 
 The selected key's **Pose**, its **Time** in seconds, and its **Event**: a clip event fired when the clip
-reaches the key, such as `hit` or `footstep`. A script receives it in `onAnimationEvent`.
+reaches the key, such as `hit` or `footstep`. A script receives it in `onAnimationEvent`. Several events
+separated by commas, such as `hitEnd, combo`, fire together.
 
 ### Blend
 
@@ -135,7 +146,8 @@ The **Motion** tab holds what shapes the whole clip.
 
 **Clip** — the clip's **Name**, its **Frames per second**, and **Loop**. With Loop on, set the last key to
 the first pose. **Download .anim** writes `<name>.anim.json`, which holds the clip and the skeleton it was
-made on, and a `.motion.json` sidecar that regenerates it.
+made on, and a `.motion.json` sidecar that regenerates it. **Open…** reads a `.motion.json` back to edit
+it again; save it as an asset to keep it in the library.
 
 ## Characters
 

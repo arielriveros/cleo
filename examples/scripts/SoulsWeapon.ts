@@ -10,7 +10,7 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  *   Weapon (template)            this script; Socket: RightHand (attach to socket, target parent)
  *   └── Mesh                     the visible weapon — its local transform IS the grip
  *
- *   Straight Sword (variant)     SoulsStraightSword extends SoulsWeapon — its stats are that class's defaults
+ *   Longsword (variant)          SoulsLongsword extends SoulsWeapon — its stats are that class's defaults
  *   ├── Mesh                     inherited, given the sword's parts and grip
  *   ├── Light1 Light2 Light3     SoulsMove data nodes, added by the variant — the moveset and its clips
  *   └── Heavy

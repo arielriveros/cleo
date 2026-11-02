@@ -103,6 +103,18 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
    */
   public attackReady: boolean = false
 
+  /**
+   * Whether this enemy is fighting `node`: its brain is in an engaged state (Approach, Strafe, Retreat,
+   * Attack) with `node` as its target. The player reads it to stand in its combat stance.
+   */
+  public engagedWith(node: Node): boolean {
+    if (this.isDead || !node) return false
+    const state: string = (this._brain as any)?.behaviorState ?? 'Idle'
+    if (state !== 'Approach' && state !== 'Strafe' && state !== 'Retreat' && state !== 'Attack') return false
+    const id = (this._brain as any)?.getBlackboard?.('target')
+    return typeof id === 'string' && id ? id === node.id : this._player === node
+  }
+
   // ----- what the AI graph reads (builtin parameters) -----------------------------------------------
   /** The brain's current target has died — the graph walks home. */
   public get targetDead(): boolean {

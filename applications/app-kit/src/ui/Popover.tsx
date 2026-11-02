@@ -9,6 +9,8 @@ export interface PopoverProps {
   /** Panel content, or a render-fn receiving a `close()` callback. */
   children: React.ReactNode | ((close: () => void) => React.ReactNode);
   align?: 'left' | 'right';
+  /** Which side of the trigger the panel opens on; it flips when that side has no room. */
+  side?: 'below' | 'above';
   disabled?: boolean;
   title?: string;
   triggerClassName?: string;
@@ -25,7 +27,7 @@ export interface PopoverProps {
  * an absolute panel is clipped by any ancestor overflow (the inspector's scroll container,
  * Collapsable's `overflow-hidden`), and z-index cannot lift it out of a clip.
  */
-export function Popover({ trigger, children, align = 'left', disabled, title, triggerClassName, className, rootClassName }: PopoverProps) {
+export function Popover({ trigger, children, align = 'left', side = 'below', disabled, title, triggerClassName, className, rootClassName }: PopoverProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -35,8 +37,8 @@ export function Popover({ trigger, children, align = 'left', disabled, title, tr
     const trigger = triggerRef.current;
     const panel = panelRef.current;
     if (!trigger || !panel) return;
-    setPos(placeAnchored(trigger.getBoundingClientRect(), panel.getBoundingClientRect(), align));
-  }, [align]);
+    setPos(placeAnchored(trigger.getBoundingClientRect(), panel.getBoundingClientRect(), align, side));
+  }, [align, side]);
 
   // Measure after the panel is in the DOM but before paint, so it never shows at the wrong spot.
   useLayoutEffect(() => {

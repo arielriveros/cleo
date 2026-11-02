@@ -71,7 +71,7 @@ const SCRIPT_FILES = [
   // modules below — a base is named after its FILE: the explorer path is the import path.
   ['SoulsCharacter', 'SoulsCharacter', 'character'],
   ['SoulsWeapon', 'SoulsWeapon', 'node'],
-  ['Straight Sword', 'SoulsStraightSword', 'node'],
+  ['Longsword', 'SoulsLongsword', 'node'],
   ['Greatsword', 'SoulsGreatsword', 'node'],
   ['Club', 'SoulsClub', 'node'],
   ['Sorcerer Staff', 'SoulsStaff', 'node'],
@@ -215,9 +215,14 @@ const placeholderClips = buildPlaceholderClips(mannequinModelJson.skin, idleClip
  */
 const importedClips = readJson(path.join(HERE, 'soulsClips.json'))
 const importedNames = new Set(importedClips.map(c => c.name))
+/**
+ * The Longsword's moveset and the combat stance, made in the Motion Creator: longsword/*.motion.json,
+ * baked by tools/soulsDemo/longsword.ts into the committed longswordClips.json (events included).
+ */
+const longswordClips = readJson(path.join(HERE, 'longswordClips.json'))
 
 const animations = []
-for (const clip of [...mannequinModelJson.animations, ...placeholderClips.filter(c => !importedNames.has(c.name)), ...importedClips]) {
+for (const clip of [...mannequinModelJson.animations, ...placeholderClips.filter(c => !importedNames.has(c.name)), ...importedClips, ...longswordClips]) {
   animations.push({ id: stableId(`anim:${clip.name}`), name: clip.name, clips: [clip], rigId: rig.id, sourceSkin: rig.skin })
 }
 rig.animationIds = animations.map(a => a.id)
@@ -285,10 +290,32 @@ const UPPER_BODY_MASK = (() => {
   return { id: stableId('mask:upper-body'), name: 'Weapon Arm', rigId: rig.id, weights }
 })()
 
+/**
+ * The "Arms" bone mask: both shoulders and everything below them. What the two-handed guard plays on while
+ * the player moves in a fight: the hands stay on the hilt over the legs' own locomotion. (Both arms hang
+ * off the chest, so whatever the spine does, the hands keep their hold on each other.)
+ */
+const ARMS_MASK = (() => {
+  const skin = mannequinModelJson.skin
+  const names = new Map(skin.nodeNames)
+  const parents = new Map(skin.nodeParents)
+  const shoulders = [...names].filter(([, n]) => /:(Left|Right)Shoulder$/.test(n)).map(([i]) => i)
+  if (shoulders.length !== 2) throw new Error('the mannequin needs both shoulder bones for the arms mask')
+  const under = (n) => { for (let p = n; p !== undefined; p = parents.get(p)) if (shoulders.includes(p)) return true; return false }
+  const weights = {}
+  for (const j of skin.joints) if (under(j.nodeIndex)) weights[names.get(j.nodeIndex)] = 1
+  return { id: stableId('mask:arms'), name: 'Arms', rigId: rig.id, weights }
+})()
+
+/** The player's stance in a fight (SoulsPlayer sets `InCombat`): the Longsword's guard, both hands on it. */
+const COMBAT_STANCE_CLIP = 'Souls_LS_Stance'
+const COMBAT_GUARD_CLIP = 'Souls_LS_Guard'
+
 function characterStateMachine(kind = 'player') {
   const speed = (op, value) => ({ op: 'and', children: [{ param: 'Speed', op, value, hysteresis: 0.15 }] })
   const trigger = (param) => ({ op: 'and', children: [{ param, op: 'trigger' }] })
   const edge = (from, to, condition) => ({ from, to, conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1, condition })
+  if (kind === 'player') return playerStateMachine({ speed, trigger, edge })
   return {
     parameters: [
       { name: 'Speed', type: 'variable', default: 0, variable: { nodeRef: 'parent', varName: 'planarSpeed', varType: 'number', source: 'builtin' } },
@@ -331,6 +358,55 @@ function characterStateMachine(kind = 'player') {
     }],
     events: [],
   }
+}
+
+/**
+ * The player's machine: the shared one, plus the fight. `InCombat` (a bool SoulsPlayer sets while locked
+ * on, while an enemy is engaged with it, and a few seconds after a blow either way) swaps the rest pose for
+ * the Longsword's guard (CombatIdle), and while moving in a fight the Guard layer keeps both hands on the
+ * hilt over the legs' locomotion -- up to a sprint, where the one-handed sword run takes over again.
+ */
+function playerStateMachine({ speed, trigger, edge }) {
+  const base = characterStateMachine('enemy')
+  const all = (...children) => ({ op: 'and', children })
+  const any = (...children) => ({ op: 'or', children })
+  const fight = { param: 'InCombat', op: 'true' }, calm = { param: 'InCombat', op: 'false' }
+  const sp = (op, value) => ({ param: 'Speed', op, value, hysteresis: 0.15 })
+  const SPRINT = 4.7
+  const machine = clone(base)
+  machine.parameters.push({ name: 'InCombat', type: 'bool', default: false })
+  for (const st of machine.states) if (st.name === 'Dead') st.clipName = DEATH_CLIP.player
+  machine.states.push({ name: 'CombatIdle', clipName: COMBAT_STANCE_CLIP, loop: true, speed: 1, isEntry: false, x: 40, y: 200 })
+  // Out of locomotion to whichever rest the fight calls for; Idle and CombatIdle trade on the flag.
+  machine.transitions = machine.transitions.map(t => (t.from === 'Locomotion' && t.to === 'Idle'
+    ? { ...t, condition: all(sp('lt', 0.5), calm) } : t))
+  machine.transitions.push(
+    { ...edge('Locomotion', 'CombatIdle', all(sp('lt', 0.5), fight)), minDwell: 0.1, blendTime: 0.3 },
+    { ...edge('Idle', 'CombatIdle', all(fight)), blendTime: 0.35 },
+    { ...edge('CombatIdle', 'Idle', all(calm)), minDwell: 0.5, blendTime: 0.6 },
+    { ...edge('CombatIdle', 'Locomotion', speed('gt', 0.5)), minDwell: 0.05, blendTime: 0.25 },
+    edge('CombatIdle', 'Dead', trigger('Died')),
+  )
+  const swordRun = machine.layers[0]
+  // The one-handed sword run only out of a fight, or at a sprint.
+  swordRun.transitions = swordRun.transitions.map(t => (t.from === 'Off' && t.to === 'Sword Run'
+    ? { ...t, condition: all(sp('gt', 2.2), any(calm, sp('gt', SPRINT))) } : t))
+  swordRun.transitions.push({ ...edge('Sword Run', 'Off', all(fight, sp('lt', SPRINT - 0.2))), blendTime: 0.3, minDwell: 0.15 })
+  machine.layers = [{
+    name: 'Guard', blend: 'override', weight: 1, maskId: ARMS_MASK.id, mask: { ...ARMS_MASK.weights },
+    states: [
+      { name: 'Off', clipName: '', loop: true, speed: 1, isEntry: true, x: 40, y: 40 },
+      { name: 'Guard', clipName: COMBAT_GUARD_CLIP, loop: true, speed: 1, isEntry: false, x: 300, y: 40 },
+    ],
+    transitions: [
+      { ...edge('Off', 'Guard', all(fight, sp('gt', 0.5), sp('lt', SPRINT))), blendTime: 0.3, minDwell: 0.1 },
+      // Standing still, the base layer's CombatIdle holds the same grip; out of the fight, or sprinting, the
+      // arms go back to the locomotion's swing.
+      { ...edge('Guard', 'Off', any(calm, sp('lt', 0.4), sp('gt', SPRINT + 0.2))), blendTime: 0.35, minDwell: 0.15 },
+      { ...edge('Guard', 'Off', trigger('Died')), blendTime: 0.15 },
+    ],
+  }, swordRun]
+  return machine
 }
 
 /**
@@ -544,6 +620,8 @@ function decalNode(key, name, materialId, { size = [1, 0.6, 1], position = [0, 0
 
 const geometryCache = new Map()
 function geometryOf(shape) {
+  // A mesh made here (the Longsword's blade) rather than a primitive.
+  if (typeof shape === 'object') return shape
   if (geometryCache.has(shape)) return geometryCache.get(shape)
   const g = shape === 'box' ? Geometry.Cube(1, 1, 1)
     : shape === 'cylinder' ? Geometry.Cylinder(16, 0.5, 1)
@@ -1066,10 +1144,63 @@ const EDGE_OUT = [0, 0, 1]
 
 const WEAPON_MESHES = {
   // The saber's edge and the axe's bit lie along the mesh's +Z; the hammer's faces along its X.
-  saber: scannedWeapon('saber', 'wooden_handle_saber', 'Wooden Saber', 'Straight Sword', 1),
   axe: scannedWeapon('axe', 'wooden_axe', 'Wooden Axe', 'Club', 1.2),
+  // No fighter wields the saber any more (the Longsword replaced it); its scan still dresses the dungeon.
+  saber: scannedWeapon('saber', 'wooden_handle_saber', 'Wooden Saber', 'Wooden Saber', 1),
   hammer: scannedWeapon('hammer', 'ornate_war_hammer', 'War Hammer', 'Greatsword', 1.8, [1, 0, 0]),
   mace: scannedWeapon('mace', 'ornate_medieval_mace', 'Ornate Mace', 'Halberd', 2.5),
+}
+
+/**
+ * The Longsword: a two-handed blade of 0.95 m on a grip long enough for both hands (the right at the
+ * guard, at the origin; the left 11 cm below, where the Motion Creator clips put it). Built here: a
+ * diamond-section blade tapering to a point, a straight crossguard, a leather grip and an iron pommel. The
+ * blade's flat faces ±X and its edges ±Z (grip()'s edge axis), so the crossguard runs along Z.
+ */
+function longswordParts() {
+  const pos = [], nor = [], uv = [], tan = [], bit = []
+  const tri = (a, b, c) => {
+    const u = vec3.sub(vec3.create(), b, a), v = vec3.sub(vec3.create(), c, a)
+    const n = vec3.normalize(vec3.create(), vec3.cross(vec3.create(), u, v))
+    const t = vec3.normalize(vec3.create(), vec3.scaleAndAdd(vec3.create(), [0, 1, 0], n, -n[1]))
+    const bt = vec3.cross(vec3.create(), n, t)
+    for (const p of [a, b, c]) { pos.push(...p); nor.push(...n); tan.push(...t); bit.push(...bt); uv.push(p[2] / 0.05 + 0.5, p[1]) }
+  }
+  // Sections up the blade: [y, half width (edge to edge, Z), half thickness (X)].
+  const rings = [[0.075, 0.026, 0.0048], [0.6, 0.022, 0.004], [0.93, 0.0165, 0.0032], [1.0, 0.007, 0.0022]]
+  const ring = ([y, w, t]) => [[0, y, w], [t, y, 0], [0, y, -w], [-t, y, 0]]
+  for (let r = 0; r < rings.length - 1; r++) {
+    const a = ring(rings[r]), b = ring(rings[r + 1])
+    for (let k = 0; k < 4; k++) { const k1 = (k + 1) % 4; tri(a[k], b[k1], b[k]); tri(a[k], a[k1], b[k1]) }
+  }
+  const tip = [0, 1.03, 0], last = ring(rings[rings.length - 1])
+  for (let k = 0; k < 4; k++) tri(last[k], last[(k + 1) % 4], tip)
+  const first = ring(rings[0])
+  tri(first[0], first[2], first[1]); tri(first[0], first[3], first[2])
+  const blade = {
+    positions: pos, normals: nor, tangents: tan, bitangents: bit, texCoords: uv,
+    indices: Array.from({ length: pos.length / 3 }, (_, i) => i),
+  }
+  return [
+    ['Blade', blade, MAT.blade, [1, 1, 1], [0, 0, 0]],
+    ['Crossguard', 'box', MAT.metal, [0.024, 0.024, 0.27], [0, 0.062, 0]],
+    ['Grip', 'cylinder', MAT.leather, [0.032, 0.235, 0.032], [0, -0.06, 0]],
+    ['Pommel', 'sphere', MAT.metal, [0.034, 0.05, 0.052], [0, -0.2, 0]],
+  ]
+}
+
+/**
+ * Segment `i` of a clip that holds several attacks: from its i-th `next` event (or the start) to the
+ * following one (or the end), clip seconds -- SoulsMove's clipStart / clipEnd.
+ */
+function comboSegment(name, i) {
+  const clip = longswordClips.find(c => c.name === name)
+  if (!clip) throw new Error(`no clip "${name}" in longswordClips.json`)
+  const cuts = (clip.events ?? []).filter(e => e.name === 'next').map(e => e.time).sort((a, b) => a - b)
+  const end = Math.max(...clip.samplers.map(s => s.input[s.input.length - 1]))
+  const bounds = [0, ...cuts, end]
+  if (i + 1 >= bounds.length) throw new Error(`${name} has no segment ${i + 1}`)
+  return { clipStart: bounds[i], clipEnd: i + 1 === bounds.length - 1 ? 0 : bounds[i + 1] }
 }
 
 /**
@@ -1140,11 +1271,15 @@ function weaponNode(key, name, script, parts, moves = [], bladeDir = BLADE_OUT) 
 }
 
 const WEAPONS = [
-  ['sword', 'Straight Sword', 'SoulsStraightSword', WEAPON_MESHES.saber, [
-    ['Light1', { clip: 'Souls_Sword_L1', playSpeed: 1.6, damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.38, comboTime: 0.45, recoverTime: 0.62, next: 'Light2' }],
-    ['Light2', { clip: 'Souls_Sword_L2', playSpeed: 1.6, damageMul: 1, staminaCost: 16, lungeStart: 0.1, lungeSeconds: 0.25, lungeSpeed: 3, hitTime: 0.36, comboTime: 0.45, recoverTime: 0.62, next: 'Light3' }],
-    ['Light3', { clip: 'Souls_Sword_L3', playSpeed: 1.5, damageMul: 1.15, staminaCost: 20, lungeStart: 0.3, lungeSeconds: 0.2, lungeSpeed: 3, hitTime: 0.52, comboTime: 0.6, recoverTime: 0.8, next: 'Light1' }],
-    ['Heavy', { clip: 'Souls_Sword_Heavy', playSpeed: 1.3, bounceOff: false, damageMul: 1.6, poiseMul: 2, staminaCost: 30, lungeStart: 0.62, lungeSeconds: 0.2, lungeSpeed: 4, trackSeconds: 0.35, hitTime: 0.78, comboTime: 1, recoverTime: 1.05, next: '' }],
+  // The Longsword's light attacks are ONE Motion Creator clip, Souls_LS_Combo (longsword/*.motion.json):
+  // each plays its segment (comboSegment: between the clip's `next` events) and a chain plays on into the
+  // next -- so all three share one play speed. Every attack steps, and the body travels by the clip's own
+  // hips (rootMotion) -- no lunge. The clip's hit / hitEnd / combo / recover events time each swing.
+  ['longsword', 'Longsword', 'SoulsLongsword', longswordParts(), [
+    ['Light1', { clip: 'Souls_LS_Combo', ...comboSegment('Souls_LS_Combo', 0), rootMotion: true, playSpeed: 1.1, damageMul: 1, staminaCost: 20, lungeSpeed: 0, trackSeconds: 0.3, next: 'Light2' }],
+    ['Light2', { clip: 'Souls_LS_Combo', ...comboSegment('Souls_LS_Combo', 1), rootMotion: true, playSpeed: 1.1, damageMul: 1, staminaCost: 20, lungeSpeed: 0, trackSeconds: 0.28, next: 'Light3' }],
+    ['Light3', { clip: 'Souls_LS_Combo', ...comboSegment('Souls_LS_Combo', 2), rootMotion: true, playSpeed: 1.1, damageMul: 1.2, staminaCost: 24, lungeSpeed: 0, trackSeconds: 0.36, next: 'Light1' }],
+    ['Heavy', { clip: 'Souls_LS_Heavy', rootMotion: true, playSpeed: 1.05, bounceOff: false, damageMul: 1.75, poiseMul: 2.2, staminaCost: 34, lungeSpeed: 0, trackSeconds: 0.55, next: '' }],
   ]],
   ['greatsword', 'Greatsword', 'SoulsGreatsword', WEAPON_MESHES.hammer, [
     ['Light1', { clip: 'Souls_GS_L1', playSpeed: 1.35, damageMul: 1, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light2' }],
@@ -1930,7 +2065,7 @@ function hud() {
     panel('hud:stamina-back', 'StaminaBack', rect(TL, [48, 68], [264, 80]), [0, 0, 0, 0.55]),
     bar('hud:stamina', 'Stamina', rect(TL, [48, 68], [264, 80]), [0.2, 0.55, 0.22, 1], [0, 0, 0, 0], 0.05, 2),
     text('hud:estus', 'Estus', 'Estus Flask  3 / 3', rect(BL, [48, -118], [520, -84]), { size: 24, tint: GOLD }),
-    text('hud:weapon', 'Weapon', 'Straight Sword', rect(BL, [48, -78], [520, -44]), { size: 22, tint: DIM }),
+    text('hud:weapon', 'Weapon', 'Longsword', rect(BL, [48, -78], [520, -44]), { size: 22, tint: DIM }),
     text('hud:souls-gain', 'SoulsGain', '', rect(BR, [-380, -120], [-56, -88]), { size: 22, align: 'right', tint: DIM }),
     text('hud:souls', 'Souls', '0', rect(BR, [-380, -84], [-56, -40]), { size: 34, align: 'right', tint: INK }),
     panel('hud:prompt', 'Prompt', rect(BC, [-280, -232], [280, -186]), [0, 0, 0, 0.62], [
@@ -2220,7 +2355,7 @@ const FOLDERS = {
     Hollow: `${ENEMY('Hollow')}/Scripts`, 'Hollow Sorcerer': `${ENEMY('Hollow Sorcerer')}/Scripts`,
     'Elite Knight': `${ENEMY('Elite Knight')}/Scripts`, 'Hollow Warden': `${ENEMY('Hollow Warden')}/Scripts`,
     SoulsWeapon: `${WEAPON('Base Weapon')}/Scripts`, 'Weapon Move': `${WEAPON('Base Weapon')}/Scripts`,
-    'Straight Sword': `${WEAPON('Straight Sword')}/Scripts`, Greatsword: `${WEAPON('Greatsword')}/Scripts`,
+    Longsword: `${WEAPON('Longsword')}/Scripts`, Greatsword: `${WEAPON('Greatsword')}/Scripts`,
     Club: `${WEAPON('Club')}/Scripts`, 'Sorcerer Staff': `${WEAPON('Sorcerer Staff')}/Scripts`, Halberd: `${WEAPON('Halberd')}/Scripts`,
     Bonfire: `${PROP('Bonfire')}/Scripts`, Pickup: `${PROP('Pickup')}/Scripts`, Message: `${PROP('Message')}/Scripts`,
     Bloodstain: `${PROP('Bloodstain')}/Scripts`, Lever: `${PROP('Lever & Gate')}/Scripts`, Door: `${PROP('Lever & Gate')}/Scripts`,
@@ -2232,7 +2367,7 @@ const FOLDERS = {
     Enemy: ENEMY('Base Enemy'), 'Enemy Spawn': ENEMY('Base Enemy'),
     Hollow: ENEMY('Hollow'), 'Hollow Sorcerer': ENEMY('Hollow Sorcerer'),
     'Elite Knight': ENEMY('Elite Knight'), 'Hollow Warden': ENEMY('Hollow Warden'),
-    Weapon: WEAPON('Base Weapon'), 'Straight Sword': WEAPON('Straight Sword'), Greatsword: WEAPON('Greatsword'),
+    Weapon: WEAPON('Base Weapon'), Longsword: WEAPON('Longsword'), Greatsword: WEAPON('Greatsword'),
     Club: WEAPON('Club'), 'Sorcerer Staff': WEAPON('Sorcerer Staff'), Halberd: WEAPON('Halberd'), Maul: WEAPON('Maul'),
     Torch: PROP('Torch'), Bonfire: PROP('Bonfire'), 'Fog Gate': PROP('Fog Gate'),
     Lever: PROP('Lever & Gate'), Gate: PROP('Lever & Gate'), Message: PROP('Message'), Pickup: PROP('Pickup'),
@@ -2260,7 +2395,7 @@ const FOLDERS = {
   rig: { Mannequin: `${SHARED}/Rigs` },
   animationField: { 'Souls Locomotion': `${SHARED}/Animations` },
   animController: { 'Souls Character': `${SHARED}/Animations`, 'Souls Enemy': `${SHARED}/Animations` },
-  boneMask: { 'Weapon Arm': `${SHARED}/Animations` },
+  boneMask: { 'Weapon Arm': `${SHARED}/Animations`, Arms: `${PLAYER}/Animations/Longsword` },
   particleSystem: {
     'Bonfire Fire': `${PROP('Bonfire')}/Particles`, 'Torch Fire': `${PROP('Torch')}/Particles`,
     'Fog Wall': `${PROP('Fog Gate')}/Particles`, 'Item Glow': `${PROP('Pickup')}/Particles`,
@@ -2282,6 +2417,7 @@ function animationFolder(name) {
   if (!name.startsWith('Souls_')) return `${SHARED}/Animations/Locomotion`
   const clip = name.slice('Souls_'.length)
   if (/^(HitLight|HitHeavy|Death|Dying|Cast|RunWithSword|Battlecry)$/.test(clip)) return `${SHARED}/Animations/Combat`
+  if (clip.startsWith('LS_')) return `${PLAYER}/Animations/Longsword`
   if (clip.startsWith('Enemy_')) return `${ENEMY('Base Enemy')}/Animations`
   if (clip.startsWith('Tall_') || clip.startsWith('Knight_')) return `${ENEMY('Elite Knight')}/Animations`
   if (clip.startsWith('Giant_') || clip === 'Roar' || clip === 'Leap') return `${ENEMY('Hollow Warden')}/Animations`
@@ -2414,7 +2550,7 @@ export function writeProject({
     terrainMaterials,
     animationFields: [locomotionField],
     animControllers: [characterController(), enemyController()],
-    boneMasks: [UPPER_BODY_MASK],
+    boneMasks: [UPPER_BODY_MASK, ARMS_MASK],
     animations,
     rigs: [rig, ...extraRigs],
     tilesets: extraTilesets,

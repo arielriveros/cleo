@@ -1,4 +1,4 @@
-import { AnimatedModel } from "../../../animation/animatedModel";
+import { AnimatedModel, type Skin } from "../../../animation/animatedModel";
 import { AnimationMapping, AnimationStateMachine, Animator } from "../../../animation/animator";
 import { Model } from "../../../graphics/model";
 import { ShaderManager } from "../../../graphics/systems/shaderManager";
@@ -19,6 +19,36 @@ import type { NodeType } from "./nodeType";
  * anything asking how big a model actually is must divide it back out.
  */
 export const SKINNED_BOUNDS_MARGIN = 1.75;
+
+/** Per skin: where its mesh's raw vertices are DRAWN at rest, or null when that is where they sit. */
+const bindToModel = new WeakMap<Skin, mat4 | null>();
+
+/**
+ * The transform a skin applies to its mesh at rest: the first joint's rest global (its node transforms
+ * multiplied down from the top of the hierarchy, as the animator accumulates them) times its inverse
+ * bind matrix. Identity for most models; not for an export whose mesh sits in other units than its
+ * skeleton -- a Sketchfab glTF of an FBX keeps centimetre vertices under a 0.01 armature node -- whose
+ * raw vertex bounds would otherwise cull the drawn mesh from where it is not.
+ */
+export function skinRestTransform(skin: Skin | null | undefined): mat4 | null {
+    if (!skin?.joints.length) return null;
+    if (bindToModel.has(skin)) return bindToModel.get(skin)!;
+    const joint = skin.joints[0];
+    const chain: number[] = [];
+    for (let n: number | undefined = joint.nodeIndex; n !== undefined && chain.length < 256; n = skin.nodeParents?.get(n)) chain.unshift(n);
+    const m = mat4.create();
+    for (const n of chain) {
+        const t = skin.nodeTransforms?.get(n);
+        if (t) mat4.multiply(m, m, t);
+    }
+    mat4.multiply(m, m, joint.inverseBindMatrix);
+    let identity = true;
+    for (let i = 0; i < 16; i++) if (Math.abs(m[i] - (i % 5 === 0 ? 1 : 0)) > 1e-4) { identity = false; break; }
+    const valid = m.every(Number.isFinite);
+    const out = identity || !valid ? null : m;
+    bindToModel.set(skin, out);
+    return out;
+}
 
 /**
  * The renderable node: a `Model` or `AnimatedModel` plus its animator, physics bounds and BVH.
@@ -197,7 +227,7 @@ export class ModelNode extends Node {
         if (geometry.positions.length === 0) return super.getBoundingBox();
 
         const local = geometry.boundingBox;
-        const transform = this.worldTransform;
+        const transform = this._boundsTransform();
         const corner = ModelNode._boxScratch;
 
         const min = this._worldBox.min;
@@ -235,6 +265,17 @@ export class ModelNode extends Node {
 
     // Reused across the 8 corners so the whole path stays allocation-free.
     private static readonly _boxScratch: vec3 = vec3.create();
+    private static readonly _boundsScratch: mat4 = mat4.create();
+
+    /**
+     * What the object-space bounds are carried to the world by: the world matrix, and for a skinned mesh
+     * whose vertices are not in its skeleton's space, the skin's rest transform first (see
+     * {@link skinRestTransform}).
+     */
+    private _boundsTransform(): mat4 {
+        const rest = this._model instanceof AnimatedModel ? skinRestTransform(this._model.skin) : null;
+        return rest ? mat4.multiply(ModelNode._boundsScratch, this.worldTransform, rest) : this.worldTransform;
+    }
 
     /**
      * Static meshes expose their geometry's cached BVH for exact picking. Skinned meshes deform on the
@@ -273,11 +314,11 @@ export class ModelNode extends Node {
         seen.local = local; seen.radius = local.radius; vec3.copy(seen.center, lc);
         seen.skinned = this._model instanceof AnimatedModel;
 
-        vec3.transformMat4(this._worldSphere.center, local.center, this.worldTransform);
+        const m = this._boundsTransform();
+        vec3.transformMat4(this._worldSphere.center, local.center, m);
 
         // The largest axis scale, straight from the basis columns: `worldScale` would decompose the whole
         // rotation to get there, and this runs for every model every frame (the shadow caster gather).
-        const m = this.worldTransform;
         const sx = m[0] * m[0] + m[1] * m[1] + m[2] * m[2];
         const sy = m[4] * m[4] + m[5] * m[5] + m[6] * m[6];
         const sz = m[8] * m[8] + m[9] * m[9] + m[10] * m[10];

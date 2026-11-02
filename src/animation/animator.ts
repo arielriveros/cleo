@@ -299,6 +299,11 @@ export interface AnimationActionOptions {
      * Actions never move the character themselves -- only the base layer drives root motion directly.
      */
     rootMotion?: boolean;
+    /**
+     * Seconds into the clip to start from (default 0): one segment of a longer clip, e.g. the second
+     * attack of a combo authored as one continuous animation. Events before it do not fire.
+     */
+    startTime?: number;
 }
 
 /** A playing action. `finished` resolves once it has faded fully out, however it ended. */
@@ -3285,6 +3290,12 @@ export class Animator {
         vec3.set(child._rootDelta, 0, 0, 0);
         const crossFade = !!previous && slot.presence > 0;
         child.playAnimationByName(clipName, action.loop, crossFade);
+        if (typeof options.startTime === 'number' && options.startTime > 0) {
+            // Join the clip part-way (one attack of a combo clip): the clock starts there, and neither the
+            // events nor the root travel before it count -- the travel is read from the previous frame's time.
+            child._currentTime = Math.min(options.startTime, child._getAnimationDuration());
+            child._prevEventTime = child._currentTime;
+        }
         slot.action = action;
         slot.presenceTarget = 1;
         slot.fadeSeconds = Math.max(1e-3, options.blendIn ?? 0.15);

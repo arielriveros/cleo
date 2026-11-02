@@ -11,6 +11,7 @@ import UvMappingSection from './UvMappingSection';
 import { PropertyTable, PropertyRow, Field, Select, NumberInput, Slider, Toggle, ColorInput, Section, DocScope } from '@cleo/app-kit/ui';
 import { CutoutSection, FoliageSections, PbrPropertiesSection, type MaterialFieldValues, type MaterialPatch } from '@cleo/app-kit/materials/MaterialFields';
 import { MaterialIcon } from '../sectionIcons';
+import { PBR_TEXTURE_SLOTS, TextureSlotFrame } from '@cleo/app-kit/materials/TextureSlots';
 
 export default function MaterialEditor(props: {node: ModelNode}) {
   if (!props.node.model) {
@@ -418,10 +419,9 @@ export default function MaterialEditor(props: {node: ModelNode}) {
   ) : null;
 
   const texSlot = (label: string, tex: string) => (
-    <div className='flex flex-col items-center gap-1'>
-      <span className='text-ui-xs text-muted'>{label}</span>
+    <TextureSlotFrame key={tex} label={label}>
       <TextureInspector tex={tex} material={model.material} />
-    </div>
+    </TextureSlotFrame>
   );
 
   // Documented with the material editor, not the node inspector: this is the whole of Material mode's panel.
@@ -593,13 +593,7 @@ export default function MaterialEditor(props: {node: ModelNode}) {
                     texture by the engine before they reach the shader (see systems/texturePacker.ts).
                     Assigning the SAME map to several of these marks it pre-packed (glTF ORM order),
                     and it is then reused as-is instead of being re-combined. */}
-                {texSlot('Base Color', 'baseColorTexture')}
-                {texSlot('Metallic', 'metallicMap')}
-                {texSlot('Roughness', 'roughnessMap')}
-                {texSlot('Normal', 'normalMap')}
-                {texSlot('Occlusion', 'occlusionMap')}
-                {texSlot('Emissive', 'emissiveMap')}
-                {showHeight && texSlot('Height', 'displacementMap')}
+                {PBR_TEXTURE_SLOTS.filter(s => s.id !== 'height' || showHeight).map(s => texSlot(s.label, s.key))}
               </div>
             </Section>
             {uvSection}

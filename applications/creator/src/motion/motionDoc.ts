@@ -33,6 +33,28 @@ export interface PoseBone {
 export interface IkGoal {
   /** Where the limb's tip goes, in model space. */
   pos: Vec3;
+  /**
+   * The tip's model-space rotation, Euler degrees (X, then Y, then Z): a hand that holds a blade at an
+   * angle however the elbow bends, a foot planted flat. Absent: the tip keeps the turn the arm gives it.
+   */
+  rot?: Vec3;
+  /**
+   * Where the middle joint points, model space: a point the elbow (or knee) bends toward -- elbows out for
+   * a wide guard. Absent: the limb keeps the bend it already has.
+   */
+  pole?: Vec3;
+  /**
+   * Hold on to another limb's tip: a two-handed grip. Each frame this tip goes where `offset` (in the lead
+   * tip's own frame, model units) puts it, turned by `rot` from the lead tip -- so the hands stay on the
+   * hilt between keys, wherever the lead hand goes. `pos` and `rot` above are then only the fallback.
+   */
+  grip?: IkGrip;
+}
+
+export interface IkGrip {
+  follow: Limb;
+  offset: Vec3;
+  rot: Vec3;
 }
 
 export interface MotionPose {
@@ -52,7 +74,10 @@ export interface MotionKey {
   blend: BlendCurve;
   /** The preset the blend was picked from, while it still matches it (a label only). */
   presetId?: string;
-  /** A clip event fired when the clip reaches this key (`onAnimationEvent`), e.g. `hit`. */
+  /**
+   * A clip event fired when the clip reaches this key (`onAnimationEvent`), e.g. `hit`; several, comma
+   * separated (`combo, recover`), fire together.
+   */
   event?: string;
 }
 
@@ -116,7 +141,17 @@ export function normaliseMotion(raw: Partial<MotionDoc> | null | undefined): Mot
       if (rot || move) bones[name] = { ...(rot ? { rot } : {}), ...(move ? { move } : {}) };
     }
     const ik: Partial<Record<Limb, IkGoal>> = {};
-    for (const limb of LIMBS) { const pos = vec(p.ik?.[limb]?.pos); if (pos) ik[limb] = { pos }; }
+    for (const limb of LIMBS) {
+      const g = p.ik?.[limb];
+      const pos = vec(g?.pos);
+      if (!pos) continue;
+      const rot = vec(g?.rot), pole = vec(g?.pole), off = vec(g?.grip?.offset), grot = vec(g?.grip?.rot);
+      const follow = g?.grip?.follow;
+      const grip = follow && follow !== limb && LIMBS.includes(follow) && off && grot ? { follow, offset: off, rot: grot } : undefined;
+      ik[limb] = { pos, ...(rot ? { rot } : {}), ...(pole ? { pole } : {}), ...(grip ? { grip } : {}) };
+    }
+    // A grip on a limb that itself follows another would chase its own tail: only one level is kept.
+    for (const limb of LIMBS) { const f = ik[limb]?.grip?.follow; if (f && ik[f]?.grip) delete ik[limb]!.grip; }
     return { id: p.id, name: typeof p.name === 'string' && p.name ? p.name : 'Pose', bones, ...(Object.keys(ik).length ? { ik } : {}) };
   });
   if (!poses.length) poses.push(restPose());
@@ -147,6 +182,22 @@ export function normaliseMotion(raw: Partial<MotionDoc> | null | undefined): Mot
     loop: !!d.loop,
     ...(typeof d.characterId === 'string' && d.characterId ? { characterId: d.characterId } : {}),
   };
+}
+
+/** A key's event names (its `event`, split on commas). */
+export function keyEvents(k: Pick<MotionKey, 'event'>): string[] {
+  return (k.event ?? '').split(',').map(s => s.trim()).filter(Boolean);
+}
+
+/**
+ * A motion read from a file: a `.motion.json` sidecar (the Creator's own export, which carries the
+ * document) or a bare document. Null when it is neither.
+ */
+export function motionFromFile(json: unknown): MotionDoc | null {
+  const j = json as { generator?: string; params?: unknown } | null;
+  const raw = j && typeof j === 'object' ? (j.generator === 'motion' && j.params ? j.params : j) : null;
+  if (!raw || !Array.isArray((raw as { poses?: unknown }).poses)) return null;
+  return normaliseMotion(raw as Partial<MotionDoc>);
 }
 
 /** The clip's length: the last key's time. */

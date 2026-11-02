@@ -19,7 +19,14 @@ import type { ClipName, NodeName } from 'cleo'
  * `hitTime`/`comboTime`/`recoverTime` fields below instead (CLIP seconds, i.e. before `playSpeed`), so a
  * freshly imported animation is playable straight away and only gets better once marked up.
  *
- * The clip must be IN PLACE: one-shot actions ignore root motion. Forward travel is `lunge*` below.
+ * Forward travel is either the `lunge*` drive below (an in-place clip), or -- with `rootMotion` -- the
+ * clip's own hips travel: an attack whose feet step moves the body exactly as far as they do.
+ *
+ * ## One clip, several attacks
+ *
+ * A combo can be ONE continuous animation: each move plays its segment, `clipStart` to `clipEnd` (clip
+ * seconds). When the next move continues the same clip where this one ends, a chained attack does not
+ * restart anything -- the animation simply plays on into it. A segment that is not chained blends out.
  */
 export default class SoulsMoveNode extends Node {
   /** Animation clip played for this attack (a clip on the player's rig). */
@@ -38,6 +45,11 @@ export default class SoulsMoveNode extends Node {
   public lungeStart: number = 0.1
   public lungeSeconds: number = 0.15
   public lungeSpeed: number = 2.5
+  /** Move the body by the clip's own hips travel (its steps) instead of the lunge. */
+  public rootMotion: boolean = false
+  /** The part of `clip` this move plays, clip seconds; an end of 0 plays to the clip's end. */
+  public clipStart: number = 0
+  public clipEnd: number = 0
   /** Seconds after the swing starts during which the player can still turn toward the target. */
   public trackSeconds: number = 0.2
   /** Fallback timings, used only when the clip carries no `hit` event. Clip seconds. */

@@ -9,7 +9,8 @@ A single toolbar row:
 
 | Control | Does |
 |---|---|
-| **+ Add ▾** | Material, Landscape Material, Template, Script, Tileset, **AI Brain (Machine)**, **AI Brain (Goals)**, **Particle System**, **Animator**, Sound, Animation, Scene, Folder, Import Files… |
+| **+ Add ▾** | Material, Landscape Material, Template, Script, Tileset, **AI Brain (Machine)**, **AI Brain (Goals)**, **Particle System**, **Animator**, Sound, Animation, Scene, Folder. The menu opens upward, over the viewport. |
+| **Import** | Picks models, textures and sounds from disk and imports them, as dropping them on the panel does. Reads **Importing…** while it works. |
 | **Search** | Filters by name. |
 | **Audit** | Flags assets a library holds but the explorer is not showing, and orphan entries pointing at deleted assets. Carries a warning badge when either exists. |
 | **Reference graph** | One asset in the middle, what uses it on the left and what it uses on the right, each followed one level, two, or all the way. Its badge counts references that point at an asset that no longer exists — the opposite question to **Audit**. |

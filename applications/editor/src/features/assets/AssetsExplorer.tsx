@@ -20,7 +20,11 @@ import { readDroppedEntries } from '../../utils/importGrouping'
 import { buildTemplateFromNode } from '../../utils/templates'
 import { buildControllerAsset } from '../../utils/animationControllers'
 import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
-import { Button, MenuItem } from '@cleo/app-kit/ui'
+import { Button } from '@cleo/app-kit/ui'
+import { AddMenu, ImportButton, type AddMenuItem } from '@cleo/app-kit/assets/AssetToolbar'
+
+/** What the toolbar's Import button takes: models, textures and sounds. */
+const IMPORT_ACCEPT = '.obj,.mtl,.gltf,.glb,.fbx,.bin,.png,.jpg,.jpeg,.bmp,.tga,.tiff,.webp,.wav,.mp3,.ogg,.m4a,.flac,.aac,.opus'
 
 // The bottom bar's single "Assets" tab: one file-manager view over all five asset libraries, with real
 // folders. Folder layout lives in VfsContext, SVAR's store owns what is on screen, useFileManagerBridge
@@ -102,20 +106,6 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey) }
   }, [missingOpen])
-
-  // "+ Add ▾" dropdown: closes on outside pointerdown or Escape.
-  const [addOpen, setAddOpen] = useState(false)
-  const addMenuRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!addOpen) return
-    const onDown = (e: PointerEvent) => {
-      if (!addMenuRef.current?.contains(e.target as Node)) setAddOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setAddOpen(false) }
-    document.addEventListener('pointerdown', onDown, true)
-    document.addEventListener('keydown', onKey)
-    return () => { document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey) }
-  }, [addOpen])
 
   // --- import ---------------------------------------------------------------------------------------
   const runImport = useCallback(async (files: File[]) => {
@@ -298,7 +288,7 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
 
   // The explorer's entire chrome is ONE 28px row; every saved pixel goes to the card area below, which at
   // a 30vh bottom bar has only ~130px for a full card row.
-  const addItems: { label: string; icon: React.ReactNode; run: () => void; title: string }[] = [
+  const addItems: AddMenuItem[] = [
     { label: 'Material', icon: <img src={iconFor('material')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterMaterialEditor(), title: 'Create a new material asset' },
     { label: 'Foliage Material', icon: <img src={iconFor('material')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterFoliageMaterialEditor(), title: 'Create a new foliage material: PBR that sways in the wind, parts for what walks through, and answers the weather (on landscape foliage)' },
     { label: 'Landscape Material', icon: <img src={iconFor('terrainMaterial')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterTerrainMaterialEditor(), title: 'Create a new landscape material asset: a surface for a landscape’s base or paint layers' },
@@ -324,16 +314,6 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     { label: 'Animation', icon: <img src={iconFor('animation')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => document.getElementById('animation-clip-import')?.click(), title: 'Import animation clips from a .fbx/.glb/.gltf and pick the character they belong to' },
     { label: 'Scene', icon: <img src={iconFor('scene')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => { void createScene() }, title: 'Create a new scene asset' },
     { label: 'Folder', icon: <img src={iconFor('folder')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: newFolder, title: 'Create a folder in the current directory' },
-    {
-      label: 'Import Files…',
-      icon: (
-        <svg className='w-3.5 h-3.5' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
-          <path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' /><path d='M17 8l-5-5-5 5M12 3v12' />
-        </svg>
-      ),
-      run: () => document.getElementById('asset-import-files')?.click(),
-      title: 'Import models, textures and sounds',
-    },
   ]
   return (<>
     <AssetExplorer
@@ -347,32 +327,9 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
       menuActions={menuActions}
       wrapperRef={wrapperRef}
       toolbarStart={<>
-        <div className='relative shrink-0' ref={addMenuRef}>
-          <Button
-            variant='success'
-            size='sm'
-            className='shrink-0 gap-0 h-[20px] text-ui-sm font-semibold leading-none whitespace-nowrap'
-            onClick={() => setAddOpen(v => !v)}
-            title='Add a new asset or folder, or import files'>
-            + Add <span className='ml-1 text-ui-2xs'>▾</span>
-          </Button>
-          {addOpen && (
-            <div className='absolute left-0 top-[22px] z-20 min-w-[160px] p-1 bg-surface-raised border border-border rounded shadow-lg'>
-              {addItems.map(item => (
-                <MenuItem key={item.label}
-                  className='items-center text-ui-sm whitespace-nowrap'
-                  icon={item.icon}
-                  onClick={() => { setAddOpen(false); item.run() }}
-                  title={item.title}>
-                  {item.label}
-                </MenuItem>
-              ))}
-            </div>
-          )}
-        </div>
-        <input id='asset-import-files' className='hidden' type='file' multiple
-          accept='.obj,.mtl,.gltf,.glb,.fbx,.bin,.png,.jpg,.jpeg,.bmp,.tga,.tiff,.webp,.wav,.mp3,.ogg,.m4a,.flac,.aac,.opus'
-          onChange={onPick} />
+        <AddMenu items={addItems} />
+        <ImportButton accept={IMPORT_ACCEPT} onFiles={runImport} busy={importing}
+          title='Import models, textures and sounds' />
 
         {/* Audio. Routed through the same `runUpload` as everything else — the importer branches on the
             extension — so a sound picked here lands exactly as one dropped on the explorer does. */}
@@ -404,8 +361,6 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
 
       </>}
       toolbarEnd={<>
-        {importing && <span className='shrink-0 text-ui-sm text-warning whitespace-nowrap'>Importing…</span>}
-
         <span className='ml-auto min-w-0 truncate text-ui-sm text-dim hidden xl:inline'>
           Drag assets into the viewport or onto a slot · drop files here to import
         </span>

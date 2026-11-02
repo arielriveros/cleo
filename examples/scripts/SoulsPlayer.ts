@@ -57,7 +57,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public displayName: string = 'Player'
   public team: string = 'player'
   /** The weapons the player starts with, by template. F swaps between them. */
-  public weaponTemplates: TemplateName[] = ['Straight Sword', 'Greatsword']
+  public weaponTemplates: TemplateName[] = ['Longsword', 'Greatsword']
 
   // ----- stats (level-up spends souls on these four) ---------------------------------------------
   public vigor: number = 10
@@ -164,6 +164,16 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public restClip: ClipName = 'Souls_Rest'
   public fogWalkClip: ClipName = 'Souls_FogWalk'
 
+  // ----- the fight -----------------------------------------------------------------------------------
+  /**
+   * Seconds the combat stance holds after the last blow given or taken (once no enemy is engaged and
+   * nothing is locked). While `inCombat`, the animator's `InCombat` swaps the idle for the Longsword's
+   * guard and keeps both hands on the hilt while moving.
+   */
+  public combatLinger: number = 5
+  /** How often the engaged enemies are looked for, seconds. */
+  public combatScanInterval: number = 0.25
+
   // ----- derived, read by the HUD and other scripts ------------------------------------------------
   public level: number = 1
   /** I-frames (roll, backstep, fog, rest, death): `hurtboxActive` is its inverse. */
@@ -171,6 +181,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public actionState: string = 'free'
   public isSprinting: boolean = false
   public attackRatingNow: number = 0
+  /** Locked on, an enemy engaged with us, or a blow given or taken within `combatLinger` seconds. */
+  public inCombat: boolean = false
   /** What pressing Interact would do right now, or '' — the HUD prompt. */
   public interactPrompt: string = ''
   /** The last souls gain and how long ago, for the HUD popup. */
@@ -194,6 +206,9 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   private _sinceSpend: number = 99
   private _sprintLocked: boolean = false
   private _safeTimer: number = 0
+  private _sinceBlow: number = 99
+  private _combatScan: number = 0
+  private _enemyEngaged: boolean = false
 
   // the current action
   private _move: any = null
@@ -206,6 +221,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   private _comboOpen: boolean = false
   private _recovered: boolean = false
   private _usesEvents: boolean = false
+  /** A combo move queued to continue the playing clip when the current segment ends ('' none). */
+  private _chainQueued: string = ''
   private _motionDir: number[] = [0, 0, 1]
   private _actionSeconds: number = 0
   private _healLeft: number = 0
@@ -307,6 +324,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   /** Interrupt whatever was happening — a drink included, which is the souls tax on greedy healing. */
   protected _onDamaged(dealt: number, poiseDamage: number, from: Node): void {
     const heavy = dealt >= this.heavyHitThreshold
+    this._sinceBlow = 0
     this._stopAction()
     this._motionDir = from ? this._dirFrom(from.worldPosition) : this._forward(-1)
     this._enter('hit')
@@ -438,7 +456,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this._sinceSpend += delta
     this.soulsGainAge += delta
 
-    if (this.isDead) { this._holdStill(intent); return }
+    if (this.isDead) { this._setCombat(false); this._holdStill(intent); return }
 
     if (this.worldPosition[1] < this.killY) {
       this.hp = 0
@@ -476,6 +494,27 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this.invulnerable = this._computeInvulnerable()
     this.hurtboxActive = !this.invulnerable
     this._tickStamina(delta)
+    this._tickCombat(delta)
+  }
+
+  /** Whether we are in a fight: what the animator's `InCombat` (the guard stance) follows. */
+  private _tickCombat(delta: number): void {
+    this._sinceBlow += delta
+    this._combatScan -= delta
+    if (this._combatScan <= 0) {
+      this._combatScan = this.combatScanInterval
+      const gm = this._gm as any
+      const enemies: any[] = gm?.liveEnemies ? gm.liveEnemies() : []
+      this._enemyEngaged = enemies.some(e => !!e?.engagedWith?.(this))
+    }
+    const resting = this.actionState === 'rest' || this.actionState === 'fog'
+    this._setCombat(!resting && (!!this.lockTarget || this._enemyEngaged || this._sinceBlow < this.combatLinger))
+  }
+
+  private _setCombat(on: boolean): void {
+    if (on === this.inCombat) return
+    this.inCombat = on
+    ;(this._model?.animator as any)?.setBool?.('InCombat', on)
   }
 
   // ----- states ----------------------------------------------------------------------------------
@@ -546,24 +585,59 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
       }
     }
 
-    // Lunge: forward drive for a window of the clip.
-    const lungeStart = num(move?.lungeStart, 0)
-    const lunging = t >= lungeStart && t < lungeStart + num(move?.lungeSeconds, 0) * this._playSpeed
-    this._driveMotion(intent, this._forward(1), lunging ? num(move?.lungeSpeed, 0) : 0)
+    if (move?.rootMotion) {
+      // The clip's own steps: its hips travel this frame, along the facing.
+      const d = (this._model?.animator as any)?.consumeRootMotion?.()
+      const fwd = this._forward(1)
+      const along = d ? d[0] * fwd[0] + d[2] * fwd[2] : 0
+      this._driveMotion(intent, along >= 0 ? fwd : this._forward(-1), this._frameDelta > 1e-5 ? Math.abs(along) / this._frameDelta : 0)
+    } else {
+      // Lunge: forward drive for a window of the clip.
+      const lungeStart = num(move?.lungeStart, 0)
+      const lunging = t >= lungeStart && t < lungeStart + num(move?.lungeSeconds, 0) * this._playSpeed
+      this._driveMotion(intent, this._forward(1), lunging ? num(move?.lungeSpeed, 0) : 0)
+    }
 
-    // Chain: inside the combo window, a buffered attack goes straight to the next move.
+    // Chain: inside the combo window, a buffered attack goes to the next move -- at once, or, when that
+    // move is the next segment of this same clip, as the clip reaches it (the animation just plays on).
     const buffered = this._bufferAge <= this.inputBufferSeconds ? this._bufferAction : ''
-    if (this._comboOpen && this._windowOpened && (buffered === 'light' || buffered === 'heavy')) {
+    if (!this._chainQueued && this._comboOpen && this._windowOpened && (buffered === 'light' || buffered === 'heavy')) {
       const next = buffered === 'light' ? (move?.next || '') : ''
-      this._startAttack(buffered, next)
-      return
+      const nextMove = next ? (this.currentWeapon() as any)?.findMove?.(next) : null
+      if (nextMove && this._continues(move, nextMove)) {
+        this._consumeBuffer()
+        this._chainQueued = next
+      } else {
+        this._startAttack(buffered, next)
+        return
+      }
     }
     // After recovery, a roll or a drink cancels the tail.
     if (this._recovered && (buffered === 'roll' || buffered === 'item')) {
+      this._chainQueued = ''
       this._enter('free')
       return
     }
-    if (this._stateTime >= this._actionSeconds) this._enter('free')
+    if (this._stateTime >= this._actionSeconds) {
+      const queued = this._chainQueued
+      this._chainQueued = ''
+      if (queued && this._startAttack('light', queued, true)) return
+      // A segment of a longer clip ends here: blend out of it rather than play on into the next attack.
+      if (this._segmented(move)) this._stopAction(num(move?.blendOut, this.attackBlendOut))
+      this._enter('free')
+    }
+  }
+
+  /** Whether `next` is the segment of the same clip that follows `move`'s. */
+  private _continues(move: any, next: any): boolean {
+    if (!move || !next || move.clip !== next.clip) return false
+    const end = num(move.clipEnd, 0)
+    return end > 0 && Math.abs(num(next.clipStart, 0) - end) < 1e-3
+  }
+
+  /** Whether a move plays only part of its clip (and so must be stopped where it ends). */
+  private _segmented(move: any): boolean {
+    return !!move && num(move.clipEnd, 0) > 0 && num(move.clipEnd, 0) < this._clipLength - 1e-3
   }
 
   private _roll(intent: any): void {
@@ -622,29 +696,43 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   // ----- entering actions ------------------------------------------------------------------------
 
-  /** Start an attack. `kind` light/heavy; `named` is the next combo move, or null for the chain's start. */
-  private _startAttack(kind: string, named: string): void {
-    if (this.stamina <= 0) return
+  /**
+   * Start an attack. `kind` light/heavy; `named` is the next combo move, or null for the chain's start.
+   * `continuing`: the move is the next segment of the clip already playing, which carries on into it.
+   * False when no attack could start (no stamina, no weapon).
+   */
+  private _startAttack(kind: string, named: string, continuing: boolean = false): boolean {
+    if (this.stamina <= 0) return false
     const weapon = this.currentWeapon() as any
-    if (!weapon) return
+    if (!weapon) return false
     const name = named || (kind === 'heavy' ? weapon.heavyMove : weapon.lightMove)
     const move = weapon.findMove?.(name) ?? weapon.findMove?.(weapon.lightMove)
-    if (!move) return
+    if (!move) return false
     this._consumeBuffer()
+    this._chainQueued = ''
     this._spend(num(move.staminaCost, 20) * num(weapon.staminaMul, 1))
 
     this._move = move
+    this._sinceBlow = 0
     this._windowOpened = false
     closeSwing(this._swing)
     this._comboOpen = false
     this._recovered = false
     this._enter('attack')
     this._playSpeed = Math.max(0.05, num(move.playSpeed, 1))
-    this._play(move.clip, this._playSpeed, false, 1, false, true)
+    const start = Math.max(0, num(move.clipStart, 0))
+    if (continuing) this._clip = move.clip
+    else {
+      // Whatever travel collected before this swing is not this swing's.
+      ;(this._model?.animator as any)?.consumeRootMotion?.()
+      this._play(move.clip, this._playSpeed, false, 1, !!move.rootMotion, true, start)
+    }
     this._usesEvents = this._clipHasEvent(move.clip, 'hit')
-    const length = this._clipLength > 0 ? this._clipLength : num(move.recoverTime, 0.7) + 0.4
+    const end = num(move.clipEnd, 0) > start ? num(move.clipEnd, 0) : this._clipLength
+    const length = end > start ? end - start : num(move.recoverTime, 0.7) + 0.4
     this._actionSeconds = length / this._playSpeed
     playSound(this, kind === 'heavy' ? 'Swing Heavy' : 'Swing')
+    return true
   }
 
   private _startRoll(intent: any): void {
@@ -970,14 +1058,14 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   }
 
   private _play(clip: string, speed: number, loop: boolean = false, ikWeight: number = 1, rootMotion: boolean = false,
-                attack: boolean = false): void {
+                attack: boolean = false, startTime: number = 0): void {
     this._clip = clip
     this._clipLength = this._clipDuration(clip)
     const animator = this._model?.animator as any
     if (!animator?.playAction || !clip) return
     const blendIn = attack ? this.attackBlendIn : this.actionBlendIn
     const blendOut = attack ? num(this._move?.blendOut, this.attackBlendOut) : this.actionBlendOut
-    animator.playAction(clip, { speed, loop, blendIn, blendOut, ikWeight, rootMotion })
+    animator.playAction(clip, { speed, loop, blendIn, blendOut, ikWeight, rootMotion, startTime })
   }
 
   private _stopAction(blendOut: number = this.actionBlendOut): void {

@@ -8,7 +8,7 @@
 
 import { quat, vec3 } from 'gl-matrix';
 import { localToMove, solvedPoseLocals } from './bakeMotion';
-import { LIMB_CHAINS, LIMBS, quatToEuler, type MotionPose, type PoseBone, type Vec3 } from './motionDoc';
+import { LIMB_CHAINS, LIMBS, eulerToQuat, quatToEuler, type MotionPose, type PoseBone, type Vec3 } from './motionDoc';
 import { modelPose, type MotionRig } from './motionRig';
 
 export interface DragOptions {
@@ -100,8 +100,23 @@ function turnFor(rig: MotionRig, bone: number, parentModel: quat, modelRot: quat
   return quatToEuler(delta);
 }
 
-/** Turn a bone so its model-space rotation is `modelRot` (the rotate rings). */
+/**
+ * Turn a bone so its model-space rotation is `modelRot` (the rotate rings). The tip of a planted limb turns
+ * its goal instead (the goal's rotation is what holds it); a gripping tip turns the hand it holds with it.
+ */
 export function rotateBone(rig: MotionRig, pose: MotionPose, bone: number, modelRot: quat): MotionPose {
+  for (const limb of LIMBS) {
+    const goal = pose.ik?.[limb];
+    if (!goal || rig.bySlot.get(LIMB_CHAINS[limb][2]) !== bone) continue;
+    if (goal.grip) {
+      // The lead tip's rotation that puts this one at modelRot: lead = modelRot * inv(grip.rot).
+      const lead = pose.ik?.[goal.grip.follow];
+      if (!lead) return pose;
+      const leadRot = quat.multiply(quat.create(), modelRot, quat.invert(quat.create(), eulerToQuat(goal.grip.rot)));
+      return { ...pose, ik: { ...pose.ik, [goal.grip.follow]: { ...lead, rot: quatToEuler(quat.normalize(leadRot, leadRot)) } } };
+    }
+    return { ...pose, ik: { ...pose.ik, [limb]: { ...goal, rot: quatToEuler(quat.normalize(quat.create(), modelRot)) } } };
+  }
   const model = modelPose(rig.bones, solvedPoseLocals(rig, pose));
   const p = rig.bones[bone].parent;
   const parentRot = p >= 0 ? model.rot[p] : quat.create();
@@ -141,8 +156,15 @@ export function dragJoint(rig: MotionRig, pose: MotionPose, joint: number, targe
   if (joint === rig.hips) return offsetJoint(rig, pose, joint, vec3.sub(vec3.create(), target, now));
 
   for (const limb of LIMBS) {
-    if (!pose.ik?.[limb] || rig.bySlot.get(LIMB_CHAINS[limb][2]) !== joint) continue;
-    return { ...pose, ik: { ...pose.ik, [limb]: { pos: [target[0], target[1], target[2]] } } };
+    const goal = pose.ik?.[limb];
+    if (!goal || rig.bySlot.get(LIMB_CHAINS[limb][2]) !== joint) continue;
+    // A hand gripping the other one (a two-handed hilt) carries the lead hand's goal with it.
+    const lead = goal.grip ? pose.ik?.[goal.grip.follow] : undefined;
+    if (goal.grip && lead) {
+      const by = vec3.sub(vec3.create(), target, now);
+      return { ...pose, ik: { ...pose.ik, [goal.grip.follow]: { ...lead, pos: [lead.pos[0] + by[0], lead.pos[1] + by[1], lead.pos[2] + by[2]] } } };
+    }
+    return { ...pose, ik: { ...pose.ik, [limb]: { ...goal, pos: [target[0], target[1], target[2]] } } };
   }
 
   if (!opts.keepLengths) return offsetJoint(rig, pose, joint, vec3.sub(vec3.create(), target, now));

@@ -5,6 +5,7 @@ import { beginLoad } from '@cleo/app-kit/feedback/loadingStore'
 import { confirmDiscard } from '../unloadGuard'
 import { IMPORT_WRITE_STEPS } from '../../utils/bundleImport'
 import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore'
+import { LauncherCard, LauncherGlyph, LauncherGrid } from '@cleo/app-kit/launcher/Launcher'
 import {
   ExampleEntry, exampleThumbnailUrl, formatBytes, importExample, loadExampleIndex,
 } from '../../utils/examples'
@@ -34,11 +35,7 @@ function Thumbnail({ entry }: { entry: ExampleEntry }) {
     )
   }
   // No cover image: fall back to the same scene glyph the project cards use.
-  return (
-    <div className='w-full h-full flex items-center justify-center bg-surface-sunken'>
-      <img src={iconFor('scene')} alt='' className='w-8 h-8 opacity-50' />
-    </div>
-  )
+  return <LauncherGlyph><img src={iconFor('scene')} alt='' className='w-8 h-8 opacity-50' /></LauncherGlyph>
 }
 
 export default function ExamplesGallery({ examples, className = '' }: {
@@ -102,35 +99,20 @@ export default function ExamplesGallery({ examples, className = '' }: {
       </div>
 
       <div className='flex-1 min-h-0 overflow-y-auto p-3'>
-        <div className='grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(180px,1fr))]'>
+        <LauncherGrid>
           {examples.map(entry => (
-            <button
+            <LauncherCard
               key={entry.slug}
-              type='button'
-              disabled={!!busySlug}
-              onClick={() => void open(entry)}
+              name={entry.name}
+              description={entry.description || undefined}
               title={entry.description || entry.name}
-              className={
-                'group flex flex-col text-left rounded-md border border-control bg-surface-raised overflow-hidden ' +
-                'cursor-pointer hover:border-highlight focus:outline-none focus:border-highlight ' +
-                'disabled:cursor-default disabled:opacity-50 ' +
-                (busySlug === entry.slug ? 'border-highlight' : '')
-              }>
-              <div className='aspect-video w-full overflow-hidden bg-surface-sunken'>
-                <Thumbnail entry={entry} />
-              </div>
-              <div className='flex flex-col gap-0.5 p-2 min-w-0'>
-                <span className='truncate text-ui font-semibold text-fg'>{entry.name}</span>
-                {entry.description && (
-                  <span className='line-clamp-2 text-ui-sm leading-snug text-muted'>{entry.description}</span>
-                )}
-                <span className='mt-0.5 text-ui-xs text-dim'>
-                  {formatBytes(entry.bytes)} · {entry.sceneCount} scene{entry.sceneCount === 1 ? '' : 's'}
-                </span>
-              </div>
-            </button>
+              meta={<>{formatBytes(entry.bytes)} · {entry.sceneCount} scene{entry.sceneCount === 1 ? '' : 's'}</>}
+              thumbnail={<Thumbnail entry={entry} />}
+              disabled={!!busySlug}
+              active={busySlug === entry.slug}
+              onClick={() => void open(entry)} />
           ))}
-        </div>
+        </LauncherGrid>
       </div>
     </div>
   )

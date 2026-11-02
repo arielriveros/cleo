@@ -2,6 +2,7 @@ import { useState } from 'react'
 import ProjectsBrowser from './ProjectsBrowser'
 import { ProjectRecord } from '../../utils/projects'
 import { VERSION_LABEL } from '../../version'
+import { LauncherPage } from '@cleo/app-kit/launcher/Launcher'
 
 /**
  * The full-screen picker shown before the workspace exists: a fresh install, or a registry pointing at
@@ -12,24 +13,12 @@ export default function ProjectLauncher({ projects }: { projects: ProjectRecord[
   const [list, setList] = useState(projects)
 
   return (
-    <div className='h-screen w-screen flex flex-col items-center justify-center bg-bg text-fg select-none'>
-      <div className='w-[720px] max-w-[92vw] flex flex-col gap-6'>
-        <div className='flex flex-col items-center gap-2'>
-          <h1 className='text-2xl font-semibold tracking-[0.3em] text-fg'>CLEO ENGINE</h1>
-          <span className='text-ui-xs uppercase tracking-[0.3em] text-dim'>Editor</span>
-          <span className='text-ui-xs tabular-nums tracking-[0.2em] text-dim'>{VERSION_LABEL}</span>
-        </div>
-        <div className='flex flex-col gap-2'>
-          <div className='text-ui text-muted'>
-            {list.length
-              ? 'Open a project to continue.'
-              : 'Create your first project, or start from one of the examples.'}
-          </div>
-          <div className='h-[380px] rounded-md border border-control overflow-hidden bg-surface-raised'>
-            <ProjectsBrowser projects={list} onChanged={setList} />
-          </div>
-        </div>
-      </div>
-    </div>
+    <LauncherPage title='CLEO ENGINE' subtitle='Editor' version={VERSION_LABEL} className='h-screen w-screen'
+      frameClassName='h-[380px]'
+      prompt={list.length
+        ? 'Open a project to continue.'
+        : 'Create your first project, or start from one of the examples.'}>
+      <ProjectsBrowser projects={list} onChanged={setList} />
+    </LauncherPage>
   )
 }

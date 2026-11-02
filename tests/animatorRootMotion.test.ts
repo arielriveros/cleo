@@ -294,6 +294,21 @@ describe('Animator — root motion from an action', () => {
         expect(a.consumeRootMotion()[0]).toBeCloseTo(0.5, 4);
     });
 
+    it('joins a clip part-way (startTime): travel and events count only from there', () => {
+        const node: any = makeNode();
+        node.worldTransform = mat4.create();
+        const clip = rmTranslate('combo', 2, 1);
+        clip.rootMotion = false;
+        clip.events = [{ time: 0.25, name: 'early' }, { time: 0.75, name: 'late' }];
+        const a = makeAnimator([still(), clip], node);
+        const fired: string[] = [];
+        a.onAnimationEvent((name: string) => fired.push(name));
+        a.playAction('combo', { rootMotion: true, blendIn: 0.001, startTime: 0.5 });
+        a.update(0.25);
+        expect(a.consumeRootMotion()[0]).toBeCloseTo(0.5, 4);   // 0.5 s -> 0.75 s of a 2 m / 1 s clip
+        expect(fired).toEqual(['late']);
+    });
+
     it('leaves the travel alone without the option', () => {
         const node: any = makeNode();
         node.worldTransform = mat4.create();

@@ -9,21 +9,21 @@ import { AssetBar, useCreatorAsset } from '../../core/useCreatorAsset';
 import { useStageCapture } from '../../core/stageCapture';
 import { useGeneration } from '../../core/useGeneration';
 import { frameBox, installOrbitCamera } from '../../fx/ui/fxPreview';
-import { bakeMotion, bakePose, limbTip, mirrorPose, poseFromClip, type BakedClip } from '../bakeMotion';
+import { bakeMotion, bakePose, gripFrom, limbTipFrame, mirrorPose, poseFromClip, solvedPoseLocals, type BakedClip } from '../bakeMotion';
 import { exportCharacter, normaliseCharacter, type CharacterDoc } from '../character';
 import type { CreatorFile } from '@cleo/app-kit/creatorLibrary';
 import type { ExportFile } from '../../core/generator';
 import type { Animation } from 'cleo/animation/animatedModel';
 import { exportMotion } from '../exportMotion';
 import {
-  DEFAULT_MOTION, LIMB_LABELS, LIMBS, motionDuration, newId, normaliseMotion, restPose,
-  type Limb, type MotionDoc, type MotionPose, type Vec3,
+  DEFAULT_MOTION, LIMB_CHAINS, LIMB_LABELS, LIMB_MIRROR, LIMBS, motionDuration, motionFromFile, newId, normaliseMotion, restPose,
+  type IkGoal, type Limb, type MotionDoc, type MotionPose, type Vec3,
 } from '../motionDoc';
 import { loadSavedPresets, type BlendPreset } from '../blendCurve';
 import { MotionCtx, POSE_DRAG_TYPE, useMotion, type MotionState, type View } from './motionContext';
 import { TimelinePanel } from './TimelinePanel';
 import { PoseGizmos } from './PoseGizmos';
-import type { MotionRig } from '../motionRig';
+import { modelPose, type MotionRig } from '../motionRig';
 import { DEFAULT_MOTION_STAGE, MotionStage, type MotionStageSettings } from './motionStage';
 
 // Motion Creator: a character animated from a few key POSES. Pose the mannequin bone by bone (or plant a
@@ -161,6 +161,18 @@ export function MotionWorkspace() {
   const capture = useStageCapture();
   const asset = useCreatorAsset<MotionDoc>('motion', doc, d => setDoc(normaliseMotion(d)), () => {}, capture);
   const rigName = character?.name ?? 'Mannequin';
+  /** A motion read from a file replaces the one being edited, detached from the library until saved. */
+  const openMotion = (next: MotionDoc) => {
+    void asset.open(null).then(() => {
+      // On the subject it was made for (no character: the mannequin).
+      if ((next.characterId ?? null) !== (doc.characterId ?? null)) chooseSubject(next.characterId ?? null);
+      setDoc(next);
+      setPoseId(next.poses[0].id);
+      setKeyId(null);
+      setView('motion');
+      toast.success(`Opened “${next.name}”. Save it as an asset to keep it in the library.`);
+    });
+  };
   function publish(motion: BakedClip, from: MotionDoc) {
     const skin = stageRef.current?.skin;
     if (!asset.active || !skin) return;
@@ -216,7 +228,7 @@ export function MotionWorkspace() {
   const value = useMemo<MotionState>(() => ({
     doc, setDoc, rig, poseId, setPoseId, bone, setBone, view, setView, clip, time, scrub, playing, togglePlay,
     stageTime: () => stageRef.current?.time() ?? 0,
-    onExport, exporting: exportJob.status.running, keyId, setKeyId, savedPresets, setSavedPresets,
+    onExport, exporting: exportJob.status.running, keyId, setKeyId, savedPresets, setSavedPresets, openMotion,
     character, setCharacter, sourceClip, showSourceClip, sourceAnimations,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [doc, rig, poseId, bone, view, clip, time, playing, exportJob.status.running, keyId, savedPresets, character, sourceClip, sourceAnimations]);
@@ -369,11 +381,14 @@ function PosePanel() {
     else bones[selected] = { ...(zero(merged.rot) ? {} : { rot: merged.rot }), ...(zero(merged.move) ? {} : { move: merged.move }) };
     setPose({ ...pose, bones });
   };
-  const setIk = (limb: Limb, pos: Vec3 | null) => {
+  const setIk = (limb: Limb, goal: IkGoal | null) => {
     const ik = { ...(pose.ik ?? {}) };
-    if (pos) ik[limb] = { pos }; else delete ik[limb];
+    if (goal) ik[limb] = goal; else delete ik[limb];
+    // Released: whatever gripped it lets go too.
+    if (!goal) for (const l of LIMBS) if (ik[l]?.grip?.follow === limb) { const { grip: _, ...rest } = ik[l]!; ik[l] = rest; }
     setPose({ ...pose, ik: Object.keys(ik).length ? ik : undefined });
   };
+  const plant = (limb: Limb) => { const f = limbTipFrame(rig, pose, limb); if (f) setIk(limb, { pos: f.pos }); };
 
   const boneButton = (n: string) => (
     <ListRow key={n} selected={n === selected} onClick={() => setBone(n)} caption={posed(n) ? 'posed' : undefined}>{short(n)}</ListRow>
@@ -412,17 +427,64 @@ function PosePanel() {
         <span className='text-ui-xs text-dim'>Plant a hand or foot: the limb bends to reach its goal, and stays there while the body moves.</span>
         {LIMBS.map(limb => {
           const goal = pose.ik?.[limb];
+          const other = LIMB_MIRROR[limb];
+          const isHand = limb === 'handL' || limb === 'handR';
+          const holdRot = (on: boolean) => {
+            if (!goal) return;
+            const { rot: _, ...rest } = goal;
+            setIk(limb, on ? { ...rest, rot: limbTipFrame(rig, pose, limb)?.rot ?? [0, 0, 0] } : rest);
+          };
+          const aim = (on: boolean) => {
+            if (!goal) return;
+            const { pole: _, ...rest } = goal;
+            if (!on) { setIk(limb, rest); return; }
+            // Start where the joint already points: out from the line between the limb's root and tip.
+            const [r, m, t] = LIMB_CHAINS[limb].map(slot => rig.bySlot.get(slot));
+            if (r === undefined || m === undefined || t === undefined) return;
+            const p = modelPose(rig.bones, solvedPoseLocals(rig, pose)).pos;
+            const out = [0, 1, 2].map(i => p[m][i] - (p[r][i] + p[t][i]) / 2);
+            const len = Math.hypot(out[0], out[1], out[2]) || 1;
+            const r3 = (v: number) => Math.round(v * 1000) / 1000;
+            setIk(limb, { ...rest, pole: [0, 1, 2].map(i => r3(p[m][i] + out[i] / len * 0.3)) as Vec3 });
+          };
+          const grip = (on: boolean) => {
+            if (!goal) return;
+            const { grip: _, ...rest } = goal;
+            if (!on) { setIk(limb, rest); return; }
+            // The other hand leads: planted where it is (with its turn held) if it was free.
+            let next = pose;
+            if (!pose.ik?.[other]) { const f = limbTipFrame(rig, pose, other); if (f) next = { ...pose, ik: { ...pose.ik, [other]: { pos: f.pos, rot: f.rot } } }; }
+            const g = gripFrom(rig, next, limb, other);
+            if (g) setPose({ ...next, ik: { ...next.ik, [limb]: { ...rest, grip: g } } });
+          };
           return (
             <div key={limb} className='pt-1'>
               <div className='flex items-center gap-2'>
                 <span className='flex-1 text-ui-sm'>{LIMB_LABELS[limb]}</span>
                 {goal
                   ? <Button size='sm' onClick={() => setIk(limb, null)}>Release</Button>
-                  : <Button size='sm' title='Plant the goal where the limb is now' onClick={() => { const p = limbTip(rig, pose, limb); if (p) setIk(limb, p); }}>Plant</Button>}
+                  : <Button size='sm' title='Plant the goal where the limb is now' onClick={() => plant(limb)}>Plant</Button>}
               </div>
-              {goal && (['X', 'Y', 'Z'] as const).map((axis, i) => (
+              {goal && !goal.grip && (['X', 'Y', 'Z'] as const).map((axis, i) => (
                 <Slider key={axis} label={`${axis} (m)`} min={-rig.height} max={rig.height} step={0.005} readout value={goal.pos[i]}
-                        onChange={v => { const p: Vec3 = [...goal.pos]; p[i] = v; setIk(limb, p); }} />
+                        onChange={v => { const p: Vec3 = [...goal.pos]; p[i] = v; setIk(limb, { ...goal, pos: p }); }} />
+              ))}
+              {goal && !goal.grip && <Toggle label='Hold rotation' checked={!!goal.rot} onChange={holdRot} />}
+              {goal?.rot && !goal.grip && (['X', 'Y', 'Z'] as const).map((axis, i) => (
+                <Slider key={`r${axis}`} label={`Turn ${axis} (°)`} min={-180} max={180} step={0.5} readout value={goal.rot![i]}
+                        onChange={v => { const r: Vec3 = [...goal.rot!]; r[i] = v; setIk(limb, { ...goal, rot: r }); }} />
+              ))}
+              {goal && <Toggle label={isHand ? 'Point the elbow' : 'Point the knee'} checked={!!goal.pole} onChange={aim} />}
+              {goal?.pole && (['X', 'Y', 'Z'] as const).map((axis, i) => (
+                <Slider key={`p${axis}`} label={`${isHand ? 'Elbow' : 'Knee'} toward ${axis} (m)`} min={-rig.height} max={rig.height} step={0.005} readout value={goal.pole![i]}
+                        onChange={v => { const q: Vec3 = [...goal.pole!]; q[i] = v; setIk(limb, { ...goal, pole: q }); }} />
+              ))}
+              {goal && isHand && !pose.ik?.[other]?.grip && (
+                <Toggle label={`Grip with the ${LIMB_LABELS[other].toLowerCase()}`} checked={!!goal.grip} onChange={grip} />
+              )}
+              {goal?.grip && (['X', 'Y', 'Z'] as const).map((axis, i) => (
+                <Slider key={`g${axis}`} label={`Grip ${axis} (m)`} min={-0.4} max={0.4} step={0.0025} readout value={goal.grip!.offset[i]}
+                        onChange={v => { const o: Vec3 = [...goal.grip!.offset]; o[i] = v; setIk(limb, { ...goal, grip: { ...goal.grip!, offset: o } }); }} />
               ))}
             </div>
           );
@@ -435,7 +497,16 @@ function PosePanel() {
 // --- Motion (right) ---------------------------------------------------------------------------------
 
 function MotionPanel() {
-  const { doc, setDoc, onExport, exporting } = useMotion();
+  const { doc, setDoc, onExport, exporting, openMotion } = useMotion();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const readFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const m = motionFromFile(JSON.parse(await file.text()));
+      if (!m) throw new Error('Not a motion: expected a .motion.json the Motion Creator exported.');
+      openMotion(m);
+    } catch (e) { toast.error(String((e as Error)?.message ?? e), { title: `Could not open ${file.name}` }); }
+  };
   return (
     <PanelBody>
       <PanelHeader kind='Motion' name={doc.name} />
@@ -456,7 +527,12 @@ function MotionPanel() {
         </div>
         <Slider label='Frames per second' min={10} max={60} step={1} readout value={doc.fps} onChange={v => setDoc({ ...doc, fps: Math.round(v) })} />
         <Toggle label='Loop' checked={doc.loop} onChange={v => setDoc({ ...doc, loop: v })} />
-        <Button size='sm' className='mt-1' disabled={exporting} onClick={onExport}>Download .anim</Button>
+        <div className='flex gap-1 mt-1'>
+          <Button size='sm' disabled={exporting} onClick={onExport}>Download .anim</Button>
+          <Button size='sm' title='Open a .motion.json (the sidecar Download writes) to edit it again' onClick={() => fileRef.current?.click()}>Open…</Button>
+          <input ref={fileRef} className='hidden' type='file' accept='.json,application/json'
+                 onChange={e => { void readFile(e.target.files?.[0]); e.target.value = ''; }} />
+        </div>
       </Collapsable>
     </PanelBody>
   );

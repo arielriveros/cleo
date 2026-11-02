@@ -9,7 +9,7 @@ import {
 } from '@cleo/app-kit/creatorLibrary';
 import { confirmDialog } from '@cleo/app-kit/feedback/dialogStore';
 import { beginLoad } from '@cleo/app-kit/feedback/loadingStore';
-import { Button, MenuItem } from '@cleo/app-kit/ui';
+import { AddMenu, ImportButton, type AddMenuItem } from '@cleo/app-kit/assets/AssetToolbar';
 import { RIGGED_ACCEPT, isModelFile } from '../core/riggedImport';
 import { importCharacter } from '../motion/characterImport';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
@@ -189,16 +189,7 @@ export function AssetsPanel() {
   }, []);
 
   // --- + Add ---
-  const [addOpen, setAddOpen] = useState(false);
-  const addRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!addOpen) return;
-    const away = (e: MouseEvent) => { if (!addRef.current?.contains(e.target as globalThis.Node)) setAddOpen(false); };
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setAddOpen(false); };
-    window.addEventListener('mousedown', away);
-    window.addEventListener('keydown', esc);
-    return () => { window.removeEventListener('mousedown', away); window.removeEventListener('keydown', esc); };
-  }, [addOpen]);
+  const [importing, setImporting] = useState(false);
   const addCharacter = async (files: File[]) => {
     if (!files.some(f => isModelFile(f.name))) { toast.info('Pick a .fbx, .glb or .gltf file (with its .bin and textures, if it has them).'); return; }
     const load = beginLoad('Adding a character', [{ id: 'read', label: 'Reading the model' }], 'overlay', { showAfterMs: 120 });
@@ -217,7 +208,11 @@ export function AssetsPanel() {
       void refresh();
     }
   };
-  const addItems = [
+  const importFiles = async (files: File[]) => {
+    setImporting(true);
+    try { await addCharacter(files); } finally { setImporting(false); }
+  };
+  const addItems: AddMenuItem[] = [
     { label: 'Rigged character…', title: 'Upload a rigged model (.fbx, .glb, .gltf): the Motion Creator can animate it, and its clips and poses sync to the editor',
       run: () => document.getElementById('creator-character-import')?.click() },
   ];
@@ -228,22 +223,9 @@ export function AssetsPanel() {
       data={data} apiRef={apiRef} init={init} modeKey={MODE_KEY} idPrefix='creator-asset'
       previews={previews} icons={icons}
       toolbarStart={<>
-        <div className='relative shrink-0' ref={addRef}>
-          <Button variant='success' size='sm' className='shrink-0 gap-0 h-[20px] text-ui-sm font-semibold leading-none whitespace-nowrap'
-                  onClick={() => setAddOpen(v => !v)} title='Add an asset to the Creator library'>
-            + Add <span className='ml-1 text-ui-2xs'>▾</span>
-          </Button>
-          {addOpen && (
-            <div className='absolute left-0 top-[22px] z-20 min-w-[160px] p-1 bg-surface-raised border border-border rounded shadow-lg'>
-              {addItems.map(item => (
-                <MenuItem key={item.label} className='items-center text-ui-sm whitespace-nowrap' title={item.title}
-                          onClick={() => { setAddOpen(false); item.run(); }}>
-                  {item.label}
-                </MenuItem>
-              ))}
-            </div>
-          )}
-        </div>
+        <AddMenu items={addItems} title='Add an asset to the Creator library' />
+        <ImportButton accept={RIGGED_ACCEPT} onFiles={files => void importFiles(files)} busy={importing}
+          title='Import a rigged model (.fbx, .glb, .gltf, with its .bin and textures) as a Character' />
         <input id='creator-character-import' className='hidden' type='file' multiple accept={RIGGED_ACCEPT}
                onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; if (files.length) void addCharacter(files); }} />
       </>}

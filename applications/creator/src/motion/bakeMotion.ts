@@ -16,7 +16,7 @@ import type { Animation } from 'cleo/animation/animatedModel';
 import { modelPose, type LocalTRS, type MotionRig } from './motionRig';
 import {
   LIMB_CHAINS, LIMB_MIRROR, LIMBS, eulerToQuat, motionDuration, newId, presetBlend, quatToEuler,
-  type IkGoal, type Limb, type MotionDoc, type MotionPose, type PoseBone, type Vec3,
+  keyEvents, type IkGoal, type IkGrip, type Limb, type MotionDoc, type MotionPose, type PoseBone, type Vec3,
 } from './motionDoc';
 import { evalBlend } from './blendCurve';
 
@@ -81,11 +81,41 @@ export function poseLocals(rig: MotionRig, pose: MotionPose): LocalTRS[] {
 /** A pose with its IK goals solved: what the viewport shows for it. */
 export function solvedPoseLocals(rig: MotionRig, pose: MotionPose): LocalTRS[] {
   const local = poseLocals(rig, pose);
+  const goals: Partial<Record<Limb, FrameGoal>> = {};
   for (const limb of LIMBS) {
-    const goal = pose.ik?.[limb];
-    if (goal) solveLimb(rig, local, limb, goal.pos as unknown as vec3, 1);
+    const g = pose.ik?.[limb];
+    if (!g) continue;
+    goals[limb] = {
+      pos: g.pos as unknown as vec3, rot: g.rot ? eulerToQuat(g.rot) : undefined, pole: g.pole as unknown as vec3 | undefined, weight: 1,
+      grip: g.grip ? { follow: g.grip.follow, offset: g.grip.offset as unknown as vec3, rot: eulerToQuat(g.grip.rot), weight: 1 } : undefined,
+    };
   }
+  solveGoals(rig, local, goals);
   return local;
+}
+
+/** A tip's model-space position and rotation in a pose as shown (to plant or lock a goal where it is). */
+export function limbTipFrame(rig: MotionRig, pose: MotionPose, limb: Limb): { pos: Vec3; rot: Vec3 } | null {
+  const tip = rig.bySlot.get(LIMB_CHAINS[limb][2]);
+  if (tip === undefined) return null;
+  const m = modelPose(rig.bones, solvedPoseLocals(rig, pose));
+  const p = m.pos[tip];
+  return { pos: [p[0], p[1], p[2]], rot: quatToEuler(quat.normalize(quat.create(), m.rot[tip])) };
+}
+
+/**
+ * The grip that keeps `limb` where it is now relative to `lead`'s tip (a two-handed hold made from the
+ * hands as posed), or null when either limb is missing.
+ */
+export function gripFrom(rig: MotionRig, pose: MotionPose, limb: Limb, lead: Limb): IkGrip | null {
+  const a = rig.bySlot.get(LIMB_CHAINS[lead][2]), b = rig.bySlot.get(LIMB_CHAINS[limb][2]);
+  if (a === undefined || b === undefined || a === b) return null;
+  const m = modelPose(rig.bones, solvedPoseLocals(rig, pose));
+  const inv = quat.invert(quat.create(), m.rot[a]);
+  const off = vec3.transformQuat(vec3.create(), vec3.sub(vec3.create(), m.pos[b], m.pos[a]), inv);
+  const rot = quat.normalize(quat.create(), quat.multiply(quat.create(), inv, m.rot[b]));
+  const r = (x: number) => Math.round(x * 1e5) / 1e5;
+  return { follow: lead, offset: [r(off[0]), r(off[1]), r(off[2])], rot: quatToEuler(rot) };
 }
 
 /** Where a limb's tip is in a pose, in model space (to plant an IK goal where the limb already is). */
@@ -139,12 +169,38 @@ export function mirrorPose(rig: MotionRig, pose: MotionPose, name = `${pose.name
   if (pose.ik) {
     ik = {};
     const centre = rig.hips >= 0 ? rig.restModel.pos[rig.hips][a] : 0;
+    const tipOf = (limb: Limb) => rig.bySlot.get(LIMB_CHAINS[limb][2]);
+    /** A tip's model rotation, mirrored onto its partner's tip (as the bones above are). */
+    const mirrorTipRot = (limb: Limb, q: quat): quat | null => {
+      const i = tipOf(limb), j = tipOf(LIMB_MIRROR[limb]);
+      if (i === undefined || j === undefined) return null;
+      const out = quat.multiply(quat.create(), reflect(q, a), quat.invert(quat.create(), reflect(rig.restModel.rot[i], a)));
+      return quat.normalize(out, quat.multiply(out, out, rig.restModel.rot[j]));
+    };
+    const shown = modelPose(rig.bones, solvedPoseLocals(rig, pose));
     for (const limb of LIMBS) {
       const g = pose.ik[limb];
       if (!g) continue;
       const pos: Vec3 = [...g.pos];
       pos[a] = 2 * centre - pos[a];
-      ik[LIMB_MIRROR[limb]] = { pos };
+      const goal: IkGoal = { pos };
+      if (g.pole) { const pole: Vec3 = [...g.pole]; pole[a] = 2 * centre - pole[a]; goal.pole = pole; }
+      if (g.rot) { const q = mirrorTipRot(limb, eulerToQuat(g.rot)); if (q) goal.rot = quatToEuler(q); }
+      const li = g.grip ? tipOf(g.grip.follow) : undefined;
+      if (g.grip && li !== undefined) {
+        // Through model space: the lead's and this tip's frames mirrored, the offset reflected.
+        const lead = shown.rot[li];
+        const leadM = mirrorTipRot(g.grip.follow, lead);
+        const own = mirrorTipRot(limb, quat.multiply(quat.create(), lead, eulerToQuat(g.grip.rot)));
+        if (leadM && own) {
+          const w = vec3.transformQuat(vec3.create(), g.grip.offset as unknown as vec3, lead);
+          w[a] = -w[a];
+          const inv = quat.invert(quat.create(), leadM);
+          const off = vec3.transformQuat(vec3.create(), w, inv);
+          goal.grip = { follow: LIMB_MIRROR[g.grip.follow], offset: [off[0], off[1], off[2]], rot: quatToEuler(quat.multiply(quat.create(), inv, own)) };
+        }
+      }
+      ik[LIMB_MIRROR[limb]] = goal;
     }
   }
   return { id: newId(), name, bones, ...(ik && Object.keys(ik).length ? { ik } : {}) };
@@ -152,14 +208,47 @@ export function mirrorPose(rig: MotionRig, pose: MotionPose, name = `${pose.name
 
 // --- IK --------------------------------------------------------------------------------------------
 
-/** Bend a limb so its tip reaches `target` (model space), blended in by `weight`. Keeps the tip's model orientation. */
-function solveLimb(rig: MotionRig, local: LocalTRS[], limb: Limb, target: vec3, weight: number): void {
+/** One limb's goal on one frame: where (and how turned) its tip should be, and how much. */
+interface FrameGoal {
+  pos: vec3;
+  rot?: quat;
+  /** Where the middle joint bends toward (model space). */
+  pole?: vec3;
+  weight: number;
+  /** Held on to another tip; `weight` of it over `pos`/`rot`. */
+  grip?: { follow: Limb; offset: vec3; rot: quat; weight: number };
+}
+
+/** Solve a frame's goals: free limbs first, then the ones gripping them, from where those tips ended up. */
+function solveGoals(rig: MotionRig, local: LocalTRS[], goals: Partial<Record<Limb, FrameGoal>>): void {
+  const order = LIMBS.filter(l => goals[l] && !goals[l]!.grip).concat(LIMBS.filter(l => goals[l]?.grip));
+  for (const limb of order) {
+    const g = goals[limb]!;
+    let pos = g.pos, rot = g.rot;
+    const lead = g.grip ? rig.bySlot.get(LIMB_CHAINS[g.grip.follow][2]) : undefined;
+    if (g.grip && lead !== undefined && g.grip.weight > 1e-4) {
+      const m = modelPose(rig.bones, local);
+      const held = vec3.add(vec3.create(), m.pos[lead], vec3.transformQuat(vec3.create(), g.grip.offset, m.rot[lead]));
+      const heldRot = quat.multiply(quat.create(), m.rot[lead], g.grip.rot);
+      const w = Math.min(1, g.grip.weight);
+      pos = vec3.lerp(vec3.create(), g.pos, held, w);
+      rot = g.rot ? quat.slerp(quat.create(), g.rot, heldRot, w) : (w >= 1 ? heldRot : undefined);
+    }
+    solveLimb(rig, local, limb, pos, g.weight, rot, g.pole);
+  }
+}
+
+/**
+ * Bend a limb so its tip reaches `target` (model space), blended in by `weight`. The tip takes the model
+ * rotation `tipRot` when given, else keeps the one the arm gave it.
+ */
+function solveLimb(rig: MotionRig, local: LocalTRS[], limb: Limb, target: vec3, weight: number, tipRot?: quat, pole?: vec3): void {
   if (weight <= 1e-4) return;
   const [rs, ms, ts] = LIMB_CHAINS[limb];
   const r = rig.bySlot.get(rs), m = rig.bySlot.get(ms), t = rig.bySlot.get(ts);
   if (r === undefined || m === undefined || t === undefined) return;
   const model = modelPose(rig.bones, local);
-  const res = solveTwoBone({ root: model.pos[r], mid: model.pos[m], tip: model.pos[t], target });
+  const res = solveTwoBone({ root: model.pos[r], mid: model.pos[m], tip: model.pos[t], target, pole: pole ?? null });
   const newRoot = quat.multiply(quat.create(), res.rootDelta, model.rot[r]);
   const newMid = quat.multiply(quat.create(), quat.multiply(quat.create(), res.midDelta, res.rootDelta), model.rot[m]);
   const parentRot = rig.bones[r].parent >= 0 ? model.rot[rig.bones[r].parent] : quat.create();
@@ -169,7 +258,7 @@ function solveLimb(rig: MotionRig, local: LocalTRS[], limb: Limb, target: vec3, 
   const midParentModel = rig.bones[m].parent === r ? newRoot : model.rot[rig.bones[m].parent];
   const midLocal = quat.multiply(quat.create(), inv(midParentModel), newMid);
   const tipParentModel = rig.bones[t].parent === m ? newMid : model.rot[rig.bones[t].parent];
-  const tipLocal = quat.multiply(quat.create(), inv(tipParentModel), model.rot[t]);
+  const tipLocal = quat.multiply(quat.create(), inv(tipParentModel), tipRot ?? model.rot[t]);
   const blend = (i: number, q: quat) => quat.normalize(local[i].r, quat.slerp(local[i].r, local[i].r, q, Math.min(1, weight)));
   blend(r, rootLocal); blend(m, midLocal); blend(t, tipLocal);
 }
@@ -256,18 +345,38 @@ export function bakeMotion(rig: MotionRig, doc: MotionDoc, name = doc.name): Bak
         quat.multiply(local[i].r, local[i].r, eulerToQuat(e, tmp));
       }
     }
-    // IK goals, eased between the keys' goals at the limb root's time. A goal only one side has fades in or out.
+    // IK goals, eased between the keys' goals at the limb root's time. A goal only one side has fades in or
+    // out; so does a grip (toward the other side's own goal).
+    const goals: Partial<Record<Limb, FrameGoal>> = {};
     for (const limb of LIMBS) {
       const root = rig.bySlot.get(LIMB_CHAINS[limb][0]);
       if (root === undefined || !doc.poses.some(p => p.ik?.[limb])) continue;
       const s = at(wrap(t - doc.overlap * rig.bones[root].depth));
       const ga: IkGoal | undefined = keyIk[s.a][limb], gb: IkGoal | undefined = keyIk[s.b][limb];
       if (!ga && !gb) continue;
-      const pa = (ga ?? gb)!.pos, pb = (gb ?? ga)!.pos;
-      const target = vec3.lerp(vec3.create(), pa as unknown as vec3, pb as unknown as vec3, s.w);
-      const weight = (ga ? 1 - s.w : 0) + (gb ? s.w : 0);
-      solveLimb(rig, local, limb, target, Math.min(1, Math.max(0, ga && gb ? 1 : weight)));
+      const A = (ga ?? gb)!, B = (gb ?? ga)!;
+      const pos = vec3.lerp(vec3.create(), A.pos as unknown as vec3, B.pos as unknown as vec3, s.w);
+      const ra = A.rot ?? B.rot, rb = B.rot ?? A.rot;
+      const rot = ra && rb ? quat.slerp(quat.create(), eulerToQuat(ra), eulerToQuat(rb), s.w) : undefined;
+      const qa = A.pole ?? B.pole, qb = B.pole ?? A.pole;
+      const pole = qa && qb ? vec3.lerp(vec3.create(), qa as unknown as vec3, qb as unknown as vec3, s.w) : undefined;
+      const weight = Math.min(1, Math.max(0, ga && gb ? 1 : (ga ? 1 - s.w : 0) + (gb ? s.w : 0)));
+      let grip: FrameGoal['grip'];
+      const ka = ga?.grip, kb = gb?.grip;
+      if (ka || kb) {
+        const x = (ka ?? kb)!, y = kb && (!ka || kb.follow === ka.follow) ? kb : x;
+        // Held at both keys: held throughout. Only at one: the hold fades toward the other key's own goal.
+        const gw = ka && kb ? 1 : ka ? (gb ? 1 - s.w : 1) : (ga ? s.w : 1);
+        grip = {
+          follow: x.follow,
+          offset: vec3.lerp(vec3.create(), x.offset as unknown as vec3, y.offset as unknown as vec3, s.w),
+          rot: quat.slerp(quat.create(), eulerToQuat(x.rot), eulerToQuat(y.rot), s.w),
+          weight: gw,
+        };
+      }
+      goals[limb] = { pos, rot, pole, weight, grip };
     }
+    solveGoals(rig, local, goals);
     for (const [i, out] of rotOut) { const r = quat.normalize(tmp, local[i].r); out.push(r[0], r[1], r[2], r[3]); }
     for (const [i, out] of posOut) { const p = local[i].t; out.push(p[0], p[1], p[2]); }
   }
@@ -281,7 +390,7 @@ export function bakeMotion(rig: MotionRig, doc: MotionDoc, name = doc.name): Bak
     clip.channels.push({ samplerIndex: clip.samplers.length, targetNodeIndex: rig.bones[i].node, targetPath: 'translation' });
     clip.samplers.push({ input: times, output, interpolation: 'LINEAR' });
   }
-  const events = keys.filter(k => k.event).map(k => ({ time: k.time, name: k.event! }));
+  const events = keys.flatMap(k => keyEvents(k).map(name => ({ time: k.time, name })));
   if (events.length) clip.events = events;
   return clip;
 }

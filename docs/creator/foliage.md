@@ -295,16 +295,20 @@ a tint over the texture, metallic, emission, the cutout threshold, whether the b
 rigidly or flutters with the leaves -- is kept per material; **Reset** at the top returns a material to
 what the generator chose.
 
-**Textures** lists the material's texture slots. Each is either **generated** -- its generator's
-settings sit beneath it (the Leaf texture, Bark texture, Blade texture or Rock texture) -- or an image of
-your own: **Image…** loads one, resized to the slot's size, and **Use generated** goes back. A rock's
+**Textures** lists the material's texture slots under the Editor's names and in its order: **Base
+Color**, **Metallic**, **Roughness**, **Normal**, **Occlusion**. Each is either **generated** -- its
+generator's settings sit beneath the slots (the Leaf texture, Bark texture, Blade texture or Rock
+texture) -- or an image of your own: hover the slot and **Upload…** loads one (or drop a file on it),
+resized to the slot's size, and **✕** goes back to the generated one. A rock's
 albedo is baked into its own six-chart layout, so a tiling photo works but shows seams.
 
-Bark carries every PBR channel: colour, normal, and an **ARM** map -- ambient occlusion in red, roughness
-in green, metallic in blue, glTF's own packing, written as both the occlusion and the metal/rough texture
-of the `.glb`. Generated bark derives its AO and roughness from the pattern's relief: cracks are darker
-and rougher than the plate tops. A scan's packed `_arm` map replaces all three channels; a greyscale
-**Bark AO**, **Bark roughness** or **Bark metallic** image replaces one channel, over the ARM map. The
+Bark carries every PBR channel. Metallic, Roughness and Occlusion are packed into one **ARM** map --
+ambient occlusion in red, roughness in green, metallic in blue, glTF's own packing, written as both the
+occlusion and the metal/rough texture of the `.glb`. As in the Editor, the packed map has no slot of its
+own: each of the three slots shows its channel of it. Generated bark derives its AO and roughness from the pattern's relief: cracks are darker
+and rougher than the plate tops. A scan's packed `_arm` / `_orm` map (told by its file name), on any of the three slots, replaces all
+three channels; a greyscale image in **Occlusion**, **Roughness** or **Metallic** replaces one channel,
+over the ARM map. The
 map's values are what the surface uses, so the Roughness slider scales the roughness channel, and Metallic
 fills the metallic channel when no map gives one. **Load texture set…** takes several images, or the `.zip`
 a PBR set was downloaded in, and puts each map in its slot by its file name (`diff`, `nor_gl`, `arm`, `ao`,

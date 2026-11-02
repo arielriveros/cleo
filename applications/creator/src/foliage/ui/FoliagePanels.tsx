@@ -3,6 +3,7 @@ import { WIND_PRESETS } from 'cleo';
 import { ParamForm } from '@cleo/app-kit/params/ParamForm';
 import type { GenericParamSpec } from '@cleo/app-kit/params/ParamField';
 import { MaterialFields } from '@cleo/app-kit/materials/MaterialFields';
+import { TextureSlotFrame, TextureSlotGrid, TextureTile, pbrSlotLabel, type PbrTextureSlot } from '@cleo/app-kit/materials/TextureSlots';
 import { Button, Collapsable, FileButton, SegmentedControl, TextInput } from '@cleo/app-kit/ui';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
 import { ListRow, PanelBody, PanelHeader, SchemaSections } from '../../app/workspace';
@@ -27,13 +28,53 @@ const DEFAULTS: Record<FoliageKind, object> = { grass: DEFAULT_GRASS, rock: DEFA
 /** LOD 0 triangle counts above which a level is flagged: foliage is drawn thousands of times. */
 const LOD0_BUDGET: Record<FoliageKind, number> = { grass: 1500, rock: 6000, tree: 20000, bush: 8000 };
 
-/** The textures each material samples, in slot order (base colour first). */
+/**
+ * The editor's PBR slot each texture fills. The bark's packed ARM map (`barkOrm`) has no slot of its own:
+ * as in the editor, ONE packed image stands in Metallic, Roughness and Occlusion, and each of those can be
+ * replaced by a greyscale image of its own (which replaces that channel).
+ */
+const SLOT_OF: Partial<Record<TextureKey, PbrTextureSlot>> = {
+  grass: 'baseColor', grassCard: 'baseColor', rockAlbedo: 'baseColor', bark: 'baseColor', leaves: 'baseColor',
+  rockNormal: 'normal', barkNormal: 'normal', leavesNormal: 'normal',
+  barkMetallic: 'metallic', barkRoughness: 'roughness', barkAo: 'occlusion',
+};
+/** The textures each material samples, in the editor's slot order. */
 const MATERIAL_TEXTURES: Record<MaterialKey, TextureKey[]> = {
   grass: ['grass'], grassCard: ['grassCard'], rock: ['rockAlbedo', 'rockNormal'], leaves: ['leaves', 'leavesNormal'],
-  bark: ['bark', 'barkNormal', 'barkOrm', 'barkAo', 'barkRoughness', 'barkMetallic'],
+  bark: ['bark', 'barkMetallic', 'barkRoughness', 'barkNormal', 'barkAo'],
 };
-/** Single-channel slots: no texture of their own, they replace one channel of the packed ARM map. */
+/** Single-channel slots: shown from the packed ARM map unless they have an image of their own. */
 const CHANNEL_SLOTS = new Set<TextureKey>(['barkAo', 'barkRoughness', 'barkMetallic']);
+/** Which channel of the packed ARM map each single-channel slot is (glTF order: R occlusion, G roughness, B metallic). */
+const ARM_CHANNEL: Partial<Record<TextureKey, 0 | 1 | 2>> = { barkAo: 0, barkRoughness: 1, barkMetallic: 2 };
+
+/** One channel of an image, as a greyscale image: what a channel slot reading the packed map shows. */
+function useChannelUrl(src: string | undefined, channel: 0 | 1 | 2 | undefined): string | undefined {
+  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    if (!src || channel === undefined) { setUrl(undefined); return; }
+    let alive = true, made: string | undefined;
+    const img = new Image();
+    img.onload = () => {
+      const size = Math.min(128, img.naturalWidth || 128);
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = size;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, size, size);
+      const data = ctx.getImageData(0, 0, size, size);
+      for (let i = 0; i < data.data.length; i += 4) {
+        const v = data.data[i + channel];
+        data.data[i] = data.data[i + 1] = data.data[i + 2] = v;
+        data.data[i + 3] = 255;
+      }
+      ctx.putImageData(data, 0, 0);
+      canvas.toBlob(b => { if (alive && b) setUrl(made = URL.createObjectURL(b)); });
+    };
+    img.src = src;
+    return () => { alive = false; if (made) URL.revokeObjectURL(made); };
+  }, [src, channel]);
+  return url;
+}
 
 function KindSections({ groups, persist }: { groups: FoliageGroup[]; persist: string }) {
   const { doc, setParams } = useFoliage();
@@ -69,31 +110,33 @@ function useGeneratedUrls(): Partial<Record<TextureKey, string>> {
   return urls;
 }
 
-/** One texture slot: the texture in use, and whether it is generated or the user's image. */
-function TextureSlot({ textureKey, url }: { textureKey: TextureKey; url?: string }) {
+/**
+ * One texture slot, drawn as the editor draws it: the slot's name, the image in use (generated, or the
+ * user's), Upload and ✕ (back to generated) on hover. A channel slot with no image of its own shows the
+ * packed ARM map it reads from; an `_arm` / `_orm` image dropped on it becomes that packed map.
+ */
+function TextureSlot({ textureKey, urls }: { textureKey: TextureKey; urls: Partial<Record<TextureKey, string>> }) {
   const { doc, overrides, setOverride } = useFoliage();
   const slot = OVERRIDE_SLOTS[doc.kind].find(s => s.key === textureKey);
-  const o = overrides[textureKey];
-  const src = o?.url ?? url;
+  const channel = CHANNEL_SLOTS.has(textureKey);
+  const own = overrides[textureKey];
+  const packed = channel ? overrides.barkOrm : undefined;
+  // A channel slot's own image is already greyscale; the packed map it otherwise reads shows its one channel.
+  const packedSrc = channel && !own ? packed?.url ?? urls.barkOrm : undefined;
+  const channelSrc = useChannelUrl(packedSrc, ARM_CHANNEL[textureKey]);
+  const src = own?.url ?? (channel ? channelSrc : urls[textureKey]);
+  const caption = own ? own.fileName : packed ? `ARM · ${packed.fileName}` : channel ? 'generated (ARM)' : 'generated';
+  const upload = (file: File) => {
+    const arm = channel && planPbrSet('bark', [file.name]).files[0]?.role === 'arm';
+    void setOverride(arm ? 'barkOrm' : textureKey, file);
+  };
+  const clear = own ? () => setOverride(textureKey, null) : packed ? () => setOverride('barkOrm', null) : undefined;
   return (
-    <div className='flex gap-2 items-start'>
-      <div className={`${CHANNEL_SLOTS.has(textureKey) ? 'w-10 h-10 ml-6' : 'w-16 h-16'} shrink-0 cleo-texture-checker border border-border`}>
-        {src && <img src={src} className='w-full h-full object-cover' />}
-      </div>
-      <div className='flex-1 min-w-0'>
-        <div className='text-ui-sm'>
-          {slot?.label ?? TEXTURE_LABELS[textureKey]}{' '}
-          <span className='text-muted'>· {o ? o.fileName : CHANNEL_SLOTS.has(textureKey) ? 'from the ARM map' : 'generated'}</span>
-        </div>
-        <div className='text-ui-xs text-muted'>{slot ? slot.hint : 'Generated from the material above it; follows its texture.'}</div>
-        {slot && (
-          <div className='flex gap-1 pt-1'>
-            <FileButton accept='image/*' onFiles={files => files[0] && setOverride(textureKey, files[0])}>Image…</FileButton>
-            {o && <Button size='sm' variant='ghost' onClick={() => setOverride(textureKey, null)}>Use generated</Button>}
-          </div>
-        )}
-      </div>
-    </div>
+    <TextureSlotFrame label={pbrSlotLabel(SLOT_OF[textureKey] ?? 'baseColor')} caption={caption}
+                      title={`${slot?.label ?? TEXTURE_LABELS[textureKey]}: ${slot ? slot.hint : 'Generated from the material above it; follows its texture.'}`}>
+      <TextureTile src={src} onUpload={slot ? upload : undefined} onClear={clear}
+                   clearTitle={own || !packed ? 'Use the generated texture' : 'Remove the packed ARM map (Metallic, Roughness and Occlusion go back to generated)'} />
+    </TextureSlotFrame>
   );
 }
 
@@ -127,7 +170,7 @@ function PbrSetButton({ material }: { material: MaterialKey }) {
   };
   return (
     <FileButton accept='image/*,.zip' multiple disabled={loading} onFiles={files => files.length && load(files)}
-                title='Several images or a .zip: colour, normal, ARM, AO, roughness and metallic are matched by file name (diff, nor_gl, arm, ao, rough, metal...).'>
+                title='Several images or a .zip: colour, normal, metallic, roughness and occlusion (or one packed ARM map for all three) are matched by file name (diff, nor_gl, arm, ao, rough, metal...).'>
       {loading ? 'Loading…' : 'Load texture set…'}
     </FileButton>
   );
@@ -147,7 +190,7 @@ export function MaterialsPanel() {
   if (!key) return <PanelBody><p className='text-ui-sm text-muted'>This {KIND_LABELS[doc.kind].toLowerCase()} has no materials.</p></PanelBody>;
   const params = doc[doc.kind];
   const generator = FOLIAGE_SCHEMAS[doc.kind].filter(g => g.side === 'material' && g.material === key);
-  const textures = MATERIAL_TEXTURES[key].filter(t => urls[t] || OVERRIDE_SLOTS[doc.kind].some(s => s.key === t));
+  const textures = MATERIAL_TEXTURES[key].filter(t => urls[t] || (CHANNEL_SLOTS.has(t) && urls.barkOrm) || OVERRIDE_SLOTS[doc.kind].some(s => s.key === t));
   const overridden = !!(params.materials && params.materials[key] && Object.keys(params.materials[key]!).length);
   return (
     <PanelBody>
@@ -162,7 +205,7 @@ export function MaterialsPanel() {
                       textures={(
                         <div className='flex flex-col gap-2'>
                           {PBR_SLOTS[key] && <div><PbrSetButton material={key} /></div>}
-                          {textures.map(t => <TextureSlot key={t} textureKey={t} url={urls[t]} />)}
+                          <TextureSlotGrid>{textures.map(t => <TextureSlot key={t} textureKey={t} urls={urls} />)}</TextureSlotGrid>
                           {generator.length > 0 && (
                             <div className='pt-1'>
                               <SchemaSections groups={generator} values={formValues(params)} persist={`cleo_creator_foliage_material_${doc.kind}`}
