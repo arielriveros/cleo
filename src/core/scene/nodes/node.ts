@@ -1497,7 +1497,7 @@ export class Node {
       ? quat.normalize(Node._wq2, quat.multiply(Node._wq2, quat.invert(Node._wq3, parent), world))
       : world;
     this.setQuaternion(local);
-    if (this._body) this._body.setQuaternion(quat.normalize(Node._wq, world));
+    if (this._body) this._body.setQuaternion(this._offsetRotation(quat.normalize(Node._wq, world)));
     return this;
   }
   private static _wv = vec3.create();
@@ -1508,19 +1508,100 @@ export class Node {
   private static _bv = vec3.create();
   private static _bq = quat.create();
 
-  /** The body's world position for this node's local position: `parentWorld · local`. */
+  /** The body's world position for this node's local position: `parentWorld · local` (+ the gap, see _bodyOffset). */
   private _pushBodyPosition(): void {
     const pw = this._parentWorldOrNull();
-    this._body!.setPosition(pw ? vec3.transformMat4(Node._bv, this._position, pw) : this._position);
+    const p = pw ? vec3.transformMat4(Node._bv, this._position, pw) : this._position;
+    const o = this._bodyOffset;
+    if (!o) { this._body!.setPosition(p); return; }
+    const out = Node._o64;
+    out[0] = p[0] + o[0]; out[1] = p[1] + o[1]; out[2] = p[2] + o[2];
+    this._body!.setPosition(out as unknown as vec3);
   }
 
-  /** The body's world orientation for this node's local rotation: `parentWorld · local`. */
+  /** The body's world orientation for this node's local rotation: `parentWorld · local` (· the gap). */
   private _pushBodyRotation(): void {
     const pw = this._parentWorldOrNull();
-    this._body!.setQuaternion(pw
+    this._body!.setQuaternion(this._offsetRotation(pw
       ? quat.normalize(Node._bq, quat.multiply(Node._bq, this._parent!.worldQuaternion, this._quaternion))
-      : this._quaternion);
+      : this._quaternion));
   }
+
+  /**
+   * With the physics step in a worker, a body's node is DRAWN where the body is at the frame's time (its
+   * last step interpolated, see WorkerBackend.visualPose) while the body holds the latest simulated pose,
+   * a little ahead. This is the gap, [dx dy dz | qx qy qz qw]: what a push from this node is moved and
+   * turned by on its way into the body, so a script that moves or turns the node (root motion, a
+   * character's turn, `addX`) moves the body by exactly as much — instead of dragging it back to the drawn
+   * pose, which would slow every relative move down. Null when node and body agree (inline physics,
+   * static bodies), and pushes are as they always were.
+   */
+  private _bodyOffset: Float64Array | null = null;
+  private static _o64 = new Float64Array(4);
+
+  /** `q · gap`: the body orientation for a node orientation `q` (see _bodyOffset). */
+  private _offsetRotation(q: ArrayLike<number>): quat {
+    const o = this._bodyOffset;
+    if (!o) return q as quat;
+    const ax = q[0], ay = q[1], az = q[2], aw = q[3], bx = o[3], by = o[4], bz = o[5], bw = o[6];
+    const out = Node._o64;
+    out[0] = aw * bx + ax * bw + ay * bz - az * by;
+    out[1] = aw * by - ax * bz + ay * bw + az * bx;
+    out[2] = aw * bz + ax * by - ay * bx + az * bw;
+    out[3] = aw * bw - ax * bx - ay * by - az * bz;
+    const n = 1 / Math.hypot(out[0], out[1], out[2], out[3]);
+    out[0] *= n; out[1] *= n; out[2] *= n; out[3] *= n;
+    return out as unknown as quat;
+  }
+
+  /**
+   * PhysicsSystem only, with the step in a worker: put this node at the world pose `origin`/`rotation` it
+   * is drawn with this frame, WITHOUT moving its body, which stays at `simOrigin`/`simRotation` (where
+   * the simulation has it). Remembers the gap between the two (see _bodyOffset). `setWorldPosition` and
+   * `setWorldQuaternion` without the push.
+   * @internal
+   */
+  public _showSimulatedPose(origin: ArrayLike<number>, rotation: ArrayLike<number>, simOrigin: ArrayLike<number>, simRotation: ArrayLike<number>): void {
+    const pw = this._parentWorldOrNull();
+    vec3.set(this._position, origin[0], origin[1], origin[2]);
+    const inv = pw ? mat4.invert(Node._wm, pw) : null;
+    if (inv) vec3.transformMat4(this._position, this._position, inv);
+    mat4.fromTranslation(this._translationMatrix, this._position);
+
+    const world = quat.set(Node._wq, rotation[0], rotation[1], rotation[2], rotation[3]);
+    const parent = pw ? this._parent!.worldQuaternion : null;
+    quat.copy(this._quaternion, parent
+      ? quat.normalize(Node._wq2, quat.multiply(Node._wq2, quat.invert(Node._wq3, parent), world))
+      : world);
+    eulerFromQuatDeg(this._euler, this._quaternion);
+    mat4.fromQuat(this._rotationMatrix, this._quaternion);
+    this._notifyChange('transform', 'position');
+    this._notifyChange('transform', 'rotation');
+    // Drawn where the body is: no gap, pushes as inline.
+    if (origin === simOrigin && rotation === simRotation) { this._bodyOffset = null; return; }
+
+    // Measured against exactly what a push would hand the body now, so a script writing back what it
+    // read (a zero move) leaves the body where it is.
+    const o = this._bodyOffset ?? (this._bodyOffset = new Float64Array(7));
+    const p = pw ? vec3.transformMat4(Node._bv, this._position, pw) : this._position;
+    o[0] = simOrigin[0] - p[0]; o[1] = simOrigin[1] - p[1]; o[2] = simOrigin[2] - p[2];
+    const q = parent ? quat.normalize(Node._bq, quat.multiply(Node._bq, parent, this._quaternion)) : this._quaternion;
+    // conj(q) · sim, so that q · gap = sim.
+    const ax = -q[0], ay = -q[1], az = -q[2], aw = q[3];
+    const bx = simRotation[0], by = simRotation[1], bz = simRotation[2], bw = simRotation[3];
+    o[3] = aw * bx + ax * bw + ay * bz - az * by;
+    o[4] = aw * by - ax * bz + ay * bw + az * bx;
+    o[5] = aw * bz + ax * by - ay * bx + az * bw;
+    o[6] = aw * bw - ax * bx - ay * by - az * bz;
+  }
+
+  /** PhysicsSystem only: node and body agree again (inline physics, a static body). @internal */
+  public _clearSimulatedPose(): void {
+    this._bodyOffset = null;
+  }
+
+  /** PhysicsSystem only: whether this node is drawn apart from its body (see _bodyOffset). @internal */
+  public get _drawnApart(): boolean { return this._bodyOffset !== null; }
 
   /** Sets local-space position (local to this node's parent — use `worldPosition` to read world-space). */
   public setPosition(pos: vec3): Node {
@@ -2104,6 +2185,7 @@ export class Node {
     canSleep?: boolean
   ): RigidBody {
     // Built at the WORLD pose (below), so a node under a moved or turned parent starts where it is drawn.
+    this._bodyOffset = null;
     this._body = new RigidBody({
       mass,
       linearDamping,

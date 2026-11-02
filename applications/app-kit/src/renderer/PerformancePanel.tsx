@@ -20,6 +20,8 @@ const REFRESH_MS = 250; // fast enough to feel live, slow enough not to churn Re
 /** Slack on the frame budget before the readout turns red — see `overBudget`. */
 const BUDGET_TOLERANCE = 0.05;
 const MB = 1024 * 1024;
+/** Refreshes the physics worker's late frames are summed over: three seconds, the window Auto judges by. */
+const LATE_WINDOW = 12;
 
 const fmt = (x: number, dp = 2) =>
   x.toLocaleString(undefined, { maximumFractionDigits: dp, minimumFractionDigits: dp });
@@ -39,6 +41,22 @@ const QUALITY_OPTIONS = [
 ];
 
 type PassRow = { name: string; avgMs: number; maxMs: number; cpuMs: number };
+
+type PhysicsThread = 'off' | 'auto' | 'on';
+const THREAD_LABEL: Record<PhysicsThread, string> = { off: 'Main thread', auto: 'Auto', on: 'Worker' };
+
+/**
+ * The host's per-machine override of the project's physics thread (the editor's), for the Workers switch.
+ * Without one the section only reads.
+ */
+export interface PhysicsThreadControl {
+  /** The project's own setting, which the machine follows without an override. */
+  project: PhysicsThread;
+  /** This machine's override and where it is set, or null. A URL override cannot be changed from here. */
+  read(): { mode: PhysicsThread; from: 'url' | 'storage' } | null;
+  /** Store this machine's override, or clear it (null). */
+  write(mode: PhysicsThread | null): void;
+}
 
 // Counters sampled EVERY frame and reported as mean + range, never grabbed once per refresh: shadow
 // cascades are staggered on a 4-frame cycle, so draw calls and triangles swing several-fold frame to
@@ -91,6 +109,11 @@ type Sample = {
   activeBodies: number; frozenBodies: number; restingBodies: number;
   triggerPassMs: number; triggerCandidates: number; triggerPairsTested: number; triggerOverlaps: number;
   broadphaseMs: number; narrowphaseMs: number; solveMs: number; integrateMs: number;
+  physicsBackend: 'inline' | 'worker'; workerState: 'inline' | 'starting' | 'worker'; workerMode: PhysicsThread;
+  workerFallback: string | null; autoStepMs: number; cores: number;
+  workerStepMs: number; syncMs: number; roundTripMs: number; readyMs: number;
+  lateFrames: number; workerFrames: number; writes: number; ops: number; bytesUp: number; bytesDown: number;
+  drawn: number; extrapolated: number; leadMs: number; jitterMs: number;
   sceneMs: number; transformMs: number; scriptMs: number; animatorMs: number; rigMs: number; clothMs: number; nodes: number;
   aiPathMs: number; aiQueries: number; aiAgents: number; navBuildMs: number; navBuilds: number; navReused: number;
   matWrites: number; matSkips: number; fallbackDraws: number; pipelinesBuilt: number;
@@ -111,6 +134,10 @@ const EMPTY: Sample = {
   activeBodies: 0, frozenBodies: 0, restingBodies: 0,
   triggerPassMs: 0, triggerCandidates: 0, triggerPairsTested: 0, triggerOverlaps: 0,
   broadphaseMs: 0, narrowphaseMs: 0, solveMs: 0, integrateMs: 0,
+  physicsBackend: 'inline', workerState: 'inline', workerMode: 'off', workerFallback: null, autoStepMs: 0, cores: 0,
+  workerStepMs: 0, syncMs: 0, roundTripMs: 0, readyMs: 0,
+  lateFrames: 0, workerFrames: 0, writes: 0, ops: 0, bytesUp: 0, bytesDown: 0,
+  drawn: 0, extrapolated: 0, leadMs: 0, jitterMs: 0,
   sceneMs: 0, transformMs: 0, scriptMs: 0, animatorMs: 0, rigMs: 0, clothMs: 0, nodes: 0,
   aiPathMs: 0, aiQueries: 0, aiAgents: 0, navBuildMs: 0, navBuilds: 0, navReused: 0,
   matWrites: 0, matSkips: 0, fallbackDraws: 0, pipelinesBuilt: 0,
@@ -122,7 +149,7 @@ const EMPTY: Sample = {
   pipeline: '—', backend: '—',
 };
 
-export default function PerformancePanel() {
+export default function PerformancePanel({ physicsThread }: { physicsThread?: PhysicsThreadControl } = {}) {
   const { instance } = useEngineHost();
   const renderer: any = instance?.renderer ?? null;
 
@@ -145,6 +172,10 @@ export default function PerformancePanel() {
   const last = useRef(performance.now());
   /** Per-counter accumulator for the current refresh window; drained and zeroed on each boundary. */
   const bins = useRef(RANGED.map(() => ({ min: Infinity, max: -Infinity, sum: 0, n: 0 })));
+  /** The physics worker's running step counts at the last refresh, and each recent refresh's share of them. */
+  const workerCounts = useRef({ posted: -1, late: -1, window: [] as { posted: number; late: number }[] });
+  /** Bumped by the physics-thread switch, which changes nothing the refresh would otherwise re-read soon. */
+  const [, setThreadTick] = useState(0);
 
   // cannon's own step split costs a few performance.now() per substep: measured only while this is open.
   useEffect(() => {
@@ -203,6 +234,19 @@ export default function PerformancePanel() {
           for (const t of map.values()) textureBytes += (t as any)?.byteSize ?? 0;
         } catch { /* registry not ready */ }
         const mem = (performance as any).memory ?? null;
+        const workerStatus = (instance?.physics as any)?.workerStatus ?? null;
+
+        // The worker's late frames over the last LATE_WINDOW refreshes: one refresh is a handful of frames.
+        // Counts that went down belong to a worker started since, and start the window again.
+        const counts = workerCounts.current;
+        const posted = phys?.workerStepsPosted ?? 0, late = phys?.workerFramesLate ?? 0;
+        if (counts.posted < 0) counts.window = [];   // first refresh: what happened before the panel opened is not counted
+        else if (posted < counts.posted || late < counts.late) counts.window = [{ posted, late }];
+        else counts.window.push({ posted: posted - counts.posted, late: late - counts.late });
+        if (counts.window.length > LATE_WINDOW) counts.window.shift();
+        counts.posted = posted; counts.late = late;
+        let windowPosted = 0, windowLate = 0;
+        for (const w of counts.window) { windowPosted += w.posted; windowLate += w.late; }
 
         // One row per scope, from BOTH profilers. They share their boundaries (see Renderer._scope),
         // so a scope with a GPU number and no CPU one, or the reverse, is a real asymmetry worth seeing
@@ -246,6 +290,26 @@ export default function PerformancePanel() {
           narrowphaseMs: phys?.narrowphaseMs ?? 0,
           solveMs: phys?.solveMs ?? 0,
           integrateMs: phys?.integrateMs ?? 0,
+          physicsBackend: phys?.backend ?? 'inline',
+          workerState: workerStatus?.state ?? 'inline',
+          workerMode: (instance?.physics as any)?.workerMode ?? 'off',
+          workerFallback: workerStatus?.fallback ?? null,
+          autoStepMs: workerStatus?.autoStepMs ?? 0,
+          cores: typeof navigator !== 'undefined' ? navigator.hardwareConcurrency ?? 0 : 0,
+          workerStepMs: phys?.workerStepMs ?? 0,
+          syncMs: phys?.syncMs ?? 0,
+          roundTripMs: phys?.workerRoundTripMs ?? 0,
+          readyMs: phys?.workerReadyMs ?? 0,
+          lateFrames: windowLate,
+          workerFrames: windowPosted + windowLate,
+          writes: phys?.workerWrites ?? 0,
+          ops: phys?.workerOps ?? 0,
+          bytesUp: phys?.workerBytesUp ?? 0,
+          bytesDown: phys?.workerBytesDown ?? 0,
+          drawn: phys?.workerDrawn ?? 0,
+          extrapolated: phys?.workerExtrapolated ?? 0,
+          leadMs: phys?.workerLeadMs ?? 0,
+          jitterMs: phys?.workerJitterMs ?? 0,
           sceneMs: sceneS?.frameMs ?? 0,
           transformMs: sceneS?.transformMs ?? 0,
           scriptMs: sceneS?.scriptMs ?? 0,
@@ -323,6 +387,20 @@ export default function PerformancePanel() {
     setPasses({ ...renderer.passEnabled });
   };
 
+  // This machine's physics thread: the override the host keeps, applied now as applyEngineRuntime would.
+  const threadOverride = physicsThread?.read() ?? null;
+  const setThread = (choice: PhysicsThread | 'project') => {
+    if (!physicsThread) return;
+    physicsThread.write(choice === 'project' ? null : choice);
+    const physics: any = instance?.physics;
+    const mode = physicsThread.read()?.mode ?? physicsThread.project;
+    if (physics?.setWorkerMode && physics.workerMode !== mode) physics.setWorkerMode(mode);
+    setThreadTick(t => t + 1);
+  };
+  const threadWhere = d.workerState === 'worker' ? 'worker' : d.workerState === 'starting' ? 'starting worker…' : 'main thread';
+  const latePct = d.workerFrames > 0 ? (100 * d.lateFrames) / d.workerFrames : 0;
+  const kb = (bytes: number) => `${fmt(bytes / 1024, 1)} KB`;
+
   /** Plain-text dump of the current numbers, for pasting into an issue or a before/after comparison. */
   const copyReport = () => {
     const lines = [
@@ -334,6 +412,11 @@ export default function PerformancePanel() {
       `triangles ${fmt(r.triangles.mean, 0)} (${r.triangles.min}-${r.triangles.max})`
         + ` - culled ${fmt(r.culledObjects.mean, 0)} obj / ${fmt(r.culledInstances.mean, 0)} inst`,
       `physics ${fmt(d.physicsMs)}ms - scene ${fmt(d.sceneMs)}ms`,
+      `physics thread ${threadWhere} (${THREAD_LABEL[d.workerMode]})`
+        + (d.workerState === 'worker'
+          ? ` - worker step ${fmt(d.workerStepMs)}ms - this thread ${fmt(d.syncMs)}ms - round trip ${fmt(d.roundTripMs, 1)}ms`
+            + ` - late ${d.lateFrames}/${d.workerFrames}`
+          : ''),
       `particles ${fmt(r.particleSystems.mean, 0)} systems (${fmt(r.particleSystemsCulled.mean, 0)} paused off screen)`
         + ` - steps ${fmt(r.particleSteps.mean, 0)} (max ${r.particleSteps.max}) - draws ${fmt(r.particleDraws.mean, 0)}`
         + ` - instances ${fmt(r.particlesDrawn.mean, 0)} - gpu builds ${r.particleGpuCreates.max} max/frame`,
@@ -382,7 +465,10 @@ export default function PerformancePanel() {
             take off this thread) while `write-back` is scene-graph sync that would stay here regardless. */}
         <Row label='Physics' value={`${fmt(d.physicsMs)} ms`} hl={d.physicsMs > 5}
              title='Only steps in Play mode — 0 while stopped is the honest answer, not a missing value.' />
-        <Row label='· step' value={`${fmt(d.stepMs)} ms`} title="cannon's solver — the part a worker could take off this thread." />
+        <Row label='· step' value={d.physicsBackend === 'worker' ? 'in worker' : `${fmt(d.stepMs)} ms`}
+             title={d.physicsBackend === 'worker'
+               ? "cannon's solver runs in the physics worker: its time is under Workers."
+               : "cannon's solver — the part a worker could take off this thread."} />
         {/* cannon's own split of the step (measured while this panel is open). Narrowphase is where terrain
             contacts land; broadphase is pairing. */}
         <Row label='·· broad / narrow' value={`${fmt(d.broadphaseMs)} / ${fmt(d.narrowphaseMs)} ms`} />
@@ -436,6 +522,49 @@ export default function PerformancePanel() {
           {detail ? '− hide script/animator split' : '+ script/animator split'}
         </Button>
         <Row label='Unattributed' value={`${fmt(unattributed)} ms`} />
+      </div></Collapsable>
+
+      <Collapsable title='Workers' persistKey='performance.workers' defaultOpen={false}><div className='w-full p-2'>
+        {/* Where the step runs NOW; the mode is the switch below (or, without one, named here). */}
+        <Row label='Physics step' value={physicsThread ? threadWhere : `${threadWhere} · ${THREAD_LABEL[d.workerMode]}`}
+             hl={d.workerFallback != null}
+             title='Where the physics step runs now. It only steps in Play and Simulate.' />
+        {physicsThread && (
+          <div className='mt-1' title='This machine only: kept across Play and editor restarts, never published. Project follows Options ▸ Engine ▸ Runtime ▸ Physics thread.'>
+            <SegmentedControl<PhysicsThread | 'project'>
+              value={threadOverride?.mode ?? 'project'}
+              options={[
+                { value: 'project', label: `Project (${THREAD_LABEL[physicsThread.project]})`, disabled: threadOverride?.from === 'url' },
+                { value: 'off', label: 'Main', disabled: threadOverride?.from === 'url' },
+                { value: 'auto', label: 'Auto', disabled: threadOverride?.from === 'url' },
+                { value: 'on', label: 'Worker', disabled: threadOverride?.from === 'url' },
+              ]}
+              onChange={setThread}
+            />
+          </div>
+        )}
+        {threadOverride?.from === 'url' && <Hint>Set by ?physicsWorker= in the page URL.</Hint>}
+        {d.workerFallback && <Hint>{d.workerFallback}</Hint>}
+        {d.workerState === 'worker' && <>
+          <Row label='· step in worker' value={`${fmt(d.workerStepMs)} ms`}
+               title='The last step, measured in the worker: time this thread did not spend.' />
+          <Row label='· this thread' value={`${fmt(d.syncMs)} ms`}
+               title="This thread's share: sending each step at the frame's end, and applying its result at the next frame's start." />
+          <Row label='· round trip' value={`${fmt(d.roundTripMs, 1)} ms · ready ${fmt(d.readyMs, 1)} ms early`} hl={d.roundTripMs > d.leadMs}
+               title='From sending the last step to its result arriving, and how long that result then waited for the frame that applied it. A round trip longer than a frame makes late frames.' />
+          <Row label='· late frames' value={`${d.lateFrames} of ${d.workerFrames} (${fmt(latePct, 0)}%)`} hl={latePct > 10}
+               title='Frames whose step had not come back in time, over the last three seconds. Their bodies are drawn carried along their velocity. Auto returns to the main thread above 10%.' />
+          <Row label='· per step' value={`${d.writes} writes · ${d.ops} ops · ${kb(d.bytesUp)} up · ${kb(d.bytesDown)} down`}
+               title='The last step sent: bodies written, bodies and constraints added, removed or reconfigured, and the data out; and the data its result brought back.' />
+          <Row label='· drawn' value={`${d.drawn} bodies · ${d.extrapolated} past their step`} hl={d.extrapolated > 0}
+               title="Moving bodies drawn between the two ends of their step this frame, and those carried on past its end because the frame outran the step." />
+          <Row label='· frame prediction' value={`${fmt(d.leadMs, 1)} ± ${fmt(d.jitterMs, 1)} ms`}
+               title='The frame time each step is sent to cover (an average of recent frames), and how far frames typically stray from it.' />
+        </>}
+        {d.workerMode === 'auto' && d.workerState === 'inline' && !d.workerFallback && (
+          <Row label='· auto' value={`${fmt(d.autoStepMs)} ms step · ${d.activeBodies} moving · ${d.cores} cores`}
+               title='Auto moves the step to the worker after two seconds of play once it averages 1.5 ms or 40+ bodies move, on a machine with 4+ cores.' />
+        )}
       </div></Collapsable>
 
       <Collapsable title='Passes (CPU / GPU)' persistKey='performance.passes-cpu-gpu' defaultOpen={false}><div className='w-full p-2'>

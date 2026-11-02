@@ -135,6 +135,8 @@ export class PhysicsWorkerCore {
         }
 
         world.gravity.set(msg.gravity[0], msg.gravity[1], msg.gravity[2]);
+        // The same clock as the main thread's (water waves are a function of it), whoever stepped last.
+        (world as any).time = msg.time;
         const solver = world.solver as unknown as { iterations?: number };
         if (typeof solver.iterations === 'number' && msg.iterations > 0) solver.iterations = msg.iterations;
         this._water = msg.water;

@@ -11,6 +11,7 @@ const mem = new Map<string, string>();
 
 import {
   DEFAULT_PROJECT_SETTINGS, applyEngineRuntime, isDefaultProjectSettings, parseProjectSettings, projectSettingsConfig,
+  physicsWorkerOverride, physicsWorkerOverrideSource, storePhysicsWorkerOverride,
 } from '../src/features/options/projectSettings';
 import { DEFAULT_EDITOR_PREFS, editorPrefsStore, getEditorPrefs, parseEditorPrefs } from '../src/features/options/editorPrefs';
 import { loadTabState, saveTabState } from '../src/utils/tabState';
@@ -71,6 +72,35 @@ describe('project settings', () => {
     expect(mixer.masterVolume).toBe(0.25);
     // No physics world (a 2D scene before one exists) is not an error.
     expect(() => applyEngineRuntime({ maxFrameDelta: 0.1, physics: null }, s)).not.toThrow();
+  });
+
+  it("keeps this machine's physics thread override (the Performance page's switch), the URL winning", () => {
+    const g = globalThis as any;
+    const location = g.location;
+    try {
+      storePhysicsWorkerOverride('on');
+      expect(physicsWorkerOverrideSource()).toEqual({ mode: 'on', from: 'storage' });
+      expect(physicsWorkerOverride()).toBe('on');
+
+      // Applied over the project's own setting, at Play and on every settings change.
+      const physics = { gravity: [0, -9.81, 0] as [number, number, number], maxSubsteps: 8, simulationRange: 0, workerMode: 'off' as const, setWorkerMode(mode: any) { this.workerMode = mode; } };
+      applyEngineRuntime({ maxFrameDelta: 0.1, physics }, { ...DEFAULT_PROJECT_SETTINGS.engine, physicsWorker: 'off' });
+      expect(physics.workerMode).toBe('on');
+
+      g.location = { search: '?physicsWorker=auto' };
+      expect(physicsWorkerOverrideSource()).toEqual({ mode: 'auto', from: 'url' });
+      g.location = location;
+
+      mem.set('cleo_physics_worker', 'gpu');
+      expect(physicsWorkerOverrideSource()).toBeNull();
+
+      storePhysicsWorkerOverride(null);
+      expect(mem.has('cleo_physics_worker')).toBe(false);
+      expect(physicsWorkerOverride()).toBeNull();
+    } finally {
+      g.location = location;
+      mem.delete('cleo_physics_worker');
+    }
   });
 });
 

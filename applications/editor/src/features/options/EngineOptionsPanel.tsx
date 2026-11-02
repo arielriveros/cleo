@@ -3,7 +3,10 @@ import RendererSettingsPanel from '@cleo/app-kit/renderer/RendererSettingsPanel'
 import PerformancePanel from '@cleo/app-kit/renderer/PerformancePanel'
 import { Button, Field, NumberInput, Section, Select, Slider, VectorInput } from '@cleo/app-kit/ui'
 import { OptionsPageBody, OptionsShell, OPTION_LABEL, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
-import { DEFAULT_PROJECT_SETTINGS, type EngineRuntimeSettings, type PhysicsWorkerSetting } from './projectSettings'
+import {
+  DEFAULT_PROJECT_SETTINGS, physicsWorkerOverrideSource, storePhysicsWorkerOverride,
+  type EngineRuntimeSettings, type PhysicsWorkerSetting,
+} from './projectSettings'
 
 // Options ▸ Engine: how the engine renders and runs THIS game. Renderer settings are saved with the open
 // scene (each scene keeps its own look); the runtime settings are project-wide and ship in the build.
@@ -12,6 +15,7 @@ type Page = 'renderer' | 'performance' | 'runtime'
 
 export default function EngineOptionsPanel() {
   const [page, setPage] = useOptionsPage<Page>('engine', 'renderer')
+  const { projectSettings } = useCleoEngine()
   return (
     <OptionsShell
       page={page}
@@ -23,7 +27,13 @@ export default function EngineOptionsPanel() {
       ]}
     >
       {page === 'renderer' && <RendererSettingsPanel />}
-      {page === 'performance' && <PerformancePanel />}
+      {page === 'performance' && (
+        <PerformancePanel physicsThread={{
+          project: projectSettings.engine.physicsWorker,
+          read: physicsWorkerOverrideSource,
+          write: storePhysicsWorkerOverride,
+        }} />
+      )}
       {page === 'runtime' && <RuntimeOptions />}
     </OptionsShell>
   )

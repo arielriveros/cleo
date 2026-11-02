@@ -54,6 +54,25 @@ export interface PhysicsStats {
     workerStepMs: number;
     /** This thread's share of running the worker: the diff and post at the frame's end, applying its result. */
     syncMs: number;
+    /** The last step's round trip: from posting it to its result arriving on this thread. */
+    workerRoundTripMs: number;
+    /** How long the last applied result had been waiting when the frame applied it: the worker's slack. */
+    workerReadyMs: number;
+    /** Steps posted, and frames whose step had not come back in time, since this worker started. */
+    workerStepsPosted: number;
+    workerFramesLate: number;
+    /** The last step sent: bodies written, membership ops (adds, removals, config changes, constraints). */
+    workerWrites: number;
+    workerOps: number;
+    /** Typed-array payload of the last step sent and of the last result received, in bytes. */
+    workerBytesUp: number;
+    workerBytesDown: number;
+    /** Bodies drawn between the two ends of their step this frame, and those carried on past its end. */
+    workerDrawn: number;
+    workerExtrapolated: number;
+    /** The frame time each step is predicted to cover, and how far frames typically stray from it. */
+    workerLeadMs: number;
+    workerJitterMs: number;
     /** Everything inside PhysicsSystem.update(). */
     frameMs: number;
 }
@@ -84,6 +103,18 @@ export const physicsStats: PhysicsStats = {
     backend: 'inline',
     workerStepMs: 0,
     syncMs: 0,
+    workerRoundTripMs: 0,
+    workerReadyMs: 0,
+    workerStepsPosted: 0,
+    workerFramesLate: 0,
+    workerWrites: 0,
+    workerOps: 0,
+    workerBytesUp: 0,
+    workerBytesDown: 0,
+    workerDrawn: 0,
+    workerExtrapolated: 0,
+    workerLeadMs: 0,
+    workerJitterMs: 0,
     frameMs: 0,
 };
 
@@ -108,4 +139,6 @@ export function resetPhysicsStats(): void {
     physicsStats.triggerPairsTested = 0;
     // The worker's frame-end half is added after update(), so a HUD read between frames sees both halves.
     physicsStats.syncMs = 0;
+    physicsStats.workerDrawn = 0;
+    physicsStats.workerExtrapolated = 0;
 }

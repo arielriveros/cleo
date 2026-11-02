@@ -18,11 +18,27 @@ import type { ContactLike, PhysicsBackend, StepResult } from './physicsBackend';
 // thread renders; at the start of the next frame (physics.update) its snapshot is written back into the
 // mirror, with the contacts, trigger events, first-contact events and buoyancy the step produced.
 //
+// TIME. A step has to be posted before the frame it is drawn in has started, so before anyone knows how
+// long that frame will be. Stepping by the frame that just ENDED (what this backend first did) draws every
+// frame one frame late, by the wrong amount: on uneven frames a body visibly speeds up and slows down
+// against everything stepped by the frame's own delta (the animator, the camera, scripts). So:
+//   - each step reaches one PREDICTED frame past now (the lead, an average of recent frame deltas), so the
+//     state scripts read is the state at this frame's time, as inline;
+//   - the step's time span is kept, and a node is DRAWN at this frame's actual time: its body's pose at the
+//     step's start and end, interpolated — or the end extrapolated a little along its velocity when the
+//     frame ran longer than predicted, or the step has not come back (see visualPose);
+//   - the body keeps the latest simulated pose. Node._showSimulatedPose remembers the gap, so a script that
+//     moves or turns the node moves the body by the same amount (root motion, a character's turn).
+// This is how engines that step physics off the game thread draw it (Unreal's async Chaos, Godot's
+// threaded physics with physics interpolation): decoupled ticks, interpolated presentation.
+//
 // One step is in flight at a time, with no SharedArrayBuffer (no cross-origin isolation is needed
-// anywhere the engine runs). A step that is late is not waited for: the frame applies nothing, and the
-// time it should have simulated rides along with the next one (capped like the engine's frame delta).
-// A body written here AFTER the diff and before the snapshot lands (a DOM input handler between frames)
-// keeps that write: the snapshot's value for it is dropped and the write goes out with the next step.
+// anywhere the engine runs). A step that is late is not waited for: the frame applies nothing, draws its
+// bodies extrapolated, and the time it should have simulated rides along with the next step (capped like
+// the engine's frame delta). A body written here AFTER the diff and before the snapshot lands (a DOM input
+// handler between frames, or a frame whose diff was skipped while a step ran) keeps that write: a moved or
+// turned body is moved or turned by the same amount from where the step left it, a written velocity
+// component replaces the step's.
 
 /** What the backend needs from PhysicsSystem. */
 export interface WorkerBackendHost {
@@ -39,6 +55,8 @@ export interface WorkerBackendHost {
 
 /** Most simulated time one step may carry: the engine's own frame-delta cap. */
 const MAX_PENDING = 0.1;
+/** How quickly the frame-time estimate (the lead) follows a changing frame rate: about ten frames. */
+const LEAD_RATE = 0.1;
 // [type mass inertia3 invInertia3 linDamp angDamp linFactor3 angFactor3 fixedRot allowSleep sleepSpeed
 //  sleepTime response group mask trigger character wantsCollide shapeCount] + per shape [id offset3 orient4 response group mask]
 const CFG_BASE = 25, CFG_SHAPE = 11;
@@ -50,6 +68,14 @@ interface Slot {
     cfg: Float64Array;
     material: unknown;
     seen: number;
+    /** The pose [px py pz qx qy qz qw] the step in flight started this body from. */
+    start: Float64Array;
+    /** The applied step, for drawing: the pose it started from, and the pose + velocity + spin it ended with. */
+    from: Float64Array;
+    to: Float64Array;
+    /** Whether `from`/`to` hold a step yet; whether they say the body did not move (nothing to draw). */
+    tracked: boolean;
+    settled: boolean;
 }
 
 export class WorkerBackend implements PhysicsBackend {
@@ -57,9 +83,9 @@ export class WorkerBackend implements PhysicsBackend {
     private _epoch = 0;
     private _seq = 0;
     private _inFlight = false;
-    private _pendingDt = 0;
     private _latest: Snapshot | null = null;
     private _failed = false;
+    private _ready = false;
     private readonly _slotOf = new Map<Body, number>();
     private readonly _slots: (Slot | undefined)[] = [];
     private readonly _freeSlots: number[] = [];
@@ -73,6 +99,30 @@ export class WorkerBackend implements PhysicsBackend {
     private readonly _contacts: ContactLike[] = [];
     private readonly _scratch = new Float64Array(STATE_STRIDE);
     private _cfgScratch = new Float64Array(64);
+
+    // ---- the clock (see the header) ----
+    /** Every frame delta step() was given: the game's clock, which the drawn poses follow. */
+    private _now = 0;
+    /** The frame delta expected next, an average of recent ones: how far past now each step reaches. */
+    private _lead = 0;
+    /** The lead the last step was posted with. */
+    private _leadSent = 0;
+    /** How far frames stray from the lead, on average. The drawn time trails the clock by about this. */
+    private _jitter = 0;
+    /** Frame time since the last post. */
+    private _sincePost = 0;
+    /** Simulated time owed to the worker: how far the target is past the end of the last step sent. */
+    private _owed = 0;
+    private _started = false;
+    /** The game-clock span the step in flight covers, and the span of the step last applied. */
+    private _flightFrom = 0;
+    private _flightTo = 0;
+    private _from = 0;
+    private _to = 0;
+    /** When the step in flight was posted, and when the last result arrived (performance.now()), for the HUD. */
+    private _postedAt = 0;
+    private _arrivedAt = 0;
+
     /** Frames whose step had not come back in time, out of frames posted — the auto mode reads these. */
     public lateFrames = 0;
     public postedFrames = 0;
@@ -83,23 +133,75 @@ export class WorkerBackend implements PhysicsBackend {
         _port.post({ kind: 'reset', epoch: this._epoch }, []);
     }
 
+    // ---- warm-up ----
+
+    /**
+     * Send the world as it stands, as a step of no time, while the main thread goes on stepping it. The
+     * worker is {@link poll ready} once it has answered: its module has loaded and it has built every
+     * collider, so the first frame it steps is not spent waiting for either.
+     */
+    public prime(): void {
+        if (this._inFlight || this._failed) return;
+        this._post(0);
+    }
+
+    /** Deliver what has arrived; whether the worker has answered at least once (see prime). */
+    public poll(): boolean {
+        this._port.poll();
+        return this._ready && !this._failed;
+    }
+
+    /**
+     * Take over from the main thread's step. The warm-up's answer is stale — that thread has stepped on
+     * since — so it is dropped unapplied, and the next diff sends every body that moved meanwhile.
+     * `frameDt` is the delta of the frame taking over (already stepped there), which starts the clock.
+     */
+    public adopt(frameDt: number): void {
+        this._latest = null;
+        this._advance(frameDt);
+        this._sincePost = 0;
+        physicsStats.workerStepsPosted = this.postedFrames;
+        physicsStats.workerFramesLate = this.lateFrames;
+    }
+
     // ---- start of frame: apply what the worker finished ----
 
-    public step(_dt: number): StepResult {
+    public step(dt: number): StepResult {
+        this._advance(dt);
         this._port.poll();
         const snap = this._latest;
         this._latest = null;
         if (!snap || this._failed) return { dt: 0, contacts: [] };
         const start = performance.now();
+        physicsStats.workerReadyMs = start - this._arrivedAt;
+        physicsStats.workerBytesDown = (snap.bodyCount * BODY_ROW + snap.contactCount * CONTACT_ROW) * 8
+            + snap.overlaps.byteLength + snap.collides.byteLength + snap.submerged.byteLength;
         this._apply(snap);
         physicsStats.syncMs += performance.now() - start;
         return { dt: snap.dt, contacts: this._contacts };
     }
 
+    /** The frame clock, and the frame-time estimate each step's reach is predicted with. */
+    private _advance(dt: number): void {
+        if (!(dt > 0)) return;
+        this._now += dt;
+        this._sincePost += dt;
+        if (this._lead === 0) this._lead = dt;
+        else {
+            this._jitter += (Math.abs(dt - this._lead) - this._jitter) * LEAD_RATE;
+            this._lead += (dt - this._lead) * LEAD_RATE;
+        }
+        physicsStats.workerLeadMs = this._lead * 1000;
+        physicsStats.workerJitterMs = this._jitter * 1000;
+    }
+
     private _receive(msg: FromWorker): void {
         if (msg.epoch !== this._epoch) return;   // from before a reset: stale
         if (msg.kind === 'error') { this._fail(new Error(msg.message)); return; }
+        this._arrivedAt = performance.now();
+        physicsStats.workerRoundTripMs = this._arrivedAt - this._postedAt;
         this._inFlight = false;
+        this._ready = true;
         this._latest = msg;
     }
 
@@ -112,23 +214,36 @@ export class WorkerBackend implements PhysicsBackend {
     private _apply(s: Snapshot): void {
         const world = this._host.world;
         const scratch = this._scratch;
+        const b = s.bodies;
         for (let r = 0; r < s.bodyCount; r++) {
             const o = r * BODY_ROW;
-            const slot = this._slots[s.bodies[o]];
+            const slot = this._slots[b[o]];
             if (!slot) continue;                          // removed since the step was posted
             const body = slot.body, sh = slot.shadow;
             readState(body, scratch, 0);
-            // A field written here since the diff keeps its write (see the header).
-            if (same(scratch, sh, 0, 7)) {
-                body.position.set(s.bodies[o + 1], s.bodies[o + 2], s.bodies[o + 3]);
-                body.quaternion.set(s.bodies[o + 4], s.bodies[o + 5], s.bodies[o + 6], s.bodies[o + 7]);
-                body.aabbNeedsUpdate = true;
-                for (let i = 0; i < 7; i++) sh[i] = s.bodies[o + 1 + i];
-            }
-            if (same(scratch, sh, 7, 3)) { body.velocity.set(s.bodies[o + 8], s.bodies[o + 9], s.bodies[o + 10]); for (let i = 0; i < 3; i++) sh[7 + i] = s.bodies[o + 8 + i]; }
-            if (same(scratch, sh, 10, 3)) { body.angularVelocity.set(s.bodies[o + 11], s.bodies[o + 12], s.bodies[o + 13]); for (let i = 0; i < 3; i++) sh[10 + i] = s.bodies[o + 11 + i]; }
-            if (scratch[19] === sh[19]) { body.sleepState = s.bodies[o + 14] as any; sh[19] = s.bodies[o + 14]; }
+            // Anything written here since the diff is kept (see the header). The shadow becomes what the
+            // worker now holds either way, so the next diff sends exactly what differs from it.
+            if (same(scratch, sh, 0, 3)) body.position.set(b[o + 1], b[o + 2], b[o + 3]);
+            else body.position.set(b[o + 1] + scratch[0] - sh[0], b[o + 2] + scratch[1] - sh[1], b[o + 3] + scratch[2] - sh[2]);
+            if (same(scratch, sh, 3, 4)) body.quaternion.set(b[o + 4], b[o + 5], b[o + 6], b[o + 7]);
+            else rebaseRotation(body.quaternion, scratch, sh, b, o + 4);
+            body.aabbNeedsUpdate = true;
+            for (let i = 0; i < 7; i++) sh[i] = b[o + 1 + i];
+            // Velocities by component: a script steering with `velocity.x = …` keeps the step's fall.
+            const v = body.velocity, w = body.angularVelocity;
+            if (scratch[7] === sh[7]) v.x = b[o + 8];
+            if (scratch[8] === sh[8]) v.y = b[o + 9];
+            if (scratch[9] === sh[9]) v.z = b[o + 10];
+            if (scratch[10] === sh[10]) w.x = b[o + 11];
+            if (scratch[11] === sh[11]) w.y = b[o + 12];
+            if (scratch[12] === sh[12]) w.z = b[o + 13];
+            for (let i = 7; i < 13; i++) sh[i] = b[o + 1 + i];
+            if (scratch[19] === sh[19]) body.sleepState = b[o + 14] as any;
+            sh[19] = b[o + 14];
+            this._track(slot);
         }
+        this._from = this._flightFrom;
+        this._to = this._flightTo;
         // The last substep's contacts, for ground stamping.
         this._contacts.length = s.contactCount;
         for (let i = 0; i < s.contactCount; i++) {
@@ -166,32 +281,118 @@ export class WorkerBackend implements PhysicsBackend {
         this._recycle.push(s.bodies.buffer as ArrayBuffer, s.contacts.buffer as ArrayBuffer);
     }
 
+    /** Record the step a body just took, for {@link visualPose}: where it started, where it is now. */
+    private _track(slot: Slot): void {
+        const body = slot.body, from = slot.from, to = slot.to;
+        from.set(slot.start);
+        const p = body.position, q = body.quaternion, v = body.velocity, w = body.angularVelocity;
+        to[0] = p.x; to[1] = p.y; to[2] = p.z; to[3] = q.x; to[4] = q.y; to[5] = q.z; to[6] = q.w;
+        to[7] = v.x; to[8] = v.y; to[9] = v.z; to[10] = w.x; to[11] = w.y; to[12] = w.z;
+        slot.tracked = true;
+        slot.settled = same(from, to, 0, 7)
+            && (body.sleepState === Body.SLEEPING || (to[7] === 0 && to[8] === 0 && to[9] === 0 && to[10] === 0 && to[11] === 0 && to[12] === 0));
+    }
+
+    // ---- drawing ----
+
+    /**
+     * The pose to DRAW `body` with this frame, [px py pz qx qy qz qw] (centre of mass, like body.position),
+     * written into `out`. Its last step's two ends interpolated at the frame's time — slightly behind the
+     * clock, by the typical misprediction, so it is nearly always an interpolation — or the end carried on
+     * along the body's velocity for a frame that outran the step (a long frame, a late worker), at most
+     * a few frames' worth. False when there is nothing to draw but the body's own pose: no step taken yet,
+     * or the body did not move.
+     */
+    public visualPose(body: Body, out: Float64Array): boolean {
+        const index = this._slotOf.get(body);
+        const slot = index === undefined ? undefined : this._slots[index];
+        if (!slot || !slot.tracked || slot.settled) return false;
+        const a = slot.from, b = slot.to;
+        const time = this._now - Math.min(this._jitter, 0.25 * this._lead);
+        const span = this._to - this._from;
+        const t = span > 0 ? (time - this._from) / span : 1;
+        if (t <= 0) {
+            for (let i = 0; i < 7; i++) out[i] = a[i];
+        } else if (t < 1) {
+            out[0] = a[0] + (b[0] - a[0]) * t;
+            out[1] = a[1] + (b[1] - a[1]) * t;
+            out[2] = a[2] + (b[2] - a[2]) * t;
+            // nlerp along the short way: a step turns a body by a few degrees at most.
+            const s = a[3] * b[3] + a[4] * b[4] + a[5] * b[5] + a[6] * b[6] < 0 ? -1 : 1;
+            let x = a[3] + (s * b[3] - a[3]) * t, y = a[4] + (s * b[4] - a[4]) * t;
+            let z = a[5] + (s * b[5] - a[5]) * t, w = a[6] + (s * b[6] - a[6]) * t;
+            const n = 1 / Math.hypot(x, y, z, w);
+            out[3] = x * n; out[4] = y * n; out[5] = z * n; out[6] = w * n;
+        } else {
+            const e = Math.min(time - this._to, Math.min(MAX_PENDING, 2.5 * this._lead));
+            if (e <= 0 || body.sleepState === Body.SLEEPING) {
+                for (let i = 0; i < 7; i++) out[i] = b[i];
+            } else {
+                physicsStats.workerExtrapolated++;
+                out[0] = b[0] + b[7] * e; out[1] = b[1] + b[8] * e; out[2] = b[2] + b[9] * e;
+                // dq/dt = ½ ω q, as cannon integrates it.
+                const qx = b[3], qy = b[4], qz = b[5], qw = b[6], wx = b[10], wy = b[11], wz = b[12], h = 0.5 * e;
+                const x = qx + h * (wx * qw + wy * qz - wz * qy);
+                const y = qy + h * (wy * qw + wz * qx - wx * qz);
+                const z = qz + h * (wz * qw + wx * qy - wy * qx);
+                const w = qw + h * (-wx * qx - wy * qy - wz * qz);
+                const n = 1 / Math.hypot(x, y, z, w);
+                out[3] = x * n; out[4] = y * n; out[5] = z * n; out[6] = w * n;
+            }
+        }
+        physicsStats.workerDrawn++;
+        return true;
+    }
+
     // ---- end of frame: tell the worker what changed, and step ----
 
-    public endFrame(dt: number): void {
+    public endFrame(_dt: number): void {
         if (this._failed) return;
         if (this._inFlight) {
-            // The last step has not come back: carry this frame's time into the next one. Nothing is
-            // diffed meanwhile, so no slot can change under the step still running.
-            this._pendingDt = Math.min(MAX_PENDING, this._pendingDt + dt);
+            // The last step has not come back: its time, and this frame's, go out with the next one.
+            // Nothing is diffed meanwhile, so no slot can change under the step still running.
             this.lateFrames++;
+            physicsStats.workerFramesLate = this.lateFrames;
             return;
         }
+        // How far this step reaches: one predicted frame past now. Kept as a running debt rather than
+        // `now + lead − end`, so a steady frame rate posts steps of exactly its delta, bit for bit.
+        if (!this._started) { this._started = true; this._owed = this._lead; }
+        else this._owed += this._sincePost + (this._lead - this._leadSent);
+        this._sincePost = 0;
+        this._leadSent = this._lead;
+        let span = this._owed > MAX_PENDING ? MAX_PENDING : this._owed;
+        if (!(span > 0)) span = 0;
+        this._owed -= span;
+        if (this._owed > 0) this._owed = 0;        // past the cap: dropped, as the engine drops a frame past MAX_DELTA
+        this._flightTo = this._now + this._lead - this._owed;
+        this._flightFrom = this._flightTo - span;
+        this.postedFrames++;
+        physicsStats.workerStepsPosted = this.postedFrames;
+        this._post(span);
+    }
+
+    private _post(stepDt: number): void {
         const start = performance.now();
-        const stepDt = Math.min(MAX_PENDING, dt + this._pendingDt);
-        this._pendingDt = 0;
         const msg = this._diff(stepDt);
-        const transfer: ArrayBuffer[] = [msg.writes.buffer as ArrayBuffer, ...this._recycle];
+        const payload: ArrayBuffer[] = [msg.writes.buffer as ArrayBuffer];
         for (const op of msg.ops) if (op.op === 'addBody' || op.op === 'config') {
-            for (const s of op.config.shapes) transfer.push(...shapeBuffers(s.def));
-            if (op.op === 'addBody') transfer.push(op.state.buffer as ArrayBuffer);
+            for (const s of op.config.shapes) payload.push(...shapeBuffers(s.def));
+            if (op.op === 'addBody') payload.push(op.state.buffer as ArrayBuffer);
         }
+        const transfer = uniqueBuffers([...payload, ...this._recycle]);
+        // Measured before posting: a transferred buffer reads as empty afterwards.
+        let bytes = 0;
+        for (const buffer of uniqueBuffers(payload)) bytes += buffer.byteLength;
+        physicsStats.workerBytesUp = bytes;
+        physicsStats.workerWrites = msg.writeCount;
+        physicsStats.workerOps = msg.ops.length;
         msg.recycle = this._recycle;
         this._recycle = [];
         this._inFlight = true;
-        this.postedFrames++;
+        this._postedAt = performance.now();
         try {
-            this._port.post(msg, uniqueBuffers(transfer));
+            this._port.post(msg, transfer);
         } catch (e) {
             this._inFlight = false;
             this._fail(e);
@@ -218,7 +419,10 @@ export class WorkerBackend implements PhysicsBackend {
                 shadow[13] = shadow[14] = shadow[15] = shadow[16] = shadow[17] = shadow[18] = 0;
                 body.force.set(0, 0, 0); body.torque.set(0, 0, 0);
                 const cfg = this._configNumbers(body, wantsCollide).slice();
-                this._slots[index] = { body, shadow, cfg, material: body.material, seen: frame };
+                this._slots[index] = {
+                    body, shadow, cfg, material: body.material, seen: frame,
+                    start: shadow.slice(0, 7), from: new Float64Array(7), to: new Float64Array(13), tracked: false, settled: false,
+                };
                 this._slotOf.set(body, index);
                 adds.push({ op: 'addBody', slot: index, config: encodeConfig(body, this._knownShapes, wantsCollide), state });
                 continue;
@@ -240,13 +444,16 @@ export class WorkerBackend implements PhysicsBackend {
             if (scratch[13] !== 0 || scratch[14] !== 0 || scratch[15] !== 0) mask |= WRITE_FORCE;
             if (scratch[16] !== 0 || scratch[17] !== 0 || scratch[18] !== 0) mask |= WRITE_TORQUE;
             if (scratch[19] !== sh[19]) mask |= WRITE_SLEEP;
-            if (!mask) continue;
-            writes.push(index, mask);
-            for (let i = 0; i < STATE_STRIDE; i++) writes.push(scratch[i]);
-            for (let i = 0; i < STATE_STRIDE; i++) sh[i] = scratch[i];
-            // A force is consumed by the step it goes out with, as cannon clears it after stepping inline.
-            if (mask & (WRITE_FORCE | WRITE_TORQUE)) { body.force.set(0, 0, 0); body.torque.set(0, 0, 0); }
-            sh[13] = sh[14] = sh[15] = sh[16] = sh[17] = sh[18] = 0;
+            if (mask) {
+                writes.push(index, mask);
+                for (let i = 0; i < STATE_STRIDE; i++) writes.push(scratch[i]);
+                for (let i = 0; i < STATE_STRIDE; i++) sh[i] = scratch[i];
+                // A force is consumed by the step it goes out with, as cannon clears it after stepping inline.
+                if (mask & (WRITE_FORCE | WRITE_TORQUE)) { body.force.set(0, 0, 0); body.torque.set(0, 0, 0); }
+                sh[13] = sh[14] = sh[15] = sh[16] = sh[17] = sh[18] = 0;
+            }
+            // The pose this step starts the body from: what the worker holds once the writes are applied.
+            for (let i = 0; i < 7; i++) slot.start[i] = sh[i];
         }
         for (let i = 0; i < this._slots.length; i++) {
             const slot = this._slots[i];
@@ -279,7 +486,7 @@ export class WorkerBackend implements PhysicsBackend {
             profile: this._host.profileStep(),
             ops: [...constraintRemoves, ...removes, ...adds, ...configs, ...constraintAdds],
             writes: Float64Array.from(writes), writeCount: writes.length / (STATE_STRIDE + 2),
-            gravity: [g.x, g.y, g.z], iterations: solver.iterations ?? 0,
+            gravity: [g.x, g.y, g.z], iterations: solver.iterations ?? 0, time: (world as any).time ?? 0,
             water: water.map(w => w.spec), recycle: [],
         };
     }
@@ -313,7 +520,10 @@ export class WorkerBackend implements PhysicsBackend {
         this._epoch++;
         this._inFlight = false;
         this._latest = null;
-        this._pendingDt = 0;
+        this._started = false;
+        this._owed = 0;
+        this._sincePost = 0;
+        this._from = this._to = this._flightFrom = this._flightTo = 0;
         this._slotOf.clear();
         this._slots.length = 0;
         this._freeSlots.length = 0;
@@ -322,6 +532,8 @@ export class WorkerBackend implements PhysicsBackend {
         this._recycle = [];
         this._sentWater = [];
         this._port.post({ kind: 'reset', epoch: this._epoch }, []);
+        // Still warming up: the answer it was waiting for belongs to the old epoch, so ask again.
+        if (!this._ready) this.prime();
     }
 
     public dispose(): void {
@@ -334,6 +546,27 @@ export class WorkerBackend implements PhysicsBackend {
 function same(a: ArrayLike<number>, b: ArrayLike<number>, from: number, count: number): boolean {
     for (let i = from; i < from + count; i++) if (a[i] !== b[i] && !(a[i] !== a[i] && b[i] !== b[i])) return false;
     return true;
+}
+
+/**
+ * A body turned here since the diff, turned by the same amount from where the step left it:
+ * `(now · was⁻¹) · stepped`, with `now` at scratch[3..6], `was` at shadow[3..6], `stepped` at row[at..].
+ */
+function rebaseRotation(out: { x: number; y: number; z: number; w: number; set(x: number, y: number, z: number, w: number): unknown }, now: ArrayLike<number>, was: ArrayLike<number>, row: ArrayLike<number>, at: number): void {
+    const ax = now[3], ay = now[4], az = now[5], aw = now[6];
+    const bx = -was[3], by = -was[4], bz = -was[5], bw = was[6];
+    // d = now · conj(was)
+    const dx = aw * bx + ax * bw + ay * bz - az * by;
+    const dy = aw * by - ax * bz + ay * bw + az * bx;
+    const dz = aw * bz + ax * by - ay * bx + az * bw;
+    const dw = aw * bw - ax * bx - ay * by - az * bz;
+    const sx = row[at], sy = row[at + 1], sz = row[at + 2], sw = row[at + 3];
+    const x = dw * sx + dx * sw + dy * sz - dz * sy;
+    const y = dw * sy - dx * sz + dy * sw + dz * sx;
+    const z = dw * sz + dx * sy - dy * sx + dz * sw;
+    const w = dw * sw - dx * sx - dy * sy - dz * sz;
+    const n = 1 / Math.hypot(x, y, z, w);
+    out.set(x * n, y * n, z * n, w * n);
 }
 
 function uniqueBuffers(list: ArrayBuffer[]): ArrayBuffer[] {

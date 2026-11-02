@@ -43,12 +43,12 @@ describe('the worker backend', () => {
         expect(backend.lateFrames).toBeGreaterThan(50);
         // The velocity the "script" writes every frame still walks the character through the zone.
         expect(trace.triggers).toEqual(['Zone enter Hero', 'Zone exit Hero']);
-        // Time is carried, not dropped: the worker's clock is the frames' time minus the step in flight
-        // and the time still pending.
+        // Time is carried, not dropped: the worker's clock is the frames' time plus the one-frame lead every
+        // step reaches ahead by (see WorkerBackend's header), minus the time not yet posted.
         const simulated = port.core.world.time;
-        const total = 301 / 60;
-        expect(simulated).toBeGreaterThan(total - 3 / 60 - 1e-9);
-        expect(simulated).toBeLessThanOrEqual(total + 1e-9);
+        const total = 301 / 60, lead = 1 / 60;
+        expect(simulated).toBeGreaterThan(total + lead - 3 / 60 - 1e-9);
+        expect(simulated).toBeLessThanOrEqual(total + lead + 1e-9);
     });
 
     it('falls back to the inline step when the worker fails, carrying on from its last step', () => {

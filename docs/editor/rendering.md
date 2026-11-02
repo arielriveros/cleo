@@ -401,6 +401,15 @@ The **Performance** page, beside Renderer: what the frame costs, and where. Its 
   CPU time only — it returns as soon as the commands are queued, so GPU cost shows under Passes.
   Physics only steps in Play mode. Unattributed is whatever the three measured phases do not account
   for: browser work, GPU sync, rAF idle.
+- **Workers** — the physics thread: where the step runs now (main thread, starting worker, worker) and
+  the mode, with a switch for this machine only. *Project* follows Options ▸ Engine ▸ Runtime ▸ Physics
+  thread; Main, Auto and Worker override it here, kept across Play and never published (the same override
+  as `localStorage.cleo_physics_worker`). While the worker steps: the step measured in the worker, this
+  thread's share (sending each step and applying its result), the round trip and how early the result
+  was ready, late frames over the last three seconds, what each step sends and brings back, the bodies drawn and those carried past
+  their step, and the frame-time prediction each step covers. Under Auto on the main thread it shows the
+  step average and moving bodies Auto decides by. If the worker failed or fell behind, the reason is
+  shown under the switch. See [Physics threading](../reference/physics-threading.md).
 - **Passes** — two numbers per scope: the CPU time spent *submitting* it and the GPU time spent
   running it. They answer different questions: a scope that is expensive on the CPU and cheap on the
   GPU is issuing too many draws, not shading too much, and no amount of LOD will help it. CPU timing
@@ -454,6 +463,11 @@ pays a submission at both ends of its own window. Compare passes with each other
 going — render CPU, render GPU, physics, or scene — and the fix for each is different.
 
 **Unattributed time** growing is usually garbage collection or something outside the engine.
+
+**Late frames under Workers** mean the worker's round trip is longer than a frame. Above 10%, Auto moves
+the step back to the main thread. Bodies *past their step* are ones drawn ahead along their velocity
+because the frame outran the step; a few on a long frame are normal, many on every frame are a worker
+falling behind.
 
 **Foliage spikes only while the camera moves.** Cell admission and the cull boundary are per-motion
 costs. A steady frame rate standing still and spikes while walking is this.

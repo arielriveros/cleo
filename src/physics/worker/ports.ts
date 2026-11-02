@@ -30,7 +30,8 @@ export class WorkerPort implements PhysicsPort {
 /**
  * The worker core run in this thread, with the real thing's semantics: every message is copied
  * (structuredClone) both ways, and a reply can be held back `delayFrames` polls to stand for a worker that
- * has not finished yet. `failAt` makes the step with that sequence number throw, for the fallback path.
+ * has not finished yet — or `delayFor(seq)` polls, per step. `failAt` makes the step with that sequence
+ * number throw, for the fallback path.
  */
 export class LoopbackPort implements PhysicsPort {
     public onMessage: ((msg: FromWorker) => void) | null = null;
@@ -39,7 +40,7 @@ export class LoopbackPort implements PhysicsPort {
     private readonly _queue: { reply: FromWorker; due: number }[] = [];
     private _polls = 0;
 
-    constructor(private readonly _options: { delayFrames?: number; failAt?: number } = {}) {}
+    constructor(private readonly _options: { delayFrames?: number; delayFor?: (seq: number) => number; failAt?: number } = {}) {}
 
     public post(msg: ToWorker, _transfer: Transferable[]): void {
         if (msg.kind === 'step' && this._options.failAt !== undefined && msg.seq === this._options.failAt) {
@@ -48,7 +49,7 @@ export class LoopbackPort implements PhysicsPort {
         }
         const reply = this.core.handle(structuredClone(msg));
         if (!reply) return;
-        const delay = this._options.delayFrames ?? 0;
+        const delay = (msg.kind === 'step' ? this._options.delayFor?.(msg.seq) : undefined) ?? this._options.delayFrames ?? 0;
         if (delay <= 0) this.onMessage?.(structuredClone(reply));
         else this._queue.push({ reply: structuredClone(reply), due: this._polls + delay });
     }

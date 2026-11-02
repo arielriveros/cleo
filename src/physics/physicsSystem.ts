@@ -156,8 +156,19 @@ export class PhysicsSystem {
   private _backend!: PhysicsBackend;
   private _workerMode: PhysicsWorkerMode = 'off';
   private _workerFactory: (() => PhysicsPort) | null = null;
+  /** A worker warming up (see WorkerBackend.prime): the step stays on this thread until it has answered. */
+  private _pendingWorker: WorkerBackend | null = null;
+  /** Set when the step moved to the worker during this frame's update, whose activation has already run. */
+  private _activatedThisFrame = false;
+  /** Scratch for the worker's drawn pose of a body and the node origin it puts the node at. */
+  private _visualPose = new Float64Array(7);
+  private _visualRotation = this._visualPose.subarray(3, 7);
+  private _visualOrigin = new Float64Array(3);
+  private _simRotation = new Float64Array(4);
   /** The auto mode's bookkeeping: seconds watched, the step-time average, and whether it gave up. */
   private _auto = { watched: 0, stepEma: 0, gaveUp: false, workerWatched: 0, lateAt: 0, postedAt: 0 };
+  /** Why the step last came back to this thread from a worker (or never left), until the mode is set again. */
+  private _workerFallback: string | null = null;
   /**
    * Mirror of the world's body membership, so the write-back pass tests it in O(1) rather than by scanning
    * `world.bodies`. Only tracks bodies added THROUGH this system; the foliage collider pool and ragdoll
@@ -284,6 +295,7 @@ export class PhysicsSystem {
 
       const writeBackStart = performance.now();
       const nodes = this._scene.nodes;
+      const worker = this._backend.kind === 'worker' ? this._backend as WorkerBackend : null;
       // A body moving its node is simulation, never an edit (see authoring.derived).
       authoring.derived++;
       try {
@@ -324,11 +336,26 @@ export class PhysicsSystem {
             this._motionConfigFor(node.body),
           );
 
-          if (node.body.mass > 0) {
+          if (node.body.mass > 0 && worker) {
+            // DYNAMIC, WORKER: the node is drawn where its body is at THIS frame's time — the worker's step
+            // interpolated (see WorkerBackend.visualPose) — while the body keeps the latest simulated pose.
+            // Written without pushing into the body; the node remembers the gap instead, so a script that
+            // then moves or turns it moves the body by the same amount (see Node._showSimulatedPose).
+            const q = node.body.quaternion, simRotation = this._simRotation;
+            simRotation[0] = q.x; simRotation[1] = q.y; simRotation[2] = q.z; simRotation[3] = q.w;
+            if (worker.visualPose(node.body, this._visualPose)) {
+              node.body.originOf(this._visualPose, this._visualOrigin);
+              node._showSimulatedPose(this._visualOrigin, this._visualRotation, pos, simRotation);
+            } else if (!asleep || node._drawnApart) {
+              // Its own pose: nothing to interpolate. Once more after it falls asleep, to settle where it is.
+              node._showSimulatedPose(pos, simRotation, pos, simRotation);
+            }
+          } else if (node.body.mass > 0) {
             // DYNAMIC: physics owns the world pose, and the node's local one is rebased from it under
             // whatever parent it has. A moving parent does not drag the body (as in Unity or Godot).
             // A sleeping body did not move: writing its pose back would only dirty the node's transform (and
             // every descendant's) for nothing. Its motion record still samples, so its speed reads 0.
+            node._clearSimulatedPose();
             if (!asleep) {
               node.setWorldPosition(pos);
               const quat = node.body.quaternion;
@@ -400,6 +427,9 @@ export class PhysicsSystem {
       // hearing about it and are still being simulated against — see worldTeardown.clearWorld.
       physicsStats.broadphaseBodies = this._world ? broadphaseBodyCount(this._world) : 0;
       physicsStats.frameMs = performance.now() - frameStart;
+      // AFTER this frame's inline step: a worker that takes over now posts its first step at this frame's
+      // end, so no frame goes without one.
+      if (this._pendingWorker) this._adoptWorker(deltaTime);
       if (this._workerMode === 'auto') this._autoSwitch(deltaTime);
     } catch (e) {
       Logger.error(e.toString());
@@ -1224,6 +1254,7 @@ export class PhysicsSystem {
     this._overlapCount.clear();
     this._localVersion++;
     this._backend?.reset();
+    this._pendingWorker?.reset();
   }
 
   // ---- Where the step runs ----
@@ -1236,8 +1267,10 @@ export class PhysicsSystem {
   public endFrame(deltaTime: number): void {
     if (this._backend?.kind !== 'worker') return;
     try {
-      // The worker's activation: what the inline backend does just before stepping.
-      this._updateActivation(deltaTime);
+      // The worker's activation: what the inline backend does just before stepping. Not twice in the frame
+      // the step moved over, whose inline update already ran it.
+      if (!this._activatedThisFrame) this._updateActivation(deltaTime);
+      this._activatedThisFrame = false;
       this._backend.endFrame(deltaTime);
     } catch (e) {
       Logger.error(`Physics: ${e}`);
@@ -1258,6 +1291,19 @@ export class PhysicsSystem {
   public get workerMode(): PhysicsWorkerMode { return this._workerMode; }
 
   /**
+   * Where the worker stands, for the Performance HUD: `state` is where the step runs now ('starting' while a
+   * worker warms up and this thread still steps); `fallback` why it came back to this thread, or could not
+   * leave it, since the mode was last set; `autoStepMs` the step-time average the auto mode decides by.
+   */
+  public get workerStatus(): { state: 'inline' | 'starting' | 'worker'; fallback: string | null; autoStepMs: number } {
+    return {
+      state: this._pendingWorker ? 'starting' : this.backend,
+      fallback: this._workerFallback,
+      autoStepMs: this._auto.stepEma,
+    };
+  }
+
+  /**
    * Run the step in a Web Worker: `'on'` now, `'auto'` once this world proves heavy enough to gain from it
    * (and back if the worker cannot keep up), `'off'` never. `create` makes the worker — a host-specific
    * bundler import of physics/worker/physicsWorker.ts, a `Worker`, or a port (tests) — and without it the
@@ -1272,39 +1318,64 @@ export class PhysicsSystem {
       return typeof (made as any).postMessage === 'function' && !('poll' in made) ? new WorkerPort(made as Worker) : made as PhysicsPort;
     } : null;
     this._auto = { watched: 0, stepEma: 0, gaveUp: false, workerWatched: 0, lateAt: 0, postedAt: 0 };
+    this._workerFallback = mode !== 'off' && !factory ? 'This host has no physics worker.' : null;
     if (mode === 'on') this._useWorker();
     else if (mode === 'off') this._useInline();
   }
 
-  private _useWorker(): boolean {
-    if (this._backend?.kind === 'worker') return true;
+  /** `frameDt`: called from update() with its delta, whose inline activation has already run; else 0. */
+  private _useWorker(frameDt = 0): boolean {
+    if (this._backend?.kind === 'worker' || this._pendingWorker) return true;
     if (!this._workerFactory || !this._world) return false;
     try {
       const port = this._workerFactory();
-      this._backend = new WorkerBackend({
+      const worker = new WorkerBackend({
         world: this._world,
         onContact: (a, b, begin) => this._onContact(a, b, begin),
         water: () => this._waterSpecs(),
         substepsFor: dt => PhysicsSystem.substepsFor(dt, this.maxSubsteps),
         profileStep: () => this.profileStep,
         onFailure: (error) => {
-          Logger.warn(`Physics worker failed (${error instanceof Error ? error.message : String(error)}); stepping on the main thread instead.`, 'Physics');
+          const reason = error instanceof Error ? error.message : String(error);
+          Logger.warn(`Physics worker failed (${reason}); stepping on the main thread instead.`, 'Physics');
+          this._workerFallback = `The worker failed: ${reason}`;
           this._auto.gaveUp = true;
           this._useInline();
         },
       }, port);
+      // Warm-up: this thread keeps stepping until the worker has the world and has answered, so a worker
+      // that takes a moment to start (loading its module, building the big colliders) freezes no frame.
+      this._pendingWorker = worker;
+      worker.prime();
+      this._adoptWorker(frameDt);    // already answered (an in-process port)
       return true;
     } catch (e) {
       Logger.warn(`Physics worker could not start (${e}); stepping on the main thread.`, 'Physics');
+      this._workerFallback = `The worker could not start: ${e instanceof Error ? e.message : String(e)}`;
       this._auto.gaveUp = true;
       return false;
     }
   }
 
   private _useInline(): void {
+    this._pendingWorker?.dispose();
+    this._pendingWorker = null;
     if (this._backend?.kind === 'inline') return;
     this._backend?.dispose();
     this._backend = this._inlineBackend();
+  }
+
+  /**
+   * Hand the step to the warming-up worker once it has answered (see _useWorker). `frameDt` is the delta of
+   * the frame doing it, already stepped inline (0 outside a frame): the worker's clock starts with it.
+   */
+  private _adoptWorker(frameDt: number): void {
+    const worker = this._pendingWorker;
+    if (!worker || !worker.poll()) return;
+    this._pendingWorker = null;
+    worker.adopt(frameDt);
+    this._backend = worker;
+    this._activatedThisFrame = frameDt > 0;
   }
 
   /**
@@ -1320,7 +1391,7 @@ export class PhysicsSystem {
       a.stepEma += (physicsStats.stepMs - a.stepEma) * Math.min(1, dt * 2);
       const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency ?? 1 : 1;
       if (a.watched >= 2 && cores >= 4 && (a.stepEma >= 1.5 || physicsStats.activeBodies >= 40)) {
-        if (!this._useWorker()) a.gaveUp = true;
+        if (!this._useWorker(dt)) a.gaveUp = true;
       }
       return;
     }
@@ -1331,6 +1402,7 @@ export class PhysicsSystem {
     a.workerWatched = 0; a.postedAt = worker.postedFrames; a.lateAt = worker.lateFrames;
     if (late > 0.1 * Math.max(1, posted + late)) {
       Logger.warn('Physics worker falls behind on this machine; stepping on the main thread.', 'Physics');
+      this._workerFallback = `The worker fell behind: ${late} of ${posted + late} frames late.`;
       a.gaveUp = true;
       this._useInline();
     }

@@ -116,20 +116,37 @@ export interface EngineRuntimeTarget {
   } | null | undefined;
 }
 
+/** Where this machine's physics-thread override is stored (see physicsWorkerOverride). */
+const PHYSICS_WORKER_OVERRIDE_KEY = 'cleo_physics_worker';
+
 /**
  * A per-machine override of the project's physics thread, for when a worker misbehaves on one machine or
  * a test wants it forced: `?physicsWorker=off|on|auto` in the URL, else `localStorage.cleo_physics_worker`.
  * Null when neither is set (or there is no window: tests, workers).
  */
 export function physicsWorkerOverride(): PhysicsWorkerSetting | null {
+  return physicsWorkerOverrideSource()?.mode ?? null;
+}
+
+/** The override and where it comes from: the URL wins over storage (the Performance page's switch writes storage). */
+export function physicsWorkerOverrideSource(): { mode: PhysicsWorkerSetting; from: 'url' | 'storage' } | null {
   const g = globalThis as any;
   try {
     const fromUrl = new URLSearchParams(g.location?.search ?? '').get('physicsWorker');
-    if (fromUrl && (PHYSICS_WORKER_SETTINGS as string[]).includes(fromUrl)) return fromUrl as PhysicsWorkerSetting;
-    const stored = g.localStorage?.getItem?.('cleo_physics_worker');
-    if (stored && (PHYSICS_WORKER_SETTINGS as string[]).includes(stored)) return stored as PhysicsWorkerSetting;
+    if (fromUrl && (PHYSICS_WORKER_SETTINGS as string[]).includes(fromUrl)) return { mode: fromUrl as PhysicsWorkerSetting, from: 'url' };
+    const stored = g.localStorage?.getItem?.(PHYSICS_WORKER_OVERRIDE_KEY);
+    if (stored && (PHYSICS_WORKER_SETTINGS as string[]).includes(stored)) return { mode: stored as PhysicsWorkerSetting, from: 'storage' };
   } catch { /* no storage: no override */ }
   return null;
+}
+
+/** Store this machine's override, or clear it with null so the machine follows the project again. */
+export function storePhysicsWorkerOverride(mode: PhysicsWorkerSetting | null): void {
+  const storage = (globalThis as any).localStorage;
+  try {
+    if (mode) storage?.setItem?.(PHYSICS_WORKER_OVERRIDE_KEY, mode);
+    else storage?.removeItem?.(PHYSICS_WORKER_OVERRIDE_KEY);
+  } catch { /* no storage: nothing to keep it in */ }
 }
 
 /** Push the runtime settings into a live engine (the editor does it on every change and at Play). */

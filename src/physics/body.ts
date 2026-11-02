@@ -120,6 +120,21 @@ class CBody extends CannonBody {
         return out;
     }
 
+    /**
+     * {@link originPosition} for a pose other than the body's own: `pose` is [px py pz qx qy qz qw], a
+     * centre of mass and an orientation (the physics worker's drawn pose, see WorkerBackend.visualPose).
+     */
+    public originOf(pose: ArrayLike<number>, out: ArrayLike<number> & { [i: number]: number }): typeof out {
+        const c = this._com, qx = pose[3], qy = pose[4], qz = pose[5], qw = pose[6];
+        // q · com · q⁻¹, written out (Quaternion.vmult).
+        const ix = qw * c.x + qy * c.z - qz * c.y, iy = qw * c.y + qz * c.x - qx * c.z;
+        const iz = qw * c.z + qx * c.y - qy * c.x, iw = -qx * c.x - qy * c.y - qz * c.z;
+        out[0] = pose[0] - (ix * qw + iw * -qx + iy * -qz - iz * -qy);
+        out[1] = pose[1] - (iy * qw + iw * -qy + iz * -qx - ix * -qz);
+        out[2] = pose[2] - (iz * qw + iw * -qz + ix * -qy - iy * -qx);
+        return out;
+    }
+
     /** Take the node origin back off the body's current position, under its current orientation. */
     private _captureOrigin(): void {
         const com = CBody._comWorld;

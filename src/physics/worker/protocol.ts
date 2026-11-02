@@ -90,6 +90,8 @@ export interface StepMessage {
     writeCount: number;
     gravity: [number, number, number];
     iterations: number;
+    /** The main thread's world clock (cannon's `world.time`), which the step continues from. */
+    time: number;
     water: WaterSpec[];
     /** Buffers the main thread is done with, handed back for the worker's next snapshot. */
     recycle: ArrayBuffer[];
