@@ -121,11 +121,19 @@ export interface Snapshot {
     /** What water buoyed: [volumeIndex, slot, fraction] per entry, the deepest fraction per pair. */
     submerged: Float64Array;
     stats: { stepMs: number; broadphaseMs: number; narrowphaseMs: number; solveMs: number; integrateMs: number };
+    /** When the worker finished it, in the receiver's performance.now() clock: set for a reply read from shared memory. */
+    doneAt?: number;
 }
 
 export interface WorkerError { kind: 'error'; epoch: number; message: string }
 
-export type FromWorker = Snapshot | WorkerError;
+/**
+ * The shared memory the worker's next replies are written to (sharedReply.ts), instead of being posted.
+ * Sent once, and again whenever a snapshot outgrows it; the port keeps it and does not pass it on.
+ */
+export interface ReplyChannel { kind: 'channel'; buffer: SharedArrayBuffer }
+
+export type FromWorker = Snapshot | WorkerError | ReplyChannel;
 
 export const BODY_ROW = 15;
 export const CONTACT_ROW = 5;

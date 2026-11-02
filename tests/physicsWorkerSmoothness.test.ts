@@ -89,6 +89,17 @@ describe('drawing a body stepped in the worker', () => {
         expect(drawnSpeedError(rig('worker', { delayFor: late }), STEADY).worst).toBeLessThan(0.025);
     });
 
+    it('keeps the time of a reply that missed several slow frames, instead of drawing a stall', () => {
+        // Four 25–45 ms frames late (a fight's busy frames, a GC pause): over 0.1 s owed at once. Dropping the
+        // excess drew the body standing still for it and then moving on: 247% worst, 22% rms.
+        const stalls = (seq: number) => (seq % 40 === 13 ? 4 : 1);
+        const jumpy = (seq: number) => 1 + (seq * 7919 % 3);          // every reply 1–3 frames after its post
+        for (const delayFor of [stalls, jumpy]) {
+            const e = drawnSpeedError(rig('worker', { delayFor }), [...UNEVEN, ...UNEVEN]);
+            expect(e.worst).toBeLessThan(0.05);
+        }
+    });
+
     it('lets scripts read the body at this frame’s time, as inline', () => {
         const a = rig('inline'), b = rig('worker');
         for (let i = 0; i < 100; i++) {

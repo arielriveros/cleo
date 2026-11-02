@@ -66,9 +66,21 @@ was last told and posts only the changes plus the step. The worker builds its wo
 code (`physics/worldConfig.ts`) and steps it exactly as the inline backend does. At the start of the next
 frame the snapshot — poses, velocities, sleep states, the last substep's contacts, trigger events,
 first contacts, buoyancy — is written back into the mirror, and each dynamic body's node is drawn
-interpolated from its last steps (`WorkerBackend.visualPose`, with a history of 32 steps per body). One step is in flight at a time, and no SharedArrayBuffer is
-used, so no cross-origin isolation headers are needed anywhere. If the worker fails, physics falls back
+interpolated from its last steps (`WorkerBackend.visualPose`, with a history of 32 steps per body). One step is in flight at a time. If the worker fails, physics falls back
 to the main thread and carries on from the worker's last step.
+
+**How the result comes back.** A posted reply is a task on the main thread, and the browser only runs it
+once the thread is free: after the frame's render. Measured in the Valley, a 1.5 ms step came back 17 ms
+after it was sent and was ready only 0.2 ms before the next frame, so any frame that started first had
+no result (a *late* frame). On a **cross-origin isolated** page the worker writes each result into a
+`SharedArrayBuffer` instead, and the main thread reads it the moment its frame starts
+(`physics/worker/sharedReply.ts`): the same scene then measured a 1.5 ms round trip and no late frames.
+The editor's and the Creator's dev servers send the headers that isolate the page
+(`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: credentialless`, from
+`crossOriginIsolationPlugin` in `applications/app-kit/vite.preset.ts`). A page served without them (a
+published web game on a host that does not send them, the packaged desktop app on `file://`) falls back
+to messages, which work the same, just later. Performance ▸ Workers shows which: *replies · shared memory*
+or *messages*.
 
 At a steady frame rate each step is exactly the frame's delta, and the engine's tests hold the worker to
 the inline step bit for bit on a mixed scene (`tests/physicsWorkerParity.test.ts`).

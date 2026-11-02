@@ -1310,13 +1310,16 @@ export class PhysicsSystem {
   /**
    * Where the worker stands, for the Performance HUD: `state` is where the step runs now ('starting' while a
    * worker warms up and this thread still steps); `fallback` why it came back to this thread, or could not
-   * leave it, since the mode was last set; `autoStepMs` the step-time average the auto mode decides by.
+   * leave it, since the mode was last set; `autoStepMs` the step-time average the auto mode decides by;
+   * `sharedReplies` whether the worker's results are read from shared memory (a cross-origin isolated
+   * page) rather than waiting for their message.
    */
-  public get workerStatus(): { state: 'inline' | 'starting' | 'worker'; fallback: string | null; autoStepMs: number } {
+  public get workerStatus(): { state: 'inline' | 'starting' | 'worker'; fallback: string | null; autoStepMs: number; sharedReplies: boolean } {
     return {
       state: this._pendingWorker ? 'starting' : this.backend,
       fallback: this._workerFallback,
       autoStepMs: this._auto.stepEma,
+      sharedReplies: this._backend.kind === 'worker' && (this._backend as WorkerBackend).sharedReplies,
     };
   }
 

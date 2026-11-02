@@ -53,8 +53,19 @@ export interface WorkerBackendHost {
     onFailure(error: unknown): void;
 }
 
-/** Most simulated time one step may carry: the engine's own frame-delta cap. */
+/** The engine's own frame-delta cap: how far a body is ever carried along its velocity past its last step. */
 const MAX_PENDING = 0.1;
+/**
+ * Most simulated time one step may carry: eight substeps of 1/60 s, the most PhysicsSystem.substepsFor gives a
+ * step. A reply that missed several frames leaves more owed than that; the rest goes out with the next steps.
+ */
+const MAX_STEP = 8 / 60;
+/**
+ * Most simulated time the worker may owe before the excess is dropped (as the engine drops a frame past its
+ * delta cap). Not one frame's cap: a reply that missed three or four 30 ms frames owes over 0.1 s of frames
+ * that each ran normally, and dropping that drew every body standing still for the dropped time, then moving on.
+ */
+const MAX_OWED = 0.25;
 /**
  * How far the drawn clock may run faster or slower than the frames to settle one frame behind: 2%, below what
  * an eye picks out as a change of speed.
@@ -183,6 +194,9 @@ export class WorkerBackend implements PhysicsBackend {
         _port.post({ kind: 'reset', epoch: this._epoch }, []);
     }
 
+    /** Whether results are read from shared memory (WorkerPort.shared) instead of waiting for their message. */
+    public get sharedReplies(): boolean { return (this._port as { shared?: boolean }).shared === true; }
+
     // ---- warm-up ----
 
     /**
@@ -269,13 +283,15 @@ export class WorkerBackend implements PhysicsBackend {
         const err = target - this._vis, limit = DRAWN_DRIFT * dt;
         this._vis += err > limit ? limit : err < -limit ? -limit : err;
         if (this._vis > this._now) this._vis = this._now;
-        else if (this._vis < this._now - MAX_PENDING) this._vis = this._now - MAX_PENDING;
+        else if (this._vis < this._now - MAX_OWED) this._vis = this._now - MAX_OWED;
     }
 
     private _receive(msg: FromWorker): void {
+        if (msg.kind === 'channel') return;      // the port's own business
         if (msg.epoch !== this._epoch) return;   // from before a reset: stale
         if (msg.kind === 'error') { this._fail(new Error(msg.message)); return; }
-        this._arrivedAt = performance.now();
+        // Read from shared memory: when the worker finished, not when this thread got round to looking.
+        this._arrivedAt = msg.doneAt ?? performance.now();
         physicsStats.workerRoundTripMs = this._arrivedAt - this._postedAt;
         this._inFlight = false;
         this._ready = true;
@@ -479,10 +495,10 @@ export class WorkerBackend implements PhysicsBackend {
         else this._owed += this._sincePost + (lead - this._leadSent);
         this._sincePost = 0;
         this._leadSent = lead;
-        let span = this._owed > MAX_PENDING ? MAX_PENDING : this._owed;
+        if (this._owed > MAX_OWED) this._owed = MAX_OWED;   // past the cap: dropped, as the engine drops a frame past MAX_DELTA
+        let span = this._owed > MAX_STEP ? MAX_STEP : this._owed;
         if (!(span > 0)) span = 0;
-        this._owed -= span;
-        if (this._owed > 0) this._owed = 0;        // past the cap: dropped, as the engine drops a frame past MAX_DELTA
+        this._owed -= span;                        // a step's worth at most: the rest goes with the next ones
         this._flightTo = this._now + lead - this._owed;
         this._flightFrom = this._flightTo - span;
         this.postedFrames++;

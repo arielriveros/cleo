@@ -17,6 +17,9 @@ const navStore = {
   },
 }
 
+/** Turn a given Options panel to a page from outside it (the editor's Play layout opening Performance). */
+export function setOptionsPage(panel: string, page: string): void { navStore.set(panel, page) }
+
 /** The page a given Options panel shows. */
 export function useOptionsPage<T extends string>(panel: string, fallback: T): [T, (page: T) => void] {
   const current = useSyncExternalStore(navStore.subscribe, navStore.get)

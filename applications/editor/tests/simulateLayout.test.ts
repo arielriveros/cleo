@@ -10,7 +10,8 @@ const ENGINE = () => read('features', 'EngineContext.tsx')
 
 describe('Simulate keeps the editor', () => {
   it('only Play strips the chrome', () => {
-    expect(DOCK()).toMatch(/if \(playing && !simulating\) return \[\.\.\.CHROME_PANELS, \.\.\.OPTIONS_PANELS\]/)
+    // Play hides the chrome and every options panel; only the Performance lock keeps Engine (performancePlayPin).
+    expect(DOCK()).toMatch(/if \(playing && !simulating\) \{\s+const hidden = \[\.\.\.CHROME_PANELS, \.\.\.OPTIONS_PANELS\]/)
   })
 
   it('docks the Engine options panel (Performance) while simulating', () => {

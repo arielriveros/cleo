@@ -25,6 +25,8 @@ export interface EditorPrefs {
   snapTranslate: number;
   snapRotateDeg: number;
   snapScale: number;
+  /** Keep Options ▸ Engine ▸ Performance docked beside the viewport in Play (the lock on that page). */
+  pinPerformanceInPlay: boolean;
 }
 
 export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
@@ -35,6 +37,7 @@ export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   snapTranslate: 1,
   snapRotateDeg: 15,
   snapScale: 0.1,
+  pinPerformanceInPlay: false,
 };
 
 const KEY = 'cleo_editor_prefs_v1';
@@ -55,6 +58,7 @@ export function parseEditorPrefs(raw: unknown): EditorPrefs {
     snapTranslate: pos(o.snapTranslate, d.snapTranslate),
     snapRotateDeg: pos(o.snapRotateDeg, d.snapRotateDeg, 0.1, 180),
     snapScale: pos(o.snapScale, d.snapScale),
+    pinPerformanceInPlay: o.pinPerformanceInPlay === true,
   };
 }
 

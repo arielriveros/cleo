@@ -6,7 +6,7 @@ import path from 'node:path'
 // which does not inherit the top-level plugins the shared engine config contributes.
 import { glslRaw } from '../../tools/viteGlsl.mjs'
 import engineConfig from '../../vite.config'
-import { appKitAlias } from '../app-kit/vite.preset'
+import { appKitAlias, crossOriginIsolationPlugin } from '../app-kit/vite.preset'
 import { buildVersionDefines } from './buildVersion'
 
 const ENGINE_ROOT = path.resolve(__dirname, '../..')
@@ -69,7 +69,8 @@ export default mergeConfig(engineConfig, defineConfig({
   define: buildVersionDefines(),
 
   // glslRaw() comes from the shared engine config; react() and nagaAssets() are the editor-only pair.
-  plugins: [react(), nagaAssets()],
+  // Cross-origin isolated (see crossOriginIsolation): the physics worker's replies go through shared memory.
+  plugins: [crossOriginIsolationPlugin(), react(), nagaAssets()],
 
   worker: {
     // Both project workers are ES modules (see workers/*Client.ts, which pass { type: 'module' }); this

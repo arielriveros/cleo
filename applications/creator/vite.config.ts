@@ -2,7 +2,7 @@ import { defineConfig, mergeConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'node:path'
 import engineConfig from '../../vite.config'
-import { appKitAlias } from '../app-kit/vite.preset'
+import { appKitAlias, crossOriginIsolationPlugin } from '../app-kit/vite.preset'
 
 const ENGINE_ROOT = path.resolve(__dirname, '../..')
 
@@ -17,7 +17,8 @@ const ENGINE_ROOT = path.resolve(__dirname, '../..')
 export default defineConfig(({ mode }) => mergeConfig(engineConfig, {
   base: '/creator/',
   resolve: { alias: appKitAlias },
-  plugins: [react()],
+  // The same isolation as the editor, whose origin this is served on (see crossOriginIsolation).
+  plugins: [crossOriginIsolationPlugin(), react()],
   server: {
     // The editor owns 8080; a fixed second port so both can run side by side.
     port: 8081,

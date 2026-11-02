@@ -110,7 +110,7 @@ type Sample = {
   activeBodies: number; frozenBodies: number; restingBodies: number;
   triggerPassMs: number; triggerCandidates: number; triggerPairsTested: number; triggerOverlaps: number;
   broadphaseMs: number; narrowphaseMs: number; solveMs: number; integrateMs: number;
-  physicsBackend: 'inline' | 'worker'; workerState: 'inline' | 'starting' | 'worker'; workerMode: PhysicsThread;
+  physicsBackend: 'inline' | 'worker'; workerState: 'inline' | 'starting' | 'worker'; workerMode: PhysicsThread; sharedReplies: boolean;
   workerFallback: string | null; autoStepMs: number; cores: number;
   workerStepMs: number; syncMs: number; roundTripMs: number; readyMs: number;
   lateFrames: number; workerFrames: number; writes: number; ops: number; bytesUp: number; bytesDown: number;
@@ -136,7 +136,7 @@ const EMPTY: Sample = {
   activeBodies: 0, frozenBodies: 0, restingBodies: 0,
   triggerPassMs: 0, triggerCandidates: 0, triggerPairsTested: 0, triggerOverlaps: 0,
   broadphaseMs: 0, narrowphaseMs: 0, solveMs: 0, integrateMs: 0,
-  physicsBackend: 'inline', workerState: 'inline', workerMode: 'off', workerFallback: null, autoStepMs: 0, cores: 0,
+  physicsBackend: 'inline', workerState: 'inline', workerMode: 'off', sharedReplies: false, workerFallback: null, autoStepMs: 0, cores: 0,
   workerStepMs: 0, syncMs: 0, roundTripMs: 0, readyMs: 0,
   lateFrames: 0, workerFrames: 0, writes: 0, ops: 0, bytesUp: 0, bytesDown: 0,
   drawn: 0, extrapolated: 0, leadMs: 0, jitterMs: 0,
@@ -151,7 +151,19 @@ const EMPTY: Sample = {
   pipeline: '—', backend: '—',
 };
 
-export default function PerformancePanel({ physicsThread }: { physicsThread?: PhysicsThreadControl } = {}) {
+/** The host's "keep this page up in Play" lock (the editor's), shown at the top of the page. */
+export interface PlayPinControl {
+  pinned: boolean;
+  onChange(pinned: boolean): void;
+}
+
+const LockGlyph = ({ open }: { open: boolean }) => (
+  <svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+    <rect x='4' y='11' width='16' height='9' rx='2' /><path d={open ? 'M8 11V7a4 4 0 0 1 7.5-2' : 'M8 11V7a4 4 0 0 1 8 0v4'} />
+  </svg>
+);
+
+export default function PerformancePanel({ physicsThread, playPin }: { physicsThread?: PhysicsThreadControl; playPin?: PlayPinControl } = {}) {
   const { instance } = useEngineHost();
   const renderer: any = instance?.renderer ?? null;
 
@@ -302,6 +314,7 @@ export default function PerformancePanel({ physicsThread }: { physicsThread?: Ph
           integrateMs: phys?.integrateMs ?? 0,
           physicsBackend: phys?.backend ?? 'inline',
           workerState: workerStatus?.state ?? 'inline',
+          sharedReplies: workerStatus?.sharedReplies ?? false,
           workerMode: (instance?.physics as any)?.workerMode ?? 'off',
           workerFallback: workerStatus?.fallback ?? null,
           autoStepMs: workerStatus?.autoStepMs ?? 0,
@@ -448,6 +461,17 @@ export default function PerformancePanel({ physicsThread }: { physicsThread?: Ph
     <DocScope page='editor/rendering' section='performance-hud'>
     <div className='h-full overflow-y-auto p-3 text-ui-sm text-fg'>
       <div className='w-full'>
+      {playPin && (
+        <div className='mb-2 flex justify-end'>
+          <Button size='sm' variant='ghost' active={playPin.pinned} aria-pressed={playPin.pinned}
+                  className='inline-flex items-center gap-1.5'
+                  title={playPin.pinned ? 'This page stays docked beside the viewport in Play. Click to unlock.' : 'Keep this page docked beside the viewport in Play.'}
+                  onClick={() => playPin.onChange(!playPin.pinned)}>
+            <LockGlyph open={!playPin.pinned} />
+            {playPin.pinned ? 'Shown in Play' : 'Show in Play'}
+          </Button>
+        </div>
+      )}
       <Collapsable title='Frame' persistKey='performance.frame'><div className='w-full p-2'>
         <div className='flex items-baseline justify-between'>
           <span className={`font-mono text-lg ${overBudget ? 'text-danger-fg' : 'text-success-fg'}`}>
@@ -566,6 +590,10 @@ export default function PerformancePanel({ physicsThread }: { physicsThread?: Ph
                title='The last step, measured in the worker: time this thread did not spend.' />
           <Row label='· this thread' value={`${fmt(d.syncMs)} ms`}
                title="This thread's share: sending each step at the frame's end, and applying its result at the next frame's start." />
+          <Row label='· replies' value={d.sharedReplies ? 'shared memory' : 'messages'} hl={!d.sharedReplies}
+               title={d.sharedReplies
+                 ? 'Each result is read the moment the frame starts.'
+                 : 'This page is not cross-origin isolated, so each result waits for the main thread to be free and a busy frame can miss it.'} />
           <Row label='· round trip' value={`${fmt(d.roundTripMs, 1)} ms · ready ${fmt(d.readyMs, 1)} ms early`} hl={d.roundTripMs > d.leadMs}
                title='From sending the last step to its result arriving, and how long that result then waited for the frame that applied it. A round trip longer than a frame makes late frames.' />
           <Row label='· late frames' value={`${d.lateFrames} of ${d.workerFrames} (${fmt(latePct, 0)}%)`} hl={latePct > 10}

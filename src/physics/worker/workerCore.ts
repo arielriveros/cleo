@@ -90,6 +90,9 @@ export class PhysicsWorkerCore {
     private _step(msg: StepMessage): Snapshot {
         const world = this._world;
         if (msg.recycle) this._free.push(...msg.recycle);
+        // Replies through shared memory keep their buffers here AND the main thread hands back its copies:
+        // keep a handful, not one more per step.
+        if (this._free.length > 8) this._free.splice(0, this._free.length - 8);
 
         for (const op of msg.ops) {
             switch (op.op) {
@@ -202,6 +205,11 @@ export class PhysicsWorkerCore {
             bodies, bodyCount: dynamic, contacts, contactCount: list.length,
             overlaps: Int32Array.from(this._overlaps), collides: Int32Array.from(this._collides), submerged, stats,
         };
+    }
+
+    /** A snapshot written to shared memory instead of posted: its buffers stay here, for the next one. */
+    public reclaim(s: Snapshot): void {
+        this._free.push(s.bodies.buffer as ArrayBuffer, s.contacts.buffer as ArrayBuffer);
     }
 
     /** Typed arrays a snapshot can hand over without copying. */

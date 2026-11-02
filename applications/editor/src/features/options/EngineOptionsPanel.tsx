@@ -7,6 +7,7 @@ import {
   DEFAULT_PROJECT_SETTINGS, physicsWorkerOverrideSource, storePhysicsWorkerOverride,
   type EngineRuntimeSettings, type PhysicsWorkerSetting,
 } from './projectSettings'
+import { editorPrefsStore, useEditorPrefs } from './editorPrefs'
 
 // Options ▸ Engine: how the engine renders and runs THIS game. Renderer settings are saved with the open
 // scene (each scene keeps its own look); the runtime settings are project-wide and ship in the build.
@@ -16,6 +17,7 @@ type Page = 'renderer' | 'performance' | 'runtime'
 export default function EngineOptionsPanel() {
   const [page, setPage] = useOptionsPage<Page>('engine', 'renderer')
   const { projectSettings } = useCleoEngine()
+  const { pinPerformanceInPlay } = useEditorPrefs()
   return (
     <OptionsShell
       page={page}
@@ -32,6 +34,9 @@ export default function EngineOptionsPanel() {
           project: projectSettings.engine.physicsWorker,
           read: physicsWorkerOverrideSource,
           write: storePhysicsWorkerOverride,
+        }} playPin={{
+          pinned: pinPerformanceInPlay,
+          onChange: pinned => editorPrefsStore.set({ pinPerformanceInPlay: pinned }),
         }} />
       )}
       {page === 'runtime' && <RuntimeOptions />}

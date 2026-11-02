@@ -10,6 +10,8 @@ import { PANEL_TITLES, panelTitle } from './panelTitles';
 import { EditorMode, useCleoEngine } from '../EngineContext';
 import { LS_KEYS, lsKey } from '../../utils/lsScope';
 import { cleoDockTheme as cleoTheme, lockAnchorPanel } from '@cleo/app-kit/layout/DockShell';
+import { setOptionsPage } from '@cleo/app-kit/ui/OptionsShell';
+import { useEditorPrefs } from '../options/editorPrefs';
 
 // Per-project. Both live keys resolve through lsScope, so deleting a project takes them with it.
 const dockLayoutKey = () => lsKey(LS_KEYS.dockLayout);
@@ -279,13 +281,17 @@ function relayout(api: DockviewApi) {
  * Which panels a given mode / play state hides. A group is hidden once by default and a mode opts out, so
  * a new mode-specific group cannot leak into unrelated modes.
  */
-export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: boolean = false): readonly string[] {
+export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: boolean = false, pinPerformance: boolean = false): readonly string[] {
   // Options mode is the only branch that keeps the options panels, alone over the live viewport.
   if (mode === 'options') return CHROME_PANELS;
   // Play strips the chrome AND every mode-specific panel. Simulate does not: nobody is possessed, so the
   // editor stays the user's — the tree and Inspector show the running simulation, and the Engine options
   // panel (Performance, Renderer) can be docked beside it.
-  if (playing && !simulating) return [...CHROME_PANELS, ...OPTIONS_PANELS];
+  // The one exception: the Performance page's lock keeps the Engine options panel up beside the game.
+  if (playing && !simulating) {
+    const hidden = [...CHROME_PANELS, ...OPTIONS_PANELS];
+    return pinPerformance ? hidden.filter(id => id !== 'optionsEngine') : hidden;
+  }
 
   const hidden = new Set<string>(simulating ? OPTIONS_PANELS.filter(id => id !== 'optionsEngine') : OPTIONS_PANELS);
 
@@ -366,6 +372,7 @@ export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: b
 
 export default function DockLayout() {
   const { eventEmitter, editorMode, isPlayMode, isSimulating } = useCleoEngine();
+  const { pinPerformanceInPlay } = useEditorPrefs();
   const [api, setApi] = useState<DockviewApi | null>(null);
   // The controller's own memory of the last commit, not derived state: the effect needs the OUTGOING mode
   // to know which key to save the tree under before it swaps trees.
@@ -438,8 +445,8 @@ export default function DockLayout() {
    */
   const applyRestriction = useCallback((dock: DockviewApi) => {
     for (const id of Object.keys(PANEL_TITLES)) dock.getPanel(id)?.api.setTitle(panelTitle(id, editorMode));
-    for (const id of hiddenPanelIds(editorMode, isPlayMode, isSimulating)) dock.getPanel(id)?.api.close();
-  }, [editorMode, isPlayMode, isSimulating]);
+    for (const id of hiddenPanelIds(editorMode, isPlayMode, isSimulating, pinPerformanceInPlay)) dock.getPanel(id)?.api.close();
+  }, [editorMode, isPlayMode, isSimulating, pinPerformanceInPlay]);
 
   // Mode/play controller. One path serves mode->mode, mode->play and play->mode: bank the outgoing mode's
   // arrangement, put the incoming mode's tree up, then restrict it. applyRestriction must run even on a
@@ -475,6 +482,18 @@ export default function DockLayout() {
           position: { referencePanel: 'properties', direction: 'within' }, inactive: true,
         });
       }
+      // Play with the Performance page locked: the viewport plus that page, docked on its right and open
+      // on Performance. Never saved, like every play tree.
+      if (isPlayMode && !isSimulating && pinPerformanceInPlay) {
+        setOptionsPage('engine', 'performance');
+        if (!api.getPanel('optionsEngine')) {
+          api.addPanel({
+            id: 'optionsEngine', component: 'optionsEngine', title: PANEL_TITLES['optionsEngine'],
+            position: { referencePanel: 'viewport', direction: 'right' },
+            initialWidth: Math.round((api.width || window.innerWidth) * 0.25),
+          });
+        }
+      }
       // fromJSON restores the tab selected when the tree was saved; put the user's choice back.
       restoreBottomTab(api);
       // Landscape mode opens on its tools, not on Properties: the tools and the layer stack under them
@@ -489,7 +508,7 @@ export default function DockLayout() {
     });
     keyRef.current = editorMode;
     playingRef.current = isPlayMode;
-  }, [api, editorMode, isPlayMode, isSimulating, applyRestriction, restoreBottomTab, withProgrammaticLayout]);
+  }, [api, editorMode, isPlayMode, isSimulating, pinPerformanceInPlay, applyRestriction, restoreBottomTab, withProgrammaticLayout]);
 
   // Remember which bottom tab the user is on. When a mode hides both there is no selection to read, so
   // the remembered value is left alone.
