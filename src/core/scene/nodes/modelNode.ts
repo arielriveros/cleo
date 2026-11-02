@@ -44,7 +44,9 @@ export function skinRestTransform(skin: Skin | null | undefined): mat4 | null {
     mat4.multiply(m, m, joint.inverseBindMatrix);
     let identity = true;
     for (let i = 0; i < 16; i++) if (Math.abs(m[i] - (i % 5 === 0 ? 1 : 0)) > 1e-4) { identity = false; break; }
-    const valid = m.every(Number.isFinite);
+    // A loop, not `m.every`: gl-matrix types a mat4 as a tuple OR an IndexedCollection, which has no `every`.
+    let valid = true;
+    for (let i = 0; i < 16; i++) if (!Number.isFinite(m[i])) { valid = false; break; }
     const out = identity || !valid ? null : m;
     bindToModel.set(skin, out);
     return out;

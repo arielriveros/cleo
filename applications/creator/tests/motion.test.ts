@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { buildRig, modelPose } from '../src/motion/motionRig';
-import { bakeMotion, editorPoseBones, gripFrom, limbTip, mirrorPose, poseFromClip, poseLocals, solvedPoseLocals } from '../src/motion/bakeMotion';
+import { bakeMotion, editorPoseBones, fkPose, gripFrom, limbTip, mirrorPose, poseFromClip, poseLocals, solvedPoseLocals } from '../src/motion/bakeMotion';
 import { exportCharacter, newCharacter, normaliseCharacter } from '../src/motion/character';
+import { exportMotion } from '../src/motion/exportMotion';
 import { parseRiggedDescriptors, riggedSkeleton } from '../src/core/riggedImport';
-import { DEFAULT_MOTION, eulerToQuat, motionFromFile, normaliseMotion, presetBlend, quatToEuler, type MotionDoc, type MotionPose } from '../src/motion/motionDoc';
+import {
+  DEFAULT_MOTION, eulerToQuat, motionFromFile, normaliseMotion, presetBlend, quatToEuler, type MotionDoc, type MotionKey, type MotionPart, type MotionPose,
+} from '../src/motion/motionDoc';
 import { BUILTIN_PRESETS, builtinPreset, evalBlend, normaliseCurve, presetOf, toKeys } from '../src/motion/blendCurve';
+import { boneGroups, defaultParts, partIndexOf, resolvePartBlend } from '../src/motion/parts';
+import {
+  exportPoseAsset, makePoseLocal, normalisePoseAsset, poseAssetDoc, poseLibrary, refreshPoseRefs, syncPoseAsset, withAssetPose,
+} from '../src/motion/poseAsset';
+import { fnv1a } from '../src/core/generator';
 import { GLTFLoader } from 'cleo/graphics/utils/gltfLoader';
 import { chainOf, dragJoint, fabrik, jointPosition, rotateBone } from '../src/motion/poseDrag';
 
@@ -108,15 +116,15 @@ describe('bake', () => {
   const raise = pose('raise', { 'mixamorig:LeftArm': { rot: [0, 0, 60] } });
   const rest = pose('rest', {});
 
-  it('starts at the first pose and ends at the last, with events at the keys', () => {
+  it('starts at the first pose and ends at the last, with no events (they are set on the clip, in the editor)', () => {
     const clip = bakeMotion(rig, doc([rest, raise], [
-      { id: 'a', poseId: 'rest', time: 0, ...presetBlend('linear') }, { id: 'b', poseId: 'raise', time: 1, ...presetBlend('smooth'), event: 'up' },
+      { id: 'a', poseId: 'rest', time: 0, ...presetBlend('linear') }, { id: 'b', poseId: 'raise', time: 1, ...presetBlend('smooth'), event: 'up' } as any,
     ]));
     const restR = rig.bones[rig.byName.get('mixamorig:LeftArm')!].r;
     expect(quat.getAngle(rotAt(clip, 'mixamorig:LeftArm', 0), restR)).toBeLessThan(1e-4);
     const last = clip.samplers[0].input.length - 1;
     expect(quat.getAngle(rotAt(clip, 'mixamorig:LeftArm', last), quat.multiply(quat.create(), restR, eulerToQuat([0, 0, 60])))).toBeLessThan(1e-3);
-    expect(clip.events).toEqual([{ time: 1, name: 'up' }]);
+    expect(clip.events).toBeUndefined();
     expect(clip.samplers[0].input[last]).toBeCloseTo(1, 6);
   });
 
@@ -189,8 +197,8 @@ describe('poses from clips, and for the editor', () => {
     expect(bones.find(b => b.name === 'mixamorig:Hips')!.translation![0]).toBeCloseTo(5, 3);
   });
 
-  it('exports a character: kept, renamed clips with the skeleton, and its pose library', () => {
-    const anims = [{ ...held, name: 'Idle' }, { ...held, name: 'Wave' }, { ...held, name: 'T-Pose' }] as any[];
+  it('exports a character: kept, renamed clips with the skeleton, imported events passed through, no pose library', () => {
+    const anims = [{ ...held, name: 'Idle', events: [{ time: 0.5, name: 'step' }] }, { ...held, name: 'Wave' }, { ...held, name: 'T-Pose' }] as any[];
     const c = newCharacter('Hero', ['hero.glb'], anims);
     c.clips = c.clips.map(x => x.source === 'Wave' ? { ...x, name: 'Hello' } : x.source === 'T-Pose' ? { ...x, hidden: true } : x);
     c.poses = [posed];
@@ -198,9 +206,11 @@ describe('poses from clips, and for the editor', () => {
     const read = (n: string) => JSON.parse(new TextDecoder().decode(files.find(f => f.name === n)!.bytes));
     const anim = read('Hero.anim.json');
     expect(anim.clips.map((x: any) => x.name)).toEqual(['Idle', 'Hello']);
+    expect(anim.clips[0].events).toEqual([{ time: 0.5, name: 'step' }]);
     expect(anim.rigName).toBe('Hero');
     expect(anim.sourceSkin.nodeNames.length).toBeGreaterThan(10);
-    expect(read('Hero.poses.json').poses[0].bones.length).toBe(3);
+    // Its poses are Pose assets now: the old library file is no longer written.
+    expect(files.map(f => f.name).sort()).toEqual(['Hero.anim.json', 'Hero.character.json']);
     expect(read('Hero.character.json').output.anim).toBe('Hero.anim.json');
     expect(normaliseCharacter(JSON.parse(JSON.stringify(c)))).toEqual(c);
   });
@@ -410,33 +420,49 @@ describe('two-handed holds', () => {
     expect(vec3.distance(b.pos[idx('RightHand')], mirrored)).toBeLessThan(0.01);
   });
 
-  it('a key may fire several events; a sidecar opens as its motion', () => {
+  it('a stored key event is dropped; a sidecar opens as its motion', () => {
     const p = pose('p', {});
-    const d = doc([p], [{ id: 'a', poseId: 'p', time: 0, ...presetBlend() }, { id: 'b', poseId: 'p', time: 0.5, ...presetBlend(), event: 'combo, recover' }]);
-    expect(bakeMotion(rig, d).events).toEqual([{ time: 0.5, name: 'combo' }, { time: 0.5, name: 'recover' }]);
+    const d = doc([p], [{ id: 'a', poseId: 'p', time: 0, ...presetBlend() }, { id: 'b', poseId: 'p', time: 0.5, ...presetBlend(), event: 'combo, recover' } as any]);
+    expect('event' in d.keys[1]).toBe(false);
+    expect(bakeMotion(rig, d).events).toBeUndefined();
     expect(motionFromFile({ generator: 'motion', creatorVersion: 1, seed: 1, params: d, output: {} })).toEqual(d);
     expect(motionFromFile(d)).toEqual(d);
     expect(motionFromFile({ generator: 'terrain', params: {} })).toBeNull();
+    // The sidecar's output lists no events either, and names the files after the asset.
+    const files = exportMotion(d, bakeMotion(rig, d), skin() as any, 'Mannequin', 'Big Swing');
+    expect(files.map(f => f.name)).toEqual(['Big_Swing.anim.json', 'Big_Swing.motion.json']);
+    const side = JSON.parse(new TextDecoder().decode(files[1].bytes));
+    expect(side.output.events).toBeUndefined();
+    expect(JSON.parse(new TextDecoder().decode(files[0].bytes)).clips[0].name).toBe('Big Swing');
   });
 });
 
 describe('the Valley Longsword motions (tools/soulsDemo/longsword)', () => {
-  it('bake on the souls mannequin with the hands on the hilt and the events inside the clip', async () => {
+  it('bake on the souls mannequin with the hands on the hilt, and the tool\'s event table inside the clip', async () => {
     const { readFileSync, readdirSync } = await import('node:fs');
     const { join } = await import('node:path');
+    const { LONGSWORD_EVENTS, withEvents } = await import('../../../tools/soulsDemo/longsword');
     const root = join(__dirname, '..', '..', '..', 'tools', 'soulsDemo');
     const models = JSON.parse(readFileSync(join(root, 'seed', 'models.json'), 'utf8'));
     const r = buildRig(models[0].nodeJson.children[0].model.skin);
     const files = readdirSync(join(root, 'longsword')).filter(f => f.endsWith('.motion.json'));
     expect(files.length).toBeGreaterThanOrEqual(4);
     expect(files).toContain('Souls_LS_Combo.motion.json');
+    const baked = JSON.parse(readFileSync(join(root, 'longswordClips.json'), 'utf8')) as { name: string; events: { time: number; name: string }[] }[];
     const R = r.bySlot.get('hand.R')!, L = r.bySlot.get('hand.L')!;
     for (const f of files) {
-      const d = motionFromFile(JSON.parse(readFileSync(join(root, 'longsword', f), 'utf8')))!;
-      const clip = bakeMotion(r, d);
+      const raw = readFileSync(join(root, 'longsword', f), 'utf8');
+      // The motions carry no events: the game's are the tool's (LONGSWORD_EVENTS), added after the bake.
+      expect(raw).not.toMatch(/"event"/);
+      const d = motionFromFile(JSON.parse(raw))!;
+      expect(bakeMotion(r, d).events).toBeUndefined();
+      const clip = withEvents(d, bakeMotion(r, d));
       const end = clip.samplers[0].input.at(-1)!;
       expect(clip.samplers.every(s => s.output.every(Number.isFinite))).toBe(true);
       for (const e of clip.events ?? []) expect(e.time).toBeLessThanOrEqual(end);
+      // longswordClips.json (what the build reads) is this table's output.
+      expect(baked.find(c => c.name === d.name)?.events).toEqual(clip.events);
+      if (LONGSWORD_EVENTS[d.name]) expect(clip.events!.length).toBe(Object.values(LONGSWORD_EVENTS[d.name]).flat().length);
       if (!d.loop) {
         // Each attack (a combo's segments, between its `next` events): hit, then hitEnd, then combo and recover.
         const ev = clip.events ?? [];
@@ -479,5 +505,205 @@ describe('elbow and knee poles', () => {
     // Mirrored with the pose.
     const m = mirrorPose(rig, pose('p', {}, { handL: { ...goal, pole: [1.2, 1.2, -0.2] } }));
     expect(m.ik!.handR!.pole![0]).toBeCloseTo(-1.2, 4);
+  });
+});
+
+describe('parts', () => {
+  const name = (n: string) => `mixamorig:${n}`;
+  const angleOf = (clip: ReturnType<typeof bakeMotion>, bone: string, f: number) =>
+    quat.getAngle(rotAt(clip, name(bone), f), rig.bones[rig.byName.get(name(bone))!].r);
+  const rest = pose('rest', {});
+  const swing = pose('swing', {
+    'mixamorig:Spine': { rot: [30, 0, 0] }, 'mixamorig:LeftArm': { rot: [0, 0, 60] }, 'mixamorig:LeftUpLeg': { rot: [40, 0, 0] },
+  });
+  const keys = (blend = 'linear'): MotionKey[] => [
+    { id: 'a', poseId: 'rest', time: 0, ...presetBlend('linear') }, { id: 'b', poseId: 'swing', time: 1, ...presetBlend(blend) },
+  ];
+  const withParts = (d: MotionDoc, edit: (parts: MotionPart[]) => MotionPart[] = p => p) => normaliseMotion({ ...d, parts: edit(defaultParts(rig)) });
+
+  it('start as the body, arms and legs, every joint in the part of its nearest slotted bone', () => {
+    const parts = defaultParts(rig);
+    expect(parts.map(p => p.name)).toEqual(['Body', 'Left arm', 'Right arm', 'Left leg', 'Right leg']);
+    expect(parts[0].bones).toEqual(['mixamorig:Hips', 'mixamorig:Spine', 'mixamorig:Neck', 'mixamorig:Head']);
+    expect(parts[1].bones).toEqual(['mixamorig:LeftArm', 'mixamorig:LeftForeArm', 'mixamorig:LeftHand']);
+    expect(parts[3].bones).toEqual(['mixamorig:LeftUpLeg', 'mixamorig:LeftLeg', 'mixamorig:LeftFoot']);
+    const index = partIndexOf(rig, parts);
+    expect(index[rig.byName.get('Armature')!]).toBe(-1);               // not a joint: in no part
+    expect(index[rig.byName.get(name('RightHand'))!]).toBe(2);
+    // The Pose tab lists the same groups by slot.
+    expect(boneGroups(rig).map(g => g.title)).toEqual(['Body', 'Left arm', 'Right arm', 'Left leg', 'Right leg']);
+  });
+
+  it('a part inherits the key blend unless its defaults or the key override it', () => {
+    const part: MotionPart = { id: 'p', name: 'P', color: '#fff', bones: [], defaults: { blend: builtinPreset('linear')!.curve, presetId: 'linear', offset: 0.1 } };
+    const key: MotionKey = { id: 'k', poseId: 'x', time: 1, ...presetBlend('spring') };
+    expect(resolvePartBlend(key, null)).toMatchObject({ presetId: 'spring', offset: 0, variation: 1, overridden: false });
+    expect(resolvePartBlend(key, { ...part, defaults: undefined }).presetId).toBe('spring');
+    expect(resolvePartBlend(key, part)).toMatchObject({ presetId: 'linear', offset: 0.1, overridden: false });
+    const over = { ...key, parts: { p: { overlap: 0.05, variation: 0 } } };
+    expect(resolvePartBlend(over, part)).toMatchObject({ presetId: 'linear', offset: 0.1, overlap: 0.05, variation: 0, overridden: true });
+    const curve = { ...key, parts: { p: { ...presetBlend('hold') } } };
+    expect(resolvePartBlend(curve, part).blend).toEqual({ type: 'hold' });
+  });
+
+  it('bake byte-identically to a motion without parts while they override nothing', () => {
+    // Pinned from the bake before parts existed: the same document must keep giving the same clip.
+    const poses = [
+      pose('rest', {}),
+      pose('reach', { 'mixamorig:Spine': { rot: [15, -10, 5] }, 'mixamorig:LeftArm': { rot: [10, 20, 60] }, 'mixamorig:Hips': { move: [0.05, -0.1, 0.1] } },
+        { footL: { pos: [0.1, 0.05, 0.1] }, handR: { pos: [-0.3, 1.2, 0.3], rot: [10, 20, 30] }, handL: { pos: [0, 1, 0], grip: { follow: 'handR', offset: [0.02, 0.1, 0.01], rot: [0, 10, 0] } } }),
+      pose('crouch', { 'mixamorig:Spine': { rot: [30, 5, 0] }, 'mixamorig:Head': { rot: [-20, 0, 0] }, 'mixamorig:Hips': { move: [0, -0.25, 0.05] } },
+        { footL: { pos: [0.1, 0.05, 0.2], pole: [0.3, 0.5, 0.6] }, footR: { pos: [-0.1, 0.05, -0.1] } }),
+    ];
+    const ks: MotionKey[] = [
+      { id: 'a', poseId: 'rest', time: 0, ...presetBlend('linear') }, { id: 'b', poseId: 'reach', time: 0.4, ...presetBlend('overshoot') },
+      { id: 'c', poseId: 'crouch', time: 0.9, ...presetBlend('spring') }, { id: 'd', poseId: 'reach', time: 1.3, ...presetBlend('hold') },
+      { id: 'e', poseId: 'rest', time: 1.8, ...presetBlend('anticipate') },
+    ];
+    const hash = (c: ReturnType<typeof bakeMotion>) => fnv1a(new TextEncoder().encode(JSON.stringify({ samplers: c.samplers, channels: c.channels })));
+    for (const [loop, pinned] of [[false, '4480b624'], [true, '90170558']] as const) {
+      const d = normaliseMotion({ ...DEFAULT_MOTION, poses, keys: ks, overlap: 0.03, variation: 2.5, variationRate: 0.7, seed: 5, fps: 30, loop });
+      const plain = bakeMotion(rig, d);
+      expect(hash(plain)).toBe(pinned);
+      expect(JSON.stringify(bakeMotion(rig, withParts(d)))).toBe(JSON.stringify(plain));
+    }
+  });
+
+  it('each part follows its own curve: arms hold while the legs go linear', () => {
+    const d = doc([rest, swing], keys('linear'), { overlap: 0 });
+    const held = withParts(d, ps => ps.map(p => (p.id === 'armL' ? { ...p, defaults: { ...presetBlend('hold') } } : p)));
+    const plain = bakeMotion(rig, d), clip = bakeMotion(rig, held);
+    const f = 15;   // 0.5 s
+    expect(angleOf(clip, 'LeftArm', f)).toBeLessThan(1e-3);                          // still at rest
+    expect(angleOf(clip, 'LeftUpLeg', f)).toBeCloseTo(angleOf(plain, 'LeftUpLeg', f), 5);   // unchanged
+    // A key's override beats the defaults: spring into key b for the left leg only.
+    const sprung = normaliseMotion({ ...held, keys: held.keys.map(k => (k.id === 'b' ? { ...k, parts: { legL: { ...presetBlend('spring') } } } : k)) });
+    const s = bakeMotion(rig, sprung);
+    const u = (i: number) => angleOf(s, 'LeftUpLeg', i) / (40 * Math.PI / 180);
+    expect(Math.max(...Array.from({ length: 31 }, (_, i) => u(i)))).toBeGreaterThan(1.02);   // swings past the pose
+    expect(angleOf(s, 'LeftArm', f)).toBeLessThan(1e-3);
+  });
+
+  it('an offset makes a part late (or early), and a one-shot plays on until it arrives', () => {
+    const d = doc([rest, swing], keys('linear'), { overlap: 0 });
+    const late = withParts(d, ps => ps.map(p => (p.id === 'armL' ? { ...p, defaults: { offset: 0.2 } } : p)));
+    const clip = bakeMotion(rig, late);
+    const ratio = (b: string, deg: number, f: number) => angleOf(clip, b, f) / (deg * Math.PI / 180);
+    expect(ratio('Spine', 30, 15)).toBeCloseTo(0.5, 2);
+    expect(ratio('LeftArm', 60, 15)).toBeCloseTo(0.3, 2);
+    expect(clip.samplers[0].input.at(-1)).toBeCloseTo(1.2, 6);
+    expect(ratio('LeftArm', 60, clip.samplers[0].input.length - 1)).toBeCloseTo(1, 3);
+    // A key's own offset moves only that key on the part's timeline: no jump anywhere.
+    const keyed = normaliseMotion({ ...d, parts: defaultParts(rig), keys: d.keys.map(k => (k.id === 'b' ? { ...k, parts: { armL: { offset: -0.3 } } } : k)) });
+    const k = bakeMotion(rig, keyed);
+    const arm = Array.from({ length: k.samplers[0].input.length }, (_, i) => angleOf(k, 'LeftArm', i));
+    expect(arm[21]).toBeCloseTo(60 * Math.PI / 180, 3);                                    // arrived by 0.7 s
+    for (let i = 1; i < arm.length; i++) expect(Math.abs(arm[i] - arm[i - 1])).toBeLessThan(0.1);
+  });
+
+  it('a part sets its own overlap and its share of the variation', () => {
+    const d = doc([rest, swing], keys('linear'), { overlap: 0.05 });
+    const tight = bakeMotion(rig, withParts(d, ps => ps.map(p => (p.id === 'armL' ? { ...p, defaults: { overlap: 0 } } : p))));
+    // The arm (depth 3 below the hips) no longer trails: at 0.5 s it is half way, like the hips.
+    expect(angleOf(tight, 'LeftArm', 15) / (60 * Math.PI / 180)).toBeCloseTo(0.5, 2);
+    const alive = doc([rest], [{ id: 'a', poseId: 'rest', time: 0, ...presetBlend() }, { id: 'b', poseId: 'rest', time: 1, ...presetBlend() }], { variation: 6 });
+    const still = bakeMotion(rig, withParts(alive, ps => ps.map(p => (p.id === 'armL' ? { ...p, defaults: { variation: 0 } } : p))));
+    const frames = still.samplers[0].input.length;
+    expect(Math.max(...Array.from({ length: frames }, (_, i) => angleOf(still, 'LeftArm', i)))).toBeLessThan(1e-4);
+    expect(Math.max(...Array.from({ length: frames }, (_, i) => angleOf(still, 'RightArm', i)))).toBeGreaterThan(0.01);
+  });
+
+  it('an IK limb moves with the part of its root', () => {
+    const a = pose('a', {}, { footL: { pos: [0.1, 0.1, 0] } }), b = pose('b', {}, { footL: { pos: [0.1, 0.1, 0.4] } });
+    const d = doc([a, b], [{ id: 'a', poseId: 'a', time: 0, ...presetBlend('linear') }, { id: 'b', poseId: 'b', time: 1, ...presetBlend('linear') }]);
+    const footAt = (c: ReturnType<typeof bakeMotion>, t: number) =>
+      modelPose(rig.bones, poseLocals(rig, poseFromClip(rig, c as any, t))).pos[rig.byName.get(name('LeftFoot'))!];
+    expect(footAt(bakeMotion(rig, d), 0.5)[2]).toBeCloseTo(0.2, 2);
+    const held = withParts(d, ps => ps.map(p => (p.id === 'legL' ? { ...p, defaults: { ...presetBlend('hold') } } : p)));
+    expect(footAt(bakeMotion(rig, held), 0.5)[2]).toBeCloseTo(0, 2);
+    // The body's part is no business of the leg's.
+    const body = withParts(d, ps => ps.map(p => (p.id === 'body' ? { ...p, defaults: { ...presetBlend('hold') } } : p)));
+    expect(footAt(bakeMotion(rig, body), 0.5)[2]).toBeCloseTo(0.2, 2);
+  });
+
+  it('are normalised: disjoint, clamped, overrides of missing parts dropped, stored events stripped', () => {
+    const d = normaliseMotion({
+      ...DEFAULT_MOTION,
+      parts: [
+        { id: 'x', name: '', color: '', bones: ['a', 'b', 'a'], defaults: { offset: 9, overlap: -1, variation: 7, blend: { type: 'nope' } } } as any,
+        { id: 'x', name: 'Y', color: '#123', bones: ['b', 'c'] },
+      ],
+      keys: [{ ...DEFAULT_MOTION.keys[0], parts: { x: { offset: -5 }, gone: { offset: 1 } }, event: 'hit' } as any],
+    });
+    expect(d.parts[0]).toEqual({ id: 'x', name: 'Part 1', color: expect.any(String), bones: ['a', 'b'], defaults: { offset: 2, overlap: 0, variation: 3 } });
+    expect(d.parts[1].id).not.toBe('x');
+    expect(d.parts[1].bones).toEqual(['c']);
+    expect(d.keys[0].parts).toEqual({ x: { offset: -2 } });
+    expect((d.keys[0] as any).event).toBeUndefined();
+    expect(normaliseMotion(JSON.parse(JSON.stringify(d)))).toEqual(d);
+    expect(normaliseMotion({ ...DEFAULT_MOTION, parts: undefined as any }).parts).toEqual([]);
+  });
+});
+
+describe('pose assets', () => {
+  const crouch = pose('crouch', { 'mixamorig:Spine': { rot: [25, 0, 0] } });
+  const entry = (bones: MotionPose['bones'], nameOf = 'Crouch') => ({ id: 'pose_1', name: nameOf, doc: poseAssetDoc({ bones }, nameOf) });
+
+  it('keep the motions that use them in step, and let a copy go local', () => {
+    const linked = { ...crouch, id: 'c1', name: 'Crouch', assetId: 'pose_1' };
+    const d = doc([pose('rest', {}), linked], [{ id: 'a', poseId: 'rest', time: 0, ...presetBlend() }, { id: 'b', poseId: 'c1', time: 1, ...presetBlend() }]);
+    expect(d.poses[1].assetId).toBe('pose_1');
+    // Unchanged library: the same document back.
+    expect(refreshPoseRefs(d, new Map([['pose_1', entry(crouch.bones)]]))).toBe(d);
+    // The asset changed (and was renamed): the copy follows, under the same pose id, so the keys still use it.
+    const edited = refreshPoseRefs(d, new Map([['pose_1', entry({ 'mixamorig:Spine': { rot: [40, 0, 0] } }, 'Deep crouch')]]));
+    expect(edited.poses[1]).toEqual({ id: 'c1', name: 'Deep crouch', bones: { 'mixamorig:Spine': { rot: [40, 0, 0] } }, assetId: 'pose_1' });
+    expect(edited.keys[1].poseId).toBe('c1');
+    // Deleted from the library: the motion keeps its copy, as its own.
+    const orphan = refreshPoseRefs(d, new Map());
+    expect(orphan.poses[1].assetId).toBeUndefined();
+    expect(orphan.poses[1].bones).toEqual(crouch.bones);
+    // Make local detaches; using the asset again reuses the linked pose rather than adding another.
+    expect(makePoseLocal(d, 'c1').poses[1].assetId).toBeUndefined();
+    expect(withAssetPose(d, entry(crouch.bones))).toEqual({ doc: d, poseId: 'c1' });
+    const added = withAssetPose(makePoseLocal(d, 'c1'), entry(crouch.bones));
+    expect(added.doc.poses).toHaveLength(3);
+    expect(added.doc.poses.find(p => p.id === added.poseId)?.assetId).toBe('pose_1');
+    // A normalised motion keeps the link.
+    expect(normaliseMotion(JSON.parse(JSON.stringify(d))).poses[1].assetId).toBe('pose_1');
+    // Content, not field order, decides whether a copy is behind (an edit may write `pole` before `rot`).
+    const goal = { pos: [0.1, 1, 0.2], pole: [0.5, 1, 0], rot: [0, 10, 0] } as any;
+    const withIk = doc([pose('rest', {}), { ...linked, ik: { handL: goal } }], d.keys);
+    const raw = { id: 'pose_1', name: 'Crouch', doc: { name: 'Crouch', pose: { bones: crouch.bones, ik: { handL: goal } } } };
+    expect(refreshPoseRefs(withIk, new Map([['pose_1', raw]]))).toBe(withIk);
+    // An edit of the asset reaches only the poses linked to it.
+    const synced = syncPoseAsset(withIk, entry({ 'mixamorig:Spine': { rot: [5, 0, 0] } }));
+    expect(synced.poses[1].bones).toEqual({ 'mixamorig:Spine': { rot: [5, 0, 0] } });
+    expect(synced.poses[0]).toBe(withIk.poses[0]);
+    expect(poseLibrary([{ id: 'pose_1', name: 'Crouch', doc: { pose: { bones: crouch.bones } } }]).get('pose_1')?.doc.pose.bones).toEqual(crouch.bones);
+  });
+
+  it('export the editor Pose asset files: the pose in the editor convention, the skeleton and the sidecar', () => {
+    const doc1 = normalisePoseAsset({ name: 'old name', characterId: 'character_9', pose: { bones: crouch.bones, ik: { footL: { pos: [0.15, 0.2, 0.25] } } } });
+    expect(doc1.characterId).toBe('character_9');
+    const files = exportPoseAsset(doc1, 'Deep Crouch', 'pose_abc', rig, skin() as any, 'Hero');
+    expect(files.map(f => f.name)).toEqual(['Deep_Crouch.pose.json', 'Deep_Crouch.pose-asset.json']);
+    const json = JSON.parse(new TextDecoder().decode(files[0].bytes));
+    expect(json.name).toBe('Deep Crouch');
+    expect(json.rigName).toBe('Hero');
+    expect(json.sourceSkin.joints.length).toBe(16);
+    expect(json.poses).toHaveLength(1);
+    expect(json.poses[0].id).toBe('pose_abc');
+    expect(json.poses[0].name).toBe('Deep Crouch');
+    // The IK goal is solved into the leg's rotations: the editor's poses have none.
+    const fk = fkPose(rig, { id: 'x', name: 'x', bones: doc1.pose.bones, ik: doc1.pose.ik });
+    expect(json.poses[0].bones).toEqual(editorPoseBones(rig, fk));
+    expect(json.poses[0].bones.map((b: any) => b.name)).toEqual(expect.arrayContaining(['mixamorig:Spine', 'mixamorig:LeftUpLeg', 'mixamorig:LeftLeg']));
+    const foot = modelPose(rig.bones, poseLocals(rig, fk)).pos[rig.byName.get('mixamorig:LeftFoot')!];
+    expect(vec3.distance(foot, [0.15, 0.2, 0.25])).toBeLessThan(2e-3);
+    const side = JSON.parse(new TextDecoder().decode(files[1].bytes));
+    expect(side.generator).toBe('pose');
+    expect(side.output).toEqual({ pose: 'Deep_Crouch.pose.json' });
+    expect(side.params).toEqual(doc1);
   });
 });

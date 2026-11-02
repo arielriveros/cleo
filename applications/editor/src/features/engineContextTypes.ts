@@ -76,6 +76,24 @@ export type AnimationImportDecision = {
 export type { ShapeDescription } from '@cleo/app-kit/gizmo/shapeDescription';
 import type { ShapeDescription } from '@cleo/app-kit/gizmo/shapeDescription';
 
+/**
+ * A node's trigger volume as the editor stores it (and as scene JSON carries it). The options mirror the
+ * engine's `TriggerOptions`; absent ones keep a plain zone's behaviour — enabled, layer 1, detects every
+ * layer, moving bodies only.
+ */
+export type TriggerDescription = {
+  shapes: ShapeDescription[];
+  enabled?: boolean;
+  /** Collision layers it is in, as a bit mask. */
+  group?: number;
+  /** Layers it detects, as a bit mask (-1: all). */
+  mask?: number;
+  /** Also detect other triggers. */
+  detectTriggers?: boolean;
+  /** Test its path between frames against other triggers. */
+  continuous?: boolean;
+};
+
 export type BodyDescription = {
   mass: number;
   linearDamping: number;
@@ -138,7 +156,7 @@ export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
   material: true,        // preview sphere
   terrainMaterial: true, // preview sphere
   stateMachine: true,    // except in Graph view — see `hideForGraph`
-  animation: true,       // the clip editor poses a character on the clip's rig
+  animation: true,       // the clip player plays the clip on a character of its rig
   animationField: true,  // the blend-space plot is translucent over the 3D preview
   model: true,
   script: false,         // ScriptTabView fills the panel

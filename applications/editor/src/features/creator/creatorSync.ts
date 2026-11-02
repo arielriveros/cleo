@@ -10,11 +10,16 @@
 //   world    the heightmap and the masks as textures (a landscape imports the heightmap at full
 //            precision through Import heightmap ▸ From Creator).
 //   character  a rigged model uploaded to the Creator: one `.anim` per clip it keeps (renamed there), on
-//            its skeleton's rig, and its pose library as a Pose asset. The model itself is not imported --
-//            the editor imports models with + Add -- but any model on the same skeleton plays the clips.
+//            its skeleton's rig. The model itself is not imported -- the editor imports models with + Add --
+//            but any model on the same skeleton plays the clips.
 //   motion   an `.anim` asset: the baked clip in the source skeleton's space, on the rig that skeleton
 //            already is in the project (the mannequin's) or a new one, linked to it -- so every character
 //            built on or retargeted from that rig can play it.
+//   pose     a Pose asset holding the one pose, on its skeleton's rig, under fixed ids -- an animator state
+//            holds a pose by id, so a re-sync must land on the same one.
+//
+// Clips are the Creator's except for their EVENTS: the Creator does not author events, the editor places
+// them on the clip, so a re-sync keeps each clip's events (keepClipEvents) and replaces everything else.
 //
 // Editor ids are derived from the Creator id (creatorLinks.ts), so a re-sync replaces in place: placed
 // models, foliage rules and particle nodes follow through the same propagation a save uses. An asset
@@ -41,7 +46,9 @@ import type { AssetKind } from '../../utils/vfs'
 import type { AnimationAsset, StoredClip, StoredSkin } from '../../utils/animationAssets'
 import type { RigAsset } from '../../utils/rigAssets'
 import type { PoseAsset } from '../../utils/poseAssets'
-import { creatorFolder, creatorIds, planCreatorSync, REMOVED_FOLDER, type CreatorLink, type CreatorLinks } from './creatorLinks'
+import {
+  creatorFolder, creatorIds, keepClipEvents, planCreatorSync, REMOVED_FOLDER, type CreatorLink, type CreatorLinks,
+} from './creatorLinks'
 import { pinKey, setCreatorPins } from './creatorPins'
 
 const LINKS_KEY = 'cleo_creator_links'
@@ -158,11 +165,17 @@ export class CreatorSync {
     if (!meta.fileNames.length) return
     if (link && !link.removed && link.revision >= meta.revision) return
     const files = await getCreatorFiles(id)
-    const next = meta.kind === 'foliage' ? await this.upsertFoliage(meta, files, link)
-      : meta.kind === 'fx' ? await this.upsertFx(meta, files, link)
-      : meta.kind === 'motion' ? await this.upsertMotion(meta, files)
-      : meta.kind === 'character' ? await this.upsertCharacter(meta, files, link)
-      : await this.upsertWorld(meta, files, link)
+    let next: CreatorLink | null
+    switch (meta.kind) {
+      case 'foliage': next = await this.upsertFoliage(meta, files, link); break
+      case 'fx': next = await this.upsertFx(meta, files, link); break
+      case 'motion': next = await this.upsertMotion(meta, files); break
+      case 'character': next = await this.upsertCharacter(meta, files, link); break
+      case 'pose': next = await this.upsertPose(meta, files); break
+      case 'world': next = await this.upsertWorld(meta, files, link); break
+      // A kind from a newer Creator: skipped, rather than built as something it is not.
+      default: Logger.warn(`Cleo Creator asset "${meta.name}" is of a kind this editor does not know (${meta.kind})`, 'Creator'); return
+    }
     if (!next) return
     this.links = { ...this.links, [id]: next }
     await this.saveLinks()
@@ -331,10 +344,11 @@ export class CreatorSync {
     const id = creatorIds.animation(meta.id)
     const rig = this.host.ensureRig(data.sourceSkin, data.rigName ?? output.rig ?? 'Rig')
     const existing = this.host.animations().find(a => a.id === id)
-    // The clip is the Creator's; anything else on the asset (its thumbnail) survives the next bake.
+    // The clip is the Creator's, all but its events; anything else on the asset (its thumbnail) survives
+    // the next bake too.
     const asset: AnimationAsset = {
       ...(existing ?? {}), id, name: meta.name,
-      clips: data.clips.map(c => ({ ...c, name: meta.name })),
+      clips: keepClipEvents(data.clips.map(c => ({ ...c, name: meta.name })), existing?.clips),
       sourceSkin: data.sourceSkin, rigId: rig?.id, sourceFile: file.name,
     }
     this.host.putAnimation(asset)
@@ -360,7 +374,8 @@ export class CreatorSync {
       if (animationIds.includes(id)) continue
       const existing = this.host.animations().find(a => a.id === id)
       this.host.putAnimation({
-        ...(existing ?? {}), id, name: clip.name, clips: [clip], sourceSkin: data.sourceSkin, rigId: rig?.id, sourceFile: `${meta.name} (Creator)`,
+        ...(existing ?? {}), id, name: clip.name, clips: keepClipEvents([clip], existing?.clips),
+        sourceSkin: data.sourceSkin, rigId: rig?.id, sourceFile: `${meta.name} (Creator)`,
       })
       if (rig) this.host.linkAnimationToRig(rig.id, id)
       animationIds.push(id)
@@ -369,17 +384,55 @@ export class CreatorSync {
     for (const id of prev?.animationIds ?? [])
       if (!animationIds.includes(id) && !this.host.isUsed('animation', id)) this.host.removeAnimation(id)
 
+    // Older Creator revisions exported the character's poses as one pose library beside its clips. Poses are
+    // Pose assets of their own now, so a revision without the file retires the library -- unless a state
+    // still holds one of its poses: then it is kept, and checked again on the next revision.
     let poseAssetId: string | undefined
     const posesFile = files.find(f => f.name === output.poses) ?? files.find(f => f.name.endsWith('.poses.json'))
     if (posesFile) {
       const p = JSON.parse(await posesFile.blob.text()) as { name?: string; poses?: PoseAsset['poses'] }
       poseAssetId = creatorIds.poseAsset(meta.id)
       this.host.putPoseAsset({ id: poseAssetId, name: p.name ?? `${meta.name} Poses`, ...(rig ? { rigId: rig.id } : {}), poses: p.poses ?? [] })
+    } else if (prev?.poseAssetId) {
+      if (this.host.isUsed('pose', prev.poseAssetId)) poseAssetId = prev.poseAssetId
+      else this.host.removePoseAsset(prev.poseAssetId)
     }
 
     const link: CreatorLink = {
       kind: 'character', name: meta.name, revision: meta.revision, folder: creatorFolder('character', meta.name),
       animationIds, ...(poseAssetId ? { poseAssetId } : {}), materialIds: [], textureIds: [],
+    }
+    this.links = { ...this.links, [meta.id]: link }
+    this.publishPins()
+    return link
+  }
+
+  // --- pose ---------------------------------------------------------------------------------------
+
+  /**
+   * A Creator Pose asset: `<stem>.pose.json` = `{ name, rigName, sourceSkin, poses: [{ id, name, bones }] }`,
+   * bones already in the editor's pose convention (deltas from rest, by bone name). It becomes a pose asset
+   * holding that one pose, on the rig its skeleton already is in the project (or a new one).
+   *
+   * Both ids are fixed (creatorIds.pose / poseEntry): an animator state holds `{ assetId, poseId }`, so a
+   * re-sync -- and the Creator renaming the pose -- must land on the same pair.
+   */
+  private async upsertPose(meta: CreatorAssetMeta, files: CreatorFile[]): Promise<CreatorLink | null> {
+    const output = (meta.sidecar?.output ?? {}) as { pose?: string }
+    const file = files.find(f => f.name === output.pose) ?? files.find(f => f.name.endsWith('.pose.json'))
+    if (!file) return null
+    const data = JSON.parse(await file.blob.text()) as { name?: string; rigName?: string; sourceSkin?: StoredSkin; poses?: PoseAsset['poses'] }
+    const pose = data.poses?.[0]
+    if (!pose) return null
+    const rig = data.sourceSkin ? this.host.ensureRig(data.sourceSkin, data.rigName ?? meta.name) : null
+    const poseAssetId = creatorIds.pose(meta.id)
+    this.host.putPoseAsset({
+      id: poseAssetId, name: meta.name, ...(rig ? { rigId: rig.id } : {}),
+      poses: [{ ...pose, id: creatorIds.poseEntry(meta.id), name: meta.name, bones: pose.bones ?? [] }],
+    })
+    const link: CreatorLink = {
+      kind: 'pose', name: meta.name, revision: meta.revision, folder: creatorFolder('pose', meta.name),
+      poseAssetId, materialIds: [], textureIds: [],
     }
     this.links = { ...this.links, [meta.id]: link }
     this.publishPins()
@@ -398,6 +451,7 @@ export class CreatorSync {
     const used = (link.modelId && this.host.isUsed('model', link.modelId, own))
       || (link.animationId && this.host.isUsed('animation', link.animationId, own))
       || (link.animationIds ?? []).some(a => this.host.isUsed('animation', a, own))
+      || (link.poseAssetId && this.host.isUsed('pose', link.poseAssetId, own))
       || (link.particleSystemId && this.host.isUsed('particleSystem', link.particleSystemId, own))
       || link.materialIds.some(m => this.host.isUsed('material', m, own))
       || link.textureIds.some(t => this.host.isUsed('texture', t, own))

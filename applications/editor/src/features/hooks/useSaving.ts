@@ -55,9 +55,6 @@ export function useSaving(deps: {
   // ...and the particle session, whose working copy lives in ParticleEditorProvider.
   const particleSystemApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerParticleSystemApply = (reg: { tabId: string; apply: () => void } | null) => { particleSystemApplyRef.current = reg; };
-  // ...and the clip session, whose working copy lives in ClipProvider.
-  const clipApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
-  const registerClipApply = (reg: { tabId: string; apply: () => void } | null) => { clipApplyRef.current = reg; };
 
   // ...and the rig session, whose working copy lives in RigProvider.
   const rigApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
@@ -122,12 +119,9 @@ export function useSaving(deps: {
         reg.apply();
         break;
       }
-      case 'animation': {
-        const session = clipApplyRef.current;
-        if (!session || session.tabId !== tabId) return false;
-        session.apply();
-        break;
-      }
+      // The Clip Player has no working copy: its edits (a clip's events, its root motion) are written to the
+      // `.anim` in the library as they are made, so there is never anything to save here.
+      case 'animation': break;
     }
     return !dirtyTabsRef.current[tabId];
   };
@@ -136,7 +130,6 @@ export function useSaving(deps: {
   const sessionSlot = (kind: TabKind): React.MutableRefObject<{ tabId: string } | null> | null => {
     switch (kind) {
       case 'stateMachine': case 'animationField': return animationApplyRef;
-      case 'animation': return clipApplyRef;
       case 'rig': return rigApplyRef;
       case 'tileset': return tilesetApplyRef;
       case 'texture': return textureApplyRef;
@@ -241,9 +234,8 @@ export function useSaving(deps: {
       // A rig saves FIRST: models and animations reference it, so a rig written after them would leave
       // one pass reading a skeleton the other has already replaced.
       rig: 0,
-      // ...and a clip after it, but still before anything that plays one: an `.anim` names its source rig,
-      // and a clip resolved against a skeleton the other pass has already replaced retargets off the wrong
-      // bind pose. Same tier is fine — the sort is stable, and `rig` is listed first.
+      // A clip tab never has anything to save (its edits are written as they are made); it keeps a tier
+      // only because the table is exhaustive.
       animation: 0,
       material: 0, terrainMaterial: 0, script: 0, stateMachine: 0, animationField: 0, tileset: 0, texture: 0,
       soundSample: 0, aiBrain: 0,
@@ -264,7 +256,7 @@ export function useSaving(deps: {
 
   return {
     registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply,
-    registerAiBrainApply, registerParticleSystemApply, registerRigApply, registerClipApply, saveTabById, runSave,
+    registerAiBrainApply, registerParticleSystemApply, registerRigApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   };
 }

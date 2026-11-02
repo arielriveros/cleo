@@ -22,6 +22,8 @@ export interface OverlapBody {
     shapeOrientations: { x: number; y: number; z: number; w: number }[];
     boundingRadius: number;
     isTrigger?: boolean;
+    /** False on a switched-off trigger (Trigger.enabled), which no query sees. */
+    enabled?: boolean;
     collisionResponse?: boolean;
     collisionFilterGroup?: number;
     mass?: number;
@@ -51,6 +53,11 @@ export interface OverlapOptions<TBody = OverlapBody> {
     includeGhosts?: boolean;
     /** Let ragdoll bone bodies count. Default false — a corpse's limbs are not a target. */
     includeRagdolls?: boolean;
+    /**
+     * Only bodies in one of these collision layers (`collisionFilterGroup & layerMask`), e.g. just the
+     * hurtbox triggers. Checked before any geometry, so it is the cheap way to narrow a query. Default: all.
+     */
+    layerMask?: number;
     /** Last word on each candidate. Return true to KEEP it. `node` is null for an ownerless body. */
     filter?: (node: Node | null, body: TBody) => boolean;
 }
@@ -265,6 +272,8 @@ function querySphere(q: QueryShape): { c: V3; r: number } {
 
 function keep<TBody extends OverlapBody>(body: TBody, opts: OverlapOptions<TBody> | undefined, ignore: Node[]): boolean {
     if (!opts?.includeTriggers && body.isTrigger) return false;
+    if (body.isTrigger && body.enabled === false) return false;
+    if (opts?.layerMask !== undefined && ((body.collisionFilterGroup ?? 1) & opts.layerMask) === 0) return false;
     if (!opts?.includeGhosts && body.collisionResponse === false && !body.isTrigger) return false;
     if (!opts?.includeRagdolls && body.collisionFilterGroup === RAGDOLL_GROUP) return false;
     const node = body.owner ?? null;

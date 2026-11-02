@@ -42,6 +42,11 @@ interface CleoConfig {
     maxSubsteps?: number;
     /** Metres from the camera past which dynamic bodies freeze. See `PhysicsSystem.simulationRange`. */
     simulationRange?: number;
+    /**
+     * Run the physics step in a Web Worker: 'on', 'auto' (when it pays) or 'off' (the default). Needs the
+     * host to have set `PhysicsSystem.workerFactory`; without one the step stays on the main thread.
+     */
+    worker?: 'off' | 'on' | 'auto';
   }
   runtime?: {
     /** Longest frame delta the loop reports, seconds. See `CleoEngine.maxFrameDelta`. */
@@ -130,6 +135,7 @@ export class CleoEngine {
     });
     if (config?.physics?.maxSubsteps) this._physicsSystem.maxSubsteps = config.physics.maxSubsteps;
     if (config?.physics?.simulationRange) this._physicsSystem.simulationRange = config.physics.simulationRange;
+    if (config?.physics?.worker) this._physicsSystem.setWorkerMode(config.physics.worker);
     if (config?.runtime?.maxFrameDelta) this.maxFrameDelta = config.runtime.maxFrameDelta;
 
     this.onUpdate = () => {};
@@ -239,6 +245,9 @@ export class CleoEngine {
 
       if (this._scene) {
         this._scene.update(deltaTime, this._timeSinceStart, this._paused);
+        // After every script, before the render: with the physics worker, this frame's changes and its
+        // step go out now, and the worker steps while this thread renders. Nothing inline.
+        if (!this._paused) this._physicsSystem.endFrame(deltaTime);
         this._renderer.render(this._scene);
       }
 

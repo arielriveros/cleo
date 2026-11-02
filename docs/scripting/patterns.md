@@ -174,8 +174,9 @@ already has.
 ```ts
 onStart() {
   if (!this.body) Logger.warn(this.name + ' has no rigid body, so it cannot move', 'Script')
-  const lc = this.body?.linearConstraints
-  if (lc && (lc[0] === 0 || lc[1] === 0 || lc[2] === 0)) {
+  // The body's per-axis motion factor (`linearConstraints` in the scene file): 0 locks that axis.
+  const lf = this.body?.linearFactor
+  if (lf && (lf.x === 0 || lf.y === 0 || lf.z === 0)) {
     Logger.warn(this.name + ' has a locked linear axis; movement along it is dead', 'Script')
   }
 }

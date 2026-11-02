@@ -40,7 +40,9 @@ const OLD_DOCK_LAYOUT_KEYS = [
 // stored at 18 has no `particleTransport` and no arrangement for the mode.
 // 20: Renderer and Input modes folded into one Options mode with Engine / Editor / Project panels; a
 // tree stored at 19 has the retired panels and no arrangement for the new ones.
-const LAYOUT_VERSION = 20;
+// 21: the clip editor became the Clip Player, and its right-rail panel `clipTracks` (per-bone key tracks)
+// became `clipInspector`; a tree stored at 20 names a panel that no longer exists.
+const LAYOUT_VERSION = 21;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -81,11 +83,11 @@ function activeBottomTab(dock: DockviewApi): BottomPanel | null {
 const STATE_MACHINE_PANELS = ['animClips', 'animVariables', 'animStateMachine'] as const;
 
 /**
- * Clip-editor panels: the track list on the right rail, and the timeline down in the bottom strip beside
- * Logger and Assets. Same arrangement as ANIMATION_FIELD_PANELS, and for the same reason — a timeline is
- * a wide, short thing that wants the full width of the window.
+ * Clip Player panels: the clip inspector on the right rail, and the timeline (transport + Events track)
+ * down in the bottom strip beside Logger and Assets. Same arrangement as ANIMATION_FIELD_PANELS, and for the
+ * same reason — a timeline is a wide, short thing that wants the full width of the window.
  */
-const CLIP_PANELS = ['clipTracks', 'clipTimeline'] as const;
+const CLIP_PANELS = ['clipInspector', 'clipTimeline'] as const;
 
 /**
  * Animation-field panels: the settings sidebar on the right rail, and the blend-space plot down in the
@@ -163,8 +165,8 @@ function buildDefaultLayout(api: DockviewApi) {
     position: { referencePanel: 'properties', direction: 'within' },
   });
   // The animation panels share the Properties tab strip; they are hidden everywhere but the one mode that
-  // owns them, where Properties itself is hidden. `clipTracks` joins them; `clipTimeline` goes below.
-  for (const id of [...STATE_MACHINE_PANELS, 'animField', 'clipTracks', ...TILEMAP_PANELS, 'landscapeTools']) {
+  // owns them, where Properties itself is hidden. `clipInspector` joins them; `clipTimeline` goes below.
+  for (const id of [...STATE_MACHINE_PANELS, 'animField', 'clipInspector', ...TILEMAP_PANELS, 'landscapeTools']) {
     api.addPanel({
       id, component: id, title: PANEL_TITLES[id],
       position: { referencePanel: 'properties', direction: 'within' },
@@ -326,9 +328,9 @@ export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: b
     case 'stateMachine':
       hide(...ADD_PANELS, 'scripts', 'physics', 'properties');
       break;
-    // The clip editor: the Scene panel is the bone tree, `clipTracks` is the inspector for whatever is
-    // selected in it, and `clipTimeline` runs along the bottom. Properties would show the preview
-    // character's node, which is not what is being edited.
+    // The Clip Player: the Scene panel is the bone tree, `clipInspector` holds the clip list and root
+    // motion, and `clipTimeline` runs along the bottom. Properties would show the preview character's node,
+    // which is not what is being edited.
     case 'animation':
       hide(...ADD_PANELS, 'scripts', 'physics', 'properties');
       break;

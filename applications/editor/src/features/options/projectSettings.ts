@@ -14,11 +14,19 @@ export interface EngineRuntimeSettings {
    * 0 = unlimited. A body's own Simulation setting can opt out or override it.
    */
   simulationRange: number;
+  /**
+   * Where the physics step runs (PhysicsSystem.setWorkerMode): 'off' on the main thread, 'on' in a Web
+   * Worker, 'auto' moves it there once the game's physics is heavy enough to gain from it.
+   */
+  physicsWorker: PhysicsWorkerSetting;
   /** Longest frame delta the loop reports, seconds (CleoEngine.maxFrameDelta). */
   maxFrameDelta: number;
   /** Master volume, 0..1 (the audio mixer's master bus). */
   masterVolume: number;
 }
+
+export type PhysicsWorkerSetting = 'off' | 'on' | 'auto';
+const PHYSICS_WORKER_SETTINGS: PhysicsWorkerSetting[] = ['off', 'on', 'auto'];
 
 export interface PublishWindowSettings {
   /** The game's name: window / tab title, installer product name and published folder name. Empty = the project name. */
@@ -44,7 +52,7 @@ export interface ProjectSettings {
 }
 
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
-  engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, maxFrameDelta: 0.1, masterVolume: 1 },
+  engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'off', maxFrameDelta: 0.1, masterVolume: 1 },
   publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true },
 };
 
@@ -64,6 +72,7 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       gravity: g,
       maxSubsteps: Math.round(num(e.maxSubsteps, d.engine.maxSubsteps, 1, 32)),
       simulationRange: num(e.simulationRange, d.engine.simulationRange, 0, 100000),
+      physicsWorker: PHYSICS_WORKER_SETTINGS.includes(e.physicsWorker) ? e.physicsWorker : d.engine.physicsWorker,
       maxFrameDelta: num(e.maxFrameDelta, d.engine.maxFrameDelta, 1 / 240, 0.5),
       masterVolume: num(e.masterVolume, d.engine.masterVolume, 0, 1),
     },
@@ -89,7 +98,7 @@ export function isDefaultProjectSettings(s: ProjectSettings): boolean {
  */
 export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
   return {
-    physics: { gravity: [...s.engine.gravity], maxSubsteps: s.engine.maxSubsteps, simulationRange: s.engine.simulationRange },
+    physics: { gravity: [...s.engine.gravity], maxSubsteps: s.engine.maxSubsteps, simulationRange: s.engine.simulationRange, worker: s.engine.physicsWorker },
     runtime: { maxFrameDelta: s.engine.maxFrameDelta },
     audio: { masterVolume: s.engine.masterVolume },
     // A publish-time switch, not something the running game reads.
@@ -100,7 +109,27 @@ export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
 /** The structural slice of the engine these settings drive, so this module stays free of `cleo` imports. */
 export interface EngineRuntimeTarget {
   maxFrameDelta: number;
-  physics: { gravity: [number, number, number]; maxSubsteps: number; simulationRange: number } | null | undefined;
+  physics: {
+    gravity: [number, number, number]; maxSubsteps: number; simulationRange: number;
+    readonly workerMode?: PhysicsWorkerSetting;
+    setWorkerMode?(mode: PhysicsWorkerSetting): void;
+  } | null | undefined;
+}
+
+/**
+ * A per-machine override of the project's physics thread, for when a worker misbehaves on one machine or
+ * a test wants it forced: `?physicsWorker=off|on|auto` in the URL, else `localStorage.cleo_physics_worker`.
+ * Null when neither is set (or there is no window: tests, workers).
+ */
+export function physicsWorkerOverride(): PhysicsWorkerSetting | null {
+  const g = globalThis as any;
+  try {
+    const fromUrl = new URLSearchParams(g.location?.search ?? '').get('physicsWorker');
+    if (fromUrl && (PHYSICS_WORKER_SETTINGS as string[]).includes(fromUrl)) return fromUrl as PhysicsWorkerSetting;
+    const stored = g.localStorage?.getItem?.('cleo_physics_worker');
+    if (stored && (PHYSICS_WORKER_SETTINGS as string[]).includes(stored)) return stored as PhysicsWorkerSetting;
+  } catch { /* no storage: no override */ }
+  return null;
 }
 
 /** Push the runtime settings into a live engine (the editor does it on every change and at Play). */
@@ -114,6 +143,8 @@ export function applyEngineRuntime(
     engine.physics.gravity = [...s.gravity] as [number, number, number];
     engine.physics.maxSubsteps = s.maxSubsteps;
     engine.physics.simulationRange = s.simulationRange;
+    const mode = physicsWorkerOverride() ?? s.physicsWorker;
+    if (engine.physics.setWorkerMode && engine.physics.workerMode !== mode) engine.physics.setWorkerMode(mode);
   }
   if (mixer) mixer.masterVolume = s.masterVolume;
 }

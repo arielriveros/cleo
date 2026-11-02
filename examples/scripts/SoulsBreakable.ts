@@ -8,11 +8,12 @@ import { playDetached } from '@/Core/Scripts/SoulsAudio'
  *
  *   Breakable Barrel     this script + a STATIC body (it blocks like any prop) + a trigger a little
  *   ├── Mesh             wider than the body (how a roll is noticed before the body stops it)
+ *   ├── Hurtbox          a trigger the size of the body, in the enemy hurtbox layer: what a blade hits
  *   └── Sounds           Break
  *
- * It is a HURTBOX for the player's swings -- `team = 'enemy'` and `receiveHit` are what SoulsHitbox
- * looks for -- without being an enemy: nothing registers it with the manager, so lock-on, the HUD and
- * the enemy count never see it. Not `blocksSwings`: a blade that bounced off it could never break it.
+ * It is a target for the player's swings -- `team = 'enemy'`, `receiveHit` and its Hurtbox are what
+ * SoulsHitbox looks for -- without being an enemy: nothing registers it with the manager, so lock-on, the
+ * HUD and the enemy count never see it. Not `blocksSwings`: a blade that bounced off it could never break it.
  */
 export default class SoulsBreakableNode extends Node {
   /** The template spawned in its place, one physics body per piece. See SoulsDebris. */

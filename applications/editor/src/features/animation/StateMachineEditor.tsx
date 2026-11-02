@@ -89,9 +89,8 @@ export function ClipsPanel() {
   // A shared clip is one stored copy retargeted onto this rig, so removing it means unlinking its ASSET;
   // deleting it off this model alone is undone by the next resolve.
   //
-  // Root motion used to be a toggle on this row. It moved to the CLIP EDITOR, where it sits beside the
-  // in-place bake it is the opposite of — the two together are one three-way choice, and this panel could
-  // only ever show half of it. This panel is about which clips a machine can name, not what they contain.
+  // Root motion used to be a toggle on this row. It moved to the CLIP PLAYER: this panel is about which
+  // clips a machine can name, not what they contain.
   const clipRow = (name: string) => {
     const sharedId = clipAssetId(name)
     return (
@@ -151,9 +150,9 @@ export function ClipsPanel() {
   )
 }
 
-// ---- Variables panel (parameters + events) ----------------------------------------------------------
+// ---- Variables panel (parameters + action slots) ----------------------------------------------------
 export function VariablesPanel() {
-  const { target, sm, accessVars, addParam, setParam, removeParam, removeEvent, setEvent } = useStateMachine()
+  const { target, sm, accessVars, addParam, setParam, removeParam } = useStateMachine()
   if (!target) return <NoModel />
 
   return (
@@ -185,26 +184,6 @@ export function VariablesPanel() {
         </div>
       </Collapsable>
 
-      <Collapsable title='Events' badge={sm.events.length || undefined} defaultOpen>
-        <div className='p-2 flex flex-col gap-1'>
-          {sm.events.length === 0 && (
-            <p className='text-ui-sm text-muted'>
-              No events. Pick a clip on the transport, scrub to a moment, and press <b>+ Event</b>.
-            </p>
-          )}
-          {sm.events.map((e, i) => (
-            <div key={i} className='flex items-center gap-1'>
-              <TextInput className={cn(tight, 'flex-1 min-w-0')} value={e.eventName} title='Event name — what onAnimationEvent receives'
-                onChange={v => setEvent(i, { eventName: v })} />
-              {/* Clip and time are the timeline's to set: an event only means anything at a moment in a clip,
-                  and you place that by dragging its marker, not by typing seconds. */}
-              <span className='text-ui-xs text-muted truncate w-[72px] shrink-0' title={e.clipName || '(no clip)'}>{e.clipName || '(no clip)'}</span>
-              <span className='text-ui-xs text-dim tabular-nums w-[38px] shrink-0 text-right' title='Drag the marker on the transport to change'>{e.time.toFixed(2)}s</span>
-              <Button variant='remove' size='sm' className='shrink-0' title='Delete event' onClick={() => removeEvent(i)}>✕</Button>
-            </div>
-          ))}
-        </div>
-      </Collapsable>
       <SlotsSection />
     </div>
   )
@@ -313,7 +292,7 @@ function SelectedState() {
       </AssetDropRow>
 
       {playsPose && (allPoses.length === 0
-        ? <p className='text-ui-xs text-warning'>No poses yet — pose bones in a clip’s editor and save them as a pose.</p>
+        ? <p className='text-ui-xs text-warning'>No poses yet — make one in Cleo Creator ▸ Motion.</p>
         : <Select className={cn(tight, 'flex-1 min-w-0')} title='The pose this state holds.'
             value={s.poseRef ? `${s.poseRef.assetId}/${s.poseRef.poseId}` : ''}
             onChange={e => {

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, NumberInput, SegmentedControl, Select } from '@cleo/app-kit/ui';
+import { Button, NumberInput, Popover, SegmentedControl, Select } from '@cleo/app-kit/ui';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
 import { useCreatorEngine } from '../../app/CreatorEngine';
 import { CreatorWorkspace, ViewportOverlay } from '../../app/workspace';
 import { downloadAll } from '../../core/download';
-import { AssetBar, useCreatorAsset } from '../../core/useCreatorAsset';
+import { AssetBar, createCreatorAsset, useCreatorAsset } from '../../core/useCreatorAsset';
 import { useStageCapture } from '../../core/stageCapture';
 import type { CreatorFile } from '@cleo/app-kit/creatorLibrary';
 import type { ExportFile } from '../../core/generator';
@@ -16,19 +16,21 @@ import { exportFoliage } from '../exportFoliage';
 import { DEFAULT_DOC, KIND_LABELS, normaliseFoliage, type FoliageDoc, type FoliageKind } from '../foliageParams';
 import type { Image } from '../textures/image';
 import { DEFAULT_STAGE, FoliageStage, patchOffsets, type LodView, type StageSettings } from './foliageStage';
-import { FoliageContext, useFoliage, type FoliageState, type SavedVariant, type TextureOverride } from './foliageContext';
-import { ExportPanel, LodPanel, MaterialsPanel, ParametersPanel, VariantsPanel } from './FoliagePanels';
+import { FoliageContext, type FoliageState, type TextureOverride } from './foliageContext';
+import { ExportPanel, FoliageStageExtra, LodPanel, MaterialsPanel, ParametersPanel } from './FoliagePanels';
 
 // Foliage Creator: grass clumps, bushes, trees and rocks from parameters, each with its LOD ladder,
 // previewed in the 3D viewport as a real LodGroupNode and exported as one .glb per level. The Creator's
-// shared layout (app/workspace.tsx): Variants (presets, seeds, saved variants, the sun) on the left,
-// Parameters with Materials, LOD and Export as tabs on the right, the console below.
+// shared layout (app/workspace.tsx), without a left dock: Parameters with Materials, LOD and Export as
+// tabs on the right, the console below; the seed (and the seeds tried) in the toolbar; the sun, wind and
+// weather in the viewport's Stage menu. Files are named after the saved asset (`untitled` on Scratch).
 //
 // Generation runs in a worker on every edit (debounced), and the preview loads the exact .glb files the
 // export would write -- through the engine's importer -- so there is no "export to see it".
 
 const DOC_KEY = 'cleo_creator_foliage_doc_v1';
 const STAGE_KEY = 'cleo_creator_foliage_stage_v1';
+/** Variants saved before they were library assets: moved into the library once (see the workspace). */
 const VARIANTS_KEY = 'cleo_creator_foliage_variants_v1';
 const REBUILD_DEBOUNCE_MS = 180;
 /** A saved tree's impostor is re-baked once edits pause this long (a bake costs a second or two). */
@@ -70,7 +72,6 @@ export function FoliageWorkspace() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [doc, setDocState] = useState<FoliageDoc>(() => load(DOC_KEY, DEFAULT_DOC, raw => normaliseFoliage(raw as FoliageDoc)));
   const [stage, setStage] = useState<StageSettings>(() => load(STAGE_KEY, DEFAULT_STAGE, raw => ({ ...DEFAULT_STAGE, ...(raw as object) })));
-  const [variants, setVariantsState] = useState<SavedVariant[]>(() => load(VARIANTS_KEY, [], raw => Array.isArray(raw) ? raw as SavedVariant[] : []));
   const [overrides, setOverrides] = useState<Partial<Record<TextureKey, TextureOverride>>>({});
   const [build, setBuild] = useState<FoliageBuild | null>(null);
   const [building, setBuilding] = useState(false);
@@ -90,7 +91,15 @@ export function FoliageWorkspace() {
     if (d.seed !== doc.seed) setSeedHistory(h => [d.seed, ...h.filter(s => s !== d.seed)].slice(0, 12));
   };
   const setParams = (p: object) => setDoc({ ...doc, [doc.kind]: p });
-  const setVariants = (v: SavedVariant[]) => { setVariantsState(v); save(VARIANTS_KEY, v); };
+
+  // Variants saved in the old left dock become library assets, once: each opens from Assets ▸ /Foliage.
+  useEffect(() => {
+    const saved = load<{ label?: string; doc?: FoliageDoc }[]>(VARIANTS_KEY, [], raw => (Array.isArray(raw) ? raw : []));
+    if (!saved.length) return;
+    try { localStorage.removeItem(VARIANTS_KEY); } catch { /* fine */ }
+    void Promise.all(saved.filter(v => v?.doc).map(v => createCreatorAsset('foliage', String(v.label || 'Variant'), normaliseFoliage(v.doc!))))
+      .then(ids => { if (ids.length) toast.success(`Moved ${ids.length} saved variant${ids.length === 1 ? '' : 's'} into Assets ▸ /Foliage.`); });
+  }, []);
 
   useEffect(() => { const t = setTimeout(() => save(DOC_KEY, doc), SAVE_DEBOUNCE_MS); return () => clearTimeout(t); }, [doc]);
   useEffect(() => { const t = setTimeout(() => save(STAGE_KEY, stage), SAVE_DEBOUNCE_MS); return () => clearTimeout(t); }, [stage]);
@@ -207,7 +216,7 @@ export function FoliageWorkspace() {
     const privateFiles: ExportFile[] = (Object.entries(overrides) as [TextureKey, TextureOverride][]).map(([k, o]) => ({
       name: `${OVERRIDE_PREFIX}${k}/${o.flipGreen ? 'dx' : 'gl'}/${o.fileName}`, mime: o.mime, bytes: o.bytes,
     }));
-    asset.publish({ from, files: exportFoliage(normaliseFoliage(from), result.summary, result.files, impostor), privateFiles });
+    asset.publish({ from, files: exportFoliage(normaliseFoliage(from), { ...result.summary, name: asset.name }, result.files, impostor), privateFiles });
   }
   // Saving (or opening) an asset publishes what is on screen, without waiting for an edit.
   useEffect(() => {
@@ -258,7 +267,7 @@ export function FoliageWorkspace() {
       const result = await c.build(doc, overrideImages, withImpostor);
       if (!result) return null;
       ctx.progress(0.9, 'Writing files');
-      return exportFoliage(normaliseFoliage(doc), result.summary, result.files, result.impostor);
+      return exportFoliage(normaliseFoliage(doc), { ...result.summary, name: asset.name }, result.files, result.impostor);
     });
     if (!files) return;
     await downloadAll(files);
@@ -273,14 +282,19 @@ export function FoliageWorkspace() {
         {active ? ` · showing ${active.culled ? 'nothing (culled)' : `LOD ${active.level}`}` : ''}
         {stage.wireframe ? ' · still' : stage.wind ? ' · swaying' : ' · as foliage'} · {build.ms.toFixed(0)} ms
       </>}
-      visibility={[
-        { key: 'grid', label: 'Grid', checked: stage.grid },
-        { key: 'ground', label: 'Floor', checked: stage.ground },
-        { key: 'sky', label: 'Sky', checked: stage.sky },
-        ...(doc.kind === 'grass' ? [{ key: 'patch', label: 'Patch of clumps', checked: stage.patch }] : []),
-        { key: 'wind', label: 'Wind', checked: stage.wind },
-        { key: 'wireframe', label: 'Wireframe', checked: stage.wireframe },
-      ].map(item => ({ ...item, onChange: (v: boolean) => setStage({ ...stage, [item.key]: v }) }))}
+      stage={{
+        toggles: [
+          { key: 'grid', label: 'Grid', checked: stage.grid },
+          { key: 'ground', label: 'Floor', checked: stage.ground },
+          { key: 'sky', label: 'Sky', checked: stage.sky },
+          ...(doc.kind === 'grass' ? [{ key: 'patch', label: 'Patch of clumps', checked: stage.patch }] : []),
+          { key: 'wind', label: 'Wind', checked: stage.wind },
+          { key: 'walk', label: 'Walk-through', checked: stage.walk },
+          { key: 'wireframe', label: 'Wireframe', checked: stage.wireframe },
+        ].map(item => ({ ...item, onChange: (v: boolean) => setStage({ ...stage, [item.key]: v }) })),
+        sun: { yaw: stage.sunYaw, elevation: stage.sunElevation, onChange: (sunYaw, sunElevation) => setStage({ ...stage, sunYaw, sunElevation }) },
+        extra: <FoliageStageExtra stage={stage} setStage={setStage} />,
+      }}
       controls={(
         <Select value={String(lodView)} title='Which level the viewport shows' onChange={e => setLodView(e.target.value === 'auto' ? 'auto' : Number(e.target.value) as LodView)}>
           <option value='auto'>LOD: by distance</option>
@@ -291,10 +305,10 @@ export function FoliageWorkspace() {
   );
 
   const value = useMemo<FoliageState>(() => ({
-    doc, setDoc, setParams, build, building, stage, setStage, overrides, setOverride, variants, setVariants, seedHistory,
+    doc, setDoc, setParams, build, building, stage, setStage, overrides, setOverride,
     impostorPreview, bakeImpostorPreview, exporting: exportJob.status.running, onExport,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [doc, build, building, stage, overrides, variants, seedHistory, impostorPreview, exportJob.status.running]);
+  }), [doc, build, building, stage, overrides, impostorPreview, exportJob.status.running, asset.name]);
 
   const kindOptions = (['grass', 'bush', 'tree', 'rock'] as FoliageKind[]).map(k => ({ value: k, label: KIND_LABELS[k] }));
   return (
@@ -307,12 +321,21 @@ export function FoliageWorkspace() {
                                          onChange={k => setDoc({ ...doc, kind: k, name: doc.name === doc.kind ? k : doc.name })} />
           <span className='text-muted'>Seed</span>
           <NumberInput className='w-28' value={doc.seed} onChange={v => setDoc({ ...doc, seed: Math.max(0, Math.floor(v)) })} />
+          <Popover align='left' title='The seeds tried this session' disabled={seedHistory.length < 2}
+                   triggerClassName='h-[25px] px-1.5 rounded border border-control-hover bg-control text-fg text-ui-sm disabled:opacity-40' trigger='▾'>
+            {close => (
+              <div className='flex max-w-[260px] flex-wrap gap-1 p-1'>
+                {seedHistory.map(s => (
+                  <Button key={s} size='sm' variant={s === doc.seed ? 'primary' : 'ghost'} onClick={() => { setDoc({ ...doc, seed: s }); close(); }}>{s}</Button>
+                ))}
+              </div>
+            )}
+          </Popover>
           <Button size='sm' title='A new random seed: another plant from the same parameters' onClick={() => setDoc({ ...doc, seed: randomSeed() })}>New seed</Button>
         </>}
         toolbarStatus={building ? 'Generating…' : undefined}
         primaryAction={{ label: 'Download .glb', disabled: exportJob.status.running || !build, onClick: onExport,
                          title: 'Every level as a .glb, the impostor atlases and a .foliage.json sidecar' }}
-        left={{ id: 'variants', title: 'Variants', render: () => <VariantsPanel /> }}
         right={[
           { id: 'parameters', title: 'Parameters', render: () => <ParametersPanel /> },
           { id: 'materials', title: 'Materials', render: () => <MaterialsPanel /> },
@@ -321,7 +344,7 @@ export function FoliageWorkspace() {
         ]}
         viewport={overlay} viewportRef={viewportRef} onFrame={() => frameAsset()}
         generation={{ status: exportJob.status, onCancel: exportJob.cancel,
-                      idle: build ? `${KIND_LABELS[build.summary.kind]} “${build.summary.name}”: ${build.summary.levels.length} levels, cull at ${build.summary.cullDistance} m${build.summary.impostor ? `, impostor from ${build.summary.impostor.distance} m` : ''}` : 'Generating…' }} />
+                      idle: build ? `${KIND_LABELS[build.summary.kind]} “${asset.name}”: ${build.summary.levels.length} levels, cull at ${build.summary.cullDistance} m${build.summary.impostor ? `, impostor from ${build.summary.impostor.distance} m` : ''}` : 'Generating…' }} />
     </FoliageContext.Provider>
   );
 }

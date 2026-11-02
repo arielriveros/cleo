@@ -11,7 +11,6 @@ import { useAssetDrop } from '../../../utils/useAssetDrop'
 import { AnimationIcon } from '../sectionIcons'
 import { ownSkinnedModelNodeOf, modelIdOf } from '../../../utils/models'
 import { instantiateController, machineClipNames, machineIsEmpty } from '../../../utils/animationControllers'
-import AnimateCharacterWizard from '../../characterAnimation/AnimateCharacterWizard'
 
 // The one animation-related thing a model NODE owns: which machine it runs.
 //
@@ -27,7 +26,6 @@ export default function AnimationSlot(props: { node: Node }) {
   const { activeTab } = useCleoEngine()
   const { markTabDirty } = useDocument()
   const [, force] = useState(0)
-  const [wizardOpen, setWizardOpen] = useState(false)
   // Above the early return (hooks). `pick` is only reached from a drop, i.e. after a render that got past it.
   const { dragOver, dropProps } = useAssetDrop('text/cleo-anim-controller', id => pick(id))
 
@@ -72,18 +70,10 @@ export default function AnimationSlot(props: { node: Node }) {
 
   return (
     <Collapsable title='Animation' icon={<AnimationIcon />} persistKey='animation'>
-      {wizardOpen && <AnimateCharacterWizard node={modelNode} onClose={() => { setWizardOpen(false); force(x => x + 1) }} />}
       <div className={cn('w-full p-2 flex flex-col gap-2 rounded border', dragOver ? 'border-selected' : 'border-transparent')}
         title='Drop an Animator here to use it' {...dropProps}>
-        {/* The fast path: a character with nothing to play gets one button that sets it all up. */}
         {machineIsEmpty(sm) && (
-          <div className='flex flex-col gap-1 rounded border border-highlight/40 bg-highlight/10 p-2'>
-            <Hint>This character has no animation yet, so it will hold its bind pose.</Hint>
-            <Button variant='primary' className='w-full py-2' onClick={() => setWizardOpen(true)}
-              title='Pick a template (locomotion, fighter, NPC) and its clips — the animator is built for you'>
-              ✨ Animate this character…
-            </Button>
-          </div>
+          <Hint>This character has no animation yet, so it holds its bind pose. Pick a shared animator below, or Edit Animation to build its own.</Hint>
         )}
         <Select value={controller?.id ?? ''} onChange={e => pick(e.target.value)}
           title='Run a shared Animator, or this character’s own'>

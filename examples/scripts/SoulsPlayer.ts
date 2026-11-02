@@ -493,6 +493,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
     this.invulnerable = this._computeInvulnerable()
     this.hurtboxActive = !this.invulnerable
+    // The hurtbox trigger follows on the same frame: a roll's i-frames are the frames it is switched off.
+    this._syncHurtbox()
     this._tickStamina(delta)
     this._tickCombat(delta)
   }
@@ -830,14 +832,18 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     }
   }
 
-  /** The `hit` event: the blade starts connecting. It stays live until `hitEnd`. */
+  /**
+   * The `hit` event: the blade's hitbox switches on, live until `hitEnd`. Only a weapon in this character's
+   * own hand arms (see wieldedBy): one riding someone else's socket hits nothing.
+   */
   private _openWindow(): void {
     this._windowOpened = true
-    openSwing(this._swing)
+    const weapon = this.currentWeapon()
+    openSwing(this._swing, wieldedBy(weapon, this) ? weapon : null, 'enemy')
   }
 
   /**
-   * One frame of the active window: sweep the blade, damage what it reached, and bounce off a wall it
+   * One frame of the active window: damage the hurtboxes the hitbox entered, and bounce off a wall it
    * reached first. Returns true when the swing ended in a recoil (the state has changed).
    */
   private _stepSwing(): boolean {

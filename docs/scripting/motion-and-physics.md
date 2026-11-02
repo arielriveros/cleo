@@ -174,8 +174,41 @@ export default class PlayerNode extends CharacterNode {
 ```
 
 A trigger is a static volume: it detects bodies with mass (characters, props that move), never another
-static body, the terrain, or another trigger. A node may carry a body AND a trigger — a solid door with
-an interaction zone around it.
+static body or the terrain. It detects other TRIGGERS only when it asks to (`detectTriggers`, on either
+side of the pair). A node may carry a body AND a trigger — a solid door with an interaction zone around it.
+
+### Triggers that detect triggers: hitboxes and hurtboxes
+
+A weapon's hitbox and a character's hurtbox are both triggers, kept apart from the rigid body the
+character walks with. Give them layers so each only ever sees the other:
+
+```ts
+const HURTBOX = 1 << 8, HITBOX = 1 << 10
+
+// On the character: a child node holding its hurtbox, the size of its body.
+const hurt = new Node('Hurtbox'); this.addChild(hurt)
+hurt.setTrigger({ group: HURTBOX, mask: HITBOX, detectTriggers: true }).setCapsule([0, 0.3, 0], [0, 1.5, 0], 0.3)
+
+// On the weapon: a capsule along the blade, swept between frames, switched on only while it swings.
+const blade = new Node('Hitbox'); weaponMesh.addChild(blade)
+const hitbox = blade.setTrigger({ group: HITBOX, mask: HURTBOX, detectTriggers: true, continuous: true, enabled: false })
+hitbox.setCapsule([0, 0.1, 0], [0, 1, 0], 0.1)
+const off = hitbox.onContact(c => { if (c.phase === 'enter') this.strike(c.node, c.point) })
+
+// From the attack's clip events:
+//   'hit'    -> hitbox.enabled = true
+//   'hitEnd' -> hitbox.enabled = false
+// I-frames: hurt.trigger.enabled = false while rolling.
+```
+
+- `enabled` switches a trigger off and on for free: its shapes stay, physics and queries ignore it, and an
+  overlap it was in ends with an exit. `removeTrigger()` takes it away for good.
+- `onContact(listener)` hears the trigger's own enters and exits with the point on the other volume and,
+  for a `continuous` trigger, how far through the frame's sweep (`fraction`) the overlap began. Keep the
+  returned remover and call it when you are done.
+- Overlap queries see hurtbox triggers with `{ includeTriggers: true, layerMask: HURTBOX }`; a disabled
+  trigger is never found.
+- The Valley example's combat (`examples/scripts/SoulsHitbox.ts`) is built exactly like this.
 
 ```ts
 export default class PickupNode extends Node {

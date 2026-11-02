@@ -330,6 +330,8 @@ export { TextureManager } from "./graphics/systems/textureManager";
 export { TexturePacker, isDerivedTextureId, PACKED_ID_PREFIX } from "./graphics/systems/texturePacker";
 export type { PackSpec, ChannelSource } from "./graphics/systems/texturePacker";
 export { RigidBody as Body, Trigger } from "./physics/body";
+export type { TriggerOptions, TriggerContact } from "./physics/body";
+export type { TriggerOverlap } from "./physics/triggerOverlaps";
 export { Ragdoll, RAGDOLL_DEFAULTS } from "./physics/ragdoll";
 export type { RagdollOptions } from "./physics/ragdoll";
 export {

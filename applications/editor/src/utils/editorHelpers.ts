@@ -37,6 +37,7 @@ import type { BodyDescription, ShapeDescription } from '../features/EngineContex
 import type { DebugVisibility, DebugChannel, DebugCategory } from '../features/DebugVisibilityContext';
 import { shapeScaleFactors } from '../features/gizmo/collisionGizmoMath';
 import { selectedCollisionShape, type CollisionChannel } from '../features/gizmo/collisionSelection';
+import { ensureLiveTriggerOverlay, dropLiveTriggerOverlay, LIVE_TRIGGERS, type LiveTriggerSource } from './liveTriggerOverlay';
 
 /**
  * Editor-only visual helpers (light/probe icons, camera frustum gizmos, physics debug wireframes),
@@ -221,7 +222,7 @@ function shapeDebugGeometry(shape: ShapeDescription, scale: Vec.vec3): Geometry 
  * colliders, and a mesh per shape (a draw, a material and a transform to update every frame) cost the
  * editor more than the level itself.
  */
-function buildMergedShapeWire(shapes: ShapeDescription[], color: [number, number, number], scale: Vec.vec3): ModelNode | null {
+export function buildMergedShapeWire(shapes: ShapeDescription[], color: [number, number, number], scale: Vec.vec3): ModelNode | null {
   const positions: number[] = [];
   const indices: number[] = [];
   const place = new Node('__debug__place');
@@ -1193,6 +1194,13 @@ export function reconcileEditorHelpers(
    * aids for the node you are placing, not permanent scene furniture.
    */
   selectedId: string | null = null,
+  options: {
+    /**
+     * Draw the triggers physics is testing right now (liveTriggerOverlay.ts) instead of the authored map:
+     * what Play and Simulate want, where most triggers are made by scripts and switched many times a second.
+     */
+    liveTriggers?: boolean;
+  } = {},
 ) {
   // With no settings supplied (or a category missing): everything on in the editor, off at runtime.
   const show = (cat: DebugCategory): boolean =>
@@ -1313,8 +1321,12 @@ export function reconcileEditorHelpers(
       || isOrientedVolume(selected) || (selected instanceof ForceFieldNode && selected.shape !== 'global'))
     ensureEffectShape(scene, selected);
 
-  // 5. Trigger wireframes (green), following the target's world transform.
-  if (show('triggers')) {
+  // 5. Trigger wireframes (green), following the target's world transform. While the game runs, the live
+  // overlay draws every trigger in the physics world instead — the authored ones included.
+  const physics = (scene as any).physics as LiveTriggerSource | undefined;
+  const live = !!options.liveTriggers && !!physics;
+  if (show('triggers') && live) ensureLiveTriggerOverlay(scene, physics!, buildMergedShapeWire);
+  else if (show('triggers')) {
     for (const [id, trigger] of triggers) {
       const target = scene.getNodeById(id);
       if (!target) continue;
@@ -1345,7 +1357,9 @@ export function reconcileEditorHelpers(
       if (!show('colliders') || !bodies.has(id) || !scene.getNodeById(id)) drop();
     } else if (node.name.startsWith(TRIGGER_PREFIX)) {
       const id = node.name.slice(TRIGGER_PREFIX.length);
-      if (!show('triggers') || !triggers.has(id) || !scene.getNodeById(id)) drop();
+      if (!show('triggers') || live || !triggers.has(id) || !scene.getNodeById(id)) drop();
+    } else if (node.name === LIVE_TRIGGERS) {
+      if (!show('triggers') || !live) { dropLiveTriggerOverlay(scene); cache.delete(node.name); }
     } else if (node.name.startsWith(TERRAIN_PREFIX)) {
       const id = node.name.slice(TERRAIN_PREFIX.length);
       if (!show('colliders') || !landscapeIds.has(id)) drop();

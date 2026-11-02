@@ -6,7 +6,6 @@ import TransformGizmo from "./gizmo/TransformGizmo";
 import CollisionGizmo from "./gizmo/CollisionGizmo";
 import BoxVolumeGizmo from "./gizmo/BoxVolumeGizmo";
 import { useCollisionShapeSelection } from "./gizmo/collisionSelection";
-import BoneGizmo from "./clip/BoneGizmo";
 import SocketPreviews from "./sockets/SocketPreviews";
 import SocketGizmo from "./sockets/SocketGizmo";
 import RagdollPreview from './rig/RagdollPreview';
@@ -526,7 +525,7 @@ export default function EngineViewport() {
                 <RagdollPreview />
             </>}
 
-            {/* The clip editor draws the same bone overlay, but NOT `AnimationPlayer`: its transport is a
+            {/* The Clip Player draws the same bone overlay, but NOT `AnimationPlayer`: its transport is a
                 dock panel (`clipTimeline`), because the timeline is the work surface here rather than a
                 control floating over one. Two transports would also fight over the same animator. */}
             {/* The animation field previews a character too, and its bones are what the blend is posing —
@@ -538,12 +537,10 @@ export default function EngineViewport() {
                 <SocketPreviews targetId={animationFieldTargetId} />
             </>}
 
+            {/* The Clip Player plays a clip on an editor-owned preview character; nothing in its scene is
+                edited, so the scene gizmo stays off here too (`showGizmo`). */}
             {editorMode === 'animation' && <>
                 <AnimationSkeletonTool viewportRef={viewportRef} />
-                {/* The scene gizmo is off in this mode (`showGizmo`), because the thing being posed is a
-                    BONE and not a node. This one drives the same gizmo through a proxy node parked on the
-                    selected joint. */}
-                <BoneGizmo viewportRef={viewportRef} />
                 <SocketPreviews />
             </>}
         </div>

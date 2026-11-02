@@ -1,15 +1,13 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { CleoEngine, Node, Scene, SkyAtmosphereNode, SkyboxNode, markEditorOwned, isEditorOwnedName } from 'cleo'
-import type { SceneChange } from 'cleo'
-import { isEditorOwnedChange } from '../src/utils/editorOwned'
+import { Scene, SkyAtmosphereNode, SkyboxNode, markEditorOwned, isEditorOwnedName } from 'cleo'
 import { removeExistingSky } from '../src/features/sceneInspector/addCatalog'
 import EventEmitter from '@cleo/app-kit/utils/eventEmitter'
 
 /**
- * The editor chrome three viewport tools park in the scene — the clip tab's bone-gizmo proxy and the two
- * brush cursors — plus the Add catalog's one-sky rule, which used to reach an asset tab's preview sky.
+ * The editor chrome two viewport tools park in the scene — the two brush cursors — plus the Add catalog's
+ * one-sky rule, which used to reach an asset tab's preview sky.
  *
  * None of these may ever mark a tab unsaved or become an undo step. The components are React and GL, so
  * their half is pinned as source contracts (the style of gizmoContract.test.ts); everything that runs
@@ -17,7 +15,6 @@ import EventEmitter from '@cleo/app-kit/utils/eventEmitter'
  */
 
 const read = (rel: string) => readFileSync(join(__dirname, '../src/features', rel), 'utf8')
-const BONE_GIZMO = read('clip/BoneGizmo.tsx')
 const LANDSCAPE_BRUSH = read('landscape/LandscapeBrush.tsx')
 // The landscape cursor's lifecycle moved out of the component into BrushCursor when the ring became a decal;
 // the contracts below follow it there, and the component is held to disposing it.
@@ -27,60 +24,6 @@ const TILEMAP_BRUSH = read('tilemap/TilemapBrush.tsx')
 const scenes: Scene[] = []
 const newScene = () => { const s = new Scene(); scenes.push(s); return s }
 afterEach(() => { while (scenes.length) scenes.pop()!.dispose() })
-
-function capture(run: () => void): SceneChange[] {
-  const events: SceneChange[] = []
-  const listener = (e: SceneChange) => events.push(e)
-  CleoEngine.eventEmitter.on('SCENE_CHANGED', listener)
-  try { run() } finally { CleoEngine.eventEmitter.off('SCENE_CHANGED', listener) }
-  return events
-}
-
-describe('the bone gizmo proxy', () => {
-  const name = /const BONE_GIZMO_PROXY_NAME = '([^']+)'/.exec(BONE_GIZMO)?.[1] ?? ''
-
-  it('is named as editor chrome', () => {
-    // Unprefixed, every per-frame park on the selected joint marked the clip tab unsaved.
-    expect(name).toBe('__editor__boneGizmoProxy')
-    expect(isEditorOwnedName(name)).toBe(true)
-    expect(BONE_GIZMO).not.toMatch(/['"]__boneGizmoProxy['"]/)
-  })
-
-  it('stays unpickable: no lowercase `gizmo`, which is the raycaster\'s exception for handles', () => {
-    // Raycaster.raycast skips `__editor__` names unless they contain lowercase `gizmo`.
-    expect(name.startsWith('__editor__') && !name.includes('gizmo')).toBe(true)
-  })
-
-  it('emits only owned events when added and removed, and nothing at all when parked on a joint', () => {
-    const scene = newScene()
-    const proxy = markEditorOwned(new Node(name))
-    const added = capture(() => scene.addNode(proxy))
-    expect(added.length).toBeGreaterThan(0)
-    expect(added.every(isEditorOwnedChange)).toBe(true)
-    // The rAF sync loop writes these every frame while a joint is selected.
-    expect(capture(() => {
-      proxy.setPosition([1, 2, 3])
-      proxy.setQuaternion([0, 0, 0, 1])
-    })).toEqual([])
-    const removed = capture(() => scene.removeNode(proxy))
-    expect(removed.length).toBeGreaterThan(0)
-    expect(removed.every(isEditorOwnedChange)).toBe(true)
-    expect(proxy.parent).toBe(null)
-  })
-
-  it('is added and removed synchronously inside withoutDirty, never through remove()', () => {
-    // remove() despawns now and leaves the detach to Scene.update's sweep, a frame later and outside any
-    // bracket, where it lands as a 'Delete' undo step.
-    expect(code(BONE_GIZMO)).not.toMatch(/\.remove\(\)/)
-    for (const token of ['editorScene.addNode(', 'editorScene.removeNode('])
-      for (const at of occurrences(BONE_GIZMO, token))
-        expect(insideWithoutDirty(BONE_GIZMO, at), `${token} at index ${at}`).toBe(true)
-  })
-
-  it('never goes into the game scene while a restored clip tab is still building its own', () => {
-    expect(BONE_GIZMO).toMatch(/if \(!editorScene \|\| editorScene === mainScene\) return/)
-  })
-})
 
 describe.each([
   ['LandscapeBrush', BRUSH_CURSOR, '__editor__terrainBrush'],

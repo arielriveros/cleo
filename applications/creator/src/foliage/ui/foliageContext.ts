@@ -7,8 +7,6 @@ import type { StageSettings } from './foliageStage';
 
 // The Foliage Creator workspace's shared state, read by every dock panel (FoliageWorkspace provides it).
 
-export interface SavedVariant { id: string; label: string; doc: FoliageDoc }
-
 /**
  * A user's replacement for one generated texture: the decoded pixels, a preview URL, and the file as
  * loaded (kept with a saved asset, so reopening it restores the override).
@@ -27,10 +25,6 @@ export interface FoliageState {
   overrides: Partial<Record<TextureKey, TextureOverride>>;
   /** `flipGreen`: the file is a DirectX normal map. */
   setOverride: (key: TextureKey, file: File | null, opts?: { flipGreen?: boolean }) => Promise<void>;
-  variants: SavedVariant[];
-  setVariants: (v: SavedVariant[]) => void;
-  /** Seeds tried this session, newest first. */
-  seedHistory: number[];
   impostorPreview: { albedoUrl: string; normalUrl: string } | null;
   bakeImpostorPreview: () => void;
   exporting: boolean;

@@ -120,6 +120,8 @@ export class Scene {
     private _cloths: Set<ClothNode> = new Set();
     /** Skinned models with cloth parts (AnimatedModel.skinnedCloth), stepped with the cloths. */
     private _skinnedCloths: Set<ModelNode> = new Set();
+    /** Callbacks run after everything has moved this frame; see {@link addLateUpdate}. */
+    private _lateUpdates: Set<(delta: number) => void> = new Set();
     private _particleSystems: Set<ParticleSystemNode> = new Set();
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
@@ -559,6 +561,20 @@ export class Scene {
                 sceneStats.rigMs = performance.now() - rigStart;
             }
 
+            // Last: everything has moved — scripts, animators, socket followers, cloth, camera rigs — so a
+            // late callback reads the poses that are about to be drawn.
+            if (this._lateUpdates.size > 0) {
+                authoring.derived++;
+                try {
+                    for (const fn of this._lateUpdates) {
+                        try { fn(delta); }
+                        catch (e) { Logger.error(`Error in a late update: ${e}`); }
+                    }
+                } finally {
+                    authoring.derived--;
+                }
+            }
+
             this._updateAudio();
 
             this._solveUI();
@@ -568,6 +584,17 @@ export class Scene {
         } catch (e) {
             Logger.error(e);
         }
+    }
+
+    /**
+     * Run `fn` once per frame AFTER every script, animator, socket follower, cloth and camera rig has moved
+     * what it moves: the place to read final world poses, e.g. an overlay drawn over held weapons, which
+     * would trail them by a frame if it placed itself in its own onUpdate. Runs whether or not the scene is
+     * playing; writes made in it count as derived, never as edits. Returns the remover.
+     */
+    public addLateUpdate(fn: (delta: number) => void): () => void {
+        this._lateUpdates.add(fn);
+        return () => { this._lateUpdates.delete(fn); };
     }
 
     /**

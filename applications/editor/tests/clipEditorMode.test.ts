@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 // Adding an editor mode means touching about fifteen files, and only four of them are compile errors if
@@ -8,26 +8,33 @@ import { join } from 'path'
 //
 // These read source text rather than importing, for the reason editorModeReachability.test.ts gives:
 // EngineContext pulls in the whole engine.
+//
+// The mode is the CLIP PLAYER now: clips are authored in Cleo Creator, and the editor plays them and places
+// their events. It kept the `animation` tab kind, so TabKind === EditorMode === AssetKind still holds.
 
-const read = (...p: string[]) => readFileSync(join(__dirname, '..', 'src', ...p), 'utf-8').replace(/\r\n/g, '\n')
+const SRC = join(__dirname, '..', 'src')
+const read = (...p: string[]) => readFileSync(join(SRC, ...p), 'utf-8').replace(/\r\n/g, '\n')
 
 const DOCK = () => read('features', 'layout', 'DockLayout.tsx')
 const PANELS = () => read('features', 'layout', 'panels.tsx')
 
-describe('the clip editor mode is fully wired', () => {
+describe('the Clip Player mode is fully wired', () => {
   it('its panels are declared, registered, built and revealed', () => {
     const dock = DOCK()
     // Declared as a group...
-    expect(dock).toMatch(/const CLIP_PANELS = \[[^\]]*'clipTracks'[^\]]*'clipTimeline'[^\]]*\]/)
+    expect(dock).toMatch(/const CLIP_PANELS = \[[^\]]*'clipInspector'[^\]]*'clipTimeline'[^\]]*\]/)
     // ...hidden everywhere but its own mode. Without this line the panels leak into every other mode,
     // because `hiddenPanelIds`'s switch has no default.
     expect(dock).toContain("if (mode !== 'animation') for (const id of CLIP_PANELS) hidden.add(id)")
     // ...added to the default tree. A panel absent here exists in no layout at all.
-    expect(dock).toMatch(/'clipTracks'.*TILEMAP_PANELS|clipTracks/)
+    expect(dock).toMatch(/'clipInspector', \.\.\.TILEMAP_PANELS/)
     expect(dock).toContain("id: 'clipTimeline', component: 'clipTimeline'")
     // ...and resolvable to a component. An id with no entry here renders nothing, with no error.
-    expect(PANELS()).toMatch(/clipTracks: ClipTracksPanel/)
+    expect(PANELS()).toMatch(/clipInspector: ClipInspectorPanel/)
     expect(PANELS()).toMatch(/clipTimeline: ClipTimelinePanel/)
+    // The per-bone key tracks are gone, and so is the panel id named after them.
+    expect(dock).not.toContain("'clipTracks'")
+    expect(PANELS()).not.toContain('clipTracks')
   })
 
   it('the timeline is renderer:always, because its rAF loop poses the character', () => {
@@ -40,11 +47,11 @@ describe('the clip editor mode is fully wired', () => {
     expect(DOCK()).toContain("editorMode === 'animation' ? 'clipTimeline'")
   })
 
-  it('the layout version was bumped and the old key retired', () => {
-    // A stored v15 tree is keyed by a mode name that no longer exists AND knows nothing of the new
-    // panels. Leaving the version alone would restore an unreadable arrangement rather than rebuilding.
+  it('the layout version was bumped for the renamed panel, and the old key retired', () => {
+    // A stored v20 tree names `clipTracks`, which no longer exists. Leaving the version alone would
+    // restore an arrangement with a hole in it rather than rebuilding.
     const dock = DOCK()
-    expect(dock).toMatch(/const LAYOUT_VERSION = (1[6-9]|[2-9]\d)/)
+    expect(dock).toMatch(/const LAYOUT_VERSION = (2[1-9]|[3-9]\d)/)
     expect(dock).toContain("'cleo_dock_layout_v15'")
   })
 
@@ -58,30 +65,28 @@ describe('the clip editor mode is fully wired', () => {
   })
 
   it('deleting the asset closes the tab', () => {
-    // Otherwise the tab stays open over a record that no longer exists, and its session holds a working
-    // copy that Save would happily re-add — resurrecting the asset the user just deleted.
     const ctx = read('features', 'EngineContext.tsx')
     const remove = ctx.slice(ctx.indexOf('const removeAnimation = '), ctx.indexOf('const removeAnimation = ') + 700)
     expect(remove).toContain("t.kind === 'animation' && t.animationId === id")
     expect(remove).toContain('removeTabById')
   })
 
-  it('the save orchestrator can reach the session', () => {
+  it('a clip tab has nothing to save: its edits are written as they are made', () => {
     const saving = read('features', 'hooks', 'useSaving.ts')
-    expect(saving).toContain('registerClipApply')
-    expect(saving).toMatch(/case 'animation': \{[\s\S]{0,200}clipApplyRef/)
-    // A clip saves in the first tier, with the rig it is authored against — before any model or scene
-    // that plays it.
+    expect(saving).not.toContain('registerClipApply')
+    expect(saving).not.toContain('clipApplyRef')
+    expect(saving).toContain("case 'animation': break;")
+    // ORDER is exhaustive over TabKind, so the kind keeps a tier.
     expect(saving).toMatch(/animation: 0/)
+    for (const gone of ['saveClipAs', 'saveClip:', 'registerClipApply'])
+      expect(read('features', 'EngineContext.tsx')).not.toContain(gone)
   })
 })
 
 // The old `animation` mode was the per-node STATE MACHINE editor. It kept its behaviour and gave up its
-// name, so that the clip editor's kind could match its AssetKind and need no special cases anywhere.
+// name, so that the clip tab's kind could match its AssetKind and need no special cases anywhere.
 describe('the state machine mode kept its behaviour under its new name', () => {
   it('nothing still gates on the old spelling', () => {
-    // Each of these is a place where `'animation'` now means the CLIP editor. A missed rename would not
-    // fail to compile — both are valid TabKinds — it would just silently apply the wrong mode's rules.
     for (const [file, needle] of [
       [read('features', 'animation', 'StateGraph.tsx'), "editorMode !== 'stateMachine'"],
       [read('features', 'EngineViewport.tsx'), "editorMode === 'stateMachine' && !graphView"],
@@ -100,9 +105,6 @@ describe('the state machine mode kept its behaviour under its new name', () => {
 
   it('the skeleton tree and bone overlay serve all three skeleton modes', () => {
     expect(PANELS()).toContain("editorMode === 'stateMachine' || editorMode === 'rig' || editorMode === 'animation'")
-    // `setSkeletonOverlay` is a single global slot, so the scene-wide debug overlay must stand down
-    // wherever a dedicated bone overlay is up. Which modes those are is one exhaustive table now, and the
-    // animation FIELD joined it: its skeleton used to depend on the debug toggle, which is off by default.
     expect(read('features', 'DebugSkeletonOverlay.tsx')).toContain('!MODE_SKELETON_OWNER[editorMode]')
     const types = read('features', 'engineContextTypes.ts')
     const table = types.slice(types.indexOf('MODE_SKELETON_OWNER'), types.indexOf('};', types.indexOf('MODE_SKELETON_OWNER')))
@@ -111,112 +113,115 @@ describe('the state machine mode kept its behaviour under its new name', () => {
   })
 })
 
-// Root motion and the in-place bake are opposite answers to one question. Two independent toggles could
-// express states that mean nothing — drive the character from travel that has been baked out of the
-// curves — and neither of the old surfaces could show the other half of the decision.
 describe('root motion has exactly one place to set it', () => {
-  it('the asset picker no longer toggles it', () => {
+  it('the asset picker and the animator clips panel no longer toggle it', () => {
     const picker = read('features', 'animation', 'AnimationAssetPicker.tsx')
     expect(picker).not.toContain('rootMotion: on')
     expect(picker).not.toContain('rootMotionToggle')
-  })
-
-  it('the state machine clips panel no longer toggles it', () => {
     const sm = read('features', 'animation', 'StateMachineEditor.tsx')
     expect(sm).not.toContain('toggleClipRootMotion')
     expect(sm).not.toContain('rootMotionOf')
-  })
-
-  it('and the plumbing behind them is gone rather than left dangling', () => {
     expect(read('features', 'animation', 'StateMachineContext.tsx')).not.toContain('toggleClipRootMotion')
     expect(read('features', 'EngineContext.tsx')).not.toContain('setClipRootMotion')
   })
 
-  it('the clip editor presents it as one three-way choice', () => {
+  it('the Clip Player offers it as a two-way choice — baking in place was a clip edit, and those are gone', () => {
     const inspector = read('features', 'clip', 'ClipInspector.tsx')
-    expect(inspector).toContain("rootMode")
-    // All three answers, and the fact that picking one clears the other.
-    for (const mode of ['mesh', 'character', 'inPlace']) expect(inspector).toContain(`'${mode}'`)
-    expect(inspector).toContain("filter(e => e.kind !== 'inPlace')")
+    expect(inspector).toContain('rootMode')
+    for (const mode of ['mesh', 'character']) expect(inspector).toContain(`value: '${mode}'`)
+    expect(inspector).not.toContain("value: 'inPlace'")
+    // A legacy In place edit still strips the travel when the clip resolves, so the choice is locked while
+    // one is on the stack rather than silently doing nothing.
+    expect(inspector).toContain('bakedInPlace')
   })
 })
 
-// The clip session edits a library asset, not an engine Scene, so `HistoryContext`'s recorder — which
-// diffs Scene subtrees against a baseline captured on SELECT_NODE — sees nothing it can record. Undo here
-// is hand-built, and these pin the three ways that goes wrong quietly.
-describe('undo in the clip session', () => {
-  const ctx = () => read('features', 'clip', 'ClipContext.tsx')
-
-  it('every mutator goes through one commit that records', () => {
-    const s = ctx()
-    expect(s).toContain('useHistory')
-    expect(s).toMatch(/const commit = useCallback\(\([\s\S]{0,400}push\(\{ label, coalesceKey, undo/)
+// The editor no longer authors motion: keys, bone posing, the edit stack and Save As went to Cleo Creator.
+describe('the clip editor became a player', () => {
+  it('the authoring files are gone', () => {
+    for (const gone of [
+      ['features', 'clip', 'BonePose.tsx'], ['features', 'clip', 'BoneGizmo.tsx'], ['features', 'clip', 'boneTrs.ts'],
+      ['utils', 'clipTracks.ts'],
+    ]) expect(existsSync(join(SRC, ...gone)), gone.join('/')).toBe(false)
+    // The pose preview's one helper moved to the Skeleton part that still uses it.
+    expect(existsSync(join(SRC, 'features', 'rig', 'boneTrs.ts'))).toBe(true)
   })
 
-  it('mutators read a ref, not a functional setState', () => {
-    // A side effect inside a state updater runs TWICE under StrictMode, which would put two entries on the
-    // stack for one edit — and the second would restore to a state that was never on screen.
-    const s = ctx()
-    const body = s.slice(s.indexOf('const patchClip'))
-    expect(body).toContain('assetRef.current')
-    expect(s).not.toMatch(/setAsset\(prev =>/)
-  })
-
-  it('undo itself does NOT record', () => {
-    // `restore` is what undo and redo call; if it pushed, undoing would push a redo of the undo and the
-    // stack would never drain.
-    const s = ctx()
-    const restore = s.slice(s.indexOf('const restore = useCallback'), s.indexOf('const commit = useCallback'))
-    expect(restore).not.toContain('push(')
-  })
-
-  it('a key drag is ONE step, not one per frame', () => {
-    const t = read('features', 'clip', 'ClipTimeline.tsx')
-    expect(t).toContain("beginBatch('Move key')")
-    expect(t).toContain('endBatch()')
-  })
-
-  it('the live preview is debounced for content edits and immediate for structural ones', () => {
-    // `applyPreviewClips` re-runs the edit stack, the retarget and a re-bind. A key drag replaces the
-    // asset every pointer move, so doing that synchronously is O(bones x keys) sixty times a second.
-    const t = read('features', 'clip', 'ClipTimeline.tsx')
-    expect(t).toContain('lastStructuralRef')
-    expect(t).toMatch(/setTimeout\(apply, \d+\)/)
-  })
-})
-
-// The transform gizmo works on a scene NODE; a bone is not one. Rather than fork it, a proxy node is
-// parked on the selected joint and the drag is converted back into the bone's local transform.
-describe('posing a bone with the gizmo', () => {
-  const g = () => read('features', 'clip', 'BoneGizmo.tsx')
-
-  it('is mounted in clip mode, and the scene gizmo is not', () => {
+  it('no bone gizmo is mounted, and the scene gizmo stays off in the mode', () => {
     const v = read('features', 'EngineViewport.tsx')
-    expect(v).toContain('<BoneGizmo viewportRef={viewportRef} />')
-    // `showGizmo` stands down in clip mode, or two gizmos would fight over the same pointer.
+    expect(v).not.toContain('BoneGizmo')
     expect(v).toContain("editorMode !== 'stateMachine' && editorMode !== 'animation'")
   })
 
-  it('reuses TransformGizmo rather than forking it', () => {
-    expect(g()).toContain('<TransformGizmo')
+  it('the inspector has no edit stack, no batch apply and no Save As', () => {
+    const inspector = read('features', 'clip', 'ClipInspector.tsx')
+    for (const gone of ['+ Mirror', '+ Retime', 'Apply an edit to other clips', 'Save As', 'BonePose'])
+      expect(inspector).not.toContain(gone)
   })
 
-  it('walks the non-joint pivot chain when converting back to bone-local', () => {
-    // Skipping `parentChain` lands the pose in the wrong frame on assimp-converted FBX rigs — which are
-    // exactly the ones where it is hardest to see what went wrong.
-    const s = g()
-    expect(s).toContain('topo.parentChain[jointIndex]')
-    expect(s).toContain('boneLocalTransform(nodeIndex)')  // the LIVE pivot local, not its rest
+  it('legacy edit stacks keep resolving, and the player offers a way to drop them', () => {
+    const inspector = read('features', 'clip', 'ClipInspector.tsx')
+    expect(inspector).toMatch(/legacy edit/)
+    expect(inspector).toContain("{ edits: undefined }")
+    // The engine-side edit stack is untouched: both resolve sites still run it.
+    expect(read('utils', 'animationResolve.ts')).toContain('applyClipEdits(')
+    expect(read('player', 'animations.ts')).toContain('applyClipEdits(')
   })
 
-  it('stops syncing the proxy while a drag is in flight', () => {
-    // Otherwise the sync loop rewrites the proxy every frame and fights the pointer.
-    expect(g()).toContain('!draggingRef.current')
+  it('the session has no working copy: the asset is the library record', () => {
+    const ctx = read('features', 'clip', 'ClipContext.tsx')
+    expect(ctx).toContain('animations.find(a => a.id === editingAnimationId)')
+    for (const gone of ['assetRef', 'saveAs', 'patchClip', 'setEdits']) expect(ctx).not.toContain(gone)
   })
 
-  it('does not let a move or rotate drag change the bone’s scale', () => {
-    // The proxy carries whatever scale the joint's world matrix had; round-tripping it through every drag
-    // would drift the bone's size with nothing touching scale.
-    expect(g()).toMatch(/patch\.kind === 'scale'\s*\n?\s*\?/)
+  it('the preview re-binds for a change to the motion, never for an events write', () => {
+    // An events write replaces the asset object. Re-binding for it would stop playback for a change that
+    // moves no bone.
+    const t = read('features', 'clip', 'ClipTimeline.tsx')
+    const parts = t.slice(t.indexOf('function poseParts'), t.indexOf('const sameParts'))
+    expect(parts).toContain('c.samplers')
+    expect(parts).not.toContain('events')
+  })
+})
+
+// Events belong to the CLIP: one track, one hook, written to the `.anim`.
+describe('events are authored on the clip, in one place', () => {
+  it('one Events track serves the Clip Player and the Animator / Skeleton transport', () => {
+    expect(read('features', 'clip', 'ClipTimeline.tsx')).toContain('<ClipEventsTrack')
+    expect(read('features', 'animation', 'AnimationPlayer.tsx')).toContain('<ClipEventsTrack')
+  })
+
+  it('writes go to the library asset with an undo entry, and a drag is one write', () => {
+    const hook = read('features', 'animation', 'useClipEvents.ts')
+    expect(hook).toContain('editSharedClip(assetId, clipName, patch)')
+    expect(hook).toMatch(/push\(\{[\s\S]{0,200}undo: \(\) => editSharedClip\(assetId, clipName, before\)/)
+    // The marker follows the pointer locally; the asset is written once, on release.
+    const track = read('features', 'animation', 'ClipEventsTrack.tsx')
+    expect(track).toMatch(/const up = \(\) => \{[\s\S]{0,300}if \(moved\) move\(index, at\)/)
+  })
+
+  it('several clips of one asset can be written in one tick', () => {
+    // The animator's events moving onto its clips writes them back to back; each write must build on the last.
+    const ctx = read('features', 'EngineContext.tsx')
+    const fn = ctx.slice(ctx.indexOf('const editSharedClip = '), ctx.indexOf('const editSharedClip = ') + 1400)
+    expect(fn).toContain('animationsRef.current = animationsRef.current.map(')
+  })
+
+  it('the animator no longer authors its own markers, and moves old ones onto the clips when opened', () => {
+    const smc = read('features', 'animation', 'StateMachineContext.tsx')
+    for (const gone of ['addEvent', 'setEvent', 'removeEvent']) expect(smc).not.toContain(gone)
+    expect(smc).toContain('liftMachineEvents(')
+    expect(read('features', 'animation', 'StateMachineEditor.tsx')).not.toContain("title='Events'")
+    expect(read('features', 'animation', 'AnimationPlayer.tsx')).not.toContain('addEvent(')
+  })
+})
+
+describe('the Animate wizard is gone', () => {
+  it('nothing builds or opens it', () => {
+    expect(existsSync(join(SRC, 'features', 'characterAnimation', 'AnimateCharacterWizard.tsx'))).toBe(false)
+    expect(existsSync(join(SRC, 'utils', 'animatorTemplates.ts'))).toBe(false)
+    expect(read('features', 'nodeInspector', 'propertyEditors', 'AnimationSlot.tsx')).not.toContain('Wizard')
+    expect(read('features', 'EngineContext.tsx')).not.toContain('animateCharacter')
+    expect(read('features', 'EditorSessionsContext.tsx')).not.toContain('animateCharacter')
   })
 })

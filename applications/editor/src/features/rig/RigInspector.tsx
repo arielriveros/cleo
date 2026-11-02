@@ -183,8 +183,8 @@ export default function RigInspector() {
         <BoneMasksPanel />
 
         {/* ---- Poses ------------------------------------------------------------------------------ */}
-        {/* Pose ASSETS on this skeleton (plus any legacy poses stored on the rig itself). Authored in the
-            clip editor, where a character is posed bone by bone; managed here. */}
+        {/* Pose ASSETS on this skeleton (plus any legacy poses stored on the rig itself). Authored in
+            Cleo Creator ▸ Motion and synced into /Creator/Poses; previewed and managed here. */}
         <PoseAssetsPanel />
 
         {/* ---- Retargeting ------------------------------------------------------------------------ */}

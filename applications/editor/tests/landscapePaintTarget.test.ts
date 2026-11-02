@@ -17,7 +17,7 @@ describe('the landscape layer stack is on screen', () => {
   it('sits in a group of its own, not tabbed behind the tools', () => {
     expect(DOCK).toMatch(/id: 'landscapeLayers', component: 'landscapeLayers'[\s\S]{0,200}direction: 'below'/)
     // …and the tools keep sharing the Properties tab strip, so only one group was added.
-    expect(DOCK).toMatch(/'clipTracks', \.\.\.TILEMAP_PANELS, 'landscapeTools'/)
+    expect(DOCK).toMatch(/'clipInspector', \.\.\.TILEMAP_PANELS, 'landscapeTools'/)
   })
 
   it('opens on the tools rather than Properties, every time the mode is entered', () => {

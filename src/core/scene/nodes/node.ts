@@ -1,5 +1,6 @@
 import { mat4, vec3, quat } from "gl-matrix";
 import { RigidBody, Trigger } from "../../../physics/body";
+import type { TriggerOptions } from "../../../physics/body";
 import type { SimulationMode } from "../../../physics/simulationRange";
 import { MotionRecord, MotionConfig, motionConfig, planarSplit, signedAngleBetween, headingAngle, facingComponents } from "../../../physics/motion";
 import type { Scene } from "../scene";
@@ -1052,8 +1053,13 @@ export class Node {
 
     // Triggers are deliberately NOT recentred: they are massless sensors driven straight from
     // node.worldPosition by PhysicsSystem, so there is no centre of mass to get wrong.
-    if (json.trigger)
-      setShapes(json.trigger.shapes, node.setTrigger());
+    if (json.trigger) {
+      // Every option is optional in the JSON: absent ones keep a plain trigger's behaviour.
+      const t = json.trigger;
+      setShapes(t.shapes, node.setTrigger({
+        enabled: t.enabled, group: t.group, mask: t.mask, detectTriggers: t.detectTriggers, continuous: t.continuous,
+      }));
+    }
 
     if (json.children) {
       for (const child of json.children)
@@ -2127,10 +2133,16 @@ export class Node {
    * to {@link onTrigger}. Bodies pass straight through it — nothing is pushed — which is what makes it
    * the tool for checkpoints, pickups and detection zones rather than {@link setBody}.
    *
+   * Replaces the node's previous trigger, if it had one. `options` sets its layers, whether it starts
+   * enabled, and whether it detects other triggers (see `TriggerOptions`).
+   *
    * @returns The new trigger, also available afterwards as {@link trigger}.
    */
-  public setTrigger(): Trigger {
+  public setTrigger(options?: TriggerOptions): Trigger {
+    // The old one would otherwise stay in the physics world, unreachable from the node, still reporting.
+    if (this._trigger) this.removeTrigger();
     this._trigger = new Trigger({
+      ...options,
       position: this.worldPosition,
       quaternion: this.worldQuaternion
     }, this);
@@ -2141,6 +2153,18 @@ export class Node {
     });
 
     return this._trigger;
+  }
+
+  /**
+   * Take this node's trigger volume away: out of the physics world, with an exit reported for every
+   * overlap it was in. To switch a trigger off for a moment and back on (an attack's hitbox), set
+   * `trigger.enabled` instead — that keeps its shapes and costs nothing.
+   */
+  public removeTrigger(): void {
+    const trigger = this._trigger;
+    if (!trigger) return;
+    this._trigger = null;
+    this._scene?.physics?.removeBody(trigger);
   }
 
   // These four return the node's LIVE internal vectors, so writing through them — `node.position[0] += 1`

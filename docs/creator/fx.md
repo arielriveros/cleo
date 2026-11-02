@@ -207,12 +207,14 @@ Wind across the stage: an engine Wind node, and a force on the gas that pulls it
 | **Gust size** | Metres between gust crests. |
 | **Gust speed** | How fast the gusts travel. |
 
-## Viewport visibility
+## Stage
 
-The eye button top-right of the viewport, beside the move / rotate / scale buttons, shows and hides what
-the viewport draws. None of it changes the effect or the bake.
+The **Stage** menu top-right of the viewport, beside the move / rotate / scale buttons.
 
-| Field | Meaning |
+**Show** — shows and hides what the viewport draws. None of it changes the effect or the bake (the sun is the effect's:
+see [Sun & sky](#sun--sky)).
+
+| Row | Meaning |
 |---|---|
 | **Grid** | The editor grid on the ground. |
 | **Floor** | A matte ground plane, for the fire light and shadows to land on. |

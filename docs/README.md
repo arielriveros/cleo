@@ -104,6 +104,7 @@ After that the two halves are independent, and you can read either first:
 | [Animation built-ins](reference/animation-builtins.md) | Values you can bind an animation or AI parameter to |
 | [Render settings](reference/render-settings.md) | Every field, type and default |
 | [File formats](reference/file-formats.md) | Asset extensions, project bundles, published builds |
+| [Physics threading](reference/physics-threading.md) | The physics step on the main thread or in a Web Worker, and measurements |
 | [Glossary](reference/glossary.md) | Terms used throughout |
 
 ## Worked examples

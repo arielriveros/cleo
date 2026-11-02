@@ -2,16 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { getAnimationTarget } from './skeleton'
 import { useStateMachine } from './StateMachineContext'
-import { Button, NumberInput, Select, Toggle } from '@cleo/app-kit/ui'
+import ClipEventsTrack, { TRACK_GUTTER, TRACK_TAIL } from './ClipEventsTrack'
+import { Button, NumberInput, Select, Toggle, cn } from '@cleo/app-kit/ui'
 import { clamp } from '@cleo/app-kit/utils/math';
 
-// Floating bottom transport for the Animation Editor: play/scrub the target clip and host its event
-// markers. The editor scene is paused (animators do not tick), so this drives the animator itself
-// via requestAnimationFrame.
+// Floating bottom transport for the Animator and Skeleton parts: play/scrub a clip on the preview character,
+// with the clip's Events track under it. The editor scene is paused (animators do not tick), so this drives
+// the animator itself via requestAnimationFrame.
+//
+// Events are the CLIP's, written to its `.anim` (ClipEventsTrack) — the animator no longer holds its own.
+// A machine still carrying markers from before shows them read-only on the track; they keep firing.
 
 export default function AnimationPlayer() {
   const { editorScene, skeletonTargetId, closeTab, activeTabId, eventEmitter } = useCleoEngine()
-  const { sm, simulate, setSimulate, addEvent, setEvent } = useStateMachine()
+  const { sm, simulate, setSimulate } = useStateMachine()
 
   const [clip, setClip] = useState<string>('')
   const [playing, setPlaying] = useState(false)
@@ -25,8 +29,6 @@ export default function AnimationPlayer() {
   const lastRef = useRef(0)
   const scrubbingRef = useRef(false)
   const trackRef = useRef<HTMLDivElement | null>(null)
-  /** Index into sm.events of the marker being dragged, or -1. */
-  const dragRef = useRef(-1)
   const [, force] = useState(0)
 
   const target = getAnimationTarget(editorScene, skeletonTargetId)
@@ -93,8 +95,10 @@ export default function AnimationPlayer() {
   }
 
   const animator = target.animator
-  /** Markers for the clip on screen, carrying their index so a drag can write straight back to sm.events. */
-  const markers = sm.events.map((e, i) => ({ e, i })).filter(({ e }) => e.clipName === clip)
+  /** The clip on screen as the character holds it: `assetId` names the `.anim` its events are written to. */
+  const current = target.model.animations.find(a => a.name === clip)
+  /** The animator's own markers on this clip — what `liftMachineEvents` could not move (an embedded clip). */
+  const legacy = sm.events.filter(e => e.clipName === clip).map(e => ({ time: e.time, name: e.eventName }))
 
   const selectClip = (name: string) => {
     setClip(name)
@@ -144,26 +148,12 @@ export default function AnimationPlayer() {
     return clamp((clientX - r.left) / r.width, 0, 1) * duration
   }
 
+  // Drag listeners go on `window`, not the panel: a pointer that leaves the track mid-drag must keep
+  // being tracked.
   const onTrackDown = (e: React.PointerEvent) => {
-    if (dragRef.current >= 0) return // a marker grabbed it first
     onScrub(timeAt(e.clientX))
     const move = (ev: PointerEvent) => onScrub(timeAt(ev.clientX))
     const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
-
-  // Drag listeners go on `window`, not the panel: a pointer that leaves the track mid-drag must keep
-  // being tracked.
-  const onMarkerDown = (e: React.PointerEvent, index: number) => {
-    e.stopPropagation() // otherwise the track underneath seeks to wherever the marker was grabbed
-    dragRef.current = index
-    const move = (ev: PointerEvent) => setEvent(index, { time: timeAt(ev.clientX) })
-    const up = () => {
-      dragRef.current = -1
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-    }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
   }
@@ -201,40 +191,28 @@ export default function AnimationPlayer() {
             onChange={(n) => { const v = Math.max(0, n); setSpeed(v); animator.speed = v }} />
         </label>
 
-        <Button
-          className='ml-1 border-danger-border'
-          disabled={!clip}
-          title={clip ? `Drop an event marker on "${clip}" at the playhead — drag it to move it` : 'Pick a clip first'}
-          onClick={() => addEvent({ clipName: clip, time, eventName: 'event' })}>
-          + Event
-        </Button>
-
         <Button className='ml-auto' title='Close the Animation Editor tab' onClick={() => closeTab(activeTabId)}>Close</Button>
       </div>
 
       <div className='flex items-center gap-2 text-ui-sm text-muted'>
-        <span className='tabular-nums w-[46px] text-right'>{fmt(time)}</span>
+        <span className={cn(TRACK_GUTTER, 'shrink-0 tabular-nums text-right')}>{fmt(time)}</span>
 
-        {/* Track: click/drag anywhere to seek; red circles are this clip's event markers. */}
+        {/* Track: click/drag anywhere to seek. */}
         <div ref={trackRef} className='relative flex-1 h-4 cursor-pointer select-none' onPointerDown={onTrackDown}>
           <div className='absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 rounded bg-control-hover' />
           <div className='absolute left-0 top-1/2 -translate-y-1/2 h-1 rounded bg-primary' style={{ width: pct(time) }} />
           {/* Playhead */}
           <div className='absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-fg pointer-events-none'
             style={{ left: pct(time) }} />
-          {markers.map(({ e, i }) => (
-            <div
-              key={i}
-              className='absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-danger border border-danger-fg cursor-grab active:cursor-grabbing hover:scale-125 transition-transform'
-              style={{ left: pct(e.time) }}
-              title={`${e.eventName} @ ${e.time.toFixed(2)}s — drag to move`}
-              onPointerDown={ev => onMarkerDown(ev, i)} />
-          ))}
         </div>
 
-        <span className='tabular-nums w-[46px]'>{fmt(duration)}</span>
-        {simulate && hasStateMachine && <span className='text-highlight'>state: {animator.currentStateName ?? '—'}</span>}
+        <span className={cn(TRACK_TAIL, 'shrink-0 tabular-nums')}>{fmt(duration)}</span>
       </div>
+
+      <ClipEventsTrack assetId={current?.assetId} clipName={clip || undefined} duration={duration} time={time}
+        onSeek={onScrub} embedded={current?.events} legacy={legacy} />
+
+      {simulate && hasStateMachine && <span className='text-ui-sm text-highlight'>state: {animator.currentStateName ?? '—'}</span>}
     </div>
   )
 }

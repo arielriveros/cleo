@@ -1054,6 +1054,31 @@ function characterModel(key, materialId, scale) {
   return model
 }
 
+/**
+ * The combat volumes' collision layers (trigger group/mask bits), as SoulsHitbox's `LAYER` has them —
+ * tests/valleySouls.test.ts checks the two agree. 1 is every ordinary body and 2 the ragdoll bones.
+ */
+const COMBAT_LAYER = { PLAYER_HURTBOX: 1 << 8, ENEMY_HURTBOX: 1 << 9, HITBOX: 1 << 10 }
+
+/**
+ * A fighter's (or breakable's) HURTBOX: a `Hurtbox` child holding one trigger capsule the size of its
+ * walking capsule, in its team's layer, that detects hitboxes only (SoulsHitbox). Kept apart from the
+ * rigid body so it can be switched off for i-frames while the body keeps walking and colliding.
+ */
+function hurtboxNode(key, team, radius, height, shape = 'capsule') {
+  const s = shape === 'cylinder'
+    ? { type: 'cylinder', radius, height, numSegments: 12, offset: [0, height / 2, 0], rotation: [0, 0, 0] }
+    : { type: 'capsule', radius, height, numSegments: 16, offset: [0, height / 2, 0], rotation: [0, 0, 0] }
+  return node('Hurtbox', 'node', {
+    id: stableId(`${key}:hurtbox`),
+    trigger: {
+      shapes: [s],
+      group: team === 'player' ? COMBAT_LAYER.PLAYER_HURTBOX : COMBAT_LAYER.ENEMY_HURTBOX,
+      mask: COMBAT_LAYER.HITBOX, detectTriggers: true,
+    },
+  })
+}
+
 function capsuleBody(radius, height, mass = 60) {
   return {
     // No linear damping: locomotion sets the velocity every frame, and damping only made the body fall
@@ -1204,6 +1229,23 @@ function comboSegment(name, i) {
 }
 
 /**
+ * The fallback active window of segment `i` of a Motion Creator clip (one combo clip played a segment per
+ * move, see comboSegment), from the segment's own `hit`/`hitEnd` events and timed from the segment's
+ * start — what the move's clock reads. Only used by a replacement clip without events, as swingWindow.
+ */
+function segmentWindow(name, i) {
+  const clip = longswordClips.find(c => c.name === name)
+  if (!clip) throw new Error(`no clip "${name}" in longswordClips.json`)
+  const { clipStart, clipEnd } = comboSegment(name, i)
+  const inSegment = e => e.time >= clipStart - 1e-6 && (clipEnd === 0 || e.time <= clipEnd + 1e-6)
+  const events = (clip.events ?? []).filter(inSegment)
+  const hit = events.find(e => e.name === 'hit')?.time
+  const end = events.find(e => e.name === 'hitEnd' && hit !== undefined && e.time > hit)?.time
+  const r = v => Math.round(v * 1000) / 1000
+  return hit === undefined || end === undefined ? {} : { hitTime: r(hit - clipStart), activeSeconds: r(end - hit) }
+}
+
+/**
  * The fallback active window for a clip, read off its own `hit`/`hitEnd` markers, so the fields shown in
  * the inspector agree with the clip (they are only used when a replacement clip has no markers).
  */
@@ -1276,10 +1318,10 @@ const WEAPONS = [
   // next -- so all three share one play speed. Every attack steps, and the body travels by the clip's own
   // hips (rootMotion) -- no lunge. The clip's hit / hitEnd / combo / recover events time each swing.
   ['longsword', 'Longsword', 'SoulsLongsword', longswordParts(), [
-    ['Light1', { clip: 'Souls_LS_Combo', ...comboSegment('Souls_LS_Combo', 0), rootMotion: true, playSpeed: 1.1, damageMul: 1, staminaCost: 20, lungeSpeed: 0, trackSeconds: 0.3, next: 'Light2' }],
-    ['Light2', { clip: 'Souls_LS_Combo', ...comboSegment('Souls_LS_Combo', 1), rootMotion: true, playSpeed: 1.1, damageMul: 1, staminaCost: 20, lungeSpeed: 0, trackSeconds: 0.28, next: 'Light3' }],
-    ['Light3', { clip: 'Souls_LS_Combo', ...comboSegment('Souls_LS_Combo', 2), rootMotion: true, playSpeed: 1.1, damageMul: 1.2, staminaCost: 24, lungeSpeed: 0, trackSeconds: 0.36, next: 'Light1' }],
-    ['Heavy', { clip: 'Souls_LS_Heavy', rootMotion: true, playSpeed: 1.05, bounceOff: false, damageMul: 1.75, poiseMul: 2.2, staminaCost: 34, lungeSpeed: 0, trackSeconds: 0.55, next: '' }],
+    ['Light1', { clip: 'Souls_LS_Combo', ...comboSegment('Souls_LS_Combo', 0), ...segmentWindow('Souls_LS_Combo', 0), rootMotion: true, playSpeed: 1.1, damageMul: 1, staminaCost: 20, lungeSpeed: 0, trackSeconds: 0.3, next: 'Light2' }],
+    ['Light2', { clip: 'Souls_LS_Combo', ...comboSegment('Souls_LS_Combo', 1), ...segmentWindow('Souls_LS_Combo', 1), rootMotion: true, playSpeed: 1.1, damageMul: 1, staminaCost: 20, lungeSpeed: 0, trackSeconds: 0.28, next: 'Light3' }],
+    ['Light3', { clip: 'Souls_LS_Combo', ...comboSegment('Souls_LS_Combo', 2), ...segmentWindow('Souls_LS_Combo', 2), rootMotion: true, playSpeed: 1.1, damageMul: 1.2, staminaCost: 24, lungeSpeed: 0, trackSeconds: 0.36, next: 'Light1' }],
+    ['Heavy', { clip: 'Souls_LS_Heavy', ...segmentWindow('Souls_LS_Heavy', 0), rootMotion: true, playSpeed: 1.05, bounceOff: false, damageMul: 1.75, poiseMul: 2.2, staminaCost: 34, lungeSpeed: 0, trackSeconds: 0.55, next: '' }],
   ]],
   ['greatsword', 'Greatsword', 'SoulsGreatsword', WEAPON_MESHES.hammer, [
     ['Light1', { clip: 'Souls_GS_L1', playSpeed: 1.35, damageMul: 1, staminaCost: 26, lungeStart: 0.45, lungeSeconds: 0.2, lungeSpeed: 2, trackSeconds: 0.35, hitTime: 0.7, comboTime: 0.85, recoverTime: 1, next: 'Light2' }],
@@ -1340,7 +1382,7 @@ function playerNode(model = null) {
   // ORDER: the camera rig before the controller (the controller finds the first rig in the subtree).
   // `Weapons` starts empty: SoulsPlayer spawns its `weaponTemplates` into it on start. The player's UI —
   // its HUD, its level-up menu, its lock-on reticle — is the PLAYER's: children of it, in its template.
-  player.children = [rigNode, model, group('player:weapons', 'Weapons', []), hud(), bonfireMenu(), confirmDialog(), lockReticle(), soundsGroup('player', SOUNDS.player), controller]
+  player.children = [rigNode, model, group('player:weapons', 'Weapons', []), hurtboxNode('player', 'player', 0.3, 1.78), hud(), bonfireMenu(), confirmDialog(), lockReticle(), soundsGroup('player', SOUNDS.player), controller]
   return player
 }
 
@@ -1490,7 +1532,8 @@ function enemyNode(spec) {
   const weapons = group(`${key}:weapons`, 'Weapons', [])
   const attacks = group(`${key}:attacks`, 'Attacks', spec.attacks.map(([name, fields]) => attack(spec.key, name, fields)))
 
-  const children = [model, lockPoint, anchor, weapons, attacks]
+  // The hurtbox matches the walking capsule below (capsuleBody), as the body's own numbers.
+  const children = [model, lockPoint, anchor, weapons, attacks, hurtboxNode(key, 'enemy', spec.radius ?? 0.3 * s, 1.78 * s)]
   // Each enemy carries its own bar: a floating one over a regular enemy, a screen one for a boss.
   if (!spec.boss) children.push(enemyHealthBar(key, anchor.id))
   else children.push(bossBar(key))
@@ -2658,5 +2701,5 @@ export {
   torchNode, messageNode, linkInstance, LEVEL, placedMessage, placedSpawn, placedPickup, sourceScene,
   TEMPLATE_SOURCE, vfx, emitter, mod, burst, fade, fxTemplate, particleSystems, navBaker, isMover,
   asTemplate, PROP, rig as MANNEQUIN_RIG, animations as RIG_ANIMATIONS, handWorld, mannequinModelJson,
-  idleClip, characterModel,
+  idleClip, characterModel, hurtboxNode, COMBAT_LAYER,
 }

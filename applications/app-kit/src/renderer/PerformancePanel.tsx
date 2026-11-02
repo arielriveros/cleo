@@ -89,6 +89,7 @@ type Sample = {
   physicsMs: number; stepMs: number; writeBackMs: number; rayMs: number; rayCount: number;
   bodies: number; broadphaseBodies: number; contacts: number; terrainMs: number;
   activeBodies: number; frozenBodies: number; restingBodies: number;
+  triggerPassMs: number; triggerCandidates: number; triggerPairsTested: number; triggerOverlaps: number;
   broadphaseMs: number; narrowphaseMs: number; solveMs: number; integrateMs: number;
   sceneMs: number; transformMs: number; scriptMs: number; animatorMs: number; rigMs: number; clothMs: number; nodes: number;
   aiPathMs: number; aiQueries: number; aiAgents: number; navBuildMs: number; navBuilds: number; navReused: number;
@@ -108,6 +109,7 @@ const EMPTY: Sample = {
   physicsMs: 0, stepMs: 0, writeBackMs: 0, rayMs: 0, rayCount: 0,
   bodies: 0, broadphaseBodies: 0, contacts: 0, terrainMs: 0,
   activeBodies: 0, frozenBodies: 0, restingBodies: 0,
+  triggerPassMs: 0, triggerCandidates: 0, triggerPairsTested: 0, triggerOverlaps: 0,
   broadphaseMs: 0, narrowphaseMs: 0, solveMs: 0, integrateMs: 0,
   sceneMs: 0, transformMs: 0, scriptMs: 0, animatorMs: 0, rigMs: 0, clothMs: 0, nodes: 0,
   aiPathMs: 0, aiQueries: 0, aiAgents: 0, navBuildMs: 0, navBuilds: 0, navReused: 0,
@@ -236,6 +238,10 @@ export default function PerformancePanel() {
           activeBodies: phys?.activeBodies ?? 0,
           frozenBodies: phys?.frozenBodies ?? 0,
           restingBodies: phys?.restingBodies ?? 0,
+          triggerPassMs: phys?.triggerPassMs ?? 0,
+          triggerCandidates: phys?.triggerCandidates ?? 0,
+          triggerPairsTested: phys?.triggerPairsTested ?? 0,
+          triggerOverlaps: phys?.triggerOverlaps ?? 0,
           broadphaseMs: phys?.broadphaseMs ?? 0,
           narrowphaseMs: phys?.narrowphaseMs ?? 0,
           solveMs: phys?.solveMs ?? 0,
@@ -391,6 +397,10 @@ export default function PerformancePanel() {
             setting); resting = asleep with "Sleep when resting". Neither is integrated or tested against terrain. */}
         <Row label='· dynamic' value={`${d.activeBodies} active · ${d.frozenBodies} frozen · ${d.restingBodies} resting`}
              title='Frozen bodies are out of their simulation range; resting ones are asleep after coming to rest. Both stay solid, neither is simulated.' />
+        {/* The engine's trigger-to-trigger pass (hitboxes against hurtboxes), which cannon cannot do. Runs
+            only while some trigger asks to detect others; `overlaps` counts every reported trigger overlap. */}
+        <Row label='· triggers' value={`${fmt(d.triggerPassMs)} ms · ${d.triggerCandidates} · ${d.triggerPairsTested} tested · ${d.triggerOverlaps} overlapping`}
+             title='Trigger-to-trigger pass: its time, the enabled triggers it considered, the pairs whose bounds met and got the exact test, and how many trigger overlaps are live.' />
         <Row label='· broadphase' value={d.broadphaseBodies.toLocaleString()} hl={d.broadphaseBodies > d.bodies}
              title='Bodies the broadphase iterates. Higher than `bodies` means stale bodies from an earlier play session are still being simulated against — a leak.' />
         {/* Brackets updateFoliageColliders exactly. Foliage collision defaults to OFF, so a non-zero

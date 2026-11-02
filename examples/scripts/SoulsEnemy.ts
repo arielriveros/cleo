@@ -1,7 +1,7 @@
 import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
 import type { ClipName, SocketName } from 'cleo'
 import { clamp, num, planarDistance } from '@/Core/Scripts/SoulsMath'
-import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
+import { Swing, bladeCapsule, closeSwing, hurtboxQuery, hurtboxTargets, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
 import SoulsCharacterNode from '@/Core/Scripts/SoulsCharacter'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
@@ -314,6 +314,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
 
   onUpdate(delta: number) {
     this._stateTime += delta
+    this._syncHurtbox()
     this._sinceHit += delta
     for (const key of Object.keys(this._cooldowns)) this._cooldowns[key] = Math.max(0, this._cooldowns[key] - delta)
     if (this._sinceHit > this.poiseRegenDelay) this.poise = this.maxPoise
@@ -523,17 +524,16 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
       gm?.shake?.(0.5)
       gm?.fx?.(attack.impactTemplate || '', this.worldPosition)
       const p = this.worldPosition
-      const hits = (this.scene?.physics as any)?.overlapSphere?.([p[0], p[1] + 0.5, p[2]], aoe, {
-        ignore: this, filter: (node: Node) => !!node && node !== this && (node as any).team === 'player'
-          && typeof (node as any).receiveHit === 'function' && (node as any).hurtboxActive !== false && !(node as any).isDead,
-      }) ?? []
-      for (const h of hits) this._hitPlayer(attack, h.node)
+      // The player's HURTBOX trigger: switched off during a roll, so a well-timed roll clears the slam.
+      const hits = (this.scene?.physics as any)?.overlapSphere?.([p[0], p[1] + 0.5, p[2]], aoe, hurtboxQuery('player', this)) ?? []
+      for (const h of hurtboxTargets(hits)) this._hitPlayer(attack, h.node)
       return
     }
-    openSwing(this._swing)
+    const weapon = this.currentWeapon()
+    openSwing(this._swing, wieldedBy(weapon, this) ? weapon : null, 'player')
   }
 
-  /** One frame of the active window: sweep the weapon's blade; the player is hit at most once. */
+  /** One frame of the active window: the hurtboxes its hitbox entered; the player is hit at most once. */
   private _stepSwing(): void {
     const weapon = this.currentWeapon() as any
     // Not in this enemy's own hand (no hand socket on its model): the blade is elsewhere, hit nothing.
@@ -631,6 +631,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     this._stateTime = 0
     if (state !== 'attack') { this._attack = null; closeSwing(this._swing) }
     this.hurtboxActive = state !== 'dead' && state !== 'phase'
+    this._syncHurtbox()
   }
 
   protected _still(intent: any): void {

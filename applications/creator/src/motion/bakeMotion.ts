@@ -1,9 +1,10 @@
 // Poses and keys to a clip.
 //
-// Every frame: find the two keys around the time, blend between their poses (the arriving key's blend curve), with
-// each joint sampled a little LATER the further it is from the hips -- overlapping action, so the body
-// leads and the extremities follow -- add a seeded drift for life, then pull the hands and feet to their IK
-// goals with the engine's analytic two-bone solver. The result is an ordinary glTF-style clip (one rotation
+// Every frame: find the two keys around the time, blend between their poses (the arriving key's blend curve,
+// or the bone's PART's: parts.ts), with each joint sampled a little LATER the further it is from the hips --
+// overlapping action, so the body leads and the extremities follow -- add a seeded drift for life, then pull
+// the hands and feet to their IK goals (timed by the limb root's part) with the engine's analytic two-bone
+// solver. With no parts, or parts that override nothing, every bone follows the keys' own blends. The result is an ordinary glTF-style clip (one rotation
 // channel per moving bone, a translation channel for the hips) that the editor and the player already
 // play, retarget and edit.
 //
@@ -16,15 +17,20 @@ import type { Animation } from 'cleo/animation/animatedModel';
 import { modelPose, type LocalTRS, type MotionRig } from './motionRig';
 import {
   LIMB_CHAINS, LIMB_MIRROR, LIMBS, eulerToQuat, motionDuration, newId, presetBlend, quatToEuler,
-  keyEvents, type IkGoal, type IkGrip, type Limb, type MotionDoc, type MotionPose, type PoseBone, type Vec3,
+  type IkGoal, type IkGrip, type Limb, type MotionDoc, type MotionPose, type PoseBone, type Vec3,
 } from './motionDoc';
-import { evalBlend } from './blendCurve';
+import { evalBlend, type BlendCurve } from './blendCurve';
+import { partIndexOf, resolvePartBlend } from './parts';
 
 /** The clip, in the shape an `.anim` asset stores (`StoredClip`): node-indexed channels, flat samplers. */
 export interface BakedClip {
   name: string;
   samplers: { input: number[]; output: number[]; interpolation: 'LINEAR' }[];
   channels: { samplerIndex: number; targetNodeIndex: number; targetPath: 'rotation' | 'translation' }[];
+  /**
+   * Clip events. The Motion Creator never authors any (they are set on the clip in the editor); a tool
+   * that bakes motions for a game may add its own (tools/soulsDemo/longsword.ts).
+   */
   events?: { time: number; name: string }[];
 }
 
@@ -284,14 +290,67 @@ const lifeWeight = (slot: string | null) => (slot ? LIFE_WEIGHT[slot.replace(/\.
 
 // --- Bake ------------------------------------------------------------------------------------------
 
+/**
+ * How one part (or the bones in none) moves through the keys: the curve into each key, and its timing --
+ * each bone at `t − offset − overlap × depth`, a key that overrides the part's offset or overlap moving
+ * that key on the part's own timeline (so the part stays continuous through it).
+ */
+interface Track {
+  curves: BlendCurve[];
+  offset: number;
+  overlap: number;
+  /** Share of the variation, when no key changes it. */
+  life: number;
+  /** Per key: its offset and overlap past the part's (null: no key changes them). */
+  dOffset: number[] | null;
+  dOverlap: number[] | null;
+  /** Per key share of the variation, eased across each blend (null: `life` throughout). */
+  lives: number[] | null;
+}
+
+function tracksOf(doc: MotionDoc): Track[] {
+  const keys = doc.keys;
+  const tracks: Track[] = doc.parts.map(part => {
+    const r = keys.map(k => resolvePartBlend(k, part));
+    const offset = part.defaults?.offset ?? 0, overlap = part.defaults?.overlap ?? doc.overlap, life = part.defaults?.variation ?? 1;
+    const dOffset = r.map(x => x.offset - offset), dOverlap = r.map(x => (x.overlap ?? doc.overlap) - overlap);
+    return {
+      curves: r.map(x => x.blend), offset, overlap, life,
+      dOffset: dOffset.some(v => v !== 0) ? dOffset : null,
+      dOverlap: dOverlap.some(v => v !== 0) ? dOverlap : null,
+      lives: r.some(x => x.variation !== life) ? r.map(x => x.variation) : null,
+    };
+  });
+  // The bones in no part: the keys' own blends, the motion's overlap.
+  tracks.push({ curves: keys.map(k => k.blend), offset: 0, overlap: doc.overlap, life: 1, dOffset: null, dOverlap: null, lives: null });
+  return tracks;
+}
+
 /** The motion as a clip: `doc.fps` frames per second over its keys, plus the settle of the overlap. */
 export function bakeMotion(rig: MotionRig, doc: MotionDoc, name = doc.name): BakedClip {
   const keys = doc.keys;
   const poses = new Map(doc.poses.map(p => [p.id, p]));
   const duration = motionDuration(doc);
   const maxDepth = Math.max(0, ...rig.bones.map(b => b.depth));
+
+  // Each bone's part and the key times on its own timeline (shared when no key moves them).
+  const tracks = tracksOf(doc);
+  const partOf = partIndexOf(rig, doc.parts);
+  const trackOf = (i: number) => tracks[partOf[i] < 0 ? tracks.length - 1 : partOf[i]];
+  const keyTimes = keys.map(k => k.time);
+  const boneTimes = rig.bones.map((b, i) => {
+    const tr = trackOf(i);
+    if (!tr.dOffset && !tr.dOverlap) return keyTimes;
+    let last = -Infinity;
+    return keys.map((k, j) => (last = Math.max(last, k.time + (tr.dOffset?.[j] ?? 0) + (tr.dOverlap?.[j] ?? 0) * b.depth)));
+  });
   // A one-shot keeps playing until the last joint has arrived; a loop wraps instead.
-  const length = doc.loop ? duration : duration + doc.overlap * maxDepth;
+  let tail = doc.overlap * maxDepth;
+  rig.bones.forEach((b, i) => {
+    const tr = trackOf(i);
+    tail = Math.max(tail, boneTimes[i][keys.length - 1] - duration + tr.offset + tr.overlap * b.depth);
+  });
+  const length = doc.loop ? duration : duration + tail;
   const frames = Math.max(2, Math.round(length * doc.fps) + 1);
   const times = Array.from({ length: frames }, (_, f) => Math.min(length, f / doc.fps));
   if (times[frames - 1] < length) times.push(length);
@@ -311,18 +370,24 @@ export function bakeMotion(rig: MotionRig, doc: MotionDoc, name = doc.name): Bak
   // A motion that only holds the rest pose still drives the hips: a clip with no channels is not a clip.
   if (!moving.size && rig.hips >= 0) moving.add(rig.hips);
 
-  /** The segment and eased share at time `t` on the key timeline. */
-  const at = (t: number): { a: number; b: number; w: number } => {
-    if (keys.length === 1 || t <= keys[0].time) return { a: 0, b: 0, w: 0 };
+  /** The segment, its linear share `u` and its eased share `w` at time `t` on a key timeline. */
+  const at = (t: number, times: number[], curves: BlendCurve[]): { a: number; b: number; w: number; u: number } => {
+    if (keys.length === 1 || t <= times[0]) return { a: 0, b: 0, w: 0, u: 0 };
     for (let k = 1; k < keys.length; k++) {
-      if (t <= keys[k].time) {
-        const span = keys[k].time - keys[k - 1].time;
-        return { a: k - 1, b: k, w: span > 1e-9 ? evalBlend(keys[k].blend, (t - keys[k - 1].time) / span) : 1 };
+      if (t <= times[k]) {
+        const span = times[k] - times[k - 1];
+        const u = span > 1e-9 ? (t - times[k - 1]) / span : 1;
+        return { a: k - 1, b: k, w: span > 1e-9 ? evalBlend(curves[k], u) : 1, u };
       }
     }
-    return { a: keys.length - 1, b: keys.length - 1, w: 0 };
+    return { a: keys.length - 1, b: keys.length - 1, w: 0, u: 0 };
   };
-  const wrap = (t: number) => (doc.loop && duration > 0 ? ((t % duration) + duration) % duration : Math.max(0, Math.min(duration, t)));
+  const wrap = (t: number, end: number) => (doc.loop && duration > 0 ? ((t % duration) + duration) % duration : Math.max(0, Math.min(end, t)));
+  /** Bone `i`'s segment at clip time `t`: at its part's delayed time, on its own timeline. */
+  const segAt = (i: number, t: number) => {
+    const tr = trackOf(i), times = boneTimes[i];
+    return at(wrap(t - tr.offset - tr.overlap * rig.bones[i].depth, Math.max(duration, times[keys.length - 1])), times, tr.curves);
+  };
 
   const rotOut = new Map<number, number[]>(), posOut = new Map<number, number[]>();
   for (const i of moving) rotOut.set(i, []);
@@ -335,23 +400,25 @@ export function bakeMotion(rig: MotionRig, doc: MotionDoc, name = doc.name): Bak
       const b = rig.bones[i];
       vec3.copy(local[i].t, b.t); vec3.copy(local[i].s, b.s); quat.copy(local[i].r, b.r);
       if (!moving.has(i) && i !== rig.hips) continue;
-      const s = at(wrap(t - doc.overlap * b.depth));
+      const s = segAt(i, t);
       quat.slerp(local[i].r, keyLocals[s.a][i].r, keyLocals[s.b][i].r, s.w);
       if (translated.has(i)) vec3.lerp(local[i].t, keyLocals[s.a][i].t, keyLocals[s.b][i].t, s.w);
-      const life = doc.variation * lifeWeight(b.slot);
+      const tr = trackOf(i);
+      const share = tr.lives ? tr.lives[s.a] + (tr.lives[s.b] - tr.lives[s.a]) * s.u : tr.life;
+      const life = doc.variation * lifeWeight(b.slot) * share;
       if (life > 0) {
         const x = t * doc.variationRate;
         const e: Vec3 = [noise1(doc.seed + i * 3, x) * life, noise1(doc.seed + i * 3 + 1, x + 17) * life, noise1(doc.seed + i * 3 + 2, x + 31) * life];
         quat.multiply(local[i].r, local[i].r, eulerToQuat(e, tmp));
       }
     }
-    // IK goals, eased between the keys' goals at the limb root's time. A goal only one side has fades in or
-    // out; so does a grip (toward the other side's own goal).
+    // IK goals, eased between the keys' goals at the limb root's time (and with its part's blend). A goal
+    // only one side has fades in or out; so does a grip (toward the other side's own goal).
     const goals: Partial<Record<Limb, FrameGoal>> = {};
     for (const limb of LIMBS) {
       const root = rig.bySlot.get(LIMB_CHAINS[limb][0]);
       if (root === undefined || !doc.poses.some(p => p.ik?.[limb])) continue;
-      const s = at(wrap(t - doc.overlap * rig.bones[root].depth));
+      const s = segAt(root, t);
       const ga: IkGoal | undefined = keyIk[s.a][limb], gb: IkGoal | undefined = keyIk[s.b][limb];
       if (!ga && !gb) continue;
       const A = (ga ?? gb)!, B = (gb ?? ga)!;
@@ -390,8 +457,6 @@ export function bakeMotion(rig: MotionRig, doc: MotionDoc, name = doc.name): Bak
     clip.channels.push({ samplerIndex: clip.samplers.length, targetNodeIndex: rig.bones[i].node, targetPath: 'translation' });
     clip.samplers.push({ input: times, output, interpolation: 'LINEAR' });
   }
-  const events = keys.flatMap(k => keyEvents(k).map(name => ({ time: k.time, name })));
-  if (events.length) clip.events = events;
   return clip;
 }
 
@@ -400,7 +465,7 @@ export function bakePose(rig: MotionRig, pose: MotionPose): BakedClip {
   return bakeMotion(rig, {
     name: 'pose', seed: 0, poses: [pose],
     keys: [{ id: 'a', poseId: pose.id, time: 0, ...presetBlend('linear') }, { id: 'b', poseId: pose.id, time: 0.1, ...presetBlend('linear') }],
-    fps: 10, overlap: 0, variation: 0, variationRate: 1, loop: false,
+    parts: [], fps: 10, overlap: 0, variation: 0, variationRate: 1, loop: false,
   }, 'pose');
 }
 
@@ -433,6 +498,28 @@ export function poseFromClip(rig: MotionRig, clip: Pick<Animation, 'samplers' | 
     }
   }
   return { id: newId(), name, bones };
+}
+
+/**
+ * The pose with its IK goals solved into its bones' rotations: what it looks like, as plain rotations (for
+ * a convention with no IK, the editor's Pose asset). A pose without goals comes back as it is.
+ */
+export function fkPose(rig: MotionRig, pose: MotionPose): MotionPose {
+  if (!pose.ik || !Object.keys(pose.ik).length) return pose;
+  const solved = solvedPoseLocals(rig, pose);
+  const bones = { ...pose.bones };
+  for (const limb of LIMBS) {
+    if (!pose.ik[limb]) continue;
+    for (const slot of LIMB_CHAINS[limb]) {
+      const i = rig.bySlot.get(slot);
+      if (i === undefined) continue;
+      const b = rig.bones[i];
+      const delta = quat.normalize(quat.create(), quat.multiply(quat.create(), quat.invert(quat.create(), b.r), solved[i].r));
+      bones[b.name] = { ...(bones[b.name] ?? {}), rot: quatToEuler(delta) };
+    }
+  }
+  const { ik: _, ...rest } = pose;
+  return { ...rest, bones };
 }
 
 /** A pose bone in the editor's Pose asset convention (`StoredPoseBone`). */

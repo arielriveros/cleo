@@ -1274,6 +1274,8 @@ function breakableBarrelNode(key, position = [0, 0, 0], yaw = 0) {
     variables: vars({ navObstacle: false }),
     children: [
       modelNode(`barrel:${key}:mesh`, 'Mesh', barrel.barrel, BARREL_MAT),
+      // What a blade hits: the body's own cylinder, as a hurtbox trigger (SoulsHitbox).
+      souls.hurtboxNode(`valley:barrel:${key}`, 'enemy', R, H, 'cylinder'),
       souls.soundsGroup(`valley:barrel:${key}`, ['Break'], { spatial: true }),
     ],
   }), 'SoulsBreakable')
@@ -1916,7 +1918,9 @@ const result = souls.writeProject({
   extraScenes: [{ id: DUNGEON_ID, name: DUNGEON_NAME, build: dungeon.scene, refs: { modelIds: [souls.MANNEQUIN_MODEL, ...CHARACTER_MODELS.map(a => a.id), ...dungeon.models.map(a => a.id)] } }],
   // 2 km of valley: barrels, debris and enemies far from the camera freeze in place instead of
   // simulating against the terrain. The player opts out (simulationMode 'always').
-  projectSettings: { engine: { simulationRange: 90 } },
+  // The physics step goes to a worker once it is heavy enough to pay (measured on the Valley 2026-11-02:
+  // main-thread physics 4.1 ms -> 1.5 ms a frame, no late steps; docs/reference/physics-threading.md).
+  projectSettings: { engine: { simulationRange: 90, physicsWorker: 'auto' } },
   // A message's glyph is tuned for Hollow Keep's dusk exposure; under the valley's noon it burned white. It
   // takes a tenth of the exposure (GLOW_EXPOSURE_WEIGHT), so this is how it reads at noon, a little hotter
   // at night and underground.

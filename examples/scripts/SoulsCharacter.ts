@@ -1,7 +1,7 @@
 import { CharacterNode, Logger, Node, Shape, moveWorldDirection, resolveSocketOwner, setMoveWorld } from 'cleo'
 import type { SocketName, TemplateName } from 'cleo'
 import { clamp } from '@/Core/Scripts/SoulsMath'
-import { bladeCapsule } from '@/Core/Scripts/SoulsHitbox'
+import { bladeCapsule, disarmHitbox, ensureHurtbox, setHurtboxEnabled } from '@/Core/Scripts/SoulsHitbox'
 
 /**
  * Hollow Keep — what every fighter is: the player, and each enemy type. A base script; the player
@@ -86,7 +86,8 @@ export default class SoulsCharacterNode extends CharacterNode {
   public isDead: boolean = false
   /**
    * Whether attacks can see this character at all. Off during i-frames, while dead, during a boss's
-   * roar: every hitbox sweep and bolt passes straight through. See SoulsHitbox.
+   * roar: its `Hurtbox` trigger is switched off, so every hitbox and bolt passes straight through. See
+   * SoulsHitbox and _syncHurtbox.
    */
   public hurtboxActive: boolean = true
 
@@ -199,6 +200,17 @@ export default class SoulsCharacterNode extends CharacterNode {
     return true
   }
 
+  /**
+   * Switch the `Hurtbox` trigger to match `hurtboxActive` (and death). Subclasses call it wherever those
+   * change; it only touches the trigger on a change. A character whose template has no Hurtbox gets one
+   * built from its body here, the first time.
+   */
+  protected _syncHurtbox(): void {
+    if (!this._hurtboxChecked) { this._hurtboxChecked = true; ensureHurtbox(this) }
+    setHurtboxEnabled(this, this.hurtboxActive && !this.isDead)
+  }
+  private _hurtboxChecked: boolean = false
+
   /** Whether a hit of `damage` lands right now. */
   protected _canBeHit(damage: number): boolean {
     return !this.isDead && damage > 0
@@ -266,6 +278,8 @@ export default class SoulsCharacterNode extends CharacterNode {
     const root = this.scene?.root
     if (!weapon || !root) return null
     const blade = bladeCapsule(weapon)
+    // A blade lying on the ground hurts nobody.
+    disarmHitbox(weapon)
     const at = Array.from(weapon.worldPosition), q = Array.from(weapon.worldQuaternion)
     weapon.detachFromSocket()
     root.addChild(weapon)

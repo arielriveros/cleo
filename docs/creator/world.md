@@ -4,8 +4,8 @@ Build a landscape from a stack of landform layers, erode it, and export the heig
 applied top to bottom, each layer reading the height the ones above it made, and nothing is baked:
 every change re-evaluates the whole stack. The live preview runs at up to 257 x 257 on a real engine
 landscape in the viewport and on the **Map**; **Generate & export** (toolbar) runs the full resolution.
-**Layers** is the left dock; **Parameters** (world settings and the selected layer or pass, with the
-world presets in its header) and **Export** are the right dock's tabs.
+**Layers** is the left dock; **Parameters** (world settings, the export's **Output** resolution and the
+selected layer or pass, with the world presets in its header) is the right dock.
 
 Heights are a fraction of the **Height scale** (0 the lowest ground, 1 a full-height peak; layers may
 overshoot and erosion may cut below 0). Positions are map coordinates, 0 to 1 across the world, with
@@ -60,16 +60,15 @@ Run after the landforms, in order.
 Erosion works in grid cells, so the same settings erode a 2049 export more finely than the 257 preview;
 check the full-resolution result before committing to a look.
 
-## Resolution
+## Output
 
 | Field | Meaning |
 |---|---|
 | **Resolution** | Samples per side of the export, 2^n + 1 to match the engine's terrain grids. |
 
-## File
-
-What **Generate & export** writes: the 16-bit heightmap as PNG and RAW, one PNG per mask, and
-`world.json` with the heights and settings.
+**Generate & export** (toolbar) writes, at that resolution, the 16-bit heightmap as PNG and RAW
+(`world_height.png`, `world_height.r16`), one PNG per mask (`world_<mask>.png`), and `world.json` with
+the heights and settings.
 
 ## Masks
 

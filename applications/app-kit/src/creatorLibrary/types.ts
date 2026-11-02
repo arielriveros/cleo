@@ -4,9 +4,9 @@
 // Creator writes an asset whenever it changes; the editor mirrors every asset into each project's
 // /Creator folder and listens on the channel to follow edits live. See store.ts and channel.ts.
 
-export type CreatorAssetKind = 'foliage' | 'fx' | 'world' | 'motion' | 'character';
+export type CreatorAssetKind = 'foliage' | 'fx' | 'world' | 'motion' | 'character' | 'pose';
 
-export const CREATOR_KINDS: readonly CreatorAssetKind[] = ['foliage', 'fx', 'world', 'motion', 'character'];
+export const CREATOR_KINDS: readonly CreatorAssetKind[] = ['foliage', 'fx', 'world', 'motion', 'character', 'pose'];
 
 /** One file an asset carries: a .glb, a PNG, a sidecar JSON... */
 export interface CreatorFile {

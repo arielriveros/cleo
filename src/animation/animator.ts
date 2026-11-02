@@ -3016,7 +3016,12 @@ export class Animator {
         };
         const fire = (from: number, to: number) => {
             for (const ev of machineEvents) {
-                if (ev.clipName === clip && ev.time > from && ev.time <= to) emit(ev.eventName);
+                if (ev.clipName !== clip || ev.time <= from || ev.time > to) continue;
+                // Events belong on the clip now; the editor moves a machine's markers there when it opens the
+                // animator. Until that machine is saved (or in a game published before) both copies exist:
+                // the clip's wins, so the event fires once.
+                if (clipEvents.some(c => c.name === ev.eventName && Math.abs(c.time - ev.time) < 1e-4)) continue;
+                emit(ev.eventName);
             }
             for (const ev of clipEvents) {
                 if (ev.time > from && ev.time <= to) emit(ev.name);

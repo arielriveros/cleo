@@ -1,12 +1,15 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { CleoEngine, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, registerTemplates, Logger, InputSystem, shaderStats, nextFrame } from 'cleo';
+import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, registerTemplates, Logger, InputSystem, shaderStats, nextFrame } from 'cleo';
 import type { LoadProgressListener } from 'cleo';
 import UILayer from '../features/gameUi/UILayer';
 import VirtualControlsLayer from '../features/gameUi/VirtualControlsLayer';
 import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData } from './unpack';
 import { attachSharedAnimations, attachTemplateAnimations } from './animations';
 import { PLAYER_CONTRACT } from '../features/publish/pack';
+import { physicsWorkerOverride } from '../features/options/projectSettings';
+// Inlined: a published game may be opened from file://, where a worker cannot load from a separate file.
+import PhysicsWorker from '../workers/physicsWorkerEntry?worker&inline';
 
 // Standalone, data-driven runtime for a published Cleo game: loads game.bin (every scene, mesh and
 // texture) and runs it outside the editor, mirroring the editor's play lifecycle
@@ -92,12 +95,18 @@ async function boot(): Promise<void> {
   (window as any).CLEO_SHADER_STATS = shaderStats;
   if (new URLSearchParams(location.search).has('shaderProfile')) shaderStats.syncEach = true;
 
+  // The project's Physics thread option (config.physics.worker) needs a way to make the worker; where one
+  // cannot start, the step stays on the main thread.
+  PhysicsSystem.workerFactory = () => new PhysicsWorker();
   const engine = new CleoEngine({
     graphics: data?.config?.graphics ?? { clearColor: [0, 0, 0, 1] },
     // Gravity + max substeps, and the frame-delta cap: the project's engine options (Options ▸ Engine).
     physics: data?.config?.physics ?? {},
     runtime: data?.config?.runtime ?? {},
   });
+  // `?physicsWorker=off|on|auto` (or localStorage.cleo_physics_worker) overrides the project's choice here.
+  const workerOverride = physicsWorkerOverride();
+  if (workerOverride) engine.physics.setWorkerMode(workerOverride);
   // The project's master volume and window title (Options ▸ Engine / Project). Older builds carry neither.
   const masterVolume = data?.config?.audio?.masterVolume;
   if (typeof masterVolume === 'number') AudioManager.Instance.mixer.masterVolume = masterVolume;

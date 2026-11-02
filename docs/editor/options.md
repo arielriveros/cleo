@@ -36,6 +36,7 @@ How the physics world steps, and how much of it.
 |---|---|---|
 | **Gravity** | (0, −9.81, 0) | World gravity, m/s². Earth is (0, −9.81, 0); a top-down or space game often wants zero. |
 | **Max substeps / frame** | 8 | Each frame advances physics in equal substeps of at most 1/60 s, up to this many. Past it the substeps grow longer: the world still covers the whole frame, in coarser steps. Lower is less work on slow frames, and less stable stacks and joints. |
+| **Physics thread** | Main thread | Where the physics step runs. *Main thread* steps it inside the frame. *Worker* steps it in a Web Worker while the frame renders, taking the solver off the main thread; each step then covers the previous frame's time, and `collide` events arrive without a contact (see [Physics threading](../reference/physics-threading.md)). *Auto* starts on the main thread and moves to the worker once physics costs 1.5 ms a frame or 40 moving bodies, and back if the worker falls behind. `?physicsWorker=off` in the URL (or `localStorage.cleo_physics_worker`) overrides it on one machine. |
 | **Simulation range** | 0 | Dynamic bodies farther than this from the camera, in metres, are frozen in place: still solid to rays, the camera and other bodies, but not simulated until the camera comes back. 0 simulates everything. A body can opt out (*Always*) or set its own range in its Physics panel. |
 
 **Frame timing**

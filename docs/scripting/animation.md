@@ -149,10 +149,11 @@ sound, a hit frame or a particle burst stays in sync with the animation rather t
 
 Markers come from two places, and both arrive through the same callback:
 
-- **On the clip** (`Animation.events`, authored on the clip editor's timeline). These fire wherever
-  the clip plays — a base state, a layer or an action slot.
-- **On the state machine** (`AnimationStateMachine.events`, the Variables panel), keyed by clip name.
-  The older form; it still works.
+- **On the clip** (`Animation.events`, authored on the Events track of the clip player and of the
+  Animator's transport). These fire wherever the clip plays — a base state, a layer or an action slot.
+- **On the state machine** (`AnimationStateMachine.events`), keyed by clip name. The older form: it
+  still fires, but the editor moves these onto their clips when the animator is opened, and a marker
+  the clip also carries fires only once.
 
 ```ts
 const stop = animator.onAnimationEvent((eventName: string, clipName: string) => {

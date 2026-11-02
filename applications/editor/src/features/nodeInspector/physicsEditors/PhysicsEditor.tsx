@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ModelNode, AnimatedModel, Node, RAGDOLL_DEFAULTS, PHYSICS_SURFACE_PRESETS, hullFromPositions, Logger, effectiveRagdollProfile } from 'cleo'
 import type { RagdollOptions, HullQuality } from 'cleo'
 import { BodyDescription, ShapeDescription, useCleoEngine } from '../../EngineContext';
+import type { TriggerDescription } from '../../engineContextTypes';
 import { useHistory } from '../../HistoryContext';
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import AxisInput from '@cleo/app-kit/ui/AxisInput'
@@ -66,6 +67,28 @@ const AxisToggles = ({ label, value, onChange }: { label: string; value: number[
           <Toggle checked={value[i] === 1} onChange={(c) => { const n = [...value]; n[i] = c ? 1 : 0; onChange(n); }} />
         </span>
       ))}
+    </div>
+  </Field>
+);
+
+// Sixteen collision-layer bits as toggles (a trigger's Layer / Detects). -1, cannon's "every layer", shows
+// as all on. Module scope for the reason AxisToggles is.
+const LAYER_BITS = 16;
+const LayerBits = ({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) => (
+  <Field label={label} labelClassName={LABEL}>
+    <div className='grid grid-cols-8 gap-0.5'>
+      {Array.from({ length: LAYER_BITS }, (_, i) => {
+        const on = (value & (1 << i)) !== 0;
+        return (
+          <button key={i} type='button' title={`Layer ${i + 1}`}
+                  className={cn('h-5 rounded text-[10px] tabular-nums border', on ? 'bg-primary/30 border-primary text-fg' : 'border-border text-dim')}
+                  onClick={() => {
+                    const all = (1 << LAYER_BITS) - 1;
+                    const next = (value === -1 ? all : value & all) ^ (1 << i);
+                    onChange(next === all ? -1 : next);
+                  }}>{i + 1}</button>
+        );
+      })}
     </div>
   </Field>
 );
@@ -172,7 +195,7 @@ export default function PhysicsEditor(props: {node: Node}) {
   const { bodies, triggers, eventEmitter, enterRigEditor, projectSettings } = useCleoEngine();
   const { push } = useHistory();
   const [bodyProperties, setBodyProperties] = useState<BodyDescription | null>(null)
-  const [triggerProperties, setTriggerProperties] = useState<{shapes: ShapeDescription[]} | null>(null);
+  const [triggerProperties, setTriggerProperties] = useState<TriggerDescription | null>(null);
   const [ragdoll, setRagdoll] = useState<RagdollOptions | null>(null);
   const [sceneChanged, setSceneChanged] = useState(false);
   const selection = useCollisionShapeSelection(eventEmitter);
@@ -205,7 +228,7 @@ export default function PhysicsEditor(props: {node: Node}) {
   // every write goes to the map first and the panel re-reads it on PHYSICS_CHANGED; the refs remember the
   // record (and its shapes array: the hull migration replaces only that) last shown, to skip no-op reads.
   const shownBodyRef = useRef<{ record?: BodyDescription; shapes?: ShapeDescription[] }>({});
-  const shownTriggerRef = useRef<{ record?: { shapes: ShapeDescription[] }; shapes?: ShapeDescription[] }>({});
+  const shownTriggerRef = useRef<{ record?: TriggerDescription; shapes?: ShapeDescription[] }>({});
 
   useEffect(() => {
     const sync = (force: boolean) => {
@@ -217,7 +240,8 @@ export default function PhysicsEditor(props: {node: Node}) {
       const trigger = triggers.get(props.node.id);
       if (force || trigger !== shownTriggerRef.current.record || trigger?.shapes !== shownTriggerRef.current.shapes) {
         shownTriggerRef.current = { record: trigger, shapes: trigger?.shapes };
-        setTriggerProperties(trigger ? { shapes: trigger.shapes } : null);
+        // The whole record: a copy of just the shapes dropped its options on the next edit.
+        setTriggerProperties(trigger ? { ...(trigger as TriggerDescription) } : null);
       }
     };
     sync(true);
@@ -246,7 +270,7 @@ export default function PhysicsEditor(props: {node: Node}) {
    * `node.serialize()`, so the history's snapshot diff never sees them: the step is built here instead.
    * `coalesce` names the field being edited, so a slider scrub or a typed number is one step, not fifty.
    */
-  const commit = (channel: CollisionChannel, next: BodyDescription | { shapes: ShapeDescription[] } | null, label: string, coalesce?: string) => {
+  const commit = (channel: CollisionChannel, next: BodyDescription | TriggerDescription | null, label: string, coalesce?: string) => {
     const node = props.node;
     const map = (channel === 'body' ? bodies : triggers) as Map<string, any>;
     const before = map.get(node.id) ?? null;
@@ -262,6 +286,9 @@ export default function PhysicsEditor(props: {node: Node}) {
 
   const setBody = (patch: Partial<BodyDescription>) =>
     commit('body', { ...bodyProperties!, ...patch }, 'Rigid body', Object.keys(patch).join(','));
+
+  const setTrigger = (patch: Partial<TriggerDescription>) =>
+    commit('trigger', { ...triggerProperties!, ...patch }, 'Trigger', Object.keys(patch).join(','));
 
   useEffect(() => {
     const m = props.node as ModelNode;
@@ -302,7 +329,7 @@ export default function PhysicsEditor(props: {node: Node}) {
     (channel === 'body' ? bodyProperties?.shapes : triggerProperties?.shapes) ?? [];
 
   const writeShapes = (channel: CollisionChannel, shapes: ShapeDescription[], label: string, coalesce?: string) =>
-    commit(channel, channel === 'body' ? { ...bodyProperties!, shapes } : { shapes }, label, coalesce);
+    commit(channel, channel === 'body' ? { ...bodyProperties!, shapes } : { ...triggerProperties, shapes }, label, coalesce);
 
   const shapeLabel = (channel: CollisionChannel, verb: string) => `${verb} ${channel === 'body' ? 'body' : 'trigger'} shape`;
 
@@ -390,7 +417,7 @@ export default function PhysicsEditor(props: {node: Node}) {
     const copy = cloneShape(shapesOf(channel)[index]);
     const target = to === 'body'
       ? { ...bodyProperties!, shapes: [...bodyProperties!.shapes, copy] }
-      : { shapes: [...(triggerProperties?.shapes ?? []), copy] };
+      : { ...triggerProperties, shapes: [...(triggerProperties?.shapes ?? []), copy] };
     commit(to, target, `Copy shape to ${to === 'body' ? 'body' : 'trigger'}`);
   };
 
@@ -519,7 +546,16 @@ export default function PhysicsEditor(props: {node: Node}) {
               <Button variant='primary' size='sm' onClick={() => commit('trigger', { shapes: [] }, 'Add trigger')}>Add Trigger</Button>
             </>
           : <>
-              <Button variant='danger' size='sm' onClick={removeTrigger}>Remove Trigger</Button>
+              <Toggle label='Enabled' className='my-1' checked={triggerProperties.enabled ?? true}
+                onChange={(c) => setTrigger({ enabled: c })} />
+              <Toggle label='Detect triggers' className='my-1' checked={triggerProperties.detectTriggers ?? false}
+                onChange={(c) => setTrigger({ detectTriggers: c })} />
+              {triggerProperties.detectTriggers &&
+                <Toggle label='Continuous' className='my-1' checked={triggerProperties.continuous ?? false}
+                  onChange={(c) => setTrigger({ continuous: c })} />}
+              <LayerBits label='Layer' value={triggerProperties.group ?? 1} onChange={(v) => setTrigger({ group: v })} />
+              <LayerBits label='Detects' value={triggerProperties.mask ?? -1} onChange={(v) => setTrigger({ mask: v })} />
+              <Button variant='danger' size='sm' className='mt-2' onClick={removeTrigger}>Remove Trigger</Button>
               <div className='mt-2'>
                 {shapeTools('trigger')}
               </div>

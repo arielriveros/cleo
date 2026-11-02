@@ -1,9 +1,9 @@
 import { useCleoEngine } from '../EngineContext'
 import RendererSettingsPanel from '@cleo/app-kit/renderer/RendererSettingsPanel'
 import PerformancePanel from '@cleo/app-kit/renderer/PerformancePanel'
-import { Button, Field, NumberInput, Section, Slider, VectorInput } from '@cleo/app-kit/ui'
+import { Button, Field, NumberInput, Section, Select, Slider, VectorInput } from '@cleo/app-kit/ui'
 import { OptionsPageBody, OptionsShell, OPTION_LABEL, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
-import { DEFAULT_PROJECT_SETTINGS, type EngineRuntimeSettings } from './projectSettings'
+import { DEFAULT_PROJECT_SETTINGS, type EngineRuntimeSettings, type PhysicsWorkerSetting } from './projectSettings'
 
 // Options ▸ Engine: how the engine renders and runs THIS game. Renderer settings are saved with the open
 // scene (each scene keeps its own look); the runtime settings are project-wide and ship in the build.
@@ -51,6 +51,13 @@ function RuntimeOptions() {
         <Field label='Simulation range (m)' labelClassName={OPTION_LABEL}>
           <NumberInput value={e.simulationRange} min={0} max={100000} step={5}
             onChange={v => set({ simulationRange: Math.max(0, v) })} />
+        </Field>
+        <Field label='Physics thread' labelClassName={OPTION_LABEL}>
+          <Select value={e.physicsWorker} onChange={ev => set({ physicsWorker: ev.target.value as PhysicsWorkerSetting })}>
+            <option value='off'>Main thread</option>
+            <option value='auto'>Auto</option>
+            <option value='on'>Worker</option>
+          </Select>
         </Field>
       </Section>
 

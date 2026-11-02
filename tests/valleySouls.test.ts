@@ -12,6 +12,7 @@ import { UIRootNode } from '../src/core/scene/nodes/ui/uiRoot';
 import { UIPanelNode } from '../src/core/scene/nodes/ui/uiContainers';
 import { UITextNode } from '../src/core/scene/nodes/ui/uiContent';
 import { UIButtonNode, UIProgressBarNode } from '../src/core/scene/nodes/ui/uiWidgets';
+import { LAYER } from '../examples/scripts/SoulsHitbox';
 
 // The Valley example is AUTHORED BY CODE (tools/valley/build.mjs, on the souls content of
 // tools/soulsDemo/build.mjs) and wired together by NAME:
@@ -197,7 +198,7 @@ describe.skipIf(!present)('the Valley example project', () => {
         check(scene().scene);
         for (const t of templates()) check(t.nodeJson);
         expect(checked).toBeGreaterThan(30);
-        for (const name of ['GameManager', 'Player', 'Hollow', 'Hollow Warden', 'Straight Sword', 'Magic Bolt', 'Lever', 'Gate', 'Fog Gate', 'Pickup'])
+        for (const name of ['GameManager', 'Player', 'Hollow', 'Hollow Warden', 'Longsword', 'Magic Bolt', 'Lever', 'Gate', 'Fog Gate', 'Pickup'])
             expect(owners.has(name), `${name} owns no sounds`).toBe(true);
         // An enemy attack's own cue (Cast, Boss Leap) is played by its enemy, from the enemy's Sounds.
         const warden = templates().find((t: any) => t.name === 'Hollow Warden').nodeJson;
@@ -375,8 +376,11 @@ describe.skipIf(!present)('the Valley example project', () => {
         const have = clips();
         for (const n of [...withScript('SoulsMove'), ...withScript('SoulsEnemyAttack')]) {
             if (n.scriptVars.projectileTemplate || n.scriptVars.aoeRadius) continue;
-            const events = have.get(n.scriptVars.clip).events ?? [];
-            const at = (name: string) => events.find((e: any) => e.name === name)?.time;
+            // A move playing one SEGMENT of a combo clip (clipStart..clipEnd) owns the events inside it, timed
+            // from the segment's start — what the move's own clock reads.
+            const start = n.scriptVars.clipStart ?? 0, end = n.scriptVars.clipEnd || Infinity;
+            const events = (have.get(n.scriptVars.clip).events ?? []).filter((e: any) => e.time >= start - 1e-6 && e.time <= end + 1e-6);
+            const at = (name: string) => { const t = events.find((e: any) => e.name === name)?.time; return t === undefined ? undefined : t - start; };
             expect(at('hitEnd'), `${n.scriptVars.clip} has no hitEnd`).toBeGreaterThan(at('hit'));
             if (at('recover') !== undefined) expect(at('hitEnd')).toBeLessThan(at('recover'));
             // The fallback fields agree with the clip, so a marker-less replacement behaves the same.
@@ -395,7 +399,7 @@ describe.skipIf(!present)('the Valley example project', () => {
 
     it('makes every weapon its own template, each with a blade hitbox from its own script', () => {
         const weapons = weaponTemplateList();
-        expect(weapons.map((t: any) => t.name).sort()).toEqual(['Club', 'Greatsword', 'Halberd', 'Sorcerer Staff', 'Straight Sword', 'Weapon']);
+        expect(weapons.map((t: any) => t.name).sort()).toEqual(['Club', 'Greatsword', 'Halberd', 'Longsword', 'Maul', 'Sorcerer Staff', 'Weapon']);
         for (const t of weapons) {
             const start = valueOf(t.nodeJson, 'bladeStart'), end = valueOf(t.nodeJson, 'bladeEnd');
             expect(end[1], t.name).toBeGreaterThan(start[1]);
@@ -409,7 +413,7 @@ describe.skipIf(!present)('the Valley example project', () => {
             expect(scriptOf(t.nodeJson).source, t.name).toMatch(/extends SoulsWeaponNode/);
         }
         // The player's weapons carry their movesets; every move names a clip.
-        for (const name of ['Straight Sword', 'Greatsword']) {
+        for (const name of ['Longsword', 'Greatsword']) {
             const moves = weapons.find((t: any) => t.name === name).nodeJson.children.filter((c: any) => valueOf(c, 'isMove'));
             expect(moves.length, name).toBeGreaterThanOrEqual(3);
             for (const m of moves) expect(valueOf(m, 'clip'), `${name}/${m.name}`).toMatch(/^Souls_/);
@@ -429,7 +433,31 @@ describe.skipIf(!present)('the Valley example project', () => {
             expect(group?.children ?? [], `${f.name} still holds weapons inline`).toEqual([]);
         }
         const player = allNodes(scene().scene).find(n => n.name === 'Player');
-        expect(valueOf(player, 'weaponTemplates')).toEqual(['Straight Sword', 'Greatsword']);
+        expect(valueOf(player, 'weaponTemplates')).toEqual(['Longsword', 'Greatsword']);
+    });
+
+    it('gives every fighter and breakable ONE hurtbox trigger, in its team layer, apart from its body', () => {
+        const inScene = allNodes(scene().scene);
+        // Whatever a blade can damage carries a `team` (SoulsCharacter and its subclasses, SoulsBreakable).
+        const fighters = everyNode().filter(n => field(scriptOf(n), 'team'));
+        let checked = 0;
+        for (const f of fighters) {
+            const template = templates().find((t: any) => allNodes(t.nodeJson).includes(f));
+            if (!template && !inScene.includes(f)) continue;
+            const boxes = (f.children ?? []).filter((c: any) => c.name === 'Hurtbox');
+            expect(boxes.length, `${f.name} has ${boxes.length} Hurtbox children`).toBe(1);
+            const trigger = template ? template.triggers?.[boxes[0].id] : boxes[0].trigger;
+            expect(trigger?.shapes?.length, `${f.name}'s Hurtbox has no trigger`).toBe(1);
+            const team = valueOf(f, 'team');
+            expect(trigger.group, `${f.name}'s hurtbox layer`).toBe(team === 'player' ? LAYER.PLAYER_HURTBOX : LAYER.ENEMY_HURTBOX);
+            expect(trigger.mask, `${f.name}'s hurtbox detects`).toBe(LAYER.HITBOX);
+            expect(trigger.detectTriggers).toBe(true);
+            // Never the body itself: the hurtbox switches off for i-frames while the body keeps colliding.
+            expect(f.body ?? template?.bodies?.[f.id], `${f.name} has no body of its own`).toBeTruthy();
+            checked++;
+        }
+        // The player (template + placed copy), the base enemy, four enemy types and the barrel.
+        expect(checked).toBeGreaterThanOrEqual(8);
     });
 
     it('gives each enemy type its own script extending SoulsEnemy, holding its stats, on its own variant', () => {
@@ -450,7 +478,7 @@ describe.skipIf(!present)('the Valley example project', () => {
 
     it('stores every variant exactly as its base + diff materializes', () => {
         const variants = templates().filter((t: any) => t.variant);
-        expect(variants.length).toBe(9);
+        expect(variants.length).toBe(10);
         for (const v of variants) {
             const base = templates().find((b: any) => b.id === v.variant.baseTemplateId);
             expect(base, `${v.name}'s base`).toBeDefined();

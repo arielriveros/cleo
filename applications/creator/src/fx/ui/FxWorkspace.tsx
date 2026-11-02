@@ -268,7 +268,7 @@ export function FxWorkspace() {
   const viewport = (<>
     <ViewportOverlay
       readout={<LiveReadout />}
-      visibility={[
+      stage={{ toggles: [
         { key: 'grid', label: 'Grid', checked: stageScene.grid },
         { key: 'groundPlane', label: 'Floor', checked: stageScene.groundPlane },
         { key: 'sky', label: 'Sky', checked: stageScene.sky },
@@ -276,7 +276,7 @@ export function FxWorkspace() {
         { key: 'showRegion', label: 'Region wireframe', checked: stageScene.showRegion },
         { key: 'showEmitter', label: 'Emitter', checked: stageScene.showEmitter },
         { key: 'showBodies', label: 'Bodies', checked: stageScene.showBodies },
-      ].map(item => ({ ...item, onChange: (v: boolean) => setStageScene(s => ({ ...s, [item.key]: v })) }))}
+      ].map(item => ({ ...item, onChange: (v: boolean) => setStageScene(s => ({ ...s, [item.key]: v })) })) }}
       controls={<GizmoModeControls mode={gizmoMode} space={gizmoSpace} onMode={setGizmoMode} onSpace={setGizmoSpace} />}
       onFrame={frameSelection} frameTitle='Frame the selection (F)' />
     <FxGizmos instance={instance} scene={scene} bus={bus} stage={stage} volume={node} viewportRef={viewportRef}

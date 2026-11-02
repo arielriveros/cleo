@@ -6,7 +6,7 @@ one tab per skeleton. It has four parts, switched from the bar under the tab str
 | Part | For |
 |---|---|
 | **Skeleton** | The bones: humanoid mapping, [sockets](#sockets), [bone masks](#bone-masks), [poses](#poses), [foot placement](#foot-placement), ragdoll and retargeting ([the bone mapper](models-and-materials.md#the-bone-mapper)). |
-| **Clips** | One `.anim`'s clips: trim, mirror, root motion, bone posing and [clip events](#events-on-the-clip). |
+| **Clips** | The [clip player](#the-clip-player): one `.anim`'s clips played on a character, with their [events](#events-on-the-clip) and root motion. |
 | **Animator** | The graph that decides which clip plays: states, transitions, parameters, layers and action slots. |
 | **Blend Spaces** | Clips mixed by speed, direction or any other parameter — see [Blend spaces](#blend-spaces). |
 
@@ -20,28 +20,12 @@ One idea holds it together: **a character has a skeleton, the skeleton owns the 
 animator drives them.** Clips are linked to the *skeleton*, never to a single model, so every
 character built on it plays them.
 
+Motion itself — keys, poses, blending, retiming — is authored in [Cleo Creator ▸
+Motion](../creator/motion.md), and reaches every project's `/Creator` folder by itself. The editor
+wires clips to characters and plays them: animators, blend spaces, foot placement, sockets, and the
+[events](#events-on-the-clip) that tie a moment of a clip to a script.
+
 The runtime API is in [Animation (scripting)](../scripting/animation.md).
-
-## Animate a character in a minute
-
-A character with no animator holds its bind pose, and its **Animation** section says so with one
-button: **✨ Animate this character…**. It opens a wizard that builds a working animator from a
-starting point you pick; everything it makes can be changed afterwards in the Animator. The wizard:
-
-1. **Checks the skeleton** — how many key humanoid bones it recognised by name. With few of them,
-   templates still work, but foot placement and clips from other skeletons may need the bone mapping
-   checked.
-2. **Picks a template** — *Third-person locomotion* (idle, walk/run/sprint blended by speed, jump,
-   fall, land), *Melee fighter* (locomotion, death, and an action slot for attacks, rolls and hits)
-   or *Simple NPC* (idle and walk).
-3. **Assigns the clips** — each slot is filled from the clip names (`Walking`, `Running`, `Falling
-   Idle` …). Change any pick; **+ Import clips…** brings more in without leaving the wizard.
-
-**Create Animator** builds a shared `.animator` on the skeleton (plus a locomotion blend space when
-there are two or more gaits), gives it to the character, turns on foot placement if the skeleton has
-none, and opens the workspace on it. Every parameter it makes is **linked** to a measured value —
-speed, air time, grounded — so the character animates in Play with no script. Attacks, rolls and hit
-reactions are actions: a script plays them with `playAction`.
 
 ## The Skeleton part
 
@@ -63,43 +47,42 @@ up under that tree. Properties holds, from the top:
   bone once and every clip from that skeleton retargets onto this one the same way, permanently.
   Corrections are kept per source skeleton; **Reset** discards that source's.
 
-## The clip editor
+## The clip player
 
-The workspace's **Clips** part edits one `.anim` at a time — pick it from **Clips ▾** on the
-workspace bar, or double-click it in Assets. The **Clip** panel holds the sections below; **Timeline**
-plays and scrubs the clip on the preview character, with its [events](#events-on-the-clip) in the row
-above the bone keys. **Save** writes the `.anim`, and **Save As…** copies its clips and their edits
-into a new `.anim` on the same skeleton, leaving this one as it was.
+The workspace's **Clips** part plays one `.anim` at a time — pick it from **Clips ▾** on the
+workspace bar, or double-click it in Assets. Clips are not edited here: they are authored in [Cleo
+Creator ▸ Motion](../creator/motion.md). Here a clip is played on a character, given its
+[events](#events-on-the-clip) and its [root motion](#root-motion). Each change is written to the
+`.anim` as it is made — there is nothing to save — and **Ctrl+Z** undoes it.
 
-- **Clips** — the clips in this `.anim`. Pick one to show and edit it; ✦ marks a clip with edits.
-- **Bone** — poses the bone picked in the Skeleton panel or the viewport. A posed bone is held over
-  the clip, so an arm pose can be judged against the walk it goes into, until **Key at …** writes the
-  pose into the clip at the playhead or **Reset** lets the clip drive it again. ◆ marks a track with
-  a key at the playhead, and its ✕ deletes that key. **Save N posed bones as a shared pose…** stores
-  the posed bones as a [pose](#poses).
-- **Edits** — the clip's edit stack: **Mirror**, **In place**, **Pose** offset, **Trim** and
-  **Retime**. Edits are applied every time the clip plays and never written into the keyframes, so
-  removing one brings the original back. They always run in the same order — trim, mirror, pose
-  offset, in place, retime — whatever order they were added in, and the list shows them in that
-  order. **Apply an edit to other clips…** copies the newest edit onto several clips at once.
+The **Clip** panel holds:
 
-With more than one character on the skeleton, a *Preview character* section picks which one plays
-the clip.
+- **Clips** — the clips in this `.anim`; pick one to play it. A clip made with an older version of the
+  editor may still carry an edit stack (mirror, trim, pose offset, in place, retime). It keeps playing
+  exactly as before, the panel says how many edits are applied, and **Remove** plays the clip as it was
+  imported.
+- **Preview character** — with more than one character on the skeleton, which one plays the clip.
+- **Root motion** — below.
+
+**Timeline**, in the bottom strip, plays and scrubs the clip on the preview character, with the clip's
+**Events** track under the scrubber.
+
+A clip synced from Cleo Creator (in `/Creator`) belongs to the Creator, which re-makes it on every sync:
+only its events can be changed here, and those survive the next sync.
 
 ### Root motion
 
 Root motion lets the *animation* physically move the character — the body if it has one, otherwise
-the model node — instead of returning it to where it started. Each clip makes one of three choices:
+the model node — instead of returning it to where it started. Each clip makes one of two choices:
 
 - **Leave in the clip** — the mesh travels and the character node stays put: the raw import.
 - **Drive the character** — the root's motion is extracted at runtime and moves the character.
-- **Bake in place** — the travel is removed from the curves and a script drives movement instead.
-  Vertical motion is kept, so a jump keeps its arc. It is an *In place* edit in the stack.
 
 Drive the character for turn-in-place and other clips whose animation is authoritative. Locomotion
-that physics velocity already moves must not drive the character as well, or it double-moves; Bake in
-place also keeps its mesh from travelling away from the body. A blend-space state ignores root motion
-entirely, and only the base layer applies it — never a layer or an action.
+that physics velocity already moves must not drive the character as well, or it double-moves; author it
+in place instead, in the Creator. A blend-space state ignores root motion entirely, and only the base
+layer applies it — never a layer or an action. A clip whose older edit stack includes **In place** has
+its travel removed already, so the choice stays locked until those edits are removed.
 
 ## The Clips panel
 
@@ -119,8 +102,8 @@ Clips belong to the model's **rig**, so every character built on that skeleton i
 
 ## The Parameters panel
 
-The Animator part's **Parameters** panel holds three lists: the machine's parameters, its events and
-its action slots.
+The Animator part's **Parameters** panel holds two lists: the machine's parameters and its action
+slots. Events are not the animator's — they belong [on the clip](#events-on-the-clip).
 
 **Parameters** — **Number**, **Toggle**, **Trigger** or **Linked**. The first three are set from a
 script; a **Linked** parameter follows a value by itself:
@@ -138,11 +121,6 @@ is in [Animation built-ins](../reference/animation-builtins.md).
 > ignores falling, so a jump never reads as a sprint; and it lets a blend-space axis be in real
 > world units.
 
-**Events** — an event name, its clip, and a time you scrub by dragging a marker on the transport.
-The event is delivered to `onAnimationEvent`. This is how a footstep, a hit frame or a particle
-burst stays locked to the animation rather than to a timer. These markers belong to *this* machine;
-a marker that should fire wherever the clip plays belongs [on the clip](#events-on-the-clip).
-
 **Action slots** — named places a script plays one-shots into, without wiring them into the graph.
 See [Action slots](#action-slots).
 
@@ -150,8 +128,8 @@ See [Action slots](#action-slots).
 
 Two views, switched with the **Animations | Graph** control:
 
-- **Animations** — the character in the viewport, with a transport to play and scrub a clip and drag
-  the machine's event markers.
+- **Animations** — the character in the viewport, with a transport to play and scrub a clip, and the
+  clip's [Events](#events-on-the-clip) track under it.
 - **Graph** — the state graph, below.
 
 ### The graph
@@ -229,7 +207,6 @@ Make one:
 - **Animator ▾ → + New Animator** on the workspace bar, for that skeleton.
 - **Assets → + Add → Animator** creates an empty one.
 - **Share…**, at the top of the Animator's panels, turns the one you are editing into a shared one.
-- The [Animate wizard](#animate-a-character-in-a-minute) always makes one.
 
 Double-click it to open it in its skeleton's workspace. It is previewed on a character built on that
 skeleton.
@@ -299,27 +276,19 @@ using the mask without saving the animator again.
 A **pose asset** (`.pose`) holds named static poses of one skeleton, each a set of per-bone changes
 from rest — a hand grip, a pointing finger, an injured stance. It is Unreal's Pose Asset.
 
-**Authoring.** Two ways:
-
-- In the [clip editor](#the-clip-editor)'s Bone section, pose some bones and use **Save N posed
-  bones as a shared pose…**.
-- In the Skeleton part, pause a clip on the frame you want and press **Capture pose** in the **Poses**
-  section. Every bone that differs from rest is kept.
-
-Either way the pose goes into the rig's pose asset, which is created for you if the rig has none.
+**Authoring.** Poses are made in [Cleo Creator ▸ Motion](../creator/motion.md#poses). Each pose saved
+there reaches every project's `/Creator/Poses` folder as a pose asset on its skeleton's rig, and follows
+every change made in the Creator. Its ids never change, so a state holding it keeps holding it.
 
 **Previewing.** Press **◉** on a pose row in the Skeleton part to show it on the preview character.
 Press it again, or **Clear pose preview**, to let the clip drive the bones again.
 
-**Managing.** The Skeleton part's **Poses** section lists the rig's pose assets: rename them, rename or
-delete individual poses, or **+ New pose asset**. Clips and states refer to a pose by id, so a rename
-breaks nothing.
+**Managing.** The Skeleton part's **Poses** section lists the rig's pose assets. A pose asset from the
+Creator is read-only there; an older one of the project's own can be renamed or deleted, and so can
+its poses. States refer to a pose by id, so a rename breaks nothing.
 
-**Using.** A pose can be
-
-- layered onto a clip as a pose-offset edit, as before; or
-- held by a state: set **Plays** to **Pose** and pick it. On a masked layer, that is a hand closing
-  around a weapon while the rest of the body keeps moving.
+**Using.** A state holds a pose: set **Plays** to **Pose** and pick it. On a masked layer, that is a
+hand closing around a weapon while the rest of the body keeps moving.
 
 > Older projects stored poses on the rig itself. Those keep working, and the Poses section offers
 > **Move into a pose asset**, which keeps every pose id so no clip referencing one breaks.
@@ -345,23 +314,29 @@ With **no** slots declared, an action plays full-body over everything. The scrip
 
 ## Events on the clip
 
-An event marker can belong to the **clip** itself, and then it fires wherever that clip plays — a
-base state, a layer or an action slot — through the same `onAnimationEvent(name, clip)` handler.
+An event marker belongs to the **clip**, and fires wherever that clip plays — a base state, a layer or
+an action slot, in any animator — through `onAnimationEvent(name, clip)`. This is how a footstep, a hit
+frame or a particle burst stays locked to the animation rather than to a timer.
 
-They are authored on the clip editor's timeline, in the row above the bone keys:
+Events are placed on the **Events** track, under the scrubber of the clip player's **Timeline** and of
+the Animator and Skeleton transports:
 
-- **+ Event at playhead** adds one and asks for its name.
-- **Drag** a marker to move it, **click** it to rename, **double-click** it to delete.
+- **+ Event** adds one at the playhead and asks for its name.
+- **Drag** a marker to move it, **click** it to rename, **right-click** it to delete.
 
-The machine's own **Events** list (in the Parameters panel) still works. Prefer the clip's for
-anything that is a fact about the animation — a footstep, a contact frame — so every machine that
-plays it gets it.
+Each change is written to the clip's `.anim` at once and can be undone. The Creator does not author
+events, so a clip synced from Cleo Creator keeps the events placed here when it is re-synced. A clip
+embedded in a model rather than kept in a `.anim` shows its events, read-only.
+
+> Animators used to carry event markers of their own. Opening one in the workspace moves its markers
+> onto the clips they name and says how many moved; save the animator to finish — until then a moved
+> marker fires twice. A marker on a clip embedded in the model has no `.anim` to move to: it stays on
+> the animator, still fires, and shows on the track as a hollow circle.
 
 ## Blend spaces
 
 A **blend space** (`.blendspace`) blends several clips by where a probe sits on a plot. Create one
-from **Blend Spaces ▾ → + New Blend Space** on the workspace bar; the Animate wizard makes one for
-locomotion.
+from **Blend Spaces ▾ → + New Blend Space** on the workspace bar.
 
 **Blend Space** (bottom) is the plot itself, with a draggable probe and a live preview. **Blend Space
 Settings** (right) has three sections:
@@ -428,7 +403,7 @@ An analytic two-bone solver that plants feet on uneven ground.
 
 Set it up under the **Skeleton** tree: select a joint — from the tree or by clicking it in the
 viewport — and assign it a role, **Thigh / Shin / Foot / Toe**, per leg. There is a `⤓`
-name-matched auto-guess and a validation report; the Animate wizard runs that guess for you.
+name-matched auto-guess and a validation report.
 
 It is stored on the **skeleton**, so every character built on it gets it. Per-state strength comes
 from the state's foot-placement weight.

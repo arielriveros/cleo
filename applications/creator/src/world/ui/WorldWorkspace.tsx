@@ -20,7 +20,7 @@ import { frameWorld, hideWorldPreview, showWorldPreview } from './worldPreview';
 
 // World Creator: build a landscape from a stack of landform primitives and erosion passes, preview it
 // live on a real engine landscape, and export the heightmap (+ masks) at full resolution. The Creator's
-// shared layout (app/workspace.tsx): Layers on the left, Parameters and Export on the right, the Map and
+// shared layout (app/workspace.tsx): Layers on the left, Parameters (with the Output resolution) on the right, the Map and
 // the console below.
 
 const PREVIEW_RESOLUTION = 257;
@@ -28,9 +28,9 @@ const STORAGE_KEY = 'cleo_creator_world_doc_v1';
 /** The preset picked last: what Reset returns to. */
 const PRESET_KEY = 'cleo_creator_world_preset_v1';
 
-/** The world settings the Parameters tab draws; Resolution is the Export tab's. */
+/** The world settings the Parameters tab draws; Resolution is its Output section's. */
 const PARAMETER_SETTINGS = SETTINGS_SCHEMA.filter(s => s.key !== 'resolution');
-const EXPORT_SETTINGS = SETTINGS_SCHEMA.filter(s => s.key === 'resolution');
+const OUTPUT_SETTINGS = SETTINGS_SCHEMA.filter(s => s.key === 'resolution');
 const PRESET_ENTRIES = WORLD_PRESETS.map(p => ({ ...p, description: p.description ?? p.label }));
 
 interface WorldState {
@@ -153,14 +153,12 @@ export function WorldWorkspace() {
         left={{ id: 'layers', title: 'Layers', render: () => <LayersPanel /> }}
         right={[
           { id: 'parameters', title: 'Parameters', render: () => <ParametersPanel /> },
-          { id: 'export', title: 'Export', render: () => <ExportPanel /> },
         ]}
         bottom={[{ id: 'map', title: 'Map', render: () => <MapPanel /> }]}
         viewport={<ViewportOverlay readout={preview && <>Preview {preview.frame.resolution}² · {preview.frame.size} m · {enabledLayers} layers · {enabledPasses} erosion passes</>}
                                    onFrame={frame} frameTitle='Frame the world (F)' />}
         onFrame={frame}
-        generation={{ status, onCancel: () => { full.cancel(); live.cancel(); },
-                      idle: preview ? `Preview ${preview.frame.resolution}² — ${enabledLayers} layers, ${enabledPasses} erosion passes` : undefined }} />
+        generation={{ status, onCancel: () => { full.cancel(); live.cancel(); } }} />
     </WorldContext.Provider>
   );
 }
@@ -209,7 +207,6 @@ function LayersPanel() {
   );
   return (
     <PanelBody>
-      <PanelHeader kind='World' name={`${doc.layers.length} layers · ${doc.erosion.length} passes`} />
       <Collapsable title='Landforms' persistKey='cleo_creator_world_layers_landforms' right={
         <Select value='' onChange={e => { const k = e.target.value as LayerKind; if (!k) return; const l = defaultLayer(k); setDoc({ ...doc, layers: [...doc.layers, l] }); select(l.id); }}>
           <option value=''>+ Add</option>
@@ -253,6 +250,10 @@ function ParametersPanel() {
         <ParamForm schema={PARAMETER_SETTINGS} values={doc.settings as unknown as Record<string, unknown>}
                    onChange={patch => setDoc({ ...doc, settings: { ...doc.settings, ...patch } })} />
       </Collapsable>
+      <Collapsable title='Output' persistKey='cleo_creator_world_output'>
+        <ParamForm schema={OUTPUT_SETTINGS} values={{ resolution: String(doc.settings.resolution) }}
+                   onChange={patch => setDoc({ ...doc, settings: { ...doc.settings, resolution: Number(patch.resolution ?? doc.settings.resolution) } })} />
+      </Collapsable>
       {layer && (
         <Collapsable title={`${LAYER_LABELS[layer.kind]}: ${layer.name}`} persistKey='cleo_creator_world_selected'>
           <ParamForm schema={[STRENGTH_SPEC, ...LAYER_SCHEMAS[layer.kind]]} values={layer as unknown as Record<string, unknown>}
@@ -272,24 +273,3 @@ function ParametersPanel() {
   );
 }
 
-/** What the export writes: the resolution, and the files. */
-function ExportPanel() {
-  const { doc, setDoc } = useWorld();
-  return (
-    <PanelBody>
-      <Collapsable title='Resolution' persistKey='cleo_creator_world_export_resolution'>
-        <ParamForm schema={EXPORT_SETTINGS} values={{ resolution: String(doc.settings.resolution) }}
-                   onChange={patch => setDoc({ ...doc, settings: { ...doc.settings, resolution: Number(patch.resolution ?? doc.settings.resolution) } })} />
-      </Collapsable>
-      <Collapsable title='File' persistKey='cleo_creator_world_export_file'>
-        <ul className='text-ui-xs text-muted font-mono'>
-          <li>world_height.png</li>
-          <li>world_height.r16</li>
-          {MASK_KINDS.map(k => <li key={k}>world_{k}.png</li>)}
-          <li>world.json</li>
-        </ul>
-        <p className='text-ui-xs text-muted pt-1'>Generate &amp; export (toolbar) writes them at {doc.settings.resolution}². Import the heightmap on a Landscape in the Editor.</p>
-      </Collapsable>
-    </PanelBody>
-  );
-}

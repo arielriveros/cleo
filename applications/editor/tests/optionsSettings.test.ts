@@ -46,11 +46,19 @@ describe('project settings', () => {
     });
     expect(isDefaultProjectSettings(s)).toBe(false);
     expect(projectSettingsConfig(s)).toEqual({
-      physics: { gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0 },
+      physics: { gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0, worker: 'off' },
       runtime: { maxFrameDelta: 0.05 },
       audio: { masterVolume: 0.5 },
       window: { title: 'Hollow Keep', width: 1920, height: 1080, fullscreen: true, resizable: false },
     });
+  });
+
+  it('reads the physics thread, falling back to the main thread for anything else', () => {
+    expect(parseProjectSettings({ engine: { physicsWorker: 'auto' } }).engine.physicsWorker).toBe('auto');
+    expect(parseProjectSettings({ engine: { physicsWorker: 'on' } }).engine.physicsWorker).toBe('on');
+    expect(parseProjectSettings({ engine: { physicsWorker: 'gpu' } }).engine.physicsWorker).toBe('off');
+    expect(parseProjectSettings(null).engine.physicsWorker).toBe('off');
+    expect(projectSettingsConfig(parseProjectSettings({ engine: { physicsWorker: 'auto' } })).physics.worker).toBe('auto');
   });
 
   it('applies the runtime slice to a live engine, physics and mixer', () => {

@@ -8,10 +8,7 @@ import { useAssetDrop } from '../../utils/useAssetDrop'
 // clip plays on every character built on that armature — and on every placement of each of them.
 //
 // It used to carry a per-clip ROOT MOTION toggle, duplicated from the state machine's Clips panel. Both
-// are gone: root motion is now one three-way choice in the CLIP EDITOR, beside the in-place bake it is
-// the opposite of. Two independent toggles in two places could express states that mean nothing (drive
-// the character from travel that has been baked out of the curves), and neither surface could show the
-// other half of the decision. The ✎ on each row is the way there.
+// are gone: root motion is set in one place, the CLIP PLAYER. The ✎ on each row is the way there.
 
 export default function AnimationAssetPicker(props: {
   /** The rig asset to link to, or null when the node has no rig yet. */
@@ -46,15 +43,13 @@ export default function AnimationAssetPicker(props: {
 
   /**
    * Root motion used to be a toggle on every one of these rows, and there was a second copy of it in the
-   * state machine's Clips panel. It is now one three-way choice in the CLIP EDITOR, next to the in-place
-   * bake it is the opposite of — a clip either leaves its travel alone, drives the character with it, or
-   * has it removed from the curves, and two independent toggles could express combinations that mean
-   * nothing. Open the `.anim` from the asset tree, or with the button on this row.
+   * state machine's Clips panel. It is set in one place now, the CLIP PLAYER, with the clip's events.
+   * Open the `.anim` from the asset tree, or with the button on this row.
    */
   const openClip = (animationId: string) => (
     <Button
       variant='ghost' size='sm' className='px-1 py-0 shrink-0'
-      title='Open this animation in the clip editor — root motion, mirroring, trimming and retiming live there'
+      title='Open this animation in the clip player — its root motion and events are set there'
       onClick={() => enterClipEditor(animationId)}
     >✎</Button>
   )

@@ -28,8 +28,9 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  *
  * ## Hitbox
  *
- * `bladeStart`/`bladeEnd`/`bladeRadius` is a capsule along the blade, in the `Mesh` child's space. During
- * an attack's active window it is swept every frame against hurtboxes (SoulsHitbox).
+ * `bladeStart`/`bladeEnd`/`bladeRadius` is a capsule along the blade, in the `Mesh` child's space. The
+ * first swing builds it as a TRIGGER on a `Hitbox` child of the Mesh; the attack's clip events switch it
+ * on (`hit`) and off (`hitEnd`), and the hurtboxes it enters are what the swing damages (SoulsHitbox).
  *
  * ## Attack rating
  *
@@ -53,7 +54,7 @@ export default class SoulsWeaponNode extends Node {
   /** First move of the light chain, and the heavy attack. Names of child SoulsMove nodes. */
   public lightMove: NodeName = 'Light1'
   public heavyMove: NodeName = 'Heavy'
-  /** The blade hitbox, in the Mesh child's space. See "Hitbox" above. */
+  /** The blade hitbox capsule, in the Mesh child's space. See "Hitbox" above. */
   public bladeStart: number[] = [0, 0.12, 0]
   public bladeEnd: number[] = [0, 1, 0]
   public bladeRadius: number = 0.12

@@ -8,9 +8,13 @@
 // Creator's own baker (applications/creator/src/motion/bakeMotion.ts) on the souls mannequin's skeleton,
 // into longswordClips.json -- the same clip shape as soulsClips.json, events included -- which build.mjs
 // adds to the mannequin's animations (so the Valley knight plays them retargeted, like every other clip).
+// The events (hit, hitEnd, combo, recover, next) are the game's, not the motions': the Motion Creator
+// authors none, so they live here (LONGSWORD_EVENTS) and are put on each clip after it is baked, at the
+// time of the key they name.
 //
-// The documents are ordinary Creator motions: open one in Cleo Creator ▸ Motion ▸ Clip ▸ Open…, edit the
-// poses, keys and blend curves there, Download, and put the .motion.json back here; then `bake` again.
+// The documents are ordinary Creator motions: import one in Cleo Creator ▸ Assets ▸ Import, edit the poses,
+// keys and blend curves in the Motion Creator, Download, and put the .motion.json back here; then `bake`
+// again. (Keep the keys' ids: the events find their keys by id.)
 //
 // `author` wrote their first version, and rewrites them from the choreography below (overwriting edits
 // made in the Creator). Each key pose is described the way a fencer would: where the hilt is, where the
@@ -24,7 +28,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quat, vec3, mat3 } from 'gl-matrix';
 import { buildRig, modelPose, type MotionRig } from '../../applications/creator/src/motion/motionRig';
-import { bakeMotion, poseFromClip, poseLocals, solvedPoseLocals } from '../../applications/creator/src/motion/bakeMotion';
+import { bakeMotion, poseFromClip, poseLocals, solvedPoseLocals, type BakedClip } from '../../applications/creator/src/motion/bakeMotion';
 import { rotateBone } from '../../applications/creator/src/motion/poseDrag';
 import {
   motionFromFile, normaliseMotion, presetBlend, quatToEuler,
@@ -210,12 +214,34 @@ const GUARD_IN: Stance = { ...GUARD, drop: 0.06, lean: 5, hilt: [-0.04, 1.055, 0
 /** The guard carried upright, for walking and strafing (only the arms play it). */
 const CARRY: Stance = { yaw: 0, lean: 0, drop: 0, hilt: [0.0, 1.02, 0.38], blade: [0.03, 0.5, 0.87], edge: [0, -1, 0] };
 
-interface Beat { at: number; pose: string; blend?: string; event?: string }
+/** A key: its time, the pose it reaches and the blend into it. Beat n becomes key `k<n>` (1-based). */
+interface Beat { at: number; pose: string; blend?: string }
 interface Move { name: string; loop?: boolean; overlap?: number; variation?: number; poses: Record<string, Stance>; beats: Beat[] }
 
-// The light combo: ONE clip, three attacks. Each ends on a settle key with the event `next` -- where the
-// game stops it (one attack) or plays on into the next (a chain). The chain window opens as the blade
-// leaves its cut (`combo` with `hitEnd`), so a press any time after the swing lands counts. Every attack steps:
+/**
+ * The clip events the game reads (build.mjs: next, hit, hitEnd, combo, recover), by clip and key id, put on
+ * each baked clip at its key's time (`withEvents`), in key order. The light combo is ONE clip, three
+ * attacks: each ends on a settle key with `next` -- where the game stops it (one attack) or plays on into
+ * the next (a chain). The chain window opens as the blade leaves its cut (`combo` with `hitEnd`), so a
+ * press any time after the swing lands counts.
+ */
+export const LONGSWORD_EVENTS: Record<string, Record<string, string[]>> = {
+  Souls_LS_Combo: {
+    k3: ['hit'], k5: ['hitEnd', 'combo'], k6: ['recover'], k7: ['next'],         // 1: Cut, Follow-through, Settle, Settle
+    k9: ['hit'], k11: ['hitEnd', 'combo'], k12: ['recover'], k13: ['next'],      // 2
+    k15: ['hit'], k17: ['hitEnd', 'combo'], k18: ['recover'],                     // 3
+  },
+  Souls_LS_Heavy: { k4: ['hit'], k6: ['hitEnd'], k7: ['combo', 'recover'] },    // Cut, Follow-through, Recover
+};
+
+/** A baked clip with the game's events of its motion (LONGSWORD_EVENTS), at the times of their keys. */
+export function withEvents(doc: MotionDoc, clip: BakedClip): BakedClip {
+  const table = LONGSWORD_EVENTS[doc.name] ?? {};
+  for (const id of Object.keys(table)) if (!doc.keys.some(k => k.id === id)) throw new Error(`${doc.name} has no key ${id} for the events ${table[id].join(', ')}`);
+  return { ...clip, events: doc.keys.flatMap(k => (table[k.id] ?? []).map(name => ({ time: k.time, name }))) };
+}
+
+// The light combo, attack by attack. Every attack steps:
 //   1  a diagonal cut from the right shoulder (oberhau), the left foot stepping in        +0.24 m
 //   2  the rising answer from below, the right foot passing forward (the stance switches) +0.31 m
 //   3  a wide horizontal cut from the right, the left foot passing again, a lunge         +0.30 m
@@ -258,22 +284,22 @@ const COMBO: Move = {
   beats: [
     { at: 0, pose: 'Guard' },
     { at: 0.28, pose: 'Wind-up 1', blend: 'easeOut' },
-    { at: 0.38, pose: 'Cut 1', blend: 'easeIn', event: 'hit' },
+    { at: 0.38, pose: 'Cut 1', blend: 'easeIn' },
     { at: 0.48, pose: 'Strike 1', blend: 'linear' },
-    { at: 0.58, pose: 'Follow-through 1', blend: 'easeOut', event: 'hitEnd, combo' },
-    { at: 0.8, pose: 'Settle 1', blend: 'smooth', event: 'recover' },
-    { at: 0.9, pose: 'Settle 1', blend: 'smooth', event: 'next' },
+    { at: 0.58, pose: 'Follow-through 1', blend: 'easeOut' },
+    { at: 0.8, pose: 'Settle 1', blend: 'smooth' },
+    { at: 0.9, pose: 'Settle 1', blend: 'smooth' },
     { at: 1.14, pose: 'Wind-up 2', blend: 'easeOut' },
-    { at: 1.24, pose: 'Cut 2', blend: 'easeIn', event: 'hit' },
+    { at: 1.24, pose: 'Cut 2', blend: 'easeIn' },
     { at: 1.34, pose: 'Strike 2', blend: 'linear' },
-    { at: 1.44, pose: 'Follow-through 2', blend: 'easeOut', event: 'hitEnd, combo' },
-    { at: 1.64, pose: 'Settle 2', blend: 'smooth', event: 'recover' },
-    { at: 1.74, pose: 'Settle 2', blend: 'smooth', event: 'next' },
+    { at: 1.44, pose: 'Follow-through 2', blend: 'easeOut' },
+    { at: 1.64, pose: 'Settle 2', blend: 'smooth' },
+    { at: 1.74, pose: 'Settle 2', blend: 'smooth' },
     { at: 2.06, pose: 'Wind-up 3', blend: 'anticipate' },
-    { at: 2.2, pose: 'Cut 3', blend: 'easeIn', event: 'hit' },
+    { at: 2.2, pose: 'Cut 3', blend: 'easeIn' },
     { at: 2.3, pose: 'Strike 3', blend: 'linear' },
-    { at: 2.4, pose: 'Follow-through 3', blend: 'easeOut', event: 'hitEnd, combo' },
-    { at: 2.64, pose: 'Settle 3', blend: 'overshoot', event: 'recover' },
+    { at: 2.4, pose: 'Follow-through 3', blend: 'easeOut' },
+    { at: 2.64, pose: 'Settle 3', blend: 'overshoot' },
     { at: 3.0, pose: 'Guard (end)', blend: 'smooth' },
   ],
 };
@@ -310,10 +336,10 @@ const MOVES: Move[] = [
       { at: 0, pose: 'Guard' },
       { at: 0.45, pose: 'High guard', blend: 'smooth' },
       { at: 0.62, pose: 'Gather', blend: 'smooth' },
-      { at: 0.74, pose: 'Cut', blend: 'easeIn', event: 'hit' },
+      { at: 0.74, pose: 'Cut', blend: 'easeIn' },
       { at: 0.84, pose: 'Strike', blend: 'linear' },
-      { at: 0.94, pose: 'Follow-through', blend: 'easeOut', event: 'hitEnd' },
-      { at: 1.3, pose: 'Recover', blend: 'smooth', event: 'combo, recover' },
+      { at: 0.94, pose: 'Follow-through', blend: 'easeOut' },
+      { at: 1.3, pose: 'Recover', blend: 'smooth' },
       { at: 1.7, pose: 'Guard (end)', blend: 'smooth' },
     ],
   },
@@ -337,7 +363,7 @@ function author(m: Move): MotionDoc {
     poses.push(p);
   }
   const keys: MotionKey[] = m.beats.map((b, i) => ({
-    id: `k${i + 1}`, poseId: ids.get(b.pose)!, time: b.at, ...presetBlend(b.blend ?? 'smooth'), ...(b.event ? { event: b.event } : {}),
+    id: `k${i + 1}`, poseId: ids.get(b.pose)!, time: b.at, ...presetBlend(b.blend ?? 'smooth'),
   }));
   return normaliseMotion({ name: m.name, seed: 7, poses, keys, fps: 30, overlap: m.overlap ?? 0.03, variation: m.variation ?? 0, variationRate: 0.5, loop: !!m.loop });
 }
@@ -362,7 +388,8 @@ function check(doc: MotionDoc): { grip: number; reachR: number; worst: string } 
 
 // --- Commands ------------------------------------------------------------------------------------------
 
-const cmd = process.argv[2] ?? 'bake';
+// Imported by a test (the Creator's motion suite reads the event table), it runs nothing.
+const cmd = process.env.VITEST ? '' : process.argv[2] ?? 'bake';
 if (cmd === 'author') {
   mkdirSync(MOTIONS, { recursive: true });
   // Motions no longer authored here go (the old one-clip-per-attack L1-L3).
@@ -381,7 +408,7 @@ if (cmd === 'author' || cmd === 'bake') {
   const clips = readdirSync(MOTIONS).filter(f => f.endsWith('.motion.json')).sort().map(f => {
     const doc = motionFromFile(JSON.parse(readFileSync(join(MOTIONS, f), 'utf8')));
     if (!doc) throw new Error(`${f} is not a Motion Creator motion`);
-    const clip = bakeMotion(rig, doc);
+    const clip = withEvents(doc, bakeMotion(rig, doc));
     // Four decimals: a tenth of a millimetre, a hundredth of a degree -- and a quarter of the file.
     const round = (v: number[]) => v.map(x => Math.round(x * 1e4) / 1e4);
     return { name: doc.name, samplers: clip.samplers.map(s => ({ ...s, input: round(s.input), output: round(s.output) })), channels: clip.channels, events: clip.events ?? [] };

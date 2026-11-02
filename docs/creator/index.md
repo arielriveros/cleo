@@ -25,38 +25,54 @@ port 8081. The desktop app opens it as a second window.
 
 Every tool is laid out the same way, so what you learn in one carries to the others:
 
-- **Toolbar** — the tool's own controls on the left (kind, seed, playback), then the
-  [saved asset](#saved-assets) controls, what is running on the right, and the tool's one output action
-  at the far right: **Generate & export**, **Export flipbook** or **Download .glb**.
-- **Left dock** — what is being built: the World's layers, the FX scene, the Foliage variants.
-- **Viewport** — the live preview. Numbers top-left; the visibility menu, the tool's controls and
+- **Toolbar** — the tool's own controls on the left (kind, seed, the subject), then the
+  [asset chip](#saved-assets), what is running on the right, and the tool's one output action at the far
+  right: **Generate & export**, **Export flipbook**, **Download .glb** or **Download .anim**.
+- **Left dock** — what is being built: the World's layers, the FX scene, the Motion's poses. Foliage has
+  none.
+- **Viewport** — the live preview. Numbers top-left; the **Stage** menu, the tool's controls and
   **Frame** top-right. **F** frames the asset in every tool.
 - **Right dock** — **Parameters** first, with the preset name, **Reset** and **Presets ▾** at its top,
-  then the tool's other tabs: Materials, LOD, Bake, Export.
-- **Bottom** — **Assets** and the **Console**, with the World's **Map** beside them. Assets is the editor's
-  own asset explorer, browsing the [saved assets](#saved-assets) of every tool under `/Foliage`, `/FX`,
-  `/World`, `/Motion` and `/Characters`: double-click one to open it in its tool; rename, duplicate, move into folders or delete it
-  there. **+ Add ▸ Rigged character…**, or **Import** beside it, uploads a rigged model as a
-  [character](motion.md#characters). The toolbar is the Editor's: the same **+ Add** menu, opening upward,
-  and the same **Import** button. Cards show a picture of the stage taken when the asset last changed.
+  then the tool's other tabs: Materials, LOD, Bake, Export, Parts.
+- **Bottom** — **Assets** and the **Console**, with the World's **Map** and the Motion's **Timeline** beside
+  them. Assets is the editor's own asset explorer, browsing the [saved assets](#saved-assets) of every tool
+  under `/Foliage`, `/FX`, `/World`, `/Motion`, `/Characters` and `/Poses`: double-click one to open it in
+  its tool; rename, duplicate, move into folders or delete it there. **+ Add ▸ Rigged character…**, or
+  **Import** beside it, uploads a rigged model as a [character](motion.md#characters); **Import** also takes
+  a `.motion.json` (the Motion Creator's sidecar) as a new motion. The toolbar is the Editor's: the same
+  **+ Add** menu, opening upward, and the same **Import** button. Cards show a picture of the stage taken
+  when the asset last changed.
 - **Status bar** — the running job's progress and Cancel, or a summary of the last result.
+
+### Stage
+
+The **Stage** menu top-right of every viewport is the preview's stage, never part of the asset: **Show**
+switches what the viewport draws (the grid, the floor, and the tool's own: the skeleton, the wind, the
+FX region), **Sun** turns the sun (**Direction**) and raises it (**Elevation**), and a tool adds its own
+sections below (Foliage's light, wind and weather).
 
 ## Saved assets
 
 Each tool works on **Scratch** — its working document, kept in the browser — until **Save as asset…**
 gives it a name. A saved asset is shared with the Editor: it appears in **every project** under
-`/Creator/<Foliage|FX|World>/<name>`, and from then on every change you make here reaches the Editor by
-itself, within a second or two. Nothing to export or import.
+`/Creator/<Foliage|FX|World|Motion|Poses>/<name>`, and from then on every change you make here reaches the
+Editor by itself, within a second or two. Nothing to export or import. The asset's name is the one name
+there is: it is what the Editor calls the asset, and it names the files a Foliage or Motion download
+writes (`untitled` on Scratch).
 
 | Tool | Published when | Becomes, in the Editor |
 |---|---|---|
 | **Foliage** | Each rebuild (about a second after an edit). A tree's impostor is re-baked once edits pause for 3 s, and the previous one is kept until then. | A model with its LOD levels and cull distance, a material per part (Bark, Leaves…), and for a tree the octahedral impostor, which a foliage rule made from the model starts with. |
 | **FX** | Each finished bake. With **Auto-bake** on, a saved asset re-bakes 1.5 s after an edit. | The flipbook (and six-way and motion maps) as textures, and a particle system drawing it. |
 | **World** | Once edits pause for 2 s, at full resolution. | The heightmap and the masks as textures. A landscape imports the heightmap at full precision with **Import heightmap ▸ From Creator**, and offers **Re-apply** when the world changes. |
+| **Motion** | Each re-bake (about a second after an edit), and when a library pose it uses changes. | An animation asset on its subject's rig. See [the Motion Creator](motion.md#in-the-editor). |
+| **Pose** | As it is edited in the Motion Creator's Pose tab. | A Pose asset on its subject's rig. |
 
-The selector at the toolbar picks the asset being edited, or Scratch to stop publishing; **Rename** and
-**Delete** act on the selected asset. A Foliage asset also keeps the texture images you loaded in its
-Materials tab, so reopening it restores them.
+The toolbar's **asset chip** shows the asset being edited: click its name to rename it; its dot turns
+green once the last change is saved; **✕** goes back to Scratch, which stops publishing (the asset stays in
+the library) and keeps the document to go on from. Everything else is the **Assets** tab's: open an asset
+there to edit it, and duplicate, move or delete it there. A Foliage asset also keeps the texture images
+you loaded in its Materials tab, so reopening it restores them.
 
 In the Editor, `/Creator` is read-only: renaming, moving or deleting there is refused, because the next
 change from the Creator would undo it. Placed models, foliage rules and particle nodes that use a synced

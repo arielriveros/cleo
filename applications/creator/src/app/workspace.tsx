@@ -5,16 +5,18 @@ import ConsolePanel from '@cleo/app-kit/feedback/ConsolePanel';
 import { ViewportHost } from '@cleo/app-kit/engine/ViewportHost';
 import { ParamForm } from '@cleo/app-kit/params/ParamForm';
 import type { GenericParamSpec } from '@cleo/app-kit/params/ParamField';
-import { Button, Collapsable, DocScope, PresetMenu, VisibilityMenu, cn, type PresetMenuEntry, type VisibilityItem } from '@cleo/app-kit/ui';
+import {
+  Button, Collapsable, DocHover, DocScope, EyeIcon, Popover, PresetMenu, Slider, Toggle, cn, useDocEntry, type PresetMenuEntry, type VisibilityItem,
+} from '@cleo/app-kit/ui';
 import type { GenerationStatus } from '../core/useGeneration';
 import { GenerationBar } from './StatusBar';
 import { AssetsPanel } from './AssetsPanel';
 
 // The one layout every Creator mode is built from, so World, FX and Foliage read the same:
 //
-//   toolbar      mode tools on the left · the saved asset · status text · the primary output action on the right
-//   left dock    what is being built (layers, scene, variants), 280 px
-//   viewport     the live 3D preview: a stats readout top-left; visibility, mode controls and Frame top-right
+//   toolbar      mode tools on the left · the saved asset's chip · status text · the primary output action on the right
+//   left dock    what is being built (layers, scene, poses), 280 px; a mode with nothing to list has none
+//   viewport     the live 3D preview: a stats readout top-left; the Stage menu, mode controls and Frame top-right
 //   right dock   Parameters first, then the mode's other tabs (Materials, LOD, Bake, Export), 340 px
 //   bottom       Assets (the shared library, app/AssetsPanel.tsx) and Console, and any mode extras beside them
 //   status bar   the running job's progress, or the last result's summary
@@ -47,7 +49,7 @@ export interface CreatorWorkspaceProps {
   /** Dim text before the primary action (what is running, which backend). */
   toolbarStatus?: ReactNode;
   primaryAction?: PrimaryAction;
-  left: WorkspacePanel;
+  left?: WorkspacePanel;
   /** The first is active; the Parameters panel by convention. */
   right: WorkspacePanel[];
   /** Tabs beside the Console. */
@@ -63,7 +65,7 @@ export interface CreatorWorkspaceProps {
 }
 
 /** Bumped when the default layout changes, so stored layouts are rebuilt. */
-const LAYOUT_VERSION = 12;
+const LAYOUT_VERSION = 13;
 const LEFT_WIDTH = 280;
 const RIGHT_WIDTH = 340;
 
@@ -82,18 +84,19 @@ export function CreatorWorkspace(props: CreatorWorkspaceProps) {
     console: () => <ConsolePanel />,
     assets: () => <AssetsPanel />,
   };
-  for (const p of [left, ...right, ...bottom]) renderers[p.id] = p.render;
+  const lefts = left ? [left] : [];
+  for (const p of [...lefts, ...right, ...bottom]) renderers[p.id] = p.render;
 
   // Dockview wants a stable component map and layout builder; both follow only the panel ids and titles.
-  const shape = JSON.stringify([left, right, bottom].map(g => (Array.isArray(g) ? g : [g]).map(p => [p.id, p.title])));
+  const shape = JSON.stringify([lefts, right, bottom].map(g => g.map(p => [p.id, p.title])));
   const components = useMemo(() => {
-    const ids = ['viewport', 'console', 'assets', left.id, ...right.map(p => p.id), ...bottom.map(p => p.id)];
+    const ids = ['viewport', 'console', 'assets', ...lefts.map(p => p.id), ...right.map(p => p.id), ...bottom.map(p => p.id)];
     return Object.fromEntries(ids.map(pid => [pid, (_: IDockviewPanelProps) => <PanelSlot id={pid} />]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shape]);
   const buildDefault = useMemo(() => (api: DockviewApi) => {
     api.addPanel({ id: 'viewport', component: 'viewport', title: 'Viewport' });
-    api.addPanel({ id: left.id, component: left.id, title: left.title, position: { referencePanel: 'viewport', direction: 'left' }, initialWidth: LEFT_WIDTH });
+    if (left) api.addPanel({ id: left.id, component: left.id, title: left.title, position: { referencePanel: 'viewport', direction: 'left' }, initialWidth: LEFT_WIDTH });
     right.forEach((p, i) => api.addPanel({
       id: p.id, component: p.id, title: p.title, initialWidth: RIGHT_WIDTH,
       position: i === 0 ? { referencePanel: 'viewport', direction: 'right' } : { referencePanel: right[0].id, direction: 'within' },
@@ -208,12 +211,70 @@ export function SchemaSections({ groups, values, onChange, persist, right }: {
   </>);
 }
 
+/** What the viewport's Stage menu holds (see `ViewportOverlay`). */
+export interface StageMenuProps {
+  /** Show / hide switches: the grid, the floor, and the mode's own (the skeleton, wind, wireframe). */
+  toggles?: VisibilityItem[];
+  /** The sun over the stage, in degrees. */
+  sun?: { yaw: number; elevation: number; onChange: (yaw: number, elevation: number) => void };
+  /** The mode's own sections below (`StageSection`s: light, wind, weather). */
+  extra?: ReactNode;
+}
+
+/** A titled section of the Stage menu; the title has its docs card. */
+export function StageSection({ title, children }: { title: string; children: ReactNode }) {
+  const entry = useDocEntry(title);
+  return (
+    <div className='flex flex-col'>
+      <DocHover as='div' entry={entry} className='pb-0.5 text-ui-xs font-semibold uppercase tracking-wide text-muted'>{title}</DocHover>
+      {children}
+    </div>
+  );
+}
+
+/** A Show row: the label (with its docs card) and its switch. */
+function StageToggle({ item }: { item: VisibilityItem }) {
+  const entry = useDocEntry(item.label, item.doc);
+  return (<>
+    <DocHover as='div' entry={entry} className='py-0.5 text-ui text-fg'>{item.label}</DocHover>
+    <div className='flex justify-center'><Toggle checked={item.checked} onChange={item.onChange} /></div>
+  </>);
+}
+
+const STAGE_TRIGGER = 'flex items-center gap-1 h-[25px] px-2 rounded border border-control-hover bg-surface-raised/80 hover:bg-surface-raised text-fg text-ui-sm cursor-pointer';
+
+/** The viewport's Stage menu: what the preview shows, the sun over it, and the mode's own stage settings. */
+function StageMenu({ toggles = [], sun, extra }: StageMenuProps) {
+  return (
+    <Popover align='right' title='The preview stage: what it shows, and the light on it' triggerClassName={STAGE_TRIGGER}
+             trigger={<><EyeIcon /><span>Stage</span></>} className='w-[290px]'>
+      <div data-cleo-overlay className='flex max-h-[70vh] flex-col gap-3 overflow-auto p-2'>
+        {toggles.length > 0 && (
+          <StageSection title='Show'>
+            <div className='grid grid-cols-[1fr_auto] items-center gap-x-3'>
+              {toggles.map(item => <StageToggle key={item.key} item={item} />)}
+            </div>
+          </StageSection>
+        )}
+        {sun && (
+          <StageSection title='Sun'>
+            <Slider label='Direction (°)' min={-180} max={180} step={1} readout value={sun.yaw} onChange={v => sun.onChange(v, sun.elevation)} />
+            <Slider label='Elevation (°)' min={-10} max={90} step={1} readout value={sun.elevation} onChange={v => sun.onChange(sun.yaw, v)} />
+          </StageSection>
+        )}
+        {extra}
+      </div>
+    </Popover>
+  );
+}
+
 /** The viewport's floating chrome, the same in every mode. */
-export function ViewportOverlay({ readout, visibility, controls, onFrame, frameTitle = 'Frame the asset (F)' }: {
+export function ViewportOverlay({ readout, stage, controls, onFrame, frameTitle = 'Frame the asset (F)' }: {
   /** Top-left numbers. */
   readout?: ReactNode;
-  visibility?: VisibilityItem[];
-  /** Mode controls between the visibility menu and Frame (gizmo modes, a LOD picker). */
+  /** The Stage menu (top-right): what the preview shows and the light on it. */
+  stage?: StageMenuProps;
+  /** Mode controls between the Stage menu and Frame (gizmo modes, a LOD picker). */
   controls?: ReactNode;
   onFrame?: () => void;
   frameTitle?: string;
@@ -225,7 +286,7 @@ export function ViewportOverlay({ readout, visibility, controls, onFrame, frameT
       </div>
     )}
     <div data-cleo-overlay className='absolute top-2 right-2 z-20 flex items-center gap-2'>
-      {visibility && visibility.length > 0 && <VisibilityMenu items={visibility} />}
+      {stage && <StageMenu {...stage} />}
       {controls}
       {onFrame && <Button size='sm' variant='ghost' className='bg-surface-raised/80' title={frameTitle} onClick={onFrame}>Frame</Button>}
     </div>

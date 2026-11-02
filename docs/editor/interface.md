@@ -118,8 +118,8 @@ disturb your layout.
 | **Animator** | The selected state or transition of the animator's graph (animator mode). |
 | **Blend Space Settings** | A blend space's axes, smoothing and samples (blend-space mode). |
 | **Blend Space** | The blend-space plot and its transport. |
-| **Clip** | The open animation's clips, preview character, root motion and edit stack (clip mode). |
-| **Timeline** | The clip's transport and scrubber. It drives the preview, so it keeps running while another tab of its group is shown. |
+| **Clip** | The open animation's clips, preview character and root motion (clip player). |
+| **Timeline** | The clip's transport, scrubber and Events track. It drives the preview, so it keeps running while another tab of its group is shown. |
 | **Particle Preview** | Play, pause and restart for the particle effect being edited. |
 | **Tiles** | The tile palette (tilemap mode). |
 | **Layers** | The tilemap layer stack. |

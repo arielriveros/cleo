@@ -5,6 +5,7 @@ import { Node } from "./node";
 import { WATER_VOLUME_PRESETS, type WaterVolumePreset } from "./waterVolumePresets";
 import { applyPreset } from "../../presets";
 import type { BuoyancyVolume } from "../../../physics/buoyancy";
+import { buoyancyVolumeFromSpec, waterSurfaceHeight, type WaterSpec } from "../../../physics/waterSurface";
 
 export interface WaterVolumeOptions {
     /** Full extents [x, depth, z] in metres, before the node's scale. The TOP face is the water surface. */
@@ -132,10 +133,7 @@ export class WaterVolumeNode extends Node {
 
     /** The water surface height at a world x/z at `time` seconds: the resting level plus a gentle swell. */
     public surfaceHeightAt(x: number, z: number, time: number): number {
-        const level = this.worldBox().max[1];
-        if (!(this._waveAmplitude > 0)) return level;
-        const phase = time * this._waveFrequency * Math.PI * 2 + x * 0.37 + z * 0.29;
-        return level + this._waveAmplitude * Math.sin(phase);
+        return waterSurfaceHeight({ max: this.worldBox().max, waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency }, x, z, time);
     }
 
     /** Whether a world point is in the water (below the resting surface, inside the box). */
@@ -154,12 +152,16 @@ export class WaterVolumeNode extends Node {
 
     /** What the physics step buoys with, at physics time `time`. */
     public buoyancyVolume(time: number): BuoyancyVolume {
+        return buoyancyVolumeFromSpec(this.buoyancySpec(), time);
+    }
+
+    /** The water as plain data (see physics/waterSurface.ts): what the physics worker buoys with. */
+    public buoyancySpec(): WaterSpec {
         const box = this.worldBox();
         return {
             min: box.min, max: box.max, density: this._density,
-            linearDrag: this._linearDrag, angularDrag: this._angularDrag,
-            affectCharacters: this._affectCharacters,
-            surfaceAt: this._waveAmplitude > 0 ? (x, z) => this.surfaceHeightAt(x, z, time) : undefined,
+            linearDrag: this._linearDrag, angularDrag: this._angularDrag, affectCharacters: this._affectCharacters,
+            waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
         };
     }
 

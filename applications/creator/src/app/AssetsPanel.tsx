@@ -12,21 +12,30 @@ import { beginLoad } from '@cleo/app-kit/feedback/loadingStore';
 import { AddMenu, ImportButton, type AddMenuItem } from '@cleo/app-kit/assets/AssetToolbar';
 import { RIGGED_ACCEPT, isModelFile } from '../core/riggedImport';
 import { importCharacter } from '../motion/characterImport';
+import { motionFromFile } from '../motion/motionDoc';
+import { createCreatorAsset } from '../core/useCreatorAsset';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
 import { requestOpen } from '../core/creatorOpen';
 import { useCreatorShell, type Tool } from './shell';
 
 // The Creator's Assets tab: the editor's asset explorer (app-kit AssetExplorer), browsing the shared
-// Creator library -- every saved asset, under a root per tool (/Foliage, /FX, /World, /Motion, and
-// /Characters for uploaded rigged models) and the folders filed in it. **+ Add** uploads a rigged model
-// as a Character (motion/characterImport.ts), the way the editor's + Add imports one. Opening an asset switches to its tool and loads it; rename, duplicate, move and delete
-// act on the library itself, so the editor's /Creator mirror follows. Kept live from the library's
-// channel, so a save in this or another window shows up at once.
+// Creator library -- every saved asset, under a root per kind (/Foliage, /FX, /World, /Motion, /Characters
+// for uploaded rigged models, /Poses for the Motion Creator's library poses) and the folders filed in it.
+// It is the one place assets are managed: the tools' toolbars only show the asset being edited. **+ Add**
+// uploads a rigged model as a Character (motion/characterImport.ts), the way the editor's + Add imports
+// one; **Import** takes a rigged model the same way, or a `.motion.json` (the Motion Creator's sidecar) as a
+// new motion. Opening an asset switches to its tool and loads it; rename, duplicate, move and delete act
+// on the library itself, so the editor's /Creator mirror follows. Kept live from the library's channel, so
+// a save in this or another window shows up at once.
 
-const ROOT: Record<CreatorAssetKind, string> = { foliage: '/Foliage', fx: '/FX', world: '/World', motion: '/Motion', character: '/Characters' };
-const EXT: Record<CreatorAssetKind, string> = { foliage: '.foliage', fx: '.fx', world: '.world', motion: '.motion', character: '.character' };
-/** The tool that opens each kind: a Character is the subject the Motion Creator animates. */
-const TOOL_OF: Record<CreatorAssetKind, Tool> = { foliage: 'foliage', fx: 'fx', world: 'world', motion: 'motion', character: 'motion' };
+const ROOT: Record<CreatorAssetKind, string> = {
+  foliage: '/Foliage', fx: '/FX', world: '/World', motion: '/Motion', character: '/Characters', pose: '/Poses',
+};
+const EXT: Record<CreatorAssetKind, string> = {
+  foliage: '.foliage', fx: '.fx', world: '.world', motion: '.motion', character: '.character', pose: '.pose',
+};
+/** The tool that opens each kind: a Character is the subject the Motion Creator animates, a Pose one of its poses. */
+const TOOL_OF: Record<CreatorAssetKind, Tool> = { foliage: 'foliage', fx: 'fx', world: 'world', motion: 'motion', character: 'motion', pose: 'motion' };
 const FOLDERS_KEY = 'cleo_creator_explorer_folders';
 const MODE_KEY = 'cleo_creator_explorer_mode';
 
@@ -47,6 +56,7 @@ const ICONS: Record<CreatorAssetKind | 'folder', string> = {
   world: glyph("<path d='M3 19l6-9 4 6 3-4 5 7z'/><circle cx='17' cy='6' r='2'/>", '#79a9e8'),
   motion: glyph("<circle cx='13' cy='4' r='2'/><path d='M9 21l3-7 3 2v5'/><path d='M7 11l4-3 4 3 3-1'/><path d='M12 8v6'/>", '#d58bd8'),
   character: glyph("<circle cx='12' cy='5' r='2.5'/><path d='M12 8v7'/><path d='M7 11h10'/><path d='M9 21l3-6 3 6'/>", '#e6c26a'),
+  pose: glyph("<circle cx='12' cy='4.5' r='2'/><path d='M12 7v7'/><path d='M12 9l-5-3'/><path d='M12 9l5 2'/><path d='M12 14l-4 7'/><path d='M12 14l3 3 2 4'/>", '#8bc4d8'),
   folder: glyph("<path d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'/>", '#c9b47a'),
 };
 
@@ -106,7 +116,7 @@ export function AssetsPanel() {
     api.intercept('create-file', (cfg: any) => {
       if (cfg.skipProvider) return true;
       if (cfg.file?.type !== 'folder' || !placeOf(cfg.parent ?? '/')) {
-        toast.info('Make folders inside /Foliage, /FX, /World, /Motion or /Characters. Assets are made in their tool, with Save as asset, or added with + Add.');
+        toast.info('Make folders inside /Foliage, /FX, /World, /Motion, /Characters or /Poses. Assets are made in their tool, with Save as asset, or added with + Add and Import.');
         return false;
       }
       return true;
@@ -208,12 +218,34 @@ export function AssetsPanel() {
       void refresh();
     }
   };
+  /** `.motion.json` files (the Motion Creator's sidecars): each a new motion asset, the last one opened. */
+  const addMotions = async (files: File[]) => {
+    let last: string | null = null;
+    for (const file of files) {
+      try {
+        const doc = motionFromFile(JSON.parse(await file.text()));
+        if (!doc) throw new Error('Not a motion: expected a .motion.json the Motion Creator wrote.');
+        last = await createCreatorAsset('motion', file.name.replace(/\.motion\.json$|\.json$/i, '') || doc.name, doc);
+      } catch (e) {
+        toast.error(String((e as Error)?.message ?? e), { title: `Could not import ${file.name}` });
+      }
+    }
+    await refresh();
+    if (!last) return;
+    toast.success('Imported into /Motion. The Motion Creator opens it.');
+    requestOpen('motion', last);
+    if (shell.tool !== 'motion') shell.choose('motion');
+  };
   const importFiles = async (files: File[]) => {
     setImporting(true);
-    try { await addCharacter(files); } finally { setImporting(false); }
+    try {
+      const motions = files.filter(f => /\.json$/i.test(f.name));
+      if (motions.length && motions.length === files.length) await addMotions(motions);
+      else await addCharacter(files.filter(f => !/\.json$/i.test(f.name)));
+    } finally { setImporting(false); }
   };
   const addItems: AddMenuItem[] = [
-    { label: 'Rigged character…', title: 'Upload a rigged model (.fbx, .glb, .gltf): the Motion Creator can animate it, and its clips and poses sync to the editor',
+    { label: 'Rigged character…', title: 'Upload a rigged model (.fbx, .glb, .gltf): the Motion Creator can animate it, and its clips sync to the editor',
       run: () => document.getElementById('creator-character-import')?.click() },
   ];
 
@@ -224,8 +256,8 @@ export function AssetsPanel() {
       previews={previews} icons={icons}
       toolbarStart={<>
         <AddMenu items={addItems} title='Add an asset to the Creator library' />
-        <ImportButton accept={RIGGED_ACCEPT} onFiles={files => void importFiles(files)} busy={importing}
-          title='Import a rigged model (.fbx, .glb, .gltf, with its .bin and textures) as a Character' />
+        <ImportButton accept={`${RIGGED_ACCEPT},.json`} onFiles={files => void importFiles(files)} busy={importing}
+          title='Import a rigged model (.fbx, .glb, .gltf, with its .bin and textures) as a Character, or a .motion.json as a motion' />
         <input id='creator-character-import' className='hidden' type='file' multiple accept={RIGGED_ACCEPT}
                onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; if (files.length) void addCharacter(files); }} />
       </>}

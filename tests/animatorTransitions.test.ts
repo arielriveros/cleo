@@ -582,6 +582,23 @@ describe('animation event markers', () => {
         expect(fired).toEqual([]);
     });
 
+    it('fires once when the clip carries the same event as the machine (markers moved onto their clips)', () => {
+        // The editor moves a machine's markers onto the clip when it opens the animator; until the animator
+        // is saved — and in any game published before — both copies exist. The clip's wins.
+        const model = { skin: SKIN, animations: [{ ...clip('idle'), events: [{ time: 0.5, name: 'hit' }] }, clip('run')] } as unknown as AnimatedModel;
+        const a = new Animator(model);
+        a.setStateMachine(machine(0.5));
+        const fired = listen(a);
+        step(a, 0.7);
+        expect(fired).toEqual(['hit']);
+        // A machine marker the clip does NOT carry still fires.
+        const b = new Animator(model);
+        b.setStateMachine({ ...machine(0.3), events: [{ clipName: 'idle', time: 0.3, eventName: 'step' }] });
+        const both = listen(b);
+        step(b, 0.7);
+        expect(both).toEqual(['step', 'hit']);
+    });
+
     it('reports the clip the marker fired on', () => {
         const a = makeAnimator();
         a.setStateMachine(machine(0.5));

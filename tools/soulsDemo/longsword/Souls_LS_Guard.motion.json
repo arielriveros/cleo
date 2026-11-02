@@ -230,6 +230,7 @@
         "presetId": "smooth"
       }
     ],
+    "parts": [],
     "fps": 30,
     "overlap": 0.02,
     "variation": 0.8,
@@ -244,7 +245,6 @@
     "fps": 30,
     "loop": true,
     "poses": 2,
-    "keys": 3,
-    "events": []
+    "keys": 3
   }
 }

@@ -40,6 +40,20 @@ export interface PhysicsStats {
     narrowphaseMs: number;
     solveMs: number;
     integrateMs: number;
+    /** The trigger↔trigger pass (see physics/triggerOverlaps.ts). */
+    triggerPassMs: number;
+    /** Enabled triggers the pass considered (0 while no trigger asks to detect others). */
+    triggerCandidates: number;
+    /** Trigger pairs whose bounds overlapped and got the exact test. */
+    triggerPairsTested: number;
+    /** Trigger overlaps currently reported to scripts, trigger↔body and trigger↔trigger together. */
+    triggerOverlaps: number;
+    /** Where the step ran this frame: 'inline' (this thread) or 'worker' (see physics/backend/). */
+    backend: 'inline' | 'worker';
+    /** The worker's step, measured in the worker: time this thread did NOT spend. Held between steps. */
+    workerStepMs: number;
+    /** This thread's share of running the worker: the diff and post at the frame's end, applying its result. */
+    syncMs: number;
     /** Everything inside PhysicsSystem.update(). */
     frameMs: number;
 }
@@ -63,6 +77,13 @@ export const physicsStats: PhysicsStats = {
     narrowphaseMs: 0,
     solveMs: 0,
     integrateMs: 0,
+    triggerPassMs: 0,
+    triggerCandidates: 0,
+    triggerPairsTested: 0,
+    triggerOverlaps: 0,
+    backend: 'inline',
+    workerStepMs: 0,
+    syncMs: 0,
     frameMs: 0,
 };
 
@@ -82,4 +103,9 @@ export function resetPhysicsStats(): void {
     physicsStats.narrowphaseMs = 0;
     physicsStats.solveMs = 0;
     physicsStats.integrateMs = 0;
+    physicsStats.triggerPassMs = 0;
+    physicsStats.triggerCandidates = 0;
+    physicsStats.triggerPairsTested = 0;
+    // The worker's frame-end half is added after update(), so a HUD read between frames sees both halves.
+    physicsStats.syncMs = 0;
 }

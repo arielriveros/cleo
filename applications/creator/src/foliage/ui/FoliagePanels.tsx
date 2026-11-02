@@ -4,9 +4,9 @@ import { ParamForm } from '@cleo/app-kit/params/ParamForm';
 import type { GenericParamSpec } from '@cleo/app-kit/params/ParamField';
 import { MaterialFields } from '@cleo/app-kit/materials/MaterialFields';
 import { TextureSlotFrame, TextureSlotGrid, TextureTile, pbrSlotLabel, type PbrTextureSlot } from '@cleo/app-kit/materials/TextureSlots';
-import { Button, Collapsable, FileButton, SegmentedControl, TextInput } from '@cleo/app-kit/ui';
+import { Button, Collapsable, FileButton, SegmentedControl, Select } from '@cleo/app-kit/ui';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
-import { ListRow, PanelBody, PanelHeader, SchemaSections } from '../../app/workspace';
+import { PanelBody, PanelHeader, SchemaSections, StageSection } from '../../app/workspace';
 import { OVERRIDE_SLOTS, TEXTURE_LABELS, type TextureKey } from '../buildFoliage';
 import {
   DEFAULT_BUSH, DEFAULT_GRASS, DEFAULT_ROCK, DEFAULT_TREE, FOLIAGE_SCHEMAS, KIND_LABELS, formValues, fromForm, type FoliageGroup, type FoliageKind,
@@ -20,8 +20,10 @@ import type { StageSettings } from './foliageStage';
 import { useFoliage } from './foliageContext';
 
 // The Foliage Creator's dock panels. Parameters, Materials, LOD and Export share the right dock as tabs;
-// Variants is the left dock. Built from the Creator's shared panel pieces (app/workspace.tsx), and the
-// Materials tab from the Editor's own material sections (app-kit MaterialFields).
+// there is no left dock (presets are Parameters ▸ Presets ▾, seeds the toolbar's, saved variants library
+// assets, and the stage's light, wind and weather the viewport's Stage menu: FoliageStageExtra). Built from
+// the Creator's shared panel pieces (app/workspace.tsx), and the Materials tab from the Editor's own
+// material sections (app-kit MaterialFields).
 
 const DEFAULTS: Record<FoliageKind, object> = { grass: DEFAULT_GRASS, rock: DEFAULT_ROCK, tree: DEFAULT_TREE, bush: DEFAULT_BUSH };
 
@@ -88,9 +90,11 @@ export function ParametersPanel() {
   const { doc, setDoc } = useFoliage();
   const apply = (p: FoliagePreset) => setDoc({ ...doc, [p.kind]: applyPreset(p), name: p.id });
   const reset = () => { setDoc({ ...doc, [doc.kind]: DEFAULTS[doc.kind] }); toast.success(`${KIND_LABELS[doc.kind]} reset to its defaults.`); };
+  // The preset last applied (a document remembers it as its `name`), while it is one of this kind's.
+  const preset = presetsFor(doc.kind).find(p => p.id === doc.name);
   return (
     <PanelBody>
-      <PanelHeader kind={KIND_LABELS[doc.kind]} name={doc.name} onReset={reset}
+      <PanelHeader kind={KIND_LABELS[doc.kind]} name={preset?.label} onReset={reset}
                    presets={presetsFor(doc.kind)} onPreset={apply} presetLabel={`${KIND_LABELS[doc.kind]} presets`} />
       <KindSections groups={FOLIAGE_SCHEMAS[doc.kind].filter(g => !g.side)} persist='params' />
     </PanelBody>
@@ -271,26 +275,12 @@ export function LodPanel() {
   );
 }
 
-/** Right dock tab: what the export writes -- the file names, texture sizes and the textures themselves. */
+/** Right dock tab: the export's own settings and the textures the .glb files embed. */
 export function ExportPanel() {
-  const { doc, setDoc } = useFoliage();
+  const { doc } = useFoliage();
   const urls = useGeneratedUrls();
-  const stem = doc.name.trim().replace(/\s+/g, '_') || 'foliage';
-  const impostor = doc.kind === 'tree' && doc.tree.impostor;
   return (
     <PanelBody>
-      <Collapsable title='File' persistKey='cleo_creator_foliage_export_file'>
-        <div className='flex items-center gap-2'>
-          <span className='text-muted text-ui-sm w-16'>Name</span>
-          <TextInput value={doc.name} onChange={name => setDoc({ ...doc, name })} />
-        </div>
-        <ul className='text-ui-xs text-muted pt-2 font-mono'>
-          {[0, 1, 2].map(i => <li key={i}>{stem}_LOD{i}.glb</li>)}
-          {impostor && <><li>{stem}_impostor_albedo.png</li><li>{stem}_impostor_normal.png</li></>}
-          <li>{stem}.foliage.json</li>
-        </ul>
-        <p className='text-ui-xs text-muted pt-1'>Download .glb (toolbar) writes them. Import the .glb files in the Editor, then set LOD 1 and 2 as the LOD 0 model's levels.</p>
-      </Collapsable>
       <KindSections groups={FOLIAGE_SCHEMAS[doc.kind].filter(g => g.side === 'export')} persist='export' />
       <Collapsable title='Embedded textures' persistKey='cleo_creator_foliage_export_textures'>
         <div className='grid grid-cols-3 gap-2'>
@@ -301,109 +291,55 @@ export function ExportPanel() {
             </figure>
           ))}
         </div>
-        <p className='text-ui-xs text-muted pt-1'>Replace any of them in the Materials tab.</p>
       </Collapsable>
     </PanelBody>
   );
 }
 
-const STAGE_SPECS: GenericParamSpec[] = [
-  { key: 'sunYaw', label: 'Sun direction', kind: 'float', min: -180, max: 180, step: 1, unit: '°' },
-  { key: 'sunElevation', label: 'Sun elevation', kind: 'float', min: -10, max: 90, step: 1, unit: '°', hint: 'Low and behind the plant shows its translucency.' },
+/** The stage's light besides the sun's direction (the Stage menu's Sun section has that). */
+const LIGHT_SPECS: GenericParamSpec[] = [
   { key: 'sunLux', label: 'Sun illuminance', kind: 'float', min: 0, max: 120000, step: 500, unit: 'lx' },
   { key: 'ambientLux', label: 'Ambient light', kind: 'float', min: 0, max: 40000, step: 100, unit: 'lx' },
 ];
 
 /** The preview's wind: the stage's WindNode, which a swaying preview is drawn through (foliageStage.ts). */
 const WIND_SPECS: GenericParamSpec[] = [
-  { key: 'wind', label: 'Wind', kind: 'bool', hint: 'Sway the preview as a foliage layer does in a level. Off, it stands still.' },
-  { key: 'windDirection', label: 'Direction', kind: 'float', min: 0, max: 360, step: 1, unit: '°', when: p => !!p.wind },
-  { key: 'windStrength', label: 'Strength', kind: 'float', min: 0, max: 3, step: 0.01, when: p => !!p.wind },
-  { key: 'windGustScale', label: 'Gust size', kind: 'float', min: 1, max: 100, step: 0.5, unit: 'm', when: p => !!p.wind },
-  { key: 'windGustSpeed', label: 'Gust speed', kind: 'float', min: 0, max: 20, step: 0.1, unit: 'm/s', when: p => !!p.wind },
+  { key: 'windDirection', label: 'Direction', kind: 'float', min: 0, max: 360, step: 1, unit: '°' },
+  { key: 'windStrength', label: 'Strength', kind: 'float', min: 0, max: 3, step: 0.01 },
+  { key: 'windGustScale', label: 'Gust size', kind: 'float', min: 1, max: 100, step: 0.5, unit: 'm' },
+  { key: 'windGustSpeed', label: 'Gust speed', kind: 'float', min: 0, max: 20, step: 0.1, unit: 'm/s' },
 ];
 
 /** The preview's weather: how the foliage materials answer rain and snow (their Weather settings). */
 const WEATHER_SPECS: GenericParamSpec[] = [
-  { key: 'wetness', label: 'Wetness', kind: 'float', min: 0, max: 1, step: 0.01, hint: 'How wet the stage is: darker, glossier, bowed leaves and blades.' },
-  { key: 'snow', label: 'Snow', kind: 'float', min: 0, max: 1, step: 0.01, hint: 'How much snow lies on the plant: it settles on what faces up, and weighs it down.' },
+  { key: 'wetness', label: 'Wetness', kind: 'float', min: 0, max: 1, step: 0.01 },
+  { key: 'snow', label: 'Snow', kind: 'float', min: 0, max: 1, step: 0.01 },
 ];
 
-/** The preview's walker: something moving through the asset, to show its Interaction. */
-const WALK_SPECS: GenericParamSpec[] = [
-  { key: 'walk', label: 'Walk-through', kind: 'bool', hint: 'Walk someone back and forth through the preview, to see how the plant gives way and springs back (the material’s Interaction).' },
-];
-
-/** Left dock: presets, seeds, saved variants, the preview's sun and its wind. */
-export function VariantsPanel() {
-  const { doc, setDoc, variants, setVariants, seedHistory, stage, setStage } = useFoliage();
-  const [label, setLabel] = useState('');
-  const presets = presetsFor(doc.kind);
-  const saveVariant = () => {
-    const name = label.trim() || `${KIND_LABELS[doc.kind]} ${doc.seed}`;
-    setVariants([{ id: `${Date.now().toString(36)}`, label: name, doc: structuredClone(doc) }, ...variants]);
-    setLabel('');
+/** The Foliage Creator's sections of the viewport's Stage menu: the light, the wind (while it blows), the weather. */
+export function FoliageStageExtra({ stage, setStage }: { stage: StageSettings; setStage: (s: StageSettings) => void }) {
+  const values = stage as unknown as Record<string, unknown>;
+  const patch = (p: Record<string, unknown>) => setStage({ ...stage, ...(p as Partial<StageSettings>) });
+  const preset = (id: string) => {
+    const p = WIND_PRESETS.find(x => x.id === id);
+    if (p) setStage({ ...stage, windPreset: p.id, windStrength: p.options.strength ?? stage.windStrength,
+                      windGustScale: p.options.gustScale ?? stage.windGustScale, windGustSpeed: p.options.gustSpeed ?? stage.windGustSpeed });
   };
-  return (
-    <PanelBody>
-      <PanelHeader kind={KIND_LABELS[doc.kind]} name={`seed ${doc.seed}`} />
-      <Collapsable title='Presets' persistKey='cleo_creator_foliage_variants_presets'>
-        <div className='flex flex-col'>
-          {presets.map(p => (
-            <ListRow key={p.id} selected={doc.name === p.id} title={p.description} caption={p.description}
-                     onClick={() => setDoc({ ...doc, [p.kind]: applyPreset(p), name: p.id })}>
-              {p.label}
-            </ListRow>
-          ))}
-        </div>
-      </Collapsable>
-      <Collapsable title='Seeds' persistKey='cleo_creator_foliage_variants_seeds'>
-        <div className='flex flex-wrap gap-1'>
-          {seedHistory.map(s => (
-            <Button key={s} size='sm' variant={s === doc.seed ? 'primary' : 'ghost'} onClick={() => setDoc({ ...doc, seed: s })}>{s}</Button>
-          ))}
-        </div>
-        <p className='text-ui-xs text-muted pt-1'>Every seed is another plant from the same parameters. New seed is in the toolbar.</p>
-      </Collapsable>
-      <Collapsable title='Saved variants' persistKey='cleo_creator_foliage_variants_saved'>
-        <div className='flex gap-1 pb-1'>
-          <TextInput value={label} placeholder={`${KIND_LABELS[doc.kind]} ${doc.seed}`} onChange={setLabel} />
-          <Button size='sm' onClick={saveVariant}>Save</Button>
-        </div>
-        {variants.length === 0 && <p className='text-ui-xs text-muted'>Keep a parameter set and seed you like to come back to it.</p>}
-        {variants.map(v => (
-          <ListRow key={v.id} title={`${KIND_LABELS[v.doc.kind]}, seed ${v.doc.seed}`} caption={KIND_LABELS[v.doc.kind]}
-                   onClick={() => setDoc(structuredClone(v.doc))}
-                   actions={<Button size='icon' variant='remove' title='Delete' onClick={() => setVariants(variants.filter(x => x.id !== v.id))}>✕</Button>}>
-            {v.label}
-          </ListRow>
-        ))}
-      </Collapsable>
-      <Collapsable title='Sun & sky' persistKey='cleo_creator_foliage_variants_stage'>
-        <ParamForm schema={STAGE_SPECS} values={stage as unknown as Record<string, unknown>}
-                   onChange={patch => setStage({ ...stage, ...(patch as Partial<StageSettings>) })} />
-      </Collapsable>
-      <Collapsable title='Wind' persistKey='cleo_creator_foliage_variants_wind'>
-        <ParamForm schema={WIND_SPECS} values={stage as unknown as Record<string, unknown>}
-                   onChange={patch => setStage({ ...stage, ...(patch as Partial<StageSettings>) })} />
-        <ParamForm schema={WALK_SPECS} values={stage as unknown as Record<string, unknown>}
-                   onChange={patch => setStage({ ...stage, ...(patch as Partial<StageSettings>) })} />
-        {stage.wind && (
-          <div className='flex flex-col pt-1'>
-            {WIND_PRESETS.map(p => (
-              <ListRow key={p.id} selected={stage.windPreset === p.id} title={p.description} caption={p.description}
-                       onClick={() => setStage({ ...stage, windPreset: p.id, windStrength: p.options.strength ?? stage.windStrength,
-                                                 windGustScale: p.options.gustScale ?? stage.windGustScale, windGustSpeed: p.options.gustSpeed ?? stage.windGustSpeed })}>
-                {p.label}
-              </ListRow>
-            ))}
-          </div>
-        )}
-      </Collapsable>
-      <Collapsable title='Weather' persistKey='cleo_creator_foliage_variants_weather'>
-        <ParamForm schema={WEATHER_SPECS} values={stage as unknown as Record<string, unknown>}
-                   onChange={patch => setStage({ ...stage, ...(patch as Partial<StageSettings>) })} />
-      </Collapsable>
-    </PanelBody>
-  );
+  return (<>
+    <StageSection title='Light'>
+      <ParamForm schema={LIGHT_SPECS} values={values} onChange={patch} />
+    </StageSection>
+    {stage.wind && (
+      <StageSection title='Wind'>
+        <Select value={stage.windPreset} title={WIND_PRESETS.find(p => p.id === stage.windPreset)?.description} onChange={e => preset(e.target.value)}>
+          {!WIND_PRESETS.some(p => p.id === stage.windPreset) && <option value={stage.windPreset}>Custom</option>}
+          {WIND_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </Select>
+        <ParamForm schema={WIND_SPECS} values={values} onChange={patch} />
+      </StageSection>
+    )}
+    <StageSection title='Weather'>
+      <ParamForm schema={WEATHER_SPECS} values={values} onChange={patch} />
+    </StageSection>
+  </>);
 }

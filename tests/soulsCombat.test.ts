@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Body, Box, Cylinder, Sphere, Vec3 } from 'cannon-es';
+import { quat } from 'gl-matrix';
 import { CleoEngine } from '../src/core/engine';
 import { Node } from '../src/core/scene/nodes/node';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
+import { Shape } from '../src/physics/shape';
+import type { Trigger } from '../src/physics/body';
 import '../src/cleo';   // registers the 'cleo' module the example scripts import from
 
 import SoulsGameManagerNode from '../examples/scripts/SoulsGameManager';
@@ -10,23 +13,27 @@ import SoulsPlayerNode from '../examples/scripts/SoulsPlayer';
 import SoulsEnemyNode from '../examples/scripts/SoulsEnemy';
 import SoulsProjectileNode from '../examples/scripts/SoulsProjectile';
 import SoulsWeaponNode from '../examples/scripts/SoulsWeapon';
-import SoulsStraightSwordNode from '../examples/scripts/SoulsStraightSword';
+import SoulsLongswordNode from '../examples/scripts/SoulsLongsword';
 import SoulsGreatswordNode from '../examples/scripts/SoulsGreatsword';
 import SoulsHollowNode from '../examples/scripts/SoulsHollow';
 import SoulsHollowWardenNode from '../examples/scripts/SoulsHollowWarden';
 import SoulsBossBarNode from '../examples/scripts/SoulsBossBar';
 import SoulsHudNode from '../examples/scripts/SoulsHud';
 import { Scene } from '../src/core/scene/scene';
-import { Capsule, newSwing, openSwing, stepSwing, isHurtbox, wieldedBy } from '../examples/scripts/SoulsHitbox';
+import {
+    Capsule, LAYER, SwingContact, Swing, closeSwing, hurtboxLayer, isHurtbox, newSwing, openSwing, stepSwing, wieldedBy,
+} from '../examples/scripts/SoulsHitbox';
 import { AnimatedModel } from '../src/animation/animatedModel';
 import { ModelNode } from '../src/core/scene/nodes/modelNode';
 import { mat4 } from 'gl-matrix';
 
-// Hollow Keep's combat is decided by shapes, not distances: a blade capsule swept from last frame's
-// grip to this frame's against the characters' physics capsules (their hurtboxes). I-frames are the
-// hurtbox switched off, and a wall the blade reaches first bounces the swing. Interactables are offered
-// through the trigger zones the player stands in. These drive the real scripts against a real cannon
-// world, with no renderer.
+// Hollow Keep's combat is decided by trigger volumes, not distances: a weapon's HITBOX (a capsule trigger
+// along its blade, switched on by the attack's `hit` event and off by `hitEnd`) entering a character's
+// HURTBOX (a capsule trigger beside its walking body). The hitbox is continuous — tested along its path
+// from last frame to this one — so a fast swing cannot skip a target. I-frames are the hurtbox switched
+// off, and a wall the blade reaches first bounces the swing. Interactables are offered through the
+// trigger zones the player stands in. These drive the real scripts against a real cannon world, with no
+// renderer.
 
 let authoring = false;
 beforeEach(() => { authoring = CleoEngine.authoringMode; CleoEngine.authoringMode = false; });
@@ -41,7 +48,7 @@ function physics(): PhysicsSystem {
     return p;
 }
 
-/** A character capsule standing at `at`, owned by `owner` — the hurtbox. */
+/** A character capsule standing at `at`, owned by `owner` — the body it walks with. */
 function capsule(p: PhysicsSystem, owner: Node, at: V3, radius = 0.3, height = 1.78): Body {
     const body = new Body({ mass: 70, position: new Vec3(at[0], at[1] + height / 2, at[2]) });
     const cyl = height - 2 * radius;
@@ -51,6 +58,18 @@ function capsule(p: PhysicsSystem, owner: Node, at: V3, radius = 0.3, height = 1
     (body as any).owner = owner;
     p.addBody(body);
     return body;
+}
+
+/** A character's hurtbox, as the generator authors it: a `Hurtbox` child with a capsule trigger at `at`. */
+function hurtbox(p: PhysicsSystem, character: Node, at: V3, radius = 0.3, height = 1.78): Trigger {
+    const hb = new Node('Hurtbox');
+    character.addChild(hb);
+    const t = hb.setTrigger({ group: hurtboxLayer((character as any).team), mask: LAYER.HITBOX, detectTriggers: true });
+    t.setCapsule([0, radius, 0], [0, height - radius, 0], radius);
+    t.position.set(at[0], at[1], at[2]);
+    t.aabbNeedsUpdate = true;
+    p.addBody(t);
+    return t;
 }
 
 function wall(p: PhysicsSystem, at: V3, half: V3, blocks: boolean, name = 'Wall'): Node {
@@ -65,62 +84,134 @@ function wall(p: PhysicsSystem, at: V3, half: V3, blocks: boolean, name = 'Wall'
 
 const enemy = (name: string) => new SoulsEnemyNode(name);
 const attacker = () => new SoulsPlayerNode('Player');
-/** A horizontal blade at chest height, along X, from `x0` to `x1`, at depth `z`. */
-const blade = (x0: number, x1: number, z: number, r = 0.12): Capsule => ({ a: [x0, 1.2, z], b: [x1, 1.2, z], radius: r });
+
+/** A weapon whose blade runs `length` m up its Mesh's Y from the grip, `radius` thick. */
+function sword(length = 1, radius = 0.1): any {
+    const w = new SoulsWeaponNode('Sword') as any;
+    Object.assign(w, { bladeStart: [0, 0, 0], bladeEnd: [0, length, 0], bladeRadius: radius });
+    w.addChild(new Node('Mesh'));
+    return w;
+}
+const hitboxOf = (w: any): Trigger | null => w.getChildByName('Mesh')[0].getChildByName('Hitbox')[0]?.trigger ?? null;
+
+/**
+ * A rigid blade pose: the grip at `hilt`, the blade `length` long, turned `yaw` degrees about Y and pitched
+ * `pitch` degrees from straight up toward +Z (90 = level, pointing along +Z at yaw 0). The trigger is posed
+ * as yaw · pitch, so the pass interpolates it exactly as a swinging arm turns it.
+ */
+function blade(hilt: V3, yaw: number, pitch: number, length: number, radius = 0.1) {
+    const q = quat.multiply(quat.create(), quat.setAxisAngle(quat.create(), [0, 1, 0], yaw * Math.PI / 180),
+        quat.setAxisAngle(quat.create(), [1, 0, 0], pitch * Math.PI / 180));
+    const up = [2 * (q[0] * q[1] - q[3] * q[2]), 1 - 2 * (q[0] * q[0] + q[2] * q[2]), 2 * (q[1] * q[2] + q[3] * q[0])];
+    const capsule: Capsule = { a: [...hilt], b: [hilt[0] + up[0] * length, hilt[1] + up[1] * length, hilt[2] + up[2] * length], radius };
+    return { capsule, hilt, q };
+}
+
+/**
+ * Swing `w` (already armed by openSwing) through `poses`, one frame each, in the game's order: the hitbox
+ * is placed where the blade is (the physics write-back), physics runs (the trigger pass reports what it
+ * entered), then the attacker's frame steps the swing. Returns every frame's contact.
+ */
+function swingThrough(p: PhysicsSystem, swing: Swing, w: any, poses: ReturnType<typeof blade>[], me: Node,
+    kind: 'player' | 'enemy', bounces: boolean): SwingContact[] {
+    const out: SwingContact[] = [];
+    for (const pose of poses) {
+        const t = hitboxOf(w);
+        if (t) {
+            p.addBody(t);
+            t.position.set(...pose.hilt);
+            t.quaternion.set(pose.q[0], pose.q[1], pose.q[2], pose.q[3]);
+            t.aabbNeedsUpdate = true;
+        }
+        p.update(1 / 60);
+        out.push(stepSwing(p, swing, pose.capsule, me, kind, bounces));
+    }
+    return out;
+}
+const hitNames = (contacts: SwingContact[]) => contacts.flatMap(c => c.targets.map(t => t.node.name));
 
 describe('a swing', () => {
-    it('hits an enemy its blade overlaps, and misses one it does not', () => {
+    it('builds its hitbox from the blade, in the Mesh\'s space, armed against the other team only', () => {
+        const w = sword(0.9, 0.11);
+        const swing = newSwing();
+        openSwing(swing, w, 'enemy');
+        const t = hitboxOf(w)!;
+        expect(t).toBeTruthy();
+        expect([t.enabled, t.group, t.mask, t.detectTriggers, t.continuous]).toEqual([true, LAYER.HITBOX, LAYER.ENEMY_HURTBOX, true, true]);
+        closeSwing(swing);
+        expect(t.enabled).toBe(false);
+        openSwing(swing, w, 'player');                                // an enemy's blade: the player's layer
+        expect(hitboxOf(w)).toBe(t);                                  // built once
+        expect(t.mask).toBe(LAYER.PLAYER_HURTBOX);
+    });
+
+    it('hits an enemy its blade overlaps, at its surface, and misses one it does not', () => {
         const p = physics();
         const near = enemy('Near'), far = enemy('Far');
-        capsule(p, near, [0, 0, 1]);
-        capsule(p, far, [0, 0, 3]);
-        const swing = newSwing(); openSwing(swing);
-        const hit = stepSwing(p, swing, blade(-0.5, 0.5, 0.8), attacker(), 'enemy', true);
+        hurtbox(p, near, [0, 0, 1]);
+        hurtbox(p, far, [0, 0, 3]);
+        const w = sword(1, 0.12), swing = newSwing();
+        openSwing(swing, w, 'enemy');
+        // Level, across the front at z 0.8, through the near enemy's capsule (its near side is at z 0.7).
+        const [hit] = swingThrough(p, swing, w, [blade([-0.5, 1.2, 0.8], 90, 90, 1, 0.12)], attacker(), 'enemy', true);
         expect(hit.targets.map(t => t.node)).toEqual([near]);
-        expect(hit.targets[0].point[2]).toBeCloseTo(0.7, 4);          // on the near side of its capsule
+        expect(hit.targets[0].point[2]).toBeCloseTo(0.7, 3);
         expect(hit.blockedAt).toBeNull();
     });
 
     it('hits each target once per swing, however many frames the blade stays in it', () => {
         const p = physics();
         const e = enemy('E');
-        capsule(p, e, [0, 0, 1]);
-        const swing = newSwing(); openSwing(swing);
-        const me = attacker();
-        let total = 0;
-        for (let f = 0; f < 5; f++) total += stepSwing(p, swing, blade(-0.5, 0.5, 1), me, 'enemy', true).targets.length;
-        expect(total).toBe(1);
-        openSwing(swing);                                            // the next swing may hit it again
-        expect(stepSwing(p, swing, blade(-0.5, 0.5, 1), me, 'enemy', true).targets.length).toBe(1);
+        hurtbox(p, e, [0, 0, 1]);
+        const w = sword(), swing = newSwing(), me = attacker();
+        const pose = blade([-0.5, 1.2, 1], 90, 90, 1);
+        openSwing(swing, w, 'enemy');
+        expect(hitNames(swingThrough(p, swing, w, [pose, pose, pose, pose, pose], me, 'enemy', true))).toEqual(['E']);
+        openSwing(swing, w, 'enemy');                                 // the next swing may hit it again
+        expect(hitNames(swingThrough(p, swing, w, [pose], me, 'enemy', true))).toEqual(['E']);
     });
 
-    it('sweeps between frames: a blade that jumps past two enemies in one frame hits both, in order', () => {
+    it('is continuous: a blade that sweeps past two enemies in one frame hits both, in order', () => {
         const p = physics();
         const left = enemy('Left'), right = enemy('Right');
-        capsule(p, left, [-1, 0, 1.2]);
-        capsule(p, right, [1, 0, 1.2]);
-        const swing = newSwing(); openSwing(swing);
-        const me = attacker();
-        // A blade pointing forward from the hilt at the origin, swung right-to-left across the front.
-        const pose = (x: number): Capsule => ({ a: [0, 1.2, 0.2], b: [x, 1.2, 2], radius: 0.1 });
-        expect(stepSwing(p, swing, pose(-6), me, 'enemy', true).targets).toEqual([]);   // first frame: wide left
-        const hit = stepSwing(p, swing, pose(6), me, 'enemy', true);                      // one big frame to the right
-        expect(hit.targets.map(t => t.node.name)).toEqual(['Left', 'Right']);
+        hurtbox(p, left, [-1, 0, 1.2]);
+        hurtbox(p, right, [1, 0, 1.2]);
+        const w = sword(2.2), swing = newSwing(), me = attacker();
+        openSwing(swing, w, 'enemy');
+        // Level from the grip at the origin: wide left, then one big frame round to wide right.
+        const contacts = swingThrough(p, swing, w, [blade([0, 1.2, 0], -85, 90, 2.2), blade([0, 1.2, 0], 85, 90, 2.2)], me, 'enemy', true);
+        expect(contacts[0].targets).toEqual([]);
+        expect(contacts[1].targets.map(t => t.node.name)).toEqual(['Left', 'Right']);
+    });
+
+    it('a disarmed hitbox hits nothing', () => {
+        const p = physics();
+        const e = enemy('E');
+        hurtbox(p, e, [0, 0, 1]);
+        const w = sword(), swing = newSwing(), me = attacker();
+        openSwing(swing, w, 'enemy');
+        closeSwing(swing);                                            // hitEnd before the blade got there
+        const contacts = swingThrough(p, swing, w, [blade([-0.5, 1.2, 1], 90, 90, 1)], me, 'enemy', true);
+        expect(contacts[0].targets).toEqual([]);
+        expect(hitboxOf(w)!.enabled).toBe(false);
     });
 
     it('never hits the attacker, the dead, or a target whose hurtbox is off', () => {
         const p = physics();
         const me = attacker();
-        capsule(p, me, [0, 0, 0]);
+        hurtbox(p, me, [0, 0, 0.6]);
         const dead = enemy('Dead'); (dead as any).isDead = true;
-        const ghost = enemy('Rolling'); (ghost as any).hurtboxActive = false;
-        capsule(p, dead, [0, 0, 1]);
-        capsule(p, ghost, [0.2, 0, 1.4]);
-        const swing = newSwing(); openSwing(swing);
-        expect(stepSwing(p, swing, blade(-1, 1, 0.8, 0.4), me, 'enemy', true).targets).toEqual([]);
+        const ghost = enemy('Rolling') as any;
+        hurtbox(p, dead, [0, 0, 1]);
+        hurtbox(p, ghost, [0.2, 0, 1.4]);
+        ghost.hurtboxActive = false; ghost._syncHurtbox();
+        const w = sword(2, 0.4), swing = newSwing();
+        openSwing(swing, w, 'enemy');
+        const pose = blade([-1, 1.2, 0.9], 90, 90, 2, 0.4);
+        expect(swingThrough(p, swing, w, [pose], me, 'enemy', true)[0].targets).toEqual([]);
         // The hurtbox comes back while the window is still open: the tail of the swing lands.
-        (ghost as any).hurtboxActive = true;
-        expect(stepSwing(p, swing, blade(-1, 1, 0.8, 0.4), me, 'enemy', true).targets.map(t => t.node)).toEqual([ghost]);
+        ghost.hurtboxActive = true; ghost._syncHurtbox();
+        expect(hitNames(swingThrough(p, swing, w, [pose], me, 'enemy', true))).toEqual(['Rolling']);
     });
 
     it('an enemy swing only sees the player; a player swing only sees enemies', () => {
@@ -139,29 +230,44 @@ describe('a swing', () => {
         const turncoat = new SoulsHollowNode('C'); turncoat.team = 'player';
         expect(isHurtbox(turncoat, a, 'player')).toBe(true);
     });
+
+    it('an enemy\'s blade passes straight through other enemies\' hurtboxes (layers, not a filter)', () => {
+        const p = physics();
+        const other = enemy('Other'), player = attacker();
+        hurtbox(p, other, [0, 0, 1]);
+        hurtbox(p, player, [0, 0, 3]);
+        const w = sword(3), swing = newSwing();
+        openSwing(swing, w, 'player');
+        const contacts = swingThrough(p, swing, w, [blade([0, 1.2, 0], 0, 90, 3)], enemy('Attacker'), 'player', true);
+        expect(hitNames(contacts)).toEqual(['Player']);
+    });
 });
 
 describe('i-frames', () => {
     it('are the player hurtbox switched off by a roll, so an enemy blade passes through', () => {
         const p = physics();
         const player = attacker() as any;
-        capsule(p, player, [0, 0, 1]);
+        hurtbox(p, player, [0, 0, 1]);
         const foe = enemy('Foe');
         player.actionState = 'roll';
         player._stateTime = 0.2;
         player.hurtboxActive = !player._computeInvulnerable();
-        const swing = newSwing(); openSwing(swing);
-        expect(stepSwing(p, swing, blade(-0.5, 0.5, 1), foe, 'player', false).targets).toEqual([]);
+        player._syncHurtbox();
+        const w = sword(), swing = newSwing();
+        openSwing(swing, w, 'player');
+        const pose = blade([-0.5, 1.2, 1], 90, 90, 1);
+        expect(swingThrough(p, swing, w, [pose], foe, 'player', false)[0].targets).toEqual([]);
         // A roll started too early: the i-frames run out while the blade is still live.
         player._stateTime = 0.5;
         player.hurtboxActive = !player._computeInvulnerable();
-        expect(stepSwing(p, swing, blade(-0.5, 0.5, 1), foe, 'player', false).targets.map((t: any) => t.node)).toEqual([player]);
+        player._syncHurtbox();
+        expect(swingThrough(p, swing, w, [pose], foe, 'player', false)[0].targets.map((t: any) => t.node)).toEqual([player]);
     });
 
     it('let a bolt fly through a rolling player, and hit one standing still', () => {
         const p = physics();
         const player = attacker() as any;
-        capsule(p, player, [0, 0, 2]);
+        hurtbox(p, player, [0, 0, 2]);
         let damage = 0;
         player.receiveHit = (amount: number) => { damage += amount; return true; };
         const bolt = new SoulsProjectileNode('Bolt') as any;
@@ -173,14 +279,32 @@ describe('i-frames', () => {
             bolt.updateTransforms();
             for (let i = 0; i < 30 && bolt._live; i++) { bolt.onUpdate(1 / 30); bolt.updateTransforms(); }
         };
-        player.hurtboxActive = false;
+        player.hurtboxActive = false; player._syncHurtbox();
         fire();
         expect(damage).toBe(0);
         expect(bolt.worldPosition[2]).toBeGreaterThan(4);           // flew on past the player
-        player.hurtboxActive = true;
+        player.hurtboxActive = true; player._syncHurtbox();
         fire();
         expect(damage).toBe(90);
         expect(bolt.removed).toBe(true);
+    });
+
+    it('builds a hurtbox from the body for a character whose template has none', () => {
+        const p = physics();
+        const scene = new Scene();
+        try {
+            const e = enemy('Bare') as any;
+            scene.addNode(e);
+            e.setBody(70).attachShape(new Shape(new Cylinder(0.35, 0.35, 1.7, 12)), [0, 0.85, 0]);
+            e.body.updateAABB();
+            e._syncHurtbox();
+            const hb = e.getChildByName('Hurtbox')[0];
+            expect(hb?.trigger).toBeTruthy();
+            expect([hb.trigger.group, hb.trigger.mask, hb.trigger.detectTriggers]).toEqual([LAYER.ENEMY_HURTBOX, LAYER.HITBOX, true]);
+            expect(hb.trigger.boundingRadius).toBeGreaterThan(0.8);
+            e.isDead = true; e._syncHurtbox();
+            expect(hb.trigger.enabled).toBe(false);
+        } finally { scene.dispose?.(); void p; }
     });
 });
 
@@ -188,69 +312,69 @@ describe('a swing meeting a wall', () => {
     it('bounces when the blade reaches a swing blocker before the enemy', () => {
         const p = physics();
         const e = enemy('Behind the wall');
-        capsule(p, e, [2, 0, 1]);
+        hurtbox(p, e, [2, 0, 1]);
         wall(p, [0.8, 1.5, 1], [0.1, 1.5, 1.5], true);
-        const swing = newSwing(); openSwing(swing);
-        const me = attacker();
-        // A forward blade swung from the left across to the right: the wall comes first.
-        const pose = (x: number): Capsule => ({ a: [0, 1.2, 0.2], b: [x, 1.2, 1.6], radius: 0.1 });
-        stepSwing(p, swing, pose(-1), me, 'enemy', true);
-        const hit = stepSwing(p, swing, pose(3), me, 'enemy', true);
-        expect(hit.blockedAt).not.toBeNull();
-        expect(hit.targets).toEqual([]);
+        const w = sword(2.2), swing = newSwing(), me = attacker();
+        openSwing(swing, w, 'enemy');
+        // A level blade swung from the left round to the right: the wall comes first.
+        const [first, second] = swingThrough(p, swing, w, [blade([0, 1.2, 0.2], -45, 90, 2.2), blade([0, 1.2, 0.2], 80, 90, 2.2)], me, 'enemy', true);
+        expect(first.blockedAt).toBeNull();
+        expect(second.blockedAt).not.toBeNull();
+        expect(second.targets).toEqual([]);
     });
 
     it('ploughs through when the move does not bounce (a heavy), and never bounces off a floor', () => {
         const p = physics();
         const e = enemy('E');
-        capsule(p, e, [2, 0, 1]);
+        hurtbox(p, e, [2, 0, 1]);
         wall(p, [0.8, 1.5, 1], [0.1, 1.5, 1.5], true);
         wall(p, [0, -0.25, 0], [10, 0.25, 10], false, 'Floor');
         const me = attacker();
-        const pose = (x: number): Capsule => ({ a: [0, 1.2, 0.2], b: [x, 1.2, 1.6], radius: 0.1 });
-        const heavy = newSwing(); openSwing(heavy);
-        stepSwing(p, heavy, pose(-1), me, 'enemy', false);
-        expect(stepSwing(p, heavy, pose(3), me, 'enemy', false).targets.map(t => t.node)).toEqual([e]);
+        const w = sword(2.2), heavy = newSwing();
+        openSwing(heavy, w, 'enemy');
+        const contacts = swingThrough(p, heavy, w, [blade([0, 1.2, 0.2], -45, 90, 2.2), blade([0, 1.2, 0.2], 80, 90, 2.2)], me, 'enemy', false);
+        expect(hitNames(contacts)).toEqual(['E']);
 
         // An overhead driven into the floor: the floor is solid but not a swing blocker.
-        const overhead = newSwing(); openSwing(overhead);
-        stepSwing(p, overhead, { a: [0, 1.6, 0.3], b: [0, 2.5, 0.8], radius: 0.1 }, me, 'enemy', true);
-        expect(stepSwing(p, overhead, { a: [0, 0.6, 0.3], b: [0, -0.1, 1.2], radius: 0.1 }, me, 'enemy', true).blockedAt).toBeNull();
+        const overhead = newSwing(), club = sword(1.6);
+        openSwing(overhead, club, 'enemy');
+        const down = swingThrough(p, overhead, club, [blade([0, 1.2, 0.3], 0, 30, 1.6), blade([0, 1.2, 0.3], 0, 150, 1.6)], me, 'enemy', true);
+        expect(down[1].blockedAt).toBeNull();
     });
 });
 
 describe('damage from a blade', () => {
-    /** A Straight Sword wired to a manager stub that records its sparks. */
-    function sword() {
+    /** A Longsword wired to a manager stub that records its sparks. */
+    function longsword() {
         const m = new SoulsGameManagerNode('GameManager') as any;
         const sparks: any[] = [];
         m.fx = (t: string, at: any) => { sparks.push([t, at]); return null; };
         m.sfx = () => {};
-        const w = new SoulsStraightSwordNode('Straight Sword') as any;
+        const w = new SoulsLongswordNode('Longsword') as any;
         w._gm = m;
         return { w, sparks };
     }
 
     it('the weapon applies its attack rating times the move, and sparks where the blade met the body', () => {
-        const { w, sparks } = sword();
+        const { w, sparks } = longsword();
         const got: number[] = [];
         const target = { receiveHit: (d: number, poise: number) => { got.push(d, poise); return true; } } as any;
         expect(w.strike({ strength: 10, dexterity: 10 }, { damageMul: 1.5, poiseMul: 2 }, target, [1, 2, 3])).toBe(true);
-        expect(got).toEqual([150, 30]);
+        expect(got).toEqual([168, 40]);
         expect(sparks).toEqual([['Hit Spark', [1, 2, 3]]]);
     });
 
     it('the target applies its OWN defence: the Elite Knight turns 15% aside', () => {
-        const { w } = sword();
+        const { w } = longsword();
         const knight = new SoulsHollowNode('Knight') as any;
         Object.assign(knight, { defense: 0.15, maxHp: 650, hp: 650, maxPoise: 999, poise: 999 });
         knight._gm = { sfx() {}, bleed() {}, shake() {} };
         w.strike({ strength: 10, dexterity: 10 }, { damageMul: 1 }, knight, null);
-        expect(knight.hp).toBe(650 - 85);
+        expect(knight.hp).toBe(650 - 95);
     });
 
     it('no spark and no damage when the target does not take it (dead, rolling)', () => {
-        const { w, sparks } = sword();
+        const { w, sparks } = longsword();
         const target = { receiveHit: () => false } as any;
         expect(w.strike({}, { damageMul: 1 }, target, [0, 0, 0])).toBe(false);
         expect(sparks).toEqual([]);
@@ -279,25 +403,25 @@ describe('weapons spawned from templates', () => {
         return { p, group, made };
     }
     const catalog = {
-        'Straight Sword': () => new SoulsStraightSwordNode('Straight Sword'),
+        'Longsword': () => new SoulsLongswordNode('Longsword'),
         'Greatsword': () => new SoulsGreatswordNode('Greatsword'),
         'Torch': () => new Node('Torch'),
     };
 
     it('spawns each named template into the Weapons group, on the hand socket, holding the first', () => {
-        const { p, group, made } = wielder('Straight Sword, Greatsword', catalog);
+        const { p, group, made } = wielder('Longsword, Greatsword', catalog);
         p._spawnWeapons();
-        expect(made).toEqual(['Straight Sword', 'Greatsword']);
+        expect(made).toEqual(['Longsword', 'Greatsword']);
         expect(p.weapons().map((w: Node) => w.parent)).toEqual([group, group]);
         expect(p.weapons().map((w: any) => w.socketAttachment)).toEqual([
             { target: 'parent', socket: 'RightHand' }, { target: 'parent', socket: 'RightHand' }]);
-        expect(p.currentWeapon().name).toBe('Straight Sword');
+        expect(p.currentWeapon().name).toBe('Longsword');
         expect(p.weapons().map((w: Node) => w.visible)).toEqual([true, false]);
-        expect(p.weaponName).toBe('Straight Sword');
+        expect(p.weaponName).toBe('Longsword');
     });
 
     it('equipping swaps what is shown and the weapon the stats read', () => {
-        const { p } = wielder('Straight Sword, Greatsword', catalog);
+        const { p } = wielder('Longsword, Greatsword', catalog);
         p._spawnWeapons();
         p.equipWeapon(1);
         expect(p.weapons().map((w: Node) => w.visible)).toEqual([false, true]);
@@ -394,7 +518,7 @@ describe('a dead enemy drops its weapon', () => {
         e.addChild(group);
         scene.addNode(e);
         e.setPosition([3, 0, 4]);
-        const club = new SoulsStraightSwordNode('Club') as any;
+        const club = new SoulsLongswordNode('Club') as any;
         club.addChild(new Node('Mesh'));
         group.addChild(club);
         club.attachToSocket('parent', 'RightHand');

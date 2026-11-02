@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CreatorAssetMeta } from '@cleo/app-kit/creatorLibrary';
-import { creatorFolder, creatorIds, planCreatorSync, type CreatorLinks } from '../src/features/creator/creatorLinks';
+import { creatorFolder, creatorIds, keepClipEvents, planCreatorSync, type CreatorLinks } from '../src/features/creator/creatorLinks';
 import { isCreatorPath } from '../src/features/creator/creatorPins';
 import { reconcileVfs, type LibSnapshot } from '../src/utils/vfs';
 import { impostorBillboardOf } from '../src/utils/foliageRules';
@@ -149,5 +149,171 @@ describe('Creator characters', () => {
     await sync.upsertCharacter({ ...m, revision: 4 }, files(['Idle']), link);
     expect(removed).toEqual(['cr_char_a_wave']);
     expect(animations.map(a => a.id)).toEqual(['cr_char_a_idle']);
+  });
+});
+
+// The Creator does not author events: they are placed in the editor, on the clip. A re-sync replaces a
+// clip with its new bake and must carry the project's events across.
+describe('keepClipEvents', () => {
+  const bake = (name: string, events?: { time: number; name: string }[]) => ({ name, samplers: [], ...(events ? { events } : {}) });
+
+  it('keeps each existing clip\'s events by name', () => {
+    const out = keepClipEvents([bake('Walk'), bake('Run', [{ time: 9, name: 'old' }])],
+                               [bake('Run', [{ time: 0.2, name: 'foot' }]), bake('Walk', [{ time: 0.5, name: 'step' }])]);
+    expect(out.map(c => [c.name, c.events])).toEqual([['Walk', [{ time: 0.5, name: 'step' }]], ['Run', [{ time: 0.2, name: 'foot' }]]]);
+  });
+
+  it('follows a single clip across a rename (a Motion asset renamed in the Creator)', () => {
+    expect(keepClipEvents([bake('Swing B')], [bake('Swing A', [{ time: 0.3, name: 'hit' }])])[0].events).toEqual([{ time: 0.3, name: 'hit' }]);
+  });
+
+  it('takes the incoming events only where the project never set any; an emptied list stays empty', () => {
+    const incoming = [bake('Idle', [{ time: 1, name: 'blink' }])];
+    expect(keepClipEvents(incoming, undefined)[0].events).toEqual([{ time: 1, name: 'blink' }]);
+    expect(keepClipEvents(incoming, [bake('Idle')])[0].events).toEqual([{ time: 1, name: 'blink' }]);
+    expect(keepClipEvents(incoming, [bake('Idle', [])])[0].events).toEqual([]);
+  });
+
+  it('does not share the arrays it copies', () => {
+    const prev = [bake('Walk', [{ time: 0.5, name: 'step' }])];
+    const out = keepClipEvents([bake('Walk')], prev);
+    out[0].events![0].time = 9;
+    expect(prev[0].events![0].time).toBe(0.5);
+  });
+});
+
+describe('a re-sync keeps the events placed in the editor', () => {
+  const skin = { joints: [{ nodeIndex: 1, inverseBindMatrix: Array(16).fill(0) }], nodeNames: [[1, 'mixamorig:Hips']] };
+  const clipOf = (name: string, events?: { time: number; name: string }[]) => ({
+    name, samplers: [{ input: [0, 1], output: [0, 0, 0, 1, 0, 0, 0, 1], interpolation: 'LINEAR' }],
+    channels: [{ samplerIndex: 0, targetNodeIndex: 1, targetPath: 'rotation' }], ...(events ? { events } : {}),
+  });
+  const json = (name: string, data: unknown) => ({ name, mime: 'application/json', blob: new Blob([JSON.stringify(data)]) });
+  const hostWith = (animations: any[]) => ({
+    animations: () => animations,
+    putAnimation: (a: any) => { const i = animations.findIndex(x => x.id === a.id); if (i >= 0) animations[i] = a; else animations.push(a); },
+    removeAnimation: () => {},
+    ensureRig: () => ({ id: 'rig_a', name: 'Rig' }),
+    linkAnimationToRig: () => {},
+    putPoseAsset: () => {},
+    removePoseAsset: () => {},
+    isUsed: () => false,
+    nameTextures: () => {},
+  });
+
+  it('a Motion clip: the new bake replaces the curves, the events stay', async () => {
+    const { CreatorSync } = await import('../src/features/creator/creatorSync');
+    const animations: any[] = [];
+    const sync = new CreatorSync(hostWith(animations) as any) as any;
+    const m = meta({ id: 'motion_b', kind: 'motion', name: 'Slash', sidecar: { output: { anim: 'Slash.anim.json' } }, fileNames: ['Slash.anim.json'] });
+    await sync.upsertMotion(m, [json('Slash.anim.json', { clips: [clipOf('x')], sourceSkin: skin })]);
+    // Placed in the editor.
+    animations[0] = { ...animations[0], clips: [{ ...animations[0].clips[0], events: [{ time: 0.2, name: 'hit' }, { time: 0.5, name: 'hitEnd' }] }] };
+    const rebake = { ...clipOf('x'), samplers: [{ input: [0, 2], output: [0, 0, 0, 1, 0, 0, 0, 1], interpolation: 'LINEAR' }] };
+    await sync.upsertMotion({ ...m, revision: 4 }, [json('Slash.anim.json', { clips: [rebake], sourceSkin: skin })]);
+    expect(animations[0].clips[0].samplers[0].input).toEqual([0, 2]);
+    expect(animations[0].clips[0].events).toEqual([{ time: 0.2, name: 'hit' }, { time: 0.5, name: 'hitEnd' }]);
+  });
+
+  it('a Character clip: per clip, by its own .anim', async () => {
+    const { CreatorSync } = await import('../src/features/creator/creatorSync');
+    const animations: any[] = [];
+    const sync = new CreatorSync(hostWith(animations) as any) as any;
+    const m = meta({ id: 'char_b', kind: 'character', name: 'Hero', sidecar: { output: { anim: 'Hero.anim.json' } } });
+    const files = () => [json('Hero.anim.json', { clips: [clipOf('Idle', [{ time: 1, name: 'blink' }]), clipOf('Walk')], sourceSkin: skin })];
+    const link = await sync.upsertCharacter(m, files(), undefined);
+    // Imported events pass through on the first sync.
+    expect(animations.find(a => a.id === 'cr_char_b_idle').clips[0].events).toEqual([{ time: 1, name: 'blink' }]);
+    const walk = animations.find(a => a.id === 'cr_char_b_walk');
+    walk.clips = [{ ...walk.clips[0], events: [{ time: 0.4, name: 'foot' }] }];
+    await sync.upsertCharacter({ ...m, revision: 4 }, files(), link);
+    expect(animations.find(a => a.id === 'cr_char_b_walk').clips[0].events).toEqual([{ time: 0.4, name: 'foot' }]);
+    expect(animations.find(a => a.id === 'cr_char_b_idle').clips[0].events).toEqual([{ time: 1, name: 'blink' }]);
+  });
+});
+
+describe('Creator poses', () => {
+  const skin = { joints: [{ nodeIndex: 1, inverseBindMatrix: Array(16).fill(0) }], nodeNames: [[1, 'mixamorig:RightHand']] };
+  const poseFile = (name: string, bones: unknown[]) => ({
+    name: 'Grip.pose.json', mime: 'application/json',
+    blob: new Blob([JSON.stringify({ name, rigName: 'Mannequin', sourceSkin: skin, poses: [{ id: 'local_1', name, bones }] })]),
+  });
+
+  it('become one pose asset holding one pose, on the skeleton\'s rig, under ids that survive a re-sync and a rename', async () => {
+    const { CreatorSync } = await import('../src/features/creator/creatorSync');
+    const poseAssets: any[] = [];
+    const host: any = {
+      ensureRig: (s: any, name: string) => { expect(s).toEqual(skin); expect(name).toBe('Mannequin'); return { id: 'rig_m', name }; },
+      putPoseAsset: (p: any) => { const i = poseAssets.findIndex(x => x.id === p.id); if (i >= 0) poseAssets[i] = p; else poseAssets.push(p); },
+      nameTextures: () => {},
+    };
+    const sync = new CreatorSync(host) as any;
+    const m = meta({ id: 'pose_a', kind: 'pose', name: 'Grip', sidecar: { output: { pose: 'Grip.pose.json' } }, fileNames: ['Grip.pose.json'] });
+    const bones = [{ name: 'mixamorig:RightHand', rotation: [0, 0, 0.38, 0.92] }];
+    const link = await sync.upsertPose(m, [poseFile('Grip', bones)]);
+    expect(link).toMatchObject({ kind: 'pose', poseAssetId: 'cr_pose_a', folder: '/Creator/Poses/Grip', materialIds: [], textureIds: [] });
+    expect(poseAssets).toEqual([{ id: 'cr_pose_a', name: 'Grip', rigId: 'rig_m', poses: [{ id: 'cr_pose_a_pose', name: 'Grip', bones }] }]);
+    // Renamed in the Creator and re-baked: same record, same pose id (an animator state holds both).
+    await sync.upsertPose({ ...m, name: 'Fist', revision: 4 }, [poseFile('Fist', bones)]);
+    expect(poseAssets).toHaveLength(1);
+    expect(poseAssets[0]).toMatchObject({ id: 'cr_pose_a', name: 'Fist', poses: [{ id: 'cr_pose_a_pose', name: 'Fist' }] });
+  });
+
+  it('skip an asset with no pose file yet', async () => {
+    const { CreatorSync } = await import('../src/features/creator/creatorSync');
+    const sync = new CreatorSync({ nameTextures: () => {} } as any) as any;
+    expect(await sync.upsertPose(meta({ id: 'p', kind: 'pose', name: 'P' }), [])).toBeNull();
+  });
+
+  it('are filed under /Creator/Poses', () => {
+    expect(creatorFolder('pose', 'Grip')).toBe('/Creator/Poses/Grip');
+    expect(creatorIds.pose('x')).toBe('cr_x');
+    expect(creatorIds.poseEntry('x')).toBe('cr_x_pose');
+  });
+
+  const retireHost = (used: boolean, removed: string[]) => ({
+    isUsed: (kind: string) => used && kind === 'pose',
+    removePoseAsset: (id: string) => removed.push(id),
+    removeAnimation: () => {}, removeModel: () => {}, removeParticleSystem: () => {}, removeMaterial: () => {},
+    texturesChanged: () => {}, nameTextures: () => {}, forgetTextures: () => {},
+  });
+  const poseLink = link({ kind: 'pose', name: 'Grip', folder: '/Creator/Poses/Grip', poseAssetId: 'cr_pose_a' });
+
+  it('deleted in the Creator: removed when nothing holds them', async () => {
+    const { CreatorSync } = await import('../src/features/creator/creatorSync');
+    const removed: string[] = [];
+    const sync = new CreatorSync(retireHost(false, removed) as any) as any;
+    sync.links = { pose_a: poseLink };
+    await sync.retire('pose_a', poseLink);
+    expect(removed).toEqual(['cr_pose_a']);
+    expect(sync.links.pose_a).toBeUndefined();
+  });
+
+  it('deleted in the Creator while a state holds one: kept, in /Creator/Removed', async () => {
+    const { CreatorSync } = await import('../src/features/creator/creatorSync');
+    const removed: string[] = [];
+    const sync = new CreatorSync(retireHost(true, removed) as any) as any;
+    sync.links = { pose_a: poseLink };
+    await sync.retire('pose_a', poseLink);
+    expect(removed).toEqual([]);
+    expect(sync.links.pose_a).toMatchObject({ removed: true, folder: '/Creator/Removed/Grip', poseAssetId: 'cr_pose_a' });
+  });
+
+  it('a Character\'s old pose library goes once a revision stops exporting it, unless a state holds one of its poses', async () => {
+    const { CreatorSync } = await import('../src/features/creator/creatorSync');
+    const skinC = { joints: [{ nodeIndex: 1, inverseBindMatrix: Array(16).fill(0) }], nodeNames: [[1, 'Hips']] };
+    const files = [{ name: 'Hero.anim.json', mime: 'application/json', blob: new Blob([JSON.stringify({ clips: [], sourceSkin: skinC })]) }];
+    const m = meta({ id: 'char_c', kind: 'character', name: 'Hero', sidecar: { output: { anim: 'Hero.anim.json' } } });
+    const prev = link({ kind: 'character', name: 'Hero', animationIds: [], poseAssetId: 'cr_char_c_poses' });
+    for (const used of [false, true]) {
+      const removed: string[] = [];
+      const sync = new CreatorSync({
+        ensureRig: () => ({ id: 'rig_h' }), animations: () => [], isUsed: (kind: string) => used && kind === 'pose',
+        removePoseAsset: (id: string) => removed.push(id), nameTextures: () => {},
+      } as any) as any;
+      const next = await sync.upsertCharacter({ ...m, revision: 5 }, files, prev);
+      expect(removed).toEqual(used ? [] : ['cr_char_c_poses']);
+      expect(next.poseAssetId).toBe(used ? 'cr_char_c_poses' : undefined);
+    }
   });
 });

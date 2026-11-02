@@ -19,8 +19,9 @@ export interface CreatorLink {
   particleSystemId?: string
   /** A Motion Creator clip's `.anim` asset. */
   animationId?: string
-  /** A Character's clips (one `.anim` each) and its pose library. */
+  /** A Character's clips (one `.anim` each). */
   animationIds?: string[]
+  /** A Pose asset's pose asset, or (older revisions) a Character's pose library. */
   poseAssetId?: string
   materialIds: string[]
   /** Every texture the sync registered for the asset (garbage-collected when a revision drops one). */
@@ -58,7 +59,9 @@ export function planCreatorSync(assets: readonly CreatorAssetMeta[], links: Read
   return { upsert, retire }
 }
 
-const KIND_FOLDER: Record<CreatorAssetKind, string> = { foliage: 'Foliage', fx: 'FX', world: 'World', motion: 'Motion', character: 'Characters' }
+const KIND_FOLDER: Record<CreatorAssetKind, string> = {
+  foliage: 'Foliage', fx: 'FX', world: 'World', motion: 'Motion', character: 'Characters', pose: 'Poses',
+}
 
 /** A name safe as one path segment. */
 export function folderSafe(name: string): string {
@@ -81,9 +84,34 @@ export const creatorIds = {
   animation: (cid: string) => `cr_${cid}`,
   /** One `.anim` per kept clip of a Character, by clip name. */
   characterClip: (cid: string, clip: string) => `cr_${cid}_${slug(clip)}`,
+  /** A Character's pose library (older Creator revisions exported one beside its clips). */
   poseAsset: (cid: string) => `cr_${cid}_poses`,
+  /** A Creator Pose asset: one pose asset holding one pose. */
+  pose: (cid: string) => `cr_${cid}`,
+  /** That pose's id inside it -- fixed, because animator states hold a pose by id. */
+  poseEntry: (cid: string) => `cr_${cid}_pose`,
   /** One material per mesh part ("Bark", "Leaves"), so a level that adds or drops a part cannot shift them. */
   material: (cid: string, part: string) => `cr_${cid}_${slug(part)}`,
   /** A texture the sync registers from a file of the asset: `fx_flipbook.png` -> `cr_<cid>_fx_flipbook`. */
   texture: (cid: string, fileName: string) => `cr_${cid}_${slug(fileName.replace(/\.[a-z0-9]+$/i, ''))}`,
+}
+
+type StoredClipEvents = { name: string; events?: { time: number; name: string }[] }
+
+/**
+ * Carry the events the project gave a Creator clip onto its next bake.
+ *
+ * Cleo Creator does not author events -- they are placed in the editor, on the clip -- so a re-sync must not
+ * replace them. Each incoming clip keeps the events of the existing clip of the same name; when both sides
+ * hold a single clip (a Motion asset, whose clip is named after the asset) it keeps that clip's, so renaming
+ * the asset in the Creator does not lose them. An existing clip with no `events` field at all takes the
+ * incoming ones (a Character's clips pass imported events through); an empty list is a choice and is kept.
+ */
+export function keepClipEvents<C extends StoredClipEvents>(incoming: readonly C[], existing: readonly StoredClipEvents[] | undefined): C[] {
+  if (!existing?.length) return [...incoming]
+  return incoming.map(c => {
+    const prev = existing.find(e => e.name === c.name) ?? (incoming.length === 1 && existing.length === 1 ? existing[0] : undefined)
+    if (!prev || prev.events === undefined) return c
+    return { ...c, events: prev.events.map(e => ({ ...e })) }
+  })
 }

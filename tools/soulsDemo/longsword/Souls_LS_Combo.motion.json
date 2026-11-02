@@ -2353,8 +2353,7 @@
             0.19
           ]
         },
-        "presetId": "easeIn",
-        "event": "hit"
+        "presetId": "easeIn"
       },
       {
         "id": "k4",
@@ -2384,8 +2383,7 @@
             1
           ]
         },
-        "presetId": "easeOut",
-        "event": "hitEnd, combo"
+        "presetId": "easeOut"
       },
       {
         "id": "k6",
@@ -2400,8 +2398,7 @@
             1
           ]
         },
-        "presetId": "smooth",
-        "event": "recover"
+        "presetId": "smooth"
       },
       {
         "id": "k7",
@@ -2416,8 +2413,7 @@
             1
           ]
         },
-        "presetId": "smooth",
-        "event": "next"
+        "presetId": "smooth"
       },
       {
         "id": "k8",
@@ -2447,8 +2443,7 @@
             0.19
           ]
         },
-        "presetId": "easeIn",
-        "event": "hit"
+        "presetId": "easeIn"
       },
       {
         "id": "k10",
@@ -2478,8 +2473,7 @@
             1
           ]
         },
-        "presetId": "easeOut",
-        "event": "hitEnd, combo"
+        "presetId": "easeOut"
       },
       {
         "id": "k12",
@@ -2494,8 +2488,7 @@
             1
           ]
         },
-        "presetId": "smooth",
-        "event": "recover"
+        "presetId": "smooth"
       },
       {
         "id": "k13",
@@ -2510,8 +2503,7 @@
             1
           ]
         },
-        "presetId": "smooth",
-        "event": "next"
+        "presetId": "smooth"
       },
       {
         "id": "k14",
@@ -2541,8 +2533,7 @@
             0.19
           ]
         },
-        "presetId": "easeIn",
-        "event": "hit"
+        "presetId": "easeIn"
       },
       {
         "id": "k16",
@@ -2572,8 +2563,7 @@
             1
           ]
         },
-        "presetId": "easeOut",
-        "event": "hitEnd, combo"
+        "presetId": "easeOut"
       },
       {
         "id": "k18",
@@ -2588,8 +2578,7 @@
             1
           ]
         },
-        "presetId": "overshoot",
-        "event": "recover"
+        "presetId": "overshoot"
       },
       {
         "id": "k19",
@@ -2607,6 +2596,7 @@
         "presetId": "smooth"
       }
     ],
+    "parts": [],
     "fps": 30,
     "overlap": 0.01,
     "variation": 0,
@@ -2621,64 +2611,6 @@
     "fps": 30,
     "loop": false,
     "poses": 17,
-    "keys": 19,
-    "events": [
-      {
-        "time": 0.38,
-        "name": "hit"
-      },
-      {
-        "time": 0.58,
-        "name": "hitEnd"
-      },
-      {
-        "time": 0.58,
-        "name": "combo"
-      },
-      {
-        "time": 0.8,
-        "name": "recover"
-      },
-      {
-        "time": 0.9,
-        "name": "next"
-      },
-      {
-        "time": 1.24,
-        "name": "hit"
-      },
-      {
-        "time": 1.44,
-        "name": "hitEnd"
-      },
-      {
-        "time": 1.44,
-        "name": "combo"
-      },
-      {
-        "time": 1.64,
-        "name": "recover"
-      },
-      {
-        "time": 1.74,
-        "name": "next"
-      },
-      {
-        "time": 2.2,
-        "name": "hit"
-      },
-      {
-        "time": 2.4,
-        "name": "hitEnd"
-      },
-      {
-        "time": 2.4,
-        "name": "combo"
-      },
-      {
-        "time": 2.64,
-        "name": "recover"
-      }
-    ]
+    "keys": 19
   }
 }

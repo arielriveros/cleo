@@ -1,8 +1,7 @@
 import { humanoidRigOf, skeletonTopology, isAncestorJoint, nearestCommonAncestor, validateIkRig } from 'cleo'
 import type { IkRig, IkFootChain, Skin } from 'cleo'
 
-// Foot placement guessed from bone NAMES — the Skeleton panel's "auto-fill" and the Animate wizard both
-// use this, so the two can never disagree about which bones are a leg.
+// Foot placement guessed from bone NAMES — the Skeleton panel's "auto-fill".
 
 /** The humanoid slots each leg role maps to. Index 0 is the left leg, 1 the right. */
 const SLOTS = {

@@ -8,8 +8,8 @@ import { bakeKinds, OUTPUT_LABELS, type FxOutput, type FxOutputKind } from '../g
 
 // The Bake tab, beside Parameters in the right dock: everything about turning the effect into textures.
 // The bake-side sections (Flipbook, Outputs), the Bake button, and a player and atlas view for whichever
-// output is selected. Export is the toolbar's, as in every Creator mode. The bake runs its own deterministic simulation from t = 0; the live
-// preview keeps going beside it.
+// output is selected. The bake runs its own deterministic simulation from t = 0; the live preview keeps
+// going beside it.
 
 export interface BakePanelProps {
   params: FxParams;

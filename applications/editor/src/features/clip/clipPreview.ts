@@ -3,21 +3,20 @@ import { resolveAnimationAsset } from '../../utils/animationResolve'
 import type { AnimationAsset } from '../../utils/animationAssets'
 import type { AnimationTarget } from '../animation/skeleton'
 
-// Showing an UNSAVED clip asset on the preview character.
+// Showing a clip asset on the Clip Player's preview character.
 //
 // Two things make this less obvious than "set the clips and play":
 //
 //  1. The `Animator` transcodes a clip into private `Bone` objects when `playAnimation` binds it, so
-//     replacing `model.animations` is invisible to playback until the clip is re-bound. Every edit
+//     replacing `model.animations` is invisible to playback until the clip is re-bound. Every change
 //     therefore has to end in `playAnimationByName` + `seek`, not just a swap.
-//  2. `resolveAnimationAsset` caches per `(asset, model)` pair. The working copy shares its id with the
-//     saved asset, so a cached entry would serve the SAVED clips for the rest of the session. Passing no
-//     cache key is the documented bypass, and is exactly what an unsaved preview is for.
+//  2. `resolveAnimationAsset` caches per `(asset, model)` pair. Passing no cache key bypasses it, so the
+//     preview always resolves the record it was handed — the one the library holds right now.
 
 /**
- * Put a working copy's clips onto the preview character, keeping the playhead where it was.
+ * Put an asset's clips onto the preview character, keeping the playhead where it was.
  *
- * Returns the name of the clip left bound, which is `want` when the asset still has it — an edit can
+ * Returns the name of the clip left bound, which is `want` when the asset still has it — a sync can
  * rename or remove the clip on screen, and silently leaving the character in whatever pose it held is
  * worse than falling back to the first clip.
  */

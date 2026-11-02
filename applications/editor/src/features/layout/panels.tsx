@@ -258,14 +258,15 @@ function AnimFieldPanel(_: IDockviewPanelProps) { return <AnimationFieldPanel />
 // That editor's work surface, docked in the bottom strip beside Logger and Assets rather than floating
 // over the viewport: the blend-space plot with its transport under it. Both read the same provider, so
 // this panel can be dragged anywhere without re-plumbing.
-/** The clip editor's inspector: the clip list, root motion, and the edit stack. */
-function ClipTracksPanel(_: IDockviewPanelProps) {
+/** The Clip Player's inspector: the clip list, the preview character and root motion. */
+function ClipInspectorPanel(_: IDockviewPanelProps) {
   return <SidePanel><ClipInspector /></SidePanel>;
 }
 
 /**
- * The clip editor's transport. `renderer: 'always'` in the dock — its rAF loop is what poses the preview
- * character, so unmounting it when another bottom tab is selected would freeze the model mid-clip.
+ * The Clip Player's transport and Events track. `renderer: 'always'` in the dock — its rAF loop is what
+ * poses the preview character, so unmounting it when another bottom tab is selected would freeze the model
+ * mid-clip.
  */
 function ClipTimelinePanel(_: IDockviewPanelProps) {
   return <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised"><ClipTimeline /></div>;
@@ -338,7 +339,7 @@ const panelComponents = {
   animStateMachine: AnimStateMachinePanel,
   animField: AnimFieldPanel,
   animFieldPlot: AnimFieldPlotPanel,
-  clipTracks: ClipTracksPanel,
+  clipInspector: ClipInspectorPanel,
   clipTimeline: ClipTimelinePanel,
   particleTransport: ParticleTransportDockPanel,
   tilePalette: TilePalettePanel,

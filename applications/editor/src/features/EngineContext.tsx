@@ -49,7 +49,7 @@ import { ScriptAsset, ScriptBaseType, SCRIPT_ID_VAR, buildScriptAsset, applyScri
 import { buildScriptGraphCtx, deriveBaseType, resolveScriptVariables, dependentsOf } from "../utils/scriptGraph";
 import { pushExternalSource } from "./scriptWorkspace/externalSourceStore";
 import { AnimationAsset, buildAnimationAsset, storeSkin, findEquivalentAnimation, withAnimationRef, withoutAnimationRef, extractEmbeddedClips } from "../utils/animationAssets";
-import type { StoredSkin } from "../utils/animationAssets";
+import type { StoredClip, StoredSkin } from "../utils/animationAssets";
 import { modelAssetSkin, applyModelAnimations, modelAnimationIds, invalidateAnimationCache, resolveAnimationAsset, registerRigResolver, registerPoseAssetResolver } from "../utils/animationResolve";
 import { AnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembedFields, machineUsesField } from "../utils/animationFields";
 import { TilesetAsset, reembedTilesets, detachTileset, normalizeTilesetAsset } from "../utils/tilesets";
@@ -57,8 +57,6 @@ import { AiBrainAsset, AiBrainKind, buildAiBrainAsset, reembedBrains, detachBrai
 import { ParticleSystemAsset, buildParticleSystemAsset, reembedParticleSystems, detachParticleSystem } from "../utils/particleSystems";
 import type { AnimControllerAsset } from "../utils/animationControllers";
 import { instantiateController, reembedMachine, pickControllerForRig, machineIsEmpty, buildControllerAsset } from "../utils/animationControllers";
-import { buildFromTemplate, templateById, type TemplateId } from "../utils/animatorTemplates";
-import { guessFootPlacement } from "../utils/footPlacementAuto";
 import type { BoneMaskAsset } from "../utils/boneMasks";
 import type { PoseAsset } from "../utils/poseAssets";
 import type { ControllerNode, ParticleSystemNode } from "cleo";
@@ -82,6 +80,7 @@ import { findEquivalentRig, buildRigAsset, runtimeSockets, overridesFromMapping,
 import { extractRigs, moveClipsToRigs } from "../utils/rigMigration";
 import { decimateGeometry } from "../workers/workerClient";
 import { cancelAllImports, ImportCancelled, parseAnimationFiles } from "../workers/importClient";
+import { installPhysicsWorker } from "../workers/physicsWorkerHost";
 import { detectMissingTextures } from "../utils/textureRefs";
 import { buildGameData } from "./publish/buildGameData";
 import { applyGameData, extractNodeState, ProjectPrefs } from "../utils/projectStorage";
@@ -100,7 +99,7 @@ import {
   collectReferencedTilesetIds,
   collectReferencedAiBrainIds,
   collectReferencedAnimationFieldIds, collectReferencedSoundIds, collectReferencedAudioIds,
-  collectReferencedAnimationIds, buildSceneRefs, collectReferencedParticleSystemIds,
+  collectReferencedAnimationIds, buildSceneRefs, collectReferencedParticleSystemIds, collectReferencedPoseAssetIds,
 } from "../utils/references";
 import { CreatorSync } from "./creator/creatorSync";
 import { impostorBillboardOf } from "../utils/foliageRules";
@@ -227,8 +226,6 @@ const EngineContext = createContext<{
   /** Open an animation controller asset for editing. */
   openAnimController: (id: string) => void;
   createAnimatorForRig: (rigId: string, name?: string) => string | null;
-  animateCharacter: (nodeId: string, templateId: TemplateId, assigned: Record<string, string | undefined>) =>
-    { controllerId: string; actions: { slot: string; clip: string }[]; footPlacement: boolean } | null;
   /** Show a different character on the open rig tab. */
   setRigPreviewModel: (tabId: string, modelId: string) => void;
   /** Which character the open rig tab is previewing. */
@@ -237,16 +234,12 @@ const EngineContext = createContext<{
   /** The models built on a rig — the candidates its preview can show. */
   modelsOnRig: (rigId: string) => ModelAsset[];
   editingRigId: string | null;
-  registerClipApply: (reg: { tabId: string; apply: () => void } | null) => void;
-  /** Open (or focus) a `.anim` asset's clip editor tab. */
+  /** Open (or focus) a `.anim` asset's Clip Player tab. */
   enterClipEditor: (animationId?: string, adoptTabId?: string) => void;
   /** Show a different character on the open clip tab. */
   setClipPreviewModel: (tabId: string, modelId: string) => void;
   /** Which character the open clip tab is previewing. */
   clipPreviewModelId: (tabId: string) => string | undefined;
-  saveClip: (asset: AnimationAsset) => void;
-  /** Save the working copy as a NEW `.anim` asset and re-point the tab at it. Returns the new id. */
-  saveClipAs: (asset: AnimationAsset, name: string) => string | null;
   /** The characters a clip asset can preview on: the models built on its SOURCE rig. */
   modelsForClip: (asset: AnimationAsset) => ModelAsset[];
   editingAnimationId: string | null;
@@ -509,7 +502,8 @@ const EngineContext = createContext<{
   /** Give the rig's controller to a just-placed character that has no state machine. See adoptRigController. */
   adoptRigController: (modelId: string, onlyRoot?: Node | null) => number;
   /** Rename a clip inside a shared `.anim` asset, or toggle its root motion. */
-  editSharedClip: (animationId: string, clipName: string, patch: { name?: string; rootMotion?: boolean }) => void;
+  /** Write one clip of a `.anim` in the library and re-resolve it everywhere it plays. */
+  editSharedClip: (animationId: string, clipName: string, patch: Partial<Pick<StoredClip, 'name' | 'rootMotion' | 'events' | 'edits'>>) => void;
   modelSession: ModelEditSession | null;
   /** Node id of the active LOD level's root in the model tab scene (viewport drop parent), or null. */
   modelEditTargetId: string | null;
@@ -631,18 +625,14 @@ const EngineContext = createContext<{
     enterRigEditor: () => {},
     openAnimController: () => {},
     createAnimatorForRig: () => null,
-    animateCharacter: () => null,
     setRigPreviewModel: () => {},
     rigPreviewModelId: () => undefined,
     saveRig: () => {},
     modelsOnRig: () => [],
     editingRigId: null,
-    registerClipApply: () => {},
     enterClipEditor: () => {},
     setClipPreviewModel: () => {},
     clipPreviewModelId: () => undefined,
-    saveClip: () => {},
-    saveClipAs: () => null,
     modelsForClip: () => [],
     editingAnimationId: null,
     enterTemplateEditor: () => {},
@@ -1860,53 +1850,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     return asset.id;
   };
 
-  /**
-   * The "Animate this character" wizard's commit: build an Animator from a template, give it to the
-   * character, switch on foot placement for its skeleton if it has none, and open the workspace on it.
-   *
-   * The Animator is a shared asset on the SKELETON (so a second character on it can reuse it), and the
-   * locomotion blend space, when there is one, is added to the library beside it.
-   */
-  const animateCharacter = (
-    nodeId: string, templateId: TemplateId, assigned: Record<string, string | undefined>,
-  ): { controllerId: string; actions: { slot: string; clip: string }[]; footPlacement: boolean } | null => {
-    const node = activeScene.getNodeById(nodeId);
-    const skinned = node instanceof ModelNode && node.animator ? node : firstSkinnedModelNode(node ?? null);
-    if (!skinned?.animator || !(skinned.model instanceof AnimatedModel) || !skinned.model.skin) {
-      Logger.error('Pick a character with a skeleton to animate', 'Editor'); return null;
-    }
-    const modelId = modelIdOf(skinned);
-    const rigId = modelId ? ensureRigForModel(modelId) : null;
-    const rig = rigId ? rigsRef.current.find(r => r.id === rigId) : undefined;
-    if (!rig) { Logger.error('This character is not a model from the library, so it has no skeleton to animate', 'Editor'); return null; }
-
-    const template = templateById(templateId);
-    const result = buildFromTemplate(template, assigned, rig.id, { name: rig.name });
-    // Mirrored eagerly, like every create-then-use path here: the machine is resolved against the refs.
-    if (result.field) {
-      animationFieldsRef.current = [...animationFieldsRef.current, result.field];
-      addAnimationField(result.field);
-    }
-    const controller = buildControllerAsset(`${rig.name} Animator`, result.machine, rig.id);
-    animControllersRef.current = [...animControllersRef.current, controller];
-    addAnimController(controller);
-
-    skinned.animator.setStateMachine(instantiateController(controller, machineLibs()));
-    markTabDirty(activeTabId, 'animate-character');
-    eventEmitter.current.emit('ANIM_SM_CHANGED');
-    eventEmitter.current.emit('SCENE_CHANGED');
-
-    let footPlacement = false;
-    if (template.footPlacement && !rig.ikRig) {
-      const guess = guessFootPlacement(skinned.model.skin);
-      if (guess.rig) { updateRig(rig.id, { ...rig, ikRig: guess.rig }); footPlacement = true; }
-    }
-
-    Logger.info(`"${skinned.name}" now animates with "${controller.name}" (${template.name})`, 'Editor');
-    openAnimController(controller.id);
-    return { controllerId: controller.id, actions: result.actions, footPlacement };
-  };
-
   // The two halves of the image/texture split. An ImageAsset is metadata over the bytes that already live
   // in the `textures` IndexedDB store; a TextureAsset is a byte source plus every sampling decision, and
   // its id IS the TextureManager id every serialized material already references.
@@ -3082,20 +3025,21 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   };
 
   /**
-   * Edit one clip inside a shared `.anim` asset (its name or its root-motion flag). Must write the LIBRARY
-   * asset: clips resolved from an asset carry `assetId` and AnimatedModel.serialize drops those, so the
-   * embedded-clip helpers patch a list the clip does not live in.
+   * Edit one clip inside a shared `.anim` asset (its name, root-motion flag, events or legacy edit stack).
+   * Must write the LIBRARY asset: clips resolved from an asset carry `assetId` and AnimatedModel.serialize
+   * drops those, so the embedded-clip helpers patch a list the clip does not live in.
    */
-  const editSharedClip = (animationId: string, clipName: string, patch: { name?: string; rootMotion?: boolean }) => {
+  const editSharedClip = (animationId: string, clipName: string, patch: Partial<Pick<StoredClip, 'name' | 'rootMotion' | 'events' | 'edits'>>) => {
     const anim = animationsRef.current.find(a => a.id === animationId);
     if (!anim) return;
     const clips = anim.clips.map(c => (c.name === clipName ? { ...c, ...patch } : c));
     if (clips.every((c, i) => c === anim.clips[i])) return;
     const updated: AnimationAsset = { ...anim, clips };
+    // Mirrored eagerly: several clips of one asset are written in the same tick (an animator's events moving
+    // onto its clips), and each must build on the last rather than on the render-time copy.
+    animationsRef.current = animationsRef.current.map(a => (a.id === animationId ? updated : a));
     updateAnimation(animationId, updated);
     invalidateAnimationCache(animationId);
-    // `updated` is handed through explicitly: updateAnimation is a state write, so animationsRef still
-    // holds the PREVIOUS clips during this call and re-resolving from it would put the old name back.
     for (const model of modelsRef.current) {
       // The rig owns the link now, so ask the model's rig rather than the model.
       if (modelAnimationIds(model).includes(animationId)) applyAnimationLinks(model, null, updated);
@@ -3133,7 +3077,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // and the two must never be confused — which is why these locals say `targetModel`.
     const skinnedModels = modelsRef.current.filter(m => modelAssetIsSkinned(m));
     const openTargetModelId = cloneNode ? modelIdOf(cloneNode) : undefined;
-    // A caller that already knows the character (the Animate wizard) skips the picker.
+    // A caller that already knows the character skips the picker.
     let targetModelId = openTargetModelId ?? opts?.modelId;
     if (!targetModelId) {
       if (!skinnedModels.length) {
@@ -4826,15 +4770,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     applyActiveTab: (tab) => applyActiveTabRef.current?.(tab),
   });
 
-  // ---- Clip editor -----------------------------------------------------------------------------------
+  // ---- Clip Player -----------------------------------------------------------------------------------
   const {
-    enterClipEditor, setClipPreviewModel, clipPreviewModelId, saveClip, saveClipAs, modelsForClip,
+    enterClipEditor, setClipPreviewModel, clipPreviewModelId, modelsForClip,
   } = useClipEditor({
     instanceRef, animationsRef, rigsRef, modelsRef, materialsRef, tabRuntimeRef,
-    dirtyArmedRef, eventEmitter, tabs, setActiveTab, commitTab, setTabs, withoutDirty,
-    updateAnimation, addAnimation, linkAnimationToRig, applyAnimationLinks,
-    modelAnimationIdsOf: modelAnimationIds,
-    clearTabDirty, activeTabId,
+    dirtyArmedRef, eventEmitter, tabs, setActiveTab, commitTab, withoutDirty, activeTabId,
     // Through a ref, for the same reason the rig editor does it.
     applyActiveTab: (tab) => applyActiveTabRef.current?.(tab),
   });
@@ -5229,6 +5170,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             || terrainMaterialsRef.current.some(tm => allTerrainFoliageRules(tm.material).some((r: any) => r?.modelId === id));
           case 'material': return scenes.some(s => collectReferencedMaterialIds(s, modelsRef.current.filter(m => !m.id.startsWith('cr_'))).has(id));
           case 'particleSystem': return scenes.some(s => collectReferencedParticleSystemIds(s).has(id));
+          // A state holding one of its poses (`poseRef`), in a scene not saved since — the graph has the rest.
+          case 'pose': return scenes.some(s => collectReferencedPoseAssetIds(s).has(id));
           case 'texture': return scenes.some(s => collectReferencedTextureIds(s, materialsRef.current.filter(m => !m.id.startsWith('cr_')),
             modelsRef.current.filter(m => !m.id.startsWith('cr_')), templatesRef.current, terrainMaterialsRef.current).has(id));
           default: return false;
@@ -5710,7 +5653,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // ---- Saving: one action per tab, plus Save All ------------------------------------------------
   const {
     registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply,
-    registerAiBrainApply, registerParticleSystemApply, registerRigApply, registerClipApply, saveTabById, runSave,
+    registerAiBrainApply, registerParticleSystemApply, registerRigApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   } = useSaving({
     tabsRef, dirtyTabsRef, activeTabIdRef, setSavingState,
@@ -6067,6 +6010,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           }
 
           instanceRef.current = engine;
+          // Before the runtime options: the project's Physics thread setting needs a way to make the worker.
+          installPhysicsWorker();
           applyEngineRuntime(engine as any, projectSettingsRef.current.engine, AudioManager.Instance.mixer);
           instanceRef.current.isPaused = false;
 
@@ -6189,8 +6134,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           // stripped from any real publish. No withoutDirty — play mode never marks the tab dirty.
           // Simulate is watched through the editor's eyes, so it wears the Editor channel's overlays.
           const playScene = instanceRef.current?.scene;
+          // Triggers come from the physics world, not the authored map: a game makes most of its own
+          // (hitboxes, hurtboxes on spawned enemies) and switches them many times a second.
           if (playScene) reconcileEditorHelpers(playScene, bodiesRef.current, triggersRef.current, vis,
-            isSimulating ? 'editor' : 'runtime', selectedNodeRef.current);
+            isSimulating ? 'editor' : 'runtime', selectedNodeRef.current, { liveTriggers: true });
         } else if (activeScene) {
           // withoutDirty as well as suppressReconcileRef: the latter only stops the reconciler re-triggering
           // ITSELF, while the helpers it splices in emit SCENE_CHANGED like any other node edit.
@@ -6878,9 +6825,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterParticleSystemEditor, saveParticleSystem, linkParticleSystemToNode, extractParticleSystemFromNode,
     registerParticleSystemApply,
     enterRigEditor, setRigPreviewModel, rigPreviewModelId, saveRig, modelsOnRig, registerRigApply,
-    openAnimController, createAnimatorForRig, animateCharacter,
-    enterClipEditor, setClipPreviewModel, clipPreviewModelId, saveClip, saveClipAs, modelsForClip,
-    registerClipApply,
+    openAnimController, createAnimatorForRig,
+    enterClipEditor, setClipPreviewModel, clipPreviewModelId, modelsForClip,
   });
   const editorSessionsValue = useMemo<EditorSessionsContextValue>(() => ({
     editingTemplateName, editingTemplateVariant, templateRootId,
@@ -7106,18 +7052,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       registerAiBrainApply,
       registerRigApply,
       enterRigEditor,
-      openAnimController, createAnimatorForRig, animateCharacter,
+      openAnimController, createAnimatorForRig,
       setRigPreviewModel,
       rigPreviewModelId,
       saveRig,
       modelsOnRig,
       editingRigId,
-      registerClipApply,
       enterClipEditor,
       setClipPreviewModel,
       clipPreviewModelId,
-      saveClip,
-      saveClipAs,
       modelsForClip,
       editingAnimationId,
       saveTileset,

@@ -1149,8 +1149,7 @@
             0.19
           ]
         },
-        "presetId": "easeIn",
-        "event": "hit"
+        "presetId": "easeIn"
       },
       {
         "id": "k5",
@@ -1180,8 +1179,7 @@
             1
           ]
         },
-        "presetId": "easeOut",
-        "event": "hitEnd"
+        "presetId": "easeOut"
       },
       {
         "id": "k7",
@@ -1196,8 +1194,7 @@
             1
           ]
         },
-        "presetId": "smooth",
-        "event": "combo, recover"
+        "presetId": "smooth"
       },
       {
         "id": "k8",
@@ -1215,6 +1212,7 @@
         "presetId": "smooth"
       }
     ],
+    "parts": [],
     "fps": 30,
     "overlap": 0.012,
     "variation": 0,
@@ -1229,24 +1227,6 @@
     "fps": 30,
     "loop": false,
     "poses": 8,
-    "keys": 8,
-    "events": [
-      {
-        "time": 0.74,
-        "name": "hit"
-      },
-      {
-        "time": 0.94,
-        "name": "hitEnd"
-      },
-      {
-        "time": 1.3,
-        "name": "combo"
-      },
-      {
-        "time": 1.3,
-        "name": "recover"
-      }
-    ]
+    "keys": 8
   }
 }

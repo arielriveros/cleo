@@ -3,7 +3,7 @@
 Generate grass clumps, bushes, trees and rocks from parameters, each with its levels of detail and its
 materials, and export them as glTF models ready for a foliage rule.
 
-![The Foliage Creator on the Oak preset: presets and seeds, the live preview, and the parameters](../media/creator-foliage.jpg)
+![The Foliage Creator on the Oak preset: the live preview and the parameters](../media/creator-foliage.jpg)
 
 Pick **Grass**, **Bush**, **Tree** or **Rock** in the toolbar. Each kind keeps its own parameters, so switching
 back and forth loses nothing. Every edit regenerates the asset in a background worker, and the
@@ -11,66 +11,78 @@ back and forth loses nothing. Every edit regenerates the asset in a background w
 preview loads the same `.glb` files the export writes, through the Editor's own importer, so what you
 see is what you import. Drag to orbit, right-drag to pan, scroll to move closer; **F** frames the asset.
 
-The menu top-right of the viewport shows the grid, floor, sky, a patch of grass clumps, and wireframe.
-The **LOD** menu beside it pins one level, or lets distance choose. The corner readout gives each
-level's triangles and the level on screen.
+The **Stage** menu top-right of the viewport sets what the preview shows and the light on it (see
+[Stage](#stage)). The **LOD** menu beside it pins one level, or lets distance choose. The corner readout
+gives each level's triangles and the level on screen.
 
-The layout is the Creator's own, the same in every mode (see [the Creator](index.md#layout)). The
-**right** dock holds **Parameters** (the shape), **Materials** (every material the asset carries, in the
-Editor's material sections), **LOD** (the level ladder) and **Export** (file name and texture sizes).
-**Download .glb** in the toolbar writes the files. The **left** dock holds presets, seeds, saved
-variants and the sun.
+The layout is the Creator's own (see [the Creator](index.md#layout)), without a left dock. The **right**
+dock holds **Parameters** (the shape, with **Presets ▾** at its top), **Materials** (every material the
+asset carries, in the Editor's material sections), **LOD** (the level ladder) and **Export** (texture sizes
+and the embedded textures). **Download .glb** in the toolbar writes the files, named after the saved asset
+(`untitled` while on Scratch).
 
 Every asset is a pure function of its parameters and **Seed**. Random choices are keyed by what they
-decide (this branch, this leaf), so changing one slider moves only what it touches. **New seed** gives
-another plant from the same parameters.
+decide (this branch, this leaf), so changing one slider moves only what it touches.
+
+## Seed
+
+The toolbar's **Seed** is the current plant's seed. **▾** beside it lists the seeds tried this session:
+click one to go back to it. **New seed** gives another plant from the same parameters.
+
+A plant worth keeping is kept as a library asset: **Save as asset…** in the toolbar, then open it again
+from **Assets**. (Variants saved in the browser by an older Creator moved into Assets ▸ `/Foliage` the
+first time it opened.)
 
 ## Presets
 
-Starting points for the current kind. A preset replaces the kind's parameters and keeps the seed.
+**Parameters ▸ Presets ▾**: starting points for the current kind. A preset replaces the kind's parameters
+and keeps the seed; the Parameters header shows the preset applied last.
 
-## Seeds
+## Stage
 
-The seeds tried this session. Click one to go back to it.
+The **Stage** menu, top-right of the viewport: the preview's stage. None of it reaches the export.
 
-## Saved variants
+**Show** — what the preview draws, and how:
 
-Keep the current kind, parameters and seed under a name, and load it again later. Stored in the browser.
+| Row | Does |
+|---|---|
+| **Grid** | The floor grid. |
+| **Floor** | The ground plane. |
+| **Sky** | The sky behind the plant. |
+| **Patch of clumps** | Grass only: a patch of clumps instead of one. |
+| **Wind** | A wind on the stage, so the preview sways (see [Wind](#wind)). |
+| **Walk-through** | Someone walks back and forth through the preview, so you can see how the plant gives way and springs back: the materials' **Interaction**. Draws the asset as a foliage layer too, with or without wind. |
+| **Wireframe** | The triangles. Shown still, as nodes. |
 
-## Sun & sky
+**Sun** — **Direction** is the sun's compass direction, **Elevation** its height above the horizon. Low and
+behind a plant shows its translucency.
 
-The light the preview is shown in. None of it reaches the export.
+### Light
 
 | Field | Meaning |
 |---|---|
-| **Sun direction** | The sun's compass direction. |
-| **Sun elevation** | The sun's height above the horizon. Low and behind a plant shows its translucency. |
 | **Sun illuminance** | Sunlight in lux; 60 000–100 000 is a clear day. |
 | **Ambient light** | The flat fill under the sky, in lux. |
 
-## Wind
+### Wind
 
-A wind on the stage, so the preview sways as the asset will in a level. The asset is drawn as a foliage
-layer, the path a game's foliage rules use, so its foliage materials sway, vary and weather as they will
-in a level; with Wireframe on (which that path does not draw) it is shown still, as nodes. The
-viewport's readout says which. None of it reaches the export.
+While **Wind** is on, the asset is drawn as a foliage layer, the path a game's foliage rules use, so its
+foliage materials sway, vary and weather as they will in a level; with Wireframe on (which that path does
+not draw) it is shown still, as nodes. The viewport's readout says which.
 
 | Field | Meaning |
 |---|---|
-| **Wind** | On or off. Also in the viewport's visibility menu. |
+| **Preset** | Calm to Storm: strength and gusts as the engine's wind presets set them. |
 | **Direction** | Where the wind blows toward, degrees counter-clockwise from +X. |
 | **Strength** | How hard: multiplies every material's lean. |
 | **Gust size** | The size of a gust, in metres. |
 | **Gust speed** | How fast gusts travel. |
-| **Walk-through** | Someone walks back and forth through the preview, so you can see how the plant gives way and springs back: the materials' **Interaction**. Draws the asset as a foliage layer too, with or without wind. |
-
-The presets below (Calm to Storm) set strength and gusts as the engine's wind presets do.
 
 ![Walk-through on a grass patch: the blades part around the walker and spring back](../media/foliage-walkthrough.gif)
 
-## Weather
+### Weather
 
-The stage's weather, to see the materials' **Weather** settings at work. None of it reaches the export.
+The stage's weather, to see the materials' **Weather** settings at work.
 
 | Field | Meaning |
 |---|---|
@@ -357,10 +369,6 @@ times and stores every level in the scene.
 The export bakes it again and writes both atlases. In the Editor, the foliage rule's own impostor bake
 is the one the engine uses.
 
-## File
-
-**Name** is the stem of every exported file. The list shows what **Download .glb** writes.
-
 ## Textures
 
 | Field | Meaning |
@@ -371,7 +379,7 @@ is the one the engine uses.
 
 ## Embedded textures
 
-Every texture the `.glb` files carry, at its export size. Replace any of them in the Materials tab.
+Every texture the `.glb` files carry, at its export size. The Materials tab replaces them.
 
 ## Using the export in the Editor
 

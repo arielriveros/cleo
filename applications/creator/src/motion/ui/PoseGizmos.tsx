@@ -13,7 +13,8 @@ import type { MotionStage } from './motionStage';
 // follows (poseDrag.ts: FABRIK with lengths kept, or a stretch); the selected bone carries the shared
 // rotate rings (app-kit's transform gizmo, the editor's own) on an invisible proxy node parked on the
 // joint, as the editor's BoneGizmo does. Everything lands in the pose document, the same values the
-// sliders edit.
+// sliders edit. While the Parts tab is showing, a click on a joint adds its bone to the selected part (or
+// takes it out) instead.
 //
 // A joint drag turns the camera off the way a gizmo drag does (GIZMO_DRAG_START / END on the bus), so the
 // left button that grabbed a joint never also orbits. Listeners sit on the DOCUMENT, after the gizmo's
@@ -41,6 +42,11 @@ interface Props {
   /** Joints are pickable only while the skeleton is drawn. */
   skeleton: boolean;
   options: DragOptions;
+  /**
+   * While set (the Parts tab is showing), a click on a joint goes here -- the bone joins or leaves the
+   * selected part -- instead of selecting or dragging it.
+   */
+  onJointPick?: (bone: string) => void;
 }
 
 export function PoseGizmos(props: Props) {
@@ -153,9 +159,10 @@ export function PoseGizmos(props: Props) {
       if (performance.now() - lastDragEnd.current < 150) return;
       const hit = pick(e);
       if (!hit) return;
-      const { rig: r, pose: p, setBone, posing: inPose, startPosing } = live.current;
+      const { rig: r, pose: p, setBone, posing: inPose, startPosing, onJointPick } = live.current;
       if (!r) return;
       e.preventDefault();
+      if (onJointPick) { onJointPick(r.bones[hit.joint].name); return; }
       setBone(r.bones[hit.joint].name);
       if (!inPose) startPosing();
       const cam = instance.scene?.activeCamera?.camera;

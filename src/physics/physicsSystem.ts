@@ -6,7 +6,9 @@ import { unwrapScriptNode } from "../core/scene/nodes/nodeScripting";
 import { World, Body, Constraint, Material, ContactMaterial, Vec3, Ray, RaycastResult, AABB, Box } from 'cannon-es';
 import { quat, vec3 } from "gl-matrix";
 import { authoring } from "../core/eventBus";
-import { RigidBody, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
+import { RigidBody, Trigger, triggerState, DEFAULT_FRICTION, DEFAULT_RESTITUTION } from "./body";
+import type { TriggerContact } from "./body";
+import { TriggerOverlapPass, TriggerOverlap, pairKey } from "./triggerOverlaps";
 import { Ragdoll, RagdollOptions } from "./ragdoll";
 import { skipCameraHit, CameraProbeBody, skipRayHit, RayHitBody, RayFilter } from "./cameraRayFilter";
 import { physicsStats, resetPhysicsStats, PhysicsStats } from "./physicsStats";
@@ -14,10 +16,18 @@ import { clearWorld, broadphaseBodyCount } from "./worldTeardown";
 import { MotionRecord, MotionConfig, createMotionRecord, sampleMotion, motionConfig } from "./motion";
 import { OverlapHit, OverlapOptions, OverlapBody, QueryShape, queryPoses, sweepPoses } from "./overlap";
 import { applyBuoyancy, floats } from "./buoyancy";
-import { CleoSAPBroadphase } from "./cleoBroadphase";
-import { installHeightfieldCollision } from "./heightfieldCollision";
-import { installConvexSat } from "./convexSat";
+import { createPhysicsWorld } from "./worldConfig";
+import { MaterialTable } from "./materialTable";
+import { InlineBackend } from "./backend/inlineBackend";
+import { WorkerBackend } from "./backend/workerBackend";
+import type { ContactLike, PhysicsBackend } from "./backend/physicsBackend";
+import { WorkerPort, type PhysicsPort } from "./worker/ports";
 import { effectiveSimulationRange, shouldFreeze, SIMULATION_WAKE_GRACE } from "./simulationRange";
+
+/** Whether a body takes part in overlaps: anything but a disabled trigger. */
+const isOn = (body: Body): boolean => !(body instanceof Trigger) || body.enabled;
+/** A trigger's re-arm count (see Trigger.rearmEpoch); 0 for any other body. */
+const epochOf = (body: Body): number => (body instanceof Trigger ? body.rearmEpoch : 0);
 
 /**
  * A body's forward axis in world space: its local +Z rotated by its orientation, written into `out`.
@@ -32,6 +42,9 @@ function bodyForward(body: Body, out: vec3): vec3 {
   out[2] = 1 - 2 * (x * x + y * y);
   return out;
 }
+
+/** Where the physics step may run: see PhysicsSystem.setWorkerMode. */
+export type PhysicsWorkerMode = 'off' | 'on' | 'auto';
 
 interface PhysicsSystemConfig {
   gravity?: number[];
@@ -138,7 +151,13 @@ export class PhysicsSystem {
   /** Scratch for the per-frame node-space body position; never escapes the write-back pass. */
   private _originScratch = vec3.create();
   /** Cannon materials by `friction|restitution`, with a ContactMaterial for every pair. See _materialFor. */
-  private _materials = new Map<string, Material>();
+  private _materialTable!: MaterialTable;
+  /** Where the step runs: this thread, or a Web Worker. See backend/physicsBackend.ts. */
+  private _backend!: PhysicsBackend;
+  private _workerMode: PhysicsWorkerMode = 'off';
+  private _workerFactory: (() => PhysicsPort) | null = null;
+  /** The auto mode's bookkeeping: seconds watched, the step-time average, and whether it gave up. */
+  private _auto = { watched: 0, stepEma: 0, gaveUp: false, workerWatched: 0, lateAt: 0, postedAt: 0 };
   /**
    * Mirror of the world's body membership, so the write-back pass tests it in O(1) rather than by scanning
    * `world.bodies`. Only tracks bodies added THROUGH this system; the foliage collider pool and ragdoll
@@ -151,7 +170,20 @@ export class PhysicsSystem {
    * the difference once per frame, so a pair that flickers across substeps never reaches a script.
    */
   private _triggerPairs = new Map<number, { a: Body; b: Body }>();
-  private _reportedPairs = new Map<number, { a: Body; b: Body }>();
+  /**
+   * What was last reported to scripts, with each side's `rearmEpoch` at the time: a trigger switched off
+   * and back on inside one frame still overlaps, but its new enter must be reported (see Trigger.rearmEpoch).
+   */
+  private _reportedPairs = new Map<number, { a: Body; b: Body; ea: number; eb: number }>();
+  /** Every trigger in the world, for the trigger↔trigger pass and the editor's overlay. */
+  private _triggers = new Set<Trigger>();
+  /** Bumped when a trigger enters or leaves the world; see {@link triggerVersion}. */
+  private _localVersion = 0;
+  /** Trigger↔trigger overlaps, which cannon cannot see — see triggerOverlaps.ts. Updated once per frame. */
+  private _ttPass = new TriggerOverlapPass();
+  private _ttPairs = new Map<number, TriggerOverlap>();
+  /** Per trigger: how many reported overlaps it is in, for the overlay's highlight. */
+  private _overlapCount = new Map<Body, number>();
   /** Bodies this system has put to sleep — out of range, or at rest — and what they were doing. */
   private _frozen = new Map<Body, FrozenState>();
   /** When a frozen body was last woken by something else (a hit, an impulse): it gets a grace period. */
@@ -199,36 +231,27 @@ export class PhysicsSystem {
 
   public initialize(): void {
     try {
-      this._world = new World();
-      this._world.gravity.set(this._gravity[0], this._gravity[1], this._gravity[2]);
-      // Sweep-and-prune, not cannon's default NaiveBroadphase: hundreds of pooled foliage collider bodies
-      // make its O(N^2) pair generation dominate the step.
-      // CleoSAPBroadphase rather than cannon's own: its pair loop scanned every static body against every
-      // later body regardless of position — see cleoBroadphase.ts.
-      this._world.broadphase = new CleoSAPBroadphase(this._world);
-      // Terrain contacts and rays that only touch the cells a body or ray actually reaches. See
-      // heightfieldCollision.ts for what cannon's own resolvers paid on a large landscape.
-      installHeightfieldCollision(this._world);
-      // The separating-axis test behind every convex-convex contact, without its parallel repeats and its
-      // per-vertex overhead — once measured as 37% of the Valley's physics. See convexSat.ts.
-      installConvexSat();
-      // cannon's automatic sleep stays off: bodies are put to sleep by this system (out of range, or at
-      // rest when they opt in), which knows what may never sleep — a character steered by velocity.
-      this._world.allowSleep = false;
-      this._world.quatNormalizeSkip = 0;
-      // Accurate quaternion normalization: the fast approximation blows cone-twist ragdoll joints up to NaN.
-      this._world.quatNormalizeFast = false;
-      // Trigger enter/exit. cannon records trigger overlaps in its bodyOverlapKeeper (the `justTest` path of
-      // the narrowphase) and diffs them every step into these two events; the per-body 'collide' event that
-      // onTrigger uses fires on first contact only and has no exit at all.
+      // Built by the same function the physics worker uses (worldConfig.ts), so both step alike.
+      this._world = createPhysicsWorld(this._gravity);
+      this._materialTable = new MaterialTable(this._world);
+      // Trigger enter/exit. cannon records trigger overlaps in its bodyOverlapKeeper and diffs them every
+      // step into these two events; the per-body 'collide' event that onTrigger uses fires on first contact
+      // only and has no exit at all.
       this._world.addEventListener('beginContact', (e: any) => this._onContact(e.bodyA, e.bodyB, true));
       this._world.addEventListener('endContact', (e: any) => this._onContact(e.bodyA, e.bodyB, false));
       // Buoyancy: once per SUBSTEP, after cannon has added gravity and before it integrates, so the water's
       // push is integrated exactly like gravity is. See physics/buoyancy.ts.
       this._world.addEventListener('preStep', () => this._applyWater());
+      this._backend = this._inlineBackend();
+      // A mode set before the world existed (the engine constructor) takes effect now.
+      if (this._workerMode === 'on') this._useWorker();
     } catch (e) {
       Logger.error(e.toString());
     }
+  }
+
+  private _inlineBackend(): InlineBackend {
+    return new InlineBackend(() => this._world, dt => PhysicsSystem.substepsFor(dt, this.maxSubsteps), () => this.profileStep);
   }
 
   public update(deltaTime: number): void {
@@ -237,45 +260,27 @@ export class PhysicsSystem {
       const frameStart = performance.now();
       resetPhysicsStats();
 
-      // The world advances by EXACTLY this frame's delta, in equal substeps no longer than 1/60 s — the
-      // same time scripts, locomotion and the animator are about to advance by. It used to be cannon's
-      // accumulator, `step(1/60, dt, 5)`, which kept its own clock: it stopped at 5 substeps (0.083 s)
-      // while scripts got up to 0.333 s, it abandoned the loop once the substeps took 16.7 ms of wall
-      // time, and it threw the leftover away. So below 60 fps — or whenever physics got heavy — bodies
-      // covered less ground than the game believed, and a speed-driven locomotion blend slid from
-      // sprint to walk; above 60 fps the body moved in 1/60 s jumps that read as 0 and 2x speed on
-      // alternate frames. Equal substeps that sum to the frame have none of that, and stay at or under
-      // the 1/60 s that keeps ragdoll joints and contacts stable.
-      // BEFORE the step: a body frozen this frame must not be integrated by it.
-      this._updateActivation(deltaTime);
+      // The step (see backend/): inline, the world advances by exactly this frame's delta in equal
+      // substeps; with the worker, this applies the step it finished while the last frame rendered.
+      const inline = this._backend.kind === 'inline';
+      // BEFORE the step: a body frozen this frame must not be integrated by it. (The worker's activation
+      // runs in endFrame, just before the step is posted.)
+      if (inline) this._updateActivation(deltaTime);
+      const result = this._backend.step(deltaTime);
+      physicsStats.backend = this._backend.kind;
+      // Seconds actually simulated. Inline, the frame's own; with the worker, its step's — or 0 while it
+      // is still running, when nothing below that depends on a step happening runs.
+      const stepDt = inline ? deltaTime : result.dt;
 
-      const stepStart = performance.now();
-      const substeps = PhysicsSystem.substepsFor(deltaTime, this.maxSubsteps);
-      const world = this._world;
-      if (world) world.doProfiling = this.profileStep;
-      if (substeps > 0) {
-        const h = deltaTime / substeps;
-        for (let i = 0; i < substeps; i++) {
-          world?.step(h);
-          if (world && this.profileStep) {
-            const prof = (world as any).profile;
-            physicsStats.broadphaseMs += prof.broadphase;
-            physicsStats.narrowphaseMs += prof.narrowphase;
-            physicsStats.solveMs += prof.solve + prof.makeContactConstraints;
-            physicsStats.integrateMs += prof.integrate;
-          }
-        }
+      if (inline || stepDt > 0) {
+        this._updateRagdolls(stepDt);
+        // update() runs only while unpaused, so the grace window cannot expire behind a paused game.
+        this._time += stepDt;
+        this._stampGroundContacts(result.contacts);
+        // Must follow the stamps, so the clocks agree with what isGrounded answers this frame.
+        this._updateAirborneTimes(stepDt);
       }
-      physicsStats.stepMs = performance.now() - stepStart;
-
-      this._updateRagdolls(deltaTime);
-      this._reportTriggerPairs();
-
-      // update() runs only while unpaused, so the grace window cannot expire behind a paused game.
-      this._time += deltaTime;
-      this._stampGroundContacts();
-      // Must follow the stamps, so the clocks agree with what isGrounded answers this frame.
-      this._updateAirborneTimes(deltaTime);
+      physicsStats.contacts = result.contacts.length;
 
       const writeBackStart = performance.now();
       const nodes = this._scene.nodes;
@@ -294,9 +299,7 @@ export class PhysicsSystem {
             // Node.setBody/setTrigger is an anonymous arrow, so removeEventListener can never match it.
             this.removeBody(bodyToAdd);
           } else if (!this._inWorld.has(bodyToAdd)) {
-            this._assignMaterial(bodyToAdd);
-            this._world.addBody(bodyToAdd);
-            this._inWorld.add(bodyToAdd);
+            this._enterWorld(bodyToAdd);
           }
         }
 
@@ -310,10 +313,12 @@ export class PhysicsSystem {
           // reading node.currentSpeed sees the step that just happened rather than last frame's.
           let motion = this._motion.get(node.body);
           if (!motion) { motion = createMotionRecord(); this._motion.set(node.body, motion); }
-          sampleMotion(
+          // Over the time actually simulated: a frame whose worker step has not come back moved nothing, and
+          // sampling it would read as a stop.
+          if (stepDt > 0) sampleMotion(
             // The node's own travel, so currentSpeed still measures what the node did — a body spinning
             // about an offset centre of mass would otherwise read as movement.
-            motion, [pos[0], pos[1], pos[2]], deltaTime, this.up,
+            motion, [pos[0], pos[1], pos[2]], stepDt, this.up,
             // Facing comes from the BODY, not the node: the node has not been written yet this frame.
             bodyForward(node.body, this._forwardScratch),
             this._motionConfigFor(node.body),
@@ -355,6 +360,12 @@ export class PhysicsSystem {
       }
       physicsStats.writeBackMs = performance.now() - writeBackStart;
 
+      // AFTER the write-back: triggers now sit where their nodes are, so the trigger↔trigger pass tests
+      // this frame's poses, and cannon's pairs and the pass's are diffed together, once. A trigger removed
+      // by the write-back (its node was removed) reports its exit in this same frame.
+      this._detectTriggerOverlaps();
+      this._reportTriggerPairs();
+
       // Terrain: register/refresh the static heightfield collider(s) so any mesh walks over the landscape.
       const terrainStart = performance.now();
       for (const landscape of this._scene.landscapes) {
@@ -388,8 +399,8 @@ export class PhysicsSystem {
       // Equal to `bodies` in a healthy world. Larger means bodies were removed without the broadphase
       // hearing about it and are still being simulated against — see worldTeardown.clearWorld.
       physicsStats.broadphaseBodies = this._world ? broadphaseBodyCount(this._world) : 0;
-      physicsStats.contacts = this._world?.contacts.length ?? 0;
       physicsStats.frameMs = performance.now() - frameStart;
+      if (this._workerMode === 'auto') this._autoSwitch(deltaTime);
     } catch (e) {
       Logger.error(e.toString());
     }
@@ -533,11 +544,15 @@ export class PhysicsSystem {
 
   public addBody(body: Body): void {
     if (!this._world) return;
-    if (!this._inWorld.has(body)) {
-      this._assignMaterial(body);
-      this._world.addBody(body);
-      this._inWorld.add(body);
-    }
+    if (!this._inWorld.has(body)) this._enterWorld(body);
+  }
+
+  /** The one way a body enters the world through this system: material, membership, trigger bookkeeping. */
+  private _enterWorld(body: Body): void {
+    this._assignMaterial(body);
+    this._world.addBody(body);
+    this._inWorld.add(body);
+    if (body instanceof Trigger) { this._triggers.add(body); this._localVersion++; }
   }
 
   /**
@@ -549,53 +564,112 @@ export class PhysicsSystem {
     if (this._inWorld.delete(body))
       this._world.removeBody(body);
     this._frozen.delete(body);
+    if (body instanceof Trigger && this._triggers.delete(body)) this._localVersion++;
     if (this._triggerPairs.size > 0)
       for (const [key, pair] of this._triggerPairs)
         if (pair.a === body || pair.b === body) this._triggerPairs.delete(key);
+    if (this._ttPairs.size > 0)
+      for (const [key, pair] of this._ttPairs)
+        if ((pair.a as unknown) === body || (pair.b as unknown) === body) this._ttPairs.delete(key);
   }
 
   // ---- Trigger enter / exit ----
 
-  private static _pairKey(a: Body, b: Body): number {
-    return a.id < b.id ? a.id * 1048576 + b.id : b.id * 1048576 + a.id;
-  }
-
   private _onContact(a: Body | null, b: Body | null, begin: boolean): void {
     // A removed body comes back as null: removeBody has already dropped its pairs.
     if (!a || !b || !(a.isTrigger || b.isTrigger)) return;
-    const key = PhysicsSystem._pairKey(a, b);
+    const key = pairKey(a, b);
     if (begin) {
-      if (this._inWorld.has(a) && this._inWorld.has(b)) this._triggerPairs.set(key, { a, b });
+      if (this._inWorld.has(a) && this._inWorld.has(b) && isOn(a) && isOn(b)) this._triggerPairs.set(key, { a, b });
     } else this._triggerPairs.delete(key);
   }
 
-  /** Fire onTriggerEnter / onTriggerExit for what changed since the last frame, on BOTH nodes of a pair. */
+  /** Trigger↔trigger overlaps for this frame (cannon cannot report them). See triggerOverlaps.ts. */
+  private _detectTriggerOverlaps(): void {
+    if (this._triggers.size < 2 && this._ttPairs.size === 0) return;
+    const start = performance.now();
+    this._ttPass.run(this._triggers, this.triggerVersion, this._ttPairs);
+    physicsStats.triggerPassMs = performance.now() - start;
+    physicsStats.triggerCandidates = this._ttPass.stats.candidates;
+    physicsStats.triggerPairsTested = this._ttPass.stats.tested;
+  }
+
+  /**
+   * Fire onTriggerEnter / onTriggerExit for what changed since the last frame, on BOTH nodes of a pair,
+   * and each Trigger side's `onContact` listeners. Cannon's trigger↔body pairs and the engine's
+   * trigger↔trigger pairs go through the same diff.
+   */
   private _reportTriggerPairs(): void {
-    if (this._triggerPairs.size === 0 && this._reportedPairs.size === 0) return;
-    for (const [key, pair] of this._reportedPairs) {
-      if (this._triggerPairs.has(key)) continue;
+    if (this._triggerPairs.size === 0 && this._ttPairs.size === 0 && this._reportedPairs.size === 0) {
+      physicsStats.triggerOverlaps = 0;
+      return;
+    }
+    for (const [key, rep] of this._reportedPairs) {
+      const live = (this._triggerPairs.has(key) || this._ttPairs.has(key)) && isOn(rep.a) && isOn(rep.b);
+      // Still overlapping, and neither side was switched off and on again since it was reported.
+      if (live && epochOf(rep.a) === rep.ea && epochOf(rep.b) === rep.eb) continue;
       // A body put to sleep inside a trigger drops out of cannon's overlap tracking (sleeping-vs-static is
       // skipped in the broadphase), which reads as an exit. It has not moved: hold the overlap until it
-      // wakes, when cannon reports the pair again and nothing is re-entered.
-      if (pair.a.sleepState === Body.SLEEPING || pair.b.sleepState === Body.SLEEPING) continue;
+      // wakes, when cannon reports the pair again and nothing is re-entered. Only while both are still
+      // in the world and switched on — a removed or disabled side really has left.
+      if (!live && (rep.a.sleepState === Body.SLEEPING || rep.b.sleepState === Body.SLEEPING)
+          && this._inWorld.has(rep.a) && this._inWorld.has(rep.b) && isOn(rep.a) && isOn(rep.b)) continue;
       this._reportedPairs.delete(key);
-      PhysicsSystem._dispatchTrigger(pair, 'onTriggerExit');
+      this._dispatchTrigger(rep.a, rep.b, 'exit', null, null, 1);
     }
     for (const [key, pair] of this._triggerPairs) {
+      if (this._reportedPairs.has(key) || !isOn(pair.a) || !isOn(pair.b)) continue;
+      this._reportedPairs.set(key, { a: pair.a, b: pair.b, ea: epochOf(pair.a), eb: epochOf(pair.b) });
+      this._dispatchTrigger(pair.a, pair.b, 'enter', null, null, 1);
+    }
+    for (const [key, hit] of this._ttPairs) {
       if (this._reportedPairs.has(key)) continue;
-      this._reportedPairs.set(key, pair);
-      PhysicsSystem._dispatchTrigger(pair, 'onTriggerEnter');
+      const a = hit.a as unknown as Body, b = hit.b as unknown as Body;
+      this._reportedPairs.set(key, { a, b, ea: epochOf(a), eb: epochOf(b) });
+      this._dispatchTrigger(a, b, 'enter', hit.pointOnA, hit.pointOnB, hit.fraction);
+    }
+    physicsStats.triggerOverlaps = this._reportedPairs.size;
+  }
+
+  private _dispatchTrigger(a: Body, b: Body, phase: 'enter' | 'exit',
+                           pointOnA: [number, number, number] | null, pointOnB: [number, number, number] | null, fraction: number): void {
+    const na = (a as any).owner, nb = (b as any).owner;
+    const hook = phase === 'enter' ? 'onTriggerEnter' : 'onTriggerExit';
+    if (na instanceof Node && nb instanceof Node && na !== nb) {
+      for (const [self, other] of [[na, nb], [nb, na]] as [Node, Node][]) {
+        try { self[hook](other); }
+        catch (e) { Logger.error(`Error in ${hook} for node ${self.name}: ${e}`, 'Script'); }
+      }
+    }
+    // Each Trigger side: its overlap count (the overlay's highlight) and its own listeners, which also hear
+    // about ownerless bodies and get the contact point.
+    const sides: [Body, Body, [number, number, number] | null][] = [[a, b, pointOnB], [b, a, pointOnA]];
+    for (const [self, other, point] of sides) {
+      if (!(self instanceof Trigger)) continue;
+      const count = (this._overlapCount.get(self) ?? 0) + (phase === 'enter' ? 1 : -1);
+      if (count > 0) this._overlapCount.set(self, count); else this._overlapCount.delete(self);
+      if (!self.hasAnyEventListener('triggerContact')) continue;
+      const owner = (other as any).owner;
+      const contact: TriggerContact = {
+        phase, self, other, node: owner instanceof Node ? owner : null,
+        point: point ? [point[0], point[1], point[2]] : null, fraction,
+      };
+      try { self.dispatchEvent({ type: 'triggerContact', contact } as any); }
+      catch (e) { Logger.error(`Error in a trigger contact listener on ${self.name}: ${e}`, 'Script'); }
     }
   }
 
-  private static _dispatchTrigger(pair: { a: Body; b: Body }, hook: 'onTriggerEnter' | 'onTriggerExit'): void {
-    const na = (pair.a as any).owner, nb = (pair.b as any).owner;
-    if (!(na instanceof Node) || !(nb instanceof Node) || na === nb) return;
-    for (const [self, other] of [[na, nb], [nb, na]] as [Node, Node][]) {
-      try { self[hook](other); }
-      catch (e) { Logger.error(`Error in ${hook} for node ${self.name}: ${e}`, 'Script'); }
-    }
-  }
+  /** Every trigger volume in the world, enabled or not. Read-only: add and remove them through nodes. */
+  public get triggers(): ReadonlySet<Trigger> { return this._triggers; }
+
+  /**
+   * Changes whenever a trigger enters or leaves the world, is enabled or disabled, starts or stops
+   * detecting triggers, or is reshaped. What caches trigger state (the editor's overlay) rebuilds on it.
+   */
+  public get triggerVersion(): number { return triggerState.version + this._localVersion; }
+
+  /** Whether `trigger` is in any reported overlap right now. */
+  public isTriggerOverlapping(trigger: Body): boolean { return (this._overlapCount.get(trigger) ?? 0) > 0; }
 
   /** How many trigger overlaps are currently reported to scripts. For tests and the stats panel. */
   public get triggerOverlapCount(): number { return this._reportedPairs.size; }
@@ -704,22 +778,7 @@ export class PhysicsSystem {
    * as MAX.
    */
   private _materialFor(friction: number, restitution: number): Material {
-    const key = `${friction}|${restitution}`;
-    const cached = this._materials.get(key);
-    if (cached) return cached;
-
-    const material = new Material(key);
-    for (const [otherKey, other] of this._materials) {
-      const [otherFriction, otherRestitution] = otherKey.split('|').map(Number);
-      this._world.addContactMaterial(new ContactMaterial(material, other, {
-        friction: Math.min(friction, otherFriction),
-        restitution: Math.max(restitution, otherRestitution),
-      }));
-    }
-    this._world.addContactMaterial(new ContactMaterial(material, material, { friction, restitution }));
-
-    this._materials.set(key, material);
-    return material;
+    return this._materialTable.materialFor(friction, restitution);
   }
 
   /** The surface every body without its own settings uses — matches cannon's own defaults. */
@@ -742,9 +801,11 @@ export class PhysicsSystem {
    * Record how ground-like each body's best contact is this frame. Must run immediately after the step, while
    * `world.contacts` still describes it — the equations are pooled and rewritten in place, so retain nothing.
    */
-  private _stampGroundContacts(): void {
+  private _stampGroundContacts(contacts?: ArrayLike<ContactLike>): void {
     const world = this._world;
     if (!world) return;
+    // The backend's list (the worker's comes back with its snapshot); the world's own by default.
+    contacts ??= world.contacts as unknown as ArrayLike<ContactLike>;
 
     // No gravity means no "down", so nothing can be ground; leaving the stamps alone lets them expire.
     const g = world.gravity;
@@ -752,7 +813,8 @@ export class PhysicsSystem {
     if (gLength === 0) return;
     const downX = g.x / gLength, downY = g.y / gLength, downZ = g.z / gLength;
 
-    for (const contact of world.contacts) {
+    for (let i = 0; i < contacts.length; i++) {
+      const contact = contacts[i];
       // `ni` points OUT of bi, i.e. from bi towards bj (negate for bj). Its agreement with gravity IS the
       // measure of ground-likeness.
       const dot = contact.ni.x * downX + contact.ni.y * downY + contact.ni.z * downZ;
@@ -1156,6 +1218,134 @@ export class PhysicsSystem {
     // The scene is going away: no exits are reported for it.
     this._triggerPairs.clear();
     this._reportedPairs.clear();
+    this._triggers.clear();
+    this._ttPairs.clear();
+    this._ttPass.clear();
+    this._overlapCount.clear();
+    this._localVersion++;
+    this._backend?.reset();
+  }
+
+  // ---- Where the step runs ----
+
+  /**
+   * End of the frame, after every script has run (CleoEngine calls it before rendering). With the worker,
+   * this is where the frame's changes are diffed and its step posted — the worker steps while this thread
+   * renders, and the next update applies the result. Inline, nothing.
+   */
+  public endFrame(deltaTime: number): void {
+    if (this._backend?.kind !== 'worker') return;
+    try {
+      // The worker's activation: what the inline backend does just before stepping.
+      this._updateActivation(deltaTime);
+      this._backend.endFrame(deltaTime);
+    } catch (e) {
+      Logger.error(`Physics: ${e}`);
+    }
+  }
+
+  /**
+   * How this host makes a physics worker, set once at startup by an app that can (the editor, the
+   * published player): typically `() => new Worker(new URL(...), { type: 'module' })` with the bundler's
+   * syntax for physics/worker/physicsWorker.ts. Left null, every world steps on the main thread.
+   */
+  public static workerFactory: (() => Worker | PhysicsPort) | null = null;
+
+  /** Where the step runs now: 'inline' (this thread) or 'worker'. */
+  public get backend(): 'inline' | 'worker' { return this._backend?.kind ?? 'inline'; }
+
+  /** The mode set with {@link setWorkerMode}. */
+  public get workerMode(): PhysicsWorkerMode { return this._workerMode; }
+
+  /**
+   * Run the step in a Web Worker: `'on'` now, `'auto'` once this world proves heavy enough to gain from it
+   * (and back if the worker cannot keep up), `'off'` never. `create` makes the worker — a host-specific
+   * bundler import of physics/worker/physicsWorker.ts, a `Worker`, or a port (tests) — and without it the
+   * step stays inline whatever the mode. If the worker fails, physics falls back to this thread, where it
+   * carries on from the worker's last step.
+   */
+  public setWorkerMode(mode: PhysicsWorkerMode, create?: (() => Worker | PhysicsPort) | null): void {
+    this._workerMode = mode;
+    const factory = create !== undefined ? create : PhysicsSystem.workerFactory;
+    this._workerFactory = factory ? () => {
+      const made = factory();
+      return typeof (made as any).postMessage === 'function' && !('poll' in made) ? new WorkerPort(made as Worker) : made as PhysicsPort;
+    } : null;
+    this._auto = { watched: 0, stepEma: 0, gaveUp: false, workerWatched: 0, lateAt: 0, postedAt: 0 };
+    if (mode === 'on') this._useWorker();
+    else if (mode === 'off') this._useInline();
+  }
+
+  private _useWorker(): boolean {
+    if (this._backend?.kind === 'worker') return true;
+    if (!this._workerFactory || !this._world) return false;
+    try {
+      const port = this._workerFactory();
+      this._backend = new WorkerBackend({
+        world: this._world,
+        onContact: (a, b, begin) => this._onContact(a, b, begin),
+        water: () => this._waterSpecs(),
+        substepsFor: dt => PhysicsSystem.substepsFor(dt, this.maxSubsteps),
+        profileStep: () => this.profileStep,
+        onFailure: (error) => {
+          Logger.warn(`Physics worker failed (${error instanceof Error ? error.message : String(error)}); stepping on the main thread instead.`, 'Physics');
+          this._auto.gaveUp = true;
+          this._useInline();
+        },
+      }, port);
+      return true;
+    } catch (e) {
+      Logger.warn(`Physics worker could not start (${e}); stepping on the main thread.`, 'Physics');
+      this._auto.gaveUp = true;
+      return false;
+    }
+  }
+
+  private _useInline(): void {
+    if (this._backend?.kind === 'inline') return;
+    this._backend?.dispose();
+    this._backend = this._inlineBackend();
+  }
+
+  /**
+   * The auto mode. Start inline; after two seconds of play, move the step to the worker if it costs this
+   * thread enough (an average of 1.5 ms or more, or 40+ moving bodies) on a machine with cores to spare.
+   * Come back if the worker cannot keep up: more than 10% of frames late over three seconds.
+   */
+  private _autoSwitch(dt: number): void {
+    const a = this._auto;
+    if (a.gaveUp) return;
+    if (this._backend.kind === 'inline') {
+      a.watched += dt;
+      a.stepEma += (physicsStats.stepMs - a.stepEma) * Math.min(1, dt * 2);
+      const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency ?? 1 : 1;
+      if (a.watched >= 2 && cores >= 4 && (a.stepEma >= 1.5 || physicsStats.activeBodies >= 40)) {
+        if (!this._useWorker()) a.gaveUp = true;
+      }
+      return;
+    }
+    const worker = this._backend as WorkerBackend;
+    a.workerWatched += dt;
+    if (a.workerWatched < 3) return;
+    const posted = worker.postedFrames - a.postedAt, late = worker.lateFrames - a.lateAt;
+    a.workerWatched = 0; a.postedAt = worker.postedFrames; a.lateAt = worker.lateFrames;
+    if (late > 0.1 * Math.max(1, posted + late)) {
+      Logger.warn('Physics worker falls behind on this machine; stepping on the main thread.', 'Physics');
+      a.gaveUp = true;
+      this._useInline();
+    }
+  }
+
+  /** The enabled water volumes as plain data for the worker, with where to report what each buoyed. */
+  private _waterSpecs(): { spec: import('./waterSurface').WaterSpec; record: (body: Body, fraction: number) => void }[] {
+    const volumes = (this._scene as any)?.waterVolumes as Set<any> | undefined;
+    if (!volumes?.size) return [];
+    const out: { spec: import('./waterSurface').WaterSpec; record: (body: Body, fraction: number) => void }[] = [];
+    for (const volume of volumes) {
+      if (!volume.enabled || typeof volume.buoyancySpec !== 'function') continue;
+      out.push({ spec: volume.buoyancySpec(), record: (body, fraction) => volume.recordSubmerged(body, fraction) });
+    }
+    return out;
   }
 
   public set scene(scene: Scene) {

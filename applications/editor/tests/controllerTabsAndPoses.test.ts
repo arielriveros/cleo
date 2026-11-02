@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { mat4, quat } from 'gl-matrix'
+import { mat4, quat, vec3 } from 'gl-matrix'
 import { assetIdOfTab, isRestorableTab } from '../src/utils/tabState'
-import { poseBoneLocal, poseDeltaOf } from '../src/features/clip/boneTrs'
+import { poseBoneLocal } from '../src/features/rig/boneTrs'
 
 // A controller opened from the asset browser has no source node — Apply writes the ASSET — so its tab
 // restores like any other asset tab. A state machine opened on a NODE still must not: its builder
@@ -21,21 +21,24 @@ describe('controller tabs', () => {
   })
 })
 
-// Capturing a pose and previewing it are inverses: what the rig editor captures from a frame must put
-// the bone back exactly where it was — including under an FBX-style rest that carries a 0.01 scale.
-describe('pose deltas', () => {
-  const rest = mat4.fromRotationTranslationScale(mat4.create(),
-    quat.fromEuler(quat.create(), 0, 0, 90), [0, 10, 0], [0.01, 0.01, 0.01])
-  const local = mat4.fromRotationTranslationScale(mat4.create(),
-    quat.fromEuler(quat.create(), 25, 0, 90), [0, 12, 1], [0.01, 0.01, 0.01])
+// Previewing a stored pose: the bone's local is the pose's delta laid on its rest, in the PARENT frame
+// (`rotation = delta x rest`, `translation = rest + delta`) — and the rest's scale is kept, which matters
+// under an FBX-style rest that carries a 0.01 scale.
+describe('pose preview', () => {
+  const restRot = quat.fromEuler(quat.create(), 0, 0, 90)
+  const rest = mat4.fromRotationTranslationScale(mat4.create(), restRot, [0, 10, 0], [0.01, 0.01, 0.01])
+  const delta = quat.fromEuler(quat.create(), 25, 0, 0)
 
-  it('round-trips capture -> preview', () => {
-    const delta = poseDeltaOf(local, rest)!
-    const back = poseBoneLocal(rest, delta)
-    for (let i = 0; i < 16; i++) expect(back[i]).toBeCloseTo(local[i], 5)
+  it('lays the delta on the rest', () => {
+    const got = poseBoneLocal(rest, { rotation: [delta[0], delta[1], delta[2], delta[3]], translation: [0, 2, 1] })
+    const want = mat4.fromRotationTranslationScale(mat4.create(),
+      quat.multiply(quat.create(), delta, restRot), [0, 12, 1], [0.01, 0.01, 0.01])
+    for (let i = 0; i < 16; i++) expect(got[i]).toBeCloseTo(want[i], 5)
   })
 
-  it('stores nothing for a bone at rest', () => {
-    expect(poseDeltaOf(rest, rest)).toBeNull()
+  it('is the rest itself for an empty delta, scale included', () => {
+    const got = poseBoneLocal(rest, {})
+    for (let i = 0; i < 16; i++) expect(got[i]).toBeCloseTo(rest[i], 6)
+    expect(vec3.length(mat4.getScaling(vec3.create(), got))).toBeCloseTo(Math.sqrt(3) * 0.01, 6)
   })
 })

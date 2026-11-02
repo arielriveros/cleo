@@ -70,7 +70,21 @@ A trigger detects overlap without responding to collision. Add one, give it shap
 `onTriggerEnter(other)` / `onTriggerExit(other)` fire as things come and go (on both nodes of the
 overlap), and `onTrigger(other)` on first contact. A node can have a body and a trigger at once.
 
-Trigger volumes are drawn in the viewport when the debug eye menu has them on.
+By default a trigger detects moving bodies (characters, props). Turn on **Detect triggers** and it also
+detects other trigger volumes: a weapon's hitbox entering a character's hurtbox, both triggers.
+
+| Setting | What it does |
+|---|---|
+| **Enabled** | Whether the trigger detects anything. A disabled trigger keeps its shapes but physics, overlap queries and the overlay ignore it; switching it on costs nothing. Scripts switch it with `node.trigger.enabled`. |
+| **Detect triggers** | Also detect other trigger volumes. Only one side of a pair has to have it on. Plain zones leave it off. |
+| **Continuous** | Test the volume along its path from last frame to this one against other triggers, so a fast mover (a blade) cannot skip past a thin target between two frames. Needs **Detect triggers** on one side. |
+| **Layer** | The collision layers this trigger is in (bits 1–16). |
+| **Detects** | The layers it detects. A pair only overlaps when each side's **Detects** has the other's **Layer**. A hurtbox that detects only the hitbox layer never even reaches a contact test with its own character's body. |
+
+Trigger volumes are drawn in the viewport when the debug eye menu has them on. While the game runs (Play
+or Simulate) the overlay draws what physics is actually testing, including triggers scripts create:
+green for a zone, cyan for one that detects triggers, magenta for a continuous one, yellow while it
+overlaps something. A disabled trigger disappears on the frame it is switched off.
 
 > `onTrigger` fires on every new contact — walk out and back in and it fires again. Latch it if the
 > thing it does should happen once — see [the pickup pattern](../scripting/patterns.md#a-pickup).
@@ -271,7 +285,9 @@ Neither needs setting up here.
 ## Seeing colliders
 
 Turn on **Collision wireframes** and **Trigger volumes** in the debug eye menu. Both have separate
-Editor and Runtime switches, so you can watch colliders during Play without cluttering authoring.
+Editor and Runtime switches, so you can watch colliders during Play without cluttering authoring. At
+runtime the trigger overlay is live: it follows every trigger in the physics world, as described under
+[Trigger](#trigger).
 
 ## See also
 

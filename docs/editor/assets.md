@@ -35,12 +35,12 @@ Folders are yours to arrange; nothing depends on where an asset sits.
 | **Model** | `.model` | Model import, or adopting a node subtree | Model mode | placed in scenes |
 | **Scene** | `.scene` | **+ Add** | The scene tab | one is the main scene |
 | **Script** | `.script` | **+ Add** | [Script mode](scripting-workflow.md) | attached to nodes |
-| **Animation** | `.anim` | **+ Add** (pick a `.fbx`/`.glb`/`.gltf`) | [Clip mode](animation.md) — clips stay in source-rig space | rig clip lists, state machines |
+| **Animation** | `.anim` | **+ Add** (pick a `.fbx`/`.glb`/`.gltf`), or [Cleo Creator](../creator/motion.md) | The [clip player](animation.md#the-clip-player) — clips stay in source-rig space | rig clip lists, state machines |
 | **Rig** | `.rig` | Model or animation import — one per distinct skeleton | [Rig mode](animation.md): clips, retargeting, IK, sockets, bone masks, poses | models built on that skeleton |
-| **Animator** | `.animator` | **+ Add**, the workspace's **Animator ▾ → + New Animator**, the [Animate wizard](animation.md#animate-a-character-in-a-minute), or **Share…** in the Animator | [Character Animation workspace](animation.md#shared-animators), previewed on a character on its skeleton | characters' **Animation** section |
+| **Animator** | `.animator` | **+ Add**, the workspace's **Animator ▾ → + New Animator**, or **Share…** in the Animator | [Character Animation workspace](animation.md#shared-animators), previewed on a character on its skeleton | characters' **Animation** section |
 | **Bone Mask** | `.mask` | The rig editor's **Bone Masks** section | Rig mode, **Bone Masks** section | controller layers and action slots |
-| **Pose Asset** | `.pose` | Saving a pose in the clip editor, or **+ New pose asset** in the rig editor's **Poses** section | Rig mode, **Poses** section | clip pose offsets, controller pose states |
-| **Blend Space** | `.blendspace` | The workspace's **Blend Spaces ▾ → + New Blend Space**, or the Animate wizard | The Character Animation workspace | a state in an animator |
+| **Pose Asset** | `.pose` | [Cleo Creator ▸ Motion](../creator/motion.md#poses), synced into `/Creator/Poses` | Rig mode, **Poses** section | controller pose states |
+| **Blend Space** | `.blendspace` | The workspace's **Blend Spaces ▾ → + New Blend Space** | The Character Animation workspace | a state in an animator |
 | **AI Brain** | `.brain` | **+ Add ▸ AI Brain (Machine \| Goals)** | [AI Brain mode](ai-brains.md) | linked from a Controller |
 | **Particle System** | `.vfx` | **+ Add ▸ Particle System**, or **Create asset from this effect** on a Particle System node | [Particle System mode](modes.md) | linked from a Particle System node, which embeds a copy |
 | **Tileset** | `.tileset` | **+ Add** (pick an atlas) | Tileset mode | tilemap layers, sprites |
@@ -172,10 +172,14 @@ textures and impostor; an FX asset as a particle system and its flipbook texture
 heightmap and mask textures (apply the heightmap with **Import heightmap ▸ From Creator** on a
 landscape). They follow every change made in the Creator, live.
 
+Motion assets, Characters and Poses arrive the same way: as animations on their skeleton's rig in
+`/Creator/Motion` and `/Creator/Characters`, and as pose assets in `/Creator/Poses`.
+
 The folder is read-only. Renaming, moving or deleting inside it is refused with a note, because the
-next sync would undo it. Duplicate an asset into another folder to make a copy of your own. When an
-asset is deleted in the Creator, a project that uses it keeps it, in `/Creator/Removed`; otherwise it is
-removed.
+next sync would undo it. Duplicate an asset into another folder to make a copy of your own. The one
+exception is a clip's [events](animation.md#events-on-the-clip): the Creator does not author them, so
+they are placed in the editor and kept across every sync. When an asset is deleted in the Creator, a
+project that uses it keeps it, in `/Creator/Removed`; otherwise it is removed.
 
 ## Storage
 

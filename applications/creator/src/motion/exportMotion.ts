@@ -8,7 +8,8 @@ import type { BakedClip } from './bakeMotion';
 import { motionDuration, type MotionDoc } from './motionDoc';
 import type { SkinLike } from './motionRig';
 
-const fileStem = (name: string) => name.trim().replace(/\s+/g, '_') || 'motion';
+/** A file name stem from an asset name: whitespace to `_`; nothing left: `fallback`. */
+export const fileStem = (name: string, fallback = 'untitled') => name.trim().replace(/\s+/g, '_') || fallback;
 
 /** A skin as the engine holds it: {@link SkinLike} plus the bind matrices and root a stored skin carries. */
 export type ExportSkin = Omit<SkinLike, 'joints'> & {
@@ -34,12 +35,16 @@ export function storedSkin(skin: ExportSkin) {
   };
 }
 
-export function exportMotion(doc: MotionDoc, clip: BakedClip, skin: ExportSkin, rigName = 'Mannequin'): ExportFile[] {
-  const stem = fileStem(doc.name);
-  const anim = { clips: [{ ...clip, name: doc.name }], sourceSkin: storedSkin(skin), rigName };
+/**
+ * The files for a motion. `name` names the clip and the files: the library asset's name (a scratch motion
+ * is `untitled`); by default the document's own.
+ */
+export function exportMotion(doc: MotionDoc, clip: BakedClip, skin: ExportSkin, rigName = 'Mannequin', name = doc.name): ExportFile[] {
+  const stem = fileStem(name);
+  const anim = { clips: [{ ...clip, name }], sourceSkin: storedSkin(skin), rigName };
   const out: ExportFile[] = [{ name: `${stem}.anim.json`, mime: 'application/json', bytes: new TextEncoder().encode(JSON.stringify(anim)) }];
   const json = sidecar('motion', doc, doc.seed, {
-    name: doc.name,
+    name,
     anim: `${stem}.anim.json`,
     rig: rigName,
     duration: clip.samplers[0]?.input.at(-1) ?? motionDuration(doc),
@@ -47,7 +52,6 @@ export function exportMotion(doc: MotionDoc, clip: BakedClip, skin: ExportSkin, 
     loop: doc.loop,
     poses: doc.poses.length,
     keys: doc.keys.length,
-    events: clip.events ?? [],
   });
   out.push({ ...json, name: `${stem}.motion.json` });
   return out;

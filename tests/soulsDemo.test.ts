@@ -7,7 +7,7 @@ import SoulsGameManagerNode from '../examples/scripts/SoulsGameManager';
 import SoulsPlayerNode from '../examples/scripts/SoulsPlayer';
 import SoulsEnemyNode from '../examples/scripts/SoulsEnemy';
 import SoulsWeaponNode from '../examples/scripts/SoulsWeapon';
-import SoulsStraightSwordNode from '../examples/scripts/SoulsStraightSword';
+import SoulsLongswordNode from '../examples/scripts/SoulsLongsword';
 import SoulsGreatswordNode from '../examples/scripts/SoulsGreatsword';
 import SoulsHollowNode from '../examples/scripts/SoulsHollow';
 import SoulsHollowSorcererNode from '../examples/scripts/SoulsHollowSorcerer';
@@ -69,15 +69,16 @@ describe('stat curves (the player owns them)', () => {
 });
 
 describe('attack rating (each weapon owns its own)', () => {
-    const sword = () => new SoulsStraightSwordNode('Straight Sword');
+    const sword = () => new SoulsLongswordNode('Longsword');
     const greatsword = () => new SoulsGreatswordNode('Greatsword');
 
     it('is the base damage at stat 10', () => {
-        expect(sword().attackRating(10, 10)).toBe(100);
+        expect(sword().attackRating(10, 10)).toBe(112);
     });
 
-    it('scales with the stat the weapon favours', () => {
-        expect(sword().attackRating(10, 30)).toBeGreaterThan(sword().attackRating(30, 10));
+    it('scales with the stat the weapon favours (the Longsword with both alike)', () => {
+        expect(sword().attackRating(10, 30)).toBe(sword().attackRating(30, 10));
+        expect(sword().attackRating(30, 30)).toBeGreaterThan(sword().attackRating(30, 10));
         expect(greatsword().attackRating(30, 10)).toBeGreaterThan(greatsword().attackRating(10, 30));
     });
 
@@ -94,14 +95,14 @@ describe('attack rating (each weapon owns its own)', () => {
 
     it('turns a move into damage from the WIELDER\'s stats', () => {
         const w = sword();
-        expect(w.hitFor({ strength: 10, dexterity: 10 } as any, { damageMul: 1.5, poiseMul: 2 })).toEqual({ damage: 150, poise: 30 });
+        expect(w.hitFor({ strength: 10, dexterity: 10 } as any, { damageMul: 1.5, poiseMul: 2 })).toEqual({ damage: 168, poise: 40 });
         expect(w.hitFor({ strength: 10, dexterity: 30 } as any, { damageMul: 1 }).damage).toBe(w.attackRating(10, 30));
     });
 
     it('the subclass is only defaults: every behaviour is the base weapon\'s', () => {
         const w = sword();
         expect(w).toBeInstanceOf(SoulsWeaponNode);
-        expect([w.displayName, w.baseDamage, w.isWeapon]).toEqual(['Straight Sword', 100, true]);
+        expect([w.displayName, w.baseDamage, w.isWeapon]).toEqual(['Longsword', 112, true]);
         expect(new SoulsWeaponNode('Weapon').displayName).toBe('Weapon');
     });
 });
@@ -129,7 +130,7 @@ describe('enemy types own their stats', () => {
     });
 
     it('the player is on the other team', () => {
-        expect([pl().team, pl().weaponTemplates]).toEqual(['player', ['Straight Sword', 'Greatsword']]);
+        expect([pl().team, pl().weaponTemplates]).toEqual(['player', ['Longsword', 'Greatsword']]);
     });
 });
 
@@ -238,7 +239,7 @@ describe('the player', () => {
 
 describe('weapons', () => {
     it('finds its moves by node name', () => {
-        const weapon = new SoulsWeaponNode('Weapon_StraightSword');
+        const weapon = new SoulsWeaponNode('Weapon_Longsword');
         const light = new SoulsMoveNode('Light1');
         weapon.addChild(light);
         weapon.addChild(new Node('Mesh'));

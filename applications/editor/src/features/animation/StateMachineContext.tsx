@@ -3,7 +3,7 @@ import { useCleoEngine } from '../EngineContext'
 import type {
   AnimationStateMachine, AnimationParameter, AnimationState,
   AnimationTransition, AnimationCondition, AnimationConditionGroup, AnimationConditionNode,
-  AnimationEventMarker, AnimationParameterType, AnimationLayer, AnimationSlotDef,
+  AnimationParameterType, AnimationLayer, AnimationSlotDef,
 } from 'cleo'
 import { isConditionGroup } from 'cleo'
 import { getAnimationTarget, accessibleNodeVariables, AccessibleVariable, AnimationTarget } from './skeleton'
@@ -14,6 +14,8 @@ import {
 } from '../../utils/animationControllers'
 import type { BoneMaskAsset } from '../../utils/boneMasks'
 import type { PoseAsset } from '../../utils/poseAssets'
+import { liftMachineEvents } from '../../utils/clipEvents'
+import { toast } from '@cleo/app-kit/feedback/toastStore'
 
 // Shared editing session for the Animation State Machine: the node-graph and the sidebar inspector edit the
 // SAME machine, so the working copy `sm`, the selection, the view toggle and every mutator live here.
@@ -119,10 +121,6 @@ interface StateMachineContextValue {
   removeNode: (from: string, to: string, path: CondPath) => void
   setTransitionCondition: (from: string, to: string, next: AnimationConditionGroup) => void
 
-  addEvent: (e?: Partial<AnimationEventMarker>) => void
-  setEvent: (i: number, patch: Partial<AnimationEventMarker>) => void
-  removeEvent: (i: number) => void
-
   renameClip: (oldName: string, typed: string) => void
   deleteClip: (name: string) => void
   importAnimationFiles: (files: File[]) => void
@@ -221,7 +219,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     scriptAssets, markTabDirty, clearTabDirty, registerAnimationApply, bodies, editSharedClip,
     adoptModelAsset, resolveModelAssetId,
   } = useCleoEngine()
-  const { animationFields, boneMasks, poseAssets, animControllers, addAnimController, updateAnimController, models } = useAssetLibrary()
+  const { animations, animationFields, boneMasks, poseAssets, animControllers, addAnimController, updateAnimController, models } = useAssetLibrary()
 
   const target = getAnimationTarget(editorScene, stateMachineTargetId)
   const hasBoneNames = !!(target && target.skin.nodeNames && target.skin.nodeNames.size > 0)
@@ -266,7 +264,21 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     const linked = live?.controllerId ? animControllers.find(c => c.id === live.controllerId) : undefined
     const fromNode: AnimationStateMachine | null = linked ? { ...clone(linked.machine), controllerId: linked.id } : live
     const existing: AnimationStateMachine | null = smCacheRef.current.get(activeTabId) ?? fromNode
-    setSm(existing ? migrateConditions(clone(existing)) : clone(EMPTY))
+    let loaded = existing ? migrateConditions(clone(existing)) : clone(EMPTY)
+    // Events belong to clips now. Markers the machine still holds move onto the `.anim` of the clip they name
+    // — written at once, like every clip-event edit — and leave the working copy, which is then unsaved: the
+    // engine fires both, so until the animator is saved a moved marker fires twice. A clip embedded in the
+    // model has no asset to hold one, so its markers stay (and still fire).
+    const lifted = liftMachineEvents(loaded, new Map(target.model.animations.map(a => [a.name, a.assetId])), animations)
+    if (lifted.moved) {
+      for (const c of lifted.clips) editSharedClip(c.assetId, c.clipName, { events: c.events })
+      loaded = lifted.machine
+      smCacheRef.current.set(activeTabId, loaded)
+      markTabDirty(activeTabId, 'anim-sm-edit')
+      toast.info(`Moved ${lifted.moved} event${lifted.moved === 1 ? '' : 's'} onto ${lifted.moved === 1 ? 'its clip' : 'their clips'}. Save the animator to finish.`,
+        { title: 'Events are on the clips now' })
+    }
+    setSm(loaded)
     setActiveLayerState(0)
     const entry = existing?.states.find((s: AnimationState) => s.isEntry)?.name ?? existing?.states[0]?.name ?? null
     setSelection(entry ? { kind: 'state', name: entry } : null)
@@ -597,14 +609,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     editCondition(from, to, path, () => null)
   }
 
-  // ---- Events (authored on the timeline; the sidebar only renames and deletes them) ----
-  const addEvent = (e?: Partial<AnimationEventMarker>) =>
-    update(prev => ({ ...prev, events: [...prev.events, { clipName: clips[0] ?? '', time: 0, eventName: 'event', ...e }] }))
-  const setEvent = (i: number, patch: Partial<AnimationEventMarker>) =>
-    update(prev => ({ ...prev, events: prev.events.map((e, idx) => idx === i ? { ...e, ...patch } : e) }))
-  const removeEvent = (i: number) => update(prev => ({ ...prev, events: prev.events.filter((_, idx) => idx !== i) }))
-
-  // ---- Clips (rename / delete on the model, keeping state/event references in sync) ----
+  // ---- Clips (rename / delete on the model, keeping state references — and any legacy markers — in sync) ----
   const renameClip = (oldName: string, typed: string) => {
     const next = typed.trim()
     if (!next || next === oldName) return
@@ -670,7 +675,6 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     addState, setState, removeState, stateIndex, commitLayout, deleteElements,
     links, linkOf, addTransition, setTransition, removeTransition, removeLink,
     addCondition, addGroup, setCondition, setGroupOp, removeNode, setTransitionCondition,
-    addEvent, setEvent, removeEvent,
     renameClip, deleteClip,
     importAnimationFiles, importSkeletonNames, closeTab, activeTabId,
   }
