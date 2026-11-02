@@ -76,6 +76,9 @@ const CLIPS = [
   ['Standing Taunt Battlecry.fbx', 'Souls_Battlecry', 'taunt'],
   ['Dying.fbx', 'Souls_Dying', 'death'],
   ['Run With Sword.fbx', 'Souls_RunWithSword', 'move'],
+  // A run that plants and turns round (in place; the script drives the travel): the player's reversal at a
+  // run (SoulsPlayer runTurn). The Valley adds its mirror, Souls_RunTurn180L, for a turn the other way.
+  ['Locomotion Pack/Running Turn 180.fbx', 'Souls_RunTurn180', 'move'],
 ]
 
 /** Hand-pinned marker times (seconds) where the measured ones are wrong. `{ clip: { hit: [..] } }`. */

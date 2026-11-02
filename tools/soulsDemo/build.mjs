@@ -215,6 +215,11 @@ const placeholderClips = buildPlaceholderClips(mannequinModelJson.skin, idleClip
  * placeholder it replaces, so the placeholder of that name is dropped; the rest are new.
  */
 const importedClips = readJson(path.join(HERE, 'soulsClips.json'))
+// The running 180° turn turns one way; its mirror (a clip edit, applied when the clip loads) the other.
+{
+  const turn = importedClips.find(c => c.name === 'Souls_RunTurn180')
+  if (turn) importedClips.push({ ...turn, name: 'Souls_RunTurn180L', edits: [{ kind: 'mirror' }] })
+}
 const importedNames = new Set(importedClips.map(c => c.name))
 /**
  * The Longsword's moveset and the combat stance, made in the Motion Creator: longsword/*.motion.json,

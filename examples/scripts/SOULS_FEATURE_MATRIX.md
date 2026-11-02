@@ -74,6 +74,7 @@ script (`Souls*.ts`), or the scene.
 | Skinned models with an animator | ✅ | The mannequin on every character. |
 | State machine with built-in parameters | ✅ | Three states, `planarSpeed`/`planarAngle`, and the `Died`/`Revive` triggers. |
 | 2D blend space (`.afield`) | ✅ | "Souls Locomotion", with a sprint sample. |
+| Running 180° turn | ✅ | Reversing at a run plants and turns round (`Souls_RunTurn180` and its mirror, `SoulsPlayer.runTurn*`). |
 | Action slots (`playAction`) | ✅ | Every attack, roll, drink and reaction. |
 | Clip events (`onAnimationEvent`) | ✅ | Hit, combo, recover, drink and cast timing. |
 | Bone sockets | ✅ | Weapons via `socketAttachment`; bolt origin via `getSocketWorldMatrix`. |

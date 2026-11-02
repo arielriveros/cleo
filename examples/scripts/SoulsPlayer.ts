@@ -28,6 +28,7 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  * ## The action state machine
  *
  *   free ──LightAttack/HeavyAttack──▶ attack ──combo window + buffered press──▶ attack (next move)
+ *     │  ──running, stick reversed─▶ runTurn (plant, turn round, run back) ──▶ free
  *     │  ──Roll (tap)──────────────▶ roll / backstep (no stick)
  *     │  ──UseItem─────────────────▶ drink
  *     │  ──SwapWeapon──────────────▶ swap
@@ -121,6 +122,19 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public rollRootMotion: boolean = true
   /** Playback speed of the roll clip when it drives the roll (the download is a slow, full dive). */
   public rollPlaySpeed: number = 1.5
+  // ----- running turn (see _startRunTurn) --------------------------------------------------------
+  /** Reversing at a run plays a planted 180° turn instead of spinning on the spot. Off: the plain turn. */
+  public runTurnEnabled: boolean = true
+  /** Degrees between where the player is running and where the stick now points that count as reversing. */
+  public runTurnAngle: number = 130
+  /** Running at least this fast (m/s); a walker just turns. */
+  public runTurnMinSpeed: number = 3
+  /** Playback speed of the turn clip. */
+  public runTurnPlaySpeed: number = 1.2
+  /** Share of the turn spent braking to a stop before pushing off the other way. */
+  public runTurnPlant: number = 0.45
+  /** Which way the clip itself turns; its mirror (`runTurnMirrorClip`) turns the other way. */
+  public runTurnClipTurnsRight: boolean = true
   public backstepCost: number = 12
   public backstepSeconds: number = 0.45
   public backstepInvulnEnd: number = 0.22
@@ -147,6 +161,9 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   // ----- clip names (swap these when the final animations arrive) ---------------------------------
   public rollClip: ClipName = 'Souls_Roll'
+  /** The running 180° turn, and its mirror for turning the other way. */
+  public runTurnClip: ClipName = 'Souls_RunTurn180'
+  public runTurnMirrorClip: ClipName = 'Souls_RunTurn180L'
   public backstepClip: ClipName = 'Souls_Backstep'
   public drinkClip: ClipName = 'Souls_Drink'
   /** Fallback seconds into the drink clip at which the heal starts when it has no `drink` event. */
@@ -204,6 +221,12 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   private _rollHeld: number = -1
   /** Seconds the current root-motion roll lasts (0: the timed roll). */
   private _rollLength: number = 0
+  /** The running turn under way: its length, the speed it came in at, the way out, and the yaw it ends facing. */
+  private _runTurnLength: number = 0
+  private _runTurnSpeed: number = 0
+  private _runTurnOut: number[] = [0, 0, 1]
+  private _runTurnYaw: number = 0
+  private _runTurnDone: boolean = true
   private _frameDelta: number = 1 / 60
   private _sprintedThisHold: boolean = false
   private _sinceSpend: number = 99
@@ -478,6 +501,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
       case 'free': this._free(intent, delta); break
       case 'attack': this._attack(intent, delta); break
       case 'roll': this._roll(intent); break
+      case 'runTurn': this._runTurn(intent); break
       case 'backstep': this._backstep(intent); break
       case 'drink': this._drink(intent); break
       case 'swap': this._swap(intent); break
@@ -543,6 +567,13 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     if (this.isSprinting) {
       this.stamina = Math.max(0, this.stamina - this.sprintCostPerSecond * delta)
       this._sinceSpend = 0
+    }
+
+    // Reversing at a run: a planted turn rather than a spin on the spot. Not locked on and strafing, where
+    // pulling the stick back is a backpedal.
+    if (moving && !(target && !this.isSprinting) && this._wantsRunTurn(intent)) {
+      this._startRunTurn(intent)
+      return
     }
 
     if (target && !this.isSprinting) {
@@ -659,6 +690,78 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     const speed = t < this.rollFastSeconds ? this.rollSpeed : (t < this.rollSeconds * 0.85 ? this.rollSlowSpeed : 0)
     this._driveMotion(intent, this._motionDir, speed)
     if (t >= this.rollSeconds) this._enter('free')
+  }
+
+  /** Running fast enough, on the ground, with the stick pointed back the way the player came. */
+  private _wantsRunTurn(intent: any): boolean {
+    if (!this.runTurnEnabled || this.inWater || !this.isGrounded) return false
+    const v = this.velocity
+    const speed = Math.hypot(v[0], v[2])
+    if (speed < this.runTurnMinSpeed) return false
+    const dir = moveWorldDirection([0, 0, 0] as any, intent)
+    const len = Math.hypot(dir[0], dir[2])
+    if (len < 0.2) return false
+    const cos = (v[0] * dir[0] + v[2] * dir[2]) / (speed * len)
+    if (cos > Math.cos(this.runTurnAngle * Math.PI / 180)) return false
+    return !!this._findClip(this.runTurnClip)
+  }
+
+  /**
+   * A running 180° turn: the body brakes along the way it was running, plants, and pushes off the way the
+   * stick points, while the clip turns the character round. The clip turns the MESH (its hips) and the node
+   * keeps its yaw throughout; at the end the node snaps round to face the new way and the clip is cut with
+   * no blend, so the run that follows takes over from a pose that already faces that way.
+   */
+  private _startRunTurn(intent: any): void {
+    const v = this.velocity
+    const speed = Math.hypot(v[0], v[2])
+    const dir = moveWorldDirection([0, 0, 0] as any, intent)
+    const len = Math.hypot(dir[0], dir[2]) || 1
+    this._motionDir = [v[0] / speed, 0, v[2] / speed]
+    this._runTurnOut = [dir[0] / len, 0, dir[2] / len]
+    this._runTurnSpeed = speed
+    // Turn toward the side the stick went. Yaw is atan2(x, z), so turning right lowers it: the way out is to the
+    // right when this cross product is negative. Straight back turns right.
+    const cross = this._motionDir[2] * this._runTurnOut[0] - this._motionDir[0] * this._runTurnOut[2]
+    const right = cross <= 0
+    const clip = right === this.runTurnClipTurnsRight || !this._findClip(this.runTurnMirrorClip) ? this.runTurnClip : this.runTurnMirrorClip
+    // The clip turns the body a half turn whatever the stick's exact angle: end facing exactly round from where
+    // the run was going, and let the run's own facing turn the last few degrees toward the stick.
+    const f = this.worldForward
+    this._runTurnYaw = Math.atan2(f[0], f[2]) * 180 / Math.PI + (right ? -180 : 180)
+    this.facingMode = 'none'
+    this._enter('runTurn')
+    this._runTurnDone = false
+    const animator = this._model?.animator as any
+    this._clip = clip
+    this._clipLength = this._clipDuration(clip)
+    // No blend out: the node turns round on the frame the clip ends, and the run must not blend toward the
+    // old facing meanwhile.
+    animator?.playAction?.(clip, { speed: this.runTurnPlaySpeed, loop: false, blendIn: this.actionBlendIn, blendOut: 0, ikWeight: 1 })
+    this._runTurnLength = this._clipLength > 0 ? this._clipLength / this.runTurnPlaySpeed : 0.5
+  }
+
+  private _runTurn(intent: any): void {
+    const t = this._stateTime, length = this._runTurnLength
+    const plant = Math.min(0.9, Math.max(0.1, this.runTurnPlant)) * length
+    if (t < plant) {
+      this._driveMotion(intent, this._motionDir, this._runTurnSpeed * (1 - t / plant))
+    } else {
+      // Pushing off the other way, up to the speed the player is asking for.
+      const out = this.isSprinting ? this.sprintSpeed : this.jogSpeed
+      this._driveMotion(intent, this._runTurnOut, out * Math.min(1, (t - plant) / Math.max(1e-3, length - plant)))
+    }
+    if (t >= length) { this._finishRunTurn(true); this._enter('free') }
+  }
+
+  /** End the turn: face the new way if the turn got far enough to show it, and cut the clip there. */
+  private _finishRunTurn(turned: boolean): void {
+    if (this._runTurnDone) return
+    this._runTurnDone = true
+    if (turned) {
+      this.setRotation([0, this._runTurnYaw, 0])
+      this._stopAction(0)
+    }
   }
 
   private _backstep(intent: any): void {
@@ -1058,6 +1161,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   }
 
   private _enter(state: string): void {
+    // Leaving a running turn early (a hit, a roll): past halfway the body is drawn facing the new way already.
+    if (this.actionState === 'runTurn' && state !== 'runTurn') this._finishRunTurn(this._stateTime >= this._runTurnLength / 2)
     if (state !== 'attack') closeSwing(this._swing)
     this.actionState = state
     this._stateTime = 0

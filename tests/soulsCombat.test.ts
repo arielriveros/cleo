@@ -831,3 +831,49 @@ describe('the imported combat clips in the scripts', () => {
         expect(played).toEqual([hollow.tauntClip]);       // once per life
     });
 });
+
+describe('the running 180° turn', () => {
+    /** A player running at `speed` along -Z, with a stub animator that records what it was asked to play. */
+    function runner(speed: number, grounded = true) {
+        const p = new SoulsPlayerNode('Player') as any;
+        const played: string[] = [], stopped: number[] = [];
+        let v: V3 = [0, 0, -speed];
+        Object.defineProperty(p, 'velocity', { get: () => v, set: (x: V3) => { v = x; }, configurable: true });
+        Object.defineProperty(p, 'isGrounded', { get: () => grounded, configurable: true });
+        p._findClip = (name: string) => name.startsWith('Souls_RunTurn180');
+        p._clipDuration = () => 0.6;
+        p._model = { animator: { playAction: (clip: string) => played.push(clip), stopAction: (_c: unknown, blend: number) => stopped.push(blend), consumeRootMotion: () => null } };
+        p.setRotation([0, 180, 0]);
+        return { p, played, stopped };
+    }
+    /** The controller's intent with the stick pointing along world (x, z). */
+    const stick = (x: number, z: number) => ({ move: [x === 0 ? 0 : -x, z], basisYaw: 0, sprint: false, speedScale: 1 } as any);
+
+    it('plants and turns round when the stick reverses at a run, toward the side it went', () => {
+        const { p, played } = runner(4);
+        p._free(stick(0.3, 1), 1 / 60);            // back, and a little to one side
+        expect(p.actionState).toBe('runTurn');
+        expect(played).toHaveLength(1);
+        const other = runner(4);
+        other.p._free(stick(-0.3, 1), 1 / 60);
+        expect(other.played[0]).not.toBe(played[0]);   // the other side plays the mirror
+    });
+
+    it('does not for a walk, in the air, or for a turn of less than the reversal angle', () => {
+        const walk = runner(2); walk.p._free(stick(0, 1), 1 / 60);
+        const air = runner(4, false); air.p._free(stick(0, 1), 1 / 60);
+        const side = runner(4); side.p._free(stick(1, 0), 1 / 60);
+        for (const r of [walk, air, side]) { expect(r.p.actionState).toBe('free'); expect(r.played).toHaveLength(0); }
+    });
+
+    it('ends facing the new way with the clip cut, then runs on freely', () => {
+        const { p, stopped } = runner(4);
+        p._free(stick(0, 1), 1 / 60);
+        const length = p._runTurnLength;
+        for (let t = 0; t < length + 0.05; t += 1 / 60) { p._stateTime += 1 / 60; p._runTurn(stick(0, 1)); if (p.actionState !== 'runTurn') break; }
+        expect(p.actionState).toBe('free');
+        const f = p.worldForward;
+        expect(Math.abs(Math.atan2(f[0], f[2]) * 180 / Math.PI)).toBeLessThan(1e-3);   // a half turn from 180
+        expect(stopped).toEqual([0]);
+    });
+});
