@@ -103,6 +103,7 @@ const SCRIPT_FILES = [
   ['Banner', 'SoulsBanner', 'uiRoot'],
   ['Bonfire Menu', 'SoulsBonfireMenu', 'uiRoot'],
   ['Confirm Dialog', 'SoulsConfirmDialog', 'uiRoot'],
+  ['Pause Menu', 'SoulsPauseMenu', 'uiRoot'],
   // A script MODULE (shared helpers, no class). Named after its FILE: the explorer path is the import
   // path, so the scripts' `import … from './SoulsMath'` resolves to /Scripts/SoulsMath.script.
   ['SoulsMath', 'SoulsMath', 'node'],
@@ -1382,7 +1383,7 @@ function playerNode(model = null) {
   // ORDER: the camera rig before the controller (the controller finds the first rig in the subtree).
   // `Weapons` starts empty: SoulsPlayer spawns its `weaponTemplates` into it on start. The player's UI —
   // its HUD, its level-up menu, its lock-on reticle — is the PLAYER's: children of it, in its template.
-  player.children = [rigNode, model, group('player:weapons', 'Weapons', []), hurtboxNode('player', 'player', 0.3, 1.78), hud(), bonfireMenu(), confirmDialog(), lockReticle(), soundsGroup('player', SOUNDS.player), controller]
+  player.children = [rigNode, model, group('player:weapons', 'Weapons', []), hurtboxNode('player', 'player', 0.3, 1.78), hud(), bonfireMenu(), confirmDialog(), pauseMenu(), lockReticle(), soundsGroup('player', SOUNDS.player), controller]
   return player
 }
 
@@ -2193,6 +2194,22 @@ function confirmDialog() {
   return withScript(screenRoot('ConfirmDialog', 'confirm', [backdrop], { visible: false }, { zOrder: 45 }), 'SoulsConfirmDialog')
 }
 
+/** The pause menu (P, Escape or Start). See SoulsPauseMenu. Above every other menu. */
+function pauseMenu() {
+  const button = (key, name, label, r) => uiNode(name, 'uiButton', {
+    ...r, label, disabled: false, tint: [0.18, 0.15, 0.12, 1], hoverTint: [1, 1, 1, 0.16], pressedTint: [0, 0, 0, 0.22],
+    disabledTint: [0.5, 0.5, 0.5, 0.4], interactive: true, borderRadius: 4,
+  }, { id: stableId(`ui:${key}`) })
+  const card = panel('pause:card', 'Card', rect([0.5, 0.5], [-300, -190], [300, 190]), [0.05, 0.045, 0.04, 0.94], [
+    text('pause:title', 'Title', 'PAUSED', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [0, 28], offsetMax: [0, 88] }, { size: 44, align: 'center', tint: GOLD }),
+    button('pause:resume', 'Resume', 'Resume', { anchorMin: [0.5, 0], anchorMax: [0.5, 0], offsetMin: [-180, 120], offsetMax: [180, 172] }),
+    button('pause:bonfire', 'Bonfire', 'Return to Bonfire', { anchorMin: [0.5, 0], anchorMax: [0.5, 0], offsetMin: [-180, 188], offsetMax: [180, 240] }),
+    text('pause:hint', 'Hint', 'P / Esc / Start resume · enemies respawn when you return to the bonfire', { anchorMin: [0, 1], anchorMax: [1, 1], offsetMin: [24, -96], offsetMax: [-24, -24] }, { size: 17, align: 'center', tint: DIM, vAlign: 'top' }),
+  ], { radius: 8 })
+  const backdrop = panel('pause:backdrop', 'Backdrop', stretch(0), [0, 0, 0, 0.55], [card], { interactive: true })
+  return withScript(screenRoot('PauseMenu', 'pause', [backdrop], { visible: false }, { zOrder: 60 }), 'SoulsPauseMenu')
+}
+
 function lockReticle() {
   const dot = panel('reticle:dot', 'Dot', stretch(0), [1, 1, 1, 0.9], [], { radius: 7 })
   return uiNode('LockReticle', 'uiRoot', {
@@ -2389,7 +2406,7 @@ const FOLDERS = {
     SoulsMath: '/Core/Scripts', SoulsHitbox: '/Core/Scripts', SoulsAudio: '/Core/Scripts', SoulsCharacter: '/Core/Scripts',
     'Game Manager': '/Game/Scripts',
     HUD: '/Game/UI/Scripts', 'Boss Bar': '/Game/UI/Scripts', Banner: '/Game/UI/Scripts', 'Bonfire Menu': '/Game/UI/Scripts',
-    'Confirm Dialog': '/Game/UI/Scripts',
+    'Confirm Dialog': '/Game/UI/Scripts', 'Pause Menu': '/Game/UI/Scripts',
     'Scene Door': `${PROP('Scene Door')}/Scripts`, Breakable: `${PROP('Breakable Barrel')}/Scripts`, Debris: `${PROP('Breakable Barrel')}/Scripts`,
     Player: `${PLAYER}/Scripts`, 'Lock-On Camera': `${PLAYER}/Scripts`,
     SoulsEnemy: `${ENEMY('Base Enemy')}/Scripts`, 'Enemy Attack': `${ENEMY('Base Enemy')}/Scripts`,

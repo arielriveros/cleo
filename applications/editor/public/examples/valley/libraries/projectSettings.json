@@ -1,1 +1,1 @@
-{"engine":{"simulationRange":90,"physicsWorker":"auto"}}
+{"version":2,"engine":{"simulationRange":90,"physicsWorker":"on"}}

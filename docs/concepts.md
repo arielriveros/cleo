@@ -131,7 +131,8 @@ and animation share one clock and movement covers the same ground at 20 fps as a
 > in the background does not resume with a single enormous step that tunnels every body through the
 > floor. A frame slower than that slows the whole game evenly rather than only the bodies. The two
 > clocks diverge permanently after that; use `Game.time` when you need "how long has this game been
-> running".
+> running". `Game.timeScale` and hit-stops slow game time further; see
+> [Time scale and hit-stop](scripting/lifecycle.md#time-scale-and-hit-stop).
 
 ## Coordinate and sign conventions
 

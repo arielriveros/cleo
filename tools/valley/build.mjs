@@ -1920,7 +1920,7 @@ const result = souls.writeProject({
   // simulating against the terrain. The player opts out (simulationMode 'always').
   // The physics step goes to a worker once it is heavy enough to pay (measured on the Valley 2026-11-02:
   // main-thread physics 4.1 ms -> 1.5 ms a frame, no late steps; docs/reference/physics-threading.md).
-  projectSettings: { engine: { simulationRange: 90, physicsWorker: 'auto' } },
+  projectSettings: { version: 2, engine: { simulationRange: 90, physicsWorker: 'on' } },
   // A message's glyph is tuned for Hollow Keep's dusk exposure; under the valley's noon it burned white. It
   // takes a tenth of the exposure (GLOW_EXPOSURE_WEIGHT), so this is how it reads at noon, a little hotter
   // at night and underground.

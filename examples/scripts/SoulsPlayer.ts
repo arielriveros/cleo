@@ -133,6 +133,9 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public inputBufferSeconds: number = 0.3
   /** A hit at or above this much damage is a heavy stagger with knockback; below, a flinch. */
   public heavyHitThreshold: number = 150
+  /** Real seconds of hit-stop when a hit lands on the player (the GameManager's), light and heavy. */
+  public hurtHitStop: number = 0.08
+  public heavyHurtHitStop: number = 0.14
   public hitLightSeconds: number = 0.45
   /** A swing that meets a wall (a `blocksSwings` body) before any enemy bounces off it for this long. */
   public recoilSeconds: number = 0.45
@@ -324,6 +327,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   /** Interrupt whatever was happening — a drink included, which is the souls tax on greedy healing. */
   protected _onDamaged(dealt: number, poiseDamage: number, from: Node): void {
     const heavy = dealt >= this.heavyHitThreshold
+    ;(this._gm as any)?.hitStop?.(heavy ? this.heavyHurtHitStop : this.hurtHitStop)
     this._sinceBlow = 0
     this._stopAction()
     this._motionDir = from ? this._dirFrom(from.worldPosition) : this._forward(-1)

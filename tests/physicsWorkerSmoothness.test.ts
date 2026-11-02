@@ -42,12 +42,12 @@ function rig(mode: 'inline' | 'worker', options: { gravity?: number; fixedRotati
     return { p, hero, port };
 }
 
-/** One engine frame: physics, the transform pass, the "scripts", the frame's end. */
-function frame(r: Rig, dt: number, script?: () => void): void {
-    r.p.update(dt);
+/** One engine frame: physics, the transform pass, the "scripts", the frame's end. `scale`/`next`: the engine's time scale this frame and next. */
+function frame(r: Rig, dt: number, script?: () => void, scale = 1, next = 1): void {
+    r.p.update(dt, scale);
     r.hero.updateTransforms();
     script?.();
-    r.p.endFrame(dt);
+    r.p.endFrame(dt, next);
 }
 
 /** Drive at constant speed; the on-screen speed error per frame, relative to the speed. */
@@ -55,7 +55,9 @@ function drawnSpeedError(r: Rig, dts: number[]): { rms: number; worst: number } 
     const xs: number[] = [];
     for (const dt of dts) frame(r, dt, () => { xs.push(r.hero.worldPosition[0]); r.hero.velocity = [SPEED, 0, 0]; });
     const errs: number[] = [];
-    for (let k = 20; k < dts.length; k++) errs.push(((xs[k] - xs[k - 1]) / dts[k] - SPEED) / SPEED);
+    // From frame 80: the worker's drawing settles one frame behind the clock over its first second (at most
+    // 2% slow), which is what a game sees once, when the step moves to the worker.
+    for (let k = 80; k < dts.length; k++) errs.push(((xs[k] - xs[k - 1]) / dts[k] - SPEED) / SPEED);
     return { rms: Math.sqrt(errs.reduce((s, e) => s + e * e, 0) / errs.length), worst: Math.max(...errs.map(Math.abs)) };
 }
 
@@ -83,7 +85,8 @@ describe('drawing a body stepped in the worker', () => {
         const uneven = drawnSpeedError(r, UNEVEN);
         expect((r.p as any)._backend.lateFrames).toBeGreaterThan(15);
         expect(uneven.worst).toBeLessThan(0.08);
-        expect(drawnSpeedError(rig('worker', { delayFor: late }), STEADY).worst).toBeLessThan(1e-3);
+        // Steady frames: a late step moves the drawn time a little further behind, at most 2% slow meanwhile.
+        expect(drawnSpeedError(rig('worker', { delayFor: late }), STEADY).worst).toBeLessThan(0.025);
     });
 
     it('lets scripts read the body at this frame’s time, as inline', () => {
@@ -192,7 +195,9 @@ describe('handing the step to the worker', () => {
         for (let i = 0; i < 40; i++) frame(r, 1 / 60, () => { xs.push(r.hero.worldPosition[0]); kinds.push(r.p.backend); r.hero.velocity = [SPEED, 0, 0]; });
         expect(kinds[5]).toBe('inline');
         expect(kinds[39]).toBe('worker');
-        for (let k = 3; k < xs.length; k++) expect(xs[k] - xs[k - 1], `frame ${k}`).toBeCloseTo(SPEED / 60, 3);
+        // The frames before were drawn at the clock (inline); the worker's drawing settles one frame behind
+        // by running at most 2% slow meanwhile — never a frozen or a doubled frame.
+        for (let k = 3; k < xs.length; k++) expect(Math.abs((xs[k] - xs[k - 1]) / (SPEED / 60) - 1), `frame ${k}`).toBeLessThan(0.025);
     });
 
     it('the first step after taking over mid-game covers the frame, like every other', () => {
@@ -211,4 +216,55 @@ describe('handing the step to the worker', () => {
         for (let i = 0; i < 10; i++) frame(r, 1 / 60);
         expect(r.p.backend).toBe('worker');
     });
+});
+
+describe('a hit-stop (the engine time scale dropping for a few frames)', () => {
+    // 1/60 frames at a time scale that drops to 0.2 for six frames, twice: CleoEngine hands physics the
+    // scaled delta, the scale, and the scale the next frame starts at (the hit landed in this frame's scripts).
+    const SCALES = Array.from({ length: 240 }, (_, i) => ((i >= 120 && i < 126) || (i >= 180 && i < 186) ? 0.2 : 1));
+    const run = (r: Rig, xs?: number[]) => SCALES.forEach((s, i) =>
+        frame(r, s / 60, () => { xs?.push(r.hero.worldPosition[0]); r.hero.velocity = [SPEED, 0, 0]; }, s, SCALES[i + 1] ?? 1));
+
+    it('simulates exactly the scaled time, as inline does', () => {
+        const a = rig('inline'), b = rig('worker');
+        run(a); run(b);
+        a.p.update(1 / 60); b.p.update(1 / 60);
+        expect(b.hero.body!.position.x).toBeCloseTo(a.hero.body!.position.x, 4);
+    });
+
+    it('draws the slow-down and the return at the scaled speed, without a jump', () => {
+        const xs: number[] = [];
+        run(rig('worker'), xs);
+        for (let k = 90; k < SCALES.length; k++) {
+            const speed = (xs[k] - xs[k - 1]) / (SCALES[k] / 60);
+            expect(Math.abs(speed - SPEED) / SPEED, `frame ${k}`).toBeLessThan(0.02);
+        }
+    });
+});
+
+describe('results that take more than a frame to come back (a high refresh rate, a busy main thread)', () => {
+    /** Drawn motion under a steering script (speed swinging 2..6 m/s), with every reply `delay` frames late. */
+    function steer(mode: 'inline' | 'worker', hz: number, delay: number): number[] {
+        const r = rig(mode, { delayFor: () => delay });
+        const dt = 1 / hz, xs: number[] = [];
+        for (let i = 0; i < 6 * hz; i++) frame(r, dt, () => { xs.push(r.hero.worldPosition[0]); r.hero.velocity = [4 + 2 * Math.sin(i * dt * 3), 0, 0]; });
+        return xs;
+    }
+    /** How far each frame's drawn step strays from the average of its neighbours, relative to the step: jitter. */
+    function jitter(xs: number[]): number {
+        const d = xs.slice(1).map((x, k) => x - xs[k]);
+        let worst = 0;
+        for (let k = Math.floor(d.length / 3); k < d.length - 1; k++) worst = Math.max(worst, Math.abs(d[k] - (d[k - 1] + d[k + 1]) / 2) / d[k]);
+        return worst;
+    }
+
+    for (const hz of [60, 144]) for (const delay of [1, 2, 3]) {
+        it(`moves as smoothly as inline at ${hz} Hz with replies ${delay} frame(s) after their post`, () => {
+            const inline = jitter(steer('inline', hz, delay));
+            const worker = jitter(steer('worker', hz, delay));
+            // A reply every frame: as smooth as inline. Every second or third frame: the worker only hears the
+            // script's steering that often, so its path really is coarser — but drawn without a stall or a jump.
+            expect(worker).toBeLessThan(Math.max(delay === 1 ? 0.01 : 0.04, 3 * inline));
+        });
+    }
 });

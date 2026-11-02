@@ -205,6 +205,51 @@ Some things deliberately keep working while paused so a pause menu can function:
 solves, and a UI button still responds. A progress bar's smoothing freezes, because it advances in
 `update`.
 
+A paused game runs no `onUpdate`, so a pause menu cannot listen for the key that closes it there.
+Listen in a late update instead, which runs every frame, paused or not:
+
+```ts
+onStart() {
+  this._stop = this.scene.addLateUpdate(() => {
+    if (Input.started('Pause')) Game.togglePause()
+  })
+}
+onDespawn() { this._stop?.() }
+```
+
+## Time scale and hit-stop
+
+`Game.timeScale` sets how fast game time runs: 1 is real time, 0.5 half speed, 0 stops the
+simulation while scripts keep getting `onUpdate` with a delta of 0. It scales everything that
+simulates: physics, timers, `onUpdate`'s delta, `Game.time`, animators, particles, cloth and AI. It
+resets to 1 when a scene loads.
+
+`Game.slowMotion(scale, seconds)` runs at `scale` for `seconds` of **real** time and then eases back.
+`Game.hitStop(seconds = 0.08, scale = 0.2)` is the short version for impacts: when a blow lands, game
+time drops to a fifth for a moment, so the hit reads as heavy without the stutter of a full freeze.
+A hit-stop always holds at least two frames, so it still shows on a slow machine where 0.08 s is a
+single frame. Overlapping calls keep the slower scale and the later end. `Game.clearSlowMotion()` ends
+one early.
+
+```ts
+onHitLanded(heavy: boolean) {
+  Game.hitStop(heavy ? 0.12 : 0.07)
+}
+```
+
+Some things keep real time on purpose, so the game stays responsive through a hit-stop:
+
+| Real time | Why |
+|---|---|
+| Input | An action pressed during slow motion still registers on that frame. |
+| Camera rigs | Damping, collision and shake stay snappy. |
+| UI | Layout and buttons. |
+| Render effects | Foliage wind, clouds, water ripples and shader `u_time` run on the wall clock. |
+| Audio | Sounds play at normal pitch and speed. |
+
+`Game.effectiveTimeScale` is the scale the last frame ran at (the time scale times any slow motion),
+and `Game.unscaledDelta` its real delta. A late update gets both deltas: `(delta, unscaledDelta)`.
+
 ## See also
 
 [Node API](node-api.md) · [Scene and game](scene-and-game.md) · [Core concepts](../concepts.md#the-frame)

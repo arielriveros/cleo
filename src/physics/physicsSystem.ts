@@ -43,6 +43,9 @@ function bodyForward(body: Body, out: vec3): vec3 {
   return out;
 }
 
+/** After the worker fell behind, how long Auto keeps the step on the main thread before trying again. */
+const AUTO_RETRY_SECONDS = 30;
+
 /** Where the physics step may run: see PhysicsSystem.setWorkerMode. */
 export type PhysicsWorkerMode = 'off' | 'on' | 'auto';
 
@@ -165,8 +168,17 @@ export class PhysicsSystem {
   private _visualRotation = this._visualPose.subarray(3, 7);
   private _visualOrigin = new Float64Array(3);
   private _simRotation = new Float64Array(4);
-  /** The auto mode's bookkeeping: seconds watched, the step-time average, and whether it gave up. */
-  private _auto = { watched: 0, stepEma: 0, gaveUp: false, workerWatched: 0, lateAt: 0, postedAt: 0 };
+  /**
+   * The auto mode's bookkeeping: seconds watched, the step-time average, whether it gave up for good (the
+   * worker failed), the late-frame window, how many windows in a row were bad, and when it may try the
+   * worker again after falling behind (seconds watched).
+   */
+  private _auto = PhysicsSystem._freshAuto();
+  private static _freshAuto() {
+    return { watched: 0, stepEma: 0, gaveUp: false, workerWatched: 0, lateAt: 0, postedAt: 0, badWindows: 0, retryAt: 0 };
+  }
+  /** The engine's time scale this frame (see update). */
+  private _timeScale = 1;
   /** Why the step last came back to this thread from a worker (or never left), until the mode is set again. */
   private _workerFallback: string | null = null;
   /**
@@ -265,7 +277,12 @@ export class PhysicsSystem {
     return new InlineBackend(() => this._world, dt => PhysicsSystem.substepsFor(dt, this.maxSubsteps), () => this.profileStep);
   }
 
-  public update(deltaTime: number): void {
+  /**
+   * `deltaTime` is game time: the frame's delta with the engine's time scale applied. `timeScale` is that
+   * scale (1 unless slow motion or a hit-stop runs), which the worker predicts its next step's reach by.
+   */
+  public update(deltaTime: number, timeScale: number = 1): void {
+    this._timeScale = timeScale;
     try {
       if (!this._scene) return;
       const frameStart = performance.now();
@@ -277,7 +294,7 @@ export class PhysicsSystem {
       // BEFORE the step: a body frozen this frame must not be integrated by it. (The worker's activation
       // runs in endFrame, just before the step is posted.)
       if (inline) this._updateActivation(deltaTime);
-      const result = this._backend.step(deltaTime);
+      const result = this._backend.step(deltaTime, timeScale);
       physicsStats.backend = this._backend.kind;
       // Seconds actually simulated. Inline, the frame's own; with the worker, its step's — or 0 while it
       // is still running, when nothing below that depends on a step happening runs.
@@ -1264,14 +1281,14 @@ export class PhysicsSystem {
    * this is where the frame's changes are diffed and its step posted — the worker steps while this thread
    * renders, and the next update applies the result. Inline, nothing.
    */
-  public endFrame(deltaTime: number): void {
+  public endFrame(deltaTime: number, nextTimeScale: number = 1): void {
     if (this._backend?.kind !== 'worker') return;
     try {
       // The worker's activation: what the inline backend does just before stepping. Not twice in the frame
       // the step moved over, whose inline update already ran it.
       if (!this._activatedThisFrame) this._updateActivation(deltaTime);
       this._activatedThisFrame = false;
-      this._backend.endFrame(deltaTime);
+      this._backend.endFrame(deltaTime, nextTimeScale);
     } catch (e) {
       Logger.error(`Physics: ${e}`);
     }
@@ -1317,7 +1334,7 @@ export class PhysicsSystem {
       const made = factory();
       return typeof (made as any).postMessage === 'function' && !('poll' in made) ? new WorkerPort(made as Worker) : made as PhysicsPort;
     } : null;
-    this._auto = { watched: 0, stepEma: 0, gaveUp: false, workerWatched: 0, lateAt: 0, postedAt: 0 };
+    this._auto = PhysicsSystem._freshAuto();
     this._workerFallback = mode !== 'off' && !factory ? 'This host has no physics worker.' : null;
     if (mode === 'on') this._useWorker();
     else if (mode === 'off') this._useInline();
@@ -1327,6 +1344,13 @@ export class PhysicsSystem {
   private _useWorker(frameDt = 0): boolean {
     if (this._backend?.kind === 'worker' || this._pendingWorker) return true;
     if (!this._workerFactory || !this._world) return false;
+    // One core: the worker would take its time from the same core the frame needs, and stepping inline
+    // costs nothing to copy.
+    if (PhysicsSystem.cores() < 2 && typeof navigator !== 'undefined' && navigator.hardwareConcurrency) {
+      this._workerFallback = 'This device has a single CPU core: the step stays on the main thread.';
+      this._auto.gaveUp = true;
+      return false;
+    }
     try {
       const port = this._workerFactory();
       const worker = new WorkerBackend({
@@ -1373,7 +1397,8 @@ export class PhysicsSystem {
     const worker = this._pendingWorker;
     if (!worker || !worker.poll()) return;
     this._pendingWorker = null;
-    worker.adopt(frameDt);
+    worker.adopt(frameDt, this._timeScale);
+    this._workerFallback = null;   // a retry that worked: nothing to explain any more
     this._backend = worker;
     this._activatedThisFrame = frameDt > 0;
   }
@@ -1389,8 +1414,8 @@ export class PhysicsSystem {
     if (this._backend.kind === 'inline') {
       a.watched += dt;
       a.stepEma += (physicsStats.stepMs - a.stepEma) * Math.min(1, dt * 2);
-      const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency ?? 1 : 1;
-      if (a.watched >= 2 && cores >= 4 && (a.stepEma >= 1.5 || physicsStats.activeBodies >= 40)) {
+      if (a.watched < a.retryAt) return;            // fell behind a while ago: wait before trying again
+      if (a.watched >= 2 && PhysicsSystem.cores() >= 4 && (a.stepEma >= 1.5 || physicsStats.activeBodies >= 40)) {
         if (!this._useWorker(dt)) a.gaveUp = true;
       }
       return;
@@ -1400,13 +1425,24 @@ export class PhysicsSystem {
     if (a.workerWatched < 3) return;
     const posted = worker.postedFrames - a.postedAt, late = worker.lateFrames - a.lateAt;
     a.workerWatched = 0; a.postedAt = worker.postedFrames; a.lateAt = worker.lateFrames;
-    if (late > 0.1 * Math.max(1, posted + late)) {
-      Logger.warn('Physics worker falls behind on this machine; stepping on the main thread.', 'Physics');
-      this._workerFallback = `The worker fell behind: ${late} of ${posted + late} frames late.`;
-      a.gaveUp = true;
-      this._useInline();
-    }
+    // One bad window is a hitch (a GC pause, a shader compile, the tab losing focus), and a late step costs
+    // little: its frame draws the bodies carried along their velocities. Only lateness that LASTS — two
+    // windows in a row — moves the step back, and not for good: Auto tries the worker again later.
+    if (late <= 0.1 * Math.max(1, posted + late)) { a.badWindows = 0; return; }
+    if (++a.badWindows < 2) return;
+    Logger.warn('Physics worker falls behind on this machine; stepping on the main thread for a while.', 'Physics');
+    this._workerFallback = `The worker fell behind: ${late} of ${posted + late} frames late. Auto tries it again in ${AUTO_RETRY_SECONDS} s.`;
+    a.badWindows = 0;
+    a.retryAt = a.watched + AUTO_RETRY_SECONDS;
+    this._useInline();
   }
+
+  /** Logical cores, or 1 where the browser does not say. */
+  public static cores(): number {
+    const n = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : undefined;
+    return typeof n === 'number' && n > 0 ? n : 1;
+  }
+
 
   /** The enabled water volumes as plain data for the worker, with where to report what each buoyed. */
   private _waterSpecs(): { spec: import('./waterSurface').WaterSpec; record: (body: Body, fraction: number) => void }[] {

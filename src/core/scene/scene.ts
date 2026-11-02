@@ -121,7 +121,7 @@ export class Scene {
     /** Skinned models with cloth parts (AnimatedModel.skinnedCloth), stepped with the cloths. */
     private _skinnedCloths: Set<ModelNode> = new Set();
     /** Callbacks run after everything has moved this frame; see {@link addLateUpdate}. */
-    private _lateUpdates: Set<(delta: number) => void> = new Set();
+    private _lateUpdates: Set<(delta: number, unscaledDelta: number) => void> = new Set();
     private _particleSystems: Set<ParticleSystemNode> = new Set();
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
@@ -416,7 +416,12 @@ export class Scene {
     /** @internal */
     public unregisterFading(node: Node): void { this._fadingNodes.delete(node); }
 
-    public update(delta: number, time: number, paused: boolean): void {
+    /**
+     * One frame. `delta` is GAME time (the engine's time scale applied: what scripts, timers, animators and
+     * physics see); `unscaledDelta` the frame's real delta, which camera rigs step by so their damping and
+     * shake stay responsive through a hit-stop or slow motion.
+     */
+    public update(delta: number, time: number, paused: boolean, unscaledDelta: number = delta): void {
         try {
             const frameStart = performance.now();
             resetSceneStats();
@@ -554,7 +559,7 @@ export class Scene {
                 // pass because it is synchronous: no real edit can interleave and be swallowed.
                 CleoEngine.authoringMode = false;
                 try {
-                    for (const rig of rigs) rig.lateUpdate(delta, snap);
+                    for (const rig of rigs) rig.lateUpdate(unscaledDelta, snap);
                 } finally {
                     CleoEngine.authoringMode = authoring;
                 }
@@ -567,7 +572,7 @@ export class Scene {
                 authoring.derived++;
                 try {
                     for (const fn of this._lateUpdates) {
-                        try { fn(delta); }
+                        try { fn(delta, unscaledDelta); }
                         catch (e) { Logger.error(`Error in a late update: ${e}`); }
                     }
                 } finally {
@@ -590,9 +595,11 @@ export class Scene {
      * Run `fn` once per frame AFTER every script, animator, socket follower, cloth and camera rig has moved
      * what it moves: the place to read final world poses, e.g. an overlay drawn over held weapons, which
      * would trail them by a frame if it placed itself in its own onUpdate. Runs whether or not the scene is
-     * playing; writes made in it count as derived, never as edits. Returns the remover.
+     * playing — and while paused, which makes it the place a pause menu listens for the key that closes it.
+     * Writes made in it count as derived, never as edits. `delta` is game time (time scale applied),
+     * `unscaledDelta` the frame's real delta. Returns the remover.
      */
-    public addLateUpdate(fn: (delta: number) => void): () => void {
+    public addLateUpdate(fn: (delta: number, unscaledDelta: number) => void): () => void {
         this._lateUpdates.add(fn);
         return () => { this._lateUpdates.delete(fn); };
     }

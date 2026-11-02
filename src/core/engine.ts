@@ -7,6 +7,7 @@ import { Scene } from "./scene/scene";
 import { engineEventBus, authoring } from "./eventBus";
 import { frameHistory, gpuProfiler } from "../graphics/gpuProfiler";
 import { frameStats } from "../graphics/renderStats";
+import { TimeDilation, type DilateOptions } from "./timeDilation";
 
 interface CleoConfig {
   graphics?: {
@@ -81,6 +82,11 @@ export class CleoEngine {
   private _maxFrameDelta: number = MAX_DELTA;
   private _timeSinceStart: number = 0;
   private _ready: boolean = false;
+  /** The game clock's speed: the time scale times any hit-stop running. See timeDilation.ts. */
+  private _dilation = new TimeDilation();
+  /** The last frame's delta before the time scale, and the scale it ran at. */
+  private _unscaledDelta = 0;
+  private _frameTimeScale = 1;
 
   private _viewport!: HTMLElement;
   private _renderer: Renderer;
@@ -230,24 +236,33 @@ export class CleoEngine {
       const currentTimestamp = performance.now();
       // Clamped at the source, not per-consumer: _timeSinceStart accumulates this same value, so
       // physics, timers, node.update, onUpdate and `time` stay on one clock. See MAX_DELTA.
-      const deltaTime = Math.min((currentTimestamp - this._lastTimestamp) / 1000, this._maxFrameDelta);
+      const unscaled = Math.min((currentTimestamp - this._lastTimestamp) / 1000, this._maxFrameDelta);
+      // The time scale applies to everything that SIMULATES — physics, timers, scripts, animators, particles
+      // — and not to input, camera rigs or UI, which keep the frame's real delta. A dilation (a hit-stop)
+      // counts down in real time, and not while paused.
+      const scale = this._paused ? this._dilation.scale : this._dilation.update(unscaled);
+      const deltaTime = unscaled * scale;
+      this._unscaledDelta = unscaled;
+      this._frameTimeScale = scale;
 
       // FIRST in the frame: poll the pads, step the gestures, resolve every action. Nothing downstream
       // may read a half-built action table, and physics is downstream. Runs even while paused — a
       // paused game still has to see the action that unpauses it, and the editor's camera map is live
       // in edit mode. What pausing gates is DELIVERY to scripts, which Scene.update already handles.
-      InputSystem.instance.beginFrame(deltaTime);
+      InputSystem.instance.beginFrame(unscaled);
 
       if (!this._paused) {
-        this._physicsSystem.update(deltaTime);
+        this._physicsSystem.update(deltaTime, scale);
         this._timeSinceStart += deltaTime * 1000;
       }
 
       if (this._scene) {
-        this._scene.update(deltaTime, this._timeSinceStart, this._paused);
+        this._scene.update(deltaTime, this._timeSinceStart, this._paused, unscaled);
         // After every script, before the render: with the physics worker, this frame's changes and its
         // step go out now, and the worker steps while this thread renders. Nothing inline.
-        if (!this._paused) this._physicsSystem.endFrame(deltaTime);
+        // The scale the NEXT frame starts at goes with it: a hit-stop landed in this frame's scripts has
+        // already lowered it, so the worker's step reaches only as far as that frame will go.
+        if (!this._paused) this._physicsSystem.endFrame(deltaTime, this._dilation.scale);
         this._renderer.render(this._scene);
       }
 
@@ -279,6 +294,10 @@ export class CleoEngine {
 
   public setScene(scene: Scene) {
     this._scene = scene;
+    // Time scale and hit-stops belong to the scene that set them: never carried into the next one, or back
+    // into the editor when Play stops.
+    this._dilation.clear();
+    this._dilation.base = 1;
     this._scene.update(0, 0, true);
     this._physicsSystem.scene = this._scene;
     // Binding CLEARS, which is the whole reason it goes through the system rather than being assigned:
@@ -303,4 +322,22 @@ export class CleoEngine {
   public get ai(): AISystem { return this._aiSystem; }
   /** Milliseconds of unpaused game time since the engine started — the same clock onUpdate's `time` gets. */
   public get timeSinceStart(): number { return this._timeSinceStart; }
+
+  /**
+   * How fast game time runs: 1 is real time, 0.5 half speed, 0 stops the simulation while scripts still
+   * get onUpdate (with a delta of 0). Multiplies with any running {@link dilate}.
+   */
+  public get timeScale(): number { return this._dilation.base; }
+  public set timeScale(scale: number) { this._dilation.base = scale; }
+  /** The scale the last frame ran at: the time scale times any dilation (a hit-stop) in progress. */
+  public get effectiveTimeScale(): number { return this._frameTimeScale; }
+  /** The last frame's delta in seconds before the time scale: what input, camera rigs and UI step by. */
+  public get unscaledDelta(): number { return this._unscaledDelta; }
+  /**
+   * Slow game time to `scale` for `seconds` of REAL time, then return to the time scale (easing back over
+   * the last `easeOut` share of it). Overlapping calls keep the slower scale and the later end.
+   */
+  public dilate(scale: number, seconds: number, options?: DilateOptions): void { this._dilation.dilate(scale, seconds, options); }
+  /** End any running dilation now (the time scale stays). */
+  public clearDilation(): void { this._dilation.clear(); }
 }

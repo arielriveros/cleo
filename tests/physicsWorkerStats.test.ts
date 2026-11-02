@@ -94,4 +94,46 @@ describe('physics worker stats', () => {
         r.p.setWorkerMode('off', null);
         expect(r.p.workerStatus.fallback).toBeNull();
     });
+
+    it('Auto rides out a hitch, moves back only when the worker stays behind, and tries it again later', () => {
+        // 40 moving bodies: what makes Auto want the worker. `slow` holds every step two frames (half late).
+        let slow = false;
+        const p = new PhysicsSystem({ gravity: [0, 0, 0] });
+        p.initialize();
+        const nodes: Node[] = [];
+        for (let i = 0; i < 40; i++) {
+            const n = new Node(`B${i}`);
+            n.setBody(1, 0, 0);
+            n.body!.attachShape(Shape.Sphere(0.2));
+            n.setWorldPosition([i * 2, 0, 0]);
+            (n as any)._hasStarted = true;
+            nodes.push(n);
+        }
+        (p as any)._scene = { nodes, landscapes: [], tilemaps: [], activeCamera: null };
+        p.setWorkerMode('auto', () => new LoopbackPort({ delayFrames: 1, delayFor: () => (slow ? 2 : 1) }));
+        const run = (seconds: number) => {
+            for (let i = 0; i < Math.round(seconds * 60); i++) {
+                p.update(1 / 60);
+                for (const n of nodes) { n.updateTransforms(); n.velocity = [1, 0, 0]; }
+                p.endFrame(1 / 60);
+            }
+        };
+        run(2.5);
+        expect(p.workerStatus.state).toBe('worker');
+        slow = true;
+        run(3.2);                                   // one bad window: a hitch, ridden out
+        expect(p.workerStatus.state).toBe('worker');
+        slow = false;
+        run(3.2);
+        slow = true;
+        run(6.2);                                   // two in a row: back to the main thread
+        expect(p.workerStatus.state).toBe('inline');
+        expect(p.workerStatus.fallback).toMatch(/fell behind/);
+        slow = false;
+        run(20);
+        expect(p.workerStatus.state).toBe('inline'); // waiting out the retry delay
+        run(12);
+        expect(p.workerStatus.state).toBe('worker'); // and trying again
+        expect(p.workerStatus.fallback).toBeNull();
+    });
 });

@@ -58,6 +58,15 @@ export default class SoulsWeaponNode extends Node {
   public bladeStart: number[] = [0, 0.12, 0]
   public bladeEnd: number[] = [0, 1, 0]
   public bladeRadius: number = 0.12
+  /**
+   * Real seconds game time slows for when a hit of this weapon lands (the GameManager's hit-stop), for the
+   * light moves and for the heavy move. A killing blow holds it longer. 0 turns it off for this weapon.
+   */
+  public hitStop: number = 0.15
+  public heavyHitStop: number = 0.22
+  /** Camera kick when a hit lands (the GameManager's shake), light and heavy. */
+  public hitShake: number = 0.12
+  public heavyHitShake: number = 0.25
   /** Effect spawned where the blade meets a body, and the sound of the hit. */
   public hitSparkTemplate: TemplateName = 'Hit Spark'
   public hitSound: SoundName = 'Hit'
@@ -114,6 +123,9 @@ export default class SoulsWeaponNode extends Node {
     const gm = (this._gm ?? this.findNode?.('GameManager')) as any
     if (point) gm?.fx?.(this.hitSparkTemplate, point)
     playSound(this, this.hitSound)
+    const heavy = !!move && move.name === this.heavyMove
+    gm?.hitStop?.(heavy ? this.heavyHitStop : this.hitStop, !!t.isDead)
+    if (wielder === gm?.player) gm?.shake?.(heavy ? this.heavyHitShake : this.hitShake)
     return true
   }
 }

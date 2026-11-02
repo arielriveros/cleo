@@ -86,7 +86,7 @@ export const SOULS_INPUT_MAP = {
         },
         button('Submit', [b('submit:enter', key('Enter')), b('submit:pad', pad('a'))]),
         button('Cancel', [b('cancel:escape', key('Escape')), b('cancel:backspace', key('Backspace')), b('cancel:pad', pad('b'))]),
-        button('Pause', [b('pause:p', key('KeyP')), b('pause:pad', pad('start'))]),
+        button('Pause', [b('pause:p', key('KeyP')), b('pause:escape', key('Escape')), b('pause:pad', pad('start'))]),
       ],
     },
   ],

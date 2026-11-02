@@ -64,9 +64,9 @@ function RuntimeOptions() {
         </Field>
         <Field label='Physics thread' labelClassName={OPTION_LABEL}>
           <Select value={e.physicsWorker} onChange={ev => set({ physicsWorker: ev.target.value as PhysicsWorkerSetting })}>
-            <option value='off'>Main thread</option>
-            <option value='auto'>Auto</option>
             <option value='on'>Worker</option>
+            <option value='auto'>Auto</option>
+            <option value='off'>Main thread</option>
           </Select>
         </Field>
       </Section>

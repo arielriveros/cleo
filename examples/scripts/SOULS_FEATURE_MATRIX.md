@@ -152,8 +152,8 @@ script (`Souls*.ts`), or the scene.
 | Runtime spawning from templates | ✅ | Enemies, effects, projectiles. |
 | Spawn/despawn lifecycle (`spawnOnStart`) | ✗ | |
 | Event bus | ✗ | The GameManager is the hub instead (SOULS_DEMO §4). |
-| Game pause | ✗ | `Game.pause()` / `Game.resume()` exist; nothing calls them. |
-| Engine time scale | ✗ (not in engine) | No `timeScale` for scripts. |
+| Game pause | ✅ | The pause menu (`SoulsPauseMenu`) listens in a late update, which runs while paused. |
+| Engine time scale | ✅ | `Game.hitStop` on every landed blow (`GameManager.hitStop`). |
 | Save / load API | ✗ (not in engine) | |
 
 ### Terrain, 2D, publishing
@@ -207,13 +207,13 @@ script (`Souls*.ts`), or the scene.
 | UI and menus | HUD (HP with drain bar, stamina, Estus, souls, prompts, messages) | ✅ | `SoulsHud` | |
 | | Banners: YOU DIED, BONFIRE LIT, VICTORY | ✅ | `SoulsBanner` | |
 | | Floating enemy health bars | ✅ | World canvases | |
-| | Pause menu | ✗ | The `Pause` action exists but nothing reads it | Ready: `Game.pause()` plus a UI canvas. |
+| | Pause menu | ✅ | `SoulsPauseMenu`: P, Escape or Start; Resume, Return to Bonfire | |
 | | Settings and title screen | ✗ | | Ready: UI widgets. Rebinding exists in the engine. |
 | Audio | SFX cues, ambience and boss music switching | ◐ | Wired, but the samples are empty | Ready: assign samples. Spatial mode, buses and `fadeTo` are unused. |
 | Feedback | Screen shake | ✅ | `GameManager.shake` | |
 | | Hit sparks, slam dust, enemy ragdoll | ✅ | | |
 | | **Blood:** spray, splat and spatter decals | ✅ | `GameManager.bleed`, `SoulsBloodSplat` | |
-| | Hit-stop (freeze frames) | ✗ | | **Engine gap:** no time scale. It would need an engine `timeScale` (or per-animator speed). |
+| | Hit-stop | ✅ | `GameManager.hitStop`: game time at 20% for 0.15 s (light), 0.22 s (heavy), 0.3 s (kill), at least two frames, with a camera kick; 0.08/0.14 s when the player is hit | |
 | | Controller rumble | ✗ | | **Engine gap:** no haptics API. |
 | Persistence | Save and load (souls, level, opened shortcuts, defeated boss) | ✗ | Everything resets on reload | **Engine gap:** no save API. Scripts would have to use `localStorage` directly, which is unavailable in desktop builds without a bridge. |
 
@@ -222,18 +222,16 @@ script (`Souls*.ts`), or the scene.
 Ranked by what they add against what they cost.
 
 1. **A boss.** The Warden, its fog gate and boss bar are finished templates; the dungeon is the obvious arena.
-2. **Pause menu and settings.** Small cost: `Game.pause()`, UI widgets, and disabling the Gameplay map.
+2. **Settings.** The pause menu exists; a settings page needs UI widgets and the engine's rebinding.
 3. **Save and load.** High value, medium cost. Needs an **engine save API** (key/value storage that works
    in web and desktop builds). Then a script persists souls, stats, shortcuts and boss state.
 4. **Guard, parry, riposte and backstab.** The defining combat verbs, script-only. Parry windows ride on
    the existing animation events.
-5. **Hit-stop.** Cheap and very noticeable, but needs an **engine time scale** first (global, or per
-   animator plus physics).
-6. **Keys and keyed doors.** Trivial with `SoulsDoor` and a new pickup `kind`.
-7. **Assign audio samples.** No code: every sound slot is wired and empty.
-8. **Per-bone hurtboxes.** Head and limb hits, with multipliers. The shape queries already support it;
+5. **Keys and keyed doors.** Trivial with `SoulsDoor` and a new pickup `kind`.
+6. **Assign audio samples.** No code: every sound slot is wired and empty.
+7. **Per-bone hurtboxes.** Head and limb hits, with multipliers. The shape queries already support it;
    it needs small capsules that follow the skeleton.
-9. **Ladders and NPCs.** Larger script work: a climb state, a dialogue UI.
+8. **Ladders and NPCs.** Larger script work: a climb state, a dialogue UI.
 
 The engine features the game does not exercise yet, and that could be shown with little change:
 - light probes in the dungeon, spot lights with shadows on its torches;

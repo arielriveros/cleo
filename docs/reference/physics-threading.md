@@ -4,15 +4,17 @@ Where the physics step runs, and what changes when it runs in a Web Worker.
 
 ## Main thread or worker
 
-By default the physics step runs on the main thread, inside each frame: input, then physics, then
-scripts, then render. The project option **Physics thread** (Options ▸ Engine ▸ Runtime) can move the
-step into a Web Worker:
+By default the physics step runs in a Web Worker while the frame renders. The project option **Physics
+thread** (Options ▸ Engine ▸ Runtime) chooses:
 
 | Setting | What happens |
 |---|---|
-| **Main thread** | The step runs inside the frame. The default. |
-| **Worker** | The step runs in a Web Worker while the frame renders. |
-| **Auto** | Starts on the main thread. After two seconds of play it moves to the worker if physics costs 1.5 ms a frame or more (or 40+ moving bodies) on a machine with 4+ cores, and comes back if the worker is late on more than 10% of frames. |
+| **Worker** | The step runs in a Web Worker while the frame renders. The default. A device that cannot run it steps on the main thread instead: no Web Workers, a single CPU core, or a worker that fails to start or fails later (physics carries on from its last step). The reason shows under Performance ▸ Workers. |
+| **Auto** | Starts on the main thread. After two seconds of play it moves to the worker if physics costs 1.5 ms a frame or more (or 40+ moving bodies) on a machine with 4+ cores. It comes back to the main thread if the worker is late on more than 10% of frames for two 3-second windows in a row (one bad window is a hitch, and is ignored), and tries the worker again 30 seconds later. |
+| **Main thread** | The step runs inside the frame: input, then physics, then scripts, then render. |
+
+Projects saved before the worker became the default stored **Main thread** without anyone choosing it,
+so they open on **Worker**. Choose Main thread again to keep it.
 
 `?physicsWorker=off|on|auto` in the page URL, or `localStorage.cleo_physics_worker`, overrides the project
 on one machine. A published game reads the same option; its player carries the worker inline, so it also
@@ -34,11 +36,13 @@ Everything a script touches stays on the main thread and keeps working unchanged
 
 ## What changes
 
-- **Bodies are drawn at the frame's time.** The worker steps while the frame renders, so each step is sent
-  before anyone knows how long the frame that shows it will last. Each step therefore reaches one
-  predicted frame ahead (the average of recent frames). Each node is drawn at its frame's actual time,
-  between where its body was at the start and at the end of the last step. When a frame runs longer than
-  predicted, the body is carried a little further along its velocity.
+- **Bodies are drawn about one frame behind.** The worker steps while the frame renders, so each step is
+  sent before anyone knows how long the frame that shows it will last, and it reaches one predicted frame
+  ahead (the average of recent frames). Each node is drawn from the body's last steps, interpolated at a
+  drawn time that advances by exactly each frame's delta and sits about one frame behind the clock. Motion
+  is therefore paced exactly like the frames, as on the main thread, and a frame that runs long still lands
+  inside steps already taken instead of being guessed. The cost is about one frame of visual delay
+  (17 ms at 60 fps) for bodies; scripts still read the latest simulated body.
 - **A node and its body can differ by a few milliseconds of motion.** `node.position` and the other node
   transforms are the drawn pose. `node.body` is the latest simulated one, the same pose scripts would see
   inline. Moving or turning the node from a script moves or turns the body by the same amount: root
@@ -62,7 +66,7 @@ was last told and posts only the changes plus the step. The worker builds its wo
 code (`physics/worldConfig.ts`) and steps it exactly as the inline backend does. At the start of the next
 frame the snapshot — poses, velocities, sleep states, the last substep's contacts, trigger events,
 first contacts, buoyancy — is written back into the mirror, and each dynamic body's node is drawn
-interpolated (`WorkerBackend.visualPose`). One step is in flight at a time, and no SharedArrayBuffer is
+interpolated from its last steps (`WorkerBackend.visualPose`, with a history of 32 steps per body). One step is in flight at a time, and no SharedArrayBuffer is
 used, so no cross-origin isolation headers are needed anywhere. If the worker fails, physics falls back
 to the main thread and carries on from the worker's last step.
 
@@ -97,6 +101,17 @@ How evenly the player is drawn while running straight (same scene, Chrome on Web
 
 The worker used to step each frame by the delta of the frame that had just ended, which made it uneven.
 
-Main-thread physics drops by about 63%. The Valley ships with **Auto**. New projects default to **Main
-thread**: a game whose physics costs well under a millisecond (one character and some props) gains
-nothing from the worker, and pays for the copying.
+At 50–55 fps (same scene, render cost lowered so frames are short; 2026-11-02):
+
+| | Main thread | Worker, drawn at the clock | Worker, drawn a frame behind |
+|---|---|---|---|
+| Player speed error, rms | 0.14–0.17% | 2.6% | 0.18–0.23% |
+| Player speed error, worst | 1.0–2.3% | 30% | 1.7–2.7% |
+| Camera speed error, worst | 3.9–5.7% | 49% | 4.8–5.7% |
+
+Drawing at the clock had to extrapolate on every frame longer than predicted, and at short frames that
+is most of them; there were no late steps in either run.
+
+Main-thread physics drops by about 63%, and the Valley ships with **Worker**. A game whose physics costs
+well under a millisecond (one character and some props) gains little from the worker and pays a little
+for the copying; **Main thread** is the choice there.

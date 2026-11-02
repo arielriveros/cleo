@@ -103,6 +103,7 @@ function RangeRow(props: { label: string; r: Range; dp?: number; unit?: string; 
 /** Everything the panel samples once per refresh, in one shape so one loop can fill it. */
 type Sample = {
   fps: number; frameMs: number; p50: number; p95: number; worst: number;
+  timeScale: number; minTimeScale: number;
   cpuMs: number; cpuPassMs: number; gpuMs: number; gpuAvailable: boolean; gpuOn: boolean;
   physicsMs: number; stepMs: number; writeBackMs: number; rayMs: number; rayCount: number;
   bodies: number; broadphaseBodies: number; contacts: number; terrainMs: number;
@@ -128,6 +129,7 @@ type Sample = {
 
 const EMPTY: Sample = {
   fps: 0, frameMs: 0, p50: 0, p95: 0, worst: 0,
+  timeScale: 1, minTimeScale: 1,
   cpuMs: 0, cpuPassMs: 0, gpuMs: 0, gpuAvailable: false, gpuOn: false,
   physicsMs: 0, stepMs: 0, writeBackMs: 0, rayMs: 0, rayCount: 0,
   bodies: 0, broadphaseBodies: 0, contacts: 0, terrainMs: 0,
@@ -174,6 +176,8 @@ export default function PerformancePanel({ physicsThread }: { physicsThread?: Ph
   const bins = useRef(RANGED.map(() => ({ min: Infinity, max: -Infinity, sum: 0, n: 0 })));
   /** The physics worker's running step counts at the last refresh, and each recent refresh's share of them. */
   const workerCounts = useRef({ posted: -1, late: -1, window: [] as { posted: number; late: number }[] });
+  /** The lowest time scale seen this refresh window: a hit-stop lasts a few frames, between two refreshes. */
+  const minScale = useRef(1);
   /** Bumped by the physics-thread switch, which changes nothing the refresh would otherwise re-read soon. */
   const [, setThreadTick] = useState(0);
 
@@ -200,6 +204,10 @@ export default function PerformancePanel({ physicsThread }: { physicsThread?: Ph
       last.current = now;
       frames.current++;
 
+      {
+        const scale = (instance as any)?.effectiveTimeScale;
+        if (typeof scale === 'number' && scale < minScale.current) minScale.current = scale;
+      }
       // Geometry/fill counters are sampled every frame, not once per refresh (see RANGED).
       {
         const s: any = renderer?.stats ?? null;
@@ -260,6 +268,8 @@ export default function PerformancePanel({ physicsThread }: { physicsThread?: Ph
             merged.set(t.name, { name: t.name, avgMs: 0, maxMs: 0, cpuMs: t.avgMs });
         setRows([...merged.values()].sort((a, b) => (b.avgMs + b.cpuMs) - (a.avgMs + a.cpuMs)));
         setD({
+          timeScale: (instance as any)?.effectiveTimeScale ?? 1,
+          minTimeScale: minScale.current,
           fps: (frames.current * 1000) / acc.current,
           frameMs: acc.current / frames.current,
           p50: frameHistory.frame.percentile(0.5),
@@ -360,6 +370,7 @@ export default function PerformancePanel({ physicsThread }: { physicsThread?: Ph
         }
         setR(drained as Record<RangedKey, Range>);
 
+        minScale.current = (instance as any)?.effectiveTimeScale ?? 1;
         setHistory(frameHistory.frame.toArray());
         frames.current = 0;
         acc.current = 0;
@@ -450,6 +461,11 @@ export default function PerformancePanel({ physicsThread }: { physicsThread?: Ph
           <span>p95 {fmt(d.p95, 1)}</span>
           <span>worst {fmt(d.worst, 1)}</span>
         </div>
+        {/* Slow motion and hit-stops (Game.timeScale, Game.hitStop): the lowest scale since the last refresh,
+            so a hit-stop that lasts a few frames still shows. */}
+        <Row label='Time scale' value={d.minTimeScale < d.timeScale - 1e-3 ? `×${fmt(d.timeScale)} · dipped to ×${fmt(d.minTimeScale)}` : `×${fmt(d.timeScale)}`}
+             hl={d.minTimeScale < 0.999}
+             title='How fast game time runs: 1 is real time. A hit-stop or slow motion shows as a dip.' />
         <div className='mt-2' title={`Target line on the graph — ${fmt(budgetMs, 2)} ms per frame.`}>
           <SegmentedControl value={budgetHz} options={BUDGETS} onChange={v => setBudgetHz(v as number)} />
         </div>

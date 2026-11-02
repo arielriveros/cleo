@@ -55,6 +55,17 @@ export interface WorkerBackendHost {
 
 /** Most simulated time one step may carry: the engine's own frame-delta cap. */
 const MAX_PENDING = 0.1;
+/**
+ * How far the drawn clock may run faster or slower than the frames to settle one frame behind: 2%, below what
+ * an eye picks out as a change of speed.
+ */
+const DRAWN_DRIFT = 0.02;
+/** How quickly the drawn clock learns how often results arrive: about twenty results. */
+const APPLY_GAP_RATE = 0.05;
+/** How quickly the drawn clock's idea of a frame follows the frame rate: about a hundred frames. */
+const DRAWN_LEAD_RATE = 0.01;
+/** How quickly "one frame behind" follows a lasting change of time scale (per real second): seconds, so a hit-stop barely moves it. */
+const DRAWN_SCALE_RATE = 0.2;
 /** How quickly the frame-time estimate (the lead) follows a changing frame rate: about ten frames. */
 const LEAD_RATE = 0.1;
 // [type mass inertia3 invInertia3 linDamp angDamp linFactor3 angFactor3 fixedRot allowSleep sleepSpeed
@@ -73,6 +84,15 @@ interface Slot {
     /** The applied step, for drawing: the pose it started from, and the pose + velocity + spin it ended with. */
     from: Float64Array;
     to: Float64Array;
+    /**
+     * What the body is drawn from: its pose [px py pz qx qy qz qw] at the ends of its last KEYS steps, with
+     * their game-clock times, in a ring (`keyHead` is the next to write). Whatever is written to the body
+     * between two steps moves this whole history with it, so a script's nudge or a teleport is drawn at once.
+     */
+    keys: Float64Array;
+    keyTimes: Float64Array;
+    keyCount: number;
+    keyHead: number;
     /** Whether `from`/`to` hold a step yet; whether they say the body did not move (nothing to draw). */
     tracked: boolean;
     settled: boolean;
@@ -103,11 +123,17 @@ export class WorkerBackend implements PhysicsBackend {
     // ---- the clock (see the header) ----
     /** Every frame delta step() was given: the game's clock, which the drawn poses follow. */
     private _now = 0;
-    /** The frame delta expected next, an average of recent ones: how far past now each step reaches. */
+    /**
+     * The frame delta expected next, an average of recent ones, in REAL seconds: how far past now each step
+     * reaches, once multiplied by the time scale the next frame runs at. Kept in real time so a hit-stop
+     * (the time scale dropping for a few frames) is a known change of speed, not a misprediction.
+     */
     private _lead = 0;
-    /** The lead the last step was posted with. */
+    /** This frame's time scale (CleoEngine's), which game-time deltas are divided by to get real time. */
+    private _scale = 1;
+    /** The lead the last step was posted with, in game time. */
     private _leadSent = 0;
-    /** How far frames stray from the lead, on average. The drawn time trails the clock by about this. */
+    /** How far frames stray from the lead, on average (real seconds). The drawn time trails the clock by about this. */
     private _jitter = 0;
     /** Frame time since the last post. */
     private _sincePost = 0;
@@ -119,6 +145,30 @@ export class WorkerBackend implements PhysicsBackend {
     private _flightTo = 0;
     private _from = 0;
     private _to = 0;
+    /**
+     * The DRAWN clock: the game time bodies are drawn at, about one frame behind the clock. It advances by
+     * each frame's own delta (so motion is drawn exactly as smoothly as the frames are paced, like inline)
+     * and drifts toward `now − lead` by at most DRAWN_DRIFT of a frame per frame. Behind the clock because the
+     * step that just arrived reaches a frame AHEAD: one frame back, the drawn time falls inside the steps
+     * already applied, however long the frame was, and nothing has to be extrapolated.
+     */
+    private _vis = 0;
+    private _visReady = false;
+    /** A slow average of the time scale: how much game time "one frame behind" is (see _advance). */
+    private _scaleAvg = 1;
+    /**
+     * A slow average of the frame time, for the drawn clock's target. The lead itself follows the frame rate
+     * within ten frames, which is right for how far a step reaches but would make the drawn time wander a
+     * little with every uneven frame.
+     */
+    private _visLead = 0;
+    /**
+     * How often results arrive, in real seconds (a slow average), and the game time the last one was applied
+     * at. Every frame on a fast round trip; every second or third frame when the reply takes longer than a
+     * frame (a high refresh rate, a busy main thread). The drawn clock stays far enough behind to cover it.
+     */
+    private _applyGap = 0;
+    private _appliedAt = NaN;
     /** When the step in flight was posted, and when the last result arrived (performance.now()), for the HUD. */
     private _postedAt = 0;
     private _arrivedAt = 0;
@@ -156,9 +206,13 @@ export class WorkerBackend implements PhysicsBackend {
      * since — so it is dropped unapplied, and the next diff sends every body that moved meanwhile.
      * `frameDt` is the delta of the frame taking over (already stepped there), which starts the clock.
      */
-    public adopt(frameDt: number): void {
+    public adopt(frameDt: number, timeScale = 1): void {
         this._latest = null;
+        this._scale = timeScale;
         this._advance(frameDt);
+        // The frame before was drawn at the clock (inline): start there, and fall back to a frame behind gently.
+        this._vis = this._now;
+        this._visReady = true;
         this._sincePost = 0;
         physicsStats.workerStepsPosted = this.postedFrames;
         physicsStats.workerFramesLate = this.lateFrames;
@@ -166,12 +220,18 @@ export class WorkerBackend implements PhysicsBackend {
 
     // ---- start of frame: apply what the worker finished ----
 
-    public step(dt: number): StepResult {
+    public step(dt: number, timeScale = 1): StepResult {
+        this._scale = timeScale;
         this._advance(dt);
         this._port.poll();
         const snap = this._latest;
         this._latest = null;
         if (!snap || this._failed) return { dt: 0, contacts: [] };
+        if (this._appliedAt === this._appliedAt && this._now > this._appliedAt) {
+            const realGap = (this._now - this._appliedAt) / (this._scaleAvg > 0 ? this._scaleAvg : 1);
+            this._applyGap = this._applyGap === 0 ? realGap : this._applyGap + (realGap - this._applyGap) * APPLY_GAP_RATE;
+        }
+        this._appliedAt = this._now;
         const start = performance.now();
         physicsStats.workerReadyMs = start - this._arrivedAt;
         physicsStats.workerBytesDown = (snap.bodyCount * BODY_ROW + snap.contactCount * CONTACT_ROW) * 8
@@ -186,13 +246,30 @@ export class WorkerBackend implements PhysicsBackend {
         if (!(dt > 0)) return;
         this._now += dt;
         this._sincePost += dt;
-        if (this._lead === 0) this._lead = dt;
+        if (!(this._scale > 0)) return;
+        const real = dt / this._scale;
+        if (this._lead === 0) this._lead = real;
         else {
-            this._jitter += (Math.abs(dt - this._lead) - this._jitter) * LEAD_RATE;
-            this._lead += (dt - this._lead) * LEAD_RATE;
+            this._jitter += (Math.abs(real - this._lead) - this._jitter) * LEAD_RATE;
+            this._lead += (real - this._lead) * LEAD_RATE;
         }
         physicsStats.workerLeadMs = this._lead * 1000;
         physicsStats.workerJitterMs = this._jitter * 1000;
+        // The drawn clock (see _vis): this frame's delta exactly, nudged toward one frame behind. "One frame"
+        // in game time follows the time scale slowly, so a hit-stop does not yank the drawn time forward.
+        this._scaleAvg += (this._scale - this._scaleAvg) * Math.min(1, DRAWN_SCALE_RATE * real);
+        this._visLead = this._visLead === 0 ? this._lead : this._visLead + (real - this._visLead) * DRAWN_LEAD_RATE;
+        // One frame behind when results arrive every frame. When they arrive every k frames, each step still
+        // reaches one frame past its post, so the drawn time must trail by 2k − 1 frames to stay inside it.
+        const gap = this._applyGap > this._visLead ? this._applyGap : this._visLead;
+        const lag = 2 * gap - this._visLead;
+        const target = this._now - lag * this._scaleAvg;
+        if (!this._visReady) { this._vis = target; this._visReady = true; return; }
+        this._vis += dt;
+        const err = target - this._vis, limit = DRAWN_DRIFT * dt;
+        this._vis += err > limit ? limit : err < -limit ? -limit : err;
+        if (this._vis > this._now) this._vis = this._now;
+        else if (this._vis < this._now - MAX_PENDING) this._vis = this._now - MAX_PENDING;
     }
 
     private _receive(msg: FromWorker): void {
@@ -283,14 +360,46 @@ export class WorkerBackend implements PhysicsBackend {
 
     /** Record the step a body just took, for {@link visualPose}: where it started, where it is now. */
     private _track(slot: Slot): void {
-        const body = slot.body, from = slot.from, to = slot.to;
-        from.set(slot.start);
-        const p = body.position, q = body.quaternion, v = body.velocity, w = body.angularVelocity;
+        const body = slot.body, from = slot.from, to = slot.to, start = slot.start;
+        const keys = slot.keys;
+        if (slot.keyCount > 0) {
+            // Carry the history along with whatever was written since the last step ended (start − its end).
+            const last = ((slot.keyHead + KEYS - 1) % KEYS) * KEY_STRIDE;
+            if (!same(start, keys, 0, 7, last)) {
+                const dx = start[0] - keys[last], dy = start[1] - keys[last + 1], dz = start[2] - keys[last + 2];
+                // The turn written since: start · conj(end), applied to every pose before it.
+                const ax = start[3], ay = start[4], az = start[5], aw = start[6];
+                const bx = -keys[last + 3], by = -keys[last + 4], bz = -keys[last + 5], bw = keys[last + 6];
+                const qx = aw * bx + ax * bw + ay * bz - az * by;
+                const qy = aw * by - ax * bz + ay * bw + az * bx;
+                const qz = aw * bz + ax * by - ay * bx + az * bw;
+                const qw = aw * bw - ax * bx - ay * by - az * bz;
+                for (let k = 0; k < slot.keyCount; k++) {
+                    const o = ((slot.keyHead + KEYS - 1 - k) % KEYS) * KEY_STRIDE;
+                    keys[o] += dx; keys[o + 1] += dy; keys[o + 2] += dz;
+                    const sx = keys[o + 3], sy = keys[o + 4], sz = keys[o + 5], sw = keys[o + 6];
+                    const x = qw * sx + qx * sw + qy * sz - qz * sy;
+                    const y = qw * sy - qx * sz + qy * sw + qz * sx;
+                    const z = qw * sz + qx * sy - qy * sx + qz * sw;
+                    const w = qw * sw - qx * sx - qy * sy - qz * sz;
+                    const n = 1 / Math.hypot(x, y, z, w);
+                    keys[o + 3] = x * n; keys[o + 4] = y * n; keys[o + 5] = z * n; keys[o + 6] = w * n;
+                }
+            }
+        }
+        // Where this step started, when that is not where the last one ended (the first step, or a gap).
+        const lastTime = slot.keyCount > 0 ? slot.keyTimes[(slot.keyHead + KEYS - 1) % KEYS] : NaN;
+        const v = body.velocity;
+        if (!(Math.abs(lastTime - this._flightFrom) < 1e-9)) pushKey(slot, start, this._flightFrom, v.x, v.y, v.z);
+        from.set(start);
+        const p = body.position, q = body.quaternion, w = body.angularVelocity;
         to[0] = p.x; to[1] = p.y; to[2] = p.z; to[3] = q.x; to[4] = q.y; to[5] = q.z; to[6] = q.w;
         to[7] = v.x; to[8] = v.y; to[9] = v.z; to[10] = w.x; to[11] = w.y; to[12] = w.z;
+        pushKey(slot, to, this._flightTo, v.x, v.y, v.z);
         slot.tracked = true;
-        slot.settled = same(from, to, 0, 7)
-            && (body.sleepState === Body.SLEEPING || (to[7] === 0 && to[8] === 0 && to[9] === 0 && to[10] === 0 && to[11] === 0 && to[12] === 0));
+        let still = body.sleepState === Body.SLEEPING || (to[7] === 0 && to[8] === 0 && to[9] === 0 && to[10] === 0 && to[11] === 0 && to[12] === 0);
+        for (let k = 0; still && k < slot.keyCount; k++) still = same(to, keys, 0, 7, k * KEY_STRIDE);
+        slot.settled = still;
     }
 
     // ---- drawing ----
@@ -307,24 +416,14 @@ export class WorkerBackend implements PhysicsBackend {
         const index = this._slotOf.get(body);
         const slot = index === undefined ? undefined : this._slots[index];
         if (!slot || !slot.tracked || slot.settled) return false;
-        const a = slot.from, b = slot.to;
-        const time = this._now - Math.min(this._jitter, 0.25 * this._lead);
-        const span = this._to - this._from;
-        const t = span > 0 ? (time - this._from) / span : 1;
-        if (t <= 0) {
-            for (let i = 0; i < 7; i++) out[i] = a[i];
-        } else if (t < 1) {
-            out[0] = a[0] + (b[0] - a[0]) * t;
-            out[1] = a[1] + (b[1] - a[1]) * t;
-            out[2] = a[2] + (b[2] - a[2]) * t;
-            // nlerp along the short way: a step turns a body by a few degrees at most.
-            const s = a[3] * b[3] + a[4] * b[4] + a[5] * b[5] + a[6] * b[6] < 0 ? -1 : 1;
-            let x = a[3] + (s * b[3] - a[3]) * t, y = a[4] + (s * b[4] - a[4]) * t;
-            let z = a[5] + (s * b[5] - a[5]) * t, w = a[6] + (s * b[6] - a[6]) * t;
-            const n = 1 / Math.hypot(x, y, z, w);
-            out[3] = x * n; out[4] = y * n; out[5] = z * n; out[6] = w * n;
-        } else {
-            const e = Math.min(time - this._to, Math.min(MAX_PENDING, 2.5 * this._lead));
+        const b = slot.to;
+        const s = this._scale;
+        const time = this._vis;
+        const keys = slot.keys, times = slot.keyTimes, n = slot.keyCount;
+        const newest = (slot.keyHead + KEYS - 1) % KEYS;
+        if (time >= times[newest]) {
+            // Past the last step's end: carry on along its velocity (a long frame, a late step), a little.
+            const e = Math.min(time - times[newest], Math.min(MAX_PENDING, 2.5 * this._lead * s));
             if (e <= 0 || body.sleepState === Body.SLEEPING) {
                 for (let i = 0; i < 7; i++) out[i] = b[i];
             } else {
@@ -339,6 +438,23 @@ export class WorkerBackend implements PhysicsBackend {
                 const n = 1 / Math.hypot(x, y, z, w);
                 out[3] = x * n; out[4] = y * n; out[5] = z * n; out[6] = w * n;
             }
+        } else {
+            // Inside the history: the two step ends either side of the drawn time.
+            let newer = newest, k = 1;
+            for (; k < n; k++) {
+                const older = (newest + KEYS - k) % KEYS;
+                if (times[older] <= time) {
+                    const span = times[newer] - times[older];
+                    // The keys either side of this pair, for the curve's tangents (the pair itself where there are none).
+                    const before = k + 1 < n ? (newest + KEYS - k - 1) % KEYS : older;
+                    const after = newer !== newest ? (newer + 1) % KEYS : newer;
+                    hermitePose(keys, times, before, older, newer, after, span > 0 ? (time - times[older]) / span : 1, out);
+                    break;
+                }
+                newer = older;
+            }
+            // Older than all of it (a body that has only just started moving): its first pose.
+            if (k >= n) for (let i = 0; i < 7; i++) out[i] = keys[newer * KEY_STRIDE + i];
         }
         physicsStats.workerDrawn++;
         return true;
@@ -346,7 +462,8 @@ export class WorkerBackend implements PhysicsBackend {
 
     // ---- end of frame: tell the worker what changed, and step ----
 
-    public endFrame(_dt: number): void {
+    /** `nextTimeScale`: the time scale the next frame starts at, which the step's reach is predicted with. */
+    public endFrame(_dt: number, nextTimeScale = 1): void {
         if (this._failed) return;
         if (this._inFlight) {
             // The last step has not come back: its time, and this frame's, go out with the next one.
@@ -357,15 +474,16 @@ export class WorkerBackend implements PhysicsBackend {
         }
         // How far this step reaches: one predicted frame past now. Kept as a running debt rather than
         // `now + lead − end`, so a steady frame rate posts steps of exactly its delta, bit for bit.
-        if (!this._started) { this._started = true; this._owed = this._lead; }
-        else this._owed += this._sincePost + (this._lead - this._leadSent);
+        const lead = this._lead * (nextTimeScale > 0 ? nextTimeScale : 0);
+        if (!this._started) { this._started = true; this._owed = lead; }
+        else this._owed += this._sincePost + (lead - this._leadSent);
         this._sincePost = 0;
-        this._leadSent = this._lead;
+        this._leadSent = lead;
         let span = this._owed > MAX_PENDING ? MAX_PENDING : this._owed;
         if (!(span > 0)) span = 0;
         this._owed -= span;
         if (this._owed > 0) this._owed = 0;        // past the cap: dropped, as the engine drops a frame past MAX_DELTA
-        this._flightTo = this._now + this._lead - this._owed;
+        this._flightTo = this._now + lead - this._owed;
         this._flightFrom = this._flightTo - span;
         this.postedFrames++;
         physicsStats.workerStepsPosted = this.postedFrames;
@@ -421,7 +539,9 @@ export class WorkerBackend implements PhysicsBackend {
                 const cfg = this._configNumbers(body, wantsCollide).slice();
                 this._slots[index] = {
                     body, shadow, cfg, material: body.material, seen: frame,
-                    start: shadow.slice(0, 7), from: new Float64Array(7), to: new Float64Array(13), tracked: false, settled: false,
+                    start: shadow.slice(0, 7), from: new Float64Array(7), to: new Float64Array(13),
+                    keys: new Float64Array(KEYS * KEY_STRIDE), keyTimes: new Float64Array(KEYS), keyCount: 0, keyHead: 0,
+                    tracked: false, settled: false,
                 };
                 this._slotOf.set(body, index);
                 adds.push({ op: 'addBody', slot: index, config: encodeConfig(body, this._knownShapes, wantsCollide), state });
@@ -524,6 +644,10 @@ export class WorkerBackend implements PhysicsBackend {
         this._owed = 0;
         this._sincePost = 0;
         this._from = this._to = this._flightFrom = this._flightTo = 0;
+        this._visReady = false;
+        this._visLead = 0;
+        this._applyGap = 0;
+        this._appliedAt = NaN;
         this._slotOf.clear();
         this._slots.length = 0;
         this._freeSlots.length = 0;
@@ -543,8 +667,65 @@ export class WorkerBackend implements PhysicsBackend {
     }
 }
 
-function same(a: ArrayLike<number>, b: ArrayLike<number>, from: number, count: number): boolean {
-    for (let i = from; i < from + count; i++) if (a[i] !== b[i] && !(a[i] !== a[i] && b[i] !== b[i])) return false;
+/** Steps of history kept per body for drawing: enough for "one frame behind" even at a twentieth of real time. */
+const KEYS = 32;
+
+/** One history entry: the pose [px py pz qx qy qz qw] and the velocity [vx vy vz] at a step's end. */
+const KEY_STRIDE = 10;
+
+/** Append a step end (pose and velocity at `time`) to a slot's drawing history. */
+function pushKey(slot: Slot, pose: ArrayLike<number>, time: number, vx: number, vy: number, vz: number): void {
+    const o = slot.keyHead * KEY_STRIDE;
+    for (let i = 0; i < 7; i++) slot.keys[o + i] = pose[i];
+    slot.keys[o + 7] = vx; slot.keys[o + 8] = vy; slot.keys[o + 9] = vz;
+    slot.keyTimes[slot.keyHead] = time;
+    slot.keyHead = (slot.keyHead + 1) % KEYS;
+    if (slot.keyCount < KEYS) slot.keyCount++;
+}
+
+/**
+ * `out` = the pose a fraction `t` of the way from key `a` to key `b` (ring indices), with `p` the key before
+ * `a` and `n` the one after `b`. The position follows a cubic Hermite curve whose tangents come from the
+ * neighbouring keys (non-uniform Catmull-Rom): exact for steady motion, and smooth where one step meets the
+ * next, which matters when results arrive every few frames and each step spans several. Rotation is nlerped.
+ */
+function hermitePose(keys: Float64Array, times: Float64Array, p: number, a: number, b: number, n: number, t: number, out: Float64Array): void {
+    const ta = times[a], tb = times[b], span = tb - ta;
+    const A = a * KEY_STRIDE, B = b * KEY_STRIDE, P = p * KEY_STRIDE, N = n * KEY_STRIDE;
+    const dtA = times[b] - times[p], dtB = times[n] - times[a];
+    const t2 = t * t, t3 = t2 * t;
+    const h00 = 2 * t3 - 3 * t2 + 1, h10 = (t3 - 2 * t2 + t) * span, h01 = -2 * t3 + 3 * t2, h11 = (t3 - t2) * span;
+    for (let i = 0; i < 3; i++) {
+        const ma = dtA > 0 ? (keys[B + i] - keys[P + i]) / dtA : 0;
+        const mb = dtB > 0 ? (keys[N + i] - keys[A + i]) / dtB : 0;
+        out[i] = h00 * keys[A + i] + h10 * ma + h01 * keys[B + i] + h11 * mb;
+    }
+    const s = keys[A + 3] * keys[B + 3] + keys[A + 4] * keys[B + 4] + keys[A + 5] * keys[B + 5] + keys[A + 6] * keys[B + 6] < 0 ? -1 : 1;
+    const x = keys[A + 3] + (s * keys[B + 3] - keys[A + 3]) * t, y = keys[A + 4] + (s * keys[B + 4] - keys[A + 4]) * t;
+    const z = keys[A + 5] + (s * keys[B + 5] - keys[A + 5]) * t, w = keys[A + 6] + (s * keys[B + 6] - keys[A + 6]) * t;
+    const len = 1 / Math.hypot(x, y, z, w);
+    out[3] = x * len; out[4] = y * len; out[5] = z * len; out[6] = w * len;
+}
+
+/** `out` = a pose between `a` and `b` ([px py pz qx qy qz qw]): position lerped, rotation nlerped the short way. */
+function lerpPose(a: ArrayLike<number>, b: ArrayLike<number>, t: number, out: Float64Array): void {
+    out[0] = a[0] + (b[0] - a[0]) * t;
+    out[1] = a[1] + (b[1] - a[1]) * t;
+    out[2] = a[2] + (b[2] - a[2]) * t;
+    // nlerp along the short way: a step turns a body by a few degrees at most.
+    const s = a[3] * b[3] + a[4] * b[4] + a[5] * b[5] + a[6] * b[6] < 0 ? -1 : 1;
+    const x = a[3] + (s * b[3] - a[3]) * t, y = a[4] + (s * b[4] - a[4]) * t;
+    const z = a[5] + (s * b[5] - a[5]) * t, w = a[6] + (s * b[6] - a[6]) * t;
+    const n = 1 / Math.hypot(x, y, z, w);
+    out[3] = x * n; out[4] = y * n; out[5] = z * n; out[6] = w * n;
+}
+
+/** Whether a[from..from+count) equals b[bFrom..] (NaN equal to NaN). `bFrom` defaults to `from`. */
+function same(a: ArrayLike<number>, b: ArrayLike<number>, from: number, count: number, bFrom: number = from): boolean {
+    for (let i = 0; i < count; i++) {
+        const x = a[from + i], y = b[bFrom + i];
+        if (x !== y && !(x !== x && y !== y)) return false;
+    }
     return true;
 }
 

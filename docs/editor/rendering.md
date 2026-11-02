@@ -391,7 +391,7 @@ The editor's reference grid, on the XZ or XY plane. Editor-only: never rendered 
 The **Performance** page, beside Renderer: what the frame costs, and where. Its sections, in order:
 
 - **Frame** — the frame time and FPS, a frame-time graph against a 60, 120 or 144 Hz budget line,
-  and the p50, p95 and worst frame. The mean alone hides hitching: a flat 12 ms and a 9 ms mean with
+  and the p50, p95 and worst frame, and the time scale (with the lowest it dipped to since the last refresh, so a hit-stop shows). The mean alone hides hitching: a flat 12 ms and a 9 ms mean with
   a 30 ms p95 read the same in one number and are completely different problems. The budget buttons
   only move the target line.
 - **Frame budget** — where the frame goes: render CPU and GPU; physics, split into step (with its

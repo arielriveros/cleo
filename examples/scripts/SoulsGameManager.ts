@@ -1,4 +1,4 @@
-import { Input, Logger, Node } from 'cleo'
+import { Game, Input, Logger, Node } from 'cleo'
 import type { TemplateName } from 'cleo'
 import { clamp, forwardYaw, num } from '@/Core/Scripts/SoulsMath'
 import { playSound, stopSound } from '@/Core/Scripts/SoulsAudio'
@@ -30,6 +30,13 @@ import { playSound, stopSound } from '@/Core/Scripts/SoulsAudio'
  *   onPlayerDied()         drop a bloodstain, YOU DIED, then respawnAtBonfire()
  *   startBossFight(gate)   wake the boss, show its bar, start the music
  *   onBossDefeated(boss)   dissolve the fog, banner, reward
+ *
+ * ## Hit-stop
+ *
+ * `hitStop(seconds)` slows game time to `hitStopScale` (20%) for a moment of real time when a blow lands,
+ * so it reads as heavy: the weapon calls it for the hits it lands (longer for heavy attacks, longest for a
+ * killing blow), the player for the hits it takes. Nothing freezes outright — animation, physics and
+ * effects carry on at a fifth of their speed and ease back. `hitStopEnabled` turns it off.
  *
  * ## Sounds and effects
  *
@@ -65,6 +72,13 @@ export default class SoulsGameManagerNode extends Node {
   public bossRewardName: string = 'Boss Reward'
   /** Name of the lore message revealed once the boss falls. */
   public bossEpilogueName: string = 'Epilogue Message'
+  // ----- hit-stop (see "Hit-stop") ------------------------------------------------------------------
+  /** Off, every blow plays at full speed. */
+  public hitStopEnabled: boolean = true
+  /** Game speed during a hit-stop: 0.2 is 80% slower. */
+  public hitStopScale: number = 0.2
+  /** Real seconds a killing blow holds the hit-stop, at least. */
+  public killHitStop: number = 0.3
   /** Log a one-off warning when the project's input map lacks the souls actions. */
   public checkInputMap: boolean = true
 
@@ -376,6 +390,16 @@ export default class SoulsGameManagerNode extends Node {
       const old = this._bloodDecals.shift()
       try { old.remove() } catch { /* already gone */ }
     }
+  }
+
+  /**
+   * A blow landed: slow game time to `hitStopScale` for `seconds` of real time (at least `killHitStop`
+   * for a killing blow). Overlapping hits keep the longer one. See "Hit-stop".
+   */
+  public hitStop(seconds: number, killingBlow: boolean = false): void {
+    if (!this.hitStopEnabled || Game.isPaused) return
+    const s = killingBlow ? Math.max(num(seconds, 0), this.killHitStop) : num(seconds, 0)
+    if (s > 0) Game.hitStop(s, clamp(this.hitStopScale, 0, 1))
   }
 
   /** Shake the player's camera. 0.2 is a hit, 0.6 a boss slam. */

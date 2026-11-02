@@ -27,10 +27,16 @@ export interface StepResult {
 
 export interface PhysicsBackend {
     readonly kind: 'inline' | 'worker';
-    /** Start of physics.update: step (inline) or apply the worker's finished step (worker). */
-    step(dt: number): StepResult;
-    /** End of the frame, after scripts: hand the worker this frame's changes and its step. */
-    endFrame(dt: number): void;
+    /**
+     * Start of physics.update: step (inline) or apply the worker's finished step (worker). `timeScale` is the
+     * engine's for this frame (dt is already scaled by it); the worker predicts its next step with it.
+     */
+    step(dt: number, timeScale?: number): StepResult;
+    /**
+     * End of the frame, after scripts: hand the worker this frame's changes and its step. `nextTimeScale`
+     * is the scale the next frame will start at (a hit-stop set this frame has already lowered it).
+     */
+    endFrame(dt: number, nextTimeScale?: number): void;
     /** The world was cleared (a scene change): forget every body. */
     reset(): void;
     dispose(): void;

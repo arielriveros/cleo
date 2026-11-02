@@ -379,6 +379,57 @@ describe('damage from a blade', () => {
         expect(w.strike({}, { damageMul: 1 }, target, [0, 0, 0])).toBe(false);
         expect(sparks).toEqual([]);
     });
+
+    it('a landed hit asks for a hit-stop: longer for the heavy move, longest for a killing blow', () => {
+        const { w } = longsword();
+        const stops: [number, boolean][] = [];
+        w._gm.hitStop = (s: number, kill: boolean) => stops.push([s, kill]);
+        const alive = { receiveHit: () => true, isDead: false } as any;
+        w.strike({}, { name: 'Light1', damageMul: 1 }, alive, null);
+        w.strike({}, { name: w.heavyMove, damageMul: 1 }, alive, null);
+        const dying = { receiveHit() { this.isDead = true; return true; }, isDead: false } as any;
+        w.strike({}, { name: 'Light1', damageMul: 1 }, dying, null);
+        w.strike({}, { damageMul: 1 }, { receiveHit: () => false } as any, null);
+        expect(stops).toEqual([[w.hitStop, false], [w.heavyHitStop, false], [w.hitStop, true]]);
+        expect(w.heavyHitStop).toBeGreaterThan(w.hitStop);
+    });
+
+    it("the player's landed hits kick the camera, harder for the heavy move; an enemy's do not", () => {
+        const { w } = longsword();
+        const shakes: number[] = [];
+        const player = {};
+        w._gm.hitStop = () => {};
+        w._gm.shake = (a: number) => shakes.push(a);
+        Object.defineProperty(w._gm, 'player', { value: player });
+        const target = { receiveHit: () => true } as any;
+        w.strike(player, { name: 'Light1', damageMul: 1 }, target, null);
+        w.strike(player, { name: w.heavyMove, damageMul: 1 }, target, null);
+        w.strike({}, { name: 'Light1', damageMul: 1 }, target, null);
+        expect(shakes).toEqual([w.hitShake, w.heavyHitShake]);
+    });
+
+    it('the game manager slows game time to a fifth for the hit-stop, longer for a kill, never while paused', async () => {
+        const { Game } = await import('../src/core/game');
+        const m = new SoulsGameManagerNode('GameManager') as any;
+        const calls: [number, number][] = [];
+        const hitStop = Game.hitStop, paused = Object.getOwnPropertyDescriptor(Game, 'isPaused')!;
+        let isPaused = false;
+        (Game as any).hitStop = (s: number, scale: number) => calls.push([s, scale]);
+        Object.defineProperty(Game, 'isPaused', { get: () => isPaused, configurable: true });
+        try {
+            m.hitStop(0.07);
+            m.hitStop(0.07, true);
+            isPaused = true;
+            m.hitStop(0.07);
+            isPaused = false;
+            m.hitStopEnabled = false;
+            m.hitStop(0.07);
+        } finally {
+            (Game as any).hitStop = hitStop;
+            Object.defineProperty(Game, 'isPaused', paused);
+        }
+        expect(calls).toEqual([[0.07, 0.2], [m.killHitStop, 0.2]]);
+    });
 });
 
 describe('weapons spawned from templates', () => {

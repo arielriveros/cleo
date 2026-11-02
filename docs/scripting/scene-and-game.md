@@ -16,7 +16,14 @@ Game.sceneNames(): string[]
 
 Game.isPaused: boolean
 Game.pause() ; Game.resume() ; Game.togglePause()
-Game.time: number                          // milliseconds of UNPAUSED game time
+Game.time: number                          // milliseconds of UNPAUSED game time (time scale applied)
+
+Game.timeScale: number                     // get and set: 1 real time, 0.5 half speed, 0 stopped
+Game.slowMotion(scale: number, seconds: number, options?: { easeOut?: number }): void
+Game.hitStop(seconds?: number, scale?: number): void   // defaults 0.08 s at 0.2
+Game.clearSlowMotion(): void
+Game.effectiveTimeScale: number            // the scale the last frame ran at
+Game.unscaledDelta: number                 // the last frame's real delta, seconds
 
 Game.gravity: [number, number, number]     // get and set
 

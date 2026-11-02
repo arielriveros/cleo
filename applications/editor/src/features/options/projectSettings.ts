@@ -15,8 +15,9 @@ export interface EngineRuntimeSettings {
    */
   simulationRange: number;
   /**
-   * Where the physics step runs (PhysicsSystem.setWorkerMode): 'off' on the main thread, 'on' in a Web
-   * Worker, 'auto' moves it there once the game's physics is heavy enough to gain from it.
+   * Where the physics step runs (PhysicsSystem.setWorkerMode): 'on' in a Web Worker (the default; a device
+   * that cannot run one steps on the main thread instead), 'off' on the main thread, 'auto' moves it to the
+   * worker once the game's physics is heavy enough to gain from it.
    */
   physicsWorker: PhysicsWorkerSetting;
   /** Longest frame delta the loop reports, seconds (CleoEngine.maxFrameDelta). */
@@ -47,12 +48,20 @@ export interface PublishWindowSettings {
 }
 
 export interface ProjectSettings {
+  /**
+   * The settings' format. 2: the physics worker became the default. A stored 'off' from before that is the
+   * old default rather than a choice, so it reads as 'on'.
+   */
+  version: number;
   engine: EngineRuntimeSettings;
   publish: PublishWindowSettings;
 }
 
+export const PROJECT_SETTINGS_VERSION = 2;
+
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
-  engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'off', maxFrameDelta: 0.1, masterVolume: 1 },
+  version: PROJECT_SETTINGS_VERSION,
+  engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'on', maxFrameDelta: 0.1, masterVolume: 1 },
   publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true },
 };
 
@@ -64,15 +73,21 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
   const o = (raw && typeof raw === 'object' ? raw : {}) as any;
   const e = o.engine ?? {}, p = o.publish ?? {};
   const d = DEFAULT_PROJECT_SETTINGS;
+  const version = typeof o.version === 'number' && Number.isFinite(o.version) ? o.version : 1;
+  // Before version 2 every project stored 'off' whether or not anyone chose it: it was the default.
+  const worker: PhysicsWorkerSetting = PHYSICS_WORKER_SETTINGS.includes(e.physicsWorker)
+    ? (version < 2 && e.physicsWorker === 'off' ? 'on' : e.physicsWorker)
+    : d.engine.physicsWorker;
   const g = Array.isArray(e.gravity) && e.gravity.length === 3 && e.gravity.every((x: unknown) => typeof x === 'number' && Number.isFinite(x))
     ? [e.gravity[0], e.gravity[1], e.gravity[2]] as [number, number, number]
     : [...d.engine.gravity] as [number, number, number];
   return {
+    version: PROJECT_SETTINGS_VERSION,
     engine: {
       gravity: g,
       maxSubsteps: Math.round(num(e.maxSubsteps, d.engine.maxSubsteps, 1, 32)),
       simulationRange: num(e.simulationRange, d.engine.simulationRange, 0, 100000),
-      physicsWorker: PHYSICS_WORKER_SETTINGS.includes(e.physicsWorker) ? e.physicsWorker : d.engine.physicsWorker,
+      physicsWorker: worker,
       maxFrameDelta: num(e.maxFrameDelta, d.engine.maxFrameDelta, 1 / 240, 0.5),
       masterVolume: num(e.masterVolume, d.engine.masterVolume, 0, 1),
     },

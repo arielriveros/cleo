@@ -47,18 +47,24 @@ describe('project settings', () => {
     });
     expect(isDefaultProjectSettings(s)).toBe(false);
     expect(projectSettingsConfig(s)).toEqual({
-      physics: { gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0, worker: 'off' },
+      physics: { gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0, worker: 'on' },
       runtime: { maxFrameDelta: 0.05 },
       audio: { masterVolume: 0.5 },
       window: { title: 'Hollow Keep', width: 1920, height: 1080, fullscreen: true, resizable: false },
     });
   });
 
-  it('reads the physics thread, falling back to the main thread for anything else', () => {
+  it('reads the physics thread, defaulting to the worker', () => {
     expect(parseProjectSettings({ engine: { physicsWorker: 'auto' } }).engine.physicsWorker).toBe('auto');
     expect(parseProjectSettings({ engine: { physicsWorker: 'on' } }).engine.physicsWorker).toBe('on');
-    expect(parseProjectSettings({ engine: { physicsWorker: 'gpu' } }).engine.physicsWorker).toBe('off');
-    expect(parseProjectSettings(null).engine.physicsWorker).toBe('off');
+    expect(parseProjectSettings({ engine: { physicsWorker: 'gpu' } }).engine.physicsWorker).toBe('on');
+    expect(parseProjectSettings(null).engine.physicsWorker).toBe('on');
+    // Main thread chosen since the worker became the default is kept; an 'off' stored before it (when
+    // every project stored the default) moves to the worker.
+    expect(parseProjectSettings({ version: 2, engine: { physicsWorker: 'off' } }).engine.physicsWorker).toBe('off');
+    expect(parseProjectSettings({ engine: { physicsWorker: 'off' } }).engine.physicsWorker).toBe('on');
+    expect(parseProjectSettings({ version: 1, engine: { physicsWorker: 'auto' } }).engine.physicsWorker).toBe('auto');
+    expect(parseProjectSettings(parseProjectSettings({ version: 2, engine: { physicsWorker: 'off' } })).engine.physicsWorker).toBe('off');
     expect(projectSettingsConfig(parseProjectSettings({ engine: { physicsWorker: 'auto' } })).physics.worker).toBe('auto');
   });
 

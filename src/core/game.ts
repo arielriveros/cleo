@@ -120,6 +120,51 @@ export const Game = {
     return CleoEngine.instance?.timeSinceStart ?? 0;
   },
 
+  /**
+   * How fast game time runs: 1 real time, 0.5 half speed, 0 stops the simulation (scripts still get
+   * onUpdate, with a delta of 0; unlike {@link pause}). Scales physics, timers, onUpdate's delta, animators,
+   * particles and AI; input, camera rigs and UI keep real time. Resets to 1 when a scene loads.
+   */
+  get timeScale(): number {
+    return CleoEngine.instance?.timeScale ?? 1;
+  },
+  set timeScale(scale: number) {
+    const engine = CleoEngine.instance;
+    if (engine) engine.timeScale = scale;
+  },
+  /** The scale the last frame actually ran at: {@link timeScale} times any slow motion or hit-stop in progress. */
+  get effectiveTimeScale(): number {
+    return CleoEngine.instance?.effectiveTimeScale ?? 1;
+  },
+  /** The last frame's delta in real seconds, before the time scale. */
+  get unscaledDelta(): number {
+    return CleoEngine.instance?.unscaledDelta ?? 0;
+  },
+  /**
+   * Run game time at `scale` for `seconds` of REAL time, then back to {@link timeScale}, easing back over
+   * the last `easeOut` share (default 0.3; 0 snaps). Overlapping calls keep the slower scale and the later end.
+   *
+   *   Game.slowMotion(0.3, 1.5);   // a dramatic finisher
+   */
+  slowMotion(scale: number, seconds: number, options?: { easeOut?: number }): void {
+    CleoEngine.instance?.dilate(scale, seconds, options);
+  },
+  /**
+   * A hit-stop: game time drops to `scale` (default 0.2, 80% slower) for `seconds` of real time (default
+   * 0.08), so a landed blow reads as heavy. The simulation never stops completely, so motion stays fluid.
+   *
+   *   Game.hitStop();              // a light hit
+   *   Game.hitStop(0.14);          // a heavy one
+   */
+  hitStop(seconds: number = 0.08, scale: number = 0.2): void {
+    // Two frames at least: on a slow machine 0.08 s is a single frame, which reads as a hitch, not a blow.
+    CleoEngine.instance?.dilate(scale, seconds, { easeOut: 0.35, minFrames: 2 });
+  },
+  /** End any slow motion or hit-stop now ({@link timeScale} stays). */
+  clearSlowMotion(): void {
+    CleoEngine.instance?.clearDilation();
+  },
+
   /** World gravity (m/s^2). Defaults to whatever the project config set; changeable at runtime. */
   get gravity(): [number, number, number] {
     return CleoEngine.instance?.physics.gravity ?? [0, -9.81, 0];

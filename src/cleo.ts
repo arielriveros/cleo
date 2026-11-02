@@ -504,6 +504,7 @@ export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime
 export { SOUNDS_GROUP, ownedSoundsGroup } from "./core/scripting/fieldTypes";
 export type { ClipName, SoundName, SocketName, TemplateName, NodeName } from "./core/scripting/fieldTypes";
 export { Game, setGameHost } from "./core/game";
+export { TimeDilation, type DilateOptions } from "./core/timeDilation";
 export { showLoadingOverlay, nextFrame, whenFramesSmooth } from "./core/loadingOverlay";
 export type { LoadingOverlay, LoadingOverlayOptions } from "./core/loadingOverlay";
 export type { GameHost, LoadProgressListener, LoadSceneOptions } from "./core/game";
