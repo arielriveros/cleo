@@ -247,6 +247,50 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
         });
     });
 
+    describe('collider geometry', () => {
+        const rotate = (q: ArrayLike<number>, v: ArrayLike<number>) => {
+            const [x, y, z, w] = [q[0], q[1], q[2], q[3]];
+            const tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+            return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)];
+        };
+        const worldCentre = (frame: number[], offset: ArrayLike<number>) => {
+            const r = rotate([frame[3], frame[4], frame[5], frame[6]], offset);
+            return [frame[0] + r[0], frame[1] + r[1], frame[2] + r[2]];
+        };
+
+        it('places every part where its collider is, inside the frame bounding radius', () => {
+            const w = make();
+            const q = [0, Math.sin(0.3), 0, Math.cos(0.3)] as const;
+            const b = w.createBody({
+                position: [1, 2, 3], rotation: q, mass: 2,
+                colliders: [
+                    { shape: { kind: 'box', halfExtents: [0.5, 0.25, 0.5] }, offset: [0.6, 0.3, 0] },
+                    { shape: { kind: 'sphere', radius: 0.2 }, offset: [-0.5, 0, 0] },
+                ],
+            });
+            const frame = new Array(7).fill(0);
+            const radius = w.getColliderFrame(b, frame);
+            const parts = w.colliderParts(b);
+            expect(w.colliderParts(b)).toBe(parts);
+            const expected = (offset: number[]) => { const r = rotate(q, offset); return [1 + r[0], 2 + r[1], 3 + r[2]]; };
+            const box = parts.find(p => p.shape.kind === 'box')!, ball = parts.find(p => p.shape.kind === 'sphere')!;
+            worldCentre(frame, box.offset).forEach((v, i) => expect(v).toBeCloseTo(expected([0.6, 0.3, 0])[i], 9));
+            worldCentre(frame, ball.offset).forEach((v, i) => expect(v).toBeCloseTo(expected([-0.5, 0, 0])[i], 9));
+            for (const part of parts) {
+                const c = worldCentre(frame, part.offset);
+                expect(Math.hypot(c[0] - frame[0], c[1] - frame[1], c[2] - frame[2]) + part.boundingRadius).toBeLessThanOrEqual(radius + 1e-9);
+            }
+        });
+
+        it('reports a capsule natively, or as the cylinder and two caps it simulates', () => {
+            const w = make();
+            const b = body(w, { kind: 'capsule', radius: 0.3, height: 1 }, [0, 0, 0]);
+            const kinds = w.colliderParts(b).map(p => p.shape.kind).sort();
+            if (w.capabilities.nativeCapsule) expect(kinds).toEqual(['capsule']);
+            else expect(kinds).toEqual(['cylinder', 'sphere', 'sphere']);
+        });
+    });
+
     describe('contacts and events', () => {
         it('reports a resting contact with the normal pointing out of the first body', () => {
             const w = make();

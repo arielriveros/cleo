@@ -2,32 +2,41 @@ import { describe, it, expect } from 'vitest';
 import {
     packParticleColliders, COLLIDER_KIND, COLLIDER_FLOATS, MAX_PARTICLE_COLLIDERS, type ColliderBody,
 } from '../src/particles/particleColliders';
+import type { ColliderGeometry, ColliderPart, PartShape } from '../src/physics/pal/types';
 import { SIM, packEmitter } from '../src/particles/particlePack';
 import { defaultEmitter, makeModule } from '../src/particles/particleSystemAsset';
 
 // The CPU half of particles bouncing off physics bodies: which bodies around an effect are handed to the
 // simulation, and in what layout. The GPU half (collideBodies in particleSimCore.wgsl) reads exactly this.
 
+/** A body as the packer sees it: its flags, plus the collider frame and parts a physics world would report. */
+interface FakeBody extends ColliderBody {
+    frame: number[];
+    bound: number;
+    parts: ColliderPart[];
+}
+
 let nextId = 1;
-const ident = { x: 0, y: 0, z: 0, w: 1 };
-function body(position: [number, number, number], shapes: any[], extra: Partial<ColliderBody> = {}): ColliderBody {
+function body(position: [number, number, number], shapes: PartShape[], extra: Partial<FakeBody> = {}): FakeBody {
     return {
         id: nextId++,
-        position: { x: position[0], y: position[1], z: position[2] },
-        quaternion: { ...ident },
-        shapes,
-        shapeOffsets: shapes.map(() => ({ x: 0, y: 0, z: 0 })),
-        shapeOrientations: shapes.map(() => ({ ...ident })),
-        boundingRadius: 2,
+        frame: [position[0], position[1], position[2], 0, 0, 0, 1],
+        bound: 2,
+        parts: shapes.map(shape => ({ shape, offset: [0, 0, 0], rotation: [0, 0, 0, 1], boundingRadius: 1 })),
         ...extra,
     };
 }
-const box = (hx: number, hy: number, hz: number) => ({ type: 4, halfExtents: { x: hx, y: hy, z: hz } });
-const sphere = (r: number) => ({ type: 1, radius: r });
+const box = (hx: number, hy: number, hz: number): PartShape => ({ kind: 'box', halfExtents: [hx, hy, hz] });
+const sphere = (r: number): PartShape => ({ kind: 'sphere', radius: r });
 
-const pack = (bodies: ColliderBody[], center: [number, number, number] = [0, 0, 0], radius = 5) => {
+const geometry: ColliderGeometry<FakeBody> = {
+    colliderParts: b => b.parts,
+    colliderFrame: (b, out) => { for (let i = 0; i < 7; i++) out[i] = b.frame[i]; return b.bound; },
+};
+
+const pack = (bodies: FakeBody[], center: [number, number, number] = [0, 0, 0], radius = 5) => {
     const out = new Float32Array(MAX_PARTICLE_COLLIDERS * COLLIDER_FLOATS);
-    const count = packParticleColliders(bodies, center, radius, out);
+    const count = packParticleColliders(bodies, center, radius, out, geometry);
     const at = (i: number) => Array.from(out.subarray(i * COLLIDER_FLOATS, (i + 1) * COLLIDER_FLOATS));
     return { count, at };
 };
@@ -45,12 +54,12 @@ describe('packParticleColliders', () => {
         expect(at(0).slice(0, 8)).toEqual([1, 2, 3, COLLIDER_KIND.CAPSULE, 1, 2, 3, 0.5]);
     });
 
-    it('packs a cannon plane by its +Z normal, and a convex hull as its bounding box', () => {
-        const ground = body([0, 0, 0], [{ type: 2 }], { boundingRadius: Infinity });
+    it('packs a plane by its normal (cannon\'s faces +Z), and a convex hull as its bounding box', () => {
+        const ground = body([0, 0, 0], [{ kind: 'plane', normal: [0, 0, 1] }], { bound: Infinity });
         // Rotate the plane -90 deg about X so its +Z normal points up.
         const s = Math.SQRT1_2;
-        ground.quaternion = { x: -s, y: 0, z: 0, w: s };
-        const hull = body([3, 0, 0], [{ type: 16, vertices: [{ x: -1, y: 0, z: -1 }, { x: 1, y: 2, z: 1 }] }]);
+        ground.frame = [0, 0, 0, -s, 0, 0, s];
+        const hull = body([3, 0, 0], [{ kind: 'convex', hull: { vertices: [[-1, 0, -1], [1, 2, 1]], faces: [], normals: [] } }]);
         const { count, at } = pack([ground, hull]);
         expect(count).toBe(2);
         const plane = at(0);

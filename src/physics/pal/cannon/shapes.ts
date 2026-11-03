@@ -48,7 +48,8 @@ export function cannonParts(desc: ShapeDesc): CannonPart[] {
             return [at(mesh)];
         }
         case 'heightfield':
-            return [at(new Heightfield(desc.heights.map(row => [...row]), { elementSize: desc.elementSize }), new Vec3(), HEIGHTFIELD_TURN.clone())];
+            // Not copied: a landscape's field is large, and cannon only reads it.
+            return [at(new Heightfield(desc.heights as number[][], { elementSize: desc.elementSize }), new Vec3(), HEIGHTFIELD_TURN.clone())];
         case 'plane':
             return [at(new Plane(), new Vec3(), PLANE_TURN.clone())];
     }

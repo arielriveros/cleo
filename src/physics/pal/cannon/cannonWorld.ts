@@ -5,11 +5,12 @@ import {
 import type { PhysicsCapabilities } from '../capabilities';
 import { PhysicsEventKind } from '../types';
 import type {
-    BodyDesc, BodyHandle, ColliderDesc, JointDesc, JointHandle, MassProperties, Out, RayHit, RayOptions, StepProfile, V3,
+    BodyDesc, BodyHandle, ColliderDesc, ColliderPart, JointDesc, JointHandle, MassProperties, Out, RayHit, RayOptions, StepProfile, V3,
 } from '../types';
 import type { PhysicsWorld } from '../world';
 import { CannonBody } from './cannonBody';
 import { cannonParts } from './shapes';
+import { cannonColliderParts } from './parts';
 import { createCannonWorld } from './worldConfig';
 import { MaterialTable } from './materialTable';
 import { broadphaseBodyCount, clearWorld } from './worldTeardown';
@@ -209,6 +210,14 @@ export class CannonWorld implements PhysicsWorld {
         body.updateAABB();
         const lo = body.aabb.lowerBound, hi = body.aabb.upperBound;
         out[0] = lo.x; out[1] = lo.y; out[2] = lo.z; out[3] = hi.x; out[4] = hi.y; out[5] = hi.z;
+    }
+
+    public colliderParts(h: BodyHandle): readonly ColliderPart[] { return cannonColliderParts(this._body(h)); }
+
+    public getColliderFrame(h: BodyHandle, out: Out): number {
+        const body = this._body(h), p = body.position, q = body.quaternion;
+        out[0] = p.x; out[1] = p.y; out[2] = p.z; out[3] = q.x; out[4] = q.y; out[5] = q.z; out[6] = q.w;
+        return body.boundingRadius;
     }
 
     // ---- joints ----

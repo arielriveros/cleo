@@ -530,7 +530,7 @@ export class ParticleRenderer {
         const center = [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2];
         const radius = Math.hypot(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]) / 2
             + ParticleRenderer.COLLIDER_MARGIN;
-        this._colliderCount = packParticleColliders(physics.bodies as unknown as ColliderBody[], center, radius, this._colliderData);
+        this._colliderCount = packParticleColliders(physics.bodies as unknown as ColliderBody[], center, radius, this._colliderData, physics.colliderGeometry);
         frameStats.particleColliders += this._colliderCount;
         return this._colliderCount;
     }

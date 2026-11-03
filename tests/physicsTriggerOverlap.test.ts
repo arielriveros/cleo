@@ -5,6 +5,7 @@ import { Node } from '../src/core/scene/nodes/node';
 import { Trigger, type TriggerOptions, type TriggerContact } from '../src/physics/body';
 import { physicsStats } from '../src/physics/physicsStats';
 import { localPrims } from '../src/physics/triggerOverlaps';
+import { cannonColliderParts } from '../src/physics/pal/cannon/parts';
 
 // Trigger volumes against OTHER trigger volumes. cannon drops every static-static pair in its broadphase
 // and every engine trigger is static, so these come from the engine's own pass (triggerOverlaps.ts), run
@@ -179,7 +180,7 @@ describe('trigger ↔ trigger overlaps', () => {
         t.addShape(new Cylinder(0.3, 0.3, 1.2, 12), new Vec3(0, 0.9, 0));
         t.addShape(new Sphere(0.3), new Vec3(0, 1.5, 0));
         t.addShape(new Sphere(0.3), new Vec3(0, 0.3, 0));
-        const prims = localPrims(t);
+        const prims = localPrims(cannonColliderParts(t));
         expect(prims).toHaveLength(1);
         expect(Array.from(prims[0].la)).toEqual([0, 0.3, 0].map(v => expect.closeTo(v, 6)));
 

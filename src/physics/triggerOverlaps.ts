@@ -1,5 +1,6 @@
 import { touch, type QueryShape } from "./overlap";
 import { Logger } from "../core/logger";
+import type { ColliderGeometry, ColliderPart } from "./pal/types";
 
 // Trigger volumes overlapping OTHER trigger volumes — a weapon's hitbox entering a character's hurtbox.
 //
@@ -16,24 +17,20 @@ import { Logger } from "../core/logger";
 //  - broadphase: sort-and-sweep over each trigger's bounding sphere (its swept bounds for a continuous
 //    one), on an array kept nearly sorted from frame to frame, so the insertion sort is close to O(n);
 //  - layers: a pair overlaps only when each side's mask has the other's group, cannon's own rule;
-//  - narrowphase: every shape becomes a capsule (a sphere is a zero-length one) or a box, in the body's
-//    space, cached until the shapes change. The engine's capsule — a cylinder plus two end spheres in
-//    cannon — collapses to ONE capsule, since the cylinder tested as a capsule already covers its caps.
+//  - narrowphase: every collider part becomes a capsule (a sphere is a zero-length one) or a box, in the
+//    body's collider frame, cached until the shapes change. A capsule a backend built from a cylinder and
+//    two end spheres (cannon) collapses to ONE capsule, since the cylinder tested as a capsule already
+//    covers its caps.
 //    Capsule against capsule is a segment-segment distance with no allocation;
 //  - a `continuous` trigger is tested along the path from last frame's pose to this one, sampled no
 //    further apart than its thinnest part, so a blade cannot step over an arm between two frames.
 //
-// A structural leaf like overlap.ts (no Node, no cannon import), so the unit suite loads it directly.
+// A structural leaf like overlap.ts (no Node, no backend import), so the unit suite loads it directly. A
+// trigger's geometry and pose come from a ColliderGeometry (PhysicsSystem's, over its world).
 
-/** What the pass reads from a trigger. `Trigger` (body.ts) satisfies it. */
+/** What the pass reads from a trigger, besides its geometry. `Trigger` (body.ts) satisfies it. */
 export interface TriggerBody {
     id: number;
-    position: { x: number; y: number; z: number };
-    quaternion: { x: number; y: number; z: number; w: number };
-    shapes: any[];
-    shapeOffsets: { x: number; y: number; z: number }[];
-    shapeOrientations: { x: number; y: number; z: number; w: number }[];
-    boundingRadius: number;
     collisionFilterGroup: number;
     readonly mask: number;
     readonly enabled: boolean;
@@ -89,6 +86,8 @@ interface Entry {
     thin: number;
     /** This frame's and last frame's pose: position xyz, quaternion xyzw. */
     cur: Float64Array;
+    /** This frame's bounding radius about `cur`. */
+    radius: number;
     prev: Float64Array;
     prevValid: boolean;
     min: Float64Array;
@@ -123,37 +122,38 @@ function rot(q: ArrayLike<number>, qi: number, x: number, y: number, z: number, 
     out[oi + 2] = iz * qw + iw * -qz + ix * -qy - iy * -qx;
 }
 
-/** The body's shapes as prims in body space. */
-export function localPrims(body: TriggerBody): Prim[] {
+/** A trigger's collider parts as prims in its collider frame. `owner` names it in a warning. */
+export function localPrims(parts: readonly ColliderPart[], owner?: { id: number }): Prim[] {
     const out: Prim[] = [];
     const caps: Prim[] = [];
     const spheres: { c: [number, number, number]; r: number }[] = [];
     const tmp = new Float64Array(3);
-    for (let i = 0; i < body.shapes.length; i++) {
-        const shape = body.shapes[i];
-        const o = body.shapeOffsets[i], so = body.shapeOrientations[i];
-        const q = [so.x, so.y, so.z, so.w];
-        // cannon's Shape.types: SPHERE 1, BOX 4, CYLINDER 128.
-        if (shape.type === 1) {
-            spheres.push({ c: [o.x, o.y, o.z], r: shape.radius });
-        } else if (shape.type === 4) {
+    for (const part of parts) {
+        const shape = part.shape, o = part.offset, q = part.rotation;
+        if (shape.kind === 'sphere') {
+            spheres.push({ c: [o[0], o[1], o[2]], r: shape.radius });
+        } else if (shape.kind === 'box') {
             const h = shape.halfExtents;
-            const p = newPrim(true, Math.min(h.x, h.y, h.z));
-            p.la.set([o.x, o.y, o.z]); p.half.set([h.x, h.y, h.z]); p.lq.set(q);
+            const p = newPrim(true, Math.min(h[0], h[1], h[2]));
+            p.la.set([o[0], o[1], o[2]]); p.half.set([h[0], h[1], h[2]]); p.lq.set(q);
             out.push(p);
-        } else if (shape.type === 128) {
-            const r = Math.max(shape.radiusTop ?? 0, shape.radiusBottom ?? 0);
+        } else if (shape.kind === 'cylinder' || shape.kind === 'capsule') {
+            const r = shape.kind === 'capsule' ? shape.radius : Math.max(shape.radiusTop, shape.radiusBottom);
             const p = newPrim(false, r);
-            rot(q, 0, 0, (shape.height ?? 0) / 2, 0, tmp, 0);
-            p.la.set([o.x - tmp[0], o.y - tmp[1], o.z - tmp[2]]);
-            p.lb.set([o.x + tmp[0], o.y + tmp[1], o.z + tmp[2]]);
-            out.push(p); caps.push(p);
+            rot(q, 0, 0, shape.height / 2, 0, tmp, 0);
+            p.la.set([o[0] - tmp[0], o[1] - tmp[1], o[2] - tmp[2]]);
+            p.lb.set([o[0] + tmp[0], o[1] + tmp[1], o[2] + tmp[2]]);
+            out.push(p); if (shape.kind === 'cylinder') caps.push(p);
         } else {
             // A convex hull, trimesh, plane or heightfield: its bounding sphere stands in. Triggers are made of
             // spheres, boxes and capsules; anything else is an approximation, said once.
             if (!warned) warned = new WeakSet();
-            if (!warned.has(body)) { warned.add(body); Logger.warn(`Trigger ${body.id}: a shape other than a sphere, box or capsule is approximated by its bounding sphere for trigger-to-trigger overlaps.`, 'Physics'); }
-            spheres.push({ c: [o.x, o.y, o.z], r: shape.boundingSphereRadius ?? 0 });
+            const key: object = owner ?? parts;
+            if (!warned.has(key)) {
+                warned.add(key);
+                Logger.warn(`Trigger ${owner ? owner.id : '?'}: a shape other than a sphere, box or capsule is approximated by its bounding sphere for trigger-to-trigger overlaps.`, 'Physics');
+            }
+            spheres.push({ c: [o[0], o[1], o[2]], r: part.boundingRadius ?? 0 });
         }
     }
     // An engine capsule's end spheres sit exactly on its cylinder-capsule's ends: drop them.
@@ -304,23 +304,21 @@ export class TriggerOverlapPass {
      * ended ones removed. `version` must change whenever a trigger is added, removed, enabled, disabled or
      * reshaped — the candidate list is only rebuilt then.
      */
-    public run(triggers: Iterable<TriggerBody>, version: number, out: Map<number, TriggerOverlap>): void {
+    public run(triggers: Iterable<TriggerBody>, version: number, out: Map<number, TriggerOverlap>, geometry: ColliderGeometry<TriggerBody>): void {
         this.stats.candidates = this.stats.tested = this.stats.overlaps = 0;
-        if (version !== this._version) this._rebuild(triggers, version);
+        if (version !== this._version) this._rebuild(triggers, version, geometry);
         const list = this._list;
         if (!this._anyDetector || list.length < 2) { if (out.size) out.clear(); return; }
         this.stats.candidates = list.length;
         const stamp = ++this._stamp;
 
-        // Poses and swept bounds. A trigger's bounding sphere is centred on its position, which is its
-        // node's origin (triggers are never mass-recentred), and covers every shape and offset.
+        // Poses and swept bounds. A trigger's bounding sphere is centred on its collider frame (its node's
+        // origin: triggers are never mass-recentred) and covers every part.
         for (const e of list) {
             const b = e.body;
-            if (e.prims.length === 0 || e.shapeVersion !== b.shapeVersion) { e.prims = localPrims(b); e.shapeVersion = b.shapeVersion; e.thin = thinnest(e.prims); }
+            if (e.prims.length === 0 || e.shapeVersion !== b.shapeVersion) { e.prims = localPrims(geometry.colliderParts(b), b); e.shapeVersion = b.shapeVersion; e.thin = thinnest(e.prims); }
             e.prev.set(e.cur);
-            const p = b.position, q = b.quaternion;
-            e.cur[0] = p.x; e.cur[1] = p.y; e.cur[2] = p.z; e.cur[3] = q.x; e.cur[4] = q.y; e.cur[5] = q.z; e.cur[6] = q.w;
-            const r = b.boundingRadius;
+            const r = e.radius = geometry.colliderFrame(b, e.cur);
             for (let k = 0; k < 3; k++) { e.min[k] = e.cur[k] - r; e.max[k] = e.cur[k] + r; }
             if (b.continuous && e.prevValid)
                 for (let k = 0; k < 3; k++) { e.min[k] = Math.min(e.min[k], e.prev[k] - r); e.max[k] = Math.max(e.max[k], e.prev[k] + r); }
@@ -375,20 +373,20 @@ export class TriggerOverlapPass {
         this._anyDetector = false;
     }
 
-    private _rebuild(triggers: Iterable<TriggerBody>, version: number): void {
+    private _rebuild(triggers: Iterable<TriggerBody>, version: number, geometry: ColliderGeometry<TriggerBody>): void {
         this._version = version;
         const keep = new Set<TriggerBody>();
         const list: Entry[] = [];
         let any = false;
         for (const body of triggers) {
-            if (!body.enabled || body.shapes.length === 0) continue;
+            if (!body.enabled || geometry.colliderParts(body).length === 0) continue;
             keep.add(body);
             let e = this._entries.get(body);
             if (!e) {
                 // A trigger that just came in (or back on) has no previous pose: its first test is discrete.
                 e = {
                     body, prims: [], shapeVersion: -1, thin: 0,
-                    cur: new Float64Array(7), prev: new Float64Array(7), prevValid: false,
+                    cur: new Float64Array(7), radius: 0, prev: new Float64Array(7), prevValid: false,
                     min: new Float64Array(3), max: new Float64Array(3), placedStamp: -1, placedT: -1,
                 };
                 this._entries.set(body, e);
@@ -461,5 +459,5 @@ function travelOf(e: Entry): number {
     const dx = e.cur[0] - e.prev[0], dy = e.cur[1] - e.prev[1], dz = e.cur[2] - e.prev[2];
     const dot = Math.min(1, Math.abs(e.prev[3] * e.cur[3] + e.prev[4] * e.cur[4] + e.prev[5] * e.cur[5] + e.prev[6] * e.cur[6]));
     const angle = 2 * Math.acos(dot);
-    return Math.hypot(dx, dy, dz) + angle * e.body.boundingRadius;
+    return Math.hypot(dx, dy, dz) + angle * e.radius;
 }

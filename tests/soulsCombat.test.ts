@@ -295,7 +295,7 @@ describe('i-frames', () => {
         try {
             const e = enemy('Bare') as any;
             scene.addNode(e);
-            e.setBody(70).attachShape(new Shape(new Cylinder(0.35, 0.35, 1.7, 12)), [0, 0.85, 0]);
+            e.setBody(70).attachShape(Shape.Cylinder(0.35, 0.35, 1.7, 12), [0, 0.85, 0]);
             e.body.updateAABB();
             e._syncHurtbox();
             const hb = e.getChildByName('Hurtbox')[0];

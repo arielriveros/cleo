@@ -1,26 +1,25 @@
 import type { Node } from "../core/scene/nodes/node";
+import type { ColliderGeometry } from "./pal/types";
 
 // Shape-overlap queries: "which bodies does this sphere / capsule / box touch right now", and the swept
 // version, "which bodies did it touch on its way from here to there". cannon has raycasts but nothing
 // volumetric, and a ray is the wrong tool for a blade — it is a line with no thickness, so it slips
 // between a thin sword and a shoulder, and a fast swing teleports clean past a target between frames.
 //
-// Geometry is exact for what characters and props are made of: spheres, boxes and capsules (the engine's
-// capsule is a cylinder plus two spheres in cannon; the cylinder part is tested as a capsule of the same
-// radius and length, which its two end spheres make exact). Convex hulls, trimeshes, heightfields and
-// planes are not tested: the queries are for hitting things, not for terrain.
+// Geometry is exact for what characters and props are made of: spheres, boxes and capsules (on a backend
+// that builds a capsule from a cylinder and two spheres, the cylinder part is tested as a capsule of the
+// same radius and length, which its two end spheres make exact). Convex hulls, trimeshes, heightfields and
+// planes are not tested: the queries are for hitting things, not for terrain. Bodies are measured from
+// their collider parts (pal/types.ts ColliderPart), exactly as their backend simulates them.
 
 type V3 = [number, number, number];
 
-/** The subset of a cannon `Body` a query reads. Structural, so this module stays a leaf the unit suite loads. */
+/**
+ * What a query reads from a body, besides its geometry (which comes from a ColliderGeometry). Structural,
+ * so this module stays a leaf the unit suite loads.
+ */
 export interface OverlapBody {
     id: number;
-    position: { x: number; y: number; z: number };
-    quaternion: { x: number; y: number; z: number; w: number };
-    shapes: any[];
-    shapeOffsets: { x: number; y: number; z: number }[];
-    shapeOrientations: { x: number; y: number; z: number; w: number }[];
-    boundingRadius: number;
     isTrigger?: boolean;
     /** False on a switched-off trigger (Trigger.enabled), which no query sees. */
     enabled?: boolean;
@@ -175,33 +174,33 @@ function boxesOverlap(ca: V3, ha: V3, axesA: V3[], cb: V3, hb: V3, axesB: V3[]):
 const axesOf = (q: readonly number[]): V3[] => [rotate(q, [1, 0, 0]), rotate(q, [0, 1, 0]), rotate(q, [0, 0, 1])];
 
 // ---------------------------------------------------------------------------------------------------
-// Target shapes: one cannon shape on a body, resolved into world space.
+// Target shapes: one collider part of a body, resolved into world space.
 
 type Target =
     | { kind: 'capsule'; a: V3; b: V3; radius: number }
     | { kind: 'box'; center: V3; half: V3; rotation: [number, number, number, number] };
 
+const FRAME: number[] = [0, 0, 0, 0, 0, 0, 1];
+
 /** A body's testable shapes in world space. Unsupported shape types are left out. */
-export function bodyTargets(body: OverlapBody): Target[] {
+export function bodyTargets<TBody>(body: TBody, geometry: ColliderGeometry<TBody>): Target[] {
     const out: Target[] = [];
-    const bq = [body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w];
-    const bp: V3 = [body.position.x, body.position.y, body.position.z];
-    for (let i = 0; i < body.shapes.length; i++) {
-        const shape = body.shapes[i];
-        const o = body.shapeOffsets[i], so = body.shapeOrientations[i];
-        const off = rotate(bq, [o.x, o.y, o.z]);
+    geometry.colliderFrame(body, FRAME);
+    const bq = [FRAME[3], FRAME[4], FRAME[5], FRAME[6]];
+    const bp: V3 = [FRAME[0], FRAME[1], FRAME[2]];
+    for (const part of geometry.colliderParts(body)) {
+        const shape = part.shape, o = part.offset;
+        const off = rotate(bq, o);
         const center: V3 = [bp[0] + off[0], bp[1] + off[1], bp[2] + off[2]];
-        const q = qmul(bq, [so.x, so.y, so.z, so.w]);
-        // cannon's Shape.types: SPHERE 1, BOX 4, CYLINDER 128 (checked by name too, for robustness).
-        const type = shape.type;
-        if (type === 1 || shape.constructor?.name === 'Sphere') {
+        const q = qmul(bq, part.rotation);
+        if (shape.kind === 'sphere') {
             out.push({ kind: 'capsule', a: center, b: center, radius: shape.radius });
-        } else if (type === 4 || shape.constructor?.name === 'Box') {
+        } else if (shape.kind === 'box') {
             const h = shape.halfExtents;
-            out.push({ kind: 'box', center, half: [h.x, h.y, h.z], rotation: q });
-        } else if (type === 128 || shape.constructor?.name === 'Cylinder') {
-            const half = rotate(q, [0, (shape.height ?? 0) / 2, 0]);
-            const radius = Math.max(shape.radiusTop ?? 0, shape.radiusBottom ?? 0);
+            out.push({ kind: 'box', center, half: [h[0], h[1], h[2]], rotation: q });
+        } else if (shape.kind === 'cylinder' || shape.kind === 'capsule') {
+            const half = rotate(q, [0, shape.height / 2, 0]);
+            const radius = shape.kind === 'capsule' ? shape.radius : Math.max(shape.radiusTop, shape.radiusBottom);
             out.push({ kind: 'capsule', a: sub(center, half), b: [center[0] + half[0], center[1] + half[1], center[2] + half[2]], radius });
         }
     }
@@ -289,7 +288,7 @@ const ignoreList = (ignore: Node | Node[] | null | undefined): Node[] => (!ignor
  * (a capsule's three cannon parts are one character), ordered by fraction then by distance.
  */
 export function queryPoses<TBody extends OverlapBody>(
-    bodies: readonly TBody[], poses: readonly QueryShape[], opts?: OverlapOptions<TBody>,
+    bodies: readonly TBody[], poses: readonly QueryShape[], geometry: ColliderGeometry<TBody>, opts?: OverlapOptions<TBody>,
 ): OverlapHit<TBody>[] {
     if (poses.length === 0) return [];
     // One bounding sphere around every pose: the cheap reject for the whole sweep.
@@ -306,11 +305,12 @@ export function queryPoses<TBody extends OverlapBody>(
     const byKey = new Map<object, OverlapHit<TBody> & { d: number }>();
     for (const body of bodies) {
         if (!keep(body, opts, ignore)) continue;
-        const bp: V3 = [body.position.x, body.position.y, body.position.z];
-        const reach = r + (body.boundingRadius || 0);
+        const bound = geometry.colliderFrame(body, FRAME);
+        const bp: V3 = [FRAME[0], FRAME[1], FRAME[2]];
+        const reach = r + (bound || 0);
         if (dist2(bp, c) > reach * reach) continue;
 
-        const targets = bodyTargets(body);
+        const targets = bodyTargets(body, geometry);
         if (targets.length === 0) continue;
         const key: object = body.owner ?? body;
         for (let i = 0; i < poses.length; i++) {

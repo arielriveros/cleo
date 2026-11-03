@@ -1,6 +1,6 @@
 import type { PhysicsCapabilities } from './capabilities';
 import type {
-    BodyDesc, BodyHandle, ColliderDesc, JointDesc, JointHandle, MassProperties, Out, PhysicsBackendKind,
+    BodyDesc, BodyHandle, ColliderDesc, ColliderPart, JointDesc, JointHandle, MassProperties, Out, PhysicsBackendKind,
     PhysicsEventKind, RayHit, RayOptions, StepProfile, V3,
 } from './types';
 
@@ -60,6 +60,17 @@ export interface PhysicsWorld {
     isSleeping(body: BodyHandle): boolean;
     /** The body's world bounds, min [3] then max [3] (6 numbers). */
     getAabb(body: BodyHandle, out: Out): void;
+    /**
+     * The body's collision geometry as this backend simulates it (see ColliderPart), placed in its collider
+     * frame. Cached: the same array until the body's colliders change.
+     */
+    colliderParts(body: BodyHandle): readonly ColliderPart[];
+    /**
+     * The frame {@link colliderParts} are placed in, [px py pz qx qy qz qw] into `out`: the centre of mass on
+     * a backend where that is the body's own position (cannon), the node origin otherwise. Returns a radius
+     * about it that bounds every part.
+     */
+    getColliderFrame(body: BodyHandle, out: Out): number;
 
     // ---- joints ----
 

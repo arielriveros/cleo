@@ -20,7 +20,7 @@ import { WorkerExecutor } from "./executor/workerExecutor";
 import type { ContactSource, PhysicsExecutor } from "./executor/physicsExecutor";
 import { createPhysicsWorld } from "./pal/createWorld";
 import type { PhysicsWorld } from "./pal/world";
-import { PhysicsEventKind, type BodyHandle } from "./pal/types";
+import { PhysicsEventKind, type BodyHandle, type ColliderGeometry, type ColliderPart } from "./pal/types";
 import { CannonWorld } from "./pal/cannon/cannonWorld";
 import { WorkerPort, type PhysicsPort } from "./worker/ports";
 import { effectiveSimulationRange, shouldFreeze, SIMULATION_WAKE_GRACE } from "./simulationRange";
@@ -656,7 +656,7 @@ export class PhysicsSystem {
   private _detectTriggerOverlaps(): void {
     if (this._triggers.size < 2 && this._ttPairs.size === 0) return;
     const start = performance.now();
-    this._ttPass.run(this._triggers, this.triggerVersion, this._ttPairs);
+    this._ttPass.run(this._triggers, this.triggerVersion, this._ttPairs, this._geometry);
     physicsStats.triggerPassMs = performance.now() - start;
     physicsStats.triggerCandidates = this._ttPass.stats.candidates;
     physicsStats.triggerPairsTested = this._ttPass.stats.tested;
@@ -750,6 +750,23 @@ export class PhysicsSystem {
   public get bodies(): readonly Body[] { return this._world ? this._cannon.raw.bodies : []; }
 
   /**
+   * Where each body's collision geometry is, as the backend simulates it (see pal/types.ts ColliderPart): what
+   * the shape queries, the trigger pass and particle collision measure bodies by.
+   */
+  public get colliderGeometry(): ColliderGeometry<{ id: number }> { return this._geometry; }
+
+  /** A body's collider parts, placed in its collider frame (see {@link colliderGeometry}). */
+  public colliderParts(body: Body): readonly ColliderPart[] {
+    const h = body.id as BodyHandle;
+    return this._world?.hasBody(h) ? this._world.colliderParts(h) : [];
+  }
+
+  private readonly _geometry: ColliderGeometry<{ id: number }> = {
+    colliderParts: body => this._world.colliderParts(body.id as BodyHandle),
+    colliderFrame: (body, out) => this._world.getColliderFrame(body.id as BodyHandle, out),
+  };
+
+  /**
    * One substep of buoyancy from every water volume in the scene (the world's `preStep`). Each volume
    * records what it buoyed, for its surface effects. Character bodies are skipped unless a volume asks:
    * a capsule averages ~150 kg/m³ and locomotion carries vertical velocity over, so water would launch it.
@@ -768,8 +785,8 @@ export class PhysicsSystem {
       for (const body of this._cannon.raw.bodies) {
         // applyForce wakes a sleeping body: a frozen floater would be thawed every substep.
         if (body.sleepState === Body.SLEEPING) continue;
-        if (!floats(body, spec, isCharacter)) continue;
-        const fraction = applyBuoyancy(body, spec, gravity, dt);
+        if (body.type !== Body.DYNAMIC || !floats(body, spec, isCharacter)) continue;
+        const fraction = applyBuoyancy(this._world, body.id as BodyHandle, body.mass, spec, gravity, dt);
         if (fraction > 0) volume.recordSubmerged(body, fraction);
       }
     }
@@ -825,7 +842,7 @@ export class PhysicsSystem {
     const opts = options?.ignore
       ? { ...options, ignore: (Array.isArray(options.ignore) ? options.ignore : [options.ignore]).map(n => unwrapScriptNode(n)) }
       : options;
-    const hits = queryPoses(this._cannon.raw.bodies as unknown as OverlapBody[], poses, opts as OverlapOptions<OverlapBody>);
+    const hits = queryPoses(this._cannon.raw.bodies as unknown as OverlapBody[], poses, this._geometry, opts as OverlapOptions<OverlapBody>);
     physicsStats.rayMs += performance.now() - start;
     physicsStats.rayCount++;
     return hits as unknown as OverlapHit<Body>[];

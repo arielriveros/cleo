@@ -1,5 +1,5 @@
 import { Node, ModelNode, Vec, eulerFromQuatDeg, markEditorOnly } from 'cleo';
-import type { Scene } from 'cleo';
+import type { Scene, ColliderPart } from 'cleo';
 import type { ShapeDescription } from '../features/EngineContext';
 
 // The trigger volumes physics is actually testing, drawn live while the game plays (Play and Simulate,
@@ -40,9 +40,6 @@ export interface LiveTrigger {
   owner: Node | null;
   position: { x: number; y: number; z: number };
   quaternion: { x: number; y: number; z: number; w: number };
-  shapes: any[];
-  shapeOffsets: { x: number; y: number; z: number }[];
-  shapeOrientations: { x: number; y: number; z: number; w: number }[];
 }
 
 /** What the overlay reads from the physics system. */
@@ -50,6 +47,8 @@ export interface LiveTriggerSource {
   readonly triggers: ReadonlySet<LiveTrigger>;
   readonly triggerVersion: number;
   isTriggerOverlapping(trigger: LiveTrigger): boolean;
+  /** A trigger's collision geometry as physics simulates it. */
+  colliderParts(trigger: LiveTrigger): readonly ColliderPart[];
 }
 
 export type WireBuilder = (shapes: ShapeDescription[], color: [number, number, number], scale: Vec.vec3) => ModelNode | null;
@@ -57,42 +56,43 @@ export type WireBuilder = (shapes: ShapeDescription[], color: [number, number, n
 const round = (v: number) => Math.round(v * 1e6) / 1e6;
 
 /**
- * A trigger body's cannon shapes as the editor's shape descriptions, at their final size (shapes are
- * scaled when they are built, so these draw at scale 1). The engine's capsule — a cylinder plus a sphere
- * on each end — comes back as one capsule.
+ * A trigger's collider parts as the editor's shape descriptions, at their final size (shapes are scaled
+ * when they are built, so these draw at scale 1). A capsule a backend built from a cylinder and a sphere on
+ * each end (cannon) comes back as one capsule.
  */
-export function bodyShapeDescriptions(body: Pick<LiveTrigger, 'shapes' | 'shapeOffsets' | 'shapeOrientations'>): ShapeDescription[] {
+export function bodyShapeDescriptions(parts: readonly ColliderPart[]): ShapeDescription[] {
   const out: ShapeDescription[] = [];
   const spheres: { index: number; c: number[]; r: number }[] = [];
   const euler = Vec.vec3.create();
   const rotationOf = (i: number): number[] => {
-    const q = body.shapeOrientations[i];
-    eulerFromQuatDeg(euler, Vec.quat.fromValues(q.x, q.y, q.z, q.w));
+    const q = parts[i].rotation;
+    eulerFromQuatDeg(euler, Vec.quat.fromValues(q[0], q[1], q[2], q[3]));
     return [round(euler[0]), round(euler[1]), round(euler[2])];
   };
-  const offsetOf = (i: number): number[] => { const o = body.shapeOffsets[i]; return [o.x, o.y, o.z]; };
+  const offsetOf = (i: number): number[] => { const o = parts[i].offset; return [o[0], o[1], o[2]]; };
 
   const cylinders: { index: number; r: number; h: number; segments: number }[] = [];
-  body.shapes.forEach((shape, i) => {
-    // cannon's Shape.types: SPHERE 1, BOX 4, CONVEXPOLYHEDRON 16, CYLINDER 128.
-    if (shape.type === 1) spheres.push({ index: i, c: offsetOf(i), r: shape.radius });
-    else if (shape.type === 4) {
+  parts.forEach(({ shape }, i) => {
+    if (shape.kind === 'sphere') spheres.push({ index: i, c: offsetOf(i), r: shape.radius });
+    else if (shape.kind === 'box') {
       const h = shape.halfExtents;
-      out.push({ type: 'box', offset: offsetOf(i), rotation: rotationOf(i), width: h.x * 2, height: h.y * 2, depth: h.z * 2 });
-    } else if (shape.type === 128) {
-      cylinders.push({ index: i, r: Math.max(shape.radiusTop ?? 0, shape.radiusBottom ?? 0), h: shape.height ?? 0, segments: shape.numSegments ?? 12 });
-    } else if (shape.type === 16) {
+      out.push({ type: 'box', offset: offsetOf(i), rotation: rotationOf(i), width: h[0] * 2, height: h[1] * 2, depth: h[2] * 2 });
+    } else if (shape.kind === 'cylinder') {
+      cylinders.push({ index: i, r: Math.max(shape.radiusTop, shape.radiusBottom), h: shape.height, segments: shape.segments || 12 });
+    } else if (shape.kind === 'capsule') {
+      out.push({ type: 'capsule', offset: offsetOf(i), rotation: rotationOf(i), radius: shape.radius, height: round(shape.height + 2 * shape.radius), numSegments: 12 });
+    } else if (shape.kind === 'convex') {
       out.push({
         type: 'convex', offset: offsetOf(i), rotation: rotationOf(i), quality: 'medium',
-        vertices: shape.vertices.map((v: any) => [v.x, v.y, v.z]), faces: shape.faces.map((f: number[]) => [...f]),
+        vertices: shape.hull.vertices.map(v => [v[0], v[1], v[2]]), faces: shape.hull.faces.map(f => [...f]),
       });
     }
   });
 
   const used = new Set<number>();
   for (const cyl of cylinders) {
-    const q = body.shapeOrientations[cyl.index];
-    const half = Vec.vec3.transformQuat(Vec.vec3.create(), [0, cyl.h / 2, 0], Vec.quat.fromValues(q.x, q.y, q.z, q.w));
+    const q = parts[cyl.index].rotation;
+    const half = Vec.vec3.transformQuat(Vec.vec3.create(), [0, cyl.h / 2, 0], Vec.quat.fromValues(q[0], q[1], q[2], q[3]));
     const o = offsetOf(cyl.index);
     const ends = [[o[0] + half[0], o[1] + half[1], o[2] + half[2]], [o[0] - half[0], o[1] - half[1], o[2] - half[2]]];
     const caps = ends.map(e => spheres.find(s => !used.has(s.index) && Math.abs(s.r - cyl.r) < 1e-6
@@ -171,7 +171,7 @@ export function tickLiveTriggers(root: Node, source: LiveTriggerSource, buildWir
       if (wire && wire.shapeVersion === trigger.shapeVersion) continue;
       if (wire?.node) { root.removeChild(wire.node); wire.node.dispose(); }
       const tint = tintOf(trigger, false);
-      const node = buildWire(bodyShapeDescriptions(trigger), LIVE_TRIGGER_COLORS[tint], [1, 1, 1]);
+      const node = buildWire(bodyShapeDescriptions(source.colliderParts(trigger)), LIVE_TRIGGER_COLORS[tint], [1, 1, 1]);
       if (node) { node.name = `${WIRE_PREFIX}${trigger.id}`; root.addChild(node); }
       state.wires.set(trigger, { node, shapeVersion: trigger.shapeVersion, tint });
     }

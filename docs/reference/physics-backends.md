@@ -27,6 +27,11 @@ and refers to the backend's by handle. Its conventions hold for every backend:
 - What a step produced is read afterwards: `forEachContact` (the last substep's contacts, normal pointing
   out of the first body) and `drainEvents` (sensor begin/end, in order, since the last drain). Destroying a
   body drops its queued events.
+- A body's collision geometry is read back as `colliderParts`, **as the backend simulates it**: cannon
+  reports a capsule as its cylinder and two end spheres, and a cylinder with the polyhedron it collides as.
+  The parts are placed in the body's collider frame (`getColliderFrame`: the centre of mass on cannon).
+  Overlap queries, the trigger↔trigger pass, buoyancy, particle collision and the editor's live trigger
+  overlay all measure bodies this way, so they measure exactly what the simulation sees.
 
 ## Two different "where"s
 
@@ -53,8 +58,8 @@ bit for bit.
 |---|---|
 | Interface, cannon backend, conformance suite | Done |
 | `PhysicsSystem` steps, queries rays, reads contacts and trigger events, sets gravity and solver iterations through the interface | Done |
-| Overlap queries, trigger↔trigger pass, buoyancy, particle colliders and the editor's trigger overlay read neutral collider descriptions | Next |
-| Terrain, foliage and tilemap colliders, ragdolls and joints on engine bodies | Planned |
+| Overlap queries, trigger↔trigger pass, buoyancy, particle colliders and the editor's trigger overlay read neutral collider descriptions | Done |
+| Terrain, foliage and tilemap colliders, ragdolls and joints on engine bodies | Next |
 | `RigidBody`, `Trigger` and `Shape` stop being cannon objects | Planned |
 | The worker protocol carries descriptions instead of cannon shapes | Planned |
 | A test keeps `cannon-es` inside `src/physics/pal/cannon/`; the project chooses its backend | Planned |

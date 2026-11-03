@@ -1,4 +1,5 @@
 import { bodyTargets, rotate, type OverlapBody } from '../physics/overlap';
+import type { ColliderGeometry } from '../physics/pal/types';
 
 // Physics bodies as particle colliders: the bodies near a particle system, reduced to the analytic shapes
 // the simulation shader tests every particle against — sparks bouncing off a floor, a magic bolt's embers
@@ -6,7 +7,8 @@ import { bodyTargets, rotate, type OverlapBody } from '../physics/overlap';
 //
 // The scene-depth collision mode only knows what is on screen; this one knows what the PHYSICS knows, so
 // it works off screen, behind other geometry and in the dark. It is the GPU half's input, gathered on the
-// CPU once per system per frame: the shader cannot walk cannon's body list.
+// CPU once per system per frame: the shader cannot walk the physics world's body list. Bodies are measured
+// from their collider parts (physics/pal/types.ts ColliderPart), as their backend simulates them.
 //
 // Shapes are exact for what levels and props are made of: spheres, boxes, capsules (and cylinders, as
 // capsules), planes, and convex hulls (as their oriented bounding box). Trimeshes and heightfields are
@@ -22,7 +24,7 @@ export const COLLIDER_KIND = { CAPSULE: 1, BOX: 2, PLANE: 3 } as const;
 
 type V3 = [number, number, number];
 
-/** The subset of a cannon body this reads, on top of what the overlap queries already need. */
+/** What this reads from a body, on top of what the overlap queries already need. */
 export interface ColliderBody extends OverlapBody {
     velocity?: { x: number; y: number; z: number };
 }
@@ -55,21 +57,25 @@ function isSolid(body: ColliderBody): boolean {
  * The velocity is the body's linear velocity: a particle bounces off a moving body RELATIVE to it, so a
  * swung shield bats embers away instead of letting them sit on its face.
  */
-export function packParticleColliders(bodies: Iterable<ColliderBody>, center: ArrayLike<number>, radius: number,
-                                      out: Float32Array): number {
+export function packParticleColliders<TBody extends ColliderBody>(bodies: Iterable<TBody>, center: ArrayLike<number>, radius: number,
+                                      out: Float32Array, geometry: ColliderGeometry<TBody>): number {
     const c: V3 = [center[0], center[1], center[2]];
     const candidates: Candidate[] = [];
+    const frame: number[] = [0, 0, 0, 0, 0, 0, 1];
 
     for (const body of bodies) {
-        if (!isSolid(body) || !body.shapes?.length) continue;
-        const bp: V3 = [body.position.x, body.position.y, body.position.z];
-        const bounding = Number.isFinite(body.boundingRadius) ? body.boundingRadius : Infinity;
+        if (!isSolid(body)) continue;
+        const parts = geometry.colliderParts(body);
+        if (!parts.length) continue;
+        const bound = geometry.colliderFrame(body, frame);
+        const bp: V3 = [frame[0], frame[1], frame[2]];
+        const bounding = Number.isFinite(bound) ? bound : Infinity;
         const centerGap = Math.hypot(bp[0] - c[0], bp[1] - c[1], bp[2] - c[2]) - bounding;
         if (centerGap > radius) continue;
         const v: V3 = body.velocity ? [body.velocity.x, body.velocity.y, body.velocity.z] : [0, 0, 0];
 
         // Spheres, boxes, capsules, cylinders: the same world-space resolution the overlap queries use.
-        for (const t of bodyTargets(body)) {
+        for (const t of bodyTargets(body, geometry)) {
             if (t.kind === 'capsule') {
                 const mid: V3 = [(t.a[0] + t.b[0]) / 2, (t.a[1] + t.b[1]) / 2, (t.a[2] + t.b[2]) / 2];
                 const half = Math.hypot(t.b[0] - t.a[0], t.b[1] - t.a[1], t.b[2] - t.a[2]) / 2;
@@ -88,30 +94,27 @@ export function packParticleColliders(bodies: Iterable<ColliderBody>, center: Ar
         }
 
         // Planes and convex hulls, which the overlap queries leave out.
-        const bq = [body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w];
-        for (let i = 0; i < body.shapes.length; i++) {
-            const shape = body.shapes[i];
-            const o = body.shapeOffsets[i], so = body.shapeOrientations[i];
-            const off = rotate(bq, [o.x, o.y, o.z]);
+        const bq = [frame[3], frame[4], frame[5], frame[6]];
+        for (const part of parts) {
+            const shape = part.shape;
+            const off = rotate(bq, part.offset);
             const sc: V3 = [bp[0] + off[0], bp[1] + off[1], bp[2] + off[2]];
-            const q = qmul(bq, [so.x, so.y, so.z, so.w]);
-            const type = shape.type;
-            if (type === 2 || shape.constructor?.name === 'Plane') {
-                // cannon's plane faces its local +Z.
-                const n = rotate(q, [0, 0, 1]);
+            const q = qmul(bq, part.rotation);
+            if (shape.kind === 'plane') {
+                const n = rotate(q, shape.normal);
                 const gap = Math.max(0, n[0] * (c[0] - sc[0]) + n[1] * (c[1] - sc[1]) + n[2] * (c[2] - sc[2]));
                 if (gap > radius) continue;
                 candidates.push({ gap: -1, write: (out2, at) => {
                     out2.set([sc[0], sc[1], sc[2], COLLIDER_KIND.PLANE, n[0], n[1], n[2], 0,
                               0, 0, 0, 0, v[0], v[1], v[2], 0], at);
                 } });
-            } else if ((type === 16 || shape.constructor?.name === 'ConvexPolyhedron') && Array.isArray(shape.vertices)) {
+            } else if (shape.kind === 'convex') {
                 // A hull as its local bounding box: exact for the boxy props hulls usually are, and a
                 // slightly generous shell for the rest — a spark cannot tell.
                 const min: V3 = [Infinity, Infinity, Infinity], max: V3 = [-Infinity, -Infinity, -Infinity];
-                for (const p of shape.vertices) {
-                    min[0] = Math.min(min[0], p.x); min[1] = Math.min(min[1], p.y); min[2] = Math.min(min[2], p.z);
-                    max[0] = Math.max(max[0], p.x); max[1] = Math.max(max[1], p.y); max[2] = Math.max(max[2], p.z);
+                for (const p of shape.hull.vertices) {
+                    min[0] = Math.min(min[0], p[0]); min[1] = Math.min(min[1], p[1]); min[2] = Math.min(min[2], p[2]);
+                    max[0] = Math.max(max[0], p[0]); max[1] = Math.max(max[1], p[1]); max[2] = Math.max(max[2], p[2]);
                 }
                 if (!Number.isFinite(min[0])) continue;
                 const localMid = rotate(q, [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2]);

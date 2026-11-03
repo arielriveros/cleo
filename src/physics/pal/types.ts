@@ -55,6 +55,49 @@ export interface ColliderDesc {
     rotation?: Q4;
 }
 
+/** A convex polyhedron as a backend simulates it: vertices, faces (index loops, CCW from outside), and their outward normals. */
+export interface ConvexHull {
+    readonly vertices: readonly V3[];
+    readonly faces: readonly (readonly number[])[];
+    readonly normals: readonly V3[];
+}
+
+/**
+ * One piece of a body's collision geometry as its backend actually simulates it. Not always what was
+ * described: cannon reports a capsule as its cylinder and two spheres, and a cylinder as the polyhedron
+ * it collides with (`hull`). Code that measures a body (overlap queries, buoyancy, the trigger overlay)
+ * reads these, so it measures exactly what the simulation sees.
+ */
+export type PartShape =
+    | { kind: 'sphere'; radius: number }
+    | { kind: 'box'; halfExtents: V3 }
+    | { kind: 'capsule'; radius: number; height: number }
+    | { kind: 'cylinder'; radiusTop: number; radiusBottom: number; height: number; segments: number; hull: ConvexHull | null }
+    | { kind: 'convex'; hull: ConvexHull }
+    /** `normal` in the part's frame (cannon's plane faces +Z). */
+    | { kind: 'plane'; normal: V3 }
+    | { kind: 'trimesh' }
+    | { kind: 'heightfield' };
+
+/** A part placed in its body's collider frame (see PhysicsWorld.getColliderFrame), with its own bounding radius. */
+export interface ColliderPart {
+    readonly shape: PartShape;
+    readonly offset: V3;
+    readonly rotation: Q4;
+    readonly boundingRadius: number;
+}
+
+/**
+ * Where an ENGINE body's collision geometry is, by body object: what the overlap queries, the trigger pass
+ * and the particle colliders read. PhysicsSystem provides it over its world.
+ */
+export interface ColliderGeometry<TBody> {
+    /** The body's parts, cached: the same array until its colliders change. */
+    colliderParts(body: TBody): readonly ColliderPart[];
+    /** The frame its parts are placed in, [px py pz qx qy qz qw] into `out`; returns a radius about it bounding every part. */
+    colliderFrame(body: TBody, out: Out): number;
+}
+
 export type BodyType = 'dynamic' | 'static' | 'kinematic';
 
 /** Mass properties in the body's frame: total mass, centre of mass from the origin, principal inertia. */

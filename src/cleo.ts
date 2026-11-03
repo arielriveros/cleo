@@ -415,6 +415,7 @@ export { Shape } from "./physics/shape";
 export { PhysicsSystem } from "./physics/physicsSystem";
 export type { PhysicsRaycastHit, PhysicsRaycastOptions } from "./physics/physicsSystem";
 export type { OverlapHit, OverlapOptions } from "./physics/overlap";
+export type { ColliderPart, PartShape, ConvexHull, ColliderGeometry } from "./physics/pal/types";
 export { physicsStats } from "./physics/physicsStats";
 export type { PhysicsStats } from "./physics/physicsStats";
 export { sceneStats, sceneStatsDetail } from "./core/scene/sceneStats";

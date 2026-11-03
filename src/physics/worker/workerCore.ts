@@ -1,6 +1,6 @@
 import { Body, Constraint, Shape, World } from 'cannon-es';
 import { CannonWorld } from '../pal/cannon/cannonWorld';
-import { PhysicsEventKind } from '../pal/types';
+import { PhysicsEventKind, type BodyHandle } from '../pal/types';
 import { applyBuoyancy, floats } from '../buoyancy';
 import { buoyancyVolumeFromSpec, type WaterSpec } from '../waterSurface';
 import { applyConfig, decodeConstraint, decodeShape, writeState } from './bodyCodec';
@@ -230,8 +230,8 @@ export class PhysicsWorkerCore {
             const volume = buoyancyVolumeFromSpec(spec, world.time);
             for (const body of world.bodies) {
                 if (body.sleepState === Body.SLEEPING) continue;
-                if (!floats(body, volume, isCharacter)) continue;
-                const fraction = applyBuoyancy(body, volume, gravity, dt);
+                if (body.type !== Body.DYNAMIC || !floats(body, volume, isCharacter)) continue;
+                const fraction = applyBuoyancy(this._world, body.id as BodyHandle, body.mass, volume, gravity, dt);
                 if (fraction <= 0) continue;
                 const key = vi * 1048576 + (body as any).__slot;
                 this._submerged.set(key, Math.max(this._submerged.get(key) ?? 0, fraction));
