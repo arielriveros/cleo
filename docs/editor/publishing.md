@@ -81,6 +81,23 @@ The first two are the ones that actually catch bugs.
 A web build is a folder of static files — any static host will serve it. The desktop targets produce
 a runnable app and an installer respectively.
 
+A desktop game is served from its own folder over `game://app`, with the two headers that make a page
+cross-origin isolated. The physics worker then hands each step back through shared memory rather than a
+message, which keeps frames from waiting on it. A web build gets the same where its host sends those
+headers:
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: credentialless
+```
+
+The build includes a `_headers` file with them, which Netlify and Cloudflare Pages read. Without them the
+game runs all the same.
+
+> **Desktop builds before this one** opened the game from `file://`. Anything a game kept in browser
+> storage (`localStorage`, IndexedDB) belongs to that origin, so a player's data from such a build does
+> not carry over to a newer one.
+
 ## See also
 
 [Projects](projects.md) · [File formats](../reference/file-formats.md) · [Scene and game (scripting)](../scripting/scene-and-game.md)

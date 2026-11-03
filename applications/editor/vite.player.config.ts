@@ -12,11 +12,12 @@ import { contract } from './src/features/publish/playerContract.json'
  * published game reuses; only game.bin changes per game. They land in public/ so the editor dev server
  * and the production build both serve them, and so publishing can fetch them same-origin.
  *
- * LIBRARY MODE, NOT AN HTML ENTRY, and that is not a stylistic choice: app-kit/desktop/gameTemplates.js runs a
- * published game with `win.loadFile(index.html)`, i.e. from file://, where an ES module script is
- * blocked by the opaque origin. Vite's HTML pipeline always emits <script type="module" crossorigin>.
- * An IIFE bundle referenced by a plain `<script defer>` in a hand-written index.html is the only shape
- * that keeps file:// working, so index.html is copied verbatim rather than processed.
+ * LIBRARY MODE, NOT AN HTML ENTRY: the player is ONE self-contained file wherever it runs (a desktop game
+ * serves its folder over game://, app-kit/desktop/gameTemplates.js; a web build is any static host), its
+ * physics worker inlined. Desktop games were once opened from file://, where an ES module script is
+ * blocked by the opaque origin, and an IIFE bundle referenced by a plain `<script defer>` in a hand-written
+ * index.html still runs from anywhere. So index.html is copied verbatim rather than processed (Vite's HTML
+ * pipeline always emits <script type="module" crossorigin>).
  */
 const PLAYER_HTML = path.resolve(__dirname, 'src/player/index.html')
 

@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const fsp = fs.promises;
 const { pathToFileURL } = require('url');
-const { GAME_MAIN_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, gamePackageJson, gameReadme } = require('./gameTemplates');
+const { GAME_MAIN_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme } = require('./gameTemplates');
 const scriptWorkspace = require('./scriptWorkspace');
 
 const isDev = process.env.CLEO_DEV === '1';
@@ -38,21 +38,33 @@ protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
 
+// Every app:// response is cross-origin isolated, as the dev server's are (`crossOriginIsolation` in
+// app-kit/vite.preset.ts): the page then has SharedArrayBuffer, and the physics worker hands each step back
+// through shared memory instead of a message the busy main thread can only take between frames.
+const ISOLATION_HEADERS = { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'credentialless' };
+
+/** `response` with the isolation headers added. */
+function isolated(response) {
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(ISOLATION_HEADERS)) headers.set(name, value);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 function editorRoot() {
   return app.isPackaged ? HOSTED_APP.packagedDist() : HOSTED_APP.devDist;
 }
 
 function registerAppProtocol() {
   const root = editorRoot();
-  protocol.handle(APP_SCHEME, (request) => {
+  protocol.handle(APP_SCHEME, async (request) => {
     let pathname = decodeURIComponent(new URL(request.url).pathname);
     if (!pathname || pathname === '/') pathname = '/index.html';
     // The Creator's page, however it is linked.
     else if (pathname === '/creator' || pathname === '/creator/') pathname = '/creator/index.html';
     // Resolve within root and block path traversal outside it.
     const filePath = path.join(root, pathname);
-    if (!filePath.startsWith(root)) return new Response('Forbidden', { status: 403 });
-    return net.fetch(pathToFileURL(filePath).toString());
+    if (!filePath.startsWith(root + path.sep)) return new Response('Forbidden', { status: 403 });
+    return isolated(await net.fetch(pathToFileURL(filePath).toString()));
   });
 }
 
@@ -292,9 +304,17 @@ ipcMain.handle('publish:web', async (event, files, options) => {
     if (!picked) return { ok: false, canceled: true };
     const { dir } = picked;
     await writeWebFiles(dir, files);
+    // The isolation headers for hosts that read a _headers file (Netlify, Cloudflare Pages): see the README.
+    await fsp.writeFile(path.join(dir, '_headers'), WEB_HEADERS, 'utf-8');
     await fsp.writeFile(
       path.join(dir, 'README.txt'),
-      'Cleo web build. Serve this folder over HTTP (e.g. `npx http-server`) and open index.html.\n',
+      'Cleo web build. Serve this folder over HTTP (e.g. `npx http-server`) and open index.html.\n\n' +
+      'The game runs smoother where the host sends two headers with every file, which give the page\n' +
+      'SharedArrayBuffer (the physics worker then hands its results back through shared memory):\n' +
+      '  Cross-Origin-Opener-Policy: same-origin\n' +
+      '  Cross-Origin-Embedder-Policy: credentialless\n' +
+      'Netlify and Cloudflare Pages read them from the _headers file in this folder. Without them the\n' +
+      'game runs all the same.\n',
       'utf-8',
     );
     return { ok: true, path: dir };
@@ -315,7 +335,7 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
     // only the installer — nothing electron-builder needed along the way (scaffold, win-unpacked, logs).
     const stage = installer ? await fsp.mkdtemp(path.join(os.tmpdir(), 'cleo-publish-')) : dir;
     try {
-      // 1) The web files + Electron scaffold. preload injects game.bin so it runs from file://.
+      // 1) The web files + Electron scaffold. preload injects game.bin; main.js serves the folder over game://.
       await writeWebFiles(stage, files);
       const electronVersion = require('electron/package.json').version;
       const win0 = (options && options.window) || {};

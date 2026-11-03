@@ -90,10 +90,12 @@ no result (a *late* frame). On a **cross-origin isolated** page the worker write
 (`physics/worker/sharedReply.ts`): the same scene then measured a 1.5 ms round trip and no late frames.
 The editor's and the Creator's dev servers send the headers that isolate the page
 (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: credentialless`, from
-`crossOriginIsolationPlugin` in `applications/app-kit/vite.preset.ts`). A page served without them (a
-published web game on a host that does not send them, the packaged desktop app on `file://`) falls back
-to messages, which work the same, just later. Performance ▸ Workers shows which: *replies · shared memory*
-or *messages*.
+`crossOriginIsolationPlugin` in `applications/app-kit/vite.preset.ts`). So does the desktop shell: the
+packaged editor is served over `app://` and a published desktop game over `game://`, each with the same
+two headers (`applications/app-kit/desktop/main.js`, `gameTemplates.js`). A published web game is isolated
+where its host sends them; Publish writes them into a `_headers` file for the hosts that read one. A page
+served without them falls back to messages, which work the same, just later. Performance ▸ Workers shows
+which: *replies · shared memory* or *messages*.
 
 At a steady frame rate each step is exactly the frame's delta, and the engine's tests hold the worker to
 the inline step bit for bit on two mixed scenes (`tests/physicsWorkerParity.test.ts`,

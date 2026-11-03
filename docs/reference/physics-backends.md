@@ -184,8 +184,8 @@ A project picks Jolt in Options ▸ Engine ▸ Runtime. What differs from cannon
 ## Rapier: what the spike found
 
 Measured on `@dimforge/rapier3d-compat` 0.21.0, the package the engine uses: its WASM is embedded in the
-JavaScript (base64), the only form that runs in a published game, which is a single file on `file://` with
-its physics worker inlined. The bundle is about 4.3 MB.
+JavaScript (base64), the only form that runs in a published game, which is a single file with its physics
+worker inlined. The bundle is about 4.3 MB.
 
 - **Sleep.** With automatic sleep off (`setCanSleep(false)`), a body put to sleep by hand stays asleep,
   `setLinvel(v, false)` does not wake it, and a body that hits it does. That is the engine's freeze.

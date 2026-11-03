@@ -1,10 +1,35 @@
 // Static templates for a published desktop (Electron) game folder.
-// The game renderer (game.js) reads window.CLEO_GAME_BUFFER, which the preload injects from game.bin,
-// so the game runs from file:// without needing an HTTP server.
+// The game renderer (game.js) reads window.CLEO_GAME_BUFFER, which the preload injects from game.bin.
+// main.js serves the folder over game://app with the two cross-origin isolation headers, so the page has
+// SharedArrayBuffer (the physics worker's results come back through shared memory) without an HTTP server.
 
-const GAME_MAIN_JS = `const { app, BrowserWindow } = require('electron');
+const GAME_MAIN_JS = `const { app, BrowserWindow, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
+
+// The game is served from its own folder over game://app rather than opened from file://. A page with an
+// origin of its own can be cross-origin isolated (these headers), which gives it SharedArrayBuffer: the
+// physics worker then hands each step back through shared memory, not a message the busy main thread only
+// reads between frames. Browser storage (localStorage, IndexedDB) belongs to that origin.
+const ISOLATION_HEADERS = { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'credentialless' };
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'game', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
+]);
+
+function serveGame() {
+  protocol.handle('game', async (request) => {
+    let pathname = decodeURIComponent(new URL(request.url).pathname);
+    if (!pathname || pathname === '/') pathname = '/index.html';
+    // Within the game's folder only.
+    const file = path.join(__dirname, pathname);
+    if (!file.startsWith(__dirname + path.sep)) return new Response('Forbidden', { status: 403 });
+    const response = await net.fetch(pathToFileURL(file).toString());
+    const headers = new Headers(response.headers);
+    for (const [name, value] of Object.entries(ISOLATION_HEADERS)) headers.set(name, value);
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  });
+}
 
 // Window options from the project (Options ▸ Project ▸ General), written at publish time.
 function windowOptions() {
@@ -32,11 +57,13 @@ function createWindow() {
   });
   win.setMenuBarVisibility(false);
   // --shader-profile: the player times every shader build with a GPU finish after each (CLEO_SHADER_STATS).
-  const query = process.argv.includes('--shader-profile') ? { shaderProfile: '1' } : undefined;
-  win.loadFile(path.join(__dirname, 'index.html'), query ? { query } : undefined);
+  const url = new URL('game://app/index.html');
+  if (process.argv.includes('--shader-profile')) url.searchParams.set('shaderProfile', '1');
+  win.loadURL(url.toString());
 }
 
 app.whenReady().then(() => {
+  serveGame();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -167,4 +194,11 @@ const GAME_INSTALLER_NSH = `!include nsDialogs.nsh
 !macroend
 `;
 
-module.exports = { GAME_MAIN_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, gamePackageJson, gameReadme };
+// A web build's _headers (Netlify, Cloudflare Pages): the cross-origin isolation the desktop game gets from
+// main.js, for hosts that read the file.
+const WEB_HEADERS = `/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+`;
+
+module.exports = { GAME_MAIN_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme };
