@@ -127,6 +127,20 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             expect(at('origin').centerOfMass).toEqual([0, 0, 0]);
         });
 
+        it('move the mass when recentred after they were made, and back, keeping its amount', () => {
+            // What RigidBody.recenterMass does: the same colliders, a new centre of mass.
+            const w = make();
+            const colliders = [{ shape: { kind: 'sphere', radius: 0.5 } as ShapeDesc, offset: [1, 0, 0] as [number, number, number] }];
+            const b = w.createBody({ position: [0, 0, 0], rotation: IDENTITY, mass: 2, centerOfMass: 'origin', colliders });
+            const mass = () => w.getMassProperties(b, { mass: 0, centerOfMass: [0, 0, 0], inertia: [0, 0, 0] });
+            w.setColliders(b, colliders, 'colliders');
+            expect(mass().mass).toBeCloseTo(2, dp(9));
+            expect(mass().centerOfMass[0]).toBeCloseTo(1, dp(9));
+            w.setColliders(b, colliders, 'origin');
+            expect(mass().mass).toBeCloseTo(2, dp(9));
+            expect(mass().centerOfMass[0]).toBeCloseTo(0, dp(9));
+        });
+
         it('move and turn about their node origin', () => {
             const w = make();
             const b = w.createBody({

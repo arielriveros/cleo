@@ -34,7 +34,7 @@ export const RAPIER_CAPABILITIES: PhysicsCapabilities = {
     coneLimit: 'approximate',
     manualSleep: true,
     profilePhases: ['broadphase', 'narrowphase', 'solve'],
-    threadable: false,
+    threadable: true,
     precision: 32,
 };
 
@@ -48,9 +48,26 @@ function dampingRate(d: number): number {
     return -Math.log(1 - d);
 }
 
+/**
+ * A joint as built, from which a copy (the physics worker's, replica.ts) builds the same joint whatever the
+ * bodies' poses are then: the frames a fixed or cone-twist joint measured from the poses it was made in are
+ * kept, not measured again.
+ */
+export type RapierJointRecord = { a: BodyHandle; b: BodyHandle; collideConnected: boolean } & (
+    /** A's origin and frame, seen from B. */
+    | { kind: 'fixed'; anchorB: number[]; frameB: number[] }
+    | { kind: 'ball'; anchorA: number[]; anchorB: number[] }
+    | { kind: 'hinge'; anchorA: number[]; anchorB: number[]; axisA: number[]; axisB: number[] }
+    | { kind: 'cone'; anchorA: number[]; anchorB: number[]; frameA: number[]; frameB: number[]; twist: number; cone: number }
+);
+
 interface Entry {
     readonly handle: BodyHandle;
     readonly body: RigidBody;
+    /** What it was made from; the fields below follow later changes. */
+    readonly desc: BodyDesc;
+    /** Bumped by every change to what it is made of (colliders, layers, response, reporting): what a copy diffs by. */
+    configVersion: number;
     readonly type: BodyType;
     readonly mass: number;
     readonly sensor: boolean;
@@ -66,6 +83,11 @@ interface Entry {
     enabled: boolean;
     parts: ColliderPart[] | null;
     radius: number;
+    /**
+     * The rotation last given to setTransform, as given: Rapier renormalises what it is set to, and a copy
+     * given the renormalised one would renormalise it again, which can move a bit the original never moved.
+     */
+    written: number[] | null;
 }
 
 export class RapierWorld implements PhysicsWorld {
@@ -87,7 +109,7 @@ export class RapierWorld implements PhysicsWorld {
     private _bodyList: BodyHandle[] | null = null;
     /** Rapier collider handle → the body handle it belongs to. */
     private readonly _owner = new Map<number, BodyHandle>();
-    private readonly _joints = new Map<number, ImpulseJoint>();
+    private readonly _joints = new Map<number, { joint: ImpulseJoint; record: RapierJointRecord }>();
     /** Queued events: [kind, a, b] per event. */
     private _events: number[] = [];
     /** Overlapping collider pairs per body pair ("lo,hi"): a pair begins on the first and ends on the last. */
@@ -142,11 +164,11 @@ export class RapierWorld implements PhysicsWorld {
         if (af) rb.enabledRotations(af[0] !== 0, af[1] !== 0, af[2] !== 0);
         const handle = this._nextHandle++ as BodyHandle;
         const entry: Entry = {
-            handle, body: this._raw.createRigidBody(rb), type, mass: type === 'dynamic' ? desc.mass : 0, sensor: !!desc.sensor,
-            colliderDescs: desc.colliders, centerOfMass: desc.centerOfMass ?? 'colliders', colliders: [],
+            handle, body: this._raw.createRigidBody(rb), desc, configVersion: 0, type, mass: type === 'dynamic' ? desc.mass : 0, sensor: !!desc.sensor,
+            colliderDescs: [...desc.colliders], centerOfMass: desc.centerOfMass ?? 'colliders', colliders: [],
             group: desc.group ?? 1, mask: desc.mask ?? -1, response: desc.collisionResponse ?? true, reports: !!desc.reportContacts,
             friction: desc.friction ?? DEFAULT_FRICTION, restitution: desc.restitution ?? DEFAULT_RESTITUTION,
-            enabled: true, parts: null, radius: 0,
+            enabled: true, parts: null, radius: 0, written: null,
         };
         this._entries.set(handle, entry);
         this._attach(entry);
@@ -160,7 +182,8 @@ export class RapierWorld implements PhysicsWorld {
         const e = this._entries.get(h);
         if (!e) return;
         for (const c of e.colliders) this._owner.delete(c.handle);
-        for (const [id, joint] of this._joints) if (!joint.isValid()) this._joints.delete(id);
+        // Rapier removes a body's joints with it.
+        for (const [id, j] of this._joints) if (j.record.a === h || j.record.b === h) this._joints.delete(id);
         this._raw.removeRigidBody(e.body);
         this._entries.delete(h);
         this._forced.delete(e);
@@ -190,9 +213,13 @@ export class RapierWorld implements PhysicsWorld {
 
     public setColliders(h: BodyHandle, colliders: readonly ColliderDesc[], centerOfMass?: 'colliders' | 'origin'): void {
         const e = this._entry(h);
-        e.colliderDescs = colliders;
         if (centerOfMass) e.centerOfMass = centerOfMass;
-        this._attach(e);
+        // The same colliders (recentring the mass): only the mass moves. Rebuilding them would change the
+        // world's history for nothing, and a copy built in one go would no longer step like it.
+        const same = colliders.length === e.colliderDescs.length && colliders.every((c, i) => c === e.colliderDescs[i]);
+        e.colliderDescs = [...colliders];
+        if (same) { this._applyMass(e); e.parts = null; } else this._attach(e);
+        e.configVersion++;
         this._version++;
     }
 
@@ -200,12 +227,14 @@ export class RapierWorld implements PhysicsWorld {
         const e = this._entry(h);
         e.group = group; e.mask = mask;
         for (const c of e.colliders) { c.setCollisionGroups(groupsOf(group, mask)); c.setSolverGroups(this._solverGroups(e)); }
+        e.configVersion++;
     }
 
     public setCollisionResponse(h: BodyHandle, response: boolean): void {
         const e = this._entry(h);
         e.response = response;
         for (const c of e.colliders) c.setSolverGroups(this._solverGroups(e));
+        e.configVersion++;
     }
 
     public setReportContacts(h: BodyHandle, report: boolean): void {
@@ -213,6 +242,7 @@ export class RapierWorld implements PhysicsWorld {
         e.reports = report;
         const events = this._events_of(e);
         for (const c of e.colliders) c.setActiveEvents(events);
+        e.configVersion++;
     }
 
     public getMassProperties(h: BodyHandle, out: MassProperties): MassProperties {
@@ -230,9 +260,12 @@ export class RapierWorld implements PhysicsWorld {
     }
 
     public setTransform(h: BodyHandle, position: ArrayLike<number> | null, rotation: ArrayLike<number> | null): void {
-        const b = this._entry(h).body;
+        const e = this._entry(h), b = e.body;
         if (position) b.setTranslation({ x: position[0], y: position[1], z: position[2] }, false);
-        if (rotation) b.setRotation({ x: rotation[0], y: rotation[1], z: rotation[2], w: rotation[3] }, false);
+        if (rotation) {
+            b.setRotation({ x: rotation[0], y: rotation[1], z: rotation[2], w: rotation[3] }, false);
+            e.written = [rotation[0], rotation[1], rotation[2], rotation[3]];
+        }
         this._dirty = true;
         this._version++;
     }
@@ -305,27 +338,25 @@ export class RapierWorld implements PhysicsWorld {
     // ---- joints ----
 
     public createJoint(desc: JointDesc): JointHandle {
-        const R = rapier();
         const a = this._entry(desc.a).body, b = this._entry(desc.b).body;
-        const v = (x: V3) => ({ x: x[0], y: x[1], z: x[2] });
-        let joint: ImpulseJoint;
+        const v = (x: V3) => [x[0], x[1], x[2]];
+        const collideConnected = !!desc.collideConnected;
+        let record: RapierJointRecord;
         switch (desc.kind) {
             case 'fixed': {
-                // Hold the pose the two have now: A's origin, seen from B.
+                // Hold the pose the two have now: A's origin and frame, seen from B.
                 const ta = a.translation(), qa = a.rotation(), tb = b.translation(), qb = b.rotation();
                 const inv = [-qb.x, -qb.y, -qb.z, qb.w], d = [0, 0, 0], frame = [0, 0, 0, 1];
                 rotate(inv, ta.x - tb.x, ta.y - tb.y, ta.z - tb.z, d);
                 multiply(inv, [qa.x, qa.y, qa.z, qa.w], frame);
-                const data = R.JointData.fixed({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0, w: 1 },
-                    { x: d[0], y: d[1], z: d[2] }, { x: frame[0], y: frame[1], z: frame[2], w: frame[3] });
-                joint = this._raw.createImpulseJoint(data, a, b, true);
+                record = { kind: 'fixed', a: desc.a, b: desc.b, collideConnected, anchorB: d, frameB: frame };
                 break;
             }
             case 'ball':
-                joint = this._raw.createImpulseJoint(R.JointData.spherical(v(desc.anchorA), v(desc.anchorB)), a, b, true);
+                record = { kind: 'ball', a: desc.a, b: desc.b, collideConnected, anchorA: v(desc.anchorA), anchorB: v(desc.anchorB) };
                 break;
             case 'hinge':
-                joint = this._raw.createImpulseJoint(R.JointData.revoluteWithAxes(v(desc.anchorA), v(desc.anchorB), v(desc.axisA), v(desc.axisB)), a, b, true);
+                record = { kind: 'hinge', a: desc.a, b: desc.b, collideConnected, anchorA: v(desc.anchorA), anchorB: v(desc.anchorB), axisA: v(desc.axisA), axisB: v(desc.axisB) };
                 break;
             case 'coneTwist': {
                 // A spherical joint whose frames put each body's axis on the joint's X: twist is about X, the
@@ -333,27 +364,55 @@ export class RapierWorld implements PhysicsWorld {
                 // frame takes its roll about the axis from A's as the two stand now, so the twist is measured
                 // from the pose the joint is made in: two frames rolled apart at the start would read as a
                 // twist past a tight limit, which the solver fights for as long as the joint lives.
-                joint = this._raw.createImpulseJoint(R.JointData.spherical(v(desc.anchorA), v(desc.anchorB)), a, b, true);
-                const fa = fromX(desc.axisA), fb = matchedFrame(a.rotation(), fa, b.rotation(), desc.axisB);
-                joint.setFrameX1({ x: fa[0], y: fa[1], z: fa[2], w: fa[3] });
-                joint.setFrameX2({ x: fb[0], y: fb[1], z: fb[2], w: fb[3] });
-                const raw = (joint as unknown as { rawSet: { jointSetLimits(h: number, axis: number, min: number, max: number): void } }).rawSet;
-                raw.jointSetLimits(joint.handle, R.JointAxis.AngX, -desc.twistAngle, desc.twistAngle);
-                raw.jointSetLimits(joint.handle, R.JointAxis.AngY, -desc.coneAngle, desc.coneAngle);
-                raw.jointSetLimits(joint.handle, R.JointAxis.AngZ, -desc.coneAngle, desc.coneAngle);
+                const frameA = fromX(desc.axisA), frameB = matchedFrame(a.rotation(), frameA, b.rotation(), desc.axisB);
+                record = {
+                    kind: 'cone', a: desc.a, b: desc.b, collideConnected, anchorA: v(desc.anchorA), anchorB: v(desc.anchorB),
+                    frameA, frameB, twist: desc.twistAngle, cone: desc.coneAngle,
+                };
                 break;
             }
         }
-        joint.setContactsEnabled(!!desc.collideConnected);
+        return this.createJointFromRecord(record);
+    }
+
+    /** Build a joint from its record (createJoint's, or a copy's with its own body handles). */
+    public createJointFromRecord(record: RapierJointRecord): JointHandle {
+        const R = rapier();
+        const a = this._entry(record.a).body, b = this._entry(record.b).body;
+        const v = (x: number[]) => ({ x: x[0], y: x[1], z: x[2] });
+        const q = (x: number[]) => ({ x: x[0], y: x[1], z: x[2], w: x[3] });
+        let joint: ImpulseJoint;
+        switch (record.kind) {
+            case 'fixed':
+                joint = this._raw.createImpulseJoint(R.JointData.fixed({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0, w: 1 }, v(record.anchorB), q(record.frameB)), a, b, true);
+                break;
+            case 'ball':
+                joint = this._raw.createImpulseJoint(R.JointData.spherical(v(record.anchorA), v(record.anchorB)), a, b, true);
+                break;
+            case 'hinge':
+                joint = this._raw.createImpulseJoint(R.JointData.revoluteWithAxes(v(record.anchorA), v(record.anchorB), v(record.axisA), v(record.axisB)), a, b, true);
+                break;
+            case 'cone': {
+                joint = this._raw.createImpulseJoint(R.JointData.spherical(v(record.anchorA), v(record.anchorB)), a, b, true);
+                joint.setFrameX1(q(record.frameA));
+                joint.setFrameX2(q(record.frameB));
+                const raw = (joint as unknown as { rawSet: { jointSetLimits(h: number, axis: number, min: number, max: number): void } }).rawSet;
+                raw.jointSetLimits(joint.handle, R.JointAxis.AngX, -record.twist, record.twist);
+                raw.jointSetLimits(joint.handle, R.JointAxis.AngY, -record.cone, record.cone);
+                raw.jointSetLimits(joint.handle, R.JointAxis.AngZ, -record.cone, record.cone);
+                break;
+            }
+        }
+        joint.setContactsEnabled(record.collideConnected);
         const id = this._nextJoint++;
-        this._joints.set(id, joint);
+        this._joints.set(id, { joint, record });
         return id as JointHandle;
     }
 
     public destroyJoint(j: JointHandle): void {
-        const joint = this._joints.get(j);
-        if (!joint) return;
-        if (joint.isValid()) this._raw.removeImpulseJoint(joint, true);
+        const entry = this._joints.get(j);
+        if (!entry) return;
+        if (entry.joint.isValid()) this._raw.removeImpulseJoint(entry.joint, true);
         this._joints.delete(j);
     }
 
@@ -462,6 +521,68 @@ export class RapierWorld implements PhysicsWorld {
         this.onPreSubstep = null;
     }
 
+    // ---- Rapier only: for the copy in the physics worker (mirror.ts, replica.ts) ----
+
+    /** What a body is made of now, as a description a copy can build it from (at its current pose). */
+    public descOf(h: BodyHandle): BodyDesc {
+        const e = this._entry(h), t = e.body.translation(), q = e.body.rotation();
+        return {
+            ...e.desc,
+            position: [t.x, t.y, t.z], rotation: [q.x, q.y, q.z, q.w],
+            colliders: e.colliderDescs, centerOfMass: e.centerOfMass,
+            group: e.group, mask: e.mask, collisionResponse: e.response, reportContacts: e.reports,
+        };
+    }
+
+    /** Bumped by every change to what the body is made of. */
+    public configVersionOf(h: BodyHandle): number { return this._entry(h).configVersion; }
+
+    /**
+     * The rotation last given to setTransform, as given (see Entry.written), and forget it: what a copy is
+     * sent instead of the renormalised one. Null when none was given since the last call.
+     */
+    public takeWrittenRotation(h: BodyHandle): number[] | null {
+        const e = this._entry(h), r = e.written;
+        e.written = null;
+        return r;
+    }
+
+    /** The joints, with what they were built from. */
+    public jointRecords(): IterableIterator<[number, { readonly record: RapierJointRecord }]> { return this._joints.entries(); }
+
+    /** The force and torque applied since the last step, [fx fy fz tx ty tz] into `out` (they act in the next). */
+    public pendingForces(h: BodyHandle, out: Out): void {
+        const b = this._entry(h).body, f = b.userForce(), t = b.userTorque();
+        out[0] = f.x; out[1] = f.y; out[2] = f.z; out[3] = t.x; out[4] = t.y; out[5] = t.z;
+    }
+
+    /** A torque acting over the next substep. */
+    public addTorque(h: BodyHandle, x: number, y: number, z: number): void {
+        const e = this._entry(h);
+        e.body.addTorque({ x, y, z }, true);
+        this._forced.add(e);
+    }
+
+    /** Queue an event a step elsewhere raised (the worker's, landing through mirror.ts): drainEvents delivers it. */
+    public raise(kind: PhysicsEventKind, a: BodyHandle, b: BodyHandle): void { this._events.push(kind, a, b); }
+
+    /** The bodies were written from elsewhere (the worker's step landing): state caches and queries must catch up. */
+    public touch(): void {
+        this._version++;
+        this._dirty = true;
+        this._contacts = null;
+    }
+
+    /** Whether the body is dynamic (what a copy reports back). */
+    public isDynamic(h: BodyHandle): boolean { return this._entry(h).type === 'dynamic'; }
+
+    /** A dynamic body as water reads it, or undefined for any other body. */
+    public floaterOf(h: BodyHandle): { mass: number; isTrigger: boolean; collisionResponse: boolean; character: boolean } | undefined {
+        const e = this._entry(h);
+        if (e.type !== 'dynamic') return undefined;
+        return { mass: e.mass, isTrigger: e.sensor, collisionResponse: e.response, character: ((e.desc.userData ?? 0) & 1) !== 0 };
+    }
+
     // ---- internals ----
 
     private _entry(h: BodyHandle): Entry {
@@ -544,6 +665,9 @@ export class RapierWorld implements PhysicsWorld {
     private _applyMass(e: Entry): void {
         const b = e.body;
         if (e.type !== 'dynamic') return;
+        // Measured afresh: the colliders' own mass at density 1, with nothing left of the last time.
+        b.setAdditionalMassProperties(0, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0, w: 1 }, false);
+        for (const c of e.colliders) c.setDensity(1);
         b.recomputeMassPropertiesFromColliders();
         const measured = b.mass();
         const com = e.centerOfMass === 'origin' ? { x: 0, y: 0, z: 0 } : b.localCom();
@@ -592,10 +716,21 @@ export class RapierWorld implements PhysicsWorld {
     private _syncQueries(): void {
         if (!this._dirty) return;
         const w = this._raw, dt = w.timestep;
+        // A sleeping body that was moved by hand (a step landing from the physics worker writes every body)
+        // is woken by the next step, even a zero-length one. These refits must change nothing: what slept
+        // goes back to sleep, its velocity as it was.
+        const sleeping: { body: RigidBody; v: { x: number; y: number; z: number }; w: { x: number; y: number; z: number } }[] = [];
+        for (const e of this._entries.values()) if (e.enabled && e.body.isSleeping()) sleeping.push({ body: e.body, v: e.body.linvel(), w: e.body.angvel() });
         w.timestep = 0;
         w.step(this._queue);
         w.step(this._queue);
         w.timestep = dt;
+        for (const s of sleeping) {
+            if (s.body.isSleeping()) continue;
+            s.body.sleep();
+            s.body.setLinvel(s.v, false);
+            s.body.setAngvel(s.w, false);
+        }
         this._drainCollisions();
         this._contacts = null;
         this._dirty = false;

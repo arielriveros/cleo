@@ -121,7 +121,8 @@ bit for bit.
 | A test keeps `cannon-es` inside `src/physics/pal/cannon/`; scripts are typed without it; the project chooses its backend | Done |
 | Rapier: the package, the spike, `RapierWorld` passing the conformance suite | Done |
 | Rapier: the engine and the Valley on it; published games carry only their backend | Done |
-| Rapier in the physics worker | Next |
+| Rapier in the physics worker | Done |
+| A Jolt backend | Listed, not started (questions below) |
 
 ## Rapier compared with cannon
 
@@ -139,10 +140,14 @@ A project picks Rapier in Options ▸ Engine ▸ Runtime. What differs from cann
 - **Queries cost a little more after things move.** Rapier refits its query tree only inside a step. The
   first ray of a frame in which a body was moved by hand runs two zero-length steps first. In the Valley
   that is about 2 ms of ray time a frame, because triggers follow their characters every frame.
-- **Main thread only for now.** The physics worker comes next. Until then a Rapier project's *Physics
-  thread* setting falls back to the main thread, and says so under Performance ▸ Workers.
-- **Published size.** A Rapier game's player is about 4.3 MB larger: `npm run build:player` builds
-  `game.js` (cannon) and `game-rapier.js`, and Publish picks the one for the project.
+- **In the physics worker** Rapier is copied by description: each body as the description it was made from
+  and each joint as the record it was built from (frames measured at creation included). The copy steps
+  exactly as the main thread would: every position and velocity is identical, the golden scene's included
+  (`tests/rapierWorker.test.ts`). A rotation written back into this thread's world reads one unit in the
+  last place off, because Rapier renormalises what it is given.
+- **Published size.** A Rapier game's player is about 8.7 MB larger, since the player and its inlined
+  physics worker each carry Rapier. `npm run build:player` builds `game.js` (cannon) and `game-rapier.js`,
+  and Publish picks the one for the project.
 
 ## Rapier: what the spike found
 

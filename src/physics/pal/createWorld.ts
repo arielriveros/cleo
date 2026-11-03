@@ -3,6 +3,8 @@ import { CannonMirror } from './cannon/mirror';
 import { CannonReplica } from './cannon/replica';
 import { loadRapier } from './rapier/load';
 import { RapierWorld } from './rapier/rapierWorld';
+import { RapierMirror } from './rapier/mirror';
+import { RapierReplica } from './rapier/replica';
 import type { WorldMirror, WorldReplica } from './replication';
 import type { PhysicsBackendKind } from './types';
 import type { PhysicsWorld } from './world';
@@ -49,7 +51,7 @@ export function createPhysicsWorld(kind: PhysicsBackendKind = 'cannon', gravity?
 export function createWorldMirror(world: PhysicsWorld): WorldMirror {
     switch (world.backend) {
         case 'cannon': return new CannonMirror(world as CannonWorld);
-        case 'rapier': throw new Error('physics: the rapier backend cannot run in the physics worker yet');
+        case 'rapier': return new RapierMirror(world as RapierWorld);
     }
 }
 
@@ -58,6 +60,6 @@ export function createWorldReplica(kind: PhysicsBackendKind): WorldReplica {
     if (!loaded.has(kind)) throw new Error(`physics: the ${kind} backend is not loaded (acquirePhysicsBackend first)`);
     switch (kind) {
         case 'cannon': return new CannonReplica();
-        case 'rapier': throw new Error('physics: the rapier backend cannot run in the physics worker yet');
+        case 'rapier': return new RapierReplica();
     }
 }

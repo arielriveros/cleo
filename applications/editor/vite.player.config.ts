@@ -109,8 +109,12 @@ export default defineConfig(({ mode }) => mergeConfig(engineConfig, defineConfig
   publicDir: false,
 
   plugins: [playerGraphGuard(), playerAssets(), ...(mode === 'rapier' ? [] : [withoutRapier()])],
-  // The physics worker is inlined into the player and bundled on its own: it needs the same swap.
-  worker: { plugins: () => (mode === 'rapier' ? [] : [withoutRapier()]) },
+  // The physics worker is inlined into the player and bundled on its own: it needs the same swap, and as one
+  // file with no chunks beside it (a worker made from a blob has nowhere to load one from), Rapier included.
+  worker: {
+    plugins: () => (mode === 'rapier' ? [] : [withoutRapier()]),
+    rollupOptions: { output: { inlineDynamicImports: true } },
+  },
 
   build: {
     outDir: 'public/player',

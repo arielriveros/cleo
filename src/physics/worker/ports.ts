@@ -63,10 +63,16 @@ export class LoopbackPort implements PhysicsPort {
             return;
         }
         const reply = this.core.handle(structuredClone(msg));
-        if (!reply) return;
         const delay = (msg.kind === 'step' ? this._options.delayFor?.(msg.seq) : undefined) ?? this._options.delayFrames ?? 0;
-        if (delay <= 0) this.onMessage?.(structuredClone(reply));
-        else this._queue.push({ reply: structuredClone(reply), due: this._polls + delay });
+        const deliver = (r: FromWorker | null) => {
+            if (!r) return;
+            if (delay <= 0) this.onMessage?.(structuredClone(r));
+            else this._queue.push({ reply: structuredClone(r), due: this._polls + delay });
+        };
+        // A promise while a backend's library loads in the core: delivered when it resolves, as a real
+        // worker's reply would arrive.
+        if (reply instanceof Promise) reply.then(deliver);
+        else deliver(reply);
     }
 
     public poll(): void {

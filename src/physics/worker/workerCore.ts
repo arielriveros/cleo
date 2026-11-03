@@ -1,4 +1,4 @@
-import { createWorldReplica } from '../pal/createWorld';
+import { acquirePhysicsBackend, createWorldReplica, isPhysicsBackendLoaded } from '../pal/createWorld';
 import type { WorldReplica } from '../pal/replication';
 import type { PhysicsBackendKind } from '../pal/types';
 import type { PhysicsWorld } from '../pal/world';
@@ -24,6 +24,8 @@ export class PhysicsWorkerCore {
     private _events: number[] = [];
     private _submerged = new Map<number, number>();
     private _free: ArrayBuffer[] = [];
+    /** A backend loading (its WASM): every message waits behind it, in order. Null when none is. */
+    private _waiting: Promise<unknown> | null = null;
 
     constructor(backend: PhysicsBackendKind = 'cannon') {
         this._replica = this._replicaOf(backend);
@@ -32,10 +34,40 @@ export class PhysicsWorkerCore {
     /** The worker's world, for tests. */
     public get world(): PhysicsWorld { return this._replica.world; }
 
-    /** Handle one message; returns the reply (a snapshot), or null. */
-    public handle(msg: ToWorker): FromWorker | null {
+    /**
+     * Handle one message; returns the reply (a snapshot), or null. A promise of it while a backend is loading
+     * (a reset onto one whose library loads first): later messages wait behind it, so replies keep their order.
+     */
+    public handle(msg: ToWorker): FromWorker | null | Promise<FromWorker | null> {
+        if (this._waiting) {
+            const reply = this._waiting.then(() => this._handleNow(msg));
+            this._wait(reply);
+            return reply;
+        }
+        return this._handleNow(msg);
+    }
+
+    /** Let messages queue behind `p` until it settles. */
+    private _wait(p: Promise<unknown>): void {
+        const settled = p.then(() => undefined, () => undefined);
+        this._waiting = settled;
+        settled.then(() => { if (this._waiting === settled) this._waiting = null; });
+    }
+
+    private _handleNow(msg: ToWorker): FromWorker | null | Promise<FromWorker | null> {
         try {
-            if (msg.kind === 'reset') { this._reset(msg.epoch, msg.backend); return null; }
+            if (msg.kind === 'reset') {
+                if (msg.backend && !isPhysicsBackendLoaded(msg.backend)) {
+                    const loaded = acquirePhysicsBackend(msg.backend).then(
+                        () => { this._reset(msg.epoch, msg.backend); return null; },
+                        (e): FromWorker => ({ kind: 'error', epoch: msg.epoch, message: `the ${msg.backend} backend failed to load in the physics worker: ${e instanceof Error ? e.message : String(e)}` }),
+                    );
+                    this._wait(loaded);
+                    return loaded;
+                }
+                this._reset(msg.epoch, msg.backend);
+                return null;
+            }
             if (msg.epoch !== this._epoch) this._reset(msg.epoch);
             return this._step(msg);
         } catch (e) {

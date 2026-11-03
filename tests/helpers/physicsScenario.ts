@@ -30,8 +30,9 @@ export interface ScenarioTrace {
 }
 
 /** A physics system as the engine sets one up for a scene with water and a camera. */
-export function scenarioPhysics(): PhysicsSystem {
-    const p = new PhysicsSystem({ gravity: [0, -9.81, 0] });
+/** The scene's PhysicsSystem, on cannon (whose traces are pinned) unless another backend is asked for. */
+export function scenarioPhysics(backend = 'cannon'): PhysicsSystem {
+    const p = new PhysicsSystem({ gravity: [0, -9.81, 0], backend });
     p.initialize();
     p.simulationRange = 30;
     return p;
