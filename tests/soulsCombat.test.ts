@@ -825,15 +825,28 @@ describe('the running 180° turn', () => {
     /** A player running at `speed` along -Z, with a stub animator that records what it was asked to play. */
     function runner(speed: number, grounded = true) {
         const p = new SoulsPlayerNode('Player') as any;
-        const played: string[] = [], stopped: number[] = [];
+        const played: string[] = [], stopped: number[] = [], options: any[] = [];
+        /** The animator parameters pinned now (setParamOverride), by name. */
+        const pinned = new Map<string, number | boolean>();
         let v: V3 = [0, 0, -speed];
+        let measured = 0;
         Object.defineProperty(p, 'velocity', { get: () => v, set: (x: V3) => { v = x; }, configurable: true });
         Object.defineProperty(p, 'isGrounded', { get: () => grounded, configurable: true });
+        Object.defineProperty(p, 'planarSpeed', { get: () => measured, configurable: true });
         p._findClip = (name: string) => name.startsWith('Souls_RunTurn180');
         p._clipDuration = () => 0.6;
-        p._model = { animator: { playAction: (clip: string) => played.push(clip), stopAction: (_c: unknown, blend: number) => stopped.push(blend), consumeRootMotion: () => null } };
+        p._model = { animator: {
+            playAction: (clip: string, o: any) => { played.push(clip); options.push(o); },
+            stopAction: (_c: unknown, blend: number) => stopped.push(blend),
+            setParamOverride: (name: string, value: number | boolean | null) => { if (value === null) pinned.delete(name); else pinned.set(name, value); },
+            consumeRootMotion: () => null,
+        } };
         p.setRotation([0, 180, 0]);
-        return { p, played, stopped };
+        return { p, played, stopped, options, pinned, measure: (s: number) => { measured = s; } };
+    }
+    /** Step the turn to its end, as the player's frame does. */
+    function runTurnToEnd(p: any, intent: any): void {
+        for (let t = 0; t < p._runTurnLength + 0.05; t += 1 / 60) { p._stateTime += 1 / 60; p._runTurn(intent); if (p.actionState !== 'runTurn') break; }
     }
     /** The controller's intent with the stick pointing along world (x, z). */
     const stick = (x: number, z: number) => ({ move: [x === 0 ? 0 : -x, z], basisYaw: 0, sprint: false, speedScale: 1 } as any);
@@ -864,5 +877,55 @@ describe('the running 180° turn', () => {
         const f = p.worldForward;
         expect(Math.abs(Math.atan2(f[0], f[2]) * 180 / Math.PI)).toBeLessThan(1e-3);   // a half turn from 180
         expect(stopped).toEqual([0]);
+    });
+
+    it('turns without foot IK, which would aim the knees the old way while the hips swing round', () => {
+        const { p, options } = runner(4);
+        p._free(stick(0, 1), 1 / 60);
+        expect(options[0].ikWeight).toBe(0);
+        expect(options[0].blendOut).toBe(0);
+    });
+
+    it('holds the base machine on a straight-ahead run under the clip, at the speed it leaves at', () => {
+        const { p, pinned } = runner(4.5);
+        p._free(stick(0, 1), 1 / 60);
+        // Braking: the run it came in at, straight ahead, never the Idle the measured speed would fall to.
+        expect(pinned.get('Speed')).toBe(4.5);
+        expect(pinned.get('Direction')).toBe(0);
+        const plant = p.runTurnPlant * p._runTurnLength;
+        while (p._stateTime < plant + 0.02) { p._stateTime += 1 / 60; p._runTurn(stick(0, 1)); }
+        // Pushing off: the jog it leaves at, so the pose the clip is cut to is already that run.
+        expect(pinned.get('Speed')).toBe(p.jogSpeed);
+        expect(pinned.get('Direction')).toBe(0);
+    });
+
+    it('hands the speed back to the body after the turn, once the measured speed has caught up', () => {
+        const { p, pinned, measure } = runner(4);
+        p._free(stick(0, 1), 1 / 60);
+        runTurnToEnd(p, stick(0, 1));
+        expect(p.actionState).toBe('free');
+        // The measured speed trails the body's: the parameter follows the body meanwhile.
+        expect(pinned.get('Speed')).toBe(4);
+        p._settleRunPin(0.1);
+        expect(pinned.get('Speed')).toBe(4);
+        measure(3.9);
+        p._settleRunPin(1 / 60);
+        expect(pinned.size).toBe(0);
+    });
+
+    it('gives the parameters back after a while even if the measured speed never catches up', () => {
+        const { p, pinned } = runner(4);
+        p._free(stick(0, 1), 1 / 60);
+        runTurnToEnd(p, stick(0, 1));
+        for (let t = 0; t < p.runTurnReleaseSeconds + 0.05; t += 1 / 60) p._settleRunPin(1 / 60);
+        expect(pinned.size).toBe(0);
+    });
+
+    it('releases the parameters at once when the turn is cut short before it shows', () => {
+        const { p, pinned } = runner(4);
+        p._free(stick(0, 1), 1 / 60);
+        p._stateTime = 0.05;
+        p._enter('roll');
+        expect(pinned.size).toBe(0);
     });
 });

@@ -135,6 +135,14 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public runTurnPlant: number = 0.45
   /** Which way the clip itself turns; its mirror (`runTurnMirrorClip`) turns the other way. */
   public runTurnClipTurnsRight: boolean = true
+  /**
+   * The animator parameters the turn holds on a straight-ahead run underneath its clip (see _pinRunPose):
+   * the character's measured speed and direction, which would otherwise drop to Idle at the plant.
+   */
+  public runTurnSpeedParam: string = 'Speed'
+  public runTurnDirectionParam: string = 'Direction'
+  /** After the turn, the longest the speed parameter keeps following the body while the measured speed catches up. */
+  public runTurnReleaseSeconds: number = 0.3
   public backstepCost: number = 12
   public backstepSeconds: number = 0.45
   public backstepInvulnEnd: number = 0.22
@@ -227,6 +235,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   private _runTurnOut: number[] = [0, 0, 1]
   private _runTurnYaw: number = 0
   private _runTurnDone: boolean = true
+  /** Seconds since a finished turn handed the speed parameter back to the body (see _settleRunPin); -1: not. */
+  private _runPinSettle: number = -1
   private _frameDelta: number = 1 / 60
   private _sprintedThisHold: boolean = false
   private _sinceSpend: number = 99
@@ -482,6 +492,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this._bufferAge += delta
     this._sinceSpend += delta
     this.soulsGainAge += delta
+    this._settleRunPin(delta)
 
     if (this.isDead) { this._setCombat(false); this._holdStill(intent); return }
 
@@ -735,21 +746,28 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     const animator = this._model?.animator as any
     this._clip = clip
     this._clipLength = this._clipDuration(clip)
+    // Under the clip the base machine keeps running on the measured speed, which falls to 0 at the plant:
+    // held on a run instead, so the pose the clip is cut to is already one (see _pinRunPose).
+    this._runPinSettle = -1
+    this._pinRunPose(speed)
     // No blend out: the node turns round on the frame the clip ends, and the run must not blend toward the
-    // old facing meanwhile.
-    animator?.playAction?.(clip, { speed: this.runTurnPlaySpeed, loop: false, blendIn: this.actionBlendIn, blendOut: 0, ikWeight: 1 })
+    // old facing meanwhile. No foot IK: the clip swings the hips round while the node keeps its old facing,
+    // so IK would aim the knees the old way and twist the planted legs.
+    animator?.playAction?.(clip, { speed: this.runTurnPlaySpeed, loop: false, blendIn: this.actionBlendIn, blendOut: 0, ikWeight: 0 })
     this._runTurnLength = this._clipLength > 0 ? this._clipLength / this.runTurnPlaySpeed : 0.5
   }
 
   private _runTurn(intent: any): void {
     const t = this._stateTime, length = this._runTurnLength
     const plant = Math.min(0.9, Math.max(0.1, this.runTurnPlant)) * length
+    // The speed the turn leaves at, up to which it pushes off the other way.
+    const out = this.isSprinting ? this.sprintSpeed : this.jogSpeed
     if (t < plant) {
       this._driveMotion(intent, this._motionDir, this._runTurnSpeed * (1 - t / plant))
+      this._pinRunPose(this._runTurnSpeed)
     } else {
-      // Pushing off the other way, up to the speed the player is asking for.
-      const out = this.isSprinting ? this.sprintSpeed : this.jogSpeed
       this._driveMotion(intent, this._runTurnOut, out * Math.min(1, (t - plant) / Math.max(1e-3, length - plant)))
+      this._pinRunPose(out)
     }
     if (t >= length) { this._finishRunTurn(true); this._enter('free') }
   }
@@ -761,7 +779,38 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     if (turned) {
       this.setRotation([0, this._runTurnYaw, 0])
       this._stopAction(0)
-    }
+      // The run pose stays held while the measured speed catches up with the body's (see _settleRunPin).
+      this._runPinSettle = 0
+      this._settleRunPin(0)
+    } else this._pinRunPose(null)
+  }
+
+  /**
+   * Hold the animator's speed parameter at `speed` and its direction straight ahead, or hand both back to
+   * what they are linked to (the character's measured motion) with null. Layers share the parameter table,
+   * so the upper-body and guard layers follow too.
+   */
+  private _pinRunPose(speed: number | null): void {
+    const animator = this._model?.animator as any
+    if (!animator?.setParamOverride) return
+    animator.setParamOverride(this.runTurnSpeedParam, speed)
+    animator.setParamOverride(this.runTurnDirectionParam, speed === null ? null : 0)
+  }
+
+  /**
+   * After a turn: the measured speed is smoothed, so it trails the body's for a moment and would read as a
+   * slower stride. The speed parameter follows the body's own speed until the measured one is within
+   * 0.2 m/s of it, or `runTurnReleaseSeconds` have passed, then both parameters are released.
+   */
+  private _settleRunPin(delta: number): void {
+    if (this._runPinSettle < 0) return
+    this._runPinSettle += delta
+    const v = this.velocity
+    const actual = Math.hypot(v[0], v[2])
+    if (this._runPinSettle >= this.runTurnReleaseSeconds || Math.abs(this.planarSpeed - actual) <= 0.2) {
+      this._runPinSettle = -1
+      this._pinRunPose(null)
+    } else this._pinRunPose(actual)
   }
 
   private _backstep(intent: any): void {
