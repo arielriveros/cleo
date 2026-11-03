@@ -14,7 +14,9 @@ describe('name-typed fields', () => {
       public socket: SocketName = 'RightHand'
       public projectile: TemplateName = 'Magic Bolt'
       public next: NodeName = ''
+      public roll: TriggerName = 'Roll'
     }`
+    expect(field(src, 'roll')).toMatchObject({ type: 'string', pick: 'trigger', default: 'Roll' })
     expect(field(src, 'clip')).toMatchObject({ type: 'string', pick: 'clip', default: 'Souls_Sword_L1' })
     expect(field(src, 'sound')).toMatchObject({ type: 'string', pick: 'sound', default: 'Swing' })
     expect(field(src, 'socket')).toMatchObject({ type: 'string', pick: 'socket' })

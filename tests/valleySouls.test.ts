@@ -353,35 +353,137 @@ describe.skipIf(!present)('the Valley example project', () => {
     const clips = () => new Map<string, any>(library('animations').map((a: any) => [a.name, a.clips[0]]));
     const duration = (clip: any) => Math.max(...clip.samplers.map((s: any) => s.input[s.input.length - 1]));
 
-    it('has every clip a move, an attack or a script default names', () => {
+    const actionsOf = (machine: any) => machine?.layers?.find((l: any) => l.name === 'Actions');
+    const controller = (name: string) => library('animControllers').find((c: any) => c.name === name);
+    /** The state a trigger enters DIRECTLY on a layer (its "Enter on trigger"), or undefined. */
+    const entryOn = (layer: any, trigger: string) => layer?.states.find((s: any) => s.triggers?.some((e: any) => e.trigger === trigger));
+    /** The state `trigger` plays on a layer: entered directly, or handed over to on it (a combo segment). */
+    const stateOf = (layer: any, trigger: string) => entryOn(layer, trigger) ?? layer?.states.find((s: any) =>
+        layer.transitions.some((t: any) => t.to === s.name && t.condition?.children?.some((c: any) => c.param === trigger && c.op === 'trigger')));
+    /**
+     * Every weapon move and enemy attack, with the state its trigger plays in its OWN character's animator:
+     * the player's for a move, its enemy type's for an attack.
+     */
+    const actionStates = () => {
+        const out: { n: any; layer: any; state: any }[] = [];
+        const player = actionsOf(controller('Souls Character').machine);
+        for (const n of withScript('SoulsMove')) out.push({ n, layer: player, state: stateOf(player, n.scriptVars.animTrigger) });
+        for (const t of templates()) {
+            const nodes = allNodes(t.nodeJson);
+            const attacks = nodes.filter(n => scriptOf(n)?.source?.includes('export default class SoulsEnemyAttackNode'));
+            if (!attacks.length) continue;
+            const layer = actionsOf(nodes.find(n => n.stateMachine?.layers)?.stateMachine);
+            for (const n of attacks) out.push({ n, layer, state: stateOf(layer, n.scriptVars.animTrigger || n.name) });
+        }
+        return out;
+    };
+    /** Where a state's own part of its clip ends: where it hands over to the next one, else the clip's end. */
+    const segmentEnd = (layer: any, state: any, length: number) => {
+        const handover = layer.transitions.filter((t: any) => t.from === state.name && t.to !== 'Off' && t.hasExitTime);
+        return handover.length ? Math.min(...handover.map((t: any) => t.exitTime * length)) : Infinity;
+    };
+
+    it('has every clip an animator plays, and a state for every move, attack and gesture', () => {
         const have = clips();
-        const wanted = new Set<string>();
-        for (const n of [...withScript('SoulsMove'), ...withScript('SoulsEnemyAttack')]) wanted.add(n.scriptVars.clip);
-        for (const src of scriptSources()) for (const m of src.matchAll(/Clip: string = '([^']+)'/g)) wanted.add(m[1]);
-        for (const src of scriptSources()) for (const m of src.matchAll(/playGesture\?\.\('([^']+)'/g)) wanted.add(m[1]);
-        for (const clip of wanted) expect(have.has(clip), `no clip "${clip}"`).toBe(true);
+        for (const c of library('animControllers'))
+            for (const layer of [c.machine, ...(c.machine.layers ?? [])])
+                for (const s of layer.states) if (s.clipName) expect(have.has(s.clipName), `${c.name}: no clip "${s.clipName}"`).toBe(true);
+        const found = actionStates();
+        expect(found.length).toBeGreaterThan(10);
+        for (const { n, state } of found) expect(state, `nothing plays ${n.name} (${n.scriptVars.animTrigger})`).toBeTruthy();
+        // A gesture an interactable asks the player for is a trigger of the player's animator.
+        const player = actionsOf(controller('Souls Character').machine);
+        for (const src of scriptSources()) for (const m of src.matchAll(/playGesture\?\.\('([^']+)'/g))
+            expect(entryOn(player, m[1]), `the player's animator has no "${m[1]}" gesture`).toBeTruthy();
+    });
+
+    it('enters every one-shot the scripts name directly by its trigger, with no Any State edge', () => {
+        const defaults = (file: string) => [...readFileSync(join(SCRIPTS, `${file}.ts`), 'utf8')
+            .matchAll(/public \w+Trigger: TriggerName = '([^']+)'/g)].map(m => m[1]);
+        const player = actionsOf(controller('Souls Character').machine);
+        for (const t of [...defaults('SoulsPlayer'), 'Pickup', 'Interact'])
+            expect(entryOn(player, t), `Souls Character: no state entered on "${t}"`).toBeTruthy();
+        for (const name of ['Souls Character', 'Souls Enemy', 'Souls Hollow', 'Souls Hollow Sorcerer', 'Souls Elite Knight', 'Souls Hollow Warden']) {
+            const layer = actionsOf(controller(name).machine);
+            if (name !== 'Souls Character') for (const t of ['Flinch', 'Stagger']) expect(entryOn(layer, t), `${name}: no "${t}"`).toBeTruthy();
+            // Back to rest from anywhere: on death, with a blend, and at once — Off's own triggers, Off first.
+            expect(layer.states[0].name, name).toBe('Off');
+            expect(layer.states[0].triggers.map((e: any) => [e.trigger, e.blendTime]), name).toEqual([['Died', 0.15], ['Stop', 0.22], ['Cut', 0]]);
+            expect(layer.transitions.filter((t: any) => t.from === '*'), name).toEqual([]);
+            // Every trigger a state is entered on is a trigger parameter of the machine.
+            const triggers = new Set(controller(name).machine.parameters.filter((p: any) => p.type === 'trigger').map((p: any) => p.name));
+            for (const s of layer.states) for (const e of s.triggers ?? []) expect(triggers.has(e.trigger), `${name}: ${e.trigger}`).toBe(true);
+        }
+        expect(entryOn(actionsOf(controller('Souls Hollow Warden').machine), 'Taunt')).toBeTruthy();
+        expect(entryOn(actionsOf(controller('Souls Hollow Warden').machine), 'Roar')).toBeTruthy();
+        expect(entryOn(actionsOf(controller('Souls Hollow').machine), 'Taunt')).toBeFalsy();   // regular enemies never taunt
+        // No script plays a clip itself, or names an animator state.
+        for (const src of scriptSources()) {
+            expect(src).not.toMatch(/\.(playAction|stopAction)\(/);
+            expect(src).not.toMatch(/layerStateName|getStateMachine\(\)\?*\.layers/);
+        }
+    });
+
+    it('rolls and turns round at a run in the player\'s Actions layer', () => {
+        const layer = actionsOf(controller('Souls Character').machine);
+        const st = (name: string) => layer.states.find((s: any) => s.name === name);
+        // The roll moves the body by the dive's own travel (extracted for SoulsPlayer), with no foot planting.
+        expect(entryOn(layer, 'Roll')).toMatchObject({ name: 'Roll', clipName: 'Souls_Roll', speed: 1.5, ikWeight: 0, extractRootMotion: true });
+        for (const [name, clip] of [['RunTurnRight', 'Souls_RunTurn180'], ['RunTurnLeft', 'Souls_RunTurn180L']]) {
+            expect(entryOn(layer, name)).toMatchObject({ clipName: clip, ikWeight: 0 });
+            // Cut at the clip's very end: the frame SoulsPlayer turns the node round.
+            const exit = layer.transitions.find((t: any) => t.from === name && t.to === 'Off');
+            expect(exit).toMatchObject({ hasExitTime: true, exitTime: 1, blendTime: 0 });
+        }
+        // Every other one-shot leaves so its blend-out ends with its clip.
+        const have = clips();
+        const drink = layer.transitions.find((t: any) => t.from === 'Drink' && t.to === 'Off');
+        const length = duration(have.get('Souls_Drink'));
+        expect(drink.blendTime).toBe(0.22);
+        expect(drink.exitTime * length + drink.blendTime).toBeCloseTo(length, 2);
+        // A second hit replays the flinch: a state trigger restarts unless told not to.
+        expect(st('HitLight').triggers[0].restart).not.toBe(false);
+    });
+
+    it('plays the Longsword\'s one-clip combo as segments, each handing over to the next on its trigger', () => {
+        const layer = actionsOf(controller('Souls Character').machine);
+        const st = (name: string) => layer.states.find((s: any) => s.name === name);
+        expect(st('Longsword Light1').clipName).toBe('Souls_LS_Combo');
+        expect(st('Longsword Light2').startTime).toBeGreaterThan(0);
+        expect(st('Longsword Light3').startTime).toBeGreaterThan(st('Longsword Light2').startTime);
+        const length = duration(clips().get('Souls_LS_Combo'));
+        for (const [from, to] of [['Longsword Light1', 'Longsword Light2'], ['Longsword Light2', 'Longsword Light3']]) {
+            const hand = layer.transitions.find((t: any) => t.from === from && t.to === to);
+            expect(hand, `${from} -> ${to}`).toMatchObject({ hasExitTime: true, blendTime: 0 });
+            expect(hand.condition.children[0].param).toBe(to);
+            expect(hand.exitTime * length).toBeCloseTo(st(to).startTime, 4);   // the clip plays straight on
+            // Only from its segment: entered directly on its trigger, it would start the moment it is queued.
+            expect(entryOn(layer, to)).toBeUndefined();
+        }
+        expect(entryOn(layer, 'Longsword Light1')).toBeTruthy();
     });
 
     it('marks every attack clip with a contact event inside the clip', () => {
         const have = clips();
-        for (const n of [...withScript('SoulsMove'), ...withScript('SoulsEnemyAttack')]) {
-            const clip = have.get(n.scriptVars.clip);
+        for (const { state } of actionStates()) {
+            const clip = have.get(state.clipName);
             const contact = (clip.events ?? []).filter((e: any) => e.name === 'hit' || e.name === 'cast');
-            expect(contact.length, `${n.scriptVars.clip} has no hit/cast event`).toBeGreaterThan(0);
+            expect(contact.length, `${state.clipName} has no hit/cast event`).toBeGreaterThan(0);
             for (const e of clip.events) expect(e.time).toBeLessThan(duration(clip));
         }
     });
 
     it('gives every melee clip an active window: hit, then hitEnd, before recovery', () => {
         const have = clips();
-        for (const n of [...withScript('SoulsMove'), ...withScript('SoulsEnemyAttack')]) {
+        for (const { n, layer, state } of actionStates()) {
             if (n.scriptVars.projectileTemplate || n.scriptVars.aoeRadius) continue;
-            // A move playing one SEGMENT of a combo clip (clipStart..clipEnd) owns the events inside it, timed
-            // from the segment's start — what the move's own clock reads.
-            const start = n.scriptVars.clipStart ?? 0, end = n.scriptVars.clipEnd || Infinity;
-            const events = (have.get(n.scriptVars.clip).events ?? []).filter((e: any) => e.time >= start - 1e-6 && e.time <= end + 1e-6);
+            // A move playing one SEGMENT of a combo clip (its state's start, to where it hands over) owns the
+            // events inside it, timed from the segment's start — what the move's own clock reads.
+            const clip = have.get(state.clipName);
+            const start = state.startTime ?? 0, end = segmentEnd(layer, state, duration(clip));
+            const events = (clip.events ?? []).filter((e: any) => e.time >= start - 1e-6 && e.time <= end + 1e-6);
             const at = (name: string) => { const t = events.find((e: any) => e.name === name)?.time; return t === undefined ? undefined : t - start; };
-            expect(at('hitEnd'), `${n.scriptVars.clip} has no hitEnd`).toBeGreaterThan(at('hit'));
+            expect(at('hitEnd'), `${state.clipName} has no hitEnd`).toBeGreaterThan(at('hit'));
             if (at('recover') !== undefined) expect(at('hitEnd')).toBeLessThan(at('recover'));
             // The fallback fields agree with the clip, so a marker-less replacement behaves the same.
             expect(n.scriptVars.hitTime).toBeCloseTo(at('hit'), 3);
@@ -412,11 +514,11 @@ describe.skipIf(!present)('the Valley example project', () => {
             expect(templates().find((b: any) => b.id === t.variant?.baseTemplateId)?.name, t.name).toBe('Weapon');
             expect(scriptOf(t.nodeJson).source, t.name).toMatch(/extends SoulsWeaponNode/);
         }
-        // The player's weapons carry their movesets; every move names a clip.
+        // The player's weapons carry their movesets; every move names the animator trigger that plays it.
         for (const name of ['Longsword', 'Greatsword']) {
             const moves = weapons.find((t: any) => t.name === name).nodeJson.children.filter((c: any) => valueOf(c, 'isMove'));
             expect(moves.length, name).toBeGreaterThanOrEqual(3);
-            for (const m of moves) expect(valueOf(m, 'clip'), `${name}/${m.name}`).toMatch(/^Souls_/);
+            for (const m of moves) expect(valueOf(m, 'animTrigger'), `${name}/${m.name}`).toBe(`${name} ${m.name}`);
         }
     });
 
@@ -519,7 +621,9 @@ describe.skipIf(!present)('the Valley example project', () => {
 
     it('ships the character controllers, and every character embeds one (so a swapped model can get it back)', () => {
         const controllers = library('animControllers');
-        expect(controllers.map((c: any) => c.name)).toEqual(['Souls Character', 'Souls Enemy']);
+        // The player's, the base enemy's, and one per enemy type: each type's attacks are its own.
+        expect(controllers.map((c: any) => c.name)).toEqual(['Souls Character', 'Souls Enemy', 'Souls Hollow',
+            'Souls Hollow Sorcerer', 'Souls Elite Knight', 'Souls Hollow Warden']);
         for (const c of controllers) expect(c.rigId).toBe(library('rigs')[0].id);
         const machines = everyNode().filter(n => n.stateMachine?.states?.length).map(n => n.stateMachine);
         expect(machines.length).toBeGreaterThan(4);
@@ -528,7 +632,7 @@ describe.skipIf(!present)('the Valley example project', () => {
         // The player falls with Dying; enemies with Standing Death Right (then the ragdoll).
         const dead = (c: any) => c.machine.states.find((st: any) => st.name === 'Dead').clipName;
         expect(dead(controllers[0])).toBe('Souls_Dying');
-        expect(dead(controllers[1])).toBe('Souls_Death');
+        for (const c of controllers.slice(1)) expect(dead(c), c.name).toBe('Souls_Death');
     });
 
     // "Run With Sword" on the sword arm: a masked override layer over the locomotion blend, on while running.

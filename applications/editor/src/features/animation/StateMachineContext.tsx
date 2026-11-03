@@ -32,6 +32,8 @@ export type SMSelection =
 
 /** Canonical (order-independent) identity for a link, so A→B and B→A resolve to the same selection. */
 export const linkKey = (x: string, y: string): [string, string] => (x <= y ? [x, y] : [y, x])
+/** A transition's `from` that matches whichever state the machine is in — the graph's "Any State" node. */
+export const ANY_STATE = '*'
 export const sameLink = (s: SMSelection, a: string, b: string) =>
   s?.kind === 'transition' && s.a === linkKey(a, b)[0] && s.b === linkKey(a, b)[1]
 
@@ -92,6 +94,8 @@ interface StateMachineContextValue {
   addParam: () => void
   setParam: (i: number, patch: Partial<AnimationParameter>) => void
   removeParam: (i: number) => void
+  /** Add a trigger parameter of this name unless the machine has one (a state's trigger, typed in). */
+  addTriggerParam: (name: string) => void
 
   addState: (pos?: { x: number; y: number }) => void
   setState: (i: number, patch: Partial<AnimationState>) => void
@@ -430,11 +434,20 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
         conditions: t.conditions.map(c => c.param === oldName ? { ...c, param: patch.name! } : c),
         condition: t.condition ? renameNode(t.condition) as AnimationConditionGroup : undefined,
       }))
-      const renameState = (st: AnimationState) => st.speedParam === oldName ? { ...st, speedParam: patch.name! } : st
+      // A state reads parameters too: its rate, its rate multiplier, its foot-IK weight, the triggers that
+      // enter it — on the base and on every layer.
+      const renameState = (st: AnimationState): AnimationState => ({
+        ...st,
+        ...(st.speedParam === oldName ? { speedParam: patch.name! } : {}),
+        ...(st.speedScaleParam === oldName ? { speedScaleParam: patch.name! } : {}),
+        ...(st.ikWeightParam === oldName ? { ikWeightParam: patch.name! } : {}),
+        ...(st.triggers ? { triggers: st.triggers.map(e => (e.trigger === oldName ? { ...e, trigger: patch.name! } : e)) } : {}),
+      })
       return {
         ...prev,
         parameters,
         transitions: renameIn(prev.transitions),
+        states: prev.states.map(renameState),
         ...(prev.layers ? {
           layers: prev.layers.map(l => ({
             ...l,
@@ -447,6 +460,11 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     })
   }
   const removeParam = (i: number) => update(prev => ({ ...prev, parameters: prev.parameters.filter((_, idx) => idx !== i) }))
+  const addTriggerParam = (name: string) => {
+    if (!name) return
+    update(prev => prev.parameters.some(p => p.name === name) ? prev
+      : { ...prev, parameters: [...prev.parameters, { name, type: 'trigger', default: false }] })
+  }
 
   // ---- States ----
   const addState = (pos?: { x: number; y: number }) => {
@@ -497,7 +515,9 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const commitLayout = (coords: Record<string, { x: number; y: number }>) =>
     updateLayer(prev => ({ ...prev, states: prev.states.map(s => coords[s.name] ? { ...s, x: coords[s.name].x, y: coords[s.name].y } : s) }), { silent: true })
   const deleteElements = (stateNames: string[], removedLinks: [string, string][]) => {
-    const names = new Set(stateNames)
+    // The Any State node is not a state: selecting it with others and pressing Delete keeps it (and its
+    // transitions); they are removed one link at a time.
+    const names = new Set(stateNames.filter(n => n !== ANY_STATE))
     const keys = new Set(removedLinks.map(([a, b]) => linkKey(a, b).join('|')))
     updateLayer(prev => ({
       ...prev,
@@ -529,10 +549,17 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
 
   const addTransition = (from: string, to: string) => {
     // A duplicate would draw as a second edge exactly on top of the first: invisible and unclickable.
-    if (!from || !to || findT(sm.transitions, from, to) >= 0) return
-    updateLayer(prev => findT(prev.transitions, from, to) >= 0 ? prev : {
-      ...prev,
-      transitions: [...prev.transitions, { from, to, conditions: [], condition: emptyGroup(), hasExitTime: false, exitTime: 1 }],
+    if (!from || !to || to === ANY_STATE || findT(sm.transitions, from, to) >= 0) return
+    updateLayer(prev => {
+      if (findT(prev.transitions, from, to) >= 0) return prev
+      const t: AnimationTransition = { from, to, conditions: [], condition: emptyGroup(), hasExitTime: false, exitTime: 1 }
+      // The first transition that holds fires, so Any-State ones go first: a hit interrupts whatever the
+      // state's own way out was about to do.
+      if (from !== ANY_STATE) return { ...prev, transitions: [...prev.transitions, t] }
+      const at = prev.transitions.findIndex(x => x.from !== ANY_STATE)
+      const transitions = [...prev.transitions]
+      transitions.splice(at < 0 ? transitions.length : at, 0, t)
+      return { ...prev, transitions }
     })
     const [a, b] = linkKey(from, to)
     setSelection({ kind: 'transition', a, b })
@@ -671,7 +698,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     boneMasks, poseAssets, controller, saveAsController, detachController,
     selection, setSelection, graphView, setGraphView, simulate, setSimulate: setSimulateLive,
     apply, paramOf,
-    addParam, setParam, removeParam,
+    addParam, setParam, removeParam, addTriggerParam,
     addState, setState, removeState, stateIndex, commitLayout, deleteElements,
     links, linkOf, addTransition, setTransition, removeTransition, removeLink,
     addCondition, addGroup, setCondition, setGroupOp, removeNode, setTransitionCondition,

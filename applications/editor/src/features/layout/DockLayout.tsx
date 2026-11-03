@@ -44,7 +44,9 @@ const OLD_DOCK_LAYOUT_KEYS = [
 // tree stored at 19 has the retired panels and no arrangement for the new ones.
 // 21: the clip editor became the Clip Player, and its right-rail panel `clipTracks` (per-bone key tracks)
 // became `clipInspector`; a tree stored at 20 names a panel that no longer exists.
-const LAYOUT_VERSION = 21;
+// 22: the rig mode's Ragdoll and Bone Masks moved out of Properties into tabs of their own; a tree stored at
+// 21 has nowhere for them.
+const LAYOUT_VERSION = 22;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -109,6 +111,12 @@ const TILEMAP_PANELS = ['tilePalette', 'tilemapLayers'] as const;
 /** Landscape-mode panels: the brush and its tools, and the base + paint layer stack. Shown only there. */
 const LANDSCAPE_PANELS = ['landscapeTools', 'landscapeLayers'] as const;
 
+/**
+ * Rig-mode panels: the skeleton's ragdoll and its bone masks, tabbed beside Properties (titled Skeleton) so
+ * each gets the whole rail instead of a stretch of one long inspector. Shown only in rig mode.
+ */
+const RIG_PANELS = ['rigRagdoll', 'rigBoneMasks'] as const;
+
 /** The two Add palettes, stacked as tabs above the Scene tree. Ordinary chrome, shown wherever the tree is. */
 const ADD_PANELS = ['sceneAdd', 'uiAdd'] as const;
 
@@ -122,7 +130,7 @@ const OPTIONS_PANELS = ['optionsEngine', 'optionsEditor', 'optionsProject'] as c
 const CHROME_PANELS = [
   'scene', 'properties', 'scripts', 'physics', 'logger', 'assets',
   ...STATE_MACHINE_PANELS, ...ANIMATION_FIELD_PANELS, ...CLIP_PANELS, ...PARTICLE_PANELS, ...TILEMAP_PANELS, ...LANDSCAPE_PANELS,
-  ...ADD_PANELS,
+  ...RIG_PANELS, ...ADD_PANELS,
 ] as const;
 
 
@@ -168,7 +176,8 @@ function buildDefaultLayout(api: DockviewApi) {
   });
   // The animation panels share the Properties tab strip; they are hidden everywhere but the one mode that
   // owns them, where Properties itself is hidden. `clipInspector` joins them; `clipTimeline` goes below.
-  for (const id of [...STATE_MACHINE_PANELS, 'animField', 'clipInspector', ...TILEMAP_PANELS, 'landscapeTools']) {
+  // The rig panels are tabs beside Properties, which rig mode keeps (as Skeleton) and opens on.
+  for (const id of [...STATE_MACHINE_PANELS, 'animField', 'clipInspector', ...TILEMAP_PANELS, 'landscapeTools', ...RIG_PANELS]) {
     api.addPanel({
       id, component: id, title: PANEL_TITLES[id],
       position: { referencePanel: 'properties', direction: 'within' },
@@ -232,6 +241,10 @@ function buildDefaultLayout(api: DockviewApi) {
  * guaranteed to carry it. The default 'onlyWhenVisible' unmounts an unselected panel, tearing down the SVAR
  * store and drag patch for `assets`, the WebGL canvas host for `viewport`, and the rAF loop that poses the
  * model for `animFieldPlot` and `clipTimeline`.
+ *
+ * NOT for a tab beside Properties: a restored group mixing 'always' with an unmounting active panel came
+ * back with Properties' content missing (an empty Skeleton tab after every mode switch into rig mode). The
+ * rig tabs re-read what they mirror when they mount instead (RAGDOLL_QUERY, QUERY_SELECTED_JOINT).
  */
 function assertRenderers(api: DockviewApi) {
   for (const id of ['viewport', 'logger', 'assets', 'animFieldPlot', 'clipTimeline']) {
@@ -302,22 +315,27 @@ export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: b
   if (mode !== 'landscape') for (const id of LANDSCAPE_PANELS) hidden.add(id);
   if (mode !== 'animation') for (const id of CLIP_PANELS) hidden.add(id);
   if (mode !== 'particleSystem') for (const id of PARTICLE_PANELS) hidden.add(id);
+  if (mode !== 'rig') for (const id of RIG_PANELS) hidden.add(id);
 
   const hide = (...ids: readonly string[]) => { for (const id of ids) hidden.add(id); };
 
   switch (mode) {
-    // The scene tab and a template both author a node tree: everything applies.
+    // Each Add palette belongs to the mode that authors it: Scene Elements to scene mode, UI Elements to UI
+    // mode. A template can hold either kind of node, so it keeps both.
     case 'scene':
+      hide('uiAdd');
+      break;
     case 'template':
       break;
     // A screen rect has no rigid body.
     case 'ui':
-      hide('physics');
+      hide('physics', 'sceneAdd');
       break;
-    // Landscape and tilemap keep the tree and Properties: a terrain's size and heightmap live there.
+    // Landscape and tilemap keep the tree and Properties: a terrain's size and heightmap live there. They are
+    // scene sub-modes, so they keep Scene Elements and leave UI Elements to UI mode.
     case 'landscape':
     case 'tilemap':
-      hide('scripts', 'physics');
+      hide('uiAdd', 'scripts', 'physics');
       break;
     // A model tab edits one thing, so there is no tree to browse: the model node stays selected (the
     // SELECT_NODE coercion in EngineContext) and Properties hosts both its inspector and its transform.
@@ -382,6 +400,9 @@ export default function DockLayout() {
   // Non-zero while a layout pass we initiated is in flight. A rebuild emits a burst of layout events in
   // which the bottom group transiently reports the first tab, overwriting the remembered choice.
   const programmaticLayoutRef = useRef(0);
+  // The rig tab a FOCUS_RIG_ASSET asked for while another mode was still up: the event fires right after
+  // `enterRigEditor`, before the rig layout exists. Taken by the next mode pass, whichever mode it is.
+  const pendingRigTabRef = useRef<string | null>(null);
 
   /** Run a programmatic layout change with bottom-tab tracking muted until its events have settled. */
   const withProgrammaticLayout = useCallback((fn: () => void) => {
@@ -504,6 +525,10 @@ export default function DockLayout() {
       }
       // Options opens on Engine the first time; a saved Options tree remembers the tab that was up.
       if (editorMode === 'options' && !restored) api.getPanel('optionsEngine')?.api.setActive();
+      // A mask or pose double-clicked from another mode: open on the tab that edits it.
+      const rigTab = pendingRigTabRef.current;
+      pendingRigTabRef.current = null;
+      if (editorMode === 'rig' && rigTab) api.getPanel(rigTab)?.api.setActive();
       relayout(api); // opening/closing panels moves the always-rendered viewport and logger
     });
     keyRef.current = editorMode;
@@ -538,6 +563,20 @@ export default function DockLayout() {
     };
     eventEmitter.on('FOCUS_BOTTOM_TAB', onFocus);
     return () => { eventEmitter.off('FOCUS_BOTTOM_TAB', onFocus); };
+  }, [api, eventEmitter]);
+
+  // A double-clicked mask or pose opens in the rig editor: bring up the tab that edits it. Which item is
+  // focused inside that tab is RigContext's `focus`, which outlives the panel being mounted.
+  useEffect(() => {
+    if (!api) return;
+    const onFocus = (e: { kind?: string } | undefined) => {
+      const tab = e?.kind === 'boneMask' ? 'rigBoneMasks' : e?.kind === 'pose' ? 'properties' : null;
+      if (!tab) return;
+      if (keyRef.current === 'rig' && !playingRef.current) api.getPanel(tab)?.api.setActive();
+      else pendingRigTabRef.current = tab;
+    };
+    eventEmitter.on('FOCUS_RIG_ASSET', onFocus);
+    return () => { eventEmitter.off('FOCUS_RIG_ASSET', onFocus); };
   }, [api, eventEmitter]);
 
   useEffect(() => {

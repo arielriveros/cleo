@@ -19,19 +19,17 @@ import { pinKey, useCreatorPins } from '../creator/creatorPins'
 // pose id against both), and "Move into a pose asset" turns them into one without touching any clip.
 
 export default function PoseAssetsPanel() {
-  const { eventEmitter, editorScene, skeletonTargetId } = useCleoEngine()
+  const { editorScene, skeletonTargetId } = useCleoEngine()
   const { poseAssets, addPoseAsset, updatePoseAsset, removePoseAsset } = useAssetLibrary()
-  const { asset, patch } = useRig()
+  const { asset, patch, focus } = useRig()
   const pins = useCreatorPins()
-  const [open, setOpen] = useState<string | null>(null)
+  // A pose double-clicked in Assets opens expanded — read from the session, since the request is made
+  // before the rig editor (and this panel) is mounted.
+  const [open, setOpen] = useState<string | null>(focus?.kind === 'pose' ? focus.id : null)
   /** The pose pinned on the preview character, so its row can show it and a second click can clear it. */
   const [previewing, setPreviewing] = useState<string | null>(null)
 
-  useEffect(() => {
-    const onFocus = (e: { kind: string; id: string }) => { if (e?.kind === 'pose') setOpen(e.id) }
-    eventEmitter.on('FOCUS_RIG_ASSET', onFocus)
-    return () => { eventEmitter.off('FOCUS_RIG_ASSET', onFocus) }
-  }, [eventEmitter])
+  useEffect(() => { if (focus?.kind === 'pose') setOpen(focus.id) }, [focus])
 
   if (!asset) return null
   const mine = poseAssets.filter(p => p.rigId === asset.id)

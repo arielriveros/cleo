@@ -4,7 +4,7 @@ import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useRig } from './RigContext'
 import { getAnimationTarget } from '../animation/skeleton'
-import { Button, Hint, OptionalNumberInput, SectionTitle, Select, TextInput, Toggle, cn } from '@cleo/app-kit/ui'
+import { Button, DocScope, Hint, OptionalNumberInput, SectionTitle, Select, TextInput, Toggle, cn } from '@cleo/app-kit/ui'
 import { buildBoneMaskAsset, presetMask, withBranch, type BoneTree } from '../../utils/boneMasks'
 
 // The rig's BONE MASKS: which bones a controller layer or an action slot is allowed to move.
@@ -25,16 +25,14 @@ const PRESETS = [
 ] as const
 
 export default function BoneMasksPanel() {
-  const { editorScene, skeletonTargetId, eventEmitter } = useCleoEngine()
+  const { editorScene, skeletonTargetId } = useCleoEngine()
   const { boneMasks, addBoneMask, updateBoneMask, removeBoneMask } = useAssetLibrary()
-  const { asset } = useRig()
-  const [selected, setSelected] = useState<string | null>(null)
+  const { asset, focus } = useRig()
+  // A mask double-clicked in Assets opens expanded — read from the session, since this tab is usually
+  // mounted only after that request was made.
+  const [selected, setSelected] = useState<string | null>(focus?.kind === 'boneMask' ? focus.id : null)
 
-  useEffect(() => {
-    const onFocus = (e: { kind: string; id: string }) => { if (e?.kind === 'boneMask') setSelected(e.id) }
-    eventEmitter.on('FOCUS_RIG_ASSET', onFocus)
-    return () => { eventEmitter.off('FOCUS_RIG_ASSET', onFocus) }
-  }, [eventEmitter])
+  useEffect(() => { if (focus?.kind === 'boneMask') setSelected(focus.id) }, [focus])
 
   const target = getAnimationTarget(editorScene, skeletonTargetId)
 
@@ -94,55 +92,58 @@ export default function BoneMasksPanel() {
   }
 
   return (
-    <div>
-      <SectionTitle title='Bone Masks' className='mb-1' />
+    // Its own section, now that it is a tab of its own rather than a stretch of the Skeleton part's inspector.
+    <DocScope page='editor/animation' section='bone-masks'>
+      <div>
+        <SectionTitle title='Bone Masks' className='mb-1' />
 
-      <div className='flex flex-col gap-1'>
-        {masks.map(m => (
-          <div key={m.id} className={cn('flex items-center gap-1 rounded border p-1', m.id === selected ? 'border-highlight' : 'border-control')}>
-            <button className='text-ui-sm px-1 text-muted hover:text-fg' onClick={() => setSelected(m.id === selected ? null : m.id)}
-              title='Edit which bones this mask includes'>{m.id === selected ? '▾' : '▸'}</button>
-            <TextInput className='flex-1' value={m.name} onChange={v => updateBoneMask(m.id, { ...m, name: v })} />
-            <span className='text-ui-xs text-muted shrink-0'>{Object.keys(m.weights).length} bones</span>
-            <Button variant='remove' size='sm' className='px-1 py-0 shrink-0' title='Delete this mask. Layers using it stop affecting anything.'
-              onClick={() => { removeBoneMask(m.id); if (selected === m.id) setSelected(null) }}>✕</Button>
-          </div>
-        ))}
-      </div>
-
-      <Select className='mt-1' value='' disabled={!rows.length}
-        onChange={e => { if (e.target.value) create(e.target.value) }}
-        title={rows.length ? 'Create a mask, starting from a preset found by bone names' : 'This skeleton has no bone names'}>
-        <option value=''>+ New mask…</option>
-        {PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
-        <option value='empty'>Empty</option>
-      </Select>
-
-      {mask && (
-        <div className='mt-1 border border-control rounded max-h-[320px] overflow-y-auto p-1'>
-          <Hint className='mb-1'>Click a bone to include its whole branch; Alt-click for that bone alone.</Hint>
-          {rows.map(({ name, depth }) => {
-            const w = mask.weights[name] ?? 0
-            return (
-              <div key={name} className='flex items-center gap-1 text-ui-sm' style={{ paddingLeft: depth * 10 }}>
-                {/* The click's altKey picks one bone vs the whole branch. */}
-                <Toggle checked={w > 0} onChange={(_, e) => toggle(name, !e.altKey)} />
-                <span className={cn('flex-1 truncate', w > 0 ? 'text-fg' : 'text-muted')} title={name}>{name.split(':').pop()}</span>
-                {w > 0 && (
-                  <OptionalNumberInput className='w-[44px] px-1 py-0'
-                    value={w} title='How strongly this bone follows the layer'
-                    onChange={v => { if (v !== undefined) setWeight(name, v) }} />
-                )}
-              </div>
-            )
-          })}
-          <div className='flex gap-1 mt-1'>
-            <Button variant='ghost' size='sm' className='text-ui-sm' onClick={() => updateBoneMask(mask.id, { ...mask, weights: {} })}>Clear</Button>
-            <Button variant='ghost' size='sm' className='text-ui-sm'
-              onClick={() => updateBoneMask(mask.id, { ...mask, weights: Object.fromEntries(rows.map(r => [r.name, 1])) })}>All</Button>
-          </div>
+        <div className='flex flex-col gap-1'>
+          {masks.map(m => (
+            <div key={m.id} className={cn('flex items-center gap-1 rounded border p-1', m.id === selected ? 'border-highlight' : 'border-control')}>
+              <button className='text-ui-sm px-1 text-muted hover:text-fg' onClick={() => setSelected(m.id === selected ? null : m.id)}
+                title='Edit which bones this mask includes'>{m.id === selected ? '▾' : '▸'}</button>
+              <TextInput className='flex-1' value={m.name} onChange={v => updateBoneMask(m.id, { ...m, name: v })} />
+              <span className='text-ui-xs text-muted shrink-0'>{Object.keys(m.weights).length} bones</span>
+              <Button variant='remove' size='sm' className='px-1 py-0 shrink-0' title='Delete this mask. Layers using it stop affecting anything.'
+                onClick={() => { removeBoneMask(m.id); if (selected === m.id) setSelected(null) }}>✕</Button>
+            </div>
+          ))}
         </div>
-      )}
-    </div>
+
+        <Select className='mt-1' value='' disabled={!rows.length}
+          onChange={e => { if (e.target.value) create(e.target.value) }}
+          title={rows.length ? 'Create a mask, starting from a preset found by bone names' : 'This skeleton has no bone names'}>
+          <option value=''>+ New mask…</option>
+          {PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+          <option value='empty'>Empty</option>
+        </Select>
+
+        {mask && (
+          <div className='mt-1 border border-control rounded max-h-[320px] overflow-y-auto p-1'>
+            <Hint className='mb-1'>Click a bone to include its whole branch; Alt-click for that bone alone.</Hint>
+            {rows.map(({ name, depth }) => {
+              const w = mask.weights[name] ?? 0
+              return (
+                <div key={name} className='flex items-center gap-1 text-ui-sm' style={{ paddingLeft: depth * 10 }}>
+                  {/* The click's altKey picks one bone vs the whole branch. */}
+                  <Toggle checked={w > 0} onChange={(_, e) => toggle(name, !e.altKey)} />
+                  <span className={cn('flex-1 truncate', w > 0 ? 'text-fg' : 'text-muted')} title={name}>{name.split(':').pop()}</span>
+                  {w > 0 && (
+                    <OptionalNumberInput className='w-[44px] px-1 py-0'
+                      value={w} title='How strongly this bone follows the layer'
+                      onChange={v => { if (v !== undefined) setWeight(name, v) }} />
+                  )}
+                </div>
+              )
+            })}
+            <div className='flex gap-1 mt-1'>
+              <Button variant='ghost' size='sm' className='text-ui-sm' onClick={() => updateBoneMask(mask.id, { ...mask, weights: {} })}>Clear</Button>
+              <Button variant='ghost' size='sm' className='text-ui-sm'
+                onClick={() => updateBoneMask(mask.id, { ...mask, weights: Object.fromEntries(rows.map(r => [r.name, 1])) })}>All</Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </DocScope>
   )
 }

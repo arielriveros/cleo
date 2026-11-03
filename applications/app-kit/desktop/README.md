@@ -9,6 +9,10 @@ lockfile, outside the `applications/` workspace: electron-builder needs electron
 app-specific is the `HOSTED_APP` block at the top of `main.js` (plus `extraResources` in
 `package.json`).
 
+`icons/` holds the window, executable and installer icons: the colour logo, and the black-and-white one
+for Creator windows. They are made from the masters in `app-kit/src/assets/logo` by
+`npm run brand:icons` (`tools/brandIcons.mjs`), along with each app's favicons and loading-screen logo.
+
 ## Develop
 
 From the repo root:
@@ -19,7 +23,16 @@ npm run desktop:dev
 
 This runs the engine type watcher, the editor dev server (port 8080) and Electron pointed at it. Only the
 Electron window opens; the dev server does not launch a browser (`npm run editor:dev` is the browser
-flavour). (Requires `npm install` at the root, `npm ci` in `applications/`, and `npm run desktop:install`.)
+flavour). Closing the window stops the rest. (Requires `npm install` at the root and `npm ci` in
+`applications/`. The shell's own dependencies are installed on the first run — `tools/ensureDesktop.mjs`,
+the same install as `npm run desktop:install`.)
+
+The Creator is not started: its menu-bar button opens a page saying so. Run `npm run creator:serve`
+alongside to use it — the editor's dev server proxies `/creator/` to it.
+
+Electron is launched through `dev.js`, which removes `ELECTRON_RUN_AS_NODE` from its environment. VS Code
+sets that variable for processes its extensions spawn, and with it Electron starts as plain Node and no
+window opens.
 
 No engine build is needed first. The editor compiles engine **source** directly through the `cleo` alias
 (vite.config.ts), so engine edits hot-reload like editor edits. `dist/` only carries declarations for the

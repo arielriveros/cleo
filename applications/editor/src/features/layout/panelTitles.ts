@@ -13,6 +13,7 @@ export const PANEL_TITLES: Record<string, string> = {
   particleTransport: 'Particle Preview',
   tilePalette: 'Tiles', tilemapLayers: 'Layers',
   landscapeTools: 'Landscape Tools', landscapeLayers: 'Landscape Layers',
+  rigRagdoll: 'Ragdoll', rigBoneMasks: 'Bone Masks',
   optionsEngine: 'Engine', optionsEditor: 'Editor', optionsProject: 'Project',
 };
 
@@ -74,6 +75,8 @@ const PANEL_DOC_PAGE: Record<string, string> = {
   particleTransport: 'editor/particles',
   tilePalette: 'editor/tilemap-2d', tilemapLayers: 'editor/tilemap-2d',
   landscapeTools: 'editor/terrain', landscapeLayers: 'editor/terrain',
+  // The ragdoll is documented with the rest of the ragdoll, in Physics.
+  rigRagdoll: 'editor/physics', rigBoneMasks: 'editor/animation',
   optionsEngine: 'editor/options', optionsEditor: 'editor/options', optionsProject: 'editor/options',
 };
 

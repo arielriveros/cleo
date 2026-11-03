@@ -267,7 +267,8 @@ Conventions for **all final art**:
 - **Units:** metres. **Up:** +Y. **Forward:** +Z, so characters face +Z in their bind pose.
 - **Characters** are humanoid and Mixamo-compatible, or anything the retargeter can map. They are about
   1.8 m tall, with the boss at about 3.2 m.
-- **Clips are in place.** One-shot actions ignore root motion (see §6).
+- **Clips are in place**, except where an Actions state extracts the travel for the script (the roll,
+  the Longsword's steps; see §6).
 - **Weapons:** the grip sits at the origin and the blade or shaft runs along local **+Y**.
 
 ### Characters
@@ -331,8 +332,7 @@ place, or assign your own (§11.6).
 
 ### State machine on every character model
 
-Attacks, rolls and reactions are **actions** played over the state machine by script. The machine itself
-only needs this:
+The base layer of every character's machine is the same:
 
 | States | Parameters | Transitions |
 |---|---|---|
@@ -341,17 +341,44 @@ only needs this:
 If you build a new machine for a new model, keep the two trigger names. The scripts fire `Died` and
 `Revive` by name.
 
-There are two controllers on the `Mannequin` rig, alike except for their `Dead` clip:
+There are six controllers on the `Mannequin` rig:
 - **Souls Character** (the player) falls with `Souls_Dying`.
-- **Souls Enemy** falls with `Souls_Death` (Standing Death Right), then goes limp after `deathSeconds`.
+- **Souls Enemy** (the base Enemy template) and one per type — **Souls Hollow**, **Souls Hollow
+  Sorcerer**, **Souls Elite Knight**, **Souls Hollow Warden** — fall with `Souls_Death` (Standing Death
+  Right), then go limp after `deathSeconds`. They differ in their Actions layer: each type's own attacks.
 
-**Upper body: running with the sword.** Both machines carry an `UpperBody` layer:
-- It is an override layer with the **Chest Up** bone mask: `mixamorig1:Spine2` (the chest) and everything above it. The lower spine stays with the legs, or the run rocks the whole torso.
+**Upper body: running with the sword.** Every machine carries an `UpperBody` layer:
+- It is an override layer with the **Weapon Arm** bone mask: the right shoulder and everything below it.
+  The torso, the head and the left arm keep the locomotion's own swing.
 - Its two states are `Off`, an empty state that contributes nothing, and `Sword Run` (`Souls_RunWithSword`, looping).
-- It switches on above `Speed` 2.2 and off below 1.8. While running, the arms carry the blade the way a
+- It switches on above `Speed` 2.2 and off below 1.8. While running, the arm carries the blade the way a
   fighter runs with one, and the legs keep the locomotion blend's footwork.
 - Walking and strafing keep the guard pose.
-- Attacks, rolls and hit reactions are actions, which play over every layer.
+
+**One-shots: the Actions layer.** Every attack, roll, hit reaction and gesture is a state of an
+`Actions` layer — full body, on top of every other layer, resting in an empty `Off` — entered directly
+by its trigger (**Enter on trigger**) when the scripts fire it by name (the `*Trigger` fields; a move's
+or attack's `animTrigger`). The scripts play no clip and name no state: the graph holds each one-shot's
+clip, speed, start and blends, and SoulsCharacter asks the animator how long what a trigger plays lasts
+(`triggerInfo`) and whether it still plays (`activeTrigger`). The Actions graphs hold no Any State edge.
+- Each one-shot leaves for `Off` as its clip ends, starting its blend-out (0.22 s; 0.35 s for an attack)
+  so the fade finishes with the clip.
+- `Off` is entered from anywhere by its own triggers — `Died` (the base falls on the same trigger), `Stop`
+  (with a blend: standing up from a bonfire) and `Cut` (at once: a run turn called off after the body
+  turned) — and is first in the list, so they win a frame in which a one-shot is fired too.
+- **Roll** plays `Souls_Roll` at 1.5x, with no foot placement, and **extracts its root travel**: the dive's
+  own travel goes to `SoulsPlayer`, which moves the body by it through its own collision.
+- **RunTurnRight** / **RunTurnLeft** play the running 180° turn (`Souls_RunTurn180` and its mirror) at 1.2x
+  with no foot placement, and leave with no blend at the clip's very end: on that same frame `SoulsPlayer`
+  turns the node round, so the run carries on facing the new way.
+- **Sheath** (on the `Swap` trigger) hands over to **Draw** at its end; the weapon changes on the sheathe
+  clip's `swap` event. **Rest** loops until `Stop`.
+- The player's weapon moves are states named `<Weapon> <Move>`. The Longsword's light combo is one clip
+  in three segments: **Longsword Light2** and **Light3** start part-way into `Souls_LS_Combo` and are
+  entered only from the segment before, on their own trigger, at its end.
+- An enemy type's attacks are states named after the attack. They play at their speed times the
+  `AttackSpeed` parameter, which the Warden raises in its second phase. `Flinch`, `Stagger` and — on
+  the boss — `Taunt` and `Roar` are its reactions.
 
 **The player in a fight.** The player's machine adds a bool parameter, `InCombat`, which `SoulsPlayer` sets
 while it is locked on, while any enemy is engaged with it (`SoulsEnemy.engagedWith`), and for
@@ -395,36 +422,42 @@ rewrites the documents from the choreography in that file, overwriting edits mad
 
 **The light combo is one clip.** `Souls_LS_Combo` holds all three attacks back to back:
 - each ends on a `next` event;
-- each `Light` move plays its segment, `clipStart` to `clipEnd`;
-- one press plays the first attack and blends back to the guard; pressing again during the swing plays on
-  into the next attack without restarting anything.
+- each `Light` move's Actions state plays its segment, starting where the one before ends;
+- one press plays the first attack and blends back to the guard; pressing again during the swing fires
+  the next attack's trigger, and the layer plays on into it at the segment's end without restarting anything.
 
-The attacks **step**. The feet move and the hips travel, and the moves use `rootMotion`, so the body moves
-exactly as far as the feet do. There is no lunge.
+The attacks **step**. The feet move and the hips travel, and the moves' states extract the root travel,
+so the body moves exactly as far as the feet do. There is no lunge.
 
-| Clip (placeholder name) | Length | Required events | Referenced by |
+The **States** column names the Actions-layer state that plays a clip (§6), and the trigger of the same
+name enters it — what a script's `*Trigger` field or a move's `animTrigger` fires.
+
+| Clip (placeholder name) | Length | Required events | States |
 |---|---|---|---|
-| `Souls_LS_Combo` | 3.1 s (three segments) | per attack: `hit`, `hitEnd, combo`, `recover`, then `next` | `Longsword/Light1..3` → `clip`, `clipStart`, `clipEnd` |
-| `Souls_LS_Heavy` | 1.8 s | `hit`, `hitEnd`, `combo`, `recover` | `Longsword/Heavy` → `clip` |
+| `Souls_LS_Combo` | 3.1 s (three segments) | per attack: `hit`, `hitEnd, combo`, `recover`, then `next` | `Longsword Light1..3` |
+| `Souls_LS_Heavy` | 1.8 s | `hit`, `hitEnd`, `combo`, `recover` | `Longsword Heavy` |
 | `Souls_LS_Stance` / `Souls_LS_Guard` | 2.4 / 1.8 s, loop | — | the player's `CombatIdle` state / `Guard` layer |
 | `Souls_Sword_L1` / `L2` / `L3`, `Souls_Sword_Heavy` | 0.9–1.4 s | `hit`, `combo`, `recover` | unused since the Longsword replaced the Straight Sword; kept in the library |
-| `Souls_GS_L1` / `L2` | 1.4 s | `hit`, `combo`, `recover` | `Weapon_Greatsword/Light1..2` → `clip` |
-| `Souls_GS_Heavy` | 2.0 s | `hit`, `recover` | `Weapon_Greatsword/Heavy` → `clip` |
-| `Souls_Roll` | 0.7 s | — | `Player` → `rollClip` |
-| `Souls_Backstep` | 0.45 s | — | `Player` → `backstepClip` |
-| `Souls_Drink` | 1.4 s | `drink` (when the heal starts) | `Player` → `drinkClip` |
-| `Souls_HitLight` / `Souls_HitHeavy` | 0.45 / 0.9 s | — | `Player` → `hitLightClip` / `hitHeavyClip` (also the enemies' flinch and stagger) |
-| `Souls_Sheath` / `Souls_Draw` | 1.7 / 1.5 s (played at 2x) | — | `Player` → `sheathClip` / `drawClip`: a swap sheathes, changes weapon, then draws |
-| `Souls_Swap` | 0.4 s | — | `Player` → `swapClip`, used only when `sheathClip` is empty |
-| `Souls_Rest` | 1.2 s, loops | — | `Player` → `restClip` (sitting at the bonfire) |
-| `Souls_Interact` / `Souls_Pickup` | 0.9 / 0.8 s | — | lever, bonfire lighting / pickups, bloodstain |
-| `Souls_FogWalk` | 1.5 s | — | `Player` → `fogWalkClip` |
+| `Souls_GS_L1` / `L2` | 1.4 s | `hit`, `combo`, `recover` | `Greatsword Light1..2` (and the Knight's `Sweep`) |
+| `Souls_GS_Heavy` | 2.0 s | `hit`, `recover` | `Greatsword Heavy` |
+| `Souls_Roll` | 1.6 s, played at 1.5x | — | `Roll` (extracts its travel) |
+| `Souls_RunTurn180` / `Souls_RunTurn180L` | 0.67 s, played at 1.2x | — | `RunTurnRight` / `RunTurnLeft` (the second is a mirror edit of the first) |
+| `Souls_Backstep` | 0.45 s | — | `Backstep` |
+| `Souls_Drink` | 1.4 s | `drink` (when the heal starts) | `Drink` |
+| `Souls_HitLight` / `Souls_HitHeavy` | 0.45 / 0.9 s | — | `HitLight` / `HitHeavy`, `Recoil` (HitLight at 1.4x); the enemies' `Flinch` / `Stagger` |
+| `Souls_Sheath` / `Souls_Draw` | 1.7 / 1.5 s (played at 2x) | `swap` (sheathe's end) | `Sheath` → `Draw`: a swap sheathes, changes weapon, then draws |
+| `Souls_Swap` | 0.4 s | — | placeholder, no longer used |
+| `Souls_Rest` | 1.2 s, loops | — | `Rest` (sitting at the bonfire) |
+| `Souls_Interact` / `Souls_Pickup` | 0.9 / 0.8 s | — | `Interact` (lever, bonfire lighting) / `Pickup` (pickups, bloodstain) |
+| `Souls_FogWalk` | 1.5 s | — | `FogWalk` |
 | `Souls_Death` | 2.3 s, root motion | — | the enemies' `Dead` state (then the ragdoll) |
 | `Idle`, `Walk`, `Run`, strafes, backwards, diagonals | — | — | the `Souls Locomotion` blend space |
 
 ### Clips the enemies use
 
-| Clip | Length | Required event | Referenced by |
+Each attack below is a state of its enemy type's Actions layer, named after the attack.
+
+| Clip | Length | Required event | Attacks |
 |---|---|---|---|
 | `Souls_Enemy_Swing` | 1.2 s | `hit`, `hitEnd` | Hollow `Swing`, Sorcerer `Shove` |
 | `Souls_Enemy_Sweep` | 1.3 s | `hit`, `hitEnd` | Hollow `Sweep` (and the source of the Tall/Giant variants) |
@@ -436,7 +469,7 @@ exactly as far as the feet do. There is no lunge.
 | `Souls_Cast` | 1.2 s | `cast` (the bolt leaves) | Sorcerer `Bolt`, Warden `Bolt Fan` |
 | `Souls_Leap` | 1.8 s | `hit` (landing) | Warden `Leap` |
 | `Souls_Knight_Combo1` / `Combo2` | 4.7 / 4.2 s | several `hit` / `hitEnd` pairs | Knight `Combo` / `Flurry`: each pair is a fresh damage window |
-| `Souls_Battlecry` | 2.8 s | — | the boss's `tauntClip`, played once on first sight (regular enemies never taunt); Warden → `roarClip` (phase two) |
+| `Souls_Battlecry` | 2.8 s | — | the boss's `Taunt`, played once on first sight (regular enemies never taunt); the Warden's `Roar` (phase two) |
 | `Souls_Dying` | 2.6 s, root motion | — | the player's `Dead` state |
 | `Souls_Roar` | 2.0 s | — | placeholder, no longer used |
 
@@ -460,9 +493,10 @@ the follow-through after it (`placeholderClips.mjs`). The 1.2x knight and the 1.
 motions, crouched with the arms dropped, because a man-sized swing scaled up passes over the player's
 head — and now a swing over the head misses.
 
-**In place.** Actions ignore root motion, so a lunge or roll forward is driven by script: `lungeStart`,
-`lungeSeconds` and `lungeSpeed` on moves and attacks, and `roll*` on the player. Bake root motion out on
-export, or leave the clip's **Root motion** toggle off.
+**In place.** An Actions state moves nothing by itself, so travel is the script's: a lunge from
+`lungeStart`, `lungeSeconds` and `lungeSpeed` on moves and attacks, or — for a state that extracts its root
+travel (the roll, the Longsword's steps) — the clip's own travel, handed to the script through
+`consumeRootMotion`. Bake root motion out of other clips on export, or leave their **Root motion** toggle off.
 
 ## 7. Sockets and weapon grips
 
@@ -637,15 +671,21 @@ plays every mannequin clip once its rig is set to **Mannequin** (§11.6).
 
 ### 11.3 Point a move or attack at a new clip
 
-- **Player attack:** open the weapon's template (**Assets ▸ Templates ▸ Weapons ▸ Longsword**) and
-  select `Light1` (or `Heavy`, …). In **Scripts**, set `clip`. Tune `playSpeed`, `staminaCost` and the `lunge*` fields to suit the motion. Reach comes from
-  the blade itself: if the new swing misses, lengthen the lunge or the weapon's `bladeEnd`/`bladeRadius`.
-- **Player one-shots:** select `Player` and set `rollClip`, `drinkClip`, `hitLightClip` and the other
-  clip fields.
-- **Enemy attack:** open the enemy's template (**Assets ▸ Templates ▸ Enemies**, double-click it), then
-  select `Attacks ▸ <attack>` and set `clip`.
-- **Add an attack:** duplicate an existing `Attacks` child and rename it. The enemy picks it up
-  automatically. For a weapon, duplicate a move in its template, rename it, and point the previous move's `next` at it.
+Clips are picked in the animators, not the scripts: open the character's animator (**Souls Character** for
+the player, **Souls Hollow** and the others for the enemies), pick the **Actions** layer tab, select the
+state and set its clip, speed and **Start at** there.
+
+- **Player attack:** the states are entered by triggers named `<Weapon> <Move>` (`Longsword Light1`). The
+  move itself — the weapon template's `Light1` (**Assets ▸ Templates ▸ Weapons ▸ Longsword**) — keeps its
+  gameplay: `staminaCost`, the `lunge*` fields, its `animTrigger`. Reach comes from the blade itself: if
+  the new swing misses, lengthen the lunge or the weapon's `bladeEnd`/`bladeRadius`.
+- **Player one-shots:** the states the `Roll`, `Drink`, `HitLight`, … triggers enter. `Player`'s
+  `*Trigger` fields name the triggers.
+- **Enemy attack:** the state its trigger (the attack's name) enters in its type's animator.
+- **Add an attack:** duplicate an existing `Attacks` child and rename it, then add a state to the type's
+  Actions layer with an **Enter on trigger** of that name. For a weapon, duplicate a move in its
+  template, rename it, add a state to **Souls Character** entered by a new trigger, pick that trigger as
+  the move's `animTrigger`, and point the previous move's `next` at it.
 
 ### 11.4 Add the event markers
 
@@ -873,7 +913,8 @@ npx vitest run tests/soulsDemo tests/valley              # rules + generated-pro
 
 **Known limitations:**
 - **Placeholder clips are crude.** They exist for timing and events. The roll is an in-place somersault.
-- **No root motion in actions.** One-shot clips must be in place; travel is scripted.
+- **One-shots never move the character themselves.** An Actions state either extracts its clip's travel
+  for the script (the roll, the Longsword) or plays in place while the script lunges.
 - **Hurtboxes are whole-body capsules.** A blade that grazes an outstretched arm outside the capsule
   does not count, and there are no head or limb multipliers.
 - **Enemy reach comes from the placeholder swings.** The attacks' `maxRange` values were measured against

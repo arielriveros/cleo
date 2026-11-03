@@ -17,6 +17,10 @@
  *     key set that now includes Tab, F5 and F12 that would swallow browser shortcuts a user expects.
  *     It applies only to codes the caller says are actually bound, and never while Ctrl or Meta is
  *     held — a modified key is a browser command, not a game one.
+ *
+ * And one rule over all of it: a key typed into a text field is not game input. It never enters the
+ * down-set and is never cancelled, so a name box in the game's own UI — or, in the editor, every field
+ * and the code editor — keeps its letters even though the listeners sit on the window.
  */
 
 import { MOUSE_BUTTONS } from "./inputSources";
@@ -29,6 +33,7 @@ import { createDeviceSnapshot } from "./resolveActions";
 import type { DeviceSnapshot } from "./resolveActions";
 import type { TouchGestureConfig, VirtualControl } from "./actionMap";
 import { DEFAULT_TOUCH_CONFIG } from "./actionMap";
+import { isTextEntryEvent, isTextEntryTarget } from "./textEntry";
 
 /** What the sampler asks its owner before deciding whether to swallow a browser default. */
 export type BoundCodeTest = (code: string) => boolean;
@@ -212,6 +217,8 @@ export class DeviceSampler {
     // method would lose `this` and could not be removed by identity either.
 
     private _onKeyDown = (event: KeyboardEvent): void => {
+        // Typing, not playing: the letter belongs to the field (see the module comment).
+        if (isTextEntryEvent(event)) return;
         // A repeat is the OS auto-repeating a held key. The down-set already has it, and letting it
         // through would do nothing — but skipping it keeps the set honest for anything reading size.
         if (!event.repeat) this._keys.add(event.code);
@@ -219,8 +226,9 @@ export class DeviceSampler {
     };
 
     private _onKeyUp = (event: KeyboardEvent): void => {
+        // Released wherever focus is: a key held down outside a field and let go inside one still lets go.
         this._keys.delete(event.code);
-        this._maybePreventKeyDefault(event);
+        if (!isTextEntryEvent(event)) this._maybePreventKeyDefault(event);
     };
 
     private _maybePreventKeyDefault(event: KeyboardEvent): void {
@@ -242,7 +250,14 @@ export class DeviceSampler {
         if (button) this._mouseButtons.add(button);
         this._updatePosition(event);
         if (this.pointerLockOnClick && event.button === 0) this.requestPointerLock();
-        if (this.preventDefault) event.preventDefault();
+        if (this.preventDefault) {
+            event.preventDefault();
+            // Cancelling the press also cancels the focus change it would make, so a field focused before
+            // the click would keep the keyboard — and its keys are not game input. A click on the game
+            // takes the keyboard, as it would without the cancel.
+            const active = typeof document !== 'undefined' ? document.activeElement : null;
+            if (isTextEntryTarget(active)) (active as HTMLElement).blur();
+        }
     };
 
     private _onMouseUp = (event: MouseEvent): void => {

@@ -20,7 +20,7 @@ import { pickChoices, PICK_LABEL, type PickContext } from './pickSources'
  * placement's override (templateOverrides.ts) and survives the instance being rebuilt from its template.
  */
 export default function ScriptVariablesEditor(props: { node: Node; overridable?: boolean }) {
-  const { eventEmitter, scriptAssetOf, revertTemplateOverride, editorScene, rigs, animations, templates } = useCleoEngine()
+  const { eventEmitter, scriptAssetOf, revertTemplateOverride, editorScene, rigs, animations, templates, animControllers } = useCleoEngine()
   const asset = scriptAssetOf(props.node)
   const [values, setValues] = useState<Record<string, any>>({})
   // In a variant's tab: an inherited node's value differs from what its base holds = this variant's override.
@@ -66,13 +66,16 @@ export default function ScriptVariablesEditor(props: { node: Node; overridable?:
     return Array.isArray(def) ? def.map(String) : []
   }
 
-  // A typed name field (`clip: ClipName`): the names valid where this node sits. See pickSources.ts.
-  const pickCtx: PickContext = { sceneRoot: editorScene?.root, rigs, animations, templates }
+  // A typed name field (`clip: ClipName`): the names valid where this node sits. See pickSources.ts. A
+  // trigger is only ever one the animators declare, so it is picked, never typed (a stored unknown one is
+  // flagged rather than dropped).
+  const pickCtx: PickContext = { sceneRoot: editorScene?.root, rigs, animations, templates, animControllers }
   const namePicker = (v: ScriptVarSchema, current: string, onChange: (value: string) => void) => {
     const noun = PICK_LABEL[v.pick!]
     return (
       <ComboSelect value={current} onChange={onChange} noun={noun}
-        choices={pickChoices(v.pick!, props.node, pickCtx)} title={`A ${noun} name`} />
+        choices={pickChoices(v.pick!, props.node, pickCtx)} title={`A ${noun} name`}
+        allowCustom={v.pick !== 'trigger'} />
     )
   }
 

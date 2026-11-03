@@ -6,7 +6,8 @@ import { getAnimationTarget } from '../animation/skeleton'
 import {
   Button, DocScope, Hint, NumberInput, PropertyRow, PropertyTable, SectionTitle, Select, Slider, TextInput, Toggle, cn,
 } from '@cleo/app-kit/ui'
-import { RAGDOLL_SELECT_PART, RAGDOLL_SHOW, RAGDOLL_TEST, RAGDOLL_TEST_STATE, rigRagdollProfile } from './RagdollPreview'
+import { RAGDOLL_QUERY, RAGDOLL_SELECT_PART, RAGDOLL_SHOW, RAGDOLL_TEST, RAGDOLL_TEST_STATE, rigRagdollProfile } from './RagdollPreview'
+import { QUERY_SELECTED_JOINT } from '../animation/SkeletonTree'
 
 // The rig's ragdoll: which bones become bodies when a character on this skeleton dies, how big and
 // heavy each is, and how each joint bends. Authored here, embedded into every model on the rig, read by
@@ -31,9 +32,20 @@ export default function RagdollPanel() {
   useEffect(() => {
     const onJoint = (i: number) => setSelectedJoint(typeof i === 'number' ? i : -1)
     const onTest = (v: boolean) => setTesting(!!v)
+    const onShow = (v: boolean) => setShow(!!v)
+    const onPart = (i: number | null) => setOpen(typeof i === 'number' ? i : null)
     eventEmitter.on('SELECT_JOINT', onJoint)
     eventEmitter.on(RAGDOLL_TEST_STATE, onTest)
-    return () => { eventEmitter.off('SELECT_JOINT', onJoint); eventEmitter.off(RAGDOLL_TEST_STATE, onTest) }
+    eventEmitter.on(RAGDOLL_SHOW, onShow)
+    eventEmitter.on(RAGDOLL_SELECT_PART, onPart)
+    // This is a tab: it unmounts while another tab of its group is up, and the viewport overlay and the bone
+    // tree carry on without it. Ask both where they are rather than starting from the defaults.
+    eventEmitter.emit(RAGDOLL_QUERY)
+    eventEmitter.emit(QUERY_SELECTED_JOINT)
+    return () => {
+      eventEmitter.off('SELECT_JOINT', onJoint); eventEmitter.off(RAGDOLL_TEST_STATE, onTest)
+      eventEmitter.off(RAGDOLL_SHOW, onShow); eventEmitter.off(RAGDOLL_SELECT_PART, onPart)
+    }
   }, [eventEmitter])
 
   const target = getAnimationTarget(editorScene, skeletonTargetId)

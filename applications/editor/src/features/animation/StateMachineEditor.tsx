@@ -1,17 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { useEditorSessions } from '../EditorSessionsContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
-import type { Animator, AnimationVariableBinding, AnimationParameterType, AnimationParameter } from 'cleo'
+import type { Animator, AnimationVariableBinding, AnimationParameterType, AnimationParameter, AnimationStateTrigger } from 'cleo'
 import { NODE_BUILTINS, isConditionGroup } from 'cleo'
 import { AccessibleVariable, UNSIGNED_BUILTINS } from './skeleton'
 import FieldDebugReadout from './FieldDebugReadout'
 import type { AnimationFieldAsset } from '../../utils/animationFields'
-import { useStateMachine } from './StateMachineContext'
+import { useStateMachine, ANY_STATE } from './StateMachineContext'
 import ConditionTree from './ConditionTree'
 import { AssetDropRow, LayerSection, SlotsSection } from './LayerPanels'
 import AnimationAssetPicker from './AnimationAssetPicker'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { Button, cn, controlClass, FileButton, hintClass, NumberInput, OptionalNumberInput, SectionTitle, SegmentedControl, Select, TextInput, Toggle } from '@cleo/app-kit/ui'
+import { Button, cn, ComboSelect, controlClass, FileButton, hintClass, NumberInput, OptionalNumberInput, SectionTitle, SegmentedControl, Select, TextInput, Toggle } from '@cleo/app-kit/ui'
 import { clamp } from '@cleo/app-kit/utils/math';
 import { promptDialog } from '@cleo/app-kit/feedback/dialogStore'
 
@@ -201,6 +201,13 @@ export function StateMachinePanel() {
       <Collapsable title='Selected' defaultOpen>
         <div className='p-2 flex flex-col gap-2'>
           {!selection && <p className='text-ui-sm text-muted'>Select a state or transition in the graph.</p>}
+          {selection?.kind === 'state' && selection.name === ANY_STATE && (
+            <p className='text-ui-sm text-muted'>
+              <b>Any State</b> — a transition from here fires whichever state this layer is in, the moment its
+              conditions hold. Drag from it to a state. To start a state on a trigger alone, give the state an
+              <b> Enter on trigger</b> instead — no transition needed.
+            </p>
+          )}
           {selection?.kind === 'state' && <SelectedState />}
           {selection?.kind === 'transition' && <SelectedTransition />}
         </div>
@@ -212,7 +219,7 @@ export function StateMachinePanel() {
 
 // ---- Selected state details -----------------------------------------------------------------------
 function SelectedState() {
-  const { sm, selection, clips, setState, removeState, stateIndex, links, animationFields, fieldOf, poseAssets, activeLayer } = useStateMachine()
+  const { sm, selection, clips, setState, removeState, stateIndex, links, animationFields, fieldOf, poseAssets, activeLayer, addTriggerParam } = useStateMachine()
   if (selection?.kind !== 'state') return null
   const i = stateIndex(selection.name)
   if (i < 0) return null
@@ -270,6 +277,10 @@ function SelectedState() {
         ? <p className='text-ui-xs text-success'>▶ Entry state — the character starts here.</p>
         : <Button size='sm' variant='subtle' className='self-start' title='Start the character in this state'
             onClick={() => setState(i, { isEntry: true })}>▶ Make this the entry state</Button>}
+
+      <EnterOnTrigger triggers={s.triggers ?? []} params={sm.parameters.filter(p => p.type === 'trigger')}
+        onChange={triggers => setState(i, { triggers: triggers.length ? triggers : undefined })}
+        onNewTrigger={addTriggerParam} />
 
       {/* Dropping a pose asset here makes the state hold that asset's first pose. */}
       <AssetDropRow mime='text/cleo-pose' title='Drop a Pose asset here to hold its first pose'
@@ -382,6 +393,31 @@ function SelectedState() {
           : <NumberInput className={cn(tight, 'w-[56px]')} step='0.1' min='0' value={s.speed}
               onChange={v => setState(i, { speed: Math.max(0, v) })} />}
       </div>
+      {/* Speed × a parameter: one number speeds up every state that names it (a boss's second phase). */}
+      <div className='flex items-center gap-1'>
+        <span className='text-ui-xs text-muted w-[42px] shrink-0'
+          title='Multiply the playback rate by a parameter, live. A missing parameter multiplies by 1.'>× param</span>
+        <Select className={cn(tight, 'flex-1 min-w-0')} value={s.speedScaleParam ?? ''}
+          onChange={e => setState(i, { speedScaleParam: e.target.value || undefined })}>
+          <option value=''>(none)</option>
+          {s.speedScaleParam && !speedParams.some(p => p.name === s.speedScaleParam)
+            && <option value={s.speedScaleParam}>{s.speedScaleParam} — missing</option>}
+          {speedParams.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+        </Select>
+      </div>
+      {!playsField && !playsPose && (
+        <div className='flex items-center gap-1'>
+          <span className='text-ui-xs text-muted w-[42px] shrink-0'
+            title='Clip seconds to start from: one segment of a longer clip, such as the second attack of a combo authored as one animation.'>Start at</span>
+          <NumberInput className={cn(tight, 'w-[56px]')} step='0.05' min='0' value={s.startTime ?? 0}
+            onChange={v => setState(i, { startTime: v > 0 ? v : undefined })} />
+          <span className='text-ui-xs text-dim'>s</span>
+        </div>
+      )}
+      {activeLayer > 0 && !playsField && !playsPose && (
+        <Toggle label='extract root travel' checked={!!s.extractRootMotion} className='text-ui-xs'
+          onChange={c => setState(i, { extractRootMotion: c || undefined })} />
+      )}
       {byParam && signedSpeed && (
         <p className='text-ui-xs text-warning -mt-1'>
           <b>“{signedSpeed}” goes negative</b> — and there is no reverse playback, so the rate is clamped to 0
@@ -446,10 +482,55 @@ function SelectedState() {
                 <span className='text-dim w-[26px] text-center' title={out && inc ? 'Both ways' : out ? 'Outgoing' : 'Incoming'}>
                   {out && inc ? '⇄' : out ? '→' : '←'}
                 </span>
-                <span className='truncate flex-1' title={other}>{other}</span>
+                <span className='truncate flex-1' title={other}>{other === ANY_STATE ? 'Any State' : other}</span>
               </div>
             )
           })}
+    </div>
+  )
+}
+
+/**
+ * The triggers that enter a state directly, by name: a script's `setTrigger('Roll')` plays the state listing
+ * Roll from wherever its layer is, with no transition drawn. A name not yet a parameter becomes a trigger.
+ */
+function EnterOnTrigger({ triggers, params, onChange, onNewTrigger }: {
+  triggers: AnimationStateTrigger[]
+  params: AnimationParameter[]
+  onChange: (next: AnimationStateTrigger[]) => void
+  onNewTrigger: (name: string) => void
+}) {
+  const set = (k: number, patch: Partial<AnimationStateTrigger>) => onChange(triggers.map((e, j) => (j === k ? { ...e, ...patch } : e)))
+  const choices = params.map(p => ({ value: p.name }))
+  return (
+    <div className='flex flex-col gap-1'>
+      <div className='flex items-center gap-1'>
+        <span className='text-ui-xs text-muted flex-1'
+          title='Triggers that start this state directly, from whatever state its layer is in — no transition needed. Checked after Any State and before this state’s own transitions.'>
+          Enter on trigger
+        </span>
+        <Button size='sm' variant='subtle' title='Start this state when a trigger fires'
+          onClick={() => onChange([...triggers, { trigger: params.find(p => !triggers.some(e => e.trigger === p.name))?.name ?? '' }])}>+ trigger</Button>
+      </div>
+      {triggers.map((e, k) => (
+        <div key={k} className='flex items-center gap-1 text-ui-xs'>
+          <span className='text-primary shrink-0'>⚡</span>
+          <div className='flex-1 min-w-0'>
+            <ComboSelect value={e.trigger} choices={choices} noun='trigger' allowEmpty={false}
+              title='The trigger, by name. A new name becomes a trigger parameter.'
+              onChange={v => { if (!params.some(p => p.name === v)) onNewTrigger(v); set(k, { trigger: v }) }} />
+          </div>
+          <span title='Seconds to blend in. Empty uses the animator default.'>
+            <OptionalNumberInput className={cn(tight, 'w-[44px]')} placeholder='0.3' value={e.blendTime}
+              onChange={v => set(k, { blendTime: v === undefined ? undefined : Math.max(0, v) })} />
+          </span>
+          <span title='Restart the state when the trigger fires while it already plays. Off, the trigger waits until it can.'>
+            <Toggle label='restart' checked={e.restart !== false} className='text-ui-xs'
+              onChange={c => set(k, { restart: c ? undefined : false })} />
+          </span>
+          <Button variant='remove' size='sm' title='Remove this trigger' onClick={() => onChange(triggers.filter((_, j) => j !== k))}>✕</Button>
+        </div>
+      ))}
     </div>
   )
 }
@@ -555,10 +636,11 @@ function SelectedTransition() {
   const link = linkOf(selection.a, selection.b)
   if (!link) return null
 
+  // Nothing transitions INTO "any state", so a link to it has one direction only.
   const dirs: { from: string; to: string; t: typeof link.forward }[] = [
     { from: link.a, to: link.b, t: link.forward },
     { from: link.b, to: link.a, t: link.backward },
-  ]
+  ].filter(d => d.to !== ANY_STATE)
 
   const chatter = chatteringPair(link.forward, link.backward)
   const disjoint = disjointReciprocal(link.forward, link.backward)
@@ -599,7 +681,7 @@ function SelectedTransition() {
           <div className='flex items-center gap-1'>
             {/* Both ends are text: rewiring is the graph's job now. */}
             <span className='text-ui-sm flex-1 truncate' title={`${from} → ${to}`}>
-              <span className='text-muted'>{from}</span> <span className='text-dim'>→</span> <span className='text-muted'>{to}</span>
+              <span className='text-muted'>{from === ANY_STATE ? 'Any State' : from}</span> <span className='text-dim'>→</span> <span className='text-muted'>{to}</span>
             </span>
             {t
               ? <Button variant='remove' size='sm' title={`Remove ${from} → ${to}`} onClick={() => removeTransition(from, to)}>✕</Button>
@@ -639,6 +721,13 @@ function SelectedTransition() {
                 onChange={v => setTransition(from, to, { minDwell: v === undefined ? undefined : Math.max(0, v) })} />
               <span className='text-dim'>s {t.minDwell === undefined && '(off)'}</span>
             </label>
+            {from === ANY_STATE && (
+              <span title={'Fire even while already in the target state, restarting it from its start — a second '
+                + 'hit replays the flinch. Off, a transition into the state the machine is in never fires.'}>
+                <Toggle label='can restart itself' checked={!!t.canTransitionToSelf} className='text-ui-xs'
+                  onChange={c => setTransition(from, to, { canTransitionToSelf: c || undefined })} />
+              </span>
+            )}
             <ConditionTree from={from} to={to} />
           </>}
         </div>

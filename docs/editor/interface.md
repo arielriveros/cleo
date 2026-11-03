@@ -62,10 +62,16 @@ returns you to whatever the scene tab was doing.
 | **Ctrl/Cmd + Shift + S** | Save all |
 | **Ctrl/Cmd + Z** | Undo |
 | **Ctrl + Shift + Z** or **Ctrl + Y** | Redo |
+| **W** / **E** / **R** | Move / Rotate / Scale gizmo |
+| **X** | Switch the gizmo between local and world axes |
 
 Save is captured before anything else sees it, so it works while you are typing in the code editor.
 Undo is *not*, so text fields and the code editor keep their own undo history — which is what you
 want when you are editing a script.
+
+The letter shortcuts never fire while a text field, a dropdown or the code editor has the keyboard —
+the letter is typed instead — nor while a mouse button is held, since **W**, **E** and **Q** also fly
+the camera. A checkbox or slider does not count as typing, so the letters work right after you click one.
 
 Tilemap mode adds **X** / **Y** / **Z** for flip and rotate; see [Tilemaps](tilemap-2d.md).
 
@@ -88,7 +94,7 @@ disturb your layout.
 | Region | Contents |
 |---|---|
 | Centre | **Viewport** (locked) |
-| Left rail (20%) | *Scene Elements* and *UI Elements* palettes stacked above the *Scene* tree |
+| Left rail (20%) | The *Scene Elements* or *UI Elements* palette (both in a template) above the *Scene* tree |
 | Right rail (25%) | *Properties*, *Scripts*, *Physics*, plus any mode-specific panels |
 | Bottom strip (30%) | *Logger*, *Assets*, and in animation-field mode the *Blend Space* plot |
 
@@ -98,8 +104,8 @@ disturb your layout.
 |---|---|
 | **Viewport** | The 3D or 2D view, plus every overlay and full-panel editor. |
 | **Scene** | The node hierarchy. Becomes **Skeleton** while you edit an animator, a clip or a rig. |
-| **Scene Elements** | The Add catalog for scene nodes. |
-| **UI Elements** | The Add catalog for UI nodes. |
+| **Scene Elements** | The Add catalog for scene nodes. Scene, landscape and tilemap modes, and in a template. |
+| **UI Elements** | The Add catalog for UI nodes. UI mode, and in a template. |
 | **Properties** | The selected node's inspector. When an asset tab is open it edits that asset instead, and its tab is retitled to match: *Material*, *Landscape Material*, *Tileset*, *Brain*, *Particle System*, *Texture*, *Sound* or *Skeleton*. |
 | **Material** | Properties while a material tab is open: the material editor, on a preview sphere. |
 | **Landscape Material** | Properties while a landscape material tab is open: its ground, slots and blend rules. |
@@ -108,7 +114,7 @@ disturb your layout.
 | **Particle System** | Properties while a particle effect is open: its emitters and their module stacks. |
 | **Texture** | Properties while a texture tab is open: how the image is sampled and imported. |
 | **Sound** | Properties while a sound sample is open: loudness, loop points, fades, bus and effects. |
-| **Skeleton** | The bone tree in place of the Scene tree while you edit an animator, a clip or a rig; in a rig tab, Properties too, where the rig's clips, retargeting, sockets and ragdoll live. |
+| **Skeleton** | The bone tree in place of the Scene tree while you edit an animator, a clip or a rig; in a rig tab, Properties too, where the rig's clips, retargeting, sockets and poses live. |
 | **Scripts** | Script slot and per-node script variables. |
 | **Physics** | Rigid body, trigger, shapes, ragdoll. |
 | **Logger** | The console. |
@@ -125,6 +131,8 @@ disturb your layout.
 | **Layers** | The tilemap layer stack. |
 | **Landscape Tools** | The brush, its tools and their settings (landscape mode). |
 | **Landscape Layers** | The landscape's base and paint layer stack (landscape mode). |
+| **Ragdoll** | The skeleton's ragdoll — its parts, their joints, and a Test drop (rig tab, beside Skeleton). See [The Ragdoll panel](physics.md#the-ragdoll-panel-rig-editor). |
+| **Bone Masks** | The skeleton's bone masks, which animator layers and action slots pick from (rig tab, beside Skeleton). See [Bone masks](animation.md#bone-masks). |
 | **Engine** | Renderer, Performance and Runtime pages (options mode). |
 | **Editor** | Scripts and Viewport preferences (options mode). |
 | **Project** | General and Input pages (options mode). |

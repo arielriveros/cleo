@@ -1,4 +1,4 @@
-import { ModelNode, AnimatedModel, ownedSoundsGroup, isEditorOwnedName, type Node } from 'cleo'
+import { ModelNode, AnimatedModel, ownedSoundsGroup, isEditorOwnedName, type Node, type AnimationStateMachine } from 'cleo'
 import { skinnedModelNodeOf } from '../../../utils/models'
 import type { ScriptPickKind } from '../../../utils/scripts'
 import type { AnimationAsset } from '../../../utils/animationAssets'
@@ -20,6 +20,8 @@ export type PickContext = {
   rigs: RigAsset[]
   animations: AnimationAsset[]
   templates: Template[]
+  /** Shared animators, for a trigger field with no character above it (a weapon's move). */
+  animControllers?: { name: string; machine: AnimationStateMachine }[]
 }
 
 const isHelper = (n: Node) => isEditorOwnedName(n.name)
@@ -92,6 +94,20 @@ function modelOwnerName(model: ModelNode): string {
   return model.name
 }
 
+const triggersOf = (sm: AnimationStateMachine | null | undefined): string[] =>
+  (sm?.parameters ?? []).filter(p => p.type === 'trigger').map(p => p.name)
+
+/**
+ * The triggers of the animator of the character `node` belongs to — what its script fires to play an
+ * Actions-layer state. A weapon's move has no character above it: every shared animator's, by animator.
+ */
+function triggerChoices(node: Node, ctx: PickContext): PickChoice[] {
+  const model = ownerSkinnedModel(node, ctx)
+  const own = triggersOf(model?.animator?.getStateMachine())
+  if (own.length) return own.map(value => ({ value, group: modelOwnerName(model!) }))
+  return (ctx.animControllers ?? []).flatMap(c => triggersOf(c.machine).map(value => ({ value, group: c.name })))
+}
+
 function soundChoices(node: Node): PickChoice[] {
   const group = ownedSoundsGroup(node)
   if (!group) return []
@@ -137,10 +153,11 @@ export function pickChoices(kind: ScriptPickKind, node: Node, ctx: PickContext):
     case 'socket': return unique(socketChoices(node, ctx))
     case 'template': return unique(ctx.templates.map(t => ({ value: t.name })))
     case 'node': return unique(nodeChoices(node))
+    case 'trigger': return unique(triggerChoices(node, ctx))
   }
 }
 
 /** Header text for a field's picker, e.g. "Clips of Player". */
 export const PICK_LABEL: Record<ScriptPickKind, string> = {
-  clip: 'clip', sound: 'sound cue', socket: 'socket', template: 'template', node: 'node',
+  clip: 'clip', sound: 'sound cue', socket: 'socket', template: 'template', node: 'node', trigger: 'animator trigger',
 }

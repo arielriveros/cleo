@@ -40,8 +40,11 @@ up under that tree. Properties holds, from the top:
   **+ Link Animation…** picks one from the library; dragging one in from Assets does the same.
 - **Blend Spaces** — the [blend spaces](#blend-spaces) authored on the skeleton; click one to open it.
   **+ New Blend Space** needs a character on the skeleton to author it against.
-- Its [sockets](#on-the-skeleton), its ragdoll ([Physics](physics.md#the-ragdoll-panel-rig-editor)), its
-  [bone masks](#bone-masks) and its [poses](#poses).
+- Its [sockets](#on-the-skeleton) and its [poses](#poses).
+
+Its ragdoll and its bone masks each have a tab of their own beside Properties: **Ragdoll** (see
+[Physics](physics.md#the-ragdoll-panel-rig-editor)) and **Bone Masks** (see [Bone masks](#bone-masks)).
+Double-clicking a `.mask` in Assets opens the skeleton on its Bone Masks tab, with that mask expanded.
 - **Retargeting** — corrections for clips authored on another skeleton. Pick the source under *Clips
   from…*, then **Map bones…** opens the [bone mapper](models-and-materials.md#the-bone-mapper). Fix a
   bone once and every clip from that skeleton retargets onto this one the same way, permanently.
@@ -138,6 +141,16 @@ A node canvas. Drag states around, drag handle to handle to make a transition, r
 menu, Delete to remove. Edges are labelled with a summary of their conditions. One state is the
 **entry** — select a state and press **▶ Make this the entry state**, or use the right-click menu.
 
+**A state entered by a trigger** shows it as a ⚡ tag under its name: when a script fires that
+trigger by name — `setTrigger('Roll')` — the layer goes to the state from whatever it is doing, with
+no transition drawn. Set it with the state's **Enter on trigger**.
+
+**Any State** sits left of the states. A transition dragged out of it can fire whichever state the
+layer is in, the moment its conditions hold. Nothing transitions into it, and it cannot be deleted.
+
+Each frame the first of these that holds wins: an Any State transition, then a state's own trigger
+(states higher in the list first), then a transition out of the current state.
+
 The toolbar carries a tab strip — **Base | *layer* … | + Layer** — that picks which
 [layer](#layers-and-bone-masks) the canvas shows. The highlighted state is that layer's current one.
 
@@ -159,11 +172,15 @@ between two states, with its conditions.
 | Field | Meaning |
 |---|---|
 | **Name** | |
+| **Enter on trigger** | Triggers that start this state directly, by name, from whatever state its layer is in — a script's `setTrigger('Roll')` plays the state listing Roll. Each with its own **blend** in, and **restart**: on, firing it while the state plays starts it over (a second hit replays the flinch); off, the trigger waits. A name that is not a parameter yet becomes a trigger. |
 | **Plays** | **Clip**; **Blend Space** — a [blend space](#blend-spaces) with per-axis parameter bindings; or **Pose** — a static pose from a [pose asset](#poses). |
 | **Loop** | |
 | **Play count** | |
 | **Speed** or **speed parameter** | Playback rate. |
-| **Foot-placement weight**, optionally from a parameter | How strongly foot placement applies in this state. |
+| **× param** | A parameter the rate is multiplied by, live — one number speeds up every state that names it (a boss's second phase). A missing parameter multiplies by 1. |
+| **Start at** | Clip seconds to start from: one segment of a longer clip. A transition that waits for the clip end at that segment's end hands over to the next. |
+| **Extract root travel** | On a layer: the clip's ground travel is collected for a script's `consumeRootMotion()` instead of moving anything, and the root is held over the start spot. A roll that covers exactly the ground the dive does. |
+| **Foot-placement weight**, optionally from a parameter | How strongly foot placement applies in this state. On a layer it applies as far as the layer shows: a roll at 0 eases foot placement out and back in with the layer. |
 | **Links** | The states this one connects to, and which way (→ out, ← in, ⇄ both). Drag from the state's right handle in the graph to add one. |
 
 **A selected transition:**
@@ -173,6 +190,7 @@ between two states, with its conditions.
 | **Wait for clip end** | Wait until the source clip reaches a point (1 = its end). |
 | **Blend** | Cross-fade seconds, per transition. |
 | **Stay at least** | Least time in the source state before this may fire. |
+| **Can restart itself** | From Any State only: fire even while already in the target state, restarting it — a second hit replays the flinch. |
 | **Conditions** | A tree of AND/OR groups over parameters. |
 
 #### Preview
@@ -254,13 +272,36 @@ Three rules worth knowing:
   layer fades out while it is there, and fades back in when it leaves. That is how an upper-body
   layer gets out of the way.
 - **Only the base layer drives root motion.** Two layers both moving the character would double it.
+  A layer state can still **extract** its clip's travel for a script to move the body by.
 - **A deleted mask switches its layer off**, rather than letting it cover the whole body.
+- **A trigger reaches every layer.** Triggers are lowered once the base and every layer have
+  evaluated, so a `Died` that sends the base to Dead also takes a layer out of what it was playing.
+
+### One-shots as an Actions layer
+
+Attacks, rolls, hit reactions and gestures can live in the graph instead of a script's
+`playAction`: a full-body layer on top of every other, resting in an empty state, with one state per
+one-shot, each entered by its own trigger (**Enter on trigger**) — the script fires it by name and
+names nothing else. Each returns to the empty state when its clip ends (**wait for clip end**, with the
+blend-out as **Blend**), so the layer fades out on its own. The clip, its speed, its start and its
+blends are the graph's to tune; the script only says when.
+
+- Leave each one-shot a little before its end — **wait for clip end** at `1 − blend × speed ÷ length` —
+  and the blend-out finishes with the clip, as an action's does.
+- A combo authored as one clip is a state per segment (**Start at**), each handing over to the next on
+  its own trigger at the segment's end. Give a follow-on segment no **Enter on trigger** of its own, or
+  its trigger would start it as soon as it is fired.
+- Give the empty state the ways back from anywhere as its own triggers, and keep it first in the list
+  so they win a frame where a one-shot fires too: a death, a trigger with a blend (standing up from a
+  bonfire), and one with none, for a one-shot whose pose must not blend into what follows.
+
+The Hollow Keep and Valley characters work this way; see [Scripting: Animation](../scripting/animation.md#one-shots-in-the-graph).
 
 ### Bone masks
 
 A **bone mask** (`.mask`) says which bones a layer or an [action slot](#action-slots) may move, and
 how strongly — an *Upper body* mask keeps the legs on locomotion. Masks are made and edited in the
-workspace's **Skeleton** part, in its **Bone Masks** section, against that skeleton:
+workspace's **Skeleton** part, on its **Bone Masks** tab, against that skeleton:
 
 - **+ New mask…** starts from a preset — **Upper body**, **Lower body**, **Left arm**, **Right arm**,
   **Head**, found by bone names — or **Empty**.

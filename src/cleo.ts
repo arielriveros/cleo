@@ -316,6 +316,7 @@ export { createDeviceSnapshot, createResolveState, resolveFrame } from "./input/
 // The runtime halves: DeviceSampler/GamepadSampler touch the DOM and the Gamepad API, InputSystem wires
 // them to the resolver, and `Input` is the facade a user script imports.
 export { DeviceSampler } from "./input/deviceSampler";
+export { isTextEntryEvent, isTextEntryTarget } from "./input/textEntry";
 export { GamepadSampler } from "./input/gamepadSampler";
 export { InputSystem } from "./input/inputSystem";
 export type { ActionListener, RebindFilter, Unsubscribe } from "./input/inputSystem";
@@ -387,6 +388,8 @@ export type {
     AnimationMapping,
     AnimationStateMachine,
     AnimationState,
+    AnimationStateTrigger,
+    AnimationTriggerInfo,
     AnimationTransition,
     AnimationCondition,
     AnimationConditionOp,
@@ -509,7 +512,7 @@ export type { ScriptCompileOptions, ScriptModuleFactory } from "./core/scripting
 export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime";
 // Typed name fields (clip/sound/socket/template/child): plain strings the inspector offers a picker for.
 export { SOUNDS_GROUP, ownedSoundsGroup } from "./core/scripting/fieldTypes";
-export type { ClipName, SoundName, SocketName, TemplateName, NodeName } from "./core/scripting/fieldTypes";
+export type { ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, ProjectTriggers } from "./core/scripting/fieldTypes";
 export { Game, setGameHost } from "./core/game";
 export { TimeDilation, type DilateOptions } from "./core/timeDilation";
 export { showLoadingOverlay, nextFrame, whenFramesSmooth } from "./core/loadingOverlay";

@@ -29,7 +29,7 @@ export default class SoulsBloodstainNode extends Node {
     if (this._taken) return
     this._taken = true
     const p = player as any
-    p.playGesture?.('Souls_Pickup', 0.8)
+    p.playGesture?.('Pickup', 0.8)
     p.addSouls?.(this.souls)
     const gm = this._gm as any
     gm?.onBloodstainRecovered?.(this)

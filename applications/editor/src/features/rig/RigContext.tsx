@@ -21,7 +21,15 @@ type RigContextValue = {
   clearOverrides: (sourceRigId: string) => void
   save: () => void
   dirty: boolean
+  /**
+   * The mask or pose last asked for by a double-click in Assets (FOCUS_RIG_ASSET). Held HERE, not by the
+   * panels, because the event fires right after `enterRigEditor` — before the rig layout, and the tab that
+   * edits the asset, are mounted. A fresh object per request, so asking again re-focuses.
+   */
+  focus: RigFocus | null
 }
+
+export type RigFocus = { kind: 'boneMask' | 'pose'; id: string }
 
 const RigContext = createContext<RigContextValue | null>(null)
 
@@ -32,11 +40,20 @@ export function useRig(): RigContextValue {
 }
 
 export function RigProvider({ children }: { children: React.ReactNode }) {
-  const { editingRigId, saveRig, registerRigApply, activeTab } = useCleoEngine()
+  const { editingRigId, saveRig, registerRigApply, activeTab, eventEmitter } = useCleoEngine()
   const { rigs } = useAssetLibrary()
   const { markTabDirty, dirtyTabs } = useDocument()
 
   const [asset, setAsset] = useState<RigAsset | null>(null)
+  const [focus, setFocus] = useState<RigFocus | null>(null)
+
+  useEffect(() => {
+    const onFocus = (e: { kind?: string; id?: string } | undefined) => {
+      if ((e?.kind === 'boneMask' || e?.kind === 'pose') && e.id) setFocus({ kind: e.kind, id: e.id })
+    }
+    eventEmitter.on('FOCUS_RIG_ASSET', onFocus)
+    return () => { eventEmitter.off('FOCUS_RIG_ASSET', onFocus) }
+  }, [eventEmitter])
   const loadedIdRef = useRef<string | null>(null)
   // Unsaved working copies, by rig id. Only ONE rig session is live at a time, so without this switching
   // to another tab and back re-adopted the LIBRARY copy and silently dropped every unsaved edit — while
@@ -113,8 +130,8 @@ export function RigProvider({ children }: { children: React.ReactNode }) {
   }, [tabId, save, registerRigApply])
 
   const value = useMemo<RigContextValue>(
-    () => ({ asset: merged, patch, setOverride, clearOverrides, save, dirty: !!(tabId && dirtyTabs[tabId]) }),
-    [merged, patch, setOverride, clearOverrides, save, tabId, dirtyTabs],
+    () => ({ asset: merged, patch, setOverride, clearOverrides, save, dirty: !!(tabId && dirtyTabs[tabId]), focus }),
+    [merged, patch, setOverride, clearOverrides, save, tabId, dirtyTabs, focus],
   )
 
   return <RigContext.Provider value={value}>{children}</RigContext.Provider>

@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react'
 // Only the store (no engine): the pre-engine boot gate renders this before EngineContext exists.
 import { loadFraction, stepFraction, useLoad, type LoadState, type LoadStepState } from './loadingStore'
+import LogoLoader from './LogoLoader'
 
-// The Cleo loading screen, shared by every app: the CLEO ENGINE title over the app's name, every step
-// of the current load with its own count and time, and a total bar weighted across them. Fed by
-// loadingStore.ts.
+// The Cleo loading screen, shared by every app: the app's logo, which fills as the total bar (weighted
+// across the steps), over the CLEO ENGINE title and the app's name, then every step of the current load
+// with its own count and time. Fed by loadingStore.ts.
 
-/** Who is loading: the subtitle under CLEO ENGINE ('Editor', 'Creator') and an optional version line. */
+/**
+ * Who is loading: the logo, the subtitle under CLEO ENGINE ('Editor', 'Creator') and an optional version
+ * line. Without a logo the total is a plain bar under the steps.
+ */
 export interface LoadingBrand {
   subtitle: string
   versionLabel?: string
+  logo?: string
 }
 
 function StatusIcon({ status }: { status: LoadStepState['status'] }) {
@@ -83,7 +88,7 @@ function StepRow({ step, now }: { step: LoadStepState; now: number }) {
 }
 
 /** The screen for one load. `variant` decides whether it covers the window or only its host. */
-export function LoadingView({ load, subtitle, versionLabel }: { load: LoadState } & LoadingBrand) {
+export function LoadingView({ load, subtitle, versionLabel, logo }: { load: LoadState } & LoadingBrand) {
   // Re-render while anything runs, so elapsed times tick.
   const [now, setNow] = useState(() => performance.now())
   const running = load.steps.some(s => s.status === 'running')
@@ -93,7 +98,8 @@ export function LoadingView({ load, subtitle, versionLabel }: { load: LoadState 
     return () => window.clearInterval(t)
   }, [running])
 
-  const pct = Math.round(loadFraction(load) * 100)
+  const fraction = loadFraction(load)
+  const pct = Math.round(fraction * 100)
   const position = load.variant === 'fullscreen' ? 'fixed inset-0 z-[1000]' : 'absolute inset-0 z-40'
   const current = load.steps.find(s => s.status === 'running')
 
@@ -102,6 +108,7 @@ export function LoadingView({ load, subtitle, versionLabel }: { load: LoadState 
          aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={load.title}>
       <div className='flex w-[440px] max-w-[90%] flex-col gap-6'>
         <div className='flex flex-col items-center gap-2'>
+          {logo && <LogoLoader src={logo} progress={fraction} className='mb-3 w-[180px]' />}
           <h1 className='text-2xl font-semibold tracking-[0.3em] text-fg'>CLEO ENGINE</h1>
           <span className='text-ui-xs uppercase tracking-[0.3em] text-muted'>{subtitle}</span>
           {versionLabel && <span className='text-ui-xs tabular-nums tracking-[0.2em] text-dim'>{versionLabel}</span>}
@@ -118,11 +125,13 @@ export function LoadingView({ load, subtitle, versionLabel }: { load: LoadState 
         </div>
 
         <div className='w-full'>
-          <div className='h-2 w-full overflow-hidden rounded-full border border-border bg-surface-sunken'>
-            <div className='h-full rounded-full bg-gradient-to-r from-border to-primary transition-[width] duration-300 ease-out'
-                 style={{ width: `${pct}%` }} />
-          </div>
-          <div className='mt-2 flex items-center justify-between text-ui text-muted'>
+          {!logo && (
+            <div className='mb-2 h-2 w-full overflow-hidden rounded-full border border-border bg-surface-sunken'>
+              <div className='h-full rounded-full bg-gradient-to-r from-border to-primary transition-[width] duration-300 ease-out'
+                   style={{ width: `${pct}%` }} />
+            </div>
+          )}
+          <div className='flex items-center justify-between text-ui text-muted'>
             <span className='truncate'>{current ? `${current.label}…` : 'Loading…'}</span>
             <span className='tabular-nums text-fg'>{pct}%</span>
           </div>
@@ -136,7 +145,7 @@ export function LoadingView({ load, subtitle, versionLabel }: { load: LoadState 
  * Shows the current load, if it is of `variant`. Mount one fullscreen host at the app root, and one
  * overlay host inside the viewport for loads that cover only it (opening a scene).
  */
-export default function LoadingScreen({ variant = 'fullscreen', subtitle, versionLabel }: { variant?: LoadState['variant'] } & LoadingBrand) {
+export default function LoadingScreen({ variant = 'fullscreen', subtitle, versionLabel, logo }: { variant?: LoadState['variant'] } & LoadingBrand) {
   const load = useLoad()
   // A load with a show delay renders nothing until the delay is up — re-checked by a timer, since
   // nothing in the store changes just because time passed.
@@ -148,5 +157,5 @@ export default function LoadingScreen({ variant = 'fullscreen', subtitle, versio
     return () => window.clearTimeout(t)
   }, [load?.id, hiddenFor > 0])
   if (!load || load.variant !== variant || hiddenFor > 0) return null
-  return <LoadingView load={load} subtitle={subtitle} versionLabel={versionLabel} />
+  return <LoadingView load={load} subtitle={subtitle} versionLabel={versionLabel} logo={logo} />
 }

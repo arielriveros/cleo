@@ -71,6 +71,9 @@ field can be picked rather than typed:
 
 - typed `ClipName`, `SoundName`, `SocketName`, `TemplateName` or `NodeName`, it offers the names this
   node can reach;
+- typed `TriggerName`, it offers the triggers of the character's animator — and only those: a trigger is
+  picked, never typed. The script and VS Code editors check every `TriggerName` (and `setTrigger`'s
+  argument) against the triggers the project's animators declare, so a misspelt one is an error;
 - typed as a literal union (`'a' | 'b'`), it offers those choices;
 - tagged `/** @options listField */`, it offers the entries of that list field.
 

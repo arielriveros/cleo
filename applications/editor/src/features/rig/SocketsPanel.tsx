@@ -5,6 +5,7 @@ import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
 import { useRig } from './RigContext'
 import { getAnimationTarget } from '../animation/skeleton'
+import { QUERY_SELECTED_JOINT } from '../animation/SkeletonTree'
 import { Button, Hint, SectionTitle, Select, TextInput, VectorInput, cn, labelClass } from '@cleo/app-kit/ui'
 import { cryptoRandomId } from '../../utils/ids'
 import type { RigSocket } from '../../utils/rigAssets'
@@ -59,6 +60,8 @@ export default function SocketsPanel() {
     const onSocket = (id: string | null) => setSelectedSocket(id ?? null)
     eventEmitter.on('SELECT_JOINT', onJoint)
     eventEmitter.on(SELECT_SOCKET, onSocket)
+    // The Skeleton tab unmounts while Ragdoll or Bone Masks is up; the bone picked meanwhile is the tree's.
+    eventEmitter.emit(QUERY_SELECTED_JOINT)
     return () => { eventEmitter.off('SELECT_JOINT', onJoint); eventEmitter.off(SELECT_SOCKET, onSocket) }
   }, [eventEmitter])
 

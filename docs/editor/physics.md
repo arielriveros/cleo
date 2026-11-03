@@ -249,7 +249,7 @@ knockback impulse applied to its root bone in world space.
 
 ### The Ragdoll panel (rig editor)
 
-The **Ragdoll** section of a skeleton's inspector — the [Skeleton part](animation.md#the-skeleton-part)
+The **Ragdoll** tab beside a skeleton's inspector — in the [Skeleton part](animation.md#the-skeleton-part)
 of its animation workspace — says how characters on that skeleton fall when they die: which bones
 become bodies, how big and heavy each is, and how each joint bends. Until parts are authored, it shows
 the automatic humanoid profile (or says the skeleton falls with the generic one) read-only.

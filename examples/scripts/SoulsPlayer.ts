@@ -1,5 +1,5 @@
 import { Input, Logger, ModelNode, Node, moveWorldDirection, setMoveWorld } from 'cleo'
-import type { ClipName, TemplateName } from 'cleo'
+import type { AnimationTriggerInfo, TemplateName, TriggerName } from 'cleo'
 import { clamp, num } from '@/Core/Scripts/SoulsMath'
 import { Swing, bladeCapsule, closeSwing, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
 import SoulsCharacterNode from '@/Core/Scripts/SoulsCharacter'
@@ -47,12 +47,16 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  *
  * ## Animation contract
  *
- * One-shots (attacks, roll, drink...) play through `animator.playAction`, as full-body actions over the
- * locomotion machine. The machine itself needs only `Died` and `Revive` triggers. Attack timing comes
- * from CLIP EVENTS named `hit`, `combo` and `recover` (and `drink` on the drink clip); a clip without them
- * falls back to the move's `hitTime`/`comboTime`/`recoverTime`, so a freshly imported clip still works
- * before anyone has authored its markers. Action slots ignore root motion — clips must be IN PLACE; the
- * travel of a roll or a lunge is driven from here.
+ * This script plays no clip and names no animator state: every one-shot — the roll, the running turn,
+ * each weapon move, the drink, the reactions — is a TRIGGER fired here by name (the `*Trigger` fields, and
+ * each move's `animTrigger`). In the shipped animator each enters a state of its **Actions** layer, a
+ * full-body layer over the locomotion machine; the graph owns the clip, its speed and its blends, and
+ * leaves the state on its own at the clip's end. The script owns the gameplay, and asks the animator how
+ * long what a trigger plays lasts and whether it still plays (`triggerInfo`, `activeTrigger`).
+ * The base machine needs `Died` and `Revive`. Attack timing comes from CLIP EVENTS named `hit`, `combo`
+ * and `recover` (`drink` on the drink clip, `swap` on the sheathe); a clip without them falls back to the
+ * move's `hitTime`/`comboTime`/`recoverTime`. Travel is driven from here: a state that extracts its root
+ * travel (the roll, the Longsword's steps) hands it over through `consumeRootMotion`.
  */
 export default class SoulsPlayerNode extends SoulsCharacterNode {
   public displayName: string = 'Player'
@@ -115,13 +119,11 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public rollFastSeconds: number = 0.45
   public rollSlowSpeed: number = 2
   /**
-   * Move by the roll clip's OWN travel (its root motion, extracted by the animator) instead of the
-   * rollSpeed curve above: the body covers exactly the ground the dive does, through its own collision.
-   * The roll always faces the way it goes -- there is only a forward roll animation.
+   * Move by the roll's OWN travel (the Roll state extracts its clip's root travel) instead of the
+   * rollSpeed curve above: the body covers exactly the ground the dive does, through its own collision,
+   * for as long as the state lasts. The roll always faces the way it goes -- there is only a forward roll.
    */
   public rollRootMotion: boolean = true
-  /** Playback speed of the roll clip when it drives the roll (the download is a slow, full dive). */
-  public rollPlaySpeed: number = 1.5
   // ----- running turn (see _startRunTurn) --------------------------------------------------------
   /** Reversing at a run plays a planted 180° turn instead of spinning on the spot. Off: the plain turn. */
   public runTurnEnabled: boolean = true
@@ -129,12 +131,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   public runTurnAngle: number = 130
   /** Running at least this fast (m/s); a walker just turns. */
   public runTurnMinSpeed: number = 3
-  /** Playback speed of the turn clip. */
-  public runTurnPlaySpeed: number = 1.2
   /** Share of the turn spent braking to a stop before pushing off the other way. */
   public runTurnPlant: number = 0.45
-  /** Which way the clip itself turns; its mirror (`runTurnMirrorClip`) turns the other way. */
-  public runTurnClipTurnsRight: boolean = true
   /**
    * The animator parameters the turn holds on a straight-ahead run underneath its clip (see _pinRunPose):
    * the character's measured speed and direction, which would otherwise drop to Idle at the plant.
@@ -167,30 +165,27 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   /** Falling below this height is death. */
   public killY: number = -15
 
-  // ----- clip names (swap these when the final animations arrive) ---------------------------------
-  public rollClip: ClipName = 'Souls_Roll'
-  /** The running 180° turn, and its mirror for turning the other way. */
-  public runTurnClip: ClipName = 'Souls_RunTurn180'
-  public runTurnMirrorClip: ClipName = 'Souls_RunTurn180L'
-  public backstepClip: ClipName = 'Souls_Backstep'
-  public drinkClip: ClipName = 'Souls_Drink'
+  // ----- animator triggers: each enters a state of the Actions layer (the clips are the graph's) ------
+  public rollTrigger: TriggerName = 'Roll'
+  public backstepTrigger: TriggerName = 'Backstep'
+  /** The running 180° turn, turning right and turning left (Left falls back to Right when it is missing). */
+  public runTurnRightTrigger: TriggerName = 'RunTurnRight'
+  public runTurnLeftTrigger: TriggerName = 'RunTurnLeft'
+  public drinkTrigger: TriggerName = 'Drink'
   /** Fallback seconds into the drink clip at which the heal starts when it has no `drink` event. */
   public drinkTime: number = 0.85
-  public hitLightClip: ClipName = 'Souls_HitLight'
-  public hitHeavyClip: ClipName = 'Souls_HitHeavy'
+  public hitLightTrigger: TriggerName = 'HitLight'
+  public hitHeavyTrigger: TriggerName = 'HitHeavy'
   /** Played when a swing bounces off a wall. */
-  public recoilClip: ClipName = 'Souls_HitLight'
-  public swapClip: ClipName = 'Souls_Swap'
+  public recoilTrigger: TriggerName = 'Recoil'
   /**
-   * A weapon swap in two halves: sheathe the one in hand, then draw the next. The weapon changes between
-   * them. Empty `sheathClip` falls back to the single `swapClip`.
+   * A weapon swap: the layer sheathes the one in hand, then draws the next. The weapon changes on the
+   * sheathe clip's `swap` event (or as the draw begins, when the clip has none).
    */
-  public sheathClip: ClipName = 'Souls_Sheath'
-  public drawClip: ClipName = 'Souls_Draw'
-  /** Playback speed of the sheathe and draw (the downloads are unhurried). */
-  public swapSpeed: number = 2
-  public restClip: ClipName = 'Souls_Rest'
-  public fogWalkClip: ClipName = 'Souls_FogWalk'
+  public swapTrigger: TriggerName = 'Swap'
+  /** Sitting at a bonfire: a looping state, left on SoulsCharacter's `stopTrigger`. */
+  public restTrigger: TriggerName = 'Rest'
+  public fogWalkTrigger: TriggerName = 'FogWalk'
 
   // ----- the fight -----------------------------------------------------------------------------------
   /**
@@ -219,7 +214,6 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   /** Where the bloodstain goes if the player falls off the world. */
   public lastSafePosition: number[] = null
 
-  private _model: ModelNode = null
   private _rig: Node = null
   private _offEvents: (() => void) | null = null
 
@@ -248,8 +242,10 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   // the current action
   private _move: any = null
+  /** What the playing move's trigger plays (Animator.triggerInfo), or null. */
+  private _moveInfo: AnimationTriggerInfo | null = null
+  /** The clip of the one-shot playing, so only its own events count. */
   private _clip: string = ''
-  private _clipLength: number = 0
   private _playSpeed: number = 1
   /** The active window has opened this attack (the swing has started connecting). */
   private _windowOpened: boolean = false
@@ -265,8 +261,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   private _healRate: number = 0
   private _drank: boolean = false
   private _swapped: boolean = false
-  /** 1 while sheathing, 2 while drawing; 0 for a single-clip swap. */
-  private _swapPhase: number = 0
+  /** The swap's clip carries the `swap` event the weapon changes on. */
+  private _swapEvent: boolean = false
   private _gestureSeconds: number = 0
   private _fogSpeed: number = 0
   private _interactTarget: Node = null
@@ -295,6 +291,9 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     if (animator && !machine?.states?.length)
       Logger.warn('Hollow Keep: "' + this.name + '" has no animation controller on its model, so it will hold its bind pose. '
         + 'Select the model node and assign "Souls Character" in its Animation section (or link the mannequin rig).', 'Script')
+    else if (animator && !this._hasAction(this.rollTrigger))
+      Logger.warn('Hollow Keep: "' + this.name + '"\'s animator plays nothing on "' + this.rollTrigger + '", so it will roll, swing '
+        + 'and drink without animating. Assign "Souls Character" in the model\'s Animation section.', 'Script')
     if (animator?.onAnimationEvent) {
       this._offEvents = animator.onAnimationEvent((name: string, clip: string) => this._onAnimEvent(name, clip))
     }
@@ -362,11 +361,11 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     const heavy = dealt >= this.heavyHitThreshold
     ;(this._gm as any)?.hitStop?.(heavy ? this.heavyHurtHitStop : this.hurtHitStop)
     this._sinceBlow = 0
-    this._stopAction()
     this._motionDir = from ? this._dirFrom(from.worldPosition) : this._forward(-1)
     this._enter('hit')
     this._actionSeconds = heavy ? this.hitHeavySeconds : this.hitLightSeconds
-    this._play(heavy ? this.hitHeavyClip : this.hitLightClip, 1)
+    // From any state: the reaction cuts whatever was playing (and a queued combo swing with it).
+    this._oneShot(heavy ? this.hitHeavyTrigger : this.hitLightTrigger)
     ;(this._gm as any)?.shake?.(heavy ? 0.35 : 0.15)
   }
 
@@ -413,7 +412,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   /** Back to life at a point. Called by the manager after YOU DIED. */
   public respawnAt(at: ArrayLike<number>, yaw: number): void {
-    this._stopAction()
+    const wasDead = this.isDead
+    this._stopActions()
     this.isDead = false
     this.restoreAll()
     this.setPosition([at[0], at[1], at[2]])
@@ -422,9 +422,12 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this.lastSafePosition = [at[0], at[1], at[2]]
     this._bufferAction = ''
     this._enter('free')
-    const animator = this._model?.animator as any
+    const animator = this._animator
     animator?.resetTrigger?.('Died')
-    animator?.setTrigger?.('Revive')
+    // Only the dead revive: raised on a living player (the pause menu's respawn), Revive would wait for the
+    // next death and stand the body straight back up.
+    if (wasDead) animator?.setTrigger?.('Revive')
+    else animator?.resetTrigger?.('Revive')
     const rig = this._rig as any
     rig?.setOrbit?.(yaw, 12)
     rig?.snapToTarget?.()
@@ -432,14 +435,13 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   /** Called by a bonfire: sit down. The manager opens the menu; `standUp` ends it. */
   public sitAtBonfire(): void {
-    this._stopAction()
     this._enter('rest')
-    this._play(this.restClip, 1, true)
+    this._oneShot(this.restTrigger)
   }
 
   public standUp(): void {
     if (this.actionState !== 'rest') return
-    this._stopAction()
+    this._stopActions()
     this._enter('free')
   }
 
@@ -448,23 +450,25 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
    * with i-frames. The gate turns its own collider off for the duration.
    */
   public walkThroughFog(start: ArrayLike<number>, yaw: number, distance: number, seconds: number): void {
-    this._stopAction()
     this.setPosition([start[0], start[1], start[2]])
     this.setRotation([0, yaw, 0])
     this._motionDir = [Math.sin(yaw * Math.PI / 180), 0, Math.cos(yaw * Math.PI / 180)]
     this._fogSpeed = distance / Math.max(0.1, seconds)
     this._enter('fog')
     this._actionSeconds = seconds
-    this._play(this.fogWalkClip, 1)
+    this._oneShot(this.fogWalkTrigger)
   }
 
-  /** A short locked gesture (picking something up, pulling a lever). */
-  public playGesture(clip: string, seconds: number): void {
+  /**
+   * A short locked gesture (picking something up, pulling a lever): `gesture` is the animator trigger of
+   * its Actions state ('Pickup', 'Interact'); empty only holds still. `seconds` is how long control is held.
+   */
+  public playGesture(gesture: TriggerName, seconds: number): void {
     if (this.isDead) return
-    this._stopAction()
     this._enter('gesture')
     this._actionSeconds = seconds
-    if (clip) this._play(clip, 1)
+    if (gesture) this._oneShot(gesture)
+    else this._stopActions()
   }
 
   /** The lock-on target's node, or null. Read off the camera rig's SoulsLockOn. */
@@ -493,6 +497,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this._sinceSpend += delta
     this.soulsGainAge += delta
     this._settleRunPin(delta)
+    this._trackAction(delta)
 
     if (this.isDead) { this._setCombat(false); this._holdStill(intent); return }
 
@@ -633,9 +638,9 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
       }
     }
 
-    if (move?.rootMotion) {
-      // The clip's own steps: its hips travel this frame, along the facing.
-      const d = (this._model?.animator as any)?.consumeRootMotion?.()
+    if (this._moveInfo?.extractsRootMotion) {
+      // The clip's own steps (its state extracts the root travel): its hips travel this frame, along the facing.
+      const d = this._animator?.consumeRootMotion?.()
       const fwd = this._forward(1)
       const along = d ? d[0] * fwd[0] + d[2] * fwd[2] : 0
       this._driveMotion(intent, along >= 0 ? fwd : this._forward(-1), this._frameDelta > 1e-5 ? Math.abs(along) / this._frameDelta : 0)
@@ -646,53 +651,54 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
       this._driveMotion(intent, this._forward(1), lunging ? num(move?.lungeSpeed, 0) : 0)
     }
 
-    // Chain: inside the combo window, a buffered attack goes to the next move -- at once, or, when that
-    // move is the next segment of this same clip, as the clip reaches it (the animation just plays on).
+    // Chain: inside the combo window, a buffered attack goes to the next move. Its trigger is fired now, and
+    // the animator decides when it starts: at once, or -- when that move is the next segment of this same
+    // clip -- as the clip reaches it, the animation playing straight on.
     const buffered = this._bufferAge <= this.inputBufferSeconds ? this._bufferAction : ''
     if (!this._chainQueued && this._comboOpen && this._windowOpened && (buffered === 'light' || buffered === 'heavy')) {
       const next = buffered === 'light' ? (move?.next || '') : ''
       const nextMove = next ? (this.currentWeapon() as any)?.findMove?.(next) : null
-      if (nextMove && this._continues(move, nextMove)) {
+      const nextInfo = nextMove ? this._triggerInfo(this._moveTrigger(nextMove)) : null
+      // A move entered only from certain states (a segment that follows this one) waits for its cue.
+      if (nextInfo && !nextInfo.fromAnywhere) {
         this._consumeBuffer()
-        this._chainQueued = next
+        // The trigger waits raised for the segment's end, so the stamina for it is checked here, at the press.
+        if (this.stamina > 0) {
+          this._chainQueued = next
+          this._raise(this._moveTrigger(nextMove))
+        }
       } else {
         this._startAttack(buffered, next)
         return
       }
     }
-    // After recovery, a roll or a drink cancels the tail.
+    // After recovery, a roll or a drink cancels the tail (and a combo swing queued for its end).
     if (this._recovered && (buffered === 'roll' || buffered === 'item')) {
       this._chainQueued = ''
+      this._lowerRaised()
       this._enter('free')
       return
     }
     if (this._stateTime >= this._actionSeconds) {
       const queued = this._chainQueued
       this._chainQueued = ''
+      // The segment's end: the animator hands over to the queued segment on this same frame.
       if (queued && this._startAttack('light', queued, true)) return
-      // A segment of a longer clip ends here: blend out of it rather than play on into the next attack.
-      if (this._segmented(move)) this._stopAction(num(move?.blendOut, this.attackBlendOut))
+      // Otherwise its exit transition blends out of it (at a segment's end, or as the clip ends).
       this._enter('free')
     }
   }
 
-  /** Whether `next` is the segment of the same clip that follows `move`'s. */
-  private _continues(move: any, next: any): boolean {
-    if (!move || !next || move.clip !== next.clip) return false
-    const end = num(move.clipEnd, 0)
-    return end > 0 && Math.abs(num(next.clipStart, 0) - end) < 1e-3
-  }
-
-  /** Whether a move plays only part of its clip (and so must be stopped where it ends). */
-  private _segmented(move: any): boolean {
-    return !!move && num(move.clipEnd, 0) > 0 && num(move.clipEnd, 0) < this._clipLength - 1e-3
+  /** The animator trigger that plays `move` (SoulsMove.animTrigger; its node name when that is empty). */
+  private _moveTrigger(move: any): TriggerName {
+    return (move?.animTrigger || move?.name || '') as TriggerName
   }
 
   private _roll(intent: any): void {
     const t = this._stateTime
     if (this._rollLength > 0) {
       // The animation's own travel this frame, along the roll direction.
-      const d = (this._model?.animator as any)?.consumeRootMotion?.()
+      const d = this._animator?.consumeRootMotion?.()
       const dist = d ? Math.hypot(d[0], d[2]) : 0
       this._driveMotion(intent, this._motionDir, this._frameDelta > 1e-5 ? dist / this._frameDelta : 0)
       if (t >= this._rollLength) this._enter('free')
@@ -714,14 +720,15 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     if (len < 0.2) return false
     const cos = (v[0] * dir[0] + v[2] * dir[2]) / (speed * len)
     if (cos > Math.cos(this.runTurnAngle * Math.PI / 180)) return false
-    return !!this._findClip(this.runTurnClip)
+    return this._hasAction(this.runTurnRightTrigger)
   }
 
   /**
    * A running 180° turn: the body brakes along the way it was running, plants, and pushes off the way the
-   * stick points, while the clip turns the character round. The clip turns the MESH (its hips) and the node
-   * keeps its yaw throughout; at the end the node snaps round to face the new way and the clip is cut with
-   * no blend, so the run that follows takes over from a pose that already faces that way.
+   * stick points, while the Actions layer's turn state turns the character round. The clip turns the MESH
+   * (its hips) and the node keeps its yaw throughout; the state leaves at its clip's end with no blend, and
+   * on that same frame the node snaps round to face the new way, so the run that follows takes over from a
+   * pose that already faces that way.
    */
   private _startRunTurn(intent: any): void {
     const v = this.velocity
@@ -735,7 +742,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     // right when this cross product is negative. Straight back turns right.
     const cross = this._motionDir[2] * this._runTurnOut[0] - this._motionDir[0] * this._runTurnOut[2]
     const right = cross <= 0
-    const clip = right === this.runTurnClipTurnsRight || !this._findClip(this.runTurnMirrorClip) ? this.runTurnClip : this.runTurnMirrorClip
+    // The turn toward that side; with no left turn in the graph, the right one (a half turn either way).
+    const trigger = right || !this._hasAction(this.runTurnLeftTrigger) ? this.runTurnRightTrigger : this.runTurnLeftTrigger
     // The clip turns the body a half turn whatever the stick's exact angle: end facing exactly round from where
     // the run was going, and let the run's own facing turn the last few degrees toward the stick.
     const f = this.worldForward
@@ -743,18 +751,12 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this.facingMode = 'none'
     this._enter('runTurn')
     this._runTurnDone = false
-    const animator = this._model?.animator as any
-    this._clip = clip
-    this._clipLength = this._clipDuration(clip)
     // Under the clip the base machine keeps running on the measured speed, which falls to 0 at the plant:
-    // held on a run instead, so the pose the clip is cut to is already one (see _pinRunPose).
+    // held on a run instead, so the pose the turn cuts to is already one (see _pinRunPose).
     this._runPinSettle = -1
     this._pinRunPose(speed)
-    // No blend out: the node turns round on the frame the clip ends, and the run must not blend toward the
-    // old facing meanwhile. No foot IK: the clip swings the hips round while the node keeps its old facing,
-    // so IK would aim the knees the old way and twist the planted legs.
-    animator?.playAction?.(clip, { speed: this.runTurnPlaySpeed, loop: false, blendIn: this.actionBlendIn, blendOut: 0, ikWeight: 0 })
-    this._runTurnLength = this._clipLength > 0 ? this._clipLength / this.runTurnPlaySpeed : 0.5
+    const info = this._oneShot(trigger)
+    this._runTurnLength = info && info.seconds > 0 ? info.seconds : 0.5
   }
 
   private _runTurn(intent: any): void {
@@ -769,16 +771,36 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
       this._driveMotion(intent, this._runTurnOut, out * Math.min(1, (t - plant) / Math.max(1e-3, length - plant)))
       this._pinRunPose(out)
     }
-    if (t >= length) { this._finishRunTurn(true); this._enter('free') }
+    if (this._runTurnEnded(t >= length)) { this._finishRunTurn(true); this._enter('free') }
   }
 
-  /** End the turn: face the new way if the turn got far enough to show it, and cut the clip there. */
+  /**
+   * Whether the turn is over. While the animator plays it, that is the frame its clip reaches the end: the
+   * state leaves on the animator's next pass -- later this same frame, after this script -- cutting to the
+   * run, so turning the node now lands on exactly that frame. The timer only answers when it never played.
+   */
+  private _runTurnEnded(timedOut: boolean): boolean {
+    if (!this._actEntered) return timedOut
+    if (!this._isPlaying(this._actTrigger)) return true
+    return this._turnClipEnded()
+  }
+
+  /** The playing turn's clip has reached its last frame. */
+  private _turnClipEnded(): boolean {
+    const length = this._actInfo?.clipLength ?? 0
+    return length > 0 && this._actTime() >= length - 1e-4
+  }
+
+  /**
+   * End the turn: face the new way if the turn got far enough to show it. Called off past halfway (a roll, a
+   * hit), the turn is cut at once as well: whatever follows must not blend from a pose drawn a half turn round.
+   */
   private _finishRunTurn(turned: boolean): void {
     if (this._runTurnDone) return
     this._runTurnDone = true
     if (turned) {
       this.setRotation([0, this._runTurnYaw, 0])
-      this._stopAction(0)
+      if (this._actEntered && this._isPlaying(this._actTrigger) && !this._turnClipEnded()) this._stopActions(true)
       // The run pose stays held while the measured speed catches up with the body's (see _settleRunPin).
       this._runPinSettle = 0
       this._settleRunPin(0)
@@ -828,23 +850,21 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   private _swap(intent: any): void {
     this._holdStill(intent)
-    if (this._swapPhase === 1 && this._stateTime >= this._actionSeconds) {
-      // Sheathed: change weapons, then draw the new one.
-      this._swapped = true
-      this.equipWeapon((this._weaponIndex + 1) % Math.max(1, this._weapons.length))
-      this.recomputeStats()
-      this._swapPhase = 2
-      const start = this._stateTime
-      this._play(this.drawClip, this.swapSpeed)
-      this._actionSeconds = start + (this._clipLength > 0 ? this._clipLength / this.swapSpeed : 0.4)
-      return
+    // The weapon changes on the sheathe's `swap` event (_onAnimEvent); a clip without one, halfway through
+    // (where a sheathe hands over to the draw).
+    if (!this._swapped && !this._swapEvent && this._stateTime >= this._actionSeconds * 0.5) this._swapWeapon()
+    if (this._stateTime >= this._actionSeconds) {
+      this._swapWeapon()
+      this._enter('free')
     }
-    if (this._swapPhase === 0 && !this._swapped && this._stateTime >= this._actionSeconds * 0.5) {
-      this._swapped = true
-      this.equipWeapon((this._weaponIndex + 1) % Math.max(1, this._weapons.length))
-      this.recomputeStats()
-    }
-    if (this._stateTime >= this._actionSeconds) this._enter('free')
+  }
+
+  /** Hold the next weapon (once per swap). */
+  private _swapWeapon(): void {
+    if (this._swapped) return
+    this._swapped = true
+    this.equipWeapon((this._weaponIndex + 1) % Math.max(1, this._weapons.length))
+    this.recomputeStats()
   }
 
   private _hit(intent: any): void {
@@ -856,11 +876,13 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   /**
    * Start an attack. `kind` light/heavy; `named` is the next combo move, or null for the chain's start.
-   * `continuing`: the move is the next segment of the clip already playing, which carries on into it.
-   * False when no attack could start (no stamina, no weapon).
+   * `continuing`: the move is the next segment of the clip already playing -- its trigger was fired at the
+   * press, and the animator hands over to it as the segment ends -- so nothing is fired again. False when no
+   * attack could start (no stamina, no weapon).
    */
   private _startAttack(kind: string, named: string, continuing: boolean = false): boolean {
-    if (this.stamina <= 0) return false
+    // A continuing segment's stamina was checked at the press (the trigger was already raised).
+    if (this.stamina <= 0 && !continuing) return false
     const weapon = this.currentWeapon() as any
     if (!weapon) return false
     const name = named || (kind === 'heavy' ? weapon.heavyMove : weapon.lightMove)
@@ -877,18 +899,25 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this._comboOpen = false
     this._recovered = false
     this._enter('attack')
-    this._playSpeed = Math.max(0.05, num(move.playSpeed, 1))
-    const start = Math.max(0, num(move.clipStart, 0))
-    if (continuing) this._clip = move.clip
-    else {
+    const trigger = this._moveTrigger(move)
+    let info: AnimationTriggerInfo | null
+    if (continuing) {
+      // Its trigger was fired at the press; the animator hands over to it later this frame, and
+      // _trackAction confirms it.
+      info = this._triggerInfo(trigger)
+      this._actTrigger = trigger
+      this._actInfo = info
+      this._actEntered = false
+      this._clip = info?.clip ?? ''
+    } else {
       // Whatever travel collected before this swing is not this swing's.
-      ;(this._model?.animator as any)?.consumeRootMotion?.()
-      this._play(move.clip, this._playSpeed, false, 1, !!move.rootMotion, true, start)
+      this._animator?.consumeRootMotion()
+      info = this._oneShot(trigger)
     }
-    this._usesEvents = this._clipHasEvent(move.clip, 'hit')
-    const end = num(move.clipEnd, 0) > start ? num(move.clipEnd, 0) : this._clipLength
-    const length = end > start ? end - start : num(move.recoverTime, 0.7) + 0.4
-    this._actionSeconds = length / this._playSpeed
+    this._moveInfo = info
+    this._playSpeed = info?.speed ?? 1
+    this._usesEvents = !!info && this._clipHasEvent(info.clip, 'hit')
+    this._actionSeconds = info && info.seconds > 0 ? info.seconds : (num(move.recoverTime, 0.7) + 0.4) / this._playSpeed
     playSound(this, kind === 'heavy' ? 'Swing Heavy' : 'Swing')
     return true
   }
@@ -904,7 +933,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
       this._spend(this.backstepCost)
       this._motionDir = this._forward(-1)
       this._enter('backstep')
-      this._play(this.backstepClip, 1, false, 0)   // no foot IK mid-backstep
+      this._oneShot(this.backstepTrigger)
     } else {
       this._spend(this.rollCost)
       this._motionDir = [dir[0] / len, 0, dir[2] / len]
@@ -916,13 +945,11 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
       this.setRotation([0, Math.atan2(dir[0], dir[2]) * 180 / Math.PI, 0])
       this._enter('roll')
       this._rollLength = 0
-      if (this.rollRootMotion && this._findClip(this.rollClip)) {
-        // No foot planting mid-tumble, and the clip's travel extracted for _roll to move the body by.
-        this._play(this.rollClip, this.rollPlaySpeed, false, 0, true)
-        ;(this._model?.animator as any)?.consumeRootMotion?.()   // drop anything left from before
-        this._rollLength = this._clipLength > 0 ? this._clipLength / this.rollPlaySpeed : this.rollSeconds
-      } else {
-        this._play(this.rollClip, 1, false, 0)
+      const info = this._oneShot(this.rollTrigger)
+      if (this.rollRootMotion && info?.extractsRootMotion) {
+        // The state extracts the dive's travel for _roll to move the body by, for as long as it lasts.
+        this._animator?.consumeRootMotion()   // drop anything left from before
+        this._rollLength = info.seconds > 0 ? info.seconds : this.rollSeconds
       }
     }
     playSound(this, 'Roll')
@@ -936,9 +963,9 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     }
     this._drank = false
     this._enter('drink')
-    this._play(this.drinkClip, 1)
-    this._usesEvents = this._clipHasEvent(this.drinkClip, 'drink')
-    this._actionSeconds = this._clipLength > 0 ? this._clipLength : 1.4
+    const info = this._oneShot(this.drinkTrigger)
+    this._usesEvents = !!info && this._clipHasEvent(info.clip, 'drink')
+    this._actionSeconds = info && info.seconds > 0 ? info.seconds : 1.4
   }
 
   private _startSwap(): void {
@@ -946,15 +973,17 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     if (this._weapons.length < 2) return
     this._swapped = false
     this._enter('swap')
-    if (this.sheathClip && this.drawClip && this._findClip(this.sheathClip) && this._findClip(this.drawClip)) {
-      this._swapPhase = 1
-      this._play(this.sheathClip, this.swapSpeed)
-      this._actionSeconds = this._clipLength > 0 ? this._clipLength / this.swapSpeed : 0.4
-      return
-    }
-    this._swapPhase = 0
-    this._play(this.swapClip, 1)
-    this._actionSeconds = this._clipLength > 0 ? this._clipLength : 0.4
+    // The sheathe and the draw it goes on into: `seconds` covers both.
+    const info = this._oneShot(this.swapTrigger)
+    this._swapEvent = !!info && this._clipHasEvent(info.clip, 'swap')
+    this._actionSeconds = info && info.seconds > 0 ? info.seconds : 0.4
+  }
+
+  /** Fire a one-shot (see SoulsCharacter._playTrigger) and remember its clip: only its own events count. */
+  private _oneShot(trigger: TriggerName): AnimationTriggerInfo | null {
+    const info = this._playTrigger(trigger)
+    this._clip = info?.clip ?? ''
+    return info
   }
 
   private _interact(): void {
@@ -968,9 +997,12 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   protected _die(): void {
     if (this.isDead) return
     this.isDead = true
-    this._stopAction()
     this._enter('dead')
-    ;(this._model?.animator as any)?.setTrigger?.('Died')
+    // The base falls on Died, and the Actions layer leaves whatever it plays on the same trigger.
+    this._lowerRaised()
+    this._actTrigger = ''
+    this._actInfo = null
+    this._animator?.setTrigger('Died')
     ;(this._gm as any)?.onPlayerDied?.(this)
   }
 
@@ -985,6 +1017,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
       else if (name === 'recover') this._recovered = true
     } else if (this.actionState === 'drink' && name === 'drink' && !this._drank) {
       this._doDrink()
+    } else if (this.actionState === 'swap' && name === 'swap') {
+      this._swapWeapon()
     }
   }
 
@@ -1027,11 +1061,10 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     gm?.fx?.((this.currentWeapon() as any)?.hitSparkTemplate || 'Hit Spark', at)
     playSound(this, 'Recoil')
     gm?.shake?.(0.2)
-    this._stopAction()
     this._motionDir = this._forward(-1)
     this._enter('recoil')
     this._actionSeconds = this.recoilSeconds
-    this._play(this.recoilClip, 1.4)
+    this._oneShot(this.recoilTrigger)
   }
 
   private _doDrink(): void {
@@ -1217,47 +1250,9 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this._stateTime = 0
     if (state === 'free') {
       this._move = null
+      this._moveInfo = null
       this._clip = ''
     }
-  }
-
-  private _play(clip: string, speed: number, loop: boolean = false, ikWeight: number = 1, rootMotion: boolean = false,
-                attack: boolean = false, startTime: number = 0): void {
-    this._clip = clip
-    this._clipLength = this._clipDuration(clip)
-    const animator = this._model?.animator as any
-    if (!animator?.playAction || !clip) return
-    const blendIn = attack ? this.attackBlendIn : this.actionBlendIn
-    const blendOut = attack ? num(this._move?.blendOut, this.attackBlendOut) : this.actionBlendOut
-    animator.playAction(clip, { speed, loop, blendIn, blendOut, ikWeight, rootMotion, startTime })
-  }
-
-  private _stopAction(blendOut: number = this.actionBlendOut): void {
-    const animator = this._model?.animator as any
-    animator?.stopAction?.(undefined, blendOut)
-    this._clip = ''
-  }
-
-  private _clipDuration(name: string): number {
-    const clip = this._findClip(name)
-    if (!clip) return 0
-    let end = 0
-    for (const s of clip.samplers ?? []) {
-      const input = s.input
-      if (input && input.length) end = Math.max(end, input[input.length - 1])
-    }
-    return end
-  }
-
-  private _clipHasEvent(name: string, event: string): boolean {
-    const clip = this._findClip(name)
-    return !!clip?.events?.some((e: any) => e.name === event)
-  }
-
-  private _findClip(name: string): any {
-    const animations = (this._model?.model as any)?.animations
-    if (!animations || !name) return null
-    return animations.find((a: any) => a.name === name) ?? null
   }
 
   private _findModel(): ModelNode {

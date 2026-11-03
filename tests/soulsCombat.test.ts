@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { Logger } from '../src/core/logger';
 import { makeBody, box, sphere, cylinder, heightfield, plane, engineCapsule } from './helpers/physicsBodies';
 import { PhysicsBody } from '../src/physics/physicsBody';
 import { Body, Box, Cylinder, Sphere, Vec3 } from 'cannon-es';
@@ -763,127 +764,275 @@ describe('wading through a water zone', () => {
     });
 });
 
-describe('the imported combat clips in the scripts', () => {
-    const oneSecond = { samplers: [{ input: [0, 1] }] };
+type ActionStateSpec = {
+    name: string; clip: string; length?: number; speed?: number; trigger?: string | null
+    speedScaleParam?: string; seconds?: number; fromAnywhere?: boolean
+};
+
+/**
+ * An animator stub answering what the scripts ask by trigger NAME: `triggerInfo` (what a trigger plays: a
+ * state of the `Actions` layer, entered by its name unless `trigger` says otherwise) and `activeTrigger`. It
+ * records the triggers fired, and lets a test play the animator's part — `enter` on a trigger, move the clip
+ * time, `rest` — while the scripts read it back as they would. `Died`, `Stop` and `Cut` take it to rest.
+ */
+function actionsAnimator(states: ActionStateSpec[]) {
+    const raised = new Set<string>();
+    const pinned = new Map<string, number | boolean>();
+    const floats = new Map<string, number>();
+    const byTrigger = new Map<string, ActionStateSpec>();
+    for (const s of states) if (s.trigger !== null) byTrigger.set(s.trigger ?? s.name, s);
+    const rest = { layer: 'Actions', state: 'Off', clip: '', clipLength: 0, speed: 1, startTime: 0, seconds: 0, extractsRootMotion: false, fromAnywhere: true };
+    const a = {
+        fired: [] as string[], raised, pinned, floats,
+        state: 'Off', time: 0, active: null as string | null, currentTime: 0,
+        triggerInfo(trigger: string) {
+            if (trigger === 'Died' || trigger === 'Stop' || trigger === 'Cut') return rest;
+            const s = byTrigger.get(trigger);
+            if (!s) return null;
+            const length = s.length ?? 1;
+            const scale = s.speedScaleParam ? floats.get(s.speedScaleParam) ?? 1 : 1;
+            const speed = (s.speed ?? 1) * scale;
+            return {
+                layer: 'Actions', state: s.name, clip: s.clip, clipLength: length, speed, startTime: 0,
+                seconds: s.seconds ?? length / speed, extractsRootMotion: false, fromAnywhere: s.fromAnywhere ?? true,
+            };
+        },
+        activeTrigger: () => a.active,
+        setTrigger: (n: string) => { raised.add(n); a.fired.push(n); },
+        resetTrigger: (n: string) => { raised.delete(n); },
+        getParam: (n: string) => (floats.has(n) ? floats.get(n) : raised.has(n)),
+        setFloat: (n: string, v: number) => { floats.set(n, v); },
+        layerStateTime: () => a.time,
+        setParamOverride: (name: string, value: number | boolean | null) => { if (value === null) pinned.delete(name); else pinned.set(name, value); },
+        consumeRootMotion: () => null,
+        /** The animator's pass taking `trigger`: its state starts at clip time 0, and the trigger is lowered. */
+        enter(trigger: string) { a.state = byTrigger.get(trigger)?.name ?? 'Off'; a.time = 0; a.active = trigger; raised.delete(trigger); },
+        /** Back in the layer's empty rest state. */
+        toRest() { a.state = 'Off'; a.time = 0; a.active = null; },
+    };
+    return a;
+}
+
+describe('one-shots are played by trigger name', () => {
     const intent = () => ({ move: [0, 0], basisYaw: 0, speedScale: 1, sprint: false, look: [0, 0] });
 
-    it('swaps weapons by sheathing, changing, then drawing', () => {
+    /** A player whose Swap trigger plays a 1 s sheathe-and-draw; `withEvent`: the sheathe's clip has `swap`. */
+    function swapper(withEvent: boolean) {
         const player: any = new SoulsPlayerNode('Player');
-        const played: string[] = [];
-        let equipped = -1;
-        player._findClip = () => oneSecond;
-        player._play = (clip: string) => { played.push(clip); player._clip = clip; player._clipLength = 1; };
+        const a = actionsAnimator([{ name: 'Sheath', clip: 'Souls_Sheath', trigger: 'Swap', seconds: 1 }]);
+        const equipped: number[] = [];
+        player._model = { animator: a };
+        player._findClip = (n: string) => (withEvent && n === 'Souls_Sheath' ? { events: [{ name: 'swap', time: 1 }] } : null);
         player._weapons = [{}, {}];
         player._weaponIndex = 0;
-        player.equipWeapon = (i: number) => { equipped = i; };
+        player.equipWeapon = (i: number) => { equipped.push(i); };
         player.recomputeStats = () => {};
+        return { player, a, equipped };
+    }
+
+    it('swaps weapons on the sheathe\'s swap event, and lasts the sheathe and the draw', () => {
+        const { player, a, equipped } = swapper(true);
         player._startSwap();
         expect(player.actionState).toBe('swap');
-        expect(played).toEqual([player.sheathClip]);
-        player._stateTime = 0.4;  player._swap(intent());          // still sheathing (1 s at 2x = 0.5 s)
-        expect(equipped).toBe(-1);
-        player._stateTime = 0.55; player._swap(intent());          // sheathed: change, then draw
-        expect(equipped).toBe(1);
-        expect(played).toEqual([player.sheathClip, player.drawClip]);
-        player._stateTime = 1.1;  player._swap(intent());          // drawn
+        expect(a.fired).toEqual(['Swap']);
+        expect(player._actionSeconds).toBeCloseTo(1, 6);           // what the trigger plays, both halves
+        a.enter('Swap'); player._trackAction(1 / 60);
+        player._stateTime = 0.6; player._swap(intent());
+        expect(equipped).toEqual([]);                              // waits for the event, past halfway too
+        player._onAnimEvent('swap', 'Souls_Sheath');
+        expect(equipped).toEqual([1]);
+        player._stateTime = 0.8; player._swap(intent());
+        expect(equipped).toEqual([1]);                             // once
+        player._stateTime = 1.05; player._swap(intent());
         expect(player.actionState).toBe('free');
+    });
+
+    it('swaps halfway when the sheathe carries no event', () => {
+        const { player, a, equipped } = swapper(false);
+        player._startSwap();
+        a.enter('Swap'); player._trackAction(1 / 60);
+        player._stateTime = 0.45; player._swap(intent());
+        expect(equipped).toEqual([]);
+        player._stateTime = 0.52; player._swap(intent());
+        expect(equipped).toEqual([1]);
     });
 
     it('never lets a regular enemy taunt', () => {
         const hollow: any = new SoulsEnemyNode('Hollow');
-        const played: string[] = [];
-        hollow._findClip = () => oneSecond;
-        hollow._play = (clip: string) => { played.push(clip); hollow._clipLength = 1; };
+        const a = actionsAnimator([{ name: 'Taunt', clip: 'Souls_Battlecry' }]);
+        hollow._model = { animator: a };
         hollow._player = { isDead: false, worldPosition: [0, 0, 5] };
         hollow._brain = { behaviorState: 'Chase' };
         hollow._ai(intent(), 1 / 60);
-        expect(played).toEqual([]);
+        expect(a.fired).toEqual([]);
         expect(hollow.fightState).not.toBe('taunt');
     });
 
     it('lets a boss shout a battle cry once, the first time it spots the player', () => {
         const hollow: any = new SoulsEnemyNode('Warden');
         hollow.isBoss = true;
-        const played: string[] = [];
-        hollow._findClip = () => oneSecond;
-        hollow._play = (clip: string) => { played.push(clip); hollow._clip = clip; hollow._clipLength = 1; };
+        const a = actionsAnimator([{ name: 'Taunt', clip: 'Souls_Battlecry', length: 2.8 }]);
+        hollow._model = { animator: a };
         hollow._player = { isDead: false, worldPosition: [0, 0, 5] };
         hollow._brain = { behaviorState: 'Idle' };
         hollow._ai(intent(), 1 / 60);
-        expect(played).toEqual([]);                       // not seen yet
+        expect(a.fired).toEqual([]);                       // not seen yet
         hollow._brain.behaviorState = 'Chase';
         hollow._ai(intent(), 1 / 60);
         expect(hollow.fightState).toBe('taunt');
-        expect(played).toEqual([hollow.tauntClip]);
+        expect(a.fired).toEqual(['Taunt']);
+        expect(hollow._reactSeconds).toBeCloseTo(2.8, 6);   // as long as its state lasts
         hollow.fightState = 'ai';
         hollow._ai(intent(), 1 / 60);
-        expect(played).toEqual([hollow.tauntClip]);       // once per life
+        expect(a.fired).toEqual(['Taunt']);                // once per life
+    });
+
+    it('plays a boss\'s attacks faster in its second phase through the AttackSpeed parameter', () => {
+        const hollow: any = new SoulsEnemyNode('Warden');
+        const a = actionsAnimator([{ name: 'Sweep', clip: 'Souls_Giant_Sweep', length: 1.8, speed: 0.9, speedScaleParam: 'AttackSpeed' }]);
+        hollow._model = { animator: a };
+        hollow._setSpeedMul(1.5);
+        expect(a.floats.get('AttackSpeed')).toBe(1.5);
+        hollow._startAttack({ name: 'Sweep', animTrigger: 'Sweep', hitTime: 0.7 });
+        expect(a.fired).toEqual(['Sweep']);
+        expect(hollow._playSpeed).toBeCloseTo(0.9 * 1.5, 6);
+        expect(hollow._actionSeconds).toBeCloseTo(1.8 / (0.9 * 1.5), 6);
+    });
+
+    it('lowers a queued trigger that never fired before raising the next one', () => {
+        const player: any = new SoulsPlayerNode('Player');
+        const a = actionsAnimator([{ name: 'HitLight', clip: 'Souls_HitLight' }]);
+        player._model = { animator: a };
+        player._raise('Longsword Light2');                 // a combo swing waiting for its segment's end
+        player._onDamaged(10, 5, null);                   // ... cut short by a hit
+        expect(a.raised.has('Longsword Light2')).toBe(false);
+        expect(a.raised.has('HitLight')).toBe(true);
+    });
+
+    it('queues a combo\'s next segment, entered only at the segment\'s end, and takes it up when it starts', () => {
+        const player: any = new SoulsPlayerNode('Player');
+        const a = actionsAnimator([
+            { name: 'Longsword Light1', clip: 'Souls_LS_Combo', seconds: 0.8 },
+            { name: 'Longsword Light2', clip: 'Souls_LS_Combo', seconds: 0.7, fromAnywhere: false },
+        ]);
+        const light1 = { name: 'Light1', animTrigger: 'Longsword Light1', next: 'Light2', staminaCost: 10, trackSeconds: 0 };
+        const light2 = { name: 'Light2', animTrigger: 'Longsword Light2', next: '', staminaCost: 10, trackSeconds: 0 };
+        player.currentWeapon = () => ({ lightMove: 'Light1', findMove: (n: string) => (n === 'Light1' ? light1 : n === 'Light2' ? light2 : null) });
+        player._model = { animator: a };
+        player._startAttack('light', null);
+        a.enter('Longsword Light1');
+        player._comboOpen = true; player._windowOpened = true; player._usesEvents = true;
+        player._bufferAction = 'light'; player._bufferAge = 0;
+        player._stateTime = 0.5; player._attack(intent(), 1 / 60);
+        // Fired, not started: the graph hands over at the segment's end.
+        expect(a.fired).toEqual(['Longsword Light1', 'Longsword Light2']);
+        expect(player._move).toBe(light1);
+        player._stateTime = 0.8; player._attack(intent(), 1 / 60);
+        expect(player._move).toBe(light2);
+        expect(player._actionSeconds).toBeCloseTo(0.7, 6);
+        expect(a.fired).toHaveLength(2);                     // nothing fired again for the hand-over
+    });
+
+    it('warns once, and still plays the gameplay, when the animator has no state for a trigger', () => {
+        const player: any = new SoulsPlayerNode('Player');
+        player._model = { animator: actionsAnimator([]) };
+        const warn = vi.spyOn(Logger, 'warn').mockImplementation(() => {});
+        try {
+            player.playGesture('Pickup', 0.8);
+            player.playGesture('Pickup', 0.8);
+            expect(player.actionState).toBe('gesture');
+            expect(warn.mock.calls.filter(c => String(c[0]).includes('"Pickup"'))).toHaveLength(1);
+        } finally { warn.mockRestore(); }
     });
 });
 
 describe('the running 180° turn', () => {
-    /** A player running at `speed` along -Z, with a stub animator that records what it was asked to play. */
+    /** A player running at `speed` along -Z, with an animator stub whose Actions layer has both turns. */
     function runner(speed: number, grounded = true) {
         const p = new SoulsPlayerNode('Player') as any;
-        const played: string[] = [], stopped: number[] = [], options: any[] = [];
-        /** The animator parameters pinned now (setParamOverride), by name. */
-        const pinned = new Map<string, number | boolean>();
+        const a = actionsAnimator([
+            { name: 'RunTurnRight', clip: 'Souls_RunTurn180', length: 0.6, speed: 1.2 },
+            { name: 'RunTurnLeft', clip: 'Souls_RunTurn180L', length: 0.6, speed: 1.2 },
+        ]);
         let v: V3 = [0, 0, -speed];
         let measured = 0;
         Object.defineProperty(p, 'velocity', { get: () => v, set: (x: V3) => { v = x; }, configurable: true });
         Object.defineProperty(p, 'isGrounded', { get: () => grounded, configurable: true });
         Object.defineProperty(p, 'planarSpeed', { get: () => measured, configurable: true });
-        p._findClip = (name: string) => name.startsWith('Souls_RunTurn180');
-        p._clipDuration = () => 0.6;
-        p._model = { animator: {
-            playAction: (clip: string, o: any) => { played.push(clip); options.push(o); },
-            stopAction: (_c: unknown, blend: number) => stopped.push(blend),
-            setParamOverride: (name: string, value: number | boolean | null) => { if (value === null) pinned.delete(name); else pinned.set(name, value); },
-            consumeRootMotion: () => null,
-        } };
+        p._model = { animator: a };
         p.setRotation([0, 180, 0]);
-        return { p, played, stopped, options, pinned, measure: (s: number) => { measured = s; } };
+        /** The animator parameters pinned now (setParamOverride), by name. */
+        return { p, a, pinned: a.pinned, measure: (s: number) => { measured = s; } };
     }
-    /** Step the turn to its end, as the player's frame does. */
+    /** Step the turn to its end, as the player's frame does (the animator never plays it). */
     function runTurnToEnd(p: any, intent: any): void {
         for (let t = 0; t < p._runTurnLength + 0.05; t += 1 / 60) { p._stateTime += 1 / 60; p._runTurn(intent); if (p.actionState !== 'runTurn') break; }
     }
     /** The controller's intent with the stick pointing along world (x, z). */
     const stick = (x: number, z: number) => ({ move: [x === 0 ? 0 : -x, z], basisYaw: 0, sprint: false, speedScale: 1 } as any);
 
-    it('plants and turns round when the stick reverses at a run, toward the side it went', () => {
-        const { p, played } = runner(4);
+    it('fires the turn toward the side the stick went when it reverses at a run, and plays no clip itself', () => {
+        const { p, a } = runner(4);
         p._free(stick(0.3, 1), 1 / 60);            // back, and a little to one side
         expect(p.actionState).toBe('runTurn');
-        expect(played).toHaveLength(1);
+        expect(a.fired).toHaveLength(1);
+        expect(p._runTurnLength).toBeCloseTo(0.6 / 1.2, 6);   // the state's length, at its speed
         const other = runner(4);
         other.p._free(stick(-0.3, 1), 1 / 60);
-        expect(other.played[0]).not.toBe(played[0]);   // the other side plays the mirror
+        expect(new Set([a.fired[0], other.a.fired[0]])).toEqual(new Set(['RunTurnRight', 'RunTurnLeft']));
+        expect((a as any).playAction).toBeUndefined();
     });
 
     it('does not for a walk, in the air, or for a turn of less than the reversal angle', () => {
         const walk = runner(2); walk.p._free(stick(0, 1), 1 / 60);
         const air = runner(4, false); air.p._free(stick(0, 1), 1 / 60);
         const side = runner(4); side.p._free(stick(1, 0), 1 / 60);
-        for (const r of [walk, air, side]) { expect(r.p.actionState).toBe('free'); expect(r.played).toHaveLength(0); }
+        for (const r of [walk, air, side]) { expect(r.p.actionState).toBe('free'); expect(r.a.fired).toHaveLength(0); }
     });
 
-    it('ends facing the new way with the clip cut, then runs on freely', () => {
-        const { p, stopped } = runner(4);
-        p._free(stick(0, 1), 1 / 60);
-        const length = p._runTurnLength;
-        for (let t = 0; t < length + 0.05; t += 1 / 60) { p._stateTime += 1 / 60; p._runTurn(stick(0, 1)); if (p.actionState !== 'runTurn') break; }
+    it('turns the body round on the frame the turn\'s clip ends, before the layer cuts back to the run', () => {
+        const { p, a } = runner(4);
+        const dt = 1 / 60;
+        p._free(stick(0, 1), dt);
+        a.enter(a.fired[0]);                       // the animator's pass, later that frame
+        /** The clip time at each turn of the node. */
+        const turnedAt: number[] = [];
+        const setRotation = p.setRotation.bind(p);
+        p.setRotation = (r: number[]) => { turnedAt.push(a.time); setRotation(r); };
+        let frames = 0;
+        while (p.actionState === 'runTurn' && frames++ < 120) {
+            // The player's frame first (breadth-first: it is the model's ancestor), then the animator's.
+            p._stateTime += dt; p._trackAction(dt); p._runTurn(stick(0, 1));
+            if (p.actionState !== 'runTurn') break;
+            a.time = Math.min(0.6, a.time + dt * 1.2);
+        }
         expect(p.actionState).toBe('free');
-        const f = p.worldForward;
-        expect(Math.abs(Math.atan2(f[0], f[2]) * 180 / Math.PI)).toBeLessThan(1e-3);   // a half turn from 180
-        expect(stopped).toEqual([0]);
+        // Once, and not a frame before the clip's end: the frame the layer's exit cuts back to the run.
+        expect(turnedAt).toEqual([0.6]);
+        // The layer's own exit cuts it: nothing more is fired.
+        expect(a.fired).toEqual(['RunTurnRight']);
     });
 
-    it('turns without foot IK, which would aim the knees the old way while the hips swing round', () => {
-        const { p, options } = runner(4);
+    it('cuts the turn at once when it is called off after the body has turned round', () => {
+        const { p, a } = runner(4);
         p._free(stick(0, 1), 1 / 60);
-        expect(options[0].ikWeight).toBe(0);
-        expect(options[0].blendOut).toBe(0);
+        a.enter(a.fired[0]); p._trackAction(1 / 60);
+        a.time = 0.4; p._stateTime = 0.35;         // past halfway
+        let turned = false;
+        const setRotation = p.setRotation.bind(p);
+        p.setRotation = (r: number[]) => { turned = true; setRotation(r); };
+        p._enter('roll');
+        expect(turned).toBe(true);                 // drawn facing the new way already
+        expect(a.fired).toContain('Cut');          // so whatever follows must not blend from the turned pose
+    });
+
+    it('does not cut a turn called off before it shows', () => {
+        const { p, a } = runner(4);
+        p._free(stick(0, 1), 1 / 60);
+        a.enter(a.fired[0]); p._trackAction(1 / 60);
+        a.time = 0.1; p._stateTime = 0.08;
+        p._enter('roll');
+        expect(a.fired).not.toContain('Cut');
     });
 
     it('holds the base machine on a straight-ahead run under the clip, at the speed it leaves at', () => {

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { mat4, quat, vec3 } from "gl-matrix";
-import { Raycaster, markEditorOwned, clothBrushDab, clothFillPiece } from "cleo";
+import { Raycaster, isTextEntryEvent, markEditorOwned, clothBrushDab, clothFillPiece } from "cleo";
 import type { ModelNode, SkinnedClothData } from "cleo";
 import { useCleoEngine } from "../EngineContext";
 import { useHistory } from "../HistoryContext";
@@ -215,16 +215,12 @@ export default function ClothBrush({ viewportRef }: Props) {
             eventEmitter.emit('GIZMO_DRAG_END', { axis: null, nodeId: null });
         };
 
-        const typing = (t: EventTarget | null) => {
-            const el = t as HTMLElement | null;
-            return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
-        };
         const resize = (factor: number) => {
             const r = getClothBrush().radius;
             setClothBrush({ radius: Math.min(2, Math.max(0.005, +(r * factor).toFixed(4))) });
         };
         const onKey = (e: KeyboardEvent) => {
-            if (!getClothBrush().painting || typing(e.target) || e.altKey || e.metaKey || e.ctrlKey) return;
+            if (!getClothBrush().painting || isTextEntryEvent(e) || e.altKey || e.metaKey || e.ctrlKey) return;
             if (e.key === '[' || e.key === ']') { resize(e.key === ']' ? 1.15 : 1 / 1.15); e.preventDefault(); }
             else if (e.key === 'Escape') { setClothBrush({ painting: false }); e.preventDefault(); }
         };

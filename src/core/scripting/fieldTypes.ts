@@ -11,6 +11,7 @@ import type { Node } from "../scene/nodes/node";
  *   public castSocket: SocketName = 'LeftHand'    // the sockets on the owner's skeleton
  *   public projectile: TemplateName = 'Magic Bolt'
  *   public next: NodeName = ''                    // a node inside or beside this one
+ *   public roll: TriggerName = 'Roll'             // a trigger on the character's animator
  *   public moves: ClipName[] = []                 // a list of any of the above works too
  *
  * The optional brand keeps a string literal assignable while still being a distinct name for the
@@ -25,6 +26,23 @@ export type SocketName = string & { readonly __pick?: "socket" };
 export type TemplateName = string & { readonly __pick?: "template" };
 /** The name of a node inside or beside this one (a child, or a sibling such as the next move in a combo). */
 export type NodeName = string & { readonly __pick?: "node" };
+/**
+ * The trigger names a project's animators declare, one key each. Empty here, so a trigger is any string;
+ * the editor augments it for a project's scripts (a generated `.cleo/types/project.d.ts`), which turns
+ * {@link TriggerName} into exactly those names: a misspelt trigger is a type error, and the names complete.
+ */
+export interface ProjectTriggers {}
+
+/**
+ * A `trigger` parameter of the animator of the character this node belongs to — what a script passes to
+ * `animator.setTrigger` to enter a state, such as an Actions-layer roll. In a project's scripts, one of the
+ * triggers its animators declare (see {@link ProjectTriggers}), or `''` for none.
+ */
+export type TriggerName = [keyof ProjectTriggers] extends [never]
+    ? string & { readonly __pick?: "trigger" }
+    // A plain union of the names (no brand): the editors complete string literals of a union, not of an
+    // intersection with one.
+    : Extract<keyof ProjectTriggers, string> | '';
 
 /**
  * Name of the group, directly under an owner (a character, a prop, a weapon), that holds its SoundNodes.

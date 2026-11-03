@@ -5,6 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cleo Creator</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/brand/icon-192.png">
+    <link rel="apple-touch-icon" href="/brand/icon-192.png">
     <!-- The pre-bundle splash below, the same as the editor's. Inline and literal: it shows while the JS
          (and the stylesheet with the theme tokens) is still downloading, so it cannot use either. -->
     <style>
@@ -14,13 +17,21 @@
         .cleo-boot h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.3em; }
         .cleo-boot small { display: block; margin-top: 8px; text-align: center; font-size: 10px;
                            letter-spacing: 0.3em; text-transform: uppercase; color: #9aa4b2; }
-        .cleo-boot .bar { width: 380px; max-width: 85vw; height: 8px; border: 1px solid #2d2d77;
-                          border-radius: 999px; background: #141620; overflow: hidden; }
-        .cleo-boot .bar span { display: block; width: 30%; height: 100%; border-radius: 999px;
-                               background: linear-gradient(90deg, #2d2d77, #326acc);
-                               animation: cleo-boot-slide 1.2s ease-in-out infinite; }
         .cleo-boot p { margin: -16px 0 0; font-size: 12px; color: #8a8aa0; }
-        @keyframes cleo-boot-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
+        /* The logo as an indeterminate loading bar: app-kit feedback/logoLoader.css in its sweep mode,
+           which the React loading screen then takes over with real progress. Keep the two alike. */
+        @property --cleo-sweep { syntax: '<percentage>'; inherits: true; initial-value: -25%; }
+        .cleo-boot .logo { position: relative; isolation: isolate; width: 180px; margin-bottom: -8px; }
+        .cleo-boot .logo img { display: block; width: 100%; height: auto; }
+        .cleo-boot .logo .dim { position: relative; opacity: 0.3; }
+        .cleo-boot .logo .glow { position: absolute; inset: 0; transform: scale(1.05); filter: blur(12px); opacity: 0.85; }
+        .cleo-boot .logo .glow i { position: absolute; inset: 0; background: linear-gradient(90deg, #326acc, #8fb4ff);
+                                   -webkit-mask: url(/brand/logo.png) center / contain no-repeat;
+                                           mask: url(/brand/logo.png) center / contain no-repeat; }
+        .cleo-boot .logo .window { position: absolute; inset: 0; animation: cleo-boot-sweep 1.4s ease-in-out infinite;
+            -webkit-mask-image: linear-gradient(90deg, transparent calc(var(--cleo-sweep) - 25%), #000 var(--cleo-sweep), transparent calc(var(--cleo-sweep) + 25%));
+                    mask-image: linear-gradient(90deg, transparent calc(var(--cleo-sweep) - 25%), #000 var(--cleo-sweep), transparent calc(var(--cleo-sweep) + 25%)); }
+        @keyframes cleo-boot-sweep { from { --cleo-sweep: -25%; } to { --cleo-sweep: 125%; } }
     </style>
 </head>
 
@@ -28,8 +39,12 @@
     <!-- React's first render replaces everything inside #root, splash included. -->
     <div id="root">
         <div class="cleo-boot" role="progressbar" aria-label="Loading Cleo Creator">
+            <div class="logo" aria-hidden="true">
+                <div class="glow"><div class="window"><i></i></div></div>
+                <img class="dim" src="/brand/logo.png" width="404" height="365" alt="">
+                <div class="window"><img src="/brand/logo.png" alt=""></div>
+            </div>
             <div><h1>CLEO ENGINE</h1><small>Creator</small></div>
-            <div class="bar"><span></span></div>
             <p>Loading Cleo Creator…</p>
         </div>
     </div>

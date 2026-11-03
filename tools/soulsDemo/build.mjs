@@ -220,6 +220,15 @@ const importedClips = readJson(path.join(HERE, 'soulsClips.json'))
   const turn = importedClips.find(c => c.name === 'Souls_RunTurn180')
   if (turn) importedClips.push({ ...turn, name: 'Souls_RunTurn180L', edits: [{ kind: 'mirror' }] })
 }
+// The weapon changes hands as the sheathe ends (SoulsPlayer swaps on this `swap` event), whatever speed
+// the Actions layer plays it at.
+{
+  const sheath = importedClips.find(c => c.name === 'Souls_Sheath')
+  if (sheath) {
+    const end = Math.max(...sheath.samplers.map(s => s.input[s.input.length - 1]))
+    sheath.events = [...(sheath.events ?? []).filter(e => e.name !== 'swap'), { name: 'swap', time: end }]
+  }
+}
 const importedNames = new Set(importedClips.map(c => c.name))
 /**
  * The Longsword's moveset and the combat stance, made in the Motion Creator: longsword/*.motion.json,
@@ -255,28 +264,39 @@ const locomotionField = (() => {
 })()
 
 /**
- * Every character's animation machine: Idle, the locomotion field, and Dead. Attacks and reactions are
- * ACTIONS played over it by script, so the machine needs only the two death triggers.
- */
-/**
- * The character controller: the state machine every character's model node embeds (idle, locomotion,
- * death), as a `.controller` asset on the mannequin rig. Shipping it as an ASSET is what lets a swapped
- * model get it back: linking the rig to a new model node with no machine hands it this controller.
+ * The character controllers: the state machine each character's model node embeds, as a `.animator` asset
+ * on the mannequin rig. Shipping it as an ASSET is what lets a swapped model get it back: linking the rig
+ * to a new model node with no machine hands it this controller.
+ *
+ * Every machine is the same idle / locomotion / death base, with an **Actions** layer on top holding the
+ * character's one-shots — attacks, rolls, reactions — each entered directly by the trigger, by name, its
+ * script fires. The player has one ("Souls Character"); every enemy TYPE has its own, since each type's attacks
+ * are its own ("Souls Hollow", ...), and the base enemy template keeps "Souls Enemy" (reactions only).
  */
 const CHARACTER_CONTROLLER_ID = stableId('controller:souls-character')
 const ENEMY_CONTROLLER_ID = stableId('controller:souls-enemy')
 /** Death clip per controller: the player falls with Dying, enemies with Standing Death Right (then the ragdoll). */
 const DEATH_CLIP = { player: 'Souls_Dying', enemy: 'Souls_Death' }
 function characterController() {
-  return { id: CHARACTER_CONTROLLER_ID, name: 'Souls Character', rigId: rig.id, machine: characterStateMachine('player') }
+  return { id: CHARACTER_CONTROLLER_ID, name: 'Souls Character', rigId: rig.id, machine: playerStateMachine() }
 }
-function enemyController() {
-  return { id: ENEMY_CONTROLLER_ID, name: 'Souls Enemy', rigId: rig.id, machine: characterStateMachine('enemy') }
+/** An enemy type's controller (`spec` from ENEMIES, or ENEMY_BASE for the base enemy template). */
+function enemyController(spec) {
+  return { id: enemyControllerId(spec), name: enemyControllerName(spec), rigId: rig.id, machine: enemyStateMachine(spec) }
 }
+const enemyControllerId = (spec) => (spec.key === 'base' ? ENEMY_CONTROLLER_ID : stableId(`controller:souls-enemy:${spec.key}`))
+const enemyControllerName = (spec) => (spec.key === 'base' ? 'Souls Enemy' : `Souls ${spec.name}`)
 
-/** The machine as a node embeds it: the controller's, stamped with where it came from. */
-function embeddedCharacterMachine(kind = 'player') {
-  return { ...characterStateMachine(kind), controllerId: kind === 'enemy' ? ENEMY_CONTROLLER_ID : CHARACTER_CONTROLLER_ID }
+/**
+ * The machine a character's model node embeds, stamped with the controller it came from. `key` is the
+ * placement key: 'player', or `enemy:<type key>` (characterModel, exampleKit's placements).
+ */
+function embeddedCharacterMachine(key = 'player') {
+  if (key === 'player') return { ...playerStateMachine(), controllerId: CHARACTER_CONTROLLER_ID }
+  const type = String(key).replace(/^enemy:/, '')
+  const spec = [ENEMY_BASE, ...ENEMIES].find(s => s.key === type)
+  if (!spec) throw new Error(`no enemy type "${type}" for the character machine of "${key}"`)
+  return { ...enemyStateMachine(spec), controllerId: enemyControllerId(spec) }
 }
 
 /**
@@ -317,11 +337,16 @@ const ARMS_MASK = (() => {
 const COMBAT_STANCE_CLIP = 'Souls_LS_Stance'
 const COMBAT_GUARD_CLIP = 'Souls_LS_Guard'
 
-function characterStateMachine(kind = 'player') {
-  const speed = (op, value) => ({ op: 'and', children: [{ param: 'Speed', op, value, hysteresis: 0.15 }] })
-  const trigger = (param) => ({ op: 'and', children: [{ param, op: 'trigger' }] })
-  const edge = (from, to, condition) => ({ from, to, conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1, condition })
-  if (kind === 'player') return playerStateMachine({ speed, trigger, edge })
+const speedCond = (op, value) => ({ op: 'and', children: [{ param: 'Speed', op, value, hysteresis: 0.15 }] })
+const triggerCond = (param) => ({ op: 'and', children: [{ param, op: 'trigger' }] })
+const smEdge = (from, to, condition) => ({ from, to, conditions: [], minDwell: 0, hasExitTime: false, exitTime: 1, condition })
+
+/**
+ * The machine every character shares: Idle, the locomotion field and Dead, and the sword run on the weapon
+ * arm. The one-shots are each character's own (the Actions layer, see actionsLayer).
+ */
+function baseCharacterMachine() {
+  const speed = speedCond, trigger = triggerCond, edge = smEdge
   return {
     parameters: [
       { name: 'Speed', type: 'variable', default: 0, variable: { nodeRef: 'parent', varName: 'planarSpeed', varType: 'number', source: 'builtin' } },
@@ -335,7 +360,7 @@ function characterStateMachine(kind = 'player') {
         name: 'Locomotion', clipName: '', fieldId: locomotionField.id, field: toRuntimeField(locomotionField),
         fieldInputs: { x: 'Direction', y: 'Speed' }, loop: true, speed: 1, isEntry: false, x: 300, y: 40,
       },
-      { name: 'Dead', clipName: DEATH_CLIP[kind], loop: false, speed: 1, isEntry: false, x: 170, y: 200 },
+      { name: 'Dead', clipName: DEATH_CLIP.enemy, loop: false, speed: 1, isEntry: false, x: 170, y: 200 },
     ],
     transitions: [
       edge('Idle', 'Dead', trigger('Died')),
@@ -348,7 +373,7 @@ function characterStateMachine(kind = 'player') {
     ],
     // The sword run, on the weapon arm only, while running: it carries the blade the way a fighter runs
     // with one, over the body's own locomotion. Off below a jog (walking and strafing in a fight
-    // keep the guard pose). Attacks, rolls and hit reactions are ACTIONS, which sit above every layer.
+    // keep the guard pose). The Actions layer, above it, covers it for an attack, a roll or a reaction.
     layers: [{
       name: 'UpperBody', blend: 'override', weight: 1, maskId: UPPER_BODY_MASK.id, mask: { ...UPPER_BODY_MASK.weights },
       states: [
@@ -370,16 +395,17 @@ function characterStateMachine(kind = 'player') {
  * The player's machine: the shared one, plus the fight. `InCombat` (a bool SoulsPlayer sets while locked
  * on, while an enemy is engaged with it, and a few seconds after a blow either way) swaps the rest pose for
  * the Longsword's guard (CombatIdle), and while moving in a fight the Guard layer keeps both hands on the
- * hilt over the legs' locomotion -- up to a sprint, where the one-handed sword run takes over again.
+ * hilt over the legs' locomotion -- up to a sprint, where the one-handed sword run takes over again. Every
+ * one-shot is a state of the Actions layer on top (see playerActions).
  */
-function playerStateMachine({ speed, trigger, edge }) {
-  const base = characterStateMachine('enemy')
+function playerStateMachine() {
+  const speed = speedCond, trigger = triggerCond, edge = smEdge
   const all = (...children) => ({ op: 'and', children })
   const any = (...children) => ({ op: 'or', children })
   const fight = { param: 'InCombat', op: 'true' }, calm = { param: 'InCombat', op: 'false' }
   const sp = (op, value) => ({ param: 'Speed', op, value, hysteresis: 0.15 })
   const SPRINT = 4.7
-  const machine = clone(base)
+  const machine = baseCharacterMachine()
   machine.parameters.push({ name: 'InCombat', type: 'bool', default: false })
   for (const st of machine.states) if (st.name === 'Dead') st.clipName = DEATH_CLIP.player
   machine.states.push({ name: 'CombatIdle', clipName: COMBAT_STANCE_CLIP, loop: true, speed: 1, isEntry: false, x: 40, y: 200 })
@@ -398,7 +424,7 @@ function playerStateMachine({ speed, trigger, edge }) {
   swordRun.transitions = swordRun.transitions.map(t => (t.from === 'Off' && t.to === 'Sword Run'
     ? { ...t, condition: all(sp('gt', 2.2), any(calm, sp('gt', SPRINT))) } : t))
   swordRun.transitions.push({ ...edge('Sword Run', 'Off', all(fight, sp('lt', SPRINT - 0.2))), blendTime: 0.3, minDwell: 0.15 })
-  machine.layers = [{
+  const guard = {
     name: 'Guard', blend: 'override', weight: 1, maskId: ARMS_MASK.id, mask: { ...ARMS_MASK.weights },
     states: [
       { name: 'Off', clipName: '', loop: true, speed: 1, isEntry: true, x: 40, y: 40 },
@@ -411,9 +437,186 @@ function playerStateMachine({ speed, trigger, edge }) {
       { ...edge('Guard', 'Off', any(calm, sp('lt', 0.4), sp('gt', SPRINT + 0.2))), blendTime: 0.35, minDwell: 0.15 },
       { ...edge('Guard', 'Off', trigger('Died')), blendTime: 0.15 },
     ],
-  }, swordRun]
+  }
+  machine.layers = [guard, swordRun, withActions(machine, playerActions())]
   return machine
 }
+
+/**
+ * An enemy type's machine: the shared one, plus its Actions layer — its own attacks, a flinch and a
+ * stagger, and a boss's battle cry. Attacks play at their speed times `AttackSpeed` (1; a boss's second
+ * phase raises it — SoulsEnemy._setSpeedMul).
+ */
+function enemyStateMachine(spec) {
+  const machine = baseCharacterMachine()
+  machine.parameters.push({ name: 'AttackSpeed', type: 'float', default: 1 })
+  machine.layers.push(withActions(machine, enemyActions(spec)))
+  return machine
+}
+
+// ----- the Actions layer --------------------------------------------------------------------------------
+
+/** Seconds the one-shots blend in and out: what the scripts' playAction calls used, now the graph's. */
+const ACTION_BLEND = { in: 0.1, out: 0.22 }
+const ATTACK_BLEND = { in: 0.12, out: 0.35 }
+/**
+ * The triggers every Actions layer leaves on, from wherever it is: Stop blends out (standing up from a
+ * bonfire, a respawn), Cut leaves at once (a run turn called off after the body has turned round).
+ */
+const STOP_TRIGGER = 'Stop', CUT_TRIGGER = 'Cut'
+
+/** A clip's length, seconds — the exit times are fractions of it. */
+function clipLength(name) {
+  const clip = animations.find(a => a.name === name)?.clips[0]
+  if (!clip) throw new Error(`an Actions state plays "${name}", which is no clip on the rig`)
+  return Math.max(...clip.samplers.map(s => s.input[s.input.length - 1]))
+}
+
+/**
+ * The player's one-shots. Each entry is a state of the Actions layer:
+ *
+ *   name     the state, and the trigger that enters it directly, by name (`trigger` another one; null: none)
+ *   exit     'fade'   (default) leaves for Off so the blend-out ends with the clip, as an action's did
+ *            'cut'    leaves at the clip's end with no blend (the run turn: the script turns the body then)
+ *            { at, blend }  leaves at clip second `at` (a segment of a longer clip)
+ *            null     never leaves on its own (a loop, left on Stop)
+ *   next     [{ to, at, blend, trigger }] transitions to other one-shots at clip second `at`: a combo's next
+ *            segment (on its trigger) or the second half of a sequence (sheathe, then draw)
+ */
+function playerActions() {
+  return [
+    // No foot planting mid-tumble; the dive's own travel is collected for SoulsPlayer to move the body by.
+    { name: 'Roll', clip: 'Souls_Roll', speed: 1.5, ikWeight: 0, extractRootMotion: true },
+    { name: 'Backstep', clip: 'Souls_Backstep', ikWeight: 0 },
+    // The clip turns the hips round while the node keeps facing the old way, so foot IK would twist the
+    // planted legs. At the end the script turns the node round on the frame this cuts back to the run.
+    { name: 'RunTurnRight', clip: 'Souls_RunTurn180', speed: 1.2, ikWeight: 0, exit: 'cut' },
+    { name: 'RunTurnLeft', clip: 'Souls_RunTurn180L', speed: 1.2, ikWeight: 0, exit: 'cut' },
+    { name: 'Drink', clip: 'Souls_Drink' },
+    { name: 'HitLight', clip: 'Souls_HitLight' },
+    { name: 'HitHeavy', clip: 'Souls_HitHeavy' },
+    // A swing that meets a wall bounces off it.
+    { name: 'Recoil', clip: 'Souls_HitLight', speed: 1.4 },
+    // Sheathe the weapon in hand, then draw the next: the weapon changes on the sheathe clip's `swap` event.
+    { name: 'Sheath', trigger: 'Swap', clip: 'Souls_Sheath', speed: 2, exit: null, next: [{ to: 'Draw', at: 'end', blend: ACTION_BLEND.in }] },
+    { name: 'Draw', trigger: null, clip: 'Souls_Draw', speed: 2 },
+    { name: 'Rest', clip: 'Souls_Rest', loop: true, exit: null },
+    { name: 'FogWalk', clip: 'Souls_FogWalk' },
+    { name: 'Pickup', clip: 'Souls_Pickup' },
+    { name: 'Interact', clip: 'Souls_Interact' },
+    ...weaponMoveActions(),
+  ]
+}
+
+/** The animator trigger (and the state it enters) that plays a weapon's move: SoulsMove.animTrigger. */
+const moveTrigger = (weaponName, moveName) => `${weaponName} ${moveName}`
+
+/**
+ * One state per move of every weapon the player can hold. A move whose `next` carries on the SAME clip from
+ * where it ends (the Longsword's one-clip combo) is entered only from that move, at the segment's end, on
+ * its own trigger: the clip plays on into it without restarting. Every other move is entered by its trigger
+ * directly, from whatever the layer is doing.
+ */
+function weaponMoveActions() {
+  const out = []
+  for (const [, weaponName, , , moves] of WEAPONS) {
+    const byName = new Map(moves)
+    const continues = (m, next) => {
+      const end = num(m.clipEnd, 0)
+      return !!next && next.clip === m.clip && end > 0 && Math.abs(num(next.clipStart, 0) - end) < 1e-3
+    }
+    const chained = new Set(moves.filter(([, m]) => continues(m, byName.get(m.next))).map(([, m]) => m.next))
+    for (const [moveName, m] of moves) {
+      const length = clipLength(m.clip)
+      const end = num(m.clipEnd, 0)
+      const segment = end > 0 && end < length - 1e-3
+      const blendOut = num(m.blendOut, ATTACK_BLEND.out)
+      out.push({
+        name: moveTrigger(weaponName, moveName),
+        trigger: chained.has(moveName) ? null : moveTrigger(weaponName, moveName),
+        clip: m.clip, speed: num(m.playSpeed, 1), startTime: num(m.clipStart, 0) || undefined,
+        extractRootMotion: !!m.rootMotion, blend: { in: ATTACK_BLEND.in, out: blendOut },
+        exit: segment ? { at: end, blend: blendOut } : 'fade',
+        next: continues(m, byName.get(m.next)) ? [{ to: moveTrigger(weaponName, m.next), at: end, blend: 0, trigger: moveTrigger(weaponName, m.next) }] : [],
+      })
+    }
+  }
+  return out
+}
+
+/** An enemy type's one-shots: its attacks (SoulsEnemyAttack.animTrigger is the attack's name), and reactions. */
+function enemyActions(spec) {
+  const out = [
+    { name: 'Flinch', clip: 'Souls_HitLight' },
+    { name: 'Stagger', clip: 'Souls_HitHeavy' },
+  ]
+  // A boss's battle cry on first sight; the Warden roars again as it turns (SoulsHollowWarden).
+  if (spec.boss) out.push({ name: 'Taunt', clip: 'Souls_Battlecry' })
+  if (spec.key === 'warden') out.push({ name: 'Roar', clip: 'Souls_Battlecry' })
+  for (const [name, a] of spec.attacks)
+    out.push({ name, clip: a.clip, speed: num(a.playSpeed, 1), speedScaleParam: 'AttackSpeed', blend: ATTACK_BLEND })
+  return out
+}
+
+/**
+ * The Actions layer for `actions` (see playerActions): a full-body layer above every other, resting in an
+ * empty `Off` that adds nothing. Every one-shot is entered DIRECTLY by its trigger (AnimationState.triggers),
+ * from whatever the layer is doing, so the graph holds no Any State edges — only a combo's segment
+ * hand-overs and the ways out. `Off` comes first in the list, so its own triggers (death, Stop, Cut) win a
+ * frame in which a one-shot is fired too. The triggers join `machine`'s parameters.
+ */
+function withActions(machine, actions) {
+  const trigger = triggerCond, edge = smEdge
+  const names = new Set()
+  const states = [{
+    name: 'Off', clipName: '', loop: true, speed: 1, isEntry: true, x: 40, y: 40,
+    // Back to rest from anywhere: on death (the base falls on the same trigger), with a blend, and at once.
+    triggers: [{ trigger: 'Died', blendTime: 0.15 }, { trigger: STOP_TRIGGER, blendTime: ACTION_BLEND.out }, { trigger: CUT_TRIGGER, blendTime: 0 }],
+  }]
+  const handovers = [], exits = []
+  const triggers = [STOP_TRIGGER, CUT_TRIGGER]
+  actions.forEach((a, i) => {
+    if (names.has(a.name) || a.name === 'Off') throw new Error(`two Actions states are called "${a.name}"`)
+    names.add(a.name)
+    const length = clipLength(a.clip)
+    const speed = a.speed ?? 1
+    const blend = a.blend ?? ACTION_BLEND
+    const enter = a.trigger === undefined ? a.name : a.trigger
+    if (enter) triggers.push(enter)
+    states.push({
+      name: a.name, clipName: a.clip, loop: !!a.loop, speed, isEntry: false,
+      // Fired again while it plays, it restarts (the default): a second hit replays the flinch.
+      ...(enter ? { triggers: [{ trigger: enter, blendTime: blend.in }] } : {}),
+      ...(a.ikWeight !== undefined ? { ikWeight: a.ikWeight } : {}),
+      ...(a.startTime ? { startTime: a.startTime } : {}),
+      ...(a.extractRootMotion ? { extractRootMotion: true } : {}),
+      ...(a.speedScaleParam ? { speedScaleParam: a.speedScaleParam } : {}),
+      x: 300 + (i % 4) * 210, y: 40 + Math.floor(i / 4) * 120,
+    })
+    for (const n of a.next ?? []) {
+      const at = n.at === 'end' ? length : n.at
+      if (n.trigger) triggers.push(n.trigger)
+      handovers.push({ ...edge(a.name, n.to, n.trigger ? trigger(n.trigger) : undefined), hasExitTime: true, exitTime: at / length, blendTime: n.blend })
+    }
+    const exit = a.exit === undefined ? 'fade' : a.exit
+    if (exit === 'fade') {
+      // Start blending out so the blend ENDS with the clip, in clip seconds: `out` real seconds at `speed`.
+      const exitTime = Math.max(0, 1 - (blend.out * speed) / length)
+      exits.push({ ...edge(a.name, 'Off'), hasExitTime: true, exitTime: round3(exitTime), blendTime: blend.out })
+    } else if (exit === 'cut') {
+      exits.push({ ...edge(a.name, 'Off'), hasExitTime: true, exitTime: 1, blendTime: 0 })
+    } else if (exit) {
+      exits.push({ ...edge(a.name, 'Off'), hasExitTime: true, exitTime: exit.at / length, blendTime: exit.blend })
+    }
+  })
+  for (const n of actions.flatMap(a => a.next ?? []))
+    if (!names.has(n.to)) throw new Error(`an Actions hand-over goes to "${n.to}", which is no state`)
+  for (const name of new Set(triggers))
+    if (!machine.parameters.some(p => p.name === name)) machine.parameters.push({ name, type: 'trigger', default: false })
+  return { name: 'Actions', blend: 'override', weight: 1, states, transitions: [...handovers, ...exits] }
+}
+
+const round3 = (v) => Math.round(v * 1000) / 1000
 
 /**
  * Sockets ride on every embedded MANNEQUIN skin — the rig is an authoring asset; the skin is what ships.
@@ -1046,7 +1249,7 @@ const sourceModelNode = playableSource.children.find(c => c.name === 'Ch36')
 const sourceBody = playableSource.body
 const ragdoll = clone(sourceModelNode.ragdoll ?? null)
 
-/** The skinned mannequin, tinted, scaled, carrying the shared machine. */
+/** The skinned mannequin, tinted, scaled, carrying its character's machine (`key`: 'player' or `enemy:<type>`). */
 function characterModel(key, materialId, scale) {
   const model = clone(sourceModelNode)
   stripClips(model)
@@ -1054,7 +1257,7 @@ function characterModel(key, materialId, scale) {
   model.scale = [scale, scale, scale]
   model.variables = vars({ __modelId: MANNEQUIN_MODEL, __materialId: materialId })
   model.model.material = matJson(materialId)
-  model.stateMachine = embeddedCharacterMachine(key === 'player' ? 'player' : 'enemy')
+  model.stateMachine = embeddedCharacterMachine(key)
   model.ragdoll = clone(ragdoll)
   model.children = []
   return model
@@ -1287,9 +1490,17 @@ function importedTiming(clip, fields) {
 }
 const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
 
-/** One SoulsMove data node. */
-function move(key, name, fields) {
-  return withScript(node(name, 'node', { id: stableId(`move:${key}:${name}`) }), 'SoulsMove', { ...fields, ...swingWindow(fields.clip), ...importedTiming(fields.clip, fields) })
+/**
+ * The fields of a move or an attack that are ANIMATION, not gameplay: they build its Actions-layer state
+ * (weaponMoveActions, enemyActions) and are not the script's. The clip still times the fallback windows.
+ */
+const ANIMATION_FIELDS = ['clip', 'playSpeed', 'clipStart', 'clipEnd', 'rootMotion', 'blendOut']
+const gameplayFields = (fields) => Object.fromEntries(Object.entries(fields).filter(([k]) => !ANIMATION_FIELDS.includes(k)))
+
+/** One SoulsMove data node: its gameplay, and the animator trigger that plays it (`weaponName move`). */
+function move(key, name, fields, weaponName) {
+  return withScript(node(name, 'node', { id: stableId(`move:${key}:${name}`) }), 'SoulsMove',
+    { ...gameplayFields(fields), animTrigger: moveTrigger(weaponName, name), ...swingWindow(fields.clip), ...importedTiming(fields.clip, fields) })
 }
 
 // The blade hitboxes are no longer data here: each is the class default of its weapon's script
@@ -1313,7 +1524,7 @@ function weaponNode(key, name, script, parts, moves = [], bladeDir = BLADE_OUT) 
   return withScript(node(name, 'node', {
     id: stableId(`weapon:${key}`),
     socketAttachment: { target: 'parent', socket: 'RightHand' },
-    children: [mesh, ...moves.map(([moveName, fields]) => move(key, moveName, fields)), soundsGroup(`weapon:${key}`, SOUNDS.weapon, { spatial: true })],
+    children: [mesh, ...moves.map(([moveName, fields]) => move(key, moveName, fields, name)), soundsGroup(`weapon:${key}`, SOUNDS.weapon, { spatial: true })],
   // A scanned mesh carries its own swing capsule, fitted to it; the primitives use the script defaults.
   }), script, Array.isArray(parts) ? undefined : parts.hitbox)
 }
@@ -1394,8 +1605,10 @@ function playerNode(model = null) {
 
 // ----- enemies ---------------------------------------------------------------------------------------
 
+/** One SoulsEnemyAttack data node: its gameplay, and the trigger that plays it in its type's animator (its name). */
 function attack(key, name, fields) {
-  return withScript(node(name, 'node', { id: stableId(`attack:${key}:${name}`) }), 'SoulsEnemyAttack', { ...fields, ...swingWindow(fields.clip), ...importedTiming(fields.clip, fields) })
+  return withScript(node(name, 'node', { id: stableId(`attack:${key}:${name}`) }), 'SoulsEnemyAttack',
+    { ...gameplayFields(fields), animTrigger: name, ...swingWindow(fields.clip), ...importedTiming(fields.clip, fields) })
 }
 
 /**
@@ -2459,7 +2672,11 @@ const FOLDERS = {
   },
   rig: { Mannequin: `${SHARED}/Rigs` },
   animationField: { 'Souls Locomotion': `${SHARED}/Animations` },
-  animController: { 'Souls Character': `${SHARED}/Animations`, 'Souls Enemy': `${SHARED}/Animations` },
+  animController: {
+    'Souls Character': `${SHARED}/Animations`, 'Souls Enemy': `${SHARED}/Animations`,
+    'Souls Hollow': `${ENEMY('Hollow')}/Animations`, 'Souls Hollow Sorcerer': `${ENEMY('Hollow Sorcerer')}/Animations`,
+    'Souls Elite Knight': `${ENEMY('Elite Knight')}/Animations`, 'Souls Hollow Warden': `${ENEMY('Hollow Warden')}/Animations`,
+  },
   boneMask: { 'Weapon Arm': `${SHARED}/Animations`, Arms: `${PLAYER}/Animations/Longsword` },
   particleSystem: {
     'Bonfire Fire': `${PROP('Bonfire')}/Particles`, 'Torch Fire': `${PROP('Torch')}/Particles`,
@@ -2614,7 +2831,7 @@ export function writeProject({
     materials: materials.filter(m => !excludeMaterials.includes(m.id)),
     terrainMaterials,
     animationFields: [locomotionField],
-    animControllers: [characterController(), enemyController()],
+    animControllers: [characterController(), ...[ENEMY_BASE, ...ENEMIES].map(enemyController)],
     boneMasks: [UPPER_BODY_MASK, ARMS_MASK],
     animations,
     rigs: [rig, ...extraRigs],

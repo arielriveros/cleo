@@ -13,6 +13,15 @@ const ENGINE_ROOT = path.resolve(__dirname, '../..')
 const NAGA_DIR = path.resolve(ENGINE_ROOT, 'src/graphics/rhi/webgpu/naga')
 const NAGA_MIME: Record<string, string> = { '.js': 'text/javascript', '.wasm': 'application/wasm' }
 
+/** The Creator's dev server, proxied at /creator/ (see `server.proxy`). */
+const CREATOR_PORT = process.env.CLEO_CREATOR_PORT ?? 8081
+/** What /creator/ answers while that server is not running. */
+const CREATOR_NOT_RUNNING = `<!doctype html><meta charset="utf-8"><title>Cleo Creator</title>
+<body style="margin:0;height:100vh;display:grid;place-items:center;background:#1e1e1e;color:#ddd;font:14px system-ui,sans-serif">
+<div style="max-width:32rem;line-height:1.5"><h2 style="margin:0 0 .5rem">Cleo Creator is not running</h2>
+<p>Its dev server (port ${CREATOR_PORT}) is started separately. From the repo root run
+<code>npm run creator:serve</code>, then reload this window.</p></div>`
+
 /**
  * The vendored naga WASM, loaded on demand by utils/wgslTranslator to check a custom material against
  * WebGPU. Kept in the engine's tree rather than duplicated into applications/editor/public/, so the repository keeps
@@ -101,7 +110,15 @@ export default mergeConfig(engineConfig, defineConfig({
     // Creator's HMR when its client connects through here.
     proxy: {
       // CLEO_CREATOR_PORT: a Creator dev server on another port (a second checkout, a test pair).
-      '/creator': { target: `http://localhost:${process.env.CLEO_CREATOR_PORT ?? 8081}`, ws: true, changeOrigin: true },
+      '/creator': {
+        target: `http://localhost:${CREATOR_PORT}`, ws: true, changeOrigin: true,
+        // `editor:dev` and `desktop:dev` start the editor alone, so the Creator is often not there: say how to
+        // start it rather than answer with Vite's bare 500.
+        configure: proxy => proxy.on('error', (_err, _req, res) => {
+          if (!('writeHead' in res) || res.headersSent) return
+          res.writeHead(502, { 'Content-Type': 'text/html; charset=utf-8' }).end(CREATOR_NOT_RUNNING)
+        }),
+      },
     },
   },
 

@@ -64,7 +64,7 @@ export default class SoulsBonfireNode extends Node {
     if (!this.lit) {
       this.lit = true
       this._applyLit()
-      p.playGesture?.('Souls_Interact', 1)
+      p.playGesture?.('Interact', 1)
       gm?.lightBonfire?.(this)
       return
     }

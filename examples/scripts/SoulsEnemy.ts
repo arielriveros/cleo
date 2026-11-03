@@ -1,5 +1,5 @@
 import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
-import type { ClipName, SocketName } from 'cleo'
+import type { AnimationTriggerInfo, SocketName, TriggerName } from 'cleo'
 import { clamp, num, planarDistance } from '@/Core/Scripts/SoulsMath'
 import { Swing, bladeCapsule, closeSwing, hurtboxQuery, hurtboxTargets, newSwing, openSwing, stepSwing, wieldedBy } from '@/Core/Scripts/SoulsHitbox'
 import SoulsCharacterNode from '@/Core/Scripts/SoulsCharacter'
@@ -12,7 +12,9 @@ import { playSound } from '@/Core/Scripts/SoulsAudio'
  * the types share: how an enemy fights, spaces, reacts and dies.
  *
  *   Hollow                Character (SoulsHollow) — capsule body, friction 0
- *   ├── <model>           skinned model with a state machine that has `Died` and `Revive` triggers
+ *   ├── <model>           skinned model whose animator has `Died` and `Revive` triggers, and a state for
+ *   │                     each trigger fired from here: every attack's `animTrigger`, `Flinch`, `Stagger`
+ *   │                     and, on a boss, `Taunt` (see SoulsCharacter)
  *   ├── LockPoint *       empty node at chest height: where the lock-on camera and reticle aim
  *   ├── Weapons           empty group; `weaponTemplates` (e.g. "Club") is spawned into it on start, into
  *   │                     the RightHand socket. The weapon's blade is the melee HITBOX (see SoulsHitbox)
@@ -67,15 +69,16 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   public attackGapMin: number = 0.6
   public attackGapMax: number = 1.2
   public flinchOnHit: boolean = true
-  public flinchClip: ClipName = 'Souls_HitLight'
+  /** Animator triggers of the reactions' Actions states; the seconds are how long each holds the enemy. */
+  public flinchTrigger: TriggerName = 'Flinch'
   public flinchSeconds: number = 0.4
-  public staggerClip: ClipName = 'Souls_HitHeavy'
+  public staggerTrigger: TriggerName = 'Stagger'
   public staggerSeconds: number = 1.2
   /**
    * A BOSS's battle cry, played once the first time it spots the player each life. Regular enemies
    * never taunt -- a shout from every Hollow in the room is noise, not menace.
    */
-  public tauntClip: ClipName = 'Souls_Battlecry'
+  public tauntTrigger: TriggerName = 'Taunt'
   public tauntOnAggro: boolean = true
   /** Seconds the death clip plays before the ragdoll takes over (0 = no ragdoll). */
   public deathSeconds: number = 2
@@ -136,7 +139,6 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   public get hasPatrol(): boolean { return !!(this._brain as any)?.routeName }
 
   protected _player: Node = null
-  protected _model: ModelNode = null
   protected _brain: Node = null
   protected _lockPoint: Node = null
   protected _healthBar: Node = null
@@ -151,8 +153,8 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   private _cooldowns: any = {}
   private _lastAttack: string = ''
   private _attack: any = null
+  /** The clip of the one-shot playing, so only its own events count. */
   private _clip: string = ''
-  private _clipLength: number = 0
   private _playSpeed: number = 1
   private _usesEvents: boolean = false
   /** The attack's active window has opened (its `hit` event, or the fallback `hitTime`). */
@@ -162,7 +164,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   private _lungeSpeedNow: number = 0
   private _strafeDir: number = 1
   private _strafeTimer: number = 0
-  /** Multiplies movement and attack speed (a boss's later phase raises it). */
+  /** Multiplies movement and attack speed (a boss's later phase raises it; see _setSpeedMul). */
   protected _speedMul: number = 1
   private _reactSeconds: number = 0
   /** Whether this life's battle cry has happened (or been skipped). */
@@ -191,7 +193,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     this.poise = this.maxPoise
     this.isDead = false
     this.phase = 1
-    this._speedMul = 1
+    this._setSpeedMul(1)
     this.isAwake = !this.isBoss
     this._taunted = false
     this.fightState = this.isBoss ? 'dormant' : 'ai'
@@ -206,7 +208,10 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     const machine = animator?.getStateMachine?.()
     if (animator && !machine?.states?.length)
       Logger.warn('Hollow Keep: "' + this.name + '" has no animation controller on its model, so it will hold its bind pose. '
-        + 'Select the model node and assign "Souls Character" in its Animation section (or link the mannequin rig).', 'Script')
+        + 'Select the model node and assign its type\'s "Souls" animator in its Animation section.', 'Script')
+    else if (animator && !this._hasAction(this.flinchTrigger))
+      Logger.warn('Hollow Keep: "' + this.name + '"\'s animator plays nothing on "' + this.flinchTrigger + '", so it will attack '
+        + 'and react without animating. Assign its type\'s "Souls" animator in the model\'s Animation section.', 'Script')
     if (animator?.onAnimationEvent) {
       this._offEvents = animator.onAnimationEvent((name: string, clip: string) => this._onAnimEvent(name, clip))
     }
@@ -259,10 +264,10 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     this.poise -= poiseDamage
     if (this.poise <= 0) {
       this.poise = this.maxPoise
-      this._react('stagger', this.staggerClip, this.staggerSeconds)
+      this._react('stagger', this.staggerTrigger, this.staggerSeconds)
       playSound(this, 'Stagger')
     } else if (this.flinchOnHit && !this.isBoss && !(this.fightState === 'attack' && this._attack?.hyperArmor)) {
-      this._react('flinch', this.flinchClip, this.flinchSeconds)
+      this._react('flinch', this.flinchTrigger, this.flinchSeconds)
     }
   }
 
@@ -302,10 +307,16 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     this.poise = this.maxPoise
     this.isDead = false
     this.phase = 1
-    this._speedMul = 1
+    this._setSpeedMul(1)
     this.isAwake = !this.isBoss
     this._taunted = false
     this._enter(this.isBoss ? 'dormant' : 'ai')
+  }
+
+  /** Set the speed multiplier: movement reads it each frame; the attacks' states through `AttackSpeed`. */
+  protected _setSpeedMul(mul: number): void {
+    this._speedMul = mul
+    this._animator?.setFloat?.('AttackSpeed', mul)
   }
 
   // =================================================================================================
@@ -314,6 +325,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
 
   onUpdate(delta: number) {
     this._stateTime += delta
+    this._trackAction(delta)
     this._syncHurtbox()
     this._sinceHit += delta
     for (const key of Object.keys(this._cooldowns)) this._cooldowns[key] = Math.max(0, this._cooldowns[key] - delta)
@@ -376,9 +388,9 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     // First sight of the player this life: the battle cry, then the fight.
     if (!this._taunted && state !== 'Idle' && state !== 'Return' && (this._player as any) && !(this._player as any).isDead) {
       this._taunted = true
-      if (this.tauntOnAggro && this.isBoss && this.tauntClip && this._findClip(this.tauntClip)) {
-        this._react('taunt', this.tauntClip, 0)
-        this._reactSeconds = this._clipLength > 0 ? this._clipLength : 1.5
+      if (this.tauntOnAggro && this.isBoss && this._hasAction(this.tauntTrigger)) {
+        const info = this._react('taunt', this.tauntTrigger, 0)
+        this._reactSeconds = info && info.seconds > 0 ? info.seconds : 1.5
         this._still(intent)
         return
       }
@@ -445,11 +457,11 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     this._windowOpened = false
     closeSwing(this._swing)
     this._enter('attack')
-    this._playSpeed = Math.max(0.05, num(attack.playSpeed, 1) * this._speedMul)
-    this._play(attack.clip, this._playSpeed, true)
-    this._usesEvents = this._clipHasEvent(attack.clip, 'hit') || this._clipHasEvent(attack.clip, 'cast')
-    const length = this._clipLength > 0 ? this._clipLength : num(attack.hitTime, 0.6) + 0.6
-    this._actionSeconds = length / this._playSpeed
+    // Its trigger plays it, at its state's speed times `AttackSpeed` (the speed multiplier).
+    const info = this._oneShot((attack.animTrigger || attack.name || '') as TriggerName)
+    this._playSpeed = info?.speed ?? Math.max(0.05, this._speedMul)
+    this._usesEvents = !!info && (this._clipHasEvent(info.clip, 'hit') || this._clipHasEvent(info.clip, 'cast'))
+    this._actionSeconds = info && info.seconds > 0 ? info.seconds : (num(attack.hitTime, 0.6) + 0.6) / this._playSpeed
 
     // A leap covers whatever distance there is, within reason.
     this._lungeSpeedNow = num(attack.lungeSpeed, 0)
@@ -590,25 +602,35 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
 
   // ----- reactions -------------------------------------------------------------------------------
 
-  protected _react(state: string, clip: string, seconds: number): void {
-    this._stopAction()
+  /** Enter reaction `state` for `seconds`, playing what `trigger` plays (cutting any attack). */
+  protected _react(state: string, trigger: TriggerName, seconds: number): AnimationTriggerInfo | null {
     this._enter(state)
     this._reactSeconds = seconds
-    this._play(clip, 1)
     this._gap = Math.max(this._gap, 0.4)
+    return this._oneShot(trigger)
+  }
+
+  /** Fire a one-shot (see SoulsCharacter._playTrigger) and remember its clip: only its own events count. */
+  protected _oneShot(trigger: TriggerName): AnimationTriggerInfo | null {
+    const info = this._playTrigger(trigger)
+    this._clip = info?.clip ?? ''
+    return info
   }
 
   protected _die(): void {
     if (this.isDead) return
     this.isDead = true
-    this._stopAction()
+    // The base falls on Died, and the Actions layer leaves whatever it plays on the same trigger.
+    this._lowerRaised()
+    this._actTrigger = ''
+    this._actInfo = null
     this._enter('dead')
     this._setBar(false)
     const brain = this._brain as any
     brain?.setBlackboard?.('dead', true)
     ;(this._aura as any)?.stop?.()
     if (this.dropWeaponOnDeath) this.dropWeapon()
-    ;(this._model?.animator as any)?.setTrigger?.('Died')
+    this._animator?.setTrigger('Died')
     const gm = this._gm as any
     playSound(this, 'Enemy Death')
     gm?.onEnemyKilled?.(this)
@@ -653,39 +675,6 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     if (diff > 180) diff -= 360
     else if (diff < -180) diff += 360
     this.setRotation([0, have + Math.max(-maxDegrees, Math.min(maxDegrees, diff)), 0])
-  }
-
-  protected _play(clip: string, speed: number, attack: boolean = false): void {
-    this._clip = clip
-    this._clipLength = this._clipDuration(clip)
-    const animator = this._model?.animator as any
-    if (animator?.playAction && clip) animator.playAction(clip, {
-      speed,
-      blendIn: attack ? this.attackBlendIn : this.actionBlendIn,
-      blendOut: attack ? this.attackBlendOut : this.actionBlendOut,
-    })
-  }
-
-  protected _stopAction(blendOut: number = this.actionBlendOut): void {
-    ;(this._model?.animator as any)?.stopAction?.(undefined, blendOut)
-    this._clip = ''
-  }
-
-  private _clipDuration(name: string): number {
-    const clip = this._findClip(name)
-    if (!clip) return 0
-    let end = 0
-    for (const s of clip.samplers ?? []) if (s.input?.length) end = Math.max(end, s.input[s.input.length - 1])
-    return end
-  }
-
-  private _clipHasEvent(name: string, event: string): boolean {
-    return !!this._findClip(name)?.events?.some((e: any) => e.name === event)
-  }
-
-  private _findClip(name: string): any {
-    const animations = (this._model?.model as any)?.animations
-    return animations && name ? animations.find((a: any) => a.name === name) ?? null : null
   }
 
   private _setBar(show: boolean): void {

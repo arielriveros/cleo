@@ -14,6 +14,7 @@ import { ModelNode } from '../core/scene/nodes/modelNode';
 import { canAccessVariable } from '../core/scene/nodes/nodeVariables';
 import { InputSystem } from '../input/inputSystem';
 import { Logger } from '../core/logger';
+import { LogTally, plural } from '../core/logTally';
 import { rootMotionNodeOf, rootParentRotation, rootParentScale } from './clipEdit';
 import { normalizeBoneName } from './boneNames';
 // The condition model and evaluator live in core/conditions.ts — they read a table of named values and
@@ -23,6 +24,7 @@ import {
     ConditionContext, conditionMet, consumeTriggers, forEachCondition, gateMet, isConditionGroup, updateLatch,
 } from '../core/conditions';
 import type { Condition, ConditionGroup, ConditionNode, ConditionOp } from '../core/conditions';
+import type { TriggerName } from '../core/scripting/fieldTypes';
 
 /** Structural view of a physics body driving a ragdoll bone, so the physics layer stays unimported. */
 export interface RagdollBodyRef {
@@ -140,6 +142,26 @@ export interface AnimationState {
     /** Parameter to read the playback rate from, re-read every frame. Overrides `speed`. */
     speedParam?: string;
     /**
+     * Parameter the playback rate is MULTIPLIED by, re-read every frame: `speed × value` (or the
+     * `speedParam`'s value × it). A boss that speeds up in its second phase sets one number and every
+     * attack state follows. A missing parameter multiplies by 1.
+     */
+    speedScaleParam?: string;
+    /**
+     * Clip seconds to start from (default 0). The clock and the event window both begin there, so a state
+     * can play one segment of a longer clip — the second attack of a combo authored as one animation —
+     * and an exit-time transition at the segment's end hands over to the next.
+     */
+    startTime?: number;
+    /**
+     * On a LAYER: collect the clip's ground-plane root travel for {@link Animator.consumeRootMotion} instead
+     * of moving anything. The root bone is held over the start spot (its height and tumble stay in the
+     * pose), and a script moves the body by the travel — a roll that covers exactly the ground the dive does,
+     * through the character's own collision. The base layer moves the character itself instead (per-clip
+     * root motion), so this is ignored there.
+     */
+    extractRootMotion?: boolean;
+    /**
      * How strongly foot IK applies while this state plays, 0..1. Absent means 1 — a foot whose ground ray
      * finds nothing already fades itself out, so this is for states whose animation is trusted verbatim.
      */
@@ -156,11 +178,61 @@ export interface AnimationState {
      * to whatever is beneath — in a masked layer that is how a hand grip sits on top of locomotion.
      */
     pose?: AnimationPose;
+    /**
+     * Triggers that enter this state directly, by name, from whatever state its layer is in — no
+     * transition needed. A script firing `setTrigger('Roll')` plays the state listing `Roll`. Checked after
+     * Any State transitions and before the current state's own (see {@link AnimationStateTrigger}).
+     */
+    triggers?: AnimationStateTrigger[];
     /** The state the machine starts in. Exactly one state should be the entry. */
     isEntry?: boolean;
     /** Graph-editor layout coordinates (authoring only — ignored at runtime). */
     x?: number;
     y?: number;
+}
+
+/** A trigger that enters a state directly (see {@link AnimationState.triggers}). */
+export interface AnimationStateTrigger {
+    /** The trigger parameter's name. */
+    trigger: string;
+    /** Seconds to cross-fade in over. Undefined uses {@link Animator.blendTime}. */
+    blendTime?: number;
+    /**
+     * Fire even while the state already plays, restarting it (a second hit replays the flinch). Default
+     * true: off, a trigger fired then would stay raised and start the state later, out of the blue.
+     */
+    restart?: boolean;
+}
+
+/**
+ * What firing a trigger plays — see {@link Animator.triggerInfo}. Everything a script needs to time a
+ * one-shot without naming its state.
+ */
+export interface AnimationTriggerInfo {
+    /** The layer the state is on, or null for the base. */
+    layer: string | null;
+    /** The state the trigger enters. */
+    state: string;
+    /** The clip it plays ('' for a blend space or a pose), and that clip's length in seconds. */
+    clip: string;
+    clipLength: number;
+    /** Its playback rate now: its speed, or speed parameter, times its speed-multiplier parameter. */
+    speed: number;
+    /** Clip seconds it starts at. */
+    startTime: number;
+    /**
+     * Real seconds it plays before the layer rests or waits on another trigger: to where it hands over on
+     * a trigger (a combo's next segment), else to its clip's end — plus whatever it flows into on its own
+     * (a sheathe that goes on into the draw).
+     */
+    seconds: number;
+    /** It collects its clip's root travel for consumeRootMotion() (AnimationState.extractRootMotion). */
+    extractsRootMotion: boolean;
+    /**
+     * Entered whatever the layer is doing (a state trigger, or an Any State transition). False: only from
+     * certain states, at their own time — a combo's next segment, which a script queues.
+     */
+    fromAnywhere: boolean;
 }
 
 // The condition model is `core/conditions.ts`'s, aliased here under its historical names. These four
@@ -194,6 +266,11 @@ export interface AnimationTransition {
      * ping-ponging state pair. Real seconds from entry, unlike `hasExitTime`'s normalized clip time.
      */
     minDwell?: number;
+    /**
+     * An Any-State (`'*'`) transition may fire while the machine is already in `to`, restarting it from its
+     * start — a second hit replays the flinch. Off, a transition into the current state never fires.
+     */
+    canTransitionToSelf?: boolean;
 }
 
 export interface AnimationEventMarker {
@@ -338,6 +415,13 @@ interface Overlay {
     /** Seconds the presence takes to cross the full 0..1 range. */
     fadeSeconds: number;
     action: ActionState | null;
+}
+
+/** The first trigger a transition's conditions read (the one that starts what it enters), or null. */
+function firstTriggerOf(t: AnimationTransition): string | null {
+    let found: string | null = null;
+    forEachCondition(t.condition, t.conditions, c => { if (!found && c.op === 'trigger') found = c.param; });
+    return found;
 }
 
 interface ActionState {
@@ -549,6 +633,11 @@ class Bone {
     public get id(): number { return this._id; }
 }
 
+// One line per scene build, not four plus one per clip for every character: a Valley-sized scene logged
+// thousands, which evicted the warnings that explain a broken setup from the log ring.
+const ANIMATOR_TALLY = new LogTally('Animation', ['animators', 'joints', 'animations'] as const,
+    c => `Initialized ${plural(c.animators, 'animator')}: ${plural(c.joints, 'joint')}, ${plural(c.animations, 'animation')}`);
+
 // --- Pose scratch ----------------------------------------------------------------------------------
 //
 // Posing a skeleton used to allocate several vec3/quat/mat4 per bone per blend, every frame, for every
@@ -606,6 +695,8 @@ interface FootPlan {
     weight: number;      // this foot's damped contribution
     /** Signed distance from the animated ankle to its target along `up`. Negative = the foot must drop. */
     along: number;
+    /** The animated ankle's height along `up` — where the CLIP put it, before any ground is consulted. */
+    height: number;
 }
 
 // One clip contributing to a field blend. `bones` is SHARED with the Animator's per-clip cache and must
@@ -656,6 +747,30 @@ export class Animator {
     private _isOverlay: boolean = false;
     /** A layer's child is in a state with nothing to play: its pose fades out rather than snapping to rest. */
     private _overlayEmpty: boolean = false;
+    /**
+     * A layer's child is still showing (its presence > 0), set by the parent each frame. Coming out of an
+     * empty state while it is, the next clip cross-fades from the pose still fading instead of replacing it.
+     */
+    private _overlayVisible: boolean = false;
+    /**
+     * A layer's foot-IK weight while it fades out through an empty state: the weight of the clip state it
+     * left, so a roll's "no foot IK" eases back with the fade rather than snapping on at the exit.
+     */
+    private _overlayFadeIkWeight: number = 1;
+    /** Seconds a layer's presence takes to fade in or out: the blend of the transition it last took. */
+    private _presenceFadeSeconds: number = 0.15;
+    /**
+     * The trigger that started what this machine plays: set when a trigger enters a state, kept through
+     * trigger-less transitions (a sequence), cleared back in the entry state. See activeTrigger.
+     */
+    private _activeTrigger: string | null = null;
+    /** Layer states whose clip the model lacks, warned about once each. */
+    private _warnedMissingLayerClip: Set<string> | null = null;
+    /**
+     * Fired transitions whose triggers are lowered once the base AND every layer have evaluated this frame
+     * (see checkTriggers), so a trigger two layers read fires both. Null outside that pass: consume at once.
+     */
+    private _pendingTriggerConsumes: AnimationTransition[] | null = null;
     /** Event markers a slot's child fires — the parent machine's list, since a slot has no machine. */
     private _externalEvents: AnimationEventMarker[] | null = null;
     /** Layers and slots, in the order they apply over the base. */
@@ -848,17 +963,12 @@ export class Animator {
         }
         // A layer's animator starts empty and silent: it plays only what its own states tell it to.
         if (this._isOverlay) return;
-        if (this._skin) {
-            Logger.info(`Animator initialized with ${this._skin.joints.length} joints`, 'Animation');
-            Logger.print('info', ['Joint node indices:', Array.from(this._nodeIndexToJointIndex.keys())], 'Animation');
-        }
+        ANIMATOR_TALLY.add({
+            animators: 1, joints: this._skin?.joints.length ?? 0, animations: animatedModel.animations.length,
+        });
 
         // If model has animations, set the first one as default
         if (animatedModel.animations.length > 0) {
-            Logger.info(`Found ${animatedModel.animations.length} animations`, 'Animation');
-            animatedModel.animations.forEach((anim, i) => {
-                Logger.info(`  Animation ${i}: "${anim.name}" with ${anim.channels.length} channels`, 'Animation');
-            });
             this.playAnimation(0);
         } else {
             Logger.warn('AnimatedModel has no animations', 'Animation');
@@ -875,14 +985,15 @@ export class Animator {
         this._playClip(this._animatedModel.animations[animationIndex], loop, blend);
     }
 
-    // Play a clip object — one of the model's, or a synthesized one such as a pose state's.
-    private _playClip(animation: Animation, loop: boolean, blend: boolean): void {
+    // Play a clip object — one of the model's, or a synthesized one such as a pose state's. With
+    // `sameClipBlend`, restarting the clip already playing cross-fades from where it was instead of jumping.
+    private _playClip(animation: Animation, loop: boolean, blend: boolean, sameClipBlend: boolean = false): void {
         this._overlayEmpty = false;
         // Must NOT test `_playing`: a finished non-looping clip holds its last frame with _playing false,
         // and that is exactly when a machine wants to cross-fade away from it. `_currentAnimation` being
         // null already covers the first play, the only case that must not blend.
         const blendOut = blend && (this._fieldEntries !== null
-            || (!!this._currentAnimation && this._currentAnimation !== animation));
+            || (!!this._currentAnimation && (this._currentAnimation !== animation || sameClipBlend)));
 
         if (blendOut) {
             // Store current animation state for blending
@@ -2137,9 +2248,18 @@ export class Animator {
     // keeps the static weight rather than reading 0.
     private _stateIkWeight(): number {
         // An action that turns IK off (a roll) eases it out as the action fades in, and back as it fades out.
+        // A layer state does the same through its own ikWeight (an Actions layer's roll), by how much of the
+        // layer shows: its weight times its presence.
         let actions = 1;
         for (const o of this._overlays) {
-            if (o.kind === 'slot' && o.action && o.action.ikWeight < 1) actions *= 1 + (o.action.ikWeight - 1) * o.presence;
+            if (o.presence <= 0) continue;
+            if (o.kind === 'slot') {
+                if (o.action && o.action.ikWeight < 1) actions *= 1 + (o.action.ikWeight - 1) * o.presence;
+                continue;
+            }
+            const child = o.animator;
+            const w = child._overlayEmpty ? child._overlayFadeIkWeight : child._stateIkWeightOfState();
+            if (w < 1) actions *= 1 + (w - 1) * o.presence * this._overlayWeight(o);
         }
         return actions * this._stateIkWeightOfState();
     }
@@ -2226,7 +2346,7 @@ export class Animator {
 
         // ---- Pass 1a: where does each foot want to be? -------------------------------------------------
         // Only where it WANTS to be — whether it goes there is pass 1b's job, and that needs every
-        // foot's clearance, so it cannot be decided inside this loop.
+        // foot's animated height, so it cannot be decided inside this loop.
         const plans = this._ikPlans;
         let planCount = 0;
 
@@ -2270,7 +2390,7 @@ export class Animator {
             }
 
             const plan = plans[planCount] ??= { chain, ankle: vec3.create(), target: vec3.create(),
-                                                normal: vec3.create(), weight: 0, along: 0 };
+                                                normal: vec3.create(), weight: 0, along: 0, height: 0 };
             planCount++;
             plan.chain = chain;
             const ankle = mat4.getTranslation(plan.ankle, ankleGlobal);
@@ -2282,24 +2402,27 @@ export class Animator {
             // The ankle sits a foot's height above the sole, or the whole foot sinks through the ground.
             const desired = vec3.scaleAndAdd(plan.target, hitModel, up, tuning.footHeight);
             plan.along = vec3.dot(vec3.sub(IK_TMP, desired, ankle), up);
+            plan.height = vec3.dot(ankle, up);
             plan.weight = next;
         }
 
         // ---- Pass 1b: let go of the feet that are mid-swing --------------------------------------------
-        // `-along` is a foot's CLEARANCE above where it would be planted, measured against the LOWEST
-        // foot: absolutely it cannot distinguish a mid-stride lift from ground lower than the animation
-        // assumed. One foot with a plan is its own reference and keeps the full correction.
+        // A swing is what the ANIMATION lifts a foot by, measured against the lowest animated foot. Never the
+        // foot's clearance above its own ground: across a slope the ground under the two feet differs, and
+        // that difference read as lift — the downhill foot was released and floated, and an uphill swing foot
+        // became the "planted" reference and was pulled down onto the slope. One foot is its own reference.
         let ref = Infinity;
-        for (let i = 0; i < planCount; i++) ref = Math.min(ref, -plans[i].along);
-        // Clamped at 0 so a foot THROUGH the ground cannot lift the reference and release the other leg.
-        ref = planCount ? Math.max(0, ref) : 0;
+        for (let i = 0; i < planCount; i++) ref = Math.min(ref, plans[i].height);
 
         // A released foot must not be solved AT ALL: `solveTwoBone` clamps to `maxReach`, so even an
         // identity solve pulls a straight leg in by a couple of millimetres. Compacted in place.
         let activeCount = 0;
         for (let i = 0; i < planCount; i++) {
             const plan = plans[i];
-            plan.weight *= swingReleaseWeight(-plan.along - ref, tuning.swingRelease);
+            // The release only stops a lifted foot being pulled DOWN. A foot inside the ground is pushed out
+            // of it mid-swing too, or a stride over rising ground clips through it. No jump where `along`
+            // changes sign: the correction there is zero either way.
+            if (plan.along <= 0) plan.weight *= swingReleaseWeight(plan.height - ref, tuning.swingRelease);
             if (plan.weight > 1e-3) {
                 if (activeCount !== i) { plans[i] = plans[activeCount]; plans[activeCount] = plan; }
                 activeCount++;
@@ -2656,6 +2779,7 @@ export class Animator {
         for (const p of this._stateMachine.parameters) {
             if (p.type === 'trigger') this._paramValues.set(p.name, false);
         }
+        this._activeTrigger = null;
         const entry = this._stateMachine.states.find(s => s.isEntry) ?? this._stateMachine.states[0];
         if (entry) this._enterState(entry.name);
         else if (this._isOverlay) { this._currentStateName = null; this._overlayEmpty = true; }
@@ -2666,9 +2790,12 @@ export class Animator {
     // Parameter setters/getters used by scripts to drive the machine.
     public setFloat(name: string, value: number): void { this._paramValues.set(name, value); }
     public setBool(name: string, value: boolean): void { this._paramValues.set(name, value); }
-    /** Fire a momentary trigger; it is consumed when a transition that uses it fires. */
-    public setTrigger(name: string): void { this._paramValues.set(name, true); }
-    public resetTrigger(name: string): void { this._paramValues.set(name, false); }
+    /**
+     * Fire a momentary trigger, by name; it is consumed when the state or transition it starts fires. A
+     * project's scripts are checked against the triggers its animators declare (see TriggerName).
+     */
+    public setTrigger(name: TriggerName): void { this._paramValues.set(name, true); }
+    public resetTrigger(name: TriggerName): void { this._paramValues.set(name, false); }
     public getParam(name: string): number | boolean | undefined { return this._paramValues.get(name); }
 
     // Hand-set values for LINKED ('variable') parameters, which otherwise re-read their source every frame.
@@ -2767,7 +2894,20 @@ export class Animator {
     private _enterState(name: string, blendOverride?: number): void {
         if (!this._stateMachine) return;
         const state = this._stateMachine.states.find(s => s.name === name);
-        const wasEmpty = this._overlayEmpty || !this._currentAnimation;
+        // A layer coming out of an empty state that has already faded away fades back in through its
+        // presence; one still visible (interrupted mid-fade) cross-fades from the pose it is holding, as a
+        // slot does, or the old pose would be swapped for the new clip's first frame at full presence.
+        const wasEmpty = (this._overlayEmpty && !this._overlayVisible) || !this._currentAnimation;
+        if (this._isOverlay) {
+            // Leaving a clip for an empty state keeps that clip's foot-IK weight for the fade-out. Read
+            // before the name changes: it is the state being left that answers.
+            if (!this._overlayEmpty) this._overlayFadeIkWeight = this._stateIkWeightOfState();
+            // The layer's presence fades over THIS transition's blend, whatever cross-fade came before.
+            this._presenceFadeSeconds = Math.max(0, blendOverride ?? this._blendTime);
+            // Only a clip state that asks extracts root travel (armed below); `_extractRoot` is read when a
+            // clip starts, so a clip already playing out under an empty state keeps what it had.
+            this._extractRoot = false;
+        }
         this._noteStateChange(this._currentStateName, name);
         this._currentStateName = name;
         this._prevEventTime = 0;
@@ -2790,9 +2930,15 @@ export class Animator {
             return;
         }
 
-        if (this._isOverlay && (!state || !state.clipName)) {
+        // A layer clip the model does not have plays nothing: say so once, and fade out as an empty state
+        // would rather than keep the previous clip running under this state's name.
+        const missingOnLayer = this._isOverlay && !!state?.clipName
+            && !this._animatedModel?.animations.some(a => a.name === state.clipName);
+        if (missingOnLayer) this._warnMissingLayerClip(state!);
+        if (this._isOverlay && (!state || !state.clipName || missingOnLayer)) {
             // An empty state on a LAYER means "add nothing": fade the layer out, holding its last pose
-            // while it goes, rather than snapping the bones to rest.
+            // while it goes, rather than snapping the bones to rest. The held clip keeps playing out (and
+            // keeps handing over any root travel it extracts) under the fade, as an action's does.
             this._overlayEmpty = true;
             if (blendOverride !== undefined) this._activeBlendTime = Math.max(0, blendOverride);
             return;
@@ -2810,15 +2956,40 @@ export class Animator {
             this._setTPose();
             return;
         }
-        // A layer coming out of an empty state fades in through its presence; cross-fading from whatever
-        // stale clip it last held would replay that clip first.
-        this.playAnimationByName(state.clipName, state.loop, !(this._isOverlay && wasEmpty));
+        if (this._isOverlay) {
+            // Root travel is extracted per state (AnimationState.extractRootMotion), armed as the clip starts.
+            this._extractRoot = !!state.extractRootMotion;
+            vec3.set(this._rootDelta, 0, 0, 0);
+            // A layer coming out of an empty state fades in through its presence; cross-fading from whatever
+            // stale clip it last held would replay that clip first. Re-entering the SAME clip (a second hit
+            // restarting the flinch, a combo going back to its first swing) cross-fades from where it was.
+            const clip = this._animatedModel!.animations.find(a => a.name === state.clipName)!;
+            this._playClip(clip, state.loop, !wasEmpty, true);
+        } else {
+            this.playAnimationByName(state.clipName, state.loop, true);
+        }
         // playAnimation just armed the blend with the animator-wide default; the transition gets the last word.
         if (blendOverride !== undefined) this._activeBlendTime = Math.max(0, blendOverride);
+        if (typeof state.startTime === 'number' && state.startTime > 0 && this._currentAnimation) {
+            // Join the clip part-way (one segment of a combo clip): the clock starts there, and neither the
+            // events nor the root travel before it count -- both are read from the previous frame's time.
+            this._currentTime = Math.min(state.startTime, this._getAnimationDuration());
+            this._prevEventTime = this._currentTime;
+        }
         this._loopLimit = Math.max(0, Math.floor(state.loopCount ?? 0));
         this._loopsPlayed = 0;
         this._speed = state.speed ?? 1.0;
         this._applyStateSpeed(state);
+    }
+
+    private _warnMissingLayerClip(state: AnimationState): void {
+        this._warnedMissingLayerClip ??= new Set();
+        if (this._warnedMissingLayerClip.has(state.name)) return;
+        this._warnedMissingLayerClip.add(state.name);
+        Logger.warn(
+            `Animation state "${state.name}" plays "${state.clipName}", which this model does not have, so the `
+            + `layer adds nothing while it is there. Pick a clip the character has, or link its skeleton's clips.`,
+            'Animation');
     }
 
     // Report a Speed parameter that has gone negative, once per state. There is no reverse playback, so
@@ -2836,17 +3007,23 @@ export class Animator {
     }
 
     // Drive the playback rate from the parameter a state names, on entry and every frame after. Falls
-    // back to the state's fixed `speed`.
+    // back to the state's fixed `speed`; `speedScaleParam` multiplies either.
     private _applyStateSpeed(state: AnimationState | undefined): void {
-        if (!state?.speedParam) return;
-        const v = this._paramValues.get(state.speedParam);
+        if (!state?.speedParam && !state?.speedScaleParam) return;
+        let rate = state.speed ?? 1.0;
+        const v = state.speedParam ? this._paramValues.get(state.speedParam) : undefined;
         // Parameter renamed or deleted: keep the fixed speed. Reading it as 0 would freeze the clip.
-        if (v === undefined) return;
-        // A bool reads as 1/0 so a flag can halt motion. The setter's clamp is mirrored here, since this
-        // bypasses it — there is no reverse playback.
-        const raw = typeof v === 'number' ? v : (v ? 1 : 0);
-        if (raw < 0) this._warnNegativeSpeed(state, raw);
-        this._speed = Math.max(0, raw);
+        if (v === undefined && !state.speedScaleParam) return;
+        if (v !== undefined) {
+            // A bool reads as 1/0 so a flag can halt motion. The setter's clamp is mirrored here, since this
+            // bypasses it — there is no reverse playback.
+            const raw = typeof v === 'number' ? v : (v ? 1 : 0);
+            if (raw < 0) this._warnNegativeSpeed(state, raw);
+            rate = raw;
+        }
+        const scale = state.speedScaleParam ? this._paramValues.get(state.speedScaleParam) : undefined;
+        if (typeof scale === 'number' && Number.isFinite(scale)) rate *= scale;
+        this._speed = Math.max(0, rate);
     }
 
     // This node or the nearest ancestor with a rigid body — whatever is actually being moved. An
@@ -2946,28 +3123,53 @@ export class Animator {
         // Re-read a parameter-driven playback rate: the state is already entered, so nothing else would.
         this._applyStateSpeed(sm.states.find(s => s.name === this._currentStateName));
 
+        // In this order, the first that holds fires: Any State transitions, then the triggers states are
+        // entered by directly, then the current state's own way out — so a hit or a death interrupts
+        // whatever the state was about to do.
         const duration = this._getAnimationDuration();
-        for (const t of sm.transitions) {
-            if (t.from !== '*' && t.from !== this._currentStateName) continue;
-            if (t.to === this._currentStateName) continue;
-
-            // Before the conditions, so a trigger is not consumed by a transition that cannot fire yet.
-            if (t.minDwell && this._stateTime < t.minDwell) continue;
-
-            // Exit-time gate: wait until the clip reaches the normalized exit time.
-            if (t.hasExitTime) {
-                const exit = (t.exitTime ?? 1.0) * duration;
-                if (this._currentTime < exit) continue;
+        for (const t of sm.transitions) if (t.from === '*' && this._tryTransition(t, duration)) return;
+        for (const s of sm.states) {
+            for (const entry of s.triggers ?? []) {
+                if (!entry.trigger || this._paramValues.get(entry.trigger) !== true) continue;
+                if (s.name === this._currentStateName && entry.restart === false) continue;
+                this._takeTransition({ from: '*', to: s.name, conditions: [], condition: { op: 'and', children: [{ param: entry.trigger, op: 'trigger' }] } },
+                    entry.trigger, entry.blendTime);
+                return;
             }
-
-            if (!this._transitionMet(t)) continue;
-
-            // EVERY trigger in the tree is consumed, including under an OR branch that did not
-            // contribute: one left raised would fire some other transition next frame.
-            consumeTriggers(this._conditionCtx, t.condition, t.conditions);
-            this._enterState(t.to, t.blendTime);
-            return;
         }
+        for (const t of sm.transitions) if (t.from === this._currentStateName && this._tryTransition(t, duration)) return;
+    }
+
+    // Fire `t` if it can: its source, its dwell, its exit time and its conditions all allow it.
+    private _tryTransition(t: AnimationTransition, duration: number): boolean {
+        if (t.to === this._currentStateName && !(t.from === '*' && t.canTransitionToSelf)) return false;
+
+        // Before the conditions, so a trigger is not consumed by a transition that cannot fire yet.
+        if (t.minDwell && this._stateTime < t.minDwell) return false;
+
+        // Exit-time gate: wait until the clip reaches the normalized exit time.
+        if (t.hasExitTime) {
+            const exit = (t.exitTime ?? 1.0) * duration;
+            if (this._currentTime < exit) return false;
+        }
+
+        if (!this._transitionMet(t)) return false;
+        this._takeTransition(t, firstTriggerOf(t), t.blendTime);
+        return true;
+    }
+
+    // Take a transition (or a state's own trigger, as one): consume its triggers, note which trigger
+    // started what plays now, and enter its state.
+    private _takeTransition(t: AnimationTransition, trigger: string | null, blendTime: number | undefined): void {
+        // EVERY trigger in the tree is consumed, including under an OR branch that did not contribute: one
+        // left raised would fire some other transition next frame. Inside checkTriggers that waits until
+        // every layer has evaluated, so they all see this frame's triggers.
+        if (this._pendingTriggerConsumes) this._pendingTriggerConsumes.push(t);
+        else consumeTriggers(this._conditionCtx, t.condition, t.conditions);
+        // A trigger-less transition (a sheathe going on into the draw) carries the one that started it.
+        if (trigger) this._activeTrigger = trigger;
+        this._enterState(t.to, blendTime);
+        if (this._stateMachine?.states.find(s => s.name === t.to)?.isEntry) this._activeTrigger = null;
     }
 
     /**
@@ -3051,6 +3253,7 @@ export class Animator {
             // A layer that starts on a clip is simply there from the first frame; fading it in would show
             // the base for a beat on every scene load.
             const present = child._overlayEmpty || !child._currentAnimation ? 0 : 1;
+            child._overlayVisible = present > 0;
             this._overlays.push({
                 kind: 'layer', name: layer.name, animator: child,
                 blend: layer.blend ?? 'override',
@@ -3100,7 +3303,7 @@ export class Animator {
             const child = o.animator;
             if (o.kind === 'layer') {
                 o.presenceTarget = child._overlayEmpty || (!child._currentAnimation && !child._fieldEntries) ? 0 : 1;
-                o.fadeSeconds = child._activeBlendTime;
+                o.fadeSeconds = child._presenceFadeSeconds;
             }
             child.update(deltaTime);
 
@@ -3131,6 +3334,8 @@ export class Animator {
                 o.action = null;
                 action.resolve();
             }
+            // Read by the child's next state change (checkTriggers runs before update).
+            child._overlayVisible = o.presence > 0;
         }
     }
 
@@ -3163,6 +3368,16 @@ export class Animator {
         return mask;
     }
 
+    // An overlay's weight this frame: its parameter's when it names one, else its own.
+    private _overlayWeight(o: Overlay): number {
+        if (o.weightParam) {
+            const v = this._paramValues.get(o.weightParam);
+            if (typeof v === 'number') return clamp(v, 0, 1);
+            if (typeof v === 'boolean') return v ? 1 : 0;
+        }
+        return o.weight;
+    }
+
     // Blend every overlay onto a bone's base local, in order.
     private _applyOverlays(nodeIndex: number, base: mat4): mat4 {
         let local = base;
@@ -3171,13 +3386,7 @@ export class Animator {
             const mask = this._overlayMask(o);
             const maskWeight = mask ? (mask.get(nodeIndex) ?? 0) : 1;
             if (maskWeight <= 0) continue;
-            let weight = o.weight;
-            if (o.weightParam) {
-                const v = this._paramValues.get(o.weightParam);
-                if (typeof v === 'number') weight = clamp(v, 0, 1);
-                else if (typeof v === 'boolean') weight = v ? 1 : 0;
-            }
-            const w = weight * maskWeight * o.presence;
+            const w = this._overlayWeight(o) * maskWeight * o.presence;
             if (w <= 0) continue;
             const layer = o.animator._sourceLocal(nodeIndex);
             // A layer that does not animate this bone leaves it to the layers beneath.
@@ -3309,13 +3518,13 @@ export class Animator {
     }
 
     /**
-     * The world-space root travel the playing actions extracted since the last call (see
-     * AnimationActionOptions.rootMotion), and reset. Divide by the frame time for a velocity.
+     * The world-space root travel extracted since the last call — by playing actions
+     * (AnimationActionOptions.rootMotion) and by layer states that extract it
+     * (AnimationState.extractRootMotion) — and reset. Divide by the frame time for a velocity.
      */
     public consumeRootMotion(out: vec3 = vec3.create()): vec3 {
         vec3.set(out, 0, 0, 0);
         for (const o of this._overlays) {
-            if (o.kind !== 'slot') continue;
             vec3.add(out, out, o.animator._rootDelta);
             vec3.set(o.animator._rootDelta, 0, 0, 0);
         }
@@ -3352,6 +3561,111 @@ export class Animator {
     /** The state a layer is in, or null. The base layer's is {@link currentStateName}. */
     public layerStateName(layer: string): string | null {
         return this._overlays.find(x => x.kind === 'layer' && x.name === layer)?.animator.currentStateName ?? null;
+    }
+
+    /**
+     * Clip seconds into the clip a layer's current state plays (a state with a `startTime` begins there),
+     * or 0 when the layer is unknown or plays nothing. A non-looping clip stops at its duration, so
+     * `layerStateTime(l) >= layerStateDuration(l)` is "the clip has reached its end".
+     */
+    public layerStateTime(layer: string): number {
+        const o = this._overlays.find(x => x.kind === 'layer' && x.name === layer);
+        return o && !o.animator._overlayEmpty && o.animator._currentAnimation ? o.animator._currentTime : 0;
+    }
+
+    /** Length in clip seconds of the clip a layer's current state plays, or 0 (see layerStateTime). */
+    public layerStateDuration(layer: string): number {
+        const o = this._overlays.find(x => x.kind === 'layer' && x.name === layer);
+        return o && !o.animator._overlayEmpty && o.animator._currentAnimation ? o.animator._getAnimationDuration() : 0;
+    }
+
+    /**
+     * The trigger whose state `layer` (the base when omitted or null) is playing: the one that entered it,
+     * still holding through any trigger-less transition after it (a sheathe going on into the draw), and
+     * null once the layer is back in its entry state. A script that fired `Roll` knows its roll is over
+     * when this stops reading `Roll` — without naming any state.
+     */
+    public activeTrigger(layer?: string | null): string | null {
+        if (!layer) return this._activeTrigger;
+        return this._overlays.find(x => x.kind === 'layer' && x.name === layer)?.animator._activeTrigger ?? null;
+    }
+
+    /**
+     * What firing `trigger` plays (see {@link AnimationTriggerInfo}), or null when nothing reads it. The
+     * state it enters is looked for from the top layer down to the base: a state entered by that trigger
+     * directly, else an Any State transition on it, else a transition from some state on it.
+     */
+    public triggerInfo(trigger: string): AnimationTriggerInfo | null {
+        const sm = this._stateMachine;
+        if (!sm || !trigger) return null;
+        const machines: { layer: string | null; states: AnimationState[]; transitions: AnimationTransition[] }[] = [
+            ...[...(sm.layers ?? [])].reverse().map(l => ({ layer: l.name, states: l.states, transitions: l.transitions })),
+            { layer: null, states: sm.states, transitions: sm.transitions },
+        ];
+        const reads = (t: AnimationTransition) => {
+            let hit = false;
+            forEachCondition(t.condition, t.conditions, c => { if (c.op === 'trigger' && c.param === trigger) hit = true; });
+            return hit;
+        };
+        for (const m of machines) {
+            let to = m.states.find(s => s.triggers?.some(e => e.trigger === trigger))?.name;
+            let fromAnywhere = !!to;
+            if (!to) {
+                to = m.transitions.find(t => t.from === '*' && reads(t))?.to;
+                fromAnywhere = !!to;
+            }
+            if (!to) to = m.transitions.find(t => t.from !== '*' && reads(t))?.to;
+            const state = to ? m.states.find(s => s.name === to) : undefined;
+            if (!state) continue;
+            const clip = state.clipName && !state.field && !state.pose ? state.clipName : '';
+            return {
+                layer: m.layer, state: state.name, clip, clipLength: this._clipLengthOf(clip),
+                speed: this._rateOf(state), startTime: Math.max(0, state.startTime ?? 0),
+                seconds: this._secondsOf(state, m.states, m.transitions, new Set()),
+                extractsRootMotion: !!state.extractRootMotion, fromAnywhere,
+            };
+        }
+        return null;
+    }
+
+    private _clipLengthOf(name: string): number {
+        const clip = name ? this._animatedModel?.animations.find(a => a.name === name) : undefined;
+        if (!clip) return 0;
+        let end = 0;
+        for (const s of clip.samplers) if (s.input.length) end = Math.max(end, s.input[s.input.length - 1]);
+        return end;
+    }
+
+    // A state's playback rate right now, as _applyStateSpeed would set it.
+    private _rateOf(state: AnimationState): number {
+        let rate = state.speed ?? 1;
+        const v = state.speedParam ? this._paramValues.get(state.speedParam) : undefined;
+        if (v !== undefined) rate = typeof v === 'number' ? v : (v ? 1 : 0);
+        const scale = state.speedScaleParam ? this._paramValues.get(state.speedScaleParam) : undefined;
+        if (typeof scale === 'number' && Number.isFinite(scale)) rate *= scale;
+        return Math.max(0, rate);
+    }
+
+    // Real seconds `state` plays before its layer rests or waits on another trigger (AnimationTriggerInfo.seconds).
+    private _secondsOf(state: AnimationState, states: AnimationState[], transitions: AnimationTransition[], seen: Set<string>): number {
+        if (seen.has(state.name)) return 0;
+        seen.add(state.name);
+        const clip = state.clipName && !state.field && !state.pose ? state.clipName : '';
+        const length = this._clipLengthOf(clip);
+        if (!length || state.loop) return 0;
+        const rate = Math.max(0.05, this._rateOf(state));
+        const start = Math.max(0, state.startTime ?? 0);
+        const isEntry = (name: string) => !!states.find(s => s.name === name)?.isEntry;
+        const out = transitions.filter(t => t.from === state.name && t.to !== state.name && t.hasExitTime && !isEntry(t.to));
+        // A hand-over on a trigger ends this state's own part there (a combo's next segment waits for a press).
+        const onTrigger = out.filter(t => firstTriggerOf(t)).map(t => (t.exitTime ?? 1) * length);
+        const end = onTrigger.length ? Math.min(length, ...onTrigger) : length;
+        const own = Math.max(0, end - start) / rate;
+        if (onTrigger.length) return own;
+        // One that goes on by itself (sheathe, then draw) lasts as long as what it goes on into, too.
+        const next = out.find(t => !firstTriggerOf(t) && !t.condition?.children?.length && !t.conditions?.length);
+        const after = next ? states.find(s => s.name === next.to) : undefined;
+        return own + (after ? this._secondsOf(after, states, transitions, seen) : 0);
     }
 
     /** Names of the layers above the base, in order. */
@@ -3483,9 +3797,23 @@ export class Animator {
 
         // The state machine, when present, is the source of truth for what plays.
         if (this._stateMachine) {
-            this._evaluateStateMachine();
-            // Layers after the base, so they read parameters the base's variable bindings just refreshed.
-            for (const o of this._overlays) if (o.kind === 'layer') o.animator._evaluateStateMachine();
+            // A fired transition's triggers are lowered only after every layer has had its look, so a
+            // trigger the base and a layer both read (Died) fires both rather than whichever comes first.
+            const fired: AnimationTransition[] = [];
+            this._pendingTriggerConsumes = fired;
+            try {
+                this._evaluateStateMachine();
+                // Layers after the base, so they read parameters the base's variable bindings just refreshed.
+                for (const o of this._overlays) {
+                    if (o.kind !== 'layer') continue;
+                    o.animator._pendingTriggerConsumes = fired;
+                    try { o.animator._evaluateStateMachine(); }
+                    finally { o.animator._pendingTriggerConsumes = null; }
+                }
+            } finally {
+                this._pendingTriggerConsumes = null;
+            }
+            for (const t of fired) consumeTriggers(this._conditionCtx, t.condition, t.conditions);
             return;
         }
 

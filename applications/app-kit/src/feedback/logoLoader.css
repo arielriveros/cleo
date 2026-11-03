@@ -1,0 +1,97 @@
+/* The Cleo logo as a progress bar (LogoLoader.tsx).
+
+   Three layers in one box, the size of the dim logo, which is the only one in flow:
+   - .cleo-logo-glow: the "bar behind the logo". A gradient in the editor's colours, cut to the logo's
+     silhouette (--cleo-logo is the logo's url()), a touch larger than the logo and blurred on the wrapper,
+     so it spills past the edges as a faint halo. Like the bar it replaces, the gradient spans only what
+     has loaded, brightest at the leading edge. The silhouette is a mask on <i> and the progress window a
+     mask on its parent: nested, so neither needs mask-composite, and the blur on the outermost wrapper
+     sees the result.
+   - .cleo-logo-dim: the whole logo, dimmed, so it reads as the empty bar.
+   - the lit logo, inside a .cleo-logo-window, at full brightness.
+   Both windows show the same span: up to --cleo-progress (determinate), or a band at --cleo-sweep that
+   crosses the logo (.cleo-logo-sweep, indeterminate). Each app's index.html repeats this as literal CSS
+   for its pre-bundle splash; keep them looking alike. */
+
+@property --cleo-progress {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
+@property --cleo-sweep {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: -25%;
+}
+
+.cleo-logo-loader {
+  position: relative;
+  isolation: isolate;
+  transition: --cleo-progress 300ms ease-out;
+}
+
+.cleo-logo-loader .cleo-logo-dim {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: auto;
+  opacity: 0.3;
+}
+
+.cleo-logo-loader .cleo-logo-window {
+  position: absolute;
+  inset: 0;
+  /* A soft leading edge, scaled so 0% shows nothing and 100% shows everything. */
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(var(--cleo-progress) * 1.1 - 10%), transparent calc(var(--cleo-progress) * 1.1));
+          mask-image: linear-gradient(90deg, #000 calc(var(--cleo-progress) * 1.1 - 10%), transparent calc(var(--cleo-progress) * 1.1));
+}
+
+.cleo-logo-loader .cleo-logo-window > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.cleo-logo-loader .cleo-logo-glow {
+  position: absolute;
+  inset: 0;
+  transform: scale(1.05);
+  filter: blur(12px);
+  animation: cleo-logo-breathe 2.4s ease-in-out infinite;
+}
+
+.cleo-logo-loader .cleo-logo-glow i {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgb(var(--border)), rgb(var(--primary)) 55%, #8fb4ff) no-repeat;
+  background-size: calc(var(--cleo-progress) * 1.1) 100%;
+  -webkit-mask: var(--cleo-logo) center / contain no-repeat;
+          mask: var(--cleo-logo) center / contain no-repeat;
+}
+
+.cleo-logo-loader.cleo-logo-sweep .cleo-logo-window {
+  -webkit-mask-image: linear-gradient(90deg, transparent calc(var(--cleo-sweep) - 25%), #000 var(--cleo-sweep), transparent calc(var(--cleo-sweep) + 25%));
+          mask-image: linear-gradient(90deg, transparent calc(var(--cleo-sweep) - 25%), #000 var(--cleo-sweep), transparent calc(var(--cleo-sweep) + 25%));
+  animation: cleo-logo-sweep 1.4s ease-in-out infinite;
+}
+
+.cleo-logo-loader.cleo-logo-sweep .cleo-logo-glow {
+  opacity: 0.85;
+  animation: none;
+}
+
+.cleo-logo-loader.cleo-logo-sweep .cleo-logo-glow i {
+  background-image: linear-gradient(90deg, rgb(var(--primary)), #8fb4ff);
+  background-size: 100% 100%;
+}
+
+@keyframes cleo-logo-sweep {
+  from { --cleo-sweep: -25%; }
+  to { --cleo-sweep: 125%; }
+}
+
+@keyframes cleo-logo-breathe {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}

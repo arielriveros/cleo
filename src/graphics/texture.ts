@@ -1,5 +1,6 @@
 import { bytesToDataUrl } from "../core/base64";
 import { Logger } from "../core/logger";
+import { LogTally, plural } from "../core/logTally";
 import { resolveTextureFormat } from "./rhi/textureFormat";
 import { glTextureFormat, glTextureTarget, glAddressMode, glMinFilter } from "./rhi/webgl2/glEnums";
 import { device } from "./rhi/deviceHandle";
@@ -27,6 +28,9 @@ function reportFloatDowngrade(requested: TextureFormat, actual: TextureFormat): 
         'Runtime',
     );
 }
+
+// One line per load, not one per texture: a project creates hundreds.
+const TEXTURE_TALLY = new LogTally('Texture', ['textures'], c => `Created ${plural(c.textures, 'texture')}`);
 
 /** The three wrap modes, as `TextureConfig` spells them. */
 export type WrapMode = 'clamp' | 'repeat' | 'mirror';
@@ -297,23 +301,14 @@ export class Texture {
 
         if (this._gpu.dimension === '2d') {
             const img = data as HTMLImageElement | null;
-            if (img) {
-                Logger.print('info', ['Creating texture with image:', {
-                    width: img.width,
-                    height: img.height,
-                    complete: img.complete,
-                    naturalWidth: img.naturalWidth,
-                    naturalHeight: img.naturalHeight,
-                    src: img.src?.substring(0, 50) + '...'
-                }], 'Texture');
-
-                if (!img.complete || img.naturalWidth === 0) {
-                    Logger.error('Image not properly loaded before texture creation', 'Texture');
-                    this._finishUpload();
-                    return;
-                }
+            if (img && (!img.complete || img.naturalWidth === 0)) {
+                Logger.error('Image not properly loaded before texture creation', 'Texture');
+                this._finishUpload();
+                return;
             }
             this._gpu.upload2D(img, this._width, this._height, this._mipMap);
+            // Image textures only: a null upload is a render target, re-allocated on every resize.
+            if (img) TEXTURE_TALLY.add({ textures: 1 });
         } else {
             // Null data on a cubemap allocates six empty faces; a no-op would leave it incomplete.
             const faces = data as CubemapFaces | null;

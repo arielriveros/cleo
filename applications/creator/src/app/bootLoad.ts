@@ -12,6 +12,12 @@ export const BOOT_STEPS = [
   { id: 'frame', label: 'First frame', weight: 1 },
 ];
 
+/**
+ * The loading screen's logo: public/brand/logo.png, the black-and-white logo (tools/brandIcons.mjs), the
+ * same file the pre-bundle splash in index.html shows. Under the Creator's base, so /creator/brand/logo.png.
+ */
+export const LOGO = `${import.meta.env.BASE_URL}brand/logo.png`;
+
 let boot: LoadHandle | null = null;
 
 /** The startup load, begun on first use. */

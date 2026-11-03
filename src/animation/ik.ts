@@ -46,8 +46,9 @@ export interface IkRigTuning {
     /** How far below the animated foot the ray reaches. Beyond this the foot is treated as airborne. */
     traceDown: number;
     /**
-     * How far a foot must rise above the most-planted foot before IK releases it, in model units — the
-     * swing/stance split. A foot at or below its ground keeps full correction; 0 disables the release.
+     * How far the ANIMATION must lift a foot above the lowest foot before IK releases it, in model units —
+     * the swing/stance split. Measured in the clip, not against the ground, so a slope is never mistaken for a
+     * stride. A foot inside its ground is pushed out even mid-swing; 0 disables the release.
      */
     swingRelease: number;
     /** Most the pelvis may be lowered, in model units. Stops a hole in the ground folding the character up. */
@@ -62,8 +63,9 @@ export const IK_DEFAULTS: IkRigTuning = {
     footHeight: 0.1,
     traceUp: 0.5,
     traceDown: 0.6,
-    // A full human stride lifts the ankle about this far, so a standing or idling character (where both feet
-    // sit at the same height) is untouched and only a real swing releases.
+    // A full human stride lifts the ankle about this far, so a standing or idling character (where the clip
+    // keeps both feet at the same height, whatever the ground under them does) is untouched and only a real
+    // swing releases.
     swingRelease: 0.2,
     maxHipDrop: 0.5,
     maxSlopeDeg: 45,

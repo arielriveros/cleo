@@ -57,6 +57,8 @@ import { AiBrainAsset, AiBrainKind, buildAiBrainAsset, reembedBrains, detachBrai
 import { ParticleSystemAsset, buildParticleSystemAsset, reembedParticleSystems, detachParticleSystem } from "../utils/particleSystems";
 import type { AnimControllerAsset } from "../utils/animationControllers";
 import { instantiateController, reembedMachine, pickControllerForRig, machineIsEmpty, buildControllerAsset } from "../utils/animationControllers";
+import { machinesInNodeJson, projectTypesDeclaration, triggerNamesOf } from "../utils/projectTriggers";
+import { setProjectTypes } from "@cleo/app-kit/code/projectTypes";
 import type { BoneMaskAsset } from "../utils/boneMasks";
 import type { PoseAsset } from "../utils/poseAssets";
 import type { ControllerNode, ParticleSystemNode } from "cleo";
@@ -1769,6 +1771,27 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
   };
   useEffect(() => { reembedLiveMachines(); }, [animControllers, boneMasks, poseAssets]);
+
+  // The trigger names the project's animators declare, published for the script editors to check scripts
+  // against (utils/projectTriggers.ts): every animator asset's, every template's embedded machines', and
+  // the live scenes' — a character may run a machine of its own. A scene edit re-reads them after a pause.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const publish = () => {
+      timer = null;
+      const machines: (AnimControllerAsset['machine'] | null)[] = animControllersRef.current.map(c => c.machine);
+      for (const t of templatesRef.current) machines.push(...machinesInNodeJson(t.nodeJson));
+      for (const scene of liveScenes()) {
+        for (const n of Array.from(scene?.nodes ?? [])) if (n instanceof ModelNode && n.animator) machines.push(n.animator.getStateMachine());
+      }
+      setProjectTypes(projectTypesDeclaration(triggerNamesOf(machines)));
+    };
+    const later = () => { timer ??= setTimeout(publish, 1000); };
+    publish();
+    const emitter = eventEmitter.current;
+    emitter.on('SCENE_CHANGED', later);
+    return () => { if (timer) clearTimeout(timer); emitter.off('SCENE_CHANGED', later); };
+  }, [animControllers, templates]);
 
   // Clips resolve `poseOffset` edits against pose assets too, so a pose edit must re-resolve every model
   // on the rig it belongs to — exactly what a rig edit does.
@@ -6275,6 +6298,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         CleoEngine.authoringMode = false;
         setIsPlayMode(true);
         setIsSimulating(simulate);
+        // The game swallows the browser's default for the keys it binds; Simulate is the editor's, so
+        // nothing is. Set here and undone on 'stop' — left on, every field in the editor lost W A S D Q E,
+        // Enter, Escape and the arrows for the rest of the session after the first Play.
+        InputSystem.instance.preventDefault = !simulate;
         if (simulate) {
           // Nobody is possessed: the editor camera keeps the keyboard and mouse, the game's controls
           // stay down (so the player character just stands there), and a click never grabs the pointer.
@@ -6340,6 +6367,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           instanceRef.current.renderer.setPostProcessingAllowed(
             TAB_RUNS_POST_PROCESSING[activeTabKindRef.current]);
         }
+        InputSystem.instance.preventDefault = false;
         InputSystem.instance.pointerLockOnClick = false;
         InputSystem.instance.releasePointerLock();
         escapeSubRef.current?.();
@@ -6579,7 +6607,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!instance) return;
     // The two sessions are exclusive: switching between Play and Simulate goes through Stop.
     if (startedRef.current && isSimulatingRef.current !== simulate) return;
-    instance.input.preventDefault = !simulate;
     if (startedRef.current) { eventEmitter.current.emit('SET_PLAY_STATE', simulate ? 'simulate' : 'play'); return; }
 
     // Play always runs the game scene, from wherever the user happens to be; Stop brings them back.

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import type { DockviewApi, IDockviewPanelProps } from 'dockview-react';
+import { isTextEntryEvent } from 'cleo';
 import { DockShell } from '@cleo/app-kit/layout/DockShell';
 import ConsolePanel from '@cleo/app-kit/feedback/ConsolePanel';
 import { ViewportHost } from '@cleo/app-kit/engine/ViewportHost';
@@ -116,8 +117,7 @@ export function CreatorWorkspace(props: CreatorWorkspaceProps) {
   keys.current = { ...(props.hotkeys ?? {}), ...(props.onFrame ? { f: props.onFrame } : {}) };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (e.ctrlKey || e.metaKey || e.altKey || t?.closest?.('input, textarea, select, [contenteditable]')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || isTextEntryEvent(e)) return;
       const run = keys.current[e.key.toLowerCase()];
       if (!run) return;
       run();

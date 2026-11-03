@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { isTextEntryEvent } from "cleo";
 import MenuBar from "./MenuBar";
 import TabBar from "./TabBar";
 import WorkspaceBar from "./characterAnimation/WorkspaceBar";
@@ -60,10 +61,7 @@ function useUndoShortcuts() {
       if (!(e.ctrlKey || e.metaKey)) return;
       const key = e.key.toLowerCase();
       if (key !== 'z' && key !== 'y') return;
-      const target = e.target as HTMLElement | null;
-      if (target && (target.isContentEditable
-        || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)
-        || target.closest('.monaco-editor'))) return;
+      if (isTextEntryEvent(e)) return;
       e.preventDefault();
       if (key === 'y' || e.shiftKey) redo();
       else undo();

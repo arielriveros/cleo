@@ -39,6 +39,15 @@ export interface GraphNodeModel {
   id: string
   x: number
   y: number
+  /** The title, when it is not the id (an "Any State" node whose id is `*`). */
+  label?: string
+  /** Transitions only LEAVE this node: no incoming handle (the "Any State" node). */
+  sourceOnly?: boolean
+  /** False keeps Delete from removing the node (its links still can be). Default true. */
+  deletable?: boolean
+  /** Small tags under the title — the triggers that enter a state directly. */
+  chips?: string[]
+  chipsTitle?: string
   /** Drawn with the entry marker and a distinct border. Exactly one node should carry it. */
   isEntry?: boolean
   /** The line under the title: what this state DOES. */
@@ -120,6 +129,9 @@ interface NodeData extends Record<string, unknown> {
   isEntry: boolean
   active: boolean
   kind: GraphNodeKind
+  sourceOnly: boolean
+  chips: string[]
+  chipsTitle?: string
 }
 
 /** Body tint per node kind. Border colour still comes from selection/active/entry, which outrank it. */
@@ -143,7 +155,7 @@ function GraphNode({ data, selected }: NodeProps) {
     : 'border-control-hover'
   return (
     <div className={`rounded border-2 ${border} ${KIND_CLASS[d.kind]} text-fg shadow-panel`} style={{ width: NODE_W }}>
-      <Handle type='target' position={Position.Left} className='!bg-primary !w-2 !h-2' />
+      {!d.sourceOnly && <Handle type='target' position={Position.Left} className='!bg-primary !w-2 !h-2' />}
       <div className='px-2 py-1 border-b border-border flex items-center gap-1'>
         {d.isEntry && <span className='text-ui-2xs px-1 rounded bg-success text-fg' title='Entry state'>▶</span>}
         <span className='text-ui font-semibold truncate flex-1' title={d.label}>{d.label}</span>
@@ -157,6 +169,11 @@ function GraphNode({ data, selected }: NodeProps) {
           <span className={`shrink-0 ${TONE_CLASS[d.badgeTone]}`} title={d.badgeTitle}>{d.badge}</span>
         )}
       </div>
+      {d.chips.length > 0 && (
+        <div className='px-2 pb-1 flex flex-wrap gap-1' title={d.chipsTitle}>
+          {d.chips.map(c => <span key={c} className='text-ui-2xs px-1 rounded bg-primary/25 text-fg truncate max-w-full'>{c}</span>)}
+        </div>
+      )}
       <Handle type='source' position={Position.Right} className='!bg-primary !w-2 !h-2' />
     </div>
   )
@@ -189,8 +206,9 @@ function Flow(props: MachineGraphProps) {
       type: 'state',
       position: { x: n.x, y: n.y },
       selected: selectedNode === n.id,
+      deletable: n.deletable ?? true,
       data: {
-        label: n.id,
+        label: n.label ?? n.id,
         subtitle: n.subtitle ?? '',
         subtitleMissing: !!n.subtitleMissing,
         glyph: n.glyph,
@@ -201,6 +219,9 @@ function Flow(props: MachineGraphProps) {
         isEntry: !!n.isEntry,
         active: n.id === activeId,
         kind: n.kind ?? 'default',
+        sourceOnly: !!n.sourceOnly,
+        chips: n.chips ?? [],
+        chipsTitle: n.chipsTitle,
       } as NodeData,
     })))
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -149,6 +149,10 @@ InputSystem.resetState(): void
 
 `isKeyDown` is an escape hatch for debug shortcuts. Anything a player will use should be an action.
 
+A key typed into a text field — an input in the game's own UI — is not game input: no action and no
+`isKeyDown` sees it, and `preventDefault` never swallows it, so the field keeps every letter. Clicking the
+game view takes the keyboard back from the field.
+
 ## See also
 
 [Input bindings](../reference/input-bindings.md) · [Input (editor)](../editor/input.md) · [Characters and controllers](characters-and-controllers.md)

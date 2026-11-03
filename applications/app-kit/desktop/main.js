@@ -28,6 +28,12 @@ const HOSTED_APP = {
 
 // --- Editor window -----------------------------------------------------------------------------
 
+// Window icons (macOS ignores these and uses the bundle's): the colour logo for the editor, the black-and-
+// white one for Creator windows, as their favicons. Made by tools/brandIcons.mjs; package.json packs
+// icons/ into the app, and electron-builder builds the installer and executable icons from the same files.
+const APP_ICON = path.join(__dirname, 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+const CREATOR_ICON = path.join(__dirname, 'icons', 'icon-creator.png');
+
 // The built editor references assets by root-absolute URLs (e.g. "/assets/...") that only resolve
 // correctly when served from an origin root. Under file:// those point at the drive root, so we
 // serve the editor's dist/ over a custom "app://" scheme where "/assets/..." maps to dist/assets/...
@@ -158,6 +164,7 @@ function openCreatorWindows(win) {
         action: 'allow',
         overrideBrowserWindowOptions: {
           width: 1600, height: 900, backgroundColor: '#252525', autoHideMenuBar: true,
+          icon: parsed.pathname.startsWith('/creator') ? CREATOR_ICON : APP_ICON,
           webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
         },
       };
@@ -174,6 +181,7 @@ function createWindow() {
     width: 1600,
     height: 900,
     backgroundColor: '#252525',
+    icon: APP_ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

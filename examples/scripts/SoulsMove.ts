@@ -1,5 +1,5 @@
 import { Node } from 'cleo'
-import type { ClipName, NodeName } from 'cleo'
+import type { NodeName, TriggerName } from 'cleo'
 
 /**
  * Hollow Keep — one attack of a weapon's moveset. Attach to a plain child node of a SoulsWeapon; the
@@ -16,22 +16,26 @@ import type { ClipName, NodeName } from 'cleo'
  *   recover   from here a buffered roll or drink may cancel the rest of the swing
  *
  * Author them on the clip's timeline in the Animation editor. A clip with no `hit` event uses the
- * `hitTime`/`comboTime`/`recoverTime` fields below instead (CLIP seconds, i.e. before `playSpeed`), so a
- * freshly imported animation is playable straight away and only gets better once marked up.
+ * `hitTime`/`comboTime`/`recoverTime` fields below instead (CLIP seconds from the move's start, i.e.
+ * before its state's speed), so a freshly imported animation is playable straight away and only gets
+ * better once marked up.
  *
- * Forward travel is either the `lunge*` drive below (an in-place clip), or -- with `rootMotion` -- the
- * clip's own hips travel: an attack whose feet step moves the body exactly as far as they do.
+ * ## Animation
+ *
+ * `animTrigger` names the animator trigger that plays the move: the player's animator has a state entered by
+ * it, whose clip, speed, start in the clip and blends are the move's animation. A state that extracts its
+ * root travel moves the body by the clip's own hips (an attack whose feet step goes exactly as far as they
+ * do); otherwise the `lunge*` drive below does.
  *
  * ## One clip, several attacks
  *
- * A combo can be ONE continuous animation: each move plays its segment, `clipStart` to `clipEnd` (clip
- * seconds). When the next move continues the same clip where this one ends, a chained attack does not
- * restart anything -- the animation simply plays on into it. A segment that is not chained blends out.
+ * A combo can be ONE continuous animation: each move's state plays a segment of it (its start time), and
+ * hands over to the next move's state at the segment's end, on that move's trigger. A chained attack
+ * restarts nothing -- the animation plays on into it. A segment that is not chained blends out.
  */
 export default class SoulsMoveNode extends Node {
-  /** Animation clip played for this attack (a clip on the player's rig). */
-  public clip: ClipName = 'Souls_Sword_L1'
-  public playSpeed: number = 1
+  /** The animator trigger that plays this move, e.g. "Longsword Light1". Empty: the node's name. */
+  public animTrigger: TriggerName = ''
   /** Multipliers on the weapon's attack rating and poise damage. */
   public damageMul: number = 1
   public poiseMul: number = 1
@@ -45,11 +49,6 @@ export default class SoulsMoveNode extends Node {
   public lungeStart: number = 0.1
   public lungeSeconds: number = 0.15
   public lungeSpeed: number = 2.5
-  /** Move the body by the clip's own hips travel (its steps) instead of the lunge. */
-  public rootMotion: boolean = false
-  /** The part of `clip` this move plays, clip seconds; an end of 0 plays to the clip's end. */
-  public clipStart: number = 0
-  public clipEnd: number = 0
   /** Seconds after the swing starts during which the player can still turn toward the target. */
   public trackSeconds: number = 0.2
   /** Fallback timings, used only when the clip carries no `hit` event. Clip seconds. */

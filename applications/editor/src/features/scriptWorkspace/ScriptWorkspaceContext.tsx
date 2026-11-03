@@ -1,4 +1,5 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { PROJECT_TYPES_REL, getProjectTypes, subscribeProjectTypes } from '@cleo/app-kit/code/projectTypes'
 import { Logger } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { useVfs } from '../assets/VfsContext'
@@ -147,6 +148,19 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     if (status !== 'live') return
     schedulePush()
   }, [vfs, scriptAssets, status, schedulePush])
+
+  // The project's own declarations (its animators' trigger names, projectTypes.ts), so the external editor
+  // checks scripts as the in-editor one does. Rewritten when they change; on connect `projectTypesRef` is
+  // cleared, so the first live render writes them.
+  const projectTypes = useSyncExternalStore(subscribeProjectTypes, getProjectTypes)
+  const projectTypesRef = useRef<string | null>(null)
+  useEffect(() => {
+    const bridge = getScriptsBridge()
+    const root = rootRef.current
+    if (status !== 'live' || !bridge || !root || projectTypes === projectTypesRef.current) return
+    projectTypesRef.current = projectTypes
+    void bridge.writeScaffold(root, [{ rel: PROJECT_TYPES_REL, content: projectTypes || 'export {}\n' }])
+  }, [status, projectTypes])
 
   /* --------------------------------------------------------------------- */
   /* Disk -> editor                                                         */
@@ -297,6 +311,7 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
 
     rootRef.current = root
     setRootPath(root)
+    projectTypesRef.current = null
     statusRef.current = 'live'
     setStatus('live')
     setMessage(null)

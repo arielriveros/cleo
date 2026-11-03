@@ -1,5 +1,5 @@
 import { Node } from 'cleo'
-import type { ClipName, TemplateName } from 'cleo'
+import type { TemplateName, TriggerName } from 'cleo'
 import SoulsEnemyNode from '@/Characters/Enemies/Base Enemy/Scripts/SoulsEnemy'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
@@ -37,7 +37,8 @@ export default class SoulsHollowWardenNode extends SoulsEnemyNode {
   public phase2At: number = 0.5
   public phase2SpeedMul: number = 1.15
   public phase2Seconds: number = 2
-  public roarClip: ClipName = 'Souls_Battlecry'
+  /** The animator trigger of the roar's Actions state. */
+  public roarTrigger: TriggerName = 'Roar'
 
   protected _onDamaged(dealt: number, poiseDamage: number, from: Node): void {
     super._onDamaged(dealt, poiseDamage, from)
@@ -45,12 +46,11 @@ export default class SoulsHollowWardenNode extends SoulsEnemyNode {
   }
 
   private _startPhase2(): void {
-    this._stopAction()
     this.phase = 2
-    this._speedMul = this.phase2SpeedMul
+    this._setSpeedMul(this.phase2SpeedMul)
     this._phaseSeconds = this.phase2Seconds
     this._enter('phase')
-    this._play(this.roarClip, 1)
+    this._oneShot(this.roarTrigger)
     const gm = this._gm as any
     gm?.shake?.(0.6)
     playSound(this, 'Boss Roar')

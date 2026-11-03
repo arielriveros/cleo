@@ -74,14 +74,15 @@ script (`Souls*.ts`), or the scene.
 | Skinned models with an animator | ✅ | The mannequin on every character. |
 | State machine with built-in parameters | ✅ | Three states, `planarSpeed`/`planarAngle`, and the `Died`/`Revive` triggers. |
 | 2D blend space (`.afield`) | ✅ | "Souls Locomotion", with a sprint sample. |
-| Running 180° turn | ✅ | Reversing at a run plants and turns round (`Souls_RunTurn180` and its mirror, `SoulsPlayer.runTurn*`). |
-| Action slots (`playAction`) | ✅ | Every attack, roll, drink and reaction. |
+| Running 180° turn | ✅ | Reversing at a run plants and turns round: the Actions layer's `RunTurnRight` / `RunTurnLeft` (`Souls_RunTurn180` and its mirror), fired by `SoulsPlayer.runTurn*`. |
+| One-shots in the graph (Actions layer, states entered by trigger) | ✅ | Every attack, roll, drink, gesture and reaction, player and enemies; the scripts fire triggers by name, and play no clip and name no state. |
+| Action slots (`playAction`) | ✗ | Replaced by the Actions layer. |
 | Clip events (`onAnimationEvent`) | ✅ | Hit, combo, recover, drink and cast timing. |
 | Bone sockets | ✅ | Weapons via `socketAttachment`; bolt origin via `getSocketWorldMatrix`. |
 | Rig asset, retargeting | ✅ | One shared rig. |
 | Layers, bone masks, Pose assets, Animation Controller asset | ✗ | |
 | Foot IK | ✗ | |
-| Root motion | ◐ | The roll and the deaths; lunges are scripted (SOULS_DEMO §6). |
+| Root motion | ◐ | The deaths move the body; the roll's and the Longsword's travel is extracted for the script; lunges are scripted (SOULS_DEMO §6). |
 
 ### Physics
 
@@ -177,7 +178,7 @@ script (`Souls*.ts`), or the scene.
 | | Sprint (hold roll), input buffering | ✅ | `SoulsPlayer` | |
 | | Jump | ✗ | `jumpSpeed: 0` | Ready: `CharacterNode` jump. |
 | | Block / guard / shield | ✗ | | Ready: a state plus a stamina-on-block rule in scripts. |
-| | Parry and riposte | ✗ | | Ready: animation events for the parry window, `playAction` for the riposte. |
+| | Parry and riposte | ✗ | | Ready: animation events for the parry window, an Actions state for the riposte. |
 | | Backstab | ✗ | | Ready: the angle test exists (`forwardYaw`, `angleDiff`). |
 | | Blade hitboxes | ✅ | `SoulsHitbox.stepSwing`: the blade capsule swept between frames against the hurtbox capsules | Whole-body hurtboxes; no limb multipliers. |
 | | Wall bounce | ✅ | `blocksSwings` bodies stop a light swing: sparks, recoil | Heavies plough through. |

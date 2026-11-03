@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useCleoEngine } from "../EngineContext";
 import { useHistory } from "../HistoryContext";
-import { Raycaster, LandscapeNode, Logger, unionRegion } from "cleo";
+import { Raycaster, LandscapeNode, Logger, isTextEntryEvent, unionRegion } from "cleo";
 import type { Terrain, SculptTool, SculptParams, BrushSpec, GridRegion, MaskGrid, MaskPatch, MaskRegion, Scene } from "cleo";
 import { BrushCursor } from "./brushCursor";
 import { lookFromSettings } from "./brushDecal";
@@ -368,12 +368,8 @@ export default function LandscapeBrush({ viewportRef }: Props) {
         };
 
         // --- keyboard -----------------------------------------------------------------------------
-        const typing = (t: EventTarget | null) => {
-            const el = t as HTMLElement | null;
-            return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
-        };
         const onKey = (e: KeyboardEvent) => {
-            if (editorMode !== 'landscape' || typing(e.target) || e.altKey || e.metaKey) return;
+            if (editorMode !== 'landscape' || isTextEntryEvent(e) || e.altKey || e.metaKey) return;
             const b = getBrush();
             if (e.key === 'Escape' && rampStartRef.current) {
                 rampStartRef.current = null;

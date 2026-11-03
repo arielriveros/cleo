@@ -15,6 +15,7 @@ import { getScriptIdOf } from '../../utils/scripts';
 import { validateNodeName } from '../../utils/nodeNames';
 import { useElementSize } from '@cleo/app-kit/utils/useElementSize';
 import { useScopedDndManager } from '../../utils/treeDnd';
+import { useTreeFocusGuard } from '../../utils/treeFocusGuard';
 import { hoveredScriptStore, useHoveredScript } from './hoveredScriptStore';
 import { TextInput } from '@cleo/app-kit/ui';
 import { UI_ICONS } from './uiIcons';
@@ -245,6 +246,8 @@ export default function SceneInspector() {
   // drag-and-drop backend, which would otherwise disable every native drop in the editor (see treeDnd).
   const { ref: viewportRef, element: viewportEl, size } = useElementSize<HTMLDivElement>();
   const dndManager = useScopedDndManager(viewportEl);
+  // Abandoning a rename by clicking into another field must not have the row take the keyboard back.
+  useTreeFocusGuard(viewportEl, treeRef);
 
   // The scene tab's root row is labelled from SceneMeta; the engine node stays named 'root' because
   // Scene.parse re-finds the root by that literal name. Display only.

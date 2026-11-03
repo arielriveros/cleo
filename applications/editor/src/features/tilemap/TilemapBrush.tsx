@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import {
   Geometry, Material, Model, ModelNode, Raycaster, TilemapNode, cellCorners, cellTile, packCell,
-  markEditorOnly,
+  isTextEntryEvent, markEditorOnly,
 } from 'cleo'
 import type { Node, TileEdit } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
@@ -293,8 +293,7 @@ export default function TilemapBrush({ viewportRef }: Props) {
     // X / Y / Z cycle the orientation the brush places, the way every tile editor binds them.
     const onKey = (e: KeyboardEvent) => {
       if (editorMode !== 'tilemap' || e.ctrlKey || e.metaKey || e.altKey) return
-      const target = e.target as HTMLElement | null
-      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
+      if (isTextEntryEvent(e)) return
       const b = tilemapBrush.current
       if (e.key === 'x' || e.key === 'X') b.orient = { ...b.orient, flipX: !b.orient.flipX }
       else if (e.key === 'y' || e.key === 'Y') b.orient = { ...b.orient, flipY: !b.orient.flipY }

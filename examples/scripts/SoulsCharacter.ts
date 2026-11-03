@@ -1,5 +1,5 @@
-import { CharacterNode, Logger, Node, Shape, moveWorldDirection, resolveSocketOwner, setMoveWorld } from 'cleo'
-import type { SocketName, TemplateName } from 'cleo'
+import { CharacterNode, Logger, ModelNode, Node, Shape, moveWorldDirection, resolveSocketOwner, setMoveWorld } from 'cleo'
+import type { AnimationTriggerInfo, Animator, SocketName, TemplateName, TriggerName } from 'cleo'
 import { clamp } from '@/Core/Scripts/SoulsMath'
 import { bladeCapsule, disarmHitbox, ensureHurtbox, setHurtboxEnabled } from '@/Core/Scripts/SoulsHitbox'
 
@@ -63,16 +63,16 @@ export default class SoulsCharacterNode extends CharacterNode {
    */
   public maxWalkSlope: number = 45
 
-  // ----- animation blending ------------------------------------------------------------------------
+  // ----- one-shots -----------------------------------------------------------------------------------
   /**
-   * Seconds an attack takes to blend in over the locomotion under it, and to blend back out into idle or
-   * the run at its end. Real seconds, whatever the attack's playback speed.
+   * Attacks, rolls and reactions are played by TRIGGER, by name (`_playTrigger`): the animator has a state
+   * each one enters, which leaves on its own at the clip's end. The graph owns every clip, its speed and its
+   * blends; the script owns the gameplay, and asks the animator how long what a trigger plays lasts
+   * (`Animator.triggerInfo`) and whether it still plays (`Animator.activeTrigger`). These two take the
+   * one-shot's layer back to rest from anything: with its blend-out, and at once.
    */
-  public attackBlendIn: number = 0.12
-  public attackBlendOut: number = 0.35
-  /** The same for every other one-shot: rolls, reactions, drinking, swaps. */
-  public actionBlendIn: number = 0.1
-  public actionBlendOut: number = 0.22
+  public stopTrigger: TriggerName = 'Stop'
+  public cutTrigger: TriggerName = 'Cut'
 
   // ----- wading ------------------------------------------------------------------------------------
   /**
@@ -92,9 +92,23 @@ export default class SoulsCharacterNode extends CharacterNode {
   public hurtboxActive: boolean = true
 
   protected _gm: Node = null
+  /** The skinned model whose animator plays this character (the subclass finds it on start). */
+  protected _model: ModelNode = null
   protected _weapons: Node[] = []
   protected _weaponIndex: number = 0
   protected _dropped: Node[] = []
+
+  /** The trigger raised last: lowered again before the next one if it never fired (see _raise). */
+  private _raised: TriggerName = ''
+  /**
+   * The one-shot the last `_playTrigger` fired: its trigger, what it plays, whether the animator has been
+   * seen playing it, and for how long it has not.
+   */
+  protected _actTrigger: TriggerName = ''
+  protected _actInfo: AnimationTriggerInfo | null = null
+  protected _actEntered: boolean = false
+  private _actWait: number = 0
+  private _warnedActions: Set<string> | null = null
 
   // =================================================================================================
   // Movement
@@ -224,6 +238,116 @@ export default class SoulsCharacterNode extends CharacterNode {
 
   protected _die(): void {
     this.isDead = true
+  }
+
+  // =================================================================================================
+  // One-shots: played by trigger, by name
+  // =================================================================================================
+
+  protected get _animator(): Animator | null { return this._model?.animator ?? null }
+
+  /** What firing `trigger` plays in this character's animator (its state, clip, speed, length), or null. */
+  protected _triggerInfo(trigger: TriggerName): AnimationTriggerInfo | null {
+    return trigger ? this._animator?.triggerInfo(trigger) ?? null : null
+  }
+
+  /** Whether this character's animator plays anything on `trigger`. */
+  protected _hasAction(trigger: TriggerName): boolean { return !!this._triggerInfo(trigger) }
+
+  /** Whether the one-shot `trigger` started is still what its layer plays. */
+  protected _isPlaying(trigger: TriggerName): boolean {
+    const info = trigger && this._actTrigger === trigger ? this._actInfo : this._triggerInfo(trigger)
+    return !!info && this._animator?.activeTrigger(info.layer) === trigger
+  }
+
+  /** Clip seconds into the clip the last fired one-shot's layer plays now (its layer's own clock). */
+  protected _actTime(): number {
+    const layer = this._actInfo?.layer
+    const a = this._animator
+    return !a ? 0 : layer ? a.layerStateTime(layer) : a.currentTime
+  }
+
+  /**
+   * Fire `trigger`. The trigger raised before it is lowered first if it never fired — a combo's next swing
+   * queued for a segment end that a hit cut short must not fire the next time that segment ends.
+   */
+  protected _raise(trigger: TriggerName): void {
+    const animator = this._animator
+    if (!animator || !trigger) return
+    if (this._raised && this._raised !== trigger && animator.getParam(this._raised) === true) animator.resetTrigger(this._raised)
+    animator.setTrigger(trigger)
+    this._raised = trigger
+  }
+
+  /** Lower the last raised trigger if it has not fired (an action called off before it could start). */
+  protected _lowerRaised(): void {
+    const animator = this._animator
+    if (this._raised && animator?.getParam(this._raised) === true) animator.resetTrigger(this._raised)
+    this._raised = ''
+  }
+
+  /**
+   * Play the one-shot `trigger` starts: fire it and return what it plays (null — and a warning, once — when
+   * this character's animator has nothing on that trigger; the gameplay goes on without the animation).
+   */
+  protected _playTrigger(trigger: TriggerName): AnimationTriggerInfo | null {
+    const info = this._triggerInfo(trigger)
+    this._actTrigger = trigger
+    this._actInfo = info
+    this._actEntered = false
+    this._actWait = 0
+    if (!info) { this._warnAction(trigger, 'starts nothing'); return null }
+    this._raise(trigger)
+    return info
+  }
+
+  /**
+   * Per frame, after a `_playTrigger`: note when the animator starts playing it. One that never does (a
+   * condition the graph added, a state that waits) is reported once rather than holding the character.
+   */
+  protected _trackAction(delta: number): void {
+    if (!this._actTrigger || this._actEntered) return
+    if (this._isPlaying(this._actTrigger)) { this._actEntered = true; return }
+    this._actWait += delta
+    if (this._actWait > 0.25) {
+      this._warnAction(this._actTrigger, 'was fired but never started')
+      this._actEntered = true
+    }
+  }
+
+  /**
+   * Leave whatever one-shot is playing, blending out (`stopTrigger`) or at once (`cut`: `cutTrigger`). Only
+   * when its layer is not already at rest: a trigger nothing takes would stay raised and cut the next
+   * one-shot short. A cut is raised beside the trigger tracking (_raise), so a one-shot fired on the same
+   * frame does not lower it: the cut goes first, and the one-shot starts on the next frame from nothing.
+   */
+  protected _stopActions(cut: boolean = false): void {
+    this._actTrigger = ''
+    this._actInfo = null
+    const animator = this._animator
+    const layer = this._triggerInfo(cut ? this.cutTrigger : this.stopTrigger)?.layer
+    if (!animator || layer === undefined || !animator.activeTrigger(layer)) { this._lowerRaised(); return }
+    if (cut) { this._lowerRaised(); animator.setTrigger(this.cutTrigger) }
+    else this._raise(this.stopTrigger)
+  }
+
+  private _warnAction(trigger: string, problem: string): void {
+    this._warnedActions ??= new Set()
+    if (this._warnedActions.has(trigger)) return
+    this._warnedActions.add(trigger)
+    Logger.warn(`Hollow Keep: "${this.name}": the trigger "${trigger}" ${problem} in its animator, so it plays no `
+      + 'animation. Give the state it should play an "Enter on trigger" of that name (or link the shipped "Souls" animator).', 'Script')
+  }
+
+  /** A clip of this character's model by name, or null. */
+  protected _findClip(name: string): any {
+    const animations = (this._model as any)?.model?.animations
+    if (!animations || !name) return null
+    return animations.find((a: any) => a.name === name) ?? null
+  }
+
+  protected _clipHasEvent(name: string, event: string): boolean {
+    return !!this._findClip(name)?.events?.some((e: any) => e.name === event)
   }
 
   // =================================================================================================

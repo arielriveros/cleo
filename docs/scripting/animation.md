@@ -33,9 +33,12 @@ machine decides what plays, and an action is the way to put something on top of 
 ```ts
 setFloat(name: string, value: number): void
 setBool(name: string, value: boolean): void
-setTrigger(name: string): void
-resetTrigger(name: string): void
+setTrigger(name: TriggerName): void
+resetTrigger(name: TriggerName): void
 getParam(name: string): number | boolean | undefined
+
+triggerInfo(trigger: string): AnimationTriggerInfo | null   // what firing it plays
+activeTrigger(layer?: string): string | null                 // the trigger whose state a layer plays
 
 get currentStateName: string | null
 get hasStateMachine: boolean
@@ -64,9 +67,18 @@ onUpdate() {
 }
 ```
 
-A `trigger` parameter is consumed by the first transition that reads it, so it cannot fire twice.
-That holds across [layers](#layers) too: they share the parameter table, and whichever layer fires on
-a trigger first consumes it.
+A `trigger` parameter stays raised until the state or transition it starts fires, then is lowered, so
+it cannot fire twice. [Layers](#layers) share the parameter table, and the lowering waits until the
+base and every layer have evaluated that frame: a trigger two layers read fires both — a `Died` that
+sends the base to Dead also takes an Actions layer out of its roll. One that nothing can take yet (its
+transition waits on the clip's end, say) stays raised until something does; `resetTrigger` withdraws it.
+
+**Triggers are names, checked.** In the editor's script editor and in the VS Code workspace, a
+`TriggerName` — `setTrigger`'s argument, and any field typed `TriggerName` — must be one of the
+triggers the project's animators declare: a misspelt one is an error, and the real names complete. The
+editor writes them to `.cleo/types/project.d.ts` as the animators change; a project with no triggers at
+all takes any string. In the inspector, a `TriggerName` field is picked from the character's triggers,
+never typed.
 
 A character running a [shared animator](../editor/animation.md#shared-animators) holds a resolved
 copy of it, so all of the above works the same either way. `getStateMachine()` returns that copy; its
@@ -81,6 +93,8 @@ script mostly just reads them, or fades one in and out:
 ```ts
 setLayerWeight(layer: string, weight: number): void   // 0..1
 layerStateName(layer: string): string | null          // the base layer's is currentStateName
+layerStateTime(layer: string): number                 // clip seconds into its state's clip (0: none)
+layerStateDuration(layer: string): number             // that clip's length (the base's: duration)
 get layerNames: string[]                              // in order, base excluded
 ```
 
@@ -93,6 +107,51 @@ onUpdate() {
 
 A layer whose weight is driven by a parameter ignores `setLayerWeight` — the parameter wins. Set the
 parameter instead.
+
+## One-shots in the graph
+
+An attack, a roll or a hit reaction can be a state of an **Actions** layer — full body, above every
+other layer, resting in an empty state — that its trigger enters directly
+([how to build one](../editor/animation.md#one-shots-as-an-actions-layer)). The script fires the
+trigger by name and names nothing else — no clip, no state, no layer; the graph owns the clip, its
+speed, its start and its blends, and the animator answers what a trigger plays:
+
+```ts
+onUpdate(delta: number) {
+  // Taken by the animator later in the frame it is set; from the next frame on, activeTrigger reads
+  // Roll on its layer until the state it started leaves on its own at the clip's end.
+  const roll = animator.triggerInfo('Roll')
+  if (this.rolling && animator.activeTrigger(roll?.layer) !== 'Roll') this.rolling = false
+  if (this.rolling) this.rollBy(animator.consumeRootMotion(), delta)   // the Roll state's extracted travel
+  else if (Input.started('Roll')) { animator.setTrigger('Roll'); this.rolling = true }
+}
+```
+
+```ts
+interface AnimationTriggerInfo {
+  layer: string | null      // null: the base
+  state: string             // the state it enters
+  clip: string; clipLength: number
+  speed: number             // the state's rate now, × its speed-multiplier parameter
+  startTime: number
+  seconds: number           // real seconds until the layer rests or waits on another trigger
+  extractsRootMotion: boolean
+  fromAnywhere: boolean     // false: only from certain states, at their time (a combo's next segment)
+}
+```
+
+- **When it ends.** `seconds` is its length — to where it hands over on another trigger, else to its
+  clip's end, plus whatever it flows into by itself (a sheathe going on into the draw). `activeTrigger`
+  stops reading it once the layer is back at rest or another trigger took over. On the frame
+  `layerStateTime` reaches `clipLength`, a transition that waits for the clip end has not fired yet — a
+  script turning the body round at the end of a turn clip does it then, and the cut lands on the same
+  frame.
+- **Frame order.** A character's script runs before its model's animator in the same frame, so a
+  trigger set in `onUpdate` is taken that frame.
+- **Root travel.** A layer state with **extract root travel** collects its clip's ground travel for
+  `consumeRootMotion()`, as `playAction({ rootMotion: true })` does.
+- **A trigger waiting** for a combo segment's end stays raised if the swing is interrupted; reset it
+  (`resetTrigger`), or it fires the next time that segment ends.
 
 ## Actions
 
@@ -110,6 +169,9 @@ interface AnimationActionOptions {
   blendOut?: number    // seconds, default 0.2
   speed?: number       // default 1
   loop?: boolean       // default false: loops until stopped
+  ikWeight?: number    // foot-IK weight while it plays, default 1 (a roll passes 0)
+  rootMotion?: boolean // extract the clip's travel for consumeRootMotion(), default false
+  startTime?: number   // clip seconds to start from, default 0
 }
 
 interface AnimationActionHandle {
@@ -242,7 +304,9 @@ node — instead of snapping back to where it started. Enable it per clip in the
 Use it on turn-in-place and other clips whose *animation* is authoritative. Leave it **off** on
 locomotion clips driven by physics velocity, or the character double-moves. A field state ignores
 root motion entirely, and so does everything above the base layer: a layer or an action never moves
-the character.
+the character. Either can EXTRACT its clip's ground travel instead — a layer state with
+`extractRootMotion`, an action with `rootMotion: true` — for a script to read with
+`consumeRootMotion()` and move the body by, through its own collision.
 
 ## Ragdolls
 

@@ -679,8 +679,9 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'animation': deps.enterClipEditor(id); return true
     case 'rig': deps.enterRigEditor(id); return true
     case 'animController': deps.openAnimController(id); return true
-    // A mask and a pose asset are edited inside the RIG editor of the skeleton they are authored against;
-    // the rig editor picks up which one to focus from FOCUS_RIG_ASSET.
+    // A mask and a pose asset are edited inside the RIG editor of the skeleton they are authored against.
+    // FOCUS_RIG_ASSET says which one: the dock brings up the tab that edits it, and RigContext holds the
+    // request until that tab mounts (it fires before the rig layout exists).
     case 'boneMask':
     case 'pose': {
       const asset = kind === 'boneMask'

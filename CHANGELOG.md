@@ -16,6 +16,32 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **One-shots live in the animator graph, played by trigger name.** A layer can hold a character's
+  attacks, rolls and reactions as states a script starts with `setTrigger('Roll')`, playing nothing
+  itself and naming no state. For that:
+  - A state can be entered **directly by a trigger** (`AnimationState.triggers`, **Enter on trigger**,
+    a ⚡ tag on the node), from whatever its layer is doing, with its own blend and restart — no
+    transition needed. Each frame Any State transitions are checked first, then state triggers, then
+    the current state's own transitions.
+  - The graph draws an **Any State** node, and **Can restart itself** lets an Any State transition
+    re-enter the state it is in (a second hit replays the flinch).
+  - `triggerInfo(trigger)` answers what a trigger plays — its layer, state, clip, rate and real length —
+    and `activeTrigger(layer)` which trigger's state a layer is playing.
+  - Trigger names are checked: the editor writes the project's triggers to `.cleo/types/project.d.ts`,
+    so `setTrigger` and `TriggerName` fields reject a misspelt name in the script and VS Code editors,
+    and the inspector only lets a `TriggerName` field pick an existing trigger.
+  - States gained **Start at** (`startTime`: one segment of a longer clip), **× param**
+    (`speedScaleParam`: the rate times a parameter) and, on a layer, **Extract root travel**
+    (`extractRootMotion`: the clip's ground travel goes to `consumeRootMotion()`).
+  - A layer state's foot-IK weight now applies, as far as the layer shows; a layer cross-fades from a
+    pose it is still fading out of instead of jumping, and re-entering the same clip cross-fades too.
+  - Triggers are lowered once the base and every layer have evaluated, so a trigger two layers read
+    fires both (a `Died` now also takes a layer out of what it plays).
+  - `layerStateTime` / `layerStateDuration`, and a `TriggerName` script field type that offers the
+    character's triggers.
+  - The Valley's player and every enemy type play all their one-shots this way: an **Actions** layer
+    per animator whose states their triggers enter directly (the enemies now have one animator per
+    type), no `playAction` left in the scripts, and moves and attacks naming an `animTrigger`.
 - **Lights keep one intensity; exposure does the rest.** The way Frostbite, Unreal and HDRP treat
   light: a light's lux or lumens never change with the time of day or the room, and auto exposure
   adapts to them as an eye does. The artistic control moved to the exposure:

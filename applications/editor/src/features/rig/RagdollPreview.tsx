@@ -24,6 +24,12 @@ export const RAGDOLL_TEST = 'RAGDOLL_TEST'
 export const RAGDOLL_TEST_STATE = 'RAGDOLL_TEST_STATE'
 /** Show / hide the colliders (boolean). */
 export const RAGDOLL_SHOW = 'RAGDOLL_SHOW'
+/**
+ * Ask the preview to re-announce what it shows — RAGDOLL_SHOW, RAGDOLL_TEST_STATE and RAGDOLL_SELECT_PART.
+ * The Ragdoll tab unmounts while another tab of its group is up and this overlay keeps running, so a tab
+ * that has just mounted asks rather than assuming the defaults.
+ */
+export const RAGDOLL_QUERY = 'RAGDOLL_QUERY'
 
 /** The profile a rig falls with: its authored one, else the automatic humanoid one (null: generic). */
 export function rigRagdollProfile(authored: unknown, skin: Skin | null | undefined): { profile: RagdollProfile | null; authored: boolean } {
@@ -46,12 +52,26 @@ export default function RagdollPreview() {
   const target = getAnimationTarget(editorScene, skeletonTargetId)
   const key = JSON.stringify(asset?.ragdoll ?? null)
 
+  // Mirrors of the state above for RAGDOLL_QUERY, which must answer with the CURRENT values.
+  const shownRef = useRef(show)
+  shownRef.current = show
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
+
   useEffect(() => {
     const onSelect = (i: number | null) => setSelected(typeof i === 'number' ? i : null)
     const onShow = (v: boolean) => setShow(!!v)
+    const onQuery = () => {
+      eventEmitter.emit(RAGDOLL_SHOW, shownRef.current)
+      eventEmitter.emit(RAGDOLL_TEST_STATE, testRef.current !== null)
+      eventEmitter.emit(RAGDOLL_SELECT_PART, selectedRef.current)
+    }
     eventEmitter.on(RAGDOLL_SELECT_PART, onSelect)
     eventEmitter.on(RAGDOLL_SHOW, onShow)
-    return () => { eventEmitter.off(RAGDOLL_SELECT_PART, onSelect); eventEmitter.off(RAGDOLL_SHOW, onShow) }
+    eventEmitter.on(RAGDOLL_QUERY, onQuery)
+    return () => {
+      eventEmitter.off(RAGDOLL_SELECT_PART, onSelect); eventEmitter.off(RAGDOLL_SHOW, onShow); eventEmitter.off(RAGDOLL_QUERY, onQuery)
+    }
   }, [eventEmitter])
 
   // ----- the test fall ----------------------------------------------------------------------------

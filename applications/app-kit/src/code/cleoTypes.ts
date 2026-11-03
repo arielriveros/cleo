@@ -11,6 +11,7 @@ import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
 // here too, while node bodies were cannon bodies. The public declarations no longer reach it: the physics
 // backend is behind the engine's own types, see docs/reference/physics-backends.md.)
 import glMatrixDeclaration from 'gl-matrix/index.d.ts?raw';
+import { PROJECT_TYPES_REL, getProjectTypes, subscribeProjectTypes } from './projectTypes';
 
 /** One declaration file, at the path it must live at for module resolution to find it. */
 export type TypeFile = { rel: string; content: string }
@@ -73,6 +74,17 @@ export function loadCleoTypes(monaco: typeof Monaco): void {
   loaded = true;
 
   const defaults = monaco.languages.typescript.typescriptDefaults;
+
+  // The project's own declarations (projectTypes.ts: its animators' trigger names), at the path the
+  // workspace writes them to, swapped whenever the editor publishes new ones.
+  let projectLib: { dispose(): void } | null = null;
+  const applyProjectTypes = () => {
+    projectLib?.dispose();
+    const content = getProjectTypes();
+    projectLib = content ? defaults.addExtraLib(content, `file:///${PROJECT_TYPES_REL}`) : null;
+  };
+  applyProjectTypes();
+  subscribeProjectTypes(applyProjectTypes);
 
   for (const key of Object.keys(engineDeclarations)) {
     const rel = key.slice(PREFIX.length);

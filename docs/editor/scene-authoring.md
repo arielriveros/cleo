@@ -17,8 +17,9 @@ Selecting the tree's **root** shows [Scene settings](#scene-settings) instead of
 
 ## The Add catalog
 
-Two palettes: **Scene Elements** and **UI Elements** (the latter appears in UI mode). Both are icon
-grids with a category selector, and your category choice is remembered.
+Two palettes: **Scene Elements** in scene mode (and while painting a landscape or a tilemap), **UI
+Elements** in UI mode, and both while you edit a template. Both are icon grids with a category
+selector, and your category choice is remembered.
 
 Every entry can be **clicked** — which parents it under the current selection — or **dragged** into
 the tree or the viewport. A dragged entry lands at the point under the cursor unless it is marked

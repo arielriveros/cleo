@@ -9,8 +9,6 @@ import { useRig } from './RigContext'
 import AnimationAssetPicker from '../animation/AnimationAssetPicker'
 import RetargetMapper from './RetargetMapper'
 import SocketsPanel from './SocketsPanel'
-import RagdollPanel from './RagdollPanel'
-import BoneMasksPanel from './BoneMasksPanel'
 import PoseAssetsPanel from './PoseAssetsPanel'
 import { loadSkin, type StoredSkin } from '../../utils/animationAssets'
 import { overridesFor } from '../../utils/rigAssets'
@@ -19,7 +17,7 @@ import { retargetView } from '../../utils/retargetView'
 import { Button, DocScope, Hint, SectionTitle, Select, TextInput, cn, hintClass, valueClass } from '@cleo/app-kit/ui'
 
 // The rig editor's Properties panel: the clips this skeleton owns, the retarget corrections onto it, and
-// which character it is previewed through.
+// which character it is previewed through. Its ragdoll and bone masks are tabs of their own beside it.
 
 const toMat4 = (a: number[]) => {
   const m = mat4.create()
@@ -105,7 +103,7 @@ export default function RigInspector() {
 
   return (
     // The Skeleton part's section first, so "Clips" here is this skeleton's linked clips, not the
-    // Animator's Clips panel; the sockets, masks and poses below fall back to their own sections.
+    // Animator's Clips panel; the sockets and poses below fall back to their own sections.
     <DocScope page='editor/animation' section='the-skeleton-part'>
       <div className='flex flex-col gap-3 p-2'>
         <div>
@@ -177,10 +175,8 @@ export default function RigInspector() {
         {/* ---- Sockets ---------------------------------------------------------------------------- */}
         <SocketsPanel />
 
-        <RagdollPanel />
-
-        {/* ---- Bone masks ------------------------------------------------------------------------- */}
-        <BoneMasksPanel />
+        {/* The ragdoll and the bone masks are not here: each has a tab of its own beside this one (DockLayout's
+            RIG_PANELS), since either fills the rail once a part or a mask is open. */}
 
         {/* ---- Poses ------------------------------------------------------------------------------ */}
         {/* Pose ASSETS on this skeleton (plus any legacy poses stored on the rig itself). Authored in

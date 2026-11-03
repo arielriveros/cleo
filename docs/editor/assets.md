@@ -38,7 +38,7 @@ Folders are yours to arrange; nothing depends on where an asset sits.
 | **Animation** | `.anim` | **+ Add** (pick a `.fbx`/`.glb`/`.gltf`), or [Cleo Creator](../creator/motion.md) | The [clip player](animation.md#the-clip-player) — clips stay in source-rig space | rig clip lists, state machines |
 | **Rig** | `.rig` | Model or animation import — one per distinct skeleton | [Rig mode](animation.md): clips, retargeting, IK, sockets, bone masks, poses | models built on that skeleton |
 | **Animator** | `.animator` | **+ Add**, the workspace's **Animator ▾ → + New Animator**, or **Share…** in the Animator | [Character Animation workspace](animation.md#shared-animators), previewed on a character on its skeleton | characters' **Animation** section |
-| **Bone Mask** | `.mask` | The rig editor's **Bone Masks** section | Rig mode, **Bone Masks** section | controller layers and action slots |
+| **Bone Mask** | `.mask` | The rig editor's **Bone Masks** tab | Rig mode, **Bone Masks** tab | controller layers and action slots |
 | **Pose Asset** | `.pose` | [Cleo Creator ▸ Motion](../creator/motion.md#poses), synced into `/Creator/Poses` | Rig mode, **Poses** section | controller pose states |
 | **Blend Space** | `.blendspace` | The workspace's **Blend Spaces ▾ → + New Blend Space** | The Character Animation workspace | a state in an animator |
 | **AI Brain** | `.brain` | **+ Add ▸ AI Brain (Machine \| Goals)** | [AI Brain mode](ai-brains.md) | linked from a Controller |
@@ -50,7 +50,8 @@ Folders are yours to arrange; nothing depends on where an asset sits.
 Extensions in full are in [File formats](../reference/file-formats.md).
 
 > **Make bone masks and pose assets from the rig editor.** Both are edited inside the rig editor of
-> the skeleton they belong to, and double-clicking one opens that rig. One created from **+ Add**
+> the skeleton they belong to, and double-clicking one opens that rig on the tab that edits it, with
+> the mask or pose expanded. One created from **+ Add**
 > starts with no rig, so it has nowhere to open — the log says so.
 
 ## Operations

@@ -94,7 +94,7 @@ export const ADD_CATEGORIES: { value: AddCategory, label: string, doc: string }[
   { value: 'complex', label: 'Complex Geometries', doc: 'editor/scene-authoring#complex-geometries' },
   { value: 'environment', label: 'Environment', doc: 'editor/scene-authoring#environment' },
   { value: 'effects', label: 'Effects', doc: 'editor/scene-authoring#effects' },
-  // UI categories. Shown only in `ui` mode (see AddNew).
+  // UI categories: the UI Elements palette's half (see AddNew), which shows in UI mode and in a template.
   { value: 'uiLayout', label: 'Layout', doc: 'editor/scene-authoring#ui--layout' },
   { value: 'uiCore', label: 'Elements', doc: 'editor/scene-authoring#ui--elements' },
   { value: 'uiWidgets', label: 'Widgets', doc: 'editor/scene-authoring#ui--widgets' },

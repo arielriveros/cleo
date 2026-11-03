@@ -1,5 +1,5 @@
 import { Node } from 'cleo'
-import type { ClipName } from 'cleo'
+import type { TriggerName } from 'cleo'
 import { playSound } from '@/Core/Scripts/SoulsAudio'
 
 /**
@@ -21,7 +21,8 @@ export default class SoulsPickupNode extends Node {
   public amount: number = 200
   public itemName: string = 'Soul of a Lost Undead'
   public hiddenUntilRevealed: boolean = false
-  public pickupClip: ClipName = 'Souls_Pickup'
+  /** The trigger of the player animator's gesture state played on taking it. */
+  public pickupGesture: TriggerName = 'Pickup'
   public taken: boolean = false
 
   private _gm: Node = null
@@ -50,7 +51,7 @@ export default class SoulsPickupNode extends Node {
     const p = player as any
     const gm = this._gm as any
     this.taken = true
-    p.playGesture?.(this.pickupClip, 0.8)
+    p.playGesture?.(this.pickupGesture, 0.8)
     if (this.kind === 'souls') p.addSouls?.(this.amount)
     // The flasks are the player's; it is asked to change them, never written to.
     else if (this.kind === 'flaskShard') p.addEstusFlask?.()

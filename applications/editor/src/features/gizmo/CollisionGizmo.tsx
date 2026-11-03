@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { mat4, vec3 } from 'gl-matrix';
-import { Node, Raycaster, markEditorOwned, uiProjectToScreen } from 'cleo';
+import { Node, Raycaster, isTextEntryEvent, markEditorOwned, uiProjectToScreen } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
 import { useHistory } from '../HistoryContext';
 import { usePlayback } from '../PlaybackContext';
@@ -355,8 +355,7 @@ export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
         if (!drag.cancelled) { drag.cancelled = true; revertDrag(drag); }
         return;
       }
-      const t = event.target as HTMLElement | null;
-      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (isTextEntryEvent(event)) return;
       if (!gizmoBusyRef.current) setCollisionShapeSelection(eventEmitter, null);
     };
     const onBlur = () => endDrag(false);

@@ -4,6 +4,7 @@ import { useCleoEngine } from '../EngineContext'
 import { getAnimationTarget, buildJointTree, jointLabel, JointTreeNode } from './skeleton'
 import { useElementSize } from '@cleo/app-kit/utils/useElementSize'
 import { useScopedDndManager } from '../../utils/treeDnd'
+import { useTreeFocusGuard } from '../../utils/treeFocusGuard'
 import IkRigPanel from './IkRigPanel'
 import { SectionTitle, TextInput } from '@cleo/app-kit/ui'
 
@@ -71,6 +72,12 @@ function JointRowView({ node }: NodeRendererProps<JointRow>) {
   )
 }
 
+/**
+ * Ask the tree to re-announce its selection as SELECT_JOINT. The tree owns which bone is selected; a panel
+ * that mounts after the pick — a rig tab brought up beside Skeleton — asks instead of assuming none.
+ */
+export const QUERY_SELECTED_JOINT = 'QUERY_SELECTED_JOINT'
+
 export default function SkeletonTree() {
   const { editorScene, skeletonTargetId, eventEmitter } = useCleoEngine()
   const [selectedJoint, setSelectedJoint] = useState<number | null>(null)
@@ -80,6 +87,8 @@ export default function SkeletonTree() {
   // (see treeDnd) so it cannot disable native drops elsewhere in the editor.
   const { ref: viewportRef, element: viewportEl, size } = useElementSize<HTMLDivElement>()
   const dndManager = useScopedDndManager(viewportEl)
+  // A row never takes the keyboard from a field outside the tree (see treeFocusGuard).
+  useTreeFocusGuard(viewportEl, treeRef)
 
   const target = getAnimationTarget(editorScene, skeletonTargetId)
   const rows = useMemo(() => (target ? toRows(buildJointTree(target.skin), target.skin) : []), [target?.node.id])
@@ -95,6 +104,14 @@ export default function SkeletonTree() {
   // never fights the sync.
   const selectedRef = useRef<number | null>(selectedJoint)
   selectedRef.current = selectedJoint
+
+  // Re-announced, not pushed: every SELECT_JOINT listener takes the same value it already has, except the
+  // panel that asked.
+  useEffect(() => {
+    const onQuery = () => { if (selectedRef.current !== null) eventEmitter.emit('SELECT_JOINT', selectedRef.current) }
+    eventEmitter.on(QUERY_SELECTED_JOINT, onQuery)
+    return () => { eventEmitter.off(QUERY_SELECTED_JOINT, onQuery) }
+  }, [eventEmitter])
   useEffect(() => {
     const tree = treeRef.current
     if (!tree) return

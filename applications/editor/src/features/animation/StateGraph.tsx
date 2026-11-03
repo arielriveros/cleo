@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
-import { useStateMachine, OP_LABEL, effectiveType } from './StateMachineContext'
+import { useStateMachine, OP_LABEL, effectiveType, ANY_STATE } from './StateMachineContext'
 import { Button, SegmentedControl } from '@cleo/app-kit/ui'
 import MachineGraph from '../../components/MachineGraph'
 import { LayerTabs } from './LayerPanels'
@@ -85,14 +85,28 @@ export default function StateGraph() {
     return () => cancelAnimationFrame(raf)
   }, [target, graphView, layerName])
 
-  const nodes: GraphNodeModel[] = useMemo(() => sm.states.map((s, i) => {
+  // "Any State": where `from: '*'` transitions start — they can fire whichever state the layer is in (an
+  // Actions layer's one-shots). Not a state, so it has no stored position: it sits left of the graph
+  // until dragged, and the drag lasts while the canvas is open.
+  const [anyMoved, setAnyMoved] = useState<{ layer: number; x: number; y: number } | null>(null)
+  const anyPos = useMemo(() => {
+    if (anyMoved && anyMoved.layer === activeLayer) return { x: anyMoved.x, y: anyMoved.y }
+    const placed = sm.states.map((_, i) => posOf(i))
+    const minX = placed.length ? Math.min(...placed.map(p => p.x)) : 0
+    const minY = placed.length ? Math.min(...placed.map(p => p.y)) : 0
+    return { x: minX - AUTO_DX, y: minY }
+  }, [anyMoved, activeLayer, sm.states, posOf])
+  const anyCount = sm.transitions.filter(t => t.from === ANY_STATE).length
+
+  const stateNodes: GraphNodeModel[] = useMemo(() => sm.states.map((s, i) => {
     const field = s.fieldId ? fieldOf(s.fieldId) : undefined
     const playsField = !!s.fieldId
     const playsPose = !playsField && !!(s.poseRef || s.pose)
     // The ⊞ badge is what distinguishes a blend state from a clip state; the name alone does not.
     const what = playsField ? (field?.name || '(missing field)')
       : playsPose ? `pose: ${s.pose?.name ?? 'pose'}`
-      : (s.clipName || (activeLayer > 0 ? '(empty — adds nothing)' : '(no clip)'))
+      : s.clipName ? `${s.clipName}${s.startTime ? ` @${s.startTime}s` : ''}`
+      : (activeLayer > 0 ? '(empty — adds nothing)' : '(no clip)')
     return {
       id: s.name,
       ...posOf(i),
@@ -105,14 +119,28 @@ export default function StateGraph() {
       // looks right in a preview (which always runs at rate 1) and wrong in Play, so it has to be
       // legible without selecting the node. Highlighted on a field state, where it multiplies an
       // already speed-matched blend.
-      badge: `${s.loop ? '↻' : '→'} ×${s.speedParam ?? s.speed}`,
-      badgeTitle: s.speedParam
+      badge: `${s.loop ? '↻' : '→'} ×${s.speedParam ?? s.speed}${s.speedScaleParam ? `·${s.speedScaleParam}` : ''}`,
+      badgeTitle: (s.speedParam
         ? `Playback rate read from the "${s.speedParam}" parameter`
-        : 'Fixed playback rate',
+        : 'Fixed playback rate')
+        + (s.speedScaleParam ? `, times the "${s.speedScaleParam}" parameter` : ''),
       badgeTone: s.speedParam && playsField ? 'warning' : 'dim',
+      // The triggers that enter it directly — a state a script plays by name needs no edge.
+      chips: (s.triggers ?? []).filter(e => e.trigger).map(e => `⚡${e.trigger}`),
+      chipsTitle: 'Entered directly by these triggers, from whatever state the layer is in',
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [sm.states, posOf, animationFields])
+
+  const nodes: GraphNodeModel[] = useMemo(() => [{
+    id: ANY_STATE,
+    label: 'Any State',
+    ...anyPos,
+    sourceOnly: true,
+    deletable: false,
+    kind: 'accent' as const,
+    subtitle: anyCount ? `${anyCount} transition${anyCount > 1 ? 's' : ''} from any state` : 'drag out to fire from any state',
+  }, ...stateNodes], [stateNodes, anyPos, anyCount])
 
   const graphLinks: GraphLinkModel[] = useMemo(() => links.map(l => {
     const fwd = l.forward ? transitionLabel(l.forward, paramOf) : ''
@@ -144,10 +172,12 @@ export default function StateGraph() {
       selectedNode={selection?.kind === 'state' ? selection.name : null}
       selectedLink={selection?.kind === 'transition' ? { a: selection.a, b: selection.b } : null}
       onMoveNode={(id, x, y) => {
+        if (id === ANY_STATE) { setAnyMoved({ layer: activeLayer, x, y }); return }
         const i = stateIndex(id)
         if (i >= 0) setState(i, { x, y })
       }}
-      onConnect={(from, to) => addTransition(from, to)}
+      // Nothing transitions INTO "any state".
+      onConnect={(from, to) => { if (to !== ANY_STATE) addTransition(from, to) }}
       onDelete={(ids, removed) => deleteElements(ids, removed)}
       onSelectNode={(id) => setSelection(id ? { kind: 'state', name: id } : null)}
       onSelectLink={(a, b) => setSelection({ kind: 'transition', a, b })}

@@ -7,6 +7,8 @@ import path from 'path';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { staticScaffold } from '../src/features/scriptWorkspace/scaffold';
+import { projectTypesDeclaration } from '../src/utils/projectTriggers';
+import { PROJECT_TYPES_REL } from '@cleo/app-kit/code/projectTypes';
 
 const exec = promisify(execFile);
 const repo = fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]applications[\\/]editor[\\/]tests[\\/]?$/, '');
@@ -281,6 +283,52 @@ export default class Bad extends Node { onStart() { clamp01('not a number') } }
     expect(bad.ok).toBe(false);
     expect(bad.out).toMatch(/Player[\\/]Hero\.ts/);
   }, 180000);
+
+  it('checks trigger names against the project\'s animators once its declaration is written', async () => {
+    if (skip) return;
+    const typesFile = path.join(root, PROJECT_TYPES_REL);
+    // Without the project's declaration a trigger is any string: a project with no animators is not locked out.
+    await writeScript('Player/Hero.ts', `
+import { Node } from 'cleo'
+import type { TriggerName } from 'cleo'
+export default class Hero extends Node {
+  public roll: TriggerName = 'Rol'
+}
+`);
+    expect((await typecheck()).ok).toBe(true);
+
+    await writeFile(typesFile, projectTypesDeclaration(['Died', 'Roll']), 'utf-8');
+    try {
+      await writeScript('Player/Hero.ts', `
+import { ModelNode, Node } from 'cleo'
+import type { TriggerName } from 'cleo'
+export default class Hero extends Node {
+  public roll: TriggerName = 'Roll'
+  public none: TriggerName = ''
+  onStart() { (this.children[0] as ModelNode).animator?.setTrigger(this.roll); (this.children[0] as ModelNode).animator?.setTrigger('Died') }
+}
+`);
+      const ok = await typecheck();
+      expect(ok.out).toBe('');
+      expect(ok.ok).toBe(true);
+
+      for (const wrong of [
+        `public roll: TriggerName = 'Rol'`,
+        `onStart() { (this.children[0] as ModelNode).animator?.setTrigger('Rol') }`,
+      ]) {
+        await writeScript('Player/Hero.ts', `
+import { ModelNode, Node } from 'cleo'
+import type { TriggerName } from 'cleo'
+export default class Hero extends Node { ${wrong} }
+`);
+        const bad = await typecheck();
+        expect(bad.ok, wrong).toBe(false);
+        expect(bad.out).toMatch(/"Rol"|'Rol'/);
+      }
+    } finally {
+      await rm(typesFile, { force: true });
+    }
+  }, 240000);
 
   it('does not let a bare project path type-check, since the game would reject it', async () => {
     if (skip) return;

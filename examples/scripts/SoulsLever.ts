@@ -36,7 +36,7 @@ export default class SoulsLeverNode extends Node {
     if (this.pulled) return
     this.pulled = true
     this._t = 0
-    ;(player as any).playGesture?.('Souls_Interact', 0.9)
+    ;(player as any).playGesture?.('Interact', 0.9)
     const gm = this._gm as any
     playSound(this, 'Lever')
     const door = this.findNode(this.doorName) as any

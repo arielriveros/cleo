@@ -65,22 +65,24 @@ function idleClip(): Animation {
 }
 
 /**
- * The rest pose with the RIGHT leg raised `h` — one foot mid-stride while the other stands.
+ * The rest pose with one leg (the RIGHT unless told otherwise) raised `h` — one foot mid-stride while the
+ * other stands.
  *
  * Lifts the THIGH, not the ankle, so the whole leg rises with its bone lengths intact and the only thing that
  * differs between the two legs is ankle height. Giving the right leg shorter rest offsets instead would
  * conflate "lifted" with "shorter", and the solver cares about both.
  */
-function liftedClip(h: number): Animation {
+function liftedClip(h: number, side: 'left' | 'right' = 'right'): Animation {
+    const [thigh, x] = side === 'right' ? [THIGH_R, 0.2] : [THIGH, 0];
     return {
         name: 'idle',
         samplers: [
             { input: [0, 1], output: [0, 2, 0, 0, 2, 0], interpolation: 'LINEAR' },
-            { input: [0, 1], output: [0.2, h, 0, 0.2, h, 0], interpolation: 'LINEAR' },
+            { input: [0, 1], output: [x, h, 0, x, h, 0], interpolation: 'LINEAR' },
         ],
         channels: [
             { samplerIndex: 0, targetNodeIndex: HIPS, targetPath: 'translation' },
-            { samplerIndex: 1, targetNodeIndex: THIGH_R, targetPath: 'translation' },
+            { samplerIndex: 1, targetNodeIndex: thigh, targetPath: 'translation' },
         ],
     };
 }
@@ -106,6 +108,25 @@ function stubPhysics(groundY: number | null, normal: vec3 = vec3.fromValues(0, 1
                 };
             },
         },
+    };
+}
+
+/**
+ * A raycast against ground whose height varies along X and not along Z: a slope running ACROSS the character,
+ * so its two feet (left at x = 0, right at x = 0.2) stand at different heights. The normal is the surface's.
+ */
+function slopedRaycast(groundAt: (x: number) => number) {
+    return (from: vec3, to: vec3) => {
+        const y = groundAt(from[0]);
+        if (from[1] < y || to[1] > y) return null;
+        const e = 1e-4, rise = (groundAt(from[0] + e) - groundAt(from[0] - e)) / (2 * e);
+        return {
+            point: vec3.fromValues(from[0], y, from[2]),
+            normal: vec3.normalize(vec3.create(), vec3.fromValues(-rise, 1, 0)),
+            distance: from[1] - y,
+            body: null as any,
+            node: null,
+        };
     };
 }
 
@@ -647,5 +668,64 @@ describe('Animator — foot IK, both legs alike', () => {
         expect(hips[2]).toBeCloseTo(0, 4);     // …not shoved forward
         expect(jointPos(a, FOOT)[1]).toBeCloseTo(-0.2, 2);
     });
+});
+
+// ----- slopes: the ground under the two feet differs, and that is not a stride ---------------------------------
+
+/**
+ * The swing/stance split used to measure a foot's lift as its clearance above its OWN ground, relative to the
+ * other foot's. On flat ground that is the stride; across a slope it is not — the difference in ground height
+ * under the two feet read as lift. Standing, the downhill foot was released and floated. Walking, the uphill
+ * swing foot became the "planted" reference and was pulled down onto the slope, so that leg never lifted.
+ * Every case runs with the slope rising to each side: nothing about it is specific to one leg.
+ */
+describe('Animator — foot IK on a slope', () => {
+    const SIDES = [
+        { uphill: 'right', up: FOOT_R, down: FOOT, xUp: 0.2, xDown: 0 },
+        { uphill: 'left', up: FOOT, down: FOOT_R, xUp: 0, xDown: 0.2 },
+    ] as const;
+    /** Ground through `yDown` under the downhill foot and `yUp` under the uphill one, linear between. */
+    const across = (s: typeof SIDES[number], yDown: number, yUp: number) =>
+        (x: number) => yDown + (yUp - yDown) * (x - s.xDown) / (s.xUp - s.xDown);
+
+    for (const s of SIDES) {
+        it(`plants both feet standing across a slope (${s.uphill} foot uphill)`, () => {
+            // 45 degrees across 0.2 m of stance: the downhill ankle wants -0.1, the uphill one +0.1.
+            const { animator, stub } = makeAnimator(RIG2, 0);
+            (stub.physics as any).raycast = slopedRaycast(across(s, -0.2, 0));
+            animator.playAnimationByName('idle', true, false);
+            step(animator);
+
+            // The pelvis drops for the downhill foot, the uphill knee bends for the other. 2 dp on the downhill
+            // foot: it reaches at full stretch, into the DEFAULT_MAX_REACH shortfall.
+            expect(jointPos(animator, HIPS)[1]).toBeCloseTo(1.9, 4);
+            expect(jointPos(animator, s.down)[1]).toBeCloseTo(-0.1, 2);
+            expect(jointPos(animator, s.up)[1]).toBeCloseTo(0.1, 4);
+        });
+
+        it(`keeps a ${s.uphill} swing foot lifted over ground rising under it`, () => {
+            // The swing foot is 0.25 up; its ground is 0.15 higher than the stance foot's but still under it.
+            // Planting it there would flatten the stride onto the slope.
+            const { animator, stub } = makeAnimator(RIG2, 0, { clip: liftedClip(0.25, s.uphill) });
+            (stub.physics as any).raycast = slopedRaycast(across(s, -0.1, 0.05));
+            animator.playAnimationByName('idle', true, false);
+            step(animator);
+
+            expect(jointPos(animator, s.up)[1]).toBeCloseTo(0.25, 4);
+            expect(jointPos(animator, s.down)[1]).toBeCloseTo(0, 2);   // straight, so the maxReach shortfall
+        });
+
+        it(`still pushes a ${s.uphill} swing foot up out of ground rising above it`, () => {
+            // Released or not, a foot is never left INSIDE the ground: its ground is at 0.3, above the 0.25 the
+            // animation lifted it to, so it goes up to 0.4.
+            const { animator, stub } = makeAnimator(RIG2, 0, { clip: liftedClip(0.25, s.uphill) });
+            (stub.physics as any).raycast = slopedRaycast(across(s, -0.1, 0.3));
+            animator.playAnimationByName('idle', true, false);
+            step(animator);
+
+            expect(jointPos(animator, s.up)[1]).toBeCloseTo(0.4, 4);
+            expect(jointPos(animator, s.down)[1]).toBeCloseTo(0, 2);   // straight, so the maxReach shortfall
+        });
+    }
 });
 

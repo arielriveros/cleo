@@ -1,5 +1,5 @@
 import { Node } from 'cleo'
-import type { ClipName, NodeName, SoundName, TemplateName } from 'cleo'
+import type { NodeName, SoundName, TemplateName, TriggerName } from 'cleo'
 
 /**
  * Hollow Keep — one attack of an enemy's moveset. Attach to a plain child of the enemy's `Attacks`
@@ -11,6 +11,12 @@ import type { ClipName, NodeName, SoundName, TemplateName } from 'cleo'
  * `minRange`..`maxRange` contains the distance to the player, and whose `phase` it has reached (0/1:
  * always; 2: boss phase two only). It avoids repeating the last one when anything else fits, then rolls
  * weighted by `weight`. See SoulsEnemy.pickAttack.
+ *
+ * ## Animation
+ *
+ * `animTrigger` names the animator trigger that plays the attack: the enemy type's animator has a state entered
+ * by it, whose clip, speed and blends are the attack's animation. It plays at its speed times the animator's
+ * `AttackSpeed` (raised in a boss's second phase).
  *
  * ## Timing
  *
@@ -28,8 +34,8 @@ import type { ClipName, NodeName, SoundName, TemplateName } from 'cleo'
  * distance to the player (capped at `lungeSpeed`) — the boss's leap. Clips must be in place.
  */
 export default class SoulsEnemyAttackNode extends Node {
-  public clip: ClipName = 'Souls_Enemy_Swing'
-  public playSpeed: number = 1
+  /** The animator trigger that plays this attack. Empty: the node's name. */
+  public animTrigger: TriggerName = ''
   public damage: number = 70
   public poiseDamage: number = 20
   public minRange: number = 0

@@ -19,7 +19,8 @@ that goes back to the home page. A reload keeps the tool that was open; a new wi
 Open it from the Editor's menu bar (**Creator**), or run `npm run dev:all` at the repository root and go
 to `http://localhost:8080/creator/`. It lives on the Editor's origin, under `/creator/`, so the two
 share one asset library (see [Saved assets](#saved-assets)). `npm run creator:dev` still runs it alone, on
-port 8081. The desktop app opens it as a second window.
+port 8081. The desktop app opens it as a second window. `npm run editor:dev` and `npm run desktop:dev` start
+the Editor alone; to open the Creator from them, run `npm run creator:serve` alongside.
 
 ## Layout
 

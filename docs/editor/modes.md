@@ -43,17 +43,18 @@ Landscape and Tilemap share one slot, chosen by the scene's authored dimension �
 
 | Mode | Viewport | Panels |
 |---|---|---|
-| `scene` | 3D/2D scene | Everything: tree, both Add palettes, Properties, Scripts, Physics, Logger, Assets |
-| `template` | The template's own scene | Same as Scene, with the tree rooted at the template root |
-| `landscape` | Scene + brush | Tree, Properties, Add palettes, plus a floating brush card. **No Scripts, no Physics** |
+| `scene` | 3D/2D scene | Everything: tree, **Scene Elements**, Properties, Scripts, Physics, Logger, Assets |
+| `template` | The template's own scene | Same as Scene, with the tree rooted at the template root, and **both** Add palettes |
+| `landscape` | Scene + brush | Tree, Properties, **Scene Elements**, plus a floating brush card. **No Scripts, no Physics** |
 | `tilemap` | Scene + tools | Tree, Properties, **Tiles**, **Layers**, plus a floating tool card. No Scripts, no Physics |
-| `ui` | Scene + DOM overlay | Everything except **Physics** — a screen rectangle has no rigid body |
+| `ui` | Scene + DOM overlay | Everything except **Physics** — a screen rectangle has no rigid body — with **UI Elements** in place of Scene Elements |
 | `options` | Live render | **Only** the Engine, Editor and Project panels |
 | `material` | Preview sphere | Properties, titled *Material*. No tree, no Add palettes |
 | `terrainMaterial` | Preview sphere | Properties, titled *Landscape Material* |
 | `model` | Model preview | Model inspector plus the node property editor |
 | `animation` | Character + skeleton | Scene panel becomes **Skeleton**, plus **Clips**, **Variables**, **State Machine**. *Properties hidden* |
 | `animationField` | Character preview | **Field Settings** on the right, **Blend Space** plot at the bottom |
+| `rig` | Character + skeleton | Scene panel becomes **Skeleton**; Properties, titled *Skeleton*, with **Ragdoll** and **Bone Masks** tabs beside it |
 | `aiBrain` | *(full-panel graph)* | The graph canvas fills the viewport area. Properties (titled *Brain*), Logger, Assets |
 | `particleSystem` | The effect over a ground plane | Properties (titled *Particle System*) holds the emitter stack; **Particle Preview** transport at the bottom. No tree, no gizmo |
 | `script` | *(full-panel editor)* | The code editor. Logger and Assets only |

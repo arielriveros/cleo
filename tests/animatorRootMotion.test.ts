@@ -319,3 +319,65 @@ describe('Animator — root motion from an action', () => {
         expect(node.position[0]).toBe(0);
     });
 });
+
+describe('Animator ? an Actions layer state that extracts its root travel', () => {
+    const still = (): Animation => ({ ...rmTranslate('still', 0, 1), rootMotion: false });
+    const actions = (extra: object = {}) => ({
+        parameters: [{ name: 'Roll', type: 'trigger' as const, default: false }],
+        states: [{ name: 'Idle', clipName: 'still', loop: true, speed: 1, isEntry: true }],
+        transitions: [],
+        events: [],
+        layers: [{
+            name: 'Actions',
+            states: [
+                { name: 'Off', clipName: '', loop: true, speed: 1, isEntry: true },
+                { name: 'Roll', clipName: 'roll', loop: false, speed: 1, extractRootMotion: true, ikWeight: 0, ...extra },
+            ],
+            transitions: [{ from: '*', to: 'Roll', conditions: [], condition: { op: 'and' as const, children: [{ param: 'Roll', op: 'trigger' as const }] }, blendTime: 0.001 }],
+        }],
+    });
+
+    it('hands the travel to consumeRootMotion instead of moving anything', () => {
+        const node: any = makeNode();
+        node.worldTransform = mat4.create();
+        const clip = rmTranslate('roll', 2, 1);
+        clip.rootMotion = false;
+        const a = makeAnimator([still(), clip], node);
+        a.setStateMachine(actions());
+        a.checkTriggers(); a.update(1 / 60);
+        a.consumeRootMotion();
+        a.setTrigger('Roll');
+        a.checkTriggers();
+        a.update(0.5);
+        expect(a.layerStateName('Actions')).toBe('Roll');
+        expect(a.consumeRootMotion()[0]).toBeCloseTo(1, 4);
+        expect(node.position[0]).toBe(0);
+        a.update(0.25);
+        expect(a.consumeRootMotion()[0]).toBeCloseTo(0.5, 4);
+    });
+
+    it('collects nothing from a state that does not ask', () => {
+        const node: any = makeNode();
+        node.worldTransform = mat4.create();
+        const clip = rmTranslate('roll', 2, 1);
+        clip.rootMotion = false;
+        const a = makeAnimator([still(), clip], node);
+        a.setStateMachine(actions({ extractRootMotion: false }));
+        a.setTrigger('Roll');
+        a.checkTriggers();
+        a.update(0.5);
+        expect(a.consumeRootMotion()[0]).toBe(0);
+    });
+
+    it('lowers foot IK by the layer state\'s weight, as far as the layer shows', () => {
+        const a: any = makeAnimator([still(), rmTranslate('roll', 2, 1)], makeNode());
+        a.setStateMachine(actions());
+        a.checkTriggers(); a.update(1 / 60);
+        expect(a._stateIkWeight()).toBe(1);                 // at rest: the layer adds nothing
+        a.setTrigger('Roll');
+        a.checkTriggers(); a.update(1 / 60);
+        expect(a._stateIkWeight()).toBe(0);
+        a._overlays[0].presence = 0.25;
+        expect(a._stateIkWeight()).toBeCloseTo(0.75, 6);
+    });
+});

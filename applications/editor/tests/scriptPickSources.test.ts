@@ -24,6 +24,20 @@ function enemy() {
 }
 
 describe('pickChoices', () => {
+  it('offers every shared animator\'s triggers, by animator, when no character is above (a weapon move)', () => {
+    const { swing } = enemy()
+    const machine = (...triggers: string[]) => ({
+      parameters: [{ name: 'Speed', type: 'float', default: 0 }, ...triggers.map(name => ({ name, type: 'trigger', default: false }))],
+      states: [], transitions: [], events: [],
+    }) as any
+    const animControllers = [{ name: 'Souls Character', machine: machine('Roll', 'Longsword Light1') }, { name: 'Souls Hollow', machine: machine('Swing') }]
+    expect(pickChoices('trigger', swing, ctx({ animControllers }))).toEqual([
+      { value: 'Roll', group: 'Souls Character' },
+      { value: 'Longsword Light1', group: 'Souls Character' },
+      { value: 'Swing', group: 'Souls Hollow' },
+    ])
+  })
+
   it('offers the cues of the nearest Sounds group above, and only SoundNodes', () => {
     const { swing } = enemy()
     expect(pickChoices('sound', swing, ctx()).map(c => c.value)).toEqual(['Enemy Swing', 'Stagger'])
