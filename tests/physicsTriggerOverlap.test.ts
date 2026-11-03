@@ -5,7 +5,6 @@ import { Node } from '../src/core/scene/nodes/node';
 import { Trigger, type TriggerOptions, type TriggerContact } from '../src/physics/body';
 import { physicsStats } from '../src/physics/physicsStats';
 import { localPrims } from '../src/physics/triggerOverlaps';
-import { cannonColliderParts } from '../src/physics/pal/cannon/parts';
 
 // Trigger volumes against OTHER trigger volumes. cannon drops every static-static pair in its broadphase
 // and every engine trigger is static, so these come from the engine's own pass (triggerOverlaps.ts), run
@@ -37,7 +36,14 @@ function trigger(p: PhysicsSystem, owner: Node, at: V3, opts: TriggerOptions, r 
     return t;
 }
 
-function moveTo(t: Body, at: V3) { t.position.set(at[0], at[1], at[2]); t.aabbNeedsUpdate = true; }
+function moveTo(t: Trigger, at: V3) { t.position.set(at[0], at[1], at[2]); }
+
+/** The engine's capsule as Node.parse attaches it: a cylinder and its two end caps. */
+function engineCapsule(t: Trigger): void {
+    t.addCollider({ shape: { kind: 'cylinder', radiusTop: 0.3, radiusBottom: 0.3, height: 1.2, segments: 12 }, offset: [0, 0.9, 0] });
+    t.addCollider({ shape: { kind: 'sphere', radius: 0.3 }, offset: [0, 1.5, 0] });
+    t.addCollider({ shape: { kind: 'sphere', radius: 0.3 }, offset: [0, 0.3, 0] });
+}
 
 /** A vertical capsule standing at `at` (the hurtbox shape: a cylinder plus end spheres). */
 function hurtbox(p: PhysicsSystem, owner: Node, at: V3, opts: TriggerOptions = { group: HURTBOX, mask: HITBOX }, radius = 0.3, height = 1.8): Trigger {
@@ -177,19 +183,17 @@ describe('trigger ↔ trigger overlaps', () => {
         const owner = new Node('o');
         const t = new Trigger({}, owner);
         // The engine's capsule, as Node.parse builds it.
-        t.addShape(new Cylinder(0.3, 0.3, 1.2, 12), new Vec3(0, 0.9, 0));
-        t.addShape(new Sphere(0.3), new Vec3(0, 1.5, 0));
-        t.addShape(new Sphere(0.3), new Vec3(0, 0.3, 0));
-        const prims = localPrims(cannonColliderParts(t));
+        engineCapsule(t);
+        const alone = physics();
+        alone.addBody(t);
+        const prims = localPrims(alone.colliderParts(t));
         expect(prims).toHaveLength(1);
         expect(Array.from(prims[0].la)).toEqual([0, 0.3, 0].map(v => expect.closeTo(v, 6)));
 
         const p = physics();
         const box = new Probe('hurtbox'), hit = new Probe('hitbox');
         const hb = new Trigger({ group: HURTBOX, mask: HITBOX }, box);
-        hb.addShape(new Cylinder(0.3, 0.3, 1.2, 12), new Vec3(0, 0.9, 0));
-        hb.addShape(new Sphere(0.3), new Vec3(0, 1.5, 0));
-        hb.addShape(new Sphere(0.3), new Vec3(0, 0.3, 0));
+        engineCapsule(hb);
         p.addBody(hb);
         const contacts: TriggerContact[] = [];
         const blade = trigger(p, hit, [0, 1.1, 0], { group: HITBOX, mask: HURTBOX, detectTriggers: true }, 0.1, [-1, 0, 0.35], [1, 0, 0.35]);
@@ -209,12 +213,12 @@ describe('trigger ↔ trigger overlaps', () => {
         p.addBody(body);
         const hb = hurtbox(p, hurt, [0, 0, 0]);
         p.update(1 / 60);
-        const world = (p as any)._cannon.raw;
-        expect(world.contacts.some((c: any) => c.bi === hb || c.bj === hb)).toBe(false);
-        // Without the mask, cannon would build full contact equations for the pair every substep.
+        const touches = () => { let n = 0; (p as any)._world.forEachContact((a: number, b: number) => { if (a === hb.id || b === hb.id) n++; }); return n > 0; };
+        expect(touches()).toBe(false);
+        // Without the mask, the backend would build full contact equations for the pair every substep.
         hb.mask = -1;
         p.update(1 / 60);
-        expect(world.contacts.some((c: any) => c.bi === hb || c.bj === hb)).toBe(true);
+        expect(touches()).toBe(true);
     });
 
     it('counts its work in the physics stats', () => {
@@ -257,7 +261,7 @@ describe('node trigger lifecycle', () => {
         p.update(1 / 60);
         n.setTrigger().setCapsule([0, 0, 0], [0, 0, 0], 2);
         p.update(1 / 60);
-        const triggers = (p as any)._cannon.raw.bodies.filter((b: Body) => b.isTrigger);
+        const triggers = p.bodies.filter(b => b.isTrigger);
         expect(triggers).toEqual([n.trigger]);
         expect([...p.triggers]).toEqual([n.trigger]);
     });
@@ -276,7 +280,7 @@ describe('node trigger lifecycle', () => {
         expect(p.triggerVersion).not.toBe(before);
         p.update(1 / 60);
         expect(blade.log).toEqual(['enter zone', 'exit zone']);
-        expect((p as any)._cannon.raw.bodies.filter((b: Body) => b.isTrigger)).toHaveLength(1);
+        expect(p.bodies.filter(b => b.isTrigger)).toHaveLength(1);
     });
 
     it('reads the trigger options from scene JSON', () => {

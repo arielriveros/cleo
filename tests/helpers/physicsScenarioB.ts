@@ -1,4 +1,3 @@
-import type { Body } from 'cannon-es';
 import { quat } from 'gl-matrix';
 import { PhysicsSystem } from '../../src/physics/physicsSystem';
 import { RigidBody, Trigger } from '../../src/physics/body';
@@ -7,6 +6,7 @@ import { Node } from '../../src/core/scene/nodes/node';
 import type { ModelNode } from '../../src/core/scene/nodes/modelNode';
 import { WaterVolumeNode } from '../../src/core/scene/nodes/waterVolumeNode';
 import { FoliageColliderField } from '../../src/terrain/foliageColliders';
+import type { PhysicsBody } from '../../src/physics/physicsBody';
 
 // The second pinned physics scene: what physicsScenario.ts leaves out. A dynamic body whose collider is
 // offset from its node (so its centre of mass is too), a cube created already rotated, a continuous
@@ -47,10 +47,8 @@ function trunkLayer() {
     };
 }
 
-/** Where `b`'s NODE sits: a RigidBody/Trigger knows its centre-of-mass offset, a plain body has none. */
-function origin(b: Body): [number, number, number] {
-    const o = (b as any).originPosition;
-    if (typeof o === 'function') { const out: [number, number, number] = [0, 0, 0]; o.call(b, out); return out; }
+/** Where `b`'s NODE sits (an engine body's position is its node origin's, whatever its centre of mass). */
+function origin(b: PhysicsBody): [number, number, number] {
     return [b.position.x, b.position.y, b.position.z];
 }
 
@@ -78,7 +76,7 @@ export function runScenarioB(p: PhysicsSystem, mannequin: (() => ModelNode) | nu
     offset.attachShape(Shape.Box(1, 0.5, 1), [0.4, 0.2, 0]);
     offset.recenterMass();
     p.addBody(offset);
-    offset.addEventListener('collide', (e: any) => events.push(`Offset hit ${e.body?.owner?.name ?? '?'}`));
+    offset.onCollide(other => events.push(`Offset hit ${other.owner?.name ?? '?'}`));
 
     // A cube created already rotated (its inertia is measured with that rotation taken out).
     const cube = new RigidBody({ mass: 3, position: [2, 4, -5], quaternion: quat.fromEuler(quat.create(), 30, 45, 10) as any, restitution: 0.2 }, new Node('Cube'));
@@ -125,7 +123,7 @@ export function runScenarioB(p: PhysicsSystem, mannequin: (() => ModelNode) | nu
     const ragdollNode = mannequin ? mannequin() : null;
     let ragdollBodies: any[] = [];
 
-    const tracked: Body[] = [offset, cube, ball, floater, nest];
+    const tracked: PhysicsBody[] = [offset, cube, ball, floater, nest];
     const trace: ScenarioBTrace = { states: [], queries: [], events, foliage: [] };
 
     for (let frame = 0; frame < frames + lag; frame++) {
@@ -163,7 +161,6 @@ export function runScenarioB(p: PhysicsSystem, mannequin: (() => ModelNode) | nu
         // The blade crosses the hurtbox in 0.6 m strides (wider than the hurtbox), and comes back.
         const bx = f < 40 ? 2 + f * 0.6 : f < 80 ? 26 - (f - 40) * 0.6 : 2;
         blade.position.set(bx, 1, 4);
-        blade.aabbNeedsUpdate = true;
 
         // The foliage: around the nest, then the camera leaves (every trunk evicted), then returns.
         const camAt = f < 60 || f >= 120 ? [-17, 2, -17] : [100, 2, 100];

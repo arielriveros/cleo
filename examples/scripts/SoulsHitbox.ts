@@ -197,11 +197,10 @@ export function ensureHurtbox(owner: Node): any {
   if (existing?.trigger) return existing
   const body = (owner as any).body
   if (!body) return null
-  body.updateAABB?.()
-  const lo = body.aabb.lowerBound, hi = body.aabb.upperBound
-  const radius = Math.max(0.05, Math.min(hi.x - lo.x, hi.z - lo.z) / 2)
+  const [lx, ly, lz, hx, hy, hz] = body.getAabb([0, 0, 0, 0, 0, 0])
+  const radius = Math.max(0.05, Math.min(hx - lx, hz - lz) / 2)
   const base = owner.worldPosition
-  const bottom = lo.y - base[1], top = hi.y - base[1]
+  const bottom = ly - base[1], top = hy - base[1]
   const node = existing ?? new Node(HURTBOX)
   if (!existing) owner.addChild(node)
   node.setTrigger({ group: hurtboxLayer((owner as any).team), mask: LAYER.HITBOX, detectTriggers: true })

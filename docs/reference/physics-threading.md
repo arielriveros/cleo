@@ -28,11 +28,13 @@ costs, and its switch sets that same per-machine override. The numbers are also 
 
 Everything a script touches stays on the main thread and keeps working unchanged:
 
-- `node.body` is still the real cannon body. Writing its velocity, applying a force or an impulse,
-  teleporting it, putting it to sleep: all of it is picked up at the end of the frame and sent to the worker.
+- `node.body` reads and writes the main thread's copy of the world. Writing its velocity, applying a force
+  or an impulse, teleporting it, putting it to sleep: all of it is picked up at the end of the frame and
+  sent to the worker.
 - Raycasts, overlaps and sweeps, the ground probe, `isGrounded`, the camera boom, triggers and the
   trigger-to-trigger pass all run on the main thread against the same bodies.
-- Trigger enter and exit, first-contact `collide` events, buoyancy and ragdolls behave the same.
+- Trigger enter and exit, first contacts (`onCollision`, `body.onCollide`), buoyancy and ragdolls behave
+  the same. First contacts are delivered after the step, on the main thread as in the worker.
 
 ## What changes
 
@@ -55,8 +57,6 @@ Everything a script touches stays on the main thread and keeps working unchanged
   turned from where the step left it, and a velocity component written replaces only that component.
 - **Switching over freezes nothing.** The world is sent to the worker while the main thread keeps stepping
   it. The worker takes over once it has answered.
-- **`collide` events arrive without a `contact`.** The event still names the other body.
-- A `collide` handler that changes velocities acts one step later than inline, where it ran mid-step.
 
 ## How it works
 

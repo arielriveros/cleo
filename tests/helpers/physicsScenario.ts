@@ -1,6 +1,7 @@
-import { Body, Box, ConeTwistConstraint, Cylinder, HingeConstraint, LockConstraint, PointToPointConstraint, Sphere, Vec3, Quaternion } from 'cannon-es';
+import { Quaternion } from 'cannon-es';
 import { PhysicsSystem } from '../../src/physics/physicsSystem';
 import { RigidBody, Trigger } from '../../src/physics/body';
+import { PhysicsBody } from '../../src/physics/physicsBody';
 import { Shape } from '../../src/physics/shape';
 import { Node } from '../../src/core/scene/nodes/node';
 import { WaterVolumeNode } from '../../src/core/scene/nodes/waterVolumeNode';
@@ -59,10 +60,9 @@ export function runScenario(p: PhysicsSystem, frames = 300, dt = 1 / 60, lag = 0
     const rows = 20, cols = 20;
     const heights: number[][] = [];
     for (let i = 0; i < rows; i++) { heights.push([]); for (let j = 0; j < cols; j++) heights[i].push(0.3 * Math.sin(i * 0.7) * Math.cos(j * 0.5)); }
-    const field = new Body({ mass: 0 });
-    field.addShape(Shape.Heightfield(heights, 1).cShape);
-    field.position.set(-10, 0.05, 30);
-    field.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+    // Laid from its corner, i along +X, j along -Z (the physics layer's heightfield).
+    const field = new PhysicsBody({ position: [-10, 0.05, 30] });
+    field.addCollider({ shape: Shape.Heightfield(heights, 1).desc });
     p.addBody(field);
     const roller = new RigidBody({ mass: 3, position: [-5, 2, 25] }, new Node('Roller'));
     roller.attachShape(Shape.Sphere(0.4));
@@ -78,7 +78,7 @@ export function runScenario(p: PhysicsSystem, frames = 300, dt = 1 / 60, lag = 0
         p.addBody(b);
         boxes.push(b);
     }
-    boxes[0].addEventListener('collide', (e: any) => collides.push(`Box0 hit ${e.body?.owner?.name ?? '?'}`));
+    boxes[0].onCollide(other => collides.push(`Box0 hit ${other.owner?.name ?? '?'}`));
 
     // The character: a capsule steered by velocity every frame, with a ground probe.
     const hero = new Node('Hero', 'character');
@@ -100,29 +100,30 @@ export function runScenario(p: PhysicsSystem, frames = 300, dt = 1 / 60, lag = 0
     crate.attachShape(Shape.Box(1, 1, 1));
     p.addBody(crate);
 
-    // A jointed chain: every constraint a ragdoll uses.
-    const links: Body[] = [];
+    // A jointed chain: every joint a ragdoll uses.
+    const links: PhysicsBody[] = [];
     for (let i = 0; i < 4; i++) {
-        const link = new Body({ mass: 1, position: new Vec3(-8, 4 - i * 0.6, -6) });
-        link.addShape(i % 2 ? new Sphere(0.15) : new Cylinder(0.1, 0.1, 0.5, 8));
+        const link = new PhysicsBody({ mass: 1, position: [-8, 4 - i * 0.6, -6] });
+        link.addCollider({ shape: i % 2 ? { kind: 'sphere', radius: 0.15 } : { kind: 'cylinder', radiusTop: 0.1, radiusBottom: 0.1, height: 0.5, segments: 8 } });
         p.addBody(link);
         links.push(link);
     }
-    const anchor = new Body({ mass: 0, position: new Vec3(-8, 4.6, -6) });
-    anchor.addShape(new Sphere(0.05));
+    const anchor = new PhysicsBody({ position: [-8, 4.6, -6] });
+    anchor.addCollider({ shape: { kind: 'sphere', radius: 0.05 } });
     p.addBody(anchor);
-    p.addConstraint(new PointToPointConstraint(anchor, new Vec3(0, -0.3, 0), links[0], new Vec3(0, 0.3, 0)));
-    p.addConstraint(new ConeTwistConstraint(links[0], links[1], { pivotA: new Vec3(0, -0.3, 0), pivotB: new Vec3(0, 0.3, 0), axisA: Vec3.UNIT_Y, axisB: Vec3.UNIT_Y, angle: 0.6, twistAngle: 0.3 }));
-    p.addConstraint(new HingeConstraint(links[1], links[2], { pivotA: new Vec3(0, -0.3, 0), pivotB: new Vec3(0, 0.3, 0), axisA: Vec3.UNIT_X, axisB: Vec3.UNIT_X }));
-    p.addConstraint(new LockConstraint(links[2], links[3]));
-    links[3].applyImpulse(new Vec3(2, 0, 0.5));
+    // A ball and a fixed joint let their two bodies collide, as cannon's point and lock constraints do.
+    p.addJoint(anchor, links[0], { kind: 'ball', anchorA: [0, -0.3, 0], anchorB: [0, 0.3, 0], collideConnected: true });
+    p.addJoint(links[0], links[1], { kind: 'coneTwist', anchorA: [0, -0.3, 0], anchorB: [0, 0.3, 0], axisA: [0, 1, 0], axisB: [0, 1, 0], coneAngle: 0.6, twistAngle: 0.3 });
+    p.addJoint(links[1], links[2], { kind: 'hinge', anchorA: [0, -0.3, 0], anchorB: [0, 0.3, 0], axisA: [1, 0, 0], axisB: [1, 0, 0] });
+    p.addJoint(links[2], links[3], { kind: 'fixed', collideConnected: true });
+    links[3].applyImpulse([2, 0, 0.5]);
 
     // A body far out of the simulation range: frozen until the camera comes to it.
     const far = new RigidBody({ mass: 5, position: [45, 3, 0] }, new Node('Far'));
     far.attachShape(Shape.Sphere(0.5));
     p.addBody(far);
 
-    const tracked: Body[] = [roller, ...boxes, body, crate, ...links, far];
+    const tracked: PhysicsBody[] = [roller, ...boxes, body, crate, ...links, far];
     const trace: ScenarioTrace = { states: [], triggers: log, collides, grounded: [], frozen: [] };
 
     for (let frame = 0; frame < frames + lag; frame++) {
@@ -145,9 +146,9 @@ export function runScenario(p: PhysicsSystem, frames = 300, dt = 1 / 60, lag = 0
         body.velocity.x = f < 180 ? 2 : 0;
         body.wakeForMotion();
         // A shove, a steady push, a teleport.
-        if (f === 50) boxes[9].applyImpulse(new Vec3(-6, 2, 0));
-        if (f >= 60 && f < 90) boxes[8].applyForce(new Vec3(0, 0, 30));
-        if (f === 120) { boxes[5].position.set(3, 6, 2); boxes[5].quaternion.copy(new Quaternion().setFromEuler(0.3, 0.2, 0.1)); boxes[5].aabbNeedsUpdate = true; boxes[5].wakeUp(); }
+        if (f === 50) boxes[9].applyImpulse([-6, 2, 0]);
+        if (f >= 60 && f < 90) boxes[8].applyForce([0, 0, 30]);
+        if (f === 120) { boxes[5].position.set(3, 6, 2); boxes[5].quaternion.copy(new Quaternion().setFromEuler(0.3, 0.2, 0.1)); boxes[5].wakeUp(); }
         // The camera walks out to the far body, which thaws, then comes back.
         if (f === 150) camera.worldPosition = [40, 2, 0];
         if (f === 240) camera.worldPosition = [0, 2, 0];

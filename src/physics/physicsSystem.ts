@@ -39,6 +39,8 @@ const isOn = (body: AnyBody): boolean => !(body instanceof Trigger) || body.enab
 const epochOf = (body: AnyBody): number => (body instanceof Trigger ? body.rearmEpoch : 0);
 /** Whether a body is asleep (or held asleep). */
 const asleep = (body: AnyBody): boolean => (body instanceof PhysicsBody ? body.isSleeping : body.sleepState === Body.SLEEPING);
+/** Whether a body is moved by the simulation. */
+const isDynamic = (body: AnyBody): boolean => (body instanceof PhysicsBody ? body.isDynamic : body.type === Body.DYNAMIC);
 
 /** A joint as PhysicsSystem.addJoint takes it: a JointDesc between two engine bodies. */
 export type JointSpec = JointDesc extends infer J ? J extends JointDesc ? Omit<J, 'a' | 'b'> : never : never;
@@ -47,7 +49,7 @@ export type JointSpec = JointDesc extends infer J ? J extends JointDesc ? Omit<J
  * A body's forward axis in world space: its local +Z rotated by its orientation, written into `out`.
  * +Z matches the engine's node convention (see `Node.worldForward`).
  */
-function bodyForward(body: Body, out: vec3): vec3 {
+function bodyForward(body: { quaternion: { x: number; y: number; z: number; w: number } }, out: vec3): vec3 {
   const q = body.quaternion;
   const x = q.x, y = q.y, z = q.z, w = q.w;
   // The third column of the rotation matrix, expanded from the quaternion.
@@ -358,9 +360,9 @@ export class PhysicsSystem {
 
         if (node.body) {
           // Where the NODE sits, not where the body's centre of mass does: with an offset collider the
-          // two differ by RigidBody's centre-of-mass offset (see CBody.recenterMass).
-          const pos = node.body.originPosition(this._originScratch);
-          const asleep = node.body.sleepState === Body.SLEEPING;
+          // two differ by RigidBody's centre-of-mass offset (see RigidBody.recenterMass).
+          const pos = node.body.position.toArray();
+          const asleep = node.body.isSleeping;
 
           // Must sample after world.step() and before Scene.update runs every script's onUpdate, so a script
           // reading node.currentSpeed sees the step that just happened rather than last frame's.
@@ -384,8 +386,9 @@ export class PhysicsSystem {
             // then moves or turns it moves the body by the same amount (see Node._showSimulatedPose).
             const q = node.body.quaternion, simRotation = this._simRotation;
             simRotation[0] = q.x; simRotation[1] = q.y; simRotation[2] = q.z; simRotation[3] = q.w;
-            if (worker.visualPose(node.body, this._visualPose)) {
-              node.body.originOf(this._visualPose, this._visualOrigin);
+            const raw = this._cannon.bodyOf(node.body.handle);
+            if (raw && worker.visualPose(raw, this._visualPose)) {
+              this._world.colliderFrameToOrigin(node.body.handle, this._visualPose, this._visualOrigin);
               node._showSimulatedPose(this._visualOrigin, this._visualRotation, pos, simRotation);
             } else if (!asleep || node._drawnApart) {
               // Its own pose: nothing to interpolate. Once more after it falls asleep, to settle where it is.
@@ -406,22 +409,11 @@ export class PhysicsSystem {
             // STATIC: the body follows its node, so colliders in a moved group (or on a moving platform)
             // stay where they are drawn. Only when the node actually moved, which is rare.
             this._followVersion.set(node.body, node.transformVersion);
-            const wp = node.worldPosition, wq = node.worldQuaternion;
-            node.body.setPosition(vec3.clone(wp));
-            node.body.setQuaternion(quat.clone(wq));
-            node.body.aabbNeedsUpdate = true;
+            node.body.setTransform(node.worldPosition, node.worldQuaternion);
           }
         }
 
-        if (node.trigger) {
-          const pos = node.worldPosition;
-          node.trigger.position.set(pos[0], pos[1], pos[2]);
-
-          const quat = node.worldQuaternion;
-          node.trigger.quaternion.set(quat[0], quat[1], quat[2], quat[3]);
-          // Moved behind cannon's back (it only re-measures what it integrates).
-          node.trigger.aabbNeedsUpdate = true;
-        }
+        if (node.trigger) node.trigger.setTransform(node.worldPosition, node.worldQuaternion);
       }
       } finally {
         authoring.derived--;
@@ -491,12 +483,12 @@ export class PhysicsSystem {
     let active = 0, frozen = 0, resting = 0;
 
     for (const body of this._inWorld) {
-      if (!(body instanceof RigidBody) || body.type !== Body.DYNAMIC) continue;
+      if (!(body instanceof RigidBody) || !body.isDynamic) continue;
       let state = this._frozen.get(body);
 
       // Something else woke it: a hit from an awake body, an impulse, a force. Let it be. It is moving for
       // a reason, and refreezing it on the spot would swallow that. It may refreeze after a grace period.
-      if (state && body.sleepState !== Body.SLEEPING) {
+      if (state && !body.isSleeping) {
         this._frozen.delete(body);
         body.rangeFrozen = false;
         this._wokenAt.set(body, this._time);
@@ -622,7 +614,6 @@ export class PhysicsSystem {
   private _enterWorld(body: AnyBody): void {
     // Its surface: a RigidBody brings its own, anything else takes the default.
     if (body instanceof PhysicsBody) this._bodies.set(body._addTo(this._world), body);
-    else if (body instanceof RigidBody) this._cannon.adoptBody(body, body.friction, body.restitution);
     else this._cannon.adoptBody(body);
     this._inWorld.add(body);
     if (body instanceof Trigger) { this._triggers.add(body); this._localVersion++; }
@@ -652,11 +643,20 @@ export class PhysicsSystem {
 
   // ---- Trigger enter / exit ----
 
-  /** The step's trigger enter/exit, in the order the world reported them (see pal/ PhysicsEventKind). */
+  /**
+   * What the step reported, in the order the world reported it (see pal/ PhysicsEventKind): trigger
+   * enter/exit, kept for the once-a-frame diff, and first contacts, delivered to the bodies that listen.
+   */
   private _drainEvents(): void {
     this._world.drainEvents((kind, a, b) => {
-      if (kind === PhysicsEventKind.SensorBegin || kind === PhysicsEventKind.SensorEnd)
+      if (kind === PhysicsEventKind.ContactBegin) {
+        const self = this._bodyOf(a), other = this._bodyOf(b);
+        if (!(self instanceof PhysicsBody) || !(other instanceof PhysicsBody)) return;
+        try { self._emitCollide(other); }
+        catch (e) { Logger.error(`Error in a collision listener on ${self.name}: ${e}`, 'Script'); }
+      } else {
         this._onContact(this._bodyOf(a) ?? null, this._bodyOf(b) ?? null, kind === PhysicsEventKind.SensorBegin);
+      }
     });
   }
 
@@ -736,13 +736,13 @@ export class PhysicsSystem {
       if (!(self instanceof Trigger)) continue;
       const count = (this._overlapCount.get(self) ?? 0) + (phase === 'enter' ? 1 : -1);
       if (count > 0) this._overlapCount.set(self, count); else this._overlapCount.delete(self);
-      if (!self.hasAnyEventListener('triggerContact')) continue;
+      if (!self._hasContactListeners) continue;
       const owner = (other as any).owner;
       const contact: TriggerContact = {
-        phase, self, other: other as Body, node: owner instanceof Node ? owner : null,
+        phase, self, other: other as PhysicsBody, node: owner instanceof Node ? owner : null,
         point: point ? [point[0], point[1], point[2]] : null, fraction,
       };
-      try { self.dispatchEvent({ type: 'triggerContact', contact } as any); }
+      try { self._emitContact(contact); }
       catch (e) { Logger.error(`Error in a trigger contact listener on ${self.name}: ${e}`, 'Script'); }
     }
   }
@@ -767,7 +767,19 @@ export class PhysicsSystem {
    * not go through `addBody`. For systems that read the colliders wholesale (particle collision); scripts
    * want the shape queries below instead.
    */
-  public get bodies(): readonly Body[] { return this._world ? this._cannon.raw.bodies : []; }
+  public get bodies(): readonly AnyBody[] {
+    if (!this._world) return [];
+    const handles = this._world.bodies();
+    if (handles !== this._bodyListOf) {
+      this._bodyListOf = handles;
+      this._bodyList = [];
+      for (const h of handles) { const b = this._bodyOf(h); if (b) this._bodyList.push(b); }
+    }
+    return this._bodyList;
+  }
+  /** {@link bodies}, and the world's handle list it was made from (rebuilt only when that changes). */
+  private _bodyList: AnyBody[] = [];
+  private _bodyListOf: readonly BodyHandle[] | null = null;
 
   /**
    * Where each body's collision geometry is, as the backend simulates it (see pal/types.ts ColliderPart): what
@@ -798,14 +810,14 @@ export class PhysicsSystem {
     const gravity = Math.hypot(g[0], g[1], g[2]);
     const dt = substep > 0 ? substep : PhysicsSystem.MAX_SUBSTEP;
     const time = this._world.time;
-    const isCharacter = (b: Body) => (b as any).owner?.nodeType === 'character';
+    const isCharacter = (b: AnyBody) => (b as any).owner?.nodeType === 'character';
     for (const volume of volumes) {
       if (!volume.enabled) continue;
       const spec = volume.buoyancyVolume(time);
-      for (const body of this._cannon.raw.bodies) {
+      for (const body of this.bodies) {
         // applyForce wakes a sleeping body: a frozen floater would be thawed every substep.
-        if (body.sleepState === Body.SLEEPING) continue;
-        if (body.type !== Body.DYNAMIC || !floats(body, spec, isCharacter)) continue;
+        if (asleep(body)) continue;
+        if (!isDynamic(body) || !floats(body, spec, isCharacter)) continue;
         const fraction = applyBuoyancy(this._world, body.id as BodyHandle, body.mass, spec, gravity, dt);
         if (fraction > 0) volume.recordSubmerged(body, fraction);
       }
@@ -862,7 +874,7 @@ export class PhysicsSystem {
     const opts = options?.ignore
       ? { ...options, ignore: (Array.isArray(options.ignore) ? options.ignore : [options.ignore]).map(n => unwrapScriptNode(n)) }
       : options;
-    const hits = queryPoses(this._cannon.raw.bodies as unknown as OverlapBody[], poses, this._geometry, opts as OverlapOptions<OverlapBody>);
+    const hits = queryPoses(this.bodies as unknown as OverlapBody[], poses, this._geometry, opts as OverlapOptions<OverlapBody>);
     physicsStats.rayMs += performance.now() - start;
     physicsStats.rayCount++;
     return hits as unknown as OverlapHit<Body>[];
@@ -921,10 +933,10 @@ export class PhysicsSystem {
     // Ground probe. A resting contact blinks out for the odd frame (see GROUND_GRACE); bodies that opted in
     // (groundProbeDistance > 0) also get a short downward raycast feeding the SAME stamp, which never
     // vanishes. Off by default.
-    for (const body of this._cannon.raw.bodies) {
+    for (const body of this.bodies) {
       if (!(body instanceof RigidBody) || body.isTrigger || body.groundProbeDistance <= 0) continue;
       // Asleep: it has not moved, and its held stamp (see _holdGround) already answers isGrounded.
-      if (body.sleepState === Body.SLEEPING) continue;
+      if (body.isSleeping) continue;
       const hit = this._probeGround(body, downX, downY, downZ, body.groundProbeDistance);
       if (hit) this._record(body, hit.dot, hit.normal, hit.gap);
     }
@@ -936,24 +948,24 @@ export class PhysicsSystem {
    * surface normal, and the `gap` from the collider's lowest point to it — or null when nothing is below.
    */
   private _probeGround(
-    body: Body, downX: number, downY: number, downZ: number, probeDistance: number
+    body: RigidBody, downX: number, downY: number, downZ: number, probeDistance: number
   ): { dot: number; normal: [number, number, number]; gap: number } | null {
     if (!this._world) return null;
 
-    // Distance from the body centre to the AABB corner reaching furthest along "down"; each axis picks its
-    // own further bound, so this holds for any gravity direction.
-    body.updateAABB();
-    const lo = body.aabb.lowerBound, hi = body.aabb.upperBound, p = body.position;
+    // Distance from the body's centre (its collider frame: the centre of mass) to the bounds corner reaching
+    // furthest along "down"; each axis picks its own further bound, so this holds for any gravity direction.
+    const box = body.getAabb(this._probeBox), p = this._probeFrame;
+    body.getColliderFrame(p);
     const extent =
-      Math.max(downX * (lo.x - p.x), downX * (hi.x - p.x)) +
-      Math.max(downY * (lo.y - p.y), downY * (hi.y - p.y)) +
-      Math.max(downZ * (lo.z - p.z), downZ * (hi.z - p.z));
+      Math.max(downX * (box[0] - p[0]), downX * (box[3] - p[0])) +
+      Math.max(downY * (box[1] - p[1]), downY * (box[4] - p[1])) +
+      Math.max(downZ * (box[2] - p[2]), downZ * (box[5] - p[2]));
     const reach = extent + probeDistance;
     if (reach <= 0) return null;
 
     const hit = this.raycast(
-      [p.x, p.y, p.z],
-      [p.x + downX * reach, p.y + downY * reach, p.z + downZ * reach],
+      [p[0], p[1], p[2]],
+      [p[0] + downX * reach, p[1] + downY * reach, p[2] + downZ * reach],
       { ignore: body });
     if (!hit) return null;
 
@@ -965,6 +977,9 @@ export class PhysicsSystem {
     // Clamped at 0: it goes slightly negative while the collider is penetrating the surface.
     return { dot, normal: [n[0], n[1], n[2]], gap: Math.max(0, hit.distance - extent) };
   }
+
+  private readonly _probeBox = new Float64Array(6);
+  private readonly _probeFrame = new Float64Array(7);
 
   private _record(body: AnyBody, dot: number, normal: [number, number, number], gap?: number): void {
     if (body.isTrigger) return;
@@ -1082,10 +1097,10 @@ export class PhysicsSystem {
   private _updateAirborneTimes(deltaTime: number): void {
     // initialize() swallows a World construction failure, so every per-frame pass must tolerate no world.
     if (deltaTime <= 0 || !this._world) return;
-    for (const body of this._cannon.raw.bodies) {
+    for (const body of this.bodies) {
       if (!this._motion.has(body)) continue;
       // Frozen clocks for a frozen body: neither airborne nor grounded time passes for something asleep.
-      if (body.sleepState === Body.SLEEPING) continue;
+      if (asleep(body)) continue;
       let rec = this._airborne.get(body);
       if (!rec) { rec = { airTime: 0, groundedTime: 0 }; this._airborne.set(body, rec); }
       if (this.isGrounded(body)) {

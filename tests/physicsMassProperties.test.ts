@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { World, Body, Plane, Box as CannonBox, Sphere as CannonSphere, ConvexPolyhedron, Vec3, Quaternion } from 'cannon-es';
+import { Plane, Box as CannonBox, Sphere as CannonSphere, ConvexPolyhedron, Vec3, Quaternion } from 'cannon-es';
 import { shapeMassProperties, bodyCenterOfMass } from '../src/physics/pal/cannon/massProperties';
 import { RigidBody } from '../src/physics/body';
+import { PhysicsBody } from '../src/physics/physicsBody';
+import { PhysicsSystem } from '../src/physics/physicsSystem';
 import { Shape } from '../src/physics/shape';
 import { Node } from '../src/core/scene/nodes/node';
 
@@ -10,11 +12,11 @@ import { Node } from '../src/core/scene/nodes/node';
  * geometry. An offset collider therefore left the mass at the node origin with the geometry hanging off
  * it, and the ground's normal force — acting at the collider, with the offset as its lever arm — rotated
  * the body until the origin->collider vector lined up with the contact normal. Every object "stood up"
- * and tilted to match the terrain. `CBody.recenterMass` moves the mass into the collider.
+ * and tilted to match the terrain. `RigidBody.recenterMass` moves the mass into the collider.
  */
 
 /** Angle in DEGREES between an orientation and identity — how far a body turned from where it started. */
-const tiltDegrees = (q: Quaternion): number => 2 * Math.acos(Math.min(1, Math.abs(q.w))) * 180 / Math.PI;
+const tiltDegrees = (q: { w: number }): number => 2 * Math.acos(Math.min(1, Math.abs(q.w))) * 180 / Math.PI;
 
 // Corner order below is (x, y, z) with z fastest, so:
 // 0=---  1=--+  2=-+-  3=-++  4=+--  5=+-+  6=++-  7=+++
@@ -45,20 +47,29 @@ const cubeHull = (centre: [number, number, number]): ConvexPolyhedron => new Con
 /** 90 degrees about Z — a body handed this starts lying on its side. */
 const ON_ITS_SIDE = (() => { const q = new Quaternion(); q.setFromEuler(0, 0, Math.PI / 2); return q; })();
 
-/** A world with a level static ground plane at y = 0. */
-const groundedWorld = (): World => {
-    const world = new World();
-    world.gravity.set(0, -9.82, 0);
-    const ground = new Body({ mass: 0 });
-    ground.addShape(new Plane());
-    ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0); // plane faces +Y
-    world.addBody(ground);
-    return world;
+/** A physics system with no scene around it. */
+const physics = (): PhysicsSystem => {
+    const p = new PhysicsSystem({ gravity: [0, -9.82, 0] });
+    p.initialize();
+    (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null };
+    return p;
 };
 
-const drop = (world: World, body: Body, seconds = 4): void => {
-    world.addBody(body);
-    for (let i = 0; i < Math.round(seconds * 60); i++) world.step(1 / 60);
+/** Put a body in a world, which is where its centre of mass is worked out. */
+const inWorld = (body: PhysicsBody): PhysicsSystem => { const p = physics(); p.addBody(body); return p; };
+
+/** The body's collider frame (the centre of mass on cannon), and its first collider's offset in it. */
+const frameY = (body: PhysicsBody): number => { const f = [0, 0, 0, 0, 0, 0, 1]; body.getColliderFrame(f); return f[1]; };
+const partOffset = (p: PhysicsSystem, body: PhysicsBody): readonly number[] => p.colliderParts(body)[0].offset;
+
+/** Drop a body on a level static ground at y = 0 and let it settle. */
+const drop = (body: PhysicsBody, seconds = 4): void => {
+    const p = physics();
+    const ground = new PhysicsBody({ position: [0, -0.5, 0] });
+    ground.addCollider({ shape: { kind: 'box', halfExtents: [50, 0.5, 50] } });
+    p.addBody(ground);
+    p.addBody(body);
+    for (let i = 0; i < Math.round(seconds * 60); i++) p.update(1 / 60);
 };
 
 describe('shape mass properties', () => {
@@ -105,43 +116,47 @@ describe('RigidBody.recenterMass', () => {
         const body = new RigidBody({ mass: 1, position: [0, 5, 0] });
         body.attachShape(Shape.Box(1, 1, 1), [0, 2, 0]);
         body.recenterMass();
+        const p = inWorld(body);
 
-        // The collider is now centred on the body origin...
-        expect(body.shapeOffsets[0].y).toBeCloseTo(0, 6);
-        // ...the body sits where the collider was...
-        expect(body.position.y).toBeCloseTo(7, 6);
+        // The collider is now centred on the centre of mass...
+        expect(partOffset(p, body)[1]).toBeCloseTo(0, 6);
+        // ...which sits where the collider was...
+        expect(frameY(body)).toBeCloseTo(7, 6);
         // ...and the NODE is still exactly where it was put. That last one is what makes the fix invisible.
-        expect(body.originPosition([0, 0, 0])[1]).toBeCloseTo(5, 6);
+        expect(body.position.y).toBeCloseTo(5, 6);
     });
 
     it('keeps the node origin fixed when the body is rotated', () => {
         const body = new RigidBody({ mass: 1, position: [0, 5, 0] });
         body.attachShape(Shape.Box(1, 1, 1), [0, 2, 0]);
         body.recenterMass();
+        inWorld(body);
 
         body.setQuaternion([0, 0, 1, 0]); // 180 degrees about Z: the collider swings below the origin
-        expect(body.position.y).toBeCloseTo(3, 5);
-        expect(body.originPosition([0, 0, 0])[1]).toBeCloseTo(5, 5);
+        expect(frameY(body)).toBeCloseTo(3, 5);
+        expect(body.position.y).toBeCloseTo(5, 5);
     });
 
     it('leaves a body whose collider is already centred alone', () => {
         const body = new RigidBody({ mass: 1, position: [1, 2, 3] });
         body.attachShape(Shape.Box(1, 1, 1), [0, 0, 0]);
         body.recenterMass();
+        const p = inWorld(body);
 
-        expect(body.shapeOffsets[0].almostEquals(new Vec3(0, 0, 0), 1e-9)).toBe(true);
-        expect(body.originPosition([0, 0, 0])[0]).toBeCloseTo(1, 9);
-        expect(body.originPosition([0, 0, 0])[1]).toBeCloseTo(2, 9);
-        expect(body.originPosition([0, 0, 0])[2]).toBeCloseTo(3, 9);
+        expect(partOffset(p, body).every(v => Math.abs(v) < 1e-9)).toBe(true);
+        expect(body.position.x).toBeCloseTo(1, 9);
+        expect(body.position.y).toBeCloseTo(2, 9);
+        expect(body.position.z).toBeCloseTo(3, 9);
     });
 
     it('skips static bodies, whose pose is authored rather than simulated', () => {
         const body = new RigidBody({ mass: 0, position: [0, 5, 0] });
         body.attachShape(Shape.Box(1, 1, 1), [0, 2, 0]);
         body.recenterMass();
+        const p = inWorld(body);
 
-        expect(body.shapeOffsets[0].y).toBeCloseTo(2, 6);
-        expect(body.position.y).toBeCloseTo(5, 6);
+        expect(partOffset(p, body)[1]).toBeCloseTo(2, 6);
+        expect(frameY(body)).toBeCloseTo(5, 6);
     });
 
     it('measures inertia in the body frame, not in whatever pose the author left', () => {
@@ -155,9 +170,11 @@ describe('RigidBody.recenterMass', () => {
 
         // cannon derives inertia from the WORLD aabb, and Node.setBody builds the body already rotated,
         // so without the fix the turned body bakes a fatter, skewed tensor into its own frame.
-        expect(turned.inertia.x).toBeCloseTo(level.inertia.x, 6);
-        expect(turned.inertia.y).toBeCloseTo(level.inertia.y, 6);
-        expect(turned.inertia.z).toBeCloseTo(level.inertia.z, 6);
+        const inertia = (b: RigidBody) => b.world!.getMassProperties(b.handle, { mass: 0, centerOfMass: [0, 0, 0], inertia: [0, 0, 0] }).inertia;
+        inWorld(level); inWorld(turned);
+        expect(inertia(turned)[0]).toBeCloseTo(inertia(level)[0], 6);
+        expect(inertia(turned)[1]).toBeCloseTo(inertia(level)[1], 6);
+        expect(inertia(turned)[2]).toBeCloseTo(inertia(level)[2], 6);
     });
 });
 
@@ -175,26 +192,26 @@ describe('an offset collider settles under gravity', () => {
 
         const control = new RigidBody({ mass: 1, position: [0, 4, 0], quaternion: lyingDown });
         control.attachShape(Shape.Box(1, 3, 1), [0, 2, 0]);
-        drop(groundedWorld(), control, 8);
+        drop(control, 8);
         expect(tiltDegrees(control.quaternion)).toBeLessThan(10); // stood bolt upright — the bug
 
         const fixed = new RigidBody({ mass: 1, position: [0, 4, 0], quaternion: lyingDown });
         fixed.attachShape(Shape.Box(1, 3, 1), [0, 2, 0]);
         fixed.recenterMass();
-        drop(groundedWorld(), fixed, 8);
+        drop(fixed, 8);
         expect(tiltDegrees(fixed.quaternion)).toBeGreaterThan(80); // stayed on its side, as it should
     });
 
     it('does not tip over when its box collider sits to one side of the node origin', () => {
         const control = new RigidBody({ mass: 1, position: [0, 3, 0] });
         control.attachShape(Shape.Box(1, 1, 1), [2, 0, 0]);
-        drop(groundedWorld(), control);
+        drop(control);
         expect(tiltDegrees(control.quaternion)).toBeGreaterThan(45);
 
         const fixed = new RigidBody({ mass: 1, position: [0, 3, 0] });
         fixed.attachShape(Shape.Box(1, 1, 1), [2, 0, 0]);
         fixed.recenterMass();
-        drop(groundedWorld(), fixed);
+        drop(fixed);
         expect(tiltDegrees(fixed.quaternion)).toBeLessThan(5);
     });
 
@@ -206,12 +223,12 @@ describe('an offset collider settles under gravity', () => {
         const fixed = new RigidBody({ mass: 1, position: [0, 3, 0] });
         fixed.attachShape(Shape.ConvexHull(vertices, CUBE_FACES)!, [0, 1.5, 0]);
         fixed.recenterMass();
-        drop(groundedWorld(), fixed);
+        drop(fixed);
 
         expect(tiltDegrees(fixed.quaternion)).toBeLessThan(5);
         // And it came to rest ON the hull: the node origin ends 1.5 below the collider centre, which is
         // itself half a unit above the ground.
-        expect(fixed.originPosition([0, 0, 0])[1]).toBeCloseTo(-1, 1);
+        expect(fixed.position.y).toBeCloseTo(-1, 1);
     });
 });
 
@@ -238,11 +255,12 @@ describe('the parse path wires it up', () => {
 
         const node = root.getChildByName('crate')[0];
         expect(node.body).not.toBeNull();
-        expect(node.body!.shapeOffsets[0].y).toBeCloseTo(0, 6);
-        expect(node.body!.position.y).toBeCloseTo(7, 6);
+        const p = inWorld(node.body!);
+        expect(partOffset(p, node.body!)[1]).toBeCloseTo(0, 6);
+        expect(frameY(node.body!)).toBeCloseTo(7, 6);
         // The authored transform is untouched — the compensation must never move anything on screen.
         expect(node.position[1]).toBeCloseTo(5, 6);
-        expect(node.body!.originPosition([0, 0, 0])[1]).toBeCloseTo(5, 6);
+        expect(node.body!.position.y).toBeCloseTo(5, 6);
     });
 
     it('does not recentre a trigger, which PhysicsSystem drives from the node transform directly', () => {
@@ -260,7 +278,8 @@ describe('the parse path wires it up', () => {
         } as any);
 
         const node = root.getChildByName('zone')[0];
-        expect(node.trigger!.shapeOffsets[0].y).toBeCloseTo(2, 6);
-        expect(node.trigger!.position.y).toBeCloseTo(5, 6);
+        const p = inWorld(node.trigger!);
+        expect(partOffset(p, node.trigger!)[1]).toBeCloseTo(2, 6);
+        expect(frameY(node.trigger!)).toBeCloseTo(5, 6);
     });
 });

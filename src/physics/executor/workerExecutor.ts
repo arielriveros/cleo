@@ -1,7 +1,7 @@
 import { Body, Constraint, World } from 'cannon-es';
 import { physicsStats } from '../physicsStats';
 import type { WaterSpec } from '../waterSurface';
-import { encodeConfig, encodeConstraint, readState, shapeBuffers } from '../worker/bodyCodec';
+import { encodeConfig, encodeConstraint, isCharacterBody, readState, shapeBuffers } from '../worker/bodyCodec';
 import type { PhysicsPort } from '../worker/ports';
 import type { FromWorker, Op, Snapshot, StepMessage } from '../worker/protocol';
 import { BODY_ROW, CONTACT_ROW, STATE_STRIDE, WRITE_ANGVEL, WRITE_FORCE, WRITE_POSE, WRITE_SLEEP, WRITE_TORQUE, WRITE_VEL } from '../worker/protocol';
@@ -644,7 +644,7 @@ export class WorkerExecutor implements PhysicsExecutor {
         c[16] = body.fixedRotation ? 1 : 0; c[17] = body.allowSleep ? 1 : 0;
         c[18] = body.sleepSpeedLimit; c[19] = body.sleepTimeLimit;
         c[20] = body.collisionResponse ? 1 : 0; c[21] = body.collisionFilterGroup; c[22] = body.collisionFilterMask;
-        c[23] = (body.isTrigger ? 1 : 0) + ((body as any).owner?.nodeType === 'character' ? 2 : 0) + (wantsCollide ? 4 : 0);
+        c[23] = (body.isTrigger ? 1 : 0) + (isCharacterBody(body) ? 2 : 0) + (wantsCollide ? 4 : 0);
         c[24] = body.shapes.length;
         for (let i = 0; i < body.shapes.length; i++) {
             const o = CFG_BASE + i * CFG_SHAPE, s = body.shapes[i], off = body.shapeOffsets[i], q = body.shapeOrientations[i];

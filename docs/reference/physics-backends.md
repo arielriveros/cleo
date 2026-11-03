@@ -47,8 +47,16 @@ is given and starts from it.
 - `physics.addJoint(a, b, { kind: 'fixed' | 'ball' | 'hinge' | 'coneTwist', ... })` joins two bodies in the
   world and returns the joint for `physics.removeJoint`.
 
-Terrain heightfields, foliage and tilemap colliders, ragdoll bones and `physics.addGroundPlane()` are engine
-bodies. `RigidBody` and `Trigger` still extend cannon's body until the next stage.
+`RigidBody` (`node.setBody`) and `Trigger` (`node.setTrigger`) are engine bodies, and so are terrain
+heightfields, foliage and tilemap colliders, ragdoll bones and `physics.addGroundPlane()`. What changed for
+scripts when node bodies stopped being cannon's:
+
+- `body.position` is the node's position, not the centre of mass's. They differ only for a dynamic body
+  whose collider is offset and recentred (`recenterMass()`); `body.getColliderFrame(out)` gives the latter.
+- First contacts (`onCollision`, `body.onCollide(listener)`) are delivered after the physics step, as the
+  worker always delivered them, rather than in the middle of it.
+- A trigger's listeners are `trigger.onContact(listener)` as before; cannon's `addEventListener` is gone.
+- `body.getAabb(out)` gives its bounds (min, then max), also before it is in a world.
 
 ## Two different "where"s
 
@@ -77,12 +85,11 @@ bit for bit.
 | `PhysicsSystem` steps, queries rays, reads contacts and trigger events, sets gravity and solver iterations through the interface | Done |
 | Overlap queries, trigger↔trigger pass, buoyancy, particle colliders and the editor's trigger overlay read neutral collider descriptions | Done |
 | Terrain, foliage and tilemap colliders, ragdolls and joints on engine bodies | Done |
-| `RigidBody`, `Trigger` and `Shape` stop being cannon objects | Next |
-| The worker protocol carries descriptions instead of cannon shapes | Planned |
+| `RigidBody`, `Trigger` and `Shape` stop being cannon objects | Done |
+| The worker protocol carries descriptions instead of cannon shapes | Next |
 | A test keeps `cannon-es` inside `src/physics/pal/cannon/`; the project chooses its backend | Planned |
 
-Until the `RigidBody` stage, `node.body` is still a cannon body, as [Physics threading](physics-threading.md)
-describes.
+Until the worker stage, the worker still replicates the main thread's cannon bodies shape for shape.
 
 ## What a Rapier backend needs to settle
 

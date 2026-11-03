@@ -120,8 +120,17 @@ export function encodeConfig(body: Body, known: Set<number>, wantsCollide: boole
         sleepSpeedLimit: body.sleepSpeedLimit, sleepTimeLimit: body.sleepTimeLimit,
         collisionResponse: body.collisionResponse, group: body.collisionFilterGroup, mask: body.collisionFilterMask,
         isTrigger: body.isTrigger, material: body.material?.name ?? null,
-        character: b.owner?.nodeType === 'character', wantsCollide, shapes,
+        character: isCharacterBody(body), wantsCollide, shapes,
     };
+}
+
+/**
+ * Whether a body is a character's, which water leaves alone: the engine marks it in the body's userData
+ * (physicsBody.ts BODY_CHARACTER), or, for a cannon body the engine did not make, by its owner.
+ */
+export function isCharacterBody(body: Body): boolean {
+    const b = body as Body & { userData?: number; owner?: { nodeType?: string } };
+    return ((b.userData ?? 0) & 1) !== 0 || b.owner?.nodeType === 'character';
 }
 
 /** A body's state into `out` at `offset`: pose, velocities, accumulated force/torque, sleep state. */

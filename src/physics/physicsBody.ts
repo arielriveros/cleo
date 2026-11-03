@@ -2,7 +2,7 @@ import { quat, vec3 } from 'gl-matrix';
 import type { Node } from '../core/scene/nodes/node';
 import type { Shape } from './shape';
 import type { PhysicsWorld } from './pal/world';
-import type { BodyDesc, BodyHandle, BodyType, ColliderDesc, Out } from './pal/types';
+import type { BodyDesc, BodyHandle, BodyType, ColliderDesc, Out, ShapeDesc } from './pal/types';
 
 // The engine's own rigid body, on any physics backend (see pal/). It holds what the body is made of (a
 // BodyDesc: mass, damping, surface, layers, colliders) and, once PhysicsSystem has put it in a world, the
@@ -42,7 +42,17 @@ export interface PhysicsBodyOptions {
     centerOfMass?: 'colliders' | 'origin';
     /** Whether a camera rig's collision probe treats it as solid. Default true. */
     cameraCollision?: boolean;
+    /** May be woken by contact when the engine has put it to sleep. Default true. */
+    allowSleep?: boolean;
+    /** Advisory sleep thresholds (m/s, s). Backend defaults when unset. */
+    sleepSpeedLimit?: number;
+    sleepTimeLimit?: number;
+    /** It is a character's: water leaves it alone unless a volume asks (see buoyancy). */
+    character?: boolean;
 }
+
+/** Bits of BodyDesc.userData the engine uses. */
+export const BODY_CHARACTER = 1;
 
 /** Indices into a body's state block: position, rotation, velocity, angular velocity. */
 const P = 0, Q = 3, V = 7, W = 10;
@@ -157,6 +167,9 @@ export class PhysicsBody {
             mask: options.mask,
             sensor: options.sensor,
             collisionResponse: options.collisionResponse,
+            sleep: options.allowSleep === undefined && options.sleepSpeedLimit === undefined && options.sleepTimeLimit === undefined
+                ? undefined : { allow: options.allowSleep, speedLimit: options.sleepSpeedLimit, timeLimit: options.sleepTimeLimit },
+            userData: options.character ? BODY_CHARACTER : 0,
             colliders: [],
         };
         this._s.set([p[0], p[1], p[2], q[0], q[1], q[2], q[3]], P);
@@ -172,12 +185,28 @@ export class PhysicsBody {
     public get world(): PhysicsWorld | null { return this._world; }
 
     public get mass(): number { return this._desc.mass; }
+    /** Moved by the simulation (not static, not kinematic). */
+    public get isDynamic(): boolean { return this._desc.type ? this._desc.type === 'dynamic' : this._desc.mass > 0; }
     public get isTrigger(): boolean { return !!this._desc.sensor; }
+    /** Per world axis, 1 = free, 0 = locked (see PhysicsBodyOptions). */
+    public get linearFactor(): { x: number; y: number; z: number } { return xyz(this._desc.linearFactor); }
+    public get angularFactor(): { x: number; y: number; z: number } { return xyz(this._desc.angularFactor); }
+    /** Takes part in the solver. False: still contacts and raycasts, pushes and is pushed by nothing. */
     public get collisionResponse(): boolean { return this._desc.collisionResponse ?? true; }
+    public set collisionResponse(response: boolean) {
+        this._desc.collisionResponse = response;
+        if (this._world) this._world.setCollisionResponse(this._handle, response);
+    }
     public get collisionFilterGroup(): number { return this._desc.group ?? 1; }
     public set collisionFilterGroup(group: number) { this._desc.group = group; this._pushFilter(); }
     public get collisionFilterMask(): number { return this._desc.mask ?? -1; }
     public set collisionFilterMask(mask: number) { this._desc.mask = mask; this._pushFilter(); }
+
+    /** A radius about its collider frame that bounds every collider (0 out of a world). */
+    public get boundingRadius(): number {
+        return this._world ? this._world.getColliderFrame(this._handle, PhysicsBody._frame) : 0;
+    }
+    private static readonly _frame = new Float64Array(7);
 
     /** Its colliders, as described. */
     public get colliders(): readonly ColliderDesc[] { return this._desc.colliders; }
@@ -198,10 +227,104 @@ export class PhysicsBody {
         return this;
     }
 
-    /** World bounds, min [3] then max [3]. Out of a world, a point at its position. */
+    /** @internal Replace every collider. */
+    protected _setColliders(colliders: ColliderDesc[]): void {
+        this._desc.colliders = colliders;
+        if (this._world) this._world.setColliders(this._handle, colliders);
+    }
+
+    /** @internal Where the mass sits from now on (see PhysicsBodyOptions.centerOfMass). */
+    protected _setCenterOfMass(mode: 'colliders' | 'origin'): void {
+        this._desc.centerOfMass = mode;
+        if (this._world) this._world.setColliders(this._handle, this._desc.colliders, mode);
+    }
+
+    /** Move the body so its node origin lands on `position`. */
+    public setPosition(position: ArrayLike<number>): void { this._writeVector(P, position[0], position[1], position[2]); }
+
+    /** Turn the body about its node origin. */
+    public setQuaternion(rotation: ArrayLike<number>): void { this._writeRotation(rotation[0], rotation[1], rotation[2], rotation[3]); }
+
+    /** Place and turn it at once (the position first, then the turn about it). */
+    public setTransform(position: ArrayLike<number>, rotation: ArrayLike<number>): void {
+        const world = this._world;
+        if (!world) { this.setPosition(position); this.setQuaternion(rotation); return; }
+        world.setTransform(this._handle, position, rotation);
+    }
+
+    /** Node-origin position [3] and rotation [4] into `out`. */
+    public getTransform<T extends Out>(out: T): T {
+        const s = this._state();
+        for (let i = 0; i < 7; i++) out[i] = s[i];
+        return out;
+    }
+
+    /**
+     * Its collision frame (the centre of mass on a backend that has no other, see
+     * PhysicsWorld.getColliderFrame) into `out`; returns the radius bounding its colliders about it. Out of
+     * a world, its node pose and 0.
+     */
+    public getColliderFrame<T extends Out>(out: T): number {
+        if (this._world) return this._world.getColliderFrame(this._handle, out);
+        this.getTransform(out);
+        return 0;
+    }
+
+    /** Drop the force and torque applied since the last substep. */
+    public clearForces(): void { if (this._world) this._world.clearForces(this._handle); }
+
+    // ---- first contacts ----
+
+    private _collideListeners: ((other: PhysicsBody) => void)[] | null = null;
+
+    /**
+     * Hear about each body this one starts touching (once per contact, until they part), after the step that
+     * made it. Returns the unsubscribe.
+     */
+    public onCollide(listener: (other: PhysicsBody) => void): () => void {
+        (this._collideListeners ??= []).push(listener);
+        if (!this._desc.reportContacts) {
+            this._desc.reportContacts = true;
+            if (this._world) this._world.setReportContacts(this._handle, true);
+        }
+        return () => {
+            const list = this._collideListeners;
+            const i = list ? list.indexOf(listener) : -1;
+            if (i >= 0) list!.splice(i, 1);
+        };
+    }
+
+    /** @internal PhysicsSystem: this body first touched `other`. */
+    public _emitCollide(other: PhysicsBody): void {
+        const list = this._collideListeners;
+        if (list) for (const listener of [...list]) listener(other);
+    }
+
+    /**
+     * World bounds, min [3] then max [3]: the world's own in a world; out of one, measured from its colliders
+     * as described (each shape's local box, turned and placed), at its own pose.
+     */
     public getAabb<T extends Out>(out: T): T {
-        if (this._world) this._world.getAabb(this._handle, out);
-        else { const s = this._s; out[0] = out[3] = s[0]; out[1] = out[4] = s[1]; out[2] = out[5] = s[2]; }
+        if (this._world) { this._world.getAabb(this._handle, out); return out; }
+        const s = this._s, body = quat.fromValues(s[3], s[4], s[5], s[6]);
+        out[0] = out[1] = out[2] = Infinity; out[3] = out[4] = out[5] = -Infinity;
+        const corner = vec3.create(), turn = quat.create();
+        for (const c of this._desc.colliders) {
+            const [lo, hi] = localBounds(c.shape);
+            const r = c.rotation ?? [0, 0, 0, 1], o = c.offset ?? [0, 0, 0];
+            quat.multiply(turn, body, quat.fromValues(r[0], r[1], r[2], r[3]));
+            for (let i = 0; i < 8; i++) {
+                vec3.set(corner, i & 1 ? hi[0] : lo[0], i & 2 ? hi[1] : lo[1], i & 4 ? hi[2] : lo[2]);
+                vec3.transformQuat(corner, corner, turn);
+                const off = vec3.transformQuat(vec3.create(), [o[0], o[1], o[2]], body);
+                for (let k = 0; k < 3; k++) {
+                    const v = s[k] + off[k] + corner[k];
+                    if (v < out[k]) out[k] = v;
+                    if (v > out[k + 3]) out[k + 3] = v;
+                }
+            }
+        }
+        if (out[0] === Infinity) { out[0] = out[3] = s[0]; out[1] = out[4] = s[1]; out[2] = out[5] = s[2]; }
         return out;
     }
 
@@ -315,4 +438,37 @@ export class PhysicsBody {
 function toArray(v: ArrayLike<number> | { x: number; y: number; z: number }): ArrayLike<number> {
     // A cannon Vec3 has a length() METHOD; an array-like has a numeric length.
     return typeof (v as ArrayLike<number>).length === 'number' ? v as ArrayLike<number> : [(v as { x: number }).x, (v as { y: number }).y, (v as { z: number }).z];
+}
+
+function xyz(v: readonly number[] | undefined): { x: number; y: number; z: number } {
+    return v ? { x: v[0], y: v[1], z: v[2] } : { x: 1, y: 1, z: 1 };
+}
+
+/** A shape's own bounds, [min, max], in its frame. */
+function localBounds(shape: ShapeDesc): [number[], number[]] {
+    const box = (x: number, y: number, z: number): [number[], number[]] => [[-x, -y, -z], [x, y, z]];
+    switch (shape.kind) {
+        case 'sphere': return box(shape.radius, shape.radius, shape.radius);
+        case 'box': return box(shape.halfExtents[0], shape.halfExtents[1], shape.halfExtents[2]);
+        case 'cylinder': { const r = Math.max(shape.radiusTop, shape.radiusBottom); return box(r, shape.height / 2, r); }
+        case 'capsule': return box(shape.radius, shape.height / 2 + shape.radius, shape.radius);
+        case 'convex': {
+            const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+            for (const v of shape.vertices) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], v[k]); hi[k] = Math.max(hi[k], v[k]); }
+            return [lo, hi];
+        }
+        case 'trimesh': {
+            const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], sc = shape.scale ?? [1, 1, 1];
+            for (let i = 0; i + 2 < shape.positions.length; i += 3)
+                for (let k = 0; k < 3; k++) { const v = shape.positions[i + k] * sc[k]; lo[k] = Math.min(lo[k], v); hi[k] = Math.max(hi[k], v); }
+            return [lo, hi];
+        }
+        case 'heightfield': {
+            let min = Infinity, max = -Infinity;
+            for (const row of shape.heights) for (const h of row) { min = Math.min(min, h); max = Math.max(max, h); }
+            const rows = shape.heights.length, cols = rows ? shape.heights[0].length : 0;
+            return [[0, min, -(cols - 1) * shape.elementSize], [(rows - 1) * shape.elementSize, max, 0]];
+        }
+        case 'plane': return box(1e6, 0, 1e6);
+    }
 }

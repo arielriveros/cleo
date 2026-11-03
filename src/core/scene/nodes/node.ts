@@ -721,10 +721,11 @@ export class Node {
 
       // PhysicsSystem walks scene.nodes, which no longer contains this node once the flag is cleared below,
       // so this is the last chance to take its body and trigger out of the world.
+      // Kept built in the world, disabled: a pooled node coming back costs nothing to re-add.
       const physics = n._scene?.physics;
       if (physics) {
-        if (n._body) physics.removeBody(n._body);
-        if (n._trigger) physics.removeBody(n._trigger);
+        if (n._body) physics.removeBody(n._body, true);
+        if (n._trigger) physics.removeBody(n._trigger, true);
       }
 
       n._spawned = false;
@@ -2200,9 +2201,8 @@ export class Node {
       simulationMode, simulationRange, canSleep
     }, this);
 
-    this._body.addEventListener('collide', (event: any) => {
-      if (event.body instanceof RigidBody || event.body instanceof Trigger)
-        this.onCollision(event.body.owner);
+    this._body.onCollide(other => {
+      if (other instanceof RigidBody || other instanceof Trigger) this.onCollision(other.owner!);
     });
 
     return this._body;
@@ -2229,9 +2229,8 @@ export class Node {
       quaternion: this.worldQuaternion
     }, this);
 
-    this._trigger.addEventListener('collide', (event: any) => {
-      if (event.body instanceof RigidBody || event.body instanceof Trigger)
-        this.onTrigger(event.body.owner);
+    this._trigger.onCollide(other => {
+      if (other instanceof RigidBody || other instanceof Trigger) this.onTrigger(other.owner!);
     });
 
     return this._trigger;

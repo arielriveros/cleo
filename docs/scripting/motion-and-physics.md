@@ -71,9 +71,9 @@ readonly friction / restitution / groundProbeDistance / motionSmoothing
 `simulatePhysics` and `cameraCollision` are **independent channels**: a decorative bush can be
 non-colliding for gameplay yet still push a camera out of it, and a trigger volume can be neither.
 
-> **A collider offset from the mesh moves the centre of mass**, because cannon has no separate
-> centre-of-mass concept — `body.position` *is* it. An object whose collider sits off-centre will
-> tilt to the ground normal. `recenterMass()` is the fix.
+> **A collider offset from the mesh moves the centre of mass** only once you call `recenterMass()`:
+> until then the mass sits at the node origin, and an object whose collider sits off-centre tilts to the
+> ground normal. Either way `body.position` is the node's position, not the centre of mass's.
 
 ## Commanded motion
 
@@ -152,7 +152,7 @@ get slopeAngle: number        // degrees
 ## Collisions and triggers
 
 ```ts
-onCollision(other: Node): void      // requires a body on BOTH nodes
+onCollision(other: Node): void      // requires a body on BOTH nodes; delivered after the physics step
 onTrigger(other: Node): void        // first contact with THIS node's trigger
 onTriggerEnter(other: Node): void   // a trigger overlap began — called on BOTH nodes
 onTriggerExit(other: Node): void    // ...and ended (also when either side is removed or despawned)

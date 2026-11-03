@@ -1,6 +1,7 @@
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
-import type { Body as CannonBody } from 'cannon-es';
+/** What the water reads back from a body it buoyed: where it is and how it moves. */
+type FloatingBody = { position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number } };
 import { Node } from "./node";
 import { WATER_VOLUME_PRESETS, type WaterVolumePreset } from "./waterVolumePresets";
 import { applyPreset } from "../../presets";
@@ -71,7 +72,7 @@ export class WaterVolumeNode extends Node {
 
     // ---- runtime ----
     /** The submerged fraction of every body the physics buoyed since the last update (max over substeps). */
-    private _submerged = new Map<CannonBody, number>();
+    private _submerged = new Map<FloatingBody, number>();
     private _sources = new Map<object, SourceState>();
     private _ripples: number[][] = Array.from({ length: WATER_RIPPLE_SLOTS }, () => [0, 0, -1000, 0]);
     private _nextSlot = 0;
@@ -166,7 +167,7 @@ export class WaterVolumeNode extends Node {
     }
 
     /** Called by the physics step for every body it buoyed. */
-    public recordSubmerged(body: CannonBody, fraction: number): void {
+    public recordSubmerged(body: FloatingBody, fraction: number): void {
         this._submerged.set(body, Math.max(this._submerged.get(body) ?? 0, fraction));
     }
 

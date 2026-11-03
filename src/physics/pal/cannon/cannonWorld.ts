@@ -114,6 +114,8 @@ export class CannonWorld implements PhysicsWorld {
         });
         if (desc.sleep?.speedLimit !== undefined) body.sleepSpeedLimit = desc.sleep.speedLimit;
         if (desc.sleep?.timeLimit !== undefined) body.sleepTimeLimit = desc.sleep.timeLimit;
+        (body as { userData?: number }).userData = desc.userData ?? 0;
+        if (desc.reportContacts) this._reportContacts(body);
         this._addColliders(body, desc.colliders);
         if ((desc.centerOfMass ?? 'colliders') === 'colliders') body.recenterMass();
         body.material = this.materialFor(desc.friction ?? DEFAULT_FRICTION, desc.restitution ?? DEFAULT_RESTITUTION);
@@ -160,13 +162,24 @@ export class CannonWorld implements PhysicsWorld {
         body.collisionFilterMask = mask;
     }
 
-    public setColliders(h: BodyHandle, colliders: readonly ColliderDesc[]): void {
+    public setColliders(h: BodyHandle, colliders: readonly ColliderDesc[], centerOfMass?: 'colliders' | 'origin'): void {
         const body = this._body(h);
+        if (centerOfMass && body instanceof CannonBody) body.resetCenterOfMass();
         for (let i = body.shapes.length - 1; i >= 0; i--) body.removeShape(body.shapes[i]);
         this._addColliders(body, colliders);
-        body.updateMassProperties();
+        if (centerOfMass === 'colliders' && body instanceof CannonBody) body.recenterMass();
+        else body.updateMassProperties();
         body.updateBoundingRadius();
         body.aabbNeedsUpdate = true;
+        this._version++;
+    }
+
+    public setCollisionResponse(h: BodyHandle, response: boolean): void { this._body(h).collisionResponse = response; }
+
+    public setReportContacts(h: BodyHandle, report: boolean): void {
+        const body = this._body(h) as Body & { __reports?: boolean };
+        if (report) this._reportContacts(body);
+        else body.__reports = false;
     }
 
     public getMassProperties(h: BodyHandle, out: MassProperties): MassProperties {
@@ -227,6 +240,12 @@ export class CannonWorld implements PhysicsWorld {
         this._body(h).applyForce(f, r);
     }
 
+    public clearForces(h: BodyHandle): void {
+        const body = this._body(h);
+        body.force.set(0, 0, 0);
+        body.torque.set(0, 0, 0);
+    }
+
     public sleep(h: BodyHandle): void { this._body(h).sleep(); }
     public wakeUp(h: BodyHandle): void { this._body(h).wakeUp(); }
     public isSleeping(h: BodyHandle): boolean { return this._body(h).sleepState === Body.SLEEPING; }
@@ -244,6 +263,12 @@ export class CannonWorld implements PhysicsWorld {
         const body = this._body(h), p = body.position, q = body.quaternion;
         out[0] = p.x; out[1] = p.y; out[2] = p.z; out[3] = q.x; out[4] = q.y; out[5] = q.z; out[6] = q.w;
         return body.boundingRadius;
+    }
+
+    public colliderFrameToOrigin(h: BodyHandle, pose: ArrayLike<number>, out: Out): void {
+        const body = this._body(h);
+        if (body instanceof CannonBody) body.originOf(pose, out);
+        else { out[0] = pose[0]; out[1] = pose[1]; out[2] = pose[2]; }
     }
 
     // ---- joints ----
@@ -458,6 +483,19 @@ export class CannonWorld implements PhysicsWorld {
                 body.addShape(part.shape, at, rotation.mult(part.orientation));
             }
         }
+    }
+
+    /**
+     * Report a body's first contacts: cannon raises them on the body, mid-step (and the worker executor
+     * raises them again as each step lands); queued here, they come out of drainEvents in that order.
+     */
+    private _reportContacts(body: Body & { __reports?: boolean; __listening?: boolean }): void {
+        body.__reports = true;
+        if (body.__listening) return;
+        body.__listening = true;
+        body.addEventListener('collide', (e: { body?: Body | null }) => {
+            if (body.__reports && e.body) this._events.push(PhysicsEventKind.ContactBegin, body.id, e.body.id);
+        });
     }
 
     private _pair(a: Body | null | undefined, b: Body | null | undefined, kind: PhysicsEventKind): void {

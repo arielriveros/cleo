@@ -1,81 +1,13 @@
-import { Body as CannonBody, Vec3, Quaternion, Sphere, Cylinder } from 'cannon-es'
 import { quat, vec3 } from 'gl-matrix';
-import { Shape } from './shape';
-import { CannonBody as PalCannonBody } from './pal/cannon/cannonBody';
+import { PhysicsBody } from './physicsBody';
+import type { Shape } from './shape';
+import type { ColliderDesc } from './pal/types';
 import { parseSimulationMode } from './simulationRange';
 import type { SimulationMode } from './simulationRange';
 import type { Node } from '../core/scene/nodes/node';
 
-
-// Internal — what RigidBody/Trigger pass down to CBody, not the public config. `position` and `quaternion`
-// are REQUIRED here: both subclasses default them before calling super(), and CBody dereferences them.
-interface BodyConfig {
-    owner?: Node;
-    name?: string;
-    mass?: number;
-    position: vec3;
-    quaternion: quat;
-    linearDamping?: number;
-    angularDamping?: number;
-    linearFactor?: vec3;
-    angularFactor?: vec3;
-    allowSleep?: boolean;
-    isTrigger?: boolean;
-    cameraCollision?: boolean;
-}
-/**
- * The engine's side of a cannon body: who owns it and what it is called. Everything about where it sits
- * (node origin vs centre of mass) is the backend's, in pal/cannon/cannonBody.ts.
- */
-class CBody extends PalCannonBody {
-    private readonly _name: string;
-    private readonly _owner: Node | null = null;
-
-    /**
-     * Whether a camera rig's collision probe treats this body as solid. Its own channel, independent of
-     * whether the body simulates physically, and read in the probe's callback rather than encoded in
-     * `collisionFilterGroup` so it cannot perturb body-body filtering.
-     */
-    public cameraCollision: boolean;
-
-    constructor(config: BodyConfig) {
-      super({
-        mass: config?.mass || 0,
-        position: new Vec3(config.position[0], config.position[1], config.position[2]),
-        quaternion: new Quaternion(config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]),
-        // `??`, not `||`: an explicit 0 is a real value here.
-        linearDamping: config.linearDamping ?? 0.25,
-        angularDamping: config.angularDamping ?? 0.25,
-        linearFactor: config?.linearFactor ? new Vec3(config.linearFactor[0], config.linearFactor[1], config.linearFactor[2]) : new Vec3(1, 1, 1),
-        angularFactor: config?.angularFactor ? new Vec3(config.angularFactor[0], config.angularFactor[1], config.angularFactor[2]) : new Vec3(1, 1, 1),
-        // `??`, not `||`: `false || true` is `true`, so this flag could only ever say yes.
-        allowSleep: config.allowSleep ?? true,
-        // Left null: PhysicsSystem assigns the material when the body enters the world, since a
-        // ContactMaterial can only be registered against a live World.
-        material: undefined,
-        isTrigger: config.isTrigger || false,
-      });
-      this.sleepTimeLimit = 0.1;
-      this._owner = config.owner || null;
-      this._name = config.name || 'body';
-      this.cameraCollision = config.cameraCollision ?? true;
-    }
-
-    /**
-     * `offset` is the shape's position in body space and `orientation` its euler rotation (DEGREES).
-     * cannon places a shape at `body.position + bodyQuaternion * offset`, so the offset must be passed
-     * plain — it does not depend on the shape's own rotation.
-     */
-    public attachShape(shape: Shape, offset: vec3 = [0, 0, 0], orientation: vec3 = [0, 0, 0]): CBody {
-        const q = quat.create();
-        quat.fromEuler(q, orientation[0], orientation[1], orientation[2]);
-        this.addShape(shape.cShape, new Vec3(offset[0], offset[1], offset[2]), new Quaternion(q[0], q[1], q[2], q[3]));
-        return this;
-    }
-
-    public get name(): string { return this._name; }
-    public get owner(): Node | null { return this._owner; }
-}
+// A node's physics: RigidBody (Node.setBody) and Trigger (Node.setTrigger). Both are engine bodies
+// (physicsBody.ts), so they live on whatever physics backend the world runs (see pal/).
 
 /** Grip against other surfaces. 0 = frictionless. */
 export const DEFAULT_FRICTION = 0.3;
@@ -123,11 +55,8 @@ interface RigidBodyConfig {
     canSleep?: boolean;
 }
 
-export class RigidBody extends CBody {
-  /**
-   * Surface properties, turned into a cannon Material by PhysicsSystem when this body enters the world
-   * (a ContactMaterial needs a live World, so it cannot happen in this constructor).
-   */
+export class RigidBody extends PhysicsBody {
+  /** Surface properties: grip and bounce. Paired with the other side's when they touch (min / max). */
   public readonly friction: number;
   public readonly restitution: number;
   /** See {@link RigidBodyConfig.groundProbeDistance}. Read by PhysicsSystem's per-frame ground probe. */
@@ -147,26 +76,29 @@ export class RigidBody extends CBody {
   public rangeFrozen: boolean = false;
 
   constructor(config?: RigidBodyConfig, owner?: Node) {
+    const friction = config?.friction ?? DEFAULT_FRICTION, restitution = config?.restitution ?? DEFAULT_RESTITUTION;
     super({
       name: owner?.name || 'rigidBody',
-      owner: owner,
+      owner: owner ?? null,
       mass: config?.mass || 0,
-      position: config?.position ? [config.position[0], config.position[1], config.position[2]] : [0, 0, 0],
-      quaternion: config?.quaternion ? [config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]] : [0, 0, 0, 1],
+      position: config?.position ?? [0, 0, 0],
+      quaternion: config?.quaternion ?? [0, 0, 0, 1],
       // `??`, not `||`: an explicit 0 must survive.
       linearDamping: config?.linearDamping ?? 0.25,
       angularDamping: config?.angularDamping ?? 0.25,
       linearFactor: config?.linearConstraints || [1, 1, 1],
       angularFactor: config?.angularConstraints || [1, 1, 1],
       allowSleep: config?.allowSleep ?? true,
-      isTrigger: false,
-      cameraCollision: config?.cameraCollision ?? true
+      sleepTimeLimit: 0.1,
+      friction, restitution,
+      collisionResponse: config?.simulatePhysics ?? true,
+      cameraCollision: config?.cameraCollision ?? true,
+      character: owner?.nodeType === 'character',
     });
-    this.friction = config?.friction ?? DEFAULT_FRICTION;
-    this.restitution = config?.restitution ?? DEFAULT_RESTITUTION;
+    this.friction = friction;
+    this.restitution = restitution;
     this.groundProbeDistance = config?.groundProbeDistance ?? 0;
     this.motionSmoothing = config?.motionSmoothing ?? 0;
-    this.simulatePhysics = config?.simulatePhysics ?? true;
     this.simulationMode = parseSimulationMode(config?.simulationMode);
     this.simulationRange = Math.max(0, config?.simulationRange ?? 0);
     this.canSleep = config?.canSleep ?? false;
@@ -174,38 +106,47 @@ export class RigidBody extends CBody {
 
   /**
    * Wake a body a script just gave a velocity — unless it is frozen for being out of range, where an AI
-   * writing its steering every frame would otherwise thaw it every frame. cannon itself only wakes on a
-   * force, an impulse or a hit, never on a velocity written in place.
+   * writing its steering every frame would otherwise thaw it every frame. A velocity written in place never
+   * wakes a body by itself; a force, an impulse or a hit does.
    */
   public wakeForMotion(): void {
-    if (this.sleepState === CannonBody.SLEEPING && !this.rangeFrozen) this.wakeUp();
+    if (this.isSleeping && !this.rangeFrozen) this.wakeUp();
   }
 
   /**
    * The physical-simulation channel: false leaves the body in the world and still raycastable but with no
-   * collision response — a ghost to the solver, still solid to a camera probe. Backed directly by cannon's
-   * `collisionResponse`.
+   * collision response — a ghost to the solver, still solid to a camera probe.
    */
   public get simulatePhysics(): boolean { return this.collisionResponse; }
   public set simulatePhysics(value: boolean) { this.collisionResponse = value; }
 
+  /** Stop it dead: no velocity, no spin, no force waiting for the next step. */
   public reset(): void {
     this.velocity.set(0, 0, 0);
     this.angularVelocity.set(0, 0, 0);
-    this.force.set(0, 0, 0);
-    this.torque.set(0, 0, 0);
+    this.clearForces();
   }
 
   /**
-   * Apply an impulse. `relativePoint` is measured from the CENTRE OF MASS, cannon's own convention — not
-   * from the node origin, which may differ once colliders are offset (see `CBody.recenterMass`). The
-   * default of zero therefore keeps meaning "straight through the centre, no spin".
+   * Apply an impulse. `relativePoint` is measured from the CENTRE OF MASS, not from the node origin, which
+   * may differ once colliders are offset (see {@link recenterMass}). The default of zero therefore keeps
+   * meaning "straight through the centre, no spin".
    */
-  public impulse(impulse: vec3, relativePoint: vec3 = vec3.create()): void {
-    super.applyImpulse(
-      new Vec3(impulse[0], impulse[1], impulse[2]),
-      new Vec3(relativePoint[0], relativePoint[1], relativePoint[2])
-    )
+  public impulse(impulse: vec3 | number[], relativePoint: vec3 | number[] = [0, 0, 0]): void {
+    this.applyImpulse(impulse, relativePoint);
+  }
+
+  /**
+   * Put the mass at the colliders' volume-weighted centre rather than at the node origin. Call once, after
+   * every shape is attached: an offset collider (what the editor fits by default — the mesh's bounds centre,
+   * typically half the model's height) would otherwise leave the mass at the node origin with the geometry
+   * hanging off it. Gravity, acting at the origin, applies no torque; the ground, pushing on the collider,
+   * does — so the body rotated until it lined up with whatever it stood on. Invisible from outside: the
+   * body still sits, turns and reports its position at the node origin.
+   */
+  public recenterMass(): void {
+    if (this.mass <= 0) return;
+    this._setCenterOfMass('colliders');
   }
 }
 
@@ -256,7 +197,7 @@ export interface TriggerContact {
   /** The trigger the listener is on. */
   self: Trigger;
   /** The body or trigger on the other side. */
-  other: CannonBody;
+  other: PhysicsBody;
   /** The Node owning {@link other}, or null for an ownerless body (a ragdoll bone, a foliage collider). */
   node: Node | null;
   /**
@@ -271,7 +212,7 @@ export interface TriggerContact {
   fraction: number;
 }
 
-export class Trigger extends CBody {
+export class Trigger extends PhysicsBody {
   private _enabled: boolean;
   private _mask: number;
   private _detectTriggers: boolean;
@@ -284,24 +225,31 @@ export class Trigger extends CBody {
   public rearmEpoch = 0;
   /** Bumped whenever the shapes change, so whatever caches them (the overlap pass, the overlay) rebuilds. */
   public shapeVersion = 0;
+  private _contactListeners: ((contact: TriggerContact) => void)[] | null = null;
 
   constructor(config?: TriggerConfig, owner?: Node) {
+    const enabled = config?.enabled ?? true, mask = config?.mask ?? -1;
     super({
       name: owner?.name || 'trigger',
-      owner: owner,
+      owner: owner ?? null,
       mass: 0,
-      position: config?.position ? [config.position[0], config.position[1], config.position[2]] : [0, 0, 0],
-      quaternion: config?.quaternion ? [config.quaternion[0], config.quaternion[1], config.quaternion[2], config.quaternion[3]] : [0, 0, 0, 1],
-      isTrigger: true
+      position: config?.position ?? [0, 0, 0],
+      quaternion: config?.quaternion ?? [0, 0, 0, 1],
+      linearDamping: 0.25,
+      angularDamping: 0.25,
+      allowSleep: true,
+      sleepTimeLimit: 0.1,
+      sensor: true,
+      group: config?.group ?? 1,
+      // A disabled trigger's mask is 0, which drops every pair in the broadphase and every ray; the logical
+      // mask is kept aside for when it comes back on.
+      mask: enabled ? mask : 0,
+      character: owner?.nodeType === 'character',
     });
-    this._enabled = config?.enabled ?? true;
-    this._mask = config?.mask ?? -1;
+    this._enabled = enabled;
+    this._mask = mask;
     this._detectTriggers = !!config?.detectTriggers;
     this._continuous = !!config?.continuous;
-    this.collisionFilterGroup = config?.group ?? 1;
-    // A disabled trigger's mask is 0 in cannon, which drops every pair in the broadphase and every ray;
-    // the logical mask is kept aside for when it comes back on.
-    this.collisionFilterMask = this._enabled ? this._mask : 0;
   }
 
   /** See {@link TriggerOptions.enabled}. */
@@ -341,7 +289,7 @@ export class Trigger extends CBody {
     triggerState.version++;
   }
 
-  public attachShape(shape: Shape, offset: vec3 = [0, 0, 0], orientation: vec3 = [0, 0, 0]): Trigger {
+  public attachShape(shape: Shape, offset: vec3 | number[] = [0, 0, 0], orientation: vec3 | number[] = [0, 0, 0]): this {
     super.attachShape(shape, offset, orientation);
     this._shapesChanged();
     return this;
@@ -352,27 +300,30 @@ export class Trigger extends CBody {
    * space) with the given radius: what a blade or a limb is. Built as the engine's capsule always is — a
    * cylinder plus two end spheres — and collapsing to a single sphere when the two ends coincide.
    */
-  public setCapsule(a: vec3, b: vec3, radius: number, segments = 8): Trigger {
-    this._removeAllShapes();
+  public setCapsule(a: vec3 | number[], b: vec3 | number[], radius: number, segments = 8): this {
     const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
     const length = Math.hypot(dx, dy, dz);
+    const colliders: ColliderDesc[] = [];
     if (length < 1e-6) {
-      this.addShape(new Sphere(radius), new Vec3(a[0], a[1], a[2]));
+      colliders.push({ shape: { kind: 'sphere', radius }, offset: [a[0], a[1], a[2]] });
     } else {
-      // cannon's Cylinder runs along its local Y.
+      // A cylinder runs along its local Y.
       const q = quat.rotationTo(quat.create(), [0, 1, 0], [dx / length, dy / length, dz / length]);
-      this.addShape(new Cylinder(radius, radius, length, segments),
-        new Vec3((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2), new Quaternion(q[0], q[1], q[2], q[3]));
-      this.addShape(new Sphere(radius), new Vec3(a[0], a[1], a[2]));
-      this.addShape(new Sphere(radius), new Vec3(b[0], b[1], b[2]));
+      colliders.push(
+        { shape: { kind: 'cylinder', radiusTop: radius, radiusBottom: radius, height: length, segments },
+          offset: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2], rotation: [q[0], q[1], q[2], q[3]] },
+        { shape: { kind: 'sphere', radius }, offset: [a[0], a[1], a[2]] },
+        { shape: { kind: 'sphere', radius }, offset: [b[0], b[1], b[2]] },
+      );
     }
+    this._setColliders(colliders);
     this._shapesChanged();
     return this;
   }
 
   /** Remove every shape. The trigger stays on its node, detecting nothing until shapes are attached again. */
-  public clearShapes(): Trigger {
-    this._removeAllShapes();
+  public clearShapes(): this {
+    this._setColliders([]);
     this._shapesChanged();
     return this;
   }
@@ -384,19 +335,25 @@ export class Trigger extends CBody {
    * call it when the listener's owner goes away.
    */
   public onContact(listener: (contact: TriggerContact) => void): () => void {
-    const handler = (event: any) => listener(event.contact as TriggerContact);
-    this.addEventListener('triggerContact', handler);
-    return () => { this.removeEventListener('triggerContact', handler); };
+    (this._contactListeners ??= []).push(listener);
+    return () => {
+      const list = this._contactListeners;
+      const i = list ? list.indexOf(listener) : -1;
+      if (i >= 0) list!.splice(i, 1);
+    };
   }
 
-  private _removeAllShapes(): void {
-    for (let i = this.shapes.length - 1; i >= 0; i--) this.removeShape(this.shapes[i]);
+  /** @internal Whether anything listens through {@link onContact}. */
+  public get _hasContactListeners(): boolean { return !!this._contactListeners?.length; }
+
+  /** @internal PhysicsSystem: an overlap started or ended. */
+  public _emitContact(contact: TriggerContact): void {
+    const list = this._contactListeners;
+    if (list) for (const listener of [...list]) listener(contact);
   }
 
   private _shapesChanged(): void {
     this.shapeVersion++;
-    this.updateBoundingRadius();
-    this.aabbNeedsUpdate = true;
     triggerState.version++;
   }
 }

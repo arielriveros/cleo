@@ -296,12 +296,13 @@ describe('i-frames', () => {
             const e = enemy('Bare') as any;
             scene.addNode(e);
             e.setBody(70).attachShape(Shape.Cylinder(0.35, 0.35, 1.7, 12), [0, 0.85, 0]);
-            e.body.updateAABB();
             e._syncHurtbox();
             const hb = e.getChildByName('Hurtbox')[0];
             expect(hb?.trigger).toBeTruthy();
             expect([hb.trigger.group, hb.trigger.mask, hb.trigger.detectTriggers]).toEqual([LAYER.ENEMY_HURTBOX, LAYER.HITBOX, true]);
-            expect(hb.trigger.boundingRadius).toBeGreaterThan(0.8);
+            // A capsule as tall as the body: its two end caps 1.7 - 2 x 0.35 apart.
+            const caps = hb.trigger.colliders.filter((c: any) => c.shape.kind === 'sphere').map((c: any) => c.offset[1]);
+            expect(Math.max(...caps) - Math.min(...caps)).toBeCloseTo(1.0, 3);
             e.isDead = true; e._syncHurtbox();
             expect(hb.trigger.enabled).toBe(false);
         } finally { scene.dispose?.(); void p; }
@@ -591,7 +592,7 @@ describe('a dead enemy drops its weapon', () => {
             now.forEach((v, i) => expect(v).toBeCloseTo(at[i] as number, 4));
             expect(club.body).toBeTruthy();
             expect(club.body.cameraCollision).toBe(false);
-            expect(club.body.shapes.length).toBe(3);
+            expect(club.body.colliders.length).toBe(3);
             expect(e.currentWeapon()).toBeNull();
             expect(e.droppedWeapons()).toEqual([club]);
         } finally { scene.dispose?.(); }

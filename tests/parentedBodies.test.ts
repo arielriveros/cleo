@@ -39,7 +39,7 @@ describe('a body under a moved, turned parent', () => {
     it('a local setPosition puts the body at parentWorld · local', () => {
         const { crate } = parentedCrate(2);
         crate.setPosition(vec3.fromValues(0, 2, 3));
-        const b = crate.body!.originPosition([0, 0, 0]);
+        const b = crate.body!.position.toArray();
         // (0, 2, 3) turned 90° about Y is (3, 2, 0); plus (10, 0, 5).
         expect(Array.from(b).map(v => +v.toFixed(4))).toEqual([13, 2, 5]);
     });
@@ -62,7 +62,7 @@ describe('a body under a moved, turned parent', () => {
         expect([w[0], w[1], w[2]].map(v => +v.toFixed(4))).toEqual([12, 3, 5]);
         expect(Math.abs(quat.dot(crate.worldQuaternion, yaw180))).toBeGreaterThan(0.9999);
         // ...and the body agrees with where the node now is.
-        const b = crate.body!.originPosition([0, 0, 0]);
+        const b = crate.body!.position.toArray();
         expect(Array.from(b).map(v => +v.toFixed(4))).toEqual([12, 3, 5]);
         const q = crate.body!.quaternion;
         expect(Math.abs(quat.dot(quat.fromValues(q.x, q.y, q.z, q.w), yaw180))).toBeGreaterThan(0.9999);
@@ -78,6 +78,6 @@ describe('a body under a moved, turned parent', () => {
         const crate = root.getChildByName('crate')[0];
         crate.setWorldPosition([4, 5, 6]);
         expect(Array.from(crate.position)).toEqual([4, 5, 6]);
-        expect(Array.from(crate.body!.originPosition([0, 0, 0])).map(v => +v.toFixed(5))).toEqual([4, 5, 6]);
+        expect(Array.from(crate.body!.position.toArray()).map(v => +v.toFixed(5))).toEqual([4, 5, 6]);
     });
 });

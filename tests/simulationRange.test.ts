@@ -49,7 +49,7 @@ function physics(cam: [number, number, number]) {
 
 function ball(p: PhysicsSystem, at: [number, number, number], config: ConstructorParameters<typeof RigidBody>[0] = {}): RigidBody {
     const body = new RigidBody({ mass: 1, position: at, linearDamping: 0, ...config });
-    body.addShape(new Sphere(0.25));
+    body.addCollider({ shape: { kind: 'sphere', radius: 0.25 } });
     p.addBody(body);
     return body;
 }

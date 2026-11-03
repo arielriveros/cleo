@@ -48,10 +48,17 @@ export interface PhysicsWorld {
     /** Enabled bodies. */
     readonly bodyCount: number;
 
-    /** Replace a body's colliders (and re-derive its mass properties). */
-    setColliders(body: BodyHandle, colliders: readonly ColliderDesc[]): void;
+    /**
+     * Replace a body's colliders and re-derive its mass properties, its mass placed as `centerOfMass` says
+     * (default: as when it was made).
+     */
+    setColliders(body: BodyHandle, colliders: readonly ColliderDesc[], centerOfMass?: 'colliders' | 'origin'): void;
     /** The collision layers a body is in and the ones it collides with (bit masks, see BodyDesc). */
     setCollisionFilter(body: BodyHandle, group: number, mask: number): void;
+    /** Whether a body takes part in the solver (see BodyDesc.collisionResponse). */
+    setCollisionResponse(body: BodyHandle, response: boolean): void;
+    /** Whether a body reports first contacts (see BodyDesc.reportContacts). */
+    setReportContacts(body: BodyHandle, report: boolean): void;
     getMassProperties(body: BodyHandle, out: MassProperties): MassProperties;
 
     /** Node-origin position [3] and rotation [4] into `out` (7 numbers). */
@@ -66,6 +73,8 @@ export interface PhysicsWorld {
     applyImpulse(body: BodyHandle, impulse: ArrayLike<number>, relativePoint?: ArrayLike<number>): void;
     /** A force at a point measured from the centre of mass, acting over the next substep only. */
     applyForce(body: BodyHandle, force: ArrayLike<number>, relativePoint?: ArrayLike<number>): void;
+    /** Drop the force and torque applied since the last substep. */
+    clearForces(body: BodyHandle): void;
 
     sleep(body: BodyHandle): void;
     wakeUp(body: BodyHandle): void;
@@ -83,6 +92,8 @@ export interface PhysicsWorld {
      * about it that bounds every part.
      */
     getColliderFrame(body: BodyHandle, out: Out): number;
+    /** Where the node origin is for a collider-frame pose [px py pz qx qy qz qw] of this body, into `out` (3). */
+    colliderFrameToOrigin(body: BodyHandle, pose: ArrayLike<number>, out: Out): void;
 
     // ---- joints ----
 

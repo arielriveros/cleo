@@ -130,9 +130,9 @@ describe('ground stamping — which contact becomes the ground', () => {
         w.addBody(floor);
 
         const body = new RigidBody({ mass: 1, groundProbeDistance: 0.2 });
-        body.addShape(new Sphere(0.25));
+        body.addCollider({ shape: { kind: 'sphere', radius: 0.25 } });
         body.position.set(0, 0.25, 0);
-        w.addBody(body);
+        p.addBody(body);
 
         setTime(p, 1);
         // ...against a flatter-than-anything contact recorded first, standing in for the neighbouring
@@ -184,10 +184,9 @@ describe('a character walking up a heightfield', () => {
             restitution: 0,
             groundProbeDistance: 0.1,
         });
-        body.addShape(new Sphere(radius));
+        body.addCollider({ shape: { kind: 'sphere', radius } });
         body.position.set(x, Math.tan(SLOPE * Math.PI / 180) * x + radius + 0.02, 0);
-        world(p).addBody(body);
-        body.material = (p as any)._cannon.materialFor(body.friction, body.restitution);
+        p.addBody(body);
         return body;
     }
 
@@ -207,7 +206,7 @@ describe('a character walking up a heightfield', () => {
         // that was reported: standing on a hill, then walking up it.
         for (let i = 0; i < 30; i++) {
             (p as any)._time += dt;
-            w.step(dt, dt, 1);
+            (p as any)._world.step(dt);
             stamp(p);
         }
         body.velocity.set(0, 0, 0);
@@ -228,7 +227,7 @@ describe('a character walking up a heightfield', () => {
             body.velocity.set(out.velocity[0], out.velocity[1], out.velocity[2]);
 
             (p as any)._time += dt;
-            w.step(dt, dt, 1);
+            (p as any)._world.step(dt);
             stamp(p);
             grounded = grounded && p.isGrounded(body);
         }

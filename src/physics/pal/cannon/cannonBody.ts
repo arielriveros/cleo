@@ -28,6 +28,14 @@ export class CannonBody extends Body {
     /** The centre of mass in the body's frame, measured from the node origin. Zero unless recentred. */
     public get centerOfMassOffset(): Vec3 { return this._com; }
 
+    /** Put the centre of mass back on the node origin, keeping the node where it is (before shapes are rebuilt). */
+    public resetCenterOfMass(): void {
+        if (this._com.x === 0 && this._com.y === 0 && this._com.z === 0) return;
+        this._captureOrigin();
+        this._com.set(0, 0, 0);
+        this._syncPosition();
+    }
+
     /**
      * Move the body so the NODE that owns it lands on `position`. With an offset centre of mass the
      * body's own `position` ends up elsewhere — see {@link _com}.

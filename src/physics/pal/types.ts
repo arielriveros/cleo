@@ -138,6 +138,13 @@ export interface BodyDesc {
     collisionResponse?: boolean;
     /** Advisory sleep tuning. The engine puts bodies to sleep itself; these only govern waking on contact. */
     sleep?: { allow?: boolean; speedLimit?: number; timeLimit?: number };
+    /** Report its first contact with each body it touches (ContactBegin events). Default false. */
+    reportContacts?: boolean;
+    /**
+     * Bits the engine attaches to the body and gets back wherever the body is simulated (a worker): the
+     * backend never reads them. Default 0.
+     */
+    userData?: number;
     colliders: readonly ColliderDesc[];
 }
 
@@ -185,6 +192,8 @@ export const PhysicsEventKind = {
     SensorBegin: 1,
     /** A sensor stopped overlapping it. */
     SensorEnd: 2,
+    /** A body that reports contacts (`a`) first touched another (`b`): one event per body that asked. */
+    ContactBegin: 3,
 } as const;
 export type PhysicsEventKind = typeof PhysicsEventKind[keyof typeof PhysicsEventKind];
 
