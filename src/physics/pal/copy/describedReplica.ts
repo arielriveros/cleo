@@ -1,16 +1,18 @@
 import type { BodyHandle, JointHandle } from '../types';
 import type { ReplicaFloater, WorldReplica } from '../replication';
-import { RapierWorld } from './rapierWorld';
+import type { DescribedJointRecord, DescribedWorld } from './describedWorld';
 import {
-    BODY_ROW, STATE_STRIDE, WRITE_ANGVEL, WRITE_FORCE, WRITE_POSE, WRITE_SLEEP, WRITE_TORQUE, WRITE_VEL, type RapierChanges,
+    BODY_ROW, STATE_STRIDE, WRITE_ANGVEL, WRITE_FORCE, WRITE_POSE, WRITE_SLEEP, WRITE_TORQUE, WRITE_VEL, type DescribedChanges,
 } from './copyMessages';
 
-// The physics worker's copy of the Rapier world (see pal/replication.ts): a RapierWorld built from the
-// mirror's descriptions (mirror.ts), with the same calls the main thread made, so it steps like the original
-// would.
+// The physics worker's copy of a world copied by description (see describedWorld.ts, pal/replication.ts):
+// a world of the same backend built from the mirror's descriptions (describedMirror.ts), with the same calls
+// the main thread made, so it steps like the original would.
 
-export class RapierReplica implements WorldReplica {
-    public readonly world = new RapierWorld([0, -9.81, 0]);
+export class DescribedReplica<J extends DescribedJointRecord> implements WorldReplica {
+    /** `world`: an empty world of the backend copied (pal/createWorld.ts makes it). */
+    constructor(public readonly world: DescribedWorld<J>) {}
+
     private readonly _bySlot: (BodyHandle | undefined)[] = [];
     private readonly _slotOf = new Map<BodyHandle, number>();
     private readonly _joints = new Map<number, JointHandle>();
@@ -18,7 +20,7 @@ export class RapierReplica implements WorldReplica {
     private readonly _seven = new Float64Array(7);
 
     public receive(changes: unknown): void {
-        const { ops, writes, writeCount } = changes as RapierChanges;
+        const { ops, writes, writeCount } = changes as DescribedChanges<J>;
         const world = this.world;
         for (const op of ops) {
             switch (op.op) {
@@ -36,8 +38,8 @@ export class RapierReplica implements WorldReplica {
                     const h = world.createBody(op.desc);
                     this._bySlot[op.slot] = h;
                     this._slotOf.set(h, op.slot);
-                    // Not the pose: the description already holds it, and Rapier stores a rotation it is made
-                    // with as given but renormalises one it is set to, which can move its last bit.
+                    // Not the pose: the description already holds it, and a backend may store a rotation it is
+                    // made with as given but renormalise one it is set to (Rapier), which can move its last bit.
                     this._write(h, op.state, 0, ~WRITE_POSE);
                     break;
                 }
@@ -51,7 +53,7 @@ export class RapierReplica implements WorldReplica {
                 }
                 case 'addJoint': {
                     const r = op.record;
-                    this._joints.set(op.id, world.createJointFromRecord({ ...r, a: this._handle(r.a), b: this._handle(r.b) } as never));
+                    this._joints.set(op.id, world.createJointFromRecord({ ...r, a: this._handle(r.a), b: this._handle(r.b) } as unknown as J));
                     break;
                 }
             }

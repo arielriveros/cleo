@@ -18,7 +18,9 @@ later. The engine's tests pin the cannon step bit for bit, so cannon games behav
 | `backendSelect.ts` | Every backend a project may ask for, and `resolvePhysicsBackendRequest`: the one to run, and why it is not the one asked for |
 | `cannon/` | The cannon-es backend, `CannonWorld`, and everything that only exists because of cannon: its broadphase, the heightfield and convex-SAT patches, the material table, the centre-of-mass bookkeeping |
 | `rapier/` | The Rapier backend, `RapierWorld`, and `load.ts`, the one place its package is loaded (on demand) |
-| `shapeBounds.ts` | Bounds and quaternion helpers measured from shape descriptions, for any backend |
+| `copy/` | Copying a world into the physics worker by description, for a backend whose world can say what each body and joint was made from (`DescribedWorld`): Rapier's |
+| `shapeBounds.ts` | Bounds, parts and quaternion helpers measured from shape descriptions, for any backend |
+| `jointFrames.ts` | Joint frames measured from joint descriptions, for a backend that builds joints from frames |
 
 A `PhysicsWorld` is handle-based and immediate, like the RHI's `Device`. The engine keeps its own objects
 and refers to the backend's by handle. Its conventions hold for every backend:
@@ -97,8 +99,10 @@ see [Physics threading](physics-threading.md)). `physics.executor` reads `'inlin
    world; a backend that fails to load falls back to cannon-es with the reason.
 3. To run in the physics worker, implement its `WorldMirror` and `WorldReplica` (`replication.ts`) and add
    them to `createWorldMirror` / `createWorldReplica`. The format between them is its own. A backend that
-   can snapshot its whole world may send that; cannon sends bodies and shapes. Without them, set
-   `threadable: false` in its capabilities.
+   can snapshot its whole world may send that; cannon sends bodies and shapes. A backend that keeps what
+   each body and joint was made from can implement `DescribedWorld` (`copy/describedWorld.ts`) and use the
+   mirror and replica in `copy/`, as Rapier does. Without any of these, set `threadable: false` in its
+   capabilities.
 4. Add it to the list in `tests/pal/conformance.test.ts` and make that suite pass. It checks behaviour, not
    bits: lifecycle, the node-origin convention, gravity, impulses, one-substep forces, sleep, axis locks,
    every shape kind at rest, contacts, sensor events, rays, every joint kind, and that a copy stepped in

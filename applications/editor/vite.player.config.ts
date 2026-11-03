@@ -21,23 +21,25 @@ import { contract } from './src/features/publish/playerContract.json'
 const PLAYER_HTML = path.resolve(__dirname, 'src/player/index.html')
 
 /**
- * The player is built once per physics backend a game can carry (`--mode rapier` for the second): a single
- * IIFE cannot load a backend on demand, and Rapier's embedded WASM is ~4 MB a cannon game has no use for.
- * `game.js` is the cannon player, with Rapier's loader swapped for a stub; `game-rapier.js` carries Rapier
- * too. Publishing picks the one for the project's physics backend (features/publish/publishClient.ts).
+ * The player is built once per physics backend a game can carry (`--mode <backend>` for each one after
+ * cannon): a single IIFE cannot load a backend on demand, and a WASM backend embeds megabytes a game on
+ * another backend has no use for. `game.js` is the cannon player, with every WASM backend's loader swapped
+ * for a stub; `game-<backend>.js` carries that backend and stubs the others. Publishing picks the one for
+ * the project's physics backend (features/publish/publishClient.ts).
  */
-const RAPIER_LOADER = path.resolve(__dirname, '../../src/physics/pal/rapier/load.ts')
-const RAPIER_STUB = path.resolve(__dirname, '../../src/physics/pal/rapier/loadStub.ts')
+const WASM_BACKENDS: readonly string[] = ['rapier']
+const PAL = path.resolve(__dirname, '../../src/physics/pal')
 
-/** Resolve Rapier's loader to the stub that has no Rapier. */
-function withoutRapier(): Plugin {
+/** Resolve each named backend's loader (pal/<backend>/load.ts) to its stub (loadStub.ts), which has no library. */
+function withoutBackends(backends: readonly string[]): Plugin {
+  const stubs = new Map(backends.map(b => [path.normalize(path.join(PAL, b, 'load.ts')), path.join(PAL, b, 'loadStub.ts')]))
   return {
-    name: 'cleo:player-without-rapier',
+    name: 'cleo:player-without-backends',
     enforce: 'pre',
     async resolveId(source, importer, options) {
-      if (!/rapier[\\/]load$/.test(source)) return null
+      if (!/[\\/]load$/.test(source)) return null
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true })
-      return resolved && path.normalize(resolved.id) === path.normalize(RAPIER_LOADER) ? RAPIER_STUB : null
+      return (resolved && stubs.get(path.normalize(resolved.id))) ?? null
     },
   }
 }
@@ -108,26 +110,26 @@ export default defineConfig(({ mode }) => mergeConfig(engineConfig, defineConfig
   // applications/editor/public into applications/editor/public/player. The player needs nothing from there.
   publicDir: false,
 
-  plugins: [playerGraphGuard(), playerAssets(), ...(mode === 'rapier' ? [] : [withoutRapier()])],
+  plugins: [playerGraphGuard(), playerAssets(), withoutBackends(WASM_BACKENDS.filter(b => b !== mode))],
   // The physics worker is inlined into the player and bundled on its own: it needs the same swap, and as one
-  // file with no chunks beside it (a worker made from a blob has nowhere to load one from), Rapier included.
+  // file with no chunks beside it (a worker made from a blob has nowhere to load one from), its backend included.
   worker: {
-    plugins: () => (mode === 'rapier' ? [] : [withoutRapier()]),
+    plugins: () => [withoutBackends(WASM_BACKENDS.filter(b => b !== mode))],
     rollupOptions: { output: { inlineDynamicImports: true } },
   },
 
   build: {
     outDir: 'public/player',
-    // The Rapier build runs second and must keep the cannon one.
-    emptyOutDir: mode !== 'rapier',
+    // The cannon build runs first; each backend's after it must keep what came before.
+    emptyOutDir: !WASM_BACKENDS.includes(mode),
     // resolveLibFilename uses a fileName function's result verbatim, no extension appended: exactly
     // "game.js", which is the name src/player/index.html and every published game hard-code (a game
-    // ships game-rapier.js under that name).
+    // ships game-<backend>.js under that name).
     lib: {
       entry: path.resolve(__dirname, 'src/player/index.tsx'),
       formats: ['iife'],
       name: 'CleoPlayer',
-      fileName: () => (mode === 'rapier' ? 'game-rapier.js' : 'game.js'),
+      fileName: () => (WASM_BACKENDS.includes(mode) ? `game-${mode}.js` : 'game.js'),
     },
   },
 })))

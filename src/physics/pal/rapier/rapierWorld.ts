@@ -2,11 +2,12 @@ import type { Collider, ColliderDesc as RColliderDesc, EventQueue, ImpulseJoint,
 import type { PhysicsCapabilities } from '../capabilities';
 import { PhysicsEventKind } from '../types';
 import type {
-    BodyDesc, BodyHandle, BodyType, ColliderDesc, ColliderPart, ConvexHull, JointDesc, JointHandle, MassProperties, Out, PartShape,
+    BodyDesc, BodyHandle, BodyType, ColliderDesc, ColliderPart, JointDesc, JointHandle, MassProperties, Out,
     RayHit, RayOptions, ShapeDesc, StepProfile, V3,
 } from '../types';
-import type { PhysicsWorld } from '../world';
-import { collidersAabb, multiply, rotate } from '../shapeBounds';
+import type { DescribedWorld } from '../copy/describedWorld';
+import { boundingRadiusOf, collidersAabb, multiply, partShapeFor, rotate } from '../shapeBounds';
+import { fromX, matchedFrame } from '../jointFrames';
 import { rapier } from './load';
 
 // The Rapier backend (@dimforge/rapier3d-compat, see docs/reference/physics-backends.md for what its spike
@@ -90,7 +91,7 @@ interface Entry {
     written: number[] | null;
 }
 
-export class RapierWorld implements PhysicsWorld {
+export class RapierWorld implements DescribedWorld<RapierJointRecord> {
     public readonly backend = 'rapier' as const;
     public readonly capabilities = RAPIER_CAPABILITIES;
     public onPreSubstep: ((dt: number) => void) | null = null;
@@ -364,7 +365,8 @@ export class RapierWorld implements PhysicsWorld {
                 // frame takes its roll about the axis from A's as the two stand now, so the twist is measured
                 // from the pose the joint is made in: two frames rolled apart at the start would read as a
                 // twist past a tight limit, which the solver fights for as long as the joint lives.
-                const frameA = fromX(desc.axisA), frameB = matchedFrame(a.rotation(), frameA, b.rotation(), desc.axisB);
+                const qa = a.rotation(), qb = b.rotation();
+                const frameA = fromX(desc.axisA), frameB = matchedFrame([qa.x, qa.y, qa.z, qa.w], frameA, [qb.x, qb.y, qb.z, qb.w], desc.axisB);
                 record = {
                     kind: 'cone', a: desc.a, b: desc.b, collideConnected, anchorA: v(desc.anchorA), anchorB: v(desc.anchorB),
                     frameA, frameB, twist: desc.twistAngle, cone: desc.coneAngle,
@@ -521,7 +523,7 @@ export class RapierWorld implements PhysicsWorld {
         this.onPreSubstep = null;
     }
 
-    // ---- Rapier only: for the copy in the physics worker (mirror.ts, replica.ts) ----
+    // ---- for the copy in the physics worker (copy/describedMirror.ts, describedReplica.ts) ----
 
     /** What a body is made of now, as a description a copy can build it from (at its current pose). */
     public descOf(h: BodyHandle): BodyDesc {
@@ -794,61 +796,6 @@ export class RapierWorld implements PhysicsWorld {
     }
 }
 
-/** The quaternion turning +X onto `axis` (normalised), [x y z w]. */
-function fromX(axis: V3): number[] {
-    const len = Math.hypot(axis[0], axis[1], axis[2]) || 1;
-    const x = axis[0] / len, y = axis[1] / len, z = axis[2] / len;
-    const d = x;   // dot((1,0,0), axis)
-    if (d < -0.999999) return [0, 1, 0, 0];   // half turn about Y
-    // q = (cross(X, axis), 1 + dot), normalised
-    const qx = 0, qy = -z, qz = y, qw = 1 + d;
-    const n = Math.hypot(qx, qy, qz, qw);
-    return [qx / n, qy / n, qz / n, qw / n];
-}
-
-/**
- * B's joint frame in B: X along `axisB`, and its roll about it taken from A's frame `frameA` (in A) as the
- * two bodies are turned now (`qa`, `qb`, world rotations), so the joint starts untwisted.
- */
-function matchedFrame(qa: { x: number; y: number; z: number; w: number }, frameA: number[], qb: { x: number; y: number; z: number; w: number }, axisB: V3): number[] {
-    const QA = [qa.x, qa.y, qa.z, qa.w], QB = [qb.x, qb.y, qb.z, qb.w];
-    const worldA = multiply(QA, frameA, [0, 0, 0, 1]);
-    const x = rotate(QB, axisB[0], axisB[1], axisB[2], [0, 0, 0]);
-    let n = Math.hypot(x[0], x[1], x[2]) || 1;
-    x[0] /= n; x[1] /= n; x[2] /= n;
-    // A's frame Y, made perpendicular to B's axis (A's Z if Y lies along it).
-    let y = rotate(worldA, 0, 1, 0, [0, 0, 0]);
-    let d = y[0] * x[0] + y[1] * x[1] + y[2] * x[2];
-    if (Math.abs(d) > 0.999) { y = rotate(worldA, 0, 0, 1, [0, 0, 0]); d = y[0] * x[0] + y[1] * x[1] + y[2] * x[2]; }
-    y[0] -= x[0] * d; y[1] -= x[1] * d; y[2] -= x[2] * d;
-    n = Math.hypot(y[0], y[1], y[2]) || 1;
-    y[0] /= n; y[1] /= n; y[2] /= n;
-    const z = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
-    const worldB = basisQuat(x, y, z);
-    return multiply([-QB[0], -QB[1], -QB[2], QB[3]], worldB, [0, 0, 0, 1]) as number[];
-}
-
-/** The rotation whose matrix has columns `x`, `y`, `z` (an orthonormal right-handed basis), [x y z w]. */
-function basisQuat(x: ArrayLike<number>, y: ArrayLike<number>, z: ArrayLike<number>): number[] {
-    const m00 = x[0], m10 = x[1], m20 = x[2], m01 = y[0], m11 = y[1], m21 = y[2], m02 = z[0], m12 = z[1], m22 = z[2];
-    const trace = m00 + m11 + m22;
-    let qx: number, qy: number, qz: number, qw: number;
-    if (trace > 0) {
-        const s = Math.sqrt(trace + 1) * 2;
-        qw = 0.25 * s; qx = (m21 - m12) / s; qy = (m02 - m20) / s; qz = (m10 - m01) / s;
-    } else if (m00 > m11 && m00 > m22) {
-        const s = Math.sqrt(1 + m00 - m11 - m22) * 2;
-        qw = (m21 - m12) / s; qx = 0.25 * s; qy = (m01 + m10) / s; qz = (m02 + m20) / s;
-    } else if (m11 > m22) {
-        const s = Math.sqrt(1 + m11 - m00 - m22) * 2;
-        qw = (m02 - m20) / s; qx = (m01 + m10) / s; qy = 0.25 * s; qz = (m12 + m21) / s;
-    } else {
-        const s = Math.sqrt(1 + m22 - m00 - m11) * 2;
-        qw = (m10 - m01) / s; qx = (m02 + m20) / s; qy = (m12 + m21) / s; qz = 0.25 * s;
-    }
-    return [qx, qy, qz, qw];
-}
-
 /** A Rapier collider for a shape description, with where the shape sits inside its collider (a heightfield is centred). */
 function colliderDescFor(shape: ShapeDesc): { desc: RColliderDesc; inner: V3 } | null {
     const R = rapier();
@@ -891,53 +838,5 @@ function colliderDescFor(shape: ShapeDesc): { desc: RColliderDesc; inner: V3 } |
             return at(R.ColliderDesc.heightfield(J - 1, I - 1, data, { x: sx, y: 1, z: sz }, R.HeightFieldFlags.FIX_INTERNAL_EDGES), [sx / 2, 0, -sz / 2]);
         }
         case 'plane': return at(new R.ColliderDesc(new R.HalfSpace({ x: 0, y: 1, z: 0 })));
-    }
-}
-
-/** A shape description as the part this backend simulates. */
-function partShapeFor(shape: ShapeDesc): PartShape {
-    switch (shape.kind) {
-        case 'sphere': return { kind: 'sphere', radius: shape.radius };
-        case 'box': return { kind: 'box', halfExtents: [shape.halfExtents[0], shape.halfExtents[1], shape.halfExtents[2]] };
-        case 'capsule': return shape.height > 0 ? { kind: 'capsule', radius: shape.radius, height: shape.height } : { kind: 'sphere', radius: shape.radius };
-        case 'cylinder':
-            return { kind: 'cylinder', radiusTop: shape.radiusTop, radiusBottom: shape.radiusBottom, height: shape.height, segments: shape.segments ?? 8, hull: null };
-        case 'convex': return { kind: 'convex', hull: hullOf(shape.vertices, shape.faces) };
-        case 'trimesh': return { kind: 'trimesh' };
-        case 'heightfield': return { kind: 'heightfield' };
-        case 'plane': return { kind: 'plane', normal: [0, 1, 0] };
-    }
-}
-
-function hullOf(vertices: readonly V3[], faces: readonly (readonly number[])[]): ConvexHull {
-    const normals = faces.map(f => {
-        const a = vertices[f[0]], b = vertices[f[1]], c = vertices[f[2]];
-        const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, n = Math.hypot(nx, ny, nz) || 1;
-        return [nx / n, ny / n, nz / n] as const;
-    });
-    return { vertices: vertices.map(v => [v[0], v[1], v[2]] as const), faces: faces.map(f => [...f]), normals };
-}
-
-function boundingRadiusOf(shape: ShapeDesc): number {
-    switch (shape.kind) {
-        case 'sphere': return shape.radius;
-        case 'box': return Math.hypot(shape.halfExtents[0], shape.halfExtents[1], shape.halfExtents[2]);
-        case 'capsule': return shape.height / 2 + shape.radius;
-        case 'cylinder': return Math.hypot(Math.max(shape.radiusTop, shape.radiusBottom), shape.height / 2);
-        case 'convex': return Math.max(0, ...shape.vertices.map(v => Math.hypot(v[0], v[1], v[2])));
-        case 'trimesh': {
-            const sc = shape.scale ?? [1, 1, 1], p = shape.positions;
-            let r = 0;
-            for (let i = 0; i + 2 < p.length; i += 3) r = Math.max(r, Math.hypot(p[i] * sc[0], p[i + 1] * sc[1], p[i + 2] * sc[2]));
-            return r;
-        }
-        case 'heightfield': {
-            const rows = shape.heights.length, cols = rows ? shape.heights[0].length : 0;
-            let h = 0;
-            for (const row of shape.heights) for (const v of row) h = Math.max(h, Math.abs(v));
-            return Math.hypot((rows - 1) * shape.elementSize, h, (cols - 1) * shape.elementSize);
-        }
-        case 'plane': return Number.MAX_VALUE;
     }
 }

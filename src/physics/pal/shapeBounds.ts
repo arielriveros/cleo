@@ -1,7 +1,8 @@
-import type { ColliderDesc, Out, ShapeDesc } from './types';
+import type { ColliderDesc, ConvexHull, Out, PartShape, ShapeDesc, V3 } from './types';
 
 // Bounds measured from shape DESCRIPTIONS (types.ts), in the layer's conventions, for any backend: a body's
-// box out of a world (PhysicsBody.getAabb), and a backend that keeps its colliders' descriptions (Rapier).
+// box out of a world (PhysicsBody.getAabb), and a backend that keeps its colliders' descriptions (Rapier,
+// Jolt): their bounds, and the parts they report.
 
 /** A shape's box in its own frame, [min, max]. A plane is a thin, very wide box. */
 export function localBounds(shape: ShapeDesc): [number[], number[]] {
@@ -77,4 +78,57 @@ export function collidersAabb(colliders: readonly ColliderDesc[], pose: ArrayLik
     }
     if (out[0] === Infinity) { out[0] = out[3] = pose[0]; out[1] = out[4] = pose[1]; out[2] = out[5] = pose[2]; }
     return out;
+}
+
+/**
+ * A shape description as the part a backend simulates when it has every primitive (Rapier, Jolt): capsules
+ * and cylinders as themselves, not cannon's compounds and polyhedra.
+ */
+export function partShapeFor(shape: ShapeDesc): PartShape {
+    switch (shape.kind) {
+        case 'sphere': return { kind: 'sphere', radius: shape.radius };
+        case 'box': return { kind: 'box', halfExtents: [shape.halfExtents[0], shape.halfExtents[1], shape.halfExtents[2]] };
+        case 'capsule': return shape.height > 0 ? { kind: 'capsule', radius: shape.radius, height: shape.height } : { kind: 'sphere', radius: shape.radius };
+        case 'cylinder':
+            return { kind: 'cylinder', radiusTop: shape.radiusTop, radiusBottom: shape.radiusBottom, height: shape.height, segments: shape.segments ?? 8, hull: null };
+        case 'convex': return { kind: 'convex', hull: hullOf(shape.vertices, shape.faces) };
+        case 'trimesh': return { kind: 'trimesh' };
+        case 'heightfield': return { kind: 'heightfield' };
+        case 'plane': return { kind: 'plane', normal: [0, 1, 0] };
+    }
+}
+
+/** A convex description as the hull a part reports, with its face normals. */
+export function hullOf(vertices: readonly V3[], faces: readonly (readonly number[])[]): ConvexHull {
+    const normals = faces.map(f => {
+        const a = vertices[f[0]], b = vertices[f[1]], c = vertices[f[2]];
+        const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, n = Math.hypot(nx, ny, nz) || 1;
+        return [nx / n, ny / n, nz / n] as const;
+    });
+    return { vertices: vertices.map(v => [v[0], v[1], v[2]] as const), faces: faces.map(f => [...f]), normals };
+}
+
+/** The radius about a shape's own origin that bounds it. */
+export function boundingRadiusOf(shape: ShapeDesc): number {
+    switch (shape.kind) {
+        case 'sphere': return shape.radius;
+        case 'box': return Math.hypot(shape.halfExtents[0], shape.halfExtents[1], shape.halfExtents[2]);
+        case 'capsule': return shape.height / 2 + shape.radius;
+        case 'cylinder': return Math.hypot(Math.max(shape.radiusTop, shape.radiusBottom), shape.height / 2);
+        case 'convex': return Math.max(0, ...shape.vertices.map(v => Math.hypot(v[0], v[1], v[2])));
+        case 'trimesh': {
+            const sc = shape.scale ?? [1, 1, 1], p = shape.positions;
+            let r = 0;
+            for (let i = 0; i + 2 < p.length; i += 3) r = Math.max(r, Math.hypot(p[i] * sc[0], p[i + 1] * sc[1], p[i + 2] * sc[2]));
+            return r;
+        }
+        case 'heightfield': {
+            const rows = shape.heights.length, cols = rows ? shape.heights[0].length : 0;
+            let h = 0;
+            for (const row of shape.heights) for (const v of row) h = Math.max(h, Math.abs(v));
+            return Math.hypot((rows - 1) * shape.elementSize, h, (cols - 1) * shape.elementSize);
+        }
+        case 'plane': return Number.MAX_VALUE;
+    }
 }

@@ -1,13 +1,14 @@
 import { PhysicsEventKind, type BodyHandle, type MassProperties } from '../types';
 import type { LandedBody, MirrorDiff, ReplicaReport, WorldMirror } from '../replication';
 import { rotate } from '../shapeBounds';
-import type { RapierWorld } from './rapierWorld';
+import type { DescribedJointRecord, DescribedWorld } from './describedWorld';
 import {
     BODY_ROW, STATE_STRIDE, WRITE_ANGVEL, WRITE_FORCE, WRITE_POSE, WRITE_SLEEP, WRITE_TORQUE, WRITE_VEL,
-    type RapierChanges, type RapierOp,
+    type CopyOp, type DescribedChanges, type SlottedJointRecord,
 } from './copyMessages';
 
-// The main thread's end of the Rapier world's copy in the physics worker (see pal/replication.ts). The world
+// The main thread's end of a world's copy in the physics worker, by description (see describedWorld.ts and
+// pal/replication.ts): Rapier's and Jolt's. The world
 // stays where the engine puts every body and joint and does not step while the worker does; each frame what
 // changed is diffed against what the worker was last told and only that goes out. When a step comes back its
 // bodies are written into the world, keeping whatever was written to them since the diff: a moved or turned
@@ -24,7 +25,7 @@ interface Slot {
     start: Float64Array;
 }
 
-export class RapierMirror implements WorldMirror {
+export class DescribedMirror<J extends DescribedJointRecord> implements WorldMirror {
     private readonly _slotOf = new Map<BodyHandle, number>();
     private readonly _slots: (Slot | undefined)[] = [];
     private readonly _freeSlots: number[] = [];
@@ -38,7 +39,7 @@ export class RapierMirror implements WorldMirror {
     private readonly _mass: MassProperties = { mass: 0, centerOfMass: [0, 0, 0], inertia: [0, 0, 0] };
     private readonly _v = [0, 0, 0];
 
-    constructor(private readonly _world: RapierWorld) {}
+    constructor(private readonly _world: DescribedWorld<J>) {}
 
     public handleOf(slot: number): BodyHandle | undefined { return this._slots[slot]?.handle; }
     public slotOf(h: BodyHandle): number | undefined { return this._slotOf.get(h); }
@@ -48,7 +49,7 @@ export class RapierMirror implements WorldMirror {
     public diff(): MirrorDiff {
         const world = this._world;
         const frame = ++this._frame;
-        const removes: RapierOp[] = [], adds: RapierOp[] = [], configs: RapierOp[] = [];
+        const removes: CopyOp<J>[] = [], adds: CopyOp<J>[] = [], configs: CopyOp<J>[] = [];
         const writes: number[] = [];
         const released: number[] = [];
         const scratch = this._scratch;
@@ -84,8 +85,8 @@ export class RapierMirror implements WorldMirror {
             if (scratch[13] !== 0 || scratch[14] !== 0 || scratch[15] !== 0) mask |= WRITE_FORCE;
             if (scratch[16] !== 0 || scratch[17] !== 0 || scratch[18] !== 0) mask |= WRITE_TORQUE;
             if (scratch[19] !== sh[19]) mask |= WRITE_SLEEP;
-            // A rotation written here goes out as it was written, not as Rapier renormalised it: the worker
-            // renormalises it once, as this world did (renormalising twice can move a bit).
+            // A rotation written here goes out as it was written, not as the backend made it (Rapier
+            // renormalises it): the worker makes it once, as this world did (renormalising twice can move a bit).
             const written = world.takeWrittenRotation(h);
             if (mask) {
                 writes.push(index, mask);
@@ -111,7 +112,7 @@ export class RapierMirror implements WorldMirror {
         }
 
         // Joints: by id. Removed ones go first, new ones after the bodies they join.
-        const jointRemoves: RapierOp[] = [], jointAdds: RapierOp[] = [];
+        const jointRemoves: CopyOp<J>[] = [], jointAdds: CopyOp<J>[] = [];
         const live = new Set<number>();
         for (const [id, { record }] of world.jointRecords()) {
             live.add(id);
@@ -119,12 +120,12 @@ export class RapierMirror implements WorldMirror {
             const a = this._slotOf.get(record.a), b = this._slotOf.get(record.b);
             if (a === undefined || b === undefined) continue;
             this._joints.add(id);
-            jointAdds.push({ op: 'addJoint', id, record: { ...record, a, b } });
+            jointAdds.push({ op: 'addJoint', id, record: { ...record, a, b } as SlottedJointRecord<J> });
         }
         for (const id of [...this._joints]) if (!live.has(id)) { jointRemoves.push({ op: 'removeJoint', id }); this._joints.delete(id); }
 
         const ops = [...jointRemoves, ...removes, ...adds, ...configs, ...jointAdds];
-        const changes: RapierChanges = { ops, writes: Float64Array.from(writes), writeCount: writes.length / (STATE_STRIDE + 2) };
+        const changes: DescribedChanges<J> = { ops, writes: Float64Array.from(writes), writeCount: writes.length / (STATE_STRIDE + 2) };
         const transfer: ArrayBuffer[] = [changes.writes.buffer as ArrayBuffer];
         for (const op of ops) if (op.op === 'addBody') transfer.push(op.state.buffer as ArrayBuffer);
         return { changes, transfer, ops: ops.length, writes: changes.writeCount, released };
@@ -163,8 +164,9 @@ export class RapierMirror implements WorldMirror {
             w.takeWrittenRotation(h);            // the worker's own, not a write to send back
             if (moved) for (let i = 0; i < 7; i++) sh[i] = b[o + 1 + i];
             else {
-                // Rapier renormalises a rotation it is given, which can move its last bit: the pose recorded
-                // is the one it now holds, or the next diff would read that bit as a write and send it back.
+                // A backend may renormalise a rotation it is given (Rapier does), which can move its last bit:
+                // the pose recorded is the one it now holds, or the next diff would read that bit as a write
+                // and send it back.
                 w.getTransform(h, this._pose);
                 for (let i = 0; i < 7; i++) sh[i] = this._pose[i];
             }

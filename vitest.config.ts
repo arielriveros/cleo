@@ -15,10 +15,12 @@ import engineConfig from './vite.config';
 // that builds or tests the engine merges — a test, the dev server and a production build then see one
 // shader and one set of class identities. The merge is explicit because vitest ignores vite.config.ts
 // outright once a vitest.config.ts exists.
-/** Engine suites that also run with Rapier as the physics backend (see the "engine on rapier" project). */
-const RAPIER_SUITES = [
+/** Engine suites that also run on every other physics backend (see the "engine on <backend>" projects). */
+const PHYSICS_SUITES = [
     'characterGround', 'physicsOverlap', 'physicsTriggerOverlap', 'terrainCollider', 'foliageColliderPose', 'ragdollProfile', 'waterVolumeNode',
 ];
+/** The backends besides cannon that the engine suites run on. */
+const OTHER_BACKENDS = ['rapier'];
 
 export default mergeConfig(engineConfig, defineConfig({
     resolve: {
@@ -34,17 +36,17 @@ export default mergeConfig(engineConfig, defineConfig({
         environment: 'node',
         projects: [
             { extends: true, test: { name: 'engine', include: ['tests/**/*.test.ts'] } },
-            // The suites about what the engine does with its physics (not cannon's bits), again on Rapier:
-            // their PhysicsSystems take the backend from tests/helpers/testPhysics.ts.
-            {
+            // The suites about what the engine does with its physics (not cannon's bits), again on each other
+            // backend: their PhysicsSystems take the backend from tests/helpers/testPhysics.ts.
+            ...OTHER_BACKENDS.map(backend => ({
                 extends: true,
                 test: {
-                    name: 'engine on rapier',
-                    include: RAPIER_SUITES.map(name => `tests/${name}.test.ts`),
-                    env: { CLEO_TEST_PHYSICS: 'rapier' },
-                    setupFiles: ['tests/helpers/rapierSetup.ts'],
+                    name: `engine on ${backend}`,
+                    include: PHYSICS_SUITES.map(name => `tests/${name}.test.ts`),
+                    env: { CLEO_TEST_PHYSICS: backend },
+                    setupFiles: ['tests/helpers/backendSetup.ts'],
                 },
-            },
+            })),
         ],
         coverage: {
             // istanbul, not v8: the v8 provider under this vite version reports branch coverage as a flat

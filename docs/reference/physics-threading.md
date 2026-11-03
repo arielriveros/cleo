@@ -77,7 +77,7 @@ fallback are the same on every backend. Each backend brings two ends (`physics/p
 (`physics/pal/cannon/mirror.ts`, `replica.ts`, `replicaCodec.ts`) sends bodies, shapes and constraints as
 data, built with the same setup code (`physics/pal/cannon/worldConfig.ts`), and carries what a rebuilt
 body cannot measure again the same way (its inertia, a lock's frame, a hinge's exact axes). Rapier's
-(`physics/pal/rapier/mirror.ts`, `replica.ts`) sends each body as its description and each joint as the
+(`physics/pal/copy/describedMirror.ts`, `describedReplica.ts`) sends each body as its description and each joint as the
 record it was built from. The worker loads Rapier's WASM before it builds the copy, and messages that
 arrive meanwhile wait in order.
 
