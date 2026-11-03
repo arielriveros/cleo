@@ -1,8 +1,8 @@
 # Physics backends
 
-Physics is moving behind a backend-neutral layer, the physics counterpart of the renderer's RHI, so it can
-run on engines other than cannon-es. Rapier is the next one planned. Today cannon-es is still the only
-backend, and games behave exactly as before: the engine's tests pin the cannon step bit for bit.
+Physics runs behind a backend-neutral layer, the physics counterpart of the renderer's RHI, so it can run
+on engines other than cannon-es. Rapier is the next one planned. Today cannon-es is the only backend, and
+games behave exactly as before: the engine's tests pin the cannon step bit for bit.
 
 ## The layer
 
@@ -15,6 +15,7 @@ backend, and games behave exactly as before: the engine's tests pin the cannon s
 | `capabilities.ts` | `PhysicsCapabilities`, what a backend can do (native capsule, collision group bits, joint limits, …), and the boot log line |
 | `createWorld.ts` | The one place that knows every backend: `createPhysicsWorld(kind)`, and the two ends of copying a world into the physics worker |
 | `replication.ts` | How a backend copies its world into the physics worker: a `WorldMirror` on the main thread, a `WorldReplica` in the worker |
+| `backendSelect.ts` | Every backend a project may ask for, and `resolvePhysicsBackendRequest`: the one to run, and why it is not the one asked for |
 | `cannon/` | The cannon-es backend, `CannonWorld`, and everything that only exists because of cannon: its broadphase, the heightfield and convex-SAT patches, the material table, the centre-of-mass bookkeeping |
 
 A `PhysicsWorld` is handle-based and immediate, like the RHI's `Device`. The engine keeps its own objects
@@ -60,6 +61,23 @@ scripts when node bodies stopped being cannon's:
 - A trigger's listeners are `trigger.onContact(listener)` as before; cannon's `addEventListener` is gone.
 - `body.getAabb(out)` gives its bounds (min, then max), also before it is in a world.
 
+## Choosing a backend
+
+A game names its backend in **Options ▸ Engine ▸ Runtime ▸ Physics backend**. The choice belongs to the
+project, not the machine: two engines do not simulate alike, so a game must play the same everywhere. The
+published game's config always carries it (`physics.backend`), so a game keeps its backend even if the
+engine's default changes.
+
+The choice is a request, read when the engine starts. A backend this build cannot run (Rapier, listed
+but not implemented yet, or a name it does not know) falls back to cannon-es. The log says why, and so
+does `physics.backendFallbackReason`. `physics.backend` is the backend running, and `physics.requestedBackend`
+the one asked for. `?physicsBackend=` in the URL asks for another backend for a comparison, in the editor
+and in a web build. Each engine logs its backend at startup:
+
+```
+Physics ready — physics cannon · capsule compound · groups 32-bit · cone limit native · worker capable
+```
+
 ## Two different "where"s
 
 **Backend** is which physics engine simulates. **Executor** is which thread steps it:
@@ -68,9 +86,12 @@ see [Physics threading](physics-threading.md)). `physics.executor` reads `'inlin
 
 ## Adding a backend
 
-1. Implement `PhysicsWorld` in `src/physics/pal/<name>/`, with its capabilities.
-2. Add it to `PhysicsBackendKind` and to `createPhysicsWorld`. A backend that must load first (Rapier's
-   WASM) gets an async acquire beside it, resolved before the engine initializes physics.
+1. Implement `PhysicsWorld` in `src/physics/pal/<name>/`, with its capabilities. Only that folder may import
+   the library it wraps; `tests/physicsBackendBoundary.test.ts` holds every other file (and the declarations
+   scripts are typed against) to it.
+2. Add it to `PhysicsBackendKind`, to `createPhysicsWorld`, and as implemented to `PHYSICS_BACKENDS`. A
+   backend that must load first (Rapier's WASM) gets an async acquire beside it, resolved before the engine
+   initializes physics.
 3. To run in the physics worker, implement its `WorldMirror` and `WorldReplica` (`replication.ts`) and add
    them to `createWorldMirror` / `createWorldReplica`. The format between them is its own. A backend that
    can snapshot its whole world may send that; cannon sends bodies and shapes. Without them, set
@@ -82,7 +103,7 @@ see [Physics threading](physics-threading.md)). `physics.executor` reads `'inlin
 
 ## Status
 
-The layer is being moved in by stages. Every stage keeps the golden traces passing unchanged
+The layer was moved in by stages. Every stage kept the golden traces passing unchanged
 (`tests/physicsGoldenTrace.test.ts`, `tests/physicsGoldenB.test.ts`) and the worker equal to the main thread
 bit for bit.
 
@@ -94,7 +115,8 @@ bit for bit.
 | Terrain, foliage and tilemap colliders, ragdolls and joints on engine bodies | Done |
 | `RigidBody`, `Trigger` and `Shape` stop being cannon objects | Done |
 | The physics worker copies the world through its backend's mirror and replica | Done |
-| A test keeps `cannon-es` inside `src/physics/pal/cannon/`; the project chooses its backend | Next |
+| A test keeps `cannon-es` inside `src/physics/pal/cannon/`; scripts are typed without it; the project chooses its backend | Done |
+| A Rapier backend | Next, after the checks below |
 
 ## What a Rapier backend needs to settle
 

@@ -5,11 +5,12 @@
 // Monaco and tsc consume, and only `npm run build` at the repo root produces them.
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
 
-// gl-matrix and cannon-es are not reachable through the engine's own tree, and without them the dist
-// declarations importing them resolve to `any`, silently, because skipLibCheck swallows it. Both ship a
-// single ambient-declaration file, so being present in the program is enough; no resolution entry point.
+// gl-matrix is not reachable through the engine's own tree, and without it the dist declarations importing
+// it resolve to `any`, silently, because skipLibCheck swallows it. It ships a single ambient-declaration
+// file, so being present in the program is enough; no resolution entry point. (cannon-es used to ship
+// here too, while node bodies were cannon bodies. The public declarations no longer reach it: the physics
+// backend is behind the engine's own types, see docs/reference/physics-backends.md.)
 import glMatrixDeclaration from 'gl-matrix/index.d.ts?raw';
-import cannonDeclaration from 'cannon-es/dist/cannon-es.d.ts?raw';
 
 /** One declaration file, at the path it must live at for module resolution to find it. */
 export type TypeFile = { rel: string; content: string }
@@ -60,7 +61,6 @@ export function workspaceTypeFiles(): TypeFile[] {
 
   // Referenced explicitly from the generated tsconfig "include": a dot-directory is not matched by "**/*.ts".
   files.push({ rel: '.cleo/types/gl-matrix.d.ts', content: glMatrixDeclaration });
-  files.push({ rel: '.cleo/types/cannon-es.d.ts', content: cannonDeclaration });
 
   return files;
 }
@@ -82,7 +82,6 @@ export function loadCleoTypes(monaco: typeof Monaco): void {
   }
   defaults.addExtraLib(CLEO_PACKAGE_JSON, 'file:///node_modules/cleo/package.json');
 
-  // Ambient, so their location is irrelevant -- being in the program is what counts.
+  // Ambient, so its location is irrelevant -- being in the program is what counts.
   defaults.addExtraLib(glMatrixDeclaration, 'file:///node_modules/gl-matrix/index.d.ts');
-  defaults.addExtraLib(cannonDeclaration, 'file:///node_modules/cannon-es/index.d.ts');
 }

@@ -52,7 +52,8 @@ Shape.Heightfield(data, elementSize)
 body.attachShape(shape, offset = [0,0,0], orientation = [0,0,0])
 ```
 
-cannon has no capsule primitive, which is why `Shape.Capsule` returns several pieces.
+`Shape.Capsule` returns several pieces (a cylinder and two end spheres) because that is a capsule every
+physics backend can simulate; cannon-es, the one games run on today, has no capsule primitive.
 
 ### Body members worth knowing
 

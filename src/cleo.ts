@@ -417,7 +417,11 @@ export type { PhysicsRaycastHit, PhysicsRaycastOptions, JointSpec } from "./phys
 export { PhysicsBody, BodyVec3, BodyQuat } from "./physics/physicsBody";
 export type { PhysicsBodyOptions } from "./physics/physicsBody";
 export type { OverlapHit, OverlapOptions } from "./physics/overlap";
-export type { ColliderPart, PartShape, ConvexHull, ColliderGeometry, ColliderDesc, ShapeDesc, JointHandle } from "./physics/pal/types";
+export type { ColliderPart, PartShape, ConvexHull, ColliderGeometry, ColliderDesc, ShapeDesc, JointHandle, PhysicsBackendKind } from "./physics/pal/types";
+export { PHYSICS_BACKENDS, DEFAULT_PHYSICS_BACKEND, resolvePhysicsBackendRequest } from "./physics/pal/backendSelect";
+export type { PhysicsBackendRequest } from "./physics/pal/backendSelect";
+export { describePhysicsCapabilities } from "./physics/pal/capabilities";
+export type { PhysicsCapabilities } from "./physics/pal/capabilities";
 export { physicsStats } from "./physics/physicsStats";
 export type { PhysicsStats } from "./physics/physicsStats";
 export { sceneStats, sceneStatsDetail } from "./core/scene/sceneStats";

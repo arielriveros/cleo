@@ -18,10 +18,12 @@ import { InlineExecutor } from "./executor/inlineExecutor";
 import { WorkerExecutor } from "./executor/workerExecutor";
 import type { ContactSource, PhysicsExecutor } from "./executor/physicsExecutor";
 import { createPhysicsWorld } from "./pal/createWorld";
+import { resolvePhysicsBackendRequest } from "./pal/backendSelect";
+import type { PhysicsCapabilities } from "./pal/capabilities";
 import type { PhysicsWorld } from "./pal/world";
 import { PhysicsEventKind, type BodyHandle, type ColliderGeometry, type ColliderPart } from "./pal/types";
 import { PhysicsBody } from "./physicsBody";
-import type { JointDesc, JointHandle } from "./pal/types";
+import type { JointDesc, JointHandle, PhysicsBackendKind } from "./pal/types";
 import { WorkerPort, type PhysicsPort } from "./worker/ports";
 import { effectiveSimulationRange, shouldFreeze, SIMULATION_WAKE_GRACE } from "./simulationRange";
 
@@ -58,6 +60,11 @@ export type PhysicsWorkerMode = 'off' | 'on' | 'auto';
 
 interface PhysicsSystemConfig {
   gravity?: number[];
+  /**
+   * The physics engine to simulate with, as a request (see pal/backendSelect.ts): 'cannon', the default and
+   * only one implemented; anything else runs on cannon, and {@link PhysicsSystem.backendFallbackReason} says why.
+   */
+  backend?: string;
 }
 
 /** A single hit from {@link PhysicsSystem.raycast}. Vectors are world space and freshly allocated. */
@@ -224,7 +231,23 @@ export class PhysicsSystem {
 
   constructor(config?: PhysicsSystemConfig) {
     this._gravity = config?.gravity ? config.gravity: [0, -9.82, 0]; // y = up
+    this._backendRequest = config?.backend ?? null;
   }
+
+  private readonly _backendRequest: string | null;
+  private _backendFallbackReason: string | null = null;
+
+  /** The physics engine simulating (see pal/): 'cannon'. Before {@link initialize}, the one that will. */
+  public get backend(): PhysicsBackendKind { return this._world?.backend ?? resolvePhysicsBackendRequest(this._backendRequest).kind; }
+
+  /** The physics engine asked for. Differs from {@link backend} when the request could not be met. */
+  public get requestedBackend(): string { return this._backendRequest ?? this.backend; }
+
+  /** Why {@link backend} is not {@link requestedBackend}, or null when the request was met. */
+  public get backendFallbackReason(): string | null { return this._backendFallbackReason; }
+
+  /** What the backend can do (see pal/capabilities.ts); null before {@link initialize}. */
+  public get capabilities(): PhysicsCapabilities | null { return this._world?.capabilities ?? null; }
 
   /** The longest physics substep: what keeps stiff joints and fast contacts stable. */
   public static readonly MAX_SUBSTEP = 1 / 60;
@@ -255,19 +278,24 @@ export class PhysicsSystem {
   public simulationRange: number = 0;
 
   /**
-   * Measure cannon's own broadphase / narrowphase / solver / integrate split into the stats. Costs a few
+   * Measure the backend's own split of the step (the phases its capabilities list) into the stats. Costs a few
    * `performance.now()` per substep, so the performance HUD turns it on only while it is showing.
    */
   public profileStep: boolean = false;
 
   /**
    * Build the world: on `world` when given (a backend the host acquired, see pal/createWorld.ts), else on
-   * cannon. Synchronous either way.
+   * the backend the config asked for (see pal/backendSelect.ts). Synchronous either way.
    */
   public initialize(world?: PhysicsWorld): void {
     try {
-      // Built the same way the physics worker builds its own (pal/cannon/worldConfig.ts), so both step alike.
-      this._world = world ?? createPhysicsWorld('cannon', this._gravity);
+      if (!world) {
+        const { kind, reason } = resolvePhysicsBackendRequest(this._backendRequest);
+        this._backendFallbackReason = reason;
+        // Built the same way the physics worker builds its own, so both step alike.
+        world = createPhysicsWorld(kind, this._gravity);
+      }
+      this._world = world;
       this._world.gravity = [this._gravity[0], this._gravity[1], this._gravity[2]];
       // Buoyancy: once per SUBSTEP, before the solver, so the water's push is integrated exactly like
       // gravity is. See physics/buoyancy.ts. (Trigger enter/exit come from the world's events, drained

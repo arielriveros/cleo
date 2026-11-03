@@ -1,3 +1,4 @@
+import { PHYSICS_BACKENDS } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import RendererSettingsPanel from '@cleo/app-kit/renderer/RendererSettingsPanel'
 import PerformancePanel from '@cleo/app-kit/renderer/PerformancePanel'
@@ -5,7 +6,7 @@ import { Button, Field, NumberInput, Section, Select, Slider, VectorInput } from
 import { OptionsPageBody, OptionsShell, OPTION_LABEL, useOptionsPage } from '@cleo/app-kit/ui/OptionsShell'
 import {
   DEFAULT_PROJECT_SETTINGS, physicsWorkerOverrideSource, storePhysicsWorkerOverride,
-  type EngineRuntimeSettings, type PhysicsWorkerSetting,
+  type EngineRuntimeSettings, type PhysicsBackendSetting, type PhysicsWorkerSetting,
 } from './projectSettings'
 import { editorPrefsStore, useEditorPrefs } from './editorPrefs'
 
@@ -45,11 +46,19 @@ export default function EngineOptionsPanel() {
 }
 
 function RuntimeOptions() {
-  const { projectSettings, setProjectSettings } = useCleoEngine()
+  const { projectSettings, setProjectSettings, instance } = useCleoEngine()
   const e = projectSettings.engine
   const set = (patch: Partial<EngineRuntimeSettings>) =>
     setProjectSettings(prev => ({ ...prev, engine: { ...prev.engine, ...patch } }))
   const d = DEFAULT_PROJECT_SETTINGS.engine
+  const backendLabel = (kind: string) => PHYSICS_BACKENDS.find(b => b.request === kind)?.label ?? kind
+  // The backend is read when the engine starts (a world cannot change engines): say so when the running
+  // one is not the project's, and why when the request could not be met.
+  const physics = instance?.physics
+  const backendNote = !physics ? null
+    : physics.backendFallbackReason ? `Running on ${backendLabel(physics.backend)}: ${physics.backendFallbackReason}.`
+    : physics.backend !== e.physicsBackend ? `Running on ${backendLabel(physics.backend)} until the project is opened again.`
+    : null
 
   return (
     <OptionsPageBody>
@@ -67,6 +76,16 @@ function RuntimeOptions() {
           <NumberInput value={e.simulationRange} min={0} max={100000} step={5}
             onChange={v => set({ simulationRange: Math.max(0, v) })} />
         </Field>
+        <Field label='Physics backend' labelClassName={OPTION_LABEL}>
+          <Select value={e.physicsBackend} onChange={ev => set({ physicsBackend: ev.target.value as PhysicsBackendSetting })}>
+            {PHYSICS_BACKENDS.map(b => (
+              <option key={b.request} value={b.request} disabled={!b.implemented}>
+                {b.implemented ? b.label : `${b.label} (not implemented yet)`}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {backendNote && <div className='text-ui-xs text-warning leading-snug'>{backendNote}</div>}
         <Field label='Physics thread' labelClassName={OPTION_LABEL}>
           <Select value={e.physicsWorker} onChange={ev => set({ physicsWorker: ev.target.value as PhysicsWorkerSetting })}>
             <option value='on'>Worker</option>

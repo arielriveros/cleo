@@ -21,8 +21,8 @@ const repo = fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]applicat
 //
 // The declaration payload is gathered from dist/ here rather than through `workspaceTypeFiles()`, which
 // depends on an `import.meta.glob` the app bundler resolves. The LAYOUT is what is under test, and
-// it is reproduced exactly: node_modules/cleo/<same rel path>, the synthetic package.json, and the two
-// ambient files under .cleo/types.
+// it is reproduced exactly: node_modules/cleo/<same rel path>, the synthetic package.json, and the ambient
+// file under .cleo/types.
 
 let root = '';
 let skip = false;
@@ -50,9 +50,8 @@ async function copyDeclarations(from: string, to: string): Promise<number> {
 beforeAll(async () => {
   const dist = path.join(repo, 'dist');
   const glMatrix = path.join(repo, 'applications', 'node_modules', 'gl-matrix', 'index.d.ts');
-  const cannon = path.join(repo, 'applications', 'node_modules', 'cannon-es', 'dist', 'cannon-es.d.ts');
   // dist/ is gitignored and written by `npm run build`, so a clean checkout has nothing to check against.
-  if (!existsSync(path.join(dist, 'cleo.d.ts')) || !existsSync(glMatrix) || !existsSync(cannon)) {
+  if (!existsSync(path.join(dist, 'cleo.d.ts')) || !existsSync(glMatrix)) {
     skip = true;
     return;
   }
@@ -76,7 +75,6 @@ beforeAll(async () => {
 
   await mkdir(path.join(root, '.cleo', 'types'), { recursive: true });
   await writeFile(path.join(root, '.cleo', 'types', 'gl-matrix.d.ts'), await readFile(glMatrix, 'utf-8'), 'utf-8');
-  await writeFile(path.join(root, '.cleo', 'types', 'cannon-es.d.ts'), await readFile(cannon, 'utf-8'), 'utf-8');
 }, 120000);
 
 afterAll(async () => {
@@ -168,6 +166,40 @@ import { Node, Vec } from 'cleo'
 export default class MathNode extends Node {
   onStart() {
     Vec.vec3.add('not a vector', 1, 2)
+  }
+}
+`);
+    const bad = await typecheck();
+    expect(bad.ok).toBe(false);
+    expect(bad.out).toMatch(/Player[\\/]Hero\.ts/);
+  }, 180000);
+
+  it('types physics bodies from the engine alone, with no physics backend in the workspace', async () => {
+    if (skip) return;
+    // Node bodies used to be cannon bodies, typed only because cannon-es.d.ts shipped alongside. They are the
+    // engine's own now (PhysicsBody), so the workspace needs no backend's declarations to type them.
+    expect(existsSync(path.join(root, 'node_modules', 'cannon-es'))).toBe(false);
+    await writeScript('Player/Hero.ts', `
+import { Node } from 'cleo'
+
+export default class Pusher extends Node {
+  onStart() {
+    const body = this.body
+    if (!body) return
+    body.velocity.set(0, 1, 0)
+    body.applyImpulse([0, 2, 0])
+    const height: number = body.position.y
+  }
+}
+`);
+    expect((await typecheck()).ok).toBe(true);
+
+    await writeScript('Player/Hero.ts', `
+import { Node } from 'cleo'
+
+export default class Pusher extends Node {
+  onStart() {
+    this.body.velocity.set('up')
   }
 }
 `);

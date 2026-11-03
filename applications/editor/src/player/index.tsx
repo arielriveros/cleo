@@ -7,7 +7,7 @@ import VirtualControlsLayer from '../features/gameUi/VirtualControlsLayer';
 import { unpackGameBin, inflateSceneGeometry, inflateTerrainData, inflateTilemapData } from './unpack';
 import { attachSharedAnimations, attachTemplateAnimations } from './animations';
 import { PLAYER_CONTRACT } from '../features/publish/pack';
-import { physicsWorkerOverride } from '../features/options/projectSettings';
+import { physicsBackendOverride, physicsWorkerOverride } from '../features/options/projectSettings';
 // Inlined: a published game may be opened from file://, where a worker cannot load from a separate file.
 import PhysicsWorker from '../workers/physicsWorkerEntry?worker&inline';
 
@@ -100,8 +100,9 @@ async function boot(): Promise<void> {
   PhysicsSystem.workerFactory = () => new PhysicsWorker();
   const engine = new CleoEngine({
     graphics: data?.config?.graphics ?? { clearColor: [0, 0, 0, 1] },
-    // Gravity + max substeps, and the frame-delta cap: the project's engine options (Options ▸ Engine).
-    physics: data?.config?.physics ?? {},
+    // Gravity, max substeps, the physics backend, and the frame-delta cap: the project's engine options
+    // (Options ▸ Engine). `?physicsBackend=` asks for another backend, for a comparison.
+    physics: { ...(data?.config?.physics ?? {}), backend: physicsBackendOverride() ?? data?.config?.physics?.backend },
     runtime: data?.config?.runtime ?? {},
   });
   // `?physicsWorker=off|on|auto` (or localStorage.cleo_physics_worker) overrides the project's choice here.

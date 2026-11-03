@@ -110,6 +110,8 @@ type Sample = {
   activeBodies: number; frozenBodies: number; restingBodies: number;
   triggerPassMs: number; triggerCandidates: number; triggerPairsTested: number; triggerOverlaps: number;
   broadphaseMs: number; narrowphaseMs: number; solveMs: number; integrateMs: number;
+  /** The physics engine (physics.backend), and the phases of its step it measures (its capabilities). */
+  physicsBackend: string; physicsPhases: readonly string[];
   physicsExecutor: 'inline' | 'worker'; workerState: 'inline' | 'starting' | 'worker'; workerMode: PhysicsThread; sharedReplies: boolean;
   workerFallback: string | null; autoStepMs: number; cores: number;
   workerStepMs: number; syncMs: number; roundTripMs: number; readyMs: number;
@@ -136,6 +138,7 @@ const EMPTY: Sample = {
   activeBodies: 0, frozenBodies: 0, restingBodies: 0,
   triggerPassMs: 0, triggerCandidates: 0, triggerPairsTested: 0, triggerOverlaps: 0,
   broadphaseMs: 0, narrowphaseMs: 0, solveMs: 0, integrateMs: 0,
+  physicsBackend: '', physicsPhases: [],
   physicsExecutor: 'inline', workerState: 'inline', workerMode: 'off', sharedReplies: false, workerFallback: null, autoStepMs: 0, cores: 0,
   workerStepMs: 0, syncMs: 0, roundTripMs: 0, readyMs: 0,
   lateFrames: 0, workerFrames: 0, writes: 0, ops: 0, bytesUp: 0, bytesDown: 0,
@@ -193,7 +196,7 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
   /** Bumped by the physics-thread switch, which changes nothing the refresh would otherwise re-read soon. */
   const [, setThreadTick] = useState(0);
 
-  // cannon's own step split costs a few performance.now() per substep: measured only while this is open.
+  // The backend's own step split costs a few performance.now() per substep: measured only while this is open.
   useEffect(() => {
     const physics: any = instance?.physics;
     if (!physics) return;
@@ -312,6 +315,8 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
           narrowphaseMs: phys?.narrowphaseMs ?? 0,
           solveMs: phys?.solveMs ?? 0,
           integrateMs: phys?.integrateMs ?? 0,
+          physicsBackend: (instance?.physics as any)?.backend ?? '',
+          physicsPhases: (instance?.physics as any)?.capabilities?.profilePhases ?? [],
           physicsExecutor: phys?.executor ?? 'inline',
           workerState: workerStatus?.state ?? 'inline',
           sharedReplies: workerStatus?.sharedReplies ?? false,
@@ -501,29 +506,32 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
           ? <Row label='Render (GPU)' value={`${fmt(d.gpuMs)} ms`} hl={d.gpuMs > budgetMs} />
           : <Row label='Render (GPU)' value={d.gpuAvailable ? 'off' : 'n/a'}
                  title={d.gpuAvailable ? 'Enable timer queries under Passes.' : (gpuProfiler.unavailableReason ?? 'GPU timing is unavailable.')} />}
-        {/* Split rather than one total on purpose: `step` is cannon's solver (the part a worker could
-            take off this thread) while `write-back` is scene-graph sync that would stay here regardless. */}
+        {/* Split rather than one total on purpose: `step` is the physics engine's own work (the part a
+            worker could take off this thread) while `write-back` is scene-graph sync that would stay here
+            regardless. */}
         <Row label='Physics' value={`${fmt(d.physicsMs)} ms`} hl={d.physicsMs > 5}
              title='Only steps in Play mode — 0 while stopped is the honest answer, not a missing value.' />
         <Row label='· step' value={d.physicsExecutor === 'worker' ? 'in worker' : `${fmt(d.stepMs)} ms`}
              title={d.physicsExecutor === 'worker'
-               ? "cannon's solver runs in the physics worker: its time is under Workers."
-               : "cannon's solver — the part a worker could take off this thread."} />
-        {/* cannon's own split of the step (measured while this panel is open). Narrowphase is where terrain
-            contacts land; broadphase is pairing. */}
-        <Row label='·· broad / narrow' value={`${fmt(d.broadphaseMs)} / ${fmt(d.narrowphaseMs)} ms`} />
-        <Row label='·· solve / integrate' value={`${fmt(d.solveMs)} / ${fmt(d.integrateMs)} ms`} />
+               ? `The physics step (${d.physicsBackend || 'the physics engine'}) runs in the physics worker: its time is under Workers.`
+               : `The physics step (${d.physicsBackend || 'the physics engine'}): the part a worker could take off this thread.`} />
+        {/* The backend's own split of the step (measured while this panel is open), for the phases it
+            measures (capabilities.profilePhases). Narrowphase is where terrain contacts land; broadphase is pairing. */}
+        {(d.physicsPhases.includes('broadphase') || d.physicsPhases.includes('narrowphase')) &&
+          <Row label='·· broad / narrow' value={`${fmt(d.broadphaseMs)} / ${fmt(d.narrowphaseMs)} ms`} />}
+        {(d.physicsPhases.includes('solve') || d.physicsPhases.includes('integrate')) &&
+          <Row label='·· solve / integrate' value={`${fmt(d.solveMs)} / ${fmt(d.integrateMs)} ms`} />}
         <Row label='· write-back' value={`${fmt(d.writeBackMs)} ms`} title='Scene-graph sync, which would stay on this thread regardless.' />
         <Row label='· rays' value={`${fmt(d.rayMs)} ms · ${d.rayCount.toLocaleString()}`} />
         {/* `broadphase` is what the broadphase will actually iterate next step. It must equal `bodies`;
             anything higher is a body that left the world without the broadphase hearing about it and is
-            still being sorted, paired and collided against. See worldTeardown.clearWorld. */}
+            still being sorted, paired and collided against. See pal/cannon/worldTeardown.clearWorld. */}
         <Row label='· bodies' value={`${d.bodies.toLocaleString()} · ${d.contacts.toLocaleString()} contacts`} />
         {/* Dynamic bodies only. Frozen = out of simulation range (Options ▸ Engine ▸ Runtime, or the body's own
             setting); resting = asleep with "Sleep when resting". Neither is integrated or tested against terrain. */}
         <Row label='· dynamic' value={`${d.activeBodies} active · ${d.frozenBodies} frozen · ${d.restingBodies} resting`}
              title='Frozen bodies are out of their simulation range; resting ones are asleep after coming to rest. Both stay solid, neither is simulated.' />
-        {/* The engine's trigger-to-trigger pass (hitboxes against hurtboxes), which cannon cannot do. Runs
+        {/* The engine's trigger-to-trigger pass (hitboxes against hurtboxes), which the backend does not do. Runs
             only while some trigger asks to detect others; `overlaps` counts every reported trigger overlap. */}
         <Row label='· triggers' value={`${fmt(d.triggerPassMs)} ms · ${d.triggerCandidates} · ${d.triggerPairsTested} tested · ${d.triggerOverlaps} overlapping`}
              title='Trigger-to-trigger pass: its time, the enabled triggers it considered, the pairs whose bounds met and got the exact test, and how many trigger overlaps are live.' />

@@ -1,6 +1,7 @@
 import { Renderer } from "../graphics/renderer";
 import { InputSystem } from "../input/inputSystem";
 import { PhysicsSystem } from "../physics/physicsSystem";
+import { describePhysicsCapabilities } from "../physics/pal/capabilities";
 import { AISystem } from "../ai/aiSystem";
 import { Logger } from "./logger";
 import { Scene } from "./scene/scene";
@@ -48,6 +49,11 @@ interface CleoConfig {
      * host to have set `PhysicsSystem.workerFactory`; without one the step stays on the main thread.
      */
     worker?: 'off' | 'on' | 'auto';
+    /**
+     * The physics engine to simulate with: 'cannon' (the default, and the only one implemented). Any other
+     * request runs on cannon with the reason logged; see `PhysicsSystem.backendFallbackReason`.
+     */
+    backend?: string;
   }
   runtime?: {
     /** Longest frame delta the loop reports, seconds. See `CleoEngine.maxFrameDelta`. */
@@ -137,7 +143,8 @@ export class CleoEngine {
                                     shaderVariants: config?.graphics?.shaderVariants,
                                     pipelines: config?.graphics?.pipelines });
     this._physicsSystem = new PhysicsSystem({
-      gravity: config?.physics?.gravity || [0, -9.81, 0]
+      gravity: config?.physics?.gravity || [0, -9.81, 0],
+      backend: config?.physics?.backend,
     });
     if (config?.physics?.maxSubsteps) this._physicsSystem.maxSubsteps = config.physics.maxSubsteps;
     if (config?.physics?.simulationRange) this._physicsSystem.simulationRange = config.physics.simulationRange;
@@ -180,6 +187,10 @@ export class CleoEngine {
 
       report?.('physics', 0, 1);
       this._physicsSystem.initialize();
+      const physics = this._physicsSystem;
+      if (physics.backendFallbackReason)
+        Logger.warn(`Physics runs on ${physics.backend} instead of ${physics.requestedBackend}: ${physics.backendFallbackReason}`, 'Runtime');
+      if (physics.capabilities) Logger.info(`Physics ready — ${describePhysicsCapabilities(physics.capabilities)}`, 'Runtime');
       this.onPostInitialize();
       report?.('physics', 1, 1);
 

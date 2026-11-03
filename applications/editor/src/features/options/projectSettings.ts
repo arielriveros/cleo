@@ -20,6 +20,12 @@ export interface EngineRuntimeSettings {
    * worker once the game's physics is heavy enough to gain from it.
    */
   physicsWorker: PhysicsWorkerSetting;
+  /**
+   * The physics engine the game simulates with (the engine's `physics.backend` config). Project-wide, not
+   * per machine: backends do not simulate alike, so the game must play the same everywhere. Read when the
+   * engine starts; one this build cannot run falls back to cannon, with the reason logged.
+   */
+  physicsBackend: PhysicsBackendSetting;
   /** Longest frame delta the loop reports, seconds (CleoEngine.maxFrameDelta). */
   maxFrameDelta: number;
   /** Master volume, 0..1 (the audio mixer's master bus). */
@@ -28,6 +34,10 @@ export interface EngineRuntimeSettings {
 
 export type PhysicsWorkerSetting = 'off' | 'on' | 'auto';
 const PHYSICS_WORKER_SETTINGS: PhysicsWorkerSetting[] = ['off', 'on', 'auto'];
+
+/** The engine's PhysicsBackendRequest (pal/backendSelect.ts), spelled out so this module stays free of `cleo`. */
+export type PhysicsBackendSetting = 'cannon' | 'rapier';
+const PHYSICS_BACKEND_SETTINGS: PhysicsBackendSetting[] = ['cannon', 'rapier'];
 
 export interface PublishWindowSettings {
   /** The game's name: window / tab title, installer product name and published folder name. Empty = the project name. */
@@ -61,7 +71,7 @@ export const PROJECT_SETTINGS_VERSION = 2;
 
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   version: PROJECT_SETTINGS_VERSION,
-  engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'on', maxFrameDelta: 0.1, masterVolume: 1 },
+  engine: { gravity: [0, -9.81, 0], maxSubsteps: 8, simulationRange: 0, physicsWorker: 'on', physicsBackend: 'cannon', maxFrameDelta: 0.1, masterVolume: 1 },
   publish: { title: '', width: 1280, height: 720, fullscreen: false, resizable: true, onlyUsedShaders: true },
 };
 
@@ -88,6 +98,7 @@ export function parseProjectSettings(raw: unknown): ProjectSettings {
       maxSubsteps: Math.round(num(e.maxSubsteps, d.engine.maxSubsteps, 1, 32)),
       simulationRange: num(e.simulationRange, d.engine.simulationRange, 0, 100000),
       physicsWorker: worker,
+      physicsBackend: PHYSICS_BACKEND_SETTINGS.includes(e.physicsBackend) ? e.physicsBackend : d.engine.physicsBackend,
       maxFrameDelta: num(e.maxFrameDelta, d.engine.maxFrameDelta, 1 / 240, 0.5),
       masterVolume: num(e.masterVolume, d.engine.masterVolume, 0, 1),
     },
@@ -113,7 +124,11 @@ export function isDefaultProjectSettings(s: ProjectSettings): boolean {
  */
 export function projectSettingsConfig(s: ProjectSettings): Record<string, any> {
   return {
-    physics: { gravity: [...s.engine.gravity], maxSubsteps: s.engine.maxSubsteps, simulationRange: s.engine.simulationRange, worker: s.engine.physicsWorker },
+    // The backend always: a game keeps the one it was made with even if the engine's default changes.
+    physics: {
+      gravity: [...s.engine.gravity], maxSubsteps: s.engine.maxSubsteps, simulationRange: s.engine.simulationRange,
+      worker: s.engine.physicsWorker, backend: s.engine.physicsBackend,
+    },
     runtime: { maxFrameDelta: s.engine.maxFrameDelta },
     audio: { masterVolume: s.engine.masterVolume },
     // A publish-time switch, not something the running game reads.
@@ -164,7 +179,21 @@ export function storePhysicsWorkerOverride(mode: PhysicsWorkerSetting | null): v
   } catch { /* no storage: nothing to keep it in */ }
 }
 
-/** Push the runtime settings into a live engine (the editor does it on every change and at Play). */
+/**
+ * The physics backend asked for in the URL, `?physicsBackend=cannon|rapier`, over the project's: for a test
+ * or a comparison. Read when an engine is constructed. Null when absent or unknown.
+ */
+export function physicsBackendOverride(): PhysicsBackendSetting | null {
+  try {
+    const fromUrl = new URLSearchParams((globalThis as any).location?.search ?? '').get('physicsBackend');
+    return fromUrl && (PHYSICS_BACKEND_SETTINGS as string[]).includes(fromUrl) ? fromUrl as PhysicsBackendSetting : null;
+  } catch { return null; }
+}
+
+/**
+ * Push the runtime settings into a live engine (the editor does it on every change and at Play). Not the
+ * physics backend: a world cannot change engines, so that one is read when an engine is constructed.
+ */
 export function applyEngineRuntime(
   engine: EngineRuntimeTarget,
   s: EngineRuntimeSettings,

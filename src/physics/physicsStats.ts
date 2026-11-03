@@ -33,8 +33,9 @@ export interface PhysicsStats {
     /** Dynamic bodies asleep at rest (`canSleep`). */
     restingBodies: number;
     /**
-     * cannon's own split of the step, summed over this frame's substeps. Only measured while
-     * `PhysicsSystem.profileStep` is on (the HUD turns it on while it is open); 0 otherwise.
+     * The backend's own split of the step, summed over this frame's substeps: the phases it measures
+     * (`capabilities.profilePhases`; the others stay 0). Only measured while `PhysicsSystem.profileStep` is
+     * on (the HUD turns it on while it is open); 0 otherwise.
      */
     broadphaseMs: number;
     narrowphaseMs: number;

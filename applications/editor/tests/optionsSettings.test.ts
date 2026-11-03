@@ -11,7 +11,7 @@ const mem = new Map<string, string>();
 
 import {
   DEFAULT_PROJECT_SETTINGS, applyEngineRuntime, isDefaultProjectSettings, parseProjectSettings, projectSettingsConfig,
-  physicsWorkerOverride, physicsWorkerOverrideSource, storePhysicsWorkerOverride,
+  physicsWorkerOverride, physicsWorkerOverrideSource, storePhysicsWorkerOverride, physicsBackendOverride,
 } from '../src/features/options/projectSettings';
 import { DEFAULT_EDITOR_PREFS, editorPrefsStore, getEditorPrefs, parseEditorPrefs } from '../src/features/options/editorPrefs';
 import { loadTabState, saveTabState } from '../src/utils/tabState';
@@ -47,7 +47,7 @@ describe('project settings', () => {
     });
     expect(isDefaultProjectSettings(s)).toBe(false);
     expect(projectSettingsConfig(s)).toEqual({
-      physics: { gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0, worker: 'on' },
+      physics: { gravity: [0, 0, 0], maxSubsteps: 4, simulationRange: 0, worker: 'on', backend: 'cannon' },
       runtime: { maxFrameDelta: 0.05 },
       audio: { masterVolume: 0.5 },
       window: { title: 'Hollow Keep', width: 1920, height: 1080, fullscreen: true, resizable: false },
@@ -66,6 +66,28 @@ describe('project settings', () => {
     expect(parseProjectSettings({ version: 1, engine: { physicsWorker: 'auto' } }).engine.physicsWorker).toBe('auto');
     expect(parseProjectSettings(parseProjectSettings({ version: 2, engine: { physicsWorker: 'off' } })).engine.physicsWorker).toBe('off');
     expect(projectSettingsConfig(parseProjectSettings({ engine: { physicsWorker: 'auto' } })).physics.worker).toBe('auto');
+  });
+
+  it('reads the physics backend, defaulting to cannon, and ships it in the game config', () => {
+    expect(parseProjectSettings(null).engine.physicsBackend).toBe('cannon');
+    expect(parseProjectSettings({ engine: { physicsBackend: 'rapier' } }).engine.physicsBackend).toBe('rapier');
+    expect(parseProjectSettings({ engine: { physicsBackend: 'havok' } }).engine.physicsBackend).toBe('cannon');
+    expect(projectSettingsConfig(parseProjectSettings({ engine: { physicsBackend: 'rapier' } })).physics.backend).toBe('rapier');
+  });
+
+  it('lets the URL ask for a physics backend', () => {
+    const g = globalThis as any;
+    const location = g.location;
+    try {
+      g.location = { search: '?physicsBackend=rapier' };
+      expect(physicsBackendOverride()).toBe('rapier');
+      g.location = { search: '?physicsBackend=havok' };
+      expect(physicsBackendOverride()).toBeNull();
+      g.location = undefined;
+      expect(physicsBackendOverride()).toBeNull();
+    } finally {
+      g.location = location;
+    }
   });
 
   it('applies the runtime slice to a live engine, physics and mixer', () => {

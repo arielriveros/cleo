@@ -60,7 +60,8 @@ export function ensureMonaco(): typeof monaco {
     // A class script's `this` is the instance, typed through `extends Node`; off so a non-class fallback
     // does not flag `this.<anything>` as implicit-any.
     noImplicitThis: false,
-    // The engine's .d.ts tree references cannon-es/gl-matrix sub-paths this loader does not resolve; an
+    // The engine's .d.ts tree references package sub-paths this loader does not resolve (gl-matrix's; the
+    // physics backend's own declarations, which nothing public reaches); an
     // unresolved transitive type must not blank out hovers on the rest of the public API.
     skipLibCheck: true,
   });

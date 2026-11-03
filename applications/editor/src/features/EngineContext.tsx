@@ -106,7 +106,7 @@ import { impostorBillboardOf } from "../utils/foliageRules";
 import { idbGet, idbSet } from "@cleo/app-kit/utils/idb";
 import { EDITOR_CAMERA_MAP } from "@cleo/app-kit/engine/viewCameraMap";
 import { KEYS, libKey, inputMapKey, projectSettingsKey } from "../utils/storageKeys";
-import { ProjectSettings, DEFAULT_PROJECT_SETTINGS, parseProjectSettings, applyEngineRuntime } from "./options/projectSettings";
+import { ProjectSettings, DEFAULT_PROJECT_SETTINGS, parseProjectSettings, applyEngineRuntime, physicsBackendOverride } from "./options/projectSettings";
 import { getEditorPrefs, editorPrefsStore } from "./options/editorPrefs";
 import { setGizmoSnapSteps } from "@cleo/app-kit/gizmo/gizmoDrag";
 import { openScriptExternally } from "./options/scriptOpener";
@@ -5991,6 +5991,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
                   // Read here because a context's API cannot change once resources exist on it.
                   backend: readBackendPreference(),
               },
+              // Read here for the same reason: a world cannot change physics engines. The project's choice
+              // as far as it is loaded yet, or the URL's; Options ▸ Engine ▸ Runtime says when they differ.
+              physics: { backend: physicsBackendOverride() ?? projectSettingsRef.current.engine.physicsBackend },
           });
 
           // Before setupInitialScene() and the texture registrations below: both build GPU resources,
