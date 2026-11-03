@@ -3,7 +3,6 @@ import { Scene } from "../core/scene/scene";
 import { Node } from "../core/scene/nodes/node";
 import { ModelNode } from "../core/scene/nodes/modelNode";
 import { unwrapScriptNode } from "../core/scene/nodes/nodeScripting";
-import { Body, Constraint } from 'cannon-es';
 import { quat, vec3 } from "gl-matrix";
 import { authoring } from "../core/eventBus";
 import { RigidBody, Trigger, triggerState } from "./body";
@@ -27,20 +26,13 @@ import type { JointDesc, JointHandle } from "./pal/types";
 import { WorkerPort, type PhysicsPort } from "./worker/ports";
 import { effectiveSimulationRange, shouldFreeze, SIMULATION_WAKE_GRACE } from "./simulationRange";
 
-/**
- * A body in the world: one of the engine's own (PhysicsBody, on any backend), or — until RigidBody and
- * Trigger become PhysicsBodies too — a cannon body.
- */
-export type AnyBody = Body | PhysicsBody;
 
 /** Whether a body takes part in overlaps: anything but a disabled trigger. */
-const isOn = (body: AnyBody): boolean => !(body instanceof Trigger) || body.enabled;
+const isOn = (body: PhysicsBody): boolean => !(body instanceof Trigger) || body.enabled;
 /** A trigger's re-arm count (see Trigger.rearmEpoch); 0 for any other body. */
-const epochOf = (body: AnyBody): number => (body instanceof Trigger ? body.rearmEpoch : 0);
+const epochOf = (body: PhysicsBody): number => (body instanceof Trigger ? body.rearmEpoch : 0);
 /** Whether a body is asleep (or held asleep). */
-const asleep = (body: AnyBody): boolean => (body instanceof PhysicsBody ? body.isSleeping : body.sleepState === Body.SLEEPING);
-/** Whether a body is moved by the simulation. */
-const isDynamic = (body: AnyBody): boolean => (body instanceof PhysicsBody ? body.isDynamic : body.type === Body.DYNAMIC);
+const asleep = (body: PhysicsBody): boolean => body.isSleeping;
 
 /** A joint as PhysicsSystem.addJoint takes it: a JointDesc between two engine bodies. */
 export type JointSpec = JointDesc extends infer J ? J extends JointDesc ? Omit<J, 'a' | 'b'> : never : never;
@@ -76,7 +68,7 @@ export interface PhysicsRaycastHit {
   normal: vec3;
   /** Distance from the ray's start, in world units. */
   distance: number;
-  body: AnyBody;
+  body: PhysicsBody;
   /** The Node that owns `body`, or null for bodies with no owner — the terrain heightfield, for instance. */
   node: Node | null;
 }
@@ -88,13 +80,13 @@ export interface PhysicsRaycastOptions {
    */
   checkCollisionResponse?: boolean;
   /** Bodies to skip. Nearly always the caster's own body, since a ray usually starts inside it. */
-  ignore?: AnyBody | AnyBody[] | null;
+  ignore?: PhysicsBody | PhysicsBody[] | null;
   /** Let trigger volumes count as hits. Default false — walking through a trigger is not walking into a wall. */
   includeTriggers?: boolean;
   /** Let bodies with `simulatePhysics = false` count as hits. Default false. */
   includeGhosts?: boolean;
   /** Last word on each candidate. Return true to skip it. `owner` is null for a body with no Node. */
-  reject?: (owner: Node | null, body: AnyBody) => boolean;
+  reject?: (owner: Node | null, body: PhysicsBody) => boolean;
   /**
    * Only what a character can stand on: DYNAMIC bodies (other characters' capsules, ragdoll limbs, loose
    * props) are dropped before any shape is tested, which is most of what a short downward ray costs.
@@ -155,7 +147,7 @@ export class PhysicsSystem {
   /** Unpaused seconds of simulated time; the clock GROUND_GRACE is measured against. */
   private _time = 0;
   /** Per body: the most ground-like contact seen recently, its surface normal, and when. See _record. */
-  private _ground = new WeakMap<AnyBody, {
+  private _ground = new WeakMap<PhysicsBody, {
     time: number;
     dot: number;
     normal: [number, number, number];
@@ -164,13 +156,13 @@ export class PhysicsSystem {
     gap?: number;
   }>();
   /** Per body: measured motion (how fast it ACTUALLY moved), sampled in the write-back pass. See motion.ts. */
-  private _motion = new WeakMap<AnyBody, MotionRecord>();
+  private _motion = new WeakMap<PhysicsBody, MotionRecord>();
   /** A static body's node `transformVersion` when its pose was last pushed (see the write-back). */
-  private _followVersion = new WeakMap<AnyBody, number>();
+  private _followVersion = new WeakMap<PhysicsBody, number>();
   /** Per body: the resolved motion tuning. `motionSmoothing` is readonly, so it can only change with the body. */
-  private _motionCfg = new WeakMap<AnyBody, MotionConfig>();
+  private _motionCfg = new WeakMap<PhysicsBody, MotionConfig>();
   /** Per body: how long it has been continuously airborne / grounded, in unpaused seconds. */
-  private _airborne = new WeakMap<AnyBody, { airTime: number; groundedTime: number }>();
+  private _airborne = new WeakMap<PhysicsBody, { airTime: number; groundedTime: number }>();
   /** Scratch for the per-frame body facing; never escapes the write-back pass. */
   private _forwardScratch = vec3.create();
   /** Scratch for the per-frame node-space body position; never escapes the write-back pass. */
@@ -206,7 +198,7 @@ export class PhysicsSystem {
    * `world.bodies`. Only tracks bodies added THROUGH this system; the foliage collider pool and ragdoll
    * constraints talk to the world directly and manage their own membership.
    */
-  private _inWorld = new Set<AnyBody>();
+  private _inWorld = new Set<PhysicsBody>();
   /** The engine bodies in the world (enabled or kept disabled), by handle: what a handle the world reports is. */
   private _bodies = new Map<number, PhysicsBody>();
   /**
@@ -214,12 +206,12 @@ export class PhysicsSystem {
    * events during the substeps — and the same set as last REPORTED to scripts. Enter/exit hooks fire from
    * the difference once per frame, so a pair that flickers across substeps never reaches a script.
    */
-  private _triggerPairs = new Map<number, { a: AnyBody; b: AnyBody }>();
+  private _triggerPairs = new Map<number, { a: PhysicsBody; b: PhysicsBody }>();
   /**
    * What was last reported to scripts, with each side's `rearmEpoch` at the time: a trigger switched off
    * and back on inside one frame still overlaps, but its new enter must be reported (see Trigger.rearmEpoch).
    */
-  private _reportedPairs = new Map<number, { a: AnyBody; b: AnyBody; ea: number; eb: number }>();
+  private _reportedPairs = new Map<number, { a: PhysicsBody; b: PhysicsBody; ea: number; eb: number }>();
   /** Every trigger in the world, for the trigger↔trigger pass and the editor's overlay. */
   private _triggers = new Set<Trigger>();
   /** Bumped when a trigger enters or leaves the world; see {@link triggerVersion}. */
@@ -228,13 +220,13 @@ export class PhysicsSystem {
   private _ttPass = new TriggerOverlapPass();
   private _ttPairs = new Map<number, TriggerOverlap>();
   /** Per trigger: how many reported overlaps it is in, for the overlay's highlight. */
-  private _overlapCount = new Map<AnyBody, number>();
+  private _overlapCount = new Map<PhysicsBody, number>();
   /** Bodies this system has put to sleep — out of range, or at rest — and what they were doing. */
-  private _frozen = new Map<AnyBody, FrozenState>();
+  private _frozen = new Map<PhysicsBody, FrozenState>();
   /** When a frozen body was last woken by something else (a hit, an impulse): it gets a grace period. */
-  private _wokenAt = new WeakMap<AnyBody, number>();
+  private _wokenAt = new WeakMap<PhysicsBody, number>();
   /** Per `canSleep` body: seconds it has been continuously at rest. */
-  private _restTime = new WeakMap<AnyBody, number>();
+  private _restTime = new WeakMap<PhysicsBody, number>();
 
   constructor(config?: PhysicsSystemConfig) {
     this._gravity = config?.gravity ? config.gravity: [0, -9.82, 0]; // y = up
@@ -571,14 +563,14 @@ export class PhysicsSystem {
    * sleeping body is skipped against static geometry), so without this `isGrounded` would expire after
    * GROUND_GRACE and a frozen character would read as falling, and play its fall.
    */
-  private _holdGround(body: AnyBody, state: FrozenState): void {
+  private _holdGround(body: PhysicsBody, state: FrozenState): void {
     if (!state.grounded) return;
     const stamp = this._ground.get(body);
     if (stamp) stamp.time = this._time;
   }
 
   /** Whether this system is holding `body` asleep (out of range or at rest). For tests and the HUD. */
-  public isFrozen(body: AnyBody): boolean { return this._frozen.has(body); }
+  public isFrozen(body: PhysicsBody): boolean { return this._frozen.has(body); }
 
   /**
    * Per-frame timings and counts for the last completed step. Read by the editor's performance HUD.
@@ -602,19 +594,18 @@ export class PhysicsSystem {
     return body;
   }
 
-  public addBody(body: AnyBody): void {
+  public addBody(body: PhysicsBody): void {
     if (!this._world) return;
     if (!this._inWorld.has(body)) this._enterWorld(body);
   }
 
   /** Whether `body` is in the world (added, and not removed since). */
-  public hasBody(body: AnyBody): boolean { return this._inWorld.has(body); }
+  public hasBody(body: PhysicsBody): boolean { return this._inWorld.has(body); }
 
   /** The one way a body enters the world through this system: material, membership, trigger bookkeeping. */
-  private _enterWorld(body: AnyBody): void {
+  private _enterWorld(body: PhysicsBody): void {
     // Its surface: a RigidBody brings its own, anything else takes the default.
-    if (body instanceof PhysicsBody) this._bodies.set(body._addTo(this._world), body);
-    else this._cannon.adoptBody(body);
+    this._bodies.set(body._addTo(this._world), body);
     this._inWorld.add(body);
     if (body instanceof Trigger) { this._triggers.add(body); this._localVersion++; }
   }
@@ -624,13 +615,11 @@ export class PhysicsSystem {
    * the end of the next step. An engine body keeps its state either way and can be added again; `keep`
    * also keeps it built in the world, disabled, so adding it again costs nothing (a pool's bodies).
    */
-  public removeBody(body: AnyBody, keep = false): void {
+  public removeBody(body: PhysicsBody, keep = false): void {
     if (!this._world) return;
     const wasIn = this._inWorld.delete(body);
-    if (body instanceof PhysicsBody) {
-      if (keep) { if (wasIn) body._disable(); }
-      else if (body.world === this._world) { this._bodies.delete(body.handle); body._release(true); }
-    } else if (wasIn) this._cannon.releaseBody(body);
+    if (keep) { if (wasIn) body._disable(); }
+    else if (body.world === this._world) { this._bodies.delete(body.handle); body._release(true); }
     this._frozen.delete(body);
     if (body instanceof Trigger && this._triggers.delete(body)) this._localVersion++;
     if (this._triggerPairs.size > 0)
@@ -651,7 +640,7 @@ export class PhysicsSystem {
     this._world.drainEvents((kind, a, b) => {
       if (kind === PhysicsEventKind.ContactBegin) {
         const self = this._bodyOf(a), other = this._bodyOf(b);
-        if (!(self instanceof PhysicsBody) || !(other instanceof PhysicsBody)) return;
+        if (!self || !other) return;
         try { self._emitCollide(other); }
         catch (e) { Logger.error(`Error in a collision listener on ${self.name}: ${e}`, 'Script'); }
       } else {
@@ -660,10 +649,10 @@ export class PhysicsSystem {
     });
   }
 
-  /** The body behind a handle the world reported: an engine body, else a cannon one. */
-  private _bodyOf(h: BodyHandle): AnyBody | undefined { return this._bodies.get(h) ?? this._cannon.bodyOf(h); }
+  /** The engine body behind a handle the world reported. */
+  private _bodyOf(h: BodyHandle): PhysicsBody | undefined { return this._bodies.get(h); }
 
-  private _onContact(a: AnyBody | null, b: AnyBody | null, begin: boolean): void {
+  private _onContact(a: PhysicsBody | null, b: PhysicsBody | null, begin: boolean): void {
     // A removed body comes back as null: removeBody has already dropped its pairs.
     if (!a || !b || !(a.isTrigger || b.isTrigger)) return;
     const key = pairKey(a, b);
@@ -712,14 +701,14 @@ export class PhysicsSystem {
     }
     for (const [key, hit] of this._ttPairs) {
       if (this._reportedPairs.has(key)) continue;
-      const a = hit.a as unknown as AnyBody, b = hit.b as unknown as AnyBody;
+      const a = hit.a as unknown as PhysicsBody, b = hit.b as unknown as PhysicsBody;
       this._reportedPairs.set(key, { a, b, ea: epochOf(a), eb: epochOf(b) });
       this._dispatchTrigger(a, b, 'enter', hit.pointOnA, hit.pointOnB, hit.fraction);
     }
     physicsStats.triggerOverlaps = this._reportedPairs.size;
   }
 
-  private _dispatchTrigger(a: AnyBody, b: AnyBody, phase: 'enter' | 'exit',
+  private _dispatchTrigger(a: PhysicsBody, b: PhysicsBody, phase: 'enter' | 'exit',
                            pointOnA: [number, number, number] | null, pointOnB: [number, number, number] | null, fraction: number): void {
     const na = (a as any).owner, nb = (b as any).owner;
     const hook = phase === 'enter' ? 'onTriggerEnter' : 'onTriggerExit';
@@ -731,7 +720,7 @@ export class PhysicsSystem {
     }
     // Each Trigger side: its overlap count (the overlay's highlight) and its own listeners, which also hear
     // about ownerless bodies and get the contact point.
-    const sides: [AnyBody, AnyBody, [number, number, number] | null][] = [[a, b, pointOnB], [b, a, pointOnA]];
+    const sides: [PhysicsBody, PhysicsBody, [number, number, number] | null][] = [[a, b, pointOnB], [b, a, pointOnA]];
     for (const [self, other, point] of sides) {
       if (!(self instanceof Trigger)) continue;
       const count = (this._overlapCount.get(self) ?? 0) + (phase === 'enter' ? 1 : -1);
@@ -757,7 +746,7 @@ export class PhysicsSystem {
   public get triggerVersion(): number { return triggerState.version + this._localVersion; }
 
   /** Whether `trigger` is in any reported overlap right now. */
-  public isTriggerOverlapping(trigger: AnyBody): boolean { return (this._overlapCount.get(trigger) ?? 0) > 0; }
+  public isTriggerOverlapping(trigger: PhysicsBody): boolean { return (this._overlapCount.get(trigger) ?? 0) > 0; }
 
   /** How many trigger overlaps are currently reported to scripts. For tests and the stats panel. */
   public get triggerOverlapCount(): number { return this._reportedPairs.size; }
@@ -767,7 +756,7 @@ export class PhysicsSystem {
    * not go through `addBody`. For systems that read the colliders wholesale (particle collision); scripts
    * want the shape queries below instead.
    */
-  public get bodies(): readonly AnyBody[] {
+  public get bodies(): readonly PhysicsBody[] {
     if (!this._world) return [];
     const handles = this._world.bodies();
     if (handles !== this._bodyListOf) {
@@ -778,7 +767,7 @@ export class PhysicsSystem {
     return this._bodyList;
   }
   /** {@link bodies}, and the world's handle list it was made from (rebuilt only when that changes). */
-  private _bodyList: AnyBody[] = [];
+  private _bodyList: PhysicsBody[] = [];
   private _bodyListOf: readonly BodyHandle[] | null = null;
 
   /**
@@ -810,14 +799,14 @@ export class PhysicsSystem {
     const gravity = Math.hypot(g[0], g[1], g[2]);
     const dt = substep > 0 ? substep : PhysicsSystem.MAX_SUBSTEP;
     const time = this._world.time;
-    const isCharacter = (b: AnyBody) => (b as any).owner?.nodeType === 'character';
+    const isCharacter = (b: PhysicsBody) => (b as any).owner?.nodeType === 'character';
     for (const volume of volumes) {
       if (!volume.enabled) continue;
       const spec = volume.buoyancyVolume(time);
       for (const body of this.bodies) {
         // applyForce wakes a sleeping body: a frozen floater would be thawed every substep.
         if (asleep(body)) continue;
-        if (!isDynamic(body) || !floats(body, spec, isCharacter)) continue;
+        if (!body.isDynamic || !floats(body, spec, isCharacter)) continue;
         const fraction = applyBuoyancy(this._world, body.id as BodyHandle, body.mass, spec, gravity, dt);
         if (fraction > 0) volume.recordSubmerged(body, fraction);
       }
@@ -831,13 +820,13 @@ export class PhysicsSystem {
    * skipped unless asked for. Spheres, boxes and capsules are tested exactly; convex hulls, trimeshes,
    * heightfields and planes are not tested at all: these queries are for hitting things, not terrain.
    */
-  public overlapSphere(center: ArrayLike<number>, radius: number, options?: OverlapOptions<Body>): OverlapHit<Body>[] {
+  public overlapSphere(center: ArrayLike<number>, radius: number, options?: OverlapOptions<PhysicsBody>): OverlapHit<PhysicsBody>[] {
     const c = v3(center);
     return this._query([{ kind: 'capsule', a: c, b: c, radius }], options);
   }
 
   /** Bodies touching the capsule from `a` to `b` (its two end centres) with `radius`. See {@link overlapSphere}. */
-  public overlapCapsule(a: ArrayLike<number>, b: ArrayLike<number>, radius: number, options?: OverlapOptions<Body>): OverlapHit<Body>[] {
+  public overlapCapsule(a: ArrayLike<number>, b: ArrayLike<number>, radius: number, options?: OverlapOptions<PhysicsBody>): OverlapHit<PhysicsBody>[] {
     return this._query([{ kind: 'capsule', a: v3(a), b: v3(b), radius }], options);
   }
 
@@ -845,7 +834,7 @@ export class PhysicsSystem {
    * Bodies touching an oriented box. `rotation` is a unit quaternion [x, y, z, w] (a node's
    * `worldQuaternion`) and defaults to none. See {@link overlapSphere}.
    */
-  public overlapBox(center: ArrayLike<number>, halfExtents: ArrayLike<number>, rotation?: ArrayLike<number> | null, options?: OverlapOptions<Body>): OverlapHit<Body>[] {
+  public overlapBox(center: ArrayLike<number>, halfExtents: ArrayLike<number>, rotation?: ArrayLike<number> | null, options?: OverlapOptions<PhysicsBody>): OverlapHit<PhysicsBody>[] {
     const q: [number, number, number, number] = rotation ? [rotation[0], rotation[1], rotation[2], rotation[3]] : [0, 0, 0, 1];
     return this._query([{ kind: 'box', center: v3(center), half: v3(halfExtents), rotation: q }], options);
   }
@@ -857,17 +846,17 @@ export class PhysicsSystem {
    * the sweep it was first touched: compare two to learn which one the swing reached first.
    */
   public sweepCapsule(a0: ArrayLike<number>, b0: ArrayLike<number>, a1: ArrayLike<number>, b1: ArrayLike<number>,
-                      radius: number, options?: OverlapOptions<Body>): OverlapHit<Body>[] {
+                      radius: number, options?: OverlapOptions<PhysicsBody>): OverlapHit<PhysicsBody>[] {
     return this._query(sweepPoses(v3(a0), v3(b0), v3(a1), v3(b1), radius), options);
   }
 
   /** Bodies a sphere touches moving from `from` to `to`: a thick ray. See {@link sweepCapsule}. */
-  public sweepSphere(from: ArrayLike<number>, to: ArrayLike<number>, radius: number, options?: OverlapOptions<Body>): OverlapHit<Body>[] {
+  public sweepSphere(from: ArrayLike<number>, to: ArrayLike<number>, radius: number, options?: OverlapOptions<PhysicsBody>): OverlapHit<PhysicsBody>[] {
     const f = v3(from), t = v3(to);
     return this._query(sweepPoses(f, f, t, t, radius), options);
   }
 
-  private _query(poses: QueryShape[], options?: OverlapOptions<Body>): OverlapHit<Body>[] {
+  private _query(poses: QueryShape[], options?: OverlapOptions<PhysicsBody>): OverlapHit<PhysicsBody>[] {
     if (!this._world) return [];
     const start = performance.now();
     // Scripts hand over script proxies; owners are compared by identity, so unwrap to the real nodes.
@@ -877,7 +866,7 @@ export class PhysicsSystem {
     const hits = queryPoses(this.bodies as unknown as OverlapBody[], poses, this._geometry, opts as OverlapOptions<OverlapBody>);
     physicsStats.rayMs += performance.now() - start;
     physicsStats.rayCount++;
-    return hits as unknown as OverlapHit<Body>[];
+    return hits as unknown as OverlapHit<PhysicsBody>[];
   }
 
   /**
@@ -891,16 +880,6 @@ export class PhysicsSystem {
 
   public removeJoint(joint: JointHandle): void {
     this._world?.destroyJoint(joint);
-  }
-
-  /** @deprecated A cannon constraint between cannon bodies; use {@link addJoint}. */
-  public addConstraint(constraint: Constraint): void {
-    this._cannon?.addConstraint(constraint);
-  }
-
-  /** @deprecated See {@link addConstraint}. */
-  public removeConstraint(constraint: Constraint): void {
-    this._cannon?.removeConstraint(constraint);
   }
 
   /**
@@ -981,7 +960,7 @@ export class PhysicsSystem {
   private readonly _probeBox = new Float64Array(6);
   private readonly _probeFrame = new Float64Array(7);
 
-  private _record(body: AnyBody, dot: number, normal: [number, number, number], gap?: number): void {
+  private _record(body: PhysicsBody, dot: number, normal: [number, number, number], gap?: number): void {
     if (body.isTrigger) return;
     const prev = this._ground.get(body);
 
@@ -1013,7 +992,7 @@ export class PhysicsSystem {
    *                     larger than GROUND_GRACE is allowed, but past that window a worse contact may
    *                     already have replaced the stamp.
    */
-  public isGrounded(body: AnyBody, maxSlopeDegrees: number = 60, graceSeconds: number = GROUND_GRACE): boolean {
+  public isGrounded(body: PhysicsBody, maxSlopeDegrees: number = 60, graceSeconds: number = GROUND_GRACE): boolean {
     // A trigger passes through everything, so it never rests on anything.
     if (!this._world || !body || body.isTrigger) return false;
 
@@ -1030,7 +1009,7 @@ export class PhysicsSystem {
    * ground under normal gravity. Backs {@link Node.groundNormal}. Falls back to UP (gravity reversed) when
    * the body is not grounded, has no stamp, or gravity is zero, so callers can project onto it unguarded.
    */
-  public groundNormal(body: AnyBody, maxSlopeDegrees: number = 60, graceSeconds: number = GROUND_GRACE): vec3 {
+  public groundNormal(body: PhysicsBody, maxSlopeDegrees: number = 60, graceSeconds: number = GROUND_GRACE): vec3 {
     const up = this.up;
     if (!this.isGrounded(body, maxSlopeDegrees, graceSeconds)) return up;
     const stamp = this._ground.get(body);
@@ -1042,7 +1021,7 @@ export class PhysicsSystem {
    * Only bodies with a `groundProbeDistance` can answer. `-1` and not 0 for "unknown": 0 means resting on the
    * ground. Capped by the probe distance, so it is a near-ground refinement, not a general altimeter.
    */
-  public groundDistance(body: AnyBody): number {
+  public groundDistance(body: PhysicsBody): number {
     if (!body || body.isTrigger) return -1;
     const stamp = this._ground.get(body);
     if (!stamp || stamp.gap === undefined) return -1;
@@ -1066,12 +1045,12 @@ export class PhysicsSystem {
    * Measured motion for a body — how fast it ACTUALLY moved, not what was commanded of it. Backs
    * {@link Node.currentSpeed} and family. Undefined until the body has been through a write-back pass.
    */
-  public motionOf(body: AnyBody): MotionRecord | undefined {
+  public motionOf(body: PhysicsBody): MotionRecord | undefined {
     return this._motion.get(body);
   }
 
   /** This body's motion tuning, from its own `motionSmoothing` where it set one. Cached per body. */
-  private _motionConfigFor(body: AnyBody): MotionConfig {
+  private _motionConfigFor(body: PhysicsBody): MotionConfig {
     let cfg = this._motionCfg.get(body);
     if (!cfg) {
       const tau = body instanceof RigidBody ? body.motionSmoothing : 0;
@@ -1086,7 +1065,7 @@ export class PhysicsSystem {
    * the grace window from {@link isGrounded}: `airTime` only climbs once the grace has expired. Both are 0
    * for a body that has never been simulated.
    */
-  public airborneTimes(body: AnyBody): { airTime: number; groundedTime: number } {
+  public airborneTimes(body: PhysicsBody): { airTime: number; groundedTime: number } {
     return this._airborne.get(body) ?? { airTime: 0, groundedTime: 0 };
   }
 
@@ -1455,13 +1434,17 @@ export class PhysicsSystem {
 
 
   /** The enabled water volumes as plain data for the worker, with where to report what each buoyed. */
-  private _waterSpecs(): { spec: import('./waterSurface').WaterSpec; record: (body: Body, fraction: number) => void }[] {
+  private _waterSpecs(): { spec: import('./waterSurface').WaterSpec; record: (body: { id: number }, fraction: number) => void }[] {
     const volumes = (this._scene as any)?.waterVolumes as Set<any> | undefined;
     if (!volumes?.size) return [];
-    const out: { spec: import('./waterSurface').WaterSpec; record: (body: Body, fraction: number) => void }[] = [];
+    const out: { spec: import('./waterSurface').WaterSpec; record: (body: { id: number }, fraction: number) => void }[] = [];
     for (const volume of volumes) {
       if (!volume.enabled || typeof volume.buoyancySpec !== 'function') continue;
-      out.push({ spec: volume.buoyancySpec(), record: (body, fraction) => volume.recordSubmerged(body, fraction) });
+      out.push({ spec: volume.buoyancySpec(), record: (body, fraction) => {
+        // The worker reports the main thread's copy of the body: the engine body behind it is what floats.
+        const engineBody = this._bodyOf(body.id as BodyHandle);
+        if (engineBody) volume.recordSubmerged(engineBody, fraction);
+      } });
     }
     return out;
   }

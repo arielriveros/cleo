@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { makeBody, box, sphere, cylinder, heightfield, plane, engineCapsule } from './helpers/physicsBodies';
+import { PhysicsBody } from '../src/physics/physicsBody';
 import { Body, Box, Cylinder, Sphere, Vec3, Quaternion } from 'cannon-es';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
 import { Node } from '../src/core/scene/nodes/node';
@@ -18,22 +20,15 @@ function physics(): PhysicsSystem {
 }
 
 /** A character-like capsule (the engine's compound: a cylinder and two end spheres), standing at `at`. */
-function capsuleBody(p: PhysicsSystem, at: V3, owner: Node | null, radius = 0.4, height = 1.8): Body {
-    const body = new Body({ mass: 1, position: new Vec3(at[0], at[1] + height / 2, at[2]) });
-    const cyl = height - 2 * radius;
-    body.addShape(new Cylinder(radius, radius, cyl, 12));
-    body.addShape(new Sphere(radius), new Vec3(0, cyl / 2, 0));
-    body.addShape(new Sphere(radius), new Vec3(0, -cyl / 2, 0));
-    (body as any).owner = owner;
+function capsuleBody(p: PhysicsSystem, at: V3, owner: Node | null, radius = 0.4, height = 1.8): PhysicsBody {
+    const body = makeBody(engineCapsule(radius, height), { mass: 1, position: [at[0], at[1] + height / 2, at[2]], owner });
     p.addBody(body);
     return body;
 }
 
-function boxBody(p: PhysicsSystem, at: V3, half: V3, owner: Node | null, yawDeg = 0): Body {
+function boxBody(p: PhysicsSystem, at: V3, half: V3, owner: Node | null, yawDeg = 0): PhysicsBody {
     const q = new Quaternion(); q.setFromEuler(0, yawDeg * Math.PI / 180, 0);
-    const body = new Body({ mass: 0, position: new Vec3(...at), quaternion: q });
-    body.addShape(new Box(new Vec3(...half)));
-    (body as any).owner = owner;
+    const body = makeBody(box(half[0], half[1], half[2]), { position: at, quaternion: [q.x, q.y, q.z, q.w], owner });
     p.addBody(body);
     return body;
 }
@@ -100,8 +95,7 @@ describe('physics overlap queries', () => {
         const p = physics();
         const me = new Node('me'), zone = new Node('zone'), ghost = new Node('ghost'), bone = new Node('bone');
         capsuleBody(p, [0, 0, 0], me);
-        const trig = new Body({ mass: 0, isTrigger: true, position: new Vec3(0, 1, 0) });
-        trig.addShape(new Sphere(1)); (trig as any).owner = zone; p.addBody(trig);
+        const trig = makeBody(sphere(1), { sensor: true, position: [0, 1, 0], owner: zone }); p.addBody(trig);
         const g = capsuleBody(p, [0, 0, 0.2], ghost); g.collisionResponse = false;
         const r = capsuleBody(p, [0, 0, -0.2], bone); r.collisionFilterGroup = 2;
 
@@ -147,8 +141,7 @@ describe('trigger enter / exit', () => {
     function zoneAndWalker() {
         const p = physics();
         const zone = new Probe('zone'), walker = new Probe('walker');
-        const trig = new Body({ mass: 0, isTrigger: true, position: new Vec3(0, 1, 0) });
-        trig.addShape(new Sphere(1)); (trig as any).owner = zone; p.addBody(trig);
+        const trig = makeBody(sphere(1), { sensor: true, position: [0, 1, 0], owner: zone }); p.addBody(trig);
         const body = capsuleBody(p, [5, 0, 0], walker);
         return { p, zone, walker, body, trig };
     }

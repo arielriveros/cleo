@@ -1,10 +1,8 @@
-import type { Shape as CannonShape } from "cannon-es";
 import { vec3 } from "gl-matrix";
 import { Geometry } from "../core/geometry";
 import { Model } from "../graphics/model";
 import { Material } from "../graphics/material";
 import type { ShapeDesc } from "./pal/types";
-import { cannonParts } from "./pal/cannon/shapes";
 
 const EPSILON = 0.01;
 
@@ -24,7 +22,6 @@ const absScale = (s: vec3): vec3 => [Math.abs(s[0]), Math.abs(s[1]), Math.abs(s[
 export class Shape {
     /** The shape, as every physics backend reads it. */
     public readonly desc: ShapeDesc;
-    private _cShape: CannonShape | null = null;
     private _debugGeometry: Geometry | null;
     private _debugModel: Model | null = null;
 
@@ -102,22 +99,12 @@ export class Shape {
     }
 
     /**
-     * Heightfield collider for terrain. `data` is a row-major 2D array of heights (data[i][j], i along the
-     * local X axis, j along the local Y axis; height is along local Z). Collides with sphere, box, convex and
-     * cylinder bodies, so any mesh using those shapes is walkable. `elementSize` is the world spacing between
-     * adjacent samples. Through {@link cShape} the owning body should be rotated -90° about X so the field
-     * lies in the world XZ plane with height along world Y (handled by the Terrain subsystem).
+     * Heightfield collider for terrain: `data[i][j]` is the height at (i, j), i along the body's +X and j along
+     * its -Z from the body's origin, heights along +Y, `elementSize` apart. Collides with sphere, box, convex
+     * and cylinder bodies, so any mesh using those shapes is walkable.
      */
     public static Heightfield(data: number[][], elementSize: number): Shape {
         return new Shape({ kind: 'heightfield', heights: data, elementSize });
-    }
-
-    /**
-     * @internal The cannon shape this describes, built on first use: the way in for engine code whose bodies
-     * are still cannon bodies. A heightfield or plane comes back in cannon's own Z-up frame.
-     */
-    public get cShape(): CannonShape {
-        return this._cShape ??= cannonParts(this.desc)[0].shape;
     }
 
     public get debugModel(): Model | null {

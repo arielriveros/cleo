@@ -413,7 +413,7 @@ export { DirectionalLight, PointLight, Spotlight, LIGHT_UNIT, REFERENCE_ILLUMINA
 export type { ExposureCurveKey } from "./graphics/lighting";
 export { Shape } from "./physics/shape";
 export { PhysicsSystem } from "./physics/physicsSystem";
-export type { PhysicsRaycastHit, PhysicsRaycastOptions, JointSpec, AnyBody } from "./physics/physicsSystem";
+export type { PhysicsRaycastHit, PhysicsRaycastOptions, JointSpec } from "./physics/physicsSystem";
 export { PhysicsBody, BodyVec3, BodyQuat } from "./physics/physicsBody";
 export type { PhysicsBodyOptions } from "./physics/physicsBody";
 export type { OverlapHit, OverlapOptions } from "./physics/overlap";

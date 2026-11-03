@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { makeBody, cylinder } from './helpers/physicsBodies';
 import { Body, Cylinder, Sphere, Vec3 } from 'cannon-es';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
 import { Node } from '../src/core/scene/nodes/node';
@@ -207,9 +208,7 @@ describe('trigger ↔ trigger overlaps', () => {
     it('a hurtbox masked to hitboxes makes no contacts with its own character\'s body', () => {
         const p = physics();
         const character = new Node('character'), hurt = new Node('hurtbox');
-        const body = new Body({ mass: 60, position: new Vec3(0, 0.9, 0) });
-        body.addShape(new Cylinder(0.3, 0.3, 1.2, 12));
-        (body as any).owner = character;
+        const body = makeBody(cylinder(0.3, 1.2), { mass: 60, position: [0, 0.9, 0], owner: character });
         p.addBody(body);
         const hb = hurtbox(p, hurt, [0, 0, 0]);
         p.update(1 / 60);

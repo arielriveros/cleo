@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { makeBody, sphere as sphereShape } from './helpers/physicsBodies';
 import { readFileSync, existsSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { Body, Box, ConeTwistConstraint, ConvexPolyhedron, Cylinder, Heightfield, HingeConstraint, LockConstraint, Plane, PointToPointConstraint, Sphere, Trimesh, Vec3 } from 'cannon-es';
@@ -73,8 +74,7 @@ describe('the worker executor', () => {
         p.update(1 / 60); p.endFrame(1 / 60); p.update(1 / 60);
         expect(port.core.world.bodies.length).toBe(0);
         // And it fills again from what the new scene adds.
-        const b = new Body({ mass: 1, position: new Vec3(0, 5, 0) });
-        b.addShape(new Sphere(0.5));
+        const b = makeBody(sphereShape(0.5), { mass: 1, position: [0, 5, 0] });
         p.addBody(b);
         p.endFrame(1 / 60); p.update(1 / 60);
         expect(port.core.world.bodies.length).toBe(1);

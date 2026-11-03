@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { makeBody, box } from './helpers/physicsBodies';
 import { Body, Box, Vec3 } from 'cannon-es';
 import { Scene } from '../src/core/scene/scene';
 import { Node } from '../src/core/scene/nodes/node';
@@ -57,12 +58,9 @@ describe('WaterVolumeNode', () => {
         p.initialize();
         (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null, waterVolumes: new Set([water]) };
 
-        const crate = new Body({ mass: 250, position: new Vec3(0, 0.5, 0) });   // 1 m³ at 250 kg/m³
-        crate.addShape(new Box(new Vec3(0.5, 0.5, 0.5)));
+        const crate = makeBody(box(0.5, 0.5, 0.5), { mass: 250, position: [0, 0.5, 0] });   // 1 m³ at 250 kg/m³
         p.addBody(crate);
-        const character = new Body({ mass: 70, position: new Vec3(5, -1, 0) });
-        character.addShape(new Box(new Vec3(0.3, 0.9, 0.3)));
-        (character as any).owner = { nodeType: 'character' };
+        const character = makeBody(box(0.3, 0.9, 0.3), { mass: 70, position: [5, -1, 0], owner: { nodeType: 'character' } as any });
         p.addBody(character);
 
         for (let i = 0; i < 600; i++) p.update(1 / 60);

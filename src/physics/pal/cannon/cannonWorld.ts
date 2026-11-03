@@ -37,9 +37,9 @@ export const CANNON_CAPABILITIES: PhysicsCapabilities = {
  * handle is its cannon `id`, so a handle stays valid for exactly as long as cannon knows the body.
  *
  * Bodies made through {@link createBody} are CannonBody (cannonBody.ts), which keeps the node origin
- * apart from cannon's centre of mass. The members after the interface's — `raw`, `adoptBody`, `bodyOf`,
- * `materialFor` — are the cannon-only ways in that the engine still uses while its own bodies are cannon
- * bodies; nothing outside physics/ may use them.
+ * apart from cannon's centre of mass. The members after the interface's — `raw`, `bodyOf`, `materialFor`,
+ * `touch` — are cannon-only ways in, for the worker executor that replicates the cannon world; nothing
+ * outside physics/ may use them.
  */
 export class CannonWorld implements PhysicsWorld {
     public readonly backend = 'cannon' as const;
@@ -433,25 +433,6 @@ export class CannonWorld implements PhysicsWorld {
 
     /** The cannon body behind a handle, enabled or not (undefined once destroyed). */
     public bodyOf(h: BodyHandle): Body | undefined { return this.raw.getBodyById(h) ?? this._disabled.get(h); }
-
-    /**
-     * Put a body the engine built itself into the world, giving it a surface first if it has none: one
-     * material left null drags every pair it is in back to the world default.
-     */
-    public adoptBody(body: Body, friction = DEFAULT_FRICTION, restitution = DEFAULT_RESTITUTION): BodyHandle {
-        if (!body.material) body.material = this.materialFor(friction, restitution);
-        this.raw.addBody(body);
-        return body.id as BodyHandle;
-    }
-
-    /** Take a body out of the world (see {@link destroyBody}, which this is for a body passed by object). */
-    public releaseBody(body: Body): void {
-        this.raw.removeBody(body);
-        this._dropEvents(body.id as BodyHandle);
-    }
-
-    public addConstraint(constraint: Constraint): void { this.raw.addConstraint(constraint); }
-    public removeConstraint(constraint: Constraint): void { this.raw.removeConstraint(constraint); }
 
     /** The cannon Material for a surface (see MaterialTable). */
     public materialFor(friction: number, restitution: number): Material {

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { makeBody, box, heightfield } from './helpers/physicsBodies';
 import { Box, Heightfield, Body, Sphere, Vec3 } from 'cannon-es';
 import {
     SIMULATION_RANGE_HYSTERESIS, effectiveSimulationRange, parseSimulationMode, shouldFreeze,
@@ -130,9 +131,7 @@ describe('PhysicsSystem simulation range', () => {
 
     it('puts a resting canSleep body to sleep and wakes it when a script moves it', () => {
         const { p } = physics([0, 0, 0]);
-        const floor = new Body({ mass: 0, shape: new Box(new Vec3(10, 0.5, 10)) });
-        floor.position.set(0, -0.5, 0);
-        p.addBody(floor);
+        p.addBody(makeBody(box(10, 0.5, 10), { position: [0, -0.5, 0] }));
         const body = ball(p, [0, 0.3, 0], { canSleep: true, linearDamping: 0.5 });
         for (let i = 0; i < 180; i++) p.update(FRAME);
         expect(p.isFrozen(body)).toBe(true);
@@ -148,11 +147,8 @@ describe('PhysicsSystem simulation range', () => {
     it('does not report a trigger exit for a body that falls asleep inside it', () => {
         const { p } = physics([0, 0, 0]);
         const pairs = (p as any)._reportedPairs as Map<number, unknown>;
-        const trigger = new Body({ mass: 0, isTrigger: true, shape: new Box(new Vec3(2, 2, 2)) });
-        p.addBody(trigger);
-        const floor = new Body({ mass: 0, shape: new Box(new Vec3(10, 0.5, 10)) });
-        floor.position.set(0, -0.5, 0);
-        p.addBody(floor);
+        p.addBody(makeBody(box(2, 2, 2), { sensor: true }));
+        p.addBody(makeBody(box(10, 0.5, 10), { position: [0, -0.5, 0] }));
         ball(p, [0, 0.3, 0], { canSleep: true, linearDamping: 0.5 });
         for (let i = 0; i < 30; i++) p.update(FRAME);
         expect(pairs.size).toBe(1);
@@ -163,11 +159,7 @@ describe('PhysicsSystem simulation range', () => {
     it('collides with terrain through the replacement resolvers', () => {
         const { p } = physics([0, 0, 0]);
         const data = Array.from({ length: 21 }, () => Array.from({ length: 21 }, () => 0));
-        const terrain = new Body({ mass: 0 });
-        terrain.addShape(new Heightfield(data, { elementSize: 1 }));
-        terrain.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-        terrain.position.set(-10, 0, 10);
-        p.addBody(terrain);
+        p.addBody(makeBody(heightfield(data, 1), { position: [-10, 0, 10] }));
         const body = ball(p, [0.3, 2, 0.6]);
         for (let i = 0; i < 180; i++) p.update(FRAME);
         expect(Math.abs(body.position.y - 0.25)).toBeLessThan(0.02);

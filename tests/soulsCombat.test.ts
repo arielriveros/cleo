@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { makeBody, box, sphere, cylinder, heightfield, plane, engineCapsule } from './helpers/physicsBodies';
+import { PhysicsBody } from '../src/physics/physicsBody';
 import { Body, Box, Cylinder, Sphere, Vec3 } from 'cannon-es';
 import { quat } from 'gl-matrix';
 import { CleoEngine } from '../src/core/engine';
@@ -49,13 +51,8 @@ function physics(): PhysicsSystem {
 }
 
 /** A character capsule standing at `at`, owned by `owner` — the body it walks with. */
-function capsule(p: PhysicsSystem, owner: Node, at: V3, radius = 0.3, height = 1.78): Body {
-    const body = new Body({ mass: 70, position: new Vec3(at[0], at[1] + height / 2, at[2]) });
-    const cyl = height - 2 * radius;
-    body.addShape(new Cylinder(radius, radius, cyl, 12));
-    body.addShape(new Sphere(radius), new Vec3(0, cyl / 2, 0));
-    body.addShape(new Sphere(radius), new Vec3(0, -cyl / 2, 0));
-    (body as any).owner = owner;
+function capsule(p: PhysicsSystem, owner: Node, at: V3, radius = 0.3, height = 1.78): PhysicsBody {
+    const body = makeBody(engineCapsule(radius, height), { mass: 70, position: [at[0], at[1] + height / 2, at[2]], owner });
     p.addBody(body);
     return body;
 }
@@ -67,7 +64,6 @@ function hurtbox(p: PhysicsSystem, character: Node, at: V3, radius = 0.3, height
     const t = hb.setTrigger({ group: hurtboxLayer((character as any).team), mask: LAYER.HITBOX, detectTriggers: true });
     t.setCapsule([0, radius, 0], [0, height - radius, 0], radius);
     t.position.set(at[0], at[1], at[2]);
-    t.aabbNeedsUpdate = true;
     p.addBody(t);
     return t;
 }
@@ -75,10 +71,7 @@ function hurtbox(p: PhysicsSystem, character: Node, at: V3, radius = 0.3, height
 function wall(p: PhysicsSystem, at: V3, half: V3, blocks: boolean, name = 'Wall'): Node {
     const n = new Node(name);
     if (blocks) n.setVariable('blocksSwings', true, 'boolean', 'public');
-    const body = new Body({ mass: 0, position: new Vec3(...at) });
-    body.addShape(new Box(new Vec3(...half)));
-    (body as any).owner = n;
-    p.addBody(body);
+    p.addBody(makeBody(box(half[0], half[1], half[2]), { position: at, owner: n }));
     return n;
 }
 
@@ -500,9 +493,7 @@ describe('interactables through trigger zones', () => {
         n.promptText = () => name;
         n.setPosition(at);
         n.updateTransforms();
-        const trig = new Body({ mass: 0, isTrigger: true, position: new Vec3(at[0], at[1] + 1, at[2]) });
-        trig.addShape(new Cylinder(reach - 0.3, reach - 0.3, 3, 12));
-        (trig as any).owner = n;
+        const trig = makeBody(cylinder(reach - 0.3, 3), { sensor: true, position: [at[0], at[1] + 1, at[2]], owner: n });
         p.addBody(trig);
         n._trig = trig;
         return n;
@@ -693,10 +684,7 @@ describe('wading through a water zone', () => {
         const n = new Node('Pond Zone');
         n.setVariable('isWater', true, 'boolean', 'public');
         n.setVariable('waterSpeedScale', speedScale, 'number', 'public');
-        const trig = new Body({ mass: 0, isTrigger: true, position: new Vec3(at[0], at[1] + 1, at[2]) });
-        trig.addShape(new Cylinder(radius, radius, 3, 16));
-        (trig as any).owner = n;
-        p.addBody(trig);
+        p.addBody(makeBody(cylinder(radius, 3, 16), { sensor: true, position: [at[0], at[1] + 1, at[2]], owner: n }));
         return n;
     }
 

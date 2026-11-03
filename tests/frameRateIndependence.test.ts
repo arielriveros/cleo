@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { makeBody, sphere } from './helpers/physicsBodies';
 import { PhysicsBody } from '../src/physics/physicsBody';
 import { Body, Sphere, Vec3 } from 'cannon-es';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
@@ -19,8 +20,8 @@ function physics(): PhysicsSystem {
 }
 
 /** A free body moving at 4 m/s along +X, added straight to the world. */
-function mover(p: PhysicsSystem): Body {
-    const body = new Body({ mass: 1, linearDamping: 0, shape: new Sphere(0.1) });
+function mover(p: PhysicsSystem): PhysicsBody {
+    const body = makeBody(sphere(0.1), { mass: 1, linearDamping: 0 });
     body.velocity.set(4, 0, 0);
     p.addBody(body);
     return body;
@@ -134,7 +135,7 @@ describe('ragdoll lifetime', () => {
 describe('a body at rest relative to the frame', () => {
     it('is untouched by the substep count (no per-step drift without forces)', () => {
         const p = physics();
-        const body = new Body({ mass: 1, shape: new Sphere(0.1), position: new Vec3(1, 2, 3) });
+        const body = makeBody(sphere(0.1), { mass: 1, position: [1, 2, 3] });
         p.addBody(body);
         for (const dt of [1 / 144, 0.1, 1 / 30]) p.update(dt);
         expect([body.position.x, body.position.y, body.position.z]).toEqual([1, 2, 3]);

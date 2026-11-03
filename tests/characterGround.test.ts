@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { makeBody, box, sphere, cylinder, heightfield, plane, engineCapsule } from './helpers/physicsBodies';
+import { PhysicsBody } from '../src/physics/physicsBody';
 import { Body, Box, Heightfield, Sphere, Vec3 } from 'cannon-es';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
 import { RigidBody } from '../src/physics/body';
@@ -48,7 +50,7 @@ describe('ground stamping — which contact becomes the ground', () => {
      * character controller projects its whole velocity onto it, so choosing wrong does not degrade the
      * movement — it aims it at the wrong plane.
      */
-    const anyBody = () => new Body({ mass: 1 });
+    const anyBody = () => new PhysicsBody({ mass: 1 });
 
     it('lets a steeper walkable facet take the stamp from a flatter one', () => {
         // THE FIX. The rule used to be "the most ground-like contact in the last GROUND_GRACE wins",
@@ -124,10 +126,8 @@ describe('ground stamping — which contact becomes the ground', () => {
         const w = world(p);
 
         // A level floor under the probe...
-        const floor = new Body({ mass: 0 });
-        floor.addShape(new Box(new Vec3(10, 0.5, 10)));
-        floor.position.set(0, -0.5, 0);
-        w.addBody(floor);
+        const floor = makeBody(box(10, 0.5, 10), { position: [0, -0.5, 0] });
+        p.addBody(floor);
 
         const body = new RigidBody({ mass: 1, groundProbeDistance: 0.2 });
         body.addCollider({ shape: { kind: 'sphere', radius: 0.25 } });
@@ -161,17 +161,13 @@ describe('a character walking up a heightfield', () => {
         // `data[i][j]` is the height at local (i, j); local +X is world +X and local +Z is world +Y once
         // the body is rotated, so a ramp in `i` is a ramp in world X.
         const data = Array.from({ length: n }, (_, i) => new Array(n).fill(i * rise));
-        const body = new Body({ mass: 0 });
-        body.addShape(new Heightfield(data, { elementSize }));
-        body.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-        body.position.set(0, 0, ((n - 1) * elementSize) / 2);
+        const body = makeBody(heightfield(data, elementSize), { position: [0, 0, ((n - 1) * elementSize) / 2] });
         // The terrain's surface, exactly as `Terrain.ensureRegistered` gets it. Load-bearing and easy to
         // leave out: cannon applies a registered ContactMaterial only when BOTH bodies carry a material,
         // so a material-less heightfield silently drags the pair back to the world default - friction 0.3
         // against a character authored at 0, which scales its commanded velocity by 0.62 EVERY frame.
         // Leaving it out does not fail loudly; it just makes the character wade.
-        body.material = (p as any)._cannon.materialFor(0.3, 0);
-        world(p).addBody(body);
+        p.addBody(body);
     }
 
     /** The Night Shift capsule, near enough: cannon has no capsule, and a sphere slides the same way. */
