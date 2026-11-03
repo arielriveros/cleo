@@ -45,7 +45,7 @@ export const JOLT_CAPABILITIES: PhysicsCapabilities = {
     coneLimit: 'native',
     manualSleep: true,
     profilePhases: [],
-    threadable: false,
+    threadable: true,
     precision: 32,
 };
 

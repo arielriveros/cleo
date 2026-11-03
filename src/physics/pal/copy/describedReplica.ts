@@ -35,7 +35,9 @@ export class DescribedReplica<J extends DescribedJointRecord> implements WorldRe
                     break;
                 }
                 case 'addBody': {
-                    const h = world.createBody(op.desc);
+                    const h = op.native !== undefined && world.createBodyWithNativeId
+                        ? world.createBodyWithNativeId(op.desc, op.native)
+                        : world.createBody(op.desc);
                     this._bySlot[op.slot] = h;
                     this._slotOf.set(h, op.slot);
                     // Not the pose: the description already holds it, and a backend may store a rotation it is

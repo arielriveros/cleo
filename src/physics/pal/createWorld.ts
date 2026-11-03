@@ -56,7 +56,7 @@ export function createWorldMirror(world: PhysicsWorld): WorldMirror {
     switch (world.backend) {
         case 'cannon': return new CannonMirror(world as CannonWorld);
         case 'rapier': return new DescribedMirror(world as RapierWorld);
-        case 'jolt': throw new Error('physics: the Jolt backend is not implemented yet');
+        case 'jolt': return new DescribedMirror(world as JoltWorld);
     }
 }
 
@@ -66,6 +66,6 @@ export function createWorldReplica(kind: PhysicsBackendKind): WorldReplica {
     switch (kind) {
         case 'cannon': return new CannonReplica();
         case 'rapier': return new DescribedReplica(new RapierWorld([0, -9.81, 0]));
-        case 'jolt': throw new Error('physics: the Jolt backend is not implemented yet');
+        case 'jolt': return new DescribedReplica(new JoltWorld([0, -9.81, 0]));
     }
 }

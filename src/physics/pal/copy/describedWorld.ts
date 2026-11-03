@@ -36,6 +36,13 @@ export interface DescribedWorld<J extends DescribedJointRecord = DescribedJointR
     raise(kind: PhysicsEventKind, a: BodyHandle, b: BodyHandle): void;
     /** The bodies were written from elsewhere (the worker's step landing): state caches and queries must catch up. */
     touch(): void;
+    /**
+     * The backend's own id for a body, where a copy must give its body the same one to step alike (Jolt's
+     * simulation depends on its BodyIDs). Without it, a copy's bodies take whatever ids they are given.
+     */
+    nativeIdOf?(h: BodyHandle): number;
+    /** createBody, the body taking the native id the original's has (see nativeIdOf). */
+    createBodyWithNativeId?(desc: BodyDesc, nativeId: number): BodyHandle;
     /** Whether the body is dynamic (what a copy reports back). */
     isDynamic(h: BodyHandle): boolean;
     /** A dynamic body as water reads it, or undefined for any other body. */

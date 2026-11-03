@@ -19,7 +19,7 @@ engine's tests pin the cannon step bit for bit, so cannon games behave exactly a
 | `cannon/` | The cannon-es backend, `CannonWorld`, and everything that only exists because of cannon: its broadphase, the heightfield and convex-SAT patches, the material table, the centre-of-mass bookkeeping |
 | `rapier/` | The Rapier backend, `RapierWorld`, and `load.ts`, the one place its package is loaded (on demand) |
 | `jolt/` | The Jolt backend, `JoltWorld`, and `load.ts`, the one place its package is loaded (on demand) |
-| `copy/` | Copying a world into the physics worker by description, for a backend whose world can say what each body and joint was made from (`DescribedWorld`): Rapier's |
+| `copy/` | Copying a world into the physics worker by description, for a backend whose world can say what each body and joint was made from (`DescribedWorld`): Rapier's and Jolt's |
 | `shapeBounds.ts` | Bounds, parts and quaternion helpers measured from shape descriptions, for any backend |
 | `jointFrames.ts` | Joint frames measured from joint descriptions, for a backend that builds joints from frames |
 
@@ -130,7 +130,7 @@ bit for bit.
 | Jolt: the package and the spike | Done |
 | Jolt: `JoltWorld` passing the conformance suite | Done |
 | Jolt: the engine and the Valley on it; published games carry only their backend | Done |
-| Jolt in the physics worker | Not started |
+| Jolt in the physics worker | Done |
 
 ## Rapier compared with cannon
 
@@ -172,6 +172,11 @@ A project picks Jolt in Options ▸ Engine ▸ Runtime. What differs from cannon
   most 16,384 bodies; the Valley in Play uses about 36 MB. Running out stops the physics for good.
 - **Heightfields are compressed**: terrain heights are about a millimetre or two off.
 - **Single-threaded.** Its threaded build cannot run the engine (see the spike below).
+- **In the physics worker** Jolt is copied by description, as Rapier is, and each body in the copy is made
+  with the `BodyID` its original has, since Jolt's simulation depends on them. The copy steps exactly as
+  the main thread would: every position, velocity and rotation of the golden scene is identical
+  (`tests/joltWorker.test.ts`). In the Valley the worker steps in about 0.5 ms, and a step comes back in
+  under a millisecond.
 - **Published size.** A Jolt game's player is about 7.5 MB larger, since the player and its inlined physics
   worker each carry Jolt. `npm run build:player` builds `game-jolt.js` beside the others, and Publish picks
   it for a Jolt project.

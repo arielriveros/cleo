@@ -523,6 +523,7 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             const inline = make(), original = make();
             const a = scene(inline), b = scene(original);
             const mirror = createWorldMirror(original), replica = createWorldReplica(kind);
+            made.push(replica.world);
             const inlineLog: string[] = [], copyLog: string[] = [];
             const landed = new Set<BodyHandle>();
             for (let frame = 0; frame < 120; frame++) {
@@ -567,6 +568,7 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             const original = make();
             scene(original);
             const mirror = createWorldMirror(original), replica = createWorldReplica(kind);
+            made.push(replica.world);
             replica.receive(structuredClone(mirror.diff().changes));
             expect(replica.world.bodyCount).toBe(original.bodyCount);
             mirror.clear(); replica.clear();

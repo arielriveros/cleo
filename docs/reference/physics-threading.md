@@ -76,10 +76,11 @@ fallback are the same on every backend. Each backend brings two ends (`physics/p
 **replica** in the worker, which builds the copy from those diffs. cannon's
 (`physics/pal/cannon/mirror.ts`, `replica.ts`, `replicaCodec.ts`) sends bodies, shapes and constraints as
 data, built with the same setup code (`physics/pal/cannon/worldConfig.ts`), and carries what a rebuilt
-body cannot measure again the same way (its inertia, a lock's frame, a hinge's exact axes). Rapier's
-(`physics/pal/copy/describedMirror.ts`, `describedReplica.ts`) sends each body as its description and each joint as the
-record it was built from. The worker loads Rapier's WASM before it builds the copy, and messages that
-arrive meanwhile wait in order.
+body cannot measure again the same way (its inertia, a lock's frame, a hinge's exact axes). Rapier's and
+Jolt's (`physics/pal/copy/describedMirror.ts`, `describedReplica.ts`) send each body as its description and
+each joint as the record it was built from; Jolt's bodies also carry their `BodyID`, which the copy gives
+its own, since Jolt's simulation depends on it. The worker loads the backend's WASM before it builds the
+copy, and messages that arrive meanwhile wait in order.
 
 **How the result comes back.** A posted reply is a task on the main thread, and the browser only runs it
 once the thread is free: after the frame's render. Measured in the Valley, a 1.5 ms step came back 17 ms

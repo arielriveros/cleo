@@ -21,7 +21,8 @@ export type SlottedJointRecord<J extends DescribedJointRecord> = Omit<J, 'a' | '
 
 /** Membership changes, applied in order: joint removals, body removals, body adds, configs, joint adds. */
 export type CopyOp<J extends DescribedJointRecord = DescribedJointRecord> =
-    | { op: 'addBody'; slot: number; desc: BodyDesc; state: Float64Array }
+    /** `native`: the body's id in the original's backend, for a copy to give its own (DescribedWorld.nativeIdOf). */
+    | { op: 'addBody'; slot: number; desc: BodyDesc; state: Float64Array; native?: number }
     | { op: 'removeBody'; slot: number }
     | { op: 'config'; slot: number; desc: BodyDesc }
     | { op: 'addJoint'; id: number; record: SlottedJointRecord<J> }

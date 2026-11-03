@@ -66,7 +66,7 @@ export class DescribedMirror<J extends DescribedJointRecord> implements WorldMir
                 world.clearForces(h);
                 this._slots[index] = { handle: h, shadow, config: world.configVersionOf(h), seen: frame, start: shadow.slice(0, 7) };
                 this._slotOf.set(h, index);
-                adds.push({ op: 'addBody', slot: index, desc: world.descOf(h), state });
+                adds.push({ op: 'addBody', slot: index, desc: world.descOf(h), state, native: world.nativeIdOf?.(h) });
                 continue;
             }
             const slot = this._slots[index]!;
