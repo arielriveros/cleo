@@ -4,6 +4,7 @@ import { CannonReplica } from './cannon/replica';
 import { loadRapier } from './rapier/load';
 import { loadJolt } from './jolt/load';
 import { RapierWorld } from './rapier/rapierWorld';
+import { JoltWorld } from './jolt/joltWorld';
 import { DescribedMirror } from './copy/describedMirror';
 import { DescribedReplica } from './copy/describedReplica';
 import type { WorldMirror, WorldReplica } from './replication';
@@ -46,7 +47,7 @@ export function createPhysicsWorld(kind: PhysicsBackendKind = 'cannon', gravity?
     switch (kind) {
         case 'cannon': return new CannonWorld(gravity);
         case 'rapier': return new RapierWorld(gravity);
-        case 'jolt': throw new Error('physics: the Jolt backend is not implemented yet');
+        case 'jolt': return new JoltWorld(gravity);
     }
 }
 

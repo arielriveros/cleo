@@ -27,7 +27,8 @@
     // that can supply a WebGL2 context. Declaring the lib separately from the emit target tells the
     // checker the truth about the runtime without changing a single byte of emitted output.
     // esnext.disposable: Rapier's typings declare `[Symbol.dispose]` on its WASM objects (types only).
-    "lib": ["es2020", "dom", "esnext.disposable"],
+    // es2021.weakref: the Jolt backend frees a world dropped without dispose (FinalizationRegistry, WeakRef).
+    "lib": ["es2020", "es2021.weakref", "dom", "esnext.disposable"],
     "allowJs": true,
     "declaration": true,
     "sourceMap": true,

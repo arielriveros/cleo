@@ -18,6 +18,7 @@ later. The engine's tests pin the cannon step bit for bit, so cannon games behav
 | `backendSelect.ts` | Every backend a project may ask for, and `resolvePhysicsBackendRequest`: the one to run, and why it is not the one asked for |
 | `cannon/` | The cannon-es backend, `CannonWorld`, and everything that only exists because of cannon: its broadphase, the heightfield and convex-SAT patches, the material table, the centre-of-mass bookkeeping |
 | `rapier/` | The Rapier backend, `RapierWorld`, and `load.ts`, the one place its package is loaded (on demand) |
+| `jolt/` | The Jolt backend, `JoltWorld`, and `load.ts`, the one place its package is loaded (on demand) |
 | `copy/` | Copying a world into the physics worker by description, for a backend whose world can say what each body and joint was made from (`DescribedWorld`): Rapier's |
 | `shapeBounds.ts` | Bounds, parts and quaternion helpers measured from shape descriptions, for any backend |
 | `jointFrames.ts` | Joint frames measured from joint descriptions, for a backend that builds joints from frames |
@@ -127,7 +128,8 @@ bit for bit.
 | Rapier: the engine and the Valley on it; published games carry only their backend | Done |
 | Rapier in the physics worker | Done |
 | Jolt: the package and the spike | Done |
-| A Jolt backend | Listed, not started |
+| Jolt: `JoltWorld` passing the conformance suite | Done |
+| Jolt: the engine and the Valley on it | Listed, not started |
 
 ## Rapier compared with cannon
 

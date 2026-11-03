@@ -13,3 +13,7 @@ export function loadJolt(): Promise<Jolt> {
 export function jolt(): Jolt {
     throw new Error('physics: this build of the player has no Jolt');
 }
+
+export function joltHeap(): { total: number; free: number } {
+    throw new Error('physics: this build of the player has no Jolt');
+}

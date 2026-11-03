@@ -28,3 +28,9 @@ export function jolt(): Jolt {
     if (!loaded) throw new Error('physics: Jolt is not loaded (acquirePhysicsBackend first)');
     return loaded;
 }
+
+/** Jolt's WASM heap in bytes: a fixed size, and what is free of it now. */
+export function joltHeap(): { total: number; free: number } {
+    const J = jolt(), statics = J.JoltInterface.prototype;
+    return { total: statics.sGetTotalMemory(), free: statics.sGetFreeMemory() };
+}

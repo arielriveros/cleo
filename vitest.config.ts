@@ -34,6 +34,9 @@ export default mergeConfig(engineConfig, defineConfig({
     },
     test: {
         environment: 'node',
+        // --expose-gc: a WASM backend's world dropped without dispose is freed when it is collected, and its
+        // heap may not grow (Jolt's is a fixed 128 MB), so the tests collect between them (backendSetup.ts).
+        poolOptions: { forks: { execArgv: ['--expose-gc'] } },
         projects: [
             { extends: true, test: { name: 'engine', include: ['tests/**/*.test.ts'] } },
             // The suites about what the engine does with its physics (not cannon's bits), again on each other

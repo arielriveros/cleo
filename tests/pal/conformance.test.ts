@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { acquirePhysicsBackend, createPhysicsWorld, createWorldMirror, createWorldReplica } from '../../src/physics/pal/createWorld';
 import { PhysicsEventKind } from '../../src/physics/pal/types';
 import type { BodyDesc, BodyHandle, PhysicsBackendKind, ShapeDesc } from '../../src/physics/pal/types';
@@ -10,7 +10,7 @@ import type { PhysicsWorld } from '../../src/physics/pal/world';
 // Decimal places follow the backend's float precision (capabilities.precision): a single-precision engine
 // meets every check to 4 places, never to 12.
 
-const BACKENDS: PhysicsBackendKind[] = ['cannon', 'rapier'];
+const BACKENDS: PhysicsBackendKind[] = ['cannon', 'rapier', 'jolt'];
 const H = 1 / 60;
 const G = -9.82;
 
@@ -29,7 +29,10 @@ function velocity(world: PhysicsWorld, h: BodyHandle): number[] { const out = ne
 function run(world: PhysicsWorld, steps: number, dt = H): void { for (let i = 0; i < steps; i++) world.step(dt); }
 
 describe.each(BACKENDS)('physics backend: %s', kind => {
-    const make = () => createPhysicsWorld(kind, [0, G, 0]);
+    // Every world is disposed after its test: a WASM backend's heap may not grow (Jolt's is a fixed 128 MB).
+    const made: PhysicsWorld[] = [];
+    const make = () => { const w = createPhysicsWorld(kind, [0, G, 0]); made.push(w); return w; };
+    afterEach(() => { for (const w of made.splice(0)) w.dispose(); });
     /** Decimal places a check can ask of this backend. */
     let dp = (n: number) => n;
     beforeAll(async () => {
