@@ -96,7 +96,7 @@ describe('ragdoll lifetime', () => {
         (p as any)._ragdolls.push(r);
         return { r, body };
     }
-    const inWorld = (p: PhysicsSystem, b: Body) => (p as any)._world.bodies.includes(b);
+    const inWorld = (p: PhysicsSystem, b: Body) => (p as any)._cannon.raw.bodies.includes(b);
 
     it('ends when its model leaves the scene, taking its bodies out of the world', () => {
         const p = physics();

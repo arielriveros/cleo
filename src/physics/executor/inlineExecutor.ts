@@ -1,6 +1,6 @@
-import type { World } from 'cannon-es';
+import type { PhysicsWorld } from '../pal/world';
 import { physicsStats } from '../physicsStats';
-import type { PhysicsBackend, StepResult } from './physicsBackend';
+import { NO_CONTACTS, type PhysicsExecutor, type StepResult } from './physicsExecutor';
 
 /**
  * The step on this thread. The world advances by EXACTLY the frame's delta, in equal substeps no longer
@@ -12,11 +12,11 @@ import type { PhysicsBackend, StepResult } from './physicsBackend';
  * body moved in 1/60 s jumps that read as 0 and 2x speed on alternate frames. Equal substeps that sum to
  * the frame have none of that, and stay at or under the 1/60 s that keeps ragdoll joints and contacts stable.
  */
-export class InlineBackend implements PhysicsBackend {
+export class InlineExecutor implements PhysicsExecutor {
     public readonly kind = 'inline' as const;
 
     constructor(
-        private readonly _world: () => World | undefined,
+        private readonly _world: () => PhysicsWorld | undefined,
         private readonly _substepsFor: (dt: number) => number,
         private readonly _profile: () => boolean,
     ) {}
@@ -26,22 +26,14 @@ export class InlineBackend implements PhysicsBackend {
         const start = performance.now();
         const substeps = this._substepsFor(dt);
         const profile = this._profile();
-        if (world) world.doProfiling = profile;
-        if (substeps > 0) {
+        if (world) world.profile = profile;
+        if (substeps > 0 && world) {
             const h = dt / substeps;
-            for (let i = 0; i < substeps; i++) {
-                world?.step(h);
-                if (world && profile) {
-                    const prof = (world as any).profile;
-                    physicsStats.broadphaseMs += prof.broadphase;
-                    physicsStats.narrowphaseMs += prof.narrowphase;
-                    physicsStats.solveMs += prof.solve + prof.makeContactConstraints;
-                    physicsStats.integrateMs += prof.integrate;
-                }
-            }
+            for (let i = 0; i < substeps; i++) world.step(h);
+            if (profile) world.readProfile(physicsStats);
         }
         physicsStats.stepMs = performance.now() - start;
-        return { dt, contacts: world ? (world.contacts as any) : [] };
+        return { dt, contacts: world ?? NO_CONTACTS };
     }
 
     public endFrame(_dt: number): void {}

@@ -1,6 +1,6 @@
 import type { WaterSpec } from '../waterSurface';
 
-// The messages between the main thread's PhysicsSystem (WorkerBackend) and the physics worker
+// The messages between the main thread's PhysicsSystem (WorkerExecutor) and the physics worker
 // (workerCore). Plain structured-cloneable data plus typed arrays, which travel as transferables.
 //
 // Every body is addressed by a SLOT, a small integer the main thread hands out and reuses; every
@@ -37,6 +37,13 @@ export interface BodyConfig {
     /** Inertia exactly as the main thread computed it (RigidBody.recenterMass measures it unrotated). */
     inertia: [number, number, number];
     invInertia: [number, number, number];
+    /**
+     * The world-space inverse inertia (cannon's Mat3 elements) as the main thread holds it. cannon only
+     * recomputes it for a body whose inertia differs by axis; a sphere's or a cube's stays the matrix of its
+     * last forced update (R·I⁻¹·Rᵀ at the rotation it was created with), which a fresh body cannot rebuild.
+     * Sent with every config but never compared for one: it changes whenever such a body turns.
+     */
+    invInertiaWorld: number[];
     linearDamping: number;
     angularDamping: number;
     linearFactor: [number, number, number];
@@ -67,7 +74,12 @@ export type ConstraintDef =
     | { t: 'p2p'; a: number; b: number; pivotA: number[]; pivotB: number[]; maxForce: number; collide: boolean }
     | { t: 'cone'; a: number; b: number; pivotA: number[]; pivotB: number[]; axisA: number[]; axisB: number[]; angle: number; twist: number; maxForce: number; collide: boolean }
     | { t: 'hinge'; a: number; b: number; pivotA: number[]; pivotB: number[]; axisA: number[]; axisB: number[]; maxForce: number; collide: boolean }
-    | { t: 'lock'; a: number; b: number; maxForce: number; collide: boolean };
+    /**
+     * `frame`: the lock's pivots and the bodies' axes as it measured them when it was made — pivotA pivotB
+     * xA xB yA yB zA zB, 3 numbers each. A lock built again from the bodies' current poses would measure
+     * them again, from poses that moved since (a ragdoll is lifted out of the ground after its joints).
+     */
+    | { t: 'lock'; a: number; b: number; maxForce: number; collide: boolean; frame: number[] };
 
 /** Membership changes, applied in order: constraint removals, body removals, body adds, constraint adds. */
 export type Op =

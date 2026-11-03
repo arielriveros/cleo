@@ -205,7 +205,7 @@ describe('trigger enter / exit', () => {
         (gate as any)._hasStarted = true;
         (p as any)._scene.nodes = [gate];
         p.update(1 / 60);
-        const bodies = (p as any)._world.bodies;
+        const bodies = (p as any)._cannon.raw.bodies;
         expect(bodies).toContain(gate.body);
         expect(bodies).toContain(gate.trigger);
     });

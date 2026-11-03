@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { World, Body, Box, Sphere, Cylinder, Vec3, Quaternion, Plane } from 'cannon-es';
 import { applyBuoyancy, floats, shapeSamples, type BuoyancyVolume } from '../src/physics/buoyancy';
-import { shapeMassProperties } from '../src/physics/massProperties';
+import { shapeMassProperties } from '../src/physics/pal/cannon/massProperties';
 
 // Buoyancy is Archimedes, sampled: whether a body floats and how low it rides must fall out of its MASS
 // against the water its volume displaces, and pushing at each submerged sample point must right a body

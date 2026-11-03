@@ -112,6 +112,7 @@ export function encodeConfig(body: Body, known: Set<number>, wantsCollide: boole
         type: body.type, mass: body.mass,
         inertia: [body.inertia.x, body.inertia.y, body.inertia.z],
         invInertia: [body.invInertia.x, body.invInertia.y, body.invInertia.z],
+        invInertiaWorld: [...body.invInertiaWorld.elements],
         linearDamping: body.linearDamping, angularDamping: body.angularDamping,
         linearFactor: [body.linearFactor.x, body.linearFactor.y, body.linearFactor.z],
         angularFactor: [body.angularFactor.x, body.angularFactor.y, body.angularFactor.z],
@@ -180,7 +181,8 @@ export function applyConfig(body: Body, config: BodyConfig, shapeOf: (ref: Shape
     // The main thread's inertia, not one recomputed here (see the header).
     body.inertia.set(...config.inertia);
     body.invInertia.set(...config.invInertia);
-    body.updateInertiaWorld(true);
+    const e = body.invInertiaWorld.elements;
+    for (let i = 0; i < 9; i++) e[i] = config.invInertiaWorld[i];
     body.aabbNeedsUpdate = true;
 }
 
@@ -219,7 +221,10 @@ export function encodeConstraint(c: Constraint, slotOf: (b: Body) => number | un
     const collide = c.collideConnected;
     const k = c as any;
     // Most specific first: LockConstraint extends PointToPointConstraint, ConeTwist does too.
-    if (c instanceof LockConstraint) return { t: 'lock', a, b, maxForce, collide };
+    if (c instanceof LockConstraint) {
+        const frame = ['pivotA', 'pivotB', 'xA', 'xB', 'yA', 'yB', 'zA', 'zB'].flatMap(key => v(k[key]));
+        return { t: 'lock', a, b, maxForce, collide, frame };
+    }
     if (c instanceof ConeTwistConstraint)
         return { t: 'cone', a, b, pivotA: v(k.pivotA), pivotB: v(k.pivotB), axisA: v(k.axisA), axisB: v(k.axisB), angle: k.angle, twist: k.twistAngle, maxForce, collide };
     if (c instanceof HingeConstraint)
@@ -233,15 +238,26 @@ export function decodeConstraint(def: ConstraintDef, bodyOf: (slot: number) => B
     const a = bodyOf(def.a), b = bodyOf(def.b);
     const v = (x: number[]) => new Vec3(x[0], x[1], x[2]);
     switch (def.t) {
-        case 'lock': return new LockConstraint(a, b, { maxForce: def.maxForce, collideConnected: def.collide } as any);
+        case 'lock': {
+            const c = new LockConstraint(a, b, { maxForce: def.maxForce, collideConnected: def.collide } as any) as any;
+            // The frame the main thread's lock measured, not one measured again here (see ConstraintDef).
+            ['pivotA', 'pivotB', 'xA', 'xB', 'yA', 'yB', 'zA', 'zB'].forEach((key, i) => c[key].set(def.frame[i * 3], def.frame[i * 3 + 1], def.frame[i * 3 + 2]));
+            return c;
+        }
         case 'cone': return new ConeTwistConstraint(a, b, {
             pivotA: v(def.pivotA), pivotB: v(def.pivotB), axisA: v(def.axisA), axisB: v(def.axisB),
             angle: def.angle, twistAngle: def.twist, maxForce: def.maxForce, collideConnected: def.collide,
         });
-        case 'hinge': return new HingeConstraint(a, b, {
-            pivotA: v(def.pivotA), pivotB: v(def.pivotB), axisA: v(def.axisA), axisB: v(def.axisB),
-            maxForce: def.maxForce, collideConnected: def.collide,
-        });
+        case 'hinge': {
+            const c = new HingeConstraint(a, b, {
+                pivotA: v(def.pivotA), pivotB: v(def.pivotB), axisA: v(def.axisA), axisB: v(def.axisB),
+                maxForce: def.maxForce, collideConnected: def.collide,
+            });
+            // The constructor normalizes its axes; these already were, and normalizing again can move a bit.
+            c.axisA.set(def.axisA[0], def.axisA[1], def.axisA[2]);
+            c.axisB.set(def.axisB[0], def.axisB[1], def.axisB[2]);
+            return c;
+        }
         case 'p2p': {
             const c = new PointToPointConstraint(a, v(def.pivotA), b, v(def.pivotB), def.maxForce);
             c.collideConnected = def.collide;

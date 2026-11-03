@@ -11,7 +11,7 @@ import { WaterVolumeNode } from '../../src/core/scene/nodes/waterVolumeNode';
 // steered by velocity with a ground probe walking through a trigger zone, a crate floating in water, a
 // jointed chain (every constraint type a ragdoll uses), a body frozen by the simulation range and thawed
 // again, collide events. The golden trace pins the inline step bit for bit; the worker parity tests run
-// the same scene through the worker backend and must match it.
+// the same scene through the worker executor and must match it.
 
 class Probe extends Node {
     constructor(name: string, private readonly log: string[]) { super(name); }

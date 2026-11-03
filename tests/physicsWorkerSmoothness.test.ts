@@ -7,7 +7,7 @@ import { LoopbackPort } from '../src/physics/worker/ports';
 
 // With the physics step in a worker, how bodies LOOK. The step is posted before the frame that draws it
 // has started, so the worker reaches one predicted frame ahead and each node is drawn at its frame's actual
-// time, interpolated between the step's two ends (physics/backend/workerBackend.ts). These pin what that
+// time, interpolated between the step's two ends (physics/executor/workerExecutor.ts). These pin what that
 // buys and what it must not break: steady motion on uneven frames and through late steps, scripts that
 // move or turn a node by an amount (root motion, a character's turn), writes made while a step ran.
 //
@@ -83,7 +83,7 @@ describe('drawing a body stepped in the worker', () => {
         const late = (seq: number) => (seq % 20 === 7 ? 2 : 1);   // one step in twenty misses its frame
         const r = rig('worker', { delayFor: late });
         const uneven = drawnSpeedError(r, UNEVEN);
-        expect((r.p as any)._backend.lateFrames).toBeGreaterThan(15);
+        expect((r.p as any)._executor.lateFrames).toBeGreaterThan(15);
         expect(uneven.worst).toBeLessThan(0.08);
         // Steady frames: a late step moves the drawn time a little further behind, at most 2% slow meanwhile.
         expect(drawnSpeedError(rig('worker', { delayFor: late }), STEADY).worst).toBeLessThan(0.025);
@@ -191,7 +191,7 @@ describe('drawing a body stepped in the worker', () => {
             return r;
         };
         const inline = run('inline'), worker = run('worker');
-        expect((worker.p as any)._backend.lateFrames).toBeGreaterThan(10);
+        expect((worker.p as any)._executor.lateFrames).toBeGreaterThan(10);
         // Throwing the whole velocity away on each of those frames loses 20 × g/60 ≈ 3.3 m/s of fall.
         expect(Math.abs(worker.hero.body!.velocity.y - inline.hero.body!.velocity.y)).toBeLessThan(0.5);
         expect(worker.hero.body!.velocity.x).toBe(2 + Math.sin(59));
@@ -201,9 +201,9 @@ describe('drawing a body stepped in the worker', () => {
 describe('handing the step to the worker', () => {
     it('keeps stepping on this thread until the worker has answered, so no frame freezes', () => {
         const r = rig('worker', { delayFor: seq => (seq === 1 ? 10 : 1) });   // the warm-up answers 10 frames late
-        expect(r.p.backend).toBe('inline');
+        expect(r.p.executor).toBe('inline');
         const xs: number[] = [], kinds: string[] = [];
-        for (let i = 0; i < 40; i++) frame(r, 1 / 60, () => { xs.push(r.hero.worldPosition[0]); kinds.push(r.p.backend); r.hero.velocity = [SPEED, 0, 0]; });
+        for (let i = 0; i < 40; i++) frame(r, 1 / 60, () => { xs.push(r.hero.worldPosition[0]); kinds.push(r.p.executor); r.hero.velocity = [SPEED, 0, 0]; });
         expect(kinds[5]).toBe('inline');
         expect(kinds[39]).toBe('worker');
         // The frames before were drawn at the clock (inline); the worker's drawing settles one frame behind
@@ -215,7 +215,7 @@ describe('handing the step to the worker', () => {
         const r = rig('worker', { delayFor: seq => (seq === 1 ? 8 : 1) });
         const xs: number[] = [], kinds: string[] = [];
         // The body as scripts read it (the latest simulated pose), not just as drawn: no frame without a step.
-        for (let i = 0; i < 20; i++) frame(r, 1 / 60, () => { xs.push(r.hero.body!.position.x); kinds.push(r.p.backend); r.hero.velocity = [SPEED, 0, 0]; });
+        for (let i = 0; i < 20; i++) frame(r, 1 / 60, () => { xs.push(r.hero.body!.position.x); kinds.push(r.p.executor); r.hero.velocity = [SPEED, 0, 0]; });
         expect(kinds.indexOf('worker')).toBeGreaterThan(4);
         for (let k = 2; k < xs.length; k++) expect(xs[k] - xs[k - 1], `frame ${k}`).toBeCloseTo(SPEED / 60, 6);
     });
@@ -225,7 +225,7 @@ describe('handing the step to the worker', () => {
         frame(r, 1 / 60);
         r.p.clear();
         for (let i = 0; i < 10; i++) frame(r, 1 / 60);
-        expect(r.p.backend).toBe('worker');
+        expect(r.p.executor).toBe('worker');
     });
 });
 

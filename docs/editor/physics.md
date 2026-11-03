@@ -280,7 +280,7 @@ Neither needs setting up here.
 - **Foliage** colliders are pooled and created near the camera rather than for every instance.
 - Terrain contacts only ever look at the cells a body overlaps, and a cell whose height range the body
   cannot reach is skipped before anything is built. Rays walk only the cells the segment crosses.
-  (`physics/heightfieldCollision.ts` replaces cannon's own heightfield resolvers for this.)
+  (`physics/pal/cannon/heightfieldCollision.ts` replaces cannon's own heightfield resolvers for this.)
 
 ## Seeing colliders
 

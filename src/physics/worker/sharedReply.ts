@@ -89,7 +89,7 @@ export class SharedReplyReader {
         this._read = ready;
         const h = this._header, f = this._scalars;
         let byte = DATA_BYTE;
-        // Copies (slice allocates an ordinary buffer): the backend keeps and recycles what it is given.
+        // Copies (slice allocates an ordinary buffer): the executor keeps and recycles what it is given.
         const f64 = (n: number) => { const a = new Float64Array(this.buffer, byte, n).slice(); byte += n * 8; return a; };
         const i32 = (n: number) => { const a = new Int32Array(this.buffer, byte, n).slice(); byte += n * 4; return a; };
         const bodies = f64(h[BODIES_LEN]), contacts = f64(h[CONTACTS_LEN]), submerged = f64(h[SUBMERGED_LEN]);

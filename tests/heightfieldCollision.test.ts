@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Body, Box, Cylinder, Heightfield, Ray, RaycastResult, Sphere, Vec3, World } from 'cannon-es';
 import {
     PILLAR_CACHE_LIMIT, cachedPillarCount, installHeightfieldCollision,
-} from '../src/physics/heightfieldCollision';
+} from '../src/physics/pal/cannon/heightfieldCollision';
 
 // The terrain collision replacement (physics/heightfieldCollision.ts) must give the answers cannon's own
 // heightfield resolvers gave, while touching only the cells a body or a ray actually reaches. These pin

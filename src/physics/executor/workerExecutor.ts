@@ -5,7 +5,8 @@ import { encodeConfig, encodeConstraint, readState, shapeBuffers } from '../work
 import type { PhysicsPort } from '../worker/ports';
 import type { FromWorker, Op, Snapshot, StepMessage } from '../worker/protocol';
 import { BODY_ROW, CONTACT_ROW, STATE_STRIDE, WRITE_ANGVEL, WRITE_FORCE, WRITE_POSE, WRITE_SLEEP, WRITE_TORQUE, WRITE_VEL } from '../worker/protocol';
-import type { ContactLike, PhysicsBackend, StepResult } from './physicsBackend';
+import { NO_CONTACTS, type ContactSource, type PhysicsExecutor, type StepResult } from './physicsExecutor';
+import type { BodyHandle } from '../pal/types';
 
 // The physics step in a Web Worker.
 //
@@ -19,7 +20,7 @@ import type { ContactLike, PhysicsBackend, StepResult } from './physicsBackend';
 // mirror, with the contacts, trigger events, first-contact events and buoyancy the step produced.
 //
 // TIME. A step has to be posted before the frame it is drawn in has started, so before anyone knows how
-// long that frame will be. Stepping by the frame that just ENDED (what this backend first did) draws every
+// long that frame will be. Stepping by the frame that just ENDED (what this executor first did) draws every
 // frame one frame late, by the wrong amount: on uneven frames a body visibly speeds up and slows down
 // against everything stepped by the frame's own delta (the animator, the camera, scripts). So:
 //   - each step reaches one PREDICTED frame past now (the lead, an average of recent frame deltas), so the
@@ -40,8 +41,8 @@ import type { ContactLike, PhysicsBackend, StepResult } from './physicsBackend';
 // turned body is moved or turned by the same amount from where the step left it, a written velocity
 // component replaces the step's.
 
-/** What the backend needs from PhysicsSystem. */
-export interface WorkerBackendHost {
+/** What the executor needs from PhysicsSystem. */
+export interface WorkerExecutorHost {
     readonly world: World;
     /** A trigger overlap starting or ending, as cannon reported it in the worker. */
     onContact(a: Body, b: Body, begin: boolean): void;
@@ -109,7 +110,7 @@ interface Slot {
     settled: boolean;
 }
 
-export class WorkerBackend implements PhysicsBackend {
+export class WorkerExecutor implements PhysicsExecutor {
     public readonly kind = 'worker' as const;
     private _epoch = 0;
     private _seq = 0;
@@ -127,7 +128,7 @@ export class WorkerBackend implements PhysicsBackend {
     private _recycle: ArrayBuffer[] = [];
     /** The water volumes the in-flight step was sent, so its buoyancy report finds them. */
     private _sentWater: { record: (body: Body, fraction: number) => void }[] = [];
-    private readonly _contacts: ContactLike[] = [];
+    private readonly _contacts = new ContactRows();
     private readonly _scratch = new Float64Array(STATE_STRIDE);
     private _cfgScratch = new Float64Array(64);
 
@@ -188,7 +189,7 @@ export class WorkerBackend implements PhysicsBackend {
     public lateFrames = 0;
     public postedFrames = 0;
 
-    constructor(private readonly _host: WorkerBackendHost, private readonly _port: PhysicsPort) {
+    constructor(private readonly _host: WorkerExecutorHost, private readonly _port: PhysicsPort) {
         _port.onMessage = (msg) => this._receive(msg);
         _port.onError = (error) => this._fail(error);
         _port.post({ kind: 'reset', epoch: this._epoch }, []);
@@ -240,7 +241,7 @@ export class WorkerBackend implements PhysicsBackend {
         this._port.poll();
         const snap = this._latest;
         this._latest = null;
-        if (!snap || this._failed) return { dt: 0, contacts: [] };
+        if (!snap || this._failed) return { dt: 0, contacts: NO_CONTACTS };
         if (this._appliedAt === this._appliedAt && this._now > this._appliedAt) {
             const realGap = (this._now - this._appliedAt) / (this._scaleAvg > 0 ? this._scaleAvg : 1);
             this._applyGap = this._applyGap === 0 ? realGap : this._applyGap + (realGap - this._applyGap) * APPLY_GAP_RATE;
@@ -318,8 +319,12 @@ export class WorkerBackend implements PhysicsBackend {
             // worker now holds either way, so the next diff sends exactly what differs from it.
             if (same(scratch, sh, 0, 3)) body.position.set(b[o + 1], b[o + 2], b[o + 3]);
             else body.position.set(b[o + 1] + scratch[0] - sh[0], b[o + 2] + scratch[1] - sh[1], b[o + 3] + scratch[2] - sh[2]);
-            if (same(scratch, sh, 3, 4)) body.quaternion.set(b[o + 4], b[o + 5], b[o + 6], b[o + 7]);
-            else rebaseRotation(body.quaternion, scratch, sh, b, o + 4);
+            // The world inertia the step's own integrate left behind, from the orientation it integrated to:
+            // the mirror never integrates, and an impulse with a lever arm (RigidBody.impulse at a point)
+            // turns it into spin through invInertiaWorld, so a stale one spun the body differently.
+            body.quaternion.set(b[o + 4], b[o + 5], b[o + 6], b[o + 7]);
+            body.updateInertiaWorld();
+            if (!same(scratch, sh, 3, 4)) rebaseRotation(body.quaternion, scratch, sh, b, o + 4);
             body.aabbNeedsUpdate = true;
             for (let i = 0; i < 7; i++) sh[i] = b[o + 1 + i];
             // Velocities by component: a script steering with `velocity.x = …` keeps the step's fall.
@@ -337,20 +342,15 @@ export class WorkerBackend implements PhysicsBackend {
         }
         this._from = this._flightFrom;
         this._to = this._flightTo;
-        // The last substep's contacts, for ground stamping.
-        this._contacts.length = s.contactCount;
+        // The last substep's contacts, for ground stamping, minus any with a body removed since (both sides
+        // are needed to stamp).
+        const contacts = this._contacts;
+        contacts.count = 0;
         for (let i = 0; i < s.contactCount; i++) {
             const o = i * CONTACT_ROW;
             const bi = this._slots[s.contacts[o]]?.body, bj = this._slots[s.contacts[o + 1]]?.body;
-            let c = this._contacts[i];
-            if (!c) c = this._contacts[i] = { bi: null as any, bj: null as any, ni: { x: 0, y: 0, z: 0 } };
-            c.bi = bi as Body; c.bj = bj as Body;
-            c.ni.x = s.contacts[o + 2]; c.ni.y = s.contacts[o + 3]; c.ni.z = s.contacts[o + 4];
+            if (bi && bj) contacts.push(bi.id, bj.id, s.contacts[o + 2], s.contacts[o + 3], s.contacts[o + 4]);
         }
-        // Drop contacts with a body removed since (both sides are needed to stamp).
-        let w = 0;
-        for (let i = 0; i < this._contacts.length; i++) if (this._contacts[i].bi && this._contacts[i].bj) this._contacts[w++] = this._contacts[i];
-        this._contacts.length = w;
         // Trigger overlaps, in the order cannon raised them.
         for (let i = 0; i < s.overlaps.length; i += 3) {
             const a = this._slots[s.overlaps[i + 1]]?.body, b = this._slots[s.overlaps[i + 2]]?.body;
@@ -768,4 +768,25 @@ function rebaseRotation(out: { x: number; y: number; z: number; w: number; set(x
 
 function uniqueBuffers(list: ArrayBuffer[]): ArrayBuffer[] {
     return [...new Set(list)].filter(b => b && b.byteLength > 0);
+}
+
+/** The applied step's contacts, as handles: rows of [a, b, nx, ny, nz]. */
+class ContactRows implements ContactSource {
+    private readonly _rows: number[] = [];
+    public count = 0;
+
+    public get contactCount(): number { return this.count; }
+
+    public push(a: number, b: number, nx: number, ny: number, nz: number): void {
+        const o = this.count++ * 5, r = this._rows;
+        r[o] = a; r[o + 1] = b; r[o + 2] = nx; r[o + 3] = ny; r[o + 4] = nz;
+    }
+
+    public forEachContact(visit: (a: BodyHandle, b: BodyHandle, nx: number, ny: number, nz: number) => void): void {
+        const r = this._rows;
+        for (let i = 0; i < this.count; i++) {
+            const o = i * 5;
+            visit(r[o] as BodyHandle, r[o + 1] as BodyHandle, r[o + 2], r[o + 3], r[o + 4]);
+        }
+    }
 }

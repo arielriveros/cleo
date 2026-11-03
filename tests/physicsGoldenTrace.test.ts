@@ -4,7 +4,7 @@ import { join } from 'path';
 import { runScenario, scenarioPhysics } from './helpers/physicsScenario';
 
 // The inline physics step, pinned bit for bit on a mixed scene (tests/helpers/physicsScenario.ts). Recorded
-// before the step moved behind the PhysicsBackend seam, so the refactor — and anything later — cannot
+// before the step moved behind the PhysicsExecutor seam, so the refactor — and anything later — cannot
 // quietly change what the simulation does. If a change to the physics is MEANT to change the trace,
 // delete the fixture and re-run to record the new one, and say why in the commit.
 

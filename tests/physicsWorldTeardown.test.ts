@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { World, Body, Box, Sphere, Vec3, SAPBroadphase } from 'cannon-es';
-import { clearWorld, broadphaseBodyCount } from '../src/physics/worldTeardown';
+import { clearWorld, broadphaseBodyCount } from '../src/physics/pal/cannon/worldTeardown';
 
 /**
  * The bug this suite exists for: `world.bodies` is NOT what the broadphase iterates. `SAPBroadphase`

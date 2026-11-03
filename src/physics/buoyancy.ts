@@ -1,5 +1,5 @@
 import { Body as CannonBody, ConvexPolyhedron, Shape, Sphere, Box, Vec3 } from 'cannon-es';
-import { shapeMassProperties } from './massProperties';
+import { shapeMassProperties } from './pal/cannon/massProperties';
 
 /**
  * Buoyancy and water drag: Archimedes' principle, sampled.

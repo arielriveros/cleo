@@ -9,7 +9,7 @@ import { installConvexSat } from './convexSat';
  * physics worker's (physics/worker/) are built identically — they must step bit for bit alike.
  * A leaf: cannon-es and the patch modules only, nothing that needs a window.
  */
-export function createPhysicsWorld(gravity: ArrayLike<number>): World {
+export function createCannonWorld(gravity: ArrayLike<number>): World {
   const world = new World();
   world.gravity.set(gravity[0], gravity[1], gravity[2]);
   // Sweep-and-prune, not cannon's default NaiveBroadphase: hundreds of pooled foliage collider bodies

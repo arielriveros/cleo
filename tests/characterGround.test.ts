@@ -34,12 +34,12 @@ const normalAt = (degrees: number): [number, number, number] => {
     return [Math.sin(r), Math.cos(r), 0];
 };
 
-const world = (p: PhysicsSystem) => (p as any)._world;
+const world = (p: PhysicsSystem) => (p as any)._cannon.raw;
 const record = (p: PhysicsSystem, body: Body, dot: number, normal: [number, number, number]) =>
     (p as any)._record(body, dot, normal);
 /** The stamping clock. `update()` advances it; nothing else here does, so tests set it by hand. */
 const setTime = (p: PhysicsSystem, t: number) => { (p as any)._time = t; };
-const stamp = (p: PhysicsSystem) => (p as any)._stampGroundContacts();
+const stamp = (p: PhysicsSystem) => (p as any)._stampGroundContacts((p as any)._world);
 
 describe('ground stamping — which contact becomes the ground', () => {
     /**
@@ -187,7 +187,7 @@ describe('a character walking up a heightfield', () => {
         body.addShape(new Sphere(radius));
         body.position.set(x, Math.tan(SLOPE * Math.PI / 180) * x + radius + 0.02, 0);
         world(p).addBody(body);
-        (p as any)._assignMaterial(body);
+        body.material = (p as any)._cannon.materialFor(body.friction, body.restitution);
         return body;
     }
 

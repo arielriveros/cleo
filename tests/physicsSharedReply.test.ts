@@ -29,7 +29,7 @@ describe('physics replies through shared memory', () => {
         const { doneAt, ...rest } = got;
         expect(rest).toEqual(sent);
         expect(Number.isFinite(doneAt)).toBe(true);
-        expect(got.bodies.buffer).not.toBe(buffer);            // a copy the backend may keep and recycle
+        expect(got.bodies.buffer).not.toBe(buffer);            // a copy the executor may keep and recycle
         expect(reader.read()).toBeNull();                      // and only once
         writer.write(snapshot(8, 3));
         expect(reader.read()!.seq).toBe(8);

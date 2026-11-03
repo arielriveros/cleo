@@ -208,7 +208,7 @@ describe('trigger ↔ trigger overlaps', () => {
         p.addBody(body);
         const hb = hurtbox(p, hurt, [0, 0, 0]);
         p.update(1 / 60);
-        const world = (p as any)._world;
+        const world = (p as any)._cannon.raw;
         expect(world.contacts.some((c: any) => c.bi === hb || c.bj === hb)).toBe(false);
         // Without the mask, cannon would build full contact equations for the pair every substep.
         hb.mask = -1;
@@ -256,7 +256,7 @@ describe('node trigger lifecycle', () => {
         p.update(1 / 60);
         n.setTrigger().setCapsule([0, 0, 0], [0, 0, 0], 2);
         p.update(1 / 60);
-        const triggers = (p as any)._world.bodies.filter((b: Body) => b.isTrigger);
+        const triggers = (p as any)._cannon.raw.bodies.filter((b: Body) => b.isTrigger);
         expect(triggers).toEqual([n.trigger]);
         expect([...p.triggers]).toEqual([n.trigger]);
     });
@@ -275,7 +275,7 @@ describe('node trigger lifecycle', () => {
         expect(p.triggerVersion).not.toBe(before);
         p.update(1 / 60);
         expect(blade.log).toEqual(['enter zone', 'exit zone']);
-        expect((p as any)._world.bodies.filter((b: Body) => b.isTrigger)).toHaveLength(1);
+        expect((p as any)._cannon.raw.bodies.filter((b: Body) => b.isTrigger)).toHaveLength(1);
     });
 
     it('reads the trigger options from scene JSON', () => {

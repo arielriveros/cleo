@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Body, Box, NaiveBroadphase, Sphere, Vec3, World } from 'cannon-es';
-import { CleoSAPBroadphase, sortByStart } from '../src/physics/cleoBroadphase';
+import { CleoSAPBroadphase, sortByStart } from '../src/physics/pal/cannon/cleoBroadphase';
 
 // The broadphase only ever chooses which pairs reach the narrowphase. Breaking its loop early is a speedup
 // exactly as long as it never drops a pair: these hold it to NaiveBroadphase's answer (every pair, same

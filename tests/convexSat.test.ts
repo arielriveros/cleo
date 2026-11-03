@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Box, ConvexPolyhedron, Cylinder, Quaternion, Vec3 } from 'cannon-es';
-import { fastFindSeparatingAxis, stockFindSeparatingAxis } from '../src/physics/convexSat';
+import { fastFindSeparatingAxis, stockFindSeparatingAxis } from '../src/physics/pal/cannon/convexSat';
 
 // The fast separating-axis test must give cannon's answer: the same verdict, and an axis along which the
 // pair overlaps by the same minimum depth, pointing the same way. Parallel axes are the only thing it

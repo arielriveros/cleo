@@ -110,7 +110,7 @@ type Sample = {
   activeBodies: number; frozenBodies: number; restingBodies: number;
   triggerPassMs: number; triggerCandidates: number; triggerPairsTested: number; triggerOverlaps: number;
   broadphaseMs: number; narrowphaseMs: number; solveMs: number; integrateMs: number;
-  physicsBackend: 'inline' | 'worker'; workerState: 'inline' | 'starting' | 'worker'; workerMode: PhysicsThread; sharedReplies: boolean;
+  physicsExecutor: 'inline' | 'worker'; workerState: 'inline' | 'starting' | 'worker'; workerMode: PhysicsThread; sharedReplies: boolean;
   workerFallback: string | null; autoStepMs: number; cores: number;
   workerStepMs: number; syncMs: number; roundTripMs: number; readyMs: number;
   lateFrames: number; workerFrames: number; writes: number; ops: number; bytesUp: number; bytesDown: number;
@@ -136,7 +136,7 @@ const EMPTY: Sample = {
   activeBodies: 0, frozenBodies: 0, restingBodies: 0,
   triggerPassMs: 0, triggerCandidates: 0, triggerPairsTested: 0, triggerOverlaps: 0,
   broadphaseMs: 0, narrowphaseMs: 0, solveMs: 0, integrateMs: 0,
-  physicsBackend: 'inline', workerState: 'inline', workerMode: 'off', sharedReplies: false, workerFallback: null, autoStepMs: 0, cores: 0,
+  physicsExecutor: 'inline', workerState: 'inline', workerMode: 'off', sharedReplies: false, workerFallback: null, autoStepMs: 0, cores: 0,
   workerStepMs: 0, syncMs: 0, roundTripMs: 0, readyMs: 0,
   lateFrames: 0, workerFrames: 0, writes: 0, ops: 0, bytesUp: 0, bytesDown: 0,
   drawn: 0, extrapolated: 0, leadMs: 0, jitterMs: 0,
@@ -312,7 +312,7 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
           narrowphaseMs: phys?.narrowphaseMs ?? 0,
           solveMs: phys?.solveMs ?? 0,
           integrateMs: phys?.integrateMs ?? 0,
-          physicsBackend: phys?.backend ?? 'inline',
+          physicsExecutor: phys?.executor ?? 'inline',
           workerState: workerStatus?.state ?? 'inline',
           sharedReplies: workerStatus?.sharedReplies ?? false,
           workerMode: (instance?.physics as any)?.workerMode ?? 'off',
@@ -505,8 +505,8 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
             take off this thread) while `write-back` is scene-graph sync that would stay here regardless. */}
         <Row label='Physics' value={`${fmt(d.physicsMs)} ms`} hl={d.physicsMs > 5}
              title='Only steps in Play mode — 0 while stopped is the honest answer, not a missing value.' />
-        <Row label='· step' value={d.physicsBackend === 'worker' ? 'in worker' : `${fmt(d.stepMs)} ms`}
-             title={d.physicsBackend === 'worker'
+        <Row label='· step' value={d.physicsExecutor === 'worker' ? 'in worker' : `${fmt(d.stepMs)} ms`}
+             title={d.physicsExecutor === 'worker'
                ? "cannon's solver runs in the physics worker: its time is under Workers."
                : "cannon's solver — the part a worker could take off this thread."} />
         {/* cannon's own split of the step (measured while this panel is open). Narrowphase is where terrain

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { World, Body, Plane, Box as CannonBox, Sphere as CannonSphere, ConvexPolyhedron, Vec3, Quaternion } from 'cannon-es';
-import { shapeMassProperties, bodyCenterOfMass } from '../src/physics/massProperties';
+import { shapeMassProperties, bodyCenterOfMass } from '../src/physics/pal/cannon/massProperties';
 import { RigidBody } from '../src/physics/body';
 import { Shape } from '../src/physics/shape';
 import { Node } from '../src/core/scene/nodes/node';

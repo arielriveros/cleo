@@ -1,31 +1,34 @@
-import type { Body } from 'cannon-es';
+import type { BodyHandle } from '../pal/types';
 
 // Where the physics step runs. PhysicsSystem owns the scene-facing half — the bodies' nodes, triggers,
-// grounding, queries — and hands the step itself to a backend:
+// grounding, queries — and hands the step itself to an executor:
 //
-//   InlineBackend   steps the cannon World on this thread, inside physics.update (the default)
-//   WorkerBackend   keeps that World as a mirror that never steps, and steps a copy in a Web Worker
+//   InlineExecutor   steps the world on this thread, inside physics.update (the default)
+//   WorkerExecutor   keeps that World as a mirror that never steps, and steps a copy in a Web Worker
 //
-// Either way the World PhysicsSystem holds is the one every query, raycast and `node.body` reads.
+// Either way the world PhysicsSystem holds (a PhysicsWorld, see pal/) is the one every query, raycast and
+// `node.body` reads.
 
-/** One contact of the last substep, as ground stamping reads it: `ni` points out of `bi`, toward `bj`. */
-export interface ContactLike {
-    bi: Body;
-    bj: Body;
-    ni: { x: number; y: number; z: number };
+/** The last substep's contacts, as ground stamping reads them: (a, b, normal pointing out of a toward b). */
+export interface ContactSource {
+    readonly contactCount: number;
+    forEachContact(visit: (a: BodyHandle, b: BodyHandle, nx: number, ny: number, nz: number) => void): void;
 }
+
+/** No contacts (a frame whose worker step has not come back). */
+export const NO_CONTACTS: ContactSource = { contactCount: 0, forEachContact() {} };
 
 export interface StepResult {
     /**
-     * Seconds of simulation this frame's update applied. The inline backend always steps the frame's own
+     * Seconds of simulation this frame's update applied. The inline executor always steps the frame's own
      * delta; the worker applies its last finished step, or nothing (0) while that step is still running.
      */
     dt: number;
     /** The last substep's contacts. Only valid until the next step. */
-    contacts: ArrayLike<ContactLike>;
+    contacts: ContactSource;
 }
 
-export interface PhysicsBackend {
+export interface PhysicsExecutor {
     readonly kind: 'inline' | 'worker';
     /**
      * Start of physics.update: step (inline) or apply the worker's finished step (worker). `timeScale` is the

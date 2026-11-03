@@ -1,15 +1,14 @@
 import { Body, Constraint, Shape, World } from 'cannon-es';
-import { createPhysicsWorld } from '../worldConfig';
-import { MaterialTable } from '../materialTable';
+import { CannonWorld } from '../pal/cannon/cannonWorld';
+import { PhysicsEventKind } from '../pal/types';
 import { applyBuoyancy, floats } from '../buoyancy';
 import { buoyancyVolumeFromSpec, type WaterSpec } from '../waterSurface';
-import { clearWorld } from '../worldTeardown';
 import { applyConfig, decodeConstraint, decodeShape, writeState } from './bodyCodec';
 import type { FromWorker, ShapeRef, Snapshot, StepMessage, ToWorker } from './protocol';
 import { BODY_ROW, CONTACT_ROW, STATE_STRIDE } from './protocol';
 
-// The physics worker's half: a cannon World built exactly like the main thread's (worldConfig.ts), kept in
-// step with it by the messages in protocol.ts, stepped exactly as PhysicsSystem's inline backend steps
+// The physics worker's half: a world built exactly like the main thread's (pal/cannon/), kept in
+// step with it by the messages in protocol.ts, stepped exactly as PhysicsSystem's inline executor steps
 // (equal substeps, buoyancy per substep), and reported back as a snapshot. Pure — no `self`, no
 // postMessage — so tests run it in-process (ports.ts LoopbackPort) and compare it with the inline step.
 // Imports only cannon-es and physics leaf modules: a worker must not pull in the engine barrel (howler
@@ -18,8 +17,7 @@ import { BODY_ROW, CONTACT_ROW, STATE_STRIDE } from './protocol';
 const MAX_SUBSTEP = 1 / 60;
 
 export class PhysicsWorkerCore {
-    private _world: World;
-    private _materials: MaterialTable;
+    private _world: CannonWorld;
     private _epoch = -1;
     private readonly _bodies: (Body | undefined)[] = [];
     private readonly _constraints = new Map<number, Constraint>();
@@ -32,20 +30,12 @@ export class PhysicsWorkerCore {
     private _free: ArrayBuffer[] = [];
 
     constructor() {
-        this._world = this._makeWorld([0, -9.81, 0]);
-        this._materials = new MaterialTable(this._world);
+        this._world = new CannonWorld([0, -9.81, 0]);
+        this._world.onPreSubstep = dt => this._applyWater(dt);
     }
 
-    private _makeWorld(gravity: ArrayLike<number>): World {
-        const world = createPhysicsWorld(gravity);
-        world.addEventListener('beginContact', (e: any) => this._overlap(e.bodyA, e.bodyB, 1));
-        world.addEventListener('endContact', (e: any) => this._overlap(e.bodyA, e.bodyB, 0));
-        world.addEventListener('preStep', () => this._applyWater());
-        return world;
-    }
-
-    /** The world, for tests. */
-    public get world(): World { return this._world; }
+    /** The cannon world, for tests. */
+    public get world(): World { return this._world.raw; }
 
     /** Handle one message; returns the reply (a snapshot), or null. */
     public handle(msg: ToWorker): FromWorker | null {
@@ -60,8 +50,7 @@ export class PhysicsWorkerCore {
 
     private _reset(epoch: number): void {
         this._epoch = epoch;
-        for (const c of [...this._world.constraints]) this._world.removeConstraint(c);
-        clearWorld(this._world);
+        this._world.clear();
         this._bodies.length = 0;
         this._constraints.clear();
         this._shapes.clear();
@@ -79,7 +68,7 @@ export class PhysicsWorkerCore {
         return shape;
     };
 
-    private _materialOf = (key: string | null) => this._materials.forKey(key);
+    private _materialOf = (key: string | null) => this._world.materials.forKey(key);
 
     private _bodyOf = (slot: number): Body => {
         const b = this._bodies[slot];
@@ -88,7 +77,7 @@ export class PhysicsWorkerCore {
     };
 
     private _step(msg: StepMessage): Snapshot {
-        const world = this._world;
+        const world = this._world.raw;
         if (msg.recycle) this._free.push(...msg.recycle);
         // Replies through shared memory keep their buffers here AND the main thread hands back its copies:
         // keep a handful, not one more per step.
@@ -137,32 +126,25 @@ export class PhysicsWorkerCore {
             if (b) writeState(b, msg.writes, at + 2, msg.writes[at + 1]);
         }
 
-        world.gravity.set(msg.gravity[0], msg.gravity[1], msg.gravity[2]);
+        this._world.gravity = msg.gravity;
         // The same clock as the main thread's (water waves are a function of it), whoever stepped last.
-        (world as any).time = msg.time;
-        const solver = world.solver as unknown as { iterations?: number };
-        if (typeof solver.iterations === 'number' && msg.iterations > 0) solver.iterations = msg.iterations;
+        this._world.time = msg.time;
+        if (msg.iterations > 0) this._world.solverIterations = msg.iterations;
         this._water = msg.water;
 
-        // Step exactly as the inline backend does: `substeps` equal substeps summing to dt.
+        // Step exactly as the inline executor does: `substeps` equal substeps summing to dt.
         this._overlaps = []; this._collides = []; this._submerged.clear();
         const stats = { stepMs: 0, broadphaseMs: 0, narrowphaseMs: 0, solveMs: 0, integrateMs: 0 };
-        world.doProfiling = msg.profile;
+        this._world.profile = msg.profile;
         const start = performance.now();
         if (msg.substeps > 0 && msg.dt > 0) {
             const h = msg.dt / msg.substeps;
-            for (let i = 0; i < msg.substeps; i++) {
-                world.step(h);
-                if (msg.profile) {
-                    const prof = (world as any).profile;
-                    stats.broadphaseMs += prof.broadphase;
-                    stats.narrowphaseMs += prof.narrowphase;
-                    stats.solveMs += prof.solve + prof.makeContactConstraints;
-                    stats.integrateMs += prof.integrate;
-                }
-            }
+            for (let i = 0; i < msg.substeps; i++) this._world.step(h);
+            if (msg.profile) this._world.readProfile(stats);
         }
         stats.stepMs = performance.now() - start;
+        // Trigger overlaps, in the order the world raised them.
+        this._world.drainEvents((kind, a, b) => this._overlap(this._world.bodyOf(a), this._world.bodyOf(b), kind === PhysicsEventKind.SensorBegin ? 1 : 0));
         return this._snapshot(msg, stats);
     }
 
@@ -173,7 +155,7 @@ export class PhysicsWorkerCore {
     }
 
     private _snapshot(msg: StepMessage, stats: Snapshot['stats']): Snapshot {
-        const world = this._world;
+        const world = this._world.raw;
         let dynamic = 0;
         for (const b of world.bodies) if (b.type !== Body.STATIC) dynamic++;
         const bodies = new Float64Array(this._take(dynamic * BODY_ROW * 8), 0, dynamic * BODY_ROW);
@@ -219,9 +201,9 @@ export class PhysicsWorkerCore {
 
     // ---- what the world reports during the step ----
 
-    private _overlap(a: Body | null, b: Body | null, begin: number): void {
-        // A removed body comes back null: the main thread has already dropped its pairs.
-        if (!a || !b || !(a.isTrigger || b.isTrigger)) return;
+    private _overlap(a: Body | undefined, b: Body | undefined, begin: number): void {
+        // A removed body is gone: the main thread has already dropped its pairs.
+        if (!a || !b) return;
         const sa = (a as any).__slot, sb = (b as any).__slot;
         if (sa === undefined || sb === undefined) return;
         this._overlaps.push(begin, sa, sb);
@@ -237,12 +219,12 @@ export class PhysicsWorkerCore {
     }
 
     /** Buoyancy, once per substep: PhysicsSystem._applyWater, from the specs the main thread sent. */
-    private _applyWater(): void {
+    private _applyWater(substep: number): void {
         if (!this._water.length) return;
-        const world = this._world;
+        const world = this._world.raw;
         const g = world.gravity;
         const gravity = Math.hypot(g.x, g.y, g.z);
-        const dt = world.dt > 0 ? world.dt : MAX_SUBSTEP;
+        const dt = substep > 0 ? substep : MAX_SUBSTEP;
         const isCharacter = (b: Body) => !!(b as any).__character;
         this._water.forEach((spec, vi) => {
             const volume = buoyancyVolumeFromSpec(spec, world.time);

@@ -7,7 +7,7 @@ import { LoopbackPort } from '../src/physics/worker/ports';
 import { decodeConstraint, decodeShape, encodeConstraint, encodeShape } from '../src/physics/worker/bodyCodec';
 import type { PhysicsSystem } from '../src/physics/physicsSystem';
 
-// The physics step in a Web Worker (physics/backend/workerBackend.ts + physics/worker/) must simulate
+// The physics step in a Web Worker (physics/executor/workerExecutor.ts + physics/worker/) must simulate
 // EXACTLY what the inline step does. These run the mixed scene of the golden trace through the worker
 // backend — over an in-process port that clones every message like a real worker does — and compare
 // bit for bit. The worker's result lands one frame after the scripts that caused it, so its trace is
@@ -19,14 +19,14 @@ function workerPhysics(port: LoopbackPort): PhysicsSystem {
     return p;
 }
 
-describe('the worker backend', () => {
-    it('steps the mixed scene exactly like the inline backend', () => {
+describe('the worker executor', () => {
+    it('steps the mixed scene exactly like the inline executor', () => {
         const inline = runScenario(scenarioPhysics());
         const port = new LoopbackPort();
         const p = workerPhysics(port);
-        expect(p.backend).toBe('worker');
+        expect(p.executor).toBe('worker');
         const worker = runScenario(p, 300, 1 / 60, 1);
-        expect(p.backend).toBe('worker');
+        expect(p.executor).toBe('worker');
         expect(worker.triggers).toEqual(inline.triggers);
         expect(worker.collides).toEqual(inline.collides);
         expect(worker.grounded).toEqual(inline.grounded);
@@ -39,12 +39,12 @@ describe('the worker backend', () => {
         const port = new LoopbackPort({ delayFrames: 2 });
         const p = workerPhysics(port);
         const trace = runScenario(p, 300, 1 / 60, 1);
-        const backend = (p as any)._backend;
+        const backend = (p as any)._executor;
         expect(backend.lateFrames).toBeGreaterThan(50);
         // The velocity the "script" writes every frame still walks the character through the zone.
         expect(trace.triggers).toEqual(['Zone enter Hero', 'Zone exit Hero']);
         // Time is carried, not dropped: the worker's clock is the frames' time plus the one-frame lead every
-        // step reaches ahead by (see WorkerBackend's header), minus the time not yet posted.
+        // step reaches ahead by (see WorkerExecutor's header), minus the time not yet posted.
         const simulated = port.core.world.time;
         const total = 301 / 60, lead = 1 / 60;
         expect(simulated).toBeGreaterThan(total + lead - 3 / 60 - 1e-9);
@@ -55,7 +55,7 @@ describe('the worker backend', () => {
         const port = new LoopbackPort({ failAt: 120 });
         const p = workerPhysics(port);
         const trace = runScenario(p, 300, 1 / 60, 1);
-        expect(p.backend).toBe('inline');
+        expect(p.executor).toBe('inline');
         // The scene went on: the character still crossed the zone, and the far body still froze and thawed.
         expect(trace.triggers).toEqual(['Zone enter Hero', 'Zone exit Hero']);
         expect(trace.frozen.slice(160, 230).some(f => !f)).toBe(true);

@@ -73,7 +73,7 @@ describe('physics worker stats', () => {
     it("reads 'starting' while the worker warms up", () => {
         const r = rig(new LoopbackPort({ delayFrames: 1, delayFor: seq => (seq === 1 ? 5 : 1) }));
         expect(r.p.workerStatus.state).toBe('starting');
-        expect(r.p.backend).toBe('inline');
+        expect(r.p.executor).toBe('inline');
         for (let i = 0; i < 6; i++) frame(r);
         expect(r.p.workerStatus.state).toBe('worker');
     });

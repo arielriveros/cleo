@@ -1529,7 +1529,7 @@ export class Node {
 
   /**
    * With the physics step in a worker, a body's node is DRAWN where the body is at the frame's time (its
-   * last step interpolated, see WorkerBackend.visualPose) while the body holds the latest simulated pose,
+   * last step interpolated, see WorkerExecutor.visualPose) while the body holds the latest simulated pose,
    * a little ahead. This is the gap, [dx dy dz | qx qy qz qw]: what a push from this node is moved and
    * turned by on its way into the body, so a script that moves or turns the node (root motion, a
    * character's turn, `addX`) moves the body by exactly as much — instead of dragging it back to the drawn

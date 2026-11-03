@@ -21,7 +21,7 @@ export interface PhysicsStats {
     /**
      * Bodies the BROADPHASE will iterate next step. Equal to `bodies` in a healthy world; anything
      * higher is a body that left `world.bodies` without the broadphase hearing about it and is still
-     * being sorted, paired and collided against. See `worldTeardown.clearWorld`.
+     * being sorted, paired and collided against. See `pal/cannon/worldTeardown.clearWorld`.
      */
     broadphaseBodies: number;
     /** Contact equations produced by the last step — a rough proxy for solver load. */
@@ -48,8 +48,8 @@ export interface PhysicsStats {
     triggerPairsTested: number;
     /** Trigger overlaps currently reported to scripts, trigger↔body and trigger↔trigger together. */
     triggerOverlaps: number;
-    /** Where the step ran this frame: 'inline' (this thread) or 'worker' (see physics/backend/). */
-    backend: 'inline' | 'worker';
+    /** Where the step ran this frame: 'inline' (this thread) or 'worker' (see physics/executor/). */
+    executor: 'inline' | 'worker';
     /** The worker's step, measured in the worker: time this thread did NOT spend. Held between steps. */
     workerStepMs: number;
     /** This thread's share of running the worker: the diff and post at the frame's end, applying its result. */
@@ -100,7 +100,7 @@ export const physicsStats: PhysicsStats = {
     triggerCandidates: 0,
     triggerPairsTested: 0,
     triggerOverlaps: 0,
-    backend: 'inline',
+    executor: 'inline',
     workerStepMs: 0,
     syncMs: 0,
     workerRoundTripMs: 0,
