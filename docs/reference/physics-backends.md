@@ -33,6 +33,23 @@ and refers to the backend's by handle. Its conventions hold for every backend:
   Overlap queries, the trigger↔trigger pass, buoyancy, particle collision and the editor's live trigger
   overlay all measure bodies this way, so they measure exactly what the simulation sees.
 
+## Engine bodies
+
+`PhysicsBody` (`src/physics/physicsBody.ts`) is the engine's own body on any backend. It holds what the body
+is made of (mass, damping, surface, layers, colliders); once `physics.addBody` has put it in a world, where it
+is and how it moves live in the world. `position`, `quaternion`, `velocity` and `angularVelocity` are live
+views: reading them reads the world, writing them writes it. Before it is added, the body keeps the state it
+is given and starts from it.
+
+- `physics.removeBody(body)` takes it out; it keeps its state and can be added again. `removeBody(body, true)`
+  keeps it built in the world, disabled, so adding it again costs nothing: what the foliage collider pool does.
+- A world clear (a scene change) keeps every body's last state; one added again is made afresh.
+- `physics.addJoint(a, b, { kind: 'fixed' | 'ball' | 'hinge' | 'coneTwist', ... })` joins two bodies in the
+  world and returns the joint for `physics.removeJoint`.
+
+Terrain heightfields, foliage and tilemap colliders, ragdoll bones and `physics.addGroundPlane()` are engine
+bodies. `RigidBody` and `Trigger` still extend cannon's body until the next stage.
+
 ## Two different "where"s
 
 **Backend** is which physics engine simulates. **Executor** is which thread steps it:
@@ -59,8 +76,8 @@ bit for bit.
 | Interface, cannon backend, conformance suite | Done |
 | `PhysicsSystem` steps, queries rays, reads contacts and trigger events, sets gravity and solver iterations through the interface | Done |
 | Overlap queries, trigger↔trigger pass, buoyancy, particle colliders and the editor's trigger overlay read neutral collider descriptions | Done |
-| Terrain, foliage and tilemap colliders, ragdolls and joints on engine bodies | Next |
-| `RigidBody`, `Trigger` and `Shape` stop being cannon objects | Planned |
+| Terrain, foliage and tilemap colliders, ragdolls and joints on engine bodies | Done |
+| `RigidBody`, `Trigger` and `Shape` stop being cannon objects | Next |
 | The worker protocol carries descriptions instead of cannon shapes | Planned |
 | A test keeps `cannon-es` inside `src/physics/pal/cannon/`; the project chooses its backend | Planned |
 

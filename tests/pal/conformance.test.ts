@@ -192,6 +192,37 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             expect(pose(w, b)[1]).toBeLessThan(10);
         });
 
+        it('step out of the world while disabled, keeping handle and state, and come back', () => {
+            const w = make();
+            const b = body(w, { kind: 'sphere', radius: 0.5 }, [0, 10, 0]);
+            const other = body(w, { kind: 'sphere', radius: 0.5 }, [5, 10, 0]);
+            w.setEnabled(b, false);
+            expect(w.hasBody(b)).toBe(true);
+            expect(w.isEnabled(b)).toBe(false);
+            expect(w.bodies()).toEqual([other]);
+            run(w, 30);
+            expect(pose(w, b)[1]).toBe(10);                     // not stepped
+            let hit = false;
+            w.raycast([0, 20, 0], [0, 0, 0], { mode: 'all' }, h => { if (h.body === b) hit = true; });
+            expect(hit).toBe(false);                            // not queried
+            w.setTransform(b, [0, 4, 0], null);                 // still writable
+            expect(pose(w, b)[1]).toBeCloseTo(4, 12);
+            w.setEnabled(b, true);
+            expect(w.bodies()).toEqual([other, b]);             // last in order
+            run(w, 30);
+            expect(pose(w, b)[1]).toBeLessThan(4);
+        });
+
+        it('only collide with the layers both masks allow', () => {
+            const w = make();
+            const floor = ground(w);
+            const ghost = body(w, { kind: 'sphere', radius: 0.5 }, [0, 1, 0]);
+            w.setCollisionFilter(ghost, 2, ~1);                 // not in, and not colliding with, layer 1
+            run(w, 60);
+            expect(pose(w, ghost)[1]).toBeLessThan(0);
+            void floor;
+        });
+
         it('honour axis locks', () => {
             const w = make();
             const b = body(w, { kind: 'sphere', radius: 0.5 }, [0, 10, 0], { linearFactor: [1, 0, 1] });

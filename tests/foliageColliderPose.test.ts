@@ -1,14 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { Cylinder } from 'cannon-es';
 import { foliageColliderPose, buildFoliageColliderBody } from '../src/terrain/foliageColliders';
+import { PhysicsSystem } from '../src/physics/physicsSystem';
 
 // A foliage collider's shape is computed ONCE (foliageColliderPose) and used by the physics body, the
 // editor's collider preview and its viewport overlay, so what you see is what you bump into.
 
 const extent = (body: ReturnType<typeof buildFoliageColliderBody>) => {
-    body.updateAABB();
-    const { lowerBound: lo, upperBound: hi } = body.aabb;
-    return [hi.x - lo.x, hi.y - lo.y, hi.z - lo.z, (hi.y + lo.y) / 2];
+    const p = new PhysicsSystem();
+    p.initialize();
+    p.addBody(body);
+    const [lx, ly, lz, hx, hy, hz] = body.getAabb([0, 0, 0, 0, 0, 0]);
+    return [hx - lx, hy - ly, hz - lz, (hy + ly) / 2];
 };
 
 describe('foliage collider shape', () => {

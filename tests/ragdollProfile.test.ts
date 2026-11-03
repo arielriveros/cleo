@@ -6,6 +6,7 @@ import { AnimatedModel } from '../src/animation/animatedModel';
 import type { Skin } from '../src/animation/animatedModel';
 import { ModelNode } from '../src/core/scene/nodes/modelNode';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
+import type { PhysicsBody } from '../src/physics/physicsBody';
 import type { Ragdoll } from '../src/physics/ragdoll';
 import { autoHumanoidProfile, parseRagdollProfile, ragdollLayout } from '../src/physics/ragdollProfile';
 import type { RagdollLayoutPart } from '../src/physics/ragdollProfile';
@@ -56,7 +57,10 @@ function world(): PhysicsSystem {
     return p;
 }
 
-const yAxis = (b: Body) => { const v = b.quaternion.vmult(new Vec3(0, 1, 0)); return vec3.fromValues(v.x, v.y, v.z); };
+const yAxis = (b: { quaternion: { vmult(v: { x: number; y: number; z: number }): { x: number; y: number; z: number } } }) => {
+    const v = b.quaternion.vmult({ x: 0, y: 1, z: 0 });
+    return vec3.fromValues(v.x, v.y, v.z);
+};
 
 describe('the automatic humanoid profile', () => {
     it('fits sixteen segments to the mannequin with a 70 kg body', () => {
@@ -168,9 +172,10 @@ describe('a profile ragdoll falling', () => {
     it('keeps its joints together', () => {
         const { p, layout, r } = setup();
         for (let i = 0; i < 180; i++) p.update(1 / 60);
-        const at = (b: Body, owner: RagdollLayoutPart, pivot: vec3) => {
+        const at = (b: PhysicsBody, owner: RagdollLayoutPart, pivot: vec3) => {
             const off = vec3.transformQuat(vec3.create(), vec3.sub(vec3.create(), pivot, owner.center), quat.invert(quat.create(), owner.rotation));
-            return b.pointToWorldFrame(new Vec3(off[0], off[1], off[2]));
+            const r = b.quaternion.vmult({ x: off[0], y: off[1], z: off[2] });
+            return new Vec3(b.position.x + r.x, b.position.y + r.y, b.position.z + r.z);
         };
         for (const lp of layout.parts) {
             if (lp.parent < 0) continue;
@@ -199,7 +204,7 @@ describe('a profile ragdoll falling', () => {
         p.addGroundPlane(0.5);                     // half a metre above the feet: the legs start buried
         p.update(1 / 60);                          // a live world: the ground's bounds are current
         const r = p.startRagdoll(mannequin());
-        for (const b of r.bodies.values()) { b.updateAABB(); expect(b.aabb.lowerBound.y).toBeGreaterThan(0.49); }
+        for (const b of r.bodies.values()) expect(b.getAabb([0, 0, 0, 0, 0, 0])[1]).toBeGreaterThan(0.49);
         let fastestUp = 0;
         for (let i = 0; i < 60; i++) {
             p.update(1 / 60);

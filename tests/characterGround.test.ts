@@ -170,7 +170,7 @@ describe('a character walking up a heightfield', () => {
         // so a material-less heightfield silently drags the pair back to the world default - friction 0.3
         // against a character authored at 0, which scales its commanded velocity by 0.62 EVERY frame.
         // Leaving it out does not fail loudly; it just makes the character wade.
-        body.material = (p as any)._defaultMaterial;
+        body.material = (p as any)._cannon.materialFor(0.3, 0);
         world(p).addBody(body);
     }
 

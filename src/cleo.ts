@@ -413,9 +413,11 @@ export { DirectionalLight, PointLight, Spotlight, LIGHT_UNIT, REFERENCE_ILLUMINA
 export type { ExposureCurveKey } from "./graphics/lighting";
 export { Shape } from "./physics/shape";
 export { PhysicsSystem } from "./physics/physicsSystem";
-export type { PhysicsRaycastHit, PhysicsRaycastOptions } from "./physics/physicsSystem";
+export type { PhysicsRaycastHit, PhysicsRaycastOptions, JointSpec, AnyBody } from "./physics/physicsSystem";
+export { PhysicsBody, BodyVec3, BodyQuat } from "./physics/physicsBody";
+export type { PhysicsBodyOptions } from "./physics/physicsBody";
 export type { OverlapHit, OverlapOptions } from "./physics/overlap";
-export type { ColliderPart, PartShape, ConvexHull, ColliderGeometry } from "./physics/pal/types";
+export type { ColliderPart, PartShape, ConvexHull, ColliderGeometry, ColliderDesc, ShapeDesc, JointHandle } from "./physics/pal/types";
 export { physicsStats } from "./physics/physicsStats";
 export type { PhysicsStats } from "./physics/physicsStats";
 export { sceneStats, sceneStatsDetail } from "./core/scene/sceneStats";

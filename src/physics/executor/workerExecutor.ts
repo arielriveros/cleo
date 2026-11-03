@@ -52,6 +52,8 @@ export interface WorkerExecutorHost {
     profileStep(): boolean;
     /** The worker failed: PhysicsSystem falls back to stepping inline, on the same world. */
     onFailure(error: unknown): void;
+    /** A step's result was written into the world's bodies, behind its back: what caches its state must re-read. */
+    stateChanged(): void;
 }
 
 /** The engine's own frame-delta cap: how far a body is ever carried along its velocity past its last step. */
@@ -366,6 +368,7 @@ export class WorkerExecutor implements PhysicsExecutor {
             if (body) this._sentWater[s.submerged[i]]?.record(body, s.submerged[i + 2]);
         }
         (world as any).time = s.time;
+        this._host.stateChanged();
         physicsStats.workerStepMs = s.stats.stepMs;
         physicsStats.broadphaseMs += s.stats.broadphaseMs;
         physicsStats.narrowphaseMs += s.stats.narrowphaseMs;

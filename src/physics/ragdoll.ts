@@ -1,8 +1,7 @@
-import {
-    Body, Sphere, Box, Cylinder, Vec3, Quaternion, PointToPointConstraint, ConeTwistConstraint, HingeConstraint,
-    LockConstraint, Constraint,
-} from 'cannon-es';
 import { mat4, vec3, quat } from 'gl-matrix';
+import { PhysicsBody } from './physicsBody';
+import type { JointHandle } from './pal/types';
+import type { JointSpec } from './physicsSystem';
 import { AnimatedModel } from '../animation/animatedModel';
 import type { Animator } from '../animation/animator';
 import type { ModelNode } from '../core/scene/nodes/modelNode';
@@ -24,7 +23,7 @@ export interface RagdollOptions {
     coneAngle?: number;
     /** Twist limit in degrees for cone-twist joints. */
     twistAngle?: number;
-    /** Constraint strength (cannon-es maxForce) — higher = stiffer joints. */
+    /** Joint strength (the most force a joint may apply) — higher = stiffer joints. */
     stiffness?: number;
     /** Per-bone angular damping — higher resists spinning (less floppy). */
     angularDamping?: number;
@@ -91,8 +90,8 @@ const MAX_HANDOFF_RISE = 0.5;
 export class Ragdoll {
     private _physics: PhysicsSystem;
     private _animator: Animator | null = null;
-    private _bodies: Map<number, Body> = new Map();   // GLTF nodeIndex -> body
-    private _constraints: Constraint[] = [];
+    private _bodies: Map<number, PhysicsBody> = new Map();   // GLTF nodeIndex -> body
+    private _joints: JointHandle[] = [];
     /** Solver iterations this ragdoll wants while it is alive (0: no preference). */
     public solverIterations = 0;
     /** The dying character's capsule, and its collision mask before this ragdoll took it out of the way. */
@@ -268,19 +267,19 @@ export class Ragdoll {
             boneDir.set(nodeIndex, dir);
             const q = quat.rotationTo(quat.create(), up, dir);
 
-            const body = new Body({
+            const body = new PhysicsBody({
+                name: 'ragdoll',
                 mass: boneMass,
-                position: new Vec3(pos[0], pos[1], pos[2]),
-                quaternion: new Quaternion(q[0], q[1], q[2], q[3]),
+                position: pos,
+                quaternion: q,
                 linearDamping: cfg.linearDamping,
                 angularDamping: cfg.angularDamping,
+                // Bones live in group 2. The mask includes the static world (group 1); adding group 2
+                // enables bone-vs-bone collision.
+                group: RAGDOLL_GROUP,
+                mask: cfg.selfCollision ? (1 | RAGDOLL_GROUP) : 1,
             });
-            body.addShape(new Sphere(radius));
-            body.updateMassProperties();
-            // Bones live in group 2. The mask includes the static world (group 1); adding group 2
-            // enables bone-vs-bone collision.
-            body.collisionFilterGroup = RAGDOLL_GROUP;
-            body.collisionFilterMask = cfg.selfCollision ? (1 | RAGDOLL_GROUP) : 1;
+            body.addCollider({ shape: { kind: 'sphere', radius } });
             if (inheritVel) body.velocity.set(inheritVel[0], inheritVel[1], inheritVel[2]);
 
             this._bodies.set(nodeIndex, body);
@@ -307,15 +306,15 @@ export class Ragdoll {
             const parentPos = bonePos.get(ancestorIndex)!;
 
             // Child body sits AT the joint origin -> pivot in child = origin.
-            const pivotChild = new Vec3(0, 0, 0);
+            const pivotChild: [number, number, number] = [0, 0, 0];
             // Pivot in parent local = parentQuat^-1 * (childPos - parentPos).
             vec3.set(rel, childPos[0] - parentPos[0], childPos[1] - parentPos[1], childPos[2] - parentPos[2]);
             quat.set(pq, parentBody.quaternion.x, parentBody.quaternion.y, parentBody.quaternion.z, parentBody.quaternion.w);
             quat.invert(pq, pq);
             vec3.transformQuat(rel, rel, pq);
-            const pivotParent = new Vec3(rel[0], rel[1], rel[2]);
+            const pivotParent: [number, number, number] = [rel[0], rel[1], rel[2]];
 
-            let constraint: PointToPointConstraint;
+            let link: JointSpec;
             if (cfg.jointType === 'coneTwist') {
                 // Cone rest axis = this bone's (child's) world direction, already computed cleanly.
                 vec3.copy(worldAxis, boneDir.get(joint.nodeIndex) || up);
@@ -328,31 +327,30 @@ export class Ragdoll {
                 quat.invert(pq, pq);
                 vec3.transformQuat(axisParent, worldAxis, pq);
 
-                constraint = new ConeTwistConstraint(childBody, parentBody, {
-                    pivotA: pivotChild,
-                    pivotB: pivotParent,
-                    axisA: new Vec3(axisChild[0], axisChild[1], axisChild[2]),
-                    axisB: new Vec3(axisParent[0], axisParent[1], axisParent[2]),
-                    angle: coneRad,
+                link = {
+                    kind: 'coneTwist',
+                    anchorA: pivotChild,
+                    anchorB: pivotParent,
+                    axisA: [axisChild[0], axisChild[1], axisChild[2]],
+                    axisB: [axisParent[0], axisParent[1], axisParent[2]],
+                    coneAngle: coneRad,
                     twistAngle: twistRad,
                     maxForce: cfg.stiffness,
                     collideConnected: false, // connected bones overlap at the joint — never collide them
-                });
+                };
             } else {
-                constraint = new PointToPointConstraint(childBody, pivotChild, parentBody, pivotParent);
-                constraint.collideConnected = false;
+                link = { kind: 'ball', anchorA: pivotChild, anchorB: pivotParent, collideConnected: false };
             }
-            this._constraints.push(constraint);
-            physics.addConstraint(constraint);
+            this._add(childBody, parentBody, link);
         }
 
         // 4) Optional knockback on the root bone(s) (kept bones with no kept ancestor).
         if (cfg.impulse) {
-            const imp = new Vec3(cfg.impulse[0], cfg.impulse[1], cfg.impulse[2]);
+            const imp = [cfg.impulse[0], cfg.impulse[1], cfg.impulse[2]];
             for (const joint of joints) {
                 const body = this._bodies.get(joint.nodeIndex);
                 if (!body) continue;
-                if (nearestKeptAncestor(joint.nodeIndex) === undefined) body.applyImpulse(imp, new Vec3(0, 0, 0));
+                if (nearestKeptAncestor(joint.nodeIndex) === undefined) body.applyImpulse(imp, [0, 0, 0]);
             }
         }
 
@@ -398,39 +396,35 @@ export class Ragdoll {
             return vec3.transformQuat(local, local, modelRot);
         })() : null;
 
-        const bodies: Body[] = [];
+        const bodies: PhysicsBody[] = [];
         const scales: number[] = [];
         for (const lp of layout.parts) {
             const { center, rotation, scale } = placeOf(lp, modelWorld, fbm[lp.joint]);
             scales.push(scale);
-            const body = new Body({
+            const body = new PhysicsBody({
+                name: 'ragdoll',
                 mass: Math.max(0.05, lp.mass * totalMass),
-                position: new Vec3(center[0], center[1], center[2]),
-                quaternion: new Quaternion(rotation[0], rotation[1], rotation[2], rotation[3]),
+                position: center,
+                quaternion: rotation,
                 linearDamping: profile.linearDamping,
                 // Hands and feet are light, short and round: on the ground they rock on their caps for
                 // seconds after everything else is still. Damping their spin costs nothing visible.
                 angularDamping: lp.mass < 0.02 ? Math.max(profile.angularDamping, 0.6) : profile.angularDamping,
+                group: RAGDOLL_GROUP,
+                mask: profile.selfCollision ? (1 | RAGDOLL_GROUP) : 1,
             });
             const r = lp.radius * scale, len = lp.length * scale, depth = lp.depth * scale;
             switch (lp.part.shape) {
                 case 'box':
-                    body.addShape(new Box(new Vec3(r, len / 2, depth / 2)));
+                    body.addCollider({ shape: { kind: 'box', halfExtents: [r, len / 2, depth / 2] } });
                     break;
                 case 'sphere':
-                    body.addShape(new Sphere(r));
+                    body.addCollider({ shape: { kind: 'sphere', radius: r } });
                     break;
-                default: {
-                    // Capsule: a cylinder between two caps (cannon has no capsule). Y along the segment.
-                    const cyl = Math.max(1e-3, len - 2 * r);
-                    body.addShape(new Cylinder(r, r, cyl, 10));
-                    body.addShape(new Sphere(r), new Vec3(0, cyl / 2, 0));
-                    body.addShape(new Sphere(r), new Vec3(0, -cyl / 2, 0));
-                }
+                default:
+                    // Y along the segment; `height` is the straight part between the two cap centres.
+                    body.addCollider({ shape: { kind: 'capsule', radius: r, height: Math.max(1e-3, len - 2 * r), segments: 10 } });
             }
-            body.updateMassProperties();
-            body.collisionFilterGroup = RAGDOLL_GROUP;
-            body.collisionFilterMask = profile.selfCollision ? (1 | RAGDOLL_GROUP) : 1;
 
             // Hand-off: keep moving the way the animation was moving this part.
             if (prev && prev.dt > 1e-4) {
@@ -443,8 +437,8 @@ export class Ragdoll {
                 v[1] = Math.min(v[1], MAX_HANDOFF_RISE);
                 if (Number.isFinite(speed)) body.velocity.set(v[0], v[1], v[2]);
             }
-            if (cfg.inheritVelocity) body.velocity.vadd(new Vec3(cfg.inheritVelocity[0], cfg.inheritVelocity[1], cfg.inheritVelocity[2]), body.velocity);
-            if (push && lp.parent >= 0 && lp.center[1] > rootY) body.velocity.vadd(new Vec3(push[0], push[1], push[2]), body.velocity);
+            if (cfg.inheritVelocity) body.velocity.vadd({ x: cfg.inheritVelocity[0], y: cfg.inheritVelocity[1], z: cfg.inheritVelocity[2] }, body.velocity);
+            if (push && lp.parent >= 0 && lp.center[1] > rootY) body.velocity.vadd({ x: push[0], y: push[1], z: push[2] }, body.velocity);
 
             bodies.push(body);
             this._bodies.set(lp.node, body);
@@ -460,20 +454,20 @@ export class Ragdoll {
                 if (d < bestD) { bestD = d; best = i; }
             });
             if (best >= 0) {
-                const kick = new Vec3(cfg.hitDirection[0], cfg.hitDirection[1], cfg.hitDirection[2]);
+                const kick = { x: cfg.hitDirection[0], y: cfg.hitDirection[1], z: cfg.hitDirection[2] };
                 bodies[best].velocity.vadd(kick, bodies[best].velocity);
                 const parent = layout.parts[best].parent;
-                if (parent >= 0) bodies[parent].velocity.vadd(kick.scale(0.5), bodies[parent].velocity);
+                if (parent >= 0) bodies[parent].velocity.vadd({ x: 0.5 * kick.x, y: 0.5 * kick.y, z: 0.5 * kick.z }, bodies[parent].velocity);
             }
         }
 
         // Joints, in each body's own frame. A body's live orientation is (bone's bind->live turn) * its
         // bind frame, so a bind-space vector's local form is just inverse(bind frame) * vector.
-        const local = (q: quat, v: vec3, origin: vec3 | null, scale: number) => {
+        const local = (q: quat, v: vec3, origin: vec3 | null, scale: number): [number, number, number] => {
             const out = origin ? vec3.sub(vec3.create(), v, origin) : vec3.clone(v);
             if (origin) vec3.scale(out, out, scale);
             vec3.transformQuat(out, out, quat.invert(quat.create(), q));
-            return new Vec3(out[0], out[1], out[2]);
+            return [out[0], out[1], out[2]];
         };
         for (const lp of layout.parts) {
             if (lp.parent < 0) continue;
@@ -484,31 +478,27 @@ export class Ragdoll {
             const pivotB = local(pp.rotation, lp.pivot, pp.center, sB);
             const type = lp.part.joint?.type ?? 'cone';
             if (type === 'fixed') {
-                const lock = new LockConstraint(a, b, { maxForce });
-                lock.collideConnected = false;
-                this._add(lock);
+                this._add(a, b, { kind: 'fixed', maxForce, collideConnected: false });
                 continue;
             }
             if (type === 'hinge' && lp.hingeAxis) {
-                const hinge = new HingeConstraint(a, b, {
-                    pivotA, pivotB,
+                this._add(a, b, {
+                    kind: 'hinge', anchorA: pivotA, anchorB: pivotB,
                     axisA: local(lp.rotation, lp.hingeAxis, null, 1),
                     axisB: local(pp.rotation, lp.hingeAxis, null, 1),
                     maxForce, collideConnected: false,
                 });
-                this._add(hinge);
             }
             // The limit: a cone around the neutral direction (for a hinge, around mid-bend, half the range
             // wide). The twist stays loose for hinges -- the hinge already holds it.
-            const cone = new ConeTwistConstraint(a, b, {
-                pivotA, pivotB,
+            this._add(a, b, {
+                kind: 'coneTwist', anchorA: pivotA, anchorB: pivotB,
                 axisA: local(lp.rotation, lp.childAxis, null, 1),
                 axisB: local(pp.rotation, lp.parentAxis, null, 1),
-                angle: lp.coneAngle,
+                coneAngle: lp.coneAngle,
                 twistAngle: type === 'hinge' ? Math.PI : Math.max(lp.twistAngle, 5 * DEG2RAD),
                 maxForce, collideConnected: false,
             });
-            this._add(cone);
         }
 
         this.solverIterations = Math.max(0, Math.round(profile.solverIterations));
@@ -524,35 +514,31 @@ export class Ragdoll {
      * whatever speed clears it, which threw the corpse metres into the air. One rigid lift for every part,
      * by the deepest penetration found straight under each one, keeps the pose and starts it resting.
      */
-    private _liftOutOfGround(bodies: Body[]): void {
+    private _liftOutOfGround(bodies: PhysicsBody[]): void {
         let lift = 0;
+        const box = [0, 0, 0, 0, 0, 0];
         for (const body of bodies) {
-            body.updateAABB();
-            const lo = body.aabb.lowerBound, hi = body.aabb.upperBound;
+            body.getAabb(box);
+            const loY = box[1], hiY = box[4];
             const x = body.position.x, z = body.position.z;
             let hit = null;
             try {
-                hit = this._physics.raycast([x, hi.y + 1, z], [x, lo.y - 1, z], { groundOnly: true });
+                hit = this._physics.raycast([x, hiY + 1, z], [x, loY - 1, z], { groundOnly: true });
             } catch { hit = null; }
-            if (hit) lift = Math.max(lift, hit.point[1] - lo.y);
+            if (hit) lift = Math.max(lift, hit.point[1] - loY);
         }
         if (lift <= 0) return;
         lift += 0.01;
-        for (const body of bodies) {
-            body.position.y += lift;
-            body.previousPosition.y += lift;
-            body.interpolatedPosition.y += lift;
-            body.updateAABB();
-        }
+        for (const body of bodies) body.position.y += lift;
     }
 
-    private _add(constraint: Constraint): void {
-        this._constraints.push(constraint);
-        this._physics.addConstraint(constraint);
+    private _add(a: PhysicsBody, b: PhysicsBody, joint: JointSpec): void {
+        const handle = this._physics.addJoint(a, b, joint);
+        if (handle !== null) this._joints.push(handle);
     }
 
     /** Underlying bone bodies keyed by GLTF node index. */
-    public get bodies(): Map<number, Body> { return this._bodies; }
+    public get bodies(): Map<number, PhysicsBody> { return this._bodies; }
 
     /** Frozen: at rest, its bodies out of the world (see {@link updateSettle}). */
     public get frozen(): boolean { return this._frozen; }
@@ -595,7 +581,8 @@ export class Ragdoll {
     public freeze(): void {
         if (this._frozen || this._destroyed) return;
         this._frozen = true;
-        for (const constraint of this._constraints) this._physics.removeConstraint(constraint);
+        for (const joint of this._joints) this._physics.removeJoint(joint);
+        this._joints = [];
         for (const body of this._bodies.values()) {
             body.velocity.set(0, 0, 0);
             body.angularVelocity.set(0, 0, 0);
@@ -607,8 +594,8 @@ export class Ragdoll {
     public destroy(): void {
         if (this._destroyed) return;
         this._destroyed = true;
-        for (const constraint of this._constraints) this._physics.removeConstraint(constraint);
-        this._constraints = [];
+        for (const joint of this._joints) this._physics.removeJoint(joint);
+        this._joints = [];
         for (const body of this._bodies.values()) this._physics.removeBody(body);
         this._bodies.clear();
         if (this._ownerBody) { this._ownerBody.collisionFilterMask = this._ownerMask; this._ownerBody = null; }

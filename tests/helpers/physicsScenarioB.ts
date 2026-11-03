@@ -123,7 +123,7 @@ export function runScenarioB(p: PhysicsSystem, mannequin: (() => ModelNode) | nu
     p.addBody(nest);
 
     const ragdollNode = mannequin ? mannequin() : null;
-    let ragdollBodies: Body[] = [];
+    let ragdollBodies: any[] = [];
 
     const tracked: Body[] = [offset, cube, ball, floater, nest];
     const trace: ScenarioBTrace = { states: [], queries: [], events, foliage: [] };
@@ -168,7 +168,7 @@ export function runScenarioB(p: PhysicsSystem, mannequin: (() => ModelNode) | nu
         // The foliage: around the nest, then the camera leaves (every trunk evicted), then returns.
         const camAt = f < 60 || f >= 120 ? [-17, 2, -17] : [100, 2, 100];
         camera.worldPosition = camAt;
-        field.update((p as any)._cannon.raw, layers, camAt as any, [0, 0, 0], (p as any)._defaultMaterial, settings);
+        field.update(p, layers, camAt as any, [0, 0, 0], settings);
         trace.foliage.push(field.activeCount);
 
         // A shove, and a teleport of the rotated cube.
@@ -184,6 +184,6 @@ export function runScenarioB(p: PhysicsSystem, mannequin: (() => ModelNode) | nu
 
         p.endFrame(dt);
     }
-    field.dispose((p as any)._cannon.raw);
+    field.dispose(p);
     return trace;
 }

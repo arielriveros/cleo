@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { PhysicsBody } from '../src/physics/physicsBody';
 import { Body, Sphere, Vec3 } from 'cannon-es';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
 import { Ragdoll } from '../src/physics/ragdoll';
@@ -87,16 +88,16 @@ describe('ragdoll lifetime', () => {
     /** A stand-in ragdoll: its bodies are in the world, the node is whatever the test makes of it. */
     function fakeRagdoll(p: PhysicsSystem, node: any) {
         const r = Object.create(Ragdoll.prototype);
-        const body = new Body({ mass: 1, shape: new Sphere(0.1) });
+        const body = new PhysicsBody({ mass: 1 }).addCollider({ shape: { kind: 'sphere', radius: 0.1 } });
         p.addBody(body);
         Object.assign(r, {
-            _physics: p, _animator: null, _bodies: new Map([[0, body]]), _constraints: [],
+            _physics: p, _animator: null, _bodies: new Map([[0, body]]), _joints: [],
             node, _stillFor: 0, _frozen: false, _destroyed: false,
         });
         (p as any)._ragdolls.push(r);
         return { r, body };
     }
-    const inWorld = (p: PhysicsSystem, b: Body) => (p as any)._cannon.raw.bodies.includes(b);
+    const inWorld = (p: PhysicsSystem, b: PhysicsBody) => p.hasBody(b);
 
     it('ends when its model leaves the scene, taking its bodies out of the world', () => {
         const p = physics();

@@ -3,7 +3,8 @@
 // only flagged stale from here, which keeps the model testable and worker-safe.
 
 // Aliased because `Material` is not imported here but the physics one reads better named for what it is.
-import { Body, Box, ConvexPolyhedron, Vec3, World, Material as PhysicsMaterial } from 'cannon-es';
+import { PhysicsBody } from '../../physics/physicsBody';
+import type { PhysicsSystem } from '../../physics/physicsSystem';
 import { vec3 } from 'gl-matrix';
 import { Logger } from '../../core/logger';
 import {
@@ -58,9 +59,8 @@ export class Tilemap {
     public collisionDepth: number = 0.5;
 
     private _origin: vec3 = vec3.create();
-    private _world: World | null = null;
-    private _physicsMaterial: PhysicsMaterial | null = null;
-    private _bodies: Map<number, Body[]> = new Map();
+    private _physics: PhysicsSystem | null = null;
+    private _bodies: Map<number, PhysicsBody[]> = new Map();
     private _dirtyBodies: Set<number> = new Set();
     private _lastBodyBuild = 0;
     private _registered = false;
@@ -420,14 +420,10 @@ export class Tilemap {
         for (const key of this._bodies.keys()) this._dirtyBodies.add(key);
     }
 
-    /**
-     * Create or refresh the static colliders and keep them registered with the world. `material` is
-     * required even with no friction settings: cannon honours a ContactMaterial only when BOTH bodies carry one.
-     */
-    public ensureRegistered(world: World, material?: PhysicsMaterial): void {
+    /** Create or refresh the static colliders and keep them in `physics`' world. They collide as the default surface. */
+    public ensureRegistered(physics: PhysicsSystem): void {
         if (this._disposed) return;
-        this._world = world;
-        if (material) this._physicsMaterial = material;
+        this._physics = physics;
 
         if (!this._registered) {
             this._registered = true;
@@ -437,7 +433,7 @@ export class Tilemap {
         }
         // Re-add anything a world reset dropped.
         for (const bodies of this._bodies.values())
-            for (const body of bodies) if (world.bodies.indexOf(body) === -1) world.addBody(body);
+            for (const body of bodies) if (!physics.hasBody(body)) this._add(physics, body);
 
         // Throttled so a continuous paint drag in play mode can't rebuild colliders every frame.
         if (this._dirtyBodies.size > 0 && Date.now() - this._lastBodyBuild > BODY_REBUILD_MS)
@@ -451,16 +447,22 @@ export class Tilemap {
         return n;
     }
 
+    /** Add a collider, which a malformed custom tile outline can make the physics backend refuse. */
+    private _add(physics: PhysicsSystem, body: PhysicsBody): void {
+        try { physics.addBody(body); }
+        catch (e) { Logger.error((e as Error).toString(), 'Tilemap'); }
+    }
+
     private _rebuildDirtyBodies(): void {
-        const world = this._world;
-        if (!world) return;
+        const physics = this._physics;
+        if (!physics) return;
         for (const key of this._dirtyBodies) {
             const existing = this._bodies.get(key);
-            if (existing) { for (const b of existing) world.removeBody(b); this._bodies.delete(key); }
+            if (existing) { for (const b of existing) physics.removeBody(b); this._bodies.delete(key); }
             const built = this._buildChunkBodies(key);
             if (built.length > 0) {
                 this._bodies.set(key, built);
-                for (const b of built) world.addBody(b);
+                for (const b of built) this._add(physics, b);
             }
         }
         this._dirtyBodies.clear();
@@ -505,12 +507,11 @@ export class Tilemap {
 
     // Bodies for one chunk. Square grids greedy-merge into boxes; isometric and hexagonal ones emit one
     // convex prism per solid cell, since merging those needs outline extraction and decomposition.
-    private _buildChunkBodies(key: number): Body[] {
+    private _buildChunkBodies(key: number): PhysicsBody[] {
         const cx = Math.floor(key / 0x10000) - 0x8000;
         const cy = (key % 0x10000) - 0x8000;
         const { solid, shaped } = this._chunkSolids(cx, cy);
-        const bodies: Body[] = [];
-        const mat = this._physicsMaterial ?? undefined;
+        const bodies: PhysicsBody[] = [];
         const depth = Math.max(0.01, this.collisionDepth);
         const g = this._grid;
 
@@ -520,36 +521,33 @@ export class Tilemap {
                 const r0 = cy * CHUNK_SIZE + box.r0, r1 = cy * CHUNK_SIZE + box.r1;
                 const x0 = c0 * g.cellWidth, x1 = (c1 + 1) * g.cellWidth;
                 const y0 = -(r1 + 1) * g.cellHeight, y1 = -r0 * g.cellHeight;
-                const body = new Body({ mass: 0, material: mat });
-                body.addShape(new Box(new Vec3((x1 - x0) / 2, (y1 - y0) / 2, depth)));
-                body.position.set(
-                    this._origin[0] + (x0 + x1) / 2,
-                    this._origin[1] + (y0 + y1) / 2,
-                    this._origin[2],
-                );
+                const body = new PhysicsBody({
+                    name: 'tilemap',
+                    position: [this._origin[0] + (x0 + x1) / 2, this._origin[1] + (y0 + y1) / 2, this._origin[2]],
+                });
+                body.addCollider({ shape: { kind: 'box', halfExtents: [(x1 - x0) / 2, (y1 - y0) / 2, depth] } });
                 bodies.push(body);
             }
         } else {
             for (let lr = 0; lr < CHUNK_SIZE; lr++) {
                 for (let lc = 0; lc < CHUNK_SIZE; lc++) {
                     if (!solid[lr * CHUNK_SIZE + lc]) continue;
-                    const body = this._prismBody(cx * CHUNK_SIZE + lc, cy * CHUNK_SIZE + lr, null, depth, mat);
+                    const body = this._prismBody(cx * CHUNK_SIZE + lc, cy * CHUNK_SIZE + lr, null, depth);
                     if (body) bodies.push(body);
                 }
             }
         }
 
         for (const s of shaped) {
-            const body = this._prismBody(s.col, s.row, s.shape, depth, mat);
+            const body = this._prismBody(s.col, s.row, s.shape, depth);
             if (body) bodies.push(body);
         }
         return bodies;
     }
 
     // A static convex prism for one cell, its footprint extruded along Z. Built around the cell's
-    // CENTRE with the body carrying the offset — cannon validates face planes against the origin.
-    private _prismBody(col: number, row: number, shape: number[] | null, depth: number,
-                       mat: PhysicsMaterial | undefined): Body | null {
+    // CENTRE with the body carrying the offset — a backend may validate face planes against the origin.
+    private _prismBody(col: number, row: number, shape: number[] | null, depth: number): PhysicsBody | null {
         const centre = cellToWorld(this._grid, col, row);
         let poly: number[];
         if (shape) {
@@ -566,9 +564,9 @@ export class Tilemap {
         const n = poly.length / 2;
         if (n < 3) return null;
 
-        const vertices: Vec3[] = [];
-        for (let i = 0; i < n; i++) vertices.push(new Vec3(poly[i * 2], poly[i * 2 + 1], depth));
-        for (let i = 0; i < n; i++) vertices.push(new Vec3(poly[i * 2], poly[i * 2 + 1], -depth));
+        const vertices: [number, number, number][] = [];
+        for (let i = 0; i < n; i++) vertices.push([poly[i * 2], poly[i * 2 + 1], depth]);
+        for (let i = 0; i < n; i++) vertices.push([poly[i * 2], poly[i * 2 + 1], -depth]);
 
         const faces: number[][] = [];
         faces.push(Array.from({ length: n }, (_, i) => i));                  // front, CCW from +Z
@@ -578,29 +576,23 @@ export class Tilemap {
             faces.push([i, n + i, n + j, j]);
         }
 
-        try {
-            const body = new Body({ mass: 0, material: mat });
-            body.addShape(new ConvexPolyhedron({ vertices, faces }));
-            body.position.set(this._origin[0] + centre[0], this._origin[1] + centre[1], this._origin[2]);
-            return body;
-        } catch (e) {
-            Logger.error((e as Error).toString(), 'Tilemap');
-            return null;
-        }
+        const body = new PhysicsBody({ name: 'tilemap', position: [this._origin[0] + centre[0], this._origin[1] + centre[1], this._origin[2]] });
+        body.addCollider({ shape: { kind: 'convex', vertices, faces } });
+        return body;
     }
 
     /** Release every GPU and physics resource. Idempotent — PhysicsSystem may call it repeatedly. */
-    public dispose(world?: World): void {
+    public dispose(physics?: PhysicsSystem): void {
         if (this._disposed) return;
         this._disposed = true;
-        const w = world || this._world;
+        const p = physics || this._physics;
         for (const bodies of this._bodies.values())
-            for (const body of bodies) { if (w) w.removeBody(body); }
+            for (const body of bodies) { if (p) p.removeBody(body); }
         this._bodies.clear();
         this._dirtyBodies.clear();
         for (const layer of this._layers)
             for (const chunk of layer.chunks.values()) { chunk.mesh?.dispose(); chunk.mesh = null; }
-        this._world = null;
+        this._physics = null;
         this._registered = false;
     }
 

@@ -1,12 +1,14 @@
-import { Body, World, Vec3, Material as PhysicsMaterial } from 'cannon-es';
 import { vec3 } from 'gl-matrix';
 import { FoliageCollision } from '../graphics/material';
 import { Shape } from '../physics/shape';
+import { PhysicsBody } from '../physics/physicsBody';
+import { quatFromEuler } from '../physics/pal/math';
+import type { PhysicsSystem } from '../physics/physicsSystem';
 import { FoliageLayer } from './foliage';
 import { foliageColliderPose } from './foliageColliderPose';
 
 // Re-exported: the pose lives in a module of its own so the navmesh baker can carve trunks without
-// pulling cannon in with it.
+// pulling physics in with it.
 export { foliageColliderPose };
 
 /** Activation policy for a terrain's pooled foliage colliders. */
@@ -31,18 +33,23 @@ const REFRESH_INTERVAL_MS = 250;
 /** `see`: the layer's `cameraDither`, stamped on the body (a pooled body may serve any layer of its shape). */
 interface Wanted { sig: string; x: number; y: number; z: number; yaw: number; scale: number; d2: number; see: boolean }
 
+/** The pool bucket each body was built for. */
+const signatures = new WeakMap<PhysicsBody, string>();
+/** Scratch for a body's yaw rotation. */
+const yawRotation = [0, 0, 0, 1];
+
 /**
  * Static physics proxies for the collidable foliage instances near the camera, materialised only inside
  * an activation disc and recycled as it slides. Bodies are pooled by SHAPE SIGNATURE (post-scale
- * dimensions, rounded), not by instance, so a recycled body only ever changes position — nothing mutates
- * `body.shapes` or recomputes mass properties.
+ * dimensions, rounded), not by instance, so a recycled body only ever changes position — nothing rebuilds
+ * its shapes or recomputes mass properties: an evicted body stays built in the world, disabled.
  */
 export class FoliageColliderField {
-    private _world: World | null = null;
+    private _physics: PhysicsSystem | null = null;
     /** Instance key -> the body currently representing it in the world. */
-    private _active = new Map<string, Body>();
+    private _active = new Map<string, PhysicsBody>();
     /** Shape signature -> bodies evicted from the world, ready to be re-placed. */
-    private _free = new Map<string, Body[]>();
+    private _free = new Map<string, PhysicsBody[]>();
     /** Layer KEY -> the layer.version the active set was computed against. Keyed by the stable
      *  identity, not the name: renaming a rule is not a reason to rebuild every collider. */
     private _versions = new Map<string, number>();
@@ -54,17 +61,16 @@ export class FoliageColliderField {
     public get activeCount(): number { return this._active.size; }
 
     public update(
-        world: World,
+        physics: PhysicsSystem,
         layers: FoliageLayer[],
         camPos: vec3 | null,
         origin: vec3,
-        material: PhysicsMaterial | null,
         settings: FoliageColliderSettings,
     ): void {
-        this._world = world;
+        this._physics = physics;
 
         if (!settings.enabled || !camPos) {
-            if (this._active.size > 0) this._deactivateAll(world);
+            if (this._active.size > 0) this._deactivateAll(physics);
             return;
         }
 
@@ -98,8 +104,8 @@ export class FoliageColliderField {
         // 3. Evict what left the set, back into the pool keyed by the shape it already carries.
         for (const [key, body] of this._active) {
             if (keep.has(key)) continue;
-            world.removeBody(body);
-            const sig = (body as any).__foliageSig as string;
+            physics.removeBody(body, true);
+            const sig = signatures.get(body)!;
             let bucket = this._free.get(sig);
             if (!bucket) { bucket = []; this._free.set(sig, bucket); }
             bucket.push(body);
@@ -110,30 +116,29 @@ export class FoliageColliderField {
         for (const [key, w] of keep) {
             const active = this._active.get(key);
             // Read by the camera probe (cameraRayFilter): a 'dither' rig sees through this rule's trees.
-            if (active) { (active as any).cameraDither = w.see; continue; }
-            const body = this._free.get(w.sig)?.pop() ?? buildBody(w.sig, layerCollisionFor(layers, key), w.scale, material);
+            if (active) { active.cameraDither = w.see; continue; }
+            const body = this._free.get(w.sig)?.pop() ?? buildBody(w.sig, layerCollisionFor(layers, key), w.scale);
             if (!body) continue;
             body.position.set(w.x, w.y, w.z);
-            body.quaternion.setFromEuler(0, w.yaw, 0);
-            // A pooled body keeps the box it had where it was last used; cannon only re-measures what it moves.
-            body.aabbNeedsUpdate = true;
-            (body as any).cameraDither = w.see;
-            world.addBody(body);
+            quatFromEuler(0, w.yaw, 0, yawRotation);
+            body.quaternion.set(yawRotation[0], yawRotation[1], yawRotation[2], yawRotation[3]);
+            body.cameraDither = w.see;
+            physics.addBody(body);
             this._active.set(key, body);
         }
     }
 
     /** Remove every body this field owns from the world and forget the pool. Safe to call twice. */
-    public dispose(world?: World): void {
-        const w = world || this._world;
-        if (w) {
-            for (const body of this._active.values()) w.removeBody(body);
-            for (const bucket of this._free.values()) for (const body of bucket) w.removeBody(body);
+    public dispose(physics?: PhysicsSystem): void {
+        const p = physics || this._physics;
+        if (p) {
+            for (const body of this._active.values()) p.removeBody(body);
+            for (const bucket of this._free.values()) for (const body of bucket) p.removeBody(body);
         }
         this._active.clear();
         this._free.clear();
         this._versions.clear();
-        this._world = null;
+        this._physics = null;
     }
 
     /** Whether anything happened that could change which instances should be active. */
@@ -148,10 +153,10 @@ export class FoliageColliderField {
         return false;
     }
 
-    private _deactivateAll(world: World): void {
+    private _deactivateAll(physics: PhysicsSystem): void {
         for (const [, body] of this._active) {
-            world.removeBody(body);
-            const sig = (body as any).__foliageSig as string;
+            physics.removeBody(body, true);
+            const sig = signatures.get(body)!;
             let bucket = this._free.get(sig);
             if (!bucket) { bucket = []; this._free.set(sig, bucket); }
             bucket.push(body);
@@ -180,22 +185,22 @@ function layerCollisionFor(layers: FoliageLayer[], key: string): FoliageCollisio
     return null;
 }
 
-/** The static body for one instance's collider (exported for tests). */
-export function buildFoliageColliderBody(col: FoliageCollision, scale: number, material: PhysicsMaterial | null = null): Body {
-    const body = new Body({ mass: 0, material: material ?? undefined, type: Body.STATIC });
+/** The static body for one instance's collider (exported for tests). It collides as the default surface. */
+export function buildFoliageColliderBody(col: FoliageCollision, scale: number): PhysicsBody {
+    const body = new PhysicsBody({ name: 'foliage', type: 'static' });
     const pose = foliageColliderPose(col, scale);
-    const at = new Vec3(0, pose.offsetY, 0);
-    if (pose.shape === 'sphere') body.addShape(Shape.Sphere(pose.size[0] / 2).cShape, at);
-    else if (pose.shape === 'box') body.addShape(Shape.Box(pose.size[0], pose.size[1], pose.size[2]).cShape, at);
-    // cannon-es's Cylinder is already Y-up (its vertices sit at ±height/2 on Y), like the node colliders
-    // in physics/shape.ts. The -90° X turn this used to add laid every foliage trunk on its side.
-    else body.addShape(Shape.Cylinder(pose.size[0] / 2, pose.size[0] / 2, pose.size[1], 8).cShape, at);
+    const offset: [number, number, number] = [0, pose.offsetY, 0];
+    if (pose.shape === 'sphere') body.addCollider({ shape: Shape.Sphere(pose.size[0] / 2).desc, offset });
+    else if (pose.shape === 'box') body.addCollider({ shape: Shape.Box(pose.size[0], pose.size[1], pose.size[2]).desc, offset });
+    // A cylinder is Y-up (like the node colliders in physics/shape.ts). The -90° X turn this used to add
+    // laid every foliage trunk on its side.
+    else body.addCollider({ shape: Shape.Cylinder(pose.size[0] / 2, pose.size[0] / 2, pose.size[1], 8).desc, offset });
     return body;
 }
 
-function buildBody(sig: string, col: FoliageCollision | null, scale: number, material: PhysicsMaterial | null): Body | null {
+function buildBody(sig: string, col: FoliageCollision | null, scale: number): PhysicsBody | null {
     if (!col) return null;
-    const body = buildFoliageColliderBody(col, scale, material);
-    (body as any).__foliageSig = sig;
+    const body = buildFoliageColliderBody(col, scale);
+    signatures.set(body, sig);
     return body;
 }

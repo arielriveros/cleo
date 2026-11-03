@@ -31,15 +31,27 @@ export interface PhysicsWorld {
     // ---- bodies ----
 
     createBody(desc: BodyDesc): BodyHandle;
-    /** Remove a body and drop any queued event that involves it. */
+    /** Remove a body for good and drop any queued event that involves it. Its handle is dead after. */
     destroyBody(body: BodyHandle): void;
+    /** Whether the handle names a body of this world, enabled or not. */
     hasBody(body: BodyHandle): boolean;
-    /** Every body, in the world's own order (the order its events and contacts follow). */
+    /**
+     * Take a body out of the simulation (`false`) or put it back (`true`), keeping its handle, shapes and
+     * state: a disabled body is stepped, contacted, queried and reported by nothing, but can still be read and
+     * written. What a pool does with the bodies it is not using. Disabling drops its queued events; enabling
+     * puts it last in the world's order.
+     */
+    setEnabled(body: BodyHandle, enabled: boolean): void;
+    isEnabled(body: BodyHandle): boolean;
+    /** Every enabled body, in the world's own order (the order its events and contacts follow). */
     bodies(): readonly BodyHandle[];
+    /** Enabled bodies. */
     readonly bodyCount: number;
 
     /** Replace a body's colliders (and re-derive its mass properties). */
     setColliders(body: BodyHandle, colliders: readonly ColliderDesc[]): void;
+    /** The collision layers a body is in and the ones it collides with (bit masks, see BodyDesc). */
+    setCollisionFilter(body: BodyHandle, group: number, mask: number): void;
     getMassProperties(body: BodyHandle, out: MassProperties): MassProperties;
 
     /** Node-origin position [3] and rotation [4] into `out` (7 numbers). */

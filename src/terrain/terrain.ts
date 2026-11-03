@@ -1,5 +1,5 @@
-// Aliased: `Material` in this file already means the graphics material imported below.
-import { Body, Heightfield, World, Material as PhysicsMaterial } from 'cannon-es';
+import { PhysicsBody } from '../physics/physicsBody';
+import type { PhysicsSystem } from '../physics/physicsSystem';
 import { vec3 } from 'gl-matrix';
 import { v4 as uuidv4 } from 'uuid';
 import { Geometry } from '../core/geometry';
@@ -210,10 +210,8 @@ export class Terrain {
     private _chunks: TerrainChunk[] = [];
     private _material: Material;
 
-    private _world: World | null = null;
-    private _body: Body | null = null;
-    /** Surface the heightfield collides as; supplied by PhysicsSystem. See ensureRegistered. */
-    private _physicsMaterial: PhysicsMaterial | null = null;
+    private _physics: PhysicsSystem | null = null;
+    private _body: PhysicsBody | null = null;
     private _bodyDirty = false;
     private _lastBodyBuild = 0;       // throttles heightfield rebuilds during a sculpt drag
     private _origin = vec3.create();  // node world position, terrain centre
@@ -1329,32 +1327,28 @@ export class Terrain {
         return data;
     }
 
+    /** The static heightfield collider, laid out the physics layer's way: from its corner, i along +X, j along -Z. */
+    private _makeBody(): PhysicsBody {
+        const half = this._cfg.size / 2;
+        const body = new PhysicsBody({ name: 'terrain', position: [this._origin[0] - half, this._origin[1], this._origin[2] + half] });
+        body.addCollider({ shape: { kind: 'heightfield', heights: this._heightfieldData(), elementSize: this._element } });
+        return body;
+    }
+
     /**
-     * Create/refresh the static Heightfield body and register it with the world (self-heals).
-     * @param material The surface the terrain collides as. Required even though terrain has no friction
-     *                 settings of its own: cannon only honors a ContactMaterial when BOTH bodies carry a
-     *                 material. Kept on the instance so a sculpt rebuild re-applies it.
+     * Create/refresh the static heightfield body and keep it in `physics`' world (self-heals: a world that
+     * was cleared gets it back). It collides as the default surface.
      */
-    public ensureRegistered(world: World, material?: PhysicsMaterial): void {
-        this._world = world;
-        if (material) this._physicsMaterial = material;
+    public ensureRegistered(physics: PhysicsSystem): void {
+        this._physics = physics;
         if (!this._body) {
-            const shape = new Heightfield(this._heightfieldData(), { elementSize: this._element });
-            const body = new Body({ mass: 0, material: this._physicsMaterial ?? undefined });
-            body.addShape(shape);
-            body.quaternion.setFromEuler(-Math.PI / 2, 0, 0); // field XY (Z up) -> world XZ (Y up)
-            const half = this._cfg.size / 2;
-            body.position.set(this._origin[0] - half, this._origin[1], this._origin[2] + half);
-            this._body = body;
-            world.addBody(body);
+            this._body = this._makeBody();
+            physics.addBody(this._body);
             this._bodyDirty = false;
             this._lastBodyBuild = Date.now();
             return;
         }
-        if (this._physicsMaterial && this._body.material !== this._physicsMaterial) this._body.material = this._physicsMaterial;
-        // cannon stamps `body.world` on add and clears it on remove: an O(1) membership test, where
-        // `world.bodies.indexOf` scanned every body in the world once per landscape per frame.
-        if ((this._body as any).world !== world) world.addBody(this._body);
+        if (!physics.hasBody(this._body)) physics.addBody(this._body);
         // Rebuild at most a few times per second so a continuous sculpt drag doesn't rebuild every frame.
         if (this._bodyDirty && Date.now() - this._lastBodyBuild > 200) this._rebuildBody();
     }
@@ -1363,28 +1357,21 @@ export class Terrain {
      * Refresh the pooled static colliders around `camPos` for collidable foliage. Driven once per step by
      * PhysicsSystem, so colliders only exist in play mode, never while authoring.
      */
-    public updateFoliageColliders(world: World, camPos: vec3 | null, material?: PhysicsMaterial): void {
+    public updateFoliageColliders(physics: PhysicsSystem, camPos: vec3 | null): void {
         if (!this.foliageColliders.enabled && !this._colliders) return;
         if (!this._colliders) this._colliders = new FoliageColliderField();
-        this._colliders.update(world, this._foliage, camPos, this._origin,
-            material ?? this._physicsMaterial, this.foliageColliders);
+        this._colliders.update(physics, this._foliage, camPos, this._origin, this.foliageColliders);
     }
 
     /** Bodies the foliage collider pool currently has in the world (0 when disabled or in the editor). */
     public get foliageColliderCount(): number { return this._colliders?.activeCount ?? 0; }
 
     private _rebuildBody(): void {
-        if (!this._world || !this._body) return;
+        if (!this._physics || !this._body) return;
         try {
-            this._world.removeBody(this._body);
-            const shape = new Heightfield(this._heightfieldData(), { elementSize: this._element });
-            const body = new Body({ mass: 0, material: this._physicsMaterial ?? undefined });
-            body.addShape(shape);
-            body.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-            const half = this._cfg.size / 2;
-            body.position.set(this._origin[0] - half, this._origin[1], this._origin[2] + half);
-            this._body = body;
-            this._world.addBody(body);
+            this._physics.removeBody(this._body);
+            this._body = this._makeBody();
+            this._physics.addBody(this._body);
             this._bodyDirty = false;
             this._lastBodyBuild = Date.now();
         } catch (e) {
@@ -1396,13 +1383,13 @@ export class Terrain {
      * Release every GPU/physics resource this terrain owns. Must stay idempotent: PhysicsSystem calls it
      * once per frame for a landscape flagged `markForRemoval` until the node leaves the scene.
      */
-    public dispose(world?: World): void {
+    public dispose(physics?: PhysicsSystem): void {
         if (this._disposed) return;
         this._disposed = true;
-        const w = world || this._world;
-        if (w && this._body) w.removeBody(this._body);
+        const p = physics || this._physics;
+        if (p && this._body) p.removeBody(this._body);
         this._body = null;
-        this._colliders?.dispose(w ?? undefined);
+        this._colliders?.dispose(p ?? undefined);
         this._colliders = null;
         // A disposed layer's merged instance buffers reach the renderer through the module-level
         // orphan queue: the foliage pass only walks LIVE landscapes, so nothing else can free them.
@@ -1413,7 +1400,7 @@ export class Terrain {
         this._chunks = [];
         // The stack's mask texture and layer arrays are exclusively ours, so their GPU objects go too.
         this._stack.dispose();
-        this._world = null;
+        this._physics = null;
     }
 
     // --- serialization ------------------------------------------------------------------------

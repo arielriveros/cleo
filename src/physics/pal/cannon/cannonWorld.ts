@@ -54,6 +54,8 @@ export class CannonWorld implements PhysicsWorld {
     /** Queued events: [kind, a, b] per event. */
     private _events: number[] = [];
     private _bodyList: BodyHandle[] | null = null;
+    /** Bodies taken out of the world but kept (setEnabled false): readable and writable, not simulated. */
+    private readonly _disabled = new Map<number, Body>();
     private readonly _joints = new Map<number, Constraint>();
     private _nextJoint = 1;
     private readonly _profile: StepProfile = { broadphaseMs: 0, narrowphaseMs: 0, solveMs: 0, integrateMs: 0 };
@@ -120,7 +122,8 @@ export class CannonWorld implements PhysicsWorld {
     }
 
     public destroyBody(h: BodyHandle): void {
-        const body = this.bodyOf(h);
+        if (this._disabled.delete(h)) return;
+        const body = this.raw.getBodyById(h);
         if (!body) return;
         this.raw.removeBody(body);
         this._dropEvents(h);
@@ -128,11 +131,34 @@ export class CannonWorld implements PhysicsWorld {
 
     public hasBody(h: BodyHandle): boolean { return this.bodyOf(h) !== undefined; }
 
+    public setEnabled(h: BodyHandle, enabled: boolean): void {
+        if (enabled) {
+            const body = this._disabled.get(h);
+            if (!body) return;
+            this._disabled.delete(h);
+            this.raw.addBody(body);
+        } else {
+            const body = this.raw.getBodyById(h);
+            if (!body) return;
+            this.raw.removeBody(body);
+            this._disabled.set(h, body);
+            this._dropEvents(h);
+        }
+    }
+
+    public isEnabled(h: BodyHandle): boolean { return this.raw.getBodyById(h) !== undefined; }
+
     public bodies(): readonly BodyHandle[] {
         return this._bodyList ??= this.raw.bodies.map(b => b.id as BodyHandle);
     }
 
     public get bodyCount(): number { return this.raw.bodies.length; }
+
+    public setCollisionFilter(h: BodyHandle, group: number, mask: number): void {
+        const body = this._body(h);
+        body.collisionFilterGroup = group;
+        body.collisionFilterMask = mask;
+    }
 
     public setColliders(h: BodyHandle, colliders: readonly ColliderDesc[]): void {
         const body = this._body(h);
@@ -368,6 +394,7 @@ export class CannonWorld implements PhysicsWorld {
         // Removing bodies is subtle enough to live in its own module — see clearWorld for the two traps
         // (splice-while-iterating, and truncating world.bodies behind the broadphase's back).
         clearWorld(this.raw);
+        this._disabled.clear();
         this._events = [];
         this._version++;
     }
@@ -379,8 +406,8 @@ export class CannonWorld implements PhysicsWorld {
 
     // ---- cannon only: for engine code whose bodies are still cannon bodies ----
 
-    /** The cannon body behind a handle (undefined once it has left the world). */
-    public bodyOf(h: BodyHandle): Body | undefined { return this.raw.getBodyById(h); }
+    /** The cannon body behind a handle, enabled or not (undefined once destroyed). */
+    public bodyOf(h: BodyHandle): Body | undefined { return this.raw.getBodyById(h) ?? this._disabled.get(h); }
 
     /**
      * Put a body the engine built itself into the world, giving it a surface first if it has none: one
@@ -406,13 +433,16 @@ export class CannonWorld implements PhysicsWorld {
         return this.materials.materialFor(friction, restitution);
     }
 
+    /** Something wrote the cannon bodies directly (the worker's step landing): caches of their state must re-read. */
+    public touch(): void { this._version++; }
+
     /** Bodies the broadphase will iterate next step: `bodyCount` in a healthy world (see worldTeardown). */
     public broadphaseBodyCount(): number { return broadphaseBodyCount(this.raw); }
 
     // ---- internals ----
 
     private _body(h: BodyHandle): Body {
-        const body = this.raw.getBodyById(h);
+        const body = this.bodyOf(h);
         if (!body) throw new Error(`physics: no body ${h} in this world`);
         return body;
     }
