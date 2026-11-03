@@ -119,22 +119,39 @@ bit for bit.
 | A test keeps `cannon-es` inside `src/physics/pal/cannon/`; scripts are typed without it; the project chooses its backend | Done |
 | A Rapier backend | Next, after the checks below |
 
-## What a Rapier backend needs to settle
+## Rapier: what the spike found
 
-Questions to answer in a spike before the Rapier backend is written:
+Measured on `@dimforge/rapier3d-compat` 0.21.0, the package the engine uses: its WASM is embedded in the
+JavaScript (base64), the only form that runs in a published game, which is a single file on `file://` with
+its physics worker inlined. The bundle is about 4.3 MB.
 
-- Does a manually slept body stay asleep with automatic sleep off? The engine freezes far bodies that way.
-- Do queries work on a world that is never stepped (the main thread's world while the worker steps)?
-- Copying for the worker: Rapier can snapshot its whole world. Is restoring one fast enough to send on
-  every membership change, or does its mirror need per-body diffs like cannon's?
-- Damping: cannon's is `v *= (1 − d)^dt`, Rapier's `v *= 1 / (1 + d·dt)`. Convert.
-- Collision groups are 16 + 16 bits in Rapier (cannon 32): check the ragdoll and hitbox layers fit.
-- Rapier's heightfield is column-major and centred; the layer's starts at its origin.
-- Rapier's joints have no `maxForce`, and a cone limit means a generic joint.
-- `collisionResponse = false` maps to empty solver groups, which keeps contacts for grounding.
-- `forEachContact` comes from `contactPairsWith` over the moving bodies.
-- Only `@dimforge/rapier3d-compat` (WASM embedded in the JS) works in a published game, which runs from
-  `file://` with its physics worker inlined.
+- **Sleep.** With automatic sleep off (`setCanSleep(false)`), a body put to sleep by hand stays asleep,
+  `setLinvel(v, false)` does not wake it, and a body that hits it does. That is the engine's freeze.
+- **Queries see the last step.** Ray and shape queries run against a tree Rapier refits inside `step`. A
+  body added, moved or turned since is invisible to them. Two zero-length steps refit it and change no
+  position or velocity bit. The backend runs them before a query when something changed.
+- **Events.** Collision events are per collider, so the backend counts collider pairs per body pair (begin
+  on the first, end on the last). A begin raised in a zero-length step is not raised again by the next real
+  step, so those events are kept. A sensor on a fixed body sees a kinematic one only with
+  `KINEMATIC_FIXED` among its active collision types.
+- **Contacts.** `contactPairsWith(collider)` lists a collider's pairs, and `contactPair(a, b)` gives the
+  manifold. Its normal points from the pair's first collider to its second, and `flipped` says the pair was
+  asked the other way round.
+- **Heightfield.** The heights are column-major: `heights[col * (nrows + 1) + row]`, where rows run along +Z
+  and columns along +X. It is centred on the collider and scaled to its full size. The layer's field starts
+  at its corner and runs along +X and −Z, so the backend transposes it, flips Z, and offsets the collider by
+  half its size.
+- **Forces persist** until `resetForces`, so the backend resets them after every step: a force lasts one
+  substep, as on cannon.
+- **Damping** is `v *= 1 / (1 + c·dt)`. cannon's `(1 − d)^dt` becomes `c = −ln(1 − d)`.
+- **Determinism.** Two worlds built the same way step bit for bit alike, and `takeSnapshot` round-trips.
+- **Precision.** Single (f32): conformance tolerances follow `capabilities.precision`.
+- **Collision groups** are 16 + 16 bits (membership << 16 | filter). The engine's layers stop at `1 << 10`.
+  A ray with groups `0xFFFFFFFF` skips a collider whose filter is 0, as a cannon ray skips a body whose mask
+  is 0.
+- **Joints.** Fixed, spherical, revolute, and a spherical joint with per-axis angular limits for the cone
+  (swing on Y and Z, twist on X: a box rather than a cone, so `coneLimit: 'approximate'`). No `maxForce`.
+- **Timings** read 0 unless `profilerEnabled` is set.
 
 ## What a Jolt backend needs to settle
 
