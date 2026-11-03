@@ -138,8 +138,8 @@ export class PhysicsSystem {
   /** The world on its backend (see pal/). Every simulation and query goes through it. */
   private _world!: PhysicsWorld;
   /**
-   * The same world as cannon's, for what still hands cannon objects around: the bodies themselves (RigidBody
-   * and Trigger are cannon bodies), constraints, and the terrain/tilemap/foliage colliders.
+   * The same world as cannon's, for the one thing that still replicates cannon objects: the physics worker
+   * (executor/workerExecutor.ts), which mirrors the cannon world shape for shape.
    */
   private _cannon!: CannonWorld;
   private _gravity: number[];
