@@ -169,6 +169,8 @@ export class CleoEngine {
     try {
       if (this._ready) return;
       const report = options.onProgress;
+      // The physics backend's library, if it has one to load (a WASM engine), loads while the GPU comes up.
+      const physicsLoaded = this._physicsSystem.load();
 
       // Before InputSystem, which binds its listeners to the canvas, and before anything else touches
       // the GPU.
@@ -186,6 +188,7 @@ export class CleoEngine {
       await this.onPreInitialize();
 
       report?.('physics', 0, 1);
+      await physicsLoaded;
       this._physicsSystem.initialize();
       const physics = this._physicsSystem;
       if (physics.backendFallbackReason)

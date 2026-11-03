@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { PHYSICS_BACKENDS, resolvePhysicsBackendRequest } from '../src/physics/pal/backendSelect';
 import { describePhysicsCapabilities } from '../src/physics/pal/capabilities';
+import { acquirePhysicsWorld, isPhysicsBackendLoaded } from '../src/physics/pal/createWorld';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
 
 // Which physics engine a game simulates with: a request (the project's setting, `?physicsBackend=`)
@@ -17,13 +18,14 @@ describe('choosing a physics backend', () => {
         const rapier = resolvePhysicsBackendRequest('rapier');
         expect(rapier.kind).toBe('cannon');
         expect(rapier.reason).toMatch(/Rapier.*not implemented/);
+        expect(resolvePhysicsBackendRequest('jolt')).toEqual({ kind: 'cannon', reason: 'the Jolt backend is not implemented yet' });
         const unknown = resolvePhysicsBackendRequest('havok');
         expect(unknown.kind).toBe('cannon');
         expect(unknown.reason).toMatch(/havok/);
     });
 
     it('lists every backend a project may name, the implemented ones runnable', () => {
-        expect(PHYSICS_BACKENDS.map(b => b.request)).toEqual(['cannon', 'rapier']);
+        expect(PHYSICS_BACKENDS.map(b => b.request)).toEqual(['cannon', 'rapier', 'jolt']);
         for (const b of PHYSICS_BACKENDS.filter(b => b.implemented)) expect(resolvePhysicsBackendRequest(b.request)).toEqual({ kind: b.request, reason: null });
     });
 
@@ -40,5 +42,16 @@ describe('choosing a physics backend', () => {
         const plain = new PhysicsSystem();
         plain.initialize();
         expect([plain.backend, plain.requestedBackend, plain.backendFallbackReason]).toEqual(['cannon', 'cannon', null]);
+    });
+
+    it('loads a backend before building its world, and cannon needs no loading', async () => {
+        expect(isPhysicsBackendLoaded('cannon')).toBe(true);
+        expect((await acquirePhysicsWorld('cannon', [0, -9.81, 0])).backend).toBe('cannon');
+        const p = new PhysicsSystem({ backend: 'cannon' });
+        const loading = p.load();
+        expect(p.load()).toBe(loading);          // once
+        await loading;
+        p.initialize();
+        expect([p.backend, p.backendFallbackReason]).toEqual(['cannon', null]);
     });
 });

@@ -294,8 +294,8 @@ describe('i-frames', () => {
             expect(hb?.trigger).toBeTruthy();
             expect([hb.trigger.group, hb.trigger.mask, hb.trigger.detectTriggers]).toEqual([LAYER.ENEMY_HURTBOX, LAYER.HITBOX, true]);
             // A capsule as tall as the body: its two end caps 1.7 - 2 x 0.35 apart.
-            const caps = hb.trigger.colliders.filter((c: any) => c.shape.kind === 'sphere').map((c: any) => c.offset[1]);
-            expect(Math.max(...caps) - Math.min(...caps)).toBeCloseTo(1.0, 3);
+            const capsule = hb.trigger.colliders.find((c: any) => c.shape.kind === 'capsule');
+            expect(capsule.shape.height).toBeCloseTo(1.0, 3);
             e.isDead = true; e._syncHurtbox();
             expect(hb.trigger.enabled).toBe(false);
         } finally { scene.dispose?.(); void p; }

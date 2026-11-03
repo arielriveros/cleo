@@ -1098,14 +1098,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // Same lifecycle as the input map: project-wide, its own key, persisted on change.
   const [projectSettings, setProjectSettings] = useState<ProjectSettings>(() => parseProjectSettings(null));
   const projectSettingsLoadedRef = useRef(false);
+  // The stored settings, read once: the engine waits for them too, since its physics backend is chosen
+  // when it is built.
+  const storedProjectSettingsRef = useRef<Promise<ProjectSettings | null> | null>(null);
+  const storedProjectSettings = () => storedProjectSettingsRef.current ??= idbGet<ProjectSettings>(projectSettingsKey())
+    .then(stored => (stored ? parseProjectSettings(stored) : null), e => { console.warn('Failed to load the project settings:', e); return null; });
   useEffect(() => {
-    (async () => {
-      try {
-        const stored = await idbGet<ProjectSettings>(projectSettingsKey());
-        if (stored) setProjectSettings(parseProjectSettings(stored));
-      } catch (e) { console.warn('Failed to load the project settings:', e); }
-      finally { projectSettingsLoadedRef.current = true; }
-    })();
+    storedProjectSettings()
+      .then(stored => { if (stored) setProjectSettings(stored); })
+      .finally(() => { projectSettingsLoadedRef.current = true; });
   }, []);
   usePersistedLibrary(projectSettingsKey(), projectSettings, projectSettingsLoadedRef);
   const projectSettingsRef = useRef(projectSettings);
@@ -5983,6 +5984,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   useEffect(() => {
       const initializeEngine = async () => {
         try {
+          const stored = await storedProjectSettings();
           const engine = new CleoEngine({
               graphics: {
                   clearColor: EDITOR_CLEAR_COLOR,
@@ -5991,9 +5993,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
                   // Read here because a context's API cannot change once resources exist on it.
                   backend: readBackendPreference(),
               },
-              // Read here for the same reason: a world cannot change physics engines. The project's choice
-              // as far as it is loaded yet, or the URL's; Options ▸ Engine ▸ Runtime says when they differ.
-              physics: { backend: physicsBackendOverride() ?? projectSettingsRef.current.engine.physicsBackend },
+              // Read here for the same reason: a world cannot change physics engines. The project's choice,
+              // or the URL's; Options ▸ Engine ▸ Runtime says when the running one differs.
+              physics: { backend: physicsBackendOverride() ?? (stored ?? projectSettingsRef.current).engine.physicsBackend },
           });
 
           // Before setupInitialScene() and the texture registrations below: both build GPU resources,

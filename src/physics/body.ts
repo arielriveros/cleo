@@ -297,8 +297,8 @@ export class Trigger extends PhysicsBody {
 
   /**
    * Replace every shape with one capsule running from `a` to `b` (body-local, i.e. in the owning node's
-   * space) with the given radius: what a blade or a limb is. Built as the engine's capsule always is — a
-   * cylinder plus two end spheres — and collapsing to a single sphere when the two ends coincide.
+   * space) with the given radius: what a blade or a limb is. Collapses to a single sphere when the two
+   * ends coincide.
    */
   public setCapsule(a: vec3 | number[], b: vec3 | number[], radius: number, segments = 8): this {
     const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
@@ -307,14 +307,12 @@ export class Trigger extends PhysicsBody {
     if (length < 1e-6) {
       colliders.push({ shape: { kind: 'sphere', radius }, offset: [a[0], a[1], a[2]] });
     } else {
-      // A cylinder runs along its local Y.
+      // A capsule runs along its local Y.
       const q = quat.rotationTo(quat.create(), [0, 1, 0], [dx / length, dy / length, dz / length]);
-      colliders.push(
-        { shape: { kind: 'cylinder', radiusTop: radius, radiusBottom: radius, height: length, segments },
-          offset: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2], rotation: [q[0], q[1], q[2], q[3]] },
-        { shape: { kind: 'sphere', radius }, offset: [a[0], a[1], a[2]] },
-        { shape: { kind: 'sphere', radius }, offset: [b[0], b[1], b[2]] },
-      );
+      colliders.push({
+        shape: { kind: 'capsule', radius, height: length, segments },
+        offset: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2], rotation: [q[0], q[1], q[2], q[3]],
+      });
     }
     this._setColliders(colliders);
     this._shapesChanged();

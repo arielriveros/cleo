@@ -71,6 +71,7 @@ describe('project settings', () => {
   it('reads the physics backend, defaulting to cannon, and ships it in the game config', () => {
     expect(parseProjectSettings(null).engine.physicsBackend).toBe('cannon');
     expect(parseProjectSettings({ engine: { physicsBackend: 'rapier' } }).engine.physicsBackend).toBe('rapier');
+    expect(parseProjectSettings({ engine: { physicsBackend: 'jolt' } }).engine.physicsBackend).toBe('jolt');
     expect(parseProjectSettings({ engine: { physicsBackend: 'havok' } }).engine.physicsBackend).toBe('cannon');
     expect(projectSettingsConfig(parseProjectSettings({ engine: { physicsBackend: 'rapier' } })).physics.backend).toBe('rapier');
   });

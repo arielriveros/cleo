@@ -5,12 +5,35 @@ import type { WorldMirror, WorldReplica } from './replication';
 import type { PhysicsBackendKind } from './types';
 import type { PhysicsWorld } from './world';
 
-/**
- * A world on the given backend: the one place that knows every backend (the RHI's equivalent is the
- * Renderer picking its Device). Synchronous for cannon; a backend that must load first (Rapier's WASM)
- * gets an async `acquire` beside it, resolved before the engine initializes physics.
- */
+// The one place that knows every backend (the RHI's equivalent is the Renderer picking its Device).
+//
+// A backend whose library must load before it can build a world (a WASM engine) is ACQUIRED first:
+// `acquirePhysicsBackend` loads it once, asynchronously, and from then on `createPhysicsWorld` builds its
+// worlds synchronously like any other. cannon needs no loading.
+
+/** Backends ready to build worlds. */
+const loaded = new Set<PhysicsBackendKind>(['cannon']);
+
+/** Whether `createPhysicsWorld(kind)` can build a world now, without {@link acquirePhysicsBackend} first. */
+export function isPhysicsBackendLoaded(kind: PhysicsBackendKind): boolean {
+    return loaded.has(kind);
+}
+
+/** Load a backend's library, once. Rejects when it cannot be loaded here. */
+export async function acquirePhysicsBackend(kind: PhysicsBackendKind): Promise<void> {
+    if (loaded.has(kind)) return;
+    loaded.add(kind);
+}
+
+/** A world on a backend, loading the backend first if it has to. */
+export async function acquirePhysicsWorld(kind: PhysicsBackendKind, gravity?: ArrayLike<number>): Promise<PhysicsWorld> {
+    await acquirePhysicsBackend(kind);
+    return createPhysicsWorld(kind, gravity);
+}
+
+/** A world on a loaded backend (see {@link acquirePhysicsBackend}). */
 export function createPhysicsWorld(kind: PhysicsBackendKind = 'cannon', gravity?: ArrayLike<number>): PhysicsWorld {
+    if (!loaded.has(kind)) throw new Error(`physics: the ${kind} backend is not loaded (acquirePhysicsBackend first)`);
     switch (kind) {
         case 'cannon': return new CannonWorld(gravity);
     }
@@ -23,8 +46,9 @@ export function createWorldMirror(world: PhysicsWorld): WorldMirror {
     }
 }
 
-/** The physics worker's copy of a world on `kind` (see replication.ts). */
+/** The physics worker's copy of a world on `kind` (see replication.ts), on a loaded backend. */
 export function createWorldReplica(kind: PhysicsBackendKind): WorldReplica {
+    if (!loaded.has(kind)) throw new Error(`physics: the ${kind} backend is not loaded (acquirePhysicsBackend first)`);
     switch (kind) {
         case 'cannon': return new CannonReplica();
     }

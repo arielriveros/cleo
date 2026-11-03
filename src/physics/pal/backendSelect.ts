@@ -6,12 +6,13 @@ import type { PhysicsBackendKind } from './types';
 // wherever it runs.
 
 /** A backend a project may ask for: those this build runs, and those planned (so a picker can show them). */
-export type PhysicsBackendRequest = PhysicsBackendKind | 'rapier';
+export type PhysicsBackendRequest = PhysicsBackendKind | 'rapier' | 'jolt';
 
 /** Every backend a project may ask for, in the order a picker lists them. */
 export const PHYSICS_BACKENDS: readonly { readonly request: PhysicsBackendRequest; readonly label: string; readonly implemented: boolean }[] = [
     { request: 'cannon', label: 'cannon-es', implemented: true },
     { request: 'rapier', label: 'Rapier', implemented: false },
+    { request: 'jolt', label: 'Jolt', implemented: false },
 ];
 
 /** The backend a request gets when it names none, or one this build cannot run. */

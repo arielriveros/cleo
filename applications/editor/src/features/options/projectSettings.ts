@@ -36,8 +36,8 @@ export type PhysicsWorkerSetting = 'off' | 'on' | 'auto';
 const PHYSICS_WORKER_SETTINGS: PhysicsWorkerSetting[] = ['off', 'on', 'auto'];
 
 /** The engine's PhysicsBackendRequest (pal/backendSelect.ts), spelled out so this module stays free of `cleo`. */
-export type PhysicsBackendSetting = 'cannon' | 'rapier';
-const PHYSICS_BACKEND_SETTINGS: PhysicsBackendSetting[] = ['cannon', 'rapier'];
+export type PhysicsBackendSetting = 'cannon' | 'rapier' | 'jolt';
+const PHYSICS_BACKEND_SETTINGS: PhysicsBackendSetting[] = ['cannon', 'rapier', 'jolt'];
 
 export interface PublishWindowSettings {
   /** The game's name: window / tab title, installer product name and published folder name. Empty = the project name. */
@@ -180,7 +180,7 @@ export function storePhysicsWorkerOverride(mode: PhysicsWorkerSetting | null): v
 }
 
 /**
- * The physics backend asked for in the URL, `?physicsBackend=cannon|rapier`, over the project's: for a test
+ * The physics backend asked for in the URL, `?physicsBackend=cannon|rapier|jolt`, over the project's: for a test
  * or a comparison. Read when an engine is constructed. Null when absent or unknown.
  */
 export function physicsBackendOverride(): PhysicsBackendSetting | null {

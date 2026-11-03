@@ -17,8 +17,8 @@ import { applyBuoyancy, floats } from "./buoyancy";
 import { InlineExecutor } from "./executor/inlineExecutor";
 import { WorkerExecutor } from "./executor/workerExecutor";
 import type { ContactSource, PhysicsExecutor } from "./executor/physicsExecutor";
-import { createPhysicsWorld } from "./pal/createWorld";
-import { resolvePhysicsBackendRequest } from "./pal/backendSelect";
+import { acquirePhysicsBackend, createPhysicsWorld, isPhysicsBackendLoaded } from "./pal/createWorld";
+import { DEFAULT_PHYSICS_BACKEND, resolvePhysicsBackendRequest } from "./pal/backendSelect";
 import type { PhysicsCapabilities } from "./pal/capabilities";
 import type { PhysicsWorld } from "./pal/world";
 import { PhysicsEventKind, type BodyHandle, type ColliderGeometry, type ColliderPart } from "./pal/types";
@@ -236,6 +236,9 @@ export class PhysicsSystem {
 
   private readonly _backendRequest: string | null;
   private _backendFallbackReason: string | null = null;
+  /** {@link load} under way or done; why the backend could not be loaded, when it could not. */
+  private _loading: Promise<void> | null = null;
+  private _loadFailure: string | null = null;
 
   /** The physics engine simulating (see pal/): 'cannon'. Before {@link initialize}, the one that will. */
   public get backend(): PhysicsBackendKind { return this._world?.backend ?? resolvePhysicsBackendRequest(this._backendRequest).kind; }
@@ -290,7 +293,12 @@ export class PhysicsSystem {
   public initialize(world?: PhysicsWorld): void {
     try {
       if (!world) {
-        const { kind, reason } = resolvePhysicsBackendRequest(this._backendRequest);
+        let { kind, reason } = resolvePhysicsBackendRequest(this._backendRequest);
+        // A backend whose library loads first (see load) and has not: the default, saying why.
+        if (!isPhysicsBackendLoaded(kind)) {
+          reason = this._loadFailure ?? `the ${kind} backend was not loaded before the world was built`;
+          kind = DEFAULT_PHYSICS_BACKEND;
+        }
         this._backendFallbackReason = reason;
         // Built the same way the physics worker builds its own, so both step alike.
         world = createPhysicsWorld(kind, this._gravity);
@@ -307,6 +315,22 @@ export class PhysicsSystem {
     } catch (e) {
       Logger.error(e.toString());
     }
+  }
+
+  /**
+   * Load what the requested backend needs before it can build a world (a WASM engine's library), so that
+   * {@link initialize} can build it. Started early by the engine and awaited before initialize; cannon
+   * needs nothing. Never rejects: a backend that cannot load is reported, and initialize falls back.
+   */
+  public load(): Promise<void> {
+    return this._loading ??= (async () => {
+      const { kind } = resolvePhysicsBackendRequest(this._backendRequest);
+      try {
+        await acquirePhysicsBackend(kind);
+      } catch (e) {
+        this._loadFailure = `the ${kind} backend failed to load: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    })();
   }
 
   private _inlineExecutor(): InlineExecutor {

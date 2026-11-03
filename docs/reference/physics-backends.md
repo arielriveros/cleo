@@ -1,7 +1,7 @@
 # Physics backends
 
 Physics runs behind a backend-neutral layer, the physics counterpart of the renderer's RHI, so it can run
-on engines other than cannon-es. Rapier is the next one planned. Today cannon-es is the only backend, and
+on engines other than cannon-es. Rapier is the next one planned, and Jolt is listed for later. Today cannon-es is the only backend, and
 games behave exactly as before: the engine's tests pin the cannon step bit for bit.
 
 ## The layer
@@ -68,8 +68,8 @@ project, not the machine: two engines do not simulate alike, so a game must play
 published game's config always carries it (`physics.backend`), so a game keeps its backend even if the
 engine's default changes.
 
-The choice is a request, read when the engine starts. A backend this build cannot run (Rapier, listed
-but not implemented yet, or a name it does not know) falls back to cannon-es. The log says why, and so
+The choice is a request, read when the engine starts. A backend this build cannot run (one listed but not
+implemented yet, or a name it does not know) falls back to cannon-es. The log says why, and so
 does `physics.backendFallbackReason`. `physics.backend` is the backend running, and `physics.requestedBackend`
 the one asked for. `?physicsBackend=` in the URL asks for another backend for a comparison, in the editor
 and in a web build. Each engine logs its backend at startup:
@@ -90,8 +90,9 @@ see [Physics threading](physics-threading.md)). `physics.executor` reads `'inlin
    the library it wraps; `tests/physicsBackendBoundary.test.ts` holds every other file (and the declarations
    scripts are typed against) to it.
 2. Add it to `PhysicsBackendKind`, to `createPhysicsWorld`, and as implemented to `PHYSICS_BACKENDS`. A
-   backend that must load first (Rapier's WASM) gets an async acquire beside it, resolved before the engine
-   initializes physics.
+   backend whose library must load first (a WASM engine) loads it in `acquirePhysicsBackend`, through a
+   dynamic `import()`. The engine starts `physics.load()` with the GPU and awaits it before building the
+   world; a backend that fails to load falls back to cannon-es with the reason.
 3. To run in the physics worker, implement its `WorldMirror` and `WorldReplica` (`replication.ts`) and add
    them to `createWorldMirror` / `createWorldReplica`. The format between them is its own. A backend that
    can snapshot its whole world may send that; cannon sends bodies and shapes. Without them, set
@@ -134,3 +135,21 @@ Questions to answer in a spike before the Rapier backend is written:
 - `forEachContact` comes from `contactPairsWith` over the moving bodies.
 - Only `@dimforge/rapier3d-compat` (WASM embedded in the JS) works in a published game, which runs from
   `file://` with its physics worker inlined.
+
+## What a Jolt backend needs to settle
+
+Jolt (JoltPhysics.js, the WASM build of Jolt Physics) is listed for later. Questions for its spike:
+
+- Which build: the single-threaded WASM, or the multithreaded one, which needs SharedArrayBuffer and so
+  a cross-origin isolated page (the published desktop game on `file://` is not).
+- Memory: every Jolt object made from JavaScript must be `destroy()`ed by hand. The backend owns that,
+  including on `clear` and `dispose`.
+- Does a build with its WASM embedded exist (or can one be made), for the published player, which runs as a
+  single file from `file://` with its physics worker inlined?
+- Jolt is double precision optionally and single by default: which build, and the conformance suite's
+  `precision` to match.
+- Its `CharacterVirtual` is a kinematic character controller. The engine's characters are dynamic bodies,
+  so it stays unused unless characters move to it on every backend.
+- Collision layers are object layers plus broadphase layers, not group/mask bits: map the engine's 16
+  layer bits onto them.
+- Its world is stepped with a fixed number of collision steps per update: one per engine substep.

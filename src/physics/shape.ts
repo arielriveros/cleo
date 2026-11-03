@@ -49,11 +49,10 @@ export class Shape {
     }
 
     /**
-     * Capsule collider, returned as the parts of a compound (a cylinder and two spheres) for the caller to
-     * attach at each offset — the form every backend can simulate. `height` is the TOTAL tip-to-tip height,
-     * so the straight section is `height - 2 * radius`; at or below `2 * radius` it degenerates to a sphere.
-     * Offsets are in scaled body space along local Y, BEFORE the shape's own rotation — `attachShape` does
-     * not rotate offsets, so a caller applying a rotation must rotate these to match.
+     * Capsule collider along local Y. `height` is the TOTAL tip-to-tip height, so the straight section is
+     * `height - 2 * radius`; at or below `2 * radius` it degenerates to a sphere. Returned as a list of parts
+     * to attach at their offsets: one capsule today, simulated as one by a backend that has capsules and as a
+     * cylinder plus two end spheres by one that does not (cannon).
      */
     public static Capsule(radius: number, height: number, numSegments: number, scale: vec3 = NO_SCALE): { shape: Shape; offset: vec3 }[] {
         const [sx, sy, sz] = absScale(scale);
@@ -62,14 +61,7 @@ export class Shape {
 
         if (cyl <= EPSILON)
             return [{ shape: new Shape({ kind: 'sphere', radius: r }, Geometry.Sphere(16, r + EPSILON)), offset: [0, 0, 0] }];
-
-        // Only the cylinder carries debug geometry, and it carries the WHOLE capsule's: three parts would
-        // otherwise draw three overlapping wireframes for one collider.
-        return [
-            { shape: new Shape({ kind: 'cylinder', radiusTop: r, radiusBottom: r, height: cyl, segments: numSegments }, Geometry.Capsule(numSegments, r + EPSILON, cyl)), offset: [0, 0, 0] },
-            { shape: new Shape({ kind: 'sphere', radius: r }), offset: [0, cyl / 2, 0] },
-            { shape: new Shape({ kind: 'sphere', radius: r }), offset: [0, -cyl / 2, 0] },
-        ];
+        return [{ shape: new Shape({ kind: 'capsule', radius: r, height: cyl, segments: numSegments }, Geometry.Capsule(numSegments, r + EPSILON, cyl)), offset: [0, 0, 0] }];
     }
 
     public static Plane(): Shape {

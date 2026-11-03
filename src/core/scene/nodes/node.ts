@@ -985,18 +985,11 @@ export class Node {
           case 'cylinder':
             target.attachShape(Shape.Cylinder(shape.radius, shape.radius, shape.height, shape.numSegments, scale), offset, rotation);
             break;
-          case 'capsule': {
-            // A capsule expands into a cylinder plus two sphere caps. `attachShape` places a shape at
-            // bodyPos + bodyQuat * offset — a shape's OWN rotation never moves it (body.ts) — so the caps'
-            // offsets, which run along the capsule's local Y, must be rotated here.
-            const q = quat.create();
-            quat.fromEuler(q, rotation[0], rotation[1], rotation[2]);
-            for (const part of Shape.Capsule(shape.radius, shape.height, shape.numSegments, scale)) {
-              const capOffset = vec3.transformQuat(vec3.create(), part.offset, q);
-              target.attachShape(part.shape, vec3.add(capOffset, capOffset, offset), rotation);
-            }
+          case 'capsule':
+            // One capsule (a backend without capsules splits it itself, along the capsule's own rotation).
+            for (const part of Shape.Capsule(shape.radius, shape.height, shape.numSegments, scale))
+              target.attachShape(part.shape, offset, rotation);
             break;
-          }
           case 'convex': {
             // A degenerate hull would feed NaN axes to cannon's SAT, so fall back to its bounding box.
             const hull = Shape.ConvexHull(shape.vertices, shape.faces, scale);

@@ -42,7 +42,7 @@ enough to make it bounce.
 ```ts
 Shape.Box(w, h, d, scale?)
 Shape.Sphere(r, scale?)
-Shape.Capsule(r, h, segments, scale?)      // returns { shape, offset }[] — a cylinder plus two caps
+Shape.Capsule(r, h, segments, scale?)      // returns { shape, offset }[] — one capsule
 Shape.Cylinder(rTop, rBottom, h, segments, scale?)
 Shape.Plane()
 Shape.ConvexHull(vertices, faces, scale?)  // null if degenerate
@@ -52,8 +52,8 @@ Shape.Heightfield(data, elementSize)
 body.attachShape(shape, offset = [0,0,0], orientation = [0,0,0])
 ```
 
-`Shape.Capsule` returns several pieces (a cylinder and two end spheres) because that is a capsule every
-physics backend can simulate; cannon-es, the one games run on today, has no capsule primitive.
+`Shape.Capsule` returns a list of parts to attach: one capsule. A physics backend with capsules simulates it
+as one; cannon-es has none, and simulates it as a cylinder with a sphere at each end.
 
 ### Body members worth knowing
 
