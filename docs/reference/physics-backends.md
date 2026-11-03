@@ -13,7 +13,8 @@ backend, and games behave exactly as before: the engine's tests pin the cannon s
 | `types.ts` | The vocabulary, as plain data: `ShapeDesc`, `ColliderDesc`, `BodyDesc`, `JointDesc`, `RayOptions`, `RayHit`, event kinds, `BodyHandle` / `JointHandle` |
 | `world.ts` | `PhysicsWorld`, the one interface the engine simulates through |
 | `capabilities.ts` | `PhysicsCapabilities`, what a backend can do (native capsule, collision group bits, joint limits, …), and the boot log line |
-| `createWorld.ts` | The one place that knows every backend: `createPhysicsWorld(kind)` |
+| `createWorld.ts` | The one place that knows every backend: `createPhysicsWorld(kind)`, and the two ends of copying a world into the physics worker |
+| `replication.ts` | How a backend copies its world into the physics worker: a `WorldMirror` on the main thread, a `WorldReplica` in the worker |
 | `cannon/` | The cannon-es backend, `CannonWorld`, and everything that only exists because of cannon: its broadphase, the heightfield and convex-SAT patches, the material table, the centre-of-mass bookkeeping |
 
 A `PhysicsWorld` is handle-based and immediate, like the RHI's `Device`. The engine keeps its own objects
@@ -25,8 +26,8 @@ and refers to the backend's by handle. Its conventions hold for every backend:
 - The engine cuts each frame into substeps and calls `step(dt)` once per substep, so every backend steps the
   same way. `onPreSubstep` runs before each one (buoyancy adds its forces there). A force lasts one substep.
 - What a step produced is read afterwards: `forEachContact` (the last substep's contacts, normal pointing
-  out of the first body) and `drainEvents` (sensor begin/end, in order, since the last drain). Destroying a
-  body drops its queued events.
+  out of the first body) and `drainEvents` (sensor begin/end and first contacts, in order, since the last
+  drain). Destroying a body drops its queued events.
 - A body's collision geometry is read back as `colliderParts`, **as the backend simulates it**: cannon
   reports a capsule as its cylinder and two end spheres, and a cylinder with the polyhedron it collides as.
   The parts are placed in the body's collider frame (`getColliderFrame`: the centre of mass on cannon).
@@ -54,7 +55,8 @@ scripts when node bodies stopped being cannon's:
 - `body.position` is the node's position, not the centre of mass's. They differ only for a dynamic body
   whose collider is offset and recentred (`recenterMass()`); `body.getColliderFrame(out)` gives the latter.
 - First contacts (`onCollision`, `body.onCollide(listener)`) are delivered after the physics step, as the
-  worker always delivered them, rather than in the middle of it.
+  worker always delivered them, rather than in the middle of it. With the worker they now arrive in the same
+  order as trigger enters and exits as on the main thread.
 - A trigger's listeners are `trigger.onContact(listener)` as before; cannon's `addEventListener` is gone.
 - `body.getAabb(out)` gives its bounds (min, then max), also before it is in a world.
 
@@ -69,9 +71,14 @@ see [Physics threading](physics-threading.md)). `physics.executor` reads `'inlin
 1. Implement `PhysicsWorld` in `src/physics/pal/<name>/`, with its capabilities.
 2. Add it to `PhysicsBackendKind` and to `createPhysicsWorld`. A backend that must load first (Rapier's
    WASM) gets an async acquire beside it, resolved before the engine initializes physics.
-3. Add it to the list in `tests/pal/conformance.test.ts` and make that suite pass. It checks behaviour, not
+3. To run in the physics worker, implement its `WorldMirror` and `WorldReplica` (`replication.ts`) and add
+   them to `createWorldMirror` / `createWorldReplica`. The format between them is its own. A backend that
+   can snapshot its whole world may send that; cannon sends bodies and shapes. Without them, set
+   `threadable: false` in its capabilities.
+4. Add it to the list in `tests/pal/conformance.test.ts` and make that suite pass. It checks behaviour, not
    bits: lifecycle, the node-origin convention, gravity, impulses, one-substep forces, sleep, axis locks,
-   every shape kind at rest, contacts, sensor events, rays and every joint kind.
+   every shape kind at rest, contacts, sensor events, rays, every joint kind, and that a copy stepped in
+   the worker's place moves and reports like the world itself.
 
 ## Status
 
@@ -86,17 +93,17 @@ bit for bit.
 | Overlap queries, trigger↔trigger pass, buoyancy, particle colliders and the editor's trigger overlay read neutral collider descriptions | Done |
 | Terrain, foliage and tilemap colliders, ragdolls and joints on engine bodies | Done |
 | `RigidBody`, `Trigger` and `Shape` stop being cannon objects | Done |
-| The worker protocol carries descriptions instead of cannon shapes | Next |
-| A test keeps `cannon-es` inside `src/physics/pal/cannon/`; the project chooses its backend | Planned |
-
-Until the worker stage, the worker still replicates the main thread's cannon bodies shape for shape.
+| The physics worker copies the world through its backend's mirror and replica | Done |
+| A test keeps `cannon-es` inside `src/physics/pal/cannon/`; the project chooses its backend | Next |
 
 ## What a Rapier backend needs to settle
 
 Questions to answer in a spike before the Rapier backend is written:
 
 - Does a manually slept body stay asleep with automatic sleep off? The engine freezes far bodies that way.
-- Do queries work on a world that is never stepped (the worker's main-thread mirror)?
+- Do queries work on a world that is never stepped (the main thread's world while the worker steps)?
+- Copying for the worker: Rapier can snapshot its whole world. Is restoring one fast enough to send on
+  every membership change, or does its mirror need per-body diffs like cannon's?
 - Damping: cannon's is `v *= (1 − d)^dt`, Rapier's `v *= 1 / (1 + d·dt)`. Convert.
 - Collision groups are 16 + 16 bits in Rapier (cannon 32): check the ragdoll and hitbox layers fit.
 - Rapier's heightfield is column-major and centred; the layer's starts at its origin.

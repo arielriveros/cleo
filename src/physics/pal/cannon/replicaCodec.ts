@@ -2,14 +2,108 @@ import {
     Body, Box, ConeTwistConstraint, Constraint, ConvexPolyhedron, Cylinder, Heightfield, HingeConstraint, LockConstraint,
     Particle, Plane, PointToPointConstraint, Quaternion, Shape, Sphere, Trimesh, Vec3,
 } from 'cannon-es';
-import type { BodyConfig, ConstraintDef, ShapeDef, ShapeRef } from './protocol';
-import { STATE_STRIDE } from './protocol';
 
-// Bodies, shapes and constraints as plain data, and back. Both halves live here so they cannot drift:
-// the main thread ENCODES what is in its (mirror) world, the worker DECODES it into its own. Rebuilt
-// objects must step exactly like the originals, so everything that feeds the solver travels — inertia
-// included, which a body cannot recompute the same way (RigidBody.recenterMass measures it unrotated).
+// How the cannon world is copied into the physics worker (see pal/replication.ts): the messages, and bodies,
+// shapes and constraints as plain data and back. Both halves live here so they cannot drift: the main
+// thread's mirror (mirror.ts) ENCODES what is in its world, the worker's replica (replica.ts) DECODES it
+// into its own. Rebuilt objects must step exactly like the originals, so everything that feeds the solver
+// travels — inertia included, which a body cannot recompute the same way (it was measured unrotated).
 // A leaf: cannon-es only.
+
+// ---------------------------------------------------------------------------------------------------
+// Messages
+
+/** One shape, enough to rebuild it exactly. Shared shapes are sent once and then named by `id`. */
+export type ShapeDef =
+    | { t: 'sphere'; r: number }
+    | { t: 'box'; h: [number, number, number] }
+    | { t: 'cylinder'; rt: number; rb: number; h: number; n: number }
+    | { t: 'convex'; v: Float64Array; f: number[][]; axes: Float64Array | null }
+    | { t: 'plane' }
+    | { t: 'particle' }
+    | { t: 'heightfield'; data: Float64Array; rows: number; cols: number; elementSize: number; min: number; max: number }
+    | { t: 'trimesh'; v: Float32Array; i: Int32Array; scale: [number, number, number] };
+
+export interface ShapeRef {
+    /** The main thread's `shape.id`. */
+    id: number;
+    /** The definition, when the worker has not seen this shape yet. */
+    def?: ShapeDef;
+    offset: [number, number, number];
+    orient: [number, number, number, number];
+    collisionResponse: boolean;
+    group: number;
+    mask: number;
+}
+
+/** A body's configuration: everything about it except where it is and how it moves. */
+export interface BodyConfig {
+    type: number;
+    mass: number;
+    /** Inertia exactly as the main thread computed it (a recentred body measures it unrotated). */
+    inertia: [number, number, number];
+    invInertia: [number, number, number];
+    /**
+     * The world-space inverse inertia (cannon's Mat3 elements) as the main thread holds it. cannon only
+     * recomputes it for a body whose inertia differs by axis; a sphere's or a cube's stays the matrix of its
+     * last forced update (R·I⁻¹·Rᵀ at the rotation it was created with), which a fresh body cannot rebuild.
+     * Sent with every config but never compared for one: it changes whenever such a body turns.
+     */
+    invInertiaWorld: number[];
+    linearDamping: number;
+    angularDamping: number;
+    linearFactor: [number, number, number];
+    angularFactor: [number, number, number];
+    fixedRotation: boolean;
+    allowSleep: boolean;
+    sleepSpeedLimit: number;
+    sleepTimeLimit: number;
+    collisionResponse: boolean;
+    group: number;
+    mask: number;
+    isTrigger: boolean;
+    /** `friction|restitution` (MaterialTable), or null for none. */
+    material: string | null;
+    /** Owned by a character node: water leaves it alone unless a volume says otherwise. */
+    character: boolean;
+    /** Reports its first contacts on the main thread: the worker reports them too. */
+    wantsCollide: boolean;
+    shapes: ShapeRef[];
+}
+
+/** Per-body state, packed: [px py pz qx qy qz qw vx vy vz wx wy wz fx fy fz tx ty tz sleepState]. */
+export const STATE_STRIDE = 20;
+/** Which parts of a state row a write carries. */
+export const WRITE_POSE = 1, WRITE_VEL = 2, WRITE_ANGVEL = 4, WRITE_FORCE = 8, WRITE_TORQUE = 16, WRITE_SLEEP = 32;
+/** A moving body in the replica's report: [slot, px py pz qx qy qz qw vx vy vz wx wy wz sleepState]. */
+export const BODY_ROW = 15;
+
+export type ConstraintDef =
+    | { t: 'p2p'; a: number; b: number; pivotA: number[]; pivotB: number[]; maxForce: number; collide: boolean }
+    | { t: 'cone'; a: number; b: number; pivotA: number[]; pivotB: number[]; axisA: number[]; axisB: number[]; angle: number; twist: number; maxForce: number; collide: boolean }
+    | { t: 'hinge'; a: number; b: number; pivotA: number[]; pivotB: number[]; axisA: number[]; axisB: number[]; maxForce: number; collide: boolean }
+    /**
+     * `frame`: the lock's pivots and the bodies' axes as it measured them when it was made — pivotA pivotB
+     * xA xB yA yB zA zB, 3 numbers each. A lock built again from the bodies' current poses would measure
+     * them again, from poses that moved since (a ragdoll is lifted out of the ground after its joints).
+     */
+    | { t: 'lock'; a: number; b: number; maxForce: number; collide: boolean; frame: number[] };
+
+/** Membership changes, applied in order: constraint removals, body removals, body adds, configs, constraint adds. */
+export type Op =
+    | { op: 'addBody'; slot: number; config: BodyConfig; state: Float64Array }
+    | { op: 'removeBody'; slot: number }
+    | { op: 'config'; slot: number; config: BodyConfig }
+    | { op: 'addConstraint'; id: number; def: ConstraintDef }
+    | { op: 'removeConstraint'; id: number };
+
+/** The mirror's diff (MirrorDiff.changes) on cannon. */
+export interface CannonChanges {
+    ops: Op[];
+    /** Writes to existing bodies: rows of [slot, mask, ...STATE_STRIDE values]. */
+    writes: Float64Array;
+    writeCount: number;
+}
 
 // cannon's Shape.types.
 const SPHERE = 1, PLANE = 2, BOX = 4, CONVEX = 16, HEIGHTFIELD = 32, PARTICLE = 64, CYLINDER = 128, TRIMESH = 256;
@@ -98,7 +192,6 @@ export function shapeBuffers(def: ShapeDef | undefined): ArrayBuffer[] {
  * definition and is added to the set.
  */
 export function encodeConfig(body: Body, known: Set<number>, wantsCollide: boolean): BodyConfig {
-    const b = body as any;
     const shapes: ShapeRef[] = body.shapes.map((shape, i) => {
         const o = body.shapeOffsets[i], q = body.shapeOrientations[i];
         const def = known.has(shape.id) ? undefined : encodeShape(shape) ?? undefined;
@@ -126,11 +219,10 @@ export function encodeConfig(body: Body, known: Set<number>, wantsCollide: boole
 
 /**
  * Whether a body is a character's, which water leaves alone: the engine marks it in the body's userData
- * (physicsBody.ts BODY_CHARACTER), or, for a cannon body the engine did not make, by its owner.
+ * (physicsBody.ts BODY_CHARACTER).
  */
 export function isCharacterBody(body: Body): boolean {
-    const b = body as Body & { userData?: number; owner?: { nodeType?: string } };
-    return ((b.userData ?? 0) & 1) !== 0 || b.owner?.nodeType === 'character';
+    return (((body as Body & { userData?: number }).userData ?? 0) & 1) !== 0;
 }
 
 /** A body's state into `out` at `offset`: pose, velocities, accumulated force/torque, sleep state. */
@@ -195,7 +287,7 @@ export function applyConfig(body: Body, config: BodyConfig, shapeOf: (ref: Shape
     body.aabbNeedsUpdate = true;
 }
 
-/** Write a packed state row into a body; `mask` (protocol WRITE_*) says which parts, -1 for all. */
+/** Write a packed state row into a body; `mask` (WRITE_*) says which parts, -1 for all. */
 export function writeState(body: Body, row: ArrayLike<number>, offset: number, mask: number): void {
     if (mask & 1) {
         body.position.set(row[offset], row[offset + 1], row[offset + 2]);
@@ -215,8 +307,6 @@ export function writeState(body: Body, row: ArrayLike<number>, offset: number, m
         }
     }
 }
-
-export { STATE_STRIDE };
 
 // ---------------------------------------------------------------------------------------------------
 // Constraints

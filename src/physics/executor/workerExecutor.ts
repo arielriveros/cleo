@@ -1,23 +1,24 @@
-import { Body, Constraint, World } from 'cannon-es';
 import { physicsStats } from '../physicsStats';
 import type { WaterSpec } from '../waterSurface';
-import { encodeConfig, encodeConstraint, isCharacterBody, readState, shapeBuffers } from '../worker/bodyCodec';
-import type { PhysicsPort } from '../worker/ports';
-import type { FromWorker, Op, Snapshot, StepMessage } from '../worker/protocol';
-import { BODY_ROW, CONTACT_ROW, STATE_STRIDE, WRITE_ANGVEL, WRITE_FORCE, WRITE_POSE, WRITE_SLEEP, WRITE_TORQUE, WRITE_VEL } from '../worker/protocol';
-import { NO_CONTACTS, type ContactSource, type PhysicsExecutor, type StepResult } from './physicsExecutor';
+import { createWorldMirror } from '../pal/createWorld';
+import type { WorldMirror } from '../pal/replication';
 import type { BodyHandle } from '../pal/types';
+import type { PhysicsWorld } from '../pal/world';
+import type { PhysicsPort } from '../worker/ports';
+import type { FromWorker, Snapshot, StepMessage } from '../worker/protocol';
+import { CONTACT_ROW } from '../worker/protocol';
+import { NO_CONTACTS, type ContactSource, type PhysicsExecutor, type StepResult } from './physicsExecutor';
 
 // The physics step in a Web Worker.
 //
-// The main thread keeps its cannon World — every body, constraint and shape exactly where the engine puts
-// them — as a MIRROR that never steps. Every query (raycasts, overlaps, sweeps, the ground probe, the
-// camera boom) and every `node.body` read and write works on it unchanged: no proxy, no API to learn.
-// Once per frame, after scripts have run (PhysicsSystem.endFrame), the mirror is DIFFED against what the
-// worker was last told — bodies added or removed, a body reconfigured, a pose, a velocity, a force, a
-// sleep state written — and only that is posted, with the frame's step. The worker steps while this
-// thread renders; at the start of the next frame (physics.update) its snapshot is written back into the
-// mirror, with the contacts, trigger events, first-contact events and buoyancy the step produced.
+// The main thread keeps its world — every body and joint exactly where the engine puts them — and does not
+// step it: every query (raycasts, overlaps, sweeps, the ground probe, the camera boom) and every `node.body`
+// read and write works on it unchanged. Once per frame, after scripts have run (PhysicsSystem.endFrame),
+// what changed in it since the worker was last told is posted with the frame's step. The worker steps its
+// copy while this thread renders; at the start of the next frame (physics.update) the step is written back
+// into the world, with the contacts, trigger events, first contacts and buoyancy it produced. How the world
+// is copied, both ways, is its backend's business (pal/replication.ts: the WorldMirror here, a WorldReplica
+// in the worker); this executor is the same on every backend.
 //
 // TIME. A step has to be posted before the frame it is drawn in has started, so before anyone knows how
 // long that frame will be. Stepping by the frame that just ENDED (what this executor first did) draws every
@@ -36,24 +37,20 @@ import type { BodyHandle } from '../pal/types';
 // One step is in flight at a time, with no SharedArrayBuffer (no cross-origin isolation is needed
 // anywhere the engine runs). A step that is late is not waited for: the frame applies nothing, draws its
 // bodies extrapolated, and the time it should have simulated rides along with the next step (capped like
-// the engine's frame delta). A body written here AFTER the diff and before the snapshot lands (a DOM input
-// handler between frames, or a frame whose diff was skipped while a step ran) keeps that write: a moved or
-// turned body is moved or turned by the same amount from where the step left it, a written velocity
-// component replaces the step's.
+// the engine's frame delta). A body written here AFTER the diff and before the step lands (a DOM input
+// handler between frames, or a frame whose diff was skipped while a step ran) keeps that write: the mirror
+// carries it along from where the step left the body.
 
 /** What the executor needs from PhysicsSystem. */
 export interface WorkerExecutorHost {
-    readonly world: World;
-    /** A trigger overlap starting or ending, as cannon reported it in the worker. */
-    onContact(a: Body, b: Body, begin: boolean): void;
+    /** The engine's world. A step's trigger overlaps and first contacts come out of its drainEvents. */
+    readonly world: PhysicsWorld;
     /** The water volumes buoying bodies this frame, and where to report what each buoyed. */
-    water(): { spec: WaterSpec; record: (body: Body, fraction: number) => void }[];
+    water(): { spec: WaterSpec; record: (body: BodyHandle, fraction: number) => void }[];
     substepsFor(dt: number): number;
     profileStep(): boolean;
     /** The worker failed: PhysicsSystem falls back to stepping inline, on the same world. */
     onFailure(error: unknown): void;
-    /** A step's result was written into the world's bodies, behind its back: what caches its state must re-read. */
-    stateChanged(): void;
 }
 
 /** The engine's own frame-delta cap: how far a body is ever carried along its velocity past its last step. */
@@ -82,21 +79,9 @@ const DRAWN_LEAD_RATE = 0.01;
 const DRAWN_SCALE_RATE = 0.2;
 /** How quickly the frame-time estimate (the lead) follows a changing frame rate: about ten frames. */
 const LEAD_RATE = 0.1;
-// [type mass inertia3 invInertia3 linDamp angDamp linFactor3 angFactor3 fixedRot allowSleep sleepSpeed
-//  sleepTime response group mask trigger character wantsCollide shapeCount] + per shape [id offset3 orient4 response group mask]
-const CFG_BASE = 25, CFG_SHAPE = 11;
-
-interface Slot {
-    body: Body;
-    /** What the worker last knew of this body's state (STATE_STRIDE values; force/torque always 0). */
-    shadow: Float64Array;
-    cfg: Float64Array;
-    material: unknown;
-    seen: number;
-    /** The pose [px py pz qx qy qz qw] the step in flight started this body from. */
-    start: Float64Array;
-    /** The applied step, for drawing: the pose it started from, and the pose + velocity + spin it ended with. */
-    from: Float64Array;
+/** What a body is drawn from, per slot (see visualPose). */
+interface Track {
+    /** The applied step's end, for drawing: pose + velocity + spin. */
     to: Float64Array;
     /**
      * What the body is drawn from: its pose [px py pz qx qy qz qw] at the ends of its last KEYS steps, with
@@ -107,7 +92,7 @@ interface Slot {
     keyTimes: Float64Array;
     keyCount: number;
     keyHead: number;
-    /** Whether `from`/`to` hold a step yet; whether they say the body did not move (nothing to draw). */
+    /** Whether `to` holds a step yet; whether the body did not move (nothing to draw). */
     tracked: boolean;
     settled: boolean;
 }
@@ -120,19 +105,13 @@ export class WorkerExecutor implements PhysicsExecutor {
     private _latest: Snapshot | null = null;
     private _failed = false;
     private _ready = false;
-    private readonly _slotOf = new Map<Body, number>();
-    private readonly _slots: (Slot | undefined)[] = [];
-    private readonly _freeSlots: number[] = [];
-    private readonly _constraintIds = new Map<Constraint, number>();
-    private _nextConstraint = 1;
-    private readonly _knownShapes = new Set<number>();
-    private _frame = 0;
+    /** The world's copying, this end (see pal/replication.ts). */
+    private readonly _mirror: WorldMirror;
+    private readonly _tracks: (Track | undefined)[] = [];
     private _recycle: ArrayBuffer[] = [];
     /** The water volumes the in-flight step was sent, so its buoyancy report finds them. */
-    private _sentWater: { record: (body: Body, fraction: number) => void }[] = [];
+    private _sentWater: { record: (body: BodyHandle, fraction: number) => void }[] = [];
     private readonly _contacts = new ContactRows();
-    private readonly _scratch = new Float64Array(STATE_STRIDE);
-    private _cfgScratch = new Float64Array(64);
 
     // ---- the clock (see the header) ----
     /** Every frame delta step() was given: the game's clock, which the drawn poses follow. */
@@ -192,9 +171,10 @@ export class WorkerExecutor implements PhysicsExecutor {
     public postedFrames = 0;
 
     constructor(private readonly _host: WorkerExecutorHost, private readonly _port: PhysicsPort) {
+        this._mirror = createWorldMirror(_host.world);
         _port.onMessage = (msg) => this._receive(msg);
         _port.onError = (error) => this._fail(error);
-        _port.post({ kind: 'reset', epoch: this._epoch }, []);
+        _port.post({ kind: 'reset', epoch: this._epoch, backend: _host.world.backend }, []);
     }
 
     /** Whether results are read from shared memory (WorkerPort.shared) instead of waiting for their message. */
@@ -251,8 +231,8 @@ export class WorkerExecutor implements PhysicsExecutor {
         this._appliedAt = this._now;
         const start = performance.now();
         physicsStats.workerReadyMs = start - this._arrivedAt;
-        physicsStats.workerBytesDown = (snap.bodyCount * BODY_ROW + snap.contactCount * CONTACT_ROW) * 8
-            + snap.overlaps.byteLength + snap.collides.byteLength + snap.submerged.byteLength;
+        physicsStats.workerBytesDown = snap.bodies.byteLength + snap.contacts.byteLength
+            + snap.events.byteLength + snap.submerged.byteLength;
         this._apply(snap);
         physicsStats.syncMs += performance.now() - start;
         return { dt: snap.dt, contacts: this._contacts };
@@ -308,40 +288,8 @@ export class WorkerExecutor implements PhysicsExecutor {
     }
 
     private _apply(s: Snapshot): void {
-        const world = this._host.world;
-        const scratch = this._scratch;
-        const b = s.bodies;
-        for (let r = 0; r < s.bodyCount; r++) {
-            const o = r * BODY_ROW;
-            const slot = this._slots[b[o]];
-            if (!slot) continue;                          // removed since the step was posted
-            const body = slot.body, sh = slot.shadow;
-            readState(body, scratch, 0);
-            // Anything written here since the diff is kept (see the header). The shadow becomes what the
-            // worker now holds either way, so the next diff sends exactly what differs from it.
-            if (same(scratch, sh, 0, 3)) body.position.set(b[o + 1], b[o + 2], b[o + 3]);
-            else body.position.set(b[o + 1] + scratch[0] - sh[0], b[o + 2] + scratch[1] - sh[1], b[o + 3] + scratch[2] - sh[2]);
-            // The world inertia the step's own integrate left behind, from the orientation it integrated to:
-            // the mirror never integrates, and an impulse with a lever arm (RigidBody.impulse at a point)
-            // turns it into spin through invInertiaWorld, so a stale one spun the body differently.
-            body.quaternion.set(b[o + 4], b[o + 5], b[o + 6], b[o + 7]);
-            body.updateInertiaWorld();
-            if (!same(scratch, sh, 3, 4)) rebaseRotation(body.quaternion, scratch, sh, b, o + 4);
-            body.aabbNeedsUpdate = true;
-            for (let i = 0; i < 7; i++) sh[i] = b[o + 1 + i];
-            // Velocities by component: a script steering with `velocity.x = …` keeps the step's fall.
-            const v = body.velocity, w = body.angularVelocity;
-            if (scratch[7] === sh[7]) v.x = b[o + 8];
-            if (scratch[8] === sh[8]) v.y = b[o + 9];
-            if (scratch[9] === sh[9]) v.z = b[o + 10];
-            if (scratch[10] === sh[10]) w.x = b[o + 11];
-            if (scratch[11] === sh[11]) w.y = b[o + 12];
-            if (scratch[12] === sh[12]) w.z = b[o + 13];
-            for (let i = 7; i < 13; i++) sh[i] = b[o + 1 + i];
-            if (scratch[19] === sh[19]) body.sleepState = b[o + 14] as any;
-            sh[19] = b[o + 14];
-            this._track(slot);
-        }
+        // The bodies, and the events the step raised (out of the world's drainEvents next).
+        this._mirror.apply(s, this._track);
         this._from = this._flightFrom;
         this._to = this._flightTo;
         // The last substep's contacts, for ground stamping, minus any with a body removed since (both sides
@@ -350,25 +298,13 @@ export class WorkerExecutor implements PhysicsExecutor {
         contacts.count = 0;
         for (let i = 0; i < s.contactCount; i++) {
             const o = i * CONTACT_ROW;
-            const bi = this._slots[s.contacts[o]]?.body, bj = this._slots[s.contacts[o + 1]]?.body;
-            if (bi && bj) contacts.push(bi.id, bj.id, s.contacts[o + 2], s.contacts[o + 3], s.contacts[o + 4]);
-        }
-        // Trigger overlaps, in the order cannon raised them.
-        for (let i = 0; i < s.overlaps.length; i += 3) {
-            const a = this._slots[s.overlaps[i + 1]]?.body, b = this._slots[s.overlaps[i + 2]]?.body;
-            if (a && b) this._host.onContact(a, b, s.overlaps[i] === 1);
-        }
-        // First contacts, for the bodies that listen.
-        for (let i = 0; i < s.collides.length; i += 2) {
-            const a = this._slots[s.collides[i]]?.body, b = this._slots[s.collides[i + 1]]?.body;
-            if (a && b) a.dispatchEvent({ type: 'collide', body: b, target: a, contact: null } as any);
+            const a = this._mirror.handleOf(s.contacts[o]), b = this._mirror.handleOf(s.contacts[o + 1]);
+            if (a !== undefined && b !== undefined) contacts.push(a, b, s.contacts[o + 2], s.contacts[o + 3], s.contacts[o + 4]);
         }
         for (let i = 0; i < s.submerged.length; i += 3) {
-            const body = this._slots[s.submerged[i + 1]]?.body;
-            if (body) this._sentWater[s.submerged[i]]?.record(body, s.submerged[i + 2]);
+            const body = this._mirror.handleOf(s.submerged[i + 1]);
+            if (body !== undefined) this._sentWater[s.submerged[i]]?.record(body, s.submerged[i + 2]);
         }
-        (world as any).time = s.time;
-        this._host.stateChanged();
         physicsStats.workerStepMs = s.stats.stepMs;
         physicsStats.broadphaseMs += s.stats.broadphaseMs;
         physicsStats.narrowphaseMs += s.stats.narrowphaseMs;
@@ -377,10 +313,16 @@ export class WorkerExecutor implements PhysicsExecutor {
         this._recycle.push(s.bodies.buffer as ArrayBuffer, s.contacts.buffer as ArrayBuffer);
     }
 
-    /** Record the step a body just took, for {@link visualPose}: where it started, where it is now. */
-    private _track(slot: Slot): void {
-        const body = slot.body, from = slot.from, to = slot.to, start = slot.start;
-        const keys = slot.keys;
+    /**
+     * Record the step a body just took (the mirror's LandedBody), for {@link visualPose}: where it started,
+     * `start`, and the pose, velocity and spin it ended with, `end`.
+     */
+    private _track = (index: number, _body: BodyHandle, start: ArrayLike<number>, end: ArrayLike<number>, sleeping: boolean): void => {
+        const slot = this._tracks[index] ??= {
+            to: new Float64Array(13), keys: new Float64Array(KEYS * KEY_STRIDE), keyTimes: new Float64Array(KEYS),
+            keyCount: 0, keyHead: 0, tracked: false, settled: false,
+        };
+        const to = slot.to, keys = slot.keys;
         if (slot.keyCount > 0) {
             // Carry the history along with whatever was written since the last step ended (start − its end).
             const last = ((slot.keyHead + KEYS - 1) % KEYS) * KEY_STRIDE;
@@ -408,32 +350,29 @@ export class WorkerExecutor implements PhysicsExecutor {
         }
         // Where this step started, when that is not where the last one ended (the first step, or a gap).
         const lastTime = slot.keyCount > 0 ? slot.keyTimes[(slot.keyHead + KEYS - 1) % KEYS] : NaN;
-        const v = body.velocity;
-        if (!(Math.abs(lastTime - this._flightFrom) < 1e-9)) pushKey(slot, start, this._flightFrom, v.x, v.y, v.z);
-        from.set(start);
-        const p = body.position, q = body.quaternion, w = body.angularVelocity;
-        to[0] = p.x; to[1] = p.y; to[2] = p.z; to[3] = q.x; to[4] = q.y; to[5] = q.z; to[6] = q.w;
-        to[7] = v.x; to[8] = v.y; to[9] = v.z; to[10] = w.x; to[11] = w.y; to[12] = w.z;
-        pushKey(slot, to, this._flightTo, v.x, v.y, v.z);
+        const vx = end[7], vy = end[8], vz = end[9];
+        if (!(Math.abs(lastTime - this._flightFrom) < 1e-9)) pushKey(slot, start, this._flightFrom, vx, vy, vz);
+        for (let i = 0; i < 13; i++) to[i] = end[i];
+        pushKey(slot, to, this._flightTo, vx, vy, vz);
         slot.tracked = true;
-        let still = body.sleepState === Body.SLEEPING || (to[7] === 0 && to[8] === 0 && to[9] === 0 && to[10] === 0 && to[11] === 0 && to[12] === 0);
+        let still = sleeping || (to[7] === 0 && to[8] === 0 && to[9] === 0 && to[10] === 0 && to[11] === 0 && to[12] === 0);
         for (let k = 0; still && k < slot.keyCount; k++) still = same(to, keys, 0, 7, k * KEY_STRIDE);
         slot.settled = still;
-    }
+    };
 
     // ---- drawing ----
 
     /**
-     * The pose to DRAW `body` with this frame, [px py pz qx qy qz qw] (centre of mass, like body.position),
-     * written into `out`. Its last step's two ends interpolated at the frame's time — slightly behind the
+     * The pose to DRAW `body` with this frame, [px py pz qx qy qz qw] (in the frame colliderFrameToOrigin
+     * takes), written into `out`. Its last step's two ends interpolated at the frame's time — slightly behind the
      * clock, by the typical misprediction, so it is nearly always an interpolation — or the end carried on
      * along the body's velocity for a frame that outran the step (a long frame, a late worker), at most
      * a few frames' worth. False when there is nothing to draw but the body's own pose: no step taken yet,
      * or the body did not move.
      */
-    public visualPose(body: Body, out: Float64Array): boolean {
-        const index = this._slotOf.get(body);
-        const slot = index === undefined ? undefined : this._slots[index];
+    public visualPose(body: BodyHandle, out: Float64Array): boolean {
+        const index = this._mirror.slotOf(body);
+        const slot = index === undefined ? undefined : this._tracks[index];
         if (!slot || !slot.tracked || slot.settled) return false;
         const b = slot.to;
         const s = this._scale;
@@ -443,7 +382,7 @@ export class WorkerExecutor implements PhysicsExecutor {
         if (time >= times[newest]) {
             // Past the last step's end: carry on along its velocity (a long frame, a late step), a little.
             const e = Math.min(time - times[newest], Math.min(MAX_PENDING, 2.5 * this._lead * s));
-            if (e <= 0 || body.sleepState === Body.SLEEPING) {
+            if (e <= 0 || this._host.world.isSleeping(body)) {
                 for (let i = 0; i < 7; i++) out[i] = b[i];
             } else {
                 physicsStats.workerExtrapolated++;
@@ -511,20 +450,24 @@ export class WorkerExecutor implements PhysicsExecutor {
 
     private _post(stepDt: number): void {
         const start = performance.now();
-        const msg = this._diff(stepDt);
-        const payload: ArrayBuffer[] = [msg.writes.buffer as ArrayBuffer];
-        for (const op of msg.ops) if (op.op === 'addBody' || op.op === 'config') {
-            for (const s of op.config.shapes) payload.push(...shapeBuffers(s.def));
-            if (op.op === 'addBody') payload.push(op.state.buffer as ArrayBuffer);
-        }
-        const transfer = uniqueBuffers([...payload, ...this._recycle]);
+        const world = this._host.world;
+        const diff = this._mirror.diff();
+        for (const slot of diff.released) this._tracks[slot] = undefined;
+        const water = this._host.water();
+        this._sentWater = water;
+        const msg: StepMessage = {
+            kind: 'step', epoch: this._epoch, seq: ++this._seq, dt: stepDt, substeps: this._host.substepsFor(stepDt),
+            profile: this._host.profileStep(), changes: diff.changes,
+            gravity: world.gravity, iterations: world.solverIterations, time: world.time,
+            water: water.map(w => w.spec), recycle: this._recycle,
+        };
+        const transfer = uniqueBuffers([...diff.transfer, ...this._recycle]);
         // Measured before posting: a transferred buffer reads as empty afterwards.
         let bytes = 0;
-        for (const buffer of uniqueBuffers(payload)) bytes += buffer.byteLength;
+        for (const buffer of uniqueBuffers(diff.transfer)) bytes += buffer.byteLength;
         physicsStats.workerBytesUp = bytes;
-        physicsStats.workerWrites = msg.writeCount;
-        physicsStats.workerOps = msg.ops.length;
-        msg.recycle = this._recycle;
+        physicsStats.workerWrites = diff.writes;
+        physicsStats.workerOps = diff.ops;
         this._recycle = [];
         this._inFlight = true;
         this._postedAt = performance.now();
@@ -535,124 +478,6 @@ export class WorkerExecutor implements PhysicsExecutor {
             this._fail(e);
         }
         physicsStats.syncMs += performance.now() - start;
-    }
-
-    private _diff(dt: number): StepMessage {
-        const world = this._host.world;
-        const frame = ++this._frame;
-        const removes: Op[] = [], adds: Op[] = [], configs: Op[] = [];
-        const writes: number[] = [];
-        const scratch = this._scratch;
-
-        for (const body of world.bodies) {
-            let index = this._slotOf.get(body);
-            const wantsCollide = body.hasAnyEventListener('collide');
-            if (index === undefined) {
-                index = this._freeSlots.pop() ?? this._slots.length;
-                const shadow = new Float64Array(STATE_STRIDE);
-                readState(body, shadow, 0);
-                const state = new Float64Array(shadow);
-                // Force and torque applied before the body arrived are consumed by this step, like inline.
-                shadow[13] = shadow[14] = shadow[15] = shadow[16] = shadow[17] = shadow[18] = 0;
-                body.force.set(0, 0, 0); body.torque.set(0, 0, 0);
-                const cfg = this._configNumbers(body, wantsCollide).slice();
-                this._slots[index] = {
-                    body, shadow, cfg, material: body.material, seen: frame,
-                    start: shadow.slice(0, 7), from: new Float64Array(7), to: new Float64Array(13),
-                    keys: new Float64Array(KEYS * KEY_STRIDE), keyTimes: new Float64Array(KEYS), keyCount: 0, keyHead: 0,
-                    tracked: false, settled: false,
-                };
-                this._slotOf.set(body, index);
-                adds.push({ op: 'addBody', slot: index, config: encodeConfig(body, this._knownShapes, wantsCollide), state });
-                continue;
-            }
-            const slot = this._slots[index]!;
-            slot.seen = frame;
-            const cfg = this._configNumbers(body, wantsCollide);
-            if (cfg.length !== slot.cfg.length || !same(cfg, slot.cfg, 0, cfg.length) || body.material !== slot.material) {
-                slot.cfg = cfg.slice();
-                slot.material = body.material;
-                configs.push({ op: 'config', slot: index, config: encodeConfig(body, this._knownShapes, wantsCollide) });
-            }
-            readState(body, scratch, 0);
-            const sh = slot.shadow;
-            let mask = 0;
-            if (!same(scratch, sh, 0, 7)) mask |= WRITE_POSE;
-            if (!same(scratch, sh, 7, 3)) mask |= WRITE_VEL;
-            if (!same(scratch, sh, 10, 3)) mask |= WRITE_ANGVEL;
-            if (scratch[13] !== 0 || scratch[14] !== 0 || scratch[15] !== 0) mask |= WRITE_FORCE;
-            if (scratch[16] !== 0 || scratch[17] !== 0 || scratch[18] !== 0) mask |= WRITE_TORQUE;
-            if (scratch[19] !== sh[19]) mask |= WRITE_SLEEP;
-            if (mask) {
-                writes.push(index, mask);
-                for (let i = 0; i < STATE_STRIDE; i++) writes.push(scratch[i]);
-                for (let i = 0; i < STATE_STRIDE; i++) sh[i] = scratch[i];
-                // A force is consumed by the step it goes out with, as cannon clears it after stepping inline.
-                if (mask & (WRITE_FORCE | WRITE_TORQUE)) { body.force.set(0, 0, 0); body.torque.set(0, 0, 0); }
-                sh[13] = sh[14] = sh[15] = sh[16] = sh[17] = sh[18] = 0;
-            }
-            // The pose this step starts the body from: what the worker holds once the writes are applied.
-            for (let i = 0; i < 7; i++) slot.start[i] = sh[i];
-        }
-        for (let i = 0; i < this._slots.length; i++) {
-            const slot = this._slots[i];
-            if (!slot || slot.seen === frame) continue;
-            removes.push({ op: 'removeBody', slot: i });
-            this._slotOf.delete(slot.body);
-            this._slots[i] = undefined;
-            this._freeSlots.push(i);
-        }
-
-        // Constraints: by identity. Removed ones go first, new ones after the bodies they join.
-        const constraintRemoves: Op[] = [], constraintAdds: Op[] = [];
-        const live = new Set(world.constraints);
-        for (const [c, id] of this._constraintIds) if (!live.has(c)) { constraintRemoves.push({ op: 'removeConstraint', id }); this._constraintIds.delete(c); }
-        for (const c of world.constraints) {
-            if (this._constraintIds.has(c)) continue;
-            const def = encodeConstraint(c, b => this._slotOf.get(b));
-            if (!def) continue;
-            const id = this._nextConstraint++;
-            this._constraintIds.set(c, id);
-            constraintAdds.push({ op: 'addConstraint', id, def });
-        }
-
-        const water = this._host.water();
-        this._sentWater = water;
-        const g = world.gravity;
-        const solver = world.solver as unknown as { iterations?: number };
-        return {
-            kind: 'step', epoch: this._epoch, seq: ++this._seq, dt, substeps: this._host.substepsFor(dt),
-            profile: this._host.profileStep(),
-            ops: [...constraintRemoves, ...removes, ...adds, ...configs, ...constraintAdds],
-            writes: Float64Array.from(writes), writeCount: writes.length / (STATE_STRIDE + 2),
-            gravity: [g.x, g.y, g.z], iterations: solver.iterations ?? 0, time: (world as any).time ?? 0,
-            water: water.map(w => w.spec), recycle: [],
-        };
-    }
-
-    /** The numbers a body's configuration is compared by (see CFG_BASE). */
-    private _configNumbers(body: Body, wantsCollide: boolean): Float64Array {
-        const n = CFG_BASE + body.shapes.length * CFG_SHAPE;
-        if (this._cfgScratch.length < n) this._cfgScratch = new Float64Array(n * 2);
-        const c = this._cfgScratch;
-        c[0] = body.type; c[1] = body.mass;
-        c[2] = body.inertia.x; c[3] = body.inertia.y; c[4] = body.inertia.z;
-        c[5] = body.invInertia.x; c[6] = body.invInertia.y; c[7] = body.invInertia.z;
-        c[8] = body.linearDamping; c[9] = body.angularDamping;
-        c[10] = body.linearFactor.x; c[11] = body.linearFactor.y; c[12] = body.linearFactor.z;
-        c[13] = body.angularFactor.x; c[14] = body.angularFactor.y; c[15] = body.angularFactor.z;
-        c[16] = body.fixedRotation ? 1 : 0; c[17] = body.allowSleep ? 1 : 0;
-        c[18] = body.sleepSpeedLimit; c[19] = body.sleepTimeLimit;
-        c[20] = body.collisionResponse ? 1 : 0; c[21] = body.collisionFilterGroup; c[22] = body.collisionFilterMask;
-        c[23] = (body.isTrigger ? 1 : 0) + (isCharacterBody(body) ? 2 : 0) + (wantsCollide ? 4 : 0);
-        c[24] = body.shapes.length;
-        for (let i = 0; i < body.shapes.length; i++) {
-            const o = CFG_BASE + i * CFG_SHAPE, s = body.shapes[i], off = body.shapeOffsets[i], q = body.shapeOrientations[i];
-            c[o] = s.id; c[o + 1] = off.x; c[o + 2] = off.y; c[o + 3] = off.z;
-            c[o + 4] = q.x; c[o + 5] = q.y; c[o + 6] = q.z; c[o + 7] = q.w;
-            c[o + 8] = s.collisionResponse ? 1 : 0; c[o + 9] = s.collisionFilterGroup; c[o + 10] = s.collisionFilterMask;
-        }
-        return c.subarray(0, n);
     }
 
     public reset(): void {
@@ -667,14 +492,11 @@ export class WorkerExecutor implements PhysicsExecutor {
         this._visLead = 0;
         this._applyGap = 0;
         this._appliedAt = NaN;
-        this._slotOf.clear();
-        this._slots.length = 0;
-        this._freeSlots.length = 0;
-        this._constraintIds.clear();
-        this._knownShapes.clear();
+        this._mirror.clear();
+        this._tracks.length = 0;
         this._recycle = [];
         this._sentWater = [];
-        this._port.post({ kind: 'reset', epoch: this._epoch }, []);
+        this._port.post({ kind: 'reset', epoch: this._epoch, backend: this._host.world.backend }, []);
         // Still warming up: the answer it was waiting for belongs to the old epoch, so ask again.
         if (!this._ready) this.prime();
     }
@@ -693,7 +515,7 @@ const KEYS = 32;
 const KEY_STRIDE = 10;
 
 /** Append a step end (pose and velocity at `time`) to a slot's drawing history. */
-function pushKey(slot: Slot, pose: ArrayLike<number>, time: number, vx: number, vy: number, vz: number): void {
+function pushKey(slot: Track, pose: ArrayLike<number>, time: number, vx: number, vy: number, vz: number): void {
     const o = slot.keyHead * KEY_STRIDE;
     for (let i = 0; i < 7; i++) slot.keys[o + i] = pose[i];
     slot.keys[o + 7] = vx; slot.keys[o + 8] = vy; slot.keys[o + 9] = vz;
@@ -726,19 +548,6 @@ function hermitePose(keys: Float64Array, times: Float64Array, p: number, a: numb
     out[3] = x * len; out[4] = y * len; out[5] = z * len; out[6] = w * len;
 }
 
-/** `out` = a pose between `a` and `b` ([px py pz qx qy qz qw]): position lerped, rotation nlerped the short way. */
-function lerpPose(a: ArrayLike<number>, b: ArrayLike<number>, t: number, out: Float64Array): void {
-    out[0] = a[0] + (b[0] - a[0]) * t;
-    out[1] = a[1] + (b[1] - a[1]) * t;
-    out[2] = a[2] + (b[2] - a[2]) * t;
-    // nlerp along the short way: a step turns a body by a few degrees at most.
-    const s = a[3] * b[3] + a[4] * b[4] + a[5] * b[5] + a[6] * b[6] < 0 ? -1 : 1;
-    const x = a[3] + (s * b[3] - a[3]) * t, y = a[4] + (s * b[4] - a[4]) * t;
-    const z = a[5] + (s * b[5] - a[5]) * t, w = a[6] + (s * b[6] - a[6]) * t;
-    const n = 1 / Math.hypot(x, y, z, w);
-    out[3] = x * n; out[4] = y * n; out[5] = z * n; out[6] = w * n;
-}
-
 /** Whether a[from..from+count) equals b[bFrom..] (NaN equal to NaN). `bFrom` defaults to `from`. */
 function same(a: ArrayLike<number>, b: ArrayLike<number>, from: number, count: number, bFrom: number = from): boolean {
     for (let i = 0; i < count; i++) {
@@ -746,27 +555,6 @@ function same(a: ArrayLike<number>, b: ArrayLike<number>, from: number, count: n
         if (x !== y && !(x !== x && y !== y)) return false;
     }
     return true;
-}
-
-/**
- * A body turned here since the diff, turned by the same amount from where the step left it:
- * `(now · was⁻¹) · stepped`, with `now` at scratch[3..6], `was` at shadow[3..6], `stepped` at row[at..].
- */
-function rebaseRotation(out: { x: number; y: number; z: number; w: number; set(x: number, y: number, z: number, w: number): unknown }, now: ArrayLike<number>, was: ArrayLike<number>, row: ArrayLike<number>, at: number): void {
-    const ax = now[3], ay = now[4], az = now[5], aw = now[6];
-    const bx = -was[3], by = -was[4], bz = -was[5], bw = was[6];
-    // d = now · conj(was)
-    const dx = aw * bx + ax * bw + ay * bz - az * by;
-    const dy = aw * by - ax * bz + ay * bw + az * bx;
-    const dz = aw * bz + ax * by - ay * bx + az * bw;
-    const dw = aw * bw - ax * bx - ay * by - az * bz;
-    const sx = row[at], sy = row[at + 1], sz = row[at + 2], sw = row[at + 3];
-    const x = dw * sx + dx * sw + dy * sz - dz * sy;
-    const y = dw * sy - dx * sz + dy * sw + dz * sx;
-    const z = dw * sz + dx * sy - dy * sx + dz * sw;
-    const w = dw * sw - dx * sx - dy * sy - dz * sz;
-    const n = 1 / Math.hypot(x, y, z, w);
-    out.set(x * n, y * n, z * n, w * n);
 }
 
 function uniqueBuffers(list: ArrayBuffer[]): ArrayBuffer[] {

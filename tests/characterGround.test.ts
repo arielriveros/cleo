@@ -36,7 +36,6 @@ const normalAt = (degrees: number): [number, number, number] => {
     return [Math.sin(r), Math.cos(r), 0];
 };
 
-const world = (p: PhysicsSystem) => (p as any)._cannon.raw;
 const record = (p: PhysicsSystem, body: Body, dot: number, normal: [number, number, number]) =>
     (p as any)._record(body, dot, normal);
 /** The stamping clock. `update()` advances it; nothing else here does, so tests set it by hand. */
@@ -123,7 +122,6 @@ describe('ground stamping — which contact becomes the ground', () => {
         // centre and reports what is actually underneath it, which on straddled terrain is the facet
         // bearing the weight rather than the flattest neighbour.
         const p = physics();
-        const w = world(p);
 
         // A level floor under the probe...
         const floor = makeBody(box(10, 0.5, 10), { position: [0, -0.5, 0] });
@@ -194,7 +192,6 @@ describe('a character walking up a heightfield', () => {
         const p = physics();
         ramp(p, 1);
         const body = walker(p, 4, 0.2);
-        const w = world(p);
 
         // Settle onto the surface first, so the measured run does not include the drop - and then zero
         // the velocity. Both characters are authored `friction: 0`, so a body left alone on a slope slides

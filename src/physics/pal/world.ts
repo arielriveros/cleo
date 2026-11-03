@@ -47,6 +47,11 @@ export interface PhysicsWorld {
     bodies(): readonly BodyHandle[];
     /** Enabled bodies. */
     readonly bodyCount: number;
+    /**
+     * Bodies the broadphase will visit next step, where the backend can tell: `bodyCount` in a healthy
+     * world, more when bodies left it without the broadphase hearing (a leak the Performance HUD shows).
+     */
+    broadphaseBodyCount?(): number;
 
     /**
      * Replace a body's colliders and re-derive its mass properties, its mass placed as `centerOfMass` says

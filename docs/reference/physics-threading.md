@@ -60,14 +60,23 @@ Everything a script touches stays on the main thread and keeps working unchanged
 
 ## How it works
 
-The main thread keeps its world (see [Physics backends](physics-backends.md)) as a mirror that never steps. At the end of each frame
-(`PhysicsSystem.endFrame`, after scripts and before render) it diffs every body against what the worker
-was last told and posts only the changes plus the step. The worker builds its world with the same setup
-code (`physics/pal/cannon/worldConfig.ts`) and steps it exactly as the inline executor does. At the start of the next
-frame the snapshot — poses, velocities, sleep states, the last substep's contacts, trigger events,
-first contacts, buoyancy — is written back into the mirror, and each dynamic body's node is drawn
-interpolated from its last steps (`WorkerExecutor.visualPose`, with a history of 32 steps per body). One step is in flight at a time. If the worker fails, physics falls back
-to the main thread and carries on from the worker's last step.
+The main thread keeps its world (see [Physics backends](physics-backends.md)) and does not step it while
+the worker does. At the end of each frame (`PhysicsSystem.endFrame`, after scripts and before render) what
+changed in it since the worker was last told is posted with the step. The worker keeps a copy of the world
+on the same backend and steps it exactly as the inline executor steps the original. At the start of the
+next frame the result — poses, velocities, sleep states, the last substep's contacts, trigger events and
+first contacts in the order the step raised them, buoyancy — is written back into the world, and each
+dynamic body's node is drawn interpolated from its last steps (`WorkerExecutor.visualPose`, with a history
+of 32 steps per body). One step is in flight at a time. If the worker fails, physics falls back to the main
+thread and carries on from the worker's last step.
+
+How the world is copied is its backend's business; the timing, the drawing, the messaging and the
+fallback are the same on every backend. Each backend brings two ends (`physics/pal/replication.ts`): a
+**mirror** over the main thread's world, which diffs it each frame and writes each result back, and a
+**replica** in the worker, which builds the copy from those diffs. cannon's
+(`physics/pal/cannon/mirror.ts`, `replica.ts`, `replicaCodec.ts`) sends bodies, shapes and constraints as
+data, built with the same setup code (`physics/pal/cannon/worldConfig.ts`), and carries what a rebuilt
+body cannot measure again the same way (its inertia, a lock's frame, a hinge's exact axes).
 
 **How the result comes back.** A posted reply is a task on the main thread, and the browser only runs it
 once the thread is free: after the frame's render. Measured in the Valley, a 1.5 ms step came back 17 ms
@@ -89,8 +98,9 @@ pooled foliage).
 `tests/physicsWorkerSmoothness.test.ts` covers how bodies are drawn on uneven frames, through late steps,
 and under scripts that move them.
 
-Code: `src/physics/executor/` (the inline and worker executors) and `src/physics/worker/` (protocol,
-codec, the worker's world).
+Code: `src/physics/executor/` (the inline and worker executors), `src/physics/worker/` (the messages, the
+worker's step loop, the shared-memory replies) and each backend's mirror and replica
+(`src/physics/pal/replication.ts`).
 
 ## Measurements
 

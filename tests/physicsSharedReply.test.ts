@@ -10,7 +10,7 @@ function snapshot(seq: number, bodies: number): Snapshot {
         kind: 'snapshot', epoch: 3, seq, dt: 1 / 60, time: seq / 60,
         bodies: Float64Array.from({ length: bodies * 15 }, (_, i) => i * 0.5 + seq), bodyCount: bodies,
         contacts: Float64Array.from([0, 1, 0, 1, 0]), contactCount: 1,
-        overlaps: Int32Array.from([1, 0, 2]), collides: Int32Array.from([4, 5]),
+        events: Int32Array.from([1, 0, 2, 3, 4, 5]),
         submerged: Float64Array.from([0, 2, 0.75]),
         stats: { stepMs: 1.5, broadphaseMs: 0.1, narrowphaseMs: 0.4, solveMs: 0.8, integrateMs: 0.2 },
     };

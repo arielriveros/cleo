@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createPhysicsWorld } from '../../src/physics/pal/createWorld';
+import { createPhysicsWorld, createWorldMirror, createWorldReplica } from '../../src/physics/pal/createWorld';
 import { PhysicsEventKind } from '../../src/physics/pal/types';
 import type { BodyDesc, BodyHandle, PhysicsBackendKind, ShapeDesc } from '../../src/physics/pal/types';
 import type { PhysicsWorld } from '../../src/physics/pal/world';
@@ -471,6 +471,80 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             w.destroyJoint(j);
             run(w, 60);
             expect(pose(w, bob)[1]).toBeLessThan(0);
+        });
+    });
+
+    describe('a copy for the physics worker (pal/replication.ts)', () => {
+        // What workerCore and WorkerExecutor do with a backend's two ends, without the clock or the ports:
+        // the world does not step, its replica steps instead, and the mirror writes each step back.
+        function scene(w: PhysicsWorld) {
+            ground(w);
+            const zone = body(w, { kind: 'box', halfExtents: [1, 1, 1] }, [0, 1, 0], { mass: 0, sensor: true });
+            const ball = body(w, { kind: 'sphere', radius: 0.5 }, [0, 3, 0], { reportContacts: true });
+            const crate = body(w, { kind: 'box', halfExtents: [0.4, 0.4, 0.4] }, [1.5, 2, 0], { rotation: [0, 0.3826834323650898, 0, 0.9238795325112867] });
+            const bob = body(w, { kind: 'sphere', radius: 0.2 }, [4, 3, 0]);
+            const hook = body(w, { kind: 'sphere', radius: 0.1 }, [4, 4, 0], { mass: 0 });
+            w.createJoint({ kind: 'ball', a: hook, b: bob, anchorA: [0, 0, 0], anchorB: [0, 1, 0] });
+            return { zone, ball, crate, bob };
+        }
+        type Scene = ReturnType<typeof scene>;
+        const nameIn = (s: Scene) => (h: BodyHandle) => (Object.keys(s) as (keyof Scene)[]).find(k => s[k] === h) ?? 'ground';
+        const log = (w: PhysicsWorld, s: Scene, out: string[]) => w.drainEvents((kind, a, b) =>
+            out.push(`${kind === PhysicsEventKind.ContactBegin ? 'contact' : kind === PhysicsEventKind.SensorBegin ? 'enter' : 'exit'} ${nameIn(s)(a)} ${nameIn(s)(b)}`));
+
+        it('steps as the world itself would, and the world reports what the copy raised', () => {
+            const inline = make(), original = make();
+            const a = scene(inline), b = scene(original);
+            const mirror = createWorldMirror(original), replica = createWorldReplica(kind);
+            const inlineLog: string[] = [], copyLog: string[] = [];
+            const landed = new Set<BodyHandle>();
+            for (let frame = 0; frame < 120; frame++) {
+                // The same writes on both sides: a shove, a force, a body leaving.
+                for (const [w, s] of [[inline, a], [original, b]] as const) {
+                    if (frame === 30) w.setLinearVelocity(s.crate, 2, 3, 0);
+                    if (frame === 40) w.applyForce(s.bob, [0, 0, 300]);
+                    if (frame === 80) w.destroyBody(s.crate);
+                }
+                inline.step(H);
+                log(inline, a, inlineLog);
+
+                const diff = mirror.diff();
+                replica.receive(structuredClone(diff.changes));
+                replica.world.gravity = original.gravity;
+                replica.world.time = original.time;
+                replica.world.step(H);
+                const events: number[] = [];
+                replica.world.drainEvents((k, x, y) => events.push(k, replica.slotOf(x)!, replica.slotOf(y)!));
+                const rows = replica.report(bytes => new ArrayBuffer(bytes));
+                mirror.apply(structuredClone({ ...rows, events: Int32Array.from(events), time: replica.world.time }), (_slot, h) => landed.add(h));
+                log(original, b, copyLog);
+            }
+            for (const key of ['ball', 'bob'] as const) {
+                const p = pose(original, b[key]), q = pose(inline, a[key]);
+                for (let i = 0; i < 7; i++) expect(p[i], `${key} pose[${i}]`).toBeCloseTo(q[i], 9);
+                const v = velocity(original, b[key]), u = velocity(inline, a[key]);
+                for (let i = 0; i < 6; i++) expect(v[i], `${key} velocity[${i}]`).toBeCloseTo(u[i], 9);
+            }
+            expect(original.hasBody(b.crate)).toBe(false);
+            expect(original.time).toBeCloseTo(inline.time, 12);
+            expect(copyLog).toEqual(inlineLog);
+            expect(copyLog).toContain('enter zone ball');
+            expect(copyLog.some(e => e.startsWith('contact ball'))).toBe(true);
+            expect(landed.has(b.ball) && landed.has(b.bob)).toBe(true);
+            // The slots name the world's own bodies.
+            expect(mirror.handleOf(mirror.slotOf(b.ball)!)).toBe(b.ball);
+        });
+
+        it('starts over from empty once cleared', () => {
+            const original = make();
+            scene(original);
+            const mirror = createWorldMirror(original), replica = createWorldReplica(kind);
+            replica.receive(structuredClone(mirror.diff().changes));
+            expect(replica.world.bodyCount).toBe(original.bodyCount);
+            mirror.clear(); replica.clear();
+            expect(replica.world.bodyCount).toBe(0);
+            replica.receive(structuredClone(mirror.diff().changes));
+            expect(replica.world.bodyCount).toBe(original.bodyCount);
         });
     });
 });

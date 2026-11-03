@@ -37,9 +37,9 @@ export const CANNON_CAPABILITIES: PhysicsCapabilities = {
  * handle is its cannon `id`, so a handle stays valid for exactly as long as cannon knows the body.
  *
  * Bodies made through {@link createBody} are CannonBody (cannonBody.ts), which keeps the node origin
- * apart from cannon's centre of mass. The members after the interface's — `raw`, `bodyOf`, `materialFor`,
- * `touch` — are cannon-only ways in, for the worker executor that replicates the cannon world; nothing
- * outside physics/ may use them.
+ * apart from cannon's centre of mass. The members after the interface's — `raw`, `materials`, `bodyOf`,
+ * `materialFor`, `touch`, `raise` — are cannon-only ways in, for the copy of the world in the physics worker
+ * (mirror.ts, replica.ts); nothing outside pal/cannon/ may use them.
  */
 export class CannonWorld implements PhysicsWorld {
     public readonly backend = 'cannon' as const;
@@ -155,6 +155,9 @@ export class CannonWorld implements PhysicsWorld {
     }
 
     public get bodyCount(): number { return this.raw.bodies.length; }
+
+    /** See worldTeardown for how a cannon world leaks bodies into its broadphase. */
+    public broadphaseBodyCount(): number { return broadphaseBodyCount(this.raw); }
 
     public setCollisionFilter(h: BodyHandle, group: number, mask: number): void {
         const body = this._body(h);
@@ -429,7 +432,7 @@ export class CannonWorld implements PhysicsWorld {
         this.onPreSubstep = null;
     }
 
-    // ---- cannon only: for engine code whose bodies are still cannon bodies ----
+    // ---- cannon only: for the copy in the physics worker (mirror.ts, replica.ts) ----
 
     /** The cannon body behind a handle, enabled or not (undefined once destroyed). */
     public bodyOf(h: BodyHandle): Body | undefined { return this.raw.getBodyById(h) ?? this._disabled.get(h); }
@@ -442,8 +445,8 @@ export class CannonWorld implements PhysicsWorld {
     /** Something wrote the cannon bodies directly (the worker's step landing): caches of their state must re-read. */
     public touch(): void { this._version++; }
 
-    /** Bodies the broadphase will iterate next step: `bodyCount` in a healthy world (see worldTeardown). */
-    public broadphaseBodyCount(): number { return broadphaseBodyCount(this.raw); }
+    /** Queue an event a step elsewhere raised (the worker's, landing through mirror.ts): drainEvents delivers it. */
+    public raise(kind: PhysicsEventKind, a: BodyHandle, b: BodyHandle): void { this._events.push(kind, a, b); }
 
     // ---- internals ----
 

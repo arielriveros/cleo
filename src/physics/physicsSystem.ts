@@ -20,7 +20,6 @@ import type { ContactSource, PhysicsExecutor } from "./executor/physicsExecutor"
 import { createPhysicsWorld } from "./pal/createWorld";
 import type { PhysicsWorld } from "./pal/world";
 import { PhysicsEventKind, type BodyHandle, type ColliderGeometry, type ColliderPart } from "./pal/types";
-import { CannonWorld } from "./pal/cannon/cannonWorld";
 import { PhysicsBody } from "./physicsBody";
 import type { JointDesc, JointHandle } from "./pal/types";
 import { WorkerPort, type PhysicsPort } from "./worker/ports";
@@ -137,11 +136,6 @@ export class PhysicsSystem {
   private _scene!: Scene;
   /** The world on its backend (see pal/). Every simulation and query goes through it. */
   private _world!: PhysicsWorld;
-  /**
-   * The same world as cannon's, for the one thing that still replicates cannon objects: the physics worker
-   * (executor/workerExecutor.ts), which mirrors the cannon world shape for shape.
-   */
-  private _cannon!: CannonWorld;
   private _gravity: number[];
   private _ragdolls: Ragdoll[] = [];
   /** Unpaused seconds of simulated time; the clock GROUND_GRACE is measured against. */
@@ -274,8 +268,6 @@ export class PhysicsSystem {
     try {
       // Built the same way the physics worker builds its own (pal/cannon/worldConfig.ts), so both step alike.
       this._world = world ?? createPhysicsWorld('cannon', this._gravity);
-      if (!(this._world instanceof CannonWorld)) throw new Error(`physics: the ${this._world.backend} backend cannot host the engine's bodies yet`);
-      this._cannon = this._world;
       this._world.gravity = [this._gravity[0], this._gravity[1], this._gravity[2]];
       // Buoyancy: once per SUBSTEP, before the solver, so the water's push is integrated exactly like
       // gravity is. See physics/buoyancy.ts. (Trigger enter/exit come from the world's events, drained
@@ -312,7 +304,7 @@ export class PhysicsSystem {
       if (inline) this._updateActivation(deltaTime);
       const result = this._executor.step(deltaTime, timeScale);
       physicsStats.executor = this._executor.kind;
-      // What the inline step reported (the worker's arrives with its snapshot, through _onContact).
+      // What the step reported: inline, as it ran; with the worker, as its result was applied just now.
       this._drainEvents();
       // Seconds actually simulated. Inline, the frame's own; with the worker, its step's — or 0 while it
       // is still running, when nothing below that depends on a step happening runs.
@@ -378,8 +370,7 @@ export class PhysicsSystem {
             // then moves or turns it moves the body by the same amount (see Node._showSimulatedPose).
             const q = node.body.quaternion, simRotation = this._simRotation;
             simRotation[0] = q.x; simRotation[1] = q.y; simRotation[2] = q.z; simRotation[3] = q.w;
-            const raw = this._cannon.bodyOf(node.body.handle);
-            if (raw && worker.visualPose(raw, this._visualPose)) {
+            if (worker.visualPose(node.body.handle, this._visualPose)) {
               this._world.colliderFrameToOrigin(node.body.handle, this._visualPose, this._visualOrigin);
               node._showSimulatedPose(this._visualOrigin, this._visualRotation, pos, simRotation);
             } else if (!asleep || node._drawnApart) {
@@ -447,7 +438,7 @@ export class PhysicsSystem {
       physicsStats.bodies = this._world?.bodyCount ?? 0;
       // Equal to `bodies` in a healthy world. Larger means bodies were removed without the broadphase
       // hearing about it and are still being simulated against — see pal/cannon/worldTeardown.clearWorld.
-      physicsStats.broadphaseBodies = this._world ? this._cannon.broadphaseBodyCount() : 0;
+      physicsStats.broadphaseBodies = this._world?.broadphaseBodyCount?.() ?? physicsStats.bodies;
       physicsStats.frameMs = performance.now() - frameStart;
       // AFTER this frame's inline step: a worker that takes over now posts its first step at this frame's
       // end, so no frame goes without one.
@@ -1332,6 +1323,12 @@ export class PhysicsSystem {
   private _useWorker(frameDt = 0): boolean {
     if (this._executor?.kind === 'worker' || this._pendingWorker) return true;
     if (!this._workerFactory || !this._world) return false;
+    // A backend that cannot copy its world into a worker (no mirror and replica, see pal/replication.ts).
+    if (!this._world.capabilities.threadable) {
+      this._workerFallback = `The ${this._world.backend} physics backend runs on the main thread only.`;
+      this._auto.gaveUp = true;
+      return false;
+    }
     // One core: the worker would take its time from the same core the frame needs, and stepping inline
     // costs nothing to copy.
     if (PhysicsSystem.cores() < 2 && typeof navigator !== 'undefined' && navigator.hardwareConcurrency) {
@@ -1342,12 +1339,10 @@ export class PhysicsSystem {
     try {
       const port = this._workerFactory();
       const worker = new WorkerExecutor({
-        world: this._cannon.raw,
-        onContact: (a, b, begin) => this._onContact(this._bodyOf(a.id as BodyHandle) ?? null, this._bodyOf(b.id as BodyHandle) ?? null, begin),
+        world: this._world,
         water: () => this._waterSpecs(),
         substepsFor: dt => PhysicsSystem.substepsFor(dt, this.maxSubsteps),
         profileStep: () => this.profileStep,
-        stateChanged: () => this._cannon.touch(),
         onFailure: (error) => {
           const reason = error instanceof Error ? error.message : String(error);
           Logger.warn(`Physics worker failed (${reason}); stepping on the main thread instead.`, 'Physics');
@@ -1434,15 +1429,15 @@ export class PhysicsSystem {
 
 
   /** The enabled water volumes as plain data for the worker, with where to report what each buoyed. */
-  private _waterSpecs(): { spec: import('./waterSurface').WaterSpec; record: (body: { id: number }, fraction: number) => void }[] {
+  private _waterSpecs(): { spec: import('./waterSurface').WaterSpec; record: (body: BodyHandle, fraction: number) => void }[] {
     const volumes = (this._scene as any)?.waterVolumes as Set<any> | undefined;
     if (!volumes?.size) return [];
-    const out: { spec: import('./waterSurface').WaterSpec; record: (body: { id: number }, fraction: number) => void }[] = [];
+    const out: { spec: import('./waterSurface').WaterSpec; record: (body: BodyHandle, fraction: number) => void }[] = [];
     for (const volume of volumes) {
       if (!volume.enabled || typeof volume.buoyancySpec !== 'function') continue;
       out.push({ spec: volume.buoyancySpec(), record: (body, fraction) => {
-        // The worker reports the main thread's copy of the body: the engine body behind it is what floats.
-        const engineBody = this._bodyOf(body.id as BodyHandle);
+        // The worker reports a handle: the engine body behind it is what floats.
+        const engineBody = this._bodyOf(body);
         if (engineBody) volume.recordSubmerged(engineBody, fraction);
       } });
     }

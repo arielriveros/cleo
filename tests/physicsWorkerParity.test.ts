@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'path';
 import { Body, Box, ConeTwistConstraint, ConvexPolyhedron, Cylinder, Heightfield, HingeConstraint, LockConstraint, Plane, PointToPointConstraint, Sphere, Trimesh, Vec3 } from 'cannon-es';
 import { runScenario, scenarioPhysics } from './helpers/physicsScenario';
 import { LoopbackPort } from '../src/physics/worker/ports';
-import { decodeConstraint, decodeShape, encodeConstraint, encodeShape } from '../src/physics/worker/bodyCodec';
+import { decodeConstraint, decodeShape, encodeConstraint, encodeShape } from '../src/physics/pal/cannon/replicaCodec';
 import type { PhysicsSystem } from '../src/physics/physicsSystem';
 
 // The physics step in a Web Worker (physics/executor/workerExecutor.ts + physics/worker/) must simulate
@@ -69,15 +69,15 @@ describe('the worker executor', () => {
         const port = new LoopbackPort();
         const p = workerPhysics(port);
         runScenario(p, 30, 1 / 60, 1);
-        expect(port.core.world.bodies.length).toBeGreaterThan(10);
+        expect(port.core.world.bodyCount).toBeGreaterThan(10);
         p.clear();
         p.update(1 / 60); p.endFrame(1 / 60); p.update(1 / 60);
-        expect(port.core.world.bodies.length).toBe(0);
+        expect(port.core.world.bodyCount).toBe(0);
         // And it fills again from what the new scene adds.
         const b = makeBody(sphereShape(0.5), { mass: 1, position: [0, 5, 0] });
         p.addBody(b);
         p.endFrame(1 / 60); p.update(1 / 60);
-        expect(port.core.world.bodies.length).toBe(1);
+        expect(port.core.world.bodyCount).toBe(1);
         expect(b.position.y).toBeLessThan(5);
     });
 });

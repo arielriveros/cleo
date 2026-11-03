@@ -3,7 +3,7 @@ import { PhysicsSystem } from '../src/physics/physicsSystem';
 import { Shape } from '../src/physics/shape';
 import { Node } from '../src/core/scene/nodes/node';
 import { LoopbackPort } from '../src/physics/worker/ports';
-import { BODY_ROW, STATE_STRIDE } from '../src/physics/worker/protocol';
+import { BODY_ROW, STATE_STRIDE } from '../src/physics/pal/cannon/replicaCodec';
 
 // What the editor's Performance ▸ Workers section reads about the physics worker: `physics.workerStatus`
 // (where the step runs, why it came back) and the worker rows of `physics.stats`. None of it may change
