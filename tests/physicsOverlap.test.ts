@@ -5,6 +5,7 @@ import { Body, Box, Cylinder, Sphere, Vec3, Quaternion } from 'cannon-es';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
 import { Node } from '../src/core/scene/nodes/node';
 import { closestSegmentSegment, closestSegmentBox, sweepPoses } from '../src/physics/overlap';
+import { TEST_PHYSICS } from './helpers/testPhysics';
 
 // Volumetric queries (overlap + sweep) and trigger enter/exit. Combat in Hollow Keep is decided by these:
 // a blade capsule swept from last frame's grip to this frame's against the characters' capsules, and
@@ -13,7 +14,7 @@ import { closestSegmentSegment, closestSegmentBox, sweepPoses } from '../src/phy
 type V3 = [number, number, number];
 
 function physics(): PhysicsSystem {
-    const p = new PhysicsSystem({ gravity: [0, 0, 0] });
+    const p = new PhysicsSystem({ gravity: [0, 0, 0], backend: TEST_PHYSICS });
     p.initialize();
     (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null };
     return p;

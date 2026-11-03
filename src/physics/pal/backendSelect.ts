@@ -11,7 +11,7 @@ export type PhysicsBackendRequest = PhysicsBackendKind | 'jolt';
 /** Every backend a project may ask for, in the order a picker lists them. */
 export const PHYSICS_BACKENDS: readonly { readonly request: PhysicsBackendRequest; readonly label: string; readonly implemented: boolean }[] = [
     { request: 'cannon', label: 'cannon-es', implemented: true },
-    { request: 'rapier', label: 'Rapier', implemented: false },
+    { request: 'rapier', label: 'Rapier', implemented: true },
     { request: 'jolt', label: 'Jolt', implemented: false },
 ];
 

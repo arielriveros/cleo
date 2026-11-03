@@ -10,6 +10,7 @@ import {
 import type { LocomotionTuning } from '../src/core/control/locomotion';
 import { createIntent, setMoveWorld } from '../src/core/control/intent';
 import type { ControlIntent } from '../src/core/control/intent';
+import { TEST_PHYSICS } from './helpers/testPhysics';
 
 // Where a character MEETS the ground, which until now had no test at all: `locomotion.test.ts` drives
 // the controller against a hand-written normal, and the physics tests step a world with nothing standing
@@ -25,7 +26,7 @@ const DOWN = [0, -1, 0] as const;
 
 /** A physics system with a live world and no scene — enough for the world, the stamps and the probe. */
 function physics(): PhysicsSystem {
-    const p = new PhysicsSystem();
+    const p = new PhysicsSystem({ backend: TEST_PHYSICS });
     p.initialize();
     return p;
 }

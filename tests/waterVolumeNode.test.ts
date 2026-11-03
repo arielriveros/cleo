@@ -6,6 +6,7 @@ import { Node } from '../src/core/scene/nodes/node';
 import { WaterVolumeNode, WATER_RIPPLE_SLOTS } from '../src/core/scene/nodes/waterVolumeNode';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
+import { TEST_PHYSICS } from './helpers/testPhysics';
 
 // The WaterVolume node: its data, the physics step that buoys through it, and the surface effects it feeds
 // a water material (ripple slots) — the last only when the material asks for them by name.
@@ -54,7 +55,7 @@ describe('WaterVolumeNode', () => {
         const water = new WaterVolumeNode('w', { size: [40, 4, 40], waveAmplitude: 0 });
         water.setPosition([0, -2, 0]);   // surface at y = 0
         water.updateTransforms?.();
-        const p = new PhysicsSystem({ gravity: [0, -9.81, 0] });
+        const p = new PhysicsSystem({ gravity: [0, -9.81, 0], backend: TEST_PHYSICS });
         p.initialize();
         (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null, waterVolumes: new Set([water]) };
 

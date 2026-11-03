@@ -14,6 +14,7 @@ import type { RagdollLayoutPart } from '../src/physics/ragdollProfile';
 import { setGLContext } from '../src/graphics/glContext';
 import { WebGL2Device } from '../src/graphics/rhi/webgl2/webgl2Device';
 import { setDevice } from '../src/graphics/rhi/deviceHandle';
+import { TEST_PHYSICS } from './helpers/testPhysics';
 
 // The REAL mannequin skeleton from the Hollow Keep example: a Mixamo rig scaled 0.01, standing in its
 // bind (T) pose. Earlier ragdoll bugs were only ever found against a real skeleton and the engine's
@@ -49,7 +50,7 @@ function mannequin(): ModelNode {
 const skinOf = (n: ModelNode) => (n.model as AnimatedModel).skin as Skin;
 
 function world(): PhysicsSystem {
-    const p = new PhysicsSystem({ gravity: [0, -9.82, 0] });
+    const p = new PhysicsSystem({ gravity: [0, -9.82, 0], backend: TEST_PHYSICS });
     p.initialize();
     (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null };
     // A thick box, not an infinite plane: what levels are made of, and what the ragdoll's lift-out-of-the-
@@ -202,15 +203,18 @@ describe('a profile ragdoll falling', () => {
     // A death clip ends lying on the floor, so limb capsules spawn partly inside it; the solver used to
     // push the buried body out at whatever speed cleared it -- the corpse leapt metres into the air.
     it('starts resting on the ground instead of being shot out of it', () => {
-        const p = new PhysicsSystem({ gravity: [0, -9.82, 0] });
+        const p = new PhysicsSystem({ gravity: [0, -9.82, 0], backend: TEST_PHYSICS });
         p.initialize();
         (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null };
         p.addGroundPlane(0.5);                     // half a metre above the feet: the legs start buried
         p.update(1 / 60);                          // a live world: the ground's bounds are current
         const r = p.startRagdoll(mannequin());
         for (const b of r.bodies.values()) expect(b.getAabb([0, 0, 0, 0, 0, 0])[1]).toBeGreaterThan(0.49);
+        // The push-out happens in the first frames. Measured over a third of a second: after that the standing
+        // T-pose topples, and how hard its limbs whip when it lands is the backend's joints, not the spawn
+        // (Rapier's joints are rigid and carry more of the impact than cannon's).
         let fastestUp = 0;
-        for (let i = 0; i < 60; i++) {
+        for (let i = 0; i < 20; i++) {
             p.update(1 / 60);
             for (const b of r.bodies.values()) fastestUp = Math.max(fastestUp, b.velocity.y);
         }

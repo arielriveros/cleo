@@ -20,6 +20,28 @@ import { contract } from './src/features/publish/playerContract.json'
  */
 const PLAYER_HTML = path.resolve(__dirname, 'src/player/index.html')
 
+/**
+ * The player is built once per physics backend a game can carry (`--mode rapier` for the second): a single
+ * IIFE cannot load a backend on demand, and Rapier's embedded WASM is ~4 MB a cannon game has no use for.
+ * `game.js` is the cannon player, with Rapier's loader swapped for a stub; `game-rapier.js` carries Rapier
+ * too. Publishing picks the one for the project's physics backend (features/publish/publishClient.ts).
+ */
+const RAPIER_LOADER = path.resolve(__dirname, '../../src/physics/pal/rapier/load.ts')
+const RAPIER_STUB = path.resolve(__dirname, '../../src/physics/pal/rapier/loadStub.ts')
+
+/** Resolve Rapier's loader to the stub that has no Rapier. */
+function withoutRapier(): Plugin {
+  return {
+    name: 'cleo:player-without-rapier',
+    enforce: 'pre',
+    async resolveId(source, importer, options) {
+      if (!/rapier[\\/]load$/.test(source)) return null
+      const resolved = await this.resolve(source, importer, { ...options, skipSelf: true })
+      return resolved && path.normalize(resolved.id) === path.normalize(RAPIER_LOADER) ? RAPIER_STUB : null
+    },
+  }
+}
+
 function playerAssets(): Plugin {
   return {
     name: 'cleo:player-assets',
@@ -69,7 +91,7 @@ function playerGraphGuard(): Plugin {
 // The shared engine config (../vite.config.ts) contributes the shader plugin and the `cleo` ->
 // ../src/cleo.ts alias -- the same source the editor dev server and both test suites use, so a published
 // game is built from exactly the engine the editor previewed it with.
-export default mergeConfig(engineConfig, defineConfig({
+export default defineConfig(({ mode }) => mergeConfig(engineConfig, defineConfig({
   // `@cleo/app-kit/...` -> the shared app-kit's source (see ../app-kit/vite.preset.ts).
   resolve: { alias: appKitAlias },
 
@@ -86,18 +108,22 @@ export default mergeConfig(engineConfig, defineConfig({
   // applications/editor/public into applications/editor/public/player. The player needs nothing from there.
   publicDir: false,
 
-  plugins: [playerGraphGuard(), playerAssets()],
+  plugins: [playerGraphGuard(), playerAssets(), ...(mode === 'rapier' ? [] : [withoutRapier()])],
+  // The physics worker is inlined into the player and bundled on its own: it needs the same swap.
+  worker: { plugins: () => (mode === 'rapier' ? [] : [withoutRapier()]) },
 
   build: {
     outDir: 'public/player',
-    emptyOutDir: true,
+    // The Rapier build runs second and must keep the cannon one.
+    emptyOutDir: mode !== 'rapier',
     // resolveLibFilename uses a fileName function's result verbatim, no extension appended: exactly
-    // "game.js", which is the name src/player/index.html and every published game hard-code.
+    // "game.js", which is the name src/player/index.html and every published game hard-code (a game
+    // ships game-rapier.js under that name).
     lib: {
       entry: path.resolve(__dirname, 'src/player/index.tsx'),
       formats: ['iife'],
       name: 'CleoPlayer',
-      fileName: () => 'game.js',
+      fileName: () => (mode === 'rapier' ? 'game-rapier.js' : 'game.js'),
     },
   },
-}))
+})))

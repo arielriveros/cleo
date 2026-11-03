@@ -1,8 +1,8 @@
 # Physics backends
 
 Physics runs behind a backend-neutral layer, the physics counterpart of the renderer's RHI, so it can run
-on engines other than cannon-es. Rapier is the next one planned, and Jolt is listed for later. Today cannon-es is the only backend, and
-games behave exactly as before: the engine's tests pin the cannon step bit for bit.
+on more than one physics engine. Two are implemented: cannon-es, the default, and Rapier. Jolt is listed for
+later. The engine's tests pin the cannon step bit for bit, so cannon games behave exactly as before.
 
 ## The layer
 
@@ -70,8 +70,8 @@ project, not the machine: two engines do not simulate alike, so a game must play
 published game's config always carries it (`physics.backend`), so a game keeps its backend even if the
 engine's default changes.
 
-The choice is a request, read when the engine starts. A backend this build cannot run (one listed but not
-implemented yet, or a name it does not know) falls back to cannon-es. The log says why, and so
+The choice is a request, read when the engine starts. A backend this build cannot run (Jolt, listed but
+not implemented yet, a name it does not know, or Rapier in a player built without it) falls back to cannon-es. The log says why, and so
 does `physics.backendFallbackReason`. `physics.backend` is the backend running, and `physics.requestedBackend`
 the one asked for. `?physicsBackend=` in the URL asks for another backend for a comparison, in the editor
 and in a web build. Each engine logs its backend at startup:
@@ -120,8 +120,29 @@ bit for bit.
 | The physics worker copies the world through its backend's mirror and replica | Done |
 | A test keeps `cannon-es` inside `src/physics/pal/cannon/`; scripts are typed without it; the project chooses its backend | Done |
 | Rapier: the package, the spike, `RapierWorld` passing the conformance suite | Done |
-| Rapier: the engine and the Valley on it; published games carry only their backend | Next |
-| Rapier in the physics worker | Planned |
+| Rapier: the engine and the Valley on it; published games carry only their backend | Done |
+| Rapier in the physics worker | Next |
+
+## Rapier compared with cannon
+
+A project picks Rapier in Options ▸ Engine ▸ Runtime. What differs from cannon:
+
+- **Characters are capsules.** A capsule collider is one shape on Rapier, not a cylinder with two spheres,
+  so a character slides over edges rather than catching on the cylinder's rim.
+- **Joints are rigid.** cannon's solver lets a joint give a little; Rapier's holds exactly, and rapier.js
+  has no setting to soften it. A ragdoll's limbs carry more of an impact: a body that falls flat whips its
+  light limbs harder than on cannon.
+- **Cone limits are approximate**: a box of swing on two axes rather than a round cone.
+- **Joint `maxForce` is ignored.** A joint holds whatever the load.
+- **Single precision.** Positions carry about seven significant digits. That is plenty at the scale of a
+  level, but not for bit-for-bit comparisons.
+- **Queries cost a little more after things move.** Rapier refits its query tree only inside a step. The
+  first ray of a frame in which a body was moved by hand runs two zero-length steps first. In the Valley
+  that is about 2 ms of ray time a frame, because triggers follow their characters every frame.
+- **Main thread only for now.** The physics worker comes next. Until then a Rapier project's *Physics
+  thread* setting falls back to the main thread, and says so under Performance ▸ Workers.
+- **Published size.** A Rapier game's player is about 4.3 MB larger: `npm run build:player` builds
+  `game.js` (cannon) and `game-rapier.js`, and Publish picks the one for the project.
 
 ## Rapier: what the spike found
 

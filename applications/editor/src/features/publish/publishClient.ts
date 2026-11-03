@@ -34,14 +34,16 @@ const STALE_PLAYER_HINT =
   'Run "npm run build:player" (repo root), then reload the editor.';
 
 // Load the prebuilt player templates (`npm run build:player` into public/player/, served same-origin by
-// both the dev server and the production editor build).
+// both the dev server and the production editor build): the player for the game's physics backend, since
+// only the Rapier one carries Rapier (see vite.player.config.ts). It ships as game.js either way.
 // public/player/ is git-ignored and no build step depends on it, so a bundle can silently drift behind
 // the packer; the contract check stops the publish instead. See pack.ts PLAYER_CONTRACT.
-async function loadPlayerTemplates(): Promise<PlayerTemplates> {
+async function loadPlayerTemplates(physicsBackend: string | undefined): Promise<PlayerTemplates> {
   let htmlRes: Response, jsRes: Response, buildRes: Response;
+  const gameJs = physicsBackend === 'rapier' ? 'player/game-rapier.js' : 'player/game.js';
   try {
     [htmlRes, jsRes, buildRes] = await Promise.all([
-      fetch('player/index.html'), fetch('player/game.js'), fetch('player/build.json'),
+      fetch('player/index.html'), fetch(gameJs), fetch('player/build.json'),
     ]);
   } catch (e) {
     throw new Error(`Player bundle not reachable. ${STALE_PLAYER_HINT}`);
@@ -71,7 +73,7 @@ async function loadPlayerTemplates(): Promise<PlayerTemplates> {
  * so the packer's mutations never reach the caller's object.
  */
 async function assemble(data: any, zip: boolean) {
-  const templates = await loadPlayerTemplates();
+  const templates = await loadPlayerTemplates(data?.config?.physics?.backend);
   const { scripts, paths, modules } = extractScripts(data); // strips node scripts and modules out of `data`
   const scriptsSource = buildScriptsSource(scripts, paths, modules);
 

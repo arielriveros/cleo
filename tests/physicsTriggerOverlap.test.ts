@@ -6,6 +6,7 @@ import { Node } from '../src/core/scene/nodes/node';
 import { Trigger, type TriggerOptions, type TriggerContact } from '../src/physics/body';
 import { physicsStats } from '../src/physics/physicsStats';
 import { localPrims } from '../src/physics/triggerOverlaps';
+import { TEST_PHYSICS } from './helpers/testPhysics';
 
 // Trigger volumes against OTHER trigger volumes. cannon drops every static-static pair in its broadphase
 // and every engine trigger is static, so these come from the engine's own pass (triggerOverlaps.ts), run
@@ -16,7 +17,7 @@ type V3 = [number, number, number];
 const HURTBOX = 1 << 8, HITBOX = 1 << 10;
 
 function physics(): PhysicsSystem {
-    const p = new PhysicsSystem({ gravity: [0, 0, 0] });
+    const p = new PhysicsSystem({ gravity: [0, 0, 0], backend: TEST_PHYSICS });
     p.initialize();
     (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null };
     return p;
@@ -214,7 +215,9 @@ describe('trigger ↔ trigger overlaps', () => {
         p.update(1 / 60);
         const touches = () => { let n = 0; (p as any)._world.forEachContact((a: number, b: number) => { if (a === hb.id || b === hb.id) n++; }); return n > 0; };
         expect(touches()).toBe(false);
-        // Without the mask, the backend would build full contact equations for the pair every substep.
+        // Without the mask, cannon builds full contact equations for the pair every substep. (Rapier's
+        // sensors never make contacts, mask or not.)
+        if (TEST_PHYSICS !== 'cannon') return;
         hb.mask = -1;
         p.update(1 / 60);
         expect(touches()).toBe(true);

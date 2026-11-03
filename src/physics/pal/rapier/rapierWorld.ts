@@ -14,7 +14,8 @@ import { rapier } from './load';
 //  - a handle is this world's own increasing integer (Rapier's handles pack an index and a generation into
 //    a float, which the engine's pair keys cannot take);
 //  - a body's position is its node origin, which is Rapier's own body translation; its collider frame is
-//    the centre of mass, so buoyancy, the ground probe and the worker's drawing measure what they did;
+//    the centre of mass (the node origin for a body that does not move), so buoyancy, the ground probe and
+//    the worker's drawing measure what they did;
 //  - a force lasts one substep (Rapier keeps them: reset after every step);
 //  - queries see the world as it is now: Rapier refits its query tree only inside a step, so after a body is
 //    added, moved or turned, two zero-length steps refit it first (they move nothing);
@@ -289,14 +290,14 @@ export class RapierWorld implements PhysicsWorld {
     }
 
     public getColliderFrame(h: BodyHandle, out: Out): number {
-        const e = this._entry(h), c = e.body.worldCom(), q = e.body.rotation();
+        const e = this._entry(h), c = e.type === 'dynamic' ? e.body.worldCom() : e.body.translation(), q = e.body.rotation();
         out[0] = c.x; out[1] = c.y; out[2] = c.z; out[3] = q.x; out[4] = q.y; out[5] = q.z; out[6] = q.w;
         if (!e.parts) this._buildParts(e);
         return e.radius;
     }
 
     public colliderFrameToOrigin(h: BodyHandle, pose: ArrayLike<number>, out: Out): void {
-        const c = this._entry(h).body.localCom(), v = this._v;
+        const c = this._localCom(this._entry(h)), v = this._v;
         rotate([pose[3], pose[4], pose[5], pose[6]], c.x, c.y, c.z, v);
         out[0] = pose[0] - v[0]; out[1] = pose[1] - v[1]; out[2] = pose[2] - v[2];
     }
@@ -328,9 +329,12 @@ export class RapierWorld implements PhysicsWorld {
                 break;
             case 'coneTwist': {
                 // A spherical joint whose frames put each body's axis on the joint's X: twist is about X, the
-                // cone is a swing limit on Y and Z (a box of swing rather than a cone: 'approximate').
+                // cone is a swing limit on Y and Z (a box of swing rather than a cone: 'approximate'). B's
+                // frame takes its roll about the axis from A's as the two stand now, so the twist is measured
+                // from the pose the joint is made in: two frames rolled apart at the start would read as a
+                // twist past a tight limit, which the solver fights for as long as the joint lives.
                 joint = this._raw.createImpulseJoint(R.JointData.spherical(v(desc.anchorA), v(desc.anchorB)), a, b, true);
-                const fa = fromX(desc.axisA), fb = fromX(desc.axisB);
+                const fa = fromX(desc.axisA), fb = matchedFrame(a.rotation(), fa, b.rotation(), desc.axisB);
                 joint.setFrameX1({ x: fa[0], y: fa[1], z: fa[2], w: fa[3] });
                 joint.setFrameX2({ x: fb[0], y: fb[1], z: fb[2], w: fb[3] });
                 const raw = (joint as unknown as { rawSet: { jointSetLimits(h: number, axis: number, min: number, max: number): void } }).rawSet;
@@ -555,9 +559,17 @@ export class RapierWorld implements PhysicsWorld {
         b.recomputeMassPropertiesFromColliders();
     }
 
-    /** The body's parts from its descriptions, placed from its centre of mass, and its bounding radius. */
+    /**
+     * The collider frame's origin in the body: the centre of mass of a dynamic body, the node origin of any
+     * other (whose mass nothing moves), as on cannon.
+     */
+    private _localCom(e: Entry): { x: number; y: number; z: number } {
+        return e.type === 'dynamic' ? e.body.localCom() : { x: 0, y: 0, z: 0 };
+    }
+
+    /** The body's parts from its descriptions, placed from its collider frame, and its bounding radius. */
     private _buildParts(e: Entry): void {
-        const c = e.body.localCom();
+        const c = this._localCom(e);
         let radius = 0;
         e.parts = [];
         for (const collider of e.colliderDescs) {
@@ -659,6 +671,49 @@ function fromX(axis: V3): number[] {
     return [qx / n, qy / n, qz / n, qw / n];
 }
 
+/**
+ * B's joint frame in B: X along `axisB`, and its roll about it taken from A's frame `frameA` (in A) as the
+ * two bodies are turned now (`qa`, `qb`, world rotations), so the joint starts untwisted.
+ */
+function matchedFrame(qa: { x: number; y: number; z: number; w: number }, frameA: number[], qb: { x: number; y: number; z: number; w: number }, axisB: V3): number[] {
+    const QA = [qa.x, qa.y, qa.z, qa.w], QB = [qb.x, qb.y, qb.z, qb.w];
+    const worldA = multiply(QA, frameA, [0, 0, 0, 1]);
+    const x = rotate(QB, axisB[0], axisB[1], axisB[2], [0, 0, 0]);
+    let n = Math.hypot(x[0], x[1], x[2]) || 1;
+    x[0] /= n; x[1] /= n; x[2] /= n;
+    // A's frame Y, made perpendicular to B's axis (A's Z if Y lies along it).
+    let y = rotate(worldA, 0, 1, 0, [0, 0, 0]);
+    let d = y[0] * x[0] + y[1] * x[1] + y[2] * x[2];
+    if (Math.abs(d) > 0.999) { y = rotate(worldA, 0, 0, 1, [0, 0, 0]); d = y[0] * x[0] + y[1] * x[1] + y[2] * x[2]; }
+    y[0] -= x[0] * d; y[1] -= x[1] * d; y[2] -= x[2] * d;
+    n = Math.hypot(y[0], y[1], y[2]) || 1;
+    y[0] /= n; y[1] /= n; y[2] /= n;
+    const z = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
+    const worldB = basisQuat(x, y, z);
+    return multiply([-QB[0], -QB[1], -QB[2], QB[3]], worldB, [0, 0, 0, 1]) as number[];
+}
+
+/** The rotation whose matrix has columns `x`, `y`, `z` (an orthonormal right-handed basis), [x y z w]. */
+function basisQuat(x: ArrayLike<number>, y: ArrayLike<number>, z: ArrayLike<number>): number[] {
+    const m00 = x[0], m10 = x[1], m20 = x[2], m01 = y[0], m11 = y[1], m21 = y[2], m02 = z[0], m12 = z[1], m22 = z[2];
+    const trace = m00 + m11 + m22;
+    let qx: number, qy: number, qz: number, qw: number;
+    if (trace > 0) {
+        const s = Math.sqrt(trace + 1) * 2;
+        qw = 0.25 * s; qx = (m21 - m12) / s; qy = (m02 - m20) / s; qz = (m10 - m01) / s;
+    } else if (m00 > m11 && m00 > m22) {
+        const s = Math.sqrt(1 + m00 - m11 - m22) * 2;
+        qw = (m21 - m12) / s; qx = 0.25 * s; qy = (m01 + m10) / s; qz = (m02 + m20) / s;
+    } else if (m11 > m22) {
+        const s = Math.sqrt(1 + m11 - m00 - m22) * 2;
+        qw = (m02 - m20) / s; qx = (m01 + m10) / s; qy = 0.25 * s; qz = (m12 + m21) / s;
+    } else {
+        const s = Math.sqrt(1 + m22 - m00 - m11) * 2;
+        qw = (m10 - m01) / s; qx = (m02 + m20) / s; qy = (m12 + m21) / s; qz = 0.25 * s;
+    }
+    return [qx, qy, qz, qw];
+}
+
 /** A Rapier collider for a shape description, with where the shape sits inside its collider (a heightfield is centred). */
 function colliderDescFor(shape: ShapeDesc): { desc: RColliderDesc; inner: V3 } | null {
     const R = rapier();
@@ -685,7 +740,8 @@ function colliderDescFor(shape: ShapeDesc): { desc: RColliderDesc; inner: V3 } |
         case 'trimesh': {
             const sc = shape.scale ?? [1, 1, 1], p = shape.positions, vertices = new Float32Array(p.length);
             for (let i = 0; i < p.length; i++) vertices[i] = p[i] * sc[i % 3];
-            return at(R.ColliderDesc.trimesh(vertices, Uint32Array.from(shape.indices)));
+            // FIX_INTERNAL_EDGES: a body sliding across two triangles is not bumped by the edge between them.
+            return at(R.ColliderDesc.trimesh(vertices, Uint32Array.from(shape.indices), R.TriMeshFlags.FIX_INTERNAL_EDGES));
         }
         case 'heightfield': {
             // The layer's field starts at its corner and runs along +X (i) and −Z (j); Rapier's is centred and
@@ -695,7 +751,9 @@ function colliderDescFor(shape: ShapeDesc): { desc: RColliderDesc; inner: V3 } |
             const data = new Float32Array(I * J);
             for (let c = 0; c < I; c++) for (let r = 0; r < J; r++) data[c * J + r] = H[c][J - 1 - r];
             const sx = (I - 1) * e, sz = (J - 1) * e;
-            return at(R.ColliderDesc.heightfield(J - 1, I - 1, data, { x: sx, y: 1, z: sz }), [sx / 2, 0, -sz / 2]);
+            // FIX_INTERNAL_EDGES: a character walking across cell boundaries is not stopped by them (a ghost
+            // collision with the edge between two triangles), as cannon's own heightfield patch ensures.
+            return at(R.ColliderDesc.heightfield(J - 1, I - 1, data, { x: sx, y: 1, z: sz }, R.HeightFieldFlags.FIX_INTERNAL_EDGES), [sx / 2, 0, -sz / 2]);
         }
         case 'plane': return at(new R.ColliderDesc(new R.HalfSpace({ x: 0, y: 1, z: 0 })));
     }

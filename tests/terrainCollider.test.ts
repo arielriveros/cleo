@@ -5,6 +5,7 @@ import { setDevice } from '../src/graphics/rhi/deviceHandle';
 import { Terrain } from '../src/terrain/terrain';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
 import { PhysicsBody } from '../src/physics/physicsBody';
+import { TEST_PHYSICS } from './helpers/testPhysics';
 
 // A landscape's collider is the physics layer's heightfield (samples from its corner, i along +X, j along
 // -Z), however the backend lays one out. Bodies dropped on a slope rising along X and a slope rising along Z
@@ -32,7 +33,7 @@ function landscape(slope: (col: number, row: number) => number) {
     terrain.setHeights(heights);
     const origin: [number, number, number] = [10, 1, -5];
     terrain.setOrigin(origin);
-    const p = new PhysicsSystem({ gravity: [0, -9.82, 0] });
+    const p = new PhysicsSystem({ gravity: [0, -9.82, 0], backend: TEST_PHYSICS });
     p.initialize();
     (p as any)._scene = { nodes: [], landscapes: [], tilemaps: [], activeCamera: null };
     terrain.ensureRegistered(p);
