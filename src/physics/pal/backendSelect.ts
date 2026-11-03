@@ -6,7 +6,7 @@ import type { PhysicsBackendKind } from './types';
 // wherever it runs.
 
 /** A backend a project may ask for: those this build runs, and those planned (so a picker can show them). */
-export type PhysicsBackendRequest = PhysicsBackendKind | 'jolt';
+export type PhysicsBackendRequest = PhysicsBackendKind;
 
 /** Every backend a project may ask for, in the order a picker lists them. */
 export const PHYSICS_BACKENDS: readonly { readonly request: PhysicsBackendRequest; readonly label: string; readonly implemented: boolean }[] = [

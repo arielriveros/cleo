@@ -2,6 +2,7 @@ import { CannonWorld } from './cannon/cannonWorld';
 import { CannonMirror } from './cannon/mirror';
 import { CannonReplica } from './cannon/replica';
 import { loadRapier } from './rapier/load';
+import { loadJolt } from './jolt/load';
 import { RapierWorld } from './rapier/rapierWorld';
 import { DescribedMirror } from './copy/describedMirror';
 import { DescribedReplica } from './copy/describedReplica';
@@ -28,6 +29,7 @@ export async function acquirePhysicsBackend(kind: PhysicsBackendKind): Promise<v
     if (loaded.has(kind)) return;
     switch (kind) {
         case 'rapier': await loadRapier(); break;
+        case 'jolt': await loadJolt(); break;
     }
     loaded.add(kind);
 }
@@ -44,6 +46,7 @@ export function createPhysicsWorld(kind: PhysicsBackendKind = 'cannon', gravity?
     switch (kind) {
         case 'cannon': return new CannonWorld(gravity);
         case 'rapier': return new RapierWorld(gravity);
+        case 'jolt': throw new Error('physics: the Jolt backend is not implemented yet');
     }
 }
 
@@ -52,6 +55,7 @@ export function createWorldMirror(world: PhysicsWorld): WorldMirror {
     switch (world.backend) {
         case 'cannon': return new CannonMirror(world as CannonWorld);
         case 'rapier': return new DescribedMirror(world as RapierWorld);
+        case 'jolt': throw new Error('physics: the Jolt backend is not implemented yet');
     }
 }
 
@@ -61,5 +65,6 @@ export function createWorldReplica(kind: PhysicsBackendKind): WorldReplica {
     switch (kind) {
         case 'cannon': return new CannonReplica();
         case 'rapier': return new DescribedReplica(new RapierWorld([0, -9.81, 0]));
+        case 'jolt': throw new Error('physics: the Jolt backend is not implemented yet');
     }
 }

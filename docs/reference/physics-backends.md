@@ -126,7 +126,8 @@ bit for bit.
 | Rapier: the package, the spike, `RapierWorld` passing the conformance suite | Done |
 | Rapier: the engine and the Valley on it; published games carry only their backend | Done |
 | Rapier in the physics worker | Done |
-| A Jolt backend | Listed, not started (questions below) |
+| Jolt: the package and the spike | Done |
+| A Jolt backend | Listed, not started |
 
 ## Rapier compared with cannon
 
@@ -187,20 +188,49 @@ its physics worker inlined. The bundle is about 4.3 MB.
   (swing on Y and Z, twist on X: a box rather than a cone, so `coneLimit: 'approximate'`). No `maxForce`.
 - **Timings** read 0 unless `profilerEnabled` is set.
 
-## What a Jolt backend needs to settle
+## Jolt: what the spike found
 
-Jolt (JoltPhysics.js, the WASM build of Jolt Physics) is listed for later. Questions for its spike:
+Measured on `jolt-physics` 1.1.1 (JoltPhysics.js, the WASM build of Jolt Physics), loaded only by
+`pal/jolt/load.ts`.
 
-- Which build: the single-threaded WASM, or the multithreaded one, which needs SharedArrayBuffer and so
-  a cross-origin isolated page (the published desktop game on `file://` is not).
-- Memory: every Jolt object made from JavaScript must be `destroy()`ed by hand. The backend owns that,
-  including on `clear` and `dispose`.
-- Does a build with its WASM embedded exist (or can one be made), for the published player, which runs as a
-  single file from `file://` with its physics worker inlined?
-- Jolt is double precision optionally and single by default: which build, and the conformance suite's
-  `precision` to match.
-- Its `CharacterVirtual` is a kinematic character controller. The engine's characters are dynamic bodies,
-  so it stays unused unless characters move to it on every backend.
-- Collision layers are object layers plus broadphase layers, not group/mask bits: map the engine's 16
-  layer bits onto them.
-- Its world is stepped with a fixed number of collision steps per update: one per engine substep.
+- **The build.** The package's default, `wasm-compat`, is single-threaded with its WASM embedded (base64,
+  about 3.2 MB), so it runs in a published game. The threaded build needs a cross-origin isolated page, and
+  it also calls a contact listener written in JavaScript from its job threads, where that JavaScript does not
+  exist: a step with job threads and a listener aborts. The backend needs a listener (sensor and contact
+  events, contacts, per-contact response and friction), so Jolt runs single-threaded. Threads would need a
+  JoltPhysics.js build with a contact recorder written in C++.
+- **Memory is fixed.** The WASM heap is 128 MB in both builds and cannot grow: an allocation past it aborts.
+  A world costs about 11 MB before its first body (10 MB of it the step's scratch allocator), about 20 MB at
+  the sizes the engine asks for. Destroying the world (`JoltInterface`) returns all of it. The backend frees
+  its world when it is cleared or disposed, and one dropped without either is freed when it is collected.
+- **Lifetimes.** Everything made with `new Jolt.X` is freed with `Jolt.destroy`. Shapes are reference
+  counted: one made from settings must be `AddRef`ed before the settings are destroyed and `Release`d once
+  a body holds it, or it is freed under the body. Static methods (`sGetObjectLayer`, `sGetFreeMemory`) are
+  reached through the class's prototype.
+- **Sleep.** With sleeping off (`mAllowSleeping = false`), a body deactivated by hand stays asleep, a
+  velocity written through `Body` leaves it asleep, and a body that hits it wakes it: the engine's freeze.
+- **Sensors** report through the same callbacks as contacts. A static sensor sees a kinematic body only
+  while that body is active; `mCollideKinematicVsNonDynamic` lets a sensor see static and sleeping bodies.
+  Kinematic bodies are added active and never sleep, so a hurtbox teleported every frame keeps detecting.
+  A body that goes to sleep inside a sensor leaves it, as on cannon. A removed body is reported gone in the
+  next step, by its `BodyID`; the backend keys bodies by index and sequence number, so an index reused by a
+  new body is never mistaken for the old one.
+- **Contacts.** Callbacks come per sub-shape pair, so the backend counts them per body pair, as on Rapier.
+  The manifold's normal points from the first body to the second. A callback costs about 1.4 µs: 500
+  resting spheres step in 7.6 ms without a listener and 9.3 ms with one (1,261 callbacks a step).
+- **Heightfield.** Square, with the sample count rounded up to a multiple of its block size (2); the extra
+  samples are holes (`cNoCollisionValue`). Heights are compressed to 8 bits per sample within each block:
+  about 1.6 mm off on a sloped field.
+- **Rest.** Bodies rest at their exact height; no penetration shows.
+- **Rays.** By default a convex shape is solid (a ray from inside hits at 0) and back faces are ignored.
+  With `mTreatConvexAsSolid` off and back faces on, a ray meets each body's entry and exit faces, as on
+  cannon, and one from inside meets the way out.
+- **Damping** is `v *= 1 − c·dt`. cannon's `(1 − d)^dt` becomes `c = −ln(1 − d)`, as on Rapier.
+- **Angular velocity** is clamped to `mMaxAngularVelocity`, about 47 rad/s by default; the backend raises it.
+  Locking every degree of freedom is allowed: the body stays put.
+- **Determinism.** Two worlds built the same way step bit for bit alike, but the simulation depends on the
+  bodies' `BodyID`s: the same bodies under other IDs end up half a metre apart within two seconds.
+  `CreateBodyWithID` with the original's IDs makes a copy step exactly alike, whatever its own history,
+  which is how the physics worker's copy is built.
+- **Collision layers.** `ObjectLayerPairFilterMask` packs a 16-bit group and a 16-bit mask into each body's
+  object layer and collides two bodies by cannon's rule. Everything shares one broadphase layer.

@@ -15,6 +15,7 @@ const DIST = join(ROOT, 'dist');
 const BACKENDS = [
     { name: 'cannon', dir: join(PAL, 'cannon'), pkg: 'cannon-es' },
     { name: 'rapier', dir: join(PAL, 'rapier'), pkg: '@dimforge/rapier3d-compat' },
+    { name: 'jolt', dir: join(PAL, 'jolt'), pkg: 'jolt-physics' },
 ];
 const isPackage = (spec: string, pkg: string) => spec === pkg || spec.startsWith(`${pkg}/`);
 

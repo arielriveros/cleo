@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { PHYSICS_BACKENDS, resolvePhysicsBackendRequest } from '../src/physics/pal/backendSelect';
 import { describePhysicsCapabilities } from '../src/physics/pal/capabilities';
-import { acquirePhysicsWorld, isPhysicsBackendLoaded } from '../src/physics/pal/createWorld';
+import { acquirePhysicsBackend, acquirePhysicsWorld, isPhysicsBackendLoaded } from '../src/physics/pal/createWorld';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
 
 // Which physics engine a game simulates with: a request (the project's setting, `?physicsBackend=`)
@@ -59,5 +59,10 @@ describe('choosing a physics backend', () => {
         p.initialize();
         expect([p.backend, p.requestedBackend, p.backendFallbackReason]).toEqual(['rapier', 'rapier', null]);
         expect(describePhysicsCapabilities(p.capabilities!)).toMatch(/^physics rapier · capsule native · /);
+    });
+
+    it("loads Jolt's library on demand", async () => {
+        await acquirePhysicsBackend('jolt');
+        expect(isPhysicsBackendLoaded('jolt')).toBe(true);
     });
 });
