@@ -22,6 +22,8 @@ export interface PhysicsCapabilities {
     readonly profilePhases: readonly ('broadphase' | 'narrowphase' | 'solve' | 'integrate')[];
     /** Its world can be built inside a Web Worker and kept in step with this thread's. */
     readonly threadable: boolean;
+    /** Bits of float it simulates in: 64 (JavaScript numbers) or 32 (a WASM engine's single precision). */
+    readonly precision: 64 | 32;
 }
 
 /** The boot log line: `physics cannon · capsule compound · groups 32-bit · ...`. */
@@ -31,6 +33,7 @@ export function describePhysicsCapabilities(c: PhysicsCapabilities): string {
         c.nativeCapsule ? 'capsule native' : 'capsule compound',
         `groups ${c.collisionGroupBits}-bit`,
         `cone limit ${c.coneLimit}`,
+        `f${c.precision}`,
         c.threadable ? 'worker capable' : 'main thread only',
     ].join(' · ');
 }

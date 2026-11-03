@@ -1,6 +1,8 @@
 import { CannonWorld } from './cannon/cannonWorld';
 import { CannonMirror } from './cannon/mirror';
 import { CannonReplica } from './cannon/replica';
+import { loadRapier } from './rapier/load';
+import { RapierWorld } from './rapier/rapierWorld';
 import type { WorldMirror, WorldReplica } from './replication';
 import type { PhysicsBackendKind } from './types';
 import type { PhysicsWorld } from './world';
@@ -22,6 +24,9 @@ export function isPhysicsBackendLoaded(kind: PhysicsBackendKind): boolean {
 /** Load a backend's library, once. Rejects when it cannot be loaded here. */
 export async function acquirePhysicsBackend(kind: PhysicsBackendKind): Promise<void> {
     if (loaded.has(kind)) return;
+    switch (kind) {
+        case 'rapier': await loadRapier(); break;
+    }
     loaded.add(kind);
 }
 
@@ -36,6 +41,7 @@ export function createPhysicsWorld(kind: PhysicsBackendKind = 'cannon', gravity?
     if (!loaded.has(kind)) throw new Error(`physics: the ${kind} backend is not loaded (acquirePhysicsBackend first)`);
     switch (kind) {
         case 'cannon': return new CannonWorld(gravity);
+        case 'rapier': return new RapierWorld(gravity);
     }
 }
 
@@ -43,6 +49,7 @@ export function createPhysicsWorld(kind: PhysicsBackendKind = 'cannon', gravity?
 export function createWorldMirror(world: PhysicsWorld): WorldMirror {
     switch (world.backend) {
         case 'cannon': return new CannonMirror(world as CannonWorld);
+        case 'rapier': throw new Error('physics: the rapier backend cannot run in the physics worker yet');
     }
 }
 
@@ -51,5 +58,6 @@ export function createWorldReplica(kind: PhysicsBackendKind): WorldReplica {
     if (!loaded.has(kind)) throw new Error(`physics: the ${kind} backend is not loaded (acquirePhysicsBackend first)`);
     switch (kind) {
         case 'cannon': return new CannonReplica();
+        case 'rapier': throw new Error('physics: the rapier backend cannot run in the physics worker yet');
     }
 }

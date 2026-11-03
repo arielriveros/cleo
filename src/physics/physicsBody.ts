@@ -2,6 +2,7 @@ import { quat, vec3 } from 'gl-matrix';
 import type { Node } from '../core/scene/nodes/node';
 import type { Shape } from './shape';
 import type { PhysicsWorld } from './pal/world';
+import { localBounds } from './pal/shapeBounds';
 import type { BodyDesc, BodyHandle, BodyType, ColliderDesc, Out, ShapeDesc } from './pal/types';
 
 // The engine's own rigid body, on any physics backend (see pal/). It holds what the body is made of (a
@@ -444,31 +445,3 @@ function xyz(v: readonly number[] | undefined): { x: number; y: number; z: numbe
     return v ? { x: v[0], y: v[1], z: v[2] } : { x: 1, y: 1, z: 1 };
 }
 
-/** A shape's own bounds, [min, max], in its frame. */
-function localBounds(shape: ShapeDesc): [number[], number[]] {
-    const box = (x: number, y: number, z: number): [number[], number[]] => [[-x, -y, -z], [x, y, z]];
-    switch (shape.kind) {
-        case 'sphere': return box(shape.radius, shape.radius, shape.radius);
-        case 'box': return box(shape.halfExtents[0], shape.halfExtents[1], shape.halfExtents[2]);
-        case 'cylinder': { const r = Math.max(shape.radiusTop, shape.radiusBottom); return box(r, shape.height / 2, r); }
-        case 'capsule': return box(shape.radius, shape.height / 2 + shape.radius, shape.radius);
-        case 'convex': {
-            const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-            for (const v of shape.vertices) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], v[k]); hi[k] = Math.max(hi[k], v[k]); }
-            return [lo, hi];
-        }
-        case 'trimesh': {
-            const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], sc = shape.scale ?? [1, 1, 1];
-            for (let i = 0; i + 2 < shape.positions.length; i += 3)
-                for (let k = 0; k < 3; k++) { const v = shape.positions[i + k] * sc[k]; lo[k] = Math.min(lo[k], v); hi[k] = Math.max(hi[k], v); }
-            return [lo, hi];
-        }
-        case 'heightfield': {
-            let min = Infinity, max = -Infinity;
-            for (const row of shape.heights) for (const h of row) { min = Math.min(min, h); max = Math.max(max, h); }
-            const rows = shape.heights.length, cols = rows ? shape.heights[0].length : 0;
-            return [[0, min, -(cols - 1) * shape.elementSize], [(rows - 1) * shape.elementSize, max, 0]];
-        }
-        case 'plane': return box(1e6, 0, 1e6);
-    }
-}

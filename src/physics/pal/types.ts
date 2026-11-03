@@ -12,7 +12,7 @@
 //  - Velocities are the centre of mass's, in world space.
 
 /** The physics engines the layer can run on. */
-export type PhysicsBackendKind = 'cannon';
+export type PhysicsBackendKind = 'cannon' | 'rapier';
 
 /** A body in a world, as the world hands it out. Opaque: only the world that made it can read it. */
 export type BodyHandle = number & { readonly __physicsBody: unique symbol };

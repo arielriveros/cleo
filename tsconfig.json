@@ -26,7 +26,8 @@
     // or String.padStart — all of which the engine already calls and all of which exist in every browser
     // that can supply a WebGL2 context. Declaring the lib separately from the emit target tells the
     // checker the truth about the runtime without changing a single byte of emitted output.
-    "lib": ["es2020", "dom"],
+    // esnext.disposable: Rapier's typings declare `[Symbol.dispose]` on its WASM objects (types only).
+    "lib": ["es2020", "dom", "esnext.disposable"],
     "allowJs": true,
     "declaration": true,
     "sourceMap": true,

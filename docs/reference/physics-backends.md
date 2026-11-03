@@ -17,6 +17,8 @@ games behave exactly as before: the engine's tests pin the cannon step bit for b
 | `replication.ts` | How a backend copies its world into the physics worker: a `WorldMirror` on the main thread, a `WorldReplica` in the worker |
 | `backendSelect.ts` | Every backend a project may ask for, and `resolvePhysicsBackendRequest`: the one to run, and why it is not the one asked for |
 | `cannon/` | The cannon-es backend, `CannonWorld`, and everything that only exists because of cannon: its broadphase, the heightfield and convex-SAT patches, the material table, the centre-of-mass bookkeeping |
+| `rapier/` | The Rapier backend, `RapierWorld`, and `load.ts`, the one place its package is loaded (on demand) |
+| `shapeBounds.ts` | Bounds and quaternion helpers measured from shape descriptions, for any backend |
 
 A `PhysicsWorld` is handle-based and immediate, like the RHI's `Device`. The engine keeps its own objects
 and refers to the backend's by handle. Its conventions hold for every backend:
@@ -75,7 +77,7 @@ the one asked for. `?physicsBackend=` in the URL asks for another backend for a 
 and in a web build. Each engine logs its backend at startup:
 
 ```
-Physics ready — physics cannon · capsule compound · groups 32-bit · cone limit native · worker capable
+Physics ready — physics cannon · capsule compound · groups 32-bit · cone limit native · f64 · worker capable
 ```
 
 ## Two different "where"s
@@ -117,7 +119,9 @@ bit for bit.
 | `RigidBody`, `Trigger` and `Shape` stop being cannon objects | Done |
 | The physics worker copies the world through its backend's mirror and replica | Done |
 | A test keeps `cannon-es` inside `src/physics/pal/cannon/`; scripts are typed without it; the project chooses its backend | Done |
-| A Rapier backend | Next, after the checks below |
+| Rapier: the package, the spike, `RapierWorld` passing the conformance suite | Done |
+| Rapier: the engine and the Valley on it; published games carry only their backend | Next |
+| Rapier in the physics worker | Planned |
 
 ## Rapier: what the spike found
 

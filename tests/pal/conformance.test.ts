@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { createPhysicsWorld, createWorldMirror, createWorldReplica } from '../../src/physics/pal/createWorld';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { acquirePhysicsBackend, createPhysicsWorld, createWorldMirror, createWorldReplica } from '../../src/physics/pal/createWorld';
 import { PhysicsEventKind } from '../../src/physics/pal/types';
 import type { BodyDesc, BodyHandle, PhysicsBackendKind, ShapeDesc } from '../../src/physics/pal/types';
 import type { PhysicsWorld } from '../../src/physics/pal/world';
@@ -7,8 +7,10 @@ import type { PhysicsWorld } from '../../src/physics/pal/world';
 // What every physics backend must do, written against the layer's interface only (src/physics/pal/world.ts)
 // and run once per backend. Behaviour, not bits: a new backend passes this before the engine runs on it.
 // The bit-for-bit pins of the cannon backend are the golden traces (physicsGoldenTrace, physicsGoldenB).
+// Decimal places follow the backend's float precision (capabilities.precision): a single-precision engine
+// meets every check to 4 places, never to 12.
 
-const BACKENDS: PhysicsBackendKind[] = ['cannon'];
+const BACKENDS: PhysicsBackendKind[] = ['cannon', 'rapier'];
 const H = 1 / 60;
 const G = -9.82;
 
@@ -28,6 +30,13 @@ function run(world: PhysicsWorld, steps: number, dt = H): void { for (let i = 0;
 
 describe.each(BACKENDS)('physics backend: %s', kind => {
     const make = () => createPhysicsWorld(kind, [0, G, 0]);
+    /** Decimal places a check can ask of this backend. */
+    let dp = (n: number) => n;
+    beforeAll(async () => {
+        await acquirePhysicsBackend(kind);
+        const single = make().capabilities.precision === 32;
+        dp = n => (single ? Math.min(n, 4) : n);
+    });
 
     describe('the world', () => {
         it('reports what it is', () => {
@@ -40,10 +49,10 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
         it('keeps a clock that steps advance and a taking-over world may set', () => {
             const w = make();
             run(w, 3);
-            expect(w.time).toBeCloseTo(3 * H, 12);
+            expect(w.time).toBeCloseTo(3 * H, dp(12));
             w.time = 10;
             w.step(H);
-            expect(w.time).toBeCloseTo(10 + H, 12);
+            expect(w.time).toBeCloseTo(10 + H, dp(12));
         });
 
         it('runs the pre-substep hook once per substep, with its length', () => {
@@ -99,8 +108,8 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
                 colliders: [{ shape: { kind: 'box', halfExtents: [0.5, 0.25, 0.5] }, offset: [0.6, 0.3, 0] }],
             });
             const p = pose(w, b);
-            for (let i = 0; i < 3; i++) expect(p[i]).toBeCloseTo([1, 2, 3][i], 12);
-            for (let i = 0; i < 4; i++) expect(p[3 + i]).toBeCloseTo(q[i], 12);
+            for (let i = 0; i < 3; i++) expect(p[i]).toBeCloseTo([1, 2, 3][i], dp(12));
+            for (let i = 0; i < 4; i++) expect(p[3 + i]).toBeCloseTo(q[i], dp(12));
         });
 
         it('put the mass at the colliders by default, at the origin when asked', () => {
@@ -114,7 +123,7 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             };
             const recentred = at('colliders');
             expect(recentred.mass).toBe(2);
-            expect(recentred.centerOfMass[0]).toBeCloseTo(1, 9);
+            expect(recentred.centerOfMass[0]).toBeCloseTo(1, dp(9));
             expect(at('origin').centerOfMass).toEqual([0, 0, 0]);
         });
 
@@ -125,15 +134,15 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
                 colliders: [{ shape: { kind: 'sphere', radius: 0.5 }, offset: [1, 0, 0] }],
             });
             w.setTransform(b, [5, 6, 7], null);
-            expect(pose(w, b).slice(0, 3).map(v => +v.toFixed(9))).toEqual([5, 6, 7]);
+            expect(pose(w, b).slice(0, 3).map(v => +v.toFixed(dp(9)))).toEqual([5, 6, 7]);
             const half = Math.SQRT1_2;
             w.setTransform(b, null, [0, half, 0, half]);
             const p = pose(w, b);
-            expect(p.slice(0, 3).map(v => +v.toFixed(9))).toEqual([5, 6, 7]);
+            expect(p.slice(0, 3).map(v => +v.toFixed(dp(9)))).toEqual([5, 6, 7]);
             // The collider swung round the origin: its bounds moved to −Z.
             const box = new Array(6).fill(0);
             w.getAabb(b, box);
-            expect((box[2] + box[5]) / 2).toBeCloseTo(6, 6);
+            expect((box[2] + box[5]) / 2).toBeCloseTo(6, dp(6));
             expect((box[2] + box[5]) / 2).not.toBeCloseTo(7, 1);
         });
 
@@ -145,7 +154,7 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             // Semi-implicit Euler over 60 steps of 1/60 s: within a few cm of ½gt².
             expect(y).toBeLessThan(10 + 0.5 * G * 1 + 0.1);
             expect(y).toBeGreaterThan(10 + 0.5 * G * 1 - 0.1);
-            expect(velocity(w, b)[1]).toBeCloseTo(G, 6);
+            expect(velocity(w, b)[1]).toBeCloseTo(G, dp(6));
         });
 
         it('take an impulse through the centre of mass as a change of velocity', () => {
@@ -163,9 +172,9 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             w.applyForce(b, [120, 0, 0]);
             w.step(H);
             const after1 = velocity(w, b)[0];
-            expect(after1).toBeCloseTo(120 / 2 * H, 9);
+            expect(after1).toBeCloseTo(120 / 2 * H, dp(9));
             w.step(H);
-            expect(velocity(w, b)[0]).toBeCloseTo(after1, 12);
+            expect(velocity(w, b)[0]).toBeCloseTo(after1, dp(12));
         });
 
         it('hold a written velocity', () => {
@@ -175,8 +184,8 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             w.setLinearVelocity(b, 3, 0, 0);
             w.setAngularVelocity(b, 0, 1, 0);
             run(w, 30);
-            expect(pose(w, b)[0]).toBeCloseTo(1.5, 6);
-            expect(velocity(w, b)[4]).toBeCloseTo(1, 6);
+            expect(pose(w, b)[0]).toBeCloseTo(1.5, dp(6));
+            expect(velocity(w, b)[4]).toBeCloseTo(1, dp(6));
         });
 
         it('stay put while asleep, and move again once woken', () => {
@@ -206,7 +215,7 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             w.raycast([0, 20, 0], [0, 0, 0], { mode: 'all' }, h => { if (h.body === b) hit = true; });
             expect(hit).toBe(false);                            // not queried
             w.setTransform(b, [0, 4, 0], null);                 // still writable
-            expect(pose(w, b)[1]).toBeCloseTo(4, 12);
+            expect(pose(w, b)[1]).toBeCloseTo(4, dp(12));
             w.setEnabled(b, true);
             expect(w.bodies()).toEqual([other, b]);             // last in order
             run(w, 30);
@@ -305,8 +314,8 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             expect(w.colliderParts(b)).toBe(parts);
             const expected = (offset: number[]) => { const r = rotate(q, offset); return [1 + r[0], 2 + r[1], 3 + r[2]]; };
             const box = parts.find(p => p.shape.kind === 'box')!, ball = parts.find(p => p.shape.kind === 'sphere')!;
-            worldCentre(frame, box.offset).forEach((v, i) => expect(v).toBeCloseTo(expected([0.6, 0.3, 0])[i], 9));
-            worldCentre(frame, ball.offset).forEach((v, i) => expect(v).toBeCloseTo(expected([-0.5, 0, 0])[i], 9));
+            worldCentre(frame, box.offset).forEach((v, i) => expect(v).toBeCloseTo(expected([0.6, 0.3, 0])[i], dp(9)));
+            worldCentre(frame, ball.offset).forEach((v, i) => expect(v).toBeCloseTo(expected([-0.5, 0, 0])[i], dp(9)));
             for (const part of parts) {
                 const c = worldCentre(frame, part.offset);
                 expect(Math.hypot(c[0] - frame[0], c[1] - frame[1], c[2] - frame[2]) + part.boundingRadius).toBeLessThanOrEqual(radius + 1e-9);
@@ -335,7 +344,7 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
                 // Out of the ground is up; out of the sphere is down.
                 const up = a === g ? ny : -ny;
                 expect(up).toBeGreaterThan(0.99);
-                expect(Math.hypot(nx, ny, nz)).toBeCloseTo(1, 6);
+                expect(Math.hypot(nx, ny, nz)).toBeCloseTo(1, dp(6));
             });
             expect(found).toBeGreaterThan(0);
             expect(w.contactCount).toBeGreaterThan(0);
@@ -389,8 +398,8 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             // A body may be hit more than once (its entry and its exit face): the nearest hit of each counts.
             const hits = cast(w, 'all').sort((a, b) => a.distance - b.distance);
             expect([...new Set(hits.map(h => h.body))]).toEqual([near, moving, far]);
-            expect(hits[0].distance).toBeCloseTo(1.5, 6);
-            expect(hits[0].normal[2]).toBeCloseTo(-1, 6);
+            expect(hits[0].distance).toBeCloseTo(1.5, dp(6));
+            expect(hits[0].normal[2]).toBeCloseTo(-1, dp(6));
         });
 
         it('reports only the nearest in closest mode', () => {
@@ -493,6 +502,7 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             out.push(`${kind === PhysicsEventKind.ContactBegin ? 'contact' : kind === PhysicsEventKind.SensorBegin ? 'enter' : 'exit'} ${nameIn(s)(a)} ${nameIn(s)(b)}`));
 
         it('steps as the world itself would, and the world reports what the copy raised', () => {
+            if (!make().capabilities.threadable) return;
             const inline = make(), original = make();
             const a = scene(inline), b = scene(original);
             const mirror = createWorldMirror(original), replica = createWorldReplica(kind);
@@ -521,12 +531,12 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
             }
             for (const key of ['ball', 'bob'] as const) {
                 const p = pose(original, b[key]), q = pose(inline, a[key]);
-                for (let i = 0; i < 7; i++) expect(p[i], `${key} pose[${i}]`).toBeCloseTo(q[i], 9);
+                for (let i = 0; i < 7; i++) expect(p[i], `${key} pose[${i}]`).toBeCloseTo(q[i], dp(9));
                 const v = velocity(original, b[key]), u = velocity(inline, a[key]);
-                for (let i = 0; i < 6; i++) expect(v[i], `${key} velocity[${i}]`).toBeCloseTo(u[i], 9);
+                for (let i = 0; i < 6; i++) expect(v[i], `${key} velocity[${i}]`).toBeCloseTo(u[i], dp(9));
             }
             expect(original.hasBody(b.crate)).toBe(false);
-            expect(original.time).toBeCloseTo(inline.time, 12);
+            expect(original.time).toBeCloseTo(inline.time, dp(12));
             expect(copyLog).toEqual(inlineLog);
             expect(copyLog).toContain('enter zone ball');
             expect(copyLog.some(e => e.startsWith('contact ball'))).toBe(true);
@@ -536,6 +546,7 @@ describe.each(BACKENDS)('physics backend: %s', kind => {
         });
 
         it('starts over from empty once cleared', () => {
+            if (!make().capabilities.threadable) return;
             const original = make();
             scene(original);
             const mirror = createWorldMirror(original), replica = createWorldReplica(kind);
