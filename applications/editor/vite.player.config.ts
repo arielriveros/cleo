@@ -27,7 +27,7 @@ const PLAYER_HTML = path.resolve(__dirname, 'src/player/index.html')
  * for a stub; `game-<backend>.js` carries that backend and stubs the others. Publishing picks the one for
  * the project's physics backend (features/publish/publishClient.ts).
  */
-const WASM_BACKENDS: readonly string[] = ['rapier']
+const WASM_BACKENDS: readonly string[] = ['rapier', 'jolt']
 const PAL = path.resolve(__dirname, '../../src/physics/pal')
 
 /** Resolve each named backend's loader (pal/<backend>/load.ts) to its stub (loadStub.ts), which has no library. */

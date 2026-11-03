@@ -1,22 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { PHYSICS_BACKENDS, resolvePhysicsBackendRequest } from '../src/physics/pal/backendSelect';
 import { describePhysicsCapabilities } from '../src/physics/pal/capabilities';
-import { acquirePhysicsBackend, acquirePhysicsWorld, isPhysicsBackendLoaded } from '../src/physics/pal/createWorld';
+import { acquirePhysicsWorld, isPhysicsBackendLoaded } from '../src/physics/pal/createWorld';
 import { PhysicsSystem } from '../src/physics/physicsSystem';
 
 // Which physics engine a game simulates with: a request (the project's setting, `?physicsBackend=`)
 // resolved against what this build runs, falling back to cannon with a stated reason.
 
 describe('choosing a physics backend', () => {
-    it('runs cannon when asked, or when nothing is asked, and Rapier when asked', () => {
+    it('runs cannon when asked, or when nothing is asked, and Rapier or Jolt when asked', () => {
         expect(resolvePhysicsBackendRequest('cannon')).toEqual({ kind: 'cannon', reason: null });
         expect(resolvePhysicsBackendRequest('rapier')).toEqual({ kind: 'rapier', reason: null });
+        expect(resolvePhysicsBackendRequest('jolt')).toEqual({ kind: 'jolt', reason: null });
         expect(resolvePhysicsBackendRequest(undefined)).toEqual({ kind: 'cannon', reason: null });
         expect(resolvePhysicsBackendRequest('')).toEqual({ kind: 'cannon', reason: null });
     });
 
     it('falls back to cannon, saying why, for a backend this build does not run', () => {
-        expect(resolvePhysicsBackendRequest('jolt')).toEqual({ kind: 'cannon', reason: 'the Jolt backend is not implemented yet' });
         const unknown = resolvePhysicsBackendRequest('havok');
         expect(unknown.kind).toBe('cannon');
         expect(unknown.reason).toMatch(/havok/);
@@ -28,12 +28,12 @@ describe('choosing a physics backend', () => {
     });
 
     it('builds the world on the resolved backend and keeps what was asked', () => {
-        const asked = new PhysicsSystem({ backend: 'jolt' });
+        const asked = new PhysicsSystem({ backend: 'havok' });
         expect(asked.capabilities).toBeNull();
         asked.initialize();
         expect(asked.backend).toBe('cannon');
-        expect(asked.requestedBackend).toBe('jolt');
-        expect(asked.backendFallbackReason).toMatch(/not implemented/);
+        expect(asked.requestedBackend).toBe('havok');
+        expect(asked.backendFallbackReason).toMatch(/no physics backend called "havok"/);
         expect(asked.capabilities!.backend).toBe('cannon');
         expect(describePhysicsCapabilities(asked.capabilities!)).toMatch(/^physics cannon · /);
 
@@ -61,8 +61,12 @@ describe('choosing a physics backend', () => {
         expect(describePhysicsCapabilities(p.capabilities!)).toMatch(/^physics rapier · capsule native · /);
     });
 
-    it("loads Jolt's library on demand", async () => {
-        await acquirePhysicsBackend('jolt');
+    it('loads Jolt first, and builds its world once loaded', async () => {
+        const p = new PhysicsSystem({ backend: 'jolt' });
+        await p.load();
         expect(isPhysicsBackendLoaded('jolt')).toBe(true);
+        p.initialize();
+        expect([p.backend, p.requestedBackend, p.backendFallbackReason]).toEqual(['jolt', 'jolt', null]);
+        expect(describePhysicsCapabilities(p.capabilities!)).toMatch(/^physics jolt · capsule native · groups 16-bit · cone limit native · f32 · /);
     });
 });

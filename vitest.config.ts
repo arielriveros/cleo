@@ -20,7 +20,7 @@ const PHYSICS_SUITES = [
     'characterGround', 'physicsOverlap', 'physicsTriggerOverlap', 'terrainCollider', 'foliageColliderPose', 'ragdollProfile', 'waterVolumeNode',
 ];
 /** The backends besides cannon that the engine suites run on. */
-const OTHER_BACKENDS = ['rapier'];
+const OTHER_BACKENDS = ['rapier', 'jolt'];
 
 export default mergeConfig(engineConfig, defineConfig({
     resolve: {

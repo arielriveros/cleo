@@ -1,8 +1,8 @@
 # Physics backends
 
 Physics runs behind a backend-neutral layer, the physics counterpart of the renderer's RHI, so it can run
-on more than one physics engine. Two are implemented: cannon-es, the default, and Rapier. Jolt is listed for
-later. The engine's tests pin the cannon step bit for bit, so cannon games behave exactly as before.
+on more than one physics engine. Three are implemented: cannon-es, the default, Rapier and Jolt. The
+engine's tests pin the cannon step bit for bit, so cannon games behave exactly as before.
 
 ## The layer
 
@@ -73,8 +73,8 @@ project, not the machine: two engines do not simulate alike, so a game must play
 published game's config always carries it (`physics.backend`), so a game keeps its backend even if the
 engine's default changes.
 
-The choice is a request, read when the engine starts. A backend this build cannot run (Jolt, listed but
-not implemented yet, a name it does not know, or Rapier in a player built without it) falls back to cannon-es. The log says why, and so
+The choice is a request, read when the engine starts. A backend this build cannot run (a name it does not
+know, or Rapier or Jolt in a player built without it) falls back to cannon-es. The log says why, and so
 does `physics.backendFallbackReason`. `physics.backend` is the backend running, and `physics.requestedBackend`
 the one asked for. `?physicsBackend=` in the URL asks for another backend for a comparison, in the editor
 and in a web build. Each engine logs its backend at startup:
@@ -129,7 +129,8 @@ bit for bit.
 | Rapier in the physics worker | Done |
 | Jolt: the package and the spike | Done |
 | Jolt: `JoltWorld` passing the conformance suite | Done |
-| Jolt: the engine and the Valley on it | Listed, not started |
+| Jolt: the engine and the Valley on it; published games carry only their backend | Done |
+| Jolt in the physics worker | Not started |
 
 ## Rapier compared with cannon
 
@@ -155,6 +156,25 @@ A project picks Rapier in Options ▸ Engine ▸ Runtime. What differs from cann
 - **Published size.** A Rapier game's player is about 8.7 MB larger, since the player and its inlined
   physics worker each carry Rapier. `npm run build:player` builds `game.js` (cannon) and `game-rapier.js`,
   and Publish picks the one for the project.
+
+## Jolt compared with cannon
+
+A project picks Jolt in Options ▸ Engine ▸ Runtime. What differs from cannon:
+
+- **Characters are capsules**, as on Rapier.
+- **Cone limits are native**: a round cone, where Rapier's is a box of swing.
+- **Joint `maxForce` is ignored**, as on Rapier. A joint holds whatever the load.
+- **Single precision**, as on Rapier.
+- **Queries are cheap.** Jolt's broadphase follows every write, so a ray never waits for a refit: in the
+  Valley about 0.6–0.9 ms of rays a frame (40–50 rays), where Rapier spends about 2 ms. The step itself
+  takes about 0.5–0.8 ms a frame on the main thread there.
+- **Memory is fixed.** Jolt's heap is 128 MB and cannot grow. A world costs about 20 MB of it and holds at
+  most 16,384 bodies; the Valley in Play uses about 36 MB. Running out stops the physics for good.
+- **Heightfields are compressed**: terrain heights are about a millimetre or two off.
+- **Single-threaded.** Its threaded build cannot run the engine (see the spike below).
+- **Published size.** A Jolt game's player is about 7.5 MB larger, since the player and its inlined physics
+  worker each carry Jolt. `npm run build:player` builds `game-jolt.js` beside the others, and Publish picks
+  it for a Jolt project.
 
 ## Rapier: what the spike found
 

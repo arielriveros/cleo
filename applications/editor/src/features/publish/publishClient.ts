@@ -35,12 +35,13 @@ const STALE_PLAYER_HINT =
 
 // Load the prebuilt player templates (`npm run build:player` into public/player/, served same-origin by
 // both the dev server and the production editor build): the player for the game's physics backend, since
-// only the Rapier one carries Rapier (see vite.player.config.ts). It ships as game.js either way.
+// only the Rapier one carries Rapier and only the Jolt one Jolt (see vite.player.config.ts). It ships as
+// game.js either way.
 // public/player/ is git-ignored and no build step depends on it, so a bundle can silently drift behind
 // the packer; the contract check stops the publish instead. See pack.ts PLAYER_CONTRACT.
 async function loadPlayerTemplates(physicsBackend: string | undefined): Promise<PlayerTemplates> {
   let htmlRes: Response, jsRes: Response, buildRes: Response;
-  const gameJs = physicsBackend === 'rapier' ? 'player/game-rapier.js' : 'player/game.js';
+  const gameJs = physicsBackend === 'rapier' || physicsBackend === 'jolt' ? `player/game-${physicsBackend}.js` : 'player/game.js';
   try {
     [htmlRes, jsRes, buildRes] = await Promise.all([
       fetch('player/index.html'), fetch(gameJs), fetch('player/build.json'),
