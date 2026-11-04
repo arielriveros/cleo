@@ -25,7 +25,7 @@ import { normaliseFx, type FxParams, type FxPreviewQuality } from './fxParams';
 import type { FxScene } from './fxScene';
 import { voxelizeBodies } from './obstacles';
 import { bakeFireLut, FIRE_OPACITY } from './volumeRender';
-import { absorptionScale, detailBlend, shadowArea, SHADOW_RES } from './realism';
+import { absorptionScale, BLUE_CORE_EMIT, detailBlend, shadowArea, SHADOW_RES } from './realism';
 import { lightVector } from './volumeRender';
 import { Texture as EngineTexture } from 'cleo/graphics/texture';
 import { device } from 'cleo/graphics/rhi/deviceHandle';
@@ -418,7 +418,7 @@ export class LiveFx {
     n.fireOpacity = p.fireOpacity ?? FIRE_OPACITY;
     n.absorptionScale = absorptionScale(p.absorptionColor);
     n.sootMask = p.fireSootMask ?? 0;
-    n.blueCore = p.blueCore ?? 0;
+    n.blueCore = (p.blueCore ?? 0) * BLUE_CORE_EMIT;
     const bc = p.blueCoreColor ?? [0.3, 0.45, 1, 1];
     n.blueCoreColor = [srgbToLinear(bc[0]), srgbToLinear(bc[1]), srgbToLinear(bc[2])];
     n.sharpen = p.sharpen ?? 0;

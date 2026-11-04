@@ -12,6 +12,18 @@ import { useDocEntry } from '../docs/DocScope';
 export const sliderFill = (fraction: number): string =>
   `calc(7px + (100% - 14px) * ${Math.min(1, Math.max(0, fraction)).toFixed(4)})`;
 
+/**
+ * The default readout: two decimals, or as many as the step has (up to four), so a 0.001 step reads
+ * 0.003 rather than 0.00; a value too small for those decimals keeps two significant digits.
+ */
+export function sliderReadout(value: number, step = 0.01): string {
+  const s = String(step);
+  const stepDecimals = s.includes('e-') ? Number(s.split('e-')[1]) : s.includes('.') ? s.length - s.indexOf('.') - 1 : 0;
+  const d = Math.min(4, Math.max(2, stepDecimals));
+  if (value !== 0 && Math.abs(value) < 0.5 * Math.pow(10, -d)) return value.toPrecision(2);
+  return value.toFixed(d);
+}
+
 export interface SliderProps {
   value: number;
   min: number;
@@ -19,7 +31,7 @@ export interface SliderProps {
   step?: number;
   onChange: (value: number) => void;
   label?: React.ReactNode;
-  /** Show the numeric readout on the right. `true` -> `value.toFixed(2)`; pass a fn to format. */
+  /** Show the numeric readout on the right. `true` -> {@link sliderReadout}; pass a fn to format. */
   readout?: boolean | ((value: number) => string);
   /** Let the user click the readout to type an exact value (default true). */
   editable?: boolean;
@@ -56,7 +68,7 @@ export function Slider({
   const [editing, setEditing] = useState(false);
   const entry = useDocEntry(label, doc, 'field');
   const pct = max > min ? clamp(((value - min) / (max - min)) * 100, 0, 100) : 0;
-  const text = typeof readout === 'function' ? readout(value) : value.toFixed(2);
+  const text = typeof readout === 'function' ? readout(value) : sliderReadout(value, step);
 
   const commit = (raw: string) => {
     const v = parseFloat(raw);

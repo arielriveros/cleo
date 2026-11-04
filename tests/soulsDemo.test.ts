@@ -335,13 +335,14 @@ describe('bloodstains', () => {
         expect(m.bloodstain).toBe(made[1]);
     });
 
-    it('drops nothing when there was nothing to lose', () => {
+    it('still marks the last death place when there was nothing to lose', () => {
         const { m, made } = withInstantiate();
         m.dropBloodstain([0, 0, 0], 500);
-        m.dropBloodstain([0, 0, 0], 0);
-        expect(made).toHaveLength(1);
+        m.dropBloodstain([3, 0, 1], 0);
+        expect(made).toHaveLength(2);
         expect(made[0].removed).toBe(true);
-        expect(m.bloodstain).toBeNull();
+        expect(made[1].souls).toBe(0);
+        expect(m.bloodstain).toBe(made[1]);
     });
 });
 
@@ -367,18 +368,17 @@ describe('blood', () => {
         return { m, made, at };
     }
 
-    it('throws droplets, pools blood under the target and spatters it along the blow', () => {
+    it('throws droplets and spatters blood along the blow, but leaves no pool', () => {
         const { m, made, at } = bleeding();
         m.bleed(at(0, 2), at(0, 0), 120);
-        expect(made.map(n => n.name)).toEqual(['Blood Spray', 'Blood Splat', 'Blood Drops']);
-        const [, splat, drops] = made;
-        expect(splat.at).toEqual([0, 0.5, 2]);
+        expect(made.map(n => n.name)).toEqual(['Blood Spray', 'Blood Drops']);
+        const [, drops] = made;
         expect(drops.yaw).toBeCloseTo(0);            // +Z: from the attacker through the target
         expect(drops.at[2]).toBeGreaterThan(2);
-        expect(splat.sizeScale).toBe(1);
+        expect(drops.sizeScale).toBe(1);
         m.bleed(at(0, 2), at(2, 2), 10_000);
-        expect(made[5].yaw).toBeCloseTo(-90);         // blow toward -X
-        expect(made[5].sizeScale).toBe(1.6);
+        expect(made[3].yaw).toBeCloseTo(-90);         // blow toward -X
+        expect(made[3].sizeScale).toBe(1.6);
     });
 
     it('bleeds nothing when blood is off or nothing was dealt', () => {
@@ -491,6 +491,17 @@ describe('a blood splat', () => {
         const t = (5 * Math.PI) / 180;
         const sloped = worldOf([Math.sin(t), Math.cos(t), 0]);
         for (let i = 0; i < 3; i++) expect(sloped.world[i]).toBeCloseTo(expected[i], 1);
+    });
+
+    it('plays a decal flipbook from where it lies, flipbookStart seconds in', () => {
+        const flip = { columns: 4, rows: 4, frames: 16, fps: 8, loop: false, blend: true };
+        for (const start of [0, 0.3]) {
+            const { s, decal } = splat({ point: [3, 0, 4], normal: [0, 1, 0] });
+            decal.flipbook = flip;
+            if (start) s.flipbookStart = start;
+            s.onUpdate(0.016);
+            expect(decal.flipbookTime).toBe(start);
+        }
     });
 
     it('removes itself with no floor in reach', () => {

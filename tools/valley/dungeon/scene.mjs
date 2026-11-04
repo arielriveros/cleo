@@ -397,9 +397,10 @@ export function buildDungeon(kit) {
     const root = node('root', 'node', {
       id: id('dungeon:root'),
       children: [
+        // As the overworld's: a hit's blood is the spatter decal alone, no spray.
         withScript(node('GameManager', 'node', {
           id: id('dungeon:manager'), children: [souls.banner(), souls.soundsGroup('dungeon:manager', souls.SOUNDS.manager, { music: souls.MUSIC_CUES })],
-        }), 'SoulsGameManager'),
+        }), 'SoulsGameManager', { bloodSprayTemplate: '' }),
         linkInstance(souls.LEVEL.player, player),
         souls.group('dungeon:level', 'Level', [structureNode, souls.group('dungeon:collision', 'Collision', collision),
           souls.group('dungeon:occluders', 'Occluders', occluderBoxes.map((o, i) => node(`Occluder ${i + 1}`, 'occluder', {

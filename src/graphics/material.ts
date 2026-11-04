@@ -698,6 +698,9 @@ export class Material {
         // Not serialized: a runtime multiplier the renderer sets per sprite draw from its tileset's overdrive.
         // Must exist on every Basic material all the same — an unset uniform reads 0 and draws black.
         material.properties.set('intensity', 1.0);
+        // Not serialized either: a sprite's soft fade, set per draw from Sprite.softness (0 = off).
+        material.properties.set('softness', 0);
+        material.properties.set('depthParams', [0.1, 1000, 0, 0]);
 
         if (properties.texture) {
             const tex = properties.texture;

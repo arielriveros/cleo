@@ -1,15 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { FluidCpu, fluidDims } from '../src/fx/fluidCpu';
-import { DEFAULT_FX, FX_SCHEMA, FX_SCENE_SPECS, normaliseFx, type FxParams } from '../src/fx/fxParams';
+import { DEFAULT_FX, FX_SCHEMA, FX_SCENE_SPECS, normaliseFx, tileDims, type FxParams } from '../src/fx/fxParams';
+import { bakeFireLut, renderTile } from '../src/fx/volumeRender';
 import { applySceneValues, EFFECT_SECTION_PRESETS, effectPresetLabel, effectPresetParams, SCENE_PRESETS, SCENE_SECTION_PRESETS } from '../src/fx/fxPresets';
 import { FX_PRESETS } from '../src/fx/fxParams';
 import { DEFAULT_SCENE, SCENE_SCHEMA, VIEW_KEYS, type FxScene } from '../src/fx/fxScene';
-import { detailBlend, emissionTemperature, groundShadow, SHADOW_RES } from '../src/fx/realism';
+import { BLUE_CORE_SOOT, BLUE_CORE_ZONE, blueCoreSource, detailBlend, emissionTemperature, groundShadow, SHADOW_RES } from '../src/fx/realism';
 
 // The realism models (realism.ts) in the CPU reference solver, and the preset contracts.
 
 const small = (p: Partial<FxParams> = {}): FxParams =>
-  normaliseFx({ ...DEFAULT_FX, regionSize: [2, 3, 2], voxelSize: 0.1, pressureIterations: 16, ...p });
+  normaliseFx({ ...DEFAULT_FX, regionSize: [2, 3, 2], voxelSize: 0.1, frameTime: 1 / 24, pressureIterations: 16, ...p });
 
 const run = (p: FxParams, steps: number, setup?: (f: FluidCpu) => void) => {
   const f = new FluidCpu(fluidDims(p));
@@ -57,7 +58,7 @@ describe('realism models', () => {
   });
 
   it('lets the flow through the sides with open boundaries, where closed walls stop it', () => {
-    const p = small({ fuel: 0, heat: 0.4, smoke: 3, wind: 15 });
+    const p = small({ fuel: 0, heat: 0.4, smoke: 3, wind: 1.5 });
     const sideFlow = (open: boolean) => {
       const f = run({ ...p, boundaries: open ? 'open' : 'closed' }, 40);
       let s = 0;
@@ -96,7 +97,7 @@ describe('realism models', () => {
   });
 
   it('carries the detail coordinates with the flow, and cross-fades the two sets', () => {
-    const f = run(small({ detailStrength: 0.5, emitSpeed: 20 }), 8);
+    const f = run(small({ detailStrength: 0.5, emitSpeed: 2 }), 8);
     expect(f.detailA).not.toBeNull();
     const d = f.detailDims;
     // Some coordinate has left its rest position (x*2, y*2, z*2).
@@ -106,6 +107,51 @@ describe('realism models', () => {
     expect(moved).toBeGreaterThan(0.5);
     expect(detailBlend(0)).toBe(0);
     expect(detailBlend(0.75)).toBeCloseTo(1, 9);
+  });
+
+  it('burns blue only where fresh fuel first burns, the base of a flame, and less of it in a sooty one', () => {
+    // Fresh from the emitter and burning: the whole zone.
+    expect(blueCoreSource(0.5, 1, 1, 0)).toBeCloseTo(1, 9);
+    // Cold gas holds no reaction zone, however fresh its fuel.
+    expect(blueCoreSource(0, 1, 1, 0)).toBe(0);
+    // Ramps in with the burning gas.
+    expect(blueCoreSource(0.1, 1, 1, 0)).toBeCloseTo(0.4, 9);
+    // Gone once BLUE_CORE_ZONE of a clean fuel has burnt, and fading toward that.
+    expect(blueCoreSource(0.5, 1 - BLUE_CORE_ZONE, 1, 0)).toBe(0);
+    expect(blueCoreSource(0.5, 0.2, 1, 0)).toBe(0);
+    expect(blueCoreSource(0.5, 1 - BLUE_CORE_ZONE / 2, 1, 0)).toBeCloseTo(0.25, 9);
+    // Soot forms sooner in a sooty fuel: at the same burn, a thinner zone.
+    const fresh = 1 - BLUE_CORE_ZONE / 4;
+    expect(blueCoreSource(0.5, fresh, 1, 0.6)).toBeLessThan(blueCoreSource(0.5, fresh, 1, 0.05));
+    expect(blueCoreSource(0.5, 1 - BLUE_CORE_ZONE / (1 + BLUE_CORE_SOOT * 0.6), 1, 0.6)).toBe(0);
+    // Relative to the emitter's fuel, never above 1; no emitter fuel, no zone (steam's vapour).
+    expect(blueCoreSource(0.5, 2.5, 3, 0)).toBeCloseTo(blueCoreSource(0.5, 2.5 / 3, 1, 0), 9);
+    expect(blueCoreSource(1, 5, 1, 0)).toBeLessThanOrEqual(1);
+    expect(blueCoreSource(0.5, 1, 0, 0)).toBe(0);
+  });
+
+  it('draws a candle orange, with no blue body or violet tip', () => {
+    // The preset run and rendered as the bake renders it: the share of the flame's pixels that read blue
+    // (more blue than red). The old core lit two thirds of the burn at full strength.
+    const bluePixels = (id: string, coarse: number) => {
+      const preset = FX_PRESETS.find(q => q.id === id)!.params;
+      const p = normaliseFx({ ...preset, voxelSize: preset.voxelSize * coarse, tileSize: 96, seed: 3 });
+      const f = run(p, Math.round(0.35 / p.frameTime) * p.substeps);
+      const { width, height } = tileDims(p);
+      const square = Math.max(width, height);
+      const tile = new Uint8Array(square * square * 4);
+      renderTile(f, p, tile, square, bakeFireLut(p));
+      let flame = 0, blue = 0;
+      for (let k = 0; k < tile.length; k += 4) {
+        if (tile[k + 3] < 51 || tile[k] + tile[k + 1] + tile[k + 2] < 60) continue;
+        flame++;
+        if (tile[k + 2] > tile[k]) blue++;
+      }
+      expect(flame).toBeGreaterThan(20);
+      return blue / flame;
+    };
+    // (The old core read blue over a third of the candle.)
+    expect(bluePixels('candle', 1.5)).toBeLessThan(0.03);
   });
 
   it('casts a ground shadow under smoke and none in clear air', () => {

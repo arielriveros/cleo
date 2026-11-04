@@ -26,11 +26,11 @@ import type { FxParams } from './fxParams';
 /** Below this thickness (m) a cell counts as dry. */
 export const FILM_DRY = 2e-5;
 /** The film thickness at which the mobility reaches the `flow` setting's reference rate, m. */
-const FILM_REF = 1.5e-3;
+export const FILM_REF = 1.5e-3;
 /** The mobility (m^2/s) at full `flow` and the reference thickness. */
-const FLOW_RATE = 0.03;
+export const FLOW_RATE = 0.03;
 /** Mobility is capped at this multiple of the reference. */
-const MOBILITY_CAP = 4;
+export const MOBILITY_CAP = 4;
 /** Most Gauss-Seidel sweeps a step: each lets the liquid's front move about a cell. */
 const SWEEPS = 24;
 /** Cells kept around what is wet when the window grows. */

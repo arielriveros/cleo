@@ -10,8 +10,6 @@
 //                  "flame"; Nguyen, Fedkiw & Jensen 2002) -- flames are thin sheets, not hot blobs
 //   blast          a pressure pulse at the emitter for the first 0.1 s: an explosion's shock bloom
 //   settling       dust falling through the air at its own speed
-//   vorticity      confinement scaled by the voxel size (Fedkiw, Stam & Jensen 2001: epsilon * h), so a
-//                  finer grid adds detail without changing the look
 
 import type { FxParams } from './fxParams';
 
@@ -28,8 +26,6 @@ export interface StepFactors {
   blast: number;
   /** Dust fall speed, voxels per second. */
   settle: number;
-  /** Vorticity confinement scale for this voxel size (1 at the 0.1 m default). */
-  vortScale: number;
 }
 
 /**
@@ -64,7 +60,6 @@ export function stepFactors(p: FxParams, time: number, dt: number): StepFactors 
     flameKeep: (p.flameLifetime ?? 0) > 0 ? Math.exp(-dt / p.flameLifetime) : 0,
     blast: (p.blast ?? 0) > 0 && time < BLAST_TIME ? p.blast : 0,
     settle: (p.settling ?? 0) / v,
-    vortScale: v / 0.1,
   };
 }
 
@@ -160,12 +155,29 @@ export function sharpenDensity(d: number, sharpen: number): number {
 }
 
 /**
- * The blue core (Nguyen et al. 2002): the reaction zone, where unburnt fuel is above ignition and burning
- * -- the base of a flame, before soot forms. It fades where the gas is white-hot, so the core stays white.
- * 0..1; the renderers then hide it behind soot ({@link blueCoreSoot}).
+ * The blue core's brightness at `blueCore` 1, as a share of the fire's: the chemiluminescence of the
+ * reaction zone (CH* and C2*) is faint beside a sooty flame's glow.
  */
-export function blueCoreSource(e: number, fuel: number): number {
-  return e > 0 && fuel > 0 ? Math.min(1, fuel * 3) * (1 - 0.7 * e) : 0;
+export const BLUE_CORE_EMIT = 0.12;
+/** The share of a clean fuel's burn that is still blue (a gas or a wax): the first of it, before soot forms. */
+export const BLUE_CORE_ZONE = 0.3;
+/** How much sooner soot forms per unit of `smokeYield`: a sooty fuel's blue zone is that much thinner. */
+export const BLUE_CORE_SOOT = 8;
+
+/**
+ * The blue core (Nguyen et al. 2002): the reaction zone where fresh fuel first burns -- the base of a
+ * flame, before soot forms. `fuel0` is what the emitter gives out: the zone is 1 there and gone once
+ * {@link BLUE_CORE_ZONE} of a clean fuel has burnt (the bottom tenth or so of a flame, as the gas speeds up
+ * rising), sooner for a sooty one (`smokeYield`, {@link BLUE_CORE_SOOT}): a candle shows a blue foot, a
+ * torch or a wood fire barely any. Only where the gas is above ignition. 0..1, a shape: the renderers add
+ * `blueCore` x {@link BLUE_CORE_EMIT} of blue there, hidden behind smoke ({@link blueCoreSoot}), so it
+ * shows where the fire around it is dim -- the edges of a flame's foot -- and never tints a white core.
+ */
+export function blueCoreSource(e: number, fuel: number, fuel0: number, smokeYield: number): number {
+  if (!(e > 0) || !(fuel > 0) || !(fuel0 > 0)) return 0;
+  const zone = BLUE_CORE_ZONE / (1 + BLUE_CORE_SOOT * Math.max(0, smokeYield));
+  const z = Math.min(1, Math.max(0, (fuel / fuel0 - (1 - zone)) / zone));
+  return z * z * Math.min(1, e * 4);
 }
 
 /** Soot hides the blue core: dense smoke at a point dims it. */

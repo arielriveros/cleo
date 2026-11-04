@@ -39,7 +39,11 @@ fn cs_advect(@builtin(global_invocation_id) g: vec3<u32>) {
     // Above the open top -- and through the sides, with open boundaries -- is fresh air.
     var s = vec4<f32>(0.0);
     let hi = vec3<f32>(f32(nx()) - 1.0, f32(ny()) - 1.0, f32(nz()) - 1.0);
-    let outside = back.y > hi.y || (open_sides() && (back.x < 0.0 || back.x > hi.x || back.z < 0.0 || back.z > hi.z));
+    let sideways = open_sides() && (back.x < 0.0 || back.x > hi.x || back.z < 0.0 || back.z > hi.z);
+    let outside = back.y > hi.y || sideways;
+    // And still air: what flows in through an open side does not move (fluidCpu.ts `advect`), or a sideways
+    // flow feeds itself through the box and drifts the whole effect.
+    if (sideways) { v = vec4<f32>(0.0); }
     if (!outside) {
         s = sample_sca(back);
         // Dust falls through the air: its own backtrace starts higher by the fall distance.
@@ -57,18 +61,7 @@ fn cs_advect(@builtin(global_invocation_id) g: vec3<u32>) {
         s.x = s.x + u.real2.y * lap.x;
         s.y = s.y + u.real2.y * lap.y;
     }
-    // Shredding: stretch the velocity tangent to hot edges into thin licks.
-    if (u.real2.x > 0.0) {
-        let gt = vec3<f32>(sca_in[idxc(x + 1, y, z)].y - sca_in[idxc(x - 1, y, z)].y,
-                           sca_in[idxc(x, y + 1, z)].y - sca_in[idxc(x, y - 1, z)].y,
-                           sca_in[idxc(x, y, z + 1)].y - sca_in[idxc(x, y, z - 1)].y) * 0.5;
-        let gl = length(gt);
-        if (gl > 1e-4) {
-            let n = gt / gl;
-            let k = min(0.5, u.real2.x * gl * u.diss.w * 10.0);
-            v = vec4<f32>(v.xyz + k * (v.xyz - dot(v.xyz, n) * n), v.w);
-        }
-    }
+    // Shredding is fxShred, after the advection, so its net push can be taken back out.
     let wall = select(g.x == 0u || g.z == 0u || g.y == 0u || g.x == nx() - 1u || g.z == nz() - 1u, g.y == 0u, open_sides());
     if (wall) {
         v.x = 0.0; v.z = 0.0;

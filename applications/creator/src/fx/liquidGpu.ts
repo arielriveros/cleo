@@ -15,9 +15,9 @@
 // step wakes them on time. The relaxation and viscosity are GATHERED (Jacobi) where the CPU applies them
 // pair by pair in place (Gauss-Seidel): the same liquid, not the same drops bit for bit.
 //
-// What lands on the floor comes back as deposit records (x, z, vx, vz), read back as often as the preview
-// can (they pile up between reads), for the CPU film (liquidFilm.ts) -- the floor decal is the film's,
-// whichever solver ran.
+// What lands on the floor is appended as deposit records (x, z, vx, vz) that the floor film (liquidFilmGpu.ts)
+// stamps in the same frame: the film is GPU buffers and the decal's textures are written in place. Only
+// the live count and the drops' box come back to the host.
 
 import { device } from 'cleo/graphics/rhi/deviceHandle';
 import { BufferUsage, ShaderStage } from 'cleo/graphics/rhi/types';
@@ -37,11 +37,12 @@ import OccupancyProgram from './shaders/fxLiquidOccupancy.wgsl';
 import LightProgram from './shaders/fxLiquidLight.wgsl';
 import PackProgram from './shaders/fxLiquidPack.wgsl';
 import type { FluidDims } from './fluidCpu';
-import { particleCount, type FxParams } from './fxParams';
+import { LiquidFilmGpu } from './liquidFilmGpu';
+import { packetVolume, particleCount, type FxParams } from './fxParams';
 import type { FxBody } from './fxScene';
 import {
-  COHESION, KERNEL_RATIO, LiquidSource, MAX_BOUNCES, NEAR_Q, NEAR_STIFFNESS, STICK_SPEED, STIFFNESS, latticeDensity, liquidSubstep,
-  referenceStep, type LiquidWind, type ReleaseBatch,
+  COHESION, KERNEL_RATIO, LiquidSource, MAX_BOUNCES, NEAR_Q, NEAR_STIFFNESS, STICK_SPEED, STIFFNESS, latticeDensity, liquidDomain, liquidSubstep,
+  referenceStep, type LiquidDomain, type LiquidWind, type ReleaseBatch,
 } from './liquidCpu';
 import { FOAM_FROM, FOAM_SPAN, LIQUID_ISO, liquidSigma, splatRadius, type Bounds } from './liquidRender';
 import { lightVector } from './volumeRender';
@@ -52,7 +53,7 @@ type Program = typeof ForcesProgram;
 const DEPOSITS = 32768;
 /** Bodies the preview can collide with: fxLiquidCollide.wgsl's `bodies` holds 3 vec4s each. */
 const MAX_BODIES = 16;
-const UNIFORM_BYTES = 13 * 16;
+const UNIFORM_BYTES = 14 * 16;
 /** fxLiquidCommon.wgsl `BOUNDS_BIAS`: the drops' box comes back in cells, biased to stay unsigned. */
 const BOUNDS_BIAS = 32768;
 /** counters: deposits, substep, live, binned; the drops' low cell (xyz, -), their high cell (xyz, -). */
@@ -68,11 +69,8 @@ function pipeline(program: Program, label: string): ComputePipeline {
 
 const nextPow2 = (v: number) => { let n = 1; while (n < v) n <<= 1; return n; };
 
-/**
- * The floor deposits since the last read: (x, z, vx, vz) per record, region metres; the live count; and
- * the box the drops were in over the frames since (region metres, whole cells), null with none.
- */
-export interface LiquidDeposits { records: Float32Array; count: number; dropped: number; live: number; bounds: Bounds | null }
+/** The live count, and the box the drops were in over the frames since the last read (region metres, whole cells; null with none). */
+export interface LiquidDeposits { live: number; bounds: Bounds | null }
 
 export class LiquidGpu {
   readonly capacity: number;
@@ -100,6 +98,8 @@ export class LiquidGpu {
   private readonly dens: Buffer;
   private readonly light: Buffer;
   private readonly brickMax: Buffer;
+  /** The floor film (a solid floor only): stamped, flowed and drawn on the GPU after each frame's substeps. */
+  readonly film: LiquidFilmGpu | null;
   private readonly pipes: Record<string, ComputePipeline>;
   private readonly groups: Record<string, BindGroup>;
   private readonly packGroups = new Map<EngineTexture, BindGroup>();
@@ -118,15 +118,19 @@ export class LiquidGpu {
   /** The particle volume, m^3: a deposit's worth. */
   readonly particleVolume: number;
 
-  constructor(p: FxParams, private readonly dims: FluidDims, voxelSize: number) {
+  /** Where the drops live and the pool can lie: not the region, which only frames them (liquidCpu.ts `liquidDomain`). */
+  readonly domain: LiquidDomain;
+
+  constructor(p: FxParams, private readonly dims: FluidDims, voxelSize: number, domain: LiquidDomain = liquidDomain(p)) {
     this.voxelSize = voxelSize;
+    this.domain = domain;
     this.cell = p.dropletSize * KERNEL_RATIO;
     const total = particleCount(p);
     const continuous = p.sourceMode === 'jet' && !(p.jetDuration > 0);
     this.capacity = Math.max(64, continuous ? Math.min(60_000, total * 6) : total);
     this.tableSize = Math.min(1 << 18, nextPow2(Math.max(1024, this.capacity * 2)));
     this.source = new LiquidSource(p.dropletSize);
-    this.particleVolume = Math.pow(p.dropletSize, 3);
+    this.particleVolume = packetVolume(p);
     const C = this.capacity, T = this.tableSize;
     const cells = dims.nx * dims.ny * dims.nz;
     const lightCells = Math.ceil(dims.nx / 2) * Math.ceil(dims.ny / 2) * Math.ceil(dims.nz / 2);
@@ -162,6 +166,8 @@ export class LiquidGpu {
     this.dens = storage('liquid.dens', cells * 8);
     this.light = storage('liquid.light', lightCells * 4);
     this.brickMax = storage('liquid.brickMax', bricks * 4);
+
+    this.film = p.floorMode === 'solid' ? new LiquidFilmGpu(p, domain, this.bodies, this.deposits, this.counters) : null;
 
     this.pipes = {
       forces: pipeline(ForcesProgram, 'liquid.forces'), scan: pipeline(ScanProgram, 'liquid.scan'),
@@ -214,6 +220,7 @@ export class LiquidGpu {
     device.writeBuffer(this.bodies, 0, new Uint8Array(data.buffer));
     this.bodyCount = live.length;
     this.origin = origin;
+    this.film?.setBodies(live.length, origin);
   }
 
   setWind(wind: LiquidWind | null): void { this.wind = wind; }
@@ -240,7 +247,9 @@ export class LiquidGpu {
     set(9, L[0], L[1], L[2], Math.max(0.15, ((sigma[0] + sigma[1] + sigma[2]) / 3) * this.voxelSize));
     u[40] = Math.ceil(this.dims.nx / 2); u[41] = Math.ceil(this.dims.ny / 2); u[42] = Math.ceil(this.dims.nz / 2); u[43] = 0;
     set(11, this.origin[0], this.origin[1], this.origin[2], FOAM_SPAN);
-    set(12, this.windowOrigin[0], this.windowOrigin[1], this.windowOrigin[2], 0);
+    set(12, this.windowOrigin[0], this.windowOrigin[1], this.windowOrigin[2], this.domain.top);
+    const d = this.domain.box;
+    set(13, d[0], d[1], d[2], d[3]);
     device.writeBuffer(this.uniforms, 0, new Uint8Array(buf));
   }
 
@@ -248,8 +257,8 @@ export class LiquidGpu {
    * Simulate `dt` seconds: upload this frame's releases, then every substep in one encoder. Its floor
    * deposits join those `readDeposits` returns next.
    */
-  step(p: FxParams, dt: number): void {
-    const sub = liquidSubstep(p, dt);
+  step(p: FxParams, dt: number, draw = true): void {
+    const sub = liquidSubstep(p, dt, this.domain.top);
     const n = Math.max(1, Math.ceil(dt / sub - 1e-9));
     const sdt = dt / n;
     this.writeUniforms(p, sdt);
@@ -279,6 +288,7 @@ export class LiquidGpu {
     }
     // Where the drops ended the frame, for the preview's window.
     run('bounds', 'bounds', C);
+    this.film?.encode(pass, p, dt, draw);
     pass.end();
     encoder.finish();
     this.time += dt;
@@ -322,25 +332,22 @@ export class LiquidGpu {
   }
 
   /**
-   * The floor deposits since the last read (with `records` false, only their count) and the live count
-   * after the last step. The copies are queued now, so the deposits start counting again from here; the
-   * promise resolves a frame or so later.
+   * The live count after the last step and the drops' box since the last read. The copies are queued now, so
+   * the box starts again from here; the promise resolves a frame or so later. (The deposits are the film's:
+   * its resolve kernel clears their count, so nothing here may.)
    */
-  readDeposits(records = true): Promise<LiquidDeposits> {
+  readDeposits(): Promise<LiquidDeposits> {
     const counters = device.readBuffer(this.counters, 0, COUNTER_BYTES);
-    const data = records ? device.readBuffer(this.deposits, 0, DEPOSITS * 16) : Promise.resolve(new ArrayBuffer(0));
-    device.writeBuffer(this.counters, 0, new Uint32Array(1));
     device.writeBuffer(this.counters, 16, BOUNDS_RESET);
     const h = this.cell;
-    return Promise.all([counters, data]).then(([c, d]) => {
+    return counters.then(async c => {
       const head = new Uint32Array(c);
-      const total = head[0];
-      const count = records ? Math.min(total, DEPOSITS) : 0;
       const bounds: Bounds | null = head[4] > head[8] ? null : [
         (head[4] - BOUNDS_BIAS) * h, (head[5] - BOUNDS_BIAS) * h, (head[6] - BOUNDS_BIAS) * h,
         (head[8] - BOUNDS_BIAS + 1) * h, (head[9] - BOUNDS_BIAS + 1) * h, (head[10] - BOUNDS_BIAS + 1) * h,
       ];
-      return { records: new Float32Array(d, 0, count * 4), count, dropped: total - count, live: head[2], bounds };
+      await this.film?.observe(bounds);
+      return { live: head[2], bounds };
     });
   }
 
@@ -390,6 +397,7 @@ export class LiquidGpu {
   }
 
   dispose(): void {
+    this.film?.dispose();
     for (const r of this.owned) r.destroy();
   }
 }

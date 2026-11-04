@@ -2790,9 +2790,11 @@ export function writeProject({
   // Camera distance past which enemies stop rendering and posing (Node.drawDistance on each type's root,
   // so the base template and every variant carry it). 0 = drawn at any distance.
   enemyDrawDistance = 0,
-  // A project's own blood: templates named 'Blood Spray', 'Blood Splat' and 'Blood Drops' (what
-  // SoulsGameManager.bleed spawns), instead of the placeholder spray and the generated splat decals.
+  // A project's own blood: templates named 'Blood Spray' and 'Blood Drops' (what SoulsGameManager.bleed
+  // spawns), instead of the placeholder spray and the generated splat decals.
   bloodTemplates = null,
+  // A project's own 'Bloodstain' (dropped where the player dies), instead of the placeholder decal.
+  bloodstain = null,
   // Particle systems the kit defines that a project replaces or does not use, by id: left out of the library.
   excludeParticleSystems = [],
 }) {
@@ -2816,7 +2818,7 @@ export function writeProject({
       bloodDecalTemplate('blood-splat', 'Blood Splat', BLOOD.splat, BLOOD_TEX.splat, [1.1, 0.4, 1.1], {}),
       bloodDecalTemplate('blood-drops', 'Blood Drops', BLOOD.drops, BLOOD_TEX.drops, [1, 0.4, 1.6], { minSize: 0.8, maxSize: 1.2 }),
     ]),
-    bloodstainTemplate(),
+    bloodstain ?? bloodstainTemplate(),
     ...Object.values(LEVEL).filter(template => !excludeTemplates.includes(template.id)),
     ...extraTemplates,
   ]
@@ -2948,5 +2950,5 @@ export {
   torchNode, messageNode, linkInstance, LEVEL, placedMessage, placedSpawn, placedPickup, sourceScene,
   TEMPLATE_SOURCE, vfx, emitter, mod, burst, fade, fxTemplate, particleSystems, navBaker, isMover, bounceOff, BLOOD, BLOOD_TEX,
   asTemplate, PROP, rig as MANNEQUIN_RIG, animations as RIG_ANIMATIONS, handWorld, mannequinModelJson,
-  idleClip, characterModel, hurtboxNode, COMBAT_LAYER,
+  idleClip, characterModel, hurtboxNode, COMBAT_LAYER, zone,
 }

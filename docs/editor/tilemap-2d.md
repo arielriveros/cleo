@@ -138,11 +138,11 @@ only reports it.
   daylight turns to a white smear at night or in a dark interior, where the exposure is hundreds of times
   higher. At 0 it keeps the same brightness under any exposure; fire usually wants a little (0.1), so it
   still glows brighter in the dark.
-- **Soft fade** — in metres, how far into the scene's geometry the sprite stays visible. At 0 a sprite is
-  cut off wherever it goes inside a surface, so a flame set into its torch loses its base inside the torch
-  head. Above 0 every part of the sprite within that distance behind a surface still shows, while a sprite
-  behind a wall further away is hidden as usual. A torch flame wants about the depth of the torch head
-  (0.2–0.3 m); much more lets the sprite show through things standing in front of it.
+- **Soft fade** — in metres: the sprite fades out over that distance as it nears the opaque surface behind
+  it, as soft particles do. At 0 a sprite is cut along a hard line wherever it goes into a surface, so a
+  flame set into its torch shows a straight edge at the torch head. Above 0 the edge melts away. The sprite
+  is still hidden by whatever stands in front of it, so the torch head seen from below hides the flame. A
+  flame wants a few centimetres to a little over a decimetre.
 
 Both support **billboarding** (**Constraints**: `free`, `spherical`, `cylindrical`), which matters in
 3D scenes where sprites are used for effects.

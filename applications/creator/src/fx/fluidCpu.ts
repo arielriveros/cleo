@@ -5,7 +5,8 @@
 //
 // Method (Stam 1999 "Stable Fluids"; Fedkiw, Stam & Jensen 2001 "Visual Simulation of Smoke"; Nguyen,
 // Fedkiw & Jensen 2002 for fuel/heat/smoke), on a collocated grid with unit voxels and velocities in
-// voxels per second. One step:
+// voxels per second -- the parameters are SI (m/s, m/s^2), turned into voxel units at the start of each
+// step (fxUnits.ts `solverUnits`). One step:
 //   1. sources     emitter fuel/heat/smoke/velocity, seeded turbulence, combustion, buoyancy, wind
 //   2. vorticity   confinement force from the curl's gradient
 //   3. advect      velocity and scalars, semi-Lagrangian, trilinear
@@ -16,6 +17,7 @@
 // Deterministic: fixed step order, the turbulence a hash of (seed, voxel, step), no Math.random.
 
 import type { FxParams } from './fxParams';
+import { solverUnits } from './fxUnits';
 import { detailPhase, stepFactors, type StepFactors } from './realism';
 
 export interface FluidDims { nx: number; ny: number; nz: number }
@@ -81,6 +83,23 @@ export interface SceneWind {
   gustSpeed: number;
 }
 
+/**
+ * Take the net push out of a forcing field, in place: each voxel gives back its weight's share of the total,
+ * f_i - w_i (sum f / sum w), so the pushes sum to zero -- the forcing stirs but moves nothing as a whole.
+ * Sums in double precision (fxForcingSum.wgsl sums in a fixed order too). Nothing to do with no weight.
+ */
+export function removeNetForce(fx: Float32Array, fy: Float32Array, fz: Float32Array, w: Float32Array): void {
+  let sx = 0, sy = 0, sz = 0, sw = 0;
+  for (let i = 0; i < w.length; i++) { sx += fx[i]; sy += fy[i]; sz += fz[i]; sw += w[i]; }
+  if (!(sw > 0)) return;
+  const mx = sx / sw, my = sy / sw, mz = sz / sw;
+  for (let i = 0; i < w.length; i++) {
+    const wi = w[i];
+    if (wi === 0) continue;
+    fx[i] -= wi * mx; fy[i] -= wi * my; fz[i] -= wi * mz;
+  }
+}
+
 /** Over-relaxation for the red-black solve; 1 is plain Gauss-Seidel. */
 export const SOR_OMEGA = 1.6;
 
@@ -115,6 +134,11 @@ export class FluidCpu {
   private fl2: Float32Array;
   /** Scratch for the diffusion and shredding passes. */
   private scratch: Float32Array | null = null;
+  /** This step's random forcing per voxel (`stir`): the push and its weight. */
+  private forceX: Float32Array | null = null;
+  private forceY: Float32Array | null = null;
+  private forceZ: Float32Array | null = null;
+  private forceW: Float32Array | null = null;
   /** Open boundaries this step: gas leaves through the sides as well as the top. */
   private open = false;
   /**
@@ -157,12 +181,14 @@ export class FluidCpu {
     return x + this.dims.nx * (y + this.dims.ny * z);
   }
 
-  /** Advance one step of `dt` seconds. */
-  step(p: FxParams, dt: number): void {
+  /** Advance one step of `dt` seconds. `params` are SI (format 3); the step works per voxel (fxUnits.ts). */
+  step(params: FxParams, dt: number): void {
+    const p = solverUnits(params);
     const k = stepFactors(p, this.time, dt);
     this.open = p.boundaries === 'open';
     this.sources(p, dt, k);
-    if (p.vorticity > 0) this.confine(p, dt, k.vortScale);
+    if (p.turbulence > 0 || (p.disturbance ?? 0) > 0) this.stir(p, dt, k);
+    if (p.vorticity > 0) this.confine(p, dt);
     this.advect(dt, p.advection === 'maccormack', k.settle);
     if ((p.diffusion ?? 0) > 0) this.diffuse(p.diffusion, dt);
     if ((p.shredding ?? 0) > 0) this.shred(p.shredding, dt);
@@ -178,17 +204,12 @@ export class FluidCpu {
     const { nx, ny, nz } = this.dims;
     const { x: ex, y: ey, z: ez, radius } = emitterVoxels(p, this.dims);
     const emitting = p.emitDuration <= 0 || this.time < p.emitDuration;
-    const tScale = p.voxelSize / p.turbulenceSize;
-    const tz = this.steps * 0.05;
     const solid = this.solid;
     const wind = this.sceneWind;
     this.sourceActive = p.expansion > 0 || k.blast > 0;
     const burned = this.sourceActive ? (this.burned ??= new Float32Array(this.count)) : null;
     burned?.fill(0);
     const condense = (p.condensation ?? 0) > 0;
-    const disturb = (p.disturbance ?? 0) > 0;
-    const cell = k.disturbanceCell;
-    const dSeed = (p.seed + 101 + k.disturbancePhase * 7919) | 0;
     for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
       const i = this.index(x, y, z);
       if (solid && solid[i]) continue;
@@ -210,37 +231,6 @@ export class FluidCpu {
           else this.density[i] += p.smoke * dt * ek;
           this.v[i] = Math.max(this.v[i], p.emitSpeed * ek);
           if (burned && k.blast > 0) burned[i] += k.blast;
-        }
-      }
-      // Turbulence wherever there is something hot to stir -- and, with `turbulenceOnSmoke`, cooled smoke
-      // too (FumeFX's lesson: missing motion complexity is what makes smoke look fake).
-      const onSmoke = p.turbulenceOnSmoke ?? 0;
-      const stir = Math.min(1, this.temperature[i]) + (onSmoke > 0 ? onSmoke * Math.min(1, this.density[i]) : 0);
-      if (p.turbulence > 0 && (this.temperature[i] > 0.02 || (onSmoke > 0 && stir > 0.02))) {
-        const k = p.turbulence * stir * dt;
-        // Noise from the emitter, so the same effect stirs the same way however much room is around it.
-        const sx = (x - ex) * tScale, sy = (y - ey) * tScale - tz, sz = (z - ez) * tScale;
-        this.u[i] += k * valueNoise3(sx, sy, sz, p.seed);
-        this.v[i] += k * 0.5 * valueNoise3(sx + 31.4, sy, sz, p.seed + 1);
-        this.w[i] += k * valueNoise3(sx, sy, sz + 17.7, p.seed + 2);
-        // A finer octave: 2.7 times the frequency, rising twice as fast.
-        const kd = k * (p.turbulenceDetail ?? 0);
-        if (kd > 0) {
-          const fx = sx * 2.7, fy = (y - ey) * tScale * 2.7 - tz * 2, fz = sz * 2.7;
-          this.u[i] += kd * valueNoise3(fx, fy, fz, p.seed + 3);
-          this.v[i] += kd * 0.5 * valueNoise3(fx + 31.4, fy, fz, p.seed + 4);
-          this.w[i] += kd * valueNoise3(fx, fy, fz + 17.7, p.seed + 5);
-        }
-      }
-      // Disturbance: one random kick per block, re-seeded every interval, where there is gas to move.
-      if (disturb) {
-        const amount = Math.min(1, this.temperature[i] + this.density[i]);
-        if (amount > 0.01) {
-          const bx = Math.floor((x - ex) / cell), by = Math.floor((y - ey) / cell), bz = Math.floor((z - ez) / cell);
-          const s = p.disturbance * amount * dt;
-          this.u[i] += s * (hash3(bx, by, bz, dSeed) * 2 - 1);
-          this.v[i] += s * (hash3(bx, by, bz, dSeed + 1) * 2 - 1);
-          this.w[i] += s * (hash3(bx, by, bz, dSeed + 2) * 2 - 1);
         }
       }
       if (condense) {
@@ -281,8 +271,81 @@ export class FluidCpu {
     }
   }
 
-  /** Vorticity confinement (Fedkiw et al. 2001): f = eps * (N x omega), N the normalised gradient of |omega|. */
-  private confine(p: FxParams, dt: number, vortScale = 1): void {
+  /**
+   * The random forcing -- turbulence (and its finer octave) and disturbance -- as pure stirring. Each push
+   * is worked out as before, then the net push over the whole domain is taken back out in proportion to
+   * each voxel's share (`removeNetForce`): turbulence moves gas around, it never moves the air as a whole.
+   * Without that, a plume about one eddy wide got the same sideways push all over, the projection kept
+   * the momentum, and the whole effect drifted -- the same way every time for one seed.
+   */
+  private stir(p: FxParams, dt: number, k: StepFactors): void {
+    const { nx, ny, nz } = this.dims;
+    const { x: ex, y: ey, z: ez } = emitterVoxels(p, this.dims);
+    const tScale = p.voxelSize / p.turbulenceSize;
+    const tz = this.steps * 0.05;
+    const solid = this.solid;
+    const onSmoke = p.turbulenceOnSmoke ?? 0;
+    const detail = p.turbulenceDetail ?? 0;
+    const disturb = (p.disturbance ?? 0) > 0;
+    const cell = k.disturbanceCell;
+    const dSeed = (p.seed + 101 + k.disturbancePhase * 7919) | 0;
+    const fx = this.forceX ??= new Float32Array(this.count);
+    const fy = this.forceY ??= new Float32Array(this.count);
+    const fz = this.forceZ ??= new Float32Array(this.count);
+    const fw = this.forceW ??= new Float32Array(this.count);
+    for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+      const i = this.index(x, y, z);
+      let px = 0, py = 0, pz = 0, w = 0;
+      if (!(solid && solid[i])) {
+        // Turbulence wherever there is something hot to stir -- and, with `turbulenceOnSmoke`, cooled
+        // smoke too (FumeFX's lesson: missing motion complexity is what makes smoke look fake).
+        const t = this.temperature[i];
+        const stir = Math.min(1, t) + (onSmoke > 0 ? onSmoke * Math.min(1, this.density[i]) : 0);
+        if (p.turbulence > 0 && (t > 0.02 || (onSmoke > 0 && stir > 0.02))) {
+          const kt = p.turbulence * stir * dt;
+          // Noise from the emitter, so the same effect stirs the same way however much room is around it.
+          const sx = (x - ex) * tScale, sy = (y - ey) * tScale - tz, sz = (z - ez) * tScale;
+          px += kt * valueNoise3(sx, sy, sz, p.seed);
+          py += kt * 0.5 * valueNoise3(sx + 31.4, sy, sz, p.seed + 1);
+          pz += kt * valueNoise3(sx, sy, sz + 17.7, p.seed + 2);
+          w += kt;
+          // A finer octave: 2.7 times the frequency, rising twice as fast.
+          const kd = kt * detail;
+          if (kd > 0) {
+            const dx = sx * 2.7, dy = (y - ey) * tScale * 2.7 - tz * 2, dz = sz * 2.7;
+            px += kd * valueNoise3(dx, dy, dz, p.seed + 3);
+            py += kd * 0.5 * valueNoise3(dx + 31.4, dy, dz, p.seed + 4);
+            pz += kd * valueNoise3(dx, dy, dz + 17.7, p.seed + 5);
+            w += kd;
+          }
+        }
+        // Disturbance: one random kick per block, re-seeded every interval, where there is gas to move.
+        if (disturb) {
+          const amount = Math.min(1, t + this.density[i]);
+          if (amount > 0.01) {
+            const bx = Math.floor((x - ex) / cell), by = Math.floor((y - ey) / cell), bz = Math.floor((z - ez) / cell);
+            const s = p.disturbance * amount * dt;
+            px += s * (hash3(bx, by, bz, dSeed) * 2 - 1);
+            py += s * (hash3(bx, by, bz, dSeed + 1) * 2 - 1);
+            pz += s * (hash3(bx, by, bz, dSeed + 2) * 2 - 1);
+            w += s;
+          }
+        }
+      }
+      fx[i] = px; fy[i] = py; fz[i] = pz; fw[i] = w;
+    }
+    removeNetForce(fx, fy, fz, fw);
+    for (let i = 0; i < this.count; i++) {
+      if (fw[i] === 0) continue;
+      this.u[i] += fx[i]; this.v[i] += fy[i]; this.w[i] += fz[i];
+    }
+  }
+
+  /**
+   * Vorticity confinement (Fedkiw et al. 2001): f = eps * (N x omega), N the normalised gradient of |omega|,
+   * eps (per second) the `vorticity` parameter and omega the voxel-space curl.
+   */
+  private confine(p: FxParams, dt: number): void {
     const { nx, ny, nz } = this.dims;
     const { u, v, w, cx, cy, cz } = this;
     const id = (x: number, y: number, z: number) => this.index(x, y, z);
@@ -297,7 +360,7 @@ export class FluidCpu {
     const mags = this.mags ??= new Float64Array(this.count);
     for (let j = 0; j < this.count; j++) mags[j] = Math.hypot(cx[j], cy[j], cz[j]);
     const mag = (j: number) => mags[j];
-    const eps = p.vorticity * vortScale;
+    const eps = p.vorticity;
     for (let z = 2; z < nz - 2; z++) for (let y = 2; y < ny - 2; y++) for (let x = 2; x < nx - 2; x++) {
       const i = id(x, y, z);
       let gx = (mag(id(x + 1, y, z)) - mag(id(x - 1, y, z))) * 0.5;
@@ -355,7 +418,12 @@ export class FluidCpu {
       w2[i] = lerp3(w, j, fx, fy, fz);
       // Above the top the domain is open (and through the sides, with open boundaries): material
       // backtraced from outside it is fresh air.
-      const outside = by > ny - 1 || (open && (bx < 0 || bx > nx - 1 || bz < 0 || bz > nz - 1));
+      const sideways = open && (bx < 0 || bx > nx - 1 || bz < 0 || bz > nz - 1);
+      const outside = by > ny - 1 || sideways;
+      // And still air: what flows in through an open side does not move. Carrying the edge voxel's own
+      // velocity in instead (a clamped read) let any sideways flow feed itself through the box for ever --
+      // a wind out of nowhere that drifted the whole effect off to one side.
+      if (sideways) { u2[i] = 0; v2[i] = 0; w2[i] = 0; }
       if (settle > 0 && !outside) {
         // Dust falls through the air: its own backtrace starts higher by the fall distance.
         const sy2 = Math.min(ny - 1, Math.max(0, by + settle * dt));
@@ -470,17 +538,36 @@ export class FluidCpu {
     const { nx, ny, nz } = this.dims;
     const { u, v, w, temperature: t } = this;
     const sy = nx, sz = nx * ny;
+    const fx = this.forceX ??= new Float32Array(this.count);
+    const fy = this.forceY ??= new Float32Array(this.count);
+    const fz = this.forceZ ??= new Float32Array(this.count);
+    const fw = this.forceW ??= new Float32Array(this.count);
+    fx.fill(0); fy.fill(0); fz.fill(0); fw.fill(0);
     for (let z = 1; z < nz - 1; z++) for (let y = 1; y < ny - 1; y++) for (let x = 1; x < nx - 1; x++) {
       const i = x + sy * y + sz * z;
       const gx = (t[i + 1] - t[i - 1]) * 0.5, gy = (t[i + sy] - t[i - sy]) * 0.5, gz = (t[i + sz] - t[i - sz]) * 0.5;
       const g = Math.hypot(gx, gy, gz);
       if (g < 1e-4) continue;
       const nx_ = gx / g, ny_ = gy / g, nz_ = gz / g;
-      const dot = u[i] * nx_ + v[i] * ny_ + w[i] * nz_;
+      // The flow's own detail: the velocity less its neighbours' mean. Stretching that pulls the shear at a
+      // hot edge into licks; stretching the whole velocity also grew the plume's own sway, every step.
+      const du = u[i] - (u[i - 1] + u[i + 1] + u[i - sy] + u[i + sy] + u[i - sz] + u[i + sz]) / 6;
+      const dv = v[i] - (v[i - 1] + v[i + 1] + v[i - sy] + v[i + sy] + v[i - sz] + v[i + sz]) / 6;
+      const dw = w[i] - (w[i - 1] + w[i + 1] + w[i - sy] + w[i + sy] + w[i - sz] + w[i + sz]) / 6;
+      const dot = du * nx_ + dv * ny_ + dw * nz_;
       const s = Math.min(0.5, amount * g * dt * 10);
-      u[i] += s * (u[i] - dot * nx_);
-      v[i] += s * (v[i] - dot * ny_);
-      w[i] += s * (w[i] - dot * nz_);
+      fx[i] = s * (du - dot * nx_);
+      fy[i] = s * (dv - dot * ny_);
+      fz[i] = s * (dw - dot * nz_);
+      fw[i] = s;
+    }
+    // The stretch feeds on the flow it stretches: left alone, a plume that leans grows its lean step after
+    // step and the whole effect slides off sideways. Its net push is taken back out, as the random
+    // forcing's is (`stir`): it pulls flames into licks, it does not move the gas as a whole.
+    removeNetForce(fx, fy, fz, fw);
+    for (let i = 0; i < this.count; i++) {
+      if (fw[i] === 0) continue;
+      u[i] += fx[i]; v[i] += fy[i]; w[i] += fz[i];
     }
   }
 

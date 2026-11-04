@@ -319,7 +319,7 @@ weapon stays where it is, and its swings hit nothing until you add the socket.
 | Orange glyph (`Message/Glyph`) | Template **Message** (7 copies + `Epilogue Message`) | Message sigil |
 | Glowing sphere (`Pickup/Item`) | Template **Pickup** (4 copies) | Item or corpse prop |
 | Glowing splat decal (`Bloodstain/Pool`) | Template **Bloodstain** | Bloodstain decal: change the `Bloodstain Decal (placeholder)` material's texture, or replace `Pool` with a prop |
-| Blood splat and spatter decals | Templates **Blood Splat**, **Blood Drops** (`Decal` child) | Your blood decals: change the texture on `Blood Splat (placeholder)` / `Blood Drops (placeholder)` (§9) |
+| Blood spatter decal | Template **Blood Drops** (`Decal` child) | Your blood decal: change the texture on `Blood Drops (placeholder)` (§9) |
 | Blue sphere (`Magic Bolt/Core`) | Template **Magic Bolt** | Projectile visual |
 
 ### Materials
@@ -591,31 +591,38 @@ calls `GameManager.bleed`, which spawns three things:
 | Template | What it is |
 |---|---|
 | `Blood Spray` | Dark droplets flying off the wound (particles, `SoulsFx`). |
-| `Blood Splat` | A pool **decal** under the body. |
 | `Blood Drops` | A spatter **decal** a step further along the blow, pointed away from the attacker. |
 
-The two decal templates carry `SoulsBloodSplat`. On its first frame it raycasts down to find the floor
+A hit leaves no pool of blood: the pool is the **Bloodstain**'s, dropped where the player dies (with or
+without souls in it; with none, its glow hides and there is nothing to retrieve), so it marks the last
+place they died. The Bloodstain's decal children play their flipbook when it appears.
+
+The decal template carries `SoulsBloodSplat`. On its first frame it raycasts down to find the floor
 (it removes itself when there is none within `snapDown`), moves onto it, tilts to match a ramp (turning
 its decals about the slope's normal, so the spatter still runs along the blow), picks a random size
 between `minSize` and `maxSize` times the hit's size, and after `lifetime` seconds fades out over
-`fadeSeconds` and is removed. A decal with a **flipbook** plays it from that moment: the Valley's are the
-FX Creator's liquid decals, the blood landing and spreading into a pool. The splat scales with damage:
+`fadeSeconds` and is removed. A decal with a **flipbook** plays it from that moment, `flipbookStart`
+seconds in (0: from its first frame; skip the frames where the liquid is still in the air when no spray
+covers them): the Valley's are the FX Creator's liquid decals, the blood landing and spreading into a
+pool. The splat scales with damage:
 `bloodReferenceDamage` (120) is a full-size splat, from 0.6× to 1.6×. The spray is spawned turned along
 the blow, so its droplets fly on away from the attacker.
 
-**GameManager fields:** `bloodEnabled` (off: no blood at all), `bloodSprayTemplate`,
-`bloodSplatTemplate`, `bloodDropsTemplate`, `bloodDropsOffset` (0.9 m: how far along the blow the
+**GameManager fields:** `bloodEnabled` (off: no blood at all), `bloodSprayTemplate` (empty: no spray,
+the decal alone), `bloodDropsTemplate`, `bloodDropsOffset` (0.9 m: how far along the blow the
 spatter's centre lies), `maxBloodDecals` (24; the oldest is removed first, so a long fight never piles up
 decals), `bloodReferenceDamage`.
 
-**The Valley's blood** is the FX Creator's (`tools/valley/creatorFx.mjs`): `Blood Spray` is a Blood
-Burst sprite played over a particle's life plus droplets on velocity-aligned particles playing the
-looping Blood Droplets; `Blood Splat` is the Blood Pool bake's floor decal and `Blood Drops` the Blood
-Spatter bake's, each an animated colour, normal and ORM atlas (wet and glossy) with its flipbook. Open the
-same presets in the Creator's FX mode (Medium: Liquid) to make your own.
+**The Valley's blood** is the FX Creator's (`tools/valley/creatorFx.mjs`), decal flipbooks only, no
+particles: its GameManagers leave `bloodSprayTemplate` empty. `Blood Drops` is the Blood Spatter bake's
+floor decal at twice the bake's size (about 2.7 × 2.4 m at `bloodReferenceDamage`), starting from the
+frame before the blood reaches the floor (its `flipbookStart`, read from the atlas by the build). The
+`Bloodstain`'s pool is the Blood Pool bake's. Each is an animated colour, normal and ORM atlas (wet and
+glossy) with its flipbook. Open the same presets in the Creator's FX mode (Medium: Liquid) to make your
+own.
 
 **Swapping the art.** The splat images are generated placeholders (`tools/soulsDemo/png.mjs`) on the
-`Blood Splat (placeholder)` and `Blood Drops (placeholder)` materials under `Assets ▸ Materials ▸ Effects`.
+`Blood Drops (placeholder)` material under `Assets ▸ Materials ▸ Effects`.
 Assign your own texture as the material's base colour: RGB is the colour (multiplied by the base
 colour), **alpha is the coverage**. A decal shows its texture once, so leave a transparent margin and
 use clamp wrapping. The `Blood Drops` image is projected with its **top pointing along the blow**.

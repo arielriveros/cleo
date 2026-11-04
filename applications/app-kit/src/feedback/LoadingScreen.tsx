@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
 // Only the store (no engine): the pre-engine boot gate renders this before EngineContext exists.
 import { loadFraction, stepFraction, useLoad, type LoadState, type LoadStepState } from './loadingStore'
+import { queueSlots, slotOpacity, type QueueSlot } from './loadQueue'
 import LogoLoader from './LogoLoader'
+import './loadingQueue.css'
 
-// The Cleo loading screen, shared by every app: the app's logo, which fills as the total bar (weighted
-// across the steps), over the CLEO ENGINE title and the app's name, then every step of the current load
-// with its own count and time. Fed by loadingStore.ts.
+// The Cleo loading screen, shared by every app, in one column with no card: the app's logo, which fills
+// as the total bar (weighted across the steps), over the CLEO ENGINE title and the app's name, then the
+// load's title with its total, and its steps as a queue: finished ones slide up and fade out, the running
+// ones show their count and percentage, and the pending ones wait below, fading out past the window's height. Each
+// step's timing goes to the console when the load ends (loadingStore.finish). Fed by loadingStore.ts.
 
 /**
  * Who is loading: the logo, the subtitle under CLEO ENGINE ('Editor', 'Creator') and an optional version
@@ -56,57 +60,51 @@ function StatusIcon({ status }: { status: LoadStepState['status'] }) {
   )
 }
 
-function seconds(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
-}
+// The queue window: rows of ROW_PX, WINDOW_ROWS of them, the focus (the first step still to finish)
+// HISTORY_ROWS down from the top so the last finished steps are seen leaving. See loadingQueue.css.
+const ROW_PX = 22
+const WINDOW_ROWS = 8
+const HISTORY_ROWS = 2
 
-function StepRow({ step, now }: { step: LoadStepState; now: number }) {
-  const elapsed = step.startedAt === null ? null : (step.endedAt ?? now) - step.startedAt
-  const count = step.total > 0 ? `${step.done.toLocaleString()} / ${step.total.toLocaleString()}` : ''
-  const dim = step.status === 'pending'
+/**
+ * One step in the queue: its status, its name, and its count with a percentage ("12/40 (30%)") only
+ * while it is running and has something to count. A failure shows its message instead. Placed and faded by its slot (loadQueue.ts).
+ */
+function QueueRow({ entry }: { entry: QueueSlot }) {
+  const { step, slot } = entry
+  const failed = step.status === 'failed'
+  // "12/40 (30%)": how many of how many, and how far that is.
+  const progress = step.status === 'running' && step.total > 0
+    ? `${Math.min(step.done, step.total).toLocaleString()}/${step.total.toLocaleString()} (${Math.round(stepFraction(step) * 100)}%)`
+    : ''
+  const gone = slot < -HISTORY_ROWS && !failed
   return (
-    <li className='flex flex-col gap-1'>
-      <div className={`flex items-center gap-2 text-ui ${dim ? 'text-dim' : 'text-fg'}`}>
-        <StatusIcon status={step.status} />
-        <span className='truncate'>{step.label}</span>
-        <span className={`ml-auto truncate text-ui-sm ${step.status === 'failed' ? 'text-danger-fg' : 'text-muted'}`}
-              title={step.detail || undefined}>
-          {step.status === 'failed' ? step.detail : count || step.detail}
-        </span>
-        <span className='w-14 shrink-0 text-right text-ui-sm tabular-nums text-dim'>
-          {elapsed === null ? '' : seconds(elapsed)}
-        </span>
-      </div>
-      {step.status === 'running' && step.total > 0 && (
-        <div className='ml-[22px] h-[3px] overflow-hidden rounded-full bg-surface-sunken'>
-          <div className='h-full rounded-full bg-primary/70 transition-[width] duration-150 ease-out'
-               style={{ width: `${Math.round(stepFraction(step) * 100)}%` }} />
-        </div>
-      )}
+    <li className={`flex items-center gap-2 text-ui ${step.status === 'pending' ? 'text-muted' : 'text-fg'}`}
+        style={{ transform: `translateY(${(slot + HISTORY_ROWS) * ROW_PX}px)`, opacity: slotOpacity(entry) }}
+        aria-hidden={gone || undefined}>
+      <StatusIcon status={step.status} />
+      {/* A failure's message gives way before its name does. */}
+      <span className={`truncate ${failed ? 'shrink-0 max-w-[55%] text-danger-fg' : ''}`}>{step.label}</span>
+      {failed
+        ? <span className='ml-auto min-w-0 truncate text-ui-sm text-danger-fg' title={step.detail || undefined}>{step.detail}</span>
+        : progress && <span className='ml-auto shrink-0 text-ui-sm tabular-nums text-muted'>{progress}</span>}
     </li>
   )
 }
 
 /** The screen for one load. `variant` decides whether it covers the window or only its host. */
 export function LoadingView({ load, subtitle, versionLabel, logo }: { load: LoadState } & LoadingBrand) {
-  // Re-render while anything runs, so elapsed times tick.
-  const [now, setNow] = useState(() => performance.now())
-  const running = load.steps.some(s => s.status === 'running')
-  useEffect(() => {
-    if (!running) return
-    const t = window.setInterval(() => setNow(performance.now()), 100)
-    return () => window.clearInterval(t)
-  }, [running])
-
   const fraction = loadFraction(load)
   const pct = Math.round(fraction * 100)
   const position = load.variant === 'fullscreen' ? 'fixed inset-0 z-[1000]' : 'absolute inset-0 z-40'
-  const current = load.steps.find(s => s.status === 'running')
+  const queue = queueSlots(load.steps)
+  const running = load.steps.filter(s => s.status === 'running').map(s => s.label).join(', ')
 
+  // One column, all at one level: the logo (the total, filling), the title, then the queue of steps.
   return (
     <div className={`${position} flex flex-col items-center justify-center bg-bg text-fg select-none`} role='progressbar'
          aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={load.title}>
-      <div className='flex w-[440px] max-w-[90%] flex-col gap-6'>
+      <div className='flex w-[340px] max-w-[90%] flex-col items-center gap-5'>
         <div className='flex flex-col items-center gap-2'>
           {logo && <LogoLoader src={logo} progress={fraction} className='mb-3 w-[180px]' />}
           <h1 className='text-2xl font-semibold tracking-[0.3em] text-fg'>CLEO ENGINE</h1>
@@ -114,27 +112,22 @@ export function LoadingView({ load, subtitle, versionLabel, logo }: { load: Load
           {versionLabel && <span className='text-ui-xs tabular-nums tracking-[0.2em] text-dim'>{versionLabel}</span>}
         </div>
 
-        <div className='flex flex-col gap-3 rounded-md border border-border bg-surface/60 p-4'>
-          <div className='flex items-baseline justify-between gap-3'>
-            <span className='truncate text-ui-lg font-medium'>{load.title}</span>
-            <span className='shrink-0 text-ui-sm tabular-nums text-dim'>{seconds(now - load.startedAt)}</span>
+        <div className='flex w-full flex-col gap-2'>
+          <div className='flex items-baseline justify-center gap-2 text-ui-lg'>
+            <span className='truncate font-medium'>{load.title}</span>
+            <span className='shrink-0 tabular-nums text-muted'>{pct}%</span>
           </div>
-          <ul className='flex max-h-[45vh] flex-col gap-1.5 overflow-y-auto pr-1'>
-            {load.steps.map(step => <StepRow key={step.id} step={step} now={now} />)}
-          </ul>
-        </div>
-
-        <div className='w-full'>
           {!logo && (
-            <div className='mb-2 h-2 w-full overflow-hidden rounded-full border border-border bg-surface-sunken'>
+            <div className='h-2 w-full overflow-hidden rounded-full border border-border bg-surface-sunken'>
               <div className='h-full rounded-full bg-gradient-to-r from-border to-primary transition-[width] duration-300 ease-out'
                    style={{ width: `${pct}%` }} />
             </div>
           )}
-          <div className='flex items-center justify-between text-ui text-muted'>
-            <span className='truncate'>{current ? `${current.label}…` : 'Loading…'}</span>
-            <span className='tabular-nums text-fg'>{pct}%</span>
-          </div>
+          <ul className='cleo-load-queue w-full' aria-label='Steps'
+              style={{ ['--row' as string]: `${ROW_PX}px`, height: WINDOW_ROWS * ROW_PX }}>
+            {queue.map(entry => <QueueRow key={entry.step.id} entry={entry} />)}
+          </ul>
+          <span className='sr-only' aria-live='polite'>{running}</span>
         </div>
       </div>
     </div>

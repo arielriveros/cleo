@@ -12,6 +12,10 @@ import { BufferUsage, ShaderStage, TextureUsage } from 'cleo/graphics/rhi/types'
 import type { BindGroup, Buffer, ComputePipeline, Texture } from 'cleo/graphics/rhi/resources';
 import type { Texture as EngineTexture } from 'cleo/graphics/texture';
 import SourcesProgram from './shaders/fxSources.wgsl';
+import ForcingProgram from './shaders/fxForcing.wgsl';
+import ForcingSumProgram from './shaders/fxForcingSum.wgsl';
+import ForcingApplyProgram from './shaders/fxForcingApply.wgsl';
+import ShredProgram from './shaders/fxShred.wgsl';
 import CurlProgram from './shaders/fxCurl.wgsl';
 import ConfineProgram from './shaders/fxConfine.wgsl';
 import AdvectProgram from './shaders/fxAdvect.wgsl';
@@ -32,6 +36,7 @@ import ReduceProgram from './shaders/fxReduce.wgsl';
 import { emitterVoxels, SOR_OMEGA, type FluidDims, type SceneWind } from './fluidCpu';
 import type { FluidBackend } from './generateFx';
 import type { FxParams } from './fxParams';
+import { solverUnits } from './fxUnits';
 import { FIRE_LIGHT_FULL_M3, FIRE_OPACITY, lightVector, RENDER_MODES, RENDER_STEP, tileAspectOf, viewBasis, type RenderMode } from './volumeRender';
 import { absorptionScale, DETAIL_PERIOD, detailBlend, detailPhase, stepFactors } from './realism';
 
@@ -59,8 +64,10 @@ function pipeline(program: Program, label: string): ComputePipeline {
 interface StageState { wind: SceneWind | null; solids: boolean }
 
 /** Pack the uniform block of fxCommon.wgsl. `resets` says which detail coordinate sets go back to rest this step. */
-function packUniforms(p: FxParams, dims: FluidDims, dt: number, time: number, steps: number, tile: number, stage: StageState,
+function packUniforms(params: FxParams, dims: FluidDims, dt: number, time: number, steps: number, tile: number, stage: StageState,
                       resets: [boolean, boolean] = [false, false], mode: RenderMode = 'color'): ArrayBuffer {
+  // SI parameters (format 3) to the kernels' per-voxel units, as fluidCpu.ts `step`.
+  const p = solverUnits(params);
   const buf = new ArrayBuffer(UNIFORM_BYTES);
   const f = new Float32Array(buf);
   const u = new Uint32Array(buf);
@@ -72,7 +79,7 @@ function packUniforms(p: FxParams, dims: FluidDims, dt: number, time: number, st
   set(3, p.turbulence, p.voxelSize / p.turbulenceSize, steps * 0.05, p.emitterShape === 'disc' ? 1 : 0);
   set(4, p.ignition, p.burnRate, p.heatRelease, p.smokeYield);
   const k = stepFactors(p, time, dt);
-  set(5, p.buoyancy, p.weight, p.vorticity * k.vortScale, p.wind);
+  set(5, p.buoyancy, p.weight, p.vorticity, p.wind);
   set(6, Math.max(0, 1 - p.cooling * dt), Math.max(0, 1 - p.smokeDissipation * dt), Math.max(0, 1 - p.velocityDamping * dt), dt);
   set(7, p.emitDuration <= 0 || time < p.emitDuration ? 1 : 0, p.absorption, p.emission, p.emissionRange);
   set(8, p.smokeColor[0], p.smokeColor[1], p.smokeColor[2], p.ambient);
@@ -138,6 +145,10 @@ export function gpuBackend(dims: FluidDims): FluidBackend {
   const solid = storage('fx.solid', cells * 4);
   const burned = storage('fx.burned', cells * 4);
   const back = storage('fx.mcBack', cells * 16);
+  // The random forcing's per-workgroup sums (fxForcing) and their total (fxForcingSum). The pushes
+  // themselves go in `curl`, free until the curl pass recomputes it.
+  const forcePartials = storage('fx.forcePartials', Math.ceil(dims.nx / 4) * Math.ceil(dims.ny / 4) * Math.ceil(dims.nz / 4) * 16);
+  const forceNet = storage('fx.forceNet', 16);
   // Advected detail coordinates: two sets, ping-ponged, each starting on the rest grid (full-res voxels).
   const restCoords = new Float32Array(lightCells * 4);
   {
@@ -162,6 +173,10 @@ export function gpuBackend(dims: FluidDims): FluidBackend {
 
   const pipes = {
     sources: pipeline(SourcesProgram, 'fx.sources'),
+    forcing: pipeline(ForcingProgram, 'fx.forcing'),
+    forcingSum: pipeline(ForcingSumProgram, 'fx.forcingSum'),
+    forcingApply: pipeline(ForcingApplyProgram, 'fx.forcingApply'),
+    shred: pipeline(ShredProgram, 'fx.shred'),
     curl: pipeline(CurlProgram, 'fx.curl'),
     confine: pipeline(ConfineProgram, 'fx.confine'),
     advect: pipeline(AdvectProgram, 'fx.advect'),
@@ -192,6 +207,11 @@ export function gpuBackend(dims: FluidDims): FluidBackend {
     const nxt = 1 - cur;
     return {
       sources: group(pipes.sources, `fx.sources.${cur}`, [vel[cur], sca[cur], solid, burned]),
+      forcing: group(pipes.forcing, `fx.forcing.${cur}`, [sca[cur], solid, curl, forcePartials]),
+      forcingApply: group(pipes.forcingApply, `fx.forcingApply.${cur}`, [curl, forceNet, vel[cur]]),
+      // Shredding works on the advected state, which is the other buffer pair.
+      shred: group(pipes.shred, `fx.shred.${cur}`, [vel[nxt], sca[nxt], curl, forcePartials]),
+      shredApply: group(pipes.forcingApply, `fx.shredApply.${cur}`, [curl, forceNet, vel[nxt]]),
       curl: group(pipes.curl, `fx.curl.${cur}`, [vel[cur], curl]),
       confine: group(pipes.confine, `fx.confine.${cur}`, [curl, vel[cur]]),
       advect: group(pipes.advect, `fx.advect.${cur}`, [vel[cur], sca[cur], vel[nxt], sca[nxt], solid]),
@@ -212,6 +232,10 @@ export function gpuBackend(dims: FluidDims): FluidBackend {
   });
   const detailGroups = [0, 1].map(c => group(pipes.detail, `fx.detail.${c}`, [vel[0], detailA[c], detailB[c], detailA[1 - c], detailB[1 - c]]));
   const detailGroupsVel1 = [0, 1].map(c => group(pipes.detail, `fx.detail.v1.${c}`, [vel[1], detailA[c], detailB[c], detailA[1 - c], detailB[1 - c]]));
+  const forcingSumGroup = device.createBindGroup({
+    label: 'fx.forcingSum', layout: pipes.forcingSum.bindGroupLayouts[0],
+    entries: [{ binding: 0, buffer: forcePartials }, { binding: 1, buffer: forceNet }],
+  });
   const jacobi = [0, 1].map(pp => group(pipes.jacobi, `fx.jacobi.${pp}`, [divergence, pressure[pp], pressure[1 - pp], solid]));
   // In place on pressure[0], which the warm start keeps from step to step.
   const jacobiRB = [0, 1].map(c => group(pipes.jacobiRB, `fx.jacobiRB.${c}`, [divergence, pressure[0], solid, colours[c]]));
@@ -257,7 +281,22 @@ export function gpuBackend(dims: FluidDims): FluidBackend {
         pass.dispatchWorkgroups(wg(dims.nx), wg(dims.ny), wg(dims.nz));
         pass.end();
       };
+      /** The workgroups' partial sums of a push field into its net (fxForcingSum), for fxForcingApply. */
+      const sumForces = () => {
+        const sum = encoder.beginComputePass('fx.forcingSum');
+        sum.setPipeline(pipes.forcingSum);
+        sum.setBindGroup(0, forcingSumGroup);
+        sum.dispatchWorkgroups(1, 1, 1);
+        sum.end();
+      };
       dispatch(pipes.sources, g.sources, 'fx.sources');
+      // Turbulence and disturbance: each voxel's push, the net push summed in a fixed order, then the pushes
+      // less their share of it -- stirring that moves no air as a whole (fluidCpu.ts `stir`).
+      if (p.turbulence > 0 || (p.disturbance ?? 0) > 0) {
+        dispatch(pipes.forcing, g.forcing, 'fx.forcing');
+        sumForces();
+        dispatch(pipes.forcingApply, g.forcingApply, 'fx.forcingApply');
+      }
       if (p.vorticity > 0) {
         dispatch(pipes.curl, g.curl, 'fx.curl');
         dispatch(pipes.confine, g.confine, 'fx.confine');
@@ -266,6 +305,12 @@ export function gpuBackend(dims: FluidDims): FluidBackend {
       if (p.advection === 'maccormack') {
         dispatch(pipes.mcBack, g.mcBack, 'fx.mcBack');
         dispatch(pipes.mcCorrect, g.mcCorrect, 'fx.mcCorrect');
+      }
+      // Shredding: the stretch of each voxel, then applied less its net push (fluidCpu.ts `shred`).
+      if ((p.shredding ?? 0) > 0) {
+        dispatch(pipes.shred, g.shred, 'fx.shred');
+        sumForces();
+        dispatch(pipes.forcingApply, g.shredApply, 'fx.shredApply');
       }
       dispatch(pipes.divergence, g.divergence, 'fx.divergence');
       let pp = 0;

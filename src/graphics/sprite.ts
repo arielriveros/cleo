@@ -152,12 +152,11 @@ export class Sprite {
   public set exposureWeight(value: number) { this._exposureWeight = unitOr1(value); }
 
   /**
-   * Soft fade, in metres: how far into the scene's geometry the sprite stays visible. 0 (the default) is a
-   * plain depth test, so a flame set into its torch is cut off where it goes inside the torch head. Above 0
-   * the sprite is depth-tested as if it stood that much nearer the camera — drawn the same size in the same
-   * place on screen — so every part of it within `softness` metres behind a surface still shows, while a
-   * sprite behind a wall further away is hidden as before. A torch flame wants about the depth of its torch
-   * head, a quarter metre; more lets it show through things in front of it.
+   * Soft fade, in metres. 0 (the default) is a plain depth test, so a flame set into its torch is cut along
+   * a hard line where it goes into the torch head. Above 0 the sprite fades out over that distance as it
+   * nears the opaque surface behind it (a soft particle), so the line melts away. It is still depth-tested
+   * as it stands: whatever is in front of it -- the torch head seen from below, a wall -- hides it. A flame
+   * wants a few centimetres to a little over a decimetre.
    */
   public get softness(): number { return this._softness; }
   public set softness(value: number) { this._softness = softnessOf(value); }

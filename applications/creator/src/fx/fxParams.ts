@@ -4,6 +4,7 @@
 import type { Gradient } from 'cleo/particles/curves';
 import type { GenericParamSpec } from '@cleo/app-kit/params/ParamField';
 import type { Preset } from '../core/generator';
+import { toSI } from './fxUnits';
 
 export type FxView = 'front' | 'side' | 'top' | 'angle';
 
@@ -40,7 +41,10 @@ export interface FxParams {
   resolution?: number;
   /** @deprecated See `resolution`. */
   heightRatio?: number;
-  /** The parameters' format: 2 is metres (see `normaliseFx`, which reads a save without it as 1). */
+  /**
+   * The parameters' format (see `normaliseFx`, which reads a save without it as 1): 2 put sizes and places in
+   * metres; 3 put the gas solver's speeds and forces in SI too (fxUnits.ts).
+   */
   version?: number;
   // --- Emitter ---
   emitterShape: 'sphere' | 'disc';
@@ -64,9 +68,9 @@ export interface FxParams {
   heat: number;
   /** Smoke added per second inside the emitter, without burning. */
   smoke: number;
-  /** Upward speed the emitter imposes, voxels per second. */
+  /** Upward speed the emitter imposes, m/s. */
   emitSpeed: number;
-  /** Noise velocity added inside and above the emitter, voxels per second. */
+  /** Noise velocity stirred inside and above the emitter: an acceleration, m/s^2. */
   turbulence: number;
   /** The turbulence's eddies, metres across. */
   turbulenceSize: number;
@@ -103,14 +107,15 @@ export interface FxParams {
   /** A pressure pulse at the emitter for the first 0.1 s: an explosion's shock. */
   blast: number;
   // --- Forces ---
+  /** Upward pull per unit of temperature, m/s^2. */
   buoyancy: number;
-  /** Downward pull per unit of smoke density. */
+  /** Downward pull per unit of smoke density, m/s^2. */
   weight: number;
-  /** Vorticity confinement strength: restores the swirls the grid smooths out. */
+  /** Vorticity confinement (Fedkiw's epsilon), per second: restores the swirls the grid smooths out. */
   vorticity: number;
-  /** Sideways drift, voxels per second along +X. */
+  /** Sideways drift along +X, m/s. */
   wind: number;
-  /** Block-noise velocity kicks in hot or smoky gas: breaks smooth sheets into tongues and billows. */
+  /** Block-noise velocity kicks in hot or smoky gas, m/s^2: breaks smooth sheets into tongues and billows. */
   disturbance: number;
   /** Disturbance block size, metres. */
   disturbanceScale: number;
@@ -126,7 +131,7 @@ export interface FxParams {
   cooling: number;
   /** Radiative cooling (proportional to T^4): short, sharp, ragged flame tips. */
   coolingT4: number;
-  /** Smoke and heat spreading into the air around them. */
+  /** Smoke and heat spreading into the air around them, m^2/s. */
   diffusion: number;
   /** Visible vapour condenses below the dew point and evaporates above it (steam). 0 is off. */
   condensation: number;
@@ -277,7 +282,7 @@ export interface FxParams {
   liquidColor: [number, number, number, number];
   /** The colour light keeps after one absorption length (1 / `liquidAbsorption`) of liquid. */
   liquidTint: [number, number, number, number];
-  /** Per metre: how quickly the liquid takes the light passing through it. Blood ~150, water ~2. */
+  /** Per metre: how quickly the liquid takes the light passing through it. Blood ~900 (a millimetre is nearly opaque), water a few. */
   liquidAbsorption: number;
   /** Surface roughness: 0 a mirror, the GGX alpha's square root. */
   liquidRoughness: number;
@@ -322,6 +327,21 @@ export const FIRE_GRADIENT: Gradient = {
 };
 
 /**
+ * A clean gas flame's colour: blue from its chemistry -- CH* (431 nm) and C2 Swan-band (516 nm) emission in
+ * the reaction zone -- not from its heat. No black body is that blue at a flame's 1900-2200 K, so a gas
+ * flame takes this gradient rather than a temperature range.
+ */
+export const GAS_FLAME_GRADIENT: Gradient = {
+  color: [
+    { t: 0, c: [0.02, 0.04, 0.35] },
+    { t: 0.4, c: [0.1, 0.25, 0.95] },
+    { t: 0.75, c: [0.3, 0.55, 1] },
+    { t: 1, c: [0.75, 0.88, 1] },
+  ],
+  alpha: [{ t: 0, a: 1 }, { t: 1, a: 1 }],
+};
+
+/**
  * Every liquid parameter's default, also what a gas effect carries for them. A liquid effect is
  * `medium: 'liquid'` plus these, re-tuned: a blood splash by default.
  */
@@ -337,25 +357,18 @@ export const LIQUID_DEFAULTS = {
 };
 
 export const DEFAULT_FX: FxParams = {
-  version: 2,
-  regionSize: [4.8, 7.2, 4.8], voxelSize: 0.1, emitterPosition: [0, 0.76, 0],
-  emitterShape: 'sphere', emitterRadius: 0.576,
-  fuel: 1.2, heat: 1.2, smoke: 0.2, emitSpeed: 6, turbulence: 8, turbulenceSize: 1.2, emitDuration: 0, emitterNoise: 0, turbulenceOnSmoke: 0, turbulenceDetail: 0,
-  ignition: 0.25, burnRate: 1.6, heatRelease: 1.4, smokeYield: 0.6, expansion: 0, maxTemperature: 0, ambientTemperature: 0, flameShape: 0, flameLifetime: 0.25, flicker: 0, blast: 0,
-  buoyancy: 14, weight: 1.5, vorticity: 0.35, wind: 0,
-  disturbance: 0, disturbanceScale: 0.3, disturbanceInterval: 0.25, shredding: 0, settling: 0, groundDrag: 0,
-  cooling: 1.1, smokeDissipation: 0.25, velocityDamping: 0.05, coolingT4: 0, diffusion: 0, condensation: 0, dewPoint: 0.35,
-  frameTime: 1 / 24, substeps: 2, pressureIterations: 30, warmup: 24, advection: 'semi-lagrangian', pressureSolver: 'jacobi', boundaries: 'closed',
-  frames: 32, tileSize: 128, tileAspect: 'square', view: 'front', yaw: 30, loopBlend: 8, edgeFade: 0,
-  smokeColor: [0.32, 0.31, 0.3, 1], absorption: 2.2, fireGradient: FIRE_GRADIENT, emission: 2.2, emissionRange: 1.2,
-  fireColorMode: 'gradient', blackbodyMin: 900, blackbodyMax: 2200,
-  lightYaw: 35, lightElevation: 50, ambient: 0.35,
-  anisotropy: 0, scatterOctaves: 1, fireGlow: 0, detailStrength: 0, detailScale: 6,
-  albedo: 1, powder: 0, skyOcclusion: 0, fireIntensity: 1,
-  fireOpacity: 0.6, blueCore: 0, blueCoreColor: [0.3, 0.45, 1, 1], absorptionColor: [1, 1, 1, 1], fireSootMask: 0, glowThreshold: 0,
-  smoothSampling: false, sharpen: 0,
-  bakeSixWay: false, bakeMotion: false, bakeEmission: false, motionScale: 4,
-  seed: 1,
+  version: 3, regionSize: [1.591, 2.386, 1.591], voxelSize: 0.03314, emitterPosition: [0, 0.2518, 0], emitterShape: 'sphere', emitterRadius: 0.1909,
+  fuel: 1.2, heat: 1.2, smoke: 0.3474, emitSpeed: 0.3454, turbulence: 0.8, turbulenceSize: 0.3976, emitDuration: 0, emitterNoise: 0,
+  turbulenceOnSmoke: 0, turbulenceDetail: 0, ignition: 0.25, burnRate: 2.779, heatRelease: 1.4, smokeYield: 0.6, expansion: 0, maxTemperature: 0,
+  ambientTemperature: 0, flameShape: 0, flameLifetime: 0.1439, flicker: 0, blast: 0, buoyancy: 1.4, weight: 0.15, vorticity: 0.608, wind: 0,
+  disturbance: 0, disturbanceScale: 0.09941, disturbanceInterval: 0.1439, shredding: 0, settling: 0, groundDrag: 0, cooling: 1.911,
+  smokeDissipation: 0.4343, velocityDamping: 0.08686, coolingT4: 0, diffusion: 0, condensation: 0, dewPoint: 0.35, frameTime: 0.02399, substeps: 2,
+  pressureIterations: 30, warmup: 24, advection: 'semi-lagrangian', pressureSolver: 'jacobi', boundaries: 'closed', frames: 32, tileSize: 128,
+  tileAspect: 'square', view: 'front', yaw: 30, loopBlend: 8, edgeFade: 0, smokeColor: [0.32, 0.31, 0.3, 1], absorption: 2.2, emission: 2.2,
+  emissionRange: 1.2, fireGradient: FIRE_GRADIENT, fireColorMode: 'gradient', blackbodyMin: 900, blackbodyMax: 2200, lightYaw: 35, lightElevation: 50, ambient: 0.35, anisotropy: 0,
+  scatterOctaves: 1, fireGlow: 0, detailStrength: 0, detailScale: 6, albedo: 1, powder: 0, skyOcclusion: 0, fireIntensity: 1, fireOpacity: 0.6,
+  blueCore: 0, blueCoreColor: [0.3, 0.45, 1, 1], absorptionColor: [1, 1, 1, 1], fireSootMask: 0, glowThreshold: 0, smoothSampling: false, sharpen: 0,
+  bakeSixWay: false, bakeMotion: false, bakeEmission: false, motionScale: 4, seed: 1,
   ...LIQUID_DEFAULTS,
   previewQuality: 'medium',
 };
@@ -390,7 +403,7 @@ export const FX_SCHEMA: readonly FxSchemaGroup[] = [
       { key: 'sourceShape', label: 'Source shape', kind: 'enum', options: [
         { value: 'point', label: 'Point' }, { value: 'sphere', label: 'Ball' }, { value: 'disc', label: 'Disc (nozzle)' }, { value: 'ring', label: 'Ring (crown)' },
       ] },
-      { key: 'sourceRadius', label: 'Source radius', kind: 'float', min: 0.005, max: 1, step: 0.005, unit: 'm', when: p => p.sourceShape !== 'point', gizmo: true },
+      { key: 'sourceRadius', label: 'Source radius', kind: 'float', min: 0.002, max: 1, step: 0.001, unit: 'm', when: p => p.sourceShape !== 'point', gizmo: true },
       { key: 'emitterPosition', label: 'Source position', kind: 'vec3', unit: 'm', gizmo: true },
       { key: 'sourceVolume', label: 'Volume', kind: 'float', min: 0.001, max: 20, step: 0.005, unit: 'L' },
       { key: 'sourceMode', label: 'Release', kind: 'enum', options: [{ value: 'burst', label: 'Burst (all at once)' }, { value: 'jet', label: 'Jet (poured)' }] },
@@ -442,14 +455,14 @@ export const FX_SCHEMA: readonly FxSchemaGroup[] = [
   {
     title: 'Emitter', medium: 'gas', specs: [
       { key: 'emitterShape', label: 'Shape', kind: 'enum', options: [{ value: 'sphere', label: 'Sphere' }, { value: 'disc', label: 'Disc' }] },
-      { key: 'emitterRadius', label: 'Radius', kind: 'float', min: 0.01, max: 10, step: 0.01, unit: 'm', gizmo: true },
+      { key: 'emitterRadius', label: 'Radius', kind: 'float', min: 0.002, max: 10, step: 0.001, unit: 'm', gizmo: true },
       { key: 'emitterPosition', label: 'Position', kind: 'vec3', unit: 'm', gizmo: true },
       { key: 'fuel', label: 'Fuel', kind: 'float', min: 0, max: 4, step: 0.05 },
       { key: 'heat', label: 'Heat', kind: 'float', min: 0, max: 4, step: 0.05 },
-      { key: 'smoke', label: 'Smoke', kind: 'float', min: 0, max: 4, step: 0.05, hint: 'Smoke emitted directly, before any burning.' },
-      { key: 'emitSpeed', label: 'Speed', kind: 'float', min: 0, max: 40, step: 0.5, unit: 'vox/s' },
-      { key: 'turbulence', label: 'Turbulence', kind: 'float', min: 0, max: 40, step: 0.5 },
-      { key: 'turbulenceSize', label: 'Turbulence size', kind: 'float', min: 0.02, max: 10, step: 0.01, unit: 'm' },
+      { key: 'smoke', label: 'Smoke', kind: 'float', min: 0, max: 12, step: 0.05, unit: '/s', hint: 'Smoke emitted directly, before any burning.' },
+      { key: 'emitSpeed', label: 'Speed', kind: 'float', min: 0, max: 20, step: 0.01, unit: 'm/s' },
+      { key: 'turbulence', label: 'Turbulence', kind: 'float', min: 0, max: 20, step: 0.01, unit: 'm/s²' },
+      { key: 'turbulenceSize', label: 'Turbulence size', kind: 'float', min: 0.005, max: 10, step: 0.005, unit: 'm' },
       { key: 'turbulenceOnSmoke', label: 'Turbulence on smoke', kind: 'float', min: 0, max: 1, step: 0.01 },
       { key: 'turbulenceDetail', label: 'Turbulence detail', kind: 'float', min: 0, max: 2, step: 0.01 },
       { key: 'emitDuration', label: 'Duration', kind: 'float', min: 0, max: 10, step: 0.05, unit: 's', hint: 'How long the emitter runs. 0 keeps it on (a flame); a short burst makes an explosion.' },
@@ -459,46 +472,46 @@ export const FX_SCHEMA: readonly FxSchemaGroup[] = [
   {
     title: 'Combustion', medium: 'gas', specs: [
       { key: 'ignition', label: 'Ignition', kind: 'float', min: 0, max: 2, step: 0.01 },
-      { key: 'burnRate', label: 'Burn rate', kind: 'float', min: 0, max: 8, step: 0.05 },
+      { key: 'burnRate', label: 'Burn rate', kind: 'float', min: 0, max: 30, step: 0.05, unit: '/s' },
       { key: 'heatRelease', label: 'Heat release', kind: 'float', min: 0, max: 6, step: 0.05 },
       { key: 'smokeYield', label: 'Smoke yield', kind: 'float', min: 0, max: 4, step: 0.05 },
       { key: 'expansion', label: 'Expansion', kind: 'float', min: 0, max: 20, step: 0.1 },
       { key: 'maxTemperature', label: 'Max temperature', kind: 'float', min: 0, max: 6, step: 0.05 },
       { key: 'ambientTemperature', label: 'Ambient temperature', kind: 'float', min: 0, max: 1, step: 0.01 },
       { key: 'flameShape', label: 'Flame shape', kind: 'float', min: 0, max: 1, step: 0.01 },
-      { key: 'flameLifetime', label: 'Flame lifetime', kind: 'float', min: 0.02, max: 2, step: 0.01, unit: 's', when: p => Number(p.flameShape) > 0 },
-      { key: 'flicker', label: 'Flicker', kind: 'float', min: 0, max: 12, step: 0.1, unit: 'Hz' },
-      { key: 'blast', label: 'Blast', kind: 'float', min: 0, max: 60, step: 0.5 },
+      { key: 'flameLifetime', label: 'Flame lifetime', kind: 'float', min: 0.005, max: 2, step: 0.005, unit: 's', when: p => Number(p.flameShape) > 0 },
+      { key: 'flicker', label: 'Flicker', kind: 'float', min: 0, max: 30, step: 0.1, unit: 'Hz' },
+      { key: 'blast', label: 'Blast', kind: 'float', min: 0, max: 200, step: 0.5, unit: '/s' },
     ],
   },
   {
     title: 'Forces', medium: 'gas', specs: [
-      { key: 'buoyancy', label: 'Buoyancy', kind: 'float', min: 0, max: 60, step: 0.5 },
-      { key: 'weight', label: 'Smoke weight', kind: 'float', min: 0, max: 20, step: 0.1 },
-      { key: 'vorticity', label: 'Vorticity', kind: 'float', min: 0, max: 2, step: 0.01 },
-      { key: 'wind', label: 'Wind', kind: 'float', min: -20, max: 20, step: 0.25, unit: 'vox/s' },
-      { key: 'disturbance', label: 'Disturbance', kind: 'float', min: 0, max: 40, step: 0.5 },
-      { key: 'disturbanceScale', label: 'Disturbance size', kind: 'float', min: 0.02, max: 3, step: 0.01, unit: 'm', when: p => Number(p.disturbance) > 0 },
-      { key: 'disturbanceInterval', label: 'Disturbance interval', kind: 'float', min: 0.02, max: 2, step: 0.01, unit: 's', when: p => Number(p.disturbance) > 0 },
-      { key: 'shredding', label: 'Shredding', kind: 'float', min: 0, max: 4, step: 0.05 },
+      { key: 'buoyancy', label: 'Buoyancy', kind: 'float', min: 0, max: 10, step: 0.01, unit: 'm/s²' },
+      { key: 'weight', label: 'Smoke weight', kind: 'float', min: 0, max: 5, step: 0.01, unit: 'm/s²' },
+      { key: 'vorticity', label: 'Vorticity', kind: 'float', min: 0, max: 6, step: 0.01, unit: '/s' },
+      { key: 'wind', label: 'Wind', kind: 'float', min: -10, max: 10, step: 0.05, unit: 'm/s' },
+      { key: 'disturbance', label: 'Disturbance', kind: 'float', min: 0, max: 20, step: 0.01, unit: 'm/s²' },
+      { key: 'disturbanceScale', label: 'Disturbance size', kind: 'float', min: 0.002, max: 3, step: 0.002, unit: 'm', when: p => Number(p.disturbance) > 0 },
+      { key: 'disturbanceInterval', label: 'Disturbance interval', kind: 'float', min: 0.01, max: 2, step: 0.005, unit: 's', when: p => Number(p.disturbance) > 0 },
+      { key: 'shredding', label: 'Shredding', kind: 'float', min: 0, max: 10, step: 0.05, unit: '/s' },
       { key: 'settling', label: 'Settling', kind: 'float', min: 0, max: 3, step: 0.01, unit: 'm/s' },
-      { key: 'groundDrag', label: 'Ground drag', kind: 'float', min: 0, max: 10, step: 0.1 },
+      { key: 'groundDrag', label: 'Ground drag', kind: 'float', min: 0, max: 20, step: 0.1, unit: '/s' },
     ],
   },
   {
     title: 'Dissipation', medium: 'gas', specs: [
-      { key: 'cooling', label: 'Cooling', kind: 'float', min: 0, max: 6, step: 0.05 },
-      { key: 'smokeDissipation', label: 'Smoke fade', kind: 'float', min: 0, max: 4, step: 0.01 },
-      { key: 'velocityDamping', label: 'Velocity damping', kind: 'float', min: 0, max: 2, step: 0.01 },
-      { key: 'coolingT4', label: 'Radiative cooling', kind: 'float', min: 0, max: 2, step: 0.01 },
-      { key: 'diffusion', label: 'Diffusion', kind: 'float', min: 0, max: 0.15, step: 0.005 },
-      { key: 'condensation', label: 'Condensation', kind: 'float', min: 0, max: 20, step: 0.1 },
+      { key: 'cooling', label: 'Cooling', kind: 'float', min: 0, max: 20, step: 0.05, unit: '/s' },
+      { key: 'smokeDissipation', label: 'Smoke fade', kind: 'float', min: 0, max: 10, step: 0.01, unit: '/s' },
+      { key: 'velocityDamping', label: 'Velocity damping', kind: 'float', min: 0, max: 5, step: 0.01, unit: '/s' },
+      { key: 'coolingT4', label: 'Radiative cooling', kind: 'float', min: 0, max: 6, step: 0.01, unit: '/s' },
+      { key: 'diffusion', label: 'Diffusion', kind: 'float', min: 0, max: 0.05, step: 0.0001, unit: 'm²/s' },
+      { key: 'condensation', label: 'Condensation', kind: 'float', min: 0, max: 60, step: 0.1, unit: '/s' },
       { key: 'dewPoint', label: 'Dew point', kind: 'float', min: 0.02, max: 2, step: 0.01, when: p => Number(p.condensation) > 0 },
     ],
   },
   {
     title: 'Simulation', specs: [
-      { key: 'frameTime', label: 'Frame time', kind: 'float', min: 1 / 120, max: 0.25, step: 0.001, unit: 's' },
+      { key: 'frameTime', label: 'Frame time', kind: 'float', min: 1 / 240, max: 0.25, step: 0.0005, unit: 's' },
       { key: 'substeps', label: 'Substeps', kind: 'int', min: 1, max: 8 },
       { key: 'pressureIterations', label: 'Pressure iterations', kind: 'int', min: 4, max: 120, when: isGas },
       { key: 'pressureSolver', label: 'Pressure solver', kind: 'enum', options: [{ value: 'jacobi', label: 'Jacobi' }, { value: 'sor', label: 'Red-black SOR' }], when: isGas },
@@ -551,7 +564,7 @@ export const FX_SCHEMA: readonly FxSchemaGroup[] = [
       { key: 'fireGlow', label: 'Fire glow', kind: 'float', min: 0, max: 4, step: 0.05 },
       { key: 'fireIntensity', label: 'Fire intensity', kind: 'float', min: 0.2, max: 32, step: 0.1 },
       { key: 'fireOpacity', label: 'Flame opacity', kind: 'float', min: 0, max: 1, step: 0.01 },
-      { key: 'blueCore', label: 'Blue core', kind: 'float', min: 0, max: 4, step: 0.05 },
+      { key: 'blueCore', label: 'Blue core', kind: 'float', min: 0, max: 8, step: 0.05 },
       { key: 'blueCoreColor', label: 'Blue core colour', kind: 'color', when: p => Number(p.blueCore) > 0 },
       { key: 'fireSootMask', label: 'Soot mask', kind: 'float', min: 0, max: 4, step: 0.05 },
       { key: 'glowThreshold', label: 'Glow threshold', kind: 'float', min: 0, max: 0.95, step: 0.01, when: p => Number(p.fireGlow) > 0 },
@@ -622,15 +635,18 @@ export function normaliseFx(raw: FxParams): FxParams {
   const size = (Array.isArray(p.regionSize) ? p.regionSize : DEFAULT_FX.regionSize).map(v => Math.max(MIN_REGION, Number(v) || MIN_REGION)) as [number, number, number];
   p.regionSize = size;
   p.voxelSize = fitVoxelSize(size, Number(p.voxelSize) || 0.1);
-  if ((Number(raw.version) || 1) < 2) toMetres(p, raw);
-  p.version = 2;
+  const version = Number(raw.version) || 1;
+  if (version < 2) toMetres(p, raw);
+  // Format 3: the gas solver's speeds and forces in SI rather than per voxel, at the voxel size they ran at.
+  if (version < 3) toSI(p, p.voxelSize);
+  p.version = 3;
   // The emitter stays inside its region.
   const e = Array.isArray(p.emitterPosition) ? p.emitterPosition : DEFAULT_FX.emitterPosition;
   const inside = (v: unknown, lo: number, hi: number) => Math.min(hi, Math.max(lo, Number.isFinite(Number(v)) ? Number(v) : 0));
   p.emitterPosition = [inside(e[0], -size[0] / 2, size[0] / 2), inside(e[1], 0, size[1]), inside(e[2], -size[2] / 2, size[2] / 2)];
   p.emitterRadius = Math.max(0.005, Number(p.emitterRadius) || DEFAULT_FX.emitterRadius);
   p.turbulenceSize = Math.max(0.01, Number(p.turbulenceSize) || DEFAULT_FX.turbulenceSize);
-  p.dropletSize = fitDropletSize(p, Math.max(0.0005, Number(p.dropletSize) || LIQUID_DEFAULTS.dropletSize));
+  p.dropletSize = Math.max(0.0005, Number(p.dropletSize) || LIQUID_DEFAULTS.dropletSize);
   return p;
 }
 
@@ -664,18 +680,23 @@ export function tileDims(p: Pick<FxParams, 'tileSize' | 'tileAspect'>): { width:
   return p.tileAspect === 'tall' ? { width: s, height: s * 2 } : p.tileAspect === 'wide' ? { width: s * 2, height: s } : { width: s, height: s };
 }
 
-/** Above this many particles the droplet size is raised to fit (the liquid's cost and memory). */
+/** The most particles a liquid simulates (its cost and memory); a bigger volume rides in them as heavier drops. */
 export const MAX_PARTICLES = 60_000;
 
-/** The droplets a liquid releases: its volume over one droplet's cube. */
+/** The droplets a liquid releases: its volume over one droplet's cube, at most {@link MAX_PARTICLES}. */
 export function particleCount(p: Pick<FxParams, 'sourceVolume' | 'dropletSize'>): number {
-  return Math.max(1, Math.round((Math.max(0, p.sourceVolume) / 1000) / Math.pow(p.dropletSize, 3)));
+  return Math.min(MAX_PARTICLES, Math.max(1, Math.round((Math.max(0, p.sourceVolume) / 1000) / Math.pow(p.dropletSize, 3))));
 }
 
-/** `size`, raised just enough that the liquid's volume fits in {@link MAX_PARTICLES}. */
-function fitDropletSize(p: Pick<FxParams, 'sourceVolume'>, size: number): number {
-  const count = (Math.max(0, p.sourceVolume) / 1000) / Math.pow(size, 3);
-  return count > MAX_PARTICLES ? size * Math.cbrt(count / MAX_PARTICLES) * 1.0001 : size;
+/**
+ * The liquid one particle stands for, m^3: a droplet's cube -- until the volume needs more than
+ * {@link MAX_PARTICLES}, when each carries its share. The droplet size is never changed to fit: the drops stay
+ * the size they were authored at and a big pour is a heavier drop, which lands as a bigger splash on the floor.
+ */
+export function packetVolume(p: Pick<FxParams, 'sourceVolume' | 'dropletSize'>): number {
+  const cube = Math.pow(p.dropletSize, 3);
+  const total = Math.max(0, p.sourceVolume) / 1000;
+  return total / cube > MAX_PARTICLES ? total / MAX_PARTICLES : cube;
 }
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0.5));
@@ -695,29 +716,30 @@ export function voxelSizeRaised(raw: FxParams): boolean {
 
 /** One line each, for the effect preset menu. */
 const PRESET_DESCRIPTIONS: Record<string, string> = {
-  campfire: 'A small wood fire with grey smoke.',
-  'campfire-hq': 'The campfire with every realism setting on.',
-  torch: 'A tall, narrow flame with little smoke.',
-  'smoke-plume': 'A rising column of grey smoke, no fire.',
-  explosion: 'A short fuel burst that blooms and rises.',
-  candle: 'A tiny, steady flame.',
-  bonfire: 'A large, roaring outdoor fire.',
-  'gas-burner': 'A clean blue gas flame.',
-  brazier: 'A fire in a raised bowl, very smoky.',
-  chimney: 'Slow, wispy dark smoke.',
-  steam: 'A white jet of steam from a vent.',
-  embers: 'Glowing embers with thin smoke.',
-  'magic-fire': 'A stylised green-cyan fire.',
-  fireball: 'A rising ball of fire.',
-  'big-explosion': 'A wide, heavy blast with dark smoke.',
-  'muzzle-flash': 'A tiny, very fast sideways flash.',
-  dust: 'A brown puff that settles.',
+  campfire: 'A wood fire, 0.9 m flames over a 0.6 m bed, with grey smoke (the stylised reference).',
+  'campfire-hq': 'The campfire with every realism setting on: 0.9 m flames over a 0.6 m bed.',
+  torch: 'A 45 cm flame on a 10 cm torch head, sooty.',
+  'smoke-plume': 'A column of pale smoke from a 0.6 m smouldering source, no fire.',
+  explosion: 'A fuel burst that blooms into a 4 m fireball and rises.',
+  candle: 'A 4 cm candle flame.',
+  bonfire: 'A roaring outdoor fire: 2.4 m flames, about 2 m across.',
+  'gas-burner': 'A clean blue gas flame, 10 cm tall.',
+  brazier: 'A fire in a 0.6 m raised bowl, very smoky.',
+  chimney: 'Slow, wispy dark smoke from a 0.3 m flue.',
+  steam: 'A white jet of steam from a 15 cm vent.',
+  embers: 'A 0.8 m bed of glowing embers with thin smoke.',
+  'magic-fire': 'A stylised green-cyan fire, campfire-sized.',
+  fireball: 'A 2 m ball of fire, rising.',
+  'big-explosion': 'A heavy blast: a 12 m fireball and dark smoke.',
+  'muzzle-flash': 'A 30 cm sideways flash, gone in a few hundredths of a second.',
+  dust: 'A brown puff 1.5 m across that settles.',
   'blood-burst': 'Liquid: blood bursting out of a hit, for a particle sprite.',
   'blood-droplet': 'Liquid: a stream of blood drops, looping, for velocity-aligned particles.',
   'blood-splash': 'Liquid: a jet of blood thrown along +Z that spatters the floor, with its decal.',
   'blood-pool': 'Liquid: blood pouring down and spreading into a pool, with its decal.',
   'water-splash': 'Liquid: the crown splash of something entering water.',
   'water-droplet': 'Liquid: a stream of water drops, looping, for velocity-aligned particles.',
+  'water-puddle': 'Liquid: rain water poured onto the ground and settling into a puddle about a metre across, for its floor decal.',
   'mercury-splash': 'Liquid: a foot coming down in mercury -- beads thrown low and rolling, with surface maps and its decal.',
 };
 
@@ -726,18 +748,22 @@ const LIQUID_BASE: FxParams = {
   ...DEFAULT_FX, medium: 'liquid', warmup: 0, loopBlend: 0, frames: 24, frameTime: 1 / 30, substeps: 1,
   view: 'front', bakeSixWay: false, bakeEmission: false, bakeMotion: false, ambient: 0.45, lightElevation: 55,
 };
+// The liquids' materials, from their real properties (docs/creator/fx.md, Real-world scale): viscosity
+// log10(mu / water's) / 3, surface tension 0.55 x sigma / water's (72 mN/m), capped at 1.
+/** Blood: 3.5-4 mPa s, 58 mN/m, 1060 kg/m^3; a millimetre of it is nearly opaque. */
 const BLOOD_LOOK: Partial<FxParams> = {
   liquidColor: [0.42, 0.03, 0.03, 1], liquidTint: [0.55, 0.04, 0.04, 1], liquidAbsorption: 900, liquidRoughness: 0.12, specular: 1, foam: 0,
-  viscosity: 0.15, surfaceTension: 0.5,
+  viscosity: 0.18, surfaceTension: 0.44,
 };
+/** Water: 1 mPa s, 72 mN/m. */
 const WATER_LOOK: Partial<FxParams> = {
   liquidColor: [0.86, 0.92, 0.95, 1], liquidTint: [0.8, 0.92, 0.95, 1], liquidAbsorption: 8, liquidRoughness: 0.05, specular: 1.4, foam: 0.9,
   viscosity: 0, surfaceTension: 0.55,
 };
-/** Mercury: a liquid metal, heavy and very tense, that beads and rolls rather than wets. */
+/** Mercury: a liquid metal (1.5 mPa s, 485 mN/m, 13 534 kg/m^3), heavy and very tense, that beads and rolls rather than wets. */
 const MERCURY_LOOK: Partial<FxParams> = {
   liquidColor: [0.83, 0.83, 0.85, 1], liquidTint: [0.83, 0.83, 0.85, 1], liquidAbsorption: 500, liquidRoughness: 0.05, liquidMetallic: 1,
-  specular: 1, foam: 0, viscosity: 0.05, surfaceTension: 1, stickiness: 0,
+  specular: 1, foam: 0, viscosity: 0.06, surfaceTension: 1, stickiness: 0,
 };
 
 export const FX_PRESETS: readonly Preset<FxParams>[] = [
@@ -745,132 +771,237 @@ export const FX_PRESETS: readonly Preset<FxParams>[] = [
   {
     id: 'campfire-hq', label: 'Campfire (realistic)',
     params: {
-      ...DEFAULT_FX, emitterNoise: 0.45, expansion: 1.5, advection: 'maccormack', pressureSolver: 'sor',
-      fireColorMode: 'blackbody', anisotropy: 0.35, scatterOctaves: 2, fireGlow: 1.2, detailStrength: 0.35,
+      // x0.331: fireHeight 2.72 m on the solver -> 0.9 m
+      ...DEFAULT_FX,
+      emitterNoise: 0.45, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5, expansion: 1.5, maxTemperature: 1.63, flameShape: 0.85, flameLifetime: 0.1036,
+      flicker: 2.606, disturbance: 1, disturbanceScale: 0.08284, disturbanceInterval: 0.1151, shredding: 1.39, coolingT4: 0.6254, diffusion: 0.001145,
+      advection: 'maccormack', pressureSolver: 'sor', boundaries: 'open', fireColorMode: 'blackbody', blackbodyMin: 950, blackbodyMax: 1600,
+      anisotropy: 0.35, scatterOctaves: 2, fireGlow: 1.2, detailStrength: 0.35, albedo: 0.55, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 3.2,
+      fireOpacity: 0.05, blueCore: 1, absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1, glowThreshold: 0.3, smoothSampling: true, sharpen: 0.25,
     },
   },
   {
     id: 'torch', label: 'Torch flame',
-    params: { ...DEFAULT_FX, emitterPosition: [0, 1, 0], emitterRadius: 0.336, regionSize: [4.8, 9.6, 4.8], emitSpeed: 10, turbulence: 5, smoke: 0.05, smokeYield: 0.25, cooling: 1.8, frames: 32 },
+    params: {
+      // x0.153: fireHeight 2.94 m on the solver -> 0.45 m
+      ...DEFAULT_FX,
+      regionSize: [0.7357, 1.471, 0.7357], voxelSize: 0.01533, emitterPosition: [0, 0.1533, 0], emitterRadius: 0.0515, smoke: 0.1277,
+      emitSpeed: 0.3915, turbulence: 0.5, turbulenceSize: 0.1839, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5, burnRate: 4.087, smokeYield: 0.25,
+      maxTemperature: 1.63, flameShape: 0.85, flameLifetime: 0.04698, flicker: 7.663, vorticity: 0.894, disturbance: 1, disturbanceScale: 0.03832,
+      disturbanceInterval: 0.0783, shredding: 3.065, cooling: 4.598, smokeDissipation: 0.6386, velocityDamping: 0.1277, coolingT4: 0.9195,
+      diffusion: 0.00036, frameTime: 0.01631, boundaries: 'open', fireColorMode: 'blackbody', blackbodyMin: 950, blackbodyMax: 1600, albedo: 0.3,
+      powder: 0.5, skyOcclusion: 0.6, fireIntensity: 3.2, fireOpacity: 0.05, blueCore: 1, absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1,
+      glowThreshold: 0.3, smoothSampling: true, sharpen: 0.25,
+    },
   },
   {
     id: 'smoke-plume', label: 'Smoke plume',
     params: {
-      ...DEFAULT_FX, emitterPosition: [0, 1, 0], emitterRadius: 0.672, fuel: 0, heat: 0.6, smoke: 2.2, emission: 0, buoyancy: 9, weight: 0.4, smokeDissipation: 0.12,
-      cooling: 0.4, regionSize: [4.8, 9.6, 4.8], turbulence: 10, absorption: 1.6, smokeColor: [0.55, 0.55, 0.57, 1],
+      // x0.446: emitterDiameter 1.34 m on the solver -> 0.6 m
+      ...DEFAULT_FX,
+      regionSize: [2.143, 4.286, 2.143], voxelSize: 0.04464, emitterPosition: [0, 0.4464, 0], emitterRadius: 0.3, fuel: 0, heat: 0.6, smoke: 3.293,
+      emitSpeed: 0.4009, turbulence: 1, turbulenceSize: 0.5357, turbulenceOnSmoke: 0.8, turbulenceDetail: 0.6, burnRate: 2.395, flameLifetime: 0.167,
+      buoyancy: 0.9, weight: 0.04, vorticity: 0.5238, disturbance: 0.6, disturbanceScale: 0.1786, disturbanceInterval: 0.2339, shredding: 0.449,
+      cooling: 0.5987, smokeDissipation: 0.1796, velocityDamping: 0.07483, diffusion: 0.003579, frameTime: 0.02784, boundaries: 'open',
+      smokeColor: [0.55, 0.55, 0.57, 1], absorption: 1.6, emission: 0, detailStrength: 0.45, detailScale: 7, albedo: 0.85, powder: 0.6,
+      skyOcclusion: 0.7, absorptionColor: [0.6, 0.55, 0.5, 1], smoothSampling: true, sharpen: 0.2,
     },
   },
   {
     id: 'explosion', label: 'Explosion burst',
     params: {
-      ...DEFAULT_FX, emitterPosition: [0, 1.695, 0], emitterRadius: 0.768, regionSize: [4.8, 4.8, 4.8], fuel: 3, heat: 2.5, emitSpeed: 2,
-      turbulence: 24, emitDuration: 0.2, buoyancy: 20, vorticity: 0.6, burnRate: 4, heatRelease: 2.4, smokeYield: 1.2, warmup: 0, frames: 48, loopBlend: 0,
-      expansion: 6, emitterNoise: 0.5, advection: 'maccormack', anisotropy: 0.3, scatterOctaves: 2, fireGlow: 1.5, detailStrength: 0.3,
+      // x0.833: fireWidthMax 4.80 m on the solver -> 4 m
+      ...DEFAULT_FX,
+      regionSize: [4, 4, 4], voxelSize: 0.08333, emitterPosition: [0, 1.412, 0], emitterRadius: 0.64, fuel: 3, heat: 2.5, smoke: 0.2191,
+      emitSpeed: 0.1826, turbulence: 2.4, turbulenceSize: 1, emitDuration: 0.1826, emitterNoise: 0.5, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5,
+      burnRate: 4.382, heatRelease: 2.4, smokeYield: 1.2, expansion: 6, maxTemperature: 1.63, flameShape: 0.6, flameLifetime: 0.2739, blast: 27.39,
+      buoyancy: 2, vorticity: 0.6573, disturbance: 1, disturbanceScale: 0.2083, disturbanceInterval: 0.1826, shredding: 0.8764, cooling: 1.205,
+      smokeDissipation: 0.2739, velocityDamping: 0.05477, coolingT4: 0.3944, diffusion: 0.004564, frameTime: 0.03804, warmup: 0,
+      advection: 'maccormack', boundaries: 'open', frames: 48, loopBlend: 0, fireColorMode: 'blackbody', blackbodyMin: 1100, blackbodyMax: 2000,
+      anisotropy: 0.3, scatterOctaves: 2, fireGlow: 1.5, detailStrength: 0.3, albedo: 0.35, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 3.5,
+      fireOpacity: 0.05, blueCore: 1, absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1, glowThreshold: 0.3, smoothSampling: true, sharpen: 0.25,
     },
   },
   {
     id: 'candle', label: 'Candle',
     params: {
-      ...DEFAULT_FX, emitterPosition: [0, 0.1516, 0], emitterRadius: 0.036, turbulenceSize: 0.3, regionSize: [0.6, 1.2, 0.6], voxelSize: 0.02, fuel: 1, heat: 1.1,
-      smoke: 0.02, smokeYield: 0.05, emitSpeed: 4, turbulence: 1.5, buoyancy: 10, vorticity: 0.15, cooling: 2.6,
-      emitterNoise: 0.2, fireColorMode: 'blackbody', blackbodyMin: 1300, blackbodyMax: 1900, emission: 2.6, fireGlow: 0.6,
+      // x0.131: fireHeight 0.304 m on the solver -> 0.04 m
+      ...DEFAULT_FX,
+      regionSize: [0.07884, 0.1577, 0.07884], voxelSize: 0.002628, emitterPosition: [0, 0.01992, 0], emitterRadius: 0.004731, fuel: 1, heat: 1.1,
+      smoke: 0.05517, emitSpeed: 0.029, turbulence: 0.03, turbulenceSize: 0.03942, emitterNoise: 0.2, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5,
+      burnRate: 4.414, smokeYield: 0.05, maxTemperature: 1.63, flameShape: 0.95, flameLifetime: 0.03625, flicker: 13.79, buoyancy: 0.2, weight: 0.03,
+      vorticity: 0.08276, disturbance: 0.06, disturbanceScale: 0.005256, disturbanceInterval: 0.0725, shredding: 3.862, cooling: 7.172,
+      smokeDissipation: 0.6897, velocityDamping: 0.1379, coolingT4: 0.9931, diffusion: 0.00001143, frameTime: 0.0151, boundaries: 'open',
+      emission: 2.6, fireColorMode: 'blackbody', blackbodyMin: 1300, blackbodyMax: 1800, fireGlow: 0.6, albedo: 0.3, powder: 0.5, skyOcclusion: 0.6,
+      fireIntensity: 3, fireOpacity: 0.05, blueCore: 1, absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1, glowThreshold: 0.3,
+      smoothSampling: true, sharpen: 0.25,
     },
   },
   {
     id: 'bonfire', label: 'Bonfire',
     params: {
-      ...DEFAULT_FX, emitterPosition: [0, 0.549, 0], emitterRadius: 1.98, turbulenceSize: 1.8, regionSize: [9, 12, 9], voxelSize: 0.15, emitterShape: 'disc', fuel: 1.6, heat: 1.4, smoke: 0.3, smokeYield: 0.9, emitSpeed: 7, turbulence: 14, buoyancy: 16, vorticity: 0.45,
-      expansion: 1, emitterNoise: 0.55, advection: 'maccormack', pressureSolver: 'sor', fireColorMode: 'blackbody', blackbodyMin: 950, blackbodyMax: 1600,
-      anisotropy: 0.35, scatterOctaves: 2, fireGlow: 1.4, detailStrength: 0.3,
+      // x0.445: fireHeight 5.40 m on the solver -> 2.4 m
+      ...DEFAULT_FX,
+      regionSize: [2.134, 4.269, 2.134], voxelSize: 0.05336, emitterPosition: [0, 0.3639, 0], emitterRadius: 0.3628, fuel: 1.6, heat: 1.4,
+      smoke: 0.4499, emitSpeed: 0.5601, turbulence: 1.68, turbulenceSize: 0.4269, emitterNoise: 0.55, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5,
+      burnRate: 2.399, smokeYield: 0.9, expansion: 1, maxTemperature: 1.63, flameShape: 0.85, flameLifetime: 0.12, flicker: 1.5, buoyancy: 1.92,
+      weight: 0.18, vorticity: 0.8098, disturbance: 1.92, disturbanceScale: 0.2223, disturbanceInterval: 0.1334, shredding: 1.2, cooling: 1.65,
+      smokeDissipation: 0.3749, velocityDamping: 0.07498, coolingT4: 0.5399, diffusion: 0.002562, frameTime: 0.02778, advection: 'maccormack',
+      pressureSolver: 'sor', boundaries: 'open', fireColorMode: 'blackbody', blackbodyMin: 950, blackbodyMax: 1600, anisotropy: 0.35,
+      scatterOctaves: 2, fireGlow: 1.4, detailStrength: 0.3, albedo: 0.5, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 3, fireOpacity: 0.05,
+      blueCore: 1, absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1, glowThreshold: 0.3, smoothSampling: true, sharpen: 0.25,
     },
   },
   {
     id: 'gas-burner', label: 'Gas burner',
     params: {
-      ...DEFAULT_FX, emitterPosition: [0, 0.2088, 0], emitterRadius: 0.288, turbulenceSize: 0.4, regionSize: [1.6, 2.4, 1.6], voxelSize: 0.04, emitterShape: 'disc', fuel: 0.8, heat: 1.6, smoke: 0, smokeYield: 0, emitSpeed: 9, turbulence: 2, buoyancy: 12, cooling: 3.2, ignition: 0.2,
-      fireColorMode: 'blackbody', blackbodyMin: 2400, blackbodyMax: 6000, emission: 1.8, emissionRange: 0.9, fireGlow: 0.4,
+      // x0.285: fireHeight 0.351 m on the solver -> 0.1 m
+      ...DEFAULT_FX,
+      regionSize: [0.4556, 0.6834, 0.4556], voxelSize: 0.01139, emitterPosition: [0, 0.05945, 0], emitterShape: 'disc', emitterRadius: 0.082,
+      fuel: 0.8, heat: 1.6, smoke: 0, emitSpeed: 0.1921, turbulence: 0.08, turbulenceSize: 0.1139, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5,
+      ignition: 0.2, burnRate: 2.998, smokeYield: 0, maxTemperature: 1.23, flameShape: 1, flameLifetime: 0.04269, buoyancy: 0.48, weight: 0.06,
+      vorticity: 0.2624, disturbance: 0.16, disturbanceScale: 0.01708, disturbanceInterval: 0.1067, shredding: 0.937, cooling: 5.997,
+      smokeDissipation: 0.4685, velocityDamping: 0.0937, coolingT4: 1.687, diffusion: 0.0001459, frameTime: 0.02223, boundaries: 'open',
+      fireGradient: GAS_FLAME_GRADIENT,
+      emission: 1.8, emissionRange: 0.9, blackbodyMin: 1900, fireGlow: 0.4, albedo: 0.7, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 2,
+      fireOpacity: 0.05, blueCore: 1, absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1, glowThreshold: 0.3, smoothSampling: true, sharpen: 0.25,
     },
   },
   {
     id: 'brazier', label: 'Brazier',
     params: {
-      ...DEFAULT_FX, emitterPosition: [0, 1.515, 0], emitterRadius: 0.6, turbulenceSize: 0.75, regionSize: [3, 6, 3], voxelSize: 0.06, emitterShape: 'disc', fuel: 1.3, heat: 1.2, smoke: 0.5, smokeYield: 1.4, turbulence: 9, smokeColor: [0.22, 0.21, 0.2, 1], absorption: 2.8,
-      emitterNoise: 0.4, fireColorMode: 'blackbody', blackbodyMin: 900, blackbodyMax: 1500, anisotropy: 0.3, scatterOctaves: 2, fireGlow: 1,
+      // x0.915: fireHeight 0.765 m on the solver -> 0.7 m
+      ...DEFAULT_FX,
+      regionSize: [2.745, 5.49, 2.745], voxelSize: 0.0549, emitterPosition: [0, 1.386, 0], emitterShape: 'disc', emitterRadius: 0.3203, fuel: 1.3,
+      smoke: 0.5227, emitSpeed: 0.3444, turbulence: 0.54, turbulenceSize: 0.6863, emitterNoise: 0.4, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5,
+      burnRate: 1.673, smokeYield: 1.4, maxTemperature: 1.63, flameShape: 0.85, flameLifetime: 0.1722, flicker: 1.254, buoyancy: 0.84, weight: 0.09,
+      vorticity: 0.2195, disturbance: 0.6, disturbanceScale: 0.2288, disturbanceInterval: 0.1913, shredding: 0.8363, cooling: 1.15,
+      smokeDissipation: 0.2613, velocityDamping: 0.05227, coolingT4: 0.3763, diffusion: 0.001891, frameTime: 0.03986, boundaries: 'open',
+      smokeColor: [0.22, 0.21, 0.2, 1], absorption: 2.8, fireColorMode: 'blackbody', blackbodyMin: 950, blackbodyMax: 1600, anisotropy: 0.3,
+      scatterOctaves: 2, fireGlow: 1, albedo: 0.35, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 3.2, fireOpacity: 0.05, blueCore: 1,
+      absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1, glowThreshold: 0.3, smoothSampling: true, sharpen: 0.25,
     },
   },
   {
     id: 'chimney', label: 'Chimney smoke',
     params: {
-      ...DEFAULT_FX, emitterPosition: [0, 0.645, 0], emitterRadius: 0.4, turbulenceSize: 1, regionSize: [4, 12, 4], voxelSize: 0.1, fuel: 0, heat: 0.45, smoke: 1.4,
-      emission: 0, emitSpeed: 5, buoyancy: 6, weight: 0.3, turbulence: 6, vorticity: 0.5, cooling: 0.25, smokeDissipation: 0.06,
-      smokeColor: [0.3, 0.3, 0.31, 1], absorption: 1.8, anisotropy: 0.25, scatterOctaves: 2, detailStrength: 0.45, detailScale: 8,
+      // x0.375: emitterDiameter 0.800 m on the solver -> 0.3 m
+      ...DEFAULT_FX,
+      regionSize: [1.5, 4.5, 1.5], voxelSize: 0.0375, emitterPosition: [0, 0.2419, 0], emitterRadius: 0.15, fuel: 0, heat: 0.45, smoke: 2.286,
+      emitSpeed: 0.3062, turbulence: 0.6, turbulenceSize: 0.375, turbulenceOnSmoke: 0.8, turbulenceDetail: 0.6, burnRate: 2.613, flameLifetime: 0.1531,
+      buoyancy: 0.6, weight: 0.03, vorticity: 0.8165, disturbance: 0.8, disturbanceScale: 0.15, disturbanceInterval: 0.2143, shredding: 0.4899,
+      cooling: 0.4082, smokeDissipation: 0.09798, velocityDamping: 0.08165, diffusion: 0.002756, frameTime: 0.02552, boundaries: 'open',
+      smokeColor: [0.3, 0.3, 0.31, 1], absorption: 1.8, emission: 0, anisotropy: 0.25, scatterOctaves: 2, detailStrength: 0.45, detailScale: 7,
+      albedo: 0.35, powder: 0.6, skyOcclusion: 0.7, absorptionColor: [0.6, 0.55, 0.5, 1], smoothSampling: true, sharpen: 0.2,
     },
   },
   {
     id: 'steam', label: 'Steam vent',
     params: {
-      ...DEFAULT_FX, emitterPosition: [0, 0.2676, 0], emitterRadius: 0.24, turbulenceSize: 0.75, regionSize: [3, 6, 3], voxelSize: 0.06, emitterShape: 'disc', fuel: 0, heat: 1.2,
-      smoke: 3, emission: 0, emitSpeed: 18, buoyancy: 8, weight: 0, turbulence: 12, cooling: 1.5, smokeDissipation: 1.1,
-      smokeColor: [0.92, 0.93, 0.95, 1], absorption: 0.9, ambient: 0.6, anisotropy: 0.55, scatterOctaves: 3, detailStrength: 0.5,
+      // x0.313: emitterDiameter 0.480 m on the solver -> 0.15 m
+      ...DEFAULT_FX,
+      regionSize: [0.9375, 1.875, 0.9375], voxelSize: 0.01875, emitterPosition: [0, 0.08363, 0], emitterShape: 'disc', emitterRadius: 0.075, fuel: 0,
+      heat: 1.4, smoke: 5.367, emitSpeed: 0.6037, turbulence: 0.72, turbulenceSize: 0.2344, turbulenceOnSmoke: 0.8, turbulenceDetail: 0.6,
+      burnRate: 2.862, flameLifetime: 0.1398, buoyancy: 0.48, weight: 0, vorticity: 0.3757, disturbance: 0.36, disturbanceScale: 0.125,
+      disturbanceInterval: 0.1957, shredding: 0.5367, cooling: 2.683, smokeDissipation: 0.3578, velocityDamping: 0.08944, diffusion: 0.0007547,
+      condensation: 14.31, dewPoint: 0.55, frameTime: 0.02329, boundaries: 'open', smokeColor: [0.92, 0.93, 0.95, 1], absorption: 0.9, emission: 0,
+      ambient: 0.6, anisotropy: 0.55, scatterOctaves: 3, detailStrength: 0.45, detailScale: 7, albedo: 0.97, powder: 0.3, skyOcclusion: 0.3,
+      smoothSampling: true, sharpen: 0.2,
     },
   },
   {
     id: 'embers', label: 'Smouldering embers',
     params: {
-      ...DEFAULT_FX, emitterPosition: [0, 0.1362, 0], emitterRadius: 0.9, turbulenceSize: 0.75, regionSize: [3, 3.6, 3], voxelSize: 0.06, emitterShape: 'disc', fuel: 0.5,
-      heat: 0.55, ignition: 0.4, emissionRange: 0.4, smoke: 0.4, smokeYield: 0.8, emitSpeed: 1.5, turbulence: 3, buoyancy: 5,
-      emitterNoise: 0.9, smokeDissipation: 0.5, fireColorMode: 'blackbody', blackbodyMin: 800, blackbodyMax: 1200, fireGlow: 1.2,
+      // x0.444: emitterDiameter 1.80 m on the solver -> 0.8 m
+      ...DEFAULT_FX,
+      regionSize: [1.333, 1.6, 1.333], voxelSize: 0.02667, emitterPosition: [0, 0.06053, 0], emitterShape: 'disc', emitterRadius: 0.4, fuel: 0.5,
+      heat: 0.55, smoke: 0.6, emitSpeed: 0.06, turbulence: 0.18, turbulenceSize: 0.3333, emitterNoise: 0.9, turbulenceOnSmoke: 0.5,
+      turbulenceDetail: 0.5, ignition: 0.4, burnRate: 2.4, smokeYield: 0.8, maxTemperature: 0.86, flameShape: 0.5, flameLifetime: 0.12, flicker: 0.9,
+      buoyancy: 0.3, weight: 0.09, vorticity: 0.315, disturbance: 0.18, disturbanceScale: 0.1111, disturbanceInterval: 0.1333, shredding: 1.2,
+      cooling: 1.65, smokeDissipation: 0.75, velocityDamping: 0.075, coolingT4: 0.54, diffusion: 0.00064, frameTime: 0.02778, boundaries: 'open',
+      emissionRange: 0.4, fireColorMode: 'blackbody', blackbodyMin: 800, blackbodyMax: 1200, fireGlow: 1.2, albedo: 0.85, powder: 0.5,
+      skyOcclusion: 0.6, fireIntensity: 2, fireOpacity: 0.05, blueCore: 1, absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1, glowThreshold: 0.3,
+      smoothSampling: true, sharpen: 0.25,
     },
   },
   {
     id: 'magic-fire', label: 'Magic fire',
     params: {
-      ...DEFAULT_FX, smoke: 0, smokeYield: 0.1, turbulence: 12, vorticity: 0.7, emitterNoise: 0.5, fireGlow: 1.6,
-      fireGradient: {
-        color: [{ t: 0, c: [0.02, 0.18, 0.12] }, { t: 0.4, c: [0.1, 0.85, 0.45] }, { t: 0.75, c: [0.35, 1, 0.9] }, { t: 1, c: [0.9, 1, 1] }],
-        alpha: [{ t: 0, a: 1 }, { t: 1, a: 1 }],
-      },
+      // x0.331: fireHeight 2.72 m on the solver -> 0.9 m
+      ...DEFAULT_FX,
+      smoke: 0, turbulence: 1.2, emitterNoise: 0.5, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5, smokeYield: 0.1, maxTemperature: 1.63,
+      flameShape: 0.85, flameLifetime: 0.1036, vorticity: 1.216, disturbance: 1, disturbanceScale: 0.08284, disturbanceInterval: 0.1151,
+      shredding: 1.39, coolingT4: 0.6254, diffusion: 0.001145, boundaries: 'open',
+      fireGradient: {color: [{t: 0, c: [0.02, 0.18, 0.12]}, {t: 0.4, c: [0.1, 0.85, 0.45]}, {t: 0.75, c: [0.35, 1, 0.9]}, {t: 1, c: [0.9, 1, 1]}], alpha: [{t: 0, a: 1}, {t: 1, a: 1}]},
+      fireGlow: 1.6, albedo: 0.7, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 3, fireOpacity: 0.05, blueCore: 1,
+      absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1, glowThreshold: 0.3, smoothSampling: true, sharpen: 0.25,
     },
   },
   {
     id: 'fireball', label: 'Fireball',
     params: {
-      ...DEFAULT_FX, emitterPosition: [0, 1.536, 0], emitterRadius: 0.84, turbulenceSize: 1.5, regionSize: [6, 10, 6], voxelSize: 0.12, fuel: 3, heat: 2.4, emitSpeed: 6,
-      emitDuration: 0.3, buoyancy: 26, expansion: 4, vorticity: 0.6, turbulence: 18, burnRate: 3, smokeYield: 1, warmup: 0, frames: 48,
-      loopBlend: 0, emitterNoise: 0.5, advection: 'maccormack', fireColorMode: 'blackbody', blackbodyMin: 1000, blackbodyMax: 2000,
-      anisotropy: 0.3, scatterOctaves: 2, fireGlow: 1.6, detailStrength: 0.25,
+      // x0.333: fireWidthMax 6.00 m on the solver -> 2 m
+      ...DEFAULT_FX,
+      regionSize: [2, 3.333, 2], voxelSize: 0.04, emitterPosition: [0, 0.512, 0], emitterRadius: 0.28, fuel: 3, heat: 2.4, smoke: 0.3464,
+      emitSpeed: 0.4157, turbulence: 2.16, turbulenceSize: 0.5, emitDuration: 0.1732, emitterNoise: 0.5, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5,
+      burnRate: 5.196, smokeYield: 1, expansion: 4, maxTemperature: 1.63, flameShape: 0.6, flameLifetime: 0.2021, blast: 20.78, buoyancy: 3.12,
+      weight: 0.18, vorticity: 1.247, disturbance: 1.2, disturbanceScale: 0.08333, disturbanceInterval: 0.1155, shredding: 1.386, cooling: 1.905,
+      smokeDissipation: 0.433, velocityDamping: 0.0866, coolingT4: 0.6235, diffusion: 0.001663, frameTime: 0.02406, warmup: 0, advection: 'maccormack',
+      boundaries: 'open', frames: 48, loopBlend: 0, fireColorMode: 'blackbody', blackbodyMin: 1100, blackbodyMax: 2000, anisotropy: 0.3,
+      scatterOctaves: 2, fireGlow: 1.6, detailStrength: 0.25, albedo: 0.35, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 3.5, fireOpacity: 0.05,
+      blueCore: 1, absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1, glowThreshold: 0.3, smoothSampling: true, sharpen: 0.25,
     },
   },
   {
     id: 'big-explosion', label: 'Large explosion',
     params: {
-      ...DEFAULT_FX, emitterPosition: [0, 1.568, 0], emitterRadius: 1.44, turbulenceSize: 3, regionSize: [12, 10, 12], voxelSize: 0.16, fuel: 4, heat: 3, emitSpeed: 3,
-      emitDuration: 0.15, buoyancy: 18, expansion: 8, vorticity: 0.8, turbulence: 30, burnRate: 5, heatRelease: 2.6, smokeYield: 1.8,
-      smokeColor: [0.18, 0.17, 0.16, 1], absorption: 3, warmup: 0, frames: 64, loopBlend: 0, emitterNoise: 0.6, advection: 'maccormack',
-      pressureSolver: 'sor', anisotropy: 0.3, scatterOctaves: 3, fireGlow: 2, detailStrength: 0.35,
+      // x1.00: fireWidthMax 12.0 m on the solver -> 12 m
+      ...DEFAULT_FX,
+      regionSize: [12, 10, 12], voxelSize: 0.16, emitterPosition: [0, 1.568, 0], emitterRadius: 1.44, fuel: 4, heat: 3, smoke: 0.2, emitSpeed: 0.48,
+      turbulence: 4.8, turbulenceSize: 3, emitDuration: 0.15, emitterNoise: 0.6, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5, burnRate: 5,
+      heatRelease: 2.6, smokeYield: 1.8, expansion: 8, maxTemperature: 1.63, flameShape: 0.55, flameLifetime: 0.35, blast: 40, buoyancy: 2.88,
+      weight: 0.24, vorticity: 1.28, disturbance: 3.2, disturbanceScale: 0.8, disturbanceInterval: 0.2, shredding: 0.8, cooling: 1.1,
+      smokeDissipation: 0.25, velocityDamping: 0.05, coolingT4: 0.36, diffusion: 0.01536, frameTime: 0.04167, warmup: 0, advection: 'maccormack',
+      pressureSolver: 'sor', boundaries: 'open', frames: 64, loopBlend: 0, smokeColor: [0.18, 0.17, 0.16, 1], absorption: 3,
+      fireColorMode: 'blackbody', blackbodyMin: 1100, blackbodyMax: 2000, anisotropy: 0.3, scatterOctaves: 3, fireGlow: 2, detailStrength: 0.35,
+      albedo: 0.3, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 4, fireOpacity: 0.05, blueCore: 1, absorptionColor: [0.425, 0.36, 0.3, 1],
+      fireSootMask: 1, glowThreshold: 0.3, smoothSampling: true, sharpen: 0.25,
     },
   },
   {
     id: 'muzzle-flash', label: 'Muzzle flash',
     params: {
-      ...DEFAULT_FX, emitterPosition: [-0.5985, 0.4, 0], emitterRadius: 0.096, turbulenceSize: 0.4, regionSize: [1.6, 0.8, 0.8], voxelSize: 0.025, fuel: 3, heat: 3,
-      emitSpeed: 0, wind: 60, emitDuration: 0.05, burnRate: 8, heatRelease: 2, smokeYield: 0.4, buoyancy: 4, expansion: 10, cooling: 5,
-      frameTime: 1 / 60, warmup: 0, frames: 12, loopBlend: 0, emitterNoise: 0.4, fireGlow: 1,
+      // x0.187: fireWidthMax 1.60 m on the solver -> 0.3 m
+      ...DEFAULT_FX,
+      regionSize: [0.3, 0.15, 0.15], voxelSize: 0.004688, emitterPosition: [-0.1122, 0.075, 0], emitterRadius: 0.018, fuel: 3, heat: 3, smoke: 0.4619,
+      emitSpeed: 0, turbulence: 0.2, turbulenceSize: 0.075, emitDuration: 0.02165, emitterNoise: 0.4, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5,
+      burnRate: 18.48, heatRelease: 2, smokeYield: 0.4, expansion: 10, maxTemperature: 1.63, flameShape: 0.7, flameLifetime: 0.02165, blast: 46.19,
+      buoyancy: 0.1, weight: 0.0375, vorticity: 0.2021, wind: 0.6495, disturbance: 0.25, disturbanceScale: 0.04687, disturbanceInterval: 0.0866,
+      shredding: 1.848, cooling: 11.55, smokeDissipation: 0.5774, velocityDamping: 0.1155, coolingT4: 4.157, diffusion: 0.00003045,
+      frameTime: 0.007217, warmup: 0, boundaries: 'open', frames: 12, loopBlend: 0, fireColorMode: 'blackbody', blackbodyMin: 1300, fireGlow: 1,
+      albedo: 0.85, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 5, fireOpacity: 0.05, blueCore: 1, absorptionColor: [0.425, 0.36, 0.3, 1],
+      fireSootMask: 1, glowThreshold: 0.3, smoothSampling: true, sharpen: 0.25,
     },
   },
   {
     id: 'dust', label: 'Dust puff',
     params: {
-      ...DEFAULT_FX, emitterPosition: [0, 0.083, 0], emitterRadius: 0.45, turbulenceSize: 0.75, regionSize: [3, 1.5, 3], voxelSize: 0.05, emitterShape: 'disc', fuel: 0, heat: 0.3,
-      smoke: 6, emission: 0, emitSpeed: 2, emitDuration: 0.15, buoyancy: 2, weight: 1.2, expansion: 6, turbulence: 10, cooling: 2,
-      smokeDissipation: 0.5, smokeColor: [0.55, 0.45, 0.34, 1], absorption: 1.6, warmup: 0, frames: 32, loopBlend: 0, detailStrength: 0.4,
+      // x1.67: smokeSpanMax 0.900 m on the solver -> 1.5 m
+      ...DEFAULT_FX,
+      regionSize: [5, 2.5, 5], voxelSize: 0.08333, emitterPosition: [0, 0.1383, 0], emitterShape: 'disc', emitterRadius: 0.75, fuel: 0, heat: 0.3,
+      smoke: 4.648, emitSpeed: 0.1291, turbulence: 0.5, turbulenceSize: 1.25, emitDuration: 0.1936, turbulenceOnSmoke: 0.8, turbulenceDetail: 0.6,
+      burnRate: 1.239, expansion: 6, flameLifetime: 0.3227, buoyancy: 0.1, weight: 0.06, vorticity: 0.1356, disturbance: 0.3, disturbanceScale: 0.6667,
+      disturbanceInterval: 0.4518, shredding: 0.2324, settling: 0.4518, groundDrag: 2.324, cooling: 1.549, smokeDissipation: 0.3873,
+      velocityDamping: 0.03873, diffusion: 0.006455, frameTime: 0.05379, warmup: 0, boundaries: 'open', loopBlend: 0,
+      smokeColor: [0.55, 0.45, 0.34, 1], absorption: 1.6, emission: 0, anisotropy: 0.4, scatterOctaves: 2, detailStrength: 0.45, detailScale: 7,
+      albedo: 0.8, powder: 0.6, skyOcclusion: 0.7, absorptionColor: [0.6, 0.55, 0.5, 1], smoothSampling: true, sharpen: 0.2,
     },
   },
   {
     id: 'blood-burst', label: 'Blood burst',
     params: {
       ...LIQUID_BASE, ...BLOOD_LOOK, emitterPosition: [0, 0.45, 0], regionSize: [0.8, 0.8, 0.8], voxelSize: 0.006, dropletSize: 0.003, sourceShape: 'sphere', sourceVolume: 0.06,
-      sourceMode: 'burst', sourceSpeed: [0.6, 3], sourcePitch: 15, sourceSpread: 150, sourceBreakup: 0.8, surfaceTension: 0.85,
+      sourceMode: 'burst', sourceSpeed: [0.6, 3], sourcePitch: 15, sourceSpread: 150, sourceBreakup: 0.8,
       floorMode: 'none', airDrag: 0.4, frames: 16, tileSize: 128, bakeDecal: false,
     },
   },
@@ -879,7 +1010,9 @@ export const FX_PRESETS: readonly Preset<FxParams>[] = [
     params: {
       ...LIQUID_BASE, ...BLOOD_LOOK, emitterPosition: [0, 0.005, 0], regionSize: [0.06, 0.12, 0.06], voxelSize: 0.001, dropletSize: 0.002, sourceShape: 'disc', sourceRadius: 0.004,
       sourceMode: 'jet', jetDuration: 0, sourceVolume: 0.003, sourceSpeed: [0.45, 0.6], sourcePitch: 90, sourceSpread: 3,
-      sourceBreakup: 0.25, surfaceTension: 0.95, gravity: 0, airDrag: 0, floorMode: 'none', warmup: 20, frames: 24, loopBlend: 8,
+      sourceBreakup: 0.25, gravity: 0, airDrag: 0,
+      // A drop of a few particles needs more cohesion than the material's (0.44 / 0.55) to hold together.
+      surfaceTension: 0.95, floorMode: 'none', warmup: 20, frames: 24, loopBlend: 8,
       tileSize: 64, tileAspect: 'tall', bakeDecal: false,
     },
   },
@@ -887,8 +1020,8 @@ export const FX_PRESETS: readonly Preset<FxParams>[] = [
     id: 'blood-splash', label: 'Blood spatter',
     params: {
       ...LIQUID_BASE, ...BLOOD_LOOK, emitterPosition: [0, 1, -0.6], regionSize: [2, 1.3, 2], voxelSize: 0.014, dropletSize: 0.005, sourceShape: 'point', sourceVolume: 0.12,
-      sourceMode: 'burst', sourceSpeed: [1, 4], sourcePitch: 10, sourceSpread: 30, sourceBreakup: 0.6, surfaceTension: 0.45,
-      floorMode: 'solid', floorBounce: 0.1, stickiness: 0.7, flow: 0.25, pinning: 1.4, edgeNoise: 0.6, soak: 0.03, view: 'side',
+      sourceMode: 'burst', sourceSpeed: [1, 4], sourcePitch: 10, sourceSpread: 30, sourceBreakup: 0.6,
+      floorMode: 'solid', floorBounce: 0.1, stickiness: 0.7, flow: 0.25, pinning: 2, edgeNoise: 0.6, soak: 0.03, view: 'side',
       bakeDecal: true, decalTileSize: 256, decalFrames: 16, decalSettle: 1.2,
     },
   },
@@ -897,7 +1030,7 @@ export const FX_PRESETS: readonly Preset<FxParams>[] = [
     params: {
       ...LIQUID_BASE, ...BLOOD_LOOK, emitterPosition: [0, 0.5, 0], regionSize: [1.2, 1, 1.2], voxelSize: 0.012, dropletSize: 0.006, sourceShape: 'disc', sourceRadius: 0.02,
       sourceMode: 'jet', jetDuration: 0.6, sourceVolume: 0.25, sourceSpeed: [0.3, 0.6], sourcePitch: -90, sourceSpread: 15,
-      sourceBreakup: 0.3, stickiness: 0.3, floorMode: 'solid', flow: 0.6, pinning: 1.6, edgeNoise: 0.6, soak: 0.01, frames: 24,
+      sourceBreakup: 0.3, stickiness: 0.3, floorMode: 'solid', flow: 0.6, pinning: 2, edgeNoise: 0.6, soak: 0.01, frames: 24,
       bakeDecal: true, decalTileSize: 256, decalFrames: 16, decalSettle: 2,
     },
   },
@@ -914,8 +1047,27 @@ export const FX_PRESETS: readonly Preset<FxParams>[] = [
     params: {
       ...LIQUID_BASE, ...WATER_LOOK, emitterPosition: [0, 0.005, 0], regionSize: [0.06, 0.12, 0.06], voxelSize: 0.001, dropletSize: 0.002, sourceShape: 'disc', sourceRadius: 0.004,
       sourceMode: 'jet', jetDuration: 0, sourceVolume: 0.003, sourceSpeed: [0.45, 0.6], sourcePitch: 90, sourceSpread: 3,
-      sourceBreakup: 0.25, surfaceTension: 0.95, gravity: 0, airDrag: 0, floorMode: 'none', warmup: 20, frames: 24, loopBlend: 8,
+      sourceBreakup: 0.25, gravity: 0, airDrag: 0,
+      // A drop of a few particles needs more cohesion than the material's (0.44 / 0.55) to hold together.
+      surfaceTension: 0.95, floorMode: 'none', warmup: 20, frames: 24, loopBlend: 8,
       tileSize: 64, tileAspect: 'tall', foam: 0.3, bakeDecal: false,
+    },
+  },
+  {
+    id: 'water-puddle', label: 'Water puddle',
+    params: {
+      // Rain water collecting in a dip: poured slowly onto soil, where it runs out to its edge hold (about a
+      // millimetre: water barely holds on earth) and soaks a little into a darker damp rim. The decal is the bake.
+      ...LIQUID_BASE, ...WATER_LOOK, emitterPosition: [0, 0.35, 0], regionSize: [1.6, 0.6, 1.6], voxelSize: 0.008, dropletSize: 0.008,
+      // A wide, broken-up pour, so the drops land in clumps that run together into an uneven puddle rather
+      // than spreading from one point into a disc.
+      sourceShape: 'disc', sourceRadius: 0.3, sourceMode: 'jet', jetDuration: 1, sourceVolume: 1, sourceSpeed: [0.4, 1],
+      sourcePitch: -70, sourceSpread: 40, sourceBreakup: 0.85, floorMode: 'solid', floorBounce: 0.05, stickiness: 0.8,
+      // Rain on a dirt trail is muddy: silt colours it brown and takes the light within a few millimetres, so the
+      // puddle reads as dark, glossy water rather than a damp shadow.
+      liquidColor: [0.2, 0.18, 0.15, 1], liquidTint: [0.45, 0.4, 0.33, 1], liquidAbsorption: 90, liquidRoughness: 0.03, foam: 0,
+      flow: 0.6, pinning: 1, edgeNoise: 1, soak: 0.05, frames: 8, tileSize: 64,
+      bakeDecal: true, decalTileSize: 512, decalFrames: 8, decalSettle: 3,
     },
   },
   {
@@ -931,53 +1083,15 @@ export const FX_PRESETS: readonly Preset<FxParams>[] = [
 ];
 for (const preset of FX_PRESETS) (preset as Preset<FxParams>).description ??= PRESET_DESCRIPTIONS[preset.id] ?? preset.label;
 
-/**
- * The realism models (realism.ts) layered over each preset: open air, the flame sheet, radiative
- * cooling, disturbance and shredding for fires; condensation for steam; the blast for explosions;
- * settling and ground drag for dust; diffusion, albedo, powder and sky occlusion for every smoke. The
- * plain Campfire stays the solver's reference (the determinism tests run it).
- */
-// From the research pass (docs/creator/fx.md, References): flames nearly transparent (only soot hides
-// what is behind them) and brighter than the smoke; chromatic, warm smoke extinction (Pyro's suggested
-// absorption colour); fire dimmed inside dense soot; glow only from the hot core; smooth tricubic
-// sampling with a little contrast; turbulence on the smoke as well as the hot gas, with a finer octave.
-const FIRE_REALISM: Partial<FxParams> = {
-  boundaries: 'open', flameShape: 0.85, flameLifetime: 0.18, coolingT4: 0.12, disturbance: 10, disturbanceScale: 0.25,
-  disturbanceInterval: 0.2, shredding: 0.8, diffusion: 0.01, albedo: 0.7, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 3.2,
-  fireOpacity: 0.05, absorptionColor: [0.425, 0.36, 0.3, 1], fireSootMask: 1, glowThreshold: 0.3, blueCore: 1,
-  smoothSampling: true, sharpen: 0.25, turbulenceOnSmoke: 0.5, turbulenceDetail: 0.5,
-};
-const SMOKE_REALISM: Partial<FxParams> = {
-  boundaries: 'open', disturbance: 6, disturbanceScale: 0.4, disturbanceInterval: 0.35, shredding: 0.3, diffusion: 0.02,
-  powder: 0.6, skyOcclusion: 0.7, detailStrength: 0.45, detailScale: 7,
-  absorptionColor: [0.6, 0.55, 0.5, 1], smoothSampling: true, sharpen: 0.2, turbulenceOnSmoke: 0.8, turbulenceDetail: 0.6,
-};
-const REALISM: Record<string, Partial<FxParams>> = {
-  'campfire-hq': { ...FIRE_REALISM, flicker: 1.5, albedo: 0.55 },
-  torch: { ...FIRE_REALISM, flicker: 3, flameLifetime: 0.12, shredding: 1.2 },
-  candle: { ...FIRE_REALISM, flicker: 5, flameShape: 0.95, flameLifetime: 0.1, disturbance: 3, disturbanceScale: 0.04, shredding: 1.4, fireIntensity: 3 },
-  bonfire: { ...FIRE_REALISM, flicker: 1, disturbance: 16, disturbanceScale: 0.5, albedo: 0.45, fireIntensity: 3 },
-  brazier: { ...FIRE_REALISM, flicker: 1.2, albedo: 0.35 },
-  'gas-burner': { ...FIRE_REALISM, flameShape: 1, flameLifetime: 0.08, coolingT4: 0.3, disturbance: 4, disturbanceScale: 0.06, shredding: 0.5, fireIntensity: 2 },
-  embers: { ...FIRE_REALISM, flameShape: 0.5, flicker: 0.6, disturbance: 3, fireIntensity: 2 },
-  'magic-fire': { ...FIRE_REALISM, fireIntensity: 3 },
-  'smoke-plume': { ...SMOKE_REALISM, albedo: 0.85 },
-  chimney: { ...SMOKE_REALISM, albedo: 0.4, disturbance: 8 },
-  steam: { ...SMOKE_REALISM, condensation: 8, dewPoint: 0.55, albedo: 0.97, powder: 0.3, skyOcclusion: 0.3, heat: 1.4, smokeDissipation: 0.2, absorptionColor: [1, 1, 1, 1] },
-  explosion: { ...FIRE_REALISM, blast: 25, flameShape: 0.6, flameLifetime: 0.3, albedo: 0.4, fireIntensity: 3.5 },
-  fireball: { ...FIRE_REALISM, blast: 12, flameShape: 0.6, flameLifetime: 0.35, albedo: 0.45, fireIntensity: 3.5 },
-  'big-explosion': { ...FIRE_REALISM, blast: 40, flameShape: 0.55, flameLifetime: 0.35, albedo: 0.3, disturbance: 20, disturbanceScale: 0.8, fireIntensity: 4 },
-  'muzzle-flash': { ...FIRE_REALISM, blast: 20, flameShape: 0.7, flameLifetime: 0.05, coolingT4: 0.6, fireIntensity: 5 },
-  dust: { ...SMOKE_REALISM, settling: 0.35, groundDrag: 3, albedo: 0.8, anisotropy: 0.4, scatterOctaves: 2 },
-};
-for (const preset of FX_PRESETS) {
-  const p = Object.assign(preset.params as FxParams, REALISM[preset.id] ?? {});
-  // Nguyen et al. 2002: burning heats toward a maximum temperature -- set just above the top of the
-  // fire's colour range, so the core reaches white-hot and no further -- and the radiative T^4 term is
-  // measured over that range, so it is scaled to keep the same strength.
-  if (REALISM[preset.id] && p.fuel > 0 && p.emission > 0) {
-    p.maxTemperature = Math.round((p.ignition + p.emissionRange * 1.15) * 100) / 100;
-    p.coolingT4 = Math.round((p.coolingT4 ?? 0) * 3 * 1000) / 1000;
-  }
-}
+// The realism models (realism.ts) are in every preset but the plain Campfire, which stays the solver's
+// reference (the determinism tests run it): open air, the flame sheet, radiative cooling (Nguyen et al.
+// 2002: burning heats toward a maximum temperature just above the top of the fire's colour range), disturbance
+// and shredding for fires; condensation for steam; the blast for explosions; settling and ground drag for dust;
+// diffusion, albedo, powder and sky occlusion for every smoke. From the research pass (docs/creator/fx.md,
+// References): flames nearly transparent (only soot hides what is behind them) and brighter than the smoke;
+// chromatic, warm smoke extinction (Pyro's suggested absorption colour); fire dimmed inside dense soot; glow only
+// from the hot core; smooth tricubic sampling with a little contrast; turbulence on the smoke as well as the hot
+// gas, with a finer octave. The gas presets' values were generated (build/probe/scale/generate.ts) from the
+// format-2 presets scaled by Froude similarity to their real-world sizes, with the standards of
+// docs/creator/fx.md (Real-world scale) applied.
 

@@ -4,11 +4,15 @@ Simulate fire, smoke or an explosion on a voxel grid -- or a liquid: a splash of
 a pour that pools -- watch it live in 3D, and export a tileset flipbook a particle system plays. A liquid
 also bakes what it leaves on the floor as an animated decal.
 
+![The FX Creator on the Campfire preset: the scene on the left, the live viewport, the parameters on the right](../media/creator-fx.jpg)
+
 The **Viewport** runs the simulation continuously and draws it as a real engine volume, lit by the
 scene's sun and hidden behind the ground like anything else in a game. Every parameter change reaches
 the next simulation step, so there is nothing to press to see it; only the region size, **Voxel size**
 and **Seed** start the simulation over. Drag to orbit, right-drag to pan (the mouse is captured while you
 drag), scroll to move closer. The move / rotate / scale buttons top-right of the viewport are the editor's.
+
+![The Campfire running live in the viewport, on the Rocky trail floor](../media/fx-campfire.gif)
 
 The **left** panel is what is in the scene: what is selected, the bodies and how the viewport renders. The light on the stage -- the sun (the one light the effect is shaded with, in the
 viewport and in the bake), sky, exposure, wind and fire light -- is the viewport's **Stage** menu, as in the
@@ -29,8 +33,10 @@ flipbook** in the toolbar writes the baked files.
 The solver is an Eulerian gas solver: semi-Lagrangian advection, a Jacobi pressure projection that keeps
 the flow incompressible, vorticity confinement to restore the swirls the grid smooths out, and a
 combustion model where fuel above the ignition temperature burns into heat and smoke (Stam 1999;
-Fedkiw, Stam and Jensen 2001; Nguyen, Fedkiw and Jensen 2002). Where things are and how big they are is in
-metres; the solver's own rates (speeds, the burn) are per voxel and per second.
+Fedkiw, Stam and Jensen 2001; Nguyen, Fedkiw and Jensen 2002). Every value is in SI units: sizes and
+places in metres, speeds in m/s, forces in m/s², rates per second. The voxel size is only the detail: a
+finer grid never changes how big the effect is or how fast it moves. Every preset is the size of the real
+thing it is -- see [Real-world scale](#real-world-scale).
 
 What the viewport's gizmos set -- where the emitter is, its size and aim, the region -- has no field in the
 panels: see [Select](#select). Their rows below say what each one is.
@@ -40,14 +46,19 @@ panels: see [Select](#select). Their rows below say what each one is.
 The simulation region: the box the effect lives in -- **room** around it, not its scale. The emitter, its
 radius and the turbulence are in metres, so growing a face gives an explosion space to bloom past where it
 stopped instead of a bigger explosion; the emitter keeps its place in the world while you drag. A liquid's
-detail follows its droplets, so a bigger region never blurs its splash or its pools. Select **Simulation
+detail follows its droplets, so a bigger region never blurs its splash or its pools. For a liquid the region
+frames only the drops in flight -- what the sprite shows: a drop that leaves it keeps flying and lands, and
+the pool on the floor covers everywhere the liquid can reach, so its decal is never cut at the region's walls.
+Size the region for the sprite; the pool comes out the same. Select **Simulation
 region** in the viewport to move it (**W**) or drag the square handles on its faces to resize it (Alt
 resizes about the centre, Ctrl snaps); see [Region](#region).
+
+![The simulation region selected: drag a face handle to give the effect more room](../media/fx-region.jpg)
 
 | Field | Meaning |
 |---|---|
 | **Medium** | Gas (smoke and fire, the voxel solver below) or Liquid (particles, see [Liquids](#liquids)). Each shows its own sections. Switching starts from that medium's first preset: Blood spatter for a liquid, the Campfire for a gas. |
-| **Voxel size** | A gas's metres per voxel: the detail. Halving it gives eight times the voxels. The emitter's speed is in voxels per second, so a finer grid also makes the same speed slower in the world. Past 2.5 million voxels the size is raised to fit: the toolbar's count turns amber and shows the grid actually used, and voxel-sized detail grows with it -- shrink the region or raise the size yourself. The CPU solver is practical up to about 250 000 voxels. A liquid has none: its voxels follow its **Droplet size**. |
+| **Voxel size** | A gas's metres per voxel: the detail. Halving it gives eight times the voxels; speeds and forces are in metres, so the effect moves the same at any voxel size. Past 2.5 million voxels the size is raised to fit: the toolbar's count turns amber and shows the grid actually used, and voxel-sized detail grows with it -- shrink the region or raise the size yourself. The CPU solver is practical up to about 250 000 voxels. A liquid has none: its voxels follow its **Droplet size**. |
 
 ## Emitter
 
@@ -60,9 +71,9 @@ Where fuel, heat and smoke enter the domain.
 | **Position** | Where the emitter is, in metres: across and through from the centre of the region's floor, and its height above the floor. The move gizmo on the selected emitter sets it. |
 | **Fuel** | Fuel the emitter holds its volume at. |
 | **Heat** | Temperature the emitter holds its volume at; above **Ignition** the fuel burns. |
-| **Smoke** | Smoke added directly, before any burning. |
-| **Speed** | Upward velocity the emitter imposes. |
-| **Turbulence** | Noise velocity stirred into hot gas. |
+| **Smoke** | Smoke added directly, before any burning, per second. |
+| **Speed** | Upward velocity the emitter imposes, m/s. |
+| **Turbulence** | Noise stirred into hot gas: an acceleration, m/s². It only stirs: the push it adds over the whole gas is taken back out every step, so a flame in still air sways but never drifts off to one side. |
 | **Turbulence size** | The size of the turbulence's eddies, in metres. The noise is anchored on the emitter, so it stays the same under the flame however the region grows. |
 | **Turbulence on smoke** | How much the turbulence also stirs smoke that has cooled, not only hot gas. Missing motion in the smoke is what most often makes a simulation look fake. |
 | **Turbulence detail** | A second, finer turbulence octave (2.7 times the frequency), relative to the first. |
@@ -76,14 +87,14 @@ How fuel burns once it is hot enough.
 | Field | Meaning |
 |---|---|
 | **Ignition** | Temperature above which fuel burns. |
-| **Burn rate** | Fuel burned per second once ignited. |
+| **Burn rate** | Fuel burned per second once ignited. Small fires burn faster: everything per second goes as one over the square root of the size (see [Real-world scale](#real-world-scale)). |
 | **Heat release** | Temperature released per unit of fuel burned. |
 | **Smoke yield** | Smoke left per unit of fuel burned. |
 | **Expansion** | Burning gas expands: the pressure solve is given that much outward flow per unit of fuel burned, so a fireball blooms outward instead of only rising. |
 | **Flame shape** | How much the fire is the thin sheet where fuel is burning right now (the flame field, as in Houdini Pyro and EmberGen) rather than all hot gas. 0 is the soft glowing blob; toward 1 flames become thin, licking sheets. |
 | **Flame lifetime** | How long the flame field lasts after fuel at a point stops burning. Shorter gives sharper, shorter tips. |
 | **Flicker** | Fuel pulses per second: a candle's or torch's rhythm. 0 is steady. |
-| **Blast** | A pressure pulse at the emitter for the first tenth of a second: an explosion's shock, blooming the fireball outward. |
+| **Blast** | An outward push at the emitter for the first tenth of a second, per second: an explosion's shock, blooming the fireball outward. |
 | **Max temperature** | Burning gas heats toward this temperature instead of without limit (Nguyen et al. 2002), so the core reaches white-hot and stays there. Radiative cooling is then measured over the range from the ambient temperature to it. 0 is off. |
 | **Ambient temperature** | The surrounding air's temperature: buoyancy lifts gas by how much hotter than it the gas is. 0 is off. |
 
@@ -93,16 +104,16 @@ What moves the gas besides its own momentum.
 
 | Field | Meaning |
 |---|---|
-| **Buoyancy** | Hot gas rises. |
-| **Smoke weight** | Smoke sinks. |
-| **Vorticity** | Confinement strength: higher keeps more curl and detail. |
-| **Wind** | A steady push along +X. |
-| **Disturbance** | Random velocity kicks in hot or smoky gas, one per block, re-seeded every interval. Breaks smooth sheets into tongues and billows, the detail real fire and smoke have and a grid smooths away. |
+| **Buoyancy** | Hot gas rises: m/s² per unit of temperature. The same at every size, as gravity is. |
+| **Smoke weight** | Smoke sinks: m/s² per unit of density. |
+| **Vorticity** | Confinement strength, per second (Fedkiw's epsilon): higher keeps more curl and detail. |
+| **Wind** | A steady push along +X, m/s. |
+| **Disturbance** | Random velocity kicks in hot or smoky gas (m/s²), one per block, re-seeded every interval. Breaks smooth sheets into tongues and billows, the detail real fire and smoke have and a grid smooths away. Like the turbulence, it only stirs: its net push is taken back out. |
 | **Disturbance size** | The size of those blocks, in metres. |
 | **Disturbance interval** | Seconds between re-seeds: shorter is busier. |
-| **Shredding** | Stretches the flow along hot edges, pulling flames and wisps into thin licks. |
+| **Shredding** | Stretches the flow along hot edges, pulling flames and wisps into thin licks. Per second. It stretches the flow's own detail (the velocity less its neighbours' average) and its net push is taken back out each step, so it shapes the flames without growing a lean that would slide the whole effect sideways. |
 | **Settling** | Dust falling through the air at its own speed, in metres per second. |
-| **Ground drag** | Slows gas in the bottom voxels, so ground-level dust and smoke spread and hug the floor. |
+| **Ground drag** | Slows gas in the bottom voxels, per second, so ground-level dust and smoke spread and hug the floor. |
 
 ## Dissipation
 
@@ -110,11 +121,11 @@ How heat, smoke and motion fade.
 
 | Field | Meaning |
 |---|---|
-| **Cooling** | How fast temperature falls. Shorter flames cool faster. |
-| **Smoke fade** | How fast smoke thins out. |
-| **Velocity damping** | How fast motion settles. |
-| **Radiative cooling** | Hot gas also cools as T⁴, so the hottest parts cool fastest: short, sharp, ragged flame tips. |
-| **Diffusion** | Smoke and heat spreading into the air around them, so smoke thins as it spreads rather than only fading. |
+| **Cooling** | How fast temperature falls, per second. Shorter flames cool faster. |
+| **Smoke fade** | How fast smoke thins out, per second. |
+| **Velocity damping** | How fast motion settles, per second. |
+| **Radiative cooling** | Hot gas also cools as T⁴, so the hottest parts cool fastest: short, sharp, ragged flame tips. Per second. |
+| **Diffusion** | Smoke and heat spreading into the air around them, m²/s, so smoke thins as it spreads rather than only fading. |
 | **Condensation** | Steam: the emitter breathes out invisible vapour, which turns into visible droplets where it cools below the **Dew point** and evaporates again above it. Steam then appears a little above the vent and vanishes as it mixes. 0 is off. |
 | **Dew point** | The temperature below which the vapour becomes visible. |
 
@@ -124,14 +135,22 @@ A liquid is particles, not a grid: drops that push apart where they crowd and pu
 surface (Clavet, Beaudoin and Poulin 2005, double density relaxation), so a thrown sheet tears into
 threads and the threads bead into drops by themselves. What lands on a solid floor becomes a **film**, a
 height field that flows out, stops at a ragged edge and soaks in; that film is the [floor decal](#outputs).
+The region is not a wall for either: the drops live wherever their release can reach -- worked out from the
+release itself, how far each drop is thrown, bounces and could spread -- and only those inside the region
+are drawn, in the viewport and in the sprite. A splash thrown above the region falls back into it.
 The live preview draws the liquid as the engine's volume, surface-shaded, and the film as a decal on the
 ground. A one-shot (a burst, or a jet with a duration) plays out, holds for a moment and replays.
 Everything in the liquid sections is in metres and seconds, and the same parameters always bake the same
 result.
 
+![Blood spatter at half speed: the drops fly, land and leave separate little pools, the floor decal](../media/fx-blood-spatter.gif)
+
 With **GPU solver** on (the WebGPU backend), the preview runs effects of 600 drops or more on the GPU,
 many times faster: the water splash's 4,700 drops take about 20 ms a frame there against 400 ms on the
-CPU. Smaller effects stay on the CPU, which is cheaper for a few hundred drops; the readout says which
+CPU. The floor film runs there too: a pool is stamped the frame its drops land, flows and soaks on the GPU, and
+is drawn straight into the decal's textures. It runs the bake's flow (the same backward-Euler step, edge holds and
+sweep count; its sweeps visit the cells line by line so the GPU can run them in parallel), so a spatter's drops leave
+the same separate little pools in the viewport as in the baked decal. Smaller effects stay on the CPU, which is cheaper for a few hundred drops; the readout says which
 ran. The GPU adds up each drop's pushes from its neighbours all at once rather than pair by pair, so its
 drops are not the bake's drop for drop. Bakes always run the CPU solver, so every machine bakes the same
 tileset.
@@ -140,6 +159,8 @@ tileset.
 
 Where the liquid comes from and how it leaves. The emitter marker in the viewport is the source: its
 gizmos set where it is, its radius and its aim (see [Select](#select)).
+
+![Water splash at half speed, a ring source throwing the crown and its central jet: into a water surface (left, Floor: Water surface) and onto solid ground (right, Floor: Solid), where it lands as a wet patch](../media/fx-water-splash.gif)
 
 | Field | Meaning |
 |---|---|
@@ -162,9 +183,9 @@ What the liquid is.
 
 | Field | Meaning |
 |---|---|
-| **Droplet size** | The spacing of the particles at rest, metres: the smallest drop there can be, and the liquid's definition. The surface is drawn at voxels of about this size (in the viewport by **Quality**, in the bake at three quarters of it) over where the drops are, and the floor film's cells are half of it -- whatever the region's size. Halving it gives eight times the particles. Above 60 000 particles the size is raised to fit. |
-| **Viscosity** | Thick liquids hold together and smear; 0 is water. |
-| **Surface tension** | How hard a free surface pulls together. Low sprays into mist; high holds a blob together; between, sheets break into threads and drops. |
+| **Droplet size** | The spacing of the particles at rest, metres: the smallest drop there can be, and the liquid's definition. The surface is drawn at voxels of about this size (in the viewport by **Quality**, in the bake at three quarters of it) over where the drops are, and the floor film's cells are half of it -- whatever the region's size. Halving it gives eight times the particles. Past 60 000 particles the size stays as authored and each drop carries more liquid, so a big pour lands as bigger splashes (the airborne drops are fewer than the liquid they stand for). |
+| **Viscosity** | Thick liquids hold together and smear; 0 is water. On a log scale of the real viscosity: log10(μ / water's) / 3, so blood 0.18, mercury 0.06, motor oil 0.77, honey 1. |
+| **Surface tension** | How hard a free surface pulls together. Low sprays into mist; high holds a blob together; between, sheets break into threads and drops. 0.55 is water's (72 mN/m), in proportion: blood 0.44, oil 0.23, mercury 1. A drop of only a few particles needs more to hold together than the real value. |
 | **Stickiness** | The share of drops that stay where they first land on a solid floor instead of bouncing. |
 | **Gravity** | Downward, m/s². 0 for a drop seen on its own. |
 | **Air drag** | Per second: the air slowing the drops. The stage's wind, when on, is what the air moves at. |
@@ -188,11 +209,13 @@ What the region's floor does with the liquid that reaches it.
 
 How the liquid is shaded, in the viewport and in the baked tiles.
 
+![Mercury splash at half speed: a liquid metal (Metallic 1) that beads and mirrors the sky](../media/fx-mercury-splash.gif)
+
 | Field | Meaning |
 |---|---|
 | **Liquid colour** | What the liquid scatters: its body colour where it is thick. |
 | **Tint** | The colour light keeps after one absorption length of liquid. Blood keeps red, water a little blue. |
-| **Absorption** | Per metre: how quickly the liquid takes the light through it. Blood about 900 (a millimetre is opaque, so a pool hides the floor), water a few. |
+| **Absorption** | Per metre: how quickly the liquid takes the light through it. Blood about 900 (a millimetre is nearly opaque, so a pool hides the floor), water a few. |
 | **Roughness** | The surface's roughness: 0 is a mirror. Also the wet film's on the decal. |
 | **Metallic** | 0 for a liquid, 1 for a liquid metal (mercury, molten gold). A metal is opaque and has no body colour: **Liquid colour** becomes the colour of its reflections, of the sun's highlight and of the sky it mirrors, and its decal is metallic too. In between is a blend of the two. |
 | **Specular** | Strength of the sun's highlight and the sky's reflection. |
@@ -209,7 +232,7 @@ Time stepping and the pressure solve.
 | **Substeps** | Solver steps per frame. More is more stable at high speeds. A liquid takes more on its own when it has to: no drop may cross more than a fraction of its neighbourhood in one step. |
 | **Pressure iterations** | Iterations of the pressure solve per step. More keeps the flow closer to incompressible. |
 | **Pressure solver** | Jacobi, or red-black SOR: Gauss-Seidel with over-relaxation, warm-started from the previous step's pressure. SOR reaches the same incompressibility in far fewer iterations. The live preview always uses it. |
-| **Boundaries** | Closed walls on every side but the top, or open air: gas leaves through the sides instead of piling against invisible glass. |
+| **Boundaries** | Closed walls on every side but the top, or open air: gas leaves through the sides instead of piling against invisible glass. The air that comes in through an open side is still, as the air around a real fire is, so no wind builds up through the box. |
 | **Advection** | How the flow carries the smoke, heat and fuel. Semi-Lagrangian is plain and slightly blurry; MacCormack measures that blur with a backward pass and corrects it, keeping much sharper detail at the cost of two extra passes. |
 | **Seed** | The turbulence's seed. |
 
@@ -221,7 +244,7 @@ How the volume is shaded, in the viewport and in the baked tiles.
 |---|---|
 | **Smoke colour** | Albedo of the smoke. |
 | **Density** | Extinction per unit of smoke: how opaque it is. |
-| **Fire colour from** | The gradient below, or black-body radiation: the hue of Planck's spectrum at each temperature, seen by an eye adapted to the hottest (the way Nguyen et al. render fire), with brightness rising as T⁴, so the hottest core reads white, the body orange and the cool edges a deep, dim red. |
+| **Fire colour from** | The gradient below, or black-body radiation: the hue of Planck's spectrum at each temperature, seen by an eye adapted to a white a quarter hotter than the hottest flame (the way Nguyen et al. render fire, but the eye adapts to the scene around a fire too, so it never takes the flame itself for white), with brightness rising as T⁴, so the hottest core reads pale yellow and white once bright, the body orange and the cool edges a deep, dim red. |
 | **Fire colour** | Colour by temperature, from ignition (left) to the hottest (right). |
 | **Coolest flame** / **Hottest flame** | Black-body temperatures, in kelvin, at ignition and at the top of the emission range. Wood fires run roughly 900 to 1500 K, gas burners hotter. |
 | **Emission** | Brightness of the fire. |
@@ -237,7 +260,7 @@ How the volume is shaded, in the viewport and in the baked tiles.
 | **Powder** | Dark edges on dense smoke facing the light (the Beer-Powder effect of real clouds and billows). |
 | **Sky occlusion** | How much the smoke above shades the sky light below it, darkening the undersides of plumes. |
 | **Flame opacity** | How much the fire hides what is behind it. Real flames are nearly transparent (about 0.05): they give light, and only soot and smoke absorb it. It never changes how bright the fire is. |
-| **Blue core** | A blue emission in the reaction zone, where unburnt fuel is above ignition and burning: the base of a flame, before soot forms. It fades where the gas is white-hot and behind dense smoke. |
+| **Blue core** | A faint blue where fresh fuel first burns, before soot forms: the foot of a flame. The zone is the first 30 % of a clean fuel's burn and thinner the sootier the fuel (**Smoke yield**); at 1 its blue is about a tenth of the fire's brightness, so it shows at the dim edges of the foot and never tints a white-hot core, and dense smoke hides it. A candle shows a hint of blue at its foot, a sooty torch or a wood fire next to none. 0 is off. |
 | **Blue core colour** | Its colour. |
 | **Soot mask** | Fire inside dense smoke is dimmed by it, so the glow shows through the gaps in the soot. |
 | **Glow threshold** | Only fire hotter than this share of the emission range lights the smoke around it (**Fire glow**), so the glow comes from the core rather than every warm wisp. |
@@ -272,13 +295,15 @@ The simulation region: the box the effect lives in, and where it stands. Both ar
 
 | Field | Meaning |
 |---|---|
-| **Region size** | Width, height and depth of the box, in metres: its face handles set it. Part of the effect: the bake frames it, so a bigger box leaves more room around the effect in each tile. A gas gets more voxels at the same **Voxel size**, so it costs more; a liquid costs only where its drops are. |
+| **Region size** | Width, height and depth of the box, in metres: its face handles set it. Part of the effect: the bake frames it, so a bigger box leaves more room around the effect in each tile. A gas gets more voxels at the same **Voxel size**, so it costs more; a liquid costs only where its drops are. A liquid's pool and its floor decal do not depend on it: the drops fly on past its walls and land. |
 | **Region position** | The centre of the region's floor, in metres: the move gizmo sets it, and a face handle moves it so the opposite face stays put. Preview only, as a bake frames the region itself. |
 
 ## Stage
 
 The **Stage** menu, top-right of the viewport beside the move / rotate / scale buttons: the stage the effect
 is previewed on, laid out as the Foliage Creator's. None of it reaches the bake except the sun's direction.
+
+![The Stage menu: what the viewport shows, the sun and light, the floor material and the fire light](../media/fx-stage.jpg)
 
 **Show** — what the viewport draws:
 
@@ -374,9 +399,69 @@ campfire (plain and realistic), torch, smoke plume, explosion burst, candle, bon
 chimney smoke, steam vent, smouldering embers, magic fire, fireball, large explosion, muzzle flash and a
 dust puff; and the liquids: a blood burst (the sprite of a hit), looping blood droplets (for
 velocity-aligned particles), a blood spatter and a blood pool (both with their floor decals), a water
-splash (a crown and its jet, sinking into a water surface), looping water droplets, and a mercury splash
+splash (a crown and its jet, sinking into a water surface), looping water droplets, a water puddle (rain
+water poured onto the ground and settling into an uneven puddle about a metre across, for its floor decal),
+and a mercury splash
 (a foot coming down in mercury: beads thrown low that roll and stay beaded, with surface maps and its
-decal). Each comes with its own region size and voxel size for its scale.
+decal). Each is the size of the real thing, in a region with room around it and a voxel size for its
+detail: see [Real-world scale](#real-world-scale). Section presets on the **Emitter**, **Combustion**,
+**Forces** and **Dissipation** sections are written for the campfire and scaled to the effect they are
+applied to, so a "Lively" candle moves like a lively candle.
+
+![Six of the effect presets, each at its real size: torch, candle, gas burner, steam vent, magic fire and smoke plume](../media/fx-presets.jpg)
+
+## Real-world scale
+
+The presets are the real things, measured: a gas effect's flame height (or its source, or its fireball)
+was measured on the solver and the preset scaled to the real size by Froude similarity -- the scaling of
+flows driven by gravity, which keeps an effect looking the same at any size: lengths by s, speeds by √s,
+time and the frame time by √s, rates by 1/√s, forces unchanged. The grid keeps its voxel count, so the
+cost stays the same, and small flames move and flicker faster, as real ones do (a fire's puffing frequency
+goes as 1.5 / √D Hz for a base D metres across). Liquids were already life-size.
+
+| Preset | The real thing |
+|---|---|
+| Candle | a 4 cm flame |
+| Gas burner | a 10 cm blue flame on a burner port |
+| Torch | a 45 cm flame on a 10 cm head (about 10 kW) |
+| Campfire, realistic campfire, magic fire | 0.9 m flames over a 0.6 m bed (about 100 kW) |
+| Brazier | 0.7 m flames over a 0.6 m bowl |
+| Bonfire | 2.4 m flames, about 2 m across (about 1.5 MW): a ball of fuel, so the flames stand up instead of running out along the floor |
+| Smouldering embers | a 0.8 m bed |
+| Smoke plume, chimney smoke, steam vent | a 0.6 m smouldering source, a 0.3 m flue, a 15 cm vent |
+| Dust puff | 1.5 m across |
+| Fireball, explosion burst, large explosion | fireballs 2 m, 4 m and 12 m across (about 0.3 kg and 9 kg of fuel) |
+| Muzzle flash | 30 cm long |
+
+Flame heights follow Heskestad's correlation, L = 0.235 Q^⅖ − 1.02 D (Q the heat release in kW, D the base
+in metres); fireball diameters the CCPS correlation, D = 5.8 M^⅓ (M the fuel in kg).
+
+The other values follow one table each, so the same material is the same value everywhere:
+
+| Fire | Black-body range |
+|---|---|
+| Wood (campfire, torch, brazier, bonfire) | 950 to 1600 K |
+| Candle | 1300 to 1800 K |
+| Embers | 800 to 1200 K |
+| Explosions and fireballs | 1100 to 2000 K |
+| Gas flame | not a black body: blue from CH and C2 emission (the gas burner's gradient); the flame is 1900 to 2200 K |
+
+| Smoke | Albedo |
+|---|---|
+| White smouldering smoke, smoke plume, embers | 0.85 |
+| Flaming wood | 0.5 to 0.55 |
+| Sooty (torch, brazier, chimney, explosions) | 0.3 to 0.35 |
+| Steam | 0.97 |
+| Dust | 0.8 |
+
+| Liquid | Viscosity (mPa·s) | Surface tension (mN/m) | Density (kg/m³) | Sliders |
+|---|---|---|---|---|
+| Water | 1.0 | 72 | 1000 | viscosity 0, surface tension 0.55 |
+| Blood | 3.5 to 4 | 58 | 1060 | 0.18, 0.44 |
+| Mercury | 1.5 | 485 | 13 534 | 0.06, 1 |
+| Motor oil | about 200 | 30 | 870 | 0.77, 0.23 |
+
+A pool's **Edge hold** is about its capillary length: blood about 2 mm, mercury about 4 mm.
 
 ## Bake
 
@@ -385,6 +470,8 @@ start (warm-up, capture, loop blend), so the live preview keeps going beside it;
 in the toolbar writes the files. The **Output** menu picks which baked atlas the player and the atlas view show. **Bake presets**
 set up the whole tab: Game-ready (8 × 8 frames of 128 px), Hero (8 × 8 of 256 px, relightable), Mobile
 (4 × 4 of 64 px), Explosion one-shot and Liquid splash (24 frames from the release, and the floor decal).
+
+![The Bake tab after baking: the Campfire's colour flipbook (left) and a blood spatter's floor decal (right), each with its player and atlas](../media/fx-bake.jpg)
 
 ### Flipbook
 
@@ -427,6 +514,24 @@ darkens the ground, so its colour is near black and its albedo share small, whil
 whole: wet ground. In the editor a synced liquid brings two decal materials, the settled frame and the
 animated atlases (give the decal the block's flipbook).
 
+### In the engine
+
+The game never runs the simulation: it plays the bake. A fire becomes a flipbook on a camera-facing
+sprite (an **Animated Sprite**, or a particle system's **Render** module, at the sidecar's columns, rows and
+FPS); a liquid's floor becomes a [Decal](../editor/node-inspector.md#decal) playing its decal flipbook
+once and holding the settled pool. The Valley example's flames, blood and splashes are made this way:
+`tools/valley/creatorFx.mjs` names each one's Creator preset, seed and few overrides, and the Valley build
+bakes them headless with the same solver, renderer and exporter as **Export flipbook**.
+
+![The Valley's bonfire effect, side by side: live in the FX Creator (left) and in the Valley, in the editor, as its baked flipbook on an additive sprite over the bonfire's logs (right)](../media/fx-creator-vs-engine-fire.gif)
+
+![A blood spatter, side by side: live in the FX Creator, where the drops fly and land (left), and in the Valley as its baked floor decal, the Blood Drops a hit leaves, spreading and settling on the ground (right)](../media/fx-creator-vs-engine-decal.gif)
+
+A flipbook is the effect from one view, so it reads best from about that view: a flame's tall tile
+turns to face the camera about its vertical axis, and a decal lies flat on whatever is under it. Size
+the sprite to the effect's region as the tile frames it, and the decal box to the decal block's `size`,
+and the effect keeps its real proportions in the game.
+
 ## References
 
 - Nguyen, Fedkiw and Jensen 2002, *Physically Based Modeling and Animation of Fire*: the temperature model, black-body colour with adaptation, the blue core.
@@ -439,6 +544,11 @@ animated atlases (give the decal the block's flipbook).
 - Clavet, Beaudoin and Poulin 2005, *Particle-based Viscoelastic Fluid Simulation*: double density relaxation and pairwise viscosity, the liquid solver.
 - Oron, Davis and Bankoff 1997, *Long-scale evolution of thin liquid films*: the lubrication equation the floor film flows by.
 - Teschner et al. 2003, *Optimized Spatial Hashing for Collision Detection of Deformable Objects*: the neighbour grid's hash.
+- Heskestad 1983, *Luminous heights of turbulent diffusion flames* (Fire Safety Journal), and the SFPE Handbook's chapter on fire plumes and flame height: the presets' flame heights.
+- Cetegen and Ahmed 1993, *Experiments on the periodic instability of buoyant plumes and pool fires* (Combustion and Flame): puffing at about 1.5 / √D Hz.
+- CCPS, *Guidelines for Evaluating the Characteristics of Vapor Cloud Explosions, Flash Fires, and BLEVEs*: fireball diameter 5.8 M^⅓.
+- Sunderland et al. 2011, *Analysis and measurement of candle flame shapes* (Proceedings of the Combustion Institute): candle flame sizes.
+- CRC Handbook of Chemistry and Physics: viscosity, surface tension and density of water and mercury; whole blood's from the haemorheology literature (about 3.5 to 4 mPa·s at high shear, about 58 mN/m).
 
 ## Licensing note
 

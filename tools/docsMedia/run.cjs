@@ -92,10 +92,32 @@ async function connect() {
     };
     await cdp('Runtime.enable');
     await cdp('Page.enable');
+    // Files changing under the dev servers (another editor at work) must not reload the page mid-session: the
+    // Vite client's socket drops its reload and update messages. /reload still reloads.
+    await cdp('Page.addScriptToEvaluateOnNewDocument', { source: FREEZE_HMR });
     await cdp('Inspector.enable').catch(() => {});
     // A fixed CSS viewport, so shots are the same size on every machine.
     await cdp('Emulation.setDeviceMetricsOverride', { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false });
 }
+
+/** Installed before any page script: Vite's HMR socket (protocol `vite-hmr`) never delivers `full-reload` or `update`. */
+const FREEZE_HMR = `(() => {
+    const W = window.WebSocket;
+    const Wrapped = function (url, protocols) {
+        const ws = protocols === undefined ? new W(url) : new W(url, protocols);
+        if (String(protocols ?? '').includes('vite-hmr')) {
+            const add = ws.addEventListener.bind(ws);
+            ws.addEventListener = (type, fn, opts) => add(type, type !== 'message' ? fn : (ev) => {
+                try { const t = JSON.parse(ev.data).type; if (t === 'full-reload' || t === 'update') return; } catch { /* not JSON */ }
+                fn(ev);
+            }, opts);
+        }
+        return ws;
+    };
+    Wrapped.prototype = W.prototype;
+    Object.assign(Wrapped, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+    window.WebSocket = Wrapped;
+})();`;
 
 /** Screencast frames while a /record is open: { t: seconds, data: base64 JPEG }. */
 let recording = null;

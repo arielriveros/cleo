@@ -13,17 +13,21 @@
 //   3. viscosity  impulses along each approaching pair's axis
 //   4. advance    x += v dt, the old positions kept
 //   5. relax      double density relaxation, `liquidIterations` passes
-//   6. collide    the preview's bodies; the floor (bounce, or deposit into the film / sink in); the region
+//   6. collide    the preview's bodies; the floor (bounce, or deposit into the film / sink in); the domain
 //   7. velocity   v = (x - x_old) / dt
 // What reaches a solid floor and stays is handed to the FILM (liquidFilm.ts), a height field that flows
 // out over the floor and soaks in: the decal output.
+//
+// The REGION is the room for the drops in flight -- what the sprite frames -- not a wall. A drop that leaves
+// it keeps flying and lands, so the pool is never cut at the region's edge: drops live inside the DOMAIN
+// (`liquidDomain`), everywhere the release can reach, worked out from the release itself.
 //
 // Deterministic: fixed order everywhere (the neighbour grid is a counting sort), randomness a hash of
 // (seed, particle, event), no Math.random. Tests pin it.
 
 import { hash3, valueNoise3 } from './fluidCpu';
-import { particleCount, type FxParams } from './fxParams';
-import { LiquidFilm } from './liquidFilm';
+import { packetVolume, particleCount, type FxParams } from './fxParams';
+import { filmCell, LiquidFilm } from './liquidFilm';
 
 /** Signed distance (metres, negative inside) from the preview's bodies at a region-space point. */
 export type LiquidObstacle = (x: number, y: number, z: number) => number;
@@ -62,12 +66,12 @@ export function referenceStep(p: Pick<FxParams, 'dropletSize'>): number {
 
 /**
  * The substep a liquid runs at: the frame's share, shortened until nothing outruns its neighbours, and
- * never past the reference step. From the parameters alone, so it is the same every frame -- and the
- * same for the CPU solver and the GPU one.
+ * never past the reference step. From the parameters alone (and the highest a drop can fall from, the
+ * domain's top), so it is the same every frame -- and the same for the CPU solver and the GPU one.
  */
-export function liquidSubstep(p: FxParams, dt: number): number {
+export function liquidSubstep(p: FxParams, dt: number, top = p.regionSize[1]): number {
   const h = p.dropletSize * KERNEL_RATIO;
-  const fall = Math.sqrt(2 * Math.max(0, p.gravity) * Math.max(p.regionSize[1], 0.1));
+  const fall = Math.sqrt(2 * Math.max(0, p.gravity) * Math.max(top, 0.1));
   const vmax = Math.max(0.5, p.sourceSpeed[1] * 1.15 + 0.5, fall);
   return Math.min(dt / Math.max(1, p.substeps), (CFL * h) / vmax, referenceStep(p));
 }
@@ -156,6 +160,90 @@ function aimBatch(vel: Float32Array, count: number, aim: readonly number[]): voi
   }
 }
 
+/**
+ * Where a liquid can go. `pool`: the floor its pool can cover, [x0, z0, x1, z1] metres from the centre of the
+ * region's floor -- the film's frame (liquidFilmGpu.ts, the preview decal), whatever the region. `box`: the
+ * drops live inside it, [x0, z0, x1, z1] region metres, up to `top` (and down to the floor's own limit).
+ */
+export interface LiquidDomain {
+  pool: [number, number, number, number];
+  box: [number, number, number, number];
+  top: number;
+}
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+/**
+ * The domain of `p`, from its release: every drop the source lets go, flown without drag (drag only shortens a
+ * flight) to where it lands and through its bounces, drifting with `wind` when the stage has one. The pool is
+ * the box of those landings, grown by 15 % of the longest reach (pressure in the liquid speeds some drops up), by
+ * how far the whole volume could spread at its edge hold, and by a little more; it is measured from the floor's
+ * centre, so the region's size never enters. The drops' box is that pool and the region floor (a solid floor),
+ * or the region floor alone (nothing pools on the others, and a drop leaving the side cannot come back into the
+ * frame); its top is as high as a drop is thrown, so a splash leaving the top falls back in.
+ */
+export function liquidDomain(p: FxParams, wind: LiquidWind | null = null): LiquidDomain {
+  const r = p.regionSize;
+  const cx = r[0] / 2, cz = r[2] / 2;
+  const g = Math.max(0, p.gravity);
+  const bounce = clamp01(p.floorBounce), keep = 1 - clamp01(p.floorFriction);
+  const k = Math.max(0, p.airDrag);
+  const wx = wind?.vx ?? 0, wz = wind?.vz ?? 0;
+  const source = new LiquidSource(p.dropletSize);
+  const batches: ReleaseBatch[] = [];
+  if (p.sourceMode !== 'jet') batches.push(source.take(p, 0, 1 / 60, Infinity));
+  else {
+    // A jet over its pour (a pour that never stops: its first second).
+    const duration = p.jetDuration > 0 ? p.jetDuration : 1, dt = Math.max(1 / 240, p.frameTime);
+    for (let t = 0; t < duration; t += dt) batches.push(source.take(p, t, dt, Infinity));
+  }
+  let lx0 = Infinity, lz0 = Infinity, lx1 = -Infinity, lz1 = -Infinity;
+  let sx0 = Infinity, sz0 = Infinity, sx1 = -Infinity, sz1 = -Infinity;
+  let apex = 0, reach = 0;
+  const land = (x: number, z: number) => { lx0 = Math.min(lx0, x); lz0 = Math.min(lz0, z); lx1 = Math.max(lx1, x); lz1 = Math.max(lz1, z); };
+  for (const b of batches) for (let i = 0; i < b.count; i++) {
+    const x = b.pos[i * 3], y = Math.max(0, b.pos[i * 3 + 1]), z = b.pos[i * 3 + 2];
+    const vx = b.vel[i * 3], vy = b.vel[i * 3 + 1], vz = b.vel[i * 3 + 2];
+    sx0 = Math.min(sx0, x); sz0 = Math.min(sz0, z); sx1 = Math.max(sx1, x); sz1 = Math.max(sz1, z);
+    apex = Math.max(apex, g > 0 && vy > 0 ? y + (vy * vy) / (2 * g) : y);
+    let t: number, down: number;
+    if (g > 0) { down = Math.sqrt(vy * vy + 2 * g * y); t = (vy + down) / g; }
+    else if (vy < 0) { down = -vy; t = y / -vy; }
+    else continue;
+    let px = x + vx * t, pz = z + vz * t;
+    if ((wx !== 0 || wz !== 0) && k > 0) {
+      const drift = t - (1 - Math.exp(-k * t)) / k;
+      px += wx * drift; pz += wz * drift;
+    }
+    land(px, pz);
+    let hx = vx, hz = vz;
+    for (let n = 0; n < MAX_BOUNCES && g > 0; n++) {
+      down *= bounce; hx *= keep; hz *= keep;
+      if (down <= 1e-6) break;
+      const tb = (2 * down) / g;
+      px += hx * tb; pz += hz * tb;
+      land(px, pz);
+    }
+    reach = Math.max(reach, Math.hypot(px - x, pz - z));
+  }
+  if (!Number.isFinite(lx0)) {
+    // Nothing lands (no gravity, nothing thrown down): the source's own footprint.
+    if (Number.isFinite(sx0)) { lx0 = sx0; lz0 = sz0; lx1 = sx1; lz1 = sz1; }
+    else { const c = sourceCenter(p); lx0 = lx1 = c.x; lz0 = lz1 = c.z; }
+  }
+  // How far the whole volume could spread at its edge hold, and a little more for pressure and the stamps.
+  const volume = particleCount(p) * packetVolume(p);
+  const hold = Math.max(2e-4, Math.max(0, p.pinning) / 1000);
+  const spread = Math.min(2, Math.sqrt(volume / (Math.PI * hold)));
+  const margin = 0.15 * reach + spread + 0.02 + 4 * filmCell(p);
+  const pool: [number, number, number, number] = [lx0 - cx - margin, lz0 - cz - margin, lx1 - cx + margin, lz1 - cz + margin];
+  const box: [number, number, number, number] = p.floorMode === 'solid'
+    ? [Math.min(0, pool[0] + cx), Math.min(0, pool[1] + cz), Math.max(r[0], pool[2] + cx), Math.max(r[2], pool[3] + cz)]
+    : [0, 0, r[0], r[2]];
+  const top = g > 0 ? Math.max(r[1], apex * 1.1 + 0.05) : r[1];
+  return { pool, box, top };
+}
+
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /** The particle state and the step. Positions in metres, region space. */
@@ -184,7 +272,7 @@ export class LiquidCpu {
   /** Particles released so far (also the next id). */
   get released(): number { return this.source.released; }
   private readonly source: LiquidSource;
-  /** Volume (m^3) handed to the film, sunk into a water surface, or gone out of the region. */
+  /** Volume (m^3) handed to the film, sunk into a water surface, or gone out of the domain. */
   deposited = 0;
   absorbed = 0;
   escaped = 0;
@@ -203,16 +291,22 @@ export class LiquidCpu {
   /** The density a particle has inside the liquid at rest (the lattice's, at `spacing`). */
   readonly restDensity: number;
   readonly region: [number, number, number];
+  /** Where the drops live and the pool can lie (`liquidDomain`): not the region, which only frames them. */
+  readonly domain: LiquidDomain;
   /** The particle volume, m^3: `spacing`^3. */
   readonly particleVolume: number;
 
-  /** `filmCellSize`: the floor film's cells, metres (its own default: half a droplet). */
-  constructor(p: FxParams, filmCellSize?: number) {
+  /**
+   * `filmCellSize`: the floor film's cells, metres (its own default: half a droplet). `wind`: the preview
+   * stage's, for how far it can carry the drops (the domain); the drops feel `sceneWind`.
+   */
+  constructor(p: FxParams, opts: { filmCellSize?: number; wind?: LiquidWind | null } = {}) {
     this.spacing = p.dropletSize;
     this.source = new LiquidSource(this.spacing);
     this.h = this.spacing * KERNEL_RATIO;
-    this.particleVolume = Math.pow(this.spacing, 3);
+    this.particleVolume = packetVolume(p);
     this.region = [p.regionSize[0], p.regionSize[1], p.regionSize[2]];
+    this.domain = liquidDomain(p, opts.wind ?? null);
     const total = particleCount(p);
     // A finite release is bounded by its volume; a pour that never stops by what can be alive at once.
     const continuous = p.sourceMode === 'jet' && !(p.jetDuration > 0);
@@ -231,7 +325,7 @@ export class LiquidCpu {
     this.hashOf = new Uint32Array(c);
     this.nStart = new Int32Array(c + 1);
     this.restDensity = latticeDensity();
-    this.film = p.floorMode === 'solid' ? new LiquidFilm(p, filmCellSize) : null;
+    this.film = p.floorMode === 'solid' ? new LiquidFilm(p, opts.filmCellSize) : null;
   }
 
   /** Every particle's volume plus the film's plus what left: what was released, for the tests. */
@@ -249,7 +343,7 @@ export class LiquidCpu {
   get referenceStep(): number { return this.h / SOUND_SPEED; }
 
   /** The substep this effect runs at (`liquidSubstep`). */
-  substep(p: FxParams, dt: number): number { return liquidSubstep(p, dt); }
+  substep(p: FxParams, dt: number): number { return liquidSubstep(p, dt, this.domain.top); }
 
   /** Advance `dt` seconds. */
   step(p: FxParams, dt: number): void {
@@ -438,7 +532,8 @@ export class LiquidCpu {
 
   private collide(p: FxParams, dt: number): void {
     const r = this.spacing * 0.5;
-    const [sx, sy, sz] = this.region;
+    const sy = this.region[1];
+    const [bx0, bz0, bx1, bz1] = this.domain.box, top = this.domain.top;
     const obstacle = this.obstacle;
     for (let i = 0; i < this.count; i++) {
       this.contact[i] = 0;
@@ -470,7 +565,8 @@ export class LiquidCpu {
         continue;
       }
       const below = p.floorMode === 'none' ? -0.5 * sy : -r;
-      if (this.x[i] < 0 || this.x[i] > sx || this.z[i] < 0 || this.z[i] > sz || this.y[i] > sy || this.y[i] < below) {
+      // Out of the domain: past anywhere the release could reach. The region's walls are no walls.
+      if (this.x[i] < bx0 || this.x[i] > bx1 || this.z[i] < bz0 || this.z[i] > bz1 || this.y[i] > top || this.y[i] < below) {
         this.dead[i] = 1;
         this.escaped += this.particleVolume;
       }
@@ -652,13 +748,15 @@ const CONE_GAIN = 1.8;
  * break-up's noise. Speed and direction are mostly COHERENT -- noise over where the particle starts
  * (and, for a jet, how far the stream has come), features about five droplets across -- so neighbours
  * leave together as sheets and fingers that surface tension then beads, instead of a cloud of single drops.
+ * The noise is measured from the source, so the same splash leaves the same way in any region around it.
  */
 function releaseVelocity(p: FxParams, id: number, pos: P3, spacing: number, time: number): [number, number, number] {
   const c = sourceCenter(p);
   const aim0 = aimVector(p);
   const along = time * (p.sourceSpeed[0] + p.sourceSpeed[1]) * 0.5;
   const f = 1 / (5 * spacing);
-  const nx = (pos.x + aim0[0] * along) * f, ny = (pos.y + aim0[1] * along) * f, nz = (pos.z + aim0[2] * along) * f;
+  const qx = pos.x - c.x, qy = pos.y - c.y, qz = pos.z - c.z;
+  const nx = (qx + aim0[0] * along) * f, ny = (qy + aim0[1] * along) * f, nz = (qz + aim0[2] * along) * f;
   const shared = (k: number) => Math.min(1, Math.max(0, 0.5 + 0.8 * valueNoise3(nx, ny, nz, p.seed + 37 * k)));
   const pick = (k: number, salt: number) => shared(k) * (1 - OWN_SHARE) + hash3(id, salt, 11, p.seed) * OWN_SHARE;
   const speed = lerp(p.sourceSpeed[0], p.sourceSpeed[1], pick(1, 4));
@@ -698,9 +796,9 @@ function releaseVelocity(p: FxParams, id: number, pos: P3, spacing: number, time
     // Finer than the release's own variation: tears the sheets into fingers.
     const g = 1 / (2.5 * spacing);
     const k = p.sourceBreakup * speed * 0.35;
-    v[0] += k * valueNoise3(nx * 2 + pos.x * g, ny * 2, nz * 2, p.seed + 101);
-    v[1] += k * valueNoise3(nx * 2, ny * 2 + pos.y * g, nz * 2, p.seed + 202);
-    v[2] += k * valueNoise3(nx * 2, ny * 2, nz * 2 + pos.z * g, p.seed + 303);
+    v[0] += k * valueNoise3(nx * 2 + qx * g, ny * 2, nz * 2, p.seed + 101);
+    v[1] += k * valueNoise3(nx * 2, ny * 2 + qy * g, nz * 2, p.seed + 202);
+    v[2] += k * valueNoise3(nx * 2, ny * 2, nz * 2 + qz * g, p.seed + 303);
   }
   return v;
 }

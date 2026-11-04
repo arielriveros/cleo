@@ -81,7 +81,7 @@ export class FluidVolumeNode extends Node {
     public absorptionScale: [number, number, number] = [1, 1, 1];
     /** Fire inside dense smoke dimmed by it, so glow shows through the gaps. 0 is off. */
     public sootMask = 0;
-    /** Blue reaction-zone emission at the bottom of the emission range. 0 is off. */
+    /** The blue reaction zone's brightness, a share of the fire's, where the volume's A is negative (minus the zone's 0..1 shape). 0 is off. */
     public blueCore = 0;
     /** The blue core's colour, linear RGB. */
     public blueCoreColor: [number, number, number] = [0.073, 0.17, 1];

@@ -188,7 +188,7 @@ describe('the region is room around a gas effect', () => {
     const v1 = { ...DEFAULT_FX, regionSize: [4.8, 7.2, 4.8], voxelSize: 0.1, emitterX: 0.25, emitterZ: 0.5, emitterHeight: 0.1, emitterRadius: 0.12, turbulenceScale: 4 } as Record<string, unknown>;
     delete v1.version; delete v1.emitterPosition; delete v1.turbulenceSize;
     const p = normaliseFx(v1 as unknown as FxParams);
-    expect(p.version).toBe(2);
+    expect(p.version).toBe(3);
     // Where format 1 put it: on its grid's voxel centres (48 x 72 x 48 of 0.1 m), from the floor's centre.
     expect(p.emitterPosition[0]).toBeCloseTo((0.25 * 47 + 0.5) * 0.1 - 2.4, 9);
     expect(p.emitterPosition[1]).toBeCloseTo((0.1 * 71 + 0.5) * 0.1, 9);
@@ -208,7 +208,7 @@ describe('the region is room around a gas effect', () => {
   it('writes every preset in metres', () => {
     for (const preset of FX_PRESETS) {
       const raw = preset.params as unknown as Record<string, unknown>;
-      expect(raw.version, preset.id).toBe(2);
+      expect(raw.version, preset.id).toBe(3);
       expect(Array.isArray(raw.emitterPosition), preset.id).toBe(true);
       for (const k of ['emitterX', 'emitterZ', 'emitterHeight', 'turbulenceScale', 'sourceHeight']) expect(raw[k], `${preset.id} ${k}`).toBeUndefined();
     }

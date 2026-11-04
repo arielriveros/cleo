@@ -15,7 +15,8 @@ import { Node } from 'cleo'
  * - NO DAY AND NIGHT. The light keeps its real lumens around the clock; the camera's auto exposure is what
  *   makes it vanish in sunlight and carry the road at night.
  *
- * The flames and embers keep a sane brightness under any exposure on their own (their Exposure weight).
+ * The flames read as fire under any exposure on their own: they take a tenth of it (their sprite's
+ * Exposure weight) and are drawn additive, so the noon sun neither hides nor darkens them.
  *
  * `lit` puts the fire out and lights it again: flames hidden, embers stopped, light off. The bonfire's
  * script drives it (its `Fire` child is one of these), so an unlit bonfire is a cold one.

@@ -1,5 +1,5 @@
 // The Valley's effects, made with the FX Creator (applications/creator/src/fx): the torches' and the
-// bonfire's flames, the blood a hit draws (a burst, droplets, a spatter and a pool on the floor) and the
+// bonfire's flames, the blood (the spatter a hit leaves and the pool where the player died) and the
 // pond's splashes are each a Creator preset with a seed and a few Valley-specific settings, baked headless
 // by tools/valley/genFx.ts -- the solver, renderer and exporter the Creator's own Export flipbook uses.
 //
@@ -9,12 +9,16 @@
 //   bonfire-fire   the bonfire preset, tall too: the bonfire, the fire pits and the hearth
 //
 // The liquids (Creator presets of the same names) feed the souls blood and the pond (build.mjs):
-//   blood-burst    the sprite a hit throws out, played over a particle's life
-//   blood-droplet  a looping stream of drops, on velocity-aligned particles
-//   blood-splash   the spatter thrown along the blow: its FLOOR DECAL (an animated pool) is "Blood Drops"
-//   blood-pool     blood pouring down into a pool: its floor decal is "Blood Splat"
+//   blood-splash   the spatter thrown along the blow: its FLOOR DECAL (an animated pool), at twice its size,
+//                  is "Blood Drops", a hit's only blood
+//   blood-pool     blood pouring down into a pool: its floor decal is the Bloodstain's, where the player died
 //   water-splash   the crown a body entering the pond throws up, its sprite
 //   water-droplet  looping water drops for the splash's droplets
+//   water-puddle   rain water settling into a puddle: its settled floor decal lies in the low spots of the
+//                  trails (build.mjs `puddles`)
+//
+// The presets are the Creator's own, at real-world size (a torch flame 0.45 m tall, a bonfire's 2.4 m): the
+// overrides here only frame them for the Valley's tiles.
 //
 // Baking is cached in build/valley_creator/, keyed by the spec and the generator's source, so a rebuild
 // only re-bakes what changed.
@@ -39,26 +43,26 @@ const FLAME_LOOK = {
 }
 
 export const CREATOR_FX = [
-  // A region just wide enough for the flame, so it fills its tall frame.
+  // A region just wide enough for the flame, so it fills its tall frame: the torch preset's, framed three
+  // quarters as wide (its emitter a little wider and higher, its eddies a little smaller), in metres.
   { key: 'torch-fire', name: 'Torch Fire', medium: 'gas', preset: 'torch', seed: 7,
-    params: { ...FLAME_LOOK, regionSize: [3.6, 7.2, 3.6], emitterPosition: [0, 0.76, 0], emitterRadius: 0.468, turbulenceSize: 0.9, tileSize: 128, tileAspect: 'tall', frames: 32, loopBlend: 8, warmup: 60, view: 'front' } },
+    params: { ...FLAME_LOOK, regionSize: [0.552, 1.104, 0.552], emitterPosition: [0, 0.1165, 0], emitterRadius: 0.0717, turbulenceSize: 0.138, tileSize: 128, tileAspect: 'tall', frames: 32, loopBlend: 8, warmup: 60, view: 'front' } },
+  // The bonfire preset as it is: a ball of fuel above the floor in a tall region (a bed's flames would run
+  // out along the floor to the frame's edges, a hard bright band at the sprite's bottom).
   { key: 'bonfire-fire', name: 'Bonfire Fire', medium: 'gas', preset: 'bonfire', seed: 11,
-    // A ball of fuel above the floor, not a bed on it: a bed's flames run out along the floor to the
-    // frame's edges, a hard bright band at the sprite's bottom. Tall, like the torch's, so the column of
-    // flame ends inside its frame instead of running off the top.
-    params: { ...FLAME_LOOK, regionSize: [4.8, 9.6, 4.8], voxelSize: 0.12, emitterShape: 'sphere', emitterPosition: [0, 0.8184, 0], emitterRadius: 0.816, turbulenceSize: 0.96, tileSize: 128, tileAspect: 'tall', frames: 32, loopBlend: 8, warmup: 60, view: 'front' } },
-  { key: 'blood-burst', name: 'Blood Burst', medium: 'liquid', preset: 'blood-burst', seed: 3, params: {} },
-  { key: 'blood-droplet', name: 'Blood Droplets', medium: 'liquid', preset: 'blood-droplet', seed: 4, params: {} },
-  // The wound 0.9 m behind the region's centre, where the template stands: SoulsGameManager.bloodDropsOffset.
+    params: { ...FLAME_LOOK, tileSize: 128, tileAspect: 'tall', frames: 32, loopBlend: 8, warmup: 60, view: 'front' } },
+  // The wound 0.9 m behind the region's centre. The Valley lays it at twice its size from
+  // SoulsGameManager.bloodDropsOffset (0.9 m) ahead of the target, so it starts at their feet (build.mjs).
   { key: 'blood-splash', name: 'Blood Spatter', medium: 'liquid', preset: 'blood-splash', seed: 5, params: { emitterPosition: [0, 1, -0.9] } },
   { key: 'blood-pool', name: 'Blood Pool', medium: 'liquid', preset: 'blood-pool', seed: 6, params: {} },
   { key: 'water-splash', name: 'Water Splash', medium: 'liquid', preset: 'water-splash', seed: 8, params: {} },
   { key: 'water-droplet', name: 'Water Droplets', medium: 'liquid', preset: 'water-droplet', seed: 9, params: {} },
+  { key: 'water-puddle', name: 'Water Puddle', medium: 'liquid', preset: 'water-puddle', seed: 12, params: {} },
 ]
 
 /** The sources a bake of each medium reads (applications/creator/src/fx/, then shared ones). */
 const SOURCES = {
-  shared: ['fxParams.ts', 'generateFx.ts', 'flipbook.ts', 'fluidCpu.ts', 'volumeRender.ts', '../core/png.ts', '../core/generator.ts'],
+  shared: ['fxParams.ts', 'fxUnits.ts', 'generateFx.ts', 'flipbook.ts', 'fluidCpu.ts', 'volumeRender.ts', '../core/png.ts', '../core/generator.ts'],
   gas: ['realism.ts', 'blackbody.ts'],
   liquid: ['liquidCpu.ts', 'liquidFilm.ts', 'liquidRender.ts'],
 }

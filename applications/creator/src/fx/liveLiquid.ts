@@ -3,9 +3,10 @@
 // a burst, a pour) plays out, holds a moment, and replays; a pour that never stops just runs.
 //
 // Two solvers. On a compute device with the GPU switch on, an effect of GPU_MIN_PARTICLES drops or more
-// is stepped by liquidGpu.ts, which splats straight into the node's storage volume; only the floor
-// deposits come back, for the film, which a worker (liquidWorker.ts, film only) runs. Otherwise the whole
-// solver runs in that worker on the CPU (liquidCpu.ts) and each finished frame is uploaded.
+// is stepped by liquidGpu.ts, which splats straight into the node's storage volume and keeps the floor film
+// (liquidFilmGpu.ts) too: the pool is stamped the frame a drop lands and its decal textures are written in
+// place. Otherwise the whole solver and its film run in a worker on the CPU (liquidWorker.ts, liquidCpu.ts)
+// and each finished frame is uploaded.
 //
 // The same face as LiveFx (liveSim.ts) where the workspace uses one: tick, setParams, setScene, restart,
 // playing / speed, stats.
@@ -16,10 +17,10 @@ import { device } from 'cleo/graphics/rhi/deviceHandle';
 import { fluidDims, type FluidDims } from './fluidCpu';
 import { normaliseFx, particleCount, type FxParams, type FxPreviewQuality } from './fxParams';
 import type { FxScene } from './fxScene';
-import { LiquidCpu } from './liquidCpu';
+import { LiquidCpu, liquidDomain, type LiquidWind } from './liquidCpu';
 import { LiquidGpu } from './liquidGpu';
 import { sourceCenter } from './liquidCpu';
-import { LIQUID_ISO, liquidSigma, previewWindow, splatRadius, type Bounds, type LiquidWindow } from './liquidRender';
+import { LIQUID_ISO, liquidSigma, previewAlbedoOpacity, previewWindow, splatRadius, type Bounds, type LiquidWindow } from './liquidRender';
 import { MAX_FRAMES_PER_TICK, QUALITY, takeFrames, type FireLight, type LiveStats } from './liveSim';
 import type { LiquidFilmFrame, LiquidWorkerIn, LiquidWorkerOut } from './liquidWorker';
 
@@ -27,6 +28,8 @@ import type { LiquidFilmFrame, LiquidWorkerIn, LiquidWorkerOut } from './liquidW
 const PREVIEW_VOXEL: Record<FxPreviewQuality, number> = { low: 2, medium: 1.4, high: 1 };
 /** Most voxels the preview grid may hold whatever the quality. */
 const PREVIEW_MAX_VOXELS = 700_000;
+/** The GPU solver's grid budget: it packs the volume on the GPU (about 20 bytes a voxel), so it can keep the droplets' voxels over far more of the region before the window has to coarsen -- and a coarser window is what makes drops look bigger. */
+const PREVIEW_MAX_VOXELS_GPU = 6_000_000;
 /** Seconds a finished one-shot holds before it replays. */
 const REPLAY_PAUSE = 0.8;
 /** A change that starts the liquid over waits for the edit to settle (a slider, a gizmo drag). */
@@ -79,12 +82,13 @@ export function flipRows(data: Uint8Array, width: number, height: number): Uint8
  * voxels, in the region's proportions, kept over the drops as they move (`previewWindow`) and coarser
  * only while they spread past it.
  */
-export function liquidPreviewGrid(p: FxParams): { dims: FluidDims; voxelSize: number; windowed: boolean } {
+export function liquidPreviewGrid(p: FxParams, gpu = false): { dims: FluidDims; voxelSize: number; windowed: boolean } {
   const v = p.dropletSize * (PREVIEW_VOXEL[p.previewQuality] ?? 1.4);
   const r = p.regionSize;
   const count = (r[0] / v) * (r[1] / v) * (r[2] / v);
-  if (count <= PREVIEW_MAX_VOXELS) return { dims: fluidDims({ regionSize: r, voxelSize: v }), voxelSize: v, windowed: false };
-  const s = Math.cbrt(PREVIEW_MAX_VOXELS / count);
+  const budget = gpu ? PREVIEW_MAX_VOXELS_GPU : PREVIEW_MAX_VOXELS;
+  if (count <= budget) return { dims: fluidDims({ regionSize: r, voxelSize: v }), voxelSize: v, windowed: false };
+  const s = Math.cbrt(budget / count);
   const n = r.map(x => Math.max(16, Math.floor((x / v) * s)));
   return { dims: { nx: n[0], ny: n[1], nz: n[2] }, voxelSize: v, windowed: true };
 }
@@ -142,14 +146,7 @@ export class LiveLiquid {
   /** The GPU solver, when it runs the particles. */
   private gpu: LiquidGpu | null = null;
   private readInFlight = false;
-  /** Frames simulated since the deposits were last read: the film's to catch up on. */
-  private filmFrames = 0;
-  /**
-   * The film worker is on a batch of deposits: what reads back meanwhile waits here, merged, so a film
-   * slower than the GPU falls behind by one batch rather than by a queue that never drains.
-   */
-  private filmBusy = false;
-  private filmPending: { records: Float32Array[]; count: number; frames: number } | null = null;
+
   /** The region the running simulation was built for (a resize waits for its restart). */
   private region: [number, number, number];
   private bodiesKey = '';
@@ -167,7 +164,7 @@ export class LiveLiquid {
 
   constructor(private node: FluidVolumeNode, params: FxParams, private readonly useGpu = false) {
     this.params = normaliseFx(params);
-    const g = liquidPreviewGrid(this.params);
+    const g = liquidPreviewGrid(this.params, this.useGpu && particleCount(this.params) >= GPU_MIN_PARTICLES);
     this.dims = g.dims;
     this.voxelSize = g.voxelSize;
     this.windowed = g.windowed;
@@ -241,7 +238,7 @@ export class LiveLiquid {
     if (this.restartTimer) clearTimeout(this.restartTimer);
     this.restartTimer = null;
     this.restartPending = false;
-    const g = liquidPreviewGrid(this.params);
+    const g = liquidPreviewGrid(this.params, this.useGpu && particleCount(this.params) >= GPU_MIN_PARTICLES);
     this.dims = g.dims;
     this.voxelSize = g.voxelSize;
     this.windowed = g.windowed;
@@ -271,7 +268,7 @@ export class LiveLiquid {
     // The window over the drops as last read back -- a frame or two old, so with room for how fast they spread.
     const moved = this.windowed && this.followDrops(this.gpuBounds, true);
     gpu.setWindow(this.window.origin, this.window.voxelSize);
-    for (let f = 0; f < step.frames; f++) gpu.step(p, p.frameTime);
+    for (let f = 0; f < step.frames; f++) gpu.step(p, p.frameTime, f === step.frames - 1);
     // Into the other volume; the renderer blends from the one just shown (not across a window move).
     const volume = node.swap();
     if (volume) gpu.pack(volume, node.occupancy);
@@ -279,58 +276,41 @@ export class LiveLiquid {
     node.blend = moved ? 1 : 0;
     this.simMs = (performance.now() - start) / step.frames;
     this.simTime += step.frames * p.frameTime;
-    this.filmFrames += step.frames;
     this.readBack(gpu);
     this.onStats?.({ simMs: this.simMs, simTime: this.simTime, backend: 'gpu', dims: this.dims, particles: this.particles });
   }
 
-  /**
-   * The GPU's floor deposits since the last read, on to the film worker with the frames it has to catch
-   * up on, and the live count for the readout. One read in flight at a time; deposits pile up meanwhile.
-   */
+  /** The live count and the drops' box, from the GPU: one read in flight at a time. */
   private readBack(gpu: LiquidGpu): void {
     if (this.readInFlight) return;
     this.readInFlight = true;
-    const film = this.params.floorMode === 'solid';
-    const frames = this.filmFrames;
-    this.filmFrames = 0;
     const generation = this.generation;
-    gpu.readDeposits(film).then(d => {
+    gpu.readDeposits().then(d => {
       if (this.gpu !== gpu || generation !== this.generation || this.disposed) return;
       this.particles = d.live;
       if (d.bounds) { this.lastBounds = this.gpuBounds; this.gpuBounds = d.bounds; }
-      if (film && this.worker) {
-        const pending = this.filmPending ??= { records: [], count: 0, frames: 0 };
-        pending.records.push(d.records.slice());
-        pending.count += d.count;
-        pending.frames += frames;
-        this.pumpFilm();
-      }
     }).catch(e => console.error('[FX Creator] liquid read-back failed', e))
       .finally(() => { if (this.gpu === gpu) this.readInFlight = false; });
-  }
-
-  /** The deposits read back since the film worker's last batch, on to it once it is free. */
-  private pumpFilm(): void {
-    const pending = this.filmPending;
-    if (this.filmBusy || !pending || !this.worker) return;
-    this.filmPending = null;
-    const records = new Float32Array(pending.count * 4);
-    let at = 0;
-    for (const r of pending.records) { records.set(r.subarray(0, Math.min(r.length, records.length - at)), at); at += r.length; }
-    this.filmBusy = true;
-    this.worker.postMessage({ type: 'film', records, count: pending.count, frames: pending.frames } satisfies LiquidWorkerIn, [records.buffer]);
   }
 
   /** Placement of the ground shadow: a liquid casts none (the film decal is its floor mark). */
   shadowPlacement(): null { return null; }
 
-  /** The floor film as a decal, once a frame of it has arrived; null for a floor that is not solid. */
+  /**
+   * The floor film as a decal, once a frame of it exists (the GPU film's textures, or the CPU film's
+   * uploads); null for a floor that is not solid.
+   */
   floorDecal(): FloorDecal | null {
-    const t = this.filmTextures;
-    if (!t || !this.filmShown || this.params.floorMode !== 'solid') return null;
-    // Where the liquid lies, from the centre of the region's floor, which stands at the region's offset.
+    if (this.params.floorMode !== 'solid') return null;
+    const g = this.gpu?.film;
     const o = this.scene?.regionOffset ?? [0, 0, 0];
+    // Where the liquid lies, from the centre of the region's floor, which stands at the region's offset.
+    if (g) {
+      if (!g.drawn) return null;
+      return { color: g.color, normal: g.normal, orm: g.orm, size: g.size, albedoOpacity: previewAlbedoOpacity(this.params), center: [o[0] + g.center[0], o[1], o[2] + g.center[1]] };
+    }
+    const t = this.filmTextures;
+    if (!t || !this.filmShown) return null;
     const f = this.filmPlace;
     return {
       color: t.color, normal: t.normal, orm: t.orm, size: f.size, albedoOpacity: this.albedoOpacity,
@@ -355,9 +335,6 @@ export class LiveLiquid {
     this.gpu?.dispose();
     this.gpu = null;
     this.readInFlight = false;
-    this.filmFrames = 0;
-    this.filmBusy = false;
-    this.filmPending = null;
     this.particles = 0;
     this.accumulator = 0;
     this.simTime = 0;
@@ -376,23 +353,29 @@ export class LiveLiquid {
     this.node.allocate(nx, ny, nz, { storage: this.useGpu && particleCount(this.params) >= GPU_MIN_PARTICLES });
     this.placeNode();
     if (this.node.storage) {
-      this.gpu = new LiquidGpu(this.params, this.dims, this.voxelSize);
+      // Where the drops and the pool can go: from the release (and the stage's wind), never the region.
+      this.gpu = new LiquidGpu(this.params, this.dims, this.voxelSize, liquidDomain(this.params, this.stageWind()));
     } else {
       const empty = new Float32Array(nx * ny * nz * 4);
       this.node.upload(empty);
       this.node.swap();
       this.node.upload(empty);
     }
-    if (!this.worker) {
-      this.worker = new Worker(new URL('./liquidWorker.ts', import.meta.url), { type: 'module' });
-      this.worker.onmessage = (e: MessageEvent<LiquidWorkerOut>) => this.onWorkerFrame(e.data);
-      this.worker.onerror = e => console.error('[FX Creator] liquid worker failed', e.message);
-    }
     this.workerBusy = false;
     this.spare = null;
     this.generation++;
-    if (this.gpu) this.worker.postMessage({ type: 'film-reset', params: this.params, generation: this.generation } satisfies LiquidWorkerIn);
-    else this.worker.postMessage({ type: 'reset', params: this.params, dims: this.dims, voxelSize: this.voxelSize, window: this.window, windowed: this.windowed, generation: this.generation } satisfies LiquidWorkerIn);
+    // The worker runs the whole liquid on the CPU; the GPU solver keeps its film on the GPU too.
+    if (this.gpu) {
+      this.worker?.terminate();
+      this.worker = null;
+    } else {
+      if (!this.worker) {
+        this.worker = new Worker(new URL('./liquidWorker.ts', import.meta.url), { type: 'module' });
+        this.worker.onmessage = (e: MessageEvent<LiquidWorkerOut>) => this.onWorkerFrame(e.data);
+        this.worker.onerror = e => console.error('[FX Creator] liquid worker failed', e.message);
+      }
+      this.worker.postMessage({ type: 'reset', params: this.params, dims: this.dims, voxelSize: this.voxelSize, window: this.window, windowed: this.windowed, wind: this.stageWind(), generation: this.generation } satisfies LiquidWorkerIn);
+    }
     this.applyStage();
     this.applyLook();
   }
@@ -444,21 +427,24 @@ export class LiveLiquid {
     this.node.setPosition([o[0] + w.origin[0] + nx * v / 2, o[1] + w.origin[1] + ny * v / 2, o[2] + w.origin[2] + nz * v / 2]);
   }
 
+  /** The stage's wind, m/s along the region's axes, or null when it is off. */
+  private stageWind(): LiquidWind | null {
+    const scene = this.scene;
+    if (!scene || !scene.wind || !(scene.windStrength > 0)) return null;
+    // WindNode's convention: degrees counter-clockwise from +X seen from above.
+    const a = (scene.windDirection * Math.PI) / 180;
+    return { vx: Math.cos(a) * scene.windStrength, vz: -Math.sin(a) * scene.windStrength };
+  }
+
   private applyStage(): void {
     const scene = this.scene;
-    if (!this.worker || !scene) return;
+    if (!scene) return;
     const origin = this.origin();
-    let wind: { vx: number; vz: number } | null = null;
-    if (scene.wind && scene.windStrength > 0) {
-      // WindNode's convention: degrees counter-clockwise from +X seen from above.
-      const a = (scene.windDirection * Math.PI) / 180;
-      wind = { vx: Math.cos(a) * scene.windStrength, vz: -Math.sin(a) * scene.windStrength };
-    }
+    const wind = this.stageWind();
     this.gpu?.setBodies(scene.bodies, origin);
     this.gpu?.setWind(wind);
-    // The worker too, on the GPU path: its film keeps out from under the bodies.
-    this.worker.postMessage({ type: 'bodies', bodies: scene.bodies, origin } satisfies LiquidWorkerIn);
-    this.worker.postMessage({ type: 'wind', wind } satisfies LiquidWorkerIn);
+    this.worker?.postMessage({ type: 'bodies', bodies: scene.bodies, origin } satisfies LiquidWorkerIn);
+    this.worker?.postMessage({ type: 'wind', wind } satisfies LiquidWorkerIn);
   }
 
   private pump(): void {
@@ -473,13 +459,6 @@ export class LiveLiquid {
   }
 
   private onWorkerFrame(msg: LiquidWorkerOut): void {
-    if (msg.type === 'film') {
-      if (this.disposed || msg.generation !== this.generation) return;
-      if (msg.film) this.uploadFilm(msg.film);
-      this.filmBusy = false;
-      this.pumpFilm();
-      return;
-    }
     this.workerBusy = false;
     if (this.disposed) return;
     const { nx, ny, nz } = this.dims;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { FluidCpu, fluidDims } from '../src/fx/fluidCpu';
-import { DEFAULT_FX, normaliseFx, type FxParams } from '../src/fx/fxParams';
+import { FluidCpu, emitterVoxels, fluidDims, removeNetForce } from '../src/fx/fluidCpu';
+import { DEFAULT_FX, FX_PRESETS, normaliseFx, type FxParams } from '../src/fx/fxParams';
 import { newBody, type FxBody } from '../src/fx/fxScene';
 import { bodyDistance, voxelizeBodies } from '../src/fx/obstacles';
 import { sceneWindOf, VOXEL_SIZE } from '../src/fx/liveSim';
@@ -10,7 +10,7 @@ import { bakeFireLut, phaseScale, sunScatter } from '../src/fx/volumeRender';
 // The preview stage reaching the solver (bodies, wind) and the realism settings shared by every renderer.
 
 const small = (p: Partial<FxParams> = {}): FxParams =>
-  normaliseFx({ ...DEFAULT_FX, regionSize: [2, 3, 2], voxelSize: 0.1, pressureIterations: 20, ...p });
+  normaliseFx({ ...DEFAULT_FX, regionSize: [2, 3, 2], voxelSize: 0.1, frameTime: 1 / 24, pressureIterations: 20, ...p });
 
 const sphere = (r: number, at: [number, number, number]): FxBody =>
   ({ id: 's', kind: 'sphere', position: at, yaw: 0, pitch: 0, size: [2 * r, 2 * r, 2 * r], visible: true });
@@ -87,6 +87,59 @@ describe('scene wind', () => {
       return sx / sw;
     };
     expect(centroidX(true)).toBeGreaterThan(centroidX(false) + 0.5);
+  });
+});
+
+describe('no drift without wind', () => {
+  /** The density-weighted centroid's x and z, voxels from the emitter's column. */
+  const centroid = (f: FluidCpu, p: FxParams) => {
+    const e = emitterVoxels(p, f.dims);
+    let sx = 0, sz = 0, sw = 0;
+    for (let z = 0; z < f.dims.nz; z++) for (let y = 0; y < f.dims.ny; y++) for (let x = 0; x < f.dims.nx; x++) {
+      const i = f.index(x, y, z);
+      const d = f.density[i] + f.temperature[i];
+      sx += (x - e.x) * d; sz += (z - e.z) * d; sw += d;
+    }
+    return [sx / sw, sz / sw];
+  };
+
+  it('keeps a symmetric flame on its emitter: the solver itself has no side', () => {
+    const p = small({ turbulence: 0, disturbance: 0, emitterNoise: 0 });
+    const f = new FluidCpu(fluidDims(p));
+    for (let i = 0; i < 120; i++) f.step(p, p.frameTime / p.substeps);
+    const [x, z] = centroid(f, p);
+    expect(Math.abs(x)).toBeLessThan(1e-3);
+    expect(Math.abs(z)).toBeLessThan(1e-3);
+  });
+
+  it('lets the realistic campfire sway but not slide away', () => {
+    // Coarse voxels (format 3: the detail only) to keep it quick. Before the fix its smoke was 0.25 m off
+    // the fire after three seconds and still going; now it sways within a few centimetres.
+    const preset = FX_PRESETS.find(q => q.id === 'campfire-hq')!.params;
+    const p = normaliseFx({ ...preset, voxelSize: preset.voxelSize * 3 });
+    const f = new FluidCpu(fluidDims(p));
+    const dt = p.frameTime / p.substeps;
+    for (let i = 0, n = Math.round(3 / dt); i < n; i++) f.step(p, dt);
+    const [x, z] = centroid(f, p);
+    expect(Math.hypot(x, z) * p.voxelSize).toBeLessThan(0.08);
+  }, 60_000);
+
+  it('takes the net push out of the random forcing, so it only stirs', () => {
+    let s = 7;
+    const rand = () => ((s = (s * 1103515245 + 12345) >>> 0) / 4294967296);
+    const n = 5000;
+    const fx = new Float32Array(n), fy = new Float32Array(n), fz = new Float32Array(n), w = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      w[i] = rand() < 0.3 ? rand() : 0;
+      fx[i] = w[i] * (rand() * 2 - 0.6); fy[i] = w[i] * (rand() * 2 - 1); fz[i] = w[i] * (rand() * 2 - 1.3);
+    }
+    const before = fx.slice();
+    removeNetForce(fx, fy, fz, w);
+    const sum = (a: Float32Array) => a.reduce((t, x) => t + x, 0);
+    const weight = sum(w);
+    for (const a of [fx, fy, fz]) expect(Math.abs(sum(a)) / weight).toBeLessThan(1e-5);
+    // Unweighted voxels are untouched; the rest keep their own swirl, less their share of the net push.
+    for (let i = 0; i < n; i++) if (w[i] === 0) expect(fx[i]).toBe(before[i]);
   });
 });
 

@@ -1,15 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { fnv1a } from '../src/core/generator';
 import { atlasLayout } from '../src/fx/flipbook';
-import { DEFAULT_FX, FX_PRESETS, LIQUID_DEFAULTS, normaliseFx, particleCount, schemaGroupsFor, tileDims, type FxParams } from '../src/fx/fxParams';
+import { DEFAULT_FX, FX_PRESETS, LIQUID_DEFAULTS, normaliseFx, packetVolume, particleCount, schemaGroupsFor, tileDims, type FxParams } from '../src/fx/fxParams';
 import { bakeKinds, exportFx, generateFx } from '../src/fx/generateFx';
-import { LiquidCpu } from '../src/fx/liquidCpu';
+import { LiquidCpu, liquidDomain } from '../src/fx/liquidCpu';
 import { filmCell, LiquidFilm, type FilmSnapshot } from '../src/fx/liquidFilm';
 import {
   bakeWindow, dropBounds, filmAlbedoOpacity, filmExtent, filmFrame, liquidSurface, previewWindow, renderFilm, renderLiquidTile, resampleFilm, shadeLiquid, splatLiquid,
   LIQUID_ISO, previewAlbedoOpacity, type Bounds,
 } from '../src/fx/liquidRender';
 import { liquidPreviewGrid, liquidReplayTime } from '../src/fx/liveLiquid';
+import { gpuStep, legacyGpuStep, recordFilm, replayFilm, wetCells, wetRegions } from './support/gpuFilmTwin';
 import { cropTile, viewBasis } from '../src/fx/volumeRender';
 
 // The liquid medium: the particle solver, the floor film, their rendering, and the bake's decal output.
@@ -42,9 +43,12 @@ describe('liquid parameters', () => {
     expect(titles('liquid', 'bake')).toEqual(['Flipbook', 'Outputs']);
   });
 
-  it('raises the droplet size when the volume would need too many particles', () => {
+  it('keeps the droplet size when the volume would need too many particles: the drops get heavier', () => {
     const p = normaliseFx({ ...liquid(), sourceVolume: 20, dropletSize: 0.001 });
-    expect(particleCount(p)).toBeLessThanOrEqual(60_000);
+    expect(p.dropletSize).toBe(0.001);
+    expect(particleCount(p)).toBe(60_000);
+    expect(packetVolume(p) * particleCount(p)).toBeCloseTo(0.02, 9);
+    expect(packetVolume(normaliseFx({ ...liquid(), sourceVolume: 0.01, dropletSize: 0.004 }))).toBeCloseTo(0.004 ** 3, 12);
   });
 
   it('bakes the decal outputs only for a liquid on a solid floor', () => {
@@ -481,5 +485,130 @@ describe('edge fade', () => {
     expect(tile[0]).toBe(255);
     const same = new Uint8Array(16).fill(200);
     expect(Array.from(fadeEdges(same, 2, 2, 0))).toEqual(Array.from(new Uint8Array(16).fill(200)));
+  });
+});
+
+describe('the GPU floor film', () => {
+  it('lays its uniform block out as the kernels read it', async () => {
+    const { filmUniformData, FILM_UNIFORM_BYTES } = await import('../src/fx/liquidFilmGpu');
+    const p = liquid({ regionSize: [2, 1.2, 1.5], seed: 9, pinning: 1.4, flow: 0.5, soak: 0.1, edgeNoise: 0.6 });
+    const frame = filmFrame(liquidDomain(p).pool, filmCell(p), 2048);
+    const buf = filmUniformData(p, { frame, dt: 1 / 30, firstId: 64, bodyCount: 2, origin: [1, 2, 3], window: [3, 4, 50, 60] });
+    expect(buf.byteLength).toBe(FILM_UNIFORM_BYTES);
+    const u = new Uint32Array(buf), f = new Float32Array(buf);
+    expect([u[0], u[1], u[2], u[3]]).toEqual([frame.cols, frame.rows, 9, 64]);
+    expect(f[6]).toBeCloseTo(frame.cell, 9);                       // geom.z: the cell
+    expect(f[7]).toBeCloseTo(Math.pow(p.dropletSize, 3), 12);      // geom.w: one drop
+    expect([f[8], f[9], f[10]]).toEqual([1, 0.75, 2]);             // the floor's centre and the body count
+    expect(f[11]).toBeCloseTo(0.0014, 9);                          // the edge hold, metres
+    expect(f[12]).toBeCloseTo(1 / 30 / (frame.cell * frame.cell), 3);
+    expect(f[15]).toBeCloseTo(1 - Math.exp(-0.1 / 30), 7);         // the soak share of the step
+    expect([f[33], f[34], f[35]]).toEqual([1, 2, 3]);              // the region's corner
+    expect([u[36], u[37], u[38], u[39]]).toEqual([3, 4, 50, 60]);  // the active window
+    // The frame is the liquid's reach on the floor, at cells of half a droplet.
+    expect(frame.cell).toBeCloseTo(0.006, 9);
+  });
+});
+
+describe('the region frames the drops; the pool is not bounded by it', () => {
+  /** Blood spatter, quick: coarse drops, a short throw. */
+  const spatter = (p: Partial<FxParams> = {}) => normaliseFx({
+    ...FX_PRESETS.find(x => x.id === 'blood-splash')!.params, dropletSize: 0.012, sourceVolume: 0.12, ...p,
+  });
+  /** Run until every drop is down (or `seconds` pass). */
+  const settle = (p: FxParams, seconds = 3) => {
+    const sim = new LiquidCpu(p);
+    for (let t = 0; t < seconds && (t === 0 || sim.count > 0); t += p.frameTime) sim.step(p, p.frameTime);
+    return sim;
+  };
+
+  it('puts the pool where the liquid can reach, whatever the region', () => {
+    const small = liquidDomain(spatter({ regionSize: [1.3, 1.3, 1.3] })), large = liquidDomain(spatter({ regionSize: [3, 1.3, 3] }));
+    for (let i = 0; i < 4; i++) expect(small.pool[i]).toBeCloseTo(large.pool[i], 6);
+    // The spray goes along +z from 0.6 m behind the floor's centre: the pool lies well ahead of the emitter.
+    expect(large.pool[3]).toBeGreaterThan(1);
+    // The drops' box holds the pool and the region; its top, how high they are thrown.
+    expect(small.box[3]).toBeCloseTo(small.pool[3] + 0.65, 6);
+    expect(small.top).toBeGreaterThanOrEqual(1.3);
+  });
+
+  it('lets drops leave the region and land: none escape, and the film stays inside the pool', () => {
+    for (const preset of FX_PRESETS.filter(x => x.params.medium === 'liquid' && x.params.floorMode === 'solid')) {
+      // The preset's drops, coarser, in a region far too small for them.
+      const p = normaliseFx({ ...preset.params, dropletSize: Math.max(0.008, preset.params.dropletSize), regionSize: [0.5, 0.5, 0.5] });
+      const sim = settle(p);
+      const released = sim.totalVolume();
+      expect(released, preset.id).toBeGreaterThan(0);
+      expect(sim.escaped / released, preset.id).toBeLessThan(0.01);
+      const e = filmExtent(sim.film!)!, d = sim.domain.pool;
+      expect(e[0], preset.id).toBeGreaterThanOrEqual(d[0]);
+      expect(e[1], preset.id).toBeGreaterThanOrEqual(d[1]);
+      expect(e[2], preset.id).toBeLessThanOrEqual(d[2]);
+      expect(e[3], preset.id).toBeLessThanOrEqual(d[3]);
+    }
+  });
+
+  it('bakes the same pool in a small region as in a large one', async () => {
+    const decal = async (w: number) => {
+      const p = spatter({ regionSize: [w, 1.3, w], frames: 4, decalFrames: 2, decalSettle: 0.6, tileSize: 16, decalTileSize: 256 });
+      const out = await generateFx(p);
+      return { size: out.decal!.size, offset: out.decal!.offset };
+    };
+    const small = await decal(1.3), large = await decal(2.5);
+    for (let a = 0; a < 2; a++) {
+      expect(small.size[a]).toBeGreaterThan(0.1);
+      expect(Math.abs(small.size[a] - large.size[a]) / large.size[a]).toBeLessThan(0.1);
+      expect(Math.abs(small.offset[a] - large.offset[a])).toBeLessThan(0.1 * Math.max(large.size[0], large.size[1]));
+    }
+  });
+
+  it('throws a splash above the region and lets it fall back in', () => {
+    const p = spatter({ regionSize: [2, 0.3, 2], emitterPosition: [0, 0.15, 0], sourcePitch: 80, sourceSpread: 5, sourceSpeed: [2, 2.5] });
+    const d = liquidDomain(p);
+    // About v^2 / 2g above the emitter: well over the 0.3 m box.
+    expect(d.top).toBeGreaterThan(0.15 + (2.5 * 2.5) / (2 * 9.81));
+    const sim = settle(p);
+    expect(sim.escaped / sim.totalVolume()).toBeLessThan(0.01);
+  });
+
+  it('keeps the preview and the bake windows to the region: drops outside do not widen them', () => {
+    const dims = { nx: 40, ny: 30, nz: 40 }, v = 0.01, region = [1, 1, 1];
+    const inside: Bounds = [0.4, 0.2, 0.4, 0.6, 0.4, 0.6];
+    const w0 = previewWindow(inside, 0.02, dims, v, region, null);
+    // The same drops, and some far past the region's walls.
+    const wide: Bounds = [-3, 0, 0.4, 0.6, 0.4, 4];
+    expect(previewWindow(wide, 0.02, dims, v, region, w0).voxelSize).toBeLessThanOrEqual(region[2] / dims.nz + 1e-9);
+    // Every drop outside: nothing to follow, the window stays.
+    expect(previewWindow([3, 0, 3, 4, 1, 4], 0.02, dims, v, region, w0)).toBe(w0);
+    const b = bakeWindow(wide, 0.02, region, v, 2_500_000);
+    expect(b.origin[0]).toBeGreaterThanOrEqual(0);
+    expect(b.origin[0] + b.dims.nx * b.voxelSize).toBeLessThanOrEqual(1 + 2 * v);
+    expect(b.origin[2] + b.dims.nz * b.voxelSize).toBeLessThanOrEqual(1 + 2 * v);
+  });
+});
+
+describe("the GPU floor film flows like the bake's", () => {
+  /** A small blood spatter: about a hundred drops on 4 mm film cells. */
+  const spatter = (seed: number) => normaliseFx({ ...FX_PRESETS.find(x => x.id === 'blood-splash')!.params, dropletSize: 0.008, sourceVolume: 0.06, seed });
+
+  it('no longer runs the flux transfer that made liquid and merged the drops', () => {
+    // The scheme the GPU film ran before: its quarter-of-the-donor flux, judged on an unconverged iterate,
+    // crept onto dry floor every frame and its clamp at zero added liquid.
+    const p = spatter(2);
+    const { events } = recordFilm(p, 1);
+    const cpu = replayFilm(p, events), legacy = replayFilm(p, events, legacyGpuStep);
+    expect(legacy.volume()).toBeGreaterThan(2 * cpu.volume());
+  });
+
+  it('leaves as many separate pools as the CPU film, over about the same floor, and keeps the volume', () => {
+    for (const seed of [2, 4]) {
+      const p = spatter(seed);
+      const { sim, events } = recordFilm(p, 2);
+      const cpu = sim.film!, gpu = replayFilm(p, events, gpuStep);
+      expect(Math.abs(gpu.volume() - cpu.volume()) / cpu.volume(), `seed ${seed}`).toBeLessThan(1e-4);
+      const a = wetCells(cpu).size, b = wetCells(gpu).size;
+      expect(Math.abs(b - a) / a, `seed ${seed} wet area`).toBeLessThan(0.25);
+      expect(Math.abs(wetRegions(gpu) - wetRegions(cpu)), `seed ${seed} pools`).toBeLessThanOrEqual(Math.max(2, Math.round(0.5 * wetRegions(cpu))));
+    }
   });
 });

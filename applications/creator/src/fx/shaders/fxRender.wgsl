@@ -237,7 +237,7 @@ fn cs_render(@builtin(global_invocation_id) g: vec3<u32>) {
                     if (u.look4.w > 0.0) { soot = exp(-u.look4.w * s.x * u.flags.y); }
                     let fire = fire_lut[u32(round(e * 255.0))].rgb * (u.flags.z * e * u.real5.y * soot);
                     var bc = 0.0;
-                    if (u.look5.x > 0.0) { bc = u.look5.x * blue_core_source(e, s.z) * exp(-2.0 * s.x * u.flags.y) * u.flags.z * u.real5.y; }
+                    if (u.look5.x > 0.0) { bc = u.look5.x * BLUE_CORE_EMIT * blue_core_source(e, s.z) * exp(-2.0 * s.x * u.flags.y) * u.flags.z * u.real5.y; }
                     c = c + a_emit * (fire + u.look6.rgb * bc);
                 }
                 col = col + T * c;

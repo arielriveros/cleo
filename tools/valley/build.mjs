@@ -38,6 +38,7 @@ import {
 } from './foliage.mjs'
 import { CREATOR_FOLIAGE, TREE_CULL, generateCreatorFoliage } from './creatorFoliage.mjs'
 import { CREATOR_FX, generateCreatorFx } from './creatorFx.mjs'
+import { firstWetFrame } from './pngAlpha.mjs'
 import { buildProps } from './props.mjs'
 import { houseColliders } from './houses.mjs'
 import { addLods, placeableCopy } from './lods.mjs'
@@ -215,8 +216,8 @@ for (const [file, name] of [['ValleyWindmill', 'Windmill Sails'], ['ValleyFireLi
 // Creator (creatorFx.mjs): Torch Fire, in tall 128 x 256 frames, on the torches, braziers and candles, and
 // Bonfire Fire on the bonfire, the fire pits and the hearth; EMBERS rising off it and, now and then, a
 // burst of SPARKS that fall and bounce across the floor; and a point LIGHT. A FireLight script on the root
-// flickers the light and keeps the flames at a sane brightness whatever the exposure (the valley's noon,
-// its night, the dungeon).
+// flickers the light. The flames take only a tenth of the exposure (FLAME_EXPOSURE_WEIGHT), so they read
+// as fire at the valley's noon, its night and in the dungeon alike.
 
 const FIRE = '/Props/Fire'
 /** The Valley's FX Creator bakes, by key (creatorFx.mjs): the flames, the blood and the splashes. */
@@ -232,11 +233,17 @@ function creatorTex(key, file, folder, name) {
   return texId
 }
 /**
- * A luminance (1 = 78,643 nits) for the flames' tilesets, carried over by GLOW_LUMINANCE to the whole
- * exposure at a torch-lit night's EV. The Creator's flames are drawn alpha-blended at full colour, bright
- * already: a quarter of what the old additive sheet took, or the whole flame burns out to white.
+ * The share of the camera's exposure a flame takes (Sprite.exposureWeight). A flame is a light source the
+ * eye always sees as fire: taking the whole exposure, it sank to a five-hundredth of its torch-lit look at
+ * noon (and, drawn alpha-blended, showed as a black shape over the sunlit ground). At a tenth it keeps about
+ * half that look in full sun and blazes only a little brighter on a moonlit night.
  */
-const FLAME_OVERDRIVE = +(0.5 * souls.GLOW_LUMINANCE).toPrecision(3)
+const FLAME_EXPOSURE_WEIGHT = 0.1
+/**
+ * The flames' tileset overdrive, at FLAME_EXPOSURE_WEIGHT: what they were tuned to look like at a
+ * torch-lit night's exposure (EV 5), the same there as before.
+ */
+const FLAME_OVERDRIVE = 0.5
 /**
  * A Creator flame: its baked `.tileset` under the Valley's ids, the frames to play and their rate, the
  * cell's width over its height, and where in the cell the flame's root sits (`root`, a share of the
@@ -261,28 +268,28 @@ const TORCH_FLAME = creatorFlame('torch-fire', 'Torch Fire', 0.1, 1.5)
 const BONFIRE_FLAME = creatorFlame('bonfire-fire', 'Bonfire Fire', 0.1, 1.6)
 
 /**
- * The flames and embers take the camera's exposure whole, as the torch's light does (Sprite /
- * ParticleSystemNode exposureWeight 1). Their brightness is a luminance: the flame sprite's tileset
- * `overdrive` and the embers' colour intensity (converted in souls `physicalEmitter`) are set so a flame
- * looks as it was tuned at a torch-lit night's exposure (EV 5). It fades into the noon sun, and blazes on a
- * moonlit night, where the eye has opened up further.
+ * The embers take the camera's exposure whole, as the torch's light does (ParticleSystemNode exposureWeight
+ * 1): their colour intensity (converted in souls `physicalEmitter`) is a luminance, tuned at a torch-lit
+ * night's exposure (EV 5). The flames take a tenth of it (FLAME_EXPOSURE_WEIGHT): they stay fire at noon.
  */
 
 /**
  * A flame sprite `height` tall standing on `base`: a cylindrical billboard (it turns to the camera about
  * its upright axis), each copy starting on a frame of its own so a row of torches does not flicker in step.
- * The Creator's frames carry the fire straight-alpha with its smoke, so it is drawn alpha-blended: the
- * flame glows (its tileset's overdrive) and the smoke over it is smoke, not light. The cell's root sits
- * `flame.root` up from its bottom edge, so the sprite is sunk by that much to put the root on `base`.
+ * Drawn ADDITIVE: a flame is light and next to transparent (the bake's FLAME_LOOK has no smoke), so it adds
+ * to what is behind it and never darkens it, whatever the exposure. The cell's root sits `flame.root` up
+ * from its bottom edge, so the sprite is sunk by that much to put the root on `base`.
  */
 function flame(key, height, base = [0, 0, 0], name = 'Flame', kind = TORCH_FLAME) {
   return node(name, 'animatedSprite', {
     id: id(`flame:${key}`), position: [base[0], base[1] + height * (0.5 - kind.root), base[2]], scale: [height * kind.aspect * kind.widen, height, 1],
     sprite: {
       constraints: 'cylindrical', tilesetId: kind.tileset.id, tileset: kind.tileset, tileIndex: 0,
-      tint: [1, 1, 1], opacity: 1, transparent: true, side: 'double', wireframe: false, blend: 'alpha',
-      // Its base sits inside the torch head or the fire pit's logs: shown through them, not cut off.
-      softness: Math.round(Math.min(0.4, height * 0.5) * 100) / 100,
+      tint: [1, 1, 1], opacity: 1, transparent: true, side: 'double', wireframe: false, blend: 'additive',
+      exposureWeight: FLAME_EXPOSURE_WEIGHT,
+      // Its base sits inside the torch head or the fire pit's logs: it fades into them over a few centimetres
+      // instead of being cut along a line, and is still hidden by whatever stands in front of it.
+      softness: Math.round(Math.min(0.15, height * 0.25) * 100) / 100,
     },
     animation: { frames: kind.frames, frameSource: 'node', fps: kind.fps, loop: true, randomStart: true },
   })
@@ -369,12 +376,11 @@ const fx = (key, asset, position) => {
 // Blood and splashes, from the FX Creator
 // =====================================================================================================
 //
-// A landed hit (SoulsGameManager.bleed) spawns three templates, here all made of FX Creator bakes:
-//   Blood Spray  particles: one Blood Burst sprite at the wound, played over its life, and droplets on
-//                velocity-aligned particles playing the looping Blood Droplets, thrown on along the blow
-//   Blood Splat  a decal under the body: the Blood Pool bake's floor decal, an animated pool that spreads
-//   Blood Drops  a decal along the blow: the Blood Spatter bake's floor decal, its spray along +Z
-// Each decal's flipbook plays from when SoulsBloodSplat lays it, so the blood lands and settles.
+// A landed hit (SoulsGameManager.bleed) draws its blood with one FX Creator decal flipbook and no particles
+// (the GameManagers' bloodSprayTemplate is empty):
+//   Blood Drops  a decal along the blow: the Blood Spatter bake's floor decal at twice its size, its spray
+//                along +Z; its flipbook plays from when SoulsBloodSplat lays it, starting as the blood lands
+// A hit leaves no pool. The Blood Pool bake's decal is the Bloodstain's, dropped where the player dies.
 // The pond's splashes (WaterVolumeNode) are Water Splash for something entering it and Water Step for
 // a character's footsteps as it wades: the Water Splash crown with Water Droplets thrown off it.
 
@@ -386,8 +392,6 @@ function creatorSprite(key, name, folder, render = {}) {
   const textureId = creatorTex(key, `${key}_flipbook.png`, `${folder}/Textures`, `${name} Flipbook`)
   return { textureId, render: { textureId, flipbook: { ...fx.manifest.output.particleFlipbook }, ...render } }
 }
-const BLOOD_BURST = creatorSprite('blood-burst', 'Blood Burst', BLOOD_DIR)
-const BLOOD_DROPLET = creatorSprite('blood-droplet', 'Blood Droplets', BLOOD_DIR)
 const WATER_SPLASH = creatorSprite('water-splash', 'Water Splash', WATER_FX_DIR)
 const WATER_DROPLET = creatorSprite('water-droplet', 'Water Droplets', WATER_FX_DIR)
 /** Seconds a one-shot sprite lasts: its frames at the bake's rate. */
@@ -422,68 +426,113 @@ function splashEmitters(key, burst, droplet, { life, size, drops, speed, spread,
     }),
   ]
 }
-const BLOOD_SPRAY_FX = souls.vfx('valley:blood-spray', 'Blood Spray',
-  // Blood is dark: lifted a little, or a torch-lit hit in the dungeon reads as nothing at all.
-  splashEmitters('blood', BLOOD_BURST, BLOOD_DROPLET, { life: spriteLife('blood-burst'), size: [0.75, 0.95], drops: 14, speed: [1.4, 3.4], spread: 35, dropSize: [0.03, 0.06], brightness: 1.8 }),
-  { center: [0, -0.4, 1], extents: [1.6, 1.4, 2] })
+// A body entering the pond: the crown about two metres across (smaller, clear water vanished against the
+// pond), its drops large enough to catch the light.
 const WATER_SPLASH_FX = souls.vfx('valley:water-splash', 'Water Splash',
-  splashEmitters('water', WATER_SPLASH, WATER_DROPLET, { life: spriteLife('water-splash'), size: [0.9, 1.1], drops: 10, speed: [1.2, 2.6], spread: 70, dropSize: [0.025, 0.05], up: 3 }),
-  { center: [0, 0.5, 0], extents: [1.4, 1.2, 1.4] })
-// A wading step: the same crown, a third the size, a few drops.
+  splashEmitters('water', WATER_SPLASH, WATER_DROPLET, { life: spriteLife('water-splash'), size: [1.9, 2.3], drops: 14, speed: [1.4, 3], spread: 70, dropSize: [0.04, 0.08], up: 3, brightness: 1.3 }),
+  { center: [0, 1, 0], extents: [2.6, 2.2, 2.6] })
+// A wading step: the same crown, under half the size, a few drops.
 const WATER_STEP_FX = souls.vfx('valley:water-step', 'Water Step',
-  splashEmitters('water-step', WATER_SPLASH, WATER_DROPLET, { life: spriteLife('water-splash') * 0.8, size: [0.35, 0.45], drops: 4, speed: [0.7, 1.4], spread: 70, dropSize: [0.018, 0.03], up: 3 }),
-  { center: [0, 0.25, 0], extents: [0.6, 0.5, 0.6] })
+  splashEmitters('water-step', WATER_SPLASH, WATER_DROPLET, { life: spriteLife('water-splash') * 0.8, size: [0.8, 1], drops: 6, speed: [0.8, 1.6], spread: 70, dropSize: [0.03, 0.05], up: 3, brightness: 1.3 }),
+  { center: [0, 0.5, 0], extents: [1.2, 1, 1.2] })
 
-/** A liquid bake's floor decal: its animated atlases as a library material, and the sidecar's decal block. */
-function creatorDecal(key, name) {
+/**
+ * A liquid bake's floor decal: its animated atlases (or, `still`, the settled last frame alone: a decal that
+ * is simply there, as a puddle is) as a library material under `folder`, and the sidecar's decal block.
+ * `wetFrom`: seconds into the flipbook one frame before liquid first lies on the floor (pngAlpha.mjs), so a
+ * decal that is the whole effect starts there, fading in, instead of showing nothing while it is airborne.
+ */
+function creatorDecal(key, name, folder = BLOOD_DIR, { still = false } = {}) {
   const fx = CREATOR[key]
   const d = fx.manifest.output.outputs.decal
-  const color = creatorTex(key, d.atlas.color, `${BLOOD_DIR}/Textures`, `${name} Decal`)
-  const normal = creatorTex(key, d.atlas.normal, `${BLOOD_DIR}/Textures`, `${name} Decal Normal`)
-  const orm = creatorTex(key, d.atlas.orm, `${BLOOD_DIR}/Textures`, `${name} Decal ORM`)
-  const materialId = libraryMaterial(`decal:${key}`, `${name} Decal`, `${BLOOD_DIR}/Materials`, pbrMaterial({
+  const images = still ? d.still : d.atlas
+  const color = creatorTex(key, images.color, `${folder}/Textures`, `${name} Decal`)
+  const normal = creatorTex(key, images.normal, `${folder}/Textures`, `${name} Decal Normal`)
+  const orm = creatorTex(key, images.orm, `${folder}/Textures`, `${name} Decal ORM`)
+  const materialId = libraryMaterial(`decal:${key}`, `${name} Decal`, `${folder}/Materials`, pbrMaterial({
     diff: color, nor: normal, arm: orm, roughness: 1, castShadow: false,
   }))
   // Where the liquid lies: its box (size) and its centre from the centre of the effect's floor (offset).
-  return { materialId, textureIds: [color, normal, orm], size: d.size, offset: d.offset ?? [0, 0], flipbook: d.flipbook, albedoOpacity: d.albedoOpacity }
+  const wetFrom = still ? 0 : Math.max(0, firstWetFrame(fx.file(d.atlas.color), d.flipbook) - 1) / d.flipbook.fps
+  return {
+    materialId, textureIds: [color, normal, orm], size: d.size, offset: d.offset ?? [0, 0],
+    flipbook: still ? null : d.flipbook, albedoOpacity: d.albedoOpacity, wetFrom,
+  }
 }
 const BLOOD_POOL_DECAL = creatorDecal('blood-pool', 'Blood Pool')
 const BLOOD_SPATTER_DECAL = creatorDecal('blood-splash', 'Blood Spatter')
+const PUDDLE_DECAL = creatorDecal('water-puddle', 'Water Puddle', WATER_FX_DIR, { still: true })
 
 /**
  * A blood decal template: SoulsBloodSplat snaps it to the floor, turns and sizes it and plays its
- * flipbook from there, then fades it out. The box is where the bake's liquid lies, 0.4 m deep, standing
- * where it lay from the centre of the bake's floor (the root).
+ * flipbook from there, then fades it out. The box is where the bake's liquid lies (`decalOptions.scale`
+ * times it, `depth` deep: 0.4 m by default), standing where it lay from the centre of the bake's floor (the
+ * root).
  */
-function bloodDecalTemplate(key, name, decal, fields = {}) {
+function bloodDecalTemplate(key, name, decal, fields = {}, decalOptions = {}) {
   const rootId = id(`template:${key}:root`)
   const root = withScript(node(name, 'node', {
     id: rootId,
-    children: [node('Decal', 'decal', {
-      id: id(`decal:${key}`),
-      position: [decal.offset[0], 0, decal.offset[1]],
-      variables: vars({ __materialId: decal.materialId }),
-      decal: {
-        size: [decal.size[0], 0.4, decal.size[1]], opacity: 1, sortOrder: 0, angleFade: 0.35, depthFade: 0.25,
-        affects: { albedo: true, normal: true, surface: true, emissive: false },
-        receivers: 'all', pattern: 'material', material: matJson(decal.materialId),
-        albedoOpacity: decal.albedoOpacity, flipbook: decal.flipbook,
-      },
-    })],
+    children: [creatorDecalNode(`decal:${key}`, decal, decalOptions)],
   }), 'SoulsBloodSplat', fields)
   return { id: id(`template:${key}`), name, nodeJson: root, textureIds: decal.textureIds, scripts: {}, bodies: {}, triggers: {} }
+}
+/**
+ * A Creator liquid's floor decal as a node: its box where the bake's liquid lies (from the centre of the
+ * bake's floor, the parent), `scale` times its size, `depth` deep, turned `yaw` about the parent.
+ */
+function creatorDecalNode(key, decal, { scale = 1, depth = 0.4, yaw = 0, name = 'Decal', sortOrder = 0, receivers = 'all' } = {}) {
+  const c = Math.cos(yaw * Math.PI / 180), s = Math.sin(yaw * Math.PI / 180)
+  const ox = decal.offset[0] * scale, oz = decal.offset[1] * scale
+  return node(name, 'decal', {
+    id: id(key),
+    position: [ox * c + oz * s, 0, -ox * s + oz * c],
+    ...(yaw ? { rotation: [0, yaw, 0] } : {}),
+    variables: vars({ __materialId: decal.materialId }),
+    decal: {
+      size: [decal.size[0] * scale, depth, decal.size[1] * scale], opacity: 1, sortOrder, angleFade: 0.35, depthFade: 0.25,
+      affects: { albedo: true, normal: true, surface: true, emissive: false },
+      receivers, pattern: 'material', material: matJson(decal.materialId),
+      albedoOpacity: decal.albedoOpacity, ...(decal.flipbook ? { flipbook: decal.flipbook } : {}),
+    },
+  })
 }
 /** An effect template (SoulsFx: play, then remove itself), with the sprites' textures recorded on it. */
 function spriteFxTemplate(key, name, asset, lifetime, textureIds) {
   return { ...souls.fxTemplate(`valley:${key}`, name, asset, lifetime), textureIds }
 }
+/**
+ * The spatter a hit leaves, grown from the bake's: it is the hit's only blood (no spray), so it must read
+ * on its own. At twice the bake (about 2.7 x 2.4 m at bloodReferenceDamage) and bloodDropsOffset (0.9 m)
+ * ahead of the target, it runs from about 0.3 m in front of their feet to 2.7 m along the blow.
+ */
+const BLOOD_SPATTER_SCALE = 2
 const BLOOD_TEMPLATES = [
-  spriteFxTemplate('blood-spray', 'Blood Spray', BLOOD_SPRAY_FX, 1.2, [BLOOD_BURST.textureId, BLOOD_DROPLET.textureId]),
-  // The pool is small and settles where the body stands; the spatter lies where the bake's drops landed,
-  // its spray along the blow, the bake's floor centre bloodDropsOffset ahead of the wound.
-  bloodDecalTemplate('blood-splat', 'Blood Splat', BLOOD_POOL_DECAL, { minSize: 0.7, maxSize: 1.1 }),
-  bloodDecalTemplate('blood-drops', 'Blood Drops', BLOOD_SPATTER_DECAL, { minSize: 0.85, maxSize: 1.15 }),
+  // A hit leaves only a spatter, its spray along the blow, playing from when the blood lands. The pool is
+  // the bloodstain's, below. The box is deeper than the bake's: the spatter is longer than the ground is flat.
+  bloodDecalTemplate('blood-drops', 'Blood Drops', BLOOD_SPATTER_DECAL,
+    { minSize: 0.85, maxSize: 1.15, flipbookStart: BLOOD_SPATTER_DECAL.wetFrom },
+    { scale: BLOOD_SPATTER_SCALE, depth: 0.6 }),
 ]
+/** The bake's pool, grown to a body's: it is where the player last died. */
+const BLOODSTAIN_POOL_SCALE = 2.4
+/**
+ * The bloodstain (SoulsGameManager.dropBloodstain), dropped where the player dies: the Blood Pool bake's
+ * decal, spreading as it plays (SoulsBloodstain starts it), and the souls kit's glow and soul pick-up over
+ * it. A new death replaces it, so the pool marks the player's last death place.
+ */
+const BLOODSTAIN_TEMPLATE = (() => {
+  const rootId = id('template:bloodstain:root')
+  const root = withScript(node('Bloodstain', 'node', {
+    id: rootId,
+    children: [
+      // Deeper than a hit's splat: the player falls on slopes and steps as well as on flat ground.
+      creatorDecalNode('bloodstain:pool', BLOOD_POOL_DECAL, { scale: BLOODSTAIN_POOL_SCALE, depth: 0.8, name: 'Pool', sortOrder: 1 }),
+      souls.particles('bloodstain:glow', 'Glow', souls.VFX.bloodstain),
+    ],
+  }), 'SoulsBloodstain')
+  return { id: id('template:bloodstain'), name: 'Bloodstain', nodeJson: root, textureIds: BLOOD_POOL_DECAL.textureIds, scripts: {}, bodies: {}, triggers: { [rootId]: souls.zone(1.5) } }
+})()
 const WATER_TEMPLATES = [
   spriteFxTemplate('water-splash', 'Water Splash', WATER_SPLASH_FX, 1.4, [WATER_SPLASH.textureId, WATER_DROPLET.textureId]),
   spriteFxTemplate('water-step', 'Water Step', WATER_STEP_FX, 1.2, [WATER_SPLASH.textureId, WATER_DROPLET.textureId]),
@@ -1640,6 +1689,47 @@ function floaters() {
 }
 
 /**
+ * Rain puddles on the trails: the Water Puddle bake's settled decal (a Creator water simulation) where rain
+ * would collect -- the low spots of the dirt roads and the forest tracks, where the ground dips below the
+ * ring around it. Sparse: the deepest spots at least PUDDLE_SPACING apart, never on a steep stretch, in the
+ * pond or under a cliff, each turned and sized at random.
+ */
+const PUDDLE_COUNT = 30
+const PUDDLE_SPACING = 9
+function puddles() {
+  const candidates = []
+  for (const line of [...dirtRoadLines, ...trackLines]) {
+    for (let i = 0; i < line.length; i += 2) {
+      const [x, z] = line[i]
+      if (heights.slopeAt(x, z) > 12 || Math.hypot(x - POND.x, z - POND.z) < POND_HALF + 3 || cliffDistance(x, z) < 6) continue
+      const h = heights.heightAt(x, z)
+      let ring = 0
+      for (let a = 0; a < 8; a++) ring += heights.heightAt(x + Math.cos(a * Math.PI / 4) * 3, z + Math.sin(a * Math.PI / 4) * 3)
+      candidates.push({ x, z, h, dip: ring / 8 - h })
+    }
+  }
+  candidates.sort((a, b) => b.dip - a.dip)
+  const chosen = []
+  for (const c of candidates) {
+    if (chosen.length >= PUDDLE_COUNT) break
+    if (chosen.some(o => Math.hypot(o.x - c.x, o.z - c.z) < PUDDLE_SPACING)) continue
+    chosen.push(c)
+  }
+  const random = rng(0x9d1e)
+  log(`puddles: ${chosen.length} of ${candidates.length} trail spots`)
+  return chosen.map((c, i) => {
+    const yaw = Math.round(random() * 360)
+    const scale = Math.round((0.8 + random() * 0.8) * 100) / 100
+    return node(`Puddle ${i + 1}`, 'node', {
+      id: id(`puddle:${i}`), position: [c.x, Math.round(c.h * 1000) / 1000, c.z],
+      // Half a metre deep: the trail's own ruts and camber are well inside it.
+      // On the ground only: a puddle does not wet the boots of whoever walks through it.
+      children: [creatorDecalNode(`puddle:${i}:decal`, PUDDLE_DECAL, { scale, depth: 0.5, yaw, receivers: 'terrain' })],
+    })
+  })
+}
+
+/**
  * One probe for the whole valley: lighting and reflections for the hamlet, its houses and torches, and what
  * the pond's water reflects. Unbounded (size 0), so every surface in the valley takes it at full weight, with
  * no seam where one probe's box gives way to another's. Captured between the hamlet and the pond, and
@@ -1980,13 +2070,15 @@ function valleyScene() {
   const root = node('root', 'node', {
     id: id('root'),
     children: [
+      // A hit's blood is the spatter decal alone: no spray particles.
       withScript(node('GameManager', 'node', {
         id: soulsId('manager'), children: [souls.banner(), souls.soundsGroup('manager', souls.SOUNDS.manager, { music: souls.MUSIC_CUES })],
-      }), 'SoulsGameManager'),
+      }), 'SoulsGameManager', { bloodSprayTemplate: '' }),
       linkInstance(LEVEL.player, player),
       sun, sky, skyLight, clouds, wind, timeOfDay,
       landscapeNode(),
       souls.group('water', 'Water', [pondWater(), pondVolume(), pondZone(), ...floaters()]),
+      souls.group('puddles', 'Puddles', puddles()),
       valleyProbe(),
       souls.group('buildings', 'Buildings', placedBuildings),
       souls.group('occluders', 'Occluders', buildingOccluders()),
@@ -2046,8 +2138,8 @@ const dungeon = buildDungeon({
 // =====================================================================================================
 
 const KEEP_ONLY = ['Stone (placeholder)', 'Flagstones (placeholder)']
-// The souls blood's placeholder materials are replaced by the Creator's decals (the bloodstain keeps its own).
-const excludeMaterials = [...souls.materials.filter(m => KEEP_ONLY.includes(m.name)).map(m => m.id), souls.BLOOD.splat, souls.BLOOD.drops]
+// The souls blood's placeholder materials, the bloodstain's included, are replaced by the Creator's decals.
+const excludeMaterials = [...souls.materials.filter(m => KEEP_ONLY.includes(m.name)).map(m => m.id), souls.BLOOD.splat, souls.BLOOD.drops, souls.BLOOD.stain]
 const SHARED_PROPS = '/Props/Shared/Materials'
 
 const foliageFolder = Object.fromEntries(foliageAssets.map(a => [a.name, `${FOLIAGE}/Models`]))
@@ -2071,6 +2163,7 @@ const result = souls.writeProject({
   templates: [BARREL_TEMPLATE, DEBRIS_TEMPLATE, CAVE_TEMPLATE, ...Object.values(FIRE_TEMPLATES), ...WATER_TEMPLATES],
   excludeTemplates: [LEVEL.torch.id, LEVEL.bonfire.id],
   bloodTemplates: BLOOD_TEMPLATES,
+  bloodstain: BLOODSTAIN_TEMPLATE,
   // The souls fires' flame particles (the valley's flames are Creator sprites) and its placeholder spray.
   excludeParticleSystems: [souls.VFX.fire.id, souls.VFX.torch.id, souls.VFX.bloodSpray.id],
   tilesets: [TORCH_FLAME.tileset, BONFIRE_FLAME.tileset],

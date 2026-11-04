@@ -41,9 +41,15 @@ export interface Orbit { target: [number, number, number]; distance: number; pit
 export function installOrbitCamera(camera: CameraNode, initial: Orbit): { frame(o: Orbit): void; current(): Orbit; restore(): void } {
   const previous = camera.onUpdate;
   const previousNear = camera.camera.near;
-  // A metre-scale effect wants a near plane the size of a hand, not the World Creator's metre.
-  camera.camera.near = 0.05;
   let o: Orbit = { ...initial, target: [...initial.target] as [number, number, number] };
+  // Effects run from a 4 cm candle to a 12 m explosion: the near plane and the closest zoom follow what is
+  // framed, so a candle can be looked at from a hand's breadth and a blast is not clipped up close.
+  let minDistance = 0.3;
+  const fit = () => {
+    minDistance = Math.max(0.01, o.distance * 0.1);
+    camera.camera.near = Math.min(0.05, Math.max(0.001, o.distance / 50));
+  };
+  fit();
 
   const place = () => {
     const p = o.pitch * Math.PI / 180, y = o.yaw * Math.PI / 180;
@@ -70,13 +76,16 @@ export function installOrbitCamera(camera: CameraNode, initial: Orbit): { frame(
       o.target[1] += pan[1] * k;
     }
     const wheel = input.value('EditorCamera/Zoom');
-    if (Math.abs(wheel) > 0) o.distance = Math.max(0.3, o.distance * Math.exp(wheel * 0.001));
+    if (Math.abs(wheel) > 0) {
+      o.distance = Math.max(minDistance, o.distance * Math.exp(wheel * 0.001));
+      camera.camera.near = Math.min(0.05, Math.max(0.001, o.distance / 50));
+    }
     place();
   };
   place();
 
   return {
-    frame(next: Orbit) { o = { ...next, target: [...next.target] as [number, number, number] }; place(); },
+    frame(next: Orbit) { o = { ...next, target: [...next.target] as [number, number, number] }; fit(); place(); },
     current() { return { ...o, target: [...o.target] as [number, number, number] }; },
     restore() { camera.onUpdate = previous; camera.camera.near = previousNear; },
   };
@@ -93,5 +102,5 @@ export function frameBox(size: readonly [number, number, number], yaw = 20, floo
 
 /** An orbit centred on `centre` from `distance` away, keeping the current angles. */
 export function frameAt(current: { pitch: number; yaw: number }, centre: readonly [number, number, number], distance: number): Orbit {
-  return { target: [centre[0], centre[1], centre[2]], distance: Math.max(0.5, distance), pitch: current.pitch, yaw: current.yaw };
+  return { target: [centre[0], centre[1], centre[2]], distance: Math.max(0.02, distance), pitch: current.pitch, yaw: current.yaw };
 }

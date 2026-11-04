@@ -165,11 +165,25 @@ function handleFor(id: number): LoadHandle {
     },
     finish() {
       if (!current || current.id !== id) return
+      logTimings(current)
       current = null
       emit()
     },
     get active() { return !!current && current.id === id },
   }
+}
+
+/**
+ * The load's times, one line in the console as it ends. The screen shows none (only what is loading,
+ * and how far), so this is where a slow step is found. Steps carried over from before a reload are left
+ * out: their times belong to the load that ran them.
+ */
+function logTimings(state: LoadState): void {
+  const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`
+  const steps = state.steps
+    .filter(s => s.startedAt !== null && s.endedAt !== null && !s.id.startsWith('prior:'))
+    .map(s => `${s.label} ${secs(s.endedAt! - s.startedAt!)}${s.status === 'failed' ? ' (failed)' : ''}`)
+  console.info(`[load] ${state.title}: ${secs(now() - state.startedAt)}${steps.length ? ` · ${steps.join(' · ')}` : ''}`)
 }
 
 // ----- maths --------------------------------------------------------------------------------------

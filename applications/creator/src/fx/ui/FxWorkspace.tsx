@@ -64,6 +64,8 @@ interface FxState {
   /** The effect preset picked last, or null for the defaults. */
   presetId: string | null;
   setPresetId: (id: string | null) => void;
+  /** Stand a new preset's region at the middle of the stage and aim the camera at it. */
+  recentre: (p: FxParams) => void;
 }
 
 const FxContext = createContext<FxState | null>(null);
@@ -211,7 +213,7 @@ export function FxWorkspace() {
     }
     if (selection?.kind === 'emitter') {
       const e = emitterPose(params, off);
-      o.frame(frameAt(o.current(), e.position, Math.max(e.radius * 8, 1.5)));
+      o.frame(frameAt(o.current(), e.position, Math.max(e.radius * 8, Math.max(...n.regionSize) * 0.6)));
       return;
     }
     o.frame(frameBox(n.regionSize, o.current().yaw, off));
@@ -219,6 +221,14 @@ export function FxWorkspace() {
 
   // W / E / R pick the gizmo, X flips local/world, Delete removes a selected body, Escape clears the
   // selection -- as in the editor. F (frame) is the workspace's own.
+  /** A preset's effect starts at the middle of the scene, whatever the last one was dragged to; the camera follows. */
+  const recentre = (p: FxParams) => {
+    const centred = [0, 0, 0] as [number, number, number];
+    setStageScene(s => ({ ...s, regionOffset: centred }));
+    const o = orbit.current;
+    if (o) o.frame(frameBox(normaliseFx(p).regionSize, o.current().yaw, centred));
+  };
+
   const removeSelectedBody = () => {
     if (selection?.kind !== 'body') return;
     setStageScene({ ...stageScene, bodies: stageScene.bodies.filter(b => b.id !== selection.id) });
@@ -334,7 +344,7 @@ export function FxWorkspace() {
   </>);
   const value = useMemo(() => ({
     params, setParams, output, liveFrames, tile: tileDims(normaliseFx(params)).width, stats, live, scene: stageScene, setScene: setStageScene,
-    selection, select: setSelection, bakeRunning: bake.status.running, onBake: () => void bakeFlipbook(), presetId, setPresetId,
+    selection, select: setSelection, bakeRunning: bake.status.running, onBake: () => void bakeFlipbook(), presetId, setPresetId, recentre,
   }), [params, output, liveFrames, stageScene, selection, bake.status.running, gpu, presetId, asset.active?.id]);
 
   return (
@@ -388,15 +398,17 @@ function LiveReadout() {
  * The scene-side effect values (region size, sun direction, preview quality) are the left panel's.
  */
 function ParametersPanel() {
-  const { params, setParams, presetId, setPresetId } = useFx();
+  const { params, setParams, presetId, setPresetId, recentre } = useFx();
   const values = { ...params, tileSize: String(params.tileSize) } as unknown as Record<string, unknown>;
   // Changing the medium starts from that medium's first preset: a liquid needs a region, droplets and a
   // source of its own, and a smoke grid's voxel size is far too coarse for drops.
   const change = (patch: Partial<FxParams>) => {
     if (patch.medium && patch.medium !== params.medium) {
       const id = patch.medium === 'liquid' ? LIQUID_START : GAS_START;
-      setParams(effectPresetParams(id, params));
+      const next = effectPresetParams(id, params);
+      setParams(next);
       setPresetId(id);
+      recentre(next);
       return;
     }
     setParams({ ...params, ...patch, tileSize: Number(patch.tileSize ?? params.tileSize) });
@@ -404,11 +416,15 @@ function ParametersPanel() {
   // An effect preset replaces every parameter -- seed, sun direction and bake settings included -- except
   // the viewport's preview quality. Reset applies the preset picked last again.
   const applyEffect = (p: { id: string }) => {
-    setParams(effectPresetParams(p.id, params));
+    const next = effectPresetParams(p.id, params);
+    setParams(next);
     setPresetId(p.id);
+    recentre(next);
   };
   const reset = () => {
-    setParams(effectPresetParams(presetId, params));
+    const next = effectPresetParams(presetId, params);
+    setParams(next);
+    recentre(next);
     toast.success(`Reset to ${effectPresetLabel(presetId)}.`);
   };
   return (

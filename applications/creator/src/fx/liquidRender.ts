@@ -30,11 +30,11 @@ export const LIQUID_ISO = 0.5;
 /** Speed (m/s) where foam starts, and the span over which it reaches full. */
 export const FOAM_FROM = 0.6, FOAM_SPAN = 2;
 /** Wet ground darkens by this share (the decal's look of a film of clear liquid). */
-const WET_DARKENING = 0.35;
+export const WET_DARKENING = 0.35;
 /** The ground a decal's colours are solved against: what the per-channel tint is folded in over. */
-const GROUND_REF = 0.35;
+export const GROUND_REF = 0.35;
 /** A dried stain's colour against the wet liquid's, and its roughness. */
-const STAIN_SHADE = 0.55, STAIN_ROUGHNESS = 0.7;
+export const STAIN_SHADE = 0.55, STAIN_ROUGHNESS = 0.7;
 
 export interface LiquidGrid {
   dims: FluidDims;
@@ -78,10 +78,11 @@ export function splatRadius(p: Pick<FxParams, 'dropletSize' | 'surfaceSmoothing'
 
 /**
  * A bake frame's grid: `bounds` grown by `pad`, cut to the region, at `voxelSize` -- raised just enough to
- * stay within `maxVoxels`. Its corner snaps to the voxel lattice from the region's corner.
+ * stay within `maxVoxels`. Its corner snaps to the voxel lattice from the region's corner. The region is the
+ * sprite's frame: drops outside it (they keep flying, to land in the pool) are not drawn and do not widen it.
  */
 export function bakeWindow(bounds: Bounds, pad: number, region: readonly number[], voxelSize: number, maxVoxels: number): LiquidWindow {
-  const lo = [0, 1, 2].map(a => Math.max(0, bounds[a] - pad));
+  const lo = [0, 1, 2].map(a => Math.min(region[a], Math.max(0, bounds[a] - pad)));
   const hi = [0, 1, 2].map(a => Math.max(lo[a], Math.min(region[a], bounds[a + 3] + pad)));
   let v = voxelSize;
   const count = [0, 1, 2].reduce((n, a) => n * Math.max(2, (hi[a] - lo[a]) / v + 1), 1);
@@ -99,13 +100,15 @@ const WINDOW_STEP = Math.pow(2, 0.25);
  * `minVoxel`, or as few steps coarser as hold them. `prev` stays while it still holds them and is at most
  * a step coarser than they need -- a window that moves or rescales every frame would swim. Its corner is
  * on the voxel lattice from the region's corner; along a side the window outgrows, it is centred on the
- * region.
+ * region. Only the drops inside the region count: it is what the sprite frames, and those outside it (still
+ * flying, to land in the pool) are not drawn.
  */
 export function previewWindow(bounds: Bounds | null, pad: number, dims: FluidDims, minVoxel: number,
                               region: readonly number[], prev: LiquidWindow | null): LiquidWindow {
   const n = [dims.nx, dims.ny, dims.nz];
-  if (!bounds) return prev ?? placeWindow([region[0] / 2, region[1] / 2, region[2] / 2], n, minVoxel, region, dims);
-  const lo = [bounds[0] - pad, bounds[1] - pad, bounds[2] - pad], hi = [bounds[3] + pad, bounds[4] + pad, bounds[5] + pad];
+  const lo = bounds ? [0, 1, 2].map(a => Math.max(0, bounds[a] - pad)) : [];
+  const hi = bounds ? [0, 1, 2].map(a => Math.min(region[a], bounds[a + 3] + pad)) : [];
+  if (!bounds || [0, 1, 2].some(a => hi[a] <= lo[a])) return prev ?? placeWindow([region[0] / 2, region[1] / 2, region[2] / 2], n, minVoxel, region, dims);
   const need = Math.max(minVoxel, ...[0, 1, 2].map(a => (hi[a] - lo[a]) / n[a]));
   const v = minVoxel * Math.pow(WINDOW_STEP, Math.ceil(Math.log(need / minVoxel) / Math.log(WINDOW_STEP) - 1e-6));
   if (prev && prev.voxelSize >= need * 0.9999 && prev.voxelSize <= v * WINDOW_STEP * 1.0001

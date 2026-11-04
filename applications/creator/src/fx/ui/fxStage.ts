@@ -55,6 +55,8 @@ export class FxStage {
   /** The effect's ground shadow: a decal darkening the floor through the shadow texture. */
   private shadow: DecalNode | null = null;
   private shadowTextureId: string | null = null;
+  /** The texture registered under `shadowTextureId`: a rebuilt simulation brings a new one (the old is freed). */
+  private shadowTexture: import('cleo/graphics/texture').Texture | null = null;
   /** A liquid's film on the floor: a decal drawing its colour, normal and ORM maps. */
   private film: DecalNode | null = null;
   private filmTextureIds: string[] = [];
@@ -235,8 +237,13 @@ export class FxStage {
       if (this.shadow) { this.world.removeNode(this.shadow); this.shadow = null; }
       return;
     }
-    if (!this.shadow || !this.shadowTextureId) {
-      this.shadowTextureId ??= TextureManager.Instance.addTexture(texture, 'fx.groundShadow');
+    if (!this.shadow || !this.shadowTextureId || texture !== this.shadowTexture) {
+      // A new simulation (a restart, the GPU switch) frees its old shadow texture: the decal must not keep
+      // drawing it, or every frame's submit fails on a destroyed texture.
+      if (this.shadow) { this.world.removeNode(this.shadow); this.shadow = null; }
+      if (this.shadowTextureId) TextureManager.Instance.removeTexture(this.shadowTextureId);
+      this.shadowTextureId = TextureManager.Instance.addTexture(texture, 'fx.groundShadow');
+      this.shadowTexture = texture;
       this.shadow = new DecalNode(PREFIX + 'shadow', {
         size: [1, 1, 1],
         material: Material.PBR({ baseColor: [0, 0, 0], roughness: 1, textures: { baseColorTexture: this.shadowTextureId } }),
@@ -256,6 +263,9 @@ export class FxStage {
   updateFloorDecal(film: FloorDecal | null): void {
     if (!film) {
       if (this.film) { this.world.removeNode(this.film); this.film = null; }
+      for (const id of this.filmTextureIds) TextureManager.Instance.removeTexture(id);
+      this.filmTextureIds = [];
+      this.filmTextures = [];
       return;
     }
     const textures = [film.color, film.normal, film.orm];
@@ -322,6 +332,7 @@ export class FxStage {
     this.floor = null;
     this.region = this.wind = this.sky = this.skyLight = this.fire = this.emitter = this.shadow = this.film = null;
     if (this.shadowTextureId) { TextureManager.Instance.removeTexture(this.shadowTextureId); this.shadowTextureId = null; }
+    this.shadowTexture = null;
     for (const id of this.filmTextureIds) TextureManager.Instance.removeTexture(id);
     this.filmTextureIds = [];
     this.filmTextures = [];

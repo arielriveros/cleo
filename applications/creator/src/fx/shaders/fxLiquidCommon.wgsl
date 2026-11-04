@@ -24,7 +24,8 @@ struct LiquidUniforms {
     light: vec4<f32>,    // toward-sun xyz, absorption per voxel inside the liquid
     light_dims: vec4<u32>, // half-resolution light grid lx, ly, lz, -
     origin: vec4<f32>,   // the region's low corner in the stage (bodies are in stage metres), foam span (m/s)
-    window: vec4<f32>,   // the preview volume's low corner in the region (m): a window over the drops, -
+    window: vec4<f32>,   // the preview volume's low corner in the region (m): a window over the drops; the domain's top (m)
+    domain: vec4<f32>,   // the drops live inside x0, z0, x1, z1 (region m): where the release can reach, not the region
 };
 
 /** The drops' box comes back in cells offset by this, so they stay unsigned (liquidGpu.ts `BOUNDS_BIAS`). */

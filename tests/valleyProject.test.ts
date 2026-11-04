@@ -406,6 +406,35 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
                 expect(e.render.lit).toBe(true);
                 expect(e.render.blend).toBe('alpha');
             }
+            // Big enough to read against the pond: the crown about two metres across, a step's under one.
+            const crown = ps.particleSystem.system.emitters.find((e: any) => e.name === 'Burst');
+            const size = crown.init.find((m: any) => m.type === 'size').params.range;
+            expect(size[0], name).toBeGreaterThanOrEqual(name === 'Water Splash' ? 1.8 : 0.75);
+        }
+    });
+
+    it('lays rain puddles from the FX Creator in the low spots of the trails', () => {
+        const group = nodes().find(n => n.name === 'Puddles');
+        expect(group).toBeTruthy();
+        const puddles = group.children;
+        expect(puddles.length).toBeGreaterThanOrEqual(15);
+        expect(puddles.length).toBeLessThanOrEqual(35);
+        const materials = library('materials');
+        for (const p of puddles) {
+            const d = p.children.find((c: any) => c.type === 'decal');
+            expect(d, p.name).toBeTruthy();
+            // The Water Puddle bake's settled decal: a still, on the ground only.
+            expect(d.decal.flipbook).toBeUndefined();
+            expect(d.decal.receivers).toBe('terrain');
+            const m = materials.find((x: any) => x.id === d.variables.__materialId?.value);
+            expect(m?.name, p.name).toBe('Water Puddle Decal');
+            // On the ground it marks: its box stands at the terrain height there.
+            expect(Math.abs(p.position[1] - heightAt(p.position[0], p.position[2]))).toBeLessThan(0.05);
+        }
+        // Sparse: never two within a few metres.
+        for (let i = 0; i < puddles.length; i++) for (let j = i + 1; j < puddles.length; j++) {
+            const a = puddles[i].position, b = puddles[j].position;
+            expect(Math.hypot(a[0] - b[0], a[2] - b[2])).toBeGreaterThan(8.5);
         }
     });
 
@@ -556,7 +585,8 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(count('Bonfire')).toBe(1);
         expect(count('Hanging Brazier')).toBe(2);
         // Fire is the FX Creator's: the torches' and the hearths' flames, each in tall 128 x 256 frames
-        // (8 x 4); alpha-blended (the frames carry their smoke), each copy on a frame of its own.
+        // (8 x 4); additive (a flame is light: it never darkens what is behind it) and taking a tenth of the
+        // exposure (fire at noon as at night), each copy on a frame of its own.
         const flames = all.filter(n => n.type === 'animatedSprite');
         expect(flames.length).toBeGreaterThan(30);
         const tilesets = new Set(flames.map(f => f.sprite.tileset.name));
@@ -564,11 +594,14 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         for (const f of flames) {
             const t = f.sprite.tileset;
             expect([t.tileWidth, t.tileHeight, t.columns, t.rows], t.name).toEqual([128, 256, 8, 4]);
-            expect(f.sprite.blend).toBe('alpha');
+            expect(f.sprite.blend).toBe('additive');
+            expect(f.sprite.exposureWeight).toBe(0.1);
             expect(f.animation.randomStart).toBe(true);
             expect(f.animation.frames).toHaveLength(32);
-            // The flame's base sits inside its torch or pit: shown through it, not cut off.
+            // The flame's base sits inside its torch or pit: it fades into it over a few centimetres, never
+            // more than a torch head is deep (the head in front of it must still hide it).
             expect(f.sprite.softness, f.name).toBeGreaterThan(0);
+            expect(f.sprite.softness, f.name).toBeLessThanOrEqual(0.15);
         }
         // Embers always; sparks one at a time, falling and bouncing off the floor.
         const fx = library('particleSystems').find((p: any) => p.name === 'Torch Embers');

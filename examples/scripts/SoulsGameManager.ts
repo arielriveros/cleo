@@ -58,10 +58,8 @@ export default class SoulsGameManagerNode extends Node {
   // ----- blood (see bleed) -------------------------------------------------------------------------
   /** Off, no blood at all: no spray and no decals. */
   public bloodEnabled: boolean = true
-  /** Droplets thrown off a wound (particles). */
+  /** Droplets thrown off a wound (particles). Empty: no spray, the decal alone (the Valley's blood). */
   public bloodSprayTemplate: TemplateName = 'Blood Spray'
-  /** The pool decal left under a wounded body. */
-  public bloodSplatTemplate: TemplateName = 'Blood Splat'
   /** The spatter decal thrown along the blow. */
   public bloodDropsTemplate: TemplateName = 'Blood Drops'
   /** Metres along the blow from the target to the spatter decal's centre (at a full-size hit). */
@@ -222,13 +220,15 @@ export default class SoulsGameManagerNode extends Node {
     this.after(this.respawnDelay, () => this.respawnAtBonfire())
   }
 
-  /** A new stain replaces the old one, and the souls in the old one are gone for good. */
+  /**
+   * A new stain replaces the old one, and the souls in the old one are gone for good. Dropped on every death,
+   * souls or none: its pool of blood marks where the player last died (with none, there is nothing to retrieve).
+   */
   public dropBloodstain(at: ArrayLike<number>, souls: number): void {
     if (this._bloodstain) {
       try { this._bloodstain.remove() } catch { /* already gone */ }
       this._bloodstain = null
     }
-    if (souls <= 0) return
     const stain = this.scene?.instantiate(this.bloodstainTemplate, { position: [at[0], at[1], at[2]] })
     if (!stain) return
     ;(stain as any).souls = souls
@@ -357,8 +357,10 @@ export default class SoulsGameManagerNode extends Node {
   }
 
   /**
-   * A hit drew blood: droplets fly off `target`, a pool lands under it and a spatter along the blow,
-   * from `from` toward `target`. Called by SoulsCharacter.receiveHit when a hit lands. `amount` (the damage dealt) sizes the splat.
+   * A hit drew blood: droplets fly off `target` (unless `bloodSprayTemplate` is empty) and a spatter lands
+   * along the blow, from `from` toward `target`. A hit leaves no pool: the pool is where the player last died
+   * (the bloodstain). Called by SoulsCharacter.receiveHit when a hit lands. `amount` (the damage dealt)
+   * sizes the splat.
    */
   public bleed(target: Node, from: Node, amount: number): void {
     if (!this.bloodEnabled || !target || !(amount > 0)) return
@@ -375,8 +377,7 @@ export default class SoulsGameManagerNode extends Node {
     const heading = Math.atan2(dx, dz) * 180 / Math.PI
     // The spray's +Z along the blow: its droplets fly on, away from the attacker.
     this.fx(this.bloodSprayTemplate, [at[0], at[1] + height * 0.6, at[2]], heading)
-    // Spawned a little above the ground: each decal finds the floor itself (SoulsBloodSplat).
-    this._splat(this.bloodSplatTemplate, [at[0], at[1] + 0.5, at[2]], NaN, scale)
+    // Spawned a little above the ground: the decal finds the floor itself (SoulsBloodSplat).
     const ahead = this.bloodDropsOffset * scale
     this._splat(this.bloodDropsTemplate, [at[0] + dx * ahead, at[1] + 0.5, at[2] + dz * ahead], heading, scale)
   }

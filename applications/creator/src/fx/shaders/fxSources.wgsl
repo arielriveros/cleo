@@ -1,4 +1,4 @@
-// Emitter, turbulence, combustion, buoyancy and wind -- fluidCpu.ts `sources`.
+// Emitter, combustion, buoyancy and wind -- fluidCpu.ts `sources`.
 // Also records the fuel burned per second per voxel, the combustion-expansion source the divergence
 // kernel reads, and skips solid voxels (placed bodies, preview only).
 
@@ -40,40 +40,7 @@ fn cs_sources(@builtin(global_invocation_id) g: vec3<u32>) {
         }
     }
 
-    // Turbulence on hot gas and, with turbulence-on-smoke, cooled smoke too; plus a finer octave.
-    let on_smoke = u.real6.x;
-    var stir = min(1.0, s.y);
-    if (on_smoke > 0.0) { stir = stir + on_smoke * min(1.0, s.x); }
-    if (u.turb.x > 0.0 && (s.y > 0.02 || (on_smoke > 0.0 && stir > 0.02))) {
-        let k = u.turb.x * stir * dt;
-        // Noise from the emitter (fluidCpu.ts): the same effect stirs the same way in any region.
-        let r = p - u.emitter.xyz;
-        let q = vec3<f32>(r.x * u.turb.y, r.y * u.turb.y - u.turb.z, r.z * u.turb.y);
-        let seed = u.dims.w;
-        v.x = v.x + k * value_noise3(q, seed);
-        v.y = v.y + k * 0.5 * value_noise3(q + vec3<f32>(31.4, 0.0, 0.0), seed + 1u);
-        v.z = v.z + k * value_noise3(q + vec3<f32>(0.0, 0.0, 17.7), seed + 2u);
-        let kd = k * u.real6.y;
-        if (kd > 0.0) {
-            let f = vec3<f32>(q.x * 2.7, r.y * u.turb.y * 2.7 - u.turb.z * 2.0, q.z * 2.7);
-            v.x = v.x + kd * value_noise3(f, seed + 3u);
-            v.y = v.y + kd * 0.5 * value_noise3(f + vec3<f32>(31.4, 0.0, 0.0), seed + 4u);
-            v.z = v.z + kd * value_noise3(f + vec3<f32>(0.0, 0.0, 17.7), seed + 5u);
-        }
-    }
-
-    // Disturbance: one random kick per block, re-seeded every interval.
-    if (u.real1.y > 0.0) {
-        let amount = min(1.0, s.y + s.x);
-        if (amount > 0.01) {
-            let b = vec3<i32>(floor((p - u.emitter.xyz) / u.real1.z));
-            let seed = u.dims.w + 101u + u32(u.real1.w) * 7919u;
-            let k = u.real1.y * amount * dt;
-            v.x = v.x + k * (hash3(b.x, b.y, b.z, seed) * 2.0 - 1.0);
-            v.y = v.y + k * (hash3(b.x, b.y, b.z, seed + 1u) * 2.0 - 1.0);
-            v.z = v.z + k * (hash3(b.x, b.y, b.z, seed + 2u) * 2.0 - 1.0);
-        }
-    }
+    // Turbulence and disturbance are fxForcing / fxForcingSum / fxForcingApply: pure stirring, no net push.
     if (u.real3.y > 0.0) {
         // Vapour <-> visible droplets across the dew point.
         if (s.y < u.real3.z) {

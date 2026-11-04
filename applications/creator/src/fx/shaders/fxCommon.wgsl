@@ -44,10 +44,18 @@ struct FxUniforms {
 /** realism.ts `FIRE_EMIT`: the fire's brightness per unit emission per voxel, whatever its opacity. */
 const FIRE_EMIT: f32 = 0.6;
 
-/** realism.ts `blueCoreSource`. */
+/** realism.ts `BLUE_CORE_EMIT`, `BLUE_CORE_ZONE`, `BLUE_CORE_SOOT`. */
+const BLUE_CORE_EMIT: f32 = 0.12;
+const BLUE_CORE_ZONE: f32 = 0.3;
+const BLUE_CORE_SOOT: f32 = 8.0;
+
+/** realism.ts `blueCoreSource`: the emitter's fuel (`emit.x`) as `fuel0`, the smoke yield (`burn.w`). */
 fn blue_core_source(e: f32, fuel: f32) -> f32 {
-    if (e <= 0.0 || fuel <= 0.0) { return 0.0; }
-    return min(1.0, fuel * 3.0) * (1.0 - 0.7 * e);
+    let fuel0 = u.emit.x;
+    if (e <= 0.0 || fuel <= 0.0 || fuel0 <= 0.0) { return 0.0; }
+    let zone = BLUE_CORE_ZONE / (1.0 + BLUE_CORE_SOOT * max(0.0, u.burn.w));
+    let z = clamp((fuel / fuel0 - (1.0 - zone)) / zone, 0.0, 1.0);
+    return z * z * min(1.0, e * 4.0);
 }
 
 /** realism.ts `glowSource`. */

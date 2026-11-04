@@ -36,11 +36,17 @@ describe('physical blackbody', () => {
     for (let k = 800; k <= 1800; k += 100) { const l = lum(blackbodyRgb(k, 1800)); expect(l).toBeGreaterThan(last); last = l; }
   });
 
-  it('bakes the LUT from it: dark red at the bottom, near-white at the top', () => {
+  it('bakes the LUT from it: dark red at the bottom, pale yellow at the top, orange between, never pink', () => {
     const lut = bakeFireLut({ ...DEFAULT_FX, fireColorMode: 'blackbody', blackbodyMin: 900, blackbodyMax: 1800 });
     expect(lut[0]).toBeGreaterThan(lut[2]);
-    const top = [lut[255 * 4], lut[255 * 4 + 1], lut[255 * 4 + 2]];
-    expect(Math.min(...top)).toBeGreaterThan(0.85);
+    const at = (i: number) => [lut[i * 4], lut[i * 4 + 1], lut[i * 4 + 2]];
+    // The eye adapts to a white hotter than the flame (FIRE_WHITE_SCALE): the hottest is warm, not white.
+    const top = at(255);
+    expect(top[0]).toBeCloseTo(1, 6);
+    expect(top[1]).toBeGreaterThan(0.7);
+    expect(top[2]).toBeLessThan(top[1]);
+    // Orange through the body: blue well below green (adapted to the hottest alone, it read pink).
+    for (const i of [128, 192]) { const c = at(i); expect(c[0]).toBeGreaterThan(c[1]); expect(c[2]).toBeLessThan(c[1] * 0.75); }
   });
 });
 

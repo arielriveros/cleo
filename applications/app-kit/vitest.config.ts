@@ -17,6 +17,7 @@ export default mergeConfig(engineConfig, defineConfig({
             // with their tests from the editor's list.
             include: [
                 'src/feedback/dialogStore.ts',
+                'src/feedback/loadQueue.ts',
                 'src/feedback/toastStore.ts',
                 'src/gizmo/gizmoDrag.ts',
                 'src/gizmo/gizmoHandles.ts',

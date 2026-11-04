@@ -244,12 +244,16 @@ describe.skipIf(!present)('the Valley example project', () => {
             if (n.scriptVars.impactTemplate) expect(names.has(n.scriptVars.impactTemplate)).toBe(true);
         }
         for (const name of ['Bloodstain', 'Hit Spark', 'Bolt Impact', 'Magic Bolt', 'Slam Dust',
-                            'Blood Spray', 'Blood Splat', 'Blood Drops']) expect(names.has(name), name).toBe(true);
+                            'Blood Drops']) expect(names.has(name), name).toBe(true);
+        // A hit leaves no pool (the pool is the bloodstain's, where the player last died) and no spray: its
+        // blood is the spatter decal alone.
+        expect(names.has('Blood Splat')).toBe(false);
+        expect(names.has('Blood Spray')).toBe(false);
     });
 
     it('gives every decal a PBR library material whose textures ship with the project', () => {
         const decals = everyNode().filter(n => n.type === 'decal');
-        expect(decals.length).toBeGreaterThanOrEqual(3);    // splat, drops, the bloodstain's pool
+        expect(decals.length).toBeGreaterThanOrEqual(3);    // drops, the bloodstain's pool, the puddles
         const materials = library('materials');
         const shipped = new Set(read('textures', 'index.json').map((t: any) => t.id));
         const refs = new Set(manifest().sceneMetas[0].refs.textureIds);
@@ -262,48 +266,45 @@ describe.skipIf(!present)('the Valley example project', () => {
             expect(shipped.has(tex), d.name).toBe(true);
             expect(refs.has(tex), d.name).toBe(true);
         }
-        // The splat templates carry the script that snaps them to the floor and fades them.
-        for (const name of ['Blood Splat', 'Blood Drops']) {
-            const t = templates().find((x: any) => x.name === name);
-            expect(scriptOf(t.nodeJson)?.source).toContain('class SoulsBloodSplatNode');
-            expect(t.nodeJson.children.some((c: any) => c.type === 'decal')).toBe(true);
-        }
+        // The splat template carries the script that snaps it to the floor and fades it.
+        const drops = templates().find((x: any) => x.name === 'Blood Drops');
+        expect(scriptOf(drops.nodeJson)?.source).toContain('class SoulsBloodSplatNode');
+        expect(drops.nodeJson.children.some((c: any) => c.type === 'decal')).toBe(true);
     });
 
-    it('draws the blood a hit leaves with the FX Creator: animated sprites, and decals that settle', () => {
+    it('draws the blood a hit leaves with the FX Creator decal flipbooks alone, no particles', () => {
         const shipped = new Set(read('textures', 'index.json').map((t: any) => t.id));
-        // The spray: a burst sprite played over its life, and droplets on velocity-aligned particles.
-        const spray = templates().find((x: any) => x.name === 'Blood Spray');
-        const ps = spray.nodeJson.children.find((c: any) => c.type === 'particleSystem').particleSystem.system;
-        const burst = ps.emitters.find((e: any) => e.name === 'Burst');
-        const drops = ps.emitters.find((e: any) => e.name === 'Droplets');
-        expect(burst.render.flipbook.mode).toBe('life');
-        expect(drops.render.alignment).toBe('velocity');
-        expect(drops.render.flipbook.frames).toBeGreaterThan(1);
-        for (const e of [burst, drops]) {
-            expect(shipped.has(e.render.textureId), e.name).toBe(true);
-            expect(e.render.lit).toBe(true);
-            expect(e.render.blend).toBe('alpha');
-        }
-        // The decals: the bake's animated pool, played once from where it lands, with relief and wet roughness.
-        for (const name of ['Blood Splat', 'Blood Drops']) {
+        // No spray: the manager spawns none, and no blood particle system ships, the kit's or the Creator's
+        // (the bloodstain's glow marks souls to recover; it is not blood).
+        const manager = allNodes(scene().scene).find((n: any) => n.name === 'GameManager');
+        expect(manager.scriptVars.bloodSprayTemplate).toBe('');
+        const blood = library('particleSystems').filter((s: any) => /blood/i.test(s.name) && !/^Bloodstain/.test(s.name));
+        expect(blood.map((s: any) => s.name)).toEqual([]);
+        // The decals: the spatter a hit leaves and the pool where the player last died (the bloodstain's), each
+        // the bake's animated pool, played once from where it lands, with relief and wet roughness.
+        for (const name of ['Blood Drops', 'Bloodstain']) {
             const t = templates().find((x: any) => x.name === name);
             const child = t.nodeJson.children.find((c: any) => c.type === 'decal');
             const d = child.decal;
             // Where the bake's liquid lay: the box around it, standing at its offset from the effect's floor centre.
             expect(child.position[1], name).toBe(0);
             expect(Math.hypot(child.position[0], child.position[2]), name).toBeLessThan(1.5);
+            if (name === 'Bloodstain') expect(scriptOf(t.nodeJson)?.source).toContain('class SoulsBloodstainNode');
             expect(d.size[0] * d.size[2], name).toBeGreaterThan(0);
             expect(d.flipbook, name).toMatchObject({ loop: false, blend: true });
             expect(d.flipbook.frames).toBeGreaterThan(1);
             expect(d.affects.normal).toBe(true);
             const tex = d.material.textures;
             for (const slot of ['baseColorTexture', 'normalMap', 'metallicRoughnessTexture']) expect(shipped.has(tex[slot]), `${name} ${slot}`).toBe(true);
+            if (name !== 'Blood Drops') continue;
+            // The hit's only blood, so big enough to read: twice the bake's spatter, over two metres a side.
+            expect(d.size[0], name).toBeGreaterThan(2);
+            expect(d.size[2], name).toBeGreaterThan(2);
+            // It starts as the blood lands, not while it is still in the air: into its flipbook, before its end.
+            const start = t.nodeJson.scriptVars.flipbookStart;
+            expect(start).toBeGreaterThan(0);
+            expect(start).toBeLessThan(d.flipbook.frames / d.flipbook.fps);
         }
-        // The placeholder spray is gone, so a Blood Spray particle system is the Creator's alone.
-        const sprays = library('particleSystems').filter((s: any) => s.name === 'Blood Spray');
-        expect(sprays).toHaveLength(1);
-        expect(sprays[0].system.emitters.map((e: any) => e.name)).toEqual(['Burst', 'Droplets']);
     });
 
 

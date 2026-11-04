@@ -2,8 +2,9 @@
 // fxParams.ts: whole stages for the left (Scene) panel, and one "Presets ▾" menu per section on both
 // sides. A section preset writes only its own section's values -- it is merged over what is there.
 
-import { DEFAULT_FX, FIRE_GRADIENT, FX_PRESETS, normaliseFx, type FxParams } from './fxParams';
+import { DEFAULT_FX, FIRE_GRADIENT, FX_PRESETS, GAS_FLAME_GRADIENT, normaliseFx, type FxParams } from './fxParams';
 import { newBody, type FxBody, type FxScene } from './fxScene';
+import { similarity } from './fxUnits';
 
 /** What a scene-side preset can touch: the stage, the scene-side effect values (the sun), and bodies. */
 export interface SceneValues {
@@ -18,6 +19,8 @@ export interface SectionPreset<V> {
   label: string;
   description: string;
   values: V;
+  /** The values are written for the Campfire's size: applied, they are scaled to the effect's (`sectionValues`). */
+  scaled?: boolean;
 }
 
 let counter = 0;
@@ -161,6 +164,16 @@ export function effectPresetLabel(id: string | null): string {
 
 // --- Effect: sections --------------------------------------------------------------------------------
 
+/** How big an effect is next to the Campfire (its region's longest side over the Campfire's). */
+export function effectScale(p: Pick<FxParams, 'regionSize'>): number {
+  return Math.max(...p.regionSize) / Math.max(...DEFAULT_FX.regionSize);
+}
+
+/** What a section preset writes into `params`: its values, scaled to the effect when written at the Campfire's size. */
+export function sectionValues<V extends Partial<FxParams>>(preset: SectionPreset<V>, params: FxParams): V {
+  return preset.scaled ? similarity(preset.values, effectScale(params)) : preset.values;
+}
+
 export const EFFECT_SECTION_PRESETS: Record<string, SectionPreset<Partial<FxParams>>[]> = {
   'Splash source': [
     { id: 'hit', label: 'Hit spray', description: 'Thrown along the aim in one burst: what a blow knocks out.',
@@ -176,9 +189,9 @@ export const EFFECT_SECTION_PRESETS: Record<string, SectionPreset<Partial<FxPara
   ],
   Liquid: [
     { id: 'water', label: 'Water', description: 'Thin, beads easily, bounces.', values: { viscosity: 0, surfaceTension: 0.55, stickiness: 0.3 } },
-    { id: 'blood', label: 'Blood', description: 'A little thicker than water, and it sticks where it lands.', values: { viscosity: 0.15, surfaceTension: 0.6, stickiness: 0.6 } },
-    { id: 'oil', label: 'Oil', description: 'Thick and clinging, smears more than it splashes.', values: { viscosity: 0.6, surfaceTension: 0.4, stickiness: 0.85 } },
-    { id: 'mercury', label: 'Mercury', description: 'Very tense and wets nothing: beads up and rolls.', values: { viscosity: 0.05, surfaceTension: 1, stickiness: 0 } },
+    { id: 'blood', label: 'Blood', description: 'A little thicker than water, and it sticks where it lands.', values: { viscosity: 0.18, surfaceTension: 0.44, stickiness: 0.6 } },
+    { id: 'oil', label: 'Oil', description: 'Thick and clinging, smears more than it splashes.', values: { viscosity: 0.77, surfaceTension: 0.23, stickiness: 0.85 } },
+    { id: 'mercury', label: 'Mercury', description: 'Very tense and wets nothing: beads up and rolls.', values: { viscosity: 0.06, surfaceTension: 1, stickiness: 0 } },
     { id: 'weightless', label: 'Weightless', description: 'No gravity and no air: for a drop seen on its own.', values: { gravity: 0, airDrag: 0 } },
   ],
   Floor: [
@@ -206,42 +219,44 @@ export const EFFECT_SECTION_PRESETS: Record<string, SectionPreset<Partial<FxPara
     { id: 'molten-gold', label: 'Molten gold', description: 'Liquid metal, warm and a little rough.',
       values: { liquidColor: [1, 0.78, 0.34, 1], liquidTint: [1, 0.78, 0.34, 1], liquidAbsorption: 500, liquidRoughness: 0.18, liquidMetallic: 1, specular: 1, foam: 0 } },
   ],
+  // Emitter, Combustion, Forces and Dissipation are written for the Campfire's size (SI) and scaled to the
+  // effect's when applied (`scaled`; fxUnits.ts `similarity`): "Lively" is as lively on a candle as on a bonfire.
   Emitter: [
-    { id: 'point', label: 'Point', description: 'A small round source.', values: { emitterShape: 'sphere', emitterRadius: 0.288, emitterPosition: [0, 0.76, 0], emitterNoise: 0.2 } },
-    { id: 'disc', label: 'Wide disc', description: 'A broad bed of fuel on the ground.', values: { emitterShape: 'disc', emitterRadius: 1.44, emitterPosition: [0, 0.334, 0], emitterNoise: 0.5 } },
-    { id: 'column', label: 'Tall column', description: 'A fast jet straight up.', values: { emitterShape: 'sphere', emitterRadius: 0.384, emitSpeed: 14, emitterNoise: 0.2 } },
-    { id: 'ragged', label: 'Ragged', description: 'A noisy, uneven source.', values: { emitterShape: 'disc', emitterRadius: 0.96, emitterNoise: 0.85 } },
-    { id: 'burst', label: 'Burst', description: 'Emits for a moment, then stops: an explosion or puff.', values: { emitDuration: 0.25 } },
+    { id: 'point', label: 'Point', description: 'A small round source.', scaled: true, values: { emitterShape: 'sphere', emitterRadius: 0.0954, emitterPosition: [0, 0.252, 0], emitterNoise: 0.2 } },
+    { id: 'disc', label: 'Wide disc', description: 'A broad bed of fuel on the ground.', scaled: true, values: { emitterShape: 'disc', emitterRadius: 0.477, emitterPosition: [0, 0.111, 0], emitterNoise: 0.5 } },
+    { id: 'column', label: 'Tall column', description: 'A fast jet straight up.', scaled: true, values: { emitterShape: 'sphere', emitterRadius: 0.127, emitSpeed: 0.806, emitterNoise: 0.2 } },
+    { id: 'ragged', label: 'Ragged', description: 'A noisy, uneven source.', scaled: true, values: { emitterShape: 'disc', emitterRadius: 0.318, emitterNoise: 0.85 } },
+    { id: 'burst', label: 'Burst', description: 'Emits for a moment, then stops: an explosion or puff.', scaled: true, values: { emitDuration: 0.144 } },
     { id: 'continuous', label: 'Continuous', description: 'Emits forever: a flame or plume.', values: { emitDuration: 0 } },
   ],
   Combustion: [
-    { id: 'wood', label: 'Wood', description: 'Steady burn, moderate smoke.', values: { ignition: 0.25, burnRate: 1.6, heatRelease: 1.4, smokeYield: 0.7 } },
-    { id: 'gas', label: 'Gas', description: 'Fast, clean burn: almost no smoke.', values: { ignition: 0.2, burnRate: 3, heatRelease: 1.2, smokeYield: 0.05 } },
-    { id: 'oil', label: 'Oil', description: 'Slow, hot and very sooty.', values: { ignition: 0.3, burnRate: 1.2, heatRelease: 1.6, smokeYield: 2.2 } },
-    { id: 'magnesium', label: 'Magnesium', description: 'Violent, white-hot burn.', values: { ignition: 0.2, burnRate: 4, heatRelease: 3, smokeYield: 0.3 } },
-    { id: 'smoulder', label: 'Smouldering', description: 'Barely burning: low flames, lots of smoke.', values: { ignition: 0.45, burnRate: 0.5, heatRelease: 0.6, smokeYield: 1 } },
+    { id: 'wood', label: 'Wood', description: 'Steady burn, moderate smoke.', scaled: true, values: { ignition: 0.25, burnRate: 2.78, heatRelease: 1.4, smokeYield: 0.7 } },
+    { id: 'gas', label: 'Gas', description: 'Fast, clean burn: almost no smoke.', scaled: true, values: { ignition: 0.2, burnRate: 5.21, heatRelease: 1.2, smokeYield: 0.05 } },
+    { id: 'oil', label: 'Oil', description: 'Slow, hot and very sooty.', scaled: true, values: { ignition: 0.3, burnRate: 2.08, heatRelease: 1.6, smokeYield: 2.2 } },
+    { id: 'magnesium', label: 'Magnesium', description: 'Violent, white-hot burn.', scaled: true, values: { ignition: 0.2, burnRate: 6.95, heatRelease: 3, smokeYield: 0.3 } },
+    { id: 'smoulder', label: 'Smouldering', description: 'Barely burning: low flames, lots of smoke.', scaled: true, values: { ignition: 0.45, burnRate: 0.869, heatRelease: 0.6, smokeYield: 1 } },
     { id: 'flame-sheet', label: 'Realistic flames', description: 'Fire drawn as the thin burning sheet, flickering, with short sharp tips.',
-      values: { flameShape: 0.85, flameLifetime: 0.18, flicker: 1.5 } },
+      scaled: true, values: { flameShape: 0.85, flameLifetime: 0.104, flicker: 2.61 } },
     { id: 'blob', label: 'Soft glow', description: 'All hot gas glows: the soft, stylised look.', values: { flameShape: 0, flicker: 0 } },
-    { id: 'blast', label: 'Blast', description: 'A shock pulse at ignition: the fireball blooms outward.', values: { blast: 25, expansion: 4 } },
+    { id: 'blast', label: 'Blast', description: 'A shock pulse at ignition: the fireball blooms outward.', scaled: true, values: { blast: 43.4, expansion: 4 } },
   ],
   Forces: [
-    { id: 'still', label: 'Still air', description: 'Gentle rise, little swirl.', values: { buoyancy: 10, vorticity: 0.2, wind: 0, disturbance: 0 } },
-    { id: 'lively', label: 'Lively', description: 'The default rise and curl.', values: { buoyancy: 14, vorticity: 0.4, disturbance: 4 } },
-    { id: 'turbulent', label: 'Turbulent', description: 'Strong swirls and breakup.', values: { buoyancy: 16, vorticity: 0.8, disturbance: 14, shredding: 0.6 } },
-    { id: 'heavy', label: 'Heavy smoke', description: 'Smoke that sinks and spreads.', values: { buoyancy: 6, weight: 4 } },
+    { id: 'still', label: 'Still air', description: 'Gentle rise, little swirl.', scaled: true, values: { buoyancy: 1, vorticity: 0.347, wind: 0, disturbance: 0 } },
+    { id: 'lively', label: 'Lively', description: 'The default rise and curl.', scaled: true, values: { buoyancy: 1.4, vorticity: 0.695, disturbance: 0.4 } },
+    { id: 'turbulent', label: 'Turbulent', description: 'Strong swirls and breakup.', scaled: true, values: { buoyancy: 1.6, vorticity: 1.39, disturbance: 1.4, shredding: 1.04 } },
+    { id: 'heavy', label: 'Heavy smoke', description: 'Smoke that sinks and spreads.', scaled: true, values: { buoyancy: 0.6, weight: 0.4 } },
     { id: 'realistic', label: 'Realistic breakup', description: 'Disturbance and shredding: smooth sheets break into tongues and wisps.',
-      values: { disturbance: 10, disturbanceScale: 0.25, disturbanceInterval: 0.2, shredding: 0.8 } },
+      scaled: true, values: { disturbance: 1, disturbanceScale: 0.0828, disturbanceInterval: 0.115, shredding: 1.39 } },
     { id: 'smooth', label: 'Smooth', description: 'No disturbance or shredding.', values: { disturbance: 0, shredding: 0 } },
-    { id: 'dust', label: 'Settling dust', description: 'Particles fall and spread along the floor.', values: { settling: 0.35, groundDrag: 3, weight: 1.2 } },
+    { id: 'dust', label: 'Settling dust', description: 'Particles fall and spread along the floor.', scaled: true, values: { settling: 0.201, groundDrag: 5.21, weight: 0.12 } },
   ],
   Dissipation: [
-    { id: 'linger', label: 'Lingering', description: 'Smoke and heat hang around.', values: { cooling: 0.6, smokeDissipation: 0.06, velocityDamping: 0.02 } },
-    { id: 'normal', label: 'Normal', description: 'The default fade.', values: { cooling: 1.1, smokeDissipation: 0.25, velocityDamping: 0.05 } },
-    { id: 'quick', label: 'Quick fade', description: 'Short-lived: smoke thins fast.', values: { cooling: 2.5, smokeDissipation: 1, velocityDamping: 0.2 } },
+    { id: 'linger', label: 'Lingering', description: 'Smoke and heat hang around.', scaled: true, values: { cooling: 1.04, smokeDissipation: 0.104, velocityDamping: 0.0347 } },
+    { id: 'normal', label: 'Normal', description: 'The default fade.', scaled: true, values: { cooling: 1.91, smokeDissipation: 0.434, velocityDamping: 0.0869 } },
+    { id: 'quick', label: 'Quick fade', description: 'Short-lived: smoke thins fast.', scaled: true, values: { cooling: 4.34, smokeDissipation: 1.74, velocityDamping: 0.347 } },
     { id: 'physical', label: 'Physical', description: 'Radiative cooling and diffusion: hot tips cool fast, smoke spreads as it thins.',
-      values: { coolingT4: 0.12, diffusion: 0.015, smokeDissipation: 0.1 } },
-    { id: 'steam', label: 'Condensing steam', description: 'Vapour turns visible as it cools and vanishes as it mixes.', values: { condensation: 8, dewPoint: 0.55 } },
+      scaled: true, values: { coolingT4: 0.208, diffusion: 0.00172, smokeDissipation: 0.174 } },
+    { id: 'steam', label: 'Condensing steam', description: 'Vapour turns visible as it cools and vanishes as it mixes.', scaled: true, values: { condensation: 13.9, dewPoint: 0.55 } },
   ],
   Simulation: [
     { id: 'draft', label: 'Draft', description: 'Fast and soft.', values: { substeps: 1, pressureIterations: 16, advection: 'semi-lagrangian', pressureSolver: 'sor' } },
@@ -252,11 +267,11 @@ export const EFFECT_SECTION_PRESETS: Record<string, SectionPreset<Partial<FxPara
   ],
   Look: [
     { id: 'clean', label: 'Clean flame', description: 'Grey smoke, soft forward scattering, glowing fire.',
-      values: { smokeColor: [0.32, 0.31, 0.3, 1], absorption: 1.6, anisotropy: 0.3, scatterOctaves: 2, fireGlow: 1, fireColorMode: 'blackbody', blackbodyMin: 900, blackbodyMax: 1700, albedo: 0.75, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 2.5 } },
+      values: { smokeColor: [0.32, 0.31, 0.3, 1], absorption: 1.6, anisotropy: 0.3, scatterOctaves: 2, fireGlow: 1, fireColorMode: 'blackbody', blackbodyMin: 950, blackbodyMax: 1600, albedo: 0.75, powder: 0.5, skyOcclusion: 0.6, fireIntensity: 2.5 } },
     { id: 'sooty', label: 'Sooty', description: 'Thick black smoke that absorbs more than it scatters.', values: { smokeColor: [0.1, 0.095, 0.09, 1], absorption: 3.5, anisotropy: 0.2, scatterOctaves: 1, albedo: 0.3, powder: 0.4, skyOcclusion: 0.7 } },
     { id: 'billowing', label: 'Billowing smoke', description: 'Dark-edged, self-shadowed billows with flowing detail.', values: { albedo: 0.85, powder: 0.6, skyOcclusion: 0.7, anisotropy: 0.35, scatterOctaves: 2, detailStrength: 0.45, detailScale: 7 } },
-    { id: 'blue', label: 'Blue gas', description: 'A blue-white gas flame.', values: { fireColorMode: 'blackbody', blackbodyMin: 2400, blackbodyMax: 6000, emission: 1.8 } },
-    { id: 'white', label: 'Hot white', description: 'White-hot core, yellow edges.', values: { fireColorMode: 'blackbody', blackbodyMin: 1800, blackbodyMax: 4000, emission: 3 } },
+    { id: 'blue', label: 'Blue gas', description: 'A clean gas flame: blue from its chemistry (CH and C2 light), not its heat.', values: { fireColorMode: 'gradient', fireGradient: GAS_FLAME_GRADIENT, emission: 1.8 } },
+    { id: 'white', label: 'Hot white', description: 'White-hot core, yellow edges: a magnesium or thermite burn.', values: { fireColorMode: 'blackbody', blackbodyMin: 2200, blackbodyMax: 3400, emission: 3 } },
     { id: 'stylised', label: 'Stylised', description: 'The hand-made fire gradient.', values: { fireColorMode: 'gradient', fireGradient: FIRE_GRADIENT } },
     { id: 'steam', label: 'Steam', description: 'White, bright, forward-scattering vapour.', values: { smokeColor: [0.92, 0.93, 0.95, 1], absorption: 0.9, anisotropy: 0.55, scatterOctaves: 3, emission: 0, albedo: 0.97, powder: 0.3, absorptionColor: [1, 1, 1, 1] } },
     { id: 'physical', label: 'Physical fire', description: 'Transparent flames over warm-brown smoke: glow through the soot gaps, a blue base, smooth gas.',

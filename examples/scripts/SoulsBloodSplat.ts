@@ -13,7 +13,8 @@ import { clamp, num } from '@/Core/Scripts/SoulsMath'
  *
  * Placement waits for the first update rather than onStart, so the spawner's `yaw` and `sizeScale` are
  * in place whichever runs first; the decals stay invisible until then. A decal with a flipbook (the FX
- * Creator's liquid decals: the blood landing and spreading) plays it from that moment.
+ * Creator's liquid decals: the blood landing and spreading) plays it from that moment, `flipbookStart`
+ * seconds in.
  */
 export default class SoulsBloodSplatNode extends Node {
   /** Seconds before the splat is gone, its fade included. */
@@ -31,6 +32,11 @@ export default class SoulsBloodSplatNode extends Node {
   public yaw: number = NaN
   /** Set by the spawner: a bigger hit leaves a bigger splat. */
   public sizeScale: number = 1
+  /**
+   * Seconds into a decal's flipbook it starts from: skip the frames before the liquid reaches the floor
+   * when nothing else (a spray of droplets) covers that gap. 0 plays it from its first frame.
+   */
+  public flipbookStart: number = 0
 
   private _age: number = 0
   private _placed: boolean = false
@@ -94,7 +100,7 @@ export default class SoulsBloodSplatNode extends Node {
       const o = this._offsets[i]
       d.setPosition([(o[0] * c + o[2] * sn) * scale, o[1], (-o[0] * sn + o[2] * c) * scale])
       d.opacity = 1
-      if (d.flipbook) d.playFlipbook()
+      if (d.flipbook) d.flipbookTime = Math.max(0, num(this.flipbookStart, 0))
     })
     return true
   }

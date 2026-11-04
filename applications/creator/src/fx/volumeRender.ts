@@ -7,10 +7,10 @@ import { evaluateGradient } from 'cleo/particles/curves';
 import { valueNoise3, type FluidCpu, type FluidDims } from './fluidCpu';
 import { blackbodyRgb } from './blackbody';
 import {
-  absorptionScale, blueCoreSoot, blueCoreSource, detailBlend, emissionTemperature, FIRE_EMIT, glowSource, packGlowOrCore, powderTerm,
+  absorptionScale, BLUE_CORE_EMIT, blueCoreSoot, blueCoreSource, detailBlend, emissionTemperature, FIRE_EMIT, glowSource, packGlowOrCore, powderTerm,
   sampleBspline, sharpenDensity,
 } from './realism';
-import type { FxParams, FxView } from './fxParams';
+import { DEFAULT_FX, type FxParams, type FxView } from './fxParams';
 
 type V3 = [number, number, number];
 
@@ -72,10 +72,18 @@ export function lightVector(p: Pick<FxParams, 'lightYaw' | 'lightElevation'>): V
 }
 
 /**
+ * The white a black-body fire is seen against, as a multiple of its hottest temperature: the eye adapts to
+ * the scene around a fire as well as to the fire, so it never takes the flame itself for white -- adapted
+ * to the hottest alone, a small hot flame reads white and pink rather than yellow and orange.
+ */
+export const FIRE_WHITE_SCALE = 1.25;
+
+/**
  * The fire colour baked into 256 RGB entries, so a sample costs a lookup: the gradient, or a black body
  * between `blackbodyMin` and `blackbodyMax` kelvin -- the hue of Planck's spectrum seen by an eye adapted
- * to the hottest (blackbody.ts), the brightness rising as T^4, so a hot core reads white and the cool
- * edges of a flame a deep dull red.
+ * to a white a little hotter than the hottest ({@link FIRE_WHITE_SCALE}, blackbody.ts), the brightness
+ * rising as T^4, so a hot core reads yellow-white once bright, the body orange and the cool edges a deep
+ * dull red.
  */
 export function bakeFireLut(p: Pick<FxParams, 'fireGradient'> & Partial<Pick<FxParams, 'fireColorMode' | 'blackbodyMin' | 'blackbodyMax'>>): Float32Array {
   const lut = new Float32Array(256 * 4);
@@ -85,11 +93,11 @@ export function bakeFireLut(p: Pick<FxParams, 'fireGradient'> & Partial<Pick<FxP
     const t = i / 255;
     if (blackbody) {
       const k = kMin + (kMax - kMin) * t;
-      // Hue: Planck -> CIE XYZ -> CAT02 adapted to the hottest -> linear sRGB (blackbody.ts), so the
-      // hottest reads white and cooler gas orange and red. Brightness: T^4 (Stefan-Boltzmann) relative to
-      // the hottest -- the visible band alone falls off far faster, too dark for the eye's adaptation to
-      // a whole fire. Re-encoded to the display values the gradient also holds.
-      const rgb = blackbodyRgb(k, kMax);
+      // Hue: Planck -> CIE XYZ -> CAT02 adapted to a little above the hottest -> linear sRGB (blackbody.ts),
+      // so the hottest reads pale yellow and cooler gas orange and red. Brightness: T^4 (Stefan-Boltzmann)
+      // relative to the hottest -- the visible band alone falls off far faster, too dark for the eye's
+      // adaptation to a whole fire. Re-encoded to the display values the gradient also holds.
+      const rgb = blackbodyRgb(k, kMax * FIRE_WHITE_SCALE);
       const peak = Math.max(rgb[0], rgb[1], rgb[2], 1e-6);
       const brightness = Math.max(0.02, Math.pow(k / kMax, 4)) / peak;
       lut.set([Math.pow(rgb[0] * brightness, 1 / 2.2), Math.pow(rgb[1] * brightness, 1 / 2.2), Math.pow(rgb[2] * brightness, 1 / 2.2), 1], i * 4);
@@ -257,7 +265,7 @@ export function packVolumeCpu(fluid: FluidCpu, p: FxParams, out: Float32Array): 
     out[k + 1] = emissionTemperature(fluid.temperature[i], fluid.flame[i], p.ignition, p.flameShape ?? 0);
     out[k + 2] = sampleLight(light, x, y, z);
     const temp = out[k + 1];
-    const core = (p.blueCore ?? 0) > 0 ? blueCoreSource(Math.min(1, Math.max(0, (temp - p.ignition) / p.emissionRange)), fluid.fuel[i]) : 0;
+    const core = (p.blueCore ?? 0) > 0 ? blueCoreSource(Math.min(1, Math.max(0, (temp - p.ignition) / p.emissionRange)), fluid.fuel[i], p.fuel, p.smokeYield) : 0;
     out[k + 3] = packGlowOrCore(glow ? sampleLight(glow, x, y, z) : 0, core);
   }
   return out;
@@ -370,7 +378,7 @@ export function renderTile(fluid: FluidCpu, p: FxParams, out: Uint8ClampedArray 
             const li = Math.round(e * 255) * 4;
             // Soot masking: fire inside dense smoke is dimmed by it, so glow shows through the gaps.
             const glow = p.emission * e * intensity * (soot > 0 ? Math.exp(-soot * d * p.absorption) : 1);
-            const bc = blue > 0 ? blue * blueCoreSource(e, fluid.sample(fluid.fuel, x, y, z)) * blueCoreSoot(d, p.absorption) * p.emission * intensity : 0;
+            const bc = blue > 0 ? blue * BLUE_CORE_EMIT * blueCoreSource(e, fluid.sample(fluid.fuel, x, y, z), p.fuel, p.smokeYield) * blueCoreSoot(d, p.absorption) * p.emission * intensity : 0;
             fR = aEmit * (lut[li] * glow + blueRgb[0] * bc);
             fG = aEmit * (lut[li + 1] * glow + blueRgb[1] * bc);
             fB = aEmit * (lut[li + 2] * glow + blueRgb[2] * bc);
@@ -416,9 +424,10 @@ export function renderTile(fluid: FluidCpu, p: FxParams, out: Uint8ClampedArray 
 /**
  * Burning volume, m^3, that lights the stage at the fire light's full brightness: a voxel at full
  * emission counts its whole volume. (Format 1 counted 1% of the region's voxels: a bigger region dimmed
- * the same fire.) This is that share of the default region, so a default campfire lights as it did.
+ * the same fire.) This is that share of the Campfire's region, so the Campfire lights the stage fully, a
+ * candle (about a twentieth of its size, so a ten-thousandth of its volume) barely, and a bonfire in full.
  */
-export const FIRE_LIGHT_FULL_M3 = 0.01 * 4.8 * 7.2 * 4.8;
+export const FIRE_LIGHT_FULL_M3 = 0.01 * DEFAULT_FX.regionSize[0] * DEFAULT_FX.regionSize[1] * DEFAULT_FX.regionSize[2];
 
 /**
  * The fire light: the emission-weighted centre of the burning voxels (0..1 of the grid per axis) and a

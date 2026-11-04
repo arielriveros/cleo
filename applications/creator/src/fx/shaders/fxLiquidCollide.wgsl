@@ -1,7 +1,8 @@
 // Liquid step 7: the preview's bodies, the floor and the region -- liquidCpu.ts `collide` and `settle`:
 // v = (x - x_old) / dt; a drop hitting a solid floor bounces or, sticking, becomes a DEPOSIT (x, z, vx,
-// vz) appended for the film (read back by the preview); one crossing a water surface or leaving the
-// region dies, freeing its slot. Sorted order: one thread per live particle, its final position and
+// vz) appended for the film (stamped by liquidFilmGpu.ts); one crossing a water surface or leaving the
+// domain dies, freeing its slot. The domain is everywhere the release can reach (liquidCpu.ts `liquidDomain`):
+// the region only frames the drops, so one leaving it keeps flying and lands in the pool. Sorted order: one thread per live particle, its final position and
 // velocity into the sorted arrays (fxLiquidScatter.wgsl takes them back to the slots, fxLiquidSplat.wgsl
 // draws them). The survivors are counted (counters[2]) for the preview's readout.
 
@@ -20,28 +21,7 @@
 @group(0) @binding(8) var<storage, read_write> deposits: array<vec4<f32>>;
 @group(0) @binding(9) var<storage, read_write> counters: array<atomic<u32>>;
 
-/** Signed distance from body `b` (three vec4s: kind and position, yaw, pitch and size xy, size z) -- obstacles.ts `bodyDistance`. */
-fn body_distance(b: u32, w: vec3<f32>) -> f32 {
-    let r0 = bodies[b * 3u];
-    let r1 = bodies[b * 3u + 1u];
-    let r2 = bodies[b * 3u + 2u];
-    let dp = w - r0.yzw;
-    let cy = cos(r1.x); let sy = sin(r1.x);
-    let x1 = dp.x * cy - dp.z * sy;
-    let z1 = dp.x * sy + dp.z * cy;
-    let cp = cos(r1.y); let sp = sin(r1.y);
-    let l = vec3<f32>(x1, dp.y * cp + z1 * sp, -dp.y * sp + z1 * cp);
-    let size = vec3<f32>(r1.z, r1.w, r2.x);
-    let kind = u32(r0.x + 0.5);
-    if (kind == 0u) { return length(l) - size.x * 0.5; }
-    if (kind == 1u) {
-        let rad = size.x * 0.5;
-        let half = max(0.0, size.y * 0.5 - rad);
-        return length(vec3<f32>(l.x, l.y - clamp(l.y, -half, half), l.z)) - rad;
-    }
-    let q = abs(l) - size * 0.5;
-    return length(max(q, vec3<f32>(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
-}
+#include "./fxLiquidBodiesCommon.wgsl"
 
 fn scene_distance(x: vec3<f32>) -> f32 {
     var d = 1e9;
@@ -85,9 +65,9 @@ fn cs_liquid_collide(@builtin(global_invocation_id) g: vec3<u32>) {
     } else if (mode == 1u && x.y < 0.0) {
         dead = true;
     }
-    let s = u.region.xyz;
-    let below = select(-r, -0.5 * s.y, mode == 2u);
-    if (x.x < 0.0 || x.x > s.x || x.z < 0.0 || x.z > s.z || x.y > s.y || x.y < below) { dead = true; }
+    let below = select(-r, -0.5 * u.region.y, mode == 2u);
+    let d = u.domain;
+    if (x.x < d.x || x.x > d.z || x.z < d.y || x.z > d.w || x.y > u.window.w || x.y < below) { dead = true; }
     if (dead) { pos_s[t] = vec4<f32>(x, 0.0); return; }
 
     var nv = (x - o) / dt;

@@ -1,0 +1,23 @@
+/* The loading screen's step queue (LoadingScreen.tsx, ordered by loadQueue.ts).
+
+   A window of fixed height: the rows are absolutely placed and moved with a transform, so when a step
+   finishes and the queue reorders, every row keyed to its step slides to its new place and fades to its
+   new opacity on its own. Both are set inline per row; the transition is here. The mask fades the top
+   (the oldest finished row leaving) and the bottom (pending steps past what the window shows), so a long
+   queue dissolves at its edges instead of growing the screen. --row is set inline, matching ROW_PX. */
+
+.cleo-load-queue {
+  position: relative;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--row), #000 calc(100% - 2.5 * var(--row)), transparent 100%);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 var(--row), #000 calc(100% - 2.5 * var(--row)), transparent 100%);
+}
+
+.cleo-load-queue > li {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: var(--row);
+  transition: transform 450ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 450ms ease-out;
+}

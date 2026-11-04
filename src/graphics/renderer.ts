@@ -806,6 +806,9 @@ interface FoliageState {
     wet: number; snow: number;
 }
 
+/** A Basic program's group-0 slot for the opaque depth snapshot (chunks/basicForward.wgsl), not a material map. */
+const SCENE_DEPTH_FIELD = 'u_sceneDepth';
+
 export class Renderer {
     private _config: RendererConfig;
     private _canvas: HTMLCanvasElement;
@@ -5527,6 +5530,8 @@ export class Renderer {
             // The environment cube rides in group 0 alongside the material maps but must NOT be looked
             // up as one: the miss falls back to a 2D texture, a sampler-type mismatch at draw time.
             if (field === null) { textures.push(envCube ?? this._fallbackCube); continue; }
+            // The opaque depth snapshot (a soft sprite's fade, chunks/basicForward.wgsl) is the frame's.
+            if (field === SCENE_DEPTH_FIELD) { textures.push(this._sceneDepthFBO.depth); continue; }
             // A cutout's edge-padded base colour stands in for the authored one (TexturePacker
             // `_syncDilation`); until it is baked, or once it is swept, the authored map draws.
             const dilated = field === 'baseColorTexture' ? material.textures.get(DILATED_BASE_SLOT) : undefined;
@@ -8951,6 +8956,9 @@ export class Renderer {
         // it) would inherit the last sprite's overdrive. Pin it to 1 instead.
         if (material.type === 'basic' && !material.properties.has('intensity'))
             this._shaderManager.setUniform('u_material.intensity', 1);
+        // The same for a sprite's soft fade: a Basic material without one must not inherit it.
+        if (material.type === 'basic' && !material.properties.has('softness'))
+            this._shaderManager.setUniform('u_material.softness', 0);
         // The same sticky-uniform guard for the texture mapping (chunks/uvProjection.wgsl): a lit material
         // built without the factories would otherwise inherit the last draw's tiling or projection.
         if (!material.properties.has('uvTransform')) {
@@ -10364,23 +10372,15 @@ export class Renderer {
         // SpriteNode.maxScreenSize: no taller than that many CSS pixels (the editor's viewport icons).
         if (node.maxScreenSize > 0) this._capSpriteScreenSize(spriteMatrix, node.maxScreenSize);
 
-        // Soft fade (Sprite.softness): depth-tested `softness` metres nearer the camera, scaled about the
-        // eye so it covers exactly the same pixels. Whatever lies less than that behind a surface — a flame
-        // inside its torch head — passes the depth test; a wall further in front still hides it.
-        const softness = node.sprite.softness;
-        if (softness > 0) {
-            const eye = this._activeCamera.position;
-            const p = [spriteMatrix[12] - eye[0], spriteMatrix[13] - eye[1], spriteMatrix[14] - eye[2]];
-            const d = Math.hypot(p[0], p[1], p[2]);
-            // Never pulled through the near plane: a sprite at the lens keeps a sliver of its distance.
-            const pull = Math.min(softness, d - this._activeCamera.near * 2);
-            if (pull > 0) {
-                const k = this._activeCamera.type === 'orthographic' ? 1 : (d - pull) / d;
-                for (let i = 0; i < 12; i++) if (i % 4 !== 3) spriteMatrix[i] *= k;
-                const f = this._activeCamera.type === 'orthographic' ? pull / d : 1 - k;
-                spriteMatrix[12] -= p[0] * f; spriteMatrix[13] -= p[1] * f; spriteMatrix[14] -= p[2] * f;
-            }
-        }
+        // Soft fade (Sprite.softness): the sprite keeps the plain depth test -- whatever stands in front of it
+        // hides it, a torch head seen from below included -- and fades out over `softness` metres as it nears
+        // the opaque surface BEHIND it (chunks/basicForward.wgsl, against the scene's depth snapshot), so a
+        // flame set into its torch head or logs melts into them instead of being cut along a line. Off where
+        // there is no live snapshot (a thumbnail, the overlay's icons).
+        const cam = this._activeCamera;
+        const soft = blend !== OVERLAY_BLEND && !this._thumbnailMode ? node.sprite.softness : 0;
+        material.properties.set('softness', soft);
+        if (soft > 0) material.properties.set('depthParams', [cam.near, cam.far, cam.type === 'orthographic' ? 1 : 0, 1]);
 
         this._shaderManager.setUniform('u_model', spriteMatrix);
         this._setDissolve(node.effectiveFade);
