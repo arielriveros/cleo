@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, Handle, Position,
   MarkerType, useNodesState, useEdgesState, useReactFlow,
@@ -47,6 +47,8 @@ export interface GraphNodeModel {
   deletable?: boolean
   /** Small tags under the title — the triggers that enter a state directly. */
   chips?: string[]
+  /** Drawn before each chip's text (the trigger bolt). */
+  chipIcon?: ReactNode
   chipsTitle?: string
   /** Drawn with the entry marker and a distinct border. Exactly one node should carry it. */
   isEntry?: boolean
@@ -131,6 +133,7 @@ interface NodeData extends Record<string, unknown> {
   kind: GraphNodeKind
   sourceOnly: boolean
   chips: string[]
+  chipIcon?: ReactNode
   chipsTitle?: string
 }
 
@@ -171,7 +174,11 @@ function GraphNode({ data, selected }: NodeProps) {
       </div>
       {d.chips.length > 0 && (
         <div className='px-2 pb-1 flex flex-wrap gap-1' title={d.chipsTitle}>
-          {d.chips.map(c => <span key={c} className='text-ui-2xs px-1 rounded bg-primary/25 text-fg truncate max-w-full'>{c}</span>)}
+          {d.chips.map(c => (
+            <span key={c} className='inline-flex items-center gap-0.5 text-ui-2xs px-1 rounded bg-primary/25 text-fg max-w-full'>
+              {d.chipIcon}<span className='truncate'>{c}</span>
+            </span>
+          ))}
         </div>
       )}
       <Handle type='source' position={Position.Right} className='!bg-primary !w-2 !h-2' />
@@ -221,6 +228,7 @@ function Flow(props: MachineGraphProps) {
         kind: n.kind ?? 'default',
         sourceOnly: !!n.sourceOnly,
         chips: n.chips ?? [],
+        chipIcon: n.chipIcon,
         chipsTitle: n.chipsTitle,
       } as NodeData,
     })))

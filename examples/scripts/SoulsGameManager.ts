@@ -64,6 +64,8 @@ export default class SoulsGameManagerNode extends Node {
   public bloodSplatTemplate: TemplateName = 'Blood Splat'
   /** The spatter decal thrown along the blow. */
   public bloodDropsTemplate: TemplateName = 'Blood Drops'
+  /** Metres along the blow from the target to the spatter decal's centre (at a full-size hit). */
+  public bloodDropsOffset: number = 0.9
   /** Blood decals alive at once. The oldest goes first, so a long fight cannot pile up draws. */
   public maxBloodDecals: number = 24
   /** Damage that leaves a full-size splat; less shrinks it, more grows it (0.6x to 1.6x). */
@@ -345,10 +347,13 @@ export default class SoulsGameManagerNode extends Node {
     playSound(this, name)
   }
 
-  /** Instantiate an effect template at a world point. Silent when the template does not exist. */
-  public fx(template: string, at: ArrayLike<number>): Node {
+  /**
+   * Instantiate an effect template at a world point, turned `yaw` degrees about the vertical (its +Z
+   * along that heading). Silent when the template does not exist.
+   */
+  public fx(template: string, at: ArrayLike<number>, yaw: number = 0): Node {
     if (!template) return null
-    return this.scene?.instantiate(template, { position: [at[0], at[1], at[2]] }) ?? null
+    return this.scene?.instantiate(template, { position: [at[0], at[1], at[2]], rotation: [0, num(yaw, 0), 0] }) ?? null
   }
 
   /**
@@ -367,11 +372,13 @@ export default class SoulsGameManagerNode extends Node {
     const height = num(t.bodyHeight, 1.8)
     const scale = clamp(amount / Math.max(1, this.bloodReferenceDamage), 0.6, 1.6)
 
-    this.fx(this.bloodSprayTemplate, [at[0], at[1] + height * 0.6, at[2]])
+    const heading = Math.atan2(dx, dz) * 180 / Math.PI
+    // The spray's +Z along the blow: its droplets fly on, away from the attacker.
+    this.fx(this.bloodSprayTemplate, [at[0], at[1] + height * 0.6, at[2]], heading)
     // Spawned a little above the ground: each decal finds the floor itself (SoulsBloodSplat).
     this._splat(this.bloodSplatTemplate, [at[0], at[1] + 0.5, at[2]], NaN, scale)
-    this._splat(this.bloodDropsTemplate, [at[0] + dx * 0.9 * scale, at[1] + 0.5, at[2] + dz * 0.9 * scale],
-                Math.atan2(dx, dz) * 180 / Math.PI, scale)
+    const ahead = this.bloodDropsOffset * scale
+    this._splat(this.bloodDropsTemplate, [at[0] + dx * ahead, at[1] + 0.5, at[2] + dz * ahead], heading, scale)
   }
 
   /** The blood decals currently on the ground, oldest first. */

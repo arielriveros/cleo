@@ -253,6 +253,7 @@ export function AssetsPanel() {
   return (
     <AssetExplorer
       data={data} apiRef={apiRef} init={init} modeKey={MODE_KEY} idPrefix='creator-asset'
+      rootLabel='Creator Files'
       previews={previews} icons={icons}
       toolbarStart={<>
         <AddMenu items={addItems} title='Add an asset to the Creator library' />

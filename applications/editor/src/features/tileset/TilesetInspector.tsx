@@ -7,6 +7,7 @@ import { vec3ToHex } from '../../utils/UtilFunctions'
 import { awaitTextureImage, textureImage } from '../../utils/textureReady'
 import { moveFrame } from '../../utils/tilesets'
 import { useTileset } from './TilesetContext'
+import { TilesetIcon } from '../nodeInspector/sectionIcons'
 
 // The tileset tab's Properties panel: how the atlas is sliced, what the selected tiles mean (solid,
 // animated, tinted, depth-anchored), and the auto-tile / variant sets built out of them.
@@ -75,7 +76,7 @@ function AtlasSlot() {
         <div className='w-12 h-12 rounded overflow-hidden bg-surface-raised flex items-center justify-center shrink-0'>
           {src
             ? <img src={src} alt='' className='w-full h-full object-contain' style={{ imageRendering: 'pixelated' }} />
-            : <span className='text-lg'>🧩</span>}
+            : <span className='inline-flex w-5 h-5 text-dim [&>svg]:w-full [&>svg]:h-full'><TilesetIcon /></span>}
         </div>
         <div className='min-w-0 flex-1'>
           <p className='truncate text-ui' title={asset.textureId}>{asset.textureId || 'No atlas'}</p>

@@ -12,7 +12,8 @@ import { clamp, num } from '@/Core/Scripts/SoulsMath'
  * it fades out over `fadeSeconds` and is removed.
  *
  * Placement waits for the first update rather than onStart, so the spawner's `yaw` and `sizeScale` are
- * in place whichever runs first; the decals stay invisible until then.
+ * in place whichever runs first; the decals stay invisible until then. A decal with a flipbook (the FX
+ * Creator's liquid decals: the blood landing and spreading) plays it from that moment.
  */
 export default class SoulsBloodSplatNode extends Node {
   /** Seconds before the splat is gone, its fade included. */
@@ -35,10 +36,13 @@ export default class SoulsBloodSplatNode extends Node {
   private _placed: boolean = false
   private _decals: any[] = []
   private _sizes: number[][] = []
+  /** Each decal's authored place under the root (a liquid bake's decal stands where its liquid lay). */
+  private _offsets: number[][] = []
 
   onStart() {
     this._decals = this.children.filter(c => c.nodeType === 'decal')
     this._sizes = this._decals.map(d => [...d.size])
+    this._offsets = this._decals.map(d => [d.position[0], d.position[1], d.position[2]])
     for (const d of this._decals) d.opacity = 0
   }
 
@@ -69,20 +73,28 @@ export default class SoulsBloodSplatNode extends Node {
     const yaw = Number.isFinite(this.yaw) ? this.yaw : Math.random() * 360
     const n = hit.normal
     // Local +Y onto the surface normal: rotations compose Ry(yaw)·Rx(pitch), and Rx(p)·(0,1,0) turned by
-    // Ry(y) is (sin p sin y, cos p, sin p cos y). A floor has no tilt, so its yaw stays free for the turn.
+    // Ry(y) is (sin p sin y, cos p, sin p cos y). That spends the root's yaw on the slope's own heading, so
+    // on a slope the decals turn the rest of the way about the normal themselves: the spatter still runs
+    // along the blow.
     const tilt = this.alignToSurface ? Math.acos(clamp(n[1], -1, 1)) * 180 / Math.PI : 0
-    const rotation: [number, number, number] = tilt > 2
-      ? [tilt, Math.atan2(n[0], n[2]) * 180 / Math.PI, 0]
-      : [0, yaw, 0]
+    const heading = Math.atan2(n[0], n[2]) * 180 / Math.PI
+    const sloped = tilt > 2
     this.setPosition([hit.point[0], hit.point[1], hit.point[2]])
-    this.setRotation(rotation)
+    this.setRotation(sloped ? [tilt, heading, 0] : [0, yaw, 0])
+    const turn = sloped ? yaw - heading : 0
+    for (const d of this._decals) d.setRotation([0, turn, 0])
 
     const scale = num(this.sizeScale, 1) * (this.minSize + Math.random() * Math.max(0, this.maxSize - this.minSize))
+    const c = Math.cos(turn * Math.PI / 180), sn = Math.sin(turn * Math.PI / 180)
     this._decals.forEach((d, i) => {
       const s = this._sizes[i]
       // Height stays: it is how far the projection reaches, not how big the splat looks.
       d.size = [s[0] * scale, s[1], s[2] * scale]
+      // Its place scales with it, and turns with it on a slope (Ry(turn), as its own rotation).
+      const o = this._offsets[i]
+      d.setPosition([(o[0] * c + o[2] * sn) * scale, o[1], (-o[0] * sn + o[2] * c) * scale])
       d.opacity = 1
+      if (d.flipbook) d.playFlipbook()
     })
     return true
   }

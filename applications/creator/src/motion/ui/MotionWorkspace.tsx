@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Collapsable, NumberInput, SegmentedControl, Select, Slider, Toggle } from '@cleo/app-kit/ui';
+import { Button, Collapsable, LinkIcon, NumberInput, SegmentedControl, Select, Slider, Toggle } from '@cleo/app-kit/ui';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
 import { confirmDialog, promptDialog } from '@cleo/app-kit/feedback/dialogStore';
 import {
@@ -542,7 +542,9 @@ function PosesPanel() {
               <ListRow selected={p.id === selected?.id} onClick={() => { setPoseId(p.id); setView('pose'); }}
                        title={p.assetId ? 'From the library: editing it changes it in every motion that uses it · drag onto the Timeline' : 'Drag onto the Timeline to add a key with this pose'}
                        caption={`${caption(p)} · ${usedBy(p.id)} keys${p.assetId ? ' · library' : ''}`}>
-                {p.assetId ? `⛓ ${p.name}` : p.name}
+                {p.assetId
+                  ? <span className='inline-flex items-center gap-1 min-w-0'><LinkIcon className='w-3 h-3 shrink-0 text-highlight' /><span className='truncate'>{p.name}</span></span>
+                  : p.name}
               </ListRow>
             </div>
           ))}

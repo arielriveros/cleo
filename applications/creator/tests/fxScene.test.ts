@@ -29,11 +29,11 @@ describe('placed bodies', () => {
   });
 
   it('turns and stretches every kind by its own transform', () => {
-    const wall: FxBody = { ...newBody('wall', 4), position: [0, 0, 0], yaw: 90, pitch: 0, size: [0.2, 2, 4] };
+    const wall: FxBody = { ...newBody('wall', [4, 4, 4]), position: [0, 0, 0], yaw: 90, pitch: 0, size: [0.2, 2, 4] };
     // Yawed 90 degrees, the 4 m depth now runs along x.
     expect(bodyDistance(wall, [1.9, 0, 0])).toBeLessThan(0);
     expect(bodyDistance(wall, [0, 0, 1.9])).toBeGreaterThan(0);
-    const capsule: FxBody = { ...newBody('capsule', 4), position: [0, 0, 0], yaw: 0, pitch: 0, size: [0.4, 2, 0.4] };
+    const capsule: FxBody = { ...newBody('capsule', [4, 4, 4]), position: [0, 0, 0], yaw: 0, pitch: 0, size: [0.4, 2, 0.4] };
     expect(bodyDistance(capsule, [0, 0.95, 0])).toBeLessThan(0);
     expect(bodyDistance(capsule, [0, 1.05, 0])).toBeGreaterThan(0);
   });
@@ -172,16 +172,18 @@ describe('the simulation region', () => {
     expect(voxelSizeRaised(DEFAULT_FX)).toBe(false);
   });
 
-  it('puts the emitter where Across / Deep say', () => {
-    const centroidX = (emitterX: number) => {
-      const p = small({ emitterX, fuel: 0, heat: 0.5, smoke: 2 });
+  it('puts the emitter where its position says, in metres from the centre of the floor', () => {
+    const centroidX = (x: number) => {
+      const p = small({ emitterPosition: [x, 0.4, 0], emitterRadius: 0.2, fuel: 0, heat: 0.5, smoke: 2 });
       const f = new FluidCpu(fluidDims(p));
       for (let i = 0; i < 8; i++) f.step(p, p.frameTime / p.substeps);
       let sx = 0, sw = 0;
       for (let i = 0, z = 0; z < f.dims.nz; z++) for (let y = 0; y < f.dims.ny; y++) for (let x = 0; x < f.dims.nx; x++, i++) { sx += x * f.density[i]; sw += f.density[i]; }
-      return sx / sw;
+      // Metres from the floor's centre.
+      return (sx / sw + 0.5) * p.voxelSize - (f.dims.nx * p.voxelSize) / 2;
     };
-    expect(centroidX(0.25)).toBeLessThan(centroidX(0.75) - 3);
+    expect(centroidX(-0.5)).toBeCloseTo(-0.5, 0);
+    expect(centroidX(0.5)).toBeCloseTo(0.5, 0);
   });
 
   it('voxelises bodies against a moved region', () => {

@@ -46,7 +46,9 @@ const OLD_DOCK_LAYOUT_KEYS = [
 // became `clipInspector`; a tree stored at 20 names a panel that no longer exists.
 // 22: the rig mode's Ragdoll and Bone Masks moved out of Properties into tabs of their own; a tree stored at
 // 21 has nowhere for them.
-const LAYOUT_VERSION = 22;
+// 23: Options mode opens at a quarter of the width (sizeOptionsRail). Nothing else changed, so a store
+// at 22 is still read; only its Options tree is dropped, which rebuilds that one mode at the new size.
+const LAYOUT_VERSION = 23;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -258,7 +260,10 @@ function loadLayouts(): LayoutStore['layouts'] {
     const raw = localStorage.getItem(dockLayoutKey());
     if (!raw) return {};
     const saved = JSON.parse(raw) as LayoutStore;
-    if (saved?.version !== LAYOUT_VERSION || !saved.layouts) return {};
+    if (!saved?.layouts) return {};
+    // See LAYOUT_VERSION 23: every arrangement but Options carries over.
+    if ((saved.version as number) === 22) { const { options: _options, ...rest } = saved.layouts; return rest; }
+    if (saved.version !== LAYOUT_VERSION) return {};
     return saved.layouts;
   } catch {
     return {};
@@ -271,6 +276,16 @@ function saveLayoutFor(api: DockviewApi, mode: EditorMode) {
     const store: LayoutStore = { version: LAYOUT_VERSION, layouts: { ...loadLayouts(), [mode]: api.toJSON() } };
     localStorage.setItem(dockLayoutKey(), JSON.stringify(store));
   } catch { /* quota or a serialization failure — a lost arrangement is not worth breaking the editor */ }
+}
+
+/**
+ * Options mode's rail at a quarter of the width. Its panels are tabs of the right rail, which starts at a
+ * quarter too, but closing the left column for the mode hands that column's width to the rail (dockview
+ * gives freed space to the last view), so a fresh Options tree would open at nearly half.
+ */
+function sizeOptionsRail(api: DockviewApi) {
+  const group = api.getPanel('optionsEngine')?.group;
+  if (group) group.api.setSize({ width: Math.round((api.width || window.innerWidth) * 0.25) });
 }
 
 function clearLayouts() {
@@ -523,8 +538,12 @@ export default function DockLayout() {
         const tools = api.getPanel('landscapeTools');
         if (tools && tools.group?.activePanel?.id !== 'landscapeTools') tools.api.setActive();
       }
-      // Options opens on Engine the first time; a saved Options tree remembers the tab that was up.
-      if (editorMode === 'options' && !restored) api.getPanel('optionsEngine')?.api.setActive();
+      // Options opens on Engine, a quarter of the width, the first time; a saved Options tree remembers the
+      // tab that was up and the width it was left at.
+      if (editorMode === 'options' && !restored) {
+        sizeOptionsRail(api);
+        api.getPanel('optionsEngine')?.api.setActive();
+      }
       // A mask or pose double-clicked from another mode: open on the tab that edits it.
       const rigTab = pendingRigTabRef.current;
       pendingRigTabRef.current = null;
@@ -590,13 +609,14 @@ export default function DockLayout() {
         // fire: reset must re-apply the restriction itself.
         assertRenderers(api);
         applyRestriction(api);
+        if (editorMode === 'options') sizeOptionsRail(api);
         restoreBottomTab(api);
         relayout(api);
       });
     };
     eventEmitter.on('RESET_DOCK_LAYOUT', onReset);
     return () => { eventEmitter.off('RESET_DOCK_LAYOUT', onReset); };
-  }, [api, eventEmitter, applyRestriction, restoreBottomTab, withProgrammaticLayout]);
+  }, [api, eventEmitter, editorMode, applyRestriction, restoreBottomTab, withProgrammaticLayout]);
 
   return (
     <div className="flex-1 min-h-0 relative">

@@ -213,6 +213,10 @@
   color: rgb(var(--text)) !important;
 }
 .cleo-fm .wx-sidebar .wx-toggle { width: 12px; height: 12px; flex: none; color: rgb(var(--text-dim)); }
+/* A folder with no sub-folders gets a placeholder instead of the toggle. SVAR sizes it (23px) to its own
+   24px icon-font chevron; matched here to the 12px toggle less SVAR's -2px margin, or every leaf folder
+   sits 13px right of its siblings. */
+.cleo-fm .wx-sidebar .wx-toggle-placeholder { width: 10px; flex: none; }
 .cleo-fm .wx-sidebar .wxi-folder { width: 14px; height: 14px; flex: none; color: rgb(var(--highlight)); }
 .cleo-fm .wx-sidebar li.wx-folder .wx-name {
   flex: 1;

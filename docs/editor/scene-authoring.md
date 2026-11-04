@@ -255,21 +255,18 @@ off in Play, or turn navmesh display on *during* Play to see what an agent is wa
 |---|---|
 | Collision wireframes | on |
 | Trigger volumes | on |
-| Light icons | on |
-| Camera frustums | on |
-| Light probes | on |
-| Exposure volumes | on |
-| Decal icons | on |
-| Sound emitters | on |
+| Editor icons | on — the markers of nodes that draw nothing of their own: lights, sounds, light probes, exposure volumes, decals, particle systems, force fields, navmeshes and cameras |
 | Bounding boxes | off |
 | Skeletons | off |
 | Animation blend | off |
 | Navigation mesh | off |
 | Foliage colliders | on |
-| Effect icons | on |
 | Preview particles | on — whether particle effects simulate while you author; editor only, since a running game always simulates them |
 | Game UI | off — always shown in UI mode and in Play |
 | Reference grid | on |
+
+An icon grows as the camera nears it until it is 64 pixels tall, then stays that size, so it is never
+a blurred close-up of its picture; the same holds when zooming in 2D.
 
 **Animation blend** shows, in a corner of the viewport, every link from an animated model's
 parameters to its pose, sampled live, with how much each value moved over the last second (a settled

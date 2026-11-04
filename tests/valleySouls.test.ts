@@ -270,6 +270,42 @@ describe.skipIf(!present)('the Valley example project', () => {
         }
     });
 
+    it('draws the blood a hit leaves with the FX Creator: animated sprites, and decals that settle', () => {
+        const shipped = new Set(read('textures', 'index.json').map((t: any) => t.id));
+        // The spray: a burst sprite played over its life, and droplets on velocity-aligned particles.
+        const spray = templates().find((x: any) => x.name === 'Blood Spray');
+        const ps = spray.nodeJson.children.find((c: any) => c.type === 'particleSystem').particleSystem.system;
+        const burst = ps.emitters.find((e: any) => e.name === 'Burst');
+        const drops = ps.emitters.find((e: any) => e.name === 'Droplets');
+        expect(burst.render.flipbook.mode).toBe('life');
+        expect(drops.render.alignment).toBe('velocity');
+        expect(drops.render.flipbook.frames).toBeGreaterThan(1);
+        for (const e of [burst, drops]) {
+            expect(shipped.has(e.render.textureId), e.name).toBe(true);
+            expect(e.render.lit).toBe(true);
+            expect(e.render.blend).toBe('alpha');
+        }
+        // The decals: the bake's animated pool, played once from where it lands, with relief and wet roughness.
+        for (const name of ['Blood Splat', 'Blood Drops']) {
+            const t = templates().find((x: any) => x.name === name);
+            const child = t.nodeJson.children.find((c: any) => c.type === 'decal');
+            const d = child.decal;
+            // Where the bake's liquid lay: the box around it, standing at its offset from the effect's floor centre.
+            expect(child.position[1], name).toBe(0);
+            expect(Math.hypot(child.position[0], child.position[2]), name).toBeLessThan(1.5);
+            expect(d.size[0] * d.size[2], name).toBeGreaterThan(0);
+            expect(d.flipbook, name).toMatchObject({ loop: false, blend: true });
+            expect(d.flipbook.frames).toBeGreaterThan(1);
+            expect(d.affects.normal).toBe(true);
+            const tex = d.material.textures;
+            for (const slot of ['baseColorTexture', 'normalMap', 'metallicRoughnessTexture']) expect(shipped.has(tex[slot]), `${name} ${slot}`).toBe(true);
+        }
+        // The placeholder spray is gone, so a Blood Spray particle system is the Creator's alone.
+        const sprays = library('particleSystems').filter((s: any) => s.name === 'Blood Spray');
+        expect(sprays).toHaveLength(1);
+        expect(sprays[0].system.emitters.map((e: any) => e.name)).toEqual(['Burst', 'Droplets']);
+    });
+
 
     it('keeps every controller the LAST child of its character, after the camera rig', () => {
         for (const n of everyNode().filter(n => n.type === 'character')) {

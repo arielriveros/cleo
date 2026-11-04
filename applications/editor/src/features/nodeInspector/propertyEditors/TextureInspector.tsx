@@ -3,6 +3,7 @@ import { TextureManager, Material, isDerivedTextureId } from 'cleo';
 import { useEventBus } from '../../EventBusContext';
 import { cn, TextInput, Button } from '@cleo/app-kit/ui';
 import { ImportIcon } from '../../topbarIcons';
+import { SpriteIcon } from '../sectionIcons';
 import NullImage from '../../../images/null.png';
 
 const thumbSrc = (id: string): string | undefined => {
@@ -227,7 +228,7 @@ export default function TextureInspector(props: { tex: string, material: Materia
                   return (
                     <button key={key} className={cn('w-full flex items-center gap-2 px-2 py-1 hover:bg-control text-left text-ui', key === texture && 'bg-control')} onClick={() => onTextureSelect(key)}>
                       <span className='w-7 h-7 rounded bg-surface-raised overflow-hidden grid place-items-center shrink-0'>
-                        {src ? <img src={src} className='w-full h-full object-cover' /> : <span className='text-ui-xs'>🖼️</span>}
+                        {src ? <img src={src} className='w-full h-full object-cover' /> : <span className='inline-flex w-4 h-4 text-dim [&>svg]:w-full [&>svg]:h-full'><SpriteIcon /></span>}
                       </span>
                       <span className='truncate flex-1'>{key}</span>
                       {key === texture && <span className='text-primary'>✓</span>}

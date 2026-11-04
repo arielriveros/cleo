@@ -44,7 +44,7 @@ function transitionLabel(t: BehaviorTransition): string {
   }
   if (t.condition) walk(t.condition)
 
-  const dwell = t.minDwell ? `⏱${t.minDwell}s` : ''
+  const dwell = t.minDwell ? `min ${t.minDwell}s` : ''
   if (leaves.length === 0) return dwell
   const OP: Record<string, string> = { gt: '>', lt: '<', eq: '=', neq: '≠', true: 'is', false: 'not', trigger: '!' }
   const parts = leaves.slice(0, 2).map(c => (

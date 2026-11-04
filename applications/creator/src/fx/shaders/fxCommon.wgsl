@@ -27,7 +27,7 @@ struct FxUniforms {
     wind: vec4<f32>,       // scene wind vx, vz (voxels/s), gustiness, gust scale (voxels)
     wind2: vec4<f32>,      // gust speed (voxels/s), has wind (0/1), has solids (0/1), MacCormack (0/1)
     look2: vec4<f32>,      // anisotropy, scattering octaves, fire glow, detail strength
-    look3: vec4<f32>,      // detail scale, -, -, -
+    look3: vec4<f32>,      // detail scale, burning voxels for a full fire light, -, -
     real1: vec4<f32>,      // open boundaries (0/1), disturbance, disturbance block (voxels), disturbance phase
     real2: vec4<f32>,      // shredding, diffusion (per step), flame kept per step, radiative cooling
     real3: vec4<f32>,      // flicker (emitter multiplier), condensation, dew point, dust settling (voxels/s)

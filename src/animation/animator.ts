@@ -1103,7 +1103,7 @@ export class Animator {
 
             // If no joints have animation data, this animation is likely invalid or targets the wrong nodes
             if (animatedCount === 0) {
-                Logger.warn(`⚠️ Animation "${animation.name}" has no channels targeting the skin joints. This animation may not work correctly.`, 'Animation');
+                Logger.warn(`Animation "${animation.name}" has no channels targeting the skin joints. This animation may not work correctly.`, 'Animation');
                 Logger.print('warn', ['Animation channels target nodes:', animation.channels.map(c => c.targetNodeIndex)], 'Animation');
                 Logger.print('warn', ['Skin joint nodes:', this._skin.joints.map(j => j.nodeIndex)], 'Animation');
             }

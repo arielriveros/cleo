@@ -5,6 +5,13 @@ import { clamp } from '../utils/math';
 import { DocHover } from './DocTooltip';
 import { useDocEntry } from '../docs/DocScope';
 
+/**
+ * The track fill for a 0..1 position: up to the thumb's centre, which travels from 7px to 100% - 7px
+ * (the thumb is 14px), not from 0 to 100%. For a raw `<input type='range'>` styled by the theme too.
+ */
+export const sliderFill = (fraction: number): string =>
+  `calc(7px + (100% - 14px) * ${Math.min(1, Math.max(0, fraction)).toFixed(4)})`;
+
 export interface SliderProps {
   value: number;
   min: number;
@@ -29,7 +36,8 @@ export interface SliderProps {
 
 /**
  * Labeled range slider with a value-proportional filled track and an optional click-to-edit
- * numeric readout. The fill is driven by the `--slider-fill` CSS var (see index.css track rules).
+ * numeric readout. The fill is driven by the `--slider-fill` CSS var (see the track rules in
+ * styles/theme.css); {@link sliderFill} puts its end under the thumb's centre.
  */
 export function Slider({
   value,
@@ -66,7 +74,7 @@ export function Slider({
       )}
       <input
         className='flex-1 min-w-0'
-        style={{ ['--slider-fill' as any]: pct + '%' }}
+        style={{ ['--slider-fill' as any]: sliderFill(pct / 100) }}
         type='range'
         min={min}
         max={max}

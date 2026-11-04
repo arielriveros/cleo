@@ -49,7 +49,6 @@ into `creatorFoliage.mjs`.
 | `props/wall_torch_model`, `props/medieval_torch.glb` | Wall-mounted and standing torches. |
 | `props/campfire_fire_with_stones.glb`, `props/dungeon_cage.glb`, `props/bookcase.glb`, `props/weapons` | The bonfire and fire pits, cages and braziers, bookcases, racked and dropped weapons. |
 | `medieval_knight__sculpture__game_ready.glb` | The player: a Mixamo-rigged knight (shield left out) on its own `Knight` rig, playing the mannequin's clips, animators and blend spaces through a retarget (`knight.mjs`). |
-| `fire.png` | The fire tileset: 8 x 4 frames of 128 x 256, the flame on every torch, brazier and fire. |
 
 ## Files
 
@@ -57,6 +56,7 @@ into `creatorFoliage.mjs`.
 - `heights.mjs` decodes the PNG with the engine's `heightmapIO.ts`.
 - `landscape.mjs` builds the landscape material, the painted masks (seven channels in two slices: trail, forest floor, dirt road, stone path, clay, sand, dirt), and the CPU surface weights. The weights come from the engine's `terrainLayers.ts`, so the pre-baked foliage respects the same rules the shader draws.
 - `creatorFoliage.mjs` lists the plants and generates them with the Foliage Creator (`genFoliage.ts`, through `vite-node`); `build.mjs` turns each one's levels, materials and impostor into a library model, library materials and a foliage rule.
+- `creatorFx.mjs` lists the effects (the two flames, the blood, the splashes) and bakes them with the FX Creator (`genFx.ts`, through `vite-node`, its CPU solvers), cached in `build/valley_creator/fx-*`; `build.mjs` makes the flames' tilesets, the blood and splash particle systems, and the blood decals' materials and templates from them. A first build bakes for about a quarter of an hour (the flames are most of it).
 - `foliage.mjs` holds the library-asset helpers, the dungeon's moss rocks and the seeded scatter. Placement is pre-baked because opening a scene never scatters.
 - `props.mjs` handles the FBX props: assimp to parts, with scaling. Some files carry no unit stamp, so those props are sized to a stated height. It also measures the windmill hub.
 - `water.glsl` / `water.mjs` hold the pond's water: a transparent forward custom material (waves from a generated tiling normal map, Fresnel reflection of the pond's light probe, a sun glint, refraction with depth absorption, shore foam and a soft edge) and its uniforms. `compileCustomWgsl.ts` translates it to WGSL at build time (through `vite-node`), so a published WebGPU game can render it.
@@ -75,7 +75,8 @@ into `creatorFoliage.mjs`.
 ## Light and time
 
 - **The Time of Day** node (`examples/scripts/ValleyDayNight.ts`) runs the valley's day: the sun's path and colour, the moon, the exposure, the morning mist and the god rays, and how bright the fires are. A death skips half a day.
-- **Fires** (`examples/scripts/ValleyFireLight.ts`) are linked templates with a tileset flame, embers, sparks that bounce on the floor, and a flickering light. Their flames and embers have an Exposure weight of 0.1, so the camera's exposure barely changes them.
+- **Fires** (`examples/scripts/ValleyFireLight.ts`) are linked templates with a flame, embers, sparks that bounce on the floor, and a flickering light. The flames are FX Creator flipbooks: Torch Fire (tall 128 x 256 frames) on the torches, braziers and candles, Bonfire Fire on the bonfire, fire pits and hearth.
+- **Blood and splashes** are FX Creator liquids too: a hit throws a Blood Burst sprite and droplets and leaves two animated decals that land and spread (Blood Pool, Blood Spatter); the pond throws a Water Splash crown where something enters it and a small Water Step at a wading character's feet.
 - **The Dungeon** is held at EV 15, the valley's noon, and its fires are lit for that: the souls content (glyphs, glows, bolts) is tuned for an exposure about that. The Time of Day scales the fires down by day and up at night.
 
 - **Leaves let light through** (Material translucency), at the Foliage Creator's values: broad leaves 0.5, grass 0.45, needles 0.25; bark none. The trees' far impostors carry the same glow.

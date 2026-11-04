@@ -21,8 +21,23 @@ import { detailPhase, stepFactors, type StepFactors } from './realism';
 export interface FluidDims { nx: number; ny: number; nz: number }
 
 /** The grid a region needs: its size over the voxel size, per axis, at least 8 (normalised parameters). */
+/**
+ * The gas emitter on the grid, voxels: its centre (a voxel index, as `emitterPosition` metres from the
+ * centre of the region's floor put it) and its radius. The grid's own extent does not enter: the emitter
+ * is where and as big as its metres say, whatever the region around it.
+ */
+export function emitterVoxels(p: Pick<FxParams, 'emitterPosition' | 'emitterRadius' | 'voxelSize'>, dims: FluidDims): { x: number; y: number; z: number; radius: number } {
+  const v = p.voxelSize, e = p.emitterPosition;
+  return {
+    x: (e[0] + (dims.nx * v) / 2) / v - 0.5,
+    y: e[1] / v - 0.5,
+    z: (e[2] + (dims.nz * v) / 2) / v - 0.5,
+    radius: Math.max(1, p.emitterRadius / v),
+  };
+}
+
 export function fluidDims(p: Pick<FxParams, 'regionSize' | 'voxelSize'>): FluidDims {
-  const v = Math.max(0.005, p.voxelSize);
+  const v = Math.max(0.001, p.voxelSize);
   const n = (m: number) => Math.max(8, Math.round(m / v));
   return { nx: n(p.regionSize[0]), ny: n(p.regionSize[1]), nz: n(p.regionSize[2]) };
 }
@@ -161,10 +176,9 @@ export class FluidCpu {
 
   private sources(p: FxParams, dt: number, k: StepFactors = stepFactors(p, this.time, dt)): void {
     const { nx, ny, nz } = this.dims;
-    const ex = (p.emitterX ?? 0.5) * (nx - 1), ez = (p.emitterZ ?? 0.5) * (nz - 1), ey = p.emitterHeight * (ny - 1);
-    const radius = Math.max(1, p.emitterRadius * nx);
+    const { x: ex, y: ey, z: ez, radius } = emitterVoxels(p, this.dims);
     const emitting = p.emitDuration <= 0 || this.time < p.emitDuration;
-    const tScale = p.turbulenceScale / nx;
+    const tScale = p.voxelSize / p.turbulenceSize;
     const tz = this.steps * 0.05;
     const solid = this.solid;
     const wind = this.sceneWind;
@@ -186,7 +200,7 @@ export class FluidCpu {
         if (inside) {
           // Emitter noise: one time-varying factor per voxel on everything the emitter holds.
           const ek = (p.emitterNoise > 0
-            ? Math.max(0, 1 + p.emitterNoise * valueNoise3(x * 0.35, y * 0.35 - this.time * 3, z * 0.35, p.seed + 7))
+            ? Math.max(0, 1 + p.emitterNoise * valueNoise3(dx * 0.35, dy * 0.35 - this.time * 3, dz * 0.35, p.seed + 7))
             : 1) * k.flicker;
           this.fuel[i] = Math.max(this.fuel[i], p.fuel * ek);
           this.temperature[i] = Math.max(this.temperature[i], p.heat * ek);
@@ -204,14 +218,15 @@ export class FluidCpu {
       const stir = Math.min(1, this.temperature[i]) + (onSmoke > 0 ? onSmoke * Math.min(1, this.density[i]) : 0);
       if (p.turbulence > 0 && (this.temperature[i] > 0.02 || (onSmoke > 0 && stir > 0.02))) {
         const k = p.turbulence * stir * dt;
-        const sx = x * tScale, sy = y * tScale - tz, sz = z * tScale;
+        // Noise from the emitter, so the same effect stirs the same way however much room is around it.
+        const sx = (x - ex) * tScale, sy = (y - ey) * tScale - tz, sz = (z - ez) * tScale;
         this.u[i] += k * valueNoise3(sx, sy, sz, p.seed);
         this.v[i] += k * 0.5 * valueNoise3(sx + 31.4, sy, sz, p.seed + 1);
         this.w[i] += k * valueNoise3(sx, sy, sz + 17.7, p.seed + 2);
         // A finer octave: 2.7 times the frequency, rising twice as fast.
         const kd = k * (p.turbulenceDetail ?? 0);
         if (kd > 0) {
-          const fx = sx * 2.7, fy = y * tScale * 2.7 - tz * 2, fz = sz * 2.7;
+          const fx = sx * 2.7, fy = (y - ey) * tScale * 2.7 - tz * 2, fz = sz * 2.7;
           this.u[i] += kd * valueNoise3(fx, fy, fz, p.seed + 3);
           this.v[i] += kd * 0.5 * valueNoise3(fx + 31.4, fy, fz, p.seed + 4);
           this.w[i] += kd * valueNoise3(fx, fy, fz + 17.7, p.seed + 5);
@@ -221,7 +236,7 @@ export class FluidCpu {
       if (disturb) {
         const amount = Math.min(1, this.temperature[i] + this.density[i]);
         if (amount > 0.01) {
-          const bx = Math.floor(x / cell), by = Math.floor(y / cell), bz = Math.floor(z / cell);
+          const bx = Math.floor((x - ex) / cell), by = Math.floor((y - ey) / cell), bz = Math.floor((z - ez) / cell);
           const s = p.disturbance * amount * dt;
           this.u[i] += s * (hash3(bx, by, bz, dSeed) * 2 - 1);
           this.v[i] += s * (hash3(bx, by, bz, dSeed + 1) * 2 - 1);

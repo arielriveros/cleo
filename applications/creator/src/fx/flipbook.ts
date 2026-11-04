@@ -6,31 +6,59 @@
 export interface AtlasLayout {
   columns: number;
   rows: number;
+  /** The tile's width (its side, for the usual square tile). */
   tile: number;
+  tileWidth: number;
+  tileHeight: number;
   width: number;
   height: number;
 }
 
-/** The squarest grid that holds `frames` tiles. */
-export function atlasLayout(frames: number, tile: number): AtlasLayout {
-  const columns = Math.max(1, Math.ceil(Math.sqrt(frames)));
+/**
+ * The grid that holds `frames` tiles in the squarest atlas: for square tiles the squarest grid, for tall
+ * ones more columns (32 tall tiles pack 8 x 4), for wide ones more rows.
+ */
+export function atlasLayout(frames: number, tileWidth: number, tileHeight = tileWidth): AtlasLayout {
+  const columns = Math.max(1, Math.ceil(Math.sqrt((frames * tileHeight) / tileWidth) - 1e-9));
   const rows = Math.max(1, Math.ceil(frames / columns));
-  return { columns, rows, tile, width: columns * tile, height: rows * tile };
+  return { columns, rows, tile: tileWidth, tileWidth, tileHeight, width: columns * tileWidth, height: rows * tileHeight };
 }
 
 /** Top-left pixel of frame `i`. */
 export function tileOrigin(layout: AtlasLayout, i: number): [number, number] {
-  return [(i % layout.columns) * layout.tile, Math.floor(i / layout.columns) * layout.tile];
+  return [(i % layout.columns) * layout.tileWidth, Math.floor(i / layout.columns) * layout.tileHeight];
 }
 
 /** Copy one tile's pixels into its cell of the atlas. */
 export function blitTile(atlas: Uint8Array, layout: AtlasLayout, i: number, tilePixels: ArrayLike<number>): void {
   const [x0, y0] = tileOrigin(layout, i);
-  const t = layout.tile;
-  for (let y = 0; y < t; y++) {
+  const w = layout.tileWidth, h = layout.tileHeight;
+  for (let y = 0; y < h; y++) {
     const dst = ((y0 + y) * layout.width + x0) * 4;
-    for (let k = 0; k < t * 4; k++) atlas[dst + k] = tilePixels[y * t * 4 + k];
+    for (let k = 0; k < w * 4; k++) atlas[dst + k] = tilePixels[y * w * 4 + k];
   }
+}
+
+/**
+ * Fade a straight-alpha tile's coverage to nothing over the outer `share` of its width and height
+ * (smoothstep), in place: whatever reaches the frame's edge fades out instead of ending on a line.
+ */
+export function fadeEdges(tile: Uint8Array, width: number, height: number, share: number): Uint8Array {
+  if (!(share > 0)) return tile;
+  const ramp = (d: number, n: number) => {
+    const t = Math.min(1, Math.max(0, (d + 0.5) / Math.max(1, share * n)));
+    return t * t * (3 - 2 * t);
+  };
+  for (let y = 0; y < height; y++) {
+    const wy = ramp(Math.min(y, height - 1 - y), height);
+    for (let x = 0; x < width; x++) {
+      const w = wy * ramp(Math.min(x, width - 1 - x), width);
+      if (w >= 1) continue;
+      const k = (y * width + x) * 4 + 3;
+      tile[k] = Math.round(tile[k] * w);
+    }
+  }
+  return tile;
 }
 
 /**
@@ -67,8 +95,8 @@ export function tilesetJson(layout: AtlasLayout, id: string, textureId: string, 
     textureId,
     imageWidth: layout.width,
     imageHeight: layout.height,
-    tileWidth: layout.tile,
-    tileHeight: layout.tile,
+    tileWidth: layout.tileWidth,
+    tileHeight: layout.tileHeight,
     margin: 0,
     spacing: 0,
     columns: layout.columns,

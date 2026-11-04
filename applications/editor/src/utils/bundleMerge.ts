@@ -125,7 +125,8 @@ export function remapDeep(obj: any, r: Remaps): void {
       for (const slot of Object.keys(val)) val[slot] = sub(r.tex, val[slot])
       continue
     }
-    if (key === 'textureId' || key === 'displacementMap') { obj[key] = sub(r.tex, val); continue }
+    // A lit particle emitter's normal and ORM maps sit beside its `textureId`.
+    if (key === 'textureId' || key === 'displacementMap' || key === 'normalTextureId' || key === 'ormTextureId') { obj[key] = sub(r.tex, val); continue }
     if (key === 'materialId') { obj[key] = sub(r.tmat, val); continue } // terrain layer → terrain material
     // A landscape-material SLOT's link to the plain Material asset its surface came from. A key of its
     // own precisely because `materialId` above means a TERRAIN material.

@@ -201,7 +201,8 @@ export function edgesOfAsset(kind: AssetKind, asset: any): EdgeSpec[] {
     // records `brainId` as the back-link, so the reference runs the other way.
     case 'aiBrain':
       break
-    // An effect draws sprites and meshes: each emitter's renderer names at most one texture and one model.
+    // An effect draws sprites and meshes: each emitter's renderer names a texture (and, lit, a normal and an
+    // ORM map) and at most one model.
     // Read through the engine's own reader rather than walkRefs, so the graph and the engine agree on what
     // an emitter actually uses (a disabled emitter still counts — it is one toggle from drawing).
     case 'particleSystem': {

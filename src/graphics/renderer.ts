@@ -8,7 +8,7 @@ import { ModelNode } from '../core/scene/nodes/modelNode';
 import { TilemapNode } from '../core/scene/nodes/tilemapNode';
 import { LightNode } from '../core/scene/nodes/lightNode';
 import { LightProbeNode } from '../core/scene/nodes/lightProbeNode';
-import { DecalNode, DECAL_RADIAL_CURVES } from '../core/scene/nodes/decalNode';
+import { DecalNode, DECAL_RADIAL_CURVES, decalFlipbookFrame, type DecalFlipbookFrame } from '../core/scene/nodes/decalNode';
 import type { FluidVolumeNode } from '../core/scene/nodes/fluidVolumeNode';
 import { SkyboxNode } from '../core/scene/nodes/skyboxNode';
 import { VolumetricCloudsNode } from '../core/scene/nodes/volumetricCloudsNode';
@@ -1011,6 +1011,7 @@ export class Renderer {
     private readonly _decalInner: number[] = [0, 0, 0, 0];
     private readonly _decalOuter: number[] = [0, 0, 0, 0];
     private readonly _decalRing: number[] = [0, 0, 0, 0];
+    private readonly _decalFlip: DecalFlipbookFrame = { a: [0, 0, 1, 1], b: [0, 0, 1, 1], blend: 0 };
     private _gBufferFBO!: Framebuffer;
 
     // The sun's world direction, refreshed at the top of the geometry pass — that pass writes a
@@ -3129,6 +3130,14 @@ export class Renderer {
             visible: this._frustumCulling ? (min, max) => this._frustum.intersectsAABB(min, max) : undefined,
             lodDistanceScale: this._particleLodDistanceScale,
             exposure: this._exposure,
+            // As the forward path picks a mesh's reflection: the probe containing it, else the sky. Never
+            // during a probe capture, which would reflect the probe being captured.
+            environment: this._capturing ? undefined : position => {
+                const probe = scene.probeForPoint(position, true);
+                const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
+                const cube = probeCube ?? scene.environmentMap;
+                return cube ? { cube, linear: !!probeCube } : null;
+            },
         };
     }
     private readonly _particleViewProj: mat4 = mat4.create();
@@ -3548,6 +3557,12 @@ export class Renderer {
             sm.setUniform('u_jitterSlot', this._frameIndex % 64);
             sm.setUniform('u_hasLut', node.fireLut ? 1 : 0);
             sm.setUniform('u_hasOccupancy', node.occupancy ? 1 : 0);
+            sm.setUniform('u_shading', node.shading === 'liquid' ? 1 : 0);
+            sm.setUniform('u_liquidIso', node.liquidIso);
+            sm.setUniform('u_liquidRoughness', node.liquidRoughness);
+            sm.setUniform('u_liquidSpecular', node.liquidSpecular);
+            sm.setUniform('u_liquidFoam', node.liquidFoam);
+            sm.setUniform('u_liquidMetallic', node.liquidMetallic);
             trace.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
                 depth, node.volume!, node.fireLut ?? this._fallbackTexture,
                 node.previousVolume ?? node.volume!, node.occupancy ?? node.volume!,
@@ -3727,6 +3742,11 @@ export class Renderer {
         sm.setUniform('u_affectNormal', decal.affects.normal);
         sm.setUniform('u_affectSurface', decal.affects.surface);
         sm.setUniform('u_decalMode', mode);
+        sm.setUniform('u_albedoOpacity', decal.albedoOpacity);
+        const flip = decalFlipbookFrame(decal.flipbook, decal.flipbookTime, this._decalFlip);
+        sm.setUniform('u_flipA', flip.a);
+        sm.setUniform('u_flipB', flip.b);
+        sm.setUniform('u_flipBlend', flip.blend);
         this._applyMaterialProperties(material);
     }
 
@@ -10240,6 +10260,31 @@ export class Renderer {
     }
 
     /**
+     * Scales the 3×3 of a sprite's model matrix down so the quad it places draws at most `maxCssPx` tall in
+     * the active camera: by view depth in perspective, by the view height in orthographic (2D zoom). CSS
+     * pixels against the canvas's CSS height, so the cap does not move with the render scale.
+     */
+    private _capSpriteScreenSize(m: mat4, maxCssPx: number): void {
+        const cssHeight = this._canvas.clientHeight;
+        const worldHeight = Math.hypot(m[4], m[5], m[6]);
+        if (!cssHeight || worldHeight <= 0) return;
+        const cam = this._activeCamera;
+        let worldPerPx: number;
+        if (cam.type === 'orthographic') {
+            worldPerPx = Math.abs(cam.top - cam.bottom) / cssHeight;
+        } else {
+            const v = cam.viewMatrix;
+            const depth = -(v[2] * m[12] + v[6] * m[13] + v[10] * m[14] + v[14]);
+            if (depth <= cam.near) return;
+            worldPerPx = 2 * depth * Math.tan(cam.fov * Math.PI / 360) / cssHeight;
+        }
+        const onScreen = worldHeight / worldPerPx;
+        if (onScreen <= maxCssPx) return;
+        const k = maxCssPx / onScreen;
+        for (let i = 0; i < 12; i++) if (i % 4 !== 3) m[i] *= k;
+    }
+
+    /**
      * `manageDepth` false means the caller owns the blend/depth-mask state for a whole batch — the 2D
      * pass sets it once around its interleaved list.
      */
@@ -10316,6 +10361,8 @@ export class Renderer {
             mat4.scale(spriteMatrix, spriteMatrix, node.worldScale);
         }
 
+        // SpriteNode.maxScreenSize: no taller than that many CSS pixels (the editor's viewport icons).
+        if (node.maxScreenSize > 0) this._capSpriteScreenSize(spriteMatrix, node.maxScreenSize);
 
         // Soft fade (Sprite.softness): depth-tested `softness` metres nearer the camera, scaled about the
         // eye so it covers exactly the same pixels. Whatever lies less than that behind a surface — a flame

@@ -392,8 +392,21 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         // Its top face is the water level, and it reaches below the deepest point of the basin.
         expect(volume.position[1] + v.size[1] / 2).toBeCloseTo(water.position[1], 3);
         expect(volume.position[1] - v.size[1] / 2).toBeLessThan(heightAt(water.position[0], water.position[2]));
-        // Ripples only: no splash particles.
-        expect(v.splashTemplate).toBe('');
+        // The FX Creator's splashes: a crown for something entering it, a small one for each wading step.
+        expect(v.splashTemplate).toBe('Water Splash');
+        expect(v.wadeSplashTemplate).toBe('Water Step');
+        const templates = library('templates');
+        for (const name of ['Water Splash', 'Water Step']) {
+            const t = templates.find((x: any) => x.name === name);
+            expect(t, name).toBeTruthy();
+            const ps = t.nodeJson.children.find((c: any) => c.type === 'particleSystem');
+            // A crown sprite and droplets, both on Creator flipbooks, lit like the water they are.
+            for (const e of ps.particleSystem.system.emitters) {
+                expect(e.render.textureId, `${name} ${e.name}`).toBeTruthy();
+                expect(e.render.lit).toBe(true);
+                expect(e.render.blend).toBe('alpha');
+            }
+        }
     });
 
     it('slows and grounds whoever wades in through a water zone at the water level', () => {
@@ -542,14 +555,16 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(count('Fire Pit')).toBe(3);
         expect(count('Bonfire')).toBe(1);
         expect(count('Hanging Brazier')).toBe(2);
-        // Fire is the tileset's: 8 x 4 frames of 128 x 256, additive, each copy on a frame of its own.
+        // Fire is the FX Creator's: the torches' and the hearths' flames, each in tall 128 x 256 frames
+        // (8 x 4); alpha-blended (the frames carry their smoke), each copy on a frame of its own.
         const flames = all.filter(n => n.type === 'animatedSprite');
         expect(flames.length).toBeGreaterThan(30);
+        const tilesets = new Set(flames.map(f => f.sprite.tileset.name));
+        expect([...tilesets].sort()).toEqual(['Bonfire Fire', 'Torch Fire']);
         for (const f of flames) {
-            expect(f.sprite.tileset.tileWidth).toBe(128);
-            expect(f.sprite.tileset.tileHeight).toBe(256);
-            expect(f.sprite.tileset.rows).toBe(4);
-            expect(f.sprite.blend).toBe('additive');
+            const t = f.sprite.tileset;
+            expect([t.tileWidth, t.tileHeight, t.columns, t.rows], t.name).toEqual([128, 256, 8, 4]);
+            expect(f.sprite.blend).toBe('alpha');
             expect(f.animation.randomStart).toBe(true);
             expect(f.animation.frames).toHaveLength(32);
             // The flame's base sits inside its torch or pit: shown through it, not cut off.

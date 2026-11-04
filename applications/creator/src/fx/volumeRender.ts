@@ -19,26 +19,50 @@ export interface ViewBasis {
   dir: V3;
   right: V3;
   up: V3;
-  /** Half the tile's extent, voxels; the tile is square and covers the whole domain. */
+  /**
+   * Half the square render's extent, voxels. The square covers the whole domain -- or, for a tall or wide
+   * tile (`aspect` = width / height), the centre cut of it that the tile keeps does.
+   */
   half: number;
   /** Domain centre, voxels. */
   center: V3;
 }
 
-export function viewBasis(dims: FluidDims, view: FxView, yawDeg: number): ViewBasis {
+/**
+ * The bake camera for `view`: looking along `dir`, the image's `right` and `up`, a real camera's frame
+ * (right x up = -dir), so a tile shows what a viewport camera at that spot sees, not its mirror image.
+ * Front looks along +Z, side along +X, angle along the yaw; top looks down with +X right and -Z up, the
+ * floor decal's own orientation.
+ */
+export function viewBasis(dims: FluidDims, view: FxView, yawDeg: number, aspect = 1): ViewBasis {
   let dir: V3, right: V3, up: V3;
-  if (view === 'top') { dir = [0, -1, 0]; right = [1, 0, 0]; up = [0, 0, 1]; }
+  if (view === 'top') { dir = [0, -1, 0]; right = [1, 0, 0]; up = [0, 0, -1]; }
   else {
     const yaw = view === 'side' ? 90 : view === 'angle' ? yawDeg : 0;
     const a = (yaw * Math.PI) / 180;
     dir = [Math.sin(a), 0, Math.cos(a)];
-    right = [Math.cos(a), 0, -Math.sin(a)];
+    right = [-Math.cos(a), 0, Math.sin(a)];
     up = [0, 1, 0];
   }
   const ext: V3 = [dims.nx - 1, dims.ny - 1, dims.nz - 1];
   const span = (v: V3) => 0.5 * (Math.abs(v[0]) * ext[0] + Math.abs(v[1]) * ext[1] + Math.abs(v[2]) * ext[2]);
-  const half = Math.max(span(right), span(up)) * 1.02;
+  // A tile narrower than the square sees `aspect` of its width; a wider one 1 / `aspect` of its height.
+  const half = Math.max(span(right) * Math.max(1, 1 / aspect), span(up) * Math.max(1, aspect)) * 1.02;
   return { dir, right, up, half, center: [ext[0] / 2, ext[1] / 2, ext[2] / 2] };
+}
+
+/** A tile's width over its height (`tileAspect`): what `viewBasis` frames a square render for. */
+export function tileAspectOf(p: Pick<FxParams, 'tileAspect'>): number {
+  return p.tileAspect === 'tall' ? 0.5 : p.tileAspect === 'wide' ? 2 : 1;
+}
+
+/** The centre `width` x `height` of a `size` x `size` RGBA8 render: a tall or wide tile cut from the square. */
+export function cropTile(square: Uint8Array, size: number, width: number, height: number): Uint8Array {
+  if (width === size && height === size) return square;
+  const out = new Uint8Array(width * height * 4);
+  const x0 = Math.floor((size - width) / 2), y0 = Math.floor((size - height) / 2);
+  for (let y = 0; y < height; y++) out.set(square.subarray(((y0 + y) * size + x0) * 4, ((y0 + y) * size + x0 + width) * 4), y * width * 4);
+  return out;
 }
 
 /** Unit vector from the volume toward the light. */
@@ -260,7 +284,7 @@ export const RENDER_MODES: Record<RenderMode, number> = { color: 0, light: 1, em
 /** Render the fluid's current state into `out` (tile x tile RGBA8, straight alpha, row 0 at the top). */
 export function renderTile(fluid: FluidCpu, p: FxParams, out: Uint8ClampedArray | Uint8Array, tile: number, lut: Float32Array, mode: RenderMode = 'color'): void {
   const dims = fluid.dims;
-  const b = viewBasis(dims, p.view, p.yaw);
+  const b = viewBasis(dims, p.view, p.yaw, tileAspectOf(p));
   const ext: V3 = [dims.nx - 1, dims.ny - 1, dims.nz - 1];
   const light = lightVolume(fluid, p);
   const lighting = mode === 'light';
@@ -390,10 +414,17 @@ export function renderTile(fluid: FluidCpu, p: FxParams, out: Uint8ClampedArray 
 }
 
 /**
- * The fire light: the emission-weighted centre of the burning voxels (0..1 of the grid per axis) and a
- * strength (the share of voxels burning, 1% = full) -- what fxReduce.wgsl computes on the GPU.
+ * Burning volume, m^3, that lights the stage at the fire light's full brightness: a voxel at full
+ * emission counts its whole volume. (Format 1 counted 1% of the region's voxels: a bigger region dimmed
+ * the same fire.) This is that share of the default region, so a default campfire lights as it did.
  */
-export function fireLightOf(f: FluidCpu, p: Pick<FxParams, 'ignition' | 'emissionRange'>): [number, number, number, number] {
+export const FIRE_LIGHT_FULL_M3 = 0.01 * 4.8 * 7.2 * 4.8;
+
+/**
+ * The fire light: the emission-weighted centre of the burning voxels (0..1 of the grid per axis) and a
+ * strength (the volume burning over {@link FIRE_LIGHT_FULL_M3}) -- what fxReduce.wgsl computes on the GPU.
+ */
+export function fireLightOf(f: FluidCpu, p: Pick<FxParams, 'ignition' | 'emissionRange' | 'voxelSize'>): [number, number, number, number] {
   const { nx, ny, nz } = f.dims;
   let sx = 0, sy = 0, sz = 0, sw = 0;
   for (let z = 0, i = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++, i++) {
@@ -402,5 +433,5 @@ export function fireLightOf(f: FluidCpu, p: Pick<FxParams, 'ignition' | 'emissio
     sx += x * e; sy += y * e; sz += z * e; sw += e;
   }
   if (sw <= 1e-4) return [0.5, 0.5, 0.5, 0];
-  return [sx / sw / Math.max(1, nx - 1), sy / sw / Math.max(1, ny - 1), sz / sw / Math.max(1, nz - 1), Math.min(1, sw / (nx * ny * nz * 0.01))];
+  return [sx / sw / Math.max(1, nx - 1), sy / sw / Math.max(1, ny - 1), sz / sw / Math.max(1, nz - 1), Math.min(1, (sw * Math.pow(p.voxelSize, 3)) / FIRE_LIGHT_FULL_M3)];
 }

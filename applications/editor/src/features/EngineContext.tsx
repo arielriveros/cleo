@@ -6056,27 +6056,29 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             engine.renderer.clearColor = [...EDITOR_CLEAR_COLOR];
 
           TextureManager.Instance.addTextureFromBase64(NullImage, {}, 'Null');
+          // The viewport icons: mipmapped, since they are drawn small far away and at most 64 CSS px up close
+          // (editorIcons' ICON_RASTER_SCALE, editorHelpers' ICON_MAX_PX).
           TextureManager.Instance.addTextureFromBase64(buildLightIconDataURL(), {
-            mipMap: false
+            mipMap: true
           }, '__editor__light_icon');
           // Light-probe viewport billboard icon, rasterised to a PNG so it can be a sprite texture.
           TextureManager.Instance.addTextureFromBase64(buildProbeIconDataURL(), {
-            mipMap: false
+            mipMap: true
           }, '__editor__probe_icon');
           // Sound-emitter viewport billboard icon, same arrangement as the two above.
           TextureManager.Instance.addTextureFromBase64(buildSoundIconDataURL(), {
-            mipMap: false
+            mipMap: true
           }, '__editor__sound_icon');
           // Decal viewport billboard icon (editorHelpers' ensureDecalIcon).
           TextureManager.Instance.addTextureFromBase64(buildDecalIconDataURL(), {
-            mipMap: false
+            mipMap: true
           }, '__editor__decal_icon');
           // Particle system and force field billboards (editorHelpers' ensureEffectIcon).
           TextureManager.Instance.addTextureFromBase64(buildParticleIconDataURL(), {
-            mipMap: false
+            mipMap: true
           }, '__editor__particle_icon');
           TextureManager.Instance.addTextureFromBase64(buildForceFieldIconDataURL(), {
-            mipMap: false
+            mipMap: true
           }, '__editor__forcefield_icon');
           eventEmitter.current.emit('TEXTURES_CHANGED');
 

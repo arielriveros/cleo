@@ -12,7 +12,7 @@ that goes back to the home page. A reload keeps the tool that was open; a new wi
 | Tool | Makes | Exports |
 |---|---|---|
 | **World Creator** | Landscapes from landform layers and erosion | A 16-bit heightmap (PNG and RAW), slope/curvature/flow/wetness masks, and a JSON sidecar |
-| **FX Creator** | Fire, smoke and explosions from a volumetric fluid simulation | A tileset flipbook (RGBA atlas PNG), a `.tileset` asset, and a JSON sidecar with the particle flipbook settings |
+| **FX Creator** | Fire, smoke and explosions from a volumetric fluid simulation, or liquids (splashes, pours) from a particle one | A tileset flipbook (RGBA atlas PNG), a `.tileset` asset, and a JSON sidecar with the particle flipbook settings; for a liquid, its floor decal (an animated colour, normal and ORM atlas) |
 | **Foliage Creator** | Grass clumps, bushes, trees and rocks from parameters, each with an LOD ladder and its materials | One `.glb` per level (textures embedded), impostor atlases for trees, and a JSON sidecar with the LOD distances |
 | **[Motion Creator](motion.md)** | Character animation from a few key poses: eased in-betweens, overlapping action, IK-planted hands and feet | An `.anim.json` clip with its skeleton, and a JSON sidecar |
 
@@ -64,7 +64,7 @@ writes (`untitled` on Scratch).
 | Tool | Published when | Becomes, in the Editor |
 |---|---|---|
 | **Foliage** | Each rebuild (about a second after an edit). A tree's impostor is re-baked once edits pause for 3 s, and the previous one is kept until then. | A model with its LOD levels and cull distance, a material per part (Bark, Leaves…), and for a tree the octahedral impostor, which a foliage rule made from the model starts with. |
-| **FX** | Each finished bake. With **Auto-bake** on, a saved asset re-bakes 1.5 s after an edit. | The flipbook (and six-way and motion maps) as textures, and a particle system drawing it. |
+| **FX** | Each finished bake. With **Auto-bake** on, a saved asset re-bakes 1.5 s after an edit. | The flipbook (and six-way and motion maps) as textures, and a particle system drawing it. A liquid's floor decal comes as two decal materials: the settled pool, and its animated atlases; a decal using them stands at the sidecar's `outputs.decal.offset` from the effect's floor centre, `size` across. |
 | **World** | Once edits pause for 2 s, at full resolution. | The heightmap and the masks as textures. A landscape imports the heightmap at full precision with **Import heightmap ▸ From Creator**, and offers **Re-apply** when the world changes. |
 | **Motion** | Each re-bake (about a second after an edit), and when a library pose it uses changes. | An animation asset on its subject's rig. See [the Motion Creator](motion.md#in-the-editor). |
 | **Pose** | As it is edited in the Motion Creator's Pose tab. | A Pose asset on its subject's rig. |

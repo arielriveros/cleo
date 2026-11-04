@@ -467,6 +467,32 @@ describe('a blood splat', () => {
         for (let i = 0; i < 3; i++) expect(m[4 + i]).toBeCloseTo(n[i]);   // the matrix's Y column
     });
 
+    it('keeps a decal where its liquid lay: its place scales with it, and turns with it on a slope', () => {
+        const worldOf = (normal: number[]) => {
+            const s = new SoulsBloodSplatNode('Blood Drops');
+            const decal = new DecalNode('Decal', { size: [1, 0.4, 2] });
+            decal.setPosition([0.2, 0, -0.4]);                  // a liquid bake's decal offset
+            s.addChild(decal);
+            s.setPosition([3, 1.5, 4]);
+            (s as any).remove = () => {};
+            Object.defineProperty(s, 'scene', { value: { physics: { raycast: () => ({ point: [3, 0, 4], normal }) } } });
+            s.onStart();
+            s.sizeScale = 2; s.minSize = 1; s.maxSize = 1; s.yaw = 30;
+            s.onUpdate(0.016);
+            s.updateTransforms();
+            return { decal, world: Array.from(decal.worldPosition) };
+        };
+        const flat = worldOf([0, 1, 0]);
+        [0.4, 0, -0.8].forEach((v, i) => expect(flat.decal.position[i]).toBeCloseTo(v, 6));
+        const r = Math.PI / 6;
+        const expected = [3 + 0.4 * Math.cos(r) - 0.8 * Math.sin(r), 0, 4 - 0.4 * Math.sin(r) - 0.8 * Math.cos(r)];
+        for (let i = 0; i < 3; i++) expect(flat.world[i]).toBeCloseTo(expected[i], 5);
+        // A gentle slope: the root takes the slope's heading, the decal turns the rest of the way, its place with it.
+        const t = (5 * Math.PI) / 180;
+        const sloped = worldOf([Math.sin(t), Math.cos(t), 0]);
+        for (let i = 0; i < 3; i++) expect(sloped.world[i]).toBeCloseTo(expected[i], 1);
+    });
+
     it('removes itself with no floor in reach', () => {
         const { s, removed } = splat(null);
         s.onUpdate(0.016);

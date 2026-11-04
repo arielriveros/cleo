@@ -1,12 +1,14 @@
 import {
-  DecalNode, DirectionalLight, Geometry, LIGHT_UNIT, LightNode, Material, Model, ModelNode, PointLight, Shape, TextureManager,
+  DecalNode, DirectionalLight, Geometry, LIGHT_UNIT, LightNode, Material, Model, ModelNode, Node, PointLight, Shape, TextureManager,
   SkyAtmosphereNode, SkyLightNode, WindNode, type CleoEngine, type Scene,
 } from 'cleo';
-import { vec3 } from 'gl-matrix';
+import { quat, vec3 } from 'gl-matrix';
 import type { FxParams } from '../fxParams';
 import { kelvinToRgb, type FxBody, type FxScene } from '../fxScene';
 import type { FireLight } from '../liveSim';
+import type { FloorDecal } from '../liveLiquid';
 import { aimSun } from './fxPreview';
+import { StageFloor } from '../../app/floor/stageFloor';
 
 // The FX Creator's preview stage, built from an FxScene: the sun and its colour, ambient, an optional
 // physical sky, exposure, the grid and a ground plane, a WindNode, a point light that follows the fire,
@@ -15,6 +17,13 @@ import { aimSun } from './fxPreview';
 
 const PREFIX = 'FX stage · ';
 const BODY_COLOR: [number, number, number] = [0.55, 0.56, 0.6];
+const EMITTER_COLOR: [number, number, number] = [1, 0.55, 0.15];
+const REGION_COLOR: [number, number, number] = [0.3, 0.9, 0.9];
+/** The region's box while it is selected (its face handles are out): brighter, so it reads as the one edited. */
+const REGION_SELECTED_COLOR: [number, number, number] = [0.85, 1, 1];
+
+/** One arrow of the emitter's aim: where it starts, the unit direction it points, its length. */
+export interface AimArrow { from: [number, number, number]; dir: [number, number, number]; length: number }
 
 interface BodyEntry { body: FxBody; node: ModelNode; key: string }
 
@@ -23,9 +32,14 @@ const shapeKey = (b: FxBody) => `${b.kind}:${b.size.map(v => v.toFixed(3)).join(
 
 export class FxStage {
   private bodies = new Map<string, BodyEntry>();
-  private ground: ModelNode | null = null;
+  private floor: StageFloor | null = null;
   /** The simulation region's wireframe box. */
   private region: ModelNode | null = null;
+  /**
+   * The region's handle: an unscaled node at its centre, which its move gizmo and face handles drive
+   * (the wireframe is scaled to the region, and the volume node follows the liquid, not the region).
+   */
+  private regionAnchor: Node | null = null;
   private wind: WindNode | null = null;
   private sky: SkyAtmosphereNode | null = null;
   private skyLight: SkyLightNode | null = null;
@@ -35,9 +49,16 @@ export class FxStage {
    * than editor chrome, so it is drawn over the smoke at partial opacity instead of hiding the flame.
    */
   private emitter: ModelNode | null = null;
+  /** The aim's arrows (a shaft and a head each): where a liquid is thrown. */
+  private arrows: { shaft: ModelNode; head: ModelNode }[] = [];
+  private regionSelected = false;
   /** The effect's ground shadow: a decal darkening the floor through the shadow texture. */
   private shadow: DecalNode | null = null;
   private shadowTextureId: string | null = null;
+  /** A liquid's film on the floor: a decal drawing its colour, normal and ORM maps. */
+  private film: DecalNode | null = null;
+  private filmTextureIds: string[] = [];
+  private filmTextures: unknown[] = [];
   private flicker = 1;
   private scene: FxScene | null = null;
 
@@ -90,13 +111,9 @@ export class FxStage {
 
     // --- Ground ---
     r.setGridVisible(scene.grid);
-    if (scene.groundPlane && !this.ground) {
-      this.ground = new ModelNode(PREFIX + 'ground', new Model(Geometry.Plane(60, 60), Material.PBR({ baseColor: [0.32, 0.31, 0.29], roughness: 0.95 })));
-      world.addNode(this.ground);
-    } else if (!scene.groundPlane && this.ground) {
-      world.removeNode(this.ground);
-      this.ground = null;
-    }
+    this.floor ??= new StageFloor(world, { color: [0.32, 0.31, 0.29], size: 60, name: PREFIX + 'ground' });
+    this.floor.configure({ set: scene.floorSet, tile: scene.floorTile, wetness: 0, snow: 0 });
+    this.floor.show(scene.groundPlane);
 
     // --- Wind ---
     if (scene.wind && !this.wind) {
@@ -137,35 +154,73 @@ export class FxStage {
         this.bodies.set(b.id, entry);
       }
       entry.body = b;
-      entry.node.visible = b.visible && scene.showBodies !== false;
+      entry.node.visible = b.visible && scene.showHelpers !== false;
       // A static body follows its node, so moving the node moves the collider too.
       entry.node.setPosition([...b.position]).setRotation([b.pitch, b.yaw, 0]);
     }
   }
 
-  /** Show (or hide) the emitter marker at a world position with a world radius. */
-  showEmitter(position: [number, number, number] | null, radius: number): void {
+  /**
+   * Show (or hide) the emitter marker at a world position with a world radius. `rotation` turns it: a
+   * liquid's marker carries its aim, which the rotate gizmo turns (see FxGizmos `quatFromAim`).
+   */
+  showEmitter(position: [number, number, number] | null, radius: number, rotation?: quat): void {
     if (!position) {
       if (this.emitter) { this.world.removeNode(this.emitter); this.emitter = null; }
       return;
     }
     if (!this.emitter) {
-      this.emitter = new ModelNode(PREFIX + 'emitter', new Model(Geometry.Sphere(16, 1), Material.Basic({ color: [1, 0.55, 0.15], opacity: 0.25 }, { transparent: true })));
+      this.emitter = new ModelNode(PREFIX + 'emitter', new Model(Geometry.Sphere(16, 1), Material.Basic({ color: EMITTER_COLOR, opacity: 0.25 }, { transparent: true })));
       this.world.addNode(this.emitter);
     }
     this.emitter.setPosition(position).setScale([radius, radius, radius]);
+    this.emitter.setQuaternion(rotation ?? quat.create());
   }
 
-  /** Draw the region's wireframe box (`origin` its min corner, `size` its extent, metres), or hide it. */
-  showRegion(origin: [number, number, number] | null, size: [number, number, number]): void {
+  /** Draw the aim: an arrow per entry (one along a liquid's aim; one per side of a crown), or none. */
+  showAim(arrows: readonly AimArrow[]): void {
+    while (this.arrows.length > arrows.length) {
+      const a = this.arrows.pop()!;
+      this.world.removeNode(a.shaft);
+      this.world.removeNode(a.head);
+    }
+    while (this.arrows.length < arrows.length) {
+      const material = () => Material.Basic({ color: EMITTER_COLOR, opacity: 0.85 }, { transparent: true, castShadow: false });
+      const a = {
+        shaft: new ModelNode(PREFIX + 'aim', new Model(Geometry.Cylinder(10, 1, 1), material())),
+        head: new ModelNode(PREFIX + 'aim head', new Model(Geometry.Cone(14, 0.5, 1), material())),
+      };
+      this.world.addNode(a.shaft);
+      this.world.addNode(a.head);
+      this.arrows.push(a);
+    }
+    arrows.forEach((arrow, i) => {
+      const { shaft, head } = this.arrows[i];
+      // The geometry stands along +Y: turn it onto the arrow's direction.
+      const q = quat.rotationTo(quat.create(), [0, 1, 0], arrow.dir);
+      const L = arrow.length, headLength = L * 0.3, shaftLength = L - headLength;
+      const along = (t: number): [number, number, number] => [arrow.from[0] + arrow.dir[0] * t, arrow.from[1] + arrow.dir[1] * t, arrow.from[2] + arrow.dir[2] * t];
+      shaft.setPosition(along(shaftLength / 2)).setQuaternion(q).setScale([L * 0.025, shaftLength, L * 0.025]);
+      head.setPosition(along(shaftLength + headLength / 2)).setQuaternion(q).setScale([L * 0.16, headLength, L * 0.16]);
+    });
+  }
+
+  /**
+   * Draw the region's wireframe box (`origin` its min corner, `size` its extent, metres), or hide it.
+   * `selected` draws it brighter: its face handles are out.
+   */
+  showRegion(origin: [number, number, number] | null, size: [number, number, number], selected = false): void {
     if (!origin) {
       if (this.region) { this.world.removeNode(this.region); this.region = null; }
       return;
     }
+    this.placeRegionAnchor(origin, size);
+    if (this.region && selected !== this.regionSelected) { this.world.removeNode(this.region); this.region = null; }
     if (!this.region) {
-      const model = new Model(Geometry.Cube(1, 1, 1, true), Material.Basic({ color: [0.3, 0.9, 0.9] }, { wireframe: true, castShadow: false }));
+      const model = new Model(Geometry.Cube(1, 1, 1, true), Material.Basic({ color: selected ? REGION_SELECTED_COLOR : REGION_COLOR }, { wireframe: true, castShadow: false }));
       this.region = new ModelNode(PREFIX + 'region', model);
       this.world.addNode(this.region);
+      this.regionSelected = selected;
     }
     this.region.setPosition([origin[0] + size[0] / 2, origin[1] + size[1] / 2, origin[2] + size[2] / 2]).setScale([...size]);
   }
@@ -194,6 +249,46 @@ export class FxStage {
     this.shadow.setPosition([placement.center[0], placement.center[1], placement.center[2]]);
   }
 
+  /**
+   * Lay a liquid's film on the floor: a decal over its square drawing the film's maps (the same ones a
+   * bake writes for the floor decal), or nothing.
+   */
+  updateFloorDecal(film: FloorDecal | null): void {
+    if (!film) {
+      if (this.film) { this.world.removeNode(this.film); this.film = null; }
+      return;
+    }
+    const textures = [film.color, film.normal, film.orm];
+    if (!this.film || textures.some((t, i) => t !== this.filmTextures[i])) {
+      if (this.film) this.world.removeNode(this.film);
+      for (const id of this.filmTextureIds) TextureManager.Instance.removeTexture(id);
+      this.filmTextureIds = textures.map((t, i) => TextureManager.Instance.addTexture(t, `fx.film.${i}`));
+      this.filmTextures = textures;
+      const [color, normal, orm] = this.filmTextureIds;
+      this.film = new DecalNode(PREFIX + 'liquid film', {
+        size: [1, 1, 1],
+        material: Material.PBR({ baseColor: [1, 1, 1], roughness: 1, metallic: 0,
+          textures: { baseColorTexture: color, normalMap: normal, roughnessMap: orm, metallicMap: orm, occlusionMap: orm } }),
+        affects: { albedo: true, normal: true, surface: true, emissive: false },
+        angleFade: 0.3, depthFade: 0.1,
+      });
+      this.world.addNode(this.film);
+    }
+    this.film.size = [film.size[0], 0.4, film.size[1]];
+    this.film.albedoOpacity = film.albedoOpacity;
+    this.film.setPosition([film.center[0], film.center[1], film.center[2]]);
+  }
+
+  /** Stand the region's handle at the centre of the region (`origin` its low corner, `size` its extent). */
+  placeRegionAnchor(origin: readonly number[], size: readonly number[]): void {
+    if (!this.regionAnchor) {
+      this.regionAnchor = new Node(PREFIX + 'region handle');
+      this.world.addNode(this.regionAnchor);
+    }
+    this.regionAnchor.setPosition([origin[0] + size[0] / 2, origin[1] + size[1] / 2, origin[2] + size[2] / 2]);
+  }
+  get regionNode(): Node | null { return this.regionAnchor; }
+
   /** The node a selection's gizmo drives: a body's model, or the emitter marker. */
   bodyNode(id: string): ModelNode | null { return this.bodies.get(id)?.node ?? null; }
   get emitterNode(): ModelNode | null { return this.emitter; }
@@ -220,9 +315,16 @@ export class FxStage {
     const world = this.world;
     for (const entry of this.bodies.values()) world.removeNode(entry.node);
     this.bodies.clear();
-    for (const n of [this.ground, this.region, this.wind, this.sky, this.skyLight, this.fire, this.emitter, this.shadow]) if (n) world.removeNode(n);
-    this.ground = this.region = this.wind = this.sky = this.skyLight = this.fire = this.emitter = this.shadow = null;
+    this.floor?.dispose();
+    for (const n of [this.region, this.regionAnchor, this.wind, this.sky, this.skyLight, this.fire, this.emitter, this.shadow, this.film]) if (n) world.removeNode(n);
+    this.regionAnchor = null;
+    this.showAim([]);
+    this.floor = null;
+    this.region = this.wind = this.sky = this.skyLight = this.fire = this.emitter = this.shadow = this.film = null;
     if (this.shadowTextureId) { TextureManager.Instance.removeTexture(this.shadowTextureId); this.shadowTextureId = null; }
+    for (const id of this.filmTextureIds) TextureManager.Instance.removeTexture(id);
+    this.filmTextureIds = [];
+    this.filmTextures = [];
     const s = this.saved;
     const light = this.sun?.light as DirectionalLight | undefined;
     if (light && s.sunIntensity !== null) light.intensity = s.sunIntensity;

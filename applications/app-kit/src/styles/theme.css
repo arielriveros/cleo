@@ -145,12 +145,14 @@ body { font-size: var(--text-ui); }
 
 input[type="file"] { display: none; }
 
-/* Modern slider styling — the fill up to the thumb is driven by --slider-fill (set per-slider by the
-   Slider component); it falls back to a static 50% split when the var is absent. */
+/* Modern slider styling. The part up to the thumb is a gradient, darkest at the start and brightest at
+   the thumb (like the loading bar), over the plain control colour: one layer sized to --slider-fill, which
+   the Slider component sets per slider (to the thumb's centre). Without the var the whole track is the
+   gradient. */
 input[type="range"] { -webkit-appearance: none; appearance: none; height: 1rem; background: transparent; }
-input[type="range"]::-webkit-slider-runnable-track { background: linear-gradient(90deg, rgb(var(--primary)) 0 var(--slider-fill, 50%), rgb(var(--control)) var(--slider-fill, 50%) 100%); height: 6px; border-radius: 9999px; }
+input[type="range"]::-webkit-slider-runnable-track { background: linear-gradient(90deg, rgb(var(--border)), rgb(var(--primary))) 0 0 / var(--slider-fill, 100%) 100% no-repeat, rgb(var(--control)); height: 6px; border-radius: 9999px; }
 input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 9999px; background: rgb(var(--text)); border: 2px solid rgb(var(--surface)); margin-top: -4px; box-shadow: 0 0 0 1px rgb(var(--border)); }
-input[type="range"]::-moz-range-track { background: linear-gradient(90deg, rgb(var(--primary)) 0 var(--slider-fill, 50%), rgb(var(--control)) var(--slider-fill, 50%) 100%); height: 6px; border-radius: 9999px; }
+input[type="range"]::-moz-range-track { background: linear-gradient(90deg, rgb(var(--border)), rgb(var(--primary))) 0 0 / var(--slider-fill, 100%) 100% no-repeat, rgb(var(--control)); height: 6px; border-radius: 9999px; }
 input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: none; border-radius: 9999px; background: rgb(var(--text)); box-shadow: 0 0 0 1px rgb(var(--border)); }
 
 /* Focus styles */

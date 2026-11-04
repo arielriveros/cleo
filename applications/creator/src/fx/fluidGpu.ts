@@ -29,10 +29,10 @@ import DetailProgram from './shaders/fxDetail.wgsl';
 import DetailPackProgram from './shaders/fxDetailPack.wgsl';
 import ShadowProgram from './shaders/fxShadow.wgsl';
 import ReduceProgram from './shaders/fxReduce.wgsl';
-import { SOR_OMEGA, type FluidDims, type SceneWind } from './fluidCpu';
+import { emitterVoxels, SOR_OMEGA, type FluidDims, type SceneWind } from './fluidCpu';
 import type { FluidBackend } from './generateFx';
 import type { FxParams } from './fxParams';
-import { FIRE_OPACITY, lightVector, RENDER_MODES, RENDER_STEP, viewBasis, type RenderMode } from './volumeRender';
+import { FIRE_LIGHT_FULL_M3, FIRE_OPACITY, lightVector, RENDER_MODES, RENDER_STEP, tileAspectOf, viewBasis, type RenderMode } from './volumeRender';
 import { absorptionScale, DETAIL_PERIOD, detailBlend, detailPhase, stepFactors } from './realism';
 
 type Program = typeof SourcesProgram;
@@ -66,9 +66,10 @@ function packUniforms(p: FxParams, dims: FluidDims, dt: number, time: number, st
   const u = new Uint32Array(buf);
   const set = (row: number, a: number, b: number, c: number, d: number) => { f[row * 4] = a; f[row * 4 + 1] = b; f[row * 4 + 2] = c; f[row * 4 + 3] = d; };
   u[0] = dims.nx; u[1] = dims.ny; u[2] = dims.nz; u[3] = p.seed >>> 0;
-  set(1, (p.emitterX ?? 0.5) * (dims.nx - 1), p.emitterHeight * (dims.ny - 1), (p.emitterZ ?? 0.5) * (dims.nz - 1), Math.max(1, p.emitterRadius * dims.nx));
+  const e = emitterVoxels(p, dims);
+  set(1, e.x, e.y, e.z, e.radius);
   set(2, p.fuel, p.heat, p.smoke, p.emitSpeed);
-  set(3, p.turbulence, p.turbulenceScale / dims.nx, steps * 0.05, p.emitterShape === 'disc' ? 1 : 0);
+  set(3, p.turbulence, p.voxelSize / p.turbulenceSize, steps * 0.05, p.emitterShape === 'disc' ? 1 : 0);
   set(4, p.ignition, p.burnRate, p.heatRelease, p.smokeYield);
   const k = stepFactors(p, time, dt);
   set(5, p.buoyancy, p.weight, p.vorticity * k.vortScale, p.wind);
@@ -77,7 +78,7 @@ function packUniforms(p: FxParams, dims: FluidDims, dt: number, time: number, st
   set(8, p.smokeColor[0], p.smokeColor[1], p.smokeColor[2], p.ambient);
   const L = lightVector(p);
   set(9, L[0], L[1], L[2], p.fireOpacity ?? FIRE_OPACITY);
-  const b = viewBasis(dims, p.view, p.yaw);
+  const b = viewBasis(dims, p.view, p.yaw, tileAspectOf(p));
   set(10, b.dir[0], b.dir[1], b.dir[2], b.half);
   set(11, b.right[0], b.right[1], b.right[2], Math.hypot(dims.nx - 1, dims.ny - 1, dims.nz - 1));
   set(12, b.up[0], b.up[1], b.up[2], tile);
@@ -88,7 +89,7 @@ function packUniforms(p: FxParams, dims: FluidDims, dt: number, time: number, st
   set(16, w?.vx ?? 0, w?.vz ?? 0, w?.gustiness ?? 0, w?.gustScale ?? 1);
   set(17, w?.gustSpeed ?? 0, w ? 1 : 0, stage.solids ? 1 : 0, p.advection === 'maccormack' ? 1 : 0);
   set(18, p.anisotropy ?? 0, p.scatterOctaves ?? 1, p.fireGlow ?? 0, p.detailStrength ?? 0);
-  set(19, p.detailScale ?? 6, 0, 0, 0);
+  set(19, p.detailScale ?? 6, FIRE_LIGHT_FULL_M3 / Math.pow(p.voxelSize, 3), 0, 0);
   set(20, p.boundaries === 'open' ? 1 : 0, p.disturbance ?? 0, k.disturbanceCell, k.disturbancePhase);
   // Diffusion as the per-step Laplacian weight, held below the explicit scheme's stability limit.
   set(21, p.shredding ?? 0, (p.diffusion ?? 0) > 0 ? Math.min(1 / 6.5, p.diffusion * dt * 60) : 0, k.flameKeep, p.coolingT4 ?? 0);

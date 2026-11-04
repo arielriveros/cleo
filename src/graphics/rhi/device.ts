@@ -298,6 +298,13 @@ export interface Device {
     readPixels(view: TextureView, x: number, y: number, width: number, height: number): Promise<Uint8Array>;
 
     /**
+     * Read `size` bytes of a buffer created with `COPY_SRC` back to the CPU, as they stand once
+     * everything submitted before the call has run. A queue write issued AFTER this call (a counter reset)
+     * does not reach what is read. Compute devices only: WebGL2 has no storage buffers to read and throws.
+     */
+    readBuffer(buffer: Buffer, offset: number, size: number): Promise<ArrayBuffer>;
+
+    /**
      * Switch per-pass GPU timing on or off. `sink` fires once per timed pass with its label and
      * elapsed milliseconds, from {@link collectTimestamps} only. A no-op on WebGL2.
      */

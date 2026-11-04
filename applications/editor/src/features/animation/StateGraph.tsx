@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { useStateMachine, OP_LABEL, effectiveType, ANY_STATE } from './StateMachineContext'
-import { Button, SegmentedControl } from '@cleo/app-kit/ui'
+import { BoltIcon, Button, SegmentedControl } from '@cleo/app-kit/ui'
 import MachineGraph from '../../components/MachineGraph'
 import { LayerTabs } from './LayerPanels'
 import type { GraphLinkModel, GraphNodeModel } from '../../components/MachineGraph'
@@ -126,7 +126,8 @@ export default function StateGraph() {
         + (s.speedScaleParam ? `, times the "${s.speedScaleParam}" parameter` : ''),
       badgeTone: s.speedParam && playsField ? 'warning' : 'dim',
       // The triggers that enter it directly — a state a script plays by name needs no edge.
-      chips: (s.triggers ?? []).filter(e => e.trigger).map(e => `⚡${e.trigger}`),
+      chips: (s.triggers ?? []).filter(e => e.trigger).map(e => e.trigger),
+      chipIcon: <BoltIcon className='w-2.5 h-2.5 shrink-0' />,
       chipsTitle: 'Entered directly by these triggers, from whatever state the layer is in',
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

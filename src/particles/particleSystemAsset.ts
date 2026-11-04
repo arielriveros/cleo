@@ -170,6 +170,11 @@ function parseRender(raw: any): RenderSettings {
         softness: Math.max(0, num(raw.softness, base.softness)),
         emissive: Math.max(0, num(raw.emissive, base.emissive)),
         lit: raw.lit === true,
+        normalTextureId: typeof raw.normalTextureId === 'string' && raw.normalTextureId ? raw.normalTextureId : null,
+        ormTextureId: typeof raw.ormTextureId === 'string' && raw.ormTextureId ? raw.ormTextureId : null,
+        normalStrength: Math.max(0, num(raw.normalStrength, base.normalStrength)),
+        roughness: Math.min(1, Math.max(0, num(raw.roughness, base.roughness))),
+        metallic: Math.min(1, Math.max(0, num(raw.metallic, base.metallic))),
         mesh: pick(raw.mesh, ['cube', 'sphere', 'tetrahedron', 'cylinder', 'model'] as const, base.mesh),
         modelId: typeof raw.modelId === 'string' && raw.modelId ? raw.modelId : null,
         meshData: parseParticleMesh(raw.meshData),
@@ -261,6 +266,8 @@ export function particleSystemReferences(def: ParticleSystemDef): { textures: st
     const textures = new Set<string>(), models = new Set<string>();
     for (const e of def.emitters) {
         if (e.render.textureId) textures.add(e.render.textureId);
+        if (e.render.normalTextureId) textures.add(e.render.normalTextureId);
+        if (e.render.ormTextureId) textures.add(e.render.ormTextureId);
         if (e.render.modelId) models.add(e.render.modelId);
     }
     return { textures: [...textures], models: [...models] };

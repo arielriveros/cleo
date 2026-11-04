@@ -27,7 +27,9 @@ export type { TexturePickerProps } from './TexturePicker';
 export { Toggle } from './Toggle';
 export type { ToggleProps } from './Toggle';
 
-export { Slider } from './Slider';
+export { Slider, sliderFill } from './Slider';
+
+export { Glyph, DiceIcon, BoltIcon, LinkIcon, PlayIcon, PauseIcon, RestartIcon } from './icons';
 export type { SliderProps } from './Slider';
 
 export { StringListInput } from './StringListInput';

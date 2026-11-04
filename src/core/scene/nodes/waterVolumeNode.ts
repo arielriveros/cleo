@@ -30,6 +30,11 @@ export interface WaterVolumeOptions {
     surfaceNodeId?: string | null;
     /** Template instantiated at the surface for splashes ('' = none). */
     splashTemplate?: string;
+    /**
+     * Template for the splashes of something WADING, the footsteps of a character walking through
+     * ('' = the entry {@link splashTemplate} for those too).
+     */
+    wadeSplashTemplate?: string;
     enabled?: boolean;
 }
 
@@ -68,6 +73,7 @@ export class WaterVolumeNode extends Node {
     private _affectCharacters: boolean;
     private _surfaceNodeId: string | null;
     private _splashTemplate: string;
+    private _wadeSplashTemplate: string;
     private _enabled: boolean;
 
     // ---- runtime ----
@@ -77,7 +83,8 @@ export class WaterVolumeNode extends Node {
     private _ripples: number[][] = Array.from({ length: WATER_RIPPLE_SLOTS }, () => [0, 0, -1000, 0]);
     private _nextSlot = 0;
     private _splashBudget = MAX_SPLASHES_PER_SECOND;
-    private _splashFailed = false;
+    /** Templates that failed to instantiate (logged once by instantiate): not asked for again. */
+    private _splashFailed = new Set<string>();
 
     constructor(name: string, options: WaterVolumeOptions = {}, id: string = uuidv4()) {
         super(name, 'waterVolume', id);
@@ -91,6 +98,7 @@ export class WaterVolumeNode extends Node {
         this._affectCharacters = !!options.affectCharacters;
         this._surfaceNodeId = typeof options.surfaceNodeId === 'string' && options.surfaceNodeId ? options.surfaceNodeId : null;
         this._splashTemplate = typeof options.splashTemplate === 'string' ? options.splashTemplate : '';
+        this._wadeSplashTemplate = typeof options.wadeSplashTemplate === 'string' ? options.wadeSplashTemplate : '';
         this._enabled = options.enabled !== false;
     }
 
@@ -115,7 +123,9 @@ export class WaterVolumeNode extends Node {
     public get surfaceNodeId(): string | null { return this._surfaceNodeId; }
     public set surfaceNodeId(v: string | null) { this._surfaceNodeId = v || null; this._notifyChange('component', 'surfaceNodeId'); }
     public get splashTemplate(): string { return this._splashTemplate; }
-    public set splashTemplate(v: string) { this._splashTemplate = v ?? ''; this._splashFailed = false; this._notifyChange('component', 'splashTemplate'); }
+    public set splashTemplate(v: string) { this._splashTemplate = v ?? ''; this._splashFailed.clear(); this._notifyChange('component', 'splashTemplate'); }
+    public get wadeSplashTemplate(): string { return this._wadeSplashTemplate; }
+    public set wadeSplashTemplate(v: string) { this._wadeSplashTemplate = v ?? ''; this._splashFailed.clear(); this._notifyChange('component', 'wadeSplashTemplate'); }
     public get enabled(): boolean { return this._enabled; }
     public set enabled(v: boolean) { if (!!v === this._enabled) return; this._enabled = !!v; this._notifyChange('component', 'enabled'); }
 
@@ -210,7 +220,7 @@ export class WaterVolumeNode extends Node {
             const planar = Math.hypot(v[0], v[2]);
             if (wading && !state.inWater) {
                 this._ripple(p[0], p[2], now, Math.min(1, 0.5 + Math.abs(v[1]) * 0.2 + planar * 0.1));
-                if (Math.abs(v[1]) > ENTRY_SPLASH_SPEED || planar > 2) this._splash(p[0], level, p[2]);
+                if (Math.abs(v[1]) > ENTRY_SPLASH_SPEED || planar > 2) this._splash(p[0], level, p[2], this._splashTemplate);
                 state.nextWake = now + WAKE_INTERVAL;
                 state.nextSplash = now + SPLASH_INTERVAL;
             } else if (wading && planar > WAKE_MIN_SPEED) {
@@ -219,7 +229,7 @@ export class WaterVolumeNode extends Node {
                     state.nextWake = now + WAKE_INTERVAL;
                 }
                 if (now >= state.nextSplash) {
-                    this._splash(p[0], level, p[2]);
+                    this._splash(p[0], level, p[2], this._wadeSplashTemplate || this._splashTemplate);
                     state.nextSplash = now + SPLASH_INTERVAL;
                 }
             }
@@ -234,7 +244,7 @@ export class WaterVolumeNode extends Node {
             const x = body.position.x, z = body.position.z;
             if (!state.inWater) {
                 this._ripple(x, z, now, Math.min(1, 0.4 + Math.abs(vy) * 0.15));
-                if (Math.abs(vy) > ENTRY_SPLASH_SPEED) this._splash(x, level, z);
+                if (Math.abs(vy) > ENTRY_SPLASH_SPEED) this._splash(x, level, z, this._splashTemplate);
                 state.nextWake = now + WAKE_INTERVAL;
             } else if (fraction < 0.98 && now >= state.nextWake) {
                 // At the surface rather than sunk: rings as it bobs (a turn of vertical direction) or drifts.
@@ -265,11 +275,11 @@ export class WaterVolumeNode extends Node {
         this._nextSlot = (this._nextSlot + 1) % WATER_RIPPLE_SLOTS;
     }
 
-    private _splash(x: number, y: number, z: number): void {
-        if (!this._splashTemplate || this._splashFailed || this._splashBudget < 1 || !this._scene) return;
+    private _splash(x: number, y: number, z: number, template: string): void {
+        if (!template || this._splashFailed.has(template) || this._splashBudget < 1 || !this._scene) return;
         this._splashBudget -= 1;
-        const made = this._scene.instantiate(this._splashTemplate, { position: [x, y + 0.02, z] });
-        if (!made) this._splashFailed = true;   // logged once by instantiate; stop asking
+        const made = this._scene.instantiate(template, { position: [x, y + 0.02, z] });
+        if (!made) this._splashFailed.add(template);   // logged once by instantiate; stop asking
     }
 
     /** Hand the ripple slots to the surface material, if it declares them. */
@@ -297,7 +307,7 @@ export class WaterVolumeNode extends Node {
                 linearDrag: this._linearDrag, angularDrag: this._angularDrag,
                 waveAmplitude: this._waveAmplitude, waveFrequency: this._waveFrequency,
                 affectCharacters: this._affectCharacters, surfaceNodeId: this._surfaceNodeId,
-                splashTemplate: this._splashTemplate, enabled: this._enabled,
+                splashTemplate: this._splashTemplate, wadeSplashTemplate: this._wadeSplashTemplate, enabled: this._enabled,
             },
         };
     }

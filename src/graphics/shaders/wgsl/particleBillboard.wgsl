@@ -58,6 +58,7 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32,
     out.viewDepth = dot(world - u_draw.u_camPos.xyz, u_draw.u_camForward.xyz);
     out.color = look.color;
     out.normal = normal;
+    out.worldPos = world;
     applyFlipbook(&out, look, corner * 0.5 + 0.5);
     return out;
 }

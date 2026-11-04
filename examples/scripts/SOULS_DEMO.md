@@ -595,14 +595,24 @@ calls `GameManager.bleed`, which spawns three things:
 | `Blood Drops` | A spatter **decal** a step further along the blow, pointed away from the attacker. |
 
 The two decal templates carry `SoulsBloodSplat`. On its first frame it raycasts down to find the floor
-(it removes itself when there is none within `snapDown`), moves onto it, tilts to match a ramp, picks a
-random size between `minSize` and `maxSize` times the hit's size, and after `lifetime` seconds fades out
-over `fadeSeconds` and is removed. The splat scales with damage: `bloodReferenceDamage` (120) is a
-full-size splat, from 0.6× to 1.6×.
+(it removes itself when there is none within `snapDown`), moves onto it, tilts to match a ramp (turning
+its decals about the slope's normal, so the spatter still runs along the blow), picks a random size
+between `minSize` and `maxSize` times the hit's size, and after `lifetime` seconds fades out over
+`fadeSeconds` and is removed. A decal with a **flipbook** plays it from that moment: the Valley's are the
+FX Creator's liquid decals, the blood landing and spreading into a pool. The splat scales with damage:
+`bloodReferenceDamage` (120) is a full-size splat, from 0.6× to 1.6×. The spray is spawned turned along
+the blow, so its droplets fly on away from the attacker.
 
 **GameManager fields:** `bloodEnabled` (off: no blood at all), `bloodSprayTemplate`,
-`bloodSplatTemplate`, `bloodDropsTemplate`, `maxBloodDecals` (24; the oldest is removed first, so a long
-fight never piles up decals), `bloodReferenceDamage`.
+`bloodSplatTemplate`, `bloodDropsTemplate`, `bloodDropsOffset` (0.9 m: how far along the blow the
+spatter's centre lies), `maxBloodDecals` (24; the oldest is removed first, so a long fight never piles up
+decals), `bloodReferenceDamage`.
+
+**The Valley's blood** is the FX Creator's (`tools/valley/creatorFx.mjs`): `Blood Spray` is a Blood
+Burst sprite played over a particle's life plus droplets on velocity-aligned particles playing the
+looping Blood Droplets; `Blood Splat` is the Blood Pool bake's floor decal and `Blood Drops` the Blood
+Spatter bake's, each an animated colour, normal and ORM atlas (wet and glossy) with its flipbook. Open the
+same presets in the Creator's FX mode (Medium: Liquid) to make your own.
 
 **Swapping the art.** The splat images are generated placeholders (`tools/soulsDemo/png.mjs`) on the
 `Blood Splat (placeholder)` and `Blood Drops (placeholder)` materials under `Assets ▸ Materials ▸ Effects`.

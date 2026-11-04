@@ -14,6 +14,12 @@ export class SpriteNode extends Node {
     protected _sprite: Sprite;
     protected _initialized: boolean;
     protected _constraints: 'free' | 'spherical' | 'cylindrical';
+    /**
+     * The tallest the quad may draw, in CSS pixels; 0 (the default) is no limit. Past it the quad
+     * shrinks, so a small raster is never blown up as the camera closes in: the editor's viewport icons
+     * set it. Not serialized.
+     */
+    public maxScreenSize: number = 0;
 
     constructor(
         name: string,

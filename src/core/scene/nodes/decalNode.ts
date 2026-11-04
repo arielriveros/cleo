@@ -75,10 +75,85 @@ export interface DecalRadialPattern {
     emissive: number;
 }
 
+/**
+ * A flipbook atlas played across the decal: every map of the material is read from the same cell, so a
+ * base colour, normal and ORM atlas baked on one layout animate together. Cells run left to right, then
+ * top to bottom, exactly as a particle flipbook's (the Creator writes both).
+ */
+export interface DecalFlipbook {
+    columns: number;
+    rows: number;
+    /** Cells actually used, at most `columns x rows`. */
+    frames: number;
+    /** Playback rate, in frames per second of (scaled) game time. */
+    fps: number;
+    /** Wrap at the end; otherwise hold the last frame (a pool that has settled). */
+    loop: boolean;
+    /** Cross-fade each frame into the next. */
+    blend: boolean;
+}
+
+/** One frame of a playing flipbook: the cells to sample, as uv offset + scale, and the cross-fade into `b`. */
+export interface DecalFlipbookFrame {
+    a: [number, number, number, number];
+    b: [number, number, number, number];
+    blend: number;
+}
+
+const flipbookCell = (out: number[], index: number, columns: number, rows: number) => {
+    const column = index % columns, row = Math.floor(index / columns);
+    // Atlas row 0 is the image's TOP, which an uploaded (flipped) texture holds at v = 1: the same
+    // mapping as `flipbookUv` in shaders/wgsl/chunks/particleDraw.wgsl.
+    out[0] = column / columns; out[1] = (rows - row - 1) / rows; out[2] = 1 / columns; out[3] = 1 / rows;
+};
+
+/**
+ * The cells a flipbook shows `time` seconds into playback. `null` is the whole image. A time that is not
+ * finite (a decal that has never played: the editor, a thumbnail) shows the LAST frame, so an authored
+ * one-shot is seen as it ends. `out` is reused when given.
+ */
+export function decalFlipbookFrame(flipbook: DecalFlipbook | null, time: number,
+                                   out: DecalFlipbookFrame = { a: [0, 0, 1, 1], b: [0, 0, 1, 1], blend: 0 }): DecalFlipbookFrame {
+    if (!flipbook) {
+        out.a[0] = out.a[1] = out.b[0] = out.b[1] = 0;
+        out.a[2] = out.a[3] = out.b[2] = out.b[3] = 1;
+        out.blend = 0;
+        return out;
+    }
+    const columns = Math.max(1, Math.round(flipbook.columns));
+    const rows = Math.max(1, Math.round(flipbook.rows));
+    const frames = Math.min(columns * rows, Math.max(1, Math.round(flipbook.frames)));
+    let f = isFinite(time) ? Math.max(0, time) * Math.max(0, flipbook.fps) : frames - 1;
+    if (flipbook.loop) f -= Math.floor(f / frames) * frames;
+    else f = Math.min(f, frames - 1);
+    const whole = Math.min(frames - 1, Math.floor(f));
+    const next = whole + 1 < frames ? whole + 1 : (flipbook.loop ? 0 : whole);
+    flipbookCell(out.a, whole, columns, rows);
+    flipbookCell(out.b, next, columns, rows);
+    out.blend = flipbook.blend && next !== whole ? f - whole : 0;
+    return out;
+}
+
+/** Tolerant reader for a flipbook block: anything that is not an object is no flipbook. */
+export function decalFlipbookFrom(v: any): DecalFlipbook | null {
+    if (!v || typeof v !== 'object') return null;
+    const n = (x: unknown, fallback: number) => (typeof x === 'number' && isFinite(x) ? x : fallback);
+    const columns = Math.max(1, Math.round(n(v.columns, 1))), rows = Math.max(1, Math.round(n(v.rows, 1)));
+    return {
+        columns, rows,
+        frames: Math.min(columns * rows, Math.max(1, Math.round(n(v.frames, columns * rows)))),
+        fps: Math.max(0, n(v.fps, 24)),
+        loop: v.loop === true,
+        blend: v.blend !== false,
+    };
+}
+
 export interface DecalOptions {
     size?: [number, number, number];
     material?: Material | null;
     opacity?: number;
+    albedoOpacity?: number;
+    flipbook?: DecalFlipbook | null;
     sortOrder?: number;
     angleFade?: number;
     depthFade?: number;
@@ -184,6 +259,10 @@ export class DecalNode extends Node {
     private _receivers: DecalReceivers;
     private _pattern: DecalPattern;
     private _radial: DecalRadialPattern;
+    private _albedoOpacity: number;
+    private _flipbook: DecalFlipbook | null;
+    /** Seconds into the flipbook; Infinity until it first plays (see {@link flipbookTime}). */
+    private _flipbookTime = Infinity;
 
     private readonly _volScratch: mat4 = mat4.create();
     private readonly _invVolScratch: mat4 = mat4.create();
@@ -202,6 +281,8 @@ export class DecalNode extends Node {
         this._receivers = options.receivers === 'terrain' ? 'terrain' : 'all';
         this._pattern = options.pattern === 'radial' ? 'radial' : 'material';
         this._radial = DecalNode._radialFrom(options.radial);
+        this._albedoOpacity = clamp01(options.albedoOpacity ?? 1);
+        this._flipbook = decalFlipbookFrom(options.flipbook);
     }
 
     // --- Authored state ---------------------------------------------------------------------------
@@ -231,6 +312,38 @@ export class DecalNode extends Node {
     /** Overall coverage multiplier, 0..1. */
     public get opacity(): number { return this._opacity; }
     public set opacity(v: number) { this._opacity = clamp01(v); }
+
+    /**
+     * How much of the albedo coverage lands, 0..1, on top of {@link opacity}. Normal and roughness keep
+     * the full coverage, so a near-black base colour at 0.3-0.5 DARKENS the ground under a film of water
+     * while its roughness turns wet, instead of painting the ground over. 1 = as the material says.
+     */
+    public get albedoOpacity(): number { return this._albedoOpacity; }
+    public set albedoOpacity(v: number) { this._albedoOpacity = clamp01(v); }
+
+    /**
+     * Plays the material's maps as an atlas, cell by cell (a pool spreading, a stain drying). `null`
+     * projects the whole image. The clock is the scene's: it starts at the decal's first update in play,
+     * so a decal spawned from a template plays from its first frame, and runs on scaled game time.
+     */
+    public get flipbook(): DecalFlipbook | null { return this._flipbook; }
+    public set flipbook(v: DecalFlipbook | null) { this._flipbook = decalFlipbookFrom(v); }
+
+    /**
+     * Seconds into the flipbook. Infinity until the decal first updates in play, which shows the last
+     * frame: outside play (the editor, a thumbnail) a one-shot decal is seen as it ends.
+     */
+    public get flipbookTime(): number { return this._flipbookTime; }
+    public set flipbookTime(v: number) { this._flipbookTime = typeof v === 'number' && !isNaN(v) ? v : Infinity; }
+
+    /** Restart the flipbook from its first frame. */
+    public playFlipbook(): void { this._flipbookTime = 0; }
+
+    public update(delta: number, time: number): void {
+        super.update(delta, time);
+        if (!this._flipbook) return;
+        this._flipbookTime = isFinite(this._flipbookTime) ? this._flipbookTime + delta : 0;
+    }
 
     /** Draw order among overlapping decals: higher lands on top. Ties break by id, never by distance. */
     public get sortOrder(): number { return this._sortOrder; }
@@ -382,6 +495,8 @@ export class DecalNode extends Node {
                     ringColor: [...r.ringColor], ringWidthPx: r.ringWidthPx, emissive: r.emissive,
                 },
                 material: this._material ? this._material.serialize() : null,
+                ...(this._albedoOpacity !== 1 ? { albedoOpacity: this._albedoOpacity } : {}),
+                ...(this._flipbook ? { flipbook: { ...this._flipbook } } : {}),
             },
         };
     }
@@ -406,6 +521,8 @@ export class DecalNode extends Node {
                 ? [d.size[0], d.size[1], d.size[2]] : undefined,
             material,
             opacity: num(d.opacity),
+            albedoOpacity: num(d.albedoOpacity),
+            flipbook: decalFlipbookFrom(d.flipbook),
             sortOrder: num(d.sortOrder),
             angleFade: num(d.angleFade),
             depthFade: num(d.depthFade),

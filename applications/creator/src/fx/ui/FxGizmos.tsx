@@ -9,14 +9,20 @@ import { captureViewport, isViewportCaptured, releaseViewport } from '@cleo/app-
 import { fluidDims } from '../fluidCpu';
 import { MIN_REGION, normaliseFx, type FxParams } from '../fxParams';
 import type { FxBody, FxScene } from '../fxScene';
+import { aimVector } from '../liquidCpu';
 import { regionOrigin } from '../liveSim';
 import { bodyDistance } from '../obstacles';
-import type { FxStage } from './fxStage';
+import type { AimArrow, FxStage } from './fxStage';
 
 // The FX viewport's direct manipulation: click to select a body, the emitter or the simulation region;
 // the shared transform gizmo (app-kit, the editor's own) on a body or the emitter; and the shared box face
 // handles (the editor's collision-shape / volume handles) on the region. Everything a handle changes is
-// written back into the FxScene / FxParams the panels show, so the solver, the bake and the panels agree.
+// written back into the FxScene / FxParams the panels show, so the solver, the bake and the panels agree:
+//   - the emitter: move = its position (metres from the centre of the region's floor), rotate = a liquid's
+//     Aim yaw / Aim pitch (its arrow shows it), scale = the radius;
+//   - the region: move = where it stands, its face handles = its size. The effect stays where it is in the
+//     world as a face moves: the region is room around it. Its box always shows, brighter while selected.
+// These have no fields in the panels (FxSpec `gizmo`): the gizmo's drag readout shows the values.
 
 export type FxSelection = { kind: 'body'; id: string } | { kind: 'emitter' } | { kind: 'region' } | null;
 
@@ -35,17 +41,80 @@ interface Props {
   select: (s: FxSelection) => void;
   mode: GizmoMode;
   space: GizmoSpace;
+  /** Bumped when the stage is (re)built, so the markers are placed on it. */
+  stageVersion: number;
 }
 
-/** World position and radius of the emitter, for the marker, the gizmo and picking. */
+/** The region's low corner in the stage: the region stands centred on its offset (its floor's centre). */
+export function regionCorner(p: FxParams, offset: readonly [number, number, number]): [number, number, number] {
+  const r = normaliseFx(p).regionSize;
+  return [offset[0] - r[0] / 2, offset[1], offset[2] - r[2] / 2];
+}
+
+/**
+ * The marker's turn for an aim (degrees; yaw from +Z toward +X, pitch up): the rotation taking the node's
+ * forward (+Z) onto the aim, with no roll.
+ */
+export function quatFromAim(yawDeg: number, pitchDeg: number): quat {
+  const q = quat.setAxisAngle(quat.create(), [0, 1, 0], (yawDeg * Math.PI) / 180);
+  // About the node's own X, by minus the pitch: a positive aim pitch turns forward up.
+  const tilt = quat.setAxisAngle(quat.create(), [1, 0, 0], (-pitchDeg * Math.PI) / 180);
+  return quat.multiply(q, q, tilt);
+}
+
+/** The aim a turned marker points (its forward, +Z): yaw from +Z toward +X and pitch up, degrees. */
+export function aimFromQuat(q: quat): { yaw: number; pitch: number } {
+  const f = vec3.transformQuat(vec3.create(), [0, 0, 1], q);
+  return { yaw: (Math.atan2(f[0], f[2]) * 180) / Math.PI, pitch: (Math.asin(Math.max(-1, Math.min(1, f[1]))) * 180) / Math.PI };
+}
+
+/** The aim's arrows from the emitter: one along a liquid's aim, or one per side of a crown at its pitch. */
+export function aimArrows(p: FxParams, offset: readonly [number, number, number]): AimArrow[] {
+  const n = normaliseFx(p);
+  if (n.medium !== 'liquid') return [];
+  const from = emitterPose(n, offset).position;
+  const length = Math.max(0.02, 0.2 * Math.min(n.regionSize[0], n.regionSize[2]));
+  if (n.sourceShape === 'ring') {
+    const pitch = (n.sourcePitch * Math.PI) / 180, R = Math.max(n.dropletSize * 2, n.sourceRadius);
+    return [0, 1, 2, 3].map(k => {
+      const a = (k * Math.PI) / 2;
+      const out: [number, number, number] = [Math.sin(a), 0, Math.cos(a)];
+      return { from: [from[0] + out[0] * R, from[1], from[2] + out[2] * R], dir: [Math.cos(pitch) * out[0], Math.sin(pitch), Math.cos(pitch) * out[2]], length };
+    });
+  }
+  return [{ from, dir: aimVector(n), length }];
+}
+
+/**
+ * World position and radius of the emitter, for the marker, the gizmo and picking: `emitterPosition` from
+ * the centre of the region's floor, as both solvers place it (fluidCpu `emitterVoxels`, liquidCpu
+ * `sourceCenter`).
+ */
 export function emitterPose(p: FxParams, offset: readonly [number, number, number]): { position: [number, number, number]; radius: number } {
   const n = normaliseFx(p);
-  const d = fluidDims(n);
-  const v = n.voxelSize;
-  const o = regionOrigin(d, v, offset);
+  const e = n.emitterPosition;
   return {
-    position: [o[0] + (n.emitterX * (d.nx - 1) + 0.5) * v, o[1] + (n.emitterHeight * (d.ny - 1) + 0.5) * v, o[2] + (n.emitterZ * (d.nz - 1) + 0.5) * v],
-    radius: Math.max(1, n.emitterRadius * d.nx) * v,
+    position: [offset[0] + e[0], offset[1] + e[1], offset[2] + e[2]],
+    radius: n.medium === 'liquid'
+      ? (n.sourceShape === 'point' ? Math.max(0.02, n.dropletSize * 3) : Math.max(0.01, n.sourceRadius))
+      : Math.max(n.emitterRadius, n.voxelSize),
+  };
+}
+
+/**
+ * A region resized by its handles to `size`, its box now centred at world `centre`: the parameters and
+ * floor offset that hold it, with the emitter kept at `emitterWorld` (where it stood when the drag began)
+ * -- the region is room around the effect, so growing a face never moves or scales what it holds.
+ */
+export function regionEdit(p: FxParams, size: readonly number[], centre: readonly number[], emitterWorld?: readonly number[]):
+    { params: FxParams; regionOffset: [number, number, number] } {
+  const regionOffset: [number, number, number] = [centre[0], centre[1] - size[1] / 2, centre[2]];
+  return {
+    params: {
+      ...p, regionSize: [size[0], size[1], size[2]],
+      ...(emitterWorld ? { emitterPosition: [emitterWorld[0] - regionOffset[0], emitterWorld[1] - regionOffset[1], emitterWorld[2] - regionOffset[2]] as [number, number, number] } : {}),
+    },
+    regionOffset,
   };
 }
 
@@ -99,33 +168,42 @@ export function FxGizmos({ instance, scene, bus, stage, volume, viewportRef, par
   // Latest values for the listeners and the callbacks the gizmos hold.
   const live = useRef({ params, fxScene, selection, select, setParams, setFxScene });
   live.current = { params, fxScene, selection, select, setParams, setFxScene };
-  /** What the selection looked like when the drag began: the gizmo's scale is relative to it. */
-  const grab = useRef<{ size?: [number, number, number]; radius?: number } | null>(null);
+  /**
+   * What the selection looked like when the drag began: the gizmo's scale is relative to it, and a region
+   * resize keeps the emitter where it was in the world.
+   */
+  const grab = useRef<{ size?: [number, number, number]; radius?: number; emitterWorld?: [number, number, number] } | null>(null);
   const lastDragEnd = useRef(0);
   const gizmoDragging = useRef(false);
+  /** The size the region's handles last set: newer than `params` until the next render. */
+  const regionSize = useRef<[number, number, number] | null>(null);
 
-  // The emitter marker follows the parameters, and shows while the emitter is selected (or always, from
-  // the eye menu). It is created here, after the render that picked the gizmo's target, so its id is
-  // handed back through state. The region's wireframe follows the region the same way, except while the
-  // region is selected: its box gizmo draws it then.
+  // The emitter marker follows the parameters (a liquid's turned to its aim, with the aim's arrows), and
+  // shows while the emitter is selected (or always, from the eye menu). It is created here, after the
+  // render that picked the gizmo's target, so its id is handed back through state. The region's
+  // wireframe follows the region the same way, and while the region is selected it stays, brighter.
   const [markerId, setMarkerId] = useState<string | null>(null);
   useEffect(() => {
     const offset = fxScene.regionOffset ?? [0, 0, 0];
-    const pose = emitterPose(params, offset);
-    stage.current?.showEmitter(selection?.kind === 'emitter' || fxScene.showEmitter ? pose.position : null, pose.radius);
+    const n = normaliseFx(params);
+    const pose = emitterPose(n, offset);
+    const showEmitter = selection?.kind === 'emitter' || fxScene.showHelpers !== false;
+    const turn = n.medium === 'liquid' ? quatFromAim(n.sourceShape === 'ring' ? 0 : n.sourceYaw, n.sourcePitch) : undefined;
+    stage.current?.showEmitter(showEmitter ? pose.position : null, pose.radius, turn);
+    stage.current?.showAim(showEmitter ? aimArrows(n, offset) : []);
     const id = stage.current?.emitterNode?.id ?? null;
     if (id !== markerId) setMarkerId(id);
-    const n = normaliseFx(params);
-    const d = fluidDims(n);
-    const size: [number, number, number] = [d.nx * n.voxelSize, d.ny * n.voxelSize, d.nz * n.voxelSize];
-    stage.current?.showRegion(fxScene.showRegion !== false && selection?.kind !== 'region' ? regionOrigin(d, n.voxelSize, offset) : null, size);
+    if (!gizmoDragging.current) regionSize.current = null;
+    const regionSelected = selection?.kind === 'region';
+    stage.current?.showRegion(fxScene.showHelpers !== false || regionSelected ? regionCorner(n, offset) : null, [...n.regionSize] as [number, number, number], regionSelected);
   });
 
   useEffect(() => {
     const onStart = () => {
       const { selection: sel, fxScene: s, params: p } = live.current;
       if (sel?.kind === 'body') grab.current = { size: [...(s.bodies.find(b => b.id === sel.id)?.size ?? [1, 1, 1])] as [number, number, number] };
-      else if (sel?.kind === 'emitter') grab.current = { radius: normaliseFx(p).emitterRadius };
+      else if (sel?.kind === 'emitter') { const n = normaliseFx(p); grab.current = { radius: n.medium === 'liquid' ? n.sourceRadius : n.emitterRadius }; }
+      else if (sel?.kind === 'region') grab.current = { emitterWorld: emitterPose(p, s.regionOffset ?? [0, 0, 0]).position };
       else grab.current = null;
       gizmoDragging.current = true;
     };
@@ -171,7 +249,7 @@ export function FxGizmos({ instance, scene, bus, stage, volume, viewportRef, par
       const { fxScene: s, params: p } = live.current;
       let best: { t: number; sel: FxSelection } | null = null;
       const consider = (t: number | null, sel: FxSelection) => { if (t !== null && (!best || t < best.t)) best = { t, sel }; };
-      if (s.showBodies !== false) for (const b of s.bodies) if (b.visible) consider(rayBody(ray.origin, ray.direction, b), { kind: 'body', id: b.id });
+      if (s.showHelpers !== false) for (const b of s.bodies) if (b.visible) consider(rayBody(ray.origin, ray.direction, b), { kind: 'body', id: b.id });
       const em = emitterPose(p, s.regionOffset ?? [0, 0, 0]);
       consider(raySphere(ray.origin, ray.direction, em.position, Math.max(em.radius, 0.15)), { kind: 'emitter' });
       if (!best) {
@@ -194,9 +272,10 @@ export function FxGizmos({ instance, scene, bus, stage, volume, viewportRef, par
     };
   }, [instance, viewportRef]);
 
-  // The node the transform gizmo drives.
+  // The node the transform gizmo drives: a body, the emitter, or (moving it) the region's handle.
   const target: Node | null = selection?.kind === 'body' ? stage.current?.bodyNode(selection.id) ?? null
-    : selection?.kind === 'emitter' && markerId ? stage.current?.emitterNode ?? null : null;
+    : selection?.kind === 'emitter' && markerId ? stage.current?.emitterNode ?? null
+    : selection?.kind === 'region' && mode === 'position' ? stage.current?.regionNode ?? null : null;
 
   const onTransform = (_id: string, patch: TransformPatch) => {
     const { selection: sel, fxScene: s, params: p } = live.current;
@@ -213,44 +292,63 @@ export function FxGizmos({ instance, scene, bus, stage, volume, viewportRef, par
         stage.current?.bodyNode(sel.id)?.setScale([1, 1, 1]);
       }
       live.current.setFxScene({ ...s, bodies: s.bodies.map(b => (b.id === body.id ? next : b)) });
+    } else if (sel?.kind === 'region') {
+      // The region moved whole: it carries the effect (the emitter is placed in it) to its new place.
+      if (patch.kind !== 'position') return;
+      const size = normaliseFx(p).regionSize;
+      live.current.setFxScene({ ...s, regionOffset: [patch.local[0], patch.local[1] - size[1] / 2, patch.local[2]] });
     } else if (sel?.kind === 'emitter') {
       const n = normaliseFx(p);
-      const d = fluidDims(n);
-      const v = n.voxelSize;
       if (patch.kind === 'position') {
-        const o = regionOrigin(d, v, s.regionOffset ?? [0, 0, 0]);
-        const frac = (w: number, lo: number, cells: number) => Math.min(0.98, Math.max(0.02, ((w - lo) / v - 0.5) / Math.max(1, cells - 1)));
-        live.current.setParams({ ...p, emitterX: frac(patch.local[0], o[0], d.nx), emitterHeight: frac(patch.local[1], o[1], d.ny), emitterZ: frac(patch.local[2], o[2], d.nz) });
+        // The inverse of `emitterPose`; `normaliseFx` keeps it inside the region.
+        const o = s.regionOffset ?? [0, 0, 0];
+        live.current.setParams({ ...p, emitterPosition: [patch.local[0] - o[0], patch.local[1] - o[1], patch.local[2] - o[2]] });
+      } else if (patch.kind === 'rotation' && n.medium === 'liquid') {
+        // The marker's forward is the aim. A crown's aim is only its pitch (out and up, all round).
+        const aim = aimFromQuat(patch.localQuat);
+        const pitch = Math.round(Math.max(-90, Math.min(90, aim.pitch)) * 10) / 10;
+        const yaw = Math.round(aim.yaw * 10) / 10;
+        live.current.setParams(n.sourceShape === 'ring' ? { ...p, sourcePitch: pitch } : { ...p, sourceYaw: yaw, sourcePitch: pitch });
+      } else if (patch.kind === 'scale' && n.medium === 'liquid') {
+        const g = grab.current?.radius ?? n.sourceRadius;
+        const s3 = (patch.local[0] + patch.local[1] + patch.local[2]) / 3;
+        live.current.setParams({ ...p, sourceRadius: Math.min(1, Math.max(0.005, g * s3)) });
       } else if (patch.kind === 'scale') {
         const g = grab.current?.radius ?? n.emitterRadius;
         const s3 = (patch.local[0] + patch.local[1] + patch.local[2]) / 3;
-        live.current.setParams({ ...p, emitterRadius: Math.min(0.45, Math.max(0.01, g * s3)) });
+        const most = 0.5 * Math.min(n.regionSize[0], n.regionSize[2]);
+        live.current.setParams({ ...p, emitterRadius: Math.min(most, Math.max(n.voxelSize, g * s3)) });
       }
     }
   };
 
   // The region's face handles edit the size (an FxParams value: part of the effect) and, through the
-  // node's position, where it stands (an FxScene value: the preview's).
+  // handle node's position, where it stands (an FxScene value: the preview's). Both land in
+  // `onRegionEdited`, which the handles call right after.
   const regionTarget: VolumeTarget = {
-    size: () => [...normaliseFx(live.current.params).regionSize] as [number, number, number],
-    setSize: s => {
-      const node = volume.current;
-      if (node) node.size = [s[0], s[1], s[2]];
-      live.current.setParams({ ...live.current.params, regionSize: [s[0], s[1], s[2]] });
-    },
+    size: () => [...(regionSize.current ?? normaliseFx(live.current.params).regionSize)] as [number, number, number],
+    setSize: s => { regionSize.current = [s[0], s[1], s[2]]; },
     minSize: MIN_REGION,
   };
+  // The handles set the size, then move the node (its centre), then report: the offset is the centre of
+  // the region's floor, from the size just set rather than the not-yet-rendered parameters. The emitter
+  // keeps its place in the world -- the region is room around the effect -- and the box follows at once,
+  // so it never lags the handles.
   const onRegionEdited = (n: Node) => {
-    const size = normaliseFx(live.current.params).regionSize;
-    const p = n.position;
-    live.current.setFxScene({ ...live.current.fxScene, regionOffset: [p[0], p[1] - size[1] / 2, p[2]] });
+    const { params: p, fxScene: s } = live.current;
+    const size = regionSize.current ?? normaliseFx(p).regionSize;
+    const c = n.position;
+    const edit = regionEdit(p, size, [c[0], c[1], c[2]], grab.current?.emitterWorld);
+    live.current.setParams(edit.params);
+    live.current.setFxScene({ ...s, regionOffset: edit.regionOffset });
+    stage.current?.showRegion([c[0] - size[0] / 2, c[1] - size[1] / 2, c[2] - size[2] / 2], [size[0], size[1], size[2]], true);
   };
 
   return <>
     <TransformGizmoView instance={instance} scene={scene} bus={bus} selectedNodeId={target?.id ?? null}
-                        mode={selection?.kind === 'emitter' && mode === 'rotation' ? 'position' : mode} space={space}
+                        mode={selection?.kind === 'emitter' && mode === 'rotation' && params.medium !== 'liquid' ? 'position' : mode} space={space}
                         onTransformChange={onTransform} viewportRef={viewportRef} />
-    <BoxVolumeGizmoView instance={instance} bus={bus} node={volume.current} target={regionTarget}
+    <BoxVolumeGizmoView instance={instance} bus={bus} node={stage.current?.regionNode ?? null} target={regionTarget}
                         active={selection?.kind === 'region'} onEdited={onRegionEdited} viewportRef={viewportRef} />
   </>;
 }

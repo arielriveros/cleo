@@ -1,6 +1,7 @@
 // The fire light: the per-brick emission sums of fxOccupancy.wgsl reduced to one emission-weighted
-// centroid (normalised to the grid) and a strength (the share of voxels burning, 1% = full), written
-// to a 1x1 RGBA8 texture the app reads back a frame or more later. One thread: a few hundred bricks.
+// centroid (normalised to the grid) and a strength (the volume burning, volumeRender.ts
+// FIRE_LIGHT_FULL_M3 = full, whatever the region around it), written to a 1x1 RGBA8 texture the app
+// reads back a frame or more later. One thread: a few hundred bricks.
 
 #include "./fxCommon.wgsl"
 
@@ -17,6 +18,6 @@ fn cs_reduce(@builtin(global_invocation_id) g: vec3<u32>) {
     let dims = vec3<f32>(u.dims.xyz);
     var centre = vec3<f32>(0.5);
     if (sum.w > 1e-4) { centre = clamp(sum.xyz / sum.w / max(dims - vec3<f32>(1.0), vec3<f32>(1.0)), vec3<f32>(0.0), vec3<f32>(1.0)); }
-    let strength = clamp(sum.w / (dims.x * dims.y * dims.z * 0.01), 0.0, 1.0);
+    let strength = clamp(sum.w / max(u.look3.y, 1e-6), 0.0, 1.0);
     textureStore(result, vec2<i32>(0, 0), vec4<f32>(centre, strength));
 }

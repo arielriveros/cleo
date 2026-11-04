@@ -118,6 +118,11 @@ so one effect can mix additive sparks with alpha-blended smoke.
 | **Soft fade** | Fades particles out where they meet opaque geometry instead of clipping. |
 | **Brightness** | Multiplies the colour's luminance (and, on a lit emitter, the lit result). |
 | **Lit** | Shaded by the scene's light, as surfaces are: the scene ambient and sky light, the sun (or the moon at night), and the strongest point or spot light reaching the effect, half-Lambert so thin smoke is never black on its far side. Off, the emitter is emissive: it glows at its colour's luminance. |
+| **Normal map** | Lit only. A tangent-space normal map laid over the sprite (or a mesh's texture coordinates), cut into the same flipbook cells as the **Texture**, OpenGL convention (green up). It gives a flat card relief: light rakes across it and highlights follow its shape. With one, the diffuse is plain Lambert rather than half-Lambert. |
+| **Normal strength** | How far the normal map bends the surface; 1 as authored, 0 flat. |
+| **ORM map** | Lit only. Occlusion (R), roughness (G) and metallic (B), cut like the **Texture**, as a PBR material's ORM map; they multiply **Roughness** and **Metallic** (set those to 1 to take the map as it is). |
+| **Roughness** | Lit only. 0 is a mirror with a tight highlight, 1 matte. Below 1, or with either map or any **Metallic**, the emitter shades as a PBR surface: GGX highlights from the sun and the strongest local light, and the reflection of the light probe containing the effect, or the sky. At the defaults (no maps, roughness 1, metallic 0) it shades as before, with no highlight. |
+| **Metallic** | Lit only. 0 for a dielectric, 1 for a metal: no diffuse, and its colour tints what it reflects -- mercury, molten metal, metal shavings. |
 | **Sort particles** | Back to front on the GPU every frame, which fixes dark fringes where alpha puffs overlap and costs a few passes. Alpha blending only; up to 65,536 particles. |
 | **Sorting order** | Draw order between emitters — higher draws later, on top — and the sorting band in 2D scenes. |
 
@@ -169,8 +174,8 @@ the copy a library asset, links it and opens it. Emitters are edited only on an 
 system from the Assets panel onto the slot to link it.
 
 Effects simulate while you author a scene. **Preview particles** in the viewport's eye menu switches
-that off; play mode always simulates. **Effect icons** in the same menu shows or hides their
-billboards.
+that off; play mode always simulates. **Editor icons** in the same menu shows or hides their
+billboards, with every other editor icon.
 
 Scripts drive the same calls:
 

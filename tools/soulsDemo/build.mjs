@@ -2790,6 +2790,11 @@ export function writeProject({
   // Camera distance past which enemies stop rendering and posing (Node.drawDistance on each type's root,
   // so the base template and every variant carry it). 0 = drawn at any distance.
   enemyDrawDistance = 0,
+  // A project's own blood: templates named 'Blood Spray', 'Blood Splat' and 'Blood Drops' (what
+  // SoulsGameManager.bleed spawns), instead of the placeholder spray and the generated splat decals.
+  bloodTemplates = null,
+  // Particle systems the kit defines that a project replaces or does not use, by id: left out of the library.
+  excludeParticleSystems = [],
 }) {
   ENEMY_MODELS = enemyModels
   ENEMY_DRAW_DISTANCE = enemyDrawDistance
@@ -2806,9 +2811,11 @@ export function writeProject({
     fxTemplate('bolt-burst', 'Bolt Burst', VFX.boltBurst, 1.8, [pointLight('burst:light', 'Flash', [0.55, 0.6, 1], 450, 7)]),
     fxTemplate('hit-spark', 'Hit Spark', VFX.hitSpark, 0.8),
     fxTemplate('slam-dust', 'Slam Dust', VFX.slamDust, 1.8),
-    fxTemplate('blood-spray', 'Blood Spray', VFX.bloodSpray, 1),
-    bloodDecalTemplate('blood-splat', 'Blood Splat', BLOOD.splat, BLOOD_TEX.splat, [1.1, 0.4, 1.1], {}),
-    bloodDecalTemplate('blood-drops', 'Blood Drops', BLOOD.drops, BLOOD_TEX.drops, [1, 0.4, 1.6], { minSize: 0.8, maxSize: 1.2 }),
+    ...(bloodTemplates ?? [
+      fxTemplate('blood-spray', 'Blood Spray', VFX.bloodSpray, 1),
+      bloodDecalTemplate('blood-splat', 'Blood Splat', BLOOD.splat, BLOOD_TEX.splat, [1.1, 0.4, 1.1], {}),
+      bloodDecalTemplate('blood-drops', 'Blood Drops', BLOOD.drops, BLOOD_TEX.drops, [1, 0.4, 1.6], { minSize: 0.8, maxSize: 1.2 }),
+    ]),
     bloodstainTemplate(),
     ...Object.values(LEVEL).filter(template => !excludeTemplates.includes(template.id)),
     ...extraTemplates,
@@ -2826,6 +2833,7 @@ export function writeProject({
   dropEmptyMachines(model.nodeJson)
   model.rigId = rig.id
 
+  const keptSystems = particleSystems.filter(s => !excludeParticleSystems.includes(s.id))
   const libraries = {
     models: [model, ...extraModels],
     materials: materials.filter(m => !excludeMaterials.includes(m.id)),
@@ -2838,7 +2846,7 @@ export function writeProject({
     tilesets: extraTilesets,
     scripts: scripts.assets,
     templates,
-    particleSystems,
+    particleSystems: keptSystems,
     aiBrains: [ENEMY_BASE, ...ENEMIES].map(enemyBrainAsset),
   }
   const others = extraScenes.map(e => ({ ...e, scene: e.build() }))
@@ -2879,7 +2887,7 @@ export function writeProject({
         materialIds: libraries.materials.map(m => m.id), modelIds: [MANNEQUIN_MODEL], templateIds: templates.map(t => t.id),
         textureIds: textures.included, scriptIds: scripts.assets.map(s => s.id),
         animationFieldIds: [locomotionField.id], animationIds: rig.animationIds,
-        particleSystemIds: particleSystems.map(p => p.id),
+        particleSystemIds: keptSystems.map(p => p.id),
         aiBrainIds: libraries.aiBrains.map(b => b.id),
         ...extraRefs,
       }),
@@ -2890,7 +2898,7 @@ export function writeProject({
         materialIds: libraries.materials.map(m => m.id), modelIds: [MANNEQUIN_MODEL], templateIds: templates.map(t => t.id),
         textureIds: textures.included, scriptIds: scripts.assets.map(s => s.id),
         animationFieldIds: [locomotionField.id], animationIds: rig.animationIds,
-        particleSystemIds: particleSystems.map(p => p.id),
+        particleSystemIds: keptSystems.map(p => p.id),
         aiBrainIds: libraries.aiBrains.map(b => b.id),
         ...(o.refs ?? {}),
       }),
@@ -2938,7 +2946,7 @@ export {
   withScript, scripts, sourceNode, clone, prop, group, staticBody, particles, pointLight, VFX, SOUNDS, GLOW_LUMINANCE,
   MUSIC_CUES, soundsGroup, banner, playerNode, bonfireNode, fogGateNode, leverNode, shortcutGate,
   torchNode, messageNode, linkInstance, LEVEL, placedMessage, placedSpawn, placedPickup, sourceScene,
-  TEMPLATE_SOURCE, vfx, emitter, mod, burst, fade, fxTemplate, particleSystems, navBaker, isMover,
+  TEMPLATE_SOURCE, vfx, emitter, mod, burst, fade, fxTemplate, particleSystems, navBaker, isMover, bounceOff, BLOOD, BLOOD_TEX,
   asTemplate, PROP, rig as MANNEQUIN_RIG, animations as RIG_ANIMATIONS, handWorld, mannequinModelJson,
   idleClip, characterModel, hurtboxNode, COMBAT_LAYER,
 }

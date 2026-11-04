@@ -99,6 +99,22 @@ describe('particle system asset', () => {
         const def = defaultParticleSystem();
         def.emitters[0].render.textureId = 'tex1';
         expect(particleSystemReferences(def)).toEqual({ textures: ['tex1'], models: [] });
+        // A lit emitter's surface maps are references too: a published game must ship them.
+        def.emitters[0].render.normalTextureId = 'tex1_n';
+        def.emitters[0].render.ormTextureId = 'tex1_orm';
+        expect(particleSystemReferences(def).textures).toEqual(['tex1', 'tex1_n', 'tex1_orm']);
+    });
+
+    it('keeps a lit emitter\'s surface through a save, and reads an old save as a plain lit card', () => {
+        const def = defaultParticleSystem();
+        Object.assign(def.emitters[0].render, { lit: true, normalTextureId: 'n', ormTextureId: 'orm', normalStrength: 2, roughness: 0.1, metallic: 1 });
+        const back = parseParticleSystem(JSON.parse(JSON.stringify(def))).emitters[0].render;
+        expect([back.normalTextureId, back.ormTextureId, back.normalStrength, back.roughness, back.metallic]).toEqual(['n', 'orm', 2, 0.1, 1]);
+        const old = parseParticleSystem({ emitters: [{ render: { lit: true, textureId: 't' } }] }).emitters[0].render;
+        expect([old.normalTextureId, old.ormTextureId, old.normalStrength, old.roughness, old.metallic]).toEqual([null, null, 1, 1, 0]);
+        // Out of range is clamped rather than trusted.
+        const wild = parseParticleSystem({ emitters: [{ render: { roughness: 7, metallic: -2, normalStrength: -1 } }] }).emitters[0].render;
+        expect([wild.roughness, wild.metallic, wild.normalStrength]).toEqual([1, 0, 0]);
     });
 
     it('every module has defaults matching its declared params', () => {

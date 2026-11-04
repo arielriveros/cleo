@@ -136,8 +136,8 @@ export function collectPublishedTextureIds(node: any, set: Set<string>): void {
     // A particle node's sprite textures sit on each embedded emitter's renderer, not in a `textures` map.
     // Missing them ships an effect whose billboards sample nothing — silently, in the published game only.
     for (const e of n?.particleSystem?.system?.emitters ?? []) {
-      const id = e?.render?.textureId
-      if (typeof id === 'string' && id) set.add(id)
+      for (const id of [e?.render?.textureId, e?.render?.normalTextureId, e?.render?.ormTextureId])
+        if (typeof id === 'string' && id) set.add(id)
     }
     for (const child of n?.children ?? []) walkTilesets(child)
   }

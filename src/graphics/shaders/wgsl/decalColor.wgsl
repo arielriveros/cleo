@@ -20,12 +20,6 @@
 @group(0) @binding(4) var u_material_maskMap_texture: texture_2d<f32>;
 @group(0) @binding(5) var u_material_maskMap_sampler: sampler;
 
-/** Half a texel inside [0, 1], so a repeat-wrapped decal texture cannot bleed in along the border. */
-fn insetUv(uv: vec2<f32>, dims: vec2<u32>) -> vec2<f32> {
-    let border = 0.5 / max(vec2<f32>(dims), vec2<f32>(1.0));
-    return clamp(uv, border, vec2<f32>(1.0) - border);
-}
-
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let s = decalSample(in.position.xy);
@@ -40,22 +34,34 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var emissive = u_material.emissiveFactor * u_material.emissiveIntensity;
     if (u_decal.u_pattern == 0) {
         if (u_material.hasBaseColorTexture != 0) {
-            let texel = textureSampleGrad(u_material_baseColorTexture_texture,
-                                          u_material_baseColorTexture_sampler,
-                                          insetUv(s.uv, textureDimensions(u_material_baseColorTexture_texture, 0)),
-                                          s.ddx, s.ddy);
+            // The flipbook's two cells this frame (the whole image without one), as the surface pass.
+            let texel = mix(textureSampleGrad(u_material_baseColorTexture_texture, u_material_baseColorTexture_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipA, textureDimensions(u_material_baseColorTexture_texture, 0)),
+                                              s.ddx * u_decal.u_flipA.zw, s.ddy * u_decal.u_flipA.zw),
+                             textureSampleGrad(u_material_baseColorTexture_texture, u_material_baseColorTexture_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipB, textureDimensions(u_material_baseColorTexture_texture, 0)),
+                                              s.ddx * u_decal.u_flipB.zw, s.ddy * u_decal.u_flipB.zw),
+                             u_decal.u_flipBlend);
             color *= pow(texel.rgb, vec3<f32>(2.2));
             alpha *= texel.a;
         }
         if (u_material.hasMaskMap != 0) {
-            alpha *= textureSampleGrad(u_material_maskMap_texture, u_material_maskMap_sampler,
-                                       insetUv(s.uv, textureDimensions(u_material_maskMap_texture, 0)),
-                                       s.ddx, s.ddy).r;
+            alpha *= mix(textureSampleGrad(u_material_maskMap_texture, u_material_maskMap_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipA, textureDimensions(u_material_maskMap_texture, 0)),
+                                              s.ddx * u_decal.u_flipA.zw, s.ddy * u_decal.u_flipA.zw).r,
+                             textureSampleGrad(u_material_maskMap_texture, u_material_maskMap_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipB, textureDimensions(u_material_maskMap_texture, 0)),
+                                              s.ddx * u_decal.u_flipB.zw, s.ddy * u_decal.u_flipB.zw).r,
+                             u_decal.u_flipBlend);
         }
         if (u_material.hasEmissiveMap != 0) {
-            let e = textureSampleGrad(u_material_emissiveMap_texture, u_material_emissiveMap_sampler,
-                                      insetUv(s.uv, textureDimensions(u_material_emissiveMap_texture, 0)),
-                                      s.ddx, s.ddy).rgb;
+            let e = mix(textureSampleGrad(u_material_emissiveMap_texture, u_material_emissiveMap_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipA, textureDimensions(u_material_emissiveMap_texture, 0)),
+                                              s.ddx * u_decal.u_flipA.zw, s.ddy * u_decal.u_flipA.zw).rgb,
+                             textureSampleGrad(u_material_emissiveMap_texture, u_material_emissiveMap_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipB, textureDimensions(u_material_emissiveMap_texture, 0)),
+                                              s.ddx * u_decal.u_flipB.zw, s.ddy * u_decal.u_flipB.zw).rgb,
+                             u_decal.u_flipBlend);
             emissive = pow(e, vec3<f32>(2.2)) * u_material.emissiveFactor * u_material.emissiveIntensity;
         }
     } else {

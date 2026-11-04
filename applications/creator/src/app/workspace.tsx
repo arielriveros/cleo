@@ -7,7 +7,8 @@ import { ViewportHost } from '@cleo/app-kit/engine/ViewportHost';
 import { ParamForm } from '@cleo/app-kit/params/ParamForm';
 import type { GenericParamSpec } from '@cleo/app-kit/params/ParamField';
 import {
-  Button, Collapsable, DocHover, DocScope, EyeIcon, Popover, PresetMenu, Slider, Toggle, cn, useDocEntry, type PresetMenuEntry, type VisibilityItem,
+  Button, Collapsable, DocHover, DocScope, EyeIcon, PauseIcon, PlayIcon, Popover, PresetMenu, RestartIcon, Slider, Toggle, cn, useDocEntry,
+  type PresetMenuEntry, type VisibilityItem,
 } from '@cleo/app-kit/ui';
 import type { GenerationStatus } from '../core/useGeneration';
 import { GenerationBar } from './StatusBar';
@@ -17,7 +18,8 @@ import { AssetsPanel } from './AssetsPanel';
 //
 //   toolbar      mode tools on the left · the saved asset's chip · status text · the primary output action on the right
 //   left dock    what is being built (layers, scene, poses), 280 px; a mode with nothing to list has none
-//   viewport     the live 3D preview: a stats readout top-left; the Stage menu, mode controls and Frame top-right
+//   viewport     the live 3D preview: a stats readout top-left; the Stage menu, mode controls and Frame top-right;
+//                a playback bar bottom-centre for a mode that simulates
 //   right dock   Parameters first, then the mode's other tabs (Materials, LOD, Bake, Export), 340 px
 //   bottom       Assets (the shared library, app/AssetsPanel.tsx) and Console, and any mode extras beside them
 //   status bar   the running job's progress, or the last result's summary
@@ -219,14 +221,19 @@ export interface StageMenuProps {
   sun?: { yaw: number; elevation: number; onChange: (yaw: number, elevation: number) => void };
   /** The mode's own sections below (`StageSection`s: light, wind, weather). */
   extra?: ReactNode;
+  /** Whole-stage presets (a `PresetMenu`), at the top of the menu. */
+  presets?: ReactNode;
 }
 
-/** A titled section of the Stage menu; the title has its docs card. */
-export function StageSection({ title, children }: { title: string; children: ReactNode }) {
+/** A titled section of the Stage menu; the title has its docs card. `right`: beside it (the section's presets). */
+export function StageSection({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) {
   const entry = useDocEntry(title);
   return (
     <div className='flex flex-col'>
-      <DocHover as='div' entry={entry} className='pb-0.5 text-ui-xs font-semibold uppercase tracking-wide text-muted'>{title}</DocHover>
+      <div className='flex items-center justify-between gap-2'>
+        <DocHover as='div' entry={entry} className='pb-0.5 text-ui-xs font-semibold uppercase tracking-wide text-muted'>{title}</DocHover>
+        {right}
+      </div>
       {children}
     </div>
   );
@@ -244,11 +251,12 @@ function StageToggle({ item }: { item: VisibilityItem }) {
 const STAGE_TRIGGER = 'flex items-center gap-1 h-[25px] px-2 rounded border border-control-hover bg-surface-raised/80 hover:bg-surface-raised text-fg text-ui-sm cursor-pointer';
 
 /** The viewport's Stage menu: what the preview shows, the sun over it, and the mode's own stage settings. */
-function StageMenu({ toggles = [], sun, extra }: StageMenuProps) {
+function StageMenu({ toggles = [], sun, extra, presets }: StageMenuProps) {
   return (
     <Popover align='right' title='The preview stage: what it shows, and the light on it' triggerClassName={STAGE_TRIGGER}
              trigger={<><EyeIcon /><span>Stage</span></>} className='w-[290px]'>
       <div data-cleo-overlay className='flex max-h-[70vh] flex-col gap-3 overflow-auto p-2'>
+        {presets && <div className='flex justify-end'>{presets}</div>}
         {toggles.length > 0 && (
           <StageSection title='Show'>
             <div className='grid grid-cols-[1fr_auto] items-center gap-x-3'>
@@ -268,8 +276,82 @@ function StageMenu({ toggles = [], sun, extra }: StageMenuProps) {
   );
 }
 
+/** What the viewport's playback bar drives: a live simulation that plays through and, a one-shot, replays. */
+export interface PlaybackBarProps {
+  playing: boolean;
+  onPlayPause: () => void;
+  onRestart: () => void;
+  speed: number;
+  onSpeed: (speed: number) => void;
+  /**
+   * Where the play-through is, read every frame: simulated seconds since it started, and how long one
+   * play-through lasts before it replays (Infinity for one that never ends). Null before it starts.
+   */
+  clock: () => { time: number; cycle: number } | null;
+}
+
+const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 2];
+const BAR_BUTTON = 'flex h-[22px] w-[22px] items-center justify-center rounded text-fg hover:bg-surface cursor-pointer';
+
+/**
+ * The viewport's playback bar: play / pause, start over, the play-through's progress (it wraps as a
+ * one-shot replays; a steady effect shows a dimmed full track) with its time, and the speed.
+ */
+export function PlaybackBar({ playing, onPlayPause, onRestart, speed, onSpeed, clock }: PlaybackBarProps) {
+  const fill = useRef<HTMLDivElement>(null);
+  const time = useRef<HTMLSpanElement>(null);
+  const read = useRef(clock);
+  read.current = clock;
+  // Drawn straight into the DOM every frame: the simulation runs at its own rate, and a React render per
+  // frame would re-render nothing but this.
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const c = read.current();
+      const f = fill.current, t = time.current;
+      if (!f || !t) return;
+      if (!c) { f.style.width = '0%'; t.textContent = '–'; return; }
+      const once = Number.isFinite(c.cycle) && c.cycle > 0;
+      f.style.width = once ? `${Math.min(100, (c.time / c.cycle) * 100).toFixed(2)}%` : '100%';
+      f.style.opacity = once ? '1' : '0.3';
+      t.textContent = once ? `${c.time.toFixed(1)} / ${c.cycle.toFixed(1)} s` : `${c.time.toFixed(1)} s · steady`;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <div data-cleo-overlay onMouseDown={e => e.stopPropagation()}
+         className='absolute bottom-3 left-1/2 z-20 flex w-[min(460px,calc(100%-24px))] -translate-x-1/2 items-center gap-2 rounded border border-control-hover bg-surface-raised/90 px-2 py-1 shadow-lg'>
+      <button type='button' className={BAR_BUTTON} title={playing ? 'Pause (Space)' : 'Play (Space)'} onClick={onPlayPause}>
+        <span className='h-3.5 w-3.5'>{playing ? <PauseIcon /> : <PlayIcon />}</span>
+      </button>
+      <button type='button' className={BAR_BUTTON} title='Start over' onClick={onRestart}>
+        <span className='h-3.5 w-3.5'><RestartIcon /></span>
+      </button>
+      <div className='relative h-1.5 flex-1 overflow-hidden rounded bg-surface' title='The play-through: a one-shot replays from the start once it has played out'>
+        <div ref={fill} className='absolute inset-y-0 left-0 bg-primary' style={{ width: '0%' }} />
+      </div>
+      <span ref={time} className='min-w-[86px] text-right text-ui-xs text-muted tabular-nums' />
+      <Popover align='right' side='above' title='Simulation speed' triggerClassName='h-[22px] rounded px-1.5 text-ui-xs text-fg hover:bg-surface cursor-pointer tabular-nums'
+               trigger={<span>{speed}×</span>} className='w-[96px]'>
+        {close => (
+          <div data-cleo-overlay className='flex flex-col p-1'>
+            {PLAYBACK_SPEEDS.map(s => (
+              <button key={s} type='button' onClick={() => { onSpeed(s); close(); }}
+                      className={cn('rounded px-2 py-0.5 text-left text-ui-sm hover:bg-surface', s === speed ? 'text-highlight' : 'text-fg')}>
+                {s}× speed
+              </button>
+            ))}
+          </div>
+        )}
+      </Popover>
+    </div>
+  );
+}
+
 /** The viewport's floating chrome, the same in every mode. */
-export function ViewportOverlay({ readout, stage, controls, onFrame, frameTitle = 'Frame the asset (F)' }: {
+export function ViewportOverlay({ readout, stage, controls, onFrame, frameTitle = 'Frame the asset (F)', playback }: {
   /** Top-left numbers. */
   readout?: ReactNode;
   /** The Stage menu (top-right): what the preview shows and the light on it. */
@@ -278,6 +360,8 @@ export function ViewportOverlay({ readout, stage, controls, onFrame, frameTitle 
   controls?: ReactNode;
   onFrame?: () => void;
   frameTitle?: string;
+  /** The playback bar (bottom-centre), for a mode whose preview is a running simulation. */
+  playback?: PlaybackBarProps;
 }) {
   return (<>
     {readout && (
@@ -290,6 +374,7 @@ export function ViewportOverlay({ readout, stage, controls, onFrame, frameTitle 
       {controls}
       {onFrame && <Button size='sm' variant='ghost' className='bg-surface-raised/80' title={frameTitle} onClick={onFrame}>Frame</Button>}
     </div>
+    {playback && <PlaybackBar {...playback} />}
   </>);
 }
 

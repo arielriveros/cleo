@@ -234,6 +234,14 @@ Blinn-Phong or Cel materials. See [Node types](../reference/node-types.md#decaln
 colour at the rim blends to the inner one at the centre along the chosen curve, with an optional ring
 on the rim.
 
+**Flipbook** — plays the material's maps as an atlas of frames, every map from the same cell: a pool
+spreading, a stain drying. The Creator's liquid FX bake these (see [FX](../creator/fx.md#bake)). Frames
+run left to right and then down from the top row; playback starts at the decal's first update in Play
+and runs on game time, and outside Play the last frame shows. With **Loop** off, the last frame holds.
+
+**Albedo opacity** — the albedo's share of the coverage. Below 1, with a dark base colour, the decal
+darkens what it lands on while its roughness and normal still land whole: wet ground rather than paint.
+
 #### Wind
 
 One wind for the whole scene. Plants sway only where their [Foliage material](models-and-materials.md#foliage-materials)
@@ -257,7 +265,7 @@ by the drag. Physics runs in Play. **Buoy characters** is off by default: a char
 mostly air and would be launched out of the water. **Swell** makes the surface bob; a **Surface**
 model whose custom material declares `vec4` uniforms `ripple0` … `ripple11` gets ripples from
 whatever moves through, and a **Splash** template spawns where something enters the water or wades
-through it. Liquid **Presets** (a still pool to lava) set the density, drag and swell, never the box
+through it (the **Wading splash** template, when set, for the footsteps of a character wading). Liquid **Presets** (a still pool to lava) set the density, drag and swell, never the box
 or what it links to.
 
 #### Occluder

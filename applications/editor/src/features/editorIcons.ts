@@ -1,11 +1,17 @@
+// Every glyph below is drawn in 64-unit coordinates onto a canvas this many times that size: the icons
+// are capped at 64 CSS px on screen (editorHelpers' ICON_MAX_PX), so twice that keeps them sharp on a
+// high-DPI display, and the mip chain keeps them clean when far away.
+const ICON_RASTER_SCALE = 2;
+
 // Rasterise the light-probe glyph (inner ring + dashed outer ring, matching the inspector's ProbeIcon) to
 // a white-on-transparent PNG data URL for the probe's billboard; a sprite Material.Basic tints it cyan.
 export function buildProbeIconDataURL(): string {
   const size = 64, cx = size / 2, cy = size / 2;
   const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
+  canvas.width = canvas.height = size * ICON_RASTER_SCALE;
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
+  ctx.scale(ICON_RASTER_SCALE, ICON_RASTER_SCALE);
   ctx.strokeStyle = 'white';
   ctx.lineWidth = 4;
   ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.stroke();
@@ -19,9 +25,10 @@ export function buildProbeIconDataURL(): string {
 export function buildDecalIconDataURL(): string {
   const size = 64, c = size / 2;
   const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
+  canvas.width = canvas.height = size * ICON_RASTER_SCALE;
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
+  ctx.scale(ICON_RASTER_SCALE, ICON_RASTER_SCALE);
   ctx.strokeStyle = 'white';
   ctx.fillStyle = 'white';
   ctx.lineCap = 'round';
@@ -48,9 +55,10 @@ export function buildDecalIconDataURL(): string {
 export function buildLightIconDataURL(): string {
   const size = 64, c = size / 2;
   const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
+  canvas.width = canvas.height = size * ICON_RASTER_SCALE;
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
+  ctx.scale(ICON_RASTER_SCALE, ICON_RASTER_SCALE);
   ctx.strokeStyle = 'white';
   ctx.fillStyle = 'white';
   ctx.lineCap = 'round';
@@ -72,9 +80,10 @@ export function buildLightIconDataURL(): string {
 export function buildSoundIconDataURL(): string {
   const size = 64, c = size / 2;
   const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
+  canvas.width = canvas.height = size * ICON_RASTER_SCALE;
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
+  ctx.scale(ICON_RASTER_SCALE, ICON_RASTER_SCALE);
   ctx.strokeStyle = 'white';
   ctx.fillStyle = 'white';
   ctx.lineCap = 'round';
@@ -105,9 +114,10 @@ export function buildSoundIconDataURL(): string {
 export function buildParticleIconDataURL(): string {
   const size = 64;
   const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
+  canvas.width = canvas.height = size * ICON_RASTER_SCALE;
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
+  ctx.scale(ICON_RASTER_SCALE, ICON_RASTER_SCALE);
   ctx.strokeStyle = 'white';
   ctx.fillStyle = 'white';
   ctx.lineWidth = 3;
@@ -132,9 +142,10 @@ export function buildParticleIconDataURL(): string {
 export function buildForceFieldIconDataURL(): string {
   const size = 64;
   const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
+  canvas.width = canvas.height = size * ICON_RASTER_SCALE;
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
+  ctx.scale(ICON_RASTER_SCALE, ICON_RASTER_SCALE);
   ctx.strokeStyle = 'white';
   ctx.lineWidth = 5;
   ctx.lineCap = 'round';

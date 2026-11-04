@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import type { SculptTool, FalloffCurve, BrushShape } from 'cleo'
-import { Button, FileButton, Hint, NumberInput, SegmentedControl, Select, Slider, Toggle, cn, labelClass } from '@cleo/app-kit/ui'
+import { Button, DiceIcon, FileButton, Hint, NumberInput, SegmentedControl, Select, Slider, Toggle, cn, labelClass } from '@cleo/app-kit/ui'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import {
   useLandscapeBrush, setBrush, activeStrength, setActiveStrength, strengthSpec, activeToolKey,
@@ -237,7 +237,7 @@ function ToolOptions() {
             <span className={label}>Seed</span>
             <span className='flex items-center gap-1'>
               <NumberInput className='w-16' value={b.noiseSeed} step={1} onChange={noiseSeed => setBrush({ noiseSeed })} />
-              <Button size='sm' variant='ghost' title='New seed' onClick={() => setBrush({ noiseSeed: Math.floor(Math.random() * 1000) })}>🎲</Button>
+              <Button size='sm' variant='ghost' title='New seed' onClick={() => setBrush({ noiseSeed: Math.floor(Math.random() * 1000) })}><DiceIcon className='w-3.5 h-3.5' /></Button>
             </span>
           </div>
         </div>

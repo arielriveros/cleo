@@ -86,7 +86,7 @@ transition.
 | Node subtitle | the state's goal |
 | Node badge | `→targetKey` or `×speedScale` |
 | Entry state | flagged |
-| Edge label | a summary of the gate — `param > value`, `⏱2s` for a dwell, joined `⇄` when bidirectional, `+N` when there are more |
+| Edge label | a summary of the gate — `param > value`, `min 2s` for a dwell, joined `⇄` when bidirectional, `+N` when there are more |
 
 **Actions:** **+ State** or double-click to add one (the first is automatically the entry). Drag
 handle to handle to make a transition; duplicates are refused. Right-click a state for **Set as

@@ -81,6 +81,11 @@ export function sceneWindOf(scene: FxScene, voxelSize = VOXEL_SIZE): SceneWind |
 }
 
 /** The region's low corner in the stage, metres: its floor centre (`regionOffset`) less half its width and depth. */
+/** Seconds a gas burst plays before it replays (it has risen and faded); Infinity for a steady effect. */
+export function gasReplayTime(p: Pick<FxParams, 'emitDuration'>): number {
+  return p.emitDuration > 0 ? p.emitDuration + 4 : Infinity;
+}
+
 export function regionOrigin(dims: FluidDims, voxelSize: number, offset: readonly [number, number, number]): [number, number, number] {
   return [offset[0] - dims.nx * voxelSize / 2, offset[1], offset[2] - dims.nz * voxelSize / 2];
 }
@@ -94,6 +99,8 @@ export interface LiveStats {
   simTime: number;
   backend: 'gpu' | 'cpu';
   dims: FluidDims;
+  /** A liquid's live particles. */
+  particles?: number;
 }
 
 /** Where the fire is and how much of it: world position and 0..1 strength. */
@@ -142,6 +149,18 @@ export class LiveFx {
   }
 
   get backend(): 'gpu' | 'cpu' { return this.gpu ? 'gpu' : 'cpu'; }
+
+  /** Simulated seconds since the last (re)start. */
+  get time(): number { return this.simTime; }
+  /** Seconds one play-through takes before it replays; Infinity for a steady effect. */
+  get cycleTime(): number { return gasReplayTime(this.params); }
+
+  private dragging = false;
+  /** A gizmo drag starts or ends: the node's placement waits for its end (the region's handles move it). */
+  setDragging(active: boolean): void {
+    this.dragging = active;
+    if (!active) this.placeNode();
+  }
 
   /**
    * New parameters. The grid size and seed restart the simulation; everything else applies to the next
@@ -192,7 +211,7 @@ export class LiveFx {
     else node.blend = Math.min(1, (performance.now() - this.lastArrival) / 1000 / Math.max(1e-3, this.arrivalGap));
     if (step.frames === 0) return;
     // A burst replays once it has had time to rise and fade, so an explosion can be watched again.
-    if (p.emitDuration > 0 && this.simTime > p.emitDuration + 4) { this.build(); return; }
+    if (this.simTime > gasReplayTime(p)) { this.build(); return; }
 
     if (this.gpu) {
       const sim = this.simParams();
@@ -283,6 +302,7 @@ export class LiveFx {
 
   /** Size and stand the node on the region: the grid at the voxel size, its floor at `regionOffset`. */
   private placeNode(): void {
+    if (this.dragging) return;
     const { nx, ny, nz } = this.dims;
     const v = this.params.voxelSize;
     const o = this.scene?.regionOffset ?? [0, 0, 0];

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Filemanager, WillowDark } from '@svar-ui/react-filemanager'
+import { Locale } from '@svar-ui/react-core'
 import type { IApi, IFileMenuOption, IParsedEntity, TContextMenuType, TMode } from '@svar-ui/react-filemanager'
 // filemanager.css @imports the SVAR stylesheet itself, so the skin's rules deterministically follow it.
 import './filemanager.css'
@@ -38,10 +39,12 @@ export interface AssetExplorerProps {
   wrapperRef?: React.RefObject<HTMLDivElement>
   /** DOM id prefix of the toolbar's controls (`<prefix>-search`, `-preview-toggle`, `-view-modes`). */
   idPrefix?: string
+  /** The root folder's name in the tree and the breadcrumbs ("Valley Files"). SVAR's own is "My files". */
+  rootLabel?: string
 }
 
 export function AssetExplorer(props: AssetExplorerProps) {
-  const { data, apiRef, init, modeKey, previews, icons, menuOptions, menuActions, toolbarStart, toolbarEnd, idPrefix = 'asset' } = props
+  const { data, apiRef, init, modeKey, previews, icons, menuOptions, menuActions, toolbarStart, toolbarEnd, idPrefix = 'asset', rootLabel } = props
   const ownWrapper = useRef<HTMLDivElement>(null)
   const wrapperRef = props.wrapperRef ?? ownWrapper
 
@@ -109,6 +112,10 @@ export function AssetExplorer(props: AssetExplorerProps) {
     return () => document.removeEventListener('click', onClick, true)
   }, [])
 
+  // SVAR names the root "My files" in its store and shows it through the `filemanager` locale group, root
+  // only. Filemanager's own Locale is `optional`, so these words, from outside it, win.
+  const words = useMemo(() => rootLabel ? { filemanager: { 'My files': rootLabel } } : null, [rootLabel])
+
   const modeButtons: { mode: TMode; title: string; icon: React.ReactNode }[] = [
     { mode: 'table', title: 'Table view', icon: <svg className='w-3 h-3' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round'><path d='M4 6h16M4 12h16M4 18h16' /></svg> },
     { mode: 'cards', title: 'Cards view', icon: <svg className='w-3 h-3' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2'><rect x='3' y='3' width='7' height='7' rx='1' /><rect x='14' y='3' width='7' height='7' rx='1' /><rect x='3' y='14' width='7' height='7' rx='1' /><rect x='14' y='14' width='7' height='7' rx='1' /></svg> },
@@ -158,15 +165,17 @@ export function AssetExplorer(props: AssetExplorerProps) {
 
       <div ref={wrapperRef} className='cleo-fm relative flex-1 min-h-0'>
         <WillowDark fonts={false}>
-          <Filemanager
-            data={initialData}
-            mode={initialMode}
-            preview={false}
-            previews={previews}
-            icons={icons}
-            menuOptions={menuOptions}
-            init={onInit}
-          />
+          <Locale words={words}>
+            <Filemanager
+              data={initialData}
+              mode={initialMode}
+              preview={false}
+              previews={previews}
+              icons={icons}
+              menuOptions={menuOptions}
+              init={onInit}
+            />
+          </Locale>
         </WillowDark>
       </div>
     </div>

@@ -15,7 +15,8 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
     size: [...props.node.size], density: props.node.density, linearDrag: props.node.linearDrag,
     angularDrag: props.node.angularDrag, waveAmplitude: props.node.waveAmplitude,
     waveFrequency: props.node.waveFrequency, affectCharacters: props.node.affectCharacters,
-    surfaceNodeId: props.node.surfaceNodeId, splashTemplate: props.node.splashTemplate, enabled: props.node.enabled,
+    surfaceNodeId: props.node.surfaceNodeId, splashTemplate: props.node.splashTemplate,
+    wadeSplashTemplate: props.node.wadeSplashTemplate, enabled: props.node.enabled,
   })
   const [v, setV] = useState(read)
   useEffect(() => { setV(read()) }, [props.node])
@@ -31,6 +32,7 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
     if (patch.affectCharacters !== undefined) n.affectCharacters = patch.affectCharacters
     if (patch.surfaceNodeId !== undefined) n.surfaceNodeId = patch.surfaceNodeId
     if (patch.splashTemplate !== undefined) n.splashTemplate = patch.splashTemplate
+    if (patch.wadeSplashTemplate !== undefined) n.wadeSplashTemplate = patch.wadeSplashTemplate
     if (patch.enabled !== undefined) n.enabled = patch.enabled
     setV(read())
     eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
@@ -75,9 +77,15 @@ export default function WaterVolumeEditor(props: { node: WaterVolumeNode }) {
             <NodeRefInput value={v.surfaceNodeId} scene={editorScene} filter={n => n instanceof ModelNode}
               onChange={surfaceNodeId => set({ surfaceNodeId })} />
           </PropertyRow>
-          <PropertyRow label='Splash' hint='Template spawned at the surface where something enters the water or wades through it.'>
+          <PropertyRow label='Splash' hint='Template spawned at the surface where something enters the water or wades through it.' divider>
             <Select value={v.splashTemplate} onChange={e => set({ splashTemplate: e.target.value })}>
               <option value=''>None</option>
+              {(templates ?? []).map((t: any) => <option key={t.id} value={t.name}>{t.name}</option>)}
+            </Select>
+          </PropertyRow>
+          <PropertyRow label='Wading splash' hint='Template for the footsteps of a character wading through. Same as Splash when not set.'>
+            <Select value={v.wadeSplashTemplate} onChange={e => set({ wadeSplashTemplate: e.target.value })}>
+              <option value=''>Same as Splash</option>
               {(templates ?? []).map((t: any) => <option key={t.id} value={t.name}>{t.name}</option>)}
             </Select>
           </PropertyRow>

@@ -11,7 +11,7 @@ import ConditionTree from './ConditionTree'
 import { AssetDropRow, LayerSection, SlotsSection } from './LayerPanels'
 import AnimationAssetPicker from './AnimationAssetPicker'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { Button, cn, ComboSelect, controlClass, FileButton, hintClass, NumberInput, OptionalNumberInput, SectionTitle, SegmentedControl, Select, TextInput, Toggle } from '@cleo/app-kit/ui'
+import { BoltIcon, Button, cn, ComboSelect, controlClass, FileButton, hintClass, NumberInput, OptionalNumberInput, SectionTitle, SegmentedControl, Select, TextInput, Toggle } from '@cleo/app-kit/ui'
 import { clamp } from '@cleo/app-kit/utils/math';
 import { promptDialog } from '@cleo/app-kit/feedback/dialogStore'
 
@@ -514,7 +514,7 @@ function EnterOnTrigger({ triggers, params, onChange, onNewTrigger }: {
       </div>
       {triggers.map((e, k) => (
         <div key={k} className='flex items-center gap-1 text-ui-xs'>
-          <span className='text-primary shrink-0'>⚡</span>
+          <BoltIcon className='w-3.5 h-3.5 shrink-0 text-primary' />
           <div className='flex-1 min-w-0'>
             <ComboSelect value={e.trigger} choices={choices} noun='trigger' allowEmpty={false}
               title='The trigger, by name. A new name becomes a trigger parameter.'

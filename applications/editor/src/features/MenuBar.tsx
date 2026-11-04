@@ -24,8 +24,7 @@ import {
   PlayGlyph, SimulateGlyph, PauseGlyph, StopGlyph,
 } from "./topbarIcons";
 import ProjectsModal from "./projects/ProjectsModal";
-import { loadProjects } from "../utils/projects";
-import { activeProjectId } from "../utils/projectScope";
+import { useProjectName } from "./projects/useProjectName";
 
 // One playback control. Same shape as ModeSelector's Segment / the viewport's gizmo toggle — a 25px
 // segment in a bordered, rounded group.
@@ -97,16 +96,7 @@ export default function MenuBar() {
   const [sessionKind, setSessionKind] = useState<'play' | 'simulate' | null>(null);
   const [showProjects, setShowProjects] = useState(false);
   // The open project's name: re-read when the projects modal closes, pushed on a rename from Options.
-  const [projectName, setProjectName] = useState('');
-  useEffect(() => {
-    void loadProjects().then(list => setProjectName(list.find(p => p.id === activeProjectId())?.name ?? ''));
-  }, [showProjects]);
-  // Options ▸ Project renames the open project in place.
-  useEffect(() => {
-    const onRename = (e: Event) => setProjectName((e as CustomEvent<string>).detail);
-    window.addEventListener('cleo:project-renamed', onRename);
-    return () => window.removeEventListener('cleo:project-renamed', onRename);
-  }, []);
+  const projectName = useProjectName(showProjects);
   const [showPublish, setShowPublish] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const publishRef = useRef<HTMLDivElement>(null);
@@ -285,7 +275,6 @@ export default function MenuBar() {
   const importDoc = useBarDoc('editor/interface#menu-bar::Import', 'Import a project .zip — replace or merge the whole workspace');
   const exportDoc = useBarDoc('editor/interface#menu-bar::Export', 'Export the whole project (scenes + assets + textures) to a .zip');
   const publishDoc = useBarDoc('editor/interface#menu-bar::Publish', 'Publish an optimized build of your game');
-  const creatorDoc = useBarDoc('editor/interface#menu-bar::Creator', 'Open Cleo Creator; its saved assets appear under /Creator');
   const resetDoc = useBarDoc('editor/interface#the-dockable-workspace::Reset Layout', 'Restore the default panel layout');
 
   return (
@@ -384,13 +373,6 @@ export default function MenuBar() {
             </div>
           )}
         </div>
-        {/* Same origin (/creator/), so its saved assets reach this project through the shared Creator
-            library; one named window, reused by every click. */}
-        <Button variant='subtle' size='sm' className='h-[25px]' {...creatorDoc.props}
-                onClick={() => window.open('/creator/', 'cleo-creator')?.focus()}>
-          Creator
-        </Button>
-        {creatorDoc.card}
       </div>
       <div className='flex items-center h-full'>
         <div className='flex items-center rounded overflow-hidden border border-control-hover my-[2px]'>

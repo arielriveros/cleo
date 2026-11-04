@@ -11,6 +11,7 @@ A single toolbar row:
 |---|---|
 | **+ Add ▾** | Material, Landscape Material, Template, Script, Tileset, **AI Brain (Machine)**, **AI Brain (Goals)**, **Particle System**, **Animator**, Sound, Animation, Scene, Folder. The menu opens upward, over the viewport. |
 | **Import** | Picks models, textures and sounds from disk and imports them, as dropping them on the panel does. Reads **Importing…** while it works. |
+| **Creator** | Opens Cleo Creator in its own window. Assets you save there appear here under `/Creator`, in every project, and follow your edits. See [Creator assets](#creator-assets). |
 | **Search** | Filters by name. |
 | **Audit** | Flags assets a library holds but the explorer is not showing, and orphan entries pointing at deleted assets. Carries a warning badge when either exists. |
 | **Reference graph** | One asset in the middle, what uses it on the left and what it uses on the right, each followed one level, two, or all the way. Its badge counts references that point at an asset that no longer exists — the opposite question to **Audit**. |
@@ -21,7 +22,8 @@ Drop OS files on the panel to import them. Drop a **scene node** on it to save t
 template. Right-click empty space for **New folder**, or a template for **Create Variant** (a template
 that inherits it — see [Template variants](scene-authoring.md#template-variants)).
 
-Folders are yours to arrange; nothing depends on where an asset sits.
+Folders are yours to arrange; nothing depends on where an asset sits. The tree's root is named after
+the project, e.g. **Valley Files**.
 
 ## The 19 kinds
 

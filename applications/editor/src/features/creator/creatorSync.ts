@@ -6,7 +6,8 @@
 //
 //   foliage  a model with its LOD levels embedded, a material per mesh part, and -- for a tree -- the
 //            Creator's octahedral impostor, which a foliage rule made from the model starts with;
-//   fx       the flipbook atlases as textures, and a particle system drawing the flipbook;
+//   fx       the flipbook atlases as textures, and a particle system drawing the flipbook; for a liquid
+//            with a floor decal, two decal materials too: the settled pool, and its animated atlases;
 //   world    the heightmap and the masks as textures (a landscape imports the heightmap at full
 //            precision through Import heightmap ▸ From Creator).
 //   character  a rigged model uploaded to the Creator: one `.anim` per clip it keeps (renamed there), on
@@ -28,7 +29,7 @@
 //
 // The work is serial, one asset at a time, and a newer revision of an asset replaces any queued one.
 
-import { Logger, ModelNode, TextureManager, type Node } from 'cleo'
+import { Logger, Material, ModelNode, TextureManager, type Node } from 'cleo'
 import {
   creatorChannel, getCreatorAsset, getCreatorFiles, listCreatorAssets, type CreatorAssetMeta, type CreatorFile,
 } from '@cleo/app-kit/creatorLibrary'
@@ -52,6 +53,12 @@ import {
 import { pinKey, setCreatorPins } from './creatorPins'
 
 const LINKS_KEY = 'cleo_creator_links'
+
+/** The part of an FX sidecar's `outputs.decal` the sync reads: the files of each map. */
+interface DecalSidecar {
+  atlas?: { color: string; normal: string; orm: string };
+  still?: { color: string; normal: string; orm: string };
+}
 
 /** What the sync needs from the editor: its libraries (current, not a render behind) and its commits. */
 export interface CreatorSyncHost {
@@ -269,14 +276,37 @@ export class CreatorSync {
 
   // --- fx -----------------------------------------------------------------------------------------
 
+  /**
+   * A liquid's floor decal as two PBR decal materials, over textures the PNG pass registered: the settled
+   * pool (`decal`), usable on any decal as it is, and the animated atlases (`decal_anim`), for a decal
+   * given the sidecar's flipbook. Each map is base colour + coverage, the relief normal, and ORM.
+   */
+  private putDecalMaterials(meta: CreatorAssetMeta, decal: DecalSidecar | undefined): string[] {
+    if (!decal?.still || !decal.atlas) return []
+    const ids: string[] = []
+    for (const [part, label, files] of [['decal', 'Decal', decal.still], ['decal_anim', 'Decal (animated)', decal.atlas]] as const) {
+      const tex = (file: string) => creatorIds.texture(meta.id, file)
+      const id = creatorIds.material(meta.id, part)
+      const material = Material.PBR({
+        baseColor: [1, 1, 1], roughness: 1, metallic: 0,
+        textures: { baseColorTexture: tex(files.color), normalMap: tex(files.normal), roughnessMap: tex(files.orm), metallicMap: tex(files.orm), occlusionMap: tex(files.orm) },
+      })
+      const existing = this.host.materials().find(m => m.id === id)
+      this.host.putMaterial(buildMaterialAsset(material, `${meta.name} ${label}`, existing?.thumbnail ?? '', id))
+      ids.push(id)
+    }
+    return ids
+  }
+
   private async upsertFx(meta: CreatorAssetMeta, files: CreatorFile[], prev: CreatorLink | undefined): Promise<CreatorLink | null> {
-    const output = (meta.sidecar?.output ?? {}) as { particleFlipbook?: Record<string, unknown>; outputs?: Record<string, unknown> }
-    const atlas = files.find(f => /_flipbook\.png$/i.test(f.name))
+    const output = (meta.sidecar?.output ?? {}) as { particleFlipbook?: Record<string, unknown>; outputs?: Record<string, unknown>; medium?: string }
+    // The colour atlas: `<name>_flipbook.png`, not one of the other atlases that share the suffix.
+    const atlas = files.find(f => /_flipbook\.png$/i.test(f.name) && !/_(albedo|normal|orm|decal|decal_normal|decal_orm)_flipbook\.png$/i.test(f.name))
     if (!atlas || !output.particleFlipbook) return null
     const folder = creatorFolder('fx', meta.name)
     const flipId = creatorIds.texture(meta.id, 'flipbook')
     const textureIds: string[] = []
-    // Every atlas: the flipbook, and the six-way and motion maps when the bake wrote them.
+    // Every atlas: the flipbook, and the six-way, motion, surface and decal maps when the bake wrote them.
     for (const f of files.filter(x => x.mime === 'image/png')) {
       const id = f === atlas ? flipId : creatorIds.texture(meta.id, f.name)
       const label = f === atlas ? 'Flipbook' : f.name.replace(/^.*?_/, '').replace(/\.png$/i, '').replace(/_/g, ' ')
@@ -288,23 +318,43 @@ export class CreatorSync {
     const psId = creatorIds.particleSystem(meta.id)
     const existing = this.host.particleSystems().find(p => p.id === psId)
     const flipbook = output.particleFlipbook as any
+    // Surface maps: the emitter draws the unlit base colour, lit by the scene, with the normal and ORM
+    // maps, their factors at 1 so the maps' roughness and metallic land as baked.
+    const surface = output.outputs?.surface as { albedo?: string; normal?: string; orm?: string } | undefined
+    const mapId = (file?: string) => (file ? creatorIds.texture(meta.id, file) : null)
+    const albedoId = mapId(surface?.albedo), normalId = mapId(surface?.normal), ormId = mapId(surface?.orm)
+    const surfaced = !!(albedoId && normalId && ormId)
+    const draw = (render: ParticleSystemAsset['system']['emitters'][number]['render']) => {
+      const wasSurfaced = !!render.ormTextureId && render.textureId !== flipId
+      render.textureId = surfaced ? albedoId : flipId
+      render.normalTextureId = surfaced ? normalId : null
+      render.ormTextureId = surfaced ? ormId : null
+      if (surfaced) { render.lit = true; render.roughness = 1; render.metallic = 1 }
+      else if (wasSurfaced) { render.roughness = 1; render.metallic = 0 }
+      render.flipbook = { ...render.flipbook, ...flipbook }
+    }
     let asset: ParticleSystemAsset
     if (existing) {
-      // Only what the Creator owns changes: the flipbook on the emitters drawing it. Anything set here
-      // (spawn rate, colour over life, more emitters) survives the next bake.
+      // Only what the Creator owns changes: the atlases on the emitters drawing one of its textures.
+      // Anything set here (spawn rate, colour over life, more emitters) survives the next bake.
       asset = structuredClone(existing)
       asset.name = meta.name
-      for (const e of asset.system.emitters)
-        if (e.render.textureId === flipId) e.render.flipbook = { ...e.render.flipbook, ...flipbook }
+      const ours = new Set([flipId, ...textureIds, ...(prev?.textureIds ?? [])])
+      for (const e of asset.system.emitters) if (e.render.textureId && ours.has(e.render.textureId)) draw(e.render)
     } else {
       asset = { ...buildParticleSystemAsset(meta.name), id: psId }
       const render = asset.system.emitters[0].render
-      render.textureId = flipId
-      render.flipbook = { ...render.flipbook, ...flipbook }
       render.blend = 'alpha'
+      // A liquid's tiles are its body colour, lit by the bake's neutral light: the scene lights them.
+      if (output.medium === 'liquid') render.lit = true
+      draw(render)
     }
 
-    const link: CreatorLink = { kind: 'fx', name: meta.name, revision: meta.revision, folder, particleSystemId: psId, materialIds: [], textureIds }
+    const materialIds = this.putDecalMaterials(meta, output.outputs?.decal as DecalSidecar | undefined)
+    for (const id of prev?.materialIds ?? [])
+      if (!materialIds.includes(id) && !this.host.isUsed('material', id)) this.host.removeMaterial(id)
+
+    const link: CreatorLink = { kind: 'fx', name: meta.name, revision: meta.revision, folder, particleSystemId: psId, materialIds, textureIds }
     this.links = { ...this.links, [meta.id]: link }
     this.publishPins()
     this.host.commitParticleSystem(asset)

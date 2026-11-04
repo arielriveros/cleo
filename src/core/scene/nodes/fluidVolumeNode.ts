@@ -13,6 +13,9 @@ export const FLUID_BRICK = 8;
  * scene's sun and occluded by opaque geometry. What fills it is up to the caller — a fluid simulation
  * writing it every frame (Cleo Creator's FX preview), or a baked volume uploaded once.
  *
+ * With {@link shading} `'liquid'` the same box draws a LIQUID instead: the surface where R crosses
+ * {@link liquidIso}, shaded as water or blood (see below).
+ *
  * The box is `size` (full extents, local units) centred on the node, under its full transform. Its
  * data is an RGBA 3D texture, `resolution` voxels along the box's own axes:
  *
@@ -34,6 +37,30 @@ export class FluidVolumeNode extends Node {
     public size: [number, number, number] = [1, 1, 1];
     /** Off keeps it in the scene without drawing it. */
     public enabled = true;
+
+    /**
+     * `'gas'` marches smoke and fire through the volume. `'liquid'` reads the channels as
+     *
+     *   R  liquid density (a splatted particle field; the surface is where it crosses `liquidIso`)
+     *   G  foam, 0..1 (aerated, fast-moving liquid turns white by `liquidFoam`)
+     *   B  light transmittance toward the sun, 0..1
+     *
+     * and draws the first surface along each ray: Beer-Lambert through the liquid behind it (per voxel,
+     * `absorption` x `absorptionScale` per channel), `smokeColor` as the liquid's body colour, the sun as a
+     * wrapped diffuse and a GGX highlight of `liquidRoughness`, the sky's reflection by Fresnel. A metal
+     * (`liquidMetallic`) is opaque and all reflection, `smokeColor` tinting it.
+     */
+    public shading: 'gas' | 'liquid' = 'gas';
+    /** Liquid: the density at the surface. */
+    public liquidIso = 0.5;
+    /** Liquid: the surface's roughness (GGX alpha's square root). */
+    public liquidRoughness = 0.1;
+    /** Liquid: strength of the sun's highlight and the sky's reflection. */
+    public liquidSpecular = 1;
+    /** Liquid: how white the foam channel turns it, 0..1. */
+    public liquidFoam = 0;
+    /** Liquid: 0..1, a metal (mercury, molten metal): opaque, no body colour, `smokeColor` tints its reflections. */
+    public liquidMetallic = 0;
 
     // --- Look ---------------------------------------------------------------------------------------
     /** Smoke albedo, linear RGB. */

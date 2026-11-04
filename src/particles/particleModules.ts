@@ -359,6 +359,19 @@ export interface RenderSettings {
     emissive: number;
     /** Simple lighting: sky ambient plus the sun. Off draws unlit. */
     lit: boolean;
+    /**
+     * Lit: a tangent-space normal map over the sprite (or mesh), cut into the same flipbook cells as
+     * `textureId`. OpenGL convention: R right, G up, B out. Null: the card's own normal.
+     */
+    normalTextureId: string | null;
+    /** Lit: R occlusion, G roughness, B metallic, cut like `textureId`, times the factors below. */
+    ormTextureId: string | null;
+    /** Lit: how far the normal map bends the card; 1 as authored. */
+    normalStrength: number;
+    /** Lit: roughness, times the ORM map's G. 1 is matte; low values give a tight highlight. */
+    roughness: number;
+    /** Lit: metallic, times the ORM map's B. A metal has no diffuse: its colour tints what it reflects. */
+    metallic: number;
     /** For `mesh` mode: a built-in shape, or `model` for `meshData`. */
     mesh: ParticleMeshKind;
     /** The model asset `meshData` was captured from — informational, for the editor and the asset graph. */
@@ -379,7 +392,8 @@ export function defaultRenderSettings(): RenderSettings {
         mode: 'billboard', alignment: 'camera', blend: 'alpha', stretch: 0.1, cutoff: 0.5,
         textureId: null,
         flipbook: { columns: 1, rows: 1, frames: 1, mode: 'life', fps: 24, cycles: 1, randomStart: false, blend: true },
-        softness: 0.3, emissive: 1, lit: false, mesh: 'cube', modelId: null, meshData: null, sort: false, sortingOrder: 0,
+        softness: 0.3, emissive: 1, lit: false, normalTextureId: null, ormTextureId: null, normalStrength: 1, roughness: 1, metallic: 0,
+        mesh: 'cube', modelId: null, meshData: null, sort: false, sortingOrder: 0,
     };
 }
 
@@ -402,6 +416,11 @@ export const RENDER_PARAMS: ParamSpec[] = [
     { key: 'emissive', label: 'Brightness', kind: 'float', min: 0, step: 0.1,
       hint: "Multiplies the colour's luminance (Color ▸ Intensity). Lit particles: multiplies the lit result." },
     { key: 'lit', label: 'Lit', kind: 'bool' },
+    { key: 'normalTextureId', label: 'Normal map', kind: 'asset', assetKind: 'texture', when: p => p.lit },
+    { key: 'normalStrength', label: 'Normal strength', kind: 'float', min: 0, max: 4, step: 0.05, when: p => p.lit && !!p.normalTextureId },
+    { key: 'ormTextureId', label: 'ORM map', kind: 'asset', assetKind: 'texture', when: p => p.lit },
+    { key: 'roughness', label: 'Roughness', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.lit },
+    { key: 'metallic', label: 'Metallic', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.lit },
     { key: 'sort', label: 'Sort particles', kind: 'bool', when: p => p.blend === 'alpha',
       hint: 'Back to front, on the GPU, every frame. Fixes dark fringes where alpha puffs overlap; costs a few passes.' },
     { key: 'sortingOrder', label: 'Sorting order', kind: 'int', hint: 'Higher draws later (on top). In 2D, offsets the emitter sorting band.' },

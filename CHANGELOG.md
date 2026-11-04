@@ -16,6 +16,52 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Liquids in the FX Creator.** FX has a **Medium**: Gas (the voxel smoke and fire solver) or
+  Liquid, a particle solver (double density relaxation) whose sheets tear into threads and beads by
+  surface tension. Its own sections: Splash source (point, ball, nozzle disc or crown ring; burst or
+  jet), Liquid (droplet size, viscosity, surface tension, stickiness), Floor (bounce, flow, edge hold,
+  soak) and Liquid look. Liquid that lands on a solid floor becomes a film that flows out, stops at a
+  ragged edge and soaks in, and the bake's new **Floor decal** output writes it as an animated colour,
+  normal and ORM atlas with its settled frame. The live preview draws the liquid as the engine volume's
+  new `liquid` shading and the film as a decal. Presets: blood burst, blood droplets, blood spatter,
+  blood pool, water splash and water droplets. Tall and wide flipbook tiles (**Tile shape**). On
+  WebGPU the preview steps liquids of 600 drops or more as GPU compute, splatting straight into the
+  preview volume (the water splash: about 20 ms a frame against 400 on the CPU); bakes stay on the CPU.
+  The RHI gains `Device.readBuffer` to read a storage buffer back.
+- **PBR particle surfaces.** A lit emitter takes a **Normal map** and an **ORM map** (occlusion,
+  roughness, metallic) cut into the same flipbook cells as its texture, with **Roughness**, **Metallic**
+  and **Normal strength** factors. It then shades as the forward PBR path does: GGX highlights from the
+  sun and the strongest local light, the probe or sky reflected, metals tinting both, the normal map's
+  frame taken from screen derivatives so rotated and stretched particles and mesh particles all work. At
+  the defaults a lit emitter shades exactly as before. Published games ship the maps (asset graph,
+  bundle remap, reference walk).
+- **Liquid metals.** The FX Creator's Liquid look has **Metallic**: mercury or molten metal is opaque and
+  all reflection, its colour tinting the highlight and the mirrored sky, in the bake, the live preview
+  (`FluidVolumeNode.liquidMetallic`) and the floor decal. **Surface maps** bakes a liquid sprite's unlit
+  base colour, normal and ORM atlases; synced to the editor, its emitter draws them lit. Presets: Mercury
+  splash; Mercury and Molten gold looks; Mercury liquid.
+- **FX Creator viewport.**
+  - **Playback bar:** play/pause (Space), start over, speed, and the play-through's progress. It replaces the toolbar's playback controls.
+  - **Stage menu:** laid out like the Foliage Creator's. It holds Show (with Wind), Sun, Light, Wind and Fire light, each with its presets. The Scene panel keeps Select, Bodies and Rendering.
+  - **Emitter gizmo:** a liquid's emitter rotates to set its aim, and an arrow shows the aim. Move sets its position for gas and liquid alike, and a liquid restarts once per drag rather than on every mouse move.
+  - **Region box:** stays drawn while the region is resized, and no longer drifts on height drags. The move gizmo (W) now moves the region too.
+  - **Gizmo-set values leave the panels.** The emitter's position, radius and aim, the region's size and position, and a body's position, size, turn and tilt have no sliders or number boxes any more: the gizmos set them, and their drag readouts show the exact value.
+- **The FX region is room, not scale.** A gas effect's emitter position, radius and turbulence size are in metres (saves migrate once, keeping the same effect; every preset is rewritten), and its noise is anchored on the emitter, so growing a face gives an explosion room to bloom past its old bounds instead of a bigger explosion. A face drag keeps the emitter where it stands in the world, and the fire light measures what burns, not how big the region is. The toolbar's voxel count turns amber when the region outgrew the voxel budget.
+- **Stage floors in the Foliage and FX Creators.** The Stage menu's **Floor** wears any PBR set from `build/terrain_textures` (served in dev, shipped in builds) with a **Tile size**. The floor is a stochastic, non-repeating re-make of the set and its height map is drawn as parallax relief. In the Foliage Creator, **Wetness** and **Snow** also reach the floor: it darkens, glosses and puddles, and snow covers low spots first, textured by `snow_02`.
+- **Liquid pools land with the drops and read as liquid.** The preview decal is one fixed frame whose textures are made once (it no longer rebuilds and blinks as the stain grows); only the changed rectangle uploads, batches grow the film once, and its albedo share is constant. Drops are compact caps (no halos), the relief is smoothed, and blood absorbs about 900 per metre so a pool hides the floor.
+- **Liquid detail follows the droplets, not the region.** The floor film's cells are half a droplet, kept only where liquid has landed, and flow implicitly (stable at any cell size). The baked floor decal covers only where the liquid lies, at that definition (**Decal max size** caps it, default 512), and its sidecar gains `offset` and a rectangular `size` and `tile`; the Valley's blood decals and `SoulsBloodSplat` stand them there. The bake splats each sprite frame at three quarters of a droplet over where the drops are, and the live preview's volume is a window over the drops at droplet voxels (moved and rescaled as they spread; on the GPU, their box comes back each frame).
+- **Liquids go where they are aimed.**
+  - **Release direction:** the cone sampler is symmetric, and bursts are re-centred on the aim, so sprays no longer lean several degrees off it (up to 90° at steep pitch). Crowns no longer drift.
+  - **Preview floor decal:** no longer mirrored in Z.
+  - **Bake views:** now real cameras. Tiles were left/right mirrors of the viewport, so every effect bakes flipped once against its last bake.
+  - **Bodies:** a new body goes in the spray's path; adding or moving one replays the splash; the floor film stops against bodies.
+- **Animated decals.** `DecalNode.flipbook` plays its material's maps as an atlas (once, holding the
+  last frame, or looping) from its first update in Play, on game time; `playFlipbook()` restarts it.
+  `albedoOpacity` lets a dark decal darken the ground while its roughness lands whole: wet ground.
+- **Water volumes** take a `wadeSplashTemplate` for a wading character's footsteps.
+- **The Valley's fires, blood and splashes are FX Creator effects**, baked headless by
+  `tools/valley/genFx.ts`: two flames (torches, and the bonfire), a hit's burst, droplets, spreading pool
+  and spatter decals, and the pond's entry and wading splashes.
 - **One-shots live in the animator graph, played by trigger name.** A layer can hold a character's
   attacks, rolls and reactions as states a script starts with `setTrigger('Roll')`, playing nothing
   itself and naming no state. For that:

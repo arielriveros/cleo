@@ -51,7 +51,7 @@ const CASES: Case[] = [
     { name: 'wind', table: WIND_PRESETS, make: () => new WindNode('wind'),
       reserved: ['direction', 'fadeStart', 'fadeEnd'] },
     { name: 'water', table: WATER_VOLUME_PRESETS, make: () => new WaterVolumeNode('water'),
-      reserved: ['size', 'surfaceNodeId', 'splashTemplate', 'enabled', 'affectCharacters'] },
+      reserved: ['size', 'surfaceNodeId', 'splashTemplate', 'wadeSplashTemplate', 'enabled', 'affectCharacters'] },
     { name: 'forceField', table: FORCE_FIELD_PRESETS, make: () => new ForceFieldNode('field'),
       reserved: ['radius', 'extents', 'enabled'] },
     { name: 'sky', table: SKY_ATMOSPHERE_PRESETS, make: () => new SkyAtmosphereNode('sky'),

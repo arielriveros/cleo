@@ -444,6 +444,10 @@ export class WebGL2Device implements Device {
      * Read a colour attachment back to the CPU; resolves immediately. Rows come back bottom-up, and
      * eight-bit colour only — `RGBA`/`UNSIGNED_BYTE` is invalid against a float target.
      */
+    public async readBuffer(): Promise<ArrayBuffer> {
+        throw new Error('readBuffer needs a compute device: WebGL2 has no storage buffers to read back');
+    }
+
     public async readPixels(view: WebGL2TextureView, x: number, y: number,
                             width: number, height: number): Promise<Uint8Array> {
         return this.readPixelsSync(view, x, y, width, height);

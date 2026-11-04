@@ -182,3 +182,73 @@ describe('live preview', () => {
     }
   });
 });
+
+describe('the region is room around a gas effect', () => {
+  it('reads a format-1 save as the same effect in metres, once', () => {
+    const v1 = { ...DEFAULT_FX, regionSize: [4.8, 7.2, 4.8], voxelSize: 0.1, emitterX: 0.25, emitterZ: 0.5, emitterHeight: 0.1, emitterRadius: 0.12, turbulenceScale: 4 } as Record<string, unknown>;
+    delete v1.version; delete v1.emitterPosition; delete v1.turbulenceSize;
+    const p = normaliseFx(v1 as unknown as FxParams);
+    expect(p.version).toBe(2);
+    // Where format 1 put it: on its grid's voxel centres (48 x 72 x 48 of 0.1 m), from the floor's centre.
+    expect(p.emitterPosition[0]).toBeCloseTo((0.25 * 47 + 0.5) * 0.1 - 2.4, 9);
+    expect(p.emitterPosition[1]).toBeCloseTo((0.1 * 71 + 0.5) * 0.1, 9);
+    expect(p.emitterPosition[2]).toBeCloseTo((0.5 * 47 + 0.5) * 0.1 - 2.4, 9);
+    expect(p.emitterRadius).toBeCloseTo(0.576, 9);
+    expect(p.turbulenceSize).toBeCloseTo(1.2, 9);
+    for (const k of ['emitterX', 'emitterZ', 'emitterHeight', 'turbulenceScale', 'sourceHeight']) expect(k in p, k).toBe(false);
+    expect(normaliseFx(p)).toEqual(p);
+    // A liquid's source: fractions of the region in metres, its height as it was.
+    const l1 = { ...v1, medium: 'liquid', regionSize: [2, 1.3, 2], emitterX: 0.5, emitterZ: 0.2, sourceHeight: 1 };
+    const l = normaliseFx(l1 as unknown as FxParams);
+    expect(l.emitterPosition[0]).toBeCloseTo(0, 9);
+    expect(l.emitterPosition[1]).toBeCloseTo(1, 9);
+    expect(l.emitterPosition[2]).toBeCloseTo(-0.6, 9);
+  });
+
+  it('writes every preset in metres', () => {
+    for (const preset of FX_PRESETS) {
+      const raw = preset.params as unknown as Record<string, unknown>;
+      expect(raw.version, preset.id).toBe(2);
+      expect(Array.isArray(raw.emitterPosition), preset.id).toBe(true);
+      for (const k of ['emitterX', 'emitterZ', 'emitterHeight', 'turbulenceScale', 'sourceHeight']) expect(raw[k], `${preset.id} ${k}`).toBeUndefined();
+    }
+  });
+
+  /** A flame for 12 substeps; its density inside the original region's box, `shift` voxels in along x. */
+  const flame = (p: FxParams, shift: number, w: number) => {
+    const f = new FluidCpu(fluidDims(p));
+    for (let i = 0; i < 12; i++) f.step(p, p.frameTime / p.substeps);
+    let total = 0, cx = 0, cy = 0;
+    for (let z = 0; z < f.dims.nz; z++) for (let y = 0; y < f.dims.ny; y++) for (let x = 0; x < w; x++) {
+      const d = f.density[f.index(x + shift, y, z)];
+      total += d; cx += x * d; cy += y * d;
+    }
+    return { f, total, cx: cx / total, cy: cy / total };
+  };
+
+  it('keeps the effect its size and place as the region grows on any side', () => {
+    const base = tiny({ seed: 3, emitterPosition: [0, 0.35, 0], emitterRadius: 0.25 });
+    const a = flame(base, 0, 16);
+    // Grown 0.8 m on -X: the floor's centre moved 0.4 m toward -X, so the emitter is 0.4 m further +X of it.
+    const minusX = flame(normaliseFx({ ...base, regionSize: [2.4, 2.4, 1.6], emitterPosition: [0.4, 0.35, 0] }), 8, 16);
+    // On +X, and upward: the original box at the grid's start.
+    const plusX = flame(normaliseFx({ ...base, regionSize: [2.4, 2.4, 1.6], emitterPosition: [-0.4, 0.35, 0] }), 0, 16);
+    const up = flame(normaliseFx({ ...base, regionSize: [1.6, 3.6, 1.6] }), 0, 16);
+    expect(a.total).toBeGreaterThan(1);
+    for (const [name, b] of [['-X', minusX], ['+X', plusX], ['up', up]] as const) {
+      expect(Math.abs(b.total - a.total) / a.total, name).toBeLessThan(0.15);
+      expect(Math.abs(b.cx - a.cx), name).toBeLessThan(0.5);
+      expect(Math.abs(b.cy - a.cy), name).toBeLessThan(0.5);
+    }
+  });
+
+  it('lights the stage by how much burns, not by how big the region is', async () => {
+    const { fireLightOf } = await import('../src/fx/volumeRender');
+    const base = tiny({ seed: 3, emitterPosition: [0, 0.35, 0], emitterRadius: 0.25 });
+    const small = fireLightOf(flame(base, 0, 16).f, base)[3];
+    const big = normaliseFx({ ...base, regionSize: [3.2, 2.4, 3.2] });
+    const large = fireLightOf(flame(big, 8, 16).f, big)[3];
+    expect(small).toBeGreaterThan(0);
+    expect(Math.abs(large - small) / small).toBeLessThan(0.15);
+  });
+});

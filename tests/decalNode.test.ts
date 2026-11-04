@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mat4, vec3 } from 'gl-matrix';
-import { DecalNode, decalLocalToUV, radialDecalWeight, radialDecalT, DECAL_RADIAL_CURVES } from '../src/core/scene/nodes/decalNode';
+import { DecalNode, decalLocalToUV, radialDecalWeight, radialDecalT, DECAL_RADIAL_CURVES, decalFlipbookFrame } from '../src/core/scene/nodes/decalNode';
 import type { DecalOptions } from '../src/core/scene/nodes/decalNode';
 import { Node } from '../src/core/scene/nodes/node';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
@@ -793,5 +793,76 @@ describe('editor picking', () => {
         expect((box.min[0] + box.max[0]) / 2).toBeCloseTo(5);
         expect((box.min[1] + box.max[1]) / 2).toBeCloseTo(3);   // half of 2 x 3
         expect((box.min[2] + box.max[2]) / 2).toBeCloseTo(-3);
+    });
+});
+
+describe('decal flipbooks', () => {
+    const book = { columns: 4, rows: 2, frames: 6, fps: 10, loop: false, blend: true };
+
+    it('is the whole image without one', () => {
+        const f = decalFlipbookFrame(null, 3);
+        expect(f.a).toEqual([0, 0, 1, 1]);
+        expect(f.b).toEqual([0, 0, 1, 1]);
+        expect(f.blend).toBe(0);
+    });
+
+    it('walks the cells left to right, top row first, row 0 at the TOP of an uploaded texture (v = 1)', () => {
+        const first = decalFlipbookFrame(book, 0);
+        expect(first.a).toEqual([0, 0.5, 0.25, 0.5]);      // column 0 of the top row
+        expect(first.b).toEqual([0.25, 0.5, 0.25, 0.5]);
+        const fifth = decalFlipbookFrame(book, 0.45);       // frame 4.5: the second row's first cell
+        expect(fifth.a).toEqual([0, 0, 0.25, 0.5]);
+        expect(fifth.b).toEqual([0.25, 0, 0.25, 0.5]);
+        expect(fifth.blend).toBeCloseTo(0.5);
+    });
+
+    it('holds the last frame of a one-shot, and shows it before the decal has ever played', () => {
+        for (const t of [0.55, 5, Infinity]) {
+            const f = decalFlipbookFrame(book, t);
+            expect(f.a, String(t)).toEqual([0.25, 0, 0.25, 0.5]);   // frame 5 of 0..5
+            expect(f.blend, String(t)).toBe(0);
+        }
+    });
+
+    it('wraps a looping one into its first frame', () => {
+        const f = decalFlipbookFrame({ ...book, loop: true }, 0.55);
+        expect(f.a).toEqual([0.25, 0, 0.25, 0.5]);
+        expect(f.b).toEqual([0, 0.5, 0.25, 0.5]);
+        expect(f.blend).toBeCloseTo(0.5);
+        expect(decalFlipbookFrame({ ...book, loop: true }, 0.6).a).toEqual([0, 0.5, 0.25, 0.5]);
+    });
+
+    it('steps without a cross-fade when blend is off', () => {
+        expect(decalFlipbookFrame({ ...book, blend: false }, 0.25).blend).toBe(0);
+    });
+
+    it('starts at the first update in play and runs on the delta it is given', () => {
+        const decal = new DecalNode('pool', { flipbook: book });
+        expect(decal.flipbookTime).toBe(Infinity);
+        decal.update(0.016, 0);
+        expect(decal.flipbookTime).toBe(0);
+        decal.update(0.25, 0.25);
+        expect(decal.flipbookTime).toBeCloseTo(0.25);
+        decal.playFlipbook();
+        expect(decal.flipbookTime).toBe(0);
+    });
+
+    it('round-trips the flipbook and the albedo opacity, and writes neither when unset', async () => {
+        const decal = new DecalNode('pool', { flipbook: book, albedoOpacity: 0.4 });
+        const { copy, json } = await roundTrip(decal);
+        expect(json.decal.flipbook).toEqual(book);
+        expect(copy.flipbook).toEqual(book);
+        expect(copy.albedoOpacity).toBeCloseTo(0.4);
+        const plain = await roundTrip(new DecalNode('plain'));
+        expect(plain.json.decal.flipbook).toBeUndefined();
+        expect(plain.json.decal.albedoOpacity).toBeUndefined();
+        expect(plain.copy.flipbook).toBeNull();
+        expect(plain.copy.albedoOpacity).toBe(1);
+    });
+
+    it('reads a malformed flipbook tolerantly', () => {
+        const opts = DecalNode.optionsFromJson({ flipbook: { columns: 'x', rows: 3, frames: 99, fps: -2 } });
+        expect(opts.flipbook).toEqual({ columns: 1, rows: 3, frames: 3, fps: 0, loop: false, blend: true });
+        expect(DecalNode.optionsFromJson({ flipbook: 7 }).flipbook).toBeNull();
     });
 });

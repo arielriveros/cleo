@@ -4,6 +4,7 @@ import {
 } from 'cleo';
 import { vec3 } from 'gl-matrix';
 import { aimSun } from '../../fx/ui/fxPreview';
+import { StageFloor } from '../../app/floor/stageFloor';
 import type { FoliageBuild } from '../foliageClient';
 
 // The Foliage Creator's preview stage: a ground, the sun, an optional physical sky, a wind, the weather,
@@ -51,6 +52,9 @@ export interface StageSettings {
    * back (the material's Interaction). Draws the asset as terrain foliage, like Wind.
    */
   walk: boolean;
+  /** The floor: a PBR set of the build's (`app/floor`; '' is the plain colour) and the metres one repeat covers. */
+  floorSet: string;
+  floorTile: number;
   /** The stage's WeatherNode: how wet (0..1) and how much snow (0..1); the foliage materials answer it. */
   wetness: number;
   snow: number;
@@ -60,7 +64,7 @@ export const DEFAULT_STAGE: StageSettings = {
   grid: true, ground: true, sky: true, patch: true, wireframe: false,
   sunYaw: 35, sunElevation: 40, sunLux: 60000, ambientLux: 6000,
   wind: true, windPreset: 'breezy', windDirection: 30, windStrength: 1, windGustScale: 18, windGustSpeed: 4,
-  walk: false, wetness: 0, snow: 0,
+  walk: false, floorSet: '', floorTile: 2, wetness: 0, snow: 0,
 };
 
 /** The walker: a person-sized capsule at walking pace. */
@@ -76,7 +80,7 @@ const WALK_HEIGHT = 1.7;
 const HOST_DEPTH = 0;
 
 export class FoliageStage {
-  private ground: ModelNode | null = null;
+  private floor: StageFloor | null = null;
   private sky: SkyAtmosphereNode | null = null;
   private skyLight: SkyLightNode | null = null;
   private root: Node | null = null;
@@ -123,13 +127,9 @@ export class FoliageStage {
     }
     world.ambientLight = vec3.fromValues(s.ambientLux, s.ambientLux, s.ambientLux);
     this.engine.renderer.setGridVisible(s.grid);
-    if (s.ground && !this.ground) {
-      this.ground = new ModelNode(PREFIX + 'ground', new Model(Geometry.Plane(80, 80), Material.PBR({ baseColor: [0.2, 0.19, 0.15], roughness: 0.95 })));
-      world.addNode(this.ground);
-    } else if (!s.ground && this.ground) {
-      world.removeNode(this.ground);
-      this.ground = null;
-    }
+    this.floor ??= new StageFloor(world, { color: [0.2, 0.19, 0.15], size: 80, name: PREFIX + 'ground' });
+    this.floor.configure({ set: s.floorSet ?? '', tile: s.floorTile ?? 2, wetness: s.wetness ?? 0, snow: s.snow ?? 0 });
+    this.floor.show(s.ground);
     if (s.sky && !this.sky) {
       this.sky = new SkyAtmosphereNode(PREFIX + 'sky', { useSceneSun: true });
       this.skyLight = new SkyLightNode(PREFIX + 'sky light', {});
@@ -387,9 +387,11 @@ export class FoliageStage {
     this.stopWalk();
     this.clear();
     const world = this.world;
-    for (const n of [this.ground, this.sky, this.skyLight, this.wind, this.weather]) if (n) world.removeNode(n);
+    this.floor?.dispose();
+    for (const n of [this.sky, this.skyLight, this.wind, this.weather]) if (n) world.removeNode(n);
     this.weather = null;
-    this.ground = this.sky = this.skyLight = null;
+    this.floor = null;
+    this.sky = this.skyLight = null;
     this.wind = null;
     const s = this.saved;
     const light = this.sun?.light as DirectionalLight | undefined;

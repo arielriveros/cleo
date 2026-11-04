@@ -74,6 +74,12 @@ struct DecalUniforms {
     u_radialInner: vec4<f32>,       // LINEAR rgb + coverage at the centre
     u_radialOuter: vec4<f32>,       // ... at the rim
     u_ringColor: vec4<f32>,         // LINEAR rgb + coverage of the rim outline
+    // The flipbook cells this frame (DecalNode.flipbook): uv offset in xy, scale in zw, and the
+    // cross-fade from A into B. (0, 0, 1, 1) and 0 without a flipbook: the whole image.
+    u_flipA: vec4<f32>,
+    u_flipB: vec4<f32>,
+    u_flipBlend: f32,
+    u_albedoOpacity: f32,           // the albedo target's share of the coverage (DecalNode.albedoOpacity)
     u_decalOpacity: f32,
     u_angleFade: f32,
     u_depthFade: f32,
@@ -143,6 +149,16 @@ fn decalWorldPos(uv: vec2<f32>, depth: f32) -> vec3<f32> {
 /** Unit-box position to decal uv. TS twin: `decalLocalToUV` in decalNode.ts. */
 fn decalUv(local: vec3<f32>) -> vec2<f32> {
     return vec2<f32>(0.5 + local.x, 0.5 - local.z);
+}
+
+/**
+ * Decal uv to the texture uv of flipbook cell `cell` (offset xy, scale zw), held half a texel inside
+ * the CELL: neither the neighbouring frame nor, for a whole-image cell, a repeat-wrapped opposite edge
+ * can bilinear-bleed in along the box's border. Gradients scale by `cell.zw` alongside.
+ */
+fn decalCellUv(uv: vec2<f32>, cell: vec4<f32>, dims: vec2<u32>) -> vec2<f32> {
+    let border = 0.5 / max(vec2<f32>(dims) * cell.zw, vec2<f32>(1.0));
+    return cell.xy + clamp(uv, border, vec2<f32>(1.0) - border) * cell.zw;
 }
 
 /**

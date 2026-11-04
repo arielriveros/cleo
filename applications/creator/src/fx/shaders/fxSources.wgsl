@@ -28,7 +28,7 @@ fn cs_sources(@builtin(global_invocation_id) g: vec3<u32>) {
         if (inside) {
             var k = 1.0;
             if (u.extra.x > 0.0) {
-                k = max(0.0, 1.0 + u.extra.x * value_noise3(vec3<f32>(p.x * 0.35, p.y * 0.35 - u.extra.z * 3.0, p.z * 0.35), u.dims.w + 7u));
+                k = max(0.0, 1.0 + u.extra.x * value_noise3(vec3<f32>(d.x * 0.35, d.y * 0.35 - u.extra.z * 3.0, d.z * 0.35), u.dims.w + 7u));
             }
             k = k * u.real3.x;
             s.z = max(s.z, u.emit.x * k);
@@ -46,14 +46,16 @@ fn cs_sources(@builtin(global_invocation_id) g: vec3<u32>) {
     if (on_smoke > 0.0) { stir = stir + on_smoke * min(1.0, s.x); }
     if (u.turb.x > 0.0 && (s.y > 0.02 || (on_smoke > 0.0 && stir > 0.02))) {
         let k = u.turb.x * stir * dt;
-        let q = vec3<f32>(p.x * u.turb.y, p.y * u.turb.y - u.turb.z, p.z * u.turb.y);
+        // Noise from the emitter (fluidCpu.ts): the same effect stirs the same way in any region.
+        let r = p - u.emitter.xyz;
+        let q = vec3<f32>(r.x * u.turb.y, r.y * u.turb.y - u.turb.z, r.z * u.turb.y);
         let seed = u.dims.w;
         v.x = v.x + k * value_noise3(q, seed);
         v.y = v.y + k * 0.5 * value_noise3(q + vec3<f32>(31.4, 0.0, 0.0), seed + 1u);
         v.z = v.z + k * value_noise3(q + vec3<f32>(0.0, 0.0, 17.7), seed + 2u);
         let kd = k * u.real6.y;
         if (kd > 0.0) {
-            let f = vec3<f32>(q.x * 2.7, p.y * u.turb.y * 2.7 - u.turb.z * 2.0, q.z * 2.7);
+            let f = vec3<f32>(q.x * 2.7, r.y * u.turb.y * 2.7 - u.turb.z * 2.0, q.z * 2.7);
             v.x = v.x + kd * value_noise3(f, seed + 3u);
             v.y = v.y + kd * 0.5 * value_noise3(f + vec3<f32>(31.4, 0.0, 0.0), seed + 4u);
             v.z = v.z + kd * value_noise3(f + vec3<f32>(0.0, 0.0, 17.7), seed + 5u);
@@ -64,7 +66,7 @@ fn cs_sources(@builtin(global_invocation_id) g: vec3<u32>) {
     if (u.real1.y > 0.0) {
         let amount = min(1.0, s.y + s.x);
         if (amount > 0.01) {
-            let b = vec3<i32>(floor(p / u.real1.z));
+            let b = vec3<i32>(floor((p - u.emitter.xyz) / u.real1.z));
             let seed = u.dims.w + 101u + u32(u.real1.w) * 7919u;
             let k = u.real1.y * amount * dt;
             v.x = v.x + k * (hash3(b.x, b.y, b.z, seed) * 2.0 - 1.0);

@@ -50,7 +50,7 @@ The JPEGs were saved with Pillow at quality 88 and 1280 px wide.
      setTimeout(() => ex.importExample(e, undefined, true), 0)"
    ```
    Then wait for the boot to settle: `loadState()` in prelude.js lists the boot steps, and none is pending once it has.
-2. **Clean editor views.** Turn the debug overlays off through `cleo_debug_visibility_v1` in localStorage (colliders, triggers, volumes, icons, grid), then reload.
+2. **Clean editor views.** Turn the debug overlays off through `cleo_debug_visibility_v1` in localStorage (colliders, triggers, icons, grid), then reload.
 3. **Editor shots** are page screenshots:
    - `lookAt(pos, target)`, `orbit(...)` and `groundAt(x, z)` place the editor camera;
    - `press(...)` and `editorTab(...)` switch modes and tabs;

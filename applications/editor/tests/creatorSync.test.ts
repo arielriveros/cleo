@@ -317,3 +317,65 @@ describe('Creator poses', () => {
     }
   });
 });
+
+describe('FX Creator liquids', () => {
+  it('bring their floor decal as two PBR decal materials over the bake\'s maps: the settled pool, and the animated atlases', async () => {
+    const { CreatorSync } = await import('../src/features/creator/creatorSync');
+    const materials: any[] = [];
+    const host: any = {
+      materials: () => materials,
+      putMaterial: (m: any) => { const i = materials.findIndex(x => x.id === m.id); if (i >= 0) materials[i] = m; else materials.push(m); },
+    };
+    const sync = new CreatorSync(host) as any;
+    const m = meta({ id: 'fx_blood', kind: 'fx', name: 'Blood' });
+    const decal = {
+      atlas: { color: 'blood_decal_flipbook.png', normal: 'blood_decal_normal_flipbook.png', orm: 'blood_decal_orm_flipbook.png' },
+      still: { color: 'blood_decal.png', normal: 'blood_decal_normal.png', orm: 'blood_decal_orm.png' },
+    };
+    const ids = sync.putDecalMaterials(m, decal);
+    expect(ids).toEqual(['cr_fx_blood_decal', 'cr_fx_blood_decal_anim']);
+    expect(materials.map(x => x.name)).toEqual(['Blood Decal', 'Blood Decal (animated)']);
+    const still = materials[0].material;
+    expect(still.type).toBe('pbr');
+    expect(materials[0].textureIds).toEqual(expect.arrayContaining(['cr_fx_blood_blood_decal', 'cr_fx_blood_blood_decal_normal', 'cr_fx_blood_blood_decal_orm']));
+    expect(materials[1].textureIds).toContain('cr_fx_blood_blood_decal_flipbook');
+    // A re-sync replaces them in place; a gas effect (no decal block) brings none.
+    sync.putDecalMaterials(m, decal);
+    expect(materials).toHaveLength(2);
+    expect(sync.putDecalMaterials(m, undefined)).toEqual([]);
+  });
+
+  it('draw their surface maps when the bake made them, lit, and go back to the colour flipbook when it stops', async () => {
+    const { CreatorSync } = await import('../src/features/creator/creatorSync');
+    let systems: any[] = [];
+    const host: any = {
+      particleSystems: () => systems,
+      commitParticleSystem: (s: any) => { systems = [s]; },
+      materials: () => [], putMaterial: () => {}, removeMaterial: () => {},
+      isUsed: () => false, texturesChanged: () => {},
+    };
+    const sync = new CreatorSync(host) as any;
+    sync.putTexture = async () => {};
+    sync.dropTextures = async () => {};
+    sync.publishPins = () => {};
+    const png = (name: string) => ({ name, mime: 'image/png', blob: new Blob() });
+    const flipbook = { columns: 4, rows: 4, frames: 16, mode: 'life', fps: 30, cycles: 1, randomStart: false, blend: true };
+    const surface = { albedo: 'hg_albedo_flipbook.png', normal: 'hg_normal_flipbook.png', orm: 'hg_orm_flipbook.png' };
+    const withMaps = meta({ id: 'fx_hg', kind: 'fx', name: 'Mercury', revision: 1,
+      sidecar: { output: { medium: 'liquid', particleFlipbook: flipbook, outputs: { surface } } } as any });
+    // The surface atlases share the `_flipbook.png` suffix; the colour atlas is still the one drawn without maps.
+    const files = [png(surface.albedo), png(surface.normal), png(surface.orm), png('hg_flipbook.png')];
+    const first = await sync.upsertFx(withMaps, files, undefined);
+    const render = systems[0].system.emitters[0].render;
+    expect(render.textureId).toBe(creatorIds.texture('fx_hg', surface.albedo));
+    expect(render.normalTextureId).toBe(creatorIds.texture('fx_hg', surface.normal));
+    expect(render.ormTextureId).toBe(creatorIds.texture('fx_hg', surface.orm));
+    expect([render.lit, render.roughness, render.metallic]).toEqual([true, 1, 1]);
+
+    const plain = meta({ ...withMaps, revision: 2, sidecar: { output: { medium: 'liquid', particleFlipbook: flipbook } } as any });
+    await sync.upsertFx(plain, [png('hg_flipbook.png')], first);
+    const after = systems[0].system.emitters[0].render;
+    expect(after.textureId).toBe(creatorIds.texture('fx_hg', 'flipbook'));
+    expect([after.normalTextureId, after.ormTextureId, after.metallic]).toEqual([null, null, 0]);
+  });
+});

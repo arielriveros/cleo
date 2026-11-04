@@ -83,7 +83,7 @@ settings is drawn from the same formulae the audio engine uses, so what is plott
 | **Max** | Linear falls silent here; the other models only clamp at it. |
 | **Rolloff** | How steeply it falls off. 0 is no attenuation at all. |
 
-Sound emitters show an icon in the viewport when **Sound emitters** is on in the debug eye menu. A
+Sound emitters show an icon in the viewport when **Editor icons** is on in the debug eye menu. A
 spatial emitter's falloff sphere (drawn at **Max**) appears only while that emitter is
 selected.
 

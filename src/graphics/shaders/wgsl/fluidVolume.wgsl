@@ -23,6 +23,12 @@
 // temporal resolve reprojects through and the composite tests against the full-resolution depth.
 //
 // No discard and no implicit derivatives: a miss returns zero, and every fetch is explicit-level.
+//
+// LIQUID shading (`u_shading` 1) reads the same box as a particle liquid instead: R is a splatted
+// density whose `u_liquidIso` crossing is the surface, G foam, B the sun's transmittance. The ray stops
+// at the first crossing (bisected), takes the normal from the density gradient and the thickness from
+// how long the ray stays inside, and shades it as `liquid_shade` -- the Creator's liquidRender.ts
+// `shadeLiquid`, so the live preview and the bake agree.
 
 const MAX_STEPS: i32 = 384;
 const INV_PI: f32 = 0.31830988618;
@@ -89,12 +95,18 @@ struct FluidVolumeUniforms {
     u_sootMask: f32,                 // fire inside dense smoke dimmed by it
     u_blueCore: f32,                 // blue reaction-zone emission strength
     u_sharpen: f32,                  // density contrast
+    u_liquidIso: f32,                // liquid: the surface density
+    u_liquidRoughness: f32,
+    u_liquidSpecular: f32,
+    u_liquidFoam: f32,
+    u_liquidMetallic: f32,           // liquid: 0..1, a metal (opaque, all reflection, tinted by u_smokeColor)
     u_smoothSampling: i32,           // tricubic B-spline sampling
     u_scatterOctaves: i32,
     u_hasDetail: i32,
     u_jitterSlot: i32,
     u_hasLut: i32,
     u_hasOccupancy: i32,
+    u_shading: i32,                  // 0 gas, 1 liquid
 };
 @group(1) @binding(4) var<uniform> u_fluid: FluidVolumeUniforms;   // not `u_volume`: GLSL names the u_volume_texture sampler that, and the two would clash
 
@@ -202,6 +214,121 @@ fn brick_empty(uvw: vec3<f32>) -> bool {
     return textureLoad(u_occupancy_texture, b, 0).r <= 0.0;
 }
 
+/** What a liquid reflects besides the sun, by direction (liquidRender.ts `liquidSky`). */
+fn liquid_sky(ry: f32) -> f32 {
+    return select(0.1 + 0.15 * (1.0 + ry), 0.75 - 0.2 * ry, ry >= 0.0);
+}
+
+/** GGX x Smith x Schlick, times N.L: the sun's highlight per unit of its light (liquidRender.ts `ggxSpecular`), for reflectance f0. */
+fn ggx_specular(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32, f0: f32) -> f32 {
+    let nl = dot(n, l);
+    let nv = max(dot(n, v), 1e-4);
+    let h = normalize(v + l);
+    let nh = max(dot(n, h), 0.0);
+    let vh = max(dot(v, h), 0.0);
+    let a = max(roughness * roughness, 0.002);
+    let a2 = a * a;
+    let dd = nh * nh * (a2 - 1.0) + 1.0;
+    let D = a2 / (3.14159265 * dd * dd);
+    let k = a * 0.5;
+    let G = (max(nl, 0.0) / (max(nl, 0.0) * (1.0 - k) + k)) * (nv / (nv * (1.0 - k) + k));
+    let F = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
+    return select(0.0, D * G * F / (4.0 * nv), nl > 0.0);
+}
+
+fn liquid_at(uvw: vec3<f32>) -> f32 {
+    return sample_volume(uvw).r;
+}
+
+/**
+ * The liquid surface along the ray: the first iso crossing between t0 and t1 (in steps of `dt`,
+ * skipping empty bricks), bisected, shaded. Premultiplied colour and coverage, as the gas march's.
+ */
+fn liquid_trace(lo: vec3<f32>, ld: vec3<f32>, safe: vec3<f32>, t0: f32, t1: f32, dt: f32, dlen: f32, jitter: f32) -> TraceOutput {
+    var out: TraceOutput;
+    out.color = vec4<f32>(0.0);
+    out.depth = vec4<f32>(0.0);
+    let iso = u_fluid.u_liquidIso;
+    var t = t0 + dt * jitter;
+    var prev = t0;
+    var hit = false;
+    for (var i: i32 = 0; i < MAX_STEPS; i = i + 1) {
+        if (t >= t1) { break; }
+        let uvw = lo + ld * t + vec3<f32>(0.5);
+        if (brick_empty(uvw)) {
+            let bmin = floor(uvw * u_fluid.u_bricks) / u_fluid.u_bricks;
+            let bmax = bmin + vec3<f32>(1.0) / u_fluid.u_bricks;
+            let q0 = (bmin - vec3<f32>(0.5) - lo) / safe;
+            let q1 = (bmax - vec3<f32>(0.5) - lo) / safe;
+            let exitT = min(min(max(q0.x, q1.x), max(q0.y, q1.y)), max(q0.z, q1.z));
+            prev = t;
+            t = t + max(ceil((exitT - t) / dt), 1.0) * dt;
+            continue;
+        }
+        if (liquid_at(uvw) >= iso) { hit = true; break; }
+        prev = t;
+        t = t + dt;
+    }
+    if (!hit) { return out; }
+    var a = prev;
+    var b = t;
+    for (var k: i32 = 0; k < 6; k = k + 1) {
+        let m = 0.5 * (a + b);
+        if (liquid_at(lo + ld * m + vec3<f32>(0.5)) >= iso) { b = m; } else { a = m; }
+    }
+    let p = lo + ld * b + vec3<f32>(0.5);
+    // Everything in VOXEL space, which for cubic voxels is world space scaled: directions keep their angles.
+    let vox = u_fluid.u_voxels;
+    let e = vec3<f32>(1.0) / vox;
+    let g = vec3<f32>(liquid_at(p + vec3<f32>(e.x, 0.0, 0.0)) - liquid_at(p - vec3<f32>(e.x, 0.0, 0.0)),
+                      liquid_at(p + vec3<f32>(0.0, e.y, 0.0)) - liquid_at(p - vec3<f32>(0.0, e.y, 0.0)),
+                      liquid_at(p + vec3<f32>(0.0, 0.0, e.z)) - liquid_at(p - vec3<f32>(0.0, 0.0, e.z)));
+    let dv = normalize(ld * vox);
+    let n = select(-normalize(g), -dv, dot(g, g) < 1e-12);
+    let V = -dv;
+    let L = normalize(u_fluid.u_sunDir * vox);
+    // Thickness behind the surface, voxels.
+    let stepVox = dt * length(ld * vox);
+    var inside = 0.0;
+    var s = b + dt;
+    for (var j: i32 = 0; j < 96; j = j + 1) {
+        if (s >= t1) { break; }
+        if (liquid_at(lo + ld * s + vec3<f32>(0.5)) < iso) { break; }
+        inside = inside + stepVox;
+        s = s + dt;
+    }
+    let T = exp(-u_fluid.u_absorption * u_fluid.u_absorptionScale * inside);
+    let at = sample_volume(p);
+    let shadow = clamp(at.b, 0.0, 1.0);
+    let fo = clamp(at.g * u_fluid.u_liquidFoam, 0.0, 1.0);
+    let sun = u_fluid.u_sunColor * INV_PI;
+    let nl = dot(n, L);
+    let wrap = max((nl + 0.3) / 1.3, 0.0);
+    let diffuseLight = sun * wrap * shadow * (1.0 - u_fluid.u_ambient) + u_fluid.u_sunAmbient + sun * u_fluid.u_ambient;
+    // A metal's reflectance is its colour; a liquid's, water's 0.02. The highlight is linear in it.
+    let m = clamp(u_fluid.u_liquidMetallic, 0.0, 1.0);
+    let f0 = mix(vec3<f32>(0.02), u_fluid.u_smokeColor, m);
+    let nvRaw = dot(n, V);
+    let F = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - max(nvRaw, 0.0), 5.0);
+    let k = u_fluid.u_liquidSpecular * shadow;
+    let s0 = k * ggx_specular(n, V, L, u_fluid.u_liquidRoughness, 0.0);
+    let s1 = k * ggx_specular(n, V, L, u_fluid.u_liquidRoughness, 1.0);
+    let spec = u_fluid.u_sunColor * (vec3<f32>(s0) + f0 * (s1 - s0));
+    // The sky in the surface: brighter facing up; a metal mirrors it along the reflected ray.
+    let ry = -V.y + 2.0 * nvRaw * n.y;
+    let sky = mix(0.25 + 0.55 * max(n.y, 0.0), liquid_sky(ry), m);
+    let env = (u_fluid.u_sunAmbient + sun * u_fluid.u_ambient) * (u_fluid.u_liquidSpecular * sky) * F;
+    let body = u_fluid.u_smokeColor * diffuseLight * (vec3<f32>(1.0) - T);
+    let diffuse = body * (1.0 - fo) + diffuseLight * (0.9 * fo);
+    let Tm = (T.x + T.y + T.z) / 3.0;
+    let Fm = (F.x + F.y + F.z) / 3.0;
+    let glass = min(1.0, 1.0 - Tm * (1.0 - Fm) * (1.0 - fo));
+    let alpha = glass + (1.0 - glass) * m;
+    out.color = vec4<f32>(diffuse * (vec3<f32>(1.0) - F) * (1.0 - m) + spec + env, alpha);
+    out.depth = vec4<f32>(b * dlen * alpha, 0.0, 0.0, alpha);
+    return out;
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> TraceOutput {
     var out: TraceOutput;
@@ -235,6 +362,10 @@ fn fs_main(in: VertexOutput) -> TraceOutput {
     let stepVox = max(u_fluid.u_stepScale, 0.05);
     let dt = stepVox / max(voxelsPerT, 1e-6);
     let jitter = fract(ign(in.position.xy) + f32(u_fluid.u_jitterSlot) * 0.61803398875);
+    if (u_fluid.u_shading == 1) {
+        // A surface wants finer steps than a gas: half a voxel at most.
+        return liquid_trace(lo, ld, safe, t0, t1, min(dt, 0.5 / max(voxelsPerT, 1e-6)), dlen, jitter);
+    }
     var t = t0 + dt * jitter;
     let sun = u_fluid.u_sunColor * INV_PI;
     let smoke = u_fluid.u_smokeColor;

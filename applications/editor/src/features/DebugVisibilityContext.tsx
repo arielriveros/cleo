@@ -10,18 +10,12 @@ import { createContext, useContext } from 'react';
 export type DebugCategory =
   | 'colliders'
   | 'triggers'
-  | 'lights'
-  | 'cameras'
-  | 'probes'
-  | 'exposureVolumes'
-  | 'decals'
-  | 'sounds'
+  | 'icons'
   | 'boundingBoxes'
   | 'skeleton'
   | 'animation'
   | 'navMesh'
   | 'foliageColliders'
-  | 'effects'
   | 'particles'
   | 'gameUi'
   | 'grid';
@@ -42,14 +36,12 @@ export interface DebugCategoryMeta {
 export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   { key: 'colliders', label: 'Collision wireframes', runtimeAvailable: true },
   { key: 'triggers', label: 'Trigger volumes', runtimeAvailable: true },
-  { key: 'lights', label: 'Light icons', runtimeAvailable: true },
-  { key: 'cameras', label: 'Camera frustums', runtimeAvailable: true },
-  { key: 'probes', label: 'Light probes', runtimeAvailable: true },
-  { key: 'exposureVolumes', label: 'Exposure volumes', runtimeAvailable: true },
-  // The icon only. A decal's box is drawn for the SELECTED decal regardless of this switch, like the
-  // navmesh bake volume: selecting the node is the request to see it.
-  { key: 'decals', label: 'Decal icons', runtimeAvailable: true },
-  { key: 'sounds', label: 'Sound emitters', runtimeAvailable: true },
+  // Every marker the editor draws for a node that has no look of its own: the billboards of lights,
+  // sounds (and a selected spatial sound's falloff sphere), light probes, exposure volumes, decals,
+  // particle systems, force fields and navmeshes, and the camera bodies. Only the icons: a selected
+  // decal's or volume's box is drawn regardless, like the navmesh bake volume, since selecting the node
+  // is the request to see it.
+  { key: 'icons', label: 'Editor icons', runtimeAvailable: true },
   { key: 'boundingBoxes', label: 'Bounding boxes', runtimeAvailable: true },
   { key: 'skeleton', label: 'Skeletons', runtimeAvailable: true },
   // Runtime is the point of this one: a blend driven by MEASURED motion reads 0 everywhere in the editor,
@@ -61,7 +53,6 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   // The colliders foliage props get in Play, drawn on the scattered instances near the camera — the same
   // disc and cap the physics uses — so a trunk collider can be checked against the trunks it stands on.
   { key: 'foliageColliders', label: 'Foliage colliders', runtimeAvailable: true },
-  { key: 'effects', label: 'Effect icons', runtimeAvailable: true },
   // Not an overlay: whether particle systems SIMULATE while authoring, like Niagara's realtime toggle.
   // Editor only — a playing game always simulates them.
   { key: 'particles', label: 'Preview particles', runtimeAvailable: false },
@@ -75,7 +66,13 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
 
 // These categories default to Editor-on; every other overlay defaults off and is opted into. Runtime is
 // off for all.
-const EDITOR_ON_BY_DEFAULT = new Set<DebugCategory>(['colliders', 'triggers', 'lights', 'cameras', 'probes', 'exposureVolumes', 'decals', 'sounds', 'foliageColliders', 'effects', 'particles', 'grid']);
+const EDITOR_ON_BY_DEFAULT = new Set<DebugCategory>(['colliders', 'triggers', 'icons', 'foliageColliders', 'particles', 'grid']);
+
+/**
+ * The rows `icons` replaced, one per kind of marker. A blob saved before it has these instead: the one
+ * switch is on in a channel if any of them was.
+ */
+const ICON_ROWS_BEFORE = ['lights', 'cameras', 'probes', 'exposureVolumes', 'decals', 'sounds', 'effects'] as const;
 
 export function defaultDebugVisibility(): DebugVisibility {
   const out = {} as DebugVisibility;
@@ -97,6 +94,13 @@ export function loadDebugVisibility(): DebugVisibility {
       if (s && typeof s === 'object') {
         if (typeof s.editor === 'boolean') base[key].editor = s.editor;
         if (typeof s.runtime === 'boolean') base[key].runtime = s.runtime;
+      }
+    }
+    if (saved && typeof saved === 'object' && !saved.icons) {
+      const old = ICON_ROWS_BEFORE.map(k => saved[k]).filter(s => s && typeof s === 'object');
+      if (old.length) {
+        base.icons.editor = old.some(s => s.editor === true);
+        base.icons.runtime = old.some(s => s.runtime === true);
       }
     }
   } catch { /* corrupt blob → defaults */ }

@@ -357,6 +357,8 @@ where it lies inside the box **and** faces the projector.
 | `receivers` | `'all'` | `'terrain'` keeps the decal off everything but landscapes. See below. |
 | `pattern` | `'material'` | `'radial'` draws the procedural gradient in `radial` instead of the material. |
 | `radial` | see below | The gradient's parameters. The setter accepts a `Partial`. |
+| `albedoOpacity` | `1` | The albedo's share of the coverage, `0..1`. Roughness, metallic, AO and the normal keep the full coverage, so a near-black base colour at `0.3`–`0.5` darkens the ground under it while its roughness turns wet: a film of clear liquid. |
+| `flipbook` | `null` | `{ columns, rows, frames, fps, loop, blend }`: play the material's maps as an atlas, every map from the same cell, left to right from the top row. See below. |
 
 `affects` and `radial` return live objects, so you can mutate them in place. From the material, a
 decal reads the base colour, whose alpha times the material's `opacity` is the coverage. It also
@@ -370,6 +372,13 @@ get mirrored: boolean        // det(worldTransform) < 0: the renderer culls the 
 get writesSurface: boolean   // albedo, surface, or a normal map to write
 get emits: boolean           // affects.emissive, and something non-zero to emit
 ```
+
+**Flipbooks.** The clock is the decal's own: `flipbookTime` starts at 0 on its first update in play and
+runs on scaled game time (slow motion and hit-stop slow it too); `playFlipbook()` restarts it. Before it
+has ever played (`flipbookTime` is `Infinity`: the editor, a thumbnail) the last frame shows, so a
+one-shot is seen as it ends. Without `loop` the last frame holds; `blend` cross-fades each frame into the
+next. The FX Creator's liquid floor decals are such atlases, with the block to play them in their sidecar.
+`decalFlipbookFrame(flipbook, time)` is the cell maths as a pure function.
 
 `getBoundingBox()` and `getBoundingSphere()` are overridden to use the box's eight corners, so
 changing `size` moves the bounds and frustum culling follows. `scene.decals` is the scene's typed
@@ -560,13 +569,14 @@ angular drag. Character bodies are skipped unless `affectCharacters` (a capsule 
 
 Properties: `size` (full extents, metres), `density` (kg/m³, default 1000), `linearDrag`,
 `angularDrag` (per second at full submersion), `waveAmplitude` / `waveFrequency` (a swell that makes
-floaters bob), `affectCharacters`, `surfaceNodeId`, `splashTemplate`, `enabled`. Helpers:
+floaters bob), `affectCharacters`, `surfaceNodeId`, `splashTemplate`, `wadeSplashTemplate`, `enabled`. Helpers:
 `worldBox()`, `surfaceHeightAt(x, z, t)`, `contains(p)`, `depthAt(p)`.
 
 In play it also disturbs its surface: if the `surfaceNodeId` model's custom material declares vec4
 uniforms `ripple0`..`ripple11`, they are filled each frame with expanding rings (`[x, z, startTime,
 strength]`, startTime on `u_time`'s clock) from characters wading and bodies floating or splashing in;
-and `splashTemplate`, when set, is instantiated at the surface where something enters or wades.
+and `splashTemplate`, when set, is instantiated at the surface where something enters or wades --
+`wadeSplashTemplate`, when set, for the steps of a character wading (every 0.45 s while it moves).
 
 ---
 

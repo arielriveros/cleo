@@ -56,6 +56,13 @@ import { ensureLiveTriggerOverlay, dropLiveTriggerOverlay, LIVE_TRIGGERS, type L
 /** Mark a helper (and anything already under it) as renderer chrome. Returns it, so it can wrap a `new`. */
 const chrome = <T extends Node>(node: T): T => { markEditorOnly(node); return node; };
 
+/**
+ * The most a viewport icon (light, sound, probe, navmesh, exposure volume, decal, effect) draws, in CSS
+ * pixels. Each is a 0.5 m billboard, which up close would fill the view with an upscaled raster; past this
+ * it stops growing (SpriteNode.maxScreenSize). editorIcons rasterises at twice it.
+ */
+const ICON_MAX_PX = 64;
+
 const LIGHT_ICON = '__editor__LightSprite';
 const CAMERA_GIZMO = '__debug__CameraModel';
 const PROBE_HELPER = '__editor__ProbeHelper';
@@ -351,6 +358,7 @@ function ensureLightIcon(light: LightNode) {
     tint: [d[0], d[1], d[2]],
   })));
   icon.setUniformScale(0.5);
+  icon.maxScreenSize = ICON_MAX_PX;
   light.addChild(icon);
 }
 
@@ -372,6 +380,7 @@ function ensureSoundHelpers(node: SoundNode, selected: boolean) {
       tint: [0.5, 0.7, 0.85],
     })));
     icon.setUniformScale(0.5);
+    icon.maxScreenSize = ICON_MAX_PX;
     node.addChild(icon);
   }
 
@@ -429,6 +438,7 @@ function ensureProbeHelper(probe: LightProbeNode) {
     tint: [0.4, 0.8, 1],
   })));
   icon.setUniformScale(0.5);
+  icon.maxScreenSize = ICON_MAX_PX;
   probe.addChild(icon);
 }
 
@@ -439,6 +449,7 @@ function ensureNavMeshIcon(navMesh: NavMeshNode) {
     tint: [0.45, 1, 0.5],
   })));
   icon.setUniformScale(0.5);
+  icon.maxScreenSize = ICON_MAX_PX;
   navMesh.addChild(icon);
 }
 
@@ -449,6 +460,7 @@ function ensureExposureHelper(volume: ExposureVolumeNode) {
     tint: [1, 0.8, 0.3],
   })));
   icon.setUniformScale(0.5);
+  icon.maxScreenSize = ICON_MAX_PX;
   volume.addChild(icon);
 }
 
@@ -471,6 +483,7 @@ function ensureDecalIcon(decal: DecalNode) {
     tint: [1, 0.68, 0.25],
   })));
   icon.setUniformScale(0.5);
+  icon.maxScreenSize = ICON_MAX_PX;
   icon.onUpdate = () => {
     const top = decal.size[1] * 0.5;
     // A tolerance, not `!==`: the position is float32, so most heights never compare equal to the double.
@@ -489,6 +502,7 @@ function ensureEffectIcon(node: ParticleSystemNode | ForceFieldNode) {
     particle ? '__editor__particle_icon' : '__editor__forcefield_icon',
     { tint: particle ? [1, 0.55, 0.3] : [0.45, 0.85, 1] })));
   icon.setUniformScale(0.5);
+  icon.maxScreenSize = ICON_MAX_PX;
   node.addChild(icon);
 }
 
@@ -1217,36 +1231,38 @@ export function reconcileEditorHelpers(
   for (const node of nodes) {
     if (isEditorOwnedName(node.name)) continue;
 
+    // One switch for every icon (the "Editor icons" row).
+    const icons = show('icons');
     if (node instanceof LightNode) {
       const existing = node.getChildByName(LIGHT_ICON)[0];
-      if (show('lights') && !existing) ensureLightIcon(node);
-      else if (!show('lights') && existing) node.removeChild(existing);
+      if (icons && !existing) ensureLightIcon(node);
+      else if (!icons && existing) node.removeChild(existing);
     } else if (node instanceof LightProbeNode) {
       const existing = node.getChildByName(PROBE_HELPER)[0];
-      if (show('probes') && !existing) ensureProbeHelper(node);
-      else if (!show('probes') && existing) node.removeChild(existing);
+      if (icons && !existing) ensureProbeHelper(node);
+      else if (!icons && existing) node.removeChild(existing);
     } else if (node instanceof NavMeshNode) {
-      // Always while authoring: the icon is how the navmesh is selected in the viewport, whatever its
-      // wireframe toggle. Never in play, where nothing is selected and it is only clutter.
+      // The icon is how the navmesh is selected in the viewport, whatever its wireframe toggle; with the
+      // icons off it is selected from the tree.
       const existing = node.getChildByName(NAVMESH_ICON)[0];
-      if (channel === 'editor' && !existing) ensureNavMeshIcon(node);
-      else if (channel !== 'editor' && existing) node.removeChild(existing);
+      if (icons && !existing) ensureNavMeshIcon(node);
+      else if (!icons && existing) node.removeChild(existing);
     } else if (node instanceof ExposureVolumeNode) {
       const existing = node.getChildByName(EXPOSURE_HELPER)[0];
-      if (show('exposureVolumes') && !existing) ensureExposureHelper(node);
-      else if (!show('exposureVolumes') && existing) node.removeChild(existing);
+      if (icons && !existing) ensureExposureHelper(node);
+      else if (!icons && existing) node.removeChild(existing);
     } else if (node instanceof DecalNode) {
       const existing = node.getChildByName(DECAL_ICON)[0];
-      if (show('decals') && !existing) ensureDecalIcon(node);
-      else if (!show('decals') && existing) node.removeChild(existing);
+      if (icons && !existing) ensureDecalIcon(node);
+      else if (!icons && existing) node.removeChild(existing);
     } else if (node instanceof ParticleSystemNode || node instanceof ForceFieldNode) {
       const existing = node.getChildByName(EFFECT_ICON)[0];
-      if (show('effects') && !existing) ensureEffectIcon(node);
-      else if (!show('effects') && existing) node.removeChild(existing);
+      if (icons && !existing) ensureEffectIcon(node);
+      else if (!icons && existing) node.removeChild(existing);
     } else if (node instanceof SoundNode) {
       // Reconciled every pass rather than only on absence: the falloff sphere follows `maxDistance`,
       // which the inspector changes while the helper already exists.
-      if (show('sounds')) ensureSoundHelpers(node, node.id === selectedId);
+      if (icons) ensureSoundHelpers(node, node.id === selectedId);
       else for (const name of [SOUND_ICON, SOUND_RADIUS]) {
         const child = node.getChildByName(name)[0];
         if (child) node.removeChild(child);
@@ -1254,7 +1270,7 @@ export function reconcileEditorHelpers(
     } else if (node instanceof CameraNode) {
       // Reconcile both ways so a hijacked/active camera's stale gizmo is cleaned up too.
       const existing = node.getChildByName(CAMERA_GIZMO)[0];
-      const shouldHave = show('cameras') && node !== viewCamera;
+      const shouldHave = icons && node !== viewCamera;
       if (shouldHave && !existing) ensureCameraGizmo(node);
       else if (!shouldHave && existing) node.removeChild(existing);
     }

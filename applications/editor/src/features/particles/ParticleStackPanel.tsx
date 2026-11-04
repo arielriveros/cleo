@@ -8,6 +8,7 @@ import {
   Toggle, VectorInput, cn,
 } from '@cleo/app-kit/ui'
 import { useParticleEditor } from './ParticleEditorContext'
+import { DiceIcon } from '@cleo/app-kit/ui/icons'
 import { useCleoEngine } from '../EngineContext'
 import ParamField from './ParamField'
 import { EMITTER_PRESETS } from './emitterPresets'
@@ -218,7 +219,7 @@ function EmitterSettings({ emitter, editEmitter, lodLevels }: {
             <div className='flex items-center gap-1'>
               <NumberInput value={emitter.seed} step={1} onChange={v => editEmitter('Seed', e => { e.seed = Math.abs(Math.round(v)) >>> 0 }, 'seed')} />
               <Button size='icon' variant='ghost' title='New random seed'
-                      onClick={() => editEmitter('Seed', e => { e.seed = Math.floor(Math.random() * 1e6) })}>🎲</Button>
+                      onClick={() => editEmitter('Seed', e => { e.seed = Math.floor(Math.random() * 1e6) })}><DiceIcon className='w-3.5 h-3.5' /></Button>
             </div>
           </PropertyRow>
         </PropertyTable>

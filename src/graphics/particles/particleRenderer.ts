@@ -139,7 +139,16 @@ export interface ParticleDrawFrame {
     lodDistanceScale?: number;
     /** The camera exposure the frame is shown at, for `ParticleSystemNode.exposureWeight`. */
     exposure?: number;
+    /**
+     * Lit emitters with a surface (maps, roughness or metallic): what they reflect at a world point, as
+     * the forward PBR path reflects -- the probe containing it, else the scene's environment -- and whether
+     * that cube is linear HDR (a probe capture) or sRGB. Null, or absent: the ambient as an even sky.
+     */
+    environment?: (position: vec3) => { cube: Texture; linear: boolean } | null;
 }
+
+/** `u_surface.w` bits: the SURFACE_* constants in chunks/particleDraw.wgsl. */
+const SURFACE = { NORMAL_MAP: 1, ORM_MAP: 2, PBR: 4 } as const;
 
 /** A node's tint, its colour divided by the part of the exposure it does not take (alpha untouched). */
 const compensatedTint: [number, number, number, number] = [1, 1, 1, 1];
@@ -320,6 +329,7 @@ export class ParticleRenderer {
     private _sortPipelineGL: RenderPipeline | null = null;
     private readonly _drawPipelines = new Map<string, RenderPipeline>();
     private _white: Texture | null = null;
+    private _blackCube: Texture | null = null;
     private _depthFallback: Texture | null = null;
     private _failed = false;
     private _warnedNoFloat = false;
@@ -428,6 +438,15 @@ export class ParticleRenderer {
             this._white.createFromData(new Uint8Array([255, 255, 255, 255]), 1, 1);
         }
         return this._white;
+    }
+
+    /** A 1x1 cube, bound for the reflection when an emitter has none. */
+    private get _cubeFallback(): Texture {
+        if (!this._blackCube) {
+            this._blackCube = new Texture({ target: 'cubemap', mipMap: false });
+            this._blackCube.createCubemapTarget(1, 1);
+        }
+        return this._blackCube;
     }
 
     /** A 1x1 depth texture at the far plane, bound when the frame has no depth to offer. */
@@ -1036,6 +1055,9 @@ export class ParticleRenderer {
             for (const { node, gpu } of list) {
                 // The torches, lamps and spots that reach this effect, once for all its lit emitters.
                 let local: ParticleLocalLighting | null = null;
+                // What its PBR emitters reflect, once for all of them (undefined: not looked up yet).
+                let reflected: { cube: Texture; linear: boolean } | null | undefined;
+                const envFor = () => (reflected === undefined ? (reflected = frame.environment?.(node.worldPosition) ?? null) : reflected);
                 const localFor = (): ParticleLocalLighting => {
                     if (local) return local;
                     if (!frame.localLights?.length) return (local = NO_LOCAL);
@@ -1056,8 +1078,21 @@ export class ParticleRenderer {
                     const sprite = (render.textureId && TextureManager.Instance.getTexture(render.textureId)) || null;
                     const spriteTex = sprite && sprite.sampledView ? sprite : this._whiteTexture;
                     const orderTex = sorted ?? this._whiteTexture;
+                    // A lit emitter's surface. PBR (a highlight, metallic) only when something asks for it,
+                    // so a plain lit emitter shades exactly as it always has.
+                    const surfaceMap = (id: string | null | undefined): Texture | null => {
+                        const t = render.lit && id ? TextureManager.Instance.getTexture(id) : null;
+                        return t && t.sampledView ? t : null;
+                    };
+                    const normalMap = surfaceMap(render.normalTextureId);
+                    const ormMap = surfaceMap(render.ormTextureId);
+                    const roughness = render.roughness ?? 1, metallic = render.metallic ?? 0;
+                    const pbr = render.lit && (!!normalMap || !!ormMap || metallic > 0 || roughness < 0.999);
+                    const env = pbr ? envFor() : null;
+                    const normalTex = normalMap ?? this._whiteTexture, ormTex = ormMap ?? this._whiteTexture;
+                    const envTex = env?.cube ?? this._cubeFallback;
                     frame.pass.setBindGroup(0, emitter.group(
-                        `d0:${pipelineId(pipeline)}:${emitter.current}:${idOf(spriteTex)}:${idOf(depth)}:${idOf(orderTex)}`,
+                        `d0:${pipelineId(pipeline)}:${emitter.current}:${idOf(spriteTex)}:${idOf(depth)}:${idOf(orderTex)}:${idOf(normalTex)}:${idOf(ormTex)}:${idOf(envTex)}`,
                         () => device.createBindGroup({
                             label: 'particleDraw',
                             layout: pipeline.layoutForGroup(0)!,
@@ -1067,6 +1102,9 @@ export class ParticleRenderer {
                                 { binding: 5, textureView: spriteTex.sampledView },
                                 { binding: 7, textureView: depth.sampledView },
                                 { binding: 9, textureView: orderTex.sampledView },
+                                { binding: 10, textureView: normalTex.sampledView },
+                                { binding: 12, textureView: ormTex.sampledView },
+                                { binding: 14, textureView: envTex.sampledView },
                             ],
                         })));
 
@@ -1097,6 +1135,10 @@ export class ParticleRenderer {
                     shaders.setUniform('u_sunColor', [frame.sunColor[0], frame.sunColor[1], frame.sunColor[2], 0]);
                     shaders.setUniform('u_keyDir', [lights.keyDirection[0], lights.keyDirection[1], lights.keyDirection[2], 0]);
                     shaders.setUniform('u_keyColor', [lights.keyColor[0], lights.keyColor[1], lights.keyColor[2], 0]);
+                    shaders.setUniform('u_surface', [roughness, metallic, render.normalStrength ?? 1,
+                                                     (normalMap ? SURFACE.NORMAL_MAP : 0) | (ormMap ? SURFACE.ORM_MAP : 0) | (pbr ? SURFACE.PBR : 0)]);
+                    shaders.setUniform('u_viewPos', [frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2],
+                                                     env ? (env.linear ? 2 : 1) : 0]);
                     if (mesh) {
                         frame.pass.setVertexBuffer(0, mesh.vertices);
                         frame.pass.setIndexBuffer(mesh.indices, 'uint32');

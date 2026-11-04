@@ -7,6 +7,7 @@ import { TextureSlotFrame, TextureSlotGrid, TextureTile, pbrSlotLabel, type PbrT
 import { Button, Collapsable, FileButton, SegmentedControl, Select } from '@cleo/app-kit/ui';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
 import { PanelBody, PanelHeader, SchemaSections, StageSection } from '../../app/workspace';
+import { FloorSection } from '../../app/floor/FloorSection';
 import { OVERRIDE_SLOTS, TEXTURE_LABELS, type TextureKey } from '../buildFoliage';
 import {
   DEFAULT_BUSH, DEFAULT_GRASS, DEFAULT_ROCK, DEFAULT_TREE, FOLIAGE_SCHEMAS, KIND_LABELS, formValues, fromForm, type FoliageGroup, type FoliageKind,
@@ -338,6 +339,7 @@ export function FoliageStageExtra({ stage, setStage }: { stage: StageSettings; s
         <ParamForm schema={WIND_SPECS} values={values} onChange={patch} />
       </StageSection>
     )}
+    <FloorSection set={stage.floorSet ?? ''} tile={stage.floorTile ?? 2} onChange={patch} />
     <StageSection title='Weather'>
       <ParamForm schema={WEATHER_SPECS} values={values} onChange={patch} />
     </StageSection>

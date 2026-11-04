@@ -1,7 +1,8 @@
 # FX Creator
 
-Simulate fire, smoke or an explosion on a voxel grid, watch it live in 3D, and export a tileset
-flipbook a particle system plays.
+Simulate fire, smoke or an explosion on a voxel grid -- or a liquid: a splash of blood, a crown of water,
+a pour that pools -- watch it live in 3D, and export a tileset flipbook a particle system plays. A liquid
+also bakes what it leaves on the floor as an animated decal.
 
 The **Viewport** runs the simulation continuously and draws it as a real engine volume, lit by the
 scene's sun and hidden behind the ground like anything else in a game. Every parameter change reaches
@@ -9,12 +10,15 @@ the next simulation step, so there is nothing to press to see it; only the regio
 and **Seed** start the simulation over. Drag to orbit, right-drag to pan (the mouse is captured while you
 drag), scroll to move closer. The move / rotate / scale buttons top-right of the viewport are the editor's.
 
-The **left** panel is the scene's composition: what is selected, the simulation region, the sun (the one
-light the effect is shaded with, in the viewport and in the bake), sky, fire light, wind, ground, bodies
-and how the viewport renders. The **right** panel is the effect itself. Both have whole-panel presets at
-the top and a **Presets ▾** menu on each section, which only changes that section.
-**Pause**, **Restart** and the speed menu control the live simulation; a burst (a **Duration** above 0)
-replays by itself once it has faded.
+The **left** panel is what is in the scene: what is selected, the bodies and how the viewport renders. The light on the stage -- the sun (the one light the effect is shaded with, in the
+viewport and in the bake), sky, exposure, wind and fire light -- is the viewport's **Stage** menu, as in the
+Foliage Creator: see [Stage](#stage). The **right** panel is the effect itself. Both panels have
+whole-panel presets at the top and a **Presets ▾** menu on each section, which only changes that section.
+
+The **playback bar** along the bottom of the viewport runs the live simulation: play / pause (**Space**),
+start over, and the speed. Its track is the play-through: a one-shot -- a gas burst (a **Duration** above
+0), a splash -- fills it and replays from the start once it has played out; a steady effect (a flame, a
+pour that never stops) runs on and shows a dimmed track.
 
 The solver runs as GPU compute when the engine's device has it (the WebGPU backend), and otherwise as
 the CPU solver in a background worker, so the editor stays responsive either way.
@@ -25,16 +29,25 @@ flipbook** in the toolbar writes the baked files.
 The solver is an Eulerian gas solver: semi-Lagrangian advection, a Jacobi pressure projection that keeps
 the flow incompressible, vorticity confinement to restore the swirls the grid smooths out, and a
 combustion model where fuel above the ignition temperature burns into heat and smoke (Stam 1999;
-Fedkiw, Stam and Jensen 2001; Nguyen, Fedkiw and Jensen 2002). Units are voxels and seconds.
+Fedkiw, Stam and Jensen 2001; Nguyen, Fedkiw and Jensen 2002). Where things are and how big they are is in
+metres; the solver's own rates (speeds, the burn) are per voxel and per second.
+
+What the viewport's gizmos set -- where the emitter is, its size and aim, the region -- has no field in the
+panels: see [Select](#select). Their rows below say what each one is.
 
 ## Domain
 
-The simulation region: a box of voxels the gas lives in. Select **Simulation region** and drag the square
-handles on its faces to resize it (Alt resizes about the centre, Ctrl snaps), or type the size here.
+The simulation region: the box the effect lives in -- **room** around it, not its scale. The emitter, its
+radius and the turbulence are in metres, so growing a face gives an explosion space to bloom past where it
+stopped instead of a bigger explosion; the emitter keeps its place in the world while you drag. A liquid's
+detail follows its droplets, so a bigger region never blurs its splash or its pools. Select **Simulation
+region** in the viewport to move it (**W**) or drag the square handles on its faces to resize it (Alt
+resizes about the centre, Ctrl snaps); see [Region](#region).
 
 | Field | Meaning |
 |---|---|
-| **Voxel size** | Metres per voxel: the detail. Halving it gives eight times the voxels. The emitter's speeds and the turbulence are in voxels, so a finer grid also makes the same settings smaller and slower in the world. Past 2.5 million voxels the size is raised to fit, and the toolbar's count shows the grid actually used. The CPU solver is practical up to about 250 000 voxels. |
+| **Medium** | Gas (smoke and fire, the voxel solver below) or Liquid (particles, see [Liquids](#liquids)). Each shows its own sections. Switching starts from that medium's first preset: Blood spatter for a liquid, the Campfire for a gas. |
+| **Voxel size** | A gas's metres per voxel: the detail. Halving it gives eight times the voxels. The emitter's speed is in voxels per second, so a finer grid also makes the same speed slower in the world. Past 2.5 million voxels the size is raised to fit: the toolbar's count turns amber and shows the grid actually used, and voxel-sized detail grows with it -- shrink the region or raise the size yourself. The CPU solver is practical up to about 250 000 voxels. A liquid has none: its voxels follow its **Droplet size**. |
 
 ## Emitter
 
@@ -43,15 +56,14 @@ Where fuel, heat and smoke enter the domain.
 | Field | Meaning |
 |---|---|
 | **Shape** | A sphere, or a flat disc one voxel thick. |
-| **Radius** | As a fraction of the domain width. |
-| **Across** / **Deep** | Where the emitter sits across the region's width and depth: 0.5 is the middle. Select **Emitter** and drag the move gizmo to place it by hand. |
-| **Height** | Where the emitter sits, as a fraction of the domain height. |
+| **Radius** | The emitter's radius, in metres: the scale gizmo on the selected emitter sets it. |
+| **Position** | Where the emitter is, in metres: across and through from the centre of the region's floor, and its height above the floor. The move gizmo on the selected emitter sets it. |
 | **Fuel** | Fuel the emitter holds its volume at. |
 | **Heat** | Temperature the emitter holds its volume at; above **Ignition** the fuel burns. |
 | **Smoke** | Smoke added directly, before any burning. |
 | **Speed** | Upward velocity the emitter imposes. |
 | **Turbulence** | Noise velocity stirred into hot gas. |
-| **Turbulence scale** | Noise features across the domain. |
+| **Turbulence size** | The size of the turbulence's eddies, in metres. The noise is anchored on the emitter, so it stays the same under the flame however the region grows. |
 | **Turbulence on smoke** | How much the turbulence also stirs smoke that has cooled, not only hot gas. Missing motion in the smoke is what most often makes a simulation look fake. |
 | **Turbulence detail** | A second, finer turbulence octave (2.7 times the frequency), relative to the first. |
 | **Duration** | How long the emitter runs; 0 keeps it on (a flame), a short burst makes an explosion. |
@@ -106,6 +118,87 @@ How heat, smoke and motion fade.
 | **Condensation** | Steam: the emitter breathes out invisible vapour, which turns into visible droplets where it cools below the **Dew point** and evaporates again above it. Steam then appears a little above the vent and vanishes as it mixes. 0 is off. |
 | **Dew point** | The temperature below which the vapour becomes visible. |
 
+## Liquids
+
+A liquid is particles, not a grid: drops that push apart where they crowd and pull together at a free
+surface (Clavet, Beaudoin and Poulin 2005, double density relaxation), so a thrown sheet tears into
+threads and the threads bead into drops by themselves. What lands on a solid floor becomes a **film**, a
+height field that flows out, stops at a ragged edge and soaks in; that film is the [floor decal](#outputs).
+The live preview draws the liquid as the engine's volume, surface-shaded, and the film as a decal on the
+ground. A one-shot (a burst, or a jet with a duration) plays out, holds for a moment and replays.
+Everything in the liquid sections is in metres and seconds, and the same parameters always bake the same
+result.
+
+With **GPU solver** on (the WebGPU backend), the preview runs effects of 600 drops or more on the GPU,
+many times faster: the water splash's 4,700 drops take about 20 ms a frame there against 400 ms on the
+CPU. Smaller effects stay on the CPU, which is cheaper for a few hundred drops; the readout says which
+ran. The GPU adds up each drop's pushes from its neighbours all at once rather than pair by pair, so its
+drops are not the bake's drop for drop. Bakes always run the CPU solver, so every machine bakes the same
+tileset.
+
+## Splash source
+
+Where the liquid comes from and how it leaves. The emitter marker in the viewport is the source: its
+gizmos set where it is, its radius and its aim (see [Select](#select)).
+
+| Field | Meaning |
+|---|---|
+| **Source shape** | Point: a small ball of liquid thrown along the aim. Ball: a ball flying apart out of its centre (an impact burst). Disc: a nozzle across the aim. Ring: a ring on the floor thrown up and out, the crown a drop makes entering water. |
+| **Source radius** | The ball's, disc's or ring's radius, in metres: the scale gizmo sets it. |
+| **Source position** | Where the source is, in metres: across and through from the centre of the region's floor, and its height above the floor. The move gizmo sets it. |
+| **Volume** | Litres released in all. With **Droplet size**, this is how many particles there are (and the cost). |
+| **Release** | Burst: all at once at the start. Jet: poured over the jet duration. |
+| **Jet duration** | Seconds a jet pours for. 0 pours for ever, at the volume per second: a looping stream. |
+| **Source speed** | The slowest and fastest a drop leaves at, m/s. |
+| **Aim yaw** | The aim's turn around the vertical, from +Z toward +X: the rotate gizmo's turn. A spatter decal's spray runs along +Z at yaw 0. |
+| **Aim pitch** | The aim's angle up from the horizontal (-90 pours straight down): the rotate gizmo's tilt. For a ring, how steep the crown is thrown. |
+| **Spray angle** | Degrees off the aim a drop may leave at; 180 sprays every way. For a ball, how radial the burst is. |
+| **Break-up** | Noise on the release velocity, finer than the drops' shared motion: tears sheets into fingers. Speed and direction are mostly shared between neighbours, so liquid leaves in sheets and streams, not as a cloud of single drops. |
+| **Crown core** | Ring only: the share of the liquid thrown straight up from the ring's centre, the jet that follows a crown. |
+
+## Liquid
+
+What the liquid is.
+
+| Field | Meaning |
+|---|---|
+| **Droplet size** | The spacing of the particles at rest, metres: the smallest drop there can be, and the liquid's definition. The surface is drawn at voxels of about this size (in the viewport by **Quality**, in the bake at three quarters of it) over where the drops are, and the floor film's cells are half of it -- whatever the region's size. Halving it gives eight times the particles. Above 60 000 particles the size is raised to fit. |
+| **Viscosity** | Thick liquids hold together and smear; 0 is water. |
+| **Surface tension** | How hard a free surface pulls together. Low sprays into mist; high holds a blob together; between, sheets break into threads and drops. |
+| **Stickiness** | The share of drops that stay where they first land on a solid floor instead of bouncing. |
+| **Gravity** | Downward, m/s². 0 for a drop seen on its own. |
+| **Air drag** | Per second: the air slowing the drops. The stage's wind, when on, is what the air moves at. |
+| **Relaxation passes** | Density relaxation passes per step. More is less compressible and costs more. |
+
+## Floor
+
+What the region's floor does with the liquid that reaches it.
+
+| Field | Meaning |
+|---|---|
+| **Floor** | Solid: drops bounce, or land and join the film, which flows and soaks in (and bakes the decal). Water surface: liquid falling back sinks in, for splashes on water. None: it falls through. |
+| **Bounce** | How much of a drop's speed into the floor it keeps when it bounces. A drop stops bouncing after two bounces, or when it lands slowly. |
+| **Friction** | How much of a drop's speed along the floor a bounce takes away. |
+| **Flow** | How readily the liquid on the floor runs out: a thick puddle runs, a thin film barely creeps (the thin-film equation, mobility growing with the thickness cubed, stepped implicitly so it is stable at any cell size). The film's cells are half a droplet, and it is kept only where liquid has landed, so its cost is the stain's, not the region's. |
+| **Edge hold** | Millimetres: liquid only advances onto dry floor from where it is thicker than this, so a pool stops instead of spreading for ever. Thicker holds make smaller, deeper pools. |
+| **Edge noise** | How much the edge hold varies across the floor: ragged, natural pool edges instead of a disc. |
+| **Soak** | Per second: the share of the wet film the floor soaks up into a matte stain. Stone barely; soil a lot. |
+
+## Liquid look
+
+How the liquid is shaded, in the viewport and in the baked tiles.
+
+| Field | Meaning |
+|---|---|
+| **Liquid colour** | What the liquid scatters: its body colour where it is thick. |
+| **Tint** | The colour light keeps after one absorption length of liquid. Blood keeps red, water a little blue. |
+| **Absorption** | Per metre: how quickly the liquid takes the light through it. Blood about 900 (a millimetre is opaque, so a pool hides the floor), water a few. |
+| **Roughness** | The surface's roughness: 0 is a mirror. Also the wet film's on the decal. |
+| **Metallic** | 0 for a liquid, 1 for a liquid metal (mercury, molten gold). A metal is opaque and has no body colour: **Liquid colour** becomes the colour of its reflections, of the sun's highlight and of the sky it mirrors, and its decal is metallic too. In between is a blend of the two. |
+| **Specular** | Strength of the sun's highlight and the sky's reflection. |
+| **Foam** | Fast-moving liquid turns white: the aerated spray of a water splash. |
+| **Smoothing** | The surface's smoothing radius, in droplet sizes: blobby above 2, beaded below 1.5. |
+
 ## Simulation
 
 Time stepping and the pressure solve.
@@ -113,7 +206,7 @@ Time stepping and the pressure solve.
 | Field | Meaning |
 |---|---|
 | **Frame time** | Simulated seconds per flipbook frame; the flipbook plays at 1 / this. |
-| **Substeps** | Solver steps per frame. More is more stable at high speeds. |
+| **Substeps** | Solver steps per frame. More is more stable at high speeds. A liquid takes more on its own when it has to: no drop may cross more than a fraction of its neighbourhood in one step. |
 | **Pressure iterations** | Iterations of the pressure solve per step. More keeps the flow closer to incompressible. |
 | **Pressure solver** | Jacobi, or red-black SOR: Gauss-Seidel with over-relaxation, warm-started from the previous step's pressure. SOR reaches the same incompressibility in far fewer iterations. The live preview always uses it. |
 | **Boundaries** | Closed walls on every side but the top, or open air: gas leaves through the sides instead of piling against invisible glass. |
@@ -159,70 +252,90 @@ coordinates, cross-faded so their resets are never seen), so it stretches and sw
 
 What the viewport's gizmos act on. Click a body, the emitter or the region in the viewport, or pick it here.
 **W**, **E** and **R** switch between move, rotate and scale; **X** flips the gizmo between world and local
-axes; **F** frames the selection; **Delete** removes a selected body; **Escape** clears the selection. The
-region is resized with its face handles; the emitter moves and scales (its radius).
+axes; **F** frames the selection; **Delete** removes a selected body; **Escape** clears the selection.
+
+These values are set here and nowhere else -- the panels have no fields for them; the drag readout shows
+the exact value while you drag:
+
+- **The emitter:** move sets its **Position** (a liquid's **Source position**), in metres from the centre
+  of the region's floor; scale sets its **Radius** (**Source radius**). A liquid's emitter also rotates:
+  that is its **Aim yaw** and **Aim pitch**, and the arrow drawn from it shows where it throws (a crown's
+  four arrows show the pitch its ring throws at, all round). A gas has no aim, so rotate moves it. A
+  liquid starts over once a drag ends, not on every mouse move.
+- **The region:** move (**W**) moves it, emitter and all; its face handles resize it, the emitter staying
+  where it is in the world. Its box stays drawn, brighter while it is selected.
+- **A body:** move, rotate and scale set its **Position**, **Turn** / **Tilt** and **Size**.
 
 ## Region
 
-The simulation region: the box of voxels the gas lives in, and where it stands.
+The simulation region: the box the effect lives in, and where it stands. Both are set with its gizmos.
 
 | Field | Meaning |
 |---|---|
-| **Region size** | Width, height and depth of the box, in metres. Part of the effect: the bake uses it. A bigger box gets more voxels at the same **Voxel size**, so it costs more. |
-| **Region position** | The centre of the region's floor, in metres; preview only, as a bake frames the region itself. Dragging a face handle moves it so the opposite face stays put. |
-
-## Sun & sky
-
-The sun is the one light the effect is shaded with: its direction lights the viewport and the baked tiles alike. Its strength and colour, the ambient and the sky are the stage's.
-
-| Field | Meaning |
-|---|---|
-| **Sun yaw** / **Sun elevation** | The direction the sunlight comes from: it lights the scene and shades the smoke, in the viewport and in the bake. |
-| **Sun illuminance** | Direct sunlight, in lux. A clear noon is about 100 000 lux. |
-| **Sun temperature** | The sun's colour as a colour temperature: about 2000 K at sunset, 5800 K at noon. |
-| **Ambient light** | Flat light from every direction, in lux. |
-| **Auto exposure** | Let the camera adapt to the scene's brightness, as a game camera does. Off, **Exposure** sets it by hand. |
-| **Exposure** | Manual exposure, EV100. |
-
-## Fire light
-
-A point light that follows the flame: placed at its glowing centre, as bright as the flame is big, so the fire lights the ground and the bodies around it.
-
-| Field | Meaning |
-|---|---|
-| **Fire lights the scene** | Add the light. |
-| **Brightness** | Lumens with the whole flame burning. |
-| **Flicker** | Random brightness changes, smoothed so they read as fire rather than noise. |
-
-## Wind
-
-Wind across the stage: an engine Wind node, and a force on the gas that pulls it toward the wind's speed where there is gas to move.
-
-| Field | Meaning |
-|---|---|
-| **Scene wind** | Turn the stage's wind on. |
-| **Direction** | Where it blows toward, degrees counter-clockwise from +X seen from above. |
-| **Strength** | Wind speed, metres per second. |
-| **Gustiness** | How much of the wind comes and goes with the gusts. 0 is steady. |
-| **Gust size** | Metres between gust crests. |
-| **Gust speed** | How fast the gusts travel. |
+| **Region size** | Width, height and depth of the box, in metres: its face handles set it. Part of the effect: the bake frames it, so a bigger box leaves more room around the effect in each tile. A gas gets more voxels at the same **Voxel size**, so it costs more; a liquid costs only where its drops are. |
+| **Region position** | The centre of the region's floor, in metres: the move gizmo sets it, and a face handle moves it so the opposite face stays put. Preview only, as a bake frames the region itself. |
 
 ## Stage
 
-The **Stage** menu top-right of the viewport, beside the move / rotate / scale buttons.
+The **Stage** menu, top-right of the viewport beside the move / rotate / scale buttons: the stage the effect
+is previewed on, laid out as the Foliage Creator's. None of it reaches the bake except the sun's direction.
 
-**Show** — shows and hides what the viewport draws. None of it changes the effect or the bake (the sun is the effect's:
-see [Sun & sky](#sun--sky)).
+**Show** — what the viewport draws:
 
 | Row | Meaning |
 |---|---|
 | **Grid** | The editor grid on the ground. |
 | **Floor** | A matte ground plane, for the fire light and shadows to land on. |
 | **Sky** | A physical atmosphere behind the effect, which also lights the smoke from the sky. Off is a flat backdrop. |
-| **Ground shadow** | The effect's shadow on the floor: the light reaching the ground through the smoke toward the sun, drawn as a decal. Its darkness is **Shadow strength** under Rendering. |
-| **Region wireframe** | The simulation region's box. While the region is selected its handles draw it instead. |
-| **Emitter** | The emitter marker, always rather than only while the emitter is selected. |
-| **Bodies** | The placed bodies. Hidden bodies still shape the flow. |
+| **Wind** | A wind across the stage (see [Wind](#wind)). |
+| **Ground shadow** | A gas: its shadow on the floor, the light reaching the ground through the smoke toward the sun, drawn as a decal. Its darkness is **Shadow strength** under Rendering. A liquid's mark on the floor is its film. |
+| **Helpers** | What the stage draws that the effect does not: the simulation region's box, the emitter marker and its aim (both shown while selected either way) and the placed bodies. Hidden bodies still shape the flow. |
+
+**Sun** — **Direction** is the sun's compass direction, **Elevation** its height above the horizon. The sun
+is the one light the effect is shaded with, so its direction lights the viewport and the baked tiles alike.
+
+### Light
+
+The sun's strength and colour, the ambient and the camera's exposure. Its presets are times of day.
+
+| Field | Meaning |
+|---|---|
+| **Sun illuminance** | Direct sunlight, in lux. A clear noon is about 100 000 lux. |
+| **Sun temperature** | The sun's colour as a colour temperature: about 2000 K at sunset, 5800 K at noon. |
+| **Ambient light** | Flat light from every direction, in lux. |
+| **Auto exposure** | Let the camera adapt to the scene's brightness, as a game camera does. Off, **Exposure** sets it by hand. |
+| **Exposure** | Manual exposure, EV100. |
+
+### Wind
+
+While **Wind** is on: an engine Wind node, and a force on the gas (or the drops) that pulls it toward the wind's speed.
+
+| Field | Meaning |
+|---|---|
+| **Direction** | Where it blows toward, degrees counter-clockwise from +X seen from above. |
+| **Strength** | Wind speed, metres per second. |
+| **Gustiness** | How much of the wind comes and goes with the gusts. 0 is steady. |
+| **Gust size** | Metres between gust crests. |
+| **Gust speed** | How fast the gusts travel. |
+
+### Floor
+
+The ground's material: one of the PBR sets the build carries, or **Plain**. Decals (the effect's shadow, a liquid's pools) draw on it as on any floor.
+
+| Field | Meaning |
+|---|---|
+| **Floor** | The set the ground wears. |
+| **Tile size** | Metres one repeat of the set's maps covers. The floor is a non-repeating re-make of the set (random offsets and quarter-turns, blended at their borders), so tiling does not show; the set's height map is drawn as parallax relief. |
+
+### Fire light
+
+A gas: a point light that follows the flame, placed at its glowing centre and as bright as the flame is big, so the fire lights the ground and the bodies around it.
+
+| Field | Meaning |
+|---|---|
+| **Fire lights the scene** | Add the light. |
+| **Brightness** | Lumens with the whole flame burning. |
+| **Flicker** | Random brightness changes, smoothed so they read as fire rather than noise. |
 
 ## Rendering
 
@@ -236,15 +349,21 @@ How the viewport draws the volume.
 
 ## Bodies
 
-Static objects the gas flows around, never through: real engine models with physics bodies. Smoke spreads under a lid, eddies behind a wall, and a body casts a shadow into the smoke. Each one has:
+Static objects the effect flows around, never through, in the preview: real engine models with physics
+bodies. Smoke spreads under a lid, eddies behind a wall, and a body casts a shadow into the smoke; a splash
+glances off a ball, runs down a wall and pools against its foot, its film stopping where the body stands.
+A new body goes where it shows at once: beside or above a gas, in a liquid's path (a ball or a post along
+its aim, a wall across it, a block where it comes down). Adding or moving one replays a liquid's one-shot,
+so it splashes against it. Bakes leave bodies out. In the panel each one has its **In the scene** switch
+and a remove button; its gizmos set the rest:
 
 | Field | Meaning |
 |---|---|
 | **In the scene** | Off, the body is hidden and the gas ignores it. |
-| **Position** | Its centre, in metres. The effect stands on the origin. |
-| **Size** | Full extents. A sphere's diameter is X; a capsule's diameter is X and its overall height Y. |
-| **Turn** | Rotation around the vertical axis. |
-| **Tilt** | Rotation around the body's own X axis, after the turn. |
+| **Position** | Its centre, in metres: the move gizmo sets it. The effect stands on the origin. |
+| **Size** | Full extents: the scale gizmo sets them. A sphere's diameter is X; a capsule's diameter is X and its overall height Y. |
+| **Turn** | Rotation around the vertical axis: the rotate gizmo's turn. |
+| **Tilt** | Rotation around the body's own X axis, after the turn: the rotate gizmo's tilt. |
 
 ## Presets
 
@@ -253,7 +372,11 @@ Bake tab's settings included), keeping only the viewport's preview quality. The 
 picked last, and **Reset** returns every parameter to it (to the defaults before any is picked). The presets: a
 campfire (plain and realistic), torch, smoke plume, explosion burst, candle, bonfire, gas burner, brazier,
 chimney smoke, steam vent, smouldering embers, magic fire, fireball, large explosion, muzzle flash and a
-dust puff. Each comes with its own region size and voxel size for its scale.
+dust puff; and the liquids: a blood burst (the sprite of a hit), looping blood droplets (for
+velocity-aligned particles), a blood spatter and a blood pool (both with their floor decals), a water
+splash (a crown and its jet, sinking into a water surface), looping water droplets, and a mercury splash
+(a foot coming down in mercury: beads thrown low that roll and stay beaded, with surface maps and its
+decal). Each comes with its own region size and voxel size for its scale.
 
 ## Bake
 
@@ -261,7 +384,7 @@ The **Bake** tab turns the effect into textures. **Bake flipbook** runs its own 
 start (warm-up, capture, loop blend), so the live preview keeps going beside it; **Export flipbook**
 in the toolbar writes the files. The **Output** menu picks which baked atlas the player and the atlas view show. **Bake presets**
 set up the whole tab: Game-ready (8 × 8 frames of 128 px), Hero (8 × 8 of 256 px, relightable), Mobile
-(4 × 4 of 64 px) and Explosion one-shot.
+(4 × 4 of 64 px), Explosion one-shot and Liquid splash (24 frames from the release, and the floor decal).
 
 ### Flipbook
 
@@ -269,9 +392,11 @@ set up the whole tab: Game-ready (8 × 8 frames of 128 px), Hero (8 × 8 of 256 
 |---|---|
 | **Warm-up frames** | Frames simulated before the first captured one, so the fire is established. |
 | **Frames** | Frames in the flipbook. The atlas is the squarest grid that holds them. |
-| **Tile size** | Pixels per frame. |
+| **Tile size** | Pixels per frame (along the short side of a tall or wide tile). |
+| **Tile shape** | Square, tall (twice as tall as wide: a flame) or wide. The atlas packs them into the squarest image: 32 tall frames are 8 × 4. |
 | **View** | The camera: front, side, top, or an angle around the vertical axis (**Yaw**). Orthographic, framing the whole domain. |
 | **Loop blend** | Frames rendered past the end and cross-faded into the start, so the flipbook loops without a pop. 0 plays once (an explosion). |
+| **Edge fade** | The share of the frame at each edge over which coverage fades out, so a flame that reaches its region's edge never ends on a straight line on the sprite. 0 is off. |
 
 ### Outputs
 
@@ -281,11 +406,26 @@ set up the whole tab: Game-ready (8 × 8 frames of 128 px), Hero (8 × 8 of 256 
 | **Motion vectors** | The flow on screen, for flipbook frame blending that morphs instead of cross-fading. R and G are 0.5 plus the motion to the right and up, in tile widths per frame, times **Motion scale**; a blend shader divides it back out. |
 | **Motion scale** | That encoding's scale, written to the sidecar. |
 | **Emission only** | The fire's light alone, behind the smoke in front of it, for an additive particle layer. |
+| **Surface maps** | A liquid's surface for a lit particle, so the engine lights the sprite with the scene's own lights rather than the bake's. Three atlases cut like the colour atlas: the unlit base colour, with the body's opacity in alpha (`_albedo_flipbook`); a tangent-space normal map, OpenGL convention -- R right, G up, B toward the viewer (`_normal_flipbook`); and an ORM map -- occlusion, roughness and metallic (`_orm_flipbook`). Synced into the editor, the effect's emitter draws them, lit. Suited to liquids you cannot see through (blood, mercury, oil, paint); a clear one like water still reads best from the colour atlas, whose reflections are baked in. |
+| **Floor decal** | A liquid on a solid floor: the film it leaves, seen from above, as a decal flipbook -- base colour with coverage in alpha (`_decal_flipbook`), a normal map of its relief (`_decal_normal_flipbook`) and an ORM map, wet glossy and soaked matte (`_decal_orm_flipbook`); and the settled last frame of each alone (`_decal`, `_decal_normal`, `_decal_orm`). |
+| **Decal max size** | Most pixels a side of a decal frame. A frame covers only where the liquid lies, drawn at the film's own cells (half a droplet), so the stain is as sharp in a 4 m region as in a 1 m one; past this size it is drawn at coarser cells. |
+| **Decal frames** | Frames of the decal flipbook, captured evenly from the release to the settle time. |
+| **Settle time** | Seconds the floor keeps flowing after the last sprite frame, so the decal ends on a pool that has stopped. |
+| **Decal relief** | Strength of the normal map. |
 
 The colour atlas is straight-alpha RGBA, frames left to right then top to bottom. Fire carries at least
 its own brightness as alpha, so transparent flames still show in it. The `.tileset` describes its grid;
 `fx.json` carries a `particleFlipbook` block (columns, rows, frames, FPS) for a particle system's
 **Render** module, and an `outputs` block naming the extra atlases and their conventions.
+
+A floor decal's block (`outputs.decal`) is what a [Decal](../editor/node-inspector.md#decal) plays it by:
+the `size` of floor it covers (the decal box's X and Z: where the liquid lies, not the region), its
+`offset` (that box's centre, X and Z metres from the centre of the effect's floor -- stand the decal there),
+`tile` (a frame's pixels, width and height), its `flipbook` (columns, rows, frames, FPS, played once from
+the effect's start and held on the settled frame) and its `albedoOpacity`. A clear liquid only
+darkens the ground, so its colour is near black and its albedo share small, while its roughness lands
+whole: wet ground. In the editor a synced liquid brings two decal materials, the settled frame and the
+animated atlases (give the decal the block's flipbook).
 
 ## References
 
@@ -296,6 +436,9 @@ its own brightness as alpha, so transparent flames still show in it. The `.tiles
 - Wyman, Sloan and Shirley 2013, *Simple Analytic Approximations to the CIE XYZ Color Matching Functions*; CIECAM02's CAT02 adaptation.
 - FumeFX realistic fire and smoke (Super Renders Farm): motion complexity over settings; turbulence on smoke.
 - Six-way lightmaps: Unity VFX Graph and Unreal documentation; *Real-time Neural Six-way Lightmaps* (2026).
+- Clavet, Beaudoin and Poulin 2005, *Particle-based Viscoelastic Fluid Simulation*: double density relaxation and pairwise viscosity, the liquid solver.
+- Oron, Davis and Bankoff 1997, *Long-scale evolution of thin liquid films*: the lubrication equation the floor film flows by.
+- Teschner et al. 2003, *Optimized Spatial Hashing for Collision Detection of Deformable Objects*: the neighbour grid's hash.
 
 ## Licensing note
 

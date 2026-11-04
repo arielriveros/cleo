@@ -159,6 +159,16 @@ describe('the programs', () => {
                                               'fluidVolumeResolve', 'fluidVolumeComposite']);
     });
 
+    it('read every map through the flipbook cells, inset per cell so no neighbouring frame bleeds in', () => {
+        for (const file of ['decalSurface.wgsl', 'decalColor.wgsl']) {
+            const src = WGSL(file);
+            expect(src, file).not.toMatch(/insetUv\(/);
+            expect(src.match(/decalCellUv\(s\.uv, u_decal\.u_flipA/g)?.length, file)
+                .toBe(src.match(/decalCellUv\(s\.uv, u_decal\.u_flipB/g)?.length);
+        }
+        expect(methodBody('_setDecalUniforms')).toMatch(/decalFlipbookFrame\(decal\.flipbook, decal\.flipbookTime/);
+    });
+
     it('never discard in the box passes, which keeps them in uniform control flow', () => {
         for (const file of ['decalSurface.wgsl', 'decalColor.wgsl', 'chunks/decal.wgsl'])
             expect(WGSL(file).replace(/\/\/[^\n]*/g, ''), file).not.toMatch(/\bdiscard\b/);

@@ -59,7 +59,7 @@ export default function TilesetSlot(props: { node: SpriteNode; onChange?: () => 
             <div className='w-[48px] h-[48px] rounded overflow-hidden bg-surface-raised flex items-center justify-center shrink-0'>
               {asset.thumbnail
                 ? <img src={asset.thumbnail} className='w-full h-full object-contain' alt={asset.name} draggable={false} />
-                : <span className='text-lg'>🔳</span>}
+                : <span className='inline-flex w-5 h-5 text-dim [&>svg]:w-full [&>svg]:h-full'><TilesetIcon /></span>}
             </div>
             <div className='flex-1 min-w-0'>
               <div className={cn(valueClass, 'truncate')} title={asset.name}>{asset.name}</div>

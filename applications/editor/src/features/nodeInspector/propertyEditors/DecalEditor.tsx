@@ -1,4 +1,4 @@
-import type { DecalNode, DecalAffects, DecalColor, DecalPattern, DecalRadialPattern, DecalRadialCurve, DecalRadialShape, DecalReceivers } from 'cleo';
+import type { DecalNode, DecalAffects, DecalColor, DecalFlipbook, DecalPattern, DecalRadialPattern, DecalRadialCurve, DecalRadialShape, DecalReceivers } from 'cleo';
 import { useState, useEffect } from 'react';
 import Collapsable from '@cleo/app-kit/ui/Collapsable';
 import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Toggle, ColorInput, Section, Hint } from '@cleo/app-kit/ui';
@@ -13,6 +13,8 @@ const SORT_HINT = 'Where decals overlap, the higher number lands on top. Ties ar
 const SURFACE_HINT = 'Roughness, metallic and ambient occlusion. They share one coverage, as in Unreal’s DBuffer.';
 const RECEIVERS_HINT = 'Terrain only keeps rocks, props and foliage standing inside the box clean. It costs one extra depth pass over the terrain while such a decal is on screen.';
 const RADIAL_HINT = 'A procedural gradient instead of the material, for ground indicators: the outer colour at the rim blends to the inner one at the centre along the chosen curve, with an optional ring on the rim.';
+const ALBEDO_OPACITY_HINT = 'The albedo’s share of the coverage. Below 1 with a dark base colour, the decal darkens the ground under it while its roughness and normal still land whole: a wet patch rather than paint.';
+const FLIPBOOK_DEFAULT: DecalFlipbook = { columns: 4, rows: 4, frames: 16, fps: 12, loop: false, blend: true };
 const CURVE_HINT = 'How the gradient falls from the centre to the rim. Power follows the exponent; the others hold the inner colour over the inner part of the radius and fall over the falloff band, like the terrain brush curves of the same names.';
 
 type DecalState = {
@@ -20,6 +22,8 @@ type DecalState = {
   sizeY: number;
   sizeZ: number;
   opacity: number;
+  albedoOpacity: number;
+  flipbook: DecalFlipbook | null;
   sortOrder: number;
   angleFade: number;
   depthFade: number;
@@ -37,6 +41,8 @@ function readDecal(node: DecalNode): DecalState {
     sizeY: node.size[1],
     sizeZ: node.size[2],
     opacity: node.opacity,
+    albedoOpacity: node.albedoOpacity,
+    flipbook: node.flipbook ? { ...node.flipbook } : null,
     sortOrder: node.sortOrder,
     angleFade: node.angleFade,
     depthFade: node.depthFade,
@@ -75,6 +81,8 @@ export default function DecalEditor(props: { node: DecalNode }) {
     const n = props.node;
     n.size = [state.sizeX, state.sizeY, state.sizeZ];
     n.opacity = state.opacity;
+    n.albedoOpacity = state.albedoOpacity;
+    n.flipbook = state.flipbook;
     n.sortOrder = state.sortOrder;
     n.angleFade = state.angleFade;
     n.depthFade = state.depthFade;
@@ -96,6 +104,8 @@ export default function DecalEditor(props: { node: DecalNode }) {
     update((prev) => ({ affects: { ...prev.affects, [key]: value } }));
   const setRadial = (patch: Partial<DecalRadialPattern>) =>
     update((prev) => ({ radial: { ...prev.radial, ...patch } }));
+  const setFlipbook = (patch: Partial<DecalFlipbook>) =>
+    update((prev) => ({ flipbook: { ...(prev.flipbook ?? FLIPBOOK_DEFAULT), ...patch } }));
 
   const radial = state.radial;
 
@@ -114,6 +124,9 @@ export default function DecalEditor(props: { node: DecalNode }) {
           </PropertyRow>
           <PropertyRow label='Opacity'>
             <Slider min={0} max={1} step={0.01} value={state.opacity} onChange={(v) => update({ opacity: v })} />
+          </PropertyRow>
+          <PropertyRow label='Albedo opacity' hint={ALBEDO_OPACITY_HINT}>
+            <Slider min={0} max={1} step={0.01} value={state.albedoOpacity} onChange={(v) => update({ albedoOpacity: v })} />
           </PropertyRow>
           <PropertyRow label='Sort order' hint={SORT_HINT}>
             <NumberInput step={1} value={state.sortOrder} onChange={(v) => update({ sortOrder: Math.round(v) })} />
@@ -147,6 +160,36 @@ export default function DecalEditor(props: { node: DecalNode }) {
             </Select>
           </PropertyRow>
         </PropertyTable>
+
+        {state.pattern === 'material' && (
+          <Section title='Flipbook' className='mt-2'>
+            <PropertyTable columns={['45%', '55%']}>
+              <PropertyRow label='Animated' hint='Play the material’s maps as an atlas of frames. They start at the decal’s first update in Play; outside Play the last frame shows.'>
+                <Toggle checked={!!state.flipbook} onChange={(on) => update({ flipbook: on ? { ...FLIPBOOK_DEFAULT } : null })} />
+              </PropertyRow>
+              {state.flipbook && (<>
+                <PropertyRow label='Columns'>
+                  <NumberInput min={1} step={1} value={state.flipbook.columns} onChange={(v) => setFlipbook({ columns: Math.max(1, Math.round(v)) })} />
+                </PropertyRow>
+                <PropertyRow label='Rows'>
+                  <NumberInput min={1} step={1} value={state.flipbook.rows} onChange={(v) => setFlipbook({ rows: Math.max(1, Math.round(v)) })} />
+                </PropertyRow>
+                <PropertyRow label='Frames' hint='Cells used, left to right and then down from the top row; at most columns × rows.'>
+                  <NumberInput min={1} step={1} value={state.flipbook.frames} onChange={(v) => setFlipbook({ frames: Math.max(1, Math.round(v)) })} />
+                </PropertyRow>
+                <PropertyRow label='Frame rate' hint='Frames per second of game time, so slow motion and hit-stop slow it too.'>
+                  <NumberInput min={0} step={1} value={state.flipbook.fps} onChange={(v) => setFlipbook({ fps: Math.max(0, v) })} />
+                </PropertyRow>
+                <PropertyRow label='Loop' hint='Off: the last frame holds, as a pool that has settled.'>
+                  <Toggle checked={state.flipbook.loop} onChange={(loop) => setFlipbook({ loop })} />
+                </PropertyRow>
+                <PropertyRow label='Blend frames' hint='Cross-fade each frame into the next.'>
+                  <Toggle checked={state.flipbook.blend} onChange={(blend) => setFlipbook({ blend })} />
+                </PropertyRow>
+              </>)}
+            </PropertyTable>
+          </Section>
+        )}
 
         {state.pattern === 'radial' && (
           <Section title='Radial pattern' className='mt-2'>

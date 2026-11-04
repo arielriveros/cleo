@@ -40,15 +40,6 @@ struct DBuffer {
     @location(2) surface: vec4<f32>,    // (roughness, metallic, ao) * a, a
 };
 
-/**
- * Half a texel inside [0, 1]: decal textures carry their own wrap mode, and a repeat-wrapped one would
- * otherwise bilinear-bleed its opposite edge in along the box's border.
- */
-fn insetUv(uv: vec2<f32>, dims: vec2<u32>) -> vec2<f32> {
-    let border = 0.5 / max(vec2<f32>(dims), vec2<f32>(1.0));
-    return clamp(uv, border, vec2<f32>(1.0) - border);
-}
-
 @fragment
 fn fs_main(in: VertexOutput) -> DBuffer {
     let s = decalSample(in.position.xy);
@@ -63,17 +54,25 @@ fn fs_main(in: VertexOutput) -> DBuffer {
     var alpha = u_material.opacity;
     if (u_decal.u_pattern == 0) {
         if (u_material.hasBaseColorTexture != 0) {
-            let texel = textureSampleGrad(u_material_baseColorTexture_texture,
-                                          u_material_baseColorTexture_sampler,
-                                          insetUv(s.uv, textureDimensions(u_material_baseColorTexture_texture, 0)),
-                                          s.ddx, s.ddy);
+            // Every map is read from the flipbook's two cells this frame (the whole image without one).
+            let texel = mix(textureSampleGrad(u_material_baseColorTexture_texture, u_material_baseColorTexture_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipA, textureDimensions(u_material_baseColorTexture_texture, 0)),
+                                              s.ddx * u_decal.u_flipA.zw, s.ddy * u_decal.u_flipA.zw),
+                             textureSampleGrad(u_material_baseColorTexture_texture, u_material_baseColorTexture_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipB, textureDimensions(u_material_baseColorTexture_texture, 0)),
+                                              s.ddx * u_decal.u_flipB.zw, s.ddy * u_decal.u_flipB.zw),
+                             u_decal.u_flipBlend);
             surfaceAlbedo *= pow(texel.rgb, vec3<f32>(2.2));   // sRGB -> linear, as pbrGBuffer.wgsl
             alpha *= texel.a;
         }
         if (u_material.hasMaskMap != 0) {
-            alpha *= textureSampleGrad(u_material_maskMap_texture, u_material_maskMap_sampler,
-                                       insetUv(s.uv, textureDimensions(u_material_maskMap_texture, 0)),
-                                       s.ddx, s.ddy).r;
+            alpha *= mix(textureSampleGrad(u_material_maskMap_texture, u_material_maskMap_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipA, textureDimensions(u_material_maskMap_texture, 0)),
+                                              s.ddx * u_decal.u_flipA.zw, s.ddy * u_decal.u_flipA.zw).r,
+                             textureSampleGrad(u_material_maskMap_texture, u_material_maskMap_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipB, textureDimensions(u_material_maskMap_texture, 0)),
+                                              s.ddx * u_decal.u_flipB.zw, s.ddy * u_decal.u_flipB.zw).r,
+                             u_decal.u_flipBlend);
         }
     } else {
         let p = radialPattern(s.t, s.tPerPixel);
@@ -89,9 +88,13 @@ fn fs_main(in: VertexOutput) -> DBuffer {
     var ao = 1.0;
     if (u_decal.u_pattern == 0
         && (u_material.hasMetallicMap != 0 || u_material.hasRoughnessMap != 0 || u_material.hasOcclusionMap != 0)) {
-        let orm = textureSampleGrad(u_material_ormTexture_texture, u_material_ormTexture_sampler,
-                                    insetUv(s.uv, textureDimensions(u_material_ormTexture_texture, 0)),
-                                    s.ddx, s.ddy).rgb;
+        let orm = mix(textureSampleGrad(u_material_ormTexture_texture, u_material_ormTexture_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipA, textureDimensions(u_material_ormTexture_texture, 0)),
+                                              s.ddx * u_decal.u_flipA.zw, s.ddy * u_decal.u_flipA.zw).rgb,
+                             textureSampleGrad(u_material_ormTexture_texture, u_material_ormTexture_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipB, textureDimensions(u_material_ormTexture_texture, 0)),
+                                              s.ddx * u_decal.u_flipB.zw, s.ddy * u_decal.u_flipB.zw).rgb,
+                             u_decal.u_flipBlend);
         if (u_material.hasOcclusionMap != 0) { ao = orm.r; }
         if (u_material.hasRoughnessMap != 0) { roughness = orm.g; }
         if (u_material.hasMetallicMap != 0) { metallic = orm.b; }
@@ -104,9 +107,13 @@ fn fs_main(in: VertexOutput) -> DBuffer {
     var normalA = 0.0;
     var n = surfaceN;
     if (u_decal.u_affectNormal != 0 && u_decal.u_pattern == 0 && u_material.hasNormalMap != 0) {
-        let tn = normalize(textureSampleGrad(u_material_normalMap_texture, u_material_normalMap_sampler,
-                                             insetUv(s.uv, textureDimensions(u_material_normalMap_texture, 0)),
-                                             s.ddx, s.ddy).rgb * 2.0 - 1.0);
+        let tn = normalize(mix(textureSampleGrad(u_material_normalMap_texture, u_material_normalMap_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipA, textureDimensions(u_material_normalMap_texture, 0)),
+                                              s.ddx * u_decal.u_flipA.zw, s.ddy * u_decal.u_flipA.zw).rgb,
+                             textureSampleGrad(u_material_normalMap_texture, u_material_normalMap_sampler,
+                                              decalCellUv(s.uv, u_decal.u_flipB, textureDimensions(u_material_normalMap_texture, 0)),
+                                              s.ddx * u_decal.u_flipB.zw, s.ddy * u_decal.u_flipB.zw).rgb,
+                             u_decal.u_flipBlend) * 2.0 - 1.0);
         let projected = u_decal.u_decalAxisX - surfaceN * dot(u_decal.u_decalAxisX, surfaceN);
         // A surface whose normal IS the decal's X (a wall the decal meets edge-on) has no projection;
         // fall back to the in-plane direction the other decal axis gives.
@@ -118,7 +125,10 @@ fn fs_main(in: VertexOutput) -> DBuffer {
     }
 
     var out: DBuffer;
-    out.albedo = select(vec4<f32>(0.0), vec4<f32>(surfaceAlbedo * a, a), u_decal.u_affectAlbedo != 0);
+    // The albedo alone may take a smaller share (albedoOpacity): a dark film that darkens the ground
+    // under it while the roughness below still lands whole — wet, not painted over.
+    let albedoA = a * clamp(u_decal.u_albedoOpacity, 0.0, 1.0);
+    out.albedo = select(vec4<f32>(0.0), vec4<f32>(surfaceAlbedo * albedoA, albedoA), u_decal.u_affectAlbedo != 0);
     out.normal = vec4<f32>((n * 0.5 + 0.5) * normalA, normalA);
     out.surface = select(vec4<f32>(0.0), vec4<f32>(vec3<f32>(roughness, metallic, ao) * a, a),
                          u_decal.u_affectSurface != 0);

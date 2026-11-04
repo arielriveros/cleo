@@ -28,7 +28,7 @@ describe('Creator compute kernels', () => {
     .map(f => path.join(dir, f)));
 
   it('finds the kernels', () => {
-    expect(kernels.length).toBe(24);
+    expect(kernels.length).toBe(37);
   });
 
   it('parses and validates every kernel', async () => {
@@ -46,5 +46,13 @@ describe('Creator compute kernels', () => {
       }
     }
     expect(failures).toEqual([]);
+  });
+
+  it('binds no more storage buffers than a WebGPU device grants by default (8 per stage)', () => {
+    // naga does not know the device's limits; past them, createComputePipeline fails in the browser.
+    const over = kernels
+      .map(file => ({ file: path.basename(file), n: (expandIncludes(file).match(/var<storage/g) ?? []).length }))
+      .filter(k => k.n > 8);
+    expect(over).toEqual([]);
   });
 });

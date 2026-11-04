@@ -23,7 +23,7 @@ onto the Timeline to add a key with it.
 
 ### This motion
 
-The motion's poses. A pose marked ⛓ (*library* in its caption) is a [library pose](#library) the motion
+The motion's poses. A pose marked with a chain link (*library* in its caption) is a [library pose](#library) the motion
 uses: editing it edits the library pose, and every motion that uses it follows.
 
 | Button | Does |

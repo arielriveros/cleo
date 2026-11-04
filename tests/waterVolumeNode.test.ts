@@ -17,6 +17,7 @@ describe('WaterVolumeNode', () => {
         const water = new WaterVolumeNode('pond', {
             size: [20, 2, 16], density: 1025, linearDrag: 3, angularDrag: 2, waveAmplitude: 0.05,
             waveFrequency: 0.4, affectCharacters: true, surfaceNodeId: 'abc', splashTemplate: 'Water Splash',
+            wadeSplashTemplate: 'Water Step',
         });
         scene.addNode(water);
         expect([...scene.waterVolumes]).toEqual([water]);
@@ -26,8 +27,8 @@ describe('WaterVolumeNode', () => {
         const back = parent.children[0] as WaterVolumeNode;
         expect(back).toBeInstanceOf(WaterVolumeNode);
         expect([back.size, back.density, back.linearDrag, back.angularDrag, back.waveAmplitude, back.waveFrequency,
-                back.affectCharacters, back.surfaceNodeId, back.splashTemplate])
-            .toEqual([[20, 2, 16], 1025, 3, 2, 0.05, 0.4, true, 'abc', 'Water Splash']);
+                back.affectCharacters, back.surfaceNodeId, back.splashTemplate, back.wadeSplashTemplate])
+            .toEqual([[20, 2, 16], 1025, 3, 2, 0.05, 0.4, true, 'abc', 'Water Splash', 'Water Step']);
     });
 
     it('puts its surface on the top face, and measures depth below it', () => {

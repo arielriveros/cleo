@@ -141,7 +141,7 @@ A node canvas. Drag states around, drag handle to handle to make a transition, r
 menu, Delete to remove. Edges are labelled with a summary of their conditions. One state is the
 **entry** — select a state and press **▶ Make this the entry state**, or use the right-click menu.
 
-**A state entered by a trigger** shows it as a ⚡ tag under its name: when a script fires that
+**A state entered by a trigger** shows it as a tag with a lightning bolt under its name: when a script fires that
 trigger by name — `setTrigger('Roll')` — the layer goes to the state from whatever it is doing, with
 no transition drawn. Set it with the state's **Enter on trigger**.
 

@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Select } from '@cleo/app-kit/ui';
+import { Button, Select, sliderFill } from '@cleo/app-kit/ui';
 import { PanelHeader, SchemaSections } from '../../app/workspace';
-import { FX_SCHEMA, type FxParams } from '../fxParams';
+import { schemaGroupsFor, tileDims, type FxParams } from '../fxParams';
 import { BAKE_PRESETS, type SectionPreset } from '../fxPresets';
 import { sectionPresets } from './sectionPresets';
-import { bakeKinds, OUTPUT_LABELS, type FxOutput, type FxOutputKind } from '../generateFx';
+import { bakeKinds, DECAL_KINDS, OUTPUT_LABELS, type FxOutput, type FxOutputKind } from '../generateFx';
 
 // The Bake tab, beside Parameters in the right dock: everything about turning the effect into textures.
 // The bake-side sections (Flipbook, Outputs), the Bake button, and a player and atlas view for whichever
-// output is selected. The bake runs its own deterministic simulation from t = 0; the live preview keeps
+// output is selected -- a liquid's floor decal plays on its own layout and rate. The bake runs its own deterministic simulation from t = 0; the live preview keeps
 // going beside it.
 
 export interface BakePanelProps {
@@ -22,21 +22,25 @@ export interface BakePanelProps {
 }
 
 export function BakePanel({ params, setParams, output, liveFrames, running, onBake }: BakePanelProps) {
-  const values = { ...params, tileSize: String(params.tileSize) } as unknown as Record<string, unknown>;
+  const values = { ...params, tileSize: String(params.tileSize), decalTileSize: String(params.decalTileSize) } as unknown as Record<string, unknown>;
   const kinds = output ? (Object.keys(output.outputs) as FxOutputKind[]) : bakeKinds(params);
   const [kind, setKind] = useState<FxOutputKind>('color');
   const shown = kinds.includes(kind) ? kind : 'color';
   const atlas = output?.outputs[shown] ?? null;
   const frames = atlas?.frames ?? (shown === 'color' ? liveFrames : []);
-  const size = output?.layout.tile ?? params.tileSize;
-  const fps = output?.fps ?? Math.round(1 / params.frameTime);
+  const decal = DECAL_KINDS.includes(shown) && output?.decal ? output.decal : null;
+  const layout = decal ? decal.layout : output?.layout;
+  const tile = tileDims(params);
+  const width = layout?.tileWidth ?? tile.width, height = layout?.tileHeight ?? tile.height;
+  const fps = decal ? decal.fps : output?.fps ?? Math.round(1 / params.frameTime);
   return (
     <div className='flex flex-col h-full min-h-0'>
       <div className='p-2 overflow-auto shrink-0' style={{ maxHeight: '55%' }}>
         <PanelHeader kind='Bake' name={output ? `${output.frames.length} frames` : 'not baked'} presetLabel='Bake presets'
                      presets={BAKE_PRESETS} onPreset={(p: SectionPreset<Partial<FxParams>>) => setParams({ ...params, ...p.values })} />
-        <SchemaSections groups={FX_SCHEMA.filter(g => g.side === 'bake')} values={values} persist='cleo_creator_fx'
-                        onChange={patch => setParams({ ...params, ...(patch as Partial<FxParams>), tileSize: Number(patch.tileSize ?? params.tileSize) })}
+        <SchemaSections groups={schemaGroupsFor(params.medium, 'bake')} values={values} persist='cleo_creator_fx'
+                        onChange={patch => setParams({ ...params, ...(patch as Partial<FxParams>), tileSize: Number(patch.tileSize ?? params.tileSize),
+                                                       decalTileSize: Number(patch.decalTileSize ?? params.decalTileSize) })}
                         right={title => sectionPresets(title, params, setParams)} />
         <div className='flex items-center gap-2 pt-2'>
           <Button variant='primary' disabled={running} onClick={onBake}>Bake flipbook</Button>
@@ -49,8 +53,8 @@ export function BakePanel({ params, setParams, output, liveFrames, running, onBa
         </Select>
       </div>
       <div className='flex-1 min-h-0 flex flex-col'>
-        <Player frames={frames} size={size} fps={fps} />
-        {output && atlas && <AtlasView pixels={atlas.atlas} width={output.layout.width} height={output.layout.height} />}
+        <Player frames={frames} width={width} height={height} fps={fps} loop={!decal} />
+        {output && atlas && layout && <AtlasView pixels={atlas.atlas} width={layout.width} height={layout.height} />}
       </div>
     </div>
   );
@@ -65,27 +69,30 @@ function paint(canvas: HTMLCanvasElement | null, pixels: Uint8Array | undefined,
   ctx.putImageData(image, 0, 0);
 }
 
-/** Plays the frames at the flipbook's own rate. */
-function Player({ frames, size, fps }: { frames: Uint8Array[]; size: number; fps: number }) {
+/** Plays the frames at the flipbook's own rate (a decal holds its last frame a moment, then starts over). */
+function Player({ frames, width, height, fps, loop }: { frames: Uint8Array[]; width: number; height: number; fps: number; loop: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [playing, setPlaying] = useState(true);
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     if (!playing || frames.length === 0) return;
-    const id = setInterval(() => setFrame(f => (f + 1) % frames.length), 1000 / Math.max(1, fps));
+    // A one-shot rests on its last frame for a second's worth of frames before replaying.
+    const hold = loop ? 0 : Math.max(1, Math.round(fps));
+    const id = setInterval(() => setFrame(f => (f + 1) % (frames.length + hold)), 1000 / Math.max(1, fps));
     return () => clearInterval(id);
-  }, [playing, frames.length, fps]);
-  useEffect(() => { paint(canvasRef.current, frames[Math.min(frame, frames.length - 1)], size, size); }, [frame, frames, size]);
+  }, [playing, frames.length, fps, loop]);
+  useEffect(() => { paint(canvasRef.current, frames[Math.min(frame, frames.length - 1)], width, height); }, [frame, frames, width, height]);
   return (
     <div className='flex flex-col flex-1 min-h-0 cleo-texture-checker'>
       <div className='flex-1 min-h-0 flex items-center justify-center p-2'>
         {frames.length
-          ? <canvas ref={canvasRef} className='h-full max-w-full aspect-square' />
+          ? <canvas ref={canvasRef} className='h-full max-w-full' style={{ aspectRatio: `${width} / ${height}` }} />
           : <span className='text-dim'>No flipbook yet — press Bake flipbook.</span>}
       </div>
       <div className='flex items-center gap-2 px-2 py-1 bg-surface-sunken border-t border-border'>
         <Button size='sm' onClick={() => setPlaying(p => !p)}>{playing ? 'Pause' : 'Play'}</Button>
         <input type='range' min={0} max={Math.max(0, frames.length - 1)} value={Math.min(frame, Math.max(0, frames.length - 1))}
+               style={{ ['--slider-fill' as string]: sliderFill(frames.length > 1 ? Math.min(frame, frames.length - 1) / (frames.length - 1) : 0) }}
                onChange={e => { setPlaying(false); setFrame(Number(e.target.value)); }} className='flex-1' />
         <span className='text-dim tabular-nums'>{frames.length ? `${Math.min(frame, frames.length - 1) + 1} / ${frames.length}` : '–'}</span>
       </div>

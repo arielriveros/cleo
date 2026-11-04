@@ -22,6 +22,8 @@ import { buildControllerAsset } from '../../utils/animationControllers'
 import { hoveredScriptStore } from '../sceneInspector/hoveredScriptStore'
 import { Button } from '@cleo/app-kit/ui'
 import { AddMenu, ImportButton, type AddMenuItem } from '@cleo/app-kit/assets/AssetToolbar'
+import CreatorButton from './CreatorButton'
+import { useProjectName } from '../projects/useProjectName'
 
 /** What the toolbar's Import button takes: models, textures and sounds. */
 const IMPORT_ACCEPT = '.obj,.mtl,.gltf,.glb,.fbx,.bin,.png,.jpg,.jpeg,.bmp,.tga,.tiff,.webp,.wav,.mp3,.ogg,.m4a,.flac,.aac,.opus'
@@ -60,6 +62,8 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     importModelFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter, scriptAssets,
   } = useCleoEngine()
   const { vfs, libs, pathIndexRef, folderKindsRef, landingFolderRef, depsRef } = useVfs()
+  // The tree's root reads "<project> Files" rather than SVAR's "My files".
+  const projectName = useProjectName()
 
   const wrapperRef = useRef<HTMLDivElement>(null)
   const vfsRef = useRef(vfs)
@@ -317,6 +321,7 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
   ]
   return (<>
     <AssetExplorer
+      rootLabel={`${projectName || 'Project'} Files`}
       data={buildFileManagerData(vfs, libs)}
       apiRef={apiRef}
       init={init}
@@ -330,6 +335,7 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
         <AddMenu items={addItems} />
         <ImportButton accept={IMPORT_ACCEPT} onFiles={runImport} busy={importing}
           title='Import models, textures and sounds' />
+        <CreatorButton />
 
         {/* Audio. Routed through the same `runUpload` as everything else — the importer branches on the
             extension — so a sound picked here lands exactly as one dropped on the explorer does. */}

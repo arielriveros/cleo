@@ -4,6 +4,8 @@ import { useCleoEngine } from '../../EngineContext'
 import { useAssetLibrary } from '../../AssetLibraryContext'
 import { useEditorSessions } from '../../EditorSessionsContext'
 import { Button, Hint, Select, cn, valueClass } from '@cleo/app-kit/ui'
+import { SoundIcon } from '../sectionIcons'
+import { AlertIcon } from '../../topbarIcons'
 import { formatDuration } from '../../../utils/audioSources'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
 
@@ -64,7 +66,11 @@ export default function SoundSampleSlot(props: { node: SoundNode; onChange?: () 
 
       <div className={`flex items-center gap-2 p-2 bg-control border rounded ${dragOver ? 'border-selected' : 'border-border'}`}>
         <div className='w-[36px] h-[36px] rounded bg-surface-raised flex items-center justify-center shrink-0 text-lg'>
-          {asset ? '🔊' : broken ? '⚠️' : '—'}
+          {asset
+            ? <span className='inline-flex w-5 h-5 text-highlight [&>svg]:w-full [&>svg]:h-full'><SoundIcon /></span>
+            : broken
+              ? <span className='inline-flex w-5 h-5 text-warning [&>svg]:w-full [&>svg]:h-full'><AlertIcon /></span>
+              : '—'}
         </div>
         <div className='flex-1 min-w-0'>
           {asset ? (

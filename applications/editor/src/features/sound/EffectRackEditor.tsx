@@ -1,6 +1,8 @@
 import { defaultEffect, EFFECT_KINDS } from 'cleo'
 import type { EffectKind, SoundEffect } from 'cleo'
+import React from 'react'
 import { Button, SectionTitle, Select, Slider, Toggle, hintClass } from '@cleo/app-kit/ui'
+import { CompressorIcon, DelayIcon, DistortionIcon, FilterIcon, ReverbIcon } from '../nodeInspector/effectIcons'
 
 // The DSP rack: an ordered list of inserts, each toggleable, movable and removable.
 //
@@ -21,12 +23,12 @@ const LABELS: Record<EffectKind, string> = {
   compressor: 'Compressor',
 }
 
-const ICONS: Record<EffectKind, string> = {
-  filter: '🎚️',
-  distortion: '🔥',
-  delay: '🔁',
-  reverb: '🌊',
-  compressor: '📉',
+const ICONS: Record<EffectKind, (props: React.SVGProps<SVGSVGElement>) => React.ReactElement> = {
+  filter: FilterIcon,
+  distortion: DistortionIcon,
+  delay: DelayIcon,
+  reverb: ReverbIcon,
+  compressor: CompressorIcon,
 }
 
 const FILTER_TYPES = [
@@ -69,7 +71,7 @@ export default function EffectRackEditor({ effects, onChange }: Props) {
       {effects.map((effect, index) => (
         <div key={index} className='rounded border border-border bg-surface-raised p-1.5 flex flex-col gap-1'>
           <div className='flex items-center gap-1'>
-            <span className='text-ui-sm'>{ICONS[effect.kind]}</span>
+            {React.createElement(ICONS[effect.kind], { className: 'w-3.5 h-3.5 shrink-0 text-highlight' })}
             <span className='text-ui-sm flex-1'>{LABELS[effect.kind]}</span>
             <Toggle
               checked={effect.enabled}

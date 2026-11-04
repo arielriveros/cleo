@@ -39,8 +39,19 @@ struct ParticleDrawFragment {
     u_sunColor: vec4<f32>,        // lit: key light (sun, or the moon at night) irradiance rgb
     u_keyDir: vec4<f32>,          // lit: direction TO the strongest point / spot light reaching the effect
     u_keyColor: vec4<f32>,        // lit: that light's irradiance rgb (zero when none reaches)
+    u_surface: vec4<f32>,         // lit: roughness, metallic, normal strength, SURFACE_* bits
+    u_viewPos: vec4<f32>,         // lit: camera xyz; w = reflections: 0 the ambient, 1 sRGB cube, 2 linear cube
 };
 @group(1) @binding(1) var<uniform> u_frag: ParticleDrawFragment;
+
+// `u_surface.w` bits. PBR: a highlight and metallic at all (any map, or a factor off its default) --
+// without it a lit emitter shades as it always has, half-Lambert and no highlight.
+const SURFACE_NORMAL_MAP: u32 = 1u;
+const SURFACE_ORM_MAP: u32    = 2u;
+const SURFACE_PBR: u32        = 4u;
+const PARTICLE_PI: f32 = 3.14159265;
+/** The env cube's mip at roughness 1, as pbrForward's MAX_REFLECTION_LOD. */
+const PARTICLE_REFLECTION_LOD: f32 = 4.0;
 
 @group(0) @binding(0) var u_p0_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_p1_texture: texture_2d<f32>;
@@ -53,6 +64,14 @@ struct ParticleDrawFragment {
 @group(0) @binding(8) var u_sceneDepth_sampler: sampler;
 // Back-to-front slot order, written by the sort (particleSort*.wgsl): (key, slot). Read only when sorted.
 @group(0) @binding(9) var u_order_texture: texture_2d<f32>;
+// Lit emitters' surface: a tangent-space normal map and an ORM map, cut into the sprite's flipbook cells
+// (white 1x1 when absent), and the reflection cube (the probe or sky the forward path reflects).
+@group(0) @binding(10) var u_normalMap_texture: texture_2d<f32>;
+@group(0) @binding(11) var u_normalMap_sampler: sampler;
+@group(0) @binding(12) var u_ormMap_texture: texture_2d<f32>;
+@group(0) @binding(13) var u_ormMap_sampler: sampler;
+@group(0) @binding(14) var u_particleEnv_texture: texture_cube<f32>;
+@group(0) @binding(15) var u_particleEnv_sampler: sampler;
 
 struct ParticleVaryings {
     @builtin(position) position: vec4<f32>,
@@ -62,6 +81,8 @@ struct ParticleVaryings {
     @location(3) frameBlend: f32,
     @location(4) viewDepth: f32,
     @location(5) normal: vec3<f32>,
+    // World position, for the view vector and the normal map's frame (from its screen derivatives).
+    @location(6) worldPos: vec3<f32>,
 };
 
 /** A particle, as the renderers see it: world space, with every over-life and by-speed module applied. */
@@ -88,6 +109,7 @@ fn deadVaryings() -> ParticleVaryings {
     out.frameBlend = 0.0;
     out.viewDepth = 0.0;
     out.normal = vec3<f32>(0.0, 1.0, 0.0);
+    out.worldPos = vec3<f32>(0.0);
     return out;
 }
 
@@ -168,7 +190,62 @@ fn linearSceneDepth(d: f32) -> f32 {
     return 2.0 * near * far / (far + near - z * (far - near));
 }
 
+/** GGX x Smith x Schlick, times N.L: a light's highlight per unit of its irradiance (liquidRender.ts `ggxSpecular`). */
+fn particleSpecular(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
+    let nl = dot(n, l);
+    if (nl <= 0.0) { return vec3<f32>(0.0); }
+    let nv = max(dot(n, v), 1e-4);
+    let h = normalize(v + l);
+    let nh = max(dot(n, h), 0.0);
+    let vh = max(dot(v, h), 0.0);
+    let a = max(roughness * roughness, 0.002);
+    let a2 = a * a;
+    let dd = nh * nh * (a2 - 1.0) + 1.0;
+    let D = a2 / (PARTICLE_PI * dd * dd);
+    let k = a * 0.5;
+    let G = (nl / (nl * (1.0 - k) + k)) * (nv / (nv * (1.0 - k) + k));
+    let F = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - vh, 5.0);
+    return F * (D * G / (4.0 * nv));
+}
+
+/** Karis' split-sum DFG fit, as pbrLighting.wgsl `EnvBRDFApprox`: the reflection's energy is f0 x A + B. */
+fn particleEnvBrdf(nv: f32, roughness: f32) -> vec2<f32> {
+    let c0 = vec4<f32>(-1.0, -0.0275, -0.572, 0.022);
+    let c1 = vec4<f32>(1.0, 0.0425, 1.04, -0.04);
+    let r = roughness * c0 + c1;
+    let a004 = min(r.x * r.x, exp2(-9.28 * nv)) * r.x + r.y;
+    return vec2<f32>(-1.04, 1.04) * a004 + r.zw;
+}
+
+/**
+ * The normal map's tangent-space vector `t` onto the surface with normal `n`: the frame is the gradient of
+ * the texture coordinates over the surface (Schuler 2013, "Normal Mapping without Precomputed Tangents"),
+ * from screen derivatives, signed by its determinant so neither the card's facing nor the backend's screen
+ * y direction can mirror it. +v is the image's up (uploads are flipped; see flipbookUv).
+ */
+fn particleMappedNormal(n: vec3<f32>, t: vec3<f32>, dpx: vec3<f32>, dpy: vec3<f32>, duvx: vec2<f32>, duvy: vec2<f32>) -> vec3<f32> {
+    let dp2perp = cross(dpy, n);
+    let dp1perp = cross(n, dpx);
+    let det = dot(dpx, dp2perp);
+    if (abs(det) < 1e-20) { return n; }
+    let s = sign(det);
+    let T = (dp2perp * duvx.x + dp1perp * duvy.x) * s;
+    let B = (dp2perp * duvx.y + dp1perp * duvy.y) * s;
+    let invmax = inverseSqrt(max(max(dot(T, T), dot(B, B)), 1e-30));
+    return normalize(T * (invmax * t.x) + B * (invmax * t.y) + n * t.z);
+}
+
 fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
+    // Everything with an implicit or explicit derivative comes first, in uniform control flow (before any
+    // discard): the sprite, the surface maps, and the frame the normal map needs.
+    let dpx = dpdx(in.worldPos);
+    let dpy = dpdy(in.worldPos);
+    let duvx = dpdx(in.uv);
+    let duvy = dpdy(in.uv);
+    let normalTexel = mix(textureSample(u_normalMap_texture, u_normalMap_sampler, in.uv),
+                          textureSample(u_normalMap_texture, u_normalMap_sampler, in.uvNext), in.frameBlend);
+    let ormTexel = mix(textureSample(u_ormMap_texture, u_ormMap_sampler, in.uv),
+                       textureSample(u_ormMap_texture, u_ormMap_sampler, in.uvNext), in.frameBlend);
     var color = in.color;
     if (u_frag.u_fragMask.x > 0.5) {
         let a = textureSample(u_sprite_texture, u_sprite_sampler, in.uv);
@@ -198,7 +275,9 @@ fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
     }
 
     var rgb = color.rgb * u_frag.u_fragParams.w;
-    if (u_frag.u_fragMask.y > 0.5) {
+    let surface = u_frag.u_surface;
+    let flags = u32(surface.w + 0.5);
+    if (u_frag.u_fragMask.y > 0.5 && (flags & SURFACE_PBR) == 0u) {
         // Lit: the scene's light, as surfaces take it — the ambient and sky fill, then the key light and the
         // strongest local light through the diffuse 1/π. Half-Lambert rather than Lambert: particles are
         // thin and back-lit as often as not, so a hard term would leave half of every cloud black.
@@ -207,6 +286,54 @@ fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
         let keyWrap = dot(n, u_frag.u_keyDir.xyz) * 0.5 + 0.5;
         let direct = (u_frag.u_sunColor.rgb * sunWrap + u_frag.u_keyColor.rgb * keyWrap) * 0.31830988618; // 1 / PI
         rgb = rgb * (u_frag.u_ambient.rgb + direct);
+    } else if (u_frag.u_fragMask.y > 0.5) {
+        // Lit with a surface: a normal map, roughness and metallic, shaded as the forward PBR path shades
+        // (GGX highlights from the key and local light, the probe or sky reflected, metals tinting both).
+        let V = normalize(u_frag.u_viewPos.xyz - in.worldPos);
+        var n = normalize(in.normal);
+        // A card is seen from both sides: light the side facing the viewer.
+        if (dot(n, V) < 0.0) { n = -n; }
+        var occlusion = 1.0;
+        var roughness = surface.x;
+        var metallic = surface.y;
+        if ((flags & SURFACE_ORM_MAP) != 0u) {
+            occlusion = ormTexel.r;
+            roughness = roughness * ormTexel.g;
+            metallic = metallic * ormTexel.b;
+        }
+        roughness = clamp(roughness, 0.02, 1.0);
+        metallic = clamp(metallic, 0.0, 1.0);
+        // Half-Lambert on the flat card, as above; Lambert once a normal map gives it real relief.
+        var wrap = 1.0;
+        if ((flags & SURFACE_NORMAL_MAP) != 0u) {
+            var t = normalTexel.xyz * 2.0 - 1.0;
+            t = vec3<f32>(t.xy * surface.z, max(t.z, 1e-3));
+            n = particleMappedNormal(n, normalize(t), dpx, dpy, duvx, duvy);
+            wrap = 0.0;
+        }
+        let nv = max(dot(n, V), 1e-4);
+        let f0 = mix(vec3<f32>(0.04), rgb, metallic);
+        let sunL = u_frag.u_sunDir.xyz;
+        let keyL = u_frag.u_keyDir.xyz;
+        let sunD = max((dot(n, sunL) + wrap) / (1.0 + wrap), 0.0);
+        let keyD = max((dot(n, keyL) + wrap) / (1.0 + wrap), 0.0);
+        let direct = (u_frag.u_sunColor.rgb * sunD + u_frag.u_keyColor.rgb * keyD) / PARTICLE_PI;
+        let diffuse = rgb * (1.0 - metallic) * (u_frag.u_ambient.rgb * occlusion + direct);
+        let highlight = u_frag.u_sunColor.rgb * particleSpecular(n, V, sunL, roughness, f0)
+                      + u_frag.u_keyColor.rgb * particleSpecular(n, V, keyL, roughness, f0);
+        // What it reflects: the cube, blurred by roughness and fading toward the ambient as it roughens
+        // (a box-filtered mip chain is no GGX prefilter). With no cube, the ambient as a sky over a darker
+        // ground, so a mirror still shows which way is up.
+        let R = reflect(-V, n);
+        var env = u_frag.u_ambient.rgb * mix(0.35, 1.3, smoothstep(-0.25, 0.25, R.y));
+        if (u_frag.u_viewPos.w > 0.5) {
+            let c = textureSampleLevel(u_particleEnv_texture, u_particleEnv_sampler, R, roughness * PARTICLE_REFLECTION_LOD).rgb;
+            let cube = select(pow(c, vec3<f32>(2.2)), c, u_frag.u_viewPos.w > 1.5);
+            env = mix(env, cube, pow(1.0 - roughness, 4.0));
+        }
+        let dfg = particleEnvBrdf(nv, roughness);
+        let reflection = env * (f0 * dfg.x + dfg.y) * occlusion;
+        rgb = diffuse + highlight + reflection;
     }
 
     // Premultiplied out. Alpha blends `one, one-minus-src-alpha`; additive drops the alpha term; cutout

@@ -80,14 +80,25 @@ not draw) it is shown still, as nodes. The viewport's readout says which.
 
 ![Walk-through on a grass patch: the blades part around the walker and spring back](../media/foliage-walkthrough.gif)
 
-### Weather
+### Floor
 
-The stage's weather, to see the materials' **Weather** settings at work.
+The ground's material. The build carries the PBR sets in `build/terrain_textures` (rock, dirt, sand, mud,
+leaves, plaster, concrete); **Plain** is a flat colour.
 
 | Field | Meaning |
 |---|---|
-| **Wetness** | How wet the stage is: leaves and blades darken, turn glossy and bow under the water. |
-| **Snow** | How much snow lies on the plant: it settles on what faces up and weighs the plant down. |
+| **Floor** | The set the ground wears. |
+| **Tile size** | Metres one repeat of the set's maps covers. The floor is a non-repeating re-make of the set (random offsets and quarter-turns, blended at their borders), so tiling does not show; the set's height map is drawn as parallax relief. |
+
+### Weather
+
+The stage's weather, to see the materials' **Weather** settings at work. It reaches the floor too: the floor's
+maps are re-composited as you drag.
+
+| Field | Meaning |
+|---|---|
+| **Wetness** | How wet the stage is: leaves and blades darken, turn glossy and bow under the water; the floor darkens by how porous it is and turns glossy, and past halfway puddles fill its low spots. |
+| **Snow** | How much snow lies on the plant: it settles on what faces up and weighs the plant down. On the floor it covers the low spots and patches first and everything at 1, textured by the snow set. |
 
 ## Clump
 

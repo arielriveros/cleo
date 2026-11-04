@@ -1722,6 +1722,23 @@ export class WebGPUDevice implements Device {
      * Read a colour attachment back to the CPU. Rows must start on 256-byte boundaries, the copy must
      * be submitted before it can be mapped, and the padding is stripped to give callers a tight buffer.
      */
+    public async readBuffer(buffer: Buffer, offset: number, size: number): Promise<ArrayBuffer> {
+        // Copies are 4-byte aligned in offset and size.
+        const start = offset & ~3;
+        const bytes = alignUp(offset + size - start, 4);
+        const staging = this._device.createBuffer({
+            label: 'readback.buffer', size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        });
+        const encoder = this._device.createCommandEncoder({ label: 'readback.buffer' });
+        encoder.copyBufferToBuffer((buffer as WebGPUBuffer).handle, start, staging, 0, bytes);
+        this._device.queue.submit([encoder.finish()]);
+        await staging.mapAsync(GPUMapMode.READ);
+        const out = staging.getMappedRange().slice(offset - start, offset - start + size);
+        staging.unmap();
+        staging.destroy();
+        return out;
+    }
+
     public async readPixels(view: TextureView, x: number, y: number,
                             width: number, height: number): Promise<Uint8Array> {
         const source = view as WebGPUTextureView;

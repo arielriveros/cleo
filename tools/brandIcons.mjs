@@ -1,6 +1,7 @@
 // Builds every small copy of the Cleo logo from the two masters in applications/app-kit/src/assets/logo:
 // the loading-screen logo and the favicons each app serves from its public/brand/ (the editor the colour
-// logo, the Creator the black-and-white one), and the desktop shell's window/installer icons. The outputs
+// logo, the Creator the black-and-white one), the editor's Creator-button icon, and the desktop shell's
+// window/installer icons. The outputs
 // are committed, so no build depends on this; run it again (`npm run brand:icons`) when a master changes.
 //
 // Plain Node, no image library: the PNGs are decoded and encoded here with zlib, and resampled with an
@@ -269,6 +270,9 @@ for (const [app, src, rect] of [['editor', color, colorRect], ['creator', bw, bw
     write(`${dir}/favicon-32.png`, icon(src, rect, 32));
     write(`${dir}/icon-192.png`, icon(src, rect, 192));
 }
+// The editor's "Creator" button (features/assets/CreatorButton.tsx) shows the Creator's logo from the
+// editor's own public/: the Creator's copy is behind a dev proxy that is empty while it is not running.
+write('applications/editor/public/brand/creator-32.png', icon(bw, bwRect, 32));
 
 const desktop = 'applications/app-kit/desktop/icons';
 write(`${desktop}/icon.png`, icon(color, colorRect, 512));

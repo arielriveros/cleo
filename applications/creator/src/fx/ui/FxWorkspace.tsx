@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { FluidVolumeNode } from 'cleo';
-import { Button, PresetMenu, Select, Toggle } from '@cleo/app-kit/ui';
+import { Toggle } from '@cleo/app-kit/ui';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
 import { useCreatorEngine } from '../../app/CreatorEngine';
 import { CreatorWorkspace, PanelBody, PanelHeader, SchemaSections, ViewportOverlay } from '../../app/workspace';
@@ -11,9 +11,10 @@ import { AssetBar, useCreatorAsset } from '../../core/useCreatorAsset';
 import { useStageCapture } from '../../core/stageCapture';
 import { fluidDims } from '../fluidCpu';
 import { gpuBackend } from '../fluidGpu';
-import { DEFAULT_FX, FX_PRESETS, FX_SCHEMA, normaliseFx, type FxParams } from '../fxParams';
+import { DEFAULT_FX, FX_PRESETS, normaliseFx, particleCount, schemaGroupsFor, tileDims, voxelSizeRaised, type FxParams } from '../fxParams';
 import { cpuBackend, exportFx, generateFx, type FxOutput } from '../generateFx';
 import { LiveFx, type LiveStats } from '../liveSim';
+import { LiveLiquid } from '../liveLiquid';
 import { legacySunDirection, loadScene, saveScene, type FxScene } from '../fxScene';
 import { EFFECT_SECTION_PRESETS, effectPresetLabel, effectPresetParams, type SectionPreset } from '../fxPresets';
 import { frameAt, frameBox, hideFxVolume, installOrbitCamera, showFxVolume } from './fxPreview';
@@ -21,17 +22,21 @@ import { emitterPose, FxGizmos, type FxSelection } from './FxGizmos';
 import type { GizmoMode, GizmoSpace } from '@cleo/app-kit/gizmo/types';
 import { GizmoModeControls } from '@cleo/app-kit/gizmo/GizmoModeControls';
 import { FxStage } from './fxStage';
-import { ScenePanel } from './ScenePanel';
+import { FxStageSections, ScenePanel } from './ScenePanel';
 import { BakePanel } from './BakePanel';
 
 // FX Creator: fire and smoke simulated on a voxel grid, shown live in the 3D viewport as an engine
 // FluidVolumeNode -- every parameter change reaches the next simulation step, so there is nothing to
-// press to see it. The Bake tab (beside Parameters) runs the deterministic offline simulation from t = 0
-// (warm-up, capture, loop blend) and packs the tileset -- and any extra outputs -- the toolbar's Export
-// writes. The Scene panel dresses the stage the effect is previewed in (sun, sky, wind, ground, placed
+// press to see it. The viewport's playback bar plays, pauses, restarts and speeds it. The Bake tab (beside
+// Parameters) runs the deterministic offline simulation from t = 0 (warm-up, capture, loop blend) and
+// packs the tileset -- and any extra outputs -- the toolbar's Export writes. The viewport's Stage menu
+// lights the stage (sun, sky, wind, fire light) and the Scene panel places what is in it (the region,
 // bodies); none of it reaches a bake. The Creator's shared layout: app/workspace.tsx.
 
 const STORAGE_KEY = 'cleo_creator_fx_params_v1';
+/** The presets a switch of medium starts from. */
+const LIQUID_START = 'blood-splash';
+const GAS_START = 'campfire';
 /** The effect preset picked last: what Reset returns to. */
 const PRESET_KEY = 'cleo_creator_fx_preset_v1';
 /** A grid or seed change restarts the simulation, so it waits for the slider to settle. */
@@ -49,7 +54,7 @@ interface FxState {
   tile: number;
   /** The live preview's latest numbers; read by the panels that show them, not rendered from state. */
   stats: React.MutableRefObject<LiveStats | null>;
-  live: React.MutableRefObject<LiveFx | null>;
+  live: React.MutableRefObject<LiveFx | LiveLiquid | null>;
   scene: FxScene;
   setScene: (s: FxScene) => void;
   selection: FxSelection;
@@ -94,6 +99,8 @@ export function FxWorkspace() {
   };
   const [stageScene, setStageScene] = useState<FxScene>(loadScene);
   const stage = useRef<FxStage | null>(null);
+  /** Bumped each time the stage is built, so the gizmos place their markers on the new one. */
+  const [stageVersion, setStageVersion] = useState(0);
   const stageRef = useRef(stageScene);
   stageRef.current = stageScene;
   const [output, setOutput] = useState<FxOutput | null>(null);
@@ -104,7 +111,7 @@ export function FxWorkspace() {
   const bake = useGeneration();
   const gpu = hasCompute && useGpu;
 
-  const live = useRef<LiveFx | null>(null);
+  const live = useRef<LiveFx | LiveLiquid | null>(null);
   const stats = useRef<LiveStats | null>(null);
   const node = useRef<FluidVolumeNode | null>(null);
   const orbit = useRef<ReturnType<typeof installOrbitCamera> | null>(null);
@@ -124,12 +131,15 @@ export function FxWorkspace() {
   }, [stageScene]);
 
   // The stage: the volume node, the orbit camera, and the live simulation feeding the node. Rebuilt only
-  // when the solver changes (GPU / CPU); parameters flow in below without tearing anything down.
+  // when the solver changes (GPU / CPU, or gas / liquid); parameters flow in below without tearing
+  // anything down.
+  const liquid = params.medium === 'liquid';
   useEffect(() => {
     if (!scene || !camera) return;
     const volume = showFxVolume(scene);
     node.current = volume;
-    const sim = new LiveFx(volume, gpu, paramsRef.current);
+    volume.shading = liquid ? 'liquid' : 'gas';
+    const sim = liquid ? new LiveLiquid(volume, paramsRef.current, gpu) : new LiveFx(volume, gpu, paramsRef.current);
     sim.onStats = s => { stats.current = s; };
     sim.playing = playing;
     sim.speed = speed;
@@ -139,21 +149,24 @@ export function FxWorkspace() {
       sim.tick(dt);
       stage.current?.updateFire(sim.fireLight, paramsRef.current);
       stage.current?.updateShadow(sim.shadowTexture, sim.shadowPlacement());
+      stage.current?.updateFloorDecal(sim instanceof LiveLiquid ? sim.floorDecal() : null);
     };
     orbit.current ??= installOrbitCamera(camera, frameBox(volume.size, 20, stageRef.current.regionOffset ?? [0, 0, 0]));
     return () => {
       sim.dispose();
       volume.onUpdate = () => { /* the simulation is gone; the volume holds its last frame */ };
+      stage.current?.updateFloorDecal(null);
       live.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene, camera, gpu]);
+  }, [scene, camera, gpu, liquid]);
   // The stage's own nodes (sun settings, sky, ground, wind, fire light, bodies), for as long as the
   // workspace is open.
   useEffect(() => {
     if (!instance || !scene) return;
     stage.current = new FxStage(instance, scene, sun);
     stage.current.apply(stageRef.current, paramsRef.current);
+    setStageVersion(v => v + 1);
     return () => { stage.current?.dispose(); stage.current = null; };
   }, [instance, scene, sun]);
   useEffect(() => {
@@ -212,6 +225,7 @@ export function FxWorkspace() {
     setSelection(null);
   };
   const hotkeys = {
+    ' ': () => setPlaying(p => !p),
     w: () => setGizmoMode('position'), e: () => setGizmoMode('rotation'), r: () => setGizmoMode('scale'),
     x: () => setGizmoSpace(sp => (sp === 'world' ? 'local' : 'world')),
     escape: () => setSelection(null), delete: removeSelectedBody, backspace: removeSelectedBody,
@@ -219,6 +233,16 @@ export function FxWorkspace() {
 
   useEffect(() => { if (live.current) live.current.playing = playing; }, [playing]);
   useEffect(() => { if (live.current) live.current.speed = speed; }, [speed]);
+
+  // A gizmo drag holds the simulation's restarts (a liquid's source or a region resized) and its node
+  // placement until the drag ends: one restart on release instead of one per mouse move.
+  useEffect(() => {
+    const start = () => live.current?.setDragging(true);
+    const end = () => live.current?.setDragging(false);
+    bus.on('GIZMO_DRAG_START', start);
+    bus.on('GIZMO_DRAG_END', end);
+    return () => { bus.off('GIZMO_DRAG_START', start); bus.off('GIZMO_DRAG_END', end); };
+  }, [bus]);
 
   // --- The saved asset: every bake of it goes to the Creator library, which the editor follows. A saved
   // asset re-bakes on its own once edits pause (Auto-bake), so the editor's flipbook keeps up. ---
@@ -264,27 +288,52 @@ export function FxWorkspace() {
     await downloadAll(await exportFx(output, params));
   };
 
-  const dims = fluidDims(normaliseFx(params));
+  const norm = normaliseFx(params);
+  const dims = fluidDims(norm);
+  // A gas: its grid, flagged when the region outgrew the voxel budget and the voxels were coarsened (its
+  // voxel-unit settings then mean bigger features). A liquid: its drops, whose size is its definition.
+  const raised = norm.medium === 'gas' && voxelSizeRaised(params);
+  const status = norm.medium === 'liquid'
+    ? <span title='The liquid: its drops, and the size each stands for. The floor stain and the surface are drawn at this size, whatever the region.'>
+        {particleCount(norm).toLocaleString()} drops · {(norm.dropletSize * 1000).toFixed(1)} mm
+      </span>
+    : <span className={raised ? 'text-warning' : undefined}
+            title={raised ? `The region needs more voxels than the budget at the voxel size set: they were coarsened to ${(norm.voxelSize * 100).toFixed(2)} cm, so the effect's voxel-sized detail grows. Shrink the region or raise the voxel size.` : 'The grid: the region divided by the voxel size'}>
+        {dims.nx}×{dims.ny}×{dims.nz} = {((dims.nx * dims.ny * dims.nz) / 1e6).toFixed(2)} M voxels
+      </span>;
   const viewport = (<>
     <ViewportOverlay
       readout={<LiveReadout />}
-      stage={{ toggles: [
-        { key: 'grid', label: 'Grid', checked: stageScene.grid },
-        { key: 'groundPlane', label: 'Floor', checked: stageScene.groundPlane },
-        { key: 'sky', label: 'Sky', checked: stageScene.sky },
-        { key: 'effectShadow', label: 'Ground shadow', checked: stageScene.effectShadow },
-        { key: 'showRegion', label: 'Region wireframe', checked: stageScene.showRegion },
-        { key: 'showEmitter', label: 'Emitter', checked: stageScene.showEmitter },
-        { key: 'showBodies', label: 'Bodies', checked: stageScene.showBodies },
-      ].map(item => ({ ...item, onChange: (v: boolean) => setStageScene(s => ({ ...s, [item.key]: v })) })) }}
+      // The Foliage Creator's Stage menu: what the preview shows, the sun, then the light, the wind and
+      // (a gas) the fire light.
+      stage={{
+        toggles: [
+          { key: 'grid', label: 'Grid', checked: stageScene.grid },
+          { key: 'groundPlane', label: 'Floor', checked: stageScene.groundPlane },
+          { key: 'sky', label: 'Sky', checked: stageScene.sky },
+          { key: 'wind', label: 'Wind', checked: stageScene.wind },
+          // A liquid casts none: its mark on the floor is its film.
+          ...(liquid ? [] : [{ key: 'effectShadow', label: 'Ground shadow', checked: stageScene.effectShadow }]),
+          // The region wireframe, the emitter marker and the bodies: everything the stage draws that the
+          // effect does not.
+          { key: 'showHelpers', label: 'Helpers', checked: stageScene.showHelpers },
+        ].map(item => ({ ...item, onChange: (v: boolean) => setStageScene(s => ({ ...s, [item.key]: v })) })),
+        sun: { yaw: params.lightYaw, elevation: params.lightElevation,
+               onChange: (yaw, elevation) => setParams({ ...params, lightYaw: yaw, lightElevation: elevation }) },
+        extra: <FxStageSections scene={stageScene} setScene={setStageScene} params={params} setParams={setParams} />,
+      }}
       controls={<GizmoModeControls mode={gizmoMode} space={gizmoSpace} onMode={setGizmoMode} onSpace={setGizmoSpace} />}
-      onFrame={frameSelection} frameTitle='Frame the selection (F)' />
+      onFrame={frameSelection} frameTitle='Frame the selection (F)'
+      playback={{
+        playing, onPlayPause: () => setPlaying(p => !p), onRestart: () => live.current?.restart(), speed, onSpeed: setSpeed,
+        clock: () => (live.current ? { time: live.current.time, cycle: live.current.cycleTime } : null),
+      }} />
     <FxGizmos instance={instance} scene={scene} bus={bus} stage={stage} volume={node} viewportRef={viewportRef}
               params={params} setParams={setParams} fxScene={stageScene} setFxScene={setStageScene}
-              selection={selection} select={setSelection} mode={gizmoMode} space={gizmoSpace} />
+              selection={selection} select={setSelection} mode={gizmoMode} space={gizmoSpace} stageVersion={stageVersion} />
   </>);
   const value = useMemo(() => ({
-    params, setParams, output, liveFrames, tile: normaliseFx(params).tileSize, stats, live, scene: stageScene, setScene: setStageScene,
+    params, setParams, output, liveFrames, tile: tileDims(normaliseFx(params)).width, stats, live, scene: stageScene, setScene: setStageScene,
     selection, select: setSelection, bakeRunning: bake.status.running, onBake: () => void bakeFlipbook(), presetId, setPresetId,
   }), [params, output, liveFrames, stageScene, selection, bake.status.running, gpu, presetId, asset.active?.id]);
 
@@ -293,11 +342,6 @@ export function FxWorkspace() {
       <CreatorWorkspace
         id='fx' page='creator/fx'
         toolbar={<>
-          <Button size='sm' onClick={() => setPlaying(p => !p)}>{playing ? 'Pause' : 'Play'}</Button>
-          <Button size='sm' onClick={() => live.current?.restart()}>Restart</Button>
-          <Select value={String(speed)} onChange={e => setSpeed(Number(e.target.value))}>
-            {[0.25, 0.5, 1, 2].map(s => <option key={s} value={s}>{s}× speed</option>)}
-          </Select>
           <label className='flex items-center gap-1 text-muted'>
             <Toggle checked={gpu} onChange={setUseGpu} /> GPU solver {hasCompute ? '' : '(unavailable)'}
           </label>
@@ -310,7 +354,7 @@ export function FxWorkspace() {
             </label>
           )}
         </div>}
-        toolbarStatus={<span title='The grid: the region divided by the voxel size'>{dims.nx}×{dims.ny}×{dims.nz} = {((dims.nx * dims.ny * dims.nz) / 1e6).toFixed(2)} M voxels</span>}
+        toolbarStatus={status}
         primaryAction={{ label: 'Export flipbook', disabled: !output || bake.status.running, onClick: exportFiles,
                          title: output ? 'The baked tileset and its sidecar' : 'Bake the flipbook first, in the Bake tab' }}
         left={{ id: 'scene', title: 'Scene', render: () => <SceneTab /> }}
@@ -334,7 +378,8 @@ function LiveReadout() {
     return () => clearInterval(t);
   }, [stats]);
   if (!s) return <>Starting…</>;
-  return <>{s.backend.toUpperCase()} · {s.dims.nx}×{s.dims.ny}×{s.dims.nz} · {s.simMs.toFixed(1)} ms/frame · t {s.simTime.toFixed(1)} s</>;
+  const what = s.particles !== undefined ? `${s.particles.toLocaleString()} drops · ` : '';
+  return <>{s.backend.toUpperCase()} · {what}{s.dims.nx}×{s.dims.ny}×{s.dims.nz} · {s.simMs.toFixed(1)} ms/frame · t {s.simTime.toFixed(1)} s</>;
 }
 
 /**
@@ -345,6 +390,17 @@ function LiveReadout() {
 function ParametersPanel() {
   const { params, setParams, presetId, setPresetId } = useFx();
   const values = { ...params, tileSize: String(params.tileSize) } as unknown as Record<string, unknown>;
+  // Changing the medium starts from that medium's first preset: a liquid needs a region, droplets and a
+  // source of its own, and a smoke grid's voxel size is far too coarse for drops.
+  const change = (patch: Partial<FxParams>) => {
+    if (patch.medium && patch.medium !== params.medium) {
+      const id = patch.medium === 'liquid' ? LIQUID_START : GAS_START;
+      setParams(effectPresetParams(id, params));
+      setPresetId(id);
+      return;
+    }
+    setParams({ ...params, ...patch, tileSize: Number(patch.tileSize ?? params.tileSize) });
+  };
   // An effect preset replaces every parameter -- seed, sun direction and bake settings included -- except
   // the viewport's preview quality. Reset applies the preset picked last again.
   const applyEffect = (p: { id: string }) => {
@@ -359,8 +415,8 @@ function ParametersPanel() {
     <PanelBody>
       <PanelHeader kind='Effect' name={effectPresetLabel(presetId)} onReset={reset} presetLabel='Effect presets'
                    presets={FX_PRESETS.map(p => ({ ...p, description: p.description ?? p.label }))} onPreset={applyEffect} />
-      <SchemaSections groups={FX_SCHEMA.filter(group => group.side !== 'bake')} values={values} persist='cleo_creator_fx'
-                      onChange={patch => setParams({ ...params, ...(patch as Partial<FxParams>), tileSize: Number(patch.tileSize ?? params.tileSize) })}
+      <SchemaSections groups={schemaGroupsFor(params.medium, 'parameters')} values={values} persist='cleo_creator_fx'
+                      onChange={patch => change(patch as Partial<FxParams>)}
                       right={title => sectionPresets(title, params, setParams)} />
     </PanelBody>
   );

@@ -6,6 +6,9 @@ import type { PostChainEntry, PostEffectId } from 'cleo';
 import Collapsable from '@cleo/app-kit/ui/Collapsable';
 import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Toggle, Hint, cn, valueClass } from '@cleo/app-kit/ui';
 import { CameraIcon, MaterialIcon } from '../sectionIcons';
+import {
+  BloomIcon, ChromaticIcon, DepthOfFieldIcon, FilmGrainIcon, GodRaysIcon, LensFlareIcon, PostEffectIcon, VignetteIcon,
+} from '../effectIcons';
 import { useAssetDrop } from '../../../utils/useAssetDrop';
 import { useEventBus } from '../../EventBusContext';
 import { useAssetLibrary } from '../../AssetLibraryContext';
@@ -23,14 +26,14 @@ const BUILTIN_LABELS: Record<string, string> = {
   filmGrain: 'Film Grain',
 };
 
-const BUILTIN_ICONS: Record<string, string> = {
-  depthOfField: '🔍',
-  godRays: '🌤️',
-  bloom: '🌟',
-  lensFlare: '✨',
-  chromatic: '🌈',
-  vignette: '⬛',
-  filmGrain: '🎞️',
+const BUILTIN_ICONS: Record<string, (props: React.SVGProps<SVGSVGElement>) => React.ReactElement> = {
+  depthOfField: DepthOfFieldIcon,
+  godRays: GodRaysIcon,
+  bloom: BloomIcon,
+  lensFlare: LensFlareIcon,
+  chromatic: ChromaticIcon,
+  vignette: VignetteIcon,
+  filmGrain: FilmGrainIcon,
 };
 
 /** The nearest CameraRigNode above this camera, if any — the rig drives its transform. */
@@ -241,7 +244,7 @@ function PostChainList(props: { node: CameraNode }) {
               {materialIndex === null ? (
                 <>
                   <div className='w-[32px] h-[32px] rounded overflow-hidden bg-surface-raised flex items-center justify-center shrink-0'>
-                    <span className='text-ui-lg'>{BUILTIN_ICONS[entry.effect] ?? '✨'}</span>
+                    {React.createElement(BUILTIN_ICONS[entry.effect] ?? PostEffectIcon, { className: 'w-5 h-5 text-highlight' })}
                   </div>
                   <span className={cn(valueClass, 'truncate flex-1')}>{BUILTIN_LABELS[entry.effect] ?? entry.effect}</span>
                 </>
@@ -250,7 +253,7 @@ function PostChainList(props: { node: CameraNode }) {
                   <div className='w-[32px] h-[32px] rounded overflow-hidden bg-surface-raised flex items-center justify-center shrink-0'>
                     {asset.thumbnail
                       ? <img src={asset.thumbnail} className='w-full h-full object-cover' alt={asset.name} draggable={false} />
-                      : <span className='text-ui-lg'>🎨</span>}
+                      : <span className='inline-flex w-5 h-5 text-dim [&>svg]:w-full [&>svg]:h-full'><MaterialIcon /></span>}
                   </div>
                   <span className={cn(valueClass, 'truncate flex-1')} title={asset.name}>{asset.name}</span>
                   <Button variant='ghost' size='icon' className='text-highlight' title='Edit this material' onClick={() => enterMaterialEditor(asset.id)}>✎</Button>

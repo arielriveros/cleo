@@ -51,6 +51,7 @@ fn vs_main(@location(0) position: vec3<f32>,
     out.viewDepth = dot(world - u_draw.u_camPos.xyz, u_draw.u_camForward.xyz);
     out.color = look.color;
     out.normal = n;
+    out.worldPos = world;
     applyFlipbook(&out, look, texCoord);
     return out;
 }
