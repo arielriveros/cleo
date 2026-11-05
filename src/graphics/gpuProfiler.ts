@@ -7,6 +7,7 @@
 
 import type { Device } from './rhi/device';
 import { timerQueryExtension } from './rhi/webgl2/capabilities';
+import { gl } from './rhi/webgl2/glContext';
 
 /** Timings for one named pass. `ms` is the most recent completed frame; `avgMs` is smoothed. */
 export interface PassTiming {
@@ -653,14 +654,13 @@ export const gpuProfiler = new GpuProfilerFacade();
 
 /**
  * Choose and install the backend for the device just acquired. Called once from `Renderer.initialize()`.
- * `glContext` is null on the WebGPU path, which simply leaves the profiler unavailable.
  */
-export function initializeGpuProfiler(device: Device,
-                                      glContext: WebGL2RenderingContext | null): void {
+export function initializeGpuProfiler(device: Device): void {
     if (device.backend === 'webgpu') {
         gpuProfiler.useBackend(new WebGPUGpuProfiler(device));
         return;
     }
+    const glContext = gl ?? null;
     if (!glContext) {
         gpuProfiler.useBackend(new NullGpuProfiler('The profiler has no WebGL2 context yet.'));
         return;

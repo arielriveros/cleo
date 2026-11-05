@@ -73,14 +73,11 @@ import type { RenderSubsystems } from './render/subsystems';
 import { ProgramRegistry } from './render/programRegistry';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
-import { gl, setGLContext } from './rhi/webgl2/glContext';
 import { describeCapabilities } from './rhi/device';
 import type { BackendKind, DeviceCapabilities, Device } from './rhi/device';
-import { resolveBackendRequest } from './rhi/backendSelect';
+import { createDevice } from './rhi/createDevice';
 // Imported unconditionally: it pulls in no naga or wasm, and a dynamic import would make acquisition
 // failure and chunk-load failure the same observable event.
-import { acquireWebGPUDevice } from './rhi/webgpu/webgpuDevice';
-import { WebGL2Device } from './rhi/webgl2/webgl2Device';
 import { setDevice, device } from './rhi/deviceHandle';
 import { jitterMatrix } from './utils/taaJitter';
 
@@ -451,9 +448,8 @@ export class Renderer {
         setDevice(gpu);
         this._capabilities = gpu.capabilities;
 
-        // Install the profiler backend for whichever device we got. `gl` is read only on the WebGL2
-        // branch — on WebGPU the live binding is undefined, and null is the honest thing to pass.
-        initializeGpuProfiler(gpu, gpu.backend === 'webgl2' ? gl : null);
+        // Install the profiler backend for whichever device we got.
+        initializeGpuProfiler(gpu);
 
         this._passes.screenQuad = new Mesh();
         this._allocateTargets();
@@ -463,27 +459,14 @@ export class Renderer {
     }
 
     // Pick a device for the requested backend, falling back to WebGL2 with a stated reason. The only
-    // part of startup that differs per backend; everything after is allocation against the result.
+    // part of startup that differs per backend — and it happens in rhi/createDevice.ts, so the renderer
+    // never names one; everything after is allocation against the `Device` interface.
     private async _acquireDevice(): Promise<Device> {
-        this._backendFallbackReason = resolveBackendRequest(this._config.backend);
-        if (this._backendFallbackReason) {
-            Logger.warn(`Falling back to WebGL2: ${this._backendFallbackReason}`, 'Runtime');
-        } else if (this._config.backend === 'webgpu') {
-            const gpu = await acquireWebGPUDevice({ canvas: this._canvas, powerPreference: 'high-performance' });
-            if (gpu) return gpu;
-            // Null covers every ordinary "this machine cannot" outcome, each already logged with its
-            // cause. Falling through to WebGL2 is the answer to all of them, not an error.
-            this._backendFallbackReason = 'WebGPU device acquisition failed — see the log above';
-        }
-
-        const context = this._canvas.getContext('webgl2') as WebGL2RenderingContext | null;
-        if (!context) throw new Error('WebGL context not available');
-        // WebGL2 branch ONLY: a canvas hosts one context type, and nothing should fake the other. On
-        // WebGPU `gl` stays undefined, so the first raw `gl.*` call throws naming its own line.
-        setGLContext(context);
-
-        // The RHI device reads the hardware's real limits once, before anything can depend on a guess.
-        return new WebGL2Device(context);
+        this._backendFallbackReason = null;
+        return createDevice(this._canvas, this._config.backend, {
+            clearColor: this._config.clearColor,
+            onFallback: reason => { this._backendFallbackReason = reason; },
+        });
     }
 
 
@@ -633,8 +616,8 @@ export class Renderer {
         await this.warmPipelines();
     }
 
-    // The default GL state, deliberately still raw `gl.*`: under WebGPU this throws on the first
-    // `gl.clearColor`, which is the correct second stop for the boot probe.
+    // What the device must offer before any target is allocated. (A WebGL2 context's standing state is
+    // the backend's own business — set once in rhi/webgl2/createWebGL2Device.ts.)
     private _configureDefaultState(): void {
         // Ask through the DEVICE, never a second `getExtension` — one fact, one source. The pipeline
         // allocates HDR targets unconditionally, so a device without them is still fatal.
@@ -643,18 +626,6 @@ export class Renderer {
             Logger.error(msg);
             throw new Error(msg);
         }
-
-        // Below is the WebGL2 context's STANDING state, which WebGPU has no counterpart for — a
-        // pipeline carries its own. It survives only because the legacy draw paths inherit it.
-        if (device.backend !== 'webgl2') return;
-        const clearColor = this._config.clearColor || [0.0, 0.0, 0.0, 1.0];
-        gl.clearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        GLState.depthTest(true);
-        GLState.blend(true);
-        GLState.depthFunc(gl.LEQUAL);
-        this._passes.restoreDefaultBlend();
-        gl.drawingBufferColorSpace = 'srgb';
     }
 
     // The allocations and one-shot bakes that depend on the programs. Separate from `preInitialize` so
@@ -1267,7 +1238,6 @@ export class Renderer {
         // screen-space framebuffers stay 0x0 with no attachments until some later window resize.
         if (this._deviceReady) this.resize();
     }
-    public get context(): WebGL2RenderingContext { return gl; }
 
     /**
      * The graphics device, as the RHI describes it. An escape hatch for tooling, not for engine code.
@@ -1680,11 +1650,13 @@ export class Renderer {
         if (this._deviceReady) this._resizeBuffers(this._renderWidth, this._renderHeight);
     }
 
-    /** Background/clear color (RGBA 0..1). Setter also updates the live GL clear color if a context exists. */
+    /**
+     * Background/clear color (RGBA 0..1). Every pass that clears to it names it explicitly
+     * (`PassEncoder.beginFullscreenPass`), so the setter only records it.
+     */
     public get clearColor(): number[] { return this._config.clearColor ? [...this._config.clearColor] : [0, 0, 0, 1]; }
     public set clearColor(color: number[]) {
         this._config.clearColor = [...color];
-        if (typeof gl !== 'undefined' && gl) gl.clearColor(color[0], color[1], color[2], color[3] ?? 1);
     }
 
     /** The EFFECTIVE exposure — metered when metering is live, authored otherwise. */
