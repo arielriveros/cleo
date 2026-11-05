@@ -315,6 +315,22 @@ describe('UniformBlockSet — std140 writes', () => {
 });
 
 describe('UniformBlockSet — upload scheduling', () => {
+    it('does not upload when a write re-sends the values the block already holds', () => {
+        const set = UniformBlockSet.reflect(install([BLOCK]))!;
+        set.set('u_exposure', 0.1);
+        set.set('u_tint', [0.2, 0.4, 0.6]);
+        set.flush();
+        expect(uploads).toHaveLength(1);
+        // Per-pass values are re-sent before every draw; equal after float rounding means unchanged.
+        set.set('u_exposure', 0.1);
+        set.set('u_tint', new Float32Array([0.2, 0.4, 0.6]));
+        set.flush();
+        expect(uploads).toHaveLength(1);
+        set.set('u_tint', [0.2, 0.4, 0.7]);
+        set.flush();
+        expect(uploads).toHaveLength(2);
+    });
+
     it('uploads once for many writes and not at all when nothing changed', () => {
         const set = UniformBlockSet.reflect(install([BLOCK]))!;
         set.set('u_exposure', 1);

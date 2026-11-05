@@ -151,14 +151,17 @@ export class UniformBlockSet {
     /** How many block members a name writes to. 1 for almost everything; 2 for a cross-stage uniform. */
     public targetCount(name: string): number { return this._members.get(name)?.length ?? 0; }
 
-    /** Write a value into its block's CPU buffer. Returns false when the name is not a block member. */
+    /**
+     * Write a value into its block's CPU buffer. Returns false when the name is not a block member. The
+     * block is marked for upload only when a stored number changed: per-pass values re-sent before every
+     * draw then cost a compare, not a `bufferSubData`.
+     */
     public set(name: string, value: any): boolean {
         const targets = this._members.get(name);
         if (!targets) return false;
         for (let i = 0; i < targets.length; i++) {
             const entry = targets[i];
-            writeMember(entry.block, entry.member, value, name);
-            entry.block.dirty = true;
+            if (writeMember(entry.block, entry.member, value, name)) entry.block.dirty = true;
         }
         return true;
     }
@@ -220,13 +223,13 @@ function describe(type: number): Shape | null {
 /** One slot lent to scalar writes, so `writeMember` never allocates. Never held. */
 const SCALAR = new Float64Array(1);
 
-// Write one member into its block's CPU buffer, honouring the reported strides. std140 pads every
-// matrix column to a vec4, so a contiguous copy would shear a mat3.
-function writeMember(block: Block, member: BlockMember, value: any, name: string): void {
+// Write one member into its block's CPU buffer, honouring the reported strides, and say whether any stored
+// number changed. std140 pads every matrix column to a vec4, so a contiguous copy would shear a mat3.
+function writeMember(block: Block, member: BlockMember, value: any, name: string): boolean {
     const shape = describe(member.type);
     if (!shape) {
         Logger.warn(`Uniform "${name}" has a type this block writer does not handle (GL enum ${member.type})`, 'Shader');
-        return;
+        return false;
     }
 
     const target = shape.integer ? block.ints : block.floats;
@@ -245,6 +248,7 @@ function writeMember(block: Block, member: BlockMember, value: any, name: string
     // on one call and a number[] on the next goes polymorphic, and V8 then boxes every element it reads:
     // that boxing was most of the uniform writer's remaining garbage, at tens of thousands of writes a frame.
     const typed = flat instanceof Float32Array;
+    let changed = false;
 
     for (let element = 0; element < elements; element++) {
         const source = element * perElement;
@@ -256,16 +260,32 @@ function writeMember(block: Block, member: BlockMember, value: any, name: string
             const byteOffset = elementOffset + column * (member.matrixStride || 0);
             const base = byteOffset >> 2;
             const from = source + column * shape.components;
-            if (typed) copyTyped(target, base, flat as Float32Array, from, shape.components);
-            else copyGeneric(target, base, flat, from, shape.components);
+            if (typed ? copyTyped(target, base, flat as Float32Array, from, shape.components)
+                      : copyGeneric(target, base, flat, from, shape.components)) changed = true;
         }
     }
+    return changed;
 }
 
-function copyTyped(target: Float32Array | Int32Array, base: number, src: Float32Array, from: number, n: number): void {
-    for (let i = 0; i < n; i++) target[base + i] = src[from + i];
+// Each copy reports whether it changed a stored number, judged by reading the slot back: the typed array's
+// store applies the float rounding and the int/bool coercion, so comparing the value handed in would call a
+// re-sent 0.1 a change every time.
+function copyTyped(target: Float32Array | Int32Array, base: number, src: Float32Array, from: number, n: number): boolean {
+    let changed = false;
+    for (let i = 0; i < n; i++) {
+        const before = target[base + i];
+        target[base + i] = src[from + i];
+        if (target[base + i] !== before) changed = true;
+    }
+    return changed;
 }
 
-function copyGeneric(target: Float32Array | Int32Array, base: number, src: ArrayLike<number>, from: number, n: number): void {
-    for (let i = 0; i < n; i++) target[base + i] = src[from + i];
+function copyGeneric(target: Float32Array | Int32Array, base: number, src: ArrayLike<number>, from: number, n: number): boolean {
+    let changed = false;
+    for (let i = 0; i < n; i++) {
+        const before = target[base + i];
+        target[base + i] = src[from + i];
+        if (target[base + i] !== before) changed = true;
+    }
+    return changed;
 }

@@ -398,3 +398,42 @@ describe('slots', () => {
         expect(program.bindingSignature()).not.toBe(first);
     });
 });
+
+describe('write-if-changed', () => {
+    const BLOCK = layout([
+        { name: 'u_test.u_value', type: 'f32', offset: 0, size: 4 },
+        { name: 'u_test.u_flag', type: 'i32', offset: 4, size: 4 },
+        { name: 'u_test.u_color', type: 'vec3<f32>', offset: 16, size: 12 },
+    ], 64);
+    function arena() {
+        const offsets: number[] = [];
+        const device = { createBuffer: (d: any) => ({ label: d.label, size: d.size, usage: d.usage, destroy() {} }),
+                         writeBuffer: (_b: unknown, offset: number) => offsets.push(offset) } as any;
+        return { device, offsets };
+    }
+
+    it('keeps its slot when a draw re-sends the values it already holds', () => {
+        // The renderer re-sends per-pass values (camera, lights) before every draw: an unchanged block
+        // must not take a fresh slot and upload a copy for each.
+        const { device, offsets } = arena();
+        const set = new UniformSet(BLOCK, device, 256, 'p');
+        set.set('u_value', 0.1); set.set('u_flag', true); set.set('u_color', [0.2, 0.4, 0.6]);
+        set.flush(device);
+        for (let draw = 0; draw < 3; draw++) {
+            set.set('u_value', 0.1);                       // not representable: judged after float rounding
+            set.set('u_flag', true);                       // a bool, stored as the i32 1
+            set.set('u_color', new Float32Array([0.2, 0.4, 0.6]));
+            set.flush(device);
+        }
+        expect(offsets).toEqual([0]);
+    });
+
+    it('moves on the moment one component changes', () => {
+        const { device, offsets } = arena();
+        const set = new UniformSet(BLOCK, device, 256, 'p');
+        set.set('u_color', [1, 1, 1]); set.flush(device);
+        set.set('u_color', [1, 1, 0.5]); set.flush(device);
+        set.set('u_flag', true); set.flush(device);       // from the initial 0
+        expect(offsets).toEqual([0, 256, 512]);
+    });
+});
