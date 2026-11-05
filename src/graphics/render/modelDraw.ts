@@ -4,7 +4,7 @@ import { Material, CustomMaterial } from '../material';
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderPipeline } from '../rhi/resources';
 import type { BlendState, CullMode, DepthStencilState } from '../rhi/types';
-import { customShaderModules, customShaderReady, customShaderResources, usedResources } from '../systems/customShaders';
+import { customPipelineReflection, customShaderReady } from '../systems/customShaders';
 import type { Texture } from '../texture';
 import type { FrameView } from './frameView';
 import type { PassEncoder } from './passEncoder';
@@ -213,17 +213,10 @@ export class ModelDraw {
             if (!state.viaRHI) { this._materials.applyCustom(mat); return false; }
             this._materials.applyCustom(mat, true);   // u_time, u_viewPos + user VALUE uniforms
             // See `PostEffects.screenMaterialPass` for what the WGSL is and why the vertex stage is a
-            // separate module. Absent on WebGL2 and for a material that could not translate.
-            const customWgsl = customShaderModules(mat);
-            const resources = customShaderResources(state.customMode, mat.uniforms);
-            const pipeline = this._pipelines.get(shaderType, {
-                resources: state.customMode === 'forward'
-                    ? usedResources(resources, customWgsl?.fragment, customWgsl?.vertex)
-                    : resources,
-                ...(customWgsl ? { wgsl: customWgsl.fragment, entryPoints: { fragment: 'main' },
-                                   vertexWgsl: { wgsl: customWgsl.vertex,
-                                                 entryPoint: customWgsl.vertexEntry } } : {}),
-            }, {
+            // separate module (absent on WebGL2 and for a material that could not translate). The
+            // reflection is kept per material, so the same object comes back and the memo hits.
+            const pipeline = this._pipelines.memoized(state.memo, mat, shaderType,
+                                                      customPipelineReflection(mat, state.customMode), {
                 cullMode: ModelDraw.cullFor(mat.config.side),
                 depthStencil: state.depthStencil,
                 blend: state.blend,
