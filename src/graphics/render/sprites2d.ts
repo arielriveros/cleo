@@ -1,4 +1,5 @@
 import { vec3, mat4 } from 'gl-matrix';
+import { dissolveOf } from '../objectData';
 import type { Camera } from '../../core/camera';
 import { Frustum } from '../../core/frustum';
 import { isEditorOnlyNode } from '../../core/scene/editorNodes';
@@ -377,9 +378,17 @@ export class Sprite2DPasses {
             ? node.overdrive * Math.pow(this._view.exposure, weight - 1) : node.overdrive);
 
         // Set material uniforms + bind textures
+        let record = 0;
         if (pipeline) {
             this._materials.applyProperties(material);
             pass!.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
+            // The Basic program reads the matrix, the dissolve and the tile from the per-object table.
+            if (this._bindGroups.declaresObjectData(pipeline)) {
+                const objects = this._sys.objects;
+                record = objects.rowFor(node, spriteMatrix, dissolveOf(node.effectiveFade), false, 0,
+                                        u1 - u0, v1 - v0, u0, v0);
+                pass!.setBindGroup(2, this._bindGroups.objectDataGroup(pipeline, objects.texture));
+            }
         } else this._materials.apply(material);
 
         const materialConfig = node.sprite.material.config;
@@ -395,7 +404,7 @@ export class Sprite2DPasses {
         }
 
         const topology = materialConfig.wireframe ? 'line-list' : 'triangle-list';
-        if (!pipeline || !this._passes.recordDraw(pass!, node.sprite.mesh, 0, 0))
+        if (!pipeline || !this._passes.recordDraw(pass!, node.sprite.mesh, 0, 0, -1, record))
             node.sprite.mesh.draw(topology);
         if (!pipeline && additive) this._passes.restoreDefaultBlend();
 
