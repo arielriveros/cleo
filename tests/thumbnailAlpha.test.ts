@@ -47,7 +47,7 @@ describe('offscreen capture alpha', () => {
         // Without this the capture is a solid rectangle the colour of the thumbnail clear, which is
         // transparent BLACK — so the failure reads as a renderer that drew nothing rather than as a
         // missing uniform, and that is what made it survive a release.
-        expect(methodBody('_presentThumbnail')).toContain("setUniform('u_alphaFromDepth', 1.0)");
+        expect(methodBody('presentThumbnail')).toContain("setUniform('u_alphaFromDepth', 1.0)");
     });
 
     it('puts the on-screen resolve back to opaque', () => {

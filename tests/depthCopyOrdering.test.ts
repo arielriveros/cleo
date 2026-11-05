@@ -58,10 +58,10 @@ describe('_copyDepth', () => {
         // The chain that made this visible: the thumbnail branch snapshots, then resolves alpha from
         // the snapshot. If either half moves, the other is no longer guarded by the two cases above.
         const post = methodBody('_applyPostProcessing');
-        const branch = post.slice(post.indexOf('if (this._presentTarget)'));
+        const branch = post.slice(post.indexOf('if (this._capture.presentTarget)'));
         expect(branch.indexOf('this._copySceneDepth()')).toBeGreaterThan(-1);
         expect(branch.indexOf('this._copySceneDepth()'))
-            .toBeLessThan(branch.indexOf('this._presentThumbnail()'));
-        expect(methodBody('_presentThumbnail')).toContain('this._temporal.depthSource()');
+            .toBeLessThan(branch.indexOf('this._capture.presentThumbnail()'));
+        expect(methodBody('presentThumbnail')).toContain('this._temporal.depthSource()');
     });
 });

@@ -204,7 +204,7 @@ export class AutoExposure {
      * Decide which exposure is in force before anything reads it.
      *
      * Called at the TOP of `_applyPostProcessing`, above the thumbnail early-return, and that placement
-     * is the point: `screenshotOffscreen` sets `_presentTarget`, which returns before the metering pass
+     * is the point: `screenshotOffscreen` sets `Capture.presentTarget`, which returns before the metering pass
      * ever runs — so a thumbnail never meters, but without this it would still render at whatever the
      * last live frame had adapted to. Two thumbnails captured a second apart came out at different
      * brightnesses, and the whole asset library shifted whenever the scene's exposure moved.
@@ -217,7 +217,7 @@ export class AutoExposure {
         // saved while auto-exposure had opened up on a dim interior banks a very large exposure, and
         // every preview in the editor then renders blown out.
         //
-        // `_presentTarget` counts as a preview whichever tab it was taken from: that is the offscreen
+        // `Capture.presentTarget` counts as a preview whichever tab it was taken from: that is the offscreen
         // thumbnail path, and a thumbnail keyed to the scene's momentary exposure is the inconsistency
         // this whole split exists to remove.
         if (!this.exposureMeteringAllowed || this._host.presentTarget) {

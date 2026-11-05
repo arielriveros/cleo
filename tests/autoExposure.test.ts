@@ -215,12 +215,12 @@ describe('the authored exposure is kept apart from the metered one', () => {
     });
 
     it('resolves the exposure ABOVE the thumbnail early-return', () => {
-        // The ordering IS the feature. `screenshotOffscreen` sets `_presentTarget`, and
+        // The ordering IS the feature. `screenshotOffscreen` sets `Capture.presentTarget`, and
         // `_applyPostProcessing` returns on it before the metering pass — so a thumbnail never meters,
         // and without a resolve above that return it would render at the scene's last metered value.
         // Two thumbnails a second apart then come out at different brightnesses.
         const post = RENDERER.slice(RENDERER.indexOf('private _applyPostProcessing('));
-        const body = post.slice(0, post.indexOf('this._presentThumbnail()'));
+        const body = post.slice(0, post.indexOf('this._capture.presentThumbnail()'));
         expect(body).toContain('this._autoExposure.resolveExposure();');
     });
 
