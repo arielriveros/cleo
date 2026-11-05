@@ -7,6 +7,7 @@ import { ShaderManager } from '../src/graphics/systems/shaderManager';
 import { PARTICLE_PROGRAMS } from '../src/graphics/particles/particleRenderer';
 import type { ShaderProgram } from '../src/graphics/rhi/shaderProgram';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
+import { rendererSource } from './helpers/rendererSource';
 
 const VALLEY_EXAMPLE = await readExample(join(__dirname, '..', 'applications', 'editor', 'public', 'examples', 'valley'));
 
@@ -16,7 +17,7 @@ const VALLEY_EXAMPLE = await readExample(join(__dirname, '..', 'applications', '
  * would build it mid-play with a warning), and a list that names a program the renderer cannot build.
  */
 
-const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8').replace(/\r\n/g, '\n');
+const RENDERER = rendererSource().replace(/\r\n/g, '\n');
 
 function tableNames(): string[] {
     const start = RENDERER.indexOf('private _programTable()');

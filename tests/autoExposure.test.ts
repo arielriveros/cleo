@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { REFERENCE_ILLUMINANCE } from '../src/graphics/lighting';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * The auto-exposure maths, ported to JS so the parts that are easy to get wrong can be checked without
@@ -197,7 +198,7 @@ describe('adaptation', () => {
 });
 
 describe('the authored exposure is kept apart from the metered one', () => {
-    const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+    const RENDERER = rendererSource();
 
     it('serializes the AUTHORED value, not whatever the meter was at', () => {
         // `exposure: this._exposure` made a scene's saved exposure depend on where the camera happened
@@ -295,7 +296,7 @@ describe('metering is suppressed outside the scene tab', () => {
 describe('the shader and the renderer agree on the window', () => {
     const SHADER = readFileSync(
         join(__dirname, '..', 'src', 'graphics', 'shaders', 'wgsl', 'exposureMeter.wgsl'), 'utf-8');
-    const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+    const RENDERER = rendererSource();
 
     it('uses the same encode window on both sides', () => {
         // Two copies of one constant, and a disagreement is silent: the exposure just settles somewhere

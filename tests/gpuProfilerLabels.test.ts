@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { PASS_LABEL_TO_SCOPE, RENDER_PASSES, scopeForPassLabel } from '../src/graphics/gpuProfiler';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * The label/scope contract, checked against renderer.ts's actual source text.
@@ -18,7 +19,7 @@ import { PASS_LABEL_TO_SCOPE, RENDER_PASSES, scopeForPassLabel } from '../src/gr
  * branch that no headless run reaches.
  */
 
-const RENDERER = readFileSync(join(__dirname, '../src/graphics/renderer.ts'), 'utf8');
+const RENDERER = rendererSource();
 
 /**
  * Every pass label renderer.ts passes as a literal.

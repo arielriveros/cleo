@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { rendererSource } from './helpers/rendererSource';
 
 // The cloud temporal/noise work is GL-bound and so mostly out of scope for this DOM-free suite (see
 // the policy note in vitest.config.ts). What IS testable is the part that silently produces a wrong
@@ -8,7 +9,7 @@ import { join } from 'node:path';
 // written pieces of code (the renderer's constants and the shader's constants) have to agree.
 
 const SRC = join(__dirname, '..', 'src');
-const renderer = readFileSync(join(SRC, 'graphics', 'renderer.ts'), 'utf8');
+const renderer = rendererSource();
 // The cloud shaders are authored in WGSL now; the GLSL WebGL2 runs is generated from these at build
 // time. Every assertion below moved with them, so they still pin the same behaviour — but against the
 // source somebody edits rather than against generated text.

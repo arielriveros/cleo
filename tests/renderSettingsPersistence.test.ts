@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Every renderer setting has to survive a refresh, a publish and an export — and the way it fails is
@@ -27,7 +28,7 @@ import { join } from 'path';
 // matches. `appliedKeys` then came back empty and this file went red on the developer's machine while
 // staying green in CI, which is the wrong way round for a guard whose whole job is to catch a setting
 // someone forgot to wire up locally.
-const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8')
+const RENDERER = rendererSource()
     .replace(/\r\n/g, '\n');
 
 /** The block between a marker and the first line that closes it at the given indent. */

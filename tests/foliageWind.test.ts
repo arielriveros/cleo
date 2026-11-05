@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
+import { rendererSource } from './helpers/rendererSource';
 // @ts-expect-error -- plain .mjs shared with the bundler configs; it has no declarations.
 import { translateWgsl } from '../tools/wgslTranslate.mjs';
 // @ts-expect-error -- same.
@@ -121,7 +122,7 @@ describe('leaves move on their own, without leaving the tree', () => {
 
 describe('leaf wiring', () => {
     const chunk = readFileSync(join(WGSL, 'chunks/foliageWind.wgsl'), 'utf-8');
-    const renderer = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+    const renderer = rendererSource();
 
     it('only the leaves role runs the leaf layers; bark rides the shared bend unchanged', () => {
         expect(chunk).toContain('if (w.response.w < 0.5) { return trunk; }');
@@ -220,7 +221,7 @@ describe('wind variants', () => {
 // ---- Renderer wiring --------------------------------------------------------------------------------
 
 describe('renderer wiring', () => {
-    const renderer = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+    const renderer = rendererSource();
 
     it('never sways the impostor bucket, and only buckets that start inside the fade', () => {
         expect(renderer).toContain('const real = !!wind && slot < billboardBucket;');

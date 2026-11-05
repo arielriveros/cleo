@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Per-frame camera and sun reach the MATERIAL uniform block on every draw path.
@@ -25,7 +26,7 @@ import { join } from 'path';
  * baseline can catch that, because every baseline is a single fixed camera.
  */
 
-const SRC = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+const SRC = rendererSource();
 
 /**
  * The inline write that bypasses the helper, in any of the spellings the call sites used. The helper itself

@@ -6,6 +6,7 @@ import {
     type ParticleLocalLight,
 } from '../src/graphics/particles/particleLighting';
 import { distanceAttenuation, REFERENCE_ILLUMINANCE } from '../src/graphics/lighting';
+import { rendererSource } from './helpers/rendererSource';
 
 const point = (position: number[], intensity = 1, range = 10): ParticleLocalLight =>
     ({ position, intensity, color: [1, 1, 1], range, sourceRadius: 0.05 });
@@ -60,7 +61,7 @@ describe('the lit-particle ambient', () => {
     it('is no longer invented from the sun', () => {
         // The draw frame used to fill lit particles with a quarter of the sun plus 0.03, whatever the
         // scene's ambient was: a moonless night still lit its smoke.
-        const src = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+        const src = rendererSource();
         expect(src).not.toContain('sunColor[0] * 0.25 + 0.03');
         expect(src).toMatch(/const ambient = this\._internalAmbient\(scene\);/);
     });

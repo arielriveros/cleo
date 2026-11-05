@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Where the decal passes sit in the frame, and the few lines of state each one cannot get wrong.
@@ -12,7 +13,7 @@ import { join } from 'path';
  */
 
 const CRLF = new RegExp(String.raw`\r\n`, 'g');
-const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8').replace(CRLF, '\n');
+const RENDERER = rendererSource().replace(CRLF, '\n');
 const WGSL = (name: string) =>
     readFileSync(join(__dirname, '..', 'src', 'graphics', 'shaders', 'wgsl', name), 'utf-8').replace(CRLF, '\n');
 

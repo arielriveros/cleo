@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { rendererSource } from './helpers/rendererSource';
 
 // Bloom is GL-bound and so mostly out of scope for this DOM-free suite (see the policy note in
 // vitest.config.ts). What IS worth pinning is the class of failure this pass has actually shipped
@@ -9,7 +10,7 @@ import { join } from 'node:path';
 // trips a compile error, a type error, or a GL warning.
 
 const SRC = join(__dirname, '..', 'src');
-const renderer = readFileSync(join(SRC, 'graphics', 'renderer.ts'), 'utf8');
+const renderer = rendererSource();
 // The three bloom passes are authored in WGSL now; the GLSL for WebGL2 is generated from these at
 // build time. The assertions below moved with them, so they still pin the same behaviour — but against
 // the source somebody edits rather than against generated text.

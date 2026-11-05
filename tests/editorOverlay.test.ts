@@ -4,6 +4,7 @@ import { join } from 'path';
 import { Node } from '../src/core/scene/nodes/node';
 import { isEditorOnlyNode, markEditorOnly } from '../src/core/scene/editorNodes';
 import { DEFAULT_BLEND, OVERLAY_BLEND, OVERLAY_COMPOSITE_BLEND } from '../src/graphics/rhi/types';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * The editor overlay layer: grid, gizmos, helper wireframes and helper icons are drawn into a buffer
@@ -16,7 +17,7 @@ import { DEFAULT_BLEND, OVERLAY_BLEND, OVERLAY_COMPOSITE_BLEND } from '../src/gr
  *     into the post chain, and looks completely normal until someone turns bloom up.
  */
 
-const RENDERER = readFileSync(join(__dirname, '../src/graphics/renderer.ts'), 'utf8');
+const RENDERER = rendererSource();
 
 describe('the chrome predicate', () => {
     it('is opt-in, not derived from the name', () => {

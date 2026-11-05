@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Which passes rasterize with the TAA jitter, and which do not.
@@ -21,7 +22,7 @@ import { join } from 'node:path';
  * new one cannot be added without someone deciding which side of the boundary it is on.
  */
 
-const RENDERER = readFileSync(join(__dirname, '../src/graphics/renderer.ts'), 'utf8')
+const RENDERER = rendererSource()
     .replace(/\r\n/g, '\n');
 
 /** The method a source offset sits inside, by the nearest preceding member declaration. */

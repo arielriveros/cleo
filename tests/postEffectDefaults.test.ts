@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { DEFAULT_POST_CHAIN } from '../src/graphics/renderGraph/chain';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Four effects were added to the default post chain — depth of field, lens flare, vignette and film
@@ -22,7 +23,7 @@ import { DEFAULT_POST_CHAIN } from '../src/graphics/renderGraph/chain';
  * needs a GPU.
  */
 
-const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8')
+const RENDERER = rendererSource()
     .replace(/\r\n/g, '\n');
 
 /** The initializer of a `private _name... = value;` field declaration. */

@@ -4,6 +4,7 @@ import { join, dirname } from 'path';
 import { resolveIncludes } from '../tools/shaderIncludes.mjs';
 import { findStructs, findResources, stripLineComments } from '../tools/wgslLayout.mjs';
 import { Material } from '../src/graphics/material';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Static guards on the Cel material's shader contract.
@@ -137,7 +138,7 @@ describe('group 0 matches the renderer texture-unit table', () => {
 });
 
 describe('the renderer knows where the ramp binds', () => {
-    const renderer = () => read(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'));
+    const renderer = () => rendererSource();
 
     it('maps rampMap to texture unit 1', () => {
         // `_textureSlot` falls through to unit 0, so an unmapped slot does not error — it binds OVER the

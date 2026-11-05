@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * The offscreen-capture alpha contract.
@@ -25,7 +26,7 @@ import { join } from 'path';
  */
 
 const CRLF = new RegExp(String.raw`\r\n`, 'g');
-const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8')
+const RENDERER = rendererSource()
     .replace(CRLF, '\n');
 
 /** The body of a `private _name(...)` method, up to its closing brace at class indentation. */

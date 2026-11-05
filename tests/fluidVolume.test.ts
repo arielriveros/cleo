@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { FLUID_BRICK, OCCUPANCY_MARGIN, floatToHalf, floatsToHalves, occupancyFromVolume } from '../src/core/scene/nodes/fluidVolumeNode';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Smoke-and-fire volumes: the half-float packing a CPU-filled volume goes through on WebGPU, and where
@@ -10,7 +11,7 @@ import { FLUID_BRICK, OCCUPANCY_MARGIN, floatToHalf, floatsToHalves, occupancyFr
  */
 
 const CRLF = new RegExp(String.raw`\r\n`, 'g');
-const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8').replace(CRLF, '\n');
+const RENDERER = rendererSource().replace(CRLF, '\n');
 const WGSL = readFileSync(join(__dirname, '..', 'src', 'graphics', 'shaders', 'wgsl', 'fluidVolume.wgsl'), 'utf-8').replace(CRLF, '\n');
 
 /** binary16 bits back to a number, for round-trip checks. */
