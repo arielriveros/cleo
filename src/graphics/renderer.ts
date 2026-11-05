@@ -993,11 +993,16 @@ export class Renderer {
     // Compile and register the runtime program for every custom material in the scene. Must run before
     // any pass, so `getShader(material.type)` never throws; a failure registers a magenta fallback.
     private _ensureCustomShaders(scene: Scene): void {
-        for (const node of scene.models) {
+        // Not the landscape chunks one by one: they all wear their terrain's one material, checked once.
+        for (const node of scene.modelsExceptTerrain) {
             // Every submesh material, not just the first: a merged model can carry a custom material on
             // one range, and a missing program makes getShader throw during the VAO/bind that follows.
             for (const mat of node.model.materials)
                 if (mat instanceof CustomMaterial) ensureCustomShader(mat);
+        }
+        for (const landscape of scene.landscapes) {
+            const mat = landscape.terrain.material;
+            if (mat instanceof CustomMaterial) ensureCustomShader(mat);
         }
         // Screen-space post-process materials live on the active camera, not on meshes.
         const screenMats = scene.activeCamera?.screenMaterials;
@@ -1006,8 +1011,10 @@ export class Renderer {
 
     private _ensurePackedTextures(scene: Scene): void {
         const packer = TexturePacker.Instance;
-        // Per submesh material — a merged model's second range has its own maps to channel-pack.
-        for (const node of scene.models) for (const mat of node.model.materials) packer.sync(mat, this._view.frameIndex);
+        // Per submesh material — a merged model's second range has its own maps to channel-pack. Not the
+        // landscape chunks: their terrain material's layers are synced per landscape just below
+        // (`sync` has nothing to do for a 'terrain' material).
+        for (const node of scene.modelsExceptTerrain) for (const mat of node.model.materials) packer.sync(mat, this._view.frameIndex);
         for (const node of scene.landscapes) node.terrain.syncPackedLayers(this._view.frameIndex, this._terrainLayerTextureSize);
         // Foliage prototypes are not scene models, so they were never synced: a foliage tree never got
         // its ORM pack, nor its cutout's edge-padded colour. Every level of every mesh layer, so a LOD

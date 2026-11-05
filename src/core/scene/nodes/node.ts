@@ -111,6 +111,11 @@ export class Node {
   // `worldTransform` in place between frames would otherwise make the next comparison see no change.
   private _worldSnapshot: Float32Array | null = null;
   private _transformVersion: number = 0;
+  // What the world matrix was last composed from (see updateTransforms): position, quaternion and scale,
+  // and the parent matrix it was multiplied by, with that parent's version (-1: not one to trust).
+  private readonly _composedFrom = new Float32Array(10);
+  private _composedParent: mat4 | null | undefined = undefined;
+  private _composedParentVersion: number = -1;
 
   protected readonly _position: vec3;
   protected readonly _translationMatrix: mat4;
@@ -486,28 +491,59 @@ export class Node {
    *                             it from that parent's transform.
    */
   public updateTransforms(parentWorldTransform: mat4 | null = null): void {
-    mat4.fromRotationTranslationScale(this._localTransform, this._quaternion, this._position, this._scale);
-
-    if (parentWorldTransform)
-      mat4.multiply(this._worldTransform, parentWorldTransform, this._localTransform);
-    else
-      mat4.copy(this._worldTransform, this._localTransform);
-
-    this._worldCacheDirty = true;
+    // The bounds caches stay dirtied on every call, whatever happens below — bounds also move with
+    // geometry, children and sizes that never touch this matrix.
     this._worldSphereDirty = true;
     this._worldBoxDirty = true;
 
-    // The caches above stay dirtied every frame — bounds also move with geometry, children and sizes that
-    // never touch this matrix. The version moves only when the matrix does.
+    // Most nodes do not move from one frame to the next — a landscape alone is ~1,000 chunk nodes — and
+    // their matrix would be recomposed into exactly what it already holds. It is skipped when everything
+    // it is composed from is what it was last composed from: the local position, rotation and scale (by
+    // value: the arrays are live and can be written directly), and the parent matrix — the same object,
+    // at the same version. A parent's version is trusted only for the parent's OWN matrix: a caller may
+    // pass another (`finishParse` before attaching, `updateTransforms()` on a parented node), and versions
+    // are per-node counters that two parents can share. The live matrix must also still equal the
+    // snapshot, so a direct write into it is overwritten as before.
+    const parent = this._parent;
+    const parentVersion = parentWorldTransform === null ? 0
+      : parent !== null && parentWorldTransform === parent._worldTransform ? parent._transformVersion : -1;
+    const p = this._position, q = this._quaternion, sc = this._scale, c = this._composedFrom;
     const world = this._worldTransform;
     const snapshot = this._worldSnapshot;
+    if (parentVersion >= 0 && parentWorldTransform === this._composedParent && parentVersion === this._composedParentVersion
+        && c[0] === p[0] && c[1] === p[1] && c[2] === p[2]
+        && c[3] === q[0] && c[4] === q[1] && c[5] === q[2] && c[6] === q[3]
+        && c[7] === sc[0] && c[8] === sc[1] && c[9] === sc[2]
+        && snapshot !== null && Node._sameMatrix(world, snapshot)) {
+      for (const child of this._children) {
+        if (child._spawned)
+          child.updateTransforms(world);
+      }
+      return;
+    }
+
+    mat4.fromRotationTranslationScale(this._localTransform, q, p, sc);
+
+    if (parentWorldTransform)
+      mat4.multiply(world, parentWorldTransform, this._localTransform);
+    else
+      mat4.copy(world, this._localTransform);
+
+    c[0] = p[0]; c[1] = p[1]; c[2] = p[2];
+    c[3] = q[0]; c[4] = q[1]; c[5] = q[2]; c[6] = q[3];
+    c[7] = sc[0]; c[8] = sc[1]; c[9] = sc[2];
+    this._composedParent = parentWorldTransform;
+    this._composedParentVersion = parentVersion;
+
+    this._worldCacheDirty = true;
+
+    // The version moves only when the matrix does.
     if (!snapshot) {
       this._worldSnapshot = new Float32Array(world);
       this._transformVersion++;
-    } else {
-      for (let i = 0; i < 16; i++) {
-        if (snapshot[i] !== world[i]) { snapshot.set(world); this._transformVersion++; break; }
-      }
+    } else if (!Node._sameMatrix(world, snapshot)) {
+      snapshot.set(world);
+      this._transformVersion++;
     }
 
     // Dormant subtrees are skipped: nothing reads their matrices, and spawn() recomputes them first.
@@ -515,6 +551,11 @@ export class Node {
       if (child._spawned)
         child.updateTransforms(this._worldTransform);
     }
+  }
+
+  private static _sameMatrix(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+    for (let i = 0; i < 16; i++) if (a[i] !== b[i]) return false;
+    return true;
   }
 
   private _updateWorldCache(): void {

@@ -103,6 +103,8 @@ export class Scene {
     private _pinnedCamera: CameraNode | null = null;
     private _lights: Set<LightNode>;
     private _models: Set<ModelNode>;
+    /** `_models` minus the landscapes' generated chunks (see {@link modelsExceptTerrain}). */
+    private _modelsExceptTerrain: Set<ModelNode>;
     private _sprites: Set<SpriteNode>;
     private _landscapes: Set<LandscapeNode>;
     private _tilemaps: Set<TilemapNode> = new Set();
@@ -205,6 +207,7 @@ export class Scene {
         this._nodes = new Set();
         this._lights = new Set();
         this._models = new Set();
+        this._modelsExceptTerrain = new Set();
         this._sprites = new Set();
         this._landscapes = new Set();
         this._tilemaps = new Set();
@@ -823,6 +826,7 @@ export class Scene {
         this._cameras = new Set();
         this._lights = new Set();
         this._models = new Set();
+        this._modelsExceptTerrain = new Set();
         this._sprites = new Set();
         this._landscapes = new Set();
         this._tilemaps = new Set();
@@ -855,8 +859,10 @@ export class Scene {
         for (const node of this._nodes) {
             if (node instanceof LightNode)
                 this._lights.add(node);
-            if (node instanceof ModelNode)
+            if (node instanceof ModelNode) {
                 this._models.add(node);
+                if (!node.isTerrainChunk) this._modelsExceptTerrain.add(node);
+            }
             if (node instanceof SpriteNode)
                 this._sprites.add(node);
             if (node instanceof LandscapeNode)
@@ -1111,6 +1117,18 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._models;
+    }
+
+    /**
+     * {@link models} without the landscapes' generated chunk nodes. A landscape is ~1,000 of them, so a
+     * per-model loop that has nothing to do for a chunk (they never move, never carry a custom material,
+     * and share one terrain material) walks this list and visits the chunks through their landscape only
+     * when it has to — see `LandscapeNode.chunkNodes`.
+     */
+    public get modelsExceptTerrain(): Set<ModelNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._modelsExceptTerrain;
     }
 
     public get lodGroups(): Set<LodGroupNode> {

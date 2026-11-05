@@ -8,6 +8,7 @@ import { TerrainLodSettings } from '../../terrain/terrain';
 import type { Terrain } from '../../terrain/terrain';
 import { GpuOcclusion, GPU_OCCLUSION_BUDGET } from '../gpuOcclusion';
 import { OcclusionBuffer } from '../occlusion/occlusionBuffer';
+import { OcclusionReuseKey } from '../occlusion/occlusionReuse';
 import { TerrainOccluder } from '../occlusion/terrainOccluder';
 import type { OccluderGrid } from '../occlusion/terrainOccluder';
 import { frameStats } from '../renderStats';
@@ -99,6 +100,9 @@ export class Visibility {
     /** Consecutive built frames in which occlusion hid nothing, and the frames skipped since (see `buildOcclusion`). */
     private _occlusionIdleFrames = 0;
     private _occlusionSkipped = 0;
+
+    /** What `occlusion` was last fully built from: a frame with the same inputs keeps it (see `buildOcclusion`). */
+    private readonly _occlusionKey = new OcclusionReuseKey();
 
     // Distance-based terrain LOD: chunks past distance1/distance2 drop to a grid decimated by step1/step2
     // (triangles scale by 1/step²). Applied per chunk, per frame, before the shadow passes.
@@ -328,8 +332,50 @@ export class Visibility {
         this._occlusionSkipped = 0;
         const start = performance.now();
         const eye = this._view.camera.position;
+        const all = this.occlusionMode === 'all';
+
+        // Everything the buffer is built from. When all of it equals what the last COMPLETE build saw — the
+        // editor's parked camera, every frame — the buffer already holds this frame's answer: keep it and
+        // only start its query counters again (they feed `lastHits` above). Rasterizing the same occluders
+        // again cost ~1.4 ms in the Valley. The frustum and the terrain tiles' order and strides all derive
+        // from `viewProj` and the eye; a terrain occluder is rebuilt only on a heights or origin change.
+        const key = this._occlusionKey;
+        key.begin();
+        key.ref(this._view.camera);
+        key.ref(scene.landscapes);              // reallocated whenever the scene's node lists rebuild
+        key.ref(all ? scene.occluders : null);
+        key.nums(this._view.viewProj, 16);
+        key.nums(eye, 3);
+        for (const landscape of scene.landscapes) {
+            key.num(landscape.visible ? 1 : 0);
+            key.num(landscape.terrain.heightsVersion);
+            key.nums(landscape.terrain.origin, 3);
+        }
+        if (all) {
+            const min = this._occMin, max = this._occMax;
+            for (const occluder of scene.occluders) {
+                key.num(occluder.enabled ? 1 : 0);
+                key.num(occluder.visible ? 1 : 0);
+                key.num(occluder.transformVersion);
+                occluder.localBox(min, max);
+                key.nums(min, 3);
+                key.nums(max, 3);
+            }
+        }
+        if (key.matches()) {
+            this.occlusion.resetQueryStats();
+            this._occlusionActive = true;
+            this._occlusionCamera = this._view.camera;
+            this.occlusionFrameStats.triangles = this.occlusion.stats.triangles;
+            this.occlusionFrameStats.ms = performance.now() - start;
+            return;
+        }
+
         this.occlusion.begin(this._view.viewProj);
         let any = false;
+        // False when a landscape sat out this build (its occluder is waiting to be rebuilt): the buffer then
+        // lacks an occluder its key describes, so it must not be kept.
+        let complete = true;
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
             const terrain = landscape.terrain;
@@ -343,7 +389,7 @@ export class Visibility {
                 // rebuilds at most twice a second — and until it does, this landscape occludes nothing:
                 // a stale mesh could stand above ground the brush just lowered.
                 const now = performance.now();
-                if (entry && now - entry.builtAt < 500) continue;
+                if (entry && now - entry.builtAt < 500) { complete = false; continue; }
                 entry = {
                     version: terrain.heightsVersion,
                     builtAt: now,
@@ -356,7 +402,7 @@ export class Visibility {
             entry.occluder.emit(this.frustum, eye, this._rasterOccluder, undefined, this._occluderHidden);
             any = true;
         }
-        if (this.occlusionMode === 'all') {
+        if (all) {
             const min = this._occMin, max = this._occMax;
             for (const occluder of scene.occluders) {
                 if (!occluder.enabled || !occluder.visible) continue;
@@ -365,8 +411,9 @@ export class Visibility {
                 any = true;
             }
         }
-        if (!any) return;
+        if (!any) { key.invalidate(); return; }
         this.occlusion.finish();
+        if (complete) key.commit(); else key.invalidate();
         this._occlusionActive = true;
         this._occlusionCamera = this._view.camera;
         // Kept until after resetFrameStats, which runs later in the frame. Inside the `prepare` scope

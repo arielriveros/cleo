@@ -168,6 +168,8 @@ export interface TerrainChunk {
     lod: number;
     /** Vertex steps of the coarse index buffers currently uploaded, or null if none are. */
     lodSteps: [number, number] | null;
+    /** The `LandscapeNode.updateLod` stamp this chunk last got its level under; -1 before the first. */
+    lodStamp: number;
 }
 
 /** Distance-based terrain LOD configuration (owned by the Renderer, applied per chunk per frame). */
@@ -363,7 +365,7 @@ export class Terrain {
                 const chunk: TerrainChunk = {
                     model: new Model(geometry, this._material),
                     c0, r0, c1, r1, dirty: false,
-                    minY: 0, maxY: 0, lod: 0, lodSteps: null,
+                    minY: 0, maxY: 0, lod: 0, lodSteps: null, lodStamp: -1,
                 };
                 this._updateChunkBounds(chunk);
                 this._chunks.push(chunk);

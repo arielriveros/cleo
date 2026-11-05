@@ -5,6 +5,7 @@ import { ModelNode } from '../../core/scene/nodes/modelNode';
 import { Scene } from '../../core/scene/scene';
 import { Framebuffer } from '../framebuffer';
 import { TemporalHistory } from './temporalHistory';
+import { LandscapeHistory } from './landscapeHistory';
 import { device } from '../rhi/deviceHandle';
 import type { RenderTarget, RenderPipeline } from '../rhi/resources';
 import { GLState } from '../systems/glState';
@@ -111,6 +112,11 @@ export class TemporalPasses {
     // the screen on the frame it appears.
     private readonly _prevXform = new WeakMap<ModelNode, { world: mat4; bones: Float32Array | null; frame: number }>();
 
+    // Terrain chunks are not in `_prevXform`: their history derives from their landscape's (see
+    // LandscapeHistory), so ~1,000 chunk snapshots are not copied and compared every frame.
+    private readonly _landscapeHistory = new LandscapeHistory();
+    private readonly _chunkPrevScratch = mat4.create();
+
     // Whether anything moved this frame. Widens the motion-blur gate, which used to ask only whether
     // the CAMERA moved — the question that made a moving object in front of a parked camera produce
     // nothing at all.
@@ -188,7 +194,22 @@ export class TemporalPasses {
      * A playing animator counts even when the node transform is identical, which is the whole point of
      * skinned velocity: a character running on the spot moves every vertex and no matrix.
      */
+    /**
+     * `node`'s world matrix last frame, or null when it has no usable history (the caller then uses this
+     * frame's, which writes zero motion). A chunk's is derived from its landscape's into a scratch, which
+     * the caller uploads before asking again.
+     */
+    private _prevWorldOf(node: ModelNode): mat4 | null {
+        const frame = this._view.frameIndex;
+        if (node.isTerrainChunk)
+            return node.parent ? this._landscapeHistory.prevWorld(node.parent, node, frame, this._chunkPrevScratch) : null;
+        const prev = this._prevXform.get(node);
+        return prev !== undefined && prev.frame === frame - 1 ? prev.world : null;
+    }
+
     private _nodeMoved(node: ModelNode): boolean {
+        // A chunk moves exactly when its landscape does: nothing moves a chunk within it.
+        if (node.isTerrainChunk) return !!node.parent && this._landscapeHistory.moved(node.parent, this._view.frameIndex);
         const prev = this._prevXform.get(node);
         if (prev === undefined || prev.frame !== this._view.frameIndex - 1) return false;
         if (!mat4.exactEquals(prev.world, node.worldTransform)) return true;
@@ -218,9 +239,16 @@ export class TemporalPasses {
     public detectObjectMotion(scene: Scene): void {
         this.anyObjectMoved = false;
         if (!this._velocityWanted()) return;
-        for (const node of scene.models) {
+        for (const node of scene.modelsExceptTerrain) {
             if (!this._sys.geometry.inGBuffer(node)) continue;
             if (this._nodeMoved(node)) { this.anyObjectMoved = true; return; }
+        }
+        // Chunks through their landscape: looked at one by one only when it moved.
+        const frame = this._view.frameIndex;
+        for (const landscape of scene.landscapes) {
+            if (!this._landscapeHistory.moved(landscape, frame)) continue;
+            for (const chunk of landscape.chunkNodes)
+                if (this._sys.geometry.inGBuffer(chunk)) { this.anyObjectMoved = true; return; }
         }
     }
 
@@ -234,7 +262,9 @@ export class TemporalPasses {
      */
     public capturePrevTransforms(scene: Scene): void {
         if (!this._velocityWanted()) return;
-        for (const node of scene.models) {
+        // A landscape's chunks remember through it: one snapshot instead of one per chunk.
+        for (const landscape of scene.landscapes) this._landscapeHistory.capture(landscape, this._view.frameIndex);
+        for (const node of scene.modelsExceptTerrain) {
             // A distance-culled model is not drawn and not posed; its stale stamp reads as "no history"
             // (zero velocity) on the frame it returns, which is the right answer for a pop-in.
             if (node.drawCulled) continue;
@@ -445,25 +475,39 @@ export class TemporalPasses {
      * Depth-tested `less-equal` against the opaque depth and writing none of it, so an occluded object
      * contributes nothing and the buffer keeps the reprojected value for whatever is actually visible.
      */
+    /** Add `node` to the velocity pass's draw list if it needs a draw there. */
+    private _selectMover(node: ModelNode, movers: ModelNode[]): void {
+        if (!this._sys.geometry.inGBuffer(node)) return;
+        // The geometry pass initializes a node added this frame; one that never got there has no
+        // mesh to draw and nothing in the depth buffer either.
+        if (!node.initialized) return;
+        // `_outsideFrustum`, not `_culled`: the stat that one increments was already counted by
+        // the geometry pass, and every node must reach it at most once per frame.
+        if (this._sys.visibility.outsideFrustum(node)) return;
+        // A node that did not move is EXACTLY what the reprojection already describes, so drawing
+        // it would spend a draw call writing back the value already there. The two opt-out modes
+        // always draw: their whole job is to cancel what the base pass wrote.
+        if (node.motionBlur === 'full' && !this._nodeMoved(node)) return;
+        movers.push(node);
+    }
+
     private _objectVelocityPass(scene: Scene): void {
         // Selected before the pass is opened, so a scene where nothing qualifies — the common case
         // under a moving camera — costs no render pass at all rather than an empty load/store of a
         // full-res target every frame.
         const movers = this._velocityDrawList;
         movers.length = 0;
-        for (const node of scene.models) {
-            if (!this._sys.geometry.inGBuffer(node)) continue;
-            // The geometry pass initializes a node added this frame; one that never got there has no
-            // mesh to draw and nothing in the depth buffer either.
-            if (!node.initialized) continue;
-            // `_outsideFrustum`, not `_culled`: the stat that one increments was already counted by
-            // the geometry pass, and every node must reach it at most once per frame.
-            if (this._sys.visibility.outsideFrustum(node)) continue;
-            // A node that did not move is EXACTLY what the reprojection already describes, so drawing
-            // it would spend a draw call writing back the value already there. The two opt-out modes
-            // always draw: their whole job is to cancel what the base pass wrote.
-            if (node.motionBlur === 'full' && !this._nodeMoved(node)) continue;
-            movers.push(node);
+        for (const node of scene.modelsExceptTerrain) this._selectMover(node, movers);
+        // A landscape's chunks only when it moved, or for a chunk opted out of plain reprojection: the
+        // rest are exactly what the reprojection describes (the `'full'` test in `_selectMover`), and a
+        // landscape is ~1,000 of them to rule out one by one.
+        const frame = this._view.frameIndex;
+        for (const landscape of scene.landscapes) {
+            const moved = this._landscapeHistory.moved(landscape, frame);
+            for (const chunk of landscape.chunkNodes) {
+                if (!moved && chunk.motionBlur === 'full') continue;
+                this._selectMover(chunk, movers);
+            }
         }
         if (movers.length === 0) return;
 
@@ -509,8 +553,7 @@ export class TemporalPasses {
                 boundPipeline = pipeline;
             }
 
-            const prev = this._prevXform.get(node);
-            const fresh = prev !== undefined && prev.frame === this._view.frameIndex - 1;
+            const prevWorld = this._prevWorldOf(node);
 
             this._shaderManager.setUniform('u_model', node.worldTransform);
             this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
@@ -523,7 +566,7 @@ export class TemporalPasses {
             this._shaderManager.setUniform('u_uvPrevViewProj',
                 mode === 'objectOnly' ? this._uvViewProjScratch : this._uvPrevViewProjScratch);
             // No usable history means no motion: previous == current, and the object writes zeros.
-            this._shaderManager.setUniform('u_prevModel', fresh ? prev!.world : node.worldTransform);
+            this._shaderManager.setUniform('u_prevModel', prevWorld ?? node.worldTransform);
             // A motion-blur opt-out, and only that. The velocity written is still the true one, so TAA
             // can reproject the object rather than ghost it — see `encodeVelocity`.
             this._shaderManager.setUniform('u_noBlur', mode === 'none' ? 1 : 0);
@@ -541,6 +584,8 @@ export class TemporalPasses {
                 // Fills ModelDraw.boneMatrixScratch with THIS frame's pose and uploads it as u_boneMatrices —
                 // which is also exactly the right PREVIOUS pose when there is no history to use.
                 this._sys.modelDraw.uploadBoneMatrices(shaderType, node);
+                const prev = this._prevXform.get(node);
+                const fresh = prev !== undefined && prev.frame === this._view.frameIndex - 1;
                 this._prevBoneScratch.set(fresh && prev!.bones ? prev!.bones : this._sys.modelDraw.boneMatrixScratch);
                 this._shaderManager.setUniform('u_prevBoneMatrices', this._prevBoneScratch);
             }

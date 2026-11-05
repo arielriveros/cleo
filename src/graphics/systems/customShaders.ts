@@ -19,6 +19,7 @@ const SHADOWS_SRC = ShadowsChunk.glslChunk!;
 import type { CustomMaterial, CustomRenderMode, CustomUniform, CustomBaseType } from '../material';
 import { cyrb53 } from '../material';
 import type { ShaderResource } from '../rhi/types';
+import type { PipelineReflection } from '../render/pipelineCache';
 
 // -----------------------------------------------------------------------------------------------
 // Runtime compilation of user-authored custom-material fragment shaders: a user's `fragment()` or
@@ -1139,6 +1140,42 @@ function webgpuHalf(mat: CustomMaterial, key: string): { wgsl?: string;
 export function customShaderModules(mat: CustomMaterial):
         { fragment: string; vertex: string; vertexEntry: string } | undefined {
     return customWgsl.get(mat.type as string);
+}
+
+/** What one material's last {@link customPipelineReflection} was built from, and the result. */
+interface ReflectionSlot {
+    entry: { fragment: string; vertex: string; vertexEntry: string } | undefined;
+    mode: CustomRenderMode;
+    type: string;
+    uniforms: CustomUniform[];
+    reflection: PipelineReflection;
+}
+const reflectionSlots = new WeakMap<CustomMaterial, ReflectionSlot>();
+
+/**
+ * The reflection a custom material's mesh pipeline is fetched with: its resources, and the translated
+ * WGSL when there is one. Kept per material and rebuilt only when an input changes, because building it
+ * is not cheap: the forward resources go through {@link usedResources}, a regex pass over the whole
+ * translated WGSL (some 300 KB with the engine's vertex module) — 2.5 ms, which the pond paid on every
+ * draw. The same object back also lets the caller memoize the pipeline by identity.
+ *
+ * Inputs: the `customWgsl` entry (a fresh object per registration, deleted with its key), the mode (the
+ * engine samplers and group 3 differ), `mat.type` (the content hash of the source and the uniform
+ * declarations) and the `uniforms` array itself, which the editor replaces when a uniform is removed.
+ */
+export function customPipelineReflection(mat: CustomMaterial, mode: CustomRenderMode): PipelineReflection {
+    const entry = customWgsl.get(mat.type as string);
+    const slot = reflectionSlots.get(mat);
+    if (slot && slot.entry === entry && slot.mode === mode && slot.type === mat.type && slot.uniforms === mat.uniforms)
+        return slot.reflection;
+    const resources = customShaderResources(mode, mat.uniforms);
+    const reflection: PipelineReflection = {
+        resources: mode === 'forward' ? usedResources(resources, entry?.fragment, entry?.vertex) : resources,
+        ...(entry ? { wgsl: entry.fragment, entryPoints: { fragment: 'main' },
+                      vertexWgsl: { wgsl: entry.vertex, entryPoint: entry.vertexEntry } } : {}),
+    };
+    reflectionSlots.set(mat, { entry, mode, type: mat.type as string, uniforms: mat.uniforms, reflection });
+    return reflection;
 }
 
 /**
