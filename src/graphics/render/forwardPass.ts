@@ -407,6 +407,7 @@ export class ForwardPass {
     private _runForwardQueue(label: string, queue: ModelNode[]): void {
         if (queue.length === 0) return;
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, label, false, undefined, false);
+        this._modelDraw.prepareRows(queue);
         for (const node of queue) this.renderModel(node, pass);
         this._passes.endFullscreenPass(pass);
     }
@@ -416,6 +417,9 @@ export class ForwardPass {
      * with one open, a program in {@link _FORWARD_PROGRAMS} and a plain material, it is recorded as a
      * pipeline + bind group; anything else stays immediate-mode. `frameStats.rhiDrawCalls` counts which.
      */
+    /** Append and upload the per-object records of `nodes` before a pass draws them (see ModelDraw.prepareRows). */
+    public prepareRows(nodes: Iterable<ModelNode>): void { this._modelDraw.prepareRows(nodes); }
+
     public renderModel(node: ModelNode, pass?: RenderPassEncoder): void {
         // Screen-mode custom materials are fullscreen camera passes (their program is linked against
         // screen.vs); drawing a mesh with one would bind mismatched attributes. Skip with a warning.

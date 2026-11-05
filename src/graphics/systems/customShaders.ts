@@ -1142,6 +1142,12 @@ export function customShaderModules(mat: CustomMaterial):
     return customWgsl.get(mat.type as string);
 }
 
+/** The per-object table's resource as the base program (the custom vertex module) declares it. */
+function objectTableResources(mode: CustomRenderMode): ShaderResource[] {
+    const base = mode === 'deferred' ? GeometryPBRProgram : PBRProgram;
+    return (base.resources as ShaderResource[]).filter(r => r.glslName === 'u_objectData');
+}
+
 /** What one material's last {@link customPipelineReflection} was built from, and the result. */
 interface ReflectionSlot {
     entry: { fragment: string; vertex: string; vertexEntry: string } | undefined;
@@ -1169,8 +1175,11 @@ export function customPipelineReflection(mat: CustomMaterial, mode: CustomRender
     if (slot && slot.entry === entry && slot.mode === mode && slot.type === mat.type && slot.uniforms === mat.uniforms)
         return slot.reflection;
     const resources = customShaderResources(mode, mat.uniforms);
+    const used = mode === 'forward' ? usedResources(resources, entry?.fragment, entry?.vertex) : resources;
     const reflection: PipelineReflection = {
-        resources: mode === 'forward' ? usedResources(resources, entry?.fragment, entry?.vertex) : resources,
+        // With translated WGSL the vertex module is the base program's, which reads the per-object table:
+        // its group 2 is this pipeline's too. (WebGL2's hand-written custom vertex stage keeps u_model.)
+        resources: entry ? [...used, ...objectTableResources(mode)] : used,
         ...(entry ? { wgsl: entry.fragment, entryPoints: { fragment: 'main' },
                       vertexWgsl: { wgsl: entry.vertex, entryPoint: entry.vertexEntry } } : {}),
     };

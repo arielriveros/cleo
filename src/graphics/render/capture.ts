@@ -243,6 +243,8 @@ export class Capture {
                 this._sky.renderSky(pass, scene, cam);
 
                 this._forward.forwardDepthWrite = true;
+                // Every model's record in one upload; the faces after the first find them all there.
+                this._forward.prepareRows(scene.models);
                 for (const node of scene.models) {
                     if (!node.visible) continue;
                     // Exclude editor-only helpers (probe sphere, light icons, camera model, etc.) so they

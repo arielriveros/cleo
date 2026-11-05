@@ -76,7 +76,7 @@ describe('the see-through hole in the shaders', () => {
         for (const file of ['chunks/modelVertex.wgsl', 'chunks/skinnedVertex.wgsl', 'chunks/instancedVertex.wgsl']) {
             const src = read(file);
             expect(src, file).toMatch(/u_camHole: vec4<f32>/);
-            expect(src, file).toMatch(/u_camHolePivot: vec4<f32>/);
+            expect(src, file).toMatch(/u_camHole(Pivot|Pass): vec4<f32>/);
             expect(src, file).toMatch(/cameraHoleVarying\(&out/);
         }
         // Wind moves fragPos, so the hole must be computed from the moved position.

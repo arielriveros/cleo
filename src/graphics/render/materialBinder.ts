@@ -264,6 +264,8 @@ export class MaterialBinder {
         // The foliage crossfade's phase, so a despawn resolves under TAA exactly as a LOD change does.
         d[1] = ((this._view.frameIndex * 7) % 16) / 16;
         this._shaderManager.setUniform('u_dissolve', d);
+        // The phase alone, for a program that reads how far gone from the per-object table.
+        this._shaderManager.setUniform('u_ditherPhase', d[1]);
     }
 
     private readonly _dissolveVec: [number, number] = [0, 0];
@@ -278,6 +280,8 @@ export class MaterialBinder {
     private readonly _camHolePivot: number[] = [0, 0, 0, 0];
 
     private readonly _camHoleDraw: number[] = [0, 0, 0, 0];
+
+    private readonly _camHolePass: number[] = [0, 0, 0, 0];
 
     private _camHoleStrength = 0;
 
@@ -310,5 +314,11 @@ export class MaterialBinder {
         p[3] = this.cameraHoleOn(optedIn) ? this._camHoleStrength : 0;
         this._shaderManager.setUniform('u_camHole', this._camHole);
         this._shaderManager.setUniform('u_camHolePivot', p);
+        // For a program reading the opt-in from the per-object table: this pass's strength, which the
+        // shader multiplies by the record's 0/1 — exactly `p[3]` for an object that opted in, 0 otherwise.
+        const q = this._camHolePass;
+        q[0] = p[0]; q[1] = p[1]; q[2] = p[2];
+        q[3] = this.cameraHoleOn(true) ? this._camHoleStrength : 0;
+        this._shaderManager.setUniform('u_camHolePass', q);
     }
 }

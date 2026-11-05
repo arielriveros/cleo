@@ -75,9 +75,32 @@ export class ModelDraw {
 
     /** Append every node's record, then upload them in one go — before a pass records its draws. */
     public prepareRows(nodes: Iterable<ModelNode>): void {
-        for (const node of nodes)
-            this._objects.ensure(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither);
+        for (const node of nodes) this.ensureRow(node);
         this._objects.flush();
+    }
+
+    /** `node`'s record, appended if needed but NOT uploaded — see {@link flushRows}. */
+    public ensureRow(node: ModelNode): void {
+        this._objects.ensure(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither);
+    }
+
+    /** Upload the records {@link ensureRow} appended. */
+    public flushRows(): void { this._objects.flush(); }
+
+    /**
+     * The record the next draw of {@link drawSubmeshes} starts `instance_index` at: set by the bind
+     * callback when the pipeline it set reads the per-object table, 0 otherwise.
+     */
+    private _firstInstance = 0;
+
+    /**
+     * After `setPipeline`: the per-object table's group, and the record this draw reads, for a pipeline
+     * that declares the table. The record first: appending one may replace the table texture.
+     */
+    private _bindObjectData(pass: RenderPassEncoder, pipeline: RenderPipeline, node: ModelNode): void {
+        if (!this._bindGroups.declaresObjectData(pipeline)) return;
+        this._firstInstance = this.rowForNode(node);
+        pass.setBindGroup(2, this._bindGroups.objectDataGroup(pipeline, this._objects.texture));
     }
 
     // The draw `_bindMaterial` serves, set by `drawMaterials` around its submesh loop: one callback bound
@@ -126,9 +149,10 @@ export class ModelDraw {
             if (!ModelDraw._drawable(mat)) return;
             // A callback that set a PIPELINE has already fixed the cull mode; calling _materials.applyCull after
             // it would be harmless today and wrong the moment the two disagree.
+            this._firstInstance = 0;
             const viaPipeline = !!bindMaterial(mat);
             if (!viaPipeline) this._materials.applyCull(mat.config.side);
-            if (viaPipeline && pass && this._passes.recordDraw(pass, model.mesh, 0, 0)) return;
+            if (viaPipeline && pass && this._passes.recordDraw(pass, model.mesh, 0, 0, -1, this._firstInstance)) return;
             model.mesh.draw(mat.config.wireframe ? 'line-list' : 'triangle-list');
             return;
         }
@@ -138,10 +162,12 @@ export class ModelDraw {
             // future disagreement into a mid-frame TypeError rather than a wrong colour. Slot 0 always exists.
             const mat = model.materials[i] ?? model.materials[0];
             if (!ModelDraw._drawable(mat)) continue;
+            this._firstInstance = 0;
             const viaPipeline = !!bindMaterial(mat);
             if (!viaPipeline) this._materials.applyCull(mat.config.side);
             if (viaPipeline && pass
-                && this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count)) continue;
+                && this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count, -1,
+                                           this._firstInstance)) continue;
             model.mesh.drawRange(submeshes[i].start, submeshes[i].count,
                 mat.config.wireframe ? 'line-list' : 'triangle-list');
         }
@@ -225,6 +251,7 @@ export class ModelDraw {
             pass!.setPipeline(pipeline);
             pass!.setBindGroup(0, this._bindGroups.terrainGroup(pipeline, mat));
             this._bindFrameLighting(pass!, pipeline, state);
+            this._bindObjectData(pass!, pipeline, node);
             return true;
         }
         if (mat instanceof CustomMaterial) {
@@ -248,6 +275,7 @@ export class ModelDraw {
             pass!.setPipeline(pipeline);
             pass!.setBindGroup(0, this._bindGroups.customGroup(pipeline, mat, state.envCube));
             this._bindFrameLighting(pass!, pipeline, state);
+            this._bindObjectData(pass!, pipeline, node);
             return true;
         }
         if (!state.viaRHI || !reflection) { this._materials.apply(mat); return false; }
@@ -266,6 +294,7 @@ export class ModelDraw {
         this._materials.applyProperties(mat);
         pass!.setBindGroup(0, this._bindGroups.materialGroup(pipeline, mat, state.envCube));
         this._bindFrameLighting(pass!, pipeline, state);
+        this._bindObjectData(pass!, pipeline, node);
         return true;
     }
 

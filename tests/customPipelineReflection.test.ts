@@ -42,7 +42,10 @@ describe('customPipelineReflection', () => {
         const first = customPipelineReflection(m, 'forward');
         for (let i = 0; i < 5; i++) expect(customPipelineReflection(m, 'forward')).toBe(first);
         const expected = usedResources(customShaderResources('forward', m.uniforms), entry.fragment, entry.vertex);
-        expect(first.resources).toEqual(expected);
+        expect(first.resources.slice(0, expected.length)).toEqual(expected);
+        // The vertex module is the base program's, which reads the per-object table at group 2.
+        expect(first.resources.slice(expected.length)).toEqual(
+            [expect.objectContaining({ group: 2, binding: 0, glslName: 'u_objectData' })]);
         expect(first.wgsl).toBe(entry.fragment);
         expect(first.entryPoints).toEqual({ fragment: 'main' });
         expect(first.vertexWgsl).toEqual({ wgsl: entry.vertex, entryPoint: entry.vertexEntry });
@@ -54,7 +57,9 @@ describe('customPipelineReflection', () => {
         const forward = customPipelineReflection(m, 'forward');
         const deferred = customPipelineReflection(m, 'deferred');
         expect(deferred).not.toBe(forward);
-        expect(deferred.resources).toEqual(customShaderResources('deferred', m.uniforms));
+        const own = customShaderResources('deferred', m.uniforms);
+        expect(deferred.resources.slice(0, own.length)).toEqual(own);
+        expect(deferred.resources.slice(own.length).map(r => r.glslName)).toEqual(['u_objectData']);
     });
 
     it('rebuilds when the uniforms array is replaced', () => {
@@ -86,6 +91,7 @@ describe('customPipelineReflection', () => {
         ensureCustomShader(m);
         expect(customShaderModules(m)).toBeUndefined();
         const r = customPipelineReflection(m, 'forward');
+        // No translated WGSL: WebGL2's hand-written vertex stage, which keeps u_model — no table.
         expect(r.resources).toEqual(customShaderResources('forward', m.uniforms));
         expect(r.wgsl).toBeUndefined();
         expect(r.vertexWgsl).toBeUndefined();
