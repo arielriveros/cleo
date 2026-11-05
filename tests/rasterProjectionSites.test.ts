@@ -62,7 +62,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         // resolved image and must come out unjittered.
         expect([...callers('rasterProjection').keys()].sort()).toEqual([
             // --- Before the resolve: these ARE the TAA input, and must jitter. ---
-            '_drawInstancedGroup',    // twice: the RHI branch and the legacy one
+            '_drawInstancedGroup',
             // Every deferred opaque (terrain included) AND every forward model: ModelDraw.beginModel sets the
             // projection for both, so forward opaques jitter and transparents, drawn after the resolve, do not.
             'beginModel',

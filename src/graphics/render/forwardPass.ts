@@ -13,7 +13,6 @@ import { usesParallax } from '../programVariants';
 import { frameStats } from '../renderStats';
 import type { RenderPassEncoder } from '../rhi/device';
 import { DEFAULT_BLEND } from '../rhi/types';
-import { GLState } from '../rhi/webgl2/glState';
 import { Texture } from '../texture';
 import { ModelDraw } from './modelDraw';
 import type { MaterialDrawState } from './modelDraw';
@@ -105,9 +104,6 @@ export class ForwardPass {
 
     /** Forward passes drawn on top of the deferred-lit scene: skybox, transparent models, sprites, editor overlays. */
     public renderForwardOverlay(scene: Scene, shadowLight: LightNode | null): void {
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-
         // Collect the forward-rendered models: transparent (any material), opaque Default (Blinn-Phong,
         // rendered forward so their full material — specular/ambient/reflectivity + maps — works),
         // plus the selected models (for the outline mask) and the two overlay queues.
@@ -158,9 +154,8 @@ export class ForwardPass {
         }
 
         // Sky fills the background; a baked atmosphere cubemap takes precedence over a static skybox.
-        // Thumbnails skip every background draw — they want a transparent one.
-        // Depth WRITES off: the sky must stay at the clear depth for the depth-reading passes.
-        GLState.depthMask(false);
+        // Thumbnails skip every background draw — they want a transparent one. The sky pipelines write
+        // no depth: the sky must stay at the clear depth for the depth-reading passes.
         const skyAtmo = scene.skyAtmosphere;
         this._passes.scope('sky');
         if (!this._host.thumbnailMode && this._host.passEnabled['sky']) {
@@ -179,8 +174,6 @@ export class ForwardPass {
 
         // Opaque Default (Blinn-Phong) models: forward-lit and depth-written, so they occlude correctly
         // against the deferred opaque geometry (whose depth was blitted into the scene FBO).
-        GLState.depthMask(true);
-        GLState.blend(false);
         this._passes.scope('forwardOpaque');
         this.forwardDepthWrite = true;
         this._runForwardQueue('forwardOpaque', opaqueForwardQueue);
@@ -224,12 +217,10 @@ export class ForwardPass {
         for (const node of transparentQueue) depthKey.set(node, vec3.squaredDistance(camPos, node.worldPosition));
         transparentQueue.sort((a, b) => depthKey.get(b)! - depthKey.get(a)!);
         this._snapshotSceneColor(transparentQueue);
-        GLState.depthMask(this._host.thumbnailMode);
         this.forwardDepthWrite = this._host.thumbnailMode;
         if (this._passes.beginPass('transparent')) this._runForwardQueue('transparent', transparentQueue);
         this.forwardDepthWrite = true;
         this.sceneBuffersLive = false;
-        GLState.depthMask(true);
 
         // GPU particles: after the transparents (and so after TAA — they never enter history), depth
         // tested against the opaque scene, soft-faded against its depth snapshot.
@@ -297,10 +288,9 @@ export class ForwardPass {
             this._host.thumbnailMode ? [0, 0, 0, 0] : undefined, true);
         this._passes.endFullscreenPass(scenePass);
 
-        // Sky background. Depth writes off: the sky renders at NDC z = w and interpolation error
+        // Sky background, written with no depth: the sky renders at NDC z = w and interpolation error
         // would write some pixels a hair below 1.0, breaking the "depth == 1.0 means sky" contract
         // of the depth-reading passes (god rays, screen materials).
-        GLState.depthMask(false);
         const fwdAtmo = scene.skyAtmosphere;
         if (!this._host.thumbnailMode) {
             const skyPass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'sky', false,
@@ -308,7 +298,6 @@ export class ForwardPass {
             this._sky.renderSky(skyPass, scene, this._view.camera);
             this._passes.endFullscreenPass(skyPass);
         }
-        GLState.depthMask(true); // models below need depth writes again
 
         const transparentDrawQueue: ModelNode[] = [];
         const opaqueDrawQueue: ModelNode[] = [];

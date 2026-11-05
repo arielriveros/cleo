@@ -9,7 +9,6 @@ import { Material } from '../material';
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderPipeline } from '../rhi/resources';
 import type { BlendState, CullMode } from '../rhi/types';
-import { GLState } from '../rhi/webgl2/glState';
 import { Texture } from '../texture';
 import { ShadowMapProgram, DecalSurfaceProgram, DecalResolveProgram, DecalColorProgram } from './programs';
 import type { FrameView } from './frameView';
@@ -208,8 +207,6 @@ export class DecalPasses {
         }
         this._passes.endFullscreenPass(pass);
         this._decalReceiversReady = true;
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**
@@ -288,9 +285,6 @@ export class DecalPasses {
         ]));
         this._passes.drawFullscreen(resolve);
         this._passes.endFullscreenPass(resolve);
-
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**
@@ -302,11 +296,6 @@ export class DecalPasses {
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'decals.emissive', false, undefined, false);
         this.drawColorDecals(pass, this.emissiveDecals, DecalPasses._DECAL_EMISSIVE_BLEND, this._view.invViewProj, 0);
         this._passes.endFullscreenPass(pass);
-        // The passes that follow are partly on the legacy path and inherit blend state.
-        this._passes.restoreDefaultBlend();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**

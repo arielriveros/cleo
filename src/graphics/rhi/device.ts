@@ -331,6 +331,12 @@ export interface Device {
      */
     collectTimestamps(): void;
 
+    /**
+     * Debug hook: every error the device has raised since the last call, clearing them. Synchronous
+     * and stalling where present (WebGL2's `getError`); absent where errors arrive asynchronously.
+     */
+    drainDebugErrors?(): number[];
+
     /** Release the device and everything still alive on it. */
     destroy(): void;
 }

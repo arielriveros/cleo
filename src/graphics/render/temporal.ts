@@ -8,7 +8,6 @@ import { TemporalHistory } from './temporalHistory';
 import { LandscapeHistory } from './landscapeHistory';
 import { device } from '../rhi/deviceHandle';
 import type { RenderTarget, RenderPipeline } from '../rhi/resources';
-import { GLState } from '../rhi/webgl2/glState';
 import { Texture } from '../texture';
 import { TaaResolveProgram, TaaSharpenProgram, ScreenProgram, MotionBlurVelocityProgram, VELOCITY_PROGRAMS, MotionBlurTileMaxProgram, MotionBlurNeighborMaxProgram, MotionBlurGatherProgram } from './programs';
 import type { TaaHistoryFilter } from './settingsTypes';
@@ -319,11 +318,6 @@ export class TemporalPasses {
 
         this._velocityPass();
         this.velocityProducedThisFrame = true;
-
-        // Restore what the overlay passes that follow expect.
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**
@@ -398,11 +392,6 @@ export class TemporalPasses {
         this._passes.copyDepth(this.depthSource(), this._taaPrevDepthFBO.depth, w, h);
 
         this.taaHistory.swap();
-
-        // Put back what the overlay passes below expect.
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     // Velocity in two stages. First the camera reprojection: reconstruct each pixel's world position

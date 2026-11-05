@@ -23,7 +23,6 @@ import type { DepthStencilState, CullMode } from '../rhi/types';
 import { TerrainFloorGrid, ShadowLayerCache, unitDirection, shadowReach, sliceCornerFactor, cascadeSphereAroundEye, staggeredCascadeDue, EYE_FIT_MARGIN, receiverInnerRadius, isFreeShadowSlot } from '../shadowCasters';
 import { MAX_CASCADES, CascadeSphere, ShadowCasterBounds, SpotShadowSlots, MAX_POINT_SHADOWS, PointShadowCache, CasterMotion, lightViewMatrix, mixNumber, HASH_SEED, pushCasterBounds, mixTransform, spotShadowFar, pointShadowFov, POINT_SHADOW_FACES, mixString, computeCascadeSplits, staleCascadeCovers, STAGGER_MARGIN, quantizeRadius, cascadeDepthScale, cascadeSphereFromPerspective, cascadeSphereFromCorners, buildCascadeMatrix } from '../shadowMath';
 import { keyLight } from '../skyNight';
-import { GLState } from '../rhi/webgl2/glState';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { VolumetricGodRaysProgram, ScreenProgram, SHADOW_PROGRAMS } from './programs';
@@ -727,11 +726,6 @@ export class ShadowPasses {
         upPass.setBindGroup(0, this._bindGroups.textureGroup(upPipeline, 0, [scratch.colors[0]]));
         this._passes.drawFullscreen(upPass);
         this._passes.endFullscreenPass(upPass);
-
-        // Restore the pipeline default by hand — the passes that follow are on the legacy path and
-        // inherit the blend state. Never a plain `gl.blendFunc`: that erodes the bloom-mask alpha.
-        GLState.blend(false);
-        this._passes.restoreDefaultBlend();
     }
 
     /**
@@ -1303,11 +1297,6 @@ export class ShadowPasses {
         // The static copy, as for the point faces (see `renderPointShadows`).
         this._prepareStaticAtlas(this._spotAtlas);
 
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-        GLState.cull(true);
-        GLState.cullFace('front');
-
         for (const node of casters) {
             const layer = this.spotSlots.layerOf(node.id);
             if (layer < 0) continue; // past MAX_SPOT_SHADOWS — this light simply goes unshadowed
@@ -1342,7 +1331,6 @@ export class ShadowPasses {
             this._drawCachedLayer(this._spotAtlas, layer, matrix, pos, far, mixTransform(HASH_SEED, matrix), false);
         }
 
-        GLState.cullFace('back');
         this.spotShadowsActive = true;
         this.spotShadowsDirty = true;
 
@@ -1409,13 +1397,10 @@ export class ShadowPasses {
         // reallocated with the live one (fresh storage holds undefined depth, so every face redraws).
         this._prepareStaticAtlas(this._pointAtlas);
 
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-        GLState.cull(true);
-        // Front-face culling, exactly as the cascade and spot passes do: rasterizing back faces puts
-        // the recorded occluder depth behind the lit surface, which is what lets the bias stay small.
-        // Safe here only because POINT_SHADOW_FACES are proper rotations — see that table's comment.
-        GLState.cullFace('front');
+        // The caster pipelines cull FRONT faces here as in the cascade and spot passes (see
+        // `cullMode` where the caster state is built): rasterizing back faces puts the recorded occluder
+        // depth behind the lit surface, which is what lets the bias stay small. Safe here only because
+        // POINT_SHADOW_FACES are proper rotations — see that table's comment.
 
         // The border, and so the fov, follows the filter radius: the kernel must not reach past what
         // the map holds. One texel over the radius covers the hardware's own 2x2 comparison filter.
@@ -1459,7 +1444,6 @@ export class ShadowPasses {
             }
         }
 
-        GLState.cullFace('back');
         this.pointShadowsActive = true;
         this.pointShadowsDirty = true;
         this.pointShadowFullUpdate = false;
@@ -1555,12 +1539,9 @@ export class ShadowPasses {
         const splits = computeCascadeSplits(cam.near, shadowFar, this.cascadeCount,
                                             this.shadowSplitLambda, this._csmSplits);
 
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-        GLState.cull(true);
-        // Front-face culling: rasterize back faces into the depth map so the recorded occluder depth
-        // sits behind the lit surface, which is what keeps a small bias from producing acne.
-        GLState.cullFace('front');
+        // The caster pipelines cull FRONT faces (see `cullMode` where the caster state is built):
+        // rasterizing back faces puts the recorded occluder depth behind the lit surface, which is what
+        // keeps a small bias from producing acne.
 
         this._ensureShadowCasters(scene);
 
@@ -1643,7 +1624,6 @@ export class ShadowPasses {
         this._layerLodMode = 'camera';
 
         this._renderFarCascade(scene, light, shadowFar);
-        GLState.cullFace('back');
 
         this._packCascadeUniforms();
         this._shadowFullUpdate = false;

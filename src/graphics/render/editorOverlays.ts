@@ -4,14 +4,12 @@ import { isEditorOnlyNode } from '../../core/scene/editorNodes';
 import { ModelNode } from '../../core/scene/nodes/modelNode';
 import { SpriteNode } from '../../core/scene/nodes/spriteNode';
 import { Scene } from '../../core/scene/scene';
-import { gl } from '../rhi/webgl2/glContext';
 import { Mesh } from '../mesh';
 import type { RenderPassEncoder } from '../rhi/device';
 import { device } from '../rhi/deviceHandle';
 import type { Buffer as RhiBuffer, RenderTarget } from '../rhi/resources';
 import { OVERLAY_BLEND, OVERLAY_COMPOSITE_BLEND, BufferUsage } from '../rhi/types';
 import type { DepthStencilState } from '../rhi/types';
-import { GLState } from '../rhi/webgl2/glState';
 import { ModelDraw } from './modelDraw';
 import type { MaterialDrawState } from './modelDraw';
 import { DEPTH_ALWAYS, DEPTH_TEST, PipelineMemo } from './pipelineCache';
@@ -124,12 +122,6 @@ export class EditorOverlays {
         this._shaderManager.setUniform('u_fadeFar', fadeFar);
 
         this._passes.drawFullscreenAndEnd(pass);
-
-        // Still set by hand: the overlay passes that follow are on the legacy path and inherit blend
-        // and depth-mask state rather than declaring their own. The OVERLAY pair, not the default one
-        // — the buffer these are all writing needs its coverage alpha accumulated.
-        this._setOverlayBlend();
-        GLState.depthMask(true);
     }
 
     private _collectAllChildren(node: any, allNodes: any[]): void {
@@ -317,36 +309,15 @@ export class EditorOverlays {
             // No depth writes: the attachment is the scene's own.
             const depthTested = DEPTH_TEST;
             const pass = this._beginOverlayPass('overlay.helpers');
-            GLState.blend(true);
-            this._setOverlayBlend();
-            GLState.depthMask(false);
             for (const node of helperNodes) this._drawOverlayNode(pass, node, depthTested);
-            // Re-asserted: a helper on the legacy path goes through `_materials.apply`, which sets its
-            // own blend, and an icon that inherited THAT would stop accumulating coverage alpha.
-            this._setOverlayBlend();
             // Icons are billboards and always transparent; `_sprites.renderSprite` handles the constraint.
-            // `false` for manageDepth — this pass owns the depth state for the whole batch.
-            for (const node of icons) this._sprites.renderSprite(node, false, pass, OVERLAY_BLEND);
+            for (const node of icons) this._sprites.renderSprite(node, pass, OVERLAY_BLEND);
             this._passes.endFullscreenPass(pass);
-            GLState.depthMask(true);
         }
 
         // Gizmos on top (also draws the editor skeleton overlay when set).
         if ((gizmoNodes.length > 0 || this.skeletonOverlay) && this._passes.beginPass('gizmos'))
             this._renderGizmos(gizmoNodes);
-
-        this._passes.restoreDefaultBlend();
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-    }
-
-    /**
-     * `OVERLAY_BLEND` as raw GL state, for the legacy draws in the overlay that still inherit blend
-     * rather than declaring it on a pipeline. Separate factors, never `blendFunc`: the alpha half is
-     * the entire point here, and `tests/cloudTemporal` forbids the collapsed call outright.
-     */
-    private _setOverlayBlend(): void {
-        if (gl) GLState.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     }
 
     private _renderGizmos(gizmoNodes: ModelNode[]): void {
@@ -364,8 +335,6 @@ export class EditorOverlays {
         this._drawSkeletonOverlay(pass, depthAlways);
 
         this._passes.endFullscreenPass(pass);
-        // Depth testing back on for whatever draws next, which is still on the legacy path.
-        GLState.depthTest(true);
     }
 
     private _ensureOverlayMeshes(): void {

@@ -113,8 +113,8 @@ export class WebGL2RenderPipeline implements RenderPipeline {
         // Through ShaderManager, not Shader.use(): see the note at the top of this file.
         ShaderManager.Instance.bind(this.module.program);
 
-        // `always` + no writes IS "no depth interaction". Must not issue `gl.depthFunc`: that is
-        // CONTEXT state and would leak past this pipeline into the next legacy draw.
+        // `always` + no writes IS "no depth interaction": depth test off, and `gl.depthFunc` left as the
+        // next depth-testing pipeline will set it.
         const noDepth = !this.depthStencil
             || (this.depthStencil.depthCompare === 'always' && !this.depthStencil.depthWriteEnabled);
         if (!noDepth) {

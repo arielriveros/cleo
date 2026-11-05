@@ -9,14 +9,12 @@ import { VolumetricCloudsNode } from '../../core/scene/nodes/volumetricCloudsNod
 import { Scene } from '../../core/scene/scene';
 import { CubeFramebuffer } from '../cubeFramebuffer';
 import { Framebuffer } from '../framebuffer';
-import { gl } from '../rhi/webgl2/glContext';
 import { Mesh } from '../mesh';
 import type { RenderPassEncoder } from '../rhi/device';
 import { device } from '../rhi/deviceHandle';
 import { DEFAULT_BLEND } from '../rhi/types';
 import type { ShaderResource } from '../rhi/types';
 import { nightFactor, moonDirection } from '../skyNight';
-import { GLState } from '../rhi/webgl2/glState';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { VolumetricCloudPasses } from './clouds';
@@ -474,11 +472,6 @@ export class SkyPasses {
      */
     private _renderAtmosphereFaces(node: SkyAtmosphereNode, sun: ArrayLike<number>, cube: Texture, res: number,
                                    faces: readonly number[]): void {
-        GLState.depthTest(false);
-        GLState.depthMask(false);
-        GLState.blend(false);
-        GLState.cull(false);
-
         this._shaderManager.bind('skyAtmosphere');
         // One pipeline for all six faces. `builtFor: 'irradiance'` — the unit cube's stride comes from
         // THAT program, not the drawing one. `target` explicitly: built before any pass opens.
@@ -543,8 +536,6 @@ export class SkyPasses {
             this._passes.endFullscreenPass(pass);
         }
         this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
-        GLState.depthMask(true);
-        GLState.depthTest(true);
     }
 
     // Height fog for the SkyAtmosphere node: a fullscreen pass that integrates the fog along each view
@@ -575,11 +566,6 @@ export class SkyPasses {
         const res = node.cubemapResolution || node.resolution;
         this._shaderManager.setUniform('u_fogSkyLod', Math.max(0, Math.log2(res) - 3));
         this._passes.drawFullscreenAndEnd(pass);
-
-        // Restore the state the following overlay passes expect.
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**
@@ -765,10 +751,6 @@ export class SkyPasses {
         this._clouds.bakeCloudNoise();
         if (!this._clouds.cloudBaseNoise || !this._clouds.cloudDetailNoise || node.opacity <= 0) return;
 
-        GLState.depthTest(false);
-        GLState.depthMask(false);
-        GLState.blend(true);
-        if (gl) GLState.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         this._shaderManager.bind('volumetricClouds');
         const pipeline = this._pipelines.fullscreen('volumetricClouds', VolumetricCloudsProgram,
                                                   VolumetricCloudPasses.CLOUD_BLEND, undefined,
@@ -805,9 +787,5 @@ export class SkyPasses {
             this._passes.drawFullscreenAndEnd(pass);
         }
         this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
-        GLState.blend(false);
-        this._passes.restoreDefaultBlend();
-        GLState.depthMask(true);
-        GLState.depthTest(true);
     }
 }

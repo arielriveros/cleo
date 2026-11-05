@@ -618,6 +618,17 @@ export class WebGL2Device implements Device {
     /** No-op. See {@link setTimestampCollection}. */
     public collectTimestamps(): void {}
 
+    /** See {@link Device.drainDebugErrors}: up to eight `getError` codes, the queue GL keeps. */
+    public drainDebugErrors(): number[] {
+        const errors: number[] = [];
+        for (let i = 0; i < 8; i++) {
+            const error = gl.getError();
+            if (error === gl.NO_ERROR) break;
+            errors.push(error);
+        }
+        return errors;
+    }
+
     /** WebGL2 issues everything as it is recorded, so `finish()` is a no-op — see WebGL2CommandEncoder. */
     public createCommandEncoder(_label?: string): WebGL2CommandEncoder {
         return new WebGL2CommandEncoder((target, descriptor) =>

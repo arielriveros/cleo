@@ -5,13 +5,11 @@ import { Scene } from '../../core/scene/scene';
 import { atmosphereTransmittance, shHemisphereMeans } from '../cloudLighting';
 import { Framebuffer } from '../framebuffer';
 import { TemporalHistory } from './temporalHistory';
-import { gl } from '../rhi/webgl2/glContext';
 import { device } from '../rhi/deviceHandle';
 import type { RenderPipeline, BindGroup } from '../rhi/resources';
 import { ShaderStage, BufferUsage } from '../rhi/types';
 import type { BlendState } from '../rhi/types';
 import { keyLight } from '../skyNight';
-import { GLState } from '../rhi/webgl2/glState';
 import { Texture } from '../texture';
 import { VolumetricCloudsProgram, CloudUpsampleProgram, CloudNoiseBakeProgram, CloudNoiseBakeComputeProgram, CloudTemporalResolveProgram } from './programs';
 import { QUALITY_TIERS } from './settingsTypes';
@@ -308,14 +306,10 @@ export class VolumetricCloudPasses {
         this.bakeCloudNoise();
         if (!this.cloudBaseNoise || !this.cloudDetailNoise) return;
 
-        // Fullscreen overlay: no depth test/write (occlusion handled via the depth texture), alpha blend.
-        GLState.depthTest(false);
-        GLState.depthMask(false);
-        GLState.blend(true);
-        // Clouds are bloom-eligible, so coverage goes into the mask alpha instead of the default
-        // mask-preserving blend. The shader outputs PREMULTIPLIED colour, so RGB and alpha share
-        // ONE, ONE_MINUS_SRC_ALPHA. Guarded: WebGPU carries the same factors in `CLOUD_BLEND`.
-        if (gl) GLState.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        // Fullscreen overlay with no depth (occlusion is handled through the depth texture), blended by
+        // `CLOUD_BLEND`: clouds are bloom-eligible, so coverage goes into the mask alpha instead of the
+        // default mask-preserving blend, and the shader outputs PREMULTIPLIED colour, so RGB and alpha
+        // share ONE, ONE_MINUS_SRC_ALPHA.
 
         // One pipeline and one texture group for the raymarch, reused by whichever target it lands in.
         // The helpers open their own passes and re-apply both; the uniforms below are written once.
@@ -370,12 +364,6 @@ export class VolumetricCloudPasses {
             this._passes.drawFullscreenAndEnd(upPass);
         }
 
-        // Restore the state the following opaque/transparent overlay passes expect (incl. the default
-        // mask-preserving alpha blend so later overlays don't clobber the bloom mask).
-        this._passes.restoreDefaultBlend();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**

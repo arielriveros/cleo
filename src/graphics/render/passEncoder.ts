@@ -1,5 +1,3 @@
-import { gl } from '../rhi/webgl2/glContext';
-import { GLState } from '../rhi/webgl2/glState';
 import { device } from '../rhi/deviceHandle';
 import { countFullscreenPass, frameStats, setViewportSize } from '../renderStats';
 import { gpuProfiler, type RenderPass } from '../gpuProfiler';
@@ -44,14 +42,10 @@ export class PassEncoder {
     constructor(private readonly _host: PassEncoderHost) {}
 
     /**
-     * Set the GL viewport and keep the profiler's notion of it in sync. Every viewport change in the
-     * renderer must go through here, or `countFullscreenPass` charges the wrong pixel count.
+     * Record the size the fill-rate stats charge the next fullscreen passes by (`countFullscreenPass`).
+     * The VIEWPORT itself is pass state: every `beginRenderPass` sets it from its target.
      */
     public setViewport(width: number, height: number): void {
-        // The GL call is WebGL2's alone: a viewport is PASS state on WebGPU, set by the pass encoder
-        // from its target's dimensions. `setViewportSize` is not skipped, because `renderStats` charges
-        // fullscreen passes by area on both backends and a missing size would silently zero `shadedMpx`.
-        if (gl) gl.viewport(0, 0, width, height);
         setViewportSize(width, height);
     }
 
@@ -110,18 +104,6 @@ export class PassEncoder {
             depthAttachment: { loadOp: clearDepth ? 'clear' : 'load', storeOp: 'store' },
         });
         return pass;
-    }
-
-    /**
-     * Put the blend function back to the pipeline default, which is a SEPARATE function: alpha blend
-     * for RGB, destination ALPHA untouched. Never restore with a plain `gl.blendFunc` — the scene
-     * buffer's alpha is the bloom-eligibility mask, and overwriting its factors erodes it.
-     */
-    public restoreDefaultBlend(): void {
-        // Standing context state, which WebGPU does not have — a pipeline carries its own blend. The
-        // callers are legacy paths restoring what they disturbed; they go when those do.
-        if (!gl) return;
-        GLState.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
     }
 
     /** Draw the screen quad and close the pass: the last two steps of every fullscreen pass. */

@@ -1,6 +1,6 @@
 import { Logger } from '../../core/logger';
+import { device } from '../rhi/deviceHandle';
 import { Framebuffer } from '../framebuffer';
-import { gl } from '../rhi/webgl2/glContext';
 import { FramebufferPool } from '../renderGraph/pool';
 import { frameStats } from '../renderStats';
 import { TextureManager } from '../systems/textureManager';
@@ -47,23 +47,20 @@ export class RenderStats {
                 private readonly _fluids: FluidVolumePasses) {}
 
     /**
-     * Check `gl.getError()` once per frame and count what it reports. OFF by default — `getError`
-     * forces a synchronous round trip that stalls the pipeline.
+     * Ask the device for its pending errors after each frame stage and count them. OFF by default — on
+     * WebGL2 that is `getError`, a synchronous round trip that stalls the pipeline.
      */
     public debugGLErrors: boolean = false;
     private _glErrorCount: number = 0;
 
     /**
-     * Report and count any GL error raised since the last check, naming the stage that raised it.
-     * `gl.getError()` clears the flag, so the check is per stage. No-op unless {@link debugGLErrors}.
+     * Report and count any device error raised since the last check, naming the stage that raised it.
+     * Draining clears them, so the check is per stage. No-op unless {@link debugGLErrors}, and on a
+     * device without the hook (WebGPU reports through `uncapturederror`, which the device handles).
      */
     public checkGLErrors(stage: string): void {
-        // `gl` as well as the flag: `getError` is a WebGL2 concept, and WebGPU reports through
-        // `uncapturederror`, which the device already handles.
-        if (!this.debugGLErrors || !gl) return;
-        for (let i = 0; i < 8; i++) {
-            const error = gl.getError();
-            if (error === gl.NO_ERROR) return;
+        if (!this.debugGLErrors || !device.drainDebugErrors) return;
+        for (const error of device.drainDebugErrors()) {
             this._glErrorCount++;
             Logger.error(`GL error ${error} raised during the ${stage} stage`, 'Renderer');
         }

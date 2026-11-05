@@ -12,12 +12,10 @@ import { TileChunk, CHUNK_SIZE } from '../tilemap/chunk';
 import { Tilemap } from '../tilemap/tilemap';
 import { TilemapLayer } from '../tilemap/tilemapLayer';
 import { TileMesh } from '../tilemap/tileMesh';
-import { gl } from '../rhi/webgl2/glContext';
 import { frameStats } from '../renderStats';
 import type { RenderPassEncoder } from '../rhi/device';
 import { DEFAULT_BLEND, SPRITE_ADDITIVE_BLEND, OVERLAY_BLEND } from '../rhi/types';
 import type { BlendState } from '../rhi/types';
-import { GLState } from '../rhi/webgl2/glState';
 import { TextureManager } from '../systems/textureManager';
 import { TilemapProgram, FORWARD_PROGRAMS } from './programs';
 import type { FrameView } from './frameView';
@@ -105,7 +103,7 @@ export class Sprite2DPasses {
                 vec3.distance(this._view.camera.position, b.worldPosition) -
                 vec3.distance(this._view.camera.position, a.worldPosition));
             const only = this._begin2DPass();
-            for (const node of sprites) this.renderSprite(node, true, only);
+            for (const node of sprites) this.renderSprite(node, only);
             this._passes.endFullscreenPass(only);
             return;
         }
@@ -172,30 +170,19 @@ export class Sprite2DPasses {
 
         list.sort((a, b) => (a.band - b.band) || (a.depth - b.depth));
 
-        // Draw state is set once for the whole list rather than restored per item the way renderSprite
-        // does: depth testing stays on so 3D geometry still occludes, but nothing here writes depth.
-        GLState.blend(true);
-        GLState.depthMask(false);
+        // One pass for the whole interleaved list. Every item's pipeline depth-tests without writing
+        // depth, so 3D geometry still occludes the 2D layer and the 2D layer never occludes itself.
         const pass = this._begin2DPass();
         for (const item of list) {
-            if ('sprite' in item) this.renderSprite(item.sprite, false, pass);
-            else if ('particles' in item) {
+            if ('sprite' in item) this.renderSprite(item.sprite, pass);
+            else if ('particles' in item)
                 this._particlePasses.particles.draw([item.particles], this._particlePasses.particleDrawFrame(scene, pass, this._targets.scene.renderTarget));
-                // Particle pipelines leave their own blend behind; the sprites after them expect the pass's.
-                this._passes.restoreDefaultBlend();
-                GLState.blend(true);
-                GLState.depthMask(false);
-            }
             else this._drawTileBand(item.node, item.layer, item.chunk, item.indexOffset, item.indexCount, pass);
         }
         this._passes.endFullscreenPass(pass);
-        GLState.depthMask(true);
     }
 
-    /**
-     * Open the pass the tiles and sprites share. Loads and stores — this draws over the composited
-     * scene — and reserves the shadow units, since a custom material on a sprite is a legacy draw.
-     */
+    /** Open the pass the tiles and sprites share. Loads and stores: this draws over the composited scene. */
     private _begin2DPass(): RenderPassEncoder {
         return this._passes.beginFullscreenPass(this._targets.scene.renderTarget, '2d', false, undefined, false);
     }
@@ -266,12 +253,8 @@ export class Sprite2DPasses {
         frameStats.objects++;
     }
 
-    /**
-     * `manageDepth` false means the caller owns the blend/depth-mask state for a whole batch — the 2D
-     * pass sets it once around its interleaved list.
-     */
-    public renderSprite(node: SpriteNode, manageDepth: boolean = true,
-                          pass?: RenderPassEncoder, blend: BlendState = DEFAULT_BLEND): void {
+    /** Record one sprite into `pass`, blended by `blend` (an editor icon passes OVERLAY_BLEND). */
+    public renderSprite(node: SpriteNode, pass?: RenderPassEncoder, blend: BlendState = DEFAULT_BLEND): void {
         if (!node.initialized)
             node.initializeSprite();
         frameStats.objects++;
@@ -383,9 +366,6 @@ export class Sprite2DPasses {
         // Sprites are always transparent
         this._shaderManager.setUniform('u_isTransparent', true);
         this._passes.recordDraw(pass, node.sprite.mesh, 0, 0, -1, record);
-
-        // Restore depth writes after drawing sprite
-        if (manageDepth) GLState.depthMask(true);
     }
 
     /** Builds a sprite's world matrix with its camera-facing billboard constraint applied. */

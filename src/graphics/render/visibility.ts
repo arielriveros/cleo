@@ -14,7 +14,6 @@ import type { OccluderGrid } from '../occlusion/terrainOccluder';
 import { frameStats } from '../renderStats';
 import { device } from '../rhi/deviceHandle';
 import type { OcclusionQuerySet } from '../rhi/resources';
-import { GLState } from '../rhi/webgl2/glState';
 import { OcclusionBoxProgram } from './programs';
 import type { OcclusionMode } from './settingsTypes';
 import type { FrameView } from './frameView';
@@ -306,8 +305,6 @@ export class Visibility {
         this._passes.finishIfOwned(this._passes.encoder);
         this._passes.encoder = null;
         this._passes.target = null;
-        // The box pipeline left depth writes off; the legacy draws after it assume they are on.
-        GLState.depthMask(true);
     }
 
     /**

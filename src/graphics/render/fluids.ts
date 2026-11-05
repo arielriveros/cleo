@@ -3,11 +3,9 @@ import type { FluidVolumeNode } from '../../core/scene/nodes/fluidVolumeNode';
 import { Scene } from '../../core/scene/scene';
 import { Framebuffer } from '../framebuffer';
 import { TemporalHistory } from './temporalHistory';
-import { gl } from '../rhi/webgl2/glContext';
 import { DirectionalLight } from '../lighting';
 import { skyAmbient } from '../particles/particleLighting';
 import { keyLight } from '../skyNight';
-import { GLState } from '../rhi/webgl2/glState';
 import { VolumetricCloudPasses } from './clouds';
 import { FluidVolumeProgram, FluidVolumeResolveProgram, FluidVolumeCompositeProgram } from './programs';
 import type { FrameView } from './frameView';
@@ -86,10 +84,6 @@ export class FluidVolumePasses {
         const jitter = temporal ? [FluidVolumePasses._halton(slot + 1, 2) - 0.5, FluidVolumePasses._halton(slot + 1, 3) - 0.5] : [0, 0];
 
         // --- 1. Trace ---
-        GLState.depthTest(false);
-        GLState.depthMask(false);
-        GLState.blend(true);
-        if (gl) GLState.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         const trace = this._passes.beginFullscreenPass(this._fluidTraceFBO!.renderTarget, 'fluidVolumes', true,
                                                 [0, 0, 0, 0], false, true);
         for (const node of volumes) {
@@ -172,7 +166,6 @@ export class FluidVolumePasses {
             this._passes.recordDraw(trace, this._sys.sky.iblCubeMesh, 0, 0);
         }
         this._passes.endFullscreenPass(trace);
-        GLState.blend(false);
 
         // --- 2. Resolve ---
         let image = this._fluidTraceFBO!.colors[0];
@@ -194,18 +187,12 @@ export class FluidVolumePasses {
         }
 
         // --- 3. Composite ---
-        GLState.blend(true);
-        if (gl) GLState.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'fluidVolumes.composite', false, undefined, false);
         this._fullscreen.bind(pass, 'fluidVolumeComposite', FluidVolumeCompositeProgram, [image, this._fluidTraceFBO!.colors[1], depth], VolumetricCloudPasses.CLOUD_BLEND);
         sm.bind('fluidVolumeComposite');
         sm.setUniform('u_invViewProj', this._view.invViewProjStable);
         this._passes.drawFullscreenAndEnd(pass);
 
-        this._passes.restoreDefaultBlend();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**

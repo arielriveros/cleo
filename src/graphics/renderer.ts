@@ -18,7 +18,6 @@ import type { ResourceDesc } from './renderGraph/resources';
 import { MAX_CASCADES, MAX_POINT_SHADOWS } from './shadowMath';
 
 
-import { GLState } from './rhi/webgl2/glState';
 import { Texture } from './texture';
 import { CustomMaterial } from './material';
 import { ensureCustomShader, customShaderReady } from './systems/customShaders';
@@ -1261,11 +1260,6 @@ export class Renderer {
         // BEFORE the thumbnail branch below, so an offscreen capture gets the authored exposure rather
         // than the scene's last metered one. See `_autoExposure.resolveExposure`.
         this._autoExposure.resolveExposure();
-
-        // Fullscreen post passes want a known, blend-free, depth-write state.
-        GLState.blend(false);
-        GLState.depthTest(false);
-        GLState.depthMask(true);
 
         // Thumbnail capture resolves straight into the offscreen target and stops — no post chain at
         // all. Those passes hard-write alpha=1, which would destroy the transparency below.
