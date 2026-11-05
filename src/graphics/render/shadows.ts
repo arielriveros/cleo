@@ -39,8 +39,23 @@ import type { VolumetricCloudPasses } from './clouds';
 import type { FoliagePasses } from './foliage';
 import { ShaderManager } from '../systems/shaderManager';
 
-/** One point-shadow face's casters, split static/dynamic, with a hash of each (`_pointFaceCasters`). */
-export interface PointFaceCasters {
+/**
+ * One punctual-light shadow atlas, spot or point, as the shared layer routine sees it. The FBOs are read
+ * through functions because they are allocated in `initialize()`, after this object is built.
+ */
+interface PunctualAtlas {
+    /** The depth passes' label — on its own line, where the profiler-label test finds it. */
+    readonly label: string;
+    live(): LayeredDepthFramebuffer;
+    statics(): LayeredDepthFramebuffer;
+    readonly liveCache: PointShadowCache;
+    readonly staticCache: PointShadowCache;
+    /** Edge of one layer, in texels: what a layer copy covers. */
+    resolution(): number;
+}
+
+/** The casters standing in one shadow layer's frustum, split static/dynamic, with a hash of each (`_frustumCasters`). */
+export interface FrustumCasters {
     statics: ShadowCasterRecord[];
     dynamics: ShadowCasterRecord[];
     staticCount: number;
@@ -341,7 +356,6 @@ export class ShadowPasses {
     private _spotShadowMatPacked: Float32Array = new Float32Array(ShadowPasses.MAX_SPOT_SHADOWS * 16);
     private _spotShadowTexelScalePacked: Float32Array = new Float32Array(ShadowPasses.MAX_SPOT_SHADOWS);
 
-    /** Layer for spot light i, or -1. Rebuilt WHOLE every frame — see the id-keying note above. */
     public spotShadowsEnabled: boolean = true;
     public spotShadowResolution: number = 1024;
 
@@ -374,23 +388,40 @@ export class ShadowPasses {
     private _pointShadowTexelScale: number = 0;
 
     /** Per point-shadow FACE (atlas layer): what the live layer was last drawn with. */
-    /** What each slot was last rasterized for, so a static lamp costs nothing after the first frame. */
-    public pointShadowCache: PointShadowCache = new PointShadowCache(MAX_POINT_SHADOWS * 6);
+    public readonly pointShadowCache: PointShadowCache = new PointShadowCache(MAX_POINT_SHADOWS * 6);
 
     /** Per face: what the static-only copy was last drawn with. */
-    public pointStaticCache: PointShadowCache = new PointShadowCache(MAX_POINT_SHADOWS * 6);
+    public readonly pointStaticCache: PointShadowCache = new PointShadowCache(MAX_POINT_SHADOWS * 6);
 
-    /** The static-only copy of every point-shadow face (see `_pointFaceCasters`). */
+    /** The static-only copy of every point-shadow face (see `_frustumCasters`). */
     public pointStaticFBO!: LayeredDepthFramebuffer;
 
     /** The same pair for the spot maps, one layer per light. */
-    private _spotShadowCache: PointShadowCache = new PointShadowCache(ShadowPasses.MAX_SPOT_SHADOWS);
-    private _spotStaticCache: PointShadowCache = new PointShadowCache(ShadowPasses.MAX_SPOT_SHADOWS);
+    private readonly _spotShadowCache: PointShadowCache = new PointShadowCache(ShadowPasses.MAX_SPOT_SHADOWS);
+    private readonly _spotStaticCache: PointShadowCache = new PointShadowCache(ShadowPasses.MAX_SPOT_SHADOWS);
     public spotStaticFBO!: LayeredDepthFramebuffer;
-    private readonly _casterMotion = new CasterMotion();
-    private readonly _pointFaceFrustum = new Frustum();
 
-    private readonly _pointFaceLists: PointFaceCasters = {
+    /** The two punctual atlases for `_prepareStaticAtlas` and `_drawCachedLayer`. */
+    private readonly _spotAtlas: PunctualAtlas = {
+        label: 'spotShadow',
+        live: () => this.spotShadowFBO,
+        statics: () => this.spotStaticFBO,
+        liveCache: this._spotShadowCache,
+        staticCache: this._spotStaticCache,
+        resolution: () => this.spotShadowResolution,
+    };
+    private readonly _pointAtlas: PunctualAtlas = {
+        label: 'pointShadow',
+        live: () => this.pointShadowFBO,
+        statics: () => this.pointStaticFBO,
+        liveCache: this.pointShadowCache,
+        staticCache: this.pointStaticCache,
+        resolution: () => this.pointShadowResolution,
+    };
+    private readonly _casterMotion = new CasterMotion();
+    private readonly _layerFrustum = new Frustum();
+
+    private readonly _frustumCasterLists: FrustumCasters = {
         statics: [], dynamics: [], staticCount: 0, dynamicCount: 0, staticHash: 0, dynamicHash: 0,
     };
 
@@ -1267,11 +1298,7 @@ export class ShadowPasses {
         if (!this._passes.beginPass('shadows.spot')) return;
         this._ensureShadowCasters(scene);
         // The static copy, as for the point faces (see `renderPointShadows`).
-        if (this.spotStaticFBO.size !== this.spotShadowFBO.size || this.spotStaticFBO.layers !== this.spotShadowFBO.layers) {
-            this.spotStaticFBO.create(this.spotShadowFBO.size, this.spotShadowFBO.layers);
-            this._spotStaticCache.invalidateAll();
-            this._spotShadowCache.invalidateAll();
-        }
+        this._prepareStaticAtlas(this._spotAtlas);
 
         GLState.depthTest(true);
         GLState.depthMask(true);
@@ -1309,24 +1336,7 @@ export class ShadowPasses {
             // from its static copy plus what moves. Keyed on the light matrix itself, which carries
             // position, direction, cone and range.
             const matrix = this.spotShadowMatrices[layer];
-            const lists = this._pointFaceCasters(matrix);
-            const key = mixTransform(HASH_SEED, matrix);
-            const staticStale = this._spotStaticCache.needsUpdate(layer, pos, far, mixNumber(key, lists.staticHash));
-            const liveStale = this._spotShadowCache.needsUpdate(layer, pos, far,
-                mixNumber(mixNumber(key, lists.staticHash), lists.dynamicHash)) || staticStale;
-            if (staticStale) {
-                const pass = this._passes.beginDepthPass(this.spotStaticFBO.renderTarget, 'spotShadow', layer);
-                this._renderShadowCasters(pass, lists.statics, lists.staticCount, matrix);
-                this._passes.endDepthPass(pass);
-            }
-            if (!liveStale) continue;
-            this._passes.copyDepthLayer(this.spotStaticFBO.texture, this.spotShadowFBO.texture, layer,
-                                 this.spotShadowResolution);
-            if (lists.dynamicCount > 0) {
-                const pass = this._passes.beginDepthPass(this.spotShadowFBO.renderTarget, 'spotShadow', layer, 'load');
-                this._renderShadowCasters(pass, lists.dynamics, lists.dynamicCount, matrix);
-                this._passes.endDepthPass(pass);
-            }
+            this._drawCachedLayer(this._spotAtlas, layer, matrix, pos, far, mixTransform(HASH_SEED, matrix), false);
         }
 
         GLState.cullFace('back');
@@ -1394,11 +1404,7 @@ export class ShadowPasses {
         this._ensureShadowCasters(scene);
         // The static copy, the live atlas's twin: allocated with the first casting point light, and
         // reallocated with the live one (fresh storage holds undefined depth, so every face redraws).
-        if (this.pointStaticFBO.size !== this.pointShadowFBO.size || this.pointStaticFBO.layers !== this.pointShadowFBO.layers) {
-            this.pointStaticFBO.create(this.pointShadowFBO.size, this.pointShadowFBO.layers);
-            this.pointStaticCache.invalidateAll();
-            this.pointShadowCache.invalidateAll();
-        }
+        this._prepareStaticAtlas(this._pointAtlas);
 
         GLState.depthTest(true);
         GLState.depthMask(true);
@@ -1446,23 +1452,7 @@ export class ShadowPasses {
                 // ITS frustum changed, and then from the face's static copy plus the casters that move:
                 // the player walking past a torch costs the one or two faces they are in, a depth copy
                 // and a character, not six passes over every wall of the dungeon.
-                const lists = this._pointFaceCasters(this.pointShadowMatrices[layer]);
-                const staticStale = this.pointStaticCache.needsUpdate(layer, pos, far, lists.staticHash) || full;
-                const liveStale = this.pointShadowCache.needsUpdate(layer, pos, far,
-                    mixNumber(lists.staticHash, lists.dynamicHash)) || staticStale;
-                if (staticStale) {
-                    const pass = this._passes.beginDepthPass(this.pointStaticFBO.renderTarget, 'pointShadow', layer);
-                    this._renderShadowCasters(pass, lists.statics, lists.staticCount, this.pointShadowMatrices[layer]);
-                    this._passes.endDepthPass(pass);
-                }
-                if (!liveStale) continue;
-                this._passes.copyDepthLayer(this.pointStaticFBO.texture, this.pointShadowFBO.texture, layer,
-                                     this.pointShadowResolution);
-                if (lists.dynamicCount > 0) {
-                    const pass = this._passes.beginDepthPass(this.pointShadowFBO.renderTarget, 'pointShadow', layer, 'load');
-                    this._renderShadowCasters(pass, lists.dynamics, lists.dynamicCount, this.pointShadowMatrices[layer]);
-                    this._passes.endDepthPass(pass);
-                }
+                this._drawCachedLayer(this._pointAtlas, layer, this.pointShadowMatrices[layer], pos, far, null, full);
             }
         }
 
@@ -1474,17 +1464,60 @@ export class ShadowPasses {
     }
 
     /**
-     * The shadow casters standing in one point-shadow face's frustum (`lightSpace`), split into static
-     * and dynamic (see `CasterMotion`), with a hash of each half so the face caches can tell "nothing
-     * moved" from "something did". A sphere test and a few multiplies per caster per face, against a
+     * Keep a punctual atlas's static copy the size of the live atlas: allocated with the first casting
+     * light, reallocated with the live one. Fresh storage holds undefined depth, so a reallocation drops
+     * both caches and every layer redraws.
+     */
+    private _prepareStaticAtlas(atlas: PunctualAtlas): void {
+        const live = atlas.live(), statics = atlas.statics();
+        if (statics.size !== live.size || statics.layers !== live.layers) {
+            statics.create(live.size, live.layers);
+            atlas.staticCache.invalidateAll();
+            atlas.liveCache.invalidateAll();
+        }
+    }
+
+    /**
+     * One atlas layer — a spot map, or one face of a point cube — cached: redrawn only when what stands
+     * in its frustum changed, and then from its static copy plus the casters that move. `seed`, when
+     * given, is mixed into both cache keys (a spot light's matrix: the cache does not otherwise key on the
+     * projection); `forceStatic` redraws the static copy regardless (a point-light full update).
+     * Each `needsUpdate` call stays the LEFT operand of its `||`: the call records the key it is asked
+     * about, and a short-circuit ahead of it would skip the record.
+     */
+    private _drawCachedLayer(atlas: PunctualAtlas, layer: number, matrix: mat4, pos: ArrayLike<number>, far: number,
+                             seed: number | null, forceStatic: boolean): void {
+        const lists = this._frustumCasters(matrix);
+        const staticKey = seed === null ? lists.staticHash : mixNumber(seed, lists.staticHash);
+        const staticStale = atlas.staticCache.needsUpdate(layer, pos, far, staticKey) || forceStatic;
+        const liveStale = atlas.liveCache.needsUpdate(layer, pos, far, mixNumber(staticKey, lists.dynamicHash))
+            || staticStale;
+        if (staticStale) {
+            const pass = this._passes.beginDepthPass(atlas.statics().renderTarget, atlas.label, layer);
+            this._renderShadowCasters(pass, lists.statics, lists.staticCount, matrix);
+            this._passes.endDepthPass(pass);
+        }
+        if (!liveStale) return;
+        this._passes.copyDepthLayer(atlas.statics().texture, atlas.live().texture, layer, atlas.resolution());
+        if (lists.dynamicCount > 0) {
+            const pass = this._passes.beginDepthPass(atlas.live().renderTarget, atlas.label, layer, 'load');
+            this._renderShadowCasters(pass, lists.dynamics, lists.dynamicCount, matrix);
+            this._passes.endDepthPass(pass);
+        }
+    }
+
+    /**
+     * The shadow casters standing in one shadow layer's frustum (`lightSpace`: a spot map or a point
+     * face), split into static and dynamic (see `CasterMotion`), with a hash of each half so the layer
+     * caches can tell "nothing moved" from "something did". A sphere test and a few multiplies per caster per face, against a
      * rasterization of the face — the trade is not close. A skinned caster mixes in the frame, because
      * one animating in place moves no transform and would otherwise keep a stale pose in the map.
      */
-    private _pointFaceCasters(lightSpace: mat4): PointFaceCasters {
-        const out = this._pointFaceLists;
+    private _frustumCasters(lightSpace: mat4): FrustumCasters {
+        const out = this._frustumCasterLists;
         out.staticCount = 0; out.dynamicCount = 0;
         let sh = HASH_SEED, dh = HASH_SEED;
-        const frustum = this._pointFaceFrustum;
+        const frustum = this._layerFrustum;
         frustum.setFromViewProjection(lightSpace);
         for (let k = 0; k < this._casterCount; k++) {
             const r = this._casterRecords[k];
