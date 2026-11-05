@@ -1732,10 +1732,14 @@ export class WebGPUDevice implements Device {
         const bytesPerTexel = TEXTURE_FORMAT_INFO[tex.format].bytesPerTexel;
         this._device.queue.writeTexture(
             { texture: tex.handle, mipLevel, origin: { x, y, z: arrayLayer } },
-            data.buffer as ArrayBuffer,
+            // The VIEW, not its whole ArrayBuffer: the browser ships everything from `offset` to the
+            // end of what it is handed to the GPU process, so `data.buffer` + `byteOffset` sent the
+            // rest of a caller's staging buffer with every upload (the object table's 256 KB scratch,
+            // once per flush — ~3.6 MB a frame in Play for ~20 KB of real rows).
+            data as ArrayBufferView<ArrayBuffer>,
             // No 256-byte rule here: the alignment requirement applies to buffer COPIES, not to
             // `writeTexture`, which takes the tightly packed rows a caller naturally has.
-            { offset: data.byteOffset, bytesPerRow: width * bytesPerTexel, rowsPerImage: height },
+            { offset: 0, bytesPerRow: width * bytesPerTexel, rowsPerImage: height },
             { width, height, depthOrArrayLayers: 1 },
         );
     }
