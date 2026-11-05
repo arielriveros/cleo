@@ -471,15 +471,6 @@ export class ForwardPass {
         // current, and letting the pipeline do it would send the per-draw uniforms to the previous draw's.
         this._modelDraw.beginModel(node, shaderType);
 
-        // Ensure default UV transform for basic shader when rendering models
-        try {
-            const hasUV = this._shaderManager.getShader(shaderType).hasUniform('u_uvScale');
-            if (hasUV) {
-                this._shaderManager.setUniform('u_uvOffset', [0, 0]);
-                this._shaderManager.setUniform('u_uvScale', [1, 1]);
-            }
-        } catch (_) {}
-
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
 
         // Per-draw light-probe selection: the probe containing THIS mesh supplies the env reflection

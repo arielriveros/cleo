@@ -115,6 +115,9 @@ export class ModelDraw {
 
     public specularAaEnabled: boolean = true;
 
+    private static readonly _UV_OFFSET = [0, 0];
+    private static readonly _UV_SCALE = [1, 1];
+
     // Reused scratch to avoid per-frame allocations
     public boneMatrixScratch: Float32Array = new Float32Array(100 * 16);
     /** Preallocated identity bone matrices, uploaded for an animated model that has no animator. */
@@ -190,6 +193,12 @@ export class ModelDraw {
             ? this._projection.nudgedProjection(this._view.camera.projectionMatrix, depthNudge)
             : this._projection.rasterProjection(this._view.camera.projectionMatrix));
         this._shaderManager.setUniform('u_model', node.worldTransform);
+        // A model shows its whole texture: the Basic family's UV transform is a sprite-sheet tile, and
+        // a uniform keeps the last sprite's. This used to be written only in the forward pass, and only
+        // where `hasUniform` saw it — which on WebGL2 never sees a block member — so a Basic model there,
+        // and in the G-buffer on both backends, drew with whatever the block held.
+        this._shaderManager.setUniform('u_uvOffset', ModelDraw._UV_OFFSET);
+        this._shaderManager.setUniform('u_uvScale', ModelDraw._UV_SCALE);
         this._materials.setDissolve(node.effectiveFade);
         this._materials.setCameraHole(node.cameraDither);
         if (animated) this.uploadBoneMatrices(shaderType, node);
