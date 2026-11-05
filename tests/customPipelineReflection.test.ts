@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../src/graphics/rhi/deviceHandle', () => ({
     device: {
         backend: 'webgpu',
+        capabilities: { backend: 'webgpu', conventions: { runtimeShaderLanguage: 'wgsl' } },
         createShaderProgram: () => ({ dispose() {} }),
     },
 }));

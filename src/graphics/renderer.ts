@@ -664,7 +664,7 @@ export class Renderer {
         // The shared screen quad. Its V pairing differs by BACKEND, and this is the ONLY place that
         // difference exists: a GL texture's v=0 is its bottom row, a WebGPU texture's its top, while
         // clip space agrees. Settling it here means no pass anywhere else needs a flip.
-        const v0 = device.backend === 'webgl2' ? 0 : 1;   // the V that belongs with clip-space y = -1
+        const v0 = device.capabilities.conventions.originTopLeft ? 1 : 0;   // the V that belongs with clip-space y = -1
         const v1 = 1 - v0;
         this._passes.screenQuad.create([-1, -1, 0, 0, v0,  1, -1, 0, 1, v0,
                                   1,  1, 0, 1, v1, -1,  1, 0, 0, v1], 12, [0, 1, 2, 0, 2, 3]);

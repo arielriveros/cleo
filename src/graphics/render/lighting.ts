@@ -472,7 +472,7 @@ export class LightingPasses {
                 far: Math.min(camera.far, this.clusterDistance),
                 fovY: camera.fov * Math.PI / 180,
                 aspect: camera.ratio,
-            }, this._targets.scene.width, this._targets.scene.height, device.backend === 'webgpu');
+            }, this._targets.scene.width, this._targets.scene.height, device.capabilities.conventions.originTopLeft);
         }
 
         this.packLightRecords(scene);

@@ -11,7 +11,7 @@ import ClusteredLightsChunk from '../shaders/wgsl/clusteredLightsChunk.wgsl';
 import ScreenProgram from '../shaders/wgsl/screen.wgsl';
 import GeometryPBRProgram from '../shaders/wgsl/geometryPBR.wgsl';
 import PBRProgram from '../shaders/wgsl/pbr.wgsl';
-import { uniformBlocksOf } from '../rhi/webgpu/wgslReflect';
+import { uniformBlocksOf } from '../rhi/wgslReflect';
 
 // The shadow library, GENERATED from chunks/shadows.wgsl at build time, so the cascade and bias
 // arithmetic is authored once. See tools/wgslTranslate.mjs `extractGlslChunk`.
@@ -1017,7 +1017,7 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
             // The WebGPU half. Absent on WebGL2, and on WebGPU with no translator installed.
             ...webgpuHalf(mat, key),
         };
-        if (!authoring.enabled && device.backend === 'webgl2' && device.prepareShaderProgram) {
+        if (!authoring.enabled && device.prepareShaderProgram) {
             device.prepareShaderProgram(descriptor);
             pendingCompiles.set(key, descriptor);
             if (!ShaderManager.Instance.find(key)) {
@@ -1099,7 +1099,7 @@ function retypeDepthTextures(wgsl: string, names: readonly string[]): string {
 function webgpuHalf(mat: CustomMaterial, key: string): { wgsl?: string;
         vertexInputs?: readonly { name: string; location: number; type: string }[];
         uniformBlocks?: readonly unknown[] } {
-    if (device.backend === 'webgl2') return {};
+    if (device.capabilities.conventions.runtimeShaderLanguage !== 'wgsl') return {};
 
     // The engine program whose VERTEX source this material is compiled against. Named per mode:
     // pairing a lit fragment stage with the fullscreen vertex stage draws the mesh as a screen quad.

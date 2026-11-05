@@ -962,7 +962,7 @@ export class ShadowPasses {
         key = mixNumber(mixNumber(mixNumber(key, this._sys.modelDraw.objectId(material)), casts ? 1 : 0),
                         material.config.side === 'double' ? 1 : 0);
         key = mixNumber(mixNumber(mixNumber(key, cut ? this._sys.modelDraw.objectId(cut.texture) : 0), cut ? cut.cutoff : 0),
-                        this._pipelines.epoch * 2 + (this._view.cubeFace && device.backend === 'webgpu' ? 1 : 0));
+                        this._pipelines.epoch * 2 + (this._view.cubeFace && device.capabilities.conventions.originTopLeft ? 1 : 0));
         key = mixNumber(mixNumber(key, reachKey), landscape.chunkNodes.length);
         // A density change swaps every chunk's geometry, and a chunk waits for its new mesh.
         const first = landscape.chunkNodes[0];
@@ -1079,7 +1079,7 @@ export class ShadowPasses {
         // so front-face culling would erase half of it. A solid caster keeps the FRONT-face culling that
         // pushes shadow acne onto surfaces the camera cannot see.
         const cullMode: CullMode = anyCutout || material.config.side === 'double' ? 'none' : 'front';
-        const epoch = this._pipelines.epoch * 2 + (this._view.cubeFace && device.backend === 'webgpu' ? 1 : 0);
+        const epoch = this._pipelines.epoch * 2 + (this._view.cubeFace && device.capabilities.conventions.originTopLeft ? 1 : 0);
 
         let state = this._shadowCasterStates.get(node);
         if (!state || state.model !== model || state.material !== material || state.shaderType !== shaderType

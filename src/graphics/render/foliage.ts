@@ -472,7 +472,7 @@ export class FoliagePasses {
         // halved where clip depth spans [-1, 1] (WebGL2) rather than [0, 1].
         const d = this._sys.shadows.shadowLightUnit, v = this._impostorShadowVec;
         v[0][0] = d[0]; v[0][1] = d[1]; v[0][2] = d[2];
-        v[0][3] = (clip[2] * d[0] + clip[6] * d[1] + clip[10] * d[2]) * (device.backend === 'webgpu' ? 1 : 0.5);
+        v[0][3] = (clip[2] * d[0] + clip[6] * d[1] + clip[10] * d[2]) * (device.capabilities.conventions.clipDepthZeroToOne ? 1 : 0.5);
         v[1][0] = info.frames; v[1][1] = info.radius; v[1][2] = albedo.config.flipY ? 1 : 0;
         v[2][0] = info.center[0]; v[2][1] = info.center[1]; v[2][2] = info.center[2];
         this._shaderManager.setUniform('u_lightDir', v[0]);

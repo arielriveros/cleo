@@ -108,7 +108,7 @@ export class Capture {
         const pixels = await device.readPixels(this._offscreenFBO.colors[0].attachmentView, 0, 0, size, size);
         // A resampled scene buffer: `presentThumbnail` blits the lit scene through the screen
         // quad, so these rows are the scene's rows and the backend rule applies.
-        return Capture._encodePNG(pixels, size, size, device.backend === 'webgl2'); // already square
+        return Capture._encodePNG(pixels, size, size, !device.capabilities.conventions.readbackRowsTopDown); // already square
     }
 
     /**

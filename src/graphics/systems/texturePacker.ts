@@ -666,7 +666,7 @@ export class TexturePacker {
     private _ensureQuad(): Mesh {
         if (this._quad) return this._quad;
         const quad = new Mesh();
-        const v0 = device.backend === 'webgl2' ? 0 : 1;   // the V that belongs with clip-space y = -1
+        const v0 = device.capabilities.conventions.originTopLeft ? 1 : 0;   // the V that belongs with clip-space y = -1
         const v1 = 1 - v0;
         quad.create([-1, -1, 0, 0, v0,  1, -1, 0, 1, v0,
                       1,  1, 0, 1, v1, -1,  1, 0, 0, v1], 12, [0, 1, 2, 0, 2, 3]);

@@ -1971,6 +1971,14 @@ export async function acquireWebGPUDevice(
         // WebGPU has no anisotropy limit query; 16 is the ceiling every implementation accepts.
         maxAnisotropy: 16,
         preferredCanvasFormat,
+        conventions: {
+            clipDepthZeroToOne: true,
+            originTopLeft: true,
+            readbackRowsTopDown: true,
+            writeTextureConvertsFloatToHalf: false,
+            pipelineCreationCompiles: true,
+            runtimeShaderLanguage: 'wgsl',
+        },
         ...(info?.description || info?.vendor
             ? {
                 adapterInfo: {

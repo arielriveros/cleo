@@ -68,6 +68,14 @@ export function detectWebGL2Capabilities(gl: WebGL2RenderingContext): DeviceCapa
         maxAnisotropy,
         // WebGL2 always presents through the canvas's own RGBA8 buffer; no format to negotiate.
         preferredCanvasFormat: 'rgba8unorm',
+        conventions: {
+            clipDepthZeroToOne: false,
+            originTopLeft: false,
+            readbackRowsTopDown: false,
+            writeTextureConvertsFloatToHalf: true,
+            pipelineCreationCompiles: false,
+            runtimeShaderLanguage: 'glsl',
+        },
 
         adapterInfo: readAdapterInfo(gl),
     };

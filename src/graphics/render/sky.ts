@@ -122,7 +122,7 @@ export class SkyPasses {
         // Flip Y on WebGPU: framebuffer row 0 is the BOTTOM on WebGL2 and the TOP on WebGPU. UV-sampled
         // targets survive that (the screen quad undoes it at present); a CUBEMAP, sampled by
         // direction, does not.
-        if (device.backend === 'webgpu') this._captureProj[5] *= -1;
+        if (device.capabilities.conventions.originTopLeft) this._captureProj[5] *= -1;
         for (const f of SkyPasses.CUBE_FACES) {
             const view = mat4.create();
             mat4.lookAt(view, [0, 0, 0], f.dir, f.up);

@@ -189,7 +189,7 @@ export class PipelineCache {
                     options: PipelineOptions): RenderPipeline {
         const target = options.target ?? this._passes.target;
         const filter = this._host.filter();
-        const cubeFace = this._view.cubeFace && device.backend === 'webgpu';
+        const cubeFace = this._view.cubeFace && device.capabilities.conventions.originTopLeft;
         const cullMode = options.cullMode ?? 'none', targets = options.targets ?? 1;
         const topology = options.topology ?? 'triangle-list', vertex = options.vertex ?? false;
         const builtFor = options.builtFor ?? null, colorWrite = options.colorWrite ?? true;
@@ -267,7 +267,7 @@ export class PipelineCache {
 
         // Only WebGPU has a front-face to get wrong here: WebGL2 keeps its own winding state and the
         // cube-face capture never changed it.
-        const cubeFace = this._view.cubeFace && device.backend === 'webgpu';
+        const cubeFace = this._view.cubeFace && device.capabilities.conventions.originTopLeft;
         const key = PipelineCache._keyOf(program, cullMode, targets, topology, vertex, builtFor, cubeFace,
                                          !!reflection.vertexWgsl, this._formatKey(target, targets),
                                          blend ?? null, resolvedDepth ?? null, colorWrite);
@@ -295,7 +295,7 @@ export class PipelineCache {
             pipeline = device.createRenderPipeline(this._describe(recipe, vertexModule, module));
             this._byKey.set(key, pipeline);
             shaderOptimizerStats.pipelinesBuilt++;
-            if (device.backend === 'webgpu') recordStall(`pipeline ${program}`, performance.now() - buildStart);
+            if (device.capabilities.conventions.pipelineCreationCompiles) recordStall(`pipeline ${program}`, performance.now() - buildStart);
             // Recorded for a publish to warm (shaderOptimizer/pipelineRecipes.ts) — never a custom material's,
             // whose program is assembled at runtime and has no name a later boot could look up.
             if (!reflection.vertexWgsl && !program.startsWith('custom') && !this._pipelineRecipes.has(key)) {
@@ -410,7 +410,7 @@ export class PipelineCache {
      */
     public async warm(onProgress?: (done: number, total: number) => void): Promise<number> {
         const recipes = this._warmRecipes;
-        if (!recipes.length || device?.backend !== 'webgpu') return 0;
+        if (!recipes.length || !device?.capabilities.conventions.pipelineCreationCompiles) return 0;
         const create = device.createRenderPipelineAsync?.bind(device);
         if (!create) return 0;
         let done = 0, warmed = 0;
