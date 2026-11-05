@@ -164,6 +164,35 @@ describe('ObjectTable', () => {
     });
 });
 
+describe('ObjectTable bone palettes', () => {
+    const pose = (k: number) => { const b = new Float32Array(1600); for (let i = 0; i < 1600; i++) b[i] = (i % 17) + k; return b; };
+
+    it('appends a palette once per owner per epoch, on a record boundary, and reuses an unchanged pose', () => {
+        const { table, submit } = fakeBackend();
+        const knight = {};
+        table.ensure({}, matrix(1), 0, false);
+        const texel = table.palette(knight, pose(0));
+        expect(texel % OBJECT_RECORD_TEXELS).toBe(0);
+        expect(texel).toBe(OBJECT_RECORD_TEXELS);           // after the one record
+        expect(table.palette(knight, pose(0))).toBe(texel);
+        expect(table.count).toBe(1 + PALETTE_RECORDS);
+        expect(table.palette(knight, pose(1))).toBe((1 + PALETTE_RECORDS) * OBJECT_RECORD_TEXELS);
+        submit();
+        expect(table.palette(knight, pose(1))).toBe(0);
+    });
+
+    it('never lets an object record share the palette written before it', () => {
+        const { table } = fakeBackend();
+        // A palette whose last record happens to hold exactly what the next object record holds.
+        const bones = new Float32Array(1600);
+        const tail = new Float32Array(32);
+        packObjectRecord(tail, 0, matrix(7), 0, false, 0);
+        bones.set(tail, 1600 - 32);
+        table.palette({}, bones);
+        expect(table.ensure({}, matrix(7), 0, false)).toBe(PALETTE_RECORDS);
+    });
+});
+
 describe('the table in translated GLSL', () => {
     let translated: { vertex: string; fragment: string; resources: { group: number; binding: number; kind: string; glslName: string }[] };
     beforeAll(async () => {

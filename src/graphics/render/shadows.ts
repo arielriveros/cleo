@@ -817,7 +817,8 @@ export class ShadowPasses {
                 // geometry shader: the unlit Basic family has no normal/tangent/bitangent, so its bone
                 // attributes sit at locations 2/3 where every lit family puts them at 5/6.
                 (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(state.shaderType).attributes);
-                this._sys.modelDraw.uploadBoneMatrices('shadowMapSkinned', node);
+                // The palette rides in the object table for a program that reads it (the caster's record).
+                if (!objectData) this._sys.modelDraw.uploadBoneMatrices('shadowMapSkinned', node);
             }
 
             // Depth-only, so no material is bound — a merged model normally casts its whole buffer in

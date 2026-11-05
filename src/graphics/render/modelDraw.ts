@@ -70,7 +70,28 @@ export class ModelDraw {
      * forward, velocity), appended on first use this submission, uploaded if pending.
      */
     public rowForNode(node: ModelNode): number {
-        return this._objects.rowFor(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither);
+        const palette = this._paletteOf(node);
+        return this._objects.rowFor(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither, palette);
+    }
+
+    /** A skinned node's bone palette in the table (its first texel), 0 for a static one. */
+    private _paletteOf(node: ModelNode): number {
+        if (!(node.model instanceof AnimatedModel)) return 0;
+        return this._objects.palette(node, this._bonesOf(node));
+    }
+
+    /**
+     * The skinning palette a draw of `node` uses: this frame's pose in `boneMatrixScratch`, or the identity
+     * palette for an animated model with no animator. Exactly what {@link uploadBoneMatrices} sends.
+     */
+    private _bonesOf(node: ModelNode): Float32Array {
+        const animatedModel = node.model as AnimatedModel;
+        if (!animatedModel.hasSkin || !node.animator) return this.boneIdentityScratch;
+        const boneMatrices = node.animator.getFinalBoneMatrices();
+        const scratch = this.boneMatrixScratch;
+        const n = Math.min(100, boneMatrices.length);
+        for (let i = 0; i < n; i++) scratch.set(boneMatrices[i], i * 16);
+        return scratch;
     }
 
     /** Append every node's record, then upload them in one go — before a pass records its draws. */
@@ -81,7 +102,8 @@ export class ModelDraw {
 
     /** `node`'s record, appended if needed but NOT uploaded — see {@link flushRows}. */
     public ensureRow(node: ModelNode): number {
-        return this._objects.ensure(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither);
+        const palette = this._paletteOf(node);
+        return this._objects.ensure(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither, palette);
     }
 
     /** Upload the records {@link ensureRow} appended. */

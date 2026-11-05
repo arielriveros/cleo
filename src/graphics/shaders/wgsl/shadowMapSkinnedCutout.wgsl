@@ -1,4 +1,5 @@
 #include "./chunks/alphaCutout.wgsl"
+#include "./chunks/objectData.wgsl"
 // Alpha-cutout depth pass for a masked SKINNED mesh using the lit vertex layout.
 //
 // One of FOUR cutout depth variants, and the split is forced rather than tidy. `texCoord` sits at
@@ -43,10 +44,9 @@ struct VertexOutput {
 const MAX_BONES: i32 = 100;
 const MAX_BONE_INFLUENCE: i32 = 4;
 
+// The caster's world matrix and bone palette come from the per-object table (chunks/objectData.wgsl).
 struct ShadowMapSkinnedUniforms {
-    u_model: mat4x4<f32>,
     u_lightSpace: mat4x4<f32>,
-    u_boneMatrices: array<mat4x4<f32>, 100>,
 };
 @group(1) @binding(0) var<uniform> u_shadow: ShadowMapSkinnedUniforms;
 
@@ -59,14 +59,16 @@ fn vs_main(
     @location(4) bitangent: vec3<f32>,
     @location(5) boneIds: vec4<i32>,
     @location(6) weights: vec4<f32>,
+    @builtin(instance_index) objectIndex: u32,
 ) -> VertexOutput {
+    let palette = u32(objectParams(objectIndex).z);
     var totalPosition = vec4<f32>(0.0);
 
     for (var i = 0; i < MAX_BONE_INFLUENCE; i++) {
         let id = boneIds[i];
         if (id == -1) { continue; }
         if (id >= MAX_BONES) { continue; }
-        totalPosition += (u_shadow.u_boneMatrices[id] * vec4<f32>(position, 1.0)) * weights[i];
+        totalPosition += (objectBone(palette, id) * vec4<f32>(position, 1.0)) * weights[i];
     }
 
     // If no bone influences were applied, fall back to the raw bind-pose position.
@@ -76,7 +78,7 @@ fn vs_main(
 
     var out: VertexOutput;
     out.uv = texCoord;
-    out.position = u_shadow.u_lightSpace * u_shadow.u_model * totalPosition;
+    out.position = u_shadow.u_lightSpace * objectModel(objectIndex) * totalPosition;
     return out;
 }
 

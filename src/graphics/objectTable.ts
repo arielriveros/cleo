@@ -4,7 +4,7 @@ import { device } from './rhi/deviceHandle';
 import type { Texture as RhiTexture } from './rhi/resources';
 import { frameStats } from './renderStats';
 import {
-    OBJECT_TABLE_WIDTH, OBJECT_RECORD_TEXELS, OBJECT_RECORD_FLOATS,
+    OBJECT_TABLE_WIDTH, OBJECT_RECORD_TEXELS, OBJECT_RECORD_FLOATS, PALETTE_BONES, PALETTE_RECORDS,
     packObjectRecord, uploadRects,
 } from './objectData';
 
@@ -55,6 +55,10 @@ export class ObjectTable {
     private _generation = 0;
     /** Per owner, its record this epoch. Checked by value before reuse. */
     private readonly _owners = new WeakMap<object, { epoch: number; record: number }>();
+    /** Per owner, its bone palette this epoch (first record), checked by value before reuse. */
+    private readonly _palettes = new WeakMap<object, { epoch: number; record: number }>();
+    /** Records below this are never shared by an object record (a palette's last record could match one). */
+    private _shareFloor = 0;
     private readonly _scratch = new Float32Array(OBJECT_RECORD_FLOATS);
 
     constructor(private readonly _allocate: (rows: number) => Texture = allocateTable,
@@ -92,7 +96,7 @@ export class ObjectTable {
         const known = this._owners.get(owner);
         if (known && known.epoch === this._epoch && this._matches(known.record)) return known.record;
         let record: number;
-        if (this._count > 0 && this._matches(this._count - 1)) record = this._count - 1;
+        if (this._count > this._shareFloor && this._matches(this._count - 1)) record = this._count - 1;
         else {
             record = this._append();
             this._staging.set(scratch, record * OBJECT_RECORD_FLOATS);
@@ -100,6 +104,30 @@ export class ObjectTable {
         if (known) { known.epoch = this._epoch; known.record = record; }
         else this._owners.set(owner, { epoch: this._epoch, record });
         return record;
+    }
+
+    /**
+     * A skinned object's bone palette — `PALETTE_BONES` matrices, 16 floats each, from `bones` — and the
+     * TEXEL it starts at, for the object's record. Appended once per epoch per owner unless the pose is
+     * unchanged; NOT uploaded (see {@link flush}). Starts on a record boundary, so no matrix straddles a row.
+     */
+    public palette(owner: object, bones: Float32Array): number {
+        this._sync();
+        const floats = PALETTE_BONES * 16;
+        const known = this._palettes.get(owner);
+        if (known && known.epoch === this._epoch) {
+            const base = known.record * OBJECT_RECORD_FLOATS, data = this._staging;
+            let same = true;
+            for (let i = 0; i < floats; i++) if (data[base + i] !== bones[i]) { same = false; break; }
+            if (same) return known.record * OBJECT_RECORD_TEXELS;
+        }
+        const first = this._count;
+        for (let i = 0; i < PALETTE_RECORDS; i++) this._append();
+        this._staging.set(bones.subarray(0, floats), first * OBJECT_RECORD_FLOATS);
+        this._shareFloor = this._count;
+        if (known) { known.epoch = this._epoch; known.record = first; }
+        else this._palettes.set(owner, { epoch: this._epoch, record: first });
+        return first * OBJECT_RECORD_TEXELS;
     }
 
     /** {@link ensure}, then upload what is pending: what a draw path that prepared nothing calls. */
@@ -162,6 +190,7 @@ export class ObjectTable {
         this._epoch = epoch;
         this._count = 0;
         this._uploaded = 0;
+        this._shareFloor = 0;
         for (const old of this._retired) old.delete();
         this._retired.length = 0;
     }
