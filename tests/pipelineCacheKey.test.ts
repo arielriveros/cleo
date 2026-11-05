@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PipelineCache, DEPTH_TEST, DEPTH_WRITE } from '../src/graphics/render/pipelineCache';
+import { PipelineCache, DEPTH_ALWAYS, DEPTH_TEST, DEPTH_WRITE } from '../src/graphics/render/pipelineCache';
 import type { BlendState, DepthStencilState } from '../src/graphics/rhi/types';
 
 /**
@@ -35,5 +35,12 @@ describe('the pipeline cache key', () => {
         const args = ['pbr', 'back', 1, 'triangle-list', 'model', 'pbr', false, false, 'rgba16float', null] as const;
         expect(keyOf(...args, DEPTH_WRITE, true)).toBe(keyOf(...args, depth, true));
         expect(keyOf(...args, DEPTH_TEST, true)).toBe(keyOf(...args, literalTest, true));
+    });
+
+    it('keeps the always-on-top state from writing the depth it borrows', () => {
+        // Gizmos and the selection silhouette draw through geometry into the scene's own depth attachment,
+        // which game sprites are still tested against later in the frame.
+        expect(DEPTH_ALWAYS.depthWriteEnabled).toBe(false);
+        expect(DEPTH_ALWAYS.depthCompare).toBe('always');
     });
 });

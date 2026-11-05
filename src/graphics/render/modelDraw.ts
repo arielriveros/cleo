@@ -132,16 +132,19 @@ export class ModelDraw {
     /**
      * Everything a model draw sets before its materials: the skinned VAO, the program, the camera and
      * world transforms, the despawn dissolve and the camera's see-through hole, and the bone palette.
-     * The projection goes through `rasterProjection`, so it jitters exactly while TAA is collecting.
-     * Returns whether the model is animated.
+     * The projection goes through `rasterProjection`, so it jitters exactly while TAA is collecting;
+     * a `depthNudge` (an editor helper coplanar with the surface it describes) pulls it toward the
+     * camera through `nudgedProjection`. Returns whether the model is animated.
      */
-    public beginModel(node: ModelNode, shaderType: string): boolean {
+    public beginModel(node: ModelNode, shaderType: string, depthNudge: number = 0): boolean {
         const animated = node.model instanceof AnimatedModel;
         if (animated)
             (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(shaderType).attributes);
         this._shaderManager.bind(shaderType);
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
+        this._shaderManager.setUniform('u_projection', depthNudge
+            ? this._projection.nudgedProjection(this._view.camera.projectionMatrix, depthNudge)
+            : this._projection.rasterProjection(this._view.camera.projectionMatrix));
         this._shaderManager.setUniform('u_model', node.worldTransform);
         this._materials.setDissolve(node.effectiveFade);
         this._materials.setCameraHole(node.cameraDither);

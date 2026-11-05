@@ -35,6 +35,12 @@ export const DEPTH_WRITE: DepthStencilState = { format: 'depth24plus', depthWrit
 /** Depth test `less-equal` without writes: transparents, the sky, boxes tested against the scene depth. */
 export const DEPTH_TEST: DepthStencilState = { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' };
 
+/**
+ * No depth test and no writes, for what draws through geometry (gizmos, the selection silhouette).
+ * Compare `always`, because WebGPU has no separate "depth test off".
+ */
+export const DEPTH_ALWAYS: DepthStencilState = { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' };
+
 /** The state `PipelineCache.get` takes, besides the program and its reflection. */
 export interface PipelineOptions {
     blend?: BlendState;

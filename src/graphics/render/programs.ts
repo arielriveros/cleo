@@ -302,8 +302,8 @@ export const VELOCITY_PROGRAMS: Record<string, { resources: readonly ShaderResou
 
 /**
  * The forward-lit programs, by registered name. Their group 0 is material textures PLUS the
- * environment cube — a forward shader resolves its own reflection. `terrainForward` and the custom
- * materials are absent: both are still applied by hand and bind only what they have.
+ * environment cube — a forward shader resolves its own reflection. Custom materials are absent: their
+ * programs compile at runtime, and their pipelines are built from the material's own reflection.
  */
 export const FORWARD_PROGRAMS: Record<string, { resources: readonly ShaderResource[] }> = {
     pbr: PBRProgram,

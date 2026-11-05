@@ -13,6 +13,8 @@ import { OVERLAY_BLEND, OVERLAY_COMPOSITE_BLEND, BufferUsage } from '../rhi/type
 import type { DepthStencilState } from '../rhi/types';
 import { GLState } from '../systems/glState';
 import { ModelDraw } from './modelDraw';
+import type { MaterialDrawState } from './modelDraw';
+import { DEPTH_ALWAYS, DEPTH_TEST, PipelineMemo } from './pipelineCache';
 import { GridProgram, OverlayCompositeProgram, OutlineProgram, FORWARD_PROGRAMS, BasicInstancedProgram } from './programs';
 import type { SkeletonOverlay } from './settingsTypes';
 import type { FrameView } from './frameView';
@@ -53,7 +55,8 @@ export class EditorOverlays {
                 private readonly _post: PostEffects,
                 private readonly _decals: DecalPasses,
                 private readonly _sprites: Sprite2DPasses,
-                private readonly _fullscreen: FullscreenPasses) {}
+                private readonly _fullscreen: FullscreenPasses,
+                private readonly _modelDraw: ModelDraw) {}
 
     // Set per frame by the first pass that opens the overlay layer (`_targets.overlay`): nothing drawn
     // means no clear and no composite, and a published build, which has no editor nodes, pays nothing.
@@ -68,6 +71,13 @@ export class EditorOverlays {
     private _overlaySphereMesh: Mesh | null = null;
     private _overlayBoneMesh: Mesh | null = null;
     private _overlayRingMesh: Mesh | null = null;
+
+    /** The helper and gizmo draws' last pipeline per material, and how they bind materials. */
+    private readonly _pipelineMemo = new PipelineMemo();
+    private readonly _drawState: MaterialDrawState = {
+        targets: 1, depthStencil: DEPTH_TEST, blend: OVERLAY_BLEND, customMode: 'forward', frameLighting: true,
+        terrainSelfShadow: false, viaRHI: true, envCube: null, memo: this._pipelineMemo,
+    };
 
     // One instance buffer PER draw set, never one shared by all four — `_drawSkeletonOverlay` records
     // bones, joints, markers and the highlight into the same pass. Same rule as `GeometryPass._instanceBuffers`.
@@ -197,8 +207,7 @@ export class EditorOverlays {
             // Always on top and never blended: the silhouette must be visible through geometry that
             // occludes it, which is the whole point of an outline. Said as compare 'always' with writes
             // off, because WebGPU has no separate "depth test disabled".
-            const depthAlways: DepthStencilState =
-                { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' };
+            const depthAlways = DEPTH_ALWAYS;
             this._shaderManager.bind('outline');
             this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
             this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
@@ -258,47 +267,19 @@ export class EditorOverlays {
 
         const type = node.model.material.type;
         const reflection = FORWARD_PROGRAMS[type];
-        this._shaderManager.bind(type);
-        const material = node.model.material;
-        const pipeline = reflection ? this._pipelines.get(type, reflection, {
-            cullMode: ModelDraw.cullFor(material.config.side),
-            depthStencil,
-            blend: OVERLAY_BLEND,
-            topology: material.config.wireframe ? 'line-list' : 'triangle-list',
-            vertex: 'model',
-            builtFor: type,
-        }) : null;
-        if (pipeline) pass.setPipeline(pipeline);
-
-        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         // `depthNudge` is folded into the projection rather than set as its own uniform: a helper that
         // is coplanar with the surface it describes needs pulling toward the camera in NDC, and doing
-        // it here costs one added constant instead of a shader variant. Zero for every other helper,
+        // it there costs one added constant instead of a shader variant. Zero for every other helper,
         // which then gets the raster projection untouched.
-        this._shaderManager.setUniform('u_projection',
-            this._projection.nudgedProjection(this._view.camera.projectionMatrix, material.config.depthNudge ?? 0));
+        const animated = this._modelDraw.beginModel(node, type, node.model.material.config.depthNudge ?? 0);
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
-
-        // Set Transform related uniforms
-        this._shaderManager.setUniform('u_model', node.worldTransform);
-        this._materials.setDissolve(node.effectiveFade);
-
-        // Set Material related uniforms
-        this._materials.applyProperties(node.model.material);
-
-        // Textures: a bind group when the program has build-time reflection, otherwise the hand-
-        // rolled slot table this used to carry — which was a third copy of `_textureSlot`, drifting
-        // independently of the other two.
-        if (pipeline) {
-            pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
-            // A LIT helper (the camera gizmo is Blinn-Phong) reads the frame's lights and shadow maps
-            // from group 3 like any forward draw; an unlit one never declares it.
-            if (this._bindGroups.declaresFrameLighting(pipeline)) pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline));
-        }
-        else this._materials.apply(material);
-
-        // Draw the mesh
-        if (!pipeline || !this._passes.recordDraw(pass, node.model.mesh, 0, 0)) node.model.mesh.draw();
+        // Through the same material binder as the scene's own draws: a bind group where the program has
+        // build-time reflection, the hand-applied path otherwise. A LIT helper (the camera gizmo is
+        // Blinn-Phong) reads the frame's lights and shadow maps from group 3 like any forward draw.
+        const state = this._drawState;
+        state.depthStencil = depthStencil;
+        state.viaRHI = !!reflection;
+        this._modelDraw.drawMaterials(pass, node, type, reflection, animated, state);
     }
 
     /**
@@ -340,8 +321,7 @@ export class EditorOverlays {
             }
             // Occluded by real geometry, exactly as these drew when they went through the G-buffer.
             // No depth writes: the attachment is the scene's own.
-            const depthTested: DepthStencilState =
-                { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' };
+            const depthTested = DEPTH_TEST;
             const pass = this._beginOverlayPass('overlay.helpers');
             GLState.blend(true);
             this._setOverlayBlend();
@@ -384,8 +364,7 @@ export class EditorOverlays {
         // the bug would be structural rather than incidental, so it goes. WebGPU has no separate
         // 'test off', hence compare 'always'.
         const pass = this._beginOverlayPass('gizmos');
-        const depthAlways: DepthStencilState =
-            { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' };
+        const depthAlways = DEPTH_ALWAYS;
 
         for (const node of gizmoNodes) this._drawOverlayNode(pass, node, depthAlways);
 

@@ -85,11 +85,11 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // --- After the resolve: the flag is already false, and these must stay put. ---
             '_drawSkeletonOverlay',
             '_drawTileBand',
-            // The overlay layer's per-mesh draw reaches `_rasterProjection` through this thin wrapper,
-            // which adds a coplanar depth nudge and delegates for everything else. Listing the wrapper
-            // rather than `_drawOverlayNode` is the honest reading of the call graph, and the jitter
-            // semantics are unchanged: the overlay is composited after the post chain, so it is further
-            // from the jitter than anything else here.
+            // A helper with a coplanar depth nudge reaches `_rasterProjection` through this thin wrapper
+            // (ModelDraw.beginModel calls it only when the nudge is non-zero); every other overlay draw goes
+            // through beginModel's own raster call. Either way the jitter semantics are unchanged: the
+            // overlay is composited after the post chain, so it is further from the jitter than anything
+            // else here.
             'nudgedProjection',
             'overdrawPass',
             // GPU particles: drawn after the transparents, in both pipelines and in the 2D pass.

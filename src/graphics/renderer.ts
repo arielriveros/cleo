@@ -486,7 +486,7 @@ export class Renderer {
         this._overlays = new EditorOverlays({
             restoreDefaultBlend: () => renderer._restoreDefaultBlend(),
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._post, this._decals, this._sprites, this._fullscreen);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._post, this._decals, this._sprites, this._fullscreen, this._modelDraw);
         this._debugViews = new DebugViews({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
