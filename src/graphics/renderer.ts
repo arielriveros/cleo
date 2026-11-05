@@ -122,6 +122,7 @@ import { BasicProgram, BasicInstancedProgram, BasicSkinnedProgram, BlinnPhongPro
 import { createFrameView, type FrameView } from './render/frameView';
 import { FrameTargets } from './render/frameTargets';
 import { PassEncoder } from './render/passEncoder';
+import { PipelineCache } from './render/pipelineCache';
 import { QUALITY_TIERS } from './render/settingsTypes';
 import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 export { QUALITY_TIERS } from './render/settingsTypes';
@@ -266,7 +267,7 @@ interface TerrainBlockSet {
 interface ShadowCasterState {
     model: Model | AnimatedModel;
     material: Material;
-    /** `_shadowPipelineEpoch` (and the cube-capture winding) the pipeline was built under. */
+    /** `_pipelines.epoch` (and the cube-capture winding) the pipeline was built under. */
     epoch: number;
     shaderType: string;
     cullMode: CullMode;
@@ -334,6 +335,8 @@ export class Renderer {
     private readonly _targets = new FrameTargets();
     /** Pass and encoder plumbing (render/passEncoder.ts): opens and closes passes, owns the frame encoder. */
     private readonly _passes: PassEncoder;
+    /** Render pipelines and shader modules, built once per state (render/pipelineCache.ts). */
+    private readonly _pipelines: PipelineCache;
 
     /**
      * The AUTHORED exposure — what the artist set, what a scene saves, and what a preview renders at.
@@ -536,8 +539,6 @@ export class Renderer {
     private _builtinLensDirt: Texture | null = null;
     private _builtinLensDirtRequested: boolean = false;
 
-    /** RHI pipelines for the fullscreen passes, by program + blend. See _fullscreenPipeline. */
-    private readonly _fullscreenPipelines = new Map<string, RenderPipeline>();
     // Depth writes for the forward model pipelines, set by whichever queue is drawing: opaque writes,
     // transparent does not. Thumbnails are the exception — their coverage alpha comes from scene depth.
     private _forwardDepthWrite = true;
@@ -612,8 +613,6 @@ export class Renderer {
     private _floorScratch: Float32Array = new Float32Array(0);
     private readonly _shadowCasterStates = new WeakMap<ModelNode, ShadowCasterState>();
     private readonly _shadowCutoutMemo = new WeakMap<Material, { frame: number; cut: ShadowCutout | null }>();
-    /** Bumped whenever a cached caster pipeline may no longer be the one `_pipelineFor` would build. */
-    private _shadowPipelineEpoch: number = 0;
     /** Per cascade-array layer: the content hash it was last drawn with, so an unchanged layer is kept. */
     private readonly _shadowLayerCache = new ShadowLayerCache(MAX_CASCADES + 1);
     private readonly _shadowLayerDrawn = new Float64Array(MAX_CASCADES + 1).fill(-Infinity);
@@ -627,7 +626,7 @@ export class Renderer {
      */
     private static readonly SHADOW_LAYER_MAX_AGE = 32;
     private static readonly FAR_LAYER_MAX_AGE = 120;
-    /** The depth state of every shadow pipeline: ONE object, so `_pipelineFor`'s key memo hits. */
+    /** The depth state of every shadow pipeline: ONE object, so `_pipelines.get`'s key memo hits. */
     private static readonly _SHADOW_DEPTH: DepthStencilState = {
         format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal',
     };
@@ -675,10 +674,6 @@ export class Renderer {
     private _variantFilter: ShadowFilter = 0;
     /** A filter change waiting for its variants to finish compiling. */
     private _pendingFilter: ShadowFilter | null = null;
-    /** `_pipelineFor`'s logical -> variant resolution, valid for `_variantMemoFilter`. */
-    private readonly _variantMemo = new Map<string, { program: string; wgsl?: string;
-                                                      entryPoints?: { vertex?: string; fragment?: string; compute?: string } } | null>();
-    private _variantMemoFilter: ShadowFilter | -1 = -1;
     /** Program-table descriptors by name, for variants and on-demand builds after boot. */
     private readonly _tableDescriptors = new Map<string, Omit<ShaderProgramDescriptor, 'label'>>();
     /** Every program built so far, by descriptor: one source never links twice (terrain has two names). */
@@ -697,15 +692,6 @@ export class Renderer {
         isShaderProgramReady: d => this.device.isShaderProgramReady?.(d) ?? true,
         createShaderProgram: d => this.device.createShaderProgram(d),
     }, () => !!this._capabilities?.parallelShaderCompile && !shaderStats.syncEach);
-    /** Every pipeline built this session, as a recipe a publish can ship. See pipelineRecipes. */
-    private readonly _pipelineRecipes = new Map<string, PipelineRecipe>();
-    /** Recipes handed in by the config, built ahead of use by {@link warmPipelines}. */
-    private readonly _warmRecipes: PipelineRecipe[];
-    /**
-     * Shader modules by program and source: a program drawn under several pipeline states (cull modes,
-     * targets, blends) compiles its module once. WebGPU parses and validates WGSL per module.
-     */
-    private readonly _moduleCache = new Map<string, Map<string, ShaderModule>>();
     private _shadowStrength: number = 1.0;
     /** Fraction of a cascade's range used to cross-fade into the next one; 0 = a hard seam. */
     private _cascadeBlend: number = 0.1;
@@ -1334,7 +1320,6 @@ export class Renderer {
         this._cascadeCount = Math.min(MAX_CASCADES, Math.max(1, Math.round(config.shadowCascades ?? this._cascadeCount)));
         this._ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._programList = config.programs ? new Set(config.programs) : null;
-        this._warmRecipes = parseRecipes(config.pipelines);
         this._variants = !!config.programs || !!config.shaderVariants;
         // A published list names the filter its variants were built for.
         if (config.programs?.some(n => /~poisson(\.pom)?$/.test(n))) this._variantFilter = 1;
@@ -1351,6 +1336,12 @@ export class Renderer {
             clearColor: () => this.clearColor,
             passEnabled: name => this._passEnabled[name],
         });
+        this._pipelines = new PipelineCache({
+            variants: this._variants,
+            filter: () => this._variants ? this._variantFilter : (this._shadowFilterMode === 1 ? 1 : 0),
+            physicalOf: name => this._physicalOf(name),
+            descriptorFor: name => this._descriptorFor(name),
+        }, this._view, this._passes, parseRecipes(config.pipelines));
 
         // Preallocated identity bone matrices (used when an animated model has no animator)
         this._boneIdentityScratch = new Float32Array(100 * 16);
@@ -1487,7 +1478,7 @@ export class Renderer {
         // Selection outline silhouette mask (low precision, no mipmaps).
         this._outlineMaskFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
         // Editor overlay layer. `precision: 'high'` matches `_targets.scene`'s rgba16float, so the gizmo,
-        // grid and sprite pipelines keep the same colour format in `_pipelineFor`'s cache key and are
+        // grid and sprite pipelines keep the same colour format in `_pipelines.get`'s cache key and are
         // not duplicated there. No depth of its own: `_overlayTarget` borrows the scene's, which is
         // what keeps helper wireframes occluded by real geometry.
         this._targets.overlay = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' },
@@ -2194,7 +2185,7 @@ export class Renderer {
             this._probePreviewFBO.create(w, h);
 
         const pass = this._passes.beginFullscreenPass(this._probePreviewFBO.renderTarget, 'probePreview', false);
-        const pipeline = this._fullscreenPipeline('probePreview', ProbePreviewProgram);
+        const pipeline = this._pipelines.fullscreen('probePreview', ProbePreviewProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [cube]));
         this._shaderManager.bind('probePreview');
@@ -2612,7 +2603,7 @@ export class Renderer {
                 if (!(chunk instanceof ModelNode) || !chunk.visible || !chunk.initialized) continue;
                 if (this._outsideFrustum(chunk)) continue;
                 this._shaderManager.bind('shadowMap');
-                const pipeline = this._pipelineFor('shadowMap', ShadowMapProgram, {
+                const pipeline = this._pipelines.get('shadowMap', ShadowMapProgram, {
                     cullMode: Renderer._cullFor(chunk.model.material.config.side),
                     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
                     targets: 0,
@@ -2672,7 +2663,7 @@ export class Renderer {
             if (!receivers) continue;
             const material = decal.material ?? this._defaultDecalMaterial;
             this._shaderManager.bind('decalSurface');
-            const pipeline = this._pipelineFor('decalSurface', DecalSurfaceProgram, {
+            const pipeline = this._pipelines.get('decalSurface', DecalSurfaceProgram, {
                 cullMode: Renderer._decalCull(decal),
                 targets: 3,
                 blend: Renderer._DECAL_DBUFFER_BLEND,
@@ -2698,8 +2689,8 @@ export class Renderer {
         // apart by the DBuffer's alphas instead, and discards them.
         const resolve = this._passes.beginFullscreenPass(gBuffer.renderTarget, 'decals.resolve', false, undefined, false);
         this._shaderManager.bind('decalResolve');
-        // `_fullscreenPipeline`'s vertex setup, with three targets.
-        const resolvePipeline = this._pipelineFor('decalResolve', DecalResolveProgram,
+        // `_pipelines.fullscreen`'s vertex setup, with three targets.
+        const resolvePipeline = this._pipelines.get('decalResolve', DecalResolveProgram,
                                                   { vertex: 'model', builtFor: 'decalResolve', targets: 3 });
         resolve.setPipeline(resolvePipeline);
         resolve.setBindGroup(0, this._textureBindGroup(resolvePipeline, 0, [
@@ -2744,7 +2735,7 @@ export class Renderer {
             this._shaderManager.bind('decalColor');
             // No depth state named: both targets carry the scene's depth, and the synthesised default is
             // "test nothing, write nothing" — the overlay in particular must never write that attachment.
-            const pipeline = this._pipelineFor('decalColor', DecalColorProgram, {
+            const pipeline = this._pipelines.get('decalColor', DecalColorProgram, {
                 cullMode: Renderer._decalCull(decal),
                 blend,
                 vertex: 'model',
@@ -2808,7 +2799,7 @@ export class Renderer {
                                                 [0, 0, 0, 0], false, true);
         for (const node of volumes) {
             sm.bind('fluidVolume');
-            const pipeline = this._pipelineFor('fluidVolume', FluidVolumeProgram, {
+            const pipeline = this._pipelines.get('fluidVolume', FluidVolumeProgram, {
                 // Back faces: `Geometry.Cube` winds counter-clockwise from outside (see `_decalCull`).
                 cullMode: Renderer._volumeMirrored(node) ? 'back' : 'front',
                 blend: Renderer._CLOUD_BLEND,
@@ -2894,7 +2885,7 @@ export class Renderer {
             const dst = this._fluidHistoryIndex ^ 1;
             const prev = this._fluidHistoryFBOs[this._fluidHistoryIndex];
             const pass = this._passes.beginFullscreenPass(this._fluidHistoryFBOs[dst].renderTarget, 'fluidVolumes.resolve', false, undefined, false);
-            const pipeline = this._fullscreenPipeline('fluidVolumeResolve', FluidVolumeResolveProgram);
+            const pipeline = this._pipelines.fullscreen('fluidVolumeResolve', FluidVolumeResolveProgram);
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
                 this._fluidTraceFBO!.colors[0], this._fluidTraceFBO!.colors[1], prev.colors[0],
@@ -2916,7 +2907,7 @@ export class Renderer {
         GLState.blend(true);
         if (gl) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'fluidVolumes.composite', false, undefined, false);
-        const pipeline = this._fullscreenPipeline('fluidVolumeComposite', FluidVolumeCompositeProgram, Renderer._CLOUD_BLEND);
+        const pipeline = this._pipelines.fullscreen('fluidVolumeComposite', FluidVolumeCompositeProgram, Renderer._CLOUD_BLEND);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [image, this._fluidTraceFBO!.colors[1], depth]));
         sm.bind('fluidVolumeComposite');
@@ -3239,7 +3230,7 @@ export class Renderer {
         this._shaderManager.bind('occlusionBox');
         this._shaderManager.setUniform('u_view', cam.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._rasterProjection(cam.projectionMatrix));
-        const pipeline = this._pipelineFor('occlusionBox', OcclusionBoxProgram, {
+        const pipeline = this._pipelines.get('occlusionBox', OcclusionBoxProgram, {
             cullMode: 'none',
             depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
             targets: 0,
@@ -3806,7 +3797,7 @@ export class Renderer {
         const model = layer.billboardModel!, info = layer.billboardOctahedral!;
         const albedo = TextureManager.Instance.getTexture(layer.billboardTextureId!);
         if (!albedo) return;
-        const pipeline = this._pipelineFor('shadowMapImpostorInstanced', ShadowMapImpostorProgram, {
+        const pipeline = this._pipelines.get('shadowMapImpostorInstanced', ShadowMapImpostorProgram, {
             // The quad is rebuilt facing the light in the vertex stage, so it never shows its back.
             cullMode: 'none',
             depthStencil: Renderer._SHADOW_DEPTH,
@@ -4047,7 +4038,7 @@ export class Renderer {
                     const moves = !!wind && (billboard ? !wind.foliage : wind.foliage && isFoliageMaterial(model.material));
                     const program = (cutout ? 'shadowMapInstancedCutout' : 'shadowMapInstanced')
                         + (!moves ? '' : billboard ? 'Wind' : 'Foliage');
-                    const pipeline = this._pipelineFor(
+                    const pipeline = this._pipelines.get(
                         program,
                         cutout ? ShadowMapInstancedCutoutProgram : ShadowMapInstancedProgram, {
                         cullMode: cutout || model.material.config.side === 'double' ? 'none' : 'front',
@@ -4343,7 +4334,7 @@ export class Renderer {
                         this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
                         if (sway) this._setWindUniforms(scene, wind!, model.material);
                         this._setLodFadeUniforms(layer, slot);
-                        const pipeline = this._pipelineFor(shaderType, GEOMETRY_PROGRAMS[shaderType], {
+                        const pipeline = this._pipelines.get(shaderType, GEOMETRY_PROGRAMS[shaderType], {
                             cullMode: Renderer._cullFor(model.material.config.side),
                             depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
                             targets: 3, colorWrite: false,
@@ -4398,7 +4389,7 @@ export class Renderer {
                         this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
                         if (sway) this._setWindUniforms(scene, wind!, model.material);
                         this._setLodFadeUniforms(layer, slot);
-                        const pipeline = this._pipelineFor(shaderType, reflection, {
+                        const pipeline = this._pipelines.get(shaderType, reflection, {
                             // Billboard cross quads are two-sided; a mesh prop keeps its material side.
                             cullMode: billboard ? 'none' : Renderer._cullFor(model.material.config.side),
                             depthStencil: afterPrepass
@@ -4471,7 +4462,7 @@ export class Renderer {
         v[1][0] = info.center[0]; v[1][1] = info.center[1]; v[1][2] = info.center[2];
         this._shaderManager.setUniform('u_impostor', v[0]);
         this._shaderManager.setUniform('u_impostorCenter', v[1]);
-        const pipeline = this._pipelineFor('foliageImpostorInstanced', GeometryFoliageImpostorProgram, {
+        const pipeline = this._pipelines.get('foliageImpostorInstanced', GeometryFoliageImpostorProgram, {
             // The quad is rebuilt facing the camera in the vertex stage, so it can never show its back.
             cullMode: 'none',
             depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
@@ -4722,8 +4713,6 @@ export class Renderer {
     }
 
     private static readonly _LOD_OFF = [0, 0, 0, 0];
-    /** A colour target's write mask with every channel off: a depth-only draw into a colour pass. */
-    private static readonly _NO_COLOR_WRITE: [boolean, boolean, boolean, boolean] = [false, false, false, false];
 
     /**
      * `Material.config.side` as a cull mode. The mapping INVERTS: `side: 'front'` means show the front
@@ -4732,29 +4721,6 @@ export class Renderer {
     private static _cullFor(side: 'front' | 'back' | 'double' | undefined): CullMode {
         if (side === 'double') return 'none';
         return side === 'back' ? 'front' : 'back';
-    }
-
-    /**
-     * Vertex layouts for a program, by the shape of mesh it will draw. Slot 0 is always the interleaved
-     * model vertex; slot 1 is the per-instance matrix or the bone indices, slot 2 the bone weights.
-     */
-    private _vertexLayoutsFor(program: string, shape: 'model' | 'model+instance' | 'model+skin' | 'tile',
-                              builtFor?: string | null): VertexBufferLayout[] {
-        // The tile vertex is genuinely its own format — position.xy | uv.xy | colour.rgba, 32 bytes —
-        // and its locations are declared in the shader rather than reflected, so it needs none of the
-        // model-attribute machinery below.
-        if (shape === 'tile') return [TILE_VERTEX_LAYOUT];
-        const attributes = this._shaderManager.getShader(program).attributes;
-        // Offsets and stride come from the program the BUFFER was written for, locations from the one
-        // about to draw it — `initializeModel` packs every vertex, skinned included, to its material
-        // program's attributes. `builtFor: null` has no correct caller today.
-        const model = modelVertexLayout(attributes,
-            builtFor ? this._shaderManager.getShader(builtFor).attributes : null);
-        if (shape === 'model+skin') {
-            const bones = boneLayouts(attributes);
-            return bones ? [model, bones[0], bones[1]] : [model];
-        }
-        return shape === 'model+instance' ? [model, instanceMatrixLayout(5)] : [model];
     }
 
     /**
@@ -4919,7 +4885,7 @@ export class Renderer {
                 this._shaderManager.setUniform('u_sunDirection', this._view.sunDirection);      // self-shadow
                 this._shaderManager.setUniform('u_specularAA', this._specularAaEnabled);   // roughness filter
                 for (const [name, value] of mat.properties) this._shaderManager.setUniform(name, value);
-                const terrainPipeline = this._pipelineFor(shaderType, reflection, {
+                const terrainPipeline = this._pipelines.get(shaderType, reflection, {
                     cullMode: Renderer._cullFor(mat.config.side),
                     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
                     targets: 3,
@@ -4938,7 +4904,7 @@ export class Renderer {
                 // See `_screenMaterialPass` for what the WGSL is and why the vertex stage is a
                 // separate module. Absent on WebGL2 and for a material that could not translate.
                 const customWgsl = customShaderModules(mat);
-                const customPipeline = this._pipelineFor(shaderType, {
+                const customPipeline = this._pipelines.get(shaderType, {
                     resources: customShaderResources('deferred', mat.uniforms),
                     ...(customWgsl ? { wgsl: customWgsl.fragment, entryPoints: { fragment: 'main' },
                                        vertexWgsl: { wgsl: customWgsl.vertex,
@@ -4959,7 +4925,7 @@ export class Renderer {
             }
             if (!reflection) { this._applyMaterial(mat); return false; }
 
-            const pipeline = this._pipelineFor(shaderType, reflection, {
+            const pipeline = this._pipelines.get(shaderType, reflection, {
                 cullMode: Renderer._cullFor(mat.config.side),
                 depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
                 targets: 3,   // the G-buffer
@@ -5167,7 +5133,7 @@ export class Renderer {
         const material = first.model.material;
         const reflection = GEOMETRY_PROGRAMS[shaderType];
         if (reflection) {
-            const pipeline = this._pipelineFor(shaderType, reflection, {
+            const pipeline = this._pipelines.get(shaderType, reflection, {
                 cullMode: Renderer._cullFor(material.config.side),
                 depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
                 targets: 3,
@@ -5245,7 +5211,7 @@ export class Renderer {
         // still sample the cascade array at 6 and the spot atlas at 15, bound once per frame.
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'deferredLighting', true,
                                                [bg[0], bg[1], bg[2], 0.0], false);
-        const pipeline = this._fullscreenPipeline('deferredLighting', DeferredLightingProgram);
+        const pipeline = this._pipelines.fullscreen('deferredLighting', DeferredLightingProgram);
         pass.setPipeline(pipeline);
 
         // Group 0: the G-buffer plus SSIL. SSIL always binds a complete texture even when disabled —
@@ -5627,7 +5593,7 @@ export class Renderer {
         this._ssilDepthParams[2] = ip[11]; this._ssilDepthParams[3] = ip[15];
 
         const trace = this._passes.beginFullscreenPass(this._ssaoFBO.renderTarget, 'ssao', true, undefined, false);
-        const tracePipeline = this._fullscreenPipeline('ssil', SsilProgram);
+        const tracePipeline = this._pipelines.fullscreen('ssil', SsilProgram);
         trace.setPipeline(tracePipeline);
         trace.setBindGroup(0, this._textureBindGroup(tracePipeline, 0, [
             this._targets.gBuffer.colors[1], this._targets.gBuffer.depth, radiance.colors[0],
@@ -5664,7 +5630,7 @@ export class Renderer {
             const src = this._ssilHistoryFBOs[this._ssilHistoryIndex];
             const dst = this._ssilHistoryFBOs[this._ssilHistoryIndex ^ 1];
             const pass = this._passes.beginFullscreenPass(dst.renderTarget, 'ssao.temporal', true, undefined, false);
-            const pipeline = this._fullscreenPipeline('ssilTemporal', SsilTemporalProgram);
+            const pipeline = this._pipelines.fullscreen('ssilTemporal', SsilTemporalProgram);
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
                 this._ssaoFBO.colors[0], src.colors[0], radiance.colors[0], this._targets.gBuffer.depth,
@@ -5689,7 +5655,7 @@ export class Renderer {
         if (!accumulated && this._passes.beginPass('ssao.blur')) {
             const pass = this._passes.beginFullscreenPass(this._ssaoBlurFBO.renderTarget, 'ssao.blur', true,
                                                    undefined, false);
-            const pipeline = this._fullscreenPipeline('ssilBlur', SsilBlurProgram);
+            const pipeline = this._pipelines.fullscreen('ssilBlur', SsilBlurProgram);
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
                 this._ssaoResult.colors[0], this._targets.gBuffer.colors[1], this._targets.gBuffer.depth,
@@ -5715,7 +5681,7 @@ export class Renderer {
         if (!this._passes.beginPass('ssao.history')) return;
         const target = this._ssilRadianceFBO;
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'ssao.history', true, undefined, false);
-        const pipeline = this._fullscreenPipeline('ssilHistory', SsilHistoryProgram);
+        const pipeline = this._pipelines.fullscreen('ssilHistory', SsilHistoryProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
             this._targets.scene.colors[0], this._depthSource(),
@@ -5780,7 +5746,7 @@ export class Renderer {
     private _renderBRDFLUT(): void {
         // No bind groups at all: the LUT is pure computation from the fragment coordinate.
         const pass = this._passes.beginFullscreenPass(this._brdfFBO.renderTarget, 'brdf', true, [0, 0, 0, 1]);
-        pass.setPipeline(this._fullscreenPipeline('brdf', BRDFProgram));
+        pass.setPipeline(this._pipelines.fullscreen('brdf', BRDFProgram));
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
     }
@@ -5793,11 +5759,11 @@ export class Renderer {
         // re-points its colour attachment at each one, and `createRenderTarget` dedupes them so six
         // faces cost six cached framebuffers rather than six per bake.
         this._shaderManager.bind(shaderName);
-        // One pipeline across six faces, so it must be TOLD its target: otherwise `_pipelineFor` falls
+        // One pipeline across six faces, so it must be TOLD its target: otherwise `_pipelines.get` falls
         // back to `_passes.target` — whatever the previous pass left — and derives the wrong colour format,
         // which WebGPU rejects. Face 0's target stands for all six, and `createRenderTarget` dedupes.
         const faceTarget = this._cubeFBO.targetFor(target, 0, mip, false, size);
-        const pipeline = this._pipelineFor(shaderName, reflection, { cullMode: 'none', vertex: 'model',
+        const pipeline = this._pipelines.get(shaderName, reflection, { cullMode: 'none', vertex: 'model',
                                                                     // The unit cube carries position
                                                                     // only; see _initializeIBL.
                                                                     builtFor: 'irradiance',
@@ -6044,7 +6010,7 @@ export class Renderer {
             this._skyProjectFBO.create(w, h);
 
         const pass = this._passes.beginFullscreenPass(this._skyProjectFBO.renderTarget, 'skyProject', false);
-        const pipeline = this._fullscreenPipeline('skyProject', SkyProjectProgram);
+        const pipeline = this._pipelines.fullscreen('skyProject', SkyProjectProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [cube]));
         this._shaderManager.bind('skyProject');
@@ -6610,7 +6576,7 @@ export class Renderer {
         // plain write. Who else may use that storage is the pool's question now, not a comment's.
         const rayPass = this._passes.beginFullscreenPass(scratch.renderTarget, 'godRays', false,
                                                   undefined, false);
-        const rayPipeline = this._fullscreenPipeline('godRays', VolumetricGodRaysProgram);
+        const rayPipeline = this._pipelines.fullscreen('godRays', VolumetricGodRaysProgram);
         rayPass.setPipeline(rayPipeline);
 
         this._shaderManager.bind('godRays');
@@ -6643,7 +6609,7 @@ export class Renderer {
         // stage that is depends on where the user put this effect, and is not this method's business.
         const upPass = this._passes.beginFullscreenPass(target.renderTarget,
                                                  'godRaysUpsample', false, undefined, false);
-        const upPipeline = this._fullscreenPipeline('screen', ScreenProgram, ADDITIVE_BLEND);
+        const upPipeline = this._pipelines.fullscreen('screen', ScreenProgram, ADDITIVE_BLEND);
         upPass.setPipeline(upPipeline);
         upPass.setBindGroup(0, this._textureBindGroup(upPipeline, 0, [scratch.colors[0]]));
         scratch.colors[0].bind(0);
@@ -6713,7 +6679,7 @@ export class Renderer {
         this._shaderManager.bind('skyAtmosphere');
         // One pipeline for all six faces. `builtFor: 'irradiance'` — the unit cube's stride comes from
         // THAT program, not the drawing one. `target` explicitly: built before any pass opens.
-        const skyPipeline = this._pipelineFor('skyAtmosphere', SkyAtmosphereProgram,
+        const skyPipeline = this._pipelines.get('skyAtmosphere', SkyAtmosphereProgram,
                                               { cullMode: 'none', vertex: 'model',
                                                 builtFor: 'irradiance',
                                                 target: this._cubeFBO.targetFor(cube, faces[0] ?? 0, 0, false) });
@@ -6825,7 +6791,7 @@ export class Renderer {
         if (!node || !node.fogEnabled || !node.cubemap || node.fogMaxOpacity <= 0 || node.fogDensity <= 0) return;
 
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'skyFog', false);
-        const pipeline = this._fullscreenPipeline('skyFog', SkyFogProgram, DEFAULT_BLEND);
+        const pipeline = this._pipelines.fullscreen('skyFog', SkyFogProgram, DEFAULT_BLEND);
         pass.setPipeline(pipeline);
 
         this._shaderManager.bind('skyFog');
@@ -6863,7 +6829,7 @@ export class Renderer {
      */
     private _drawSky(pass: RenderPassEncoder, cubemap: Texture, mesh: Mesh,
                      view: mat4, proj: mat4, linearInput: boolean): void {
-        const pipeline = this._pipelineFor('skybox', SkyboxProgram, {
+        const pipeline = this._pipelines.get('skybox', SkyboxProgram, {
             cullMode: 'none',
             depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
             vertex: 'model',
@@ -7371,7 +7337,7 @@ export class Renderer {
         GLState.blend(true);
         if (gl) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         this._shaderManager.bind('volumetricClouds');
-        const pipeline = this._fullscreenPipeline('volumetricClouds', VolumetricCloudsProgram,
+        const pipeline = this._pipelines.fullscreen('volumetricClouds', VolumetricCloudsProgram,
                                                   Renderer._CLOUD_BLEND, undefined,
                                                   this._cubeFBO.targetFor(cube, faces[0] ?? 0, 0, false));
         // The depth texture is bound only because the layout has a slot for it; `u_ignoreDepth` skips it.
@@ -7448,7 +7414,7 @@ export class Renderer {
         // `target` explicitly, for the same reason the sky bake passes one: this single pipeline is
         // reused across the full-res, reduced-res and Bayer trace targets, and it is built before any
         // of their passes open. They share the scene buffer's float format, so it speaks for all three.
-        const rayPipeline = this._fullscreenPipeline('volumetricClouds', VolumetricCloudsProgram,
+        const rayPipeline = this._pipelines.fullscreen('volumetricClouds', VolumetricCloudsProgram,
                                                      Renderer._CLOUD_BLEND, undefined,
                                                      this._targets.scene.renderTarget);
         const rayGroup = (pipe: RenderPipeline) => this._textureBindGroup(pipe, 0, [
@@ -7486,7 +7452,7 @@ export class Renderer {
             // cloudUpsample.fs re-decides occlusion per full-resolution pixel, against the G-buffer
             // depth the raymarch bounded itself with, and uses the low-res buffer for colour only.
             const upPass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'cloudUpsample', false);
-            const upPipeline = this._fullscreenPipeline('cloudUpsample', CloudUpsampleProgram,
+            const upPipeline = this._pipelines.fullscreen('cloudUpsample', CloudUpsampleProgram,
                                                        Renderer._CLOUD_BLEND);
             upPass.setPipeline(upPipeline);
             upPass.setBindGroup(0, this._textureBindGroup(upPipeline, 0,
@@ -7727,7 +7693,7 @@ export class Renderer {
         const prev = this._cloudHistoryFBOs[this._cloudHistoryIndex];
         const resolvePass = this._passes.beginFullscreenPass(this._cloudHistoryFBOs[dst].renderTarget,
                                                       'clouds.resolve', false, undefined, false);
-        const resolvePipeline = this._fullscreenPipeline('cloudTemporalResolve', CloudTemporalResolveProgram);
+        const resolvePipeline = this._pipelines.fullscreen('cloudTemporalResolve', CloudTemporalResolveProgram);
         resolvePass.setPipeline(resolvePipeline);
         resolvePass.setBindGroup(0, this._textureBindGroup(resolvePipeline, 0, [
             this._cloudTraceFBO.colors[0], prev.colors[0], this._targets.gBuffer.depth,
@@ -7848,7 +7814,7 @@ export class Renderer {
         // the overlay's alpha is coverage, so erasing it would erase the grid. Nothing here can bloom
         // any more regardless, because nothing here is in the image bloom reads.
         const pass = this._beginOverlayPass('grid');
-        const pipeline = this._fullscreenPipeline('grid', GridProgram, OVERLAY_BLEND,
+        const pipeline = this._pipelines.fullscreen('grid', GridProgram, OVERLAY_BLEND,
             { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' });
         pass.setPipeline(pipeline);
         // The STABLE inverse, not `_view.invViewProj`: this pass builds a world ray from the uv rather than
@@ -8032,7 +7998,7 @@ export class Renderer {
 
         // The pipeline binds the program, but the uniforms below are written by name into the bound
         // program's block, so it still has to be current before them.
-        const pipeline = pass ? this._pipelineFor('tilemap', TilemapProgram, {
+        const pipeline = pass ? this._pipelines.get('tilemap', TilemapProgram, {
             // What the pass set by hand: blended, depth-tested against the 3D scene, no depth writes
             // (tiles are sorted, and a written depth would occlude the band drawn after).
             cullMode: 'none',
@@ -8458,320 +8424,6 @@ export class Renderer {
     }
 
     /**
-     * The RHI pipeline for a fullscreen pass, built once per program + state combination. Every
-     * fullscreen pass writes one target, never tests depth and never culls, so blend is the only
-     * thing that varies.
-     */
-    private _fullscreenPipeline(program: string,
-                                reflection: { resources: readonly ShaderResource[]; wgsl?: string;
-                                              entryPoints?: { vertex?: string; fragment?: string;
-                                                              compute?: string } },
-                                blend?: BlendState, depthStencil?: DepthStencilState,
-                                target?: RenderTarget | null): RenderPipeline {
-        // The shared screen quad is position + texCoord interleaved, 20 bytes — what
-        // `packedModelLayout` produces for a program declaring those two, so `builtFor: program` fits.
-        // It must not be left empty: a pipeline with no vertex layouts binds no attributes at all.
-        return this._pipelineFor(program, reflection,
-                                 { blend, depthStencil, vertex: 'model', builtFor: program, target });
-    }
-
-    /**
-     * The RHI pipeline for `program` under a particular render state, built once per combination and
-     * cached on a string key: two draws wanting the same program and state must get the same object.
-     */
-    /**
-     * The two halves of the pipeline key that used to go through `JSON.stringify`.
-     *
-     * `_pipelineFor` is called per submesh per draw, and per caster per cascade in the shadow pass, and
-     * every caller hands it a freshly built state literal — so the serialisation could not be hoisted
-     * and ran thousands of times a frame to produce a string the Map lookup below it uses once.
-     * Concatenating the fields by hand is the same key at a fraction of the cost. EVERY field must
-     * appear: a state that differs only in a field left out here would silently reuse the wrong
-     * pipeline.
-     */
-    // _pipelineFor runs for every draw, and its key used to be rebuilt from scratch each time: the
-    // formats array sliced and joined, the blend and depth states stringified. Most callers pass the same
-    // state OBJECTS frame after frame, so each piece is memoised on its object — the strings are made once.
-    private static readonly _depthKeys = new WeakMap<DepthStencilState, string>();
-    private static readonly _blendKeys = new WeakMap<BlendState, string>();
-    private readonly _formatKeys = new WeakMap<RenderTarget, string[]>();
-
-    private static _depthKey(d: DepthStencilState): string {
-        let k = Renderer._depthKeys.get(d);
-        if (k === undefined) {
-            k = d.format + (d.depthWriteEnabled ? 'w' : '-') + d.depthCompare
-                + ':' + (d.depthBias ?? 0) + ':' + (d.depthBiasSlopeScale ?? 0);
-            Renderer._depthKeys.set(d, k);
-        }
-        return k;
-    }
-
-    private static _blendKey(b: BlendState): string {
-        let k = Renderer._blendKeys.get(b);
-        if (k === undefined) {
-            k = b.color.srcFactor + b.color.dstFactor + b.color.operation
-                + '/' + b.alpha.srcFactor + b.alpha.dstFactor + b.alpha.operation;
-            Renderer._blendKeys.set(b, k);
-        }
-        return k;
-    }
-
-    /** The first `targets` colour formats of `target`, joined — memoised per target and count. */
-    private _formatKey(target: RenderTarget | null | undefined, targets: number): string {
-        if (!target) return '';
-        let byCount = this._formatKeys.get(target);
-        if (!byCount) { byCount = []; this._formatKeys.set(target, byCount); }
-        let k = byCount[targets];
-        if (k === undefined) {
-            k = target.colorViews.slice(0, targets).map(v => v.texture.format).join(',');
-            byCount[targets] = k;
-        }
-        return k;
-    }
-
-    private _pipelineFor(program: string,
-                         reflection: { resources: readonly ShaderResource[]; wgsl?: string;
-                                       entryPoints?: { vertex?: string; fragment?: string;
-                                                       compute?: string };
-                                       /**
-                                        * A SEPARATE module for the vertex stage, used only by custom
-                                        * materials, whose WGSL is a translated fragment stage alone.
-                                        * Both modules carry the same `program` name.
-                                        */
-                                       vertexWgsl?: { wgsl: string; entryPoint: string } },
-                         options: { blend?: BlendState; depthStencil?: DepthStencilState;
-                                    cullMode?: CullMode; targets?: number;
-                                    topology?: PrimitiveTopology;
-                                    vertex?: false | 'model' | 'model+instance' | 'model+skin' | 'tile';
-                                    builtFor?: string | null;
-                                    /**
-                                     * The target this pipeline will draw into, required only when it is
-                                     * built BEFORE the pass is opened; otherwise `_passes.target`.
-                                     */
-                                    target?: RenderTarget | null;
-                                    /** False writes depth only: every colour target's write mask off. */
-                                    colorWrite?: boolean } = {}): RenderPipeline {
-        const { blend, depthStencil, cullMode = 'none', targets = 1,
-                topology = 'triangle-list', vertex = false, builtFor = null, colorWrite = true } = options;
-        // A logical name served by a variant (programVariants.ts): WebGPU compiles the WGSL handed in
-        // here, not the program ShaderManager has, so the variant's own source has to replace the base
-        // reflection the caller passed — and its name keys the cache, so a filter switch builds anew.
-        //
-        // NOT only with variants on: the `Pom` names resolve to their parallax variant in the editor too
-        // (the base program has the march compiled out), so gating this on `_variants` left WebGPU
-        // compiling the base WGSL for every height-mapped material — flat, while WebGL2, which binds the
-        // linked program by name, showed the relief.
-        if (this._variants || program in EXTRA_LOGICAL_NAMES) {
-            // Memoized per logical name and filter: this runs for every draw, and resolving builds strings.
-            const filter = this._variants ? this._variantFilter : (this._shadowFilterMode === 1 ? 1 : 0);
-            if (this._variantMemoFilter !== filter) {
-                this._variantMemo.clear();
-                this._shadowPipelineEpoch++;
-                this._variantMemoFilter = filter;
-            }
-            let swap = this._variantMemo.get(program);
-            if (swap === undefined) {
-                const physical = this._physicalOf(program);
-                const variant = physical !== program ? this._descriptorFor(physical) : null;
-                swap = variant ? { program: physical, wgsl: variant.wgsl,
-                                   entryPoints: (variant as { entryPoints?: typeof reflection.entryPoints }).entryPoints } : null;
-                this._variantMemo.set(program, swap);
-            }
-            if (swap) {
-                program = swap.program;
-                reflection = { ...reflection, wgsl: swap.wgsl, entryPoints: swap.entryPoints };
-            }
-        }
-        // `builtFor` is part of the key: one shadow program draws over buffers of several strides.
-        // The ATTACHMENT FORMATS are part of the pipeline and WebGPU rejects a mismatch with its pass,
-        // so they are derived from the target the caller is about to draw into.
-        const target = options.target ?? this._passes.target;
-        // A caller that named its own depth state keeps it; otherwise it comes from the target, because
-        // `_passes.beginFullscreenPass` always declares a depth attachment and WebGPU requires the pipeline to
-        // match one that exists.
-        const depthFormat = target?.depthView?.texture.format;
-        // The synthesised default is "no depth interaction", NOT the depth-test defaults — anything
-        // else makes every fullscreen post pass depth-test and stamp the depth buffer. WebGPU requires
-        // depth state whenever the pass has a depth attachment, and `_passes.beginFullscreenPass` always does.
-        const resolvedDepth = depthStencil
-            ?? (depthFormat ? { format: depthFormat, depthWriteEnabled: false,
-                                depthCompare: 'always' as const } : undefined);
-
-        // Only WebGPU has a front-face to get wrong here: WebGL2 keeps its own winding state and the
-        // cube-face capture never changed it.
-        const cubeFace = this._view.cubeFace && device.backend === 'webgpu';
-        const key = program + '|' + cullMode + '|' + targets + '|' + topology + '|' + vertex
-                            + '|' + (builtFor ?? '') + (cubeFace ? '|cw' : '')
-                            + (reflection.vertexWgsl ? '|vs' : '')
-                            + '|' + this._formatKey(target, targets)
-                            + (blend ? '|' + Renderer._blendKey(blend) : '')
-                            + (resolvedDepth ? '|' + Renderer._depthKey(resolvedDepth) : '')
-                            + (colorWrite ? '' : '|nc');
-        let pipeline = this._fullscreenPipelines.get(key);
-        if (!pipeline) {
-            const buildStart = performance.now();
-            const colorFormats = target ? target.colorViews.slice(0, targets).map(v => v.texture.format) : [];
-            // One module per program and source, shared by every pipeline state it is drawn under. Not for a
-            // custom material's split vertex stage, whose resources are rebuilt per material.
-            const module = this._shaderModuleFor(program, reflection, !reflection.vertexWgsl);
-            const vertexModule = reflection.vertexWgsl
-                ? device.createShaderModule({
-                    label: program, program, stage: ShaderStage.VERTEX,
-                    source: reflection.vertexWgsl.wgsl,
-                    entryPoints: { vertex: reflection.vertexWgsl.entryPoint },
-                    resources: reflection.resources,
-                  })
-                : module;
-            pipeline = device.createRenderPipeline({
-                label: program,
-                vertex: vertexModule, fragment: module,
-                // Slot 0 is the interleaved model vertex; slot 1 the per-instance model matrix across
-                // four slots, neither API having a mat4 vertex format. With no `vertex` shape this is a
-                // fullscreen pass and takes the SCREEN QUAD's layout — never `[]`, which is invalid.
-                vertexLayouts: vertex
-                    ? this._vertexLayoutsFor(program, vertex, builtFor)
-                    : screenQuadLayout(this._shaderManager.getShader(program).attributes),
-                // A Y-inverted projection reverses winding, so a cube-face capture calls the other
-                // side the front. Part of the cache key below for the same reason the cull mode is.
-                primitive: { topology, cullMode, frontFace: cubeFace ? 'cw' : 'ccw' },
-                ...(resolvedDepth ? { depthStencil: resolvedDepth } : {}),
-                colorTargets: Array.from({ length: targets }, (_unused, i) => ({
-                    // `rgba8unorm` only when there is no target to ask - the legacy fallback, and the
-                    // shape every one of these used to have unconditionally.
-                    format: colorFormats[i] ?? ('rgba8unorm' as const),
-                    ...(blend ? { blend } : {}),
-                    ...(colorWrite ? {} : { writeMask: Renderer._NO_COLOR_WRITE }),
-                })),
-            });
-            this._fullscreenPipelines.set(key, pipeline);
-            shaderOptimizerStats.pipelinesBuilt++;
-            if (device.backend === 'webgpu') recordStall(`pipeline ${program}`, performance.now() - buildStart);
-            // Recorded for a publish to warm (shaderOptimizer/pipelineRecipes.ts) — never a custom material's,
-            // whose program is assembled at runtime and has no name a later boot could look up.
-            if (!reflection.vertexWgsl && !program.startsWith('custom') && !this._pipelineRecipes.has(key)) {
-                this._pipelineRecipes.set(key, {
-                    program, cullMode, targets, topology, vertex, builtFor, cubeFace,
-                    colorFormats: colorFormats.slice(),
-                    blend: blend ?? null,
-                    depthStencil: resolvedDepth ?? null,
-                    ...(colorWrite ? {} : { colorWrite: false }),
-                });
-                shaderOptimizerStats.recipesRecorded = this._pipelineRecipes.size;
-            }
-        }
-        return pipeline;
-    }
-
-    /**
-     * The shader module for `program`'s source, from the module cache when `cacheable`. WebGPU parses and
-     * validates WGSL per module, so a program drawn under several pipeline states (both cull modes,
-     * wireframe, a second target set) used to compile its module once per state.
-     */
-    private _shaderModuleFor(program: string,
-                             reflection: { resources: readonly ShaderResource[]; wgsl?: string;
-                                           entryPoints?: { vertex?: string; fragment?: string; compute?: string } },
-                             cacheable: boolean): ShaderModule {
-        const source = reflection.wgsl ?? '';
-        const entries = reflection.entryPoints;
-        const entryKey = entries ? `${entries.vertex ?? ''}/${entries.fragment ?? ''}/${entries.compute ?? ''}` : '';
-        let byProgram = cacheable ? this._moduleCache.get(program + '#' + entryKey) : undefined;
-        const hit = byProgram?.get(source);
-        if (hit) { shaderOptimizerStats.moduleReuses++; return hit; }
-        const module = device.createShaderModule({
-            label: program,
-            program,
-            stage: ShaderStage.VERTEX | ShaderStage.FRAGMENT,
-            // WebGPU compiles the WGSL; WebGL2 reaches the linked program by name and uses only the
-            // reflection. Optional — a runtime-assembled custom material has no WGSL at all.
-            source,
-            ...(entries ? { entryPoints: entries } : {}),
-            resources: reflection.resources,
-        });
-        if (cacheable) {
-            if (!byProgram) { byProgram = new Map(); this._moduleCache.set(program + '#' + entryKey, byProgram); }
-            byProgram.set(source, module);
-        }
-        return module;
-    }
-
-    /**
-     * Every pipeline this session has built, as recipes (shaderOptimizer/pipelineRecipes.ts). The editor
-     * hands them to publish, which writes them into `config.graphics.pipelines` for the player to warm.
-     */
-    public pipelineRecipes(): PipelineRecipe[] {
-        return [...this._pipelineRecipes.values()].map(serializeRecipe);
-    }
-
-    /**
-     * Build the config's recorded pipelines ahead of use, off the main thread (WebGPU's
-     * `createRenderPipelineAsync`), so the first frame that draws each one finds it ready instead of
-     * stalling to compile it. Resolves when all are done; a recipe whose program this build does not have
-     * is skipped. A no-op on WebGL2, where a pipeline is a state bundle over an already-linked program.
-     */
-    public async warmPipelines(onProgress?: (done: number, total: number) => void): Promise<number> {
-        const recipes = this._warmRecipes;
-        if (!recipes.length || device?.backend !== 'webgpu') return 0;
-        const create = device.createRenderPipelineAsync?.bind(device);
-        if (!create) return 0;
-        let done = 0, warmed = 0;
-        const jobs = recipes.map(async (r) => {
-            try {
-                const built = this._recipePipeline(r, create);
-                if (built) {
-                    const [key, pipeline] = await built;
-                    if (!this._fullscreenPipelines.has(key)) {
-                        this._fullscreenPipelines.set(key, pipeline);
-                        warmed++;
-                    }
-                }
-            } catch (e) {
-                Logger.warn(`[shaders] could not warm pipeline '${r.program}': ${e}`, 'Renderer');
-            } finally {
-                onProgress?.(++done, recipes.length);
-            }
-        });
-        await Promise.all(jobs);
-        shaderOptimizerStats.pipelinesWarmed += warmed;
-        return warmed;
-    }
-
-    /**
-     * Start building one recipe's pipeline, under exactly the key `_pipelineFor` would look it up by.
-     * Null when this build has no program by that name (a recipe from an older or larger build).
-     */
-    private _recipePipeline(r: PipelineRecipe, create: (d: RenderPipelineDescriptor) => Promise<RenderPipeline>):
-            Promise<[string, RenderPipeline]> | null {
-        const descriptor = this._descriptorFor(r.program) ?? this._descriptorFor(this._physicalOf(r.program));
-        if (!descriptor || !this._shaderManager.find(r.program) && !this._shaderManager.find(this._physicalOf(r.program)))
-            return null;
-        const reflection = descriptor as unknown as { resources: readonly ShaderResource[]; wgsl?: string;
-                                                      entryPoints?: { vertex?: string; fragment?: string; compute?: string } };
-        if (!reflection.wgsl) return null;
-        const key = r.program + '|' + r.cullMode + '|' + r.targets + '|' + r.topology + '|' + r.vertex
-                  + '|' + (r.builtFor ?? '') + (r.cubeFace ? '|cw' : '')
-                  + '|' + r.colorFormats.join(',')
-                  + (r.blend ? '|' + Renderer._blendKey(r.blend) : '')
-                  + (r.depthStencil ? '|' + Renderer._depthKey(r.depthStencil) : '')
-                  + (r.colorWrite === false ? '|nc' : '');
-        if (this._fullscreenPipelines.has(key)) return null;
-        const module = this._shaderModuleFor(r.program, reflection, true);
-        return create({
-            label: r.program,
-            vertex: module, fragment: module,
-            vertexLayouts: r.vertex
-                ? this._vertexLayoutsFor(r.program, r.vertex, r.builtFor)
-                : screenQuadLayout(this._shaderManager.getShader(r.program).attributes),
-            primitive: { topology: r.topology, cullMode: r.cullMode, frontFace: r.cubeFace ? 'cw' : 'ccw' },
-            ...(r.depthStencil ? { depthStencil: r.depthStencil } : {}),
-            colorTargets: Array.from({ length: r.targets }, (_unused, i) => ({
-                format: (r.colorFormats[i] ?? 'rgba8unorm') as TextureFormat,
-                ...(r.blend ? { blend: r.blend } : {}),
-                ...(r.colorWrite === false ? { writeMask: Renderer._NO_COLOR_WRITE } : {}),
-            })),
-        }).then(pipeline => [key, pipeline] as [string, RenderPipeline]);
-    }
-
-    /**
      * A bind group over this pass's textures, in binding order. Cached — on WebGPU a `GPUBindGroup` is
      * a real driver object and a frame needs ~120 of them.
      *
@@ -8825,6 +8477,22 @@ export class Renderer {
     private readonly _textureIds = new WeakMap<Texture, number>();
     private _nextTextureId = 0;
 
+    /**
+     * Every pipeline this session has built, as recipes (shaderOptimizer/pipelineRecipes.ts). The editor
+     * hands them to publish, which writes them into `config.graphics.pipelines` for the player to warm.
+     */
+    public pipelineRecipes(): PipelineRecipe[] {
+        return this._pipelines.recipes();
+    }
+
+    /**
+     * Build the config's recorded pipelines ahead of use, off the main thread (WebGPU's
+     * `createRenderPipelineAsync`), so the first frame that draws each one finds it ready. Resolves when
+     * all are done; a no-op on WebGL2. See PipelineCache.warm.
+     */
+    public warmPipelines(onProgress?: (done: number, total: number) => void): Promise<number> {
+        return this._pipelines.warm(onProgress);
+    }
     /**
      * True when this frame's camera transform differs from last frame's by more than float noise.
      * Camera-reprojection motion blur has nothing to reconstruct from a stationary camera.
@@ -9247,7 +8915,7 @@ export class Renderer {
                 // NOT need u_sunDirection: this pass reads the sun from its own light list.
                 this._shaderManager.setUniform('u_specularAA', this._specularAaEnabled);
                 if (!viaRHI) { this._applyTerrainMaterial(mat); return false; }
-                const terrainPipeline = this._pipelineFor(shaderType, reflection, {
+                const terrainPipeline = this._pipelines.get(shaderType, reflection, {
                     cullMode: Renderer._cullFor(mat.config.side),
                     depthStencil: { format: 'depth24plus', depthWriteEnabled: this._forwardDepthWrite,
                                     depthCompare: 'less-equal' },
@@ -9268,7 +8936,7 @@ export class Renderer {
                 // See `_screenMaterialPass`. Absent on WebGL2 and for a material that could not
                 // translate; group 3 (the shadow maps) is bound below as for any lit program.
                 const customWgsl = customShaderModules(mat);
-                const customPipeline = this._pipelineFor(shaderType, {
+                const customPipeline = this._pipelines.get(shaderType, {
                     resources: usedResources(customShaderResources('forward', mat.uniforms),
                                              customWgsl?.fragment, customWgsl?.vertex),
                     ...(customWgsl ? { wgsl: customWgsl.fragment, entryPoints: { fragment: 'main' },
@@ -9291,7 +8959,7 @@ export class Renderer {
             }
             if (!viaRHI) { this._applyMaterial(mat); return false; }
 
-            const pipeline = this._pipelineFor(shaderType, reflection, {
+            const pipeline = this._pipelines.get(shaderType, reflection, {
                 cullMode: Renderer._cullFor(mat.config.side),
                 // Depth writes follow the CALLER's state, not the material's, and are passed in rather
                 // than read from GLState — the descriptor must be a pure function of its arguments or
@@ -9364,7 +9032,7 @@ export class Renderer {
         // and the material's own cull side and topology.
         const material = node.sprite.material;
         const reflection = FORWARD_PROGRAMS[material.type];
-        const pipeline = pass && reflection ? this._pipelineFor(material.type, reflection, {
+        const pipeline = pass && reflection ? this._pipelines.get(material.type, reflection, {
             cullMode: Renderer._cullFor(material.config.side),
             depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
             // DEFAULT_BLEND for a scene sprite (its alpha must not touch the bloom mask), OVERLAY_BLEND
@@ -9695,7 +9363,7 @@ export class Renderer {
         key = mixNumber(mixNumber(mixNumber(key, this._objectId(material)), casts ? 1 : 0),
                         material.config.side === 'double' ? 1 : 0);
         key = mixNumber(mixNumber(mixNumber(key, cut ? this._objectId(cut.texture) : 0), cut ? cut.cutoff : 0),
-                        this._shadowPipelineEpoch * 2 + (this._view.cubeFace && device.backend === 'webgpu' ? 1 : 0));
+                        this._pipelines.epoch * 2 + (this._view.cubeFace && device.backend === 'webgpu' ? 1 : 0));
         key = mixNumber(mixNumber(key, reachKey), landscape.chunkNodes.length);
         // A density change swaps every chunk's geometry, and a chunk waits for its new mesh.
         const first = landscape.chunkNodes[0];
@@ -9810,12 +9478,12 @@ export class Renderer {
         // so front-face culling would erase half of it. A solid caster keeps the FRONT-face culling that
         // pushes shadow acne onto surfaces the camera cannot see.
         const cullMode: CullMode = anyCutout || material.config.side === 'double' ? 'none' : 'front';
-        const epoch = this._shadowPipelineEpoch * 2 + (this._view.cubeFace && device.backend === 'webgpu' ? 1 : 0);
+        const epoch = this._pipelines.epoch * 2 + (this._view.cubeFace && device.backend === 'webgpu' ? 1 : 0);
 
         let state = this._shadowCasterStates.get(node);
         if (!state || state.model !== model || state.material !== material || state.shaderType !== shaderType
             || state.cullMode !== cullMode || state.epoch !== epoch) {
-            const pipeline = this._pipelineFor(shaderType, SHADOW_PROGRAMS[shaderType], {
+            const pipeline = this._pipelines.get(shaderType, SHADOW_PROGRAMS[shaderType], {
                 cullMode,
                 depthStencil: Renderer._SHADOW_DEPTH,
                 targets: 0,
@@ -10520,9 +10188,9 @@ export class Renderer {
         }
 
         const key = mixNumber(mixNumber(mixNumber(mixNumber(HASH_SEED, chunk0.transformVersion), chunkState.pipelineId),
-                                        this._reachKey), this._shadowPipelineEpoch);
+                                        this._reachKey), this._pipelines.epoch);
         if (rebuilt || set.recordsKey !== key || set.records.length !== set.meshes.length) {
-            const pipeline = this._pipelineFor('shadowMap', SHADOW_PROGRAMS.shadowMap, {
+            const pipeline = this._pipelines.get('shadowMap', SHADOW_PROGRAMS.shadowMap, {
                 cullMode: chunkState.cullMode,
                 depthStencil: Renderer._SHADOW_DEPTH,
                 targets: 0,
@@ -10731,7 +10399,7 @@ export class Renderer {
                 // The only `compose` label: the plain scene copy. PASS_LABEL_TO_SCOPE files it under
                 // `present`, which is the scope this node already opened.
                 const pass = this._passes.beginFullscreenPass(ctx.target(head).renderTarget, 'compose', true);
-                const pipeline = this._fullscreenPipeline('screen', ScreenProgram);
+                const pipeline = this._pipelines.fullscreen('screen', ScreenProgram);
                 pass.setPipeline(pipeline);
                 pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.scene.colors[0]]));
                 this._passes.drawFullscreen(pass);
@@ -10960,7 +10628,7 @@ export class Renderer {
      */
     private _presentPass(source: Framebuffer): void {
         const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'present', true);
-        const pipeline = this._fullscreenPipeline('present', PresentProgram);
+        const pipeline = this._pipelines.fullscreen('present', PresentProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_exposure', this._view.exposure);
         this._shaderManager.setUniform('u_saturation', this._effectiveSaturation());
@@ -10996,7 +10664,7 @@ export class Renderer {
      */
     private _overlayCompositePass(): void {
         const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'overlay.composite', false);
-        const pipeline = this._fullscreenPipeline('overlayComposite', OverlayCompositeProgram,
+        const pipeline = this._pipelines.fullscreen('overlayComposite', OverlayCompositeProgram,
                                                   OVERLAY_COMPOSITE_BLEND);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.overlay.colors[0]]));
@@ -11020,10 +10688,10 @@ export class Renderer {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'screenMaterial',
                                                false, undefined, false);
         // The WGSL, when there is any. On WebGL2 there is none and none is needed — the program
-        // is already linked and `_pipelineFor` reaches it by name. `entryPoints.fragment` is
+        // is already linked and `_pipelines.get` reaches it by name. `entryPoints.fragment` is
         // `main` because that is what naga calls the entry it generates, not `fs_main`.
         const wgsl = customShaderModules(mat);
-        const pipeline = this._pipelineFor(mat.type, {
+        const pipeline = this._pipelines.get(mat.type, {
             resources: screenShaderResources(mat.uniforms),
             ...(wgsl ? { wgsl: wgsl.fragment, entryPoints: { fragment: 'main' },
                          vertexWgsl: { wgsl: wgsl.vertex, entryPoint: wgsl.vertexEntry } } : {}),
@@ -11065,7 +10733,7 @@ export class Renderer {
         // set overlapping-but-not-identical uniform and unit state now cannot drift apart.
         const pass = this._passes.beginFullscreenPass(this._presentTarget!.renderTarget, 'presentThumbnail',
                                                true, [0, 0, 0, 0]);
-        const pipeline = this._fullscreenPipeline('present', PresentProgram);
+        const pipeline = this._pipelines.fullscreen('present', PresentProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_exposure', this._view.exposure);
         // Ungraded on purpose: an asset thumbnail is a picture of the ASSET, and it should not change
@@ -11098,7 +10766,7 @@ export class Renderer {
         // The clear moves in here with the pass: the caller used to unbind the scene FBO and clear the
         // screen by hand, which is the same thing said twice and only one of them portable.
         const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'outline', true);
-        const pipeline = this._fullscreenPipeline('outlinePost', OutlinePostProgram);
+        const pipeline = this._pipelines.fullscreen('outlinePost', OutlinePostProgram);
         pass.setPipeline(pipeline);
         // This pass does the final resolve, so it carries the WHOLE grade and not just the exposure.
         // It used to set only that, which meant selecting an object dropped the saturation trim and
@@ -11155,7 +10823,7 @@ export class Renderer {
         for (const node of scene.models) {
             if (!node.visible || isEditorOnlyNode(node)) continue;
             if (!node.initialized) node.initializeModel();
-            const pipeline = this._pipelineFor('overdraw', OverdrawProgram, {
+            const pipeline = this._pipelines.get('overdraw', OverdrawProgram, {
                 blend: Renderer._OVERDRAW_BLEND, depthStencil: depthAlways,
                 cullMode: 'none', vertex: 'model', builtFor: node.model.material.type,
             });
@@ -11182,7 +10850,7 @@ export class Renderer {
                         ? (layer.billboardModel ? [layer.billboardModel] : [])
                         : layer.levels[slot].models;
                     for (const model of models) {
-                        const pipeline = this._pipelineFor('overdrawInstanced', OverdrawInstancedProgram, {
+                        const pipeline = this._pipelines.get('overdrawInstanced', OverdrawInstancedProgram, {
                             blend: Renderer._OVERDRAW_BLEND, depthStencil: depthAlways,
                             cullMode: 'none', vertex: 'model+instance', builtFor: 'blinn_phongGeometry',
                         });
@@ -11209,7 +10877,7 @@ export class Renderer {
         const layer = Math.min(this._shadowCascadeFBO.layers - 1, Math.max(0, this._shadowDebugLayer));
         this._shadowCascadeFBO.setCompareEnabled(false);
         const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'shadowDebug', true);
-        const pipeline = this._fullscreenPipeline('shadowDebug', ShadowDebugProgram);
+        const pipeline = this._pipelines.fullscreen('shadowDebug', ShadowDebugProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_layer', layer);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._shadowCascadeFBO.texture]));
@@ -11275,7 +10943,7 @@ export class Renderer {
             default:          tex = this._targets.scene.colors[0];      mode = 0; break;
         }
         const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'debugView', true);
-        const pipeline = this._fullscreenPipeline('debugView', DebugViewProgram);
+        const pipeline = this._pipelines.fullscreen('debugView', DebugViewProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_mode', mode);
         this._shaderManager.setUniform('u_validity', this._debugValidity);
@@ -11315,7 +10983,7 @@ export class Renderer {
         const read = 1 - write;
         const pass = this._passes.beginFullscreenPass(this._exposureFBOs[write].renderTarget, 'exposure', true,
                                                undefined, false);
-        const pipeline = this._fullscreenPipeline('exposureMeter', ExposureMeterProgram);
+        const pipeline = this._pipelines.fullscreen('exposureMeter', ExposureMeterProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.scene.colors[0]]));
         this._passes.drawFullscreen(pass);
@@ -11514,7 +11182,7 @@ export class Renderer {
         const mip0 = this._bloomMips[0];
         const brightPass = this._passes.beginFullscreenPass(mip0.renderTarget, 'bloom.bright', true,
                                                      undefined, false);
-        const brightPipeline = this._fullscreenPipeline('bloom', BloomProgram);
+        const brightPipeline = this._pipelines.fullscreen('bloom', BloomProgram);
         brightPass.setPipeline(brightPipeline);
         // The bright pass reads pre-exposure linear radiance, so it needs the exposure to decide what
         // counts as bright — without it the threshold is compared against radiance ~3x darker than what
@@ -11544,10 +11212,10 @@ export class Renderer {
                 // would be a wasted write. That is what the bare `bind()` used to express implicitly.
                 const pass = this._passes.beginFullscreenPass(this._bloomMips[i].renderTarget, 'bloom.blur',
                                                        false, undefined, false);
-                // Built INSIDE the pass, never hoisted above the loop: `_pipelineFor` reads its colour
+                // Built INSIDE the pass, never hoisted above the loop: `_pipelines.get` reads its colour
                 // format off `_passes.target`, which only exists between begin and end. Not a
                 // per-iteration cost — pipelines are cached and the format is part of the key.
-                const downPipeline = this._fullscreenPipeline('bloomDownsample', BloomDownsampleProgram);
+                const downPipeline = this._pipelines.fullscreen('bloomDownsample', BloomDownsampleProgram);
                 pass.setPipeline(downPipeline);
                 this._shaderManager.setUniform('u_srcTexelSize', [1 / from.width, 1 / from.height]);
                 // Both grids: the mips halve with floor(), so an odd level is not exactly 2x the next
@@ -11571,7 +11239,7 @@ export class Renderer {
                 const pass = this._passes.beginFullscreenPass(to.renderTarget, 'bloom.blur', false,
                                                        undefined, false);
                 // Inside the pass, for the format reason spelled out on the downsample loop above.
-                const upPipeline = this._fullscreenPipeline('bloomUpsample', BloomUpsampleProgram,
+                const upPipeline = this._pipelines.fullscreen('bloomUpsample', BloomUpsampleProgram,
                                                             ADDITIVE_BLEND);
                 pass.setPipeline(upPipeline);
                 // Radius in the SOURCE mip's texels, so the spread is resolution-independent. Per axis:
@@ -11593,7 +11261,7 @@ export class Renderer {
     /** Composite the accumulated bloom back over the image, from one chain stage into the next. */
     private _bloomComposite(source: Framebuffer, target: Framebuffer): void {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'bloom.composite', true);
-        const pipeline = this._fullscreenPipeline('composer', ComposerProgram);
+        const pipeline = this._pipelines.fullscreen('composer', ComposerProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_bloomIntensity', this._bloomIntensity);
         // Dirt rides on the bloom composite because it is only visible where there is glare to catch —
@@ -11718,7 +11386,7 @@ export class Renderer {
         // 1. Half-res colour, and the signed CoC in alpha. The scope is already open — this node
         //    reports under `dof.coc`, and the two below are opened as it moves through them.
         const cocPass = this._passes.beginFullscreenPass(coc.renderTarget, 'dof.coc', true, undefined, false);
-        const cocPipeline = this._fullscreenPipeline('dofCoc', DofCocProgram);
+        const cocPipeline = this._pipelines.fullscreen('dofCoc', DofCocProgram);
         cocPass.setPipeline(cocPipeline);
         this._shaderManager.setUniform('u_near', this._view.camera.near);
         this._shaderManager.setUniform('u_far', this._view.camera.far);
@@ -11736,7 +11404,7 @@ export class Renderer {
         this._passes.scope('dof.gather');
         const gatherPass = this._passes.beginFullscreenPass(bokeh.renderTarget, 'dof.gather', true,
                                                      undefined, false);
-        const gatherPipeline = this._fullscreenPipeline('dofGather', DofGatherProgram);
+        const gatherPipeline = this._pipelines.fullscreen('dofGather', DofGatherProgram);
         gatherPass.setPipeline(gatherPipeline);
         // The clamp expressed in the grid this pass works in, which is half the render resolution.
         this._shaderManager.setUniform('u_maxCocHalfPx', this._dofMaxBlur * 0.5);
@@ -11749,7 +11417,7 @@ export class Renderer {
         //    between sharp and blurred does not land on the half-res grid.
         this._passes.scope('dof.composite');
         const outPass = this._passes.beginFullscreenPass(target.renderTarget, 'dof.composite', true);
-        const outPipeline = this._fullscreenPipeline('dofComposite', DofCompositeProgram);
+        const outPipeline = this._pipelines.fullscreen('dofComposite', DofCompositeProgram);
         outPass.setPipeline(outPipeline);
         this._shaderManager.setUniform('u_near', this._view.camera.near);
         this._shaderManager.setUniform('u_far', this._view.camera.far);
@@ -11773,7 +11441,7 @@ export class Renderer {
         // 1. Trace the ghosts. Reads the chain image itself, so anything occluded throws no flare.
         const genPass = this._passes.beginFullscreenPass(scratch.renderTarget, 'lensFlare', true,
                                                   undefined, false);
-        const genPipeline = this._fullscreenPipeline('lensFlare', LensFlareProgram);
+        const genPipeline = this._pipelines.fullscreen('lensFlare', LensFlareProgram);
         genPass.setPipeline(genPipeline);
         // The threshold is on the EXPOSED image, as bloom's is, so it means the same brightness on screen in
         // a sunlit field and in a cave; the buffer is pre-exposure, so it is uploaded divided back out.
@@ -11793,7 +11461,7 @@ export class Renderer {
         const dirt = this._lensDirtSource();
         const upPass = this._passes.beginFullscreenPass(target.renderTarget, 'lensFlareComposite', false,
                                                  undefined, false);
-        const upPipeline = this._fullscreenPipeline('lensFlareComposite', LensFlareCompositeProgram,
+        const upPipeline = this._pipelines.fullscreen('lensFlareComposite', LensFlareCompositeProgram,
                                                     ADDITIVE_BLEND);
         upPass.setPipeline(upPipeline);
         this._shaderManager.setUniform('u_flareIntensity', this._lensFlareIntensity);
@@ -11813,7 +11481,7 @@ export class Renderer {
     /** Lens fall-off toward the corners, multiplicative on the linear-HDR chain. */
     private _fxaaPass(source: Framebuffer, target: Framebuffer): void {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'fxaa', true);
-        const pipeline = this._fullscreenPipeline('fxaa', FxaaProgram);
+        const pipeline = this._pipelines.fullscreen('fxaa', FxaaProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_texelSize', [1 / Math.max(1, this._renderWidth), 1 / Math.max(1, this._renderHeight)]);
         this._shaderManager.setUniform('u_exposure', this._view.exposure);
@@ -11827,7 +11495,7 @@ export class Renderer {
 
     private _vignettePass(source: Framebuffer, target: Framebuffer): void {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'vignette', true);
-        const pipeline = this._fullscreenPipeline('vignette', VignetteProgram);
+        const pipeline = this._pipelines.fullscreen('vignette', VignetteProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_vignetteStrength', this._vignetteStrength);
         this._shaderManager.setUniform('u_vignetteRoundness', this._vignetteRoundness);
@@ -11843,7 +11511,7 @@ export class Renderer {
     /** Film grain, animated and midtone-weighted. The last thing in the lens; see filmGrain.wgsl. */
     private _filmGrainPass(source: Framebuffer, target: Framebuffer): void {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'filmGrain', true);
-        const pipeline = this._fullscreenPipeline('filmGrain', FilmGrainProgram);
+        const pipeline = this._pipelines.fullscreen('filmGrain', FilmGrainProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_grainIntensity', this._filmGrainIntensity);
         this._shaderManager.setUniform('u_grainSize', this._filmGrainSize);
@@ -11860,7 +11528,7 @@ export class Renderer {
 
     private _chromaticAberrationPass(source: Framebuffer, target: Framebuffer): void {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'chromatic', true);
-        const pipeline = this._fullscreenPipeline('chromaticAberration', ChromaticAberrationProgram);
+        const pipeline = this._pipelines.fullscreen('chromaticAberration', ChromaticAberrationProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_strength', this._chromaticAberrationStrength);
         this._shaderManager.setUniform('u_aspect', this._renderWidth / Math.max(1, this._renderHeight));
@@ -11925,7 +11593,7 @@ export class Renderer {
         const dst = this._taaHistoryIndex ^ 1;
 
         const pass = this._passes.beginFullscreenPass(this._taaHistoryFBOs[dst].renderTarget, 'taa', true);
-        const pipeline = this._fullscreenPipeline('taaResolve', TaaResolveProgram);
+        const pipeline = this._pipelines.fullscreen('taaResolve', TaaResolveProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
             this._targets.scene.colors[0],
@@ -11958,8 +11626,8 @@ export class Renderer {
             ? this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'taa.sharpen', false)
             : this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'taa.copy', false);
         const copyPipeline = sharpen
-            ? this._fullscreenPipeline('taaSharpen', TaaSharpenProgram)
-            : this._fullscreenPipeline('screen', ScreenProgram);
+            ? this._pipelines.fullscreen('taaSharpen', TaaSharpenProgram)
+            : this._pipelines.fullscreen('screen', ScreenProgram);
         copy.setPipeline(copyPipeline);
         copy.setBindGroup(0, this._textureBindGroup(copyPipeline, 0,
                                                    [this._taaHistoryFBOs[dst].colors[0]]));
@@ -11994,7 +11662,7 @@ export class Renderer {
     // chunks/motionBlurShutter.wgsl for why the stored form is the unblurred one.
     private _velocityPass(): void {
         const pass = this._passes.beginFullscreenPass(this._targets.velocity.renderTarget, 'velocity', true);
-        const pipeline = this._fullscreenPipeline('motionBlurVelocity', MotionBlurVelocityProgram);
+        const pipeline = this._pipelines.fullscreen('motionBlurVelocity', MotionBlurVelocityProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._depthSource()]));
         // `_uvProducing` hands back ONE shared scratch, so each result needs a home before the next
@@ -12135,7 +11803,7 @@ export class Renderer {
             // scenery it never covered.
             const topology = node.model.material.config.wireframe ? 'line-list' : 'triangle-list';
 
-            const pipeline = this._pipelineFor(shaderType, VELOCITY_PROGRAMS[shaderType], {
+            const pipeline = this._pipelines.get(shaderType, VELOCITY_PROGRAMS[shaderType], {
                 cullMode: Renderer._cullFor(node.model.material.config.side),
                 // Reads the opaque depth and writes none of it: this pass must not disturb a buffer the
                 // gather below still compares against.
@@ -12208,7 +11876,7 @@ export class Renderer {
         // scene render — see `_produceVelocity` — and it holds the RAW delta, so the shutter scale and
         // the one-tile cap are applied here, inside the tile loop, before the magnitude compare.
         const tilePass = this._passes.beginFullscreenPass(this._velocityTileFBO.renderTarget, 'velocity.tile', true);
-        const tilePipeline = this._fullscreenPipeline('motionBlurTileMax', MotionBlurTileMaxProgram);
+        const tilePipeline = this._pipelines.fullscreen('motionBlurTileMax', MotionBlurTileMaxProgram);
         tilePass.setPipeline(tilePipeline);
         tilePass.setBindGroup(0, this._textureBindGroup(tilePipeline, 0, [this._targets.velocity.colors[0]]));
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
@@ -12221,7 +11889,7 @@ export class Renderer {
 
         // 2) NeighborMax: 3x3 dilation of the tile velocities.
         const nbPass = this._passes.beginFullscreenPass(this._velocityNeighborFBO.renderTarget, 'velocity.neighbor', true);
-        const nbPipeline = this._fullscreenPipeline('motionBlurNeighborMax', MotionBlurNeighborMaxProgram);
+        const nbPipeline = this._pipelines.fullscreen('motionBlurNeighborMax', MotionBlurNeighborMaxProgram);
         nbPass.setPipeline(nbPipeline);
         nbPass.setBindGroup(0, this._textureBindGroup(nbPipeline, 0, [this._velocityTileFBO.colors[0]]));
         this._shaderManager.setUniform('u_tileTexelSize', [1 / this._velocityTileFBO.width, 1 / this._velocityTileFBO.height]);
@@ -12230,7 +11898,7 @@ export class Renderer {
 
         // 3) Gather: reconstruct the blurred image into the head of the chain.
         const gatherPass = this._passes.beginFullscreenPass(target.renderTarget, 'motionBlur', true);
-        const gatherPipeline = this._fullscreenPipeline('motionBlur', MotionBlurGatherProgram);
+        const gatherPipeline = this._pipelines.fullscreen('motionBlur', MotionBlurGatherProgram);
         gatherPass.setPipeline(gatherPipeline);
         gatherPass.setBindGroup(0, this._textureBindGroup(gatherPipeline, 0, [
             this._targets.scene.colors[0], this._targets.velocity.colors[0],
@@ -13310,7 +12978,7 @@ export class Renderer {
             // whichever program the mesh was built for (Basic 20 bytes per vertex, PBR 56). `builtFor`
             // is `material.type` for SKINNED meshes too, not the `animated ? null` used elsewhere here.
             const drawWith = (mesh: Mesh, builtFor: string | null, model: mat4) => {
-                const pipeline = this._pipelineFor('outline', OutlineProgram, {
+                const pipeline = this._pipelines.get('outline', OutlineProgram, {
                     depthStencil: depthAlways, vertex: 'model', builtFor,
                 });
                 pass.setPipeline(pipeline);
@@ -13381,7 +13049,7 @@ export class Renderer {
         const reflection = FORWARD_PROGRAMS[type];
         this._shaderManager.bind(type);
         const material = node.model.material;
-        const pipeline = reflection ? this._pipelineFor(type, reflection, {
+        const pipeline = reflection ? this._pipelines.get(type, reflection, {
             cullMode: Renderer._cullFor(material.config.side),
             depthStencil,
             blend: OVERLAY_BLEND,
@@ -13568,7 +13236,7 @@ export class Renderer {
         // The overlay meshes carry position ONLY (see _ensureOverlayMeshes), so the buffer they were
         // built with is `shadowMap`'s single-attribute layout, not `basicInstanced`'s. Naming that as
         // `builtFor` is what keeps the stride at 12 rather than the unlit 20.
-        const pipeline = pass ? this._pipelineFor('basicInstanced', BasicInstancedProgram, {
+        const pipeline = pass ? this._pipelines.get('basicInstanced', BasicInstancedProgram, {
             cullMode: 'back',
             depthStencil,
             vertex: 'model+instance',

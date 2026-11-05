@@ -71,7 +71,7 @@ describe('transient aliasing', () => {
     });
 
     it('never aliases across formats or sizes', () => {
-        // `Renderer._pipelineFor` keys its pipeline cache on the attachment FORMATS it reads back off
+        // `PipelineCache.get` keys its pipeline cache on the attachment FORMATS it reads back off
         // the live target. A pipeline built for one format handed a target of another is a validation
         // error on WebGPU and a silent mis-render on WebGL2, so the bucket key has to include both.
         const graph = new RenderGraphBuilder<string>();

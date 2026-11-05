@@ -57,9 +57,9 @@ describe('offscreen capture alpha', () => {
     });
 
     it('is claimed by every sharer of the present program', () => {
-        // A third caller of `_fullscreenPipeline('present', ...)` that did not write the flag would
+        // A third caller of `_pipelines.fullscreen('present', ...)` that did not write the flag would
         // inherit whichever of the two above ran last — the same trap, one level up.
         expect(linesWith("setUniform('u_alphaFromDepth'").length)
-            .toBe(linesWith("_fullscreenPipeline('present'").length);
+            .toBe(linesWith("_pipelines.fullscreen('present'").length);
     });
 });
