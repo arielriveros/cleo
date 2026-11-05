@@ -13,6 +13,7 @@ import type { ShadowPasses } from './shadows';
 import type { SsilPasses } from './ssil';
 import type { SkyPasses } from './sky';
 import type { DebugViews } from './debugViews';
+import type { FluidVolumePasses } from './fluids';
 
 /** What RenderStats reads from the renderer that owns it, while those members still live there. */
 export interface RenderStatsHost {
@@ -40,7 +41,8 @@ export class RenderStats {
                 private readonly _shadows: ShadowPasses,
                 private readonly _ssil: SsilPasses,
                 private readonly _sky: SkyPasses,
-                private readonly _debugViews: DebugViews) {}
+                private readonly _debugViews: DebugViews,
+                private readonly _fluids: FluidVolumePasses) {}
 
     /**
      * Check `gl.getError()` once per frame and count what it reports. OFF by default — `getError`
@@ -145,6 +147,12 @@ export class RenderStats {
         if (this._clouds.cloudDetailNoise) bytes += this._clouds.cloudDetailNoise.byteSize;
         addFbo(this._ssil.ssaoFBO); addFbo(this._ssil.ssaoBlurFBO);
         for (const f of this._ssil.ssilHistory.targets) addFbo(f);
+        // The TAA history and its depth copy, and the smoke-and-fire trace and history: allocated on first
+        // use, so a project that never turns them on is charged nothing.
+        for (const f of this._temporal.taaHistory.targets) addFbo(f);
+        addFbo(this._temporal.prevDepthFBO ?? undefined);
+        addFbo(this._fluids.traceFBO ?? undefined);
+        for (const f of this._fluids.fluidHistory.targets) addFbo(f);
         addFbo(this._ssil.ssilRadianceFBO ?? undefined);
         addFbo(this._sky.brdfFBO); addFbo(this._post.outlineMaskFBO); addFbo(this._targets.overlay);
         addFbo(this._debugViews.overdrawFBO ?? undefined);

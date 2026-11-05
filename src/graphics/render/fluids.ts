@@ -235,6 +235,9 @@ export class FluidVolumePasses {
     }
 
     private _fluidTraceFBO: Framebuffer | null = null;
+
+    /** The volume trace target, once a volume has drawn; for memory accounting. */
+    public get traceFBO(): Framebuffer | null { return this._fluidTraceFBO; }
     public readonly fluidHistory = new TemporalHistory({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
 
     /** Element-wise closeness of two matrices: "the camera did not move this frame". */

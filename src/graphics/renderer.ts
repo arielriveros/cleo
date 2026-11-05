@@ -505,7 +505,8 @@ export class Renderer {
             get renderHeight() { return renderer._renderHeight; },
             get renderScale() { return renderer._renderScale; },
             get renderWidth() { return renderer._renderWidth; },
-        }, this._targets, this._temporal, this._post, this._clouds, this._decals, this._shadows, this._ssil, this._sky, this._debugViews);
+        }, this._targets, this._temporal, this._post, this._clouds, this._decals, this._shadows, this._ssil, this._sky, this._debugViews,
+           this._fluids);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._shadows.shadowDistance = config.shadowDistance ?? 100;
         this._shadows.cascadeCount = Math.min(MAX_CASCADES, Math.max(1, Math.round(config.shadowCascades ?? this._shadows.cascadeCount)));

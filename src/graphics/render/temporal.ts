@@ -90,6 +90,9 @@ export class TemporalPasses {
     public readonly taaHistory = new TemporalHistory({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
     private _taaPrevDepthFBO!: Framebuffer;
 
+    /** The previous-frame depth copy, once TAA has run; for memory accounting. */
+    public get prevDepthFBO(): Framebuffer | null { return this._taaPrevDepthFBO ?? null; }
+
     /** History weight when still and under fast motion. See `taaResolve.wgsl`. */
     public taaFeedback: number = 0.97;
     public taaMotionFeedback: number = 0.88;
