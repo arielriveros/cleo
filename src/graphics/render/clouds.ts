@@ -26,6 +26,7 @@ import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
+import type { FullscreenPasses } from './fullscreenPasses';
 
 /** What VolumetricCloudPasses reads from the renderer that owns it, while those members still live there. */
 export interface VolumetricCloudPassesHost {
@@ -59,7 +60,8 @@ export class VolumetricCloudPasses {
                 private readonly _passes: PassEncoder,
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
-                private readonly _projection: ViewProjection) {}
+                private readonly _projection: ViewProjection,
+                private readonly _fullscreen: FullscreenPasses) {}
 
     // Reduced-resolution volumetric-clouds raymarch target (lazily sized to the node's resolutionScale;
     // upsampled + composited into the scene buffer). Only used when resolutionScale < 1.
@@ -354,8 +356,7 @@ export class VolumetricCloudPasses {
             const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'clouds', false);
             pass.setPipeline(rayPipeline);
             pass.setBindGroup(0, rayGroup(rayPipeline));
-            this._passes.drawFullscreen(pass);
-            this._passes.endFullscreenPass(pass);
+            this._passes.drawFullscreenAndEnd(pass);
         } else {
             // Reduced resolution: raymarch into a low-res target, then bilinear-upsample + composite. Fewer
             // rays (scale per axis) is the whole point — the raymarch is the pass's dominant GPU cost.
@@ -369,19 +370,14 @@ export class VolumetricCloudPasses {
             // cloudUpsample.fs re-decides occlusion per full-resolution pixel, against the G-buffer
             // depth the raymarch bounded itself with, and uses the low-res buffer for colour only.
             const upPass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'cloudUpsample', false);
-            const upPipeline = this._pipelines.fullscreen('cloudUpsample', CloudUpsampleProgram,
-                                                       VolumetricCloudPasses.CLOUD_BLEND);
-            upPass.setPipeline(upPipeline);
-            upPass.setBindGroup(0, this._bindGroups.textureGroup(upPipeline, 0,
-                                                          [source, this._targets.gBuffer.depth]));
+            this._fullscreen.bind(upPass, 'cloudUpsample', CloudUpsampleProgram, [source, this._targets.gBuffer.depth], VolumetricCloudPasses.CLOUD_BLEND);
             this._shaderManager.bind('cloudUpsample');
             this._shaderManager.setUniform('u_cloudResolution', [w, h]);
             this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
             this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
             this._shaderManager.setUniform('u_slabBottom', node.baseAltitude);
             this._shaderManager.setUniform('u_slabTop', node.baseAltitude + node.thickness);
-            this._passes.drawFullscreen(upPass);
-            this._passes.endFullscreenPass(upPass);
+            this._passes.drawFullscreenAndEnd(upPass);
         }
 
         // Restore the state the following opaque/transparent overlay passes expect (incl. the default
@@ -543,8 +539,7 @@ export class VolumetricCloudPasses {
                                                     true, [0, 0, 0, 0], false);
         tracePass.setPipeline(pipeline);
         tracePass.setBindGroup(0, group(pipeline));
-        this._passes.drawFullscreen(tracePass);
-        this._passes.endFullscreenPass(tracePass);
+        this._passes.drawFullscreenAndEnd(tracePass);
         // Whatever setting change routed us here also makes the accumulated history meaningless.
         this.cloudHistory.invalidate();
         return this.cloudsFBO.colors[0];
@@ -579,8 +574,7 @@ export class VolumetricCloudPasses {
                                                         true, [0, 0, 0, 0], false);
             tracePass.setPipeline(pipeline);
             tracePass.setBindGroup(0, group(pipeline));
-            this._passes.drawFullscreen(tracePass);
-            this._passes.endFullscreenPass(tracePass);
+            this._passes.drawFullscreenAndEnd(tracePass);
             this.cloudHistory.swap();
             return this.cloudHistory.read.colors[0];
         }
@@ -599,19 +593,16 @@ export class VolumetricCloudPasses {
                                                     true, [0, 0, 0, 0], false);
         tracePass.setPipeline(pipeline);
         tracePass.setBindGroup(0, group(pipeline));
-        this._passes.drawFullscreen(tracePass);
-        this._passes.endFullscreenPass(tracePass);
+        this._passes.drawFullscreenAndEnd(tracePass);
 
         // --- Resolve: reconstruct full cloud resolution from history + the new samples ---
         this._passes.scope('clouds.resolve');
         const prev = this.cloudHistory.read;
         const resolvePass = this._passes.beginFullscreenPass(this.cloudHistory.write.renderTarget,
                                                       'clouds.resolve', false, undefined, false);
-        const resolvePipeline = this._pipelines.fullscreen('cloudTemporalResolve', CloudTemporalResolveProgram);
-        resolvePass.setPipeline(resolvePipeline);
-        resolvePass.setBindGroup(0, this._bindGroups.textureGroup(resolvePipeline, 0, [
+        this._fullscreen.bind(resolvePass, 'cloudTemporalResolve', CloudTemporalResolveProgram, [
             this.cloudTraceFBO.colors[0], prev.colors[0], this._targets.gBuffer.depth,
-        ]));
+        ]);
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
         this._shaderManager.setUniform('u_prevViewProj', this._projection.uvProducing(this._view.prevViewProj));
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
@@ -623,8 +614,7 @@ export class VolumetricCloudPasses {
         // returns early, but must stay set — an unset uniform silently reads as false.
         this._shaderManager.setUniform('u_historyValid', this.cloudHistory.valid && this._view.hasPrevViewProj);
         this._shaderManager.setUniform('u_slabMid', node.baseAltitude + node.thickness * 0.5);
-        this._passes.drawFullscreen(resolvePass);
-        this._passes.endFullscreenPass(resolvePass);
+        this._passes.drawFullscreenAndEnd(resolvePass);
 
         this.cloudHistory.swap();
         return this.cloudHistory.read.colors[0];

@@ -10,6 +10,7 @@ import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
+import type { FullscreenPasses } from './fullscreenPasses';
 
 /** What AutoExposure reads from the renderer that owns it, while those members still live there. */
 export interface AutoExposureHost {
@@ -29,7 +30,8 @@ export class AutoExposure {
                 private readonly _targets: FrameTargets,
                 private readonly _passes: PassEncoder,
                 private readonly _pipelines: PipelineCache,
-                private readonly _bindGroups: BindGroupCache) {}
+                private readonly _bindGroups: BindGroupCache,
+                private readonly _fullscreen: FullscreenPasses) {}
 
     /**
      * The AUTHORED exposure — what the artist set, what a scene saves, and what a preview renders at.
@@ -145,11 +147,8 @@ export class AutoExposure {
         const read = 1 - write;
         const pass = this._passes.beginFullscreenPass(this.exposureFBOs[write].renderTarget, 'exposure', true,
                                                undefined, false);
-        const pipeline = this._pipelines.fullscreen('exposureMeter', ExposureMeterProgram);
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._targets.scene.colors[0]]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._fullscreen.bind(pass, 'exposureMeter', ExposureMeterProgram, [this._targets.scene.colors[0]]);
+        this._passes.drawFullscreenAndEnd(pass);
         this._exposureWrite = read;
 
         // The READ does not happen here. `readPixels` binds a scratch framebuffer of its own and

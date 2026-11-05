@@ -26,6 +26,7 @@ import type { PostEffects } from './postEffects';
 import type { DecalPasses } from './decals';
 import type { Sprite2DPasses } from './sprites2d';
 import { ShaderManager } from '../systems/shaderManager';
+import type { FullscreenPasses } from './fullscreenPasses';
 
 /** What EditorOverlays reads from the renderer that owns it, while those members still live there. */
 export interface EditorOverlaysHost {
@@ -51,7 +52,8 @@ export class EditorOverlays {
                 private readonly _projection: ViewProjection,
                 private readonly _post: PostEffects,
                 private readonly _decals: DecalPasses,
-                private readonly _sprites: Sprite2DPasses) {}
+                private readonly _sprites: Sprite2DPasses,
+                private readonly _fullscreen: FullscreenPasses) {}
 
     // Set per frame by the first pass that opens the overlay layer (`_targets.overlay`): nothing drawn
     // means no clear and no composite, and a published build, which has no editor nodes, pays nothing.
@@ -112,8 +114,7 @@ export class EditorOverlays {
         }
         this._shaderManager.setUniform('u_fadeFar', fadeFar);
 
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
 
         // Still set by hand: the overlay passes that follow are on the legacy path and inherit blend
         // and depth-mask state rather than declaring their own. The OVERLAY pair, not the default one
@@ -144,12 +145,8 @@ export class EditorOverlays {
      */
     public overlayCompositePass(): void {
         const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'overlay.composite', false);
-        const pipeline = this._pipelines.fullscreen('overlayComposite', OverlayCompositeProgram,
-                                                  OVERLAY_COMPOSITE_BLEND);
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._targets.overlay.colors[0]]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._fullscreen.bind(pass, 'overlayComposite', OverlayCompositeProgram, [this._targets.overlay.colors[0]], OVERLAY_COMPOSITE_BLEND);
+        this._passes.drawFullscreenAndEnd(pass);
     }
 
     /**

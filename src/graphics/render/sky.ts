@@ -31,6 +31,7 @@ import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
 import type { LightingPasses } from './lighting';
 import { ShaderManager } from '../systems/shaderManager';
+import type { FullscreenPasses } from './fullscreenPasses';
 
 /** What SkyPasses reads from the renderer that owns it, while those members still live there. */
 export interface SkyPassesHost {
@@ -58,7 +59,8 @@ export class SkyPasses {
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
                 private readonly _clouds: VolumetricCloudPasses,
-                private readonly _lighting: LightingPasses) {}
+                private readonly _lighting: LightingPasses,
+                private readonly _fullscreen: FullscreenPasses) {}
 
     // IBL (image-based lighting). Shared BRDF LUT + a cube framebuffer/mesh/camera for baking, plus a
     // scene-wide IBL cache built from scene.environmentMap when no light probe is active.
@@ -158,8 +160,7 @@ export class SkyPasses {
         // No bind groups at all: the LUT is pure computation from the fragment coordinate.
         const pass = this._passes.beginFullscreenPass(this.brdfFBO.renderTarget, 'brdf', true, [0, 0, 0, 1]);
         pass.setPipeline(this._pipelines.fullscreen('brdf', BRDFProgram));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
     }
 
     // Render a convolution shader (irradiance/prefilter) into all 6 faces of `target` at a mip level.
@@ -280,14 +281,11 @@ export class SkyPasses {
             this.skyProjectFBO.create(w, h);
 
         const pass = this._passes.beginFullscreenPass(this.skyProjectFBO.renderTarget, 'skyProject', false);
-        const pipeline = this._pipelines.fullscreen('skyProject', SkyProjectProgram);
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [cube]));
+        this._fullscreen.bind(pass, 'skyProject', SkyProjectProgram, [cube]);
         this._shaderManager.bind('skyProject');
         this._shaderManager.setUniform('u_linearInput', linear ? 1 : 0);
         this._shaderManager.setUniform('u_projectScale', scale);
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
 
         // Restored before the await, for the same reason `renderProbePreview` does it: a game-loop
         // frame that lands while this is suspended must find the live viewport, not the 32x16 one.
@@ -560,13 +558,11 @@ export class SkyPasses {
         if (!node || !node.fogEnabled || !node.cubemap || node.fogMaxOpacity <= 0 || node.fogDensity <= 0) return;
 
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'skyFog', false);
-        const pipeline = this._pipelines.fullscreen('skyFog', SkyFogProgram, DEFAULT_BLEND);
-        pass.setPipeline(pipeline);
+        this._fullscreen.bind(pass, 'skyFog', SkyFogProgram, [this._targets.sceneDepth.depth, node.cubemap], DEFAULT_BLEND);
 
         this._shaderManager.bind('skyFog');
         // The CLEAN atmosphere, never the cloud-baked sky: fog is the colour of the air at the horizon, and
         // sampling clouds into it painted them onto every fogged hillside.
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._targets.sceneDepth.depth, node.cubemap]));
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         this._shaderManager.setUniform('u_fogDensity', node.fogDensity);
@@ -580,8 +576,7 @@ export class SkyPasses {
         // or sky detail in it). ~8px-per-face target regardless of the baked cubemap resolution.
         const res = node.cubemapResolution || node.resolution;
         this._shaderManager.setUniform('u_fogSkyLod', Math.max(0, Math.log2(res) - 3));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
 
         // Restore the state the following overlay passes expect.
         GLState.blend(false);
@@ -809,8 +804,7 @@ export class SkyPasses {
                                                    'cloudSkyBake', false, undefined, false);
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, group);
-            this._passes.drawFullscreen(pass);
-            this._passes.endFullscreenPass(pass);
+            this._passes.drawFullscreenAndEnd(pass);
         }
         this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
         GLState.blend(false);

@@ -20,6 +20,7 @@ import type { ShadowPasses } from './shadows';
 import type { LightingPasses } from './lighting';
 import type { ForwardPass } from './forwardPass';
 import { ShaderManager } from '../systems/shaderManager';
+import type { FullscreenPasses } from './fullscreenPasses';
 
 /** What Capture reads from the renderer that owns it, while those members still live there. */
 export interface CaptureHost {
@@ -50,7 +51,8 @@ export class Capture {
                 private readonly _shadows: ShadowPasses,
                 private readonly _lighting: LightingPasses,
                 private readonly _sky: SkyPasses,
-                private readonly _forward: ForwardPass) {}
+                private readonly _forward: ForwardPass,
+                private readonly _fullscreen: FullscreenPasses) {}
 
     // Offscreen thumbnail capture. While `presentTarget` is set the pipeline renders at the target's
     // size, skips every background draw and resolves into it, never touching the canvas.
@@ -126,13 +128,10 @@ export class Capture {
             this._probePreviewFBO.create(w, h);
 
         const pass = this._passes.beginFullscreenPass(this._probePreviewFBO.renderTarget, 'probePreview', false);
-        const pipeline = this._pipelines.fullscreen('probePreview', ProbePreviewProgram);
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [cube]));
+        this._fullscreen.bind(pass, 'probePreview', ProbePreviewProgram, [cube]);
         this._shaderManager.bind('probePreview');
         this._shaderManager.setUniform('u_exposure', probe.intensity);
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
 
         // Viewport restored BEFORE the await, for the same reason the capture above restores its
         // buffers first: a game-loop frame that lands while this is suspended must find the live
@@ -299,8 +298,9 @@ export class Capture {
         // set overlapping-but-not-identical uniform and unit state now cannot drift apart.
         const pass = this._passes.beginFullscreenPass(this.presentTarget!.renderTarget, 'presentThumbnail',
                                                true, [0, 0, 0, 0]);
-        const pipeline = this._pipelines.fullscreen('present', PresentProgram);
-        pass.setPipeline(pipeline);
+        this._fullscreen.bind(pass, 'present', PresentProgram, [
+            this._targets.scene.colors[0], this._temporal.depthSource(), this._post.colorLut.volumeFor(null),
+        ]);
         this._shaderManager.setUniform('u_exposure', this._view.exposure);
         // Ungraded on purpose: an asset thumbnail is a picture of the ASSET, and it should not change
         // because the scene it was captured in happens to be overcast — or because someone hung a
@@ -319,10 +319,6 @@ export class Capture {
         // happened when this line was dropped in the TAA/LUT rewrite, and it took the whole asset
         // library's transparency with it as well as every baked foliage impostor.
         this._shaderManager.setUniform('u_alphaFromDepth', 1.0);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            this._targets.scene.colors[0], this._temporal.depthSource(), this._post.colorLut.volumeFor(null),
-        ]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
     }
 }

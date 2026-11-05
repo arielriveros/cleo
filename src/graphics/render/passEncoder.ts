@@ -115,6 +115,12 @@ export class PassEncoder {
         return pass;
     }
 
+    /** Draw the screen quad and close the pass: the last two steps of every fullscreen pass. */
+    public drawFullscreenAndEnd(pass: RenderPassEncoder): void {
+        this.drawFullscreen(pass);
+        this.endFullscreenPass(pass);
+    }
+
     public endFullscreenPass(pass: RenderPassEncoder): void {
         pass.end();
         // Only an encoder this pass OWNS is finished here. The frame encoder outlives every pass in the

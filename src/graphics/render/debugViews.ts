@@ -18,6 +18,7 @@ import type { FoliagePasses } from './foliage';
 import type { ShadowPasses } from './shadows';
 import type { SsilPasses } from './ssil';
 import { ShaderManager } from '../systems/shaderManager';
+import type { FullscreenPasses } from './fullscreenPasses';
 
 /** What DebugViews reads from the renderer that owns it, while those members still live there. */
 export interface DebugViewsHost {
@@ -44,7 +45,8 @@ export class DebugViews {
                 private readonly _post: PostEffects,
                 private readonly _foliage: FoliagePasses,
                 private readonly _shadows: ShadowPasses,
-                private readonly _ssil: SsilPasses) {}
+                private readonly _ssil: SsilPasses,
+                private readonly _fullscreen: FullscreenPasses) {}
 
     // Editor "Renderer" debug view: which buffer to blit to the screen ('final' = normal image).
     public debugView: DebugView = 'final';
@@ -158,12 +160,9 @@ export class DebugViews {
         const layer = Math.min(this._shadows.shadowCascadeFBO.layers - 1, Math.max(0, this._shadows.shadowDebugLayer));
         this._shadows.shadowCascadeFBO.setCompareEnabled(false);
         const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'shadowDebug', true);
-        const pipeline = this._pipelines.fullscreen('shadowDebug', ShadowDebugProgram);
-        pass.setPipeline(pipeline);
+        this._fullscreen.bind(pass, 'shadowDebug', ShadowDebugProgram, [this._shadows.shadowCascadeFBO.texture]);
         this._shaderManager.setUniform('u_layer', layer);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._shadows.shadowCascadeFBO.texture]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
         this._shadows.shadowCascadeFBO.setCompareEnabled(true);
     }
 
@@ -224,8 +223,7 @@ export class DebugViews {
             default:          tex = this._targets.scene.colors[0];      mode = 0; break;
         }
         const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'debugView', true);
-        const pipeline = this._pipelines.fullscreen('debugView', DebugViewProgram);
-        pass.setPipeline(pipeline);
+        this._fullscreen.bind(pass, 'debugView', DebugViewProgram, [tex, this._targets.gBuffer.depth]);
         this._shaderManager.setUniform('u_mode', mode);
         this._shaderManager.setUniform('u_validity', this.debugValidity);
         // The tonemapped channels ('scene', 'bloom', 'overdraw's fallback) resolve with the SCENE's
@@ -235,8 +233,6 @@ export class DebugViews {
         this._shaderManager.setUniform('u_exposure', this._view.exposure); // used by the tonemapped channels
         // The depth attachment rides along on every channel, because WebGPU requires every binding the
         // shader declares to be present and only mode 3 actually reads it.
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [tex, this._targets.gBuffer.depth]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
     }
 }

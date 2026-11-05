@@ -23,6 +23,7 @@ import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { TemporalPasses } from './temporal';
 import { ShaderManager } from '../systems/shaderManager';
+import type { FullscreenPasses } from './fullscreenPasses';
 
 /** What PostEffects reads from the renderer that owns it, while those members still live there. */
 export interface PostEffectsHost {
@@ -50,7 +51,8 @@ export class PostEffects {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _materials: MaterialBinder,
-                private readonly _temporal: TemporalPasses) {}
+                private readonly _temporal: TemporalPasses,
+                private readonly _fullscreen: FullscreenPasses) {}
 
     /**
      * HDR bloom: luminance where bloom starts, soft-knee width around it, and additive strength.
@@ -233,12 +235,13 @@ export class PostEffects {
      */
     public presentPass(source: Framebuffer): void {
         const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'present', true);
-        const pipeline = this._pipelines.fullscreen('present', PresentProgram);
-        pass.setPipeline(pipeline);
+        const lut = this.colorLut.volumeFor(this.colorGradingLut);
+        this._fullscreen.bind(pass, 'present', PresentProgram, [
+            source.colors[0], this._targets.scene.depth, lut,
+        ]);
         this._shaderManager.setUniform('u_exposure', this._view.exposure);
         this._shaderManager.setUniform('u_saturation', this._effectiveSaturation());
         this._shaderManager.setUniform('u_toneMapper', this.toneMapperId());
-        const lut = this.colorLut.volumeFor(this.colorGradingLut);
         this._shaderManager.setUniform('u_lutSize', this.colorLut.size);
         this._shaderManager.setUniform('u_lutIntensity', this._lutIntensity());
         // Opaque. The flag is reset rather than assumed because uniforms persist across binds, and a
@@ -247,11 +250,7 @@ export class PostEffects {
         this._shaderManager.setUniform('u_alphaFromDepth', 0.0);
         // Every texture is bound even where it is not read (the coverage depth at alphaFromDepth 0,
         // the identity LUT at intensity 0) — WebGPU requires every declared binding to be satisfied.
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            source.colors[0], this._targets.scene.depth, lut,
-        ]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
     }
 
     /**
@@ -298,8 +297,7 @@ export class PostEffects {
         this._shaderManager.setUniform('u_sunVisible', sun.visible);
         this._shaderManager.setUniform('u_exposure', this._view.exposure); // lets a pass invert the final present resolve
         this._materials.applyCustom(mat, true);   // u_time, u_viewPos + user VALUE uniforms only
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
     }
 
     // Screen-space selection outline: draws a border just outside the silhouette mask over the
@@ -308,25 +306,22 @@ export class PostEffects {
         // The clear moves in here with the pass: the caller used to unbind the scene FBO and clear the
         // screen by hand, which is the same thing said twice and only one of them portable.
         const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'outline', true);
-        const pipeline = this._pipelines.fullscreen('outlinePost', OutlinePostProgram);
-        pass.setPipeline(pipeline);
+        const lut = this.colorLut.volumeFor(this.colorGradingLut);
+        this._fullscreen.bind(pass, 'outlinePost', OutlinePostProgram, [
+            source.colors[0], this.outlineMaskFBO.colors[0], lut,
+        ]);
         // This pass does the final resolve, so it carries the WHOLE grade and not just the exposure.
         // It used to set only that, which meant selecting an object dropped the saturation trim and
         // the frame changed colour under the artist.
         this._shaderManager.setUniform('u_exposure', this._view.exposure);
         this._shaderManager.setUniform('u_saturation', this._effectiveSaturation());
         this._shaderManager.setUniform('u_toneMapper', this.toneMapperId());
-        const lut = this.colorLut.volumeFor(this.colorGradingLut);
         this._shaderManager.setUniform('u_lutSize', this.colorLut.size);
         this._shaderManager.setUniform('u_lutIntensity', this._lutIntensity());
         this._shaderManager.setUniform('u_texelSize', [1 / this._host.renderWidth, 1 / this._host.renderHeight]);
         this._shaderManager.setUniform('u_outlineColor', this.outlineColor);
         this._shaderManager.setUniform('u_outlineWidth', this.outlineWidth);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            source.colors[0], this.outlineMaskFBO.colors[0], lut,
-        ]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
     }
 
     /**
@@ -344,8 +339,9 @@ export class PostEffects {
         const mip0 = this.bloomMips[0];
         const brightPass = this._passes.beginFullscreenPass(mip0.renderTarget, 'bloom.bright', true,
                                                      undefined, false);
-        const brightPipeline = this._pipelines.fullscreen('bloom', BloomProgram);
-        brightPass.setPipeline(brightPipeline);
+        this._fullscreen.bind(brightPass, 'bloom', BloomProgram, [
+            source.colors[0], this._targets.scene.colors[0],
+        ]);
         // The bright pass reads pre-exposure linear radiance, so it needs the exposure to decide what
         // counts as bright — without it the threshold is compared against radiance ~3x darker than what
         // reaches the screen, and at the default 1.0 nothing in an ordinary scene ever clears it.
@@ -359,11 +355,7 @@ export class PostEffects {
         this._shaderManager.setUniform('u_dstResolution', [mip0.width, mip0.height]);
         // Bloom-eligibility mask lives in the raw scene buffer's alpha (motion blur discards alpha, so
         // read it from the scene FBO directly, not the post-processed copy the first entry names).
-        brightPass.setBindGroup(0, this._bindGroups.textureGroup(brightPipeline, 0, [
-            source.colors[0], this._targets.scene.colors[0],
-        ]));
-        this._passes.drawFullscreen(brightPass);
-        this._passes.endFullscreenPass(brightPass);
+        this._passes.drawFullscreenAndEnd(brightPass);
 
         if (this._host.passEnabled['bloom.blur']) {
             // 2. Downsample: each level reads the one above it at twice the resolution.
@@ -377,8 +369,7 @@ export class PostEffects {
                 // Built INSIDE the pass, never hoisted above the loop: `_pipelines.get` reads its colour
                 // format off `_passes.target`, which only exists between begin and end. Not a
                 // per-iteration cost — pipelines are cached and the format is part of the key.
-                const downPipeline = this._pipelines.fullscreen('bloomDownsample', BloomDownsampleProgram);
-                pass.setPipeline(downPipeline);
+                this._fullscreen.bind(pass, 'bloomDownsample', BloomDownsampleProgram, [from.colors[0]]);
                 this._shaderManager.setUniform('u_srcTexelSize', [1 / from.width, 1 / from.height]);
                 // Both grids: the mips halve with floor(), so an odd level is not exactly 2x the next
                 // and the kernel has to be snapped to the source grid rather than assuming the ratio.
@@ -386,9 +377,7 @@ export class PostEffects {
                 // Karis average on the first step only — it tames fireflies but is not energy
                 // conserving, so applying it all the way down would visibly dim the bloom.
                 this._shaderManager.setUniform('u_karisAverage', i === 1);
-                pass.setBindGroup(0, this._bindGroups.textureGroup(downPipeline, 0, [from.colors[0]]));
-                this._passes.drawFullscreen(pass);
-                this._passes.endFullscreenPass(pass);
+                this._passes.drawFullscreenAndEnd(pass);
             }
 
             // 3. Upsample: additively blend each level onto the next larger one, accumulating in the
@@ -401,16 +390,12 @@ export class PostEffects {
                 const pass = this._passes.beginFullscreenPass(to.renderTarget, 'bloom.blur', false,
                                                        undefined, false);
                 // Inside the pass, for the format reason spelled out on the downsample loop above.
-                const upPipeline = this._pipelines.fullscreen('bloomUpsample', BloomUpsampleProgram,
-                                                            ADDITIVE_BLEND);
-                pass.setPipeline(upPipeline);
+                this._fullscreen.bind(pass, 'bloomUpsample', BloomUpsampleProgram, [from.colors[0]], ADDITIVE_BLEND);
                 // Radius in the SOURCE mip's texels, so the spread is resolution-independent. Per axis:
                 // one value off the width alone is short by the aspect ratio vertically.
                 this._shaderManager.setUniform('u_filterRadius',
                     [PostEffects.BLOOM_FILTER_RADIUS / from.width, PostEffects.BLOOM_FILTER_RADIUS / from.height]);
-                pass.setBindGroup(0, this._bindGroups.textureGroup(upPipeline, 0, [from.colors[0]]));
-                this._passes.drawFullscreen(pass);
-                this._passes.endFullscreenPass(pass);
+                this._passes.drawFullscreenAndEnd(pass);
             }
             // Still restored by hand: the passes that follow are on the legacy path and enable BLEND
             // without setting the function, so they inherit whatever was left. Drop this once they are
@@ -423,21 +408,18 @@ export class PostEffects {
     /** Composite the accumulated bloom back over the image, from one chain stage into the next. */
     public bloomComposite(source: Framebuffer, target: Framebuffer): void {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'bloom.composite', true);
-        const pipeline = this._pipelines.fullscreen('composer', ComposerProgram);
-        pass.setPipeline(pipeline);
-        this._shaderManager.setUniform('u_bloomIntensity', this.bloomIntensity);
         // Dirt rides on the bloom composite because it is only visible where there is glare to catch —
         // see the header of composer.wgsl. Bound even at intensity 0, because WebGPU requires every
         // declared binding to be satisfied whether or not the shader reads it.
         const dirt = this._lensDirtSource();
+        this._fullscreen.bind(pass, 'composer', ComposerProgram, [
+            source.colors[0], this.bloomMips[0].colors[0], dirt ?? this._bindGroups.fallbackTexture,
+        ]);
+        this._shaderManager.setUniform('u_bloomIntensity', this.bloomIntensity);
         this._shaderManager.setUniform('u_dirtIntensity', this._lensDirtStrength(dirt));
         // The unit numbers are gone: the bind group assigns them and sets u_buffer1/u_buffer2 from the
         // shader's own reflection, so the order here is the order the shader declares.
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            source.colors[0], this.bloomMips[0].colors[0], dirt ?? this._bindGroups.fallbackTexture,
-        ]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
     }
 
     /**
@@ -548,8 +530,7 @@ export class PostEffects {
         // 1. Half-res colour, and the signed CoC in alpha. The scope is already open — this node
         //    reports under `dof.coc`, and the two below are opened as it moves through them.
         const cocPass = this._passes.beginFullscreenPass(coc.renderTarget, 'dof.coc', true, undefined, false);
-        const cocPipeline = this._pipelines.fullscreen('dofCoc', DofCocProgram);
-        cocPass.setPipeline(cocPipeline);
+        this._fullscreen.bind(cocPass, 'dofCoc', DofCocProgram, [source.colors[0], depth]);
         this._shaderManager.setUniform('u_near', this._view.camera.near);
         this._shaderManager.setUniform('u_far', this._view.camera.far);
         this._shaderManager.setUniform('u_focusDistance', u.focus);
@@ -558,29 +539,25 @@ export class PostEffects {
         this._shaderManager.setUniform('u_cocScale', u.scale);
         this._shaderManager.setUniform('u_maxCocPx', this.dofMaxBlur);
         this._shaderManager.setUniform('u_srcTexelSize', [1 / this._host.renderWidth, 1 / this._host.renderHeight]);
-        cocPass.setBindGroup(0, this._bindGroups.textureGroup(cocPipeline, 0, [source.colors[0], depth]));
-        this._passes.drawFullscreen(cocPass);
-        this._passes.endFullscreenPass(cocPass);
+        this._passes.drawFullscreenAndEnd(cocPass);
 
         // 2. The bokeh itself.
         this._passes.scope('dof.gather');
         const gatherPass = this._passes.beginFullscreenPass(bokeh.renderTarget, 'dof.gather', true,
                                                      undefined, false);
-        const gatherPipeline = this._pipelines.fullscreen('dofGather', DofGatherProgram);
-        gatherPass.setPipeline(gatherPipeline);
+        this._fullscreen.bind(gatherPass, 'dofGather', DofGatherProgram, [coc.colors[0]]);
         // The clamp expressed in the grid this pass works in, which is half the render resolution.
         this._shaderManager.setUniform('u_maxCocHalfPx', this.dofMaxBlur * 0.5);
         this._shaderManager.setUniform('u_texelSize', [1 / coc.width, 1 / coc.height]);
-        gatherPass.setBindGroup(0, this._bindGroups.textureGroup(gatherPipeline, 0, [coc.colors[0]]));
-        this._passes.drawFullscreen(gatherPass);
-        this._passes.endFullscreenPass(gatherPass);
+        this._passes.drawFullscreenAndEnd(gatherPass);
 
         // 3. Back over the sharp image, with the CoC recomputed at full resolution so the boundary
         //    between sharp and blurred does not land on the half-res grid.
         this._passes.scope('dof.composite');
         const outPass = this._passes.beginFullscreenPass(target.renderTarget, 'dof.composite', true);
-        const outPipeline = this._pipelines.fullscreen('dofComposite', DofCompositeProgram);
-        outPass.setPipeline(outPipeline);
+        this._fullscreen.bind(outPass, 'dofComposite', DofCompositeProgram, [
+            source.colors[0], bokeh.colors[0], depth,
+        ]);
         this._shaderManager.setUniform('u_near', this._view.camera.near);
         this._shaderManager.setUniform('u_far', this._view.camera.far);
         this._shaderManager.setUniform('u_focusDistance', u.focus);
@@ -588,11 +565,7 @@ export class PostEffects {
         this._shaderManager.setUniform('u_focalLength', u.focal);
         this._shaderManager.setUniform('u_cocScale', u.scale);
         this._shaderManager.setUniform('u_maxCocPx', this.dofMaxBlur);
-        outPass.setBindGroup(0, this._bindGroups.textureGroup(outPipeline, 0, [
-            source.colors[0], bokeh.colors[0], depth,
-        ]));
-        this._passes.drawFullscreen(outPass);
-        this._passes.endFullscreenPass(outPass);
+        this._passes.drawFullscreenAndEnd(outPass);
     }
 
     /**
@@ -603,8 +576,7 @@ export class PostEffects {
         // 1. Trace the ghosts. Reads the chain image itself, so anything occluded throws no flare.
         const genPass = this._passes.beginFullscreenPass(scratch.renderTarget, 'lensFlare', true,
                                                   undefined, false);
-        const genPipeline = this._pipelines.fullscreen('lensFlare', LensFlareProgram);
-        genPass.setPipeline(genPipeline);
+        this._fullscreen.bind(genPass, 'lensFlare', LensFlareProgram, [target.colors[0]]);
         // The threshold is on the EXPOSED image, as bloom's is, so it means the same brightness on screen in
         // a sunlit field and in a cave; the buffer is pre-exposure, so it is uploaded divided back out.
         this._shaderManager.setUniform('u_flareThreshold', this.lensFlareThreshold / Math.max(1e-8, this._view.exposure));
@@ -614,25 +586,19 @@ export class PostEffects {
         this._shaderManager.setUniform('u_flareDispersal', PostEffects.LENS_FLARE_DISPERSAL);
         this._shaderManager.setUniform('u_flareHaloWidth', this.lensFlareHaloWidth);
         this._shaderManager.setUniform('u_flareChromatic', PostEffects.LENS_FLARE_CHROMATIC);
-        genPass.setBindGroup(0, this._bindGroups.textureGroup(genPipeline, 0, [target.colors[0]]));
-        this._passes.drawFullscreen(genPass);
-        this._passes.endFullscreenPass(genPass);
+        this._passes.drawFullscreenAndEnd(genPass);
 
         // 2. Add it back, modulated by the dirt overlay. Additive, so the pass returns a contribution
         // and never reads its own destination — which is what makes the in-place declaration honest.
         const dirt = this._lensDirtSource();
         const upPass = this._passes.beginFullscreenPass(target.renderTarget, 'lensFlareComposite', false,
                                                  undefined, false);
-        const upPipeline = this._pipelines.fullscreen('lensFlareComposite', LensFlareCompositeProgram,
-                                                    ADDITIVE_BLEND);
-        upPass.setPipeline(upPipeline);
+        this._fullscreen.bind(upPass, 'lensFlareComposite', LensFlareCompositeProgram, [
+            scratch.colors[0], dirt ?? this._bindGroups.fallbackTexture,
+        ], ADDITIVE_BLEND);
         this._shaderManager.setUniform('u_flareIntensity', this.lensFlareIntensity);
         this._shaderManager.setUniform('u_dirtIntensity', this._lensDirtStrength(dirt));
-        upPass.setBindGroup(0, this._bindGroups.textureGroup(upPipeline, 0, [
-            scratch.colors[0], dirt ?? this._bindGroups.fallbackTexture,
-        ]));
-        this._passes.drawFullscreen(upPass);
-        this._passes.endFullscreenPass(upPass);
+        this._passes.drawFullscreenAndEnd(upPass);
 
         // Restored by hand, as god rays does: the passes that follow are still on the legacy path and
         // enable BLEND without setting the function, so they inherit whatever was left here.
@@ -640,41 +606,34 @@ export class PostEffects {
         this._host.restoreDefaultBlend();
     }
 
-    /** Lens fall-off toward the corners, multiplicative on the linear-HDR chain. */
     public fxaaPass(source: Framebuffer, target: Framebuffer): void {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'fxaa', true);
-        const pipeline = this._pipelines.fullscreen('fxaa', FxaaProgram);
-        pass.setPipeline(pipeline);
+        this._fullscreen.bind(pass, 'fxaa', FxaaProgram, [source.colors[0]]);
         this._shaderManager.setUniform('u_texelSize', [1 / Math.max(1, this._host.renderWidth), 1 / Math.max(1, this._host.renderHeight)]);
         this._shaderManager.setUniform('u_exposure', this._view.exposure);
         this._shaderManager.setUniform('u_edgeThreshold', this.fxaaEdgeThreshold);
         this._shaderManager.setUniform('u_subpixel', this.fxaaSubpixel);
         this._shaderManager.setUniform('u_searchSteps', FXAA_SEARCH_STEPS[this.fxaaQuality]);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [source.colors[0]]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
     }
 
+    /** Lens fall-off toward the corners, multiplicative on the linear-HDR chain. */
     public vignettePass(source: Framebuffer, target: Framebuffer): void {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'vignette', true);
-        const pipeline = this._pipelines.fullscreen('vignette', VignetteProgram);
-        pass.setPipeline(pipeline);
+        this._fullscreen.bind(pass, 'vignette', VignetteProgram, [source.colors[0]]);
         this._shaderManager.setUniform('u_vignetteStrength', this.vignetteStrength);
         this._shaderManager.setUniform('u_vignetteRoundness', this.vignetteRoundness);
         this._shaderManager.setUniform('u_vignetteSmoothness', this.vignetteSmoothness);
         // The RENDER aspect, not the canvas: internal buffers follow `renderScale` and the present
         // pass upscales, so a canvas-derived ratio would skew the ellipse at any scale but 1.
         this._shaderManager.setUniform('u_aspect', this._host.renderWidth / Math.max(1, this._host.renderHeight));
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [source.colors[0]]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
     }
 
     /** Film grain, animated and midtone-weighted. The last thing in the lens; see filmGrain.wgsl. */
     public filmGrainPass(source: Framebuffer, target: Framebuffer): void {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'filmGrain', true);
-        const pipeline = this._pipelines.fullscreen('filmGrain', FilmGrainProgram);
-        pass.setPipeline(pipeline);
+        this._fullscreen.bind(pass, 'filmGrain', FilmGrainProgram, [source.colors[0]]);
         this._shaderManager.setUniform('u_grainIntensity', this.filmGrainIntensity);
         this._shaderManager.setUniform('u_grainSize', this.filmGrainSize);
         this._shaderManager.setUniform('u_grainColored', this.filmGrainColored ? 1 : 0);
@@ -683,19 +642,14 @@ export class PostEffects {
         this._shaderManager.setUniform('u_time', performance.now() * 0.001);
         this._shaderManager.setUniform('u_resolution', [this._host.renderWidth, this._host.renderHeight]);
         this._shaderManager.setUniform('u_exposure', this._view.exposure);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [source.colors[0]]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
     }
 
     public chromaticAberrationPass(source: Framebuffer, target: Framebuffer): void {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'chromatic', true);
-        const pipeline = this._pipelines.fullscreen('chromaticAberration', ChromaticAberrationProgram);
-        pass.setPipeline(pipeline);
+        this._fullscreen.bind(pass, 'chromaticAberration', ChromaticAberrationProgram, [source.colors[0]]);
         this._shaderManager.setUniform('u_strength', this.chromaticAberrationStrength);
         this._shaderManager.setUniform('u_aspect', this._host.renderWidth / Math.max(1, this._host.renderHeight));
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [source.colors[0]]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
     }
 }

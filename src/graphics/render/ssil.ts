@@ -13,6 +13,7 @@ import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
 import type { TemporalPasses } from './temporal';
 import { ShaderManager } from '../systems/shaderManager';
+import type { FullscreenPasses } from './fullscreenPasses';
 
 /** What SsilPasses reads from the renderer that owns it, while those members still live there. */
 export interface SsilPassesHost {
@@ -38,7 +39,8 @@ export class SsilPasses {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
-                private readonly _temporal: TemporalPasses) {}
+                private readonly _temporal: TemporalPasses,
+                private readonly _fullscreen: FullscreenPasses) {}
 
     // The trace and blur targets. The `ssao*` names are the settings' and the profiler scopes', kept so
     // saved projects load.
@@ -183,11 +185,9 @@ export class SsilPasses {
         this._ssilDepthParams[2] = ip[11]; this._ssilDepthParams[3] = ip[15];
 
         const trace = this._passes.beginFullscreenPass(this.ssaoFBO.renderTarget, 'ssao', true, undefined, false);
-        const tracePipeline = this._pipelines.fullscreen('ssil', SsilProgram);
-        trace.setPipeline(tracePipeline);
-        trace.setBindGroup(0, this._bindGroups.textureGroup(tracePipeline, 0, [
+        this._fullscreen.bind(trace, 'ssil', SsilProgram, [
             this._targets.gBuffer.colors[1], this._targets.gBuffer.depth, radiance.colors[0],
-        ]));
+        ]);
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._ssilProj);
         this._shaderManager.setUniform('u_invProjection', this._invProjection);
@@ -207,8 +207,7 @@ export class SsilPasses {
         // A cap on the screen-space search, so a surface right in front of the camera does not send its
         // samples across the whole frame and through every cache line on the way.
         this._shaderManager.setUniform('u_maxRadiusPx', Math.max(16, this._host.renderHeight * 0.15));
-        this._passes.drawFullscreen(trace);
-        this._passes.endFullscreenPass(trace);
+        this._passes.drawFullscreenAndEnd(trace);
         this.ssaoResult = this.ssaoFBO;
 
         // Temporal accumulation, which also filters spatially. Needs last frame's depth for its
@@ -220,11 +219,9 @@ export class SsilPasses {
             const src = this.ssilHistory.read;
             const dst = this.ssilHistory.write;
             const pass = this._passes.beginFullscreenPass(dst.renderTarget, 'ssao.temporal', true, undefined, false);
-            const pipeline = this._pipelines.fullscreen('ssilTemporal', SsilTemporalProgram);
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
+            this._fullscreen.bind(pass, 'ssilTemporal', SsilTemporalProgram, [
                 this.ssaoFBO.colors[0], src.colors[0], radiance.colors[0], this._targets.gBuffer.depth,
-            ]));
+            ]);
             this._shaderManager.setUniform('u_invProjection', this._invProjection);
             this._shaderManager.setUniform('u_viewToPrevClip', this._ssilViewToPrevClip);
             this._shaderManager.setUniform('u_viewToPrevView', this._ssilViewToPrevView);
@@ -232,8 +229,7 @@ export class SsilPasses {
             this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
             this._shaderManager.setUniform('u_feedback', SsilPasses.SSIL_FEEDBACK);
             this._shaderManager.setUniform('u_historyValid', historyValid);
-            this._passes.drawFullscreen(pass);
-            this._passes.endFullscreenPass(pass);
+            this._passes.drawFullscreenAndEnd(pass);
             this.ssilHistory.swap();
             this.ssilHistoryFrame = this._view.frameIndex;
             this.ssaoResult = dst;
@@ -245,15 +241,12 @@ export class SsilPasses {
         if (!accumulated && this._passes.beginPass('ssao.blur')) {
             const pass = this._passes.beginFullscreenPass(this.ssaoBlurFBO.renderTarget, 'ssao.blur', true,
                                                    undefined, false);
-            const pipeline = this._pipelines.fullscreen('ssilBlur', SsilBlurProgram);
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
+            this._fullscreen.bind(pass, 'ssilBlur', SsilBlurProgram, [
                 this.ssaoResult.colors[0], this._targets.gBuffer.colors[1], this._targets.gBuffer.depth,
-            ]));
+            ]);
             this._shaderManager.setUniform('u_depthParams', this._ssilDepthParams);
             this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
-            this._passes.drawFullscreen(pass);
-            this._passes.endFullscreenPass(pass);
+            this._passes.drawFullscreenAndEnd(pass);
             this.ssaoResult = this.ssaoBlurFBO;
         }
 
@@ -271,17 +264,14 @@ export class SsilPasses {
         if (!this._passes.beginPass('ssao.history')) return;
         const target = this.ssilRadianceFBO;
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'ssao.history', true, undefined, false);
-        const pipeline = this._pipelines.fullscreen('ssilHistory', SsilHistoryProgram);
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
+        this._fullscreen.bind(pass, 'ssilHistory', SsilHistoryProgram, [
             this._targets.scene.colors[0], this._temporal.depthSource(),
-        ]));
+        ]);
         // The depth snapshot was rasterized through this frame's jittered projection.
         mat4.invert(this._invProjection, this._host.jitteredCameraProj);
         this._projection.uvConsuming(this._invProjection, this._invProjection);
         this._shaderManager.setUniform('u_invProjection', this._invProjection);
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
         this.ssilRadianceFrame = this._view.frameIndex;
         // Put back what the overlay passes below expect, as the TAA resolve does.
         this._targets.scene.bind();

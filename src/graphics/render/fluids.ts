@@ -21,6 +21,7 @@ import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
+import type { FullscreenPasses } from './fullscreenPasses';
 
 /** What FluidVolumePasses reads from the renderer that owns it, while those members still live there. */
 export interface FluidVolumePassesHost {
@@ -53,7 +54,8 @@ export class FluidVolumePasses {
                 private readonly _passes: PassEncoder,
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
-                private readonly _projection: ViewProjection) {}
+                private readonly _projection: ViewProjection,
+                private readonly _fullscreen: FullscreenPasses) {}
 
     /**
      * Draw every enabled {@link FluidVolumeNode} over the scene buffer, in three steps:
@@ -190,19 +192,16 @@ export class FluidVolumePasses {
         if (temporal) {
             const prev = this._fluidHistory.read;
             const pass = this._passes.beginFullscreenPass(this._fluidHistory.write.renderTarget, 'fluidVolumes.resolve', false, undefined, false);
-            const pipeline = this._pipelines.fullscreen('fluidVolumeResolve', FluidVolumeResolveProgram);
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
+            this._fullscreen.bind(pass, 'fluidVolumeResolve', FluidVolumeResolveProgram, [
                 this._fluidTraceFBO!.colors[0], this._fluidTraceFBO!.colors[1], prev.colors[0],
-            ]));
+            ]);
             sm.bind('fluidVolumeResolve');
             sm.setUniform('u_invViewProj', this._view.invViewProjStable);
             sm.setUniform('u_prevViewProj', this._projection.uvProducing(this._view.prevViewProj));
             // Moving or editing: lean on the new samples so nothing smears; still: accumulate.
             sm.setUniform('u_feedback', moving || lead.interacting ? 0.6 : 0.9);
             sm.setUniform('u_historyValid', this._fluidHistory.valid && this._view.hasPrevViewProj ? 1 : 0);
-            this._passes.drawFullscreen(pass);
-            this._passes.endFullscreenPass(pass);
+            this._passes.drawFullscreenAndEnd(pass);
             this._fluidHistory.swap();
             image = this._fluidHistory.read.colors[0];
         }
@@ -211,13 +210,10 @@ export class FluidVolumePasses {
         GLState.blend(true);
         if (gl) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'fluidVolumes.composite', false, undefined, false);
-        const pipeline = this._pipelines.fullscreen('fluidVolumeComposite', FluidVolumeCompositeProgram, VolumetricCloudPasses.CLOUD_BLEND);
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [image, this._fluidTraceFBO!.colors[1], depth]));
+        this._fullscreen.bind(pass, 'fluidVolumeComposite', FluidVolumeCompositeProgram, [image, this._fluidTraceFBO!.colors[1], depth], VolumetricCloudPasses.CLOUD_BLEND);
         sm.bind('fluidVolumeComposite');
         sm.setUniform('u_invViewProj', this._view.invViewProjStable);
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
 
         this._host.restoreDefaultBlend();
         GLState.blend(false);

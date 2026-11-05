@@ -50,6 +50,7 @@ import { FrameTargets } from './render/frameTargets';
 import { PassEncoder } from './render/passEncoder';
 import { PipelineCache } from './render/pipelineCache';
 import { BindGroupCache } from './render/bindGroups';
+import { FullscreenPasses } from './render/fullscreenPasses';
 import { MaterialBinder } from './render/materialBinder';
 import { ViewProjection } from './render/viewProjection';
 import { QUALITY_TIERS, FXAA_SEARCH_STEPS, clampFinite } from './render/settingsTypes';
@@ -142,6 +143,8 @@ export class Renderer {
     private readonly _pipelines: PipelineCache;
     /** Bind groups over textures and materials, cached by what they bind (render/bindGroups.ts). */
     private readonly _bindGroups: BindGroupCache;
+    /** The common body of a fullscreen pass: pipeline plus group-0 textures (render/fullscreenPasses.ts). */
+    private readonly _fullscreen: FullscreenPasses;
     /** Material uniforms, the despawn dissolve and the camera hole, per draw (render/materialBinder.ts). */
     private readonly _materials: MaterialBinder;
     /** Clip-space Z, the TAA jitter, the coplanar depth nudge and the uv flips (render/viewProjection.ts). */
@@ -305,6 +308,7 @@ export class Renderer {
             pointShadows: () => this._shadows.pointShadowFBO.texture,
             lightGrid: () => this._lighting.lightGrid.texture,
         }, this._targets);
+        this._fullscreen = new FullscreenPasses(this._pipelines, this._bindGroups);
         this._materials = new MaterialBinder({
             specularAa: () => this._modelDraw.specularAaEnabled,
             renderWidth: () => this._renderWidth,
@@ -326,11 +330,11 @@ export class Renderer {
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
             uploadBoneMatrices: (...args: Parameters<ModelDraw['uploadBoneMatrices']>) => renderer._modelDraw.uploadBoneMatrices(...args),
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen);
         this._autoExposure = new AutoExposure({
             get presentTarget() { return renderer._capture.presentTarget; },
             get ev100() { return renderer.ev100; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._fullscreen);
         this._post = new PostEffects({
             cloudiness: (...args: Parameters<LightingPasses['cloudiness']>) => renderer._lighting.cloudiness(...args),
             get passEnabled() { return renderer._passEnabled; },
@@ -338,7 +342,7 @@ export class Renderer {
             get renderWidth() { return renderer._renderWidth; },
             restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
             sunScreenInfo: (...args: Parameters<SkyPasses['sunScreenInfo']>) => renderer._sky.sunScreenInfo(...args),
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._temporal);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._temporal, this._fullscreen);
         this._clouds = new VolumetricCloudPasses({
             get clearSkySH() { return renderer._sky.clearSkySH; },
             get clearSkySHValid() { return renderer._sky.clearSkySHValid; },
@@ -353,7 +357,7 @@ export class Renderer {
             get renderWidth() { return renderer._renderWidth; },
             restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen);
         this._decals = new DecalPasses({
             cullFor: ModelDraw.cullFor.bind(Renderer),
             get deferred() { return renderer._deferred; },
@@ -380,7 +384,7 @@ export class Renderer {
             restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
             get skySH() { return renderer._sky.skySH; },
             get skySHValid() { return renderer._sky.skySHValid; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen);
         this._particlePasses = new ParticlePasses({
             cloudGrade: (...args: Parameters<LightingPasses['cloudGrade']>) => renderer._lighting.cloudGrade(...args),
             dirOf: (...args: Parameters<LightingPasses['dirOf']>) => renderer._lighting.dirOf(...args),
@@ -447,7 +451,7 @@ export class Renderer {
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._temporal);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._temporal, this._fullscreen);
         this._lighting = new LightingPasses({
             get brdfFBO() { return renderer._sky.brdfFBO; },
             cloudSkyFrontCube: () => renderer._sky.cloudSkyFrontCube(),
@@ -466,7 +470,7 @@ export class Renderer {
             restoreDefaultBlend: () => renderer._restoreDefaultBlend(),
             get thumbnailMode() { return renderer._thumbnailMode; },
             captureProbe: (scene, probe) => renderer._capture.captureProbe(scene, probe),
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._lighting);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._lighting, this._fullscreen);
         this._modelDraw = new ModelDraw(this._passes, this._materials);
         this._geometry = new GeometryPass(this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._foliage, this._visibility, this._lighting, this._modelDraw);
         this._forward = new ForwardPass({
@@ -481,18 +485,18 @@ export class Renderer {
         this._overlays = new EditorOverlays({
             restoreDefaultBlend: () => renderer._restoreDefaultBlend(),
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._post, this._decals, this._sprites);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._post, this._decals, this._sprites, this._fullscreen);
         this._debugViews = new DebugViews({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._temporal, this._post, this._foliage, this._shadows, this._ssil);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._temporal, this._post, this._foliage, this._shadows, this._ssil, this._fullscreen);
         this._capture = new Capture({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             resizeBuffers: (width, height) => renderer._resizeBuffers(width, height),
             get clearColor() { return renderer.clearColor; },
             render: (scene) => renderer.render(scene),
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._temporal, this._post, this._shadows, this._lighting, this._sky, this._forward);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._temporal, this._post, this._shadows, this._lighting, this._sky, this._forward, this._fullscreen);
         this._stats = new RenderStats({
             get canvas() { return renderer._canvas; },
             get deferred() { return renderer._deferred; },
@@ -1706,11 +1710,8 @@ export class Renderer {
                 // The only `compose` label: the plain scene copy. PASS_LABEL_TO_SCOPE files it under
                 // `present`, which is the scope this node already opened.
                 const pass = this._passes.beginFullscreenPass(ctx.target(head).renderTarget, 'compose', true);
-                const pipeline = this._pipelines.fullscreen('screen', ScreenProgram);
-                pass.setPipeline(pipeline);
-                pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._targets.scene.colors[0]]));
-                this._passes.drawFullscreen(pass);
-                this._passes.endFullscreenPass(pass);
+                this._fullscreen.bind(pass, 'screen', ScreenProgram, [this._targets.scene.colors[0]]);
+                this._passes.drawFullscreenAndEnd(pass);
             },
         });
 

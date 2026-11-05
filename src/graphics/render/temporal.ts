@@ -20,6 +20,7 @@ import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
+import type { FullscreenPasses } from './fullscreenPasses';
 
 /** What TemporalPasses reads from the renderer that owns it, while those members still live there. */
 export interface TemporalPassesHost {
@@ -48,7 +49,8 @@ export class TemporalPasses {
                 private readonly _passes: PassEncoder,
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
-                private readonly _projection: ViewProjection) {}
+                private readonly _projection: ViewProjection,
+                private readonly _fullscreen: FullscreenPasses) {}
 
     // Camera-reprojection motion blur (UE5-style tile reconstruction). Off by default.
     public motionBlurEnabled: boolean = true;
@@ -321,15 +323,13 @@ export class TemporalPasses {
         if (!this.taaSupported) { this._view.taaJitterActive = false; return; }
 
         const pass = this._passes.beginFullscreenPass(this.taaHistory.write.renderTarget, 'taa', true);
-        const pipeline = this._pipelines.fullscreen('taaResolve', TaaResolveProgram);
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
+        this._fullscreen.bind(pass, 'taaResolve', TaaResolveProgram, [
             this._targets.scene.colors[0],
             this.taaHistory.read.colors[0],
             this._targets.velocity.colors[0],
             this.depthSource(),
             this._taaPrevDepthFBO.depth,
-        ]));
+        ]);
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
         this._shaderManager.setUniform('u_resolution', [w, h]);
         this._shaderManager.setUniform('u_near', this._view.camera.near);
@@ -342,8 +342,7 @@ export class TemporalPasses {
         this._shaderManager.setUniform('u_varianceGamma', this.taaClipStrength);
         this._shaderManager.setUniform('u_historyValid', this.taaHistory.valid && this._view.hasPrevViewProj);
         this._shaderManager.setUniform('u_historyFilter', this.taaHistoryFilter === 'catmullRom' ? 1 : 0);
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
 
         // Back over the scene buffer — sharpened on the way when asked. The HISTORY keeps the
         // unsharpened resolve: sharpening inside the feedback loop would compound every frame.
@@ -364,8 +363,7 @@ export class TemporalPasses {
             this._shaderManager.setUniform('u_sharpness', this.taaSharpness);
             this._shaderManager.setUniform('u_exposure', this._view.exposure);
         }
-        this._passes.drawFullscreen(copy);
-        this._passes.endFullscreenPass(copy);
+        this._passes.drawFullscreenAndEnd(copy);
 
         // The depth that produced the history just written, kept for next frame's disocclusion test.
         // AFTER the resolve, which still had to read the previous contents. A copy rather than a pass:
@@ -389,9 +387,7 @@ export class TemporalPasses {
     // chunks/motionBlurShutter.wgsl for why the stored form is the unblurred one.
     private _velocityPass(): void {
         const pass = this._passes.beginFullscreenPass(this._targets.velocity.renderTarget, 'velocity', true);
-        const pipeline = this._pipelines.fullscreen('motionBlurVelocity', MotionBlurVelocityProgram);
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this.depthSource()]));
+        this._fullscreen.bind(pass, 'motionBlurVelocity', MotionBlurVelocityProgram, [this.depthSource()]);
         // `_projection.uvProducing` hands back ONE shared scratch, so each result needs a home before the next
         // call — the same two the object pass below already uses.
         mat4.copy(this._uvViewProjScratch, this._projection.uvProducing(this._view.viewProj));
@@ -401,8 +397,7 @@ export class TemporalPasses {
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
         this._shaderManager.setUniform('u_viewProj', this._uvViewProjScratch);
         this._shaderManager.setUniform('u_prevViewProj', this._uvPrevViewProjScratch);
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
+        this._passes.drawFullscreenAndEnd(pass);
 
         // Its own pass over the same colour buffer, with the opaque depth attached so the draws can
         // depth-test. A second pass rather than more draws in the one above: that one owns no depth,
@@ -571,34 +566,26 @@ export class TemporalPasses {
         // scene render — see `produceVelocity` — and it holds the RAW delta, so the shutter scale and
         // the one-tile cap are applied here, inside the tile loop, before the magnitude compare.
         const tilePass = this._passes.beginFullscreenPass(this.velocityTileFBO.renderTarget, 'velocity.tile', true);
-        const tilePipeline = this._pipelines.fullscreen('motionBlurTileMax', MotionBlurTileMaxProgram);
-        tilePass.setPipeline(tilePipeline);
-        tilePass.setBindGroup(0, this._bindGroups.textureGroup(tilePipeline, 0, [this._targets.velocity.colors[0]]));
+        this._fullscreen.bind(tilePass, 'motionBlurTileMax', MotionBlurTileMaxProgram, [this._targets.velocity.colors[0]]);
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
         this._shaderManager.setUniform('u_screenSize', [w, h]);
         this._shaderManager.setUniform('u_intensity', this.motionBlurIntensity);
         this._shaderManager.setUniform('u_maxVelocityPx', this.motionBlurMaxLength);
         this._shaderManager.setUniform('u_tileSize', K);
-        this._passes.drawFullscreen(tilePass);
-        this._passes.endFullscreenPass(tilePass);
+        this._passes.drawFullscreenAndEnd(tilePass);
 
         // 2) NeighborMax: 3x3 dilation of the tile velocities.
         const nbPass = this._passes.beginFullscreenPass(this.velocityNeighborFBO.renderTarget, 'velocity.neighbor', true);
-        const nbPipeline = this._pipelines.fullscreen('motionBlurNeighborMax', MotionBlurNeighborMaxProgram);
-        nbPass.setPipeline(nbPipeline);
-        nbPass.setBindGroup(0, this._bindGroups.textureGroup(nbPipeline, 0, [this.velocityTileFBO.colors[0]]));
+        this._fullscreen.bind(nbPass, 'motionBlurNeighborMax', MotionBlurNeighborMaxProgram, [this.velocityTileFBO.colors[0]]);
         this._shaderManager.setUniform('u_tileTexelSize', [1 / this.velocityTileFBO.width, 1 / this.velocityTileFBO.height]);
-        this._passes.drawFullscreen(nbPass);
-        this._passes.endFullscreenPass(nbPass);
+        this._passes.drawFullscreenAndEnd(nbPass);
 
         // 3) Gather: reconstruct the blurred image into the head of the chain.
         const gatherPass = this._passes.beginFullscreenPass(target.renderTarget, 'motionBlur', true);
-        const gatherPipeline = this._pipelines.fullscreen('motionBlur', MotionBlurGatherProgram);
-        gatherPass.setPipeline(gatherPipeline);
-        gatherPass.setBindGroup(0, this._bindGroups.textureGroup(gatherPipeline, 0, [
+        this._fullscreen.bind(gatherPass, 'motionBlur', MotionBlurGatherProgram, [
             this._targets.scene.colors[0], this._targets.velocity.colors[0],
             this.velocityNeighborFBO.colors[0], this.depthSource(),
-        ]));
+        ]);
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
         this._shaderManager.setUniform('u_screenSize', [w, h]);
         // Same shutter the TileMax pass applied, from the same two uniforms: the per-pixel and
@@ -610,7 +597,6 @@ export class TemporalPasses {
         this._shaderManager.setUniform('u_mbJitter', this.motionBlurJitter);
         this._shaderManager.setUniform('u_near', this._view.camera.near);
         this._shaderManager.setUniform('u_far', this._view.camera.far);
-        this._passes.drawFullscreen(gatherPass);
-        this._passes.endFullscreenPass(gatherPass);
+        this._passes.drawFullscreenAndEnd(gatherPass);
     }
 }
