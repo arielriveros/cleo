@@ -1152,6 +1152,7 @@ class WebGPUCommandEncoder implements CommandEncoder {
                 ...(loadOp === 'clear'
                     ? { clearValue: toGpuColor(declared?.clearValue) }
                     : {}),
+                ...(declared?.depthSlice !== undefined ? { depthSlice: declared.depthSlice } : {}),
             };
         });
 

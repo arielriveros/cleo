@@ -272,9 +272,6 @@ export class Texture {
      */
     public get downgraded(): boolean { return this._downgraded; }
 
-    /** The device-owned handle. Everything below still binds and uploads through it directly. */
-    private get _texture(): WebGLTexture { return (this._gpu as WebGL2Texture).handle; }
-
     /** Bind for sampling at a texture UNIT. WebGL2 only — WebGPU binds through bind groups. */
     public bind(slot: number = 0): void {
         if (device.backend !== 'webgl2') return;
@@ -524,7 +521,6 @@ export class Texture {
         this._sourceUri = bytesToDataUrl(this._source.bytes, this._source.mime);
         return this._sourceUri;
     }
-    public get texture(): WebGLTexture { return this._texture; }
 
     /** The device-owned texture, typed by the RHI. Prefer this over `gpu`, which casts to WebGL2. */
     public get rhiTexture(): RhiTexture { return this._gpu; }

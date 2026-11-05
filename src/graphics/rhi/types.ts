@@ -403,6 +403,11 @@ export interface ColorAttachmentDescriptor {
     storeOp: StoreOp;
     /** RGBA. Only read when `loadOp` is `'clear'`. */
     clearValue?: [number, number, number, number];
+    /**
+     * The z slice to render into when the attachment is a 3D texture's view — required there, as WebGPU
+     * requires it, and set per pass: a volume baked slice by slice is one target and one pass per slice.
+     */
+    depthSlice?: number;
 }
 
 export interface DepthAttachmentDescriptor {

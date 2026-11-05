@@ -241,6 +241,17 @@ export class WebGL2Device implements Device {
         if (layer !== undefined && target.framebuffer && layered)
             target.framebuffer.attachDepthLayer(layered, layer);
 
+        // A 3D colour attachment renders into the slice the pass names, by re-pointing the attachment as
+        // the depth layer above is re-pointed.
+        if (target.framebuffer) {
+            for (const attachment of descriptor.colorAttachments) {
+                if (attachment.depthSlice === undefined) continue;
+                const view = target.colorViews[attachment.target];
+                if (view) target.framebuffer.attachColorLayer(attachment.target, view.texture.handle,
+                                                              attachment.depthSlice, view.baseMipLevel);
+            }
+        }
+
         // The TARGET's colour count, never the descriptor's — a descriptor names only the attachments
         // whose load op it cares about, and taking the count from it drops the rest of a G-buffer.
         if (target.framebuffer) target.framebuffer.setDrawBuffers(target.colorCount);

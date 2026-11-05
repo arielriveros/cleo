@@ -19,7 +19,7 @@ const MIGRATING: Readonly<Record<string, readonly string[]>> = {
     'src/graphics/mesh.ts': ['gl', 'GLState', 'glDevice', 'WebGLType', 'backendImport', 'backendName'],
     'src/graphics/particles/particleRenderer.ts': ['backendName'],
     'src/graphics/render/capture.ts': ['GLState', 'backendName', 'backendImport'],
-    'src/graphics/render/clouds.ts': ['gl', 'GLState', 'glDevice', 'backendImport'],
+    'src/graphics/render/clouds.ts': ['gl', 'GLState', 'backendImport'],
     'src/graphics/render/decals.ts': ['GLState', 'backendImport'],
     'src/graphics/render/editorOverlays.ts': ['gl', 'GLState', 'backendImport'],
     'src/graphics/render/fluids.ts': ['gl', 'GLState', 'backendImport'],
@@ -43,7 +43,7 @@ const MIGRATING: Readonly<Record<string, readonly string[]>> = {
                                  'backendImport', 'backendName'],
     'src/graphics/systems/customShaders.ts': ['backendImport', 'backendName'],
     'src/graphics/systems/texturePacker.ts': ['backendName'],
-    'src/graphics/texture.ts': ['WebGLType', 'backendImport', 'backendName'],
+    'src/graphics/texture.ts': ['backendImport', 'backendName'],
     'src/graphics/tilemap/tileMesh.ts': ['gl', 'GLState', 'glDevice', 'WebGLType', 'backendImport', 'backendName'],
 };
 
