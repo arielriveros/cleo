@@ -90,7 +90,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // semantics are unchanged: the overlay is composited after the post chain, so it is further
             // from the jitter than anything else here.
             'nudgedProjection',
-            '_overdrawPass',
+            'overdrawPass',
             // GPU particles: drawn after the transparents, in both pipelines and in the 2D pass.
             'particleDrawFrame',
             // Smoke-and-fire volumes, ray-marched over the resolved image (`FluidVolumePasses.renderFluidVolumes`).
