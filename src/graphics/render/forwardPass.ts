@@ -9,10 +9,12 @@ import { Scene } from '../../core/scene/scene';
 import { Framebuffer } from '../framebuffer';
 import { RenderPass } from '../gpuProfiler';
 import { CustomMaterial } from '../material';
+import type { Material } from '../material';
 import { usesParallax } from '../programVariants';
 import { frameStats } from '../renderStats';
 import type { RenderPassEncoder } from '../rhi/device';
 import { DEFAULT_BLEND } from '../rhi/types';
+import type { ShaderResource } from '../rhi/types';
 import { customShaderModules, usedResources, customShaderResources } from '../systems/customShaders';
 import { GLState } from '../systems/glState';
 import { Texture } from '../texture';
@@ -95,6 +97,17 @@ export class ForwardPass {
 
     /** The forward draw's last pipeline per material. See PipelineMemo. */
     private readonly _pipelineMemo = new PipelineMemo();
+
+    // The draw `_bindMaterial` serves, set by `renderModel` around its submesh loop: one callback bound
+    // for the pass's life instead of a closure built per draw.
+    private _drawPass: RenderPassEncoder | null = null;
+    private _drawNode: ModelNode | null = null;
+    private _drawShader = '';
+    private _drawReflection: { resources: readonly ShaderResource[] } | undefined = undefined;
+    private _drawViaRHI = false;
+    private _drawEnvCube: Texture | null = null;
+    private _drawAnimated = false;
+    private readonly _bindMaterial = (mat: Material): boolean => this._bindForwardMaterial(mat);
 
     // Node ids already warned about carrying a screen-space custom material on a mesh (once per node).
     private _warnedScreenMaterialMeshes: Set<string> = new Set();
@@ -512,79 +525,95 @@ export class ForwardPass {
         if (!viaRHI) GLState.blend(materialConfig.transparent === true);
 
         // Set material uniforms + bind textures, once per submesh.
-        this._modelDraw.drawSubmeshes(node, mat => {
-            // Terrain and custom materials keep the legacy path even inside an RHI pass: both bind only
-            // the textures they happen to have, and a bind group has to fill every binding the shader
-            // declares. They move when their material application does.
-            if (mat.type === 'terrain') {
-                for (const [name, value] of mat.properties) this._shaderManager.setUniform(name, value);
-                // The forward terrain twin needs the roughness filter flag too, or a probe capture
-                // shades terrain with a different NDF width than the frame it is a probe for. It does
-                // NOT need u_sunDirection: this pass reads the sun from its own light list.
-                this._shaderManager.setUniform('u_specularAA', this._modelDraw.specularAaEnabled);
-                if (!viaRHI) { this._materials.applyTerrain(mat); return false; }
-                const terrainPipeline = this._pipelines.memoized(this._pipelineMemo, mat, shaderType, reflection, {
-                    cullMode: ModelDraw.cullFor(mat.config.side),
-                    depthStencil: this.forwardDepthWrite ? DEPTH_WRITE : DEPTH_TEST,
-                    blend: materialConfig.transparent === true ? DEFAULT_BLEND : undefined,
-                    topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
-                    vertex: 'model',
-                    builtFor: 'terrain',
-                });
-                pass!.setPipeline(terrainPipeline);
-                pass!.setBindGroup(0, this._bindGroups.terrainGroup(terrainPipeline, mat));
-                if (this._bindGroups.declaresFrameLighting(terrainPipeline))
-                    pass!.setBindGroup(3, this._bindGroups.frameLightingGroup(terrainPipeline));
-                return true;
-            }
-            if (mat instanceof CustomMaterial) {
-                if (!viaRHI) { this._materials.applyCustom(mat); return false; }
-                this._materials.applyCustom(mat, true);
-                // See `_post.screenMaterialPass`. Absent on WebGL2 and for a material that could not
-                // translate; group 3 (the shadow maps) is bound below as for any lit program.
-                const customWgsl = customShaderModules(mat);
-                const customPipeline = this._pipelines.get(shaderType, {
-                    resources: usedResources(customShaderResources('forward', mat.uniforms),
-                                             customWgsl?.fragment, customWgsl?.vertex),
-                    ...(customWgsl ? { wgsl: customWgsl.fragment, entryPoints: { fragment: 'main' },
-                                       vertexWgsl: { wgsl: customWgsl.vertex,
-                                                     entryPoint: customWgsl.vertexEntry } } : {}),
-                }, {
-                    cullMode: ModelDraw.cullFor(mat.config.side),
-                    depthStencil: this.forwardDepthWrite ? DEPTH_WRITE : DEPTH_TEST,
-                    blend: materialConfig.transparent === true ? DEFAULT_BLEND : undefined,
-                    topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
-                    vertex: isAnimatedModel ? 'model+skin' : 'model',
-                    builtFor: node.model.material.type,   // skinned too — see `GeometryPass._drawGeometryNode`
-                });
-                pass!.setPipeline(customPipeline);
-                pass!.setBindGroup(0, this._bindGroups.customGroup(customPipeline, mat, envCube));
-                if (this._bindGroups.declaresFrameLighting(customPipeline))
-                    pass!.setBindGroup(3, this._bindGroups.frameLightingGroup(customPipeline));
-                return true;
-            }
-            if (!viaRHI) { this._materials.apply(mat); return false; }
+        this._drawPass = pass ?? null;
+        this._drawNode = node;
+        this._drawShader = shaderType;
+        this._drawReflection = reflection;
+        this._drawViaRHI = viaRHI;
+        this._drawEnvCube = envCube;
+        this._drawAnimated = isAnimatedModel;
+        this._modelDraw.drawSubmeshes(node, this._bindMaterial, pass);
+        this._drawPass = null;
+        this._drawNode = null;
+        this._drawEnvCube = null;
+    }
 
-            const pipeline = this._pipelines.memoized(this._pipelineMemo, mat, shaderType, reflection, {
+    /** Bind one submesh range's material for `renderModel`'s draw, whose state is in the `_draw*` fields. */
+    private _bindForwardMaterial(mat: Material): boolean {
+        const pass = this._drawPass, node = this._drawNode!, shaderType = this._drawShader;
+        const reflection = this._drawReflection, viaRHI = this._drawViaRHI, envCube = this._drawEnvCube;
+        const isAnimatedModel = this._drawAnimated, materialConfig = node.model.material.config;
+        // Terrain and custom materials keep the legacy path even inside an RHI pass: both bind only
+        // the textures they happen to have, and a bind group has to fill every binding the shader
+        // declares. They move when their material application does.
+        if (mat.type === 'terrain') {
+            for (const [name, value] of mat.properties) this._shaderManager.setUniform(name, value);
+            // The forward terrain twin needs the roughness filter flag too, or a probe capture
+            // shades terrain with a different NDF width than the frame it is a probe for. It does
+            // NOT need u_sunDirection: this pass reads the sun from its own light list.
+            this._shaderManager.setUniform('u_specularAA', this._modelDraw.specularAaEnabled);
+            if (!viaRHI) { this._materials.applyTerrain(mat); return false; }
+            const terrainPipeline = this._pipelines.memoized(this._pipelineMemo, mat, shaderType, reflection!, {
                 cullMode: ModelDraw.cullFor(mat.config.side),
-                // Depth writes follow the CALLER's state, not the material's, and are passed in rather
-                // than read from GLState — the descriptor must be a pure function of its arguments or
-                // the cache key is wrong.
+                depthStencil: this.forwardDepthWrite ? DEPTH_WRITE : DEPTH_TEST,
+                blend: materialConfig.transparent === true ? DEFAULT_BLEND : undefined,
+                topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
+                vertex: 'model',
+                builtFor: 'terrain',
+            });
+            pass!.setPipeline(terrainPipeline);
+            pass!.setBindGroup(0, this._bindGroups.terrainGroup(terrainPipeline, mat));
+            if (this._bindGroups.declaresFrameLighting(terrainPipeline))
+                pass!.setBindGroup(3, this._bindGroups.frameLightingGroup(terrainPipeline));
+            return true;
+        }
+        if (mat instanceof CustomMaterial) {
+            if (!viaRHI) { this._materials.applyCustom(mat); return false; }
+            this._materials.applyCustom(mat, true);
+            // See `_post.screenMaterialPass`. Absent on WebGL2 and for a material that could not
+            // translate; group 3 (the shadow maps) is bound below as for any lit program.
+            const customWgsl = customShaderModules(mat);
+            const customPipeline = this._pipelines.get(shaderType, {
+                resources: usedResources(customShaderResources('forward', mat.uniforms),
+                                         customWgsl?.fragment, customWgsl?.vertex),
+                ...(customWgsl ? { wgsl: customWgsl.fragment, entryPoints: { fragment: 'main' },
+                                   vertexWgsl: { wgsl: customWgsl.vertex,
+                                                 entryPoint: customWgsl.vertexEntry } } : {}),
+            }, {
+                cullMode: ModelDraw.cullFor(mat.config.side),
                 depthStencil: this.forwardDepthWrite ? DEPTH_WRITE : DEPTH_TEST,
                 blend: materialConfig.transparent === true ? DEFAULT_BLEND : undefined,
                 topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
                 vertex: isAnimatedModel ? 'model+skin' : 'model',
                 builtFor: node.model.material.type,   // skinned too — see `GeometryPass._drawGeometryNode`
             });
-            pass!.setPipeline(pipeline);
-            this._materials.applyProperties(mat);
-            pass!.setBindGroup(0, this._bindGroups.materialGroup(pipeline, mat, envCube));
-            // Group 3 when the program has one. The unlit Basic family does not sample shadows at all,
-            // so asking for a group it never declared is an error rather than an empty bind — the same
-            // rule WebGPU enforces through `layout: 'auto'`.
-            if (this._bindGroups.declaresFrameLighting(pipeline))
-                pass!.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline));
+            pass!.setPipeline(customPipeline);
+            pass!.setBindGroup(0, this._bindGroups.customGroup(customPipeline, mat, envCube));
+            if (this._bindGroups.declaresFrameLighting(customPipeline))
+                pass!.setBindGroup(3, this._bindGroups.frameLightingGroup(customPipeline));
             return true;
-        }, pass);
+        }
+        if (!viaRHI) { this._materials.apply(mat); return false; }
+
+        const pipeline = this._pipelines.memoized(this._pipelineMemo, mat, shaderType, reflection!, {
+            cullMode: ModelDraw.cullFor(mat.config.side),
+            // Depth writes follow the CALLER's state, not the material's, and are passed in rather
+            // than read from GLState — the descriptor must be a pure function of its arguments or
+            // the cache key is wrong.
+            depthStencil: this.forwardDepthWrite ? DEPTH_WRITE : DEPTH_TEST,
+            blend: materialConfig.transparent === true ? DEFAULT_BLEND : undefined,
+            topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
+            vertex: isAnimatedModel ? 'model+skin' : 'model',
+            builtFor: node.model.material.type,   // skinned too — see `GeometryPass._drawGeometryNode`
+        });
+        pass!.setPipeline(pipeline);
+        this._materials.applyProperties(mat);
+        pass!.setBindGroup(0, this._bindGroups.materialGroup(pipeline, mat, envCube));
+        // Group 3 when the program has one. The unlit Basic family does not sample shadows at all,
+        // so asking for a group it never declared is an error rather than an empty bind — the same
+        // rule WebGPU enforces through `layout: 'auto'`.
+        if (this._bindGroups.declaresFrameLighting(pipeline))
+            pass!.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline));
+        return true;
     }
 }
