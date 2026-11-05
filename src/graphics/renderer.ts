@@ -25,11 +25,8 @@ import {
     MAX_CASCADES, MAX_POINT_SHADOWS,
 } from './shadowMath';
 import { Geometry } from '../core/geometry';
-import { Frustum } from '../core/frustum';
 import { AnimatedModel } from '../animation/animatedModel';
 
-import { GpuOcclusion, GPU_OCCLUSION_BUDGET } from './gpuOcclusion'
-import type { OcclusionQuerySet } from './rhi/resources'
 
 import { GLState } from './systems/glState';
 import { Texture } from './texture';
@@ -49,13 +46,10 @@ import {
 } from './shaderOptimizer';
 import type { PipelineRecipe } from './shaderOptimizer';
 import { OcclusionBuffer } from './occlusion/occlusionBuffer';
-import { TerrainOccluder, type OccluderGrid } from './occlusion/terrainOccluder';
-import type { Terrain } from '../terrain/terrain';
 import { physicalFor, splitPhysical, logicalNamesFor, usesParallax, opaqueEligible, EXTRA_LOGICAL_NAMES, LAZY_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
 import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
 import { cpuProfiler } from './cpuProfiler';
 import { ssilTraceShape } from './ssilSettings';
-import { TerrainLodSettings } from '../terrain/terrain';
 import { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from '../terrain/terrainSurfaceArrays';
 import { FoliageGpuCuller } from './foliageGpuCulling';
 import { gatherFoliageInteractors } from './foliageInteraction';
@@ -64,9 +58,8 @@ import {
     BasicInstancedProgram, OutlineProgram, ShadowDebugProgram, SkyboxProgram, VolumetricCloudsProgram,
     SkyAtmosphereProgram, ProbePreviewProgram, SkyProjectProgram, SkyFogProgram, ScreenProgram, PresentProgram,
     OverlayCompositeProgram, DebugViewProgram, OverdrawProgram, OverdrawInstancedProgram, GridProgram,
-    OcclusionBoxProgram, DeferredLightingProgram, SsilProgram, SsilTemporalProgram, SsilBlurProgram,
-    SsilHistoryProgram, IrradianceProgram, PrefilterProgram, BRDFProgram, programTable, FORWARD_PROGRAMS,
-    GEOMETRY_PROGRAMS,
+    DeferredLightingProgram, SsilProgram, SsilTemporalProgram, SsilBlurProgram, SsilHistoryProgram,
+    IrradianceProgram, PrefilterProgram, BRDFProgram, programTable, FORWARD_PROGRAMS, GEOMETRY_PROGRAMS,
 } from './render/programs';
 import { createFrameView, type FrameView } from './render/frameView';
 import { FrameTargets } from './render/frameTargets';
@@ -87,6 +80,7 @@ import { ParticlePasses } from './render/particlePasses';
 import { Sprite2DPasses } from './render/sprites2d';
 import { FoliagePasses } from './render/foliage';
 import { ShadowPasses } from './render/shadows';
+import { Visibility } from './render/visibility';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 import { gl, setGLContext } from './glContext';
@@ -111,10 +105,6 @@ import { isEditorOnlyNode } from '../core/scene/editorNodes';
 import type { ShaderResource, BlendState, DepthStencilState, CullMode } from './rhi/types';
 import type { RenderTarget } from './rhi/resources';
 import type { RenderPassEncoder } from './rhi/device';
-
-/** Built frames in a row that hid nothing before occlusion backs off, and how often it probes then. */
-const OCCLUSION_IDLE_FRAMES = 30;
-const OCCLUSION_IDLE_PROBE = 8;
 
 /** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
  *  forward materials are appended at runtime via `customForwardTypes()`. */
@@ -216,6 +206,8 @@ export class Renderer {
     private readonly _foliage: FoliagePasses;
     /** Shadow maps: casters, cascades and the far cascade, spot and point shadows, their uniforms (render/shadows.ts). */
     private readonly _shadows: ShadowPasses;
+    /** What the view can see: frustum, CPU occluders and GPU occlusion queries, terrain and model LOD (render/visibility.ts). */
+    private readonly _visibility: Visibility;
 
     /**
      * Whether the post-process chain runs at all for this host.
@@ -492,48 +484,6 @@ export class Renderer {
     private static readonly SKY_RGBM_RANGE = 64.0;
 
 
-    // Per-object camera frustum culling for the main color passes. Rebuilt each frame from _view.viewProj.
-    private _frustum: Frustum = new Frustum();
-    private _frustumCulling: boolean = true;
-    /** See RenderSettings.occlusionCulling. */
-    private _occlusionMode: OcclusionMode = 'all';
-    /** This frame's occluders, rasterized on the CPU (graphics/occlusion/occlusionBuffer.ts). */
-    private readonly _occlusion = new OcclusionBuffer(256, 144);
-    /** Whether `_occlusion` describes the view being drawn right now (never during a capture). */
-    private _occlusionActive = false;
-    /** The camera `_occlusion` was built for: a probe or thumbnail capture draws through another. */
-    private _occlusionCamera: Camera | null = null;
-    /** Per landscape: its lowered occluder mesh, rebuilt when its heights change. */
-    private readonly _terrainOccluders = new WeakMap<Terrain, { version: number; builtAt: number;
-                                                               origin: [number, number, number]; occluder: TerrainOccluder }>();
-    /** Per node, this frame: whether it is occluded (`_outsideFrustum` asks up to four times a frame). */
-    private readonly _occludedMemo = new Map<ModelNode, boolean>();
-    private readonly _occMin = [0, 0, 0];
-    private readonly _occMax = [0, 0, 0];
-    private readonly _occlusionFrameStats = { triangles: 0, ms: 0 };
-    /** See RenderSettings.occlusionQueries, and graphics/gpuOcclusion.ts. */
-    private _occlusionQueriesEnabled = true;
-    /** See RenderSettings.lightOcclusionCulling. */
-    private _lightOcclusionCulling = true;
-    /** Per light, this frame: whether its reach is hidden (see `_lightOccluded`). */
-    private readonly _lightOccludedMemo = new Map<LightNode, boolean>();
-    private readonly _gpuOcclusion = new GpuOcclusion();
-    private _occlusionQueries: OcclusionQuerySet | null = null;
-    /** Whether this frame's view takes and acts on GPU occlusion queries, and for which camera. */
-    private _gpuOcclusionActive = false;
-    private _gpuOcclusionCamera: Camera | null = null;
-    private readonly _gpuOcclusionForward = [0, 0, -1];
-    private readonly _gpuOcclusionModel = mat4.create();
-    /** Consecutive built frames in which occlusion hid nothing, and the frames skipped since (see `_buildOcclusion`). */
-    private _occlusionIdleFrames = 0;
-    private _occlusionSkipped = 0;
-    // Distance-based terrain LOD: chunks past distance1/distance2 drop to a grid decimated by step1/step2
-    // (triangles scale by 1/step²). Applied per chunk, per frame, before the shadow passes.
-    private _terrainLodEnabled: boolean = true;
-    private _terrainLodDistance1: number = 120;
-    private _terrainLodDistance2: number = 300;
-    private _terrainLodStep1: number = 2;
-    private _terrainLodStep2: number = 4;
     private _terrainLayerTextureSize: number = DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE;
 
     // Editor infinite grid overlay (off in published builds; toggled by the editor)
@@ -615,7 +565,7 @@ export class Renderer {
             cullFor: Renderer._cullFor.bind(Renderer),
             get debugView() { return renderer._debugView; },
             inGBuffer: renderer._inGBuffer.bind(renderer),
-            outsideFrustum: renderer._outsideFrustum.bind(renderer),
+            outsideFrustum: (...args: Parameters<Visibility['outsideFrustum']>) => renderer._visibility.outsideFrustum(...args),
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
@@ -652,10 +602,10 @@ export class Renderer {
             copyColors: renderer._copyColors.bind(renderer),
             cullFor: Renderer._cullFor.bind(Renderer),
             get deferred() { return renderer._deferred; },
-            get frustum() { return renderer._frustum; },
-            get frustumCulling() { return renderer._frustumCulling; },
+            get frustum() { return renderer._visibility.frustum; },
+            get frustumCulling() { return renderer._visibility.frustumCulling; },
             get iblCubeMesh() { return renderer._iblCubeMesh; },
-            outsideFrustum: renderer._outsideFrustum.bind(renderer),
+            outsideFrustum: (...args: Parameters<Visibility['outsideFrustum']>) => renderer._visibility.outsideFrustum(...args),
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
@@ -664,8 +614,8 @@ export class Renderer {
         this._fluids = new FluidVolumePasses({
             cloudGrade: renderer._cloudGrade.bind(renderer),
             dirOf: renderer._dirOf.bind(renderer),
-            get frustum() { return renderer._frustum; },
-            get frustumCulling() { return renderer._frustumCulling; },
+            get frustum() { return renderer._visibility.frustum; },
+            get frustumCulling() { return renderer._visibility.frustumCulling; },
             get iblCubeMesh() { return renderer._iblCubeMesh; },
             internalAmbient: renderer._internalAmbient.bind(renderer),
             get keyLight() { return renderer._keyLight; },
@@ -679,12 +629,12 @@ export class Renderer {
         this._particlePasses = new ParticlePasses({
             cloudGrade: renderer._cloudGrade.bind(renderer),
             dirOf: renderer._dirOf.bind(renderer),
-            get frustum() { return renderer._frustum; },
-            get frustumCulling() { return renderer._frustumCulling; },
+            get frustum() { return renderer._visibility.frustum; },
+            get frustumCulling() { return renderer._visibility.frustumCulling; },
             internalAmbient: renderer._internalAmbient.bind(renderer),
             get keyLight() { return renderer._keyLight; },
             get keyLightNode() { return renderer._keyLightNode; },
-            get lightOccludedMemo() { return renderer._lightOccludedMemo; },
+            get lightOccludedMemo() { return renderer._visibility.lightOccludedMemo; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
@@ -695,18 +645,18 @@ export class Renderer {
         this._sprites = new Sprite2DPasses({
             get canvas() { return renderer._canvas; },
             cullFor: Renderer._cullFor.bind(Renderer),
-            get frustum() { return renderer._frustum; },
-            get frustumCulling() { return renderer._frustumCulling; },
+            get frustum() { return renderer._visibility.frustum; },
+            get frustumCulling() { return renderer._visibility.frustumCulling; },
             restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._particlePasses);
         this._foliage = new FoliagePasses({
             get SHADOW_DEPTH() { return ShadowPasses.SHADOW_DEPTH; },
-            aabbDistSq: renderer._aabbDistSq.bind(renderer),
-            cellOccluded: renderer._cellOccluded.bind(renderer),
+            aabbDistSq: (...args: Parameters<Visibility['aabbDistSq']>) => renderer._visibility.aabbDistSq(...args),
+            cellOccluded: (...args: Parameters<Visibility['cellOccluded']>) => renderer._visibility.cellOccluded(...args),
             cullFor: Renderer._cullFor.bind(Renderer),
-            get frustum() { return renderer._frustum; },
-            get frustumCulling() { return renderer._frustumCulling; },
+            get frustum() { return renderer._visibility.frustum; },
+            get frustumCulling() { return renderer._visibility.frustumCulling; },
             objectId: renderer._objectId.bind(renderer),
             shadowCutoutOf: (...args: Parameters<ShadowPasses['shadowCutoutOf']>) => renderer._shadows.shadowCutoutOf(...args),
             get shadowFrustum() { return renderer._shadows.shadowFrustum; },
@@ -719,19 +669,24 @@ export class Renderer {
             get coneSphere() { return renderer._coneSphere; },
             get deviceReady() { return renderer._deviceReady; },
             dirOf: (node) => renderer._dirOf(node),
-            get frustum() { return renderer._frustum; },
-            get frustumCulling() { return renderer._frustumCulling; },
+            get frustum() { return renderer._visibility.frustum; },
+            get frustumCulling() { return renderer._visibility.frustumCulling; },
             get keyLight() { return renderer._keyLight; },
             get keyLightDir() { return renderer._keyLightDir; },
-            lightOccluded: (node, center, radius) => renderer._lightOccluded(node, center, radius),
+            lightOccluded: (node, center, radius) => renderer._visibility.lightOccluded(node, center, radius),
             objectId: (obj) => renderer._objectId(obj),
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             restoreDefaultBlend: () => renderer._restoreDefaultBlend(),
-            get terrainLodStep2() { return renderer._terrainLodStep2; },
+            get terrainLodStep2() { return renderer._visibility.terrainLodStep2; },
             get thumbnailMode() { return renderer._thumbnailMode; },
             uploadBoneMatrices: (shaderType, node) => renderer._uploadBoneMatrices(shaderType, node),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._foliage);
+        this._visibility = new Visibility({
+            get iblCubeMesh() { return renderer._iblCubeMesh; },
+            get selectedNodeId() { return renderer._selectedNodeId; },
+            get thumbnailMode() { return renderer._thumbnailMode; },
+        }, this._view, this._targets, this._passes, this._pipelines, this._projection);
         this._shadows.shadowDistance = config.shadowDistance ?? 100;
         this._shadows.cascadeCount = Math.min(MAX_CASCADES, Math.max(1, Math.round(config.shadowCascades ?? this._shadows.cascadeCount)));
 
@@ -1338,8 +1293,8 @@ export class Renderer {
         // both sides of every motion-vector subtraction, where a jitter present on one side and absent
         // on the other is indistinguishable from real motion.
         mat4.multiply(this._view.viewProj, proj, view);
-        this._frustum.setFromViewProjection(this._view.viewProj);
-        if (!this._thumbnailMode) this._stampAnimationView(scene);
+        this._visibility.frustum.setFromViewProjection(this._view.viewProj);
+        if (!this._thumbnailMode) this._visibility.stampAnimationView(scene);
 
         // The matrix actually RASTERIZED this frame, and its inverse. Every pass that unprojects the
         // depth buffer wants this one: the depth was written through the jittered projection, so the
@@ -1359,15 +1314,15 @@ export class Renderer {
 
         // Pick each terrain chunk's detail level for this camera. Before the shadow passes, so the
         // cascades/shadow map rasterize the same reduced terrain the color passes will.
-        this._updateTerrainLOD(scene);
+        this._visibility.updateTerrainLOD(scene);
 
         // Same for per-mesh LOD groups: each picks its active level (or distance-culls) before shadows.
-        this._updateModelLOD(scene);
+        this._visibility.updateModelLOD(scene);
 
         // The occluders, rasterized for this view before anything asks what is visible: the foliage
         // prepare, the geometry pass, the forward overlay and the velocity pass all consult it.
-        this._buildOcclusion(scene);
-        this._beginGpuOcclusion();
+        this._visibility.buildOcclusion(scene);
+        this._visibility.beginGpuOcclusion();
 
         // Which models moved since last frame. AFTER LOD selection, so a level that was just swapped in
         // is already flagged not-visible-last-frame rather than reading as a teleport, and BEFORE post
@@ -1406,8 +1361,8 @@ export class Renderer {
 
         // Reset per-frame perf counters AFTER the (occasional) IBL bake so bakes don't spike the stats.
         resetFrameStats();
-        frameStats.occluderTriangles = this._occlusionFrameStats.triangles;
-        frameStats.occlusionMs = this._occlusionFrameStats.ms;
+        frameStats.occluderTriangles = this._visibility.occlusionFrameStats.triangles;
+        frameStats.occlusionMs = this._visibility.occlusionFrameStats.ms;
         const _statsT0 = performance.now();
 
         // Particle simulation steps. Here because no pass is open and every pass that READS the state
@@ -1783,287 +1738,11 @@ export class Renderer {
         if (encoder !== this._passes.frameEncoder) encoder.finish();
     }
 
-    // True when `node` is fully outside the camera frustum. PURE — no stat side effect, so use it only
-    // where a node was already counted this frame; {@link _culled} is the counting variant.
-    /**
-     * Tell every animated model whether the camera can see it and how far away it is, for the animation
-     * LOD next frame's update picks (ModelNode.update -> Animator.setLod). One frame stale by design: the
-     * scene updates before it renders. Uses the same cached bounding sphere the frustum cull does.
-     */
-    private _stampAnimationView(scene: Scene): void {
-        const eye = this._view.camera.position;
-        for (const node of scene.models) {
-            if (!node.animator) continue;
-            const s = node.getBoundingSphere();
-            node.cameraVisible = !this._frustumCulling
-                || this._frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius);
-            node.cameraDistance = Math.max(0, vec3.distance(eye, s.center) - s.radius);
-        }
-    }
-
-    /**
-     * Whether the camera cannot see `node`: outside the frustum, or inside it but hidden behind this
-     * frame's occluders (see {@link _buildOcclusion}). Every per-view visibility test goes through here,
-     * which is what keeps the geometry pass, the forward overlay and the velocity pass in agreement.
-     */
-    private _outsideFrustum(node: ModelNode): boolean {
-        if (!this._frustumCulling) return false;
-        const s = node.getBoundingSphere();
-        if (!this._frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) return true;
-        return this._nodeOccluded(node, s);
-    }
-
-    /**
-     * Occlusion half of {@link _outsideFrustum}, memoised per node for the frame: the CPU occluders first
-     * (same frame, exact), then a fresh GPU occlusion query result (graphics/gpuOcclusion.ts). A node the
-     * CPU test lets through is offered for this frame's queries whatever its last result, so a node that
-     * was hidden is found again the moment it is uncovered.
-     */
-    private _nodeOccluded(node: ModelNode, s: { center: ArrayLike<number>; radius: number }): boolean {
-        if (this._view.cubeFace) return false;
-        const cpu = this._occlusionActive && this._view.camera === this._occlusionCamera;
-        const gpu = this._gpuOcclusionActive && this._view.camera === this._gpuOcclusionCamera;
-        if (!cpu && !gpu) return false;
-        // The selected node is redrawn by the outline mask whatever happens; keep it honest everywhere.
-        if (this._selectedNodeId && node.id === this._selectedNodeId) return false;
-        const memo = this._occludedMemo.get(node);
-        if (memo !== undefined) return memo;
-        const r = s.radius, c = s.center;
-        let hidden = false;
-        if (cpu) {
-            const min = this._occMin, max = this._occMax;
-            min[0] = c[0] - r; min[1] = c[1] - r; min[2] = c[2] - r;
-            max[0] = c[0] + r; max[1] = c[1] + r; max[2] = c[2] + r;
-            hidden = this._occlusion.isBoxOccluded(min, max);
-        }
-        if (!hidden && gpu && Renderer._worthQuerying(node, c, r, this._view.camera)) {
-            const triangles = node.model.geometry.indices.length / 3;
-            if (this._gpuOcclusion.consider(node, r, triangles) && this._gpuOcclusion.isHidden(node)) {
-                hidden = true;
-                frameStats.queryOccludedObjects++;
-            }
-        }
-        this._occludedMemo.set(node, hidden);
-        return hidden;
-    }
-
-    /**
-     * Whether nothing on screen is within reach of `light`: a fresh GPU occlusion query found the box
-     * around its influence sphere (`center`, `radius`) hidden behind the frame's depth. Such a light can
-     * light no visible pixel, so it is left out of the light grid and passed over for a shadow map. The
-     * light is offered for this frame's queries either way, so it is found again the moment that changes.
-     * Never true with the eye inside (or near) the sphere, whose box the near plane would clip, nor in a
-     * capture, nor with `lightOcclusionCulling` off. Memoised for the frame.
-     */
-    private _lightOccluded(node: LightNode, center: ArrayLike<number>, radius: number): boolean {
-        if (!this._lightOcclusionCulling || !this._gpuOcclusionActive || this._view.cubeFace
-            || this._view.camera !== this._gpuOcclusionCamera) return false;
-        const memo = this._lightOccludedMemo.get(node);
-        if (memo !== undefined) return memo;
-        const eye = this._view.camera.position;
-        const d = Math.hypot(eye[0] - center[0], eye[1] - center[1], eye[2] - center[2]);
-        const hidden = d > radius * 1.2 + 1
-            && this._gpuOcclusion.considerLight(node, center, radius)
-            && this._gpuOcclusion.isLightHidden(node);
-        this._lightOccludedMemo.set(node, hidden);
-        return hidden;
-    }
-
-    /**
-     * Whether a node is worth an occlusion query at all. A query is a draw of its box, and its cost is the
-     * box's screen area: a box filling half the screen costs a full-screen depth test and is almost never
-     * hidden, which in the Valley made the query pass 5 ms on WebGL2 — the near landscape chunks, two
-     * hundred metres across as boxes, were each a full-screen test. The FAR chunks stay candidates: one
-     * behind a ridge is exactly what the queries are for, and those are small on screen. Never the eye
-     * inside the box either: its near faces would be clipped and the query could report nothing.
-     */
-    private static _worthQuerying(node: ModelNode, c: ArrayLike<number>, r: number, cam: Camera): boolean {
-        const eye = cam.position;
-        const d = Math.hypot(eye[0] - c[0], eye[1] - c[1], eye[2] - c[2]);
-        if (d < r * 1.2 + 1) return false;
-        // Projected radius as a fraction of the screen height: r * cot(fov/2) / d under perspective.
-        const p = cam.projectionMatrix;
-        const screen = p[11] !== 0 ? r * Math.abs(p[5]) / d : r * Math.abs(p[5]);
-        return screen < 0.15;
-    }
-
-    /**
-     * Start the frame's GPU occlusion: collect whatever query results have come back, decide whether this
-     * view uses them. The main view only — a capture or a thumbnail never reads the main view's verdicts.
-     */
-    private _beginGpuOcclusion(): void {
-        const active = this._occlusionQueriesEnabled && this._occlusionMode !== 'off' && this._frustumCulling
-            && !this._thumbnailMode && !this._view.capturing && !this._view.cubeFace
-            && !!device.capabilities.hasOcclusionQuery && !!device.createOcclusionQuerySet;
-        if (active && !this._occlusionQueries)
-            this._occlusionQueries = device.createOcclusionQuerySet!(GPU_OCCLUSION_BUDGET, 'occlusionQueries');
-        const view = this._view.camera.viewMatrix, f = this._gpuOcclusionForward;
-        f[0] = -view[2]; f[1] = -view[6]; f[2] = -view[10];
-        this._gpuOcclusion.beginFrame(active ? this._occlusionQueries : null, this._view.camera.position, f);
-        this._lightOccludedMemo.clear();
-        this._gpuOcclusionActive = active;
-        this._gpuOcclusionCamera = this._view.camera;
-    }
-
-    /**
-     * Draw every candidate node's box against the depth the geometry pass just wrote, each inside its own
-     * occlusion query, and record the readback (graphics/gpuOcclusion.ts). No colour, no depth write: it
-     * changes nothing on screen. The box is the bounding sphere's cube, a tenth larger — loose on purpose,
-     * so a node about to come into view already reads as visible.
-     */
-    private _gpuOcclusionPass(): void {
-        const set = this._occlusionQueries, nodes = this._gpuOcclusion.candidates;
-        if (!this._gpuOcclusionActive || !set || nodes.length === 0 || this._view.camera !== this._gpuOcclusionCamera) return;
-        // Its own scope, so the boxes' cost is a row of its own rather than part of the foliage pass's.
-        this._passes.scope('occlusion.queries');
-        const target = device.createRenderTarget({
-            label: 'occlusionQueries', colorViews: [], depthView: this._targets.gBuffer.depth.attachmentView,
-        });
-        this._passes.encoder = this._passes.acquireEncoder('occlusionQueries');
-        this._passes.target = target;
-        const pass = this._passes.encoder.beginRenderPass(target, {
-            label: 'occlusionQueries',
-            colorAttachments: [],
-            depthAttachment: { loadOp: 'load', storeOp: 'store' },
-            occlusionQuerySet: set,
-        });
-        const cam = this._view.camera;
-        this._shaderManager.bind('occlusionBox');
-        this._shaderManager.setUniform('u_view', cam.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(cam.projectionMatrix));
-        const pipeline = this._pipelines.get('occlusionBox', OcclusionBoxProgram, {
-            cullMode: 'none',
-            depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
-            targets: 0,
-            vertex: 'model',
-            builtFor: 'irradiance',   // `_iblCubeMesh` is position-only, built from that program's attributes
-        });
-        pass.setPipeline(pipeline);
-        const model = this._gpuOcclusionModel;
-        for (let i = 0; i < nodes.length; i++) {
-            // A light is tested by its influence sphere, stored when it was offered; a node by its own.
-            const light = this._gpuOcclusion.lightSpheres.get(nodes[i]);
-            const s = light ? { center: light, radius: light[3] } : (nodes[i] as ModelNode).getBoundingSphere();
-            const size = s.radius * 2 * 1.1;
-            mat4.fromTranslation(model, s.center as vec3);
-            mat4.scale(model, model, [size, size, size]);
-            this._shaderManager.setUniform('u_model', model);
-            pass.beginOcclusionQuery(i);
-            if (!this._passes.recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
-            pass.endOcclusionQuery();
-        }
-        pass.end();
-        frameStats.occlusionQueries += nodes.length;
-        // Into the encoder that holds the pass, after it; then finish that encoder only if this owns it.
-        set.resolve(this._passes.encoder, nodes.length, this._gpuOcclusion.submitted());
-        if (this._passes.encoder !== this._passes.frameEncoder) this._passes.encoder.finish();
-        this._passes.encoder = null;
-        this._passes.target = null;
-        // The box pipeline left depth writes off; the legacy draws after it assume they are on.
-        GLState.depthMask(true);
-    }
-
-    /**
-     * {@link _outsideFrustum}, additionally incrementing the `culledObjects` stat (and `occludedObjects` for
-     * the ones only an occluder hid) so the editor HUD can report savings. Every node must reach this at
-     * most once per frame or the HUD double-counts.
-     */
-    private _culled(node: ModelNode): boolean {
-        const outside = this._outsideFrustum(node);
-        if (outside) {
-            frameStats.culledObjects++;
-            if (this._occludedMemo.get(node)) frameStats.occludedObjects++;
-        }
-        return outside;
-    }
-
-    /**
-     * Rasterize this frame's occluders into the CPU occlusion buffer (graphics/occlusion): every visible
-     * landscape as its lowered occluder mesh, and every enabled Occluder volume. Conservative throughout —
-     * see OcclusionBuffer — so nothing it hides is visible.
-     *
-     * A landscape the camera is BELOW (a cave, a noclip camera) is left out: the lowering argument holds
-     * only for a viewer above the surface.
-     */
-    private _buildOcclusion(scene: Scene): void {
-        // What the last built buffer achieved, read before begin() zeroes it.
-        const lastHits = this._occlusionActive ? this._occlusion.stats.occluded : -1;
-        this._occludedMemo.clear();
-        this._occlusionActive = false;
-        this._occlusionFrameStats.triangles = 0;
-        this._occlusionFrameStats.ms = 0;
-        if (this._occlusionMode === 'off' || !this._frustumCulling || this._thumbnailMode) return;
-        // A view in which nothing is hidden — the editor's high overview, open ground — would pay for the
-        // buffer every frame for nothing. After a run of such frames it is built only every few frames, as
-        // a probe, until one hides something again. Not building is always safe: it only culls less.
-        if (lastHits === 0) this._occlusionIdleFrames++;
-        else if (lastHits > 0) this._occlusionIdleFrames = 0;
-        if (this._occlusionIdleFrames >= OCCLUSION_IDLE_FRAMES && ++this._occlusionSkipped < OCCLUSION_IDLE_PROBE) return;
-        this._occlusionSkipped = 0;
-        const start = performance.now();
-        const eye = this._view.camera.position;
-        this._occlusion.begin(this._view.viewProj);
-        let any = false;
-        for (const landscape of scene.landscapes) {
-            if (!landscape.visible) continue;
-            const terrain = landscape.terrain;
-            const o = terrain.origin;
-            if (terrain.heightAt(eye[0] - o[0], eye[2] - o[2]) + o[1] > eye[1]) continue;
-            let entry = this._terrainOccluders.get(terrain);
-            // Built in world space, so a moved landscape needs a new one as much as a sculpted one.
-            const moved = !!entry && (entry.origin[0] !== o[0] || entry.origin[1] !== o[1] || entry.origin[2] !== o[2]);
-            if (!entry || entry.version !== terrain.heightsVersion || moved) {
-                // A rebuild walks the whole height grid (tens of ms for a 2k landscape), so a sculpt drag
-                // rebuilds at most twice a second — and until it does, this landscape occludes nothing:
-                // a stale mesh could stand above ground the brush just lowered.
-                const now = performance.now();
-                if (entry && now - entry.builtAt < 500) continue;
-                entry = {
-                    version: terrain.heightsVersion,
-                    builtAt: now,
-                    origin: [o[0], o[1], o[2]],
-                    occluder: new TerrainOccluder({ heights: terrain.heights, resolution: terrain.resolution,
-                                                    size: terrain.size, origin: [o[0], o[1], o[2]] }),
-                };
-                this._terrainOccluders.set(terrain, entry);
-            }
-            entry.occluder.emit(this._frustum, eye, this._rasterOccluder, undefined, this._occluderHidden);
-            any = true;
-        }
-        if (this._occlusionMode === 'all') {
-            const min = this._occMin, max = this._occMax;
-            for (const occluder of scene.occluders) {
-                if (!occluder.enabled || !occluder.visible) continue;
-                occluder.localBox(min, max);
-                this._occlusion.rasterizeBox(min, max, occluder.worldTransform);
-                any = true;
-            }
-        }
-        if (!any) return;
-        this._occlusion.finish();
-        this._occlusionActive = true;
-        this._occlusionCamera = this._view.camera;
-        // Kept until after resetFrameStats, which runs later in the frame. Inside the `prepare` scope
-        // (scopes never nest), so the time gets a counter of its own instead of a profiler row.
-        this._occlusionFrameStats.triangles = this._occlusion.stats.triangles;
-        this._occlusionFrameStats.ms = performance.now() - start;
-    }
-
-    /** `_buildOcclusion`'s callbacks into the terrain occluder, bound once rather than per frame. */
-    private readonly _rasterOccluder = (grid: OccluderGrid) => this._occlusion.rasterizeGrid(grid.positions, grid.cols, grid.rows);
-    private readonly _occluderHidden = (min: ArrayLike<number>, max: ArrayLike<number>) => this._occlusion.isBoxHiddenSoFar(min, max);
-
-    /** Whether a foliage cell's box is hidden behind this frame's occluders. */
-    private _cellOccluded(min: ArrayLike<number>, max: ArrayLike<number>): boolean {
-        if (!this._occlusionActive || this._view.camera !== this._occlusionCamera) return false;
-        return this._occlusion.isBoxOccluded(min, max);
-    }
-
     /**
      * Whether this node's geometry is what the deferred G-buffer holds: the material-and-visibility
      * half of {@link _geometryPass}'s accept test.
      *
-     * The frustum cull is deliberately NOT part of it — `_culled` counts a stat and every node must
+     * The frustum cull is deliberately NOT part of it — `_visibility.culled` counts a stat and every node must
      * reach it at most once per frame — and neither is the lazy `initializeModel`.
      *
      * Shared with the object-velocity pass so the two agree exactly. A node they disagreed about would
@@ -2113,7 +1792,7 @@ export class Renderer {
             // Default (Blinn-Phong) materials are forward-rendered in the overlay so their full feature
             // set (specular/ambient/reflectivity + maps) works; they never enter the deferred G-buffer.
             if (!this._inGBuffer(node)) continue;
-            if (this._culled(node)) continue;
+            if (this._visibility.culled(node)) continue;
             if (!node.initialized) node.initializeModel();
 
             const mat = node.model.material;
@@ -2163,42 +1842,8 @@ export class Renderer {
             this._passes.endFullscreenPass(foliage);
         }
         // The G-buffer depth is complete: ask the GPU which candidate nodes it hides.
-        this._gpuOcclusionPass();
+        this._visibility.gpuOcclusionPass();
         this._passes.endScope();
-    }
-
-    // Distance-based terrain LOD: every landscape re-picks its chunks' detail levels. The levels are
-    // alternate index buffers over one unchanged vertex buffer, so this is a distance test per chunk.
-    private _updateTerrainLOD(scene: Scene): void {
-        if (scene.landscapes.size === 0) return;
-        const settings: TerrainLodSettings = {
-            enabled: this._terrainLodEnabled,
-            distance1: this._terrainLodDistance1,
-            distance2: this._terrainLodDistance2,
-            step1: this._terrainLodStep1,
-            step2: this._terrainLodStep2,
-        };
-        for (const landscape of scene.landscapes) landscape.updateLod(this._view.camera.position, settings);
-    }
-
-    // Distance-based model LOD: every LodGroupNode picks its visible level subtree, or hides past its
-    // cull distance; every node with a drawDistance hides its subtree past it (×0.9 hysteresis on the
-    // way back, like the LOD groups). Visibility flags are rewritten only on a transition.
-    private _updateModelLOD(scene: Scene): void {
-        const eye = this._view.camera.position;
-        for (const group of scene.lodGroups) group.updateLod(eye);
-        for (const node of scene.drawDistanceNodes) node.updateDrawCull(eye);
-    }
-
-    /** Squared distance from point `p` to the closest point of the AABB [min, max] (0 if inside). */
-    private _aabbDistSq(p: vec3, min: ArrayLike<number>, max: ArrayLike<number>): number {
-        let d2 = 0;
-        for (let a = 0; a < 3; a++) {
-            const v = p[a];
-            if (v < min[a]) d2 += (min[a] - v) * (min[a] - v);
-            else if (v > max[a]) d2 += (v - max[a]) * (v - max[a]);
-        }
-        return d2;
     }
 
     /** Additive accumulation: every fragment adds its increment, and nothing occludes anything. */
@@ -3264,14 +2909,14 @@ export class Renderer {
                 // A light whose whole reach is hidden keeps its record (its index is fixed) but reaches
                 // no cluster: radius 0 is "reaches nothing" to buildClusters.
                 const r = this._coneSphere.radius;
-                this._setClusterLight(count, center, this._lightOccluded(node, center, r) ? 0 : r);
+                this._setClusterLight(count, center, this._visibility.lightOccluded(node, center, r) ? 0 : r);
             } else {
                 const point = node.light as PointLight;
                 const p = node.worldPosition;
                 center[0] = p[0]; center[1] = p[1]; center[2] = p[2];
                 // The windowed falloff reaches EXACTLY zero at `range`, which is what makes this a
                 // cull rather than an approximation. See `distanceAttenuation`.
-                this._setClusterLight(count, center, this._lightOccluded(node, center, point.range) ? 0 : point.range);
+                this._setClusterLight(count, center, this._visibility.lightOccluded(node, center, point.range) ? 0 : point.range);
             }
             count++;
         }
@@ -3803,15 +3448,15 @@ export class Renderer {
 
             const mat = node.model.material;
             if (mat.config.transparent) {
-                if (!selected && this._culled(node)) continue;
+                if (!selected && this._visibility.culled(node)) continue;
                 transparentQueue.push(node);
             } else if (mat.type === 'blinn_phong' || mat.type === 'blinn_phongSkinned'
                        || mat.type === 'cel' || mat.type === 'celSkinned'
                        || mat.type.startsWith('custom:')) {
-                // `_outsideFrustum`, not `_culled`: the geometry pass already tested and counted these
+                // `_visibility.outsideFrustum`, not `_visibility.culled`: the geometry pass already tested and counted these
                 // (it culls before it skips forward-rendered material types), so counting again here
                 // would report every off-screen Blinn-Phong model twice.
-                if (!selected && this._outsideFrustum(node)) continue;
+                if (!selected && this._visibility.outsideFrustum(node)) continue;
                 opaqueForwardQueue.push(node);
             }
         }
@@ -4444,7 +4089,7 @@ export class Renderer {
             // Check if this node is selected
             else if (this._selectedNodeId && node.id === this._selectedNodeId) {
                 selectedNodes.push(node);
-            } else if (!this._culled(node)) {
+            } else if (!this._visibility.culled(node)) {
                 // Add to transparent draw queue if transparent so that it is drawn last
                 if (node.model.material.config.transparent === true)
                     transparentDrawQueue.push(node);
@@ -5759,24 +5404,24 @@ export class Renderer {
     public set exposureSpeedDown(v: number) { this._autoExposure.exposureSpeedDown = Math.max(0, v); }
 
     /** Per-object camera frustum culling for the main color passes (on by default). */
-    public get frustumCulling(): boolean { return this._frustumCulling; }
-    public set frustumCulling(enabled: boolean) { this._frustumCulling = enabled; }
+    public get frustumCulling(): boolean { return this._visibility.frustumCulling; }
+    public set frustumCulling(enabled: boolean) { this._visibility.frustumCulling = enabled; }
     /** See RenderSettings.occlusionCulling. */
-    public get occlusionCulling(): OcclusionMode { return this._occlusionMode; }
+    public get occlusionCulling(): OcclusionMode { return this._visibility.occlusionMode; }
     public set occlusionCulling(mode: OcclusionMode) {
-        this._occlusionMode = mode === 'off' || mode === 'terrain' ? mode : 'all';
+        this._visibility.occlusionMode = mode === 'off' || mode === 'terrain' ? mode : 'all';
     }
     /** See RenderSettings.foliagePrepass. */
     public get foliagePrepass(): boolean { return this._foliage.foliagePrepass; }
     public set foliagePrepass(on: boolean) { this._foliage.foliagePrepass = !!on; }
     /** See RenderSettings.occlusionQueries. */
-    public get occlusionQueries(): boolean { return this._occlusionQueriesEnabled; }
-    public set occlusionQueries(on: boolean) { this._occlusionQueriesEnabled = !!on; }
+    public get occlusionQueries(): boolean { return this._visibility.occlusionQueriesEnabled; }
+    public set occlusionQueries(on: boolean) { this._visibility.occlusionQueriesEnabled = !!on; }
     /** See RenderSettings.lightOcclusionCulling. */
-    public get lightOcclusionCulling(): boolean { return this._lightOcclusionCulling; }
-    public set lightOcclusionCulling(on: boolean) { this._lightOcclusionCulling = !!on; }
+    public get lightOcclusionCulling(): boolean { return this._visibility.lightOcclusionCulling; }
+    public set lightOcclusionCulling(on: boolean) { this._visibility.lightOcclusionCulling = !!on; }
     /** Point and spot lights left out last frame because their whole reach was hidden. */
-    public get occludedLights(): number { return this._gpuOcclusion.hiddenLightsThisFrame; }
+    public get occludedLights(): number { return this._visibility.gpuOcclusion.hiddenLightsThisFrame; }
     /** See RenderSettings.foliageGpuCulling. */
     public get foliageGpuCulling(): boolean { return this._foliage.foliageGpuCulling; }
     public set foliageGpuCulling(on: boolean) { this._foliage.foliageGpuCulling = !!on; }
@@ -5788,7 +5433,7 @@ export class Renderer {
         this._foliage.foliageShadowDistance = Number.isFinite(metres) ? Math.max(0, metres) : 0;
     }
     /** This frame's CPU occlusion buffer, for a debug view. Its contents are only meaningful mid-frame. */
-    public get occlusionBuffer(): OcclusionBuffer { return this._occlusion; }
+    public get occlusionBuffer(): OcclusionBuffer { return this._visibility.occlusion; }
 
     /** Distance (world units) beyond which foliage cells are culled; 0 disables distance culling. */
     public get particleLodDistanceScale(): number { return this._particlePasses.particleLodDistanceScale; }
@@ -5804,20 +5449,20 @@ export class Renderer {
     public set foliageCellSize(s: number) { this._foliage.foliageCellSize = Math.max(1, s); }
 
     /** Distance-based terrain LOD (3 levels: full detail, step1-decimated, step2-decimated). */
-    public get terrainLodEnabled(): boolean { return this._terrainLodEnabled; }
-    public set terrainLodEnabled(enabled: boolean) { this._terrainLodEnabled = enabled; }
+    public get terrainLodEnabled(): boolean { return this._visibility.terrainLodEnabled; }
+    public set terrainLodEnabled(enabled: boolean) { this._visibility.terrainLodEnabled = enabled; }
 
     /** Camera distance (world units) past which a terrain chunk drops to level 1 / level 2. */
-    public get terrainLodDistance1(): number { return this._terrainLodDistance1; }
-    public set terrainLodDistance1(d: number) { this._terrainLodDistance1 = Math.max(0, d); }
-    public get terrainLodDistance2(): number { return this._terrainLodDistance2; }
-    public set terrainLodDistance2(d: number) { this._terrainLodDistance2 = Math.max(0, d); }
+    public get terrainLodDistance1(): number { return this._visibility.terrainLodDistance1; }
+    public set terrainLodDistance1(d: number) { this._visibility.terrainLodDistance1 = Math.max(0, d); }
+    public get terrainLodDistance2(): number { return this._visibility.terrainLodDistance2; }
+    public set terrainLodDistance2(d: number) { this._visibility.terrainLodDistance2 = Math.max(0, d); }
 
     /** Vertex step of terrain LOD level 1 / level 2 (2, 4 or 8): triangles scale by 1/step². */
-    public get terrainLodStep1(): number { return this._terrainLodStep1; }
-    public set terrainLodStep1(s: number) { this._terrainLodStep1 = Renderer._clampLodStep(s); }
-    public get terrainLodStep2(): number { return this._terrainLodStep2; }
-    public set terrainLodStep2(s: number) { this._terrainLodStep2 = Renderer._clampLodStep(s); }
+    public get terrainLodStep1(): number { return this._visibility.terrainLodStep1; }
+    public set terrainLodStep1(s: number) { this._visibility.terrainLodStep1 = Renderer._clampLodStep(s); }
+    public get terrainLodStep2(): number { return this._visibility.terrainLodStep2; }
+    public set terrainLodStep2(s: number) { this._visibility.terrainLodStep2 = Renderer._clampLodStep(s); }
 
     /** Side of the landscape layer arrays; snapped to a supported size. Changing it re-bakes every surface. */
     public get terrainLayerTextureSize(): number { return this._terrainLayerTextureSize; }
@@ -6170,22 +5815,22 @@ export class Renderer {
             fxaaQuality: this._post.fxaaQuality,
             fxaaSubpixel: this._post.fxaaSubpixel,
             fxaaEdgeThreshold: this._post.fxaaEdgeThreshold,
-            frustumCulling: this._frustumCulling,
-            occlusionCulling: this._occlusionMode,
+            frustumCulling: this._visibility.frustumCulling,
+            occlusionCulling: this._visibility.occlusionMode,
             foliageShadowDistance: this._foliage.foliageShadowDistance,
             foliagePrepass: this._foliage.foliagePrepass,
             foliageGpuCulling: this._foliage.foliageGpuCulling,
-            occlusionQueries: this._occlusionQueriesEnabled,
-            lightOcclusionCulling: this._lightOcclusionCulling,
+            occlusionQueries: this._visibility.occlusionQueriesEnabled,
+            lightOcclusionCulling: this._visibility.lightOcclusionCulling,
             foliageCullDistance: this._foliage.foliageCullDistance,
             particleLodDistanceScale: this._particlePasses.particleLodDistanceScale,
             foliageDensityFalloff: this._foliage.foliageDensityFalloff,
             foliageCellSize: this._foliage.foliageCellSize,
-            terrainLodEnabled: this._terrainLodEnabled,
-            terrainLodDistance1: this._terrainLodDistance1,
-            terrainLodDistance2: this._terrainLodDistance2,
-            terrainLodStep1: this._terrainLodStep1,
-            terrainLodStep2: this._terrainLodStep2,
+            terrainLodEnabled: this._visibility.terrainLodEnabled,
+            terrainLodDistance1: this._visibility.terrainLodDistance1,
+            terrainLodDistance2: this._visibility.terrainLodDistance2,
+            terrainLodStep1: this._visibility.terrainLodStep1,
+            terrainLodStep2: this._visibility.terrainLodStep2,
             terrainLayerTextureSize: this._terrainLayerTextureSize,
         };
     }

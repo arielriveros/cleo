@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { CleoEngine } from '../src/core/engine';
 import { Node } from '../src/core/scene/nodes/node';
 
-// Node.drawDistance: the renderer calls updateDrawCull(eye) each frame (Renderer._updateModelLOD). Past
+// Node.drawDistance: the renderer calls updateDrawCull(eye) each frame (Visibility.updateModelLOD). Past
 // the distance the whole subtree reads invisible; it returns only inside ×0.9; authored visibility and
 // LOD visibility are untouched; nothing emits SCENE_CHANGED.
 

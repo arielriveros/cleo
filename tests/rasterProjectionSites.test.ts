@@ -68,7 +68,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             'foliagePass',
             '_drawOctahedralImpostors',   // the foliage pass's impostor bucket, inside it
             // Occlusion query boxes, tested against the jittered G-buffer depth they must agree with.
-            '_gpuOcclusionPass',
+            'gpuOcclusionPass',
             // Its draws depth-test `less-equal` against the JITTERED depth buffer; unjittered here and
             // every mover's velocity is rejected or smeared by half a pixel at its own silhouette.
             '_objectVelocityPass',
