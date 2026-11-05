@@ -99,6 +99,8 @@ export class RenderStats {
             shadedMpx: frameStats.shadedMpx,
             stateChanges: frameStats.stateChanges,
             stateChangesSaved: frameStats.stateChangesSaved,
+            rhiStateCalls: frameStats.rhiStateCalls,
+            rhiStateCallsSaved: frameStats.rhiStateCallsSaved,
             particlesDrawn: frameStats.particlesDrawn,
             particleSteps: frameStats.particleSteps,
             particleSystems: frameStats.particleSystems,

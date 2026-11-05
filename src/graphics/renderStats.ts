@@ -69,6 +69,10 @@ export interface RenderStats {
     stateChanges: number;
     /** Redundant GL state changes the GLState cache absorbed (a hit — the state already matched). */
     stateChangesSaved: number;
+    /** WebGPU pass state calls issued: setPipeline / setBindGroup / setVertexBuffer / setIndexBuffer. */
+    rhiStateCalls: number;
+    /** WebGPU pass state calls skipped because the pass already had exactly that state bound. */
+    rhiStateCallsSaved: number;
     /** Particle pool slots drawn (capacity, live or not — the GPU alone knows how many are alive). */
     particlesDrawn: number;
     /** Particle simulation steps run (one dispatch or ping-pong draw per emitter per step). */
@@ -124,6 +128,8 @@ export const frameStats: RenderStats = {
     shadedMpx: 0,
     stateChanges: 0,
     stateChangesSaved: 0,
+    rhiStateCalls: 0,
+    rhiStateCallsSaved: 0,
     particlesDrawn: 0,
     particleSteps: 0,
     particleSystems: 0,
@@ -196,4 +202,6 @@ export function resetFrameStats(): void {
     frameStats.shadedMpx = 0;
     frameStats.stateChanges = 0;
     frameStats.stateChangesSaved = 0;
+    frameStats.rhiStateCalls = 0;
+    frameStats.rhiStateCallsSaved = 0;
 }
