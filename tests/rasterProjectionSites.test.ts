@@ -65,7 +65,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             '_drawGeometryNode',      // all deferred opaques, terrain included
             '_drawInstancedGroup',    // twice: the RHI branch and the legacy one
             '_drawSky',               // the horizon aliases harder than anything else in a scene
-            '_foliagePass',
+            'foliagePass',
             '_drawOctahedralImpostors',   // the foliage pass's impostor bucket, inside it
             // Occlusion query boxes, tested against the jittered G-buffer depth they must agree with.
             '_gpuOcclusionPass',
@@ -108,7 +108,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         expect([...callers('clipProjection').keys()].sort()).toEqual([
             '_convolveCubeFaces',     // _captureProj
             '_drawImpostorShadows',   // lightSpace
-            '_foliageShadowPass',     // lightSpace
+            'foliageShadowPass',      // lightSpace
             'rasterProjection',       // the wrapper's own two returns
             '_renderAtmosphereFaces', // _captureProj (the sky bake and the cloud-sky bake)
             '_renderShadowCasters',   // lightSpace

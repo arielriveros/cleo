@@ -92,9 +92,9 @@ describe('renderer wiring', () => {
         expect(renderer).toMatch(/p\.cell\.visible = true;\s*place\(p\.cell\);/);
     });
     it('uses the effective cull for colour and shadows alike', () => {
-        expect(renderer.match(/foliageEffectiveCull\(layer, this\._foliageCullDistance\)/g)?.length).toBe(2);
+        expect(renderer.match(/foliageEffectiveCull\(layer, this\.foliageCullDistance\)/g)?.length).toBe(2);
     });
     it('turns the crossfade off for placed (non-foliage) instanced models', () => {
-        expect(renderer.match(/setUniform\('u_lodCamera', Renderer\._LOD_OFF\)/g)?.length).toBe(2);
+        expect(renderer.match(/setUniform\('u_lodCamera', FoliagePasses\.LOD_OFF\)/g)?.length).toBe(2);
     });
 });
