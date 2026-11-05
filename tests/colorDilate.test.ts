@@ -110,14 +110,14 @@ describe('wiring', () => {
         const at = renderer.indexOf('private _ensurePackedTextures');
         const body = renderer.slice(at, renderer.indexOf('\n    }\n', at));
         expect(body).toContain('node.terrain.foliage');
-        expect(body).toContain('packer.sync(mat, this._frameIndex)');
+        expect(body).toContain('packer.sync(mat, this._view.frameIndex)');
     });
 
     it('billboard cards and impostors are padded too: requested before any pass opens, bound at draw', () => {
         const renderer = rendererSource();
         const at = renderer.indexOf('private _ensurePackedTextures');
         const body = renderer.slice(at, renderer.indexOf('\n    }\n', at));
-        expect(body).toContain('packer.ensureDilated(card, 0.5, this._frameIndex)');
+        expect(body).toContain('packer.ensureDilated(card, 0.5, this._view.frameIndex)');
         expect(renderer).toContain('TexturePacker.Instance.dilatedId(texId, 0.5)');
         // An impostor re-bake reuses its texture id, so the cache must notice the source object changed.
         expect(read('systems/texturePacker.ts')).toContain('entry.source === TextureManager.Instance.getTexture(sourceId)');

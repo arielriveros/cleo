@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { rendererSource } from './helpers/rendererSource';
+import { rendererSource, expectAbsent } from './helpers/rendererSource';
 
 /**
  * Which passes rasterize with the TAA jitter, and which do not.
@@ -51,8 +51,9 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         // The whole design rests on this being zero. A site left on `_clipProjection` is one that can
         // never jitter, whichever side of the resolve it is on — and if it is on the near side, TAA
         // silently degrades to a blur over that geometry.
-        expect(RENDERER.split('this._clipProjection(this._activeCamera.projectionMatrix)').length - 1)
-            .toBe(0);
+        // Anchored on the jittered call, so a rename of the camera field cannot make this pass vacuously.
+        expectAbsent(RENDERER, 'this._clipProjection(this._view.camera.projectionMatrix)',
+                     'this._rasterProjection(this._view.camera.projectionMatrix)');
     });
 
     it('routes exactly these methods through _rasterProjection', () => {
@@ -126,7 +127,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
     it('gates the jitter and the resolve on the same flag', () => {
         // A jittered image that nothing resolves is strictly worse than no TAA: it is the same
         // aliasing, now crawling. One field decides both.
-        expect(RENDERER).toContain('if (!this._taaJitterActive || this._cubeFaceCapture');
-        expect(RENDERER).toContain('if (!this._taaJitterActive || !this._velocityProducedThisFrame) return;');
+        expect(RENDERER).toContain('if (!this._view.taaJitterActive || this._view.cubeFace');
+        expect(RENDERER).toContain('if (!this._view.taaJitterActive || !this._velocityProducedThisFrame) return;');
     });
 });

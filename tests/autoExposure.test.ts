@@ -229,7 +229,7 @@ describe('the authored exposure is kept apart from the metered one', () => {
         // is not: a scene saved while auto-exposure had opened up on a dim interior banks a very large
         // exposure, and every preview in the editor then renders blown out. A constant is also what
         // keeps thumbnails comparable with each other and stable as the scene is retuned.
-        expect(RENDERER).toContain('this._exposure = Renderer.PREVIEW_EXPOSURE;');
+        expect(RENDERER).toContain('this._view.exposure = Renderer.PREVIEW_EXPOSURE;');
         expect(RENDERER).toContain('PREVIEW_EXPOSURE = 2.0');
         const fn = RENDERER.slice(RENDERER.indexOf('private _resolveExposure()'));
         const body = fn.slice(0, fn.indexOf('\n    }'));

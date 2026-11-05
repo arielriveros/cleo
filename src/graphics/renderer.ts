@@ -200,6 +200,7 @@ import type { FoliageBatch, FoliageLayer, FoliageBand } from '../terrain/foliage
 import { FoliageGpuCuller, type GpuCullBucket, type GpuFoliageSegment } from './foliageGpuCulling';
 import { FoliageInteraction, gatherFoliageInteractors } from './foliageInteraction';
 
+import { createFrameView, type FrameView } from './render/frameView';
 import { QUALITY_TIERS } from './render/settingsTypes';
 import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 export { QUALITY_TIERS } from './render/settingsTypes';
@@ -402,20 +403,17 @@ export class Renderer {
     // Definite-assignment: set by the `viewport` setter during engine initialization, before any render.
     private _viewport!: HTMLElement;
 
-    // Definite-assignment: reassigned at the top of every render() from the scene's active camera.
-    private _activeCamera!: Camera;
-
-    // A linear scale applied before the ACES tonemap. The default compensates for the Lambertian
-    // albedo/PI diffuse, which otherwise leaves a white surface at ~0.3 raw radiance.
     /**
-     * The EFFECTIVE exposure the shaders use. With metering live this is the adapted value, rewritten
-     * every frame; otherwise it is `_baseExposure` below.
+     * This frame's view: camera, frame index, capture flags, the matrices every pass reads. One object,
+     * shared by reference with the subsystems split out of this class (render/frameView.ts), so a
+     * capture that swaps the camera is seen by all of them at once.
      */
-    private _exposure: number = 2.0;
+    private readonly _view: FrameView = createFrameView();
+
     /**
      * The AUTHORED exposure — what the artist set, what a scene saves, and what a preview renders at.
      *
-     * Separate from `_exposure` because the meter overwrites that one continuously. Without the split,
+     * Separate from `_view.exposure` because the meter overwrites that one continuously. Without the split,
      * `getRenderSettings()` saved whatever the meter happened to be at the instant of the save, and
      * suppressing metering for a preview would leave the preview sitting on the last adapted value —
      * so two thumbnails captured a second apart came out at different brightnesses.
@@ -599,10 +597,6 @@ export class Renderer {
     private readonly _decalFlip: DecalFlipbookFrame = { a: [0, 0, 1, 1], b: [0, 0, 1, 1], blend: 0 };
     private _gBufferFBO!: Framebuffer;
 
-    // The sun's world direction, refreshed at the top of the geometry pass — that pass writes a
-    // G-buffer and never sees the light list, but parallax self-shadowing needs it.
-    // `[0, 0, 0]` means no directional light and switches self-shadowing off.
-    private _sunDirection: number[] = [0, 0, 0];
 
     // Offscreen thumbnail capture. While `_presentTarget` is set the pipeline renders at the target's
     // size, skips every background draw and resolves into it, never touching the canvas.
@@ -1015,18 +1009,11 @@ export class Renderer {
      * still reads back what the user chose on a device that cannot honour it.
      */
     private _taaSupported: boolean = true;
-    /**
-     * Whether THIS frame rasterizes with a sub-pixel offset — and, equivalently, whether the resolve
-     * runs. One field for both on purpose: a jittered image that nothing resolves is strictly worse
-     * than no TAA at all. Cleared the instant the resolve completes, which is what keeps the overlay
-     * passes that follow it unjittered.
-     */
-    private _taaJitterActive: boolean = false;
     /** Clip-space translation for this frame's phase; the identity while TAA is off. */
     private readonly _jitterMatrix: mat4 = mat4.create();
     /** `_jitterMatrix * camera.projectionMatrix` — the projection SSAO reconstructs against. */
     private readonly _jitteredCameraProj: mat4 = mat4.create();
-    /** The view-projection actually rasterized this frame. `_invViewProj` is inverted from this. */
+    /** The view-projection actually rasterized this frame. `_view.invViewProj` is inverted from this. */
     private readonly _jitteredViewProj: mat4 = mat4.create();
 
     /**
@@ -1075,7 +1062,7 @@ export class Renderer {
     private _ssilTargetsW: number = 0;
     private _ssilTargetsH: number = 0;
     /**
-     * `_frameIndex` the history / the radiance copy were last written in. Each is usable only by the very
+     * `_view.frameIndex` the history / the radiance copy were last written in. Each is usable only by the very
      * next frame — a STAMP rather than a valid flag, because a flag survives a frame that skipped the
      * pass (the profiler kill switch, an empty G-buffer, a thumbnail) and would then hand over an image
      * from several frames back as if it were the last one. -1 = never.
@@ -1206,8 +1193,6 @@ export class Renderer {
     private _csmSphere: CascadeSphere = { center: vec3.create(), radius: 0 };
     private _csmScratch = { view: mat4.create(), proj: mat4.create(), up: vec3.create(), center: vec3.create() };
     private _csmForward: vec3 = vec3.create();
-    /** Frame counter used to stagger distant cascade updates (see _renderCascades). */
-    private _frameIndex: number = 0;
     // Scratch for the clip->view matrix handed to the SSIL passes (see viewPosAt in ssil.wgsl).
     private _invProjection: mat4 = mat4.create();
     private _ssaoRadius: number = 0.5;
@@ -1223,7 +1208,6 @@ export class Renderer {
     private _captureCamera!: Camera;
     private _captureProj: mat4 = mat4.create();
     private _iblFaceViews: mat4[] = [];
-    private _capturing: boolean = false;
     // Standard cube-map capture directions (dir, up) in the OpenGL convention.
     private static readonly _CUBE_FACES: { dir: [number, number, number], up: [number, number, number] }[] = [
         { dir: [ 1,  0,  0], up: [0, -1,  0] }, // +X
@@ -1259,17 +1243,6 @@ export class Renderer {
      */
     public debugGLErrors: boolean = false;
     private _glErrorCount: number = 0;
-    private _viewProj: mat4 = mat4.create();
-    private _invViewProj: mat4 = mat4.create();
-    /**
-     * The inverse of the UNJITTERED view-projection.
-     *
-     * Exactly one pass wants it. `_renderGrid` reads no depth texture: it intersects a per-pixel world
-     * ray with the origin plane and writes its own fragment depth, and it draws AFTER the resolve, so
-     * nothing averages it. Handed the jittered inverse it would wobble every grid line half a pixel,
-     * every frame, for as long as TAA is on.
-     */
-    private _invViewProjStable: mat4 = mat4.create();
     // Previous frame's view-projection, used by the camera-reprojection motion blur pass.
     // --- Sky light -----------------------------------------------------------------------------
     // Nine L2 spherical-harmonic coefficients, rgb each, padded to vec4 for WGSL's 16-byte uniform
@@ -1311,7 +1284,7 @@ export class Renderer {
     private _particleCollideValid = false;
     private readonly _forceFieldScratch = new Float32Array(MAX_FORCE_FIELDS * 16);
 
-    // Per-object camera frustum culling for the main color passes. Rebuilt each frame from _viewProj.
+    // Per-object camera frustum culling for the main color passes. Rebuilt each frame from _view.viewProj.
     private _frustum: Frustum = new Frustum();
     private _frustumCulling: boolean = true;
     /** See RenderSettings.occlusionCulling. */
@@ -2181,15 +2154,15 @@ export class Renderer {
         // `_render` already returned when there is no active camera; this repeats the test only so the
         // compiler can narrow it across the function boundary the frame encoder introduced.
         if (!scene.activeCamera) return;
-        this._activeCamera = scene.activeCamera.camera;
-        this._activeCamera.resize(this._renderWidth, this._renderHeight);
+        this._view.camera = scene.activeCamera.camera;
+        this._view.camera.resize(this._renderWidth, this._renderHeight);
         this._updateCameraHole(scene);
         // Kept for per-draw lookups (forward light-probe selection) that don't receive the scene.
         this._currentScene = scene;
         this._advanceWindTime();
         // What is pushing foliage aside this frame (characters, moving bodies, blasts): stamps for the
         // instanced foliage programs, aged against the same clock as the wind.
-        this._foliageInteraction.update(gatherFoliageInteractors(scene), this._windTime, this._activeCamera.position);
+        this._foliageInteraction.update(gatherFoliageInteractors(scene), this._view.windTime, this._view.camera.position);
 
         // Everything from here to the sky bake runs BEFORE `_statsT0`, so none of it is inside the
         // `Render (CPU)` figure the HUD shows — it lands in "Unattributed" instead. That exclusion is
@@ -2212,20 +2185,20 @@ export class Renderer {
         // because the resolve reprojects through that buffer: switching that pass off in the profiler
         // would otherwise leave the frame jittered with nothing to resolve it, which is strictly worse
         // than no TAA at all.
-        this._taaJitterActive = this._taaEnabled && this._taaSupported && !this._thumbnailMode
+        this._view.taaJitterActive = this._taaEnabled && this._taaSupported && !this._thumbnailMode
                                 && this._passEnabled['taa'] && this._passEnabled['velocity'];
         this._updateJitter();
 
         // Cache view/projection/inverse and update the culling frustum for this frame
-        const view = this._activeCamera.viewMatrix;
-        const proj = this._activeCamera.projectionMatrix;
+        const view = this._view.camera.viewMatrix;
+        const proj = this._view.camera.projectionMatrix;
         // UNJITTERED, and it must stay that way for two separate reasons. The culling frustum below is
         // built from it — CPU-side geometry with no screen-space convention in it at all, and one that
         // breathed by half a pixel every frame would pop objects in and out along its edges. And it is
         // both sides of every motion-vector subtraction, where a jitter present on one side and absent
         // on the other is indistinguishable from real motion.
-        mat4.multiply(this._viewProj, proj, view);
-        this._frustum.setFromViewProjection(this._viewProj);
+        mat4.multiply(this._view.viewProj, proj, view);
+        this._frustum.setFromViewProjection(this._view.viewProj);
         if (!this._thumbnailMode) this._stampAnimationView(scene);
 
         // The matrix actually RASTERIZED this frame, and its inverse. Every pass that unprojects the
@@ -2233,16 +2206,16 @@ export class Renderer {
         // unjittered inverse would place each pixel's world point half a texel off its own geometry.
         // Only the inverse, which exists solely so a fullscreen pass can turn a uv back into a world
         // position, carries the flip.
-        if (this._taaJitterActive) mat4.multiply(this._jitteredCameraProj, this._jitterMatrix, proj);
+        if (this._view.taaJitterActive) mat4.multiply(this._jitteredCameraProj, this._jitterMatrix, proj);
         else mat4.copy(this._jitteredCameraProj, proj);
         mat4.multiply(this._jitteredViewProj, this._jitteredCameraProj, view);
-        mat4.invert(this._invViewProj, this._jitteredViewProj);
-        this._uvConsuming(this._invViewProj, this._invViewProj);
+        mat4.invert(this._view.invViewProj, this._jitteredViewProj);
+        this._uvConsuming(this._view.invViewProj, this._view.invViewProj);
 
         // The UNJITTERED inverse, for the one consumer that SYNTHESISES geometry from a uv instead of
         // reading the depth buffer — see `_renderGrid`.
-        mat4.invert(this._invViewProjStable, this._viewProj);
-        this._uvConsuming(this._invViewProjStable, this._invViewProjStable);
+        mat4.invert(this._view.invViewProjStable, this._view.viewProj);
+        this._uvConsuming(this._view.invViewProjStable, this._view.invViewProjStable);
 
         // Pick each terrain chunk's detail level for this camera. Before the shadow passes, so the
         // cascades/shadow map rasterize the same reduced terrain the color passes will.
@@ -2360,16 +2333,16 @@ export class Renderer {
         this._checkGLErrors('post');
 
         // Remember this frame's camera transform so next frame's motion blur can reproject against it.
-        mat4.copy(this._prevViewProj, this._viewProj);
-        mat4.copy(this._prevView, this._activeCamera.viewMatrix);
+        mat4.copy(this._prevViewProj, this._view.viewProj);
+        mat4.copy(this._prevView, this._view.camera.viewMatrix);
         this._hasPrevViewProj = true;
 
         // And the camera behind this frame's depth snapshot, for next frame's particle collision. Not
         // from an offscreen capture: those resize the depth buffer and render from somewhere else.
-        if (!this._thumbnailMode && !this._capturing) {
-            mat4.copy(this._particleCollideViewProj, this._viewProj);
-            vec3.copy(this._particleCollideCamPos, this._activeCamera.position);
-            this._particleCollideOrtho = this._activeCamera.type === 'orthographic';
+        if (!this._thumbnailMode && !this._view.capturing) {
+            mat4.copy(this._particleCollideViewProj, this._view.viewProj);
+            vec3.copy(this._particleCollideCamPos, this._view.camera.position);
+            this._particleCollideOrtho = this._view.camera.type === 'orthographic';
             this._particleCollideValid = true;
         }
 
@@ -2390,7 +2363,7 @@ export class Renderer {
         gpuProfiler.endFrame();
         cpuProfiler.endFrame();
 
-        this._frameIndex++;
+        this._view.frameIndex++;
         frameStats.frameMs = performance.now() - _statsT0;
     }
 
@@ -2553,7 +2526,7 @@ export class Renderer {
     private _bindShadowsToForwardShaders(): void {
         for (const shaderName of this._forwardShaders()) {
             this._shaderManager.bind(shaderName);
-            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+            this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
             this._uploadShadowUniforms(shaderName);
         }
     }
@@ -2562,7 +2535,7 @@ export class Renderer {
         // Frame-default probe: the one whose volume covers the camera. Uses its SHARP linear-HDR
         // capture rather than the convolved prefilter, falling back to the sRGB scene environment;
         // `u_envMapLinear` tells the shader which decode to apply.
-        const probe = scene.probeForPoint(this._activeCamera.position, true);
+        const probe = scene.probeForPoint(this._view.camera.position, true);
         const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
         const envCube = probeCube ?? scene.environmentMap;
         for (const shaderName of this._forwardShaders()) {
@@ -2613,7 +2586,7 @@ export class Renderer {
             field.packInto(this._forceFieldScratch, fieldCount * 16);
             fieldCount++;
         }
-        const live = this._particleCollideValid && !this._thumbnailMode && !this._capturing;
+        const live = this._particleCollideValid && !this._thumbnailMode && !this._view.capturing;
         return {
             encoder: this._acquireEncoder('particles.sim'),
             gravity: scene.physics?.gravity ?? [0, -9.81, 0],
@@ -2634,12 +2607,12 @@ export class Renderer {
 
     /** A 2D scene: an orthographic camera over tilemaps. Its particles join the Y-sorted 2D pass. */
     private _isFlatParticleScene(scene: Scene): boolean {
-        return this._activeCamera.type === 'orthographic' && scene.tilemaps.size > 0;
+        return this._view.camera.type === 'orthographic' && scene.tilemaps.size > 0;
     }
 
     private _drawParticleNodes(scene: Scene, nodes: Iterable<ParticleSystemNode>, target: RenderTarget): void {
         // The sort runs passes of its own, so it goes before the particle pass opens.
-        this._particles.sort(nodes, this._acquireEncoder('particles.sort'), this._activeCamera.position);
+        this._particles.sort(nodes, this._acquireEncoder('particles.sort'), this._view.camera.position);
         const pass = this._beginFullscreenPass(target, 'particles', false, undefined, false);
         this._particles.draw(nodes, this._particleDrawFrame(scene, pass, target));
         this._endFullscreenPass(pass);
@@ -2658,7 +2631,7 @@ export class Renderer {
      * draw), the same one-frame lag TAA has; it only matters for an `exposureWeight` below 1.
      */
     private _particleDrawFrame(scene: Scene, pass: RenderPassEncoder, target: RenderTarget): ParticleDrawFrame {
-        const camera = this._activeCamera;
+        const camera = this._view.camera;
         let sun: LightNode | null = null;
         for (const light of scene.lights) if (light.type === 'directional') { sun = light; break; }
         const sunColor = [0, 0, 0];
@@ -2714,10 +2687,10 @@ export class Renderer {
             ambient, sunDirection, sunColor, localLights,
             visible: this._frustumCulling ? (min, max) => this._frustum.intersectsAABB(min, max) : undefined,
             lodDistanceScale: this._particleLodDistanceScale,
-            exposure: this._exposure,
+            exposure: this._view.exposure,
             // As the forward path picks a mesh's reflection: the probe containing it, else the sky. Never
             // during a probe capture, which would reflect the probe being captured.
-            environment: this._capturing ? undefined : position => {
+            environment: this._view.capturing ? undefined : position => {
                 const probe = scene.probeForPoint(position, true);
                 const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
                 const cube = probeCube ?? scene.environmentMap;
@@ -2731,8 +2704,8 @@ export class Renderer {
     private _ensurePackedTextures(scene: Scene): void {
         const packer = TexturePacker.Instance;
         // Per submesh material — a merged model's second range has its own maps to channel-pack.
-        for (const node of scene.models) for (const mat of node.model.materials) packer.sync(mat, this._frameIndex);
-        for (const node of scene.landscapes) node.terrain.syncPackedLayers(this._frameIndex, this._terrainLayerTextureSize);
+        for (const node of scene.models) for (const mat of node.model.materials) packer.sync(mat, this._view.frameIndex);
+        for (const node of scene.landscapes) node.terrain.syncPackedLayers(this._view.frameIndex, this._terrainLayerTextureSize);
         // Foliage prototypes are not scene models, so they were never synced: a foliage tree never got
         // its ORM pack, nor its cutout's edge-padded colour. Every level of every mesh layer, so a LOD
         // switch never meets an unbaked material.
@@ -2741,7 +2714,7 @@ export class Renderer {
                 if (layer.kind !== 'mesh') continue;
                 for (const level of layer.levels)
                     for (const model of level.models)
-                        for (const mat of model.materials) packer.sync(mat, this._frameIndex);
+                        for (const mat of model.materials) packer.sync(mat, this._view.frameIndex);
             }
         // Billboard cards and baked impostors are bound by texture, not material, so their edge padding
         // is requested here, where no pass is open. Their alpha IS the cutout (0.5 in the shader), and
@@ -2752,11 +2725,11 @@ export class Renderer {
                 const card = layer.kind === 'billboard' ? layer.textureId : layer.billboardModel ? layer.billboardTextureId : null;
                 // Not an octahedral atlas: the baker already dilated every frame inside its own tile, and
                 // padding the whole sheet would bleed each view into its neighbours.
-                if (card && card !== 'Null' && !layer.billboardOctahedral) packer.ensureDilated(card, 0.5, this._frameIndex);
+                if (card && card !== 'Null' && !layer.billboardOctahedral) packer.ensureDilated(card, 0.5, this._view.frameIndex);
             }
         // Decals sample the same packed ORM map a mesh wearing their material would.
-        for (const decal of scene.decals) if (decal.material) packer.sync(decal.material, this._frameIndex);
-        packer.sweep(this._frameIndex);
+        for (const decal of scene.decals) if (decal.material) packer.sync(decal.material, this._view.frameIndex);
+        packer.sweep(this._view.frameIndex);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -2869,7 +2842,7 @@ export class Renderer {
         if (!this._decalReceiversWanted || !this._beginPass('decals.receivers')) return;
         this._decalReceiverFBO = this._decalTarget(this._decalReceiverFBO, () => new Framebuffer({ usage: 'depth' }));
         const pass = this._beginFullscreenPass(this._decalReceiverFBO.renderTarget, 'decalReceivers', true);
-        const cam = this._activeCamera;
+        const cam = this._view.camera;
         // `_rasterProjection` already carries this frame's jitter and WebGPU's clip-z remap, so nothing
         // else is applied on top — `_renderShadowCasters` runs its light matrix through `_clipProjection`
         // because a light matrix has neither.
@@ -2952,7 +2925,7 @@ export class Renderer {
             // PER DECAL, not hoisted: WebGL2 hands texture units out in bind order and resets them only
             // on `setPipeline`, so a hoisted one runs past the 16 guaranteed units within three decals.
             pass.setPipeline(pipeline);
-            this._setDecalUniforms(decal, material, this._invViewProj, 0);
+            this._setDecalUniforms(decal, material, this._view.invViewProj, 0);
             pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
             // Bindings 0, 2, 4: the depth projected onto, the receiver depth, the G-buffer normal. None
             // of them is attached to this pass — the DBuffer has no depth attachment at all.
@@ -2990,7 +2963,7 @@ export class Renderer {
      */
     private _emissiveDecalPass(): void {
         const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'decals.emissive', false, undefined, false);
-        this._drawColorDecals(pass, this._emissiveDecals, Renderer._DECAL_EMISSIVE_BLEND, this._invViewProj, 0);
+        this._drawColorDecals(pass, this._emissiveDecals, Renderer._DECAL_EMISSIVE_BLEND, this._view.invViewProj, 0);
         this._endFullscreenPass(pass);
         // The passes that follow are partly on the legacy path and inherit blend state.
         this._restoreDefaultBlend();
@@ -3047,7 +3020,7 @@ export class Renderer {
         for (const node of scene.fluidVolumes)
             if (node.enabled && node.visible && node.volume && !this._outsideFrustumBox(node)) volumes.push(node);
         if (volumes.length === 0) return;
-        const camPos = this._activeCamera.position;
+        const camPos = this._view.camera.position;
         const key = new Map<FluidVolumeNode, number>();
         for (const v of volumes) key.set(v, vec3.squaredDistance(camPos, v.worldPosition));
         volumes.sort((a, b) => key.get(b)! - key.get(a)!);
@@ -3059,14 +3032,14 @@ export class Renderer {
         const h = Math.max(1, Math.ceil(this._renderHeight * scale));
         this._ensureFluidTargets(w, h, temporal);
         // The camera moved this frame: draw cheaply now, and let the history (if any) catch up.
-        const moving = this._hasPrevViewProj && !Renderer._matricesClose(this._viewProj, this._prevViewProj);
+        const moving = this._hasPrevViewProj && !Renderer._matricesClose(this._view.viewProj, this._prevViewProj);
 
         const { sunColor, ambient, sunDir } = this._fluidVolumeLight(scene);
         const depth = this._sceneDepthFBO.depth;
         const sm = this._shaderManager;
-        const cam = this._activeCamera;
+        const cam = this._view.camera;
         // Sub-pixel ray jitter (Halton 2,3) so accumulated frames sample the whole pixel.
-        const slot = this._frameIndex % 16;
+        const slot = this._view.frameIndex % 16;
         const jitter = temporal ? [Renderer._halton(slot + 1, 2) - 0.5, Renderer._halton(slot + 1, 3) - 0.5] : [0, 0];
 
         // --- 1. Trace ---
@@ -3094,7 +3067,7 @@ export class Renderer {
             sm.setUniform('u_view', cam.viewMatrix);
             sm.setUniform('u_projection', this._rasterProjection(cam.projectionMatrix));
             sm.setUniform('u_volumeInvModel', node.invVolumeMatrix);
-            sm.setUniform('u_invViewProj', this._invViewProjStable);
+            sm.setUniform('u_invViewProj', this._view.invViewProjStable);
             sm.setUniform('u_voxels', [...node.resolution]);
             sm.setUniform('u_smokeColor', node.smokeColor);
             sm.setUniform('u_sunColor', sunColor);
@@ -3118,7 +3091,7 @@ export class Renderer {
             sm.setUniform('u_ambient', node.ambient);
             // Sprite.exposureWeight's rule: divide by the share of the exposure the fire does not take.
             const fw = Math.min(1, Math.max(0, node.fireExposureWeight));
-            sm.setUniform('u_fireScale', fw < 1 && this._exposure > 0 ? Math.pow(this._exposure, fw - 1) : 1);
+            sm.setUniform('u_fireScale', fw < 1 && this._view.exposure > 0 ? Math.pow(this._view.exposure, fw - 1) : 1);
             sm.setUniform('u_stepScale', step);
             sm.setUniform('u_blend', node.previousVolume ? Math.min(1, Math.max(0, node.blend)) : 1);
             sm.setUniform('u_anisotropy', node.anisotropy);
@@ -3139,7 +3112,7 @@ export class Renderer {
             sm.setUniform('u_detailBlend', node.detailBlend);
             sm.setUniform('u_hasDetail', node.hasDetail && node.detailA && node.detailB ? 1 : 0);
             sm.setUniform('u_scatterOctaves', Math.max(1, Math.round(node.scatterOctaves)));
-            sm.setUniform('u_jitterSlot', this._frameIndex % 64);
+            sm.setUniform('u_jitterSlot', this._view.frameIndex % 64);
             sm.setUniform('u_hasLut', node.fireLut ? 1 : 0);
             sm.setUniform('u_hasOccupancy', node.occupancy ? 1 : 0);
             sm.setUniform('u_shading', node.shading === 'liquid' ? 1 : 0);
@@ -3170,7 +3143,7 @@ export class Renderer {
                 this._fluidTraceFBO!.colors[0], this._fluidTraceFBO!.colors[1], prev.colors[0],
             ]));
             sm.bind('fluidVolumeResolve');
-            sm.setUniform('u_invViewProj', this._invViewProjStable);
+            sm.setUniform('u_invViewProj', this._view.invViewProjStable);
             sm.setUniform('u_prevViewProj', this._uvProducing(this._prevViewProj));
             // Moving or editing: lean on the new samples so nothing smears; still: accumulate.
             sm.setUniform('u_feedback', moving || lead.interacting ? 0.6 : 0.9);
@@ -3190,7 +3163,7 @@ export class Renderer {
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [image, this._fluidTraceFBO!.colors[1], depth]));
         sm.bind('fluidVolumeComposite');
-        sm.setUniform('u_invViewProj', this._invViewProjStable);
+        sm.setUniform('u_invViewProj', this._view.invViewProjStable);
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
 
@@ -3296,7 +3269,7 @@ export class Renderer {
      */
     private _setDecalUniforms(decal: DecalNode, material: Material, invViewProj: mat4, mode: 0 | 1): void {
         const sm = this._shaderManager;
-        const cam = this._activeCamera;
+        const cam = this._view.camera;
         sm.setUniform('u_model', decal.volumeMatrix);
         sm.setUniform('u_view', cam.viewMatrix);
         sm.setUniform('u_projection', this._rasterProjection(cam.projectionMatrix));
@@ -3369,7 +3342,7 @@ export class Renderer {
      * scene updates before it renders. Uses the same cached bounding sphere the frustum cull does.
      */
     private _stampAnimationView(scene: Scene): void {
-        const eye = this._activeCamera.position;
+        const eye = this._view.camera.position;
         for (const node of scene.models) {
             if (!node.animator) continue;
             const s = node.getBoundingSphere();
@@ -3398,9 +3371,9 @@ export class Renderer {
      * was hidden is found again the moment it is uncovered.
      */
     private _nodeOccluded(node: ModelNode, s: { center: ArrayLike<number>; radius: number }): boolean {
-        if (this._cubeFaceCapture) return false;
-        const cpu = this._occlusionActive && this._activeCamera === this._occlusionCamera;
-        const gpu = this._gpuOcclusionActive && this._activeCamera === this._gpuOcclusionCamera;
+        if (this._view.cubeFace) return false;
+        const cpu = this._occlusionActive && this._view.camera === this._occlusionCamera;
+        const gpu = this._gpuOcclusionActive && this._view.camera === this._gpuOcclusionCamera;
         if (!cpu && !gpu) return false;
         // The selected node is redrawn by the outline mask whatever happens; keep it honest everywhere.
         if (this._selectedNodeId && node.id === this._selectedNodeId) return false;
@@ -3414,7 +3387,7 @@ export class Renderer {
             max[0] = c[0] + r; max[1] = c[1] + r; max[2] = c[2] + r;
             hidden = this._occlusion.isBoxOccluded(min, max);
         }
-        if (!hidden && gpu && Renderer._worthQuerying(node, c, r, this._activeCamera)) {
+        if (!hidden && gpu && Renderer._worthQuerying(node, c, r, this._view.camera)) {
             const triangles = node.model.geometry.indices.length / 3;
             if (this._gpuOcclusion.consider(node, r, triangles) && this._gpuOcclusion.isHidden(node)) {
                 hidden = true;
@@ -3434,11 +3407,11 @@ export class Renderer {
      * capture, nor with `lightOcclusionCulling` off. Memoised for the frame.
      */
     private _lightOccluded(node: LightNode, center: ArrayLike<number>, radius: number): boolean {
-        if (!this._lightOcclusionCulling || !this._gpuOcclusionActive || this._cubeFaceCapture
-            || this._activeCamera !== this._gpuOcclusionCamera) return false;
+        if (!this._lightOcclusionCulling || !this._gpuOcclusionActive || this._view.cubeFace
+            || this._view.camera !== this._gpuOcclusionCamera) return false;
         const memo = this._lightOccludedMemo.get(node);
         if (memo !== undefined) return memo;
-        const eye = this._activeCamera.position;
+        const eye = this._view.camera.position;
         const d = Math.hypot(eye[0] - center[0], eye[1] - center[1], eye[2] - center[2]);
         const hidden = d > radius * 1.2 + 1
             && this._gpuOcclusion.considerLight(node, center, radius)
@@ -3471,16 +3444,16 @@ export class Renderer {
      */
     private _beginGpuOcclusion(): void {
         const active = this._occlusionQueriesEnabled && this._occlusionMode !== 'off' && this._frustumCulling
-            && !this._thumbnailMode && !this._capturing && !this._cubeFaceCapture
+            && !this._thumbnailMode && !this._view.capturing && !this._view.cubeFace
             && !!device.capabilities.hasOcclusionQuery && !!device.createOcclusionQuerySet;
         if (active && !this._occlusionQueries)
             this._occlusionQueries = device.createOcclusionQuerySet!(GPU_OCCLUSION_BUDGET, 'occlusionQueries');
-        const view = this._activeCamera.viewMatrix, f = this._gpuOcclusionForward;
+        const view = this._view.camera.viewMatrix, f = this._gpuOcclusionForward;
         f[0] = -view[2]; f[1] = -view[6]; f[2] = -view[10];
-        this._gpuOcclusion.beginFrame(active ? this._occlusionQueries : null, this._activeCamera.position, f);
+        this._gpuOcclusion.beginFrame(active ? this._occlusionQueries : null, this._view.camera.position, f);
         this._lightOccludedMemo.clear();
         this._gpuOcclusionActive = active;
-        this._gpuOcclusionCamera = this._activeCamera;
+        this._gpuOcclusionCamera = this._view.camera;
     }
 
     /**
@@ -3491,7 +3464,7 @@ export class Renderer {
      */
     private _gpuOcclusionPass(): void {
         const set = this._occlusionQueries, nodes = this._gpuOcclusion.candidates;
-        if (!this._gpuOcclusionActive || !set || nodes.length === 0 || this._activeCamera !== this._gpuOcclusionCamera) return;
+        if (!this._gpuOcclusionActive || !set || nodes.length === 0 || this._view.camera !== this._gpuOcclusionCamera) return;
         // Its own scope, so the boxes' cost is a row of its own rather than part of the foliage pass's.
         this._scope('occlusion.queries');
         const target = device.createRenderTarget({
@@ -3505,7 +3478,7 @@ export class Renderer {
             depthAttachment: { loadOp: 'load', storeOp: 'store' },
             occlusionQuerySet: set,
         });
-        const cam = this._activeCamera;
+        const cam = this._view.camera;
         this._shaderManager.bind('occlusionBox');
         this._shaderManager.setUniform('u_view', cam.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._rasterProjection(cam.projectionMatrix));
@@ -3579,8 +3552,8 @@ export class Renderer {
         if (this._occlusionIdleFrames >= OCCLUSION_IDLE_FRAMES && ++this._occlusionSkipped < OCCLUSION_IDLE_PROBE) return;
         this._occlusionSkipped = 0;
         const start = performance.now();
-        const eye = this._activeCamera.position;
-        this._occlusion.begin(this._viewProj);
+        const eye = this._view.camera.position;
+        this._occlusion.begin(this._view.viewProj);
         let any = false;
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
@@ -3620,7 +3593,7 @@ export class Renderer {
         if (!any) return;
         this._occlusion.finish();
         this._occlusionActive = true;
-        this._occlusionCamera = this._activeCamera;
+        this._occlusionCamera = this._view.camera;
         // Kept until after resetFrameStats, which runs later in the frame. Inside the `prepare` scope
         // (scopes never nest), so the time gets a counter of its own instead of a profiler row.
         this._occlusionFrameStats.triangles = this._occlusion.stats.triangles;
@@ -3633,7 +3606,7 @@ export class Renderer {
 
     /** Whether a foliage cell's box is hidden behind this frame's occluders. */
     private _cellOccluded(min: ArrayLike<number>, max: ArrayLike<number>): boolean {
-        if (!this._occlusionActive || this._activeCamera !== this._occlusionCamera) return false;
+        if (!this._occlusionActive || this._view.camera !== this._occlusionCamera) return false;
         return this._occlusion.isBoxOccluded(min, max);
     }
 
@@ -3667,11 +3640,11 @@ export class Renderer {
     private readonly _drawSortScratch = new Map<ModelNode, number>();
 
     private _geometryPass(scene: Scene): void {
-        // Refreshed here, at the one point in this pass that still has the scene. See `_sunDirection`.
-        this._sunDirection = [0, 0, 0];
+        // Refreshed here, at the one point in this pass that still has the scene. See `_view.sunDirection`.
+        this._view.sunDirection = [0, 0, 0];
         for (const node of scene.lights) {
             if (node.type !== 'directional') continue;
-            this._sunDirection = this._dirOf(node) as unknown as number[];
+            this._view.sunDirection = this._dirOf(node) as unknown as number[];
             break;
         }
 
@@ -3714,7 +3687,7 @@ export class Renderer {
         // reject hidden fragments at the early depth test. One number per node, computed once.
         const sortKey = this._drawSortScratch;
         sortKey.clear();
-        const eye = this._activeCamera.position, far = this._activeCamera.far;
+        const eye = this._view.camera.position, far = this._view.camera.far;
         for (const node of singles) {
             const s = node.getBoundingSphere();
             const depth = Math.max(0, vec3.distance(eye, s.center) - s.radius);
@@ -3805,13 +3778,13 @@ export class Renderer {
      * hysteresis reads.
      */
     private _prepareFoliage(scene: Scene): void {
-        const camPos = this._activeCamera.position;
+        const camPos = this._view.camera.position;
         // The GPU path for the main view only, once a frame: its per-bucket parameters go up with
         // `writeBuffer`, which a second cull in the same unsubmitted frame would overwrite under the first.
         const gpu = this._foliageGpuCulling && FoliageGpuCuller.supported && this._frustumCulling
-            && !this._thumbnailMode && !this._capturing && !this._cubeFaceCapture
-            && this._foliageGpuFrame !== this._frameIndex;
-        if (gpu) this._foliageGpuFrame = this._frameIndex;
+            && !this._thumbnailMode && !this._view.capturing && !this._view.cubeFace
+            && this._foliageGpuFrame !== this._view.frameIndex;
+        if (gpu) this._foliageGpuFrame = this._view.frameIndex;
 
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
@@ -3962,7 +3935,7 @@ export class Renderer {
             });
         }
         layer.gpuBatches = this._foliageGpu.cull(this._acquireEncoder('foliage.cull'), layer, buckets,
-                                                 this._frustum.planes, this._activeCamera.position);
+                                                 this._frustum.planes, this._view.camera.position);
         layer.gpuCulled = true;
     }
 
@@ -4042,7 +4015,7 @@ export class Renderer {
                     hash = mixNumber(mixNumber(hash, this._objectId(model.mesh)), model.mesh.activeIndexCount);
                 if (cascade === 0) {
                     const w = this._foliageWind(scene, layer);
-                    if (w) hash = mixNumber(mixNumber(hash, this._windTime), w.droop);
+                    if (w) hash = mixNumber(mixNumber(hash, this._view.windTime), w.droop);
                 }
             }
         }
@@ -4119,10 +4092,10 @@ export class Renderer {
     private _foliageShadowCandidates(layer: FoliageLayer): { count: number; cells: FoliageCell[]; bounds: Float32Array } {
         let entry = this._foliageCandidates.get(layer);
         if (!entry) { entry = { frame: -1, count: 0, cells: [], bounds: new Float32Array(0) }; this._foliageCandidates.set(layer, entry); }
-        if (entry.frame === this._frameIndex) return entry;
-        entry.frame = this._frameIndex;
+        if (entry.frame === this._view.frameIndex) return entry;
+        entry.frame = this._view.frameIndex;
 
-        const camPos = this._activeCamera.position;
+        const camPos = this._view.camera.position;
         const cullDistance = foliageEffectiveCull(layer, this._foliageCullDistance);
         const maxD2 = cullDistance > 0 ? cullDistance * cullDistance : Infinity;
         // The shadow distance, with its own hysteresis band (appear inside it, vanish 10% past it).
@@ -4136,7 +4109,7 @@ export class Renderer {
                                   Math.sqrt(shadowOut2));
         const near = this._foliageCellsNear(layer, camPos, reachMax);
         const stamp = this._foliageCellStamp(layer);
-        const frame = this._frameIndex;
+        const frame = this._view.frameIndex;
         // Last frame's candidates, before this frame's overwrite them: see the clean-up below.
         const previous = this._foliagePreviousCells;
         previous.length = 0;
@@ -4355,10 +4328,6 @@ export class Renderer {
     // Foliage wind (chunks/foliageWind.wgsl)
     // ---------------------------------------------------------------------------------------------
 
-    /** Seconds of wind time, advanced by the frame delta (clamped, so a stall never makes plants jump). */
-    private _windTime: number = 0;
-    /** Last frame's `_windTime`, for the motion vectors. */
-    private _windTimePrev: number = 0;
     private _windClock: number = -1;
     /** This frame's foliage interaction stamps (graphics/foliageInteraction.ts). */
     private readonly _foliageInteraction = new FoliageInteraction();
@@ -4369,8 +4338,8 @@ export class Renderer {
         const now = performance.now();
         const dt = this._windClock < 0 ? 0 : Math.min(0.1, Math.max(0, (now - this._windClock) / 1000));
         this._windClock = now;
-        this._windTimePrev = this._windTime;
-        this._windTime += dt;
+        this._view.windTimePrev = this._view.windTime;
+        this._view.windTime += dt;
     }
 
     /**
@@ -4455,10 +4424,10 @@ export class Renderer {
         const node = scene.wind;
         const windOn = !!node && node.visible && node.strength > 0;
         const [dx, dz] = windOn ? node!.directionXZ : [1, 0];
-        const cam = this._activeCamera.position;
+        const cam = this._view.camera.position;
         const [g, t, r, sh, c] = this._windVec;
         g[0] = dx; g[1] = dz; g[2] = windOn ? node!.strength : 0; g[3] = windOn ? node!.gustScale : 18;
-        t[0] = this._windTime; t[1] = this._windTimePrev; t[2] = windOn ? node!.gustSpeed : 4; t[3] = w.fadeEnd;
+        t[0] = this._view.windTime; t[1] = this._view.windTimePrev; t[2] = windOn ? node!.gustSpeed : 4; t[3] = w.fadeEnd;
         r[0] = w.lean; r[1] = w.stiffness;
         const leaves = material.properties.get('windRole') === 'leaves';
         r[2] = leaves ? Math.max(0, Number(material.properties.get('windFlutter') ?? 0.5) || 0) : 0;
@@ -4500,11 +4469,11 @@ export class Renderer {
         const [b, c, f] = this._lodVec;
         if (band) { b[0] = band.inStart; b[1] = band.inEnd; b[2] = band.outStart; b[3] = band.outEnd; }
         else { b[0] = b[1] = b[2] = b[3] = 0; }
-        const cam = this._activeCamera.position;
+        const cam = this._view.camera.position;
         c[0] = cam[0]; c[1] = cam[1]; c[2] = cam[2];
         c[3] = !band ? 0 : layer.kind === 'billboard' ? 2 : 1;
         // A different dither phase every frame, so TAA resolves the screen-door into a smooth blend.
-        f[0] = ((this._frameIndex * 7) % 16) / 16;
+        f[0] = ((this._view.frameIndex * 7) % 16) / 16;
         // The leaf translucency the impostor program writes into the G-buffer (the mesh
         // levels read it off their own materials instead).
         f[1] = layer.farTranslucency;
@@ -4525,7 +4494,7 @@ export class Renderer {
         const d = this._dissolveVec;
         d[0] = fade >= 1 ? 0 : 1 - Math.max(0, fade);
         // The foliage crossfade's phase, so a despawn resolves under TAA exactly as a LOD change does.
-        d[1] = ((this._frameIndex * 7) % 16) / 16;
+        d[1] = ((this._view.frameIndex * 7) % 16) / 16;
         this._shaderManager.setUniform('u_dissolve', d);
     }
     private readonly _dissolveVec: [number, number] = [0, 0];
@@ -4543,11 +4512,11 @@ export class Renderer {
     private _updateCameraHole(scene: Scene): void {
         const see = scene.activeCamera?.seeThrough;
         // Not in the editor's own views, not in captures and thumbnails: only the game camera has a player.
-        if (!see || !see.active || see.strength <= 0 || see.radius <= 0 || this._capturing || this._thumbnailMode) {
+        if (!see || !see.active || see.strength <= 0 || see.radius <= 0 || this._view.capturing || this._thumbnailMode) {
             this._camHoleStrength = 0;
             return;
         }
-        const eye = this._activeCamera.position;
+        const eye = this._view.camera.position;
         this._camHole[0] = eye[0]; this._camHole[1] = eye[1]; this._camHole[2] = eye[2];
         this._camHole[3] = 1 / see.radius;
         this._camHolePivot[0] = see.pivot[0]; this._camHolePivot[1] = see.pivot[1]; this._camHolePivot[2] = see.pivot[2];
@@ -4556,7 +4525,7 @@ export class Renderer {
 
     /** Whether a draw that opted in (`cameraDither`) gets the hole this frame. */
     private _cameraHoleOn(optedIn: boolean): boolean {
-        return optedIn && this._camHoleStrength > 0 && !this._capturing && !this._cubeFaceCapture;
+        return optedIn && this._camHoleStrength > 0 && !this._view.capturing && !this._view.cubeFace;
     }
 
     /**
@@ -4613,8 +4582,8 @@ export class Renderer {
                         const sway = !!wind?.foliage && isFoliageMaterial(model.material);
                         const shaderType = sway ? 'pbrGeometryInstancedPrepassFoliage' : 'pbrGeometryInstancedPrepass';
                         this._shaderManager.bind(shaderType);
-                        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-                        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+                        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+                        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
                         if (sway) this._setWindUniforms(scene, wind!, model.material);
                         this._setLodFadeUniforms(layer, slot);
                         const pipeline = this._pipelineFor(shaderType, Renderer._GEOMETRY_PROGRAMS[shaderType], {
@@ -4668,8 +4637,8 @@ export class Renderer {
                         const reflection = billboard ? GeometryFoliageBillboardProgram
                                                      : Renderer._GEOMETRY_PROGRAMS[shaderType];
                         this._shaderManager.bind(shaderType);
-                        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-                        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+                        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+                        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
                         if (sway) this._setWindUniforms(scene, wind!, model.material);
                         this._setLodFadeUniforms(layer, slot);
                         const pipeline = this._pipelineFor(shaderType, reflection, {
@@ -4736,8 +4705,8 @@ export class Renderer {
         if (!albedo || !normal) return;
 
         this._shaderManager.bind('foliageImpostorInstanced');
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
         this._setLodFadeUniforms(layer, slot);
         const v = this._impostorVec;
         // Which way up the atlas sits in its texture: see `atlasUv` in geometryFoliageImpostor.wgsl.
@@ -4778,14 +4747,14 @@ export class Renderer {
             step1: this._terrainLodStep1,
             step2: this._terrainLodStep2,
         };
-        for (const landscape of scene.landscapes) landscape.updateLod(this._activeCamera.position, settings);
+        for (const landscape of scene.landscapes) landscape.updateLod(this._view.camera.position, settings);
     }
 
     // Distance-based model LOD: every LodGroupNode picks its visible level subtree, or hides past its
     // cull distance; every node with a drawDistance hides its subtree past it (×0.9 hysteresis on the
     // way back, like the LOD groups). Visibility flags are rewritten only on a transition.
     private _updateModelLOD(scene: Scene): void {
-        const eye = this._activeCamera.position;
+        const eye = this._view.camera.position;
         for (const group of scene.lodGroups) group.updateLod(eye);
         for (const node of scene.drawDistanceNodes) node.updateDrawCull(eye);
     }
@@ -4816,15 +4785,12 @@ export class Renderer {
         // A CUBE FACE inverts Y as well, to match the cubemap layout — the same inversion
         // `_initializeIBL` bakes into `_captureProj`. The probe capture is the only cube-face render
         // that goes through a normal camera, so it is the only one that must be told.
-        const source = this._cubeFaceCapture
+        const source = this._view.cubeFace
             ? mat4.multiply(this._cubeFaceScratch, Renderer._FLIP_SCREEN_Y, projection)
             : projection;
         mat4.multiply(this._clipProjScratch, Renderer._CLIP_Z_ZERO_TO_ONE, source);
         return this._clipProjScratch;
     }
-    // True only while the probe capture renders into cube faces. Inverting Y reverses triangle winding,
-    // so `_pipelineFor` must flip `frontFace` too or every solid renders inside out.
-    private _cubeFaceCapture = false;
     private readonly _cubeFaceScratch: mat4 = mat4.create();
     private readonly _clipProjScratch: mat4 = mat4.create();
 
@@ -4833,7 +4799,7 @@ export class Renderer {
      *
      * Every pass that draws into the image TAA resolves goes through this; everything drawn after the
      * resolve — the grid, transparents, gizmos, sprites, the selection mask — goes through
-     * {@link _clipProjection} and stays put. In practice both call THIS, and `_taaJitterActive`
+     * {@link _clipProjection} and stays put. In practice both call THIS, and `_view.taaJitterActive`
      * decides: it is cleared the moment the resolve runs, so "is this pass before the resolve" is
      * answered once, by the frame, instead of being re-derived at a dozen call sites. `_renderModel`
      * is why that matters — one function serves the forward-opaque queue, the transparent queue and
@@ -4857,8 +4823,8 @@ export class Renderer {
      * to an orthographic camera, and to `_renderSky`'s temporary perspective override of one.
      */
     private _updateJitter(): void {
-        if (!this._taaJitterActive) { mat4.identity(this._jitterMatrix); return; }
-        jitterMatrix(this._jitterMatrix, this._frameIndex % TAA_PHASES,
+        if (!this._view.taaJitterActive) { mat4.identity(this._jitterMatrix); return; }
+        jitterMatrix(this._jitterMatrix, this._view.frameIndex % TAA_PHASES,
                      this._renderWidth, this._renderHeight);
     }
 
@@ -4870,11 +4836,11 @@ export class Renderer {
      * downstream will average their sub-pixel offsets back out. They would simply shimmer.
      */
     private _endJitterPhase(): void {
-        this._taaJitterActive = false;
+        this._view.taaJitterActive = false;
     }
 
     private _rasterProjection(projection: mat4): mat4 {
-        if (!this._taaJitterActive || this._cubeFaceCapture || this._capturing)
+        if (!this._view.taaJitterActive || this._view.cubeFace || this._view.capturing)
             return this._clipProjection(projection);
         mat4.multiply(this._rasterProjScratch, this._jitterMatrix, projection);
         return this._clipProjection(this._rasterProjScratch);
@@ -5238,8 +5204,8 @@ export class Renderer {
             (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(shaderType).attributes);
 
         this._shaderManager.bind(shaderType);
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
         this._shaderManager.setUniform('u_model', node.worldTransform);
         this._setDissolve(node.effectiveFade);
         this._setCameraHole(node.cameraDither);
@@ -5256,8 +5222,8 @@ export class Renderer {
             if (mat.type === 'terrain') {
                 // u_viewPos again, and deliberately: terrain reads it from its OWN uniform block
                 // (TerrainUniforms), not from the transform block set above. Two blocks, two writes.
-                this._shaderManager.setUniform('u_viewPos', this._activeCamera.position); // parallax V + specular V
-                this._shaderManager.setUniform('u_sunDirection', this._sunDirection);      // self-shadow
+                this._shaderManager.setUniform('u_viewPos', this._view.camera.position); // parallax V + specular V
+                this._shaderManager.setUniform('u_sunDirection', this._view.sunDirection);      // self-shadow
                 this._shaderManager.setUniform('u_specularAA', this._specularAaEnabled);   // roughness filter
                 for (const [name, value] of mat.properties) this._shaderManager.setUniform(name, value);
                 const terrainPipeline = this._pipelineFor(shaderType, reflection, {
@@ -5549,8 +5515,8 @@ export class Renderer {
                 builtFor: material.type,
             });
             pass.setPipeline(pipeline);
-            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+            this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+            this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
             // Placed instanced models never crossfade, and the foliage pass may have left it on.
             this._shaderManager.setUniform('u_lodCamera', Renderer._LOD_OFF);
             this._setCameraHole(false);
@@ -5558,8 +5524,8 @@ export class Renderer {
             pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
         } else {
             this._shaderManager.bind(shaderType);
-            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+            this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+            this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
             this._shaderManager.setUniform('u_lodCamera', Renderer._LOD_OFF);
             this._setCameraHole(false);
             this._applyMaterial(material);
@@ -5628,15 +5594,15 @@ export class Renderer {
             this._gBufferFBO.depth, (this._ssaoResult ?? this._ssaoBlurFBO).colors[0],
         ]));
 
-        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
-        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
+        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
 
         // Upload all lights once for the whole screen.
         this._setDeferredLighting(scene);
 
         // Shadows
         this._shaderManager.bind('deferredLighting');
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         this._uploadShadowUniforms('deferredLighting');
         pass.setBindGroup(3, this._frameLightingBindGroup(pipeline));
 
@@ -5645,7 +5611,7 @@ export class Renderer {
         // EVERY sampler unit is assigned every frame, used or not — an unassigned cube sampler aliases
         // the 2D G-buffer sampler on unit 0, which is a draw-time type collision.
         this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
-        const probes = scene.probesForFrame(this._activeCamera.position, 2);
+        const probes = scene.probesForFrame(this._view.camera.position, 2);
         this._shaderManager.setUniform('u_probeCount', probes.length);
 
         // Group 2: the IBL cubes, the BRDF LUT and the environment fallback. Every slot resolves to a
@@ -5967,7 +5933,7 @@ export class Renderer {
 
     /** Whether a stamp says "written last frame" — the only age the reprojecting passes can use. */
     private _ssilFresh(stamp: number): boolean {
-        return stamp >= 0 && stamp === this._frameIndex - 1 && this._hasPrevViewProj;
+        return stamp >= 0 && stamp === this._view.frameIndex - 1 && this._hasPrevViewProj;
     }
 
     /**
@@ -5991,7 +5957,7 @@ export class Renderer {
         this._uvConsuming(this._invProjection, this._invProjection);
         mat4.copy(this._ssilProj, this._uvProducing(this._jitteredCameraProj));
         // A view-space point to last frame's clip space and view space in one multiply each.
-        mat4.invert(this._ssilInvView, this._activeCamera.viewMatrix);
+        mat4.invert(this._ssilInvView, this._view.camera.viewMatrix);
         mat4.multiply(this._ssilViewToPrevClip, this._uvProducing(this._prevViewProj), this._ssilInvView);
         mat4.multiply(this._ssilViewToPrevView, this._prevView, this._ssilInvView);
         // The inverse projection's z and w rows, which is all a view DEPTH needs (column-major).
@@ -6005,7 +5971,7 @@ export class Renderer {
         trace.setBindGroup(0, this._textureBindGroup(tracePipeline, 0, [
             this._gBufferFBO.colors[1], this._gBufferFBO.depth, radiance.colors[0],
         ]));
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._ssilProj);
         this._shaderManager.setUniform('u_invProjection', this._invProjection);
         this._shaderManager.setUniform('u_viewToPrevClip', this._ssilViewToPrevClip);
@@ -6018,9 +5984,9 @@ export class Renderer {
         this._shaderManager.setUniform('u_steps', steps);
         // Small and wrapping: the noise only needs a new phase each frame, and a float that grows for a
         // whole session loses the fraction the hash lives in.
-        this._shaderManager.setUniform('u_frame', this._frameIndex % 64);
+        this._shaderManager.setUniform('u_frame', this._view.frameIndex % 64);
         this._shaderManager.setUniform('u_hasRadiance', this._ssilBounceThisFrame);
-        this._shaderManager.setUniform('u_ortho', this._activeCamera.type === 'orthographic');
+        this._shaderManager.setUniform('u_ortho', this._view.camera.type === 'orthographic');
         // A cap on the screen-space search, so a surface right in front of the camera does not send its
         // samples across the whole frame and through every cache line on the way.
         this._shaderManager.setUniform('u_maxRadiusPx', Math.max(16, this._renderHeight * 0.15));
@@ -6052,7 +6018,7 @@ export class Renderer {
             this._drawFullscreen(pass);
             this._endFullscreenPass(pass);
             this._ssilHistoryIndex ^= 1;
-            this._ssilHistoryFrame = this._frameIndex;
+            this._ssilHistoryFrame = this._view.frameIndex;
             this._ssaoResult = dst;
             accumulated = true;
         }
@@ -6099,7 +6065,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_invProjection', this._invProjection);
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
-        this._ssilRadianceFrame = this._frameIndex;
+        this._ssilRadianceFrame = this._view.frameIndex;
         // Put back what the overlay passes below expect, as the TAA resolve does.
         this._sceneFBO.bind();
         GLState.blend(false);
@@ -6225,8 +6191,8 @@ export class Renderer {
      * bake its irradiance + prefiltered specular maps. Guarded so probe capture never re-enters itself.
      */
     public captureProbe(scene: Scene, probe: LightProbeNode): void {
-        if (this._capturing) return;
-        this._capturing = true;
+        if (this._view.capturing) return;
+        this._view.capturing = true;
 
         const res = probe.resolution;
         const levels = Math.floor(Math.log2(res)) + 1;
@@ -6236,10 +6202,10 @@ export class Renderer {
         const cam = this._captureCamera;
         cam.fov = 90;
         cam.resize(res, res); // aspect 1
-        const prevCamera = this._activeCamera;
-        this._activeCamera = cam;
+        const prevCamera = this._view.camera;
+        this._view.camera = cam;
         // Everything below swaps renderer state (the camera, the cube-face winding, suppressed shadows, a
-        // one-cluster light grid). A throw anywhere in the capture used to leave `_capturing` set, and
+        // one-cluster light grid). A throw anywhere in the capture used to leave `_view.capturing` set, and
         // `_updateIBL` then never refreshed a probe again; the `finally` puts all of it back.
         let baked = false;
         try {
@@ -6267,7 +6233,7 @@ export class Renderer {
             // Every draw below writes a CUBE FACE. See `_clipProjection`: on WebGPU that needs the same
             // Y inversion `_captureProj` carries for the sky and IBL bakes, and the reversed winding that
             // comes with it. Restored in the `finally` at the end of the capture.
-            this._cubeFaceCapture = true;
+            this._view.cubeFace = true;
             for (let face = 0; face < 6; face++) {
                 const f = Renderer._CUBE_FACES[face];
                 const dir = vec3.fromValues(f.dir[0], f.dir[1], f.dir[2]);
@@ -6308,16 +6274,16 @@ export class Renderer {
 
             // Cleared before `bakeIBL` below, which renders its own cube faces through `_captureProj` -
             // that matrix already carries the inversion, and applying it twice would undo it.
-            this._cubeFaceCapture = false;
-            this._activeCamera = prevCamera;
+            this._view.cubeFace = false;
+            this._view.camera = prevCamera;
             this._generateMipsAfterRender(sourceCube);
 
             const { irradiance, prefiltered } = this.bakeIBL(sourceCube, res);
             probe.setBakedMaps(sourceCube, irradiance, prefiltered);
             baked = true;
         } finally {
-            this._cubeFaceCapture = false;
-            this._activeCamera = prevCamera;
+            this._view.cubeFace = false;
+            this._view.camera = prevCamera;
             if (!baked) sourceCube.delete();
             this._setViewport(this._renderWidth, this._renderHeight);
             this._shadowsSuppressed = false;
@@ -6326,7 +6292,7 @@ export class Renderer {
             // uniforms would otherwise send every fragment of the next frame to cluster 0.
             this._bindShadowsToForwardShaders();
             this._lightGrid.restoreGrid();
-            this._capturing = false;
+            this._view.capturing = false;
         }
     }
 
@@ -6354,7 +6320,7 @@ export class Renderer {
     // cadence rather than testing the sun again — two tests of one thing eventually disagree.
     // The readback is async, so the coefficients land a frame or two late; nothing here blocks.
     private _updateSkyLight(scene: Scene): void {
-        if (this._capturing) return;
+        if (this._view.capturing) return;
         const node = scene.skyLight;
         if (!node) {
             // Leaving the coefficients behind would keep lighting a scene whose sky light was deleted.
@@ -6659,7 +6625,7 @@ export class Renderer {
      * the cascades.
      */
     private _buildLightGrid(scene: Scene): void {
-        const camera = this._activeCamera;
+        const camera = this._view.camera;
         const lights = scene.lights;
 
         // Collect the punctual lights, in the order Scene numbered them — `node.index` IS the record
@@ -6887,7 +6853,7 @@ export class Renderer {
     // Bake any light probe flagged for baking or due for a realtime refresh. IBL applies only where
     // the user has placed a probe; a scene without one keeps flat ambient plus the crude env map.
     private _updateIBL(scene: Scene): void {
-        if (this._capturing) return;
+        if (this._view.capturing) return;
 
         const now = performance.now();
         for (const probe of scene.lightProbes) {
@@ -6937,7 +6903,7 @@ export class Renderer {
         dir = [dir[0] / len, dir[1] / len, dir[2] / len];
 
         // Project the sun as a point at infinity: clip = viewProj * vec4(dirTowardSun, 0).
-        const m = this._viewProj;
+        const m = this._view.viewProj;
         const clipX = m[0] * dir[0] + m[4] * dir[1] + m[8] * dir[2];
         const clipY = m[1] * dir[0] + m[5] * dir[1] + m[9] * dir[2];
         const clipW = m[3] * dir[0] + m[7] * dir[1] + m[11] * dir[2];
@@ -6988,8 +6954,8 @@ export class Renderer {
 
         this._shaderManager.bind('godRays');
         rayPass.setBindGroup(0, this._textureBindGroup(rayPipeline, 0, [this._sceneDepthFBO.depth]));
-        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
-        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
+        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         this._shaderManager.setUniform('u_sunDir', s);
         this._shaderManager.setUniform('u_lightColor', lightColor);
         this._shaderManager.setUniform('u_tint', node.godRayTint);
@@ -7003,7 +6969,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_anisotropy', node.godRayAnisotropy);
         this._shaderManager.setUniform('u_maxDistance', node.godRayMaxDistance);
         this._shaderManager.setUniform('u_steps', node.godRaySamples);
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         // With no caster the cascade lookups all return "lit" and the shafts degrade to uniform haze,
         // which is why this pass needs no shadow-present branch of its own any more.
         this._uploadShadowUniforms('godRays');
@@ -7032,7 +6998,7 @@ export class Renderer {
     // Re-bake the SkyAtmosphere cubemap when needed: on first use / parameter change (needsBake) or
     // when the sun direction has moved past a small epsilon. No-op when no atmosphere node exists.
     private _updateSkyAtmosphere(scene: Scene): void {
-        if (this._capturing) return;
+        if (this._view.capturing) return;
         const node = scene.skyAtmosphere;
         if (!node) return;
 
@@ -7205,8 +7171,8 @@ export class Renderer {
         // The CLEAN atmosphere, never the cloud-baked sky: fog is the colour of the air at the horizon, and
         // sampling clouds into it painted them onto every fogged hillside.
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._sceneDepthFBO.depth, node.cubemap]));
-        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
-        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
+        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         this._shaderManager.setUniform('u_fogDensity', node.fogDensity);
         this._shaderManager.setUniform('u_fogStart', node.fogStart);
         this._shaderManager.setUniform('u_fogHeight', node.fogHeight);
@@ -7343,7 +7309,7 @@ export class Renderer {
         if (!this._thumbnailMode && this._passEnabled['sky']) {
             const skyPass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'sky', false,
                                                       undefined, false);
-            this._renderSky(skyPass, scene, this._activeCamera);
+            this._renderSky(skyPass, scene, this._view.camera);
             this._endFullscreenPass(skyPass);
         }
 
@@ -7396,7 +7362,7 @@ export class Renderer {
 
         // Transparent models: back-to-front, depth-tested against opaque, no depth writes. Thumbnails
         // are the exception — their coverage alpha comes from the scene depth, so they must write it.
-        const camPos = this._activeCamera.position;
+        const camPos = this._view.camera.position;
         const depthKey = new Map<ModelNode, number>();
         for (const node of transparentQueue) depthKey.set(node, vec3.squaredDistance(camPos, node.worldPosition));
         transparentQueue.sort((a, b) => depthKey.get(b)! - depthKey.get(a)!);
@@ -7663,7 +7629,7 @@ export class Renderer {
 
     /** Start, continue or finish the cloud-sky bake. Runs after the atmosphere bake, before the sky light. */
     private _updateCloudSky(scene: Scene): void {
-        if (this._capturing || this._thumbnailMode) return;
+        if (this._view.capturing || this._thumbnailMode) return;
         const node = scene.volumetricClouds;
         const atmo = scene.skyAtmosphere;
         if (!node || !atmo || !atmo.cubemap || !node.bakeIntoSky) {
@@ -7699,7 +7665,7 @@ export class Renderer {
                 this._cloudSkyCubes[cube] = made;
                 this._cloudSkyRes[cube] = res;
             }
-            const e = this._activeCamera.position;
+            const e = this._view.camera.position;
             this._cloudSkyBake = {
                 cube, face: 0,
                 // All six at once when there is nothing to show yet or someone pressed Regenerate (the
@@ -7827,7 +7793,7 @@ export class Renderer {
         const rayGroup = (pipe: RenderPipeline) => this._textureBindGroup(pipe, 0, [
             this._gBufferFBO.depth, this._cloudBaseNoise!, this._cloudDetailNoise!,
         ]);
-        this._setCloudUniforms(scene, node, this._invViewProj, this._activeCamera.position,
+        this._setCloudUniforms(scene, node, this._view.invViewProj, this._view.camera.position,
                                performance.now() * 0.001);
         this._shaderManager.setUniform('u_ignoreDepth', false);
 
@@ -7840,7 +7806,7 @@ export class Renderer {
         if (scale >= 0.999) {
             // Full resolution: raymarch straight into the bound scene buffer (premultiplied "over" set above).
             this._shaderManager.setUniform('u_temporal', false);
-            this._shaderManager.setUniform('u_jitterSlot', this._frameIndex % 16);
+            this._shaderManager.setUniform('u_jitterSlot', this._view.frameIndex % 16);
             const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'clouds', false);
             pass.setPipeline(rayPipeline);
             pass.setBindGroup(0, rayGroup(rayPipeline));
@@ -7866,8 +7832,8 @@ export class Renderer {
                                                           [source, this._gBufferFBO.depth]));
             this._shaderManager.bind('cloudUpsample');
             this._shaderManager.setUniform('u_cloudResolution', [w, h]);
-            this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
-            this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+            this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
+            this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
             this._shaderManager.setUniform('u_slabBottom', node.baseAltitude);
             this._shaderManager.setUniform('u_slabTop', node.baseAltitude + node.thickness);
             this._drawFullscreen(upPass);
@@ -8028,7 +7994,7 @@ export class Renderer {
                                group: (p: RenderPipeline) => BindGroup): Texture {
         if (this._cloudsFBO.width !== w || this._cloudsFBO.height !== h) this._cloudsFBO.resize(w, h);
         this._shaderManager.setUniform('u_temporal', false);
-        this._shaderManager.setUniform('u_jitterSlot', this._frameIndex % 16);
+        this._shaderManager.setUniform('u_jitterSlot', this._view.frameIndex % 16);
         const tracePass = this._beginFullscreenPass(this._cloudsFBO.renderTarget, 'cloudTrace',
                                                     true, [0, 0, 0, 0], false);
         tracePass.setPipeline(pipeline);
@@ -8065,7 +8031,7 @@ export class Renderer {
             // The raymarch shader is still bound by the caller; u_temporal false makes traceUV() the
             // identity, so this writes one ray per pixel of the history target.
             this._shaderManager.setUniform('u_temporal', false);
-            this._shaderManager.setUniform('u_jitterSlot', this._frameIndex % 16);
+            this._shaderManager.setUniform('u_jitterSlot', this._view.frameIndex % 16);
             const tracePass = this._beginFullscreenPass(this._cloudHistoryFBOs[seed].renderTarget, 'cloudReseed',
                                                         true, [0, 0, 0, 0], false);
             tracePass.setPipeline(pipeline);
@@ -8078,7 +8044,7 @@ export class Renderer {
         }
 
         // --- Trace: 1/16 of the rays ---
-        const bayerIndex = this._frameIndex % 16;
+        const bayerIndex = this._view.frameIndex % 16;
         const cell = Renderer.CLOUD_BAYER_ORDER.indexOf(bayerIndex);
         this._shaderManager.setUniform('u_temporal', true);
         this._shaderManager.setUniform('u_traceResolution', [tw, th]);
@@ -8105,9 +8071,9 @@ export class Renderer {
         resolvePass.setBindGroup(0, this._textureBindGroup(resolvePipeline, 0, [
             this._cloudTraceFBO.colors[0], prev.colors[0], this._gBufferFBO.depth,
         ]));
-        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+        this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
         this._shaderManager.setUniform('u_prevViewProj', this._uvProducing(this._prevViewProj));
-        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         this._shaderManager.setUniform('u_resolution', [w, h]);
         this._shaderManager.setUniform('u_traceResolution', [tw, th]);
         this._shaderManager.setUniform('u_bayerIndex', bayerIndex);
@@ -8224,25 +8190,25 @@ export class Renderer {
         const pipeline = this._fullscreenPipeline('grid', GridProgram, OVERLAY_BLEND,
             { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' });
         pass.setPipeline(pipeline);
-        // The STABLE inverse, not `_invViewProj`: this pass builds a world ray from the uv rather than
+        // The STABLE inverse, not `_view.invViewProj`: this pass builds a world ray from the uv rather than
         // unprojecting the depth buffer, and it draws after the TAA resolve, so a jittered ray would
         // shimmer the grid rather than antialias it. `u_viewProj` is unjittered for the same reason.
-        this._shaderManager.setUniform('u_invViewProj', this._invViewProjStable);
-        this._shaderManager.setUniform('u_viewProj', this._viewProj);
-        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_invViewProj', this._view.invViewProjStable);
+        this._shaderManager.setUniform('u_viewProj', this._view.viewProj);
+        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         this._shaderManager.setUniform('u_plane', this._gridPlane);
 
         // Fade radius scales with zoom so the grid always reads as infinite. In perspective
         // that tracks the camera's distance to the plane; in ortho it tracks the frustum extent.
         let fadeFar: number;
-        if (this._activeCamera.type === 'orthographic') {
-            const width = Math.abs(this._activeCamera.right - this._activeCamera.left);
-            const height = Math.abs(this._activeCamera.top - this._activeCamera.bottom);
+        if (this._view.camera.type === 'orthographic') {
+            const width = Math.abs(this._view.camera.right - this._view.camera.left);
+            const height = Math.abs(this._view.camera.top - this._view.camera.bottom);
             fadeFar = Math.max(40, Math.max(width, height) * 2.0);
         } else {
             const h = Math.abs(this._gridPlane === 0
-                ? this._activeCamera.position[1]
-                : this._activeCamera.position[2]);
+                ? this._view.camera.position[1]
+                : this._view.camera.position[2]);
             fadeFar = Math.max(40, h * 25.0);
         }
         this._shaderManager.setUniform('u_fadeFar', fadeFar);
@@ -8278,8 +8244,8 @@ export class Renderer {
             // Back-to-front so blended sprites composite correctly. Selection outlines come from the
             // mask pass, so there is no special-casing of the selected sprite here.
             sprites.sort((a, b) =>
-                vec3.distance(this._activeCamera.position, b.worldPosition) -
-                vec3.distance(this._activeCamera.position, a.worldPosition));
+                vec3.distance(this._view.camera.position, b.worldPosition) -
+                vec3.distance(this._view.camera.position, a.worldPosition));
             const only = this._begin2DPass();
             for (const node of sprites) this._renderSprite(node, true, only);
             this._endFullscreenPass(only);
@@ -8415,13 +8381,13 @@ export class Renderer {
         }) : null;
         if (pipeline) pass!.setPipeline(pipeline);
         this._shaderManager.bind('tilemap');
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
 
         // Chunk meshes are in MAP-LOCAL space, so the node's world position belongs here — read off the
         // node, not `tilemap.origin`, which is stale until the scene ticks. Parallax and the layer z
         // offset ride in this matrix and ONLY here, never on the node's transform.
-        const cam = this._activeCamera.position;
+        const cam = this._view.camera.position;
         const origin = node.worldPosition;
         const model = mat4.create();
         mat4.fromTranslation(model, [
@@ -8519,9 +8485,9 @@ export class Renderer {
     private _applyMaterialProperties(material: Material): void {
         // The per-view values below, gathered first: if the bound program's block already holds this
         // material under this exact view, this frame, there is nothing to send (shaderOptimizer/materialSync).
-        const cam = this._activeCamera;
+        const cam = this._view.camera;
         mat4.multiply(this._materialViewProj, cam.projectionMatrix, cam.viewMatrix);
-        const view = this._materialView, eye = cam.position, sun = this._sunDirection;
+        const view = this._materialView, eye = cam.position, sun = this._view.sunDirection;
         for (let i = 0; i < 16; i++) view[i] = this._materialViewProj[i];
         view[16] = eye[0]; view[17] = eye[1]; view[18] = eye[2];
         view[19] = sun[0]; view[20] = sun[1]; view[21] = sun[2];
@@ -8534,8 +8500,8 @@ export class Renderer {
         // by the rest of it here, as a sprite's overdrive is; the tonemapper multiplies by all of it. Safe
         // against the per-frame memo above: the exposure does not change within a frame.
         const emissiveWeight = material.properties.get('emissiveExposureWeight');
-        if (emissiveWeight !== undefined && emissiveWeight < 1 && this._exposure > 0) {
-            const k = Math.pow(this._exposure, Math.max(0, emissiveWeight) - 1);
+        if (emissiveWeight !== undefined && emissiveWeight < 1 && this._view.exposure > 0) {
+            const k = Math.pow(this._view.exposure, Math.max(0, emissiveWeight) - 1);
             if (material.properties.has('emissiveIntensity'))
                 this._shaderManager.setUniform('u_material.emissiveIntensity', Number(material.properties.get('emissiveIntensity')) * k);
             else {
@@ -8566,10 +8532,10 @@ export class Renderer {
         // Same for its tint: a leaf's would otherwise recolour the next hand-built material's glow.
         if (material.type === 'pbr' && !material.properties.has('translucencyTint'))
             this._shaderManager.setUniform('u_material.translucencyTint', [1, 1, 1, 0]);
-        this._shaderManager.setUniform('u_material.viewPos', this._activeCamera.position);
-        this._shaderManager.setUniform('u_material.sunDirection', this._sunDirection);
+        this._shaderManager.setUniform('u_material.viewPos', this._view.camera.position);
+        this._shaderManager.setUniform('u_material.sunDirection', this._view.sunDirection);
         // The parallax hit's pixel depth offset (`parallaxDepth`). Built from the camera being drawn
-        // NOW rather than the frame's cached `_viewProj`, so a probe or thumbnail capture that swaps the
+        // NOW rather than the frame's cached `_view.viewProj`, so a probe or thumbnail capture that swaps the
         // active camera offsets against its own projection. Unjittered and GL-convention on purpose:
         // the shader adds a DELTA to the rasterised depth, which neither the jitter nor WebGPU's 0..1
         // remap changes. (Computed at the top, where the memo needs it.)
@@ -8600,11 +8566,11 @@ export class Renderer {
      */
     private _applyCustomMaterial(material: CustomMaterial, samplersViaBindGroup: boolean = false): void {
         this._shaderManager.setUniform('u_time', performance.now() * 0.001);
-        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         if (material.renderMode === 'forward') {
             // The scene helpers' inputs (customShaders.ts FORWARD_SCENE_BODY). Set per draw: both names
             // are shared with fullscreen passes that leave their own values behind.
-            const cam = this._activeCamera;
+            const cam = this._view.camera;
             this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
             this._shaderManager.setUniform('u_depthParams', [cam.near, cam.far,
                 cam.type === 'orthographic' ? 1 : 0, this._sceneBuffersLive ? 1 : 0]);
@@ -8718,7 +8684,7 @@ export class Renderer {
      */
     private _nodeMoved(node: ModelNode): boolean {
         const prev = this._prevXform.get(node);
-        if (prev === undefined || prev.frame !== this._frameIndex - 1) return false;
+        if (prev === undefined || prev.frame !== this._view.frameIndex - 1) return false;
         if (!mat4.exactEquals(prev.world, node.worldTransform)) return true;
         const animator = node.animator;
         return !!animator && (animator.isPlaying || animator.isBlending);
@@ -8768,11 +8734,11 @@ export class Renderer {
             if (node.drawCulled) continue;
             let entry = this._prevXform.get(node);
             if (entry === undefined) {
-                entry = { world: mat4.create(), bones: null, frame: this._frameIndex };
+                entry = { world: mat4.create(), bones: null, frame: this._view.frameIndex };
                 this._prevXform.set(node, entry);
             }
             mat4.copy(entry.world, node.worldTransform);
-            entry.frame = this._frameIndex;
+            entry.frame = this._view.frameIndex;
 
             const skin = Renderer._skinOf(node);
             if (!skin) { entry.bones = null; continue; }
@@ -9111,7 +9077,7 @@ export class Renderer {
 
         // Only WebGPU has a front-face to get wrong here: WebGL2 keeps its own winding state and the
         // cube-face capture never changed it.
-        const cubeFace = this._cubeFaceCapture && device.backend === 'webgpu';
+        const cubeFace = this._view.cubeFace && device.backend === 'webgpu';
         const key = program + '|' + cullMode + '|' + targets + '|' + topology + '|' + vertex
                             + '|' + (builtFor ?? '') + (cubeFace ? '|cw' : '')
                             + (reflection.vertexWgsl ? '|vs' : '')
@@ -9344,7 +9310,7 @@ export class Renderer {
     private _cameraMoved(): boolean {
         if (!this._hasPrevViewProj) return false;
         for (let i = 0; i < 16; i++)
-            if (Math.abs(this._viewProj[i] - this._prevViewProj[i]) > 1e-7) return true;
+            if (Math.abs(this._view.viewProj[i] - this._prevViewProj[i]) > 1e-7) return true;
         return false;
     }
 
@@ -9363,16 +9329,16 @@ export class Renderer {
      * scale-free — a view-direction jump, and camera movement as a fraction of a reference distance.
      */
     private _detectTemporalCut(scene: Scene): void {
-        if (this._activeCamera !== this._lastTemporalCamera) {
+        if (this._view.camera !== this._lastTemporalCamera) {
             // The commonest cut there is: switching cameras in the editor, or to a cutscene camera.
-            this._lastTemporalCamera = this._activeCamera;
+            this._lastTemporalCamera = this._view.camera;
             this.invalidateTemporalHistory();
             this._captureTemporalCameraState();
             return;
         }
 
-        const pos = this._activeCamera.position;
-        const view = this._activeCamera.viewMatrix;
+        const pos = this._view.camera.position;
+        const view = this._view.camera.viewMatrix;
         // Camera forward is the negated third row of the view matrix (it is the inverse rotation).
         const fx = -view[2], fy = -view[6], fz = -view[10];
 
@@ -9386,7 +9352,7 @@ export class Renderer {
         // because the cloud layer this used to measure against does not exist in most scenes. When
         // there IS a cloud layer it can only TIGHTEN the bound, so the old behaviour is preserved
         // exactly rather than approximated.
-        let reference = Math.max(1, Math.min(this._activeCamera.far, this._shadowDistance));
+        let reference = Math.max(1, Math.min(this._view.camera.far, this._shadowDistance));
         const clouds = scene.volumetricClouds;
         if (clouds) {
             const slabMid = clouds.baseAltitude + clouds.thickness * 0.5;
@@ -9401,8 +9367,8 @@ export class Renderer {
     }
 
     private _captureTemporalCameraState(): void {
-        const pos = this._activeCamera.position;
-        const view = this._activeCamera.viewMatrix;
+        const pos = this._view.camera.position;
+        const view = this._view.camera.viewMatrix;
         vec3.set(this._prevTemporalCamPos, pos[0], pos[1], pos[2]);
         vec3.set(this._prevTemporalCamFwd, -view[2], -view[6], -view[10]);
     }
@@ -9551,7 +9517,7 @@ export class Renderer {
         if (!this._thumbnailMode) {
             const skyPass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'sky', false,
                                                       undefined, false);
-            this._renderSky(skyPass, scene, this._activeCamera);
+            this._renderSky(skyPass, scene, this._view.camera);
             this._endFullscreenPass(skyPass);
         }
         GLState.depthMask(true); // models below need depth writes again
@@ -9610,8 +9576,8 @@ export class Renderer {
 
         // Sort transparent draw queue by distance to camera
         transparentDrawQueue.sort((a, b) => {
-            const aDist = vec3.distance(this._activeCamera.position, a.worldPosition);
-            const bDist = vec3.distance(this._activeCamera.position, b.worldPosition);
+            const aDist = vec3.distance(this._view.camera.position, a.worldPosition);
+            const bDist = vec3.distance(this._view.camera.position, b.worldPosition);
 
             return bDist - aDist;
         });
@@ -9731,14 +9697,14 @@ export class Renderer {
             }
         } catch (_) {}
 
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
-        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
+        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
 
         // Per-draw light-probe selection: the probe containing THIS mesh supplies the env reflection
         // cube (unit 7). Always re-set — a previous draw may have bound a different cube.
         // Skipped during probe capture, to avoid feedback.
-        if (!this._capturing && this._currentScene &&
+        if (!this._view.capturing && this._currentScene &&
             (shaderType === 'blinn_phong' || shaderType === 'blinn_phongSkinned' ||
              shaderType === 'pbr' || shaderType === 'pbrSkinned' || shaderType.startsWith('custom:'))) {
             // Reflections are all the forward path takes from a probe; its lighting is the sky and ambient.
@@ -9867,7 +9833,7 @@ export class Renderer {
         const cssHeight = this._canvas.clientHeight;
         const worldHeight = Math.hypot(m[4], m[5], m[6]);
         if (!cssHeight || worldHeight <= 0) return;
-        const cam = this._activeCamera;
+        const cam = this._view.camera;
         let worldPerPx: number;
         if (cam.type === 'orthographic') {
             worldPerPx = Math.abs(cam.top - cam.bottom) / cssHeight;
@@ -9924,37 +9890,37 @@ export class Renderer {
         this._shaderManager.setUniform('u_uvOffset', [u0, v0]);
         this._shaderManager.setUniform('u_uvScale', [u1 - u0, v1 - v0]);
 
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
-        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
+        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         
         // constraint the sprite to always face the camera based on the node's constraints
         const spriteMatrix = mat4.clone(node.worldTransform);
         const constraints: 'free' | 'spherical' | 'cylindrical' = node.constraints;
 
         if (constraints === 'spherical') {
-            spriteMatrix[0] = this._activeCamera.viewMatrix[0];
-            spriteMatrix[1] = this._activeCamera.viewMatrix[4];
-            spriteMatrix[2] = this._activeCamera.viewMatrix[8];
-            spriteMatrix[4] = this._activeCamera.viewMatrix[1];
-            spriteMatrix[5] = this._activeCamera.viewMatrix[5];
-            spriteMatrix[6] = this._activeCamera.viewMatrix[9];
-            spriteMatrix[8] = this._activeCamera.viewMatrix[2];
-            spriteMatrix[9] = this._activeCamera.viewMatrix[6];
-            spriteMatrix[10] = this._activeCamera.viewMatrix[10];
+            spriteMatrix[0] = this._view.camera.viewMatrix[0];
+            spriteMatrix[1] = this._view.camera.viewMatrix[4];
+            spriteMatrix[2] = this._view.camera.viewMatrix[8];
+            spriteMatrix[4] = this._view.camera.viewMatrix[1];
+            spriteMatrix[5] = this._view.camera.viewMatrix[5];
+            spriteMatrix[6] = this._view.camera.viewMatrix[9];
+            spriteMatrix[8] = this._view.camera.viewMatrix[2];
+            spriteMatrix[9] = this._view.camera.viewMatrix[6];
+            spriteMatrix[10] = this._view.camera.viewMatrix[10];
             // reapply scaling
             mat4.scale(spriteMatrix, spriteMatrix, node.worldScale);
         }
         else if (constraints === 'cylindrical') {
-            spriteMatrix[0] = this._activeCamera.viewMatrix[0];
-            spriteMatrix[1] = this._activeCamera.viewMatrix[4];
-            spriteMatrix[2] = this._activeCamera.viewMatrix[8];
+            spriteMatrix[0] = this._view.camera.viewMatrix[0];
+            spriteMatrix[1] = this._view.camera.viewMatrix[4];
+            spriteMatrix[2] = this._view.camera.viewMatrix[8];
             spriteMatrix[4] = 0;
             spriteMatrix[5] = 1;
             spriteMatrix[6] = 0;
-            spriteMatrix[8] = this._activeCamera.viewMatrix[2];
-            spriteMatrix[9] = this._activeCamera.viewMatrix[6];
-            spriteMatrix[10] = this._activeCamera.viewMatrix[10];
+            spriteMatrix[8] = this._view.camera.viewMatrix[2];
+            spriteMatrix[9] = this._view.camera.viewMatrix[6];
+            spriteMatrix[10] = this._view.camera.viewMatrix[10];
 
             // reapply scaling
             mat4.scale(spriteMatrix, spriteMatrix, node.worldScale);
@@ -9968,7 +9934,7 @@ export class Renderer {
         // the opaque surface BEHIND it (chunks/basicForward.wgsl, against the scene's depth snapshot), so a
         // flame set into its torch head or logs melts into them instead of being cut along a line. Off where
         // there is no live snapshot (a thumbnail, the overlay's icons).
-        const cam = this._activeCamera;
+        const cam = this._view.camera;
         const soft = blend !== OVERLAY_BLEND && !this._thumbnailMode ? node.sprite.softness : 0;
         material.properties.set('softness', soft);
         if (soft > 0) material.properties.set('depthParams', [cam.near, cam.far, cam.type === 'orthographic' ? 1 : 0, 1]);
@@ -9980,8 +9946,8 @@ export class Renderer {
         // sprites sharing a tileset never fight over one value. A sprite that takes less than the whole
         // exposure (Sprite.exposureWeight) is divided by the rest of it here; the tonemapper multiplies by all.
         const weight = node.sprite.exposureWeight;
-        material.properties.set('intensity', weight < 1 && this._exposure > 0
-            ? node.overdrive * Math.pow(this._exposure, weight - 1) : node.overdrive);
+        material.properties.set('intensity', weight < 1 && this._view.exposure > 0
+            ? node.overdrive * Math.pow(this._view.exposure, weight - 1) : node.overdrive);
 
         // Set material uniforms + bind textures
         if (pipeline) {
@@ -10129,8 +10095,8 @@ export class Renderer {
      * caster's shadow volume (see `shadowReach`).
      */
     private _ensureShadowCasters(scene: Scene): void {
-        if (this._castersFrame === this._frameIndex && this._castersScene === scene) return;
-        this._castersFrame = this._frameIndex;
+        if (this._castersFrame === this._view.frameIndex && this._castersScene === scene) return;
+        this._castersFrame = this._view.frameIndex;
         this._castersScene = scene;
 
         const sun = this._shadowLight;
@@ -10236,7 +10202,7 @@ export class Renderer {
         key = mixNumber(mixNumber(mixNumber(key, this._objectId(material)), casts ? 1 : 0),
                         material.config.side === 'double' ? 1 : 0);
         key = mixNumber(mixNumber(mixNumber(key, cut ? this._objectId(cut.texture) : 0), cut ? cut.cutoff : 0),
-                        this._shadowPipelineEpoch * 2 + (this._cubeFaceCapture && device.backend === 'webgpu' ? 1 : 0));
+                        this._shadowPipelineEpoch * 2 + (this._view.cubeFace && device.backend === 'webgpu' ? 1 : 0));
         key = mixNumber(mixNumber(key, reachKey), landscape.chunkNodes.length);
         // A density change swaps every chunk's geometry, and a chunk waits for its new mesh.
         const first = landscape.chunkNodes[0];
@@ -10351,7 +10317,7 @@ export class Renderer {
         // so front-face culling would erase half of it. A solid caster keeps the FRONT-face culling that
         // pushes shadow acne onto surfaces the camera cannot see.
         const cullMode: CullMode = anyCutout || material.config.side === 'double' ? 'none' : 'front';
-        const epoch = this._shadowPipelineEpoch * 2 + (this._cubeFaceCapture && device.backend === 'webgpu' ? 1 : 0);
+        const epoch = this._shadowPipelineEpoch * 2 + (this._view.cubeFace && device.backend === 'webgpu' ? 1 : 0);
 
         let state = this._shadowCasterStates.get(node);
         if (!state || state.model !== model || state.material !== material || state.shaderType !== shaderType
@@ -10388,10 +10354,10 @@ export class Renderer {
     /** `_shadowCutoutOf`, once per material per frame: a landscape's thousand chunks share one material. */
     private _shadowCutoutCached(material: Material): ShadowCutout | null {
         const entry = this._shadowCutoutMemo.get(material);
-        if (entry && entry.frame === this._frameIndex) return entry.cut;
+        if (entry && entry.frame === this._view.frameIndex) return entry.cut;
         const cut = this._shadowCutoutOf(material);
-        if (entry) { entry.frame = this._frameIndex; entry.cut = cut; }
-        else this._shadowCutoutMemo.set(material, { frame: this._frameIndex, cut });
+        if (entry) { entry.frame = this._view.frameIndex; entry.cut = cut; }
+        else this._shadowCutoutMemo.set(material, { frame: this._view.frameIndex, cut });
         return cut;
     }
 
@@ -10470,7 +10436,7 @@ export class Renderer {
         const mesh = record.node.model.mesh;
         if (!mesh.hasLods) return -1;
         if (this._layerLodMode === 'beyond') {
-            const c = record.sphere.center, e = this._activeCamera.position;
+            const c = record.sphere.center, e = this._view.camera.position;
             const dx = c[0] - e[0], dy = c[1] - e[1], dz = c[2] - e[2];
             if (Math.sqrt(dx * dx + dy * dy + dz * dz) - record.sphere.radius <= this._layerLodRadius) return -1;
         }
@@ -10497,7 +10463,7 @@ export class Renderer {
                 // of it, and a sail turning in the wind beside the camera is shaded by the near cascades,
                 // not by this. Redrawing the whole landscape to follow either cost more than anything else
                 // in the frame. Its age limit catches the rest.
-                const e = this._activeCamera.position;
+                const e = this._view.camera.position;
                 const dx = c[0] - e[0], dy = c[1] - e[1], dz = c[2] - e[2];
                 if (Math.sqrt(dx * dx + dy * dy + dz * dz) + r.sphere.radius + r.reach > motionFrom)
                     h = mixNumber(mixNumber(mixNumber(h, Math.round(c[0] / coarseMotion)), Math.round(c[1] / coarseMotion)),
@@ -10511,7 +10477,7 @@ export class Renderer {
                 const lod = this._shadowLodFor(r);
                 h = mixNumber(mixNumber(h, r.terrainVersion), lod >= 0 ? lod : r.node.model.mesh.activeLod);
             }
-            if (state.skinned && coarseMotion <= 0) h = mixNumber(h, this._frameIndex);
+            if (state.skinned && coarseMotion <= 0) h = mixNumber(h, this._view.frameIndex);
         }
         return h;
     }
@@ -10541,7 +10507,7 @@ export class Renderer {
         // Nearest first, hidden ones last, then truncated, as the point lights are (see there): the slots
         // go to the lights the camera is among, and `SpotShadowSlots.update` lets an incumbent keep its own.
         if (casters.length > Renderer.MAX_SPOT_SHADOWS) {
-            const cam = this._activeCamera.position;
+            const cam = this._view.camera.position;
             const rank = (n: LightNode) => {
                 const spot = n.light as Spotlight;
                 spotBoundingSphere(n.worldPosition, n.worldForward, spot.range,
@@ -10673,7 +10639,7 @@ export class Renderer {
         // spare. Dropping it outright made a light at the edge of visibility trade its slot back and
         // forth as its query verdict aged, and every hand-over redraws all six faces from scratch.
         if (casters.length > MAX_POINT_SHADOWS) {
-            const cam = this._activeCamera.position;
+            const cam = this._view.camera.position;
             const rank = (n: LightNode) => vec3.squaredDistance(n.worldPosition, cam)
                 + (this._lightOccluded(n, n.worldPosition, (n.light as PointLight).range) ? 1e12 : 0);
             casters.sort((a, b) => rank(a) - rank(b));
@@ -10791,11 +10757,11 @@ export class Renderer {
             if (!frustum.intersectsSphere(c[0], c[1], c[2], r.sphere.radius)) continue;
             const node = r.node;
             const dynamic = r.terrainVersion < 0
-                && this._casterMotion.isDynamic(node, node.transformVersion, this._frameIndex, r.state.skinned);
+                && this._casterMotion.isDynamic(node, node.transformVersion, this._view.frameIndex, r.state.skinned);
             let h = mixTransform(mixString(dynamic ? dh : sh, node.id), node.worldTransform);
             if (r.terrainVersion >= 0) h = mixNumber(h, r.terrainVersion);
             if (dynamic) {
-                if (r.state.skinned) h = mixNumber(h, this._frameIndex);
+                if (r.state.skinned) h = mixNumber(h, this._view.frameIndex);
                 dh = h;
                 out.dynamics[out.dynamicCount++] = r;
             } else {
@@ -10821,7 +10787,7 @@ export class Renderer {
     private _renderCascades(scene: Scene, light: LightNode): void {
         // The key light's direction — the moon's at night (see `_updateKeyLight`).
         const lightDir = this._dirOf(light);
-        const cam = this._activeCamera;
+        const cam = this._view.camera;
         // Cap the shadowed range so cascades stay tight regardless of the camera far plane
         // (the editor camera uses far=10000, which otherwise stretches the cascades → jagged).
         const shadowFar = Math.min(cam.far, this._shadowDistance);
@@ -10863,7 +10829,7 @@ export class Renderer {
             const eyeFit = staggered && perspective;
             if (eyeFit) cascadeSphereAroundEye(farD, fovY, aspect, eye, this._csmSphere);
             else this._fitCascadeSphere(nearD, farD);
-            if (staggered && !this._shadowFullUpdate && !staggeredCascadeDue(i, this._frameIndex)
+            if (staggered && !this._shadowFullUpdate && !staggeredCascadeDue(i, this._view.frameIndex)
                 && vec3.dot(this._cascadeFitLightDirs[i], lightDir) > 0.99999
                 && staleCascadeCovers(this._cascadeFitSpheres[i], this._csmSphere)) continue;
 
@@ -10900,11 +10866,11 @@ export class Renderer {
             const hash = mixNumber(this._layerHash(this._cascadeMatrices[i]), foliage);
             const changed = this._shadowLayerCache.changed(i, hash);
             if (!changed && !this._shadowFullUpdate
-                && this._frameIndex - this._shadowLayerDrawn[i] < Renderer.SHADOW_LAYER_MAX_AGE) {
+                && this._view.frameIndex - this._shadowLayerDrawn[i] < Renderer.SHADOW_LAYER_MAX_AGE) {
                 frameStats.shadowLayersSkipped++;
                 continue;
             }
-            this._shadowLayerDrawn[i] = this._frameIndex;
+            this._shadowLayerDrawn[i] = this._view.frameIndex;
 
             const pass = this._beginDepthPass(this._shadowCascadeFBO.renderTarget, 'cascade', i);
             this._renderShadowCasters(pass, this._layerCasters, this._layerCasterCount, this._cascadeMatrices[i]);
@@ -10931,7 +10897,7 @@ export class Renderer {
      */
     private _renderFarCascade(scene: Scene, light: LightNode, nearShadowEnd: number): void {
         const lightDir = this._dirOf(light);
-        const cam = this._activeCamera;
+        const cam = this._view.camera;
         const reach = Math.min(cam.far, this._shadowFarDistance);
         // Off, or not reaching past the near cascades: the shader is told 0 and never samples the layer.
         if (this._shadowFarDistance <= 0 || reach <= nearShadowEnd || this._shadowCascadeFBO.layers <= this._cascadeCount) {
@@ -10956,12 +10922,12 @@ export class Renderer {
         const blocks = this._farTerrainBlocks(scene);
         // Pixels nearer than this are shaded by the near cascades: movement there does not show here.
         const motionFrom = nearShadowEnd * (1 - this._cascadeBlend);
-        if (!due && (!this._shadowStagger || isFreeShadowSlot(this._frameIndex, this._cascadeCount))) {
+        if (!due && (!this._shadowStagger || isFreeShadowSlot(this._view.frameIndex, this._cascadeCount))) {
             // Judged against the fit it was DRAWN with: re-fitting just to ask would change the matrix,
             // and so the answer, whenever the camera moved at all.
             this._selectLayerCasters(this._farCascadeFit, null, 0, Renderer.FAR_CASTER_MIN_RADIUS, blocks);
             due = this._shadowLayerCache.changed(layer, this._layerHash(this._farCascadeMatrix, this._farMotionStep(), motionFrom))
-                || this._frameIndex - this._shadowLayerDrawn[layer] >= Renderer.FAR_LAYER_MAX_AGE;
+                || this._view.frameIndex - this._shadowLayerDrawn[layer] >= Renderer.FAR_LAYER_MAX_AGE;
             if (!due) frameStats.shadowLayersSkipped++;
         }
         if (due) {
@@ -10975,7 +10941,7 @@ export class Renderer {
             this._farCascadeValid = true;
             // Remember what it is drawn with, for the next free frame's question.
             this._shadowLayerCache.changed(layer, this._layerHash(this._farCascadeMatrix, this._farMotionStep(), motionFrom));
-            this._shadowLayerDrawn[layer] = this._frameIndex;
+            this._shadowLayerDrawn[layer] = this._view.frameIndex;
 
             const pass = this._beginDepthPass(this._shadowCascadeFBO.renderTarget, 'cascade', layer);
             this._renderShadowCasters(pass, this._layerCasters, this._layerCasterCount, this._farCascadeMatrix);
@@ -11001,7 +10967,7 @@ export class Renderer {
         // Blocks of landscapes no longer drawn: freed once unused for a while (a play session's scene
         // comes and goes; its editor twin's blocks are rebuilt in a few milliseconds if it returns).
         for (const [landscape, set] of this._terrainBlocks) {
-            if (scene.landscapes.has(landscape) || this._frameIndex - set.lastUsed < 600) continue;
+            if (scene.landscapes.has(landscape) || this._view.frameIndex - set.lastUsed < 600) continue;
             for (const mesh of set.meshes) mesh.dispose();
             this._terrainBlocks.delete(landscape);
         }
@@ -11033,7 +10999,7 @@ export class Renderer {
                     recordsKey: NaN, lastUsed: 0 };
             this._terrainBlocks.set(landscape, set);
         }
-        set.lastUsed = this._frameIndex;
+        set.lastUsed = this._view.frameIndex;
         let rebuilt = false;
         if (set.terrain !== terrain || set.version !== terrain.heightsVersion || set.step !== step) {
             const spans = shadowBlockSpans(terrain.resolution, terrain.config.chunkQuads, Renderer.TERRAIN_BLOCK_CHUNKS);
@@ -11110,7 +11076,7 @@ export class Renderer {
      * texel grid.
      */
     private _fitCascadeSphere(nearD: number, farD: number): void {
-        const cam = this._activeCamera;
+        const cam = this._view.camera;
 
         if (cam.type === 'perspective') {
             // Camera forward = -Z of the view matrix's rotation, read straight out of the columns.
@@ -11503,7 +11469,7 @@ export class Renderer {
         const pass = this._beginFullscreenPass(this._screenTarget(), 'present', true);
         const pipeline = this._fullscreenPipeline('present', PresentProgram);
         pass.setPipeline(pipeline);
-        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_exposure', this._view.exposure);
         this._shaderManager.setUniform('u_saturation', this._effectiveSaturation());
         this._shaderManager.setUniform('u_toneMapper', this._toneMapperId());
         const lut = this._colorLut.volumeFor(this._colorGradingLut);
@@ -11583,11 +11549,11 @@ export class Renderer {
             source.colors[0], this._sceneDepthFBO.depth, ...userTextures,
         ]));
         this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
-        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+        this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
         this._shaderManager.setUniform('u_sunDir', sun.dir);
         this._shaderManager.setUniform('u_sunUV', sun.uv);
         this._shaderManager.setUniform('u_sunVisible', sun.visible);
-        this._shaderManager.setUniform('u_exposure', this._exposure); // lets a pass invert the final present resolve
+        this._shaderManager.setUniform('u_exposure', this._view.exposure); // lets a pass invert the final present resolve
         this._applyCustomMaterial(mat, true);   // u_time, u_viewPos + user VALUE uniforms only
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
@@ -11608,7 +11574,7 @@ export class Renderer {
                                                true, [0, 0, 0, 0]);
         const pipeline = this._fullscreenPipeline('present', PresentProgram);
         pass.setPipeline(pipeline);
-        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_exposure', this._view.exposure);
         // Ungraded on purpose: an asset thumbnail is a picture of the ASSET, and it should not change
         // because the scene it was captured in happens to be overcast — or because someone hung a
         // teal-and-orange LUT on the project. The tone CURVE is kept, because that is the shape of
@@ -11644,7 +11610,7 @@ export class Renderer {
         // This pass does the final resolve, so it carries the WHOLE grade and not just the exposure.
         // It used to set only that, which meant selecting an object dropped the saturation trim and
         // the frame changed colour under the artist.
-        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_exposure', this._view.exposure);
         this._shaderManager.setUniform('u_saturation', this._effectiveSaturation());
         this._shaderManager.setUniform('u_toneMapper', this._toneMapperId());
         const lut = this._colorLut.volumeFor(this._colorGradingLut);
@@ -11690,8 +11656,8 @@ export class Renderer {
 
         this._shaderManager.bind('overdraw');
         this._shaderManager.setUniform('u_increment', 1 / Renderer.OVERDRAW_MAX);
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
 
         for (const node of scene.models) {
             if (!node.visible || isEditorOnlyNode(node)) continue;
@@ -11709,8 +11675,8 @@ export class Renderer {
         // this frame's colour pass, every level and the impostor, counted the same way.
         this._shaderManager.bind('overdrawInstanced');
         this._shaderManager.setUniform('u_increment', 1 / Renderer.OVERDRAW_MAX);
-        mat4.multiply(this._overdrawViewProj, this._rasterProjection(this._activeCamera.projectionMatrix),
-                      this._activeCamera.viewMatrix);
+        mat4.multiply(this._overdrawViewProj, this._rasterProjection(this._view.camera.projectionMatrix),
+                      this._view.camera.viewMatrix);
         this._shaderManager.setUniform('u_lightSpace', this._overdrawViewProj);
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
@@ -11824,7 +11790,7 @@ export class Renderer {
         // curve, so "Lit Scene" cannot disagree with "Final" about what the frame looks like. No LUT
         // here on purpose — a debug channel is a picture of a BUFFER, and a grade would misreport it.
         this._shaderManager.setUniform('u_toneMapper', this._toneMapperId());
-        this._shaderManager.setUniform('u_exposure', this._exposure); // used by the tonemapped channels
+        this._shaderManager.setUniform('u_exposure', this._view.exposure); // used by the tonemapped channels
         // The depth attachment rides along on every channel, because WebGPU requires every binding the
         // shader declares to be present and only mode 3 actually reads it.
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [tex, this._gBufferFBO.depth]));
@@ -11838,7 +11804,7 @@ export class Renderer {
      * the smallest mip, upsample back with additive blending, composite mip 0 over the scene.
      */
     /**
-     * Meter the lit scene into a 1x1 target, and adapt `_exposure` toward what LAST frame measured.
+     * Meter the lit scene into a 1x1 target, and adapt `_view.exposure` toward what LAST frame measured.
      *
      * A FRAME LATE, deliberately. Reading a target the GPU finished with a frame ago costs nothing;
      * reading the one just written forces the pipeline to drain, and `readPixels` is synchronous under
@@ -11898,7 +11864,7 @@ export class Renderer {
      */
     private _updateEffectiveExposure(): void {
         const scene = this._currentScene;
-        const camera = this._activeCamera;
+        const camera = this._view.camera;
         const found = scene && camera ? scene.exposureVolumesAt(camera.position) : [];
         this._effExposureLayers = found.map(f => ({ overrides: f.volume.overridesView, weight: f.weight }));
         this._effExposureVolumes = found.map(f => ({ id: f.volume.id, weight: f.weight }));
@@ -11948,14 +11914,14 @@ export class Renderer {
         // thumbnail path, and a thumbnail keyed to the scene's momentary exposure is the inconsistency
         // this whole split exists to remove.
         if (!this._exposureMeteringAllowed || this._presentTarget) {
-            this._exposure = Renderer.PREVIEW_EXPOSURE;
+            this._view.exposure = Renderer.PREVIEW_EXPOSURE;
             return;
         }
         this._updateEffectiveExposure();
         // Metering allowed but switched off (for the project, or by a volume around the camera): the
         // manual exposure stands — the artist's, blended toward any volume's in EV.
         if (!this._effAutoWas) {
-            this._exposure = this._effManualFromVolume
+            this._view.exposure = this._effManualFromVolume
                 ? REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, this._effExposure.ev100))
                 : this._baseExposure;
         }
@@ -11979,7 +11945,7 @@ export class Renderer {
         const due = this._exposureReadDue;
         this._exposureReadDue = -1;
         if (due < 0 || this._exposureReadPending) return;
-        if (this._exposureMetered && this._frameIndex % Renderer.EXPOSURE_READ_INTERVAL !== 0) return;
+        if (this._exposureMetered && this._view.frameIndex % Renderer.EXPOSURE_READ_INTERVAL !== 0) return;
         const target = this._exposureFBOs[due];
         if (!target || target.colors.length === 0) return;
 
@@ -12019,7 +11985,7 @@ export class Renderer {
     }
 
     /**
-     * Ease `_exposure` toward the metered target, in EV (log) space, at a rate that does not depend on
+     * Ease `_view.exposure` toward the metered target, in EV (log) space, at a rate that does not depend on
      * the frame rate.
      *
      * `1 - exp(-dt * speed)` rather than a fixed `dt * k` per frame: the naive form adapts twice as fast
@@ -12041,7 +12007,7 @@ export class Renderer {
         // deterministically.
         const t = speed <= 0 ? 1 : 1 - Math.exp(-Math.max(0, dtSeconds) * speed);
         this._exposureEV += (target - this._exposureEV) * t;
-        this._exposure = REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, this._exposureEV));
+        this._view.exposure = REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, this._exposureEV));
     }
 
     /**
@@ -12062,7 +12028,7 @@ export class Renderer {
         // reaches the screen, and at the default 1.0 nothing in an ordinary scene ever clears it.
         this._shaderManager.setUniform('u_bloomThreshold', this._bloomThreshold);
         this._shaderManager.setUniform('u_bloomKnee', this._bloomKnee);
-        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_exposure', this._view.exposure);
         this._shaderManager.setUniform('u_bloomMaskEnabled', this._bloomMaskEnabled);
         // The bright pass halves the resolution, so it needs both grids to box-filter rather than
         // point-sample (see sourceBlockUV in bloom.fs).
@@ -12222,11 +12188,11 @@ export class Renderer {
             return this._dofLastFocusDistance;
         }
         this._warnedDanglingFocus = false;
-        const view = this._activeCamera.viewMatrix;
+        const view = this._view.camera.viewMatrix;
         // The camera's forward axis, read off the view matrix's third row — the same place
         // `_captureTemporalCameraState` takes it from, rather than recomputing it from the node.
         const forward = vec3.fromValues(-view[2], -view[6], -view[10]);
-        const distance = focusDistanceToTarget(this._activeCamera.position, forward, target.worldPosition);
+        const distance = focusDistanceToTarget(this._view.camera.position, forward, target.worldPosition);
         // Behind the camera is not a focus distance. Hold rather than invert the image.
         if (distance > 0.01) this._dofLastFocusDistance = distance;
         return this._dofLastFocusDistance;
@@ -12234,7 +12200,7 @@ export class Renderer {
 
     /** Everything in the CoC that is constant across the frame. See `dofMath.circleOfConfusion`. */
     private _dofUniforms(scene: Scene): { focus: number; halfRange: number; focal: number; scale: number } {
-        const focal = focalLengthFromFov(this._activeCamera.fov);
+        const focal = focalLengthFromFov(this._view.camera.fov);
         return {
             focus: this._resolveFocusDistance(scene),
             halfRange: this._dofFocusRange * 0.5,
@@ -12261,8 +12227,8 @@ export class Renderer {
         const cocPass = this._beginFullscreenPass(coc.renderTarget, 'dof.coc', true, undefined, false);
         const cocPipeline = this._fullscreenPipeline('dofCoc', DofCocProgram);
         cocPass.setPipeline(cocPipeline);
-        this._shaderManager.setUniform('u_near', this._activeCamera.near);
-        this._shaderManager.setUniform('u_far', this._activeCamera.far);
+        this._shaderManager.setUniform('u_near', this._view.camera.near);
+        this._shaderManager.setUniform('u_far', this._view.camera.far);
         this._shaderManager.setUniform('u_focusDistance', u.focus);
         this._shaderManager.setUniform('u_focusHalfRange', u.halfRange);
         this._shaderManager.setUniform('u_focalLength', u.focal);
@@ -12292,8 +12258,8 @@ export class Renderer {
         const outPass = this._beginFullscreenPass(target.renderTarget, 'dof.composite', true);
         const outPipeline = this._fullscreenPipeline('dofComposite', DofCompositeProgram);
         outPass.setPipeline(outPipeline);
-        this._shaderManager.setUniform('u_near', this._activeCamera.near);
-        this._shaderManager.setUniform('u_far', this._activeCamera.far);
+        this._shaderManager.setUniform('u_near', this._view.camera.near);
+        this._shaderManager.setUniform('u_far', this._view.camera.far);
         this._shaderManager.setUniform('u_focusDistance', u.focus);
         this._shaderManager.setUniform('u_focusHalfRange', u.halfRange);
         this._shaderManager.setUniform('u_focalLength', u.focal);
@@ -12318,7 +12284,7 @@ export class Renderer {
         genPass.setPipeline(genPipeline);
         // The threshold is on the EXPOSED image, as bloom's is, so it means the same brightness on screen in
         // a sunlit field and in a cave; the buffer is pre-exposure, so it is uploaded divided back out.
-        this._shaderManager.setUniform('u_flareThreshold', this._lensFlareThreshold / Math.max(1e-8, this._exposure));
+        this._shaderManager.setUniform('u_flareThreshold', this._lensFlareThreshold / Math.max(1e-8, this._view.exposure));
         this._shaderManager.setUniform('u_flareGhosts', this._lensFlareGhosts);
         // Not a setting: the spacing that puts the ghosts across the frame rather than piled at the
         // centre. Exposing it alongside the ghost count would mostly be a way to hide them all.
@@ -12357,7 +12323,7 @@ export class Renderer {
         const pipeline = this._fullscreenPipeline('fxaa', FxaaProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_texelSize', [1 / Math.max(1, this._renderWidth), 1 / Math.max(1, this._renderHeight)]);
-        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_exposure', this._view.exposure);
         this._shaderManager.setUniform('u_edgeThreshold', this._fxaaEdgeThreshold);
         this._shaderManager.setUniform('u_subpixel', this._fxaaSubpixel);
         this._shaderManager.setUniform('u_searchSteps', FXAA_SEARCH_STEPS[this._fxaaQuality]);
@@ -12393,7 +12359,7 @@ export class Renderer {
         // speed to the frame rate, so it would crawl on a slow machine and shimmer on a fast one.
         this._shaderManager.setUniform('u_time', performance.now() * 0.001);
         this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
-        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_exposure', this._view.exposure);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
@@ -12425,7 +12391,7 @@ export class Renderer {
         if (this._thumbnailMode || !this._hasPrevViewProj) return;
         // The debug channel is a reader too: without it, selecting 'velocity' with motion blur off
         // would show a stale buffer rather than this frame's motion.
-        const wanted = this._taaJitterActive || this._motionBlurWillRun
+        const wanted = this._view.taaJitterActive || this._motionBlurWillRun
                        || this._debugView === 'velocity';
         if (!wanted || !this._beginPass('velocity')) return;
 
@@ -12454,14 +12420,14 @@ export class Renderer {
      * every time the camera moves.
      */
     private _taaResolvePass(): void {
-        if (!this._taaJitterActive || !this._velocityProducedThisFrame) return;
+        if (!this._view.taaJitterActive || !this._velocityProducedThisFrame) return;
         const w = this._renderWidth, h = this._renderHeight;
 
         this._scope('taa');
         this._ensureTaaTargets(w, h);
         // The format guard runs on allocation, so the first frame on a device without float targets is
         // where TAA turns itself off. The jitter goes with it, this frame included.
-        if (!this._taaSupported) { this._taaJitterActive = false; return; }
+        if (!this._taaSupported) { this._view.taaJitterActive = false; return; }
 
         const dst = this._taaHistoryIndex ^ 1;
 
@@ -12477,11 +12443,11 @@ export class Renderer {
         ]));
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
         this._shaderManager.setUniform('u_resolution', [w, h]);
-        this._shaderManager.setUniform('u_near', this._activeCamera.near);
-        this._shaderManager.setUniform('u_far', this._activeCamera.far);
+        this._shaderManager.setUniform('u_near', this._view.camera.near);
+        this._shaderManager.setUniform('u_far', this._view.camera.far);
         // Last frame's exposure: `_resolveExposure` runs at the top of `_applyPostProcessing`, which is
         // now AFTER this pass. Correct for a weight, which is all it is used for.
-        this._shaderManager.setUniform('u_exposure', this._exposure);
+        this._shaderManager.setUniform('u_exposure', this._view.exposure);
         this._shaderManager.setUniform('u_feedbackMin', Math.min(this._taaMotionFeedback, this._taaFeedback));
         this._shaderManager.setUniform('u_feedbackMax', this._taaFeedback);
         this._shaderManager.setUniform('u_varianceGamma', this._taaClipStrength);
@@ -12507,7 +12473,7 @@ export class Renderer {
         if (sharpen) {
             this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
             this._shaderManager.setUniform('u_sharpness', this._taaSharpness);
-            this._shaderManager.setUniform('u_exposure', this._exposure);
+            this._shaderManager.setUniform('u_exposure', this._view.exposure);
         }
         this._drawFullscreen(copy);
         this._endFullscreenPass(copy);
@@ -12540,11 +12506,11 @@ export class Renderer {
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._depthSource()]));
         // `_uvProducing` hands back ONE shared scratch, so each result needs a home before the next
         // call — the same two the object pass below already uses.
-        mat4.copy(this._uvViewProjScratch, this._uvProducing(this._viewProj));
+        mat4.copy(this._uvViewProjScratch, this._uvProducing(this._view.viewProj));
         mat4.copy(this._uvPrevViewProjScratch, this._uvProducing(this._prevViewProj));
         // Jittered inverse in, unjittered projections out. See the shader: that pairing is what makes
         // the stored delta jitter-free without any code anywhere re-deriving the jitter's direction.
-        this._shaderManager.setUniform('u_invViewProj', this._invViewProj);
+        this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
         this._shaderManager.setUniform('u_viewProj', this._uvViewProjScratch);
         this._shaderManager.setUniform('u_prevViewProj', this._uvPrevViewProjScratch);
         this._drawFullscreen(pass);
@@ -12652,7 +12618,7 @@ export class Renderer {
         if (movers.length === 0) return;
 
         // `_uvProducing` hands back one shared scratch, so each result needs a home before the next call.
-        mat4.copy(this._uvViewProjScratch, this._uvProducing(this._viewProj));
+        mat4.copy(this._uvViewProjScratch, this._uvProducing(this._view.viewProj));
         mat4.copy(this._uvPrevViewProjScratch, this._uvProducing(this._prevViewProj));
 
         const pass = this._beginFullscreenPass(this._velocityObjectsTarget(), 'velocity.objects', false);
@@ -12694,11 +12660,11 @@ export class Renderer {
             }
 
             const prev = this._prevXform.get(node);
-            const fresh = prev !== undefined && prev.frame === this._frameIndex - 1;
+            const fresh = prev !== undefined && prev.frame === this._view.frameIndex - 1;
 
             this._shaderManager.setUniform('u_model', node.worldTransform);
-            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+            this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+            this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
             this._shaderManager.setUniform('u_uvViewProj', this._uvViewProjScratch);
             // 'objectOnly' is handed THIS frame's view-projection as its previous one, so the camera
             // term appears on both sides of the subtraction and divides out exactly rather than being
@@ -12786,8 +12752,8 @@ export class Renderer {
         this._shaderManager.setUniform('u_maxVelocityPx', this._motionBlurMaxLength);
         this._shaderManager.setUniform('u_samples', this._motionBlurSamples);
         this._shaderManager.setUniform('u_mbJitter', this._motionBlurJitter);
-        this._shaderManager.setUniform('u_near', this._activeCamera.near);
-        this._shaderManager.setUniform('u_far', this._activeCamera.far);
+        this._shaderManager.setUniform('u_near', this._view.camera.near);
+        this._shaderManager.setUniform('u_far', this._view.camera.far);
         this._drawFullscreen(gatherPass);
         this._endFullscreenPass(gatherPass);
     }
@@ -12956,21 +12922,21 @@ export class Renderer {
     }
 
     /** The EFFECTIVE exposure — metered when metering is live, authored otherwise. */
-    public get exposure(): number { return this._exposure; }
+    public get exposure(): number { return this._view.exposure; }
     /**
      * Set the AUTHORED exposure. Applied to the effective value immediately as well, so a manual change
      * shows at once; the next frame's `_resolveExposure` re-decides which of the two is in force.
      */
     public set exposure(exposure: number) {
         this._baseExposure = Math.max(0, exposure);
-        this._exposure = this._baseExposure;
+        this._view.exposure = this._baseExposure;
     }
 
     /**
      * Exposure as a photographic EV100, which is the same setting written the way a light meter writes
      * it: `exposure = REFERENCE_ILLUMINANCE / (1.2 * 2^EV100)`.
      *
-     * A re-parameterisation, not a new control — `_exposure` remains the storage, and EV100 15 is
+     * A re-parameterisation, not a new control — `_view.exposure` remains the storage, and EV100 15 is
      * exactly the default 2.0, so nothing moves by adding this. It exists because photometric lights
      * make exposure LOAD-BEARING PER SCENE: at EV100 15 (a sunny exterior) a 1500 lm bulb two metres
      * away is invisible, and that is physics rather than a bug — the sun really is about three decades
@@ -12982,7 +12948,7 @@ export class Renderer {
      * a cave and a hillside in one project can each carry their own.
      */
     public get ev100(): number {
-        return Math.log2(REFERENCE_ILLUMINANCE / (1.2 * Math.max(1e-6, this._exposure)));
+        return Math.log2(REFERENCE_ILLUMINANCE / (1.2 * Math.max(1e-6, this._view.exposure)));
     }
     public set ev100(ev: number) {
         this.exposure = REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, ev));
@@ -13601,7 +13567,7 @@ export class Renderer {
             pointShadowBias: this._pointShadowBias,
             bloomEnabled: this._bloomIntensity > 0,
             clearColor: this.clearColor,
-            // The AUTHORED value. Serializing `_exposure` saved whatever the meter was at when the
+            // The AUTHORED value. Serializing `_view.exposure` saved whatever the meter was at when the
             // save happened, which made a scene's stored exposure depend on where the camera pointed.
             exposure: this._baseExposure,
             bloomThreshold: this._bloomThreshold,
@@ -13843,8 +13809,8 @@ export class Renderer {
             const depthAlways: DepthStencilState =
                 { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' };
             this._shaderManager.bind('outline');
-            this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+            this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+            this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
             this._shaderManager.setUniform('u_outlineColor', [1.0, 1.0, 1.0]); // white silhouette
 
             // One pipeline per SOURCE material, never one for the pass: the buffer was interleaved for
@@ -13889,7 +13855,7 @@ export class Renderer {
     /** Builds a sprite's world matrix with its camera-facing billboard constraint applied. */
     private _spriteBillboardMatrix(node: SpriteNode): mat4 {
         const m = mat4.clone(node.worldTransform);
-        const view = this._activeCamera.viewMatrix;
+        const view = this._view.camera.viewMatrix;
         const constraints: 'free' | 'spherical' | 'cylindrical' = node.constraints;
         if (constraints === 'spherical') {
             m[0] = view[0]; m[1] = view[4]; m[2] = view[8];
@@ -13932,14 +13898,14 @@ export class Renderer {
         }) : null;
         if (pipeline) pass.setPipeline(pipeline);
 
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         // `depthNudge` is folded into the projection rather than set as its own uniform: a helper that
         // is coplanar with the surface it describes needs pulling toward the camera in NDC, and doing
         // it here costs one added constant instead of a shader variant. Zero for every other helper,
         // which then gets the raster projection untouched.
         this._shaderManager.setUniform('u_projection',
-            this._nudgedProjection(this._activeCamera.projectionMatrix, material.config.depthNudge ?? 0));
-        this._shaderManager.setUniform('u_viewPos', this._activeCamera.position);
+            this._nudgedProjection(this._view.camera.projectionMatrix, material.config.depthNudge ?? 0));
+        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
 
         // Set Transform related uniforms
         this._shaderManager.setUniform('u_model', node.worldTransform);
@@ -13997,7 +13963,7 @@ export class Renderer {
             // jittered one would make a projected cursor shimmer by a sub-pixel every frame.
             if (overlayDecals) {
                 const decalPass = this._beginOverlayPass('overlay.decals');
-                this._drawColorDecals(decalPass, this._overlayDecals, OVERLAY_BLEND, this._invViewProjStable, 1);
+                this._drawColorDecals(decalPass, this._overlayDecals, OVERLAY_BLEND, this._view.invViewProjStable, 1);
                 this._endFullscreenPass(decalPass);
             }
             // Occluded by real geometry, exactly as these drew when they went through the G-buffer.
@@ -14116,8 +14082,8 @@ export class Renderer {
             builtFor: 'shadowMap',
         }) : null;
         if (pipeline) pass!.setPipeline(pipeline);
-        this._shaderManager.setUniform('u_view', this._activeCamera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._activeCamera.projectionMatrix));
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
 
         // `set` indexes this call's own buffer — see _overlayInstanceBuffers.
         const drawSet = (set: number, mesh: Mesh, matrices: Float32Array, count: number,

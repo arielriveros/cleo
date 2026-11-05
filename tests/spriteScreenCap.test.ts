@@ -10,9 +10,9 @@ import { Camera } from '../src/core/camera';
  * orthographic by the view's height, so a 2D zoom is capped too.
  */
 
-// The method only reads the active camera and the canvas's CSS height.
+// The method only reads the frame's camera and the canvas's CSS height.
 const cap = (camera: Camera, m: mat4, maxCssPx: number, cssHeight = 1000) => {
-    const stub = { _activeCamera: camera, _canvas: { clientHeight: cssHeight } };
+    const stub = { _view: { camera }, _canvas: { clientHeight: cssHeight } };
     (Renderer.prototype as any)._capSpriteScreenSize.call(stub, m, maxCssPx);
     return Math.hypot(m[4], m[5], m[6]);
 };

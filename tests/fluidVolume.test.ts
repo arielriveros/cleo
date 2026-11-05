@@ -97,7 +97,7 @@ describe('the fluid volume pass', () => {
     it('reconstructs rays with the stable inverse, as everything after the resolve does', () => {
         const at = RENDERER.indexOf('private _renderFluidVolumes(');
         const body = RENDERER.slice(at, RENDERER.indexOf('\n    }\n', at));
-        expect(body).toContain("sm.setUniform('u_invViewProj', this._invViewProjStable)");
+        expect(body).toContain("sm.setUniform('u_invViewProj', this._view.invViewProjStable)");
         expect(body).toContain('Renderer._CLOUD_BLEND');
     });
 
