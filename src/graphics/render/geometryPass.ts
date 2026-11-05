@@ -18,7 +18,7 @@ import { GEOMETRY_PROGRAMS } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
-import { DEPTH_WRITE } from './pipelineCache';
+import { DEPTH_WRITE, PipelineMemo } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
@@ -55,6 +55,10 @@ export class GeometryPass {
     // a buffer earlier draws reference — on a recorded backend, nothing has executed until submit.
     private readonly _instanceBuffers: Map<string, RhiBuffer> = new Map();
     private _instanceScratch: Float32Array = new Float32Array(16 * 64);
+
+    /** The last pipeline per material of the G-buffer draw and of the instanced draw. See PipelineMemo. */
+    private readonly _pipelineMemo = new PipelineMemo();
+    private readonly _instancedMemo = new PipelineMemo();
 
     /**
      * Whether this node's geometry is what the deferred G-buffer holds: the material-and-visibility
@@ -217,7 +221,7 @@ export class GeometryPass {
                 this._shaderManager.setUniform('u_sunDirection', this._view.sunDirection);      // self-shadow
                 this._shaderManager.setUniform('u_specularAA', this._modelDraw.specularAaEnabled);   // roughness filter
                 for (const [name, value] of mat.properties) this._shaderManager.setUniform(name, value);
-                const terrainPipeline = this._pipelines.get(shaderType, reflection, {
+                const terrainPipeline = this._pipelines.memoized(this._pipelineMemo, mat, shaderType, reflection, {
                     cullMode: ModelDraw.cullFor(mat.config.side),
                     depthStencil: DEPTH_WRITE,
                     targets: 3,
@@ -257,7 +261,7 @@ export class GeometryPass {
             }
             if (!reflection) { this._materials.apply(mat); return false; }
 
-            const pipeline = this._pipelines.get(shaderType, reflection, {
+            const pipeline = this._pipelines.memoized(this._pipelineMemo, mat, shaderType, reflection, {
                 cullMode: ModelDraw.cullFor(mat.config.side),
                 depthStencil: DEPTH_WRITE,
                 targets: 3,   // the G-buffer
@@ -293,7 +297,7 @@ export class GeometryPass {
         const material = first.model.material;
         const reflection = GEOMETRY_PROGRAMS[shaderType];
         if (reflection) {
-            const pipeline = this._pipelines.get(shaderType, reflection, {
+            const pipeline = this._pipelines.memoized(this._instancedMemo, material, shaderType, reflection, {
                 cullMode: ModelDraw.cullFor(material.config.side),
                 depthStencil: DEPTH_WRITE,
                 targets: 3,

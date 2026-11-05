@@ -35,6 +35,66 @@ export const DEPTH_WRITE: DepthStencilState = { format: 'depth24plus', depthWrit
 /** Depth test `less-equal` without writes: transparents, the sky, boxes tested against the scene depth. */
 export const DEPTH_TEST: DepthStencilState = { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' };
 
+/** The state `PipelineCache.get` takes, besides the program and its reflection. */
+export interface PipelineOptions {
+    blend?: BlendState;
+    depthStencil?: DepthStencilState;
+    cullMode?: CullMode;
+    targets?: number;
+    topology?: PrimitiveTopology;
+    vertex?: false | 'model' | 'model+instance' | 'model+skin' | 'tile';
+    builtFor?: string | null;
+    /**
+     * The target this pipeline will draw into, required only when it is built BEFORE the pass is
+     * opened; otherwise `_passes.target`.
+     */
+    target?: RenderTarget | null;
+    /** False writes depth only: every colour target's write mask off. */
+    colorWrite?: boolean;
+}
+
+/** The program reflection `PipelineCache.get` takes. */
+export interface PipelineReflection {
+    resources: readonly ShaderResource[];
+    wgsl?: string;
+    entryPoints?: { vertex?: string; fragment?: string; compute?: string };
+    /**
+     * A SEPARATE module for the vertex stage, used only by custom materials, whose WGSL is a translated
+     * fragment stage alone. Both modules carry the same `program` name.
+     */
+    vertexWgsl?: { wgsl: string; entryPoint: string };
+}
+
+/** One owner's last pipeline at one call site, with every input it was built from. */
+interface MemoSlot {
+    pipeline: RenderPipeline | null;
+    program: string;
+    reflection: PipelineReflection | null;
+    target: RenderTarget | null | undefined;
+    filter: ShadowFilter;
+    cubeFace: boolean;
+    cullMode: CullMode;
+    targets: number;
+    topology: PrimitiveTopology;
+    vertex: PipelineOptions['vertex'];
+    builtFor: string | null;
+    blend: BlendState | undefined;
+    depthStencil: DepthStencilState | undefined;
+    colorWrite: boolean;
+}
+
+/**
+ * One draw call site's memo of the pipeline it last got per owner (a material). A draw asks with the same
+ * inputs frame after frame, and checking them by identity is far cheaper than building the ten-part key
+ * string `get` looks pipelines up by. Generalises what the shadow pass does for its casters
+ * (`ShadowCasterState`). State objects are compared by IDENTITY, so a call site passes shared constants
+ * (`DEPTH_WRITE`, `DEFAULT_BLEND`), never a fresh literal, or it never hits.
+ */
+export class PipelineMemo {
+    /** Per owner, read and written only by PipelineCache.memoized. */
+    public readonly slots = new WeakMap<object, MemoSlot>();
+}
+
 /**
  * Render pipelines and shader modules, built once per program + state and cached: two draws that want the
  * same program and state get the same pipeline object. Records every pipeline it builds as a recipe a
@@ -115,31 +175,44 @@ export class PipelineCache {
     }
 
     /**
+     * {@link get} through a call site's memo: the pipeline `owner` was given last time when every input
+     * is the same object or value as then, else `get`'s answer, remembered. The filter and the cube-face
+     * flag are inputs too — they change the program and the winding `get` would pick.
+     */
+    public memoized(memo: PipelineMemo, owner: object, program: string, reflection: PipelineReflection,
+                    options: PipelineOptions): RenderPipeline {
+        const target = options.target ?? this._passes.target;
+        const filter = this._host.filter();
+        const cubeFace = this._view.cubeFace && device.backend === 'webgpu';
+        const cullMode = options.cullMode ?? 'none', targets = options.targets ?? 1;
+        const topology = options.topology ?? 'triangle-list', vertex = options.vertex ?? false;
+        const builtFor = options.builtFor ?? null, colorWrite = options.colorWrite ?? true;
+        let slot = memo.slots.get(owner);
+        if (slot && slot.pipeline && slot.program === program && slot.reflection === reflection
+            && slot.target === target && slot.filter === filter && slot.cubeFace === cubeFace
+            && slot.cullMode === cullMode && slot.targets === targets && slot.topology === topology
+            && slot.vertex === vertex && slot.builtFor === builtFor && slot.blend === options.blend
+            && slot.depthStencil === options.depthStencil && slot.colorWrite === colorWrite)
+            return slot.pipeline;
+        const pipeline = this.get(program, reflection, options);
+        if (!slot) {
+            slot = { pipeline, program, reflection, target, filter, cubeFace, cullMode, targets, topology, vertex,
+                     builtFor, blend: options.blend, depthStencil: options.depthStencil, colorWrite };
+            memo.slots.set(owner, slot);
+        } else {
+            slot.pipeline = pipeline; slot.program = program; slot.reflection = reflection; slot.target = target;
+            slot.filter = filter; slot.cubeFace = cubeFace; slot.cullMode = cullMode; slot.targets = targets;
+            slot.topology = topology; slot.vertex = vertex; slot.builtFor = builtFor; slot.blend = options.blend;
+            slot.depthStencil = options.depthStencil; slot.colorWrite = colorWrite;
+        }
+        return pipeline;
+    }
+
+    /**
      * The RHI pipeline for `program` under a particular render state, built once per combination and
      * cached on a string key: two draws wanting the same program and state must get the same object.
      */
-    public get(program: string,
-                         reflection: { resources: readonly ShaderResource[]; wgsl?: string;
-                                       entryPoints?: { vertex?: string; fragment?: string;
-                                                       compute?: string };
-                                       /**
-                                        * A SEPARATE module for the vertex stage, used only by custom
-                                        * materials, whose WGSL is a translated fragment stage alone.
-                                        * Both modules carry the same `program` name.
-                                        */
-                                       vertexWgsl?: { wgsl: string; entryPoint: string } },
-                         options: { blend?: BlendState; depthStencil?: DepthStencilState;
-                                    cullMode?: CullMode; targets?: number;
-                                    topology?: PrimitiveTopology;
-                                    vertex?: false | 'model' | 'model+instance' | 'model+skin' | 'tile';
-                                    builtFor?: string | null;
-                                    /**
-                                     * The target this pipeline will draw into, required only when it is
-                                     * built BEFORE the pass is opened; otherwise `_passes.target`.
-                                     */
-                                    target?: RenderTarget | null;
-                                    /** False writes depth only: every colour target's write mask off. */
-                                    colorWrite?: boolean } = {}): RenderPipeline {
+    public get(program: string, reflection: PipelineReflection, options: PipelineOptions = {}): RenderPipeline {
         const { blend, depthStencil, cullMode = 'none', targets = 1,
                 topology = 'triangle-list', vertex = false, builtFor = null, colorWrite = true } = options;
         // A logical name served by a variant (programVariants.ts): WebGPU compiles the WGSL handed in

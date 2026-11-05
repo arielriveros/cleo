@@ -21,7 +21,7 @@ import { FORWARD_PROGRAMS } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
-import { DEPTH_TEST, DEPTH_WRITE } from './pipelineCache';
+import { DEPTH_TEST, DEPTH_WRITE, PipelineMemo } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
@@ -85,6 +85,9 @@ export class ForwardPass {
     // Depth writes for the forward model pipelines, set by whichever queue is drawing: opaque writes,
     // transparent does not. Thumbnails are the exception — their coverage alpha comes from scene depth.
     public forwardDepthWrite = true;
+
+    /** The forward draw's last pipeline per material. See PipelineMemo. */
+    private readonly _pipelineMemo = new PipelineMemo();
 
     // Node ids already warned about carrying a screen-space custom material on a mesh (once per node).
     private _warnedScreenMaterialMeshes: Set<string> = new Set();
@@ -521,7 +524,7 @@ export class ForwardPass {
                 // NOT need u_sunDirection: this pass reads the sun from its own light list.
                 this._shaderManager.setUniform('u_specularAA', this._modelDraw.specularAaEnabled);
                 if (!viaRHI) { this._materials.applyTerrain(mat); return false; }
-                const terrainPipeline = this._pipelines.get(shaderType, reflection, {
+                const terrainPipeline = this._pipelines.memoized(this._pipelineMemo, mat, shaderType, reflection, {
                     cullMode: ModelDraw.cullFor(mat.config.side),
                     depthStencil: this.forwardDepthWrite ? DEPTH_WRITE : DEPTH_TEST,
                     blend: materialConfig.transparent === true ? DEFAULT_BLEND : undefined,
@@ -563,7 +566,7 @@ export class ForwardPass {
             }
             if (!viaRHI) { this._materials.apply(mat); return false; }
 
-            const pipeline = this._pipelines.get(shaderType, reflection, {
+            const pipeline = this._pipelines.memoized(this._pipelineMemo, mat, shaderType, reflection, {
                 cullMode: ModelDraw.cullFor(mat.config.side),
                 // Depth writes follow the CALLER's state, not the material's, and are passed in rather
                 // than read from GLState — the descriptor must be a pure function of its arguments or
