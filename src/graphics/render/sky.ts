@@ -25,6 +25,7 @@ import { BRDFProgram, SkyProjectProgram, SkyAtmosphereProgram, SkyFogProgram, Sk
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
+import { DEPTH_TEST } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
@@ -599,7 +600,7 @@ export class SkyPasses {
                      view: mat4, proj: mat4, linearInput: boolean): void {
         const pipeline = this._pipelines.get('skybox', SkyboxProgram, {
             cullMode: 'none',
-            depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
+            depthStencil: DEPTH_TEST,
             vertex: 'model',
             builtFor: 'skybox',
         });

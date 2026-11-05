@@ -20,6 +20,7 @@ import type { OcclusionMode } from './settingsTypes';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
+import { DEPTH_TEST } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
@@ -258,7 +259,7 @@ export class Visibility {
         this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(cam.projectionMatrix));
         const pipeline = this._pipelines.get('occlusionBox', OcclusionBoxProgram, {
             cullMode: 'none',
-            depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
+            depthStencil: DEPTH_TEST,
             targets: 0,
             vertex: 'model',
             builtFor: 'irradiance',   // `SkyPasses.iblCubeMesh` is position-only, built from that program's attributes

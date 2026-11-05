@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PipelineCache } from '../src/graphics/render/pipelineCache';
+import { PipelineCache, DEPTH_TEST, DEPTH_WRITE } from '../src/graphics/render/pipelineCache';
 import type { BlendState, DepthStencilState } from '../src/graphics/rhi/types';
 
 /**
@@ -26,5 +26,14 @@ describe('the pipeline cache key', () => {
     it('carries the winding, a split vertex stage, the blend and a depth-only write mask', () => {
         expect(keyOf('basic', 'none', 1, 'triangle-list', false, null, true, true, 'rgba8unorm', blend, null, false))
             .toBe('basic|none|1|triangle-list|false||cw|vs|rgba8unorm|src-alphaone-minus-src-alphaadd/oneone-minus-src-alphaadd|nc');
+    });
+
+    it('spells the shared depth constants exactly as the literals they replaced', () => {
+        // The draw paths pass DEPTH_WRITE / DEPTH_TEST instead of a literal per draw (so the key memo hits);
+        // a recipe recorded with the literal must still be found by the constant.
+        const literalTest: DepthStencilState = { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' };
+        const args = ['pbr', 'back', 1, 'triangle-list', 'model', 'pbr', false, false, 'rgba16float', null] as const;
+        expect(keyOf(...args, DEPTH_WRITE, true)).toBe(keyOf(...args, depth, true));
+        expect(keyOf(...args, DEPTH_TEST, true)).toBe(keyOf(...args, literalTest, true));
     });
 });

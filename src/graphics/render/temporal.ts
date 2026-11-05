@@ -14,6 +14,7 @@ import type { TaaHistoryFilter, DebugView } from './settingsTypes';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
+import { DEPTH_TEST } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
@@ -518,7 +519,7 @@ export class TemporalPasses {
                 cullMode: this._host.cullFor(node.model.material.config.side),
                 // Reads the opaque depth and writes none of it: this pass must not disturb a buffer the
                 // gather below still compares against.
-                depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
+                depthStencil: DEPTH_TEST,
                 targets: 1,
                 topology,
                 vertex: skin ? 'model+skin' : 'model',

@@ -17,6 +17,7 @@ import { ShadowMapProgram, DecalSurfaceProgram, DecalResolveProgram, DecalColorP
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
+import { DEPTH_WRITE } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
@@ -172,7 +173,7 @@ export class DecalPasses {
                 this._shaderManager.bind('shadowMap');
                 const pipeline = this._pipelines.get('shadowMap', ShadowMapProgram, {
                     cullMode: this._host.cullFor(chunk.model.material.config.side),
-                    depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                    depthStencil: DEPTH_WRITE,
                     targets: 0,
                     vertex: 'model',
                     // Written for the terrain program, whatever draws it — see `_renderShadowCasters`.

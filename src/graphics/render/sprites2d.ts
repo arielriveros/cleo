@@ -22,6 +22,7 @@ import { TilemapProgram, FORWARD_PROGRAMS } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
+import { DEPTH_TEST } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
@@ -232,7 +233,7 @@ export class Sprite2DPasses {
             // What the pass set by hand: blended, depth-tested against the 3D scene, no depth writes
             // (tiles are sorted, and a written depth would occlude the band drawn after).
             cullMode: 'none',
-            depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
+            depthStencil: DEPTH_TEST,
             blend: DEFAULT_BLEND,
             vertex: 'tile',
         }) : null;
@@ -299,7 +300,7 @@ export class Sprite2DPasses {
         const reflection = FORWARD_PROGRAMS[material.type];
         const pipeline = pass && reflection ? this._pipelines.get(material.type, reflection, {
             cullMode: this._host.cullFor(material.config.side),
-            depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
+            depthStencil: DEPTH_TEST,
             // DEFAULT_BLEND for a scene sprite (its alpha must not touch the bloom mask), OVERLAY_BLEND
             // for an editor icon drawn into the overlay layer, where alpha IS coverage.
             blend,

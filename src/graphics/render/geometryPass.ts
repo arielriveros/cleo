@@ -18,6 +18,7 @@ import { GEOMETRY_PROGRAMS } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
+import { DEPTH_WRITE } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
@@ -218,7 +219,7 @@ export class GeometryPass {
                 for (const [name, value] of mat.properties) this._shaderManager.setUniform(name, value);
                 const terrainPipeline = this._pipelines.get(shaderType, reflection, {
                     cullMode: ModelDraw.cullFor(mat.config.side),
-                    depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                    depthStencil: DEPTH_WRITE,
                     targets: 3,
                     topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
                     vertex: 'model',
@@ -242,7 +243,7 @@ export class GeometryPass {
                                                      entryPoint: customWgsl.vertexEntry } } : {}),
                 }, {
                     cullMode: ModelDraw.cullFor(mat.config.side),
-                    depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                    depthStencil: DEPTH_WRITE,
                     targets: 3,
                     topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
                     vertex: animated ? 'model+skin' : 'model',
@@ -258,7 +259,7 @@ export class GeometryPass {
 
             const pipeline = this._pipelines.get(shaderType, reflection, {
                 cullMode: ModelDraw.cullFor(mat.config.side),
-                depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                depthStencil: DEPTH_WRITE,
                 targets: 3,   // the G-buffer
                 topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
                 vertex: animated ? 'model+skin' : 'model',
@@ -294,7 +295,7 @@ export class GeometryPass {
         if (reflection) {
             const pipeline = this._pipelines.get(shaderType, reflection, {
                 cullMode: ModelDraw.cullFor(material.config.side),
-                depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                depthStencil: DEPTH_WRITE,
                 targets: 3,
                 topology: material.config.wireframe ? 'line-list' : 'triangle-list',
                 vertex: 'model+instance',

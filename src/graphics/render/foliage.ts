@@ -24,6 +24,7 @@ import { Texture } from '../texture';
 import { ShadowMapImpostorProgram, ShadowMapInstancedCutoutProgram, ShadowMapInstancedProgram, GEOMETRY_PROGRAMS, GeometryFoliageBillboardProgram, GeometryFoliageImpostorProgram } from './programs';
 import type { FrameView } from './frameView';
 import type { PassEncoder } from './passEncoder';
+import { DEPTH_WRITE } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
@@ -958,7 +959,7 @@ export class FoliagePasses {
                         this._setLodFadeUniforms(layer, slot);
                         const pipeline = this._pipelines.get(shaderType, GEOMETRY_PROGRAMS[shaderType], {
                             cullMode: this._host.cullFor(model.material.config.side),
-                            depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                            depthStencil: DEPTH_WRITE,
                             targets: 3, colorWrite: false,
                             vertex: 'model+instance', builtFor: 'blinn_phongGeometry',
                         });
@@ -1087,7 +1088,7 @@ export class FoliagePasses {
         const pipeline = this._pipelines.get('foliageImpostorInstanced', GeometryFoliageImpostorProgram, {
             // The quad is rebuilt facing the camera in the vertex stage, so it can never show its back.
             cullMode: 'none',
-            depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+            depthStencil: DEPTH_WRITE,
             targets: 3,   // the G-buffer
             vertex: 'model+instance',
             builtFor: 'blinn_phongGeometry',

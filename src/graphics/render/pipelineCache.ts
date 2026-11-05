@@ -26,6 +26,16 @@ export interface PipelineCacheHost {
 }
 
 /**
+ * Depth test `less-equal` with writes, for an opaque draw. A SHARED object, never a fresh literal per
+ * draw: the key memo below is keyed on the state object, so a literal rebuilt every draw also rebuilt
+ * its key string every draw. Never mutate it.
+ */
+export const DEPTH_WRITE: DepthStencilState = { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' };
+
+/** Depth test `less-equal` without writes: transparents, the sky, boxes tested against the scene depth. */
+export const DEPTH_TEST: DepthStencilState = { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' };
+
+/**
  * Render pipelines and shader modules, built once per program + state and cached: two draws that want the
  * same program and state get the same pipeline object. Records every pipeline it builds as a recipe a
  * publish can ship, and warms a published game's recipes ahead of use. Split out of Renderer.

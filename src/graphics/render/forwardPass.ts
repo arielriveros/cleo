@@ -21,6 +21,7 @@ import { FORWARD_PROGRAMS } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
+import { DEPTH_TEST, DEPTH_WRITE } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
@@ -522,9 +523,8 @@ export class ForwardPass {
                 if (!viaRHI) { this._materials.applyTerrain(mat); return false; }
                 const terrainPipeline = this._pipelines.get(shaderType, reflection, {
                     cullMode: ModelDraw.cullFor(mat.config.side),
-                    depthStencil: { format: 'depth24plus', depthWriteEnabled: this.forwardDepthWrite,
-                                    depthCompare: 'less-equal' },
-                    ...(materialConfig.transparent === true ? { blend: DEFAULT_BLEND } : {}),
+                    depthStencil: this.forwardDepthWrite ? DEPTH_WRITE : DEPTH_TEST,
+                    blend: materialConfig.transparent === true ? DEFAULT_BLEND : undefined,
                     topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
                     vertex: 'model',
                     builtFor: 'terrain',
@@ -549,9 +549,8 @@ export class ForwardPass {
                                                      entryPoint: customWgsl.vertexEntry } } : {}),
                 }, {
                     cullMode: ModelDraw.cullFor(mat.config.side),
-                    depthStencil: { format: 'depth24plus', depthWriteEnabled: this.forwardDepthWrite,
-                                    depthCompare: 'less-equal' },
-                    ...(materialConfig.transparent === true ? { blend: DEFAULT_BLEND } : {}),
+                    depthStencil: this.forwardDepthWrite ? DEPTH_WRITE : DEPTH_TEST,
+                    blend: materialConfig.transparent === true ? DEFAULT_BLEND : undefined,
                     topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
                     vertex: isAnimatedModel ? 'model+skin' : 'model',
                     builtFor: node.model.material.type,   // skinned too — see `GeometryPass._drawGeometryNode`
@@ -569,11 +568,8 @@ export class ForwardPass {
                 // Depth writes follow the CALLER's state, not the material's, and are passed in rather
                 // than read from GLState — the descriptor must be a pure function of its arguments or
                 // the cache key is wrong.
-                depthStencil: { format: 'depth24plus', depthWriteEnabled: this.forwardDepthWrite,
-                                depthCompare: 'less-equal' },
-                ...(materialConfig.transparent === true
-                    ? { blend: DEFAULT_BLEND }
-                    : {}),
+                depthStencil: this.forwardDepthWrite ? DEPTH_WRITE : DEPTH_TEST,
+                blend: materialConfig.transparent === true ? DEFAULT_BLEND : undefined,
                 topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
                 vertex: isAnimatedModel ? 'model+skin' : 'model',
                 builtFor: node.model.material.type,   // skinned too — see `GeometryPass._drawGeometryNode`
