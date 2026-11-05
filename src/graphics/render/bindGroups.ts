@@ -9,6 +9,13 @@ import type { FrameTargets } from './frameTargets';
 /** A Basic program's group-0 slot for the opaque depth snapshot (chunks/basicForward.wgsl), not a material map. */
 export const SCENE_DEPTH_FIELD = 'u_sceneDepth';
 
+/** What a pipeline's group 3 declares: either half of the frame-lighting group, and the bindings it has. */
+interface LightingFacts {
+    readonly shadows: boolean;
+    readonly lightGrid: boolean;
+    readonly bindings: ReadonlySet<number>;
+}
+
 /** The frame's lighting textures, owned by the shadow and light-grid code still in the renderer. */
 export interface BindGroupHost {
     shadowCascades(): Texture;
@@ -41,6 +48,17 @@ export class BindGroupCache {
     private readonly _materialFields = new WeakMap<RenderPipeline, (string | null)[]>();
 
     private readonly _materialTextureScratch: Texture[] = [];
+
+    /**
+     * What a pipeline's group 3 declares, read off its reflection once. The draw paths ask for every
+     * draw, and each answer used to walk the resource list again (and `frameLightingGroup` built a
+     * filtered array and a Set of its bindings per draw).
+     */
+    private readonly _lightingFacts = new WeakMap<RenderPipeline, LightingFacts>();
+
+    /** Scratch lists for the custom, terrain and frame-lighting groups: `textureGroup` only reads them. */
+    private readonly _groupTextureScratch: Texture[] = [];
+    private readonly _groupBindingScratch: number[] = [];
 
     private readonly _textureGroups = new WeakMap<RenderPipeline, Map<string, BindGroup>>();
 
@@ -156,10 +174,12 @@ export class BindGroupCache {
      */
     public customGroup(pipeline: RenderPipeline, material: CustomMaterial,
                              envCube?: Texture | null): BindGroup {
-        const textures: Texture[] = [];
+        const textures = this._groupTextureScratch;
+        textures.length = 0;
         // Each at the binding its resource declares: a resource the shader never uses is filtered out of
         // a translated pipeline (see `usedResources`), so counting slots off by twos would shift the rest.
-        const bindings: number[] = [];
+        const bindings = this._groupBindingScratch;
+        bindings.length = 0;
         for (const resource of pipeline.resources) {
             if (resource.group !== 0 || resource.kind !== 'texture') continue;
             bindings.push(resource.binding);
@@ -182,7 +202,8 @@ export class BindGroupCache {
      * unassigned layers included — an empty binding leaves whatever the previous draw put there.
      */
     public terrainGroup(pipeline: RenderPipeline, material: Material): BindGroup {
-        const textures: Texture[] = [];
+        const textures = this._groupTextureScratch;
+        textures.length = 0;
         for (const resource of pipeline.resources) {
             if (resource.group !== 0 || resource.kind !== 'texture') continue;
             const id = material.textures.get(resource.glslName);
@@ -212,7 +233,7 @@ export class BindGroupCache {
      * group 3 holds the light grid as well, and `terrainForward` takes that half and no shadows.
      */
     public declaresShadowGroup(pipeline: RenderPipeline): boolean {
-        return pipeline.resources.some(r => r.group === 3 && r.glslName === 'u_shadowCascades');
+        return this._factsOf(pipeline).shadows;
     }
 
     /**
@@ -221,12 +242,27 @@ export class BindGroupCache {
      * a group a program never declared is an error rather than an empty bind.
      */
     public declaresLightGrid(pipeline: RenderPipeline): boolean {
-        return pipeline.resources.some(r => r.group === 3 && r.glslName === 'u_lightData');
+        return this._factsOf(pipeline).lightGrid;
     }
 
     /** Does this program declare group 3 at all, in either half? */
     public declaresFrameLighting(pipeline: RenderPipeline): boolean {
-        return this.declaresShadowGroup(pipeline) || this.declaresLightGrid(pipeline);
+        const facts = this._factsOf(pipeline);
+        return facts.shadows || facts.lightGrid;
+    }
+
+    private _factsOf(pipeline: RenderPipeline): LightingFacts {
+        let facts = this._lightingFacts.get(pipeline);
+        if (!facts) {
+            const group3 = pipeline.resources.filter(r => r.group === 3);
+            facts = {
+                shadows: group3.some(r => r.glslName === 'u_shadowCascades'),
+                lightGrid: group3.some(r => r.glslName === 'u_lightData'),
+                bindings: new Set(group3.map(r => r.binding)),
+            };
+            this._lightingFacts.set(pipeline, facts);
+        }
+        return facts;
     }
 
     /**
@@ -243,26 +279,25 @@ export class BindGroupCache {
      * command buffer.
      */
     public frameLightingGroup(pipeline: RenderPipeline, withPunctual: boolean = true): BindGroup {
-        const textures: Texture[] = [];
-        const bindings: number[] = [];
+        const textures = this._groupTextureScratch;
+        const bindings = this._groupBindingScratch;
+        textures.length = 0;
+        bindings.length = 0;
         // Only the bindings this program's layout really has. A CUSTOM material's WGSL comes out of naga,
         // which drops every resource the shader never reaches: a lit custom surface (the Valley's water)
         // that samples the sun's cascades but never a spot or point shadow has no binding 2 or 4, and
         // naming them anyway made the whole group -- and every frame's command buffer -- invalid.
-        const declared = new Set(pipeline.resources.filter(r => r.group === 3).map(r => r.binding));
-        const add = (texture: Texture, binding: number) => {
-            if (!declared.has(binding)) return;
-            textures.push(texture); bindings.push(binding);
-        };
-        if (this.declaresShadowGroup(pipeline)) {
-            add(this._host.shadowCascades(), 0);
+        const facts = this._factsOf(pipeline);
+        const declared = facts.bindings;
+        if (facts.shadows) {
+            if (declared.has(0)) { textures.push(this._host.shadowCascades()); bindings.push(0); }
             if (withPunctual) {
-                add(this._host.spotShadows(), 2);
-                add(this._host.pointShadows(), 4);
+                if (declared.has(2)) { textures.push(this._host.spotShadows()); bindings.push(2); }
+                if (declared.has(4)) { textures.push(this._host.pointShadows()); bindings.push(4); }
             }
         }
         // One texture and no sampler beside it — the light data is only ever `textureLoad`ed.
-        if (this.declaresLightGrid(pipeline)) add(this._host.lightGrid(), 6);
+        if (facts.lightGrid && declared.has(6)) { textures.push(this._host.lightGrid()); bindings.push(6); }
         return this.textureGroup(pipeline, 3, textures, bindings);
     }
 }
