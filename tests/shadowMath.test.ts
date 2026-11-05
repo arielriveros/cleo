@@ -391,7 +391,7 @@ describe('SpotShadowSlots', () => {
 // Point-light (cube) shadow maps.
 // ---------------------------------------------------------------------------------------------
 
-/** The six face view-projections exactly as `Renderer._renderPointShadows` builds them. */
+/** The six face view-projections exactly as `ShadowPasses.renderPointShadows` builds them. */
 function buildFaceMatrices(lightPos: vec3, near: number, far: number, fov: number): mat4[] {
     return POINT_SHADOW_FACES.map(face => {
         const view = mat4.create();

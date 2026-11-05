@@ -68,10 +68,6 @@ export class PipelineCache {
     private static readonly _NO_COLOR_WRITE: [boolean, boolean, boolean, boolean] = [false, false, false, false];
 
     /**
-     * The RHI pipeline for `program` under a particular render state, built once per combination and
-     * cached on a string key: two draws wanting the same program and state must get the same object.
-     */
-    /**
      * The two halves of the pipeline key that used to go through `JSON.stringify`.
      *
      * `get` is called per submesh per draw, and per caster per cascade in the shadow pass, and
@@ -108,6 +104,10 @@ export class PipelineCache {
                                  { blend, depthStencil, vertex: 'model', builtFor: program, target });
     }
 
+    /**
+     * The RHI pipeline for `program` under a particular render state, built once per combination and
+     * cached on a string key: two draws wanting the same program and state must get the same object.
+     */
     public get(program: string,
                          reflection: { resources: readonly ShaderResource[]; wgsl?: string;
                                        entryPoints?: { vertex?: string; fragment?: string;

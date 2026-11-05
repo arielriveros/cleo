@@ -6,7 +6,7 @@ import { DILATED_BASE_SLOT } from '../systems/texturePacker';
 import type { Material, CustomMaterial } from '../material';
 import type { FrameTargets } from './frameTargets';
 
-/** The opaque scene depth's slot name in a material's group 0 (a soft sprite's fade). */
+/** A Basic program's group-0 slot for the opaque depth snapshot (chunks/basicForward.wgsl), not a material map. */
 export const SCENE_DEPTH_FIELD = 'u_sceneDepth';
 
 /** The frame's lighting textures, owned by the shadow and light-grid code still in the renderer. */

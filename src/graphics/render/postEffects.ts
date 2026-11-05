@@ -330,6 +330,10 @@ export class PostEffects {
     }
 
     /**
+     * HDR bloom via a downsample/upsample mip pyramid (Jimenez, "Next Generation Post Processing in
+     * Call of Duty: Advanced Warfare", SIGGRAPH 2014). Chain: bright-pass into mip 0, downsample to
+     * the smallest mip, upsample back with additive blending, composite mip 0 over the scene.
+     *
      * Build the bloom pyramid from `source`: bright pass, downsample chain, additive upsample chain.
      * Writes only its own mips — the composite that puts the result back over the image is
      * {@link bloomComposite}, a separate pass because it is separately switchable and because only it
