@@ -201,6 +201,7 @@ import { FoliageGpuCuller, type GpuCullBucket, type GpuFoliageSegment } from './
 import { FoliageInteraction, gatherFoliageInteractors } from './foliageInteraction';
 
 import { createFrameView, type FrameView } from './render/frameView';
+import { FrameTargets } from './render/frameTargets';
 import { QUALITY_TIERS } from './render/settingsTypes';
 import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 export { QUALITY_TIERS } from './render/settingsTypes';
@@ -409,6 +410,8 @@ export class Renderer {
      * capture that swaps the camera is seen by all of them at once.
      */
     private readonly _view: FrameView = createFrameView();
+    /** The frame's shared render targets (render/frameTargets.ts), held by reference like `_view`. */
+    private readonly _targets = new FrameTargets();
 
     /**
      * The AUTHORED exposure — what the artist set, what a scene saves, and what a preview renders at.
@@ -530,11 +533,8 @@ export class Renderer {
     private _outlineColor: [number, number, number] = [1.0, 0.55, 0.1];
     private _outlineWidth: number = 5.0;
 
-    // The editor overlay layer: grid, gizmos, helper wireframes, helper icons. Its own colour buffer
-    // so the post chain never sees any of it, composited over the resolved image in `present`'s wake.
-    // `_overlayDrawn` is set per frame by the first pass that opens it — nothing was drawn, no clear,
-    // no composite, and a published build (which has no editor nodes at all) pays nothing.
-    private _overlayFBO!: Framebuffer;
+    // Set per frame by the first pass that opens the overlay layer (`_targets.overlay`): nothing drawn
+    // means no clear and no composite, and a published build, which has no editor nodes, pays nothing.
     private _overlayDrawn: boolean = false;
     // Editor "Renderer" debug view: which buffer to blit to the screen ('final' = normal image).
     private _debugView: DebugView = 'final';
@@ -558,16 +558,6 @@ export class Renderer {
     // at `canvas * renderScale` while the canvas stays native, so the present upscales.
     private _renderScale: number = 1.0;
 
-    private _sceneFBO!: Framebuffer;
-    // Snapshot of _sceneFBO's depth, taken after the opaque forward draw so fullscreen passes can
-    // sample full opaque depth without a read/write feedback on the bound _sceneFBO.
-    private _sceneDepthFBO!: Framebuffer;
-    /**
-     * The opaque scene's COLOUR, copied just before the transparent queue — what a transparent custom
-     * material refracts (`u_sceneColor`). Allocated on first use and copied only on frames where a
-     * visible transparent material reads it; see `_snapshotSceneColor`.
-     */
-    private _refractionFBO: Framebuffer | null = null;
     /** True while the transparent queue runs after this frame's depth/colour snapshots. */
     private _sceneBuffersLive = false;
     /**
@@ -595,7 +585,6 @@ export class Renderer {
     private readonly _decalOuter: number[] = [0, 0, 0, 0];
     private readonly _decalRing: number[] = [0, 0, 0, 0];
     private readonly _decalFlip: DecalFlipbookFrame = { a: [0, 0, 1, 1], b: [0, 0, 1, 1], blend: 0 };
-    private _gBufferFBO!: Framebuffer;
 
 
     // Offscreen thumbnail capture. While `_presentTarget` is set the pipeline renders at the target's
@@ -990,12 +979,10 @@ export class Renderer {
         15,  7, 13,  5,
     ];
 
-    // Motion blur: full-res per-pixel velocity + TileMax/NeighborMax (both tile-res). `_velocityFBO`
-    // holds RAW motion — TAA reads the same buffer and needs the unscaled delta.
-    private _velocityFBO!: Framebuffer;
+    // Motion blur's TileMax / NeighborMax, both at tile resolution, beside `_targets.velocity`.
     private _velocityTileFBO!: Framebuffer;
     private _velocityNeighborFBO!: Framebuffer;
-    // Whether `_velocityFBO` actually holds THIS frame's motion. Same hazard `_ssaoProducedThisFrame`
+    // Whether `_targets.velocity` actually holds THIS frame's motion. Same hazard `_ssaoProducedThisFrame`
     // guards: a framebuffer keeps its contents when nothing draws into it, so a reader that assumed
     // the pass ran would reconstruct from whichever frame last filled it.
     private _velocityProducedThisFrame: boolean = false;
@@ -1533,14 +1520,14 @@ export class Renderer {
     // Allocate every render target. Nothing here is backend-aware and nothing should become so — the
     // porting work belongs inside `Framebuffer`, not in this list.
     private _allocateTargets(): void {
-        this._sceneFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
-        this._sceneDepthFBO = new Framebuffer({ usage: 'depth' });
+        this._targets.scene = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        this._targets.sceneDepth = new Framebuffer({ usage: 'depth' });
         this._shadowCascadeFBO = new LayeredDepthFramebuffer();
         this._spotShadowFBO = new LayeredDepthFramebuffer();
         this._pointShadowFBO = new LayeredDepthFramebuffer();
         this._pointStaticFBO = new LayeredDepthFramebuffer();
         this._spotStaticFBO = new LayeredDepthFramebuffer();
-        this._gBufferFBO = new Framebuffer({ colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' } });
+        this._targets.gBuffer = new Framebuffer({ colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Bloom carries linear HDR (bright pixels can far exceed 1.0), so both the bright buffer and the
         // ping-pong blur targets are float — an RGBA8 bloom would clamp and defeat the HDR bright-pass.
         for (let i = 0; i < Renderer.BLOOM_MIP_COUNT; i++)
@@ -1563,7 +1550,7 @@ export class Renderer {
         // `depth: false`: the fullscreen reprojection tests no depth, and the object pass that does
         // borrows the opaque buffer through `_velocityObjectsTarget` rather than owning one. The
         // default would allocate a full-res depth texture nothing ever reads.
-        this._velocityFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
+        this._targets.velocity = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
         this._velocityTileFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._velocityNeighborFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // SSIL: bounce light in rgb (HDR, so float) and visibility in a. No depth attachment — every
@@ -1582,11 +1569,11 @@ export class Renderer {
         this._skyProjectFBO = new Framebuffer({ colorTextureOptions: { mipMap: false }, depth: false });
         // Selection outline silhouette mask (low precision, no mipmaps).
         this._outlineMaskFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
-        // Editor overlay layer. `precision: 'high'` matches `_sceneFBO`'s rgba16float, so the gizmo,
+        // Editor overlay layer. `precision: 'high'` matches `_targets.scene`'s rgba16float, so the gizmo,
         // grid and sprite pipelines keep the same colour format in `_pipelineFor`'s cache key and are
         // not duplicated there. No depth of its own: `_overlayTarget` borrows the scene's, which is
         // what keeps helper wireframes occluded by real geometry.
-        this._overlayFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' },
+        this._targets.overlay = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' },
                                              depth: false });
     }
 
@@ -2077,16 +2064,16 @@ export class Renderer {
     private _createTargets(): void {
         // Create framebuffers at the internal render size (canvas x renderScale), not the canvas size.
         const rw = this._renderWidth, rh = this._renderHeight;
-        this._sceneFBO.create(rw, rh);
-        this._gBufferFBO.create(rw, rh);
+        this._targets.scene.create(rw, rh);
+        this._targets.gBuffer.create(rw, rh);
         this._exposureFBOs[0].create(1, 1);
         this._exposureFBOs[1].create(1, 1);
         this._ssaoFBO.create(this._ssaoWidth, this._ssaoHeight);
         this._ssaoBlurFBO.create(this._ssaoWidth, this._ssaoHeight);
         this._outlineMaskFBO.create(rw, rh);
-        // Must match `_sceneFBO` exactly: `_overlayTarget` attaches that buffer's depth alongside this
+        // Must match `_targets.scene` exactly: `_overlayTarget` attaches that buffer's depth alongside this
         // one's colour, and a mismatched extent is an incomplete framebuffer on WebGL2.
-        this._overlayFBO.create(rw, rh);
+        this._targets.overlay.create(rw, rh);
 
         // Shared instance-matrix buffer for GPU instancing in the geometry pass
         // VERTEX | COPY_DST: rewritten every frame with the batch's world matrices, which is what
@@ -2102,7 +2089,7 @@ export class Renderer {
         this._createBloomMips(rw, rh);
 
         const mbK = Renderer.MOTION_BLUR_TILE;
-        this._velocityFBO.create(rw, rh);
+        this._targets.velocity.create(rw, rh);
         this._velocityTileFBO.create(Math.ceil(rw / mbK), Math.ceil(rh / mbK));
         this._velocityNeighborFBO.create(Math.ceil(rw / mbK), Math.ceil(rh / mbK));
         
@@ -2602,7 +2589,7 @@ export class Renderer {
     /** Draw every particle system of a 3D scene into the scene buffer. 2D scenes draw theirs in the 2D pass. */
     private _renderParticles(scene: Scene): void {
         if (scene.particleSystems.size === 0 || this._isFlatParticleScene(scene)) return;
-        this._drawParticleNodes(scene, scene.particleSystems, this._sceneFBO.renderTarget);
+        this._drawParticleNodes(scene, scene.particleSystems, this._targets.scene.renderTarget);
     }
 
     /** A 2D scene: an orthographic camera over tilemaps. Its particles join the Y-sorted 2D pass. */
@@ -2901,7 +2888,7 @@ export class Renderer {
      */
     private _surfaceDecalPass(): void {
         const w = this._renderWidth, h = this._renderHeight;
-        const gBuffer = this._gBufferFBO;
+        const gBuffer = this._targets.gBuffer;
         // RGBA8 — Unreal's DBuffer precision. Every value written is a premultiplied 0..1 quantity.
         const dbuffer = this._dBufferFBO = this._decalTarget(this._dBufferFBO, () => new Framebuffer({
             colorAttachments: 3, colorTextureOptions: { mipMap: false }, depth: false }));
@@ -2937,7 +2924,7 @@ export class Renderer {
         // A pass cannot sample what it writes, and the resolve writes the G-buffer.
         this._copyColors(gBuffer.colors, copy.colors, w, h);
 
-        // Never binds `_gBufferFBO.depth`: it is attached to this pass. The shader tells untouched pixels
+        // Never binds `_targets.gBuffer.depth`: it is attached to this pass. The shader tells untouched pixels
         // apart by the DBuffer's alphas instead, and discards them.
         const resolve = this._beginFullscreenPass(gBuffer.renderTarget, 'decals.resolve', false, undefined, false);
         this._shaderManager.bind('decalResolve');
@@ -2962,7 +2949,7 @@ export class Renderer {
      * too, so this is the one decal output that reaches the Default and Cel materials.
      */
     private _emissiveDecalPass(): void {
-        const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'decals.emissive', false, undefined, false);
+        const pass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'decals.emissive', false, undefined, false);
         this._drawColorDecals(pass, this._emissiveDecals, Renderer._DECAL_EMISSIVE_BLEND, this._view.invViewProj, 0);
         this._endFullscreenPass(pass);
         // The passes that follow are partly on the legacy path and inherit blend state.
@@ -2979,7 +2966,7 @@ export class Renderer {
      */
     private _drawColorDecals(pass: RenderPassEncoder, decals: readonly DecalNode[], blend: BlendState,
                              invViewProj: mat4, mode: 0 | 1): void {
-        const depth = this._sceneDepthFBO.depth;
+        const depth = this._targets.sceneDepth.depth;
         for (const decal of decals) {
             const receivers = this._decalReceiverDepth(decal, depth);
             if (!receivers) continue;
@@ -3035,7 +3022,7 @@ export class Renderer {
         const moving = this._hasPrevViewProj && !Renderer._matricesClose(this._view.viewProj, this._prevViewProj);
 
         const { sunColor, ambient, sunDir } = this._fluidVolumeLight(scene);
-        const depth = this._sceneDepthFBO.depth;
+        const depth = this._targets.sceneDepth.depth;
         const sm = this._shaderManager;
         const cam = this._view.camera;
         // Sub-pixel ray jitter (Halton 2,3) so accumulated frames sample the whole pixel.
@@ -3158,7 +3145,7 @@ export class Renderer {
         // --- 3. Composite ---
         GLState.blend(true);
         if (gl) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'fluidVolumes.composite', false, undefined, false);
+        const pass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'fluidVolumes.composite', false, undefined, false);
         const pipeline = this._fullscreenPipeline('fluidVolumeComposite', FluidVolumeCompositeProgram, Renderer._CLOUD_BLEND);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [image, this._fluidTraceFBO!.colors[1], depth]));
@@ -3468,7 +3455,7 @@ export class Renderer {
         // Its own scope, so the boxes' cost is a row of its own rather than part of the foliage pass's.
         this._scope('occlusion.queries');
         const target = device.createRenderTarget({
-            label: 'occlusionQueries', colorViews: [], depthView: this._gBufferFBO.depth.attachmentView,
+            label: 'occlusionQueries', colorViews: [], depthView: this._targets.gBuffer.depth.attachmentView,
         });
         this._passEncoder = this._acquireEncoder('occlusionQueries');
         this._passTarget = target;
@@ -3651,7 +3638,7 @@ export class Renderer {
         // One pass for every node: the target and its clear belong to the pass, while the per-draw
         // state (which program, which cull mode, which textures) belongs to the pipelines and bind
         // groups set inside it.
-        const pass = this._beginFullscreenPass(this._gBufferFBO.renderTarget, 'geometry', true);
+        const pass = this._beginFullscreenPass(this._targets.gBuffer.renderTarget, 'geometry', true);
 
         // No unbind needed here: the geometry pass's bind group clears the units the previous frame's
         // lighting pass left the G-buffer textures on, which would otherwise be a feedback hazard.
@@ -3708,7 +3695,7 @@ export class Renderer {
             // Its own pass over the same G-buffer, opened after the geometry pass closed: foliage is
             // deferred-lit like everything else, it just arrives by a different route (per-cell
             // instance buffers rather than scene nodes).
-            const foliage = this._beginFullscreenPass(this._gBufferFBO.renderTarget, 'foliage', false,
+            const foliage = this._beginFullscreenPass(this._targets.gBuffer.renderTarget, 'foliage', false,
                                                       undefined, false);
             this._foliagePass(scene, foliage);
             this._endFullscreenPass(foliage);
@@ -5079,7 +5066,7 @@ export class Renderer {
             // up as one: the miss falls back to a 2D texture, a sampler-type mismatch at draw time.
             if (field === null) { textures.push(envCube ?? this._fallbackCube); continue; }
             // The opaque depth snapshot (a soft sprite's fade, chunks/basicForward.wgsl) is the frame's.
-            if (field === SCENE_DEPTH_FIELD) { textures.push(this._sceneDepthFBO.depth); continue; }
+            if (field === SCENE_DEPTH_FIELD) { textures.push(this._targets.sceneDepth.depth); continue; }
             // A cutout's edge-padded base colour stands in for the authored one (TexturePacker
             // `_syncDilation`); until it is baked, or once it is swept, the authored map draws.
             const dilated = field === 'baseColorTexture' ? material.textures.get(DILATED_BASE_SLOT) : undefined;
@@ -5135,9 +5122,9 @@ export class Renderer {
             if (resource.group !== 0 || resource.kind !== 'texture') continue;
             bindings.push(resource.binding);
             if (resource.glslName === 'u_envMap') { textures.push(envCube ?? this._fallbackCube); continue; }
-            if (resource.glslName === 'u_sceneDepth') { textures.push(this._sceneDepthFBO.depth); continue; }
+            if (resource.glslName === 'u_sceneDepth') { textures.push(this._targets.sceneDepth.depth); continue; }
             if (resource.glslName === 'u_sceneColor') {
-                textures.push(this._refractionFBO?.colors[0] ?? this._fallbackTexture);
+                textures.push(this._targets.refraction?.colors[0] ?? this._fallbackTexture);
                 continue;
             }
             const id = material.textures.get(resource.glslName.replace(/^u_/, ''));
@@ -5574,7 +5561,7 @@ export class Renderer {
         const w = this._renderWidth, h = this._renderHeight;
 
         // Copy the opaque depth into the scene FBO so forward passes depth-test correctly.
-        this._copyDepth(this._gBufferFBO.depth, this._sceneFBO.depth, w, h);
+        this._copyDepth(this._targets.gBuffer.depth, this._targets.scene.depth, w, h);
 
         // Depth was blitted in; clear only colour. Alpha clears to 0 so the background starts with an
         // empty bloom mask. Thumbnails clear to transparent black, so no fringe bleeds in.
@@ -5582,7 +5569,7 @@ export class Renderer {
         const bg = this._thumbnailMode ? [0, 0, 0] : cc;
         // This pass binds its shadows through group 3, but the unit reservation stays: CUSTOM materials
         // still sample the cascade array at 6 and the spot atlas at 15, bound once per frame.
-        const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'deferredLighting', true,
+        const pass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'deferredLighting', true,
                                                [bg[0], bg[1], bg[2], 0.0], false);
         const pipeline = this._fullscreenPipeline('deferredLighting', DeferredLightingProgram);
         pass.setPipeline(pipeline);
@@ -5590,8 +5577,8 @@ export class Renderer {
         // Group 0: the G-buffer plus SSIL. SSIL always binds a complete texture even when disabled —
         // the shader gates on u_ssaoEnabled, but the sampler still has to point somewhere valid.
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-            this._gBufferFBO.colors[0], this._gBufferFBO.colors[1], this._gBufferFBO.colors[2],
-            this._gBufferFBO.depth, (this._ssaoResult ?? this._ssaoBlurFBO).colors[0],
+            this._targets.gBuffer.colors[0], this._targets.gBuffer.colors[1], this._targets.gBuffer.colors[2],
+            this._targets.gBuffer.depth, (this._ssaoResult ?? this._ssaoBlurFBO).colors[0],
         ]));
 
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
@@ -5969,7 +5956,7 @@ export class Renderer {
         const tracePipeline = this._fullscreenPipeline('ssil', SsilProgram);
         trace.setPipeline(tracePipeline);
         trace.setBindGroup(0, this._textureBindGroup(tracePipeline, 0, [
-            this._gBufferFBO.colors[1], this._gBufferFBO.depth, radiance.colors[0],
+            this._targets.gBuffer.colors[1], this._targets.gBuffer.depth, radiance.colors[0],
         ]));
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._ssilProj);
@@ -6006,7 +5993,7 @@ export class Renderer {
             const pipeline = this._fullscreenPipeline('ssilTemporal', SsilTemporalProgram);
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-                this._ssaoFBO.colors[0], src.colors[0], radiance.colors[0], this._gBufferFBO.depth,
+                this._ssaoFBO.colors[0], src.colors[0], radiance.colors[0], this._targets.gBuffer.depth,
             ]));
             this._shaderManager.setUniform('u_invProjection', this._invProjection);
             this._shaderManager.setUniform('u_viewToPrevClip', this._ssilViewToPrevClip);
@@ -6031,7 +6018,7 @@ export class Renderer {
             const pipeline = this._fullscreenPipeline('ssilBlur', SsilBlurProgram);
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-                this._ssaoResult.colors[0], this._gBufferFBO.colors[1], this._gBufferFBO.depth,
+                this._ssaoResult.colors[0], this._targets.gBuffer.colors[1], this._targets.gBuffer.depth,
             ]));
             this._shaderManager.setUniform('u_depthParams', this._ssilDepthParams);
             this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
@@ -6057,7 +6044,7 @@ export class Renderer {
         const pipeline = this._fullscreenPipeline('ssilHistory', SsilHistoryProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-            this._sceneFBO.colors[0], this._depthSource(),
+            this._targets.scene.colors[0], this._depthSource(),
         ]));
         // The depth snapshot was rasterized through this frame's jittered projection.
         mat4.invert(this._invProjection, this._jitteredCameraProj);
@@ -6067,7 +6054,7 @@ export class Renderer {
         this._endFullscreenPass(pass);
         this._ssilRadianceFrame = this._view.frameIndex;
         // Put back what the overlay passes below expect, as the TAA resolve does.
-        this._sceneFBO.bind();
+        this._targets.scene.bind();
         GLState.blend(false);
         GLState.depthTest(true);
         GLState.depthMask(true);
@@ -6681,7 +6668,7 @@ export class Renderer {
                 far: Math.min(camera.far, this._clusterDistance),
                 fovY: camera.fov * Math.PI / 180,
                 aspect: camera.ratio,
-            }, this._sceneFBO.width, this._sceneFBO.height, device.backend === 'webgpu');
+            }, this._targets.scene.width, this._targets.scene.height, device.backend === 'webgpu');
         }
 
         this._packLightRecords(scene);
@@ -6953,7 +6940,7 @@ export class Renderer {
         rayPass.setPipeline(rayPipeline);
 
         this._shaderManager.bind('godRays');
-        rayPass.setBindGroup(0, this._textureBindGroup(rayPipeline, 0, [this._sceneDepthFBO.depth]));
+        rayPass.setBindGroup(0, this._textureBindGroup(rayPipeline, 0, [this._targets.sceneDepth.depth]));
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         this._shaderManager.setUniform('u_sunDir', s);
@@ -7117,13 +7104,13 @@ export class Renderer {
         GLState.depthTest(true);
     }
 
-    /** Blit _sceneFBO's depth (deferred blit + forward opaques) into _sceneDepthFBO so fullscreen
-     *  passes can sample the complete opaque depth without a read/write feedback on _sceneFBO,
-     *  then re-bind _sceneFBO (restores the overlay pass's render target + viewport). */
+    /** Blit _targets.scene's depth (deferred blit + forward opaques) into _targets.sceneDepth so fullscreen
+     *  passes can sample the complete opaque depth without a read/write feedback on _targets.scene,
+     *  then re-bind _targets.scene (restores the overlay pass's render target + viewport). */
     private _copySceneDepth(): void {
-        this._copyDepth(this._sceneFBO.depth, this._sceneDepthFBO.depth,
+        this._copyDepth(this._targets.scene.depth, this._targets.sceneDepth.depth,
                         this._renderWidth, this._renderHeight);
-        this._sceneFBO.bind();
+        this._targets.scene.bind();
     }
 
     /**
@@ -7163,14 +7150,14 @@ export class Renderer {
         const node = scene.skyAtmosphere;
         if (!node || !node.fogEnabled || !node.cubemap || node.fogMaxOpacity <= 0 || node.fogDensity <= 0) return;
 
-        const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'skyFog', false);
+        const pass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'skyFog', false);
         const pipeline = this._fullscreenPipeline('skyFog', SkyFogProgram, DEFAULT_BLEND);
         pass.setPipeline(pipeline);
 
         this._shaderManager.bind('skyFog');
         // The CLEAN atmosphere, never the cloud-baked sky: fog is the colour of the air at the horizon, and
         // sampling clouds into it painted them onto every fogged hillside.
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._sceneDepthFBO.depth, node.cubemap]));
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.sceneDepth.depth, node.cubemap]));
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         this._shaderManager.setUniform('u_fogDensity', node.fogDensity);
@@ -7247,7 +7234,7 @@ export class Renderer {
 
     /** Forward passes drawn on top of the deferred-lit scene: skybox, transparent models, sprites, editor overlays. */
     private _renderForwardOverlay(scene: Scene, shadowLight: LightNode | null): void {
-        this._sceneFBO.bind();
+        this._targets.scene.bind();
         GLState.depthTest(true);
         GLState.depthMask(true);
 
@@ -7307,7 +7294,7 @@ export class Renderer {
         const skyAtmo = scene.skyAtmosphere;
         this._scope('sky');
         if (!this._thumbnailMode && this._passEnabled['sky']) {
-            const skyPass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'sky', false,
+            const skyPass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'sky', false,
                                                       undefined, false);
             this._renderSky(skyPass, scene, this._view.camera);
             this._endFullscreenPass(skyPass);
@@ -7714,7 +7701,7 @@ export class Renderer {
                                                   Renderer._CLOUD_BLEND, undefined,
                                                   this._cubeFBO.targetFor(cube, faces[0] ?? 0, 0, false));
         // The depth texture is bound only because the layout has a slot for it; `u_ignoreDepth` skips it.
-        const group = this._textureBindGroup(pipeline, 0, [this._gBufferFBO.depth, this._cloudBaseNoise,
+        const group = this._textureBindGroup(pipeline, 0, [this._targets.gBuffer.depth, this._cloudBaseNoise,
                                                            this._cloudDetailNoise]);
         this._setCloudUniforms(scene, node, this._cloudFaceInv, bake.eye, bake.time);
         this._shaderManager.setUniform('u_ignoreDepth', true);
@@ -7789,9 +7776,9 @@ export class Renderer {
         // of their passes open. They share the scene buffer's float format, so it speaks for all three.
         const rayPipeline = this._fullscreenPipeline('volumetricClouds', VolumetricCloudsProgram,
                                                      Renderer._CLOUD_BLEND, undefined,
-                                                     this._sceneFBO.renderTarget);
+                                                     this._targets.scene.renderTarget);
         const rayGroup = (pipe: RenderPipeline) => this._textureBindGroup(pipe, 0, [
-            this._gBufferFBO.depth, this._cloudBaseNoise!, this._cloudDetailNoise!,
+            this._targets.gBuffer.depth, this._cloudBaseNoise!, this._cloudDetailNoise!,
         ]);
         this._setCloudUniforms(scene, node, this._view.invViewProj, this._view.camera.position,
                                performance.now() * 0.001);
@@ -7807,7 +7794,7 @@ export class Renderer {
             // Full resolution: raymarch straight into the bound scene buffer (premultiplied "over" set above).
             this._shaderManager.setUniform('u_temporal', false);
             this._shaderManager.setUniform('u_jitterSlot', this._view.frameIndex % 16);
-            const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'clouds', false);
+            const pass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'clouds', false);
             pass.setPipeline(rayPipeline);
             pass.setBindGroup(0, rayGroup(rayPipeline));
             this._drawFullscreen(pass);
@@ -7824,12 +7811,12 @@ export class Renderer {
             // Pass B: composite the low-res clouds, premultiplied "over". Not a bilinear blit —
             // cloudUpsample.fs re-decides occlusion per full-resolution pixel, against the G-buffer
             // depth the raymarch bounded itself with, and uses the low-res buffer for colour only.
-            const upPass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'cloudUpsample', false);
+            const upPass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'cloudUpsample', false);
             const upPipeline = this._fullscreenPipeline('cloudUpsample', CloudUpsampleProgram,
                                                        Renderer._CLOUD_BLEND);
             upPass.setPipeline(upPipeline);
             upPass.setBindGroup(0, this._textureBindGroup(upPipeline, 0,
-                                                          [source, this._gBufferFBO.depth]));
+                                                          [source, this._targets.gBuffer.depth]));
             this._shaderManager.bind('cloudUpsample');
             this._shaderManager.setUniform('u_cloudResolution', [w, h]);
             this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
@@ -8069,7 +8056,7 @@ export class Renderer {
         const resolvePipeline = this._fullscreenPipeline('cloudTemporalResolve', CloudTemporalResolveProgram);
         resolvePass.setPipeline(resolvePipeline);
         resolvePass.setBindGroup(0, this._textureBindGroup(resolvePipeline, 0, [
-            this._cloudTraceFBO.colors[0], prev.colors[0], this._gBufferFBO.depth,
+            this._cloudTraceFBO.colors[0], prev.colors[0], this._targets.gBuffer.depth,
         ]));
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
         this._shaderManager.setUniform('u_prevViewProj', this._uvProducing(this._prevViewProj));
@@ -8150,7 +8137,7 @@ export class Renderer {
      */
     private _checkTaaFormats(): void {
         const downgraded = this._taaHistoryFBOs.length > 0
-            && (this._taaHistoryFBOs[0].colors[0].downgraded || this._velocityFBO.colors[0].downgraded);
+            && (this._taaHistoryFBOs[0].colors[0].downgraded || this._targets.velocity.colors[0].downgraded);
         if (!downgraded) { this._taaSupported = true; return; }
         if (this._taaSupported)
             Logger.error('Temporal antialiasing disabled: this device has no float render targets, so '
@@ -8322,7 +8309,7 @@ export class Renderer {
         for (const item of list) {
             if ('sprite' in item) this._renderSprite(item.sprite, false, pass);
             else if ('particles' in item) {
-                this._particles.draw([item.particles], this._particleDrawFrame(scene, pass, this._sceneFBO.renderTarget));
+                this._particles.draw([item.particles], this._particleDrawFrame(scene, pass, this._targets.scene.renderTarget));
                 // Particle pipelines leave their own blend behind; the sprites after them expect the pass's.
                 this._restoreDefaultBlend();
                 GLState.blend(true);
@@ -8339,7 +8326,7 @@ export class Renderer {
      * scene — and reserves the shadow units, since a custom material on a sprite is a legacy draw.
      */
     private _begin2DPass(): RenderPassEncoder {
-        return this._beginFullscreenPass(this._sceneFBO.renderTarget, '2d', false, undefined, false);
+        return this._beginFullscreenPass(this._targets.scene.renderTarget, '2d', false, undefined, false);
     }
 
     /** Frustum test for one chunk, in world space. `origin` is the owning node's world position. */
@@ -8595,9 +8582,9 @@ export class Renderer {
         }
         // The legacy (non-bind-group) path binds the forward scene samplers by unit too.
         if (!samplersViaBindGroup && material.renderMode === 'forward') {
-            this._sceneDepthFBO.depth.bind(unit);
+            this._targets.sceneDepth.depth.bind(unit);
             this._shaderManager.setUniform('u_sceneDepth', unit++);
-            const color = this._refractionFBO?.colors[0] ?? fallback;
+            const color = this._targets.refraction?.colors[0] ?? fallback;
             if (color) color.bind(unit);
             this._shaderManager.setUniform('u_sceneColor', unit++);
         }
@@ -8616,17 +8603,17 @@ export class Renderer {
 
     /**
      * Copy the opaque scene's colour for refraction, right before the transparent queue, and mark the
-     * scene buffers live for its draws. A copy rather than a read of `_sceneFBO`: that is the target the
+     * scene buffers live for its draws. A copy rather than a read of `_targets.scene`: that is the target the
      * transparents draw INTO, and a pass cannot sample its own attachment. Skipped — no allocation, no
      * copy — unless something visible actually reads it.
      */
     private _snapshotSceneColor(queue: readonly ModelNode[]): void {
         this._sceneBuffersLive = !this._thumbnailMode;
         if (this._thumbnailMode || !Renderer._readsSceneColor(queue)) return;
-        const fbo = this._refractionFBO = this._decalTarget(this._refractionFBO, () => new Framebuffer({
+        const fbo = this._targets.refraction = this._decalTarget(this._targets.refraction, () => new Framebuffer({
             colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
-        this._copyColors([this._sceneFBO.colors[0]], [fbo.colors[0]], this._renderWidth, this._renderHeight);
-        this._sceneFBO.bind();
+        this._copyColors([this._targets.scene.colors[0]], [fbo.colors[0]], this._renderWidth, this._renderHeight);
+        this._targets.scene.bind();
     }
 
     private _applyTerrainMaterial(material: Material): void {
@@ -9431,23 +9418,23 @@ export class Renderer {
     private _resizeBuffers(width: number, height: number): void {
         this._setViewport(width, height);
 
-        this._sceneFBO.resize(width, height);
-        this._sceneDepthFBO.resize(width, height);
-        this._gBufferFBO.resize(width, height);
+        this._targets.scene.resize(width, height);
+        this._targets.sceneDepth.resize(width, height);
+        this._targets.gBuffer.resize(width, height);
         const aw = Math.max(1, Math.round(width * this._ssaoResolutionScale));
         const ah = Math.max(1, Math.round(height * this._ssaoResolutionScale));
         this._ssaoFBO.resize(aw, ah);
         this._ssaoBlurFBO.resize(aw, ah);
         this._createBloomMips(width, height);
         this._outlineMaskFBO.resize(width, height);
-        this._overlayFBO.resize(width, height);   // in lockstep with _sceneFBO; see _overlayTarget
+        this._targets.overlay.resize(width, height);   // in lockstep with _sceneFBO; see _overlayTarget
         // Only once allocated; `_decalTarget` sizes them on first use.
         this._dBufferFBO?.resize(width, height);
         this._gBufferCopyFBO?.resize(width, height);
         this._decalReceiverFBO?.resize(width, height);
-        this._refractionFBO?.resize(width, height);
+        this._targets.refraction?.resize(width, height);
         const mbK = Renderer.MOTION_BLUR_TILE;
-        this._velocityFBO.resize(width, height);
+        this._targets.velocity.resize(width, height);
         this._velocityTileFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
         this._velocityNeighborFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
         // A resize invalidates the previous-frame camera transform; skip blur for one frame. It also
@@ -9499,13 +9486,13 @@ export class Renderer {
     }
 
     private _renderScene(scene: Scene): void {
-        this._sceneFBO.bind();
+        this._targets.scene.bind();
         this._setViewport(this._renderWidth, this._renderHeight);
         // The frame's clear, as a PASS of its own: the sky below deliberately LOADS, and a thumbnail
         // skips the sky entirely while still needing the buffer cleared.
         // Thumbnails clear to transparent black so only geometry ends up opaque.
         const scenePass = this._beginFullscreenPass(
-            this._sceneFBO.renderTarget, 'sceneClear', true,
+            this._targets.scene.renderTarget, 'sceneClear', true,
             this._thumbnailMode ? [0, 0, 0, 0] : undefined, true);
         this._endFullscreenPass(scenePass);
 
@@ -9515,7 +9502,7 @@ export class Renderer {
         GLState.depthMask(false);
         const fwdAtmo = scene.skyAtmosphere;
         if (!this._thumbnailMode) {
-            const skyPass = this._beginFullscreenPass(this._sceneFBO.renderTarget, 'sky', false,
+            const skyPass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'sky', false,
                                                       undefined, false);
             this._renderSky(skyPass, scene, this._view.camera);
             this._endFullscreenPass(skyPass);
@@ -9614,7 +9601,7 @@ export class Renderer {
      */
     private _runForwardQueue(label: string, queue: ModelNode[]): void {
         if (queue.length === 0) return;
-        const pass = this._beginFullscreenPass(this._sceneFBO.renderTarget, label, false, undefined, false);
+        const pass = this._beginFullscreenPass(this._targets.scene.renderTarget, label, false, undefined, false);
         for (const node of queue) this._renderModel(node, pass);
         this._endFullscreenPass(pass);
     }
@@ -11160,7 +11147,7 @@ export class Renderer {
             //   * it has to include the TRANSPARENTS. They write depth in thumbnail mode precisely so
             //     they can be covered (`_renderForwardOverlay`), and an alpha-cutout canopy is drawn
             //     in that queue -- a snapshot taken before it would cut a tree back to its trunk.
-            //   * `_presentThumbnail` was the ONLY place in the engine that sampled `_sceneFBO.depth`
+            //   * `_presentThumbnail` was the ONLY place in the engine that sampled `_targets.scene.depth`
             //     directly. Every other depth consumer -- god rays, sky fog, the velocity chain --
             //     reads this snapshot instead, because sampling a texture that is still a live depth
             //     ATTACHMENT is the shape WebGL2 calls a feedback loop and leaves undefined.
@@ -11193,8 +11180,8 @@ export class Renderer {
      * cannot be reordered, and they are not chain entries at all:
      *
      *   compose   the scene enters the chain. Motion blur IS this step when it runs, reconstructing
-     *             the image out of `_sceneFBO` and the velocity buffer while copying it in.
-     *   exposure  meters `_sceneFBO` BEFORE god rays or bloom put light into the chain. Metering after
+     *             the image out of `_targets.scene` and the velocity buffer while copying it in.
+     *   exposure  meters `_targets.scene` BEFORE god rays or bloom put light into the chain. Metering after
      *             them makes exposure and bloom chase each other: bloom brightens the frame, the meter
      *             darkens the exposure, which moves bloom's display-referred threshold, and round again.
      *   present   the single display resolve. Last by definition.
@@ -11240,7 +11227,7 @@ export class Renderer {
                 const pass = this._beginFullscreenPass(ctx.target(head).renderTarget, 'compose', true);
                 const pipeline = this._fullscreenPipeline('screen', ScreenProgram);
                 pass.setPipeline(pipeline);
-                pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._sceneFBO.colors[0]]));
+                pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.scene.colors[0]]));
                 this._drawFullscreen(pass);
                 this._endFullscreenPass(pass);
             },
@@ -11252,7 +11239,7 @@ export class Renderer {
         const nowMs = performance.now();
         const dt = Math.min(0.25, Math.max(0, (nowMs - this._lastExposureMs) / 1000));
         this._lastExposureMs = nowMs;
-        // It reads `_sceneFBO` and writes its own 1x1 targets, so it touches no chain resource at all —
+        // It reads `_targets.scene` and writes its own 1x1 targets, so it touches no chain resource at all —
         // which is why its position is fixed by the comment above rather than by a dependency.
         if (this._meteringActive() && this._passEnabled['exposure'])
             graph.addPass({ id: 'exposure', scope: 'exposure', execute: () => this._exposurePass(dt) });
@@ -11482,7 +11469,7 @@ export class Renderer {
         // Every texture is bound even where it is not read (the coverage depth at alphaFromDepth 0,
         // the identity LUT at intensity 0) — WebGPU requires every declared binding to be satisfied.
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-            source.colors[0], this._sceneFBO.depth, lut,
+            source.colors[0], this._targets.scene.depth, lut,
         ]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
@@ -11506,7 +11493,7 @@ export class Renderer {
         const pipeline = this._fullscreenPipeline('overlayComposite', OverlayCompositeProgram,
                                                   OVERLAY_COMPOSITE_BLEND);
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._overlayFBO.colors[0]]));
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.overlay.colors[0]]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
     }
@@ -11546,7 +11533,7 @@ export class Renderer {
             return (id ? TextureManager.Instance.getTexture(id) : null) ?? fallback;
         });
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-            source.colors[0], this._sceneDepthFBO.depth, ...userTextures,
+            source.colors[0], this._targets.sceneDepth.depth, ...userTextures,
         ]));
         this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
@@ -11593,7 +11580,7 @@ export class Renderer {
         // library's transparency with it as well as every baked foliage impostor.
         this._shaderManager.setUniform('u_alphaFromDepth', 1.0);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-            this._sceneFBO.colors[0], this._depthSource(), this._colorLut.volumeFor(null),
+            this._targets.scene.colors[0], this._depthSource(), this._colorLut.volumeFor(null),
         ]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
@@ -11740,17 +11727,17 @@ export class Renderer {
         let tex: Texture;
         let mode = 0;
         switch (this._debugView) {
-            case 'scene':     tex = this._sceneFBO.colors[0];      mode = 6; break;
-            case 'albedo':    tex = this._gBufferFBO.colors[0];    mode = 0; break;
+            case 'scene':     tex = this._targets.scene.colors[0];      mode = 6; break;
+            case 'albedo':    tex = this._targets.gBuffer.colors[0];    mode = 0; break;
             // Mode 8, not 2: this alpha is signed (negative = translucency), which mode 2 would flag.
-            case 'metallic':  tex = this._gBufferFBO.colors[0];    mode = 8; break;
-            case 'normal':    tex = this._gBufferFBO.colors[1];    mode = 1; break;
-            case 'roughness': tex = this._gBufferFBO.colors[1];    mode = 2; break;
-            case 'emissive':  tex = this._gBufferFBO.colors[2];    mode = 0; break;
-            case 'ao':        tex = this._gBufferFBO.colors[2];    mode = 2; break;
+            case 'metallic':  tex = this._targets.gBuffer.colors[0];    mode = 8; break;
+            case 'normal':    tex = this._targets.gBuffer.colors[1];    mode = 1; break;
+            case 'roughness': tex = this._targets.gBuffer.colors[1];    mode = 2; break;
+            case 'emissive':  tex = this._targets.gBuffer.colors[2];    mode = 0; break;
+            case 'ao':        tex = this._targets.gBuffer.colors[2];    mode = 2; break;
             // Mode 3 reads its own `texture_depth_2d` binding rather than this one — a depth texture
             // cannot satisfy a colour sampler on WebGPU. The colour slot still needs SOMETHING valid.
-            case 'depth':     tex = this._gBufferFBO.colors[0];    mode = 3; break;
+            case 'depth':     tex = this._targets.gBuffer.colors[0];    mode = 3; break;
             // `_ssaoResult`, not `_ssaoBlurFBO`: the blur and the accumulation are separately
             // switchable, and with one off the lighting pass reads an EARLIER stage while this channel
             // would have gone on showing a later one nothing was consuming. A debug channel that
@@ -11762,24 +11749,24 @@ export class Renderer {
             // The bloom-eligibility mask itself: the scene buffer's ALPHA, as greyscale. White blooms,
             // black cannot. Exists because "bloom does nothing" is otherwise indistinguishable between
             // an empty mask and a threshold no pixel clears, and there was no way to look at it.
-            case 'bloomMask': tex = this._sceneFBO.colors[0];      mode = 2; break;
+            case 'bloomMask': tex = this._targets.scene.colors[0];      mode = 2; break;
             case 'mask':      tex = this._outlineMaskFBO.colors[0]; mode = 0; break;
-            case 'velocity':  tex = this._velocityFBO.colors[0];   mode = 5; break;
+            case 'velocity':  tex = this._targets.velocity.colors[0];   mode = 5; break;
             // The accumulated history itself. Ghosting and smearing are visible here a frame before
             // they are visible in the composed image, and "is the history sane" is the first question
             // to ask of any temporal artefact. Falls back to the lit scene while TAA is off, when the
             // buffer has not been allocated at all.
             case 'taaHistory':
-                if (this._taaHistoryFBOs.length === 0) { tex = this._sceneFBO.colors[0]; mode = 6; }
+                if (this._taaHistoryFBOs.length === 0) { tex = this._targets.scene.colors[0]; mode = 6; }
                 else { tex = this._taaHistoryFBOs[this._taaHistoryIndex].colors[0]; mode = 6; }
                 break;
             // Falls back to the lit scene if the overdraw target has not been allocated yet (the
             // pass above bails on a degenerate viewport), rather than dereferencing null.
             case 'overdraw':
-                if (!this._overdrawFBO || this._overdrawFBO.colors.length === 0) { tex = this._sceneFBO.colors[0]; mode = 6; }
+                if (!this._overdrawFBO || this._overdrawFBO.colors.length === 0) { tex = this._targets.scene.colors[0]; mode = 6; }
                 else { tex = this._overdrawFBO.colors[0]; mode = 7; }
                 break;
-            default:          tex = this._sceneFBO.colors[0];      mode = 0; break;
+            default:          tex = this._targets.scene.colors[0];      mode = 0; break;
         }
         const pass = this._beginFullscreenPass(this._screenTarget(), 'debugView', true);
         const pipeline = this._fullscreenPipeline('debugView', DebugViewProgram);
@@ -11793,7 +11780,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_exposure', this._view.exposure); // used by the tonemapped channels
         // The depth attachment rides along on every channel, because WebGPU requires every binding the
         // shader declares to be present and only mode 3 actually reads it.
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [tex, this._gBufferFBO.depth]));
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [tex, this._targets.gBuffer.depth]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
     }
@@ -11811,7 +11798,7 @@ export class Renderer {
      * the hood on WebGL2. One frame of lag is invisible against an adaptation half-life measured in
      * seconds — the smoothing below would swallow far more than that.
      *
-     * `_sceneFBO`, not the compose buffer: metering has to happen on the lit scene before bloom adds
+     * `_targets.scene`, not the compose buffer: metering has to happen on the lit scene before bloom adds
      * light back into it, or exposure and bloom chase each other — bloom brightens the frame, the meter
      * darkens the exposure, which changes bloom's display-referred threshold, and so on.
      */
@@ -11824,7 +11811,7 @@ export class Renderer {
                                                undefined, false);
         const pipeline = this._fullscreenPipeline('exposureMeter', ExposureMeterProgram);
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._sceneFBO.colors[0]]));
+        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.scene.colors[0]]));
         this._drawFullscreen(pass);
         this._endFullscreenPass(pass);
         this._exposureWrite = read;
@@ -12037,7 +12024,7 @@ export class Renderer {
         // Bloom-eligibility mask lives in the raw scene buffer's alpha (motion blur discards alpha, so
         // read it from the scene FBO directly, not the post-processed copy the first entry names).
         brightPass.setBindGroup(0, this._textureBindGroup(brightPipeline, 0, [
-            source.colors[0], this._sceneFBO.colors[0],
+            source.colors[0], this._targets.scene.colors[0],
         ]));
         this._drawFullscreen(brightPass);
         this._endFullscreenPass(brightPass);
@@ -12377,7 +12364,7 @@ export class Renderer {
     }
 
     /**
-     * Fill `_velocityFBO` for this frame, if anything is going to read it.
+     * Fill `_targets.velocity` for this frame, if anything is going to read it.
      *
      * Called from the SCENE render, right after the opaque depth snapshot, rather than from
      * post-processing where it used to live: the TAA resolve runs inside the scene render, so the
@@ -12400,16 +12387,16 @@ export class Renderer {
 
         // Restore what the overlay passes that follow expect. The velocity passes drew into their own
         // targets, so unlike `_renderSkyFog` this has to put the scene buffer back as well.
-        this._sceneFBO.bind();
+        this._targets.scene.bind();
         GLState.blend(false);
         GLState.depthTest(true);
         GLState.depthMask(true);
     }
 
     /**
-     * Resolve the antialiased image, and copy it back over `_sceneFBO`.
+     * Resolve the antialiased image, and copy it back over `_targets.scene`.
      *
-     * TWO passes, and the copy is not avoidable: the resolve READS `_sceneFBO.colors[0]`, and
+     * TWO passes, and the copy is not avoidable: the resolve READS `_targets.scene.colors[0]`, and
      * everything drawn after this point — grid, transparents, gizmos, sprites, the selection mask —
      * DRAWS into it. Making it the resolve's own target would be a read/write feedback on one texture.
      *
@@ -12435,9 +12422,9 @@ export class Renderer {
         const pipeline = this._fullscreenPipeline('taaResolve', TaaResolveProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-            this._sceneFBO.colors[0],
+            this._targets.scene.colors[0],
             this._taaHistoryFBOs[this._taaHistoryIndex].colors[0],
-            this._velocityFBO.colors[0],
+            this._targets.velocity.colors[0],
             this._depthSource(),
             this._taaPrevDepthFBO.depth,
         ]));
@@ -12462,8 +12449,8 @@ export class Renderer {
         // Two literal calls rather than one with a computed label: the profiler-label test finds the
         // labels by scanning for them.
         const copy = sharpen
-            ? this._beginFullscreenPass(this._sceneFBO.renderTarget, 'taa.sharpen', false)
-            : this._beginFullscreenPass(this._sceneFBO.renderTarget, 'taa.copy', false);
+            ? this._beginFullscreenPass(this._targets.scene.renderTarget, 'taa.sharpen', false)
+            : this._beginFullscreenPass(this._targets.scene.renderTarget, 'taa.copy', false);
         const copyPipeline = sharpen
             ? this._fullscreenPipeline('taaSharpen', TaaSharpenProgram)
             : this._fullscreenPipeline('screen', ScreenProgram);
@@ -12487,7 +12474,7 @@ export class Renderer {
         this._taaHistoryValid = true;
 
         // Put back what the overlay passes below expect.
-        this._sceneFBO.bind();
+        this._targets.scene.bind();
         GLState.blend(false);
         GLState.depthTest(true);
         GLState.depthMask(true);
@@ -12495,12 +12482,12 @@ export class Renderer {
 
     // Velocity in two stages. First the camera reprojection: reconstruct each pixel's world position
     // from the opaque depth, project it with the previous frame's view-projection, and store the RAW
-    // screen-space delta (UV units, no shutter scale, no clamp) in _velocityFBO — correct for
+    // screen-space delta (UV units, no shutter scale, no clamp) in _targets.velocity — correct for
     // everything that did not move, and for the sky. Then the movers overwrite their own pixels with
     // the truth. Motion blur applies its own scale and cap when it reads the buffer; see
     // chunks/motionBlurShutter.wgsl for why the stored form is the unblurred one.
     private _velocityPass(): void {
-        const pass = this._beginFullscreenPass(this._velocityFBO.renderTarget, 'velocity', true);
+        const pass = this._beginFullscreenPass(this._targets.velocity.renderTarget, 'velocity', true);
         const pipeline = this._fullscreenPipeline('motionBlurVelocity', MotionBlurVelocityProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._depthSource()]));
@@ -12530,13 +12517,13 @@ export class Renderer {
      *
      * Deliberately not the G-buffer depth under `deferred`, which is the narrower buffer this used to
      * return: forward-opaque Blinn-Phong models are drawn after the G-buffer and write only into
-     * `_sceneFBO.depth`, so every one of their pixels was reprojected as whatever geometry sat behind
+     * `_targets.scene.depth`, so every one of their pixels was reprojected as whatever geometry sat behind
      * it. Motion blur tolerated that; TAA reads the same buffer to decide where a pixel was last
      * frame, and would ghost every Blinn-Phong object in the scene. Safe to unify only because the
      * velocity chain now runs after `_copySceneDepth` in both pipelines.
      */
     private _depthSource(): Texture {
-        return this._sceneDepthFBO.depth;
+        return this._targets.sceneDepth.depth;
     }
 
     /**
@@ -12547,7 +12534,7 @@ export class Renderer {
     private _velocityObjectsTarget(): RenderTarget {
         return device.createRenderTarget({
             label: 'velocity+depth',
-            colorViews: [this._velocityFBO.colors[0].attachmentView],
+            colorViews: [this._targets.velocity.colors[0].attachmentView],
             depthView: this._depthSource().attachmentView,
         });
     }
@@ -12557,7 +12544,7 @@ export class Renderer {
      * `_velocityObjectsTarget`, and for the same reason: helper wireframes and icons must still be
      * occluded by the geometry in front of them, and that answer already exists.
      *
-     * `_sceneFBO.depth`, not `_depthSource()`: this draws in the same part of the frame the grid and
+     * `_targets.scene.depth`, not `_depthSource()`: this draws in the same part of the frame the grid and
      * transparents do, testing against the live attachment rather than the snapshot taken for the
      * fullscreen passes. Never cached on the renderer — a resize deletes both textures and the device
      * evicts every target naming them.
@@ -12565,8 +12552,8 @@ export class Renderer {
     private _overlayTarget(): RenderTarget {
         return device.createRenderTarget({
             label: 'overlay+depth',
-            colorViews: [this._overlayFBO.colors[0].attachmentView],
-            depthView: this._sceneFBO.depth.attachmentView,
+            colorViews: [this._targets.overlay.colors[0].attachmentView],
+            depthView: this._targets.scene.depth.attachmentView,
         });
     }
 
@@ -12705,19 +12692,19 @@ export class Renderer {
     }
 
     // UE5-style tile reconstruction motion blur: velocity -> TileMax -> NeighborMax -> jittered
-    // gather. Reads the lit scene (_sceneFBO) and writes the blurred result into the head of the post
+    // gather. Reads the lit scene (_targets.scene) and writes the blurred result into the head of the post
     // chain, replacing the plain scene->compose copy so the rest of the chain is unchanged.
     private _motionBlurPass(target: Framebuffer): void {
         const w = this._renderWidth, h = this._renderHeight;
         const K = Renderer.MOTION_BLUR_TILE;
 
-        // 1) TileMax: dominant velocity per KxK tile. `_velocityFBO` was already filled during the
+        // 1) TileMax: dominant velocity per KxK tile. `_targets.velocity` was already filled during the
         // scene render — see `_produceVelocity` — and it holds the RAW delta, so the shutter scale and
         // the one-tile cap are applied here, inside the tile loop, before the magnitude compare.
         const tilePass = this._beginFullscreenPass(this._velocityTileFBO.renderTarget, 'velocity.tile', true);
         const tilePipeline = this._fullscreenPipeline('motionBlurTileMax', MotionBlurTileMaxProgram);
         tilePass.setPipeline(tilePipeline);
-        tilePass.setBindGroup(0, this._textureBindGroup(tilePipeline, 0, [this._velocityFBO.colors[0]]));
+        tilePass.setBindGroup(0, this._textureBindGroup(tilePipeline, 0, [this._targets.velocity.colors[0]]));
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
         this._shaderManager.setUniform('u_screenSize', [w, h]);
         this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
@@ -12740,7 +12727,7 @@ export class Renderer {
         const gatherPipeline = this._fullscreenPipeline('motionBlur', MotionBlurGatherProgram);
         gatherPass.setPipeline(gatherPipeline);
         gatherPass.setBindGroup(0, this._textureBindGroup(gatherPipeline, 0, [
-            this._sceneFBO.colors[0], this._velocityFBO.colors[0],
+            this._targets.scene.colors[0], this._targets.velocity.colors[0],
             this._velocityNeighborFBO.colors[0], this._depthSource(),
         ]));
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
@@ -12889,24 +12876,24 @@ export class Renderer {
             for (const c of fbo.colors) bytes += c.byteSize;
             if (fbo.depth) bytes += fbo.depth.byteSize;
         };
-        addFbo(this._sceneFBO); addFbo(this._gBufferFBO);
+        addFbo(this._targets.scene); addFbo(this._targets.gBuffer);
         bytes += this._shadowCascadeFBO.texture.byteSize; // one array texture, layers included
         bytes += this._spotShadowFBO.texture.byteSize;
         bytes += this._pointShadowFBO.texture.byteSize;
         for (const m of this._bloomMips) addFbo(m);
         // The cloud temporal targets and baked noise volumes belong here too — an 8MB volume absent
         // from the estimate defeats its purpose.
-        addFbo(this._sceneDepthFBO); addFbo(this._cloudsFBO); addFbo(this._cloudTraceFBO);
-        addFbo(this._refractionFBO ?? undefined);
+        addFbo(this._targets.sceneDepth); addFbo(this._cloudsFBO); addFbo(this._cloudTraceFBO);
+        addFbo(this._targets.refraction ?? undefined);
         for (const f of this._cloudHistoryFBOs) addFbo(f);
         if (this._cloudBaseNoise) bytes += this._cloudBaseNoise.byteSize;
         if (this._cloudDetailNoise) bytes += this._cloudDetailNoise.byteSize;
         addFbo(this._ssaoFBO); addFbo(this._ssaoBlurFBO);
         for (const f of this._ssilHistoryFBOs) addFbo(f);
         addFbo(this._ssilRadianceFBO ?? undefined);
-        addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO); addFbo(this._overlayFBO);
+        addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO); addFbo(this._targets.overlay);
         addFbo(this._overdrawFBO ?? undefined);
-        addFbo(this._velocityFBO); addFbo(this._velocityTileFBO); addFbo(this._velocityNeighborFBO);
+        addFbo(this._targets.velocity); addFbo(this._velocityTileFBO); addFbo(this._velocityNeighborFBO);
         addFbo(this._dBufferFBO ?? undefined); addFbo(this._gBufferCopyFBO ?? undefined);
         addFbo(this._decalReceiverFBO ?? undefined);
         bytes += this._postPool.byteSize;
@@ -13849,7 +13836,7 @@ export class Renderer {
         this._endFullscreenPass(pass);
 
         // Restore the scene framebuffer for any subsequent draws.
-        this._sceneFBO.bind();
+        this._targets.scene.bind();
     }
 
     /** Builds a sprite's world matrix with its camera-facing billboard constraint applied. */
@@ -13931,7 +13918,7 @@ export class Renderer {
 
     /**
      * The editor overlay layer: the grid, helper wireframes, helper icons, gizmos and the skeleton
-     * overlay, all drawn into `_overlayFBO` instead of the scene buffer.
+     * overlay, all drawn into `_targets.overlay` instead of the scene buffer.
      *
      * This is the whole feature. None of it may reach the post chain — chrome that blooms, throws
      * lens-flare ghosts, blurs into depth of field or moves the auto-exposure meter is chrome that
@@ -13990,7 +13977,7 @@ export class Renderer {
             this._renderGizmos(gizmoNodes);
 
         // Hand the scene buffer back: the selection mask and the legacy WebGL2 paths below assume it.
-        this._sceneFBO.bind();
+        this._targets.scene.bind();
         this._restoreDefaultBlend();
         GLState.depthTest(true);
         GLState.depthMask(true);
@@ -14007,7 +13994,7 @@ export class Renderer {
 
     private _renderGizmos(gizmoNodes: ModelNode[]): void {
         // Always on top: depth test off. Depth WRITES are off too, and that is a change — the pass
-        // used to write into `_sceneFBO.depth`, which it shares with the scene, so a gizmo silently
+        // used to write into `_targets.scene.depth`, which it shares with the scene, so a gizmo silently
         // occluded every game sprite drawn after it. Now that the overlay borrows the same attachment
         // the bug would be structural rather than incidental, so it goes. WebGPU has no separate
         // 'test off', hence compare 'always'.

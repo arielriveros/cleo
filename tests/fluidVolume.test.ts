@@ -106,7 +106,7 @@ describe('the fluid volume pass', () => {
         const body = RENDERER.slice(at, RENDERER.indexOf('\n    }\n', at));
         const trace = body.indexOf("this._fluidTraceFBO!.renderTarget, 'fluidVolumes'");
         const resolve = body.indexOf("'fluidVolumes.resolve'");
-        const composite = body.indexOf("this._sceneFBO.renderTarget, 'fluidVolumes.composite'");
+        const composite = body.indexOf("this._targets.scene.renderTarget, 'fluidVolumes.composite'");
         expect(trace).toBeGreaterThan(-1);
         expect(resolve).toBeGreaterThan(trace);
         expect(composite).toBeGreaterThan(resolve);

@@ -94,7 +94,7 @@ describe('bloom diagnosability', () => {
         // pixel clears. Mode 2 renders the alpha channel as greyscale (debugView.fs), so this needs no
         // shader work — only the channel wiring, which is exactly what kept getting skipped.
         expect(renderer).toMatch(/'bloomMask'/);
-        expect(renderer).toMatch(/case 'bloomMask':\s*tex = this\._sceneFBO\.colors\[0\];\s*mode = 2;/);
+        expect(renderer).toMatch(/case 'bloomMask':\s*tex = this\._targets\.scene\.colors\[0\];\s*mode = 2;/);
     });
 });
 
