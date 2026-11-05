@@ -22,7 +22,6 @@ import { TileMesh } from '../graphics/tilemap/tileMesh';
 import { CHUNK_SIZE, TileChunk } from '../graphics/tilemap/chunk';
 import { cellToWorld } from '../graphics/tilemap/cellMath';
 import { DEFAULT_ANGULAR_RADIUS, DEFAULT_SCENE_AMBIENT_LUX, DirectionalLight, type ExposureCurveKey, PointLight, REFERENCE_ILLUMINANCE, Spotlight } from './lighting';
-import { blendExposure, effectiveCurveStops, type EffectiveExposure, type ExposureLayer } from './exposureBlend';
 import { Mesh } from './mesh';
 import type { ShaderProgram, ShaderProgramDescriptor } from './rhi/shaderProgram';
 import { Framebuffer } from './framebuffer';
@@ -102,7 +101,7 @@ import {
     ProbePreviewProgram, SkyProjectProgram, SkyFogProgram, DecalSurfaceProgram, DecalResolveProgram,
     DecalColorProgram, FluidVolumeProgram, FluidVolumeResolveProgram, FluidVolumeCompositeProgram,
     ScreenProgram, PresentProgram, OverlayCompositeProgram, DebugViewProgram, OverdrawProgram,
-    OverdrawInstancedProgram, BloomProgram, ExposureMeterProgram, BloomDownsampleProgram, BloomUpsampleProgram,
+    OverdrawInstancedProgram, BloomProgram, BloomDownsampleProgram, BloomUpsampleProgram,
     ChromaticAberrationProgram, DofCocProgram, DofGatherProgram, DofCompositeProgram, LensFlareProgram,
     LensFlareCompositeProgram, VignetteProgram, FxaaProgram, FilmGrainProgram, ComposerProgram,
     VolumetricGodRaysProgram, GridProgram, OutlinePostProgram, TilemapProgram, GeometryFoliageBillboardProgram,
@@ -120,6 +119,7 @@ import { ViewProjection } from './render/viewProjection';
 import { QUALITY_TIERS } from './render/settingsTypes';
 import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 import { TemporalPasses } from './render/temporal';
+import { AutoExposure } from './render/autoExposure';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 import { gl, setGLContext } from './glContext';
@@ -337,31 +337,9 @@ export class Renderer {
     private readonly _projection: ViewProjection;
     /** TAA, the velocity buffer, per-object motion and motion blur (render/temporal.ts). */
     private readonly _temporal: TemporalPasses;
+    /** The authored exposure, the metering pass and its adaptation, exposure volumes (render/autoExposure.ts). */
+    private readonly _autoExposure: AutoExposure;
 
-    /**
-     * The AUTHORED exposure — what the artist set, what a scene saves, and what a preview renders at.
-     *
-     * Separate from `_view.exposure` because the meter overwrites that one continuously. Without the split,
-     * `getRenderSettings()` saved whatever the meter happened to be at the instant of the save, and
-     * suppressing metering for a preview would leave the preview sitting on the last adapted value —
-     * so two thumbnails captured a second apart came out at different brightnesses.
-     *
-     * Written by the `exposure` / `ev100` setters and by `applyRenderSettings`. NEVER by the meter.
-     */
-    private _baseExposure: number = 2.0;
-    /**
-     * Whether this host currently permits metering at all — distinct from {@link
-     * RenderSettings.autoExposureEnabled}, which is the project's setting and rides `config.render`.
-     *
-     * The editor suppresses metering on every tab that is not the scene: those render a throwaway
-     * preview with `createMaterialPreviewScene`'s fixed studio rig, which has nothing to do with the
-     * project, so an exposure metered from it means nothing. Toggling the SETTING per tab instead would
-     * either fight the saved value or mark the scene dirty on a tab switch.
-     *
-     * Defaults to allowed, so the standalone player and any non-editor host meter with no extra call.
-     * Deliberately not part of `RenderSettings` — it is view state, like `debugView`.
-     */
-    private _exposureMeteringAllowed: boolean = true;
     /**
      * Whether the post-process chain runs at all for this host.
      *
@@ -374,7 +352,7 @@ export class Renderer {
      * Antialiasing is deliberately NOT part of this: TAA resolves inside the scene render rather than
      * in the chain, so it keeps running and a preview stays free of crawling edges.
      *
-     * A host property, like `_exposureMeteringAllowed` and `debugView` — never a `RenderSettings`
+     * A host property, like `_autoExposure.exposureMeteringAllowed` and `debugView` — never a `RenderSettings`
      * field. It is a way of LOOKING at a scene, not part of one, so it must not ride through save,
      * publish or the standalone player, where every viewport is the scene.
      */
@@ -927,61 +905,6 @@ export class Renderer {
     private _specularAaEnabled: boolean = true;
     private _horizonOcclusionEnabled: boolean = true;
 
-    // --- auto-exposure ------------------------------------------------------------------------
-    private _autoExposureEnabled: boolean = true;
-    // +1 stop, which is Unreal's `AutoExposureBias` default. Metering to middle grey alone lands a
-    // scene about a stop under where a hand-set exposure usually sits — measured on the harness scene,
-    // frame mean 202 to 146 — because 0.18 is a reflectance target and most content is not an 18% grey
-    // card. Every engine that ships auto-exposure ships a positive bias on top of it for that reason.
-    private _exposureCompensation: number = 1.0;
-    private _exposureCompensationCurve: ExposureCurveKey[] = [];
-    private _exposureMinEV: number = 2.0;
-    private _exposureMaxEV: number = 17.0;
-    private _exposureSpeedUp: number = 3.0;
-    private _exposureSpeedDown: number = 1.0;
-    /**
-     * The exposure settings IN FORCE this frame: the scene's fields above, with any exposure volumes
-     * around the camera blended over them (`_resolveExposure`). The meter, the clamp and the adaptation
-     * read this; the getters, setters and `getRenderSettings` stay on the scene's own fields, so a volume
-     * never reaches a saved scene.
-     */
-    private get _effExposure(): EffectiveExposure {
-        // Rebuilt on every read (a handful a frame) rather than cached, so a setter or
-        // `applyRenderSettings` between frames is in force at once, as it was before volumes.
-        return this._sceneExposureOnly(this._effExposureLayers);
-    }
-    /** The volumes around the camera at the last `_resolveExposure`, as blend layers. */
-    private _effExposureLayers: ExposureLayer[] = [];
-    /** The same volumes, by id and weight, for the inspector. */
-    private _effExposureVolumes: { id: string, weight: number }[] = [];
-    /** Whether metering was in force at the last `_resolveExposure`, to catch a volume switching it on. */
-    private _effAutoWas: boolean = true;
-    /** A volume around the camera sets the manual EV; otherwise the authored `_baseExposure` stands exactly. */
-    private _effManualFromVolume: boolean = false;
-    /** Two 1x1 metering targets. See `_exposurePass` for why they are read a frame late. */
-    private _exposureFBOs: Framebuffer[] = [];
-    private _exposureWrite: number = 0;
-    /** True once a readback has landed; until then the hand-set exposure stands. */
-    private _exposureMetered: boolean = false;
-    private _exposureReadPending: boolean = false;
-    /** Which metering target the end of the frame should read, or -1 for none. */
-    private _exposureReadDue: number = -1;
-    /**
-     * Frames between readbacks. Metering runs every frame — it is 256 fetches into one fragment — but
-     * the READ is the expensive half: `readPixels` is synchronous under the hood on WebGL2, so every
-     * one of them drains the pipeline. Six is 10Hz at 60fps, against an adaptation half-life measured
-     * in seconds.
-     */
-    private static readonly EXPOSURE_READ_INTERVAL = 6;
-    /** The adapted value, in EV100. Seeded from the initial exposure so frame one does not jump. */
-    private _exposureEV: number = 0;
-    /** Must match LOG_LUM_MIN/MAX in exposureMeter.wgsl. */
-    private static readonly LOG_LUMINANCE_WINDOW: [number, number] = [-22.0, 8.0];
-    /**
-     * Where the metered average is placed. 0.18 is middle grey — the reflectance a light meter assumes
-     * and the value every photographic exposure system is calibrated around.
-     */
-    private static readonly EXPOSURE_KEY = 0.18;
     /** Depth fetches per pixel in the SSIL trace; split into slices and steps by `ssilTraceShape`. */
     private _ssaoSamples: number = 24;
     // SSIL resolution as a fraction of the render size. Occlusion and bounce are low-frequency and
@@ -1275,6 +1198,10 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
             uploadBoneMatrices: renderer._uploadBoneMatrices.bind(renderer),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection);
+        this._autoExposure = new AutoExposure({
+            get presentTarget() { return renderer._presentTarget; },
+            get ev100() { return renderer.ev100; },
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups);
 
         // Preallocated identity bone matrices (used when an animated model has no animator)
         this._boneIdentityScratch = new Float32Array(100 * 16);
@@ -1398,8 +1325,8 @@ export class Renderer {
         // stage is fullscreen with depth testing off.
         const aoOptions = { colorTextureOptions: { mipMap: false, precision: 'high' as const }, depth: false };
         // Metering targets: 1x1, and 8-BIT rather than float because `readPixels` refuses anything
-        // else on WebGL2. Two of them, ping-ponged — see `_exposurePass`.
-        this._exposureFBOs = [new Framebuffer({ colorTextureOptions: { mipMap: false } }),
+        // else on WebGL2. Two of them, ping-ponged — see `_autoExposure.exposurePass`.
+        this._autoExposure.exposureFBOs = [new Framebuffer({ colorTextureOptions: { mipMap: false } }),
                               new Framebuffer({ colorTextureOptions: { mipMap: false } })];
         this._ssaoFBO = new Framebuffer(aoOptions);
         this._ssaoBlurFBO = new Framebuffer(aoOptions);
@@ -1760,8 +1687,8 @@ export class Renderer {
         const rw = this._renderWidth, rh = this._renderHeight;
         this._targets.scene.create(rw, rh);
         this._targets.gBuffer.create(rw, rh);
-        this._exposureFBOs[0].create(1, 1);
-        this._exposureFBOs[1].create(1, 1);
+        this._autoExposure.exposureFBOs[0].create(1, 1);
+        this._autoExposure.exposureFBOs[1].create(1, 1);
         this._ssaoFBO.create(this._ssaoWidth, this._ssaoHeight);
         this._ssaoBlurFBO.create(this._ssaoWidth, this._ssaoHeight);
         this._outlineMaskFBO.create(rw, rh);
@@ -2036,7 +1963,7 @@ export class Renderer {
         // end-of-frame drain, which would otherwise be charged to `present`.
         this._passes.scope('frameEnd');
 
-        this._readExposureSample();
+        this._autoExposure.readExposureSample();
 
         // Close the last open GPU scope and read back whichever earlier frames have resolved. Must be
         // the final thing in the frame: results are collected from frames already retired, never waited
@@ -9475,8 +9402,8 @@ export class Renderer {
 
     private _applyPostProcessing(scene: Scene): void {
         // BEFORE the thumbnail branch below, so an offscreen capture gets the authored exposure rather
-        // than the scene's last metered one. See `_resolveExposure`.
-        this._resolveExposure();
+        // than the scene's last metered one. See `_autoExposure.resolveExposure`.
+        this._autoExposure.resolveExposure();
 
         // Fullscreen post passes want a known, blend-free, depth-write state.
         GLState.blend(false);
@@ -9583,12 +9510,12 @@ export class Renderer {
         // Clamped: a backgrounded tab or a shader compile can produce a multi-second gap, and letting
         // that through would snap the exposure in one frame instead of easing.
         const nowMs = performance.now();
-        const dt = Math.min(0.25, Math.max(0, (nowMs - this._lastExposureMs) / 1000));
-        this._lastExposureMs = nowMs;
+        const dt = Math.min(0.25, Math.max(0, (nowMs - this._autoExposure.lastExposureMs) / 1000));
+        this._autoExposure.lastExposureMs = nowMs;
         // It reads `_targets.scene` and writes its own 1x1 targets, so it touches no chain resource at all —
         // which is why its position is fixed by the comment above rather than by a dependency.
-        if (this._meteringActive() && this._passEnabled['exposure'])
-            graph.addPass({ id: 'exposure', scope: 'exposure', execute: () => this._exposurePass(dt) });
+        if (this._autoExposure.meteringActive() && this._passEnabled['exposure'])
+            graph.addPass({ id: 'exposure', scope: 'exposure', execute: () => this._autoExposure.exposurePass(dt) });
 
         // --- the reorderable middle ---------------------------------------------------------------
         // Skipped whole on a preview surface: `src` never advances, so the head the scene was composed
@@ -10136,79 +10063,6 @@ export class Renderer {
      * Call of Duty: Advanced Warfare", SIGGRAPH 2014). Chain: bright-pass into mip 0, downsample to
      * the smallest mip, upsample back with additive blending, composite mip 0 over the scene.
      */
-    /**
-     * Meter the lit scene into a 1x1 target, and adapt `_view.exposure` toward what LAST frame measured.
-     *
-     * A FRAME LATE, deliberately. Reading a target the GPU finished with a frame ago costs nothing;
-     * reading the one just written forces the pipeline to drain, and `readPixels` is synchronous under
-     * the hood on WebGL2. One frame of lag is invisible against an adaptation half-life measured in
-     * seconds — the smoothing below would swallow far more than that.
-     *
-     * `_targets.scene`, not the compose buffer: metering has to happen on the lit scene before bloom adds
-     * light back into it, or exposure and bloom chase each other — bloom brightens the frame, the meter
-     * darkens the exposure, which changes bloom's display-referred threshold, and so on.
-     */
-    private _exposurePass(dtSeconds: number): void {
-        // No gate and no scope of its own: the node is added only when metering is live and the pass is
-        // switched on (see `_buildPostGraph`), and the graph opens the scope for every node it runs.
-        const write = this._exposureWrite;
-        const read = 1 - write;
-        const pass = this._passes.beginFullscreenPass(this._exposureFBOs[write].renderTarget, 'exposure', true,
-                                               undefined, false);
-        const pipeline = this._pipelines.fullscreen('exposureMeter', ExposureMeterProgram);
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._targets.scene.colors[0]]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-        this._exposureWrite = read;
-
-        // The READ does not happen here. `readPixels` binds a scratch framebuffer of its own and
-        // unbinds to the default one when it is done, so calling it between two passes leaves the
-        // chain that follows drawing somewhere else — measured, and it cost the WebGL2 context
-        // outright (error 37442, CONTEXT_LOST_WEBGL, raised at the next frame's prologue). It is
-        // deferred to `_readExposureSample`, after the frame is finished.
-        this._exposureReadDue = read;
-        this._adaptExposure(dtSeconds);
-    }
-
-    /** Is metering driving the exposure this frame? The project's setting AND this host's permission. */
-    private _meteringActive(): boolean {
-        return this._effExposure.autoExposureEnabled && this._exposureMeteringAllowed;
-    }
-
-    /** The scene's own exposure settings, with no volume over them. */
-    private _sceneExposureOnly(layers: readonly ExposureLayer[] = []): EffectiveExposure {
-        return blendExposure({
-            autoExposureEnabled: this._autoExposureEnabled,
-            ev100: Math.log2(REFERENCE_ILLUMINANCE / (1.2 * Math.max(1e-6, this._baseExposure))),
-            exposureCompensation: this._exposureCompensation,
-            exposureCompensationCurve: this._exposureCompensationCurve,
-            exposureMinEV: this._exposureMinEV,
-            exposureMaxEV: this._exposureMaxEV,
-            exposureSpeedUp: this._exposureSpeedUp,
-            exposureSpeedDown: this._exposureSpeedDown,
-        }, layers);
-    }
-
-    /**
-     * Blend the exposure volumes around the camera over the scene's settings, into `_effExposure`.
-     * A volume that switches metering on re-seeds the adaptation from the current picture, as the
-     * `autoExposureEnabled` setter does, so walking into it eases instead of snapping.
-     */
-    private _updateEffectiveExposure(): void {
-        const scene = this._view.scene;
-        const camera = this._view.camera;
-        const found = scene && camera ? scene.exposureVolumesAt(camera.position) : [];
-        this._effExposureLayers = found.map(f => ({ overrides: f.volume.overridesView, weight: f.weight }));
-        this._effExposureVolumes = found.map(f => ({ id: f.volume.id, weight: f.weight }));
-        this._effManualFromVolume = found.some(f => f.volume.overridesView.ev100 !== undefined);
-        const auto = this._effExposure.autoExposureEnabled;
-        if (auto && !this._effAutoWas) {
-            this._exposureEV = this.ev100;
-            this._exposureMetered = false;
-        }
-        this._effAutoWas = auto;
-    }
 
     /**
      * The exposure settings in force this frame — the scene's, with the exposure volumes around the
@@ -10218,129 +10072,12 @@ export class Renderer {
         autoExposureEnabled: boolean, ev100: number, exposureCompensation: number, exposureMinEV: number,
         exposureMaxEV: number, exposureSpeedUp: number, exposureSpeedDown: number, volumes: { id: string, weight: number }[],
     } {
-        const e = this._effExposure;
+        const e = this._autoExposure.effExposure;
         return {
             autoExposureEnabled: e.autoExposureEnabled, ev100: e.ev100, exposureCompensation: e.exposureCompensation,
             exposureMinEV: e.exposureMinEV, exposureMaxEV: e.exposureMaxEV, exposureSpeedUp: e.exposureSpeedUp,
-            exposureSpeedDown: e.exposureSpeedDown, volumes: this._effExposureVolumes.map(v => ({ ...v })),
+            exposureSpeedDown: e.exposureSpeedDown, volumes: this._autoExposure.effExposureVolumes.map(v => ({ ...v })),
         };
-    }
-
-    /**
-     * Decide which exposure is in force before anything reads it.
-     *
-     * Called at the TOP of `_applyPostProcessing`, above the thumbnail early-return, and that placement
-     * is the point: `screenshotOffscreen` sets `_presentTarget`, which returns before the metering pass
-     * ever runs — so a thumbnail never meters, but without this it would still render at whatever the
-     * last live frame had adapted to. Two thumbnails captured a second apart came out at different
-     * brightnesses, and the whole asset library shifted whenever the scene's exposure moved.
-     */
-    private _resolveExposure(): void {
-        // A PREVIEW renders at a fixed exposure, not the project's. The preview scenes carry their own
-        // studio rig, so the exposure that renders them correctly is a constant — and pinning it is what
-        // keeps every thumbnail in the asset library comparable with the others and stable as the scene
-        // is retuned. Using the project's authored value instead looks reasonable and is not: a scene
-        // saved while auto-exposure had opened up on a dim interior banks a very large exposure, and
-        // every preview in the editor then renders blown out.
-        //
-        // `_presentTarget` counts as a preview whichever tab it was taken from: that is the offscreen
-        // thumbnail path, and a thumbnail keyed to the scene's momentary exposure is the inconsistency
-        // this whole split exists to remove.
-        if (!this._exposureMeteringAllowed || this._presentTarget) {
-            this._view.exposure = Renderer.PREVIEW_EXPOSURE;
-            return;
-        }
-        this._updateEffectiveExposure();
-        // Metering allowed but switched off (for the project, or by a volume around the camera): the
-        // manual exposure stands — the artist's, blended toward any volume's in EV.
-        if (!this._effAutoWas) {
-            this._view.exposure = this._effManualFromVolume
-                ? REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, this._effExposure.ev100))
-                : this._baseExposure;
-        }
-    }
-
-    /**
-     * The exposure every preview and thumbnail renders at: EV100 15, the engine default, and the value
-     * the preview scenes were authored against long before auto-exposure existed. Deliberately a
-     * constant rather than the project's setting — see `_resolveExposure`.
-     */
-    private static readonly PREVIEW_EXPOSURE = 2.0;
-
-    /**
-     * Pull the metering result back, at the very end of the frame and only every few frames.
-     *
-     * Both halves of that matter. `readPixels` binds and then UNBINDS a framebuffer, so between passes
-     * it redirects everything after it; and it is synchronous on WebGL2, so every call drains the
-     * pipeline. Here there is no pass left to disturb, and the interval keeps the drain occasional.
-     */
-    private _readExposureSample(): void {
-        const due = this._exposureReadDue;
-        this._exposureReadDue = -1;
-        if (due < 0 || this._exposureReadPending) return;
-        if (this._exposureMetered && this._view.frameIndex % Renderer.EXPOSURE_READ_INTERVAL !== 0) return;
-        const target = this._exposureFBOs[due];
-        if (!target || target.colors.length === 0) return;
-
-        this._exposureReadPending = true;
-        device.readPixels(target.colors[0].attachmentView, 0, 0, 1, 1)
-            .then(px => { this._onExposureSample((px[0] + px[1] / 255) / 255); })
-            .catch(() => { /* a resize can invalidate the view mid-flight; the next read recovers */ })
-            .finally(() => { this._exposureReadPending = false; });
-    }
-
-    /** Decode one metering sample into the target EV100 the adaptation is chasing. */
-    private _onExposureSample(encoded: number): void {
-        const [lo, hi] = Renderer.LOG_LUMINANCE_WINDOW;
-        const avgLuminance = Math.pow(2, lo + encoded * (hi - lo));
-        // Place the metered average at middle grey, then read that exposure back as an EV100 so the
-        // clamps and the compensation below are in the unit the inspector already speaks.
-        const wanted = Renderer.EXPOSURE_KEY / Math.max(avgLuminance, 1e-9);
-        this._exposureTargetEV = Math.log2(REFERENCE_ILLUMINANCE / (1.2 * Math.max(1e-9, wanted)));
-        if (!this._exposureMetered) {
-            // First sample: snap rather than ease, or the opening second of every scene is a fade-in.
-            this._exposureEV = this._clampExposureEV(this._exposureTargetEV);
-            this._exposureMetered = true;
-        }
-    }
-    private _exposureTargetEV: number = 0;
-    private _lastExposureMs: number = performance.now();
-
-    private _clampExposureEV(ev: number): number {
-        // Compensation is SUBTRACTED: +1 stop of exposure compensation means a brighter picture, which
-        // on a meter is a LOWER EV. Applied after the clamp so the trim can still reach past it. The
-        // curve is keyed on the UNCLAMPED metered EV, the scene's own brightness, as Unreal keys it.
-        // Reads the settings in force, so an exposure volume around the camera clamps and trims too.
-        const e = this._effExposure;
-        const lo = Math.min(e.exposureMinEV, e.exposureMaxEV);
-        const hi = Math.max(e.exposureMinEV, e.exposureMaxEV);
-        return Math.min(hi, Math.max(lo, ev)) - e.exposureCompensation - effectiveCurveStops(e, ev);
-    }
-
-    /**
-     * Ease `_view.exposure` toward the metered target, in EV (log) space, at a rate that does not depend on
-     * the frame rate.
-     *
-     * `1 - exp(-dt * speed)` rather than a fixed `dt * k` per frame: the naive form adapts twice as fast
-     * at 120fps as at 60, so a scene's look would depend on the machine it ran on.
-     *
-     * A RATE, not a duration — `* speed`, not `/ speed`. This was the other way round when it landed,
-     * which made the settings a time constant in seconds while carrying Unreal's rate NAMES and Unreal's
-     * rate VALUES. The digits matched and the meaning did not: at 3.0 it was a three-second constant
-     * where Unreal's is a third of a second, so adaptation ran nine times slower than the numbers
-     * implied, and a slider labelled speed would have moved the wrong way.
-     */
-    private _adaptExposure(dtSeconds: number): void {
-        if (!this._exposureMetered) return;
-        const target = this._clampExposureEV(this._exposureTargetEV);
-        // Brightening the PICTURE means the EV falls, and that is the direction an eye is slow in.
-        const speed = target < this._exposureEV ? this._effExposure.exposureSpeedDown : this._effExposure.exposureSpeedUp;
-        // 0 snaps rather than freezing. A rate of zero would literally never converge, which is useless
-        // as the bottom of a slider and is also what `passConfigs.js` relies on to gate this
-        // deterministically.
-        const t = speed <= 0 ? 1 : 1 - Math.exp(-Math.max(0, dtSeconds) * speed);
-        this._exposureEV += (target - this._exposureEV) * t;
-        this._view.exposure = REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, this._exposureEV));
     }
 
     /**
@@ -10908,11 +10645,11 @@ export class Renderer {
     public get exposure(): number { return this._view.exposure; }
     /**
      * Set the AUTHORED exposure. Applied to the effective value immediately as well, so a manual change
-     * shows at once; the next frame's `_resolveExposure` re-decides which of the two is in force.
+     * shows at once; the next frame's `_autoExposure.resolveExposure` re-decides which of the two is in force.
      */
     public set exposure(exposure: number) {
-        this._baseExposure = Math.max(0, exposure);
-        this._view.exposure = this._baseExposure;
+        this._autoExposure.baseExposure = Math.max(0, exposure);
+        this._view.exposure = this._autoExposure.baseExposure;
     }
 
     /**
@@ -11099,21 +10836,21 @@ export class Renderer {
     public set horizonOcclusionEnabled(on: boolean) { this._horizonOcclusionEnabled = on; }
 
     /** See {@link RenderSettings.autoExposureEnabled}. */
-    public get autoExposureEnabled(): boolean { return this._autoExposureEnabled; }
+    public get autoExposureEnabled(): boolean { return this._autoExposure.autoExposureEnabled; }
     /**
-     * Allow or suppress metering for this host. See `_exposureMeteringAllowed`.
+     * Allow or suppress metering for this host. See `_autoExposure.exposureMeteringAllowed`.
      *
      * Re-allowing re-seeds the adaptation from the current picture, so returning to the scene tab eases
      * rather than snapping — the same thing the `autoExposureEnabled` setter does.
      */
     public setExposureMeteringAllowed(allowed: boolean): void {
-        if (allowed && !this._exposureMeteringAllowed) {
-            this._exposureEV = this.ev100;
-            this._exposureMetered = false;
+        if (allowed && !this._autoExposure.exposureMeteringAllowed) {
+            this._autoExposure.exposureEV = this.ev100;
+            this._autoExposure.exposureMetered = false;
         }
-        this._exposureMeteringAllowed = allowed;
+        this._autoExposure.exposureMeteringAllowed = allowed;
     }
-    public get exposureMeteringAllowed(): boolean { return this._exposureMeteringAllowed; }
+    public get exposureMeteringAllowed(): boolean { return this._autoExposure.exposureMeteringAllowed; }
 
     /**
      * Run or suppress the post-process chain for this host. See `_postProcessingAllowed`.
@@ -11127,25 +10864,25 @@ export class Renderer {
     public set autoExposureEnabled(on: boolean) {
         // Seed the adaptation from wherever the manual value stands, so switching it on eases away
         // from the current picture instead of snapping to the metered one.
-        if (on && !this._autoExposureEnabled) { this._exposureEV = this.ev100; this._exposureMetered = false; }
-        this._autoExposureEnabled = on;
+        if (on && !this._autoExposure.autoExposureEnabled) { this._autoExposure.exposureEV = this.ev100; this._autoExposure.exposureMetered = false; }
+        this._autoExposure.autoExposureEnabled = on;
     }
-    public get exposureCompensation(): number { return this._exposureCompensation; }
-    public set exposureCompensation(v: number) { this._exposureCompensation = v; }
-    public get exposureCompensationCurve(): ExposureCurveKey[] { return this._exposureCompensationCurve; }
+    public get exposureCompensation(): number { return this._autoExposure.exposureCompensation; }
+    public set exposureCompensation(v: number) { this._autoExposure.exposureCompensation = v; }
+    public get exposureCompensationCurve(): ExposureCurveKey[] { return this._autoExposure.exposureCompensationCurve; }
     public set exposureCompensationCurve(curve: ExposureCurveKey[]) {
-        this._exposureCompensationCurve = (curve ?? [])
+        this._autoExposure.exposureCompensationCurve = (curve ?? [])
             .filter(k => Array.isArray(k) && Number.isFinite(k[0]) && Number.isFinite(k[1]))
             .map(k => [k[0], k[1]] as ExposureCurveKey);
     }
-    public get exposureMinEV(): number { return this._exposureMinEV; }
-    public set exposureMinEV(v: number) { this._exposureMinEV = v; }
-    public get exposureMaxEV(): number { return this._exposureMaxEV; }
-    public set exposureMaxEV(v: number) { this._exposureMaxEV = v; }
-    public get exposureSpeedUp(): number { return this._exposureSpeedUp; }
-    public set exposureSpeedUp(v: number) { this._exposureSpeedUp = Math.max(0, v); }
-    public get exposureSpeedDown(): number { return this._exposureSpeedDown; }
-    public set exposureSpeedDown(v: number) { this._exposureSpeedDown = Math.max(0, v); }
+    public get exposureMinEV(): number { return this._autoExposure.exposureMinEV; }
+    public set exposureMinEV(v: number) { this._autoExposure.exposureMinEV = v; }
+    public get exposureMaxEV(): number { return this._autoExposure.exposureMaxEV; }
+    public set exposureMaxEV(v: number) { this._autoExposure.exposureMaxEV = v; }
+    public get exposureSpeedUp(): number { return this._autoExposure.exposureSpeedUp; }
+    public set exposureSpeedUp(v: number) { this._autoExposure.exposureSpeedUp = Math.max(0, v); }
+    public get exposureSpeedDown(): number { return this._autoExposure.exposureSpeedDown; }
+    public set exposureSpeedDown(v: number) { this._autoExposure.exposureSpeedDown = Math.max(0, v); }
 
     /** Per-object camera frustum culling for the main color passes (on by default). */
     public get frustumCulling(): boolean { return this._frustumCulling; }
@@ -11552,7 +11289,7 @@ export class Renderer {
             clearColor: this.clearColor,
             // The AUTHORED value. Serializing `_view.exposure` saved whatever the meter was at when the
             // save happened, which made a scene's stored exposure depend on where the camera pointed.
-            exposure: this._baseExposure,
+            exposure: this._autoExposure.baseExposure,
             bloomThreshold: this._bloomThreshold,
             bloomKnee: this._bloomKnee,
             bloomIntensity: this._bloomIntensity,
@@ -11583,13 +11320,13 @@ export class Renderer {
             specularOcclusionEnabled: this._specularOcclusionEnabled,
             specularAaEnabled: this._specularAaEnabled,
             horizonOcclusionEnabled: this._horizonOcclusionEnabled,
-            autoExposureEnabled: this._autoExposureEnabled,
-            exposureCompensation: this._exposureCompensation,
-            exposureCompensationCurve: this._exposureCompensationCurve.map(k => [k[0], k[1]] as ExposureCurveKey),
-            exposureMinEV: this._exposureMinEV,
-            exposureMaxEV: this._exposureMaxEV,
-            exposureSpeedUp: this._exposureSpeedUp,
-            exposureSpeedDown: this._exposureSpeedDown,
+            autoExposureEnabled: this._autoExposure.autoExposureEnabled,
+            exposureCompensation: this._autoExposure.exposureCompensation,
+            exposureCompensationCurve: this._autoExposure.exposureCompensationCurve.map(k => [k[0], k[1]] as ExposureCurveKey),
+            exposureMinEV: this._autoExposure.exposureMinEV,
+            exposureMaxEV: this._autoExposure.exposureMaxEV,
+            exposureSpeedUp: this._autoExposure.exposureSpeedUp,
+            exposureSpeedDown: this._autoExposure.exposureSpeedDown,
             ssaoRadius: this._ssaoRadius,
             ssaoPower: this._ssaoPower,
             ssaoBias: this._ssaoBias,
@@ -11709,13 +11446,13 @@ export class Renderer {
         if (s.horizonOcclusionEnabled !== undefined)
             this.horizonOcclusionEnabled = s.horizonOcclusionEnabled;
         if (s.autoExposureEnabled !== undefined) this.autoExposureEnabled = s.autoExposureEnabled;
-        if (s.exposureCompensation !== undefined) this._exposureCompensation = s.exposureCompensation;
+        if (s.exposureCompensation !== undefined) this._autoExposure.exposureCompensation = s.exposureCompensation;
         // Whole-blob semantics like the tone mapper: a scene without a curve must not inherit the last one.
         this.exposureCompensationCurve = s.exposureCompensationCurve ?? [];
-        if (s.exposureMinEV !== undefined) this._exposureMinEV = s.exposureMinEV;
-        if (s.exposureMaxEV !== undefined) this._exposureMaxEV = s.exposureMaxEV;
-        if (s.exposureSpeedUp !== undefined) this._exposureSpeedUp = Math.max(0, s.exposureSpeedUp);
-        if (s.exposureSpeedDown !== undefined) this._exposureSpeedDown = Math.max(0, s.exposureSpeedDown);
+        if (s.exposureMinEV !== undefined) this._autoExposure.exposureMinEV = s.exposureMinEV;
+        if (s.exposureMaxEV !== undefined) this._autoExposure.exposureMaxEV = s.exposureMaxEV;
+        if (s.exposureSpeedUp !== undefined) this._autoExposure.exposureSpeedUp = Math.max(0, s.exposureSpeedUp);
+        if (s.exposureSpeedDown !== undefined) this._autoExposure.exposureSpeedDown = Math.max(0, s.exposureSpeedDown);
         if (s.ssaoRadius !== undefined) this.ssaoRadius = s.ssaoRadius;
         if (s.ssaoPower !== undefined) this.ssaoPower = s.ssaoPower;
         if (s.ssaoBias !== undefined) this.ssaoBias = s.ssaoBias;
