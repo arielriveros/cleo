@@ -43,7 +43,7 @@ describe('surface decals', () => {
         const geometry = body.indexOf('this._geometryPass(scene)');
         const decals = body.indexOf('this._decals.surfaceDecalPass()');
         const ssil = body.indexOf('this._ssil.ssilPass()');
-        const lighting = body.indexOf('this._deferredLightingPass(');
+        const lighting = body.indexOf('this._lighting.deferredLightingPass(');
         expect(geometry).toBeGreaterThan(-1);
         expect(decals).toBeGreaterThan(geometry);
         expect(ssil).toBeGreaterThan(decals);
