@@ -72,9 +72,9 @@ describe('surface decals', () => {
     });
 
     it('copy the G-buffer through the frame encoder, as a depth copy does', () => {
-        const body = methodBody('_copyColors');
-        expect(body).toContain("this._passes.acquireEncoder('copyColor')");
-        expect(body).toContain('if (encoder !== this._passes.frameEncoder) encoder.finish()');
+        const body = methodBody('copyColors');
+        expect(body).toContain("this.acquireEncoder('copyColor')");
+        expect(body).toContain('this.finishIfOwned(encoder)');
         expect(body).not.toContain('device.createCommandEncoder');
     });
 
@@ -95,7 +95,7 @@ describe('emissive decals', () => {
     it('run after the opaque depth snapshot, in both pipelines', () => {
         for (const method of ['renderForwardOverlay', 'renderScene']) {
             const body = methodBody(method);
-            const snapshot = body.indexOf('this._host.copySceneDepth()');
+            const snapshot = body.indexOf('this.copySceneDepth()');
             const emissive = body.indexOf('this._decals.emissiveDecalPass()');
             expect(snapshot, method).toBeGreaterThan(-1);
             expect(emissive, method).toBeGreaterThan(snapshot);

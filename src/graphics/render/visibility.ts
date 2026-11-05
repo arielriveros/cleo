@@ -282,7 +282,7 @@ export class Visibility {
         frameStats.occlusionQueries += nodes.length;
         // Into the encoder that holds the pass, after it; then finish that encoder only if this owns it.
         set.resolve(this._passes.encoder, nodes.length, this.gpuOcclusion.submitted());
-        if (this._passes.encoder !== this._passes.frameEncoder) this._passes.encoder.finish();
+        this._passes.finishIfOwned(this._passes.encoder);
         this._passes.encoder = null;
         this._passes.target = null;
         // The box pipeline left depth writes off; the legacy draws after it assume they are on.

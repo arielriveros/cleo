@@ -318,7 +318,6 @@ export class Renderer {
         }, this._view);
         this._temporal = new TemporalPasses({
             get boneMatrixScratch() { return renderer._modelDraw.boneMatrixScratch; },
-            copyDepth: renderer._copyDepth.bind(renderer),
             cullFor: ModelDraw.cullFor.bind(Renderer),
             get debugView() { return renderer._debugViews.debugView; },
             inGBuffer: (...args: Parameters<GeometryPass['inGBuffer']>) => renderer._geometry.inGBuffer(...args),
@@ -356,7 +355,6 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection);
         this._decals = new DecalPasses({
-            copyColors: renderer._copyColors.bind(renderer),
             cullFor: ModelDraw.cullFor.bind(Renderer),
             get deferred() { return renderer._deferred; },
             get frustum() { return renderer._visibility.frustum; },
@@ -453,7 +451,6 @@ export class Renderer {
         this._lighting = new LightingPasses({
             get brdfFBO() { return renderer._sky.brdfFBO; },
             cloudSkyFrontCube: () => renderer._sky.cloudSkyFrontCube(),
-            copyDepth: (source, destination, width, height) => renderer._copyDepth(source, destination, width, height),
             get programList() { return renderer._programList; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
@@ -473,8 +470,6 @@ export class Renderer {
         this._modelDraw = new ModelDraw(this._passes, this._materials);
         this._geometry = new GeometryPass(this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._foliage, this._visibility, this._lighting, this._modelDraw);
         this._forward = new ForwardPass({
-            copyColors: (sources, destinations, width, height) => renderer._copyColors(sources, destinations, width, height),
-            copySceneDepth: () => renderer._copySceneDepth(),
             get passEnabled() { return renderer._passEnabled; },
             renderEditorOverlay: (scene, helperNodes, gizmoNodes) => renderer._overlays.renderEditorOverlay(scene, helperNodes, gizmoNodes),
             get renderHeight() { return renderer._renderHeight; },
@@ -1395,23 +1390,6 @@ export class Renderer {
         this._passes.endScope();
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Decals
-    // ---------------------------------------------------------------------------------------------
-
-    /**
-     * Copy colour attachments, recorded into the frame's encoder exactly as {@link _copyDepth} records
-     * a depth copy and for the same reason: on WebGPU a copy on its own encoder is submitted BEFORE the
-     * frame's unsubmitted passes, and would read the previous frame's G-buffer.
-     */
-    private _copyColors(sources: readonly Texture[], destinations: readonly Texture[],
-                        width: number, height: number): void {
-        const encoder = this._passes.acquireEncoder('copyColor');
-        for (let i = 0; i < sources.length; i++)
-            encoder.copyTextureToTexture(sources[i].attachmentView, destinations[i].attachmentView, width, height);
-        if (encoder !== this._passes.frameEncoder) encoder.finish();
-    }
-
     /**
      * Put the blend function back to the pipeline default, which is a SEPARATE function: alpha blend
      * for RGB, destination ALPHA untouched. Never restore with a plain `gl.blendFunc` — the scene
@@ -1424,54 +1402,12 @@ export class Renderer {
         gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Image-based lighting (IBL)
-    // ---------------------------------------------------------------------------------------------
-
     /**
      * The sky light's current coefficients, or null before the first projection lands. Read-only, for
      * inspection: the editor's sky-light panel and the landscape builder's finite/non-zero gate.
      */
     public get skyLightSH(): Float32Array | null {
         return this._sky.skySHValid ? this._sky.skySH : null;
-    }
-
-    /** Blit _targets.scene's depth (deferred blit + forward opaques) into _targets.sceneDepth so fullscreen
-     *  passes can sample the complete opaque depth without a read/write feedback on _targets.scene,
-     *  then re-bind _targets.scene (restores the overlay pass's render target + viewport). */
-    private _copySceneDepth(): void {
-        this._copyDepth(this._targets.scene.depth, this._targets.sceneDepth.depth,
-                        this._renderWidth, this._renderHeight);
-        this._targets.scene.bind();
-    }
-
-    /**
-     * Copy a depth buffer, through the RHI, for a later pass that must depth-test or depth-read
-     * against another attachment.
-     *
-     * Recorded into the FRAME's encoder whenever one is open, exactly as `_passes.beginFullscreenPass`
-     * records its passes, and finished here only when this call owns the encoder.
-     *
-     * That is the whole correctness of it on WebGPU, and it used to be wrong. `finish()` SUBMITS,
-     * while the frame's render passes sit unsubmitted in `_passes.frameEncoder` until the end of the
-     * frame -- so a copy on its own encoder ran BEFORE every draw it was supposed to be copying
-     * the results of. It read whatever the depth buffer held before the frame started: the
-     * previous frame's depth in a live viewport, which a barely-moving camera makes look almost
-     * right, and on a resized buffer nothing at all.
-     *
-     * An offscreen capture is where that becomes total rather than subtle. It resizes every
-     * target, renders ONE frame and reads it back, so "before this frame" is a freshly allocated
-     * buffer -- zeroed, which reads as depth 0, which is `covered` everywhere. Every thumbnail and
-     * every baked impostor came back a fully opaque rectangle on WebGPU while WebGL2, whose
-     * commands execute as they are issued, was correct.
-     *
-     * The other two callers were quietly wrong the same way: the deferred G-buffer depth handed to
-     * the forward overlay, and TAA's previous-frame depth.
-     */
-    private _copyDepth(source: Texture, destination: Texture, width: number, height: number): void {
-        const encoder = this._passes.acquireEncoder('copyDepth');
-        encoder.copyTextureToTexture(source.attachmentView, destination.attachmentView, width, height);
-        if (encoder !== this._passes.frameEncoder) encoder.finish();
     }
 
     /**
@@ -1696,7 +1632,7 @@ export class Renderer {
             //     directly. Every other depth consumer -- god rays, sky fog, the velocity chain --
             //     reads this snapshot instead, because sampling a texture that is still a live depth
             //     ATTACHMENT is the shape WebGL2 calls a feedback loop and leaves undefined.
-            this._copySceneDepth();
+            this._forward.copySceneDepth();
             this._capture.presentThumbnail();
             return;
         }

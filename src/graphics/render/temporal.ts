@@ -23,7 +23,6 @@ import { ShaderManager } from '../systems/shaderManager';
 /** What TemporalPasses reads from the renderer that owns it, while those members still live there. */
 export interface TemporalPassesHost {
     readonly boneMatrixScratch: Float32Array;
-    copyDepth(source: Texture, destination: Texture, width: number, height: number): void;
     cullFor(side: 'front' | 'back' | 'double' | undefined): CullMode;
     readonly debugView: DebugView;
     inGBuffer(node: ModelNode): boolean;
@@ -385,8 +384,8 @@ export class TemporalPasses {
 
         // The depth that produced the history just written, kept for next frame's disocclusion test.
         // AFTER the resolve, which still had to read the previous contents. A copy rather than a pass:
-        // `_copySceneDepth` already does exactly this, on both backends.
-        this._host.copyDepth(this.depthSource(), this._taaPrevDepthFBO.depth, w, h);
+        // `ForwardPass.copySceneDepth` already does exactly this, on both backends.
+        this._passes.copyDepth(this.depthSource(), this._taaPrevDepthFBO.depth, w, h);
 
         this.taaHistoryIndex = dst;
         this.taaHistoryValid = true;
@@ -430,7 +429,7 @@ export class TemporalPasses {
     /**
      * The opaque depth the velocity chain reconstructs, tests and compares against.
      *
-     * The snapshot `_copySceneDepth` takes after the opaque draw, in BOTH pipelines — the same buffer
+     * The snapshot `ForwardPass.copySceneDepth` takes after the opaque draw, in BOTH pipelines — the same buffer
      * the other post passes (god rays, screen materials) already read.
      *
      * Deliberately not the G-buffer depth under `deferred`, which is the narrower buffer this used to
@@ -438,7 +437,7 @@ export class TemporalPasses {
      * `_targets.scene.depth`, so every one of their pixels was reprojected as whatever geometry sat behind
      * it. Motion blur tolerated that; TAA reads the same buffer to decide where a pixel was last
      * frame, and would ghost every Blinn-Phong object in the scene. Safe to unify only because the
-     * velocity chain now runs after `_copySceneDepth` in both pipelines.
+     * velocity chain now runs after `ForwardPass.copySceneDepth` in both pipelines.
      */
     public depthSource(): Texture {
         return this._targets.sceneDepth.depth;

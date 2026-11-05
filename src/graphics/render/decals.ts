@@ -26,7 +26,6 @@ import { ShaderManager } from '../systems/shaderManager';
 
 /** What DecalPasses reads from the renderer that owns it, while those members still live there. */
 export interface DecalPassesHost {
-    copyColors(sources: readonly Texture[], destinations: readonly Texture[], width: number, height: number): void;
     cullFor(side: 'front' | 'back' | 'double' | undefined): CullMode;
     readonly deferred: boolean;
     readonly frustum: Frustum;
@@ -251,7 +250,7 @@ export class DecalPasses {
         this._passes.endFullscreenPass(pass);
 
         // A pass cannot sample what it writes, and the resolve writes the G-buffer.
-        this._host.copyColors(gBuffer.colors, copy.colors, w, h);
+        this._passes.copyColors(gBuffer.colors, copy.colors, w, h);
 
         // Never binds `_targets.gBuffer.depth`: it is attached to this pass. The shader tells untouched pixels
         // apart by the DBuffer's alphas instead, and discards them.

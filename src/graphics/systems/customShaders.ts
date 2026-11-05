@@ -116,7 +116,7 @@ vec3 getNormal() { return normalize(TBN[2]); }
 // are both generated from this, so they cannot disagree. The deferred interface declares none.
 const FORWARD_ENGINE_SAMPLERS: SamplerDecl[] = [
     { name: 'u_envMap', type: 'samplerCube' },
-    // The opaque scene behind a TRANSPARENT material: its depth (the snapshot `_copySceneDepth` takes
+    // The opaque scene behind a TRANSPARENT material: its depth (the snapshot `ForwardPass.copySceneDepth` takes
     // before the transparent queue) and its colour (copied at the same point, only when a visible
     // material asks for it). Read them through the cleoScene* helpers, never directly — see
     // FORWARD_SCENE_BODY. An opaque material sees last frame's copy, or a 1x1 fallback.

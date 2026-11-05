@@ -51,7 +51,6 @@ function allForwardShaders(): string[] {
 export interface LightingPassesHost {
     readonly brdfFBO: Framebuffer;
     cloudSkyFrontCube(): Texture | null;
-    copyDepth(source: Texture, destination: Texture, width: number, height: number): void;
     readonly programList: ReadonlySet<string> | null;
     readonly renderHeight: number;
     readonly renderWidth: number;
@@ -204,7 +203,7 @@ export class LightingPasses {
         const w = this._host.renderWidth, h = this._host.renderHeight;
 
         // Copy the opaque depth into the scene FBO so forward passes depth-test correctly.
-        this._host.copyDepth(this._targets.gBuffer.depth, this._targets.scene.depth, w, h);
+        this._passes.copyDepth(this._targets.gBuffer.depth, this._targets.scene.depth, w, h);
 
         // Depth was blitted in; clear only colour. Alpha clears to 0 so the background starts with an
         // empty bloom mask. Thumbnails clear to transparent black, so no fringe bleeds in.

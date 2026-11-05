@@ -1320,7 +1320,7 @@ export class ShadowPasses {
                 this._passes.endDepthPass(pass);
             }
             if (!liveStale) continue;
-            this._copyDepthLayer(this.spotStaticFBO.texture, this.spotShadowFBO.texture, layer,
+            this._passes.copyDepthLayer(this.spotStaticFBO.texture, this.spotShadowFBO.texture, layer,
                                  this.spotShadowResolution);
             if (lists.dynamicCount > 0) {
                 const pass = this._passes.beginDepthPass(this.spotShadowFBO.renderTarget, 'spotShadow', layer, 'load');
@@ -1456,7 +1456,7 @@ export class ShadowPasses {
                     this._passes.endDepthPass(pass);
                 }
                 if (!liveStale) continue;
-                this._copyDepthLayer(this.pointStaticFBO.texture, this.pointShadowFBO.texture, layer,
+                this._passes.copyDepthLayer(this.pointStaticFBO.texture, this.pointShadowFBO.texture, layer,
                                      this.pointShadowResolution);
                 if (lists.dynamicCount > 0) {
                     const pass = this._passes.beginDepthPass(this.pointShadowFBO.renderTarget, 'pointShadow', layer, 'load');
@@ -1506,16 +1506,6 @@ export class ShadowPasses {
         }
         out.staticHash = sh; out.dynamicHash = dh;
         return out;
-    }
-
-    /**
-     * Copy one layer of a depth array into the same layer of another, recorded into the frame's encoder
-     * for the reason {@link _copyDepth} gives.
-     */
-    private _copyDepthLayer(source: Texture, destination: Texture, layer: number, size: number): void {
-        const encoder = this._passes.acquireEncoder('copyDepthLayer');
-        encoder.copyTextureToTexture(source.layerView(layer), destination.layerView(layer), size, size);
-        if (encoder !== this._passes.frameEncoder) encoder.finish();
     }
 
     /** Render the directional light's cascaded shadow maps (one array layer per view-frustum slice). */

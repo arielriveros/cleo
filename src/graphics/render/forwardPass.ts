@@ -49,8 +49,6 @@ const FORWARD_POM: Readonly<Record<string, string>> = { pbr: 'pbrPom', pbrSkinne
 
 /** What ForwardPass reads from the renderer that owns it, while those members still live there. */
 export interface ForwardPassHost {
-    copyColors(sources: readonly Texture[], destinations: readonly Texture[], width: number, height: number): void;
-    copySceneDepth(): void;
     readonly passEnabled: Record<RenderPass, boolean>;
     renderEditorOverlay(scene: Scene, helperNodes: ModelNode[], gizmoNodes: ModelNode[]): void;
     readonly renderHeight: number;
@@ -182,7 +180,7 @@ export class ForwardPass {
 
         // Volumetric clouds: raymarched fullscreen, composited over the sky and occluded by opaque
         // geometry (the shader reads the G-buffer depth to bound each ray — this runs before
-        // _copySceneDepth below, so the blitted copy does not exist yet).
+        // copySceneDepth below, so the blitted copy does not exist yet).
         // Not while the clouds are drawn from the sky bake: they are already in the sky above.
         if (!this._host.thumbnailMode && !this._sky.cloudSkyActive(scene) && this._passes.beginPass('clouds'))
             this._clouds.renderVolumetricClouds(scene);
@@ -197,7 +195,7 @@ export class ForwardPass {
 
         // Snapshot the complete opaque depth (deferred + forward) for the fullscreen passes below
         // and the later post-processing passes (god rays, screen-space materials).
-        if (!this._host.thumbnailMode) this._host.copySceneDepth();
+        if (!this._host.thumbnailMode) this.copySceneDepth();
 
         // Decal emissive, onto every opaque surface in that snapshot. Before the fog, which should veil
         // a glowing decal exactly as it veils the surface under it.
@@ -279,12 +277,23 @@ export class ForwardPass {
      * transparents draw INTO, and a pass cannot sample its own attachment. Skipped — no allocation, no
      * copy — unless something visible actually reads it.
      */
+    /**
+     * Copy the scene's depth (deferred blit + forward opaques) into `_targets.sceneDepth`, so fullscreen
+     * passes can sample the complete opaque depth without a read/write feedback on `_targets.scene`, then
+     * re-bind `_targets.scene` (restores the overlay pass's render target and viewport).
+     */
+    public copySceneDepth(): void {
+        this._passes.copyDepth(this._targets.scene.depth, this._targets.sceneDepth.depth,
+                               this._host.renderWidth, this._host.renderHeight);
+        this._targets.scene.bind();
+    }
+
     private _snapshotSceneColor(queue: readonly ModelNode[]): void {
         this.sceneBuffersLive = !this._host.thumbnailMode;
         if (this._host.thumbnailMode || !ForwardPass._readsSceneColor(queue)) return;
         const fbo = this._targets.refraction = this._decals.decalTarget(this._targets.refraction, () => new Framebuffer({
             colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
-        this._host.copyColors([this._targets.scene.colors[0]], [fbo.colors[0]], this._host.renderWidth, this._host.renderHeight);
+        this._passes.copyColors([this._targets.scene.colors[0]], [fbo.colors[0]], this._host.renderWidth, this._host.renderHeight);
         this._targets.scene.bind();
     }
 
@@ -351,7 +360,7 @@ export class ForwardPass {
 
         // Snapshot the opaque depth for the post-processing passes (god rays, screen materials)
         // that sample it after this pipeline finishes.
-        if (!this._host.thumbnailMode) this._host.copySceneDepth();
+        if (!this._host.thumbnailMode) this.copySceneDepth();
 
         // Decal emissive over that snapshot. The only decal output this pipeline has: with no G-buffer
         // there is nothing for a surface decal to write into.

@@ -38,10 +38,10 @@ function methodBody(name: string): string {
     return rest.slice(0, end);
 }
 
-describe('_copyDepth', () => {
+describe('PassEncoder.copyDepth', () => {
     it('records into the frame encoder rather than opening its own', () => {
-        const body = methodBody('_copyDepth');
-        expect(body).toContain("this._passes.acquireEncoder('copyDepth')");
+        const body = methodBody('copyDepth');
+        expect(body).toContain("this.acquireEncoder('copyDepth')");
         // The literal is what the bug was. `acquireEncoder` falls back to it when no frame is open,
         // which is the only legitimate way this helper may reach it.
         expect(body).not.toContain('device.createCommandEncoder');
@@ -51,7 +51,8 @@ describe('_copyDepth', () => {
         // `endFullscreenPass` makes exactly this distinction for passes, and for the same reason:
         // finishing the FRAME encoder mid-frame submits everything recorded so far and leaves the rest
         // of the frame recording into a spent object.
-        expect(methodBody('_copyDepth')).toContain('if (encoder !== this._passes.frameEncoder) encoder.finish()');
+        expect(methodBody('copyDepth')).toContain('this.finishIfOwned(encoder)');
+        expect(methodBody('finishIfOwned')).toContain('if (encoder !== this.frameEncoder) encoder.finish()');
     });
 
     it('is what the capture path resolves its coverage from', () => {
@@ -59,8 +60,8 @@ describe('_copyDepth', () => {
         // the snapshot. If either half moves, the other is no longer guarded by the two cases above.
         const post = methodBody('_applyPostProcessing');
         const branch = post.slice(post.indexOf('if (this._capture.presentTarget)'));
-        expect(branch.indexOf('this._copySceneDepth()')).toBeGreaterThan(-1);
-        expect(branch.indexOf('this._copySceneDepth()'))
+        expect(branch.indexOf('this._forward.copySceneDepth()')).toBeGreaterThan(-1);
+        expect(branch.indexOf('this._forward.copySceneDepth()'))
             .toBeLessThan(branch.indexOf('this._capture.presentThumbnail()'));
         expect(methodBody('presentThumbnail')).toContain('this._temporal.depthSource()');
     });

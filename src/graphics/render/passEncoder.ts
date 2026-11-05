@@ -118,8 +118,8 @@ export class PassEncoder {
     public endFullscreenPass(pass: RenderPassEncoder): void {
         pass.end();
         // Only an encoder this pass OWNS is finished here. The frame encoder outlives every pass in the
-        // frame and is submitted once, by `_flushFrameEncoder`.
-        if (this.encoder && this.encoder !== this.frameEncoder) this.encoder.finish();
+        // frame and is submitted once, by `flushFrameEncoder`.
+        if (this.encoder) this.finishIfOwned(this.encoder);
         this.encoder = null;
         this.target = null;
     }
@@ -127,6 +127,66 @@ export class PassEncoder {
     /** The frame's encoder, or a fresh one when there is no frame open. See {@link _frameEncoder}. */
     public acquireEncoder(label: string): CommandEncoder {
         return this.frameEncoder ?? device.createCommandEncoder(label);
+    }
+
+    /**
+     * Finish `encoder` if this call owns it. The frame's encoder is never finished here: it outlives every
+     * pass in the frame and is submitted once, by {@link flushFrameEncoder}.
+     */
+    public finishIfOwned(encoder: CommandEncoder): void {
+        if (encoder !== this.frameEncoder) encoder.finish();
+    }
+
+    /**
+     * Copy colour attachments, recorded into the frame's encoder exactly as {@link copyDepth} records a
+     * depth copy and for the same reason: on WebGPU a copy on its own encoder is submitted BEFORE the
+     * frame's unsubmitted passes, and would read the previous frame's G-buffer.
+     */
+    public copyColors(sources: readonly Texture[], destinations: readonly Texture[],
+                      width: number, height: number): void {
+        const encoder = this.acquireEncoder('copyColor');
+        for (let i = 0; i < sources.length; i++)
+            encoder.copyTextureToTexture(sources[i].attachmentView, destinations[i].attachmentView, width, height);
+        this.finishIfOwned(encoder);
+    }
+
+    /**
+     * Copy a depth buffer, through the RHI, for a later pass that must depth-test or depth-read
+     * against another attachment.
+     *
+     * Recorded into the FRAME's encoder whenever one is open, exactly as {@link beginFullscreenPass}
+     * records its passes, and finished here only when this call owns the encoder.
+     *
+     * That is the whole correctness of it on WebGPU, and it used to be wrong. `finish()` SUBMITS,
+     * while the frame's render passes sit unsubmitted in {@link frameEncoder} until the end of the
+     * frame -- so a copy on its own encoder ran BEFORE every draw it was supposed to be copying
+     * the results of. It read whatever the depth buffer held before the frame started: the
+     * previous frame's depth in a live viewport, which a barely-moving camera makes look almost
+     * right, and on a resized buffer nothing at all.
+     *
+     * An offscreen capture is where that becomes total rather than subtle. It resizes every
+     * target, renders ONE frame and reads it back, so "before this frame" is a freshly allocated
+     * buffer -- zeroed, which reads as depth 0, which is `covered` everywhere. Every thumbnail and
+     * every baked impostor came back a fully opaque rectangle on WebGPU while WebGL2, whose
+     * commands execute as they are issued, was correct.
+     *
+     * The other two callers were quietly wrong the same way: the deferred G-buffer depth handed to
+     * the forward overlay, and TAA's previous-frame depth.
+     */
+    public copyDepth(source: Texture, destination: Texture, width: number, height: number): void {
+        const encoder = this.acquireEncoder('copyDepth');
+        encoder.copyTextureToTexture(source.attachmentView, destination.attachmentView, width, height);
+        this.finishIfOwned(encoder);
+    }
+
+    /**
+     * Copy one layer of a depth array into the same layer of another (a shadow atlas's static copy into
+     * the live one), recorded into the frame's encoder for the reason {@link copyDepth} gives.
+     */
+    public copyDepthLayer(source: Texture, destination: Texture, layer: number, size: number): void {
+        const encoder = this.acquireEncoder('copyDepthLayer');
+        encoder.copyTextureToTexture(source.layerView(layer), destination.layerView(layer), size, size);
+        this.finishIfOwned(encoder);
     }
 
     /**
