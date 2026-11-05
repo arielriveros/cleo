@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mat4 } from 'gl-matrix';
-import { Renderer } from '../src/graphics/renderer';
+import { capSpriteScreenSize } from '../src/graphics/render/sprites2d';
 import { Camera } from '../src/core/camera';
 
 /**
@@ -10,10 +10,8 @@ import { Camera } from '../src/core/camera';
  * orthographic by the view's height, so a 2D zoom is capped too.
  */
 
-// The method only reads the frame's camera and the canvas's CSS height.
 const cap = (camera: Camera, m: mat4, maxCssPx: number, cssHeight = 1000) => {
-    const stub = { _view: { camera }, _canvas: { clientHeight: cssHeight } };
-    (Renderer.prototype as any)._capSpriteScreenSize.call(stub, m, maxCssPx);
+    capSpriteScreenSize(m, maxCssPx, camera, cssHeight);
     return Math.hypot(m[4], m[5], m[6]);
 };
 
