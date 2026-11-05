@@ -1,6 +1,6 @@
 import { device } from '../rhi/deviceHandle';
 import { countFullscreenPass, frameStats, setViewportSize } from '../renderStats';
-import { gpuProfiler, type RenderPass } from '../gpuProfiler';
+import type { RenderPass } from '../gpuProfiler';
 import { cpuProfiler } from '../cpuProfiler';
 import type { Mesh } from '../mesh';
 import type { Texture } from '../texture';
@@ -235,7 +235,7 @@ export class PassEncoder {
     }
 
     /**
-     * Open a GPU timing scope, and report whether the pass should run at all. Call as
+     * Open a timing scope, and report whether the pass should run at all. Call as
      * `if (!this.beginPass('x')) return;` — a switched-off pass must never also be timed.
      */
     public beginPass(name: RenderPass): boolean {
@@ -245,21 +245,16 @@ export class PassEncoder {
     }
 
     /**
-     * Open one render scope, timed on BOTH sides.
-     *
-     * The two profilers share these boundaries deliberately: a GPU pass table with no CPU column sends
-     * you looking at the GPU when the cost is submission, and two independently placed sets of scopes
-     * would produce rows that cannot be compared. Flat, never nested — WebGL2 allows one active timer
-     * query, so opening a scope closes the previous one on both sides.
+     * Open one render scope on the CPU profiler. Flat, never nested: opening a scope closes the
+     * previous one. The GPU side needs no call — the device times each render pass, and
+     * `scopeForPassLabel` files its label under the scope that contains it, so the rows pair up.
      */
     public scope(name: RenderPass | string): void {
-        gpuProfiler.beginPass(name);
         cpuProfiler.beginPass(name);
     }
 
-    /** Close the open scope on both profilers. */
+    /** Close the open scope. */
     public endScope(): void {
-        gpuProfiler.endPass();
         cpuProfiler.endPass();
     }
 

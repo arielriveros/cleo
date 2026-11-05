@@ -1,13 +1,11 @@
-// Per-pass GPU timing, read by the editor's profiler panel and performance HUD. Standalone: it takes
-// its device and GL context by injection.
+// Per-pass GPU timing, read by the editor's profiler panel and performance HUD. Standalone: it takes its
+// device by injection.
 //
-// The two backends do not measure the same thing, which is the shape of the whole file. WebGL2 times
-// an arbitrary SCOPE the renderer opens and closes; WebGPU can only time a render PASS. The ratios
-// between the name spaces are 1:0, 1:1, 1:N and N:1, so `attribution` labels which set the rows are in.
+// Both backends time render PASSES, through the device (`setTimestampCollection`): WebGPU with timestamp
+// queries, WebGL2 with a timer query bracketing each pass. A pass's descriptor label reports under the
+// renderer SCOPE that contains it (`scopeForPassLabel`), so the GPU rows pair with the CPU profiler's.
 
 import type { Device } from './rhi/device';
-import { timerQueryExtension } from './rhi/webgl2/capabilities';
-import { gl } from './rhi/webgl2/glContext';
 
 /** Timings for one named pass. `ms` is the most recent completed frame; `avgMs` is smoothed. */
 export interface PassTiming {
@@ -25,8 +23,8 @@ export interface PassTiming {
 }
 
 /**
- * Every scope the renderer can time, and the key space for `Renderer.passEnabled`. Flat, not nested:
- * WebGL2 allows only one active query per target, so scopes never overlap.
+ * Every scope the renderer opens (`PassEncoder.scope`), and the key space for `Renderer.passEnabled`.
+ * Flat, not nested: the CPU profiler times them as a sequence.
  */
 export const RENDER_PASSES = [
     'shadows.cascades',
@@ -103,7 +101,7 @@ export const TOGGLEABLE_PASSES: RenderPass[] = [
 ];
 
 /**
- * Render-pass LABEL -> the WebGL2 profiler SCOPE containing it. Only exact correspondences and unambiguous
+ * Render-pass LABEL -> the renderer SCOPE containing it. Only exact correspondences and unambiguous
  * sums may be added (tests/gpuProfilerLabels.test.ts); an unmapped label reports as `pass:<label>`.
  */
 export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
@@ -147,6 +145,8 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     forwardOpaque: 'forwardOpaque',
     transparent: 'transparent',
     particles: 'particles',
+    // The simulation step: a compute pass on WebGPU, the ping-pong render pass on WebGL2 — the same span.
+    'particles.sim': 'particles.sim',
 
     // Renamed but still one-to-one: the pass label and the scope name simply differ.
     cascade: 'shadows.cascades',
@@ -156,7 +156,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     screenMaterial: 'screenMaterials',
     skyAtmosphereBake: 'sky.bake',
 
-    // Unambiguous sums: each runs inside the named scope on WebGL2.
+    // Unambiguous sums: each runs inside the named scope.
     'decals.resolve': 'decals',
     iblConvolve: 'ibl.bake',
     probeCapture: 'ibl.bake',
@@ -170,7 +170,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     'taa.sharpen': 'taa',
     'velocity.tile': 'motionBlur',
     'velocity.neighbor': 'motionBlur',
-    // The scene -> compose[0] copy; WebGL2 times it under `present`, which is reported twice a frame.
+    // The scene -> compose[0] copy, which runs inside the `present` scope.
     compose: 'present',
     // The overlay layer's two labels: the helper/icon draws during the scene render, and the
     // composite past the end of the post chain. Both report under the one scope.
@@ -284,9 +284,6 @@ export const frameHistory = {
     clear(): void { this.frame.clear(); this.cpuRender.clear(); this.gpu.clear(); },
 };
 
-interface Scope { name: string; query: WebGLQuery; }
-interface PendingFrame { scopes: Scope[]; }
-
 /**
  * What the renderer, the HUD and the profiler panel talk to. One backend is live at a time, chosen by
  * {@link initializeGpuProfiler} once the device is known.
@@ -296,11 +293,8 @@ export interface GpuProfilerBackend {
     enabled: boolean;
     readonly totalMs: number;
     readonly passes: PassTiming[];
-    readonly attribution: 'scopes' | 'passes';
     readonly unavailableReason: string | null;
     historyFor(name: string): Ring | null;
-    beginPass(name: RenderPass | string): void;
-    endPass(): void;
     endFrame(): void;
     reset(): void;
 }
@@ -312,202 +306,16 @@ export interface GpuProfilerBackend {
 export class NullGpuProfiler implements GpuProfilerBackend {
     public enabled = false;
     public readonly available = false;
-    public readonly attribution = 'scopes' as const;
 
     constructor(public readonly unavailableReason: string) {}
 
     public get totalMs(): number { return 0; }
     public get passes(): PassTiming[] { return []; }
     public historyFor(_name: string): Ring | null { return null; }
-    public beginPass(_name: RenderPass | string): void {}
-    public endPass(): void {}
     public endFrame(): void {}
     public reset(): void {}
 }
 
-/**
- * GPU timer-query profiler over `EXT_disjoint_timer_query_webgl2`. Results are collected frames late
- * and never waited on; frames flagged `GPU_DISJOINT_EXT` are discarded whole.
- */
-export class WebGL2GpuProfiler implements GpuProfilerBackend {
-    private _gl: WebGL2RenderingContext | null = null;
-    private _ext: any = null;
-    private _enabled = false;
-
-    private _timings = new Map<string, PassTiming>();
-    private _history = new Map<string, Ring>();
-
-    // Frames whose queries have been issued but not yet read back.
-    private _pending: PendingFrame[] = [];
-    // Scopes opened during the frame currently being recorded.
-    private _current: Scope[] = [];
-    private _openQuery: WebGLQuery | null = null;
-
-    // Recycled query objects; create/delete per pass per frame would allocate ~25 GL objects a frame.
-    private _pool: WebGLQuery[] = [];
-
-    private _lastFrameTotal = 0;
-    /** Resolved frames since construction/reset; the clock `PassTiming.lastSeenFrame` is measured on. */
-    private _resolvedFrames = 0;
-
-    /** Resolve the timer extension. Called from `initializeGpuProfiler`; safe to call again. */
-    public initialize(context: WebGL2RenderingContext): void {
-        this._gl = context;
-        this._ext = timerQueryExtension(context);
-    }
-
-    /** True when timer queries can actually be issued. False means the UI must fall back to bisection. */
-    public get available(): boolean { return this._ext !== null && this._gl !== null; }
-
-    /** WebGL2 times renderer-defined scopes, not render passes. See the file header. */
-    public readonly attribution = 'scopes' as const;
-
-    public get unavailableReason(): string | null {
-        if (this.available) return null;
-        return this._gl === null
-            ? 'The profiler has no WebGL2 context yet.'
-            : 'EXT_disjoint_timer_query_webgl2 is unavailable on this driver/browser.';
-    }
-
-    public get enabled(): boolean { return this._enabled; }
-    public set enabled(v: boolean) {
-        if (this._enabled === v) return;
-        this._enabled = v;
-        if (!v) this._discardPending();
-    }
-
-    /** Sum of the most recently resolved frame's pass timings, in ms. */
-    public get totalMs(): number { return this._lastFrameTotal; }
-
-    /**
-     * Timed passes, largest average first. Allocates — call at UI refresh rate, not per frame.
-     * Passes that stopped reporting are dropped rather than held at their last average.
-     */
-    public get passes(): PassTiming[] {
-        const cutoff = this._resolvedFrames - STALE_PASS_FRAMES;
-        return [...this._timings.values()]
-            .filter(t => t.lastSeenFrame >= cutoff)
-            .sort((a, b) => b.avgMs - a.avgMs);
-    }
-
-    /** Rolling history for one pass, or null if it has never been timed. */
-    public historyFor(name: string): Ring | null { return this._history.get(name) ?? null; }
-
-    /**
-     * Open a timing scope. Implicitly closes the previous one — WebGL2 permits only one active
-     * TIME_ELAPSED query, so scopes are a flat sequence rather than a stack.
-     */
-    public beginPass(name: RenderPass | string): void {
-        if (!this._enabled || !this._ext) return;
-        this._closeOpenQuery();
-
-        const gl = this._gl!;
-        const query = this._pool.pop() ?? gl.createQuery();
-        if (!query) return;
-
-        gl.beginQuery(this._ext.TIME_ELAPSED_EXT, query);
-        this._openQuery = query;
-        this._current.push({ name, query });
-    }
-
-    /** Close the open scope without opening another. Optional — `endFrame` closes it anyway. */
-    public endPass(): void {
-        if (!this._enabled || !this._ext) return;
-        this._closeOpenQuery();
-    }
-
-    /** Close the frame: end any open scope, queue it for readback, and collect resolved frames. */
-    public endFrame(): void {
-        if (!this._enabled || !this._ext) { this._current.length = 0; return; }
-        this._closeOpenQuery();
-
-        if (this._current.length > 0) {
-            this._pending.push({ scopes: this._current });
-            this._current = [];
-        }
-
-        // Bound the queue: if the driver has stopped resolving, recycle the oldest rather than grow.
-        while (this._pending.length > MAX_PENDING_FRAMES) {
-            const dropped = this._pending.shift()!;
-            for (const s of dropped.scopes) this._pool.push(s.query);
-        }
-
-        this._collect();
-    }
-
-    /** Zero every accumulator and history. Timings restart from the next resolved frame. */
-    public reset(): void {
-        this._timings.clear();
-        for (const ring of this._history.values()) ring.clear();
-        this._history.clear();
-        this._lastFrameTotal = 0;
-        this._resolvedFrames = 0;
-    }
-
-    private _closeOpenQuery(): void {
-        if (!this._openQuery) return;
-        this._gl!.endQuery(this._ext.TIME_ELAPSED_EXT);
-        this._openQuery = null;
-    }
-
-    /**
-     * Read back every pending frame whose queries have all resolved. Queries complete in submission
-     * order, so testing the last one is enough to know the whole frame is ready.
-     */
-    private _collect(): void {
-        const gl = this._gl!;
-
-        // A disjoint anywhere in the window invalidates every timing still in flight.
-        if (gl.getParameter(this._ext.GPU_DISJOINT_EXT)) { this._discardPending(); return; }
-
-        while (this._pending.length > 0) {
-            const frame = this._pending[0];
-            const lastQuery = frame.scopes[frame.scopes.length - 1].query;
-            if (!gl.getQueryParameter(lastQuery, gl.QUERY_RESULT_AVAILABLE)) break;
-
-            this._pending.shift();
-            this._resolvedFrames++;
-            let total = 0;
-            for (const scope of frame.scopes) {
-                // Nanoseconds -> milliseconds.
-                const ms = gl.getQueryParameter(scope.query, gl.QUERY_RESULT) / 1e6;
-                total += ms;
-                this._record(scope.name, ms);
-                this._pool.push(scope.query);
-            }
-            this._lastFrameTotal = total;
-        }
-    }
-
-    private _record(name: string, ms: number): void {
-        let t = this._timings.get(name);
-        if (!t) {
-            t = { name, ms, avgMs: ms, maxMs: ms, samples: 0, lastSeenFrame: this._resolvedFrames };
-            this._timings.set(name, t);
-            this._history.set(name, new Ring(HISTORY_FRAMES));
-        }
-        t.lastSeenFrame = this._resolvedFrames;
-        t.ms = ms;
-        t.avgMs += (ms - t.avgMs) * EMA_ALPHA;
-        if (ms > t.maxMs) t.maxMs = ms;
-        t.samples++;
-        this._history.get(name)!.push(ms);
-    }
-
-    private _discardPending(): void {
-        // Close any active query first: an open query returned to the pool makes the next
-        // beginQuery on it an INVALID_OPERATION, which kills all timing from then on.
-        this._closeOpenQuery();
-        for (const frame of this._pending)
-            for (const s of frame.scopes) this._pool.push(s.query);
-        this._pending.length = 0;
-        // The in-progress frame's queries were opened but its results are now untrustworthy too.
-        for (const s of this._current) this._pool.push(s.query);
-        this._current.length = 0;
-    }
-}
-
-// TODO: unify with the equivalent four members on WebGL2GpuProfiler.
 
 class PassTimingTable {
     private _timings = new Map<string, PassTiming>();
@@ -551,12 +359,11 @@ class PassTimingTable {
 }
 
 /**
- * GPU timing over WebGPU timestamp queries; `beginPass`/`endPass` are no-ops and labels come from
- * `RenderPassDescriptor.label`. Biased high: each pass pays a submission's start-up inside its window.
+ * GPU timing per render pass, through the device's `setTimestampCollection` / `collectTimestamps` —
+ * WebGPU timestamp queries, or WebGL2 timer queries bracketing each pass. Labels come from
+ * `RenderPassDescriptor.label` and report under `scopeForPassLabel`'s scope.
  */
-export class WebGPUGpuProfiler implements GpuProfilerBackend {
-    public readonly attribution = 'passes' as const;
-
+export class PassGpuProfiler implements GpuProfilerBackend {
     private _table = new PassTimingTable();
     private _enabled = false;
     private _lastFrameTotal = 0;
@@ -570,7 +377,8 @@ export class WebGPUGpuProfiler implements GpuProfilerBackend {
     public get unavailableReason(): string | null {
         return this.available
             ? null
-            : 'The WebGPU adapter does not offer the timestamp-query feature.';
+            : 'This graphics device cannot time GPU passes (no WebGPU timestamp-query feature, or no ' +
+              'EXT_disjoint_timer_query_webgl2).';
     }
 
     public get enabled(): boolean { return this._enabled; }
@@ -587,9 +395,6 @@ export class WebGPUGpuProfiler implements GpuProfilerBackend {
     public get totalMs(): number { return this._lastFrameTotal; }
     public get passes(): PassTiming[] { return this._table.passes; }
     public historyFor(name: string): Ring | null { return this._table.historyFor(name); }
-
-    public beginPass(_name: RenderPass | string): void {}
-    public endPass(): void {}
 
     /**
      * Pump the drain and close one reported frame. `collectTimestamps` never waits on the GPU, and a
@@ -627,7 +432,7 @@ export class GpuProfilerFacade implements GpuProfilerBackend {
     public get backend(): GpuProfilerBackend { return this._backend; }
 
     public useBackend(backend: GpuProfilerBackend): void {
-        // Turn the old backend off first: on WebGPU `enabled = false` releases the collection sink.
+        // Turn the old backend off first: `enabled = false` releases the device's collection sink.
         const wasEnabled = this._backend.enabled;
         this._backend.enabled = false;
         this._backend = backend;
@@ -635,7 +440,6 @@ export class GpuProfilerFacade implements GpuProfilerBackend {
     }
 
     public get available(): boolean { return this._backend.available; }
-    public get attribution(): 'scopes' | 'passes' { return this._backend.attribution; }
     public get unavailableReason(): string | null { return this._backend.unavailableReason; }
 
     public get enabled(): boolean { return this._backend.enabled; }
@@ -644,8 +448,6 @@ export class GpuProfilerFacade implements GpuProfilerBackend {
     public get totalMs(): number { return this._backend.totalMs; }
     public get passes(): PassTiming[] { return this._backend.passes; }
     public historyFor(name: string): Ring | null { return this._backend.historyFor(name); }
-    public beginPass(name: RenderPass | string): void { this._backend.beginPass(name); }
-    public endPass(): void { this._backend.endPass(); }
     public endFrame(): void { this._backend.endFrame(); }
     public reset(): void { this._backend.reset(); }
 }
@@ -656,17 +458,6 @@ export const gpuProfiler = new GpuProfilerFacade();
  * Choose and install the backend for the device just acquired. Called once from `Renderer.initialize()`.
  */
 export function initializeGpuProfiler(device: Device): void {
-    if (device.backend === 'webgpu') {
-        gpuProfiler.useBackend(new WebGPUGpuProfiler(device));
-        return;
-    }
-    const glContext = gl ?? null;
-    if (!glContext) {
-        gpuProfiler.useBackend(new NullGpuProfiler('The profiler has no WebGL2 context yet.'));
-        return;
-    }
-    const backend = new WebGL2GpuProfiler();
-    backend.initialize(glContext);
-    gpuProfiler.useBackend(backend);
+    gpuProfiler.useBackend(new PassGpuProfiler(device));
 }
 

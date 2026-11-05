@@ -16,6 +16,7 @@ import type {
 } from '../device';
 import type { ComputePipeline, OcclusionQuerySet } from '../resources';
 import { WebGL2OcclusionQuerySet } from './webgl2Queries';
+import { WebGL2PassTimer } from './webgl2PassTimer';
 import type { RenderPassDescriptor } from '../types';
 import type { Buffer, Texture } from '../resources';
 import type { BufferUsageFlags, TextureFormat, TextureDimension, TextureUsageFlags, SamplerDescriptor, AddressMode, TextureConfigureDescriptor } from '../types';
@@ -101,10 +102,14 @@ export class WebGL2Device implements Device {
      */
     private readonly _pending = new Map<string, Map<string, { shader: Shader; submitAt: number; readyAt?: number }>>();
 
+    /** Per-render-pass GPU timing — see {@link setTimestampCollection}. */
+    private readonly _timer: WebGL2PassTimer;
+
     constructor(context: WebGL2RenderingContext) {
         this.capabilities = detectWebGL2Capabilities(context);
         this._parallelCompile = parallelShaderCompileExtension(context);
         this._canvas = context.canvas;
+        this._timer = new WebGL2PassTimer(context);
     }
 
     /** Returns the concrete backend buffer, since callers inside the WebGL2 half need its `handle`. */
@@ -236,6 +241,8 @@ export class WebGL2Device implements Device {
      * `clearValue` clears to (0, 0, 0, 1) (depth 1); `storeOp` is recorded but ignored.
      */
     public beginRenderPass(target: WebGL2RenderTarget, descriptor: RenderPassDescriptor): void {
+        // First, so the load ops below are inside the timed span as they are in WebGPU's.
+        this._timer.beginPass(descriptor.label ?? 'render-pass');
         target.bind();
 
         // Render into ONE layer of an array depth target, by re-pointing the depth attachment.
@@ -612,11 +619,16 @@ export class WebGL2Device implements Device {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
-    /** No-op: WebGL2 timing wraps renderer-defined SCOPES and does not go through the RHI. */
-    public setTimestampCollection(_enabled: boolean, _sink: (label: string, ms: number) => void): void {}
+    /**
+     * Time every render pass with `EXT_disjoint_timer_query_webgl2`, reported by its descriptor label —
+     * the same contract as WebGPU's timestamp queries (see WebGL2PassTimer).
+     */
+    public setTimestampCollection(enabled: boolean, sink: (label: string, ms: number) => void): void {
+        this._timer.setEnabled(enabled, sink);
+    }
 
-    /** No-op. See {@link setTimestampCollection}. */
-    public collectTimestamps(): void {}
+    /** See {@link Device.collectTimestamps}. Never waits on the GPU. */
+    public collectTimestamps(): void { this._timer.collect(); }
 
     /** See {@link Device.drainDebugErrors}: up to eight `getError` codes, the queue GL keeps. */
     public drainDebugErrors(): number[] {
@@ -632,10 +644,14 @@ export class WebGL2Device implements Device {
     /** WebGL2 issues everything as it is recorded, so `finish()` is a no-op — see WebGL2CommandEncoder. */
     public createCommandEncoder(_label?: string): WebGL2CommandEncoder {
         return new WebGL2CommandEncoder((target, descriptor) =>
-            this.beginRenderPass(target as WebGL2RenderTarget, descriptor));
+            this.beginRenderPass(target as WebGL2RenderTarget, descriptor), this._endPass);
     }
 
+    /** Every render pass encoder calls this from `end()`: the close of its timed span. */
+    private readonly _endPass = (): void => this._timer.endPass();
+
     public destroy(): void {
+        this._timer.destroy();
         for (const byFragment of this._pending.values())
             for (const entry of byFragment.values()) entry.shader.dispose();
         this._pending.clear();

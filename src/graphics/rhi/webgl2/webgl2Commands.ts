@@ -276,8 +276,12 @@ export class WebGL2BindGroup implements BindGroup {
 // ------------------------------------------------------------------------------------------------
 
 export class WebGL2RenderPassEncoder implements RenderPassEncoder {
-    /** The pass's occlusion queries, from its descriptor. Immediate mode: begin/end issue at once. */
-    constructor(private readonly _queries: WebGL2OcclusionQuerySet | null = null) {}
+    /**
+     * The pass's occlusion queries, from its descriptor (immediate mode: begin/end issue at once), and
+     * what `end()` tells the device — the close of the pass's timed span.
+     */
+    constructor(private readonly _queries: WebGL2OcclusionQuerySet | null = null,
+                private readonly _onEnd: (() => void) | null = null) {}
 
     private _pipeline: WebGL2RenderPipeline | null = null;
     /** Next free texture unit. Groups bind consecutively from 0, in the order they are set. */
@@ -376,6 +380,7 @@ export class WebGL2RenderPassEncoder implements RenderPassEncoder {
         if (this._ended) return;
         this._ended = true;
         this._pipeline?.module.shader.flushUniformBlocks();
+        this._onEnd?.();
     }
 }
 
@@ -384,11 +389,13 @@ export class WebGL2RenderPassEncoder implements RenderPassEncoder {
  * still be written for the deferred model.
  */
 export class WebGL2CommandEncoder implements CommandEncoder {
-    constructor(private readonly _beginPass: (target: RenderTarget, descriptor: any) => void) {}
+    constructor(private readonly _beginPass: (target: RenderTarget, descriptor: any) => void,
+                private readonly _endPass: (() => void) | null = null) {}
 
     public beginRenderPass(target: RenderTarget, descriptor: any): RenderPassEncoder {
         this._beginPass(target, descriptor);
-        return new WebGL2RenderPassEncoder((descriptor?.occlusionQuerySet as WebGL2OcclusionQuerySet | undefined) ?? null);
+        return new WebGL2RenderPassEncoder((descriptor?.occlusionQuerySet as WebGL2OcclusionQuerySet | undefined) ?? null,
+                                           this._endPass);
     }
 
     /** Always throws: WebGL2 has no compute stage. Check `capabilities.hasCompute` first. */

@@ -320,8 +320,9 @@ export interface Device {
     readBuffer(buffer: Buffer, offset: number, size: number): Promise<ArrayBuffer>;
 
     /**
-     * Switch per-pass GPU timing on or off. `sink` fires once per timed pass with its label and
-     * elapsed milliseconds, from {@link collectTimestamps} only. A no-op on WebGL2.
+     * Switch per-pass GPU timing on or off. `sink` fires once per timed render pass with its descriptor
+     * label and elapsed milliseconds, from {@link collectTimestamps} only. WebGPU uses timestamp
+     * queries, WebGL2 a timer query bracketing each pass; both need {@link DeviceCapabilities.hasTimestampQuery}.
      */
     setTimestampCollection(enabled: boolean, sink: (label: string, ms: number) => void): void;
 

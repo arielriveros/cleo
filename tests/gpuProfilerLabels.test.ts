@@ -11,7 +11,7 @@ import { rendererSource } from './helpers/rendererSource';
  * gpuProfiler.ts, so a pass boundary and a profiler scope are one thing rather than two lists that
  * drift apart" — and it was false when written: ~40 pass labels against 29 scopes. The docstring is
  * fixed; this file is what keeps the half of the claim that IS true from rotting, because
- * `PASS_LABEL_TO_SCOPE` is the thing WebGPU timings are attributed through and a stale key there is a
+ * `PASS_LABEL_TO_SCOPE` is the thing GPU pass timings are attributed through and a stale key there is a
  * silent hole in the readout rather than a build error.
  *
  * Source-text scanning rather than instrumentation, because the alternative is a live renderer: the
@@ -19,7 +19,9 @@ import { rendererSource } from './helpers/rendererSource';
  * branch that no headless run reaches.
  */
 
-const RENDERER = rendererSource();
+// The particle simulation records its own passes (particleRenderer.ts), inside the renderer's scope.
+const RENDERER = rendererSource() + '\n' +
+    readFileSync(join(__dirname, '..', 'src', 'graphics', 'particles', 'particleRenderer.ts'), 'utf-8').replace(/\r\n/g, '\n');
 
 /**
  * Every pass label renderer.ts passes as a literal.

@@ -12,7 +12,6 @@ import { BOUNDARY_ALLOWED, boundaryHits, boundaryOffenders } from './helpers/rhi
  */
 const MIGRATING: Readonly<Record<string, readonly string[]>> = {
     'src/core/scene/nodes/fluidVolumeNode.ts': ['backendName'],
-    'src/graphics/gpuProfiler.ts': ['gl', 'WebGLType', 'backendImport', 'backendName'],
     'src/graphics/particles/particleRenderer.ts': ['backendName'],
     'src/graphics/render/capture.ts': ['backendName'],
     'src/graphics/render/foliage.ts': ['backendName'],
