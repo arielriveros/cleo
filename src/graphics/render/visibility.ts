@@ -296,8 +296,7 @@ export class Visibility {
         const cube = this._sys.sky.iblCubeMesh;
         for (let i = 0; i < nodes.length; i++) {
             pass.beginOcclusionQuery(i);
-            // The cube is indexed, so `recordDraw` takes it; the fallback is the no-pass legacy path.
-            if (!this._passes.recordDraw(pass, cube, 0, 0, -1, records[i])) cube.draw();
+            this._passes.recordDraw(pass, cube, 0, 0, -1, records[i]);
             pass.endOcclusionQuery();
         }
         pass.end();

@@ -12,11 +12,7 @@ import { BOUNDARY_ALLOWED, boundaryHits, boundaryOffenders } from './helpers/rhi
  */
 const MIGRATING: Readonly<Record<string, readonly string[]>> = {
     'src/core/scene/nodes/fluidVolumeNode.ts': ['backendName'],
-    'src/graphics/cubeFramebuffer.ts': ['glDevice', 'backendImport', 'backendName'],
-    'src/graphics/framebuffer.ts': ['glDevice', 'backendImport', 'backendName'],
     'src/graphics/gpuProfiler.ts': ['gl', 'WebGLType', 'backendImport', 'backendName'],
-    'src/graphics/layeredDepthFramebuffer.ts': ['glDevice', 'backendImport', 'backendName'],
-    'src/graphics/mesh.ts': ['gl', 'GLState', 'glDevice', 'WebGLType', 'backendImport', 'backendName'],
     'src/graphics/particles/particleRenderer.ts': ['backendName'],
     'src/graphics/render/capture.ts': ['GLState', 'backendName', 'backendImport'],
     'src/graphics/render/clouds.ts': ['gl', 'GLState', 'backendImport'],
@@ -26,14 +22,13 @@ const MIGRATING: Readonly<Record<string, readonly string[]>> = {
     'src/graphics/render/foliage.ts': ['backendName'],
     'src/graphics/render/forwardPass.ts': ['GLState', 'backendImport'],
     'src/graphics/render/lighting.ts': ['GLState', 'backendName', 'backendImport'],
-    'src/graphics/render/materialBinder.ts': ['GLState', 'backendImport'],
     'src/graphics/render/particlePasses.ts': ['GLState', 'backendImport'],
     'src/graphics/render/passEncoder.ts': ['gl', 'GLState', 'backendImport'],
     'src/graphics/render/pipelineCache.ts': ['backendName'],
     'src/graphics/render/postEffects.ts': ['GLState', 'backendImport'],
     'src/graphics/render/shadows.ts': ['GLState', 'backendName', 'backendImport'],
     'src/graphics/render/sky.ts': ['gl', 'GLState', 'backendName', 'backendImport'],
-    'src/graphics/render/sprites2d.ts': ['gl', 'GLState', 'backendImport'],
+    'src/graphics/render/sprites2d.ts': ['GLState', 'backendImport'],
     'src/graphics/render/ssil.ts': ['GLState', 'backendImport'],
     'src/graphics/render/stats.ts': ['gl', 'backendImport'],
     'src/graphics/render/temporal.ts': ['GLState', 'backendImport'],
@@ -42,8 +37,6 @@ const MIGRATING: Readonly<Record<string, readonly string[]>> = {
     'src/graphics/renderer.ts': ['GLState', 'backendImport', 'backendName'],
     'src/graphics/systems/customShaders.ts': ['backendImport', 'backendName'],
     'src/graphics/systems/texturePacker.ts': ['backendName'],
-    'src/graphics/texture.ts': ['backendImport', 'backendName'],
-    'src/graphics/tilemap/tileMesh.ts': ['gl', 'GLState', 'glDevice', 'WebGLType', 'backendImport', 'backendName'],
 };
 
 const ROOTS = ['src', 'applications/app-kit/src', 'applications/editor/src', 'applications/creator/src'];

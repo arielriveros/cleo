@@ -128,12 +128,11 @@ export class FoliagePasses {
     public foliageDensityFalloff: number = FOLIAGE_DENSITY_FALLOFF;
 
     /**
-     * Bring every foliage layer's GPU state up to date. Must run BEFORE the shadow pass. The VAO is
-     * ALWAYS initialized from `blinn_phongGeometry`'s attributes — a second set would re-stride the mesh.
+     * Bring every foliage layer's GPU state up to date. Must run BEFORE the shadow pass. Every foliage
+     * mesh is packed with `blinn_phongGeometry`'s five attributes, whichever program later draws it —
+     * which is why its pipelines say `builtFor: 'blinn_phongGeometry'`.
      */
     public ensureFoliageUploaded(scene: Scene): void {
-        const defaultAttrs = this._shaderManager.getShader('blinn_phongGeometry').attributes;
-
         // Buffers of layers disposed with their terrain. Drained ahead of the landscape loop — no live
         // landscape can reach them per-layer.
         for (const buf of collectOrphanedFoliageBuffers()) buf.destroy();
@@ -148,7 +147,6 @@ export class FoliagePasses {
                     const initModel = (model: Model) => {
                         const g = model.geometry;
                         model.mesh.create(g.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']), g.vertexCount, g.indices);
-                        model.mesh.initializeVAO(defaultAttrs);
                     };
                     for (const level of layer.levels) for (const m of level.models) initModel(m);
                     if (layer.billboardModel) initModel(layer.billboardModel);
@@ -483,11 +481,7 @@ export class FoliagePasses {
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [albedo]));
         for (const batch of chunks) {
             if (batch.count === 0 || !batch.buffer) continue;
-            if (!this.recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch)) {
-                model.mesh.setupInstanceMatrixBuffer(batch.buffer, 5);
-                model.mesh.drawInstanced(batch.count);
-                model.mesh.teardownInstanceMatrixBuffer(5);
-            }
+            this.recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch);
             frameStats.foliageShadowDraws++;
         }
     }
@@ -724,13 +718,7 @@ export class FoliagePasses {
 
                     for (const batch of chunks) {
                         if (batch.count === 0 || !batch.buffer) continue;
-                        if (!this.recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch)) {
-                            model.mesh.setupInstanceMatrixBuffer(batch.buffer, 5);
-                            model.mesh.drawInstanced(batch.count);
-                            // Locations 5-8 left at divisor 1 corrupt the next NON-instanced draw of
-                            // the same mesh, which in this pass is the very next model.
-                            model.mesh.teardownInstanceMatrixBuffer(5);
-                        }
+                        this.recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch);
                         frameStats.foliageShadowDraws++;
                     }
                 }
@@ -956,13 +944,12 @@ export class FoliagePasses {
                         this._materials.applyProperties(model.material);
                         if (sway) this._setFoliageWeather(wind!);
                         pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, model.material));
-                        let all = true;
                         for (const batch of chunks) {
                             if (batch.count === 0 || !batch.buffer) continue;
-                            all = this.recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch) && all;
+                            this.recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch);
                             frameStats.foliageDraws++;
                         }
-                        if (all) depthWritten.add(slot * 4096 + layer.levels[slot].models.indexOf(model));
+                        depthWritten.add(slot * 4096 + layer.levels[slot].models.indexOf(model));
                     }
                 }
 
@@ -1029,11 +1016,7 @@ export class FoliagePasses {
                         // Every chunk shares the binds above; only the instance buffer differs.
                         for (const batch of chunks) {
                             if (batch.count === 0 || !batch.buffer) continue;
-                            if (!this.recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch)) {
-                                model.mesh.setupInstanceMatrixBuffer(batch.buffer, 5);
-                                model.mesh.drawInstanced(batch.count);
-                                model.mesh.teardownInstanceMatrixBuffer(5);
-                            }
+                            this.recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch);
                             frameStats.foliageDraws++;
                         }
                     }
@@ -1086,11 +1069,7 @@ export class FoliagePasses {
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [albedo, normal]));
         for (const batch of chunks) {
             if (batch.count === 0 || !batch.buffer) continue;
-            if (!this.recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch)) {
-                model.mesh.setupInstanceMatrixBuffer(batch.buffer, 5);
-                model.mesh.drawInstanced(batch.count);
-                model.mesh.teardownInstanceMatrixBuffer(5);
-            }
+            this.recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch);
             frameStats.foliageDraws++;
         }
     }
@@ -1201,28 +1180,22 @@ export class FoliagePasses {
     // `builtFor: 'blinn_phongGeometry'` — every foliage mesh is initialised from its five attributes,
     // whatever program later draws it.
     public recordFoliageDraw(pass: RenderPassEncoder, mesh: Mesh,
-                               instances: RhiBuffer, count: number, batch?: FoliageBatch): boolean {
-        // LODs are NOT a reason to fall back: a level is an alternate index buffer over the same
-        // vertices, and `activeIndexBuffer` names the selected one. Only `isAnimated` needs the
-        // legacy path.
+                               instances: RhiBuffer, count: number, batch?: FoliageBatch): void {
+        // LODs are NOT a special case: a level is an alternate index buffer over the same vertices,
+        // and `activeIndexBuffer` names the selected one.
         const indices = mesh.activeIndexBuffer;
         const indirect = (batch as GpuFoliageSegment | undefined)?.indirect;
-        // A GPU-culled segment never falls back: its instance count exists only on the GPU.
+        // A GPU-culled segment's instance count exists only on the GPU, so it needs an indexed mesh.
         if (indirect) {
             const offset = indirect.offsets.get(mesh);
-            if (offset === undefined || mesh.isAnimated || !indices) return true;
+            if (offset === undefined || mesh.isAnimated || !indices) return;
             pass.setVertexBuffer(0, mesh.vertexBuffer);
             pass.setVertexBuffer(1, instances, indirect.vertexOffset);
             pass.setIndexBuffer(indices, mesh.activeIndexFormat);
             pass.drawIndexedIndirect(indirect.args, offset);
-            return true;
+            return;
         }
-        if (mesh.isAnimated || !indices) return false;
-        pass.setVertexBuffer(0, mesh.vertexBuffer);
-        pass.setVertexBuffer(1, instances);
-        pass.setIndexBuffer(indices, mesh.activeIndexFormat);
-        pass.drawIndexed(mesh.activeIndexCount, count);
-        return true;
+        this._passes.recordInstancedDraw(pass, mesh, instances, count);
     }
 
     /**

@@ -19,29 +19,8 @@ export function applyVertexLayout(layout: VertexBufferLayout, buffer: WebGLBuffe
             gl.vertexAttribPointer(attribute.shaderLocation, size, type, normalized,
                                    layout.arrayStride, attribute.offset);
         }
-        // A divisor is VAO state and it is sticky — see {@link clearVertexLayout}.
+        // A divisor is VAO state and sticky: the cached VAOs are keyed by pipeline AND buffers, so an
+        // instanced layout never shares a VAO with a non-instanced draw.
         if (layout.stepMode === 'instance') gl.vertexAttribDivisor(attribute.shaderLocation, 1);
     }
-}
-
-/**
- * Undo {@link applyVertexLayout} for an instanced layout. Required: a divisor outlives the draw, and
- * left set on a shared mesh VAO it corrupts the next non-instanced draw of that mesh.
- */
-export function clearVertexLayout(layout: VertexBufferLayout): void {
-    for (const attribute of layout.attributes) {
-        if (layout.stepMode === 'instance') gl.vertexAttribDivisor(attribute.shaderLocation, 0);
-        gl.disableVertexAttribArray(attribute.shaderLocation);
-    }
-}
-
-/**
- * Bind one attribute from a linked program's REFLECTED layout, for attributes the declared layouts do
- * not describe. WebGL2-only: `layout.type` is a raw GL enum with no `VertexFormat` to name it.
- */
-export function applyReflectedAttribute(
-    location: number, layout: { size: number; type: number; stride: number; offset: number },
-): void {
-    gl.enableVertexAttribArray(location);
-    gl.vertexAttribPointer(location, layout.size, layout.type, false, layout.stride, layout.offset);
 }

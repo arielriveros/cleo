@@ -725,7 +725,6 @@ export class ShadowPasses {
         const upPipeline = this._pipelines.fullscreen('screen', ScreenProgram, ADDITIVE_BLEND);
         upPass.setPipeline(upPipeline);
         upPass.setBindGroup(0, this._bindGroups.textureGroup(upPipeline, 0, [scratch.colors[0]]));
-        scratch.colors[0].bind(0);
         this._passes.drawFullscreen(upPass);
         this._passes.endFullscreenPass(upPass);
 
@@ -812,14 +811,8 @@ export class ShadowPasses {
                 modelSet = true;
             }
 
-            if (state.skinned) {
-                // Initialize the animated VAO from the program ABOUT TO DRAW IT, never from the node's
-                // geometry shader: the unlit Basic family has no normal/tangent/bitangent, so its bone
-                // attributes sit at locations 2/3 where every lit family puts them at 5/6.
-                (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(state.shaderType).attributes);
-                // The palette rides in the object table for a program that reads it (the caster's record).
-                if (!objectData) this._sys.modelDraw.uploadBoneMatrices('shadowMapSkinned', node);
-            }
+            // The palette rides in the object table for a program that reads it (the caster's record).
+            if (state.skinned && !objectData) this._sys.modelDraw.uploadBoneMatrices('shadowMapSkinned', node);
 
             // Depth-only, so no material is bound — a merged model normally casts its whole buffer in
             // ONE call. Only when some submesh opts out of shadows, or needs its own cutout texture,
@@ -844,22 +837,18 @@ export class ShadowPasses {
                         [cut ? cut.texture : this._bindGroups.fallbackTexture]));
                     const start = submeshes ? submeshes[i].start : 0;
                     const drawCount = submeshes ? submeshes[i].count : 0;
-                    if (this._passes.recordDraw(pass, model.mesh, start, drawCount, -1, row)) continue;
-                    if (submeshes) model.mesh.drawRange(start, drawCount, 'triangle-list');
-                    else model.mesh.draw('triangle-list');
+                    this._passes.recordDraw(pass, model.mesh, start, drawCount, -1, row);
                 }
             } else if (record.mesh) {
                 this._passes.recordDraw(pass, record.mesh, 0, 0, -1, row);
             } else if (state.wholeBuffer) {
-                if (!this._passes.recordDraw(pass, model.mesh, 0, 0, this._shadowLodFor(record), row))
-                    model.mesh.draw('triangle-list');
+                this._passes.recordDraw(pass, model.mesh, 0, 0, this._shadowLodFor(record), row);
             } else {
                 const submeshes = model.submeshes;
                 for (let i = 0; i < submeshes.length; i++) {
                     const caster = materials[i] ?? materials[0];   // see ModelDraw.drawSubmeshes: never index past the array
                     if (!caster.config.castShadow || caster.config.wireframe) continue;
-                    if (this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count, -1, row)) continue;
-                    model.mesh.drawRange(submeshes[i].start, submeshes[i].count, 'triangle-list');
+                    this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count, -1, row);
                 }
             }
         }

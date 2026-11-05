@@ -36,7 +36,6 @@ export class SpriteNode extends Node {
 
     public initializeSprite(): void {
         const shader = ShaderManager.Instance.getShader(this._sprite.material.type);
-        this._sprite.mesh.initializeVAO(shader.attributes);
 
         const attributes = [];
         for (const attr of shader.attributes) {

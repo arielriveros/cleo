@@ -667,7 +667,6 @@ export class Renderer {
         // clip space agrees. Settling it here means no pass anywhere else needs a flip.
         const v0 = device.backend === 'webgl2' ? 0 : 1;   // the V that belongs with clip-space y = -1
         const v1 = 1 - v0;
-        this._passes.screenQuad.initializeVAO(this._shaderManager.getShader('screen').attributes);
         this._passes.screenQuad.create([-1, -1, 0, 0, v0,  1, -1, 0, 1, v0,
                                   1,  1, 0, 1, v1, -1,  1, 0, 0, v1], 12, [0, 1, 2, 0, 2, 3]);
 

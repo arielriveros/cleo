@@ -2,11 +2,9 @@ import { bytesToDataUrl } from "../core/base64";
 import { Logger } from "../core/logger";
 import { LogTally, plural } from "../core/logTally";
 import { resolveTextureFormat } from "./rhi/textureFormat";
-import { glTextureFormat, glTextureTarget, glAddressMode, glMinFilter } from "./rhi/webgl2/glEnums";
 import { device } from "./rhi/deviceHandle";
 import type { TextureView as RhiTextureView } from './rhi/resources';
 import type { CommandEncoder } from './rhi/device';
-import { WebGL2Texture } from "./rhi/webgl2/webgl2Device";
 import type { Texture as RhiTexture } from "./rhi/resources";
 import { TextureUsage } from "./rhi/types";
 import type { TextureFormat, TextureDimension, AddressMode, TextureConfigureDescriptor } from "./rhi/types";
@@ -121,8 +119,7 @@ const ADDRESS_MODES: Readonly<Record<'clamp' | 'repeat' | 'mirror', AddressMode>
 };
 
 export class Texture {
-    // The device-owned texture, typed by the RHI interface. `bind`/`unbind` are the only WebGL2-only
-    // operations, and they cast at their call sites.
+    // The device-owned texture, typed by the RHI interface.
     private readonly _gpu: RhiTexture;
     private _width: number = 0;
     private _height: number = 0;
@@ -149,13 +146,7 @@ export class Texture {
     private _precision: 'low' | 'high';
     private _addressMode: AddressMode;
     private _mipMapFilter: 'nearest' | 'linear' = 'linear';
-    private _target: number;
-    private _internalFormat: number;
     private _mipMap: boolean;
-    private _format: number;
-    private _type: number;
-    // Unit this texture was last bound to, so `unbind()` releases that unit rather than assuming 0.
-    private _boundSlot: number = 0;
     // Definite-assignment: written by the constructor, immediately below.
     private _resolvedFormat!: TextureFormat;
     private _downgraded: boolean = false;
@@ -170,7 +161,6 @@ export class Texture {
                      : options?.target === 'texture3D' ? '3d'
                      : options?.target === 'texture2DArray' ? '2d-array'
                      : '2d';
-        this._target = glTextureTarget(dimension);
 
         // `wrapping` is the both-axes shorthand every existing caller passes; the per-axis fields
         // override it. `_addressMode` stays the U axis, which is what the legacy `config` getter reports.
@@ -220,10 +210,6 @@ export class Texture {
                       | TextureUsage.RENDER_ATTACHMENT | TextureUsage.COPY_SRC,
         });
 
-        const triple = glTextureFormat(resolved.format);
-        this._internalFormat = triple.internalFormat;
-        this._format = triple.format;
-        this._type = triple.type;
         this._channels = this._usage === 'depth' ? 1 : (options?.channels === 'r' ? 1 : 4);
 
         const filter = options?.mipMapFilter === 'nearest' ? 'nearest' : 'linear';
@@ -272,22 +258,9 @@ export class Texture {
      */
     public get downgraded(): boolean { return this._downgraded; }
 
-    /** Bind for sampling at a texture UNIT. WebGL2 only — WebGPU binds through bind groups. */
-    public bind(slot: number = 0): void {
-        if (device.backend !== 'webgl2') return;
-        (this._gpu as WebGL2Texture).bind(slot);
-    }
-
-    /** Release whichever unit this texture was last bound to. A no-op off WebGL2. */
-    public unbind(): void {
-        if (device.backend !== 'webgl2') return;
-        (this._gpu as WebGL2Texture).unbind();
-    }
-
-    /** Close an upload: record the dimensions it established, then release the upload unit. */
+    /** Close an upload: record the dimensions it established. (The device releases its upload unit.) */
     private _finishUpload(): void {
         this._syncGpuSize();
-        this.unbind();
     }
 
     public create(data: HTMLImageElement | CubemapFaces | null, width: number = 0, height: number = 0): void {
@@ -334,7 +307,6 @@ export class Texture {
     /** Upload a sub-rectangle of RGBA bytes (row-major, tightly packed) into an existing data texture. */
     public updateRegion(x: number, y: number, width: number, height: number, data: Uint8Array): void {
         this._gpu.uploadRegion(x, y, width, height, data);
-        this.unbind();
     }
 
     public updateImg(data: HTMLImageElement | null): void {
@@ -447,7 +419,6 @@ export class Texture {
      */
     public writeLayer(layer: number, x: number, y: number, width: number, height: number, data: Uint8Array): void {
         device.writeTexture(this._gpu, data, width, height, 0, layer, x, y);
-        this.unbind();
     }
 
     /** ONE layer of mip 0 as a render attachment — what a bake draws a layer into. */
@@ -467,7 +438,6 @@ export class Texture {
     /** Toggle hardware depth comparison on a depth array/2D target. */
     public setDepthCompare(enabled: boolean): void {
         this._gpu.setCompareMode(enabled);
-        this.unbind();
     }
 
     /**
@@ -476,7 +446,6 @@ export class Texture {
      */
     public generateMipmaps(encoder?: CommandEncoder): void {
         this._gpu.generateMipmaps(encoder);
-        this.unbind();
     }
 
     public delete(): void {

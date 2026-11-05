@@ -133,7 +133,6 @@ export class SkyPasses {
 
         const cubeGeo = Geometry.Cube();
         this.iblCubeMesh = new Mesh();
-        this.iblCubeMesh.initializeVAO(this._shaderManager.getShader('irradiance').attributes);
         this.iblCubeMesh.create(cubeGeo.getData(['position']), cubeGeo.indices.length, cubeGeo.indices);
 
         this.cubeFBO = new CubeFramebuffer();
@@ -188,7 +187,7 @@ export class SkyPasses {
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [sourceCube]));
             this._shaderManager.setUniform('u_view', this._iblFaceViews[face]);
-            if (!this._passes.recordDraw(pass, this.iblCubeMesh, 0, 0)) this.iblCubeMesh.draw();
+            this._passes.recordDraw(pass, this.iblCubeMesh, 0, 0);
             this._passes.endFullscreenPass(pass);
         }
     }
@@ -606,7 +605,7 @@ export class SkyPasses {
         this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(proj));
         this._shaderManager.setUniform('u_linearInput', linearInput);
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [cubemap]));
-        if (!this._passes.recordDraw(pass, mesh, 0, 0)) mesh.draw();
+        this._passes.recordDraw(pass, mesh, 0, 0);
     }
 
     /**

@@ -248,7 +248,7 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['motionBlur',                   MotionBlurGatherProgram],
         // Per-object velocity, drawn over the reprojection buffer. Three variants for the three
         // skinned/unskinned vertex layouts — each declares the SAME attributes as the colour
-        // program of its family, so `AnimatedModel.initializeVAO` finds the layout it already built.
+        // program of its family.
         ['objectVelocity',               ObjectVelocityProgram],
         ['objectVelocitySkinned',        ObjectVelocitySkinnedProgram],
         ['objectVelocityBasicSkinned',   ObjectVelocityBasicSkinnedProgram],

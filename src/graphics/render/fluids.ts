@@ -169,7 +169,7 @@ export class FluidVolumePasses {
                 node.previousVolume ?? node.volume!, node.occupancy ?? node.volume!,
                 node.detailA ?? node.volume!, node.detailB ?? node.volume!,
             ]));
-            if (!this._passes.recordDraw(trace, this._sys.sky.iblCubeMesh, 0, 0)) this._sys.sky.iblCubeMesh.draw();
+            this._passes.recordDraw(trace, this._sys.sky.iblCubeMesh, 0, 0);
         }
         this._passes.endFullscreenPass(trace);
         GLState.blend(false);

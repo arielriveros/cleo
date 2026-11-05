@@ -75,8 +75,6 @@ export class WebGL2Device implements Device {
      * buffer id (-1 for none): numbers all the way, where the general key is a string built per draw.
      */
     private readonly _singleVertexArrays = new Map<WebGL2RenderPipeline, Map<number, Map<number, WebGLVertexArrayObject>>>();
-    /** VAOs a caller owns and binds itself — Mesh and TileMesh. See createVertexArray. */
-    private readonly _ownedVertexArrays = new Set<WebGLVertexArrayObject>();
     /** Deduped render targets, keyed by their attachment set. See createRenderTarget. */
     private readonly _renderTargets = new Map<string, WebGL2RenderTarget>();
     /** Attachment shapes already found complete (see {@link createRenderTarget}). */
@@ -614,31 +612,6 @@ export class WebGL2Device implements Device {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
-    // -- vertex state owned by a caller ------------------------------------------------------------
-
-    /**
-     * A vertex array object owned by the caller — what `Mesh` and `TileMesh` bind themselves, as
-     * opposed to the ones {@link vertexArrayFor} builds. Tracked, so `destroy()` releases it.
-     */
-    public createVertexArray(): WebGLVertexArrayObject {
-        const vao = gl.createVertexArray() as WebGLVertexArrayObject;
-        this._ownedVertexArrays.add(vao);
-        return vao;
-    }
-
-    public deleteVertexArray(vao: WebGLVertexArrayObject): void {
-        this._ownedVertexArrays.delete(vao);
-        gl.deleteVertexArray(vao);
-    }
-
-    /**
-     * Point the CURRENT VAO's element binding at `buffer` — VAO state, not global, which is how a mesh
-     * selects one of several LOD index buffers.
-     */
-    public bindIndexBuffer(buffer: WebGL2Buffer): void {
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer.handle);
-    }
-
     /** No-op: WebGL2 timing wraps renderer-defined SCOPES and does not go through the RHI. */
     public setTimestampCollection(_enabled: boolean, _sink: (label: string, ms: number) => void): void {}
 
@@ -677,8 +650,6 @@ export class WebGL2Device implements Device {
             for (const byIndex of byVertex.values())
                 for (const vao of byIndex.values()) gl.deleteVertexArray(vao);
         this._singleVertexArrays.clear();
-        for (const vao of this._ownedVertexArrays) gl.deleteVertexArray(vao);
-        this._ownedVertexArrays.clear();
     }
 }
 

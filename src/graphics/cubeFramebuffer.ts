@@ -1,7 +1,5 @@
-import { glDevice } from './rhi/webgl2/webgl2Device';
 import { device } from './rhi/deviceHandle';
 import type { RenderTarget } from './rhi/resources';
-import type { WebGL2RenderTarget } from './rhi/webgl2/webgl2Commands';
 import { Texture } from './texture';
 
 /**
@@ -25,19 +23,6 @@ export class CubeFramebuffer {
     public targetFor(cube: Texture, face: number, mip: number = 0,
                      withDepth: boolean = false, size: number = 0): RenderTarget {
         return this._target(cube, face, mip, withDepth, size);
-    }
-
-    /** Bind a cube face/mip as colour attachment 0. WebGL2 only; a no-op on other backends. */
-    public bindFace(cube: Texture, face: number, mip: number = 0, withDepth: boolean = false, size: number = 0): void {
-        if (device.backend !== 'webgl2') return;
-        (this._target(cube, face, mip, withDepth, size) as WebGL2RenderTarget).bind(false);
-    }
-
-    /** Hand the draw target back to the canvas. The viewport is the caller's. */
-    public unbind(): void {
-        if (device.backend !== 'webgl2') return;
-
-        glDevice().getCurrentSurfaceTarget().bind(false);
     }
 
     private _target(cube: Texture, face: number, mip: number, withDepth: boolean, size: number): RenderTarget {

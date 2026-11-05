@@ -274,7 +274,6 @@ export class SsilPasses {
         this._passes.drawFullscreenAndEnd(pass);
         this.ssilRadianceFrame = this._view.frameIndex;
         // Put back what the overlay passes below expect, as the TAA resolve does.
-        this._targets.scene.bind();
         GLState.blend(false);
         GLState.depthTest(true);
         GLState.depthMask(true);

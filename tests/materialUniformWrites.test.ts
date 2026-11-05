@@ -66,10 +66,10 @@ describe('material uniform writes go through one place', () => {
     });
 
     it('every draw path that sets a pipeline also applies the material properties', () => {
-        // A cheap structural proxy: the helper must be reached from more than the legacy fallback.
-        // Six inline loops were replaced; fewer callers than that means one was dropped, not refactored.
+        // A cheap structural proxy. Six inline loops were replaced; fewer callers than that means one
+        // was dropped, not refactored. (The immediate-mode `MaterialBinder.apply` that was a seventh is
+        // gone with the legacy draw paths.)
         const callers = (SRC.match(/this\.(?:_materials\.)?applyProperties\(/g) ?? []).length;
-        expect(callers, 'expected the 6 migrated call sites plus MaterialBinder.apply itself')
-            .toBeGreaterThanOrEqual(7);
+        expect(callers, 'expected the 6 migrated call sites').toBeGreaterThanOrEqual(6);
     });
 });

@@ -97,7 +97,7 @@ export class ForwardPass {
     /** How the forward draw binds materials; the depth, blend, path and reflection cube change per draw. */
     private readonly _drawState: MaterialDrawState = {
         targets: 1, depthStencil: DEPTH_WRITE, blend: undefined, customMode: 'forward', frameLighting: true,
-        terrainSelfShadow: false, viaRHI: false, envCube: null, memo: this._pipelineMemo,
+        terrainSelfShadow: false, envCube: null, memo: this._pipelineMemo,
     };
 
     // Node ids already warned about carrying a screen-space custom material on a mesh (once per node).
@@ -105,7 +105,6 @@ export class ForwardPass {
 
     /** Forward passes drawn on top of the deferred-lit scene: skybox, transparent models, sprites, editor overlays. */
     public renderForwardOverlay(scene: Scene, shadowLight: LightNode | null): void {
-        this._targets.scene.bind();
         GLState.depthTest(true);
         GLState.depthMask(true);
 
@@ -278,7 +277,6 @@ export class ForwardPass {
     public copySceneDepth(): void {
         this._passes.copyDepth(this._targets.scene.depth, this._targets.sceneDepth.depth,
                                this._host.renderWidth, this._host.renderHeight);
-        this._targets.scene.bind();
     }
 
     private _snapshotSceneColor(queue: readonly ModelNode[]): void {
@@ -287,11 +285,9 @@ export class ForwardPass {
         const fbo = this._targets.refraction = this._decals.decalTarget(this._targets.refraction, () => new Framebuffer({
             colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
         this._passes.copyColors([this._targets.scene.colors[0]], [fbo.colors[0]], this._host.renderWidth, this._host.renderHeight);
-        this._targets.scene.bind();
     }
 
     public renderScene(scene: Scene): void {
-        this._targets.scene.bind();
         this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
         // The frame's clear, as a PASS of its own: the sky below deliberately LOADS, and a thumbnail
         // skips the sky entirely while still needing the buffer cleared.
@@ -465,7 +461,7 @@ export class ForwardPass {
         // A custom material has no entry in the static table — its program is compiled at runtime —
         // but it does have a bind-group layout, derived from the same interface its prelude is
         // generated from. So it qualifies too, and builds its own pipeline in the callback below.
-        const viaRHI = !!pass && (!!reflection || shaderType.startsWith('custom:'));
+        if (!pass || (!reflection && !shaderType.startsWith('custom:'))) return;
         let envCube: Texture | null = null;
         // The program is bound here on BOTH paths: every setUniform below writes into whatever program is
         // current, and letting the pipeline do it would send the per-draw uniforms to the previous draw's.
@@ -485,11 +481,8 @@ export class ForwardPass {
             const cube = probeCube ?? this._view.scene.environmentMap;
             this._shaderManager.setUniform('u_useEnvMap', cube ? true : false);
             this._shaderManager.setUniform('u_envMapLinear', probeCube ? true : false);
-            // On the RHI path the cube is a group 0 entry and the backend picks its unit; binding it
-            // here as well would put the same texture on two units, one of which the allocator is free
-            // to hand to something else.
-            if (viaRHI) envCube = cube ?? null;
-            else cube?.bind(7);
+            // A group 0 entry: the material's bind group carries it.
+            envCube = cube ?? null;
         }
 
         frameStats.objects++;
@@ -501,16 +494,11 @@ export class ForwardPass {
         // Inform shaders about transparency state (only used by PBR shaders)
         this._shaderManager.setUniform('u_isTransparent', materialConfig.transparent);
 
-        // Control blending per material. On the RHI path this is pipeline state instead — set from the
-        // same `materialConfig.transparent`, so the two agree by construction.
-        if (!viaRHI) GLState.blend(materialConfig.transparent === true);
-
         // Set material uniforms + bind textures, once per submesh. Depth writes follow the caller's
         // state (opaque or transparent queue), not the material's.
         const state = this._drawState;
         state.depthStencil = this.forwardDepthWrite ? DEPTH_WRITE : DEPTH_TEST;
         state.blend = materialConfig.transparent === true ? DEFAULT_BLEND : undefined;
-        state.viaRHI = viaRHI;
         state.envCube = envCube;
         this._modelDraw.drawMaterials(pass, node, shaderType, reflection, isAnimatedModel, state);
         state.envCube = null;

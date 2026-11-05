@@ -1,8 +1,6 @@
-import { glDevice } from './rhi/webgl2/webgl2Device';
 import { device } from './rhi/deviceHandle';
 import type { RenderTarget } from './rhi/resources';
 import type { ColorAttachmentDescriptor } from './rhi/types';
-import type { WebGL2RenderTarget } from './rhi/webgl2/webgl2Commands';
 import { Texture, TextureConfig } from './texture';
 
 interface FrameBufferOptions {
@@ -63,20 +61,6 @@ export class Framebuffer {
 
         // Attaching, draw buffers and the completeness check all happen here.
         this.renderTarget;
-        return this;
-    }
-
-    /** Make this the current draw target, viewport included. WebGL2 only; a no-op elsewhere. */
-    public bind(): Framebuffer {
-        if (device.backend !== 'webgl2') return this;
-        (this.renderTarget as WebGL2RenderTarget).bind();
-        return this;
-    }
-
-    /** Hand the canvas back the draw target — the default framebuffer, at its own resolution. */
-    public unbind(): Framebuffer {
-        if (device.backend !== 'webgl2') return this;
-        glDevice().getCurrentSurfaceTarget().bind();
         return this;
     }
 

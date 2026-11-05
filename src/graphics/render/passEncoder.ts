@@ -6,7 +6,8 @@ import { gpuProfiler, type RenderPass } from '../gpuProfiler';
 import { cpuProfiler } from '../cpuProfiler';
 import type { Mesh } from '../mesh';
 import type { Texture } from '../texture';
-import type { RenderTarget } from '../rhi/resources';
+import type { Buffer, RenderTarget } from '../rhi/resources';
+import { Logger } from '../../core/logger';
 import type { CommandEncoder, RenderPassEncoder } from '../rhi/device';
 
 /** What PassEncoder reads from the renderer that owns it. */
@@ -54,15 +55,10 @@ export class PassEncoder {
         setViewportSize(width, height);
     }
 
-    /**
-     * Draw the shared screen quad, counted against the fill-rate stats. Use this rather than
-     * `screenQuad.draw()` for any screen-space pass. With a pass, the draw is RECORDED — on WebGPU a
-     * draw outside an encoder is not a draw.
-     */
-    public drawFullscreen(pass?: RenderPassEncoder): void {
+    /** Draw the shared screen quad into `pass`, counted against the fill-rate stats. */
+    public drawFullscreen(pass: RenderPassEncoder): void {
         countFullscreenPass();
-        if (pass && this.recordDraw(pass, this.screenQuad, 0, 0)) return;
-        this.screenQuad.draw();
+        this.recordDraw(pass, this.screenQuad, 0, 0);
     }
 
     /**
@@ -285,35 +281,62 @@ export class PassEncoder {
         cpuProfiler.endPass();
     }
 
-    // Record a mesh draw through the RHI. Returns false ONLY for a skinned mesh missing its bone
-    // buffers — everything else records, indexed or not, LOD levels and submesh ranges included.
-    // `lod` >= 0 draws that index level instead of the active one, for a whole-buffer draw only.
+    /**
+     * Record a mesh draw: indexed or not, LOD levels and submesh ranges included. `lod` >= 0 draws that
+     * index level instead of the active one, for a whole-buffer draw only. Every mesh draw in the
+     * renderer goes through here or {@link recordInstancedDraw} — there is no immediate-mode fallback.
+     */
     public recordDraw(pass: RenderPassEncoder, mesh: Mesh, firstIndex: number, indexCount: number,
-                        lod: number = -1, firstInstance: number = 0): boolean {
+                        lod: number = -1, firstInstance: number = 0): void {
         const level = lod >= 0 && indexCount === 0 && firstIndex === 0 && mesh.hasLods ? lod : -1;
         const indices = level >= 0 ? mesh.lodIndexBuffer(level) : mesh.activeIndexBuffer;
+        if (mesh.isAnimated && (!mesh.boneIndicesBuffer || !mesh.boneWeightsBuffer)) {
+            // `createAnimated` always allocates both, so this is a mesh mid-rebuild: skip, once said.
+            if (!PassEncoder._warnedBoneless) {
+                PassEncoder._warnedBoneless = true;
+                Logger.warn('A skinned mesh without bone buffers was skipped', 'Renderer');
+            }
+            return;
+        }
         pass.setVertexBuffer(0, mesh.vertexBuffer);
         if (mesh.isAnimated) {
             // Bone data rides in dedicated buffers rather than the interleaved vertex, so it is two
             // more slots — at the locations THIS program declares, which differ between the lit and
             // unlit families. See boneLayouts.
-            if (!mesh.boneIndicesBuffer || !mesh.boneWeightsBuffer) return false;
-            pass.setVertexBuffer(1, mesh.boneIndicesBuffer);
-            pass.setVertexBuffer(2, mesh.boneWeightsBuffer);
+            pass.setVertexBuffer(1, mesh.boneIndicesBuffer!);
+            pass.setVertexBuffer(2, mesh.boneWeightsBuffer!);
         }
-        // A mesh with no index buffer records an ARRAY draw rather than falling back;
-        // `firstIndex`/`indexCount` become the vertex range.
+        // A mesh with no index buffer records an ARRAY draw; `firstIndex`/`indexCount` become the
+        // vertex range. Nothing to rasterize is not a draw: an empty mesh reaches here from a node added
+        // THIS frame — the shadow pass precedes the geometry pass that builds it.
         if (!indices) {
-            // Nothing to rasterize is not a draw. An empty mesh reaches here from a node added THIS
-            // frame — the shadow pass precedes the geometry pass that builds it. Returns TRUE: the
-            // draw was handled, and the caller's fallback is a raw `gl` call.
             const count = indexCount > 0 ? indexCount : mesh.vertexCount;
             if (count > 0) pass.draw(count, 1, firstIndex, firstInstance);
-            return true;
+            return;
         }
         pass.setIndexBuffer(indices, level >= 0 ? mesh.lodIndexFormat(level) : mesh.activeIndexFormat);
         const count = indexCount > 0 ? indexCount : level >= 0 ? mesh.lodIndexCount(level) : mesh.activeIndexCount;
         if (count > 0) pass.drawIndexed(count, 1, firstIndex, 0, firstInstance);
-        return true;
+    }
+
+    private static _warnedBoneless = false;
+
+    /**
+     * Record `count` instances of `mesh`: its vertices in slot 0, the per-instance data (`instances`, from
+     * `instanceOffset` bytes) in slot 1. Indexed through the mesh's ACTIVE index level when it has one —
+     * an LOD level is an alternate index buffer over the same vertices — an array draw otherwise.
+     */
+    public recordInstancedDraw(pass: RenderPassEncoder, mesh: Mesh, instances: Buffer, count: number,
+                               instanceOffset: number = 0): void {
+        if (count <= 0) return;
+        pass.setVertexBuffer(0, mesh.vertexBuffer);
+        pass.setVertexBuffer(1, instances, instanceOffset);
+        const indices = mesh.activeIndexBuffer;
+        if (indices) {
+            pass.setIndexBuffer(indices, mesh.activeIndexFormat);
+            pass.drawIndexed(mesh.activeIndexCount, count);
+        } else if (mesh.vertexCount > 0) {
+            pass.draw(mesh.vertexCount, count);
+        }
     }
 }

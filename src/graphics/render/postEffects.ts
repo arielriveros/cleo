@@ -295,7 +295,7 @@ export class PostEffects {
         this._shaderManager.setUniform('u_sunUV', sun.uv);
         this._shaderManager.setUniform('u_sunVisible', sun.visible);
         this._shaderManager.setUniform('u_exposure', this._view.exposure); // lets a pass invert the final present resolve
-        this._materials.applyCustom(mat, true);   // u_time, u_viewPos + user VALUE uniforms only
+        this._materials.applyCustom(mat);   // u_time, u_viewPos + user VALUE uniforms only
         this._passes.drawFullscreenAndEnd(pass);
     }
 

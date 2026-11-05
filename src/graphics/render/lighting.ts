@@ -186,10 +186,8 @@ export class LightingPasses {
         for (const shaderName of this._forwardShaders()) {
             this._shaderManager.bind(shaderName);
             this._shaderManager.setUniform('u_useEnvMap', envCube ? true : false);
-            this._shaderManager.setUniform('u_envMap', 7);
             this._shaderManager.setUniform('u_envMapLinear', probeCube ? true : false);
         }
-        envCube?.bind(7);
     }
 
     private readonly _probeLobes: [number[], number[]] = [[1, 1], [1, 1]];

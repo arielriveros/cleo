@@ -108,9 +108,8 @@ describe('group 0 matches the renderer texture-unit table', () => {
         expect(bindings).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     });
 
-    it('puts the ramp second, on the unit _textureSlot gives it', () => {
-        // Group 0 is filled in reflection SOURCE order, and `_textureSlot` hands `rampMap` unit 1. The
-        // two only agree because the ramp is declared right after the base colour.
+    it('puts the ramp second, right after the base colour', () => {
+        // Group 0 is filled in reflection order, slot by slot (BindGroupCache.materialGroup).
         const textures = findResources(compose('cel.wgsl'))
             .filter((r: any) => r.group === 0 && r.kind === 'texture')
             .sort((a: any, b: any) => a.binding - b.binding)
@@ -140,17 +139,13 @@ describe('group 0 matches the renderer texture-unit table', () => {
 describe('the renderer knows where the ramp binds', () => {
     const renderer = () => rendererSource();
 
-    it('maps rampMap to texture unit 1', () => {
-        // `_textureSlot` falls through to unit 0, so an unmapped slot does not error — it binds OVER the
-        // base colour, and the ramp gradient becomes the surface's albedo.
-        expect(renderer()).toContain("case 'rampMap': return 1;");
-    });
-
-    it('does not list rampMap as a packer source slot', () => {
-        // `_SOURCE_SLOTS` is for authoring inputs the packer combines and the shader never binds
-        // directly. The ramp is bound directly; listing it here would skip it entirely.
-        const set = renderer().slice(renderer().indexOf('_SOURCE_SLOTS'));
-        expect(set.slice(0, set.indexOf(']'))).not.toContain('rampMap');
+    it('binds rampMap by its own name through the material bind group', () => {
+        // Group 0's texture slots are the reflection names with `u_material_` stripped, looked up on the
+        // material by that name — so `u_material_rampMap` reads the material's `rampMap`, nothing else.
+        // (The old unit table, where an unmapped slot fell through to unit 0 and bound OVER the base
+        // colour, went with the immediate-mode material binder.)
+        expect(renderer()).toMatch(/resource\.glslName\.replace\(\/\^u_material_\/, ''\)/);
+        expect(renderer()).toMatch(/const id = material\.textures\.get\(field\);/);
     });
 
     it('keeps cel out of the G-buffer and in the forward overlay, together', () => {
