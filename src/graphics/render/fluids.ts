@@ -190,8 +190,8 @@ export class FluidVolumePasses {
         // --- 2. Resolve ---
         let image = this._fluidTraceFBO!.colors[0];
         if (temporal) {
-            const prev = this._fluidHistory.read;
-            const pass = this._passes.beginFullscreenPass(this._fluidHistory.write.renderTarget, 'fluidVolumes.resolve', false, undefined, false);
+            const prev = this.fluidHistory.read;
+            const pass = this._passes.beginFullscreenPass(this.fluidHistory.write.renderTarget, 'fluidVolumes.resolve', false, undefined, false);
             this._fullscreen.bind(pass, 'fluidVolumeResolve', FluidVolumeResolveProgram, [
                 this._fluidTraceFBO!.colors[0], this._fluidTraceFBO!.colors[1], prev.colors[0],
             ]);
@@ -200,10 +200,10 @@ export class FluidVolumePasses {
             sm.setUniform('u_prevViewProj', this._projection.uvProducing(this._view.prevViewProj));
             // Moving or editing: lean on the new samples so nothing smears; still: accumulate.
             sm.setUniform('u_feedback', moving || lead.interacting ? 0.6 : 0.9);
-            sm.setUniform('u_historyValid', this._fluidHistory.valid && this._view.hasPrevViewProj ? 1 : 0);
+            sm.setUniform('u_historyValid', this.fluidHistory.valid && this._view.hasPrevViewProj ? 1 : 0);
             this._passes.drawFullscreenAndEnd(pass);
-            this._fluidHistory.swap();
-            image = this._fluidHistory.read.colors[0];
+            this.fluidHistory.swap();
+            image = this.fluidHistory.read.colors[0];
         }
 
         // --- 3. Composite ---
@@ -230,12 +230,12 @@ export class FluidVolumePasses {
         if (!this._fluidTraceFBO)
             this._fluidTraceFBO = new Framebuffer({ colorAttachments: 2, colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
         if (this._fluidTraceFBO.width !== w || this._fluidTraceFBO.height !== h) this._fluidTraceFBO.resize(w, h);
-        if (!temporal) { this._fluidHistory.invalidate(); return; }
-        this._fluidHistory.ensure(w, h);
+        if (!temporal) { this.fluidHistory.invalidate(); return; }
+        this.fluidHistory.ensure(w, h);
     }
 
     private _fluidTraceFBO: Framebuffer | null = null;
-    private readonly _fluidHistory = new TemporalHistory({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
+    public readonly fluidHistory = new TemporalHistory({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
 
     /** Element-wise closeness of two matrices: "the camera did not move this frame". */
     private static _matricesClose(a: mat4, b: mat4): boolean {

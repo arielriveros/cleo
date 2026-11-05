@@ -1419,11 +1419,12 @@ export class Renderer {
      * Drop any accumulated temporal history. Call on a camera cut, scene change, or anything else
      * that makes last frame's image meaningless — otherwise the accumulation buffer smears the old
      * view across the new one, for the ~16 frames it takes the clouds to refresh every Bayer slot and
-     * for as long as TAA keeps finding history to blend.
+     * for as long as TAA, or the smoke-and-fire volumes, keep finding history to blend.
      */
     public invalidateTemporalHistory(): void {
         this._clouds.cloudHistory.invalidate();
         this._temporal.taaHistory.invalidate();
+        this._fluids.fluidHistory.invalidate();
         this._ssil.ssilHistoryFrame = -1;
         this._ssil.ssilRadianceFrame = -1;
     }

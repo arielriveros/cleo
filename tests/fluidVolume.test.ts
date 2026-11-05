@@ -117,7 +117,7 @@ describe('the fluid volume pass', () => {
     it('drops the temporal history whenever its targets are resized', () => {
         const at = RENDERER.indexOf('private _ensureFluidTargets(');
         const body = RENDERER.slice(at, RENDERER.indexOf('\n    }\n', at));
-        expect(body).toContain('this._fluidHistory.ensure(w, h)');
+        expect(body).toContain('this.fluidHistory.ensure(w, h)');
         // The drop itself is TemporalHistory's, shared with the TAA, cloud and SSIL histories.
         const ensureAt = RENDERER.indexOf('public ensure(width: number, height: number): boolean {');
         const ensure = RENDERER.slice(ensureAt, RENDERER.indexOf('\n    }\n', ensureAt));
