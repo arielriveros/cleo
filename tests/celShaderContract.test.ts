@@ -155,7 +155,7 @@ describe('the renderer knows where the ramp binds', () => {
 
     it('keeps cel out of the G-buffer and in the forward overlay, together', () => {
         // These two must agree. Only the exclusion makes a cel mesh invisible; only the queue arm draws
-        // it twice — once as Cook-Torrance through `_geometryShaderFor`'s pbrGeometry default.
+        // it twice — once as Cook-Torrance through `GeometryPass._geometryShaderFor`'s pbrGeometry default.
         const src = renderer();
         expect(src).toMatch(/dtype === 'cel' \|\| dtype === 'celSkinned'/);
         expect(src).toMatch(/mat\.type === 'cel' \|\| mat\.type === 'celSkinned'/);

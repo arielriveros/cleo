@@ -104,7 +104,7 @@ describe('where the chrome passes draw', () => {
     });
 
     it('leaves the chrome out of the G-buffer and the depth snapshot', () => {
-        expect(bodyOf('_inGBuffer')).toContain('isEditorOnlyNode(node)');
+        expect(bodyOf('inGBuffer')).toContain('isEditorOnlyNode(node)');
     });
 
     it('never writes the depth attachment it borrows from the scene', () => {

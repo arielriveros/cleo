@@ -323,7 +323,7 @@ export const FORWARD_PROGRAMS: Record<string, { resources: readonly ShaderResour
     basicInstanced: BasicInstancedProgram,
 };
 
-/** WGSL reflection for the geometry programs, by the name `_geometryShaderFor` picks at draw time. */
+/** WGSL reflection for the geometry programs, by the name `GeometryPass._geometryShaderFor` picks at draw time. */
 export const GEOMETRY_PROGRAMS: Record<string, { resources: readonly ShaderResource[] }> = {
     pbrGeometry: GeometryPBRProgram,
     pbrGeometrySkinned: GeometryPBRSkinnedProgram,

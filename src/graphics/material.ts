@@ -649,7 +649,7 @@ enum MaterialType {
     BasicSkinned = 'basicSkinned',
     DefaultSkinned = 'blinn_phongSkinned',
     PBR = 'pbr',
-    // Forward-only, like Blinn-Phong: `Renderer._inGBuffer` excludes both, and the forward overlay draws
+    // Forward-only, like Blinn-Phong: `GeometryPass.inGBuffer` excludes both, and the forward overlay draws
     // them. A cel material CANNOT go through the deferred pass — the G-buffer carries no shading-model
     // id and the lighting pass is Cook-Torrance, so the bands and the rim would simply be lost.
     Cel = 'cel',

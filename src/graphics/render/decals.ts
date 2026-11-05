@@ -212,7 +212,7 @@ export class DecalPasses {
      * fullscreen resolve folds that into the G-buffer, reading a copy of it taken just before.
      *
      * Before SSAO and lighting, so both see the decal: its normal is shaded and occluded like any other.
-     * Deferred receivers only; see `_inGBuffer` for which materials those are.
+     * Deferred receivers only; see `GeometryPass.inGBuffer` for which materials those are.
      */
     public surfaceDecalPass(): void {
         const w = this._host.renderWidth, h = this._host.renderHeight;

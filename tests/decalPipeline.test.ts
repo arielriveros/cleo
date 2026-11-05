@@ -40,7 +40,7 @@ function blendState(name: string): string {
 describe('surface decals', () => {
     it('resolve into the G-buffer after it is drawn and before SSIL and lighting read it', () => {
         const body = methodBody('_renderDeferred');
-        const geometry = body.indexOf('this._geometryPass(scene)');
+        const geometry = body.indexOf('this._geometry.geometryPass(scene)');
         const decals = body.indexOf('this._decals.surfaceDecalPass()');
         const ssil = body.indexOf('this._ssil.ssilPass()');
         const lighting = body.indexOf('this._lighting.deferredLightingPass(');

@@ -1063,7 +1063,7 @@ export class ShadowPasses {
                 vertex: skinned ? 'model+skin' : 'model',
                 // The shadow programs declare only position, but the buffer under them was written for
                 // whatever material the node wears — 20 bytes for an unlit caster, 56 for a lit one.
-                builtFor: material.type,   // skinned too — see `_geometryPass`
+                builtFor: material.type,   // skinned too — see `GeometryPass._drawGeometryNode`
                 // Resolved outside any pass. A depth-only pipeline takes no colour formats from it.
                 target: this.shadowCascadeFBO.renderTarget,
             });
