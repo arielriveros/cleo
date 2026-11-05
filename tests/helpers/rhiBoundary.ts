@@ -1,17 +1,18 @@
 import { readFileSync, readdirSync, statSync } from 'fs';
-import { join, relative } from 'path';
+import { join, relative, posix } from 'path';
 import ts from 'typescript';
 
 /**
  * The RHI boundary: what code OUTSIDE `src/graphics/rhi/webgl2/` and `src/graphics/rhi/webgpu/` must not
  * contain. The renderer talks to the interfaces in `rhi/` (Device, encoders, resources, ShaderProgram)
  * and never to WebGL or WebGPU themselves — not by a raw call, not through a WebGL-only helper, and not
- * by asking which backend is live (conventions are named device fields instead).
+ * by asking which backend is live (conventions are named device fields: `DeviceCapabilities.conventions`).
  *
  * Every pattern runs over code with comments removed by the TypeScript printer (so a `//` inside a string
  * or a regex literal cannot swallow real code). Most also run with string and JSX text blanked — a
  * message that MENTIONS `navigator.gpu` is not a use of it; `strings: true` rules read the strings, which
- * is where an import path or a context name lives.
+ * is where a context name lives. Imports are checked separately, with each specifier resolved against
+ * the importing file.
  */
 export const BOUNDARY_RULES: readonly { readonly id: string; readonly pattern: RegExp; readonly strings?: boolean }[] = [
     { id: 'gl', pattern: /(?<![\w$.])gl\.\w/ },
@@ -23,7 +24,6 @@ export const BOUNDARY_RULES: readonly { readonly id: string; readonly pattern: R
     { id: 'WebGLType', pattern: /\bWebGL(?:2RenderingContext|RenderingContext|Texture|Buffer|Framebuffer|VertexArrayObject|Query|Program|Shader|UniformLocation|Sync)\b/ },
     { id: 'GPUEnum', pattern: /\bGPU(?:BufferUsage|TextureUsage|MapMode|ShaderStage|ColorWrite)\b/ },
     { id: 'navigatorGpu', pattern: /\bnavigator\.gpu\b/ },
-    { id: 'backendImport', pattern: /(?:from|import)\s*\(?\s*['"`][^'"`]*rhi\/(?:webgl2|webgpu)\//, strings: true },
     { id: 'backendName', pattern: /\b(?:device|capabilities|_capabilities|caps)\??\.backend\s*[!=]==/ },
 ];
 
@@ -33,8 +33,6 @@ export const BOUNDARY_ALLOWED: Readonly<Record<string, readonly string[]>> = {
     'src/graphics/rhi/createDevice.ts': ['backendImport'],
     // Public API re-exports (`setGLContext`, `WebGL2Device`, `acquireWebGPUDevice`, ...).
     'src/cleo.ts': ['backendImport', 'setGLContext'],
-    // The capability probe that decides whether WebGPU is offered at all.
-    'src/graphics/rhi/backendSelect.ts': ['navigatorGpu'],
     // Ambient declarations branding WebGL's handle types.
     'src/webglHandles.d.ts': ['WebGLType'],
 };
@@ -92,11 +90,29 @@ export function stripCommentsAndStrings(source: string, fileName = 'x.ts'): stri
     finally { result.dispose(); }
 }
 
-/** The rule ids `source` breaks. */
-export function boundaryHits(source: string, fileName = 'x.ts'): string[] {
+const SPECIFIER = /\b(?:from|import)\s*\(?\s*['"`]([^'"`]+)['"`]/g;
+const BACKEND_PATH = /(?:^|\/)rhi\/(?:webgl2|webgpu)\//;
+
+/**
+ * Whether `code` (at repo-relative `fileName`) imports anything inside a backend folder. Specifiers
+ * are RESOLVED against the file, so `./webgl2/x` from `rhi/` counts as much as `../rhi/webgl2/x`.
+ */
+function importsBackend(code: string, fileName: string): boolean {
+    const dir = posix.dirname(fileName.split('\\').join('/'));
+    for (const m of code.matchAll(SPECIFIER)) {
+        const spec = m[1];
+        if (BACKEND_PATH.test(spec.startsWith('.') ? posix.join(dir, spec) : spec)) return true;
+    }
+    return false;
+}
+
+/** The rule ids `source`, at repo-relative `fileName`, breaks. */
+export function boundaryHits(source: string, fileName = 'src/graphics/x.ts'): string[] {
     const withStrings = stripComments(source, fileName);
     const code = stripCommentsAndStrings(source, fileName);
-    return BOUNDARY_RULES.filter(r => r.pattern.test(r.strings ? withStrings : code)).map(r => r.id);
+    const hits = BOUNDARY_RULES.filter(r => r.pattern.test(r.strings ? withStrings : code)).map(r => r.id);
+    if (importsBackend(withStrings, fileName)) hits.push('backendImport');
+    return hits;
 }
 
 /** Every rule each file under `roots` breaks: repo-relative path -> rule ids. Backend folders skipped. */
@@ -105,7 +121,7 @@ export function boundaryOffenders(roots: readonly string[]): { scanned: number; 
     let scanned = 0;
     for (const root of roots) {
         for (const path of tsFiles(join(REPO, root))) {
-            const rel = relative(REPO, path).replace(/\\/g, '/');
+            const rel = relative(REPO, path).split('\\').join('/');
             if (BACKENDS.some(b => rel.startsWith(b))) continue;
             scanned++;
             const hits = boundaryHits(readFileSync(path, 'utf-8'), rel);
