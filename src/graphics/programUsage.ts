@@ -17,7 +17,7 @@ import { physicalFor, particleSimProgram, type ShadowFilter } from './programVar
 import { packEmitter, simStripMask } from '../particles/particlePack';
 import { parseParticleSystem } from '../particles/particleSystemAsset';
 import { resolveSubEmitters } from '../particles/particleRuntime';
-import { QUALITY_TIERS, type RenderSettings, type QualityPreset } from './renderer';
+import { QUALITY_TIERS, type RenderSettings, type QualityPreset } from './render/settingsTypes';
 
 /**
  * How a program-table entry is decided: `core` always ships; `feature` ships when a scene or setting
