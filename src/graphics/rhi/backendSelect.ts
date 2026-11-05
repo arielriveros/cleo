@@ -13,7 +13,7 @@ export function webgpuAvailableInBrowser(): boolean {
 
 /**
  * Whether this build can render a scene on WebGPU — a stricter question than whether a WebGPU device
- * can be acquired. The remaining WebGL2-only calls are the `glDevice()` sites.
+ * can be acquired. Nothing above the RHI is WebGL2-only any more (tests/rhiIsolation guards that).
  */
 export const WEBGPU_IMPLEMENTED = true;
 
