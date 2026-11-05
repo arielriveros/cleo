@@ -165,6 +165,8 @@ export class DecalPasses {
         // up when the material changes — once per landscape — not ~1,000 times a frame.
         let bound: RenderPipeline | null = null;
         let boundMaterial: Material | null = null;
+        let objectData = false, boundGeneration = -1;
+        const objects = this._sys.objects;
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
             // The chunks are the landscape's ModelNode children; the terrain draws nothing else.
@@ -186,11 +188,22 @@ export class DecalPasses {
                         this._shaderManager.bind('shadowMap');
                         pass.setPipeline(pipeline);
                         bound = pipeline;
+                        boundGeneration = -1;
+                        objectData = this._bindGroups.declaresObjectData(pipeline);
                         this._shaderManager.setUniform('u_lightSpace', this._decalReceiverViewProj);
                     }
                 }
-                this._shaderManager.setUniform('u_model', chunk.worldTransform);
-                if (!this._passes.recordDraw(pass, chunk.model.mesh, 0, 0)) chunk.model.mesh.draw('triangle-list');
+                // The chunk's record (a landscape's chunks share one); the group right after the pipeline,
+                // and again if appending the record replaced the table texture.
+                let row = 0;
+                if (objectData) {
+                    row = this._sys.modelDraw.rowForNode(chunk);
+                    if (boundGeneration !== objects.generation) {
+                        pass.setBindGroup(2, this._bindGroups.objectDataGroup(bound!, objects.texture));
+                        boundGeneration = objects.generation;
+                    }
+                } else this._shaderManager.setUniform('u_model', chunk.worldTransform);
+                if (!this._passes.recordDraw(pass, chunk.model.mesh, 0, 0, -1, row)) chunk.model.mesh.draw('triangle-list');
             }
         }
         this._passes.endFullscreenPass(pass);

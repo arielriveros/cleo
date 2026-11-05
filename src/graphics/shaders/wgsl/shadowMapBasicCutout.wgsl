@@ -1,4 +1,5 @@
 #include "./chunks/alphaCutout.wgsl"
+#include "./chunks/objectData.wgsl"
 // Alpha-cutout depth pass for a masked mesh using the unlit (Basic) vertex layout.
 //
 // One of FOUR cutout depth variants, and the split is forced rather than tidy. `texCoord` sits at
@@ -40,8 +41,8 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
 };
 
+// The caster's world matrix comes from the per-object table (chunks/objectData.wgsl).
 struct ShadowMapUniforms {
-    u_model: mat4x4<f32>,
     u_lightSpace: mat4x4<f32>,
 };
 @group(1) @binding(0) var<uniform> u_shadow: ShadowMapUniforms;
@@ -50,10 +51,11 @@ struct ShadowMapUniforms {
 fn vs_main(
     @location(0) position: vec3<f32>,
     @location(1) texCoord: vec2<f32>,
+    @builtin(instance_index) objectIndex: u32,
 ) -> VertexOutput {
     var out: VertexOutput;
     out.uv = texCoord;
-    out.position = u_shadow.u_lightSpace * u_shadow.u_model * vec4<f32>(position, 1.0);
+    out.position = u_shadow.u_lightSpace * objectModel(objectIndex) * vec4<f32>(position, 1.0);
     return out;
 }
 

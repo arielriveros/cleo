@@ -19,14 +19,15 @@ const compose = (file: string) => resolveIncludes(readFileSync(join(WGSL, file),
 
 /** The programs converted so far, by the vertex chunk they include. */
 const PROGRAMS = ['pbr.wgsl', 'cel.wgsl', 'blinnPhong.wgsl', 'geometryPBR.wgsl', 'geometryBlinnPhong.wgsl',
-                  'geometryTerrain.wgsl', 'terrainForward.wgsl', 'basic.wgsl', 'geometryBasic.wgsl'];
+                  'geometryTerrain.wgsl', 'terrainForward.wgsl', 'basic.wgsl', 'geometryBasic.wgsl',
+                  'shadowMap.wgsl', 'shadowMapCutout.wgsl', 'shadowMapBasicCutout.wgsl'];
 
 describe('programs reading the per-object table', () => {
     it.each(PROGRAMS)('%s takes its record through instance_index and has no per-draw transform', (file) => {
         const src = compose(file);
         expect(src).toContain('var u_objectData_texture: texture_2d<f32>');
         expect(src).toMatch(/@builtin\(instance_index\) objectIndex: u32/);
-        const block = /struct (?:ModelTransform|BasicTransform) \{([^}]*)\}/.exec(src)![1];
+        const block = /struct (?:ModelTransform|BasicTransform|ShadowMapUniforms) \{([^}]*)\}/.exec(src)![1];
         expect(block).not.toMatch(/\bu_model\b|\bu_dissolve\b|\bu_camHolePivot\b|\bu_uvScale\b/);
     });
 

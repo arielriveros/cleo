@@ -80,8 +80,8 @@ export class ModelDraw {
     }
 
     /** `node`'s record, appended if needed but NOT uploaded — see {@link flushRows}. */
-    public ensureRow(node: ModelNode): void {
-        this._objects.ensure(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither);
+    public ensureRow(node: ModelNode): number {
+        return this._objects.ensure(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither);
     }
 
     /** Upload the records {@link ensureRow} appended. */

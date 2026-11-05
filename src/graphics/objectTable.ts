@@ -72,6 +72,9 @@ export class ObjectTable {
     /** Records written this epoch. */
     public get count(): number { this._sync(); return this._count; }
 
+    /** The submission epoch the records belong to: a record index is valid only while this is unchanged. */
+    public get epoch(): number { this._sync(); return this._epoch; }
+
     /** Bytes of GPU storage (the live texture; retired ones last one epoch). */
     public get gpuBytes(): number { return this._rows * OBJECT_TABLE_WIDTH * 16; }
 
