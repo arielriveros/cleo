@@ -1,6 +1,7 @@
 import { mat4 } from 'gl-matrix';
 import { Logger } from '../../core/logger';
 import { Framebuffer } from '../framebuffer';
+import { TemporalHistory } from './temporalHistory';
 import { ssilTraceShape } from '../ssilSettings';
 import { GLState } from '../systems/glState';
 import { SsilProgram, SsilTemporalProgram, SsilBlurProgram, SsilHistoryProgram } from './programs';
@@ -48,8 +49,7 @@ export class SsilPasses {
     public ssaoResult!: Framebuffer;
 
     /** Temporal ping-pong, at the trace's resolution. Lazily allocated in `_ensureSsilTargets`. */
-    public readonly ssilHistoryFBOs: Framebuffer[] = [];
-    private _ssilHistoryIndex: number = 0;
+    public readonly ssilHistory = new TemporalHistory({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
 
     /**
      * Last frame's lit opaque colour at the trace's resolution, with the view depth it was seen at —
@@ -57,8 +57,6 @@ export class SsilPasses {
      * one that has since been uncovered. See ssilHistory.wgsl.
      */
     public ssilRadianceFBO: Framebuffer | null = null;
-    private _ssilTargetsW: number = 0;
-    private _ssilTargetsH: number = 0;
 
     /**
      * `_view.frameIndex` the history / the radiance copy were last written in. Each is usable only by the very
@@ -128,16 +126,11 @@ export class SsilPasses {
      * `Framebuffer.resize` hands back uninitialized memory, not a stale image.
      */
     private _ensureSsilTargets(w: number, h: number): void {
-        if (!this.ssilRadianceFBO) {
-            const options = { colorTextureOptions: { mipMap: false, precision: 'high' as const }, depth: false };
-            for (let i = 0; i < 2; i++) this.ssilHistoryFBOs.push(new Framebuffer(options));
-            this.ssilRadianceFBO = new Framebuffer(options);
-        }
-        if (this._ssilTargetsW === w && this._ssilTargetsH === h) return;
-        for (const fbo of this.ssilHistoryFBOs) fbo.resize(w, h);
+        if (!this.ssilRadianceFBO)
+            this.ssilRadianceFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
+        // One size for both: the radiance copy is resized exactly when the history is.
+        if (!this.ssilHistory.ensure(w, h)) return;
         this.ssilRadianceFBO.resize(w, h);
-        this._ssilTargetsW = w;
-        this._ssilTargetsH = h;
         this.ssilHistoryFrame = -1;
         this.ssilRadianceFrame = -1;
         this._checkSsilFormats();
@@ -224,8 +217,8 @@ export class SsilPasses {
         let accumulated = false;
         if (this._passes.beginPass('ssao.temporal')) {
             const historyValid = radianceFresh && this._ssilFresh(this.ssilHistoryFrame);
-            const src = this.ssilHistoryFBOs[this._ssilHistoryIndex];
-            const dst = this.ssilHistoryFBOs[this._ssilHistoryIndex ^ 1];
+            const src = this.ssilHistory.read;
+            const dst = this.ssilHistory.write;
             const pass = this._passes.beginFullscreenPass(dst.renderTarget, 'ssao.temporal', true, undefined, false);
             const pipeline = this._pipelines.fullscreen('ssilTemporal', SsilTemporalProgram);
             pass.setPipeline(pipeline);
@@ -241,7 +234,7 @@ export class SsilPasses {
             this._shaderManager.setUniform('u_historyValid', historyValid);
             this._passes.drawFullscreen(pass);
             this._passes.endFullscreenPass(pass);
-            this._ssilHistoryIndex ^= 1;
+            this.ssilHistory.swap();
             this.ssilHistoryFrame = this._view.frameIndex;
             this.ssaoResult = dst;
             accumulated = true;

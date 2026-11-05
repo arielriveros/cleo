@@ -1417,8 +1417,8 @@ export class Renderer {
      * for as long as TAA keeps finding history to blend.
      */
     public invalidateTemporalHistory(): void {
-        this._clouds.cloudHistoryValid = false;
-        this._temporal.taaHistoryValid = false;
+        this._clouds.cloudHistory.invalidate();
+        this._temporal.taaHistory.invalidate();
         this._ssil.ssilHistoryFrame = -1;
         this._ssil.ssilRadianceFrame = -1;
     }

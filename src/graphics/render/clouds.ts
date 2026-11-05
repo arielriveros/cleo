@@ -5,6 +5,7 @@ import { VolumetricCloudsNode } from '../../core/scene/nodes/volumetricCloudsNod
 import { Scene } from '../../core/scene/scene';
 import { atmosphereTransmittance, shHemisphereMeans } from '../cloudLighting';
 import { Framebuffer } from '../framebuffer';
+import { TemporalHistory } from './temporalHistory';
 import { gl } from '../glContext';
 import { device } from '../rhi/deviceHandle';
 import type { RenderPipeline, BindGroup } from '../rhi/resources';
@@ -76,19 +77,15 @@ export class VolumetricCloudPasses {
     private static readonly CLOUD_DETAIL_NOISE_SIZE = 32;
     private static readonly CLOUD_DETAIL_NOISE_PERIOD = 4;
 
-    // Temporal reprojection targets: `cloudHistoryFBOs` ping-pong at cloud render resolution, and
-    // `cloudTraceFBO` holds the new samples at 1/4 per axis — 1/16 of the pixels.
-    public cloudHistoryFBOs: Framebuffer[] = [];
+    // Temporal reprojection targets: `cloudHistory` ping-pong at cloud render resolution, and
+    // `cloudTraceFBO` holds the new samples at 1/4 per axis — 1/16 of the pixels. The history is
+    // untrusted whenever it cannot be relied on — first frame, a resize, a quality change, a camera
+    // cut — and that frame traces at full cloud resolution to reseed rather than upscaling 1/16 of it.
+    // WITH a depth attachment, unlike the other histories: the reseed draws into it through the shared
+    // raymarch pipeline, built against the depth-bearing scene target, and WebGPU rejects a pipeline
+    // with depth state in a pass that has no depth attachment.
+    public readonly cloudHistory = new TemporalHistory({ colorTextureOptions: { mipMap: false, precision: 'high' } });
     public cloudTraceFBO!: Framebuffer;
-    private _cloudHistoryIndex: number = 0;
-
-    // False whenever the history cannot be trusted — first frame, a resize, a quality change, a camera
-    // cut. That frame traces at full cloud resolution to reseed rather than upscaling 1/16 of it.
-    public cloudHistoryValid: boolean = false;
-
-    /** Cloud-space dimensions the history was last built at, so a change can invalidate it. */
-    private _cloudHistoryW: number = 0;
-    private _cloudHistoryH: number = 0;
 
     /** Bayer subset traced this frame, and the size of the pattern (4x4). */
     private static readonly CLOUD_BAYER_SIZE = 4;
@@ -549,7 +546,7 @@ export class VolumetricCloudPasses {
         this._passes.drawFullscreen(tracePass);
         this._passes.endFullscreenPass(tracePass);
         // Whatever setting change routed us here also makes the accumulated history meaningless.
-        this.cloudHistoryValid = false;
+        this.cloudHistory.invalidate();
         return this.cloudsFBO.colors[0];
     }
 
@@ -568,26 +565,24 @@ export class VolumetricCloudPasses {
         const th = Math.max(1, Math.ceil(h / VolumetricCloudPasses.CLOUD_BAYER_SIZE));
 
         // Must run BEFORE the reseed test below: a resize reallocates the targets and clears
-        // cloudHistoryValid, which is exactly the case the reseed exists for.
+        // `cloudHistory.valid`, which is exactly the case the reseed exists for.
         this._ensureCloudTemporalTargets(w, h, tw, th);
 
         // --- Reseed: no usable history, so trace the WHOLE cloud image once ---
         // Tracing 1/16 anyway would show a blocky 4x upscale converging over ~16 frames.
-        if (!this.cloudHistoryValid || !this._view.hasPrevViewProj) {
-            const seed = this._cloudHistoryIndex ^ 1;
+        if (!this.cloudHistory.valid || !this._view.hasPrevViewProj) {
             // The raymarch shader is still bound by the caller; u_temporal false makes traceUV() the
             // identity, so this writes one ray per pixel of the history target.
             this._shaderManager.setUniform('u_temporal', false);
             this._shaderManager.setUniform('u_jitterSlot', this._view.frameIndex % 16);
-            const tracePass = this._passes.beginFullscreenPass(this.cloudHistoryFBOs[seed].renderTarget, 'cloudReseed',
+            const tracePass = this._passes.beginFullscreenPass(this.cloudHistory.write.renderTarget, 'cloudReseed',
                                                         true, [0, 0, 0, 0], false);
             tracePass.setPipeline(pipeline);
             tracePass.setBindGroup(0, group(pipeline));
             this._passes.drawFullscreen(tracePass);
             this._passes.endFullscreenPass(tracePass);
-            this._cloudHistoryIndex = seed;
-            this.cloudHistoryValid = true;
-            return this.cloudHistoryFBOs[seed].colors[0];
+            this.cloudHistory.swap();
+            return this.cloudHistory.read.colors[0];
         }
 
         // --- Trace: 1/16 of the rays ---
@@ -609,9 +604,8 @@ export class VolumetricCloudPasses {
 
         // --- Resolve: reconstruct full cloud resolution from history + the new samples ---
         this._passes.scope('clouds.resolve');
-        const dst = this._cloudHistoryIndex ^ 1;
-        const prev = this.cloudHistoryFBOs[this._cloudHistoryIndex];
-        const resolvePass = this._passes.beginFullscreenPass(this.cloudHistoryFBOs[dst].renderTarget,
+        const prev = this.cloudHistory.read;
+        const resolvePass = this._passes.beginFullscreenPass(this.cloudHistory.write.renderTarget,
                                                       'clouds.resolve', false, undefined, false);
         const resolvePipeline = this._pipelines.fullscreen('cloudTemporalResolve', CloudTemporalResolveProgram);
         resolvePass.setPipeline(resolvePipeline);
@@ -627,14 +621,13 @@ export class VolumetricCloudPasses {
         // History needs BOTH a seeded buffer and a previous camera to reproject through; a resize
         // invalidates the first, the first frame the second. Always true while the reseed above
         // returns early, but must stay set — an unset uniform silently reads as false.
-        this._shaderManager.setUniform('u_historyValid', this.cloudHistoryValid && this._view.hasPrevViewProj);
+        this._shaderManager.setUniform('u_historyValid', this.cloudHistory.valid && this._view.hasPrevViewProj);
         this._shaderManager.setUniform('u_slabMid', node.baseAltitude + node.thickness * 0.5);
         this._passes.drawFullscreen(resolvePass);
         this._passes.endFullscreenPass(resolvePass);
 
-        this._cloudHistoryIndex = dst;
-        this.cloudHistoryValid = true;
-        return this.cloudHistoryFBOs[dst].colors[0];
+        this.cloudHistory.swap();
+        return this.cloudHistory.read.colors[0];
     }
 
     /**
@@ -642,19 +635,10 @@ export class VolumetricCloudPasses {
      * mandatory: `Framebuffer.resize` reallocates its attachments, holding uninitialized memory.
      */
     private _ensureCloudTemporalTargets(w: number, h: number, tw: number, th: number): void {
-        if (this.cloudHistoryFBOs.length === 0) {
-            for (let i = 0; i < 2; i++)
-                this.cloudHistoryFBOs.push(new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }));
-        }
-        if (this._cloudHistoryW !== w || this._cloudHistoryH !== h) {
-            for (const fbo of this.cloudHistoryFBOs) fbo.resize(w, h);
-            this._cloudHistoryW = w;
-            this._cloudHistoryH = h;
-            this.cloudHistoryValid = false;
-        }
+        this.cloudHistory.ensure(w, h);
         if (this.cloudTraceFBO.width !== tw || this.cloudTraceFBO.height !== th) {
             this.cloudTraceFBO.resize(tw, th);
-            this.cloudHistoryValid = false;
+            this.cloudHistory.invalidate();
         }
     }
 
@@ -672,16 +656,16 @@ export class VolumetricCloudPasses {
         // being a valid predecessor for it.
         if (node.resolutionScale !== t.cloudResolutionScale) {
             node.resolutionScale = t.cloudResolutionScale;
-            this.cloudHistoryValid = false;
+            this.cloudHistory.invalidate();
         }
-        if (node.steps !== t.cloudSteps) { node.steps = t.cloudSteps; this.cloudHistoryValid = false; }
-        if (node.lightSteps !== t.cloudLightSteps) { node.lightSteps = t.cloudLightSteps; this.cloudHistoryValid = false; }
+        if (node.steps !== t.cloudSteps) { node.steps = t.cloudSteps; this.cloudHistory.invalidate(); }
+        if (node.lightSteps !== t.cloudLightSteps) { node.lightSteps = t.cloudLightSteps; this.cloudHistory.invalidate(); }
         // Ultra traces every pixel every frame: it is the reference/still-capture tier, so it trades
         // the 16x ray saving for zero reprojection artifacts.
         const wantTemporal = this._host.quality !== 'ultra';
         if (node.temporalUpscale !== wantTemporal) {
             node.temporalUpscale = wantTemporal;
-            this.cloudHistoryValid = false;
+            this.cloudHistory.invalidate();
         }
     }
 }

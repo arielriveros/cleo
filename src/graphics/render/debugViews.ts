@@ -212,8 +212,8 @@ export class DebugViews {
             // to ask of any temporal artefact. Falls back to the lit scene while TAA is off, when the
             // buffer has not been allocated at all.
             case 'taaHistory':
-                if (this._temporal.taaHistoryFBOs.length === 0) { tex = this._targets.scene.colors[0]; mode = 6; }
-                else { tex = this._temporal.taaHistoryFBOs[this._temporal.taaHistoryIndex].colors[0]; mode = 6; }
+                if (!this._temporal.taaHistory.allocated) { tex = this._targets.scene.colors[0]; mode = 6; }
+                else { tex = this._temporal.taaHistory.read.colors[0]; mode = 6; }
                 break;
             // Falls back to the lit scene if the overdraw target has not been allocated yet (the
             // pass above bails on a degenerate viewport), rather than dereferencing null.

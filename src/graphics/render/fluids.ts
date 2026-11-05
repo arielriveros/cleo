@@ -4,6 +4,7 @@ import type { FluidVolumeNode } from '../../core/scene/nodes/fluidVolumeNode';
 import { LightNode } from '../../core/scene/nodes/lightNode';
 import { Scene } from '../../core/scene/scene';
 import { Framebuffer } from '../framebuffer';
+import { TemporalHistory } from './temporalHistory';
 import { gl } from '../glContext';
 import { DirectionalLight } from '../lighting';
 import { Mesh } from '../mesh';
@@ -187,9 +188,8 @@ export class FluidVolumePasses {
         // --- 2. Resolve ---
         let image = this._fluidTraceFBO!.colors[0];
         if (temporal) {
-            const dst = this._fluidHistoryIndex ^ 1;
-            const prev = this._fluidHistoryFBOs[this._fluidHistoryIndex];
-            const pass = this._passes.beginFullscreenPass(this._fluidHistoryFBOs[dst].renderTarget, 'fluidVolumes.resolve', false, undefined, false);
+            const prev = this._fluidHistory.read;
+            const pass = this._passes.beginFullscreenPass(this._fluidHistory.write.renderTarget, 'fluidVolumes.resolve', false, undefined, false);
             const pipeline = this._pipelines.fullscreen('fluidVolumeResolve', FluidVolumeResolveProgram);
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
@@ -200,12 +200,11 @@ export class FluidVolumePasses {
             sm.setUniform('u_prevViewProj', this._projection.uvProducing(this._view.prevViewProj));
             // Moving or editing: lean on the new samples so nothing smears; still: accumulate.
             sm.setUniform('u_feedback', moving || lead.interacting ? 0.6 : 0.9);
-            sm.setUniform('u_historyValid', this._fluidHistoryValid && this._view.hasPrevViewProj ? 1 : 0);
+            sm.setUniform('u_historyValid', this._fluidHistory.valid && this._view.hasPrevViewProj ? 1 : 0);
             this._passes.drawFullscreen(pass);
             this._passes.endFullscreenPass(pass);
-            this._fluidHistoryIndex = dst;
-            this._fluidHistoryValid = true;
-            image = this._fluidHistoryFBOs[dst].colors[0];
+            this._fluidHistory.swap();
+            image = this._fluidHistory.read.colors[0];
         }
 
         // --- 3. Composite ---
@@ -235,24 +234,12 @@ export class FluidVolumePasses {
         if (!this._fluidTraceFBO)
             this._fluidTraceFBO = new Framebuffer({ colorAttachments: 2, colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
         if (this._fluidTraceFBO.width !== w || this._fluidTraceFBO.height !== h) this._fluidTraceFBO.resize(w, h);
-        if (!temporal) { this._fluidHistoryValid = false; return; }
-        if (this._fluidHistoryFBOs.length === 0)
-            for (let i = 0; i < 2; i++)
-                this._fluidHistoryFBOs.push(new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
-        if (this._fluidHistoryW !== w || this._fluidHistoryH !== h) {
-            for (const fbo of this._fluidHistoryFBOs) fbo.resize(w, h);
-            this._fluidHistoryW = w;
-            this._fluidHistoryH = h;
-            this._fluidHistoryValid = false;
-        }
+        if (!temporal) { this._fluidHistory.invalidate(); return; }
+        this._fluidHistory.ensure(w, h);
     }
 
     private _fluidTraceFBO: Framebuffer | null = null;
-    private readonly _fluidHistoryFBOs: Framebuffer[] = [];
-    private _fluidHistoryIndex = 0;
-    private _fluidHistoryValid = false;
-    private _fluidHistoryW = 0;
-    private _fluidHistoryH = 0;
+    private readonly _fluidHistory = new TemporalHistory({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
 
     /** Element-wise closeness of two matrices: "the camera did not move this frame". */
     private static _matricesClose(a: mat4, b: mat4): boolean {

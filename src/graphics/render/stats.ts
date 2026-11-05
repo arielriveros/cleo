@@ -140,11 +140,11 @@ export class RenderStats {
         // from the estimate defeats its purpose.
         addFbo(this._targets.sceneDepth); addFbo(this._clouds.cloudsFBO); addFbo(this._clouds.cloudTraceFBO);
         addFbo(this._targets.refraction ?? undefined);
-        for (const f of this._clouds.cloudHistoryFBOs) addFbo(f);
+        for (const f of this._clouds.cloudHistory.targets) addFbo(f);
         if (this._clouds.cloudBaseNoise) bytes += this._clouds.cloudBaseNoise.byteSize;
         if (this._clouds.cloudDetailNoise) bytes += this._clouds.cloudDetailNoise.byteSize;
         addFbo(this._ssil.ssaoFBO); addFbo(this._ssil.ssaoBlurFBO);
-        for (const f of this._ssil.ssilHistoryFBOs) addFbo(f);
+        for (const f of this._ssil.ssilHistory.targets) addFbo(f);
         addFbo(this._ssil.ssilRadianceFBO ?? undefined);
         addFbo(this._sky.brdfFBO); addFbo(this._post.outlineMaskFBO); addFbo(this._targets.overlay);
         addFbo(this._debugViews.overdrawFBO ?? undefined);

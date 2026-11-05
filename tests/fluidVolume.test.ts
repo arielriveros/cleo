@@ -117,9 +117,13 @@ describe('the fluid volume pass', () => {
     it('drops the temporal history whenever its targets are resized', () => {
         const at = RENDERER.indexOf('private _ensureFluidTargets(');
         const body = RENDERER.slice(at, RENDERER.indexOf('\n    }\n', at));
-        const resize = body.indexOf('fbo.resize(w, h)');
+        expect(body).toContain('this._fluidHistory.ensure(w, h)');
+        // The drop itself is TemporalHistory's, shared with the TAA, cloud and SSIL histories.
+        const ensureAt = RENDERER.indexOf('public ensure(width: number, height: number): boolean {');
+        const ensure = RENDERER.slice(ensureAt, RENDERER.indexOf('\n    }\n', ensureAt));
+        const resize = ensure.indexOf('fbo.resize(width, height)');
         expect(resize).toBeGreaterThan(-1);
-        expect(body.indexOf('this._fluidHistoryValid = false', resize)).toBeGreaterThan(resize);
+        expect(ensure.indexOf('this.valid = false', resize)).toBeGreaterThan(resize);
     });
 
     it('keeps the vertex and fragment uniform blocks apart (a shared block fails to link on GLSL)', () => {

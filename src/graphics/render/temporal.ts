@@ -4,6 +4,7 @@ import { Logger } from '../../core/logger';
 import { ModelNode } from '../../core/scene/nodes/modelNode';
 import { Scene } from '../../core/scene/scene';
 import { Framebuffer } from '../framebuffer';
+import { TemporalHistory } from './temporalHistory';
 import { device } from '../rhi/deviceHandle';
 import type { RenderTarget, RenderPipeline } from '../rhi/resources';
 import type { CullMode } from '../rhi/types';
@@ -84,12 +85,8 @@ export class TemporalPasses {
      * copy is what lets the resolve ask "was this pixel the same surface last frame" — the one residual
      * `cloudTemporalResolve.wgsl` names and cannot fix.
      */
-    public readonly taaHistoryFBOs: Framebuffer[] = [];
+    public readonly taaHistory = new TemporalHistory({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
     private _taaPrevDepthFBO!: Framebuffer;
-    public taaHistoryIndex: number = 0;
-    public taaHistoryValid: boolean = false;
-    private _taaHistoryW: number = 0;
-    private _taaHistoryH: number = 0;
 
     /** History weight when still and under fast motion. See `taaResolve.wgsl`. */
     public taaFeedback: number = 0.97;
@@ -143,24 +140,14 @@ export class TemporalPasses {
      * than merely a stale image.
      */
     private _ensureTaaTargets(w: number, h: number): void {
-        if (this.taaHistoryFBOs.length === 0) {
-            for (let i = 0; i < 2; i++)
-                this.taaHistoryFBOs.push(new Framebuffer(
-                    { colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
-            // `usage: 'depth'` is depth and nothing else — no colour attachment. A COPY of the scene
-            // depth rather than a linear-depth render: `depth24plus` has no float fallback
-            // (`resolveTextureFormat` returns early for it), whereas an `r16float` twin would be
-            // subject to the very downgrade `_checkTaaFormats` exists to catch.
-            this._taaPrevDepthFBO = new Framebuffer({ usage: 'depth' });
-        }
-        if (this._taaHistoryW !== w || this._taaHistoryH !== h) {
-            for (const fbo of this.taaHistoryFBOs) fbo.resize(w, h);
-            this._taaPrevDepthFBO.resize(w, h);
-            this._taaHistoryW = w;
-            this._taaHistoryH = h;
-            this.taaHistoryValid = false;
-            this._checkTaaFormats();
-        }
+        if (!this.taaHistory.ensure(w, h)) return;
+        // `usage: 'depth'` is depth and nothing else — no colour attachment. A COPY of the scene
+        // depth rather than a linear-depth render: `depth24plus` has no float fallback
+        // (`resolveTextureFormat` returns early for it), whereas an `r16float` twin would be
+        // subject to the very downgrade `_checkTaaFormats` exists to catch.
+        if (!this._taaPrevDepthFBO) this._taaPrevDepthFBO = new Framebuffer({ usage: 'depth' });
+        this._taaPrevDepthFBO.resize(w, h);
+        this._checkTaaFormats();
     }
 
     /**
@@ -173,8 +160,8 @@ export class TemporalPasses {
      * would read as a TAA problem.
      */
     private _checkTaaFormats(): void {
-        const downgraded = this.taaHistoryFBOs.length > 0
-            && (this.taaHistoryFBOs[0].colors[0].downgraded || this._targets.velocity.colors[0].downgraded);
+        const downgraded = this.taaHistory.allocated
+            && (this.taaHistory.targets[0].colors[0].downgraded || this._targets.velocity.colors[0].downgraded);
         if (!downgraded) { this.taaSupported = true; return; }
         if (this.taaSupported)
             Logger.error('Temporal antialiasing disabled: this device has no float render targets, so '
@@ -333,14 +320,12 @@ export class TemporalPasses {
         // where TAA turns itself off. The jitter goes with it, this frame included.
         if (!this.taaSupported) { this._view.taaJitterActive = false; return; }
 
-        const dst = this.taaHistoryIndex ^ 1;
-
-        const pass = this._passes.beginFullscreenPass(this.taaHistoryFBOs[dst].renderTarget, 'taa', true);
+        const pass = this._passes.beginFullscreenPass(this.taaHistory.write.renderTarget, 'taa', true);
         const pipeline = this._pipelines.fullscreen('taaResolve', TaaResolveProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
             this._targets.scene.colors[0],
-            this.taaHistoryFBOs[this.taaHistoryIndex].colors[0],
+            this.taaHistory.read.colors[0],
             this._targets.velocity.colors[0],
             this.depthSource(),
             this._taaPrevDepthFBO.depth,
@@ -355,7 +340,7 @@ export class TemporalPasses {
         this._shaderManager.setUniform('u_feedbackMin', Math.min(this.taaMotionFeedback, this.taaFeedback));
         this._shaderManager.setUniform('u_feedbackMax', this.taaFeedback);
         this._shaderManager.setUniform('u_varianceGamma', this.taaClipStrength);
-        this._shaderManager.setUniform('u_historyValid', this.taaHistoryValid && this._view.hasPrevViewProj);
+        this._shaderManager.setUniform('u_historyValid', this.taaHistory.valid && this._view.hasPrevViewProj);
         this._shaderManager.setUniform('u_historyFilter', this.taaHistoryFilter === 'catmullRom' ? 1 : 0);
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
@@ -373,7 +358,7 @@ export class TemporalPasses {
             : this._pipelines.fullscreen('screen', ScreenProgram);
         copy.setPipeline(copyPipeline);
         copy.setBindGroup(0, this._bindGroups.textureGroup(copyPipeline, 0,
-                                                   [this.taaHistoryFBOs[dst].colors[0]]));
+                                                   [this.taaHistory.write.colors[0]]));
         if (sharpen) {
             this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
             this._shaderManager.setUniform('u_sharpness', this.taaSharpness);
@@ -387,8 +372,7 @@ export class TemporalPasses {
         // `ForwardPass.copySceneDepth` already does exactly this, on both backends.
         this._passes.copyDepth(this.depthSource(), this._taaPrevDepthFBO.depth, w, h);
 
-        this.taaHistoryIndex = dst;
-        this.taaHistoryValid = true;
+        this.taaHistory.swap();
 
         // Put back what the overlay passes below expect.
         this._targets.scene.bind();
