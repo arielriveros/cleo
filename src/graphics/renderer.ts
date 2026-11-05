@@ -28,12 +28,11 @@ import type { ShaderProgram, ShaderProgramDescriptor } from './rhi/shaderProgram
 import { Framebuffer } from './framebuffer';
 import { LayeredDepthFramebuffer } from './layeredDepthFramebuffer';
 import { BUILTIN_LENS_DIRT_BASE64, BUILTIN_LENS_DIRT_MIME } from './builtinLensDirt';
-import { SENSOR_HEIGHT, circleOfConfusion, focalLengthFromFov, focusDistanceToTarget } from './dofMath';
+import { SENSOR_HEIGHT, focalLengthFromFov, focusDistanceToTarget } from './dofMath';
 import { RenderGraphBuilder } from './renderGraph/graph';
 import type { CompiledGraph, ResourceId } from './renderGraph/graph';
 import { FramebufferPool } from './renderGraph/pool';
 import { materialIndexOf, resolvePostChain } from './renderGraph/chain';
-import type { PostEffectId } from './renderGraph/chain';
 import type { ResourceDesc } from './renderGraph/resources';
 import {
     MAX_CASCADES, CascadeSphere, computeCascadeSplits, cascadeSphereFromPerspective,
@@ -60,19 +59,19 @@ import { Texture } from './texture';
 import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material, CustomMaterial, isFoliageMaterial } from './material';
 import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources, usedResources } from './systems/customShaders';
-import { TexturePacker, DILATED_BASE_SLOT } from './systems/texturePacker';
-import { ParticleRenderer, PARTICLE_PROGRAMS, setParticleSimVariants, type ParticleSimFrame, type ParticleDrawFrame } from './particles/particleRenderer';
+import { TexturePacker } from './systems/texturePacker';
+import { ParticleRenderer, setParticleSimVariants, type ParticleSimFrame, type ParticleDrawFrame } from './particles/particleRenderer';
 import { skyAmbient, type ParticleLocalLight } from './particles/particleLighting';
 import { MAX_FORCE_FIELDS } from '../core/scene/nodes/forceFieldNode';
 import type { ParticleSystemNode } from '../core/scene/nodes/particleSystemNode';
 import { Model } from './model';
 import { TextureManager } from './systems/textureManager';
 import { Logger } from '../core/logger';
-import { frameStats, resetFrameStats, countFullscreenPass, setViewportSize } from './renderStats';
+import { frameStats, resetFrameStats } from './renderStats';
 import { shaderStats } from './shaderStats';
 import {
-    MaterialSync, MATERIAL_VIEW_SIZE, DrawSortKeys, ProgramCompileQueue, parseRecipes, serializeRecipe,
-    resetShaderOptimizerFrame, recordStall, shaderOptimizerStats,
+    DrawSortKeys, ProgramCompileQueue, parseRecipes, resetShaderOptimizerFrame, recordStall,
+    shaderOptimizerStats,
 } from './shaderOptimizer';
 import type { PipelineRecipe } from './shaderOptimizer';
 import { OcclusionBuffer } from './occlusion/occlusionBuffer';
@@ -96,38 +95,31 @@ import type { FoliageBatch, FoliageLayer, FoliageBand } from '../terrain/foliage
 import { FoliageGpuCuller, type GpuCullBucket, type GpuFoliageSegment } from './foliageGpuCulling';
 import { FoliageInteraction, gatherFoliageInteractors } from './foliageInteraction';
 
-import { BasicProgram, BasicInstancedProgram, BasicSkinnedProgram, BlinnPhongProgram, BlinnPhongSkinnedProgram,
-    CelProgram, CelSkinnedProgram, OutlineProgram, ShadowMapProgram, ShadowMapSkinnedProgram,
-    ShadowMapInstancedProgram, ShadowMapInstancedCutoutProgram, ShadowMapCutoutProgram,
-    ShadowMapSkinnedCutoutProgram, ShadowMapBasicCutoutProgram, ShadowMapBasicSkinnedCutoutProgram,
-    ShadowDebugProgram, SkyboxProgram, VolumetricCloudsProgram, CloudNoiseBakeProgram,
+import {
+    BasicInstancedProgram, OutlineProgram, ShadowMapProgram, ShadowMapInstancedProgram,
+    ShadowMapInstancedCutoutProgram, ShadowDebugProgram, SkyboxProgram, VolumetricCloudsProgram,
     CloudNoiseBakeComputeProgram, CloudTemporalResolveProgram, CloudUpsampleProgram, SkyAtmosphereProgram,
     ProbePreviewProgram, SkyProjectProgram, SkyFogProgram, DecalSurfaceProgram, DecalResolveProgram,
     DecalColorProgram, FluidVolumeProgram, FluidVolumeResolveProgram, FluidVolumeCompositeProgram,
     ScreenProgram, PresentProgram, OverlayCompositeProgram, DebugViewProgram, OverdrawProgram,
     OverdrawInstancedProgram, BloomProgram, ExposureMeterProgram, BloomDownsampleProgram, BloomUpsampleProgram,
     ChromaticAberrationProgram, DofCocProgram, DofGatherProgram, DofCompositeProgram, LensFlareProgram,
-    LensFlareCompositeProgram, VignetteProgram, TaaSharpenProgram, FxaaProgram, FilmGrainProgram,
-    ComposerProgram, VolumetricGodRaysProgram, GridProgram, OutlinePostProgram, MotionBlurVelocityProgram,
-    TaaResolveProgram, MotionBlurTileMaxProgram, MotionBlurNeighborMaxProgram, MotionBlurGatherProgram,
-    ObjectVelocityProgram, ObjectVelocitySkinnedProgram, ObjectVelocityBasicSkinnedProgram, PBRProgram,
-    PBRSkinnedProgram, TerrainForwardProgram, TilemapProgram, GeometryPBRProgram, GeometryPBRSkinnedProgram,
-    GeometryPBRInstancedProgram, GeometryBlinnPhongProgram, GeometryBlinnPhongSkinnedProgram,
-    GeometryBlinnPhongInstancedProgram, GeometryTerrainProgram, GeometryFoliageBillboardProgram,
-    GeometryFoliageImpostorProgram, OcclusionBoxProgram, ShadowMapImpostorProgram, GeometryBasicProgram,
-    GeometryBasicSkinnedProgram, DeferredLightingProgram, SsilProgram, SsilTemporalProgram, SsilBlurProgram,
-    SsilHistoryProgram, IrradianceProgram, PrefilterProgram, BRDFProgram, programTable, SHADOW_PROGRAMS,
-    VELOCITY_PROGRAMS, FORWARD_PROGRAMS, GEOMETRY_PROGRAMS,
+    LensFlareCompositeProgram, VignetteProgram, FxaaProgram, FilmGrainProgram, ComposerProgram,
+    VolumetricGodRaysProgram, GridProgram, OutlinePostProgram, TilemapProgram, GeometryFoliageBillboardProgram,
+    GeometryFoliageImpostorProgram, OcclusionBoxProgram, ShadowMapImpostorProgram, DeferredLightingProgram,
+    SsilProgram, SsilTemporalProgram, SsilBlurProgram, SsilHistoryProgram, IrradianceProgram, PrefilterProgram,
+    BRDFProgram, programTable, SHADOW_PROGRAMS, FORWARD_PROGRAMS, GEOMETRY_PROGRAMS,
 } from './render/programs';
 import { createFrameView, type FrameView } from './render/frameView';
 import { FrameTargets } from './render/frameTargets';
 import { PassEncoder } from './render/passEncoder';
 import { PipelineCache } from './render/pipelineCache';
-import { BindGroupCache, SCENE_DEPTH_FIELD } from './render/bindGroups';
+import { BindGroupCache } from './render/bindGroups';
 import { MaterialBinder } from './render/materialBinder';
 import { ViewProjection } from './render/viewProjection';
 import { QUALITY_TIERS } from './render/settingsTypes';
 import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
+import { TemporalPasses } from './render/temporal';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 import { gl, setGLContext } from './glContext';
@@ -140,7 +132,7 @@ import { acquireWebGPUDevice } from './rhi/webgpu/webgpuDevice';
 import { WebGL2Device, glDevice } from './rhi/webgl2/webgl2Device';
 import { setDevice, device } from './rhi/deviceHandle';
 import { LightGrid, MAX_LIGHTS } from './lightGrid';
-import { TAA_PHASES, jitterMatrix } from './utils/taaJitter';
+import { jitterMatrix } from './utils/taaJitter';
 import { ColorGradingLut, IDENTITY_LUT_SIZE } from './colorGrading';
 import { DEFAULT_CLUSTER_GRID, spotBoundingSphere, type ClusterLight } from './clusters';
 import { NO_SHADOW_SLOT, POINT_CONE_OFFSET, POINT_CONE_SCALE } from './lightData';
@@ -148,11 +140,9 @@ import type { Buffer as RhiBuffer } from './rhi/resources';
 import { BufferUsage, ShaderStage, ADDITIVE_BLEND, DEFAULT_BLEND, OVERLAY_BLEND, SPRITE_ADDITIVE_BLEND,
          OVERLAY_COMPOSITE_BLEND } from './rhi/types';
 import { isEditorOnlyNode } from '../core/scene/editorNodes';
-import type { ShaderResource, BlendState, DepthStencilState, CullMode, PrimitiveTopology, VertexBufferLayout, TextureFormat } from './rhi/types';
-import type { RenderPipeline, BindGroup, RenderTarget, ShaderModule } from './rhi/resources';
-import type { RenderPassEncoder, CommandEncoder, RenderPipelineDescriptor } from './rhi/device';
-import { modelVertexLayout, instanceMatrixLayout, boneLayouts, screenQuadLayout, TILE_VERTEX_LAYOUT } from './rhi/vertexLayouts';
-import type { WebGL2RenderPassEncoder } from './rhi/webgl2/webgl2Commands';
+import type { ShaderResource, BlendState, DepthStencilState, CullMode } from './rhi/types';
+import type { RenderPipeline, BindGroup, RenderTarget } from './rhi/resources';
+import type { RenderPassEncoder } from './rhi/device';
 
 /** Built frames in a row that hid nothing before occlusion backs off, and how often it probes then. */
 const OCCLUSION_IDLE_FRAMES = 30;
@@ -345,6 +335,8 @@ export class Renderer {
     private readonly _materials: MaterialBinder;
     /** Clip-space Z, the TAA jitter, the coplanar depth nudge and the uv flips (render/viewProjection.ts). */
     private readonly _projection: ViewProjection;
+    /** TAA, the velocity buffer, per-object motion and motion blur (render/temporal.ts). */
+    private readonly _temporal: TemporalPasses;
 
     /**
      * The AUTHORED exposure — what the artist set, what a scene saves, and what a preview renders at.
@@ -450,14 +442,6 @@ export class Renderer {
     private _filmGrainSize: number = 2.0;
     private _filmGrainColored: boolean = false;
     private _selectedNodeId: string | null = null;
-
-    // Camera-reprojection motion blur (UE5-style tile reconstruction). Off by default.
-    private _motionBlurEnabled: boolean = true;
-    private _motionBlurIntensity: number = 1.0;
-    private _motionBlurSamples: number = 12;
-    private _motionBlurJitter: number = 0.5;
-    private _motionBlurMaxLength: number = 20;
-    private static readonly MOTION_BLUR_TILE = 20; // tile edge (px); also caps the blur length
 
     // Selection outline: a silhouette mask FBO plus a screen-space edge pass. `_outlineActive` is set
     // per frame when something was drawn into the mask, so the pass is skipped with no selection.
@@ -872,49 +856,11 @@ export class Renderer {
         15,  7, 13,  5,
     ];
 
-    // Motion blur's TileMax / NeighborMax, both at tile resolution, beside `_targets.velocity`.
-    private _velocityTileFBO!: Framebuffer;
-    private _velocityNeighborFBO!: Framebuffer;
-    // Whether `_targets.velocity` actually holds THIS frame's motion. Same hazard `_ssaoProducedThisFrame`
-    // guards: a framebuffer keeps its contents when nothing draws into it, so a reader that assumed
-    // the pass ran would reconstruct from whichever frame last filled it.
-    private _velocityProducedThisFrame: boolean = false;
-
-    // ---- Temporal antialiasing -------------------------------------------------------------------
-    /** The setting. On by default: aliasing is the most visible artefact the renderer still has. */
-    private _taaEnabled: boolean = true;
-    /**
-     * Cleared by the format guard when a float render target degraded to `rgba8unorm`, which can hold
-     * neither an HDR history nor a signed velocity. Separate from the setting so the editor's toggle
-     * still reads back what the user chose on a device that cannot honour it.
-     */
-    private _taaSupported: boolean = true;
     /** `_projection.jitterMatrix * camera.projectionMatrix` — the projection SSAO reconstructs against. */
     private readonly _jitteredCameraProj: mat4 = mat4.create();
     /** The view-projection actually rasterized this frame. `_view.invViewProj` is inverted from this. */
     private readonly _jitteredViewProj: mat4 = mat4.create();
 
-    /**
-     * Colour history ping-pong, plus a copy of the depth that produced it.
-     *
-     * Lazily allocated, as the cloud history is: a project with TAA off pays no VRAM for it. The depth
-     * copy is what lets the resolve ask "was this pixel the same surface last frame" — the one residual
-     * `cloudTemporalResolve.wgsl` names and cannot fix.
-     */
-    private readonly _taaHistoryFBOs: Framebuffer[] = [];
-    private _taaPrevDepthFBO!: Framebuffer;
-    private _taaHistoryIndex: number = 0;
-    private _taaHistoryValid: boolean = false;
-    private _taaHistoryW: number = 0;
-    private _taaHistoryH: number = 0;
-    /** History weight when still and under fast motion. See `taaResolve.wgsl`. */
-    private _taaFeedback: number = 0.97;
-    private _taaMotionFeedback: number = 0.88;
-    /** Standard deviations the neighbourhood clamp box spans. */
-    private _taaClipStrength: number = 1.0;
-    private _taaHistoryFilter: TaaHistoryFilter = 'catmullRom';
-    /** RCAS strength on the copy that goes on to the screen; never on the history. 0 = plain copy. */
-    private _taaSharpness: number = 0.25;
     private _fxaaEnabled: boolean = false;
     private _fxaaQuality: FxaaQuality = 'medium';
     private _fxaaSubpixel: number = 0.75;
@@ -950,11 +896,9 @@ export class Renderer {
     /**
      * Cleared when an SSIL target came back rgba8unorm on a device without float render targets: an
      * 8-bit radiance copy clips every highlight at 1 and has no room for a depth. The pass then runs as
-     * ambient occlusion alone, which 8 bits still hold. Separate from the setting, as `_taaSupported` is.
+     * ambient occlusion alone, which 8 bits still hold. Separate from the setting, as `_temporal.taaSupported` is.
      */
     private _ssilSupported: boolean = true;
-    /** Last frame's view matrix, beside `_prevViewProj`: SSIL compares depths in that camera's space. */
-    private readonly _prevView: mat4 = mat4.create();
     private readonly _ssilInvView: mat4 = mat4.create();
     private readonly _ssilProj: mat4 = mat4.create();
     private readonly _ssilViewToPrevClip: mat4 = mat4.create();
@@ -1104,9 +1048,6 @@ export class Renderer {
     // Node ids already warned about carrying a screen-space custom material on a mesh (once per node).
     private _warnedScreenMaterialMeshes: Set<string> = new Set();
 
-    // The scene being rendered this frame, for per-draw lookups that don't receive it (forward
-    // light-probe selection in _renderModel).
-    private _currentScene: Scene | null = null;
 
     private _shaderManager: ShaderManager;
 
@@ -1144,15 +1085,13 @@ export class Renderer {
     /** Must match RGBM_RANGE in skyProject.wgsl. */
     private static readonly SKY_RGBM_RANGE = 64.0;
 
-    private _prevViewProj: mat4 = mat4.create();
-    private _hasPrevViewProj: boolean = false;
 
     /** The GPU particle system: state textures, simulation steps, billboard draws. */
     private readonly _particles = new ParticleRenderer();
     /**
      * The camera that produced the opaque depth the particle simulation collides against — LAST frame's,
      * since the simulation runs before this frame draws anything. Its own copy rather than
-     * `_prevViewProj`, because a thumbnail capture must not overwrite it.
+     * `_view.prevViewProj`, because a thumbnail capture must not overwrite it.
      */
     private readonly _particleCollideViewProj: mat4 = mat4.create();
     private readonly _particleCollideCamPos: vec3 = vec3.create();
@@ -1256,34 +1195,6 @@ export class Renderer {
     // Reused scratch to avoid per-frame allocations
     private _boneMatrixScratch: Float32Array = new Float32Array(100 * 16);
 
-    // Last frame's world matrix and bone palette per model, for per-object motion vectors.
-    //
-    // A WeakMap rather than a field on ModelNode: this is renderer bookkeeping with a renderer's
-    // lifetime, and a node the renderer stops seeing should take its snapshot with it.
-    //
-    // `frame` is the frame index the entry was written on. An entry that is not from EXACTLY the
-    // previous frame is treated as absent — a node that was just spawned, unhidden, LOD-swapped or
-    // teleported has no honest previous position, and inventing one draws a full-length streak across
-    // the screen on the frame it appears.
-    private readonly _prevXform = new WeakMap<ModelNode, { world: mat4; bones: Float32Array | null; frame: number }>();
-    // Whether anything moved this frame. Widens the motion-blur gate, which used to ask only whether
-    // the CAMERA moved — the question that made a moving object in front of a parked camera produce
-    // nothing at all.
-    private _anyObjectMoved: boolean = false;
-    /**
-     * Whether the motion-blur chain will run this frame, decided ONCE at the top of the frame.
-     *
-     * It used to be decided in `_applyPostProcessing`, where it was needed. The velocity buffer it
-     * consumes is now filled during the scene render — long before post-processing — so the question
-     * has to be answered before that pass, not after it.
-     */
-    private _motionBlurWillRun: boolean = false;
-    // `_projection.uvProducing` returns a single shared scratch, so two live results need two homes of their own.
-    private readonly _uvViewProjScratch: mat4 = mat4.create();
-    private readonly _uvPrevViewProjScratch: mat4 = mat4.create();
-    private readonly _prevBoneScratch: Float32Array = new Float32Array(100 * 16);
-    // Reused selection buffer for the object-velocity pass, so picking the movers allocates nothing.
-    private readonly _velocityDrawList: ModelNode[] = [];
     private _boneIdentityScratch: Float32Array;
     // One instance buffer PER GROUP, keyed by the mesh+material key. A single shared buffer would have
     // every group in the pass read the LAST matrices written, and a growth reallocation would destroy
@@ -1323,6 +1234,8 @@ export class Renderer {
         // Create material system
         this._shaderManager = ShaderManager.Instance;
 
+        // Hosts read and call members that still live here, through this alias (getters cannot be arrows).
+        const renderer = this;
         this._passes = new PassEncoder({
             clearColor: () => this.clearColor,
             passEnabled: name => this._passEnabled[name],
@@ -1350,6 +1263,18 @@ export class Renderer {
             renderWidth: () => this._renderWidth,
             renderHeight: () => this._renderHeight,
         }, this._view);
+        this._temporal = new TemporalPasses({
+            get boneMatrixScratch() { return renderer._boneMatrixScratch; },
+            copyDepth: renderer._copyDepth.bind(renderer),
+            cullFor: Renderer._cullFor.bind(Renderer),
+            get debugView() { return renderer._debugView; },
+            inGBuffer: renderer._inGBuffer.bind(renderer),
+            outsideFrustum: renderer._outsideFrustum.bind(renderer),
+            get renderHeight() { return renderer._renderHeight; },
+            get renderWidth() { return renderer._renderWidth; },
+            get thumbnailMode() { return renderer._thumbnailMode; },
+            uploadBoneMatrices: renderer._uploadBoneMatrices.bind(renderer),
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection);
 
         // Preallocated identity bone matrices (used when an animated model has no animator)
         this._boneIdentityScratch = new Float32Array(100 * 16);
@@ -1464,11 +1389,11 @@ export class Renderer {
         // image that was not the frame.
         // Motion blur velocity buffers (signed velocity -> float precision).
         // `depth: false`: the fullscreen reprojection tests no depth, and the object pass that does
-        // borrows the opaque buffer through `_velocityObjectsTarget` rather than owning one. The
+        // borrows the opaque buffer through `TemporalPasses._velocityObjectsTarget` rather than owning one. The
         // default would allocate a full-res depth texture nothing ever reads.
         this._targets.velocity = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
-        this._velocityTileFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
-        this._velocityNeighborFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        this._temporal.velocityTileFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        this._temporal.velocityNeighborFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // SSIL: bounce light in rgb (HDR, so float) and visibility in a. No depth attachment — every
         // stage is fullscreen with depth testing off.
         const aoOptions = { colorTextureOptions: { mipMap: false, precision: 'high' as const }, depth: false };
@@ -1857,10 +1782,10 @@ export class Renderer {
 
         this._createBloomMips(rw, rh);
 
-        const mbK = Renderer.MOTION_BLUR_TILE;
+        const mbK = TemporalPasses.MOTION_BLUR_TILE;
         this._targets.velocity.create(rw, rh);
-        this._velocityTileFBO.create(Math.ceil(rw / mbK), Math.ceil(rh / mbK));
-        this._velocityNeighborFBO.create(Math.ceil(rw / mbK), Math.ceil(rh / mbK));
+        this._temporal.velocityTileFBO.create(Math.ceil(rw / mbK), Math.ceil(rh / mbK));
+        this._temporal.velocityNeighborFBO.create(Math.ceil(rw / mbK), Math.ceil(rh / mbK));
         
         // The shared screen quad. Its V pairing differs by BACKEND, and this is the ONLY place that
         // difference exists: a GL texture's v=0 is its bottom row, a WebGPU texture's its top, while
@@ -1914,7 +1839,7 @@ export class Renderer {
         this._view.camera.resize(this._renderWidth, this._renderHeight);
         this._materials.updateCameraHole(scene);
         // Kept for per-draw lookups (forward light-probe selection) that don't receive the scene.
-        this._currentScene = scene;
+        this._view.scene = scene;
         this._advanceWindTime();
         // What is pushing foliage aside this frame (characters, moving bodies, blasts): stamps for the
         // instanced foliage programs, aged against the same clock as the wind.
@@ -1941,7 +1866,7 @@ export class Renderer {
         // because the resolve reprojects through that buffer: switching that pass off in the profiler
         // would otherwise leave the frame jittered with nothing to resolve it, which is strictly worse
         // than no TAA at all.
-        this._view.taaJitterActive = this._taaEnabled && this._taaSupported && !this._thumbnailMode
+        this._view.taaJitterActive = this._temporal.taaEnabled && this._temporal.taaSupported && !this._thumbnailMode
                                 && this._passEnabled['taa'] && this._passEnabled['velocity'];
         this._projection.updateJitter();
 
@@ -1987,19 +1912,19 @@ export class Renderer {
 
         // Which models moved since last frame. AFTER LOD selection, so a level that was just swapped in
         // is already flagged not-visible-last-frame rather than reading as a teleport, and BEFORE post
-        // processing, which is where the answer is needed — see `_detectObjectMotion`.
-        this._detectObjectMotion(scene);
+        // processing, which is where the answer is needed — see `_temporal.detectObjectMotion`.
+        this._temporal.detectObjectMotion(scene);
 
         // Decide the motion-blur gate here rather than in `_applyPostProcessing`: the velocity buffer
-        // it reads is produced inside the scene render now, so `_produceVelocity` has to know the
+        // it reads is produced inside the scene render now, so `_temporal.produceVelocity` has to know the
         // answer before post-processing would have supplied it.
-        // `|| _anyObjectMoved`: asking only whether the CAMERA moved is what made an object crossing
+        // `|| _temporal.anyObjectMoved`: asking only whether the CAMERA moved is what made an object crossing
         // the view of a parked camera produce no blur at all — the chain was never even run.
-        this._motionBlurWillRun = this._motionBlurEnabled && this._hasPrevViewProj
-                                  && this._motionBlurIntensity > 0.0 && this._passEnabled['motionBlur']
+        this._temporal.motionBlurWillRun = this._temporal.motionBlurEnabled && this._view.hasPrevViewProj
+                                  && this._temporal.motionBlurIntensity > 0.0 && this._passEnabled['motionBlur']
                                   && !this._thumbnailMode
-                                  && (this._cameraMoved() || this._anyObjectMoved);
-        this._velocityProducedThisFrame = false;
+                                  && (this._temporal.cameraMoved() || this._temporal.anyObjectMoved);
+        this._temporal.velocityProducedThisFrame = false;
         // Cleared here rather than after the composite: `_buildPostGraph` reads it to decide whether
         // to add the composite node at all, and that runs after the whole scene render.
         this._overlayDrawn = false;
@@ -2089,9 +2014,9 @@ export class Renderer {
         this._checkGLErrors('post');
 
         // Remember this frame's camera transform so next frame's motion blur can reproject against it.
-        mat4.copy(this._prevViewProj, this._view.viewProj);
-        mat4.copy(this._prevView, this._view.camera.viewMatrix);
-        this._hasPrevViewProj = true;
+        mat4.copy(this._view.prevViewProj, this._view.viewProj);
+        mat4.copy(this._view.prevView, this._view.camera.viewMatrix);
+        this._view.hasPrevViewProj = true;
 
         // And the camera behind this frame's depth snapshot, for next frame's particle collision. Not
         // from an offscreen capture: those resize the depth buffer and render from somewhere else.
@@ -2105,7 +2030,7 @@ export class Renderer {
         // Same for every model's world matrix and bone pose. Here rather than in `updateTransforms`:
         // `Scene.update` runs that pass TWICE on frames with camera rigs, and the second run would
         // overwrite the snapshot with this frame's value.
-        this._capturePrevTransforms(scene);
+        this._temporal.capturePrevTransforms(scene);
 
         // Sacrificial trailing scope: whichever query is LAST in a frame absorbs the driver's
         // end-of-frame drain, which would otherwise be charged to `present`.
@@ -2346,7 +2271,7 @@ export class Renderer {
         return {
             encoder: this._passes.acquireEncoder('particles.sim'),
             gravity: scene.physics?.gravity ?? [0, -9.81, 0],
-            depth: live ? this._depthSource() : null,
+            depth: live ? this._temporal.depthSource() : null,
             viewProj: live ? this._particleCollideViewProj : null,
             cameraPosition: this._particleCollideCamPos,
             orthographic: this._particleCollideOrtho,
@@ -2438,7 +2363,7 @@ export class Renderer {
             cameraPosition: camera.position,
             near: camera.near, far: camera.far,
             orthographic: camera.type === 'orthographic',
-            depth: this._thumbnailMode ? null : this._depthSource(),
+            depth: this._thumbnailMode ? null : this._temporal.depthSource(),
             width: this._renderWidth, height: this._renderHeight,
             ambient, sunDirection, sunColor, localLights,
             visible: this._frustumCulling ? (min, max) => this._frustum.intersectsAABB(min, max) : undefined,
@@ -2788,7 +2713,7 @@ export class Renderer {
         const h = Math.max(1, Math.ceil(this._renderHeight * scale));
         this._ensureFluidTargets(w, h, temporal);
         // The camera moved this frame: draw cheaply now, and let the history (if any) catch up.
-        const moving = this._hasPrevViewProj && !Renderer._matricesClose(this._view.viewProj, this._prevViewProj);
+        const moving = this._view.hasPrevViewProj && !Renderer._matricesClose(this._view.viewProj, this._view.prevViewProj);
 
         const { sunColor, ambient, sunDir } = this._fluidVolumeLight(scene);
         const depth = this._targets.sceneDepth.depth;
@@ -2900,10 +2825,10 @@ export class Renderer {
             ]));
             sm.bind('fluidVolumeResolve');
             sm.setUniform('u_invViewProj', this._view.invViewProjStable);
-            sm.setUniform('u_prevViewProj', this._projection.uvProducing(this._prevViewProj));
+            sm.setUniform('u_prevViewProj', this._projection.uvProducing(this._view.prevViewProj));
             // Moving or editing: lean on the new samples so nothing smears; still: accumulate.
             sm.setUniform('u_feedback', moving || lead.interacting ? 0.6 : 0.9);
-            sm.setUniform('u_historyValid', this._fluidHistoryValid && this._hasPrevViewProj ? 1 : 0);
+            sm.setUniform('u_historyValid', this._fluidHistoryValid && this._view.hasPrevViewProj ? 1 : 0);
             this._passes.drawFullscreen(pass);
             this._passes.endFullscreenPass(pass);
             this._fluidHistoryIndex = dst;
@@ -5200,7 +5125,7 @@ export class Renderer {
         this._checkSsilFormats();
     }
 
-    /** See {@link _ssilSupported}. Same shape as `_checkTaaFormats`. */
+    /** See {@link _ssilSupported}. Same shape as `TemporalPasses._checkTaaFormats`. */
     private _checkSsilFormats(): void {
         const downgraded = this._ssaoFBO.colors[0].downgraded
             || (this._ssilRadianceFBO?.colors[0].downgraded ?? false);
@@ -5214,7 +5139,7 @@ export class Renderer {
 
     /** Whether a stamp says "written last frame" — the only age the reprojecting passes can use. */
     private _ssilFresh(stamp: number): boolean {
-        return stamp >= 0 && stamp === this._view.frameIndex - 1 && this._hasPrevViewProj;
+        return stamp >= 0 && stamp === this._view.frameIndex - 1 && this._view.hasPrevViewProj;
     }
 
     /**
@@ -5239,8 +5164,8 @@ export class Renderer {
         mat4.copy(this._ssilProj, this._projection.uvProducing(this._jitteredCameraProj));
         // A view-space point to last frame's clip space and view space in one multiply each.
         mat4.invert(this._ssilInvView, this._view.camera.viewMatrix);
-        mat4.multiply(this._ssilViewToPrevClip, this._projection.uvProducing(this._prevViewProj), this._ssilInvView);
-        mat4.multiply(this._ssilViewToPrevView, this._prevView, this._ssilInvView);
+        mat4.multiply(this._ssilViewToPrevClip, this._projection.uvProducing(this._view.prevViewProj), this._ssilInvView);
+        mat4.multiply(this._ssilViewToPrevView, this._view.prevView, this._ssilInvView);
         // The inverse projection's z and w rows, which is all a view DEPTH needs (column-major).
         const ip = this._invProjection;
         this._ssilDepthParams[0] = ip[10]; this._ssilDepthParams[1] = ip[14];
@@ -5338,7 +5263,7 @@ export class Renderer {
         const pipeline = this._pipelines.fullscreen('ssilHistory', SsilHistoryProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            this._targets.scene.colors[0], this._depthSource(),
+            this._targets.scene.colors[0], this._temporal.depthSource(),
         ]));
         // The depth snapshot was rasterized through this frame's jittered projection.
         mat4.invert(this._invProjection, this._jitteredCameraProj);
@@ -5823,7 +5748,7 @@ export class Renderer {
      * share is deliberately the small half — most of the overcast wash comes from the lighting.
      */
     private _effectiveSaturation(): number {
-        const scene = this._currentScene;
+        const scene = this._view.scene;
         if (!scene) return this._saturation;
         const skyLight = scene.skyLight;
         const c = this._cloudiness(scene) * (skyLight ? skyLight.cloudResponse : 0);
@@ -6096,7 +6021,7 @@ export class Renderer {
 
     /** Upload the sky-light coefficients to the CURRENTLY BOUND program. */
     private _uploadSkyLight(): void {
-        const scene = this._currentScene;
+        const scene = this._view.scene;
         const node = scene?.skyLight ?? null;
         const on = !!node && this._skySHValid;
         const grade = scene ? this._cloudGrade(scene) : { sun: 1, white: 0, sky: 1, flat: 0 };
@@ -6630,8 +6555,8 @@ export class Renderer {
         // post-processing: the alternative is smearing the editor grid across the viewport every time
         // the camera moves, which is the first thing anyone notices. The editor chrome that used to be
         // in this list has gone further still — into its own buffer, past the end of the post chain.
-        this._produceVelocity();
-        this._taaResolvePass();
+        this._temporal.produceVelocity();
+        this._temporal.taaResolvePass();
         this._projection.endJitterPhase();
         // And the same image, reduced, as next frame's bounce light — before anything above is drawn.
         this._ssilHistoryPass();
@@ -7307,7 +7232,7 @@ export class Renderer {
 
         // --- Reseed: no usable history, so trace the WHOLE cloud image once ---
         // Tracing 1/16 anyway would show a blocky 4x upscale converging over ~16 frames.
-        if (!this._cloudHistoryValid || !this._hasPrevViewProj) {
+        if (!this._cloudHistoryValid || !this._view.hasPrevViewProj) {
             const seed = this._cloudHistoryIndex ^ 1;
             // The raymarch shader is still bound by the caller; u_temporal false makes traceUV() the
             // identity, so this writes one ray per pixel of the history target.
@@ -7353,7 +7278,7 @@ export class Renderer {
             this._cloudTraceFBO.colors[0], prev.colors[0], this._targets.gBuffer.depth,
         ]));
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
-        this._shaderManager.setUniform('u_prevViewProj', this._projection.uvProducing(this._prevViewProj));
+        this._shaderManager.setUniform('u_prevViewProj', this._projection.uvProducing(this._view.prevViewProj));
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         this._shaderManager.setUniform('u_resolution', [w, h]);
         this._shaderManager.setUniform('u_traceResolution', [tw, th]);
@@ -7361,7 +7286,7 @@ export class Renderer {
         // History needs BOTH a seeded buffer and a previous camera to reproject through; a resize
         // invalidates the first, the first frame the second. Always true while the reseed above
         // returns early, but must stay set — an unset uniform silently reads as false.
-        this._shaderManager.setUniform('u_historyValid', this._cloudHistoryValid && this._hasPrevViewProj);
+        this._shaderManager.setUniform('u_historyValid', this._cloudHistoryValid && this._view.hasPrevViewProj);
         this._shaderManager.setUniform('u_slabMid', node.baseAltitude + node.thickness * 0.5);
         this._passes.drawFullscreen(resolvePass);
         this._passes.endFullscreenPass(resolvePass);
@@ -7393,54 +7318,6 @@ export class Renderer {
     }
 
     /**
-     * Allocate and size the TAA history, and drop it whenever it is reallocated.
-     *
-     * The invalidation is mandatory, not defensive: `Framebuffer.resize` deletes and recreates every
-     * attachment, so a valid flag that survived a resize would point at uninitialized memory rather
-     * than merely a stale image.
-     */
-    private _ensureTaaTargets(w: number, h: number): void {
-        if (this._taaHistoryFBOs.length === 0) {
-            for (let i = 0; i < 2; i++)
-                this._taaHistoryFBOs.push(new Framebuffer(
-                    { colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
-            // `usage: 'depth'` is depth and nothing else — no colour attachment. A COPY of the scene
-            // depth rather than a linear-depth render: `depth24plus` has no float fallback
-            // (`resolveTextureFormat` returns early for it), whereas an `r16float` twin would be
-            // subject to the very downgrade `_checkTaaFormats` exists to catch.
-            this._taaPrevDepthFBO = new Framebuffer({ usage: 'depth' });
-        }
-        if (this._taaHistoryW !== w || this._taaHistoryH !== h) {
-            for (const fbo of this._taaHistoryFBOs) fbo.resize(w, h);
-            this._taaPrevDepthFBO.resize(w, h);
-            this._taaHistoryW = w;
-            this._taaHistoryH = h;
-            this._taaHistoryValid = false;
-            this._checkTaaFormats();
-        }
-    }
-
-    /**
-     * Refuse to run TAA on a device where a float render target silently became `rgba8unorm`.
-     *
-     * That format can represent neither an HDR history nor a signed velocity — every negative
-     * component of a motion vector clamps to zero — so the result would not be a degraded picture but
-     * a wrong one, with no error anywhere. `Texture.downgraded` is the only signal: the allocation
-     * itself succeeds, and `reportFloatDowngrade` warns once per format about bloom, which nobody
-     * would read as a TAA problem.
-     */
-    private _checkTaaFormats(): void {
-        const downgraded = this._taaHistoryFBOs.length > 0
-            && (this._taaHistoryFBOs[0].colors[0].downgraded || this._targets.velocity.colors[0].downgraded);
-        if (!downgraded) { this._taaSupported = true; return; }
-        if (this._taaSupported)
-            Logger.error('Temporal antialiasing disabled: this device has no float render targets, so '
-                + 'the history and velocity buffers were allocated as rgba8unorm. An 8-bit UNORM '
-                + 'velocity buffer cannot represent a negative motion vector at all.', 'Renderer');
-        this._taaSupported = false;
-    }
-
-    /**
      * Drop any accumulated temporal history. Call on a camera cut, scene change, or anything else
      * that makes last frame's image meaningless — otherwise the accumulation buffer smears the old
      * view across the new one, for the ~16 frames it takes the clouds to refresh every Bayer slot and
@@ -7448,7 +7325,7 @@ export class Renderer {
      */
     public invalidateTemporalHistory(): void {
         this._cloudHistoryValid = false;
-        this._taaHistoryValid = false;
+        this._temporal.taaHistoryValid = false;
         this._ssilHistoryFrame = -1;
         this._ssilRadianceFrame = -1;
     }
@@ -7737,92 +7614,6 @@ export class Renderer {
      * Upload the skinning palette. By NAME, never a cached location: `getUniformLocation` returns null
      * for a std140 block member, which is indistinguishable from "this shader has no bones".
      */
-    /** The animated model behind a node when it is genuinely skinned and posed, else null. */
-    private static _skinOf(node: ModelNode): AnimatedModel | null {
-        const model = node.model;
-        if (!(model instanceof AnimatedModel)) return null;
-        return model.hasSkin && node.animator ? model : null;
-    }
-
-    /**
-     * Whether this node's geometry sits somewhere different than it did last frame.
-     *
-     * False without a snapshot from EXACTLY the previous frame: no history is not the same as no
-     * motion, but it is the only safe answer — the alternative is a full-length streak on the frame a
-     * node spawns, unhides or teleports.
-     *
-     * A playing animator counts even when the node transform is identical, which is the whole point of
-     * skinned velocity: a character running on the spot moves every vertex and no matrix.
-     */
-    private _nodeMoved(node: ModelNode): boolean {
-        const prev = this._prevXform.get(node);
-        if (prev === undefined || prev.frame !== this._view.frameIndex - 1) return false;
-        if (!mat4.exactEquals(prev.world, node.worldTransform)) return true;
-        const animator = node.animator;
-        return !!animator && (animator.isPlaying || animator.isBlending);
-    }
-
-    /**
-     * Set {@link _anyObjectMoved} for this frame.
-     *
-     * Split from {@link _capturePrevTransforms} on purpose. Post-processing has to KNOW whether
-     * anything moved before it decides to run motion blur at all, and the snapshot can only be
-     * replaced after the frame is drawn — so the read happens here, at the top of the frame, and the
-     * write happens at the bottom. Folding them together would leave the gate one frame behind and the
-     * first frame of every motion unblurred.
-     */
-    /**
-     * Whether anything in the frame reads the velocity buffer, and so whether the previous-transform
-     * snapshot is worth keeping. Motion blur was the only reader until TAA; both need the same
-     * per-node history, so the condition is shared rather than duplicated at each site.
-     */
-    private _velocityWanted(): boolean {
-        return (this._motionBlurEnabled && this._motionBlurIntensity > 0)
-            || (this._taaEnabled && this._taaSupported);
-    }
-
-    private _detectObjectMotion(scene: Scene): void {
-        this._anyObjectMoved = false;
-        if (!this._velocityWanted()) return;
-        for (const node of scene.models) {
-            if (!this._inGBuffer(node)) continue;
-            if (this._nodeMoved(node)) { this._anyObjectMoved = true; return; }
-        }
-    }
-
-    /**
-     * Record where every model sat this frame, for next frame's velocity. Runs once, at the tail.
-     *
-     * Skipped entirely while nothing reads velocity, which costs nothing on the way back: the frame
-     * stamps go stale, `_nodeMoved` reads that as "no history", and the first re-enabled frame emits
-     * zero velocity rather than a streak from wherever things stood when it was switched off. Kept as
-     * a condition rather than made unconditional for exactly that property.
-     */
-    private _capturePrevTransforms(scene: Scene): void {
-        if (!this._velocityWanted()) return;
-        for (const node of scene.models) {
-            // A distance-culled model is not drawn and not posed; its stale stamp reads as "no history"
-            // (zero velocity) on the frame it returns, which is the right answer for a pop-in.
-            if (node.drawCulled) continue;
-            let entry = this._prevXform.get(node);
-            if (entry === undefined) {
-                entry = { world: mat4.create(), bones: null, frame: this._view.frameIndex };
-                this._prevXform.set(node, entry);
-            }
-            mat4.copy(entry.world, node.worldTransform);
-            entry.frame = this._view.frameIndex;
-
-            const skin = Renderer._skinOf(node);
-            if (!skin) { entry.bones = null; continue; }
-            // Allocated on first use and reused after: 6.4KB per skinned node, and only for the ones
-            // that actually have a pose to remember.
-            if (!entry.bones) entry.bones = new Float32Array(100 * 16);
-            const boneMatrices = node.animator!.getFinalBoneMatrices();
-            const n = Math.min(100, boneMatrices.length);
-            for (let i = 0; i < n; i++) entry.bones.set(boneMatrices[i], i * 16);
-        }
-    }
-
     private _uploadBoneMatrices(shaderType: string, node: ModelNode): void {
         const animatedModel = node.model as AnimatedModel;
         if (animatedModel.hasSkin && node.animator) {
@@ -7883,16 +7674,6 @@ export class Renderer {
      */
     public warmPipelines(onProgress?: (done: number, total: number) => void): Promise<number> {
         return this._pipelines.warm(onProgress);
-    }
-    /**
-     * True when this frame's camera transform differs from last frame's by more than float noise.
-     * Camera-reprojection motion blur has nothing to reconstruct from a stationary camera.
-     */
-    private _cameraMoved(): boolean {
-        if (!this._hasPrevViewProj) return false;
-        for (let i = 0; i < 16; i++)
-            if (Math.abs(this._view.viewProj[i] - this._prevViewProj[i]) > 1e-7) return true;
-        return false;
     }
 
     /**
@@ -7998,14 +7779,14 @@ export class Renderer {
         this._gBufferCopyFBO?.resize(width, height);
         this._decalReceiverFBO?.resize(width, height);
         this._targets.refraction?.resize(width, height);
-        const mbK = Renderer.MOTION_BLUR_TILE;
+        const mbK = TemporalPasses.MOTION_BLUR_TILE;
         this._targets.velocity.resize(width, height);
-        this._velocityTileFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
-        this._velocityNeighborFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
+        this._temporal.velocityTileFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
+        this._temporal.velocityNeighborFBO.resize(Math.ceil(width / mbK), Math.ceil(height / mbK));
         // A resize invalidates the previous-frame camera transform; skip blur for one frame. It also
         // reallocates every attachment (Framebuffer.create deletes and recreates), so every temporal
         // history now points at uninitialized memory — not merely a stale image.
-        this._hasPrevViewProj = false;
+        this._view.hasPrevViewProj = false;
         this.invalidateTemporalHistory();
         // The pool has no resize of its own: every slot it holds was built for the OLD extent, and the
         // next compile asks for the new one. Releasing here rather than reallocating keeps the "a
@@ -8122,8 +7903,8 @@ export class Renderer {
         // The temporal boundary — see the matching block in `_renderForwardOverlay`. This pipeline has
         // no clouds, no fog and no grid, so the opaque snapshot above is the whole scene and the
         // transparents below are the first thing that must stay out of history.
-        this._produceVelocity();
-        this._taaResolvePass();
+        this._temporal.produceVelocity();
+        this._temporal.taaResolvePass();
         this._projection.endJitterPhase();
 
         // Sort transparent draw queue by distance to camera
@@ -8256,13 +8037,13 @@ export class Renderer {
         // Per-draw light-probe selection: the probe containing THIS mesh supplies the env reflection
         // cube (unit 7). Always re-set — a previous draw may have bound a different cube.
         // Skipped during probe capture, to avoid feedback.
-        if (!this._view.capturing && this._currentScene &&
+        if (!this._view.capturing && this._view.scene &&
             (shaderType === 'blinn_phong' || shaderType === 'blinn_phongSkinned' ||
              shaderType === 'pbr' || shaderType === 'pbrSkinned' || shaderType.startsWith('custom:'))) {
             // Reflections are all the forward path takes from a probe; its lighting is the sky and ambient.
-            const probe = this._currentScene.probeForPoint(node.worldPosition, true);
+            const probe = this._view.scene.probeForPoint(node.worldPosition, true);
             const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
-            const cube = probeCube ?? this._currentScene.environmentMap;
+            const cube = probeCube ?? this._view.scene.environmentMap;
             this._shaderManager.setUniform('u_useEnvMap', cube ? true : false);
             this._shaderManager.setUniform('u_envMapLinear', probeCube ? true : false);
             // On the RHI path the cube is a group 0 entry and the backend picks its unit; binding it
@@ -9679,7 +9460,7 @@ export class Renderer {
      */
     private _setDirectionalOnForward(node: LightNode): void {
         if (node.type !== 'directional') return;
-        const grade = this._currentScene ? this._cloudGrade(this._currentScene)
+        const grade = this._view.scene ? this._cloudGrade(this._view.scene)
                                          : { sun: 1, white: 0, sky: 1, flat: 0 };
         for (const shaderName of this._forwardShaders()) {
             try {
@@ -9774,11 +9555,11 @@ export class Renderer {
         const flip = (): ResourceId => (src === composeA ? composeB : composeA);
 
         // --- head: the scene enters the chain ----------------------------------------------------
-        // The gate was decided at the top of the frame (`_motionBlurWillRun`) because the velocity
+        // The gate was decided at the top of the frame (`_temporal.motionBlurWillRun`) because the velocity
         // buffer is produced during the scene render. The second term is not redundant: the chain must
         // not run against a buffer that pass declined to fill.
         const blur = this._postProcessingAllowed
-                     && this._motionBlurWillRun && this._velocityProducedThisFrame;
+                     && this._temporal.motionBlurWillRun && this._temporal.velocityProducedThisFrame;
         // Captured, never `src` itself: `src` walks along the chain as the loop below adds stages, and
         // a closure over it would resolve to whichever buffer the chain ENDED on by the time the graph
         // runs — which is the last stage's output, not the head this pass is supposed to fill.
@@ -9786,7 +9567,7 @@ export class Renderer {
         graph.addPass({
             id: 'compose', scope: blur ? 'motionBlur' : 'present', writes: [head],
             execute: ctx => {
-                if (blur) { this._motionBlurPass(ctx.target(head)); return; }
+                if (blur) { this._temporal.motionBlurPass(ctx.target(head)); return; }
                 // The only `compose` label: the plain scene copy. PASS_LABEL_TO_SCOPE files it under
                 // `present`, which is the scope this node already opened.
                 const pass = this._passes.beginFullscreenPass(ctx.target(head).renderTarget, 'compose', true);
@@ -9897,7 +9678,7 @@ export class Renderer {
             }
 
             if (entry.effect === 'depthOfField') {
-                // `_depthSource()` is only filled outside thumbnail mode, but the whole chain is
+                // `_temporal.depthSource()` is only filled outside thumbnail mode, but the whole chain is
                 // bypassed for `_presentTarget` before this runs, so there is no stale-depth path here.
                 if (!this._dofEnabled || this._dofMaxBlur <= 0 || !this._passEnabled['dof.coc']) continue;
                 const from = src, to = flip();
@@ -10145,7 +9926,7 @@ export class Renderer {
         // library's transparency with it as well as every baked foliage impostor.
         this._shaderManager.setUniform('u_alphaFromDepth', 1.0);
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            this._targets.scene.colors[0], this._depthSource(), this._colorLut.volumeFor(null),
+            this._targets.scene.colors[0], this._temporal.depthSource(), this._colorLut.volumeFor(null),
         ]));
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
@@ -10322,8 +10103,8 @@ export class Renderer {
             // to ask of any temporal artefact. Falls back to the lit scene while TAA is off, when the
             // buffer has not been allocated at all.
             case 'taaHistory':
-                if (this._taaHistoryFBOs.length === 0) { tex = this._targets.scene.colors[0]; mode = 6; }
-                else { tex = this._taaHistoryFBOs[this._taaHistoryIndex].colors[0]; mode = 6; }
+                if (this._temporal.taaHistoryFBOs.length === 0) { tex = this._targets.scene.colors[0]; mode = 6; }
+                else { tex = this._temporal.taaHistoryFBOs[this._temporal.taaHistoryIndex].colors[0]; mode = 6; }
                 break;
             // Falls back to the lit scene if the overdraw target has not been allocated yet (the
             // pass above bails on a degenerate viewport), rather than dereferencing null.
@@ -10415,7 +10196,7 @@ export class Renderer {
      * `autoExposureEnabled` setter does, so walking into it eases instead of snapping.
      */
     private _updateEffectiveExposure(): void {
-        const scene = this._currentScene;
+        const scene = this._view.scene;
         const camera = this._view.camera;
         const found = scene && camera ? scene.exposureVolumesAt(camera.position) : [];
         this._effExposureLayers = found.map(f => ({ overrides: f.volume.overridesView, weight: f.weight }));
@@ -10772,7 +10553,7 @@ export class Renderer {
     private _dofPass(scene: Scene, coc: Framebuffer, bokeh: Framebuffer,
                      source: Framebuffer, target: Framebuffer): void {
         const u = this._dofUniforms(scene);
-        const depth = this._depthSource();
+        const depth = this._temporal.depthSource();
 
         // 1. Half-res colour, and the signed CoC in alpha. The scope is already open — this node
         //    reports under `dof.coc`, and the two below are opened as it moves through them.
@@ -10929,187 +10710,11 @@ export class Renderer {
     }
 
     /**
-     * Fill `_targets.velocity` for this frame, if anything is going to read it.
-     *
-     * Called from the SCENE render, right after the opaque depth snapshot, rather than from
-     * post-processing where it used to live: the TAA resolve runs inside the scene render, so the
-     * buffer has to exist before post-processing starts. Motion blur then reuses what this produced.
-     *
-     * `_velocityProducedThisFrame`, in the shape of `_ssaoProducedThisFrame`, because a framebuffer
-     * keeps its contents when nothing draws into it — a consumer that assumed the pass ran would
-     * reconstruct from whatever frame last filled it.
-     */
-    private _produceVelocity(): void {
-        if (this._thumbnailMode || !this._hasPrevViewProj) return;
-        // The debug channel is a reader too: without it, selecting 'velocity' with motion blur off
-        // would show a stale buffer rather than this frame's motion.
-        const wanted = this._view.taaJitterActive || this._motionBlurWillRun
-                       || this._debugView === 'velocity';
-        if (!wanted || !this._passes.beginPass('velocity')) return;
-
-        this._velocityPass();
-        this._velocityProducedThisFrame = true;
-
-        // Restore what the overlay passes that follow expect. The velocity passes drew into their own
-        // targets, so unlike `_renderSkyFog` this has to put the scene buffer back as well.
-        this._targets.scene.bind();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-    }
-
-    /**
-     * Resolve the antialiased image, and copy it back over `_targets.scene`.
-     *
-     * TWO passes, and the copy is not avoidable: the resolve READS `_targets.scene.colors[0]`, and
-     * everything drawn after this point — grid, transparents, gizmos, sprites, the selection mask —
-     * DRAWS into it. Making it the resolve's own target would be a read/write feedback on one texture.
-     *
-     * Runs inside the scene render rather than in post-processing, which is where a resolve would
-     * normally live. This is the last point where the image is simultaneously full render resolution,
-     * linear HDR, pre-tonemap and matched by a depth buffer — and, more importantly, the last point
-     * before the editor's overlays are drawn. A resolve after them smears the grid across the viewport
-     * every time the camera moves.
-     */
-    private _taaResolvePass(): void {
-        if (!this._view.taaJitterActive || !this._velocityProducedThisFrame) return;
-        const w = this._renderWidth, h = this._renderHeight;
-
-        this._passes.scope('taa');
-        this._ensureTaaTargets(w, h);
-        // The format guard runs on allocation, so the first frame on a device without float targets is
-        // where TAA turns itself off. The jitter goes with it, this frame included.
-        if (!this._taaSupported) { this._view.taaJitterActive = false; return; }
-
-        const dst = this._taaHistoryIndex ^ 1;
-
-        const pass = this._passes.beginFullscreenPass(this._taaHistoryFBOs[dst].renderTarget, 'taa', true);
-        const pipeline = this._pipelines.fullscreen('taaResolve', TaaResolveProgram);
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            this._targets.scene.colors[0],
-            this._taaHistoryFBOs[this._taaHistoryIndex].colors[0],
-            this._targets.velocity.colors[0],
-            this._depthSource(),
-            this._taaPrevDepthFBO.depth,
-        ]));
-        this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
-        this._shaderManager.setUniform('u_resolution', [w, h]);
-        this._shaderManager.setUniform('u_near', this._view.camera.near);
-        this._shaderManager.setUniform('u_far', this._view.camera.far);
-        // Last frame's exposure: `_resolveExposure` runs at the top of `_applyPostProcessing`, which is
-        // now AFTER this pass. Correct for a weight, which is all it is used for.
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
-        this._shaderManager.setUniform('u_feedbackMin', Math.min(this._taaMotionFeedback, this._taaFeedback));
-        this._shaderManager.setUniform('u_feedbackMax', this._taaFeedback);
-        this._shaderManager.setUniform('u_varianceGamma', this._taaClipStrength);
-        this._shaderManager.setUniform('u_historyValid', this._taaHistoryValid && this._hasPrevViewProj);
-        this._shaderManager.setUniform('u_historyFilter', this._taaHistoryFilter === 'catmullRom' ? 1 : 0);
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-
-        // Back over the scene buffer — sharpened on the way when asked. The HISTORY keeps the
-        // unsharpened resolve: sharpening inside the feedback loop would compound every frame.
-        const sharpen = this._taaSharpness > 0;
-        // Two literal calls rather than one with a computed label: the profiler-label test finds the
-        // labels by scanning for them.
-        const copy = sharpen
-            ? this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'taa.sharpen', false)
-            : this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'taa.copy', false);
-        const copyPipeline = sharpen
-            ? this._pipelines.fullscreen('taaSharpen', TaaSharpenProgram)
-            : this._pipelines.fullscreen('screen', ScreenProgram);
-        copy.setPipeline(copyPipeline);
-        copy.setBindGroup(0, this._bindGroups.textureGroup(copyPipeline, 0,
-                                                   [this._taaHistoryFBOs[dst].colors[0]]));
-        if (sharpen) {
-            this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
-            this._shaderManager.setUniform('u_sharpness', this._taaSharpness);
-            this._shaderManager.setUniform('u_exposure', this._view.exposure);
-        }
-        this._passes.drawFullscreen(copy);
-        this._passes.endFullscreenPass(copy);
-
-        // The depth that produced the history just written, kept for next frame's disocclusion test.
-        // AFTER the resolve, which still had to read the previous contents. A copy rather than a pass:
-        // `_copySceneDepth` already does exactly this, on both backends.
-        this._copyDepth(this._depthSource(), this._taaPrevDepthFBO.depth, w, h);
-
-        this._taaHistoryIndex = dst;
-        this._taaHistoryValid = true;
-
-        // Put back what the overlay passes below expect.
-        this._targets.scene.bind();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-    }
-
-    // Velocity in two stages. First the camera reprojection: reconstruct each pixel's world position
-    // from the opaque depth, project it with the previous frame's view-projection, and store the RAW
-    // screen-space delta (UV units, no shutter scale, no clamp) in _targets.velocity — correct for
-    // everything that did not move, and for the sky. Then the movers overwrite their own pixels with
-    // the truth. Motion blur applies its own scale and cap when it reads the buffer; see
-    // chunks/motionBlurShutter.wgsl for why the stored form is the unblurred one.
-    private _velocityPass(): void {
-        const pass = this._passes.beginFullscreenPass(this._targets.velocity.renderTarget, 'velocity', true);
-        const pipeline = this._pipelines.fullscreen('motionBlurVelocity', MotionBlurVelocityProgram);
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._depthSource()]));
-        // `_projection.uvProducing` hands back ONE shared scratch, so each result needs a home before the next
-        // call — the same two the object pass below already uses.
-        mat4.copy(this._uvViewProjScratch, this._projection.uvProducing(this._view.viewProj));
-        mat4.copy(this._uvPrevViewProjScratch, this._projection.uvProducing(this._prevViewProj));
-        // Jittered inverse in, unjittered projections out. See the shader: that pairing is what makes
-        // the stored delta jitter-free without any code anywhere re-deriving the jitter's direction.
-        this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
-        this._shaderManager.setUniform('u_viewProj', this._uvViewProjScratch);
-        this._shaderManager.setUniform('u_prevViewProj', this._uvPrevViewProjScratch);
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-
-        // Its own pass over the same colour buffer, with the opaque depth attached so the draws can
-        // depth-test. A second pass rather than more draws in the one above: that one owns no depth,
-        // and giving it some would mean clearing the buffer the gather still has to compare against.
-        if (this._currentScene) this._objectVelocityPass(this._currentScene);
-    }
-
-    /**
-     * The opaque depth the velocity chain reconstructs, tests and compares against.
-     *
-     * The snapshot `_copySceneDepth` takes after the opaque draw, in BOTH pipelines — the same buffer
-     * the other post passes (god rays, screen materials) already read.
-     *
-     * Deliberately not the G-buffer depth under `deferred`, which is the narrower buffer this used to
-     * return: forward-opaque Blinn-Phong models are drawn after the G-buffer and write only into
-     * `_targets.scene.depth`, so every one of their pixels was reprojected as whatever geometry sat behind
-     * it. Motion blur tolerated that; TAA reads the same buffer to decide where a pixel was last
-     * frame, and would ghost every Blinn-Phong object in the scene. Safe to unify only because the
-     * velocity chain now runs after `_copySceneDepth` in both pipelines.
-     */
-    private _depthSource(): Texture {
-        return this._targets.sceneDepth.depth;
-    }
-
-    /**
-     * The velocity buffer's colour with the opaque depth attached, so the object pass can depth-test
-     * against the geometry that produced it without owning a depth buffer of its own. Deduped by the
-     * device, so building it per pass is free.
-     */
-    private _velocityObjectsTarget(): RenderTarget {
-        return device.createRenderTarget({
-            label: 'velocity+depth',
-            colorViews: [this._targets.velocity.colors[0].attachmentView],
-            depthView: this._depthSource().attachmentView,
-        });
-    }
-
-    /**
      * The overlay layer's colour with the SCENE's live depth attached — the same borrowing trick as
-     * `_velocityObjectsTarget`, and for the same reason: helper wireframes and icons must still be
+     * `TemporalPasses._velocityObjectsTarget`, and for the same reason: helper wireframes and icons must still be
      * occluded by the geometry in front of them, and that answer already exists.
      *
-     * `_targets.scene.depth`, not `_depthSource()`: this draws in the same part of the frame the grid and
+     * `_targets.scene.depth`, not `_temporal.depthSource()`: this draws in the same part of the frame the grid and
      * transparents do, testing against the live attachment rather than the snapshot taken for the
      * fullscreen passes. Never cached on the renderer — a resize deletes both textures and the device
      * evicts every target naming them.
@@ -11134,180 +10739,6 @@ export class Renderer {
         const clear = !this._overlayDrawn;
         this._overlayDrawn = true;
         return this._passes.beginFullscreenPass(this._overlayTarget(), label, clear, [0, 0, 0, 0], false);
-    }
-
-    /**
-     * Per-object motion vectors, drawn OVER the camera-reprojection buffer.
-     *
-     * The base pass answers "where was this world point last frame" under the assumption that the point
-     * never moved. For anything that did move that answer is wrong, and this pass overwrites it with
-     * the real one: the same surface point projected through last frame's model matrix, and last
-     * frame's bone pose, instead of this frame's.
-     *
-     * Depth-tested `less-equal` against the opaque depth and writing none of it, so an occluded object
-     * contributes nothing and the buffer keeps the reprojected value for whatever is actually visible.
-     */
-    private _objectVelocityPass(scene: Scene): void {
-        // Selected before the pass is opened, so a scene where nothing qualifies — the common case
-        // under a moving camera — costs no render pass at all rather than an empty load/store of a
-        // full-res target every frame.
-        const movers = this._velocityDrawList;
-        movers.length = 0;
-        for (const node of scene.models) {
-            if (!this._inGBuffer(node)) continue;
-            // The geometry pass initializes a node added this frame; one that never got there has no
-            // mesh to draw and nothing in the depth buffer either.
-            if (!node.initialized) continue;
-            // `_outsideFrustum`, not `_culled`: the stat that one increments was already counted by
-            // the geometry pass, and every node must reach it at most once per frame.
-            if (this._outsideFrustum(node)) continue;
-            // A node that did not move is EXACTLY what the reprojection already describes, so drawing
-            // it would spend a draw call writing back the value already there. The two opt-out modes
-            // always draw: their whole job is to cancel what the base pass wrote.
-            if (node.motionBlur === 'full' && !this._nodeMoved(node)) continue;
-            movers.push(node);
-        }
-        if (movers.length === 0) return;
-
-        // `_projection.uvProducing` hands back one shared scratch, so each result needs a home before the next call.
-        mat4.copy(this._uvViewProjScratch, this._projection.uvProducing(this._view.viewProj));
-        mat4.copy(this._uvPrevViewProjScratch, this._projection.uvProducing(this._prevViewProj));
-
-        const pass = this._passes.beginFullscreenPass(this._velocityObjectsTarget(), 'velocity.objects', false);
-        // The pipeline last SET, not merely last built — the same dedupe the shadow caster loop uses.
-        let boundPipeline: RenderPipeline | null = null;
-
-        for (const node of movers) {
-            const mode = node.motionBlur;
-            const skin = Renderer._skinOf(node);
-            // The unlit Basic family has no normal/tangent/bitangent, so it packs bone data at
-            // locations 2/3 where every lit family puts it at 5/6 — one program cannot read both.
-            const materialType = node.model.material.type;
-            const basicFamily = materialType === 'basic' || materialType === 'basicSkinned';
-            const shaderType = skin
-                ? (basicFamily ? 'objectVelocityBasicSkinned' : 'objectVelocitySkinned')
-                : 'objectVelocity';
-
-            // Matched to the geometry pass, not assumed: a wireframe model put only its EDGES in the
-            // depth buffer, so filled triangles here would pass `less-equal` across the whole
-            // silhouette — against the background's far depth — and paint the model's velocity over
-            // scenery it never covered.
-            const topology = node.model.material.config.wireframe ? 'line-list' : 'triangle-list';
-
-            const pipeline = this._pipelines.get(shaderType, VELOCITY_PROGRAMS[shaderType], {
-                cullMode: Renderer._cullFor(node.model.material.config.side),
-                // Reads the opaque depth and writes none of it: this pass must not disturb a buffer the
-                // gather below still compares against.
-                depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
-                targets: 1,
-                topology,
-                vertex: skin ? 'model+skin' : 'model',
-                // As in the shadow pass: these programs declare a narrow attribute set, but the buffer
-                // under them was packed for whatever material the node wears.
-                builtFor: materialType,
-            });
-            if (pipeline !== boundPipeline) {
-                pass.setPipeline(pipeline);
-                boundPipeline = pipeline;
-            }
-
-            const prev = this._prevXform.get(node);
-            const fresh = prev !== undefined && prev.frame === this._view.frameIndex - 1;
-
-            this._shaderManager.setUniform('u_model', node.worldTransform);
-            this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
-            this._shaderManager.setUniform('u_uvViewProj', this._uvViewProjScratch);
-            // 'objectOnly' is handed THIS frame's view-projection as its previous one, so the camera
-            // term appears on both sides of the subtraction and divides out exactly rather than being
-            // approximated away. What is left is the node's own world-space motion — see MotionBlurMode
-            // for which cases that actually makes sharper, which is not all of them.
-            this._shaderManager.setUniform('u_uvPrevViewProj',
-                mode === 'objectOnly' ? this._uvViewProjScratch : this._uvPrevViewProjScratch);
-            // No usable history means no motion: previous == current, and the object writes zeros.
-            this._shaderManager.setUniform('u_prevModel', fresh ? prev!.world : node.worldTransform);
-            // A motion-blur opt-out, and only that. The velocity written is still the true one, so TAA
-            // can reproject the object rather than ghost it — see `encodeVelocity`.
-            this._shaderManager.setUniform('u_noBlur', mode === 'none' ? 1 : 0);
-            // 'objectOnly' is handed this frame's view-projection above, so what it writes is the
-            // node's world motion rather than its screen motion — a deliberate blur and a wrong
-            // reprojection. Flagging it lets the TAA resolve decline to use it instead of ghosting.
-            this._shaderManager.setUniform('u_trueMotion', mode === 'objectOnly' ? 0 : 1);
-
-            if (skin) {
-                // Initialize the VAO from the program ABOUT TO DRAW IT — see the same note in
-                // `_renderShadowCasters`. These programs declare the same attributes at the same
-                // locations as their family's colour program, so this is a no-op after the geometry
-                // pass rather than a per-frame re-stride.
-                skin.initializeVAO(this._shaderManager.getShader(shaderType).attributes);
-                // Fills _boneMatrixScratch with THIS frame's pose and uploads it as u_boneMatrices —
-                // which is also exactly the right PREVIOUS pose when there is no history to use.
-                this._uploadBoneMatrices(shaderType, node);
-                this._prevBoneScratch.set(fresh && prev!.bones ? prev!.bones : this._boneMatrixScratch);
-                this._shaderManager.setUniform('u_prevBoneMatrices', this._prevBoneScratch);
-            }
-
-            // Velocity is per surface, not per material: a merged model is one draw over its whole
-            // index buffer, with no material bound at all.
-            if (!this._passes.recordDraw(pass, node.model.mesh, 0, 0))
-                node.model.mesh.draw(topology);
-        }
-
-        this._passes.endFullscreenPass(pass);
-    }
-
-    // UE5-style tile reconstruction motion blur: velocity -> TileMax -> NeighborMax -> jittered
-    // gather. Reads the lit scene (_targets.scene) and writes the blurred result into the head of the post
-    // chain, replacing the plain scene->compose copy so the rest of the chain is unchanged.
-    private _motionBlurPass(target: Framebuffer): void {
-        const w = this._renderWidth, h = this._renderHeight;
-        const K = Renderer.MOTION_BLUR_TILE;
-
-        // 1) TileMax: dominant velocity per KxK tile. `_targets.velocity` was already filled during the
-        // scene render — see `_produceVelocity` — and it holds the RAW delta, so the shutter scale and
-        // the one-tile cap are applied here, inside the tile loop, before the magnitude compare.
-        const tilePass = this._passes.beginFullscreenPass(this._velocityTileFBO.renderTarget, 'velocity.tile', true);
-        const tilePipeline = this._pipelines.fullscreen('motionBlurTileMax', MotionBlurTileMaxProgram);
-        tilePass.setPipeline(tilePipeline);
-        tilePass.setBindGroup(0, this._bindGroups.textureGroup(tilePipeline, 0, [this._targets.velocity.colors[0]]));
-        this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
-        this._shaderManager.setUniform('u_screenSize', [w, h]);
-        this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
-        this._shaderManager.setUniform('u_maxVelocityPx', this._motionBlurMaxLength);
-        this._shaderManager.setUniform('u_tileSize', K);
-        this._passes.drawFullscreen(tilePass);
-        this._passes.endFullscreenPass(tilePass);
-
-        // 2) NeighborMax: 3x3 dilation of the tile velocities.
-        const nbPass = this._passes.beginFullscreenPass(this._velocityNeighborFBO.renderTarget, 'velocity.neighbor', true);
-        const nbPipeline = this._pipelines.fullscreen('motionBlurNeighborMax', MotionBlurNeighborMaxProgram);
-        nbPass.setPipeline(nbPipeline);
-        nbPass.setBindGroup(0, this._bindGroups.textureGroup(nbPipeline, 0, [this._velocityTileFBO.colors[0]]));
-        this._shaderManager.setUniform('u_tileTexelSize', [1 / this._velocityTileFBO.width, 1 / this._velocityTileFBO.height]);
-        this._passes.drawFullscreen(nbPass);
-        this._passes.endFullscreenPass(nbPass);
-
-        // 3) Gather: reconstruct the blurred image into the head of the chain.
-        const gatherPass = this._passes.beginFullscreenPass(target.renderTarget, 'motionBlur', true);
-        const gatherPipeline = this._pipelines.fullscreen('motionBlur', MotionBlurGatherProgram);
-        gatherPass.setPipeline(gatherPipeline);
-        gatherPass.setBindGroup(0, this._bindGroups.textureGroup(gatherPipeline, 0, [
-            this._targets.scene.colors[0], this._targets.velocity.colors[0],
-            this._velocityNeighborFBO.colors[0], this._depthSource(),
-        ]));
-        this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
-        this._shaderManager.setUniform('u_screenSize', [w, h]);
-        // Same shutter the TileMax pass applied, from the same two uniforms: the per-pixel and
-        // per-tile velocities must agree about how long the shutter is or the gather reads a dominant
-        // direction that does not match the taps it takes along it.
-        this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
-        this._shaderManager.setUniform('u_maxVelocityPx', this._motionBlurMaxLength);
-        this._shaderManager.setUniform('u_samples', this._motionBlurSamples);
-        this._shaderManager.setUniform('u_mbJitter', this._motionBlurJitter);
-        this._shaderManager.setUniform('u_near', this._view.camera.near);
-        this._shaderManager.setUniform('u_far', this._view.camera.far);
-        this._passes.drawFullscreen(gatherPass);
-        this._passes.endFullscreenPass(gatherPass);
     }
 
     public get canvas(): HTMLCanvasElement { return this._canvas; }
@@ -11458,7 +10889,7 @@ export class Renderer {
         addFbo(this._ssilRadianceFBO ?? undefined);
         addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO); addFbo(this._targets.overlay);
         addFbo(this._overdrawFBO ?? undefined);
-        addFbo(this._targets.velocity); addFbo(this._velocityTileFBO); addFbo(this._velocityNeighborFBO);
+        addFbo(this._targets.velocity); addFbo(this._temporal.velocityTileFBO); addFbo(this._temporal.velocityNeighborFBO);
         addFbo(this._dBufferFBO ?? undefined); addFbo(this._gBufferCopyFBO ?? undefined);
         addFbo(this._decalReceiverFBO ?? undefined);
         bytes += this._postPool.byteSize;
@@ -11585,13 +11016,13 @@ export class Renderer {
     public get filmGrainColored(): boolean { return this._filmGrainColored; }
     public set filmGrainColored(v: boolean) { this._filmGrainColored = v; }
 
-    public get motionBlurEnabled(): boolean { return this._motionBlurEnabled; }
-    public set motionBlurEnabled(enabled: boolean) { this._motionBlurEnabled = enabled; }
+    public get motionBlurEnabled(): boolean { return this._temporal.motionBlurEnabled; }
+    public set motionBlurEnabled(enabled: boolean) { this._temporal.motionBlurEnabled = enabled; }
 
-    public get taaEnabled(): boolean { return this._taaEnabled; }
+    public get taaEnabled(): boolean { return this._temporal.taaEnabled; }
     public set taaEnabled(enabled: boolean) {
-        if (enabled === this._taaEnabled) return;
-        this._taaEnabled = enabled;
+        if (enabled === this._temporal.taaEnabled) return;
+        this._temporal.taaEnabled = enabled;
         // Whatever is in the history buffer describes a frame this camera may never have rendered.
         // Blending against it would smear the moment TAA is switched back on.
         this.invalidateTemporalHistory();
@@ -11600,30 +11031,30 @@ export class Renderer {
      * False once the float-format guard has fired. Read-only: it is a property of the DEVICE, not a
      * setting, so the editor's toggle keeps reading back what the user chose.
      */
-    public get taaSupported(): boolean { return this._taaSupported; }
-    public get motionBlurIntensity(): number { return this._motionBlurIntensity; }
-    public set motionBlurIntensity(intensity: number) { this._motionBlurIntensity = Math.max(0, intensity); }
-    public get motionBlurSamples(): number { return this._motionBlurSamples; }
-    public set motionBlurSamples(samples: number) { this._motionBlurSamples = Math.min(32, Math.max(4, Math.round(samples))); }
-    public get motionBlurJitter(): number { return this._motionBlurJitter; }
-    public set motionBlurJitter(v: number) { this._motionBlurJitter = clampFinite(v, 0, 1, 0.5); }
-    public get motionBlurMaxLength(): number { return this._motionBlurMaxLength; }
+    public get taaSupported(): boolean { return this._temporal.taaSupported; }
+    public get motionBlurIntensity(): number { return this._temporal.motionBlurIntensity; }
+    public set motionBlurIntensity(intensity: number) { this._temporal.motionBlurIntensity = Math.max(0, intensity); }
+    public get motionBlurSamples(): number { return this._temporal.motionBlurSamples; }
+    public set motionBlurSamples(samples: number) { this._temporal.motionBlurSamples = Math.min(32, Math.max(4, Math.round(samples))); }
+    public get motionBlurJitter(): number { return this._temporal.motionBlurJitter; }
+    public set motionBlurJitter(v: number) { this._temporal.motionBlurJitter = clampFinite(v, 0, 1, 0.5); }
+    public get motionBlurMaxLength(): number { return this._temporal.motionBlurMaxLength; }
     public set motionBlurMaxLength(px: number) {
-        this._motionBlurMaxLength = clampFinite(px, 4, Renderer.MOTION_BLUR_TILE, Renderer.MOTION_BLUR_TILE);
+        this._temporal.motionBlurMaxLength = clampFinite(px, 4, TemporalPasses.MOTION_BLUR_TILE, TemporalPasses.MOTION_BLUR_TILE);
     }
 
     // The TAA tuning knobs. A change to how the history is weighted or fetched leaves the history
     // itself valid — it is still last frame's image — so none of these invalidate it.
-    public get taaFeedback(): number { return this._taaFeedback; }
-    public set taaFeedback(v: number) { this._taaFeedback = clampFinite(v, 0.8, 0.98, 0.97); }
-    public get taaMotionFeedback(): number { return this._taaMotionFeedback; }
-    public set taaMotionFeedback(v: number) { this._taaMotionFeedback = clampFinite(v, 0.5, 0.95, 0.88); }
-    public get taaClipStrength(): number { return this._taaClipStrength; }
-    public set taaClipStrength(v: number) { this._taaClipStrength = clampFinite(v, 0.5, 2, 1); }
-    public get taaHistoryFilter(): TaaHistoryFilter { return this._taaHistoryFilter; }
-    public set taaHistoryFilter(f: TaaHistoryFilter) { this._taaHistoryFilter = f === 'bilinear' ? 'bilinear' : 'catmullRom'; }
-    public get taaSharpness(): number { return this._taaSharpness; }
-    public set taaSharpness(v: number) { this._taaSharpness = clampFinite(v, 0, 1, 0.25); }
+    public get taaFeedback(): number { return this._temporal.taaFeedback; }
+    public set taaFeedback(v: number) { this._temporal.taaFeedback = clampFinite(v, 0.8, 0.98, 0.97); }
+    public get taaMotionFeedback(): number { return this._temporal.taaMotionFeedback; }
+    public set taaMotionFeedback(v: number) { this._temporal.taaMotionFeedback = clampFinite(v, 0.5, 0.95, 0.88); }
+    public get taaClipStrength(): number { return this._temporal.taaClipStrength; }
+    public set taaClipStrength(v: number) { this._temporal.taaClipStrength = clampFinite(v, 0.5, 2, 1); }
+    public get taaHistoryFilter(): TaaHistoryFilter { return this._temporal.taaHistoryFilter; }
+    public set taaHistoryFilter(f: TaaHistoryFilter) { this._temporal.taaHistoryFilter = f === 'bilinear' ? 'bilinear' : 'catmullRom'; }
+    public get taaSharpness(): number { return this._temporal.taaSharpness; }
+    public set taaSharpness(v: number) { this._temporal.taaSharpness = clampFinite(v, 0, 1, 0.25); }
 
     public get fxaaEnabled(): boolean { return this._fxaaEnabled; }
     public set fxaaEnabled(enabled: boolean) { this._fxaaEnabled = !!enabled; }
@@ -11808,9 +11239,9 @@ export class Renderer {
         this._ssaoEnabled = t.ssaoEnabled;
         this._ssaoSamples = t.ssaoSamples;
         this._ssilEnabled = t.ssilEnabled;
-        this._motionBlurEnabled = t.motionBlurEnabled;
-        if (this._taaEnabled !== t.taaEnabled) {
-            this._taaEnabled = t.taaEnabled;
+        this._temporal.motionBlurEnabled = t.motionBlurEnabled;
+        if (this._temporal.taaEnabled !== t.taaEnabled) {
+            this._temporal.taaEnabled = t.taaEnabled;
             // Turning it on mid-session must not blend against whatever the buffer last held.
             this.invalidateTemporalHistory();
         }
@@ -12165,17 +11596,17 @@ export class Renderer {
             ssaoThickness: this._ssaoThickness,
             ssilEnabled: this._ssilEnabled,
             ssilIntensity: this._ssilIntensity,
-            motionBlurEnabled: this._motionBlurEnabled,
-            motionBlurIntensity: this._motionBlurIntensity,
-            motionBlurSamples: this._motionBlurSamples,
-            motionBlurJitter: this._motionBlurJitter,
-            motionBlurMaxLength: this._motionBlurMaxLength,
-            taaEnabled: this._taaEnabled,
-            taaFeedback: this._taaFeedback,
-            taaMotionFeedback: this._taaMotionFeedback,
-            taaClipStrength: this._taaClipStrength,
-            taaHistoryFilter: this._taaHistoryFilter,
-            taaSharpness: this._taaSharpness,
+            motionBlurEnabled: this._temporal.motionBlurEnabled,
+            motionBlurIntensity: this._temporal.motionBlurIntensity,
+            motionBlurSamples: this._temporal.motionBlurSamples,
+            motionBlurJitter: this._temporal.motionBlurJitter,
+            motionBlurMaxLength: this._temporal.motionBlurMaxLength,
+            taaEnabled: this._temporal.taaEnabled,
+            taaFeedback: this._temporal.taaFeedback,
+            taaMotionFeedback: this._temporal.taaMotionFeedback,
+            taaClipStrength: this._temporal.taaClipStrength,
+            taaHistoryFilter: this._temporal.taaHistoryFilter,
+            taaSharpness: this._temporal.taaSharpness,
             fxaaEnabled: this._fxaaEnabled,
             fxaaQuality: this._fxaaQuality,
             fxaaSubpixel: this._fxaaSubpixel,

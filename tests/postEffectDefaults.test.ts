@@ -121,7 +121,7 @@ describe('every chain effect is gated where the ping-pong is decided', () => {
         // render, not in the chain, which is what lets the chain be switched off wholesale without
         // taking antialiasing with it. If a `taa` branch ever appears here, that stops being true.
         expect(GRAPH).not.toContain("entry.effect === 'taa'");
-        expect(RENDERER).toContain('private _taaResolvePass()');
+        expect(RENDERER).toContain('public taaResolvePass()');
     });
 
     it('advances the ping-pong only for effects that consume a chain stage', () => {

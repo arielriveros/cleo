@@ -82,7 +82,7 @@ describe('the fluid volume pass', () => {
     })();
 
     it('draws after the TAA resolve and before the transparents', () => {
-        const taa = forward.indexOf('this._taaResolvePass()');
+        const taa = forward.indexOf('this._temporal.taaResolvePass()');
         const volumes = forward.indexOf('this._renderFluidVolumes(scene)');
         const transparent = forward.indexOf("this._runForwardQueue('transparent'");
         expect(taa).toBeGreaterThan(-1);

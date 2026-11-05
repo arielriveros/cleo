@@ -1,5 +1,6 @@
 import { mat4 } from 'gl-matrix';
 import type { Camera } from '../../core/camera';
+import type { Scene } from '../../core/scene/scene';
 
 /**
  * The renderer's per-frame view state, one object shared by reference between `Renderer` and the
@@ -56,6 +57,15 @@ export interface FrameView {
     windTime: number;
     /** Last frame's `windTime`, for the motion vectors. */
     windTimePrev: number;
+    /** Last frame's unjittered view-projection, for motion blur, TAA and particle collision reprojection. */
+    readonly prevViewProj: mat4;
+    /** Last frame's view matrix, beside `prevViewProj`: SSIL compares depths in that camera's space. */
+    readonly prevView: mat4;
+    /** False until a frame has been drawn, and again after a resize: no usable previous view. */
+    hasPrevViewProj: boolean;
+    // The scene being rendered this frame, for per-draw lookups that don't receive it (forward
+    // light-probe selection in _renderModel).
+    scene: Scene | null;
 }
 
 /** A FrameView at its defaults. `camera` is assigned at the top of every frame, before any read. */
@@ -73,5 +83,9 @@ export function createFrameView(): FrameView {
         sunDirection: [0, 0, 0],
         windTime: 0,
         windTimePrev: 0,
+        prevViewProj: mat4.create(),
+        prevView: mat4.create(),
+        hasPrevViewProj: false,
+        scene: null,
     };
 }

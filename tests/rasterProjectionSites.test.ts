@@ -58,7 +58,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
 
     it('routes exactly these methods through _rasterProjection', () => {
         // Adding a method here is a decision, not a formality: check where the new pass sits relative
-        // to `_taaResolvePass` before you add it. Everything below the resolve is drawn on top of the
+        // to the TAA resolve (`TemporalPasses.taaResolvePass`) before you add it. Everything below the resolve is drawn on top of the
         // resolved image and must come out unjittered.
         expect([...callers('rasterProjection').keys()].sort()).toEqual([
             // --- Before the resolve: these ARE the TAA input, and must jitter. ---
@@ -120,14 +120,14 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         // separate functions with separate insertion points. One wired and the other not would leave
         // half the pipelines shimmering.
         expect(RENDERER.split('this._projection.endJitterPhase();').length - 1).toBe(2);
-        expect(RENDERER.split('this._taaResolvePass();').length - 1).toBe(2);
-        expect(RENDERER.split('this._produceVelocity();').length - 1).toBe(2);
+        expect(RENDERER.split('this._temporal.taaResolvePass();').length - 1).toBe(2);
+        expect(RENDERER.split('this._temporal.produceVelocity();').length - 1).toBe(2);
     });
 
     it('gates the jitter and the resolve on the same flag', () => {
         // A jittered image that nothing resolves is strictly worse than no TAA: it is the same
         // aliasing, now crawling. One field decides both.
         expect(RENDERER).toContain('if (!this._view.taaJitterActive || this._view.cubeFace');
-        expect(RENDERER).toContain('if (!this._view.taaJitterActive || !this._velocityProducedThisFrame) return;');
+        expect(RENDERER).toContain('if (!this._view.taaJitterActive || !this.velocityProducedThisFrame) return;');
     });
 });

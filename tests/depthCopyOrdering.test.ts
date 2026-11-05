@@ -62,6 +62,6 @@ describe('_copyDepth', () => {
         expect(branch.indexOf('this._copySceneDepth()')).toBeGreaterThan(-1);
         expect(branch.indexOf('this._copySceneDepth()'))
             .toBeLessThan(branch.indexOf('this._presentThumbnail()'));
-        expect(methodBody('_presentThumbnail')).toContain('this._depthSource()');
+        expect(methodBody('_presentThumbnail')).toContain('this._temporal.depthSource()');
     });
 });

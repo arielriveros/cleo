@@ -151,7 +151,7 @@ describe('per-object velocity', () => {
     it('emits nothing when the previous transform is the current one', () => {
         // What the pass uploads for a node with no usable history — freshly spawned, unhidden,
         // LOD-swapped or teleported. A stale snapshot would draw a full-length streak on the frame the
-        // node appears, so `_nodeMoved` reports false and `u_prevModel` gets the current matrix.
+        // node appears, so `TemporalPasses._nodeMoved` reports false and `u_prevModel` gets the current matrix.
         expect(velocity('full', panned, panned, movedX, movedX)).toEqual([0, 0]);
     });
 });
