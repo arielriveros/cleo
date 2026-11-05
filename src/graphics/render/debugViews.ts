@@ -20,7 +20,7 @@ import type { SsilPasses } from './ssil';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 
-/** What DebugViews reads from the renderer that owns it, while those members still live there. */
+/** What DebugViews reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface DebugViewsHost {
     readonly renderHeight: number;
     readonly renderWidth: number;

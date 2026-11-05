@@ -4,7 +4,6 @@ import { LightNode } from '../../core/scene/nodes/lightNode';
 import { Scene } from '../../core/scene/scene';
 import { spotBoundingSphere, DEFAULT_CLUSTER_GRID } from '../clusters';
 import type { ClusterLight } from '../clusters';
-import { Framebuffer } from '../framebuffer';
 import { NO_SHADOW_SLOT, POINT_CONE_SCALE, POINT_CONE_OFFSET } from '../lightData';
 import { LightGrid, MAX_LIGHTS } from '../lightGrid';
 import { DirectionalLight, Spotlight, PointLight, DEFAULT_SCENE_AMBIENT_LUX, REFERENCE_ILLUMINANCE } from '../lighting';
@@ -25,6 +24,7 @@ import type { BindGroupCache } from './bindGroups';
 import type { Visibility } from './visibility';
 import type { SsilPasses } from './ssil';
 import { ShaderManager } from '../systems/shaderManager';
+import type { RenderSubsystems } from './subsystems';
 
 /** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
  *  forward materials are appended at runtime via `customForwardTypes()`. */
@@ -47,16 +47,10 @@ function allForwardShaders(): string[] {
     return _forwardShaderCache;
 }
 
-/** What LightingPasses reads from the renderer that owns it, while those members still live there. */
+/** What LightingPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface LightingPassesHost {
-    readonly brdfFBO: Framebuffer;
-    cloudSkyFrontCube(): Texture | null;
-    readonly programList: ReadonlySet<string> | null;
     readonly renderHeight: number;
     readonly renderWidth: number;
-    readonly skySH: Float32Array;
-    readonly skySHSource: Texture | null;
-    readonly skySHValid: boolean;
     readonly thumbnailMode: boolean;
     readonly clearColor: number[];
 }
@@ -78,7 +72,8 @@ export class LightingPasses {
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _shadows: ShadowPasses,
                 private readonly _visibility: Visibility,
-                private readonly _ssil: SsilPasses) {}
+                private readonly _ssil: SsilPasses,
+                private readonly _sys: RenderSubsystems) {}
 
     /**
      * The scene's directional light AS UPLOADED this frame — the sun by day, the moon at night — when a
@@ -136,7 +131,7 @@ export class LightingPasses {
                 if (seen.has(program)) continue;
                 seen.add(program);
                 out.push(name);
-            } else if (!this._host.programList) {
+            } else if (!this._sys.programs.programList) {
                 // The editor builds everything: a name not registered yet is one the bind below should
                 // build (or report), as it always did.
                 out.push(name);
@@ -255,7 +250,7 @@ export class LightingPasses {
         }
         pass.setBindGroup(2, this._bindGroups.textureGroup(pipeline, 2, [
             cubes[0], cubes[1], cubes[2], cubes[3],
-            this._host.brdfFBO.colors[0], scene.environmentMap ?? this._bindGroups.fallbackCube,
+            this._sys.sky.brdfFBO.colors[0], scene.environmentMap ?? this._bindGroups.fallbackCube,
         ]));
 
         for (let i = 0; i < 2; i++) {
@@ -326,7 +321,7 @@ export class LightingPasses {
     public cloudGrade(scene: Scene): { sun: number, white: number, sky: number, flat: number } {
         const skyLight = scene.skyLight;
         const c = this.cloudiness(scene) * (skyLight ? skyLight.cloudResponse : 0);
-        const bakedSky = this._host.skySHSource !== null && this._host.skySHSource === this._host.cloudSkyFrontCube();
+        const bakedSky = this._sys.sky.skySHSource !== null && this._sys.sky.skySHSource === this._sys.sky.cloudSkyFrontCube();
         return {
             sun: 1 - LightingPasses.CLOUD_SUN_DIM * c,
             white: LightingPasses.CLOUD_SUN_WHITEN * c,
@@ -611,7 +606,7 @@ export class LightingPasses {
     private _uploadSkyLight(): void {
         const scene = this._view.scene;
         const node = scene?.skyLight ?? null;
-        const on = !!node && this._host.skySHValid;
+        const on = !!node && this._sys.sky.skySHValid;
         const grade = scene ? this.cloudGrade(scene) : { sun: 1, white: 0, sky: 1, flat: 0 };
 
         this._shaderManager.setUniform('u_skyLight.enabled', on ? 1 : 0);
@@ -619,12 +614,12 @@ export class LightingPasses {
 
         let sh = LightingPasses._ZERO_SH;
         if (on) {
-            sh = this._host.skySH;
+            sh = this._sys.sky.skySH;
             if (grade.flat > 0) {
                 // Collapse toward L0 ALONE — the sky's mean radiance, a uniform dome. Scaling all nine
                 // instead would dim a still-directional sky rather than flattening it.
                 const keep = 1 - grade.flat;
-                this._skySHGraded.set(this._host.skySH);
+                this._skySHGraded.set(this._sys.sky.skySH);
                 for (let k = 1; k < 9; k++)
                     for (let ch = 0; ch < 3; ch++) this._skySHGraded[k * 4 + ch] *= keep;
                 sh = this._skySHGraded;

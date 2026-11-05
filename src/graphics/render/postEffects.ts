@@ -24,14 +24,13 @@ import type { MaterialBinder } from './materialBinder';
 import type { TemporalPasses } from './temporal';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
+import type { RenderSubsystems } from './subsystems';
 
-/** What PostEffects reads from the renderer that owns it, while those members still live there. */
+/** What PostEffects reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface PostEffectsHost {
-    cloudiness(scene: Scene): number;
     readonly passEnabled: Record<RenderPass, boolean>;
     readonly renderHeight: number;
     readonly renderWidth: number;
-    sunScreenInfo(scene: Scene): { dir: [number, number, number], uv: [number, number], visible: number };
 }
 
 /**
@@ -51,7 +50,8 @@ export class PostEffects {
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _materials: MaterialBinder,
                 private readonly _temporal: TemporalPasses,
-                private readonly _fullscreen: FullscreenPasses) {}
+                private readonly _fullscreen: FullscreenPasses,
+                private readonly _sys: RenderSubsystems) {}
 
     /**
      * HDR bloom: luminance where bloom starts, soft-knee width around it, and additive strength.
@@ -209,7 +209,7 @@ export class PostEffects {
         const scene = this._view.scene;
         if (!scene) return this.saturation;
         const skyLight = scene.skyLight;
-        const c = this._host.cloudiness(scene) * (skyLight ? skyLight.cloudResponse : 0);
+        const c = this._sys.lighting.cloudiness(scene) * (skyLight ? skyLight.cloudResponse : 0);
         return this.saturation * (1 - PostEffects.CLOUD_DESATURATE * c);
     }
 
@@ -264,7 +264,7 @@ export class PostEffects {
      */
     public screenMaterialPass(scene: Scene, mat: CustomMaterial,
                                 source: Framebuffer, target: Framebuffer): void {
-        const sun = this._host.sunScreenInfo(scene);
+        const sun = this._sys.sky.sunScreenInfo(scene);
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'screenMaterial',
                                                false, undefined, false);
         // The WGSL, when there is any. On WebGL2 there is none and none is needed — the program

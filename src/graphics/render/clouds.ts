@@ -1,6 +1,5 @@
-import { mat4, vec3 } from 'gl-matrix';
+import { mat4 } from 'gl-matrix';
 import { Logger } from '../../core/logger';
-import { LightNode } from '../../core/scene/nodes/lightNode';
 import { VolumetricCloudsNode } from '../../core/scene/nodes/volumetricCloudsNode';
 import { Scene } from '../../core/scene/scene';
 import { atmosphereTransmittance, shHemisphereMeans } from '../cloudLighting';
@@ -13,7 +12,6 @@ import { ShaderStage, BufferUsage } from '../rhi/types';
 import type { BlendState } from '../rhi/types';
 import { glDevice } from '../rhi/webgl2/webgl2Device';
 import { keyLight } from '../skyNight';
-import type { KeyLight } from '../skyNight';
 import { GLState } from '../systems/glState';
 import { Texture } from '../texture';
 import { VolumetricCloudsProgram, CloudUpsampleProgram, CloudNoiseBakeComputeProgram, CloudTemporalResolveProgram } from './programs';
@@ -27,17 +25,10 @@ import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
+import type { RenderSubsystems } from './subsystems';
 
-/** What VolumetricCloudPasses reads from the renderer that owns it, while those members still live there. */
+/** What VolumetricCloudPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface VolumetricCloudPassesHost {
-    readonly clearSkySH: Float32Array;
-    readonly clearSkySHValid: boolean;
-    cloudSkyActive(scene: Scene): boolean;
-    readonly cloudWindDir: [number, number, number];
-    dirOf(node: LightNode): vec3;
-    readonly keyLight: KeyLight | null;
-    readonly keyLightNode: LightNode | null;
-    keyLightScale(): number;
     readonly quality: QualityPreset;
     readonly renderHeight: number;
     readonly renderWidth: number;
@@ -60,7 +51,8 @@ export class VolumetricCloudPasses {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
-                private readonly _fullscreen: FullscreenPasses) {}
+                private readonly _fullscreen: FullscreenPasses,
+                private readonly _sys: RenderSubsystems) {}
 
     // Reduced-resolution volumetric-clouds raymarch target (lazily sized to the node's resolutionScale;
     // upsampled + composited into the scene buffer). Only used when resolutionScale < 1.
@@ -179,7 +171,7 @@ export class VolumetricCloudPasses {
             }
             effSunColor = [0, 1, 2].map(i => sunColor[i] * this._cloudSunT[i]);
             // The key light's strength: fades out at sunset, and is the moonlight fraction at night.
-            effSunIntensity = node.sunIntensity * this._host.keyLightScale();
+            effSunIntensity = node.sunIntensity * this._sys.lighting.keyLightScale();
         } else {
             effSunColor = [0, 1, 2].map(i =>
                 sunColor[i] * mix1(1, sunsetColor[i], sunset) * mix1(1, NIGHT_SUN_DIM, night));
@@ -194,7 +186,7 @@ export class VolumetricCloudPasses {
         let effAmbientIntensity = node.ambientIntensity;
         // Only with an atmosphere: its sun irradiance is what puts the sky's radiance and the clouds'
         // `sunIntensity` on one scale. A skybox's SH comes in arbitrary units the clouds cannot relate to.
-        const skySH = node.useSkyAmbient && atmo && scene.skyLight && this._host.clearSkySHValid ? this._host.clearSkySH : null;
+        const skySH = node.useSkyAmbient && atmo && scene.skyLight && this._sys.sky.clearSkySHValid ? this._sys.sky.clearSkySH : null;
         if (skySH && atmo) {
             // The real sky's radiance: it already darkens, reddens and goes blue-hour with the sun.
             // Re-expressed in the clouds' units: sky radiance per unit of the atmosphere's sun
@@ -240,8 +232,8 @@ export class VolumetricCloudPasses {
             for (const light of scene.lights) {
                 if (light.type === 'directional') {
                     // The key light: at night that is the moon, in the moon's colour.
-                    sunDir = this._host.dirOf(light);
-                    const key = light === this._host.keyLightNode ? this._host.keyLight : null;
+                    sunDir = this._sys.lighting.dirOf(light);
+                    const key = light === this._sys.lighting.keyLightNode ? this._sys.lighting.keyLight : null;
                     sunColor = key?.isMoon ? key.color : light.light.diffuse;
                     break;
                 }
@@ -284,8 +276,8 @@ export class VolumetricCloudPasses {
         this._shaderManager.setUniform('u_hazeDistance', node.hazeDistance);
         // Animation
         // The scene Wind's direction and strength when the node follows it, else its own.
-        const windSpeed = node.resolveWind(scene.wind, this._host.cloudWindDir);
-        this._shaderManager.setUniform('u_wind', this._host.cloudWindDir);
+        const windSpeed = node.resolveWind(scene.wind, this._sys.shadows.cloudWindDir);
+        this._shaderManager.setUniform('u_wind', this._sys.shadows.cloudWindDir);
         this._shaderManager.setUniform('u_windSpeed', windSpeed);
         this._shaderManager.setUniform('u_detailWindFactor', node.detailWindFactor);
         // Quality
@@ -299,7 +291,7 @@ export class VolumetricCloudPasses {
 
     /** The clouds' wind clock, in seconds: frozen at the bake while they are drawn from it. */
     public cloudTime(scene: Scene, node: VolumetricCloudsNode): number {
-        return this._host.cloudSkyActive(scene) ? node.bakedAt : performance.now() * 0.001;
+        return this._sys.sky.cloudSkyActive(scene) ? node.bakedAt : performance.now() * 0.001;
     }
 
     /**

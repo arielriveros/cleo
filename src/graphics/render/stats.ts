@@ -15,7 +15,7 @@ import type { SkyPasses } from './sky';
 import type { DebugViews } from './debugViews';
 import type { FluidVolumePasses } from './fluids';
 
-/** What RenderStats reads from the renderer that owns it, while those members still live there. */
+/** What RenderStats reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface RenderStatsHost {
     readonly canvas: HTMLCanvasElement;
     readonly deferred: boolean;

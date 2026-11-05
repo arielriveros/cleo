@@ -7,7 +7,6 @@ import { Scene } from '../../core/scene/scene';
 import { TerrainLodSettings } from '../../terrain/terrain';
 import type { Terrain } from '../../terrain/terrain';
 import { GpuOcclusion, GPU_OCCLUSION_BUDGET } from '../gpuOcclusion';
-import { Mesh } from '../mesh';
 import { OcclusionBuffer } from '../occlusion/occlusionBuffer';
 import { TerrainOccluder } from '../occlusion/terrainOccluder';
 import type { OccluderGrid } from '../occlusion/terrainOccluder';
@@ -24,14 +23,14 @@ import { DEPTH_TEST } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
+import type { RenderSubsystems } from './subsystems';
 
 /** Built frames in a row that hid nothing before occlusion backs off, and how often it probes then. */
 const OCCLUSION_IDLE_FRAMES = 30;
 const OCCLUSION_IDLE_PROBE = 8;
 
-/** What Visibility reads from the renderer that owns it, while those members still live there. */
+/** What Visibility reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface VisibilityHost {
-    readonly iblCubeMesh: Mesh;
     readonly selectedNodeId: string | null;
     readonly thumbnailMode: boolean;
 }
@@ -51,7 +50,8 @@ export class Visibility {
                 private readonly _targets: FrameTargets,
                 private readonly _passes: PassEncoder,
                 private readonly _pipelines: PipelineCache,
-                private readonly _projection: ViewProjection) {}
+                private readonly _projection: ViewProjection,
+                private readonly _sys: RenderSubsystems) {}
 
     // Per-object camera frustum culling for the main color passes. Rebuilt each frame from _view.viewProj.
     public frustum: Frustum = new Frustum();
@@ -275,7 +275,7 @@ export class Visibility {
             mat4.scale(model, model, [size, size, size]);
             this._shaderManager.setUniform('u_model', model);
             pass.beginOcclusionQuery(i);
-            if (!this._passes.recordDraw(pass, this._host.iblCubeMesh, 0, 0)) this._host.iblCubeMesh.draw();
+            if (!this._passes.recordDraw(pass, this._sys.sky.iblCubeMesh, 0, 0)) this._sys.sky.iblCubeMesh.draw();
             pass.endOcclusionQuery();
         }
         pass.end();

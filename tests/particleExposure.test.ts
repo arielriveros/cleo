@@ -64,6 +64,6 @@ describe('the lit-particle ambient', () => {
         const src = rendererSource();
         expect(src).not.toContain('sunColor[0] * 0.25 + 0.03');
         // From the scene ambient, wherever that helper lives (a host call while lighting is in the renderer).
-        expect(src).toMatch(/const ambient = this\.(?:_host\.|_\w+\.)?_?internalAmbient\(scene\);/);
+        expect(src).toMatch(/const ambient = this\.(?:\w+\.)*_?internalAmbient\(scene\);/);
     });
 });

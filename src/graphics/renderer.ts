@@ -5,7 +5,6 @@ import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
 import { LightNode } from '../core/scene/nodes/lightNode';
 import type { LightProbeNode } from '../core/scene/nodes/lightProbeNode';
-import { keyLight } from './skyNight';
 import { type ExposureCurveKey, REFERENCE_ILLUMINANCE } from './lighting';
 import { Mesh } from './mesh';
 import type { ShaderProgram, ShaderProgramDescriptor } from './rhi/shaderProgram';
@@ -16,9 +15,7 @@ import type { CompiledGraph, ResourceId } from './renderGraph/graph';
 import { FramebufferPool } from './renderGraph/pool';
 import { materialIndexOf, resolvePostChain } from './renderGraph/chain';
 import type { ResourceDesc } from './renderGraph/resources';
-import {
-    MAX_CASCADES, MAX_POINT_SHADOWS,
-} from './shadowMath';
+import { MAX_CASCADES, MAX_POINT_SHADOWS } from './shadowMath';
 
 
 import { GLState } from './systems/glState';
@@ -29,9 +26,7 @@ import { TexturePacker } from './systems/texturePacker';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats } from './renderStats';
 import { shaderStats } from './shaderStats';
-import {
-    parseRecipes, resetShaderOptimizerFrame,
-} from './shaderOptimizer';
+import { parseRecipes, resetShaderOptimizerFrame } from './shaderOptimizer';
 import type { PipelineRecipe } from './shaderOptimizer';
 import { OcclusionBuffer } from './occlusion/occlusionBuffer';
 import { EXTRA_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
@@ -41,9 +36,7 @@ import { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from 
 import { FoliageGpuCuller } from './foliageGpuCulling';
 import { gatherFoliageInteractors } from './foliageInteraction';
 
-import {
-    ScreenProgram,
-} from './render/programs';
+import { ScreenProgram } from './render/programs';
 import { createFrameView, type FrameView } from './render/frameView';
 import { FrameTargets } from './render/frameTargets';
 import { PassEncoder } from './render/passEncoder';
@@ -75,6 +68,7 @@ import { EditorOverlays } from './render/editorOverlays';
 import { DebugViews } from './render/debugViews';
 import { Capture } from './render/capture';
 import { RenderStats } from './render/stats';
+import type { RenderSubsystems } from './render/subsystems';
 import { ProgramRegistry } from './render/programRegistry';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
@@ -191,6 +185,8 @@ export class Renderer {
     private readonly _capture: Capture;
     /** Frame statistics for the performance HUD, the GPU memory estimate and the opt-in GL error check (render/stats.ts). */
     private readonly _stats: RenderStats;
+    /** The subsystems, for the ones that reach each other while drawing (render/subsystems.ts). Filled at the end of the constructor. */
+    private readonly _subsystems = {} as { -readonly [K in keyof RenderSubsystems]: RenderSubsystems[K] };
     /** Shader programs: the boot build, variants, on-demand builds with stand-ins, filter swaps (render/programRegistry.ts). */
     private readonly _programs: ProgramRegistry;
 
@@ -276,8 +272,7 @@ export class Renderer {
             get capabilities() { return renderer._capabilities; },
             get deviceReady() { return renderer._deviceReady; },
             get device() { return renderer.device; },
-            get shadowFilterMode() { return renderer._shadows.shadowFilterMode; },
-        }, config.programs, !!config.shaderVariants);
+        }, config.programs, !!config.shaderVariants, this._subsystems);
         this._pipelines = new PipelineCache(this._programs, this._view, this._passes, parseRecipes(config.pipelines));
         this._bindGroups = new BindGroupCache({
             shadowCascades: () => this._shadows.shadowCascadeFBO.texture,
@@ -298,119 +293,56 @@ export class Renderer {
             renderHeight: () => this._renderHeight,
         }, this._view);
         this._temporal = new TemporalPasses({
-            get boneMatrixScratch() { return renderer._modelDraw.boneMatrixScratch; },
-            get debugView() { return renderer._debugViews.debugView; },
-            inGBuffer: (...args: Parameters<GeometryPass['inGBuffer']>) => renderer._geometry.inGBuffer(...args),
-            outsideFrustum: (...args: Parameters<Visibility['outsideFrustum']>) => renderer._visibility.outsideFrustum(...args),
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-            uploadBoneMatrices: (...args: Parameters<ModelDraw['uploadBoneMatrices']>) => renderer._modelDraw.uploadBoneMatrices(...args),
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems);
         this._autoExposure = new AutoExposure({
-            get presentTarget() { return renderer._capture.presentTarget; },
             get ev100() { return renderer.ev100; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._fullscreen);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._fullscreen, this._subsystems);
         this._post = new PostEffects({
-            cloudiness: (...args: Parameters<LightingPasses['cloudiness']>) => renderer._lighting.cloudiness(...args),
             get passEnabled() { return renderer._passEnabled; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            sunScreenInfo: (...args: Parameters<SkyPasses['sunScreenInfo']>) => renderer._sky.sunScreenInfo(...args),
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._temporal, this._fullscreen);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._temporal, this._fullscreen, this._subsystems);
         this._clouds = new VolumetricCloudPasses({
-            get clearSkySH() { return renderer._sky.clearSkySH; },
-            get clearSkySHValid() { return renderer._sky.clearSkySHValid; },
-            cloudSkyActive: (...args: Parameters<SkyPasses['cloudSkyActive']>) => renderer._sky.cloudSkyActive(...args),
-            get cloudWindDir() { return renderer._shadows.cloudWindDir; },
-            dirOf: (...args: Parameters<LightingPasses['dirOf']>) => renderer._lighting.dirOf(...args),
-            get keyLight() { return renderer._lighting.keyLight; },
-            get keyLightNode() { return renderer._lighting.keyLightNode; },
-            keyLightScale: (...args: Parameters<LightingPasses['keyLightScale']>) => renderer._lighting.keyLightScale(...args),
             get quality() { return renderer._quality; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems);
         this._decals = new DecalPasses({
             get deferred() { return renderer._deferred; },
-            get frustum() { return renderer._visibility.frustum; },
-            get frustumCulling() { return renderer._visibility.frustumCulling; },
-            get iblCubeMesh() { return renderer._sky.iblCubeMesh; },
-            outsideFrustum: (...args: Parameters<Visibility['outsideFrustum']>) => renderer._visibility.outsideFrustum(...args),
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._subsystems);
         this._fluids = new FluidVolumePasses({
-            cloudGrade: (...args: Parameters<LightingPasses['cloudGrade']>) => renderer._lighting.cloudGrade(...args),
-            dirOf: (...args: Parameters<LightingPasses['dirOf']>) => renderer._lighting.dirOf(...args),
-            get frustum() { return renderer._visibility.frustum; },
-            get frustumCulling() { return renderer._visibility.frustumCulling; },
-            get iblCubeMesh() { return renderer._sky.iblCubeMesh; },
-            internalAmbient: (...args: Parameters<LightingPasses['internalAmbient']>) => renderer._lighting.internalAmbient(...args),
-            get keyLight() { return renderer._lighting.keyLight; },
-            get keyLightNode() { return renderer._lighting.keyLightNode; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            get skySH() { return renderer._sky.skySH; },
-            get skySHValid() { return renderer._sky.skySHValid; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen, this._subsystems);
         this._particlePasses = new ParticlePasses({
-            cloudGrade: (...args: Parameters<LightingPasses['cloudGrade']>) => renderer._lighting.cloudGrade(...args),
-            dirOf: (...args: Parameters<LightingPasses['dirOf']>) => renderer._lighting.dirOf(...args),
-            get frustum() { return renderer._visibility.frustum; },
-            get frustumCulling() { return renderer._visibility.frustumCulling; },
-            internalAmbient: (...args: Parameters<LightingPasses['internalAmbient']>) => renderer._lighting.internalAmbient(...args),
-            get keyLight() { return renderer._lighting.keyLight; },
-            get keyLightNode() { return renderer._lighting.keyLightNode; },
-            get lightOccludedMemo() { return renderer._visibility.lightOccludedMemo; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            get skySH() { return renderer._sky.skySH; },
-            get skySHValid() { return renderer._sky.skySHValid; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._projection, this._temporal);
+        }, this._view, this._targets, this._passes, this._projection, this._temporal, this._subsystems);
         this._sprites = new Sprite2DPasses({
             get canvas() { return renderer._canvas; },
-            get frustum() { return renderer._visibility.frustum; },
-            get frustumCulling() { return renderer._visibility.frustumCulling; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._particlePasses);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._particlePasses, this._subsystems);
         this._foliage = new FoliagePasses({
-            aabbDistSq: (...args: Parameters<Visibility['aabbDistSq']>) => renderer._visibility.aabbDistSq(...args),
-            cellOccluded: (...args: Parameters<Visibility['cellOccluded']>) => renderer._visibility.cellOccluded(...args),
-            get frustum() { return renderer._visibility.frustum; },
-            get frustumCulling() { return renderer._visibility.frustumCulling; },
-            objectId: (...args: Parameters<ModelDraw['objectId']>) => renderer._modelDraw.objectId(...args),
-            shadowCutoutOf: (...args: Parameters<ShadowPasses['shadowCutoutOf']>) => renderer._shadows.shadowCutoutOf(...args),
-            get shadowFrustum() { return renderer._shadows.shadowFrustum; },
-            get shadowLightUnit() { return renderer._shadows.shadowLightUnit; },
-            shadowReachOf: (...args: Parameters<ShadowPasses['shadowReachOf']>) => renderer._shadows.shadowReachOf(...args),
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection);
+        }, this._view, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._subsystems);
         this._shadows = new ShadowPasses({
-            atmosphereSunDir: (scene, node) => renderer._sky.atmosphereSunDir(scene, node),
-            get coneSphere() { return renderer._lighting.coneSphere; },
             get deviceReady() { return renderer._deviceReady; },
-            dirOf: (node) => renderer._lighting.dirOf(node),
-            get frustum() { return renderer._visibility.frustum; },
-            get frustumCulling() { return renderer._visibility.frustumCulling; },
-            get keyLight() { return renderer._lighting.keyLight; },
-            get keyLightDir() { return renderer._lighting.keyLightDir; },
-            lightOccluded: (node, center, radius) => renderer._visibility.lightOccluded(node, center, radius),
-            objectId: (obj) => renderer._modelDraw.objectId(obj),
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            get terrainLodStep2() { return renderer._visibility.terrainLodStep2; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-            uploadBoneMatrices: (shaderType, node) => renderer._modelDraw.uploadBoneMatrices(shaderType, node),
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._foliage);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._foliage, this._subsystems);
         this._visibility = new Visibility({
-            get iblCubeMesh() { return renderer._sky.iblCubeMesh; },
             get selectedNodeId() { return renderer._selectedNodeId; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._projection);
+        }, this._view, this._targets, this._passes, this._pipelines, this._projection, this._subsystems);
         this._ssil = new SsilPasses({
             get jitteredCameraProj() { return renderer._jitteredCameraProj; },
             get renderHeight() { return renderer._renderHeight; },
@@ -418,35 +350,26 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._temporal, this._fullscreen);
         this._lighting = new LightingPasses({
-            get brdfFBO() { return renderer._sky.brdfFBO; },
-            cloudSkyFrontCube: () => renderer._sky.cloudSkyFrontCube(),
-            get programList() { return renderer._programs.programList; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            get skySH() { return renderer._sky.skySH; },
-            get skySHSource() { return renderer._sky.skySHSource; },
-            get skySHValid() { return renderer._sky.skySHValid; },
             get thumbnailMode() { return renderer._thumbnailMode; },
             get clearColor() { return renderer.clearColor; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._shadows, this._visibility, this._ssil);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._shadows, this._visibility, this._ssil, this._subsystems);
         this._sky = new SkyPasses({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-            captureProbe: (scene, probe) => renderer._capture.captureProbe(scene, probe),
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._lighting, this._fullscreen);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._lighting, this._fullscreen, this._subsystems);
         this._modelDraw = new ModelDraw(this._view, this._passes, this._pipelines, this._bindGroups, this._materials,
                                         this._projection);
         this._geometry = new GeometryPass(this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._foliage, this._visibility, this._lighting, this._modelDraw);
         this._forward = new ForwardPass({
             get passEnabled() { return renderer._passEnabled; },
-            renderEditorOverlay: (scene, helperNodes, gizmoNodes) => renderer._overlays.renderEditorOverlay(scene, helperNodes, gizmoNodes),
             get renderHeight() { return renderer._renderHeight; },
-            renderSelectionMask: (models, sprites) => renderer._overlays.renderSelectionMask(models, sprites),
             get renderWidth() { return renderer._renderWidth; },
             get selectedNodeId() { return renderer._selectedNodeId; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._temporal, this._clouds, this._decals, this._fluids, this._particlePasses, this._sprites, this._visibility, this._ssil, this._lighting, this._sky, this._modelDraw);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._temporal, this._clouds, this._decals, this._fluids, this._particlePasses, this._sprites, this._visibility, this._ssil, this._lighting, this._sky, this._modelDraw, this._subsystems);
         this._overlays = new EditorOverlays({
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._post, this._decals, this._sprites, this._fullscreen, this._modelDraw);
@@ -470,6 +393,18 @@ export class Renderer {
             get renderWidth() { return renderer._renderWidth; },
         }, this._targets, this._temporal, this._post, this._clouds, this._decals, this._shadows, this._ssil, this._sky, this._debugViews,
            this._fluids);
+        Object.assign(this._subsystems, {
+            lighting: this._lighting,
+            sky: this._sky,
+            shadows: this._shadows,
+            visibility: this._visibility,
+            modelDraw: this._modelDraw,
+            geometry: this._geometry,
+            debugViews: this._debugViews,
+            overlays: this._overlays,
+            capture: this._capture,
+            programs: this._programs,
+        } satisfies RenderSubsystems);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._shadows.shadowDistance = config.shadowDistance ?? 100;
         this._shadows.cascadeCount = Math.min(MAX_CASCADES, Math.max(1, Math.round(config.shadowCascades ?? this._shadows.cascadeCount)));

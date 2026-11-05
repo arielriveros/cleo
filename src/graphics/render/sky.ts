@@ -3,7 +3,6 @@ import { Camera } from '../../core/camera';
 import { authoring } from '../../core/eventBus';
 import { Geometry } from '../../core/geometry';
 import { Logger } from '../../core/logger';
-import { LightProbeNode } from '../../core/scene/nodes/lightProbeNode';
 import { SkyAtmosphereNode, DEFAULT_MOONLIGHT_INTENSITY } from '../../core/scene/nodes/skyAtmosphereNode';
 import { SkyboxNode } from '../../core/scene/nodes/skyboxNode';
 import { VolumetricCloudsNode } from '../../core/scene/nodes/volumetricCloudsNode';
@@ -32,13 +31,13 @@ import type { ViewProjection } from './viewProjection';
 import type { LightingPasses } from './lighting';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
+import type { RenderSubsystems } from './subsystems';
 
-/** What SkyPasses reads from the renderer that owns it, while those members still live there. */
+/** What SkyPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface SkyPassesHost {
     readonly renderHeight: number;
     readonly renderWidth: number;
     readonly thumbnailMode: boolean;
-    captureProbe(scene: Scene, probe: LightProbeNode): void;
 }
 
 /**
@@ -59,7 +58,8 @@ export class SkyPasses {
                 private readonly _projection: ViewProjection,
                 private readonly _clouds: VolumetricCloudPasses,
                 private readonly _lighting: LightingPasses,
-                private readonly _fullscreen: FullscreenPasses) {}
+                private readonly _fullscreen: FullscreenPasses,
+                private readonly _sys: RenderSubsystems) {}
 
     // IBL (image-based lighting). Shared BRDF LUT + a cube framebuffer/mesh/camera for baking, plus a
     // scene-wide IBL cache built from scene.environmentMap when no light probe is active.
@@ -368,7 +368,7 @@ export class SkyPasses {
         for (const probe of scene.lightProbes) {
             const due = probe.mode === 'realtime' && (now - probe.lastBakeTime) >= probe.updateFrequency * 1000;
             if (probe.needsBake || due) {
-                this._host.captureProbe(scene, probe);
+                this._sys.capture.captureProbe(scene, probe);
                 probe.markBaked(now);
             }
         }

@@ -37,6 +37,7 @@ import type { SsilPasses } from './ssil';
 import type { LightingPasses } from './lighting';
 import type { SkyPasses } from './sky';
 import { ShaderManager } from '../systems/shaderManager';
+import type { RenderSubsystems } from './subsystems';
 
 /** The skinned twin of each forward program that has one. */
 const FORWARD_SKINNED: Readonly<Record<string, string>> = {
@@ -45,12 +46,10 @@ const FORWARD_SKINNED: Readonly<Record<string, string>> = {
 /** The parallax variant of each forward program that has one. */
 const FORWARD_POM: Readonly<Record<string, string>> = { pbr: 'pbrPom', pbrSkinned: 'pbrSkinnedPom' };
 
-/** What ForwardPass reads from the renderer that owns it, while those members still live there. */
+/** What ForwardPass reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface ForwardPassHost {
     readonly passEnabled: Record<RenderPass, boolean>;
-    renderEditorOverlay(scene: Scene, helperNodes: ModelNode[], gizmoNodes: ModelNode[]): void;
     readonly renderHeight: number;
-    renderSelectionMask(models: ModelNode[], sprites: SpriteNode[]): void;
     readonly renderWidth: number;
     readonly selectedNodeId: string | null;
     readonly thumbnailMode: boolean;
@@ -82,7 +81,8 @@ export class ForwardPass {
                 private readonly _ssil: SsilPasses,
                 private readonly _lighting: LightingPasses,
                 private readonly _sky: SkyPasses,
-                private readonly _modelDraw: ModelDraw) {}
+                private readonly _modelDraw: ModelDraw,
+                private readonly _sys: RenderSubsystems) {}
 
     /** True while the transparent queue runs after this frame's depth/colour snapshots. */
     public sceneBuffersLive = false;
@@ -242,7 +242,7 @@ export class ForwardPass {
 
         // Editor chrome, into the overlay buffer. Last of the scene render and first thing after the
         // post chain, which is the whole point: nothing between those two moments can see it.
-        this._host.renderEditorOverlay(scene, helperNodes, gizmoNodes);
+        this._sys.overlays.renderEditorOverlay(scene, helperNodes, gizmoNodes);
 
         // Selection silhouette mask (consumed by the post-process outline pass).
         const selectedSprites: SpriteNode[] = [];
@@ -250,7 +250,7 @@ export class ForwardPass {
             for (const node of scene.sprites)
                 if (node.visible && node.id === this._host.selectedNodeId) selectedSprites.push(node);
         this._passes.scope('outlineMask');
-        this._host.renderSelectionMask(selectedNodes, selectedSprites);
+        this._sys.overlays.renderSelectionMask(selectedNodes, selectedSprites);
     }
 
     /** Whether any transparent node in `queue` carries a material that reads the scene colour. */
@@ -389,14 +389,14 @@ export class ForwardPass {
 
         // Editor chrome, into the overlay layer. This pipeline gains a grid it never had, for free:
         // `EditorOverlays._renderGrid` was only ever reached from the deferred path.
-        this._host.renderEditorOverlay(scene, helperNodes, gizmoNodes);
+        this._sys.overlays.renderEditorOverlay(scene, helperNodes, gizmoNodes);
 
         // Selection silhouette mask (consumed by the post-process outline pass).
         const selectedSprites: SpriteNode[] = [];
         if (this._host.selectedNodeId)
             for (const node of scene.sprites)
                 if (node.visible && node.id === this._host.selectedNodeId) selectedSprites.push(node);
-        this._host.renderSelectionMask(selectedNodes, selectedSprites);
+        this._sys.overlays.renderSelectionMask(selectedNodes, selectedSprites);
     }
 
     /**

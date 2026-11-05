@@ -10,14 +10,13 @@ import { programTable } from './programs';
 import { setParticleSimVariants } from '../particles/particleRenderer';
 import type { PipelineCacheHost } from './pipelineCache';
 import { ShaderManager } from '../systems/shaderManager';
+import type { RenderSubsystems } from './subsystems';
 
-/** What ProgramRegistry reads from the renderer that owns it, while those members still live there. */
+/** What ProgramRegistry reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface ProgramRegistryHost {
     readonly capabilities: DeviceCapabilities;
     readonly deviceReady: boolean;
     readonly device: Device;
-    /** The project's shadow filter setting, which the variants follow (see {@link ProgramRegistry.variantFilter}). */
-    readonly shadowFilterMode: number;
 }
 
 /**
@@ -35,7 +34,7 @@ export class ProgramRegistry implements PipelineCacheHost {
      * build-time variants without one (`config.shaderVariants`).
      */
     constructor(private readonly _host: ProgramRegistryHost, programs: readonly string[] | undefined,
-                shaderVariants: boolean) {
+                shaderVariants: boolean, private readonly _sys: RenderSubsystems) {
         this.programList = programs ? new Set(programs) : null;
         this.variants = !!programs || shaderVariants;
         // A published list names the filter its variants were built for.
@@ -54,7 +53,7 @@ export class ProgramRegistry implements PipelineCacheHost {
 
     /** The shadow filter the programs serve right now: the variants' while they are in use, else the setting. */
     public filter(): ShadowFilter {
-        return this.variants ? this.variantFilter : (this._host.shadowFilterMode === 1 ? 1 : 0);
+        return this.variants ? this.variantFilter : (this._sys.shadows.shadowFilterMode === 1 ? 1 : 0);
     }
 
     /** A filter change waiting for its variants to finish compiling. */
@@ -94,7 +93,7 @@ export class ProgramRegistry implements PipelineCacheHost {
                 return descriptor ? [[physical, descriptor] as const] : [];
             })];
         }
-        if (this.programList === null) this.variantFilter = this._host.shadowFilterMode === 1 ? 1 : 0;
+        if (this.programList === null) this.variantFilter = this._sys.shadows.shadowFilterMode === 1 ? 1 : 0;
         const list = this.programList;
         const out: (readonly [string, Omit<ShaderProgramDescriptor, 'label'>])[] = [];
         for (const [name, descriptor] of table) {
@@ -140,7 +139,7 @@ export class ProgramRegistry implements PipelineCacheHost {
      */
     public physicalOf(name: string): string {
         if (this.variants) return physicalFor(name, this.variantFilter);
-        return name in EXTRA_LOGICAL_NAMES ? physicalFor(name, this._host.shadowFilterMode === 1 ? 1 : 0) : name;
+        return name in EXTRA_LOGICAL_NAMES ? physicalFor(name, this._sys.shadows.shadowFilterMode === 1 ? 1 : 0) : name;
     }
 
     /** Register `program` as `physical` and as every logical name that currently resolves to it. */

@@ -1,5 +1,4 @@
 import { vec3, mat4 } from 'gl-matrix';
-import { Frustum } from '../../core/frustum';
 import { Scene } from '../../core/scene/scene';
 import { FOLIAGE_DENSITY_FALLOFF, collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes, foliageEffectiveCull, foliageLodBands, foliageCullLimitSq, foliageAdmitCount, FOLIAGE_SORT_REFRESH, sortFoliageFrontToBack, foliageKeepFraction, createFoliageBatch, foliageBatchStale, foliageBatchInstances, rememberFoliageBatch, foliageChunkBounds, foliageChunkLimit, packFoliageInstances } from '../../terrain/foliage';
 import type { FoliageCell, FoliageLayer, FoliageBand, FoliageBatch } from '../../terrain/foliage';
@@ -19,7 +18,6 @@ import { shadowTouchesSphere, shadowFarthestFrom } from '../shadowCasters';
 import { CascadeSphere, HASH_SEED, mixNumber } from '../shadowMath';
 import { TextureManager } from '../systems/textureManager';
 import { TexturePacker } from '../systems/texturePacker';
-import { Texture } from '../texture';
 import { ShadowMapImpostorProgram, ShadowMapInstancedCutoutProgram, ShadowMapInstancedProgram, GEOMETRY_PROGRAMS, GeometryFoliageBillboardProgram, GeometryFoliageImpostorProgram } from './programs';
 import type { FrameView } from './frameView';
 import type { PassEncoder } from './passEncoder';
@@ -30,6 +28,7 @@ import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
+import type { RenderSubsystems } from './subsystems';
 
 /** A foliage layer's cells bucketed on the ground plane, for the shadow pass's range query. */
 export interface FoliageCellGrid {
@@ -53,17 +52,8 @@ export interface FoliageState {
     wet: number; snow: number;
 }
 
-/** What FoliagePasses reads from the renderer that owns it, while those members still live there. */
+/** What FoliagePasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface FoliagePassesHost {
-    aabbDistSq(p: vec3, min: ArrayLike<number>, max: ArrayLike<number>): number;
-    cellOccluded(min: ArrayLike<number>, max: ArrayLike<number>): boolean;
-    readonly frustum: Frustum;
-    readonly frustumCulling: boolean;
-    objectId(obj: object): number;
-    shadowCutoutOf(material: Material): { texture: Texture, cutoff: number, useRed: boolean } | null;
-    readonly shadowFrustum: Frustum;
-    readonly shadowLightUnit: vec3;
-    shadowReachOf(x: number, y: number, z: number, r: number): number;
     readonly thumbnailMode: boolean;
 }
 
@@ -82,7 +72,8 @@ export class FoliagePasses {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _materials: MaterialBinder,
-                private readonly _projection: ViewProjection) {}
+                private readonly _projection: ViewProjection,
+                private readonly _sys: RenderSubsystems) {}
 
     /** See RenderSettings.foliageShadowDistance. */
     public foliageShadowDistance = 0;
@@ -199,7 +190,7 @@ export class FoliagePasses {
         const camPos = this._view.camera.position;
         // The GPU path for the main view only, once a frame: its per-bucket parameters go up with
         // `writeBuffer`, which a second cull in the same unsubmitted frame would overwrite under the first.
-        const gpu = this.foliageGpuCulling && FoliageGpuCuller.supported && this._host.frustumCulling
+        const gpu = this.foliageGpuCulling && FoliageGpuCuller.supported && this._sys.visibility.frustumCulling
             && !this._host.thumbnailMode && !this._view.capturing && !this._view.cubeFace
             && this._foliageGpuFrame !== this._view.frameIndex;
         if (gpu) this._foliageGpuFrame = this._view.frameIndex;
@@ -227,7 +218,7 @@ export class FoliagePasses {
                 const camX = camPos[0], camY = camPos[1], camZ = camPos[2];
                 const place = (cell: FoliageCell) => {
                     // The cell's distance SPAN, from its instance origins (not the geometry-padded box).
-                    const dn = Math.sqrt(this._host.aabbDistSq(camPos, cell.pmin, cell.pmax));
+                    const dn = Math.sqrt(this._sys.visibility.aabbDistSq(camPos, cell.pmin, cell.pmax));
                     const fx = Math.max(Math.abs(camX - cell.pmin[0]), Math.abs(camX - cell.pmax[0]));
                     const fy = Math.max(Math.abs(camY - cell.pmin[1]), Math.abs(camY - cell.pmax[1]));
                     const fz = Math.max(Math.abs(camZ - cell.pmin[2]), Math.abs(camZ - cell.pmax[2]));
@@ -256,7 +247,7 @@ export class FoliagePasses {
                     // proves the layer is up.
                     const wasVisible = cell.visible;
                     anyWasVisible ||= wasVisible;
-                    const d2 = this._host.aabbDistSq(camPos, cell.min, cell.max);
+                    const d2 = this._sys.visibility.aabbDistSq(camPos, cell.min, cell.max);
                     // Distance cull with a hysteresis band, so a cell on the boundary cannot flip every
                     // frame. Instances themselves dissolve out before the cull (the last band's ramp), so
                     // the step here is never seen.
@@ -268,8 +259,8 @@ export class FoliagePasses {
                     }
                     // Off screen also when an occluder hides it: an occluded cell is ADMITTED like an
                     // off-screen one (so it appears at once when revealed) and simply not drawn.
-                    let onScreen = !this._host.frustumCulling || this._host.frustum.intersectsAABB(cell.min, cell.max);
-                    if (onScreen && this._host.cellOccluded(cell.min, cell.max)) {
+                    let onScreen = !this._sys.visibility.frustumCulling || this._sys.visibility.frustum.intersectsAABB(cell.min, cell.max);
+                    if (onScreen && this._sys.visibility.cellOccluded(cell.min, cell.max)) {
                         onScreen = false;
                         frameStats.occludedCells++;
                     }
@@ -353,7 +344,7 @@ export class FoliagePasses {
             });
         }
         layer.gpuBatches = this._foliageGpu.cull(this._passes.acquireEncoder('foliage.cull'), layer, buckets,
-                                                 this._host.frustum.planes, this._view.camera.position);
+                                                 this._sys.visibility.frustum.planes, this._view.camera.position);
         layer.gpuCulled = true;
     }
 
@@ -381,8 +372,8 @@ export class FoliagePasses {
      */
     public prepareFoliageShadow(scene: Scene, lightSpace: mat4, cascade: number,
                                   sphere: CascadeSphere, eye: ArrayLike<number>, inner: number): number {
-        this._host.shadowFrustum.setFromViewProjection(lightSpace);
-        const d = this._host.shadowLightUnit;
+        this._sys.shadows.shadowFrustum.setFromViewProjection(lightSpace);
+        const d = this._sys.shadows.shadowLightUnit;
         let hash = HASH_SEED;
 
         for (const landscape of scene.landscapes) {
@@ -401,7 +392,7 @@ export class FoliagePasses {
                     const cx = b[o], cy = b[o + 1], cz = b[o + 2], r = b[o + 3], reach = b[o + 4];
                     if (!shadowTouchesSphere(cx, cy, cz, r, d, reach, sphere)) continue;
                     if (inner > 0 && shadowFarthestFrom(cx, cy, cz, r, d, reach, eye) < inner) continue;
-                    if (!this._host.shadowFrustum.intersectsAABB(cell.min, cell.max)) continue;
+                    if (!this._sys.shadows.shadowFrustum.intersectsAABB(cell.min, cell.max)) continue;
                     visible.push(cell);
                 }
                 // Nearest the sun first, so a tree in front fills the depth before the needles behind it
@@ -426,11 +417,11 @@ export class FoliagePasses {
 
                 // What this layer puts in the cascade: which cells, at which version and thinning, drawn
                 // from which meshes — and, where the cascade sways it, the wind's clock.
-                hash = mixNumber(mixNumber(mixNumber(hash, this._host.objectId(layer)), layer.version), keep);
+                hash = mixNumber(mixNumber(mixNumber(hash, this._sys.modelDraw.objectId(layer)), layer.version), keep);
                 hash = mixNumber(hash, visible.length);
                 for (const cell of visible) hash = mixNumber(hash, cell.index);
                 for (const model of models)
-                    hash = mixNumber(mixNumber(hash, this._host.objectId(model.mesh)), model.mesh.activeIndexCount);
+                    hash = mixNumber(mixNumber(hash, this._sys.modelDraw.objectId(model.mesh)), model.mesh.activeIndexCount);
                 if (cascade === 0) {
                     const w = this._foliageWind(scene, layer);
                     if (w) hash = mixNumber(mixNumber(hash, this._view.windTime), w.droop);
@@ -481,7 +472,7 @@ export class FoliagePasses {
         this._shaderManager.setUniform('u_lightSpace', clip);
         // Window depth per world unit along the light: the clip matrix's z row against the light direction,
         // halved where clip depth spans [-1, 1] (WebGL2) rather than [0, 1].
-        const d = this._host.shadowLightUnit, v = this._impostorShadowVec;
+        const d = this._sys.shadows.shadowLightUnit, v = this._impostorShadowVec;
         v[0][0] = d[0]; v[0][1] = d[1]; v[0][2] = d[2];
         v[0][3] = (clip[2] * d[0] + clip[6] * d[1] + clip[10] * d[2]) * (device.backend === 'webgpu' ? 1 : 0.5);
         v[1][0] = info.frames; v[1][1] = info.radius; v[1][2] = albedo.config.flipY ? 1 : 0;
@@ -543,7 +534,7 @@ export class FoliagePasses {
             // `_prepareFoliage` owns that flag and clears it on the distance test alone, which makes it
             // exactly "inside the damped cull range".
             const limit2 = foliageCullLimitSq(maxD2, cell.visible, this._foliageCullHysteresis);
-            const d2 = this._host.aabbDistSq(camPos, cell.min, cell.max);
+            const d2 = this._sys.visibility.aabbDistSq(camPos, cell.min, cell.max);
             if (d2 > limit2) continue;
             const casts = d2 <= (cell.shadowCast ? shadowOut2 : shadowIn2);
             cell.shadowCast = casts;
@@ -557,7 +548,7 @@ export class FoliagePasses {
             const cx = (lo[0] + hi[0]) * 0.5, cy = (lo[1] + hi[1]) * 0.5, cz = (lo[2] + hi[2]) * 0.5;
             const r = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) * 0.5;
             entry.bounds[o] = cx; entry.bounds[o + 1] = cy; entry.bounds[o + 2] = cz; entry.bounds[o + 3] = r;
-            entry.bounds[o + 4] = this._host.shadowReachOf(cx, cy, cz, r);
+            entry.bounds[o + 4] = this._sys.shadows.shadowReachOf(cx, cy, cz, r);
             entry.cells[n++] = cell;
         }
         // A cell that cast last frame and is now past the grid's reach was not visited: it is past the
@@ -703,7 +694,7 @@ export class FoliagePasses {
                             const tex = layer.textureId ? TextureManager.Instance.getTexture(layer.textureId) : null;
                             return tex ? { texture: tex, cutoff: 0.5, useRed: false } : null;
                         })()
-                        : this._host.shadowCutoutOf(model.material);
+                        : this._sys.shadows.shadowCutoutOf(model.material);
                     const cutout = !!cut;
                     // A cut-out caster culls nothing — its shape is in the texture and its card is
                     // two-sided; a solid prop keeps the FRONT-face culling the rest of the shadow pass

@@ -5,7 +5,6 @@ import { isEditorOnlyNode } from '../../core/scene/editorNodes';
 import type { LandscapeNode } from '../../core/scene/nodes/landscapeNode';
 import { LightNode } from '../../core/scene/nodes/lightNode';
 import { ModelNode } from '../../core/scene/nodes/modelNode';
-import { SkyAtmosphereNode } from '../../core/scene/nodes/skyAtmosphereNode';
 import { Scene } from '../../core/scene/scene';
 import { shadowBlockSpans, buildShadowBlock } from '../../terrain/terrainShadowBlocks';
 import { spotBoundingSphere } from '../clusters';
@@ -24,7 +23,6 @@ import type { DepthStencilState, CullMode } from '../rhi/types';
 import { TerrainFloorGrid, ShadowLayerCache, unitDirection, shadowReach, sliceCornerFactor, cascadeSphereAroundEye, staggeredCascadeDue, EYE_FIT_MARGIN, receiverInnerRadius, isFreeShadowSlot } from '../shadowCasters';
 import { MAX_CASCADES, CascadeSphere, ShadowCasterBounds, SpotShadowSlots, MAX_POINT_SHADOWS, PointShadowCache, CasterMotion, lightViewMatrix, mixNumber, HASH_SEED, pushCasterBounds, mixTransform, spotShadowFar, pointShadowFov, POINT_SHADOW_FACES, mixString, computeCascadeSplits, staleCascadeCovers, STAGGER_MARGIN, quantizeRadius, cascadeDepthScale, cascadeSphereFromPerspective, cascadeSphereFromCorners, buildCascadeMatrix } from '../shadowMath';
 import { keyLight } from '../skyNight';
-import type { KeyLight } from '../skyNight';
 import { GLState } from '../systems/glState';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
@@ -39,6 +37,7 @@ import type { VolumetricCloudPasses } from './clouds';
 import type { FoliagePasses } from './foliage';
 import { ShaderManager } from '../systems/shaderManager';
 import { DEPTH_WRITE } from './pipelineCache';
+import type { RenderSubsystems } from './subsystems';
 
 /**
  * One punctual-light shadow atlas, spot or point, as the shared layer routine sees it. The FBOs are read
@@ -132,23 +131,12 @@ export interface ShadowCasterState {
 
 export type ShadowCutout = { texture: Texture, cutoff: number, useRed: boolean };
 
-/** What ShadowPasses reads from the renderer that owns it, while those members still live there. */
+/** What ShadowPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface ShadowPassesHost {
-    atmosphereSunDir(scene: Scene, node: SkyAtmosphereNode): [number, number, number];
-    readonly coneSphere: { center: Float32Array; radius: number };
     readonly deviceReady: boolean;
-    dirOf(node: LightNode): vec3;
-    readonly frustum: Frustum;
-    readonly frustumCulling: boolean;
-    readonly keyLight: KeyLight | null;
-    readonly keyLightDir: vec3;
-    lightOccluded(node: LightNode, center: ArrayLike<number>, radius: number): boolean;
-    objectId(obj: object): number;
     readonly renderHeight: number;
     readonly renderWidth: number;
-    readonly terrainLodStep2: number;
     readonly thumbnailMode: boolean;
-    uploadBoneMatrices(shaderType: string, node: ModelNode): void;
 }
 
 /**
@@ -168,7 +156,8 @@ export class ShadowPasses {
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
                 private readonly _clouds: VolumetricCloudPasses,
-                private readonly _foliage: FoliagePasses) {}
+                private readonly _foliage: FoliagePasses,
+                private readonly _sys: RenderSubsystems) {}
 
     // ---- Cascaded shadow maps --------------------------------------------------------------
     // ONE depth TEXTURE_2D_ARRAY, a layer per cascade, sampled by every lighting path through
@@ -550,7 +539,7 @@ export class ShadowPasses {
         }
         if (!light) return;
         // The key light's direction: at night the clouds shadow the moonlight.
-        const f = this._host.dirOf(light);
+        const f = this._sys.lighting.dirOf(light);
         const len = Math.hypot(f[0], f[1], f[2]) || 1;
         sun[0] = -f[0] / len; sun[1] = -f[1] / len; sun[2] = -f[2] / len;
         sun[3] = skyLight.cloudShadowStrength;
@@ -673,10 +662,10 @@ export class ShadowPasses {
         if (!node || !node.godRaysEnabled) return;
 
         // The key light: the sun by day, the moon at night.
-        const key = this._host.keyLight;
+        const key = this._sys.lighting.keyLight;
         const s: [number, number, number] = key
-            ? [-this._host.keyLightDir[0], -this._host.keyLightDir[1], -this._host.keyLightDir[2]]
-            : this._host.atmosphereSunDir(scene, node);
+            ? [-this._sys.lighting.keyLightDir[0], -this._sys.lighting.keyLightDir[1], -this._sys.lighting.keyLightDir[2]]
+            : this._sys.sky.atmosphereSunDir(scene, node);
         // Light color: the scene directional light's diffuse when the atmosphere tracks it, else the
         // node's own sun color.
         let lightColor: [number, number, number] = [node.sunColor[0], node.sunColor[1], node.sunColor[2]];
@@ -774,7 +763,7 @@ export class ShadowPasses {
         for (let k = 0; k < count; k++) {
             const record = casters[k];
             const node = record.node, state = record.state;
-            if (this._host.frustumCulling) {
+            if (this._sys.visibility.frustumCulling) {
                 const s = record.sphere;
                 if (!this.shadowFrustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) continue;
             }
@@ -805,7 +794,7 @@ export class ShadowPasses {
                 // geometry shader: the unlit Basic family has no normal/tangent/bitangent, so its bone
                 // attributes sit at locations 2/3 where every lit family puts them at 5/6.
                 (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(state.shaderType).attributes);
-                this._host.uploadBoneMatrices('shadowMapSkinned', node);
+                this._sys.modelDraw.uploadBoneMatrices('shadowMapSkinned', node);
             }
 
             // Depth-only, so no material is bound — a merged model normally casts its whole buffer in
@@ -864,7 +853,7 @@ export class ShadowPasses {
         this._castersScene = scene;
 
         const sun = this.shadowLight;
-        const d = sun ? unitDirection(this._host.dirOf(sun), this.shadowLightUnit)
+        const d = sun ? unitDirection(this._sys.lighting.dirOf(sun), this.shadowLightUnit)
                       : vec3.set(this.shadowLightUnit, 0, -1, 0);
         lightViewMatrix(d, this._casterLightView, this._csmScratch);
 
@@ -962,10 +951,10 @@ export class ShadowPasses {
         const cut = this._shadowCutoutCached(material);
         const casts = landscape.effectiveFade >= 0.5 && material.config.castShadow && !material.config.wireframe;
         let key = mixNumber(mixNumber(mixNumber(HASH_SEED, terrain.heightsVersion), landscape.transformVersion),
-                            this._host.objectId(terrain));
-        key = mixNumber(mixNumber(mixNumber(key, this._host.objectId(material)), casts ? 1 : 0),
+                            this._sys.modelDraw.objectId(terrain));
+        key = mixNumber(mixNumber(mixNumber(key, this._sys.modelDraw.objectId(material)), casts ? 1 : 0),
                         material.config.side === 'double' ? 1 : 0);
-        key = mixNumber(mixNumber(mixNumber(key, cut ? this._host.objectId(cut.texture) : 0), cut ? cut.cutoff : 0),
+        key = mixNumber(mixNumber(mixNumber(key, cut ? this._sys.modelDraw.objectId(cut.texture) : 0), cut ? cut.cutoff : 0),
                         this._pipelines.epoch * 2 + (this._view.cubeFace && device.backend === 'webgpu' ? 1 : 0));
         key = mixNumber(mixNumber(key, reachKey), landscape.chunkNodes.length);
         // A density change swaps every chunk's geometry, and a chunk waits for its new mesh.
@@ -1067,7 +1056,7 @@ export class ShadowPasses {
             const cut = this._shadowCutoutCached(m);
             if (cut) {
                 anyCutout = true;
-                key = mixNumber(mixNumber(mixNumber(key, this._host.objectId(cut.texture)), cut.cutoff), cut.useRed ? 1 : 0);
+                key = mixNumber(mixNumber(mixNumber(key, this._sys.modelDraw.objectId(cut.texture)), cut.cutoff), cut.useRed ? 1 : 0);
             }
             if (!m.config.castShadow || m.config.wireframe) wholeBuffer = false;
         }
@@ -1100,7 +1089,7 @@ export class ShadowPasses {
                 target: this.shadowCascadeFBO.renderTarget,
             });
             state = { model, material, epoch, shaderType, cullMode, pipeline, skinned, anyCutout, wholeBuffer,
-                      id: this._host.objectId(node), key: 0, pipelineId: this._host.objectId(pipeline),
+                      id: this._sys.modelDraw.objectId(node), key: 0, pipelineId: this._sys.modelDraw.objectId(pipeline),
                       reach: 0, reachKey: -1, reachX: NaN, reachY: NaN, reachZ: NaN, reachR: NaN };
             this._shadowCasterStates.set(node, state);
         }
@@ -1220,7 +1209,7 @@ export class ShadowPasses {
         let h = mixTransform(HASH_SEED, matrix);
         const d = this.shadowLightUnit;
         h = mixNumber(mixNumber(mixNumber(h, d[0]), d[1]), d[2]);
-        h = mixNumber(h, this._host.frustumCulling ? 1 : 0);
+        h = mixNumber(h, this._sys.visibility.frustumCulling ? 1 : 0);
         for (let k = 0; k < this._layerCasterCount; k++) {
             const r = this._layerCasters[k];
             const state = r.state, c = r.sphere.center;
@@ -1265,9 +1254,9 @@ export class ShadowPasses {
                 // is hidden behind what is on screen, shadows nothing anyone can see.
                 const spot = node.light as Spotlight;
                 spotBoundingSphere(node.worldPosition, node.worldForward, spot.range,
-                                   spot.outerCutOff * Math.PI / 180, this._host.coneSphere);
-                const c = this._host.coneSphere.center, r = this._host.coneSphere.radius;
-                if (this._host.frustumCulling && !this._host.frustum.intersectsSphere(c[0], c[1], c[2], r)) continue;
+                                   spot.outerCutOff * Math.PI / 180, this._sys.lighting.coneSphere);
+                const c = this._sys.lighting.coneSphere.center, r = this._sys.lighting.coneSphere.radius;
+                if (this._sys.visibility.frustumCulling && !this._sys.visibility.frustum.intersectsSphere(c[0], c[1], c[2], r)) continue;
                 casters.push(node);
             }
         }
@@ -1278,9 +1267,9 @@ export class ShadowPasses {
             const rank = (n: LightNode) => {
                 const spot = n.light as Spotlight;
                 spotBoundingSphere(n.worldPosition, n.worldForward, spot.range,
-                                   spot.outerCutOff * Math.PI / 180, this._host.coneSphere);
+                                   spot.outerCutOff * Math.PI / 180, this._sys.lighting.coneSphere);
                 return vec3.squaredDistance(n.worldPosition, cam)
-                    + (this._host.lightOccluded(n, this._host.coneSphere.center, this._host.coneSphere.radius) ? 1e12 : 0);
+                    + (this._sys.visibility.lightOccluded(n, this._sys.lighting.coneSphere.center, this._sys.lighting.coneSphere.radius) ? 1e12 : 0);
             };
             casters.sort((a, b) => rank(a) - rank(b));
             casters.length = ShadowPasses.MAX_SPOT_SHADOWS;
@@ -1371,8 +1360,8 @@ export class ShadowPasses {
                 const far = spotShadowFar((node.light as PointLight).range, this.pointShadowDistance);
                 // A light can only shadow what it lights, and it lights nothing past its own range.
                 // The cheapest cull there is, and it removes a whole SIX-PASS light rather than a draw.
-                if (this._host.frustumCulling
-                    && !this._host.frustum.intersectsSphere(pos[0], pos[1], pos[2], far)) continue;
+                if (this._sys.visibility.frustumCulling
+                    && !this._sys.visibility.frustum.intersectsSphere(pos[0], pos[1], pos[2], far)) continue;
                 casters.push(node);
             }
         }
@@ -1387,7 +1376,7 @@ export class ShadowPasses {
         if (casters.length > MAX_POINT_SHADOWS) {
             const cam = this._view.camera.position;
             const rank = (n: LightNode) => vec3.squaredDistance(n.worldPosition, cam)
-                + (this._host.lightOccluded(n, n.worldPosition, (n.light as PointLight).range) ? 1e12 : 0);
+                + (this._sys.visibility.lightOccluded(n, n.worldPosition, (n.light as PointLight).range) ? 1e12 : 0);
             casters.sort((a, b) => rank(a) - rank(b));
             casters.length = MAX_POINT_SHADOWS;
         }
@@ -1545,7 +1534,7 @@ export class ShadowPasses {
     /** Render the directional light's cascaded shadow maps (one array layer per view-frustum slice). */
     public renderCascades(scene: Scene, light: LightNode): void {
         // The key light's direction — the moon's at night (see `_updateKeyLight`).
-        const lightDir = this._host.dirOf(light);
+        const lightDir = this._sys.lighting.dirOf(light);
         const cam = this._view.camera;
         // Cap the shadowed range so cascades stay tight regardless of the camera far plane
         // (the editor camera uses far=10000, which otherwise stretches the cascades → jagged).
@@ -1655,7 +1644,7 @@ export class ShadowPasses {
      * staggered cascade takes.
      */
     private _renderFarCascade(scene: Scene, light: LightNode, nearShadowEnd: number): void {
-        const lightDir = this._host.dirOf(light);
+        const lightDir = this._sys.lighting.dirOf(light);
         const cam = this._view.camera;
         const reach = Math.min(cam.far, this.shadowFarDistance);
         // Off, or not reaching past the near cascades: the shader is told 0 and never samples the layer.
@@ -1753,7 +1742,7 @@ export class ShadowPasses {
         if (chunkState.shaderType !== 'shadowMap' || chunkState.anyCutout) return null;
 
         const terrain = landscape.terrain;
-        const step = Math.max(1, this._host.terrainLodStep2 | 0);
+        const step = Math.max(1, this._sys.visibility.terrainLodStep2 | 0);
         let set = this._terrainBlocks.get(landscape);
         if (!set) {
             set = { terrain: null, version: -1, step: 0, positions: [], meshes: [], bounds: [], records: [],
@@ -1810,8 +1799,8 @@ export class ShadowPasses {
                 vec3.transformMat4(center, center, world);
                 const radius = 0.5 * Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) * scale;
                 const state: ShadowCasterState = {
-                    ...chunkState, shaderType: 'shadowMap', pipeline, pipelineId: this._host.objectId(pipeline),
-                    skinned: false, anyCutout: false, wholeBuffer: true, id: this._host.objectId(set.meshes[i]),
+                    ...chunkState, shaderType: 'shadowMap', pipeline, pipelineId: this._sys.modelDraw.objectId(pipeline),
+                    skinned: false, anyCutout: false, wholeBuffer: true, id: this._sys.modelDraw.objectId(set.meshes[i]),
                     reach: 0, reachKey: -1, reachX: NaN, reachY: NaN, reachZ: NaN, reachR: NaN, key: 0,
                 };
                 state.key = mixNumber(HASH_SEED, state.pipelineId);

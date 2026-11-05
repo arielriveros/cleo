@@ -10,7 +10,7 @@ import type { RenderTarget, RenderPipeline } from '../rhi/resources';
 import { GLState } from '../systems/glState';
 import { Texture } from '../texture';
 import { TaaResolveProgram, TaaSharpenProgram, ScreenProgram, MotionBlurVelocityProgram, VELOCITY_PROGRAMS, MotionBlurTileMaxProgram, MotionBlurNeighborMaxProgram, MotionBlurGatherProgram } from './programs';
-import type { TaaHistoryFilter, DebugView } from './settingsTypes';
+import type { TaaHistoryFilter } from './settingsTypes';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -21,17 +21,13 @@ import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 import { ModelDraw } from './modelDraw';
+import type { RenderSubsystems } from './subsystems';
 
-/** What TemporalPasses reads from the renderer that owns it, while those members still live there. */
+/** What TemporalPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface TemporalPassesHost {
-    readonly boneMatrixScratch: Float32Array;
-    readonly debugView: DebugView;
-    inGBuffer(node: ModelNode): boolean;
-    outsideFrustum(node: ModelNode): boolean;
     readonly renderHeight: number;
     readonly renderWidth: number;
     readonly thumbnailMode: boolean;
-    uploadBoneMatrices(shaderType: string, node: ModelNode): void;
 }
 
 /**
@@ -49,7 +45,8 @@ export class TemporalPasses {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
-                private readonly _fullscreen: FullscreenPasses) {}
+                private readonly _fullscreen: FullscreenPasses,
+                private readonly _sys: RenderSubsystems) {}
 
     // Camera-reprojection motion blur (UE5-style tile reconstruction). Off by default.
     public motionBlurEnabled: boolean = true;
@@ -222,7 +219,7 @@ export class TemporalPasses {
         this.anyObjectMoved = false;
         if (!this._velocityWanted()) return;
         for (const node of scene.models) {
-            if (!this._host.inGBuffer(node)) continue;
+            if (!this._sys.geometry.inGBuffer(node)) continue;
             if (this._nodeMoved(node)) { this.anyObjectMoved = true; return; }
         }
     }
@@ -287,7 +284,7 @@ export class TemporalPasses {
         // The debug channel is a reader too: without it, selecting 'velocity' with motion blur off
         // would show a stale buffer rather than this frame's motion.
         const wanted = this._view.taaJitterActive || this.motionBlurWillRun
-                       || this._host.debugView === 'velocity';
+                       || this._sys.debugViews.debugView === 'velocity';
         if (!wanted || !this._passes.beginPass('velocity')) return;
 
         this._velocityPass();
@@ -455,13 +452,13 @@ export class TemporalPasses {
         const movers = this._velocityDrawList;
         movers.length = 0;
         for (const node of scene.models) {
-            if (!this._host.inGBuffer(node)) continue;
+            if (!this._sys.geometry.inGBuffer(node)) continue;
             // The geometry pass initializes a node added this frame; one that never got there has no
             // mesh to draw and nothing in the depth buffer either.
             if (!node.initialized) continue;
             // `_outsideFrustum`, not `_culled`: the stat that one increments was already counted by
             // the geometry pass, and every node must reach it at most once per frame.
-            if (this._host.outsideFrustum(node)) continue;
+            if (this._sys.visibility.outsideFrustum(node)) continue;
             // A node that did not move is EXACTLY what the reprojection already describes, so drawing
             // it would spend a draw call writing back the value already there. The two opt-out modes
             // always draw: their whole job is to cancel what the base pass wrote.
@@ -543,8 +540,8 @@ export class TemporalPasses {
                 skin.initializeVAO(this._shaderManager.getShader(shaderType).attributes);
                 // Fills ModelDraw.boneMatrixScratch with THIS frame's pose and uploads it as u_boneMatrices —
                 // which is also exactly the right PREVIOUS pose when there is no history to use.
-                this._host.uploadBoneMatrices(shaderType, node);
-                this._prevBoneScratch.set(fresh && prev!.bones ? prev!.bones : this._host.boneMatrixScratch);
+                this._sys.modelDraw.uploadBoneMatrices(shaderType, node);
+                this._prevBoneScratch.set(fresh && prev!.bones ? prev!.bones : this._sys.modelDraw.boneMatrixScratch);
                 this._shaderManager.setUniform('u_prevBoneMatrices', this._prevBoneScratch);
             }
 

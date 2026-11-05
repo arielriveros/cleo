@@ -30,7 +30,7 @@ import type { Sprite2DPasses } from './sprites2d';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 
-/** What EditorOverlays reads from the renderer that owns it, while those members still live there. */
+/** What EditorOverlays reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface EditorOverlaysHost {
     readonly thumbnailMode: boolean;
 }

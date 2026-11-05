@@ -9,7 +9,6 @@ import type { RenderPassEncoder } from '../rhi/device';
 import { device } from '../rhi/deviceHandle';
 import type { Buffer as RhiBuffer } from '../rhi/resources';
 import { BufferUsage } from '../rhi/types';
-import type { ShaderResource } from '../rhi/types';
 import { DrawSortKeys } from '../shaderOptimizer';
 import { FoliagePasses } from './foliage';
 import { ModelDraw } from './modelDraw';

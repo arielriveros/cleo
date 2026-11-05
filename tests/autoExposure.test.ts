@@ -233,7 +233,7 @@ describe('the authored exposure is kept apart from the metered one', () => {
         expect(RENDERER).toContain('PREVIEW_EXPOSURE = 2.0');
         const body = methodBody('resolveExposure');
         // The offscreen thumbnail path counts as a preview whichever tab it was taken from.
-        expect(body).toContain('!this.exposureMeteringAllowed || this._host.presentTarget');
+        expect(body).toContain('!this.exposureMeteringAllowed || this._sys.capture.presentTarget');
     });
 
     it('leaves a manual exposure alone when metering is merely switched off', () => {

@@ -1,5 +1,4 @@
 import { mat4, vec3 } from 'gl-matrix';
-import { Frustum } from '../../core/frustum';
 import { isEditorOnlyNode } from '../../core/scene/editorNodes';
 import { DecalNode, DECAL_RADIAL_CURVES, decalFlipbookFrame } from '../../core/scene/nodes/decalNode';
 import type { DecalFlipbookFrame } from '../../core/scene/nodes/decalNode';
@@ -7,7 +6,6 @@ import { ModelNode } from '../../core/scene/nodes/modelNode';
 import { Scene } from '../../core/scene/scene';
 import { Framebuffer } from '../framebuffer';
 import { Material } from '../material';
-import { Mesh } from '../mesh';
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderPipeline } from '../rhi/resources';
 import type { BlendState, CullMode } from '../rhi/types';
@@ -24,14 +22,11 @@ import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
+import type { RenderSubsystems } from './subsystems';
 
-/** What DecalPasses reads from the renderer that owns it, while those members still live there. */
+/** What DecalPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface DecalPassesHost {
     readonly deferred: boolean;
-    readonly frustum: Frustum;
-    readonly frustumCulling: boolean;
-    readonly iblCubeMesh: Mesh;
-    outsideFrustum(node: ModelNode): boolean;
     readonly renderHeight: number;
     readonly renderWidth: number;
     readonly thumbnailMode: boolean;
@@ -53,7 +48,8 @@ export class DecalPasses {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _materials: MaterialBinder,
-                private readonly _projection: ViewProjection) {}
+                private readonly _projection: ViewProjection,
+                private readonly _sys: RenderSubsystems) {}
 
     /**
      * Decal targets, all LAZY: a scene without decals never allocates them. The DBuffer (three RGBA8
@@ -105,9 +101,9 @@ export class DecalPasses {
         this._decalReceiversReady = false;
         for (const decal of scene.decals) {
             if (!decal.visible) continue;
-            if (this._host.frustumCulling) {
+            if (this._sys.visibility.frustumCulling) {
                 const s = decal.getBoundingSphere();
-                if (!this._host.frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) continue;
+                if (!this._sys.visibility.frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) continue;
             }
             let drawn = false;
             if (isEditorOnlyNode(decal)) {
@@ -167,7 +163,7 @@ export class DecalPasses {
             // The chunks are the landscape's ModelNode children; the terrain draws nothing else.
             for (const chunk of landscape.children) {
                 if (!(chunk instanceof ModelNode) || !chunk.visible || !chunk.initialized) continue;
-                if (this._host.outsideFrustum(chunk)) continue;
+                if (this._sys.visibility.outsideFrustum(chunk)) continue;
                 this._shaderManager.bind('shadowMap');
                 const pipeline = this._pipelines.get('shadowMap', ShadowMapProgram, {
                     cullMode: ModelDraw.cullFor(chunk.model.material.config.side),
@@ -244,7 +240,7 @@ export class DecalPasses {
             // Bindings 0, 2, 4: the depth projected onto, the receiver depth, the G-buffer normal. None
             // of them is attached to this pass — the DBuffer has no depth attachment at all.
             pass.setBindGroup(2, this._bindGroups.textureGroup(pipeline, 2, [gBuffer.depth, receivers, gBuffer.colors[1]]));
-            if (!this._passes.recordDraw(pass, this._host.iblCubeMesh, 0, 0)) this._host.iblCubeMesh.draw();
+            if (!this._passes.recordDraw(pass, this._sys.sky.iblCubeMesh, 0, 0)) this._sys.sky.iblCubeMesh.draw();
         }
         this._passes.endFullscreenPass(pass);
 
@@ -311,7 +307,7 @@ export class DecalPasses {
             this._setDecalUniforms(decal, material, invViewProj, mode);
             pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
             pass.setBindGroup(2, this._bindGroups.textureGroup(pipeline, 2, [depth, receivers]));
-            if (!this._passes.recordDraw(pass, this._host.iblCubeMesh, 0, 0)) this._host.iblCubeMesh.draw();
+            if (!this._passes.recordDraw(pass, this._sys.sky.iblCubeMesh, 0, 0)) this._sys.sky.iblCubeMesh.draw();
         }
     }
 

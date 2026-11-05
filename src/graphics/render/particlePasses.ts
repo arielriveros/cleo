@@ -1,5 +1,4 @@
 import { mat4, vec3 } from 'gl-matrix';
-import { Frustum } from '../../core/frustum';
 import { MAX_FORCE_FIELDS } from '../../core/scene/nodes/forceFieldNode';
 import { LightNode } from '../../core/scene/nodes/lightNode';
 import type { ParticleSystemNode } from '../../core/scene/nodes/particleSystemNode';
@@ -12,28 +11,18 @@ import type { ParticleSimFrame, ParticleDrawFrame } from '../particles/particleR
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderTarget } from '../rhi/resources';
 import { keyLight } from '../skyNight';
-import type { KeyLight } from '../skyNight';
 import { GLState } from '../systems/glState';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
 import type { ViewProjection } from './viewProjection';
 import type { TemporalPasses } from './temporal';
+import type { RenderSubsystems } from './subsystems';
 
-/** What ParticlePasses reads from the renderer that owns it, while those members still live there. */
+/** What ParticlePasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface ParticlePassesHost {
-    cloudGrade(scene: Scene): { sun: number, white: number, sky: number, flat: number };
-    dirOf(node: LightNode): vec3;
-    readonly frustum: Frustum;
-    readonly frustumCulling: boolean;
-    internalAmbient(scene: Scene | null): number[];
-    readonly keyLight: KeyLight | null;
-    readonly keyLightNode: LightNode | null;
-    readonly lightOccludedMemo: Map<LightNode, boolean>;
     readonly renderHeight: number;
     readonly renderWidth: number;
-    readonly skySH: Float32Array;
-    readonly skySHValid: boolean;
     readonly thumbnailMode: boolean;
 }
 
@@ -48,7 +37,8 @@ export class ParticlePasses {
                 private readonly _targets: FrameTargets,
                 private readonly _passes: PassEncoder,
                 private readonly _projection: ViewProjection,
-                private readonly _temporal: TemporalPasses) {}
+                private readonly _temporal: TemporalPasses,
+                private readonly _sys: RenderSubsystems) {}
 
     /** The GPU particle system: state textures, simulation steps, billboard draws. */
     public readonly particles = new ParticleRenderer();
@@ -144,21 +134,21 @@ export class ParticlePasses {
         const sunDirection = [0, 1, 0];
         if (sun) {
             const light = sun.light as DirectionalLight;
-            const key = sun === this._host.keyLightNode ? this._host.keyLight : null;
+            const key = sun === this._sys.lighting.keyLightNode ? this._sys.lighting.keyLight : null;
             const k = key ? key.intensity : light.internalIntensity;
             const c = key ? key.color : light.color;
             sunColor[0] = c[0] * k; sunColor[1] = c[1] * k; sunColor[2] = c[2] * k;
-            const f = this._host.dirOf(sun);
+            const f = this._sys.lighting.dirOf(sun);
             sunDirection[0] = -f[0]; sunDirection[1] = -f[1]; sunDirection[2] = -f[2];
         }
         // The fallback indirect term surfaces get (deferredLighting `indirect.diffuse`): the scene ambient,
         // as the sky light scales it, plus the sky light's mean irradiance. No invented floor: a scene with
         // neither is dark, for particles as for everything else.
-        const ambient = this._host.internalAmbient(scene);
+        const ambient = this._sys.lighting.internalAmbient(scene);
         const skyNode = scene.skyLight;
-        if (skyNode && this._host.skySHValid) {
-            const grade = this._host.cloudGrade(scene);
-            const sky = skyAmbient(this._host.skySH, skyNode.intensity * grade.sky);
+        if (skyNode && this._sys.sky.skySHValid) {
+            const grade = this._sys.lighting.cloudGrade(scene);
+            const sky = skyAmbient(this._sys.sky.skySH, skyNode.intensity * grade.sky);
             ambient[0] += sky[0]; ambient[1] += sky[1]; ambient[2] += sky[2];
         }
 
@@ -167,7 +157,7 @@ export class ParticlePasses {
         localLights.length = 0;
         for (const node of scene.lights) {
             if (node.type === 'directional' || node.index < 0) continue;
-            if (this._host.lightOccludedMemo.get(node) === true) continue;
+            if (this._sys.visibility.lightOccludedMemo.get(node) === true) continue;
             const light = node.light as PointLight | Spotlight;
             const record: ParticleLocalLight = {
                 position: node.worldPosition, intensity: light.internalIntensity, color: light.color,
@@ -191,7 +181,7 @@ export class ParticlePasses {
             depth: this._host.thumbnailMode ? null : this._temporal.depthSource(),
             width: this._host.renderWidth, height: this._host.renderHeight,
             ambient, sunDirection, sunColor, localLights,
-            visible: this._host.frustumCulling ? (min, max) => this._host.frustum.intersectsAABB(min, max) : undefined,
+            visible: this._sys.visibility.frustumCulling ? (min, max) => this._sys.visibility.frustum.intersectsAABB(min, max) : undefined,
             lodDistanceScale: this.particleLodDistanceScale,
             exposure: this._view.exposure,
             // As the forward path picks a mesh's reflection: the probe containing it, else the sky. Never

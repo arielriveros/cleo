@@ -30,12 +30,11 @@ import type { ViewProjection } from './viewProjection';
 import type { ParticlePasses } from './particlePasses';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
+import type { RenderSubsystems } from './subsystems';
 
-/** What Sprite2DPasses reads from the renderer that owns it, while those members still live there. */
+/** What Sprite2DPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface Sprite2DPassesHost {
     readonly canvas: HTMLCanvasElement;
-    readonly frustum: Frustum;
-    readonly frustumCulling: boolean;
     readonly thumbnailMode: boolean;
 }
 
@@ -78,7 +77,8 @@ export class Sprite2DPasses {
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _materials: MaterialBinder,
                 private readonly _projection: ViewProjection,
-                private readonly _particlePasses: ParticlePasses) {}
+                private readonly _particlePasses: ParticlePasses,
+                private readonly _sys: RenderSubsystems) {}
 
     /**
      * The single depth-sorted 2D pass: tilemap chunks and sprites drawn in one interleaved order,
@@ -201,7 +201,7 @@ export class Sprite2DPasses {
 
     /** Frustum test for one chunk, in world space. `origin` is the owning node's world position. */
     private _chunkVisible(tilemap: Tilemap, layer: TilemapLayer, chunk: TileChunk, origin: vec3): boolean {
-        if (!this._host.frustumCulling) return true;
+        if (!this._sys.visibility.frustumCulling) return true;
         // A parallaxed layer is drawn at a camera-dependent offset, so its world box moves with the
         // camera; culling it against the un-offset box would pop tiles in and out at the screen edge.
         if (layer.cfg.parallax[0] !== 1 || layer.cfg.parallax[1] !== 1) return true;
@@ -216,7 +216,7 @@ export class Sprite2DPasses {
         const padX = CHUNK_SIZE * g.cellWidth, padY = CHUNK_SIZE * g.cellHeight;
         const min = [origin[0] + Math.min(c0[0], c1[0]) - padX, origin[1] + Math.min(c0[1], c1[1]) - padY, origin[2] - 1];
         const max = [origin[0] + Math.max(c0[0], c1[0]) + padX, origin[1] + Math.max(c0[1], c1[1]) + padY, origin[2] + 1];
-        return this._host.frustum.intersectsAABB(min, max);
+        return this._sys.visibility.frustum.intersectsAABB(min, max);
     }
 
     private _drawTileBand(node: TilemapNode, layer: TilemapLayer, chunk: TileChunk,

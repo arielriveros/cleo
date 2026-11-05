@@ -11,10 +11,10 @@ import type { PassEncoder } from './passEncoder';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { FullscreenPasses } from './fullscreenPasses';
+import type { RenderSubsystems } from './subsystems';
 
-/** What AutoExposure reads from the renderer that owns it, while those members still live there. */
+/** What AutoExposure reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface AutoExposureHost {
-    readonly presentTarget: Framebuffer | null;
     readonly ev100: number;
 }
 
@@ -31,7 +31,8 @@ export class AutoExposure {
                 private readonly _passes: PassEncoder,
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
-                private readonly _fullscreen: FullscreenPasses) {}
+                private readonly _fullscreen: FullscreenPasses,
+                private readonly _sys: RenderSubsystems) {}
 
     /**
      * The AUTHORED exposure — what the artist set, what a scene saves, and what a preview renders at.
@@ -219,7 +220,7 @@ export class AutoExposure {
         // `Capture.presentTarget` counts as a preview whichever tab it was taken from: that is the offscreen
         // thumbnail path, and a thumbnail keyed to the scene's momentary exposure is the inconsistency
         // this whole split exists to remove.
-        if (!this.exposureMeteringAllowed || this._host.presentTarget) {
+        if (!this.exposureMeteringAllowed || this._sys.capture.presentTarget) {
             this._view.exposure = AutoExposure.PREVIEW_EXPOSURE;
             return;
         }

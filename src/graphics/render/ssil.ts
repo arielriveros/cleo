@@ -15,7 +15,7 @@ import type { TemporalPasses } from './temporal';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 
-/** What SsilPasses reads from the renderer that owns it, while those members still live there. */
+/** What SsilPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface SsilPassesHost {
     readonly jitteredCameraProj: mat4;
     readonly renderHeight: number;

@@ -22,7 +22,7 @@ import type { ForwardPass } from './forwardPass';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 
-/** What Capture reads from the renderer that owns it, while those members still live there. */
+/** What Capture reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface CaptureHost {
     readonly renderHeight: number;
     readonly renderWidth: number;

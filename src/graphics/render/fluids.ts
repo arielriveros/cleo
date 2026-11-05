@@ -1,16 +1,12 @@
 import { vec3, mat4 } from 'gl-matrix';
-import { Frustum } from '../../core/frustum';
 import type { FluidVolumeNode } from '../../core/scene/nodes/fluidVolumeNode';
-import { LightNode } from '../../core/scene/nodes/lightNode';
 import { Scene } from '../../core/scene/scene';
 import { Framebuffer } from '../framebuffer';
 import { TemporalHistory } from './temporalHistory';
 import { gl } from '../glContext';
 import { DirectionalLight } from '../lighting';
-import { Mesh } from '../mesh';
 import { skyAmbient } from '../particles/particleLighting';
 import { keyLight } from '../skyNight';
-import type { KeyLight } from '../skyNight';
 import { GLState } from '../systems/glState';
 import { VolumetricCloudPasses } from './clouds';
 import { FluidVolumeProgram, FluidVolumeResolveProgram, FluidVolumeCompositeProgram } from './programs';
@@ -22,21 +18,12 @@ import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
+import type { RenderSubsystems } from './subsystems';
 
-/** What FluidVolumePasses reads from the renderer that owns it, while those members still live there. */
+/** What FluidVolumePasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface FluidVolumePassesHost {
-    cloudGrade(scene: Scene): { sun: number, white: number, sky: number, flat: number };
-    dirOf(node: LightNode): vec3;
-    readonly frustum: Frustum;
-    readonly frustumCulling: boolean;
-    readonly iblCubeMesh: Mesh;
-    internalAmbient(scene: Scene | null): number[];
-    readonly keyLight: KeyLight | null;
-    readonly keyLightNode: LightNode | null;
     readonly renderHeight: number;
     readonly renderWidth: number;
-    readonly skySH: Float32Array;
-    readonly skySHValid: boolean;
 }
 
 /**
@@ -54,7 +41,8 @@ export class FluidVolumePasses {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
-                private readonly _fullscreen: FullscreenPasses) {}
+                private readonly _fullscreen: FullscreenPasses,
+                private readonly _sys: RenderSubsystems) {}
 
     /**
      * Draw every enabled {@link FluidVolumeNode} over the scene buffer, in three steps:
@@ -181,7 +169,7 @@ export class FluidVolumePasses {
                 node.previousVolume ?? node.volume!, node.occupancy ?? node.volume!,
                 node.detailA ?? node.volume!, node.detailB ?? node.volume!,
             ]));
-            if (!this._passes.recordDraw(trace, this._host.iblCubeMesh, 0, 0)) this._host.iblCubeMesh.draw();
+            if (!this._passes.recordDraw(trace, this._sys.sky.iblCubeMesh, 0, 0)) this._sys.sky.iblCubeMesh.draw();
         }
         this._passes.endFullscreenPass(trace);
         GLState.blend(false);
@@ -254,9 +242,9 @@ export class FluidVolumePasses {
 
     /** True when the volume's box is entirely outside the view frustum (and culling is on). */
     private _outsideFrustumBox(node: FluidVolumeNode): boolean {
-        if (!this._host.frustumCulling) return false;
+        if (!this._sys.visibility.frustumCulling) return false;
         const box = node.getBoundingBox();
-        return !this._host.frustum.intersectsAABB(box.min, box.max);
+        return !this._sys.visibility.frustum.intersectsAABB(box.min, box.max);
     }
 
     /** A negative determinant reverses the box's winding, so the other face set is the back one. */
@@ -274,19 +262,19 @@ export class FluidVolumePasses {
         for (const node of scene.lights) {
             if (node.type !== 'directional') continue;
             const light = node.light as DirectionalLight;
-            const key = node === this._host.keyLightNode ? this._host.keyLight : null;
+            const key = node === this._sys.lighting.keyLightNode ? this._sys.lighting.keyLight : null;
             const k = key ? key.intensity : light.internalIntensity;
             const c = key ? key.color : light.color;
             sunColor[0] = c[0] * k; sunColor[1] = c[1] * k; sunColor[2] = c[2] * k;
-            const f = this._host.dirOf(node);
+            const f = this._sys.lighting.dirOf(node);
             sunDir[0] = -f[0]; sunDir[1] = -f[1]; sunDir[2] = -f[2];
             break;
         }
-        const ambient = this._host.internalAmbient(scene);
+        const ambient = this._sys.lighting.internalAmbient(scene);
         const skyNode = scene.skyLight;
-        if (skyNode && this._host.skySHValid) {
-            const grade = this._host.cloudGrade(scene);
-            const sky = skyAmbient(this._host.skySH, skyNode.intensity * grade.sky);
+        if (skyNode && this._sys.sky.skySHValid) {
+            const grade = this._sys.lighting.cloudGrade(scene);
+            const sky = skyAmbient(this._sys.sky.skySH, skyNode.intensity * grade.sky);
             ambient[0] += sky[0]; ambient[1] += sky[1]; ambient[2] += sky[2];
         }
         return { sunColor, ambient, sunDir };
