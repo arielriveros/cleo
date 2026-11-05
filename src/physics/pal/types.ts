@@ -174,6 +174,13 @@ export interface RayOptions {
     includeNoResponse?: boolean;
     /** Skip every dynamic body before any shape is tested: what a character can stand on. Default false. */
     excludeDynamic?: boolean;
+    /**
+     * Skip every sensor before any shape is tested. Default false. A hint: a backend may still report
+     * sensors, so the caller keeps its own filter; it only saves the work of testing them.
+     */
+    excludeSensors?: boolean;
+    /** Bodies to skip before any shape is tested (the caster's own). A hint, like `excludeSensors`. */
+    ignore?: BodyHandle | readonly BodyHandle[];
 }
 
 /** One ray hit. Written into a reused object: copy what you keep. */

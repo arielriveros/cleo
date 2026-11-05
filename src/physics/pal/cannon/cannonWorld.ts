@@ -209,9 +209,18 @@ export class CannonWorld implements PhysicsWorld {
             if (position) body.setPosition(position);
             if (rotation) body.setQuaternion(rotation);
         } else {
-            if (position) body.position.set(position[0], position[1], position[2]);
-            if (rotation) body.quaternion.set(rotation[0], rotation[1], rotation[2], rotation[3]);
-            body.aabbNeedsUpdate = true;
+            const p = body.position, q = body.quaternion;
+            let moved = false;
+            if (position && (p.x !== position[0] || p.y !== position[1] || p.z !== position[2])) {
+                p.set(position[0], position[1], position[2]);
+                moved = true;
+            }
+            if (rotation && (q.x !== rotation[0] || q.y !== rotation[1] || q.z !== rotation[2] || q.w !== rotation[3])) {
+                q.set(rotation[0], rotation[1], rotation[2], rotation[3]);
+                moved = true;
+            }
+            // Re-measured on the next query only when it actually moved — see CannonBody._syncPosition.
+            if (moved) body.aabbNeedsUpdate = true;
         }
         this._version++;
     }
@@ -357,8 +366,8 @@ export class CannonWorld implements PhysicsWorld {
     // ---- queries ----
 
     public raycast(from: ArrayLike<number>, to: ArrayLike<number>, options: RayOptions, onHit: (hit: RayHit) => void): void {
-        const f = CannonWorld._rayFrom.set(from[0], from[1], from[2]);
-        const t = CannonWorld._rayTo.set(to[0], to[1], to[2]);
+        CannonWorld._rayFrom.set(from[0], from[1], from[2]);
+        CannonWorld._rayTo.set(to[0], to[1], to[2]);
         const checkCollisionResponse = !options.includeNoResponse;
         const hit = this._hit;
         const report = (result: RaycastResult) => {
@@ -371,23 +380,28 @@ export class CannonWorld implements PhysicsWorld {
             hit.distance = result.distance;
             onHit(hit);
         };
-        if (options.excludeDynamic) { this._raycastStatic(checkCollisionResponse, options.mode, report); return; }
-        if (options.mode === 'closest') {
-            const result = CannonWorld._closest;
-            result.reset();
-            if (this.raw.raycastClosest(f, t, { checkCollisionResponse }, result)) report(result);
-            return;
-        }
-        this.raw.raycastAll(f, t, { checkCollisionResponse }, report);
+        this._raycastFiltered(checkCollisionResponse, options, report);
     }
 
     /**
-     * `raycastAll` minus every DYNAMIC body, decided before any shape test. Same Ray, same per-body
-     * intersection and the same callback contract (every hit, the caller keeps the nearest) — only the
-     * candidate list differs: cannon's broad phase hands a ray every body whose box it overlaps, and a
-     * foot's ray starts inside its own character's capsule.
+     * Every ray, in either mode: cannon's own Ray and per-body intersection over a candidate list gathered
+     * here instead of by `broadphase.aabbQuery`. Two reasons:
+     *
+     * - The broad phase's query is a linear scan either way (cannon's SAP computes the axis bounds and
+     *   discards them), and on the main thread of the worker build its axis list is not sorted by anything
+     *   — the mirror world never steps. So nothing is lost by walking `bodies`.
+     * - Bodies the ray cannot report are dropped BEFORE their box is refreshed or a shape is tested:
+     *   cannon's own `intersectBody` predicates (no collision response, a group/mask mismatch) and what the
+     *   caller would throw away on sight — dynamic bodies for a ground probe, sensors, the caster's own
+     *   body (a foot's or an AI's ray starts inside its own capsule). Sensors are the hit boxes and trigger
+     *   zones that follow animated bones: re-measured every frame, they were most of what a ray paid for.
+     *
+     * The hits are the ones cannon reports for the bodies kept, through the same callback contract (every
+     * hit, the caller keeps the nearest); only the candidate ORDER differs, which no caller depends on.
      */
-    private _raycastStatic(checkCollisionResponse: boolean, mode: RayOptions['mode'], report: (result: RaycastResult) => void): void {
+    private _raycastFiltered(checkCollisionResponse: boolean, options: RayOptions,
+                             report: (result: RaycastResult) => void): void {
+        const mode = options.mode;
         const ray = CannonWorld._groundRay;
         ray.from.copy(CannonWorld._rayFrom);
         ray.to.copy(CannonWorld._rayTo);
@@ -405,16 +419,30 @@ export class CannonWorld implements PhysicsWorld {
 
         const box = CannonWorld._groundBox;
         ray.getAABB(box);
+        const excludeDynamic = !!options.excludeDynamic, excludeSensors = !!options.excludeSensors;
+        const ignore = options.ignore;
         const candidates = CannonWorld._groundCandidates;
         candidates.length = 0;
         for (const body of this.raw.bodies) {
-            if (body.type === Body.DYNAMIC) continue;
+            // cannon's `intersectBody` would return on these two without testing a shape.
+            if (checkCollisionResponse && !body.collisionResponse) continue;
+            if ((ray.collisionFilterGroup & body.collisionFilterMask) === 0
+                || (body.collisionFilterGroup & ray.collisionFilterMask) === 0) continue;
+            if (excludeDynamic && body.type === Body.DYNAMIC) continue;
+            if (excludeSensors && body.isTrigger) continue;
+            if (ignore !== undefined && CannonWorld._ignored(ignore, body.id as BodyHandle)) continue;
             if (body.aabbNeedsUpdate) body.updateAABB();
             if (body.aabb.overlaps(box)) candidates.push(body);
         }
         ray.intersectBodies(candidates);
         candidates.length = 0;
         if (mode === 'closest' && ray.hasHit) report(ray.result);
+    }
+
+    private static _ignored(ignore: BodyHandle | readonly BodyHandle[], h: BodyHandle): boolean {
+        if (typeof ignore === 'number') return ignore === h;
+        for (let i = 0; i < ignore.length; i++) if (ignore[i] === h) return true;
+        return false;
     }
 
     public clear(): void {
@@ -503,7 +531,6 @@ export class CannonWorld implements PhysicsWorld {
     private static readonly _b = new Vec3();
     private static readonly _rayFrom = new Vec3();
     private static readonly _rayTo = new Vec3();
-    private static readonly _closest = new RaycastResult();
     private static readonly _groundRay = new Ray();
     private static readonly _groundResult = new RaycastResult();
     private static readonly _groundBox = new AABB();

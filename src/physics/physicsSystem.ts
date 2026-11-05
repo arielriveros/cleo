@@ -1177,6 +1177,10 @@ export class PhysicsSystem {
       // The solidity filter is on by default; the camera turns it off so ghosts still block the boom.
       includeNoResponse: !(opts.checkCollisionResponse ?? true),
       excludeDynamic: !!opts.groundOnly,
+      // Hints, so the backend skips before testing what `skipRayHit` below would throw away on sight:
+      // sensors (hit boxes and trigger zones riding animated bones) and the caster's own body.
+      excludeSensors: !opts.includeTriggers,
+      ignore: this._rayIgnoreHandles(opts.ignore),
     }, hit => {
       const body = this._bodyOf(hit.body);
       if (!body) return;
@@ -1198,6 +1202,17 @@ export class PhysicsSystem {
     physicsStats.rayCount++;
     return nearest;
   }
+
+  /** `ignore` as backend handles for the ray hint; a list is written into one reused array. */
+  private _rayIgnoreHandles(ignore: PhysicsBody | PhysicsBody[] | null | undefined): BodyHandle | readonly BodyHandle[] | undefined {
+    if (!ignore) return undefined;
+    if (!Array.isArray(ignore)) return typeof ignore.handle === 'number' ? ignore.handle : undefined;
+    const list = this._rayIgnoreList;
+    list.length = 0;
+    for (const body of ignore) if (body && typeof body.handle === 'number') list.push(body.handle);
+    return list;
+  }
+  private readonly _rayIgnoreList: BodyHandle[] = [];
 
   /**
    * Turn a skinned ModelNode into a ragdoll and drive its skeleton from physics. A humanoid (or a rig

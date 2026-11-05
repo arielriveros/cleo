@@ -34,6 +34,7 @@ export class CannonBody extends Body {
         this._captureOrigin();
         this._com.set(0, 0, 0);
         this._syncPosition();
+        this.aabbNeedsUpdate = true;
     }
 
     /**
@@ -44,8 +45,10 @@ export class CannonBody extends Body {
      * around by reference, and a fresh object per body per frame is pure garbage.
      */
     public setPosition(position: ArrayLike<number>) {
+        const p = this.position, x = p.x, y = p.y, z = p.z;
         this._origin.set(position[0], position[1], position[2]);
         this._syncPosition();
+        if (p.x !== x || p.y !== y || p.z !== z) this.aabbNeedsUpdate = true;
     }
 
     /**
@@ -56,9 +59,13 @@ export class CannonBody extends Body {
         // Re-read the origin from where the body actually IS before turning it, so a rotation applied
         // without a preceding setPosition — a script calling node.rotateY, or animator root motion —
         // pivots about the node's current origin rather than a stale one.
+        const p = this.position, x = p.x, y = p.y, z = p.z;
+        const q = this.quaternion, qx = q.x, qy = q.y, qz = q.z, qw = q.w;
         this._captureOrigin();
-        this.quaternion.set(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
+        q.set(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
         this._syncPosition();
+        if (p.x !== x || p.y !== y || p.z !== z || q.x !== qx || q.y !== qy || q.z !== qz || q.w !== qw)
+            this.aabbNeedsUpdate = true;
     }
 
     /** Where the owning node sits, written into `out`: this body's position with {@link _com} taken off. */
@@ -98,9 +105,10 @@ export class CannonBody extends Body {
         const com = CannonBody._comWorld;
         this.quaternion.vmult(this._com, com);
         this._origin.vadd(com, this.position);
-        // cannon only re-measures a body's AABB when IT moved the body (integrate); a static or sleeping
-        // body placed from a script would otherwise keep the box it had where it used to be.
-        this.aabbNeedsUpdate = true;
+        // The AABB is flagged by the CALLERS, and only when the pose really changed: cannon re-measures a
+        // body's box only when IT moved the body (integrate), so a static or sleeping body placed from a
+        // script must be flagged — but a set to where the body already is happens every frame for bodies
+        // following their nodes, and every flag is a re-measure on the next ray or overlap query.
     }
 
     /**
