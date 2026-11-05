@@ -283,6 +283,7 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
     ];
 }
 
+/** WGSL reflection for the depth-only shadow programs, reachable by the name the pass picks. */
 export const SHADOW_PROGRAMS: Record<string, { resources: readonly ShaderResource[] }> = {
     shadowMap: ShadowMapProgram,
     shadowMapSkinned: ShadowMapSkinnedProgram,
@@ -322,6 +323,7 @@ export const FORWARD_PROGRAMS: Record<string, { resources: readonly ShaderResour
     basicInstanced: BasicInstancedProgram,
 };
 
+/** WGSL reflection for the geometry programs, by the name `_geometryShaderFor` picks at draw time. */
 export const GEOMETRY_PROGRAMS: Record<string, { resources: readonly ShaderResource[] }> = {
     pbrGeometry: GeometryPBRProgram,
     pbrGeometrySkinned: GeometryPBRSkinnedProgram,

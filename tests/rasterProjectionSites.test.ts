@@ -33,15 +33,15 @@ function enclosingMethod(source: string, index: number): string {
     return declarations.length ? declarations[declarations.length - 1][1] : '<none>';
 }
 
-/** Every method containing at least one `this.<call>(`, with how many. */
+/**
+ * Every method calling the projection helper `call`, with how many: `this._projection.<call>(` from the
+ * renderer, `this.<call>(` from inside ViewProjection itself.
+ */
 function callers(call: string): Map<string, number> {
-    const needle = `this.${call}(`;
     const found = new Map<string, number>();
-    let at = RENDERER.indexOf(needle);
-    while (at !== -1) {
-        const method = enclosingMethod(RENDERER, at);
+    for (const m of RENDERER.matchAll(new RegExp(`this\\.(?:_projection\\.)?${call}\\(`, 'g'))) {
+        const method = enclosingMethod(RENDERER, m.index!);
         found.set(method, (found.get(method) ?? 0) + 1);
-        at = RENDERER.indexOf(needle, at + needle.length);
     }
     return found;
 }
@@ -52,15 +52,15 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         // never jitter, whichever side of the resolve it is on — and if it is on the near side, TAA
         // silently degrades to a blur over that geometry.
         // Anchored on the jittered call, so a rename of the camera field cannot make this pass vacuously.
-        expectAbsent(RENDERER, 'this._clipProjection(this._view.camera.projectionMatrix)',
-                     'this._rasterProjection(this._view.camera.projectionMatrix)');
+        expectAbsent(RENDERER, 'this._projection.clipProjection(this._view.camera.projectionMatrix)',
+                     'this._projection.rasterProjection(this._view.camera.projectionMatrix)');
     });
 
     it('routes exactly these methods through _rasterProjection', () => {
         // Adding a method here is a decision, not a formality: check where the new pass sits relative
         // to `_taaResolvePass` before you add it. Everything below the resolve is drawn on top of the
         // resolved image and must come out unjittered.
-        expect([...callers('_rasterProjection').keys()].sort()).toEqual([
+        expect([...callers('rasterProjection').keys()].sort()).toEqual([
             // --- Before the resolve: these ARE the TAA input, and must jitter. ---
             '_drawGeometryNode',      // all deferred opaques, terrain included
             '_drawInstancedGroup',    // twice: the RHI branch and the legacy one
@@ -89,7 +89,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // rather than `_drawOverlayNode` is the honest reading of the call graph, and the jitter
             // semantics are unchanged: the overlay is composited after the post chain, so it is further
             // from the jitter than anything else here.
-            '_nudgedProjection',
+            'nudgedProjection',
             '_overdrawPass',
             // GPU particles: drawn after the transparents, in both pipelines and in the 2D pass.
             '_particleDrawFrame',
@@ -105,11 +105,11 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         // and position rather than its matrix, and `_captureProj` is a fixed 90-degree square face —
         // so both are immune by construction rather than by being excluded, and jittering either would
         // move shadows and probe captures against the image instead of with it.
-        expect([...callers('_clipProjection').keys()].sort()).toEqual([
+        expect([...callers('clipProjection').keys()].sort()).toEqual([
             '_convolveCubeFaces',     // _captureProj
             '_drawImpostorShadows',   // lightSpace
             '_foliageShadowPass',     // lightSpace
-            '_rasterProjection',      // the wrapper's own two returns
+            'rasterProjection',       // the wrapper's own two returns
             '_renderAtmosphereFaces', // _captureProj (the sky bake and the cloud-sky bake)
             '_renderShadowCasters',   // lightSpace
         ].sort());
@@ -119,7 +119,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         // Deferred goes through `_renderForwardOverlay`, forward through `_renderScene`, and they are
         // separate functions with separate insertion points. One wired and the other not would leave
         // half the pipelines shimmering.
-        expect(RENDERER.split('this._endJitterPhase();').length - 1).toBe(2);
+        expect(RENDERER.split('this._projection.endJitterPhase();').length - 1).toBe(2);
         expect(RENDERER.split('this._taaResolvePass();').length - 1).toBe(2);
         expect(RENDERER.split('this._produceVelocity();').length - 1).toBe(2);
     });

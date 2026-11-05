@@ -125,7 +125,7 @@ describe('the receiver filter', () => {
         expect(frame.indexOf('this._collectDecals(scene)')).toBeLessThan(receivers);
         expect(receivers).toBeLessThan(frame.indexOf('this._renderDeferred('));
         expect(receivers).toBeLessThan(frame.indexOf('this._renderForward('));
-        expect(methodBody('_decalReceiverPass')).toContain('this._rasterProjection(cam.projectionMatrix)');
+        expect(methodBody('_decalReceiverPass')).toContain('this._projection.rasterProjection(cam.projectionMatrix)');
     });
 
     it('draws nothing, rather than everything, for a terrain decal whose receiver depth is missing', () => {
