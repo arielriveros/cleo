@@ -334,6 +334,6 @@ describe('the shader and the renderer agree on the window', () => {
     it('meters the lit scene rather than the composed frame', () => {
         // After bloom, exposure and bloom chase each other: bloom brightens, the meter darkens, which
         // moves bloom's display-referred threshold, and round again.
-        expect(RENDERER).toContain('this._textureBindGroup(pipeline, 0, [this._targets.scene.colors[0]])');
+        expect(RENDERER).toContain('this._bindGroups.textureGroup(pipeline, 0, [this._targets.scene.colors[0]])');
     });
 });

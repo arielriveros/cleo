@@ -97,7 +97,7 @@ describe('the shadow library is self-contained', () => {
     });
 
     it('declares the point atlas last in group 3, and pairs it', () => {
-        // `Renderer._textureBindGroup` places the Nth texture at binding 2N, so group 3's bindings are
+        // `BindGroupCache.textureGroup` places the Nth texture at binding 2N, so group 3's bindings are
         // positional: a texture inserted in the middle, or a sampler that does not follow its texture,
         // silently rebinds the cascades to something else.
         expect(src()).toContain('@group(3) @binding(4) var u_pointShadows_texture: texture_depth_2d_array;');
@@ -173,7 +173,7 @@ describe('the JS and WGSL cube-face selectors are one partition', () => {
 });
 
 describe('every shadow-sampling program reaches every group-3 binding', () => {
-    // The hazard `_textureBindGroup` creates: it hands group 3 the Nth texture at binding 2N, so a
+    // The hazard `BindGroupCache.textureGroup` creates: it hands group 3 the Nth texture at binding 2N, so a
     // program that declares the shadow group but never CALLS into the point atlas has naga drop
     // bindings 4/5 — and the third texture then lands on a layout that has no slot for it. Cheap to
     // check by source text, and the failure it catches is a WebGPU validation error in someone's scene.

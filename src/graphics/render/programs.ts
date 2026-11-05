@@ -313,7 +313,7 @@ export const FORWARD_PROGRAMS: Record<string, { resources: readonly ShaderResour
     blinn_phong: BlinnPhongProgram,
     blinn_phongSkinned: BlinnPhongSkinnedProgram,
     // Cel declares no env cube, so its group 0 is five plain material slots and
-    // `_materialTextureFields` yields no null entry for `_materialBindGroup` to fill.
+    // `BindGroupCache` yields no null entry for `materialGroup` to fill.
     cel: CelProgram,
     celSkinned: CelSkinnedProgram,
     terrainForward: TerrainForwardProgram,

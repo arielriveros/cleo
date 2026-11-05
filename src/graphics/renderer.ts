@@ -123,6 +123,7 @@ import { createFrameView, type FrameView } from './render/frameView';
 import { FrameTargets } from './render/frameTargets';
 import { PassEncoder } from './render/passEncoder';
 import { PipelineCache } from './render/pipelineCache';
+import { BindGroupCache, SCENE_DEPTH_FIELD } from './render/bindGroups';
 import { QUALITY_TIERS } from './render/settingsTypes';
 import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 export { QUALITY_TIERS } from './render/settingsTypes';
@@ -312,7 +313,6 @@ interface FoliageState {
 }
 
 /** A Basic program's group-0 slot for the opaque depth snapshot (chunks/basicForward.wgsl), not a material map. */
-const SCENE_DEPTH_FIELD = 'u_sceneDepth';
 
 export class Renderer {
     private _config: RendererConfig;
@@ -337,6 +337,8 @@ export class Renderer {
     private readonly _passes: PassEncoder;
     /** Render pipelines and shader modules, built once per state (render/pipelineCache.ts). */
     private readonly _pipelines: PipelineCache;
+    /** Bind groups over textures and materials, cached by what they bind (render/bindGroups.ts). */
+    private readonly _bindGroups: BindGroupCache;
 
     /**
      * The AUTHORED exposure — what the artist set, what a scene saves, and what a preview renders at.
@@ -517,16 +519,6 @@ export class Renderer {
     // 8-bit, NOT `precision: 'high'` — readPixels(RGBA, UNSIGNED_BYTE) is invalid against a float target.
     private _offscreenFBO: Framebuffer | null = null;
     private _presentTarget: Framebuffer | null = null;
-    /** 1x1 cube bound to unfilled IBL slots so no cube sampler is ever left unbound. */
-    private _fallbackCube!: Texture;
-    /** 1x1 white 2D texture, bound wherever a material declares a map it does not have. */
-    private _fallbackTexture!: Texture;
-    /**
-     * The same, as a one-layer 2D ARRAY: a `texture_2d_array` binding cannot take the plain fallback —
-     * WebGPU rejects the view dimension outright, and on WebGL2 a sampler2DArray reading a TEXTURE_2D
-     * unit is a draw error. Built on first need; the landscape's layer stack is its only user.
-     */
-    private _fallbackArray: Texture | null = null;
     /**
      * The built-in lens-dirt overlay, decoded once on first use.
      *
@@ -1342,6 +1334,12 @@ export class Renderer {
             physicalOf: name => this._physicalOf(name),
             descriptorFor: name => this._descriptorFor(name),
         }, this._view, this._passes, parseRecipes(config.pipelines));
+        this._bindGroups = new BindGroupCache({
+            shadowCascades: () => this._shadowCascadeFBO.texture,
+            spotShadows: () => this._spotShadowFBO.texture,
+            pointShadows: () => this._pointShadowFBO.texture,
+            lightGrid: () => this._lightGrid.texture,
+        }, this._targets);
 
         // Preallocated identity bone matrices (used when an animated model has no animator)
         this._boneIdentityScratch = new Float32Array(100 * 16);
@@ -2187,7 +2185,7 @@ export class Renderer {
         const pass = this._passes.beginFullscreenPass(this._probePreviewFBO.renderTarget, 'probePreview', false);
         const pipeline = this._pipelines.fullscreen('probePreview', ProbePreviewProgram);
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [cube]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [cube]));
         this._shaderManager.bind('probePreview');
         this._shaderManager.setUniform('u_exposure', probe.intensity);
         this._passes.drawFullscreen(pass);
@@ -2674,10 +2672,10 @@ export class Renderer {
             // on `setPipeline`, so a hoisted one runs past the 16 guaranteed units within three decals.
             pass.setPipeline(pipeline);
             this._setDecalUniforms(decal, material, this._view.invViewProj, 0);
-            pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
+            pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
             // Bindings 0, 2, 4: the depth projected onto, the receiver depth, the G-buffer normal. None
             // of them is attached to this pass — the DBuffer has no depth attachment at all.
-            pass.setBindGroup(2, this._textureBindGroup(pipeline, 2, [gBuffer.depth, receivers, gBuffer.colors[1]]));
+            pass.setBindGroup(2, this._bindGroups.textureGroup(pipeline, 2, [gBuffer.depth, receivers, gBuffer.colors[1]]));
             if (!this._passes.recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
         }
         this._passes.endFullscreenPass(pass);
@@ -2693,7 +2691,7 @@ export class Renderer {
         const resolvePipeline = this._pipelines.get('decalResolve', DecalResolveProgram,
                                                   { vertex: 'model', builtFor: 'decalResolve', targets: 3 });
         resolve.setPipeline(resolvePipeline);
-        resolve.setBindGroup(0, this._textureBindGroup(resolvePipeline, 0, [
+        resolve.setBindGroup(0, this._bindGroups.textureGroup(resolvePipeline, 0, [
             copy.colors[0], copy.colors[1], copy.colors[2],
             dbuffer.colors[0], dbuffer.colors[1], dbuffer.colors[2],
         ]));
@@ -2743,8 +2741,8 @@ export class Renderer {
             });
             pass.setPipeline(pipeline);
             this._setDecalUniforms(decal, material, invViewProj, mode);
-            pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
-            pass.setBindGroup(2, this._textureBindGroup(pipeline, 2, [depth, receivers]));
+            pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
+            pass.setBindGroup(2, this._bindGroups.textureGroup(pipeline, 2, [depth, receivers]));
             if (!this._passes.recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
         }
     }
@@ -2869,8 +2867,8 @@ export class Renderer {
             sm.setUniform('u_liquidSpecular', node.liquidSpecular);
             sm.setUniform('u_liquidFoam', node.liquidFoam);
             sm.setUniform('u_liquidMetallic', node.liquidMetallic);
-            trace.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-                depth, node.volume!, node.fireLut ?? this._fallbackTexture,
+            trace.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
+                depth, node.volume!, node.fireLut ?? this._bindGroups.fallbackTexture,
                 node.previousVolume ?? node.volume!, node.occupancy ?? node.volume!,
                 node.detailA ?? node.volume!, node.detailB ?? node.volume!,
             ]));
@@ -2887,7 +2885,7 @@ export class Renderer {
             const pass = this._passes.beginFullscreenPass(this._fluidHistoryFBOs[dst].renderTarget, 'fluidVolumes.resolve', false, undefined, false);
             const pipeline = this._pipelines.fullscreen('fluidVolumeResolve', FluidVolumeResolveProgram);
             pass.setPipeline(pipeline);
-            pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+            pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
                 this._fluidTraceFBO!.colors[0], this._fluidTraceFBO!.colors[1], prev.colors[0],
             ]));
             sm.bind('fluidVolumeResolve');
@@ -2909,7 +2907,7 @@ export class Renderer {
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'fluidVolumes.composite', false, undefined, false);
         const pipeline = this._pipelines.fullscreen('fluidVolumeComposite', FluidVolumeCompositeProgram, Renderer._CLOUD_BLEND);
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [image, this._fluidTraceFBO!.colors[1], depth]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [image, this._fluidTraceFBO!.colors[1], depth]));
         sm.bind('fluidVolumeComposite');
         sm.setUniform('u_invViewProj', this._view.invViewProjStable);
         this._passes.drawFullscreen(pass);
@@ -3818,7 +3816,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_lightDir', v[0]);
         this._shaderManager.setUniform('u_impostor', v[1]);
         this._shaderManager.setUniform('u_impostorCenter', v[2]);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [albedo]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [albedo]));
         for (const batch of chunks) {
             if (batch.count === 0 || !batch.buffer) continue;
             if (!this._recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch)) {
@@ -4053,7 +4051,7 @@ export class Renderer {
                     if (cutout) {
                         this._shaderManager.setUniform('u_cutoff', cut!.cutoff);
                         this._shaderManager.setUniform('u_useRed', cut!.useRed);
-                        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [cut!.texture]));
+                        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [cut!.texture]));
                     }
 
                     for (const batch of chunks) {
@@ -4343,7 +4341,7 @@ export class Renderer {
                         pass.setPipeline(pipeline);
                         this._applyMaterialProperties(model.material);
                         if (sway) this._setFoliageWeather(wind!);
-                        pass.setBindGroup(0, this._materialBindGroup(pipeline, model.material));
+                        pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, model.material));
                         let all = true;
                         for (const batch of chunks) {
                             if (batch.count === 0 || !batch.buffer) continue;
@@ -4406,12 +4404,12 @@ export class Renderer {
                             const padded = texId ? TexturePacker.Instance.dilatedId(texId, 0.5) : null;
                             const tex = (padded ? TextureManager.Instance.getTexture(padded) : null)
                                 ?? (texId ? TextureManager.Instance.getTexture(texId) : null);
-                            pass.setBindGroup(0, this._textureBindGroup(pipeline, 0,
-                                                                       [tex ?? this._fallbackTexture]));
+                            pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0,
+                                                                       [tex ?? this._bindGroups.fallbackTexture]));
                         } else {
                             this._applyMaterialProperties(model.material);
                             if (foliage) this._setFoliageWeather(wind!);
-                            pass.setBindGroup(0, this._materialBindGroup(pipeline, model.material));
+                            pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, model.material));
                         }
 
                         // Every chunk shares the binds above; only the instance buffer differs.
@@ -4471,7 +4469,7 @@ export class Renderer {
             builtFor: 'blinn_phongGeometry',
         });
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [albedo, normal]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [albedo, normal]));
         for (const batch of chunks) {
             if (batch.count === 0 || !batch.buffer) continue;
             if (!this._recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch)) {
@@ -4723,115 +4721,6 @@ export class Renderer {
         return side === 'back' ? 'front' : 'back';
     }
 
-    /**
-     * A bind group over a material's textures, one entry per texture the SHADER declares. EVERY
-     * declared binding is filled — a bind group cannot leave one out — so a missing map takes a 1x1
-     * white fallback and the shader gates on its `has*` flags.
-     */
-    private _materialBindGroup(pipeline: RenderPipeline, material: Material,
-                               envCube?: Texture | null): BindGroup {
-        // A scratch list, not a new array per draw: _textureBindGroup only reads it.
-        const textures = this._materialTextureScratch;
-        textures.length = 0;
-        for (const field of this._materialTextureFields(pipeline)) {
-            // The environment cube rides in group 0 alongside the material maps but must NOT be looked
-            // up as one: the miss falls back to a 2D texture, a sampler-type mismatch at draw time.
-            if (field === null) { textures.push(envCube ?? this._fallbackCube); continue; }
-            // The opaque depth snapshot (a soft sprite's fade, chunks/basicForward.wgsl) is the frame's.
-            if (field === SCENE_DEPTH_FIELD) { textures.push(this._targets.sceneDepth.depth); continue; }
-            // A cutout's edge-padded base colour stands in for the authored one (TexturePacker
-            // `_syncDilation`); until it is baked, or once it is swept, the authored map draws.
-            const dilated = field === 'baseColorTexture' ? material.textures.get(DILATED_BASE_SLOT) : undefined;
-            const dilatedTexture = dilated ? TextureManager.Instance.getTexture(dilated) : null;
-            const id = material.textures.get(field);
-            const texture = dilatedTexture ?? (id ? TextureManager.Instance.getTexture(id) : null);
-            textures.push(texture ?? this._fallbackTexture);
-        }
-        return this._textureBindGroup(pipeline, 0, textures);
-    }
-
-    /**
-     * A pipeline's group-0 material texture slots, as the MATERIAL names them, in binding order.
-     * `null` marks the environment cube, which has no material slot behind it.
-     *
-     * Derived once per pipeline rather than per draw: the names come from the shader's reflection and
-     * cannot change, but stripping the `u_material_` prefix off each one used to run a regex per texture
-     * per draw — six throwaway strings on every PBR mesh in the scene, every frame.
-     */
-    private _materialTextureFields(pipeline: RenderPipeline): readonly (string | null)[] {
-        let fields = this._materialFields.get(pipeline);
-        if (fields) return fields;
-        fields = [];
-        for (const resource of pipeline.resources) {
-            if (resource.group !== 0 || resource.kind !== 'texture') continue;
-            fields.push(resource.glslName === 'u_envMap'
-                ? null
-                : resource.glslName.replace(/^u_material_/, ''));
-        }
-        this._materialFields.set(pipeline, fields);
-        return fields;
-    }
-    private readonly _materialFields = new WeakMap<RenderPipeline, (string | null)[]>();
-    private readonly _materialTextureScratch: Texture[] = [];
-
-    /**
-     * A terrain material's nine layer samplers as a bind group. Separate from
-     * {@link _materialBindGroup} because terrain names its textures bare. EVERY slot is filled,
-     * unassigned layers included — an empty binding leaves whatever the previous draw put there.
-     */
-    /**
-     * A custom material's group 0: the mode's engine samplers, then the user's, in declaration order.
-     * The ORDER is the PRELUDE's — `customShaderResources` and `declareSamplers` walk the same lists —
-     * so this only fills each declared slot, falling back to a 1x1 texture where none is assigned.
-     */
-    private _customBindGroup(pipeline: RenderPipeline, material: CustomMaterial,
-                             envCube?: Texture | null): BindGroup {
-        const textures: Texture[] = [];
-        // Each at the binding its resource declares: a resource the shader never uses is filtered out of
-        // a translated pipeline (see `usedResources`), so counting slots off by twos would shift the rest.
-        const bindings: number[] = [];
-        for (const resource of pipeline.resources) {
-            if (resource.group !== 0 || resource.kind !== 'texture') continue;
-            bindings.push(resource.binding);
-            if (resource.glslName === 'u_envMap') { textures.push(envCube ?? this._fallbackCube); continue; }
-            if (resource.glslName === 'u_sceneDepth') { textures.push(this._targets.sceneDepth.depth); continue; }
-            if (resource.glslName === 'u_sceneColor') {
-                textures.push(this._targets.refraction?.colors[0] ?? this._fallbackTexture);
-                continue;
-            }
-            const id = material.textures.get(resource.glslName.replace(/^u_/, ''));
-            const texture = id ? TextureManager.Instance.getTexture(id) : null;
-            textures.push(texture ?? this._fallbackTexture);
-        }
-        return this._textureBindGroup(pipeline, 0, textures, bindings);
-    }
-
-    private _terrainBindGroup(pipeline: RenderPipeline, material: Material): BindGroup {
-        const textures: Texture[] = [];
-        for (const resource of pipeline.resources) {
-            if (resource.group !== 0 || resource.kind !== 'texture') continue;
-            const id = material.textures.get(resource.glslName);
-            const texture = id ? TextureManager.Instance.getTexture(id) : null;
-            textures.push(texture ?? this._fallbackFor(resource.type));
-        }
-        return this._textureBindGroup(pipeline, 0, textures);
-    }
-
-    /**
-     * The fallback that matches a binding's WGSL TYPE. The dimension has to agree with the declaration
-     * on both backends, so a missing array layer stack binds a one-layer white array, never the 2D white.
-     */
-    private _fallbackFor(wgslType: string): Texture {
-        if (!wgslType.includes('2d_array')) return this._fallbackTexture;
-        if (!this._fallbackArray) {
-            const array = new Texture({ target: 'texture2DArray', mipMap: false });
-            array.createColorArray(1, 1, 1, false);
-            array.writeLayer(0, 0, 0, 1, 1, new Uint8Array([255, 255, 255, 255]));
-            this._fallbackArray = array;
-        }
-        return this._fallbackArray;
-    }
-
     private _geometryShaderFor(node: ModelNode): string {
         const type = node.model.material.type;
         // A deferred custom material is drawn with its own runtime-compiled G-buffer program.
@@ -4896,7 +4785,7 @@ export class Renderer {
                     builtFor: 'terrain',
                 });
                 pass.setPipeline(terrainPipeline);
-                pass.setBindGroup(0, this._terrainBindGroup(terrainPipeline, mat));
+                pass.setBindGroup(0, this._bindGroups.terrainGroup(terrainPipeline, mat));
                 return true;
             }
             if (mat instanceof CustomMaterial) {
@@ -4920,7 +4809,7 @@ export class Renderer {
                     builtFor: node.model.material.type,
                 });
                 pass.setPipeline(customPipeline);
-                pass.setBindGroup(0, this._customBindGroup(customPipeline, mat));
+                pass.setBindGroup(0, this._bindGroups.customGroup(customPipeline, mat));
                 return true;
             }
             if (!reflection) { this._applyMaterial(mat); return false; }
@@ -4935,7 +4824,7 @@ export class Renderer {
             });
             pass.setPipeline(pipeline);
             this._applyMaterialProperties(mat);
-            pass.setBindGroup(0, this._materialBindGroup(pipeline, mat));
+            pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, mat));
             return true;
         }, pass);
         frameStats.objects++;
@@ -5148,7 +5037,7 @@ export class Renderer {
             this._shaderManager.setUniform('u_lodCamera', Renderer._LOD_OFF);
             this._setCameraHole(false);
             this._applyMaterialProperties(material);
-            pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
+            pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
         } else {
             this._shaderManager.bind(shaderType);
             this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
@@ -5216,7 +5105,7 @@ export class Renderer {
 
         // Group 0: the G-buffer plus SSIL. SSIL always binds a complete texture even when disabled —
         // the shader gates on u_ssaoEnabled, but the sampler still has to point somewhere valid.
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
             this._targets.gBuffer.colors[0], this._targets.gBuffer.colors[1], this._targets.gBuffer.colors[2],
             this._targets.gBuffer.depth, (this._ssaoResult ?? this._ssaoBlurFBO).colors[0],
         ]));
@@ -5231,7 +5120,7 @@ export class Renderer {
         this._shaderManager.bind('deferredLighting');
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         this._uploadShadowUniforms('deferredLighting');
-        pass.setBindGroup(3, this._frameLightingBindGroup(pipeline));
+        pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline));
 
         // Split-sum IBL from up to 2 probe volumes, blended per pixel by feathered containment;
         // uncovered pixels fall back to flat ambient plus the `u_envMap` reflection.
@@ -5247,13 +5136,13 @@ export class Renderer {
         const cubes: Texture[] = [];
         for (let i = 0; i < 2; i++) {
             const fill = probes[i] ?? probes[0] ?? null;
-            const irradiance = fill?.irradiance ?? scene.environmentMap ?? this._fallbackCube;
-            const prefiltered = fill?.prefiltered ?? scene.environmentMap ?? this._fallbackCube;
+            const irradiance = fill?.irradiance ?? scene.environmentMap ?? this._bindGroups.fallbackCube;
+            const prefiltered = fill?.prefiltered ?? scene.environmentMap ?? this._bindGroups.fallbackCube;
             cubes.push(irradiance, prefiltered);
         }
-        pass.setBindGroup(2, this._textureBindGroup(pipeline, 2, [
+        pass.setBindGroup(2, this._bindGroups.textureGroup(pipeline, 2, [
             cubes[0], cubes[1], cubes[2], cubes[3],
-            this._brdfFBO.colors[0], scene.environmentMap ?? this._fallbackCube,
+            this._brdfFBO.colors[0], scene.environmentMap ?? this._bindGroups.fallbackCube,
         ]));
 
         for (let i = 0; i < 2; i++) {
@@ -5430,65 +5319,6 @@ export class Renderer {
     }
 
     /**
-     * Does this program sample the shadow maps? Asked of the RESOURCE, never the group number —
-     * group 3 holds the light grid as well, and `terrainForward` takes that half and no shadows.
-     */
-    private _declaresShadowGroup(pipeline: RenderPipeline): boolean {
-        return pipeline.resources.some(r => r.group === 3 && r.glslName === 'u_shadowCascades');
-    }
-
-    /**
-     * Does this program read the clustered light grid? Asked of the RESOURCE, like
-     * {@link _declaresShadowGroup} — the unlit Basic family reads neither half of group 3, and binding
-     * a group a program never declared is an error rather than an empty bind.
-     */
-    private _declaresLightGrid(pipeline: RenderPipeline): boolean {
-        return pipeline.resources.some(r => r.group === 3 && r.glslName === 'u_lightData');
-    }
-
-    /** Does this program declare group 3 at all, in either half? */
-    private _declaresFrameLighting(pipeline: RenderPipeline): boolean {
-        return this._declaresShadowGroup(pipeline) || this._declaresLightGrid(pipeline);
-    }
-
-    /**
-     * Group 3, the per-frame lighting group: the shadow maps, and the clustered light-data texture.
-     *
-     * TWO CHUNKS SHARE THE GROUP because there is no fifth group to give either of them — WebGPU's
-     * `maxBindGroups` is 4, a CEILING rather than a default (see chunks/clusteredLights.wgsl). A
-     * program takes either half, both, or neither, so the entries carry their BINDING NUMBERS from
-     * chunks/shadows.wgsl (0/2/4) and chunks/clusteredLights.wgsl (6) instead of being counted off:
-     * terrain reads the light grid with no shadow maps at all, which counting would land at binding 0.
-     *
-     * The punctual atlases are the caller's to STATE — a program declaring them but never calling them
-     * has the binding dead-code eliminated, and an entry the layout does not have invalidates the whole
-     * command buffer.
-     */
-    private _frameLightingBindGroup(pipeline: RenderPipeline, withPunctual: boolean = true): BindGroup {
-        const textures: Texture[] = [];
-        const bindings: number[] = [];
-        // Only the bindings this program's layout really has. A CUSTOM material's WGSL comes out of naga,
-        // which drops every resource the shader never reaches: a lit custom surface (the Valley's water)
-        // that samples the sun's cascades but never a spot or point shadow has no binding 2 or 4, and
-        // naming them anyway made the whole group -- and every frame's command buffer -- invalid.
-        const declared = new Set(pipeline.resources.filter(r => r.group === 3).map(r => r.binding));
-        const add = (texture: Texture, binding: number) => {
-            if (!declared.has(binding)) return;
-            textures.push(texture); bindings.push(binding);
-        };
-        if (this._declaresShadowGroup(pipeline)) {
-            add(this._shadowCascadeFBO.texture, 0);
-            if (withPunctual) {
-                add(this._spotShadowFBO.texture, 2);
-                add(this._pointShadowFBO.texture, 4);
-            }
-        }
-        // One texture and no sampler beside it — the light data is only ever `textureLoad`ed.
-        if (this._declaresLightGrid(pipeline)) add(this._lightGrid.texture, 6);
-        return this._textureBindGroup(pipeline, 3, textures, bindings);
-    }
-
-    /**
      * Repack the per-cascade arrays into the upload buffers, once, after the cascade pass. The matrix
      * goes through `_uvProducing`: the lighting shader turns a world position into a shadow-map TEXTURE
      * COORDINATE, so it takes the same clip-to-uv flip every fullscreen reconstruction does.
@@ -5595,7 +5425,7 @@ export class Renderer {
         const trace = this._passes.beginFullscreenPass(this._ssaoFBO.renderTarget, 'ssao', true, undefined, false);
         const tracePipeline = this._pipelines.fullscreen('ssil', SsilProgram);
         trace.setPipeline(tracePipeline);
-        trace.setBindGroup(0, this._textureBindGroup(tracePipeline, 0, [
+        trace.setBindGroup(0, this._bindGroups.textureGroup(tracePipeline, 0, [
             this._targets.gBuffer.colors[1], this._targets.gBuffer.depth, radiance.colors[0],
         ]));
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
@@ -5632,7 +5462,7 @@ export class Renderer {
             const pass = this._passes.beginFullscreenPass(dst.renderTarget, 'ssao.temporal', true, undefined, false);
             const pipeline = this._pipelines.fullscreen('ssilTemporal', SsilTemporalProgram);
             pass.setPipeline(pipeline);
-            pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+            pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
                 this._ssaoFBO.colors[0], src.colors[0], radiance.colors[0], this._targets.gBuffer.depth,
             ]));
             this._shaderManager.setUniform('u_invProjection', this._invProjection);
@@ -5657,7 +5487,7 @@ export class Renderer {
                                                    undefined, false);
             const pipeline = this._pipelines.fullscreen('ssilBlur', SsilBlurProgram);
             pass.setPipeline(pipeline);
-            pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+            pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
                 this._ssaoResult.colors[0], this._targets.gBuffer.colors[1], this._targets.gBuffer.depth,
             ]));
             this._shaderManager.setUniform('u_depthParams', this._ssilDepthParams);
@@ -5683,7 +5513,7 @@ export class Renderer {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'ssao.history', true, undefined, false);
         const pipeline = this._pipelines.fullscreen('ssilHistory', SsilHistoryProgram);
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
             this._targets.scene.colors[0], this._depthSource(),
         ]));
         // The depth snapshot was rasterized through this frame's jittered projection.
@@ -5734,13 +5564,13 @@ export class Renderer {
         // "nothing", and an unset sampler aliases the 2D G-buffer sampler on unit 0.
         // `target: 'cubemap'` is NOT optional: without it this is a 2D texture, which is the exact
         // aliasing it exists to prevent. `allocateCube` throws on the mismatch.
-        this._fallbackCube = new Texture({ target: 'cubemap', mipMap: false });
-        this._fallbackCube.createCubemapTarget(1, 1);
+        this._bindGroups.fallbackCube = new Texture({ target: 'cubemap', mipMap: false });
+        this._bindGroups.fallbackCube.createCubemapTarget(1, 1);
 
         // White rather than black: a material with no base colour map multiplies by this, and black
         // would render every untextured object invisible rather than merely unmapped.
-        this._fallbackTexture = new Texture({ mipMap: false });
-        this._fallbackTexture.createFromData(new Uint8Array([255, 255, 255, 255]), 1, 1);
+        this._bindGroups.fallbackTexture = new Texture({ mipMap: false });
+        this._bindGroups.fallbackTexture.createFromData(new Uint8Array([255, 255, 255, 255]), 1, 1);
     }
 
     private _renderBRDFLUT(): void {
@@ -5775,7 +5605,7 @@ export class Renderer {
                 this._cubeFBO.targetFor(target, face, mip, false, size),
                 'iblConvolve', true, [0, 0, 0, 1], false);
             pass.setPipeline(pipeline);
-            pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [sourceCube]));
+            pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [sourceCube]));
             this._shaderManager.setUniform('u_view', this._iblFaceViews[face]);
             if (!this._passes.recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
             this._passes.endFullscreenPass(pass);
@@ -6012,7 +5842,7 @@ export class Renderer {
         const pass = this._passes.beginFullscreenPass(this._skyProjectFBO.renderTarget, 'skyProject', false);
         const pipeline = this._pipelines.fullscreen('skyProject', SkyProjectProgram);
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [cube]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [cube]));
         this._shaderManager.bind('skyProject');
         this._shaderManager.setUniform('u_linearInput', linear ? 1 : 0);
         this._shaderManager.setUniform('u_projectScale', scale);
@@ -6580,7 +6410,7 @@ export class Renderer {
         rayPass.setPipeline(rayPipeline);
 
         this._shaderManager.bind('godRays');
-        rayPass.setBindGroup(0, this._textureBindGroup(rayPipeline, 0, [this._targets.sceneDepth.depth]));
+        rayPass.setBindGroup(0, this._bindGroups.textureGroup(rayPipeline, 0, [this._targets.sceneDepth.depth]));
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         this._shaderManager.setUniform('u_sunDir', s);
@@ -6600,8 +6430,8 @@ export class Renderer {
         // With no caster the cascade lookups all return "lit" and the shafts degrade to uniform haze,
         // which is why this pass needs no shadow-present branch of its own any more.
         this._uploadShadowUniforms('godRays');
-        // Sun cascades only — see `_frameLightingBindGroup`. The shafts come from the directional light.
-        rayPass.setBindGroup(3, this._frameLightingBindGroup(rayPipeline, false));
+        // Sun cascades only — see `_bindGroups.frameLightingGroup`. The shafts come from the directional light.
+        rayPass.setBindGroup(3, this._bindGroups.frameLightingGroup(rayPipeline, false));
         this._passes.drawFullscreen(rayPass);
         this._passes.endFullscreenPass(rayPass);
 
@@ -6611,7 +6441,7 @@ export class Renderer {
                                                  'godRaysUpsample', false, undefined, false);
         const upPipeline = this._pipelines.fullscreen('screen', ScreenProgram, ADDITIVE_BLEND);
         upPass.setPipeline(upPipeline);
-        upPass.setBindGroup(0, this._textureBindGroup(upPipeline, 0, [scratch.colors[0]]));
+        upPass.setBindGroup(0, this._bindGroups.textureGroup(upPipeline, 0, [scratch.colors[0]]));
         scratch.colors[0].bind(0);
         this._passes.drawFullscreen(upPass);
         this._passes.endFullscreenPass(upPass);
@@ -6723,8 +6553,8 @@ export class Renderer {
         this._shaderManager.setUniform('u_moonTexture', !!moonTex);
         this._shaderManager.setUniform('u_moonEnabled', node.moonEnabled);
         this._shaderManager.setUniform('u_nightScale', node.moonlightIntensity / DEFAULT_MOONLIGHT_INTENSITY);
-        const nightGroup = this._textureBindGroup(skyPipeline, 2, [nightTex ?? this._fallbackTexture,
-                                                                    moonTex ?? this._fallbackTexture]);
+        const nightGroup = this._bindGroups.textureGroup(skyPipeline, 2, [nightTex ?? this._bindGroups.fallbackTexture,
+                                                                    moonTex ?? this._bindGroups.fallbackTexture]);
         // A texture still loading bakes the procedural fallback; remember to bake again once it is in.
         this._skyTexturesPending = (!!node.nightSkyTexture && !nightTex) || (!!node.moonTexture && !moonTex);
 
@@ -6797,7 +6627,7 @@ export class Renderer {
         this._shaderManager.bind('skyFog');
         // The CLEAN atmosphere, never the cloud-baked sky: fog is the colour of the air at the horizon, and
         // sampling clouds into it painted them onto every fogged hillside.
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.sceneDepth.depth, node.cubemap]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._targets.sceneDepth.depth, node.cubemap]));
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         this._shaderManager.setUniform('u_fogDensity', node.fogDensity);
@@ -6842,7 +6672,7 @@ export class Renderer {
         // cube-face and capture guards rather than by picking call sites.
         this._shaderManager.setUniform('u_projection', this._rasterProjection(proj));
         this._shaderManager.setUniform('u_linearInput', linearInput);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [cubemap]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [cubemap]));
         if (!this._passes.recordDraw(pass, mesh, 0, 0)) mesh.draw();
     }
 
@@ -7341,7 +7171,7 @@ export class Renderer {
                                                   Renderer._CLOUD_BLEND, undefined,
                                                   this._cubeFBO.targetFor(cube, faces[0] ?? 0, 0, false));
         // The depth texture is bound only because the layout has a slot for it; `u_ignoreDepth` skips it.
-        const group = this._textureBindGroup(pipeline, 0, [this._targets.gBuffer.depth, this._cloudBaseNoise,
+        const group = this._bindGroups.textureGroup(pipeline, 0, [this._targets.gBuffer.depth, this._cloudBaseNoise,
                                                            this._cloudDetailNoise]);
         this._setCloudUniforms(scene, node, this._cloudFaceInv, bake.eye, bake.time);
         this._shaderManager.setUniform('u_ignoreDepth', true);
@@ -7417,7 +7247,7 @@ export class Renderer {
         const rayPipeline = this._pipelines.fullscreen('volumetricClouds', VolumetricCloudsProgram,
                                                      Renderer._CLOUD_BLEND, undefined,
                                                      this._targets.scene.renderTarget);
-        const rayGroup = (pipe: RenderPipeline) => this._textureBindGroup(pipe, 0, [
+        const rayGroup = (pipe: RenderPipeline) => this._bindGroups.textureGroup(pipe, 0, [
             this._targets.gBuffer.depth, this._cloudBaseNoise!, this._cloudDetailNoise!,
         ]);
         this._setCloudUniforms(scene, node, this._view.invViewProj, this._view.camera.position,
@@ -7455,7 +7285,7 @@ export class Renderer {
             const upPipeline = this._pipelines.fullscreen('cloudUpsample', CloudUpsampleProgram,
                                                        Renderer._CLOUD_BLEND);
             upPass.setPipeline(upPipeline);
-            upPass.setBindGroup(0, this._textureBindGroup(upPipeline, 0,
+            upPass.setBindGroup(0, this._bindGroups.textureGroup(upPipeline, 0,
                                                           [source, this._targets.gBuffer.depth]));
             this._shaderManager.bind('cloudUpsample');
             this._shaderManager.setUniform('u_cloudResolution', [w, h]);
@@ -7695,7 +7525,7 @@ export class Renderer {
                                                       'clouds.resolve', false, undefined, false);
         const resolvePipeline = this._pipelines.fullscreen('cloudTemporalResolve', CloudTemporalResolveProgram);
         resolvePass.setPipeline(resolvePipeline);
-        resolvePass.setBindGroup(0, this._textureBindGroup(resolvePipeline, 0, [
+        resolvePass.setBindGroup(0, this._bindGroups.textureGroup(resolvePipeline, 0, [
             this._cloudTraceFBO.colors[0], prev.colors[0], this._targets.gBuffer.depth,
         ]));
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
@@ -8027,7 +7857,7 @@ export class Renderer {
         const texture = TextureManager.Instance.getTexture(tileset.textureId)
             || TextureManager.Instance.getTexture('Null');
         if (pipeline) {
-            pass!.setBindGroup(0, this._textureBindGroup(pipeline, 0, [texture ?? this._fallbackTexture]));
+            pass!.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [texture ?? this._bindGroups.fallbackTexture]));
         } else {
             this._shaderManager.setUniform('u_tileset', 0);
             if (texture) texture.bind(0);
@@ -8261,7 +8091,7 @@ export class Renderer {
         // chunks/terrainStack.wgsl). Every binding is a 2D ARRAY, so a missing one takes the one-layer
         // array fallback — a 2D texture on a sampler2DArray unit is a draw error. The scalar and array
         // uniforms already match by name.
-        const fallback = this._fallbackFor('texture_2d_array<f32>');
+        const fallback = this._bindGroups.fallbackFor('texture_2d_array<f32>');
         const bindAt = (name: string, slot: number) => {
             const texId = material.textures.get(name);
             const tex = (texId && TextureManager.Instance.getTexture(texId)) || fallback;
@@ -8422,60 +8252,6 @@ export class Renderer {
             h = Math.max(1, Math.floor(h / 2));
         }
     }
-
-    /**
-     * A bind group over this pass's textures, in binding order. Cached — on WebGPU a `GPUBindGroup` is
-     * a real driver object and a frame needs ~120 of them.
-     *
-     * Keyed on texture identity plus `generation`, the pair `Texture._cachedView` also uses: a
-     * recreated `GPUTexture` must invalidate the group naming it. WebGL2's `generation` is constant,
-     * so a resize correctly does not invalidate there.
-     */
-    private _textureBindGroup(pipeline: RenderPipeline, group: number, textures: Texture[],
-                              bindings?: readonly number[]): BindGroup {
-        const layout = pipeline.layoutForGroup(group);
-        if (!layout) throw new Error(`${pipeline.label}: no bind group layout for group ${group}`);
-
-        const at = (i: number) => bindings ? bindings[i] : i * 2;
-        const signature = this._textureGroupKey(group, textures, bindings);
-        let byKey = this._textureGroups.get(pipeline);
-        if (!byKey) { byKey = new Map(); this._textureGroups.set(pipeline, byKey); }
-        const cached = byKey.get(signature);
-        if (cached) return cached;
-
-        const made = device.createBindGroup({
-            label: `${pipeline.label}:group${group}`,
-            layout,
-            // Bindings are (texture, sampler) pairs, so the Nth texture is at binding 2N unless the
-            // caller numbered them itself — see `_frameLightingBindGroup`, whose group is shared by two
-            // chunks and so has holes in it. The sampler half is deliberately not listed: this engine
-            // keeps filter and wrap state on the texture.
-            entries: textures.map((texture, i) => ({ binding: at(i), textureView: texture.sampledView })),
-        });
-        // A cached bind group holds its textures alive and a `Framebuffer` resize can produce NEW
-        // `Texture` objects, so the cap bounds what would otherwise leak; the next frame refills.
-        if (byKey.size >= Renderer.BIND_GROUP_CACHE_LIMIT) byKey.clear();
-        byKey.set(signature, made);
-        return made;
-    }
-    private readonly _textureGroups = new WeakMap<RenderPipeline, Map<string, BindGroup>>();
-    private static readonly BIND_GROUP_CACHE_LIMIT = 512;
-
-    /**
-     * A stable key for "these textures, in this order, at these storage generations". `Texture` has no
-     * id of its own, so one is handed out lazily and remembered weakly.
-     */
-    private _textureGroupKey(group: number, textures: Texture[], bindings?: readonly number[]): string {
-        let key = bindings ? group + '@' + bindings.join(',') : String(group);
-        for (const texture of textures) {
-            let id = this._textureIds.get(texture);
-            if (id === undefined) { id = ++this._nextTextureId; this._textureIds.set(texture, id); }
-            key += '|' + id + ':' + texture.rhiTexture.generation;
-        }
-        return key;
-    }
-    private readonly _textureIds = new WeakMap<Texture, number>();
-    private _nextTextureId = 0;
 
     /**
      * Every pipeline this session has built, as recipes (shaderOptimizer/pipelineRecipes.ts). The editor
@@ -8925,9 +8701,9 @@ export class Renderer {
                     builtFor: 'terrain',
                 });
                 pass!.setPipeline(terrainPipeline);
-                pass!.setBindGroup(0, this._terrainBindGroup(terrainPipeline, mat));
-                if (this._declaresFrameLighting(terrainPipeline))
-                    pass!.setBindGroup(3, this._frameLightingBindGroup(terrainPipeline));
+                pass!.setBindGroup(0, this._bindGroups.terrainGroup(terrainPipeline, mat));
+                if (this._bindGroups.declaresFrameLighting(terrainPipeline))
+                    pass!.setBindGroup(3, this._bindGroups.frameLightingGroup(terrainPipeline));
                 return true;
             }
             if (mat instanceof CustomMaterial) {
@@ -8952,9 +8728,9 @@ export class Renderer {
                     builtFor: node.model.material.type,   // skinned too — see `_geometryPass`
                 });
                 pass!.setPipeline(customPipeline);
-                pass!.setBindGroup(0, this._customBindGroup(customPipeline, mat, envCube));
-                if (this._declaresFrameLighting(customPipeline))
-                    pass!.setBindGroup(3, this._frameLightingBindGroup(customPipeline));
+                pass!.setBindGroup(0, this._bindGroups.customGroup(customPipeline, mat, envCube));
+                if (this._bindGroups.declaresFrameLighting(customPipeline))
+                    pass!.setBindGroup(3, this._bindGroups.frameLightingGroup(customPipeline));
                 return true;
             }
             if (!viaRHI) { this._applyMaterial(mat); return false; }
@@ -8975,12 +8751,12 @@ export class Renderer {
             });
             pass!.setPipeline(pipeline);
             this._applyMaterialProperties(mat);
-            pass!.setBindGroup(0, this._materialBindGroup(pipeline, mat, envCube));
+            pass!.setBindGroup(0, this._bindGroups.materialGroup(pipeline, mat, envCube));
             // Group 3 when the program has one. The unlit Basic family does not sample shadows at all,
             // so asking for a group it never declared is an error rather than an empty bind — the same
             // rule WebGPU enforces through `layout: 'auto'`.
-            if (this._declaresFrameLighting(pipeline))
-                pass!.setBindGroup(3, this._frameLightingBindGroup(pipeline));
+            if (this._bindGroups.declaresFrameLighting(pipeline))
+                pass!.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline));
             return true;
         }, pass);
     }
@@ -9113,7 +8889,7 @@ export class Renderer {
         // Set material uniforms + bind textures
         if (pipeline) {
             this._applyMaterialProperties(material);
-            pass!.setBindGroup(0, this._materialBindGroup(pipeline, material));
+            pass!.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
         } else this._applyMaterial(material);
 
         const materialConfig = node.sprite.material.config;
@@ -9224,8 +9000,8 @@ export class Renderer {
                     // cutout program is what is bound — so give it a threshold nothing can fall below.
                     this._shaderManager.setUniform('u_cutoff', cut ? cut.cutoff : 0.0);
                     this._shaderManager.setUniform('u_useRed', cut ? cut.useRed : false);
-                    pass.setBindGroup(0, this._textureBindGroup(state.pipeline, 0,
-                        [cut ? cut.texture : this._fallbackTexture]));
+                    pass.setBindGroup(0, this._bindGroups.textureGroup(state.pipeline, 0,
+                        [cut ? cut.texture : this._bindGroups.fallbackTexture]));
                     const start = submeshes ? submeshes[i].start : 0;
                     const drawCount = submeshes ? submeshes[i].count : 0;
                     if (this._passes.recordDraw(pass, model.mesh, start, drawCount)) continue;
@@ -10401,7 +10177,7 @@ export class Renderer {
                 const pass = this._passes.beginFullscreenPass(ctx.target(head).renderTarget, 'compose', true);
                 const pipeline = this._pipelines.fullscreen('screen', ScreenProgram);
                 pass.setPipeline(pipeline);
-                pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.scene.colors[0]]));
+                pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._targets.scene.colors[0]]));
                 this._passes.drawFullscreen(pass);
                 this._passes.endFullscreenPass(pass);
             },
@@ -10642,7 +10418,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_alphaFromDepth', 0.0);
         // Every texture is bound even where it is not read (the coverage depth at alphaFromDepth 0,
         // the identity LUT at intensity 0) — WebGPU requires every declared binding to be satisfied.
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
             source.colors[0], this._targets.scene.depth, lut,
         ]));
         this._passes.drawFullscreen(pass);
@@ -10667,7 +10443,7 @@ export class Renderer {
         const pipeline = this._pipelines.fullscreen('overlayComposite', OverlayCompositeProgram,
                                                   OVERLAY_COMPOSITE_BLEND);
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.overlay.colors[0]]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._targets.overlay.colors[0]]));
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
     }
@@ -10701,12 +10477,12 @@ export class Renderer {
         // Group 0 is the two engine samplers followed by the user's, in declaration order — the
         // order `screenShaderResources` and the prelude both use. A user sampler with no texture
         // assigned gets the shared fallback, because a bind group cannot leave a binding empty.
-        const fallback = TextureManager.Instance.getTexture('Null') ?? this._fallbackTexture;
+        const fallback = TextureManager.Instance.getTexture('Null') ?? this._bindGroups.fallbackTexture;
         const userTextures = screenUserSamplerNames(mat.uniforms).map((name: string) => {
             const id = mat.textures.get(name.replace(/^u_/, ''));
             return (id ? TextureManager.Instance.getTexture(id) : null) ?? fallback;
         });
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
             source.colors[0], this._targets.sceneDepth.depth, ...userTextures,
         ]));
         this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
@@ -10753,7 +10529,7 @@ export class Renderer {
         // happened when this line was dropped in the TAA/LUT rewrite, and it took the whole asset
         // library's transparency with it as well as every baked foliage impostor.
         this._shaderManager.setUniform('u_alphaFromDepth', 1.0);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
             this._targets.scene.colors[0], this._depthSource(), this._colorLut.volumeFor(null),
         ]));
         this._passes.drawFullscreen(pass);
@@ -10780,7 +10556,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_texelSize', [1 / this._renderWidth, 1 / this._renderHeight]);
         this._shaderManager.setUniform('u_outlineColor', this._outlineColor);
         this._shaderManager.setUniform('u_outlineWidth', this._outlineWidth);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
             source.colors[0], this._outlineMaskFBO.colors[0], lut,
         ]));
         this._passes.drawFullscreen(pass);
@@ -10880,7 +10656,7 @@ export class Renderer {
         const pipeline = this._pipelines.fullscreen('shadowDebug', ShadowDebugProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_layer', layer);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._shadowCascadeFBO.texture]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._shadowCascadeFBO.texture]));
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
         this._shadowCascadeFBO.setCompareEnabled(true);
@@ -10954,7 +10730,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_exposure', this._view.exposure); // used by the tonemapped channels
         // The depth attachment rides along on every channel, because WebGPU requires every binding the
         // shader declares to be present and only mode 3 actually reads it.
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [tex, this._targets.gBuffer.depth]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [tex, this._targets.gBuffer.depth]));
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
     }
@@ -10985,7 +10761,7 @@ export class Renderer {
                                                undefined, false);
         const pipeline = this._pipelines.fullscreen('exposureMeter', ExposureMeterProgram);
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.scene.colors[0]]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._targets.scene.colors[0]]));
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
         this._exposureWrite = read;
@@ -11197,7 +10973,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_dstResolution', [mip0.width, mip0.height]);
         // Bloom-eligibility mask lives in the raw scene buffer's alpha (motion blur discards alpha, so
         // read it from the scene FBO directly, not the post-processed copy the first entry names).
-        brightPass.setBindGroup(0, this._textureBindGroup(brightPipeline, 0, [
+        brightPass.setBindGroup(0, this._bindGroups.textureGroup(brightPipeline, 0, [
             source.colors[0], this._targets.scene.colors[0],
         ]));
         this._passes.drawFullscreen(brightPass);
@@ -11224,7 +11000,7 @@ export class Renderer {
                 // Karis average on the first step only — it tames fireflies but is not energy
                 // conserving, so applying it all the way down would visibly dim the bloom.
                 this._shaderManager.setUniform('u_karisAverage', i === 1);
-                pass.setBindGroup(0, this._textureBindGroup(downPipeline, 0, [from.colors[0]]));
+                pass.setBindGroup(0, this._bindGroups.textureGroup(downPipeline, 0, [from.colors[0]]));
                 this._passes.drawFullscreen(pass);
                 this._passes.endFullscreenPass(pass);
             }
@@ -11246,7 +11022,7 @@ export class Renderer {
                 // one value off the width alone is short by the aspect ratio vertically.
                 this._shaderManager.setUniform('u_filterRadius',
                     [Renderer.BLOOM_FILTER_RADIUS / from.width, Renderer.BLOOM_FILTER_RADIUS / from.height]);
-                pass.setBindGroup(0, this._textureBindGroup(upPipeline, 0, [from.colors[0]]));
+                pass.setBindGroup(0, this._bindGroups.textureGroup(upPipeline, 0, [from.colors[0]]));
                 this._passes.drawFullscreen(pass);
                 this._passes.endFullscreenPass(pass);
             }
@@ -11271,8 +11047,8 @@ export class Renderer {
         this._shaderManager.setUniform('u_dirtIntensity', this._lensDirtStrength(dirt));
         // The unit numbers are gone: the bind group assigns them and sets u_buffer1/u_buffer2 from the
         // shader's own reflection, so the order here is the order the shader declares.
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
-            source.colors[0], this._bloomMips[0].colors[0], dirt ?? this._fallbackTexture,
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
+            source.colors[0], this._bloomMips[0].colors[0], dirt ?? this._bindGroups.fallbackTexture,
         ]));
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
@@ -11396,7 +11172,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_cocScale', u.scale);
         this._shaderManager.setUniform('u_maxCocPx', this._dofMaxBlur);
         this._shaderManager.setUniform('u_srcTexelSize', [1 / this._renderWidth, 1 / this._renderHeight]);
-        cocPass.setBindGroup(0, this._textureBindGroup(cocPipeline, 0, [source.colors[0], depth]));
+        cocPass.setBindGroup(0, this._bindGroups.textureGroup(cocPipeline, 0, [source.colors[0], depth]));
         this._passes.drawFullscreen(cocPass);
         this._passes.endFullscreenPass(cocPass);
 
@@ -11409,7 +11185,7 @@ export class Renderer {
         // The clamp expressed in the grid this pass works in, which is half the render resolution.
         this._shaderManager.setUniform('u_maxCocHalfPx', this._dofMaxBlur * 0.5);
         this._shaderManager.setUniform('u_texelSize', [1 / coc.width, 1 / coc.height]);
-        gatherPass.setBindGroup(0, this._textureBindGroup(gatherPipeline, 0, [coc.colors[0]]));
+        gatherPass.setBindGroup(0, this._bindGroups.textureGroup(gatherPipeline, 0, [coc.colors[0]]));
         this._passes.drawFullscreen(gatherPass);
         this._passes.endFullscreenPass(gatherPass);
 
@@ -11426,7 +11202,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_focalLength', u.focal);
         this._shaderManager.setUniform('u_cocScale', u.scale);
         this._shaderManager.setUniform('u_maxCocPx', this._dofMaxBlur);
-        outPass.setBindGroup(0, this._textureBindGroup(outPipeline, 0, [
+        outPass.setBindGroup(0, this._bindGroups.textureGroup(outPipeline, 0, [
             source.colors[0], bokeh.colors[0], depth,
         ]));
         this._passes.drawFullscreen(outPass);
@@ -11452,7 +11228,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_flareDispersal', Renderer.LENS_FLARE_DISPERSAL);
         this._shaderManager.setUniform('u_flareHaloWidth', this._lensFlareHaloWidth);
         this._shaderManager.setUniform('u_flareChromatic', Renderer.LENS_FLARE_CHROMATIC);
-        genPass.setBindGroup(0, this._textureBindGroup(genPipeline, 0, [target.colors[0]]));
+        genPass.setBindGroup(0, this._bindGroups.textureGroup(genPipeline, 0, [target.colors[0]]));
         this._passes.drawFullscreen(genPass);
         this._passes.endFullscreenPass(genPass);
 
@@ -11466,8 +11242,8 @@ export class Renderer {
         upPass.setPipeline(upPipeline);
         this._shaderManager.setUniform('u_flareIntensity', this._lensFlareIntensity);
         this._shaderManager.setUniform('u_dirtIntensity', this._lensDirtStrength(dirt));
-        upPass.setBindGroup(0, this._textureBindGroup(upPipeline, 0, [
-            scratch.colors[0], dirt ?? this._fallbackTexture,
+        upPass.setBindGroup(0, this._bindGroups.textureGroup(upPipeline, 0, [
+            scratch.colors[0], dirt ?? this._bindGroups.fallbackTexture,
         ]));
         this._passes.drawFullscreen(upPass);
         this._passes.endFullscreenPass(upPass);
@@ -11488,7 +11264,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_edgeThreshold', this._fxaaEdgeThreshold);
         this._shaderManager.setUniform('u_subpixel', this._fxaaSubpixel);
         this._shaderManager.setUniform('u_searchSteps', FXAA_SEARCH_STEPS[this._fxaaQuality]);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [source.colors[0]]));
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
     }
@@ -11503,7 +11279,7 @@ export class Renderer {
         // The RENDER aspect, not the canvas: internal buffers follow `renderScale` and the present
         // pass upscales, so a canvas-derived ratio would skew the ellipse at any scale but 1.
         this._shaderManager.setUniform('u_aspect', this._renderWidth / Math.max(1, this._renderHeight));
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [source.colors[0]]));
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
     }
@@ -11521,7 +11297,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_time', performance.now() * 0.001);
         this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
         this._shaderManager.setUniform('u_exposure', this._view.exposure);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [source.colors[0]]));
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
     }
@@ -11532,7 +11308,7 @@ export class Renderer {
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_strength', this._chromaticAberrationStrength);
         this._shaderManager.setUniform('u_aspect', this._renderWidth / Math.max(1, this._renderHeight));
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [source.colors[0]]));
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
     }
@@ -11595,7 +11371,7 @@ export class Renderer {
         const pass = this._passes.beginFullscreenPass(this._taaHistoryFBOs[dst].renderTarget, 'taa', true);
         const pipeline = this._pipelines.fullscreen('taaResolve', TaaResolveProgram);
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
             this._targets.scene.colors[0],
             this._taaHistoryFBOs[this._taaHistoryIndex].colors[0],
             this._targets.velocity.colors[0],
@@ -11629,7 +11405,7 @@ export class Renderer {
             ? this._pipelines.fullscreen('taaSharpen', TaaSharpenProgram)
             : this._pipelines.fullscreen('screen', ScreenProgram);
         copy.setPipeline(copyPipeline);
-        copy.setBindGroup(0, this._textureBindGroup(copyPipeline, 0,
+        copy.setBindGroup(0, this._bindGroups.textureGroup(copyPipeline, 0,
                                                    [this._taaHistoryFBOs[dst].colors[0]]));
         if (sharpen) {
             this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
@@ -11664,7 +11440,7 @@ export class Renderer {
         const pass = this._passes.beginFullscreenPass(this._targets.velocity.renderTarget, 'velocity', true);
         const pipeline = this._pipelines.fullscreen('motionBlurVelocity', MotionBlurVelocityProgram);
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._depthSource()]));
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._depthSource()]));
         // `_uvProducing` hands back ONE shared scratch, so each result needs a home before the next
         // call — the same two the object pass below already uses.
         mat4.copy(this._uvViewProjScratch, this._uvProducing(this._view.viewProj));
@@ -11878,7 +11654,7 @@ export class Renderer {
         const tilePass = this._passes.beginFullscreenPass(this._velocityTileFBO.renderTarget, 'velocity.tile', true);
         const tilePipeline = this._pipelines.fullscreen('motionBlurTileMax', MotionBlurTileMaxProgram);
         tilePass.setPipeline(tilePipeline);
-        tilePass.setBindGroup(0, this._textureBindGroup(tilePipeline, 0, [this._targets.velocity.colors[0]]));
+        tilePass.setBindGroup(0, this._bindGroups.textureGroup(tilePipeline, 0, [this._targets.velocity.colors[0]]));
         this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
         this._shaderManager.setUniform('u_screenSize', [w, h]);
         this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
@@ -11891,7 +11667,7 @@ export class Renderer {
         const nbPass = this._passes.beginFullscreenPass(this._velocityNeighborFBO.renderTarget, 'velocity.neighbor', true);
         const nbPipeline = this._pipelines.fullscreen('motionBlurNeighborMax', MotionBlurNeighborMaxProgram);
         nbPass.setPipeline(nbPipeline);
-        nbPass.setBindGroup(0, this._textureBindGroup(nbPipeline, 0, [this._velocityTileFBO.colors[0]]));
+        nbPass.setBindGroup(0, this._bindGroups.textureGroup(nbPipeline, 0, [this._velocityTileFBO.colors[0]]));
         this._shaderManager.setUniform('u_tileTexelSize', [1 / this._velocityTileFBO.width, 1 / this._velocityTileFBO.height]);
         this._passes.drawFullscreen(nbPass);
         this._passes.endFullscreenPass(nbPass);
@@ -11900,7 +11676,7 @@ export class Renderer {
         const gatherPass = this._passes.beginFullscreenPass(target.renderTarget, 'motionBlur', true);
         const gatherPipeline = this._pipelines.fullscreen('motionBlur', MotionBlurGatherProgram);
         gatherPass.setPipeline(gatherPipeline);
-        gatherPass.setBindGroup(0, this._textureBindGroup(gatherPipeline, 0, [
+        gatherPass.setBindGroup(0, this._bindGroups.textureGroup(gatherPipeline, 0, [
             this._targets.scene.colors[0], this._targets.velocity.colors[0],
             this._velocityNeighborFBO.colors[0], this._depthSource(),
         ]));
@@ -13079,10 +12855,10 @@ export class Renderer {
         // rolled slot table this used to carry — which was a third copy of `_textureSlot`, drifting
         // independently of the other two.
         if (pipeline) {
-            pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
+            pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
             // A LIT helper (the camera gizmo is Blinn-Phong) reads the frame's lights and shadow maps
             // from group 3 like any forward draw; an unlit one never declares it.
-            if (this._declaresFrameLighting(pipeline)) pass.setBindGroup(3, this._frameLightingBindGroup(pipeline));
+            if (this._bindGroups.declaresFrameLighting(pipeline)) pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline));
         }
         else this._applyMaterial(material);
 
@@ -13277,8 +13053,8 @@ export class Renderer {
                 // invalidated the group, then the command buffer, and rendered WebGPU entirely black.
                 const overlayTextures = pipeline.resources
                     .filter(r => r.group === 0 && r.kind === 'texture')
-                    .map(() => this._fallbackTexture);
-                pass!.setBindGroup(0, this._textureBindGroup(pipeline, 0, overlayTextures));
+                    .map(() => this._bindGroups.fallbackTexture);
+                pass!.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, overlayTextures));
                 pass!.setVertexBuffer(0, mesh.vertexBuffer);
                 pass!.setVertexBuffer(1, buf!);
                 pass!.setIndexBuffer(mesh.activeIndexBuffer, mesh.activeIndexFormat);

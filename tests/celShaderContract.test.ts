@@ -99,7 +99,7 @@ describe('the light functions stay uniformity-safe', () => {
 
 describe('group 0 matches the renderer texture-unit table', () => {
     it('is a contiguous run of texture/sampler pairs', () => {
-        // `_textureBindGroup` places the Nth texture at binding 2N, so a gap or a reordering puts a
+        // `BindGroupCache.textureGroup` places the Nth texture at binding 2N, so a gap or a reordering puts a
         // sampler where the backend expects a texture. WebGPU rejects the draw; WebGL2 does not.
         const bindings = findResources(compose('cel.wgsl'))
             .filter((r: any) => r.group === 0)
@@ -120,7 +120,7 @@ describe('group 0 matches the renderer texture-unit table', () => {
     });
 
     it('declares no environment cube', () => {
-        // Cel has no reflection, and leaving `u_envMap` out is what lets `_materialBindGroup` fill group
+        // Cel has no reflection, and leaving `u_envMap` out is what lets `BindGroupCache.materialGroup` fill group
         // 0 from the material's own slots with no null entry, and what lets the renderer's per-draw env
         // gate stay a three-model check.
         for (const entry of ['cel.wgsl', 'celSkinned.wgsl'])
