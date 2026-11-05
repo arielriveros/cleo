@@ -61,3 +61,53 @@ describe('the frame-lighting group', () => {
         expect(created[1].entries.map(e => (e.textureView as { name: string }).name)).toEqual(['cascades', 'spots', 'points', 'grid']);
     });
 });
+
+describe("the owner's last group", () => {
+    const material = {};
+    const lit = () => pipeline('pbr', [{ name: 'u_shadowCascades', binding: 0 }, { name: 'u_lightData', binding: 6 }]);
+
+    it('answers a repeat bind without building the string key', () => {
+        const c = cache();
+        const p = lit();
+        const a = texture('albedo'), n = texture('normal');
+        const keyed = (c as unknown as { _textureGroupKey: (...x: unknown[]) => string });
+        const real = keyed._textureGroupKey.bind(c);
+        let keys = 0;
+        keyed._textureGroupKey = (...x: unknown[]) => { keys++; return real(...x); };
+        const first = c.textureGroup(p, 0, [a, n], undefined, material);
+        for (let i = 0; i < 3; i++) expect(c.textureGroup(p, 0, [a, n], undefined, material)).toBe(first);
+        expect(keys).toBe(1);
+        expect(created).toHaveLength(1);
+    });
+
+    it('builds anew when a texture is swapped or its storage recreated', () => {
+        const c = cache();
+        const p = lit();
+        const a = texture('albedo'), n = texture('normal'), other = texture('other');
+        const first = c.textureGroup(p, 0, [a, n], undefined, material);
+        expect(c.textureGroup(p, 0, [a, other], undefined, material)).not.toBe(first);
+        (n as unknown as { rhiTexture: { generation: number } }).rhiTexture.generation = 1;
+        const third = c.textureGroup(p, 0, [a, n], undefined, material);
+        expect(third).not.toBe(first);
+        expect(created).toHaveLength(3);
+    });
+
+    it('keeps a group per pipeline an owner is drawn with', () => {
+        const c = cache();
+        const gbuffer = lit(), forward = lit();
+        const a = texture('albedo');
+        const g = c.textureGroup(gbuffer, 0, [a], undefined, material);
+        const f = c.textureGroup(forward, 0, [a], undefined, material);
+        expect(c.textureGroup(gbuffer, 0, [a], undefined, material)).toBe(g);
+        expect(c.textureGroup(forward, 0, [a], undefined, material)).toBe(f);
+        expect(created).toHaveLength(2);
+    });
+
+    it('reuses the frame-lighting group per pipeline', () => {
+        const c = cache();
+        const p = lit();
+        const first = c.frameLightingGroup(p);
+        expect(c.frameLightingGroup(p)).toBe(first);
+        expect(created).toHaveLength(1);
+    });
+});

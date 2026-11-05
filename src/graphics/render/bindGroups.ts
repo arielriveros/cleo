@@ -9,6 +9,15 @@ import type { FrameTargets } from './frameTargets';
 /** A Basic program's group-0 slot for the opaque depth snapshot (chunks/basicForward.wgsl), not a material map. */
 export const SCENE_DEPTH_FIELD = 'u_sceneDepth';
 
+/** One owner's last bind group for a pipeline and group index. See `BindGroupCache._lastGroups`. */
+interface LastGroup {
+    readonly pipeline: RenderPipeline;
+    readonly group: number;
+    readonly textures: Texture[];
+    readonly generations: number[];
+    bindGroup: BindGroup;
+}
+
 /** What a pipeline's group 3 declares: either half of the frame-lighting group, and the bindings it has. */
 interface LightingFacts {
     readonly shadows: boolean;
@@ -69,6 +78,17 @@ export class BindGroupCache {
     private _nextTextureId = 0;
 
     /**
+     * Per owner (a material, or a pipeline for its frame-lighting group): the groups it was last given,
+     * by pipeline and group index, with the textures and storage generations they were built over. A draw
+     * that binds what it bound last time — nearly every draw, every frame — is answered from here without
+     * building the string key below. A few entries, because one material is drawn by several pipelines
+     * (G-buffer, forward, skinned and not) within a frame.
+     */
+    private readonly _lastGroups = new WeakMap<object, LastGroup[]>();
+
+    private static readonly LAST_GROUPS_PER_OWNER = 4;
+
+    /**
      * A bind group over this pass's textures, in binding order. Cached — on WebGPU a `GPUBindGroup` is
      * a real driver object and a frame needs ~120 of them.
      *
@@ -77,7 +97,18 @@ export class BindGroupCache {
      * so a resize correctly does not invalidate there.
      */
     public textureGroup(pipeline: RenderPipeline, group: number, textures: Texture[],
-                              bindings?: readonly number[]): BindGroup {
+                              bindings?: readonly number[], owner?: object): BindGroup {
+        // `bindings` is not compared: every caller derives it from the pipeline's own resources, so the
+        // pipeline and group index already decide it.
+        const last = owner ? this._lastGroupOf(owner, pipeline, group) : null;
+        if (last && BindGroupCache._sameTextures(last, textures)) return last.bindGroup;
+        const bindGroup = this._textureGroupByKey(pipeline, group, textures, bindings);
+        if (owner) this._remember(owner, last, pipeline, group, textures, bindGroup);
+        return bindGroup;
+    }
+
+    private _textureGroupByKey(pipeline: RenderPipeline, group: number, textures: Texture[],
+                               bindings?: readonly number[]): BindGroup {
         const layout = pipeline.layoutForGroup(group);
         if (!layout) throw new Error(`${pipeline.label}: no bind group layout for group ${group}`);
 
@@ -102,6 +133,42 @@ export class BindGroupCache {
         if (byKey.size >= BindGroupCache.BIND_GROUP_CACHE_LIMIT) byKey.clear();
         byKey.set(signature, made);
         return made;
+    }
+
+    private _lastGroupOf(owner: object, pipeline: RenderPipeline, group: number): LastGroup | null {
+        const list = this._lastGroups.get(owner);
+        if (!list) return null;
+        for (let i = 0; i < list.length; i++)
+            if (list[i].pipeline === pipeline && list[i].group === group) return list[i];
+        return null;
+    }
+
+    /** Same textures, in the same order, each still at the storage generation the group was built over. */
+    private static _sameTextures(last: LastGroup, textures: readonly Texture[]): boolean {
+        const n = textures.length;
+        if (last.textures.length !== n) return false;
+        for (let i = 0; i < n; i++)
+            if (last.textures[i] !== textures[i] || last.generations[i] !== textures[i].rhiTexture.generation) return false;
+        return true;
+    }
+
+    private _remember(owner: object, entry: LastGroup | null, pipeline: RenderPipeline, group: number,
+                      textures: readonly Texture[], bindGroup: BindGroup): void {
+        if (!entry) {
+            let list = this._lastGroups.get(owner);
+            if (!list) { list = []; this._lastGroups.set(owner, list); }
+            if (list.length >= BindGroupCache.LAST_GROUPS_PER_OWNER) list.shift();
+            entry = { pipeline, group, textures: [], generations: [], bindGroup };
+            list.push(entry);
+        }
+        // Copied, never the caller's list: the callers pass scratch arrays they refill on the next draw.
+        entry.textures.length = 0;
+        entry.generations.length = 0;
+        for (const texture of textures) {
+            entry.textures.push(texture);
+            entry.generations.push(texture.rhiTexture.generation);
+        }
+        entry.bindGroup = bindGroup;
     }
 
     /**
@@ -142,7 +209,7 @@ export class BindGroupCache {
             const texture = dilatedTexture ?? (id ? TextureManager.Instance.getTexture(id) : null);
             textures.push(texture ?? this.fallbackTexture);
         }
-        return this.textureGroup(pipeline, 0, textures);
+        return this.textureGroup(pipeline, 0, textures, undefined, material);
     }
 
     /**
@@ -193,7 +260,7 @@ export class BindGroupCache {
             const texture = id ? TextureManager.Instance.getTexture(id) : null;
             textures.push(texture ?? this.fallbackTexture);
         }
-        return this.textureGroup(pipeline, 0, textures, bindings);
+        return this.textureGroup(pipeline, 0, textures, bindings, material);
     }
 
     /**
@@ -210,7 +277,7 @@ export class BindGroupCache {
             const texture = id ? TextureManager.Instance.getTexture(id) : null;
             textures.push(texture ?? this.fallbackFor(resource.type));
         }
-        return this.textureGroup(pipeline, 0, textures);
+        return this.textureGroup(pipeline, 0, textures, undefined, material);
     }
 
     /**
@@ -298,6 +365,6 @@ export class BindGroupCache {
         }
         // One texture and no sampler beside it — the light data is only ever `textureLoad`ed.
         if (facts.lightGrid && declared.has(6)) { textures.push(this._host.lightGrid()); bindings.push(6); }
-        return this.textureGroup(pipeline, 3, textures, bindings);
+        return this.textureGroup(pipeline, 3, textures, bindings, pipeline);
     }
 }
