@@ -179,13 +179,9 @@ export class PipelineCache {
         // Only WebGPU has a front-face to get wrong here: WebGL2 keeps its own winding state and the
         // cube-face capture never changed it.
         const cubeFace = this._view.cubeFace && device.backend === 'webgpu';
-        const key = program + '|' + cullMode + '|' + targets + '|' + topology + '|' + vertex
-                            + '|' + (builtFor ?? '') + (cubeFace ? '|cw' : '')
-                            + (reflection.vertexWgsl ? '|vs' : '')
-                            + '|' + this._formatKey(target, targets)
-                            + (blend ? '|' + PipelineCache._blendKey(blend) : '')
-                            + (resolvedDepth ? '|' + PipelineCache._depthKey(resolvedDepth) : '')
-                            + (colorWrite ? '' : '|nc');
+        const key = PipelineCache._keyOf(program, cullMode, targets, topology, vertex, builtFor, cubeFace,
+                                         !!reflection.vertexWgsl, this._formatKey(target, targets),
+                                         blend ?? null, resolvedDepth ?? null, colorWrite);
         let pipeline = this._byKey.get(key);
         if (!pipeline) {
             const buildStart = performance.now();
@@ -201,40 +197,20 @@ export class PipelineCache {
                     resources: reflection.resources,
                   })
                 : module;
-            pipeline = device.createRenderPipeline({
-                label: program,
-                vertex: vertexModule, fragment: module,
-                // Slot 0 is the interleaved model vertex; slot 1 the per-instance model matrix across
-                // four slots, neither API having a mat4 vertex format. With no `vertex` shape this is a
-                // fullscreen pass and takes the SCREEN QUAD's layout — never `[]`, which is invalid.
-                vertexLayouts: vertex
-                    ? this.vertexLayoutsFor(program, vertex, builtFor)
-                    : screenQuadLayout(this._shaderManager.getShader(program).attributes),
-                // A Y-inverted projection reverses winding, so a cube-face capture calls the other
-                // side the front. Part of the cache key below for the same reason the cull mode is.
-                primitive: { topology, cullMode, frontFace: cubeFace ? 'cw' : 'ccw' },
-                ...(resolvedDepth ? { depthStencil: resolvedDepth } : {}),
-                colorTargets: Array.from({ length: targets }, (_unused, i) => ({
-                    // `rgba8unorm` only when there is no target to ask - the legacy fallback, and the
-                    // shape every one of these used to have unconditionally.
-                    format: colorFormats[i] ?? ('rgba8unorm' as const),
-                    ...(blend ? { blend } : {}),
-                    ...(colorWrite ? {} : { writeMask: PipelineCache._NO_COLOR_WRITE }),
-                })),
-            });
+            const recipe: PipelineRecipe = {
+                program, cullMode, targets, topology, vertex, builtFor, cubeFace, colorFormats,
+                blend: blend ?? null,
+                depthStencil: resolvedDepth ?? null,
+                ...(colorWrite ? {} : { colorWrite: false }),
+            };
+            pipeline = device.createRenderPipeline(this._describe(recipe, vertexModule, module));
             this._byKey.set(key, pipeline);
             shaderOptimizerStats.pipelinesBuilt++;
             if (device.backend === 'webgpu') recordStall(`pipeline ${program}`, performance.now() - buildStart);
             // Recorded for a publish to warm (shaderOptimizer/pipelineRecipes.ts) — never a custom material's,
             // whose program is assembled at runtime and has no name a later boot could look up.
             if (!reflection.vertexWgsl && !program.startsWith('custom') && !this._pipelineRecipes.has(key)) {
-                this._pipelineRecipes.set(key, {
-                    program, cullMode, targets, topology, vertex, builtFor, cubeFace,
-                    colorFormats: colorFormats.slice(),
-                    blend: blend ?? null,
-                    depthStencil: resolvedDepth ?? null,
-                    ...(colorWrite ? {} : { colorWrite: false }),
-                });
+                this._pipelineRecipes.set(key, { ...recipe, colorFormats: colorFormats.slice() });
                 shaderOptimizerStats.recipesRecorded = this._pipelineRecipes.size;
             }
         }
@@ -382,27 +358,55 @@ export class PipelineCache {
         const reflection = descriptor as unknown as { resources: readonly ShaderResource[]; wgsl?: string;
                                                       entryPoints?: { vertex?: string; fragment?: string; compute?: string } };
         if (!reflection.wgsl) return null;
-        const key = r.program + '|' + r.cullMode + '|' + r.targets + '|' + r.topology + '|' + r.vertex
-                  + '|' + (r.builtFor ?? '') + (r.cubeFace ? '|cw' : '')
-                  + '|' + r.colorFormats.join(',')
-                  + (r.blend ? '|' + PipelineCache._blendKey(r.blend) : '')
-                  + (r.depthStencil ? '|' + PipelineCache._depthKey(r.depthStencil) : '')
-                  + (r.colorWrite === false ? '|nc' : '');
+        const key = PipelineCache._keyOf(r.program, r.cullMode, r.targets, r.topology, r.vertex, r.builtFor,
+                                         r.cubeFace, false, r.colorFormats.join(','), r.blend, r.depthStencil,
+                                         r.colorWrite !== false);
         if (this._byKey.has(key)) return null;
         const module = this.shaderModuleFor(r.program, reflection, true);
-        return create({
-            label: r.program,
-            vertex: module, fragment: module,
-            vertexLayouts: r.vertex
-                ? this.vertexLayoutsFor(r.program, r.vertex, r.builtFor)
-                : screenQuadLayout(this._shaderManager.getShader(r.program).attributes),
-            primitive: { topology: r.topology, cullMode: r.cullMode, frontFace: r.cubeFace ? 'cw' : 'ccw' },
-            ...(r.depthStencil ? { depthStencil: r.depthStencil } : {}),
-            colorTargets: Array.from({ length: r.targets }, (_unused, i) => ({
-                format: (r.colorFormats[i] ?? 'rgba8unorm') as TextureFormat,
-                ...(r.blend ? { blend: r.blend } : {}),
-                ...(r.colorWrite === false ? { writeMask: PipelineCache._NO_COLOR_WRITE } : {}),
+        return create(this._describe(r, module, module)).then(pipeline => [key, pipeline] as [string, RenderPipeline]);
+    }
+
+    /**
+     * The cache key for a pipeline state: the ONE spelling `get` and the recipe warm-up both use, so a
+     * warmed pipeline is found by the draw that wants it. Published games ship recipes and are looked up
+     * by this string, so its format is a contract: every field must appear, and none may be reworded.
+     * Positional rather than an options object because `get` builds it on every draw.
+     */
+    private static _keyOf(program: string, cullMode: CullMode, targets: number, topology: PrimitiveTopology,
+                          vertex: PipelineRecipe['vertex'], builtFor: string | null, cubeFace: boolean,
+                          separateVertexStage: boolean, formats: string, blend: BlendState | null,
+                          depthStencil: DepthStencilState | null, colorWrite: boolean): string {
+        return program + '|' + cullMode + '|' + targets + '|' + topology + '|' + vertex
+             + '|' + (builtFor ?? '') + (cubeFace ? '|cw' : '')
+             + (separateVertexStage ? '|vs' : '')
+             + '|' + formats
+             + (blend ? '|' + PipelineCache._blendKey(blend) : '')
+             + (depthStencil ? '|' + PipelineCache._depthKey(depthStencil) : '')
+             + (colorWrite ? '' : '|nc');
+    }
+
+    /** The device descriptor for a pipeline state: shared by `get` and the recipe warm-up, like the key. */
+    private _describe(s: PipelineRecipe, vertexModule: ShaderModule, fragmentModule: ShaderModule): RenderPipelineDescriptor {
+        return {
+            label: s.program,
+            vertex: vertexModule, fragment: fragmentModule,
+            // Slot 0 is the interleaved model vertex; slot 1 the per-instance model matrix across
+            // four slots, neither API having a mat4 vertex format. With no `vertex` shape this is a
+            // fullscreen pass and takes the SCREEN QUAD's layout — never `[]`, which is invalid.
+            vertexLayouts: s.vertex
+                ? this.vertexLayoutsFor(s.program, s.vertex, s.builtFor)
+                : screenQuadLayout(this._shaderManager.getShader(s.program).attributes),
+            // A Y-inverted projection reverses winding, so a cube-face capture calls the other
+            // side the front. Part of the cache key for the same reason the cull mode is.
+            primitive: { topology: s.topology, cullMode: s.cullMode, frontFace: s.cubeFace ? 'cw' : 'ccw' },
+            ...(s.depthStencil ? { depthStencil: s.depthStencil } : {}),
+            colorTargets: Array.from({ length: s.targets }, (_unused, i) => ({
+                // `rgba8unorm` only when there is no target to ask - the legacy fallback, and the
+                // shape every one of these used to have unconditionally.
+                format: (s.colorFormats[i] ?? 'rgba8unorm') as TextureFormat,
+                ...(s.blend ? { blend: s.blend } : {}),
+                ...(s.colorWrite === false ? { writeMask: PipelineCache._NO_COLOR_WRITE } : {}),
             })),
-        }).then(pipeline => [key, pipeline] as [string, RenderPipeline]);
+        };
     }
 }
