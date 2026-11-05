@@ -289,7 +289,7 @@ export class PassEncoder {
     // buffers — everything else records, indexed or not, LOD levels and submesh ranges included.
     // `lod` >= 0 draws that index level instead of the active one, for a whole-buffer draw only.
     public recordDraw(pass: RenderPassEncoder, mesh: Mesh, firstIndex: number, indexCount: number,
-                        lod: number = -1): boolean {
+                        lod: number = -1, firstInstance: number = 0): boolean {
         const level = lod >= 0 && indexCount === 0 && firstIndex === 0 && mesh.hasLods ? lod : -1;
         const indices = level >= 0 ? mesh.lodIndexBuffer(level) : mesh.activeIndexBuffer;
         pass.setVertexBuffer(0, mesh.vertexBuffer);
@@ -308,12 +308,12 @@ export class PassEncoder {
             // frame — the shadow pass precedes the geometry pass that builds it. Returns TRUE: the
             // draw was handled, and the caller's fallback is a raw `gl` call.
             const count = indexCount > 0 ? indexCount : mesh.vertexCount;
-            if (count > 0) pass.draw(count, 1, firstIndex);
+            if (count > 0) pass.draw(count, 1, firstIndex, firstInstance);
             return true;
         }
         pass.setIndexBuffer(indices, level >= 0 ? mesh.lodIndexFormat(level) : mesh.activeIndexFormat);
         const count = indexCount > 0 ? indexCount : level >= 0 ? mesh.lodIndexCount(level) : mesh.activeIndexCount;
-        if (count > 0) pass.drawIndexed(count, 1, firstIndex);
+        if (count > 0) pass.drawIndexed(count, 1, firstIndex, 0, firstInstance);
         return true;
     }
 }

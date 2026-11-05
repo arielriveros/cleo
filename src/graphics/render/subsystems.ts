@@ -8,6 +8,7 @@ import type { DebugViews } from './debugViews';
 import type { EditorOverlays } from './editorOverlays';
 import type { Capture } from './capture';
 import type { ProgramRegistry } from './programRegistry';
+import type { ObjectTable } from '../objectTable';
 
 /**
  * The renderer's subsystems, for the ones that reach each other while drawing. Filled once, at the end of
@@ -27,4 +28,6 @@ export interface RenderSubsystems {
     readonly overlays: EditorOverlays;
     readonly capture: Capture;
     readonly programs: ProgramRegistry;
+    /** The per-object table every converted draw reads its matrix and per-object values from. */
+    readonly objects: ObjectTable;
 }

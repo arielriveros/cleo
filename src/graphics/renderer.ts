@@ -62,6 +62,7 @@ import { SsilPasses } from './render/ssil';
 import { LightingPasses } from './render/lighting';
 import { SkyPasses } from './render/sky';
 import { ModelDraw } from './render/modelDraw';
+import { ObjectTable } from './objectTable';
 import { GeometryPass } from './render/geometryPass';
 import { ForwardPass } from './render/forwardPass';
 import { EditorOverlays } from './render/editorOverlays';
@@ -173,6 +174,8 @@ export class Renderer {
     private readonly _sky: SkyPasses;
     /** What every model draw shares: submesh ranges, the skinning palette, cull mapping, object ids (render/modelDraw.ts). */
     private readonly _modelDraw: ModelDraw;
+    /** The per-object table (graphics/objectTable.ts). Allocates its texture on first use. */
+    private readonly _objects = new ObjectTable();
     /** The deferred geometry pass: G-buffer membership, the opaque draw sort, instanced groups (render/geometryPass.ts). */
     private readonly _geometry: GeometryPass;
     /** Forward drawing: the deferred overlay, the forward pipeline's scene, queues and the per-model draw (render/forwardPass.ts). */
@@ -361,7 +364,7 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._lighting, this._fullscreen, this._subsystems);
         this._modelDraw = new ModelDraw(this._view, this._passes, this._pipelines, this._bindGroups, this._materials,
-                                        this._projection);
+                                        this._projection, this._objects);
         this._geometry = new GeometryPass(this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._foliage, this._visibility, this._lighting, this._modelDraw);
         this._forward = new ForwardPass({
             get passEnabled() { return renderer._passEnabled; },
@@ -391,6 +394,7 @@ export class Renderer {
             get renderHeight() { return renderer._renderHeight; },
             get renderScale() { return renderer._renderScale; },
             get renderWidth() { return renderer._renderWidth; },
+            get objectTableBytes() { return renderer._objects.gpuBytes; },
         }, this._targets, this._temporal, this._post, this._clouds, this._decals, this._shadows, this._ssil, this._sky, this._debugViews,
            this._fluids);
         Object.assign(this._subsystems, {
@@ -404,6 +408,7 @@ export class Renderer {
             overlays: this._overlays,
             capture: this._capture,
             programs: this._programs,
+            objects: this._objects,
         } satisfies RenderSubsystems);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._shadows.shadowDistance = config.shadowDistance ?? 100;

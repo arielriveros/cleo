@@ -23,6 +23,8 @@ export interface RenderStatsHost {
     readonly renderHeight: number;
     readonly renderScale: number;
     readonly renderWidth: number;
+    /** The per-object table's texture (graphics/objectTable.ts). */
+    readonly objectTableBytes: number;
 }
 
 /**
@@ -101,6 +103,11 @@ export class RenderStats {
             stateChangesSaved: frameStats.stateChangesSaved,
             rhiStateCalls: frameStats.rhiStateCalls,
             rhiStateCallsSaved: frameStats.rhiStateCallsSaved,
+            uniformUploads: frameStats.uniformUploads,
+            uniformUploadBytes: frameStats.uniformUploadBytes,
+            objectRows: frameStats.objectRows,
+            objectUploads: frameStats.objectUploads,
+            objectUploadBytes: frameStats.objectUploadBytes,
             particlesDrawn: frameStats.particlesDrawn,
             particleSteps: frameStats.particleSteps,
             particleSystems: frameStats.particleSystems,
@@ -162,6 +169,7 @@ export class RenderStats {
         addFbo(this._decals.dBufferFBO ?? undefined); addFbo(this._decals.gBufferCopyFBO ?? undefined);
         addFbo(this._decals.decalReceiverFBO ?? undefined);
         bytes += this._host.postPool.byteSize;
+        bytes += this._host.objectTableBytes;
         for (const tex of TextureManager.Instance.textures.values()) bytes += tex.byteSize;
         return bytes;
     }

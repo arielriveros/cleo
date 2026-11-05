@@ -71,6 +71,10 @@ export class BindGroupCache {
 
     private readonly _textureGroups = new WeakMap<RenderPipeline, Map<string, BindGroup>>();
 
+    /** Per pipeline: whether it reads the per-object table, and its group over the current table. */
+    private readonly _objectData = new WeakMap<RenderPipeline, { declares: boolean; texture: Texture | null;
+                                                                 generation: number; group: BindGroup | null }>();
+
     private static readonly BIND_GROUP_CACHE_LIMIT = 512;
 
     private readonly _textureIds = new WeakMap<Texture, number>();
@@ -87,6 +91,41 @@ export class BindGroupCache {
     private readonly _lastGroups = new WeakMap<object, LastGroup[]>();
 
     private static readonly LAST_GROUPS_PER_OWNER = 4;
+
+    /** Whether `pipeline` reads the per-object table (graphics/objectTable.ts) — group 2, binding 0. */
+    public declaresObjectData(pipeline: RenderPipeline): boolean {
+        return this._objectDataSlot(pipeline).declares;
+    }
+
+    /**
+     * `pipeline`'s group 2 over the per-object table. One per pipeline (auto layouts are per pipeline), kept
+     * until the table is replaced. Bind it right after every `setPipeline` of a pipeline that declares it:
+     * WebGL2 hands out texture units from 0 again at each one.
+     */
+    public objectDataGroup(pipeline: RenderPipeline, table: Texture): BindGroup {
+        const slot = this._objectDataSlot(pipeline);
+        const generation = table.rhiTexture.generation;
+        if (slot.group && slot.texture === table && slot.generation === generation) return slot.group;
+        const layout = pipeline.layoutForGroup(2);
+        if (!layout) throw new Error(`${pipeline.label}: no group 2 for the object table`);
+        slot.group = device.createBindGroup({
+            label: `${pipeline.label}:objects`, layout,
+            entries: [{ binding: 0, textureView: table.sampledView }],
+        });
+        slot.texture = table;
+        slot.generation = generation;
+        return slot.group;
+    }
+
+    private _objectDataSlot(pipeline: RenderPipeline) {
+        let slot = this._objectData.get(pipeline);
+        if (!slot) {
+            const declares = pipeline.resources.some(r => r.group === 2 && r.binding === 0 && r.glslName === 'u_objectData');
+            slot = { declares, texture: null, generation: -1, group: null };
+            this._objectData.set(pipeline, slot);
+        }
+        return slot;
+    }
 
     /**
      * A bind group over this pass's textures, in binding order. Cached — on WebGPU a `GPUBindGroup` is

@@ -3,6 +3,7 @@ import { Logger } from '../../core/logger';
 import { glDevice } from '../rhi/webgl2/webgl2Device';
 import type { WebGL2Buffer } from '../rhi/webgl2/webgl2Device';
 import { BufferUsage } from '../rhi/types';
+import { frameStats } from '../renderStats';
 
 // std140 uniform blocks, for programs generated from WGSL: naga puts every non-sampler uniform into a
 // block, and `getUniformLocation` returns null for a block member. A CPU buffer per block, written at
@@ -181,6 +182,8 @@ export class UniformBlockSet {
             if (!block.dirty) continue;
             glDevice().writeBuffer(block.buffer, 0, block.bytes);
             block.dirty = false;
+            frameStats.uniformUploads++;
+            frameStats.uniformUploadBytes += block.bytes.byteLength;
         }
     }
 

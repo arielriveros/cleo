@@ -321,15 +321,16 @@ export class WebGL2RenderPassEncoder implements RenderPassEncoder {
         this._indexFormat = format;
     }
 
-    public draw(vertexCount: number, instanceCount: number = 1, firstVertex: number = 0): void {
-        const topology = this._beginDraw();
+    public draw(vertexCount: number, instanceCount: number = 1, firstVertex: number = 0, firstInstance: number = 0): void {
+        const topology = this._beginDraw(firstInstance);
         if (instanceCount > 1) gl.drawArraysInstanced(topology, firstVertex, vertexCount, instanceCount);
         else gl.drawArrays(topology, firstVertex, vertexCount);
         this._countDraw(vertexCount, instanceCount);
     }
 
-    public drawIndexed(indexCount: number, instanceCount: number = 1, firstIndex: number = 0): void {
-        const topology = this._beginDraw();
+    public drawIndexed(indexCount: number, instanceCount: number = 1, firstIndex: number = 0,
+                       _baseVertex: number = 0, firstInstance: number = 0): void {
+        const topology = this._beginDraw(firstInstance);
         const type = glIndexType(this._indexFormat);
         const offset = firstIndex * indexByteSize(this._indexFormat);
         if (instanceCount > 1) gl.drawElementsInstanced(topology, indexCount, type, offset, instanceCount);
@@ -347,11 +348,17 @@ export class WebGL2RenderPassEncoder implements RenderPassEncoder {
 
     // Bind the VAO this draw needs and flush pending uniform writes. The VAO is built from the
     // PIPELINE's layouts over this encoder's buffers, and cached on the device.
-    private _beginDraw(): number {
+    private _beginDraw(firstInstance: number): number {
         if (!this._pipeline) throw new Error('draw before setPipeline');
+        // WebGL2 has no base instance: `instance_index` is naga's `gl_InstanceID + naga_vs_first_instance`,
+        // and an instance-rate attribute would NOT be offset — so such a pipeline must draw from 0.
+        if (firstInstance !== 0 && this._pipeline.vertexLayouts.some(l => l.stepMode === 'instance'))
+            throw new Error(`${this._pipeline.label}: firstInstance with instance-rate vertex buffers`);
         GLState.bindVAO(glDevice().vertexArrayFor(this._pipeline, this._vertexBuffers, this._indexBuffer));
         // Uniform writes upload once, immediately before the draw that reads them.
         ShaderManager.Instance.flushBound();
+        // The per-object record (graphics/objectTable.ts); a no-op for a program that does not read it.
+        this._pipeline.module.shader.setFirstInstance(firstInstance);
         return glTopology(this._pipeline.primitive.topology);
     }
 
@@ -395,5 +402,6 @@ export class WebGL2CommandEncoder implements CommandEncoder {
         glDevice().copyTexture(source as WebGL2TextureView, destination as WebGL2TextureView, width, height);
     }
 
-    public finish(): void { /* WebGL2 issued everything as it was recorded */ }
+    /** WebGL2 issued everything as it was recorded; finishing only closes a submission epoch. */
+    public finish(): void { glDevice().endSubmission(); }
 }

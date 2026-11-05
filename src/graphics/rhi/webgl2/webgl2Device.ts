@@ -32,6 +32,23 @@ export class WebGL2Device implements Device {
     public readonly backend: BackendKind = 'webgl2';
     public readonly capabilities: DeviceCapabilities;
 
+    /** See {@link Device.submissionEpoch}: one per encoder finish — WebGL2 is immediate. */
+    public get submissionEpoch(): number { return this._submissionEpoch; }
+    private _submissionEpoch = 0;
+    public endSubmission(): void { this._submissionEpoch++; }
+
+    /**
+     * The unit `writeTexture` uploads through: the last one, which no pass reaches. An upload binds the
+     * texture to its unit and unbinds it after, and on unit 0 that would blank whatever a draw already in
+     * progress bound there — the per-object table uploads between the draws of a pass.
+     */
+    private _uploadUnit = -1;
+    private get uploadUnit(): number {
+        if (this._uploadUnit < 0)
+            this._uploadUnit = Math.min(Number(gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS)) || 32, 32) - 1;
+        return this._uploadUnit;
+    }
+
     /** Live resources, so `destroy()` can release what the caller did not. */
     private readonly _buffers = new Set<WebGL2Buffer>();
     private readonly _textures = new Set<WebGL2Texture>();
@@ -435,7 +452,7 @@ export class WebGL2Device implements Device {
      */
     public writeTexture(texture: WebGL2Texture, data: ArrayBufferView, width: number, height: number,
                         mipLevel: number = 0, arrayLayer: number = 0, x: number = 0, y: number = 0): void {
-        texture.bindForUpload();
+        texture.bindForUpload(this.uploadUnit);
         texture.write(data, width, height, mipLevel, arrayLayer, x, y);
         texture.unbind();
     }
@@ -753,9 +770,9 @@ export class WebGL2Texture implements Texture {
      * Bind for MUTATION. texImage/texParameter/generateMipmap act on the active unit, so this forces
      * both the unit and the binding rather than letting the cache elide either.
      */
-    public bindForUpload(): void {
-        this._boundSlot = 0;
-        GLState.bindTextureForced(0, this.target, this.handle);
+    public bindForUpload(unit: number = 0): void {
+        this._boundSlot = unit;
+        GLState.bindTextureForced(unit, this.target, this.handle);
     }
 
     /** Release whichever unit this texture was last bound to. */

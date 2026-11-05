@@ -4,6 +4,7 @@
 import type { Device } from './device';
 import type { Buffer } from './resources';
 import { BufferUsage } from './types';
+import { frameStats } from '../renderStats';
 
 /** One writable leaf, as the `.wgsl` loader reflects it. */
 export interface UniformMember {
@@ -211,6 +212,8 @@ export class UniformSet {
         if (this._cursor + 1 >= this._slots) this._grow(device);
         else this._cursor++;
         device.writeBuffer(this._buffer, this._cursor * this.slotSize, this._bytes);
+        frameStats.uniformUploads++;
+        frameStats.uniformUploadBytes += this._bytes.byteLength;
     }
 
     // Double the arena and start again at its first slot. The OLD buffer must NOT be destroyed yet: draws

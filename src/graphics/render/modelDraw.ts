@@ -13,6 +13,8 @@ import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
+import type { ObjectTable } from '../objectTable';
+import { dissolveOf } from '../objectData';
 
 /** `count` identity matrices, packed. */
 function identityPalette(count: number): Float32Array {
@@ -60,7 +62,23 @@ export class ModelDraw {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _materials: MaterialBinder,
-                private readonly _projection: ViewProjection) {}
+                private readonly _projection: ViewProjection,
+                private readonly _objects: ObjectTable) {}
+
+    /**
+     * `node`'s record in the per-object table — the same one whichever pass asks (shadows, G-buffer,
+     * forward, velocity), appended on first use this submission, uploaded if pending.
+     */
+    public rowForNode(node: ModelNode): number {
+        return this._objects.rowFor(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither);
+    }
+
+    /** Append every node's record, then upload them in one go — before a pass records its draws. */
+    public prepareRows(nodes: Iterable<ModelNode>): void {
+        for (const node of nodes)
+            this._objects.ensure(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither);
+        this._objects.flush();
+    }
 
     // The draw `_bindMaterial` serves, set by `drawMaterials` around its submesh loop: one callback bound
     // for the object's life instead of a closure built per draw.

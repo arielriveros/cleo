@@ -145,6 +145,19 @@ export class Shader implements ShaderProgram {
         this._setUniform(uniform.info.location, uniform.info.type, value, uniform.info.size);
     }
 
+    /**
+     * Start `instance_index` at `first` for the next draw: naga's `naga_vs_first_instance`, which a
+     * vertex stage reading `@builtin(instance_index)` declares (WebGL2 has no base-instance draw). The
+     * per-object table's record arrives this way. Program state, so an unchanged value is not re-sent;
+     * a no-op for a program without the uniform. The program must be the bound one.
+     */
+    public setFirstInstance(first: number): void {
+        const uniform = this._uniforms['naga_vs_first_instance'];
+        if (!uniform || uniform.last === first) return;
+        uniform.last = first;
+        gl.uniform1ui(uniform.info.location, first);
+    }
+
     /** Upload any block writes made since the last flush. Call immediately before a draw. */
     public flushUniformBlocks(): void { this._blocks?.flush(); }
 
@@ -261,6 +274,9 @@ export class Shader implements ShaderProgram {
         for (let i = 0; i < numAttribs; i++) {
             const attribInfo = gl.getActiveAttrib(this._shaderProgram, i);
             if (!attribInfo) break;
+            // A built-in (ES 3.0 lets a driver list `gl_InstanceID`, which naga's `instance_index` reads) is
+            // no buffer attribute: counting it would widen every vertex layout built from this program.
+            if (attribInfo.name.startsWith('gl_')) continue;
     
             // TODO: Handle other types, 4 is the default for floats
             attributesStride += this.getTypeSize(attribInfo.type) * 4;
@@ -271,6 +287,9 @@ export class Shader implements ShaderProgram {
         for (let i = 0; i < numAttribs; i++) {
             const attribInfo = gl.getActiveAttrib(this._shaderProgram, i);
             if (!attribInfo) break;
+            // A built-in (ES 3.0 lets a driver list `gl_InstanceID`, which naga's `instance_index` reads) is
+            // no buffer attribute: counting it would widen every vertex layout built from this program.
+            if (attribInfo.name.startsWith('gl_')) continue;
     
             const byteSize = this.getTypeByteSize(attribInfo.type);
     

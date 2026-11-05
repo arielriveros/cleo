@@ -111,3 +111,31 @@ describe("the owner's last group", () => {
         expect(created).toHaveLength(1);
     });
 });
+
+// The per-object table binds as group 2, binding 0 of every program that reads it — one group per
+// pipeline (auto layouts are per pipeline), rebuilt only when the table texture is replaced.
+describe('the object-table group', () => {
+    const objectPipeline = (label: string) => ({
+        label,
+        resources: [{ group: 2, binding: 0, glslName: 'u_objectData', kind: 'texture', type: 'texture_2d<f32>' }],
+        layoutForGroup: () => ({}),
+    }) as unknown as RenderPipeline;
+
+    it('says which pipelines read the table', () => {
+        expect(cache().declaresObjectData(objectPipeline('pbr'))).toBe(true);
+        expect(cache().declaresObjectData(pipeline('basic', [{ name: 'u_shadowCascades', binding: 0 }]))).toBe(false);
+    });
+
+    it('builds one group per pipeline and table, and a new one when the table is replaced', () => {
+        const c = cache();
+        const a = objectPipeline('a'), b = objectPipeline('b');
+        const table = texture('table');
+        const first = c.objectDataGroup(a, table);
+        expect(c.objectDataGroup(a, table)).toBe(first);
+        expect(created.at(-1)!.entries).toEqual([{ binding: 0, textureView: (table as any).sampledView }]);
+        expect(c.objectDataGroup(b, table)).not.toBe(first);
+        const grown = texture('grown');
+        expect(c.objectDataGroup(a, grown)).not.toBe(first);
+        expect(created.length).toBe(3);
+    });
+});

@@ -810,17 +810,26 @@ export class WebGPURenderPassEncoder implements RenderPassEncoder {
         this._pass.setScissorRect(x, y, width, height);
     }
 
-    public draw(vertexCount: number, instanceCount: number = 1, firstVertex: number = 0): void {
+    public draw(vertexCount: number, instanceCount: number = 1, firstVertex: number = 0, firstInstance: number = 0): void {
+        if (firstInstance !== 0) this._checkFirstInstance();
         this._flushUniforms();
-        this._pass.draw(vertexCount, instanceCount, firstVertex);
+        this._pass.draw(vertexCount, instanceCount, firstVertex, firstInstance);
         this._countDraw(vertexCount, instanceCount);
     }
 
     public drawIndexed(indexCount: number, instanceCount: number = 1, firstIndex: number = 0,
-                       baseVertex: number = 0): void {
+                       baseVertex: number = 0, firstInstance: number = 0): void {
+        if (firstInstance !== 0) this._checkFirstInstance();
         this._flushUniforms();
-        this._pass.drawIndexed(indexCount, instanceCount, firstIndex, baseVertex);
+        this._pass.drawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance);
         this._countDraw(indexCount, instanceCount);
+    }
+
+    // WebGPU offsets instance-rate attribute fetch by `firstInstance`; WebGL2 cannot. A pipeline with an
+    // instance-rate buffer must therefore draw from instance 0, or the two backends would disagree.
+    private _checkFirstInstance(): void {
+        if (this._pipeline?.vertexLayouts.some(l => l.stepMode === 'instance'))
+            throw new Error(`${this._pipeline.label}: firstInstance with instance-rate vertex buffers`);
     }
 
     public beginOcclusionQuery(index: number): void { this._pass.beginOcclusionQuery(index); }
@@ -1748,6 +1757,10 @@ export class WebGPUDevice implements Device {
     private readonly _recording = new Map<WebGPUCommandEncoder, number>();
     private _submitCount = 0;
 
+    /** See {@link Device.submissionEpoch}. */
+    public get submissionEpoch(): number { return this._submissionEpoch; }
+    private _submissionEpoch = 0;
+
     private _submitted(encoder: WebGPUCommandEncoder): void {
         this._submitCount++;
         this._recording.delete(encoder);
@@ -1756,7 +1769,10 @@ export class WebGPUDevice implements Device {
         // submits is abandoned, not pending.
         for (const [open, since] of this._recording)
             if (this._submitCount - since > 64) this._recording.delete(open);
-        if (this._recording.size === 0) this.releaseUniformSlots();
+        if (this._recording.size === 0) {
+            this.releaseUniformSlots();
+            this._submissionEpoch++;
+        }
     }
 
     /** See {@link Device.setTimestampCollection}. Everything it needs lives in `TimestampCollector`. */
