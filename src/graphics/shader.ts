@@ -263,8 +263,9 @@ export class Shader implements ShaderProgram {
         }
     }
 
-    public hasUniform(name: string) {
-        return name in this._uniforms;
+    /** Whether this program declares `name`: a loose uniform OR a block member, as on WebGPU. */
+    public hasUniform(name: string): boolean {
+        return name in this._uniforms || (this._blocks?.has(name) ?? false);
     }
 
     private storeAttributes(): void {

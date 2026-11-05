@@ -55,6 +55,7 @@ export interface ShaderProgram {
      */
     setUniform(name: string, value: any): void;
 
+    /** Whether a {@link setUniform} of `name` reaches anything: a loose uniform or a block member. */
     hasUniform(name: string): boolean;
 
     /** Upload whatever uniform writes are pending. Call immediately before a draw, not per `setUniform`. */

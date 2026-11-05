@@ -3,6 +3,7 @@ import { ModelNode } from '../../core/scene/nodes/modelNode';
 import { Material, CustomMaterial } from '../material';
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderPipeline } from '../rhi/resources';
+import type { ShaderProgram } from '../rhi/shaderProgram';
 import type { BlendState, CullMode, DepthStencilState } from '../rhi/types';
 import { customPipelineReflection, customShaderReady } from '../systems/customShaders';
 import type { Texture } from '../texture';
@@ -15,6 +16,19 @@ import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import type { ObjectTable } from '../objectTable';
 import { dissolveOf } from '../objectData';
+
+/**
+ * Which of `beginModel`'s per-draw names a program declares. A program that reads the per-object table
+ * has none of them, and writing them anyway cost a route lookup each — and, for a skinned draw, copying
+ * the whole bone palette into a scratch the program never reads. Resolved once per program.
+ */
+interface ModelProgramProfile {
+    readonly model: boolean;
+    readonly uv: boolean;
+    readonly bones: boolean;
+    readonly dissolve: boolean;
+    readonly camHolePivot: boolean;
+}
 
 /** `count` identity matrices, packed. */
 function identityPalette(count: number): Float32Array {
@@ -210,21 +224,42 @@ export class ModelDraw {
         if (animated)
             (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(shaderType).attributes);
         this._shaderManager.bind(shaderType);
+        const declares = this._profileOf(this._shaderManager.bound!);
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         this._shaderManager.setUniform('u_projection', depthNudge
             ? this._projection.nudgedProjection(this._view.camera.projectionMatrix, depthNudge)
             : this._projection.rasterProjection(this._view.camera.projectionMatrix));
-        this._shaderManager.setUniform('u_model', node.worldTransform);
+        if (declares.model) this._shaderManager.setUniform('u_model', node.worldTransform);
         // A model shows its whole texture: the Basic family's UV transform is a sprite-sheet tile, and
         // a uniform keeps the last sprite's. This used to be written only in the forward pass, and only
-        // where `hasUniform` saw it — which on WebGL2 never sees a block member — so a Basic model there,
-        // and in the G-buffer on both backends, drew with whatever the block held.
-        this._shaderManager.setUniform('u_uvOffset', ModelDraw._UV_OFFSET);
-        this._shaderManager.setUniform('u_uvScale', ModelDraw._UV_SCALE);
-        this._materials.setDissolve(node.effectiveFade);
-        this._materials.setCameraHole(node.cameraDither);
-        if (animated) this.uploadBoneMatrices(shaderType, node);
+        // where `hasUniform` saw it — which on WebGL2 never saw a block member — so a Basic model there,
+        // and in the G-buffer on both backends, drew with whatever the block held. (A table program
+        // takes the UV transform from its record instead.)
+        if (declares.uv) {
+            this._shaderManager.setUniform('u_uvOffset', ModelDraw._UV_OFFSET);
+            this._shaderManager.setUniform('u_uvScale', ModelDraw._UV_SCALE);
+        }
+        this._materials.setDissolve(node.effectiveFade, declares.dissolve);
+        this._materials.setCameraHole(node.cameraDither, declares.camHolePivot);
+        if (animated && declares.bones) this.uploadBoneMatrices(shaderType, node);
         return animated;
+    }
+
+    private readonly _profiles = new WeakMap<ShaderProgram, ModelProgramProfile>();
+
+    private _profileOf(program: ShaderProgram): ModelProgramProfile {
+        let profile = this._profiles.get(program);
+        if (!profile) {
+            profile = {
+                model: program.hasUniform('u_model'),
+                uv: program.hasUniform('u_uvOffset') || program.hasUniform('u_uvScale'),
+                bones: program.hasUniform('u_boneMatrices'),
+                dissolve: program.hasUniform('u_dissolve'),
+                camHolePivot: program.hasUniform('u_camHolePivot'),
+            };
+            this._profiles.set(program, profile);
+        }
+        return profile;
     }
 
     /**
@@ -259,14 +294,15 @@ export class ModelDraw {
         if (mat.type === 'terrain') {
             if (state.terrainSelfShadow) {
                 // u_viewPos again, and deliberately: terrain reads it from its OWN uniform block, not the
-                // transform block `beginModel` wrote. Two blocks, two writes.
+                // transform block `beginModel` wrote. Two blocks, two writes. Outside the material memo
+                // below: whether they are written at all depends on the pass, not the material.
                 this._shaderManager.setUniform('u_viewPos', this._view.camera.position); // parallax V + specular V
                 this._shaderManager.setUniform('u_sunDirection', this._view.sunDirection); // self-shadow
             }
-            // The roughness filter, in both passes: a probe capture must shade terrain with the same NDF
-            // width as the frame it is a probe for.
-            this._shaderManager.setUniform('u_specularAA', this.specularAaEnabled);
-            for (const [name, value] of mat.properties) this._shaderManager.setUniform(name, value);
+            // The surface arrays, and the roughness filter (in both passes: a probe capture must shade
+            // terrain with the same NDF width as the frame it is a probe for) — once per landscape per
+            // frame, not per chunk.
+            this._materials.applyTerrainProperties(mat);
             if (!state.viaRHI) { this._materials.applyTerrain(mat); return false; }
             const pipeline = this._pipelines.memoized(state.memo, mat, shaderType, reflection!, {
                 cullMode: ModelDraw.cullFor(mat.config.side),
