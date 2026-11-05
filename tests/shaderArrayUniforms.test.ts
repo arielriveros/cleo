@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setGLContext } from '../src/graphics/glContext';
-import { Shader } from '../src/graphics/shader';
+import { setGLContext } from '../src/graphics/rhi/webgl2/glContext';
+import { Shader } from '../src/graphics/rhi/webgl2/webgl2Shader';
 
 /**
  * Array uniforms, reachable by their bare name.

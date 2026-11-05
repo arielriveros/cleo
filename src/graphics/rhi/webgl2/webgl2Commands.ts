@@ -4,10 +4,10 @@
 // Binding through `ShaderManager` rather than `Shader.use()` is load-bearing: it keeps `setUniform`'s
 // `_boundShader` current and the harness's shader-coverage measurement intact.
 
-import { gl } from '../../glContext';
-import { GLState } from '../../systems/glState';
+import { gl } from './glContext';
+import { GLState } from './glState';
 import { ShaderManager } from '../../systems/shaderManager';
-import type { Shader } from '../../shader';
+import type { Shader } from './webgl2Shader';
 import {
     glCompare, glBlendFactor, glBlendOperation, glCullMode, glFrontFace,
     glTopology, glIndexType, indexByteSize,

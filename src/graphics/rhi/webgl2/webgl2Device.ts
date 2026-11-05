@@ -1,5 +1,5 @@
-import { gl } from '../../glContext';
-import { GLState } from '../../systems/glState';
+import { gl } from './glContext';
+import { GLState } from './glState';
 import { Logger } from '../../../core/logger';
 import { shaderStats } from '../../shaderStats';
 import { glBufferTarget, glBufferUsageHint, glTextureTarget, glTextureFormat, glAddressMode, glMinFilter, glMagFilter } from './glEnums';
@@ -21,7 +21,7 @@ import type { Buffer, Texture } from '../resources';
 import type { BufferUsageFlags, TextureFormat, TextureDimension, TextureUsageFlags, SamplerDescriptor, AddressMode, TextureConfigureDescriptor } from '../types';
 import { textureByteSize, TEXTURE_FORMAT_INFO, isDepthFormat } from '../types';
 import type { ShaderProgram, ShaderProgramDescriptor } from '../shaderProgram';
-import { Shader } from '../../shader';
+import { Shader } from './webgl2Shader';
 import { device } from '../deviceHandle';
 
 /**

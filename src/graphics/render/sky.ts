@@ -9,14 +9,14 @@ import { VolumetricCloudsNode } from '../../core/scene/nodes/volumetricCloudsNod
 import { Scene } from '../../core/scene/scene';
 import { CubeFramebuffer } from '../cubeFramebuffer';
 import { Framebuffer } from '../framebuffer';
-import { gl } from '../glContext';
+import { gl } from '../rhi/webgl2/glContext';
 import { Mesh } from '../mesh';
 import type { RenderPassEncoder } from '../rhi/device';
 import { device } from '../rhi/deviceHandle';
 import { DEFAULT_BLEND } from '../rhi/types';
 import type { ShaderResource } from '../rhi/types';
 import { nightFactor, moonDirection } from '../skyNight';
-import { GLState } from '../systems/glState';
+import { GLState } from '../rhi/webgl2/glState';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { VolumetricCloudPasses } from './clouds';

@@ -1,5 +1,5 @@
 import { mat4 } from 'gl-matrix';
-import { GLState } from '../systems/glState';
+import { GLState } from '../rhi/webgl2/glState';
 import { ShaderManager } from '../systems/shaderManager';
 import { TextureManager } from '../systems/textureManager';
 import { MaterialSync, MATERIAL_VIEW_SIZE } from '../shaderOptimizer';

@@ -4,7 +4,7 @@ import { join } from 'path';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
 import { AnimatedModel } from '../src/animation/animatedModel';
 import { ModelNode } from '../src/core/scene/nodes/modelNode';
-import { setGLContext } from '../src/graphics/glContext';
+import { setGLContext } from '../src/graphics/rhi/webgl2/glContext';
 import { WebGL2Device } from '../src/graphics/rhi/webgl2/webgl2Device';
 import { setDevice } from '../src/graphics/rhi/deviceHandle';
 import { LoopbackPort } from '../src/physics/worker/ports';

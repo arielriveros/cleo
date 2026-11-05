@@ -11,7 +11,7 @@ import type { ParticleSimFrame, ParticleDrawFrame } from '../particles/particleR
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderTarget } from '../rhi/resources';
 import { keyLight } from '../skyNight';
-import { GLState } from '../systems/glState';
+import { GLState } from '../rhi/webgl2/glState';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';

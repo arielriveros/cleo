@@ -1,5 +1,5 @@
-import { gl } from '../glContext';
-import { GLState } from '../systems/glState';
+import { gl } from '../rhi/webgl2/glContext';
+import { GLState } from '../rhi/webgl2/glState';
 import { device } from '../rhi/deviceHandle';
 import { countFullscreenPass, frameStats, setViewportSize } from '../renderStats';
 import { gpuProfiler, type RenderPass } from '../gpuProfiler';

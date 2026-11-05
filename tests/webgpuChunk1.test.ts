@@ -6,7 +6,7 @@
 // tested at all: none of them is visible in a picture, and each was found by a driver rejecting
 // something rather than by a pixel moving.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { GLState } from '../src/graphics/systems/glState';
+import { GLState } from '../src/graphics/rhi/webgl2/glState';
 import { frameStats, resetFrameStats } from '../src/graphics/renderStats';
 
 // ------------------------------------------------------------------------------------------------

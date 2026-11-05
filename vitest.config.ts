@@ -100,7 +100,7 @@ export default mergeConfig(engineConfig, defineConfig({
                 'src/core/uiLayout.ts',
                 'src/animation/animationField.ts',
                 'src/animation/boneNames.ts',
-                'src/graphics/glContext.ts',
+                'src/graphics/rhi/webgl2/glContext.ts',
                 'src/animation/ik.ts',
                 'src/graphics/dofMath.ts',
                 'src/graphics/indexFormat.ts',

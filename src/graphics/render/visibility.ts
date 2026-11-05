@@ -14,7 +14,7 @@ import type { OccluderGrid } from '../occlusion/terrainOccluder';
 import { frameStats } from '../renderStats';
 import { device } from '../rhi/deviceHandle';
 import type { OcclusionQuerySet } from '../rhi/resources';
-import { GLState } from '../systems/glState';
+import { GLState } from '../rhi/webgl2/glState';
 import { OcclusionBoxProgram } from './programs';
 import type { OcclusionMode } from './settingsTypes';
 import type { FrameView } from './frameView';

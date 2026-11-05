@@ -9,7 +9,7 @@ import { RenderPass } from '../gpuProfiler';
 import { CustomMaterial } from '../material';
 import { ADDITIVE_BLEND } from '../rhi/types';
 import { customShaderModules, screenShaderResources, screenUserSamplerNames } from '../systems/customShaders';
-import { GLState } from '../systems/glState';
+import { GLState } from '../rhi/webgl2/glState';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { PresentProgram, OutlinePostProgram, BloomProgram, BloomDownsampleProgram, BloomUpsampleProgram, ComposerProgram, DofCocProgram, DofGatherProgram, DofCompositeProgram, LensFlareProgram, LensFlareCompositeProgram, FxaaProgram, VignetteProgram, FilmGrainProgram, ChromaticAberrationProgram } from './programs';

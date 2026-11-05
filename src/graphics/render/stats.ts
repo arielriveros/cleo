@@ -1,6 +1,6 @@
 import { Logger } from '../../core/logger';
 import { Framebuffer } from '../framebuffer';
-import { gl } from '../glContext';
+import { gl } from '../rhi/webgl2/glContext';
 import { FramebufferPool } from '../renderGraph/pool';
 import { frameStats } from '../renderStats';
 import { TextureManager } from '../systems/textureManager';

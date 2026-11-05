@@ -8,7 +8,7 @@ import { TemporalHistory } from './temporalHistory';
 import { LandscapeHistory } from './landscapeHistory';
 import { device } from '../rhi/deviceHandle';
 import type { RenderTarget, RenderPipeline } from '../rhi/resources';
-import { GLState } from '../systems/glState';
+import { GLState } from '../rhi/webgl2/glState';
 import { Texture } from '../texture';
 import { TaaResolveProgram, TaaSharpenProgram, ScreenProgram, MotionBlurVelocityProgram, VELOCITY_PROGRAMS, MotionBlurTileMaxProgram, MotionBlurNeighborMaxProgram, MotionBlurGatherProgram } from './programs';
 import type { TaaHistoryFilter } from './settingsTypes';

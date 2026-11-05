@@ -13,7 +13,7 @@ import { usesParallax } from '../programVariants';
 import { frameStats } from '../renderStats';
 import type { RenderPassEncoder } from '../rhi/device';
 import { DEFAULT_BLEND } from '../rhi/types';
-import { GLState } from '../systems/glState';
+import { GLState } from '../rhi/webgl2/glState';
 import { Texture } from '../texture';
 import { ModelDraw } from './modelDraw';
 import type { MaterialDrawState } from './modelDraw';

@@ -9,7 +9,7 @@ import { Material } from '../material';
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderPipeline } from '../rhi/resources';
 import type { BlendState, CullMode } from '../rhi/types';
-import { GLState } from '../systems/glState';
+import { GLState } from '../rhi/webgl2/glState';
 import { Texture } from '../texture';
 import { ShadowMapProgram, DecalSurfaceProgram, DecalResolveProgram, DecalColorProgram } from './programs';
 import type { FrameView } from './frameView';

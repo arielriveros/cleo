@@ -1,4 +1,4 @@
-import { gl } from '../../glContext';
+import { gl } from './glContext';
 import { glVertexFormat } from './glEnums';
 import type { VertexBufferLayout } from '../types';
 

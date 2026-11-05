@@ -12,7 +12,7 @@ import type { ShaderProgram } from '../rhi/shaderProgram';
 import { keyLight, moonDirection } from '../skyNight';
 import type { KeyLight } from '../skyNight';
 import { customForwardTypes } from '../systems/customShaders';
-import { GLState } from '../systems/glState';
+import { GLState } from '../rhi/webgl2/glState';
 import { Texture } from '../texture';
 import { DeferredLightingProgram } from './programs';
 import { ShadowPasses } from './shadows';

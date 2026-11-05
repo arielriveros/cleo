@@ -4,7 +4,7 @@ import { join } from 'path';
 import { Node, Scene, Terrain, TerrainMaterial } from 'cleo';
 // From the engine SOURCE, which is what `cleo` is aliased to in this suite (see vitest.config.ts), so
 // these reach the same module instances `Terrain` uses rather than a second copy.
-import { setGLContext } from '../../../src/graphics/glContext';
+import { setGLContext } from '../../../src/graphics/rhi/webgl2/glContext';
 import { setDevice } from '../../../src/graphics/rhi/deviceHandle';
 import { WebGL2Device } from '../../../src/graphics/rhi/webgl2/webgl2Device';
 import { PREVIEW_TERRAIN_SIZE, REFERENCE_LANDSCAPE } from '../src/features/demoScene/previewFraming';

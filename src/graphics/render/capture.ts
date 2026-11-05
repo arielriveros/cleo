@@ -5,7 +5,7 @@ import { Scene } from '../../core/scene/scene';
 import { IDENTITY_LUT_SIZE } from '../colorGrading';
 import { Framebuffer } from '../framebuffer';
 import { device } from '../rhi/deviceHandle';
-import { GLState } from '../systems/glState';
+import { GLState } from '../rhi/webgl2/glState';
 import { Texture } from '../texture';
 import { ProbePreviewProgram, IrradianceProgram, PrefilterProgram, PresentProgram } from './programs';
 import { SkyPasses } from './sky';

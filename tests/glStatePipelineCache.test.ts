@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setGLContext } from '../src/graphics/glContext';
-import { GLState } from '../src/graphics/systems/glState';
+import { setGLContext } from '../src/graphics/rhi/webgl2/glContext';
+import { GLState } from '../src/graphics/rhi/webgl2/glState';
 
 /**
  * WebGL2RenderPipeline.apply used to issue depthFunc, frontFace, blendFuncSeparate, blendEquationSeparate

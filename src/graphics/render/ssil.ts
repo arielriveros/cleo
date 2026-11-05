@@ -3,7 +3,7 @@ import { Logger } from '../../core/logger';
 import { Framebuffer } from '../framebuffer';
 import { TemporalHistory } from './temporalHistory';
 import { ssilTraceShape } from '../ssilSettings';
-import { GLState } from '../systems/glState';
+import { GLState } from '../rhi/webgl2/glState';
 import { SsilProgram, SsilTemporalProgram, SsilBlurProgram, SsilHistoryProgram } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';

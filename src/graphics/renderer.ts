@@ -18,7 +18,7 @@ import type { ResourceDesc } from './renderGraph/resources';
 import { MAX_CASCADES, MAX_POINT_SHADOWS } from './shadowMath';
 
 
-import { GLState } from './systems/glState';
+import { GLState } from './rhi/webgl2/glState';
 import { Texture } from './texture';
 import { CustomMaterial } from './material';
 import { ensureCustomShader, customShaderReady } from './systems/customShaders';
@@ -73,7 +73,7 @@ import type { RenderSubsystems } from './render/subsystems';
 import { ProgramRegistry } from './render/programRegistry';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
-import { gl, setGLContext } from './glContext';
+import { gl, setGLContext } from './rhi/webgl2/glContext';
 import { describeCapabilities } from './rhi/device';
 import type { BackendKind, DeviceCapabilities, Device } from './rhi/device';
 import { resolveBackendRequest } from './rhi/backendSelect';

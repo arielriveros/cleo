@@ -23,7 +23,7 @@ import type { DepthStencilState, CullMode } from '../rhi/types';
 import { TerrainFloorGrid, ShadowLayerCache, unitDirection, shadowReach, sliceCornerFactor, cascadeSphereAroundEye, staggeredCascadeDue, EYE_FIT_MARGIN, receiverInnerRadius, isFreeShadowSlot } from '../shadowCasters';
 import { MAX_CASCADES, CascadeSphere, ShadowCasterBounds, SpotShadowSlots, MAX_POINT_SHADOWS, PointShadowCache, CasterMotion, lightViewMatrix, mixNumber, HASH_SEED, pushCasterBounds, mixTransform, spotShadowFar, pointShadowFov, POINT_SHADOW_FACES, mixString, computeCascadeSplits, staleCascadeCovers, STAGGER_MARGIN, quantizeRadius, cascadeDepthScale, cascadeSphereFromPerspective, cascadeSphereFromCorners, buildCascadeMatrix } from '../shadowMath';
 import { keyLight } from '../skyNight';
-import { GLState } from '../systems/glState';
+import { GLState } from '../rhi/webgl2/glState';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { VolumetricGodRaysProgram, ScreenProgram, SHADOW_PROGRAMS } from './programs';

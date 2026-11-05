@@ -16,7 +16,7 @@ export type { NodeType } from "./core/scene/nodes/nodeType";
 export { ModelNode, disposeModelSubtree } from "./core/scene/nodes/modelNode";
 // Device entry points. Exported so an embedder — or a test that has to construct a Model, which
 // allocates GPU buffers in its constructor — can stand up a context without reaching into src/.
-export { setGLContext } from "./graphics/glContext";
+export { setGLContext } from "./graphics/rhi/webgl2/glContext";
 export { setDevice } from "./graphics/rhi/deviceHandle";
 export { WebGL2Device } from "./graphics/rhi/webgl2/webgl2Device";
 export { LodGroupNode } from "./core/scene/nodes/lodGroupNode";

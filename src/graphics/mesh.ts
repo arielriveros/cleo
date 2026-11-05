@@ -1,5 +1,5 @@
 // TODO: the six raw-GL draw calls below move onto a RenderPassEncoder with the geometry-pass migration.
-import { gl } from './glContext';
+import { gl } from './rhi/webgl2/glContext';
 import type { PrimitiveTopology, IndexFormat } from './rhi/types';
 import { glTopology, glIndexType, indexByteSize } from './rhi/webgl2/glEnums';
 import { isTriangleTopology } from './rhi/types';
@@ -15,7 +15,7 @@ import {
     MODEL_VERTEX_LAYOUT, BONE_INDEX_LAYOUT, BONE_WEIGHT_LAYOUT,
     packedModelLayout, instanceMatrixLayout, isModelAttribute,
 } from './rhi/vertexLayouts';
-import { GLState } from './systems/glState';
+import { GLState } from './rhi/webgl2/glState';
 import { ShaderManager } from './systems/shaderManager';
 import { frameStats } from './renderStats';
 import { createIndexArray, indexFormatFor } from './indexFormat';

@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import { vec3 } from 'gl-matrix';
-import { setGLContext } from '../src/graphics/glContext';
+import { setGLContext } from '../src/graphics/rhi/webgl2/glContext';
 import { WebGL2Device } from '../src/graphics/rhi/webgl2/webgl2Device';
 import { setDevice } from '../src/graphics/rhi/deviceHandle';
 import { FoliageLayer } from '../src/terrain/foliage';

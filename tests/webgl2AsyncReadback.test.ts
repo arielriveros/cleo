@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setGLContext } from '../src/graphics/glContext';
+import { setGLContext } from '../src/graphics/rhi/webgl2/glContext';
 import { WebGL2Device } from '../src/graphics/rhi/webgl2/webgl2Device';
 
 /**
