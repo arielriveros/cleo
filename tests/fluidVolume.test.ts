@@ -98,7 +98,7 @@ describe('the fluid volume pass', () => {
         const at = RENDERER.indexOf('private _renderFluidVolumes(');
         const body = RENDERER.slice(at, RENDERER.indexOf('\n    }\n', at));
         expect(body).toContain("sm.setUniform('u_invViewProj', this._view.invViewProjStable)");
-        expect(body).toContain('Renderer._CLOUD_BLEND');
+        expect(body).toContain('VolumetricCloudPasses.CLOUD_BLEND');
     });
 
     it('traces, then resolves (temporal only), then composites onto the scene buffer', () => {

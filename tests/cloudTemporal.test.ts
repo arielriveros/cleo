@@ -118,8 +118,8 @@ describe('noise volume periods', () => {
         const detail = Number(/CLOUD_DETAIL_NOISE_PERIOD = (\d+)/.exec(renderer)?.[1]);
         expect(base).toBeGreaterThan(0);
         expect(detail).toBeGreaterThan(0);
-        expect(renderer).toContain('1 / Renderer.CLOUD_BASE_NOISE_PERIOD');
-        expect(renderer).toContain('1 / Renderer.CLOUD_DETAIL_NOISE_PERIOD');
+        expect(renderer).toContain('1 / VolumetricCloudPasses.CLOUD_BASE_NOISE_PERIOD');
+        expect(renderer).toContain('1 / VolumetricCloudPasses.CLOUD_DETAIL_NOISE_PERIOD');
     });
 
     it('uses power-of-two volume sizes', () => {
