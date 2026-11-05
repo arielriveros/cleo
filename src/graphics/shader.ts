@@ -19,7 +19,7 @@ export class Shader implements ShaderProgram {
     private _fragmentShader!: WebGLShader;
     private _attributes: AttributeInfo[] = [];
     private _uniforms: {
-        [name: string]: {info: UniformInfo, value: any}
+        [name: string]: {info: UniformInfo, value: any, last?: number | boolean}
     } = {};
     // std140 blocks, for programs generated from WGSL. Null for hand-written GLSL, which has loose
     // uniforms instead. See systems/uniformBlocks.ts.
@@ -135,6 +135,13 @@ export class Shader implements ShaderProgram {
             return;
         }
         uniform.value = value;
+        // A uniform is PROGRAM state and every gl.uniform* call is made from this file, so a scalar
+        // equal to the last one this program was given is already what GL holds. The case that pays:
+        // a WebGL2 bind group setting each sampler to its texture unit on every draw.
+        if (uniform.info.size === 1 && (typeof value === 'number' || typeof value === 'boolean')) {
+            if (uniform.last === value) return;
+            uniform.last = value;
+        }
         this._setUniform(uniform.info.location, uniform.info.type, value, uniform.info.size);
     }
 

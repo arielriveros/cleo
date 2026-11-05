@@ -1,4 +1,5 @@
 import { gl } from '../glContext';
+import { GLState } from '../systems/glState';
 import { device } from '../rhi/deviceHandle';
 import { countFullscreenPass, frameStats, setViewportSize } from '../renderStats';
 import { gpuProfiler, type RenderPass } from '../gpuProfiler';
@@ -124,7 +125,7 @@ export class PassEncoder {
         // Standing context state, which WebGPU does not have — a pipeline carries its own blend. The
         // callers are legacy paths restoring what they disturbed; they go when those do.
         if (!gl) return;
-        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+        GLState.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
     }
 
     /** Draw the screen quad and close the pass: the last two steps of every fullscreen pass. */

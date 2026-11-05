@@ -388,7 +388,7 @@ export class Sprite2DPasses {
         this._shaderManager.setUniform('u_isTransparent', true);
         if (!pipeline) {
             GLState.blend(true);
-            if (additive && gl) gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.ZERO, gl.ONE);
+            if (additive && gl) GLState.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.ZERO, gl.ONE);
             // Don't write to depth for blended sprites to avoid occluding later sprites
             GLState.depthMask(false);
             this._materials.applyCull(materialConfig.side);

@@ -316,7 +316,7 @@ export class VolumetricCloudPasses {
         // Clouds are bloom-eligible, so coverage goes into the mask alpha instead of the default
         // mask-preserving blend. The shader outputs PREMULTIPLIED colour, so RGB and alpha share
         // ONE, ONE_MINUS_SRC_ALPHA. Guarded: WebGPU carries the same factors in `CLOUD_BLEND`.
-        if (gl) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        if (gl) GLState.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
         // One pipeline and one texture group for the raymarch, reused by whichever target it lands in.
         // The helpers open their own passes and re-apply both; the uniforms below are written once.

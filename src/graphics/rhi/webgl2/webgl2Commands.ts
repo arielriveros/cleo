@@ -120,7 +120,7 @@ export class WebGL2RenderPipeline implements RenderPipeline {
         if (!noDepth) {
             GLState.depthTest(true);
             GLState.depthMask(this.depthStencil!.depthWriteEnabled);
-            gl.depthFunc(glCompare(this.depthStencil!.depthCompare));
+            GLState.depthFunc(glCompare(this.depthStencil!.depthCompare));
         } else {
             // Mask as well as disable: DEPTH_TEST off still lets writes through on some drivers.
             GLState.depthTest(false);
@@ -130,25 +130,25 @@ export class WebGL2RenderPipeline implements RenderPipeline {
         const cull = glCullMode(this.primitive.cullMode);
         if (cull === null) GLState.cull(false);
         else { GLState.cull(true); GLState.cullFace(cull); }
-        gl.frontFace(glFrontFace(this.primitive.frontFace));
+        GLState.frontFace(glFrontFace(this.primitive.frontFace));
 
         // WebGL2 blends globally: several targets may blend only if they all blend identically, and
         // anything it cannot express throws here rather than blending under the wrong state.
         const blend = uniformTargetBlend(this.colorTargets, this.label);
         if (blend) {
             GLState.blend(true);
-            gl.blendFuncSeparate(
+            GLState.blendFuncSeparate(
                 glBlendFactor(blend.color.srcFactor), glBlendFactor(blend.color.dstFactor),
                 glBlendFactor(blend.alpha.srcFactor), glBlendFactor(blend.alpha.dstFactor));
-            gl.blendEquationSeparate(
+            GLState.blendEquationSeparate(
                 glBlendOperation(blend.color.operation), glBlendOperation(blend.alpha.operation));
         } else {
             GLState.blend(false);
         }
 
         const mask = this.colorTargets[0]?.writeMask;
-        gl.colorMask(mask ? mask[0] : true, mask ? mask[1] : true,
-                     mask ? mask[2] : true, mask ? mask[3] : true);
+        GLState.colorMask(mask ? mask[0] : true, mask ? mask[1] : true,
+                          mask ? mask[2] : true, mask ? mask[3] : true);
     }
 
     public destroy(): void { /* the program is owned by ShaderManager */ }

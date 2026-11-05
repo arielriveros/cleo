@@ -647,7 +647,7 @@ export class Renderer {
         gl.clear(gl.COLOR_BUFFER_BIT);
         GLState.depthTest(true);
         GLState.blend(true);
-        gl.depthFunc(gl.LEQUAL);
+        GLState.depthFunc(gl.LEQUAL);
         this._passes.restoreDefaultBlend();
         gl.drawingBufferColorSpace = 'srgb';
     }
