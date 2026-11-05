@@ -124,6 +124,7 @@ import { FrameTargets } from './render/frameTargets';
 import { PassEncoder } from './render/passEncoder';
 import { PipelineCache } from './render/pipelineCache';
 import { BindGroupCache, SCENE_DEPTH_FIELD } from './render/bindGroups';
+import { MaterialBinder } from './render/materialBinder';
 import { QUALITY_TIERS } from './render/settingsTypes';
 import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 export { QUALITY_TIERS } from './render/settingsTypes';
@@ -339,6 +340,8 @@ export class Renderer {
     private readonly _pipelines: PipelineCache;
     /** Bind groups over textures and materials, cached by what they bind (render/bindGroups.ts). */
     private readonly _bindGroups: BindGroupCache;
+    /** Material uniforms, the despawn dissolve and the camera hole, per draw (render/materialBinder.ts). */
+    private readonly _materials: MaterialBinder;
 
     /**
      * The AUTHORED exposure — what the artist set, what a scene saves, and what a preview renders at.
@@ -671,11 +674,6 @@ export class Renderer {
     /** Every program built so far, by descriptor: one source never links twice (terrain has two names). */
     private readonly _builtByDescriptor = new Map<object, ShaderProgram>();
 
-    // ---- The shader optimizer (shaderOptimizer/) ----
-    /** Which material each program's material block already holds; see MaterialSync. */
-    private readonly _materialSync = new MaterialSync();
-    /** The per-view values riding in the material block, gathered for MaterialSync's comparison. */
-    private readonly _materialView = new Float64Array(MATERIAL_VIEW_SIZE);
     /** Interned program/material ids for the opaque draw sort. */
     private readonly _drawSortKeys = new DrawSortKeys();
     /** Programs compiling in the background while a stand-in draws. See _buildOnDemand. */
@@ -1340,6 +1338,13 @@ export class Renderer {
             pointShadows: () => this._pointShadowFBO.texture,
             lightGrid: () => this._lightGrid.texture,
         }, this._targets);
+        this._materials = new MaterialBinder({
+            specularAa: () => this._specularAaEnabled,
+            renderWidth: () => this._renderWidth,
+            renderHeight: () => this._renderHeight,
+            sceneBuffersLive: () => this._sceneBuffersLive,
+            thumbnailMode: () => this._thumbnailMode,
+        }, this._view, this._targets, this._bindGroups);
 
         // Preallocated identity bone matrices (used when an animated model has no animator)
         this._boneIdentityScratch = new Float32Array(100 * 16);
@@ -1884,7 +1889,7 @@ export class Renderer {
         // The shader optimizer's frame: counters zeroed, material memos expired (a material may have been
         // edited since the last frame), and any background compile that finished swapped in.
         resetShaderOptimizerFrame();
-        this._materialSync.beginFrame();
+        this._materials.sync.beginFrame();
         this._compileQueue.poll();
         this._passes.frameEncoder = device.createCommandEncoder('frame');
         try {
@@ -1902,7 +1907,7 @@ export class Renderer {
         if (!scene.activeCamera) return;
         this._view.camera = scene.activeCamera.camera;
         this._view.camera.resize(this._renderWidth, this._renderHeight);
-        this._updateCameraHole(scene);
+        this._materials.updateCameraHole(scene);
         // Kept for per-draw lookups (forward light-probe selection) that don't receive the scene.
         this._currentScene = scene;
         this._advanceWindTime();
@@ -3051,7 +3056,7 @@ export class Renderer {
         sm.setUniform('u_flipA', flip.a);
         sm.setUniform('u_flipB', flip.b);
         sm.setUniform('u_flipBlend', flip.blend);
-        this._applyMaterialProperties(material);
+        this._materials.applyProperties(material);
     }
 
     /** Column `index` of `m`'s rotation-scale part, normalised: a world-space axis of the box. */
@@ -4228,62 +4233,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_lodFrame', f);
         // Every foliage program reads the hole block too, so it is written on every bind, never only on
         // the layers that opt in: a uniform keeps its last value.
-        this._setCameraHole(layer.cameraDither);
-    }
-
-    /**
-     * A node's despawn dissolve for the program just bound (`u_dissolve`, see Node.remove). Written on
-     * EVERY draw through a model or basic program, never only on fading ones: a uniform keeps its last
-     * value, so a solid draw after a dissolving one would otherwise inherit its holes.
-     */
-    private _setDissolve(fade: number): void {
-        const d = this._dissolveVec;
-        d[0] = fade >= 1 ? 0 : 1 - Math.max(0, fade);
-        // The foliage crossfade's phase, so a despawn resolves under TAA exactly as a LOD change does.
-        d[1] = ((this._view.frameIndex * 7) % 16) / 16;
-        this._shaderManager.setUniform('u_dissolve', d);
-    }
-    private readonly _dissolveVec: [number, number] = [0, 0];
-
-    /**
-     * This frame's camera see-through hole (chunks/cameraHole.wgsl), from the active camera's
-     * `seeThrough` — set by a CameraRig in 'dither' collision mode. `_camHolePivot[3]` is the strength,
-     * 0 when no rig asked for one, which switches the test off in every program at once.
-     */
-    private readonly _camHole: number[] = [0, 0, 0, 1];
-    private readonly _camHolePivot: number[] = [0, 0, 0, 0];
-    private readonly _camHoleDraw: number[] = [0, 0, 0, 0];
-    private _camHoleStrength = 0;
-
-    private _updateCameraHole(scene: Scene): void {
-        const see = scene.activeCamera?.seeThrough;
-        // Not in the editor's own views, not in captures and thumbnails: only the game camera has a player.
-        if (!see || !see.active || see.strength <= 0 || see.radius <= 0 || this._view.capturing || this._thumbnailMode) {
-            this._camHoleStrength = 0;
-            return;
-        }
-        const eye = this._view.camera.position;
-        this._camHole[0] = eye[0]; this._camHole[1] = eye[1]; this._camHole[2] = eye[2];
-        this._camHole[3] = 1 / see.radius;
-        this._camHolePivot[0] = see.pivot[0]; this._camHolePivot[1] = see.pivot[1]; this._camHolePivot[2] = see.pivot[2];
-        this._camHoleStrength = Math.min(1, see.strength);
-    }
-
-    /** Whether a draw that opted in (`cameraDither`) gets the hole this frame. */
-    private _cameraHoleOn(optedIn: boolean): boolean {
-        return optedIn && this._camHoleStrength > 0 && !this._view.capturing && !this._view.cubeFace;
-    }
-
-    /**
-     * The hole block of the program just bound. Written on EVERY draw through a model or instanced
-     * program, like `_setDissolve`: a uniform keeps its last value.
-     */
-    private _setCameraHole(optedIn: boolean): void {
-        const p = this._camHoleDraw;
-        p[0] = this._camHolePivot[0]; p[1] = this._camHolePivot[1]; p[2] = this._camHolePivot[2];
-        p[3] = this._cameraHoleOn(optedIn) ? this._camHoleStrength : 0;
-        this._shaderManager.setUniform('u_camHole', this._camHole);
-        this._shaderManager.setUniform('u_camHolePivot', p);
+        this._materials.setCameraHole(layer.cameraDither);
     }
 
     /** Whether every material maps by its mesh uv (no box or triplanar projection): the lean foliage test. */
@@ -4309,7 +4259,7 @@ export class Renderer {
                 // leaves overlap on screen. Billboards gain nothing — their colour pass is already one fetch.
                 // Nor a layer the camera hole is cutting into: the colour pass after a prepass has no
                 // discard, so the depth the prepass wrote would show through as a solid silhouette.
-                const prepassSlots = this._foliagePrepass && layer.kind !== 'billboard' && !this._cameraHoleOn(layer.cameraDither)
+                const prepassSlots = this._foliagePrepass && layer.kind !== 'billboard' && !this._materials.cameraHoleOn(layer.cameraDither)
                     ? Math.min(2, billboardBucket) : 0;
                 const prepassed = (model: Model, slot: number) => slot < prepassSlots && model.material.type === 'pbr'
                     && !usesParallax(model.materials) && Renderer._meshUvOnly(model.materials);
@@ -4339,7 +4289,7 @@ export class Renderer {
                             vertex: 'model+instance', builtFor: 'blinn_phongGeometry',
                         });
                         pass.setPipeline(pipeline);
-                        this._applyMaterialProperties(model.material);
+                        this._materials.applyProperties(model.material);
                         if (sway) this._setFoliageWeather(wind!);
                         pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, model.material));
                         let all = true;
@@ -4407,7 +4357,7 @@ export class Renderer {
                             pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0,
                                                                        [tex ?? this._bindGroups.fallbackTexture]));
                         } else {
-                            this._applyMaterialProperties(model.material);
+                            this._materials.applyProperties(model.material);
                             if (foliage) this._setFoliageWeather(wind!);
                             pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, model.material));
                         }
@@ -4739,7 +4689,7 @@ export class Renderer {
                 // which keeps early-Z (chunks/pbrGBuffer.wgsl, CLEO_OPAQUE). A dissolving node falls
                 // back to the plain one for the length of its fade.
                 // Likewise a node the camera's see-through hole may cut into: it needs the discard.
-                return opaqueEligible(node.model.materials) && node.effectiveFade >= 1 && !this._cameraHoleOn(node.cameraDither)
+                return opaqueEligible(node.model.materials) && node.effectiveFade >= 1 && !this._materials.cameraHoleOn(node.cameraDither)
                     ? base + 'Opaque' : base;
             }
         }
@@ -4755,8 +4705,8 @@ export class Renderer {
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
         this._shaderManager.setUniform('u_model', node.worldTransform);
-        this._setDissolve(node.effectiveFade);
-        this._setCameraHole(node.cameraDither);
+        this._materials.setDissolve(node.effectiveFade);
+        this._materials.setCameraHole(node.cameraDither);
 
         if (animated) this._uploadBoneMatrices(shaderType, node);
 
@@ -4789,7 +4739,7 @@ export class Renderer {
                 return true;
             }
             if (mat instanceof CustomMaterial) {
-                this._applyCustomMaterial(mat, true);   // u_time, u_viewPos + user VALUE uniforms
+                this._materials.applyCustom(mat, true);   // u_time, u_viewPos + user VALUE uniforms
                 // See `_screenMaterialPass` for what the WGSL is and why the vertex stage is a
                 // separate module. Absent on WebGL2 and for a material that could not translate.
                 const customWgsl = customShaderModules(mat);
@@ -4812,7 +4762,7 @@ export class Renderer {
                 pass.setBindGroup(0, this._bindGroups.customGroup(customPipeline, mat));
                 return true;
             }
-            if (!reflection) { this._applyMaterial(mat); return false; }
+            if (!reflection) { this._materials.apply(mat); return false; }
 
             const pipeline = this._pipelines.get(shaderType, reflection, {
                 cullMode: Renderer._cullFor(mat.config.side),
@@ -4823,7 +4773,7 @@ export class Renderer {
                 builtFor: node.model.material.type,   // skinned too — see the note above
             });
             pass.setPipeline(pipeline);
-            this._applyMaterialProperties(mat);
+            this._materials.applyProperties(mat);
             pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, mat));
             return true;
         }, pass);
@@ -4844,10 +4794,10 @@ export class Renderer {
         if (!model.hasSubmeshes) {
             const mat = model.material;
             if (!Renderer._drawable(mat)) return;
-            // A callback that set a PIPELINE has already fixed the cull mode; calling _applyCull after
+            // A callback that set a PIPELINE has already fixed the cull mode; calling _materials.applyCull after
             // it would be harmless today and wrong the moment the two disagree.
             const viaPipeline = !!bindMaterial(mat);
-            if (!viaPipeline) this._applyCull(mat.config.side);
+            if (!viaPipeline) this._materials.applyCull(mat.config.side);
             if (viaPipeline && pass && this._passes.recordDraw(pass, model.mesh, 0, 0)) return;
             model.mesh.draw(mat.config.wireframe ? 'line-list' : 'triangle-list');
             return;
@@ -4859,7 +4809,7 @@ export class Renderer {
             const mat = model.materials[i] ?? model.materials[0];
             if (!Renderer._drawable(mat)) continue;
             const viaPipeline = !!bindMaterial(mat);
-            if (!viaPipeline) this._applyCull(mat.config.side);
+            if (!viaPipeline) this._materials.applyCull(mat.config.side);
             if (viaPipeline && pass
                 && this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count)) continue;
             model.mesh.drawRange(submeshes[i].start, submeshes[i].count,
@@ -5035,17 +4985,17 @@ export class Renderer {
             this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
             // Placed instanced models never crossfade, and the foliage pass may have left it on.
             this._shaderManager.setUniform('u_lodCamera', Renderer._LOD_OFF);
-            this._setCameraHole(false);
-            this._applyMaterialProperties(material);
+            this._materials.setCameraHole(false);
+            this._materials.applyProperties(material);
             pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
         } else {
             this._shaderManager.bind(shaderType);
             this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
             this._shaderManager.setUniform('u_projection', this._rasterProjection(this._view.camera.projectionMatrix));
             this._shaderManager.setUniform('u_lodCamera', Renderer._LOD_OFF);
-            this._setCameraHole(false);
-            this._applyMaterial(material);
-            this._applyCull(material.config.side);
+            this._materials.setCameraHole(false);
+            this._materials.apply(material);
+            this._materials.applyCull(material.config.side);
         }
 
         const mesh = first.model.mesh;
@@ -7868,7 +7818,7 @@ export class Renderer {
             pass!.setIndexBuffer(chunk.mesh.indexBuffer, 'uint16');
             pass!.drawIndexed(indexCount, 1, indexOffset);
         } else {
-            this._applyCull('double');
+            this._materials.applyCull('double');
             chunk.mesh.drawRange(indexOffset, indexCount);
         }
         frameStats.tilemapDraws++;
@@ -7881,183 +7831,6 @@ export class Renderer {
         let id = this._objIds.get(obj);
         if (id === undefined) { id = this._objIdCounter++; this._objIds.set(obj, id); }
         return id;
-    }
-
-    private _textureSlot(name: string): number {
-        switch (name) {
-            case 'texture': case 'baseTexture': case 'baseColorTexture': return 0;
-            case 'ormTexture': case 'specularReflectivityMap': return 1;
-            case 'emissiveMap': return 2;
-            case 'normalMap': return 3;
-            case 'maskMap': return 4;
-            // Unit 5 was freed when metallic/roughness/occlusion were packed into one ORM map. The
-            // parallax height field spends it; see the note in chunks/pbrGBuffer.wgsl for why this
-            // gets its own unit rather than riding in the normal map's alpha the way terrain does.
-            case 'displacementMap': return 5;
-            // The cel ramp rides unit 1, which is free on a cel material and only on a cel
-            // material: unit 1 belongs to the packed ORM / specular-reflectivity map, and those are
-            // written only by `systems/texturePacker.ts`, whose switch on the material type has no
-            // cel case. Adding one would collide here.
-            case 'rampMap': return 1;
-            default: return 0;
-        }
-    }
-
-    /**
-     * Slots a material carries as authoring inputs but never binds: `systems/texturePacker.ts` combines
-     * them into a derived slot (`ormTexture`, `specularReflectivityMap`) and the shader samples that.
-     * They MUST be skipped — `_textureSlot` falls through to unit 0, so a source slot left in the loop
-     * binds over the base-colour texture.
-     */
-    private static readonly _SOURCE_SLOTS = new Set([
-        'metallicMap', 'roughnessMap', 'occlusionMap', 'metallicRoughnessTexture',
-        'specularMap', 'reflectivityMap'
-    ]);
-
-    /**
-     * Every scalar the material block wants: the material's own properties, and the per-frame camera
-     * and sun that parallax occlusion mapping marches against.
-     *
-     * The last two are why this is a method rather than a two-line loop at each call site. They are NOT
-     * material constants — they change every frame — but the deferred geometry stage has no other
-     * group-1 block to read them from, so they ride in `PBRMaterial` (see chunks/pbrGBuffer.wgsl).
-     * They used to be written ONLY in `_applyMaterial`, which the RHI migration quietly demoted to the
-     * legacy no-reflection fallback: every real PBR draw took an inline `mat.properties` loop instead
-     * and wrote neither. `UniformBlockSet.set` returns false for a name it does not know and
-     * `setUniform` swallows that, so nothing reported it and both members simply stayed ZERO.
-     *
-     * A zero `viewPos` does not switch parallax off — it moves the eye to the world ORIGIN. `toEye`
-     * becomes `normalize(-fragPos)`, which still varies per fragment and still produces a plausible
-     * offset, so the relief looked real. It just could not respond to the camera: the effect was welded
-     * to the object and sat still while you orbited it. A zero `sunDirection` did switch the
-     * height-field self-shadow off outright.
-     *
-     * Called for every material on every pipeline. `setUniform` no-ops where a name is not declared,
-     * which is what makes it safe on the forward and sprite paths that read the camera from their own
-     * lighting block instead.
-     */
-    private static readonly _UV_IDENTITY = [1, 1, 0, 0];
-    private readonly _materialViewProj: mat4 = mat4.create();
-
-    private _applyMaterialProperties(material: Material): void {
-        // The per-view values below, gathered first: if the bound program's block already holds this
-        // material under this exact view, this frame, there is nothing to send (shaderOptimizer/materialSync).
-        const cam = this._view.camera;
-        mat4.multiply(this._materialViewProj, cam.projectionMatrix, cam.viewMatrix);
-        const view = this._materialView, eye = cam.position, sun = this._view.sunDirection;
-        for (let i = 0; i < 16; i++) view[i] = this._materialViewProj[i];
-        view[16] = eye[0]; view[17] = eye[1]; view[18] = eye[2];
-        view[19] = sun[0]; view[20] = sun[1]; view[21] = sun[2];
-        view[22] = this._specularAaEnabled ? 1 : 0;
-        if (!this._materialSync.needsWrite(this._shaderManager.bound, material, view)) return;
-
-        for (const [name, value] of material.properties)
-            this._shaderManager.setUniform(this._materialSync.uniformName(name), value);
-        // An emissive that takes less than the whole exposure (Material emissiveExposureWeight) is divided
-        // by the rest of it here, as a sprite's overdrive is; the tonemapper multiplies by all of it. Safe
-        // against the per-frame memo above: the exposure does not change within a frame.
-        const emissiveWeight = material.properties.get('emissiveExposureWeight');
-        if (emissiveWeight !== undefined && emissiveWeight < 1 && this._view.exposure > 0) {
-            const k = Math.pow(this._view.exposure, Math.max(0, emissiveWeight) - 1);
-            if (material.properties.has('emissiveIntensity'))
-                this._shaderManager.setUniform('u_material.emissiveIntensity', Number(material.properties.get('emissiveIntensity')) * k);
-            else {
-                const e = material.properties.get('emissive');
-                if (e) this._shaderManager.setUniform('u_material.emissive', [e[0] * k, e[1] * k, e[2] * k]);
-            }
-        }
-        // Uniforms stick to the program, so a Basic material built without `intensity` (Material.Basic sets
-        // it) would inherit the last sprite's overdrive. Pin it to 1 instead.
-        if (material.type === 'basic' && !material.properties.has('intensity'))
-            this._shaderManager.setUniform('u_material.intensity', 1);
-        // The same for a sprite's soft fade: a Basic material without one must not inherit it.
-        if (material.type === 'basic' && !material.properties.has('softness'))
-            this._shaderManager.setUniform('u_material.softness', 0);
-        // The same sticky-uniform guard for the texture mapping (chunks/uvProjection.wgsl): a lit material
-        // built without the factories would otherwise inherit the last draw's tiling or projection.
-        if (!material.properties.has('uvTransform')) {
-            this._shaderManager.setUniform('u_material.uvTransform', Renderer._UV_IDENTITY);
-            this._shaderManager.setUniform('u_material.uvProjection', 0);
-            this._shaderManager.setUniform('u_material.uvSpace', 0);
-            this._shaderManager.setUniform('u_material.uvWorldSize', 1);
-            this._shaderManager.setUniform('u_material.uvBlend', 4);
-        }
-        // And for translucency: a PBR material built by hand (not through Material.PBR) would otherwise
-        // inherit the last leaf's, and carry it into the G-buffer as a negative metallic.
-        if (material.type === 'pbr' && !material.properties.has('translucency'))
-            this._shaderManager.setUniform('u_material.translucency', 0);
-        // Same for its tint: a leaf's would otherwise recolour the next hand-built material's glow.
-        if (material.type === 'pbr' && !material.properties.has('translucencyTint'))
-            this._shaderManager.setUniform('u_material.translucencyTint', [1, 1, 1, 0]);
-        this._shaderManager.setUniform('u_material.viewPos', this._view.camera.position);
-        this._shaderManager.setUniform('u_material.sunDirection', this._view.sunDirection);
-        // The parallax hit's pixel depth offset (`parallaxDepth`). Built from the camera being drawn
-        // NOW rather than the frame's cached `_view.viewProj`, so a probe or thumbnail capture that swaps the
-        // active camera offsets against its own projection. Unjittered and GL-convention on purpose:
-        // the shader adds a DELTA to the rasterised depth, which neither the jitter nor WebGPU's 0..1
-        // remap changes. (Computed at the top, where the memo needs it.)
-        this._shaderManager.setUniform('u_material.viewProj', this._materialViewProj);
-        // Renderer state in a material block for the third time, and the same reason as the two above:
-        // the deferred geometry stage binds no lighting block. `setUniform` no-ops on the material
-        // types that do not declare it (basic, blinn-phong), which is what keeps this one line enough.
-        this._shaderManager.setUniform('u_material.specularAA', this._specularAaEnabled);
-    }
-
-    private _applyMaterial(material: Material): void {
-        this._applyMaterialProperties(material);
-        for (const [name, tex] of material.textures) {
-            if (Renderer._SOURCE_SLOTS.has(name)) continue;
-            const slot = this._textureSlot(name);
-            // Samplers are `u_material_<field>` with an UNDERSCORE while the scalars above stay dotted:
-            // WGSL forbids an opaque type inside a uniform struct, so the samplers are hoisted out.
-            this._shaderManager.setUniform(`u_material_${name}`, slot);
-            const texture = TextureManager.Instance.getTexture(tex);
-            if (texture) texture.bind(slot);
-        }
-    }
-
-    /**
-     * Upload a custom material's user uniforms to the currently bound program. Scalars and vectors go by
-     * bare `u_<name>`; user samplers bind from texture unit 9 upward — 0-5 std material, 6 shadow
-     * cascades, 7 env, 8 skybox and 15 spot shadow atlas are reserved.
-     */
-    private _applyCustomMaterial(material: CustomMaterial, samplersViaBindGroup: boolean = false): void {
-        this._shaderManager.setUniform('u_time', performance.now() * 0.001);
-        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
-        if (material.renderMode === 'forward') {
-            // The scene helpers' inputs (customShaders.ts FORWARD_SCENE_BODY). Set per draw: both names
-            // are shared with fullscreen passes that leave their own values behind.
-            const cam = this._view.camera;
-            this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
-            this._shaderManager.setUniform('u_depthParams', [cam.near, cam.far,
-                cam.type === 'orthographic' ? 1 : 0, this._sceneBuffersLive ? 1 : 0]);
-        }
-        const fallback = TextureManager.Instance.getTexture('Null');
-        let unit = 9;
-        for (const u of material.uniforms) {
-            if (u.type === 'sampler2D' || u.type === 'samplerCube') {
-                // A bind group already assigned this sampler its unit AND set the uniform; doing it
-                // again here would bind the texture to a second unit the allocator can reuse.
-                if (samplersViaBindGroup) continue;
-                // No unit ceiling: units are the backend's to assign.
-                const texId = material.textures.get(u.name);
-                const tex = (texId && TextureManager.Instance.getTexture(texId)) || fallback;
-                this._shaderManager.setUniform(`u_${u.name}`, unit);
-                if (tex) tex.bind(unit);
-                unit++;
-            } else {
-                const value = material.properties.has(u.name) ? material.properties.get(u.name) : u.value;
-                this._shaderManager.setUniform(`u_${u.name}`, value);
-            }
-        }
-        // The legacy (non-bind-group) path binds the forward scene samplers by unit too.
-        if (!samplersViaBindGroup && material.renderMode === 'forward') {
-            this._targets.sceneDepth.depth.bind(unit);
-            this._shaderManager.setUniform('u_sceneDepth', unit++);
-            const color = this._targets.refraction?.colors[0] ?? fallback;
-            if (color) color.bind(unit);
-            this._shaderManager.setUniform('u_sceneColor', unit++);
-        }
     }
 
     /** Whether any transparent node in `queue` carries a material that reads the scene colour. */
@@ -8084,38 +7857,6 @@ export class Renderer {
             colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
         this._copyColors([this._targets.scene.colors[0]], [fbo.colors[0]], this._renderWidth, this._renderHeight);
         this._targets.scene.bind();
-    }
-
-    private _applyTerrainMaterial(material: Material): void {
-        // Fixed slot layout, 4 units: the paint masks and the three surface arrays (see
-        // chunks/terrainStack.wgsl). Every binding is a 2D ARRAY, so a missing one takes the one-layer
-        // array fallback — a 2D texture on a sampler2DArray unit is a draw error. The scalar and array
-        // uniforms already match by name.
-        const fallback = this._bindGroups.fallbackFor('texture_2d_array<f32>');
-        const bindAt = (name: string, slot: number) => {
-            const texId = material.textures.get(name);
-            const tex = (texId && TextureManager.Instance.getTexture(texId)) || fallback;
-            tex.bind(slot);
-            this._shaderManager.setUniform(name, slot);
-        };
-        bindAt('u_masks', 0);
-        bindAt('u_surfAlbedo', 1);
-        bindAt('u_surfNormal', 2);
-        bindAt('u_surfOrm', 3);
-        for (const [name, value] of material.properties)
-            this._shaderManager.setUniform(name, value);
-    }
-
-    private _applyCull(side: 'front' | 'back' | 'double' | undefined): void {
-        switch (side) {
-            case 'back':
-                GLState.cull(true); GLState.cullFace('front'); break;
-            case 'double':
-                GLState.cull(false); break;
-            case 'front':
-            default:
-                GLState.cull(true); GLState.cullFace('back'); break;
-        }
     }
 
     /**
@@ -8660,8 +8401,8 @@ export class Renderer {
         // Set Transform releted uniforms on the model's shader type
         // TODO: Mutliply node transform with model transform for model correction
         this._shaderManager.setUniform('u_model', node.worldTransform);
-        this._setDissolve(node.effectiveFade);
-        this._setCameraHole(node.cameraDither);
+        this._materials.setDissolve(node.effectiveFade);
+        this._materials.setCameraHole(node.cameraDither);
 
         // For animated models, set bone matrices
         if (isAnimatedModel) this._uploadBoneMatrices(shaderType, node);
@@ -8690,7 +8431,7 @@ export class Renderer {
                 // shades terrain with a different NDF width than the frame it is a probe for. It does
                 // NOT need u_sunDirection: this pass reads the sun from its own light list.
                 this._shaderManager.setUniform('u_specularAA', this._specularAaEnabled);
-                if (!viaRHI) { this._applyTerrainMaterial(mat); return false; }
+                if (!viaRHI) { this._materials.applyTerrain(mat); return false; }
                 const terrainPipeline = this._pipelines.get(shaderType, reflection, {
                     cullMode: Renderer._cullFor(mat.config.side),
                     depthStencil: { format: 'depth24plus', depthWriteEnabled: this._forwardDepthWrite,
@@ -8707,8 +8448,8 @@ export class Renderer {
                 return true;
             }
             if (mat instanceof CustomMaterial) {
-                if (!viaRHI) { this._applyCustomMaterial(mat); return false; }
-                this._applyCustomMaterial(mat, true);
+                if (!viaRHI) { this._materials.applyCustom(mat); return false; }
+                this._materials.applyCustom(mat, true);
                 // See `_screenMaterialPass`. Absent on WebGL2 and for a material that could not
                 // translate; group 3 (the shadow maps) is bound below as for any lit program.
                 const customWgsl = customShaderModules(mat);
@@ -8733,7 +8474,7 @@ export class Renderer {
                     pass!.setBindGroup(3, this._bindGroups.frameLightingGroup(customPipeline));
                 return true;
             }
-            if (!viaRHI) { this._applyMaterial(mat); return false; }
+            if (!viaRHI) { this._materials.apply(mat); return false; }
 
             const pipeline = this._pipelines.get(shaderType, reflection, {
                 cullMode: Renderer._cullFor(mat.config.side),
@@ -8750,7 +8491,7 @@ export class Renderer {
                 builtFor: node.model.material.type,   // skinned too — see `_geometryPass`
             });
             pass!.setPipeline(pipeline);
-            this._applyMaterialProperties(mat);
+            this._materials.applyProperties(mat);
             pass!.setBindGroup(0, this._bindGroups.materialGroup(pipeline, mat, envCube));
             // Group 3 when the program has one. The unlit Basic family does not sample shadows at all,
             // so asking for a group it never declared is an error rather than an empty bind — the same
@@ -8877,7 +8618,7 @@ export class Renderer {
         if (soft > 0) material.properties.set('depthParams', [cam.near, cam.far, cam.type === 'orthographic' ? 1 : 0, 1]);
 
         this._shaderManager.setUniform('u_model', spriteMatrix);
-        this._setDissolve(node.effectiveFade);
+        this._materials.setDissolve(node.effectiveFade);
 
         // Per draw, from the tile on screen: an animated sprite follows its frame's overdrive, and two
         // sprites sharing a tileset never fight over one value. A sprite that takes less than the whole
@@ -8888,9 +8629,9 @@ export class Renderer {
 
         // Set material uniforms + bind textures
         if (pipeline) {
-            this._applyMaterialProperties(material);
+            this._materials.applyProperties(material);
             pass!.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
-        } else this._applyMaterial(material);
+        } else this._materials.apply(material);
 
         const materialConfig = node.sprite.material.config;
 
@@ -8901,7 +8642,7 @@ export class Renderer {
             if (additive && gl) gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.ZERO, gl.ONE);
             // Don't write to depth for blended sprites to avoid occluding later sprites
             GLState.depthMask(false);
-            this._applyCull(materialConfig.side);
+            this._materials.applyCull(materialConfig.side);
         }
 
         const topology = materialConfig.wireframe ? 'line-list' : 'triangle-list';
@@ -10491,7 +10232,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_sunUV', sun.uv);
         this._shaderManager.setUniform('u_sunVisible', sun.visible);
         this._shaderManager.setUniform('u_exposure', this._view.exposure); // lets a pass invert the final present resolve
-        this._applyCustomMaterial(mat, true);   // u_time, u_viewPos + user VALUE uniforms only
+        this._materials.applyCustom(mat, true);   // u_time, u_viewPos + user VALUE uniforms only
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
     }
@@ -12846,10 +12587,10 @@ export class Renderer {
 
         // Set Transform related uniforms
         this._shaderManager.setUniform('u_model', node.worldTransform);
-        this._setDissolve(node.effectiveFade);
+        this._materials.setDissolve(node.effectiveFade);
 
         // Set Material related uniforms
-        this._applyMaterialProperties(node.model.material);
+        this._materials.applyProperties(node.model.material);
 
         // Textures: a bind group when the program has build-time reflection, otherwise the hand-
         // rolled slot table this used to carry — which was a third copy of `_textureSlot`, drifting
@@ -12860,7 +12601,7 @@ export class Renderer {
             // from group 3 like any forward draw; an unlit one never declares it.
             if (this._bindGroups.declaresFrameLighting(pipeline)) pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline));
         }
-        else this._applyMaterial(material);
+        else this._materials.apply(material);
 
         // Draw the mesh
         if (!pipeline || !this._passes.recordDraw(pass, node.model.mesh, 0, 0)) node.model.mesh.draw();
@@ -12912,7 +12653,7 @@ export class Renderer {
             this._setOverlayBlend();
             GLState.depthMask(false);
             for (const node of helperNodes) this._drawOverlayNode(pass, node, depthTested);
-            // Re-asserted: a helper on the legacy path goes through `_applyMaterial`, which sets its
+            // Re-asserted: a helper on the legacy path goes through `_materials.apply`, which sets its
             // own blend, and an icon that inherited THAT would stop accumulating coverage alpha.
             this._setOverlayBlend();
             // Icons are billboards and always transparent; `_renderSprite` handles the constraint.
@@ -13027,7 +12768,7 @@ export class Renderer {
                          color: [number, number, number]) => {
             if (count <= 0) return;
             // Written by hand, not from a material: the block no longer holds what MaterialSync remembers.
-            this._materialSync.invalidate(this._shaderManager.bound);
+            this._materials.sync.invalidate(this._shaderManager.bound);
             this._shaderManager.setUniform('u_material.color', color);
             this._shaderManager.setUniform('u_material.hasTexture', false);
             this._shaderManager.setUniform('u_material.opacity', 1.0);
