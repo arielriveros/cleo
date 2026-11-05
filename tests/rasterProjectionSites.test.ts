@@ -16,7 +16,7 @@ import { rendererSource, expectAbsent } from './helpers/rendererSource';
  *     sub-pixel offsets back out. It simply shimmers, every frame, forever.
  *
  * In practice every camera-projection site calls `_rasterProjection` and the `_taaJitterActive` flag —
- * cleared the moment the resolve runs — decides. That is deliberate: `_renderModel` alone serves the
+ * cleared the moment the resolve runs — decides. That is deliberate: `ForwardPass.renderModel` alone serves the
  * forward-opaque queue, the transparent queue and the probe capture, and the right answer differs for
  * all three, so no list of call sites can express it. What this test pins is the SET of sites, so a
  * new one cannot be added without someone deciding which side of the boundary it is on.
@@ -72,13 +72,13 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // Its draws depth-test `less-equal` against the JITTERED depth buffer; unjittered here and
             // every mover's velocity is rejected or smeared by half a pixel at its own silhouette.
             '_objectVelocityPass',
-            '_renderModel',           // forward opaque (jitters) AND transparents (does not)
+            'renderModel',            // forward opaque (jitters) AND transparents (does not)
             // The landscape-only depth decals with `receivers: 'terrain'` compare against. It must jitter
             // exactly like the G-buffer and scene depth it is compared with, or the two disagree by a
             // TAA offset at every slope and the brush frays.
             'decalReceiverPass',
             // Every decal box: the DBuffer and emissive passes (before the resolve, jittered) AND the
-            // editor overlay (after it, not) — the `_renderModel` situation, decided by the flag.
+            // editor overlay (after it, not) — the `renderModel` situation, decided by the flag.
             '_setDecalUniforms',
 
             // --- After the resolve: the flag is already false, and these must stay put. ---
@@ -116,7 +116,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
     });
 
     it('clears the jitter at the temporal boundary, in both pipelines', () => {
-        // Deferred goes through `_renderForwardOverlay`, forward through `_renderScene`, and they are
+        // Deferred goes through `renderForwardOverlay`, forward through `renderScene`, and they are
         // separate functions with separate insertion points. One wired and the other not would leave
         // half the pipelines shimmering.
         expect(RENDERER.split('this._projection.endJitterPhase();').length - 1).toBe(2);

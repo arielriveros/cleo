@@ -81,7 +81,7 @@ export class ViewProjection {
      * resolve — the grid, transparents, gizmos, sprites, the selection mask — goes through
      * {@link clipProjection} and stays put. In practice both call THIS, and `_view.taaJitterActive`
      * decides: it is cleared the moment the resolve runs, so "is this pass before the resolve" is
-     * answered once, by the frame, instead of being re-derived at a dozen call sites. `_renderModel`
+     * answered once, by the frame, instead of being re-derived at a dozen call sites. `ForwardPass.renderModel`
      * is why that matters — one function serves the forward-opaque queue, the transparent queue and
      * the probe capture, and the right answer differs for all three.
      *

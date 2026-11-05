@@ -18,7 +18,7 @@ export class FrameTargets {
     /**
      * The opaque scene's COLOUR, copied just before the transparent queue — what a transparent custom
      * material refracts (`u_sceneColor`). Allocated on first use and copied only on frames where a
-     * visible transparent material reads it; see `_snapshotSceneColor`.
+     * visible transparent material reads it; see `ForwardPass._snapshotSceneColor`.
      */
     public refraction: Framebuffer | null = null;
     /** The deferred G-buffer: three float colour attachments plus depth. */

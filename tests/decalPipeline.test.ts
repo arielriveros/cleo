@@ -93,9 +93,9 @@ describe('emissive decals', () => {
     });
 
     it('run after the opaque depth snapshot, in both pipelines', () => {
-        for (const method of ['_renderForwardOverlay', '_renderScene']) {
+        for (const method of ['renderForwardOverlay', 'renderScene']) {
             const body = methodBody(method);
-            const snapshot = body.indexOf('this._copySceneDepth()');
+            const snapshot = body.indexOf('this._host.copySceneDepth()');
             const emissive = body.indexOf('this._decals.emissiveDecalPass()');
             expect(snapshot, method).toBeGreaterThan(-1);
             expect(emissive, method).toBeGreaterThan(snapshot);

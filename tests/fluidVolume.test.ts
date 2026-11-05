@@ -77,7 +77,7 @@ describe('occupancyFromVolume', () => {
 
 describe('the fluid volume pass', () => {
     const forward = (() => {
-        const start = RENDERER.indexOf('\n    private _renderForwardOverlay(');
+        const start = RENDERER.indexOf('\n    public renderForwardOverlay(');
         return RENDERER.slice(start, RENDERER.indexOf('\n    }\n', start));
     })();
 
@@ -91,7 +91,7 @@ describe('the fluid volume pass', () => {
     });
 
     it('is skipped for thumbnails, whose depth snapshot is never taken', () => {
-        expect(forward).toMatch(/!this\._thumbnailMode && scene\.fluidVolumes\.size > 0/);
+        expect(forward).toMatch(/!this\._host\.thumbnailMode && scene\.fluidVolumes\.size > 0/);
     });
 
     it('reconstructs rays with the stable inverse, as everything after the resolve does', () => {

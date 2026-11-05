@@ -64,7 +64,7 @@ export interface FrameView {
     /** False until a frame has been drawn, and again after a resize: no usable previous view. */
     hasPrevViewProj: boolean;
     // The scene being rendered this frame, for per-draw lookups that don't receive it (forward
-    // light-probe selection in _renderModel).
+    // light-probe selection in ForwardPass.renderModel).
     scene: Scene | null;
 }
 
