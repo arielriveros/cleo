@@ -345,7 +345,7 @@ export class Renderer {
         this._visibility = new Visibility({
             get selectedNodeId() { return renderer._selectedNodeId; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._projection, this._subsystems);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._subsystems);
         this._ssil = new SsilPasses({
             get jitteredCameraProj() { return renderer._jitteredCameraProj; },
             get renderHeight() { return renderer._renderHeight; },

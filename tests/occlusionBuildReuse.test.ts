@@ -22,7 +22,7 @@ function setup() {
     };
     const scene = { landscapes: new Set(), occluders: new Set([wall]) };
     const host = { selectedNodeId: null, thumbnailMode: false };
-    const vis = new Visibility(host as never, view as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const vis = new Visibility(host as never, view as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     vis.frustum.setFromViewProjection(view.viewProj);
     const begin = vi.spyOn(vis.occlusion, 'begin');
     const build = () => { vis.frustum.setFromViewProjection(view.viewProj); vis.buildOcclusion(scene as never); };

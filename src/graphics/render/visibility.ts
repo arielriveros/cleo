@@ -20,6 +20,7 @@ import type { OcclusionMode } from './settingsTypes';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
+import type { BindGroupCache } from './bindGroups';
 import { DEPTH_TEST } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { ViewProjection } from './viewProjection';
@@ -51,6 +52,7 @@ export class Visibility {
                 private readonly _targets: FrameTargets,
                 private readonly _passes: PassEncoder,
                 private readonly _pipelines: PipelineCache,
+                private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
                 private readonly _sys: RenderSubsystems) {}
 
@@ -96,6 +98,13 @@ export class Visibility {
     private _gpuOcclusionCamera: Camera | null = null;
     private readonly _gpuOcclusionForward = [0, 0, -1];
     private readonly _gpuOcclusionModel = mat4.create();
+    /**
+     * Per query slot, the owner its box record is kept under in the per-object table, and this frame's
+     * record. A token per SLOT, not the node: the node's own record (its world matrix) must not be
+     * displaced by its box, and the table compares by value, so a slot that changes node stays correct.
+     */
+    private readonly _gpuOcclusionOwners: object[] = [];
+    private readonly _gpuOcclusionRecords: number[] = [];
 
     /** Consecutive built frames in which occlusion hid nothing, and the frames skipped since (see `buildOcclusion`). */
     private _occlusionIdleFrames = 0;
@@ -257,6 +266,20 @@ export class Visibility {
             depthAttachment: { loadOp: 'load', storeOp: 'store' },
             occlusionQuerySet: set,
         });
+        // Every box's record first, uploaded in one go: the draws then change nothing but the query and
+        // `firstInstance`, and the block below holds the camera alone, written once.
+        const objects = this._sys.objects, owners = this._gpuOcclusionOwners, records = this._gpuOcclusionRecords;
+        const model = this._gpuOcclusionModel;
+        for (let i = 0; i < nodes.length; i++) {
+            // A light is tested by its influence sphere, stored when it was offered; a node by its own.
+            const light = this.gpuOcclusion.lightSpheres.get(nodes[i]);
+            const s = light ? { center: light, radius: light[3] } : (nodes[i] as ModelNode).getBoundingSphere();
+            const size = s.radius * 2 * 1.1;
+            mat4.fromTranslation(model, s.center as vec3);
+            mat4.scale(model, model, [size, size, size]);
+            records[i] = objects.ensure(owners[i] ??= {}, model, 0, false);
+        }
+        objects.flush();
         const cam = this._view.camera;
         this._shaderManager.bind('occlusionBox');
         this._shaderManager.setUniform('u_view', cam.viewMatrix);
@@ -269,17 +292,12 @@ export class Visibility {
             builtFor: 'irradiance',   // `SkyPasses.iblCubeMesh` is position-only, built from that program's attributes
         });
         pass.setPipeline(pipeline);
-        const model = this._gpuOcclusionModel;
+        pass.setBindGroup(2, this._bindGroups.objectDataGroup(pipeline, objects.texture));
+        const cube = this._sys.sky.iblCubeMesh;
         for (let i = 0; i < nodes.length; i++) {
-            // A light is tested by its influence sphere, stored when it was offered; a node by its own.
-            const light = this.gpuOcclusion.lightSpheres.get(nodes[i]);
-            const s = light ? { center: light, radius: light[3] } : (nodes[i] as ModelNode).getBoundingSphere();
-            const size = s.radius * 2 * 1.1;
-            mat4.fromTranslation(model, s.center as vec3);
-            mat4.scale(model, model, [size, size, size]);
-            this._shaderManager.setUniform('u_model', model);
             pass.beginOcclusionQuery(i);
-            if (!this._passes.recordDraw(pass, this._sys.sky.iblCubeMesh, 0, 0)) this._sys.sky.iblCubeMesh.draw();
+            // The cube is indexed, so `recordDraw` takes it; the fallback is the no-pass legacy path.
+            if (!this._passes.recordDraw(pass, cube, 0, 0, -1, records[i])) cube.draw();
             pass.endOcclusionQuery();
         }
         pass.end();
