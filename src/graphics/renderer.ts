@@ -471,7 +471,8 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
             captureProbe: (scene, probe) => renderer._capture.captureProbe(scene, probe),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._lighting, this._fullscreen);
-        this._modelDraw = new ModelDraw(this._passes, this._materials);
+        this._modelDraw = new ModelDraw(this._view, this._passes, this._pipelines, this._bindGroups, this._materials,
+                                        this._projection);
         this._geometry = new GeometryPass(this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._foliage, this._visibility, this._lighting, this._modelDraw);
         this._forward = new ForwardPass({
             get passEnabled() { return renderer._passEnabled; },

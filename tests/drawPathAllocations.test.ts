@@ -9,10 +9,12 @@ import { methodBody, expectAbsent, rendererSource } from './helpers/rendererSour
  */
 describe('the model draw paths', () => {
     it('hand the submesh loop a callback bound once, not a closure per draw', () => {
-        expect(methodBody('_drawGeometryNode')).toContain('this._modelDraw.drawSubmeshes(node, this._bindMaterial, pass)');
-        expect(methodBody('renderModel')).toContain('this._modelDraw.drawSubmeshes(node, this._bindMaterial, pass)');
-        expectAbsent(methodBody('_drawGeometryNode'), 'drawSubmeshes(node, (mat)', 'drawSubmeshes(node, this._bindMaterial');
-        expectAbsent(methodBody('renderModel'), 'drawSubmeshes(node, mat =>', 'drawSubmeshes(node, this._bindMaterial');
+        // Both draw paths go through ModelDraw.drawMaterials, which hands the loop its bound callback.
+        expect(methodBody('_drawGeometryNode')).toContain('this._modelDraw.drawMaterials(');
+        expect(methodBody('renderModel')).toContain('this._modelDraw.drawMaterials(');
+        expect(methodBody('drawMaterials')).toContain('this.drawSubmeshes(node, this._bindMaterial, pass)');
+        expectAbsent(methodBody('drawMaterials'), 'drawSubmeshes(node, (mat)', 'drawSubmeshes(node, this._bindMaterial');
+        expectAbsent(methodBody('drawMaterials'), 'drawSubmeshes(node, mat =>', 'drawSubmeshes(node, this._bindMaterial');
     });
 
     it('sort the opaque queue by a static comparator over pooled records', () => {

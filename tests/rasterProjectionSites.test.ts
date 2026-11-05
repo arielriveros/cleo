@@ -16,7 +16,7 @@ import { rendererSource, expectAbsent } from './helpers/rendererSource';
  *     sub-pixel offsets back out. It simply shimmers, every frame, forever.
  *
  * In practice every camera-projection site calls `_rasterProjection` and the `_taaJitterActive` flag —
- * cleared the moment the resolve runs — decides. That is deliberate: `ForwardPass.renderModel` alone serves the
+ * cleared the moment the resolve runs — decides. That is deliberate: `ModelDraw.beginModel` alone serves the
  * forward-opaque queue, the transparent queue and the probe capture, and the right answer differs for
  * all three, so no list of call sites can express it. What this test pins is the SET of sites, so a
  * new one cannot be added without someone deciding which side of the boundary it is on.
@@ -62,8 +62,10 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         // resolved image and must come out unjittered.
         expect([...callers('rasterProjection').keys()].sort()).toEqual([
             // --- Before the resolve: these ARE the TAA input, and must jitter. ---
-            '_drawGeometryNode',      // all deferred opaques, terrain included
             '_drawInstancedGroup',    // twice: the RHI branch and the legacy one
+            // Every deferred opaque (terrain included) AND every forward model: ModelDraw.beginModel sets the
+            // projection for both, so forward opaques jitter and transparents, drawn after the resolve, do not.
+            'beginModel',
             '_drawSky',               // the horizon aliases harder than anything else in a scene
             'foliagePass',
             '_drawOctahedralImpostors',   // the foliage pass's impostor bucket, inside it
@@ -72,13 +74,12 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // Its draws depth-test `less-equal` against the JITTERED depth buffer; unjittered here and
             // every mover's velocity is rejected or smeared by half a pixel at its own silhouette.
             '_objectVelocityPass',
-            'renderModel',            // forward opaque (jitters) AND transparents (does not)
             // The landscape-only depth decals with `receivers: 'terrain'` compare against. It must jitter
             // exactly like the G-buffer and scene depth it is compared with, or the two disagree by a
             // TAA offset at every slope and the brush frays.
             'decalReceiverPass',
             // Every decal box: the DBuffer and emissive passes (before the resolve, jittered) AND the
-            // editor overlay (after it, not) — the `renderModel` situation, decided by the flag.
+            // editor overlay (after it, not) — the `beginModel` situation, decided by the flag.
             '_setDecalUniforms',
 
             // --- After the resolve: the flag is already false, and these must stay put. ---

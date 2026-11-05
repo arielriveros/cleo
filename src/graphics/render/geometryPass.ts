@@ -3,8 +3,6 @@ import { AnimatedModel } from '../../animation/animatedModel';
 import { isEditorOnlyNode } from '../../core/scene/editorNodes';
 import { ModelNode } from '../../core/scene/nodes/modelNode';
 import { Scene } from '../../core/scene/scene';
-import { CustomMaterial } from '../material';
-import type { Material } from '../material';
 import { usesParallax, opaqueEligible } from '../programVariants';
 import { frameStats } from '../renderStats';
 import type { RenderPassEncoder } from '../rhi/device';
@@ -13,9 +11,9 @@ import type { Buffer as RhiBuffer } from '../rhi/resources';
 import { BufferUsage } from '../rhi/types';
 import type { ShaderResource } from '../rhi/types';
 import { DrawSortKeys } from '../shaderOptimizer';
-import { customShaderModules, customShaderResources } from '../systems/customShaders';
 import { FoliagePasses } from './foliage';
 import { ModelDraw } from './modelDraw';
+import type { MaterialDrawState } from './modelDraw';
 import { GEOMETRY_PROGRAMS } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
@@ -122,14 +120,11 @@ export class GeometryPass {
     private readonly _instanceGroups = new Map<number, ModelNode[]>();
     private readonly _groupOrder: number[] = [];
 
-    // The draw `_bindMaterial` serves, set by `_drawGeometryNode` around its submesh loop: one callback
-    // bound for the pass's life instead of a closure built per draw.
-    private _drawPass: RenderPassEncoder | null = null;
-    private _drawNode: ModelNode | null = null;
-    private _drawShader = '';
-    private _drawReflection: { resources: readonly ShaderResource[] } | undefined = undefined;
-    private _drawAnimated = false;
-    private readonly _bindMaterial = (mat: Material): boolean => this._bindGeometryMaterial(mat);
+    /** How the G-buffer draw binds materials (see ModelDraw.drawMaterials). */
+    private readonly _drawState: MaterialDrawState = {
+        targets: 3, depthStencil: DEPTH_WRITE, blend: undefined, customMode: 'deferred', frameLighting: false,
+        terrainSelfShadow: true, viaRHI: true, envCube: null, memo: this._pipelineMemo,
+    };
 
     public geometryPass(scene: Scene): void {
         // Refreshed here, at the one point in this pass that still has the scene. See `_view.sunDirection`.
@@ -245,98 +240,9 @@ export class GeometryPass {
 
     private _drawGeometryNode(pass: RenderPassEncoder, node: ModelNode,
                               shaderType: string = this._geometryShaderFor(node)): void {
-        const animated = node.model instanceof AnimatedModel;
-        if (animated)
-            (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(shaderType).attributes);
-
-        this._shaderManager.bind(shaderType);
-        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
-        this._shaderManager.setUniform('u_model', node.worldTransform);
-        this._materials.setDissolve(node.effectiveFade);
-        this._materials.setCameraHole(node.cameraDither);
-
-        if (animated) this._modelDraw.uploadBoneMatrices(shaderType, node);
-
-        // One draw per submesh, sharing everything above: a merged model has one vertex buffer, one
-        // world transform and one bone upload, and differs only in which material each index range uses.
-        // Submeshes are constrained to a single material type, so the shader bound above stays correct.
-        this._drawPass = pass;
-        this._drawNode = node;
-        this._drawShader = shaderType;
-        this._drawReflection = GEOMETRY_PROGRAMS[shaderType];
-        this._drawAnimated = animated;
-        this._modelDraw.drawSubmeshes(node, this._bindMaterial, pass);
-        this._drawPass = null;
-        this._drawNode = null;
+        const animated = this._modelDraw.beginModel(node, shaderType);
+        this._modelDraw.drawMaterials(pass, node, shaderType, GEOMETRY_PROGRAMS[shaderType], animated, this._drawState);
         frameStats.objects++;
-    }
-
-    /** Bind one submesh range's material for `_drawGeometryNode`'s draw, whose state is in the `_draw*` fields. */
-    private _bindGeometryMaterial(mat: Material): boolean {
-        const pass = this._drawPass!, node = this._drawNode!, shaderType = this._drawShader;
-        const reflection = this._drawReflection, animated = this._drawAnimated;
-        // Custom materials keep the legacy path: their GLSL is assembled at runtime, so there is no
-        // reflection and no bind-group layout. Terrain has both, but binds its samplers by hand.
-        if (mat.type === 'terrain') {
-            // u_viewPos again, and deliberately: terrain reads it from its OWN uniform block
-            // (TerrainUniforms), not from the transform block set above. Two blocks, two writes.
-            this._shaderManager.setUniform('u_viewPos', this._view.camera.position); // parallax V + specular V
-            this._shaderManager.setUniform('u_sunDirection', this._view.sunDirection);      // self-shadow
-            this._shaderManager.setUniform('u_specularAA', this._modelDraw.specularAaEnabled);   // roughness filter
-            for (const [name, value] of mat.properties) this._shaderManager.setUniform(name, value);
-            const terrainPipeline = this._pipelines.memoized(this._pipelineMemo, mat, shaderType, reflection!, {
-                cullMode: ModelDraw.cullFor(mat.config.side),
-                depthStencil: DEPTH_WRITE,
-                targets: 3,
-                topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
-                vertex: 'model',
-                // The buffer was written for the `terrain` program, which is registered as an alias
-                // of this one precisely so ModelNode.initializeModel could reflect its attributes.
-                builtFor: 'terrain',
-            });
-            pass.setPipeline(terrainPipeline);
-            pass.setBindGroup(0, this._bindGroups.terrainGroup(terrainPipeline, mat));
-            return true;
-        }
-        if (mat instanceof CustomMaterial) {
-            this._materials.applyCustom(mat, true);   // u_time, u_viewPos + user VALUE uniforms
-            // See `_post.screenMaterialPass` for what the WGSL is and why the vertex stage is a
-            // separate module. Absent on WebGL2 and for a material that could not translate.
-            const customWgsl = customShaderModules(mat);
-            const customPipeline = this._pipelines.get(shaderType, {
-                resources: customShaderResources('deferred', mat.uniforms),
-                ...(customWgsl ? { wgsl: customWgsl.fragment, entryPoints: { fragment: 'main' },
-                                   vertexWgsl: { wgsl: customWgsl.vertex,
-                                                 entryPoint: customWgsl.vertexEntry } } : {}),
-            }, {
-                cullMode: ModelDraw.cullFor(mat.config.side),
-                depthStencil: DEPTH_WRITE,
-                targets: 3,
-                topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
-                vertex: animated ? 'model+skin' : 'model',
-                // `material.type` even when the mesh is SKINNED: `initializeModel` packs every mesh
-                // to its material program's attributes, so a Basic skinned model is 20 bytes.
-                builtFor: node.model.material.type,
-            });
-            pass.setPipeline(customPipeline);
-            pass.setBindGroup(0, this._bindGroups.customGroup(customPipeline, mat));
-            return true;
-        }
-        if (!reflection) { this._materials.apply(mat); return false; }
-
-        const pipeline = this._pipelines.memoized(this._pipelineMemo, mat, shaderType, reflection, {
-            cullMode: ModelDraw.cullFor(mat.config.side),
-            depthStencil: DEPTH_WRITE,
-            targets: 3,   // the G-buffer
-            topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
-            vertex: animated ? 'model+skin' : 'model',
-            builtFor: node.model.material.type,   // skinned too — see the note above
-        });
-        pass.setPipeline(pipeline);
-        this._materials.applyProperties(mat);
-        pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, mat));
-        return true;
     }
 
     private _drawInstancedGroup(pass: RenderPassEncoder, group: ModelNode[], key: number): void {
