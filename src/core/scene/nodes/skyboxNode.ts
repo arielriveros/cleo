@@ -19,7 +19,6 @@ export class SkyboxNode extends Node {
     }
 
     public initializeSkybox(): void {
-        this._skybox.mesh.initializeVAO(ShaderManager.Instance.getShader('skybox').attributes);
         this._skybox.mesh.create(this._skybox.box.getData(['position']), this._skybox.box.indices.length, this._skybox.box.indices);
         this._initialized = true;
     }

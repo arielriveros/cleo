@@ -9,6 +9,7 @@ const created: any[] = [];
 vi.mock('../src/graphics/rhi/deviceHandle', () => ({
     device: {
         backend: 'webgpu',
+        capabilities: { backend: 'webgpu', conventions: { runtimeShaderLanguage: 'wgsl' } },
         createShaderProgram: (desc: any) => { created.push(desc); return { dispose() {} }; },
     },
 }));

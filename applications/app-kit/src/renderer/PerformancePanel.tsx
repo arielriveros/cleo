@@ -7,13 +7,13 @@ import Collapsable from '../ui/Collapsable';
 
 // The renderer's performance panel: what the frame costs, and where. Cost is attributed two ways:
 //
-//  1. GPU timers, gated by the backend — WebGL2 needs EXT_disjoint_timer_query_webgl2, WebGPU needs the
-//     adapter's `timestamp-query`. `gpuProfiler.attribution` says which name space the rows are in:
-//     WebGL2 times renderer scopes, WebGPU times render passes, and they are not the same list.
+//  1. GPU timers, one per render pass on both backends — WebGL2 needs EXT_disjoint_timer_query_webgl2,
+//     WebGPU needs the adapter's `timestamp-query`. Each pass reports under the renderer scope that
+//     contains it, so the rows pair with the CPU column.
 //  2. Per-pass kill switches, which measure a pass's marginal cost including downstream savings.
 //
 // Explanatory prose belongs in docs/editor/rendering.md › Performance HUD, whose entries are the section
-// titles' hover cards (the WebGPU pass-attribution caveat included), and in per-row `title` tooltips —
+// titles' hover cards, and in per-row `title` tooltips —
 // not in visible captions: this is a long column already.
 
 const REFRESH_MS = 250; // fast enough to feel live, slow enough not to churn React
@@ -647,9 +647,7 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
           label='Timer queries'
           checked={enabled}
           onChange={v => { gpuProfiler.enabled = v; setEnabled(v); }}
-          title={gpuProfiler.attribution === 'passes'
-            ? 'WebGPU timestamp queries. Times each render pass at its own pass boundary.'
-            : 'EXT_disjoint_timer_query_webgl2. Wraps each renderer scope in a GPU timer.'}
+          title='Times each render pass on the GPU (WebGPU timestamp queries, or EXT_disjoint_timer_query_webgl2 on WebGL2), filed under the scope that contains it.'
         />
         {!gpuProfiler.available && (
           <Hint>{gpuProfiler.unavailableReason ?? 'GPU timing is unavailable here.'} Use the pass switches below.</Hint>

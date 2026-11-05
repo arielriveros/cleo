@@ -121,8 +121,6 @@ export class AnimatedModel {
      */
     public skinnedCloth: SkinnedClothData | null = null;
 
-    /** Which attribute layout the VAO currently holds; see initializeVAO. */
-    private _vaoLayoutKey: string | null = null;
     private _isAnimated: boolean = false;
     
     constructor(
@@ -626,40 +624,6 @@ export class AnimatedModel {
         
         Logger.info(`AnimatedModel needs to be initialized with shader: ${shaderType}`, 'Animation');
     }
-
-    /**
-     * Initialize the VAO for the attribute layout a program declares. Keyed by the LAYOUT, never by a
-     * once-only flag: passes can disagree about bone-attribute locations, and the Basic family does.
-     */
-    public initializeVAO(shaderAttributes: any[]): void {
-        const key = AnimatedModel._layoutKey(shaderAttributes);
-        if (this._vaoLayoutKey === key) return;
-
-        if (this.hasSkin && this._mesh.isAnimated) {
-            this._mesh.initializeAnimatedVAO(shaderAttributes);
-        } else {
-            this._mesh.initializeVAO(shaderAttributes);
-        }
-
-        this._vaoLayoutKey = key;
-    }
-
-    // A stable identity for "which attributes at which locations". Sorted, because `getActiveAttrib`
-    // enumeration order is driver-dependent.
-    private static _layoutKey(shaderAttributes: any[]): string {
-        // Memoised per attribute list: a program hands out the same array every time, and this runs per
-        // skinned draw per pass (every shadow cascade among them).
-        let key = AnimatedModel._layoutKeys.get(shaderAttributes);
-        if (key === undefined) {
-            key = shaderAttributes
-                .map(a => `${a.name}@${a.location}`)
-                .sort()
-                .join(',');
-            AnimatedModel._layoutKeys.set(shaderAttributes, key);
-        }
-        return key;
-    }
-    private static readonly _layoutKeys = new WeakMap<any[], string>();
 
     // Getters
     public get geometry(): Geometry { return this._geometry; }

@@ -34,7 +34,7 @@ export class ViewProjection {
      * COMPARE with the original, which every depth-reading shader still expects. One reused scratch.
      */
     public clipProjection(projection: mat4): mat4 {
-        if (device.backend !== 'webgpu') return projection;
+        if (!device.capabilities.conventions.clipDepthZeroToOne) return projection;
         // A CUBE FACE inverts Y as well, to match the cubemap layout — the same inversion
         // `SkyPasses.initializeIBL` bakes into `_captureProj`. The probe capture is the only cube-face render
         // that goes through a normal camera, so it is the only one that must be told.
@@ -147,12 +147,12 @@ export class ViewProjection {
      * Both are the identity on WebGL2.
      */
     public uvConsuming(out: mat4, inverse: mat4): mat4 {
-        if (device.backend !== 'webgpu') return inverse === out ? out : (mat4.copy(out, inverse), out);
+        if (!device.capabilities.conventions.originTopLeft) return inverse === out ? out : (mat4.copy(out, inverse), out);
         return mat4.multiply(out, inverse, ViewProjection.FLIP_SCREEN_Y);
     }
 
     public uvProducing(matrix: mat4): mat4 {
-        if (device.backend !== 'webgpu') return matrix;
+        if (!device.capabilities.conventions.originTopLeft) return matrix;
         return mat4.multiply(this._uvProjScratch, ViewProjection.FLIP_SCREEN_Y, matrix);
     }
 

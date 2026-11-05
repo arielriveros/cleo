@@ -63,7 +63,7 @@ describe('beginModel', () => {
     });
 
     it('asks hasUniform, which on WebGL2 must see block members too', () => {
-        const shader = readFileSync(join(SRC, 'shader.ts'), 'utf-8');
+        const shader = readFileSync(join(SRC, 'rhi', 'webgl2', 'webgl2Shader.ts'), 'utf-8');
         expect(shader).toMatch(/public hasUniform\(name: string\): boolean \{\s*return name in this\._uniforms \|\| \(this\._blocks\?\.has\(name\) \?\? false\);/);
     });
 

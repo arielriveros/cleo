@@ -57,7 +57,6 @@ export interface MaterialDrawState {
      */
     terrainSelfShadow: boolean;
     /** False draws through the legacy immediate path: nothing is recorded, materials bind by hand. */
-    viaRHI: boolean;
     /** The reflection cube group 0 carries (forward only), or null. */
     envCube: Texture | null;
     readonly memo: PipelineMemo;
@@ -141,7 +140,7 @@ export class ModelDraw {
 
     // The draw `_bindMaterial` serves, set by `drawMaterials` around its submesh loop: one callback bound
     // for the object's life instead of a closure built per draw.
-    private _drawPass: RenderPassEncoder | undefined = undefined;
+    private _drawPass: RenderPassEncoder | null = null;
     private _drawNode: ModelNode | null = null;
     private _drawShader = '';
     private _drawReflection: PipelineReflection | undefined = undefined;
@@ -172,27 +171,21 @@ export class ModelDraw {
         return side === 'back' ? 'front' : 'back';
     }
 
-    // Whether this material has a program behind it at all. Checked HERE rather than in a bind
-    // callback: those return false to mean "use the legacy `mesh.draw()`", which is a raw `gl` call.
+    // Whether this material has a program behind it at all.
     private static _drawable(mat: Material): boolean {
         return !(mat instanceof CustomMaterial) || customShaderReady(mat);
     }
 
     // Draw a model's index buffer, applying `bindMaterial` before each range. The single-material case
-    // takes the same path with one range.
-    public drawSubmeshes(node: ModelNode, bindMaterial: (material: Material) => boolean | void,
-                           pass?: RenderPassEncoder): void {
+    // takes the same path with one range. `bindMaterial` sets the range's pipeline and groups; a range it
+    // could set none for (no program behind the material) is not drawn.
+    public drawSubmeshes(node: ModelNode, bindMaterial: (material: Material) => boolean, pass: RenderPassEncoder): void {
         const model = node.model;
         if (!model.hasSubmeshes) {
             const mat = model.material;
             if (!ModelDraw._drawable(mat)) return;
-            // A callback that set a PIPELINE has already fixed the cull mode; calling _materials.applyCull after
-            // it would be harmless today and wrong the moment the two disagree.
             this._firstInstance = 0;
-            const viaPipeline = !!bindMaterial(mat);
-            if (!viaPipeline) this._materials.applyCull(mat.config.side);
-            if (viaPipeline && pass && this._passes.recordDraw(pass, model.mesh, 0, 0, -1, this._firstInstance)) return;
-            model.mesh.draw(mat.config.wireframe ? 'line-list' : 'triangle-list');
+            if (bindMaterial(mat)) this._passes.recordDraw(pass, model.mesh, 0, 0, -1, this._firstInstance);
             return;
         }
         const submeshes = model.submeshes;
@@ -202,13 +195,8 @@ export class ModelDraw {
             const mat = model.materials[i] ?? model.materials[0];
             if (!ModelDraw._drawable(mat)) continue;
             this._firstInstance = 0;
-            const viaPipeline = !!bindMaterial(mat);
-            if (!viaPipeline) this._materials.applyCull(mat.config.side);
-            if (viaPipeline && pass
-                && this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count, -1,
-                                           this._firstInstance)) continue;
-            model.mesh.drawRange(submeshes[i].start, submeshes[i].count,
-                mat.config.wireframe ? 'line-list' : 'triangle-list');
+            if (bindMaterial(mat))
+                this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count, -1, this._firstInstance);
         }
     }
 
@@ -221,8 +209,6 @@ export class ModelDraw {
      */
     public beginModel(node: ModelNode, shaderType: string, depthNudge: number = 0): boolean {
         const animated = node.model instanceof AnimatedModel;
-        if (animated)
-            (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(shaderType).attributes);
         this._shaderManager.bind(shaderType);
         const declares = this._profileOf(this._shaderManager.bound!);
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
@@ -269,7 +255,7 @@ export class ModelDraw {
      * range's material goes through ONE binder — terrain, custom or standard — with the pipeline state
      * `state` describes, or the legacy immediate path when the draw is not recorded.
      */
-    public drawMaterials(pass: RenderPassEncoder | undefined, node: ModelNode, shaderType: string,
+    public drawMaterials(pass: RenderPassEncoder, node: ModelNode, shaderType: string,
                          reflection: PipelineReflection | undefined, animated: boolean,
                          state: MaterialDrawState): void {
         this._drawPass = pass;
@@ -279,14 +265,14 @@ export class ModelDraw {
         this._drawAnimated = animated;
         this._drawState = state;
         this.drawSubmeshes(node, this._bindMaterial, pass);
-        this._drawPass = undefined;
+        this._drawPass = null;
         this._drawNode = null;
         this._drawState = null;
     }
 
     /** Bind one submesh range's material for `drawMaterials`, whose inputs are in the `_draw*` fields. */
     private _bindModelMaterial(mat: Material): boolean {
-        const pass = this._drawPass, node = this._drawNode!, shaderType = this._drawShader;
+        const pass = this._drawPass!, node = this._drawNode!, shaderType = this._drawShader;
         const reflection = this._drawReflection, animated = this._drawAnimated, state = this._drawState!;
         const topology = mat.config.wireframe ? 'line-list' : 'triangle-list';
         // Terrain and custom materials bind only the textures they have; a bind group must fill every
@@ -303,8 +289,8 @@ export class ModelDraw {
             // terrain with the same NDF width as the frame it is a probe for) — once per landscape per
             // frame, not per chunk.
             this._materials.applyTerrainProperties(mat);
-            if (!state.viaRHI) { this._materials.applyTerrain(mat); return false; }
-            const pipeline = this._pipelines.memoized(state.memo, mat, shaderType, reflection!, {
+            if (!reflection) return false;
+            const pipeline = this._pipelines.memoized(state.memo, mat, shaderType, reflection, {
                 cullMode: ModelDraw.cullFor(mat.config.side),
                 depthStencil: state.depthStencil,
                 blend: state.blend,
@@ -315,15 +301,14 @@ export class ModelDraw {
                 // of this one precisely so ModelNode.initializeModel could reflect its attributes.
                 builtFor: 'terrain',
             });
-            pass!.setPipeline(pipeline);
-            pass!.setBindGroup(0, this._bindGroups.terrainGroup(pipeline, mat));
-            this._bindFrameLighting(pass!, pipeline, state);
-            this._bindObjectData(pass!, pipeline, node);
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, this._bindGroups.terrainGroup(pipeline, mat));
+            this._bindFrameLighting(pass, pipeline, state);
+            this._bindObjectData(pass, pipeline, node);
             return true;
         }
         if (mat instanceof CustomMaterial) {
-            if (!state.viaRHI) { this._materials.applyCustom(mat); return false; }
-            this._materials.applyCustom(mat, true);   // u_time, u_viewPos + user VALUE uniforms
+            this._materials.applyCustom(mat);   // u_time, u_viewPos + user VALUE uniforms
             // See `PostEffects.screenMaterialPass` for what the WGSL is and why the vertex stage is a
             // separate module (absent on WebGL2 and for a material that could not translate). The
             // reflection is kept per material, so the same object comes back and the memo hits.
@@ -339,13 +324,13 @@ export class ModelDraw {
                 // to its material program's attributes, so a Basic skinned model is 20 bytes.
                 builtFor: node.model.material.type,
             });
-            pass!.setPipeline(pipeline);
-            pass!.setBindGroup(0, this._bindGroups.customGroup(pipeline, mat, state.envCube));
-            this._bindFrameLighting(pass!, pipeline, state);
-            this._bindObjectData(pass!, pipeline, node);
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, this._bindGroups.customGroup(pipeline, mat, state.envCube));
+            this._bindFrameLighting(pass, pipeline, state);
+            this._bindObjectData(pass, pipeline, node);
             return true;
         }
-        if (!state.viaRHI || !reflection) { this._materials.apply(mat); return false; }
+        if (!reflection) return false;
         const pipeline = this._pipelines.memoized(state.memo, mat, shaderType, reflection, {
             cullMode: ModelDraw.cullFor(mat.config.side),
             // Depth writes follow the CALLER's state, not the material's, and come in rather than from
@@ -357,11 +342,11 @@ export class ModelDraw {
             vertex: animated ? 'model+skin' : 'model',
             builtFor: node.model.material.type,   // skinned too — see the custom branch
         });
-        pass!.setPipeline(pipeline);
+        pass.setPipeline(pipeline);
         this._materials.applyProperties(mat);
-        pass!.setBindGroup(0, this._bindGroups.materialGroup(pipeline, mat, state.envCube));
-        this._bindFrameLighting(pass!, pipeline, state);
-        this._bindObjectData(pass!, pipeline, node);
+        pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, mat, state.envCube));
+        this._bindFrameLighting(pass, pipeline, state);
+        this._bindObjectData(pass, pipeline, node);
         return true;
     }
 

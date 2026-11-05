@@ -9,14 +9,12 @@ import { VolumetricCloudsNode } from '../../core/scene/nodes/volumetricCloudsNod
 import { Scene } from '../../core/scene/scene';
 import { CubeFramebuffer } from '../cubeFramebuffer';
 import { Framebuffer } from '../framebuffer';
-import { gl } from '../glContext';
 import { Mesh } from '../mesh';
 import type { RenderPassEncoder } from '../rhi/device';
 import { device } from '../rhi/deviceHandle';
 import { DEFAULT_BLEND } from '../rhi/types';
 import type { ShaderResource } from '../rhi/types';
 import { nightFactor, moonDirection } from '../skyNight';
-import { GLState } from '../systems/glState';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { VolumetricCloudPasses } from './clouds';
@@ -124,7 +122,7 @@ export class SkyPasses {
         // Flip Y on WebGPU: framebuffer row 0 is the BOTTOM on WebGL2 and the TOP on WebGPU. UV-sampled
         // targets survive that (the screen quad undoes it at present); a CUBEMAP, sampled by
         // direction, does not.
-        if (device.backend === 'webgpu') this._captureProj[5] *= -1;
+        if (device.capabilities.conventions.originTopLeft) this._captureProj[5] *= -1;
         for (const f of SkyPasses.CUBE_FACES) {
             const view = mat4.create();
             mat4.lookAt(view, [0, 0, 0], f.dir, f.up);
@@ -133,7 +131,6 @@ export class SkyPasses {
 
         const cubeGeo = Geometry.Cube();
         this.iblCubeMesh = new Mesh();
-        this.iblCubeMesh.initializeVAO(this._shaderManager.getShader('irradiance').attributes);
         this.iblCubeMesh.create(cubeGeo.getData(['position']), cubeGeo.indices.length, cubeGeo.indices);
 
         this.cubeFBO = new CubeFramebuffer();
@@ -188,7 +185,7 @@ export class SkyPasses {
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [sourceCube]));
             this._shaderManager.setUniform('u_view', this._iblFaceViews[face]);
-            if (!this._passes.recordDraw(pass, this.iblCubeMesh, 0, 0)) this.iblCubeMesh.draw();
+            this._passes.recordDraw(pass, this.iblCubeMesh, 0, 0);
             this._passes.endFullscreenPass(pass);
         }
     }
@@ -475,11 +472,6 @@ export class SkyPasses {
      */
     private _renderAtmosphereFaces(node: SkyAtmosphereNode, sun: ArrayLike<number>, cube: Texture, res: number,
                                    faces: readonly number[]): void {
-        GLState.depthTest(false);
-        GLState.depthMask(false);
-        GLState.blend(false);
-        GLState.cull(false);
-
         this._shaderManager.bind('skyAtmosphere');
         // One pipeline for all six faces. `builtFor: 'irradiance'` — the unit cube's stride comes from
         // THAT program, not the drawing one. `target` explicitly: built before any pass opens.
@@ -544,8 +536,6 @@ export class SkyPasses {
             this._passes.endFullscreenPass(pass);
         }
         this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
-        GLState.depthMask(true);
-        GLState.depthTest(true);
     }
 
     // Height fog for the SkyAtmosphere node: a fullscreen pass that integrates the fog along each view
@@ -576,11 +566,6 @@ export class SkyPasses {
         const res = node.cubemapResolution || node.resolution;
         this._shaderManager.setUniform('u_fogSkyLod', Math.max(0, Math.log2(res) - 3));
         this._passes.drawFullscreenAndEnd(pass);
-
-        // Restore the state the following overlay passes expect.
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**
@@ -606,7 +591,7 @@ export class SkyPasses {
         this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(proj));
         this._shaderManager.setUniform('u_linearInput', linearInput);
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [cubemap]));
-        if (!this._passes.recordDraw(pass, mesh, 0, 0)) mesh.draw();
+        this._passes.recordDraw(pass, mesh, 0, 0);
     }
 
     /**
@@ -766,10 +751,6 @@ export class SkyPasses {
         this._clouds.bakeCloudNoise();
         if (!this._clouds.cloudBaseNoise || !this._clouds.cloudDetailNoise || node.opacity <= 0) return;
 
-        GLState.depthTest(false);
-        GLState.depthMask(false);
-        GLState.blend(true);
-        if (gl) GLState.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         this._shaderManager.bind('volumetricClouds');
         const pipeline = this._pipelines.fullscreen('volumetricClouds', VolumetricCloudsProgram,
                                                   VolumetricCloudPasses.CLOUD_BLEND, undefined,
@@ -806,9 +787,5 @@ export class SkyPasses {
             this._passes.drawFullscreenAndEnd(pass);
         }
         this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
-        GLState.blend(false);
-        this._passes.restoreDefaultBlend();
-        GLState.depthMask(true);
-        GLState.depthTest(true);
     }
 }

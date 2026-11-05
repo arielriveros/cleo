@@ -4,10 +4,10 @@
 // Binding through `ShaderManager` rather than `Shader.use()` is load-bearing: it keeps `setUniform`'s
 // `_boundShader` current and the harness's shader-coverage measurement intact.
 
-import { gl } from '../../glContext';
-import { GLState } from '../../systems/glState';
+import { gl } from './glContext';
+import { GLState } from './glState';
 import { ShaderManager } from '../../systems/shaderManager';
-import type { Shader } from '../../shader';
+import type { Shader } from './webgl2Shader';
 import {
     glCompare, glBlendFactor, glBlendOperation, glCullMode, glFrontFace,
     glTopology, glIndexType, indexByteSize,
@@ -113,8 +113,8 @@ export class WebGL2RenderPipeline implements RenderPipeline {
         // Through ShaderManager, not Shader.use(): see the note at the top of this file.
         ShaderManager.Instance.bind(this.module.program);
 
-        // `always` + no writes IS "no depth interaction". Must not issue `gl.depthFunc`: that is
-        // CONTEXT state and would leak past this pipeline into the next legacy draw.
+        // `always` + no writes IS "no depth interaction": depth test off, and `gl.depthFunc` left as the
+        // next depth-testing pipeline will set it.
         const noDepth = !this.depthStencil
             || (this.depthStencil.depthCompare === 'always' && !this.depthStencil.depthWriteEnabled);
         if (!noDepth) {
@@ -276,8 +276,12 @@ export class WebGL2BindGroup implements BindGroup {
 // ------------------------------------------------------------------------------------------------
 
 export class WebGL2RenderPassEncoder implements RenderPassEncoder {
-    /** The pass's occlusion queries, from its descriptor. Immediate mode: begin/end issue at once. */
-    constructor(private readonly _queries: WebGL2OcclusionQuerySet | null = null) {}
+    /**
+     * The pass's occlusion queries, from its descriptor (immediate mode: begin/end issue at once), and
+     * what `end()` tells the device — the close of the pass's timed span.
+     */
+    constructor(private readonly _queries: WebGL2OcclusionQuerySet | null = null,
+                private readonly _onEnd: (() => void) | null = null) {}
 
     private _pipeline: WebGL2RenderPipeline | null = null;
     /** Next free texture unit. Groups bind consecutively from 0, in the order they are set. */
@@ -376,6 +380,7 @@ export class WebGL2RenderPassEncoder implements RenderPassEncoder {
         if (this._ended) return;
         this._ended = true;
         this._pipeline?.module.shader.flushUniformBlocks();
+        this._onEnd?.();
     }
 }
 
@@ -384,11 +389,13 @@ export class WebGL2RenderPassEncoder implements RenderPassEncoder {
  * still be written for the deferred model.
  */
 export class WebGL2CommandEncoder implements CommandEncoder {
-    constructor(private readonly _beginPass: (target: RenderTarget, descriptor: any) => void) {}
+    constructor(private readonly _beginPass: (target: RenderTarget, descriptor: any) => void,
+                private readonly _endPass: (() => void) | null = null) {}
 
     public beginRenderPass(target: RenderTarget, descriptor: any): RenderPassEncoder {
         this._beginPass(target, descriptor);
-        return new WebGL2RenderPassEncoder((descriptor?.occlusionQuerySet as WebGL2OcclusionQuerySet | undefined) ?? null);
+        return new WebGL2RenderPassEncoder((descriptor?.occlusionQuerySet as WebGL2OcclusionQuerySet | undefined) ?? null,
+                                           this._endPass);
     }
 
     /** Always throws: WebGL2 has no compute stage. Check `capabilities.hasCompute` first. */

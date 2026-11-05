@@ -12,12 +12,10 @@ import { TileChunk, CHUNK_SIZE } from '../tilemap/chunk';
 import { Tilemap } from '../tilemap/tilemap';
 import { TilemapLayer } from '../tilemap/tilemapLayer';
 import { TileMesh } from '../tilemap/tileMesh';
-import { gl } from '../glContext';
 import { frameStats } from '../renderStats';
 import type { RenderPassEncoder } from '../rhi/device';
 import { DEFAULT_BLEND, SPRITE_ADDITIVE_BLEND, OVERLAY_BLEND } from '../rhi/types';
 import type { BlendState } from '../rhi/types';
-import { GLState } from '../systems/glState';
 import { TextureManager } from '../systems/textureManager';
 import { TilemapProgram, FORWARD_PROGRAMS } from './programs';
 import type { FrameView } from './frameView';
@@ -105,7 +103,7 @@ export class Sprite2DPasses {
                 vec3.distance(this._view.camera.position, b.worldPosition) -
                 vec3.distance(this._view.camera.position, a.worldPosition));
             const only = this._begin2DPass();
-            for (const node of sprites) this.renderSprite(node, true, only);
+            for (const node of sprites) this.renderSprite(node, only);
             this._passes.endFullscreenPass(only);
             return;
         }
@@ -172,30 +170,19 @@ export class Sprite2DPasses {
 
         list.sort((a, b) => (a.band - b.band) || (a.depth - b.depth));
 
-        // Draw state is set once for the whole list rather than restored per item the way renderSprite
-        // does: depth testing stays on so 3D geometry still occludes, but nothing here writes depth.
-        GLState.blend(true);
-        GLState.depthMask(false);
+        // One pass for the whole interleaved list. Every item's pipeline depth-tests without writing
+        // depth, so 3D geometry still occludes the 2D layer and the 2D layer never occludes itself.
         const pass = this._begin2DPass();
         for (const item of list) {
-            if ('sprite' in item) this.renderSprite(item.sprite, false, pass);
-            else if ('particles' in item) {
+            if ('sprite' in item) this.renderSprite(item.sprite, pass);
+            else if ('particles' in item)
                 this._particlePasses.particles.draw([item.particles], this._particlePasses.particleDrawFrame(scene, pass, this._targets.scene.renderTarget));
-                // Particle pipelines leave their own blend behind; the sprites after them expect the pass's.
-                this._passes.restoreDefaultBlend();
-                GLState.blend(true);
-                GLState.depthMask(false);
-            }
             else this._drawTileBand(item.node, item.layer, item.chunk, item.indexOffset, item.indexCount, pass);
         }
         this._passes.endFullscreenPass(pass);
-        GLState.depthMask(true);
     }
 
-    /**
-     * Open the pass the tiles and sprites share. Loads and stores — this draws over the composited
-     * scene — and reserves the shadow units, since a custom material on a sprite is a legacy draw.
-     */
+    /** Open the pass the tiles and sprites share. Loads and stores: this draws over the composited scene. */
     private _begin2DPass(): RenderPassEncoder {
         return this._passes.beginFullscreenPass(this._targets.scene.renderTarget, '2d', false, undefined, false);
     }
@@ -229,15 +216,16 @@ export class Sprite2DPasses {
 
         // The pipeline binds the program, but the uniforms below are written by name into the bound
         // program's block, so it still has to be current before them.
-        const pipeline = pass ? this._pipelines.get('tilemap', TilemapProgram, {
-            // What the pass set by hand: blended, depth-tested against the 3D scene, no depth writes
-            // (tiles are sorted, and a written depth would occlude the band drawn after).
+        if (!pass || !chunk.mesh.vertexBuffer || !chunk.mesh.indexBuffer) return;
+        const pipeline = this._pipelines.get('tilemap', TilemapProgram, {
+            // Blended, depth-tested against the 3D scene, no depth writes (tiles are sorted, and a
+            // written depth would occlude the band drawn after).
             cullMode: 'none',
             depthStencil: DEPTH_TEST,
             blend: DEFAULT_BLEND,
             vertex: 'tile',
-        }) : null;
-        if (pipeline) pass!.setPipeline(pipeline);
+        });
+        pass.setPipeline(pipeline);
         this._shaderManager.bind('tilemap');
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
@@ -257,31 +245,16 @@ export class Sprite2DPasses {
 
         const texture = TextureManager.Instance.getTexture(tileset.textureId)
             || TextureManager.Instance.getTexture('Null');
-        if (pipeline) {
-            pass!.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [texture ?? this._bindGroups.fallbackTexture]));
-        } else {
-            this._shaderManager.setUniform('u_tileset', 0);
-            if (texture) texture.bind(0);
-        }
-
-        if (pipeline && chunk.mesh.vertexBuffer && chunk.mesh.indexBuffer) {
-            pass!.setVertexBuffer(0, chunk.mesh.vertexBuffer);
-            pass!.setIndexBuffer(chunk.mesh.indexBuffer, 'uint16');
-            pass!.drawIndexed(indexCount, 1, indexOffset);
-        } else {
-            this._materials.applyCull('double');
-            chunk.mesh.drawRange(indexOffset, indexCount);
-        }
+        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [texture ?? this._bindGroups.fallbackTexture]));
+        pass.setVertexBuffer(0, chunk.mesh.vertexBuffer);
+        pass.setIndexBuffer(chunk.mesh.indexBuffer, 'uint16');
+        pass.drawIndexed(indexCount, 1, indexOffset);
         frameStats.tilemapDraws++;
         frameStats.objects++;
     }
 
-    /**
-     * `manageDepth` false means the caller owns the blend/depth-mask state for a whole batch — the 2D
-     * pass sets it once around its interleaved list.
-     */
-    public renderSprite(node: SpriteNode, manageDepth: boolean = true,
-                          pass?: RenderPassEncoder, blend: BlendState = DEFAULT_BLEND): void {
+    /** Record one sprite into `pass`, blended by `blend` (an editor icon passes OVERLAY_BLEND). */
+    public renderSprite(node: SpriteNode, pass?: RenderPassEncoder, blend: BlendState = DEFAULT_BLEND): void {
         if (!node.initialized)
             node.initializeSprite();
         frameStats.objects++;
@@ -298,7 +271,8 @@ export class Sprite2DPasses {
         // and the material's own cull side and topology.
         const material = node.sprite.material;
         const reflection = FORWARD_PROGRAMS[material.type];
-        const pipeline = pass && reflection ? this._pipelines.get(material.type, reflection, {
+        if (!pass || !reflection) return;
+        const pipeline = this._pipelines.get(material.type, reflection, {
             cullMode: ModelDraw.cullFor(material.config.side),
             depthStencil: DEPTH_TEST,
             // DEFAULT_BLEND for a scene sprite (its alpha must not touch the bloom mask), OVERLAY_BLEND
@@ -307,8 +281,8 @@ export class Sprite2DPasses {
             topology: material.config.wireframe ? 'line-list' : 'triangle-list',
             vertex: 'model',
             builtFor: material.type,
-        }) : null;
-        if (pipeline) pass!.setPipeline(pipeline);
+        });
+        pass.setPipeline(pipeline);
 
         // The sprite's tile, as a sub-rect of the atlas. `basic.vs` does
         // `fragTexCoord = a_texCoord * u_uvScale + u_uvOffset` over the quad's baked 0..1 UVs, and
@@ -379,37 +353,19 @@ export class Sprite2DPasses {
 
         // Set material uniforms + bind textures
         let record = 0;
-        if (pipeline) {
-            this._materials.applyProperties(material);
-            pass!.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
-            // The Basic program reads the matrix, the dissolve and the tile from the per-object table.
-            if (this._bindGroups.declaresObjectData(pipeline)) {
-                const objects = this._sys.objects;
-                record = objects.rowFor(node, spriteMatrix, dissolveOf(node.effectiveFade), false, 0,
-                                        u1 - u0, v1 - v0, u0, v0);
-                pass!.setBindGroup(2, this._bindGroups.objectDataGroup(pipeline, objects.texture));
-            }
-        } else this._materials.apply(material);
-
-        const materialConfig = node.sprite.material.config;
+        this._materials.applyProperties(material);
+        pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
+        // The Basic program reads the matrix, the dissolve and the tile from the per-object table.
+        if (this._bindGroups.declaresObjectData(pipeline)) {
+            const objects = this._sys.objects;
+            record = objects.rowFor(node, spriteMatrix, dissolveOf(node.effectiveFade), false, 0,
+                                    u1 - u0, v1 - v0, u0, v0);
+            pass.setBindGroup(2, this._bindGroups.objectDataGroup(pipeline, objects.texture));
+        }
 
         // Sprites are always transparent
         this._shaderManager.setUniform('u_isTransparent', true);
-        if (!pipeline) {
-            GLState.blend(true);
-            if (additive && gl) GLState.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.ZERO, gl.ONE);
-            // Don't write to depth for blended sprites to avoid occluding later sprites
-            GLState.depthMask(false);
-            this._materials.applyCull(materialConfig.side);
-        }
-
-        const topology = materialConfig.wireframe ? 'line-list' : 'triangle-list';
-        if (!pipeline || !this._passes.recordDraw(pass!, node.sprite.mesh, 0, 0, -1, record))
-            node.sprite.mesh.draw(topology);
-        if (!pipeline && additive) this._passes.restoreDefaultBlend();
-
-        // Restore depth writes after drawing sprite
-        if (manageDepth) GLState.depthMask(true);
+        this._passes.recordDraw(pass, node.sprite.mesh, 0, 0, -1, record);
     }
 
     /** Builds a sprite's world matrix with its camera-facing billboard constraint applied. */

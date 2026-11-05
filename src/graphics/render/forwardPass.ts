@@ -13,7 +13,6 @@ import { usesParallax } from '../programVariants';
 import { frameStats } from '../renderStats';
 import type { RenderPassEncoder } from '../rhi/device';
 import { DEFAULT_BLEND } from '../rhi/types';
-import { GLState } from '../systems/glState';
 import { Texture } from '../texture';
 import { ModelDraw } from './modelDraw';
 import type { MaterialDrawState } from './modelDraw';
@@ -97,7 +96,7 @@ export class ForwardPass {
     /** How the forward draw binds materials; the depth, blend, path and reflection cube change per draw. */
     private readonly _drawState: MaterialDrawState = {
         targets: 1, depthStencil: DEPTH_WRITE, blend: undefined, customMode: 'forward', frameLighting: true,
-        terrainSelfShadow: false, viaRHI: false, envCube: null, memo: this._pipelineMemo,
+        terrainSelfShadow: false, envCube: null, memo: this._pipelineMemo,
     };
 
     // Node ids already warned about carrying a screen-space custom material on a mesh (once per node).
@@ -105,10 +104,6 @@ export class ForwardPass {
 
     /** Forward passes drawn on top of the deferred-lit scene: skybox, transparent models, sprites, editor overlays. */
     public renderForwardOverlay(scene: Scene, shadowLight: LightNode | null): void {
-        this._targets.scene.bind();
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-
         // Collect the forward-rendered models: transparent (any material), opaque Default (Blinn-Phong,
         // rendered forward so their full material — specular/ambient/reflectivity + maps — works),
         // plus the selected models (for the outline mask) and the two overlay queues.
@@ -159,9 +154,8 @@ export class ForwardPass {
         }
 
         // Sky fills the background; a baked atmosphere cubemap takes precedence over a static skybox.
-        // Thumbnails skip every background draw — they want a transparent one.
-        // Depth WRITES off: the sky must stay at the clear depth for the depth-reading passes.
-        GLState.depthMask(false);
+        // Thumbnails skip every background draw — they want a transparent one. The sky pipelines write
+        // no depth: the sky must stay at the clear depth for the depth-reading passes.
         const skyAtmo = scene.skyAtmosphere;
         this._passes.scope('sky');
         if (!this._host.thumbnailMode && this._host.passEnabled['sky']) {
@@ -180,8 +174,6 @@ export class ForwardPass {
 
         // Opaque Default (Blinn-Phong) models: forward-lit and depth-written, so they occlude correctly
         // against the deferred opaque geometry (whose depth was blitted into the scene FBO).
-        GLState.depthMask(true);
-        GLState.blend(false);
         this._passes.scope('forwardOpaque');
         this.forwardDepthWrite = true;
         this._runForwardQueue('forwardOpaque', opaqueForwardQueue);
@@ -225,12 +217,10 @@ export class ForwardPass {
         for (const node of transparentQueue) depthKey.set(node, vec3.squaredDistance(camPos, node.worldPosition));
         transparentQueue.sort((a, b) => depthKey.get(b)! - depthKey.get(a)!);
         this._snapshotSceneColor(transparentQueue);
-        GLState.depthMask(this._host.thumbnailMode);
         this.forwardDepthWrite = this._host.thumbnailMode;
         if (this._passes.beginPass('transparent')) this._runForwardQueue('transparent', transparentQueue);
         this.forwardDepthWrite = true;
         this.sceneBuffersLive = false;
-        GLState.depthMask(true);
 
         // GPU particles: after the transparents (and so after TAA — they never enter history), depth
         // tested against the opaque scene, soft-faded against its depth snapshot.
@@ -278,7 +268,6 @@ export class ForwardPass {
     public copySceneDepth(): void {
         this._passes.copyDepth(this._targets.scene.depth, this._targets.sceneDepth.depth,
                                this._host.renderWidth, this._host.renderHeight);
-        this._targets.scene.bind();
     }
 
     private _snapshotSceneColor(queue: readonly ModelNode[]): void {
@@ -287,11 +276,9 @@ export class ForwardPass {
         const fbo = this._targets.refraction = this._decals.decalTarget(this._targets.refraction, () => new Framebuffer({
             colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
         this._passes.copyColors([this._targets.scene.colors[0]], [fbo.colors[0]], this._host.renderWidth, this._host.renderHeight);
-        this._targets.scene.bind();
     }
 
     public renderScene(scene: Scene): void {
-        this._targets.scene.bind();
         this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
         // The frame's clear, as a PASS of its own: the sky below deliberately LOADS, and a thumbnail
         // skips the sky entirely while still needing the buffer cleared.
@@ -301,10 +288,9 @@ export class ForwardPass {
             this._host.thumbnailMode ? [0, 0, 0, 0] : undefined, true);
         this._passes.endFullscreenPass(scenePass);
 
-        // Sky background. Depth writes off: the sky renders at NDC z = w and interpolation error
+        // Sky background, written with no depth: the sky renders at NDC z = w and interpolation error
         // would write some pixels a hair below 1.0, breaking the "depth == 1.0 means sky" contract
         // of the depth-reading passes (god rays, screen materials).
-        GLState.depthMask(false);
         const fwdAtmo = scene.skyAtmosphere;
         if (!this._host.thumbnailMode) {
             const skyPass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'sky', false,
@@ -312,7 +298,6 @@ export class ForwardPass {
             this._sky.renderSky(skyPass, scene, this._view.camera);
             this._passes.endFullscreenPass(skyPass);
         }
-        GLState.depthMask(true); // models below need depth writes again
 
         const transparentDrawQueue: ModelNode[] = [];
         const opaqueDrawQueue: ModelNode[] = [];
@@ -465,7 +450,7 @@ export class ForwardPass {
         // A custom material has no entry in the static table — its program is compiled at runtime —
         // but it does have a bind-group layout, derived from the same interface its prelude is
         // generated from. So it qualifies too, and builds its own pipeline in the callback below.
-        const viaRHI = !!pass && (!!reflection || shaderType.startsWith('custom:'));
+        if (!pass || (!reflection && !shaderType.startsWith('custom:'))) return;
         let envCube: Texture | null = null;
         // The program is bound here on BOTH paths: every setUniform below writes into whatever program is
         // current, and letting the pipeline do it would send the per-draw uniforms to the previous draw's.
@@ -485,11 +470,8 @@ export class ForwardPass {
             const cube = probeCube ?? this._view.scene.environmentMap;
             this._shaderManager.setUniform('u_useEnvMap', cube ? true : false);
             this._shaderManager.setUniform('u_envMapLinear', probeCube ? true : false);
-            // On the RHI path the cube is a group 0 entry and the backend picks its unit; binding it
-            // here as well would put the same texture on two units, one of which the allocator is free
-            // to hand to something else.
-            if (viaRHI) envCube = cube ?? null;
-            else cube?.bind(7);
+            // A group 0 entry: the material's bind group carries it.
+            envCube = cube ?? null;
         }
 
         frameStats.objects++;
@@ -501,16 +483,11 @@ export class ForwardPass {
         // Inform shaders about transparency state (only used by PBR shaders)
         this._shaderManager.setUniform('u_isTransparent', materialConfig.transparent);
 
-        // Control blending per material. On the RHI path this is pipeline state instead — set from the
-        // same `materialConfig.transparent`, so the two agree by construction.
-        if (!viaRHI) GLState.blend(materialConfig.transparent === true);
-
         // Set material uniforms + bind textures, once per submesh. Depth writes follow the caller's
         // state (opaque or transparent queue), not the material's.
         const state = this._drawState;
         state.depthStencil = this.forwardDepthWrite ? DEPTH_WRITE : DEPTH_TEST;
         state.blend = materialConfig.transparent === true ? DEFAULT_BLEND : undefined;
-        state.viaRHI = viaRHI;
         state.envCube = envCube;
         this._modelDraw.drawMaterials(pass, node, shaderType, reflection, isAnimatedModel, state);
         state.envCube = null;

@@ -4,18 +4,9 @@
 //
 // On a Y-sorted layer the index buffer is split into BANDS of contiguous ranges sharing one sort
 // depth, so the renderer interleaves tiles with sprites at one draw per band rather than per cell.
-
-// The last raw GL here is the two draw calls. They stay for the same reason Mesh's do: a draw belongs
-// on a render-pass encoder, and moving the 2D pass onto one is its own migration.
-import { gl } from '../glContext';
-import { GLState } from '../../graphics/systems/glState';
-import { glTopology, glIndexType, indexByteSize } from '../rhi/webgl2/glEnums';
-import { frameStats } from '../../graphics/renderStats';
-import { ShaderManager } from '../../graphics/systems/shaderManager';
+// Drawn by recording `vertexBuffer`/`indexBuffer` through the 2D pass (`Sprite2DPasses`); the tilemap
+// pipeline carries TILE_VERTEX_LAYOUT.
 import { TILE_VERTEX_LAYOUT } from '../rhi/vertexLayouts';
-import { applyVertexLayout } from '../rhi/webgl2/vertexArray';
-import { glDevice } from '../rhi/webgl2/webgl2Device';
-import type { WebGL2Buffer } from '../rhi/webgl2/webgl2Device';
 import { device } from '../rhi/deviceHandle';
 import type { Buffer as RhiBuffer } from '../rhi/resources';
 import { BufferUsage } from '../rhi/types';
@@ -25,7 +16,7 @@ import type { TilemapLayer } from './tilemapLayer';
 import type { Tileset } from './tileset';
 
 // Derived from TILE_VERTEX_LAYOUT, so the scratch-buffer arithmetic cannot drift from the offsets
-// the VAO is built with.
+// the pipeline reads with.
 const FLOATS_PER_VERTEX = TILE_VERTEX_LAYOUT.arrayStride / 4;
 const MAX_CELLS = CHUNK_SIZE * CHUNK_SIZE;
 
@@ -56,7 +47,6 @@ interface AnimatedRef {
 }
 
 export class TileMesh {
-    private _vao: WebGLVertexArrayObject | null = null;
     private _vbo: RhiBuffer | null = null;
     private _ibo: RhiBuffer | null = null;
     private _indexCount = 0;
@@ -182,28 +172,14 @@ export class TileMesh {
     }
 
     private _upload(verts: Float32Array, indices: Uint16Array): void {
-        // The VAO is WebGL2-only, read by `draw`/`drawRange` alone; the RHI path builds its own.
-        const webgl2 = device.backend === 'webgl2';
-        if (webgl2 && !this._vao) {
-            this._vao = glDevice().createVertexArray();
-            // COPY_DST on the vertex buffer: an animated chunk rewrites its UVs every frame through
-            // `advanceAnimation`, which is what earns it a DYNAMIC_DRAW hint. Indices never change.
-        }
+        // COPY_DST on the vertex buffer: an animated chunk rewrites its UVs every frame through
+        // `patchAnimatedUVs`. Indices never change.
         if (!this._vbo) {
             this._vbo = device.createBuffer({ label: 'tileChunk.vertices', size: 0, usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
             this._ibo = device.createBuffer({ label: 'tileChunk.indices', size: 0, usage: BufferUsage.INDEX | BufferUsage.COPY_DST });
         }
-        // ELEMENT_ARRAY_BUFFER is VAO state on WebGL2, so the index upload below has to land in
-        // this chunk's own VAO rather than whatever was current. WebGPU has neither.
-        if (webgl2) GLState.bindVAO(this._vao);
         this._vbo = device.reallocateBuffer(this._vbo!, verts);
-
-        // The layout is still this chunk's own — a tilemap vertex really is position/uv/colour, not the
-        // model vertex — but the attribute binding is no longer a private copy of the same six calls.
-        if (webgl2) applyVertexLayout(TILE_VERTEX_LAYOUT, (this._vbo as WebGL2Buffer).handle);
-
         this._ibo = device.reallocateBuffer(this._ibo!, indices);
-        if (webgl2) GLState.bindVAO(null);
     }
 
     /**
@@ -228,50 +204,16 @@ export class TileMesh {
                 this._verts[base + 3] = uvScratch[1] + t * (uvScratch[3] - uvScratch[1]);
             }
         }
-        if (device.backend === 'webgl2') GLState.bindVAO(this._vao);
         device.writeBuffer(this._vbo!, 0, this._verts);
-        if (device.backend === 'webgl2') GLState.bindVAO(null);
     }
 
     /** The chunk buffers, for a caller recording the draw through the RHI. Null until `build` has run. */
     public get vertexBuffer(): RhiBuffer | null { return this._vbo; }
     public get indexBuffer(): RhiBuffer | null { return this._ibo; }
 
-    public draw(): void {
-        if (this._indexCount === 0 || !this._vao) return;
-        GLState.bindVAO(this._vao);
-        // Upload pending uniform-block writes: a WGSL-authored program has no loose uniforms, so
-        // without this the chunks draw against whatever the buffer was allocated with.
-        ShaderManager.Instance.flushBound();
-        gl.drawElements(glTopology('triangle-list'), this._indexCount, glIndexType('uint16'), 0);
-        frameStats.drawCalls++;
-        frameStats.vertices += this._vertexCount;
-        frameStats.triangles += this._indexCount / 3;
-    }
-
-    /** Draw one contiguous slice of the index buffer — a single depth band on a Y-sorted layer. */
-    public drawRange(indexOffset: number, indexCount: number): void {
-        if (indexCount <= 0 || !this._vao) return;
-        GLState.bindVAO(this._vao);
-        // Same reason as `draw` above.
-        ShaderManager.Instance.flushBound();
-        gl.drawElements(glTopology('triangle-list'), indexCount, glIndexType('uint16'),
-                        indexOffset * indexByteSize('uint16'));
-        frameStats.drawCalls++;
-        frameStats.vertices += indexCount;
-        frameStats.triangles += indexCount / 3;
-    }
-
     public dispose(): void {
         if (this._ibo) { this._ibo.destroy(); this._ibo = null; }
         if (this._vbo) { this._vbo.destroy(); this._vbo = null; }
-        if (this._vao) {
-            // GLState dedupes bindVertexArray by identity, so a deleted VAO left in its cache would make
-            // the next bind of that handle a silent no-op.
-            if (GLState.currentVAO === this._vao) GLState.reset();
-            glDevice().deleteVertexArray(this._vao);
-            this._vao = null;
-        }
         this._verts = null;
         this._animated = [];
         this._bands = [];

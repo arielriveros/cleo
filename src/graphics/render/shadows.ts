@@ -23,7 +23,6 @@ import type { DepthStencilState, CullMode } from '../rhi/types';
 import { TerrainFloorGrid, ShadowLayerCache, unitDirection, shadowReach, sliceCornerFactor, cascadeSphereAroundEye, staggeredCascadeDue, EYE_FIT_MARGIN, receiverInnerRadius, isFreeShadowSlot } from '../shadowCasters';
 import { MAX_CASCADES, CascadeSphere, ShadowCasterBounds, SpotShadowSlots, MAX_POINT_SHADOWS, PointShadowCache, CasterMotion, lightViewMatrix, mixNumber, HASH_SEED, pushCasterBounds, mixTransform, spotShadowFar, pointShadowFov, POINT_SHADOW_FACES, mixString, computeCascadeSplits, staleCascadeCovers, STAGGER_MARGIN, quantizeRadius, cascadeDepthScale, cascadeSphereFromPerspective, cascadeSphereFromCorners, buildCascadeMatrix } from '../shadowMath';
 import { keyLight } from '../skyNight';
-import { GLState } from '../systems/glState';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { VolumetricGodRaysProgram, ScreenProgram, SHADOW_PROGRAMS } from './programs';
@@ -725,14 +724,8 @@ export class ShadowPasses {
         const upPipeline = this._pipelines.fullscreen('screen', ScreenProgram, ADDITIVE_BLEND);
         upPass.setPipeline(upPipeline);
         upPass.setBindGroup(0, this._bindGroups.textureGroup(upPipeline, 0, [scratch.colors[0]]));
-        scratch.colors[0].bind(0);
         this._passes.drawFullscreen(upPass);
         this._passes.endFullscreenPass(upPass);
-
-        // Restore the pipeline default by hand — the passes that follow are on the legacy path and
-        // inherit the blend state. Never a plain `gl.blendFunc`: that erodes the bloom-mask alpha.
-        GLState.blend(false);
-        this._passes.restoreDefaultBlend();
     }
 
     /**
@@ -812,14 +805,8 @@ export class ShadowPasses {
                 modelSet = true;
             }
 
-            if (state.skinned) {
-                // Initialize the animated VAO from the program ABOUT TO DRAW IT, never from the node's
-                // geometry shader: the unlit Basic family has no normal/tangent/bitangent, so its bone
-                // attributes sit at locations 2/3 where every lit family puts them at 5/6.
-                (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(state.shaderType).attributes);
-                // The palette rides in the object table for a program that reads it (the caster's record).
-                if (!objectData) this._sys.modelDraw.uploadBoneMatrices('shadowMapSkinned', node);
-            }
+            // The palette rides in the object table for a program that reads it (the caster's record).
+            if (state.skinned && !objectData) this._sys.modelDraw.uploadBoneMatrices('shadowMapSkinned', node);
 
             // Depth-only, so no material is bound — a merged model normally casts its whole buffer in
             // ONE call. Only when some submesh opts out of shadows, or needs its own cutout texture,
@@ -844,22 +831,18 @@ export class ShadowPasses {
                         [cut ? cut.texture : this._bindGroups.fallbackTexture]));
                     const start = submeshes ? submeshes[i].start : 0;
                     const drawCount = submeshes ? submeshes[i].count : 0;
-                    if (this._passes.recordDraw(pass, model.mesh, start, drawCount, -1, row)) continue;
-                    if (submeshes) model.mesh.drawRange(start, drawCount, 'triangle-list');
-                    else model.mesh.draw('triangle-list');
+                    this._passes.recordDraw(pass, model.mesh, start, drawCount, -1, row);
                 }
             } else if (record.mesh) {
                 this._passes.recordDraw(pass, record.mesh, 0, 0, -1, row);
             } else if (state.wholeBuffer) {
-                if (!this._passes.recordDraw(pass, model.mesh, 0, 0, this._shadowLodFor(record), row))
-                    model.mesh.draw('triangle-list');
+                this._passes.recordDraw(pass, model.mesh, 0, 0, this._shadowLodFor(record), row);
             } else {
                 const submeshes = model.submeshes;
                 for (let i = 0; i < submeshes.length; i++) {
                     const caster = materials[i] ?? materials[0];   // see ModelDraw.drawSubmeshes: never index past the array
                     if (!caster.config.castShadow || caster.config.wireframe) continue;
-                    if (this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count, -1, row)) continue;
-                    model.mesh.drawRange(submeshes[i].start, submeshes[i].count, 'triangle-list');
+                    this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count, -1, row);
                 }
             }
         }
@@ -979,7 +962,7 @@ export class ShadowPasses {
         key = mixNumber(mixNumber(mixNumber(key, this._sys.modelDraw.objectId(material)), casts ? 1 : 0),
                         material.config.side === 'double' ? 1 : 0);
         key = mixNumber(mixNumber(mixNumber(key, cut ? this._sys.modelDraw.objectId(cut.texture) : 0), cut ? cut.cutoff : 0),
-                        this._pipelines.epoch * 2 + (this._view.cubeFace && device.backend === 'webgpu' ? 1 : 0));
+                        this._pipelines.epoch * 2 + (this._view.cubeFace && device.capabilities.conventions.originTopLeft ? 1 : 0));
         key = mixNumber(mixNumber(key, reachKey), landscape.chunkNodes.length);
         // A density change swaps every chunk's geometry, and a chunk waits for its new mesh.
         const first = landscape.chunkNodes[0];
@@ -1096,7 +1079,7 @@ export class ShadowPasses {
         // so front-face culling would erase half of it. A solid caster keeps the FRONT-face culling that
         // pushes shadow acne onto surfaces the camera cannot see.
         const cullMode: CullMode = anyCutout || material.config.side === 'double' ? 'none' : 'front';
-        const epoch = this._pipelines.epoch * 2 + (this._view.cubeFace && device.backend === 'webgpu' ? 1 : 0);
+        const epoch = this._pipelines.epoch * 2 + (this._view.cubeFace && device.capabilities.conventions.originTopLeft ? 1 : 0);
 
         let state = this._shadowCasterStates.get(node);
         if (!state || state.model !== model || state.material !== material || state.shaderType !== shaderType
@@ -1314,11 +1297,6 @@ export class ShadowPasses {
         // The static copy, as for the point faces (see `renderPointShadows`).
         this._prepareStaticAtlas(this._spotAtlas);
 
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-        GLState.cull(true);
-        GLState.cullFace('front');
-
         for (const node of casters) {
             const layer = this.spotSlots.layerOf(node.id);
             if (layer < 0) continue; // past MAX_SPOT_SHADOWS — this light simply goes unshadowed
@@ -1353,7 +1331,6 @@ export class ShadowPasses {
             this._drawCachedLayer(this._spotAtlas, layer, matrix, pos, far, mixTransform(HASH_SEED, matrix), false);
         }
 
-        GLState.cullFace('back');
         this.spotShadowsActive = true;
         this.spotShadowsDirty = true;
 
@@ -1420,13 +1397,10 @@ export class ShadowPasses {
         // reallocated with the live one (fresh storage holds undefined depth, so every face redraws).
         this._prepareStaticAtlas(this._pointAtlas);
 
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-        GLState.cull(true);
-        // Front-face culling, exactly as the cascade and spot passes do: rasterizing back faces puts
-        // the recorded occluder depth behind the lit surface, which is what lets the bias stay small.
-        // Safe here only because POINT_SHADOW_FACES are proper rotations — see that table's comment.
-        GLState.cullFace('front');
+        // The caster pipelines cull FRONT faces here as in the cascade and spot passes (see
+        // `cullMode` where the caster state is built): rasterizing back faces puts the recorded occluder
+        // depth behind the lit surface, which is what lets the bias stay small. Safe here only because
+        // POINT_SHADOW_FACES are proper rotations — see that table's comment.
 
         // The border, and so the fov, follows the filter radius: the kernel must not reach past what
         // the map holds. One texel over the radius covers the hardware's own 2x2 comparison filter.
@@ -1470,7 +1444,6 @@ export class ShadowPasses {
             }
         }
 
-        GLState.cullFace('back');
         this.pointShadowsActive = true;
         this.pointShadowsDirty = true;
         this.pointShadowFullUpdate = false;
@@ -1566,12 +1539,9 @@ export class ShadowPasses {
         const splits = computeCascadeSplits(cam.near, shadowFar, this.cascadeCount,
                                             this.shadowSplitLambda, this._csmSplits);
 
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-        GLState.cull(true);
-        // Front-face culling: rasterize back faces into the depth map so the recorded occluder depth
-        // sits behind the lit surface, which is what keeps a small bias from producing acne.
-        GLState.cullFace('front');
+        // The caster pipelines cull FRONT faces (see `cullMode` where the caster state is built):
+        // rasterizing back faces puts the recorded occluder depth behind the lit surface, which is what
+        // keeps a small bias from producing acne.
 
         this._ensureShadowCasters(scene);
 
@@ -1654,7 +1624,6 @@ export class ShadowPasses {
         this._layerLodMode = 'camera';
 
         this._renderFarCascade(scene, light, shadowFar);
-        GLState.cullFace('back');
 
         this._packCascadeUniforms();
         this._shadowFullUpdate = false;

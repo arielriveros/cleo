@@ -1,7 +1,5 @@
 import { mat4 } from 'gl-matrix';
-import { GLState } from '../systems/glState';
 import { ShaderManager } from '../systems/shaderManager';
-import { TextureManager } from '../systems/textureManager';
 import { MaterialSync, MATERIAL_VIEW_SIZE } from '../shaderOptimizer';
 import type { Material, CustomMaterial } from '../material';
 import type { Scene } from '../../core/scene/scene';
@@ -42,37 +40,6 @@ export class MaterialBinder {
 
     /** The per-view values riding in the material block, gathered for MaterialSync's comparison. */
     private readonly _materialView = new Float64Array(MATERIAL_VIEW_SIZE);
-
-    private _textureSlot(name: string): number {
-        switch (name) {
-            case 'texture': case 'baseTexture': case 'baseColorTexture': return 0;
-            case 'ormTexture': case 'specularReflectivityMap': return 1;
-            case 'emissiveMap': return 2;
-            case 'normalMap': return 3;
-            case 'maskMap': return 4;
-            // Unit 5 was freed when metallic/roughness/occlusion were packed into one ORM map. The
-            // parallax height field spends it; see the note in chunks/pbrGBuffer.wgsl for why this
-            // gets its own unit rather than riding in the normal map's alpha the way terrain does.
-            case 'displacementMap': return 5;
-            // The cel ramp rides unit 1, which is free on a cel material and only on a cel
-            // material: unit 1 belongs to the packed ORM / specular-reflectivity map, and those are
-            // written only by `systems/texturePacker.ts`, whose switch on the material type has no
-            // cel case. Adding one would collide here.
-            case 'rampMap': return 1;
-            default: return 0;
-        }
-    }
-
-    /**
-     * Slots a material carries as authoring inputs but never binds: `systems/texturePacker.ts` combines
-     * them into a derived slot (`ormTexture`, `specularReflectivityMap`) and the shader samples that.
-     * They MUST be skipped — `_textureSlot` falls through to unit 0, so a source slot left in the loop
-     * binds over the base-colour texture.
-     */
-    private static readonly _SOURCE_SLOTS = new Set([
-        'metallicMap', 'roughnessMap', 'occlusionMap', 'metallicRoughnessTexture',
-        'specularMap', 'reflectivityMap'
-    ]);
 
     private static readonly _UV_IDENTITY = [1, 1, 0, 0];
 
@@ -157,25 +124,12 @@ export class MaterialBinder {
         this._shaderManager.setUniform('u_material.specularAA', this._host.specularAa());
     }
 
-    public apply(material: Material): void {
-        this.applyProperties(material);
-        for (const [name, tex] of material.textures) {
-            if (MaterialBinder._SOURCE_SLOTS.has(name)) continue;
-            const slot = this._textureSlot(name);
-            // Samplers are `u_material_<field>` with an UNDERSCORE while the scalars above stay dotted:
-            // WGSL forbids an opaque type inside a uniform struct, so the samplers are hoisted out.
-            this._shaderManager.setUniform(`u_material_${name}`, slot);
-            const texture = TextureManager.Instance.getTexture(tex);
-            if (texture) texture.bind(slot);
-        }
-    }
-
     /**
-     * Upload a custom material's user uniforms to the currently bound program. Scalars and vectors go by
-     * bare `u_<name>`; user samplers bind from texture unit 9 upward — 0-5 std material, 6 shadow
-     * cascades, 7 env, 8 skybox and 15 spot shadow atlas are reserved.
+     * Upload a custom material's per-draw values to the currently bound program: time, camera, the
+     * forward scene helpers' inputs, and the user's scalar and vector uniforms by bare `u_<name>`. Its
+     * samplers belong to the bind group (`BindGroupCache.customGroup`).
      */
-    public applyCustom(material: CustomMaterial, samplersViaBindGroup: boolean = false): void {
+    public applyCustom(material: CustomMaterial): void {
         this._shaderManager.setUniform('u_time', performance.now() * 0.001);
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         if (material.renderMode === 'forward') {
@@ -186,31 +140,10 @@ export class MaterialBinder {
             this._shaderManager.setUniform('u_depthParams', [cam.near, cam.far,
                 cam.type === 'orthographic' ? 1 : 0, this._host.sceneBuffersLive() ? 1 : 0]);
         }
-        const fallback = TextureManager.Instance.getTexture('Null');
-        let unit = 9;
         for (const u of material.uniforms) {
-            if (u.type === 'sampler2D' || u.type === 'samplerCube') {
-                // A bind group already assigned this sampler its unit AND set the uniform; doing it
-                // again here would bind the texture to a second unit the allocator can reuse.
-                if (samplersViaBindGroup) continue;
-                // No unit ceiling: units are the backend's to assign.
-                const texId = material.textures.get(u.name);
-                const tex = (texId && TextureManager.Instance.getTexture(texId)) || fallback;
-                this._shaderManager.setUniform(`u_${u.name}`, unit);
-                if (tex) tex.bind(unit);
-                unit++;
-            } else {
-                const value = material.properties.has(u.name) ? material.properties.get(u.name) : u.value;
-                this._shaderManager.setUniform(`u_${u.name}`, value);
-            }
-        }
-        // The legacy (non-bind-group) path binds the forward scene samplers by unit too.
-        if (!samplersViaBindGroup && material.renderMode === 'forward') {
-            this._targets.sceneDepth.depth.bind(unit);
-            this._shaderManager.setUniform('u_sceneDepth', unit++);
-            const color = this._targets.refraction?.colors[0] ?? fallback;
-            if (color) color.bind(unit);
-            this._shaderManager.setUniform('u_sceneColor', unit++);
+            if (u.type === 'sampler2D' || u.type === 'samplerCube') continue;   // the bind group's
+            const value = material.properties.has(u.name) ? material.properties.get(u.name) : u.value;
+            this._shaderManager.setUniform(`u_${u.name}`, value);
         }
     }
 
@@ -243,37 +176,6 @@ export class MaterialBinder {
         this._shaderManager.setUniform('u_specularAA', this._host.specularAa());
         for (const [name, value] of material.properties)
             this._shaderManager.setUniform(name, value);
-    }
-
-    /** The legacy (non-bind-group) terrain textures. The values came first, from {@link applyTerrainProperties}. */
-    public applyTerrain(material: Material): void {
-        // Fixed slot layout, 4 units: the paint masks and the three surface arrays (see
-        // chunks/terrainStack.wgsl). Every binding is a 2D ARRAY, so a missing one takes the one-layer
-        // array fallback — a 2D texture on a sampler2DArray unit is a draw error. The scalar and array
-        // uniforms already match by name.
-        const fallback = this._bindGroups.fallbackFor('texture_2d_array<f32>');
-        const bindAt = (name: string, slot: number) => {
-            const texId = material.textures.get(name);
-            const tex = (texId && TextureManager.Instance.getTexture(texId)) || fallback;
-            tex.bind(slot);
-            this._shaderManager.setUniform(name, slot);
-        };
-        bindAt('u_masks', 0);
-        bindAt('u_surfAlbedo', 1);
-        bindAt('u_surfNormal', 2);
-        bindAt('u_surfOrm', 3);
-    }
-
-    public applyCull(side: 'front' | 'back' | 'double' | undefined): void {
-        switch (side) {
-            case 'back':
-                GLState.cull(true); GLState.cullFace('front'); break;
-            case 'double':
-                GLState.cull(false); break;
-            case 'front':
-            default:
-                GLState.cull(true); GLState.cullFace('back'); break;
-        }
     }
 
     /**

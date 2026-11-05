@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { setGLContext } from '../src/graphics/glContext';
+import { setGLContext } from '../src/graphics/rhi/webgl2/glContext';
 import { WebGL2Device } from '../src/graphics/rhi/webgl2/webgl2Device';
 import { setDevice } from '../src/graphics/rhi/deviceHandle';
-import { UniformBlockSet } from '../src/graphics/systems/uniformBlocks';
+import { UniformBlockSet } from '../src/graphics/rhi/webgl2/uniformBlocks';
 
 /**
  * std140 packing, against a driver-reported layout.

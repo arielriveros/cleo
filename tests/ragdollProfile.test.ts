@@ -11,7 +11,7 @@ import type { PhysicsBody } from '../src/physics/physicsBody';
 import type { Ragdoll } from '../src/physics/ragdoll';
 import { autoHumanoidProfile, parseRagdollProfile, ragdollLayout } from '../src/physics/ragdollProfile';
 import type { RagdollLayoutPart } from '../src/physics/ragdollProfile';
-import { setGLContext } from '../src/graphics/glContext';
+import { setGLContext } from '../src/graphics/rhi/webgl2/glContext';
 import { WebGL2Device } from '../src/graphics/rhi/webgl2/webgl2Device';
 import { setDevice } from '../src/graphics/rhi/deviceHandle';
 import { TEST_PHYSICS } from './helpers/testPhysics';

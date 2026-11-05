@@ -1,4 +1,4 @@
-import { gl } from '../../glContext';
+import { gl } from './glContext';
 import type { OcclusionQuerySet } from '../resources';
 
 /** Frames of queries in flight. WebGL never makes a result available in the frame it was issued. */

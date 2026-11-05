@@ -459,11 +459,12 @@ project; click it again (in Play or out) to unlock. Its sections, in order:
   bisection is the fallback for a cost the timers cannot see, so it must not shrink where they are
   weaker.
 
-On WebGPU the Passes rows are render *passes*, not the renderer scopes WebGL2 times, and the two
-lists are not interchangeable. A pass with no matching scope appears as `pass:…`, and there is no
-`frameEnd` row, because per-pass timestamps already exclude the end-of-frame drain it exists to
-absorb. Absolute values run high — the renderer submits one command buffer per pass, so each pass
-pays a submission at both ends of its own window. Compare passes with each other, not with WebGL2.
+On both backends the GPU column times render *passes* — WebGPU with timestamp queries, WebGL2 with a
+timer query around each pass — and files each pass under the renderer scope that contains it, so it
+lines up with the CPU column. A pass with no matching scope appears as `pass:…`. Copies, uploads and
+readbacks happen outside passes and are not timed. On WebGPU absolute values run high — the renderer
+submits one command buffer per pass, so each pass pays a submission at both ends of its own window —
+so compare passes with each other, not across backends.
 
 ### Reading it
 

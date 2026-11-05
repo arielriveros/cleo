@@ -1,10 +1,10 @@
 import { mat4, vec2, vec3, vec4 } from 'gl-matrix';
 import { gl } from './glContext';
-import { GLState } from './systems/glState';
-import { UniformBlockSet } from './systems/uniformBlocks';
+import { GLState } from './glState';
+import { UniformBlockSet } from './uniformBlocks';
 
 
-import type { ShaderProgram, AttributeInfo } from './rhi/shaderProgram';
+import type { ShaderProgram, AttributeInfo } from '../shaderProgram';
 
 type UniformInfo = {
     type: string,   // human readable type of the uniform

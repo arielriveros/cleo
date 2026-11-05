@@ -9,7 +9,6 @@ import { Material } from '../material';
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderPipeline } from '../rhi/resources';
 import type { BlendState, CullMode } from '../rhi/types';
-import { GLState } from '../systems/glState';
 import { Texture } from '../texture';
 import { ShadowMapProgram, DecalSurfaceProgram, DecalResolveProgram, DecalColorProgram } from './programs';
 import type { FrameView } from './frameView';
@@ -203,13 +202,11 @@ export class DecalPasses {
                         boundGeneration = objects.generation;
                     }
                 } else this._shaderManager.setUniform('u_model', chunk.worldTransform);
-                if (!this._passes.recordDraw(pass, chunk.model.mesh, 0, 0, -1, row)) chunk.model.mesh.draw('triangle-list');
+                this._passes.recordDraw(pass, chunk.model.mesh, 0, 0, -1, row);
             }
         }
         this._passes.endFullscreenPass(pass);
         this._decalReceiversReady = true;
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**
@@ -267,7 +264,7 @@ export class DecalPasses {
             // Bindings 0, 2, 4: the depth projected onto, the receiver depth, the G-buffer normal. None
             // of them is attached to this pass — the DBuffer has no depth attachment at all.
             pass.setBindGroup(2, this._bindGroups.textureGroup(pipeline, 2, [gBuffer.depth, receivers, gBuffer.colors[1]]));
-            if (!this._passes.recordDraw(pass, this._sys.sky.iblCubeMesh, 0, 0)) this._sys.sky.iblCubeMesh.draw();
+            this._passes.recordDraw(pass, this._sys.sky.iblCubeMesh, 0, 0);
         }
         this._passes.endFullscreenPass(pass);
 
@@ -288,9 +285,6 @@ export class DecalPasses {
         ]));
         this._passes.drawFullscreen(resolve);
         this._passes.endFullscreenPass(resolve);
-
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**
@@ -302,11 +296,6 @@ export class DecalPasses {
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'decals.emissive', false, undefined, false);
         this.drawColorDecals(pass, this.emissiveDecals, DecalPasses._DECAL_EMISSIVE_BLEND, this._view.invViewProj, 0);
         this._passes.endFullscreenPass(pass);
-        // The passes that follow are partly on the legacy path and inherit blend state.
-        this._passes.restoreDefaultBlend();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**
@@ -334,7 +323,7 @@ export class DecalPasses {
             this._setDecalUniforms(decal, material, invViewProj, mode);
             pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
             pass.setBindGroup(2, this._bindGroups.textureGroup(pipeline, 2, [depth, receivers]));
-            if (!this._passes.recordDraw(pass, this._sys.sky.iblCubeMesh, 0, 0)) this._sys.sky.iblCubeMesh.draw();
+            this._passes.recordDraw(pass, this._sys.sky.iblCubeMesh, 0, 0);
         }
     }
 

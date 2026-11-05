@@ -3,7 +3,6 @@ import { Logger } from '../../core/logger';
 import { Framebuffer } from '../framebuffer';
 import { TemporalHistory } from './temporalHistory';
 import { ssilTraceShape } from '../ssilSettings';
-import { GLState } from '../systems/glState';
 import { SsilProgram, SsilTemporalProgram, SsilBlurProgram, SsilHistoryProgram } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
@@ -249,9 +248,6 @@ export class SsilPasses {
             this._passes.drawFullscreenAndEnd(pass);
             this.ssaoResult = this.ssaoBlurFBO;
         }
-
-        GLState.depthMask(true);
-        GLState.depthTest(true);
     }
 
     /**
@@ -273,10 +269,5 @@ export class SsilPasses {
         this._shaderManager.setUniform('u_invProjection', this._invProjection);
         this._passes.drawFullscreenAndEnd(pass);
         this.ssilRadianceFrame = this._view.frameIndex;
-        // Put back what the overlay passes below expect, as the TAA resolve does.
-        this._targets.scene.bind();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 }

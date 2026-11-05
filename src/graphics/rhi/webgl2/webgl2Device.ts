@@ -1,5 +1,5 @@
-import { gl } from '../../glContext';
-import { GLState } from '../../systems/glState';
+import { gl } from './glContext';
+import { GLState } from './glState';
 import { Logger } from '../../../core/logger';
 import { shaderStats } from '../../shaderStats';
 import { glBufferTarget, glBufferUsageHint, glTextureTarget, glTextureFormat, glAddressMode, glMinFilter, glMagFilter } from './glEnums';
@@ -16,19 +16,36 @@ import type {
 } from '../device';
 import type { ComputePipeline, OcclusionQuerySet } from '../resources';
 import { WebGL2OcclusionQuerySet } from './webgl2Queries';
+import { WebGL2PassTimer } from './webgl2PassTimer';
 import type { RenderPassDescriptor } from '../types';
 import type { Buffer, Texture } from '../resources';
 import type { BufferUsageFlags, TextureFormat, TextureDimension, TextureUsageFlags, SamplerDescriptor, AddressMode, TextureConfigureDescriptor } from '../types';
 import { textureByteSize, TEXTURE_FORMAT_INFO, isDepthFormat } from '../types';
 import type { ShaderProgram, ShaderProgramDescriptor } from '../shaderProgram';
-import { Shader } from '../../shader';
+import { Shader } from './webgl2Shader';
 import { device } from '../deviceHandle';
+
+/**
+ * The unit every texture upload and allocation goes through: the last one, which no pass reaches. An
+ * upload binds the texture to its unit and unbinds it after, and on unit 0 that would blank whatever a
+ * draw already in progress bound there — the per-object table uploads between the draws of a pass, and
+ * a particle emitter allocates its state the first time it plays.
+ */
+let _uploadUnit = -1;
+function uploadUnit(): number {
+    if (_uploadUnit < 0)
+        _uploadUnit = Math.min(Number(gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS)) || 32, 32) - 1;
+    return _uploadUnit;
+}
 
 /**
  * How long a readback waits for its fence before taking the bytes anyway (which then blocks until the GPU
  * is done). Generous: a hidden tab throttles the timer that polls to once a second.
  */
 const READBACK_PATIENCE_MS = 5000;
+
+/** What a colour `loadOp: 'clear'` with no `clearValue` clears to — WebGPU's default as well. */
+const DEFAULT_CLEAR_COLOR = new Float32Array([0, 0, 0, 1]);
 
 /**
  * The WebGL2 implementation of the RHI device. One gap remains, on the command encoder rather than
@@ -43,17 +60,6 @@ export class WebGL2Device implements Device {
     private _submissionEpoch = 0;
     public endSubmission(): void { this._submissionEpoch++; }
 
-    /**
-     * The unit `writeTexture` uploads through: the last one, which no pass reaches. An upload binds the
-     * texture to its unit and unbinds it after, and on unit 0 that would blank whatever a draw already in
-     * progress bound there — the per-object table uploads between the draws of a pass.
-     */
-    private _uploadUnit = -1;
-    private get uploadUnit(): number {
-        if (this._uploadUnit < 0)
-            this._uploadUnit = Math.min(Number(gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS)) || 32, 32) - 1;
-        return this._uploadUnit;
-    }
 
     /** Live resources, so `destroy()` can release what the caller did not. */
     private readonly _buffers = new Set<WebGL2Buffer>();
@@ -70,8 +76,6 @@ export class WebGL2Device implements Device {
      * buffer id (-1 for none): numbers all the way, where the general key is a string built per draw.
      */
     private readonly _singleVertexArrays = new Map<WebGL2RenderPipeline, Map<number, Map<number, WebGLVertexArrayObject>>>();
-    /** VAOs a caller owns and binds itself — Mesh and TileMesh. See createVertexArray. */
-    private readonly _ownedVertexArrays = new Set<WebGLVertexArrayObject>();
     /** Deduped render targets, keyed by their attachment set. See createRenderTarget. */
     private readonly _renderTargets = new Map<string, WebGL2RenderTarget>();
     /** Attachment shapes already found complete (see {@link createRenderTarget}). */
@@ -98,10 +102,14 @@ export class WebGL2Device implements Device {
      */
     private readonly _pending = new Map<string, Map<string, { shader: Shader; submitAt: number; readyAt?: number }>>();
 
+    /** Per-render-pass GPU timing — see {@link setTimestampCollection}. */
+    private readonly _timer: WebGL2PassTimer;
+
     constructor(context: WebGL2RenderingContext) {
         this.capabilities = detectWebGL2Capabilities(context);
         this._parallelCompile = parallelShaderCompileExtension(context);
         this._canvas = context.canvas;
+        this._timer = new WebGL2PassTimer(context);
     }
 
     /** Returns the concrete backend buffer, since callers inside the WebGL2 half need its `handle`. */
@@ -119,7 +127,7 @@ export class WebGL2Device implements Device {
      * reallocation, matching `queue.writeBuffer`. Use {@link reallocateBuffer} to resize.
      */
     public writeBuffer(buffer: WebGL2Buffer, offset: number, data: ArrayBufferView): void {
-        gl.bindBuffer(buffer.target, buffer.handle);
+        buffer.bindForWrite();
         gl.bufferSubData(buffer.target, offset, data);
     }
 
@@ -128,7 +136,7 @@ export class WebGL2Device implements Device {
      * Right for a full rebuild, wrong for a partial edit. The only call whose size may change.
      */
     public reallocateBuffer(buffer: WebGL2Buffer, data: ArrayBufferView): WebGL2Buffer {
-        gl.bindBuffer(buffer.target, buffer.handle);
+        buffer.bindForWrite();
         gl.bufferData(buffer.target, data, buffer.hint);
         buffer.setSize(data.byteLength);
         // Always the same object here: `bufferData` re-specifies storage in place, so every existing
@@ -230,9 +238,11 @@ export class WebGL2Device implements Device {
 
     /**
      * Begin a render pass: bind the target, set the viewport, honour each load op. A `'clear'` with no
-     * `clearValue` uses the standing clear colour; `storeOp` is recorded but ignored.
+     * `clearValue` clears to (0, 0, 0, 1) (depth 1); `storeOp` is recorded but ignored.
      */
     public beginRenderPass(target: WebGL2RenderTarget, descriptor: RenderPassDescriptor): void {
+        // First, so the load ops below are inside the timed span as they are in WebGPU's.
+        this._timer.beginPass(descriptor.label ?? 'render-pass');
         target.bind();
 
         // Render into ONE layer of an array depth target, by re-pointing the depth attachment.
@@ -241,26 +251,37 @@ export class WebGL2Device implements Device {
         if (layer !== undefined && target.framebuffer && layered)
             target.framebuffer.attachDepthLayer(layered, layer);
 
+        // A 3D colour attachment renders into the slice the pass names, by re-pointing the attachment as
+        // the depth layer above is re-pointed.
+        if (target.framebuffer) {
+            for (const attachment of descriptor.colorAttachments) {
+                if (attachment.depthSlice === undefined) continue;
+                const view = target.colorViews[attachment.target];
+                if (view) target.framebuffer.attachColorLayer(attachment.target, view.texture.handle,
+                                                              attachment.depthSlice, view.baseMipLevel);
+            }
+        }
+
         // The TARGET's colour count, never the descriptor's — a descriptor names only the attachments
         // whose load op it cares about, and taking the count from it drops the rest of a G-buffer.
         if (target.framebuffer) target.framebuffer.setDrawBuffers(target.colorCount);
 
-        let clearBits = 0;
+        // Clears through `clearBufferfv` with an explicit value, never `gl.clear` — which reads the
+        // standing `clearColor`/`clearDepth` — so a clear means the same thing on both backends: the
+        // descriptor's value, (0, 0, 0, 1) / 1 when it names none, as WebGPU defaults them.
+        // A GL clear is also MASKED, by `colorMask` and `depthMask` alike, and WebGPU's `loadOp: 'clear'`
+        // is not. Force both, or a pass after one that wrote no colour (a depth prepass) or no depth
+        // silently clears nothing. The scissor test, which would clip a clear too, is never enabled.
+        let colourMaskForced = false;
         for (const attachment of descriptor.colorAttachments) {
             if (attachment.loadOp !== 'clear') continue;
-            if (attachment.clearValue) gl.clearBufferfv(gl.COLOR, attachment.target, attachment.clearValue);
-            else clearBits |= gl.COLOR_BUFFER_BIT;
+            if (!colourMaskForced) { GLState.colorMask(true, true, true, true); colourMaskForced = true; }
+            gl.clearBufferfv(gl.COLOR, attachment.target, attachment.clearValue ?? DEFAULT_CLEAR_COLOR);
         }
-        // A GL depth clear is MASKED by `depthMask` — `clearBufferfv` as much as `clear` — and WebGPU's
-        // `loadOp: 'clear'` is not. Force it, or a pass whose predecessor left depth writes off silently
-        // clears nothing and the frame draws against the last one's depth.
         if (descriptor.depthAttachment?.loadOp === 'clear') {
             GLState.depthMask(true);
-            if (descriptor.depthAttachment.clearValue !== undefined)
-                gl.clearBufferfv(gl.DEPTH, 0, [descriptor.depthAttachment.clearValue]);
-            else clearBits |= gl.DEPTH_BUFFER_BIT;
+            gl.clearBufferfv(gl.DEPTH, 0, [descriptor.depthAttachment.clearValue ?? 1]);
         }
-        if (clearBits !== 0) gl.clear(clearBits);
     }
 
     // --------------------------------------------------------------------------------------------
@@ -460,7 +481,7 @@ export class WebGL2Device implements Device {
      */
     public writeTexture(texture: WebGL2Texture, data: ArrayBufferView, width: number, height: number,
                         mipLevel: number = 0, arrayLayer: number = 0, x: number = 0, y: number = 0): void {
-        texture.bindForUpload(this.uploadUnit);
+        texture.bindForUpload();
         texture.write(data, width, height, mipLevel, arrayLayer, x, y);
         texture.unbind();
     }
@@ -564,6 +585,10 @@ export class WebGL2Device implements Device {
 
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this._copyRead.handle);
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this._copyDraw.handle);
+        // Masks do not apply to a blit by the spec, but drivers have disagreed; the scissor test, which
+        // DOES clip one, is never enabled by this backend.
+        GLState.colorMask(true, true, true, true);
+        GLState.depthMask(true);
         gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height,
                            depth ? gl.DEPTH_BUFFER_BIT : gl.COLOR_BUFFER_BIT, gl.NEAREST);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -594,44 +619,39 @@ export class WebGL2Device implements Device {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
-    // -- vertex state owned by a caller ------------------------------------------------------------
-
     /**
-     * A vertex array object owned by the caller — what `Mesh` and `TileMesh` bind themselves, as
-     * opposed to the ones {@link vertexArrayFor} builds. Tracked, so `destroy()` releases it.
+     * Time every render pass with `EXT_disjoint_timer_query_webgl2`, reported by its descriptor label —
+     * the same contract as WebGPU's timestamp queries (see WebGL2PassTimer).
      */
-    public createVertexArray(): WebGLVertexArrayObject {
-        const vao = gl.createVertexArray() as WebGLVertexArrayObject;
-        this._ownedVertexArrays.add(vao);
-        return vao;
+    public setTimestampCollection(enabled: boolean, sink: (label: string, ms: number) => void): void {
+        this._timer.setEnabled(enabled, sink);
     }
 
-    public deleteVertexArray(vao: WebGLVertexArrayObject): void {
-        this._ownedVertexArrays.delete(vao);
-        gl.deleteVertexArray(vao);
+    /** See {@link Device.collectTimestamps}. Never waits on the GPU. */
+    public collectTimestamps(): void { this._timer.collect(); }
+
+    /** See {@link Device.drainDebugErrors}: up to eight `getError` codes, the queue GL keeps. */
+    public drainDebugErrors(): number[] {
+        const errors: number[] = [];
+        for (let i = 0; i < 8; i++) {
+            const error = gl.getError();
+            if (error === gl.NO_ERROR) break;
+            errors.push(error);
+        }
+        return errors;
     }
-
-    /**
-     * Point the CURRENT VAO's element binding at `buffer` — VAO state, not global, which is how a mesh
-     * selects one of several LOD index buffers.
-     */
-    public bindIndexBuffer(buffer: WebGL2Buffer): void {
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer.handle);
-    }
-
-    /** No-op: WebGL2 timing wraps renderer-defined SCOPES and does not go through the RHI. */
-    public setTimestampCollection(_enabled: boolean, _sink: (label: string, ms: number) => void): void {}
-
-    /** No-op. See {@link setTimestampCollection}. */
-    public collectTimestamps(): void {}
 
     /** WebGL2 issues everything as it is recorded, so `finish()` is a no-op — see WebGL2CommandEncoder. */
     public createCommandEncoder(_label?: string): WebGL2CommandEncoder {
         return new WebGL2CommandEncoder((target, descriptor) =>
-            this.beginRenderPass(target as WebGL2RenderTarget, descriptor));
+            this.beginRenderPass(target as WebGL2RenderTarget, descriptor), this._endPass);
     }
 
+    /** Every render pass encoder calls this from `end()`: the close of its timed span. */
+    private readonly _endPass = (): void => this._timer.endPass();
+
     public destroy(): void {
+        this._timer.destroy();
         for (const byFragment of this._pending.values())
             for (const entry of byFragment.values()) entry.shader.dispose();
         this._pending.clear();
@@ -657,8 +677,6 @@ export class WebGL2Device implements Device {
             for (const byIndex of byVertex.values())
                 for (const vao of byIndex.values()) gl.deleteVertexArray(vao);
         this._singleVertexArrays.clear();
-        for (const vao of this._ownedVertexArrays) gl.deleteVertexArray(vao);
-        this._ownedVertexArrays.clear();
     }
 }
 
@@ -691,9 +709,19 @@ export class WebGL2Buffer implements Buffer {
         // Allocate up front when a size was given, so a later partial write has storage to land in.
         // A size of 0 means "sized by the first whole-buffer write".
         if (this._size > 0) {
-            gl.bindBuffer(this.target, this._handle);
+            this.bindForWrite();
             gl.bufferData(this.target, this._size, this.hint);
         }
+    }
+
+    /**
+     * Bind for an upload. ELEMENT_ARRAY_BUFFER is VERTEX ARRAY state: binding an index buffer while a
+     * cached VAO is current (every RHI draw leaves its VAO bound) would rewrite that VAO's index binding,
+     * and the next draw through it would read the wrong indices. So an index buffer is bound with no VAO.
+     */
+    public bindForWrite(): void {
+        if (this.target === gl.ELEMENT_ARRAY_BUFFER) GLState.bindVAO(null);
+        gl.bindBuffer(this.target, this._handle);
     }
 
     /** Bytes currently allocated. Changes only through {@link WebGL2Device.reallocateBuffer}. */
@@ -841,9 +869,10 @@ export class WebGL2Texture implements Texture {
 
     /**
      * Bind for MUTATION. texImage/texParameter/generateMipmap act on the active unit, so this forces
-     * both the unit and the binding rather than letting the cache elide either.
+     * both the unit and the binding rather than letting the cache elide either. Every mutating method
+     * below binds through here and unbinds when done, so no texture is left on the upload unit.
      */
-    public bindForUpload(unit: number = 0): void {
+    public bindForUpload(unit: number = uploadUnit()): void {
         this._boundSlot = unit;
         GLState.bindTextureForced(unit, this.target, this.handle);
     }
@@ -905,6 +934,7 @@ export class WebGL2Texture implements Texture {
         this._applySamplerState();
         if (mipMap) gl.generateMipmap(this.target);
         if (image) this.checkForErrors();
+        this.unbind();
     }
 
     /** The six cube-face targets, in GL face order. */
@@ -929,6 +959,7 @@ export class WebGL2Texture implements Texture {
         this._applySamplerState();
         if (mipMap) gl.generateMipmap(this.target);
         this.checkForErrors();
+        this.unbind();
     }
 
     /** Upload one cube face, by index into +X -X +Y -Y +Z -Z — not a GL face enum. */
@@ -940,6 +971,7 @@ export class WebGL2Texture implements Texture {
         gl.texImage2D(target, 0, this._internalFormat, this._glFormat, this._type, image);
         if (mipMap) gl.generateMipmap(this.target);
         this.checkForErrors();
+        this.unbind();
     }
 
     /**
@@ -956,12 +988,14 @@ export class WebGL2Texture implements Texture {
         gl.texParameteri(this.target, gl.TEXTURE_WRAP_S, glAddressMode(wrapping));
         gl.texParameteri(this.target, gl.TEXTURE_WRAP_T, glAddressMode(wrapping));
         this.checkForErrors();
+        this.unbind();
     }
 
     public uploadRegion(x: number, y: number, width: number, height: number, data: Uint8Array): void {
         this.bindForUpload();
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         gl.texSubImage2D(this.target, 0, x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, data);
+        this.unbind();
     }
 
     /**
@@ -1007,6 +1041,7 @@ export class WebGL2Texture implements Texture {
         gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+        this.unbind();
     }
 
     /**
@@ -1025,6 +1060,7 @@ export class WebGL2Texture implements Texture {
         gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_T, wrap);
         gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_R, wrap);
         this.checkForErrors();
+        this.unbind();
     }
 
     /**
@@ -1046,6 +1082,7 @@ export class WebGL2Texture implements Texture {
             gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_COMPARE_FUNC, gl.LESS);
         }
         this.checkForErrors();
+        this.unbind();
     }
 
     /**
@@ -1062,6 +1099,7 @@ export class WebGL2Texture implements Texture {
                         width, height, Math.max(1, layers));
         this._applySamplerState();
         this.checkForErrors();
+        this.unbind();
     }
 
     /**
@@ -1073,12 +1111,14 @@ export class WebGL2Texture implements Texture {
         gl.texParameteri(this.target, gl.TEXTURE_COMPARE_MODE, enabled ? gl.COMPARE_REF_TO_TEXTURE : gl.NONE);
         gl.texParameteri(this.target, gl.TEXTURE_MIN_FILTER, enabled ? gl.LINEAR : gl.NEAREST);
         gl.texParameteri(this.target, gl.TEXTURE_MAG_FILTER, enabled ? gl.LINEAR : gl.NEAREST);
+        this.unbind();
     }
 
     /** The encoder argument is WebGPU's; `gl.generateMipmap` is immediate-mode and already ordered. */
     public generateMipmaps(): void {
         this.bindForUpload();
         gl.generateMipmap(this.target);
+        this.unbind();
     }
 
     // Drain any already-flagged error first: `gl.getError()` is a GLOBAL sticky flag, so a later check

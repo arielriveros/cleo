@@ -1,8 +1,8 @@
 // Reflecting a WGSL module the engine did not build — a custom material, translated by naga at runtime.
 // Shares `tools/wgslLayout.mjs` with the build-time path, so the layout rules have one implementation.
-import { findResources, findUniformBlocks } from '../../../../tools/wgslLayout.mjs';
-import type { UniformBlockLayout } from '../uniformSet';
-import type { ShaderResource } from '../types';
+import { findResources, findUniformBlocks } from '../../../tools/wgslLayout.mjs';
+import type { UniformBlockLayout } from './uniformSet';
+import type { ShaderResource } from './types';
 
 /** The bind-group entries a module declares, in the RHI's own shape. */
 export function resourcesOf(wgsl: string): ShaderResource[] {

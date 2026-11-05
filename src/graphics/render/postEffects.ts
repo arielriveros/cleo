@@ -9,7 +9,6 @@ import { RenderPass } from '../gpuProfiler';
 import { CustomMaterial } from '../material';
 import { ADDITIVE_BLEND } from '../rhi/types';
 import { customShaderModules, screenShaderResources, screenUserSamplerNames } from '../systems/customShaders';
-import { GLState } from '../systems/glState';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { PresentProgram, OutlinePostProgram, BloomProgram, BloomDownsampleProgram, BloomUpsampleProgram, ComposerProgram, DofCocProgram, DofGatherProgram, DofCompositeProgram, LensFlareProgram, LensFlareCompositeProgram, FxaaProgram, VignetteProgram, FilmGrainProgram, ChromaticAberrationProgram } from './programs';
@@ -295,7 +294,7 @@ export class PostEffects {
         this._shaderManager.setUniform('u_sunUV', sun.uv);
         this._shaderManager.setUniform('u_sunVisible', sun.visible);
         this._shaderManager.setUniform('u_exposure', this._view.exposure); // lets a pass invert the final present resolve
-        this._materials.applyCustom(mat, true);   // u_time, u_viewPos + user VALUE uniforms only
+        this._materials.applyCustom(mat);   // u_time, u_viewPos + user VALUE uniforms only
         this._passes.drawFullscreenAndEnd(pass);
     }
 
@@ -396,11 +395,6 @@ export class PostEffects {
                     [PostEffects.BLOOM_FILTER_RADIUS / from.width, PostEffects.BLOOM_FILTER_RADIUS / from.height]);
                 this._passes.drawFullscreenAndEnd(pass);
             }
-            // Still restored by hand: the passes that follow are on the legacy path and enable BLEND
-            // without setting the function, so they inherit whatever was left. Drop this once they are
-            // migrated and their own pipelines say what they need.
-            GLState.blend(false);
-            this._passes.restoreDefaultBlend();
         }
     }
 
@@ -598,11 +592,6 @@ export class PostEffects {
         this._shaderManager.setUniform('u_flareIntensity', this.lensFlareIntensity);
         this._shaderManager.setUniform('u_dirtIntensity', this._lensDirtStrength(dirt));
         this._passes.drawFullscreenAndEnd(upPass);
-
-        // Restored by hand, as god rays does: the passes that follow are still on the legacy path and
-        // enable BLEND without setting the function, so they inherit whatever was left here.
-        GLState.blend(false);
-        this._passes.restoreDefaultBlend();
     }
 
     public fxaaPass(source: Framebuffer, target: Framebuffer): void {

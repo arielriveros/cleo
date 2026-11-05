@@ -11,7 +11,6 @@ import type { ParticleSimFrame, ParticleDrawFrame } from '../particles/particleR
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderTarget } from '../rhi/resources';
 import { keyLight } from '../skyNight';
-import { GLState } from '../systems/glState';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -66,12 +65,6 @@ export class ParticlePasses {
         this._passes.scope('particles.sim');
         this.particles.simulate(scene, frame);
         this._passes.endScope();
-        // The WebGL2 ping-pong went through pipelines that leave blend and depth off; put back what the
-        // legacy draws that follow expect, as the cloud pass does.
-        this._passes.restoreDefaultBlend();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     private _particleSimFrame(scene: Scene): ParticleSimFrame {
@@ -112,10 +105,6 @@ export class ParticlePasses {
         const pass = this._passes.beginFullscreenPass(target, 'particles', false, undefined, false);
         this.particles.draw(nodes, this.particleDrawFrame(scene, pass, target));
         this._passes.endFullscreenPass(pass);
-        this._passes.restoreDefaultBlend();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**

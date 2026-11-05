@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     Ring, frameHistory, gpuProfiler, RENDER_PASSES, TOGGLEABLE_PASSES,
-    NullGpuProfiler, WebGPUGpuProfiler, initializeGpuProfiler,
+    NullGpuProfiler, PassGpuProfiler, initializeGpuProfiler,
 } from '../src/graphics/gpuProfiler';
 import type { Device } from '../src/graphics/rhi/device';
 
@@ -124,8 +124,6 @@ describe('gpuProfiler without a GL context', () => {
         expect(gpuProfiler.available).toBe(false);
         expect(() => {
             gpuProfiler.enabled = true;
-            gpuProfiler.beginPass('geometry');
-            gpuProfiler.endPass();
             gpuProfiler.endFrame();
             gpuProfiler.enabled = false;
         }).not.toThrow();
@@ -135,7 +133,7 @@ describe('gpuProfiler without a GL context', () => {
 });
 
 // ------------------------------------------------------------------------------------------------
-// The two-backend facade
+// The facade and the per-pass backend
 // ------------------------------------------------------------------------------------------------
 
 /**
@@ -174,18 +172,16 @@ describe('NullGpuProfiler', () => {
         const p = new NullGpuProfiler('no device yet');
         expect(p.available).toBe(false);
         expect(p.unavailableReason).toBe('no device yet');
-        expect(p.attribution).toBe('scopes');
-        expect(() => { p.beginPass('geometry'); p.endPass(); p.endFrame(); p.reset(); }).not.toThrow();
+        expect(() => { p.endFrame(); p.reset(); }).not.toThrow();
         expect(p.historyFor('geometry')).toBeNull();
     });
 });
 
-describe('WebGPUGpuProfiler', () => {
+describe('PassGpuProfiler', () => {
     it('turns collection on and off through the device, never behind its back', () => {
         const { device, state } = stubDevice(true);
-        const p = new WebGPUGpuProfiler(device);
+        const p = new PassGpuProfiler(device);
         expect(p.available).toBe(true);
-        expect(p.attribution).toBe('passes');
         expect(p.unavailableReason).toBeNull();
 
         p.enabled = true;
@@ -198,7 +194,7 @@ describe('WebGPUGpuProfiler', () => {
         // An adapter is allowed not to offer it, and asking for timestamps anyway is a validation
         // error rather than a downgrade — so nothing may reach the device in this state.
         const { device, state } = stubDevice(false);
-        const p = new WebGPUGpuProfiler(device);
+        const p = new PassGpuProfiler(device);
         expect(p.available).toBe(false);
         expect(p.unavailableReason).toMatch(/timestamp-query/);
 
@@ -212,7 +208,7 @@ describe('WebGPUGpuProfiler', () => {
 
     it('maps a pass label onto its scope, and an unmapped one onto a pass: row', () => {
         const { device, state } = stubDevice(true);
-        const p = new WebGPUGpuProfiler(device);
+        const p = new PassGpuProfiler(device);
         p.enabled = true;
         state.pending.push(['deferredLighting', 2], ['brdf', 0.5]);
         p.endFrame();
@@ -229,7 +225,7 @@ describe('WebGPUGpuProfiler', () => {
         // chain is 8+ separate render passes here. Reporting them individually under one name would
         // make the row read as the LAST blur step rather than the chain.
         const { device, state } = stubDevice(true);
-        const p = new WebGPUGpuProfiler(device);
+        const p = new PassGpuProfiler(device);
         p.enabled = true;
         state.pending.push(['bloom.blur', 1], ['bloom.blur', 2], ['bloom.blur', 3]);
         p.endFrame();
@@ -244,7 +240,7 @@ describe('WebGPUGpuProfiler', () => {
         // ordinary case. Counting it as a resolved frame would age every row towards STALE_PASS_FRAMES
         // while the picture is still being drawn.
         const { device, state } = stubDevice(true);
-        const p = new WebGPUGpuProfiler(device);
+        const p = new PassGpuProfiler(device);
         p.enabled = true;
         state.pending.push(['geometry', 4]);
         p.endFrame();
@@ -257,7 +253,7 @@ describe('WebGPUGpuProfiler', () => {
 
     it('reset() clears the rows and the total', () => {
         const { device, state } = stubDevice(true);
-        const p = new WebGPUGpuProfiler(device);
+        const p = new PassGpuProfiler(device);
         p.enabled = true;
         state.pending.push(['geometry', 4]);
         p.endFrame();
@@ -276,8 +272,7 @@ describe('the gpuProfiler facade', () => {
             gpuProfiler.enabled = true;                 // switched on before any device exists
             expect(gpuProfiler.available).toBe(false);  // the Null backend, still
 
-            initializeGpuProfiler(device, null);
-            expect(gpuProfiler.attribution).toBe('passes');
+            initializeGpuProfiler(device);
             expect(gpuProfiler.available).toBe(true);
             // The panel's checkbox is set before boot as often as after it; a swap that dropped it
             // would leave the UI showing an enabled profiler that is collecting nothing.
@@ -288,10 +283,6 @@ describe('the gpuProfiler facade', () => {
             gpuProfiler.endFrame();
             expect(gpuProfiler.totalMs).toBeCloseTo(3);
             expect(gpuProfiler.historyFor('geometry')?.last).toBeCloseTo(3);
-
-            // beginPass/endPass are no-ops on this backend rather than errors: the renderer's ~30 call
-            // sites are unconditional and must stay that way.
-            expect(() => { gpuProfiler.beginPass('geometry'); gpuProfiler.endPass(); }).not.toThrow();
         } finally {
             gpuProfiler.enabled = false;
             gpuProfiler.useBackend(new NullGpuProfiler('test teardown'));
@@ -299,16 +290,16 @@ describe('the gpuProfiler facade', () => {
     });
 
     it('turns the outgoing backend off before swapping it out', () => {
-        // On WebGPU `enabled = false` is what releases the device's sink. A backend left enabled
+        // `enabled = false` is what releases the device's sink. A backend left enabled
         // behind the facade would go on filling a map nothing reads, for the life of the page.
         const first = stubDevice(true);
         const second = stubDevice(true);
         try {
-            initializeGpuProfiler(first.device, null);
+            initializeGpuProfiler(first.device);
             gpuProfiler.enabled = true;
             expect(first.state.enabled).toBe(true);
 
-            initializeGpuProfiler(second.device, null);
+            initializeGpuProfiler(second.device);
             expect(first.state.enabled).toBe(false);
             expect(second.state.enabled).toBe(true);
         } finally {
@@ -317,14 +308,17 @@ describe('the gpuProfiler facade', () => {
         }
     });
 
-    it('installs a Null backend for a WebGL2 device with no context to time', () => {
-        const device = { backend: 'webgl2', capabilities: { backend: 'webgl2' } } as unknown as Device;
+    it('is unavailable, with the reason, on a device that cannot time passes', () => {
+        // The same profiler for both backends: whether timing works is the device's capability.
+        const { device, state } = stubDevice(false);
         try {
-            initializeGpuProfiler(device, null);
+            initializeGpuProfiler(device);
+            gpuProfiler.enabled = true;
             expect(gpuProfiler.available).toBe(false);
-            expect(gpuProfiler.attribution).toBe('scopes');
-            expect(gpuProfiler.unavailableReason).toMatch(/WebGL2 context/);
+            expect(gpuProfiler.unavailableReason).toMatch(/timestamp-query|timer_query/);
+            expect(state.enabled).toBe(false);
         } finally {
+            gpuProfiler.enabled = false;
             gpuProfiler.useBackend(new NullGpuProfiler('test teardown'));
         }
     });

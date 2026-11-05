@@ -5,7 +5,6 @@ import { Scene } from '../../core/scene/scene';
 import { IDENTITY_LUT_SIZE } from '../colorGrading';
 import { Framebuffer } from '../framebuffer';
 import { device } from '../rhi/deviceHandle';
-import { GLState } from '../systems/glState';
 import { Texture } from '../texture';
 import { ProbePreviewProgram, IrradianceProgram, PrefilterProgram, PresentProgram } from './programs';
 import { SkyPasses } from './sky';
@@ -109,7 +108,7 @@ export class Capture {
         const pixels = await device.readPixels(this._offscreenFBO.colors[0].attachmentView, 0, 0, size, size);
         // A resampled scene buffer: `presentThumbnail` blits the lit scene through the screen
         // quad, so these rows are the scene's rows and the backend rule applies.
-        return Capture._encodePNG(pixels, size, size, device.backend === 'webgl2'); // already square
+        return Capture._encodePNG(pixels, size, size, !device.capabilities.conventions.readbackRowsTopDown); // already square
     }
 
     /**
@@ -146,11 +145,6 @@ export class Capture {
 
     /** Convolve a source environment cubemap into diffuse-irradiance and prefiltered-specular cubemaps. */
     public bakeIBL(sourceCube: Texture, sourceRes: number): { irradiance: Texture, prefiltered: Texture } {
-        GLState.depthTest(false);
-        GLState.depthMask(false);
-        GLState.blend(false);
-        GLState.cull(false);
-
         // Diffuse irradiance (small, no mips).
         const irradiance = new Texture({ target: 'cubemap', precision: 'high', mipMap: false });
         irradiance.createCubemapTarget(SkyPasses.IRRADIANCE_SIZE, 1);
@@ -170,8 +164,6 @@ export class Capture {
         }
 
         this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
-        GLState.depthMask(true);
-        GLState.depthTest(true);
         return { irradiance, prefiltered };
     }
 

@@ -12,7 +12,6 @@ import type { ShaderProgram } from '../rhi/shaderProgram';
 import { keyLight, moonDirection } from '../skyNight';
 import type { KeyLight } from '../skyNight';
 import { customForwardTypes } from '../systems/customShaders';
-import { GLState } from '../systems/glState';
 import { Texture } from '../texture';
 import { DeferredLightingProgram } from './programs';
 import { ShadowPasses } from './shadows';
@@ -186,10 +185,8 @@ export class LightingPasses {
         for (const shaderName of this._forwardShaders()) {
             this._shaderManager.bind(shaderName);
             this._shaderManager.setUniform('u_useEnvMap', envCube ? true : false);
-            this._shaderManager.setUniform('u_envMap', 7);
             this._shaderManager.setUniform('u_envMapLinear', probeCube ? true : false);
         }
-        envCube?.bind(7);
     }
 
     private readonly _probeLobes: [number[], number[]] = [[1, 1], [1, 1]];
@@ -279,10 +276,6 @@ export class LightingPasses {
 
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
-
-        // Still restored by hand: the passes that follow are on the legacy path and inherit this.
-        GLState.depthMask(true);
-        GLState.depthTest(true);
     }
 
     private _setDeferredLighting(scene: Scene): void {
@@ -479,7 +472,7 @@ export class LightingPasses {
                 far: Math.min(camera.far, this.clusterDistance),
                 fovY: camera.fov * Math.PI / 180,
                 aspect: camera.ratio,
-            }, this._targets.scene.width, this._targets.scene.height, device.backend === 'webgpu');
+            }, this._targets.scene.width, this._targets.scene.height, device.capabilities.conventions.originTopLeft);
         }
 
         this.packLightRecords(scene);

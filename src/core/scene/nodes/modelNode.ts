@@ -103,7 +103,6 @@ export class ModelNode extends Node {
 
     public initializeModel(): void {
         const shader = ShaderManager.Instance.getShader(this._model.material.type);
-        this._model.mesh.initializeVAO(shader.attributes);
         // Extracted rather than inline so the packing rule has one home: the stride is not constant —
         // a position-and-uv program packs to 20 bytes and a full PBR one to 56.
         const attributes = geometryAttributesFor(shader.attributes);

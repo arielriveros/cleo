@@ -4,14 +4,12 @@ import { isEditorOnlyNode } from '../../core/scene/editorNodes';
 import { ModelNode } from '../../core/scene/nodes/modelNode';
 import { SpriteNode } from '../../core/scene/nodes/spriteNode';
 import { Scene } from '../../core/scene/scene';
-import { gl } from '../glContext';
 import { Mesh } from '../mesh';
 import type { RenderPassEncoder } from '../rhi/device';
 import { device } from '../rhi/deviceHandle';
 import type { Buffer as RhiBuffer, RenderTarget } from '../rhi/resources';
 import { OVERLAY_BLEND, OVERLAY_COMPOSITE_BLEND, BufferUsage } from '../rhi/types';
 import type { DepthStencilState } from '../rhi/types';
-import { GLState } from '../systems/glState';
 import { ModelDraw } from './modelDraw';
 import type { MaterialDrawState } from './modelDraw';
 import { DEPTH_ALWAYS, DEPTH_TEST, PipelineMemo } from './pipelineCache';
@@ -75,7 +73,7 @@ export class EditorOverlays {
     private readonly _pipelineMemo = new PipelineMemo();
     private readonly _drawState: MaterialDrawState = {
         targets: 1, depthStencil: DEPTH_TEST, blend: OVERLAY_BLEND, customMode: 'forward', frameLighting: true,
-        terrainSelfShadow: false, viaRHI: true, envCube: null, memo: this._pipelineMemo,
+        terrainSelfShadow: false, envCube: null, memo: this._pipelineMemo,
     };
 
     // One instance buffer PER draw set, never one shared by all four — `_drawSkeletonOverlay` records
@@ -124,12 +122,6 @@ export class EditorOverlays {
         this._shaderManager.setUniform('u_fadeFar', fadeFar);
 
         this._passes.drawFullscreenAndEnd(pass);
-
-        // Still set by hand: the overlay passes that follow are on the legacy path and inherit blend
-        // and depth-mask state rather than declaring their own. The OVERLAY pair, not the default one
-        // — the buffer these are all writing needs its coverage alpha accumulated.
-        this._setOverlayBlend();
-        GLState.depthMask(true);
     }
 
     private _collectAllChildren(node: any, allNodes: any[]): void {
@@ -246,9 +238,6 @@ export class EditorOverlays {
             }
         }
         this._passes.endFullscreenPass(pass);
-
-        // Restore the scene framebuffer for any subsequent draws.
-        this._targets.scene.bind();
     }
 
     /**
@@ -272,12 +261,10 @@ export class EditorOverlays {
         // which then gets the raster projection untouched.
         const animated = this._modelDraw.beginModel(node, type, node.model.material.config.depthNudge ?? 0);
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
-        // Through the same material binder as the scene's own draws: a bind group where the program has
-        // build-time reflection, the hand-applied path otherwise. A LIT helper (the camera gizmo is
+        // Through the same material binder as the scene's own draws. A LIT helper (the camera gizmo is
         // Blinn-Phong) reads the frame's lights and shadow maps from group 3 like any forward draw.
         const state = this._drawState;
         state.depthStencil = depthStencil;
-        state.viaRHI = !!reflection;
         this._modelDraw.drawMaterials(pass, node, type, reflection, animated, state);
     }
 
@@ -322,38 +309,15 @@ export class EditorOverlays {
             // No depth writes: the attachment is the scene's own.
             const depthTested = DEPTH_TEST;
             const pass = this._beginOverlayPass('overlay.helpers');
-            GLState.blend(true);
-            this._setOverlayBlend();
-            GLState.depthMask(false);
             for (const node of helperNodes) this._drawOverlayNode(pass, node, depthTested);
-            // Re-asserted: a helper on the legacy path goes through `_materials.apply`, which sets its
-            // own blend, and an icon that inherited THAT would stop accumulating coverage alpha.
-            this._setOverlayBlend();
             // Icons are billboards and always transparent; `_sprites.renderSprite` handles the constraint.
-            // `false` for manageDepth — this pass owns the depth state for the whole batch.
-            for (const node of icons) this._sprites.renderSprite(node, false, pass, OVERLAY_BLEND);
+            for (const node of icons) this._sprites.renderSprite(node, pass, OVERLAY_BLEND);
             this._passes.endFullscreenPass(pass);
-            GLState.depthMask(true);
         }
 
         // Gizmos on top (also draws the editor skeleton overlay when set).
         if ((gizmoNodes.length > 0 || this.skeletonOverlay) && this._passes.beginPass('gizmos'))
             this._renderGizmos(gizmoNodes);
-
-        // Hand the scene buffer back: the selection mask and the legacy WebGL2 paths below assume it.
-        this._targets.scene.bind();
-        this._passes.restoreDefaultBlend();
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-    }
-
-    /**
-     * `OVERLAY_BLEND` as raw GL state, for the legacy draws in the overlay that still inherit blend
-     * rather than declaring it on a pipeline. Separate factors, never `blendFunc`: the alpha half is
-     * the entire point here, and `tests/cloudTemporal` forbids the collapsed call outright.
-     */
-    private _setOverlayBlend(): void {
-        if (gl) GLState.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     }
 
     private _renderGizmos(gizmoNodes: ModelNode[]): void {
@@ -371,20 +335,15 @@ export class EditorOverlays {
         this._drawSkeletonOverlay(pass, depthAlways);
 
         this._passes.endFullscreenPass(pass);
-        // Depth testing back on for whatever draws next, which is still on the legacy path.
-        GLState.depthTest(true);
     }
 
     private _ensureOverlayMeshes(): void {
         if (this._overlaySphereMesh && this._overlayBoneMesh) return;
-        // Position-only base geometry: init the VAO with the single-attribute shadowMap shader (spheres/
-        // cubes may lack tangents, so a 5-attr layout would mismatch). Instance matrices are wired
-        // separately via setupInstanceMatrixBuffer (mirrors _foliage.foliagePass).
-        const attrs = this._shaderManager.getShader('shadowMap').attributes;
+        // Position-only base geometry (spheres/cubes may lack tangents); the instance matrices ride in
+        // their own vertex buffer, slot 1 of the instanced pipeline.
         const build = (g: Geometry): Mesh => {
             const m = new Mesh();
             m.create(g.getData(['position']), g.vertexCount, g.indices);
-            m.initializeVAO(attrs);
             return m;
         };
         if (!this._overlaySphereMesh) this._overlaySphereMesh = build(Geometry.Sphere(8, 1));
@@ -452,26 +411,18 @@ export class EditorOverlays {
                                          usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
             buf = this._overlayInstanceBuffers[set] =
                 device.reallocateBuffer(buf, matrices.subarray(0, count * 16));
-            if (pipeline && mesh.activeIndexBuffer) {
-                // The overlay never sets `hasTexture`, so nothing here is actually sampled — but every
-                // sampler the shader declares still has to reference a complete texture or the group
-                // is rejected whole. The count comes from the PIPELINE rather than a literal: this
-                // used to pass one fallback, and adding the cutout mask to the basic chunks turned
-                // that into "Number of entries (2) did not match the expected number (4)", which
-                // invalidated the group, then the command buffer, and rendered WebGPU entirely black.
-                const overlayTextures = pipeline.resources
-                    .filter(r => r.group === 0 && r.kind === 'texture')
-                    .map(() => this._bindGroups.fallbackTexture);
-                pass!.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, overlayTextures));
-                pass!.setVertexBuffer(0, mesh.vertexBuffer);
-                pass!.setVertexBuffer(1, buf!);
-                pass!.setIndexBuffer(mesh.activeIndexBuffer, mesh.activeIndexFormat);
-                pass!.drawIndexed(mesh.activeIndexCount, count);
-            } else {
-                mesh.setupInstanceMatrixBuffer(buf!, 5);
-                mesh.drawInstanced(count, 'triangle-list');
-                mesh.teardownInstanceMatrixBuffer(5);
-            }
+            if (!pipeline) return;
+            // The overlay never sets `hasTexture`, so nothing here is actually sampled — but every
+            // sampler the shader declares still has to reference a complete texture or the group
+            // is rejected whole. The count comes from the PIPELINE rather than a literal: this
+            // used to pass one fallback, and adding the cutout mask to the basic chunks turned
+            // that into "Number of entries (2) did not match the expected number (4)", which
+            // invalidated the group, then the command buffer, and rendered WebGPU entirely black.
+            const overlayTextures = pipeline.resources
+                .filter(r => r.group === 0 && r.kind === 'texture')
+                .map(() => this._bindGroups.fallbackTexture);
+            pass!.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, overlayTextures));
+            this._passes.recordInstancedDraw(pass!, mesh, buf!, count);
         };
 
         // Bones first, joints over them, role markers above those, and the selection highlight last of all —

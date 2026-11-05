@@ -262,7 +262,7 @@ export class FluidVolumeNode extends Node {
         const [dx, dy, dz] = this.detailResolution;
         const cells = dx * dy * dz;
         if (!this._detail[0] || a.length < cells * 3 || b.length < cells * 3) return;
-        const half = device.backend === 'webgpu';
+        const half = !device.capabilities.conventions.writeTextureConvertsFloatToHalf;
         const floats = this._detailFloats && this._detailFloats.length === cells * 4 ? this._detailFloats : (this._detailFloats = new Float32Array(cells * 4));
         if (half && (!this._detailHalf || this._detailHalf.length !== cells * 4)) this._detailHalf = new Uint16Array(cells * 4);
         const slice = dx * dy * 4;
@@ -288,7 +288,7 @@ export class FluidVolumeNode extends Node {
         const slice = nx * ny * 4;
         if (data.length < slice * nz) throw new Error(`FluidVolumeNode.upload: expected ${slice * nz} floats, got ${data.length}`);
         // WebGL2 converts FLOAT to the half-float storage itself; WebGPU takes the texel bytes as stored.
-        const half = device.backend === 'webgpu';
+        const half = !device.capabilities.conventions.writeTextureConvertsFloatToHalf;
         if (half && (!this._half || this._half.length !== slice * nz)) this._half = new Uint16Array(slice * nz);
         if (half) floatsToHalves(data, this._half!);
         for (let z = 0; z < nz; z++) {

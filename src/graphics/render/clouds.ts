@@ -5,16 +5,13 @@ import { Scene } from '../../core/scene/scene';
 import { atmosphereTransmittance, shHemisphereMeans } from '../cloudLighting';
 import { Framebuffer } from '../framebuffer';
 import { TemporalHistory } from './temporalHistory';
-import { gl } from '../glContext';
 import { device } from '../rhi/deviceHandle';
 import type { RenderPipeline, BindGroup } from '../rhi/resources';
 import { ShaderStage, BufferUsage } from '../rhi/types';
 import type { BlendState } from '../rhi/types';
-import { glDevice } from '../rhi/webgl2/webgl2Device';
 import { keyLight } from '../skyNight';
-import { GLState } from '../systems/glState';
 import { Texture } from '../texture';
-import { VolumetricCloudsProgram, CloudUpsampleProgram, CloudNoiseBakeComputeProgram, CloudTemporalResolveProgram } from './programs';
+import { VolumetricCloudsProgram, CloudUpsampleProgram, CloudNoiseBakeProgram, CloudNoiseBakeComputeProgram, CloudTemporalResolveProgram } from './programs';
 import { QUALITY_TIERS } from './settingsTypes';
 import type { QualityPreset } from './settingsTypes';
 import type { FrameView } from './frameView';
@@ -309,14 +306,10 @@ export class VolumetricCloudPasses {
         this.bakeCloudNoise();
         if (!this.cloudBaseNoise || !this.cloudDetailNoise) return;
 
-        // Fullscreen overlay: no depth test/write (occlusion handled via the depth texture), alpha blend.
-        GLState.depthTest(false);
-        GLState.depthMask(false);
-        GLState.blend(true);
-        // Clouds are bloom-eligible, so coverage goes into the mask alpha instead of the default
-        // mask-preserving blend. The shader outputs PREMULTIPLIED colour, so RGB and alpha share
-        // ONE, ONE_MINUS_SRC_ALPHA. Guarded: WebGPU carries the same factors in `CLOUD_BLEND`.
-        if (gl) GLState.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        // Fullscreen overlay with no depth (occlusion is handled through the depth texture), blended by
+        // `CLOUD_BLEND`: clouds are bloom-eligible, so coverage goes into the mask alpha instead of the
+        // default mask-preserving blend, and the shader outputs PREMULTIPLIED colour, so RGB and alpha
+        // share ONE, ONE_MINUS_SRC_ALPHA.
 
         // One pipeline and one texture group for the raymarch, reused by whichever target it lands in.
         // The helpers open their own passes and re-apply both; the uniforms below are written once.
@@ -371,12 +364,6 @@ export class VolumetricCloudPasses {
             this._passes.drawFullscreenAndEnd(upPass);
         }
 
-        // Restore the state the following opaque/transparent overlay passes expect (incl. the default
-        // mask-preserving alpha blend so later overlays don't clobber the bloom mask).
-        this._passes.restoreDefaultBlend();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**
@@ -466,47 +453,44 @@ export class VolumetricCloudPasses {
     }
 
     /**
-     * The WebGL2 bake: a fullscreen draw per z-slice, with the attachment re-pointed between them.
-     * Its output is pinned by three recorded pixel signatures (`meshClouds.deferred`,
-     * `meshShading.deferred.full`, `meshBaseline.deferred.full`).
+     * The raster bake, for a device without compute: a fullscreen draw per z-slice, one render pass per
+     * slice into ONE target over the whole volume (`depthSlice` picks the slice). Its output is pinned
+     * by three recorded pixel signatures (`meshClouds.deferred`, `meshShading.deferred.full`,
+     * `meshBaseline.deferred.full`).
      */
     private _bakeCloudNoiseRaster(): void {
-        // A private framebuffer with `framebufferTextureLayer`, not the `Framebuffer` class, which owns
-        // a fixed set of 2D attachments. Deliberately NOT an RHI render pass: 160 slices through
-        // `createRenderTarget` would strand that many cached framebuffers for the session.
-        const bakeFbo = glDevice().createFramebuffer('cloudNoiseBake');
-
         // Volumes are RGBA8 (the default `precision: 'low'`): the fields are 0..1 scalars that then
         // get remapped and smoothstepped, so 8 bits per channel sits below the noise floor of the
         // result, and float would quadruple an already sizeable allocation.
         const bake = (tex: Texture, size: number, period: number, octaves: number, detail: boolean) => {
             tex.createVolume(size, size, size, 'repeat');
+            // An incomplete target is reported by `createRenderTarget`'s completeness check — the
+            // failure that would otherwise read back as "no clouds anywhere".
+            const target = device.createRenderTarget({
+                label: 'cloudNoiseBake', colorViews: [device.createWholeTextureView(tex.rhiTexture)],
+            });
+            // No depth, no blend, no culling, every channel written: the state the bake always wanted,
+            // now stated rather than inherited from whichever pipeline ran before it.
+            const pipeline = this._pipelines.fullscreen('cloudNoiseBake', CloudNoiseBakeProgram, undefined, undefined, target);
             this._shaderManager.bind('cloudNoiseBake');
             this._shaderManager.setUniform('u_period', period);
             this._shaderManager.setUniform('u_octaves', octaves);
             this._shaderManager.setUniform('u_detail', detail);
-            bakeFbo.bind();
-            this._passes.setViewport(size, size);
+            const encoder = device.createCommandEncoder('cloudNoiseBake');
             for (let z = 0; z < size; z++) {
-                bakeFbo.attachColorLayer(0, tex.texture, z);
-                if (z === 0) {
-                    // Once per volume, not per slice. The failure is silent: an incomplete framebuffer
-                    // drops every draw and the volume reads back as "no clouds anywhere".
-                    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-                    if (status !== gl.FRAMEBUFFER_COMPLETE) {
-                        Logger.print('error', ['Cloud noise bake framebuffer incomplete:', status], 'Renderer');
-                        return;
-                    }
-                }
+                const pass = encoder.beginRenderPass(target, {
+                    label: 'cloudNoiseBake',
+                    colorAttachments: [{ target: 0, loadOp: 'load', storeOp: 'store', depthSlice: z }],
+                });
+                pass.setPipeline(pipeline);
                 // Texel centre, so the baked value lands at the point a LINEAR fetch will sample.
                 this._shaderManager.setUniform('u_slice', (z + 0.5) / size);
-                this._passes.screenQuad.draw(); // not _drawFullscreen: a one-off bake is not a per-frame pass
+                // Not `drawFullscreen`: a one-off bake is not a per-frame pass for the fill-rate stats.
+                this._passes.recordDraw(pass, this._passes.screenQuad, 0, 0);
+                pass.end();
             }
+            encoder.finish();
         };
-
-        GLState.depthTest(false);
-        GLState.blend(false);
-        GLState.depthMask(false);
 
         this.cloudBaseNoise = new Texture({ target: 'texture3D', mipMap: false, wrapping: 'repeat' });
         bake(this.cloudBaseNoise, VolumetricCloudPasses.CLOUD_BASE_NOISE_SIZE, VolumetricCloudPasses.CLOUD_BASE_NOISE_PERIOD, 4, false);
@@ -514,9 +498,6 @@ export class VolumetricCloudPasses {
         this.cloudDetailNoise = new Texture({ target: 'texture3D', mipMap: false, wrapping: 'repeat' });
         bake(this.cloudDetailNoise, VolumetricCloudPasses.CLOUD_DETAIL_NOISE_SIZE, VolumetricCloudPasses.CLOUD_DETAIL_NOISE_PERIOD, 3, true);
 
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        bakeFbo.destroy();
-        GLState.depthMask(true);
         Logger.info('Baked cloud noise volumes', 'Renderer');
     }
 

@@ -16,9 +16,46 @@ import type { ShaderProgram, ShaderProgramDescriptor } from './shaderProgram';
 /** Which graphics API a device is driving. */
 export type BackendKind = 'webgl2' | 'webgpu';
 
+/**
+ * The conventions a device's API fixes and the renderer has to meet. Named, so rendering code asks for
+ * the convention it depends on — never which backend is running.
+ */
+export interface DeviceConventions {
+    /**
+     * Clip-space depth spans [0, 1] (WebGPU) rather than [-1, 1] (WebGL2): projections are remapped
+     * for rasterising (`ViewProjection.clipProjection`), and a clip-space depth delta is half as large.
+     */
+    readonly clipDepthZeroToOne: boolean;
+    /**
+     * Texel and framebuffer row 0 is the TOP (WebGPU) rather than the bottom (WebGL2). Clip space agrees
+     * on both, so a uv paired with a clip position, a rasterised cube face and the screen quad's V all
+     * flip with it.
+     */
+    readonly originTopLeft: boolean;
+    /** `readPixels` returns the top row first (WebGPU) rather than the bottom row (WebGL2). */
+    readonly readbackRowsTopDown: boolean;
+    /**
+     * `writeTexture` into a half-float (`rgba16float`) texture takes Float32 data and converts it
+     * (WebGL2); otherwise the caller packs halves itself (WebGPU).
+     */
+    readonly writeTextureConvertsFloatToHalf: boolean;
+    /**
+     * Creating a render pipeline compiles shader code (WebGPU), so building one mid-frame is a stall
+     * worth recording, and recorded pipelines are worth warming ahead of the first frame.
+     */
+    readonly pipelineCreationCompiles: boolean;
+    /**
+     * The language a program built at RUN time is written in — a custom material's shader: `'wgsl'`
+     * (WebGPU) or `'glsl'` (WebGL2; engine programs are translated at build time).
+     */
+    readonly runtimeShaderLanguage: 'wgsl' | 'glsl';
+}
+
 /** What the running device can do. Every field is a real limit read back from the API, never a guess. */
 export interface DeviceCapabilities {
+    /** Which API is running — for logs and the editor's backend selector. Rendering asks {@link conventions}. */
     readonly backend: BackendKind;
+    readonly conventions: DeviceConventions;
 
     /** Largest square 2D texture. WebGPU guarantees at least 8192; WebGL2 drivers vary. */
     readonly maxTextureSize: number;
@@ -320,8 +357,9 @@ export interface Device {
     readBuffer(buffer: Buffer, offset: number, size: number): Promise<ArrayBuffer>;
 
     /**
-     * Switch per-pass GPU timing on or off. `sink` fires once per timed pass with its label and
-     * elapsed milliseconds, from {@link collectTimestamps} only. A no-op on WebGL2.
+     * Switch per-pass GPU timing on or off. `sink` fires once per timed render pass with its descriptor
+     * label and elapsed milliseconds, from {@link collectTimestamps} only. WebGPU uses timestamp
+     * queries, WebGL2 a timer query bracketing each pass; both need {@link DeviceCapabilities.hasTimestampQuery}.
      */
     setTimestampCollection(enabled: boolean, sink: (label: string, ms: number) => void): void;
 
@@ -330,6 +368,12 @@ export interface Device {
      * the GPU, so results arrive one to three frames late and an empty call is the ordinary case.
      */
     collectTimestamps(): void;
+
+    /**
+     * Debug hook: every error the device has raised since the last call, clearing them. Synchronous
+     * and stalling where present (WebGL2's `getError`); absent where errors arrive asynchronously.
+     */
+    drainDebugErrors?(): number[];
 
     /** Release the device and everything still alive on it. */
     destroy(): void;

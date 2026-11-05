@@ -122,7 +122,7 @@ export class GeometryPass {
     /** How the G-buffer draw binds materials (see ModelDraw.drawMaterials). */
     private readonly _drawState: MaterialDrawState = {
         targets: 3, depthStencil: DEPTH_WRITE, blend: undefined, customMode: 'deferred', frameLighting: false,
-        terrainSelfShadow: true, viaRHI: true, envCube: null, memo: this._pipelineMemo,
+        terrainSelfShadow: true, envCube: null, memo: this._pipelineMemo,
     };
 
     public geometryPass(scene: Scene): void {
@@ -271,32 +271,23 @@ export class GeometryPass {
 
         const material = first.model.material;
         const reflection = GEOMETRY_PROGRAMS[shaderType];
-        if (reflection) {
-            const pipeline = this._pipelines.memoized(this._instancedMemo, material, shaderType, reflection, {
-                cullMode: ModelDraw.cullFor(material.config.side),
-                depthStencil: DEPTH_WRITE,
-                targets: 3,
-                topology: material.config.wireframe ? 'line-list' : 'triangle-list',
-                vertex: 'model+instance',
-                builtFor: material.type,
-            });
-            pass.setPipeline(pipeline);
-            this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
-            // Placed instanced models never crossfade, and the foliage pass may have left it on.
-            this._shaderManager.setUniform('u_lodCamera', FoliagePasses.LOD_OFF);
-            this._materials.setCameraHole(false);
-            this._materials.applyProperties(material);
-            pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
-        } else {
-            this._shaderManager.bind(shaderType);
-            this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
-            this._shaderManager.setUniform('u_lodCamera', FoliagePasses.LOD_OFF);
-            this._materials.setCameraHole(false);
-            this._materials.apply(material);
-            this._materials.applyCull(material.config.side);
-        }
+        if (!reflection) return;
+        const pipeline = this._pipelines.memoized(this._instancedMemo, material, shaderType, reflection, {
+            cullMode: ModelDraw.cullFor(material.config.side),
+            depthStencil: DEPTH_WRITE,
+            targets: 3,
+            topology: material.config.wireframe ? 'line-list' : 'triangle-list',
+            vertex: 'model+instance',
+            builtFor: material.type,
+        });
+        pass.setPipeline(pipeline);
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
+        // Placed instanced models never crossfade, and the foliage pass may have left it on.
+        this._shaderManager.setUniform('u_lodCamera', FoliagePasses.LOD_OFF);
+        this._materials.setCameraHole(false);
+        this._materials.applyProperties(material);
+        pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
 
         const mesh = first.model.mesh;
         let instances = this._instanceBuffers.get(key)
@@ -304,21 +295,10 @@ export class GeometryPass {
                                      usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
         instances = device.reallocateBuffer(instances, this._instanceScratch.subarray(0, needed));
         this._instanceBuffers.set(key, instances);
-        const topology = first.model.material.config.wireframe ? 'line-list' : 'triangle-list';
 
-        // Through the RHI when the mesh's whole layout fits on the pipeline. No divisor teardown is
-        // needed: a VAO keyed by pipeline AND buffers gives the instanced draw its own.
-        // `active*` rather than the base index buffer, and no `hasLods` bail — see _foliage.recordFoliageDraw.
-        if (reflection && !mesh.isAnimated && mesh.activeIndexBuffer) {
-            pass.setVertexBuffer(0, mesh.vertexBuffer);
-            pass.setVertexBuffer(1, instances);
-            pass.setIndexBuffer(mesh.activeIndexBuffer, mesh.activeIndexFormat);
-            pass.drawIndexed(mesh.activeIndexCount, count);
-        } else {
-            mesh.setupInstanceMatrixBuffer(instances, 5);
-            mesh.drawInstanced(count, topology);
-            mesh.teardownInstanceMatrixBuffer(5);
-        }
+        // The ACTIVE index level, and no `hasLods` bail: a level is an alternate index buffer over the
+        // same vertices. A mesh without indices draws as an array.
+        this._passes.recordInstancedDraw(pass, mesh, instances, count);
         frameStats.objects += count; // each batched node is a distinct scene object
     }
 }

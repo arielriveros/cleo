@@ -263,7 +263,7 @@ export class TexturePacker {
         if (!base || !mask || base.width === 0 || base.height === 0 || mask.width === 0 || mask.height === 0) return null;
 
         const shader = this._ensureDilateShader();
-        const quad = this._ensureQuad(this._ensureShader());
+        const quad = this._ensureQuad();
         const width = Math.min(base.width, TexturePacker.MAX_SIZE);
         const height = Math.min(base.height, TexturePacker.MAX_SIZE);
         const wrapping = base.config.wrapping;
@@ -491,7 +491,7 @@ export class TexturePacker {
      */
     private _bake(key: string, spec: PackSpec, sources: string[], frame: number): string | null {
         const shader = this._ensureShader();
-        const quad = this._ensureQuad(shader);
+        const quad = this._ensureQuad();
         const textures = sources.map(id => TextureManager.Instance.getTexture(id)!);
 
         let width = 1, height = 1;
@@ -557,7 +557,7 @@ export class TexturePacker {
             if (!sources.includes(source.textureId)) sources.push(source.textureId);
         }
         const shader = this._ensureShader();
-        const quad = this._ensureQuad(shader);
+        const quad = this._ensureQuad();
         const textures = sources.map(id => TextureManager.Instance.getTexture(id)!);
         // A bind group may not have a hole, and an all-constant spec has no source to alias: bind the
         // placeholder, which the shader never reads because every channel is a constant.
@@ -663,11 +663,10 @@ export class TexturePacker {
     // A private screen quad. Its V pairing is the BACKEND's, as `Renderer`'s shared quad picks it: a
     // GL texture's v=0 is its bottom row and a WebGPU texture's its top, so one pairing for both
     // mirrors the pack vertically on one of them.
-    private _ensureQuad(shader: ShaderProgram): Mesh {
+    private _ensureQuad(): Mesh {
         if (this._quad) return this._quad;
         const quad = new Mesh();
-        quad.initializeVAO(shader.attributes);
-        const v0 = device.backend === 'webgl2' ? 0 : 1;   // the V that belongs with clip-space y = -1
+        const v0 = device.capabilities.conventions.originTopLeft ? 1 : 0;   // the V that belongs with clip-space y = -1
         const v1 = 1 - v0;
         quad.create([-1, -1, 0, 0, v0,  1, -1, 0, 1, v0,
                       1,  1, 0, 1, v1, -1,  1, 0, 0, v1], 12, [0, 1, 2, 0, 2, 3]);

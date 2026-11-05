@@ -1,12 +1,11 @@
-import { gl } from '../glContext';
-import { GLState } from '../systems/glState';
 import { device } from '../rhi/deviceHandle';
 import { countFullscreenPass, frameStats, setViewportSize } from '../renderStats';
-import { gpuProfiler, type RenderPass } from '../gpuProfiler';
+import type { RenderPass } from '../gpuProfiler';
 import { cpuProfiler } from '../cpuProfiler';
 import type { Mesh } from '../mesh';
 import type { Texture } from '../texture';
-import type { RenderTarget } from '../rhi/resources';
+import type { Buffer, RenderTarget } from '../rhi/resources';
+import { Logger } from '../../core/logger';
 import type { CommandEncoder, RenderPassEncoder } from '../rhi/device';
 
 /** What PassEncoder reads from the renderer that owns it. */
@@ -43,26 +42,17 @@ export class PassEncoder {
     constructor(private readonly _host: PassEncoderHost) {}
 
     /**
-     * Set the GL viewport and keep the profiler's notion of it in sync. Every viewport change in the
-     * renderer must go through here, or `countFullscreenPass` charges the wrong pixel count.
+     * Record the size the fill-rate stats charge the next fullscreen passes by (`countFullscreenPass`).
+     * The VIEWPORT itself is pass state: every `beginRenderPass` sets it from its target.
      */
     public setViewport(width: number, height: number): void {
-        // The GL call is WebGL2's alone: a viewport is PASS state on WebGPU, set by the pass encoder
-        // from its target's dimensions. `setViewportSize` is not skipped, because `renderStats` charges
-        // fullscreen passes by area on both backends and a missing size would silently zero `shadedMpx`.
-        if (gl) gl.viewport(0, 0, width, height);
         setViewportSize(width, height);
     }
 
-    /**
-     * Draw the shared screen quad, counted against the fill-rate stats. Use this rather than
-     * `screenQuad.draw()` for any screen-space pass. With a pass, the draw is RECORDED — on WebGPU a
-     * draw outside an encoder is not a draw.
-     */
-    public drawFullscreen(pass?: RenderPassEncoder): void {
+    /** Draw the shared screen quad into `pass`, counted against the fill-rate stats. */
+    public drawFullscreen(pass: RenderPassEncoder): void {
         countFullscreenPass();
-        if (pass && this.recordDraw(pass, this.screenQuad, 0, 0)) return;
-        this.screenQuad.draw();
+        this.recordDraw(pass, this.screenQuad, 0, 0);
     }
 
     /**
@@ -114,18 +104,6 @@ export class PassEncoder {
             depthAttachment: { loadOp: clearDepth ? 'clear' : 'load', storeOp: 'store' },
         });
         return pass;
-    }
-
-    /**
-     * Put the blend function back to the pipeline default, which is a SEPARATE function: alpha blend
-     * for RGB, destination ALPHA untouched. Never restore with a plain `gl.blendFunc` — the scene
-     * buffer's alpha is the bloom-eligibility mask, and overwriting its factors erodes it.
-     */
-    public restoreDefaultBlend(): void {
-        // Standing context state, which WebGPU does not have — a pipeline carries its own blend. The
-        // callers are legacy paths restoring what they disturbed; they go when those do.
-        if (!gl) return;
-        GLState.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
     }
 
     /** Draw the screen quad and close the pass: the last two steps of every fullscreen pass. */
@@ -257,7 +235,7 @@ export class PassEncoder {
     }
 
     /**
-     * Open a GPU timing scope, and report whether the pass should run at all. Call as
+     * Open a timing scope, and report whether the pass should run at all. Call as
      * `if (!this.beginPass('x')) return;` — a switched-off pass must never also be timed.
      */
     public beginPass(name: RenderPass): boolean {
@@ -267,53 +245,75 @@ export class PassEncoder {
     }
 
     /**
-     * Open one render scope, timed on BOTH sides.
-     *
-     * The two profilers share these boundaries deliberately: a GPU pass table with no CPU column sends
-     * you looking at the GPU when the cost is submission, and two independently placed sets of scopes
-     * would produce rows that cannot be compared. Flat, never nested — WebGL2 allows one active timer
-     * query, so opening a scope closes the previous one on both sides.
+     * Open one render scope on the CPU profiler. Flat, never nested: opening a scope closes the
+     * previous one. The GPU side needs no call — the device times each render pass, and
+     * `scopeForPassLabel` files its label under the scope that contains it, so the rows pair up.
      */
     public scope(name: RenderPass | string): void {
-        gpuProfiler.beginPass(name);
         cpuProfiler.beginPass(name);
     }
 
-    /** Close the open scope on both profilers. */
+    /** Close the open scope. */
     public endScope(): void {
-        gpuProfiler.endPass();
         cpuProfiler.endPass();
     }
 
-    // Record a mesh draw through the RHI. Returns false ONLY for a skinned mesh missing its bone
-    // buffers — everything else records, indexed or not, LOD levels and submesh ranges included.
-    // `lod` >= 0 draws that index level instead of the active one, for a whole-buffer draw only.
+    /**
+     * Record a mesh draw: indexed or not, LOD levels and submesh ranges included. `lod` >= 0 draws that
+     * index level instead of the active one, for a whole-buffer draw only. Every mesh draw in the
+     * renderer goes through here or {@link recordInstancedDraw} — there is no immediate-mode fallback.
+     */
     public recordDraw(pass: RenderPassEncoder, mesh: Mesh, firstIndex: number, indexCount: number,
-                        lod: number = -1, firstInstance: number = 0): boolean {
+                        lod: number = -1, firstInstance: number = 0): void {
         const level = lod >= 0 && indexCount === 0 && firstIndex === 0 && mesh.hasLods ? lod : -1;
         const indices = level >= 0 ? mesh.lodIndexBuffer(level) : mesh.activeIndexBuffer;
+        if (mesh.isAnimated && (!mesh.boneIndicesBuffer || !mesh.boneWeightsBuffer)) {
+            // `createAnimated` always allocates both, so this is a mesh mid-rebuild: skip, once said.
+            if (!PassEncoder._warnedBoneless) {
+                PassEncoder._warnedBoneless = true;
+                Logger.warn('A skinned mesh without bone buffers was skipped', 'Renderer');
+            }
+            return;
+        }
         pass.setVertexBuffer(0, mesh.vertexBuffer);
         if (mesh.isAnimated) {
             // Bone data rides in dedicated buffers rather than the interleaved vertex, so it is two
             // more slots — at the locations THIS program declares, which differ between the lit and
             // unlit families. See boneLayouts.
-            if (!mesh.boneIndicesBuffer || !mesh.boneWeightsBuffer) return false;
-            pass.setVertexBuffer(1, mesh.boneIndicesBuffer);
-            pass.setVertexBuffer(2, mesh.boneWeightsBuffer);
+            pass.setVertexBuffer(1, mesh.boneIndicesBuffer!);
+            pass.setVertexBuffer(2, mesh.boneWeightsBuffer!);
         }
-        // A mesh with no index buffer records an ARRAY draw rather than falling back;
-        // `firstIndex`/`indexCount` become the vertex range.
+        // A mesh with no index buffer records an ARRAY draw; `firstIndex`/`indexCount` become the
+        // vertex range. Nothing to rasterize is not a draw: an empty mesh reaches here from a node added
+        // THIS frame — the shadow pass precedes the geometry pass that builds it.
         if (!indices) {
-            // Nothing to rasterize is not a draw. An empty mesh reaches here from a node added THIS
-            // frame — the shadow pass precedes the geometry pass that builds it. Returns TRUE: the
-            // draw was handled, and the caller's fallback is a raw `gl` call.
             const count = indexCount > 0 ? indexCount : mesh.vertexCount;
             if (count > 0) pass.draw(count, 1, firstIndex, firstInstance);
-            return true;
+            return;
         }
         pass.setIndexBuffer(indices, level >= 0 ? mesh.lodIndexFormat(level) : mesh.activeIndexFormat);
         const count = indexCount > 0 ? indexCount : level >= 0 ? mesh.lodIndexCount(level) : mesh.activeIndexCount;
         if (count > 0) pass.drawIndexed(count, 1, firstIndex, 0, firstInstance);
-        return true;
+    }
+
+    private static _warnedBoneless = false;
+
+    /**
+     * Record `count` instances of `mesh`: its vertices in slot 0, the per-instance data (`instances`, from
+     * `instanceOffset` bytes) in slot 1. Indexed through the mesh's ACTIVE index level when it has one —
+     * an LOD level is an alternate index buffer over the same vertices — an array draw otherwise.
+     */
+    public recordInstancedDraw(pass: RenderPassEncoder, mesh: Mesh, instances: Buffer, count: number,
+                               instanceOffset: number = 0): void {
+        if (count <= 0) return;
+        pass.setVertexBuffer(0, mesh.vertexBuffer);
+        pass.setVertexBuffer(1, instances, instanceOffset);
+        const indices = mesh.activeIndexBuffer;
+        if (indices) {
+            pass.setIndexBuffer(indices, mesh.activeIndexFormat);
+            pass.drawIndexed(mesh.activeIndexCount, count);
+        } else if (mesh.vertexCount > 0) {
+            pass.draw(mesh.vertexCount, count);
+        }
     }
 }

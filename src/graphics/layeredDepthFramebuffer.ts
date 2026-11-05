@@ -1,8 +1,6 @@
-import { glDevice } from './rhi/webgl2/webgl2Device';
 import { device } from './rhi/deviceHandle';
 import type { RenderTarget } from './rhi/resources';
 import { Texture } from './texture';
-import type { WebGL2RenderTarget } from './rhi/webgl2/webgl2Commands';
 
 /**
  * A depth-only render target over one `TEXTURE_2D_ARRAY`, rendered a layer at a time: the cascaded
@@ -31,12 +29,6 @@ export class LayeredDepthFramebuffer {
         this._layers = layers;
     }
 
-    public unbind(): void {
-        if (device.backend !== 'webgl2') return;
-
-        glDevice().getCurrentSurfaceTarget().bind();
-    }
-
     /**
      * Reset every layer to depth 1.0, so every shadow lookup passes and nothing is occluded. Required
      * when a scene has no casting light, or the layers keep the previous scene's shadows.
@@ -59,9 +51,6 @@ export class LayeredDepthFramebuffer {
      * raw depth through a plain sampler2DArray.
      */
     public setCompareEnabled(enabled: boolean): void { this._texture.setDepthCompare(enabled); }
-
-    /** Bind the whole array for SAMPLING on `unit`. */
-    public bindTexture(unit: number): void { this._texture.bind(unit); }
 
     public delete(): void {
         this._texture.delete();

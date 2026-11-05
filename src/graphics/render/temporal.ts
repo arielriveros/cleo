@@ -8,7 +8,6 @@ import { TemporalHistory } from './temporalHistory';
 import { LandscapeHistory } from './landscapeHistory';
 import { device } from '../rhi/deviceHandle';
 import type { RenderTarget, RenderPipeline } from '../rhi/resources';
-import { GLState } from '../systems/glState';
 import { Texture } from '../texture';
 import { TaaResolveProgram, TaaSharpenProgram, ScreenProgram, MotionBlurVelocityProgram, VELOCITY_PROGRAMS, MotionBlurTileMaxProgram, MotionBlurNeighborMaxProgram, MotionBlurGatherProgram } from './programs';
 import type { TaaHistoryFilter } from './settingsTypes';
@@ -319,13 +318,6 @@ export class TemporalPasses {
 
         this._velocityPass();
         this.velocityProducedThisFrame = true;
-
-        // Restore what the overlay passes that follow expect. The velocity passes drew into their own
-        // targets, so unlike `SkyPasses.renderSkyFog` this has to put the scene buffer back as well.
-        this._targets.scene.bind();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     /**
@@ -400,12 +392,6 @@ export class TemporalPasses {
         this._passes.copyDepth(this.depthSource(), this._taaPrevDepthFBO.depth, w, h);
 
         this.taaHistory.swap();
-
-        // Put back what the overlay passes below expect.
-        this._targets.scene.bind();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
     }
 
     // Velocity in two stages. First the camera reprojection: reconstruct each pixel's world position
@@ -576,11 +562,6 @@ export class TemporalPasses {
             this._shaderManager.setUniform('u_trueMotion', mode === 'objectOnly' ? 0 : 1);
 
             if (skin) {
-                // Initialize the VAO from the program ABOUT TO DRAW IT — see the same note in
-                // `_renderShadowCasters`. These programs declare the same attributes at the same
-                // locations as their family's colour program, so this is a no-op after the geometry
-                // pass rather than a per-frame re-stride.
-                skin.initializeVAO(this._shaderManager.getShader(shaderType).attributes);
                 // Fills ModelDraw.boneMatrixScratch with THIS frame's pose and uploads it as u_boneMatrices —
                 // which is also exactly the right PREVIOUS pose when there is no history to use.
                 this._sys.modelDraw.uploadBoneMatrices(shaderType, node);
@@ -592,8 +573,7 @@ export class TemporalPasses {
 
             // Velocity is per surface, not per material: a merged model is one draw over its whole
             // index buffer, with no material bound at all.
-            if (!this._passes.recordDraw(pass, node.model.mesh, 0, 0))
-                node.model.mesh.draw(topology);
+            this._passes.recordDraw(pass, node.model.mesh, 0, 0);
         }
 
         this._passes.endFullscreenPass(pass);

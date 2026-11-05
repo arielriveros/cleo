@@ -1,5 +1,5 @@
-import { gl } from '../glContext';
-import { frameStats } from '../renderStats';
+import { gl } from './glContext';
+import { frameStats } from '../../renderStats';
 
 /**
  * Central cache of WebGL global state, skipping every redundant driver call. Every state change must

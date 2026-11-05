@@ -618,7 +618,7 @@ export class ParticleRenderer {
             mat4.identity(this._frameInvViewProj);
         }
         const s = this._frameScreen;
-        s[0] = depth?.width ?? 1; s[1] = depth?.height ?? 1; s[2] = device.backend === 'webgpu' ? 1 : 0; s[3] = valid ? 1 : 0;
+        s[0] = depth?.width ?? 1; s[1] = depth?.height ?? 1; s[2] = device.capabilities.conventions.originTopLeft ? 1 : 0; s[3] = valid ? 1 : 0;
         const c = this._frameCam;
         c[0] = frame.cameraPosition[0]; c[1] = frame.cameraPosition[1]; c[2] = frame.cameraPosition[2];
         c[3] = frame.orthographic ? 1 : 0;

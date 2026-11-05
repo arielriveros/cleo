@@ -14,7 +14,6 @@ import type { OccluderGrid } from '../occlusion/terrainOccluder';
 import { frameStats } from '../renderStats';
 import { device } from '../rhi/deviceHandle';
 import type { OcclusionQuerySet } from '../rhi/resources';
-import { GLState } from '../systems/glState';
 import { OcclusionBoxProgram } from './programs';
 import type { OcclusionMode } from './settingsTypes';
 import type { FrameView } from './frameView';
@@ -296,8 +295,7 @@ export class Visibility {
         const cube = this._sys.sky.iblCubeMesh;
         for (let i = 0; i < nodes.length; i++) {
             pass.beginOcclusionQuery(i);
-            // The cube is indexed, so `recordDraw` takes it; the fallback is the no-pass legacy path.
-            if (!this._passes.recordDraw(pass, cube, 0, 0, -1, records[i])) cube.draw();
+            this._passes.recordDraw(pass, cube, 0, 0, -1, records[i]);
             pass.endOcclusionQuery();
         }
         pass.end();
@@ -307,8 +305,6 @@ export class Visibility {
         this._passes.finishIfOwned(this._passes.encoder);
         this._passes.encoder = null;
         this._passes.target = null;
-        // The box pipeline left depth writes off; the legacy draws after it assume they are on.
-        GLState.depthMask(true);
     }
 
     /**
