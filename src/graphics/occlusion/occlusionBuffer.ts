@@ -80,6 +80,16 @@ export class OcclusionBuffer {
         this.stats.tested = 0;
     }
 
+    /**
+     * Keep the built buffer for another frame and start its query counters again — for a frame whose
+     * view and occluders are exactly the ones it was built from. Queries read the buffer and never write
+     * it, so the answers are the same; only `tested`/`occluded` count per frame.
+     */
+    public resetQueryStats(): void {
+        this.stats.occluded = 0;
+        this.stats.tested = 0;
+    }
+
     // ---- Rasterizing occluders ----
 
     private readonly _clip = new Float64Array(4 * 3);
