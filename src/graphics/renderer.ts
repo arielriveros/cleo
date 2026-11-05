@@ -54,9 +54,7 @@ import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material, CustomMaterial, isFoliageMaterial } from './material';
 import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, customShaderResources, usedResources } from './systems/customShaders';
 import { TexturePacker } from './systems/texturePacker';
-import { ParticleRenderer, setParticleSimVariants, type ParticleSimFrame, type ParticleDrawFrame } from './particles/particleRenderer';
-import { skyAmbient, type ParticleLocalLight } from './particles/particleLighting';
-import { MAX_FORCE_FIELDS } from '../core/scene/nodes/forceFieldNode';
+import { setParticleSimVariants } from './particles/particleRenderer';
 import type { ParticleSystemNode } from '../core/scene/nodes/particleSystemNode';
 import { Model } from './model';
 import { TextureManager } from './systems/textureManager';
@@ -114,6 +112,7 @@ import { PostEffects } from './render/postEffects';
 import { VolumetricCloudPasses } from './render/clouds';
 import { DecalPasses } from './render/decals';
 import { FluidVolumePasses } from './render/fluids';
+import { ParticlePasses } from './render/particlePasses';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 import { gl, setGLContext } from './glContext';
@@ -336,6 +335,8 @@ export class Renderer {
     private readonly _decals: DecalPasses;
     /** Smoke-and-fire volumes: the raymarch, its temporal history and the composite (render/fluids.ts). */
     private readonly _fluids: FluidVolumePasses;
+    /** GPU particle simulation, sorting and drawing, and the per-frame data they are handed (render/particlePasses.ts). */
+    private readonly _particlePasses: ParticlePasses;
 
     /**
      * Whether the post-process chain runs at all for this host.
@@ -839,19 +840,6 @@ export class Renderer {
     private static readonly SKY_RGBM_RANGE = 64.0;
 
 
-    /** The GPU particle system: state textures, simulation steps, billboard draws. */
-    private readonly _particles = new ParticleRenderer();
-    /**
-     * The camera that produced the opaque depth the particle simulation collides against — LAST frame's,
-     * since the simulation runs before this frame draws anything. Its own copy rather than
-     * `_view.prevViewProj`, because a thumbnail capture must not overwrite it.
-     */
-    private readonly _particleCollideViewProj: mat4 = mat4.create();
-    private readonly _particleCollideCamPos: vec3 = vec3.create();
-    private _particleCollideOrtho = false;
-    private _particleCollideValid = false;
-    private readonly _forceFieldScratch = new Float32Array(MAX_FORCE_FIELDS * 16);
-
     // Per-object camera frustum culling for the main color passes. Rebuilt each frame from _view.viewProj.
     private _frustum: Frustum = new Frustum();
     private _frustumCulling: boolean = true;
@@ -898,8 +886,6 @@ export class Renderer {
     private _occlusionSkipped = 0;
     // Foliage cells beyond this camera distance are skipped (world units; 0 = disabled).
     private _foliageCullDistance: number = 65;
-    /** See RenderSettings.particleLodDistanceScale. */
-    private _particleLodDistanceScale: number = 1;
     // Foliage spatial-grid cell size (world units); smaller = tighter culling, more draw calls.
     // MUST match FoliageLayer.cellSize's default, or the first frame after every load rebuilds the grid.
     private _foliageCellSize: number = 13;
@@ -1083,6 +1069,22 @@ export class Renderer {
             get skySH() { return renderer._skySH; },
             get skySHValid() { return renderer._skySHValid; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection);
+        this._particlePasses = new ParticlePasses({
+            cloudGrade: renderer._cloudGrade.bind(renderer),
+            dirOf: renderer._dirOf.bind(renderer),
+            get frustum() { return renderer._frustum; },
+            get frustumCulling() { return renderer._frustumCulling; },
+            internalAmbient: renderer._internalAmbient.bind(renderer),
+            get keyLight() { return renderer._keyLight; },
+            get keyLightNode() { return renderer._keyLightNode; },
+            get lightOccludedMemo() { return renderer._lightOccludedMemo; },
+            get renderHeight() { return renderer._renderHeight; },
+            get renderWidth() { return renderer._renderWidth; },
+            restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
+            get skySH() { return renderer._skySH; },
+            get skySHValid() { return renderer._skySHValid; },
+            get thumbnailMode() { return renderer._thumbnailMode; },
+        }, this._view, this._targets, this._passes, this._projection, this._temporal);
 
         // Preallocated identity bone matrices (used when an animated model has no animator)
         this._boneIdentityScratch = new Float32Array(100 * 16);
@@ -1761,7 +1763,7 @@ export class Renderer {
 
         // Particle simulation steps. Here because no pass is open and every pass that READS the state
         // textures comes later; on WebGPU the dispatches go into the frame encoder ahead of those draws.
-        this._simulateParticles(scene);
+        this._particlePasses.simulateParticles(scene);
 
         // Shadow map depth pass, shared by both pipelines. The caster is the FIRST directional light
         // flagged to cast, in traversal order — not whichever the light Set happens to yield last.
@@ -1829,10 +1831,10 @@ export class Renderer {
         // And the camera behind this frame's depth snapshot, for next frame's particle collision. Not
         // from an offscreen capture: those resize the depth buffer and render from somewhere else.
         if (!this._thumbnailMode && !this._view.capturing) {
-            mat4.copy(this._particleCollideViewProj, this._view.viewProj);
-            vec3.copy(this._particleCollideCamPos, this._view.camera.position);
-            this._particleCollideOrtho = this._view.camera.type === 'orthographic';
-            this._particleCollideValid = true;
+            mat4.copy(this._particlePasses.particleCollideViewProj, this._view.viewProj);
+            vec3.copy(this._particlePasses.particleCollideCamPos, this._view.camera.position);
+            this._particlePasses.particleCollideOrtho = this._view.camera.type === 'orthographic';
+            this._particlePasses.particleCollideValid = true;
         }
 
         // Same for every model's world matrix and bone pose. Here rather than in `updateTransforms`:
@@ -2049,146 +2051,6 @@ export class Renderer {
         const screenMats = scene.activeCamera?.screenMaterials;
         if (screenMats) for (const mat of screenMats) ensureCustomShader(mat);
     }
-
-    // Keep every material's derived texture slots in step with its authored sources. Per frame rather
-    // than on assignment: sources decode asynchronously, and an unresolved pack simply retries.
-    /** Run the particle systems' queued simulation steps. See {@link ParticleRenderer.simulate}. */
-    private _simulateParticles(scene: Scene): void {
-        const frame = this._particleSimFrame(scene);
-        if (scene.particleSystems.size === 0) { this._particles.simulate(scene, frame); return; }
-        this._passes.scope('particles.sim');
-        this._particles.simulate(scene, frame);
-        this._passes.endScope();
-        // The WebGL2 ping-pong went through pipelines that leave blend and depth off; put back what the
-        // legacy draws that follow expect, as the cloud pass does.
-        this._restoreDefaultBlend();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-    }
-
-    private _particleSimFrame(scene: Scene): ParticleSimFrame {
-        // Force fields, packed once for every emitter this frame.
-        let fieldCount = 0;
-        for (const field of scene.forceFields) {
-            if (!field.enabled || !field.visible || fieldCount >= MAX_FORCE_FIELDS) continue;
-            field.packInto(this._forceFieldScratch, fieldCount * 16);
-            fieldCount++;
-        }
-        const live = this._particleCollideValid && !this._thumbnailMode && !this._view.capturing;
-        return {
-            encoder: this._passes.acquireEncoder('particles.sim'),
-            gravity: scene.physics?.gravity ?? [0, -9.81, 0],
-            depth: live ? this._temporal.depthSource() : null,
-            viewProj: live ? this._particleCollideViewProj : null,
-            cameraPosition: this._particleCollideCamPos,
-            orthographic: this._particleCollideOrtho,
-            fields: this._forceFieldScratch,
-            fieldCount,
-        };
-    }
-
-    /** Draw every particle system of a 3D scene into the scene buffer. 2D scenes draw theirs in the 2D pass. */
-    private _renderParticles(scene: Scene): void {
-        if (scene.particleSystems.size === 0 || this._isFlatParticleScene(scene)) return;
-        this._drawParticleNodes(scene, scene.particleSystems, this._targets.scene.renderTarget);
-    }
-
-    /** A 2D scene: an orthographic camera over tilemaps. Its particles join the Y-sorted 2D pass. */
-    private _isFlatParticleScene(scene: Scene): boolean {
-        return this._view.camera.type === 'orthographic' && scene.tilemaps.size > 0;
-    }
-
-    private _drawParticleNodes(scene: Scene, nodes: Iterable<ParticleSystemNode>, target: RenderTarget): void {
-        // The sort runs passes of its own, so it goes before the particle pass opens.
-        this._particles.sort(nodes, this._passes.acquireEncoder('particles.sort'), this._view.camera.position);
-        const pass = this._passes.beginFullscreenPass(target, 'particles', false, undefined, false);
-        this._particles.draw(nodes, this._particleDrawFrame(scene, pass, target));
-        this._passes.endFullscreenPass(pass);
-        this._restoreDefaultBlend();
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-    }
-
-    /**
-     * What a particle draw needs from this frame: camera, depth snapshot, and the scene's light for lit
-     * particles — the same ambient and sky light the deferred pass gives surfaces, the key light (the sun,
-     * or the moon at night), and the punctual lights, which the particle renderer gathers per effect.
-     *
-     * `exposure` is the one the PREVIOUS frame's post chain settled on (the post chain runs after the scene
-     * draw), the same one-frame lag TAA has; it only matters for an `exposureWeight` below 1.
-     */
-    private _particleDrawFrame(scene: Scene, pass: RenderPassEncoder, target: RenderTarget): ParticleDrawFrame {
-        const camera = this._view.camera;
-        let sun: LightNode | null = null;
-        for (const light of scene.lights) if (light.type === 'directional') { sun = light; break; }
-        const sunColor = [0, 0, 0];
-        const sunDirection = [0, 1, 0];
-        if (sun) {
-            const light = sun.light as DirectionalLight;
-            const key = sun === this._keyLightNode ? this._keyLight : null;
-            const k = key ? key.intensity : light.internalIntensity;
-            const c = key ? key.color : light.color;
-            sunColor[0] = c[0] * k; sunColor[1] = c[1] * k; sunColor[2] = c[2] * k;
-            const f = this._dirOf(sun);
-            sunDirection[0] = -f[0]; sunDirection[1] = -f[1]; sunDirection[2] = -f[2];
-        }
-        // The fallback indirect term surfaces get (deferredLighting `indirect.diffuse`): the scene ambient,
-        // as the sky light scales it, plus the sky light's mean irradiance. No invented floor: a scene with
-        // neither is dark, for particles as for everything else.
-        const ambient = this._internalAmbient(scene);
-        const skyNode = scene.skyLight;
-        if (skyNode && this._skySHValid) {
-            const grade = this._cloudGrade(scene);
-            const sky = skyAmbient(this._skySH, skyNode.intensity * grade.sky);
-            ambient[0] += sky[0]; ambient[1] += sky[1]; ambient[2] += sky[2];
-        }
-
-        // The punctual lights as the light grid has them, less those whose whole reach was hidden this frame.
-        const localLights = this._particleLights;
-        localLights.length = 0;
-        for (const node of scene.lights) {
-            if (node.type === 'directional' || node.index < 0) continue;
-            if (this._lightOccludedMemo.get(node) === true) continue;
-            const light = node.light as PointLight | Spotlight;
-            const record: ParticleLocalLight = {
-                position: node.worldPosition, intensity: light.internalIntensity, color: light.color,
-                range: light.range, sourceRadius: light.sourceRadius,
-            };
-            if (node.type === 'spotlight') {
-                record.direction = node.worldForward;
-                record.cone = (light as Spotlight).coneScaleOffset;
-            }
-            localLights.push(record);
-        }
-
-        return {
-            pass, target,
-            viewProj: mat4.multiply(this._particleViewProj, this._projection.rasterProjection(camera.projectionMatrix),
-                                    camera.viewMatrix),
-            view: camera.viewMatrix,
-            cameraPosition: camera.position,
-            near: camera.near, far: camera.far,
-            orthographic: camera.type === 'orthographic',
-            depth: this._thumbnailMode ? null : this._temporal.depthSource(),
-            width: this._renderWidth, height: this._renderHeight,
-            ambient, sunDirection, sunColor, localLights,
-            visible: this._frustumCulling ? (min, max) => this._frustum.intersectsAABB(min, max) : undefined,
-            lodDistanceScale: this._particleLodDistanceScale,
-            exposure: this._view.exposure,
-            // As the forward path picks a mesh's reflection: the probe containing it, else the sky. Never
-            // during a probe capture, which would reflect the probe being captured.
-            environment: this._view.capturing ? undefined : position => {
-                const probe = scene.probeForPoint(position, true);
-                const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
-                const cube = probeCube ?? scene.environmentMap;
-                return cube ? { cube, linear: !!probeCube } : null;
-            },
-        };
-    }
-    private readonly _particleViewProj: mat4 = mat4.create();
-    private readonly _particleLights: ParticleLocalLight[] = [];
 
     private _ensurePackedTextures(scene: Scene): void {
         const packer = TexturePacker.Instance;
@@ -5765,7 +5627,7 @@ export class Renderer {
 
         // GPU particles: after the transparents (and so after TAA — they never enter history), depth
         // tested against the opaque scene, soft-faded against its depth snapshot.
-        if (this._passes.beginPass('particles')) this._renderParticles(scene);
+        if (this._passes.beginPass('particles')) this._particlePasses.renderParticles(scene);
 
         // Tiles + sprites, depth-sorted together (always transparent, forward). Scene content only —
         // the editor's icon billboards are filtered out and drawn in the overlay below.
@@ -6121,7 +5983,7 @@ export class Renderer {
         for (const item of list) {
             if ('sprite' in item) this._renderSprite(item.sprite, false, pass);
             else if ('particles' in item) {
-                this._particles.draw([item.particles], this._particleDrawFrame(scene, pass, this._targets.scene.renderTarget));
+                this._particlePasses.particles.draw([item.particles], this._particlePasses.particleDrawFrame(scene, pass, this._targets.scene.renderTarget));
                 // Particle pipelines leave their own blend behind; the sprites after them expect the pass's.
                 this._restoreDefaultBlend();
                 GLState.blend(true);
@@ -6549,7 +6411,7 @@ export class Renderer {
         this._sceneBuffersLive = false;
 
         // GPU particles, as in the deferred overlay.
-        if (this._passes.beginPass('particles')) this._renderParticles(scene);
+        if (this._passes.beginPass('particles')) this._particlePasses.renderParticles(scene);
 
         // Tiles + sprites, depth-sorted together. A selected sprite draws in its own depth order — its
         // outline comes from the mask pass below.
@@ -9148,9 +9010,9 @@ export class Renderer {
     public get occlusionBuffer(): OcclusionBuffer { return this._occlusion; }
 
     /** Distance (world units) beyond which foliage cells are culled; 0 disables distance culling. */
-    public get particleLodDistanceScale(): number { return this._particleLodDistanceScale; }
+    public get particleLodDistanceScale(): number { return this._particlePasses.particleLodDistanceScale; }
     public set particleLodDistanceScale(v: number) {
-        this._particleLodDistanceScale = Number.isFinite(v) ? Math.min(4, Math.max(0.25, v)) : 1;
+        this._particlePasses.particleLodDistanceScale = Number.isFinite(v) ? Math.min(4, Math.max(0.25, v)) : 1;
     }
 
     public get foliageCullDistance(): number { return this._foliageCullDistance; }
@@ -9225,7 +9087,7 @@ export class Renderer {
         this._recreateShadowTargets(t.shadowMapResolution, t.shadowCascades);
         this.shadowFilterMode = t.shadowFilterMode;
         this._shadowFilterRadius = t.shadowFilterRadius;
-        this._particleLodDistanceScale = t.particleLodDistanceScale;
+        this._particlePasses.particleLodDistanceScale = t.particleLodDistanceScale;
         // Re-applying the tier must not leave the label saying "custom" from an earlier manual tweak.
         this._quality = preset;
         // A preset moves a dozen knobs at once; tell any panel mirroring them to re-read.
@@ -9560,7 +9422,7 @@ export class Renderer {
             occlusionQueries: this._occlusionQueriesEnabled,
             lightOcclusionCulling: this._lightOcclusionCulling,
             foliageCullDistance: this._foliageCullDistance,
-            particleLodDistanceScale: this._particleLodDistanceScale,
+            particleLodDistanceScale: this._particlePasses.particleLodDistanceScale,
             foliageDensityFalloff: this._foliageDensityFalloff,
             foliageCellSize: this._foliageCellSize,
             terrainLodEnabled: this._terrainLodEnabled,
