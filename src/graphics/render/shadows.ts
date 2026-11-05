@@ -811,7 +811,7 @@ export class ShadowPasses {
             } else {
                 const submeshes = model.submeshes;
                 for (let i = 0; i < submeshes.length; i++) {
-                    const caster = materials[i] ?? materials[0];   // see _drawSubmeshes: never index past the array
+                    const caster = materials[i] ?? materials[0];   // see ModelDraw.drawSubmeshes: never index past the array
                     if (!caster.config.castShadow || caster.config.wireframe) continue;
                     if (this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count)) continue;
                     model.mesh.drawRange(submeshes[i].start, submeshes[i].count, 'triangle-list');

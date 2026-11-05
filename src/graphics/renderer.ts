@@ -27,7 +27,7 @@ import { AnimatedModel } from '../animation/animatedModel';
 
 import { GLState } from './systems/glState';
 import { Texture } from './texture';
-import { Material, CustomMaterial } from './material';
+import { CustomMaterial } from './material';
 import { ensureCustomShader, customShaderReady, customShaderModules, customShaderResources, usedResources } from './systems/customShaders';
 import { TexturePacker } from './systems/texturePacker';
 import { setParticleSimVariants } from './particles/particleRenderer';
@@ -77,6 +77,7 @@ import { Visibility } from './render/visibility';
 import { SsilPasses } from './render/ssil';
 import { LightingPasses } from './render/lighting';
 import { SkyPasses } from './render/sky';
+import { ModelDraw } from './render/modelDraw';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 import { gl, setGLContext } from './glContext';
@@ -95,7 +96,7 @@ import {
     BufferUsage, DEFAULT_BLEND, OVERLAY_BLEND, OVERLAY_COMPOSITE_BLEND,
 } from './rhi/types';
 import { isEditorOnlyNode } from '../core/scene/editorNodes';
-import type { BlendState, DepthStencilState, CullMode } from './rhi/types';
+import type { BlendState, DepthStencilState } from './rhi/types';
 import type { RenderTarget } from './rhi/resources';
 import type { RenderPassEncoder } from './rhi/device';
 
@@ -185,6 +186,8 @@ export class Renderer {
     private readonly _lighting: LightingPasses;
     /** The sky: IBL baking, light probes, the sky light's SH, atmosphere and cloud-sky bakes, sky draw and fog (render/sky.ts). */
     private readonly _sky: SkyPasses;
+    /** What every model draw shares: submesh ranges, the skinning palette, cull mapping, object ids (render/modelDraw.ts). */
+    private readonly _modelDraw: ModelDraw;
 
     /**
      * Whether the post-process chain runs at all for this host.
@@ -287,8 +290,6 @@ export class Renderer {
     /** The view-projection actually rasterized this frame. `_view.invViewProj` is inverted from this. */
     private readonly _jitteredViewProj: mat4 = mat4.create();
 
-    private _specularAaEnabled: boolean = true;
-
     /** Active quality tier; 'custom' once any individual knob has been changed by hand. */
     private _quality: QualityPreset = 'high';
     /** Accumulation target for the overdraw debug view. Allocated lazily — the channel is editor-only. */
@@ -319,10 +320,6 @@ export class Renderer {
     private _gridEnabled: boolean = false;
     private _gridPlane: 0 | 1 = 0; // 0 = XZ ground (3D), 1 = XY front (2D)
 
-    // Reused scratch to avoid per-frame allocations
-    private _boneMatrixScratch: Float32Array = new Float32Array(100 * 16);
-
-    private _boneIdentityScratch: Float32Array;
     // One instance buffer PER GROUP, keyed by the mesh+material key. A single shared buffer would have
     // every group in the pass read the LAST matrices written, and a growth reallocation would destroy
     // a buffer earlier draws reference — on a recorded backend, nothing has executed until submit.
@@ -337,10 +334,6 @@ export class Renderer {
     // One instance buffer PER draw set, never one shared by all four — `_drawSkeletonOverlay` records
     // bones, joints, markers and the highlight into the same pass. Same rule as `_instanceBuffers`.
     private _overlayInstanceBuffers: (RhiBuffer | null)[] = [];
-
-    // Object -> stable id (for grouping identical mesh+material into instanced draws)
-    private _objIds: WeakMap<object, number> = new WeakMap();
-    private _objIdCounter: number = 0;
 
     constructor(config: RendererConfig) {
         this._config = config;
@@ -377,7 +370,7 @@ export class Renderer {
             lightGrid: () => this._lighting.lightGrid.texture,
         }, this._targets);
         this._materials = new MaterialBinder({
-            specularAa: () => this._specularAaEnabled,
+            specularAa: () => this._modelDraw.specularAaEnabled,
             renderWidth: () => this._renderWidth,
             renderHeight: () => this._renderHeight,
             sceneBuffersLive: () => this._sceneBuffersLive,
@@ -388,16 +381,16 @@ export class Renderer {
             renderHeight: () => this._renderHeight,
         }, this._view);
         this._temporal = new TemporalPasses({
-            get boneMatrixScratch() { return renderer._boneMatrixScratch; },
+            get boneMatrixScratch() { return renderer._modelDraw.boneMatrixScratch; },
             copyDepth: renderer._copyDepth.bind(renderer),
-            cullFor: Renderer._cullFor.bind(Renderer),
+            cullFor: ModelDraw.cullFor.bind(Renderer),
             get debugView() { return renderer._debugView; },
             inGBuffer: renderer._inGBuffer.bind(renderer),
             outsideFrustum: (...args: Parameters<Visibility['outsideFrustum']>) => renderer._visibility.outsideFrustum(...args),
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-            uploadBoneMatrices: renderer._uploadBoneMatrices.bind(renderer),
+            uploadBoneMatrices: (...args: Parameters<ModelDraw['uploadBoneMatrices']>) => renderer._modelDraw.uploadBoneMatrices(...args),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection);
         this._autoExposure = new AutoExposure({
             get presentTarget() { return renderer._presentTarget; },
@@ -428,7 +421,7 @@ export class Renderer {
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection);
         this._decals = new DecalPasses({
             copyColors: renderer._copyColors.bind(renderer),
-            cullFor: Renderer._cullFor.bind(Renderer),
+            cullFor: ModelDraw.cullFor.bind(Renderer),
             get deferred() { return renderer._deferred; },
             get frustum() { return renderer._visibility.frustum; },
             get frustumCulling() { return renderer._visibility.frustumCulling; },
@@ -472,7 +465,7 @@ export class Renderer {
         }, this._view, this._targets, this._passes, this._projection, this._temporal);
         this._sprites = new Sprite2DPasses({
             get canvas() { return renderer._canvas; },
-            cullFor: Renderer._cullFor.bind(Renderer),
+            cullFor: ModelDraw.cullFor.bind(Renderer),
             get frustum() { return renderer._visibility.frustum; },
             get frustumCulling() { return renderer._visibility.frustumCulling; },
             restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
@@ -482,10 +475,10 @@ export class Renderer {
             get SHADOW_DEPTH() { return ShadowPasses.SHADOW_DEPTH; },
             aabbDistSq: (...args: Parameters<Visibility['aabbDistSq']>) => renderer._visibility.aabbDistSq(...args),
             cellOccluded: (...args: Parameters<Visibility['cellOccluded']>) => renderer._visibility.cellOccluded(...args),
-            cullFor: Renderer._cullFor.bind(Renderer),
+            cullFor: ModelDraw.cullFor.bind(Renderer),
             get frustum() { return renderer._visibility.frustum; },
             get frustumCulling() { return renderer._visibility.frustumCulling; },
-            objectId: renderer._objectId.bind(renderer),
+            objectId: (...args: Parameters<ModelDraw['objectId']>) => renderer._modelDraw.objectId(...args),
             shadowCutoutOf: (...args: Parameters<ShadowPasses['shadowCutoutOf']>) => renderer._shadows.shadowCutoutOf(...args),
             get shadowFrustum() { return renderer._shadows.shadowFrustum; },
             get shadowLightUnit() { return renderer._shadows.shadowLightUnit; },
@@ -502,13 +495,13 @@ export class Renderer {
             get keyLight() { return renderer._lighting.keyLight; },
             get keyLightDir() { return renderer._lighting.keyLightDir; },
             lightOccluded: (node, center, radius) => renderer._visibility.lightOccluded(node, center, radius),
-            objectId: (obj) => renderer._objectId(obj),
+            objectId: (obj) => renderer._modelDraw.objectId(obj),
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             restoreDefaultBlend: () => renderer._restoreDefaultBlend(),
             get terrainLodStep2() { return renderer._visibility.terrainLodStep2; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-            uploadBoneMatrices: (shaderType, node) => renderer._uploadBoneMatrices(shaderType, node),
+            uploadBoneMatrices: (shaderType, node) => renderer._modelDraw.uploadBoneMatrices(shaderType, node),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._foliage);
         this._visibility = new Visibility({
             get iblCubeMesh() { return renderer._sky.iblCubeMesh; },
@@ -541,18 +534,10 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
             captureProbe: (scene, probe) => renderer.captureProbe(scene, probe),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._lighting);
+        this._modelDraw = new ModelDraw(this._passes, this._materials);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._shadows.shadowDistance = config.shadowDistance ?? 100;
         this._shadows.cascadeCount = Math.min(MAX_CASCADES, Math.max(1, Math.round(config.shadowCascades ?? this._shadows.cascadeCount)));
-
-        // Preallocated identity bone matrices (used when an animated model has no animator)
-        this._boneIdentityScratch = new Float32Array(100 * 16);
-        for (let i = 0; i < 100; i++) {
-            this._boneIdentityScratch[i * 16 + 0] = 1;
-            this._boneIdentityScratch[i * 16 + 5] = 1;
-            this._boneIdentityScratch[i * 16 + 10] = 1;
-            this._boneIdentityScratch[i * 16 + 15] = 1;
-        }
 
         // Plain mat4s and numbers — CPU scratch for the shadow passes, no GPU resource — so these stay
         // in the constructor while the framebuffers they feed move into initialize().
@@ -1574,7 +1559,7 @@ export class Renderer {
             // Multi-material models never instance: the key is one mesh + one material, and an
             // instanced draw covers the whole index buffer rather than a range.
             if (!animated && !node.model.hasSubmeshes && (mat.type === 'pbr' || mat.type === 'blinn_phong')) {
-                const key = `${this._objectId(node.model.mesh)}|${this._objectId(mat)}`;
+                const key = `${this._modelDraw.objectId(node.model.mesh)}|${this._modelDraw.objectId(mat)}`;
                 let group = instanceGroups.get(key);
                 if (!group) { group = []; instanceGroups.set(key, group); }
                 group.push(node);
@@ -1625,15 +1610,6 @@ export class Renderer {
         alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
     };
 
-    /**
-     * `Material.config.side` as a cull mode. The mapping INVERTS: `side: 'front'` means show the front
-     * faces, so the BACK ones are culled.
-     */
-    private static _cullFor(side: 'front' | 'back' | 'double' | undefined): CullMode {
-        if (side === 'double') return 'none';
-        return side === 'back' ? 'front' : 'back';
-    }
-
     private _geometryShaderFor(node: ModelNode): string {
         const type = node.model.material.type;
         // A deferred custom material is drawn with its own runtime-compiled G-buffer program.
@@ -1671,13 +1647,13 @@ export class Renderer {
         this._materials.setDissolve(node.effectiveFade);
         this._materials.setCameraHole(node.cameraDither);
 
-        if (animated) this._uploadBoneMatrices(shaderType, node);
+        if (animated) this._modelDraw.uploadBoneMatrices(shaderType, node);
 
         // One draw per submesh, sharing everything above: a merged model has one vertex buffer, one
         // world transform and one bone upload, and differs only in which material each index range uses.
         // Submeshes are constrained to a single material type, so the shader bound above stays correct.
         const reflection = GEOMETRY_PROGRAMS[shaderType];
-        this._drawSubmeshes(node, (mat) => {
+        this._modelDraw.drawSubmeshes(node, (mat) => {
             // Custom materials keep the legacy path: their GLSL is assembled at runtime, so there is no
             // reflection and no bind-group layout. Terrain has both, but binds its samplers by hand.
             if (mat.type === 'terrain') {
@@ -1685,10 +1661,10 @@ export class Renderer {
                 // (TerrainUniforms), not from the transform block set above. Two blocks, two writes.
                 this._shaderManager.setUniform('u_viewPos', this._view.camera.position); // parallax V + specular V
                 this._shaderManager.setUniform('u_sunDirection', this._view.sunDirection);      // self-shadow
-                this._shaderManager.setUniform('u_specularAA', this._specularAaEnabled);   // roughness filter
+                this._shaderManager.setUniform('u_specularAA', this._modelDraw.specularAaEnabled);   // roughness filter
                 for (const [name, value] of mat.properties) this._shaderManager.setUniform(name, value);
                 const terrainPipeline = this._pipelines.get(shaderType, reflection, {
-                    cullMode: Renderer._cullFor(mat.config.side),
+                    cullMode: ModelDraw.cullFor(mat.config.side),
                     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
                     targets: 3,
                     topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
@@ -1712,7 +1688,7 @@ export class Renderer {
                                        vertexWgsl: { wgsl: customWgsl.vertex,
                                                      entryPoint: customWgsl.vertexEntry } } : {}),
                 }, {
-                    cullMode: Renderer._cullFor(mat.config.side),
+                    cullMode: ModelDraw.cullFor(mat.config.side),
                     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
                     targets: 3,
                     topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
@@ -1728,7 +1704,7 @@ export class Renderer {
             if (!reflection) { this._materials.apply(mat); return false; }
 
             const pipeline = this._pipelines.get(shaderType, reflection, {
-                cullMode: Renderer._cullFor(mat.config.side),
+                cullMode: ModelDraw.cullFor(mat.config.side),
                 depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
                 targets: 3,   // the G-buffer
                 topology: mat.config.wireframe ? 'line-list' : 'triangle-list',
@@ -1741,43 +1717,6 @@ export class Renderer {
             return true;
         }, pass);
         frameStats.objects++;
-    }
-
-    // Whether this material has a program behind it at all. Checked HERE rather than in a bind
-    // callback: those return false to mean "use the legacy `mesh.draw()`", which is a raw `gl` call.
-    private static _drawable(mat: Material): boolean {
-        return !(mat instanceof CustomMaterial) || customShaderReady(mat);
-    }
-
-    // Draw a model's index buffer, applying `bindMaterial` before each range. The single-material case
-    // takes the same path with one range.
-    private _drawSubmeshes(node: ModelNode, bindMaterial: (material: Material) => boolean | void,
-                           pass?: RenderPassEncoder): void {
-        const model = node.model;
-        if (!model.hasSubmeshes) {
-            const mat = model.material;
-            if (!Renderer._drawable(mat)) return;
-            // A callback that set a PIPELINE has already fixed the cull mode; calling _materials.applyCull after
-            // it would be harmless today and wrong the moment the two disagree.
-            const viaPipeline = !!bindMaterial(mat);
-            if (!viaPipeline) this._materials.applyCull(mat.config.side);
-            if (viaPipeline && pass && this._passes.recordDraw(pass, model.mesh, 0, 0)) return;
-            model.mesh.draw(mat.config.wireframe ? 'line-list' : 'triangle-list');
-            return;
-        }
-        const submeshes = model.submeshes;
-        for (let i = 0; i < submeshes.length; i++) {
-            // `materials` is parallel to `submeshes` by construction, but indexing it unguarded turns any
-            // future disagreement into a mid-frame TypeError rather than a wrong colour. Slot 0 always exists.
-            const mat = model.materials[i] ?? model.materials[0];
-            if (!Renderer._drawable(mat)) continue;
-            const viaPipeline = !!bindMaterial(mat);
-            if (!viaPipeline) this._materials.applyCull(mat.config.side);
-            if (viaPipeline && pass
-                && this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count)) continue;
-            model.mesh.drawRange(submeshes[i].start, submeshes[i].count,
-                mat.config.wireframe ? 'line-list' : 'triangle-list');
-        }
     }
 
     private _drawInstancedGroup(pass: RenderPassEncoder, group: ModelNode[], key: string): void {
@@ -1801,7 +1740,7 @@ export class Renderer {
         const reflection = GEOMETRY_PROGRAMS[shaderType];
         if (reflection) {
             const pipeline = this._pipelines.get(shaderType, reflection, {
-                cullMode: Renderer._cullFor(material.config.side),
+                cullMode: ModelDraw.cullFor(material.config.side),
                 depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
                 targets: 3,
                 topology: material.config.wireframe ? 'line-list' : 'triangle-list',
@@ -2269,12 +2208,6 @@ export class Renderer {
 
     // --- Shared helpers ---------------------------------------------------------------------------
 
-    private _objectId(obj: object): number {
-        let id = this._objIds.get(obj);
-        if (id === undefined) { id = this._objIdCounter++; this._objIds.set(obj, id); }
-        return id;
-    }
-
     /** Whether any transparent node in `queue` carries a material that reads the scene colour. */
     private static _readsSceneColor(queue: readonly ModelNode[]): boolean {
         for (const node of queue) {
@@ -2299,23 +2232,6 @@ export class Renderer {
             colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
         this._copyColors([this._targets.scene.colors[0]], [fbo.colors[0]], this._renderWidth, this._renderHeight);
         this._targets.scene.bind();
-    }
-
-    /**
-     * Upload the skinning palette. By NAME, never a cached location: `getUniformLocation` returns null
-     * for a std140 block member, which is indistinguishable from "this shader has no bones".
-     */
-    private _uploadBoneMatrices(shaderType: string, node: ModelNode): void {
-        const animatedModel = node.model as AnimatedModel;
-        if (animatedModel.hasSkin && node.animator) {
-            const boneMatrices = node.animator.getFinalBoneMatrices();
-            const scratch = this._boneMatrixScratch;
-            const n = Math.min(100, boneMatrices.length);
-            for (let i = 0; i < n; i++) scratch.set(boneMatrices[i], i * 16);
-            this._shaderManager.setUniform('u_boneMatrices', scratch.subarray(0, 100 * 16));
-        } else {
-            this._shaderManager.setUniform('u_boneMatrices', this._boneIdentityScratch);
-        }
     }
 
     // Size the render path is currently targeting: the offscreen square while capturing a thumbnail,
@@ -2737,7 +2653,7 @@ export class Renderer {
         this._materials.setCameraHole(node.cameraDither);
 
         // For animated models, set bone matrices
-        if (isAnimatedModel) this._uploadBoneMatrices(shaderType, node);
+        if (isAnimatedModel) this._modelDraw.uploadBoneMatrices(shaderType, node);
 
         frameStats.objects++;
 
@@ -2753,7 +2669,7 @@ export class Renderer {
         if (!viaRHI) GLState.blend(materialConfig.transparent === true);
 
         // Set material uniforms + bind textures, once per submesh.
-        this._drawSubmeshes(node, mat => {
+        this._modelDraw.drawSubmeshes(node, mat => {
             // Terrain and custom materials keep the legacy path even inside an RHI pass: both bind only
             // the textures they happen to have, and a bind group has to fill every binding the shader
             // declares. They move when their material application does.
@@ -2762,10 +2678,10 @@ export class Renderer {
                 // The forward terrain twin needs the roughness filter flag too, or a probe capture
                 // shades terrain with a different NDF width than the frame it is a probe for. It does
                 // NOT need u_sunDirection: this pass reads the sun from its own light list.
-                this._shaderManager.setUniform('u_specularAA', this._specularAaEnabled);
+                this._shaderManager.setUniform('u_specularAA', this._modelDraw.specularAaEnabled);
                 if (!viaRHI) { this._materials.applyTerrain(mat); return false; }
                 const terrainPipeline = this._pipelines.get(shaderType, reflection, {
-                    cullMode: Renderer._cullFor(mat.config.side),
+                    cullMode: ModelDraw.cullFor(mat.config.side),
                     depthStencil: { format: 'depth24plus', depthWriteEnabled: this._forwardDepthWrite,
                                     depthCompare: 'less-equal' },
                     ...(materialConfig.transparent === true ? { blend: DEFAULT_BLEND } : {}),
@@ -2792,7 +2708,7 @@ export class Renderer {
                                        vertexWgsl: { wgsl: customWgsl.vertex,
                                                      entryPoint: customWgsl.vertexEntry } } : {}),
                 }, {
-                    cullMode: Renderer._cullFor(mat.config.side),
+                    cullMode: ModelDraw.cullFor(mat.config.side),
                     depthStencil: { format: 'depth24plus', depthWriteEnabled: this._forwardDepthWrite,
                                     depthCompare: 'less-equal' },
                     ...(materialConfig.transparent === true ? { blend: DEFAULT_BLEND } : {}),
@@ -2809,7 +2725,7 @@ export class Renderer {
             if (!viaRHI) { this._materials.apply(mat); return false; }
 
             const pipeline = this._pipelines.get(shaderType, reflection, {
-                cullMode: Renderer._cullFor(mat.config.side),
+                cullMode: ModelDraw.cullFor(mat.config.side),
                 // Depth writes follow the CALLER's state, not the material's, and are passed in rather
                 // than read from GLState — the descriptor must be a pure function of its arguments or
                 // the cache key is wrong.
@@ -3787,8 +3703,8 @@ export class Renderer {
     public set specularOcclusionEnabled(on: boolean) { this._lighting.specularOcclusionEnabled = on; }
 
     /** See {@link RenderSettings.specularAaEnabled}. */
-    public get specularAaEnabled(): boolean { return this._specularAaEnabled; }
-    public set specularAaEnabled(on: boolean) { this._specularAaEnabled = on; }
+    public get specularAaEnabled(): boolean { return this._modelDraw.specularAaEnabled; }
+    public set specularAaEnabled(on: boolean) { this._modelDraw.specularAaEnabled = on; }
 
     /** See {@link RenderSettings.horizonOcclusionEnabled}. */
     public get horizonOcclusionEnabled(): boolean { return this._lighting.horizonOcclusionEnabled; }
@@ -4225,7 +4141,7 @@ export class Renderer {
             colorGradingIntensity: this._post.colorGradingIntensity,
             ssaoEnabled: this._ssil.ssaoEnabled,
             specularOcclusionEnabled: this._lighting.specularOcclusionEnabled,
-            specularAaEnabled: this._specularAaEnabled,
+            specularAaEnabled: this._modelDraw.specularAaEnabled,
             horizonOcclusionEnabled: this._lighting.horizonOcclusionEnabled,
             autoExposureEnabled: this._autoExposure.autoExposureEnabled,
             exposureCompensation: this._autoExposure.exposureCompensation,
@@ -4497,7 +4413,7 @@ export class Renderer {
         this._shaderManager.bind(type);
         const material = node.model.material;
         const pipeline = reflection ? this._pipelines.get(type, reflection, {
-            cullMode: Renderer._cullFor(material.config.side),
+            cullMode: ModelDraw.cullFor(material.config.side),
             depthStencil,
             blend: OVERLAY_BLEND,
             topology: material.config.wireframe ? 'line-list' : 'triangle-list',

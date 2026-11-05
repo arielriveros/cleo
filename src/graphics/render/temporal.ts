@@ -560,7 +560,7 @@ export class TemporalPasses {
                 // locations as their family's colour program, so this is a no-op after the geometry
                 // pass rather than a per-frame re-stride.
                 skin.initializeVAO(this._shaderManager.getShader(shaderType).attributes);
-                // Fills _boneMatrixScratch with THIS frame's pose and uploads it as u_boneMatrices —
+                // Fills ModelDraw.boneMatrixScratch with THIS frame's pose and uploads it as u_boneMatrices —
                 // which is also exactly the right PREVIOUS pose when there is no history to use.
                 this._host.uploadBoneMatrices(shaderType, node);
                 this._prevBoneScratch.set(fresh && prev!.bones ? prev!.bones : this._host.boneMatrixScratch);
