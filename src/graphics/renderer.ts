@@ -202,6 +202,7 @@ import { FoliageInteraction, gatherFoliageInteractors } from './foliageInteracti
 
 import { createFrameView, type FrameView } from './render/frameView';
 import { FrameTargets } from './render/frameTargets';
+import { PassEncoder } from './render/passEncoder';
 import { QUALITY_TIERS } from './render/settingsTypes';
 import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 export { QUALITY_TIERS } from './render/settingsTypes';
@@ -412,6 +413,8 @@ export class Renderer {
     private readonly _view: FrameView = createFrameView();
     /** The frame's shared render targets (render/frameTargets.ts), held by reference like `_view`. */
     private readonly _targets = new FrameTargets();
+    /** Pass and encoder plumbing (render/passEncoder.ts): opens and closes passes, owns the frame encoder. */
+    private readonly _passes: PassEncoder;
 
     /**
      * The AUTHORED exposure — what the artist set, what a scene saves, and what a preview renders at.
@@ -616,17 +619,9 @@ export class Renderer {
 
     /** RHI pipelines for the fullscreen passes, by program + blend. See _fullscreenPipeline. */
     private readonly _fullscreenPipelines = new Map<string, RenderPipeline>();
-    /** The encoder recording the pass currently open. See _beginFullscreenPass. */
     // Depth writes for the forward model pipelines, set by whichever queue is drawing: opaque writes,
     // transparent does not. Thumbnails are the exception — their coverage alpha comes from scene depth.
     private _forwardDepthWrite = true;
-    /** The target of the open pass, for `_pipelineFor` to derive attachment formats from. */
-    private _passTarget: RenderTarget | null = null;
-    private _passEncoder: CommandEncoder | null = null;
-    // ONE command encoder for the whole frame, and therefore one `queue.submit`.
-    // Null outside a frame: passes opened during INITIALISATION fall back to one encoder each, and a
-    // readback that must see its own work forces the boundary with `_flushFrameEncoder`.
-    private _frameEncoder: CommandEncoder | null = null;
     // Separate 2:1 (non-square) target for the light-probe cubemap preview thumbnail. Allocated on first use.
     private _probePreviewFBO: Framebuffer | null = null;
 
@@ -1210,8 +1205,6 @@ export class Renderer {
     private static readonly BRDF_LUT_SIZE = 512;
     private static readonly _IDENTITY_MAT4: mat4 = mat4.create();
 
-    private _screenQuad!: Mesh;
-
     // Node ids already warned about carrying a screen-space custom material on a mesh (once per node).
     private _warnedScreenMaterialMeshes: Set<string> = new Set();
 
@@ -1435,6 +1428,11 @@ export class Renderer {
         // Create material system
         this._shaderManager = ShaderManager.Instance;
 
+        this._passes = new PassEncoder({
+            clearColor: () => this.clearColor,
+            passEnabled: name => this._passEnabled[name],
+        });
+
         // Preallocated identity bone matrices (used when an animated model has no animator)
         this._boneIdentityScratch = new Float32Array(100 * 16);
         for (let i = 0; i < 100; i++) {
@@ -1485,7 +1483,7 @@ export class Renderer {
         // branch — on WebGPU the live binding is undefined, and null is the honest thing to pass.
         initializeGpuProfiler(gpu, gpu.backend === 'webgl2' ? gl : null);
 
-        this._screenQuad = new Mesh();
+        this._passes.screenQuad = new Mesh();
         this._allocateTargets();
 
         this._deviceReady = true;
@@ -2098,8 +2096,8 @@ export class Renderer {
         // clip space agrees. Settling it here means no pass anywhere else needs a flip.
         const v0 = device.backend === 'webgl2' ? 0 : 1;   // the V that belongs with clip-space y = -1
         const v1 = 1 - v0;
-        this._screenQuad.initializeVAO(this._shaderManager.getShader('screen').attributes);
-        this._screenQuad.create([-1, -1, 0, 0, v0,  1, -1, 0, 1, v0,
+        this._passes.screenQuad.initializeVAO(this._shaderManager.getShader('screen').attributes);
+        this._passes.screenQuad.create([-1, -1, 0, 0, v0,  1, -1, 0, 1, v0,
                                   1,  1, 0, 1, v1, -1,  1, 0, 0, v1], 12, [0, 1, 2, 0, 2, 3]);
 
         // IBL setup (BRDF LUT is rendered on the screen quad, so this must run after it exists).
@@ -2127,13 +2125,13 @@ export class Renderer {
         resetShaderOptimizerFrame();
         this._materialSync.beginFrame();
         this._compileQueue.poll();
-        this._frameEncoder = device.createCommandEncoder('frame');
+        this._passes.frameEncoder = device.createCommandEncoder('frame');
         try {
             this._renderFrame(scene);
         } finally {
             // `finally`, because `_renderFrame` can throw: an encoder left open would leak every pass
             // recorded into it and the next frame would start on a stale one.
-            this._flushFrameEncoder();
+            this._passes.flushFrameEncoder();
         }
     }
 
@@ -2155,7 +2153,7 @@ export class Renderer {
         // `Render (CPU)` figure the HUD shows — it lands in "Unattributed" instead. That exclusion is
         // deliberate (an occasional probe bake must not spike the frame stat), but it also means a
         // per-frame full-scene walk here is invisible. The CPU profiler scopes it so it is not.
-        this._scope('prepare');
+        this._passes.scope('prepare');
 
         // Compile+register any custom-material programs before any pass calls initializeModel/getShader.
         this._ensureCustomShaders(scene);
@@ -2238,7 +2236,7 @@ export class Renderer {
         // Re-bake the sky atmosphere cubemap when the sun moves (before IBL, so probes capture the sky).
         // The key light first: the cloud-sky bake below lights its clouds with it.
         this._updateKeyLight(scene);
-        this._scope('sky.bake');
+        this._passes.scope('sky.bake');
         this._updateSkyAtmosphere(scene);
         this._updateCloudSky(scene);
 
@@ -2247,9 +2245,9 @@ export class Renderer {
         this._updateSkyLight(scene);
 
         // Bake/refresh IBL (light probes + scene environment) before the main passes.
-        this._scope('ibl.bake');
+        this._passes.scope('ibl.bake');
         this._updateIBL(scene);
-        this._endScope();
+        this._passes.endScope();
 
         // Reset per-frame perf counters AFTER the (occasional) IBL bake so bakes don't spike the stats.
         resetFrameStats();
@@ -2275,14 +2273,14 @@ export class Renderer {
         // Foliage GPU state must be current BEFORE the shadow pass, which can now draw it. Timed under
         // its own scope: a layer whose prototypes were just re-derived re-uploads every cell here, and
         // that cost is invisible if it is charged to whichever pass happens to open next.
-        this._scope('foliage.upload');
+        this._passes.scope('foliage.upload');
         this._ensureFoliageUploaded(scene);
-        this._endScope();
+        this._passes.endScope();
         this._checkGLErrors('framePrologue');
 
         this._shadowsActive = false;
         if (shadowLight && this._shadowsEnabled) {
-            if (this._beginPass('shadows.cascades')) {
+            if (this._passes.beginPass('shadows.cascades')) {
                 this._renderCascades(scene, shadowLight!);
                 this._shadowsActive = true;
                 this._shadowMapsDirty = true;
@@ -2302,9 +2300,9 @@ export class Renderer {
 
         // AFTER the shadow passes and before anything shades: the passes above are what hand out the
         // spot atlas layers and point cube slots, and each light's slot travels inside its record.
-        this._scope('lightGrid');
+        this._passes.scope('lightGrid');
         this._buildLightGrid(scene);
-        this._endScope();
+        this._passes.endScope();
 
         // Decals, once per frame for both pipelines: which ones draw where, and — inside the jittered
         // phase, so it matches the depth it is compared against — the landscape-only receiver depth.
@@ -2340,7 +2338,7 @@ export class Renderer {
 
         // Sacrificial trailing scope: whichever query is LAST in a frame absorbs the driver's
         // end-of-frame drain, which would otherwise be charged to `present`.
-        this._scope('frameEnd');
+        this._passes.scope('frameEnd');
 
         this._readExposureSample();
 
@@ -2423,19 +2421,19 @@ export class Renderer {
         if (this._probePreviewFBO.width !== w || this._probePreviewFBO.height !== h)
             this._probePreviewFBO.create(w, h);
 
-        const pass = this._beginFullscreenPass(this._probePreviewFBO.renderTarget, 'probePreview', false);
+        const pass = this._passes.beginFullscreenPass(this._probePreviewFBO.renderTarget, 'probePreview', false);
         const pipeline = this._fullscreenPipeline('probePreview', ProbePreviewProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [cube]));
         this._shaderManager.bind('probePreview');
         this._shaderManager.setUniform('u_exposure', probe.intensity);
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
 
         // Viewport restored BEFORE the await, for the same reason the capture above restores its
         // buffers first: a game-loop frame that lands while this is suspended must find the live
         // viewport, not the preview's 2:1 one.
-        this._setViewport(this._renderWidth, this._renderHeight);
+        this._passes.setViewport(this._renderWidth, this._renderHeight);
 
         const pixels = await device.readPixels(this._probePreviewFBO.colors[0].attachmentView, 0, 0, w, h);
         // Synthesised, not resampled: probePreview.wgsl reads `uv.y` as a LATITUDE, and the screen
@@ -2554,9 +2552,9 @@ export class Renderer {
     private _simulateParticles(scene: Scene): void {
         const frame = this._particleSimFrame(scene);
         if (scene.particleSystems.size === 0) { this._particles.simulate(scene, frame); return; }
-        this._scope('particles.sim');
+        this._passes.scope('particles.sim');
         this._particles.simulate(scene, frame);
-        this._endScope();
+        this._passes.endScope();
         // The WebGL2 ping-pong went through pipelines that leave blend and depth off; put back what the
         // legacy draws that follow expect, as the cloud pass does.
         this._restoreDefaultBlend();
@@ -2575,7 +2573,7 @@ export class Renderer {
         }
         const live = this._particleCollideValid && !this._thumbnailMode && !this._view.capturing;
         return {
-            encoder: this._acquireEncoder('particles.sim'),
+            encoder: this._passes.acquireEncoder('particles.sim'),
             gravity: scene.physics?.gravity ?? [0, -9.81, 0],
             depth: live ? this._depthSource() : null,
             viewProj: live ? this._particleCollideViewProj : null,
@@ -2599,10 +2597,10 @@ export class Renderer {
 
     private _drawParticleNodes(scene: Scene, nodes: Iterable<ParticleSystemNode>, target: RenderTarget): void {
         // The sort runs passes of its own, so it goes before the particle pass opens.
-        this._particles.sort(nodes, this._acquireEncoder('particles.sort'), this._view.camera.position);
-        const pass = this._beginFullscreenPass(target, 'particles', false, undefined, false);
+        this._particles.sort(nodes, this._passes.acquireEncoder('particles.sort'), this._view.camera.position);
+        const pass = this._passes.beginFullscreenPass(target, 'particles', false, undefined, false);
         this._particles.draw(nodes, this._particleDrawFrame(scene, pass, target));
-        this._endFullscreenPass(pass);
+        this._passes.endFullscreenPass(pass);
         this._restoreDefaultBlend();
         GLState.blend(false);
         GLState.depthTest(true);
@@ -2725,7 +2723,7 @@ export class Renderer {
 
     private _renderDeferred(scene: Scene, shadowLight: LightNode | null): void {
         // 1. Rasterize all opaque lit geometry into the G-buffer.
-        this._scope('geometry');
+        this._passes.scope('geometry');
         this._geometryPass(scene);
         this._checkGLErrors('geometry');
         // BOTH counters, not just `objects`: instanced foliage bumps only `instances`, and a landscape
@@ -2733,24 +2731,24 @@ export class Renderer {
         const gBufferHasGeometry = frameStats.objects > 0 || frameStats.instances > 0;
         // 1a. Surface decals, resolved into the G-buffer before anything reads it — SSIL occludes the
         // decal's normal and the lighting pass shades its albedo like the surface's own.
-        if (this._surfaceDecals.length > 0 && gBufferHasGeometry && this._beginPass('decals')) {
+        if (this._surfaceDecals.length > 0 && gBufferHasGeometry && this._passes.beginPass('decals')) {
             this._surfaceDecalPass();
             this._checkGLErrors('decals');
         }
         // 1b. Screen-space ambient occlusion and bounce light from the G-buffer and last frame's light.
         this._ssaoProducedThisFrame = false;
-        if (this._ssaoEnabled && gBufferHasGeometry && this._beginPass('ssao')) {
+        if (this._ssaoEnabled && gBufferHasGeometry && this._passes.beginPass('ssao')) {
             this._ssilPass();
             this._ssaoProducedThisFrame = true;
         }
         // 2. Light the G-buffer in a single fullscreen pass into the scene FBO.
-        this._scope('lighting');
+        this._passes.scope('lighting');
         this._deferredLightingPass(scene, shadowLight);
         this._checkGLErrors('deferredLighting');
         // 3. Forward passes (skybox, transparent, sprites, outlines, gizmos) into the scene FBO.
         this._renderForwardOverlay(scene, shadowLight);
         this._checkGLErrors('forwardOverlay');
-        this._endScope();
+        this._passes.endScope();
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -2826,9 +2824,9 @@ export class Renderer {
      * a scene with no landscape then draws nothing, instead of everywhere.
      */
     private _decalReceiverPass(scene: Scene): void {
-        if (!this._decalReceiversWanted || !this._beginPass('decals.receivers')) return;
+        if (!this._decalReceiversWanted || !this._passes.beginPass('decals.receivers')) return;
         this._decalReceiverFBO = this._decalTarget(this._decalReceiverFBO, () => new Framebuffer({ usage: 'depth' }));
-        const pass = this._beginFullscreenPass(this._decalReceiverFBO.renderTarget, 'decalReceivers', true);
+        const pass = this._passes.beginFullscreenPass(this._decalReceiverFBO.renderTarget, 'decalReceivers', true);
         const cam = this._view.camera;
         // `_rasterProjection` already carries this frame's jitter and WebGPU's clip-z remap, so nothing
         // else is applied on top — `_renderShadowCasters` runs its light matrix through `_clipProjection`
@@ -2853,10 +2851,10 @@ export class Renderer {
                 if (pipeline !== bound) { pass.setPipeline(pipeline); bound = pipeline; }
                 this._shaderManager.setUniform('u_lightSpace', this._decalReceiverViewProj);
                 this._shaderManager.setUniform('u_model', chunk.worldTransform);
-                if (!this._recordDraw(pass, chunk.model.mesh, 0, 0)) chunk.model.mesh.draw('triangle-list');
+                if (!this._passes.recordDraw(pass, chunk.model.mesh, 0, 0)) chunk.model.mesh.draw('triangle-list');
             }
         }
-        this._endFullscreenPass(pass);
+        this._passes.endFullscreenPass(pass);
         this._decalReceiversReady = true;
         GLState.depthTest(true);
         GLState.depthMask(true);
@@ -2896,7 +2894,7 @@ export class Renderer {
         const copy = this._gBufferCopyFBO = this._decalTarget(this._gBufferCopyFBO, () => new Framebuffer({
             colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false }));
 
-        const pass = this._beginFullscreenPass(dbuffer.renderTarget, 'decals', true, [0, 0, 0, 1], false, true);
+        const pass = this._passes.beginFullscreenPass(dbuffer.renderTarget, 'decals', true, [0, 0, 0, 1], false, true);
         for (const decal of this._surfaceDecals) {
             const receivers = this._decalReceiverDepth(decal, gBuffer.depth);
             if (!receivers) continue;
@@ -2917,16 +2915,16 @@ export class Renderer {
             // Bindings 0, 2, 4: the depth projected onto, the receiver depth, the G-buffer normal. None
             // of them is attached to this pass — the DBuffer has no depth attachment at all.
             pass.setBindGroup(2, this._textureBindGroup(pipeline, 2, [gBuffer.depth, receivers, gBuffer.colors[1]]));
-            if (!this._recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
+            if (!this._passes.recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
         }
-        this._endFullscreenPass(pass);
+        this._passes.endFullscreenPass(pass);
 
         // A pass cannot sample what it writes, and the resolve writes the G-buffer.
         this._copyColors(gBuffer.colors, copy.colors, w, h);
 
         // Never binds `_targets.gBuffer.depth`: it is attached to this pass. The shader tells untouched pixels
         // apart by the DBuffer's alphas instead, and discards them.
-        const resolve = this._beginFullscreenPass(gBuffer.renderTarget, 'decals.resolve', false, undefined, false);
+        const resolve = this._passes.beginFullscreenPass(gBuffer.renderTarget, 'decals.resolve', false, undefined, false);
         this._shaderManager.bind('decalResolve');
         // `_fullscreenPipeline`'s vertex setup, with three targets.
         const resolvePipeline = this._pipelineFor('decalResolve', DecalResolveProgram,
@@ -2936,8 +2934,8 @@ export class Renderer {
             copy.colors[0], copy.colors[1], copy.colors[2],
             dbuffer.colors[0], dbuffer.colors[1], dbuffer.colors[2],
         ]));
-        this._drawFullscreen(resolve);
-        this._endFullscreenPass(resolve);
+        this._passes.drawFullscreen(resolve);
+        this._passes.endFullscreenPass(resolve);
 
         GLState.depthTest(true);
         GLState.depthMask(true);
@@ -2949,9 +2947,9 @@ export class Renderer {
      * too, so this is the one decal output that reaches the Default and Cel materials.
      */
     private _emissiveDecalPass(): void {
-        const pass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'decals.emissive', false, undefined, false);
+        const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'decals.emissive', false, undefined, false);
         this._drawColorDecals(pass, this._emissiveDecals, Renderer._DECAL_EMISSIVE_BLEND, this._view.invViewProj, 0);
-        this._endFullscreenPass(pass);
+        this._passes.endFullscreenPass(pass);
         // The passes that follow are partly on the legacy path and inherit blend state.
         this._restoreDefaultBlend();
         GLState.blend(false);
@@ -2984,7 +2982,7 @@ export class Renderer {
             this._setDecalUniforms(decal, material, invViewProj, mode);
             pass.setBindGroup(0, this._materialBindGroup(pipeline, material));
             pass.setBindGroup(2, this._textureBindGroup(pipeline, 2, [depth, receivers]));
-            if (!this._recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
+            if (!this._passes.recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
         }
     }
 
@@ -3034,7 +3032,7 @@ export class Renderer {
         GLState.depthMask(false);
         GLState.blend(true);
         if (gl) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        const trace = this._beginFullscreenPass(this._fluidTraceFBO!.renderTarget, 'fluidVolumes', true,
+        const trace = this._passes.beginFullscreenPass(this._fluidTraceFBO!.renderTarget, 'fluidVolumes', true,
                                                 [0, 0, 0, 0], false, true);
         for (const node of volumes) {
             sm.bind('fluidVolume');
@@ -3113,9 +3111,9 @@ export class Renderer {
                 node.previousVolume ?? node.volume!, node.occupancy ?? node.volume!,
                 node.detailA ?? node.volume!, node.detailB ?? node.volume!,
             ]));
-            if (!this._recordDraw(trace, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
+            if (!this._passes.recordDraw(trace, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
         }
-        this._endFullscreenPass(trace);
+        this._passes.endFullscreenPass(trace);
         GLState.blend(false);
 
         // --- 2. Resolve ---
@@ -3123,7 +3121,7 @@ export class Renderer {
         if (temporal) {
             const dst = this._fluidHistoryIndex ^ 1;
             const prev = this._fluidHistoryFBOs[this._fluidHistoryIndex];
-            const pass = this._beginFullscreenPass(this._fluidHistoryFBOs[dst].renderTarget, 'fluidVolumes.resolve', false, undefined, false);
+            const pass = this._passes.beginFullscreenPass(this._fluidHistoryFBOs[dst].renderTarget, 'fluidVolumes.resolve', false, undefined, false);
             const pipeline = this._fullscreenPipeline('fluidVolumeResolve', FluidVolumeResolveProgram);
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
@@ -3135,8 +3133,8 @@ export class Renderer {
             // Moving or editing: lean on the new samples so nothing smears; still: accumulate.
             sm.setUniform('u_feedback', moving || lead.interacting ? 0.6 : 0.9);
             sm.setUniform('u_historyValid', this._fluidHistoryValid && this._hasPrevViewProj ? 1 : 0);
-            this._drawFullscreen(pass);
-            this._endFullscreenPass(pass);
+            this._passes.drawFullscreen(pass);
+            this._passes.endFullscreenPass(pass);
             this._fluidHistoryIndex = dst;
             this._fluidHistoryValid = true;
             image = this._fluidHistoryFBOs[dst].colors[0];
@@ -3145,14 +3143,14 @@ export class Renderer {
         // --- 3. Composite ---
         GLState.blend(true);
         if (gl) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        const pass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'fluidVolumes.composite', false, undefined, false);
+        const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'fluidVolumes.composite', false, undefined, false);
         const pipeline = this._fullscreenPipeline('fluidVolumeComposite', FluidVolumeCompositeProgram, Renderer._CLOUD_BLEND);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [image, this._fluidTraceFBO!.colors[1], depth]));
         sm.bind('fluidVolumeComposite');
         sm.setUniform('u_invViewProj', this._view.invViewProjStable);
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
 
         this._restoreDefaultBlend();
         GLState.blend(false);
@@ -3315,10 +3313,10 @@ export class Renderer {
      */
     private _copyColors(sources: readonly Texture[], destinations: readonly Texture[],
                         width: number, height: number): void {
-        const encoder = this._acquireEncoder('copyColor');
+        const encoder = this._passes.acquireEncoder('copyColor');
         for (let i = 0; i < sources.length; i++)
             encoder.copyTextureToTexture(sources[i].attachmentView, destinations[i].attachmentView, width, height);
-        if (encoder !== this._frameEncoder) encoder.finish();
+        if (encoder !== this._passes.frameEncoder) encoder.finish();
     }
 
     // True when `node` is fully outside the camera frustum. PURE — no stat side effect, so use it only
@@ -3453,13 +3451,13 @@ export class Renderer {
         const set = this._occlusionQueries, nodes = this._gpuOcclusion.candidates;
         if (!this._gpuOcclusionActive || !set || nodes.length === 0 || this._view.camera !== this._gpuOcclusionCamera) return;
         // Its own scope, so the boxes' cost is a row of its own rather than part of the foliage pass's.
-        this._scope('occlusion.queries');
+        this._passes.scope('occlusion.queries');
         const target = device.createRenderTarget({
             label: 'occlusionQueries', colorViews: [], depthView: this._targets.gBuffer.depth.attachmentView,
         });
-        this._passEncoder = this._acquireEncoder('occlusionQueries');
-        this._passTarget = target;
-        const pass = this._passEncoder.beginRenderPass(target, {
+        this._passes.encoder = this._passes.acquireEncoder('occlusionQueries');
+        this._passes.target = target;
+        const pass = this._passes.encoder.beginRenderPass(target, {
             label: 'occlusionQueries',
             colorAttachments: [],
             depthAttachment: { loadOp: 'load', storeOp: 'store' },
@@ -3487,16 +3485,16 @@ export class Renderer {
             mat4.scale(model, model, [size, size, size]);
             this._shaderManager.setUniform('u_model', model);
             pass.beginOcclusionQuery(i);
-            if (!this._recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
+            if (!this._passes.recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
             pass.endOcclusionQuery();
         }
         pass.end();
         frameStats.occlusionQueries += nodes.length;
         // Into the encoder that holds the pass, after it; then finish that encoder only if this owns it.
-        set.resolve(this._passEncoder, nodes.length, this._gpuOcclusion.submitted());
-        if (this._passEncoder !== this._frameEncoder) this._passEncoder.finish();
-        this._passEncoder = null;
-        this._passTarget = null;
+        set.resolve(this._passes.encoder, nodes.length, this._gpuOcclusion.submitted());
+        if (this._passes.encoder !== this._passes.frameEncoder) this._passes.encoder.finish();
+        this._passes.encoder = null;
+        this._passes.target = null;
         // The box pipeline left depth writes off; the legacy draws after it assume they are on.
         GLState.depthMask(true);
     }
@@ -3638,7 +3636,7 @@ export class Renderer {
         // One pass for every node: the target and its clear belong to the pass, while the per-draw
         // state (which program, which cull mode, which textures) belongs to the pipelines and bind
         // groups set inside it.
-        const pass = this._beginFullscreenPass(this._targets.gBuffer.renderTarget, 'geometry', true);
+        const pass = this._passes.beginFullscreenPass(this._targets.gBuffer.renderTarget, 'geometry', true);
 
         // No unbind needed here: the geometry pass's bind group clears the units the previous frame's
         // lighting pass left the G-buffer textures on, which would otherwise be a feedback hazard.
@@ -3688,21 +3686,21 @@ export class Renderer {
             if (group.length >= 2) this._drawInstancedGroup(pass, group, key);
             else this._drawGeometryNode(pass, group[0]);
         }
-        this._endFullscreenPass(pass);
+        this._passes.endFullscreenPass(pass);
 
         // Instanced foliage owned by landscapes (grass billboards + scattered mesh props).
-        if (this._beginPass('foliage')) {
+        if (this._passes.beginPass('foliage')) {
             // Its own pass over the same G-buffer, opened after the geometry pass closed: foliage is
             // deferred-lit like everything else, it just arrives by a different route (per-cell
             // instance buffers rather than scene nodes).
-            const foliage = this._beginFullscreenPass(this._targets.gBuffer.renderTarget, 'foliage', false,
+            const foliage = this._passes.beginFullscreenPass(this._targets.gBuffer.renderTarget, 'foliage', false,
                                                       undefined, false);
             this._foliagePass(scene, foliage);
-            this._endFullscreenPass(foliage);
+            this._passes.endFullscreenPass(foliage);
         }
         // The G-buffer depth is complete: ask the GPU which candidate nodes it hides.
         this._gpuOcclusionPass();
-        this._endScope();
+        this._passes.endScope();
     }
 
     /**
@@ -3921,7 +3919,7 @@ export class Renderer {
                 sphere: octa ? [octa.center[0], octa.center[1], octa.center[2], octa.radius * 1.05] : Renderer._modelsSphere(models),
             });
         }
-        layer.gpuBatches = this._foliageGpu.cull(this._acquireEncoder('foliage.cull'), layer, buckets,
+        layer.gpuBatches = this._foliageGpu.cull(this._passes.acquireEncoder('foliage.cull'), layer, buckets,
                                                  this._frustum.planes, this._view.camera.position);
         layer.gpuCulled = true;
     }
@@ -5287,7 +5285,7 @@ export class Renderer {
             // it would be harmless today and wrong the moment the two disagree.
             const viaPipeline = !!bindMaterial(mat);
             if (!viaPipeline) this._applyCull(mat.config.side);
-            if (viaPipeline && pass && this._recordDraw(pass, model.mesh, 0, 0)) return;
+            if (viaPipeline && pass && this._passes.recordDraw(pass, model.mesh, 0, 0)) return;
             model.mesh.draw(mat.config.wireframe ? 'line-list' : 'triangle-list');
             return;
         }
@@ -5300,42 +5298,10 @@ export class Renderer {
             const viaPipeline = !!bindMaterial(mat);
             if (!viaPipeline) this._applyCull(mat.config.side);
             if (viaPipeline && pass
-                && this._recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count)) continue;
+                && this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count)) continue;
             model.mesh.drawRange(submeshes[i].start, submeshes[i].count,
                 mat.config.wireframe ? 'line-list' : 'triangle-list');
         }
-    }
-
-    // Record a mesh draw through the RHI. Returns false ONLY for a skinned mesh missing its bone
-    // buffers — everything else records, indexed or not, LOD levels and submesh ranges included.
-    // `lod` >= 0 draws that index level instead of the active one, for a whole-buffer draw only.
-    private _recordDraw(pass: RenderPassEncoder, mesh: Mesh, firstIndex: number, indexCount: number,
-                        lod: number = -1): boolean {
-        const level = lod >= 0 && indexCount === 0 && firstIndex === 0 && mesh.hasLods ? lod : -1;
-        const indices = level >= 0 ? mesh.lodIndexBuffer(level) : mesh.activeIndexBuffer;
-        pass.setVertexBuffer(0, mesh.vertexBuffer);
-        if (mesh.isAnimated) {
-            // Bone data rides in dedicated buffers rather than the interleaved vertex, so it is two
-            // more slots — at the locations THIS program declares, which differ between the lit and
-            // unlit families. See boneLayouts.
-            if (!mesh.boneIndicesBuffer || !mesh.boneWeightsBuffer) return false;
-            pass.setVertexBuffer(1, mesh.boneIndicesBuffer);
-            pass.setVertexBuffer(2, mesh.boneWeightsBuffer);
-        }
-        // A mesh with no index buffer records an ARRAY draw rather than falling back;
-        // `firstIndex`/`indexCount` become the vertex range.
-        if (!indices) {
-            // Nothing to rasterize is not a draw. An empty mesh reaches here from a node added THIS
-            // frame — the shadow pass precedes the geometry pass that builds it. Returns TRUE: the
-            // draw was handled, and the caller's fallback is a raw `gl` call.
-            const count = indexCount > 0 ? indexCount : mesh.vertexCount;
-            if (count > 0) pass.draw(count, 1, firstIndex);
-            return true;
-        }
-        pass.setIndexBuffer(indices, level >= 0 ? mesh.lodIndexFormat(level) : mesh.activeIndexFormat);
-        const count = indexCount > 0 ? indexCount : level >= 0 ? mesh.lodIndexCount(level) : mesh.activeIndexCount;
-        if (count > 0) pass.drawIndexed(count, 1, firstIndex);
-        return true;
     }
 
     /**
@@ -5569,7 +5535,7 @@ export class Renderer {
         const bg = this._thumbnailMode ? [0, 0, 0] : cc;
         // This pass binds its shadows through group 3, but the unit reservation stays: CUSTOM materials
         // still sample the cascade array at 6 and the spot atlas at 15, bound once per frame.
-        const pass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'deferredLighting', true,
+        const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'deferredLighting', true,
                                                [bg[0], bg[1], bg[2], 0.0], false);
         const pipeline = this._fullscreenPipeline('deferredLighting', DeferredLightingProgram);
         pass.setPipeline(pipeline);
@@ -5640,8 +5606,8 @@ export class Renderer {
         this._shaderManager.setUniform('u_ssaoTexelSize',
             this._ssaoResolutionScale >= 0.999 ? [0, 0] : [1 / this._ssaoWidth, 1 / this._ssaoHeight]);
 
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
 
         // Still restored by hand: the passes that follow are on the legacy path and inherit this.
         GLState.depthMask(true);
@@ -5952,7 +5918,7 @@ export class Renderer {
         this._ssilDepthParams[0] = ip[10]; this._ssilDepthParams[1] = ip[14];
         this._ssilDepthParams[2] = ip[11]; this._ssilDepthParams[3] = ip[15];
 
-        const trace = this._beginFullscreenPass(this._ssaoFBO.renderTarget, 'ssao', true, undefined, false);
+        const trace = this._passes.beginFullscreenPass(this._ssaoFBO.renderTarget, 'ssao', true, undefined, false);
         const tracePipeline = this._fullscreenPipeline('ssil', SsilProgram);
         trace.setPipeline(tracePipeline);
         trace.setBindGroup(0, this._textureBindGroup(tracePipeline, 0, [
@@ -5977,19 +5943,19 @@ export class Renderer {
         // A cap on the screen-space search, so a surface right in front of the camera does not send its
         // samples across the whole frame and through every cache line on the way.
         this._shaderManager.setUniform('u_maxRadiusPx', Math.max(16, this._renderHeight * 0.15));
-        this._drawFullscreen(trace);
-        this._endFullscreenPass(trace);
+        this._passes.drawFullscreen(trace);
+        this._passes.endFullscreenPass(trace);
         this._ssaoResult = this._ssaoFBO;
 
         // Temporal accumulation, which also filters spatially. Needs last frame's depth for its
         // disocclusion test, which rides in the radiance copy's alpha — so without a fresh copy the
         // history is restarted, not trusted.
         let accumulated = false;
-        if (this._beginPass('ssao.temporal')) {
+        if (this._passes.beginPass('ssao.temporal')) {
             const historyValid = radianceFresh && this._ssilFresh(this._ssilHistoryFrame);
             const src = this._ssilHistoryFBOs[this._ssilHistoryIndex];
             const dst = this._ssilHistoryFBOs[this._ssilHistoryIndex ^ 1];
-            const pass = this._beginFullscreenPass(dst.renderTarget, 'ssao.temporal', true, undefined, false);
+            const pass = this._passes.beginFullscreenPass(dst.renderTarget, 'ssao.temporal', true, undefined, false);
             const pipeline = this._fullscreenPipeline('ssilTemporal', SsilTemporalProgram);
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
@@ -6002,8 +5968,8 @@ export class Renderer {
             this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
             this._shaderManager.setUniform('u_feedback', Renderer.SSIL_FEEDBACK);
             this._shaderManager.setUniform('u_historyValid', historyValid);
-            this._drawFullscreen(pass);
-            this._endFullscreenPass(pass);
+            this._passes.drawFullscreen(pass);
+            this._passes.endFullscreenPass(pass);
             this._ssilHistoryIndex ^= 1;
             this._ssilHistoryFrame = this._view.frameIndex;
             this._ssaoResult = dst;
@@ -6012,8 +5978,8 @@ export class Renderer {
 
         // Edge-aware blur of the raw trace — only when the accumulation, which filters spatially itself,
         // did not run (it is switched off in the profiler).
-        if (!accumulated && this._beginPass('ssao.blur')) {
-            const pass = this._beginFullscreenPass(this._ssaoBlurFBO.renderTarget, 'ssao.blur', true,
+        if (!accumulated && this._passes.beginPass('ssao.blur')) {
+            const pass = this._passes.beginFullscreenPass(this._ssaoBlurFBO.renderTarget, 'ssao.blur', true,
                                                    undefined, false);
             const pipeline = this._fullscreenPipeline('ssilBlur', SsilBlurProgram);
             pass.setPipeline(pipeline);
@@ -6022,8 +5988,8 @@ export class Renderer {
             ]));
             this._shaderManager.setUniform('u_depthParams', this._ssilDepthParams);
             this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
-            this._drawFullscreen(pass);
-            this._endFullscreenPass(pass);
+            this._passes.drawFullscreen(pass);
+            this._passes.endFullscreenPass(pass);
             this._ssaoResult = this._ssaoBlurFBO;
         }
 
@@ -6038,9 +6004,9 @@ export class Renderer {
      */
     private _ssilHistoryPass(): void {
         if (!this._ssaoEnabled || !this._ssilSupported || this._thumbnailMode || !this._ssilRadianceFBO) return;
-        if (!this._beginPass('ssao.history')) return;
+        if (!this._passes.beginPass('ssao.history')) return;
         const target = this._ssilRadianceFBO;
-        const pass = this._beginFullscreenPass(target.renderTarget, 'ssao.history', true, undefined, false);
+        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'ssao.history', true, undefined, false);
         const pipeline = this._fullscreenPipeline('ssilHistory', SsilHistoryProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
@@ -6050,8 +6016,8 @@ export class Renderer {
         mat4.invert(this._invProjection, this._jitteredCameraProj);
         this._uvConsuming(this._invProjection, this._invProjection);
         this._shaderManager.setUniform('u_invProjection', this._invProjection);
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
         this._ssilRadianceFrame = this._view.frameIndex;
         // Put back what the overlay passes below expect, as the TAA resolve does.
         this._targets.scene.bind();
@@ -6105,10 +6071,10 @@ export class Renderer {
 
     private _renderBRDFLUT(): void {
         // No bind groups at all: the LUT is pure computation from the fragment coordinate.
-        const pass = this._beginFullscreenPass(this._brdfFBO.renderTarget, 'brdf', true, [0, 0, 0, 1]);
+        const pass = this._passes.beginFullscreenPass(this._brdfFBO.renderTarget, 'brdf', true, [0, 0, 0, 1]);
         pass.setPipeline(this._fullscreenPipeline('brdf', BRDFProgram));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     // Render a convolution shader (irradiance/prefilter) into all 6 faces of `target` at a mip level.
@@ -6120,7 +6086,7 @@ export class Renderer {
         // faces cost six cached framebuffers rather than six per bake.
         this._shaderManager.bind(shaderName);
         // One pipeline across six faces, so it must be TOLD its target: otherwise `_pipelineFor` falls
-        // back to `_passTarget` — whatever the previous pass left — and derives the wrong colour format,
+        // back to `_passes.target` — whatever the previous pass left — and derives the wrong colour format,
         // which WebGPU rejects. Face 0's target stands for all six, and `createRenderTarget` dedupes.
         const faceTarget = this._cubeFBO.targetFor(target, 0, mip, false, size);
         const pipeline = this._pipelineFor(shaderName, reflection, { cullMode: 'none', vertex: 'model',
@@ -6131,14 +6097,14 @@ export class Renderer {
         this._shaderManager.setUniform('u_projection', this._clipProjection(this._captureProj));
         if (perFace) perFace();
         for (let face = 0; face < 6; face++) {
-            const pass = this._beginFullscreenPass(
+            const pass = this._passes.beginFullscreenPass(
                 this._cubeFBO.targetFor(target, face, mip, false, size),
                 'iblConvolve', true, [0, 0, 0, 1], false);
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [sourceCube]));
             this._shaderManager.setUniform('u_view', this._iblFaceViews[face]);
-            if (!this._recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
-            this._endFullscreenPass(pass);
+            if (!this._passes.recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
+            this._passes.endFullscreenPass(pass);
         }
     }
 
@@ -6167,7 +6133,7 @@ export class Renderer {
             });
         }
 
-        this._setViewport(this._renderWidth, this._renderHeight);
+        this._passes.setViewport(this._renderWidth, this._renderHeight);
         GLState.depthMask(true);
         GLState.depthTest(true);
         return { irradiance, prefiltered };
@@ -6233,7 +6199,7 @@ export class Renderer {
                 // One pass per face — a face is its own render target, and the cube framebuffer re-points
                 // its colour attachment at each. Colour AND depth are cleared; the depth attachment is the
                 // cube framebuffer's scratch one at this resolution.
-                const pass = this._beginFullscreenPass(
+                const pass = this._passes.beginFullscreenPass(
                     this._cubeFBO.targetFor(sourceCube, face, 0, true, res),
                     'probeCapture', true, [clear[0], clear[1], clear[2], clear[3]], true);
 
@@ -6256,14 +6222,14 @@ export class Renderer {
                     if (node.model.material.config.probeable === false) continue;
                     this._renderModel(node, pass);
                 }
-                this._endFullscreenPass(pass);
+                this._passes.endFullscreenPass(pass);
             }
 
             // Cleared before `bakeIBL` below, which renders its own cube faces through `_captureProj` -
             // that matrix already carries the inversion, and applying it twice would undo it.
             this._view.cubeFace = false;
             this._view.camera = prevCamera;
-            this._generateMipsAfterRender(sourceCube);
+            this._passes.generateMipsAfterRender(sourceCube);
 
             const { irradiance, prefiltered } = this.bakeIBL(sourceCube, res);
             probe.setBakedMaps(sourceCube, irradiance, prefiltered);
@@ -6272,7 +6238,7 @@ export class Renderer {
             this._view.cubeFace = false;
             this._view.camera = prevCamera;
             if (!baked) sourceCube.delete();
-            this._setViewport(this._renderWidth, this._renderHeight);
+            this._passes.setViewport(this._renderWidth, this._renderHeight);
             this._shadowsSuppressed = false;
             // The forward programs still hold the capture's u_shadowsEnabled = false; restore them so the
             // frame that follows this bake is not silently unshadowed. Same for the one-cluster grid — its
@@ -6369,24 +6335,24 @@ export class Renderer {
         if (this._skyProjectFBO.width !== w || this._skyProjectFBO.height !== h)
             this._skyProjectFBO.create(w, h);
 
-        const pass = this._beginFullscreenPass(this._skyProjectFBO.renderTarget, 'skyProject', false);
+        const pass = this._passes.beginFullscreenPass(this._skyProjectFBO.renderTarget, 'skyProject', false);
         const pipeline = this._fullscreenPipeline('skyProject', SkyProjectProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [cube]));
         this._shaderManager.bind('skyProject');
         this._shaderManager.setUniform('u_linearInput', linear ? 1 : 0);
         this._shaderManager.setUniform('u_projectScale', scale);
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
 
         // Restored before the await, for the same reason `renderProbePreview` does it: a game-loop
         // frame that lands while this is suspended must find the live viewport, not the 32x16 one.
-        this._setViewport(this._renderWidth, this._renderHeight);
+        this._passes.setViewport(this._renderWidth, this._renderHeight);
 
         // SUBMIT BEFORE READING — the one place in the frame that must. `readPixels` copies on its own
         // encoder and submits immediately, so without this it runs ahead of the pass above and reads a
         // target nothing has written.
-        this._flushFrameEncoder(true);
+        this._passes.flushFrameEncoder(true);
 
         const pixels = await device.readPixels(this._skyProjectFBO.colors[0].attachmentView, 0, 0, w, h);
         const k = 1 / scale;
@@ -6934,7 +6900,7 @@ export class Renderer {
         }
         // Pass A: raymarch at half resolution into the scratch buffer the graph handed us. Blend off:
         // plain write. Who else may use that storage is the pool's question now, not a comment's.
-        const rayPass = this._beginFullscreenPass(scratch.renderTarget, 'godRays', false,
+        const rayPass = this._passes.beginFullscreenPass(scratch.renderTarget, 'godRays', false,
                                                   undefined, false);
         const rayPipeline = this._fullscreenPipeline('godRays', VolumetricGodRaysProgram);
         rayPass.setPipeline(rayPipeline);
@@ -6962,19 +6928,19 @@ export class Renderer {
         this._uploadShadowUniforms('godRays');
         // Sun cascades only — see `_frameLightingBindGroup`. The shafts come from the directional light.
         rayPass.setBindGroup(3, this._frameLightingBindGroup(rayPipeline, false));
-        this._drawFullscreen(rayPass);
-        this._endFullscreenPass(rayPass);
+        this._passes.drawFullscreen(rayPass);
+        this._passes.endFullscreenPass(rayPass);
 
         // Pass B: additively upsample into the chain buffer the graph handed us. In place — which
         // stage that is depends on where the user put this effect, and is not this method's business.
-        const upPass = this._beginFullscreenPass(target.renderTarget,
+        const upPass = this._passes.beginFullscreenPass(target.renderTarget,
                                                  'godRaysUpsample', false, undefined, false);
         const upPipeline = this._fullscreenPipeline('screen', ScreenProgram, ADDITIVE_BLEND);
         upPass.setPipeline(upPipeline);
         upPass.setBindGroup(0, this._textureBindGroup(upPipeline, 0, [scratch.colors[0]]));
         scratch.colors[0].bind(0);
-        this._drawFullscreen(upPass);
-        this._endFullscreenPass(upPass);
+        this._passes.drawFullscreen(upPass);
+        this._passes.endFullscreenPass(upPass);
 
         // Restore the pipeline default by hand — the passes that follow are on the legacy path and
         // inherit the blend state. Never a plain `gl.blendFunc`: that erodes the bloom-mask alpha.
@@ -7013,7 +6979,7 @@ export class Renderer {
         }
         const cube = node.cubemap!;
         this._renderAtmosphereFaces(node, sun, cube, res, Renderer._ALL_FACES);
-        this._generateMipsAfterRender(cube);
+        this._passes.generateMipsAfterRender(cube);
         node.markBaked(sun);
         // The sky light follows the sky. Nothing used to tell it to, so ambient froze at the first sun
         // position; the re-projection is throttled because it is a readback.
@@ -7088,18 +7054,18 @@ export class Renderer {
         // A texture still loading bakes the procedural fallback; remember to bake again once it is in.
         this._skyTexturesPending = (!!node.nightSkyTexture && !nightTex) || (!!node.moonTexture && !moonTex);
 
-        this._setViewport(res, res);
+        this._passes.setViewport(res, res);
         for (const face of faces) {
             // A pass per face, like `_convolveCubeFaces`: a face is a different render target.
-            const pass = this._beginFullscreenPass(this._cubeFBO.targetFor(cube, face, 0, false),
+            const pass = this._passes.beginFullscreenPass(this._cubeFBO.targetFor(cube, face, 0, false),
                                                    'skyAtmosphereBake', true, [0, 0, 0, 1], false);
             pass.setPipeline(skyPipeline);
             pass.setBindGroup(2, nightGroup);
             this._shaderManager.setUniform('u_view', this._iblFaceViews[face]);
-            this._recordDraw(pass, this._iblCubeMesh, 0, 0);
-            this._endFullscreenPass(pass);
+            this._passes.recordDraw(pass, this._iblCubeMesh, 0, 0);
+            this._passes.endFullscreenPass(pass);
         }
-        this._setViewport(this._renderWidth, this._renderHeight);
+        this._passes.setViewport(this._renderWidth, this._renderHeight);
         GLState.depthMask(true);
         GLState.depthTest(true);
     }
@@ -7117,11 +7083,11 @@ export class Renderer {
      * Copy a depth buffer, through the RHI, for a later pass that must depth-test or depth-read
      * against another attachment.
      *
-     * Recorded into the FRAME's encoder whenever one is open, exactly as `_beginFullscreenPass`
+     * Recorded into the FRAME's encoder whenever one is open, exactly as `_passes.beginFullscreenPass`
      * records its passes, and finished here only when this call owns the encoder.
      *
      * That is the whole correctness of it on WebGPU, and it used to be wrong. `finish()` SUBMITS,
-     * while the frame's render passes sit unsubmitted in `_frameEncoder` until the end of the
+     * while the frame's render passes sit unsubmitted in `_passes.frameEncoder` until the end of the
      * frame -- so a copy on its own encoder ran BEFORE every draw it was supposed to be copying
      * the results of. It read whatever the depth buffer held before the frame started: the
      * previous frame's depth in a live viewport, which a barely-moving camera makes look almost
@@ -7137,9 +7103,9 @@ export class Renderer {
      * the forward overlay, and TAA's previous-frame depth.
      */
     private _copyDepth(source: Texture, destination: Texture, width: number, height: number): void {
-        const encoder = this._acquireEncoder('copyDepth');
+        const encoder = this._passes.acquireEncoder('copyDepth');
         encoder.copyTextureToTexture(source.attachmentView, destination.attachmentView, width, height);
-        if (encoder !== this._frameEncoder) encoder.finish();
+        if (encoder !== this._passes.frameEncoder) encoder.finish();
     }
 
     // Height fog for the SkyAtmosphere node: a fullscreen pass that integrates the fog along each view
@@ -7150,7 +7116,7 @@ export class Renderer {
         const node = scene.skyAtmosphere;
         if (!node || !node.fogEnabled || !node.cubemap || node.fogMaxOpacity <= 0 || node.fogDensity <= 0) return;
 
-        const pass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'skyFog', false);
+        const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'skyFog', false);
         const pipeline = this._fullscreenPipeline('skyFog', SkyFogProgram, DEFAULT_BLEND);
         pass.setPipeline(pipeline);
 
@@ -7171,8 +7137,8 @@ export class Renderer {
         // or sky detail in it). ~8px-per-face target regardless of the baked cubemap resolution.
         const res = node.cubemapResolution || node.resolution;
         this._shaderManager.setUniform('u_fogSkyLod', Math.max(0, Math.log2(res) - 3));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
 
         // Restore the state the following overlay passes expect.
         GLState.blend(false);
@@ -7203,7 +7169,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_projection', this._rasterProjection(proj));
         this._shaderManager.setUniform('u_linearInput', linearInput);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [cubemap]));
-        if (!this._recordDraw(pass, mesh, 0, 0)) mesh.draw();
+        if (!this._passes.recordDraw(pass, mesh, 0, 0)) mesh.draw();
     }
 
     /**
@@ -7292,26 +7258,26 @@ export class Renderer {
         // Depth WRITES off: the sky must stay at the clear depth for the depth-reading passes.
         GLState.depthMask(false);
         const skyAtmo = scene.skyAtmosphere;
-        this._scope('sky');
+        this._passes.scope('sky');
         if (!this._thumbnailMode && this._passEnabled['sky']) {
-            const skyPass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'sky', false,
+            const skyPass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'sky', false,
                                                       undefined, false);
             this._renderSky(skyPass, scene, this._view.camera);
-            this._endFullscreenPass(skyPass);
+            this._passes.endFullscreenPass(skyPass);
         }
 
         // Volumetric clouds: raymarched fullscreen, composited over the sky and occluded by opaque
         // geometry (the shader reads the G-buffer depth to bound each ray — this runs before
         // _copySceneDepth below, so the blitted copy does not exist yet).
         // Not while the clouds are drawn from the sky bake: they are already in the sky above.
-        if (!this._thumbnailMode && !this._cloudSkyActive(scene) && this._beginPass('clouds'))
+        if (!this._thumbnailMode && !this._cloudSkyActive(scene) && this._passes.beginPass('clouds'))
             this._renderVolumetricClouds(scene);
 
         // Opaque Default (Blinn-Phong) models: forward-lit and depth-written, so they occlude correctly
         // against the deferred opaque geometry (whose depth was blitted into the scene FBO).
         GLState.depthMask(true);
         GLState.blend(false);
-        this._scope('forwardOpaque');
+        this._passes.scope('forwardOpaque');
         this._forwardDepthWrite = true;
         this._runForwardQueue('forwardOpaque', opaqueForwardQueue);
 
@@ -7321,11 +7287,11 @@ export class Renderer {
 
         // Decal emissive, onto every opaque surface in that snapshot. Before the fog, which should veil
         // a glowing decal exactly as it veils the surface under it.
-        if (this._emissiveDecals.length > 0 && this._beginPass('decals.emissive')) this._emissiveDecalPass();
+        if (this._emissiveDecals.length > 0 && this._passes.beginPass('decals.emissive')) this._emissiveDecalPass();
 
         // Atmospheric fog over the opaque scene (aerial perspective from the SkyAtmosphere node).
         // Drawn before the grid/transparents so editor overlays stay crisp.
-        if (!this._thumbnailMode && this._beginPass('skyFog')) this._renderSkyFog(scene);
+        if (!this._thumbnailMode && this._passes.beginPass('skyFog')) this._renderSkyFog(scene);
 
         // --- The temporal boundary. ---------------------------------------------------------------
         // Everything ABOVE is the scene: sky, clouds, opaques, fog. It is full render resolution,
@@ -7344,7 +7310,7 @@ export class Renderer {
 
         // Smoke-and-fire volumes, over the resolved image like the transparents (a volume has no velocity
         // and animates every frame, so TAA history would only smear it), occluded by the depth snapshot.
-        if (!this._thumbnailMode && scene.fluidVolumes.size > 0 && this._beginPass('fluidVolumes'))
+        if (!this._thumbnailMode && scene.fluidVolumes.size > 0 && this._passes.beginPass('fluidVolumes'))
             this._renderFluidVolumes(scene);
 
         // Transparent models: back-to-front, depth-tested against opaque, no depth writes. Thumbnails
@@ -7356,18 +7322,18 @@ export class Renderer {
         this._snapshotSceneColor(transparentQueue);
         GLState.depthMask(this._thumbnailMode);
         this._forwardDepthWrite = this._thumbnailMode;
-        if (this._beginPass('transparent')) this._runForwardQueue('transparent', transparentQueue);
+        if (this._passes.beginPass('transparent')) this._runForwardQueue('transparent', transparentQueue);
         this._forwardDepthWrite = true;
         this._sceneBuffersLive = false;
         GLState.depthMask(true);
 
         // GPU particles: after the transparents (and so after TAA — they never enter history), depth
         // tested against the opaque scene, soft-faded against its depth snapshot.
-        if (this._beginPass('particles')) this._renderParticles(scene);
+        if (this._passes.beginPass('particles')) this._renderParticles(scene);
 
         // Tiles + sprites, depth-sorted together (always transparent, forward). Scene content only —
         // the editor's icon billboards are filtered out and drawn in the overlay below.
-        if (this._beginPass('2d')) this._render2DPass(scene);
+        if (this._passes.beginPass('2d')) this._render2DPass(scene);
 
         // Editor chrome, into the overlay buffer. Last of the scene render and first thing after the
         // post chain, which is the whole point: nothing between those two moments can see it.
@@ -7378,7 +7344,7 @@ export class Renderer {
         if (this._selectedNodeId)
             for (const node of scene.sprites)
                 if (node.visible && node.id === this._selectedNodeId) selectedSprites.push(node);
-        this._scope('outlineMask');
+        this._passes.scope('outlineMask');
         this._renderSelectionMask(selectedNodes, selectedSprites);
     }
 
@@ -7669,7 +7635,7 @@ export class Renderer {
         this._bakeCloudSkyFaces(scene, node, atmo, faces);
         if (bake.face < 6) return;
 
-        this._generateMipsAfterRender(this._cloudSkyCubes[bake.cube]!);
+        this._passes.generateMipsAfterRender(this._cloudSkyCubes[bake.cube]!);
         this._cloudSkyFront = bake.cube;
         node.markBaked(bake.sun, bake.time, bake.signature);
         this._cloudSkyBake = null;
@@ -7711,7 +7677,7 @@ export class Renderer {
         this._shaderManager.setUniform('u_steps', Math.min(192, Math.max(node.steps, 96)));
         this._shaderManager.setUniform('u_lightSteps', Math.min(12, Math.max(node.lightSteps, 8)));
 
-        this._setViewport(res, res);
+        this._passes.setViewport(res, res);
         const eye = bake.eye;
         for (const face of faces) {
             // The face's view from the bake's eye, through the UNFLIPPED 90-degree projection on both
@@ -7725,14 +7691,14 @@ export class Renderer {
             mat4.multiply(this._cloudFaceInv, Renderer._CLOUD_FACE_PROJ, this._cloudFaceView);
             mat4.invert(this._cloudFaceInv, this._cloudFaceInv);
             this._shaderManager.setUniform('u_invViewProj', this._cloudFaceInv);
-            const pass = this._beginFullscreenPass(this._cubeFBO.targetFor(cube, face, 0, false),
+            const pass = this._passes.beginFullscreenPass(this._cubeFBO.targetFor(cube, face, 0, false),
                                                    'cloudSkyBake', false, undefined, false);
             pass.setPipeline(pipeline);
             pass.setBindGroup(0, group);
-            this._drawFullscreen(pass);
-            this._endFullscreenPass(pass);
+            this._passes.drawFullscreen(pass);
+            this._passes.endFullscreenPass(pass);
         }
-        this._setViewport(this._renderWidth, this._renderHeight);
+        this._passes.setViewport(this._renderWidth, this._renderHeight);
         GLState.blend(false);
         this._restoreDefaultBlend();
         GLState.depthMask(true);
@@ -7794,11 +7760,11 @@ export class Renderer {
             // Full resolution: raymarch straight into the bound scene buffer (premultiplied "over" set above).
             this._shaderManager.setUniform('u_temporal', false);
             this._shaderManager.setUniform('u_jitterSlot', this._view.frameIndex % 16);
-            const pass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'clouds', false);
+            const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'clouds', false);
             pass.setPipeline(rayPipeline);
             pass.setBindGroup(0, rayGroup(rayPipeline));
-            this._drawFullscreen(pass);
-            this._endFullscreenPass(pass);
+            this._passes.drawFullscreen(pass);
+            this._passes.endFullscreenPass(pass);
         } else {
             // Reduced resolution: raymarch into a low-res target, then bilinear-upsample + composite. Fewer
             // rays (scale per axis) is the whole point — the raymarch is the pass's dominant GPU cost.
@@ -7811,7 +7777,7 @@ export class Renderer {
             // Pass B: composite the low-res clouds, premultiplied "over". Not a bilinear blit —
             // cloudUpsample.fs re-decides occlusion per full-resolution pixel, against the G-buffer
             // depth the raymarch bounded itself with, and uses the low-res buffer for colour only.
-            const upPass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'cloudUpsample', false);
+            const upPass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'cloudUpsample', false);
             const upPipeline = this._fullscreenPipeline('cloudUpsample', CloudUpsampleProgram,
                                                        Renderer._CLOUD_BLEND);
             upPass.setPipeline(upPipeline);
@@ -7823,8 +7789,8 @@ export class Renderer {
             this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
             this._shaderManager.setUniform('u_slabBottom', node.baseAltitude);
             this._shaderManager.setUniform('u_slabTop', node.baseAltitude + node.thickness);
-            this._drawFullscreen(upPass);
-            this._endFullscreenPass(upPass);
+            this._passes.drawFullscreen(upPass);
+            this._passes.endFullscreenPass(upPass);
         }
 
         // Restore the state the following opaque/transparent overlay passes expect (incl. the default
@@ -7942,7 +7908,7 @@ export class Renderer {
             this._shaderManager.setUniform('u_octaves', octaves);
             this._shaderManager.setUniform('u_detail', detail);
             bakeFbo.bind();
-            this._setViewport(size, size);
+            this._passes.setViewport(size, size);
             for (let z = 0; z < size; z++) {
                 bakeFbo.attachColorLayer(0, tex.texture, z);
                 if (z === 0) {
@@ -7956,7 +7922,7 @@ export class Renderer {
                 }
                 // Texel centre, so the baked value lands at the point a LINEAR fetch will sample.
                 this._shaderManager.setUniform('u_slice', (z + 0.5) / size);
-                this._screenQuad.draw(); // not _drawFullscreen: a one-off bake is not a per-frame pass
+                this._passes.screenQuad.draw(); // not _drawFullscreen: a one-off bake is not a per-frame pass
             }
         };
 
@@ -7982,12 +7948,12 @@ export class Renderer {
         if (this._cloudsFBO.width !== w || this._cloudsFBO.height !== h) this._cloudsFBO.resize(w, h);
         this._shaderManager.setUniform('u_temporal', false);
         this._shaderManager.setUniform('u_jitterSlot', this._view.frameIndex % 16);
-        const tracePass = this._beginFullscreenPass(this._cloudsFBO.renderTarget, 'cloudTrace',
+        const tracePass = this._passes.beginFullscreenPass(this._cloudsFBO.renderTarget, 'cloudTrace',
                                                     true, [0, 0, 0, 0], false);
         tracePass.setPipeline(pipeline);
         tracePass.setBindGroup(0, group(pipeline));
-        this._drawFullscreen(tracePass);
-        this._endFullscreenPass(tracePass);
+        this._passes.drawFullscreen(tracePass);
+        this._passes.endFullscreenPass(tracePass);
         // Whatever setting change routed us here also makes the accumulated history meaningless.
         this._cloudHistoryValid = false;
         return this._cloudsFBO.colors[0];
@@ -8019,12 +7985,12 @@ export class Renderer {
             // identity, so this writes one ray per pixel of the history target.
             this._shaderManager.setUniform('u_temporal', false);
             this._shaderManager.setUniform('u_jitterSlot', this._view.frameIndex % 16);
-            const tracePass = this._beginFullscreenPass(this._cloudHistoryFBOs[seed].renderTarget, 'cloudReseed',
+            const tracePass = this._passes.beginFullscreenPass(this._cloudHistoryFBOs[seed].renderTarget, 'cloudReseed',
                                                         true, [0, 0, 0, 0], false);
             tracePass.setPipeline(pipeline);
             tracePass.setBindGroup(0, group(pipeline));
-            this._drawFullscreen(tracePass);
-            this._endFullscreenPass(tracePass);
+            this._passes.drawFullscreen(tracePass);
+            this._passes.endFullscreenPass(tracePass);
             this._cloudHistoryIndex = seed;
             this._cloudHistoryValid = true;
             return this._cloudHistoryFBOs[seed].colors[0];
@@ -8040,18 +8006,18 @@ export class Renderer {
         // cycle and the resolve's accumulation averages them away instead of freezing in grain.
         this._shaderManager.setUniform('u_jitterSlot', bayerIndex);
 
-        const tracePass = this._beginFullscreenPass(this._cloudTraceFBO.renderTarget, 'cloudTraceBayer',
+        const tracePass = this._passes.beginFullscreenPass(this._cloudTraceFBO.renderTarget, 'cloudTraceBayer',
                                                     true, [0, 0, 0, 0], false);
         tracePass.setPipeline(pipeline);
         tracePass.setBindGroup(0, group(pipeline));
-        this._drawFullscreen(tracePass);
-        this._endFullscreenPass(tracePass);
+        this._passes.drawFullscreen(tracePass);
+        this._passes.endFullscreenPass(tracePass);
 
         // --- Resolve: reconstruct full cloud resolution from history + the new samples ---
-        this._scope('clouds.resolve');
+        this._passes.scope('clouds.resolve');
         const dst = this._cloudHistoryIndex ^ 1;
         const prev = this._cloudHistoryFBOs[this._cloudHistoryIndex];
-        const resolvePass = this._beginFullscreenPass(this._cloudHistoryFBOs[dst].renderTarget,
+        const resolvePass = this._passes.beginFullscreenPass(this._cloudHistoryFBOs[dst].renderTarget,
                                                       'clouds.resolve', false, undefined, false);
         const resolvePipeline = this._fullscreenPipeline('cloudTemporalResolve', CloudTemporalResolveProgram);
         resolvePass.setPipeline(resolvePipeline);
@@ -8069,8 +8035,8 @@ export class Renderer {
         // returns early, but must stay set — an unset uniform silently reads as false.
         this._shaderManager.setUniform('u_historyValid', this._cloudHistoryValid && this._hasPrevViewProj);
         this._shaderManager.setUniform('u_slabMid', node.baseAltitude + node.thickness * 0.5);
-        this._drawFullscreen(resolvePass);
-        this._endFullscreenPass(resolvePass);
+        this._passes.drawFullscreen(resolvePass);
+        this._passes.endFullscreenPass(resolvePass);
 
         this._cloudHistoryIndex = dst;
         this._cloudHistoryValid = true;
@@ -8200,8 +8166,8 @@ export class Renderer {
         }
         this._shaderManager.setUniform('u_fadeFar', fadeFar);
 
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
 
         // Still set by hand: the overlay passes that follow are on the legacy path and inherit blend
         // and depth-mask state rather than declaring their own. The OVERLAY pair, not the default one
@@ -8235,7 +8201,7 @@ export class Renderer {
                 vec3.distance(this._view.camera.position, a.worldPosition));
             const only = this._begin2DPass();
             for (const node of sprites) this._renderSprite(node, true, only);
-            this._endFullscreenPass(only);
+            this._passes.endFullscreenPass(only);
             return;
         }
 
@@ -8317,7 +8283,7 @@ export class Renderer {
             }
             else this._drawTileBand(item.node, item.layer, item.chunk, item.indexOffset, item.indexCount, pass);
         }
-        this._endFullscreenPass(pass);
+        this._passes.endFullscreenPass(pass);
         GLState.depthMask(true);
     }
 
@@ -8326,7 +8292,7 @@ export class Renderer {
      * scene — and reserves the shadow units, since a custom material on a sprite is a legacy draw.
      */
     private _begin2DPass(): RenderPassEncoder {
-        return this._beginFullscreenPass(this._targets.scene.renderTarget, '2d', false, undefined, false);
+        return this._passes.beginFullscreenPass(this._targets.scene.renderTarget, '2d', false, undefined, false);
     }
 
     /** Frustum test for one chunk, in world space. `origin` is the owning node's world position. */
@@ -8770,18 +8736,6 @@ export class Renderer {
     private get _thumbnailMode(): boolean { return this._presentTarget !== null; }
 
     /**
-     * Set the GL viewport and keep the profiler's notion of it in sync. Every viewport change in the
-     * renderer must go through here, or `countFullscreenPass` charges the wrong pixel count.
-     */
-    private _setViewport(width: number, height: number): void {
-        // The GL call is WebGL2's alone: a viewport is PASS state on WebGPU, set by the pass encoder
-        // from its target's dimensions. `setViewportSize` is not skipped, because `renderStats` charges
-        // fullscreen passes by area on both backends and a missing size would silently zero `shadedMpx`.
-        if (gl) gl.viewport(0, 0, width, height);
-        setViewportSize(width, height);
-    }
-
-    /**
      * (Re)size the bloom pyramid for a `width`x`height` render target. Level i is the render size
      * halved i+1 times, floored at 1px so a small window cannot ask for a 0-sized texture.
      */
@@ -8794,133 +8748,6 @@ export class Renderer {
             h = Math.max(1, Math.floor(h / 2));
         }
     }
-
-    /**
-     * Draw the shared screen quad, counted against the fill-rate stats. Use this rather than
-     * `_screenQuad.draw()` for any screen-space pass. With a pass, the draw is RECORDED — on WebGPU a
-     * draw outside an encoder is not a draw.
-     */
-    private _drawFullscreen(pass?: RenderPassEncoder): void {
-        countFullscreenPass();
-        if (pass && this._recordDraw(pass, this._screenQuad, 0, 0)) return;
-        this._screenQuad.draw();
-    }
-
-
-    /**
-     * The device's surface target: the default framebuffer at canvas resolution. Reacquire it every
-     * frame rather than holding it — WebGPU hands back a fresh swap-chain texture each time.
-     */
-    private _screenTarget(): RenderTarget {
-        return device.getCurrentSurfaceTarget();
-    }
-
-    /**
-     * Open a fullscreen pass on `target`. The encoder is held on the renderer, so `finish()` happens in
-     * {@link _endFullscreenPass} AFTER the draws are recorded — WebGPU submits nothing until then.
-     */
-    private _beginFullscreenPass(target: RenderTarget, label: string, clear: boolean,
-                                 clearValue?: [number, number, number, number],
-                                 clearDepth: boolean = clear,
-                                 /** Clear EVERY colour attachment to `clearValue`, not attachment 0 alone. */
-                                 clearAll: boolean = false): RenderPassEncoder {
-        this._passEncoder = this._acquireEncoder(label);
-        // So `_pipelineFor` can read the formats it has to agree with. Same lifetime as the encoder.
-        this._passTarget = target;
-        // EVERY colour attachment when clearing to the standing colour (matching `gl.clear`); a NAMED
-        // clearValue clears attachment 0 alone (matching `clearBufferfv`). The standing colour is
-        // passed explicitly — WebGPU has no context-state equivalent of `gl.clearColor`.
-        const standing = this.clearColor;
-        const standingValue: [number, number, number, number] =
-            [standing[0], standing[1], standing[2], standing[3] ?? 1];
-        const colorAttachments = (clear && (!clearValue || clearAll))
-            ? target.colorViews.map((_view, index) => ({
-                target: index, loadOp: 'clear' as const, storeOp: 'store' as const,
-                clearValue: clearValue ?? standingValue,
-            }))
-            : [{
-                target: 0,
-                loadOp: (clear ? 'clear' : 'load') as 'clear' | 'load',
-                storeOp: 'store' as const,
-                // Absent means "the standing clear colour", which is what a bare `gl.clear` used. A
-                // named value goes through clearBufferfv instead and needs no save/restore of the
-                // context's colour — which is what the thumbnail path used to do by hand.
-                ...(clearValue ? { clearValue } : {}),
-            }];
-        const pass = this._passEncoder.beginRenderPass(target, {
-            label,
-            colorAttachments,
-            // Separate from the colour op because several targets carry no depth at all and the passes
-            // that write them said `{ color: true }` — clearing depth there was never intended, even
-            // though on a depthless framebuffer it happens to be a no-op.
-            depthAttachment: { loadOp: clearDepth ? 'clear' : 'load', storeOp: 'store' },
-        });
-        return pass;
-    }
-
-    private _endFullscreenPass(pass: RenderPassEncoder): void {
-        pass.end();
-        // Only an encoder this pass OWNS is finished here. The frame encoder outlives every pass in the
-        // frame and is submitted once, by `_flushFrameEncoder`.
-        if (this._passEncoder && this._passEncoder !== this._frameEncoder) this._passEncoder.finish();
-        this._passEncoder = null;
-        this._passTarget = null;
-    }
-
-    /** The frame's encoder, or a fresh one when there is no frame open. See {@link _frameEncoder}. */
-    private _acquireEncoder(label: string): CommandEncoder {
-        return this._frameEncoder ?? device.createCommandEncoder(label);
-    }
-
-    /**
-     * Submit whatever the frame has recorded so far. Anything that must OBSERVE the frame's work has
-     * to call this first — a readback cannot see commands still in an unsubmitted encoder.
-     */
-    private _flushFrameEncoder(reopen: boolean = false): void {
-        if (!this._frameEncoder) return;
-        const encoder = this._frameEncoder;
-        this._frameEncoder = null;
-        encoder.finish();
-        if (reopen) this._frameEncoder = device.createCommandEncoder('frame');
-    }
-
-    /**
-     * Build a just-rendered texture's mip chain, recorded into the frame's own encoder.
-     *
-     * A mip chain is built by READING level 0, so a generator that submits its own encoder runs BEFORE
-     * the passes still sitting in `_frameEncoder` and every level above the first comes out empty.
-     * `null` when no frame is open is correct — each pass finishes its own encoder there.
-     */
-    private _generateMipsAfterRender(texture: Texture): void {
-        texture.generateMipmaps(this._frameEncoder ?? undefined);
-    }
-
-    /**
-     * Open a depth-only pass into one layer of an array target: a shadow cascade, or a spot slot.
-     * No colour attachments. The LAYER belongs to the descriptor, not the target.
-     */
-    private _beginDepthPass(target: RenderTarget, label: string, layer: number,
-                            loadOp: 'clear' | 'load' = 'clear'): RenderPassEncoder {
-        frameStats.shadowLayers++;
-        this._shadowDrawMark = frameStats.drawCalls;
-        this._shadowTriangleMark = frameStats.triangles;
-        this._passEncoder = this._acquireEncoder(label);
-        this._passTarget = target;
-        return this._passEncoder.beginRenderPass(target, {
-            label,
-            colorAttachments: [],
-            depthAttachment: { loadOp, storeOp: 'store', baseArrayLayer: layer },
-        });
-    }
-
-    /** Close a pass opened by {@link _beginDepthPass}, charging what it drew to the shadow counters. */
-    private _endDepthPass(pass: RenderPassEncoder): void {
-        frameStats.shadowDraws += frameStats.drawCalls - this._shadowDrawMark;
-        frameStats.shadowTriangles += frameStats.triangles - this._shadowTriangleMark;
-        this._endFullscreenPass(pass);
-    }
-    private _shadowDrawMark = 0;
-    private _shadowTriangleMark = 0;
 
     /**
      * The RHI pipeline for a fullscreen pass, built once per program + state combination. Every
@@ -9011,7 +8838,7 @@ export class Renderer {
                                     builtFor?: string | null;
                                     /**
                                      * The target this pipeline will draw into, required only when it is
-                                     * built BEFORE the pass is opened; otherwise `_passTarget`.
+                                     * built BEFORE the pass is opened; otherwise `_passes.target`.
                                      */
                                     target?: RenderTarget | null;
                                     /** False writes depth only: every colour target's write mask off. */
@@ -9050,14 +8877,14 @@ export class Renderer {
         // `builtFor` is part of the key: one shadow program draws over buffers of several strides.
         // The ATTACHMENT FORMATS are part of the pipeline and WebGPU rejects a mismatch with its pass,
         // so they are derived from the target the caller is about to draw into.
-        const target = options.target ?? this._passTarget;
+        const target = options.target ?? this._passes.target;
         // A caller that named its own depth state keeps it; otherwise it comes from the target, because
-        // `_beginFullscreenPass` always declares a depth attachment and WebGPU requires the pipeline to
+        // `_passes.beginFullscreenPass` always declares a depth attachment and WebGPU requires the pipeline to
         // match one that exists.
         const depthFormat = target?.depthView?.texture.format;
         // The synthesised default is "no depth interaction", NOT the depth-test defaults — anything
         // else makes every fullscreen post pass depth-test and stamp the depth buffer. WebGPU requires
-        // depth state whenever the pass has a depth attachment, and `_beginFullscreenPass` always does.
+        // depth state whenever the pass has a depth attachment, and `_passes.beginFullscreenPass` always does.
         const resolvedDepth = depthStencil
             ?? (depthFormat ? { format: depthFormat, depthWriteEnabled: false,
                                 depthCompare: 'always' as const } : undefined);
@@ -9360,35 +9187,6 @@ export class Renderer {
         vec3.set(this._prevTemporalCamFwd, -view[2], -view[6], -view[10]);
     }
 
-    /**
-     * Open a GPU timing scope, and report whether the pass should run at all. Call as
-     * `if (!this._beginPass('x')) return;` — a switched-off pass must never also be timed.
-     */
-    private _beginPass(name: RenderPass): boolean {
-        if (!this._passEnabled[name]) return false;
-        this._scope(name);
-        return true;
-    }
-
-    /**
-     * Open one render scope, timed on BOTH sides.
-     *
-     * The two profilers share these boundaries deliberately: a GPU pass table with no CPU column sends
-     * you looking at the GPU when the cost is submission, and two independently placed sets of scopes
-     * would produce rows that cannot be compared. Flat, never nested — WebGL2 allows one active timer
-     * query, so opening a scope closes the previous one on both sides.
-     */
-    private _scope(name: RenderPass | string): void {
-        gpuProfiler.beginPass(name);
-        cpuProfiler.beginPass(name);
-    }
-
-    /** Close the open scope on both profilers. */
-    private _endScope(): void {
-        gpuProfiler.endPass();
-        cpuProfiler.endPass();
-    }
-
     public resize(): void {
         if (!this._viewport) return;
         const width = this._viewport.clientWidth, height = this._viewport.clientHeight;
@@ -9416,7 +9214,7 @@ export class Renderer {
      * independently of the viewport and left alone.
      */
     private _resizeBuffers(width: number, height: number): void {
-        this._setViewport(width, height);
+        this._passes.setViewport(width, height);
 
         this._targets.scene.resize(width, height);
         this._targets.sceneDepth.resize(width, height);
@@ -9487,14 +9285,14 @@ export class Renderer {
 
     private _renderScene(scene: Scene): void {
         this._targets.scene.bind();
-        this._setViewport(this._renderWidth, this._renderHeight);
+        this._passes.setViewport(this._renderWidth, this._renderHeight);
         // The frame's clear, as a PASS of its own: the sky below deliberately LOADS, and a thumbnail
         // skips the sky entirely while still needing the buffer cleared.
         // Thumbnails clear to transparent black so only geometry ends up opaque.
-        const scenePass = this._beginFullscreenPass(
+        const scenePass = this._passes.beginFullscreenPass(
             this._targets.scene.renderTarget, 'sceneClear', true,
             this._thumbnailMode ? [0, 0, 0, 0] : undefined, true);
-        this._endFullscreenPass(scenePass);
+        this._passes.endFullscreenPass(scenePass);
 
         // Sky background. Depth writes off: the sky renders at NDC z = w and interpolation error
         // would write some pixels a hair below 1.0, breaking the "depth == 1.0 means sky" contract
@@ -9502,10 +9300,10 @@ export class Renderer {
         GLState.depthMask(false);
         const fwdAtmo = scene.skyAtmosphere;
         if (!this._thumbnailMode) {
-            const skyPass = this._beginFullscreenPass(this._targets.scene.renderTarget, 'sky', false,
+            const skyPass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'sky', false,
                                                       undefined, false);
             this._renderSky(skyPass, scene, this._view.camera);
-            this._endFullscreenPass(skyPass);
+            this._passes.endFullscreenPass(skyPass);
         }
         GLState.depthMask(true); // models below need depth writes again
 
@@ -9552,7 +9350,7 @@ export class Renderer {
 
         // Decal emissive over that snapshot. The only decal output this pipeline has: with no G-buffer
         // there is nothing for a surface decal to write into.
-        if (this._emissiveDecals.length > 0 && this._beginPass('decals.emissive')) this._emissiveDecalPass();
+        if (this._emissiveDecals.length > 0 && this._passes.beginPass('decals.emissive')) this._emissiveDecalPass();
 
         // The temporal boundary — see the matching block in `_renderForwardOverlay`. This pipeline has
         // no clouds, no fog and no grid, so the opaque snapshot above is the whole scene and the
@@ -9576,7 +9374,7 @@ export class Renderer {
         this._sceneBuffersLive = false;
 
         // GPU particles, as in the deferred overlay.
-        if (this._beginPass('particles')) this._renderParticles(scene);
+        if (this._passes.beginPass('particles')) this._renderParticles(scene);
 
         // Tiles + sprites, depth-sorted together. A selected sprite draws in its own depth order — its
         // outline comes from the mask pass below.
@@ -9601,9 +9399,9 @@ export class Renderer {
      */
     private _runForwardQueue(label: string, queue: ModelNode[]): void {
         if (queue.length === 0) return;
-        const pass = this._beginFullscreenPass(this._targets.scene.renderTarget, label, false, undefined, false);
+        const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, label, false, undefined, false);
         for (const node of queue) this._renderModel(node, pass);
-        this._endFullscreenPass(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     /**
@@ -9955,7 +9753,7 @@ export class Renderer {
         }
 
         const topology = materialConfig.wireframe ? 'line-list' : 'triangle-list';
-        if (!pipeline || !this._recordDraw(pass!, node.sprite.mesh, 0, 0))
+        if (!pipeline || !this._passes.recordDraw(pass!, node.sprite.mesh, 0, 0))
             node.sprite.mesh.draw(topology);
         if (!pipeline && additive) this._restoreDefaultBlend();
 
@@ -10054,21 +9852,21 @@ export class Renderer {
                         [cut ? cut.texture : this._fallbackTexture]));
                     const start = submeshes ? submeshes[i].start : 0;
                     const drawCount = submeshes ? submeshes[i].count : 0;
-                    if (this._recordDraw(pass, model.mesh, start, drawCount)) continue;
+                    if (this._passes.recordDraw(pass, model.mesh, start, drawCount)) continue;
                     if (submeshes) model.mesh.drawRange(start, drawCount, 'triangle-list');
                     else model.mesh.draw('triangle-list');
                 }
             } else if (record.mesh) {
-                this._recordDraw(pass, record.mesh, 0, 0);
+                this._passes.recordDraw(pass, record.mesh, 0, 0);
             } else if (state.wholeBuffer) {
-                if (!this._recordDraw(pass, model.mesh, 0, 0, this._shadowLodFor(record)))
+                if (!this._passes.recordDraw(pass, model.mesh, 0, 0, this._shadowLodFor(record)))
                     model.mesh.draw('triangle-list');
             } else {
                 const submeshes = model.submeshes;
                 for (let i = 0; i < submeshes.length; i++) {
                     const caster = materials[i] ?? materials[0];   // see _drawSubmeshes: never index past the array
                     if (!caster.config.castShadow || caster.config.wireframe) continue;
-                    if (this._recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count)) continue;
+                    if (this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count)) continue;
                     model.mesh.drawRange(submeshes[i].start, submeshes[i].count, 'triangle-list');
                 }
             }
@@ -10516,7 +10314,7 @@ export class Renderer {
             this._spotStaticCache.invalidateAll();
             return;
         }
-        if (!this._beginPass('shadows.spot')) return;
+        if (!this._passes.beginPass('shadows.spot')) return;
         this._ensureShadowCasters(scene);
         // The static copy, as for the point faces (see `_renderPointShadows`).
         if (this._spotStaticFBO.size !== this._spotShadowFBO.size || this._spotStaticFBO.layers !== this._spotShadowFBO.layers) {
@@ -10567,17 +10365,17 @@ export class Renderer {
             const liveStale = this._spotShadowCache.needsUpdate(layer, pos, far,
                 mixNumber(mixNumber(key, lists.staticHash), lists.dynamicHash)) || staticStale;
             if (staticStale) {
-                const pass = this._beginDepthPass(this._spotStaticFBO.renderTarget, 'spotShadow', layer);
+                const pass = this._passes.beginDepthPass(this._spotStaticFBO.renderTarget, 'spotShadow', layer);
                 this._renderShadowCasters(pass, lists.statics, lists.staticCount, matrix);
-                this._endDepthPass(pass);
+                this._passes.endDepthPass(pass);
             }
             if (!liveStale) continue;
             this._copyDepthLayer(this._spotStaticFBO.texture, this._spotShadowFBO.texture, layer,
                                  this._spotShadowResolution);
             if (lists.dynamicCount > 0) {
-                const pass = this._beginDepthPass(this._spotShadowFBO.renderTarget, 'spotShadow', layer, 'load');
+                const pass = this._passes.beginDepthPass(this._spotShadowFBO.renderTarget, 'spotShadow', layer, 'load');
                 this._renderShadowCasters(pass, lists.dynamics, lists.dynamicCount, matrix);
-                this._endDepthPass(pass);
+                this._passes.endDepthPass(pass);
             }
         }
 
@@ -10642,7 +10440,7 @@ export class Renderer {
             this._pointStaticCache.invalidateAll();
             return;
         }
-        if (!this._beginPass('shadows.point')) return;
+        if (!this._passes.beginPass('shadows.point')) return;
         this._ensureShadowCasters(scene);
         // The static copy, the live atlas's twin: allocated with the first casting point light, and
         // reallocated with the live one (fresh storage holds undefined depth, so every face redraws).
@@ -10703,17 +10501,17 @@ export class Renderer {
                 const liveStale = this._pointShadowCache.needsUpdate(layer, pos, far,
                     mixNumber(lists.staticHash, lists.dynamicHash)) || staticStale;
                 if (staticStale) {
-                    const pass = this._beginDepthPass(this._pointStaticFBO.renderTarget, 'pointShadow', layer);
+                    const pass = this._passes.beginDepthPass(this._pointStaticFBO.renderTarget, 'pointShadow', layer);
                     this._renderShadowCasters(pass, lists.statics, lists.staticCount, this._pointShadowMatrices[layer]);
-                    this._endDepthPass(pass);
+                    this._passes.endDepthPass(pass);
                 }
                 if (!liveStale) continue;
                 this._copyDepthLayer(this._pointStaticFBO.texture, this._pointShadowFBO.texture, layer,
                                      this._pointShadowResolution);
                 if (lists.dynamicCount > 0) {
-                    const pass = this._beginDepthPass(this._pointShadowFBO.renderTarget, 'pointShadow', layer, 'load');
+                    const pass = this._passes.beginDepthPass(this._pointShadowFBO.renderTarget, 'pointShadow', layer, 'load');
                     this._renderShadowCasters(pass, lists.dynamics, lists.dynamicCount, this._pointShadowMatrices[layer]);
-                    this._endDepthPass(pass);
+                    this._passes.endDepthPass(pass);
                 }
             }
         }
@@ -10765,9 +10563,9 @@ export class Renderer {
      * for the reason {@link _copyDepth} gives.
      */
     private _copyDepthLayer(source: Texture, destination: Texture, layer: number, size: number): void {
-        const encoder = this._acquireEncoder('copyDepthLayer');
+        const encoder = this._passes.acquireEncoder('copyDepthLayer');
         encoder.copyTextureToTexture(source.layerView(layer), destination.layerView(layer), size, size);
-        if (encoder !== this._frameEncoder) encoder.finish();
+        if (encoder !== this._passes.frameEncoder) encoder.finish();
     }
 
     /** Render the directional light's cascaded shadow maps (one array layer per view-frustum slice). */
@@ -10859,12 +10657,12 @@ export class Renderer {
             }
             this._shadowLayerDrawn[i] = this._view.frameIndex;
 
-            const pass = this._beginDepthPass(this._shadowCascadeFBO.renderTarget, 'cascade', i);
+            const pass = this._passes.beginDepthPass(this._shadowCascadeFBO.renderTarget, 'cascade', i);
             this._renderShadowCasters(pass, this._layerCasters, this._layerCasterCount, this._cascadeMatrices[i]);
             // Inside the cascade pass, not after it: a caster recorded after the encoder closed is not
             // recorded at all on a deferred backend.
             this._foliageShadowPass(scene, this._cascadeMatrices[i], i, pass);
-            this._endDepthPass(pass);
+            this._passes.endDepthPass(pass);
         }
         this._layerLodMode = 'camera';
 
@@ -10930,9 +10728,9 @@ export class Renderer {
             this._shadowLayerCache.changed(layer, this._layerHash(this._farCascadeMatrix, this._farMotionStep(), motionFrom));
             this._shadowLayerDrawn[layer] = this._view.frameIndex;
 
-            const pass = this._beginDepthPass(this._shadowCascadeFBO.renderTarget, 'cascade', layer);
+            const pass = this._passes.beginDepthPass(this._shadowCascadeFBO.renderTarget, 'cascade', layer);
             this._renderShadowCasters(pass, this._layerCasters, this._layerCasterCount, this._farCascadeMatrix);
-            this._endDepthPass(pass);
+            this._passes.endDepthPass(pass);
         }
         this._layerLodMode = 'camera';
         this._farCascadeActiveDistance = this._farCascadeValid ? reach : 0;
@@ -11157,16 +10955,16 @@ export class Renderer {
         }
 
         const graph = this._buildPostGraph(scene);
-        // Every node opens its own profiler scope, on both sides, exactly as `_beginPass` did at each
+        // Every node opens its own profiler scope, on both sides, exactly as `_passes.beginPass` did at each
         // call site before the chain became data. Without this the whole chain reports under whichever
         // scope happened to be open when it started — which is what the WebGL2 profiler times, so its
         // per-effect rows would all read zero while `present` absorbed the lot.
         //
-        // `_beginPass` can also REFUSE, and no node here may be refused: each one was already gated on
+        // `_passes.beginPass` can also REFUSE, and no node here may be refused: each one was already gated on
         // its own `_passEnabled` entry in `_buildPostGraph`, because skipping a pass that was going to
         // write the next chain buffer leaves the stage after it reading one nothing filled. The two
         // gates agree by construction; `tests/postEffectDefaults` is what keeps them agreeing.
-        graph.execute(this._postPool, scope => this._beginPass(scope as RenderPass));
+        graph.execute(this._postPool, scope => this._passes.beginPass(scope as RenderPass));
         // Whatever the chain stopped asking for is released rather than left resident — the point of
         // pooling these instead of allocating one buffer per effect up front.
         this._postPool.trim(graph.slots.length);
@@ -11224,12 +11022,12 @@ export class Renderer {
                 if (blur) { this._motionBlurPass(ctx.target(head)); return; }
                 // The only `compose` label: the plain scene copy. PASS_LABEL_TO_SCOPE files it under
                 // `present`, which is the scope this node already opened.
-                const pass = this._beginFullscreenPass(ctx.target(head).renderTarget, 'compose', true);
+                const pass = this._passes.beginFullscreenPass(ctx.target(head).renderTarget, 'compose', true);
                 const pipeline = this._fullscreenPipeline('screen', ScreenProgram);
                 pass.setPipeline(pipeline);
                 pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.scene.colors[0]]));
-                this._drawFullscreen(pass);
-                this._endFullscreenPass(pass);
+                this._passes.drawFullscreen(pass);
+                this._passes.endFullscreenPass(pass);
             },
         });
 
@@ -11453,7 +11251,7 @@ export class Renderer {
      * uniform reaches the GPU.
      */
     private _presentPass(source: Framebuffer): void {
-        const pass = this._beginFullscreenPass(this._screenTarget(), 'present', true);
+        const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'present', true);
         const pipeline = this._fullscreenPipeline('present', PresentProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_exposure', this._view.exposure);
@@ -11471,8 +11269,8 @@ export class Renderer {
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
             source.colors[0], this._targets.scene.depth, lut,
         ]));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     /**
@@ -11489,13 +11287,13 @@ export class Renderer {
      * at the graph node in `_buildPostGraph`.
      */
     private _overlayCompositePass(): void {
-        const pass = this._beginFullscreenPass(this._screenTarget(), 'overlay.composite', false);
+        const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'overlay.composite', false);
         const pipeline = this._fullscreenPipeline('overlayComposite', OverlayCompositeProgram,
                                                   OVERLAY_COMPOSITE_BLEND);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.overlay.colors[0]]));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     /**
@@ -11511,7 +11309,7 @@ export class Renderer {
     private _screenMaterialPass(scene: Scene, mat: CustomMaterial,
                                 source: Framebuffer, target: Framebuffer): void {
         const sun = this._sunScreenInfo(scene);
-        const pass = this._beginFullscreenPass(target.renderTarget, 'screenMaterial',
+        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'screenMaterial',
                                                false, undefined, false);
         // The WGSL, when there is any. On WebGL2 there is none and none is needed — the program
         // is already linked and `_pipelineFor` reaches it by name. `entryPoints.fragment` is
@@ -11542,8 +11340,8 @@ export class Renderer {
         this._shaderManager.setUniform('u_sunVisible', sun.visible);
         this._shaderManager.setUniform('u_exposure', this._view.exposure); // lets a pass invert the final present resolve
         this._applyCustomMaterial(mat, true);   // u_time, u_viewPos + user VALUE uniforms only
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     /**
@@ -11557,7 +11355,7 @@ export class Renderer {
         // The same program and pipeline as the on-screen present — only the target, the clear colour
         // and `u_alphaFromDepth` differ. Sharing the pipeline is the point: two call sites that used to
         // set overlapping-but-not-identical uniform and unit state now cannot drift apart.
-        const pass = this._beginFullscreenPass(this._presentTarget!.renderTarget, 'presentThumbnail',
+        const pass = this._passes.beginFullscreenPass(this._presentTarget!.renderTarget, 'presentThumbnail',
                                                true, [0, 0, 0, 0]);
         const pipeline = this._fullscreenPipeline('present', PresentProgram);
         pass.setPipeline(pipeline);
@@ -11582,8 +11380,8 @@ export class Renderer {
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
             this._targets.scene.colors[0], this._depthSource(), this._colorLut.volumeFor(null),
         ]));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     // Screen-space selection outline: draws a border just outside the silhouette mask over the
@@ -11591,7 +11389,7 @@ export class Renderer {
     private _outlinePass(source: Framebuffer): void {
         // The clear moves in here with the pass: the caller used to unbind the scene FBO and clear the
         // screen by hand, which is the same thing said twice and only one of them portable.
-        const pass = this._beginFullscreenPass(this._screenTarget(), 'outline', true);
+        const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'outline', true);
         const pipeline = this._fullscreenPipeline('outlinePost', OutlinePostProgram);
         pass.setPipeline(pipeline);
         // This pass does the final resolve, so it carries the WHOLE grade and not just the exposure.
@@ -11609,8 +11407,8 @@ export class Renderer {
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
             source.colors[0], this._outlineMaskFBO.colors[0], lut,
         ]));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     /**
@@ -11632,7 +11430,7 @@ export class Renderer {
         // One pipeline per SOURCE material, never one for the pass: `overdraw` declares position only,
         // but the buffer it reads was interleaved for whichever program the mesh was built for (Basic
         // packs 20 bytes per vertex, PBR 56). `builtFor` makes the layout follow the BUFFER.
-        const pass = this._beginFullscreenPass(this._overdrawFBO.renderTarget, 'overdraw',
+        const pass = this._passes.beginFullscreenPass(this._overdrawFBO.renderTarget, 'overdraw',
                                                true, [0, 0, 0, 1], true);
 
         // Nothing occludes anything: this counts how many times each pixel was shaded, so the depth
@@ -11655,7 +11453,7 @@ export class Renderer {
             });
             pass.setPipeline(pipeline);
             this._shaderManager.setUniform('u_model', node.worldTransform);
-            this._recordDraw(pass, node.model.mesh, 0, 0);
+            this._passes.recordDraw(pass, node.model.mesh, 0, 0);
         }
 
         // Terrain foliage, which never was in `scene.models`: the batches `_prepareFoliage` packed for
@@ -11690,7 +11488,7 @@ export class Renderer {
             }
         }
 
-        this._endFullscreenPass(pass);
+        this._passes.endFullscreenPass(pass);
     }
     private readonly _overdrawViewProj = mat4.create();
 
@@ -11702,13 +11500,13 @@ export class Renderer {
     private _blitShadowLayer(): void {
         const layer = Math.min(this._shadowCascadeFBO.layers - 1, Math.max(0, this._shadowDebugLayer));
         this._shadowCascadeFBO.setCompareEnabled(false);
-        const pass = this._beginFullscreenPass(this._screenTarget(), 'shadowDebug', true);
+        const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'shadowDebug', true);
         const pipeline = this._fullscreenPipeline('shadowDebug', ShadowDebugProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_layer', layer);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._shadowCascadeFBO.texture]));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
         this._shadowCascadeFBO.setCompareEnabled(true);
     }
 
@@ -11768,7 +11566,7 @@ export class Renderer {
                 break;
             default:          tex = this._targets.scene.colors[0];      mode = 0; break;
         }
-        const pass = this._beginFullscreenPass(this._screenTarget(), 'debugView', true);
+        const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'debugView', true);
         const pipeline = this._fullscreenPipeline('debugView', DebugViewProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_mode', mode);
@@ -11781,8 +11579,8 @@ export class Renderer {
         // The depth attachment rides along on every channel, because WebGPU requires every binding the
         // shader declares to be present and only mode 3 actually reads it.
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [tex, this._targets.gBuffer.depth]));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     /**
@@ -11807,13 +11605,13 @@ export class Renderer {
         // switched on (see `_buildPostGraph`), and the graph opens the scope for every node it runs.
         const write = this._exposureWrite;
         const read = 1 - write;
-        const pass = this._beginFullscreenPass(this._exposureFBOs[write].renderTarget, 'exposure', true,
+        const pass = this._passes.beginFullscreenPass(this._exposureFBOs[write].renderTarget, 'exposure', true,
                                                undefined, false);
         const pipeline = this._fullscreenPipeline('exposureMeter', ExposureMeterProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._targets.scene.colors[0]]));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
         this._exposureWrite = read;
 
         // The READ does not happen here. `readPixels` binds a scratch framebuffer of its own and
@@ -12006,7 +11804,7 @@ export class Renderer {
     private _bloomGenerate(source: Framebuffer): void {
         // 1. Bright pass into the largest mip (half res). Also writes the scene passthrough into
         const mip0 = this._bloomMips[0];
-        const brightPass = this._beginFullscreenPass(mip0.renderTarget, 'bloom.bright', true,
+        const brightPass = this._passes.beginFullscreenPass(mip0.renderTarget, 'bloom.bright', true,
                                                      undefined, false);
         const brightPipeline = this._fullscreenPipeline('bloom', BloomProgram);
         brightPass.setPipeline(brightPipeline);
@@ -12026,20 +11824,20 @@ export class Renderer {
         brightPass.setBindGroup(0, this._textureBindGroup(brightPipeline, 0, [
             source.colors[0], this._targets.scene.colors[0],
         ]));
-        this._drawFullscreen(brightPass);
-        this._endFullscreenPass(brightPass);
+        this._passes.drawFullscreen(brightPass);
+        this._passes.endFullscreenPass(brightPass);
 
         if (this._passEnabled['bloom.blur']) {
             // 2. Downsample: each level reads the one above it at twice the resolution.
-            this._scope('bloom.blur');
+            this._passes.scope('bloom.blur');
             for (let i = 1; i < this._bloomMips.length; i++) {
                 const from = this._bloomMips[i - 1];
                 // `loadOp: 'load'` — each level is fully overwritten by the draw, so clearing first
                 // would be a wasted write. That is what the bare `bind()` used to express implicitly.
-                const pass = this._beginFullscreenPass(this._bloomMips[i].renderTarget, 'bloom.blur',
+                const pass = this._passes.beginFullscreenPass(this._bloomMips[i].renderTarget, 'bloom.blur',
                                                        false, undefined, false);
                 // Built INSIDE the pass, never hoisted above the loop: `_pipelineFor` reads its colour
-                // format off `_passTarget`, which only exists between begin and end. Not a
+                // format off `_passes.target`, which only exists between begin and end. Not a
                 // per-iteration cost — pipelines are cached and the format is part of the key.
                 const downPipeline = this._fullscreenPipeline('bloomDownsample', BloomDownsampleProgram);
                 pass.setPipeline(downPipeline);
@@ -12051,8 +11849,8 @@ export class Renderer {
                 // conserving, so applying it all the way down would visibly dim the bloom.
                 this._shaderManager.setUniform('u_karisAverage', i === 1);
                 pass.setBindGroup(0, this._textureBindGroup(downPipeline, 0, [from.colors[0]]));
-                this._drawFullscreen(pass);
-                this._endFullscreenPass(pass);
+                this._passes.drawFullscreen(pass);
+                this._passes.endFullscreenPass(pass);
             }
 
             // 3. Upsample: additively blend each level onto the next larger one, accumulating in the
@@ -12062,7 +11860,7 @@ export class Renderer {
                 const from = this._bloomMips[i];
                 const to = this._bloomMips[i - 1];
                 // Accumulating INTO the destination, so it must be loaded, never cleared.
-                const pass = this._beginFullscreenPass(to.renderTarget, 'bloom.blur', false,
+                const pass = this._passes.beginFullscreenPass(to.renderTarget, 'bloom.blur', false,
                                                        undefined, false);
                 // Inside the pass, for the format reason spelled out on the downsample loop above.
                 const upPipeline = this._fullscreenPipeline('bloomUpsample', BloomUpsampleProgram,
@@ -12073,8 +11871,8 @@ export class Renderer {
                 this._shaderManager.setUniform('u_filterRadius',
                     [Renderer.BLOOM_FILTER_RADIUS / from.width, Renderer.BLOOM_FILTER_RADIUS / from.height]);
                 pass.setBindGroup(0, this._textureBindGroup(upPipeline, 0, [from.colors[0]]));
-                this._drawFullscreen(pass);
-                this._endFullscreenPass(pass);
+                this._passes.drawFullscreen(pass);
+                this._passes.endFullscreenPass(pass);
             }
             // Still restored by hand: the passes that follow are on the legacy path and enable BLEND
             // without setting the function, so they inherit whatever was left. Drop this once they are
@@ -12086,7 +11884,7 @@ export class Renderer {
 
     /** Composite the accumulated bloom back over the image, from one chain stage into the next. */
     private _bloomComposite(source: Framebuffer, target: Framebuffer): void {
-        const pass = this._beginFullscreenPass(target.renderTarget, 'bloom.composite', true);
+        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'bloom.composite', true);
         const pipeline = this._fullscreenPipeline('composer', ComposerProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_bloomIntensity', this._bloomIntensity);
@@ -12100,8 +11898,8 @@ export class Renderer {
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
             source.colors[0], this._bloomMips[0].colors[0], dirt ?? this._fallbackTexture,
         ]));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     /**
@@ -12211,7 +12009,7 @@ export class Renderer {
 
         // 1. Half-res colour, and the signed CoC in alpha. The scope is already open — this node
         //    reports under `dof.coc`, and the two below are opened as it moves through them.
-        const cocPass = this._beginFullscreenPass(coc.renderTarget, 'dof.coc', true, undefined, false);
+        const cocPass = this._passes.beginFullscreenPass(coc.renderTarget, 'dof.coc', true, undefined, false);
         const cocPipeline = this._fullscreenPipeline('dofCoc', DofCocProgram);
         cocPass.setPipeline(cocPipeline);
         this._shaderManager.setUniform('u_near', this._view.camera.near);
@@ -12223,12 +12021,12 @@ export class Renderer {
         this._shaderManager.setUniform('u_maxCocPx', this._dofMaxBlur);
         this._shaderManager.setUniform('u_srcTexelSize', [1 / this._renderWidth, 1 / this._renderHeight]);
         cocPass.setBindGroup(0, this._textureBindGroup(cocPipeline, 0, [source.colors[0], depth]));
-        this._drawFullscreen(cocPass);
-        this._endFullscreenPass(cocPass);
+        this._passes.drawFullscreen(cocPass);
+        this._passes.endFullscreenPass(cocPass);
 
         // 2. The bokeh itself.
-        this._scope('dof.gather');
-        const gatherPass = this._beginFullscreenPass(bokeh.renderTarget, 'dof.gather', true,
+        this._passes.scope('dof.gather');
+        const gatherPass = this._passes.beginFullscreenPass(bokeh.renderTarget, 'dof.gather', true,
                                                      undefined, false);
         const gatherPipeline = this._fullscreenPipeline('dofGather', DofGatherProgram);
         gatherPass.setPipeline(gatherPipeline);
@@ -12236,13 +12034,13 @@ export class Renderer {
         this._shaderManager.setUniform('u_maxCocHalfPx', this._dofMaxBlur * 0.5);
         this._shaderManager.setUniform('u_texelSize', [1 / coc.width, 1 / coc.height]);
         gatherPass.setBindGroup(0, this._textureBindGroup(gatherPipeline, 0, [coc.colors[0]]));
-        this._drawFullscreen(gatherPass);
-        this._endFullscreenPass(gatherPass);
+        this._passes.drawFullscreen(gatherPass);
+        this._passes.endFullscreenPass(gatherPass);
 
         // 3. Back over the sharp image, with the CoC recomputed at full resolution so the boundary
         //    between sharp and blurred does not land on the half-res grid.
-        this._scope('dof.composite');
-        const outPass = this._beginFullscreenPass(target.renderTarget, 'dof.composite', true);
+        this._passes.scope('dof.composite');
+        const outPass = this._passes.beginFullscreenPass(target.renderTarget, 'dof.composite', true);
         const outPipeline = this._fullscreenPipeline('dofComposite', DofCompositeProgram);
         outPass.setPipeline(outPipeline);
         this._shaderManager.setUniform('u_near', this._view.camera.near);
@@ -12255,8 +12053,8 @@ export class Renderer {
         outPass.setBindGroup(0, this._textureBindGroup(outPipeline, 0, [
             source.colors[0], bokeh.colors[0], depth,
         ]));
-        this._drawFullscreen(outPass);
-        this._endFullscreenPass(outPass);
+        this._passes.drawFullscreen(outPass);
+        this._passes.endFullscreenPass(outPass);
     }
 
     /**
@@ -12265,7 +12063,7 @@ export class Renderer {
      */
     private _lensFlarePass(scratch: Framebuffer, target: Framebuffer): void {
         // 1. Trace the ghosts. Reads the chain image itself, so anything occluded throws no flare.
-        const genPass = this._beginFullscreenPass(scratch.renderTarget, 'lensFlare', true,
+        const genPass = this._passes.beginFullscreenPass(scratch.renderTarget, 'lensFlare', true,
                                                   undefined, false);
         const genPipeline = this._fullscreenPipeline('lensFlare', LensFlareProgram);
         genPass.setPipeline(genPipeline);
@@ -12279,13 +12077,13 @@ export class Renderer {
         this._shaderManager.setUniform('u_flareHaloWidth', this._lensFlareHaloWidth);
         this._shaderManager.setUniform('u_flareChromatic', Renderer.LENS_FLARE_CHROMATIC);
         genPass.setBindGroup(0, this._textureBindGroup(genPipeline, 0, [target.colors[0]]));
-        this._drawFullscreen(genPass);
-        this._endFullscreenPass(genPass);
+        this._passes.drawFullscreen(genPass);
+        this._passes.endFullscreenPass(genPass);
 
         // 2. Add it back, modulated by the dirt overlay. Additive, so the pass returns a contribution
         // and never reads its own destination — which is what makes the in-place declaration honest.
         const dirt = this._lensDirtSource();
-        const upPass = this._beginFullscreenPass(target.renderTarget, 'lensFlareComposite', false,
+        const upPass = this._passes.beginFullscreenPass(target.renderTarget, 'lensFlareComposite', false,
                                                  undefined, false);
         const upPipeline = this._fullscreenPipeline('lensFlareComposite', LensFlareCompositeProgram,
                                                     ADDITIVE_BLEND);
@@ -12295,8 +12093,8 @@ export class Renderer {
         upPass.setBindGroup(0, this._textureBindGroup(upPipeline, 0, [
             scratch.colors[0], dirt ?? this._fallbackTexture,
         ]));
-        this._drawFullscreen(upPass);
-        this._endFullscreenPass(upPass);
+        this._passes.drawFullscreen(upPass);
+        this._passes.endFullscreenPass(upPass);
 
         // Restored by hand, as god rays does: the passes that follow are still on the legacy path and
         // enable BLEND without setting the function, so they inherit whatever was left here.
@@ -12306,7 +12104,7 @@ export class Renderer {
 
     /** Lens fall-off toward the corners, multiplicative on the linear-HDR chain. */
     private _fxaaPass(source: Framebuffer, target: Framebuffer): void {
-        const pass = this._beginFullscreenPass(target.renderTarget, 'fxaa', true);
+        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'fxaa', true);
         const pipeline = this._fullscreenPipeline('fxaa', FxaaProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_texelSize', [1 / Math.max(1, this._renderWidth), 1 / Math.max(1, this._renderHeight)]);
@@ -12315,12 +12113,12 @@ export class Renderer {
         this._shaderManager.setUniform('u_subpixel', this._fxaaSubpixel);
         this._shaderManager.setUniform('u_searchSteps', FXAA_SEARCH_STEPS[this._fxaaQuality]);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     private _vignettePass(source: Framebuffer, target: Framebuffer): void {
-        const pass = this._beginFullscreenPass(target.renderTarget, 'vignette', true);
+        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'vignette', true);
         const pipeline = this._fullscreenPipeline('vignette', VignetteProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_vignetteStrength', this._vignetteStrength);
@@ -12330,13 +12128,13 @@ export class Renderer {
         // pass upscales, so a canvas-derived ratio would skew the ellipse at any scale but 1.
         this._shaderManager.setUniform('u_aspect', this._renderWidth / Math.max(1, this._renderHeight));
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     /** Film grain, animated and midtone-weighted. The last thing in the lens; see filmGrain.wgsl. */
     private _filmGrainPass(source: Framebuffer, target: Framebuffer): void {
-        const pass = this._beginFullscreenPass(target.renderTarget, 'filmGrain', true);
+        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'filmGrain', true);
         const pipeline = this._fullscreenPipeline('filmGrain', FilmGrainProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_grainIntensity', this._filmGrainIntensity);
@@ -12348,19 +12146,19 @@ export class Renderer {
         this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
         this._shaderManager.setUniform('u_exposure', this._view.exposure);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     private _chromaticAberrationPass(source: Framebuffer, target: Framebuffer): void {
-        const pass = this._beginFullscreenPass(target.renderTarget, 'chromatic', true);
+        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'chromatic', true);
         const pipeline = this._fullscreenPipeline('chromaticAberration', ChromaticAberrationProgram);
         pass.setPipeline(pipeline);
         this._shaderManager.setUniform('u_strength', this._chromaticAberrationStrength);
         this._shaderManager.setUniform('u_aspect', this._renderWidth / Math.max(1, this._renderHeight));
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [source.colors[0]]));
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     /**
@@ -12380,7 +12178,7 @@ export class Renderer {
         // would show a stale buffer rather than this frame's motion.
         const wanted = this._view.taaJitterActive || this._motionBlurWillRun
                        || this._debugView === 'velocity';
-        if (!wanted || !this._beginPass('velocity')) return;
+        if (!wanted || !this._passes.beginPass('velocity')) return;
 
         this._velocityPass();
         this._velocityProducedThisFrame = true;
@@ -12410,7 +12208,7 @@ export class Renderer {
         if (!this._view.taaJitterActive || !this._velocityProducedThisFrame) return;
         const w = this._renderWidth, h = this._renderHeight;
 
-        this._scope('taa');
+        this._passes.scope('taa');
         this._ensureTaaTargets(w, h);
         // The format guard runs on allocation, so the first frame on a device without float targets is
         // where TAA turns itself off. The jitter goes with it, this frame included.
@@ -12418,7 +12216,7 @@ export class Renderer {
 
         const dst = this._taaHistoryIndex ^ 1;
 
-        const pass = this._beginFullscreenPass(this._taaHistoryFBOs[dst].renderTarget, 'taa', true);
+        const pass = this._passes.beginFullscreenPass(this._taaHistoryFBOs[dst].renderTarget, 'taa', true);
         const pipeline = this._fullscreenPipeline('taaResolve', TaaResolveProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [
@@ -12440,8 +12238,8 @@ export class Renderer {
         this._shaderManager.setUniform('u_varianceGamma', this._taaClipStrength);
         this._shaderManager.setUniform('u_historyValid', this._taaHistoryValid && this._hasPrevViewProj);
         this._shaderManager.setUniform('u_historyFilter', this._taaHistoryFilter === 'catmullRom' ? 1 : 0);
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
 
         // Back over the scene buffer — sharpened on the way when asked. The HISTORY keeps the
         // unsharpened resolve: sharpening inside the feedback loop would compound every frame.
@@ -12449,8 +12247,8 @@ export class Renderer {
         // Two literal calls rather than one with a computed label: the profiler-label test finds the
         // labels by scanning for them.
         const copy = sharpen
-            ? this._beginFullscreenPass(this._targets.scene.renderTarget, 'taa.sharpen', false)
-            : this._beginFullscreenPass(this._targets.scene.renderTarget, 'taa.copy', false);
+            ? this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'taa.sharpen', false)
+            : this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'taa.copy', false);
         const copyPipeline = sharpen
             ? this._fullscreenPipeline('taaSharpen', TaaSharpenProgram)
             : this._fullscreenPipeline('screen', ScreenProgram);
@@ -12462,8 +12260,8 @@ export class Renderer {
             this._shaderManager.setUniform('u_sharpness', this._taaSharpness);
             this._shaderManager.setUniform('u_exposure', this._view.exposure);
         }
-        this._drawFullscreen(copy);
-        this._endFullscreenPass(copy);
+        this._passes.drawFullscreen(copy);
+        this._passes.endFullscreenPass(copy);
 
         // The depth that produced the history just written, kept for next frame's disocclusion test.
         // AFTER the resolve, which still had to read the previous contents. A copy rather than a pass:
@@ -12487,7 +12285,7 @@ export class Renderer {
     // the truth. Motion blur applies its own scale and cap when it reads the buffer; see
     // chunks/motionBlurShutter.wgsl for why the stored form is the unblurred one.
     private _velocityPass(): void {
-        const pass = this._beginFullscreenPass(this._targets.velocity.renderTarget, 'velocity', true);
+        const pass = this._passes.beginFullscreenPass(this._targets.velocity.renderTarget, 'velocity', true);
         const pipeline = this._fullscreenPipeline('motionBlurVelocity', MotionBlurVelocityProgram);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._textureBindGroup(pipeline, 0, [this._depthSource()]));
@@ -12500,8 +12298,8 @@ export class Renderer {
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
         this._shaderManager.setUniform('u_viewProj', this._uvViewProjScratch);
         this._shaderManager.setUniform('u_prevViewProj', this._uvPrevViewProjScratch);
-        this._drawFullscreen(pass);
-        this._endFullscreenPass(pass);
+        this._passes.drawFullscreen(pass);
+        this._passes.endFullscreenPass(pass);
 
         // Its own pass over the same colour buffer, with the opaque depth attached so the draws can
         // depth-test. A second pass rather than more draws in the one above: that one owns no depth,
@@ -12568,7 +12366,7 @@ export class Renderer {
     private _beginOverlayPass(label: string): RenderPassEncoder {
         const clear = !this._overlayDrawn;
         this._overlayDrawn = true;
-        return this._beginFullscreenPass(this._overlayTarget(), label, clear, [0, 0, 0, 0], false);
+        return this._passes.beginFullscreenPass(this._overlayTarget(), label, clear, [0, 0, 0, 0], false);
     }
 
     /**
@@ -12608,7 +12406,7 @@ export class Renderer {
         mat4.copy(this._uvViewProjScratch, this._uvProducing(this._view.viewProj));
         mat4.copy(this._uvPrevViewProjScratch, this._uvProducing(this._prevViewProj));
 
-        const pass = this._beginFullscreenPass(this._velocityObjectsTarget(), 'velocity.objects', false);
+        const pass = this._passes.beginFullscreenPass(this._velocityObjectsTarget(), 'velocity.objects', false);
         // The pipeline last SET, not merely last built — the same dedupe the shadow caster loop uses.
         let boundPipeline: RenderPipeline | null = null;
 
@@ -12684,11 +12482,11 @@ export class Renderer {
 
             // Velocity is per surface, not per material: a merged model is one draw over its whole
             // index buffer, with no material bound at all.
-            if (!this._recordDraw(pass, node.model.mesh, 0, 0))
+            if (!this._passes.recordDraw(pass, node.model.mesh, 0, 0))
                 node.model.mesh.draw(topology);
         }
 
-        this._endFullscreenPass(pass);
+        this._passes.endFullscreenPass(pass);
     }
 
     // UE5-style tile reconstruction motion blur: velocity -> TileMax -> NeighborMax -> jittered
@@ -12701,7 +12499,7 @@ export class Renderer {
         // 1) TileMax: dominant velocity per KxK tile. `_targets.velocity` was already filled during the
         // scene render — see `_produceVelocity` — and it holds the RAW delta, so the shutter scale and
         // the one-tile cap are applied here, inside the tile loop, before the magnitude compare.
-        const tilePass = this._beginFullscreenPass(this._velocityTileFBO.renderTarget, 'velocity.tile', true);
+        const tilePass = this._passes.beginFullscreenPass(this._velocityTileFBO.renderTarget, 'velocity.tile', true);
         const tilePipeline = this._fullscreenPipeline('motionBlurTileMax', MotionBlurTileMaxProgram);
         tilePass.setPipeline(tilePipeline);
         tilePass.setBindGroup(0, this._textureBindGroup(tilePipeline, 0, [this._targets.velocity.colors[0]]));
@@ -12710,20 +12508,20 @@ export class Renderer {
         this._shaderManager.setUniform('u_intensity', this._motionBlurIntensity);
         this._shaderManager.setUniform('u_maxVelocityPx', this._motionBlurMaxLength);
         this._shaderManager.setUniform('u_tileSize', K);
-        this._drawFullscreen(tilePass);
-        this._endFullscreenPass(tilePass);
+        this._passes.drawFullscreen(tilePass);
+        this._passes.endFullscreenPass(tilePass);
 
         // 2) NeighborMax: 3x3 dilation of the tile velocities.
-        const nbPass = this._beginFullscreenPass(this._velocityNeighborFBO.renderTarget, 'velocity.neighbor', true);
+        const nbPass = this._passes.beginFullscreenPass(this._velocityNeighborFBO.renderTarget, 'velocity.neighbor', true);
         const nbPipeline = this._fullscreenPipeline('motionBlurNeighborMax', MotionBlurNeighborMaxProgram);
         nbPass.setPipeline(nbPipeline);
         nbPass.setBindGroup(0, this._textureBindGroup(nbPipeline, 0, [this._velocityTileFBO.colors[0]]));
         this._shaderManager.setUniform('u_tileTexelSize', [1 / this._velocityTileFBO.width, 1 / this._velocityTileFBO.height]);
-        this._drawFullscreen(nbPass);
-        this._endFullscreenPass(nbPass);
+        this._passes.drawFullscreen(nbPass);
+        this._passes.endFullscreenPass(nbPass);
 
         // 3) Gather: reconstruct the blurred image into the head of the chain.
-        const gatherPass = this._beginFullscreenPass(target.renderTarget, 'motionBlur', true);
+        const gatherPass = this._passes.beginFullscreenPass(target.renderTarget, 'motionBlur', true);
         const gatherPipeline = this._fullscreenPipeline('motionBlur', MotionBlurGatherProgram);
         gatherPass.setPipeline(gatherPipeline);
         gatherPass.setBindGroup(0, this._textureBindGroup(gatherPipeline, 0, [
@@ -12741,8 +12539,8 @@ export class Renderer {
         this._shaderManager.setUniform('u_mbJitter', this._motionBlurJitter);
         this._shaderManager.setUniform('u_near', this._view.camera.near);
         this._shaderManager.setUniform('u_far', this._view.camera.far);
-        this._drawFullscreen(gatherPass);
-        this._endFullscreenPass(gatherPass);
+        this._passes.drawFullscreen(gatherPass);
+        this._passes.endFullscreenPass(gatherPass);
     }
 
     public get canvas(): HTMLCanvasElement { return this._canvas; }
@@ -13787,7 +13585,7 @@ export class Renderer {
 
         // Opened and cleared even with nothing selected, or a silhouette from the previous selection
         // survives. `clearValue`, not the standing clear colour: the mask wants transparent black.
-        const pass = this._beginFullscreenPass(this._outlineMaskFBO.renderTarget, 'outlineMask',
+        const pass = this._passes.beginFullscreenPass(this._outlineMaskFBO.renderTarget, 'outlineMask',
                                                true, [0, 0, 0, 0], false);
         if (this._outlineActive) {
             // Always on top and never blended: the silhouette must be visible through geometry that
@@ -13809,7 +13607,7 @@ export class Renderer {
                 });
                 pass.setPipeline(pipeline);
                 this._shaderManager.setUniform('u_model', model);
-                this._recordDraw(pass, mesh, 0, 0);
+                this._passes.recordDraw(pass, mesh, 0, 0);
             };
 
             // Selected models and their children.
@@ -13833,7 +13631,7 @@ export class Renderer {
                 drawWith(node.sprite.mesh, node.sprite.material.type, this._spriteBillboardMatrix(node));
             }
         }
-        this._endFullscreenPass(pass);
+        this._passes.endFullscreenPass(pass);
 
         // Restore the scene framebuffer for any subsequent draws.
         this._targets.scene.bind();
@@ -13913,7 +13711,7 @@ export class Renderer {
         else this._applyMaterial(material);
 
         // Draw the mesh
-        if (!pipeline || !this._recordDraw(pass, node.model.mesh, 0, 0)) node.model.mesh.draw();
+        if (!pipeline || !this._passes.recordDraw(pass, node.model.mesh, 0, 0)) node.model.mesh.draw();
     }
 
     /**
@@ -13938,20 +13736,20 @@ export class Renderer {
         if (this._thumbnailMode) return;
 
         // Editor infinite grid, composited over the scene/skybox and occluded by geometry.
-        if (this._beginPass('grid')) this._renderGrid();
+        if (this._passes.beginPass('grid')) this._renderGrid();
 
         const icons: SpriteNode[] = [];
         for (const node of scene.sprites) if (node.visible && isEditorOnlyNode(node)) icons.push(node);
 
         const overlayDecals = this._overlayDecals.length > 0;
-        if ((helperNodes.length > 0 || icons.length > 0 || overlayDecals) && this._beginPass('overlay')) {
+        if ((helperNodes.length > 0 || icons.length > 0 || overlayDecals) && this._passes.beginPass('overlay')) {
             // Editor-only decals (the landscape brush) first, so helper wireframes draw over them.
             // Reconstructed with the STABLE inverse: this layer sits after the TAA resolve, and the
             // jittered one would make a projected cursor shimmer by a sub-pixel every frame.
             if (overlayDecals) {
                 const decalPass = this._beginOverlayPass('overlay.decals');
                 this._drawColorDecals(decalPass, this._overlayDecals, OVERLAY_BLEND, this._view.invViewProjStable, 1);
-                this._endFullscreenPass(decalPass);
+                this._passes.endFullscreenPass(decalPass);
             }
             // Occluded by real geometry, exactly as these drew when they went through the G-buffer.
             // No depth writes: the attachment is the scene's own.
@@ -13968,12 +13766,12 @@ export class Renderer {
             // Icons are billboards and always transparent; `_renderSprite` handles the constraint.
             // `false` for manageDepth — this pass owns the depth state for the whole batch.
             for (const node of icons) this._renderSprite(node, false, pass, OVERLAY_BLEND);
-            this._endFullscreenPass(pass);
+            this._passes.endFullscreenPass(pass);
             GLState.depthMask(true);
         }
 
         // Gizmos on top (also draws the editor skeleton overlay when set).
-        if ((gizmoNodes.length > 0 || this._skeletonOverlay) && this._beginPass('gizmos'))
+        if ((gizmoNodes.length > 0 || this._skeletonOverlay) && this._passes.beginPass('gizmos'))
             this._renderGizmos(gizmoNodes);
 
         // Hand the scene buffer back: the selection mask and the legacy WebGL2 paths below assume it.
@@ -14007,7 +13805,7 @@ export class Renderer {
         // Editor skeleton overlay (instanced), also always-on-top.
         this._drawSkeletonOverlay(pass, depthAlways);
 
-        this._endFullscreenPass(pass);
+        this._passes.endFullscreenPass(pass);
         // Depth testing back on for whatever draws next, which is still on the legacy path.
         GLState.depthTest(true);
     }

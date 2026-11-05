@@ -61,7 +61,7 @@ describe('surface decals', () => {
         // A named clear value clears one attachment unless asked otherwise; stale normals or roughness in
         // targets 1 and 2 would resolve into every lit pixel.
         expect(methodBody('_surfaceDecalPass'))
-            .toMatch(/_beginFullscreenPass\(dbuffer\.renderTarget, 'decals', true, \[0, 0, 0, 1\], false, true\)/);
+            .toMatch(/beginFullscreenPass\(dbuffer\.renderTarget, 'decals', true, \[0, 0, 0, 1\], false, true\)/);
     });
 
     it('never let the resolve sample the depth attached to its own pass', () => {
@@ -73,8 +73,8 @@ describe('surface decals', () => {
 
     it('copy the G-buffer through the frame encoder, as a depth copy does', () => {
         const body = methodBody('_copyColors');
-        expect(body).toContain("this._acquireEncoder('copyColor')");
-        expect(body).toContain('if (encoder !== this._frameEncoder) encoder.finish()');
+        expect(body).toContain("this._passes.acquireEncoder('copyColor')");
+        expect(body).toContain('if (encoder !== this._passes.frameEncoder) encoder.finish()');
         expect(body).not.toContain('device.createCommandEncoder');
     });
 

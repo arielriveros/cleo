@@ -100,7 +100,7 @@ describe('where the chrome passes draw', () => {
         expect(graph).toBeGreaterThan(-1);
         expect(overlay).toBeGreaterThan(graph);
         // It resolves to the screen with clear=false: a second pass over what `present` just wrote.
-        expect(bodyOf('_overlayCompositePass')).toContain("this._screenTarget(), 'overlay.composite', false");
+        expect(bodyOf('_overlayCompositePass')).toContain("this._passes.screenTarget(), 'overlay.composite', false");
     });
 
     it('leaves the chrome out of the G-buffer and the depth snapshot', () => {

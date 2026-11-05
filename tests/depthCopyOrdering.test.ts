@@ -13,7 +13,7 @@ import { rendererSource } from './helpers/rendererSource';
  * clear) only PRODUCES data, so submitting early is fine or even required for those.
  *
  * That distinction is the whole test. On WebGPU `finish()` submits, while the frame's render passes
- * sit unsubmitted in `_frameEncoder` until the end of the frame — so a copy on its own encoder runs
+ * sit unsubmitted in the frame encoder until the end of the frame — so a copy on its own encoder runs
  * BEFORE every draw it was meant to copy. In a live viewport that reads as the previous frame's depth,
  * which a barely-moving camera makes look almost right; in an offscreen capture, which resizes every
  * target and renders exactly one frame, it reads a freshly allocated buffer. Zeroed, which is depth 0,
@@ -41,17 +41,17 @@ function methodBody(name: string): string {
 describe('_copyDepth', () => {
     it('records into the frame encoder rather than opening its own', () => {
         const body = methodBody('_copyDepth');
-        expect(body).toContain("this._acquireEncoder('copyDepth')");
-        // The literal is what the bug was. `_acquireEncoder` falls back to it when no frame is open,
+        expect(body).toContain("this._passes.acquireEncoder('copyDepth')");
+        // The literal is what the bug was. `acquireEncoder` falls back to it when no frame is open,
         // which is the only legitimate way this helper may reach it.
         expect(body).not.toContain('device.createCommandEncoder');
     });
 
     it('finishes only an encoder it owns', () => {
-        // `_endFullscreenPass` makes exactly this distinction for passes, and for the same reason:
+        // `endFullscreenPass` makes exactly this distinction for passes, and for the same reason:
         // finishing the FRAME encoder mid-frame submits everything recorded so far and leaves the rest
         // of the frame recording into a spent object.
-        expect(methodBody('_copyDepth')).toContain('if (encoder !== this._frameEncoder) encoder.finish()');
+        expect(methodBody('_copyDepth')).toContain('if (encoder !== this._passes.frameEncoder) encoder.finish()');
     });
 
     it('is what the capture path resolves its coverage from', () => {

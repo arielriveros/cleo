@@ -25,7 +25,7 @@ const RENDERER = rendererSource();
  * Every pass label renderer.ts passes as a literal.
  *
  * Three helpers take a label and one descriptor spells it inline, so all four are read:
- * `_beginFullscreenPass(target, label, …)`, `_beginDepthPass(target, label, layer)`,
+ * `beginFullscreenPass(target, label, …)`, `beginDepthPass(target, label, layer)`,
  * `_runForwardQueue(label, queue)` and a bare `{ label: '…' }`. Arguments are split at paren depth 0
  * rather than by a comma regex, because the first argument is routinely a call of its own
  * (`this._cubeFBO.targetFor(cube, face, 0, false)`) and a naive split lands in the middle of it.
@@ -38,10 +38,11 @@ function passLabels(source: string): Set<string> {
 function passLabelList(source: string): string[] {
     const found: string[] = [];
     const helpers: [string, number][] = [
-        ['_beginFullscreenPass(', 1],
-        ['_beginDepthPass(', 1],
+        // Without the underscore: the pass encoder's methods (`this._passes.beginFullscreenPass(`).
+        ['beginFullscreenPass(', 1],
+        ['beginDepthPass(', 1],
         ['_runForwardQueue(', 0],
-        // The editor overlay layer's own opener. It wraps `_beginFullscreenPass` to clear the buffer
+        // The editor overlay layer's own opener. It wraps `beginFullscreenPass` to clear the buffer
         // lazily, so its callers name their label here rather than at the wrapped call.
         ['_beginOverlayPass(', 0],
     ];
