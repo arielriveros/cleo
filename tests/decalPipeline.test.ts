@@ -42,7 +42,7 @@ describe('surface decals', () => {
         const body = methodBody('_renderDeferred');
         const geometry = body.indexOf('this._geometryPass(scene)');
         const decals = body.indexOf('this._decals.surfaceDecalPass()');
-        const ssil = body.indexOf('this._ssilPass()');
+        const ssil = body.indexOf('this._ssil.ssilPass()');
         const lighting = body.indexOf('this._deferredLightingPass(');
         expect(geometry).toBeGreaterThan(-1);
         expect(decals).toBeGreaterThan(geometry);

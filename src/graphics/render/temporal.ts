@@ -61,7 +61,7 @@ export class TemporalPasses {
     public velocityTileFBO!: Framebuffer;
     public velocityNeighborFBO!: Framebuffer;
 
-    // Whether `_targets.velocity` actually holds THIS frame's motion. Same hazard `_ssaoProducedThisFrame`
+    // Whether `_targets.velocity` actually holds THIS frame's motion. Same hazard `SsilPasses.ssaoProducedThisFrame`
     // guards: a framebuffer keeps its contents when nothing draws into it, so a reader that assumed
     // the pass ran would reconstruct from whichever frame last filled it.
     public velocityProducedThisFrame: boolean = false;
@@ -287,7 +287,7 @@ export class TemporalPasses {
      * post-processing where it used to live: the TAA resolve runs inside the scene render, so the
      * buffer has to exist before post-processing starts. Motion blur then reuses what this produced.
      *
-     * `velocityProducedThisFrame`, in the shape of `_ssaoProducedThisFrame`, because a framebuffer
+     * `velocityProducedThisFrame`, in the shape of `SsilPasses.ssaoProducedThisFrame`, because a framebuffer
      * keeps its contents when nothing draws into it — a consumer that assumed the pass ran would
      * reconstruct from whatever frame last filled it.
      */
