@@ -36,7 +36,7 @@ export interface FrameView {
     /**
      * The inverse of the UNJITTERED view-projection.
      *
-     * Exactly one pass wants it. `_renderGrid` reads no depth texture: it intersects a per-pixel world
+     * Exactly one pass wants it. `EditorOverlays._renderGrid` reads no depth texture: it intersects a per-pixel world
      * ray with the origin plane and writes its own fragment depth, and it draws AFTER the resolve, so
      * nothing averages it. Handed the jittered inverse it would wobble every grid line half a pixel,
      * every frame, for as long as TAA is on.

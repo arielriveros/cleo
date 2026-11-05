@@ -113,7 +113,7 @@ export class DecalPasses {
             }
             let drawn = false;
             if (isEditorOnlyNode(decal)) {
-                // A capture wants the asset and nothing else, exactly as `_renderEditorOverlay` says.
+                // A capture wants the asset and nothing else, exactly as `EditorOverlays.renderEditorOverlay` says.
                 if (this._host.thumbnailMode) continue;
                 this.overlayDecals.push(decal);
                 drawn = true;

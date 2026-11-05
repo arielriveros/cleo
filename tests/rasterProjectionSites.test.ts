@@ -95,7 +95,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             'particleDrawFrame',
             // Smoke-and-fire volumes, ray-marched over the resolved image (`FluidVolumePasses.renderFluidVolumes`).
             'renderFluidVolumes',
-            '_renderSelectionMask',
+            'renderSelectionMask',
             'renderSprite',
         ].sort());
     });

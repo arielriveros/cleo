@@ -89,7 +89,7 @@ describe('where the chrome passes draw', () => {
             // The leak this whole feature closes: `compose` copies `_targets.scene` into the post chain.
             expect(body, `${name} must not target the scene buffer`).not.toContain('_targets.scene.renderTarget');
         }
-        expect(bodyOf('_renderEditorOverlay')).toContain("_beginOverlayPass('overlay.helpers')");
+        expect(bodyOf('renderEditorOverlay')).toContain("_beginOverlayPass('overlay.helpers')");
     });
 
     it('keeps the composite past the display resolve', () => {
@@ -100,7 +100,7 @@ describe('where the chrome passes draw', () => {
         expect(graph).toBeGreaterThan(-1);
         expect(overlay).toBeGreaterThan(graph);
         // It resolves to the screen with clear=false: a second pass over what `present` just wrote.
-        expect(bodyOf('_overlayCompositePass')).toContain("this._passes.screenTarget(), 'overlay.composite', false");
+        expect(bodyOf('overlayCompositePass')).toContain("this._passes.screenTarget(), 'overlay.composite', false");
     });
 
     it('leaves the chrome out of the G-buffer and the depth snapshot', () => {
@@ -110,7 +110,7 @@ describe('where the chrome passes draw', () => {
     it('never writes the depth attachment it borrows from the scene', () => {
         // `_overlayTarget` attaches `_targets.scene.depth`, which game sprites are still tested against
         // further down the frame. A gizmo that wrote depth there would occlude them — it used to.
-        for (const name of ['_renderGizmos', '_renderEditorOverlay'])
+        for (const name of ['_renderGizmos', 'renderEditorOverlay'])
             expect(bodyOf(name)).not.toContain('depthWriteEnabled: true');
     });
 });

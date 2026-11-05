@@ -92,7 +92,7 @@ export class Sprite2DPasses {
     public render2DPass(scene: Scene): void {
         const sprites: SpriteNode[] = [];
         // Scene content only. The editor's light/sound/probe icons are billboards in `scene.sprites`
-        // too, and they belong to the overlay layer — see `_renderEditorOverlay`.
+        // too, and they belong to the overlay layer — see `EditorOverlays.renderEditorOverlay`.
         for (const node of scene.sprites) if (node.visible && !isEditorOnlyNode(node)) sprites.push(node);
 
         const tilemaps: TilemapNode[] = [];

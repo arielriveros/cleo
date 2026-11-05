@@ -386,7 +386,7 @@ export class ForwardPass {
         this._sprites.render2DPass(scene);
 
         // Editor chrome, into the overlay layer. This pipeline gains a grid it never had, for free:
-        // `_renderGrid` was only ever reached from the deferred path.
+        // `EditorOverlays._renderGrid` was only ever reached from the deferred path.
         this._host.renderEditorOverlay(scene, helperNodes, gizmoNodes);
 
         // Selection silhouette mask (consumed by the post-process outline pass).

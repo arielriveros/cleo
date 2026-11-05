@@ -105,7 +105,7 @@ describe('emissive decals', () => {
 
 describe('editor-only decals', () => {
     it('draw in the overlay layer, reconstructed with the STABLE inverse view-projection', () => {
-        const body = methodBody('_renderEditorOverlay');
+        const body = methodBody('renderEditorOverlay');
         expect(body).toMatch(/this\._decals\.drawColorDecals\(decalPass, this\._decals\.overlayDecals, OVERLAY_BLEND, this\._view\.invViewProjStable, 1\)/);
         // Before the helpers, so a selected node's wireframe still draws over the brush.
         expect(body.indexOf("'overlay.decals'")).toBeLessThan(body.indexOf("'overlay.helpers'"));
