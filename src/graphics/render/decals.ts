@@ -23,10 +23,10 @@ import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
+import { ModelDraw } from './modelDraw';
 
 /** What DecalPasses reads from the renderer that owns it, while those members still live there. */
 export interface DecalPassesHost {
-    cullFor(side: 'front' | 'back' | 'double' | undefined): CullMode;
     readonly deferred: boolean;
     readonly frustum: Frustum;
     readonly frustumCulling: boolean;
@@ -34,7 +34,6 @@ export interface DecalPassesHost {
     outsideFrustum(node: ModelNode): boolean;
     readonly renderHeight: number;
     readonly renderWidth: number;
-    restoreDefaultBlend(): void;
     readonly thumbnailMode: boolean;
 }
 
@@ -171,7 +170,7 @@ export class DecalPasses {
                 if (this._host.outsideFrustum(chunk)) continue;
                 this._shaderManager.bind('shadowMap');
                 const pipeline = this._pipelines.get('shadowMap', ShadowMapProgram, {
-                    cullMode: this._host.cullFor(chunk.model.material.config.side),
+                    cullMode: ModelDraw.cullFor(chunk.model.material.config.side),
                     depthStencil: DEPTH_WRITE,
                     targets: 0,
                     vertex: 'model',
@@ -281,7 +280,7 @@ export class DecalPasses {
         this.drawColorDecals(pass, this.emissiveDecals, DecalPasses._DECAL_EMISSIVE_BLEND, this._view.invViewProj, 0);
         this._passes.endFullscreenPass(pass);
         // The passes that follow are partly on the legacy path and inherit blend state.
-        this._host.restoreDefaultBlend();
+        this._passes.restoreDefaultBlend();
         GLState.blend(false);
         GLState.depthTest(true);
         GLState.depthMask(true);

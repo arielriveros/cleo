@@ -38,6 +38,7 @@ import type { ViewProjection } from './viewProjection';
 import type { VolumetricCloudPasses } from './clouds';
 import type { FoliagePasses } from './foliage';
 import { ShaderManager } from '../systems/shaderManager';
+import { DEPTH_WRITE } from './pipelineCache';
 
 /**
  * One punctual-light shadow atlas, spot or point, as the shared layer routine sees it. The FBOs are read
@@ -145,7 +146,6 @@ export interface ShadowPassesHost {
     objectId(obj: object): number;
     readonly renderHeight: number;
     readonly renderWidth: number;
-    restoreDefaultBlend(): void;
     readonly terrainLodStep2: number;
     readonly thumbnailMode: boolean;
     uploadBoneMatrices(shaderType: string, node: ModelNode): void;
@@ -274,10 +274,11 @@ export class ShadowPasses {
     private static readonly SHADOW_LAYER_MAX_AGE = 32;
     private static readonly FAR_LAYER_MAX_AGE = 120;
 
-    /** The depth state of every shadow pipeline: ONE object, so `_pipelines.get`'s key memo hits. */
-    public static readonly SHADOW_DEPTH: DepthStencilState = {
-        format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal',
-    };
+    /**
+     * The depth state of every shadow pipeline, foliage casters included: the shared DEPTH_WRITE object,
+     * so the key memo hits and the casters' pipeline memo compares one identity.
+     */
+    public static readonly SHADOW_DEPTH: DepthStencilState = DEPTH_WRITE;
 
     // ---- Far cascade: landscape-scale shadows past the near cascades ------------------------
     // One extra layer of the cascade array (index `cascadeCount`), fit around the CAMERA rather than
@@ -736,7 +737,7 @@ export class ShadowPasses {
         // Restore the pipeline default by hand — the passes that follow are on the legacy path and
         // inherit the blend state. Never a plain `gl.blendFunc`: that erodes the bloom-mask alpha.
         GLState.blend(false);
-        this._host.restoreDefaultBlend();
+        this._passes.restoreDefaultBlend();
     }
 
     /**

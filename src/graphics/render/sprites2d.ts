@@ -15,7 +15,7 @@ import { gl } from '../glContext';
 import { frameStats } from '../renderStats';
 import type { RenderPassEncoder } from '../rhi/device';
 import { DEFAULT_BLEND, SPRITE_ADDITIVE_BLEND, OVERLAY_BLEND } from '../rhi/types';
-import type { BlendState, CullMode } from '../rhi/types';
+import type { BlendState } from '../rhi/types';
 import { GLState } from '../systems/glState';
 import { TextureManager } from '../systems/textureManager';
 import { TilemapProgram, FORWARD_PROGRAMS } from './programs';
@@ -29,14 +29,13 @@ import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
 import type { ParticlePasses } from './particlePasses';
 import { ShaderManager } from '../systems/shaderManager';
+import { ModelDraw } from './modelDraw';
 
 /** What Sprite2DPasses reads from the renderer that owns it, while those members still live there. */
 export interface Sprite2DPassesHost {
     readonly canvas: HTMLCanvasElement;
-    cullFor(side: 'front' | 'back' | 'double' | undefined): CullMode;
     readonly frustum: Frustum;
     readonly frustumCulling: boolean;
-    restoreDefaultBlend(): void;
     readonly thumbnailMode: boolean;
 }
 
@@ -182,7 +181,7 @@ export class Sprite2DPasses {
             else if ('particles' in item) {
                 this._particlePasses.particles.draw([item.particles], this._particlePasses.particleDrawFrame(scene, pass, this._targets.scene.renderTarget));
                 // Particle pipelines leave their own blend behind; the sprites after them expect the pass's.
-                this._host.restoreDefaultBlend();
+                this._passes.restoreDefaultBlend();
                 GLState.blend(true);
                 GLState.depthMask(false);
             }
@@ -299,7 +298,7 @@ export class Sprite2DPasses {
         const material = node.sprite.material;
         const reflection = FORWARD_PROGRAMS[material.type];
         const pipeline = pass && reflection ? this._pipelines.get(material.type, reflection, {
-            cullMode: this._host.cullFor(material.config.side),
+            cullMode: ModelDraw.cullFor(material.config.side),
             depthStencil: DEPTH_TEST,
             // DEFAULT_BLEND for a scene sprite (its alpha must not touch the bloom mask), OVERLAY_BLEND
             // for an editor icon drawn into the overlay layer, where alpha IS coverage.
@@ -398,7 +397,7 @@ export class Sprite2DPasses {
         const topology = materialConfig.wireframe ? 'line-list' : 'triangle-list';
         if (!pipeline || !this._passes.recordDraw(pass!, node.sprite.mesh, 0, 0))
             node.sprite.mesh.draw(topology);
-        if (!pipeline && additive) this._host.restoreDefaultBlend();
+        if (!pipeline && additive) this._passes.restoreDefaultBlend();
 
         // Restore depth writes after drawing sprite
         if (manageDepth) GLState.depthMask(true);

@@ -32,7 +32,6 @@ import type { FullscreenPasses } from './fullscreenPasses';
 
 /** What EditorOverlays reads from the renderer that owns it, while those members still live there. */
 export interface EditorOverlaysHost {
-    restoreDefaultBlend(): void;
     readonly thumbnailMode: boolean;
 }
 
@@ -343,7 +342,7 @@ export class EditorOverlays {
 
         // Hand the scene buffer back: the selection mask and the legacy WebGL2 paths below assume it.
         this._targets.scene.bind();
-        this._host.restoreDefaultBlend();
+        this._passes.restoreDefaultBlend();
         GLState.depthTest(true);
         GLState.depthMask(true);
     }

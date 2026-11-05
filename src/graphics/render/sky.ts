@@ -37,7 +37,6 @@ import type { FullscreenPasses } from './fullscreenPasses';
 export interface SkyPassesHost {
     readonly renderHeight: number;
     readonly renderWidth: number;
-    restoreDefaultBlend(): void;
     readonly thumbnailMode: boolean;
     captureProbe(scene: Scene, probe: LightProbeNode): void;
 }
@@ -808,7 +807,7 @@ export class SkyPasses {
         }
         this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
         GLState.blend(false);
-        this._host.restoreDefaultBlend();
+        this._passes.restoreDefaultBlend();
         GLState.depthMask(true);
         GLState.depthTest(true);
     }

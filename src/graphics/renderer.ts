@@ -299,7 +299,6 @@ export class Renderer {
         }, this._view);
         this._temporal = new TemporalPasses({
             get boneMatrixScratch() { return renderer._modelDraw.boneMatrixScratch; },
-            cullFor: ModelDraw.cullFor.bind(Renderer),
             get debugView() { return renderer._debugViews.debugView; },
             inGBuffer: (...args: Parameters<GeometryPass['inGBuffer']>) => renderer._geometry.inGBuffer(...args),
             outsideFrustum: (...args: Parameters<Visibility['outsideFrustum']>) => renderer._visibility.outsideFrustum(...args),
@@ -317,7 +316,6 @@ export class Renderer {
             get passEnabled() { return renderer._passEnabled; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
             sunScreenInfo: (...args: Parameters<SkyPasses['sunScreenInfo']>) => renderer._sky.sunScreenInfo(...args),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._temporal, this._fullscreen);
         this._clouds = new VolumetricCloudPasses({
@@ -332,11 +330,9 @@ export class Renderer {
             get quality() { return renderer._quality; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen);
         this._decals = new DecalPasses({
-            cullFor: ModelDraw.cullFor.bind(Renderer),
             get deferred() { return renderer._deferred; },
             get frustum() { return renderer._visibility.frustum; },
             get frustumCulling() { return renderer._visibility.frustumCulling; },
@@ -344,7 +340,6 @@ export class Renderer {
             outsideFrustum: (...args: Parameters<Visibility['outsideFrustum']>) => renderer._visibility.outsideFrustum(...args),
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection);
         this._fluids = new FluidVolumePasses({
@@ -358,7 +353,6 @@ export class Renderer {
             get keyLightNode() { return renderer._lighting.keyLightNode; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
             get skySH() { return renderer._sky.skySH; },
             get skySHValid() { return renderer._sky.skySHValid; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._fullscreen);
@@ -373,24 +367,19 @@ export class Renderer {
             get lightOccludedMemo() { return renderer._visibility.lightOccludedMemo; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
             get skySH() { return renderer._sky.skySH; },
             get skySHValid() { return renderer._sky.skySHValid; },
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._projection, this._temporal);
         this._sprites = new Sprite2DPasses({
             get canvas() { return renderer._canvas; },
-            cullFor: ModelDraw.cullFor.bind(Renderer),
             get frustum() { return renderer._visibility.frustum; },
             get frustumCulling() { return renderer._visibility.frustumCulling; },
-            restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._particlePasses);
         this._foliage = new FoliagePasses({
-            get SHADOW_DEPTH() { return ShadowPasses.SHADOW_DEPTH; },
             aabbDistSq: (...args: Parameters<Visibility['aabbDistSq']>) => renderer._visibility.aabbDistSq(...args),
             cellOccluded: (...args: Parameters<Visibility['cellOccluded']>) => renderer._visibility.cellOccluded(...args),
-            cullFor: ModelDraw.cullFor.bind(Renderer),
             get frustum() { return renderer._visibility.frustum; },
             get frustumCulling() { return renderer._visibility.frustumCulling; },
             objectId: (...args: Parameters<ModelDraw['objectId']>) => renderer._modelDraw.objectId(...args),
@@ -413,7 +402,6 @@ export class Renderer {
             objectId: (obj) => renderer._modelDraw.objectId(obj),
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            restoreDefaultBlend: () => renderer._restoreDefaultBlend(),
             get terrainLodStep2() { return renderer._visibility.terrainLodStep2; },
             get thumbnailMode() { return renderer._thumbnailMode; },
             uploadBoneMatrices: (shaderType, node) => renderer._modelDraw.uploadBoneMatrices(shaderType, node),
@@ -444,7 +432,6 @@ export class Renderer {
         this._sky = new SkyPasses({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            restoreDefaultBlend: () => renderer._restoreDefaultBlend(),
             get thumbnailMode() { return renderer._thumbnailMode; },
             captureProbe: (scene, probe) => renderer._capture.captureProbe(scene, probe),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._lighting, this._fullscreen);
@@ -461,7 +448,6 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._temporal, this._clouds, this._decals, this._fluids, this._particlePasses, this._sprites, this._visibility, this._ssil, this._lighting, this._sky, this._modelDraw);
         this._overlays = new EditorOverlays({
-            restoreDefaultBlend: () => renderer._restoreDefaultBlend(),
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._post, this._decals, this._sprites, this._fullscreen, this._modelDraw);
         this._debugViews = new DebugViews({
@@ -727,7 +713,7 @@ export class Renderer {
         GLState.depthTest(true);
         GLState.blend(true);
         gl.depthFunc(gl.LEQUAL);
-        this._restoreDefaultBlend();
+        this._passes.restoreDefaultBlend();
         gl.drawingBufferColorSpace = 'srgb';
     }
 
@@ -1146,18 +1132,6 @@ export class Renderer {
         this._forward.renderForwardOverlay(scene, shadowLight);
         this._stats.checkGLErrors('forwardOverlay');
         this._passes.endScope();
-    }
-
-    /**
-     * Put the blend function back to the pipeline default, which is a SEPARATE function: alpha blend
-     * for RGB, destination ALPHA untouched. Never restore with a plain `gl.blendFunc` — the scene
-     * buffer's alpha is the bloom-eligibility mask, and overwriting its factors erodes it.
-     */
-    private _restoreDefaultBlend(): void {
-        // Standing context state, which WebGPU does not have — a pipeline carries its own blend. The
-        // callers are legacy paths restoring what they disturbed; they go when those do.
-        if (!gl) return;
-        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
     }
 
     /**

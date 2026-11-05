@@ -258,7 +258,7 @@ describe('bloom mask blend state', () => {
         // pipeline carries its own), and pinning the exact text made this fail for a reason that has
         // nothing to do with the mask it protects.
         expect(renderer).toMatch(
-            /_restoreDefaultBlend\(\): void \{[\s\S]{0,400}?gl\.blendFuncSeparate\(gl\.SRC_ALPHA, gl\.ONE_MINUS_SRC_ALPHA, gl\.ZERO, gl\.ONE\);/);
+            /restoreDefaultBlend\(\): void \{[\s\S]{0,400}?gl\.blendFuncSeparate\(gl\.SRC_ALPHA, gl\.ONE_MINUS_SRC_ALPHA, gl\.ZERO, gl\.ONE\);/);
     });
 
     it('does not let a quality tier destroy the authored bloom intensity', () => {

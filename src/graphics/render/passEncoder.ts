@@ -115,6 +115,18 @@ export class PassEncoder {
         return pass;
     }
 
+    /**
+     * Put the blend function back to the pipeline default, which is a SEPARATE function: alpha blend
+     * for RGB, destination ALPHA untouched. Never restore with a plain `gl.blendFunc` — the scene
+     * buffer's alpha is the bloom-eligibility mask, and overwriting its factors erodes it.
+     */
+    public restoreDefaultBlend(): void {
+        // Standing context state, which WebGPU does not have — a pipeline carries its own blend. The
+        // callers are legacy paths restoring what they disturbed; they go when those do.
+        if (!gl) return;
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+    }
+
     /** Draw the screen quad and close the pass: the last two steps of every fullscreen pass. */
     public drawFullscreenAndEnd(pass: RenderPassEncoder): void {
         this.drawFullscreen(pass);

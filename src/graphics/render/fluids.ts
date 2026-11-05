@@ -35,7 +35,6 @@ export interface FluidVolumePassesHost {
     readonly keyLightNode: LightNode | null;
     readonly renderHeight: number;
     readonly renderWidth: number;
-    restoreDefaultBlend(): void;
     readonly skySH: Float32Array;
     readonly skySHValid: boolean;
 }
@@ -215,7 +214,7 @@ export class FluidVolumePasses {
         sm.setUniform('u_invViewProj', this._view.invViewProjStable);
         this._passes.drawFullscreenAndEnd(pass);
 
-        this._host.restoreDefaultBlend();
+        this._passes.restoreDefaultBlend();
         GLState.blend(false);
         GLState.depthTest(true);
         GLState.depthMask(true);

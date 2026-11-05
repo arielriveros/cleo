@@ -32,7 +32,6 @@ export interface ParticlePassesHost {
     readonly lightOccludedMemo: Map<LightNode, boolean>;
     readonly renderHeight: number;
     readonly renderWidth: number;
-    restoreDefaultBlend(): void;
     readonly skySH: Float32Array;
     readonly skySHValid: boolean;
     readonly thumbnailMode: boolean;
@@ -79,7 +78,7 @@ export class ParticlePasses {
         this._passes.endScope();
         // The WebGL2 ping-pong went through pipelines that leave blend and depth off; put back what the
         // legacy draws that follow expect, as the cloud pass does.
-        this._host.restoreDefaultBlend();
+        this._passes.restoreDefaultBlend();
         GLState.blend(false);
         GLState.depthTest(true);
         GLState.depthMask(true);
@@ -123,7 +122,7 @@ export class ParticlePasses {
         const pass = this._passes.beginFullscreenPass(target, 'particles', false, undefined, false);
         this.particles.draw(nodes, this.particleDrawFrame(scene, pass, target));
         this._passes.endFullscreenPass(pass);
-        this._host.restoreDefaultBlend();
+        this._passes.restoreDefaultBlend();
         GLState.blend(false);
         GLState.depthTest(true);
         GLState.depthMask(true);

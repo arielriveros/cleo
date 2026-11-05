@@ -7,7 +7,6 @@ import { Framebuffer } from '../framebuffer';
 import { TemporalHistory } from './temporalHistory';
 import { device } from '../rhi/deviceHandle';
 import type { RenderTarget, RenderPipeline } from '../rhi/resources';
-import type { CullMode } from '../rhi/types';
 import { GLState } from '../systems/glState';
 import { Texture } from '../texture';
 import { TaaResolveProgram, TaaSharpenProgram, ScreenProgram, MotionBlurVelocityProgram, VELOCITY_PROGRAMS, MotionBlurTileMaxProgram, MotionBlurNeighborMaxProgram, MotionBlurGatherProgram } from './programs';
@@ -21,11 +20,11 @@ import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
+import { ModelDraw } from './modelDraw';
 
 /** What TemporalPasses reads from the renderer that owns it, while those members still live there. */
 export interface TemporalPassesHost {
     readonly boneMatrixScratch: Float32Array;
-    cullFor(side: 'front' | 'back' | 'double' | undefined): CullMode;
     readonly debugView: DebugView;
     inGBuffer(node: ModelNode): boolean;
     outsideFrustum(node: ModelNode): boolean;
@@ -497,7 +496,7 @@ export class TemporalPasses {
             const topology = node.model.material.config.wireframe ? 'line-list' : 'triangle-list';
 
             const pipeline = this._pipelines.get(shaderType, VELOCITY_PROGRAMS[shaderType], {
-                cullMode: this._host.cullFor(node.model.material.config.side),
+                cullMode: ModelDraw.cullFor(node.model.material.config.side),
                 // Reads the opaque depth and writes none of it: this pass must not disturb a buffer the
                 // gather below still compares against.
                 depthStencil: DEPTH_TEST,

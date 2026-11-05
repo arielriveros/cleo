@@ -15,7 +15,6 @@ import type { RenderPassEncoder } from '../rhi/device';
 import { device } from '../rhi/deviceHandle';
 import type { Buffer as RhiBuffer } from '../rhi/resources';
 import { BufferUsage } from '../rhi/types';
-import type { DepthStencilState, CullMode } from '../rhi/types';
 import { shadowTouchesSphere, shadowFarthestFrom } from '../shadowCasters';
 import { CascadeSphere, HASH_SEED, mixNumber } from '../shadowMath';
 import { TextureManager } from '../systems/textureManager';
@@ -30,6 +29,7 @@ import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
+import { ModelDraw } from './modelDraw';
 
 /** A foliage layer's cells bucketed on the ground plane, for the shadow pass's range query. */
 export interface FoliageCellGrid {
@@ -55,10 +55,8 @@ export interface FoliageState {
 
 /** What FoliagePasses reads from the renderer that owns it, while those members still live there. */
 export interface FoliagePassesHost {
-    readonly SHADOW_DEPTH: DepthStencilState;
     aabbDistSq(p: vec3, min: ArrayLike<number>, max: ArrayLike<number>): number;
     cellOccluded(min: ArrayLike<number>, max: ArrayLike<number>): boolean;
-    cullFor(side: 'front' | 'back' | 'double' | undefined): CullMode;
     readonly frustum: Frustum;
     readonly frustumCulling: boolean;
     objectId(obj: object): number;
@@ -473,7 +471,7 @@ export class FoliagePasses {
         const pipeline = this._pipelines.get('shadowMapImpostorInstanced', ShadowMapImpostorProgram, {
             // The quad is rebuilt facing the light in the vertex stage, so it never shows its back.
             cullMode: 'none',
-            depthStencil: this._host.SHADOW_DEPTH,
+            depthStencil: DEPTH_WRITE,
             targets: 0,
             vertex: 'model+instance',
             builtFor: 'blinn_phongGeometry',
@@ -719,7 +717,7 @@ export class FoliagePasses {
                         program,
                         cutout ? ShadowMapInstancedCutoutProgram : ShadowMapInstancedProgram, {
                         cullMode: cutout || model.material.config.side === 'double' ? 'none' : 'front',
-                        depthStencil: this._host.SHADOW_DEPTH,
+                        depthStencil: DEPTH_WRITE,
                         targets: 0,
                         vertex: 'model+instance',
                         builtFor: 'blinn_phongGeometry',
@@ -958,7 +956,7 @@ export class FoliagePasses {
                         if (sway) this._setWindUniforms(scene, wind!, model.material);
                         this._setLodFadeUniforms(layer, slot);
                         const pipeline = this._pipelines.get(shaderType, GEOMETRY_PROGRAMS[shaderType], {
-                            cullMode: this._host.cullFor(model.material.config.side),
+                            cullMode: ModelDraw.cullFor(model.material.config.side),
                             depthStencil: DEPTH_WRITE,
                             targets: 3, colorWrite: false,
                             vertex: 'model+instance', builtFor: 'blinn_phongGeometry',
@@ -1014,7 +1012,7 @@ export class FoliagePasses {
                         this._setLodFadeUniforms(layer, slot);
                         const pipeline = this._pipelines.get(shaderType, reflection, {
                             // Billboard cross quads are two-sided; a mesh prop keeps its material side.
-                            cullMode: billboard ? 'none' : this._host.cullFor(model.material.config.side),
+                            cullMode: billboard ? 'none' : ModelDraw.cullFor(model.material.config.side),
                             depthStencil: afterPrepass
                                 ? { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'equal' }
                                 : { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },

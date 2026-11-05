@@ -31,7 +31,6 @@ export interface PostEffectsHost {
     readonly passEnabled: Record<RenderPass, boolean>;
     readonly renderHeight: number;
     readonly renderWidth: number;
-    restoreDefaultBlend(): void;
     sunScreenInfo(scene: Scene): { dir: [number, number, number], uv: [number, number], visible: number };
 }
 
@@ -401,7 +400,7 @@ export class PostEffects {
             // without setting the function, so they inherit whatever was left. Drop this once they are
             // migrated and their own pipelines say what they need.
             GLState.blend(false);
-            this._host.restoreDefaultBlend();
+            this._passes.restoreDefaultBlend();
         }
     }
 
@@ -603,7 +602,7 @@ export class PostEffects {
         // Restored by hand, as god rays does: the passes that follow are still on the legacy path and
         // enable BLEND without setting the function, so they inherit whatever was left here.
         GLState.blend(false);
-        this._host.restoreDefaultBlend();
+        this._passes.restoreDefaultBlend();
     }
 
     public fxaaPass(source: Framebuffer, target: Framebuffer): void {

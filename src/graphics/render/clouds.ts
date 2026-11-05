@@ -41,7 +41,6 @@ export interface VolumetricCloudPassesHost {
     readonly quality: QualityPreset;
     readonly renderHeight: number;
     readonly renderWidth: number;
-    restoreDefaultBlend(): void;
     readonly thumbnailMode: boolean;
 }
 
@@ -382,7 +381,7 @@ export class VolumetricCloudPasses {
 
         // Restore the state the following opaque/transparent overlay passes expect (incl. the default
         // mask-preserving alpha blend so later overlays don't clobber the bloom mask).
-        this._host.restoreDefaultBlend();
+        this._passes.restoreDefaultBlend();
         GLState.blend(false);
         GLState.depthTest(true);
         GLState.depthMask(true);
