@@ -162,7 +162,7 @@ export class VolumetricCloudPasses {
         if (atmo) {
             const rs = atmo.rayleighScatter;
             const params = {
-                // The same coefficients `_bakeSkyAtmosphere` hands the sky shader.
+                // The same coefficients `SkyPasses._bakeSkyAtmosphere` hands the sky shader.
                 rayleigh: [5.8e-6 * rs, 13.5e-6 * rs, 33.1e-6 * rs] as [number, number, number],
                 mie: 21e-6 * atmo.mieScatter,
                 rayleighHeight: atmo.rayleighHeight, mieHeight: atmo.mieHeight,

@@ -457,7 +457,7 @@ describe('POINT_SHADOW_FACES', () => {
     });
 
     it('produces PROPER rotations, so front-face culling keeps its meaning', () => {
-        // The reason this table is not Renderer._CUBE_FACES. That one is the OpenGL cubemap
+        // The reason this table is not SkyPasses.CUBE_FACES. That one is the OpenGL cubemap
         // convention, whose left-handed basis gives lookAt a determinant of -1 — a mirrored view,
         // which swaps which triangles rasterize as front-facing. The shadow pass culls FRONT faces
         // to push acne out of sight, so a mirrored frame would cull the visible half of every caster

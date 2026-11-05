@@ -106,7 +106,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         // so both are immune by construction rather than by being excluded, and jittering either would
         // move shadows and probe captures against the image instead of with it.
         expect([...callers('clipProjection').keys()].sort()).toEqual([
-            '_convolveCubeFaces',     // _captureProj
+            'convolveCubeFaces',      // _captureProj
             '_drawImpostorShadows',   // lightSpace
             'foliageShadowPass',      // lightSpace
             'rasterProjection',       // the wrapper's own two returns

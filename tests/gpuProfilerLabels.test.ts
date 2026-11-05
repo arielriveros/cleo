@@ -28,7 +28,7 @@ const RENDERER = rendererSource();
  * `beginFullscreenPass(target, label, …)`, `beginDepthPass(target, label, layer)`,
  * `_runForwardQueue(label, queue)` and a bare `{ label: '…' }`. Arguments are split at paren depth 0
  * rather than by a comma regex, because the first argument is routinely a call of its own
- * (`this._cubeFBO.targetFor(cube, face, 0, false)`) and a naive split lands in the middle of it.
+ * (`this.cubeFBO.targetFor(cube, face, 0, false)`) and a naive split lands in the middle of it.
  */
 function passLabels(source: string): Set<string> {
     return new Set(passLabelList(source));

@@ -1,15 +1,12 @@
 import { mat4, vec3 } from 'gl-matrix';
-import { authoring, engineEventBus } from '../core/eventBus';
+import { engineEventBus } from '../core/eventBus';
 import { ShaderManager } from './systems/shaderManager';
 import { Camera } from '../core/camera';
 import { Scene } from '../core/scene/scene';
 import { ModelNode } from '../core/scene/nodes/modelNode';
 import { LightNode } from '../core/scene/nodes/lightNode';
 import { LightProbeNode } from '../core/scene/nodes/lightProbeNode';
-import { SkyboxNode } from '../core/scene/nodes/skyboxNode';
-import { VolumetricCloudsNode } from '../core/scene/nodes/volumetricCloudsNode';
-import { DEFAULT_MOONLIGHT_INTENSITY, SkyAtmosphereNode } from '../core/scene/nodes/skyAtmosphereNode';
-import { keyLight, moonDirection, nightFactor } from './skyNight';
+import { keyLight } from './skyNight';
 import { SpriteNode } from '../core/scene/nodes/spriteNode';
 import { type ExposureCurveKey, REFERENCE_ILLUMINANCE } from './lighting';
 import { Mesh } from './mesh';
@@ -30,7 +27,6 @@ import { AnimatedModel } from '../animation/animatedModel';
 
 import { GLState } from './systems/glState';
 import { Texture } from './texture';
-import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material, CustomMaterial } from './material';
 import { ensureCustomShader, customShaderReady, customShaderModules, customShaderResources, usedResources } from './systems/customShaders';
 import { TexturePacker } from './systems/texturePacker';
@@ -54,10 +50,9 @@ import { FoliageGpuCuller } from './foliageGpuCulling';
 import { gatherFoliageInteractors } from './foliageInteraction';
 
 import {
-    BasicInstancedProgram, OutlineProgram, ShadowDebugProgram, SkyboxProgram, VolumetricCloudsProgram,
-    SkyAtmosphereProgram, ProbePreviewProgram, SkyProjectProgram, SkyFogProgram, ScreenProgram, PresentProgram,
-    OverlayCompositeProgram, DebugViewProgram, OverdrawProgram, OverdrawInstancedProgram, GridProgram,
-    IrradianceProgram, PrefilterProgram, BRDFProgram, programTable, FORWARD_PROGRAMS, GEOMETRY_PROGRAMS,
+    BasicInstancedProgram, OutlineProgram, ShadowDebugProgram, ProbePreviewProgram, ScreenProgram,
+    PresentProgram, OverlayCompositeProgram, DebugViewProgram, OverdrawProgram, OverdrawInstancedProgram,
+    GridProgram, IrradianceProgram, PrefilterProgram, programTable, FORWARD_PROGRAMS, GEOMETRY_PROGRAMS,
 } from './render/programs';
 import { createFrameView, type FrameView } from './render/frameView';
 import { FrameTargets } from './render/frameTargets';
@@ -81,6 +76,7 @@ import { ShadowPasses } from './render/shadows';
 import { Visibility } from './render/visibility';
 import { SsilPasses } from './render/ssil';
 import { LightingPasses } from './render/lighting';
+import { SkyPasses } from './render/sky';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 import { gl, setGLContext } from './glContext';
@@ -99,7 +95,7 @@ import {
     BufferUsage, DEFAULT_BLEND, OVERLAY_BLEND, OVERLAY_COMPOSITE_BLEND,
 } from './rhi/types';
 import { isEditorOnlyNode } from '../core/scene/editorNodes';
-import type { ShaderResource, BlendState, DepthStencilState, CullMode } from './rhi/types';
+import type { BlendState, DepthStencilState, CullMode } from './rhi/types';
 import type { RenderTarget } from './rhi/resources';
 import type { RenderPassEncoder } from './rhi/device';
 
@@ -187,6 +183,8 @@ export class Renderer {
     private readonly _ssil: SsilPasses;
     /** The frame's lights: key light, clustered light grid, cloud grade, forward uploads, deferred lighting (render/lighting.ts). */
     private readonly _lighting: LightingPasses;
+    /** The sky: IBL baking, light probes, the sky light's SH, atmosphere and cloud-sky bakes, sky draw and fog (render/sky.ts). */
+    private readonly _sky: SkyPasses;
 
     /**
      * Whether the post-process chain runs at all for this host.
@@ -298,28 +296,6 @@ export class Renderer {
     /** Fragment count that saturates the heat map to red. 16 layers is deep enough to be alarming. */
     private static readonly OVERDRAW_MAX = 16;
 
-    // IBL (image-based lighting). Shared BRDF LUT + a cube framebuffer/mesh/camera for baking, plus a
-    // scene-wide IBL cache built from scene.environmentMap when no light probe is active.
-    private _brdfFBO!: Framebuffer;
-    private _cubeFBO!: CubeFramebuffer;
-    private _iblCubeMesh!: Mesh;
-    private _captureCamera!: Camera;
-    private _captureProj: mat4 = mat4.create();
-    private _iblFaceViews: mat4[] = [];
-    // Standard cube-map capture directions (dir, up) in the OpenGL convention.
-    private static readonly _CUBE_FACES: { dir: [number, number, number], up: [number, number, number] }[] = [
-        { dir: [ 1,  0,  0], up: [0, -1,  0] }, // +X
-        { dir: [-1,  0,  0], up: [0, -1,  0] }, // -X
-        { dir: [ 0,  1,  0], up: [0,  0,  1] }, // +Y
-        { dir: [ 0, -1,  0], up: [0,  0, -1] }, // -Y
-        { dir: [ 0,  0,  1], up: [0, -1,  0] }, // +Z
-        { dir: [ 0,  0, -1], up: [0, -1,  0] }, // -Z
-    ];
-    private static readonly IRRADIANCE_SIZE = 32;
-    private static readonly PREFILTER_SIZE = 128;
-    private static readonly PREFILTER_MIPS = 5;
-    private static readonly BRDF_LUT_SIZE = 512;
-
     // Node ids already warned about carrying a screen-space custom material on a mesh (once per node).
     private _warnedScreenMaterialMeshes: Set<string> = new Set();
 
@@ -335,30 +311,6 @@ export class Renderer {
      */
     public debugGLErrors: boolean = false;
     private _glErrorCount: number = 0;
-    // Previous frame's view-projection, used by the camera-reprojection motion blur pass.
-    // --- Sky light -----------------------------------------------------------------------------
-    // Nine L2 spherical-harmonic coefficients, rgb each, padded to vec4 for WGSL's 16-byte uniform
-    // array stride. Derived from an equirect unwrap of the scene's sky cubemap.
-    private _skySH: Float32Array = new Float32Array(9 * 4);
-    private _skySHValid: boolean = false;
-    /** One readback in flight at a time; the sky can re-bake while the previous projection resolves. */
-    private _skyProjectionPending: boolean = false;
-    /** Set by every sky re-bake; `_updateSkyLight` turns it into a throttled re-projection. */
-    private _skyLightReprojectPending = false;
-    private _skyLightReprojectAt = -Infinity;
-    /** The CLEAR (cloud-free) atmosphere's coefficients, which the clouds' own ambient is lit by. */
-    private _clearSkySH: Float32Array = new Float32Array(9 * 4);
-    private _clearSkySHValid = false;
-    private _clearSkySource: Texture | null = null;
-    private _clearSkyStale = true;
-    /** The cube the current coefficients came from, so a sky swap re-derives even with the sun still. */
-    private _skySHSource: Texture | null = null;
-    private _skyProjectFBO!: Framebuffer;
-    /** Equirect unwrap size. 512 texels is ample for an L2 fit and keeps the readback trivial. */
-    private static readonly SKY_PROJECT_W = 32;
-    private static readonly SKY_PROJECT_H = 16;
-    /** Must match RGBM_RANGE in skyProject.wgsl. */
-    private static readonly SKY_RGBM_RANGE = 64.0;
 
 
     private _terrainLayerTextureSize: number = DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE;
@@ -457,12 +409,12 @@ export class Renderer {
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
-            sunScreenInfo: renderer._sunScreenInfo.bind(renderer),
+            sunScreenInfo: (...args: Parameters<SkyPasses['sunScreenInfo']>) => renderer._sky.sunScreenInfo(...args),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._temporal);
         this._clouds = new VolumetricCloudPasses({
-            get clearSkySH() { return renderer._clearSkySH; },
-            get clearSkySHValid() { return renderer._clearSkySHValid; },
-            cloudSkyActive: renderer._cloudSkyActive.bind(renderer),
+            get clearSkySH() { return renderer._sky.clearSkySH; },
+            get clearSkySHValid() { return renderer._sky.clearSkySHValid; },
+            cloudSkyActive: (...args: Parameters<SkyPasses['cloudSkyActive']>) => renderer._sky.cloudSkyActive(...args),
             get cloudWindDir() { return renderer._shadows.cloudWindDir; },
             dirOf: (...args: Parameters<LightingPasses['dirOf']>) => renderer._lighting.dirOf(...args),
             get keyLight() { return renderer._lighting.keyLight; },
@@ -480,7 +432,7 @@ export class Renderer {
             get deferred() { return renderer._deferred; },
             get frustum() { return renderer._visibility.frustum; },
             get frustumCulling() { return renderer._visibility.frustumCulling; },
-            get iblCubeMesh() { return renderer._iblCubeMesh; },
+            get iblCubeMesh() { return renderer._sky.iblCubeMesh; },
             outsideFrustum: (...args: Parameters<Visibility['outsideFrustum']>) => renderer._visibility.outsideFrustum(...args),
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
@@ -492,15 +444,15 @@ export class Renderer {
             dirOf: (...args: Parameters<LightingPasses['dirOf']>) => renderer._lighting.dirOf(...args),
             get frustum() { return renderer._visibility.frustum; },
             get frustumCulling() { return renderer._visibility.frustumCulling; },
-            get iblCubeMesh() { return renderer._iblCubeMesh; },
+            get iblCubeMesh() { return renderer._sky.iblCubeMesh; },
             internalAmbient: (...args: Parameters<LightingPasses['internalAmbient']>) => renderer._lighting.internalAmbient(...args),
             get keyLight() { return renderer._lighting.keyLight; },
             get keyLightNode() { return renderer._lighting.keyLightNode; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
-            get skySH() { return renderer._skySH; },
-            get skySHValid() { return renderer._skySHValid; },
+            get skySH() { return renderer._sky.skySH; },
+            get skySHValid() { return renderer._sky.skySHValid; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection);
         this._particlePasses = new ParticlePasses({
             cloudGrade: (...args: Parameters<LightingPasses['cloudGrade']>) => renderer._lighting.cloudGrade(...args),
@@ -514,8 +466,8 @@ export class Renderer {
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
-            get skySH() { return renderer._skySH; },
-            get skySHValid() { return renderer._skySHValid; },
+            get skySH() { return renderer._sky.skySH; },
+            get skySHValid() { return renderer._sky.skySHValid; },
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._projection, this._temporal);
         this._sprites = new Sprite2DPasses({
@@ -541,7 +493,7 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection);
         this._shadows = new ShadowPasses({
-            atmosphereSunDir: (scene, node) => renderer._atmosphereSunDir(scene, node),
+            atmosphereSunDir: (scene, node) => renderer._sky.atmosphereSunDir(scene, node),
             get coneSphere() { return renderer._lighting.coneSphere; },
             get deviceReady() { return renderer._deviceReady; },
             dirOf: (node) => renderer._lighting.dirOf(node),
@@ -559,7 +511,7 @@ export class Renderer {
             uploadBoneMatrices: (shaderType, node) => renderer._uploadBoneMatrices(shaderType, node),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._foliage);
         this._visibility = new Visibility({
-            get iblCubeMesh() { return renderer._iblCubeMesh; },
+            get iblCubeMesh() { return renderer._sky.iblCubeMesh; },
             get selectedNodeId() { return renderer._selectedNodeId; },
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._projection);
@@ -570,18 +522,25 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._temporal);
         this._lighting = new LightingPasses({
-            get brdfFBO() { return renderer._brdfFBO; },
-            cloudSkyFrontCube: () => renderer._cloudSkyFrontCube(),
+            get brdfFBO() { return renderer._sky.brdfFBO; },
+            cloudSkyFrontCube: () => renderer._sky.cloudSkyFrontCube(),
             copyDepth: (source, destination, width, height) => renderer._copyDepth(source, destination, width, height),
             get programList() { return renderer._programList; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-            get skySH() { return renderer._skySH; },
-            get skySHSource() { return renderer._skySHSource; },
-            get skySHValid() { return renderer._skySHValid; },
+            get skySH() { return renderer._sky.skySH; },
+            get skySHSource() { return renderer._sky.skySHSource; },
+            get skySHValid() { return renderer._sky.skySHValid; },
             get thumbnailMode() { return renderer._thumbnailMode; },
             get clearColor() { return renderer.clearColor; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._shadows, this._visibility, this._ssil);
+        this._sky = new SkyPasses({
+            get renderHeight() { return renderer._renderHeight; },
+            get renderWidth() { return renderer._renderWidth; },
+            restoreDefaultBlend: () => renderer._restoreDefaultBlend(),
+            get thumbnailMode() { return renderer._thumbnailMode; },
+            captureProbe: (scene, probe) => renderer.captureProbe(scene, probe),
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._lighting);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._shadows.shadowDistance = config.shadowDistance ?? 100;
         this._shadows.cascadeCount = Math.min(MAX_CASCADES, Math.max(1, Math.round(config.shadowCascades ?? this._shadows.cascadeCount)));
@@ -714,10 +673,10 @@ export class Renderer {
         this._ssil.ssaoFBO = new Framebuffer(aoOptions);
         this._ssil.ssaoBlurFBO = new Framebuffer(aoOptions);
         // BRDF integration LUT (computed once) — high precision, no mipmaps.
-        this._brdfFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
+        this._sky.brdfFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // 8-BIT ON PURPOSE, and RGBM-encoded by the shader. WebGL2's readback refuses anything but a
         // 4-byte colour format, so a float target here could be rendered but never read.
-        this._skyProjectFBO = new Framebuffer({ colorTextureOptions: { mipMap: false }, depth: false });
+        this._sky.skyProjectFBO = new Framebuffer({ colorTextureOptions: { mipMap: false }, depth: false });
         // Selection outline silhouette mask (low precision, no mipmaps).
         this._post.outlineMaskFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
         // Editor overlay layer. `precision: 'high'` matches `_targets.scene`'s rgba16float, so the gizmo,
@@ -1107,7 +1066,7 @@ export class Renderer {
                                   1,  1, 0, 1, v1, -1,  1, 0, 0, v1], 12, [0, 1, 2, 0, 2, 3]);
 
         // IBL setup (BRDF LUT is rendered on the screen quad, so this must run after it exists).
-        this._initializeIBL();
+        this._sky.initializeIBL();
 
         this.resize();
 
@@ -1243,16 +1202,16 @@ export class Renderer {
         // The key light first: the cloud-sky bake below lights its clouds with it.
         this._lighting.updateKeyLight(scene);
         this._passes.scope('sky.bake');
-        this._updateSkyAtmosphere(scene);
-        this._updateCloudSky(scene);
+        this._sky.updateSkyAtmosphere(scene);
+        this._sky.updateCloudSky(scene);
 
         // Re-derive the sky light from the cubemap the bake above just refreshed. Before the probe
         // capture below, so a probe baked this frame sees the same sky the scene is lit by.
-        this._updateSkyLight(scene);
+        this._sky.updateSkyLight(scene);
 
         // Bake/refresh IBL (light probes + scene environment) before the main passes.
         this._passes.scope('ibl.bake');
-        this._updateIBL(scene);
+        this._sky.updateIBL(scene);
         this._passes.endScope();
 
         // Reset per-frame perf counters AFTER the (occasional) IBL bake so bakes don't spike the stats.
@@ -1907,84 +1866,6 @@ export class Renderer {
     // Image-based lighting (IBL)
     // ---------------------------------------------------------------------------------------------
 
-    // One-time IBL setup: cube capture camera/mesh/framebuffer, per-face view matrices, and the
-    // shared BRDF integration LUT.
-    private _initializeIBL(): void {
-        // 90-degree perspective for cube-face rendering (camera sits inside the unit cube).
-        mat4.perspective(this._captureProj, Math.PI / 2, 1, 0.1, 10);
-        // Flip Y on WebGPU: framebuffer row 0 is the BOTTOM on WebGL2 and the TOP on WebGPU. UV-sampled
-        // targets survive that (the screen quad undoes it at present); a CUBEMAP, sampled by
-        // direction, does not.
-        if (device.backend === 'webgpu') this._captureProj[5] *= -1;
-        for (const f of Renderer._CUBE_FACES) {
-            const view = mat4.create();
-            mat4.lookAt(view, [0, 0, 0], f.dir, f.up);
-            this._iblFaceViews.push(view);
-        }
-
-        const cubeGeo = Geometry.Cube();
-        this._iblCubeMesh = new Mesh();
-        this._iblCubeMesh.initializeVAO(this._shaderManager.getShader('irradiance').attributes);
-        this._iblCubeMesh.create(cubeGeo.getData(['position']), cubeGeo.indices.length, cubeGeo.indices);
-
-        this._cubeFBO = new CubeFramebuffer();
-        this._captureCamera = new Camera({ type: 'perspective', fov: 90, near: 0.05, far: 2000 });
-
-        this._brdfFBO.create(Renderer.BRDF_LUT_SIZE, Renderer.BRDF_LUT_SIZE);
-        this._renderBRDFLUT();
-
-        // A 1x1 complete cubemap for any IBL slot a frame does not fill. A bind group cannot express
-        // "nothing", and an unset sampler aliases the 2D G-buffer sampler on unit 0.
-        // `target: 'cubemap'` is NOT optional: without it this is a 2D texture, which is the exact
-        // aliasing it exists to prevent. `allocateCube` throws on the mismatch.
-        this._bindGroups.fallbackCube = new Texture({ target: 'cubemap', mipMap: false });
-        this._bindGroups.fallbackCube.createCubemapTarget(1, 1);
-
-        // White rather than black: a material with no base colour map multiplies by this, and black
-        // would render every untextured object invisible rather than merely unmapped.
-        this._bindGroups.fallbackTexture = new Texture({ mipMap: false });
-        this._bindGroups.fallbackTexture.createFromData(new Uint8Array([255, 255, 255, 255]), 1, 1);
-    }
-
-    private _renderBRDFLUT(): void {
-        // No bind groups at all: the LUT is pure computation from the fragment coordinate.
-        const pass = this._passes.beginFullscreenPass(this._brdfFBO.renderTarget, 'brdf', true, [0, 0, 0, 1]);
-        pass.setPipeline(this._pipelines.fullscreen('brdf', BRDFProgram));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-    }
-
-    // Render a convolution shader (irradiance/prefilter) into all 6 faces of `target` at a mip level.
-    private _convolveCubeFaces(shaderName: string, reflection: { resources: readonly ShaderResource[] },
-                               sourceCube: Texture, target: Texture, mip: number, size: number,
-                               perFace?: () => void): void {
-        // One pass PER FACE, because a face is a different render target — the cube framebuffer
-        // re-points its colour attachment at each one, and `createRenderTarget` dedupes them so six
-        // faces cost six cached framebuffers rather than six per bake.
-        this._shaderManager.bind(shaderName);
-        // One pipeline across six faces, so it must be TOLD its target: otherwise `_pipelines.get` falls
-        // back to `_passes.target` — whatever the previous pass left — and derives the wrong colour format,
-        // which WebGPU rejects. Face 0's target stands for all six, and `createRenderTarget` dedupes.
-        const faceTarget = this._cubeFBO.targetFor(target, 0, mip, false, size);
-        const pipeline = this._pipelines.get(shaderName, reflection, { cullMode: 'none', vertex: 'model',
-                                                                    // The unit cube carries position
-                                                                    // only; see _initializeIBL.
-                                                                    builtFor: 'irradiance',
-                                                                    target: faceTarget });
-        this._shaderManager.setUniform('u_projection', this._projection.clipProjection(this._captureProj));
-        if (perFace) perFace();
-        for (let face = 0; face < 6; face++) {
-            const pass = this._passes.beginFullscreenPass(
-                this._cubeFBO.targetFor(target, face, mip, false, size),
-                'iblConvolve', true, [0, 0, 0, 1], false);
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [sourceCube]));
-            this._shaderManager.setUniform('u_view', this._iblFaceViews[face]);
-            if (!this._passes.recordDraw(pass, this._iblCubeMesh, 0, 0)) this._iblCubeMesh.draw();
-            this._passes.endFullscreenPass(pass);
-        }
-    }
-
     /** Convolve a source environment cubemap into diffuse-irradiance and prefiltered-specular cubemaps. */
     public bakeIBL(sourceCube: Texture, sourceRes: number): { irradiance: Texture, prefiltered: Texture } {
         GLState.depthTest(false);
@@ -1994,17 +1875,17 @@ export class Renderer {
 
         // Diffuse irradiance (small, no mips).
         const irradiance = new Texture({ target: 'cubemap', precision: 'high', mipMap: false });
-        irradiance.createCubemapTarget(Renderer.IRRADIANCE_SIZE, 1);
-        this._convolveCubeFaces('irradiance', IrradianceProgram, sourceCube, irradiance, 0,
-                                Renderer.IRRADIANCE_SIZE);
+        irradiance.createCubemapTarget(SkyPasses.IRRADIANCE_SIZE, 1);
+        this._sky.convolveCubeFaces('irradiance', IrradianceProgram, sourceCube, irradiance, 0,
+                                SkyPasses.IRRADIANCE_SIZE);
 
         // Prefiltered specular (mip level encodes roughness).
         const prefiltered = new Texture({ target: 'cubemap', precision: 'high', mipMap: true });
-        prefiltered.createCubemapTarget(Renderer.PREFILTER_SIZE, Renderer.PREFILTER_MIPS);
-        for (let mip = 0; mip < Renderer.PREFILTER_MIPS; mip++) {
-            const mipSize = Math.max(1, Math.floor(Renderer.PREFILTER_SIZE * Math.pow(0.5, mip)));
-            const roughness = Renderer.PREFILTER_MIPS > 1 ? mip / (Renderer.PREFILTER_MIPS - 1) : 0;
-            this._convolveCubeFaces('prefilter', PrefilterProgram, sourceCube, prefiltered, mip, mipSize, () => {
+        prefiltered.createCubemapTarget(SkyPasses.PREFILTER_SIZE, SkyPasses.PREFILTER_MIPS);
+        for (let mip = 0; mip < SkyPasses.PREFILTER_MIPS; mip++) {
+            const mipSize = Math.max(1, Math.floor(SkyPasses.PREFILTER_SIZE * Math.pow(0.5, mip)));
+            const roughness = SkyPasses.PREFILTER_MIPS > 1 ? mip / (SkyPasses.PREFILTER_MIPS - 1) : 0;
+            this._sky.convolveCubeFaces('prefilter', PrefilterProgram, sourceCube, prefiltered, mip, mipSize, () => {
                 this._shaderManager.setUniform('u_roughness', roughness);
                 this._shaderManager.setUniform('u_resolution', sourceRes);
             });
@@ -2029,14 +1910,14 @@ export class Renderer {
         const sourceCube = new Texture({ target: 'cubemap', precision: 'high', mipMap: true });
         sourceCube.createCubemapTarget(res, levels);
 
-        const cam = this._captureCamera;
+        const cam = this._sky.captureCamera;
         cam.fov = 90;
         cam.resize(res, res); // aspect 1
         const prevCamera = this._view.camera;
         this._view.camera = cam;
         // Everything below swaps renderer state (the camera, the cube-face winding, suppressed shadows, a
         // one-cluster light grid). A throw anywhere in the capture used to leave `_view.capturing` set, and
-        // `_updateIBL` then never refreshed a probe again; the `finally` puts all of it back.
+        // `_sky.updateIBL` then never refreshed a probe again; the `finally` puts all of it back.
         let baked = false;
         try {
             // Forward lighting for the capture, with no probe IBL bound, to avoid feedback. Shadows are
@@ -2061,11 +1942,11 @@ export class Renderer {
             const eye = vec3.create();
             const clear = this._config.clearColor || [0, 0, 0, 1];
             // Every draw below writes a CUBE FACE. See `_projection.clipProjection`: on WebGPU that needs the same
-            // Y inversion `_captureProj` carries for the sky and IBL bakes, and the reversed winding that
+            // Y inversion `SkyPasses._captureProj` carries for the sky and IBL bakes, and the reversed winding that
             // comes with it. Restored in the `finally` at the end of the capture.
             this._view.cubeFace = true;
             for (let face = 0; face < 6; face++) {
-                const f = Renderer._CUBE_FACES[face];
+                const f = SkyPasses.CUBE_FACES[face];
                 const dir = vec3.fromValues(f.dir[0], f.dir[1], f.dir[2]);
                 const up = vec3.fromValues(f.up[0], f.up[1], f.up[2]);
                 cam.position = probePos;
@@ -2077,11 +1958,11 @@ export class Renderer {
                 // its colour attachment at each. Colour AND depth are cleared; the depth attachment is the
                 // cube framebuffer's scratch one at this resolution.
                 const pass = this._passes.beginFullscreenPass(
-                    this._cubeFBO.targetFor(sourceCube, face, 0, true, res),
+                    this._sky.cubeFBO.targetFor(sourceCube, face, 0, true, res),
                     'probeCapture', true, [clear[0], clear[1], clear[2], clear[3]], true);
 
                 // Sky first, at depth 1.0 and without writing depth, then the opaque geometry over it.
-                this._renderSky(pass, scene, cam);
+                this._sky.renderSky(pass, scene, cam);
 
                 this._forwardDepthWrite = true;
                 for (const node of scene.models) {
@@ -2102,7 +1983,7 @@ export class Renderer {
                 this._passes.endFullscreenPass(pass);
             }
 
-            // Cleared before `bakeIBL` below, which renders its own cube faces through `_captureProj` -
+            // Cleared before `bakeIBL` below, which renders its own cube faces through `SkyPasses._captureProj` -
             // that matrix already carries the inversion, and applying it twice would undo it.
             this._view.cubeFace = false;
             this._view.camera = prevCamera;
@@ -2127,367 +2008,11 @@ export class Renderer {
     }
 
     /**
-     * The cubemap the sky light derives from: the baked atmosphere, else a user skybox, else the scene
-     * environment map. Returns the cube and whether it is already linear HDR.
-     */
-    private _skySource(scene: Scene): { cube: Texture, linear: boolean } | null {
-        const atmo = scene.skyAtmosphere;
-        // The clouded sky while it is what the scene draws: overcast ambient then comes from the real
-        // clouds, not from the analytic grade.
-        const clouded = this._cloudSkyActive(scene) ? this._cloudSkyFrontCube() : null;
-        if (clouded) return { cube: clouded, linear: true };
-        if (atmo?.cubemap) return { cube: atmo.cubemap, linear: true };
-        const skybox = scene.skybox as SkyboxNode | null;
-        if (skybox) {
-            if (!skybox.initialized) skybox.initializeSkybox();
-            if (skybox.skybox.texture) return { cube: skybox.skybox.texture, linear: false };
-        }
-        if (scene.environmentMap) return { cube: scene.environmentMap, linear: false };
-        return null;
-    }
-
-    // Re-derive the sky light's spherical harmonics when the sky changes. Rides the sky's own re-bake
-    // cadence rather than testing the sun again — two tests of one thing eventually disagree.
-    // The readback is async, so the coefficients land a frame or two late; nothing here blocks.
-    private _updateSkyLight(scene: Scene): void {
-        if (this._view.capturing) return;
-        const node = scene.skyLight;
-        if (!node) {
-            // Leaving the coefficients behind would keep lighting a scene whose sky light was deleted.
-            this._skySHValid = false;
-            this._skySHSource = null;
-            return;
-        }
-
-        const source = this._skySource(scene);
-        if (!source) { this._skySHValid = false; this._skySHSource = null; return; }
-        if (this._skyProjectionPending) return;
-
-        // A sky re-bake asks for a re-projection; at most once a second, since each one is a readback.
-        // Kept pending rather than dropped, so the LAST position of a moving sun is always projected.
-        if (this._skyLightReprojectPending) {
-            const now = performance.now();
-            if (now - this._skyLightReprojectAt >= 1000) {
-                node.markDirty();
-                this._skyLightReprojectPending = false;
-                this._skyLightReprojectAt = now;
-            }
-        }
-
-        const atmo = scene.skyAtmosphere;
-        const atmoCube = atmo?.cubemap ?? null;
-        // A night sky is orders of magnitude darker than a day one; scale it up for the 8-bit readback.
-        const projectScale = atmo ? 1 + 15 * nightFactor(atmo.lastSunDir[1]) : 1;
-        // The clear sky's coefficients are what the CLOUDS are lit by. While the scene's come from the
-        // clouded sky, they are projected on their own, so the clouds never light themselves.
-        if (atmoCube && source.cube !== atmoCube && (this._clearSkyStale || this._clearSkySource !== atmoCube)) {
-            this._clearSkyStale = false;
-            this._clearSkySource = atmoCube;
-            this._skyProjectionPending = true;
-            void this._projectSkyLight(atmoCube, true, [1, 1, 1], 'clear', projectScale)
-                .catch((e) => Logger.warn(`Sky light projection failed: ${(e && e.message) || e}`, 'Runtime'))
-                .then(() => { this._skyProjectionPending = false; });
-            return;
-        }
-
-        const stale = node.needsProjection || !this._skySHValid || this._skySHSource !== source.cube;
-        if (!stale) return;
-
-        this._skyProjectionPending = true;
-        node.markProjected();
-        this._skySHSource = source.cube;
-        if (source.cube === atmoCube) { this._clearSkyStale = false; this._clearSkySource = atmoCube; }
-        void this._projectSkyLight(source.cube, source.linear, node.tint,
-                                   source.cube === atmoCube ? 'both' : 'scene', projectScale)
-            // NAMED, not swallowed. A failed projection leaves the scene lit by nothing but the flat
-            // ambient, which looks exactly like a dark sky — the one failure mode that hides itself.
-            .catch((e) => Logger.warn(`Sky light projection failed: ${(e && e.message) || e}`, 'Runtime'))
-            .then(() => { this._skyProjectionPending = false; });
-    }
-
-    /** Unwrap, read back, project. Split out only so `_updateSkyLight` itself stays synchronous. */
-    private async _projectSkyLight(cube: Texture, linear: boolean, tint: [number, number, number],
-                                   target: 'scene' | 'clear' | 'both' = 'scene', scale = 1): Promise<void> {
-        const w = Renderer.SKY_PROJECT_W, h = Renderer.SKY_PROJECT_H;
-        if (this._skyProjectFBO.width !== w || this._skyProjectFBO.height !== h)
-            this._skyProjectFBO.create(w, h);
-
-        const pass = this._passes.beginFullscreenPass(this._skyProjectFBO.renderTarget, 'skyProject', false);
-        const pipeline = this._pipelines.fullscreen('skyProject', SkyProjectProgram);
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [cube]));
-        this._shaderManager.bind('skyProject');
-        this._shaderManager.setUniform('u_linearInput', linear ? 1 : 0);
-        this._shaderManager.setUniform('u_projectScale', scale);
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-
-        // Restored before the await, for the same reason `renderProbePreview` does it: a game-loop
-        // frame that lands while this is suspended must find the live viewport, not the 32x16 one.
-        this._passes.setViewport(this._renderWidth, this._renderHeight);
-
-        // SUBMIT BEFORE READING — the one place in the frame that must. `readPixels` copies on its own
-        // encoder and submits immediately, so without this it runs ahead of the pass above and reads a
-        // target nothing has written.
-        this._passes.flushFrameEncoder(true);
-
-        const pixels = await device.readPixels(this._skyProjectFBO.colors[0].attachmentView, 0, 0, w, h);
-        const k = 1 / scale;
-        if (target !== 'clear') {
-            this._skySH.set(Renderer._projectEquirectToSH(pixels, w, h, [tint[0] * k, tint[1] * k, tint[2] * k]));
-            this._skySHValid = true;
-        }
-        if (target !== 'scene') {
-            // Untinted: the sky light's tint is an artistic grade on the SCENE's ambient, not the sky.
-            this._clearSkySH.set(Renderer._projectEquirectToSH(pixels, w, h, [k, k, k]));
-            this._clearSkySHValid = true;
-        }
-    }
-
-    // Project an RGBM equirect map onto L2 spherical harmonics. Row 0 is the south pole on BOTH
-    // backends, so no per-backend flip. The `cos(lat)` weight is the solid angle a texel subtends —
-    // without it the oversampled poles dominate the integral.
-    private static _projectEquirectToSH(pixels: Uint8Array, w: number, h: number,
-                                        tint: [number, number, number]): Float32Array {
-        const sh = new Float32Array(9 * 4);
-        let weightSum = 0;
-        for (let row = 0; row < h; row++) {
-            const v = (row + 0.5) / h;
-            const lat = (v - 0.5) * Math.PI;
-            const cosLat = Math.cos(lat);
-            const sinLat = Math.sin(lat);
-            for (let col = 0; col < w; col++) {
-                const u = (col + 0.5) / w;
-                const lon = (u - 0.5) * 2 * Math.PI;
-                const x = cosLat * Math.sin(lon);
-                const y = sinLat;
-                const z = -cosLat * Math.cos(lon);
-
-                const i = (row * w + col) * 4;
-                const m = pixels[i + 3] / 255 * Renderer.SKY_RGBM_RANGE;
-                const r = (pixels[i] / 255) * m * tint[0];
-                const g = (pixels[i + 1] / 255) * m * tint[1];
-                const b = (pixels[i + 2] / 255) * m * tint[2];
-
-                const weight = cosLat;
-                weightSum += weight;
-
-                // Real SH basis, l = 0..2, in the order chunks/pbrLighting.wgsl evaluates them.
-                const basis = [
-                    0.282095,
-                    0.488603 * y, 0.488603 * z, 0.488603 * x,
-                    1.092548 * x * y, 1.092548 * y * z,
-                    0.315392 * (3 * z * z - 1),
-                    1.092548 * x * z, 0.546274 * (x * x - y * y),
-                ];
-                for (let k = 0; k < 9; k++) {
-                    const c = basis[k] * weight;
-                    sh[k * 4] += r * c;
-                    sh[k * 4 + 1] += g * c;
-                    sh[k * 4 + 2] += b * c;
-                }
-            }
-        }
-        // 4*PI is the sphere's solid angle and the weight sum is its discrete counterpart, so this turns
-        // the Riemann sum into the integral the coefficients are defined as.
-        const norm = weightSum > 0 ? (4 * Math.PI) / weightSum : 0;
-        for (let k = 0; k < 9 * 4; k++) sh[k] *= norm;
-        return sh;
-    }
-
-    /**
      * The sky light's current coefficients, or null before the first projection lands. Read-only, for
      * inspection: the editor's sky-light panel and the landscape builder's finite/non-zero gate.
      */
     public get skyLightSH(): Float32Array | null {
-        return this._skySHValid ? this._skySH : null;
-    }
-
-    // Bake any light probe flagged for baking or due for a realtime refresh. IBL applies only where
-    // the user has placed a probe; a scene without one keeps flat ambient plus the crude env map.
-    private _updateIBL(scene: Scene): void {
-        if (this._view.capturing) return;
-
-        const now = performance.now();
-        for (const probe of scene.lightProbes) {
-            const due = probe.mode === 'realtime' && (now - probe.lastBakeTime) >= probe.updateFrequency * 1000;
-            if (probe.needsBake || due) {
-                this.captureProbe(scene, probe);
-                probe.markBaked(now);
-            }
-        }
-    }
-
-    // Direction TOWARD the sun for a SkyAtmosphere node: the scene directional light (negated travel
-    // direction) when useSceneSun, else the node's manual override. Always normalized.
-    private _atmosphereSunDir(scene: Scene, node: SkyAtmosphereNode): [number, number, number] {
-        let s: [number, number, number] = [node.sunDirection[0], node.sunDirection[1], node.sunDirection[2]];
-        if (node.useSceneSun) {
-            for (const light of scene.lights) {
-                if (light.type === 'directional') {
-                    const f = light.worldForward; // light travels along +forward, so the sun is at -forward
-                    s = [-f[0], -f[1], -f[2]];
-                    break;
-                }
-            }
-        }
-        const len = Math.hypot(s[0], s[1], s[2]) || 1;
-        return [s[0] / len, s[1] / len, s[2] / len];
-    }
-
-    /**
-     * Sun direction + screen-space UV + visibility fade for the scene's sun: the first directional
-     * light (negated travel direction), else the SkyAtmosphere sun. `visible` is 0 when there is no
-     * sun or it is behind the camera, fading to 0 as it leaves the viewport. Shared by the god-rays
-     * pass and the camera's screen-space material passes (u_sunDir/u_sunUV/u_sunVisible).
-     */
-    private _sunScreenInfo(scene: Scene): { dir: [number, number, number], uv: [number, number], visible: number } {
-        let dir: [number, number, number] | null = null;
-        for (const light of scene.lights) {
-            if (light.type === 'directional') {
-                const f = this._lighting.dirOf(light); // light travels along +forward, so the sun is at -forward
-                dir = [-f[0], -f[1], -f[2]];
-                break;
-            }
-        }
-        if (!dir && scene.skyAtmosphere) dir = this._atmosphereSunDir(scene, scene.skyAtmosphere);
-        if (!dir) return { dir: [0, 0, 0], uv: [0, 0], visible: 0 };
-        const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
-        dir = [dir[0] / len, dir[1] / len, dir[2] / len];
-
-        // Project the sun as a point at infinity: clip = viewProj * vec4(dirTowardSun, 0).
-        const m = this._view.viewProj;
-        const clipX = m[0] * dir[0] + m[4] * dir[1] + m[8] * dir[2];
-        const clipY = m[1] * dir[0] + m[5] * dir[1] + m[9] * dir[2];
-        const clipW = m[3] * dir[0] + m[7] * dir[1] + m[11] * dir[2];
-        if (clipW <= 0.0) return { dir, uv: [0, 0], visible: 0 }; // sun is behind the camera
-        const uv: [number, number] = [(clipX / clipW) * 0.5 + 0.5, (clipY / clipW) * 0.5 + 0.5];
-        const dx = Math.max(0, Math.max(-uv[0], uv[0] - 1));
-        const dy = Math.max(0, Math.max(-uv[1], uv[1] - 1));
-        const visible = Math.max(0, 1 - Math.hypot(dx, dy) / 0.5);
-        return { dir, uv, visible };
-    }
-
-    // Re-bake the SkyAtmosphere cubemap when needed: on first use / parameter change (needsBake) or
-    // when the sun direction has moved past a small epsilon. No-op when no atmosphere node exists.
-    private _updateSkyAtmosphere(scene: Scene): void {
-        if (this._view.capturing) return;
-        const node = scene.skyAtmosphere;
-        if (!node) return;
-
-        const sun = this._atmosphereSunDir(scene, node);
-        const last = node.lastSunDir;
-        const dot = sun[0] * last[0] + sun[1] * last[1] + sun[2] * last[2];
-        const SUN_EPS = Math.cos(0.3 * Math.PI / 180); // re-bake once the sun rotates ~0.3 degrees
-        if (this._skyTexturesPending
-            && (!node.nightSkyTexture || TextureManager.Instance.getTexture(node.nightSkyTexture))
-            && (!node.moonTexture || TextureManager.Instance.getTexture(node.moonTexture))) node.markDirty();
-        if (node.needsBake || dot < SUN_EPS)
-            this._bakeSkyAtmosphere(node, sun);
-    }
-
-    // Bake the Nishita single-scattering atmosphere into the node's cubemap (6 faces via the IBL cube
-    // machinery: _captureProj + _iblFaceViews + _iblCubeMesh + _cubeFBO). Stores a display-referred
-    // (tonemapped) cubemap so the existing 'skybox' draw can sample it unchanged.
-    private _bakeSkyAtmosphere(node: SkyAtmosphereNode, sun: [number, number, number]): void {
-        const res = node.resolution;
-        if (!node.cubemap || node.cubemapResolution !== res) {
-            const levels = Math.floor(Math.log2(res)) + 1;
-            const cube = new Texture({ target: 'cubemap', precision: 'high', mipMap: true });
-            cube.createCubemapTarget(res, levels);
-            node.setCubemap(cube, res);
-        }
-        const cube = node.cubemap!;
-        this._renderAtmosphereFaces(node, sun, cube, res, Renderer._ALL_FACES);
-        this._passes.generateMipsAfterRender(cube);
-        node.markBaked(sun);
-        // The sky light follows the sky. Nothing used to tell it to, so ambient froze at the first sun
-        // position; the re-projection is throttled because it is a readback.
-        this._skyLightReprojectPending = true;
-        this._clearSkyStale = true;
-    }
-    private static readonly _ALL_FACES: readonly number[] = [0, 1, 2, 3, 4, 5];
-    /** The last atmosphere bake named a night-sky or moon texture the manager did not have yet. */
-    private _skyTexturesPending = false;
-
-    /**
-     * Render the atmosphere — the day sky and, after sunset, the night sky (stars or a custom texture,
-     * airglow, the moon and the moonlit sky) — into `faces` of `cube`, `res` texels square. Shared by the
-     * atmosphere's own bake and the cloud-sky bake, which paints the clouds over a fresh copy of it.
-     */
-    private _renderAtmosphereFaces(node: SkyAtmosphereNode, sun: ArrayLike<number>, cube: Texture, res: number,
-                                   faces: readonly number[]): void {
-        GLState.depthTest(false);
-        GLState.depthMask(false);
-        GLState.blend(false);
-        GLState.cull(false);
-
-        this._shaderManager.bind('skyAtmosphere');
-        // One pipeline for all six faces. `builtFor: 'irradiance'` — the unit cube's stride comes from
-        // THAT program, not the drawing one. `target` explicitly: built before any pass opens.
-        const skyPipeline = this._pipelines.get('skyAtmosphere', SkyAtmosphereProgram,
-                                              { cullMode: 'none', vertex: 'model',
-                                                builtFor: 'irradiance',
-                                                target: this._cubeFBO.targetFor(cube, faces[0] ?? 0, 0, false) });
-        this._shaderManager.setUniform('u_projection', this._projection.clipProjection(this._captureProj));
-        this._shaderManager.setUniform('u_sunDir', sun);
-        this._shaderManager.setUniform('u_sunColor', node.sunColor);
-        this._shaderManager.setUniform('u_sunIntensity', node.sunIntensity);
-        // Earth Rayleigh scattering coefficients (per metre), scaled by the user multiplier.
-        const rs = node.rayleighScatter;
-        this._shaderManager.setUniform('u_rayleigh', [5.8e-6 * rs, 13.5e-6 * rs, 33.1e-6 * rs]);
-        this._shaderManager.setUniform('u_mie', 21e-6 * node.mieScatter);
-        this._shaderManager.setUniform('u_rayleighHeight', node.rayleighHeight);
-        this._shaderManager.setUniform('u_mieHeight', node.mieHeight);
-        this._shaderManager.setUniform('u_mieG', node.mieG);
-        this._shaderManager.setUniform('u_planetRadius', node.planetRadius);
-        this._shaderManager.setUniform('u_atmosphereRadius', node.atmosphereRadius);
-        this._shaderManager.setUniform('u_sunDiskSize', node.sunDiskSize);
-        this._shaderManager.setUniform('u_exposure', node.exposure);
-        this._shaderManager.setUniform('u_groundColor', node.groundColor);
-        this._shaderManager.setUniform('u_viewSteps', node.viewSteps);
-        this._shaderManager.setUniform('u_lightSteps', node.lightSteps);
-
-        // Night sky. `u_night` is 0 by day, which is what keeps a day bake from paying for any of it.
-        const DEG = Math.PI / 180;
-        const nightTex = node.nightSkyTexture ? TextureManager.Instance.getTexture(node.nightSkyTexture) : null;
-        const moonTex = node.moonTexture ? TextureManager.Instance.getTexture(node.moonTexture) : null;
-        this._shaderManager.setUniform('u_night', node.nightEnabled ? nightFactor(sun[1]) : 0);
-        this._shaderManager.setUniform('u_moonDir', moonDirection(sun, node.moonOffsetYaw, node.moonOffsetPitch));
-        this._shaderManager.setUniform('u_moonColor', node.moonColor);
-        this._shaderManager.setUniform('u_airglowColor', node.airglowColor);
-        this._shaderManager.setUniform('u_starIntensity', node.starIntensity);
-        this._shaderManager.setUniform('u_starDensity', node.starDensity);
-        this._shaderManager.setUniform('u_starColorVariance', node.starColorVariance);
-        this._shaderManager.setUniform('u_nightSkyIntensity', node.nightSkyIntensity);
-        this._shaderManager.setUniform('u_nightSkyRotation', node.nightSkyRotation * DEG);
-        this._shaderManager.setUniform('u_moonSize', node.moonSize * DEG);
-        this._shaderManager.setUniform('u_moonPhase', node.moonPhase);
-        this._shaderManager.setUniform('u_moonIntensity', node.moonIntensity);
-        this._shaderManager.setUniform('u_airglowIntensity', node.airglowIntensity);
-        this._shaderManager.setUniform('u_nightTexture', !!nightTex);
-        this._shaderManager.setUniform('u_moonTexture', !!moonTex);
-        this._shaderManager.setUniform('u_moonEnabled', node.moonEnabled);
-        this._shaderManager.setUniform('u_nightScale', node.moonlightIntensity / DEFAULT_MOONLIGHT_INTENSITY);
-        const nightGroup = this._bindGroups.textureGroup(skyPipeline, 2, [nightTex ?? this._bindGroups.fallbackTexture,
-                                                                    moonTex ?? this._bindGroups.fallbackTexture]);
-        // A texture still loading bakes the procedural fallback; remember to bake again once it is in.
-        this._skyTexturesPending = (!!node.nightSkyTexture && !nightTex) || (!!node.moonTexture && !moonTex);
-
-        this._passes.setViewport(res, res);
-        for (const face of faces) {
-            // A pass per face, like `_convolveCubeFaces`: a face is a different render target.
-            const pass = this._passes.beginFullscreenPass(this._cubeFBO.targetFor(cube, face, 0, false),
-                                                   'skyAtmosphereBake', true, [0, 0, 0, 1], false);
-            pass.setPipeline(skyPipeline);
-            pass.setBindGroup(2, nightGroup);
-            this._shaderManager.setUniform('u_view', this._iblFaceViews[face]);
-            this._passes.recordDraw(pass, this._iblCubeMesh, 0, 0);
-            this._passes.endFullscreenPass(pass);
-        }
-        this._passes.setViewport(this._renderWidth, this._renderHeight);
-        GLState.depthMask(true);
-        GLState.depthTest(true);
+        return this._sky.skySHValid ? this._sky.skySH : null;
     }
 
     /** Blit _targets.scene's depth (deferred blit + forward opaques) into _targets.sceneDepth so fullscreen
@@ -2526,96 +2051,6 @@ export class Renderer {
         const encoder = this._passes.acquireEncoder('copyDepth');
         encoder.copyTextureToTexture(source.attachmentView, destination.attachmentView, width, height);
         if (encoder !== this._passes.frameEncoder) encoder.finish();
-    }
-
-    // Height fog for the SkyAtmosphere node: a fullscreen pass that integrates the fog along each view
-    // ray and tints toward the atmosphere's horizon colour (see skyFog.wgsl), over the opaque scene and
-    // the sky's horizon band. Reads the scene-depth snapshot, not the G-buffer, so forward Blinn-Phong
-    // opaques fog at their own depth too.
-    private _renderSkyFog(scene: Scene): void {
-        const node = scene.skyAtmosphere;
-        if (!node || !node.fogEnabled || !node.cubemap || node.fogMaxOpacity <= 0 || node.fogDensity <= 0) return;
-
-        const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'skyFog', false);
-        const pipeline = this._pipelines.fullscreen('skyFog', SkyFogProgram, DEFAULT_BLEND);
-        pass.setPipeline(pipeline);
-
-        this._shaderManager.bind('skyFog');
-        // The CLEAN atmosphere, never the cloud-baked sky: fog is the colour of the air at the horizon, and
-        // sampling clouds into it painted them onto every fogged hillside.
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._targets.sceneDepth.depth, node.cubemap]));
-        this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
-        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
-        this._shaderManager.setUniform('u_fogDensity', node.fogDensity);
-        this._shaderManager.setUniform('u_fogStart', node.fogStart);
-        this._shaderManager.setUniform('u_fogHeight', node.fogHeight);
-        this._shaderManager.setUniform('u_fogHeightFalloff', node.fogHeightFalloff);
-        this._shaderManager.setUniform('u_fogMaxOpacity', node.fogMaxOpacity);
-        this._shaderManager.setUniform('u_fogColor', node.fogColor);
-        this._shaderManager.setUniform('u_fogColorBlend', node.fogColorBlend);
-        // Sample the atmosphere well up the mip chain so fog is a smooth colour haze (no crisp sun disk
-        // or sky detail in it). ~8px-per-face target regardless of the baked cubemap resolution.
-        const res = node.cubemapResolution || node.resolution;
-        this._shaderManager.setUniform('u_fogSkyLod', Math.max(0, Math.log2(res) - 3));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-
-        // Restore the state the following overlay passes expect.
-        GLState.blend(false);
-        GLState.depthTest(true);
-        GLState.depthMask(true);
-    }
-
-    /**
-     * Draw a sky cube — a baked atmosphere cubemap or a user skybox — into `pass`.
-     *
-     * Depth WRITES off, test on: the cube renders at NDC z = w, and interpolation error would put
-     * some pixels a hair below 1.0 for every depth-reading pass downstream. Culling off — the cube is
-     * viewed from inside. Both meshes carry position only, so both use `builtFor: 'skybox'` (12 bytes).
-     */
-    private _drawSky(pass: RenderPassEncoder, cubemap: Texture, mesh: Mesh,
-                     view: mat4, proj: mat4, linearInput: boolean): void {
-        const pipeline = this._pipelines.get('skybox', SkyboxProgram, {
-            cullMode: 'none',
-            depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
-            vertex: 'model',
-            builtFor: 'skybox',
-        });
-        pass.setPipeline(pipeline);
-        this._shaderManager.setUniform('u_view', view);
-        // Jittered like every other pass that lands in the TAA input — the sky is where the horizon
-        // aliases hardest. The probe/IBL callers are neutralised inside `_projection.rasterProjection` by the
-        // cube-face and capture guards rather than by picking call sites.
-        this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(proj));
-        this._shaderManager.setUniform('u_linearInput', linearInput);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [cubemap]));
-        if (!this._passes.recordDraw(pass, mesh, 0, 0)) mesh.draw();
-    }
-
-    /**
-     * The sky for one camera view, whichever kind the scene has. Returns false when there is none.
-     * The perspective override is mandatory: an orthographic projection has no valid sky direction.
-     */
-    private _renderSky(pass: RenderPassEncoder, scene: Scene, camera: Camera): boolean {
-        const prevType = camera.type;
-        camera.type = 'perspective';
-        const proj = camera.projectionMatrix;
-        camera.type = prevType;
-
-        const atmo = scene.skyAtmosphere;
-        const sky = this._atmosphereSkyCube(scene);
-        if (atmo && sky) {
-            // A baked atmosphere cube is linear HDR; a user cubemap is sRGB-authored.
-            this._drawSky(pass, sky, this._iblCubeMesh, camera.viewMatrix, proj, true);
-            return true;
-        }
-        if (scene.skybox) {
-            const node = scene.skybox as SkyboxNode;
-            if (!node.initialized) node.initializeSkybox();
-            this._drawSky(pass, node.skybox.texture, node.skybox.mesh, camera.viewMatrix, proj, false);
-            return true;
-        }
-        return false;
     }
 
     /** Forward passes drawn on top of the deferred-lit scene: skybox, transparent models, sprites, editor overlays. */
@@ -2682,7 +2117,7 @@ export class Renderer {
         if (!this._thumbnailMode && this._passEnabled['sky']) {
             const skyPass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'sky', false,
                                                       undefined, false);
-            this._renderSky(skyPass, scene, this._view.camera);
+            this._sky.renderSky(skyPass, scene, this._view.camera);
             this._passes.endFullscreenPass(skyPass);
         }
 
@@ -2690,7 +2125,7 @@ export class Renderer {
         // geometry (the shader reads the G-buffer depth to bound each ray — this runs before
         // _copySceneDepth below, so the blitted copy does not exist yet).
         // Not while the clouds are drawn from the sky bake: they are already in the sky above.
-        if (!this._thumbnailMode && !this._cloudSkyActive(scene) && this._passes.beginPass('clouds'))
+        if (!this._thumbnailMode && !this._sky.cloudSkyActive(scene) && this._passes.beginPass('clouds'))
             this._clouds.renderVolumetricClouds(scene);
 
         // Opaque Default (Blinn-Phong) models: forward-lit and depth-written, so they occlude correctly
@@ -2711,7 +2146,7 @@ export class Renderer {
 
         // Atmospheric fog over the opaque scene (aerial perspective from the SkyAtmosphere node).
         // Drawn before the grid/transparents so editor overlays stay crisp.
-        if (!this._thumbnailMode && this._passes.beginPass('skyFog')) this._renderSkyFog(scene);
+        if (!this._thumbnailMode && this._passes.beginPass('skyFog')) this._sky.renderSkyFog(scene);
 
         // --- The temporal boundary. ---------------------------------------------------------------
         // Everything ABOVE is the scene: sky, clouds, opaques, fog. It is full render resolution,
@@ -2766,180 +2201,6 @@ export class Renderer {
                 if (node.visible && node.id === this._selectedNodeId) selectedSprites.push(node);
         this._passes.scope('outlineMask');
         this._renderSelectionMask(selectedNodes, selectedSprites);
-    }
-
-    // ---- Cloud sky bake ----------------------------------------------------------------------------
-    // With `bakeIntoSky`, play mode (and a published game) does not raymarch the clouds every frame:
-    // they are painted once over a copy of the atmosphere, into a cubemap that is then drawn, fogged
-    // with and projected into the sky light exactly like the atmosphere's own. The bake is redone at
-    // load rather than saved, so it costs the project nothing; a moving sun re-bakes it a face a frame.
-
-    /** Front/back cubes, so the sky keeps drawing the old bake while the next one fills in. */
-    private _cloudSkyCubes: (Texture | null)[] = [null, null];
-    private _cloudSkyRes: number[] = [0, 0];
-    private _cloudSkyFront = -1;
-    /** The bake in progress: target cube, next face, and the sun, clock and eye it is made with. */
-    private _cloudSkyBake: {
-        cube: number; face: number; perFrame: number;
-        sun: [number, number, number]; time: number; eye: [number, number, number]; signature: string;
-    } | null = null;
-    private _cloudSkyWait = 0;
-    private readonly _cloudFaceView: mat4 = mat4.create();
-    private readonly _cloudFaceInv: mat4 = mat4.create();
-    /** `_captureProj` before its WebGPU Y flip: what a cloud-sky face's rays are rebuilt through. */
-    private static readonly _CLOUD_FACE_PROJ: mat4 = mat4.perspective(mat4.create(), Math.PI / 2, 1, 0.1, 10);
-    /** How far (degrees) the sun may move in play before `autoRebake` starts a new bake. */
-    private static readonly CLOUD_SKY_AUTO_DEGREES = 2;
-
-    private _cloudSkyFrontCube(): Texture | null {
-        return this._cloudSkyFront >= 0 ? this._cloudSkyCubes[this._cloudSkyFront] : null;
-    }
-
-    /** True while the scene's sky — and so its clouds — is drawn from the cloud-sky bake. */
-    private _cloudSkyActive(scene: Scene): boolean {
-        const node = scene.volumetricClouds;
-        if (!node || !node.enabled || !node.bakeIntoSky || !scene.skyAtmosphere?.cubemap) return false;
-        if (this._cloudSkyFront < 0) return false;
-        // `authoring` is off in play, in Simulate and in a published player.
-        return !authoring.enabled || node.previewBake;
-    }
-
-    /** The atmosphere cube to draw, fog with and project: the clouded one while the bake is active. */
-    private _atmosphereSkyCube(scene: Scene): Texture | null {
-        return this._cloudSkyActive(scene) ? this._cloudSkyFrontCube() : (scene.skyAtmosphere?.cubemap ?? null);
-    }
-
-    private _releaseCloudSky(): void {
-        for (const cube of this._cloudSkyCubes) cube?.delete();
-        this._cloudSkyCubes = [null, null];
-        this._cloudSkyRes = [0, 0];
-        this._cloudSkyFront = -1;
-        this._cloudSkyBake = null;
-    }
-
-    /** Start, continue or finish the cloud-sky bake. Runs after the atmosphere bake, before the sky light. */
-    private _updateCloudSky(scene: Scene): void {
-        if (this._view.capturing || this._thumbnailMode) return;
-        const node = scene.volumetricClouds;
-        const atmo = scene.skyAtmosphere;
-        if (!node || !atmo || !atmo.cubemap || !node.bakeIntoSky) {
-            if (this._cloudSkyCubes[0] || this._cloudSkyCubes[1]) this._releaseCloudSky();
-            return;
-        }
-        if (!node.enabled) { this._cloudSkyBake = null; return; }
-        const sun = atmo.lastSunDir;
-
-        if (!this._cloudSkyBake) {
-            const fresh = this._cloudSkyFront < 0;
-            const play = !authoring.enabled;
-            const requested = node.bakeRequested;
-            let start = requested || (fresh && (play || node.previewBake));
-            const baked = node.bakedSunDir;
-            if (!start && play && node.autoRebake && baked) {
-                const dot = sun[0] * baked[0] + sun[1] * baked[1] + sun[2] * baked[2];
-                start = dot < Math.cos(Renderer.CLOUD_SKY_AUTO_DEGREES * Math.PI / 180);
-            }
-            if (!start) return;
-            // The clouds are lit by the CLEAR sky's coefficients, which arrive by async readback. Give
-            // the first projection a few frames to land rather than baking flat-lit clouds.
-            if (scene.skyLight && node.useSkyAmbient && !this._clearSkySHValid && this._cloudSkyWait++ < 30) return;
-            this._cloudSkyWait = 0;
-            node.takeBakeRequest();
-
-            const cube = this._cloudSkyFront === 0 ? 1 : 0;
-            const res = node.bakeResolution;
-            if (!this._cloudSkyCubes[cube] || this._cloudSkyRes[cube] !== res) {
-                this._cloudSkyCubes[cube]?.delete();
-                const made = new Texture({ target: 'cubemap', precision: 'high', mipMap: true });
-                made.createCubemapTarget(res, Math.floor(Math.log2(res)) + 1);
-                this._cloudSkyCubes[cube] = made;
-                this._cloudSkyRes[cube] = res;
-            }
-            const e = this._view.camera.position;
-            this._cloudSkyBake = {
-                cube, face: 0,
-                // All six at once when there is nothing to show yet or someone pressed Regenerate (the
-                // loading overlay or the click covers the hitch); a moving sun gets a face a frame.
-                perFrame: fresh || requested ? 6 : 1,
-                sun: [sun[0], sun[1], sun[2]], time: performance.now() * 0.001,
-                eye: [e[0], e[1], e[2]], signature: node.bakeSignature(),
-            };
-        }
-
-        const bake = this._cloudSkyBake;
-        const faces: number[] = [];
-        while (faces.length < bake.perFrame && bake.face < 6) faces.push(bake.face++);
-        this._bakeCloudSkyFaces(scene, node, atmo, faces);
-        if (bake.face < 6) return;
-
-        this._passes.generateMipsAfterRender(this._cloudSkyCubes[bake.cube]!);
-        this._cloudSkyFront = bake.cube;
-        node.markBaked(bake.sun, bake.time, bake.signature);
-        this._cloudSkyBake = null;
-        this._skyLightReprojectPending = true;
-    }
-
-    /**
-     * Paint `faces` of the bake's cube: the atmosphere first, then the cloud raymarch over it, seen
-     * from the bake's eye through each face. No depth bound (nothing occludes a sky face), no temporal
-     * reconstruction and no dither (either would freeze into the texture as grain and face seams), and
-     * a step floor above the live pass, since this is paid once.
-     */
-    private _bakeCloudSkyFaces(scene: Scene, node: VolumetricCloudsNode, atmo: SkyAtmosphereNode,
-                               faces: readonly number[]): void {
-        const bake = this._cloudSkyBake!;
-        const cube = this._cloudSkyCubes[bake.cube]!;
-        const res = this._cloudSkyRes[bake.cube];
-        this._renderAtmosphereFaces(atmo, bake.sun, cube, res, faces);
-
-        this._clouds.bakeCloudNoise();
-        if (!this._clouds.cloudBaseNoise || !this._clouds.cloudDetailNoise || node.opacity <= 0) return;
-
-        GLState.depthTest(false);
-        GLState.depthMask(false);
-        GLState.blend(true);
-        if (gl) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        this._shaderManager.bind('volumetricClouds');
-        const pipeline = this._pipelines.fullscreen('volumetricClouds', VolumetricCloudsProgram,
-                                                  VolumetricCloudPasses.CLOUD_BLEND, undefined,
-                                                  this._cubeFBO.targetFor(cube, faces[0] ?? 0, 0, false));
-        // The depth texture is bound only because the layout has a slot for it; `u_ignoreDepth` skips it.
-        const group = this._bindGroups.textureGroup(pipeline, 0, [this._targets.gBuffer.depth, this._clouds.cloudBaseNoise,
-                                                           this._clouds.cloudDetailNoise]);
-        this._clouds.setCloudUniforms(scene, node, this._cloudFaceInv, bake.eye, bake.time);
-        this._shaderManager.setUniform('u_ignoreDepth', true);
-        this._shaderManager.setUniform('u_temporal', false);
-        this._shaderManager.setUniform('u_jitter', false);
-        this._shaderManager.setUniform('u_jitterSlot', 0);
-        this._shaderManager.setUniform('u_steps', Math.min(192, Math.max(node.steps, 96)));
-        this._shaderManager.setUniform('u_lightSteps', Math.min(12, Math.max(node.lightSteps, 8)));
-
-        this._passes.setViewport(res, res);
-        const eye = bake.eye;
-        for (const face of faces) {
-            // The face's view from the bake's eye, through the UNFLIPPED 90-degree projection on both
-            // backends. The ray is rebuilt from the screen quad's uv, and the quad already carries the
-            // backend difference (its V is inverted on WebGPU, see `_screenQuad`), which lands every uv
-            // row on the texel row the atmosphere's rasterized face put that direction in. Using
-            // `_captureProj`, whose Y is flipped on WebGPU for RASTERIZING into a cube, applied the
-            // flip twice: every side face traced the mirror image of its sky, so its clouds went below
-            // the horizon and only the zenith and nadir looked right.
-            mat4.translate(this._cloudFaceView, this._iblFaceViews[face], [-eye[0], -eye[1], -eye[2]]);
-            mat4.multiply(this._cloudFaceInv, Renderer._CLOUD_FACE_PROJ, this._cloudFaceView);
-            mat4.invert(this._cloudFaceInv, this._cloudFaceInv);
-            this._shaderManager.setUniform('u_invViewProj', this._cloudFaceInv);
-            const pass = this._passes.beginFullscreenPass(this._cubeFBO.targetFor(cube, face, 0, false),
-                                                   'cloudSkyBake', false, undefined, false);
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(0, group);
-            this._passes.drawFullscreen(pass);
-            this._passes.endFullscreenPass(pass);
-        }
-        this._passes.setViewport(this._renderWidth, this._renderHeight);
-        GLState.blend(false);
-        this._restoreDefaultBlend();
-        GLState.depthMask(true);
-        GLState.depthTest(true);
     }
 
     /**
@@ -3266,7 +2527,7 @@ export class Renderer {
         if (!this._thumbnailMode) {
             const skyPass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'sky', false,
                                                       undefined, false);
-            this._renderSky(skyPass, scene, this._view.camera);
+            this._sky.renderSky(skyPass, scene, this._view.camera);
             this._passes.endFullscreenPass(skyPass);
         }
         GLState.depthMask(true); // models below need depth writes again
@@ -4322,7 +3583,7 @@ export class Renderer {
         addFbo(this._ssil.ssaoFBO); addFbo(this._ssil.ssaoBlurFBO);
         for (const f of this._ssil.ssilHistoryFBOs) addFbo(f);
         addFbo(this._ssil.ssilRadianceFBO ?? undefined);
-        addFbo(this._brdfFBO); addFbo(this._post.outlineMaskFBO); addFbo(this._targets.overlay);
+        addFbo(this._sky.brdfFBO); addFbo(this._post.outlineMaskFBO); addFbo(this._targets.overlay);
         addFbo(this._overdrawFBO ?? undefined);
         addFbo(this._targets.velocity); addFbo(this._temporal.velocityTileFBO); addFbo(this._temporal.velocityNeighborFBO);
         addFbo(this._decals.dBufferFBO ?? undefined); addFbo(this._decals.gBufferCopyFBO ?? undefined);

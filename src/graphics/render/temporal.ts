@@ -303,7 +303,7 @@ export class TemporalPasses {
         this.velocityProducedThisFrame = true;
 
         // Restore what the overlay passes that follow expect. The velocity passes drew into their own
-        // targets, so unlike `_renderSkyFog` this has to put the scene buffer back as well.
+        // targets, so unlike `SkyPasses.renderSkyFog` this has to put the scene buffer back as well.
         this._targets.scene.bind();
         GLState.blend(false);
         GLState.depthTest(true);

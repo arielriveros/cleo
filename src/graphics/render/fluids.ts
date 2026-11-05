@@ -110,7 +110,7 @@ export class FluidVolumePasses {
                 blend: VolumetricCloudPasses.CLOUD_BLEND,
                 targets: 2,
                 vertex: 'model',
-                builtFor: 'irradiance',   // `_iblCubeMesh` is position-only, built from that program's attributes
+                builtFor: 'irradiance',   // `SkyPasses.iblCubeMesh` is position-only, built from that program's attributes
             });
             trace.setPipeline(pipeline);
             const cheap = moving || node.interacting;

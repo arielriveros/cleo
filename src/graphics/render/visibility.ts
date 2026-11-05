@@ -261,7 +261,7 @@ export class Visibility {
             depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' },
             targets: 0,
             vertex: 'model',
-            builtFor: 'irradiance',   // `_iblCubeMesh` is position-only, built from that program's attributes
+            builtFor: 'irradiance',   // `SkyPasses.iblCubeMesh` is position-only, built from that program's attributes
         });
         pass.setPipeline(pipeline);
         const model = this._gpuOcclusionModel;

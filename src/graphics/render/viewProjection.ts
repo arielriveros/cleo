@@ -36,7 +36,7 @@ export class ViewProjection {
     public clipProjection(projection: mat4): mat4 {
         if (device.backend !== 'webgpu') return projection;
         // A CUBE FACE inverts Y as well, to match the cubemap layout — the same inversion
-        // `_initializeIBL` bakes into `_captureProj`. The probe capture is the only cube-face render
+        // `SkyPasses.initializeIBL` bakes into `_captureProj`. The probe capture is the only cube-face render
         // that goes through a normal camera, so it is the only one that must be told.
         const source = this._view.cubeFace
             ? mat4.multiply(this._cubeFaceScratch, ViewProjection.FLIP_SCREEN_Y, projection)
@@ -55,7 +55,7 @@ export class ViewProjection {
      * The offset is a displacement in PIXELS; NDC x spans [-1, 1] over `_renderWidth`, so one pixel is
      * `2 / width` of NDC regardless of the projection. That independence is the reason the jitter is a
      * clip-space post-multiply rather than a nudge to the frustum extents: it then applies unchanged
-     * to an orthographic camera, and to `_renderSky`'s temporary perspective override of one.
+     * to an orthographic camera, and to `SkyPasses.renderSky`'s temporary perspective override of one.
      */
     public updateJitter(): void {
         if (!this._view.taaJitterActive) { mat4.identity(this.jitterMatrix); return; }
