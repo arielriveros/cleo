@@ -28,6 +28,14 @@ import type { LightingPasses } from './lighting';
 import { ShaderManager } from '../systems/shaderManager';
 
 /**
+ * The PBR G-buffer programs by variant, as constants. The choice runs twice per node per frame (the sort
+ * key, then the draw), and building `base + 'Pom'` there made a new string each time — which every
+ * name-keyed lookup after it (the program, its reflection, the sort intern) then had to hash afresh.
+ */
+const PBR_GEOMETRY = { plain: 'pbrGeometry', pom: 'pbrGeometryPom', opaque: 'pbrGeometryOpaque' } as const;
+const PBR_GEOMETRY_SKINNED = { plain: 'pbrGeometrySkinned', pom: 'pbrGeometrySkinnedPom', opaque: 'pbrGeometrySkinnedOpaque' } as const;
+
+/**
  * The deferred geometry pass: which nodes the G-buffer holds, the opaque draw sort (program, then
  * material, then front to back), single and instanced draws into the G-buffer, then the foliage
  * pass and the GPU occlusion queries over the finished depth. Split out of Renderer.
@@ -180,14 +188,14 @@ export class GeometryPass {
             default: {
                 // The parallax variant if ANY submesh marches: it keeps the runtime test, so it is
                 // right for the ones that do not too. See programVariants.ts.
-                const base = animated ? 'pbrGeometrySkinned' : 'pbrGeometry';
-                if (usesParallax(node.model.materials)) return base + 'Pom';
+                const names = animated ? PBR_GEOMETRY_SKINNED : PBR_GEOMETRY;
+                if (usesParallax(node.model.materials)) return names.pom;
                 // No cutout on any submesh and no despawn dissolve under way: the no-discard program,
                 // which keeps early-Z (chunks/pbrGBuffer.wgsl, CLEO_OPAQUE). A dissolving node falls
                 // back to the plain one for the length of its fade.
                 // Likewise a node the camera's see-through hole may cut into: it needs the discard.
                 return opaqueEligible(node.model.materials) && node.effectiveFade >= 1 && !this._materials.cameraHoleOn(node.cameraDither)
-                    ? base + 'Opaque' : base;
+                    ? names.opaque : names.plain;
             }
         }
     }

@@ -38,6 +38,13 @@ import type { LightingPasses } from './lighting';
 import type { SkyPasses } from './sky';
 import { ShaderManager } from '../systems/shaderManager';
 
+/** The skinned twin of each forward program that has one. */
+const FORWARD_SKINNED: Readonly<Record<string, string>> = {
+    basic: 'basicSkinned', blinn_phong: 'blinn_phongSkinned', pbr: 'pbrSkinned', cel: 'celSkinned',
+};
+/** The parallax variant of each forward program that has one. */
+const FORWARD_POM: Readonly<Record<string, string>> = { pbr: 'pbrPom', pbrSkinned: 'pbrSkinnedPom' };
+
 /** What ForwardPass reads from the renderer that owns it, while those members still live there. */
 export interface ForwardPassHost {
     copyColors(sources: readonly Texture[], destinations: readonly Texture[], width: number, height: number): void;
@@ -426,19 +433,11 @@ export class ForwardPass {
         // Use appropriate shader based on model type and material. Terrain is deferred-only in the main
         // pipeline; in this forward path (light-probe capture) it uses the forward-lit terrain variant.
         let shaderType: string = node.model.material.type === 'terrain' ? 'terrainForward' : node.model.material.type;
-        if (isAnimatedModel) {
-            if (shaderType === 'basic') {
-                shaderType = 'basicSkinned';
-            } else if (shaderType === 'blinn_phong') {
-                shaderType = 'blinn_phongSkinned';
-            } else if (shaderType === 'pbr') {
-                shaderType = 'pbrSkinned';
-            } else if (shaderType === 'cel') {
-                shaderType = 'celSkinned';
-            }
-        }
-        if ((shaderType === 'pbr' || shaderType === 'pbrSkinned') && usesParallax(node.model.materials))
-            shaderType += 'Pom';
+        if (isAnimatedModel) shaderType = FORWARD_SKINNED[shaderType] ?? shaderType;
+        // A constant, not `shaderType + 'Pom'`: a string built per draw is hashed afresh by every
+        // name-keyed lookup after it.
+        const pom = FORWARD_POM[shaderType];
+        if (pom && usesParallax(node.model.materials)) shaderType = pom;
         if (isAnimatedModel) {
             const animatedModel = node.model as AnimatedModel;
             // Initialize the VAO for the animated model if not already done
