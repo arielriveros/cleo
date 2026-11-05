@@ -428,6 +428,8 @@ export type { PhysicsCapabilities } from "./physics/pal/capabilities";
 export { physicsStats } from "./physics/physicsStats";
 export type { PhysicsStats } from "./physics/physicsStats";
 export { sceneStats, sceneStatsDetail } from "./core/scene/sceneStats";
+export { engineStats, frameAccount, FrameAccount } from "./core/engineStats";
+export type { EngineFrame, FrameSummary } from "./core/engineStats";
 export type { SceneStats } from "./core/scene/sceneStats";
 export { frameStats, currentViewport } from "./graphics/renderStats";
 export type { RenderStats } from "./graphics/renderStats";

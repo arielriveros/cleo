@@ -402,8 +402,13 @@ project; click it again (in Play or out) to unlock. Its sections, in order:
   (active, frozen, resting), broadphase and foliage colliders; scene, split into transforms, rigs, AI
   paths and navmesh builds, with scripts and animators on request; and unattributed time. Render is
   CPU time only — it returns as soon as the commands are queued, so GPU cost shows under Passes.
-  Physics only steps in Play mode. Unattributed is whatever the three measured phases do not account
-  for: browser work, GPU sync, rAF idle.
+  Physics only steps in Play mode. Three rows account for the rest of the frame, each measured per
+  frame by the engine loop itself, with its average and its worst frame since the last refresh:
+  *prologue & bakes* is renderer work Render (CPU) leaves out on purpose (prepare, the shader compile
+  queue, sky and probe bakes, the submit); *Unattributed* is engine-loop time in none of the phases,
+  near zero unless something untimed runs; *Outside the loop* is the time between one engine frame and
+  the next — waiting for the display refresh when the frame finished early, for the GPU, or for browser
+  work such as garbage collection.
 - **Workers** — the physics thread: where the step runs now (main thread, starting worker, worker) and
   the mode, with a switch for this machine only. *Project* follows Options ▸ Engine ▸ Runtime ▸ Physics
   thread; Main, Auto and Worker override it here, kept across Play and never published (the same override
@@ -465,7 +470,10 @@ pays a submission at both ends of its own window. Compare passes with each other
 **Start with Frame budget**, not with the FPS number. It tells you which of four places the time is
 going — render CPU, render GPU, physics, or scene — and the fix for each is different.
 
-**Unattributed time** growing is usually garbage collection or something outside the engine.
+**Outside the loop** is mostly idle when the frame rate sits at the display's refresh rate: a parked
+editor camera at 75 Hz shows 2–4 ms there with nothing wrong. It matters when the frame rate is BELOW
+the refresh rate and the GPU timer is under budget — then it is browser work (garbage collection,
+layout) or a wait on the GPU. **Unattributed** with a real peak is untimed engine work.
 
 **Late frames under Workers** mean the worker's round trip is longer than a frame. Above 10%, Auto moves
 the step back to the main thread. Bodies *past their step* are ones drawn ahead along their velocity

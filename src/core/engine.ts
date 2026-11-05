@@ -8,6 +8,7 @@ import { Scene } from "./scene/scene";
 import { engineEventBus, authoring } from "./eventBus";
 import { frameHistory, gpuProfiler } from "../graphics/gpuProfiler";
 import { frameStats } from "../graphics/renderStats";
+import { engineStats, frameAccount } from "./engineStats";
 import { TimeDilation, type DilateOptions } from "./timeDilation";
 
 interface CleoConfig {
@@ -263,21 +264,39 @@ export class CleoEngine {
       // may read a half-built action table, and physics is downstream. Runs even while paused — a
       // paused game still has to see the action that unpauses it, and the editor's camera map is live
       // in edit mode. What pausing gates is DELIVERY to scripts, which Scene.update already handles.
+      // Each phase timed here, by the loop that runs it — see core/engineStats.ts for what that fixed.
+      let mark = performance.now();
       InputSystem.instance.beginFrame(unscaled);
+      let now = performance.now();
+      const inputMs = now - mark;
+      let physicsMs = 0, sceneMs = 0, renderMs = 0;
 
       if (!this._paused) {
+        mark = now;
         this._physicsSystem.update(deltaTime, scale);
+        now = performance.now();
+        physicsMs += now - mark;
         this._timeSinceStart += deltaTime * 1000;
       }
 
       if (this._scene) {
+        mark = now;
         this._scene.update(deltaTime, this._timeSinceStart, this._paused, unscaled);
+        now = performance.now();
+        sceneMs = now - mark;
         // After every script, before the render: with the physics worker, this frame's changes and its
         // step go out now, and the worker steps while this thread renders. Nothing inline.
         // The scale the NEXT frame starts at goes with it: a hit-stop landed in this frame's scripts has
         // already lowered it, so the worker's step reaches only as far as that frame will go.
-        if (!this._paused) this._physicsSystem.endFrame(deltaTime, this._dilation.scale);
+        if (!this._paused) {
+          mark = now;
+          this._physicsSystem.endFrame(deltaTime, this._dilation.scale);
+          now = performance.now();
+          physicsMs += now - mark;
+        }
+        mark = now;
         this._renderer.render(this._scene);
+        renderMs = performance.now() - mark;
       }
 
       this.onUpdate(deltaTime, this._timeSinceStart);
@@ -290,11 +309,19 @@ export class CleoEngine {
         gpuMs: gpuProfiler.totalMs,
       });
 
+      engineStats.periodMs = currentTimestamp - this._lastTimestamp;
+      engineStats.inputMs = inputMs;
+      engineStats.physicsMs = physicsMs;
+      engineStats.sceneMs = sceneMs;
+      engineStats.renderMs = renderMs;
       this._lastTimestamp = currentTimestamp;
       // LAST: clear the per-frame accumulators. Must be the END and not the start — DOM events land
       // between rAF callbacks, so clearing here is what makes "everything that arrived during this
       // frame is visible during this frame" true. Same reason resetMouseVelocity sat here.
       InputSystem.instance.endFrame();
+      engineStats.loopMs = performance.now() - currentTimestamp;
+      // The first turn has no previous one to measure an interval from.
+      if (engineStats.periodMs < 1000) frameAccount.add(engineStats, frameStats.frameMs);
       requestAnimationFrame(this._gameLoop.bind(this));
     } catch (e) {
       Logger.error(e);
