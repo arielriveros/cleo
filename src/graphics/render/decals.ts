@@ -15,7 +15,7 @@ import { ShadowMapProgram, DecalSurfaceProgram, DecalResolveProgram, DecalColorP
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
-import { DEPTH_WRITE } from './pipelineCache';
+import { DEPTH_WRITE, PipelineMemo } from './pipelineCache';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
@@ -136,6 +136,9 @@ export class DecalPasses {
         return fbo;
     }
 
+    /** The receiver pass's pipeline per material (see PipelineCache.memoized). */
+    private readonly _receiverMemo = new PipelineMemo();
+
     /**
      * Depth of the landscape ALONE, for decals with `receivers: 'terrain'` — the landscape brush.
      *
@@ -157,24 +160,35 @@ export class DecalPasses {
         // else is applied on top — `_renderShadowCasters` runs its light matrix through `_projection.clipProjection`
         // because a light matrix has neither.
         mat4.multiply(this._decalReceiverViewProj, this._projection.rasterProjection(cam.projectionMatrix), cam.viewMatrix);
+        // Per chunk only what differs: its transform and its draw. The chunks share their terrain's one
+        // material, so the pipeline (and the program, and the light-space matrix in its block) is looked
+        // up when the material changes — once per landscape — not ~1,000 times a frame.
         let bound: RenderPipeline | null = null;
+        let boundMaterial: Material | null = null;
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
             // The chunks are the landscape's ModelNode children; the terrain draws nothing else.
             for (const chunk of landscape.children) {
                 if (!(chunk instanceof ModelNode) || !chunk.visible || !chunk.initialized) continue;
                 if (this._sys.visibility.outsideFrustum(chunk)) continue;
-                this._shaderManager.bind('shadowMap');
-                const pipeline = this._pipelines.get('shadowMap', ShadowMapProgram, {
-                    cullMode: ModelDraw.cullFor(chunk.model.material.config.side),
-                    depthStencil: DEPTH_WRITE,
-                    targets: 0,
-                    vertex: 'model',
-                    // Written for the terrain program, whatever draws it — see `_renderShadowCasters`.
-                    builtFor: chunk.model.material.type,
-                });
-                if (pipeline !== bound) { pass.setPipeline(pipeline); bound = pipeline; }
-                this._shaderManager.setUniform('u_lightSpace', this._decalReceiverViewProj);
+                const material = chunk.model.material;
+                if (material !== boundMaterial) {
+                    boundMaterial = material;
+                    const pipeline = this._pipelines.memoized(this._receiverMemo, material, 'shadowMap', ShadowMapProgram, {
+                        cullMode: ModelDraw.cullFor(material.config.side),
+                        depthStencil: DEPTH_WRITE,
+                        targets: 0,
+                        vertex: 'model',
+                        // Written for the terrain program, whatever draws it — see `_renderShadowCasters`.
+                        builtFor: material.type,
+                    });
+                    if (pipeline !== bound) {
+                        this._shaderManager.bind('shadowMap');
+                        pass.setPipeline(pipeline);
+                        bound = pipeline;
+                        this._shaderManager.setUniform('u_lightSpace', this._decalReceiverViewProj);
+                    }
+                }
                 this._shaderManager.setUniform('u_model', chunk.worldTransform);
                 if (!this._passes.recordDraw(pass, chunk.model.mesh, 0, 0)) chunk.model.mesh.draw('triangle-list');
             }

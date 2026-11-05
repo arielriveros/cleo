@@ -20,6 +20,9 @@ const TERRAIN_ATTRIBUTES = ['position', 'normal', 'uv', 'tangent', 'bitangent'];
 export class LandscapeNode extends Node {
     private _terrain: Terrain;
     private _chunkNodes: ModelNode[] = [];
+    /** `updateLod`'s inputs as of its last pass, and a stamp bumped whenever they change. */
+    private readonly _lodInputs = new Float64Array(13);
+    private _lodStamp = 0;
 
     constructor(name: string, terrain: Terrain, id: string = uuidv4()) {
         super(name, 'landscape', id);
@@ -76,12 +79,31 @@ export class LandscapeNode extends Node {
      * so the shadow maps draw the reduced terrain too.
      */
     public updateLod(camPos: vec3, settings: TerrainLodSettings): void {
+        // What `lodFor` reads besides each chunk's own state. While none of it changes — a parked camera —
+        // every chunk already has the level it would be given again (hysteresis included: a second call
+        // with the same inputs returns the same level), so a chunk given its level under the current
+        // stamp is skipped. A chunk that initializes later, or whose mesh lost its level (re-created index
+        // buffers reset it to 0), still gets one.
+        const terrain = this._terrain, o = terrain.origin, k = this._lodInputs;
+        if (k[0] !== camPos[0] || k[1] !== camPos[1] || k[2] !== camPos[2]
+            || k[3] !== (settings.enabled ? 1 : 0) || k[4] !== settings.distance1 || k[5] !== settings.distance2
+            || k[6] !== settings.step1 || k[7] !== settings.step2
+            || k[8] !== o[0] || k[9] !== o[1] || k[10] !== o[2] || k[11] !== terrain.heightsVersion || this._lodStamp === 0) {
+            k[0] = camPos[0]; k[1] = camPos[1]; k[2] = camPos[2];
+            k[3] = settings.enabled ? 1 : 0; k[4] = settings.distance1; k[5] = settings.distance2;
+            k[6] = settings.step1; k[7] = settings.step2;
+            k[8] = o[0]; k[9] = o[1]; k[10] = o[2]; k[11] = terrain.heightsVersion;
+            this._lodStamp++;
+        }
+        const stamp = this._lodStamp;
         const chunks = this._terrain.chunks;
         for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
             const node = this._chunkNodes[i];
             if (!node || !node.initialized) continue; // mesh not created yet: draws full-res this frame
             const mesh = chunk.model.mesh;
+            if (chunk.lodStamp === stamp && mesh.activeLod === chunk.lod) continue;
+            chunk.lodStamp = stamp;
 
             if (!settings.enabled) {
                 chunk.lod = 0;
