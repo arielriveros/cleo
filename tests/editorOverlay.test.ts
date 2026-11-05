@@ -75,10 +75,10 @@ describe('the overlay blend presets', () => {
 describe('where the chrome passes draw', () => {
     /** The body of a renderer method, up to the next top-level `private`/`public` member. */
     const bodyOf = (name: string): string => {
-        const at = RENDERER.indexOf(`private ${name}(`);
+        const at = RENDERER.search(new RegExp(`(?:private|public) ${name}\\(`));
         expect(at, `${name} not found`).toBeGreaterThan(-1);
         const rest = RENDERER.slice(at);
-        const end = rest.indexOf('\n    private ', 1);
+        const end = rest.search(/\n    (?:private|public) /);
         return end === -1 ? rest : rest.slice(0, end);
     };
 

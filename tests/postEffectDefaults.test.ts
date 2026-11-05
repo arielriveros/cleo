@@ -26,9 +26,9 @@ import { rendererSource } from './helpers/rendererSource';
 const RENDERER = rendererSource()
     .replace(/\r\n/g, '\n');
 
-/** The initializer of a `private _name... = value;` field declaration. */
+/** The initializer of a `name: T = value;` field declaration, wherever the field now lives. */
 function fieldDefault(name: string): string {
-    const match = RENDERER.match(new RegExp(`private _${name}\\s*:\\s*[A-Za-z<>|\\[\\] ]+ = ([^;]+);`));
+    const match = RENDERER.match(new RegExp(`(?:private|public) _?${name}\\s*:\\s*[A-Za-z<>|\\[\\] ]+ = ([^;]+);`));
     expect(match, `no default found for _${name}`).toBeTruthy();
     return match![1].trim();
 }
@@ -72,12 +72,12 @@ describe('every chain effect is gated where the ping-pong is decided', () => {
     })();
 
     it.each([
-        ['depthOfField', '_dofEnabled'],
-        ['lensFlare', '_lensFlareIntensity'],
-        ['vignette', '_vignetteStrength'],
-        ['filmGrain', '_filmGrainIntensity'],
-        ['bloom', '_bloomIntensity'],
-        ['chromatic', '_chromaticAberrationStrength'],
+        ['depthOfField', '_post.dofEnabled'],
+        ['lensFlare', '_post.lensFlareIntensity'],
+        ['vignette', '_post.vignetteStrength'],
+        ['filmGrain', '_post.filmGrainIntensity'],
+        ['bloom', '_post.bloomIntensity'],
+        ['chromatic', '_post.chromaticAberrationStrength'],
     ])('%s is gated on %s at build time', (effect, field) => {
         const at = GRAPH.indexOf(`entry.effect === '${effect}'`);
         expect(at, `${effect} has no branch in _buildPostGraph`).toBeGreaterThan(-1);

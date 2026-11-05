@@ -19,7 +19,7 @@ const WGSL = (name: string) =>
 
 /** The brace-matched body of `private [static] name(...)`. */
 function methodBody(name: string): string {
-    const start = RENDERER.search(new RegExp(`\\n    private (?:static )?${name}\\(`));
+    const start = RENDERER.search(new RegExp(`\\n    (?:private|public) (?:static )?${name}\\(`));
     expect(start, `${name} not found in renderer.ts`).toBeGreaterThan(-1);
     const open = RENDERER.indexOf('{', RENDERER.indexOf(')', start));
     let depth = 0;

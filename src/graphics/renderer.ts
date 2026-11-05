@@ -26,8 +26,6 @@ import { Mesh } from './mesh';
 import type { ShaderProgram, ShaderProgramDescriptor } from './rhi/shaderProgram';
 import { Framebuffer } from './framebuffer';
 import { LayeredDepthFramebuffer } from './layeredDepthFramebuffer';
-import { BUILTIN_LENS_DIRT_BASE64, BUILTIN_LENS_DIRT_MIME } from './builtinLensDirt';
-import { SENSOR_HEIGHT, focalLengthFromFov, focusDistanceToTarget } from './dofMath';
 import { RenderGraphBuilder } from './renderGraph/graph';
 import type { CompiledGraph, ResourceId } from './renderGraph/graph';
 import { FramebufferPool } from './renderGraph/pool';
@@ -57,7 +55,7 @@ import { GLState } from './systems/glState';
 import { Texture } from './texture';
 import { CubeFramebuffer } from './cubeFramebuffer';
 import { Material, CustomMaterial, isFoliageMaterial } from './material';
-import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, screenShaderResources, screenUserSamplerNames, customShaderResources, usedResources } from './systems/customShaders';
+import { ensureCustomShader, customShaderReady, customShaderModules, customForwardTypes, customShaderResources, usedResources } from './systems/customShaders';
 import { TexturePacker } from './systems/texturePacker';
 import { ParticleRenderer, setParticleSimVariants, type ParticleSimFrame, type ParticleDrawFrame } from './particles/particleRenderer';
 import { skyAmbient, type ParticleLocalLight } from './particles/particleLighting';
@@ -101,13 +99,11 @@ import {
     ProbePreviewProgram, SkyProjectProgram, SkyFogProgram, DecalSurfaceProgram, DecalResolveProgram,
     DecalColorProgram, FluidVolumeProgram, FluidVolumeResolveProgram, FluidVolumeCompositeProgram,
     ScreenProgram, PresentProgram, OverlayCompositeProgram, DebugViewProgram, OverdrawProgram,
-    OverdrawInstancedProgram, BloomProgram, BloomDownsampleProgram, BloomUpsampleProgram,
-    ChromaticAberrationProgram, DofCocProgram, DofGatherProgram, DofCompositeProgram, LensFlareProgram,
-    LensFlareCompositeProgram, VignetteProgram, FxaaProgram, FilmGrainProgram, ComposerProgram,
-    VolumetricGodRaysProgram, GridProgram, OutlinePostProgram, TilemapProgram, GeometryFoliageBillboardProgram,
-    GeometryFoliageImpostorProgram, OcclusionBoxProgram, ShadowMapImpostorProgram, DeferredLightingProgram,
-    SsilProgram, SsilTemporalProgram, SsilBlurProgram, SsilHistoryProgram, IrradianceProgram, PrefilterProgram,
-    BRDFProgram, programTable, SHADOW_PROGRAMS, FORWARD_PROGRAMS, GEOMETRY_PROGRAMS,
+    OverdrawInstancedProgram, VolumetricGodRaysProgram, GridProgram, TilemapProgram,
+    GeometryFoliageBillboardProgram, GeometryFoliageImpostorProgram, OcclusionBoxProgram,
+    ShadowMapImpostorProgram, DeferredLightingProgram, SsilProgram, SsilTemporalProgram, SsilBlurProgram,
+    SsilHistoryProgram, IrradianceProgram, PrefilterProgram, BRDFProgram, programTable, SHADOW_PROGRAMS,
+    FORWARD_PROGRAMS, GEOMETRY_PROGRAMS,
 } from './render/programs';
 import { createFrameView, type FrameView } from './render/frameView';
 import { FrameTargets } from './render/frameTargets';
@@ -116,10 +112,11 @@ import { PipelineCache } from './render/pipelineCache';
 import { BindGroupCache } from './render/bindGroups';
 import { MaterialBinder } from './render/materialBinder';
 import { ViewProjection } from './render/viewProjection';
-import { QUALITY_TIERS } from './render/settingsTypes';
+import { QUALITY_TIERS, FXAA_SEARCH_STEPS, clampFinite } from './render/settingsTypes';
 import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 import { TemporalPasses } from './render/temporal';
 import { AutoExposure } from './render/autoExposure';
+import { PostEffects } from './render/postEffects';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 import { gl, setGLContext } from './glContext';
@@ -133,7 +130,7 @@ import { WebGL2Device, glDevice } from './rhi/webgl2/webgl2Device';
 import { setDevice, device } from './rhi/deviceHandle';
 import { LightGrid, MAX_LIGHTS } from './lightGrid';
 import { jitterMatrix } from './utils/taaJitter';
-import { ColorGradingLut, IDENTITY_LUT_SIZE } from './colorGrading';
+import { IDENTITY_LUT_SIZE } from './colorGrading';
 import { DEFAULT_CLUSTER_GRID, spotBoundingSphere, type ClusterLight } from './clusters';
 import { NO_SHADOW_SLOT, POINT_CONE_OFFSET, POINT_CONE_SCALE } from './lightData';
 import type { Buffer as RhiBuffer } from './rhi/resources';
@@ -198,12 +195,6 @@ interface RendererConfig {
     pipelines?: readonly unknown[];
 }
 
-const FXAA_SEARCH_STEPS: Record<FxaaQuality, number> = { low: 5, medium: 8, high: 12 };
-
-/** `v` clamped to [lo, hi]; `fallback` when it is not a finite number (a hand-edited or old save). */
-function clampFinite(v: number, lo: number, hi: number, fallback: number): number {
-    return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
-}
 
 /**
  * One shadow caster, gathered once per frame and shared by every shadow layer that frame: the cascades,
@@ -339,6 +330,8 @@ export class Renderer {
     private readonly _temporal: TemporalPasses;
     /** The authored exposure, the metering pass and its adaptation, exposure volumes (render/autoExposure.ts). */
     private readonly _autoExposure: AutoExposure;
+    /** The post chain's effect passes and the display transform: bloom, DOF, lens, grading, present (render/postEffects.ts). */
+    private readonly _post: PostEffects;
 
     /**
      * Whether the post-process chain runs at all for this host.
@@ -357,76 +350,7 @@ export class Renderer {
      * publish or the standalone player, where every viewport is the scene.
      */
     private _postProcessingAllowed: boolean = true;
-    /**
-     * HDR bloom: luminance where bloom starts, soft-knee width around it, and additive strength.
-     *
-     * The threshold is EXPOSED luminance (see bloom.wgsl), and 2.0 rather than the 1.0 it sat at for as
-     * long as bloom has existed. 1.0 was chosen while the bright pass was reading an unwritten mip of
-     * the compose buffer and contributing almost nothing, so it was never really tested; with the
-     * sampling fixed it selects 16% of an ordinary frame and lays a haze over everything.
-     *
-     * 2.0 is where the tonemapper gives out rather than an arbitrary knob: ACES does not reach white
-     * until an exposed luminance around 2, so "bloom what would clip on screen" IS this number. Measured
-     * on the harness base scene, it selects 1.3% of the frame — the blown specular highlights and
-     * nothing else — against 16% at 1.0 and 71% at 0.8.
-     */
-    private _bloomThreshold: number = 2.0;
-    private _bloomKnee: number = 0.5;
-    /**
-     * Additive strength of the bloom pyramid, 0.35.
-     *
-     * It was 0.6, set while the bright pass was reading an unwritten mip and adding almost nothing.
-     * Against a working bloom that is too much: measured on the `full` scene it lifts the frame mean by
-     * 3.8%, and what that looks like is a checkerboard floor losing its contrast and a bright sphere
-     * turning into a ball of haze. 0.35 lifts it by 2.8%, keeps the floor readable, and still glows
-     * clearly on the blown highlights.
-     *
-     * For reference, Unreal ships 0.675 — but over a DIFFERENT model, with no threshold at all and five
-     * weighted passes summing to roughly 0.7 tint, which is a wide thin veiling glare rather than this
-     * pyramid's thresholded glow. The number does not transfer; the restraint does.
-     */
-    private _bloomIntensity: number = 0.35;
-    // The intensity the USER asked for, remembered across quality changes — a tier that disables bloom
-    // zeroes `_bloomIntensity`, and this is what it restores from. Must track the default above, or a
-    // quality switch silently reinstates the old value.
-    private _bloomIntensityUser: number = 0.35;
-    // Restrict bloom to surfaces that set the scene buffer's alpha mask. Off by default: only
-    // deferred-lit geometry, a baked sky and clouds can set it, so sprites and transparents never bloom.
-    private _bloomMaskEnabled: boolean = false;
-    private _chromaticAberrationStrength: number = 0.0;
-    // Every effect added after the render graph landed ships OFF, so that adding them to the default
-    // chain changed no existing project's image. See DEFAULT_POST_CHAIN in renderGraph/chain.ts.
-    private _dofEnabled: boolean = false;
-    private _dofFocusDistance: number = 10.0;
-    private _dofFocusRange: number = 0.0;
-    private _dofAperture: number = 2.8;
-    private _dofMaxBlur: number = 24.0;
-    /**
-     * The last focus distance actually used, so a focus target that despawns HOLDS the focal plane
-     * rather than snapping it to the camera. A rack focus to zero is far more visible than a stale one.
-     */
-    private _dofLastFocusDistance: number = 10.0;
-    private _warnedDanglingFocus: boolean = false;
-    private _lensFlareIntensity: number = 0.0;
-    private _lensFlareThreshold: number = 1.0;
-    private _lensFlareGhosts: number = 4;
-    private _lensFlareHaloWidth: number = 0.45;
-    private _lensDirtTexture: string | null = null;
-    private _lensDirtIntensity: number = 0.0;
-    private _vignetteStrength: number = 0.0;
-    private _vignetteRoundness: number = 0.0;
-    private _vignetteSmoothness: number = 0.4;
-    private _filmGrainIntensity: number = 0.0;
-    private _filmGrainSize: number = 2.0;
-    private _filmGrainColored: boolean = false;
     private _selectedNodeId: string | null = null;
-
-    // Selection outline: a silhouette mask FBO plus a screen-space edge pass. `_outlineActive` is set
-    // per frame when something was drawn into the mask, so the pass is skipped with no selection.
-    private _outlineMaskFBO!: Framebuffer;
-    private _outlineActive: boolean = false;
-    private _outlineColor: [number, number, number] = [1.0, 0.55, 0.1];
-    private _outlineWidth: number = 5.0;
 
     // Set per frame by the first pass that opens the overlay layer (`_targets.overlay`): nothing drawn
     // means no clear and no composite, and a published build, which has no editor nodes, pays nothing.
@@ -487,17 +411,6 @@ export class Renderer {
     // 8-bit, NOT `precision: 'high'` — readPixels(RGBA, UNSIGNED_BYTE) is invalid against a float target.
     private _offscreenFBO: Framebuffer | null = null;
     private _presentTarget: Framebuffer | null = null;
-    /**
-     * The built-in lens-dirt overlay, decoded once on first use.
-     *
-     * Held HERE rather than registered in `TextureManager`, and that is what makes it work in a
-     * published game: the editor registers its 'Null' fallback into the manager at boot and the
-     * standalone player does not, so a built-in registered the same way would work in the editor and
-     * silently vanish everywhere else. Staying out of the manager also keeps it invisible to the
-     * publish walk and the orphan collector, so it needs no plumbing in either.
-     */
-    private _builtinLensDirt: Texture | null = null;
-    private _builtinLensDirtRequested: boolean = false;
 
     // Depth writes for the forward model pipelines, set by whichever queue is drawing: opaque writes,
     // transparent does not. Thumbnails are the exception — their coverage alpha comes from scene depth.
@@ -742,12 +655,6 @@ export class Renderer {
     private readonly _lightGrid: LightGrid = new LightGrid();
 
     /**
-     * The colour-grading LUT as a GPU volume. Owns its own cache and an identity fallback, so the
-     * three display resolves below can bind `volumeFor(...)` unconditionally — WebGPU rejects a bind
-     * group with an unsatisfied binding, and there is no 3D equivalent of the 'Null' texture.
-     */
-    private readonly _colorLut: ColorGradingLut = new ColorGradingLut();
-    /**
      * How far the cluster grid reaches, in world units.
      *
      * NOT the camera's far plane, for the same reason `_shadowDistance` is not: the editor camera runs
@@ -770,17 +677,6 @@ export class Renderer {
     private _pointProj: mat4 = mat4.create();
     private _pointTarget: vec3 = vec3.create();
 
-    // Post processing
-    // Bloom downsample/upsample pyramid: level 0 is half the render size and each halves again, so the
-    // whole chain costs about a third of one full-res pass. Allocation stops at 1px.
-    private _bloomMips: Framebuffer[] = [];
-    private static readonly BLOOM_MIP_COUNT = 6;
-    /** Ghost spacing along the centre line, as a fraction of the distance to it. */
-    private static readonly LENS_FLARE_DISPERSAL = 0.32;
-    /** Channel separation of a ghost, in uv. Small: past ~0.01 it stops reading as glass. */
-    private static readonly LENS_FLARE_CHROMATIC = 0.006;
-    // Upsample tent radius, in source-mip texels. ~2 gives a wide, soft falloff without ringing.
-    private static readonly BLOOM_FILTER_RADIUS = 2.0;
     // Reduced-resolution volumetric-clouds raymarch target (lazily sized to the node's resolutionScale;
     // upsampled + composited into the scene buffer). Only used when resolutionScale < 1.
     private _cloudsFBO!: Framebuffer;
@@ -838,11 +734,6 @@ export class Renderer {
     private readonly _jitteredCameraProj: mat4 = mat4.create();
     /** The view-projection actually rasterized this frame. `_view.invViewProj` is inverted from this. */
     private readonly _jitteredViewProj: mat4 = mat4.create();
-
-    private _fxaaEnabled: boolean = false;
-    private _fxaaQuality: FxaaQuality = 'medium';
-    private _fxaaSubpixel: number = 0.75;
-    private _fxaaEdgeThreshold: number = 0.125;
 
     // SSIL (deferred path; screen-space indirect lighting with a visibility bitmask, which replaced the
     // old hemisphere-kernel SSAO and still answers to its settings). Trace -> temporal accumulation ->
@@ -1202,6 +1093,14 @@ export class Renderer {
             get presentTarget() { return renderer._presentTarget; },
             get ev100() { return renderer.ev100; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups);
+        this._post = new PostEffects({
+            cloudiness: renderer._cloudiness.bind(renderer),
+            get passEnabled() { return renderer._passEnabled; },
+            get renderHeight() { return renderer._renderHeight; },
+            get renderWidth() { return renderer._renderWidth; },
+            restoreDefaultBlend: renderer._restoreDefaultBlend.bind(renderer),
+            sunScreenInfo: renderer._sunScreenInfo.bind(renderer),
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._temporal);
 
         // Preallocated identity bone matrices (used when an animated model has no animator)
         this._boneIdentityScratch = new Float32Array(100 * 16);
@@ -1298,8 +1197,8 @@ export class Renderer {
         this._targets.gBuffer = new Framebuffer({ colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Bloom carries linear HDR (bright pixels can far exceed 1.0), so both the bright buffer and the
         // ping-pong blur targets are float — an RGBA8 bloom would clamp and defeat the HDR bright-pass.
-        for (let i = 0; i < Renderer.BLOOM_MIP_COUNT; i++)
-            this._bloomMips.push(new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }));
+        for (let i = 0; i < PostEffects.BLOOM_MIP_COUNT; i++)
+            this._post.bloomMips.push(new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } }));
         // Same config as the blur scratch buffers (LINEAR-filtered float) so the low-res clouds upsample smoothly.
         this._cloudsFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Same float/LINEAR config: the resolve reads it with bilinear taps for its neighbourhood bounds.
@@ -1336,7 +1235,7 @@ export class Renderer {
         // 4-byte colour format, so a float target here could be rendered but never read.
         this._skyProjectFBO = new Framebuffer({ colorTextureOptions: { mipMap: false }, depth: false });
         // Selection outline silhouette mask (low precision, no mipmaps).
-        this._outlineMaskFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
+        this._post.outlineMaskFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
         // Editor overlay layer. `precision: 'high'` matches `_targets.scene`'s rgba16float, so the gizmo,
         // grid and sprite pipelines keep the same colour format in `_pipelines.get`'s cache key and are
         // not duplicated there. No depth of its own: `_overlayTarget` borrows the scene's, which is
@@ -1691,7 +1590,7 @@ export class Renderer {
         this._autoExposure.exposureFBOs[1].create(1, 1);
         this._ssaoFBO.create(this._ssaoWidth, this._ssaoHeight);
         this._ssaoBlurFBO.create(this._ssaoWidth, this._ssaoHeight);
-        this._outlineMaskFBO.create(rw, rh);
+        this._post.outlineMaskFBO.create(rw, rh);
         // Must match `_targets.scene` exactly: `_overlayTarget` attaches that buffer's depth alongside this
         // one's colour, and a mismatched extent is an incomplete framebuffer on WebGL2.
         this._targets.overlay.create(rw, rh);
@@ -1707,7 +1606,7 @@ export class Renderer {
         this._spotShadowFBO.create(this._spotShadowResolution, Renderer.MAX_SPOT_SHADOWS);
         this._pointShadowFBO.create(this._pointShadowResolution, MAX_POINT_SHADOWS * 6);
 
-        this._createBloomMips(rw, rh);
+        this._post.createBloomMips(rw, rh);
 
         const mbK = TemporalPasses.MOTION_BLUR_TILE;
         this._targets.velocity.create(rw, rh);
@@ -4466,7 +4365,7 @@ export class Renderer {
             }
             if (mat instanceof CustomMaterial) {
                 this._materials.applyCustom(mat, true);   // u_time, u_viewPos + user VALUE uniforms
-                // See `_screenMaterialPass` for what the WGSL is and why the vertex stage is a
+                // See `_post.screenMaterialPass` for what the WGSL is and why the vertex stage is a
                 // separate module. Absent on WebGL2 and for a material that could not translate.
                 const customWgsl = customShaderModules(mat);
                 const customPipeline = this._pipelines.get(shaderType, {
@@ -5633,54 +5532,9 @@ export class Renderer {
     private static readonly CLOUD_SKY_FILL = 1.1;
     /** How far the sky collapses toward its own L0 — a uniform dome, which is what overcast IS. */
     private static readonly CLOUD_SKY_FLATTEN = 0.9;
-    /** Saturation removed at full cloud. Small: most of the wash should come from the lighting. */
-    private static readonly CLOUD_DESATURATE = 0.28;
 
     /** Scratch for the flattened coefficients, so the projected ones are never mutated. */
     private _skySHGraded: Float32Array = new Float32Array(9 * 4);
-
-    /** Artist trim on final saturation. 1 = untouched; the cloud grade multiplies on top of it. */
-    private _saturation: number = 1.0;
-
-    /** The display transform. See {@link ToneMapper} for why AgX rather than the ACES fit. */
-    private _toneMapper: ToneMapper = 'agx';
-    /** Colour-grading LUT: a texture id resolved to a 3D volume by `_colorLut`. */
-    private _colorGradingLut: string | null = null;
-    private _colorGradingIntensity: number = 1.0;
-
-    /**
-     * The operator id the shaders switch on. Must match the TONE_* constants in
-     * `shaders/wgsl/chunks/grade.wgsl` — two tables, and nothing but this comment ties them.
-     */
-    private _toneMapperId(): number {
-        switch (this._toneMapper) {
-            case 'aces': return 1;
-            case 'neutral': return 2;
-            case 'none': return 3;
-            default: return 0;   // agx
-        }
-    }
-
-    /**
-     * LUT blend for the present pass. Zero with no LUT assigned — while one is still DECODING the
-     * identity volume is bound instead, and blending toward an identity is already a no-op, so that
-     * case needs no special handling and gets none.
-     */
-    private _lutIntensity(): number {
-        return this._colorGradingLut ? this._colorGradingIntensity : 0;
-    }
-
-    /**
-     * Saturation for the present pass: the artist trim, times what the clouds take out. The cloud
-     * share is deliberately the small half — most of the overcast wash comes from the lighting.
-     */
-    private _effectiveSaturation(): number {
-        const scene = this._view.scene;
-        if (!scene) return this._saturation;
-        const skyLight = scene.skyLight;
-        const c = this._cloudiness(scene) * (skyLight ? skyLight.cloudResponse : 0);
-        return this._saturation * (1 - Renderer.CLOUD_DESATURATE * c);
-    }
 
     /**
      * Push the SUN's uniforms to the currently bound program.
@@ -7573,20 +7427,6 @@ export class Renderer {
     private get _thumbnailMode(): boolean { return this._presentTarget !== null; }
 
     /**
-     * (Re)size the bloom pyramid for a `width`x`height` render target. Level i is the render size
-     * halved i+1 times, floored at 1px so a small window cannot ask for a 0-sized texture.
-     */
-    private _createBloomMips(width: number, height: number): void {
-        let w = Math.max(1, Math.floor(width / 2));
-        let h = Math.max(1, Math.floor(height / 2));
-        for (const mip of this._bloomMips) {
-            if (mip.width !== w || mip.height !== h) mip.create(w, h);
-            w = Math.max(1, Math.floor(w / 2));
-            h = Math.max(1, Math.floor(h / 2));
-        }
-    }
-
-    /**
      * Every pipeline this session has built, as recipes (shaderOptimizer/pipelineRecipes.ts). The editor
      * hands them to publish, which writes them into `config.graphics.pipelines` for the player to warm.
      */
@@ -7698,8 +7538,8 @@ export class Renderer {
         const ah = Math.max(1, Math.round(height * this._ssaoResolutionScale));
         this._ssaoFBO.resize(aw, ah);
         this._ssaoBlurFBO.resize(aw, ah);
-        this._createBloomMips(width, height);
-        this._outlineMaskFBO.resize(width, height);
+        this._post.createBloomMips(width, height);
+        this._post.outlineMaskFBO.resize(width, height);
         this._targets.overlay.resize(width, height);   // in lockstep with _sceneFBO; see _overlayTarget
         // Only once allocated; `_decalTarget` sizes them on first use.
         this._dBufferFBO?.resize(width, height);
@@ -8032,7 +7872,7 @@ export class Renderer {
             if (mat instanceof CustomMaterial) {
                 if (!viaRHI) { this._materials.applyCustom(mat); return false; }
                 this._materials.applyCustom(mat, true);
-                // See `_screenMaterialPass`. Absent on WebGL2 and for a material that could not
+                // See `_post.screenMaterialPass`. Absent on WebGL2 and for a material that could not
                 // translate; group 3 (the shadow maps) is bound below as for any lit program.
                 const customWgsl = customShaderModules(mat);
                 const customPipeline = this._pipelines.get(shaderType, {
@@ -9544,7 +9384,7 @@ export class Renderer {
                 const from = src, to = flip();
                 graph.addPass({
                     id: entry.effect, scope: 'screenMaterials', reads: [from], writes: [to],
-                    execute: ctx => this._screenMaterialPass(
+                    execute: ctx => this._post.screenMaterialPass(
                         scene, material, ctx.read(from), ctx.target(to)),
                 });
                 src = to;
@@ -9577,28 +9417,28 @@ export class Renderer {
                 // Two nodes rather than one, because the pyramid and the composite are separately
                 // switchable in the profiler and only the composite consumes a chain stage. Fused,
                 // switching the composite off would advance the ping-pong onto an unwritten buffer.
-                if (this._bloomIntensity <= 0 || !this._passEnabled['bloom.bright']) continue;
+                if (this._post.bloomIntensity <= 0 || !this._passEnabled['bloom.bright']) continue;
                 const from = src;
                 graph.addPass({
                     id: 'bloom.generate', scope: 'bloom.bright', reads: [from],
-                    execute: ctx => this._bloomGenerate(ctx.read(from)),
+                    execute: ctx => this._post.bloomGenerate(ctx.read(from)),
                 });
                 if (!this._passEnabled['bloom.composite']) continue;
                 const to = flip();
                 graph.addPass({
                     id: 'bloom.composite', scope: 'bloom.composite', reads: [from], writes: [to],
-                    execute: ctx => this._bloomComposite(ctx.read(from), ctx.target(to)),
+                    execute: ctx => this._post.bloomComposite(ctx.read(from), ctx.target(to)),
                 });
                 src = to;
                 continue;
             }
 
             if (entry.effect === 'chromatic') {
-                if (this._chromaticAberrationStrength <= 0 || !this._passEnabled['chromatic']) continue;
+                if (this._post.chromaticAberrationStrength <= 0 || !this._passEnabled['chromatic']) continue;
                 const from = src, to = flip();
                 graph.addPass({
                     id: 'chromatic', scope: 'chromatic', reads: [from], writes: [to],
-                    execute: ctx => this._chromaticAberrationPass(ctx.read(from), ctx.target(to)),
+                    execute: ctx => this._post.chromaticAberrationPass(ctx.read(from), ctx.target(to)),
                 });
                 src = to;
                 continue;
@@ -9607,14 +9447,14 @@ export class Renderer {
             if (entry.effect === 'depthOfField') {
                 // `_temporal.depthSource()` is only filled outside thumbnail mode, but the whole chain is
                 // bypassed for `_presentTarget` before this runs, so there is no stale-depth path here.
-                if (!this._dofEnabled || this._dofMaxBlur <= 0 || !this._passEnabled['dof.coc']) continue;
+                if (!this._post.dofEnabled || this._post.dofMaxBlur <= 0 || !this._passEnabled['dof.coc']) continue;
                 const from = src, to = flip();
                 const half = { kind: 'scaled' as const, scale: 0.5 };
                 const coc = graph.declare({ ...hdr, name: 'dof.coc', size: half, lifetime: 'transient' });
                 const bokeh = graph.declare({ ...hdr, name: 'dof.bokeh', size: half, lifetime: 'transient' });
                 graph.addPass({
                     id: 'depthOfField', scope: 'dof.coc', reads: [from], writes: [to, coc, bokeh],
-                    execute: ctx => this._dofPass(scene, ctx.target(coc), ctx.target(bokeh),
+                    execute: ctx => this._post.dofPass(scene, ctx.target(coc), ctx.target(bokeh),
                                                   ctx.read(from), ctx.target(to)),
                 });
                 src = to;
@@ -9624,7 +9464,7 @@ export class Renderer {
             if (entry.effect === 'lensFlare') {
                 // The god-rays shape: composited additively INTO the stage it reads, so it consumes no
                 // chain stage. `readWrites` is what tells the pool it may not lend that buffer out.
-                if (this._lensFlareIntensity <= 0 || !this._passEnabled['lensFlare']) continue;
+                if (this._post.lensFlareIntensity <= 0 || !this._passEnabled['lensFlare']) continue;
                 const inPlace = src;
                 const scratch = graph.declare({
                     ...hdr, name: 'lensFlare.scratch', size: { kind: 'scaled', scale: 0.5 },
@@ -9632,28 +9472,28 @@ export class Renderer {
                 });
                 graph.addPass({
                     id: 'lensFlare', scope: 'lensFlare', readWrites: [inPlace], writes: [scratch],
-                    execute: ctx => this._lensFlarePass(ctx.target(scratch), ctx.target(inPlace)),
+                    execute: ctx => this._post.lensFlarePass(ctx.target(scratch), ctx.target(inPlace)),
                 });
                 continue;
             }
 
             if (entry.effect === 'vignette') {
-                if (this._vignetteStrength <= 0 || !this._passEnabled['vignette']) continue;
+                if (this._post.vignetteStrength <= 0 || !this._passEnabled['vignette']) continue;
                 const from = src, to = flip();
                 graph.addPass({
                     id: 'vignette', scope: 'vignette', reads: [from], writes: [to],
-                    execute: ctx => this._vignettePass(ctx.read(from), ctx.target(to)),
+                    execute: ctx => this._post.vignettePass(ctx.read(from), ctx.target(to)),
                 });
                 src = to;
                 continue;
             }
 
             if (entry.effect === 'filmGrain') {
-                if (this._filmGrainIntensity <= 0 || !this._passEnabled['filmGrain']) continue;
+                if (this._post.filmGrainIntensity <= 0 || !this._passEnabled['filmGrain']) continue;
                 const from = src, to = flip();
                 graph.addPass({
                     id: 'filmGrain', scope: 'filmGrain', reads: [from], writes: [to],
-                    execute: ctx => this._filmGrainPass(ctx.read(from), ctx.target(to)),
+                    execute: ctx => this._post.filmGrainPass(ctx.read(from), ctx.target(to)),
                 });
                 src = to;
             }
@@ -9663,11 +9503,11 @@ export class Renderer {
         // Last, so it smooths the edges whatever the chain did to them (DoF, bloom, grain), and on the
         // final scene image only: the overlay is composited after the present, so the grid and gizmos
         // keep their crisp lines.
-        if (this._fxaaEnabled && this._passEnabled['fxaa'] && this._debugView === 'final') {
+        if (this._post.fxaaEnabled && this._passEnabled['fxaa'] && this._debugView === 'final') {
             const from = src, to = flip();
             graph.addPass({
                 id: 'fxaa', scope: 'fxaa', reads: [from], writes: [to],
-                execute: ctx => this._fxaaPass(ctx.read(from), ctx.target(to)),
+                execute: ctx => this._post.fxaaPass(ctx.read(from), ctx.target(to)),
             });
             src = to;
         }
@@ -9685,8 +9525,8 @@ export class Renderer {
                     return;
                 }
                 // Composite the selection outline over the final image on the way to the screen.
-                if (this._outlineActive) { this._outlinePass(ctx.read(result)); return; }
-                this._presentPass(ctx.read(result));
+                if (this._post.outlineActive) { this._post.outlinePass(ctx.read(result)); return; }
+                this._post.presentPass(ctx.read(result));
             },
         });
 
@@ -9721,34 +9561,6 @@ export class Renderer {
     }
 
     /**
-     * The single display resolve: exposure -> tone curve -> LUT -> sRGB on the linear-HDR composite.
-     * Uniform VALUES still travel by name through ShaderManager; the backend decides how a named
-     * uniform reaches the GPU.
-     */
-    private _presentPass(source: Framebuffer): void {
-        const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'present', true);
-        const pipeline = this._pipelines.fullscreen('present', PresentProgram);
-        pass.setPipeline(pipeline);
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
-        this._shaderManager.setUniform('u_saturation', this._effectiveSaturation());
-        this._shaderManager.setUniform('u_toneMapper', this._toneMapperId());
-        const lut = this._colorLut.volumeFor(this._colorGradingLut);
-        this._shaderManager.setUniform('u_lutSize', this._colorLut.size);
-        this._shaderManager.setUniform('u_lutIntensity', this._lutIntensity());
-        // Opaque. The flag is reset rather than assumed because uniforms persist across binds, and a
-        // preceding thumbnail capture would otherwise leave it on and punch the page background
-        // through the viewport.
-        this._shaderManager.setUniform('u_alphaFromDepth', 0.0);
-        // Every texture is bound even where it is not read (the coverage depth at alphaFromDepth 0,
-        // the identity LUT at intensity 0) — WebGPU requires every declared binding to be satisfied.
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            source.colors[0], this._targets.scene.depth, lut,
-        ]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-    }
-
-    /**
      * Put the editor overlay layer onto the resolved image.
      *
      * A SECOND pass on the surface target, with `clear: false` — the one genuinely new capability
@@ -9756,7 +9568,7 @@ export class Renderer {
      * framebuffer 0. WebGPU's `getCurrentTexture()` hands back the same texture for the rest of the
      * frame, the renderer holds one encoder for the whole frame, and two sequential render passes on
      * one colour attachment is ordinary. The surface has no depth view, so this is depth-less — the
-     * same shape `_presentPass` is.
+     * same shape `_post.presentPass` is.
      *
      * The shader encodes to sRGB and nothing else. No exposure, no tone curve, no LUT: see the note
      * at the graph node in `_buildPostGraph`.
@@ -9767,54 +9579,6 @@ export class Renderer {
                                                   OVERLAY_COMPOSITE_BLEND);
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [this._targets.overlay.colors[0]]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-    }
-
-    /**
-     * Run ONE of the active camera's screen-space custom materials as a fullscreen pass, from one chain
-     * stage into the next. Where it sits in the chain — and whether it runs at all — is decided in
-     * `_buildPostGraph`, which is also where a material whose program failed to build is left out
-     * rather than skipped mid-loop. Runs in linear HDR; the resolve happens afterwards in 'present'.
-     *
-     * These programs compile at RUNTIME from user GLSL, so there is no build-time reflection:
-     * `customShaderResources` derives group 0 from the same interface description the prelude is
-     * generated from.
-     */
-    private _screenMaterialPass(scene: Scene, mat: CustomMaterial,
-                                source: Framebuffer, target: Framebuffer): void {
-        const sun = this._sunScreenInfo(scene);
-        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'screenMaterial',
-                                               false, undefined, false);
-        // The WGSL, when there is any. On WebGL2 there is none and none is needed — the program
-        // is already linked and `_pipelines.get` reaches it by name. `entryPoints.fragment` is
-        // `main` because that is what naga calls the entry it generates, not `fs_main`.
-        const wgsl = customShaderModules(mat);
-        const pipeline = this._pipelines.get(mat.type, {
-            resources: screenShaderResources(mat.uniforms),
-            ...(wgsl ? { wgsl: wgsl.fragment, entryPoints: { fragment: 'main' },
-                         vertexWgsl: { wgsl: wgsl.vertex, entryPoint: wgsl.vertexEntry } } : {}),
-        }, { vertex: 'model', builtFor: mat.type });
-        pass.setPipeline(pipeline);
-        this._shaderManager.bind(mat.type);
-        // Group 0 is the two engine samplers followed by the user's, in declaration order — the
-        // order `screenShaderResources` and the prelude both use. A user sampler with no texture
-        // assigned gets the shared fallback, because a bind group cannot leave a binding empty.
-        const fallback = TextureManager.Instance.getTexture('Null') ?? this._bindGroups.fallbackTexture;
-        const userTextures = screenUserSamplerNames(mat.uniforms).map((name: string) => {
-            const id = mat.textures.get(name.replace(/^u_/, ''));
-            return (id ? TextureManager.Instance.getTexture(id) : null) ?? fallback;
-        });
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            source.colors[0], this._targets.sceneDepth.depth, ...userTextures,
-        ]));
-        this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
-        this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
-        this._shaderManager.setUniform('u_sunDir', sun.dir);
-        this._shaderManager.setUniform('u_sunUV', sun.uv);
-        this._shaderManager.setUniform('u_sunVisible', sun.visible);
-        this._shaderManager.setUniform('u_exposure', this._view.exposure); // lets a pass invert the final present resolve
-        this._materials.applyCustom(mat, true);   // u_time, u_viewPos + user VALUE uniforms only
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
     }
@@ -9840,47 +9604,20 @@ export class Renderer {
         // teal-and-orange LUT on the project. The tone CURVE is kept, because that is the shape of
         // the light rather than a grade on top of it.
         this._shaderManager.setUniform('u_saturation', 1.0);
-        this._shaderManager.setUniform('u_toneMapper', this._toneMapperId());
+        this._shaderManager.setUniform('u_toneMapper', this._post.toneMapperId());
         // Reset, not assumed: uniforms persist across binds and this pass shares present's pipeline,
         // so a frame that graded the viewport would otherwise leak into every thumbnail after it.
         this._shaderManager.setUniform('u_lutIntensity', 0.0);
         this._shaderManager.setUniform('u_lutSize', IDENTITY_LUT_SIZE);
         // The whole reason this pass exists. Set here for the same reason the two above are: the
-        // on-screen `_presentPass` writes 0.0 on EVERY frame, so a thumbnail that does not write it
+        // on-screen `_post.presentPass` writes 0.0 on EVERY frame, so a thumbnail that does not write it
         // back inherits an opaque alpha and the capture comes out as a solid rectangle — a black one,
         // since thumbnail mode clears to transparent black and skips the sky. That is exactly what
         // happened when this line was dropped in the TAA/LUT rewrite, and it took the whole asset
         // library's transparency with it as well as every baked foliage impostor.
         this._shaderManager.setUniform('u_alphaFromDepth', 1.0);
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            this._targets.scene.colors[0], this._temporal.depthSource(), this._colorLut.volumeFor(null),
-        ]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-    }
-
-    // Screen-space selection outline: draws a border just outside the silhouette mask over the
-    // final composited image. Renders to whatever framebuffer is currently bound (the screen).
-    private _outlinePass(source: Framebuffer): void {
-        // The clear moves in here with the pass: the caller used to unbind the scene FBO and clear the
-        // screen by hand, which is the same thing said twice and only one of them portable.
-        const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'outline', true);
-        const pipeline = this._pipelines.fullscreen('outlinePost', OutlinePostProgram);
-        pass.setPipeline(pipeline);
-        // This pass does the final resolve, so it carries the WHOLE grade and not just the exposure.
-        // It used to set only that, which meant selecting an object dropped the saturation trim and
-        // the frame changed colour under the artist.
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
-        this._shaderManager.setUniform('u_saturation', this._effectiveSaturation());
-        this._shaderManager.setUniform('u_toneMapper', this._toneMapperId());
-        const lut = this._colorLut.volumeFor(this._colorGradingLut);
-        this._shaderManager.setUniform('u_lutSize', this._colorLut.size);
-        this._shaderManager.setUniform('u_lutIntensity', this._lutIntensity());
-        this._shaderManager.setUniform('u_texelSize', [1 / this._renderWidth, 1 / this._renderHeight]);
-        this._shaderManager.setUniform('u_outlineColor', this._outlineColor);
-        this._shaderManager.setUniform('u_outlineWidth', this._outlineWidth);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            source.colors[0], this._outlineMaskFBO.colors[0], lut,
+            this._targets.scene.colors[0], this._temporal.depthSource(), this._post.colorLut.volumeFor(null),
         ]));
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);
@@ -10018,12 +9755,12 @@ export class Renderer {
             case 'ssao':      tex = (this._ssaoResult ?? this._ssaoBlurFBO).colors[0]; mode = 2; break;
             // The bounce light, before albedo, through the same exposure and curve as the image.
             case 'ssil':      tex = (this._ssaoResult ?? this._ssaoBlurFBO).colors[0]; mode = 6; break;
-            case 'bloom':     tex = this._bloomMips[0].colors[0];  mode = 6; break;
+            case 'bloom':     tex = this._post.bloomMips[0].colors[0];  mode = 6; break;
             // The bloom-eligibility mask itself: the scene buffer's ALPHA, as greyscale. White blooms,
             // black cannot. Exists because "bloom does nothing" is otherwise indistinguishable between
             // an empty mask and a threshold no pixel clears, and there was no way to look at it.
             case 'bloomMask': tex = this._targets.scene.colors[0];      mode = 2; break;
-            case 'mask':      tex = this._outlineMaskFBO.colors[0]; mode = 0; break;
+            case 'mask':      tex = this._post.outlineMaskFBO.colors[0]; mode = 0; break;
             case 'velocity':  tex = this._targets.velocity.colors[0];   mode = 5; break;
             // The accumulated history itself. Ghosting and smearing are visible here a frame before
             // they are visible in the composed image, and "is the history sane" is the first question
@@ -10049,7 +9786,7 @@ export class Renderer {
         // The tonemapped channels ('scene', 'bloom', 'overdraw's fallback) resolve with the SCENE's
         // curve, so "Lit Scene" cannot disagree with "Final" about what the frame looks like. No LUT
         // here on purpose — a debug channel is a picture of a BUFFER, and a grade would misreport it.
-        this._shaderManager.setUniform('u_toneMapper', this._toneMapperId());
+        this._shaderManager.setUniform('u_toneMapper', this._post.toneMapperId());
         this._shaderManager.setUniform('u_exposure', this._view.exposure); // used by the tonemapped channels
         // The depth attachment rides along on every channel, because WebGPU requires every binding the
         // shader declares to be present and only mode 3 actually reads it.
@@ -10078,372 +9815,6 @@ export class Renderer {
             exposureMinEV: e.exposureMinEV, exposureMaxEV: e.exposureMaxEV, exposureSpeedUp: e.exposureSpeedUp,
             exposureSpeedDown: e.exposureSpeedDown, volumes: this._autoExposure.effExposureVolumes.map(v => ({ ...v })),
         };
-    }
-
-    /**
-     * Build the bloom pyramid from `source`: bright pass, downsample chain, additive upsample chain.
-     * Writes only its own mips — the composite that puts the result back over the image is
-     * {@link _bloomComposite}, a separate pass because it is separately switchable and because only it
-     * consumes a stage of the chain.
-     */
-    private _bloomGenerate(source: Framebuffer): void {
-        // 1. Bright pass into the largest mip (half res). Also writes the scene passthrough into
-        const mip0 = this._bloomMips[0];
-        const brightPass = this._passes.beginFullscreenPass(mip0.renderTarget, 'bloom.bright', true,
-                                                     undefined, false);
-        const brightPipeline = this._pipelines.fullscreen('bloom', BloomProgram);
-        brightPass.setPipeline(brightPipeline);
-        // The bright pass reads pre-exposure linear radiance, so it needs the exposure to decide what
-        // counts as bright — without it the threshold is compared against radiance ~3x darker than what
-        // reaches the screen, and at the default 1.0 nothing in an ordinary scene ever clears it.
-        this._shaderManager.setUniform('u_bloomThreshold', this._bloomThreshold);
-        this._shaderManager.setUniform('u_bloomKnee', this._bloomKnee);
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
-        this._shaderManager.setUniform('u_bloomMaskEnabled', this._bloomMaskEnabled);
-        // The bright pass halves the resolution, so it needs both grids to box-filter rather than
-        // point-sample (see sourceBlockUV in bloom.fs).
-        this._shaderManager.setUniform('u_srcTexelSize', [1 / this._renderWidth, 1 / this._renderHeight]);
-        this._shaderManager.setUniform('u_dstResolution', [mip0.width, mip0.height]);
-        // Bloom-eligibility mask lives in the raw scene buffer's alpha (motion blur discards alpha, so
-        // read it from the scene FBO directly, not the post-processed copy the first entry names).
-        brightPass.setBindGroup(0, this._bindGroups.textureGroup(brightPipeline, 0, [
-            source.colors[0], this._targets.scene.colors[0],
-        ]));
-        this._passes.drawFullscreen(brightPass);
-        this._passes.endFullscreenPass(brightPass);
-
-        if (this._passEnabled['bloom.blur']) {
-            // 2. Downsample: each level reads the one above it at twice the resolution.
-            this._passes.scope('bloom.blur');
-            for (let i = 1; i < this._bloomMips.length; i++) {
-                const from = this._bloomMips[i - 1];
-                // `loadOp: 'load'` — each level is fully overwritten by the draw, so clearing first
-                // would be a wasted write. That is what the bare `bind()` used to express implicitly.
-                const pass = this._passes.beginFullscreenPass(this._bloomMips[i].renderTarget, 'bloom.blur',
-                                                       false, undefined, false);
-                // Built INSIDE the pass, never hoisted above the loop: `_pipelines.get` reads its colour
-                // format off `_passes.target`, which only exists between begin and end. Not a
-                // per-iteration cost — pipelines are cached and the format is part of the key.
-                const downPipeline = this._pipelines.fullscreen('bloomDownsample', BloomDownsampleProgram);
-                pass.setPipeline(downPipeline);
-                this._shaderManager.setUniform('u_srcTexelSize', [1 / from.width, 1 / from.height]);
-                // Both grids: the mips halve with floor(), so an odd level is not exactly 2x the next
-                // and the kernel has to be snapped to the source grid rather than assuming the ratio.
-                this._shaderManager.setUniform('u_dstResolution', [this._bloomMips[i].width, this._bloomMips[i].height]);
-                // Karis average on the first step only — it tames fireflies but is not energy
-                // conserving, so applying it all the way down would visibly dim the bloom.
-                this._shaderManager.setUniform('u_karisAverage', i === 1);
-                pass.setBindGroup(0, this._bindGroups.textureGroup(downPipeline, 0, [from.colors[0]]));
-                this._passes.drawFullscreen(pass);
-                this._passes.endFullscreenPass(pass);
-            }
-
-            // 3. Upsample: additively blend each level onto the next larger one, accumulating in the
-            //    blender. ADDITIVE_BLEND (rhi/types.ts) spells out the ALPHA half as well as the
-            //    colour half; a blend that forgets alpha makes bloom emit nothing.
-            for (let i = this._bloomMips.length - 1; i > 0; i--) {
-                const from = this._bloomMips[i];
-                const to = this._bloomMips[i - 1];
-                // Accumulating INTO the destination, so it must be loaded, never cleared.
-                const pass = this._passes.beginFullscreenPass(to.renderTarget, 'bloom.blur', false,
-                                                       undefined, false);
-                // Inside the pass, for the format reason spelled out on the downsample loop above.
-                const upPipeline = this._pipelines.fullscreen('bloomUpsample', BloomUpsampleProgram,
-                                                            ADDITIVE_BLEND);
-                pass.setPipeline(upPipeline);
-                // Radius in the SOURCE mip's texels, so the spread is resolution-independent. Per axis:
-                // one value off the width alone is short by the aspect ratio vertically.
-                this._shaderManager.setUniform('u_filterRadius',
-                    [Renderer.BLOOM_FILTER_RADIUS / from.width, Renderer.BLOOM_FILTER_RADIUS / from.height]);
-                pass.setBindGroup(0, this._bindGroups.textureGroup(upPipeline, 0, [from.colors[0]]));
-                this._passes.drawFullscreen(pass);
-                this._passes.endFullscreenPass(pass);
-            }
-            // Still restored by hand: the passes that follow are on the legacy path and enable BLEND
-            // without setting the function, so they inherit whatever was left. Drop this once they are
-            // migrated and their own pipelines say what they need.
-            GLState.blend(false);
-            this._restoreDefaultBlend();
-        }
-    }
-
-    /** Composite the accumulated bloom back over the image, from one chain stage into the next. */
-    private _bloomComposite(source: Framebuffer, target: Framebuffer): void {
-        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'bloom.composite', true);
-        const pipeline = this._pipelines.fullscreen('composer', ComposerProgram);
-        pass.setPipeline(pipeline);
-        this._shaderManager.setUniform('u_bloomIntensity', this._bloomIntensity);
-        // Dirt rides on the bloom composite because it is only visible where there is glare to catch —
-        // see the header of composer.wgsl. Bound even at intensity 0, because WebGPU requires every
-        // declared binding to be satisfied whether or not the shader reads it.
-        const dirt = this._lensDirtSource();
-        this._shaderManager.setUniform('u_dirtIntensity', this._lensDirtStrength(dirt));
-        // The unit numbers are gone: the bind group assigns them and sets u_buffer1/u_buffer2 from the
-        // shader's own reflection, so the order here is the order the shader declares.
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            source.colors[0], this._bloomMips[0].colors[0], dirt ?? this._bindGroups.fallbackTexture,
-        ]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-    }
-
-    /**
-     * The lens-dirt overlay to sample this frame: the project's texture, or the built-in one.
-     *
-     * Resolved lazily, per frame, INSIDE the pass — never at `applyRenderSettings` time. That is not a
-     * style choice: the standalone player applies render settings before it registers any texture, so
-     * anything that resolved an id up front would come back empty in every published game. The same
-     * reason `ColorGradingLut.volumeFor` works this way.
-     *
-     * Returns null while the built-in is still decoding, which {@link _lensDirtStrength} turns into an
-     * intensity of 0 — so a frame composites against no dirt rather than against a white fallback,
-     * which would flash the bloom to double brightness for the frame or two before the decode lands.
-     */
-    private _lensDirtSource(): Texture | null {
-        if (this._lensDirtTexture) return TextureManager.Instance.getTexture(this._lensDirtTexture) ?? null;
-        if (this._builtinLensDirt) return this._builtinLensDirt;
-        this._decodeBuiltinLensDirt();
-        return null;
-    }
-
-    /** Kick off the one-time decode of the built-in mask. Idempotent; a failure is not retried. */
-    private _decodeBuiltinLensDirt(): void {
-        if (this._builtinLensDirtRequested || typeof Image === 'undefined') return;
-        this._builtinLensDirtRequested = true;
-        // Clamped, not repeated: it is a single overlay stretched across the frame, and a repeat wrap
-        // would seam down the middle of the image the moment a sample landed outside [0,1].
-        const texture = new Texture({ mipMap: false, wrapping: 'clamp' });
-        const image = new Image();
-        image.onload = () => {
-            if (image.width > 0 && image.height > 0) {
-                texture.create(image, image.width, image.height);
-                this._builtinLensDirt = texture;
-            } else Logger.warn('Built-in lens dirt decoded to zero size', 'Renderer');
-        };
-        image.onerror = () => Logger.warn('Failed to decode the built-in lens dirt', 'Renderer');
-        image.src = `data:${BUILTIN_LENS_DIRT_MIME};base64,${BUILTIN_LENS_DIRT_BASE64}`;
-    }
-
-    /** The dirt intensity actually in force: zero unless there is a decoded mask to multiply by. */
-    private _lensDirtStrength(dirt: Texture | null): number {
-        return dirt ? this._lensDirtIntensity : 0;
-    }
-
-    /**
-     * The distance the lens is focused at this frame, in metres.
-     *
-     * A camera that names a focus target measures the distance to it ALONG THE VIEW AXIS — a target
-     * off to one side is further away than the plane it stands on, and focusing on its euclidean
-     * distance would push the plane past it and leave the target itself soft.
-     *
-     * A target that has been removed HOLDS the last distance rather than falling back to the authored
-     * one. Both are defensible; holding is much less alarming to watch, because the alternative racks
-     * focus across the whole frame on the exact frame something despawned.
-     */
-    private _resolveFocusDistance(scene: Scene): number {
-        const node = scene.activeCamera;
-        const targetId = node?.focusTargetId ?? null;
-        if (!targetId) {
-            this._dofLastFocusDistance = this._dofFocusDistance;
-            this._warnedDanglingFocus = false;
-            return this._dofFocusDistance;
-        }
-        const target = node!.focusTarget;
-        if (!target) {
-            if (!this._warnedDanglingFocus) {
-                Logger.warn(`Focus target ${targetId} is not in the scene; holding the last focus distance`,
-                            'Renderer');
-                this._warnedDanglingFocus = true;
-            }
-            return this._dofLastFocusDistance;
-        }
-        this._warnedDanglingFocus = false;
-        const view = this._view.camera.viewMatrix;
-        // The camera's forward axis, read off the view matrix's third row — the same place
-        // `_captureTemporalCameraState` takes it from, rather than recomputing it from the node.
-        const forward = vec3.fromValues(-view[2], -view[6], -view[10]);
-        const distance = focusDistanceToTarget(this._view.camera.position, forward, target.worldPosition);
-        // Behind the camera is not a focus distance. Hold rather than invert the image.
-        if (distance > 0.01) this._dofLastFocusDistance = distance;
-        return this._dofLastFocusDistance;
-    }
-
-    /** Everything in the CoC that is constant across the frame. See `dofMath.circleOfConfusion`. */
-    private _dofUniforms(scene: Scene): { focus: number; halfRange: number; focal: number; scale: number } {
-        const focal = focalLengthFromFov(this._view.camera.fov);
-        return {
-            focus: this._resolveFocusDistance(scene),
-            halfRange: this._dofFocusRange * 0.5,
-            focal,
-            // f*f / N / sensorHeight * screenHeight — the leading term of the thin-lens CoC, in pixels.
-            // The thin lens gives the blur circle's DIAMETER and the gather uses it as a RADIUS, so every
-            // f-stop blurs twice as much as a real lens would. Kept on purpose: the camera's default 60
-            // degree FOV is a ~21 mm lens, which barely defocuses anything at true scale.
-            scale: (focal * focal / Math.max(1e-3, this._dofAperture) / SENSOR_HEIGHT) * this._renderHeight,
-        };
-    }
-
-    /**
-     * Depth of field: CoC prefilter, bokeh gather, composite. Three passes over two half-resolution
-     * buffers the graph owns, so none of it is resident when the effect is off.
-     */
-    private _dofPass(scene: Scene, coc: Framebuffer, bokeh: Framebuffer,
-                     source: Framebuffer, target: Framebuffer): void {
-        const u = this._dofUniforms(scene);
-        const depth = this._temporal.depthSource();
-
-        // 1. Half-res colour, and the signed CoC in alpha. The scope is already open — this node
-        //    reports under `dof.coc`, and the two below are opened as it moves through them.
-        const cocPass = this._passes.beginFullscreenPass(coc.renderTarget, 'dof.coc', true, undefined, false);
-        const cocPipeline = this._pipelines.fullscreen('dofCoc', DofCocProgram);
-        cocPass.setPipeline(cocPipeline);
-        this._shaderManager.setUniform('u_near', this._view.camera.near);
-        this._shaderManager.setUniform('u_far', this._view.camera.far);
-        this._shaderManager.setUniform('u_focusDistance', u.focus);
-        this._shaderManager.setUniform('u_focusHalfRange', u.halfRange);
-        this._shaderManager.setUniform('u_focalLength', u.focal);
-        this._shaderManager.setUniform('u_cocScale', u.scale);
-        this._shaderManager.setUniform('u_maxCocPx', this._dofMaxBlur);
-        this._shaderManager.setUniform('u_srcTexelSize', [1 / this._renderWidth, 1 / this._renderHeight]);
-        cocPass.setBindGroup(0, this._bindGroups.textureGroup(cocPipeline, 0, [source.colors[0], depth]));
-        this._passes.drawFullscreen(cocPass);
-        this._passes.endFullscreenPass(cocPass);
-
-        // 2. The bokeh itself.
-        this._passes.scope('dof.gather');
-        const gatherPass = this._passes.beginFullscreenPass(bokeh.renderTarget, 'dof.gather', true,
-                                                     undefined, false);
-        const gatherPipeline = this._pipelines.fullscreen('dofGather', DofGatherProgram);
-        gatherPass.setPipeline(gatherPipeline);
-        // The clamp expressed in the grid this pass works in, which is half the render resolution.
-        this._shaderManager.setUniform('u_maxCocHalfPx', this._dofMaxBlur * 0.5);
-        this._shaderManager.setUniform('u_texelSize', [1 / coc.width, 1 / coc.height]);
-        gatherPass.setBindGroup(0, this._bindGroups.textureGroup(gatherPipeline, 0, [coc.colors[0]]));
-        this._passes.drawFullscreen(gatherPass);
-        this._passes.endFullscreenPass(gatherPass);
-
-        // 3. Back over the sharp image, with the CoC recomputed at full resolution so the boundary
-        //    between sharp and blurred does not land on the half-res grid.
-        this._passes.scope('dof.composite');
-        const outPass = this._passes.beginFullscreenPass(target.renderTarget, 'dof.composite', true);
-        const outPipeline = this._pipelines.fullscreen('dofComposite', DofCompositeProgram);
-        outPass.setPipeline(outPipeline);
-        this._shaderManager.setUniform('u_near', this._view.camera.near);
-        this._shaderManager.setUniform('u_far', this._view.camera.far);
-        this._shaderManager.setUniform('u_focusDistance', u.focus);
-        this._shaderManager.setUniform('u_focusHalfRange', u.halfRange);
-        this._shaderManager.setUniform('u_focalLength', u.focal);
-        this._shaderManager.setUniform('u_cocScale', u.scale);
-        this._shaderManager.setUniform('u_maxCocPx', this._dofMaxBlur);
-        outPass.setBindGroup(0, this._bindGroups.textureGroup(outPipeline, 0, [
-            source.colors[0], bokeh.colors[0], depth,
-        ]));
-        this._passes.drawFullscreen(outPass);
-        this._passes.endFullscreenPass(outPass);
-    }
-
-    /**
-     * Ghosts and halo, raised at half resolution into `scratch` and composited additively back into
-     * `target`. In place, like god rays, so it neither consumes nor produces a stage of the chain.
-     */
-    private _lensFlarePass(scratch: Framebuffer, target: Framebuffer): void {
-        // 1. Trace the ghosts. Reads the chain image itself, so anything occluded throws no flare.
-        const genPass = this._passes.beginFullscreenPass(scratch.renderTarget, 'lensFlare', true,
-                                                  undefined, false);
-        const genPipeline = this._pipelines.fullscreen('lensFlare', LensFlareProgram);
-        genPass.setPipeline(genPipeline);
-        // The threshold is on the EXPOSED image, as bloom's is, so it means the same brightness on screen in
-        // a sunlit field and in a cave; the buffer is pre-exposure, so it is uploaded divided back out.
-        this._shaderManager.setUniform('u_flareThreshold', this._lensFlareThreshold / Math.max(1e-8, this._view.exposure));
-        this._shaderManager.setUniform('u_flareGhosts', this._lensFlareGhosts);
-        // Not a setting: the spacing that puts the ghosts across the frame rather than piled at the
-        // centre. Exposing it alongside the ghost count would mostly be a way to hide them all.
-        this._shaderManager.setUniform('u_flareDispersal', Renderer.LENS_FLARE_DISPERSAL);
-        this._shaderManager.setUniform('u_flareHaloWidth', this._lensFlareHaloWidth);
-        this._shaderManager.setUniform('u_flareChromatic', Renderer.LENS_FLARE_CHROMATIC);
-        genPass.setBindGroup(0, this._bindGroups.textureGroup(genPipeline, 0, [target.colors[0]]));
-        this._passes.drawFullscreen(genPass);
-        this._passes.endFullscreenPass(genPass);
-
-        // 2. Add it back, modulated by the dirt overlay. Additive, so the pass returns a contribution
-        // and never reads its own destination — which is what makes the in-place declaration honest.
-        const dirt = this._lensDirtSource();
-        const upPass = this._passes.beginFullscreenPass(target.renderTarget, 'lensFlareComposite', false,
-                                                 undefined, false);
-        const upPipeline = this._pipelines.fullscreen('lensFlareComposite', LensFlareCompositeProgram,
-                                                    ADDITIVE_BLEND);
-        upPass.setPipeline(upPipeline);
-        this._shaderManager.setUniform('u_flareIntensity', this._lensFlareIntensity);
-        this._shaderManager.setUniform('u_dirtIntensity', this._lensDirtStrength(dirt));
-        upPass.setBindGroup(0, this._bindGroups.textureGroup(upPipeline, 0, [
-            scratch.colors[0], dirt ?? this._bindGroups.fallbackTexture,
-        ]));
-        this._passes.drawFullscreen(upPass);
-        this._passes.endFullscreenPass(upPass);
-
-        // Restored by hand, as god rays does: the passes that follow are still on the legacy path and
-        // enable BLEND without setting the function, so they inherit whatever was left here.
-        GLState.blend(false);
-        this._restoreDefaultBlend();
-    }
-
-    /** Lens fall-off toward the corners, multiplicative on the linear-HDR chain. */
-    private _fxaaPass(source: Framebuffer, target: Framebuffer): void {
-        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'fxaa', true);
-        const pipeline = this._pipelines.fullscreen('fxaa', FxaaProgram);
-        pass.setPipeline(pipeline);
-        this._shaderManager.setUniform('u_texelSize', [1 / Math.max(1, this._renderWidth), 1 / Math.max(1, this._renderHeight)]);
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
-        this._shaderManager.setUniform('u_edgeThreshold', this._fxaaEdgeThreshold);
-        this._shaderManager.setUniform('u_subpixel', this._fxaaSubpixel);
-        this._shaderManager.setUniform('u_searchSteps', FXAA_SEARCH_STEPS[this._fxaaQuality]);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [source.colors[0]]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-    }
-
-    private _vignettePass(source: Framebuffer, target: Framebuffer): void {
-        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'vignette', true);
-        const pipeline = this._pipelines.fullscreen('vignette', VignetteProgram);
-        pass.setPipeline(pipeline);
-        this._shaderManager.setUniform('u_vignetteStrength', this._vignetteStrength);
-        this._shaderManager.setUniform('u_vignetteRoundness', this._vignetteRoundness);
-        this._shaderManager.setUniform('u_vignetteSmoothness', this._vignetteSmoothness);
-        // The RENDER aspect, not the canvas: internal buffers follow `renderScale` and the present
-        // pass upscales, so a canvas-derived ratio would skew the ellipse at any scale but 1.
-        this._shaderManager.setUniform('u_aspect', this._renderWidth / Math.max(1, this._renderHeight));
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [source.colors[0]]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-    }
-
-    /** Film grain, animated and midtone-weighted. The last thing in the lens; see filmGrain.wgsl. */
-    private _filmGrainPass(source: Framebuffer, target: Framebuffer): void {
-        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'filmGrain', true);
-        const pipeline = this._pipelines.fullscreen('filmGrain', FilmGrainProgram);
-        pass.setPipeline(pipeline);
-        this._shaderManager.setUniform('u_grainIntensity', this._filmGrainIntensity);
-        this._shaderManager.setUniform('u_grainSize', this._filmGrainSize);
-        this._shaderManager.setUniform('u_grainColored', this._filmGrainColored ? 1 : 0);
-        // Wall-clock, as the other animated passes take it. A frame counter would tie the grain's
-        // speed to the frame rate, so it would crawl on a slow machine and shimmer on a fast one.
-        this._shaderManager.setUniform('u_time', performance.now() * 0.001);
-        this._shaderManager.setUniform('u_resolution', [this._renderWidth, this._renderHeight]);
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [source.colors[0]]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
-    }
-
-    private _chromaticAberrationPass(source: Framebuffer, target: Framebuffer): void {
-        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'chromatic', true);
-        const pipeline = this._pipelines.fullscreen('chromaticAberration', ChromaticAberrationProgram);
-        pass.setPipeline(pipeline);
-        this._shaderManager.setUniform('u_strength', this._chromaticAberrationStrength);
-        this._shaderManager.setUniform('u_aspect', this._renderWidth / Math.max(1, this._renderHeight));
-        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [source.colors[0]]));
-        this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
     }
 
     /**
@@ -10613,7 +9984,7 @@ export class Renderer {
         bytes += this._shadowCascadeFBO.texture.byteSize; // one array texture, layers included
         bytes += this._spotShadowFBO.texture.byteSize;
         bytes += this._pointShadowFBO.texture.byteSize;
-        for (const m of this._bloomMips) addFbo(m);
+        for (const m of this._post.bloomMips) addFbo(m);
         // The cloud temporal targets and baked noise volumes belong here too — an 8MB volume absent
         // from the estimate defeats its purpose.
         addFbo(this._targets.sceneDepth); addFbo(this._cloudsFBO); addFbo(this._cloudTraceFBO);
@@ -10624,7 +9995,7 @@ export class Renderer {
         addFbo(this._ssaoFBO); addFbo(this._ssaoBlurFBO);
         for (const f of this._ssilHistoryFBOs) addFbo(f);
         addFbo(this._ssilRadianceFBO ?? undefined);
-        addFbo(this._brdfFBO); addFbo(this._outlineMaskFBO); addFbo(this._targets.overlay);
+        addFbo(this._brdfFBO); addFbo(this._post.outlineMaskFBO); addFbo(this._targets.overlay);
         addFbo(this._overdrawFBO ?? undefined);
         addFbo(this._targets.velocity); addFbo(this._temporal.velocityTileFBO); addFbo(this._temporal.velocityNeighborFBO);
         addFbo(this._dBufferFBO ?? undefined); addFbo(this._gBufferCopyFBO ?? undefined);
@@ -10674,84 +10045,84 @@ export class Renderer {
         this.exposure = REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, ev));
     }
 
-    public get bloomThreshold(): number { return this._bloomThreshold; }
-    public set bloomThreshold(v: number) { this._bloomThreshold = Math.max(0, v); }
+    public get bloomThreshold(): number { return this._post.bloomThreshold; }
+    public set bloomThreshold(v: number) { this._post.bloomThreshold = Math.max(0, v); }
 
-    public get bloomKnee(): number { return this._bloomKnee; }
-    public set bloomKnee(v: number) { this._bloomKnee = Math.max(0, v); }
+    public get bloomKnee(): number { return this._post.bloomKnee; }
+    public set bloomKnee(v: number) { this._post.bloomKnee = Math.max(0, v); }
 
-    public get bloomIntensity(): number { return this._bloomIntensity; }
+    public get bloomIntensity(): number { return this._post.bloomIntensity; }
     public set bloomIntensity(v: number) {
-        this._bloomIntensity = Math.max(0, v);
-        this._bloomIntensityUser = this._bloomIntensity;
+        this._post.bloomIntensity = Math.max(0, v);
+        this._post.bloomIntensityUser = this._post.bloomIntensity;
     }
 
-    public get bloomMaskEnabled(): boolean { return this._bloomMaskEnabled; }
-    public set bloomMaskEnabled(v: boolean) { this._bloomMaskEnabled = v; }
+    public get bloomMaskEnabled(): boolean { return this._post.bloomMaskEnabled; }
+    public set bloomMaskEnabled(v: boolean) { this._post.bloomMaskEnabled = v; }
 
-    public get saturation(): number { return this._saturation; }
-    public set saturation(v: number) { this._saturation = Math.max(0, v); }
+    public get saturation(): number { return this._post.saturation; }
+    public set saturation(v: number) { this._post.saturation = Math.max(0, v); }
 
-    public get toneMapper(): ToneMapper { return this._toneMapper; }
-    public set toneMapper(m: ToneMapper) { this._toneMapper = m; }
+    public get toneMapper(): ToneMapper { return this._post.toneMapper; }
+    public set toneMapper(m: ToneMapper) { this._post.toneMapper = m; }
 
-    public get colorGradingLut(): string | null { return this._colorGradingLut; }
+    public get colorGradingLut(): string | null { return this._post.colorGradingLut; }
     // Empty string folds to null: it is what an editor `<select>` reports for "(none)", and a texture
     // lookup on '' would be a miss every frame rather than an explicit absence.
-    public set colorGradingLut(id: string | null) { this._colorGradingLut = id || null; }
+    public set colorGradingLut(id: string | null) { this._post.colorGradingLut = id || null; }
 
-    public get colorGradingIntensity(): number { return this._colorGradingIntensity; }
-    public set colorGradingIntensity(v: number) { this._colorGradingIntensity = Math.min(1, Math.max(0, v)); }
+    public get colorGradingIntensity(): number { return this._post.colorGradingIntensity; }
+    public set colorGradingIntensity(v: number) { this._post.colorGradingIntensity = Math.min(1, Math.max(0, v)); }
 
-    public get chromaticAberrationStrength(): number { return this._chromaticAberrationStrength; }
-    public set chromaticAberrationStrength(strength: number) { this._chromaticAberrationStrength = Math.max(0, strength); }
+    public get chromaticAberrationStrength(): number { return this._post.chromaticAberrationStrength; }
+    public set chromaticAberrationStrength(strength: number) { this._post.chromaticAberrationStrength = Math.max(0, strength); }
 
-    public get dofEnabled(): boolean { return this._dofEnabled; }
-    public set dofEnabled(v: boolean) { this._dofEnabled = v; }
-    public get dofFocusDistance(): number { return this._dofFocusDistance; }
-    public set dofFocusDistance(v: number) { this._dofFocusDistance = Math.max(0.01, v); }
-    public get dofFocusRange(): number { return this._dofFocusRange; }
-    public set dofFocusRange(v: number) { this._dofFocusRange = Math.max(0, v); }
+    public get dofEnabled(): boolean { return this._post.dofEnabled; }
+    public set dofEnabled(v: boolean) { this._post.dofEnabled = v; }
+    public get dofFocusDistance(): number { return this._post.dofFocusDistance; }
+    public set dofFocusDistance(v: number) { this._post.dofFocusDistance = Math.max(0.01, v); }
+    public get dofFocusRange(): number { return this._post.dofFocusRange; }
+    public set dofFocusRange(v: number) { this._post.dofFocusRange = Math.max(0, v); }
     // f/0.7 is about the fastest lens ever built; the ceiling just keeps the slider honest.
-    public get dofAperture(): number { return this._dofAperture; }
-    public set dofAperture(v: number) { this._dofAperture = Math.min(32, Math.max(0.7, v)); }
+    public get dofAperture(): number { return this._post.dofAperture; }
+    public set dofAperture(v: number) { this._post.dofAperture = Math.min(32, Math.max(0.7, v)); }
     // Capped at the radius the 48-tap gather can still cover without the disc beading.
-    public get dofMaxBlur(): number { return this._dofMaxBlur; }
-    public set dofMaxBlur(v: number) { this._dofMaxBlur = Math.min(64, Math.max(0, v)); }
+    public get dofMaxBlur(): number { return this._post.dofMaxBlur; }
+    public set dofMaxBlur(v: number) { this._post.dofMaxBlur = Math.min(64, Math.max(0, v)); }
 
-    public get lensFlareIntensity(): number { return this._lensFlareIntensity; }
-    public set lensFlareIntensity(v: number) { this._lensFlareIntensity = Math.max(0, v); }
-    public get lensFlareThreshold(): number { return this._lensFlareThreshold; }
-    public set lensFlareThreshold(v: number) { this._lensFlareThreshold = Math.max(0, v); }
+    public get lensFlareIntensity(): number { return this._post.lensFlareIntensity; }
+    public set lensFlareIntensity(v: number) { this._post.lensFlareIntensity = Math.max(0, v); }
+    public get lensFlareThreshold(): number { return this._post.lensFlareThreshold; }
+    public set lensFlareThreshold(v: number) { this._post.lensFlareThreshold = Math.max(0, v); }
     // Clamped to the shader's GHOST_LIMIT: the loop is compiled with a fixed bound so it can unroll,
     // and asking for more would silently give you eight rather than what the panel said.
-    public get lensFlareGhosts(): number { return this._lensFlareGhosts; }
-    public set lensFlareGhosts(v: number) { this._lensFlareGhosts = Math.min(8, Math.max(0, Math.round(v))); }
-    public get lensFlareHaloWidth(): number { return this._lensFlareHaloWidth; }
-    public set lensFlareHaloWidth(v: number) { this._lensFlareHaloWidth = Math.min(1, Math.max(0, v)); }
+    public get lensFlareGhosts(): number { return this._post.lensFlareGhosts; }
+    public set lensFlareGhosts(v: number) { this._post.lensFlareGhosts = Math.min(8, Math.max(0, Math.round(v))); }
+    public get lensFlareHaloWidth(): number { return this._post.lensFlareHaloWidth; }
+    public set lensFlareHaloWidth(v: number) { this._post.lensFlareHaloWidth = Math.min(1, Math.max(0, v)); }
 
-    public get lensDirtTexture(): string | null { return this._lensDirtTexture; }
+    public get lensDirtTexture(): string | null { return this._post.lensDirtTexture; }
     // Empty string folds to null, as `colorGradingLut` does: it is what an editor <select> reports for
     // its first option, and here null additionally MEANS the built-in rather than "none".
-    public set lensDirtTexture(id: string | null) { this._lensDirtTexture = id || null; }
-    public get lensDirtIntensity(): number { return this._lensDirtIntensity; }
-    public set lensDirtIntensity(v: number) { this._lensDirtIntensity = Math.max(0, v); }
+    public set lensDirtTexture(id: string | null) { this._post.lensDirtTexture = id || null; }
+    public get lensDirtIntensity(): number { return this._post.lensDirtIntensity; }
+    public set lensDirtIntensity(v: number) { this._post.lensDirtIntensity = Math.max(0, v); }
 
-    public get vignetteStrength(): number { return this._vignetteStrength; }
-    public set vignetteStrength(v: number) { this._vignetteStrength = Math.min(1, Math.max(0, v)); }
-    public get vignetteRoundness(): number { return this._vignetteRoundness; }
-    public set vignetteRoundness(v: number) { this._vignetteRoundness = Math.min(1, Math.max(0, v)); }
+    public get vignetteStrength(): number { return this._post.vignetteStrength; }
+    public set vignetteStrength(v: number) { this._post.vignetteStrength = Math.min(1, Math.max(0, v)); }
+    public get vignetteRoundness(): number { return this._post.vignetteRoundness; }
+    public set vignetteRoundness(v: number) { this._post.vignetteRoundness = Math.min(1, Math.max(0, v)); }
     // Never 0: the shader smoothsteps across +/- this, and a zero band is a hard aliased ring.
-    public get vignetteSmoothness(): number { return this._vignetteSmoothness; }
-    public set vignetteSmoothness(v: number) { this._vignetteSmoothness = Math.min(1, Math.max(0.01, v)); }
+    public get vignetteSmoothness(): number { return this._post.vignetteSmoothness; }
+    public set vignetteSmoothness(v: number) { this._post.vignetteSmoothness = Math.min(1, Math.max(0.01, v)); }
 
-    public get filmGrainIntensity(): number { return this._filmGrainIntensity; }
-    public set filmGrainIntensity(v: number) { this._filmGrainIntensity = Math.max(0, v); }
+    public get filmGrainIntensity(): number { return this._post.filmGrainIntensity; }
+    public set filmGrainIntensity(v: number) { this._post.filmGrainIntensity = Math.max(0, v); }
     // Floored at 1: a sub-pixel cell cannot be resolved and only aliases against the pixel grid.
-    public get filmGrainSize(): number { return this._filmGrainSize; }
-    public set filmGrainSize(v: number) { this._filmGrainSize = Math.max(1, v); }
-    public get filmGrainColored(): boolean { return this._filmGrainColored; }
-    public set filmGrainColored(v: boolean) { this._filmGrainColored = v; }
+    public get filmGrainSize(): number { return this._post.filmGrainSize; }
+    public set filmGrainSize(v: number) { this._post.filmGrainSize = Math.max(1, v); }
+    public get filmGrainColored(): boolean { return this._post.filmGrainColored; }
+    public set filmGrainColored(v: boolean) { this._post.filmGrainColored = v; }
 
     public get motionBlurEnabled(): boolean { return this._temporal.motionBlurEnabled; }
     public set motionBlurEnabled(enabled: boolean) { this._temporal.motionBlurEnabled = enabled; }
@@ -10793,20 +10164,20 @@ export class Renderer {
     public get taaSharpness(): number { return this._temporal.taaSharpness; }
     public set taaSharpness(v: number) { this._temporal.taaSharpness = clampFinite(v, 0, 1, 0.25); }
 
-    public get fxaaEnabled(): boolean { return this._fxaaEnabled; }
-    public set fxaaEnabled(enabled: boolean) { this._fxaaEnabled = !!enabled; }
-    public get fxaaQuality(): FxaaQuality { return this._fxaaQuality; }
-    public set fxaaQuality(q: FxaaQuality) { this._fxaaQuality = q in FXAA_SEARCH_STEPS ? q : 'medium'; }
-    public get fxaaSubpixel(): number { return this._fxaaSubpixel; }
-    public set fxaaSubpixel(v: number) { this._fxaaSubpixel = clampFinite(v, 0, 1, 0.75); }
-    public get fxaaEdgeThreshold(): number { return this._fxaaEdgeThreshold; }
-    public set fxaaEdgeThreshold(v: number) { this._fxaaEdgeThreshold = clampFinite(v, 0.063, 0.333, 0.125); }
+    public get fxaaEnabled(): boolean { return this._post.fxaaEnabled; }
+    public set fxaaEnabled(enabled: boolean) { this._post.fxaaEnabled = !!enabled; }
+    public get fxaaQuality(): FxaaQuality { return this._post.fxaaQuality; }
+    public set fxaaQuality(q: FxaaQuality) { this._post.fxaaQuality = q in FXAA_SEARCH_STEPS ? q : 'medium'; }
+    public get fxaaSubpixel(): number { return this._post.fxaaSubpixel; }
+    public set fxaaSubpixel(v: number) { this._post.fxaaSubpixel = clampFinite(v, 0, 1, 0.75); }
+    public get fxaaEdgeThreshold(): number { return this._post.fxaaEdgeThreshold; }
+    public set fxaaEdgeThreshold(v: number) { this._post.fxaaEdgeThreshold = clampFinite(v, 0.063, 0.333, 0.125); }
 
     // Selection outline appearance (used by the post-process outline pass).
-    public get outlineColor(): [number, number, number] { return this._outlineColor; }
-    public set outlineColor(color: [number, number, number]) { this._outlineColor = color; }
-    public get outlineWidth(): number { return this._outlineWidth; }
-    public set outlineWidth(width: number) { this._outlineWidth = Math.max(0, width); }
+    public get outlineColor(): [number, number, number] { return this._post.outlineColor; }
+    public set outlineColor(color: [number, number, number]) { this._post.outlineColor = color; }
+    public get outlineWidth(): number { return this._post.outlineWidth; }
+    public set outlineWidth(width: number) { this._post.outlineWidth = Math.max(0, width); }
 
     public get ssaoEnabled(): boolean { return this._ssaoEnabled; }
     public set ssaoEnabled(enabled: boolean) { this._ssaoEnabled = enabled; }
@@ -10982,10 +10353,10 @@ export class Renderer {
             // Turning it on mid-session must not blend against whatever the buffer last held.
             this.invalidateTemporalHistory();
         }
-        this._fxaaEnabled = t.fxaaEnabled;
+        this._post.fxaaEnabled = t.fxaaEnabled;
         // Restore what the user authored rather than a hardcoded default: a tier without bloom has to
         // zero the live value, and re-selecting a tier with bloom must give back the same setting.
-        this._bloomIntensity = t.bloomEnabled ? this._bloomIntensityUser : 0;
+        this._post.bloomIntensity = t.bloomEnabled ? this._post.bloomIntensityUser : 0;
         if (this._ssaoResolutionScale !== t.ssaoResolutionScale || this._renderScale !== t.renderScale) {
             this._ssaoResolutionScale = t.ssaoResolutionScale;
             this._renderScale = t.renderScale;
@@ -11285,37 +10656,37 @@ export class Renderer {
             pointShadowResolution: this._pointShadowResolution,
             pointShadowDistance: this._pointShadowDistance,
             pointShadowBias: this._pointShadowBias,
-            bloomEnabled: this._bloomIntensity > 0,
+            bloomEnabled: this._post.bloomIntensity > 0,
             clearColor: this.clearColor,
             // The AUTHORED value. Serializing `_view.exposure` saved whatever the meter was at when the
             // save happened, which made a scene's stored exposure depend on where the camera pointed.
             exposure: this._autoExposure.baseExposure,
-            bloomThreshold: this._bloomThreshold,
-            bloomKnee: this._bloomKnee,
-            bloomIntensity: this._bloomIntensity,
-            bloomMaskEnabled: this._bloomMaskEnabled,
-            chromaticAberrationStrength: this._chromaticAberrationStrength,
-            dofEnabled: this._dofEnabled,
-            dofFocusDistance: this._dofFocusDistance,
-            dofFocusRange: this._dofFocusRange,
-            dofAperture: this._dofAperture,
-            dofMaxBlur: this._dofMaxBlur,
-            lensFlareIntensity: this._lensFlareIntensity,
-            lensFlareThreshold: this._lensFlareThreshold,
-            lensFlareGhosts: this._lensFlareGhosts,
-            lensFlareHaloWidth: this._lensFlareHaloWidth,
-            lensDirtTexture: this._lensDirtTexture,
-            lensDirtIntensity: this._lensDirtIntensity,
-            vignetteStrength: this._vignetteStrength,
-            vignetteRoundness: this._vignetteRoundness,
-            vignetteSmoothness: this._vignetteSmoothness,
-            filmGrainIntensity: this._filmGrainIntensity,
-            filmGrainSize: this._filmGrainSize,
-            filmGrainColored: this._filmGrainColored,
-            saturation: this._saturation,
-            toneMapper: this._toneMapper,
-            colorGradingLut: this._colorGradingLut,
-            colorGradingIntensity: this._colorGradingIntensity,
+            bloomThreshold: this._post.bloomThreshold,
+            bloomKnee: this._post.bloomKnee,
+            bloomIntensity: this._post.bloomIntensity,
+            bloomMaskEnabled: this._post.bloomMaskEnabled,
+            chromaticAberrationStrength: this._post.chromaticAberrationStrength,
+            dofEnabled: this._post.dofEnabled,
+            dofFocusDistance: this._post.dofFocusDistance,
+            dofFocusRange: this._post.dofFocusRange,
+            dofAperture: this._post.dofAperture,
+            dofMaxBlur: this._post.dofMaxBlur,
+            lensFlareIntensity: this._post.lensFlareIntensity,
+            lensFlareThreshold: this._post.lensFlareThreshold,
+            lensFlareGhosts: this._post.lensFlareGhosts,
+            lensFlareHaloWidth: this._post.lensFlareHaloWidth,
+            lensDirtTexture: this._post.lensDirtTexture,
+            lensDirtIntensity: this._post.lensDirtIntensity,
+            vignetteStrength: this._post.vignetteStrength,
+            vignetteRoundness: this._post.vignetteRoundness,
+            vignetteSmoothness: this._post.vignetteSmoothness,
+            filmGrainIntensity: this._post.filmGrainIntensity,
+            filmGrainSize: this._post.filmGrainSize,
+            filmGrainColored: this._post.filmGrainColored,
+            saturation: this._post.saturation,
+            toneMapper: this._post.toneMapper,
+            colorGradingLut: this._post.colorGradingLut,
+            colorGradingIntensity: this._post.colorGradingIntensity,
             ssaoEnabled: this._ssaoEnabled,
             specularOcclusionEnabled: this._specularOcclusionEnabled,
             specularAaEnabled: this._specularAaEnabled,
@@ -11344,10 +10715,10 @@ export class Renderer {
             taaClipStrength: this._temporal.taaClipStrength,
             taaHistoryFilter: this._temporal.taaHistoryFilter,
             taaSharpness: this._temporal.taaSharpness,
-            fxaaEnabled: this._fxaaEnabled,
-            fxaaQuality: this._fxaaQuality,
-            fxaaSubpixel: this._fxaaSubpixel,
-            fxaaEdgeThreshold: this._fxaaEdgeThreshold,
+            fxaaEnabled: this._post.fxaaEnabled,
+            fxaaQuality: this._post.fxaaQuality,
+            fxaaSubpixel: this._post.fxaaSubpixel,
+            fxaaEdgeThreshold: this._post.fxaaEdgeThreshold,
             frustumCulling: this._frustumCulling,
             occlusionCulling: this._occlusionMode,
             foliageShadowDistance: this._foliageShadowDistance,
@@ -11411,7 +10782,7 @@ export class Renderer {
         if (s.bloomThreshold !== undefined) this.bloomThreshold = s.bloomThreshold;
         if (s.bloomKnee !== undefined) this.bloomKnee = s.bloomKnee;
         if (s.bloomIntensity !== undefined) this.bloomIntensity = s.bloomIntensity;
-        if (s.bloomMaskEnabled !== undefined) this._bloomMaskEnabled = s.bloomMaskEnabled;
+        if (s.bloomMaskEnabled !== undefined) this._post.bloomMaskEnabled = s.bloomMaskEnabled;
         if (s.chromaticAberrationStrength !== undefined) this.chromaticAberrationStrength = s.chromaticAberrationStrength;
         if (s.dofEnabled !== undefined) this.dofEnabled = s.dofEnabled;
         if (s.dofFocusDistance !== undefined) this.dofFocusDistance = s.dofFocusDistance;
@@ -11512,17 +10883,17 @@ export class Renderer {
 
     /**
      * Draw the selected nodes' silhouettes as solid white into the outline mask FBO, which
-     * `_outlinePass` turns into a screen-space border. No depth test or write, so an occluded
-     * selection is still outlined. Sets `_outlineActive`.
+     * `_post.outlinePass` turns into a screen-space border. No depth test or write, so an occluded
+     * selection is still outlined. Sets `_post.outlineActive`.
      */
     private _renderSelectionMask(models: ModelNode[], sprites: SpriteNode[]): void {
-        this._outlineActive = models.length > 0 || sprites.length > 0;
+        this._post.outlineActive = models.length > 0 || sprites.length > 0;
 
         // Opened and cleared even with nothing selected, or a silhouette from the previous selection
         // survives. `clearValue`, not the standing clear colour: the mask wants transparent black.
-        const pass = this._passes.beginFullscreenPass(this._outlineMaskFBO.renderTarget, 'outlineMask',
+        const pass = this._passes.beginFullscreenPass(this._post.outlineMaskFBO.renderTarget, 'outlineMask',
                                                true, [0, 0, 0, 0], false);
-        if (this._outlineActive) {
+        if (this._post.outlineActive) {
             // Always on top and never blended: the silhouette must be visible through geometry that
             // occludes it, which is the whole point of an outline. Said as compare 'always' with writes
             // off, because WebGPU has no separate "depth test disabled".

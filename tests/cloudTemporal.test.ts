@@ -264,7 +264,7 @@ describe('bloom mask blend state', () => {
     it('does not let a quality tier destroy the authored bloom intensity', () => {
         // Tier `low` disables bloom, which zeroes the live intensity; re-selecting a tier with bloom
         // used to restore a hardcoded 0.6 and silently discard whatever the user had set.
-        expect(renderer).toContain('_bloomIntensityUser');
-        expect(renderer).not.toMatch(/Math\.max\(this\._bloomIntensity, 0\.6\)/);
+        expect(renderer).toContain('bloomIntensityUser');
+        expect(renderer).not.toMatch(/Math\.max\(this\.(?:_post\.)?_?bloomIntensity, 0\.6\)/);
     });
 });

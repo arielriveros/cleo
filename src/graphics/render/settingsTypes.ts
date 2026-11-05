@@ -356,6 +356,13 @@ export interface QualityTier {
 export type TaaHistoryFilter = 'bilinear' | 'catmullRom';
 
 export type FxaaQuality = 'low' | 'medium' | 'high';
+/** Edge search steps per FXAA quality preset. */
+export const FXAA_SEARCH_STEPS: Record<FxaaQuality, number> = { low: 5, medium: 8, high: 12 };
+
+/** `v` clamped to [lo, hi]; `fallback` when it is not a finite number (a hand-edited or old save). */
+export function clampFinite(v: number, lo: number, hi: number, fallback: number): number {
+    return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
+}
 
 // Tier definitions. Each step down roughly quarters the cost of the cloud raymarch and SSAO/SSIL, which
 // scale with resolution squared AND with their step/sample count.

@@ -31,7 +31,7 @@ const RENDERER = rendererSource()
 
 /** The body of a `private _name(...)` method, up to its closing brace at class indentation. */
 function methodBody(name: string): string {
-    const start = RENDERER.indexOf(`private ${name}(`);
+    const start = RENDERER.search(new RegExp(`(?:private|public) (?:static )?${name}\\(`));
     expect(start, `${name} not found in renderer.ts`).toBeGreaterThan(-1);
     const rest = RENDERER.slice(start);
     const end = rest.indexOf('\n    }');
@@ -53,7 +53,7 @@ describe('offscreen capture alpha', () => {
     it('puts the on-screen resolve back to opaque', () => {
         // The other half, and the reason the thumbnail cannot simply set the flag once and leave it:
         // a leaked 1.0 punches the page background through the viewport on every frame after a capture.
-        expect(methodBody('_presentPass')).toContain("setUniform('u_alphaFromDepth', 0.0)");
+        expect(methodBody('presentPass')).toContain("setUniform('u_alphaFromDepth', 0.0)");
     });
 
     it('is claimed by every sharer of the present program', () => {
