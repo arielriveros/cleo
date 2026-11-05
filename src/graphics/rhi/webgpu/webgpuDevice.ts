@@ -694,10 +694,23 @@ class WebGPURenderTarget implements RenderTarget {
 // Command recording
 // ------------------------------------------------------------------------------------------------
 
-class WebGPURenderPassEncoder implements RenderPassEncoder {
+export class WebGPURenderPassEncoder implements RenderPassEncoder {
     private _ended = false;
     /** Remembered from `setPipeline`, for the triangle count in `_countDraw`. */
     private _topology: PrimitiveTopology = 'triangle-list';
+
+    // What this pass has bound, so a call that would set the same state again is skipped — a measured
+    // Valley frame repeated 42% of its state calls (a sorted geometry run re-sets one pipeline per draw,
+    // occlusion queries one cube's buffers per query, every draw the uniform group a draw that changed
+    // nothing still has). A pass gets a FRESH encoder and WebGPU resets all pass state at
+    // `beginRenderPass`, so nothing here outlives the pass. Auto layouts make every pipeline's groups its
+    // own objects, so an identical object at an index is the very binding a draw validates against.
+    private readonly _groups: (GPUBindGroup | null)[] = [null, null, null, null];
+    private readonly _vertexBuffers: (GPUBuffer | null)[] = [];
+    private readonly _vertexOffsets: number[] = [];
+    private _indexBuffer: GPUBuffer | null = null;
+    private _indexFormat: GPUIndexFormat | null = null;
+    private _indexOffset = -1;
 
     constructor(private readonly _pass: GPURenderPassEncoder,
                 private readonly _device: GPUDevice) {}
@@ -709,9 +722,16 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
     public setPipeline(pipeline: RenderPipeline): void {
         const p = pipeline as WebGPURenderPipeline;
         this._topology = p.primitive.topology;
-        this._pass.setPipeline(p.handle);
-        for (const { group, handle } of p.emptyBindGroups(this._device))
-            this._pass.setBindGroup(group, handle);
+        if (p !== this._pipeline) {
+            this._pass.setPipeline(p.handle);
+            frameStats.rhiStateCalls++;
+            for (const { group, handle } of p.emptyBindGroups(this._device))
+                this._bindGroup(group, handle);
+        } else {
+            // Same pipeline: its empty groups are still bound — nothing this pass set since could have
+            // replaced them without setting another pipeline first.
+            frameStats.rhiStateCallsSaved++;
+        }
 
         // Bind the PROGRAM here, or a pass that never calls `bind` itself writes its uniforms into
         // whichever program the previous pass left bound. The blocks themselves are bound at draw
@@ -734,23 +754,52 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
         program.flushUniformBlocks();
         if (this._pipeline && program instanceof WebGPUShaderProgram)
             for (const { group, handle } of this._pipeline.uniformGroupsFor(program, this._device))
-                this._pass.setBindGroup(group, handle);
+                this._bindGroup(group, handle);
+    }
+
+    /** `setBindGroup` without offsets, skipped when that very group is already at `group`. */
+    private _bindGroup(group: number, handle: GPUBindGroup): void {
+        if (this._groups[group] === handle) { frameStats.rhiStateCallsSaved++; return; }
+        this._groups[group] = handle;
+        this._pass.setBindGroup(group, handle);
+        frameStats.rhiStateCalls++;
     }
 
     public setBindGroup(group: number, bindGroup: BindGroup, dynamicOffsets?: readonly number[]): void {
         const handle = (bindGroup as WebGPUBindGroup).handle;
+        if (!dynamicOffsets) { this._bindGroup(group, handle); return; }
         // The third argument must be OMITTED when there are no offsets, never passed as `undefined`:
-        // `setBindGroup` is overloaded on ARGUMENT COUNT, and an explicit undefined throws.
-        if (dynamicOffsets) this._pass.setBindGroup(group, handle, Array.from(dynamicOffsets));
-        else this._pass.setBindGroup(group, handle);
+        // `setBindGroup` is overloaded on ARGUMENT COUNT, and an explicit undefined throws. With offsets
+        // the call always goes through, and the slot is forgotten: the same group at other offsets is
+        // other state.
+        this._pass.setBindGroup(group, handle, Array.from(dynamicOffsets));
+        this._groups[group] = null;
+        frameStats.rhiStateCalls++;
     }
 
     public setVertexBuffer(slot: number, buffer: Buffer, offset: number = 0): void {
-        this._pass.setVertexBuffer(slot, (buffer as WebGPUBuffer).handle, offset);
+        const handle = (buffer as WebGPUBuffer).handle;
+        if (this._vertexBuffers[slot] === handle && this._vertexOffsets[slot] === offset) {
+            frameStats.rhiStateCallsSaved++;
+            return;
+        }
+        this._vertexBuffers[slot] = handle;
+        this._vertexOffsets[slot] = offset;
+        this._pass.setVertexBuffer(slot, handle, offset);
+        frameStats.rhiStateCalls++;
     }
 
     public setIndexBuffer(buffer: Buffer, format: IndexFormat, offset: number = 0): void {
-        this._pass.setIndexBuffer((buffer as WebGPUBuffer).handle, gpuIndexFormat(format), offset);
+        const handle = (buffer as WebGPUBuffer).handle, f = gpuIndexFormat(format);
+        if (this._indexBuffer === handle && this._indexFormat === f && this._indexOffset === offset) {
+            frameStats.rhiStateCallsSaved++;
+            return;
+        }
+        this._indexBuffer = handle;
+        this._indexFormat = f;
+        this._indexOffset = offset;
+        this._pass.setIndexBuffer(handle, f, offset);
+        frameStats.rhiStateCalls++;
     }
 
     public setViewport(x: number, y: number, width: number, height: number): void {
@@ -761,17 +810,26 @@ class WebGPURenderPassEncoder implements RenderPassEncoder {
         this._pass.setScissorRect(x, y, width, height);
     }
 
-    public draw(vertexCount: number, instanceCount: number = 1, firstVertex: number = 0): void {
+    public draw(vertexCount: number, instanceCount: number = 1, firstVertex: number = 0, firstInstance: number = 0): void {
+        if (firstInstance !== 0) this._checkFirstInstance();
         this._flushUniforms();
-        this._pass.draw(vertexCount, instanceCount, firstVertex);
+        this._pass.draw(vertexCount, instanceCount, firstVertex, firstInstance);
         this._countDraw(vertexCount, instanceCount);
     }
 
     public drawIndexed(indexCount: number, instanceCount: number = 1, firstIndex: number = 0,
-                       baseVertex: number = 0): void {
+                       baseVertex: number = 0, firstInstance: number = 0): void {
+        if (firstInstance !== 0) this._checkFirstInstance();
         this._flushUniforms();
-        this._pass.drawIndexed(indexCount, instanceCount, firstIndex, baseVertex);
+        this._pass.drawIndexed(indexCount, instanceCount, firstIndex, baseVertex, firstInstance);
         this._countDraw(indexCount, instanceCount);
+    }
+
+    // WebGPU offsets instance-rate attribute fetch by `firstInstance`; WebGL2 cannot. A pipeline with an
+    // instance-rate buffer must therefore draw from instance 0, or the two backends would disagree.
+    private _checkFirstInstance(): void {
+        if (this._pipeline?.vertexLayouts.some(l => l.stepMode === 'instance'))
+            throw new Error(`${this._pipeline.label}: firstInstance with instance-rate vertex buffers`);
     }
 
     public beginOcclusionQuery(index: number): void { this._pass.beginOcclusionQuery(index); }
@@ -1674,10 +1732,14 @@ export class WebGPUDevice implements Device {
         const bytesPerTexel = TEXTURE_FORMAT_INFO[tex.format].bytesPerTexel;
         this._device.queue.writeTexture(
             { texture: tex.handle, mipLevel, origin: { x, y, z: arrayLayer } },
-            data.buffer as ArrayBuffer,
+            // The VIEW, not its whole ArrayBuffer: the browser ships everything from `offset` to the
+            // end of what it is handed to the GPU process, so `data.buffer` + `byteOffset` sent the
+            // rest of a caller's staging buffer with every upload (the object table's 256 KB scratch,
+            // once per flush — ~3.6 MB a frame in Play for ~20 KB of real rows).
+            data as ArrayBufferView<ArrayBuffer>,
             // No 256-byte rule here: the alignment requirement applies to buffer COPIES, not to
             // `writeTexture`, which takes the tightly packed rows a caller naturally has.
-            { offset: data.byteOffset, bytesPerRow: width * bytesPerTexel, rowsPerImage: height },
+            { offset: 0, bytesPerRow: width * bytesPerTexel, rowsPerImage: height },
             { width, height, depthOrArrayLayers: 1 },
         );
     }
@@ -1699,6 +1761,10 @@ export class WebGPUDevice implements Device {
     private readonly _recording = new Map<WebGPUCommandEncoder, number>();
     private _submitCount = 0;
 
+    /** See {@link Device.submissionEpoch}. */
+    public get submissionEpoch(): number { return this._submissionEpoch; }
+    private _submissionEpoch = 0;
+
     private _submitted(encoder: WebGPUCommandEncoder): void {
         this._submitCount++;
         this._recording.delete(encoder);
@@ -1707,7 +1773,10 @@ export class WebGPUDevice implements Device {
         // submits is abandoned, not pending.
         for (const [open, since] of this._recording)
             if (this._submitCount - since > 64) this._recording.delete(open);
-        if (this._recording.size === 0) this.releaseUniformSlots();
+        if (this._recording.size === 0) {
+            this.releaseUniformSlots();
+            this._submissionEpoch++;
+        }
     }
 
     /** See {@link Device.setTimestampCollection}. Everything it needs lives in `TimestampCollector`. */

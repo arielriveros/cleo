@@ -244,9 +244,10 @@ export class AutoExposure {
     /**
      * Pull the metering result back, at the very end of the frame and only every few frames.
      *
-     * Both halves of that matter. `readPixels` binds and then UNBINDS a framebuffer, so between passes
-     * it redirects everything after it; and it is synchronous on WebGL2, so every call drains the
-     * pipeline. Here there is no pass left to disturb, and the interval keeps the drain occasional.
+     * `readPixels` binds and then UNBINDS a framebuffer, so between passes it would redirect everything
+     * after it; here there is no pass left to disturb. The result arrives a frame or two later on both
+     * backends (WebGPU maps a copy; WebGL2 copies into a pixel-pack buffer and waits on a fence), and
+     * one read is in flight at a time — the adaptation eases toward the target anyway.
      */
     public readExposureSample(): void {
         const due = this._exposureReadDue;

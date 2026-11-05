@@ -79,6 +79,12 @@ export interface ShadowCasterRecord {
     terrainVersion: number;
     /** A mesh drawn in place of the node's own — a terrain shadow block (terrain/terrainShadowBlocks.ts). */
     mesh: Mesh | null;
+    /**
+     * The node's per-object record and the table epoch it belongs to: found once per epoch, then reused by
+     * every layer of every light (a node's matrix cannot change between them). -1: not yet this epoch.
+     */
+    row: number;
+    rowEpoch: number;
 }
 
 /** One landscape's chunk casters, and their spheres and reaches packed `x, y, z, r, reach` for the layer test. */
@@ -760,6 +766,19 @@ export class ShadowPasses {
         this.shadowFrustum.setFromViewProjection(lightSpace);
         let modelSet = false;
         const lastModel = this._shadowLastModel;
+
+        // Every caster's per-object record, appended and uploaded once — by the first layer of the
+        // epoch; every later layer of every light finds them on its records. A landscape's chunks share
+        // one matrix, so they collapse to one record.
+        const objects = this._sys.objects, modelDraw = this._sys.modelDraw;
+        const epoch = objects.epoch;
+        for (let k = 0; k < count; k++) {
+            const record = casters[k];
+            if (record.rowEpoch !== epoch) { record.row = modelDraw.ensureRow(record.node); record.rowEpoch = epoch; }
+        }
+        objects.flush();
+        let objectData = false;
+
         for (let k = 0; k < count; k++) {
             const record = casters[k];
             const node = record.node, state = record.state;
@@ -773,6 +792,9 @@ export class ShadowPasses {
             if (state.pipeline !== boundPipeline) {
                 pass.setPipeline(state.pipeline);
                 boundPipeline = state.pipeline;
+                // The object table's group right after the pipeline (WebGL2 hands units out again).
+                objectData = this._bindGroups.declaresObjectData(state.pipeline);
+                if (objectData) pass.setBindGroup(2, this._bindGroups.objectDataGroup(state.pipeline, objects.texture));
             }
             if (state.shaderType !== bound) {
                 this._shaderManager.setUniform('u_lightSpace', this._projection.clipProjection(lightSpace));
@@ -780,10 +802,11 @@ export class ShadowPasses {
                 modelSet = false;
             }
 
-            // Only when it differs from the last draw's: every chunk of a landscape shares one transform,
-            // and an unchanged block uploads nothing.
+            // A program reading the object table takes the matrix from the record; the others (skinned)
+            // get u_model, only when it differs from the last draw's.
+            const row = objectData ? record.row : 0;
             const world = node.worldTransform;
-            if (!modelSet || !ShadowPasses._sameMatrix(lastModel, world)) {
+            if (!objectData && (!modelSet || !ShadowPasses._sameMatrix(lastModel, world))) {
                 this._shaderManager.setUniform('u_model', world);
                 lastModel.set(world);
                 modelSet = true;
@@ -794,7 +817,8 @@ export class ShadowPasses {
                 // geometry shader: the unlit Basic family has no normal/tangent/bitangent, so its bone
                 // attributes sit at locations 2/3 where every lit family puts them at 5/6.
                 (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(state.shaderType).attributes);
-                this._sys.modelDraw.uploadBoneMatrices('shadowMapSkinned', node);
+                // The palette rides in the object table for a program that reads it (the caster's record).
+                if (!objectData) this._sys.modelDraw.uploadBoneMatrices('shadowMapSkinned', node);
             }
 
             // Depth-only, so no material is bound — a merged model normally casts its whole buffer in
@@ -820,21 +844,21 @@ export class ShadowPasses {
                         [cut ? cut.texture : this._bindGroups.fallbackTexture]));
                     const start = submeshes ? submeshes[i].start : 0;
                     const drawCount = submeshes ? submeshes[i].count : 0;
-                    if (this._passes.recordDraw(pass, model.mesh, start, drawCount)) continue;
+                    if (this._passes.recordDraw(pass, model.mesh, start, drawCount, -1, row)) continue;
                     if (submeshes) model.mesh.drawRange(start, drawCount, 'triangle-list');
                     else model.mesh.draw('triangle-list');
                 }
             } else if (record.mesh) {
-                this._passes.recordDraw(pass, record.mesh, 0, 0);
+                this._passes.recordDraw(pass, record.mesh, 0, 0, -1, row);
             } else if (state.wholeBuffer) {
-                if (!this._passes.recordDraw(pass, model.mesh, 0, 0, this._shadowLodFor(record)))
+                if (!this._passes.recordDraw(pass, model.mesh, 0, 0, this._shadowLodFor(record), row))
                     model.mesh.draw('triangle-list');
             } else {
                 const submeshes = model.submeshes;
                 for (let i = 0; i < submeshes.length; i++) {
                     const caster = materials[i] ?? materials[0];   // see ModelDraw.drawSubmeshes: never index past the array
                     if (!caster.config.castShadow || caster.config.wireframe) continue;
-                    if (this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count)) continue;
+                    if (this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count, -1, row)) continue;
                     model.mesh.drawRange(submeshes[i].start, submeshes[i].count, 'triangle-list');
                 }
             }
@@ -919,7 +943,7 @@ export class ShadowPasses {
         let record = this._casterRecordByNode.get(node);
         const state = this._shadowCasterStateOf(node);
         if (!record) {
-            record = { node, sphere, state, reach: 0, terrainVersion, mesh: null };
+            record = { node, sphere, state, reach: 0, terrainVersion, mesh: null, row: 0, rowEpoch: -1 };
             this._casterRecordByNode.set(node, record);
         }
         record.sphere = sphere;
@@ -1805,7 +1829,8 @@ export class ShadowPasses {
                 };
                 state.key = mixNumber(HASH_SEED, state.pipelineId);
                 const record: ShadowCasterRecord = { node: chunk0, sphere: { center, radius }, state, reach: 0,
-                                                     terrainVersion: terrain.heightsVersion, mesh: set.meshes[i] };
+                                                     terrainVersion: terrain.heightsVersion, mesh: set.meshes[i],
+                                                     row: 0, rowEpoch: -1 };
                 this._updateReach(record, this._reachKey);
                 set.records.push(record);
             }

@@ -353,7 +353,7 @@ export class EditorOverlays {
      * the entire point here, and `tests/cloudTemporal` forbids the collapsed call outright.
      */
     private _setOverlayBlend(): void {
-        if (gl) gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        if (gl) GLState.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     }
 
     private _renderGizmos(gizmoNodes: ModelNode[]): void {

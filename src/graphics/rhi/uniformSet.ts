@@ -4,6 +4,7 @@
 import type { Device } from './device';
 import type { Buffer } from './resources';
 import { BufferUsage } from './types';
+import { frameStats } from '../renderStats';
 
 /** One writable leaf, as the `.wgsl` loader reflects it. */
 export interface UniformMember {
@@ -25,7 +26,7 @@ export interface UniformBlockLayout {
 
 // How to write one member: N elements of M components, each `stride` bytes apart. Every type collapses
 // onto this shape once, here, so the writer stays branch-free at call time.
-interface WriteShape {
+export interface WriteShape {
     readonly offset: number;
     readonly elements: number;
     readonly components: number;
@@ -196,9 +197,16 @@ export class UniformSet {
     public set(name: string, value: unknown): boolean {
         const shape = this._shapes.get(name);
         if (!shape) return false;
-        const target = shape.integer ? this._ints : this._floats;
-        if (writeShape(shape, target, value)) this._dirty = true;
+        this.write(shape, value);
         return true;
+    }
+
+    /** Where `name` lives in this block, or undefined. Resolved once per name by {@link ProgramUniforms}. */
+    public shapeOf(name: string): WriteShape | undefined { return this._shapes.get(name); }
+
+    /** {@link set} with the member already resolved (see {@link shapeOf}). */
+    public write(shape: WriteShape, value: unknown): void {
+        if (writeShape(shape, shape.integer ? this._ints : this._floats, value)) this._dirty = true;
     }
 
     /**
@@ -211,6 +219,8 @@ export class UniformSet {
         if (this._cursor + 1 >= this._slots) this._grow(device);
         else this._cursor++;
         device.writeBuffer(this._buffer, this._cursor * this.slotSize, this._bytes);
+        frameStats.uniformUploads++;
+        frameStats.uniformUploadBytes += this._bytes.byteLength;
     }
 
     // Double the arena and start again at its first slot. The OLD buffer must NOT be destroyed yet: draws
@@ -247,10 +257,15 @@ export class UniformSet {
  * Every uniform block one PROGRAM declares, written by name and bound by group. A name goes to EVERY
  * block declaring it — `u_view` lives in two, and writing only the first leaves the other zeroed.
  */
+/** One block member a name writes: the block, and where in it. */
+interface UniformRoute { readonly set: UniformSet; readonly shape: WriteShape }
+
 export class ProgramUniforms {
     private readonly _sets: UniformSet[] = [];
-    // Resolved name -> every set that declares it, memoised. A miss caches null.
-    private readonly _route = new Map<string, UniformSet[] | null>();
+    // Resolved name -> every member it writes (block AND place), memoised. A miss caches null. Holding
+    // the member, not just the block, makes a write one map lookup instead of two — it runs for every
+    // uniform of every draw.
+    private readonly _route = new Map<string, UniformRoute[] | null>();
 
     constructor(device: Device, blocks: readonly UniformBlockLayout[], label = 'program',
                 alignment: number = DEFAULT_UNIFORM_OFFSET_ALIGNMENT) {
@@ -270,17 +285,24 @@ export class ProgramUniforms {
      * error — the renderer sets uniforms only some programs have, and every call site relies on that.
      */
     public set(name: string, value: unknown): boolean {
-        const cached = this._route.get(name);
-        if (cached !== undefined) return cached !== null && this._writeAll(cached, name, value);
-        const matches = this._sets.filter(set => set.has(name));
-        this._route.set(name, matches.length ? matches : null);
-        return matches.length > 0 && this._writeAll(matches, name, value);
+        let routes = this._route.get(name);
+        if (routes === undefined) {
+            const found: UniformRoute[] = [];
+            for (const set of this._sets) {
+                const shape = set.shapeOf(name);
+                if (shape) found.push({ set, shape });
+            }
+            routes = found.length ? found : null;
+            this._route.set(name, routes);
+        }
+        if (routes === null) return false;
+        for (let i = 0; i < routes.length; i++) routes[i].set.write(routes[i].shape, value);
+        return true;
     }
 
-    private _writeAll(sets: readonly UniformSet[], name: string, value: unknown): boolean {
-        let written = false;
-        for (const set of sets) written = set.set(name, value) || written;
-        return written;
+    /** Whether any block declares `name`. */
+    public declares(name: string): boolean {
+        return this._sets.some(set => set.has(name));
     }
 
     /** Upload every block that changed, each into a fresh slot. One call, immediately before a draw. */

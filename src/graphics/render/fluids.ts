@@ -89,7 +89,7 @@ export class FluidVolumePasses {
         GLState.depthTest(false);
         GLState.depthMask(false);
         GLState.blend(true);
-        if (gl) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        if (gl) GLState.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         const trace = this._passes.beginFullscreenPass(this._fluidTraceFBO!.renderTarget, 'fluidVolumes', true,
                                                 [0, 0, 0, 0], false, true);
         for (const node of volumes) {
@@ -195,7 +195,7 @@ export class FluidVolumePasses {
 
         // --- 3. Composite ---
         GLState.blend(true);
-        if (gl) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        if (gl) GLState.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'fluidVolumes.composite', false, undefined, false);
         this._fullscreen.bind(pass, 'fluidVolumeComposite', FluidVolumeCompositeProgram, [image, this._fluidTraceFBO!.colors[1], depth], VolumetricCloudPasses.CLOUD_BLEND);
         sm.bind('fluidVolumeComposite');

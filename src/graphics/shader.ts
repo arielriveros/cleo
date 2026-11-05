@@ -19,7 +19,7 @@ export class Shader implements ShaderProgram {
     private _fragmentShader!: WebGLShader;
     private _attributes: AttributeInfo[] = [];
     private _uniforms: {
-        [name: string]: {info: UniformInfo, value: any}
+        [name: string]: {info: UniformInfo, value: any, last?: number | boolean}
     } = {};
     // std140 blocks, for programs generated from WGSL. Null for hand-written GLSL, which has loose
     // uniforms instead. See systems/uniformBlocks.ts.
@@ -135,7 +135,27 @@ export class Shader implements ShaderProgram {
             return;
         }
         uniform.value = value;
+        // A uniform is PROGRAM state and every gl.uniform* call is made from this file, so a scalar
+        // equal to the last one this program was given is already what GL holds. The case that pays:
+        // a WebGL2 bind group setting each sampler to its texture unit on every draw.
+        if (uniform.info.size === 1 && (typeof value === 'number' || typeof value === 'boolean')) {
+            if (uniform.last === value) return;
+            uniform.last = value;
+        }
         this._setUniform(uniform.info.location, uniform.info.type, value, uniform.info.size);
+    }
+
+    /**
+     * Start `instance_index` at `first` for the next draw: naga's `naga_vs_first_instance`, which a
+     * vertex stage reading `@builtin(instance_index)` declares (WebGL2 has no base-instance draw). The
+     * per-object table's record arrives this way. Program state, so an unchanged value is not re-sent;
+     * a no-op for a program without the uniform. The program must be the bound one.
+     */
+    public setFirstInstance(first: number): void {
+        const uniform = this._uniforms['naga_vs_first_instance'];
+        if (!uniform || uniform.last === first) return;
+        uniform.last = first;
+        gl.uniform1ui(uniform.info.location, first);
     }
 
     /** Upload any block writes made since the last flush. Call immediately before a draw. */
@@ -243,8 +263,9 @@ export class Shader implements ShaderProgram {
         }
     }
 
-    public hasUniform(name: string) {
-        return name in this._uniforms;
+    /** Whether this program declares `name`: a loose uniform OR a block member, as on WebGPU. */
+    public hasUniform(name: string): boolean {
+        return name in this._uniforms || (this._blocks?.has(name) ?? false);
     }
 
     private storeAttributes(): void {
@@ -254,6 +275,9 @@ export class Shader implements ShaderProgram {
         for (let i = 0; i < numAttribs; i++) {
             const attribInfo = gl.getActiveAttrib(this._shaderProgram, i);
             if (!attribInfo) break;
+            // A built-in (ES 3.0 lets a driver list `gl_InstanceID`, which naga's `instance_index` reads) is
+            // no buffer attribute: counting it would widen every vertex layout built from this program.
+            if (attribInfo.name.startsWith('gl_')) continue;
     
             // TODO: Handle other types, 4 is the default for floats
             attributesStride += this.getTypeSize(attribInfo.type) * 4;
@@ -264,6 +288,9 @@ export class Shader implements ShaderProgram {
         for (let i = 0; i < numAttribs; i++) {
             const attribInfo = gl.getActiveAttrib(this._shaderProgram, i);
             if (!attribInfo) break;
+            // A built-in (ES 3.0 lets a driver list `gl_InstanceID`, which naga's `instance_index` reads) is
+            // no buffer attribute: counting it would widen every vertex layout built from this program.
+            if (attribInfo.name.startsWith('gl_')) continue;
     
             const byteSize = this.getTypeByteSize(attribInfo.type);
     

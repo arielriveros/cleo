@@ -3,6 +3,7 @@ import { ModelNode } from '../../core/scene/nodes/modelNode';
 import { Material, CustomMaterial } from '../material';
 import type { RenderPassEncoder } from '../rhi/device';
 import type { RenderPipeline } from '../rhi/resources';
+import type { ShaderProgram } from '../rhi/shaderProgram';
 import type { BlendState, CullMode, DepthStencilState } from '../rhi/types';
 import { customPipelineReflection, customShaderReady } from '../systems/customShaders';
 import type { Texture } from '../texture';
@@ -13,6 +14,21 @@ import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
+import type { ObjectTable } from '../objectTable';
+import { dissolveOf } from '../objectData';
+
+/**
+ * Which of `beginModel`'s per-draw names a program declares. A program that reads the per-object table
+ * has none of them, and writing them anyway cost a route lookup each — and, for a skinned draw, copying
+ * the whole bone palette into a scratch the program never reads. Resolved once per program.
+ */
+interface ModelProgramProfile {
+    readonly model: boolean;
+    readonly uv: boolean;
+    readonly bones: boolean;
+    readonly dissolve: boolean;
+    readonly camHolePivot: boolean;
+}
 
 /** `count` identity matrices, packed. */
 function identityPalette(count: number): Float32Array {
@@ -60,7 +76,68 @@ export class ModelDraw {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _materials: MaterialBinder,
-                private readonly _projection: ViewProjection) {}
+                private readonly _projection: ViewProjection,
+                private readonly _objects: ObjectTable) {}
+
+    /**
+     * `node`'s record in the per-object table — the same one whichever pass asks (shadows, G-buffer,
+     * forward, velocity), appended on first use this submission, uploaded if pending.
+     */
+    public rowForNode(node: ModelNode): number {
+        const palette = this._paletteOf(node);
+        return this._objects.rowFor(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither, palette);
+    }
+
+    /** A skinned node's bone palette in the table (its first texel), 0 for a static one. */
+    private _paletteOf(node: ModelNode): number {
+        if (!(node.model instanceof AnimatedModel)) return 0;
+        return this._objects.palette(node, this._bonesOf(node));
+    }
+
+    /**
+     * The skinning palette a draw of `node` uses: this frame's pose in `boneMatrixScratch`, or the identity
+     * palette for an animated model with no animator. Exactly what {@link uploadBoneMatrices} sends.
+     */
+    private _bonesOf(node: ModelNode): Float32Array {
+        const animatedModel = node.model as AnimatedModel;
+        if (!animatedModel.hasSkin || !node.animator) return this.boneIdentityScratch;
+        const boneMatrices = node.animator.getFinalBoneMatrices();
+        const scratch = this.boneMatrixScratch;
+        const n = Math.min(100, boneMatrices.length);
+        for (let i = 0; i < n; i++) scratch.set(boneMatrices[i], i * 16);
+        return scratch;
+    }
+
+    /** Append every node's record, then upload them in one go — before a pass records its draws. */
+    public prepareRows(nodes: Iterable<ModelNode>): void {
+        for (const node of nodes) this.ensureRow(node);
+        this._objects.flush();
+    }
+
+    /** `node`'s record, appended if needed but NOT uploaded — see {@link flushRows}. */
+    public ensureRow(node: ModelNode): number {
+        const palette = this._paletteOf(node);
+        return this._objects.ensure(node, node.worldTransform, dissolveOf(node.effectiveFade), !!node.cameraDither, palette);
+    }
+
+    /** Upload the records {@link ensureRow} appended. */
+    public flushRows(): void { this._objects.flush(); }
+
+    /**
+     * The record the next draw of {@link drawSubmeshes} starts `instance_index` at: set by the bind
+     * callback when the pipeline it set reads the per-object table, 0 otherwise.
+     */
+    private _firstInstance = 0;
+
+    /**
+     * After `setPipeline`: the per-object table's group, and the record this draw reads, for a pipeline
+     * that declares the table. The record first: appending one may replace the table texture.
+     */
+    private _bindObjectData(pass: RenderPassEncoder, pipeline: RenderPipeline, node: ModelNode): void {
+        if (!this._bindGroups.declaresObjectData(pipeline)) return;
+        this._firstInstance = this.rowForNode(node);
+        pass.setBindGroup(2, this._bindGroups.objectDataGroup(pipeline, this._objects.texture));
+    }
 
     // The draw `_bindMaterial` serves, set by `drawMaterials` around its submesh loop: one callback bound
     // for the object's life instead of a closure built per draw.
@@ -73,6 +150,9 @@ export class ModelDraw {
     private readonly _bindMaterial = (mat: Material): boolean => this._bindModelMaterial(mat);
 
     public specularAaEnabled: boolean = true;
+
+    private static readonly _UV_OFFSET = [0, 0];
+    private static readonly _UV_SCALE = [1, 1];
 
     // Reused scratch to avoid per-frame allocations
     public boneMatrixScratch: Float32Array = new Float32Array(100 * 16);
@@ -108,9 +188,10 @@ export class ModelDraw {
             if (!ModelDraw._drawable(mat)) return;
             // A callback that set a PIPELINE has already fixed the cull mode; calling _materials.applyCull after
             // it would be harmless today and wrong the moment the two disagree.
+            this._firstInstance = 0;
             const viaPipeline = !!bindMaterial(mat);
             if (!viaPipeline) this._materials.applyCull(mat.config.side);
-            if (viaPipeline && pass && this._passes.recordDraw(pass, model.mesh, 0, 0)) return;
+            if (viaPipeline && pass && this._passes.recordDraw(pass, model.mesh, 0, 0, -1, this._firstInstance)) return;
             model.mesh.draw(mat.config.wireframe ? 'line-list' : 'triangle-list');
             return;
         }
@@ -120,10 +201,12 @@ export class ModelDraw {
             // future disagreement into a mid-frame TypeError rather than a wrong colour. Slot 0 always exists.
             const mat = model.materials[i] ?? model.materials[0];
             if (!ModelDraw._drawable(mat)) continue;
+            this._firstInstance = 0;
             const viaPipeline = !!bindMaterial(mat);
             if (!viaPipeline) this._materials.applyCull(mat.config.side);
             if (viaPipeline && pass
-                && this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count)) continue;
+                && this._passes.recordDraw(pass, model.mesh, submeshes[i].start, submeshes[i].count, -1,
+                                           this._firstInstance)) continue;
             model.mesh.drawRange(submeshes[i].start, submeshes[i].count,
                 mat.config.wireframe ? 'line-list' : 'triangle-list');
         }
@@ -141,15 +224,42 @@ export class ModelDraw {
         if (animated)
             (node.model as AnimatedModel).initializeVAO(this._shaderManager.getShader(shaderType).attributes);
         this._shaderManager.bind(shaderType);
+        const declares = this._profileOf(this._shaderManager.bound!);
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         this._shaderManager.setUniform('u_projection', depthNudge
             ? this._projection.nudgedProjection(this._view.camera.projectionMatrix, depthNudge)
             : this._projection.rasterProjection(this._view.camera.projectionMatrix));
-        this._shaderManager.setUniform('u_model', node.worldTransform);
-        this._materials.setDissolve(node.effectiveFade);
-        this._materials.setCameraHole(node.cameraDither);
-        if (animated) this.uploadBoneMatrices(shaderType, node);
+        if (declares.model) this._shaderManager.setUniform('u_model', node.worldTransform);
+        // A model shows its whole texture: the Basic family's UV transform is a sprite-sheet tile, and
+        // a uniform keeps the last sprite's. This used to be written only in the forward pass, and only
+        // where `hasUniform` saw it — which on WebGL2 never saw a block member — so a Basic model there,
+        // and in the G-buffer on both backends, drew with whatever the block held. (A table program
+        // takes the UV transform from its record instead.)
+        if (declares.uv) {
+            this._shaderManager.setUniform('u_uvOffset', ModelDraw._UV_OFFSET);
+            this._shaderManager.setUniform('u_uvScale', ModelDraw._UV_SCALE);
+        }
+        this._materials.setDissolve(node.effectiveFade, declares.dissolve);
+        this._materials.setCameraHole(node.cameraDither, declares.camHolePivot);
+        if (animated && declares.bones) this.uploadBoneMatrices(shaderType, node);
         return animated;
+    }
+
+    private readonly _profiles = new WeakMap<ShaderProgram, ModelProgramProfile>();
+
+    private _profileOf(program: ShaderProgram): ModelProgramProfile {
+        let profile = this._profiles.get(program);
+        if (!profile) {
+            profile = {
+                model: program.hasUniform('u_model'),
+                uv: program.hasUniform('u_uvOffset') || program.hasUniform('u_uvScale'),
+                bones: program.hasUniform('u_boneMatrices'),
+                dissolve: program.hasUniform('u_dissolve'),
+                camHolePivot: program.hasUniform('u_camHolePivot'),
+            };
+            this._profiles.set(program, profile);
+        }
+        return profile;
     }
 
     /**
@@ -184,14 +294,15 @@ export class ModelDraw {
         if (mat.type === 'terrain') {
             if (state.terrainSelfShadow) {
                 // u_viewPos again, and deliberately: terrain reads it from its OWN uniform block, not the
-                // transform block `beginModel` wrote. Two blocks, two writes.
+                // transform block `beginModel` wrote. Two blocks, two writes. Outside the material memo
+                // below: whether they are written at all depends on the pass, not the material.
                 this._shaderManager.setUniform('u_viewPos', this._view.camera.position); // parallax V + specular V
                 this._shaderManager.setUniform('u_sunDirection', this._view.sunDirection); // self-shadow
             }
-            // The roughness filter, in both passes: a probe capture must shade terrain with the same NDF
-            // width as the frame it is a probe for.
-            this._shaderManager.setUniform('u_specularAA', this.specularAaEnabled);
-            for (const [name, value] of mat.properties) this._shaderManager.setUniform(name, value);
+            // The surface arrays, and the roughness filter (in both passes: a probe capture must shade
+            // terrain with the same NDF width as the frame it is a probe for) — once per landscape per
+            // frame, not per chunk.
+            this._materials.applyTerrainProperties(mat);
             if (!state.viaRHI) { this._materials.applyTerrain(mat); return false; }
             const pipeline = this._pipelines.memoized(state.memo, mat, shaderType, reflection!, {
                 cullMode: ModelDraw.cullFor(mat.config.side),
@@ -207,6 +318,7 @@ export class ModelDraw {
             pass!.setPipeline(pipeline);
             pass!.setBindGroup(0, this._bindGroups.terrainGroup(pipeline, mat));
             this._bindFrameLighting(pass!, pipeline, state);
+            this._bindObjectData(pass!, pipeline, node);
             return true;
         }
         if (mat instanceof CustomMaterial) {
@@ -230,6 +342,7 @@ export class ModelDraw {
             pass!.setPipeline(pipeline);
             pass!.setBindGroup(0, this._bindGroups.customGroup(pipeline, mat, state.envCube));
             this._bindFrameLighting(pass!, pipeline, state);
+            this._bindObjectData(pass!, pipeline, node);
             return true;
         }
         if (!state.viaRHI || !reflection) { this._materials.apply(mat); return false; }
@@ -248,6 +361,7 @@ export class ModelDraw {
         this._materials.applyProperties(mat);
         pass!.setBindGroup(0, this._bindGroups.materialGroup(pipeline, mat, state.envCube));
         this._bindFrameLighting(pass!, pipeline, state);
+        this._bindObjectData(pass!, pipeline, node);
         return true;
     }
 

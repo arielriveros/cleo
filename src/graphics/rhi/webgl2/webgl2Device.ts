@@ -25,12 +25,35 @@ import { Shader } from '../../shader';
 import { device } from '../deviceHandle';
 
 /**
+ * How long a readback waits for its fence before taking the bytes anyway (which then blocks until the GPU
+ * is done). Generous: a hidden tab throttles the timer that polls to once a second.
+ */
+const READBACK_PATIENCE_MS = 5000;
+
+/**
  * The WebGL2 implementation of the RHI device. One gap remains, on the command encoder rather than
  * here: `CommandEncoder.copyTextureToTexture` throws.
  */
 export class WebGL2Device implements Device {
     public readonly backend: BackendKind = 'webgl2';
     public readonly capabilities: DeviceCapabilities;
+
+    /** See {@link Device.submissionEpoch}: one per encoder finish — WebGL2 is immediate. */
+    public get submissionEpoch(): number { return this._submissionEpoch; }
+    private _submissionEpoch = 0;
+    public endSubmission(): void { this._submissionEpoch++; }
+
+    /**
+     * The unit `writeTexture` uploads through: the last one, which no pass reaches. An upload binds the
+     * texture to its unit and unbinds it after, and on unit 0 that would blank whatever a draw already in
+     * progress bound there — the per-object table uploads between the draws of a pass.
+     */
+    private _uploadUnit = -1;
+    private get uploadUnit(): number {
+        if (this._uploadUnit < 0)
+            this._uploadUnit = Math.min(Number(gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS)) || 32, 32) - 1;
+        return this._uploadUnit;
+    }
 
     /** Live resources, so `destroy()` can release what the caller did not. */
     private readonly _buffers = new Set<WebGL2Buffer>();
@@ -61,6 +84,8 @@ export class WebGL2Device implements Device {
     private _surfaceTarget: WebGL2RenderTarget | null = null;
     /** Scratch framebuffer for readback, created on first use. See readPixels. */
     private _readbackFramebuffer: WebGL2Framebuffer | null = null;
+    /** Pixel-pack buffers a finished readback handed back, for the next one. See readPixels. */
+    private readonly _packBuffers: { handle: WebGLBuffer; bytes: number }[] = [];
     /** Scratch read/draw framebuffers for copyTextureToTexture, created on first use. */
     private _copyRead: WebGL2Framebuffer | null = null;
     private _copyDraw: WebGL2Framebuffer | null = null;
@@ -435,7 +460,7 @@ export class WebGL2Device implements Device {
      */
     public writeTexture(texture: WebGL2Texture, data: ArrayBufferView, width: number, height: number,
                         mipLevel: number = 0, arrayLayer: number = 0, x: number = 0, y: number = 0): void {
-        texture.bindForUpload();
+        texture.bindForUpload(this.uploadUnit);
         texture.write(data, width, height, mipLevel, arrayLayer, x, y);
         texture.unbind();
     }
@@ -448,9 +473,71 @@ export class WebGL2Device implements Device {
         throw new Error('readBuffer needs a compute device: WebGL2 has no storage buffers to read back');
     }
 
-    public async readPixels(view: WebGL2TextureView, x: number, y: number,
-                            width: number, height: number): Promise<Uint8Array> {
-        return this.readPixelsSync(view, x, y, width, height);
+    /**
+     * Read a colour attachment back WITHOUT stalling: `readPixels` into a pixel-pack buffer, a fence
+     * behind it, and the bytes copied out once the GPU has passed the fence — polled from a timer, so the
+     * frames in between run. A plain `readPixels` into client memory waits for every command queued
+     * before it, which on a busy frame is milliseconds of main thread (auto-exposure paid it every few
+     * frames).
+     *
+     * The copy is QUEUED here, in command order, so what comes back is the target as it stood at the
+     * call, whatever is drawn into it afterwards — the same contract as WebGPU's copy + `mapAsync`. If
+     * the fence has not signalled after {@link READBACK_PATIENCE_MS} the bytes are taken anyway (that
+     * waits, but never fails); a lost context rejects.
+     */
+    public readPixels(view: WebGL2TextureView, x: number, y: number,
+                      width: number, height: number): Promise<Uint8Array> {
+        try {
+            this._checkReadable(view);
+        } catch (e) {
+            return Promise.reject(e);
+        }
+        const bytes = width * height * 4;
+        const pack = this._takePackBuffer(bytes);
+        this._bindReadback(view);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pack.handle);
+        gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        this._unbindReadback();
+        const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        // Without a flush the fence may sit in the command buffer until something else flushes it.
+        gl.flush();
+
+        const started = performance.now();
+        return new Promise<Uint8Array>((resolve, reject) => {
+            const poll = () => {
+                if (gl.isContextLost()) {
+                    if (sync) gl.deleteSync(sync);
+                    reject(new Error('readPixels: the WebGL2 context was lost before the read finished'));
+                    return;
+                }
+                const status = sync ? gl.clientWaitSync(sync, 0, 0) : gl.ALREADY_SIGNALED;
+                if (status === gl.TIMEOUT_EXPIRED && performance.now() - started < READBACK_PATIENCE_MS) {
+                    setTimeout(poll, 1);
+                    return;
+                }
+                if (sync) gl.deleteSync(sync);
+                const out = new Uint8Array(bytes);
+                gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pack.handle);
+                gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, out);
+                gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+                this._packBuffers.push(pack);
+                resolve(out);
+            };
+            setTimeout(poll, 0);
+        });
+    }
+
+    /** A pixel-pack buffer of at least `bytes`, reused from a finished readback when one is free. */
+    private _takePackBuffer(bytes: number): { handle: WebGLBuffer; bytes: number } {
+        const pack = this._packBuffers.pop() ?? { handle: gl.createBuffer()!, bytes: 0 };
+        if (pack.bytes < bytes) {
+            gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pack.handle);
+            gl.bufferData(gl.PIXEL_PACK_BUFFER, bytes, gl.STREAM_READ);
+            gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+            pack.bytes = bytes;
+        }
+        return pack;
     }
 
     /**
@@ -482,28 +569,29 @@ export class WebGL2Device implements Device {
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
-    private readPixelsSync(view: WebGL2TextureView, x: number, y: number,
-                          width: number, height: number): Uint8Array {
+    private _checkReadable(view: WebGL2TextureView): void {
         const format = view.texture.format;
         if (isDepthFormat(format)) throw new Error(`readPixels cannot read the depth format ${format}`);
         if (TEXTURE_FORMAT_INFO[format].bytesPerTexel !== 4)
             throw new Error(`readPixels needs an 8-bit colour target on WebGL2; this one is ${format}`);
+    }
 
+    /** `view` as the read framebuffer's colour attachment 0. Undo with {@link _unbindReadback}. */
+    private _bindReadback(view: WebGL2TextureView): void {
         if (!this._readbackFramebuffer) this._readbackFramebuffer = this.createFramebuffer('readback');
         const framebuffer = this._readbackFramebuffer;
         framebuffer.bind();
         framebuffer.attachColor(0, view);
         framebuffer.setDrawBuffers(1);
         gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    }
 
-        const out = new Uint8Array(width * height * 4);
-        gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, out);
-
+    private _unbindReadback(): void {
         // Detach before unbinding, so the scratch framebuffer never holds a reference that would keep a
-        // deleted texture's storage alive — or, worse, be read back on the next call.
-        framebuffer.detachColor(0);
+        // deleted texture's storage alive — or, worse, be read back on the next call. The copy into the
+        // pack buffer is already queued; detaching does not cancel it.
+        this._readbackFramebuffer!.detachColor(0);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        return out;
     }
 
     // -- vertex state owned by a caller ------------------------------------------------------------
@@ -553,6 +641,8 @@ export class WebGL2Device implements Device {
         this._targetsByTexture.clear();
         this._surfaceTarget = null;
         this._readbackFramebuffer = null;
+        for (const pack of this._packBuffers) gl.deleteBuffer(pack.handle);
+        this._packBuffers.length = 0;
         for (const framebuffer of [...this._framebuffers]) framebuffer.destroy();
         this._framebuffers.clear();
         for (const buffer of [...this._buffers]) buffer.destroy();
@@ -753,9 +843,9 @@ export class WebGL2Texture implements Texture {
      * Bind for MUTATION. texImage/texParameter/generateMipmap act on the active unit, so this forces
      * both the unit and the binding rather than letting the cache elide either.
      */
-    public bindForUpload(): void {
-        this._boundSlot = 0;
-        GLState.bindTextureForced(0, this.target, this.handle);
+    public bindForUpload(unit: number = 0): void {
+        this._boundSlot = unit;
+        GLState.bindTextureForced(unit, this.target, this.handle);
     }
 
     /** Release whichever unit this texture was last bound to. */

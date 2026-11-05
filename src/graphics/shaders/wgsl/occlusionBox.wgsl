@@ -5,10 +5,14 @@
 //
 // Rasterized with the JITTERED projection, like the depth it is tested against: unjittered, the box and
 // the depth would disagree by a TAA offset at every silhouette.
+//
+// The box's matrix is a record in the per-object table (chunks/objectData.wgsl): every candidate's is
+// written and uploaded once before the queries, so the block holds the camera alone and stays the same
+// from one query to the next.
+
+#include "./chunks/objectData.wgsl"
 
 struct OcclusionBoxTransform {
-    // The unit cube (Geometry.Cube) onto the node's box, world space.
-    u_model: mat4x4<f32>,
     u_view: mat4x4<f32>,
     u_projection: mat4x4<f32>,
 };
@@ -22,9 +26,11 @@ struct BoxVarying {
 };
 
 @vertex
-fn vs_main(@location(0) position: vec3<f32>) -> BoxVarying {
+fn vs_main(@location(0) position: vec3<f32>,
+           @builtin(instance_index) objectIndex: u32) -> BoxVarying {
     var out: BoxVarying;
-    out.position = u_box.u_projection * u_box.u_view * u_box.u_model * vec4<f32>(position, 1.0);
+    // The record's matrix: the unit cube (Geometry.Cube) onto the node's box, world space.
+    out.position = u_box.u_projection * u_box.u_view * objectModel(objectIndex) * vec4<f32>(position, 1.0);
     return out;
 }
 

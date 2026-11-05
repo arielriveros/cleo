@@ -103,14 +103,7 @@ export class MaterialBinder {
     public applyProperties(material: Material): void {
         // The per-view values below, gathered first: if the bound program's block already holds this
         // material under this exact view, this frame, there is nothing to send (shaderOptimizer/materialSync).
-        const cam = this._view.camera;
-        mat4.multiply(this._materialViewProj, cam.projectionMatrix, cam.viewMatrix);
-        const view = this._materialView, eye = cam.position, sun = this._view.sunDirection;
-        for (let i = 0; i < 16; i++) view[i] = this._materialViewProj[i];
-        view[16] = eye[0]; view[17] = eye[1]; view[18] = eye[2];
-        view[19] = sun[0]; view[20] = sun[1]; view[21] = sun[2];
-        view[22] = this._host.specularAa() ? 1 : 0;
-        if (!this.sync.needsWrite(this._shaderManager.bound, material, view)) return;
+        if (!this.sync.needsWrite(this._shaderManager.bound, material, this._viewValues())) return;
 
         for (const [name, value] of material.properties)
             this._shaderManager.setUniform(this.sync.uniformName(name), value);
@@ -221,6 +214,38 @@ export class MaterialBinder {
         }
     }
 
+    /**
+     * The per-view values a material write depends on ({@link MATERIAL_VIEW_SIZE}): view-projection,
+     * camera position, sun direction, specular AA. See MaterialSync for why they are compared, not versioned.
+     */
+    private _viewValues(): Float64Array {
+        const cam = this._view.camera;
+        mat4.multiply(this._materialViewProj, cam.projectionMatrix, cam.viewMatrix);
+        const view = this._materialView, eye = cam.position, sun = this._view.sunDirection;
+        for (let i = 0; i < 16; i++) view[i] = this._materialViewProj[i];
+        view[16] = eye[0]; view[17] = eye[1]; view[18] = eye[2];
+        view[19] = sun[0]; view[20] = sun[1]; view[21] = sun[2];
+        view[22] = this._host.specularAa() ? 1 : 0;
+        return view;
+    }
+
+    /**
+     * A landscape material's values into the bound terrain program's block: its properties (the surface
+     * arrays — eight vec4 arrays of every surface's colour, rules, blend, shading) and the specular AA
+     * switch. Under the same rule as {@link applyProperties}: skipped when this program's last write was
+     * this material, this frame, under the same view. A landscape draws as ~100 chunks with one
+     * material, so this was the single largest uniform writer in the frame — every chunk re-wrote and
+     * re-compared ~600 floats that had not changed. Nothing else writes these names (`TerrainLayerStack`
+     * only fills the material's Map), so no foreign write can slip in between.
+     */
+    public applyTerrainProperties(material: Material): void {
+        if (!this.sync.needsWrite(this._shaderManager.bound, material, this._viewValues())) return;
+        this._shaderManager.setUniform('u_specularAA', this._host.specularAa());
+        for (const [name, value] of material.properties)
+            this._shaderManager.setUniform(name, value);
+    }
+
+    /** The legacy (non-bind-group) terrain textures. The values came first, from {@link applyTerrainProperties}. */
     public applyTerrain(material: Material): void {
         // Fixed slot layout, 4 units: the paint masks and the three surface arrays (see
         // chunks/terrainStack.wgsl). Every binding is a 2D ARRAY, so a missing one takes the one-layer
@@ -237,8 +262,6 @@ export class MaterialBinder {
         bindAt('u_surfAlbedo', 1);
         bindAt('u_surfNormal', 2);
         bindAt('u_surfOrm', 3);
-        for (const [name, value] of material.properties)
-            this._shaderManager.setUniform(name, value);
     }
 
     public applyCull(side: 'front' | 'back' | 'double' | undefined): void {
@@ -258,12 +281,16 @@ export class MaterialBinder {
      * EVERY draw through a model or basic program, never only on fading ones: a uniform keeps its last
      * value, so a solid draw after a dissolving one would otherwise inherit its holes.
      */
-    public setDissolve(fade: number): void {
+    public setDissolve(fade: number, legacy: boolean = true): void {
         const d = this._dissolveVec;
         d[0] = fade >= 1 ? 0 : 1 - Math.max(0, fade);
         // The foliage crossfade's phase, so a despawn resolves under TAA exactly as a LOD change does.
         d[1] = ((this._view.frameIndex * 7) % 16) / 16;
-        this._shaderManager.setUniform('u_dissolve', d);
+        // `legacy` false: the caller knows the bound program has no per-draw `u_dissolve` (it reads the
+        // per-object table), so the write would reach nothing.
+        if (legacy) this._shaderManager.setUniform('u_dissolve', d);
+        // The phase alone, for a program that reads how far gone from the per-object table.
+        this._shaderManager.setUniform('u_ditherPhase', d[1]);
     }
 
     private readonly _dissolveVec: [number, number] = [0, 0];
@@ -278,6 +305,8 @@ export class MaterialBinder {
     private readonly _camHolePivot: number[] = [0, 0, 0, 0];
 
     private readonly _camHoleDraw: number[] = [0, 0, 0, 0];
+
+    private readonly _camHolePass: number[] = [0, 0, 0, 0];
 
     private _camHoleStrength = 0;
 
@@ -304,11 +333,21 @@ export class MaterialBinder {
      * The hole block of the program just bound. Written on EVERY draw through a model or instanced
      * program, like `setDissolve`: a uniform keeps its last value.
      */
-    public setCameraHole(optedIn: boolean): void {
-        const p = this._camHoleDraw;
-        p[0] = this._camHolePivot[0]; p[1] = this._camHolePivot[1]; p[2] = this._camHolePivot[2];
-        p[3] = this.cameraHoleOn(optedIn) ? this._camHoleStrength : 0;
+    public setCameraHole(optedIn: boolean, legacy: boolean = true): void {
         this._shaderManager.setUniform('u_camHole', this._camHole);
-        this._shaderManager.setUniform('u_camHolePivot', p);
+        // `legacy` false: the bound program reads the opt-in from the per-object table and has no
+        // per-draw `u_camHolePivot` (see setDissolve).
+        if (legacy) {
+            const p = this._camHoleDraw;
+            p[0] = this._camHolePivot[0]; p[1] = this._camHolePivot[1]; p[2] = this._camHolePivot[2];
+            p[3] = this.cameraHoleOn(optedIn) ? this._camHoleStrength : 0;
+            this._shaderManager.setUniform('u_camHolePivot', p);
+        }
+        // For a program reading the opt-in from the per-object table: this pass's strength, which the
+        // shader multiplies by the record's 0/1 — exactly `p[3]` for an object that opted in, 0 otherwise.
+        const q = this._camHolePass;
+        q[0] = this._camHolePivot[0]; q[1] = this._camHolePivot[1]; q[2] = this._camHolePivot[2];
+        q[3] = this.cameraHoleOn(true) ? this._camHoleStrength : 0;
+        this._shaderManager.setUniform('u_camHolePass', q);
     }
 }

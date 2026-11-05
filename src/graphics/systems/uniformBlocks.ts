@@ -3,6 +3,7 @@ import { Logger } from '../../core/logger';
 import { glDevice } from '../rhi/webgl2/webgl2Device';
 import type { WebGL2Buffer } from '../rhi/webgl2/webgl2Device';
 import { BufferUsage } from '../rhi/types';
+import { frameStats } from '../renderStats';
 
 // std140 uniform blocks, for programs generated from WGSL: naga puts every non-sampler uniform into a
 // block, and `getUniformLocation` returns null for a block member. A CPU buffer per block, written at
@@ -44,7 +45,7 @@ export class UniformBlockSet {
     private readonly _blocks: Block[] = [];
     // Name -> every block member it refers to. A LIST: naga emits one block per stage, so a name can
     // legitimately land in two, and a write must reach both.
-    private readonly _members = new Map<string, { block: Block; member: BlockMember }[]>();
+    private readonly _members = new Map<string, { block: Block; member: BlockMember; shape: Shape | null }[]>();
 
     private constructor() {}
 
@@ -140,10 +141,13 @@ export class UniformBlockSet {
 
     /** Append one target for `name`, ignoring an exact repeat of the same member. */
     private _add(name: string, block: Block, member: BlockMember): void {
+        // The write shape is resolved HERE, once: `describe` reads a dozen GL enums off the context,
+        // which per write (every uniform of every draw) was a measurable share of the writer.
+        const entry = { block, member, shape: describe(member.type) };
         const list = this._members.get(name);
-        if (!list) { this._members.set(name, [{ block, member }]); return; }
+        if (!list) { this._members.set(name, [entry]); return; }
         if (list.some(e => e.block === block && e.member.offset === member.offset)) return;
-        list.push({ block, member });
+        list.push(entry);
     }
 
     public has(name: string): boolean { return this._members.has(name); }
@@ -161,7 +165,7 @@ export class UniformBlockSet {
         if (!targets) return false;
         for (let i = 0; i < targets.length; i++) {
             const entry = targets[i];
-            if (writeMember(entry.block, entry.member, value, name)) entry.block.dirty = true;
+            if (writeMember(entry.block, entry.member, entry.shape, value, name)) entry.block.dirty = true;
         }
         return true;
     }
@@ -181,6 +185,8 @@ export class UniformBlockSet {
             if (!block.dirty) continue;
             glDevice().writeBuffer(block.buffer, 0, block.bytes);
             block.dirty = false;
+            frameStats.uniformUploads++;
+            frameStats.uniformUploadBytes += block.bytes.byteLength;
         }
     }
 
@@ -225,8 +231,7 @@ const SCALAR = new Float64Array(1);
 
 // Write one member into its block's CPU buffer, honouring the reported strides, and say whether any stored
 // number changed. std140 pads every matrix column to a vec4, so a contiguous copy would shear a mat3.
-function writeMember(block: Block, member: BlockMember, value: any, name: string): boolean {
-    const shape = describe(member.type);
+function writeMember(block: Block, member: BlockMember, shape: Shape | null, value: any, name: string): boolean {
     if (!shape) {
         Logger.warn(`Uniform "${name}" has a type this block writer does not handle (GL enum ${member.type})`, 'Shader');
         return false;

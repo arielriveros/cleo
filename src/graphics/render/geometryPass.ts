@@ -183,6 +183,14 @@ export class GeometryPass {
             }
         }
         list.sort(GeometryPass._bySortKey);
+        // Every record this pass reads, appended and uploaded once before its draws (the singles of the
+        // instance groups too — they draw through the same path).
+        for (let i = 0; i < list.length; i++) this._modelDraw.ensureRow(list[i].node);
+        for (let i = 0; i < order.length; i++) {
+            const group = groups.get(order[i])!;
+            if (group.length === 1) this._modelDraw.ensureRow(group[0]);
+        }
+        this._modelDraw.flushRows();
         for (let i = 0; i < list.length; i++) this._drawGeometryNode(pass, list[i].node, list[i].shader);
 
         // Instanced groups (>=2 identical mesh+material), else fall back to a single draw.

@@ -183,8 +183,15 @@ export interface RenderPassEncoder {
     setIndexBuffer(buffer: Buffer, format: IndexFormat, offset?: number): void;
     setViewport(x: number, y: number, width: number, height: number): void;
     setScissor(x: number, y: number, width: number, height: number): void;
-    draw(vertexCount: number, instanceCount?: number, firstVertex?: number): void;
-    drawIndexed(indexCount: number, instanceCount?: number, firstIndex?: number, baseVertex?: number): void;
+    /**
+     * `firstInstance` starts `instance_index`: a draw through a program that reads the per-object table
+     * (graphics/objectTable.ts) passes its record here. WebGL2 has no base instance — it reaches the shader
+     * through naga's `naga_vs_first_instance` uniform — so a pipeline with instance-rate vertex buffers
+     * (whose attribute fetch WebGPU WOULD offset) must keep it 0; both backends throw otherwise.
+     */
+    draw(vertexCount: number, instanceCount?: number, firstVertex?: number, firstInstance?: number): void;
+    drawIndexed(indexCount: number, instanceCount?: number, firstIndex?: number, baseVertex?: number,
+                firstInstance?: number): void;
     /**
      * An indexed draw whose arguments a GPU pass wrote: five u32 at `indirectOffset` in an `INDIRECT`
      * buffer — index count, instance count, first index, base vertex, first instance (which must be 0).
@@ -225,6 +232,13 @@ export interface CommandEncoder {
 export interface Device {
     readonly backend: BackendKind;
     readonly capabilities: DeviceCapabilities;
+    /**
+     * Moves when the device has taken everything recorded so far: on WebGPU when a submit leaves no
+     * encoder still recording (the moment the uniform arenas recycle their slots), on WebGL2 at every
+     * encoder finish (it is immediate). Data uploaded for the draws of one epoch may be overwritten in
+     * the next — see graphics/objectTable.ts.
+     */
+    readonly submissionEpoch: number;
 
     createBuffer(descriptor: BufferDescriptor): Buffer;
     createTexture(descriptor: TextureDescriptor): Texture;
@@ -292,8 +306,9 @@ export interface Device {
     createCommandEncoder(label?: string): CommandEncoder;
 
     /**
-     * Read a colour attachment back to the CPU. Asynchronous because WebGPU's `copyTextureToBuffer` +
-     * `mapAsync` is; callers must finish rendering and restore their state BEFORE awaiting.
+     * Read a colour attachment back to the CPU, as it stands at the call. Asynchronous on both backends —
+     * WebGPU copies into a buffer and maps it, WebGL2 copies into a pixel-pack buffer and waits on a fence
+     * — so it never stalls the frame; callers must finish rendering and restore their state BEFORE awaiting.
      */
     readPixels(view: TextureView, x: number, y: number, width: number, height: number): Promise<Uint8Array>;
 

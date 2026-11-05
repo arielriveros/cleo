@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { gpuProfiler, cpuProfiler, frameHistory, frameStats, sceneStatsDetail, TextureManager, TOGGLEABLE_PASSES, navBuildStats, shaderOptimizerStats } from 'cleo';
+import { gpuProfiler, cpuProfiler, frameHistory, frameStats, sceneStatsDetail, TextureManager, TOGGLEABLE_PASSES, navBuildStats, shaderOptimizerStats, frameAccount } from 'cleo';
 import { useEngineHost } from '../engine/EngineHost';
 import { DocScope, Section, Slider, Toggle, SegmentedControl, Button, Hint } from '../ui';
 import Sparkline from './Sparkline';
@@ -118,6 +118,7 @@ type Sample = {
   lateFrames: number; workerFrames: number; writes: number; ops: number; bytesUp: number; bytesDown: number;
   drawn: number; extrapolated: number; leadMs: number; jitterMs: number;
   sceneMs: number; transformMs: number; scriptMs: number; animatorMs: number; rigMs: number; clothMs: number; nodes: number;
+  untimedMs: number; untimedPeakMs: number; outsideMs: number; outsidePeakMs: number; renderExtraMs: number; renderExtraPeakMs: number;
   aiPathMs: number; aiQueries: number; aiAgents: number; navBuildMs: number; navBuilds: number; navReused: number;
   matWrites: number; matSkips: number; fallbackDraws: number; pipelinesBuilt: number;
   asyncCompiles: number; pendingCompiles: number; syncCompiles: number; worstStallMs: number; worstStallName: string;
@@ -144,6 +145,7 @@ const EMPTY: Sample = {
   lateFrames: 0, workerFrames: 0, writes: 0, ops: 0, bytesUp: 0, bytesDown: 0,
   drawn: 0, extrapolated: 0, leadMs: 0, jitterMs: 0,
   sceneMs: 0, transformMs: 0, scriptMs: 0, animatorMs: 0, rigMs: 0, clothMs: 0, nodes: 0,
+  untimedMs: 0, untimedPeakMs: 0, outsideMs: 0, outsidePeakMs: 0, renderExtraMs: 0, renderExtraPeakMs: 0,
   aiPathMs: 0, aiQueries: 0, aiAgents: 0, navBuildMs: 0, navBuilds: 0, navReused: 0,
   matWrites: 0, matSkips: 0, fallbackDraws: 0, pipelinesBuilt: 0,
   asyncCompiles: 0, pendingCompiles: 0, syncCompiles: 0, worstStallMs: 0, worstStallName: '',
@@ -213,6 +215,8 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
 
   useEffect(() => {
     let raf = 0;
+    // The engine accounts every loop turn whether or not this page is open: start from now.
+    frameAccount.drain();
     const tick = () => {
       const now = performance.now();
       acc.current += now - last.current;
@@ -282,6 +286,8 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
           if (!merged.has(t.name))
             merged.set(t.name, { name: t.name, avgMs: 0, maxMs: 0, cpuMs: t.avgMs });
         setRows([...merged.values()].sort((a, b) => (b.avgMs + b.cpuMs) - (a.avgMs + a.cpuMs)));
+        // Every engine loop turn since the last refresh, timed by the loop itself (core/engineStats.ts).
+        const acct = frameAccount.drain();
         setD({
           timeScale: (instance as any)?.effectiveTimeScale ?? 1,
           minTimeScale: minScale.current,
@@ -339,6 +345,12 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
           leadMs: phys?.workerLeadMs ?? 0,
           jitterMs: phys?.workerJitterMs ?? 0,
           sceneMs: sceneS?.frameMs ?? 0,
+          untimedMs: acct.untimedMs,
+          untimedPeakMs: acct.untimedPeakMs,
+          outsideMs: acct.outsideMs,
+          outsidePeakMs: acct.outsidePeakMs,
+          renderExtraMs: acct.renderExtraMs,
+          renderExtraPeakMs: acct.renderExtraPeakMs,
           transformMs: sceneS?.transformMs ?? 0,
           scriptMs: sceneS?.scriptMs ?? 0,
           animatorMs: sceneS?.animatorMs ?? 0,
@@ -441,6 +453,8 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
       `triangles ${fmt(r.triangles.mean, 0)} (${r.triangles.min}-${r.triangles.max})`
         + ` - culled ${fmt(r.culledObjects.mean, 0)} obj / ${fmt(r.culledInstances.mean, 0)} inst`,
       `physics ${fmt(d.physicsMs)}ms - scene ${fmt(d.sceneMs)}ms`,
+      `render prologue ${fmt(d.renderExtraMs)}ms (peak ${fmt(d.renderExtraPeakMs)}) - unattributed ${fmt(d.untimedMs)}ms (peak ${fmt(d.untimedPeakMs)})`
+        + ` - outside the loop ${fmt(d.outsideMs)}ms (peak ${fmt(d.outsidePeakMs)})`,
       `physics thread ${threadWhere} (${THREAD_LABEL[d.workerMode]})`
         + (d.workerState === 'worker'
           ? ` - worker step ${fmt(d.workerStepMs)}ms - this thread ${fmt(d.syncMs)}ms - round trip ${fmt(d.roundTripMs, 1)}ms`
@@ -458,8 +472,6 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
   };
 
   if (!renderer) return <div className='p-3 text-muted text-ui'>No renderer.</div>;
-
-  const unattributed = Math.max(0, d.frameMs - d.cpuMs - d.physicsMs - d.sceneMs);
 
   return (
     // The sections fill the panel's width, like every other Options page.
@@ -502,6 +514,11 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
 
       <Collapsable title='Frame budget' persistKey='performance.frame-budget' defaultOpen={false}><div className='w-full p-2'>
         <Row label='Render (CPU)' value={`${fmt(d.cpuMs, 1)} ms`} />
+        {/* What Render (CPU) leaves out on purpose — an occasional probe or sky bake must not spike it — but
+            which still runs on this thread every frame: the per-frame prepare walks, the shader compile
+            queue, the bakes and the frame's submit. Average and worst frame since the last refresh. */}
+        <Row label='· prologue & bakes' value={`${fmt(d.renderExtraMs)} ms · peak ${fmt(d.renderExtraPeakMs, 1)}`}
+             title='Renderer work outside the Render (CPU) figure: prepare (culling, LOD, occlusion), the shader compile queue, sky and probe bakes, and the frame submit. Their split is under Passes (prepare, sky.bake, ibl.bake).' />
         {d.gpuOn
           ? <Row label='Render (GPU)' value={`${fmt(d.gpuMs)} ms`} hl={d.gpuMs > budgetMs} />
           : <Row label='Render (GPU)' value={d.gpuAvailable ? 'off' : 'n/a'}
@@ -569,7 +586,13 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
         >
           {detail ? '− hide script/animator split' : '+ script/animator split'}
         </Button>
-        <Row label='Unattributed' value={`${fmt(unattributed)} ms`} />
+        {/* Measured per frame by the engine loop itself, never an average minus a snapshot: see
+            core/engineStats.ts for the three things the old single row mixed together. */}
+        <Row label='Unattributed' value={`${fmt(d.untimedMs)} ms · peak ${fmt(d.untimedPeakMs, 1)}`}
+             hl={d.untimedPeakMs > 2}
+             title='Engine-loop time in none of input, physics, scene or render. Near zero; a peak here is real untimed work.' />
+        <Row label='Outside the loop' value={`${fmt(d.outsideMs)} ms · peak ${fmt(d.outsidePeakMs, 1)}`}
+             title='Between one engine frame and the next: waiting for the display refresh (a frame that finished early), for the GPU, or for browser work — garbage collection, layout, editor panels.' />
       </div></Collapsable>
 
       <Collapsable title='Workers' persistKey='performance.workers' defaultOpen={false}><div className='w-full p-2'>

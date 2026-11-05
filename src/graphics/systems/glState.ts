@@ -13,6 +13,12 @@ class GLStateCache {
     private _depthMask: boolean | null = null;
     private _activeTexture: number = -1;
     private _boundTextures: Map<number, WebGLTexture | null> = new Map();
+    // Pipeline state WebGL2RenderPipeline.apply used to issue raw on every apply. -1: unknown.
+    private _depthFunc = -1;
+    private _frontFace = -1;
+    private readonly _blendFunc = [-1, -1, -1, -1];
+    private readonly _blendEquation = [-1, -1];
+    private _colorMask = -1;
 
     public useProgram(program: WebGLProgram | null): void {
         if (!gl) return;
@@ -112,6 +118,63 @@ class GLStateCache {
         frameStats.stateChanges++;
     }
 
+    /** The depth comparison. Callers pass the GL enum they already resolved (`gl.LEQUAL`, ...). */
+    public depthFunc(func: number): void {
+        if (!gl) return;
+        if (this._depthFunc !== func) {
+            gl.depthFunc(func);
+            this._depthFunc = func;
+            frameStats.stateChanges++;
+        } else frameStats.stateChangesSaved++;
+    }
+
+    /** Which winding is front-facing (`gl.CCW` / `gl.CW`). */
+    public frontFace(mode: number): void {
+        if (!gl) return;
+        if (this._frontFace !== mode) {
+            gl.frontFace(mode);
+            this._frontFace = mode;
+            frameStats.stateChanges++;
+        } else frameStats.stateChangesSaved++;
+    }
+
+    /**
+     * The separate blend factors. Every blend-function write must come through here — a plain
+     * `gl.blendFunc` or a raw `gl.blendFuncSeparate` would leave this cache describing state GL no
+     * longer has, and the next pipeline would skip the call that restores it.
+     */
+    public blendFuncSeparate(srcRGB: number, dstRGB: number, srcAlpha: number, dstAlpha: number): void {
+        if (!gl) return;
+        const f = this._blendFunc;
+        if (f[0] !== srcRGB || f[1] !== dstRGB || f[2] !== srcAlpha || f[3] !== dstAlpha) {
+            gl.blendFuncSeparate(srcRGB, dstRGB, srcAlpha, dstAlpha);
+            f[0] = srcRGB; f[1] = dstRGB; f[2] = srcAlpha; f[3] = dstAlpha;
+            frameStats.stateChanges++;
+        } else frameStats.stateChangesSaved++;
+    }
+
+    /** The separate blend equations. See {@link blendFuncSeparate}. */
+    public blendEquationSeparate(modeRGB: number, modeAlpha: number): void {
+        if (!gl) return;
+        const e = this._blendEquation;
+        if (e[0] !== modeRGB || e[1] !== modeAlpha) {
+            gl.blendEquationSeparate(modeRGB, modeAlpha);
+            e[0] = modeRGB; e[1] = modeAlpha;
+            frameStats.stateChanges++;
+        } else frameStats.stateChangesSaved++;
+    }
+
+    /** The colour write mask. */
+    public colorMask(r: boolean, g: boolean, b: boolean, a: boolean): void {
+        if (!gl) return;
+        const bits = (r ? 1 : 0) | (g ? 2 : 0) | (b ? 4 : 0) | (a ? 8 : 0);
+        if (this._colorMask !== bits) {
+            gl.colorMask(r, g, b, a);
+            this._colorMask = bits;
+            frameStats.stateChanges++;
+        } else frameStats.stateChangesSaved++;
+    }
+
     /** Depth testing on or off. Named rather than enum-taking — see {@link cullFace}. */
     public depthTest(on: boolean): void { this.setEnabled(0x0B71 /* DEPTH_TEST */, on); }
 
@@ -129,6 +192,11 @@ class GLStateCache {
         this._depthMask = null;
         this._activeTexture = -1;
         this._boundTextures.clear();
+        this._depthFunc = -1;
+        this._frontFace = -1;
+        this._blendFunc.fill(-1);
+        this._blendEquation.fill(-1);
+        this._colorMask = -1;
     }
 }
 

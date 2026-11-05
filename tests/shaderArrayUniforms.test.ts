@@ -134,3 +134,21 @@ describe('Shader — array uniforms by bare name', () => {
         expect(calls.length).toBe(before);
     });
 });
+
+// A scalar uniform equal to the last value this program was given is not re-sent: GL keeps uniforms per
+// program, and every gl.uniform* call is made by Shader. The case that pays is a WebGL2 bind group
+// setting each sampler to its texture unit on every draw.
+describe('scalar uniforms already holding the value', () => {
+    it('are not re-sent; a new value, or an array, always is', () => {
+        shader.setUniform('u_exposure', 1.5);
+        shader.setUniform('u_exposure', 1.5);
+        shader.setUniform('u_exposure', 2);
+        shader.setUniform('u_exposure', 2);
+        shader.setUniform('u_cascadeSplits', [1, 2, 3, 4]);
+        shader.setUniform('u_cascadeSplits', [1, 2, 3, 4]);
+        expect(calls.map(c => `${c.fn} ${c.location}`)).toEqual([
+            'uniform1f u_exposure', 'uniform1f u_exposure',
+            'uniform1fv u_cascadeSplits[0]', 'uniform1fv u_cascadeSplits[0]',
+        ]);
+    });
+});

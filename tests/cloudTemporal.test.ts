@@ -257,8 +257,9 @@ describe('bloom mask blend state', () => {
         // guard when WebGPU arrived (there is no standing blend func to restore on a backend where a
         // pipeline carries its own), and pinning the exact text made this fail for a reason that has
         // nothing to do with the mask it protects.
+        // Through GLState since it caches the blend func (a raw call would leave the cache stale).
         expect(renderer).toMatch(
-            /restoreDefaultBlend\(\): void \{[\s\S]{0,400}?gl\.blendFuncSeparate\(gl\.SRC_ALPHA, gl\.ONE_MINUS_SRC_ALPHA, gl\.ZERO, gl\.ONE\);/);
+            /restoreDefaultBlend\(\): void \{[\s\S]{0,400}?(?:gl|GLState)\.blendFuncSeparate\(gl\.SRC_ALPHA, gl\.ONE_MINUS_SRC_ALPHA, gl\.ZERO, gl\.ONE\);/);
     });
 
     it('does not let a quality tier destroy the authored bloom intensity', () => {

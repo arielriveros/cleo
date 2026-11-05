@@ -769,7 +769,7 @@ export class SkyPasses {
         GLState.depthTest(false);
         GLState.depthMask(false);
         GLState.blend(true);
-        if (gl) gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        if (gl) GLState.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         this._shaderManager.bind('volumetricClouds');
         const pipeline = this._pipelines.fullscreen('volumetricClouds', VolumetricCloudsProgram,
                                                   VolumetricCloudPasses.CLOUD_BLEND, undefined,
