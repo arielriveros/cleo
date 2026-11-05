@@ -20,8 +20,10 @@ const VALLEY_EXAMPLE = await readExample(join(__dirname, '..', 'applications', '
 const RENDERER = rendererSource().replace(/\r\n/g, '\n');
 
 function tableNames(): string[] {
-    const start = RENDERER.indexOf('private _programTable()');
-    const body = RENDERER.slice(start, RENDERER.indexOf('\n    }\n', start));
+    // render/programs.ts: a module-level function, so its body ends at a column-0 brace.
+    const start = RENDERER.indexOf('export function programTable()');
+    expect(start).toBeGreaterThan(-1);
+    const body = RENDERER.slice(start, RENDERER.indexOf('\n}\n', start));
     return [...body.matchAll(/\['(\w+)',/g)].map(m => m[1]);
 }
 

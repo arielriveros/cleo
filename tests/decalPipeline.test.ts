@@ -149,7 +149,10 @@ describe('the decal box', () => {
 
 describe('the programs', () => {
     it('are appended at the end of the program table', () => {
-        const table = methodBody('_programTable');
+        // render/programs.ts: a module-level function, ending at a column-0 brace.
+        const start = RENDERER.indexOf('export function programTable()');
+        expect(start).toBeGreaterThan(-1);
+        const table = RENDERER.slice(start, RENDERER.indexOf('\n}\n', start));
         const entries = [...table.matchAll(/\['(\w+)',\s+\w+Program\]/g)].map(m => m[1]);
         // Appended as a block, and only programs added LATER may follow them (the table never reorders:
         // the driver assigns attribute locations per program).

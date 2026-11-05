@@ -67,7 +67,7 @@ interface ParticleProgram {
 let useSimVariants = false;
 export function setParticleSimVariants(on: boolean): void { useSimVariants = on; }
 
-/** Program names in `ShaderManager`, with their imports. Registered by `Renderer._programTable`. */
+/** Program names in `ShaderManager`, with their imports. Registered through `programTable` (render/programs.ts). */
 export const PARTICLE_PROGRAMS: {
     readonly sim: readonly [string, ParticleProgram];
     readonly billboard: readonly [string, ParticleProgram];
