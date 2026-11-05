@@ -26,16 +26,15 @@ import { Texture } from './texture';
 import { CustomMaterial } from './material';
 import { ensureCustomShader, customShaderReady } from './systems/customShaders';
 import { TexturePacker } from './systems/texturePacker';
-import { setParticleSimVariants } from './particles/particleRenderer';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats } from './renderStats';
 import { shaderStats } from './shaderStats';
 import {
-    ProgramCompileQueue, parseRecipes, resetShaderOptimizerFrame, recordStall, shaderOptimizerStats,
+    parseRecipes, resetShaderOptimizerFrame,
 } from './shaderOptimizer';
 import type { PipelineRecipe } from './shaderOptimizer';
 import { OcclusionBuffer } from './occlusion/occlusionBuffer';
-import { physicalFor, splitPhysical, logicalNamesFor, EXTRA_LOGICAL_NAMES, LAZY_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
+import { EXTRA_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
 import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
 import { cpuProfiler } from './cpuProfiler';
 import { TERRAIN_LAYER_TEXTURE_SIZES, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from '../terrain/terrainSurfaceArrays';
@@ -43,7 +42,7 @@ import { FoliageGpuCuller } from './foliageGpuCulling';
 import { gatherFoliageInteractors } from './foliageInteraction';
 
 import {
-    ScreenProgram, programTable,
+    ScreenProgram,
 } from './render/programs';
 import { createFrameView, type FrameView } from './render/frameView';
 import { FrameTargets } from './render/frameTargets';
@@ -76,6 +75,7 @@ import { EditorOverlays } from './render/editorOverlays';
 import { DebugViews } from './render/debugViews';
 import { Capture } from './render/capture';
 import { RenderStats } from './render/stats';
+import { ProgramRegistry } from './render/programRegistry';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 import { gl, setGLContext } from './glContext';
@@ -191,6 +191,8 @@ export class Renderer {
     private readonly _capture: Capture;
     /** Frame statistics for the performance HUD, the GPU memory estimate and the opt-in GL error check (render/stats.ts). */
     private readonly _stats: RenderStats;
+    /** Shader programs: the boot build, variants, on-demand builds with stand-ins, filter swaps (render/programRegistry.ts). */
+    private readonly _programs: ProgramRegistry;
 
     /**
      * Whether the post-process chain runs at all for this host.
@@ -225,27 +227,6 @@ export class Renderer {
     // at `canvas * renderScale` while the canvas stays native, so the present upscales.
     private _renderScale: number = 1.0;
 
-    // --- Programs: variants and on-demand builds (programVariants.ts, programUsage.ts) -------------
-    /** Build-time variants in use: a published program list, or `config.shaderVariants`. */
-    private readonly _variants: boolean;
-    /** The published program list; null builds every program, as the editor does. */
-    private readonly _programList: ReadonlySet<string> | null;
-    /** The shadow filter the variant aliases point at, which can trail `_shadows.shadowFilterMode` mid-swap. */
-    private _variantFilter: ShadowFilter = 0;
-    /** A filter change waiting for its variants to finish compiling. */
-    private _pendingFilter: ShadowFilter | null = null;
-    /** Program-table descriptors by name, for variants and on-demand builds after boot. */
-    private readonly _tableDescriptors = new Map<string, Omit<ShaderProgramDescriptor, 'label'>>();
-    /** Every program built so far, by descriptor: one source never links twice (terrain has two names). */
-    private readonly _builtByDescriptor = new Map<object, ShaderProgram>();
-
-    /** Programs compiling in the background while a stand-in draws. See _buildOnDemand. */
-    private readonly _compileQueue = new ProgramCompileQueue<ShaderProgramDescriptor, ShaderProgram>({
-        prepareShaderProgram: d => this.device.prepareShaderProgram?.(d),
-        isShaderProgramReady: d => this.device.isShaderProgramReady?.(d) ?? true,
-        createShaderProgram: d => this.device.createShaderProgram(d),
-    }, () => !!this._capabilities?.parallelShaderCompile && !shaderStats.syncEach);
-
     // ---------------------------------------------------------------------------------------------
     // Volumetric cloud noise volumes + temporal reprojection state
     // ---------------------------------------------------------------------------------------------
@@ -277,11 +258,6 @@ export class Renderer {
     constructor(config: RendererConfig) {
         this._config = config;
         this._deferred = config.deferred !== false; // default: deferred on
-        this._programList = config.programs ? new Set(config.programs) : null;
-        this._variants = !!config.programs || !!config.shaderVariants;
-        // A published list names the filter its variants were built for.
-        if (config.programs?.some(n => /~poisson(\.pom)?$/.test(n))) this._variantFilter = 1;
-        if (this._variants) setParticleSimVariants(true);
         // The canvas ELEMENT exists from construction, deliberately: the editor re-parents it on every
         // mode switch and InputSystem binds its listeners to it, both of which can happen before a
         // device has been acquired. Only the context is deferred — see initialize().
@@ -296,12 +272,13 @@ export class Renderer {
             clearColor: () => this.clearColor,
             passEnabled: name => this._passEnabled[name],
         });
-        this._pipelines = new PipelineCache({
-            variants: this._variants,
-            filter: () => this._variants ? this._variantFilter : (this._shadows.shadowFilterMode === 1 ? 1 : 0),
-            physicalOf: name => this._physicalOf(name),
-            descriptorFor: name => this._descriptorFor(name),
-        }, this._view, this._passes, parseRecipes(config.pipelines));
+        this._programs = new ProgramRegistry({
+            get capabilities() { return renderer._capabilities; },
+            get deviceReady() { return renderer._deviceReady; },
+            get device() { return renderer.device; },
+            get shadowFilterMode() { return renderer._shadows.shadowFilterMode; },
+        }, config.programs, !!config.shaderVariants);
+        this._pipelines = new PipelineCache(this._programs, this._view, this._passes, parseRecipes(config.pipelines));
         this._bindGroups = new BindGroupCache({
             shadowCascades: () => this._shadows.shadowCascadeFBO.texture,
             spotShadows: () => this._shadows.spotShadowFBO.texture,
@@ -455,7 +432,7 @@ export class Renderer {
         this._lighting = new LightingPasses({
             get brdfFBO() { return renderer._sky.brdfFBO; },
             cloudSkyFrontCube: () => renderer._sky.cloudSkyFrontCube(),
-            get programList() { return renderer._programList; },
+            get programList() { return renderer._programs.programList; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get skySH() { return renderer._sky.skySH; },
@@ -670,18 +647,18 @@ export class Renderer {
         if (!this._deviceReady)
             throw new Error('Renderer.preInitialize() called before initialize() — await the device first');
         this._configureDefaultState();
-        const programs = this._programsToBuild();
+        const programs = this._programs.programsToBuild();
         const built = new Map<Omit<ShaderProgramDescriptor, 'label'>, ShaderProgram>();
         shaderStats.phase = 'init';
         try {
             // Submitting everything first still pays even here: while the first finish blocks, the
             // driver compiles the rest on its own threads.
-            this._prefetchPrograms(programs);
-            for (const entry of programs) this._buildProgram(entry, built);
+            this._programs.prefetchPrograms(programs);
+            for (const entry of programs) this._programs.buildProgram(entry, built);
         } finally {
             shaderStats.phase = 'lazy';
         }
-        this._shaderManager.setResolver(name => this._buildOnDemand(name));
+        this._shaderManager.setResolver(name => this._programs.buildOnDemand(name));
         this._createTargets();
     }
 
@@ -689,7 +666,7 @@ export class Renderer {
      * {@link preInitialize}, reporting each program as it is built and yielding to the browser between
      * them, so a loading screen can show the compile. The same programs, in the same order.
      *
-     * Every program is submitted up front ({@link _prefetchPrograms}); with KHR_parallel_shader_compile
+     * Every program is submitted up front ({@link _programs.prefetchPrograms}); with KHR_parallel_shader_compile
      * the driver builds them on worker threads while this waits — polling, never blocking — for each in
      * table order. Without the extension each build blocks in turn, as it always has.
      */
@@ -697,22 +674,22 @@ export class Renderer {
         if (!this._deviceReady)
             throw new Error('Renderer.preInitializeAsync() called before initialize() — await the device first');
         this._configureDefaultState();
-        const programs = this._programsToBuild();
+        const programs = this._programs.programsToBuild();
         const built = new Map<Omit<ShaderProgramDescriptor, 'label'>, ShaderProgram>();
         const yieldToBrowser = () => new Promise<void>(resolve => setTimeout(resolve, 0));
         onProgress?.(0, programs.length);
         try {
             shaderStats.phase = 'init';
-            this._prefetchPrograms(programs);
+            this._programs.prefetchPrograms(programs);
             let sliceStart = performance.now();
             for (let i = 0; i < programs.length; i++) {
-                while (!this._programReady(programs[i])) {
+                while (!this._programs.programReady(programs[i])) {
                     await yieldToBrowser();
                     sliceStart = performance.now();
                 }
                 // Re-set after every yield: a lazy build (an editor compile check) can run in the gap.
                 shaderStats.phase = 'init';
-                this._buildProgram(programs[i], built);
+                this._programs.buildProgram(programs[i], built);
                 shaderStats.phase = 'lazy';
                 onProgress?.(i + 1, programs.length);
                 if (performance.now() - sliceStart > 12) {
@@ -723,222 +700,11 @@ export class Renderer {
         } finally {
             shaderStats.phase = 'lazy';
         }
-        this._shaderManager.setResolver(name => this._buildOnDemand(name));
+        this._shaderManager.setResolver(name => this._programs.buildOnDemand(name));
         this._createTargets();
         // The recorded pipelines (config.graphics.pipelines), while the loading screen is still up: on
         // WebGPU each would otherwise compile on the first frame that draws it.
         await this.warmPipelines();
-    }
-
-    /**
-     * The programs this boot builds. The editor: the whole table, plus the parallax (`pom`) variants
-     * for the current shadow filter — those are the only programs that march and write frag_depth, so
-     * the base programs never do, and building them up front keeps the first height-mapped material
-     * from stalling a frame on a synchronous compile. With variants: each family's base
-     * entry is replaced by the variants it needs (for the current shadow filter, or exactly those a
-     * published list names), and a published list drops everything it does not name — those build on
-     * first use instead (see {@link _buildOnDemand}).
-     */
-    private _programsToBuild(): readonly (readonly [string, Omit<ShaderProgramDescriptor, 'label'>])[] {
-        const table = programTable();
-        for (const [name, descriptor] of table) this._tableDescriptors.set(name, descriptor);
-        if (!this._variants) {
-            // Every always-variant name, except the lazy ones an opt-in feature builds on first use.
-            const pom = new Set(Object.keys(EXTRA_LOGICAL_NAMES).filter(n => !LAZY_LOGICAL_NAMES.has(n))
-                                                                 .map(n => this._physicalOf(n)));
-            return [...table, ...[...pom].flatMap(physical => {
-                const descriptor = this._descriptorFor(physical);
-                return descriptor ? [[physical, descriptor] as const] : [];
-            })];
-        }
-        if (this._programList === null) this._variantFilter = this._shadows.shadowFilterMode === 1 ? 1 : 0;
-        const list = this._programList;
-        const out: (readonly [string, Omit<ShaderProgramDescriptor, 'label'>])[] = [];
-        for (const [name, descriptor] of table) {
-            const variants = Renderer._variantsOf(descriptor);
-            const family = [name, ...Object.keys(EXTRA_LOGICAL_NAMES).filter(n => EXTRA_LOGICAL_NAMES[n] === name)];
-            if (!variants || !family.some(n => physicalFor(n, 0) !== n)) {
-                // No rule picks among these variants (particle sims are chosen per emitter): the base
-                // builds as usual, and any variant a published list names builds now too.
-                if (!list || list.has(name)) out.push([name, descriptor]);
-                if (variants && list) for (const tag of Object.keys(variants))
-                    if (list.has(`${name}~${tag}`)) out.push([`${name}~${tag}`, variants[tag]]);
-                continue;
-            }
-            const wanted = list
-                ? Object.keys(variants).map(tag => `${name}~${tag}`).filter(p => list.has(p))
-                : [...new Set(family.map(n => physicalFor(n, this._variantFilter)))];
-            for (const physical of wanted) out.push([physical, variants[splitPhysical(physical)![1]]]);
-        }
-        return out;
-    }
-
-    private static _variantsOf(descriptor: object): Record<string, Omit<ShaderProgramDescriptor, 'label'>> | undefined {
-        return (descriptor as { variants?: Record<string, Omit<ShaderProgramDescriptor, 'label'>> }).variants;
-    }
-
-    /**
-     * The descriptor behind a program name: a table entry, or one of its variants (`name~tag`). Null
-     * for a name no table entry provides (custom materials, which register themselves).
-     */
-    private _descriptorFor(name: string): Omit<ShaderProgramDescriptor, 'label'> | null {
-        if (this._tableDescriptors.size === 0)
-            for (const [n, d] of programTable()) this._tableDescriptors.set(n, d);
-        const split = splitPhysical(name);
-        if (!split) return this._tableDescriptors.get(name) ?? null;
-        const base = this._tableDescriptors.get(split[0]);
-        return (base && Renderer._variantsOf(base)?.[split[1]]) ?? null;
-    }
-
-    /**
-     * The program a logical name is served by right now. Without variants every name is its own table
-     * entry — EXCEPT the parallax names, which always mean the `pom` variant: the base program has the
-     * march compiled out, because only a program that marches may write frag_depth.
-     */
-    private _physicalOf(name: string): string {
-        if (this._variants) return physicalFor(name, this._variantFilter);
-        return name in EXTRA_LOGICAL_NAMES ? physicalFor(name, this._shadows.shadowFilterMode === 1 ? 1 : 0) : name;
-    }
-
-    /** Register `program` as `physical` and as every logical name that currently resolves to it. */
-    private _registerProgram(physical: string, program: ShaderProgram): void {
-        if (this._variants) {
-            for (const name of logicalNamesFor(physical, this._variantFilter)) this._shaderManager.addShader(name, program);
-            return;
-        }
-        this._shaderManager.addShader(physical, program);
-        for (const alias in EXTRA_LOGICAL_NAMES)
-            if (this._physicalOf(alias) === physical) this._shaderManager.addShader(alias, program);
-    }
-
-    /**
-     * Build a program the boot did not: a name a published list missed, a particle variant, the other
-     * side of a shadow-filter switch. Installed as ShaderManager's resolver, so it runs on the first
-     * bind of a name nothing has registered yet. Synchronous, so it is a hitch: a published game whose
-     * list is right never gets here, which is why it says so when it does.
-     */
-    private _buildOnDemand(name: string): ShaderProgram | undefined {
-        const physical = this._physicalOf(name);
-        const existing = this._shaderManager.find(physical);
-        if (existing) { this._registerProgram(physical, existing); return existing; }
-        const descriptor = this._descriptorFor(physical);
-        if (!descriptor) return undefined;
-        let program = this._builtByDescriptor.get(descriptor);
-        if (program) { this._registerProgram(physical, program); return program; }
-
-        // A VARIANT can be compiled in the background while its family's uber program draws in its place:
-        // the base program's runtime branches cover whatever the variant compiled out, so the frame is
-        // right (or, for a parallax or wind variant, merely flat or still for a few frames) and nothing
-        // stalls. The variant is swapped in under its names the frame its compile finishes.
-        const standIn = this._standInFor(physical);
-        if (standIn && this._compileQueue.request(physical, { ...descriptor, label: physical }, built => {
-            this._builtByDescriptor.set(descriptor, built);
-            this._registerProgram(physical, built);
-        }, error => Logger.error(`[shaders] '${physical}' failed to compile: ${error}`, 'Renderer'))) {
-            if (this._programList)
-                Logger.warn(`[shaders] '${physical}' compiling in the background — missing from the published program list`, 'Renderer');
-            shaderOptimizerStats.fallbackDraws++;
-            return standIn;
-        }
-
-        if (this._programList)
-            Logger.warn(`[shaders] '${physical}' built on demand — missing from the published program list`, 'Renderer');
-        const start = performance.now();
-        program = this.device.createShaderProgram({ ...descriptor, label: physical });
-        shaderOptimizerStats.syncCompiles++;
-        recordStall(physical, performance.now() - start);
-        this._builtByDescriptor.set(descriptor, program);
-        this._registerProgram(physical, program);
-        return program;
-    }
-
-    /**
-     * The program that may draw in a variant's place while it compiles: its family's base (the uber
-     * program), else any sibling variant already built — every variant of a family shares its bindings,
-     * blocks and vertex inputs by construction (tests/shaderVariants.test.ts). Undefined for a program
-     * with no family, which then has to be built on the spot.
-     */
-    private _standInFor(physical: string): ShaderProgram | undefined {
-        const split = splitPhysical(physical);
-        if (!split) return undefined;
-        const base = split[0];
-        const own = this._shaderManager.find(base);
-        if (own) return own;
-        const prefix = base + '~';
-        for (const name of this._shaderManager.registeredShaders) {
-            if (name !== physical && name.startsWith(prefix)) return this._shaderManager.find(name);
-        }
-        return undefined;
-    }
-
-    /**
-     * Point the filter-dependent programs at `filter`'s variants. Their compiles are submitted now and
-     * the aliases swap on a later frame, once all are done, so changing the setting does not stall a
-     * frame on a driver that compiles in parallel; the old filter keeps rendering until then.
-     */
-    private _requestVariantFilter(filter: ShadowFilter): void {
-        if (!this._variants || !this._deviceReady) return;
-        if (filter === this._variantFilter) { this._pendingFilter = null; return; }
-        this._pendingFilter = filter;
-        for (const physical of this._filterSwapTargets(filter)) {
-            const descriptor = this._descriptorFor(physical);
-            if (descriptor && !this._shaderManager.find(physical))
-                this.device.prepareShaderProgram?.({ ...descriptor, label: physical });
-        }
-    }
-
-    /** The variants a switch to `filter` needs: those of every filter-dependent name in use. */
-    private _filterSwapTargets(filter: ShadowFilter): string[] {
-        const inUse = FILTER_DEPENDENT.filter(n => this._shaderManager.find(n));
-        return [...new Set(inUse.map(n => physicalFor(n, filter)))];
-    }
-
-    /** Finish a pending filter switch once every program it needs is compiled. Called each frame. */
-    private _pollVariantFilter(): void {
-        const filter = this._pendingFilter;
-        if (filter === null) return;
-        const targets = this._filterSwapTargets(filter);
-        for (const physical of targets) {
-            const descriptor = this._descriptorFor(physical);
-            if (descriptor && !this._shaderManager.find(physical)
-                && !(this.device.isShaderProgramReady?.({ ...descriptor, label: physical }) ?? true)) return;
-        }
-        this._variantFilter = filter;
-        this._pendingFilter = null;
-        for (const physical of targets) {
-            const descriptor = this._descriptorFor(physical);
-            if (!descriptor) continue;
-            let program = this._shaderManager.find(physical) ?? this._builtByDescriptor.get(descriptor);
-            if (!program) {
-                program = this.device.createShaderProgram({ ...descriptor, label: physical });
-                this._builtByDescriptor.set(descriptor, program);
-            }
-            this._registerProgram(physical, program);
-        }
-    }
-
-    /**
-     * Submit every program's compile and link without waiting, so the driver builds them in parallel.
-     * Skipped without the extension (nothing to gain) and under `shaderStats.syncEach`, whose point is
-     * timing each program on its own.
-     */
-    private _prefetchPrograms(programs: readonly (readonly [string, Omit<ShaderProgramDescriptor, 'label'>])[]): void {
-        if (!this._capabilities?.parallelShaderCompile || shaderStats.syncEach) return;
-        const prepare = this.device.prepareShaderProgram;
-        if (!prepare) return;
-        const seen = new Set<object>();
-        for (const [name, descriptor] of programs) {
-            if (seen.has(descriptor)) continue;
-            seen.add(descriptor);
-            prepare.call(this.device, { ...descriptor, label: name });
-        }
-    }
-
-    /** Whether building `entry` now would not block. Always true when nothing was prefetched. */
-    private _programReady(entry: readonly [string, Omit<ShaderProgramDescriptor, 'label'>]): boolean {
-        if (!this._capabilities?.parallelShaderCompile) return true;
-        const [name, descriptor] = entry;
-        return this.device.isShaderProgramReady?.({ ...descriptor, label: name }) ?? true;
     }
 
     // The default GL state, deliberately still raw `gl.*`: under WebGPU this throws on the first
@@ -963,20 +729,6 @@ export class Renderer {
         gl.depthFunc(gl.LEQUAL);
         this._restoreDefaultBlend();
         gl.drawingBufferColorSpace = 'srgb';
-    }
-
-    // One program can carry two names, and they must be the SAME object: uniform state lives on the
-    // program, so linking the source twice gives two that drift apart silently. `built` remembers them.
-    private _buildProgram(entry: readonly [string, Omit<ShaderProgramDescriptor, 'label'>],
-                          built: Map<Omit<ShaderProgramDescriptor, 'label'>, ShaderProgram>): void {
-        const [name, descriptor] = entry;
-        let program = built.get(descriptor);
-        if (!program) {
-            program = this.device.createShaderProgram({ ...descriptor, label: name });
-            built.set(descriptor, program);
-            this._builtByDescriptor.set(descriptor, program);
-        }
-        this._registerProgram(name, program);
     }
 
     // The allocations and one-shot bakes that depend on the programs. Separate from `preInitialize` so
@@ -1041,12 +793,12 @@ export class Renderer {
         // there is nothing to render. An offscreen capture brings its own target and still renders.
         if (!this._capture.presentTarget
             && (this._viewportEmpty || this._canvas.width === 0 || this._canvas.height === 0)) return;
-        this._pollVariantFilter();
+        this._programs.pollVariantFilter();
         // The shader optimizer's frame: counters zeroed, material memos expired (a material may have been
         // edited since the last frame), and any background compile that finished swapped in.
         resetShaderOptimizerFrame();
         this._materials.sync.beginFrame();
-        this._compileQueue.poll();
+        this._programs.compileQueue.poll();
         this._passes.frameEncoder = device.createCommandEncoder('frame');
         try {
             this._renderFrame(scene);
@@ -2438,10 +2190,10 @@ export class Renderer {
     public set shadowFilterMode(v: number) {
         this._shadows.shadowFilterMode = v === 1 ? 1 : 0;
         // With variants the filter is compiled into the lit programs: switch those over too.
-        this._requestVariantFilter(this._shadows.shadowFilterMode as ShadowFilter);
-        // Without them, only the forward parallax names are filter-bound (see `_physicalOf`). Drop their
+        this._programs.requestVariantFilter(this._shadows.shadowFilterMode as ShadowFilter);
+        // Without them, only the forward parallax names are filter-bound (see `_programs.physicalOf`). Drop their
         // aliases so the next bind resolves them to the other filter's variant.
-        if (!this._variants && this._deviceReady)
+        if (!this._programs.variants && this._deviceReady)
             for (const name of FILTER_DEPENDENT)
                 if (name in EXTRA_LOGICAL_NAMES) this._shaderManager.removeShader(name);
     }

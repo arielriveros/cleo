@@ -6,7 +6,7 @@
 // the list this module produces into `config.graphics.programs`, and the player builds only those.
 //
 // The rule throughout is CONSERVATIVE: when the JSON cannot tell, include. A name missing from the list
-// is not a crash — the renderer builds it on first use, with a warning (Renderer._buildOnDemand) — but
+// is not a crash — the renderer builds it on first use, with a warning (ProgramRegistry.buildOnDemand) — but
 // it is a hitch in the middle of play, which is exactly what the list exists to avoid.
 //
 // Names are PHYSICAL (programVariants.ts): `pbr~pcf`, `particleSim~s9`. Every program-table name is
