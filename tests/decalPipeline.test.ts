@@ -41,7 +41,7 @@ describe('surface decals', () => {
     it('resolve into the G-buffer after it is drawn and before SSIL and lighting read it', () => {
         const body = methodBody('_renderDeferred');
         const geometry = body.indexOf('this._geometryPass(scene)');
-        const decals = body.indexOf('this._surfaceDecalPass()');
+        const decals = body.indexOf('this._decals.surfaceDecalPass()');
         const ssil = body.indexOf('this._ssilPass()');
         const lighting = body.indexOf('this._deferredLightingPass(');
         expect(geometry).toBeGreaterThan(-1);
@@ -51,8 +51,8 @@ describe('surface decals', () => {
     });
 
     it('set the pipeline per decal, which is what resets WebGL2 texture units', () => {
-        const body = methodBody('_surfaceDecalPass');
-        const loop = body.indexOf('for (const decal of this._surfaceDecals)');
+        const body = methodBody('surfaceDecalPass');
+        const loop = body.indexOf('for (const decal of this.surfaceDecals)');
         expect(loop).toBeGreaterThan(-1);
         expect(body.indexOf('pass.setPipeline(pipeline)', loop)).toBeGreaterThan(loop);
     });
@@ -60,12 +60,12 @@ describe('surface decals', () => {
     it('clear every DBuffer attachment, not attachment 0 alone', () => {
         // A named clear value clears one attachment unless asked otherwise; stale normals or roughness in
         // targets 1 and 2 would resolve into every lit pixel.
-        expect(methodBody('_surfaceDecalPass'))
+        expect(methodBody('surfaceDecalPass'))
             .toMatch(/beginFullscreenPass\(dbuffer\.renderTarget, 'decals', true, \[0, 0, 0, 1\], false, true\)/);
     });
 
     it('never let the resolve sample the depth attached to its own pass', () => {
-        const body = methodBody('_surfaceDecalPass');
+        const body = methodBody('surfaceDecalPass');
         const resolve = body.slice(body.indexOf("'decals.resolve'"));
         expect(resolve).not.toMatch(/gBuffer\.depth|_gBufferFBO\.depth/);
         expect(WGSL('decalResolve.wgsl')).not.toMatch(/texture_depth_2d/);
@@ -96,7 +96,7 @@ describe('emissive decals', () => {
         for (const method of ['_renderForwardOverlay', '_renderScene']) {
             const body = methodBody(method);
             const snapshot = body.indexOf('this._copySceneDepth()');
-            const emissive = body.indexOf('this._emissiveDecalPass()');
+            const emissive = body.indexOf('this._decals.emissiveDecalPass()');
             expect(snapshot, method).toBeGreaterThan(-1);
             expect(emissive, method).toBeGreaterThan(snapshot);
         }
@@ -106,32 +106,32 @@ describe('emissive decals', () => {
 describe('editor-only decals', () => {
     it('draw in the overlay layer, reconstructed with the STABLE inverse view-projection', () => {
         const body = methodBody('_renderEditorOverlay');
-        expect(body).toMatch(/_drawColorDecals\(decalPass, this\._overlayDecals, OVERLAY_BLEND, this\._view\.invViewProjStable, 1\)/);
+        expect(body).toMatch(/this\._decals\.drawColorDecals\(decalPass, this\._decals\.overlayDecals, OVERLAY_BLEND, this\._view\.invViewProjStable, 1\)/);
         // Before the helpers, so a selected node's wireframe still draws over the brush.
         expect(body.indexOf("'overlay.decals'")).toBeLessThan(body.indexOf("'overlay.helpers'"));
     });
 
     it('are routed by the editor-only flag, and never drawn into a thumbnail', () => {
-        const body = methodBody('_collectDecals');
+        const body = methodBody('collectDecals');
         expect(body).toContain('isEditorOnlyNode(decal)');
-        expect(body).toMatch(/if \(this\._thumbnailMode\) continue;/);
+        expect(body).toMatch(/if \(this\._host\.thumbnailMode\) continue;/);
     });
 });
 
 describe('the receiver filter', () => {
     it('draws its depth before the scene, inside the jittered phase', () => {
         const frame = methodBody('_renderFrame');
-        const receivers = frame.indexOf('this._decalReceiverPass(scene)');
-        expect(frame.indexOf('this._collectDecals(scene)')).toBeLessThan(receivers);
+        const receivers = frame.indexOf('this._decals.decalReceiverPass(scene)');
+        expect(frame.indexOf('this._decals.collectDecals(scene)')).toBeLessThan(receivers);
         expect(receivers).toBeLessThan(frame.indexOf('this._renderDeferred('));
         expect(receivers).toBeLessThan(frame.indexOf('this._renderForward('));
-        expect(methodBody('_decalReceiverPass')).toContain('this._projection.rasterProjection(cam.projectionMatrix)');
+        expect(methodBody('decalReceiverPass')).toContain('this._projection.rasterProjection(cam.projectionMatrix)');
     });
 
     it('draws nothing, rather than everything, for a terrain decal whose receiver depth is missing', () => {
         const body = methodBody('_decalReceiverDepth');
-        expect(body).toMatch(/return this\._decalReceiversReady && this\._decalReceiverFBO \? this\._decalReceiverFBO\.depth : null;/);
-        for (const method of ['_surfaceDecalPass', '_drawColorDecals'])
+        expect(body).toMatch(/return this\._decalReceiversReady && this\.decalReceiverFBO \? this\.decalReceiverFBO\.depth : null;/);
+        for (const method of ['surfaceDecalPass', 'drawColorDecals'])
             expect(methodBody(method), method).toMatch(/if \(!receivers\) continue;/);
     });
 });
@@ -142,7 +142,7 @@ describe('the decal box', () => {
     });
 
     it('is the shared position-only cube, drawn with the layout it was built for', () => {
-        for (const method of ['_surfaceDecalPass', '_drawColorDecals'])
+        for (const method of ['surfaceDecalPass', 'drawColorDecals'])
             expect(methodBody(method), method).toContain("builtFor: 'irradiance'");
     });
 });

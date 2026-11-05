@@ -76,7 +76,7 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // The landscape-only depth decals with `receivers: 'terrain'` compare against. It must jitter
             // exactly like the G-buffer and scene depth it is compared with, or the two disagree by a
             // TAA offset at every slope and the brush frays.
-            '_decalReceiverPass',
+            'decalReceiverPass',
             // Every decal box: the DBuffer and emissive passes (before the resolve, jittered) AND the
             // editor overlay (after it, not) — the `_renderModel` situation, decided by the flag.
             '_setDecalUniforms',
