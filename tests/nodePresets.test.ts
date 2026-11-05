@@ -232,7 +232,7 @@ describe('render presets', () => {
         const renderer = makeRenderer();
         renderer.exposureMinEV = 2; renderer.exposureMaxEV = 17; renderer.exposureCompensation = 1;
         renderer.exposureCompensationCurve = [[-2, -2], [10, 0]];
-        const clamp = (ev: number) => (renderer as any)._clampExposureEV(ev);
+        const clamp = (ev: number) => (renderer as any)._autoExposure._clampExposureEV(ev);
         // Metered at EV -2 (a moonlit night): clamped to the EV 2 floor, then 1 stop brighter and 2 darker.
         expect(clamp(-2)).toBeCloseTo(2 - 1 + 2, 6);
         expect(clamp(15)).toBeCloseTo(15 - 1, 6);

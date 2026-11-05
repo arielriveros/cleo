@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { REFERENCE_ILLUMINANCE } from '../src/graphics/lighting';
+import { rendererSource, methodBody, expectAbsent } from './helpers/rendererSource';
 
 /**
  * The auto-exposure maths, ported to JS so the parts that are easy to get wrong can be checked without
@@ -197,30 +198,30 @@ describe('adaptation', () => {
 });
 
 describe('the authored exposure is kept apart from the metered one', () => {
-    const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+    const RENDERER = rendererSource();
 
     it('serializes the AUTHORED value, not whatever the meter was at', () => {
         // `exposure: this._exposure` made a scene's saved exposure depend on where the camera happened
         // to be pointing when Save was pressed.
-        expect(RENDERER).toContain('exposure: this._baseExposure,');
+        expect(RENDERER).toContain('exposure: this._autoExposure.baseExposure,');
     });
 
     it('never lets the meter write the authored value', () => {
-        // The meter owns `_exposure`; `_baseExposure` is written only by the setters and by
+        // The meter owns `FrameView.exposure`; `baseExposure` is written only by the setters and by
         // applyRenderSettings. If the adaptation touched it, suppressing metering would leave a preview
         // sitting on the last adapted value, which is the bug this split exists to remove.
-        const fn = RENDERER.slice(RENDERER.indexOf('private _adaptExposure('));
-        expect(fn.slice(0, fn.indexOf('\n    }'))).not.toContain('_baseExposure');
+        const fn = methodBody('_adaptExposure');
+        expectAbsent(fn, 'baseExposure', 'this._view.exposure =');
     });
 
     it('resolves the exposure ABOVE the thumbnail early-return', () => {
-        // The ordering IS the feature. `screenshotOffscreen` sets `_presentTarget`, and
+        // The ordering IS the feature. `screenshotOffscreen` sets `Capture.presentTarget`, and
         // `_applyPostProcessing` returns on it before the metering pass — so a thumbnail never meters,
         // and without a resolve above that return it would render at the scene's last metered value.
         // Two thumbnails a second apart then come out at different brightnesses.
         const post = RENDERER.slice(RENDERER.indexOf('private _applyPostProcessing('));
-        const body = post.slice(0, post.indexOf('this._presentThumbnail()'));
-        expect(body).toContain('this._resolveExposure();');
+        const body = post.slice(0, post.indexOf('this._capture.presentThumbnail()'));
+        expect(body).toContain('this._autoExposure.resolveExposure();');
     });
 
     it("renders a preview at a FIXED exposure, not the project's", () => {
@@ -228,22 +229,20 @@ describe('the authored exposure is kept apart from the metered one', () => {
         // is not: a scene saved while auto-exposure had opened up on a dim interior banks a very large
         // exposure, and every preview in the editor then renders blown out. A constant is also what
         // keeps thumbnails comparable with each other and stable as the scene is retuned.
-        expect(RENDERER).toContain('this._exposure = Renderer.PREVIEW_EXPOSURE;');
+        expect(RENDERER).toContain('this._view.exposure = AutoExposure.PREVIEW_EXPOSURE;');
         expect(RENDERER).toContain('PREVIEW_EXPOSURE = 2.0');
-        const fn = RENDERER.slice(RENDERER.indexOf('private _resolveExposure()'));
-        const body = fn.slice(0, fn.indexOf('\n    }'));
+        const body = methodBody('resolveExposure');
         // The offscreen thumbnail path counts as a preview whichever tab it was taken from.
-        expect(body).toContain('!this._exposureMeteringAllowed || this._presentTarget');
+        expect(body).toContain('!this.exposureMeteringAllowed || this._sys.capture.presentTarget');
     });
 
     it('leaves a manual exposure alone when metering is merely switched off', () => {
         // Auto-exposure off project-wide is not a preview: the artist's own exposure has to stand.
-        const fn = RENDERER.slice(RENDERER.indexOf('private _resolveExposure()'));
         // Exactly, unless an exposure volume around the camera sets a manual EV of its own.
-        const body = fn.slice(0, fn.indexOf('\n    private '));
+        const body = methodBody('resolveExposure');
         expect(body).toContain('if (!this._effAutoWas) {');
-        expect(body).toContain(': this._baseExposure;');
-        expect(RENDERER).toContain('return this._effExposure.autoExposureEnabled && this._exposureMeteringAllowed;');
+        expect(body).toContain(': this.baseExposure;');
+        expect(RENDERER).toContain('return this.effExposure.autoExposureEnabled && this.exposureMeteringAllowed;');
     });
 });
 
@@ -295,7 +294,7 @@ describe('metering is suppressed outside the scene tab', () => {
 describe('the shader and the renderer agree on the window', () => {
     const SHADER = readFileSync(
         join(__dirname, '..', 'src', 'graphics', 'shaders', 'wgsl', 'exposureMeter.wgsl'), 'utf-8');
-    const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+    const RENDERER = rendererSource();
 
     it('uses the same encode window on both sides', () => {
         // Two copies of one constant, and a disagreement is silent: the exposure just settles somewhere
@@ -333,6 +332,6 @@ describe('the shader and the renderer agree on the window', () => {
     it('meters the lit scene rather than the composed frame', () => {
         // After bloom, exposure and bloom chase each other: bloom brightens, the meter darkens, which
         // moves bloom's display-referred threshold, and round again.
-        expect(RENDERER).toContain('this._textureBindGroup(pipeline, 0, [this._sceneFBO.colors[0]])');
+        expect(methodBody('exposurePass')).toContain("'exposureMeter', ExposureMeterProgram, [this._targets.scene.colors[0]]");
     });
 });

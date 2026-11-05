@@ -189,23 +189,15 @@ export class UniformSet {
 
     /**
      * Write a value by name; false when this block declares no such member. A value shorter than the
-     * member is written in full and the tail left alone.
+     * member is written in full and the tail left alone. The block turns dirty only when a stored number
+     * actually changed: the renderer re-sends per-pass values (the camera, the lights) before every draw,
+     * and an unchanged block keeps its slot at the next {@link flush} instead of uploading a copy.
      */
     public set(name: string, value: unknown): boolean {
         const shape = this._shapes.get(name);
         if (!shape) return false;
-
         const target = shape.integer ? this._ints : this._floats;
-        const source = toNumbers(value);
-        let written = 0;
-
-        for (let element = 0; element < shape.elements && written < source.length; element++) {
-            // Byte offset -> typed-array index; exact, since every WGSL uniform offset is a multiple of 4.
-            const base = (shape.offset + element * shape.stride) >> 2;
-            for (let c = 0; c < shape.components && written < source.length; c++)
-                target[base + c] = source[written++];
-        }
-        this._dirty = true;
+        if (writeShape(shape, target, value)) this._dirty = true;
         return true;
     }
 
@@ -326,12 +318,47 @@ function suffixesOf(name: string): string[] {
     return out;
 }
 
-// Coerce whatever the renderer passed into a flat run of numbers. Booleans become 0/1: WGSL forbids
-// `bool` in a uniform buffer, so every shader flag is an `i32`.
-function toNumbers(value: unknown): ArrayLike<number> {
-    if (typeof value === 'number') return [value];
-    if (typeof value === 'boolean') return [value ? 1 : 0];
-    if (ArrayBuffer.isView(value)) return value as unknown as ArrayLike<number>;
-    if (Array.isArray(value)) return value.map(v => (typeof v === 'boolean' ? (v ? 1 : 0) : v));
-    return [];
+// Write whatever the renderer passed into `target` at `shape`, and say whether any stored number changed.
+// Booleans become 0/1 (WGSL forbids `bool` in a uniform buffer, so every shader flag is an `i32`); the
+// typed array's own store does that coercion, and the float rounding, so a change is judged by reading the
+// slot back rather than by comparing the value handed in. Nothing here allocates: this runs for every
+// uniform of every draw, and the scalar and array cases used to build a fresh array each time.
+function writeShape(shape: WriteShape, target: Float32Array | Int32Array, value: unknown): boolean {
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        const i = shape.offset >> 2, before = target[i];
+        target[i] = value as number;
+        return target[i] !== before;   // NaN never equals itself: written, and reported as a change
+    }
+    if (value instanceof Float32Array) return writeTyped(shape, target, value);
+    if (ArrayBuffer.isView(value) || Array.isArray(value)) return writeGeneric(shape, target, value as ArrayLike<number>);
+    return false;
+}
+
+// Split by SOURCE kind so each copy loop stays monomorphic: one loop fed a Float32Array on one call and a
+// number[] on the next goes polymorphic, and V8 then boxes every element it reads.
+function writeTyped(shape: WriteShape, target: Float32Array | Int32Array, source: Float32Array): boolean {
+    let written = 0, changed = false;
+    for (let element = 0; element < shape.elements && written < source.length; element++) {
+        // Byte offset -> typed-array index; exact, since every WGSL uniform offset is a multiple of 4.
+        const base = (shape.offset + element * shape.stride) >> 2;
+        for (let c = 0; c < shape.components && written < source.length; c++) {
+            const before = target[base + c];
+            target[base + c] = source[written++];
+            if (target[base + c] !== before) changed = true;
+        }
+    }
+    return changed;
+}
+
+function writeGeneric(shape: WriteShape, target: Float32Array | Int32Array, source: ArrayLike<number>): boolean {
+    let written = 0, changed = false;
+    for (let element = 0; element < shape.elements && written < source.length; element++) {
+        const base = (shape.offset + element * shape.stride) >> 2;
+        for (let c = 0; c < shape.components && written < source.length; c++) {
+            const before = target[base + c];
+            target[base + c] = source[written++];
+            if (target[base + c] !== before) changed = true;
+        }
+    }
+    return changed;
 }

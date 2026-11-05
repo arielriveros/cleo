@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Where a depth copy sits in the frame's command stream.
@@ -12,7 +13,7 @@ import { join } from 'path';
  * clear) only PRODUCES data, so submitting early is fine or even required for those.
  *
  * That distinction is the whole test. On WebGPU `finish()` submits, while the frame's render passes
- * sit unsubmitted in `_frameEncoder` until the end of the frame — so a copy on its own encoder runs
+ * sit unsubmitted in the frame encoder until the end of the frame — so a copy on its own encoder runs
  * BEFORE every draw it was meant to copy. In a live viewport that reads as the previous frame's depth,
  * which a barely-moving camera makes look almost right; in an offscreen capture, which resizes every
  * target and renders exactly one frame, it reads a freshly allocated buffer. Zeroed, which is depth 0,
@@ -24,12 +25,12 @@ import { join } from 'path';
  */
 
 const CRLF = new RegExp(String.raw`\r\n`, 'g');
-const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8')
+const RENDERER = rendererSource()
     .replace(CRLF, '\n');
 
 /** The body of a `private _name(...)` method, up to its closing brace at class indentation. */
 function methodBody(name: string): string {
-    const start = RENDERER.indexOf(`private ${name}(`);
+    const start = RENDERER.search(new RegExp(`(?:private|public) (?:static )?${name}\\(`));
     expect(start, `${name} not found in renderer.ts`).toBeGreaterThan(-1);
     const rest = RENDERER.slice(start);
     const end = rest.indexOf('\n    }');
@@ -37,30 +38,31 @@ function methodBody(name: string): string {
     return rest.slice(0, end);
 }
 
-describe('_copyDepth', () => {
+describe('PassEncoder.copyDepth', () => {
     it('records into the frame encoder rather than opening its own', () => {
-        const body = methodBody('_copyDepth');
-        expect(body).toContain("this._acquireEncoder('copyDepth')");
-        // The literal is what the bug was. `_acquireEncoder` falls back to it when no frame is open,
+        const body = methodBody('copyDepth');
+        expect(body).toContain("this.acquireEncoder('copyDepth')");
+        // The literal is what the bug was. `acquireEncoder` falls back to it when no frame is open,
         // which is the only legitimate way this helper may reach it.
         expect(body).not.toContain('device.createCommandEncoder');
     });
 
     it('finishes only an encoder it owns', () => {
-        // `_endFullscreenPass` makes exactly this distinction for passes, and for the same reason:
+        // `endFullscreenPass` makes exactly this distinction for passes, and for the same reason:
         // finishing the FRAME encoder mid-frame submits everything recorded so far and leaves the rest
         // of the frame recording into a spent object.
-        expect(methodBody('_copyDepth')).toContain('if (encoder !== this._frameEncoder) encoder.finish()');
+        expect(methodBody('copyDepth')).toContain('this.finishIfOwned(encoder)');
+        expect(methodBody('finishIfOwned')).toContain('if (encoder !== this.frameEncoder) encoder.finish()');
     });
 
     it('is what the capture path resolves its coverage from', () => {
         // The chain that made this visible: the thumbnail branch snapshots, then resolves alpha from
         // the snapshot. If either half moves, the other is no longer guarded by the two cases above.
         const post = methodBody('_applyPostProcessing');
-        const branch = post.slice(post.indexOf('if (this._presentTarget)'));
-        expect(branch.indexOf('this._copySceneDepth()')).toBeGreaterThan(-1);
-        expect(branch.indexOf('this._copySceneDepth()'))
-            .toBeLessThan(branch.indexOf('this._presentThumbnail()'));
-        expect(methodBody('_presentThumbnail')).toContain('this._depthSource()');
+        const branch = post.slice(post.indexOf('if (this._capture.presentTarget)'));
+        expect(branch.indexOf('this._forward.copySceneDepth()')).toBeGreaterThan(-1);
+        expect(branch.indexOf('this._forward.copySceneDepth()'))
+            .toBeLessThan(branch.indexOf('this._capture.presentThumbnail()'));
+        expect(methodBody('presentThumbnail')).toContain('this._temporal.depthSource()');
     });
 });

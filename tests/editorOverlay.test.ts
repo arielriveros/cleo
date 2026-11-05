@@ -4,6 +4,7 @@ import { join } from 'path';
 import { Node } from '../src/core/scene/nodes/node';
 import { isEditorOnlyNode, markEditorOnly } from '../src/core/scene/editorNodes';
 import { DEFAULT_BLEND, OVERLAY_BLEND, OVERLAY_COMPOSITE_BLEND } from '../src/graphics/rhi/types';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * The editor overlay layer: grid, gizmos, helper wireframes and helper icons are drawn into a buffer
@@ -12,11 +13,11 @@ import { DEFAULT_BLEND, OVERLAY_BLEND, OVERLAY_COMPOSITE_BLEND } from '../src/gr
  *
  * Two halves are worth pinning, because both failed silently when they were wrong:
  *   * WHICH nodes are chrome. The obvious test — an `__editor__` name — is the wrong one.
- *   * WHERE those draws land. A pass retargeted back at `_sceneFBO` puts the chrome straight back
+ *   * WHERE those draws land. A pass retargeted back at `_targets.scene` puts the chrome straight back
  *     into the post chain, and looks completely normal until someone turns bloom up.
  */
 
-const RENDERER = readFileSync(join(__dirname, '../src/graphics/renderer.ts'), 'utf8');
+const RENDERER = rendererSource();
 
 describe('the chrome predicate', () => {
     it('is opt-in, not derived from the name', () => {
@@ -74,10 +75,10 @@ describe('the overlay blend presets', () => {
 describe('where the chrome passes draw', () => {
     /** The body of a renderer method, up to the next top-level `private`/`public` member. */
     const bodyOf = (name: string): string => {
-        const at = RENDERER.indexOf(`private ${name}(`);
+        const at = RENDERER.search(new RegExp(`(?:private|public) ${name}\\(`));
         expect(at, `${name} not found`).toBeGreaterThan(-1);
         const rest = RENDERER.slice(at);
-        const end = rest.indexOf('\n    private ', 1);
+        const end = rest.search(/\n    (?:private|public) /);
         return end === -1 ? rest : rest.slice(0, end);
     };
 
@@ -85,10 +86,10 @@ describe('where the chrome passes draw', () => {
         for (const name of ['_renderGrid', '_renderGizmos']) {
             const body = bodyOf(name);
             expect(body, `${name} must use _beginOverlayPass`).toContain('_beginOverlayPass(');
-            // The leak this whole feature closes: `compose` copies `_sceneFBO` into the post chain.
-            expect(body, `${name} must not target _sceneFBO`).not.toContain('_sceneFBO.renderTarget');
+            // The leak this whole feature closes: `compose` copies `_targets.scene` into the post chain.
+            expect(body, `${name} must not target the scene buffer`).not.toContain('_targets.scene.renderTarget');
         }
-        expect(bodyOf('_renderEditorOverlay')).toContain("_beginOverlayPass('overlay.helpers')");
+        expect(bodyOf('renderEditorOverlay')).toContain("_beginOverlayPass('overlay.helpers')");
     });
 
     it('keeps the composite past the display resolve', () => {
@@ -99,17 +100,17 @@ describe('where the chrome passes draw', () => {
         expect(graph).toBeGreaterThan(-1);
         expect(overlay).toBeGreaterThan(graph);
         // It resolves to the screen with clear=false: a second pass over what `present` just wrote.
-        expect(bodyOf('_overlayCompositePass')).toContain("this._screenTarget(), 'overlay.composite', false");
+        expect(bodyOf('overlayCompositePass')).toContain("this._passes.screenTarget(), 'overlay.composite', false");
     });
 
     it('leaves the chrome out of the G-buffer and the depth snapshot', () => {
-        expect(bodyOf('_inGBuffer')).toContain('isEditorOnlyNode(node)');
+        expect(bodyOf('inGBuffer')).toContain('isEditorOnlyNode(node)');
     });
 
     it('never writes the depth attachment it borrows from the scene', () => {
-        // `_overlayTarget` attaches `_sceneFBO.depth`, which game sprites are still tested against
+        // `_overlayTarget` attaches `_targets.scene.depth`, which game sprites are still tested against
         // further down the frame. A gizmo that wrote depth there would occlude them — it used to.
-        for (const name of ['_renderGizmos', '_renderEditorOverlay'])
+        for (const name of ['_renderGizmos', 'renderEditorOverlay'])
             expect(bodyOf(name)).not.toContain('depthWriteEnabled: true');
     });
 });

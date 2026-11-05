@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { rendererSource } from './helpers/rendererSource';
 
 // A cutout's colour map authored over black (a grass JPG plus a separate mask) went black at a distance
 // and kept a dark fringe up close: mips and bilinear filtering averaged the hidden black into the blades.
@@ -100,23 +101,23 @@ describe('push-pull edge padding', () => {
 
 describe('wiring', () => {
     it('the renderer binds the edge-padded colour in place of the authored base colour', () => {
-        const renderer = read('renderer.ts');
+        const renderer = rendererSource();
         expect(renderer).toContain("field === 'baseColorTexture' ? material.textures.get(DILATED_BASE_SLOT)");
     });
 
     it('foliage prototype materials are synced, so foliage gets the padded colour (and its ORM pack)', () => {
-        const renderer = read('renderer.ts');
+        const renderer = rendererSource();
         const at = renderer.indexOf('private _ensurePackedTextures');
         const body = renderer.slice(at, renderer.indexOf('\n    }\n', at));
         expect(body).toContain('node.terrain.foliage');
-        expect(body).toContain('packer.sync(mat, this._frameIndex)');
+        expect(body).toContain('packer.sync(mat, this._view.frameIndex)');
     });
 
     it('billboard cards and impostors are padded too: requested before any pass opens, bound at draw', () => {
-        const renderer = read('renderer.ts');
+        const renderer = rendererSource();
         const at = renderer.indexOf('private _ensurePackedTextures');
         const body = renderer.slice(at, renderer.indexOf('\n    }\n', at));
-        expect(body).toContain('packer.ensureDilated(card, 0.5, this._frameIndex)');
+        expect(body).toContain('packer.ensureDilated(card, 0.5, this._view.frameIndex)');
         expect(renderer).toContain('TexturePacker.Instance.dilatedId(texId, 0.5)');
         // An impostor re-bake reuses its texture id, so the cache must notice the source object changed.
         expect(read('systems/texturePacker.ts')).toContain('entry.source === TextureManager.Instance.getTexture(sourceId)');

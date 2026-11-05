@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { FLUID_BRICK, OCCUPANCY_MARGIN, floatToHalf, floatsToHalves, occupancyFromVolume } from '../src/core/scene/nodes/fluidVolumeNode';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Smoke-and-fire volumes: the half-float packing a CPU-filled volume goes through on WebGPU, and where
@@ -10,7 +11,7 @@ import { FLUID_BRICK, OCCUPANCY_MARGIN, floatToHalf, floatsToHalves, occupancyFr
  */
 
 const CRLF = new RegExp(String.raw`\r\n`, 'g');
-const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8').replace(CRLF, '\n');
+const RENDERER = rendererSource().replace(CRLF, '\n');
 const WGSL = readFileSync(join(__dirname, '..', 'src', 'graphics', 'shaders', 'wgsl', 'fluidVolume.wgsl'), 'utf-8').replace(CRLF, '\n');
 
 /** binary16 bits back to a number, for round-trip checks. */
@@ -76,13 +77,13 @@ describe('occupancyFromVolume', () => {
 
 describe('the fluid volume pass', () => {
     const forward = (() => {
-        const start = RENDERER.indexOf('\n    private _renderForwardOverlay(');
+        const start = RENDERER.indexOf('\n    public renderForwardOverlay(');
         return RENDERER.slice(start, RENDERER.indexOf('\n    }\n', start));
     })();
 
     it('draws after the TAA resolve and before the transparents', () => {
-        const taa = forward.indexOf('this._taaResolvePass()');
-        const volumes = forward.indexOf('this._renderFluidVolumes(scene)');
+        const taa = forward.indexOf('this._temporal.taaResolvePass()');
+        const volumes = forward.indexOf('this._fluids.renderFluidVolumes(scene)');
         const transparent = forward.indexOf("this._runForwardQueue('transparent'");
         expect(taa).toBeGreaterThan(-1);
         expect(volumes).toBeGreaterThan(taa);
@@ -90,22 +91,22 @@ describe('the fluid volume pass', () => {
     });
 
     it('is skipped for thumbnails, whose depth snapshot is never taken', () => {
-        expect(forward).toMatch(/!this\._thumbnailMode && scene\.fluidVolumes\.size > 0/);
+        expect(forward).toMatch(/!this\._host\.thumbnailMode && scene\.fluidVolumes\.size > 0/);
     });
 
     it('reconstructs rays with the stable inverse, as everything after the resolve does', () => {
-        const at = RENDERER.indexOf('private _renderFluidVolumes(');
+        const at = RENDERER.indexOf('public renderFluidVolumes(');
         const body = RENDERER.slice(at, RENDERER.indexOf('\n    }\n', at));
-        expect(body).toContain("sm.setUniform('u_invViewProj', this._invViewProjStable)");
-        expect(body).toContain('Renderer._CLOUD_BLEND');
+        expect(body).toContain("sm.setUniform('u_invViewProj', this._view.invViewProjStable)");
+        expect(body).toContain('VolumetricCloudPasses.CLOUD_BLEND');
     });
 
     it('traces, then resolves (temporal only), then composites onto the scene buffer', () => {
-        const at = RENDERER.indexOf('private _renderFluidVolumes(');
+        const at = RENDERER.indexOf('public renderFluidVolumes(');
         const body = RENDERER.slice(at, RENDERER.indexOf('\n    }\n', at));
         const trace = body.indexOf("this._fluidTraceFBO!.renderTarget, 'fluidVolumes'");
         const resolve = body.indexOf("'fluidVolumes.resolve'");
-        const composite = body.indexOf("this._sceneFBO.renderTarget, 'fluidVolumes.composite'");
+        const composite = body.indexOf("this._targets.scene.renderTarget, 'fluidVolumes.composite'");
         expect(trace).toBeGreaterThan(-1);
         expect(resolve).toBeGreaterThan(trace);
         expect(composite).toBeGreaterThan(resolve);
@@ -116,9 +117,13 @@ describe('the fluid volume pass', () => {
     it('drops the temporal history whenever its targets are resized', () => {
         const at = RENDERER.indexOf('private _ensureFluidTargets(');
         const body = RENDERER.slice(at, RENDERER.indexOf('\n    }\n', at));
-        const resize = body.indexOf('fbo.resize(w, h)');
+        expect(body).toContain('this.fluidHistory.ensure(w, h)');
+        // The drop itself is TemporalHistory's, shared with the TAA, cloud and SSIL histories.
+        const ensureAt = RENDERER.indexOf('public ensure(width: number, height: number): boolean {');
+        const ensure = RENDERER.slice(ensureAt, RENDERER.indexOf('\n    }\n', ensureAt));
+        const resize = ensure.indexOf('fbo.resize(width, height)');
         expect(resize).toBeGreaterThan(-1);
-        expect(body.indexOf('this._fluidHistoryValid = false', resize)).toBeGreaterThan(resize);
+        expect(ensure.indexOf('this.valid = false', resize)).toBeGreaterThan(resize);
     });
 
     it('keeps the vertex and fragment uniform blocks apart (a shared block fails to link on GLSL)', () => {

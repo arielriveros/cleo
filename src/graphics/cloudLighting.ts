@@ -53,7 +53,7 @@ export function atmosphereTransmittance(p: AtmosphereParams, altitude: number,
 
 /**
  * Mean radiance of the upper (+Y) and lower (-Y) hemispheres of an order-2 SH projection laid out as
- * `Renderer._projectEquirectToSH` writes it (9 coefficients, 4 floats apart, basis order y, z, x for
+ * `SkyPasses._projectEquirectToSH` writes it (9 coefficients, 4 floats apart, basis order y, z, x for
  * l = 1). Over a hemisphere about Y every basis function except Y00 and the `y` one integrates to
  * zero, so each mean is `0.282095 c0 ± 0.244301 c1` (the second is 0.488603 * pi / 2pi).
  */

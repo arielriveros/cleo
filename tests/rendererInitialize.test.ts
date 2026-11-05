@@ -71,7 +71,7 @@ describe('Renderer.preInitializeAsync', () => {
         renderer._configureDefaultState = () => {};
         renderer._createTargets = vi.fn();
         const built: string[] = [];
-        renderer._buildProgram = (entry: readonly [string, unknown]) => { built.push(entry[0]); };
+        renderer._programs.buildProgram = (entry: readonly [string, unknown]) => { built.push(entry[0]); };
         return { renderer, built };
     }
 
@@ -103,7 +103,7 @@ describe('Renderer.preInitializeAsync', () => {
         renderer._configureDefaultState = () => {};
         renderer._createTargets = vi.fn();
         const built: string[] = [];
-        renderer._buildProgram = (entry: readonly [string, unknown]) => { built.push(entry[0]); };
+        renderer._programs.buildProgram = (entry: readonly [string, unknown]) => { built.push(entry[0]); };
         const reports: [number, number][] = [];
         try {
             await renderer.preInitializeAsync((done: number, total: number) => reports.push([done, total]));

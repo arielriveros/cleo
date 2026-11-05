@@ -15,7 +15,7 @@
 // runtime branches cover every setting it can toggle without a recompile — with ONE exception: the
 // parallax march is never compiled into a base program, because the march writes frag_depth and that
 // costs early-Z for every draw of the program. So the `Pom` names below mean their `pom` variant
-// everywhere, the editor included (see Renderer._physicalOf).
+// everywhere, the editor included (see ProgramRegistry.physicalOf).
 
 /** The shadow filter a variant compiles in: 0 = 3x3 PCF, 1 = rotated Poisson. */
 export type ShadowFilter = 0 | 1;
@@ -102,7 +102,7 @@ export const EXTRA_LOGICAL_NAMES: Readonly<Record<string, string>> = {
 /**
  * Variant names the editor does NOT build at boot: they serve an opt-in feature (the foliage prepass), so
  * paying their compile on every launch would tax everyone for something few use. The first draw that asks
- * compiles them in the background while the family's base program stands in (Renderer._buildOnDemand).
+ * compiles them in the background while the family's base program stands in (ProgramRegistry.buildOnDemand).
  */
 export const LAZY_LOGICAL_NAMES: ReadonlySet<string> = new Set([
     'pbrGeometryInstancedPrepass', 'pbrGeometryInstancedPrepassFoliage',

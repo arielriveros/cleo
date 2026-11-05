@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Per-frame camera and sun reach the MATERIAL uniform block on every draw path.
@@ -25,30 +26,30 @@ import { join } from 'path';
  * baseline can catch that, because every baseline is a single fixed camera.
  */
 
-const SRC = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+const SRC = rendererSource();
 
 /**
  * The inline write that bypasses the helper, in any of the spellings the call sites used. The helper itself
  * writes through MaterialSync's interned names (shaderOptimizer/materialSync.ts): the same write, without a
  * template string per property per draw.
  */
-const INLINE_LOOP = /for \(const \[name, value\] of [A-Za-z0-9_.!]+\.properties\)\s*\n\s*this\._shaderManager\.setUniform\((?:`u_material\.\$\{name\}`|this\._materialSync\.uniformName\(name\)), value\);/g;
+const INLINE_LOOP = /for \(const \[name, value\] of [A-Za-z0-9_.!]+\.properties\)\s*\n\s*this\._shaderManager\.setUniform\((?:`u_material\.\$\{name\}`|this\.sync\.uniformName\(name\)), value\);/g;
 
 describe('material uniform writes go through one place', () => {
     it('has exactly one loop writing u_material.<property>', () => {
         const hits = SRC.match(INLINE_LOOP) ?? [];
         expect(
             hits.length,
-            'Every material property loop must live in _applyMaterialProperties. A second one is a draw ' +
+            'Every material property loop must live in MaterialBinder.applyProperties. A second one is a draw ' +
             'path that writes the material\'s own uniforms but NOT the per-frame viewPos/sunDirection ' +
             'beside them — which is exactly how parallax stopped responding to the camera while still ' +
             'looking like it worked.',
         ).toBe(1);
     });
 
-    it('that loop is inside _applyMaterialProperties, next to the per-frame writes', () => {
-        const fn = SRC.match(/private _applyMaterialProperties\(material: Material\): void \{([\s\S]*?)\n    \}/);
-        expect(fn, '_applyMaterialProperties not found').not.toBeNull();
+    it('that loop is inside MaterialBinder.applyProperties, next to the per-frame writes', () => {
+        const fn = SRC.match(/public applyProperties\(material: Material\): void \{([\s\S]*?)\n    \}/);
+        expect(fn, 'MaterialBinder.applyProperties not found').not.toBeNull();
         const body = fn![1];
         expect(body).toMatch(INLINE_LOOP);
         expect(body, 'the eye position the march builds toEye from').toMatch(/u_material\.viewPos/);
@@ -67,8 +68,8 @@ describe('material uniform writes go through one place', () => {
     it('every draw path that sets a pipeline also applies the material properties', () => {
         // A cheap structural proxy: the helper must be reached from more than the legacy fallback.
         // Six inline loops were replaced; fewer callers than that means one was dropped, not refactored.
-        const callers = (SRC.match(/this\._applyMaterialProperties\(/g) ?? []).length;
-        expect(callers, 'expected the 6 migrated call sites plus _applyMaterial itself')
+        const callers = (SRC.match(/this\.(?:_materials\.)?applyProperties\(/g) ?? []).length;
+        expect(callers, 'expected the 6 migrated call sites plus MaterialBinder.apply itself')
             .toBeGreaterThanOrEqual(7);
     });
 });

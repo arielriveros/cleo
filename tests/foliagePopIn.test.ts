@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { foliageEffectiveCull, foliageLodBands, foliageKeepFraction, type FoliageBand } from '../src/terrain/foliage';
+import { rendererSource } from './helpers/rendererSource';
 
 // Foliage pop-in. A 10 m pine with generated LODs had bands at 80/160/320 m while "no cull set" meant
 // the scene's 65 m: only LOD0 ever drew, and trees vanished at 65 m without becoming their impostor.
@@ -85,15 +86,15 @@ describe('foliageLodBands: the per-instance crossfade', () => {
 });
 
 describe('renderer wiring', () => {
-    const renderer = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+    const renderer = rendererSource();
     it('admits off-screen in-range cells for free and draws admitted cells the same frame', () => {
         expect(renderer).toContain('if (!p.onScreen) { p.cell.visible = true; continue; }');
         expect(renderer).toMatch(/p\.cell\.visible = true;\s*place\(p\.cell\);/);
     });
     it('uses the effective cull for colour and shadows alike', () => {
-        expect(renderer.match(/foliageEffectiveCull\(layer, this\._foliageCullDistance\)/g)?.length).toBe(2);
+        expect(renderer.match(/foliageEffectiveCull\(layer, this\.foliageCullDistance\)/g)?.length).toBe(2);
     });
     it('turns the crossfade off for placed (non-foliage) instanced models', () => {
-        expect(renderer.match(/setUniform\('u_lodCamera', Renderer\._LOD_OFF\)/g)?.length).toBe(2);
+        expect(renderer.match(/setUniform\('u_lodCamera', FoliagePasses\.LOD_OFF\)/g)?.length).toBe(2);
     });
 });

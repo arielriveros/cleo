@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { rendererSource } from './helpers/rendererSource';
 
 // Bloom is GL-bound and so mostly out of scope for this DOM-free suite (see the policy note in
 // vitest.config.ts). What IS worth pinning is the class of failure this pass has actually shipped
@@ -9,7 +10,7 @@ import { join } from 'node:path';
 // trips a compile error, a type error, or a GL warning.
 
 const SRC = join(__dirname, '..', 'src');
-const renderer = readFileSync(join(SRC, 'graphics', 'renderer.ts'), 'utf8');
+const renderer = rendererSource();
 // The three bloom passes are authored in WGSL now; the GLSL for WebGL2 is generated from these at
 // build time. The assertions below moved with them, so they still pin the same behaviour — but against
 // the source somebody edits rather than against generated text.
@@ -18,9 +19,9 @@ const bloomShader = readFileSync(join(WGSL, 'bloom.wgsl'), 'utf8');
 const downsampleShader = readFileSync(join(WGSL, 'bloomDownsample.wgsl'), 'utf8');
 const upsampleShader = readFileSync(join(WGSL, 'bloomUpsample.wgsl'), 'utf8');
 
-/** Body of a `private _name(...)` method, so a uniform upload can be attributed to its own pass. */
+/** Body of a class method, private or public, so a uniform upload can be attributed to its own pass. */
 function methodBody(source: string, name: string): string {
-    const at = source.indexOf(`private ${name}(`);
+    const at = source.search(new RegExp(`(?:private|public) ${name}\\(`));
     expect(at, `method not found: ${name}`).toBeGreaterThan(-1);
     const open = source.indexOf('{', at);
     let depth = 0;
@@ -54,8 +55,8 @@ describe('bloom bright-pass threshold space', () => {
     it('is fed the exposure by the bloom pass itself', () => {
         // A uniform declared and never uploaded reads as 0, which would make luma 0 and take bloom
         // straight back to black — the same failure with a different cause. Scope the check to
-        // _bloomGenerate: the renderer uploads u_exposure in half a dozen other passes.
-        const body = methodBody(renderer, '_bloomGenerate');
+        // PostEffects.bloomGenerate: the renderer uploads u_exposure in half a dozen other passes.
+        const body = methodBody(renderer, 'bloomGenerate');
         expect(body).toContain("setUniform('u_exposure'");
         expect(body).toContain("setUniform('u_bloomMaskEnabled'");
     });
@@ -77,12 +78,12 @@ describe('bloom eligibility mask', () => {
 
     it('defaults to off', () => {
         // Bloom over the whole image is the conventional default; the mask is an artistic filter.
-        expect(renderer).toMatch(/_bloomMaskEnabled: boolean = false;/);
+        expect(renderer).toMatch(/bloomMaskEnabled: boolean = false;/);
     });
 
     it('survives a settings round trip', () => {
         // Otherwise the toggle silently resets on every project load.
-        expect(renderer).toContain('bloomMaskEnabled: this._bloomMaskEnabled,');
+        expect(renderer).toContain('bloomMaskEnabled: this._post.bloomMaskEnabled,');
         expect(renderer).toContain('if (s.bloomMaskEnabled !== undefined)');
     });
 });
@@ -93,7 +94,7 @@ describe('bloom diagnosability', () => {
         // pixel clears. Mode 2 renders the alpha channel as greyscale (debugView.fs), so this needs no
         // shader work — only the channel wiring, which is exactly what kept getting skipped.
         expect(renderer).toMatch(/'bloomMask'/);
-        expect(renderer).toMatch(/case 'bloomMask':\s*tex = this\._sceneFBO\.colors\[0\];\s*mode = 2;/);
+        expect(renderer).toMatch(/case 'bloomMask':\s*tex = this\._targets\.scene\.colors\[0\];\s*mode = 2;/);
     });
 });
 
@@ -122,7 +123,7 @@ describe('bloom pyramid grid alignment', () => {
     it('feeds both grids from the renderer', () => {
         // sourceBlockUV needs the destination resolution; unset it reads 0 and floor(0) collapses
         // every texel onto the same source block.
-        const body = methodBody(renderer, '_bloomGenerate');
+        const body = methodBody(renderer, 'bloomGenerate');
         expect(body).toContain("setUniform('u_srcTexelSize'");
         expect((body.match(/setUniform\('u_dstResolution'/g) ?? []).length).toBe(2); // bright pass + downsample loop
     });
@@ -133,7 +134,7 @@ describe('bloom pyramid grid alignment', () => {
         expect(upsampleShader).toMatch(/u_filterRadius: vec2<f32>/);
         expect(upsampleShader).toMatch(/let x = u_bloom\.u_filterRadius\.x;/);
         expect(upsampleShader).toMatch(/let y = u_bloom\.u_filterRadius\.y;/);
-        expect(renderer).toMatch(/BLOOM_FILTER_RADIUS \/ from\.width, Renderer\.BLOOM_FILTER_RADIUS \/ from\.height/);
+        expect(renderer).toMatch(/BLOOM_FILTER_RADIUS \/ from\.width, PostEffects\.BLOOM_FILTER_RADIUS \/ from\.height/);
     });
 
     it('sizes the half-res scratch buffers with integers', () => {

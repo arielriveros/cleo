@@ -116,7 +116,7 @@ vec3 getNormal() { return normalize(TBN[2]); }
 // are both generated from this, so they cannot disagree. The deferred interface declares none.
 const FORWARD_ENGINE_SAMPLERS: SamplerDecl[] = [
     { name: 'u_envMap', type: 'samplerCube' },
-    // The opaque scene behind a TRANSPARENT material: its depth (the snapshot `_copySceneDepth` takes
+    // The opaque scene behind a TRANSPARENT material: its depth (the snapshot `ForwardPass.copySceneDepth` takes
     // before the transparent queue) and its colour (copied at the same point, only when a visible
     // material asks for it). Read them through the cleoScene* helpers, never directly — see
     // FORWARD_SCENE_BODY. An opaque material sees last frame's copy, or a 1x1 fallback.
@@ -317,7 +317,7 @@ const FORWARD_INTERFACE: PreludeInterface = {
     structs: LIGHT_STRUCTS,
     // The shadow library binds SIX group-3 entries but `shadowCalculation()` reaches only two, and the
     // light grid is a group-4 entry a material need not touch at all. Without these calls a material
-    // gets a layout narrower than the engine's group — and `_textureBindGroup` fills a group
+    // gets a layout narrower than the engine's group — and `BindGroupCache.textureGroup` fills a group
     // POSITIONALLY, so the mismatch is a bind-group error rather than a spare binding nobody reads.
     keepAlive: 'cleoPunctualVisibility(0, 0, fragPos, getNormal(), fragPos)'
              + ' + cleoLightTexel(0).r',

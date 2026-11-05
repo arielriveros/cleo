@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Curved silhouettes and the pixel depth offset for parallax occlusion mapping.
@@ -218,7 +219,7 @@ describe('the pixel depth offset', () => {
 
 describe('the editor binds the parallax variant, not the base program', () => {
     it('Pom names resolve to their pom variant without the variant system too', () => {
-        const src = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+        const src = rendererSource();
         expect(src).toMatch(/name in EXTRA_LOGICAL_NAMES \? physicalFor\(name,/);
     });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { rendererSource } from './helpers/rendererSource';
 
 // The cloud temporal/noise work is GL-bound and so mostly out of scope for this DOM-free suite (see
 // the policy note in vitest.config.ts). What IS testable is the part that silently produces a wrong
@@ -8,7 +9,7 @@ import { join } from 'node:path';
 // written pieces of code (the renderer's constants and the shader's constants) have to agree.
 
 const SRC = join(__dirname, '..', 'src');
-const renderer = readFileSync(join(SRC, 'graphics', 'renderer.ts'), 'utf8');
+const renderer = rendererSource();
 // The cloud shaders are authored in WGSL now; the GLSL WebGL2 runs is generated from these at build
 // time. Every assertion below moved with them, so they still pin the same behaviour — but against the
 // source somebody edits rather than against generated text.
@@ -117,8 +118,8 @@ describe('noise volume periods', () => {
         const detail = Number(/CLOUD_DETAIL_NOISE_PERIOD = (\d+)/.exec(renderer)?.[1]);
         expect(base).toBeGreaterThan(0);
         expect(detail).toBeGreaterThan(0);
-        expect(renderer).toContain('1 / Renderer.CLOUD_BASE_NOISE_PERIOD');
-        expect(renderer).toContain('1 / Renderer.CLOUD_DETAIL_NOISE_PERIOD');
+        expect(renderer).toContain('1 / VolumetricCloudPasses.CLOUD_BASE_NOISE_PERIOD');
+        expect(renderer).toContain('1 / VolumetricCloudPasses.CLOUD_DETAIL_NOISE_PERIOD');
     });
 
     it('uses power-of-two volume sizes', () => {
@@ -257,13 +258,13 @@ describe('bloom mask blend state', () => {
         // pipeline carries its own), and pinning the exact text made this fail for a reason that has
         // nothing to do with the mask it protects.
         expect(renderer).toMatch(
-            /_restoreDefaultBlend\(\): void \{[\s\S]{0,400}?gl\.blendFuncSeparate\(gl\.SRC_ALPHA, gl\.ONE_MINUS_SRC_ALPHA, gl\.ZERO, gl\.ONE\);/);
+            /restoreDefaultBlend\(\): void \{[\s\S]{0,400}?gl\.blendFuncSeparate\(gl\.SRC_ALPHA, gl\.ONE_MINUS_SRC_ALPHA, gl\.ZERO, gl\.ONE\);/);
     });
 
     it('does not let a quality tier destroy the authored bloom intensity', () => {
         // Tier `low` disables bloom, which zeroes the live intensity; re-selecting a tier with bloom
         // used to restore a hardcoded 0.6 and silently discard whatever the user had set.
-        expect(renderer).toContain('_bloomIntensityUser');
-        expect(renderer).not.toMatch(/Math\.max\(this\._bloomIntensity, 0\.6\)/);
+        expect(renderer).toContain('bloomIntensityUser');
+        expect(renderer).not.toMatch(/Math\.max\(this\.(?:_post\.)?_?bloomIntensity, 0\.6\)/);
     });
 });

@@ -320,7 +320,7 @@ export const MAX_POINT_SHADOWS = 4;
  * assumes. `dir` is the view direction from the light; `up` completes an ordinary right-handed
  * camera.
  *
- * DELIBERATELY NOT `Renderer._CUBE_FACES`. That table is the OpenGL cubemap convention, whose
+ * DELIBERATELY NOT `SkyPasses.CUBE_FACES`. That table is the OpenGL cubemap convention, whose
  * left-handed face basis is exactly why probe capture has to reverse winding (`_cubeFaceCapture`).
  * A mirrored view matrix swaps which triangles count as front-facing, and the shadow pass rasterizes
  * with FRONT-face culling to push acne onto surfaces the camera cannot see — so a mirrored frame

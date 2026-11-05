@@ -4,6 +4,7 @@ import { join, dirname } from 'path';
 import { resolveIncludes } from '../tools/shaderIncludes.mjs';
 import { findStructs, findResources, stripLineComments } from '../tools/wgslLayout.mjs';
 import { Material } from '../src/graphics/material';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Static guards on the Cel material's shader contract.
@@ -98,7 +99,7 @@ describe('the light functions stay uniformity-safe', () => {
 
 describe('group 0 matches the renderer texture-unit table', () => {
     it('is a contiguous run of texture/sampler pairs', () => {
-        // `_textureBindGroup` places the Nth texture at binding 2N, so a gap or a reordering puts a
+        // `BindGroupCache.textureGroup` places the Nth texture at binding 2N, so a gap or a reordering puts a
         // sampler where the backend expects a texture. WebGPU rejects the draw; WebGL2 does not.
         const bindings = findResources(compose('cel.wgsl'))
             .filter((r: any) => r.group === 0)
@@ -119,7 +120,7 @@ describe('group 0 matches the renderer texture-unit table', () => {
     });
 
     it('declares no environment cube', () => {
-        // Cel has no reflection, and leaving `u_envMap` out is what lets `_materialBindGroup` fill group
+        // Cel has no reflection, and leaving `u_envMap` out is what lets `BindGroupCache.materialGroup` fill group
         // 0 from the material's own slots with no null entry, and what lets the renderer's per-draw env
         // gate stay a three-model check.
         for (const entry of ['cel.wgsl', 'celSkinned.wgsl'])
@@ -137,7 +138,7 @@ describe('group 0 matches the renderer texture-unit table', () => {
 });
 
 describe('the renderer knows where the ramp binds', () => {
-    const renderer = () => read(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'));
+    const renderer = () => rendererSource();
 
     it('maps rampMap to texture unit 1', () => {
         // `_textureSlot` falls through to unit 0, so an unmapped slot does not error — it binds OVER the
@@ -154,7 +155,7 @@ describe('the renderer knows where the ramp binds', () => {
 
     it('keeps cel out of the G-buffer and in the forward overlay, together', () => {
         // These two must agree. Only the exclusion makes a cel mesh invisible; only the queue arm draws
-        // it twice — once as Cook-Torrance through `_geometryShaderFor`'s pbrGeometry default.
+        // it twice — once as Cook-Torrance through `GeometryPass._geometryShaderFor`'s pbrGeometry default.
         const src = renderer();
         expect(src).toMatch(/dtype === 'cel' \|\| dtype === 'celSkinned'/);
         expect(src).toMatch(/mat\.type === 'cel' \|\| mat\.type === 'celSkinned'/);

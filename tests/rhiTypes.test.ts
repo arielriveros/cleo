@@ -140,7 +140,7 @@ describe('usage flags', () => {
 describe('blend presets', () => {
     // The bloom mask contract: the alpha channel of the scene buffer is the bloom mask, not coverage,
     // so the default blend must leave the DESTINATION alpha exactly as it found it. That is zero/one —
-    // `dst = 0*src + 1*dst` — and it is what `Renderer._restoreDefaultBlend` has always set with
+    // `dst = 0*src + 1*dst` — and it is what `PassEncoder.restoreDefaultBlend` has always set with
     // `blendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ZERO, ONE)`.
     //
     // This asserted `one` until the forward pass became the first caller of the constant. Nothing

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { DEFAULT_POST_CHAIN } from '../src/graphics/renderGraph/chain';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * Four effects were added to the default post chain — depth of field, lens flare, vignette and film
@@ -22,12 +23,12 @@ import { DEFAULT_POST_CHAIN } from '../src/graphics/renderGraph/chain';
  * needs a GPU.
  */
 
-const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8')
+const RENDERER = rendererSource()
     .replace(/\r\n/g, '\n');
 
-/** The initializer of a `private _name... = value;` field declaration. */
+/** The initializer of a `name: T = value;` field declaration, wherever the field now lives. */
 function fieldDefault(name: string): string {
-    const match = RENDERER.match(new RegExp(`private _${name}\\s*:\\s*[A-Za-z<>|\\[\\] ]+ = ([^;]+);`));
+    const match = RENDERER.match(new RegExp(`(?:private|public) _?${name}\\s*:\\s*[A-Za-z<>|\\[\\] ]+ = ([^;]+);`));
     expect(match, `no default found for _${name}`).toBeTruthy();
     return match![1].trim();
 }
@@ -71,12 +72,12 @@ describe('every chain effect is gated where the ping-pong is decided', () => {
     })();
 
     it.each([
-        ['depthOfField', '_dofEnabled'],
-        ['lensFlare', '_lensFlareIntensity'],
-        ['vignette', '_vignetteStrength'],
-        ['filmGrain', '_filmGrainIntensity'],
-        ['bloom', '_bloomIntensity'],
-        ['chromatic', '_chromaticAberrationStrength'],
+        ['depthOfField', '_post.dofEnabled'],
+        ['lensFlare', '_post.lensFlareIntensity'],
+        ['vignette', '_post.vignetteStrength'],
+        ['filmGrain', '_post.filmGrainIntensity'],
+        ['bloom', '_post.bloomIntensity'],
+        ['chromatic', '_post.chromaticAberrationStrength'],
     ])('%s is gated on %s at build time', (effect, field) => {
         const at = GRAPH.indexOf(`entry.effect === '${effect}'`);
         expect(at, `${effect} has no branch in _buildPostGraph`).toBeGreaterThan(-1);
@@ -120,7 +121,7 @@ describe('every chain effect is gated where the ping-pong is decided', () => {
         // render, not in the chain, which is what lets the chain be switched off wholesale without
         // taking antialiasing with it. If a `taa` branch ever appears here, that stops being true.
         expect(GRAPH).not.toContain("entry.effect === 'taa'");
-        expect(RENDERER).toContain('private _taaResolvePass()');
+        expect(RENDERER).toContain('public taaResolvePass()');
     });
 
     it('advances the ping-pong only for effects that consume a chain stage', () => {

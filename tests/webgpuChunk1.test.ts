@@ -107,7 +107,7 @@ describe('Texture view memo', () => {
 // ------------------------------------------------------------------------------------------------
 //
 // WebGPU requires a pipeline to declare depth state whenever its pass has a depth attachment, and
-// `_beginFullscreenPass` always declares one — so the renderer synthesises `{ depthCompare: 'always',
+// `beginFullscreenPass` always declares one — so the renderer synthesises `{ depthCompare: 'always',
 // depthWriteEnabled: false }` for every fullscreen pass that never asked for depth at all.
 //
 // On WebGL2 those same pipelines previously took the no-depthStencil branch, which DISABLES the depth

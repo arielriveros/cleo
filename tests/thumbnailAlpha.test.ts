@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * The offscreen-capture alpha contract.
@@ -25,12 +26,12 @@ import { join } from 'path';
  */
 
 const CRLF = new RegExp(String.raw`\r\n`, 'g');
-const RENDERER = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8')
+const RENDERER = rendererSource()
     .replace(CRLF, '\n');
 
 /** The body of a `private _name(...)` method, up to its closing brace at class indentation. */
 function methodBody(name: string): string {
-    const start = RENDERER.indexOf(`private ${name}(`);
+    const start = RENDERER.search(new RegExp(`(?:private|public) (?:static )?${name}\\(`));
     expect(start, `${name} not found in renderer.ts`).toBeGreaterThan(-1);
     const rest = RENDERER.slice(start);
     const end = rest.indexOf('\n    }');
@@ -46,19 +47,19 @@ describe('offscreen capture alpha', () => {
         // Without this the capture is a solid rectangle the colour of the thumbnail clear, which is
         // transparent BLACK — so the failure reads as a renderer that drew nothing rather than as a
         // missing uniform, and that is what made it survive a release.
-        expect(methodBody('_presentThumbnail')).toContain("setUniform('u_alphaFromDepth', 1.0)");
+        expect(methodBody('presentThumbnail')).toContain("setUniform('u_alphaFromDepth', 1.0)");
     });
 
     it('puts the on-screen resolve back to opaque', () => {
         // The other half, and the reason the thumbnail cannot simply set the flag once and leave it:
         // a leaked 1.0 punches the page background through the viewport on every frame after a capture.
-        expect(methodBody('_presentPass')).toContain("setUniform('u_alphaFromDepth', 0.0)");
+        expect(methodBody('presentPass')).toContain("setUniform('u_alphaFromDepth', 0.0)");
     });
 
     it('is claimed by every sharer of the present program', () => {
-        // A third caller of `_fullscreenPipeline('present', ...)` that did not write the flag would
+        // A third caller of the `present` program that did not write the flag would
         // inherit whichever of the two above ran last — the same trap, one level up.
         expect(linesWith("setUniform('u_alphaFromDepth'").length)
-            .toBe(linesWith("_fullscreenPipeline('present'").length);
+            .toBe(linesWith("'present', PresentProgram").length);
     });
 });

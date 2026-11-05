@@ -37,7 +37,7 @@ function ndcDepth(projection: mat4, zView: number): number {
     return clip[2] / clip[3];
 }
 
-/** What `Renderer._nudgedProjection` does, in isolation. */
+/** What `ViewProjection.nudgedProjection` does, in isolation. */
 function nudged(projection: mat4, nudge: number): mat4 {
     const out = mat4.clone(projection);
     if (out[11] === 0) out[14] -= nudge; // orthographic

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { rendererSource, expectAbsent } from './helpers/rendererSource';
 
 /**
  * Which passes rasterize with the TAA jitter, and which do not.
@@ -15,13 +16,13 @@ import { join } from 'node:path';
  *     sub-pixel offsets back out. It simply shimmers, every frame, forever.
  *
  * In practice every camera-projection site calls `_rasterProjection` and the `_taaJitterActive` flag —
- * cleared the moment the resolve runs — decides. That is deliberate: `_renderModel` alone serves the
+ * cleared the moment the resolve runs — decides. That is deliberate: `ModelDraw.beginModel` alone serves the
  * forward-opaque queue, the transparent queue and the probe capture, and the right answer differs for
  * all three, so no list of call sites can express it. What this test pins is the SET of sites, so a
  * new one cannot be added without someone deciding which side of the boundary it is on.
  */
 
-const RENDERER = readFileSync(join(__dirname, '../src/graphics/renderer.ts'), 'utf8')
+const RENDERER = rendererSource()
     .replace(/\r\n/g, '\n');
 
 /** The method a source offset sits inside, by the nearest preceding member declaration. */
@@ -32,15 +33,15 @@ function enclosingMethod(source: string, index: number): string {
     return declarations.length ? declarations[declarations.length - 1][1] : '<none>';
 }
 
-/** Every method containing at least one `this.<call>(`, with how many. */
+/**
+ * Every method calling the projection helper `call`, with how many: `this._projection.<call>(` from the
+ * renderer, `this.<call>(` from inside ViewProjection itself.
+ */
 function callers(call: string): Map<string, number> {
-    const needle = `this.${call}(`;
     const found = new Map<string, number>();
-    let at = RENDERER.indexOf(needle);
-    while (at !== -1) {
-        const method = enclosingMethod(RENDERER, at);
+    for (const m of RENDERER.matchAll(new RegExp(`this\\.(?:_projection\\.)?${call}\\(`, 'g'))) {
+        const method = enclosingMethod(RENDERER, m.index!);
         found.set(method, (found.get(method) ?? 0) + 1);
-        at = RENDERER.indexOf(needle, at + needle.length);
     }
     return found;
 }
@@ -50,51 +51,53 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         // The whole design rests on this being zero. A site left on `_clipProjection` is one that can
         // never jitter, whichever side of the resolve it is on — and if it is on the near side, TAA
         // silently degrades to a blur over that geometry.
-        expect(RENDERER.split('this._clipProjection(this._activeCamera.projectionMatrix)').length - 1)
-            .toBe(0);
+        // Anchored on the jittered call, so a rename of the camera field cannot make this pass vacuously.
+        expectAbsent(RENDERER, 'this._projection.clipProjection(this._view.camera.projectionMatrix)',
+                     'this._projection.rasterProjection(this._view.camera.projectionMatrix)');
     });
 
     it('routes exactly these methods through _rasterProjection', () => {
         // Adding a method here is a decision, not a formality: check where the new pass sits relative
-        // to `_taaResolvePass` before you add it. Everything below the resolve is drawn on top of the
+        // to the TAA resolve (`TemporalPasses.taaResolvePass`) before you add it. Everything below the resolve is drawn on top of the
         // resolved image and must come out unjittered.
-        expect([...callers('_rasterProjection').keys()].sort()).toEqual([
+        expect([...callers('rasterProjection').keys()].sort()).toEqual([
             // --- Before the resolve: these ARE the TAA input, and must jitter. ---
-            '_drawGeometryNode',      // all deferred opaques, terrain included
             '_drawInstancedGroup',    // twice: the RHI branch and the legacy one
+            // Every deferred opaque (terrain included) AND every forward model: ModelDraw.beginModel sets the
+            // projection for both, so forward opaques jitter and transparents, drawn after the resolve, do not.
+            'beginModel',
             '_drawSky',               // the horizon aliases harder than anything else in a scene
-            '_foliagePass',
+            'foliagePass',
             '_drawOctahedralImpostors',   // the foliage pass's impostor bucket, inside it
             // Occlusion query boxes, tested against the jittered G-buffer depth they must agree with.
-            '_gpuOcclusionPass',
+            'gpuOcclusionPass',
             // Its draws depth-test `less-equal` against the JITTERED depth buffer; unjittered here and
             // every mover's velocity is rejected or smeared by half a pixel at its own silhouette.
             '_objectVelocityPass',
-            '_renderModel',           // forward opaque (jitters) AND transparents (does not)
             // The landscape-only depth decals with `receivers: 'terrain'` compare against. It must jitter
             // exactly like the G-buffer and scene depth it is compared with, or the two disagree by a
             // TAA offset at every slope and the brush frays.
-            '_decalReceiverPass',
+            'decalReceiverPass',
             // Every decal box: the DBuffer and emissive passes (before the resolve, jittered) AND the
-            // editor overlay (after it, not) — the `_renderModel` situation, decided by the flag.
+            // editor overlay (after it, not) — the `beginModel` situation, decided by the flag.
             '_setDecalUniforms',
 
             // --- After the resolve: the flag is already false, and these must stay put. ---
             '_drawSkeletonOverlay',
             '_drawTileBand',
-            // The overlay layer's per-mesh draw reaches `_rasterProjection` through this thin wrapper,
-            // which adds a coplanar depth nudge and delegates for everything else. Listing the wrapper
-            // rather than `_drawOverlayNode` is the honest reading of the call graph, and the jitter
-            // semantics are unchanged: the overlay is composited after the post chain, so it is further
-            // from the jitter than anything else here.
-            '_nudgedProjection',
-            '_overdrawPass',
+            // A helper with a coplanar depth nudge reaches `_rasterProjection` through this thin wrapper
+            // (ModelDraw.beginModel calls it only when the nudge is non-zero); every other overlay draw goes
+            // through beginModel's own raster call. Either way the jitter semantics are unchanged: the
+            // overlay is composited after the post chain, so it is further from the jitter than anything
+            // else here.
+            'nudgedProjection',
+            'overdrawPass',
             // GPU particles: drawn after the transparents, in both pipelines and in the 2D pass.
-            '_particleDrawFrame',
-            // Smoke-and-fire volumes, ray-marched over the resolved image (renderer `_renderFluidVolumes`).
-            '_renderFluidVolumes',
-            '_renderSelectionMask',
-            '_renderSprite',
+            'particleDrawFrame',
+            // Smoke-and-fire volumes, ray-marched over the resolved image (`FluidVolumePasses.renderFluidVolumes`).
+            'renderFluidVolumes',
+            'renderSelectionMask',
+            'renderSprite',
         ].sort());
     });
 
@@ -103,29 +106,29 @@ describe('the camera projection reaches every pass through one wrapper', () => {
         // and position rather than its matrix, and `_captureProj` is a fixed 90-degree square face —
         // so both are immune by construction rather than by being excluded, and jittering either would
         // move shadows and probe captures against the image instead of with it.
-        expect([...callers('_clipProjection').keys()].sort()).toEqual([
-            '_convolveCubeFaces',     // _captureProj
+        expect([...callers('clipProjection').keys()].sort()).toEqual([
+            'convolveCubeFaces',      // _captureProj
             '_drawImpostorShadows',   // lightSpace
-            '_foliageShadowPass',     // lightSpace
-            '_rasterProjection',      // the wrapper's own two returns
+            'foliageShadowPass',      // lightSpace
+            'rasterProjection',       // the wrapper's own two returns
             '_renderAtmosphereFaces', // _captureProj (the sky bake and the cloud-sky bake)
             '_renderShadowCasters',   // lightSpace
         ].sort());
     });
 
     it('clears the jitter at the temporal boundary, in both pipelines', () => {
-        // Deferred goes through `_renderForwardOverlay`, forward through `_renderScene`, and they are
+        // Deferred goes through `renderForwardOverlay`, forward through `renderScene`, and they are
         // separate functions with separate insertion points. One wired and the other not would leave
         // half the pipelines shimmering.
-        expect(RENDERER.split('this._endJitterPhase();').length - 1).toBe(2);
-        expect(RENDERER.split('this._taaResolvePass();').length - 1).toBe(2);
-        expect(RENDERER.split('this._produceVelocity();').length - 1).toBe(2);
+        expect(RENDERER.split('this._projection.endJitterPhase();').length - 1).toBe(2);
+        expect(RENDERER.split('this._temporal.taaResolvePass();').length - 1).toBe(2);
+        expect(RENDERER.split('this._temporal.produceVelocity();').length - 1).toBe(2);
     });
 
     it('gates the jitter and the resolve on the same flag', () => {
         // A jittered image that nothing resolves is strictly worse than no TAA: it is the same
         // aliasing, now crawling. One field decides both.
-        expect(RENDERER).toContain('if (!this._taaJitterActive || this._cubeFaceCapture');
-        expect(RENDERER).toContain('if (!this._taaJitterActive || !this._velocityProducedThisFrame) return;');
+        expect(RENDERER).toContain('if (!this._view.taaJitterActive || this._view.cubeFace');
+        expect(RENDERER).toContain('if (!this._view.taaJitterActive || !this.velocityProducedThisFrame) return;');
     });
 });

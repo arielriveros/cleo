@@ -38,7 +38,7 @@ export class ShaderManager {
 
     /**
      * Builds a program nothing has registered yet, when its name is one the renderer knows how to build
-     * (see Renderer._buildOnDemand). Consulted on a miss by {@link getShader}, {@link bind} and
+     * (see ProgramRegistry.buildOnDemand). Consulted on a miss by {@link getShader}, {@link bind} and
      * {@link bindIfRegistered}; never by {@link find}, which stays a pure lookup.
      */
     private _resolver: ((name: string) => ShaderProgram | undefined) | null = null;

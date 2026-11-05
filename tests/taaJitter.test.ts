@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mat4, vec4 } from 'gl-matrix';
 import { TAA_PHASES, TAA_JITTER, jitterMatrix } from '../src/graphics/utils/taaJitter';
+import { rendererSource } from './helpers/rendererSource';
 
 /**
  * The TAA jitter matrix.
@@ -100,7 +101,7 @@ describe('the jitter matrix', () => {
 
     it('is checked against the matrix the renderer actually uses', () => {
         // The literal above is a copy, and a copy that drifts proves nothing. Read the real one.
-        const source = readFileSync(join(__dirname, '..', 'src', 'graphics', 'renderer.ts'), 'utf-8');
+        const source = rendererSource();
         expect(source).toContain('mat4.fromValues(1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 0.5, 0,  0, 0, 0.5, 1)');
     });
 

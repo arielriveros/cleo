@@ -4,7 +4,7 @@
 // startup profile, to name which programs a slow first launch is spent on.
 
 export interface ShaderBuildRecord {
-    /** The descriptor label: a `_programTable` name, a custom material key, `particleSim#…`, … */
+    /** The descriptor label: a `programTable` name, a custom material key, `particleSim#…`, … */
     label: string;
     /**
      * Submit to usable: compile + link + reflection (+ `gl.finish()` when {@link shaderStats.syncEach}).

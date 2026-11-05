@@ -205,7 +205,7 @@ export class Texture {
             ...(size?.depth !== undefined ? { depthOrArrayLayers: size.depth } : {}),
             usage: this._usage === 'depth'
                 ? TextureUsage.RENDER_ATTACHMENT | TextureUsage.TEXTURE_BINDING
-                  | TextureUsage.COPY_SRC | TextureUsage.COPY_DST   // _copyDepth blits between targets
+                  | TextureUsage.COPY_SRC | TextureUsage.COPY_DST   // PassEncoder.copyDepth blits between targets
                 // STORAGE_BINDING replaces attachment usage rather than joining it — asking for both
                 // narrows the formats WebGPU accepts.
                 // A load-only data texture asks for nothing else: no attachment, no readback. See
