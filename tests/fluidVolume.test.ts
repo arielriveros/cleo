@@ -83,7 +83,7 @@ describe('the fluid volume pass', () => {
 
     it('draws after the TAA resolve and before the transparents', () => {
         const taa = forward.indexOf('this._temporal.taaResolvePass()');
-        const volumes = forward.indexOf('this._renderFluidVolumes(scene)');
+        const volumes = forward.indexOf('this._fluids.renderFluidVolumes(scene)');
         const transparent = forward.indexOf("this._runForwardQueue('transparent'");
         expect(taa).toBeGreaterThan(-1);
         expect(volumes).toBeGreaterThan(taa);
@@ -95,14 +95,14 @@ describe('the fluid volume pass', () => {
     });
 
     it('reconstructs rays with the stable inverse, as everything after the resolve does', () => {
-        const at = RENDERER.indexOf('private _renderFluidVolumes(');
+        const at = RENDERER.indexOf('public renderFluidVolumes(');
         const body = RENDERER.slice(at, RENDERER.indexOf('\n    }\n', at));
         expect(body).toContain("sm.setUniform('u_invViewProj', this._view.invViewProjStable)");
         expect(body).toContain('VolumetricCloudPasses.CLOUD_BLEND');
     });
 
     it('traces, then resolves (temporal only), then composites onto the scene buffer', () => {
-        const at = RENDERER.indexOf('private _renderFluidVolumes(');
+        const at = RENDERER.indexOf('public renderFluidVolumes(');
         const body = RENDERER.slice(at, RENDERER.indexOf('\n    }\n', at));
         const trace = body.indexOf("this._fluidTraceFBO!.renderTarget, 'fluidVolumes'");
         const resolve = body.indexOf("'fluidVolumes.resolve'");
