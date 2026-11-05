@@ -27,7 +27,6 @@ import { CustomMaterial } from './material';
 import { ensureCustomShader, customShaderReady } from './systems/customShaders';
 import { TexturePacker } from './systems/texturePacker';
 import { setParticleSimVariants } from './particles/particleRenderer';
-import { TextureManager } from './systems/textureManager';
 import { Logger } from '../core/logger';
 import { frameStats, resetFrameStats } from './renderStats';
 import { shaderStats } from './shaderStats';
@@ -75,6 +74,7 @@ import { ForwardPass } from './render/forwardPass';
 import { EditorOverlays } from './render/editorOverlays';
 import { DebugViews } from './render/debugViews';
 import { Capture } from './render/capture';
+import { RenderStats } from './render/stats';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 import { gl, setGLContext } from './glContext';
@@ -186,6 +186,8 @@ export class Renderer {
     private readonly _debugViews: DebugViews;
     /** Captures: offscreen screenshots and thumbnails, light-probe capture and IBL bake, probe previews (render/capture.ts). */
     private readonly _capture: Capture;
+    /** Frame statistics for the performance HUD, the GPU memory estimate and the opt-in GL error check (render/stats.ts). */
+    private readonly _stats: RenderStats;
 
     /**
      * Whether the post-process chain runs at all for this host.
@@ -266,14 +268,6 @@ export class Renderer {
 
     // Deferred pipeline state
     private _deferred: boolean;
-
-    /**
-     * Check `gl.getError()` once per frame and count what it reports. OFF by default — `getError`
-     * forces a synchronous round trip that stalls the pipeline.
-     */
-    public debugGLErrors: boolean = false;
-    private _glErrorCount: number = 0;
-
 
     private _terrainLayerTextureSize: number = DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE;
 
@@ -504,6 +498,14 @@ export class Renderer {
             get clearColor() { return renderer.clearColor; },
             render: (scene) => renderer.render(scene),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._temporal, this._post, this._shadows, this._lighting, this._sky, this._forward);
+        this._stats = new RenderStats({
+            get canvas() { return renderer._canvas; },
+            get deferred() { return renderer._deferred; },
+            get postPool() { return renderer._postPool; },
+            get renderHeight() { return renderer._renderHeight; },
+            get renderScale() { return renderer._renderScale; },
+            get renderWidth() { return renderer._renderWidth; },
+        }, this._targets, this._temporal, this._post, this._clouds, this._decals, this._shadows, this._ssil, this._sky, this._debugViews);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._shadows.shadowDistance = config.shadowDistance ?? 100;
         this._shadows.cascadeCount = Math.min(MAX_CASCADES, Math.max(1, Math.round(config.shadowCascades ?? this._shadows.cascadeCount)));
@@ -1168,7 +1170,7 @@ export class Renderer {
         this._sky.updateIBL(scene);
         this._passes.endScope();
 
-        // Reset per-frame perf counters AFTER the (occasional) IBL bake so bakes don't spike the stats.
+        // Reset per-frame perf counters AFTER the (occasional) IBL bake so bakes don't spike the RenderStats.stats.
         resetFrameStats();
         frameStats.occluderTriangles = this._visibility.occlusionFrameStats.triangles;
         frameStats.occlusionMs = this._visibility.occlusionFrameStats.ms;
@@ -1195,7 +1197,7 @@ export class Renderer {
         this._passes.scope('foliage.upload');
         this._foliage.ensureFoliageUploaded(scene);
         this._passes.endScope();
-        this._checkGLErrors('framePrologue');
+        this._stats.checkGLErrors('framePrologue');
 
         this._shadows.shadowsActive = false;
         if (shadowLight && this._shadows.shadowsEnabled) {
@@ -1205,11 +1207,11 @@ export class Renderer {
                 this._shadows.shadowMapsDirty = true;
             }
         }
-        this._checkGLErrors('cascades');
+        this._stats.checkGLErrors('cascades');
         this._shadows.renderSpotShadows(scene);
-        this._checkGLErrors('spotShadows');
+        this._stats.checkGLErrors('spotShadows');
         this._shadows.renderPointShadows(scene);
-        this._checkGLErrors('pointShadows');
+        this._stats.checkGLErrors('pointShadows');
 
         if (!this._shadows.shadowsActive) {
             // No caster: the pass above is skipped, so the layers still hold the LAST scene's depth and
@@ -1230,11 +1232,11 @@ export class Renderer {
 
         if (this._deferred) this._renderDeferred(scene, shadowLight);
         else this._renderForward(scene, shadowLight);
-        this._checkGLErrors('scene');
+        this._stats.checkGLErrors('scene');
 
         // Apply post processing
         this._applyPostProcessing(scene);
-        this._checkGLErrors('post');
+        this._stats.checkGLErrors('post');
 
         // Remember this frame's camera transform so next frame's motion blur can reproject against it.
         mat4.copy(this._view.prevViewProj, this._view.viewProj);
@@ -1367,7 +1369,7 @@ export class Renderer {
         // 1. Rasterize all opaque lit geometry into the G-buffer.
         this._passes.scope('geometry');
         this._geometry.geometryPass(scene);
-        this._checkGLErrors('geometry');
+        this._stats.checkGLErrors('geometry');
         // BOTH counters, not just `objects`: instanced foliage bumps only `instances`, and a landscape
         // whose only deferred geometry is grass would otherwise lose its AO.
         const gBufferHasGeometry = frameStats.objects > 0 || frameStats.instances > 0;
@@ -1375,7 +1377,7 @@ export class Renderer {
         // decal's normal and the lighting pass shades its albedo like the surface's own.
         if (this._decals.surfaceDecals.length > 0 && gBufferHasGeometry && this._passes.beginPass('decals')) {
             this._decals.surfaceDecalPass();
-            this._checkGLErrors('decals');
+            this._stats.checkGLErrors('decals');
         }
         // 1b. Screen-space ambient occlusion and bounce light from the G-buffer and last frame's light.
         this._ssil.ssaoProducedThisFrame = false;
@@ -1386,10 +1388,10 @@ export class Renderer {
         // 2. Light the G-buffer in a single fullscreen pass into the scene FBO.
         this._passes.scope('lighting');
         this._lighting.deferredLightingPass(scene, shadowLight);
-        this._checkGLErrors('deferredLighting');
+        this._stats.checkGLErrors('deferredLighting');
         // 3. Forward passes (skybox, transparent, sprites, outlines, gizmos) into the scene FBO.
         this._forward.renderForwardOverlay(scene, shadowLight);
-        this._checkGLErrors('forwardOverlay');
+        this._stats.checkGLErrors('forwardOverlay');
         this._passes.endScope();
     }
 
@@ -2008,78 +2010,15 @@ export class Renderer {
 
     public get canvas(): HTMLCanvasElement { return this._canvas; }
 
-    /**
-     * Report and count any GL error raised since the last check, naming the stage that raised it.
-     * `gl.getError()` clears the flag, so the check is per stage. No-op unless {@link debugGLErrors}.
-     */
-    private _checkGLErrors(stage: string): void {
-        // `gl` as well as the flag: `getError` is a WebGL2 concept, and WebGPU reports through
-        // `uncapturederror`, which the device already handles.
-        if (!this.debugGLErrors || !gl) return;
-        for (let i = 0; i < 8; i++) {
-            const error = gl.getError();
-            if (error === gl.NO_ERROR) return;
-            this._glErrorCount++;
-            Logger.error(`GL error ${error} raised during the ${stage} stage`, 'Renderer');
-        }
-    }
+    /** Per-frame render statistics for the editor's performance HUD (last completed frame). See {@link RenderStats}. */
+    public get stats(): RenderStats['stats'] { return this._stats.stats; }
 
-    /** Per-frame render statistics for the editor's performance HUD (last completed frame). */
-    public get stats() {
-        return {
-            drawCalls: frameStats.drawCalls,
-            instancedDrawCalls: frameStats.instancedDrawCalls,
-            objects: frameStats.objects,
-            culledObjects: frameStats.culledObjects,
-            occludedObjects: frameStats.occludedObjects,
-            occludedCells: frameStats.occludedCells,
-            occluderTriangles: frameStats.occluderTriangles,
-            occlusionMs: frameStats.occlusionMs,
-            culledInstances: frameStats.culledInstances,
-            // Surfaced here, not just on `frameStats`: the performance panel reads its per-frame
-            // counters off THIS object, so a counter added to the accumulator and not to this list
-            // reads as a permanent zero in the HUD - the same way the physics and scene rows once did.
-            foliageDraws: frameStats.foliageDraws,
-            foliageShadowDraws: frameStats.foliageShadowDraws,
-            foliageCells: frameStats.foliageCells,
-            foliageCellsScanned: frameStats.foliageCellsScanned,
-            shadowLayers: frameStats.shadowLayers,
-            shadowLayersSkipped: frameStats.shadowLayersSkipped,
-            shadowDraws: frameStats.shadowDraws,
-            shadowTriangles: frameStats.shadowTriangles,
-            instances: frameStats.instances,
-            triangles: frameStats.triangles,
-            vertices: frameStats.vertices,
-            tilemapChunks: frameStats.tilemapChunks,
-            tilemapDraws: frameStats.tilemapDraws,
-            fullscreenPasses: frameStats.fullscreenPasses,
-            shadedMpx: frameStats.shadedMpx,
-            stateChanges: frameStats.stateChanges,
-            stateChangesSaved: frameStats.stateChangesSaved,
-            particlesDrawn: frameStats.particlesDrawn,
-            particleSteps: frameStats.particleSteps,
-            particleSystems: frameStats.particleSystems,
-            particleSystemsCulled: frameStats.particleSystemsCulled,
-            particleSystemsLodCulled: frameStats.particleSystemsLodCulled,
-            particleSystemsLodReduced: frameStats.particleSystemsLodReduced,
-            particleColliders: frameStats.particleColliders,
-            particleDraws: frameStats.particleDraws,
-            particleGpuCreates: frameStats.particleGpuCreates,
-            particleGpuReuses: frameStats.particleGpuReuses,
-            frameMs: frameStats.frameMs,
-            pipeline: this._deferred ? 'deferred' as const : 'forward' as const,
-            glErrors: this._glErrorCount,
-            // Canvas size (what the display sees) and internal size (what the pipeline actually
-            // shades) are different numbers once renderScale is below 1, and the gap between them is
-            // exactly what the profiler panel is there to let you tune.
-            width: this._canvas.width,
-            height: this._canvas.height,
-            renderWidth: this._renderWidth,
-            renderHeight: this._renderHeight,
-            renderScale: this._renderScale,
-            gpuBytes: this._estimateGpuBytes(),
-        };
-    }
+    /**
+     * Check `gl.getError()` after each frame stage and count what it reports. OFF by default — `getError`
+     * forces a synchronous round trip that stalls the pipeline.
+     */
+    public get debugGLErrors(): boolean { return this._stats.debugGLErrors; }
+    public set debugGLErrors(on: boolean) { this._stats.debugGLErrors = on; }
 
     // ---------------------------------------------------------------------------------------------
     // Profiling / debug controls (editor tooling)
@@ -2126,40 +2065,6 @@ export class Renderer {
         if (clamped === this._renderScale) return;
         this._renderScale = clamped;
         if (this._deviceReady) this._resizeBuffers(this._renderWidth, this._renderHeight);
-    }
-
-    /** Rough GPU memory estimate: the renderer's own render-target framebuffers + registered asset
-     *  textures. Excludes vertex/instance buffers and IBL cubemaps, so it is a lower bound. */
-    private _estimateGpuBytes(): number {
-        let bytes = 0;
-        const addFbo = (fbo?: Framebuffer) => {
-            if (!fbo) return;
-            for (const c of fbo.colors) bytes += c.byteSize;
-            if (fbo.depth) bytes += fbo.depth.byteSize;
-        };
-        addFbo(this._targets.scene); addFbo(this._targets.gBuffer);
-        bytes += this._shadows.shadowCascadeFBO.texture.byteSize; // one array texture, layers included
-        bytes += this._shadows.spotShadowFBO.texture.byteSize;
-        bytes += this._shadows.pointShadowFBO.texture.byteSize;
-        for (const m of this._post.bloomMips) addFbo(m);
-        // The cloud temporal targets and baked noise volumes belong here too — an 8MB volume absent
-        // from the estimate defeats its purpose.
-        addFbo(this._targets.sceneDepth); addFbo(this._clouds.cloudsFBO); addFbo(this._clouds.cloudTraceFBO);
-        addFbo(this._targets.refraction ?? undefined);
-        for (const f of this._clouds.cloudHistoryFBOs) addFbo(f);
-        if (this._clouds.cloudBaseNoise) bytes += this._clouds.cloudBaseNoise.byteSize;
-        if (this._clouds.cloudDetailNoise) bytes += this._clouds.cloudDetailNoise.byteSize;
-        addFbo(this._ssil.ssaoFBO); addFbo(this._ssil.ssaoBlurFBO);
-        for (const f of this._ssil.ssilHistoryFBOs) addFbo(f);
-        addFbo(this._ssil.ssilRadianceFBO ?? undefined);
-        addFbo(this._sky.brdfFBO); addFbo(this._post.outlineMaskFBO); addFbo(this._targets.overlay);
-        addFbo(this._debugViews.overdrawFBO ?? undefined);
-        addFbo(this._targets.velocity); addFbo(this._temporal.velocityTileFBO); addFbo(this._temporal.velocityNeighborFBO);
-        addFbo(this._decals.dBufferFBO ?? undefined); addFbo(this._decals.gBufferCopyFBO ?? undefined);
-        addFbo(this._decals.decalReceiverFBO ?? undefined);
-        bytes += this._postPool.byteSize;
-        for (const tex of TextureManager.Instance.textures.values()) bytes += tex.byteSize;
-        return bytes;
     }
 
     /** Background/clear color (RGBA 0..1). Setter also updates the live GL clear color if a context exists. */
