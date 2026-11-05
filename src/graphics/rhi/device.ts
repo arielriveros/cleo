@@ -306,8 +306,9 @@ export interface Device {
     createCommandEncoder(label?: string): CommandEncoder;
 
     /**
-     * Read a colour attachment back to the CPU. Asynchronous because WebGPU's `copyTextureToBuffer` +
-     * `mapAsync` is; callers must finish rendering and restore their state BEFORE awaiting.
+     * Read a colour attachment back to the CPU, as it stands at the call. Asynchronous on both backends —
+     * WebGPU copies into a buffer and maps it, WebGL2 copies into a pixel-pack buffer and waits on a fence
+     * — so it never stalls the frame; callers must finish rendering and restore their state BEFORE awaiting.
      */
     readPixels(view: TextureView, x: number, y: number, width: number, height: number): Promise<Uint8Array>;
 
