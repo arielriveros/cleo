@@ -10,7 +10,7 @@ export type DebugView =
     'emissive' | 'ao' | 'depth' | 'ssao' | 'ssil' | 'shadow' | 'cascades' | 'bloom' | 'bloomMask' | 'mask' | 'velocity' |
     'taaHistory' | 'overdraw';
 
-/** How much the CPU occlusion culling uses: nothing, the landscape, or the landscape and Occluder volumes. */
+/** How much occlusion culling does: nothing, the landscape, or the landscape and occlusion volumes. */
 export type OcclusionMode = 'off' | 'terrain' | 'all';
 
 /**
@@ -243,8 +243,8 @@ export interface RenderSettings {
     fxaaEdgeThreshold?: number;
     frustumCulling: boolean;
     /**
-     * CPU occlusion culling (graphics/occlusion): skip what is hidden behind the landscape (`terrain`) or
-     * behind the landscape and Occluder volumes (`all`). Absent = `all`.
+     * Occlusion culling (graphics/occlusion): skip what is hidden behind the landscape (`terrain`), and
+     * also the contents of every occlusion volume the camera cannot see (`all`). Absent = `all`.
      */
     occlusionCulling?: OcclusionMode;
     /**

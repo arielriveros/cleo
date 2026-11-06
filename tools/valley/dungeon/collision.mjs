@@ -139,7 +139,7 @@ export function rasterise(parts, bounds) {
     const list = floors[i].sort((p, q) => p.y - q.y)
     floors[i] = list.filter((f, k) => k === list.length - 1 || list[k + 1].y - f.y >= 1.0)
   }
-  // `res`/`y0`/`bin`/`bins` describe the steep-face bins for readers outside this module (occluders.mjs).
+  // `res`/`y0`/`bin`/`bins` describe the steep-face bins for readers outside this module.
   return { x0, z0, W, H, floors, steep, down, seeThrough, binOf, res: RES, y0: Y0, bin: BIN, bins: BINS }
 }
 

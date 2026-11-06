@@ -64,6 +64,7 @@ export interface PhysicsThreadControl {
 const RANGED = ['drawCalls', 'instancedDrawCalls', 'objects', 'instances', 'triangles',
                 'culledObjects', 'culledInstances', 'occludedObjects', 'queryOccludedObjects', 'occlusionQueries',
                 'occludedCells', 'occluderTriangles', 'occlusionMs',
+                'occlusionVolumes', 'occlusionVolumesHidden', 'volumeCulledNodes',
                 'fullscreenPasses', 'shadedMpx',
                 'stateChanges', 'stateChangesSaved',
                 'foliageDraws', 'foliageShadowDraws', 'foliageCells', 'foliageCellsScanned',
@@ -702,7 +703,7 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
                   title='Foliage instances rejected by the distance or frustum test, counted per blade.' />
         {/* CPU occlusion culling (graphics/occlusion): the share of "culled" an occluder accounts for. */}
         <RangeRow label='· occluded objects' r={r.occludedObjects}
-                  title='Of the culled objects, those in view but hidden behind the landscape or an Occluder volume.' />
+                  title='Of the culled objects, those in view but hidden behind the landscape or by a GPU occlusion query.' />
         <RangeRow label='· by GPU queries' r={r.queryOccludedObjects}
                   title='Of the occluded objects, those a GPU occlusion query found hidden behind what was actually drawn — a building, a cliff — which the CPU occluders cannot see.' />
         <RangeRow label='· GPU queries' r={r.occlusionQueries}
@@ -713,6 +714,14 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
                   title='Occluder triangles rasterized into the CPU occlusion buffer.' />
         <RangeRow label='· occlusion' r={r.occlusionMs} dp={2} unit=' ms'
                   title='CPU time spent rasterizing the occluders this frame (part of prepare).' />
+        {/* Occlusion volumes (graphics/occlusion/occlusionVolumes.ts): boxes whose contents are skipped while
+            the box is out of sight. */}
+        <RangeRow label='Occlusion volumes' r={r.occlusionVolumes}
+                  title='Enabled occlusion volumes with something inside, whose visibility was decided this frame.' />
+        <RangeRow label='· out of sight' r={r.occlusionVolumesHidden}
+                  title='Of those, the ones the camera could not see: off screen, behind the landscape, or behind what was drawn.' />
+        <RangeRow label='· nodes skipped' r={r.volumeCulledNodes}
+                  title='Models, sprites, particle systems, lights, decals and fluids inside an out-of-sight volume, skipped this frame.' />
         {/* Shadow maps are the one pass that re-draws the scene several times a frame, so they get their
             own slice of the draw and triangle totals above. */}
         <RangeRow label='Shadow layers' r={r.shadowLayers}

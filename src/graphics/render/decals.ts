@@ -99,7 +99,7 @@ export class DecalPasses {
         this._decalReceiversWanted = false;
         this._decalReceiversReady = false;
         for (const decal of scene.decals) {
-            if (!decal.visible) continue;
+            if (!decal.visible || this._sys.visibility.volumeCulled(decal)) continue;
             if (this._sys.visibility.frustumCulling) {
                 const s = decal.getBoundingSphere();
                 if (!this._sys.visibility.frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) continue;

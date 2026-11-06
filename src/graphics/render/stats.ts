@@ -77,6 +77,9 @@ export class RenderStats {
             occludedCells: frameStats.occludedCells,
             occluderTriangles: frameStats.occluderTriangles,
             occlusionMs: frameStats.occlusionMs,
+            occlusionVolumes: frameStats.occlusionVolumes,
+            occlusionVolumesHidden: frameStats.occlusionVolumesHidden,
+            volumeCulledNodes: frameStats.volumeCulledNodes,
             culledInstances: frameStats.culledInstances,
             // Surfaced here, not just on `frameStats`: the performance panel reads its per-frame
             // counters off THIS object, so a counter added to the accumulator and not to this list

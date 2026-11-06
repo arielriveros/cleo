@@ -11,6 +11,7 @@ import { TilemapNode } from '../src/core/scene/nodes/tilemapNode';
 import { LightNode } from '../src/core/scene/nodes/lightNode';
 import { LightProbeNode } from '../src/core/scene/nodes/lightProbeNode';
 import { ExposureVolumeNode } from '../src/core/scene/nodes/exposureVolumeNode';
+import { OcclusionVolumeNode } from '../src/core/scene/nodes/occlusionVolumeNode';
 import { VolumetricCloudsNode } from '../src/core/scene/nodes/volumetricCloudsNode';
 import { SkyAtmosphereNode } from '../src/core/scene/nodes/skyAtmosphereNode';
 import { SkyLightNode } from '../src/core/scene/nodes/skyLightNode';
@@ -60,6 +61,12 @@ const CASES: { label: string, make: () => Node, cls: Function }[] = [
     { label: 'light-spot', make: () => new LightNode('spot', new Spotlight({})), cls: LightNode },
     { label: 'lightProbe', make: () => new LightProbeNode('probe', { size: [4, 4, 4] }), cls: LightProbeNode },
     { label: 'exposureVolume', make: () => new ExposureVolumeNode('exposure', { size: [4, 4, 4], overrides: { exposureMinEV: 3 } }), cls: ExposureVolumeNode },
+    { label: 'occlusionVolume', make: () => {
+        const v = new OcclusionVolumeNode('room', [6, 3, 5]);
+        v.setCull('lights', false);
+        v.setCull('shadows', false);
+        return v;
+    }, cls: OcclusionVolumeNode },
     { label: 'volumetricClouds', make: () => new VolumetricCloudsNode('clouds'), cls: VolumetricCloudsNode },
     { label: 'skyAtmosphere', make: () => new SkyAtmosphereNode('sky'), cls: SkyAtmosphereNode },
     { label: 'skyLight', make: () => new SkyLightNode('sky light'), cls: SkyLightNode },
@@ -134,6 +141,23 @@ describe('parseNodeJson', () => {
             expect(reparentsIn(events)).toEqual([]);
         });
     }
+
+    it("reads a scene's legacy 'occluder' as an occlusion volume of the same size", () => {
+        const { parent } = parseCapturing({ type: 'occluder', name: 'Occluder 1', id: 'occ-1', occluder: { size: [2, 3, 0.5], enabled: false } });
+        const restored = parent.children[0] as OcclusionVolumeNode;
+        expect(restored).toBeInstanceOf(OcclusionVolumeNode);
+        expect(restored.nodeType).toBe('occlusionVolume');
+        expect(restored.size).toEqual([2, 3, 0.5]);
+        expect(restored.enabled).toBe(false);
+        expect(Object.values(restored.cull).every(Boolean)).toBe(true);
+    });
+
+    it('an occlusion volume saved without cull switches hides everything', () => {
+        const { parent } = parseCapturing({ type: 'occlusionVolume', name: 'v', id: 'v-1', occlusionVolume: { size: [1, 1, 1] } });
+        const restored = parent.children[0] as OcclusionVolumeNode;
+        expect(restored.enabled).toBe(true);
+        expect(Object.values(restored.cull).every(Boolean)).toBe(true);
+    });
 
     it('rebuilds a nested subtree, attaching every node exactly once', async () => {
         const root = new UIRootNode('UI');

@@ -141,12 +141,13 @@ export class ParticlePasses {
             ambient[0] += sky[0]; ambient[1] += sky[1]; ambient[2] += sky[2];
         }
 
-        // The punctual lights as the light grid has them, less those whose whole reach was hidden this frame.
+        // The punctual lights as the light grid has them, less those whose whole reach was hidden this frame
+        // and those inside an occlusion volume the camera cannot see.
         const localLights = this._particleLights;
         localLights.length = 0;
         for (const node of scene.lights) {
             if (node.type === 'directional' || node.index < 0) continue;
-            if (this._sys.visibility.lightOccludedMemo.get(node) === true) continue;
+            if (this._sys.visibility.lightOccludedMemo.get(node) === true || this._sys.visibility.volumeCulled(node)) continue;
             const light = node.light as PointLight | Spotlight;
             const record: ParticleLocalLight = {
                 position: node.worldPosition, intensity: light.internalIntensity, color: light.color,
@@ -171,6 +172,7 @@ export class ParticlePasses {
             width: this._host.renderWidth, height: this._host.renderHeight,
             ambient, sunDirection, sunColor, localLights,
             visible: this._sys.visibility.frustumCulling ? (min, max) => this._sys.visibility.frustum.intersectsAABB(min, max) : undefined,
+            hidden: this._hiddenByVolume,
             lodDistanceScale: this.particleLodDistanceScale,
             exposure: this._view.exposure,
             // As the forward path picks a mesh's reflection: the probe containing it, else the sky. Never
@@ -184,6 +186,7 @@ export class ParticlePasses {
         };
     }
 
+    private readonly _hiddenByVolume = (node: ParticleSystemNode) => this._sys.visibility.volumeCulled(node);
     private readonly _particleViewProj: mat4 = mat4.create();
     private readonly _particleLights: ParticleLocalLight[] = [];
 }

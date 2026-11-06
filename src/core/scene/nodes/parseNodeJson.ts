@@ -16,7 +16,7 @@ import { SkyAtmosphereNode } from "./skyAtmosphereNode";
 import { SkyLightNode } from "./skyLightNode";
 import { WindNode } from "./windNode";
 import { WeatherNode } from "./weatherNode";
-import { OccluderNode } from "./occluderNode";
+import { OcclusionVolumeNode } from "./occlusionVolumeNode";
 import { CameraNode } from "./cameraNode";
 import { SpriteNode } from "./spriteNode";
 import { AnimatedSpriteNode } from "./animatedSpriteNode";
@@ -56,7 +56,9 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'skyLight': SkyLightNode.parse(parent, json); break;
     case 'wind': WindNode.parse(parent, json); break;
     case 'weather': WeatherNode.parse(parent, json); break;
-    case 'occluder': OccluderNode.parse(parent, json); break;
+    case 'occlusionVolume': OcclusionVolumeNode.parse(parent, json); break;
+    // Saved before occluders became occlusion volumes (see OcclusionVolumeNode.parseLegacyOccluder).
+    case 'occluder': OcclusionVolumeNode.parseLegacyOccluder(parent, json); break;
     case 'lodGroup': LodGroupNode.parse(parent, json); break;
     case 'cameraRig': CameraRigNode.parse(parent, json); break;
     case 'character': CharacterNode.parse(parent, json); break;

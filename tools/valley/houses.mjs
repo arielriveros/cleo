@@ -32,7 +32,7 @@ const LINTEL_STEP = 0.25            // lintels this close in height are one box
 const round = (v) => Math.round(v * 1000) / 1000
 
 /**
- * The house grid in the shape `dungeon/collision.mjs#rasterise` returns (so occluders.mjs reads both), plus
+ * The house grid in the shape `dungeon/collision.mjs#rasterise` returns, plus
  * per cell: `roofLow` (underside of the roof, or Infinity), `topMax` (the highest anything reaches),
  * `steepMax`, and `floorY` (a raised floor: the highest up face FLOOR_MIN .. FLOOR_MAX over the base, or
  * -Infinity where the floor is the ground).

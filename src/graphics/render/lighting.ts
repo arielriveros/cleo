@@ -440,14 +440,17 @@ export class LightingPasses {
                 // A light whose whole reach is hidden keeps its record (its index is fixed) but reaches
                 // no cluster: radius 0 is "reaches nothing" to buildClusters.
                 const r = this.coneSphere.radius;
-                this._setClusterLight(count, center, this._visibility.lightOccluded(node, center, r) ? 0 : r);
+                // So is a light inside an occlusion volume the camera cannot see.
+                const hidden = this._visibility.volumeCulled(node) || this._visibility.lightOccluded(node, center, r);
+                this._setClusterLight(count, center, hidden ? 0 : r);
             } else {
                 const point = node.light as PointLight;
                 const p = node.worldPosition;
                 center[0] = p[0]; center[1] = p[1]; center[2] = p[2];
                 // The windowed falloff reaches EXACTLY zero at `range`, which is what makes this a
                 // cull rather than an approximation. See `distanceAttenuation`.
-                this._setClusterLight(count, center, this._visibility.lightOccluded(node, center, point.range) ? 0 : point.range);
+                const hidden = this._visibility.volumeCulled(node) || this._visibility.lightOccluded(node, center, point.range);
+                this._setClusterLight(count, center, hidden ? 0 : point.range);
             }
             count++;
         }
@@ -520,19 +523,23 @@ export class LightingPasses {
         for (const node of scene.lights) {
             if (node.type === 'directional' || node.index < 0) continue;
             if (i >= MAX_LIGHTS) break;
+            // A light inside an occlusion volume the camera cannot see keeps its record (its index is
+            // fixed) but at no intensity: the orthographic grid's one cluster holds every record whatever
+            // its radius, so radius 0 alone would not put it out there.
+            const off = this._visibility.volumeCulled(node);
 
             if (node.type === 'spotlight') {
                 const spot = node.light as Spotlight;
                 const [coneScale, coneOffset] = spot.coneScaleOffset;
                 this.lightGrid.packRecord(i, node.worldPosition, spot.invRangeSquared,
-                                           spot.color, spot.internalIntensity,
+                                           spot.color, off ? 0 : spot.internalIntensity,
                                            node.worldForward, spot.sourceRadius,
                                            coneScale, coneOffset,
                                            this._shadows.spotSlots.layerOf(node.id), NO_SHADOW_SLOT);
             } else {
                 const point = node.light as PointLight;
                 this.lightGrid.packRecord(i, node.worldPosition, point.invRangeSquared,
-                                           point.color, point.internalIntensity,
+                                           point.color, off ? 0 : point.internalIntensity,
                                            ShadowPasses.POINT_DIRECTION, point.sourceRadius,
                                            POINT_CONE_SCALE, POINT_CONE_OFFSET,
                                            NO_SHADOW_SLOT, this._shadows.pointSlots.layerOf(node.id));

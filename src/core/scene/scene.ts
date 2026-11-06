@@ -19,7 +19,7 @@ import { ForceFieldNode } from "./nodes/forceFieldNode";
 import { ClothNode } from "./nodes/clothNode";
 import { WaterVolumeNode } from "./nodes/waterVolumeNode";
 import { ExposureVolumeNode } from "./nodes/exposureVolumeNode";
-import { OccluderNode } from "./nodes/occluderNode";
+import { OcclusionVolumeNode } from "./nodes/occlusionVolumeNode";
 import { SkyboxNode } from "./nodes/skyboxNode";
 import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./nodes/skyAtmosphereNode";
@@ -128,7 +128,7 @@ export class Scene {
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
     private _exposureVolumes: Set<ExposureVolumeNode> = new Set();
-    private _occluders: Set<OccluderNode> = new Set();
+    private _occlusionVolumes: Set<OcclusionVolumeNode> = new Set();
     private _sounds: Set<SoundNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
     private _uiRoots: Set<UIRootNode> = new Set();
@@ -845,7 +845,7 @@ export class Scene {
         this._forceFields = new Set();
         this._waterVolumes = new Set();
         this._exposureVolumes = new Set();
-        this._occluders = new Set();
+        this._occlusionVolumes = new Set();
         this._sounds = new Set();
         this._lightProbes = new Set();
         this._skybox = null;
@@ -899,8 +899,8 @@ export class Scene {
                 this._waterVolumes.add(node);
             if (node instanceof ExposureVolumeNode)
                 this._exposureVolumes.add(node);
-            if (node instanceof OccluderNode)
-                this._occluders.add(node);
+            if (node instanceof OcclusionVolumeNode)
+                this._occlusionVolumes.add(node);
             if (node instanceof SoundNode)
                 this._sounds.add(node);
             if (node instanceof LightProbeNode)
@@ -1228,11 +1228,11 @@ export class Scene {
         return this._forceFields;
     }
 
-    /** Every occluder volume in the scene: what the renderer's occlusion culling hides things behind. */
-    public get occluders(): Set<OccluderNode> {
+    /** Every occlusion volume in the scene: boxes whose contents the renderer skips while the box is out of sight. */
+    public get occlusionVolumes(): Set<OcclusionVolumeNode> {
         if (this._dirty)
             this._breadthFirstTraversal();
-        return this._occluders;
+        return this._occlusionVolumes;
     }
 
     /** Every water volume in the scene: what the physics step buoys bodies with. */

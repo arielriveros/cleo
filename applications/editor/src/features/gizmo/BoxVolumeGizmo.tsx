@@ -1,11 +1,11 @@
-import { ExposureVolumeNode, LightProbeNode, MIN_EXPOSURE_VOLUME_SIZE, type Node } from 'cleo';
+import { ExposureVolumeNode, LightProbeNode, MIN_EXPOSURE_VOLUME_SIZE, OcclusionVolumeNode, type Node } from 'cleo';
 import BoxVolumeGizmoView, { type VolumeTarget } from '@cleo/app-kit/gizmo/BoxVolumeGizmo';
 import { useCleoEngine } from '../EngineContext';
 import { usePlayback } from '../PlaybackContext';
 import { isWithinTemplateInstance } from '../../utils/templates';
 
 /**
- * The editor's face handles for box VOLUME nodes — light probes and exposure volumes: app-kit's
+ * The editor's face handles for box VOLUME nodes — light probes, exposure and occlusion volumes: app-kit's
  * context-free box gizmo (see its header), on the selected node when it is one, outside Play and outside
  * a template instance. Every change announces SCENE_CHANGED and BOX_VOLUME_EDITED.
  */
@@ -17,6 +17,10 @@ export const BOX_VOLUME_EDITED = 'BOX_VOLUME_EDITED';
 export function boxVolumeTarget(node: Node | null | undefined): VolumeTarget | null {
   if (node instanceof ExposureVolumeNode) {
     return { size: () => [...node.size] as [number, number, number], setSize: s => { node.size = s; }, minSize: MIN_EXPOSURE_VOLUME_SIZE };
+  }
+  // Fitted to a room's interior by dragging its faces in to the walls.
+  if (node instanceof OcclusionVolumeNode) {
+    return { size: () => [...node.size] as [number, number, number], setSize: s => { node.size = s; }, minSize: 0.01 };
   }
   // An unbounded probe (any side 0) has no box to grab: it covers the whole scene.
   if (node instanceof LightProbeNode && node.bounded) {

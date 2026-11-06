@@ -90,8 +90,10 @@ export class Sprite2DPasses {
     public render2DPass(scene: Scene): void {
         const sprites: SpriteNode[] = [];
         // Scene content only. The editor's light/sound/probe icons are billboards in `scene.sprites`
-        // too, and they belong to the overlay layer — see `EditorOverlays.renderEditorOverlay`.
-        for (const node of scene.sprites) if (node.visible && !isEditorOnlyNode(node)) sprites.push(node);
+        // too, and they belong to the overlay layer — see `EditorOverlays.renderEditorOverlay`. Not one
+        // inside an occlusion volume the camera cannot see.
+        for (const node of scene.sprites)
+            if (node.visible && !isEditorOnlyNode(node) && !this._sys.visibility.volumeCulled(node)) sprites.push(node);
 
         const tilemaps: TilemapNode[] = [];
         for (const node of scene.tilemaps) if (node.visible) tilemaps.push(node);
@@ -129,7 +131,7 @@ export class Sprite2DPasses {
         // band offset by the highest emitter sorting order — so "in front of the player" is authored,
         // not an accident of traversal.
         for (const particles of scene.particleSystems) {
-            if (!particles.visible) continue;
+            if (!particles.visible || this._sys.visibility.volumeCulled(particles)) continue;
             let order = 0;
             for (const e of particles.system.emitters) order = Math.max(order, e.render.sortingOrder);
             list.push({ band: entityBand + order, depth: -particles.worldPosition[1], particles });

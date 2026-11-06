@@ -28,6 +28,7 @@ import { shaderStats } from './shaderStats';
 import { parseRecipes, resetShaderOptimizerFrame } from './shaderOptimizer';
 import type { PipelineRecipe } from './shaderOptimizer';
 import { OcclusionBuffer } from './occlusion/occlusionBuffer';
+import type { OcclusionVolumeNode } from '../core/scene/nodes/occlusionVolumeNode';
 import { EXTRA_LOGICAL_NAMES, FILTER_DEPENDENT, type ShadowFilter } from './programVariants';
 import { gpuProfiler, initializeGpuProfiler, RENDER_PASSES, RenderPass } from './gpuProfiler';
 import { cpuProfiler } from './cpuProfiler';
@@ -782,6 +783,10 @@ export class Renderer {
         // prepare, the geometry pass, the forward overlay and the velocity pass all consult it.
         this._visibility.buildOcclusion(scene);
         this._visibility.beginGpuOcclusion();
+        // Then the occlusion volumes, which read both: which boxes the camera cannot see, so every pass
+        // below (shadows, particles, the light grid, decals, the geometry and forward passes) skips
+        // what is inside them.
+        this._visibility.updateOcclusionVolumes(scene);
 
         // Which models moved since last frame. AFTER LOD selection, so a level that was just swapped in
         // is already flagged not-visible-last-frame rather than reading as a teleport, and BEFORE post
@@ -822,6 +827,9 @@ export class Renderer {
         resetFrameStats();
         frameStats.occluderTriangles = this._visibility.occlusionFrameStats.triangles;
         frameStats.occlusionMs = this._visibility.occlusionFrameStats.ms;
+        frameStats.occlusionVolumes = this._visibility.volumeFrameStats.tested;
+        frameStats.occlusionVolumesHidden = this._visibility.volumeFrameStats.hidden;
+        frameStats.volumeCulledNodes = this._visibility.volumeFrameStats.culledNodes;
         const _statsT0 = performance.now();
 
         // Particle simulation steps. Here because no pass is open and every pass that READS the state
@@ -1926,6 +1934,15 @@ export class Renderer {
     }
     /** This frame's CPU occlusion buffer, for a debug view. Its contents are only meaningful mid-frame. */
     public get occlusionBuffer(): OcclusionBuffer { return this._visibility.occlusion; }
+    /**
+     * What the last frame decided for an occlusion volume (graphics/occlusion/occlusionVolumes.ts): how
+     * many nodes lie inside it, and whether the camera could not see it (so they were skipped). Null when
+     * volumes did not act (occlusion culling not `'all'`, frustum culling off) or the volume took no part
+     * (disabled, hidden, no size).
+     */
+    public occlusionVolumeStatus(volume: OcclusionVolumeNode): { inside: number; hidden: boolean } | null {
+        return this._visibility.volumes.status(volume);
+    }
 
     /** Distance (world units) beyond which foliage cells are culled; 0 disables distance culling. */
     public get particleLodDistanceScale(): number { return this._particlePasses.particleLodDistanceScale; }

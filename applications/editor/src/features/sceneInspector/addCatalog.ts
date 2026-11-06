@@ -48,7 +48,7 @@ import {
   ForceFieldNode,
   ClothNode,
   WaterVolumeNode,
-  OccluderNode,
+  OcclusionVolumeNode,
   LIGHT_UNIT,
   newLightOptions,
 } from 'cleo'
@@ -68,7 +68,7 @@ import {
   DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon, ExposureVolumeIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon, WeatherIcon,
-  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OccluderIcon, ClothIcon,
+  SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
 } from './nodeIcons'
 import { createLandscapeNode } from '../../utils/landscapeSlots'
 import { defaultDecalMaterial } from '../../utils/materials'
@@ -384,10 +384,11 @@ export const ADD_ITEMS: AddItem[] = [
     create: async () => new WaterVolumeNode('water volume', { size: [10, 2, 10] }),
   },
   {
-    // An occlusion-culling volume: hides what is behind it from rendering. Placed INSIDE a building's
-    // walls or a cliff's bulk; landscapes need none (see graphics/occlusion).
-    id: 'occluder', label: 'Occluder', icon: OccluderIcon, category: 'environment',
-    create: async () => new OccluderNode('occluder', [4, 3, 4]),
+    // An occlusion volume: what lies wholly inside the box is not rendered while the box cannot be seen
+    // (graphics/occlusion/occlusionVolumes.ts). Fitted to a room's interior, inside its walls, it skips
+    // the room's contents whenever you cannot see into it. Placeable: it is a volume.
+    id: 'occlusionVolume', label: 'Occlusion Volume', icon: OcclusionVolumeIcon, category: 'environment',
+    create: async () => new OcclusionVolumeNode('occlusion volume', [4, 3, 4]),
   },
   {
     id: 'forceField', label: 'Force Field', icon: ForceFieldIcon, category: 'effects',

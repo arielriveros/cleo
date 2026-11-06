@@ -24,6 +24,12 @@ export interface RenderStats {
     occluderTriangles: number;
     /** CPU time building the occlusion buffer (rasterizing the occluders), ms. Part of `prepare`. */
     occlusionMs: number;
+    /** Enabled occlusion volumes with something inside, whose visibility was decided this frame. */
+    occlusionVolumes: number;
+    /** Of those, the ones the camera could not see. */
+    occlusionVolumesHidden: number;
+    /** Nodes of every kind (models, sprites, particles, lights, decals, fluids) a hidden volume skipped. */
+    volumeCulledNodes: number;
     /** Foliage instances skipped this frame by the distance or frustum test (per blade, not per cell). */
     culledInstances: number;
     /** Instanced draws the foliage COLOUR pass issued. One per prototype sub-model per detail level. */
@@ -117,6 +123,9 @@ export const frameStats: RenderStats = {
     occludedCells: 0,
     occluderTriangles: 0,
     occlusionMs: 0,
+    occlusionVolumes: 0,
+    occlusionVolumesHidden: 0,
+    volumeCulledNodes: 0,
     culledInstances: 0,
     foliageDraws: 0,
     foliageShadowDraws: 0,
@@ -186,6 +195,9 @@ export function resetFrameStats(): void {
     frameStats.occludedCells = 0;
     frameStats.occluderTriangles = 0;
     frameStats.occlusionMs = 0;
+    frameStats.occlusionVolumes = 0;
+    frameStats.occlusionVolumesHidden = 0;
+    frameStats.volumeCulledNodes = 0;
     frameStats.culledInstances = 0;
     frameStats.foliageDraws = 0;
     frameStats.foliageShadowDraws = 0;

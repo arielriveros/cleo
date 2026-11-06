@@ -138,9 +138,9 @@ export const DecalIcon = () => (
 export const ParticlesIcon = () => (
   <S><circle cx="12" cy="19.5" r="1.6" fill="currentColor" stroke="none" /><circle cx="7" cy="11" r="1.5" /><circle cx="12" cy="7" r="1.9" /><circle cx="17" cy="10.5" r="1.4" /><circle cx="9.5" cy="4" r="0.9" fill="currentColor" stroke="none" /><circle cx="15.5" cy="4.5" r="1" fill="currentColor" stroke="none" /><path d="M12 17.5 7.8 12.6M12 17.5V9.2M12 17.5l4.3-5.5" strokeDasharray="1.6 1.6" /></S>
 );
-/** Occluder: a solid block with a dashed silhouette behind it. */
-export const OccluderIcon = () => (
-  <S><path d="M3.5 7.5h11v11h-11Z" fill="currentColor" fillOpacity="0.35" /><path d="M9.5 4.5h11v11" strokeDasharray="2 2" /></S>
+/** Occlusion volume: a dashed box around a solid block, struck through — what is inside goes unseen. */
+export const OcclusionVolumeIcon = () => (
+  <S><path d="M3.5 3.5h17v17h-17Z" strokeDasharray="2.6 2.2" /><path d="M8 11h8v6.5H8Z" fill="currentColor" fillOpacity="0.35" /><path d="M6 18.5 18 6.5" /></S>
 );
 /** Exposure volume: a dashed box around a half-lit disc, the exposure it sets inside. */
 export const ExposureVolumeIcon = () => (
