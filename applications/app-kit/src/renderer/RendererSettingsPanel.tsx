@@ -26,6 +26,8 @@ const CHANNELS: { key: string; label: string }[] = [
   { key: 'depth',     label: 'Depth' },
   { key: 'ssao',      label: 'SSAO' },
   { key: 'ssil',      label: 'Indirect' },
+  { key: 'ssr',       label: 'Reflections' },
+  { key: 'ssrConfidence', label: 'Refl. Share' },
   { key: 'shadow',    label: 'Shadow' },
   { key: 'cascades',  label: 'Cascades' },
   { key: 'bloom',     label: 'Bloom' },
@@ -179,6 +181,12 @@ export default function RendererSettingsPanel() {
   const [ssaoThickness, setSsaoThickness] = useState<number>(() => renderer?.ssaoThickness ?? 0.25);
   const [ssilEnabled, setSsilEnabled] = useState<boolean>(() => renderer?.ssilEnabled ?? true);
   const [ssilIntensity, setSsilIntensity] = useState<number>(() => renderer?.ssilIntensity ?? 1);
+  const [ssrEnabled, setSsrEnabled] = useState<boolean>(() => renderer?.ssrEnabled ?? true);
+  const [ssrResolution, setSsrResolution] = useState<number>(() => renderer?.ssrResolutionScale ?? 0.5);
+  const [ssrSteps, setSsrSteps] = useState<number>(() => renderer?.ssrSteps ?? 32);
+  const [ssrMaxRoughness, setSsrMaxRoughness] = useState<number>(() => renderer?.ssrMaxRoughness ?? 0.6);
+  const [ssrMaxDistance, setSsrMaxDistance] = useState<number>(() => renderer?.ssrMaxDistance ?? 50);
+  const [ssrThickness, setSsrThickness] = useState<number>(() => renderer?.ssrThickness ?? 0.3);
   const [gridVisible, setGridVisible] = useState<boolean>(() => renderer?.gridVisible ?? true);
   const [gridPlane, setGridPlane] = useState<string>(() => renderer?.gridPlane ?? 'xz');
   const [frustumCulling, setFrustumCulling] = useState<boolean>(() => renderer?.frustumCulling ?? true);
@@ -296,6 +304,12 @@ export default function RendererSettingsPanel() {
     setSsaoThickness(renderer.ssaoThickness);
     setSsilEnabled(renderer.ssilEnabled);
     setSsilIntensity(renderer.ssilIntensity);
+    setSsrEnabled(renderer.ssrEnabled);
+    setSsrResolution(renderer.ssrResolutionScale);
+    setSsrSteps(renderer.ssrSteps);
+    setSsrMaxRoughness(renderer.ssrMaxRoughness);
+    setSsrMaxDistance(renderer.ssrMaxDistance);
+    setSsrThickness(renderer.ssrThickness);
     setGridVisible(renderer.gridVisible);
     setGridPlane(renderer.gridPlane);
     setFrustumCulling(renderer.frustumCulling);
@@ -859,6 +873,39 @@ export default function RendererSettingsPanel() {
           onChange={(v) => { renderer.ssaoThickness = v; setSsaoThickness(v); touch(); }} />
         <Slider label='Bias' value={ssaoBias} min={0} max={0.2} step={0.005}
           onChange={(v) => { renderer.ssaoBias = v; setSsaoBias(v); touch(); }} />
+      </div></Collapsable>
+
+      {/* What is on screen, reflected in glossy deferred surfaces. Where a ray finds nothing the light
+          probes, the scene environment map and then the sky reflect instead, so a miss is never black. */}
+      <Collapsable title='Screen-Space Reflections' persistKey='renderer.screen-space-reflections' defaultOpen={false}><div className='w-full p-2'>
+        <Toggle label='Enabled' checked={ssrEnabled} className='my-1'
+          onChange={(c) => { renderer.ssrEnabled = c; setSsrEnabled(c); touch(); }} />
+        {ssrEnabled && !renderer.ssrSupported &&
+          <Hint>Disabled on this device: float render targets are unavailable, so the reflection buffers
+            cannot hold HDR light. Probes and the environment still reflect.</Hint>}
+        <Slider label='Max Roughness' labelClassName={LABEL_W} value={ssrMaxRoughness} min={0} max={1} step={0.01}
+          onChange={(v) => { renderer.ssrMaxRoughness = v; setSsrMaxRoughness(renderer.ssrMaxRoughness); touch(); }} />
+        <Slider label='Max Distance' labelClassName={LABEL_W} value={ssrMaxDistance} min={1} max={200} step={1}
+          readout={(v) => `${v.toFixed(0)} m`}
+          onChange={(v) => { renderer.ssrMaxDistance = v; setSsrMaxDistance(renderer.ssrMaxDistance); touch(); }} />
+        <Slider label='Thickness' labelClassName={LABEL_W} value={ssrThickness} min={0.01} max={2} step={0.01}
+          readout={(v) => `${v.toFixed(2)} m`}
+          onChange={(v) => { renderer.ssrThickness = v; setSsrThickness(renderer.ssrThickness); touch(); }} />
+        <Slider label='Steps' labelClassName={LABEL_W} value={ssrSteps} min={8} max={128} step={1}
+          readout={(v) => v.toFixed(0)}
+          onChange={(v) => { renderer.ssrSteps = v; setSsrSteps(renderer.ssrSteps); touch(); }} />
+        <div className='flex items-center gap-1 my-1 text-ui'
+             title='Trace resolution. Half costs a quarter of Full and is filtered back up to the frame; Full keeps mirror reflections sharp.'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Resolution</span>
+          <SegmentedControl
+            value={ssrResolution >= 0.999 ? 'full' : 'half'}
+            onChange={(r) => { renderer.ssrResolutionScale = r === 'full' ? 1 : 0.5; setSsrResolution(renderer.ssrResolutionScale); touch(); }}
+            options={[
+              { value: 'half' as const, label: 'Half', title: 'Half resolution: a quarter of the cost' },
+              { value: 'full' as const, label: 'Full', title: 'Full resolution: sharp mirrors' },
+            ]}
+          />
+        </div>
       </div></Collapsable>
 
       <Collapsable title='Shading' persistKey='renderer.shading' defaultOpen={false}><div className='w-full p-2'>

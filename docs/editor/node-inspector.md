@@ -190,6 +190,12 @@ Lights the scene with the sky itself: a surface facing up receives the zenith, o
 receives the sunset. It works from the Sky Atmosphere or from a Skybox, whichever the scene has, so
 there is no need for a light probe just to get ambient light.
 
+It also gives glossy surfaces the sky to reflect. Where no light probe covers a surface and the scene
+has no Environment Map, the reflection is the same sky, blurred to each surface's roughness, and it
+follows the sun and clouds as they change (refreshed at most once a second). Intensity and tint apply
+to it too. [Screen-space reflections](rendering.md#screen-space-reflections) fall back to it wherever
+the screen has nothing to show.
+
 Intensity, tint, ambient and night ambient, cloud response — and, while the scene draws volumetric
 clouds, **Cloud Shadows** with a strength — plus an L0 read-out that separates "the projection has
 not landed yet" from "the sky really is that dim". **Ambient** scales the scene's flat ambient fill

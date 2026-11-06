@@ -22,7 +22,7 @@ const D = '/Environment/Dungeon'
 const DP = `${D}/Props`
 
 export function buildDungeon(kit) {
-  const { id, node, vars, souls, withScript, linkInstance, tex, pbrMaterial, libraryMaterial, modelNode, placeFire, log, playerModel = null } = kit
+  const { id, node, vars, souls, withScript, linkInstance, tex, pbrMaterial, libraryMaterial, modelNode, placeFire, log, playerModel = null, BLOOD_MANAGER_FIELDS = {} } = kit
 
   // ===================================================================================================
   // The structure
@@ -397,10 +397,10 @@ export function buildDungeon(kit) {
     const root = node('root', 'node', {
       id: id('dungeon:root'),
       children: [
-        // As the overworld's: a hit's blood is the spatter decal alone, no spray.
+        // The overworld's blood fields (the spatter's scale).
         withScript(node('GameManager', 'node', {
           id: id('dungeon:manager'), children: [souls.banner(), souls.soundsGroup('dungeon:manager', souls.SOUNDS.manager, { music: souls.MUSIC_CUES })],
-        }), 'SoulsGameManager', { bloodSprayTemplate: '' }),
+        }), 'SoulsGameManager', BLOOD_MANAGER_FIELDS),
         linkInstance(souls.LEVEL.player, player),
         souls.group('dungeon:level', 'Level', [structureNode, souls.group('dungeon:collision', 'Collision', collision),
           souls.group('dungeon:occluders', 'Occluders', occluderBoxes.map((o, i) => node(`Occluder ${i + 1}`, 'occluder', {

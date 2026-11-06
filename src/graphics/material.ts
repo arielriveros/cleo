@@ -654,7 +654,10 @@ enum MaterialType {
     // id and the lighting pass is Cook-Torrance, so the bands and the rim would simply be lost.
     Cel = 'cel',
     CelSkinned = 'celSkinned',
-    Terrain = 'terrain'
+    Terrain = 'terrain',
+    // A LIT sprite's private material (Sprite.lit): never authored, never serialized, drawn by the 2D
+    // pass alone with the `spriteLit` program (six-way lightmaps, surface maps or flat).
+    SpriteLit = 'spriteLit'
 }
 
 /** A `translucencyTint` made safe: four finite numbers, colour and blend clamped to 0..1; none -> no tint. */
@@ -710,6 +713,35 @@ export class Material {
         applyMask(material, properties.mask, properties.alphaCutoff);
         applyHeight(material, properties.displacementMap, properties);
 
+        return material;
+    }
+
+    /**
+     * A lit sprite's material (Sprite.lit), drawn by `spriteLit.wgsl`: `texture` is the tile atlas (the
+     * colour, or the base colour beside surface maps), `mapA`/`mapB` the tileset's lighting maps (six-way
+     * positive/negative, or normal/ORM). Everything else is set per draw by the 2D pass: the light, the
+     * sprite's frame, the soft fade. Defaults keep an unset uniform from drawing black or inheriting.
+     */
+    public static SpriteLit(properties: BasicProperties, config?: MaterialConfig): Material {
+        const material = new Material(config);
+        material.type = MaterialType.SpriteLit;
+        material.properties.set('color', properties.color || [1.0, 1.0, 1.0]);
+        material.properties.set('opacity', properties.opacity ?? 1.0);
+        material.properties.set('hasTexture', properties.texture ? true : false);
+        material.properties.set('intensity', 1.0);
+        material.properties.set('softness', 0);
+        material.properties.set('depthParams', [0.1, 1000, 0, 0]);
+        material.properties.set('mode', 0);
+        material.properties.set('hasOrm', false);
+        material.properties.set('sunDir', [0, 1, 0]);
+        material.properties.set('sunColor', [0, 0, 0]);
+        material.properties.set('ambient', [0, 0, 0]);
+        material.properties.set('keyDir', [0, 1, 0]);
+        material.properties.set('keyColor', [0, 0, 0]);
+        material.properties.set('right', [1, 0, 0]);
+        material.properties.set('up', [0, 1, 0]);
+        material.properties.set('back', [0, 0, -1]);
+        if (properties.texture) material.textures.set('texture', properties.texture);
         return material;
     }
 

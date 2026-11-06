@@ -56,17 +56,19 @@ describe('programsFor', () => {
                                   chromaticAberrationStrength: 0, filmGrainIntensity: 0, vignetteStrength: 0.35 }, use);
         const list = programsFor(use);
         // Skinned PBR characters, static PBR geometry, one shadow filter, the deferred resolve.
+        // The puddles are decals; the bonfire's smoke a lit sprite.
         for (const name of ['pbrSkinned~pcf', 'pbrGeometrySkinned~flat', 'pbrGeometry~flat', 'deferredLighting~pcf',
-                            'screen', 'present', 'skyAtmosphere', 'volumetricClouds', 'particleBillboard', 'ssil', 'vignette'])
+                            'screen', 'present', 'skyAtmosphere', 'volumetricClouds', 'particleBillboard', 'ssil', 'vignette',
+                            'decalSurface', 'spriteLit'])
             expect(list, name).toContain(name);
         // Particles as stripped variants.
         expect(list.some(n => /^particleSim~s\d+$/.test(n))).toBe(true);
         for (const name of ['cel', 'cel~pcf', 'grid', 'outline', 'debugView', 'pbr~poisson',
-                            'decalSurface', 'dofCoc', 'taaResolve', 'motionBlur', 'exposureMeter', 'lensFlare'])
+                            'dofCoc', 'taaResolve', 'motionBlur', 'exposureMeter', 'lensFlare'])
             expect(list, name).not.toContain(name);
         // 60 with the impostor shadow program the Valley's pines cast through in the outer cascades, and
-        // the knight's cut-out skinned variants on top.
-        expect(list.length).toBeLessThan(64);
+        // the knight's cut-out skinned variants on top; the puddles' three decal programs and the smoke's.
+        expect(list.length).toBeLessThan(68);
     });
 
     it('builds the parallax variant only for a material that marches', () => {

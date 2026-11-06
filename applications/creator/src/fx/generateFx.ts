@@ -175,9 +175,15 @@ export async function generateFx(raw: FxParams, ctx: GenerateContext = SILENT_CO
 /** Each output's frames into its atlas, the loop tail cross-faded into the head first. */
 function packAtlases(captures: Map<FxOutputKind, Uint8Array[]>, layout: AtlasLayout, frames: number, tail: number): Partial<Record<FxOutputKind, FxAtlas>> {
   const outputs: Partial<Record<FxOutputKind, FxAtlas>> = {};
-  for (const [kind, all] of captures) {
+  // The six-way negative map's alpha is the emission, not its coverage: it loops by the positive map's
+  // coverage (loopBlend `cover`), so it goes first, while those frames are still as rendered (the blend
+  // works in place).
+  const kinds = [...captures.keys()].sort((x, y) => Number(y === 'sixWayNeg') - Number(x === 'sixWayNeg'));
+  for (const kind of kinds) {
+    const all = captures.get(kind)!;
     const head = all.slice(0, frames);
-    if (tail > 0) loopBlend(head, all.slice(frames));
+    const pos = kind === 'sixWayNeg' ? captures.get('sixWayPos') : undefined;
+    if (tail > 0) loopBlend(head, all.slice(frames), pos ? { head: pos.slice(0, frames), tail: pos.slice(frames) } : undefined);
     const atlas = new Uint8Array(layout.width * layout.height * 4);
     head.forEach((t, i) => blitTile(atlas, layout, i, t));
     outputs[kind] = { atlas, frames: head };

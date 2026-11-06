@@ -128,6 +128,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         if (t.a < 0.0) { return vec4<f32>(0.0, -t.a, 0.0, 1.0); }
         return vec4<f32>(vec3<f32>(t.a), 1.0);
     }
+    // Nothing to show: the channel's pass did not run this frame (SSR switched off, or skipped). Black
+    // rather than the bound placeholder, which would read as a buffer full of answers.
+    if (mode == 9) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
     // Passthrough RGB (albedo, emissive, …).
     return vec4<f32>(t.rgb, 1.0);
 }

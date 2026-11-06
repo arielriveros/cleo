@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { assembleCustomFragment, customSeedTemplate, vulkanUnsupportedReason } from '../src/graphics/systems/customShaders';
+import { assembleCustomFragment, customSeedTemplate, retypeDepthTextures, vulkanUnsupportedReason } from '../src/graphics/systems/customShaders';
 import type { CustomUniform } from '../src/graphics/material';
 
 /**
@@ -333,6 +333,43 @@ vec4 fragment() {
         expect(wgsl).toContain('u_sceneColor_t');
     });
 
+    // Screen-space reflection off a transparent surface. The helper and its two uniforms join the prelude
+    // ONLY for a material whose source calls it: the stored-WGSL hash covers the whole prelude, so adding
+    // them to every forward material would have invalidated the saved translation of each one.
+    it('translates the screen reflection helper, and gives it only to the materials that call it', () => {
+        const body = `
+vec4 fragment() {
+    vec3 R = reflect(normalize(fragPos - u_viewPos), getNormal());
+    vec4 ssr = cleoScreenReflection(fragPos, R);
+    return vec4(mix(vec3(0.2, 0.3, 0.4), ssr.rgb, ssr.a), 1.0);
+}
+`;
+        const es = assembleCustomFragment('forward', body, []);
+        for (const name of ['cleoScreenReflection', 'u_ssrProjection', 'u_ssrParams']) expect(es, name).toContain(name);
+        const wgsl = glslToWgsl(assembleCustomFragment('forward', body, [], 'vulkan'), 'fragment');
+        expect(wgsl).toContain('u_ssrParams');
+
+        // The march samples inside a loop and behind early returns, where WebGPU rejects implicit-LOD
+        // sampling — the module, and with it the material, never draws. Its readers sample explicitly...
+        const fnBody = (name: string) => {
+            const at = wgsl.indexOf(`fn ${name}(`);
+            expect(at, name).toBeGreaterThan(-1);
+            return wgsl.slice(at, wgsl.indexOf('\n}\n', at));
+        };
+        for (const name of ['_cleoReflectDepth', '_cleoReflectColor', 'cleoScreenReflection'])
+            expect(fnBody(name), name).not.toMatch(/textureSample\(/);
+        // ...and the depth one, once retyped to a depth texture, takes the integer level WGSL requires.
+        const retyped = retypeDepthTextures(wgsl, ['u_sceneDepth']);
+        expect(retyped).toMatch(/textureSampleLevel\(u_sceneDepth_t, [^;]*, i32\([^;]*\)\)/);
+
+        const plain = 'vec4 fragment() { return vec4(cleoSceneColor(cleoScreenUV()), 1.0); }';
+        for (const dialect of ['es300', 'vulkan'] as const) {
+            const prelude = assembleCustomFragment('forward', plain, [], dialect);
+            expect(prelude).not.toContain('u_ssrParams');
+            expect(prelude).not.toContain('cleoScreenReflection');
+        }
+    });
+
     // The Valley example's pond water (tools/valley/water.glsl): the one shipped material that uses every
     // scene helper, with the exact uniforms it ships with.
     it('translates the Valley water material', async () => {
@@ -340,6 +377,9 @@ vec4 fragment() {
         const wgsl = glslToWgsl(assembleCustomFragment('forward', WATER_SOURCE, WATER_UNIFORMS, 'vulkan'), 'fragment');
         expect(wgsl).toContain('@fragment');
         expect(wgsl).toContain('u_normalMap_t');
+        // It reflects what is on screen, through the opt-in helper.
+        expect(WATER_SOURCE).toContain('cleoScreenReflection');
+        expect(wgsl).toContain('u_ssrParams');
     });
 
     // Every SEED template, through naga. These are the scaffolds a new custom material starts from, so

@@ -11,6 +11,8 @@ import type { VolumetricCloudPasses } from './clouds';
 import type { DecalPasses } from './decals';
 import type { ShadowPasses } from './shadows';
 import type { SsilPasses } from './ssil';
+import type { SsrPasses } from './ssr';
+import type { SceneRadianceCopy } from './sceneRadiance';
 import type { SkyPasses } from './sky';
 import type { DebugViews } from './debugViews';
 import type { FluidVolumePasses } from './fluids';
@@ -44,7 +46,9 @@ export class RenderStats {
                 private readonly _ssil: SsilPasses,
                 private readonly _sky: SkyPasses,
                 private readonly _debugViews: DebugViews,
-                private readonly _fluids: FluidVolumePasses) {}
+                private readonly _fluids: FluidVolumePasses,
+                private readonly _ssr: SsrPasses,
+                private readonly _radiance: SceneRadianceCopy) {}
 
     /**
      * Ask the device for its pending errors after each frame stage and count them. OFF by default — on
@@ -159,7 +163,10 @@ export class RenderStats {
         addFbo(this._temporal.prevDepthFBO ?? undefined);
         addFbo(this._fluids.traceFBO ?? undefined);
         for (const f of this._fluids.fluidHistory.targets) addFbo(f);
-        addFbo(this._ssil.ssilRadianceFBO ?? undefined);
+        addFbo(this._radiance.fbo ?? undefined);
+        addFbo(this._ssr.traceFBO ?? undefined); addFbo(this._ssr.resolveFBO ?? undefined);
+        for (const f of this._ssr.history.targets) addFbo(f);
+        for (const cube of this._sky.skyReflectionCubes) if (cube) bytes += cube.byteSize;
         addFbo(this._sky.brdfFBO); addFbo(this._post.outlineMaskFBO); addFbo(this._targets.overlay);
         addFbo(this._debugViews.overdrawFBO ?? undefined);
         addFbo(this._targets.velocity); addFbo(this._temporal.velocityTileFBO); addFbo(this._temporal.velocityNeighborFBO);

@@ -413,6 +413,17 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
     });
 
+    it('raises lit smoke over the valley bonfire', () => {
+        const bonfire = nodes().find(n => n.name === 'Bonfire' && n.type === 'node');
+        const smoke = allNodes(bonfire).filter((n: any) => n.type === 'animatedSprite' && n.name === 'Smoke');
+        expect(smoke).toHaveLength(1);
+        expect(smoke[0].sprite.lit).toBe(true);
+        expect(smoke[0].sprite.tileset.sixWayPositiveTextureId).toBeTruthy();
+        // A fireplace's fire (a hearth) has none.
+        for (const h of nodes().filter(n => n.name === 'Hearth'))
+            expect(allNodes(h).some((n: any) => n.name === 'Smoke'), h.id).toBe(false);
+    });
+
     it('lays rain puddles from the FX Creator in the low spots of the trails', () => {
         const group = nodes().find(n => n.name === 'Puddles');
         expect(group).toBeTruthy();
@@ -587,7 +598,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         // Fire is the FX Creator's: the torches' and the hearths' flames, each in tall 128 x 256 frames
         // (8 x 4); additive (a flame is light: it never darkens what is behind it) and taking a tenth of the
         // exposure (fire at noon as at night), each copy on a frame of its own.
-        const flames = all.filter(n => n.type === 'animatedSprite');
+        const flames = all.filter(n => n.type === 'animatedSprite' && n.name !== 'Smoke');
         expect(flames.length).toBeGreaterThan(30);
         const tilesets = new Set(flames.map(f => f.sprite.tileset.name));
         expect([...tilesets].sort()).toEqual(['Bonfire Fire', 'Torch Fire']);
@@ -618,6 +629,23 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(collision.bodies).toBe(false);
         expect(collision.restitution).toBeGreaterThan(0.2);
         expect(fx.system.emitters.some((e: any) => e.name === 'Embers')).toBe(true);
+
+        // Smoke over the bonfire and the fire pits: a LIT sprite relit by the Creator's six-way lightmaps
+        // (the fire below lights it), alpha-blended, soft where it meets the logs and the ceiling.
+        const smokes = all.filter(n => n.type === 'animatedSprite' && n.name === 'Smoke');
+        expect(smokes).toHaveLength(4);
+        const shipped = new Set(read('textures', 'index.json').map((t: any) => t.id));
+        for (const s of smokes) {
+            expect(s.sprite.lit, s.id).toBe(true);
+            expect(s.sprite.blend ?? 'alpha').toBe('alpha');
+            expect(s.sprite.softness).toBeGreaterThan(0.1);
+            expect(s.animation.loop).toBe(true);
+            const t = s.sprite.tileset;
+            expect(t.name).toBe('Fire Smoke');
+            for (const key of ['textureId', 'sixWayPositiveTextureId', 'sixWayNegativeTextureId']) expect(shipped.has(t[key]), key).toBe(true);
+            // Under the entry hall's 4.2 m ceiling: the column's top below 4 m over the fire.
+            expect(s.position[1] + s.scale[1] / 2).toBeLessThan(4.2);
+        }
     });
 
     it('makes the dungeon a level: enemies, a bonfire, and the Warden behind a fog gate', () => {

@@ -80,7 +80,31 @@ export interface TilesetConfig {
      * texture as authored. A tile's own `overdrive` overrides it.
      */
     overdrive?: number;
+    /**
+     * LIGHTING MAPS: atlases cut into the same cells as the tileset's texture, which a LIT sprite
+     * (Sprite.lit) shades with instead of drawing the texture as it is. Two kinds, each a pair:
+     *
+     *  - six-way lightmaps (smoke, steam, dust: anything soft and see-through), the FX Creator's Six-way +
+     *    and Six-way − outputs: the positive map's RGB is the effect lit from its right, top and back (away
+     *    from the camera), A its coverage; the negative map's RGB lit from its left, bottom and front, A its
+     *    emission. A lit sprite blends them by each light's direction (Unity VFX Graph's six-way lighting).
+     *  - surface maps (liquids, anything with a surface): a tangent-space normal map (OpenGL: R right,
+     *    G up, B toward the viewer) and an optional ORM map (R occlusion, G roughness, B metallic). The
+     *    tileset's own texture is then the base colour (the Creator's Surface maps albedo output).
+     *
+     * Six-way wins when both of its maps are set; a lit sprite with neither kind is shaded flat.
+     */
+    sixWayPositiveTextureId?: string | null;
+    sixWayNegativeTextureId?: string | null;
+    normalTextureId?: string | null;
+    ormTextureId?: string | null;
 }
+
+/** How a lit sprite over a tileset shades: see {@link TilesetConfig.sixWayPositiveTextureId}. */
+export type TilesetLighting = 'sixWay' | 'surface' | 'flat';
+
+/** A texture id, or null for none (an empty string included). */
+const idOrNull = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
 
 /** The overdrive range authoring accepts. */
 export const MAX_TILESET_OVERDRIVE = 32;
@@ -99,6 +123,10 @@ export class Tileset {
     private readonly _columns: number;
     private readonly _rows: number;
     private readonly _overdrive: number;
+    private readonly _sixWayPositiveTextureId: string | null;
+    private readonly _sixWayNegativeTextureId: string | null;
+    private readonly _normalTextureId: string | null;
+    private readonly _ormTextureId: string | null;
     private _meta: Map<number, TileMeta> = new Map();
     private _terrains: TerrainSet[] = [];
     private _variants: VariantSet[] = [];
@@ -115,6 +143,10 @@ export class Tileset {
         this._columns = Math.max(1, cfg.columns);
         this._rows = Math.max(1, cfg.rows);
         this._overdrive = clampOverdrive(cfg.overdrive);
+        this._sixWayPositiveTextureId = idOrNull(cfg.sixWayPositiveTextureId);
+        this._sixWayNegativeTextureId = idOrNull(cfg.sixWayNegativeTextureId);
+        this._normalTextureId = idOrNull(cfg.normalTextureId);
+        this._ormTextureId = idOrNull(cfg.ormTextureId);
     }
 
     public get id(): string { return this._id; }
@@ -129,6 +161,21 @@ export class Tileset {
     public get spacing(): number { return this._spacing; }
     /** See {@link TilesetConfig.overdrive}. */
     public get overdrive(): number { return this._overdrive; }
+    /** The lighting maps: see {@link TilesetConfig.sixWayPositiveTextureId}. */
+    public get sixWayPositiveTextureId(): string | null { return this._sixWayPositiveTextureId; }
+    public get sixWayNegativeTextureId(): string | null { return this._sixWayNegativeTextureId; }
+    public get normalTextureId(): string | null { return this._normalTextureId; }
+    public get ormTextureId(): string | null { return this._ormTextureId; }
+    /** How a lit sprite shades over this tileset: six-way with both six-way maps, surface with a normal map, else flat. */
+    public get lighting(): TilesetLighting {
+        if (this._sixWayPositiveTextureId && this._sixWayNegativeTextureId) return 'sixWay';
+        return this._normalTextureId ? 'surface' : 'flat';
+    }
+    /** Every lighting map that is set, for asset references. */
+    public get lightingTextureIds(): string[] {
+        return [this._sixWayPositiveTextureId, this._sixWayNegativeTextureId, this._normalTextureId, this._ormTextureId]
+            .filter((id): id is string => !!id);
+    }
 
     /** The linear colour multiplier `tileIndex` draws with: its own overdrive, else the tileset's. */
     public overdriveOf(tileIndex: number): number {
@@ -215,6 +262,11 @@ export class Tileset {
             rows: this._rows,
             // Only when set, so every tileset authored before overdrive serializes byte-for-byte as it did.
             ...(this._overdrive !== 1 ? { overdrive: this._overdrive } : {}),
+            // Likewise the lighting maps: only those that are set.
+            ...(this._sixWayPositiveTextureId ? { sixWayPositiveTextureId: this._sixWayPositiveTextureId } : {}),
+            ...(this._sixWayNegativeTextureId ? { sixWayNegativeTextureId: this._sixWayNegativeTextureId } : {}),
+            ...(this._normalTextureId ? { normalTextureId: this._normalTextureId } : {}),
+            ...(this._ormTextureId ? { ormTextureId: this._ormTextureId } : {}),
             tiles,
             terrains: this._terrains.map(t => ({ ...t, tiles: { ...t.tiles } })),
             variantSets: this._variants.map(v => ({ ...v, tiles: v.tiles.map(t => ({ ...t })) })),
@@ -234,6 +286,10 @@ export class Tileset {
             columns: json?.columns ?? 1,
             rows: json?.rows ?? 1,
             overdrive: json?.overdrive,
+            sixWayPositiveTextureId: json?.sixWayPositiveTextureId,
+            sixWayNegativeTextureId: json?.sixWayNegativeTextureId,
+            normalTextureId: json?.normalTextureId,
+            ormTextureId: json?.ormTextureId,
         });
         for (const key of Object.keys(json?.tiles ?? {})) {
             const idx = Number(key);

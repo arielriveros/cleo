@@ -1,4 +1,5 @@
 import type { LightingPasses } from './lighting';
+import type { SsrPasses } from './ssr';
 import type { SkyPasses } from './sky';
 import type { ShadowPasses } from './shadows';
 import type { Visibility } from './visibility';
@@ -19,6 +20,8 @@ import type { ObjectTable } from '../objectTable';
  */
 export interface RenderSubsystems {
     readonly lighting: LightingPasses;
+    /** Screen-space reflections, whose result the lighting pass blends over the environment's. */
+    readonly ssr: SsrPasses;
     readonly sky: SkyPasses;
     readonly shadows: ShadowPasses;
     readonly visibility: Visibility;

@@ -9,6 +9,7 @@ import { PARTICLE_PROGRAMS } from '../particles/particleRenderer';
 import BasicProgram from '../shaders/wgsl/basic.wgsl';
 import BasicInstancedProgram from '../shaders/wgsl/basicInstanced.wgsl';
 import BasicSkinnedProgram from '../shaders/wgsl/basicSkinned.wgsl';
+import SpriteLitProgram from '../shaders/wgsl/spriteLit.wgsl';
 import BlinnPhongProgram from '../shaders/wgsl/blinnPhong.wgsl';
 import BlinnPhongSkinnedProgram from '../shaders/wgsl/blinnPhongSkinned.wgsl';
 import CelProgram from '../shaders/wgsl/cel.wgsl';
@@ -104,6 +105,9 @@ import SsilProgram from '../shaders/wgsl/ssil.wgsl';
 import SsilTemporalProgram from '../shaders/wgsl/ssilTemporal.wgsl';
 import SsilBlurProgram from '../shaders/wgsl/ssilBlur.wgsl';
 import SsilHistoryProgram from '../shaders/wgsl/ssilHistory.wgsl';
+import SsrProgram from '../shaders/wgsl/ssr.wgsl';
+import SsrResolveProgram from '../shaders/wgsl/ssrResolve.wgsl';
+import SsrTemporalProgram from '../shaders/wgsl/ssrTemporal.wgsl';
 
 // IBL (image-based lighting) precompute shaders
 import IrradianceProgram from '../shaders/wgsl/irradiance.wgsl';
@@ -133,7 +137,8 @@ export {
     GeometryFoliageBillboardProgram, GeometryFoliageImpostorProgram, OcclusionBoxProgram, ShadowMapImpostorProgram,
     GeometryBasicProgram, GeometryBasicSkinnedProgram, DeferredLightingProgram, SsilProgram,
     SsilTemporalProgram, SsilBlurProgram, SsilHistoryProgram, IrradianceProgram,
-    PrefilterProgram, BRDFProgram,
+    PrefilterProgram, BRDFProgram, SpriteLitProgram, SsrProgram,
+    SsrResolveProgram, SsrTemporalProgram,
 };
 
 // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
@@ -280,6 +285,12 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['fluidVolume',                  FluidVolumeProgram],
         ['fluidVolumeResolve',           FluidVolumeResolveProgram],
         ['fluidVolumeComposite',         FluidVolumeCompositeProgram],
+        // Lit sprites (Sprite.lit: six-way lightmaps, surface maps, flat). APPENDED.
+        ['spriteLit',                    SpriteLitProgram],
+        // Screen-space reflections: trace, resolve, temporal accumulation (render/ssr.ts). APPENDED.
+        ['ssr',                          SsrProgram],
+        ['ssrResolve',                   SsrResolveProgram],
+        ['ssrTemporal',                  SsrTemporalProgram],
     ];
 }
 
@@ -321,6 +332,8 @@ export const FORWARD_PROGRAMS: Record<string, { resources: readonly ShaderResour
     basic: BasicProgram,
     basicSkinned: BasicSkinnedProgram,
     basicInstanced: BasicInstancedProgram,
+    // A lit sprite's private material (Sprite.drawMaterial); drawn by the 2D pass alone.
+    spriteLit: SpriteLitProgram,
 };
 
 /** WGSL reflection for the geometry programs, by the name `GeometryPass._geometryShaderFor` picks at draw time. */

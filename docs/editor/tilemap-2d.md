@@ -37,6 +37,23 @@ of the flame or an unlit tile in a glowing set; set it back to the tileset's val
 tileset again. An animated sprite uses the overdrive of the frame on screen. An animated tilemap
 tile keeps its base tile's value. Around 3–4 is a strong glow at the default bloom settings.
 
+**Lighting maps** — the atlases a **lit** sprite (**Appearance ▸ Lit**) shades with instead of drawing
+the atlas as it is, cut into the same cells. Every sprite drawn from the tileset uses them.
+
+- **Six-way +** and **Six-way −** — six-way lightmaps, for smoke, steam, dust: anything soft and
+  see-through. The FX Creator bakes them (**Bake ▸ Six-way lightmaps**, the Six-way + and Six-way −
+  outputs): the effect rendered six more times, lit from its right, top and back, and from its left,
+  bottom and front. A lit sprite blends them by each light's direction, so the side facing the sun is
+  bright, the far side dark, a back-lit edge glows and a fire below lights the underside: the effect is
+  relit by the scene's own lights, its self-shadowing baked in. This is the six-way lighting of Unity's
+  VFX Graph, and the maps are the same.
+- **Normal** and **ORM** — a surface, for liquids and anything solid: a tangent-space normal map (OpenGL
+  convention: R right, G up, B toward the viewer) and an optional ORM map (R occlusion, G roughness,
+  B metallic). The atlas is then the base colour. The FX Creator bakes all three for a liquid (**Bake ▸
+  Surface maps**: the albedo, normal and ORM outputs; the albedo goes in the atlas slot).
+
+Six-way wins when both six-way maps are set. With no maps a lit sprite is shaded flat.
+
 **Variants** — variant sets: several tiles that mean the same thing, which the **Random** brush picks
 from at random, by weight. This is what stops a large area of ground looking obviously repeated.
 **+ Variant set** adds one; select tiles on the atlas and add them to it, each with its weight.
@@ -127,12 +144,19 @@ better choice when the same animation is used in several places.
 - **Random start** — each copy starts on a random frame of its own list, so a row of the same sprite
   (torches along a wall) does not flicker in step. It applies when the sprite spawns.
 
-**Appearance** — tint, opacity, blending, exposure weight, soft fade, transparency, which sides draw, and wireframe. A tileset with
+**Appearance** — tint, opacity, blending, lit, exposure weight, soft fade, transparency, which sides draw, and wireframe. A tileset with
 **overdrive** makes its sprites glow through bloom; the value belongs to the tileset, and the section
 only reports it.
 
 - **Blending** — **Alpha** draws the sprite over what is behind it. **Additive** adds it as light, for
   fire and glows: black parts vanish and overlapping sprites brighten each other.
+- **Lit** — the sprite takes the scene's light instead of showing its texture as it is: the key light
+  (the sun, or the moon) and the shadows it casts on the sprite, the sky and ambient light, and the
+  strongest light near it. Its tileset's **Lighting maps** decide how: relit from each light's
+  direction with six-way lightmaps (smoke), shaded as a surface with a normal map (a liquid's splash),
+  or flat with neither. The **Tint** is then the colour of what scatters the light: a grey for smoke.
+  A lit sprite takes the camera's whole exposure, like a model; **Exposure weight** applies only to what
+  it emits (the fire a six-way negative map marks).
 - **Exposure weight** — how much the camera's exposure brightens the sprite. A sprite is unlit, so at 1
   (the default) it is multiplied by the exposure like everything lit, and a flame that reads right in
   daylight turns to a white smear at night or in a dark interior, where the exposure is hundreds of times

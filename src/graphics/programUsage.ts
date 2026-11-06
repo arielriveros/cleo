@@ -40,6 +40,7 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     foliageImpostorInstanced: 'feature', shadowMapImpostorInstanced: 'feature',
     tilemap: 'feature',
     ssil: 'feature', ssilTemporal: 'feature', ssilBlur: 'feature', ssilHistory: 'feature',
+    ssr: 'feature', ssrResolve: 'feature', ssrTemporal: 'feature',
     shadowMapSkinned: 'feature', shadowMapInstanced: 'feature', shadowMapInstancedCutout: 'feature',
     shadowMapCutout: 'feature', shadowMapSkinnedCutout: 'feature', shadowMapBasicCutout: 'feature',
     shadowMapBasicSkinnedCutout: 'feature',
@@ -52,6 +53,7 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     objectVelocity: 'feature', objectVelocitySkinned: 'feature', objectVelocityBasicSkinned: 'feature',
     decalSurface: 'feature', decalResolve: 'feature', decalColor: 'feature',
     fluidVolume: 'feature', fluidVolumeResolve: 'feature', fluidVolumeComposite: 'feature',
+    spriteLit: 'feature',
     particleSim: 'feature', particleBillboard: 'feature', particleMesh: 'feature', particleSort: 'feature',
     basicInstanced: 'editor', probePreview: 'editor', overlayComposite: 'editor', debugView: 'editor',
     shadowDebug: 'editor', overdraw: 'editor', overdrawInstanced: 'editor', grid: 'editor', outline: 'editor', outlinePost: 'editor',
@@ -156,6 +158,8 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
             const type = node.sprite?.material?.type;
             add(FORWARD[type] ?? 'basic');
             if (type === 'pbr' || type === 'blinn_phong') add(`${type}Geometry`);
+            // A lit sprite draws with its own program (Sprite.lit).
+            if (node.sprite?.lit === true) add('spriteLit');
             break;
         }
         case 'landscape':
@@ -218,6 +222,8 @@ export function usageFromRenderSettings(settings: Partial<RenderSettings> | null
     use.filters.add(filter);
     if (on('bloomEnabled', 'bloomEnabled')) add('bloom', 'bloomDownsample', 'bloomUpsample');
     if (on('ssaoEnabled', 'ssaoEnabled')) add('ssil', 'ssilTemporal', 'ssilBlur', 'ssilHistory');
+    // Reflections trace the same copy of last frame's light SSIL bounces, so they need its program too.
+    if (on('ssrEnabled', 'ssrEnabled')) add('ssr', 'ssrResolve', 'ssrTemporal', 'ssilHistory');
     if (on('autoExposureEnabled')) add('exposureMeter');
     if (on('dofEnabled')) add('dofCoc', 'dofGather', 'dofComposite');
     if (positive('lensFlareIntensity')) add('lensFlare', 'lensFlareComposite');

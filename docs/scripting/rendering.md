@@ -143,6 +143,27 @@ The colour is copied only on frames where a visible transparent material's sourc
 `cleoSceneColor` / `u_sceneColor`. An opaque material has no such snapshot (`cleoHasScene()` is
 false). `tools/valley/water.glsl` is a complete example.
 
+A transparent surface can also reflect what is on screen:
+
+```glsl
+vec4 cleoScreenReflection(vec3 worldPos, vec3 R)  // rgb = the opaque scene where R lands, a = how far to trust it
+```
+
+It marches the world-space direction `R` from `worldPos` through the opaque depth, with the renderer's
+[Screen-Space Reflections](../editor/rendering.md#screen-space-reflections) settings (off there, off
+here). `a` is 0 where the ray leaves the screen, runs behind something or reaches the sky, so blend
+your own reflection under it:
+
+```glsl
+vec3 R = reflect(-V, N);
+vec3 reflection = u_useEnvMap ? textureLod(u_envMap, R, roughness * 4.0).rgb : skyColor;
+vec4 ssr = cleoScreenReflection(fragPos, R);
+reflection = mix(reflection, ssr.rgb, ssr.a);
+```
+
+Only a material whose source names `cleoScreenReflection` gets the helper and its two uniforms
+(`u_ssrProjection`, `u_ssrParams`); every other material's prelude, and so its saved WGSL, is unchanged.
+
 On WebGPU, a published game has no GLSL translator: a custom material renders from the WGSL saved
 with it (`compiledWgsl`), which the material inspector writes when it compiles the shader, and which is
 ignored if the source or the engine prelude changed since (`compiledWgslHash`).

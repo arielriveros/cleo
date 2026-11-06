@@ -1,16 +1,22 @@
 // The Valley's effects, made with the FX Creator (applications/creator/src/fx): the torches' and the
-// bonfire's flames, the blood (the spatter a hit leaves and the pool where the player died) and the
-// pond's splashes are each a Creator preset with a seed and a few Valley-specific settings, baked headless
-// by tools/valley/genFx.ts -- the solver, renderer and exporter the Creator's own Export flipbook uses.
+// bonfire's flames, the smoke over the outdoor fires, the blood (the splatter at a wound, the spatter a hit
+// leaves and the pool where the player died) and the pond's splashes are each a Creator preset with a seed
+// and a few Valley-specific settings, baked headless by tools/valley/genFx.ts -- the solver, renderer and
+// exporter the Creator's own Export flipbook uses.
 //
-// Two fires, one for the torches and one for the bonfire:
+// Two fires, one for the torches and one for the bonfire, and their smoke:
 //   torch-fire     the torch preset in TALL tiles (128 x 256, 8 x 4): wall and standing torches, the hanging
 //                  braziers and, small, the candles
 //   bonfire-fire   the bonfire preset, tall too: the bonfire, the fire pits and the hearth
+//   fire-smoke     the smoke plume preset with its SIX-WAY LIGHTMAPS (lit from right/top/back, left/bottom/
+//                  front): a lit sprite over the bonfire and the fire pits, shaded by the sun, its shadows
+//                  and the fire's light in the engine
 //
 // The liquids (Creator presets of the same names) feed the souls blood and the pond (build.mjs):
-//   blood-splash   the spatter thrown along the blow: its FLOOR DECAL (an animated pool), at twice its size,
-//                  is "Blood Drops", a hit's only blood
+//   blood-burst    the airborne splatter at a wound, with its SURFACE MAPS (albedo, normal, ORM): a lit
+//                  sprite, "Blood Spray", played at the blade's contact point
+//   blood-splash   the spatter thrown along the blow: its FLOOR DECAL (an animated pool), at three quarters
+//                  of its size, is "Blood Drops"
 //   blood-pool     blood pouring down into a pool: its floor decal is the Bloodstain's, where the player died
 //   water-splash   the crown a body entering the pond throws up, its sprite
 //   water-droplet  looping water drops for the splash's droplets
@@ -53,6 +59,11 @@ export const CREATOR_FX = [
     params: { ...FLAME_LOOK, tileSize: 128, tileAspect: 'tall', frames: 32, loopBlend: 8, warmup: 60, view: 'front' } },
   // The wound 0.9 m behind the region's centre. The Valley lays it at twice its size from
   // SoulsGameManager.bloodDropsOffset (0.9 m) ahead of the target, so it starts at their feet (build.mjs).
+  // A column rising off a fire, in tall tiles like the flames; a 1.8 s loop (smoke rises slowly: a shorter
+  // one shows its repeat), warmed up until the plume fills its region.
+  { key: 'fire-smoke', name: 'Fire Smoke', medium: 'gas', preset: 'smoke-plume', seed: 13,
+    params: { bakeSixWay: true, tileSize: 128, tileAspect: 'tall', frames: 64, loopBlend: 16, warmup: 150, view: 'front' } },
+  { key: 'blood-burst', name: 'Blood Burst', medium: 'liquid', preset: 'blood-burst', seed: 3, params: { bakeSurfaceMaps: true } },
   { key: 'blood-splash', name: 'Blood Spatter', medium: 'liquid', preset: 'blood-splash', seed: 5, params: { emitterPosition: [0, 1, -0.9] } },
   { key: 'blood-pool', name: 'Blood Pool', medium: 'liquid', preset: 'blood-pool', seed: 6, params: {} },
   { key: 'water-splash', name: 'Water Splash', medium: 'liquid', preset: 'water-splash', seed: 8, params: {} },

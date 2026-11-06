@@ -3,14 +3,14 @@ import { Logger } from '../../core/logger';
 import { Framebuffer } from '../framebuffer';
 import { TemporalHistory } from './temporalHistory';
 import { ssilTraceShape } from '../ssilSettings';
-import { SsilProgram, SsilTemporalProgram, SsilBlurProgram, SsilHistoryProgram } from './programs';
+import { SsilProgram, SsilTemporalProgram, SsilBlurProgram } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
 import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { ViewProjection } from './viewProjection';
-import type { TemporalPasses } from './temporal';
+import type { SceneRadianceCopy } from './sceneRadiance';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 
@@ -19,14 +19,14 @@ export interface SsilPassesHost {
     readonly jitteredCameraProj: mat4;
     readonly renderHeight: number;
     readonly renderWidth: number;
-    readonly thumbnailMode: boolean;
 }
 
 /**
  * Screen-space indirect lighting with a visibility bitmask (ssil.wgsl), which replaced the old
- * hemisphere-kernel SSAO and still answers to its settings: the trace, temporal accumulation (or an
- * edge-aware blur), and the copy of the lit opaque image the next frame bounces. The deferred
- * lighting pass reads the result: rgb = bounce light, a = visibility. Split out of Renderer.
+ * hemisphere-kernel SSAO and still answers to its settings: the trace and temporal accumulation (or an
+ * edge-aware blur). What it bounces is last frame's lit opaque image, the copy SSR reflects as well
+ * (render/sceneRadiance.ts). The deferred lighting pass reads the result: rgb = bounce light,
+ * a = visibility. Split out of Renderer.
  */
 export class SsilPasses {
     private readonly _shaderManager = ShaderManager.Instance;
@@ -38,7 +38,7 @@ export class SsilPasses {
                 private readonly _pipelines: PipelineCache,
                 private readonly _bindGroups: BindGroupCache,
                 private readonly _projection: ViewProjection,
-                private readonly _temporal: TemporalPasses,
+                private readonly _radiance: SceneRadianceCopy,
                 private readonly _fullscreen: FullscreenPasses) {}
 
     // The trace and blur targets. The `ssao*` names are the settings' and the profiler scopes', kept so
@@ -53,20 +53,12 @@ export class SsilPasses {
     public readonly ssilHistory = new TemporalHistory({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
 
     /**
-     * Last frame's lit opaque colour at the trace's resolution, with the view depth it was seen at —
-     * what the trace bounces, and how both it and the temporal pass tell a surface they still see from
-     * one that has since been uncovered. See ssilHistory.wgsl.
-     */
-    public ssilRadianceFBO: Framebuffer | null = null;
-
-    /**
-     * `_view.frameIndex` the history / the radiance copy were last written in. Each is usable only by the very
-     * next frame — a STAMP rather than a valid flag, because a flag survives a frame that skipped the
-     * pass (the profiler kill switch, an empty G-buffer, a thumbnail) and would then hand over an image
-     * from several frames back as if it were the last one. -1 = never.
+     * `_view.frameIndex` the history was last written in. Usable only by the very next frame — a STAMP
+     * rather than a valid flag, because a flag survives a frame that skipped the pass (the profiler kill
+     * switch, an empty G-buffer, a thumbnail) and would then hand over an image from several frames back
+     * as if it were the last one. -1 = never. The radiance copy keeps its own (`SceneRadianceCopy.frame`).
      */
     public ssilHistoryFrame: number = -1;
-    public ssilRadianceFrame: number = -1;
 
     /**
      * Cleared when an SSIL target came back rgba8unorm on a device without float render targets: an
@@ -123,24 +115,19 @@ export class SsilPasses {
     private static readonly SSIL_FEEDBACK = 0.9;
 
     /**
-     * Allocate and size the SSIL history and radiance copy, and drop both whenever they are reallocated —
-     * `Framebuffer.resize` hands back uninitialized memory, not a stale image.
+     * Allocate and size the SSIL history, and drop it whenever it is reallocated — `Framebuffer.resize`
+     * hands back uninitialized memory, not a stale image. The radiance copy sizes itself.
      */
     private _ensureSsilTargets(w: number, h: number): void {
-        if (!this.ssilRadianceFBO)
-            this.ssilRadianceFBO = new Framebuffer({ colorTextureOptions: { mipMap: false, precision: 'high' }, depth: false });
-        // One size for both: the radiance copy is resized exactly when the history is.
+        this._radiance.ensure();
         if (!this.ssilHistory.ensure(w, h)) return;
-        this.ssilRadianceFBO.resize(w, h);
         this.ssilHistoryFrame = -1;
-        this.ssilRadianceFrame = -1;
         this._checkSsilFormats();
     }
 
     /** See {@link _ssilSupported}. Same shape as `TemporalPasses._checkTaaFormats`. */
     private _checkSsilFormats(): void {
-        const downgraded = this.ssaoFBO.colors[0].downgraded
-            || (this.ssilRadianceFBO?.colors[0].downgraded ?? false);
+        const downgraded = this.ssaoFBO.colors[0].downgraded || !this._radiance.supported;
         if (!downgraded) { this._ssilSupported = true; return; }
         if (this._ssilSupported)
             Logger.warn('Screen-space indirect light disabled: this device has no float render targets, so '
@@ -163,8 +150,8 @@ export class SsilPasses {
     public ssilPass(): void {
         const w = this.ssaoWidth, h = this.ssaoHeight;
         this._ensureSsilTargets(w, h);
-        const radiance = this.ssilRadianceFBO!;
-        const radianceFresh = this._ssilSupported && this._ssilFresh(this.ssilRadianceFrame);
+        const radiance = this._radiance.fbo!;
+        const radianceFresh = this._ssilSupported && this._radiance.fresh;
         this.ssilBounceThisFrame = this.ssilEnabled && radianceFresh;
         const { slices, steps } = ssilTraceShape(this.ssaoSamples);
 
@@ -248,26 +235,5 @@ export class SsilPasses {
             this._passes.drawFullscreenAndEnd(pass);
             this.ssaoResult = this.ssaoBlurFBO;
         }
-    }
-
-    /**
-     * Keep this frame's lit opaque image, at SSIL's resolution, for NEXT frame's trace to bounce. At the
-     * temporal boundary on purpose: the scene is final there (TAA-resolved when TAA ran) and nothing
-     * that must not bounce — transparents, particles, sprites, editor chrome — has been drawn yet.
-     */
-    public ssilHistoryPass(): void {
-        if (!this.ssaoEnabled || !this._ssilSupported || this._host.thumbnailMode || !this.ssilRadianceFBO) return;
-        if (!this._passes.beginPass('ssao.history')) return;
-        const target = this.ssilRadianceFBO;
-        const pass = this._passes.beginFullscreenPass(target.renderTarget, 'ssao.history', true, undefined, false);
-        this._fullscreen.bind(pass, 'ssilHistory', SsilHistoryProgram, [
-            this._targets.scene.colors[0], this._temporal.depthSource(),
-        ]);
-        // The depth snapshot was rasterized through this frame's jittered projection.
-        mat4.invert(this._invProjection, this._host.jitteredCameraProj);
-        this._projection.uvConsuming(this._invProjection, this._invProjection);
-        this._shaderManager.setUniform('u_invProjection', this._invProjection);
-        this._passes.drawFullscreenAndEnd(pass);
-        this.ssilRadianceFrame = this._view.frameIndex;
     }
 }

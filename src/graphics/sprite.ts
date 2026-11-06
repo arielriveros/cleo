@@ -23,6 +23,7 @@ export interface SpriteOptions {
     blend?: SpriteBlend;
     exposureWeight?: number;
     softness?: number;
+    lit?: boolean;
 }
 
 /** A soft-fade distance: non-negative metres, capped where it stops meaning "near the surface". */
@@ -54,6 +55,9 @@ export class Sprite {
   private _blend: SpriteBlend;
   private _exposureWeight: number;
   private _softness: number;
+  private _lit: boolean;
+  /** A lit sprite's private material, made on first lit draw (see {@link drawMaterial}). */
+  private _litMaterial: Material | null = null;
 
   constructor(options?: SpriteOptions) {
       this._tileset = options?.tileset ?? null;
@@ -63,6 +67,7 @@ export class Sprite {
       this._blend = options?.blend === 'additive' ? 'additive' : 'alpha';
       this._exposureWeight = unitOr1(options?.exposureWeight);
       this._softness = softnessOf(options?.softness);
+      this._lit = options?.lit === true;
       this._material = Material.Basic(
           { color: this._tint, opacity: this._opacity, texture: this._tileset?.textureId },
           {
@@ -161,6 +166,44 @@ export class Sprite {
   public get softness(): number { return this._softness; }
   public set softness(value: number) { this._softness = softnessOf(value); }
 
+  /**
+   * Lit: the sprite takes the scene's light instead of showing its texture as it is -- the sun (and the
+   * shadows it casts on the sprite), the sky and ambient light, and the strongest light near it. How, its
+   * tileset decides (Tileset.lighting): with six-way lightmaps, the effect relit from the light's direction
+   * (smoke, steam); with a normal map, its surface shaded (a liquid's splash); with neither, flat, as a
+   * lit particle. Off (the default), unlit, as it always was.
+   */
+  public get lit(): boolean { return this._lit; }
+  public set lit(value: boolean) { this._lit = value === true; }
+
+  /**
+   * The material this sprite DRAWS with: the private Basic one, or for a lit sprite its private lit one,
+   * kept in step with the tint, opacity, sides and tileset (its texture and lighting maps) on every call.
+   * Renderer-internal, as {@link material} is.
+   */
+  public drawMaterial(): Material {
+      if (!this._lit) return this._material;
+      const lit = this._litMaterial ??= Material.SpriteLit({ color: this._tint, opacity: this._opacity }, {
+          transparent: true, side: 'double', wireframe: false, castShadow: false, probeable: false,
+      });
+      const cfg = this._material.config;
+      lit.config.transparent = cfg.transparent;
+      lit.config.side = cfg.side;
+      lit.config.wireframe = cfg.wireframe;
+      lit.properties.set('color', this._tint);
+      lit.properties.set('opacity', this._opacity);
+      const ts = this._tileset;
+      const set = (slot: string, id: string | null | undefined) => { if (id) lit.textures.set(slot, id); else lit.textures.delete(slot); };
+      set('texture', ts?.textureId);
+      lit.properties.set('hasTexture', !!ts?.textureId);
+      const mode = ts ? ts.lighting : 'flat';
+      set('mapA', mode === 'sixWay' ? ts!.sixWayPositiveTextureId : mode === 'surface' ? ts!.normalTextureId : null);
+      set('mapB', mode === 'sixWay' ? ts!.sixWayNegativeTextureId : mode === 'surface' ? ts!.ormTextureId : null);
+      lit.properties.set('mode', mode === 'sixWay' ? 1 : mode === 'surface' ? 2 : 0);
+      lit.properties.set('hasOrm', mode === 'surface' && !!ts!.ormTextureId);
+      return lit;
+  }
+
   /** Texture-space rect [u0, v0, u1, v1] of the tile this sprite shows. */
   public uvRect(): [number, number, number, number] {
       return this.uvRectOf(this._tileIndex);
@@ -194,6 +237,7 @@ export class Sprite {
           ...(this._blend === 'additive' ? { blend: 'additive' } : {}),
           ...(this._exposureWeight < 1 ? { exposureWeight: this._exposureWeight } : {}),
           ...(this._softness > 0 ? { softness: this._softness } : {}),
+          ...(this._lit ? { lit: true } : {}),
       };
   }
 
@@ -210,6 +254,7 @@ export class Sprite {
           blend: data?.blend,
           exposureWeight: data?.exposureWeight,
           softness: data?.softness,
+          lit: data?.lit === true,
       });
   }
 }

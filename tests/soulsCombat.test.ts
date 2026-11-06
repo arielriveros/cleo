@@ -350,13 +350,25 @@ describe('damage from a blade', () => {
         return { w, sparks };
     }
 
-    it('the weapon applies its attack rating times the move, and sparks where the blade met the body', () => {
+    it('the weapon applies its attack rating times the move and hands the body the contact point, without sparks', () => {
         const { w, sparks } = longsword();
-        const got: number[] = [];
-        const target = { receiveHit: (d: number, poise: number) => { got.push(d, poise); return true; } } as any;
+        const got: any[] = [];
+        const target = { receiveHit: (d: number, poise: number, _from: any, point: any) => { got.push(d, poise, point); return true; } } as any;
         expect(w.strike({ strength: 10, dexterity: 10 }, { damageMul: 1.5, poiseMul: 2 }, target, [1, 2, 3])).toBe(true);
-        expect(got).toEqual([168, 40]);
-        expect(sparks).toEqual([['Hit Spark', [1, 2, 3]]]);
+        // The point is where the body bleeds (GameManager.bleed); sparks are for a blade meeting a wall.
+        expect(got).toEqual([168, 40, [1, 2, 3]]);
+        expect(sparks).toEqual([]);
+    });
+
+    it('a character bleeds where the blade struck it', () => {
+        const { w } = longsword();
+        const knight = new SoulsHollowNode('Knight') as any;
+        Object.assign(knight, { maxHp: 650, hp: 650, maxPoise: 999, poise: 999 });
+        const bled: any[] = [];
+        knight._gm = { sfx() {}, shake() {}, bleed: (...args: any[]) => bled.push(args) };
+        w.strike({ strength: 10, dexterity: 10 }, { damageMul: 1 }, knight, [0.2, 1.4, 0.5]);
+        expect(bled).toHaveLength(1);
+        expect(bled[0][3]).toEqual([0.2, 1.4, 0.5]);
     });
 
     it('the target applies its OWN defence: the Elite Knight turns 15% aside', () => {

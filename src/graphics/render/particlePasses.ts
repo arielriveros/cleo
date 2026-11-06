@@ -117,6 +117,42 @@ export class ParticlePasses {
      */
     public particleDrawFrame(scene: Scene, pass: RenderPassEncoder, target: RenderTarget): ParticleDrawFrame {
         const camera = this._view.camera;
+        const { ambient, sunDirection, sunColor, localLights } = this.frameLight(scene);
+
+        return {
+            pass, target,
+            viewProj: mat4.multiply(this._particleViewProj, this._projection.rasterProjection(camera.projectionMatrix),
+                                    camera.viewMatrix),
+            view: camera.viewMatrix,
+            cameraPosition: camera.position,
+            near: camera.near, far: camera.far,
+            orthographic: camera.type === 'orthographic',
+            depth: this._host.thumbnailMode ? null : this._temporal.depthSource(),
+            width: this._host.renderWidth, height: this._host.renderHeight,
+            ambient, sunDirection, sunColor, localLights,
+            visible: this._sys.visibility.frustumCulling ? (min, max) => this._sys.visibility.frustum.intersectsAABB(min, max) : undefined,
+            lodDistanceScale: this.particleLodDistanceScale,
+            exposure: this._view.exposure,
+            // As the forward path picks a mesh's reflection: the probe containing it, else the sky. Never
+            // during a probe capture, which would reflect the probe being captured.
+            environment: this._view.capturing ? undefined : position => {
+                const probe = scene.probeForPoint(position, true);
+                const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
+                const cube = probeCube ?? scene.environmentMap;
+                return cube ? { cube, linear: !!probeCube } : null;
+            },
+        };
+    }
+
+    /**
+     * The frame's light as lit particles and lit sprites (Sprite.lit) take it: the key directional light
+     * (the sun, or the moon at night) as a unit direction TOWARD it and its colour times its intensity, the
+     * ambient and sky fill surfaces get, and the punctual lights for `gatherParticleLocalLight` to pick a
+     * key from at each effect. Worked out once per scene and frame; the result is shared, not a copy.
+     */
+    public frameLight(scene: Scene): FrameLight {
+        const cached = this._frameLight;
+        if (cached && this._frameLightScene === scene && this._frameLightFrame === this._view.frameIndex) return cached;
         let sun: LightNode | null = null;
         for (const light of scene.lights) if (light.type === 'directional') { sun = light; break; }
         const sunColor = [0, 0, 0];
@@ -159,31 +195,24 @@ export class ParticlePasses {
             localLights.push(record);
         }
 
-        return {
-            pass, target,
-            viewProj: mat4.multiply(this._particleViewProj, this._projection.rasterProjection(camera.projectionMatrix),
-                                    camera.viewMatrix),
-            view: camera.viewMatrix,
-            cameraPosition: camera.position,
-            near: camera.near, far: camera.far,
-            orthographic: camera.type === 'orthographic',
-            depth: this._host.thumbnailMode ? null : this._temporal.depthSource(),
-            width: this._host.renderWidth, height: this._host.renderHeight,
-            ambient, sunDirection, sunColor, localLights,
-            visible: this._sys.visibility.frustumCulling ? (min, max) => this._sys.visibility.frustum.intersectsAABB(min, max) : undefined,
-            lodDistanceScale: this.particleLodDistanceScale,
-            exposure: this._view.exposure,
-            // As the forward path picks a mesh's reflection: the probe containing it, else the sky. Never
-            // during a probe capture, which would reflect the probe being captured.
-            environment: this._view.capturing ? undefined : position => {
-                const probe = scene.probeForPoint(position, true);
-                const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
-                const cube = probeCube ?? scene.environmentMap;
-                return cube ? { cube, linear: !!probeCube } : null;
-            },
-        };
+        const light: FrameLight = { ambient, sunDirection, sunColor, localLights };
+        this._frameLight = light;
+        this._frameLightScene = scene;
+        this._frameLightFrame = this._view.frameIndex;
+        return light;
     }
 
     private readonly _particleViewProj: mat4 = mat4.create();
     private readonly _particleLights: ParticleLocalLight[] = [];
+    private _frameLight: FrameLight | null = null;
+    private _frameLightScene: Scene | null = null;
+    private _frameLightFrame = -1;
+}
+
+/** See {@link ParticlePasses.frameLight}. */
+export interface FrameLight {
+    readonly ambient: number[];
+    readonly sunDirection: number[];
+    readonly sunColor: number[];
+    readonly localLights: readonly ParticleLocalLight[];
 }

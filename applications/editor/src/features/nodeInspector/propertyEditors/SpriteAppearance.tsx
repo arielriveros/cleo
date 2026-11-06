@@ -8,6 +8,12 @@ import { AppearanceIcon } from '../sectionIcons'
 
 // Tint / opacity / blending for a sprite, inline. A sprite's image comes from its tileset, not a material.
 
+const LIGHTING_HINT = {
+  sixWay: 'Lit by the tileset\'s six-way lightmaps: the sun, its shadows and nearby lights relight it from their direction.',
+  surface: 'Lit as a surface by the tileset\'s normal map (and ORM map): diffuse and highlights from the scene\'s lights.',
+  flat: 'Lit flat: the tileset has no lighting maps (Tileset editor > Lighting maps), so it is shaded as a card facing the camera.',
+} as const
+
 export default function SpriteAppearance(props: { node: SpriteNode }) {
   const eventEmitter = useEventBus()
   const sprite = props.node.sprite
@@ -19,6 +25,7 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
   const [blend, setBlend] = useState(sprite.blend)
   const [exposureWeight, setExposureWeight] = useState(sprite.exposureWeight)
   const [softness, setSoftness] = useState(sprite.softness)
+  const [lit, setLit] = useState(sprite.lit)
 
   useEffect(() => {
     setTint(vec3ToHex(sprite.tint))
@@ -29,6 +36,7 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
     setBlend(sprite.blend)
     setExposureWeight(sprite.exposureWeight)
     setSoftness(sprite.softness)
+    setLit(sprite.lit)
   }, [props.node])
 
   const changed = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
@@ -55,6 +63,9 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
               <option value='alpha'>Alpha</option>
               <option value='additive'>Additive</option>
             </Select>
+          </PropertyRow>
+          <PropertyRow label='Lit'>
+            <Toggle checked={lit} onChange={(c) => { sprite.lit = c; setLit(c); changed() }} />
           </PropertyRow>
           <PropertyRow label='Exposure weight'>
             <Slider min={0} max={1} step={0.05} value={exposureWeight} onChange={(v) => {
@@ -83,6 +94,10 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
             <Toggle checked={wireframe} onChange={(c) => { sprite.wireframe = c; setWireframe(c); changed() }} />
           </PropertyRow>
         </PropertyTable>
+        {lit && (
+          // How it is lit is the tileset's (Tileset editor > Lighting maps), so every sprite from it agrees.
+          <Hint>{LIGHTING_HINT[props.node.tileset?.lighting ?? 'flat']}</Hint>
+        )}
         {(props.node.tileset?.overdrive ?? 1) !== 1 && (
           // Read-only: overdrive belongs to the tileset (Tileset editor > Atlas), so every sprite from it agrees.
           <Hint>Overdrive ×{props.node.tileset!.overdrive} from the tileset: this sprite glows through bloom.</Hint>

@@ -177,7 +177,12 @@ describe('the shaders it was ported from', () => {
     it('applies to the specular factor only', () => {
         // Never to `diffuseAO`: a reflection ray is not a statement about the diffuse lobe, which has
         // no single direction to compare against.
-        for (const src of [DEFERRED, FORWARD])
-            expect(src).toContain('specularAO *= horizonOcclusion(');
+        expect(FORWARD).toContain('specularAO *= horizonOcclusion(');
+        // The deferred pass computes it once and hands it to both specular sources: the environment's
+        // factor and the screen-space reflection, which takes no AO but does take the ray's horizon.
+        expect(DEFERRED).toContain('horizon = horizonOcclusion(reflect(-V, N), Ng);');
+        expect(DEFERRED).toContain('specularAO *= horizon;');
+        expect(DEFERRED).toMatch(/ssrSpecular = [^;]*\* horizon;/);
+        expect(DEFERRED).not.toMatch(/diffuseAO \*= horizon/);
     });
 });

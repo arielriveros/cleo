@@ -30,6 +30,8 @@ import type { ParticlePasses } from './particlePasses';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
+import { gatherParticleLocalLight } from '../particles/particleLighting';
+import type { Material } from '../material';
 
 /** What Sprite2DPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface Sprite2DPassesHost {
@@ -259,7 +261,9 @@ export class Sprite2DPasses {
             node.initializeSprite();
         frameStats.objects++;
 
-        this._shaderManager.bind(node.sprite.material.type);
+        // A lit sprite (Sprite.lit) draws with its own material and program; the overlay's icons never do.
+        const material = blend === OVERLAY_BLEND ? node.sprite.material : node.sprite.drawMaterial();
+        this._shaderManager.bind(material.type);
 
         // A scene sprite authored additive (fire, glows) adds its light instead. The editor overlay's
         // icons keep the blend they were handed.
@@ -269,7 +273,6 @@ export class Sprite2DPasses {
         // Everything the hand-written tail below sets, as pipeline state: always blended, never a
         // depth write (a blended sprite that wrote depth would occlude the ones sorted behind it),
         // and the material's own cull side and topology.
-        const material = node.sprite.material;
         const reflection = FORWARD_PROGRAMS[material.type];
         if (!pass || !reflection) return;
         const pipeline = this._pipelines.get(material.type, reflection, {
@@ -343,6 +346,8 @@ export class Sprite2DPasses {
 
         this._shaderManager.setUniform('u_model', spriteMatrix);
         this._materials.setDissolve(node.effectiveFade);
+        const lit = material.type === 'spriteLit';
+        if (lit) this._setSpriteLight(node, material, spriteMatrix);
 
         // Per draw, from the tile on screen: an animated sprite follows its frame's overdrive, and two
         // sprites sharing a tileset never fight over one value. A sprite that takes less than the whole
@@ -355,6 +360,11 @@ export class Sprite2DPasses {
         let record = 0;
         this._materials.applyProperties(material);
         pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
+        if (lit && this._bindGroups.declaresShadowGroup(pipeline)) {
+            // The key light's cascades: a lit sprite takes the shadows the sun casts on it.
+            this._sys.shadows.uploadShadowUniforms(material.type);
+            pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline, false));
+        }
         // The Basic program reads the matrix, the dissolve and the tile from the per-object table.
         if (this._bindGroups.declaresObjectData(pipeline)) {
             const objects = this._sys.objects;
@@ -367,6 +377,48 @@ export class Sprite2DPasses {
         this._shaderManager.setUniform('u_isTransparent', true);
         this._passes.recordDraw(pass, node.sprite.mesh, 0, 0, -1, record);
     }
+
+    /**
+     * A lit sprite's light (Sprite.lit, spriteLit.wgsl): the frame's key light and fill as lit particles
+     * take them, plus the strongest local light at the sprite, and the sprite's own frame -- its right, up
+     * and BACK (away from the camera), the frame the Creator bakes six-way lightmaps and normals in. A
+     * quad seen from behind (a free sprite) shows its texture mirrored, so its frame is mirrored with it.
+     */
+    private _setSpriteLight(node: SpriteNode, material: Material, m: mat4): void {
+        const right = vec3.normalize(this._litRight, vec3.set(this._litRight, m[0], m[1], m[2]));
+        const up = vec3.normalize(this._litUp, vec3.set(this._litUp, m[4], m[5], m[6]));
+        const back = vec3.cross(this._litBack, right, up);
+        vec3.normalize(back, vec3.negate(back, back));
+        const cam = this._view.camera.position;
+        if ((m[12] - cam[0]) * back[0] + (m[13] - cam[1]) * back[1] + (m[14] - cam[2]) * back[2] < 0) {
+            vec3.negate(back, back);
+            vec3.negate(right, right);
+        }
+        material.properties.set('right', [right[0], right[1], right[2]]);
+        material.properties.set('up', [up[0], up[1], up[2]]);
+        material.properties.set('back', [back[0], back[1], back[2]]);
+
+        const scene = node.scene;
+        if (!scene) {
+            material.properties.set('sunColor', [0, 0, 0]);
+            material.properties.set('keyColor', [0, 0, 0]);
+            material.properties.set('ambient', [0, 0, 0]);
+            return;
+        }
+        const light = this._particlePasses.frameLight(scene);
+        const local = gatherParticleLocalLight([m[12], m[13], m[14]], light.localLights);
+        material.properties.set('sunDir', [light.sunDirection[0], light.sunDirection[1], light.sunDirection[2]]);
+        material.properties.set('sunColor', [light.sunColor[0], light.sunColor[1], light.sunColor[2]]);
+        // As lit particles: the fill of the local lights past the key joins the ambient, through the 1/π.
+        material.properties.set('ambient', [light.ambient[0] + local.fill[0] / Math.PI, light.ambient[1] + local.fill[1] / Math.PI,
+                                            light.ambient[2] + local.fill[2] / Math.PI]);
+        material.properties.set('keyDir', local.keyDirection);
+        material.properties.set('keyColor', local.keyColor);
+    }
+
+    private readonly _litRight = vec3.create();
+    private readonly _litUp = vec3.create();
+    private readonly _litBack = vec3.create();
 
     /** Builds a sprite's world matrix with its camera-facing billboard constraint applied. */
     public spriteBillboardMatrix(node: SpriteNode): mat4 {
