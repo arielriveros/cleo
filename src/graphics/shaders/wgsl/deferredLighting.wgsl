@@ -372,8 +372,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     } else if (u_lighting.u_envMapMode == 1) {
         let NoV = max(dot(N, V), 0.0);
         let R = reflect(-V, N);
-        let env = textureSampleLevel(u_envMap_texture, u_envMap_sampler, R,
-                                     roughness * MAX_REFLECTION_LOD).rgb;
+        // DECODED: the environment map is six 8-bit images holding sRGB-encoded colour (scene.ts builds
+        // it from them, and the engine has no sRGB texture format to decode on read). Read raw, every
+        // reflection of it was the encoded value treated as light — roughly twice too bright in the
+        // midtones, and brighter than the same cube reflected by a forward material, which decodes.
+        // The engine's own decode (chunks/tonemap.wgsl toLinear), as forward and the sky light use.
+        let env = pow(textureSampleLevel(u_envMap_texture, u_envMap_sampler, R,
+                                         roughness * MAX_REFLECTION_LOD).rgb, vec3<f32>(2.2));
         // TWO SEPARATE FACTORS that used to be one, and the distinction is the whole point.
         //
         // The DFG pair is ENERGY: how much of the incoming environment a surface of this roughness and
