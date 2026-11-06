@@ -31,7 +31,7 @@ export default class SoulsBreakableNode extends Node {
   private _inside: Node[] = []
 
   /** SoulsHitbox's damage hook: any hit breaks it, pushed away from whoever struck. */
-  public receiveHit(_damage: number, _poise: number, from: Node): boolean {
+  public receiveHit(_damage: number, _poise: number, from: Node, _point?: ArrayLike<number>): boolean {
     if (this.isBroken) return false
     const me = this.worldPosition
     const at = from ? from.worldPosition : me

@@ -188,7 +188,7 @@ variable. Entering it starts the boss fight even if the player got in without wa
   where it was last frame to where it is now, so a fast swing cannot pass through a target between
   frames. Each target is hit once per swing, at the point the blade touched it.
 - **Swing blockers.** Walls, pillars and the gates carry the variable `blocksSwings`. A player swing whose
-  blade reaches one before any enemy bounces off it: sparks, a recoil (`recoilSeconds`, `recoilClip`), no
+  blade reaches one before any enemy bounces off it: sparks (the only place they show), a recoil (`recoilSeconds`, `recoilClip`), no
   damage. Heavies (`bounceOff: false` on the move) plough through. Floors never block. Enemy attacks
   ignore blockers unless the attack sets `bounceOff`.
 - **Slams** (`aoeRadius`) hit every hurtbox inside the radius at the `hit` event.
@@ -561,7 +561,7 @@ All effects are `.vfx` assets under `Assets ▸ Effects`, embedded in Particle S
 | Fog Wall | `Fog Gate/Fog` |
 | Magic Bolt Trail | template `Magic Bolt/Trail` |
 | Magic Bolt Impact | template `Bolt Impact` |
-| Hit Spark | template `Hit Spark` (on every player hit) |
+| Hit Spark | template `Hit Spark` (where a blade meets a wall and bounces off; a body bleeds instead) |
 | Slam Dust | template `Slam Dust` (boss slam and leap) |
 | Item Glow, Message Glow | pickups and messages |
 | Bloodstain Glow | template `Bloodstain` |
@@ -586,11 +586,12 @@ across it, and blood lands and stays.
 ### Blood
 
 Every hit that lands, on an enemy or on the player (`SoulsCharacter.receiveHit`, melee and bolts alike),
-calls `GameManager.bleed`, which spawns three things:
+calls `GameManager.bleed`, which spawns two things. A blade that meets a body throws no sparks: those are
+for a blade meeting a wall (`SoulsWeapon.hitSparkTemplate`).
 
 | Template | What it is |
 |---|---|
-| `Blood Spray` | Dark droplets flying off the wound (particles, `SoulsFx`). |
+| `Blood Spray` | Blood thrown off the wound (`SoulsFx`), spawned where the hit struck -- the blade's contact point, the bolt's, or chest height for a slam -- and scaled with the hit. |
 | `Blood Drops` | A spatter **decal** a step further along the blow, pointed away from the attacker. |
 
 A hit leaves no pool of blood: the pool is the **Bloodstain**'s, dropped where the player dies (with or
@@ -605,21 +606,26 @@ between `minSize` and `maxSize` times the hit's size, and after `lifetime` secon
 seconds in (0: from its first frame; skip the frames where the liquid is still in the air when no spray
 covers them): the Valley's are the FX Creator's liquid decals, the blood landing and spreading into a
 pool. The splat scales with damage:
-`bloodReferenceDamage` (120) is a full-size splat, from 0.6× to 1.6×. The spray is spawned turned along
-the blow, so its droplets fly on away from the attacker.
+`bloodReferenceDamage` (120) is a full-size splat, from 0.6× to 1.6×, and the spray the same. The spray
+is spawned turned along the blow, so its droplets fly on away from the attacker. `receiveHit(damage,
+poise, from, point)` carries the contact point from the weapon (`SoulsWeapon.strike`), an enemy's blade
+and a bolt to `bleed`.
 
 **GameManager fields:** `bloodEnabled` (off: no blood at all), `bloodSprayTemplate` (empty: no spray,
 the decal alone), `bloodDropsTemplate`, `bloodDropsOffset` (0.9 m: how far along the blow the
 spatter's centre lies), `maxBloodDecals` (24; the oldest is removed first, so a long fight never piles up
 decals), `bloodReferenceDamage`.
 
-**The Valley's blood** is the FX Creator's (`tools/valley/creatorFx.mjs`), decal flipbooks only, no
-particles: its GameManagers leave `bloodSprayTemplate` empty. `Blood Drops` is the Blood Spatter bake's
-floor decal at twice the bake's size (about 2.7 × 2.4 m at `bloodReferenceDamage`), starting from the
-frame before the blood reaches the floor (its `flipbookStart`, read from the atlas by the build). The
-`Bloodstain`'s pool is the Blood Pool bake's. Each is an animated colour, normal and ORM atlas (wet and
-glossy) with its flipbook. Open the same presets in the Creator's FX mode (Medium: Liquid) to make your
-own.
+**The Valley's blood** is the FX Creator's liquid simulations (`tools/valley/creatorFx.mjs`), flipbooks
+only, no particles. `Blood Spray` is the Blood Burst bake on a **lit** animated sprite: its Surface maps
+(the albedo atlas, a normal and an ORM map) are its tileset's, so the scene's light shades the wet blood
+-- dark in the dungeon, glossy under a torch -- and it plays once at the contact point (0.8 m across at
+`bloodReferenceDamage`). `Blood Drops` is the Blood Spatter bake's floor decal at three quarters of the
+bake's size (about 1.0 × 0.9 m), its GameManagers' `bloodDropsOffset` scaled with it (0.675 m), starting
+from the frame before the blood reaches the floor (its `flipbookStart`, read from the atlas by the
+build). The `Bloodstain`'s pool is the Blood Pool bake's. Each decal is an animated colour, normal and ORM
+atlas (wet and glossy) with its flipbook. Open the same presets in the Creator's FX mode (Medium: Liquid)
+to make your own.
 
 **Swapping the art.** The splat images are generated placeholders (`tools/soulsDemo/png.mjs`) on the
 `Blood Drops (placeholder)` material under `Assets ▸ Materials ▸ Effects`.

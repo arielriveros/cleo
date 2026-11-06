@@ -67,7 +67,7 @@ export default class SoulsProjectileNode extends Node {
     const hits = hurtboxTargets(physics?.sweepSphere?.([from[0], from[1], from[2]], to, this.radius, hurtboxQuery('player', null)) ?? [])
       .filter(h => h.node.id !== this._owner)
     for (const h of hits) {
-      if ((h.node as any).receiveHit(this.damage, this.poiseDamage, this)) {
+      if ((h.node as any).receiveHit(this.damage, this.poiseDamage, this, h.point)) {
         this.setPosition([h.point[0], h.point[1], h.point[2]])
         this._expire('player')
         return

@@ -65,21 +65,27 @@ export function fadeEdges(tile: Uint8Array, width: number, height: number, share
  * Seamless looping: frames rendered past the end (`tail`, K of them) are cross-faded into the first K,
  * so frame N-1 flows into frame 0. Frame i < K becomes lerp(tail[i], head[i], (i + 1) / (K + 1)): almost
  * all tail at the start (which is what continues frame N-1), all head by frame K.
+ *
+ * The colour is blended premultiplied by the coverage, so a transparent pixel's undefined colour cannot
+ * bleed into an opaque one. The coverage is the frames' own alpha, unless `cover` gives it: an atlas whose
+ * alpha is something else -- the six-way negative map's is the emission, zero for plain smoke, which
+ * blended as coverage wiped its light out of the first K frames -- takes the coverage of the frames in
+ * `cover` (as rendered: not yet blended themselves) and blends its own alpha as a plain value.
  */
-export function loopBlend(head: Uint8Array[], tail: Uint8Array[]): void {
+export function loopBlend(head: Uint8Array[], tail: Uint8Array[], cover?: { head: Uint8Array[]; tail: Uint8Array[] }): void {
   const K = Math.min(head.length, tail.length);
   for (let i = 0; i < K; i++) {
     const w = (i + 1) / (K + 1);
     const a = head[i], b = tail[i];
-    // Blend premultiplied so a transparent pixel's undefined colour cannot bleed into an opaque one.
+    const ca = cover ? cover.head[i] : a, cb = cover ? cover.tail[i] : b;
     for (let p = 0; p < a.length; p += 4) {
-      const aa = a[p + 3] / 255, ba = b[p + 3] / 255;
+      const aa = ca[p + 3] / 255, ba = cb[p + 3] / 255;
       const alpha = ba + (aa - ba) * w;
       for (let c = 0; c < 3; c++) {
         const pre = (b[p + c] * ba) + ((a[p + c] * aa) - (b[p + c] * ba)) * w;
         a[p + c] = alpha > 1e-4 ? Math.round(Math.min(255, pre / alpha)) : 0;
       }
-      a[p + 3] = Math.round(alpha * 255);
+      a[p + 3] = cover ? Math.round(b[p + 3] + (a[p + 3] - b[p + 3]) * w) : Math.round(alpha * 255);
     }
   }
 }

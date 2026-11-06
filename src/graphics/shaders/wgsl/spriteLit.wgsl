@@ -1,0 +1,215 @@
+// Lit sprite program (Sprite.lit): a camera-facing quad that takes the scene's light from its tileset's
+// LIGHTING MAPS (Tileset.lighting) instead of showing its texture as it is.
+//
+//   mode 1  SIX-WAY LIGHTMAPS (smoke, steam, dust). The FX Creator renders each flipbook frame six more
+//           times, lit from the frame's right, top and back and from its left, bottom and front, into two
+//           atlases (positive: R right, G top, B back, A coverage; negative: R left, G bottom, B front,
+//           A emission). Here each light's direction, in the sprite's own frame, picks and blends three of
+//           the six by the squares of its components (they sum to 1), which is Unity VFX Graph's six-way
+//           lighting and what EmberGen and Houdini export for: self-shadowing, back-lit glow and thick
+//           cores, all baked, relit from any direction at the cost of two texture reads.
+//   mode 2  SURFACE MAPS (liquids). The texture is the base colour; a tangent-space normal map (OpenGL)
+//           and an ORM map shade it as a surface: diffuse plus GGX highlights.
+//   mode 0  FLAT: half-Lambert on a card facing the camera, as a lit particle.
+//
+// Lights, as lit particles take them (render/particlePasses.ts): the key directional light (the sun, or
+// the moon) with the cascaded shadow it casts on the sprite's quad and the cloud shadow, the ambient and
+// sky fill, and the strongest local light near the sprite as a second key (the rest folded into the fill).
+// The lit colour is scene-linear, like a model's: it takes the camera's whole exposure. Only the six-way
+// EMISSION (a fire inside its smoke) is scaled by the sprite's intensity (overdrive, exposure weight).
+
+#include "./chunks/dither.wgsl"
+#include "./chunks/objectData.wgsl"
+#include "./chunks/tonemap.wgsl"
+#include "./chunks/shadows.wgsl"
+
+const SPRITE_PI: f32 = 3.14159265359;
+
+struct SpriteLitVaryings {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    // Despawn dissolve (x = how far gone, y = dither phase); zero keeps everything. See dissolveKeeps.
+    @location(1) dissolve: vec2<f32>,
+    @location(2) worldPos: vec3<f32>,
+    // The positive distance in front of the camera: the cascade pick.
+    @location(3) viewDepth: f32,
+};
+
+// The same block the Basic program reads (chunks/basicVertex.wgsl), so the 2D pass's uploads land alike.
+struct BasicTransform {
+    u_view: mat4x4<f32>,
+    u_projection: mat4x4<f32>,
+    u_ditherPhase: f32,
+};
+@group(1) @binding(0) var<uniform> u_transform: BasicTransform;
+
+@vertex
+fn vs_main(
+    @location(0) position: vec3<f32>,
+    @location(1) texCoord: vec2<f32>,
+    @builtin(instance_index) objectIndex: u32,
+) -> SpriteLitVaryings {
+    let model = objectModel(objectIndex);
+    let uvt = objectUvTransform(objectIndex);
+    let world = model * vec4<f32>(position, 1.0);
+    let view = u_transform.u_view * world;
+    var out: SpriteLitVaryings;
+    out.uv = texCoord * uvt.xy + uvt.zw;
+    out.dissolve = vec2<f32>(objectParams(objectIndex).x, u_transform.u_ditherPhase);
+    out.worldPos = world.xyz;
+    out.viewDepth = -view.z;
+    out.position = u_transform.u_projection * view;
+    return out;
+}
+
+@group(0) @binding(0) var u_material_texture_texture: texture_2d<f32>;
+@group(0) @binding(1) var u_material_texture_sampler: sampler;
+// Six-way positive map, or the normal map.
+@group(0) @binding(2) var u_material_mapA_texture: texture_2d<f32>;
+@group(0) @binding(3) var u_material_mapA_sampler: sampler;
+// Six-way negative map, or the ORM map.
+@group(0) @binding(4) var u_material_mapB_texture: texture_2d<f32>;
+@group(0) @binding(5) var u_material_mapB_sampler: sampler;
+// The opaque scene's depth snapshot, for the soft fade (as chunks/basicForward.wgsl).
+@group(0) @binding(6) var u_sceneDepth_texture: texture_depth_2d;
+@group(0) @binding(7) var u_sceneDepth_sampler: sampler;
+
+struct SpriteLitMaterial {
+    color: vec3<f32>,
+    opacity: f32,
+    // i32 rather than bool: WGSL forbids bool in a uniform buffer.
+    hasTexture: i32,
+    /** The six-way emission's multiplier: the sprite's overdrive over the exposure it does not take. */
+    intensity: f32,
+    /** Soft fade, metres (Sprite.softness); 0 = off. */
+    softness: f32,
+    /** 0 flat, 1 six-way, 2 surface. */
+    mode: i32,
+    /** x near, y far, z 1 = orthographic, w 1 = the depth snapshot is live. */
+    depthParams: vec4<f32>,
+    /** Unit direction TOWARD the key directional light; its colour times its intensity. */
+    sunDir: vec3<f32>,
+    hasOrm: i32,
+    sunColor: vec3<f32>,
+    /** The ambient and sky fill (deferredLighting's indirect diffuse), plus the local lights past the key. */
+    ambient: vec3<f32>,
+    /** The strongest local light at the sprite: unit direction toward it, and its colour at the sprite. */
+    keyDir: vec3<f32>,
+    keyColor: vec3<f32>,
+    /** The sprite's frame, unit vectors: its right, its up, and BACK, away from the camera (the bake's). */
+    right: vec3<f32>,
+    up: vec3<f32>,
+    back: vec3<f32>,
+    /** The camera (MaterialBinder sets it on every material). */
+    viewPos: vec3<f32>,
+};
+@group(1) @binding(1) var<uniform> u_material: SpriteLitMaterial;
+
+/** Six-way: how much light from `l` (a unit direction toward it, in the sprite's frame) the frame scatters to the eye. */
+fn sixWayLight(l: vec3<f32>, pos: vec4<f32>, neg: vec4<f32>) -> f32 {
+    let w = l * l;
+    let x = select(neg.r, pos.r, l.x > 0.0);
+    let y = select(neg.g, pos.g, l.y > 0.0);
+    let z = select(neg.b, pos.b, l.z > 0.0);
+    return w.x * x + w.y * y + w.z * z;
+}
+
+/** `d`, a world direction, in the sprite's frame (right, up, back). */
+fn spriteFrame(d: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(dot(d, u_material.right), dot(d, u_material.up), dot(d, u_material.back));
+}
+
+/** GGX highlight of one light (Cook-Torrance, Schlick Fresnel, Smith-Schlick visibility), times N.L. */
+fn spriteSpecular(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
+    let H = normalize(L + V);
+    let nl = max(dot(N, L), 0.0);
+    let nv = max(dot(N, V), 1e-4);
+    let nh = max(dot(N, H), 0.0);
+    let a = roughness * roughness;
+    let a2 = a * a;
+    let dd = nh * nh * (a2 - 1.0) + 1.0;
+    let D = a2 / (SPRITE_PI * dd * dd);
+    let k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+    let G = (nl / (nl * (1.0 - k) + k)) * (nv / (nv * (1.0 - k) + k));
+    let F = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
+    return D * G * F / max(4.0 * nl * nv, 1e-4) * nl;
+}
+
+/** A window depth's distance along the camera axis (as chunks/basicForward.wgsl `basicViewDepth`). */
+fn spriteViewDepth(d: f32) -> f32 {
+    let near = u_material.depthParams.x;
+    let far = u_material.depthParams.y;
+    if (u_material.depthParams.z > 0.5) { return near + d * (far - near); }
+    let z = d * 2.0 - 1.0;
+    return 2.0 * near * far / (far + near - z * (far - near));
+}
+
+@fragment
+fn fs_main(in: SpriteLitVaryings) -> @location(0) vec4<f32> {
+    // Every sample first, in uniform control flow, before anything can discard.
+    let tex = textureSample(u_material_texture_texture, u_material_texture_sampler, in.uv);
+    let mapA = textureSample(u_material_mapA_texture, u_material_mapA_sampler, in.uv);
+    let mapB = textureSample(u_material_mapB_texture, u_material_mapB_sampler, in.uv);
+    // A despawn dissolve: see Node.remove and chunks/dither.wgsl.
+    if (!dissolveKeeps(in.dissolve, in.position.xy)) { discard; }
+
+    let m = u_material;
+    cleoFragCoord = in.position.xy;
+    // The key light's shadow ON THE QUAD (a single tap: smoke is soft, and its own self-shadow is baked),
+    // at the shadow strength the scene sets, and the clouds'.
+    let tap = shadowVisibility(in.worldPos, in.viewDepth);
+    let vis = (1.0 - (1.0 - tap) * u_shadow.u_shadowStrength) * cleoCloudShadow(in.worldPos);
+    let tint = toLinear(m.color);
+    var rgb = vec3<f32>(0.0);
+    var alpha = m.opacity;
+
+    if (m.mode == 1) {
+        // Six-way. The maps are lighting data (linear), not colour.
+        let sun = sixWayLight(spriteFrame(m.sunDir), mapA, mapB);
+        let key = sixWayLight(spriteFrame(m.keyDir), mapA, mapB);
+        // Light from everywhere at once: the six responses' mean.
+        let fill = (mapA.r + mapA.g + mapA.b + mapB.r + mapB.g + mapB.b) / 6.0;
+        rgb = tint * (m.ambient * fill + (m.sunColor * vis * sun + m.keyColor * key) / SPRITE_PI);
+        // A fire inside the smoke: the colour atlas where the negative map says it emits.
+        if (m.hasTexture != 0) { rgb += toLinear(tex.rgb) * mapB.a * m.intensity; }
+        alpha *= mapA.a;
+    } else if (m.mode == 2) {
+        // Surface: base colour, normal, ORM.
+        var albedo = tint;
+        if (m.hasTexture != 0) { albedo *= toLinear(tex.rgb); alpha *= tex.a; }
+        let nt = mapA.xyz * 2.0 - 1.0;
+        let toward = -m.back;
+        let N = normalize(m.right * nt.x + m.up * nt.y + toward * nt.z);
+        let V = normalize(m.viewPos - in.worldPos);
+        var occlusion = 1.0;
+        var roughness = 0.5;
+        var metallic = 0.0;
+        if (m.hasOrm != 0) { occlusion = mapB.r; roughness = mapB.g; metallic = mapB.b; }
+        roughness = clamp(roughness, 0.04, 1.0);
+        let f0 = mix(vec3<f32>(0.04), albedo, metallic);
+        let diffuse = albedo * (1.0 - metallic);
+        let sunL = max(dot(N, m.sunDir), 0.0);
+        let keyL = max(dot(N, m.keyDir), 0.0);
+        rgb = diffuse * (m.ambient * occlusion + (m.sunColor * vis * sunL + m.keyColor * keyL) / SPRITE_PI);
+        rgb += m.sunColor * vis * spriteSpecular(N, V, m.sunDir, roughness, f0)
+             + m.keyColor * spriteSpecular(N, V, m.keyDir, roughness, f0);
+        // A little of the fill in the highlight, so a glossy liquid is not flat away from the lights.
+        rgb += m.ambient * f0 * occlusion * (1.0 - roughness) * 0.5;
+    } else {
+        // Flat: half-Lambert, a card facing the camera.
+        var albedo = tint;
+        if (m.hasTexture != 0) { albedo *= toLinear(tex.rgb); alpha *= tex.a; }
+        let n = -m.back;
+        let sunWrap = dot(n, m.sunDir) * 0.5 + 0.5;
+        let keyWrap = dot(n, m.keyDir) * 0.5 + 0.5;
+        rgb = albedo * (m.ambient + (m.sunColor * vis * sunWrap + m.keyColor * keyWrap) / SPRITE_PI);
+    }
+
+    // Soft fade: the view depths of the scene behind and of this fragment, from the same window depth.
+    if (m.softness > 0.0 && m.depthParams.w > 0.5) {
+        let uv = in.position.xy / vec2<f32>(textureDimensions(u_sceneDepth_texture, 0));
+        let scene = spriteViewDepth(textureSampleLevel(u_sceneDepth_texture, u_sceneDepth_sampler, uv, 0));
+        alpha *= clamp((scene - spriteViewDepth(in.position.z)) / m.softness, 0.0, 1.0);
+    }
+    return vec4<f32>(rgb, alpha);
+}

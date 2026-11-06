@@ -372,13 +372,24 @@ describe('blood', () => {
         const { m, made, at } = bleeding();
         m.bleed(at(0, 2), at(0, 0), 120);
         expect(made.map(n => n.name)).toEqual(['Blood Spray', 'Blood Drops']);
-        const [, drops] = made;
+        const [spray, drops] = made;
+        // No contact point: the spray at chest height (0.6 of the default 1.8 m body).
+        expect(spray.at).toEqual([0, expect.closeTo(1.08, 6), 2]);
         expect(drops.yaw).toBeCloseTo(0);            // +Z: from the attacker through the target
         expect(drops.at[2]).toBeGreaterThan(2);
         expect(drops.sizeScale).toBe(1);
         m.bleed(at(0, 2), at(2, 2), 10_000);
         expect(made[3].yaw).toBeCloseTo(-90);         // blow toward -X
         expect(made[3].sizeScale).toBe(1.6);
+    });
+
+    it('splatters where the hit struck, as big as the hit', () => {
+        const { m, made, at } = bleeding();
+        m.bleed(at(0, 2), at(0, 0), 60, [0.1, 1.3, 1.7]);
+        const [spray] = made;
+        expect(spray.at).toEqual([0.1, 1.3, 1.7]);
+        // Half the reference damage: the spray at 0.6 of its size, the floor of the range.
+        expect(Array.from(spray.scale)).toEqual([0.6, 0.6, 0.6].map(v => expect.closeTo(v, 6)));
     });
 
     it('bleeds nothing when blood is off or nothing was dealt', () => {

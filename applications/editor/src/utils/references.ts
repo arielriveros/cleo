@@ -91,6 +91,8 @@ export function collectSceneTextureIds(
     for (const sn of scene.sprites) {
       const id = sn.tileset?.textureId
       if (id) set.add(id)
+      // A lit sprite's lighting maps (six-way, normal, ORM) ride on its tileset too.
+      for (const map of sn.tileset?.lightingTextureIds ?? []) set.add(map)
     }
     // UI images hold a bare texture id — no material, no tileset — so nothing above sees them either.
     for (const un of scene.uiNodes) {
@@ -130,6 +132,9 @@ export function collectPublishedTextureIds(node: any, set: Set<string>): void {
     for (const ts of n?.tilemap?.tilesets ?? []) if (ts?.textureId) set.add(ts.textureId)
     const spriteTileset = n?.sprite?.tileset
     if (spriteTileset?.textureId) set.add(spriteTileset.textureId)
+    // Its lighting maps (Sprite.lit): six-way lightmaps, or a normal and an ORM map.
+    for (const key of ['sixWayPositiveTextureId', 'sixWayNegativeTextureId', 'normalTextureId', 'ormTextureId'])
+      if (typeof spriteTileset?.[key] === 'string' && spriteTileset[key]) set.add(spriteTileset[key])
     // A uiImage's texture id sits on its `ui` payload, not in a `textures` map. Missing it packs no
     // texture and the published game's UI images come back blank with nothing logged.
     if (typeof n?.ui?.textureId === 'string' && n.ui.textureId) set.add(n.ui.textureId)

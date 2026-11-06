@@ -52,6 +52,7 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     objectVelocity: 'feature', objectVelocitySkinned: 'feature', objectVelocityBasicSkinned: 'feature',
     decalSurface: 'feature', decalResolve: 'feature', decalColor: 'feature',
     fluidVolume: 'feature', fluidVolumeResolve: 'feature', fluidVolumeComposite: 'feature',
+    spriteLit: 'feature',
     particleSim: 'feature', particleBillboard: 'feature', particleMesh: 'feature', particleSort: 'feature',
     basicInstanced: 'editor', probePreview: 'editor', overlayComposite: 'editor', debugView: 'editor',
     shadowDebug: 'editor', overdraw: 'editor', overdrawInstanced: 'editor', grid: 'editor', outline: 'editor', outlinePost: 'editor',
@@ -156,6 +157,8 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
             const type = node.sprite?.material?.type;
             add(FORWARD[type] ?? 'basic');
             if (type === 'pbr' || type === 'blinn_phong') add(`${type}Geometry`);
+            // A lit sprite draws with its own program (Sprite.lit).
+            if (node.sprite?.lit === true) add('spriteLit');
             break;
         }
         case 'landscape':

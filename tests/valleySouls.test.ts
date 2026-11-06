@@ -244,11 +244,9 @@ describe.skipIf(!present)('the Valley example project', () => {
             if (n.scriptVars.impactTemplate) expect(names.has(n.scriptVars.impactTemplate)).toBe(true);
         }
         for (const name of ['Bloodstain', 'Hit Spark', 'Bolt Impact', 'Magic Bolt', 'Slam Dust',
-                            'Blood Drops']) expect(names.has(name), name).toBe(true);
-        // A hit leaves no pool (the pool is the bloodstain's, where the player last died) and no spray: its
-        // blood is the spatter decal alone.
+                            'Blood Spray', 'Blood Drops']) expect(names.has(name), name).toBe(true);
+        // A hit leaves no pool: the pool is the bloodstain's, where the player last died.
         expect(names.has('Blood Splat')).toBe(false);
-        expect(names.has('Blood Spray')).toBe(false);
     });
 
     it('gives every decal a PBR library material whose textures ship with the project', () => {
@@ -272,14 +270,32 @@ describe.skipIf(!present)('the Valley example project', () => {
         expect(drops.nodeJson.children.some((c: any) => c.type === 'decal')).toBe(true);
     });
 
-    it('draws the blood a hit leaves with the FX Creator decal flipbooks alone, no particles', () => {
+    it('draws the blood a hit leaves with FX Creator flipbooks alone, no particles', () => {
         const shipped = new Set(read('textures', 'index.json').map((t: any) => t.id));
-        // No spray: the manager spawns none, and no blood particle system ships, the kit's or the Creator's
-        // (the bloodstain's glow marks souls to recover; it is not blood).
+        // No blood particle system ships, the kit's or the Creator's (the bloodstain's glow marks souls to
+        // recover; it is not blood). The manager spawns the default spray, the spatter scaled with the bake.
         const manager = allNodes(scene().scene).find((n: any) => n.name === 'GameManager');
-        expect(manager.scriptVars.bloodSprayTemplate).toBe('');
+        expect(manager.scriptVars.bloodSprayTemplate).toBeUndefined();
+        expect(manager.scriptVars.bloodDropsOffset).toBeCloseTo(0.675, 6);
         const blood = library('particleSystems').filter((s: any) => /blood/i.test(s.name) && !/^Bloodstain/.test(s.name));
         expect(blood.map((s: any) => s.name)).toEqual([]);
+        // The splatter at the wound: the Blood Burst liquid bake played once on a LIT sprite, shaded through
+        // its surface maps (the albedo atlas, a normal and an ORM map), gone when its frames have played.
+        const spray = templates().find((x: any) => x.name === 'Blood Spray');
+        expect(scriptOf(spray.nodeJson)?.source).toContain('class SoulsFxNode');
+        expect(allNodes(spray.nodeJson).some((n: any) => n.type === 'particleSystem')).toBe(false);
+        const splatter = spray.nodeJson.children.find((c: any) => c.type === 'animatedSprite');
+        expect(splatter.sprite.lit).toBe(true);
+        expect(splatter.sprite.constraints).toBe('spherical');
+        expect(splatter.animation.loop).toBe(false);
+        expect(splatter.animation.randomStart).toBeFalsy();
+        expect(splatter.animation.frames.length).toBeGreaterThan(8);
+        const ts = splatter.sprite.tileset;
+        for (const key of ['textureId', 'normalTextureId', 'ormTextureId']) expect(shipped.has(ts[key]), key).toBe(true);
+        expect(ts.sixWayPositiveTextureId).toBeUndefined();
+        const life = splatter.animation.frames.length / splatter.animation.fps;
+        expect(spray.nodeJson.scriptVars.lifetime).toBeGreaterThanOrEqual(life);
+        expect(spray.nodeJson.scriptVars.lifetime).toBeLessThan(life + 0.2);
         // The decals: the spatter a hit leaves and the pool where the player last died (the bloodstain's), each
         // the bake's animated pool, played once from where it lands, with relief and wet roughness.
         for (const name of ['Blood Drops', 'Bloodstain']) {
@@ -297,9 +313,8 @@ describe.skipIf(!present)('the Valley example project', () => {
             const tex = d.material.textures;
             for (const slot of ['baseColorTexture', 'normalMap', 'metallicRoughnessTexture']) expect(shipped.has(tex[slot]), `${name} ${slot}`).toBe(true);
             if (name !== 'Blood Drops') continue;
-            // The hit's only blood, so big enough to read: twice the bake's spatter, over two metres a side.
-            expect(d.size[0], name).toBeGreaterThan(2);
-            expect(d.size[2], name).toBeGreaterThan(2);
+            // Three quarters of the bake's spatter: about a metre, the splatter at the wound carrying the hit.
+            for (const side of [d.size[0], d.size[2]]) { expect(side).toBeGreaterThan(0.7); expect(side).toBeLessThan(1.1); }
             // It starts as the blood lands, not while it is still in the air: into its flipbook, before its end.
             const start = t.nodeJson.scriptVars.flipbookStart;
             expect(start).toBeGreaterThan(0);

@@ -160,7 +160,7 @@ describe('the programs', () => {
         expect(entries.slice(at, at + 3)).toEqual(['decalSurface', 'decalResolve', 'decalColor']);
         expect(entries.slice(at + 3)).toEqual(['overdrawInstanced', 'foliageImpostorInstanced', 'occlusionBox',
                                               'shadowMapImpostorInstanced', 'taaSharpen', 'fxaa', 'fluidVolume',
-                                              'fluidVolumeResolve', 'fluidVolumeComposite']);
+                                              'fluidVolumeResolve', 'fluidVolumeComposite', 'spriteLit']);
     });
 
     it('read every map through the flipbook cells, inset per cell so no neighbouring frame bleeds in', () => {

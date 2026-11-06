@@ -67,7 +67,10 @@ export default class SoulsWeaponNode extends Node {
   /** Camera kick when a hit lands (the GameManager's shake), light and heavy. */
   public hitShake: number = 0.12
   public heavyHitShake: number = 0.25
-  /** Effect spawned where the blade meets a body, and the sound of the hit. */
+  /**
+   * Effect spawned where the blade meets a WALL (the swing bounces off it: SoulsPlayer/SoulsEnemy). A blade
+   * meeting a body draws blood instead (GameManager.bleed). And the sound of a hit.
+   */
   public hitSparkTemplate: TemplateName = 'Hit Spark'
   public hitSound: SoundName = 'Hit'
   /** Marker characters look for among the nodes they spawn (a script class is never `instanceof`). */
@@ -113,15 +116,15 @@ export default class SoulsWeaponNode extends Node {
 
   /**
    * The blade reached `target`'s hurtbox at `point` during `move`. The target takes the hit through its
-   * own `receiveHit` (its defence, its poise, its reaction are its business). Returns true if it landed.
+   * own `receiveHit` (its defence, its poise, its reaction are its business), with the point, where a body
+   * bleeds. No sparks: those are for a blade meeting a wall. Returns true if it landed.
    */
   public strike(wielder: Node, move: any, target: Node, point: ArrayLike<number>): boolean {
     const t = target as any
     if (!wielder || typeof t?.receiveHit !== 'function') return false
     const { damage, poise } = this.hitFor(wielder, move)
-    if (!t.receiveHit(damage, poise, wielder)) return false
+    if (!t.receiveHit(damage, poise, wielder, point ?? undefined)) return false
     const gm = (this._gm ?? this.findNode?.('GameManager')) as any
-    if (point) gm?.fx?.(this.hitSparkTemplate, point)
     playSound(this, this.hitSound)
     const heavy = !!move && move.name === this.heavyMove
     gm?.hitStop?.(heavy ? this.heavyHitStop : this.hitStop, !!t.isDead)

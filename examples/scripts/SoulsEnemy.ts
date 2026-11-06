@@ -554,7 +554,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     if (!blade) return
     const attack = this._attack as any
     const contact = stepSwing(this.scene?.physics, this._swing, blade, this, 'player', !!attack?.bounceOff)
-    for (const t of contact.targets) this._hitPlayer(attack, t.node)
+    for (const t of contact.targets) this._hitPlayer(attack, t.node, t.point)
     if (contact.blockedAt) {
       closeSwing(this._swing)
       ;(this._gm as any)?.fx?.(weapon?.hitSparkTemplate || 'Hit Spark', contact.blockedAt)
@@ -562,13 +562,14 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   }
 
   /**
-   * An attack reached `target`. The damage is the ATTACK's — an enemy's moveset is tuned per move — and
-   * the target takes it through its own receiveHit (where a rolling player's i-frames let it pass).
+   * An attack reached `target` (at `point`, the blade's contact, where the player bleeds). The damage is the
+   * ATTACK's — an enemy's moveset is tuned per move — and the target takes it through its own receiveHit
+   * (where a rolling player's i-frames let it pass).
    */
-  private _hitPlayer(attack: any, target: Node): boolean {
+  private _hitPlayer(attack: any, target: Node, point?: ArrayLike<number>): boolean {
     const t = target as any
     if (!attack || typeof t?.receiveHit !== 'function') return false
-    const landed = !!t.receiveHit(num(attack.damage, 50), num(attack.poiseDamage, 20), this)
+    const landed = !!t.receiveHit(num(attack.damage, 50), num(attack.poiseDamage, 20), this, point)
     if (landed) playSound(this, 'Player Hit')
     return landed
   }

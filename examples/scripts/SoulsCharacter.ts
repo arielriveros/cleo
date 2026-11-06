@@ -202,12 +202,15 @@ export default class SoulsCharacterNode extends CharacterNode {
     return Math.max(1, Math.round(raw * (1 - clamp(this.defense, 0, 0.9))))
   }
 
-  /** Take a hit. Returns true when it landed. See "Taking a hit". */
-  public receiveHit(damage: number, poiseDamage: number, from: Node): boolean {
+  /**
+   * Take a hit. Returns true when it landed. `point`, where it struck (a blade's contact, a bolt's), is where
+   * the blood splatters; without one, at chest height. See "Taking a hit".
+   */
+  public receiveHit(damage: number, poiseDamage: number, from: Node, point?: ArrayLike<number>): boolean {
     if (!this._canBeHit(damage)) return false
     const dealt = this.applyDefense(damage)
     this.hp = Math.max(0, this.hp - dealt)
-    ;(this._gm as any)?.bleed?.(this, from, dealt)
+    ;(this._gm as any)?.bleed?.(this, from, dealt, point)
     this._onHurt(dealt, from)
     if (this.hp <= 0) this._die()
     else this._onDamaged(dealt, poiseDamage, from)

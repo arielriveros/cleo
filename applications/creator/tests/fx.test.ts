@@ -79,6 +79,19 @@ describe('flipbook', () => {
     expect(head[2][0]).toBe(0);
   });
 
+  it('loops a map whose alpha is not coverage (six-way negative) by another map\'s coverage', () => {
+    // The negative map of plain smoke: light in RGB, no emission (A = 0). Blended by its own alpha its
+    // light vanished from every looped frame; by the positive map's coverage it cross-fades like the rest.
+    const px = (v: number, a: number) => new Uint8Array([v, v, v, a]);
+    const head = [px(0, 0), px(0, 0)], tail = [px(240, 0)];
+    const cover = { head: [px(0, 255), px(0, 255)], tail: [px(0, 255)] };
+    loopBlend(head, tail, cover);
+    expect(head[0][0]).toBe(120);
+    expect(head[0][3]).toBe(0);
+    // The coverage frames are read, never written.
+    expect(cover.head[0][3]).toBe(255);
+  });
+
   it('frames the whole domain for every view', () => {
     const dims = { nx: 16, ny: 32, nz: 16 };
     for (const view of ['front', 'side', 'top', 'angle'] as const) {

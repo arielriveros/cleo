@@ -58,7 +58,10 @@ export default class SoulsGameManagerNode extends Node {
   // ----- blood (see bleed) -------------------------------------------------------------------------
   /** Off, no blood at all: no spray and no decals. */
   public bloodEnabled: boolean = true
-  /** Droplets thrown off a wound (particles). Empty: no spray, the decal alone (the Valley's blood). */
+  /**
+   * The blood thrown off a wound, spawned where the hit struck and scaled with it (particles in the kit; the
+   * Valley's is a lit flipbook of an FX Creator liquid simulation). Empty: no spray, the decal alone.
+   */
   public bloodSprayTemplate: TemplateName = 'Blood Spray'
   /** The spatter decal thrown along the blow. */
   public bloodDropsTemplate: TemplateName = 'Blood Drops'
@@ -357,17 +360,18 @@ export default class SoulsGameManagerNode extends Node {
   }
 
   /**
-   * A hit drew blood: droplets fly off `target` (unless `bloodSprayTemplate` is empty) and a spatter lands
-   * along the blow, from `from` toward `target`. A hit leaves no pool: the pool is where the player last died
-   * (the bloodstain). Called by SoulsCharacter.receiveHit when a hit lands. `amount` (the damage dealt)
-   * sizes the splat.
+   * A hit drew blood: blood flies off `target` where it was struck (`at`: a blade's contact point; without
+   * one, at chest height; none at all when `bloodSprayTemplate` is empty) and a spatter lands along the blow,
+   * from `from` toward `target`. A hit leaves no pool: the pool is where the player last died (the
+   * bloodstain). Called by SoulsCharacter.receiveHit when a hit lands. `amount` (the damage dealt) sizes the
+   * spray and the splat.
    */
-  public bleed(target: Node, from: Node, amount: number): void {
+  public bleed(target: Node, from: Node, amount: number, at?: ArrayLike<number>): void {
     if (!this.bloodEnabled || !target || !(amount > 0)) return
-    const at = target.worldPosition
+    const pos = target.worldPosition
     const src = from?.worldPosition
-    let dx = src ? at[0] - src[0] : 0
-    let dz = src ? at[2] - src[2] : 1
+    let dx = src ? pos[0] - src[0] : 0
+    let dz = src ? pos[2] - src[2] : 1
     const len = Math.hypot(dx, dz)
     if (len < 1e-4) { dx = 0; dz = 1 } else { dx /= len; dz /= len }
     const t = target as any
@@ -375,11 +379,14 @@ export default class SoulsGameManagerNode extends Node {
     const scale = clamp(amount / Math.max(1, this.bloodReferenceDamage), 0.6, 1.6)
 
     const heading = Math.atan2(dx, dz) * 180 / Math.PI
-    // The spray's +Z along the blow: its droplets fly on, away from the attacker.
-    this.fx(this.bloodSprayTemplate, [at[0], at[1] + height * 0.6, at[2]], heading)
+    // The spray where the hit struck, its +Z along the blow (its droplets fly on, away from the attacker),
+    // as big as the hit.
+    const struck = at && at.length >= 3 && Number.isFinite(at[0]) ? [at[0], at[1], at[2]] : [pos[0], pos[1] + height * 0.6, pos[2]]
+    const spray = this.fx(this.bloodSprayTemplate, struck, heading)
+    if (spray) spray.setScale([spray.scale[0] * scale, spray.scale[1] * scale, spray.scale[2] * scale])
     // Spawned a little above the ground: the decal finds the floor itself (SoulsBloodSplat).
     const ahead = this.bloodDropsOffset * scale
-    this._splat(this.bloodDropsTemplate, [at[0] + dx * ahead, at[1] + 0.5, at[2] + dz * ahead], heading, scale)
+    this._splat(this.bloodDropsTemplate, [pos[0] + dx * ahead, pos[1] + 0.5, pos[2] + dz * ahead], heading, scale)
   }
 
   /** The blood decals currently on the ground, oldest first. */

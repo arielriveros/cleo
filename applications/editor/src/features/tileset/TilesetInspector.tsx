@@ -5,7 +5,8 @@ import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { Button, ButtonWithConfirm, NumberInput, Select, TextInput, Toggle, ColorInput, Hint, cn, labelClass } from '@cleo/app-kit/ui'
 import { vec3ToHex } from '../../utils/UtilFunctions'
 import { awaitTextureImage, textureImage } from '../../utils/textureReady'
-import { moveFrame } from '../../utils/tilesets'
+import { moveFrame, TILESET_LIGHTING_MAPS, tilesetTextureIds } from '../../utils/tilesets'
+import type { TilesetLightingMap } from '../../utils/tilesets'
 import { useTileset } from './TilesetContext'
 import { TilesetIcon } from '../nodeInspector/sectionIcons'
 
@@ -412,6 +413,53 @@ function VariantSetsEditor() {
   )
 }
 
+const LIGHTING_MAP_LABELS: Record<TilesetLightingMap, { label: string; title: string }> = {
+  sixWayPositiveTextureId: { label: 'Six-way +', title: 'The FX Creator\'s Six-way + output: lit from the right, top and back (RGB), coverage (A).' },
+  sixWayNegativeTextureId: { label: 'Six-way −', title: 'The FX Creator\'s Six-way − output: lit from the left, bottom and front (RGB), emission (A).' },
+  normalTextureId: { label: 'Normal', title: 'A tangent-space normal map (OpenGL: R right, G up, B toward the viewer). The atlas is then the base colour.' },
+  ormTextureId: { label: 'ORM', title: 'Occlusion (R), roughness (G) and metallic (B), beside the normal map.' },
+}
+
+/**
+ * The atlases a LIT sprite (Sprite.lit) shades with, cut into the same cells as the atlas: six-way
+ * lightmaps for smoke and the like, or a normal (and ORM) map for a surface. Each is picked from the
+ * project's textures; the asset's `textureIds` follow, so the maps ship with whatever uses the tileset.
+ */
+function LightingMapsEditor() {
+  const { asset, patch } = useTileset()
+  const textureIds = useMemo(
+    () => Array.from(TextureManager.Instance.textures.keys())
+      .filter(id => !id.includes('__editor__') && !id.includes('__debug__') && id !== 'Null'),
+    [],
+  )
+  if (!asset) return null
+  const sixWay = !!asset.sixWayPositiveTextureId && !!asset.sixWayNegativeTextureId
+  const set = (key: TilesetLightingMap, id: string) => {
+    const next = { ...asset, [key]: id || undefined }
+    patch({ [key]: id || undefined, textureIds: tilesetTextureIds(next) })
+  }
+  return (
+    <div className='space-y-2'>
+      {TILESET_LIGHTING_MAPS.map(key => (
+        <div key={key} className='flex items-center justify-between gap-2'>
+          <span className={label} title={LIGHTING_MAP_LABELS[key].title}>{LIGHTING_MAP_LABELS[key].label}</span>
+          <Select className='w-40' value={asset[key] ?? ''} onChange={(e) => set(key, e.target.value)}>
+            <option value=''>None</option>
+            {textureIds.map(id => <option key={id} value={id}>{id}</option>)}
+          </Select>
+        </div>
+      ))}
+      <Hint>
+        {sixWay
+          ? 'Lit sprites from this tileset are relit from each light\'s direction by the six-way lightmaps.'
+          : asset.normalTextureId
+            ? 'Lit sprites from this tileset are shaded as a surface: the atlas is the base colour.'
+            : 'No lighting maps: lit sprites from this tileset are shaded flat.'}
+      </Hint>
+    </div>
+  )
+}
+
 export default function TilesetInspector() {
   const { asset, patch, save, dirty } = useTileset()
 
@@ -457,6 +505,10 @@ export default function TilesetInspector() {
           )}
           <Hint>{asset.columns} x {asset.rows} = {asset.columns * asset.rows} tiles.</Hint>
         </div>
+      </Collapsable>
+
+      <Collapsable title='Lighting maps' persistKey='tileset.lighting'>
+        <div className='p-2'><LightingMapsEditor /></div>
       </Collapsable>
 
       <Collapsable title='Selected tiles' persistKey='tileset.tile' defaultOpen>

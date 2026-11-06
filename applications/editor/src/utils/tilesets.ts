@@ -27,6 +27,14 @@ export type TilesetAsset = {
   rows: number
   /** Linear brightness multiplier for every tile (TilesetConfig.overdrive). Absent = 1. */
   overdrive?: number
+  /**
+   * Lighting maps for lit sprites (TilesetConfig.sixWayPositiveTextureId): six-way lightmaps, or a normal
+   * map and an ORM map, cut into the same cells as the atlas. Absent = none. Listed in `textureIds` too.
+   */
+  sixWayPositiveTextureId?: string
+  sixWayNegativeTextureId?: string
+  normalTextureId?: string
+  ormTextureId?: string
   /** Sparse: only the tiles that actually carry metadata. */
   tiles: Record<number, TileMeta>
   terrains: TerrainSet[]
@@ -166,6 +174,17 @@ export function moveFrame(frames: readonly number[], from: number, to: number): 
   return next
 }
 
+/** The lighting-map fields of a tileset asset, in the order the inspector lists them. */
+export const TILESET_LIGHTING_MAPS = ['sixWayPositiveTextureId', 'sixWayNegativeTextureId', 'normalTextureId', 'ormTextureId'] as const
+export type TilesetLightingMap = typeof TILESET_LIGHTING_MAPS[number]
+
+/** `textureIds` for an asset: its atlas, then every lighting map it has (what reference scans read). */
+export function tilesetTextureIds(asset: Pick<TilesetAsset, 'textureId' | TilesetLightingMap>): string[] {
+  const ids = [asset.textureId]
+  for (const key of TILESET_LIGHTING_MAPS) { const id = asset[key]; if (id && !ids.includes(id)) ids.push(id) }
+  return ids
+}
+
 /** The engine-facing view: exactly what a Tilemap registers and embeds. */
 export function toRuntimeTileset(asset: TilesetAsset): Tileset {
   const cfg: TilesetConfig = {
@@ -180,6 +199,10 @@ export function toRuntimeTileset(asset: TilesetAsset): Tileset {
     columns: asset.columns,
     rows: asset.rows,
     overdrive: asset.overdrive,
+    sixWayPositiveTextureId: asset.sixWayPositiveTextureId,
+    sixWayNegativeTextureId: asset.sixWayNegativeTextureId,
+    normalTextureId: asset.normalTextureId,
+    ormTextureId: asset.ormTextureId,
   }
   const ts = new Tileset(cfg)
   for (const key of Object.keys(asset.tiles ?? {})) {
@@ -207,10 +230,11 @@ export function fromRuntimeTileset(ts: Tileset, name: string): TilesetAsset {
     columns: json.columns,
     rows: json.rows,
     ...(json.overdrive !== undefined ? { overdrive: json.overdrive } : {}),
+    ...Object.fromEntries(TILESET_LIGHTING_MAPS.filter(k => json[k]).map(k => [k, json[k]])),
     tiles: json.tiles,
     terrains: json.terrains,
     variantSets: json.variantSets,
-    textureIds: [json.textureId],
+    textureIds: tilesetTextureIds(json),
   }
 }
 
