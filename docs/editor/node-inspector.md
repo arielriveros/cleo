@@ -274,13 +274,32 @@ whatever moves through, and a **Splash** template spawns where something enters 
 through it (the **Wading splash** template, when set, for the footsteps of a character wading). Liquid **Presets** (a still pool to lava) set the density, drag and swell, never the box
 or what it links to.
 
-#### Occluder
+#### Occlusion Volume
 
-A box that hides whatever is behind it from rendering; it draws nothing and collides with nothing.
-Keep it inside the solid part of what it stands for — the walls of a building, the bulk of a rock:
-anything that pokes out of the real geometry hides things you can see past it. Landscapes occlude on
-their own. Culling is switched off, or limited to terrain, in
+A box whose contents are not rendered while the camera cannot see the box; it draws nothing and
+collides with nothing. Anything lying wholly inside it belongs to it — a light by its position — with
+no parenting needed, and something poking out of the box is never hidden. The box cannot be seen when
+it is off screen, behind the landscape, or behind what was drawn (a GPU occlusion query, so a room can
+show its contents a frame late as you come round a door frame); with the camera inside, it is always
+seen. Fit it to a room with its faces inside the walls, floor and ceiling — halfway into them is ideal,
+so what stands on the floor or against a wall is wholly inside, and the box still hides behind the
+walls' outer faces — and the room's contents are skipped whenever you cannot see into it. Drag its faces
+in the viewport to fit it. Only deferred-shaded (PBR) geometry hides a box from the GPU query; glass
+and other forward-shaded or transparent surfaces are seen through. The line under **Size** says what it did
+last frame. It acts only with **Occlusion** at **+ Volumes** in
 [Renderer settings › Optimizations](rendering.md#optimizations).
+
+**Occlude** picks what it hides:
+
+| Kind | What is skipped while the box is out of sight |
+|---|---|
+| **Models** | Static, skinned and cloth models inside it. |
+| **Sprites** | Sprites and animated sprites. |
+| **Particles** | Particle systems; a looping one also pauses its simulation. |
+| **Lights** | Point and spot lights: they light nothing and render no shadow map. |
+| **Decals** | Decals. |
+| **Fluids** | Fluid volumes. |
+| **Shadows** | The models' shadows. Off, its models are not drawn but still cast, for a shadow that falls out of the box into view. |
 
 ### Effects
 

@@ -443,10 +443,11 @@ export default function RendererSettingsPanel() {
       <Collapsable title='Optimizations' persistKey='renderer.optimizations' defaultOpen={false}><div className='w-full p-2'>
         <Toggle label='Frustum Culling' checked={frustumCulling} className='my-1'
           onChange={(c) => { renderer.frustumCulling = c; setFrustumCulling(c); touch(); }} />
-        {/* CPU occlusion culling (graphics/occlusion): what is behind a hill, or behind an Occluder volume,
-            is skipped before it is drawn. Conservative by construction, so it never hides what can be seen. */}
+        {/* Occlusion culling (graphics/occlusion): what is behind a hill is skipped before it is drawn, and
+            with volumes on, everything inside an occlusion volume the camera cannot see. Conservative by
+            construction, so it never hides what can be seen. */}
         <div className='flex items-center gap-1 my-1 text-ui'
-             title='Skip models and foliage hidden behind the landscape (Terrain) or behind the landscape and Occluder volumes (All). Needs Frustum Culling on.'>
+             title='Skip models and foliage hidden behind the landscape (Terrain), and also the contents of every occlusion volume the camera cannot see (+ Volumes). Needs Frustum Culling on.'>
           <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Occlusion</span>
           <SegmentedControl
             value={occlusionCulling}
@@ -454,13 +455,13 @@ export default function RendererSettingsPanel() {
             options={[
               { value: 'off' as const, label: 'Off', title: 'No occlusion culling' },
               { value: 'terrain' as const, label: 'Terrain', title: 'Hidden behind the landscape' },
-              { value: 'all' as const, label: 'All', title: 'Hidden behind the landscape or an Occluder volume' },
+              { value: 'all' as const, label: '+ Volumes', title: 'Hidden behind the landscape, and inside occlusion volumes the camera cannot see' },
             ]}
           />
         </div>
         <Toggle label='GPU Occlusion Queries' checked={occlusionQueries} className='my-1'
           disabled={occlusionCulling === 'off'}
-          title='Also ask the GPU which large or heavy objects are hidden behind what was actually drawn — a building, a cliff, a rock — not just the landscape and Occluder volumes. Results arrive a frame or two late, so an object can appear a frame late when what hid it moves away fast.'
+          title='Also ask the GPU which large or heavy objects, and which occlusion volumes, are hidden behind what was actually drawn — a building, a cliff, a rock — not just the landscape. Results arrive a frame or two late, so an object can appear a frame late when what hid it moves away fast.'
           onChange={(c) => { renderer.occlusionQueries = c; setOcclusionQueries(c); touch(); }} />
         <Toggle label='Light Occlusion' checked={lightOcclusion} className='my-1'
           disabled={occlusionCulling === 'off' || !occlusionQueries}

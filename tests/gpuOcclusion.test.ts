@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { GpuOcclusion, GPU_OCCLUSION_BUDGET, LIGHT_OCCLUSION_BUDGET, MAX_AGE, MIN_RADIUS, MIN_TRIANGLES } from '../src/graphics/gpuOcclusion';
+import { GpuOcclusion, GPU_OCCLUSION_BUDGET, LIGHT_OCCLUSION_BUDGET, MAX_AGE, MIN_RADIUS, MIN_TRIANGLES, VOLUME_OCCLUSION_BUDGET } from '../src/graphics/gpuOcclusion';
 import type { OcclusionQuerySet } from '../src/graphics/rhi/resources';
 import type { ModelNode } from '../src/core/scene/nodes/modelNode';
 
@@ -110,5 +110,32 @@ describe('GpuOcclusion', () => {
         // A camera cut forgets it.
         o.beginFrame(set, [100, 0, 0], FWD);
         expect(o.isLightHidden(torch)).toBe(false);
+    });
+
+    it('queries occlusion volumes by their own box, within a budget of their own, ahead of nodes', () => {
+        const set = new FakeQueries();
+        const o = new GpuOcclusion();
+        const room = {}, cellar = {};
+        const box = Array.from({ length: 16 }, (_, i) => i);
+        o.beginFrame(set, EYE, FWD);
+        expect(o.considerVolume(room, box)).toBe(true);
+        expect(o.considerVolume(room, box)).toBe(false);            // once a frame
+        expect(Array.from(o.volumeBoxes.get(room)!)).toEqual(box);  // a copy of the box it was offered with
+        expect(o.considerVolume(cellar, box)).toBe(true);
+        for (let i = 0; i < VOLUME_OCCLUSION_BUDGET * 2; i++) o.considerVolume({}, box);
+        expect(o.candidates.length).toBe(VOLUME_OCCLUSION_BUDGET);
+        expect(o.consider(node('house'), MIN_RADIUS * 2, 10)).toBe(true);
+
+        const tag = o.submitted();
+        const visible = new Uint8Array(o.candidates.length).fill(1);
+        visible[0] = 0;                                              // the room cannot be seen
+        set.ready.push({ tag, count: visible.length, visible });
+        o.beginFrame(set, EYE, FWD);
+        expect(o.isVolumeHidden(room)).toBe(true);
+        expect(o.isVolumeHidden(cellar)).toBe(false);
+        expect(o.hiddenVolumesThisFrame).toBe(1);
+        // Stale after MAX_AGE frames with no newer result, like any verdict.
+        for (let i = 0; i < MAX_AGE; i++) o.beginFrame(set, EYE, FWD);
+        expect(o.isVolumeHidden(room)).toBe(false);
     });
 });

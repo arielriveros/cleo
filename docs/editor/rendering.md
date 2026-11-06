@@ -57,12 +57,14 @@ two detail steps. Distances are in world units. A terrain chunk past each LOD di
 coarser grid, but its borders stay at full detail, so the levels meet without seams.
 
 **Occlusion** skips what is hidden, in two stages. The first rasterizes the landscape (lowered, so it
-can only hide what the real ground hides) and any **Occluder** volumes into a small CPU depth buffer
-the same frame: exact, and never wrong. **GPU Occlusion Queries** add what that cannot see — a cart
-behind a house, a camp below a cliff that is not terrain — by drawing each large or heavy model's box
-against the frame's real depth. Those results arrive a frame or two late, so an object can appear a
-frame late when whatever hid it moves away fast; turn the queries off if that shows. The Performance
-HUD's *occluded objects* row splits into the two.
+can only hide what the real ground hides) into a small CPU depth buffer the same frame: exact, and
+never wrong. **GPU Occlusion Queries** add what that cannot see — a cart behind a house, a camp below a
+cliff that is not terrain — by drawing each large or heavy model's box against the frame's real depth.
+Those results arrive a frame or two late, so an object can appear a frame late when whatever hid it
+moves away fast; turn the queries off if that shows. The Performance HUD's *occluded objects* row
+splits into the two. **+ Volumes** also skips everything inside an
+[Occlusion Volume](node-inspector.md#occlusion-volume) the camera cannot see — off screen, behind the
+landscape, or (with the queries on) behind what was drawn; *Terrain* leaves volumes out.
 
 **Light Occlusion** uses the same queries for point and spot lights. Each light's whole reach (the
 sphere where its falloff ends) is tested against what was drawn; a light whose reach is entirely

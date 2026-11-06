@@ -135,6 +135,8 @@ export interface ParticleDrawFrame {
     localLights?: readonly ParticleLocalLight[];
     /** Frustum test on a world AABB; a system wholly outside is not drawn (it still simulates). */
     visible?: (min: vec3, max: vec3) => boolean;
+    /** Whether an occlusion volume hides the system this frame: not drawn, and off screen like one outside the frustum. */
+    hidden?: (node: ParticleSystemNode) => boolean;
     /** Multiplies every system's LOD distances (the renderer's `particleLodDistanceScale`). Default 1. */
     lodDistanceScale?: number;
     /** The camera exposure the frame is shown at, for `ParticleSystemNode.exposureWeight`. */
@@ -1035,6 +1037,7 @@ export class ParticleRenderer {
             const box = node.getBoundingBox();
             let inView = node.visible;
             if (inView && frame.visible) inView = frame.visible(box.min, box.max);
+            if (inView && frame.hidden) inView = !frame.hidden(node);
             node.offscreen = !inView;
             // Distance LOD, for every system in or out of view: a culled one must be measured to come back.
             ParticleRenderer._updateLod(node, box, frame);

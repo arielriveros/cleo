@@ -85,7 +85,7 @@ volumes that tune how the scene is lit and culled.
 | **Landscape** | Not placeable. `size 200`, `resolution 129`, `chunkQuads 32`. |
 | **Wind** | Not placeable: one wind for the whole scene. Plants sway only where their material asks for it. |
 | **Water Volume** | A `10 × 2 × 10` box of water: what is inside floats, and what moves through it ripples the surface. |
-| **Occluder** | A `4 × 3 × 4` occlusion-culling volume, placed inside a building's walls or a cliff's bulk. |
+| **Occlusion Volume** | A `4 × 3 × 4` box whose contents are skipped while you cannot see it. Fit it inside a room's walls. |
 
 Skybox and Sky Atmosphere are mutually exclusive: they are two answers to the same question.
 

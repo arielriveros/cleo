@@ -42,7 +42,6 @@ import { firstWetFrame } from './pngAlpha.mjs'
 import { buildProps } from './props.mjs'
 import { houseColliders } from './houses.mjs'
 import { addLods, placeableCopy } from './lods.mjs'
-import { fitOccluders } from './occluders.mjs'
 import { buildKnight } from './knight.mjs'
 import { buildHollow, buildStrongKnight } from './enemies.mjs'
 import { WATER_SOURCE, WATER_UNIFORMS } from './water.mjs'
@@ -1099,21 +1098,6 @@ const HOUSE_WALLS = new Map()
 function buildingToWorld(b, [lx, ly, lz]) {
   const c = Math.cos(b.yaw), s = Math.sin(b.yaw)
   return [round3(b.x + lx * c + lz * s), round3(b.y + ly), round3(b.z - lx * s + lz * c)]
-}
-
-/** Occluders inside each enterable house's walls (occluders.mjs), placed with the house. */
-function buildingOccluders() {
-  const out = []
-  for (const b of buildings) {
-    const house = houseShapes.get(b.key)
-    if (!house) continue
-    fitOccluders(house.grid, house.boxes.filter(x => x.kind === 'wall')).forEach((o, i) => out.push(node(`${b.prop.name} Occluder ${i + 1}`, 'occluder', {
-      id: id(`occluder:${b.key}:${i}`), position: buildingToWorld(b, o.center),
-      rotation: [0, round3(b.yaw * 180 / Math.PI), 0], occluder: { size: o.size, enabled: true },
-    })))
-  }
-  log('occluders', `${out.length} inside the houses' walls`)
-  return out
 }
 
 // =====================================================================================================
@@ -2176,7 +2160,6 @@ function valleyScene() {
       souls.group('puddles', 'Puddles', puddles()),
       valleyProbe(),
       souls.group('buildings', 'Buildings', placedBuildings),
-      souls.group('occluders', 'Occluders', buildingOccluders()),
       souls.group('exposure-volumes', 'Exposure Volumes', exposureVolumes()),
       barrels,
       torches,

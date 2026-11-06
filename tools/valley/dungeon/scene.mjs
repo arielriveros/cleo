@@ -12,7 +12,6 @@ import { boundsOf, decimate } from '../meshes.mjs'
 import { addLods, placeableCopy } from '../lods.mjs'
 import { loadStructure, chunkParts, doorFrames, openDoorways, removePieces } from './structure.mjs'
 import { buildColliders, chunkBoxes, reachability, walkableSoup } from './collision.mjs'
-import { fitOccluders } from '../occluders.mjs'
 import { buildBench, buildBookcase, buildCage, buildChain, buildCrate, buildLadder, buildRack, buildStaticBarrel, buildTable, buildWeapon } from './props.mjs'
 import * as L from './layout.mjs'
 
@@ -84,15 +83,10 @@ export function buildDungeon(kit) {
 
   // ----- colliders -------------------------------------------------------------------------------------
 
-  const { boxes, grid } = buildColliders(structure.parts, structure.bounds)
+  const { boxes } = buildColliders(structure.parts, structure.bounds)
   const kinds = {}
   for (const b of boxes) kinds[b.kind] = (kinds[b.kind] ?? 0) + 1
   log('dungeon', `colliders: ${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')}`)
-
-  // Occluders down the middle of the walls between the rooms (occluders.mjs): a room through a wall is
-  // never drawn. No bodies, and a group of their own, beside the Collision group rather than in it.
-  const occluderBoxes = fitOccluders(grid, boxes.filter(b => b.kind === 'wall'))
-  log('dungeon', `${occluderBoxes.length} occluders`)
 
   // ===================================================================================================
   // Props: library models, placed as linked copies
@@ -402,10 +396,7 @@ export function buildDungeon(kit) {
           id: id('dungeon:manager'), children: [souls.banner(), souls.soundsGroup('dungeon:manager', souls.SOUNDS.manager, { music: souls.MUSIC_CUES })],
         }), 'SoulsGameManager', BLOOD_MANAGER_FIELDS),
         linkInstance(souls.LEVEL.player, player),
-        souls.group('dungeon:level', 'Level', [structureNode, souls.group('dungeon:collision', 'Collision', collision),
-          souls.group('dungeon:occluders', 'Occluders', occluderBoxes.map((o, i) => node(`Occluder ${i + 1}`, 'occluder', {
-            id: id(`dungeon:occluder:${i}`), position: o.center, occluder: { size: o.size, enabled: true },
-          })))]),
+        souls.group('dungeon:level', 'Level', [structureNode, souls.group('dungeon:collision', 'Collision', collision)]),
         props, barrels,
         souls.group('dungeon:fires', 'Fires', fireNodes),
         souls.group('dungeon:shafts', 'Moonlight', shafts()),

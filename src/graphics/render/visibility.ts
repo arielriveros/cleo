@@ -8,6 +8,13 @@ import { TerrainLodSettings } from '../../terrain/terrain';
 import type { Terrain } from '../../terrain/terrain';
 import { GpuOcclusion, GPU_OCCLUSION_BUDGET } from '../gpuOcclusion';
 import { OcclusionBuffer } from '../occlusion/occlusionBuffer';
+import { OcclusionVolumes } from '../occlusion/occlusionVolumes';
+import type { VolumeContentSource, VolumeLike, VolumeQueries } from '../occlusion/occlusionVolumes';
+import { isEditorOnlyNode } from '../../core/scene/editorNodes';
+import type { SpriteNode } from '../../core/scene/nodes/spriteNode';
+import type { ParticleSystemNode } from '../../core/scene/nodes/particleSystemNode';
+import type { DecalNode } from '../../core/scene/nodes/decalNode';
+import type { FluidVolumeNode } from '../../core/scene/nodes/fluidVolumeNode';
 import { OcclusionReuseKey } from '../occlusion/occlusionReuse';
 import { TerrainOccluder } from '../occlusion/terrainOccluder';
 import type { OccluderGrid } from '../occlusion/terrainOccluder';
@@ -37,9 +44,10 @@ export interface VisibilityHost {
 }
 
 /**
- * What the current view can see: the camera frustum, the CPU occlusion buffer (landscapes and
- * Occluder volumes), GPU occlusion queries for nodes and light reaches, the distance LOD of
- * landscapes and LOD groups, and the animation LOD stamp. Every per-view visibility test goes
+ * What the current view can see: the camera frustum, the CPU occlusion buffer (landscapes), GPU
+ * occlusion queries for nodes and light reaches, occlusion volumes (whose contents are skipped while
+ * the volume's box cannot be seen), the distance LOD of landscapes and LOD groups, and the animation
+ * LOD stamp. Every per-view visibility test goes
  * through here, which keeps the geometry pass, the forward overlay and the velocity pass in
  * agreement. Split out of Renderer.
  */
@@ -105,6 +113,18 @@ export class Visibility {
     private readonly _gpuOcclusionOwners: object[] = [];
     private readonly _gpuOcclusionRecords: number[] = [];
 
+    /**
+     * Occlusion volumes (graphics/occlusion/occlusionVolumes.ts): this frame's answer for the main view —
+     * what is hidden because the box it lies inside cannot be seen. Decided by `updateOcclusionVolumes`,
+     * read through `volumeCulled` / `volumeShadowCulled`.
+     */
+    public readonly volumes = new OcclusionVolumes();
+    /** Whether `volumes` holds an answer, and for which camera (a capture draws through another). */
+    private _volumesActive = false;
+    private _volumeCamera: Camera | null = null;
+    /** The volume counters, kept for the HUD past `resetFrameStats` (which runs later in the frame). */
+    public readonly volumeFrameStats = { tested: 0, hidden: 0, culledNodes: 0 };
+
     /** Consecutive built frames in which occlusion hid nothing, and the frames skipped since (see `buildOcclusion`). */
     private _occlusionIdleFrames = 0;
     private _occlusionSkipped = 0;
@@ -130,15 +150,18 @@ export class Visibility {
         for (const node of scene.models) {
             if (!node.animator) continue;
             const s = node.getBoundingSphere();
+            // A model its occlusion volume hid LAST frame counts as off screen too: the stamp is one frame
+            // stale anyway, and this runs before this frame's volumes are decided.
             node.cameraVisible = !this.frustumCulling
-                || this.frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius);
+                || (this.frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius) && !this.volumeCulled(node));
             node.cameraDistance = Math.max(0, vec3.distance(eye, s.center) - s.radius);
         }
     }
 
     /**
-     * Whether the camera cannot see `node`: outside the frustum, or inside it but hidden behind this
-     * frame's occluders (see {@link buildOcclusion}). Every per-view visibility test goes through here,
+     * Whether the camera cannot see `node`: outside the frustum, inside an occlusion volume whose box it
+     * cannot see ({@link volumeCulled}), or hidden behind this frame's occluders (see
+     * {@link buildOcclusion}). Every per-view visibility test goes through here,
      * which is what keeps the geometry pass, the forward overlay and the velocity pass in agreement.
      *
      * PURE — no stat side effect, so use it only where a node was already counted this frame;
@@ -148,6 +171,8 @@ export class Visibility {
         if (!this.frustumCulling) return false;
         const s = node.getBoundingSphere();
         if (!this.frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) return true;
+        // Before the occlusion tests: a node its volume hides is never offered for a query of its own.
+        if (this.volumeCulled(node)) return true;
         return this._nodeOccluded(node, s);
     }
 
@@ -270,6 +295,14 @@ export class Visibility {
         const objects = this._sys.objects, owners = this._gpuOcclusionOwners, records = this._gpuOcclusionRecords;
         const model = this._gpuOcclusionModel;
         for (let i = 0; i < nodes.length; i++) {
+            // An occlusion volume is tested by its own oriented box, not inflated: what it hides lies
+            // inside the box already, and a box grown through the walls it was fitted inside would be
+            // seen from outside them.
+            const box = this.gpuOcclusion.volumeBoxes.get(nodes[i]);
+            if (box) {
+                records[i] = objects.ensure(owners[i] ??= {}, box, 0, false);
+                continue;
+            }
             // A light is tested by its influence sphere, stored when it was offered; a node by its own.
             const light = this.gpuOcclusion.lightSpheres.get(nodes[i]);
             const s = light ? { center: light, radius: light[3] } : (nodes[i] as ModelNode).getBoundingSphere();
@@ -323,8 +356,8 @@ export class Visibility {
 
     /**
      * Rasterize this frame's occluders into the CPU occlusion buffer (graphics/occlusion): every visible
-     * landscape as its lowered occluder mesh, and every enabled Occluder volume. Conservative throughout —
-     * see OcclusionBuffer — so nothing it hides is visible.
+     * landscape as its lowered occluder mesh. Conservative throughout — see OcclusionBuffer — so nothing
+     * it hides is visible.
      *
      * A landscape the camera is BELOW (a cave, a noclip camera) is left out: the lowering argument holds
      * only for a viewer above the surface.
@@ -346,7 +379,6 @@ export class Visibility {
         this._occlusionSkipped = 0;
         const start = performance.now();
         const eye = this._view.camera.position;
-        const all = this.occlusionMode === 'all';
 
         // Everything the buffer is built from. When all of it equals what the last COMPLETE build saw — the
         // editor's parked camera, every frame — the buffer already holds this frame's answer: keep it and
@@ -357,24 +389,12 @@ export class Visibility {
         key.begin();
         key.ref(this._view.camera);
         key.ref(scene.landscapes);              // reallocated whenever the scene's node lists rebuild
-        key.ref(all ? scene.occluders : null);
         key.nums(this._view.viewProj, 16);
         key.nums(eye, 3);
         for (const landscape of scene.landscapes) {
             key.num(landscape.visible ? 1 : 0);
             key.num(landscape.terrain.heightsVersion);
             key.nums(landscape.terrain.origin, 3);
-        }
-        if (all) {
-            const min = this._occMin, max = this._occMax;
-            for (const occluder of scene.occluders) {
-                key.num(occluder.enabled ? 1 : 0);
-                key.num(occluder.visible ? 1 : 0);
-                key.num(occluder.transformVersion);
-                occluder.localBox(min, max);
-                key.nums(min, 3);
-                key.nums(max, 3);
-            }
         }
         if (key.matches()) {
             this.occlusion.resetQueryStats();
@@ -416,15 +436,6 @@ export class Visibility {
             entry.occluder.emit(this.frustum, eye, this._rasterOccluder, undefined, this._occluderHidden);
             any = true;
         }
-        if (all) {
-            const min = this._occMin, max = this._occMax;
-            for (const occluder of scene.occluders) {
-                if (!occluder.enabled || !occluder.visible) continue;
-                occluder.localBox(min, max);
-                this.occlusion.rasterizeBox(min, max, occluder.worldTransform);
-                any = true;
-            }
-        }
         if (!any) { key.invalidate(); return; }
         this.occlusion.finish();
         if (complete) key.commit(); else key.invalidate();
@@ -445,6 +456,139 @@ export class Visibility {
         if (!this._occlusionActive || this._view.camera !== this._occlusionCamera) return false;
         return this.occlusion.isBoxOccluded(min, max);
     }
+
+    /**
+     * Decide this frame's occlusion volumes for the main view (graphics/occlusion/occlusionVolumes.ts):
+     * which boxes the camera cannot see, and so which of their contents every pass skips. After
+     * `buildOcclusion` and `beginGpuOcclusion` (it reads the CPU buffer and the query verdicts, and
+     * offers each box for this frame's queries), before anything draws.
+     *
+     * Only with `occlusionCulling` at `'all'` and frustum culling on, never in a thumbnail, a capture or
+     * a cube face: those draw everything.
+     */
+    public updateOcclusionVolumes(scene: Scene): void {
+        const s = this.volumeFrameStats;
+        s.tested = s.hidden = s.culledNodes = 0;
+        this._volumesActive = false;
+        if (this.occlusionMode !== 'all' || !this.frustumCulling || this._host.thumbnailMode
+            || this._view.capturing || this._view.cubeFace || scene.occlusionVolumes.size === 0) {
+            this.volumes.clear();
+            return;
+        }
+        const camera = this._view.camera;
+        const sources = this._volumeSources;
+        sources[0].nodes = scene.modelsExceptTerrain;
+        sources[1].nodes = scene.sprites;
+        sources[2].nodes = scene.particleSystems;
+        sources[3].nodes = scene.lights;
+        sources[4].nodes = scene.decals;
+        sources[5].nodes = scene.fluidVolumes;
+        const selected = this._host.selectedNodeId ? scene.getNodeById(this._host.selectedNodeId) : null;
+        this.volumes.update({
+            volumes: scene.occlusionVolumes as Iterable<VolumeLike>,
+            sources,
+            eye: camera.position,
+            near: camera.near,
+            planes: this.frustum.planes,
+            cpuOccluded: this._occlusionActive && camera === this._occlusionCamera ? this._volumeCpuOccluded : null,
+            queries: this._gpuOcclusionActive && camera === this._gpuOcclusionCamera ? this._volumeQueries : null,
+            exempt: selected ?? null,
+        });
+        this._volumesActive = true;
+        this._volumeCamera = camera;
+        s.tested = this.volumes.stats.tested;
+        s.hidden = this.volumes.stats.hidden;
+        s.culledNodes = this.volumes.stats.culledNodes;
+    }
+
+    /**
+     * Whether `node` is skipped this frame because it lies inside an occlusion volume whose box the camera
+     * cannot see (and the volume hides that kind of content). False in any view but the one the volumes
+     * were decided for.
+     */
+    public volumeCulled(node: object): boolean {
+        return this._volumesActive && this._view.camera === this._volumeCamera && !this._view.cubeFace
+            && this.volumes.hidden.has(node);
+    }
+
+    /** Whether a model casts no shadow this frame: its occlusion volume is hidden and hides shadows too. */
+    public volumeShadowCulled(node: object): boolean {
+        return this._volumesActive && this.volumes.shadowHidden.has(node);
+    }
+
+    private readonly _volumeCpuOccluded = (min: ArrayLike<number>, max: ArrayLike<number>) => this.occlusion.isBoxOccluded(min, max);
+    private readonly _volumeQueries: VolumeQueries = {
+        consider: (volume, box) => this.gpuOcclusion.considerVolume(volume, box),
+        isHidden: volume => this.gpuOcclusion.isVolumeHidden(volume),
+    };
+
+    /**
+     * What each kind of content is, for the volumes: its bounds and when they change. Editor chrome and
+     * a sun never belong to a volume; the landscapes' chunks are left out by the model list itself.
+     */
+    private readonly _volumeSources: VolumeSources = [
+        {
+            kind: 'models', nodes: [],
+            version: n => n.transformVersion,
+            // A new mesh is new bounds without the transform moving.
+            ref: n => n.model?.geometry ?? null,
+            bounds: (n, min, max) => {
+                if (isEditorOnlyNode(n)) return false;
+                const b = n.getBoundingBox();
+                return copyBox(b.min, b.max, min, max);
+            },
+        },
+        {
+            kind: 'sprites', nodes: [],
+            version: n => n.transformVersion,
+            bounds: (n, min, max) => {
+                if (isEditorOnlyNode(n)) return false;
+                // A billboard quad `worldScale` across, turned to the camera: any way round, its corners
+                // stay within half its diagonal of the centre.
+                const p = n.worldPosition, sc = n.worldScale;
+                const r = 0.5 * Math.hypot(sc[0], sc[1], sc[2]);
+                return copyBox([p[0] - r, p[1] - r, p[2] - r], [p[0] + r, p[1] + r, p[2] + r], min, max);
+            },
+        },
+        {
+            // Every frame: a system's bounds follow its parameters, not just its transform.
+            kind: 'particles', nodes: [],
+            version: () => NaN,
+            bounds: (n, min, max) => {
+                if (isEditorOnlyNode(n)) return false;
+                const b = n.getBoundingBox();
+                return copyBox(b.min, b.max, min, max);
+            },
+        },
+        {
+            // A light by its position: what it lights is the user's call (the volume's Lights switch).
+            kind: 'lights', nodes: [],
+            version: n => n.transformVersion,
+            bounds: (n, min, max) => {
+                if (n.type === 'directional' || isEditorOnlyNode(n)) return false;
+                const p = n.worldPosition;
+                return copyBox(p, p, min, max);
+            },
+        },
+        {
+            kind: 'decals', nodes: [],
+            version: () => NaN,
+            bounds: (n, min, max) => {
+                if (isEditorOnlyNode(n)) return false;
+                const b = n.getBoundingBox();
+                return copyBox(b.min, b.max, min, max);
+            },
+        },
+        {
+            kind: 'fluids', nodes: [],
+            version: () => NaN,
+            bounds: (n, min, max) => {
+                if (isEditorOnlyNode(n)) return false;
+                const b = n.getBoundingBox();
+                return copyBox(b.min, b.max, min, max);
+            },
+        },
+    ];
 
     // Distance-based terrain LOD: every landscape re-picks its chunks' detail levels. The levels are
     // alternate index buffers over one unchanged vertex buffer, so this is a distance test per chunk.
@@ -479,4 +623,19 @@ export class Visibility {
         }
         return d2;
     }
+}
+
+/** The content kinds the volumes look through, in this order; `nodes` is pointed at the scene each frame. */
+type VolumeSources = [
+    VolumeContentSource<ModelNode>, VolumeContentSource<SpriteNode>, VolumeContentSource<ParticleSystemNode>,
+    VolumeContentSource<LightNode>, VolumeContentSource<DecalNode>, VolumeContentSource<FluidVolumeNode>,
+];
+
+/** `[srcMin, srcMax]` into `[min, max]`; false for an empty or non-finite box (it belongs to no volume). */
+function copyBox(srcMin: ArrayLike<number>, srcMax: ArrayLike<number>, min: vec3, max: vec3): boolean {
+    for (let a = 0; a < 3; a++) {
+        min[a] = srcMin[a]; max[a] = srcMax[a];
+        if (!Number.isFinite(min[a]) || !Number.isFinite(max[a]) || min[a] > max[a]) return false;
+    }
+    return true;
 }

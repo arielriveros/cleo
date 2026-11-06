@@ -59,7 +59,8 @@ export class FluidVolumePasses {
     public renderFluidVolumes(scene: Scene): void {
         const volumes: FluidVolumeNode[] = [];
         for (const node of scene.fluidVolumes)
-            if (node.enabled && node.visible && node.volume && !this._outsideFrustumBox(node)) volumes.push(node);
+            if (node.enabled && node.visible && node.volume && !this._outsideFrustumBox(node)
+                && !this._sys.visibility.volumeCulled(node)) volumes.push(node);
         if (volumes.length === 0) return;
         const camPos = this._view.camera.position;
         const key = new Map<FluidVolumeNode, number>();

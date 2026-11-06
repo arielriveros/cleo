@@ -27,7 +27,7 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `renderScale` | `number` | `1.0` | Internal render resolution as a fraction of the canvas. |
 | `clearColor` | `number[]` | `[0, 0, 0, 1]` | Background colour where nothing is drawn. |
 | `frustumCulling` | `boolean` | `true` | Skip objects outside the camera frustum. |
-| `occlusionCulling` | `'off' \| 'terrain' \| 'all'` | `'all'` | Skip models and foliage cells hidden behind the landscape (`'terrain'`), or behind the landscape and Occluder volumes (`'all'`). A conservative CPU depth buffer, built the same frame — it never hides something visible. Needs `frustumCulling`. |
+| `occlusionCulling` | `'off' \| 'terrain' \| 'all'` | `'all'` | Skip models and foliage cells hidden behind the landscape (`'terrain'`) — a conservative CPU depth buffer, built the same frame — and, with `'all'`, everything inside an [occlusion volume](node-types.md#occlusionvolumenode--occlusionvolume) the camera cannot see. Neither ever hides something visible. Needs `frustumCulling`. |
 | `occlusionQueries` | `boolean` | `true` | Occlusion culling's second stage: GPU occlusion queries against what was actually drawn, for large or heavy models hidden behind buildings, cliffs or rocks. Results arrive a frame or two late, so only a fresh "hidden" is acted on and a camera cut forgets them. Needs `occlusionCulling` on. |
 | `lightOcclusionCulling` | `boolean` | `true` | Leave out every point and spot light whose whole reach is hidden behind what was drawn, using the GPU occlusion queries: it takes no cluster slot and no shadow map. Needs `occlusionQueries` on. |
 

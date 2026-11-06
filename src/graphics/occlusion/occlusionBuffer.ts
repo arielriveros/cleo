@@ -4,8 +4,8 @@
  * ## The approach
  *
  * Software occlusion culling, the way Frostbite, Killzone and Intel's Masked Occlusion Culling do it:
- * rasterize a handful of large, simple, conservative occluders (here: a lowered terrain mesh and authored
- * occluder boxes) into a low-resolution depth buffer on the CPU, reduce it to a max-depth pyramid, and
+ * rasterize a handful of large, simple, conservative occluders (here: a lowered terrain mesh; boxes too,
+ * through `rasterizeBox`) into a low-resolution depth buffer on the CPU, reduce it to a max-depth pyramid, and
  * test each object's screen rectangle against it before anything is drawn. Same frame, no GPU readback,
  * no latency, identical on WebGL2 and WebGPU.
  *
@@ -13,9 +13,9 @@
  *
  * Every step errs toward "visible":
  *
- * - **Occluders are inside the real geometry.** The terrain occluder is lowered (terrainOccluder.ts) and
- *   occluder boxes are authored inside the walls they stand for. Anything the occluder hides, the real
- *   surface hides too.
+ * - **Occluders are inside the real geometry.** The terrain occluder is lowered (terrainOccluder.ts), and
+ *   a box rasterized as an occluder must sit inside the walls it stands for. Anything the occluder hides,
+ *   the real surface hides too.
  * - **Each texel stores the FARTHEST its occluder reaches across the texel**, not the depth at the texel
  *   centre: the triangle's 1/w plane is evaluated at the texel's four corners and the farthest kept (and
  *   never past the triangle's own farthest vertex). Several occluders keep the NEAREST of those.

@@ -11,7 +11,7 @@ type NodeType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite'
   | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup'
   | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
-  | 'particleSystem' | 'forceField' | 'waterVolume' | 'occluder' | 'exposureVolume' | 'cloth'
+  | 'particleSystem' | 'forceField' | 'waterVolume' | 'occlusionVolume' | 'exposureVolume' | 'cloth'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 ```
@@ -275,6 +275,30 @@ lit by whatever else covers them (another probe, the sky light, the scene ambien
 their reflections from this probe. `affectsReflections` is the converse. Neither needs a re-bake. The
 forward-shaded materials only ever take reflections from a probe, so `affectsLighting` changes the
 deferred path alone.
+
+### OcclusionVolumeNode — `'occlusionVolume'`
+
+A box whose contents are not rendered while the active camera cannot see the box. Anything whose
+world bounds lie wholly inside it belongs to it, found automatically (a light by its position; a
+directional light never). The box cannot be seen when it is outside the frustum, behind the landscape,
+or found hidden behind what was drawn by a GPU occlusion query; with the camera inside, it is always
+seen. A box fitted to a room — its faces halfway into the walls, floor and ceiling, so what rests on
+them is inside — therefore skips the room's furniture, lights and effects whenever you cannot see into
+it. Only deferred-shaded geometry hides the box from the query; forward-shaded and transparent
+surfaces do not. Acts only with `occlusionCulling: 'all'`.
+
+```ts
+size: [number, number, number]       // full extents, before the node transform
+enabled: boolean
+cull: OcclusionVolumeCull            // a copy: models, sprites, particles, lights, decals, fluids, shadows
+setCull(key, on) ; culls(key): boolean
+renderer.occlusionVolumeStatus(volume): { inside: number, hidden: boolean } | null   // last frame
+```
+
+Every `cull` switch is on by default. `shadows` is separate from `models`: with it off, the volume's
+models are not drawn but keep casting shadows (a shadow can fall out of the box into view). A hidden
+light lights nothing and renders no shadow map; a hidden looping particle system also pauses. Scenes
+saved with the old `'occluder'` type load as occlusion volumes of the same size.
 
 ### SkyboxNode — `'skybox'`
 

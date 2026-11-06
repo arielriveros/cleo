@@ -879,8 +879,11 @@ export class ShadowPasses {
             if (!node.visible || !node.initialized || isEditorOnlyNode(node)) continue;
             const s = node.getBoundingSphere();
             // Casting or not, anything visible receives: a ground plane that casts nothing still ends the
-            // shadow volume of the cube floating over it.
-            if (s.center[1] - s.radius < floor) floor = s.center[1] - s.radius;
+            // shadow volume of the cube floating over it. Not a model its occlusion volume hides from the
+            // camera this frame: nothing sees it receive.
+            if (s.center[1] - s.radius < floor && !this._sys.visibility.volumeCulled(node)) floor = s.center[1] - s.radius;
+            // Inside an occlusion volume the camera cannot see, whose Shadows switch is on: casts nothing.
+            if (this._sys.visibility.volumeShadowCulled(node)) continue;
             // A despawn dissolve drops its shadow halfway through: depth has no screen-door to share.
             if (node.effectiveFade < 0.5) continue;
             // A merged model can have a non-casting submesh among casting ones, so the test is "any
@@ -1276,7 +1279,8 @@ export class ShadowPasses {
                 spotBoundingSphere(n.worldPosition, n.worldForward, spot.range,
                                    spot.outerCutOff * Math.PI / 180, this._sys.lighting.coneSphere);
                 return vec3.squaredDistance(n.worldPosition, cam)
-                    + (this._sys.visibility.lightOccluded(n, this._sys.lighting.coneSphere.center, this._sys.lighting.coneSphere.radius) ? 1e12 : 0);
+                    + (this._sys.visibility.volumeCulled(n)
+                       || this._sys.visibility.lightOccluded(n, this._sys.lighting.coneSphere.center, this._sys.lighting.coneSphere.radius) ? 1e12 : 0);
             };
             casters.sort((a, b) => rank(a) - rank(b));
             casters.length = ShadowPasses.MAX_SPOT_SHADOWS;
@@ -1300,6 +1304,10 @@ export class ShadowPasses {
         for (const node of casters) {
             const layer = this.spotSlots.layerOf(node.id);
             if (layer < 0) continue; // past MAX_SPOT_SHADOWS — this light simply goes unshadowed
+            // Inside an occlusion volume the camera cannot see: it lights nothing this frame, so its map
+            // is not redrawn. It keeps its slot (a hand-over redraws from scratch), and the layer cache
+            // catches up on whatever changed the frame it is seen again.
+            if (this._sys.visibility.volumeCulled(node)) continue;
 
             const light = node.light as Spotlight;
             const pos = node.worldPosition;
@@ -1377,7 +1385,8 @@ export class ShadowPasses {
         if (casters.length > MAX_POINT_SHADOWS) {
             const cam = this._view.camera.position;
             const rank = (n: LightNode) => vec3.squaredDistance(n.worldPosition, cam)
-                + (this._sys.visibility.lightOccluded(n, n.worldPosition, (n.light as PointLight).range) ? 1e12 : 0);
+                + (this._sys.visibility.volumeCulled(n)
+                   || this._sys.visibility.lightOccluded(n, n.worldPosition, (n.light as PointLight).range) ? 1e12 : 0);
             casters.sort((a, b) => rank(a) - rank(b));
             casters.length = MAX_POINT_SHADOWS;
         }
@@ -1411,6 +1420,9 @@ export class ShadowPasses {
         for (const node of casters) {
             const slot = this.pointSlots.layerOf(node.id);
             if (slot < 0) continue;   // past MAX_POINT_SHADOWS — this light simply goes unshadowed
+            // Inside an occlusion volume the camera cannot see: as the spot lights (see there). Not on a
+            // full update, which nothing would repeat for it later.
+            if (!this.pointShadowFullUpdate && this._sys.visibility.volumeCulled(node)) continue;
 
             const light = node.light as PointLight;
             const pos = node.worldPosition;
