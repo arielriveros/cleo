@@ -8,8 +8,8 @@
 // twig meets the branch, which is how tree/treeMesh.ts places them.
 
 import type { LeafShape, Rgba } from '../foliageParams';
-import { stream } from '../rng';
-import { createImage, dilateColor, mixRgb, normalFromHeight, putLinear, rgb, scaleRgb, shiftHue, type Image, type Rgb } from './image';
+import { stream } from '../../core/texture/rng';
+import { createImage, dilateColor, mixRgb, normalFromHeight, putLinear, rgb, scaleRgb, shiftHue, type Image, type Rgb } from '../../core/texture/image';
 
 export const ATLAS_CELLS = 2;
 

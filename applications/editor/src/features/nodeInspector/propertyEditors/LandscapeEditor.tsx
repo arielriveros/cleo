@@ -9,12 +9,19 @@ import { useHistory } from '../../HistoryContext'
 import { rebuildTerrain } from '../../landscape/rebuildTerrain'
 import { applyHeightsTo } from '../../landscape/heightmapImport'
 import HeightmapImportDialog from '../../landscape/HeightmapImportDialog'
+import WorldImportDialog from '../../landscape/WorldImportDialog'
+import { importSlotsOf, useWorldImport } from '../../landscape/useWorldImport'
+import { entriesFromBlobs, entriesFromFiles, loadWorld, type LoadedWorld } from '../../landscape/worldSources'
+import { CREATOR_WORLD_VAR, DEFAULT_ORIENTATION, parseCreatorWorldLink, reapplyMapping, worldChanged, type CreatorWorldLink } from '../../landscape/worldImport'
 import { setTerrainHeights } from '../../../utils/terrainAccess'
 import { clamp } from '@cleo/app-kit/utils/math';
 import { creatorChannel, getCreatorFiles, listCreatorAssets, type CreatorAssetMeta } from '@cleo/app-kit/creatorLibrary'
 
-/** On a landscape: the Cleo Creator world its heights came from, `<id>@<revision>`. */
-const CREATOR_WORLD_VAR = '__creatorWorld'
+/** A Creator world's `exportHash` (its sidecar's `output.exportHash`): it changes only when the exported files do. */
+function exportHashOf(world: CreatorAssetMeta): string | undefined {
+  const out = world.sidecar?.output as { exportHash?: unknown } | undefined
+  return typeof out?.exportHash === 'string' && out.exportHash ? out.exportHash : undefined
+}
 
 /** The Creator library's worlds, kept current while the inspector is open. */
 function useCreatorWorlds(): CreatorAssetMeta[] {
@@ -30,7 +37,8 @@ function useCreatorWorlds(): CreatorAssetMeta[] {
 }
 
 // Node inspector for a LandscapeNode: the terrain's STRUCTURE — size, sampling, chunking — plus the
-// heightmap import/export that replaces its shape wholesale. Landscape mode holds the brushes that edit it.
+// heightmap import/export that replaces its shape wholesale, and Import world (heights plus surfaces, see
+// landscape/WorldImportDialog). Landscape mode holds the brushes that edit it.
 
 const RESOLUTION_HINT = 'Height samples per side. More detail, more memory. A layer’s height map is drawn by the parallax march, not by these vertices, so Resolution controls the terrain’s SHAPE and a material’s Depth controls its surface relief.'
 const MASK_HINT = 'Texels per side of the paint masks. Independent of Resolution: a road wants a finer mask than the ground wants vertices. 1024 over 200 m is 20 cm per texel.'
@@ -38,6 +46,7 @@ const MASK_SIZES = [256, 512, 1024, 2048] as const
 const CHUNK_QUADS_HINT = 'Quads per side of each render chunk: the unit of frustum culling and distance LOD. Smaller chunks give finer culling and LOD granularity, at more draw calls.'
 const REBUILD_HINT = 'Rebuilds at the current settings, resampling the sculpted shape, the painted layers and the scattered foliage onto it. Nothing you authored is lost.'
 const IMPORT_HINT = 'Replace the sculpted shape from a heightmap: 16-bit PNG or RAW (R16) at full precision, JPG/BMP at 8 bits. You choose the height range and see it on the landscape before committing; the painted layers and foliage stay.'
+const WORLD_FILES_HINT = 'Import a World export from disk: its heightmap, splatmaps or weightmaps and the .json manifest (pick them together), or the zip. Each world surface is mapped onto a paint-only slot of the landscape material.'
 
 /** Decode a picked heightmap: PNG and RAW at full precision, anything else through the browser at 8 bits. */
 async function decodeHeightmapFile(file: File): Promise<HeightImage> {
@@ -63,16 +72,18 @@ function download(bytes: Uint8Array, name: string, mime: string): void {
 }
 
 export default function LandscapeEditor(props: { node: LandscapeNode }) {
-  const { eventEmitter, editorScene, withoutDirty } = useCleoEngine()
+  const { eventEmitter, editorScene, withoutDirty, materials } = useCleoEngine()
   const { push } = useHistory()
-  const [pendingImport, setPendingImport] = useState<{ image: HeightImage; fileName: string; creator?: { id: string; revision: number } } | null>(null)
+  const [pendingImport, setPendingImport] = useState<{ image: HeightImage; fileName: string } | null>(null)
+  const [pendingWorld, setPendingWorld] = useState<{ world: LoadedWorld; previous: CreatorWorldLink | null } | null>(null)
+  const { commit: commitWorld } = useWorldImport(props.node)
   const worlds = useCreatorWorlds()
-  const appliedWorld = (() => {
-    const v = props.node.getVariable(CREATOR_WORLD_VAR)
-    const m = typeof v === 'string' ? /^(.+)@(\d+)$/.exec(v) : null
-    return m ? { id: m[1], revision: Number(m[2]) } : null
-  })()
-  const newerWorld = appliedWorld && worlds.find(w => w.id === appliedWorld.id && w.revision > appliedWorld.revision)
+  const appliedWorld = parseCreatorWorldLink(props.node.getVariable(CREATOR_WORLD_VAR))
+  // Keyed on the export hash when both sides have one: a preview-only edit in the Creator (a tint, the
+  // water look) bumps the revision but changes no file, and must not offer to replace the landscape.
+  const newerWorld = appliedWorld
+    ? worlds.find(w => worldChanged(appliedWorld, { id: w.id, revision: w.revision, exportHash: exportHashOf(w) }))
+    : undefined
   // For DISPLAY only. Every action below reads `props.node.terrain` when it runs: a rebuild replaces the
   // Terrain object on the node, and a closure holding this one would write into the disposed original.
   const terrain = props.node.terrain
@@ -142,20 +153,20 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
     }
   }
 
-  /**
-   * A Cleo Creator world's heightmap, at full precision: its 16-bit PNG, with the height range its sidecar
-   * records written into the name the import dialog reads it from.
-   */
-  const importFromCreator = async (world: CreatorAssetMeta) => {
+  /** A Cleo Creator world from the library, at full precision: heights, surfaces and manifest. */
+  const loadCreatorWorld = async (world: CreatorAssetMeta): Promise<LoadedWorld> => {
+    const files = await getCreatorFiles(world.id)
+    return loadWorld(entriesFromBlobs(files), {
+      name: world.name, sidecar: world.sidecar,
+      creator: { id: world.id, revision: world.revision, exportHash: exportHashOf(world) },
+    })
+  }
+
+  /** Open Import world on a library world; a previous import of the same world seeds its choices. */
+  const openCreatorWorld = async (world: CreatorAssetMeta) => {
     setImporting(true)
     try {
-      const files = await getCreatorFiles(world.id)
-      const height = files.find(f => /_height\.png$/i.test(f.name))
-      if (!height) throw new Error('it has no heightmap yet')
-      const out = (world.sidecar?.output ?? {}) as { minHeight?: number; maxHeight?: number }
-      const round = (x: number | undefined) => Math.round((x ?? 0) * 1000) / 1000
-      const fileName = `${world.name}_min${round(out.minHeight)}_max${round(out.maxHeight ?? 100)}.png`
-      setPendingImport({ image: await decodeHeightmapFile(new File([height.blob], fileName)), fileName, creator: { id: world.id, revision: world.revision } })
+      setPendingWorld({ world: await loadCreatorWorld(world), previous: appliedWorld?.id === world.id ? appliedWorld : null })
     } catch (err) {
       Logger.error(`Could not import the Creator world "${world.name}": ${err instanceof Error ? err.message : err}`, 'Editor')
     } finally {
@@ -163,10 +174,51 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
     }
   }
 
+  /** Open Import world on files from disk: heightmap + splat/weight maps + manifest, or their zip. */
+  const importWorldFiles = async (files: File[]) => {
+    if (!files.length) return
+    setImporting(true)
+    try {
+      setPendingWorld({ world: await loadWorld(await entriesFromFiles(files)), previous: null })
+    } catch (err) {
+      Logger.error(`Could not import the world: ${err instanceof Error ? err.message : err}`, 'Editor')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  /**
+   * Re-apply a changed library world in one click, with the mapping, orientation and size choice the
+   * landscape remembers. A landscape that only ever took a world's heights (the old link, no mapping)
+   * has no choices to repeat, so it gets the dialog.
+   */
+  const reapplyWorld = async (world: CreatorAssetMeta) => {
+    if (!appliedWorld?.mapping) { void openCreatorWorld(world); return }
+    setImporting(true)
+    try {
+      const loaded = await loadCreatorWorld(world)
+      const layers = loaded.weights ? loaded.manifest.layers : []
+      const slots = importSlotsOf(props.node.terrain.layerStack.base.material, materials)
+      const err = commitWorld({
+        world: loaded,
+        range: { min: loaded.manifest.minHeight, max: loaded.manifest.maxHeight },
+        orientation: appliedWorld.orientation ?? DEFAULT_ORIENTATION,
+        matchSize: appliedWorld.matchSize ?? true,
+        mapping: reapplyMapping(appliedWorld.mapping, layers, slots),
+        resetRules: false,
+      })
+      if (err) Logger.error(err, 'Editor')
+      else Logger.info(`Re-applied “${world.name}” from Cleo Creator`, 'Editor')
+    } catch (err) {
+      Logger.error(`Could not re-apply the Creator world "${world.name}": ${err instanceof Error ? err.message : err}`, 'Editor')
+    } finally {
+      setImporting(false)
+      setRevision(r => r + 1)
+    }
+  }
+
   /** One undo step for a whole-field replacement. The terrain is found by node id when it runs. */
   const commitHeights = (before: Float32Array, after: Float32Array) => {
-    // Remember which Creator world this is, so a later change to it offers a re-apply.
-    if (pendingImport?.creator) props.node.setVariable(CREATOR_WORLD_VAR, `${pendingImport.creator.id}@${pendingImport.creator.revision}`, 'string')
     const nodeId = props.node.id
     const put = (h: Float32Array) => {
       const node = editorScene.getNodeById(nodeId) as LandscapeNode | null
@@ -237,8 +289,14 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
           {newerWorld && (
             <div className='flex items-center gap-2 rounded border border-warning/50 bg-warning/10 px-2 py-1 text-ui'>
               <span className='flex-1'>“{newerWorld.name}” changed in Cleo Creator.</span>
-              <Button size='sm' disabled={importing} onClick={() => void importFromCreator(newerWorld)}
-                title='Import its new heightmap; you confirm the range and see it before it replaces the shape'>Re-apply</Button>
+              <Button size='sm' disabled={importing} onClick={() => void reapplyWorld(newerWorld)}
+                title={appliedWorld?.mapping
+                  ? 'Import its new heights and surfaces with the same mapping and orientation, as one undo step'
+                  : 'Open Import world with its new heights and surfaces'}>Re-apply</Button>
+              {appliedWorld?.mapping && (
+                <Button size='sm' variant='ghost' disabled={importing} onClick={() => void openCreatorWorld(newerWorld)}
+                  title='Open Import world to check the mapping and orientation before applying'>Review…</Button>
+              )}
             </div>
           )}
           <div className='flex gap-1'>
@@ -249,10 +307,12 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
               {importing ? 'Importing…' : 'Import heightmap'}
             </FileButton>
             {worlds.length > 0 && (
-              <Popover align='right' title='A world made in Cleo Creator, at full precision' trigger={<span className='text-ui px-2'>From Creator ▾</span>}>
-                <div data-cleo-overlay className='flex flex-col p-1 text-ui min-w-[170px]'>
-                  {worlds.map(w => <MenuItem key={w.id} onClick={() => void importFromCreator(w)}>{w.name}</MenuItem>)}
-                </div>
+              <Popover align='right' title='A world made in Cleo Creator: its heights and its surfaces, at full precision' trigger={<span className='text-ui px-2'>From Creator ▾</span>}>
+                {close => (
+                  <div data-cleo-overlay className='flex flex-col p-1 text-ui min-w-[170px]'>
+                    {worlds.map(w => <MenuItem key={w.id} onClick={() => { close(); void openCreatorWorld(w) }}>{w.name}</MenuItem>)}
+                  </div>
+                )}
               </Popover>
             )}
             <Popover align='right' title='Download the height field' trigger={<span className='text-ui px-2'>Export ▾</span>}>
@@ -266,11 +326,19 @@ export default function LandscapeEditor(props: { node: LandscapeNode }) {
               </div>
             </Popover>
           </div>
+          <FileButton className='w-full py-1' title={WORLD_FILES_HINT} multiple accept='.png,.r16,.raw,.json,.zip' disabled={importing}
+            onFiles={(files) => { void importWorldFiles(files) }}>
+            Import world files
+          </FileButton>
         </div>
       </div>
       {pendingImport && (
         <HeightmapImportDialog node={props.node} scene={editorScene} image={pendingImport.image} fileName={pendingImport.fileName}
           onClose={() => setPendingImport(null)} onCommit={commitHeights} />
+      )}
+      {pendingWorld && (
+        <WorldImportDialog node={props.node} world={pendingWorld.world} previous={pendingWorld.previous}
+          onClose={() => { setPendingWorld(null); setRevision(r => r + 1) }} />
       )}
     </Collapsable>
     </DocScope>

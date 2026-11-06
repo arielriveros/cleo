@@ -18,9 +18,9 @@
 import { simplify } from '@cleo/app-kit/geometry/simplify';
 import type { RockParams } from './foliageParams';
 import { normalize, type FoliageLevel, type FoliagePart, type PartBuffers, type V3 } from './mesh';
-import { fbm3, noiseSeed, ridged3, valueNoise3 } from './noise';
-import { stream } from './rng';
-import { createImage, dilateColor, mixRgb, normalFromHeight, putLinear, rasterTriangle, rgb, scaleRgb, type Image } from './textures/image';
+import { fbm3, noiseSeed, ridged3, valueNoise3 } from '../core/texture/noise';
+import { stream } from '../core/texture/rng';
+import { createImage, dilateColor, mixRgb, normalFromHeight, putLinear, rasterTriangle, rgb, scaleRgb, type Image } from '../core/texture/image';
 
 const smoothstep = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 

@@ -1,8 +1,13 @@
-// A World Creator document: the world's frame, the ordered landform stack, and the erosion passes run
-// after it. Plain JSON, so it saves, diffs and travels in the export sidecar as-is.
+// A World Creator document: the world's frame, the ordered landform stack, the erosion passes run after
+// it, the surfaces that texture it (version 2), the lakes, and how the preview shows it. Plain JSON, so
+// it saves, diffs and travels in the export sidecar as-is.
 
 import type { DropletParams, PipeParams, ThermalParams } from './erosion';
 import type { LayerKind, WorldLayer } from './features';
+import { DEFAULT_LAKES, type LakeSettings } from './lakes';
+import { normaliseSurfaces, surfaceExportKey, type SurfaceLayer } from './surfaces/surfaceDoc';
+import { defaultSurfaces } from './surfaces/presets';
+import { DEFAULT_WATER_LOOK, normaliseWaterLook, type WaterLook } from './water/waterLook';
 
 export interface WorldSettings {
   /** Samples per side; 2^n + 1 so it matches the engine's terrain grids (257 .. 4097). */
@@ -12,7 +17,7 @@ export interface WorldSettings {
   /** World units of a normalised height of 1. */
   heightScale: number;
   seed: number;
-  /** Normalised sea level, for the preview's water plane and the coast layers' default. */
+  /** Normalised sea level: the preview's sea, and what the water rules measure from. */
   seaLevel: number;
 }
 
@@ -23,10 +28,55 @@ export type ErosionPass =
 
 export type ErosionKind = ErosionPass['kind'];
 
+/** Preview quality: the live landscape's grid and paint-mask resolution. */
+export type PreviewQuality = 'draft' | 'fine';
+
+export const PREVIEW_QUALITY: Record<PreviewQuality, { heights: number; masks: number }> = {
+  draft: { heights: 257, masks: 512 },
+  fine: { heights: 513, masks: 1024 },
+};
+
+/** How the preview shows the world. Never exported, never part of the export hash. */
+export interface WorldPreview {
+  quality: PreviewQuality;
+  water: WaterLook;
+}
+
+/** What the export writes beyond the heights (the Export tab). */
+export interface WorldOutputSettings {
+  /** Splat / weight map texels per side. */
+  splatResolution: number;
+  /** RGBA splatmaps, four normalised layers each (Unity, Godot, custom shaders). */
+  splat: boolean;
+  /** One grayscale weight map per layer (Unreal weight-blended layers, Gaea, Blender). */
+  weightmaps: boolean;
+  /** 32-bit float heights, OpenEXR. */
+  exr: boolean;
+  /** Which data masks to write. */
+  masks: string[];
+  /** Data masks at 16 bits rather than 8. */
+  masks16: boolean;
+  /** Download one zip rather than separate files. */
+  zip: boolean;
+}
+
+export const SPLAT_RESOLUTIONS = [512, 1024, 2048, 4096] as const;
+
+export const DEFAULT_OUTPUT: WorldOutputSettings = {
+  splatResolution: 1024, splat: true, weightmaps: true, exr: false,
+  masks: ['slope', 'curvature', 'flow', 'wetness'], masks16: false, zip: true,
+};
+
 export interface WorldDoc {
+  version: 2;
   settings: WorldSettings;
   layers: WorldLayer[];
   erosion: ErosionPass[];
+  /** Bottom to top; index 0 is the base and covers everything. */
+  surfaces: SurfaceLayer[];
+  water: { lakes: LakeSettings };
+  output: WorldOutputSettings;
+  preview: WorldPreview;
 }
 
 export const RESOLUTIONS = [257, 513, 1025, 2049, 4097] as const;
@@ -74,3 +124,44 @@ export function defaultErosion(kind: ErosionKind): ErosionPass {
 }
 
 export const DEFAULT_SETTINGS: WorldSettings = { resolution: 513, size: 2048, heightScale: 600, seed: 1, seaLevel: 0.1 };
+
+export const DEFAULT_PREVIEW: WorldPreview = { quality: 'draft', water: DEFAULT_WATER_LOOK };
+
+/** A document's version-2 parts, for a terrain-only (version 1) document or preset. */
+export function worldExtras(): Pick<WorldDoc, 'version' | 'surfaces' | 'water' | 'output' | 'preview'> {
+  return { version: 2, surfaces: defaultSurfaces(), water: { lakes: { ...DEFAULT_LAKES } }, output: { ...DEFAULT_OUTPUT, masks: [...DEFAULT_OUTPUT.masks] }, preview: { ...DEFAULT_PREVIEW } };
+}
+
+/**
+ * Any stored world (a version-1 document from before surfaces, a library asset, a preset) brought up to
+ * the current shape. Version 1 documents get the default (temperate) surface stack.
+ */
+export function normaliseWorld(raw: unknown): WorldDoc {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<WorldDoc>;
+  const extras = worldExtras();
+  const lakes = { ...DEFAULT_LAKES, ...(r.water?.lakes ?? {}) };
+  const output = { ...extras.output, ...(r.output ?? {}) };
+  if (!SPLAT_RESOLUTIONS.includes(output.splatResolution as typeof SPLAT_RESOLUTIONS[number])) output.splatResolution = DEFAULT_OUTPUT.splatResolution;
+  if (!Array.isArray(output.masks)) output.masks = [...DEFAULT_OUTPUT.masks];
+  const preview = r.preview ?? extras.preview;
+  return {
+    version: 2,
+    settings: { ...DEFAULT_SETTINGS, ...(r.settings ?? {}) },
+    layers: Array.isArray(r.layers) ? r.layers : [],
+    erosion: Array.isArray(r.erosion) ? r.erosion : [],
+    surfaces: normaliseSurfaces(r.surfaces, defaultSurfaces),
+    water: { lakes },
+    output,
+    preview: { quality: preview.quality === 'fine' ? 'fine' : 'draft', water: normaliseWaterLook(preview.water) },
+  };
+}
+
+/** The parts of a document that decide the terrain (heights, erosion): what the terrain stage caches on. */
+export function terrainKey(doc: WorldDoc, resolution: number): string {
+  return JSON.stringify([resolution, doc.settings.size, doc.settings.heightScale, doc.settings.seed, doc.layers, doc.erosion]);
+}
+
+/** The parts that decide the exported files: everything but the preview (and preview-only surface looks). */
+export function exportKey(doc: WorldDoc): string {
+  return JSON.stringify([doc.settings, doc.layers, doc.erosion, doc.water, doc.output, doc.surfaces.map(surfaceExportKey)]);
+}

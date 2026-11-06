@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { compileParticleCustomCode, customCodeKey, type CompiledCustomCode } from 'cleo'
 import GlslCodeEditor from '../nodeInspector/scriptEditor/GlslCodeEditor'
 import { Button } from '@cleo/app-kit/ui'
-import { ensureWgslTranslator } from '../../utils/wgslTranslator'
+import { ensureWgslTranslator } from '@cleo/app-kit/engine/wgslTranslator'
 
 // The custom-code module's editor: WGSL in, a validated compile out. The source runs only once Compile
 // has validated THIS text (see src/particles/particleCustomCode.ts) — so an edit in progress never

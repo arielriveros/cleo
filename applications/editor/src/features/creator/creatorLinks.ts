@@ -96,7 +96,16 @@ export const creatorIds = {
   texture: (cid: string, fileName: string) => `cr_${cid}_${slug(fileName.replace(/\.[a-z0-9]+$/i, ''))}`,
 }
 
-type StoredClipEvents = { name: string; events?: { time: number; name: string }[] }
+/**
+ * A World export's splatmaps (`<n>_splat_<k>.png`) and weightmaps (`<n>_weight_<ii>_<slug>.png`): data that
+ * Import world reads into a landscape's paint masks, not textures to register. The heightmap and the data
+ * masks stay textures.
+ */
+export function isWorldImportData(fileName: string): boolean {
+  return /_splat_\d+\.png$/i.test(fileName) || /_weight_\d+_.*\.png$/i.test(fileName)
+}
+
+type StoredClipEvents ={ name: string; events?: { time: number; name: string }[] }
 
 /**
  * Carry the events the project gave a Creator clip onto its next bake.

@@ -1,4 +1,4 @@
-// Noise for the Foliage Creator's textures and rock shapes.
+// Noise for the Creator's procedural textures (foliage, the World's surface materials) and rock shapes.
 //
 // Two families:
 //  - PERIODIC 2D (value noise, fBm, Worley) for tiling textures. A bark texture wraps around the trunk
@@ -74,6 +74,82 @@ export function worley2(seed: number, u: number, v: number, cellsX: number, cell
     if (d < f1) { f2 = f1; f1 = d; id = wy * cx + wx; } else if (d < f2) f2 = d;
   }
   return { f1, f2, id };
+}
+
+/**
+ * The PERIODIC families again, as samplers bound to one (seed, period) and read off precomputed lattice
+ * tables: the same values as `fbm2` / `worley2` (the tables hold exactly the lattice hashes those compute
+ * per sample, and Worley takes the same feature points), for a generator that samples one noise
+ * hundreds of thousands of times. Build the samplers once per generation, outside the per-texel loop.
+ */
+export class NoiseTables {
+  private readonly lattices = new Map<string, Float64Array>();
+
+  private lattice(seed: number, px: number, py: number, alt = false): Float64Array {
+    const key = `${seed}:${px}:${py}:${alt ? 1 : 0}`;
+    let t = this.lattices.get(key);
+    if (!t) {
+      t = new Float64Array(px * py);
+      const sd = alt ? seed ^ 0x5bd1e995 : seed;
+      for (let y = 0; y < py; y++) for (let x = 0; x < px; x++) t[y * px + x] = h2(sd, x, y);
+      this.lattices.set(key, t);
+    }
+    return t;
+  }
+
+  /** `(u, v) => fbm2(seed, u, v, cellsX, cellsY, octaves, gain)`. */
+  fbm(seed: number, cellsX: number, cellsY: number, octaves = 4, gain = 0.5): (u: number, v: number) => number {
+    const tables: Float64Array[] = [], pxs: number[] = [], pys: number[] = [], amps: number[] = [];
+    let amp = 1, norm = 0, cx = Math.max(1, Math.round(cellsX)), cy = Math.max(1, Math.round(cellsY));
+    for (let o = 0; o < octaves; o++) {
+      tables.push(this.lattice(seed + o * 1013, cx, cy)); pxs.push(cx); pys.push(cy); amps.push(amp);
+      norm += amp; amp *= gain; cx *= 2; cy *= 2;
+    }
+    const inv = 1 / norm;
+    return (u, v) => {
+      let sum = 0;
+      for (let o = 0; o < octaves; o++) {
+        const t = tables[o], px = pxs[o], py = pys[o];
+        const x = u * px, y = v * py;
+        const x0 = Math.floor(x), y0 = Math.floor(y);
+        const fx = smooth(x - x0), fy = smooth(y - y0);
+        let xa = x0 % px; if (xa < 0) xa += px;
+        let ya = y0 % py; if (ya < 0) ya += py;
+        const xb = xa + 1 === px ? 0 : xa + 1, rb = (ya + 1 === py ? 0 : ya + 1) * px, ra = ya * px;
+        sum += lerp(lerp(t[ra + xa], t[ra + xb], fx), lerp(t[rb + xa], t[rb + xb], fx), fy) * amps[o];
+      }
+      return sum * inv;
+    };
+  }
+
+  /**
+   * `(u, v) => worley2(seed, u, v, cellsX, cellsY)`. The returned record is the sampler's own and is
+   * overwritten by its next call: read what is needed before sampling again.
+   */
+  worley(seed: number, cellsX: number, cellsY: number): (u: number, v: number) => { f1: number; f2: number; id: number } {
+    const cx = Math.max(1, Math.round(cellsX)), cy = Math.max(1, Math.round(cellsY));
+    const ox = this.lattice(seed, cx, cy), oy = this.lattice(seed, cx, cy, true);
+    const cell = { f1: 0, f2: 0, id: 0 };
+    return (u, v) => {
+      const x = u * cx, y = v * cy;
+      const ix = Math.floor(x), iy = Math.floor(y);
+      let f1 = 1e9, f2 = 1e9, id = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const gy = iy + dy;
+        let wy = gy % cy; if (wy < 0) wy += cy;
+        for (let dx = -1; dx <= 1; dx++) {
+          const gx = ix + dx;
+          let wx = gx % cx; if (wx < 0) wx += cx;
+          const k = wy * cx + wx;
+          const ex = gx + ox[k] - x, ey = gy + oy[k] - y;
+          const d = Math.sqrt(ex * ex + ey * ey);
+          if (d < f1) { f2 = f1; f1 = d; id = k; } else if (d < f2) f2 = d;
+        }
+      }
+      cell.f1 = f1; cell.f2 = f2; cell.id = id;
+      return cell;
+    };
+  }
 }
 
 /** 3D value noise in [0, 1). */

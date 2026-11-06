@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react';
 import type { TextureKey } from '../buildFoliage';
 import type { FoliageBuild } from '../foliageClient';
 import type { FoliageDoc } from '../foliageParams';
-import type { Image } from '../textures/image';
+import type { Image } from '../../core/texture/image';
 import type { StageSettings } from './foliageStage';
 
 // The Foliage Creator workspace's shared state, read by every dock panel (FoliageWorkspace provides it).

@@ -7,14 +7,18 @@ import { setWgslTranslator, hasWgslTranslator, setParticleGlslTranslator, hasPar
  *
  * Two rules keep 1.3 MB of shader compiler out of the bundle: the import must keep `@vite-ignore` so the
  * browser resolves it at runtime rather than the bundler pulling it into the graph, and it must be
- * called on demand from the custom-material inspector rather than at boot. The artifact is emitted to
- * `naga/` by the `cleo:naga-assets` plugin in vite.config.ts, which also serves it in dev.
+ * called on demand (the editor's custom-material inspector, the Creator's World water) rather than at boot.
+ * The artifact is emitted to `<base>naga/` by the `cleo:naga-assets` plugin (app-kit vite.preset.ts),
+ * which also serves it in dev; every app that calls this registers that plugin with its own base.
  */
 
 let loading: Promise<boolean> | null = null
 
-/** Resolve a path against the page's base, so this works under a sub-path deployment. */
-const assetUrl = (file: string) => new URL(`naga/${file}`, document.baseURI).href
+/**
+ * Resolve against the app's base (the editor's `/`, the Creator's `/creator/`), so this works under a
+ * sub-path deployment whatever the page's own URL is.
+ */
+const assetUrl = (file: string) => new URL(`${import.meta.env.BASE_URL}naga/${file}`, document.baseURI).href
 
 async function load(): Promise<boolean> {
   try {

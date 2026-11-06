@@ -5,8 +5,8 @@
 // normal map are both read off that one field, so the colour and the relief always agree.
 
 import type { BarkPattern, Rgba } from '../foliageParams';
-import { fbm2, noiseSeed, worley2 } from '../noise';
-import { createImage, normalFromHeight, putLinear, rgb, type Image } from './image';
+import { fbm2, noiseSeed, worley2 } from '../../core/texture/noise';
+import { createImage, normalFromHeight, putLinear, rgb, type Image } from '../../core/texture/image';
 
 const smoothstep = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 

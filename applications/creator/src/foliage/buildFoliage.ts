@@ -17,8 +17,8 @@ import { boundsOf, triangles, vertices, type FoliageLevel, type MaterialKey, typ
 import { buildRock } from './rock';
 import { barkTextures } from './textures/bark';
 import { leafTextures } from './textures/leaves';
-import { ormMap } from './textures/orm';
-import { resample, type Image } from './textures/image';
+import { ormMap } from '../core/texture/orm';
+import { resample, type Image } from '../core/texture/image';
 import { buildSkeleton } from './tree/skeleton';
 import { treeLevels } from './tree/treeMesh';
 

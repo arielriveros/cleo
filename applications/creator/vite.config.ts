@@ -2,7 +2,7 @@ import { defineConfig, mergeConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'node:path'
 import engineConfig from '../../vite.config'
-import { appKitAlias, crossOriginIsolationPlugin } from '../app-kit/vite.preset'
+import { appKitAlias, crossOriginIsolationPlugin, nagaAssetsPlugin } from '../app-kit/vite.preset'
 import { floorSetsPlugin } from './vite.floors'
 
 const ENGINE_ROOT = path.resolve(__dirname, '../..')
@@ -20,7 +20,8 @@ export default defineConfig(({ mode }) => mergeConfig(engineConfig, {
   resolve: { alias: appKitAlias },
   // The same isolation as the editor, whose origin this is served on (see crossOriginIsolation).
   // The stage floors' PBR sets (build/terrain_textures): served in dev, copied into the build.
-  plugins: [crossOriginIsolationPlugin(), react(), floorSetsPlugin(path.join(ENGINE_ROOT, 'build', 'terrain_textures'))],
+  // naga (GLSL -> WGSL) for the World's water material on WebGPU, under /creator/naga/.
+  plugins: [crossOriginIsolationPlugin(), react(), floorSetsPlugin(path.join(ENGINE_ROOT, 'build', 'terrain_textures')), nagaAssetsPlugin('/creator/')],
   server: {
     // The editor owns 8080; a fixed second port so both can run side by side.
     port: 8081,

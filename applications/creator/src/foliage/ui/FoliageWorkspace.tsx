@@ -14,7 +14,7 @@ import type { Overrides, TextureKey } from '../buildFoliage';
 import { FoliageClient, type FoliageBuild } from '../foliageClient';
 import { exportFoliage } from '../exportFoliage';
 import { DEFAULT_DOC, KIND_LABELS, normaliseFoliage, type FoliageDoc, type FoliageKind } from '../foliageParams';
-import type { Image } from '../textures/image';
+import type { Image } from '../../core/texture/image';
 import { DEFAULT_STAGE, FoliageStage, patchOffsets, type LodView, type StageSettings } from './foliageStage';
 import { FoliageContext, type FoliageState, type TextureOverride } from './foliageContext';
 import { ExportPanel, FoliageStageExtra, LodPanel, MaterialsPanel, ParametersPanel } from './FoliagePanels';

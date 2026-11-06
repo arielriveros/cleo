@@ -11,7 +11,7 @@ that goes back to the home page. A reload keeps the tool that was open; a new wi
 
 | Tool | Makes | Exports |
 |---|---|---|
-| **World Creator** | Landscapes from landform layers and erosion | A 16-bit heightmap (PNG and RAW), slope/curvature/flow/wetness masks, and a JSON sidecar |
+| **[World Creator](world.md)** | Landscapes from landform layers and erosion, textured by rule-placed surfaces, with the sea and lakes | A 16-bit heightmap (PNG, RAW, optional EXR), RGBA splatmaps and per-surface weight maps, data masks, and a JSON manifest |
 | **FX Creator** | Fire, smoke and explosions from a volumetric fluid simulation, or liquids (splashes, pours) from a particle one | A tileset flipbook (RGBA atlas PNG), a `.tileset` asset, and a JSON sidecar with the particle flipbook settings; for a liquid, its floor decal (an animated colour, normal and ORM atlas) |
 | **Foliage Creator** | Grass clumps, bushes, trees and rocks from parameters, each with an LOD ladder and its materials | One `.glb` per level (textures embedded), impostor atlases for trees, and a JSON sidecar with the LOD distances |
 | **[Motion Creator](motion.md)** | Character animation from a few key poses: eased in-betweens, overlapping action, IK-planted hands and feet | An `.anim.json` clip with its skeleton, and a JSON sidecar |
@@ -65,7 +65,7 @@ writes (`untitled` on Scratch).
 |---|---|---|
 | **Foliage** | Each rebuild (about a second after an edit). A tree's impostor is re-baked once edits pause for 3 s, and the previous one is kept until then. | A model with its LOD levels and cull distance, a material per part (Bark, Leaves…), and for a tree the octahedral impostor, which a foliage rule made from the model starts with. |
 | **FX** | Each finished bake. With **Auto-bake** on, a saved asset re-bakes 1.5 s after an edit. | The flipbook (and six-way and motion maps) as textures, and a particle system drawing it. A liquid's floor decal comes as two decal materials: the settled pool, and its animated atlases; a decal using them stands at the sidecar's `outputs.decal.offset` from the effect's floor centre, `size` across. |
-| **World** | Once edits pause for 2 s, at full resolution. | The heightmap and the masks as textures. A landscape imports the heightmap at full precision with **Import heightmap ▸ From Creator**, and offers **Re-apply** when the world changes. |
+| **World** | Once edits pause for 2 s, at full resolution (an edit to how the preview looks only re-saves the document). | The data masks as textures. A landscape imports the world, heights and surfaces, with **Import world ▸ From Creator**: each surface maps onto a slot of the landscape's material. It offers **Re-apply** when the world's files change. |
 | **Motion** | Each re-bake (about a second after an edit), and when a library pose it uses changes. | An animation asset on its subject's rig. See [the Motion Creator](motion.md#in-the-editor). |
 | **Pose** | As it is edited in the Motion Creator's Pose tab. | A Pose asset on its subject's rig. |
 
@@ -98,8 +98,12 @@ on the renderer settings, as in the Editor.
 
 [Saved assets](#saved-assets) need none of this. For files downloaded with the output action:
 
-- **Heightmap:** in Landscape mode, import `world_height.png` (or `.r16`) and enter the **Min** and
-  **Max** heights from `world.json` (`minHeight`, `maxHeight`). The masks import as paint layers.
+- **World:** in a landscape's inspector, **Import world** takes the heightmap, the splat or weight
+  maps and the `.json` manifest (or the zip): it sets the height range and size from the manifest and
+  maps each surface onto a slot of the landscape's material. See
+  [Import world](../editor/terrain.md#import-world). A plain heightmap imports in Landscape mode with the
+  **Min** and **Max** heights from the manifest (`minHeight`, `maxHeight`); any other engine reads the
+  same files (see [World Creator ▸ Export](world.md#export)).
 - **Flipbook:** import `fx_flipbook.png` as a texture, then the `.tileset`; in a particle system's
   **Render** module set the texture to the tileset and copy `particleFlipbook` from `fx.json` into its
   flipbook settings (columns, rows, frames, FPS).

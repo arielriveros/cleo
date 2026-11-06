@@ -16,6 +16,17 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Surfaces, water and standard outputs in the World Creator.** A stack of surfaces (sand, grass,
+  rock, scree, snow...) placed by rules over the terrain's own values and what erosion did to it:
+  height, height above water, slope, aspect, curvature, cavity, flow area, wetness, water depth, shore
+  distance, deposits, wear, talus, other surfaces and noise, each a soft-edged band over a histogram of
+  its input. Four biome sets. The preview landscape uses the engine's own splat stack with generated
+  PBR preview materials, and draws the sea and auto-detected lakes with a large-water material; neither
+  is exported. The export writes industry-standard files: 16-bit PNG and RAW heights (optional 32-bit
+  EXR), RGBA splatmaps and per-surface weight maps whose weights sum to 255, data masks and a manifest.
+  The editor's **Import world** maps each surface onto a slot of a landscape's material (Add missing
+  slots creates them) and Re-apply follows the world's changes. The engine reads the files through
+  `decodePngChannels`, `readWorldManifest`, `weightPlanesFromImages` and `weightPlanesToAlphaPlanes`.
 - **Liquids in the FX Creator.** FX has a **Medium**: Gas (the voxel smoke and fire solver) or
   Liquid, a particle solver (double density relaxation) whose sheets tear into threads and beads by
   surface tension. Its own sections: Splash source (point, ball, nozzle disc or crown ring; burst or
