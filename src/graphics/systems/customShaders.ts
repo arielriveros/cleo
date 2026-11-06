@@ -325,6 +325,132 @@ const FORWARD_INTERFACE: PreludeInterface = {
     body: (dialect) => COMMON_BODY + LIGHTING_BODY(dialect) + FORWARD_SCENE_BODY,
 };
 
+/**
+ * The two inputs `cleoScreenReflection` marches with. Not in LIGHTING_UNIFORMS: see
+ * {@link FORWARD_REFLECTION_INTERFACE} for why only a material that calls it gets them.
+ */
+const SCREEN_REFLECTION_UNIFORMS: ValueDecl[] = [
+    { name: 'u_ssrProjection', type: 'mat4', comment: 'view -> clip, flipped to land on screen uvs (cleoScreenReflection)' },
+    { name: 'u_ssrParams', type: 'vec4', comment: 'x march steps, y thickness, z max distance, w 1 = reflections on' },
+];
+
+const SCREEN_REFLECTION_BODY = `
+// Explicit-LOD twins of cleoSceneViewDepth and cleoSceneColor. The march reads the scene inside a loop
+// and behind early returns, and WGSL refuses implicit-LOD sampling there ("must only be called from
+// uniform control flow") - the whole module, so on WebGPU the material would not draw at all.
+float _cleoReflectDepth(vec2 uv) {
+    float d = textureLod(u_sceneDepth, uv, 0.0).r;
+    float n = u_depthParams.x, f = u_depthParams.y;
+    float z = d * 2.0 - 1.0;
+    return 2.0 * n * f / (f + n - z * (f - n));
+}
+vec3 _cleoReflectColor(vec2 uv) { return textureLod(u_sceneColor, uv, 0.0).rgb; }
+
+/**
+ * Screen-space reflection off a transparent surface: march the world-space direction R from worldPos
+ * through this frame's opaque depth and return the opaque scene's colour where the ray lands. The same
+ * march as the engine's own reflections (shaders/wgsl/ssr.wgsl), driven by the renderer's Screen-Space
+ * Reflections settings — off there, off here.
+ *
+ * rgb = the reflected colour, linear HDR; a = how far to trust it, 0..1. Zero where the ray left the
+ * screen, ran behind something, reached the sky or reflections are off, so blend your own reflection
+ * (a probe cube, a sky colour) under it: mix(myReflection, ssr.rgb, ssr.a).
+ */
+vec4 cleoScreenReflection(vec3 worldPos, vec3 R) {
+    if (!cleoHasScene() || u_ssrParams.w < 0.5 || u_depthParams.z > 0.5) return vec4(0.0);
+    vec3 origin = (u_view * vec4(worldPos, 1.0)).xyz;
+    vec3 dir = normalize(mat3(u_view) * R);
+    float farPlane = u_depthParams.y;
+    float rayLen = u_ssrParams.z;
+    if (dir.z > 1e-5) rayLen = min(rayLen, (-u_depthParams.x - origin.z) / dir.z * 0.99);
+    if (rayLen <= 0.0) return vec4(0.0);
+    vec3 endP = origin + dir * rayLen;
+    vec4 h0 = u_ssrProjection * vec4(origin, 1.0);
+    vec4 h1 = u_ssrProjection * vec4(endP, 1.0);
+    float k0 = 1.0 / h0.w;
+    float k1 = 1.0 / h1.w;
+    vec2 res = max(u_resolution, vec2(1.0));
+    vec2 s0 = (h0.xy * k0 * 0.5 + 0.5) * res;
+    vec2 s1 = (h1.xy * k1 * 0.5 + 0.5) * res;
+    float q0 = origin.z * k0;
+    float q1 = endP.z * k1;
+    vec2 d = s1 - s0;
+    float fullLen = max(abs(d.x), abs(d.y));
+    if (fullLen < 1.0) return vec4(0.0);
+    float tEnd = 1.0;
+    if (d.x > 1e-6) tEnd = min(tEnd, (res.x - 0.5 - s0.x) / d.x);
+    if (d.x < -1e-6) tEnd = min(tEnd, (0.5 - s0.x) / d.x);
+    if (d.y > 1e-6) tEnd = min(tEnd, (res.y - 0.5 - s0.y) / d.y);
+    if (d.y < -1e-6) tEnd = min(tEnd, (0.5 - s0.y) / d.y);
+    tEnd = max(tEnd, 0.0);
+    float onScreen = fullLen * tEnd;
+    if (onScreen < 1.0) return vec4(0.0);
+    // Twice the deferred march's steps and no per-pixel jitter. A transparent surface is drawn after the
+    // TAA resolve, so nothing averages a jittered march back out: it would stay as grain on the water.
+    // Neighbouring pixels marching the same steps agree instead, and the bisection below still pins
+    // each hit between them.
+    int steps = int(clamp(u_ssrParams.x * 2.0, 1.0, 128.0));
+    float dt = max(1.0, onScreen / float(steps)) / fullLen;
+    float jitter = 0.5;
+    float prevT = 0.0;
+    float prevDepth = -1.0;
+    float tLo = 0.0;
+    float tHi = 0.0;
+    bool found = false;
+    for (int i = 0; i < 128; i++) {
+        if (i >= steps) break;
+        float t = (float(i) + 1.0 + jitter) * dt;
+        if (t > tEnd) break;
+        float rayDepth = -(mix(q0, q1, t) / mix(k0, k1, t));
+        float sceneDepth = _cleoReflectDepth((floor(s0 + d * t) + 0.5) / res);
+        float lo = prevDepth < 0.0 ? rayDepth : min(prevDepth, rayDepth);
+        float hi = max(prevDepth, rayDepth);
+        if (sceneDepth < farPlane * 0.999 && hi >= sceneDepth && lo <= sceneDepth + u_ssrParams.y) {
+            found = true;
+            tLo = prevT;
+            tHi = t;
+            break;
+        }
+        prevT = t;
+        prevDepth = rayDepth;
+    }
+    if (!found) return vec4(0.0);
+    for (int j = 0; j < 5; j++) {
+        float mid = 0.5 * (tLo + tHi);
+        float rayDepth = -(mix(q0, q1, mid) / mix(k0, k1, mid));
+        float sceneDepth = _cleoReflectDepth((floor(s0 + d * mid) + 0.5) / res);
+        if (sceneDepth < farPlane * 0.999 && rayDepth >= sceneDepth) tHi = mid; else tLo = mid;
+    }
+    vec2 hitUV = (floor(s0 + d * tHi) + 0.5) / res;
+    vec2 edge = clamp(min(hitUV, vec2(1.0) - hitUV) / 0.08, vec2(0.0), vec2(1.0));
+    vec3 hitPos = mix(origin * k0, endP * k1, tHi) / mix(k0, k1, tHi);
+    float fade = edge.x * edge.y
+               * (1.0 - smoothstep(0.75, 1.0, length(hitPos - origin) / u_ssrParams.z))
+               * (1.0 - smoothstep(0.4, 0.9, dir.z));
+    return vec4(_cleoReflectColor(hitUV), fade);
+}
+`;
+
+/**
+ * The forward prelude plus `cleoScreenReflection`, for a material whose source calls it.
+ *
+ * OPT-IN, and that is about saved materials, not cost. `compiledWgslHash` covers the whole assembled
+ * prelude, and a published game on WebGPU renders a custom material only from WGSL whose hash still
+ * matches (`webgpuHalf`). Adding these uniforms and this function to every forward material would have
+ * invalidated the stored translation of every one already saved — each would stop drawing on WebGPU
+ * until reopened in the editor. Materials that never name the helper assemble exactly as before.
+ */
+const FORWARD_REFLECTION_INTERFACE: PreludeInterface = {
+    ...FORWARD_INTERFACE,
+    uniforms: [...FORWARD_INTERFACE.uniforms, ...SCREEN_REFLECTION_UNIFORMS],
+    body: (dialect) => (COMMON_BODY + LIGHTING_BODY(dialect) + FORWARD_SCENE_BODY) + SCREEN_REFLECTION_BODY,
+};
+
+/** Whether a forward material's source uses the screen-space reflection helper. */
+function usesScreenReflection(fragmentSource: string): boolean {
+    return /\bcleoScreenReflection\b/.test(fragmentSource);
+}
+
 const FORWARD_EPILOGUE = `
 void main() {
     TBN = mat3(fragTangent, fragBitangent, fragNormal);
@@ -765,7 +891,8 @@ export function assembleCustomFragment(
     // All three modes go through the interface generator now, so one description produces both dialects
     // and there is no second copy of any prelude to drift.
     const iface = renderMode === 'screen' ? SCREEN_INTERFACE
-                : renderMode === 'deferred' ? DEFERRED_INTERFACE : FORWARD_INTERFACE;
+                : renderMode === 'deferred' ? DEFERRED_INTERFACE
+                : usesScreenReflection(fragmentSource) ? FORWARD_REFLECTION_INTERFACE : FORWARD_INTERFACE;
     const epilogue = renderMode === 'screen' ? SCREEN_EPILOGUE
                    : renderMode === 'deferred' ? DEFERRED_EPILOGUE : FORWARD_EPILOGUE;
 
@@ -1065,8 +1192,25 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
  * Retype naga's depth textures and fix up the reads: GLSL has one `sampler2D` whatever the format, so
  * naga emits `texture_2d<f32>` and WebGPU rejects the bind group. A WRAP, not a rename — `textureSample`
  * on a depth texture returns a bare `f32`, restored to `(d, 0, 0, 1)` as an ES driver would give it.
+ * An explicit level (`textureLod` in GLSL) arrives as an `f32`, and a depth texture takes only an
+ * integer one, so that argument is converted too.
  */
-function retypeDepthTextures(wgsl: string, names: readonly string[]): string {
+/** `f(a, b, c)` -> `f(a, b, i32(c))`, splitting on the call's own top-level commas. */
+function integerLastArgument(call: string): string {
+    const open = call.indexOf('(');
+    let depth = 0, lastComma = -1;
+    for (let i = open + 1; i < call.length - 1; i++) {
+        const ch = call[i];
+        if (ch === '(') depth++;
+        else if (ch === ')') depth--;
+        else if (ch === ',' && depth === 0) lastComma = i;
+    }
+    if (lastComma === -1) return call;
+    const arg = call.slice(lastComma + 1, call.length - 1).trim();
+    return `${call.slice(0, lastComma + 1)} i32(${arg}))`;
+}
+
+export function retypeDepthTextures(wgsl: string, names: readonly string[]): string {
     let out = wgsl;
     for (const name of names) {
         out = out.replace(new RegExp(String.raw`(var\s+${name}_t\s*:\s*)texture_2d<f32>`, 'g'),
@@ -1083,7 +1227,8 @@ function retypeDepthTextures(wgsl: string, names: readonly string[]): string {
                     else if (out[i] === ')' && --depth === 0) { end = i; break; }
                 }
                 if (end === -1) break;   // unbalanced: leave it alone and let the compiler say so
-                const call = out.slice(at, end + 1);
+                let call = out.slice(at, end + 1);
+                if (fn === 'textureSampleLevel') call = integerLastArgument(call);
                 const wrapped = `vec4<f32>(${call}, 0.0, 0.0, 1.0)`;
                 out = out.slice(0, at) + wrapped + out.slice(end + 1);
                 at += wrapped.length - call.length;

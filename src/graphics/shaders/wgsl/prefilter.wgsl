@@ -6,7 +6,8 @@
 #include "./chunks/cubeVertex.wgsl"
 #include "./chunks/importanceSample.wgsl"
 
-const SAMPLE_COUNT: u32 = 1024u;
+/** The loop bound. A bake asks for up to this many samples per texel (`u_sampleCount`). */
+const MAX_SAMPLE_COUNT: u32 = 1024u;
 
 @group(0) @binding(0) var u_envMap_texture: texture_cube<f32>;
 @group(0) @binding(1) var u_envMap_sampler: sampler;
@@ -15,6 +16,13 @@ struct PrefilterUniforms {
     u_roughness: f32,
     /** Source cube face resolution, for the firefly-reducing mip selection below. */
     u_resolution: f32,
+    /**
+     * Samples per texel, up to MAX_SAMPLE_COUNT. A probe bake takes all of them; the sky reflection,
+     * re-filtered whenever the sky moves, takes fewer — the mip selection below is what keeps that clean.
+     */
+    u_sampleCount: f32,
+    /** 1 when the source is an 8-bit sRGB cube (a skybox, the scene environment map): decode as read. */
+    u_decodeSrgb: f32,
 };
 @group(1) @binding(1) var<uniform> u_prefilter: PrefilterUniforms;
 
@@ -39,8 +47,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var prefiltered = vec3<f32>(0.0);
     var totalWeight = 0.0;
 
-    for (var i = 0u; i < SAMPLE_COUNT; i++) {
-        let xi = hammersley(i, SAMPLE_COUNT);
+    let sampleCount = u32(clamp(u_prefilter.u_sampleCount, 1.0, f32(MAX_SAMPLE_COUNT)));
+    for (var i = 0u; i < MAX_SAMPLE_COUNT; i++) {
+        if (i >= sampleCount) { break; }
+        let xi = hammersley(i, sampleCount);
         let h = importanceSampleGGX(xi, n, u_prefilter.u_roughness);
         let l = normalize(2.0 * dot(v, h) * h - v);
 
@@ -55,11 +65,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let pdf = d * nDotH / (4.0 * hDotV) + 0.0001;
 
             let saTexel = 4.0 * PI / (6.0 * u_prefilter.u_resolution * u_prefilter.u_resolution);
-            let saSample = 1.0 / (f32(SAMPLE_COUNT) * pdf + 0.0001);
+            let saSample = 1.0 / (f32(sampleCount) * pdf + 0.0001);
             var mipLevel = 0.5 * log2(saSample / saTexel);
             if (u_prefilter.u_roughness == 0.0) { mipLevel = 0.0; }
 
-            prefiltered += textureSampleLevel(u_envMap_texture, u_envMap_sampler, l, mipLevel).rgb * nDotL;
+            var c = textureSampleLevel(u_envMap_texture, u_envMap_sampler, l, mipLevel).rgb;
+            // The engine's own decode (chunks/tonemap.wgsl toLinear), so a skybox reflects the colour it draws.
+            if (u_prefilter.u_decodeSrgb > 0.5) { c = pow(c, vec3<f32>(2.2)); }
+            prefiltered += c * nDotL;
             totalWeight += nDotL;
         }
     }

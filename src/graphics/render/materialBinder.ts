@@ -6,6 +6,8 @@ import type { Scene } from '../../core/scene/scene';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { BindGroupCache } from './bindGroups';
+import { device } from '../rhi/deviceHandle';
+import { ViewProjection } from './viewProjection';
 
 /** What MaterialBinder reads from the renderer that owns it. */
 export interface MaterialBinderHost {
@@ -18,6 +20,11 @@ export interface MaterialBinderHost {
     sceneBuffersLive(): boolean;
     /** True while an offscreen thumbnail is being captured. */
     thumbnailMode(): boolean;
+    /**
+     * The screen-space reflection settings a forward material's `cleoScreenReflection` marches with:
+     * [steps, thickness, max distance, 1 = on].
+     */
+    ssrForward(): readonly number[];
 }
 
 /**
@@ -37,6 +44,7 @@ export class MaterialBinder {
     // ---- The shader optimizer (shaderOptimizer/) ----
     /** Which material each program's material block already holds; see MaterialSync. */
     public readonly sync = new MaterialSync();
+    private readonly _ssrProjection: mat4 = mat4.create();
 
     /** The per-view values riding in the material block, gathered for MaterialSync's comparison. */
     private readonly _materialView = new Float64Array(MATERIAL_VIEW_SIZE);
@@ -139,6 +147,13 @@ export class MaterialBinder {
             this._shaderManager.setUniform('u_resolution', [this._host.renderWidth(), this._host.renderHeight()]);
             this._shaderManager.setUniform('u_depthParams', [cam.near, cam.far,
                 cam.type === 'orthographic' ? 1 : 0, this._host.sceneBuffersLive() ? 1 : 0]);
+            // `cleoScreenReflection` projects onto the same screen uvs `cleoScreenUV` reads: GL's rows on
+            // WebGL2, flipped to WebGPU's where they run the other way (`ViewProjection.uvProducing`).
+            if (device.capabilities.conventions.originTopLeft)
+                mat4.multiply(this._ssrProjection, ViewProjection.FLIP_SCREEN_Y, cam.projectionMatrix);
+            else mat4.copy(this._ssrProjection, cam.projectionMatrix);
+            this._shaderManager.setUniform('u_ssrProjection', this._ssrProjection);
+            this._shaderManager.setUniform('u_ssrParams', this._host.ssrForward());
         }
         for (const u of material.uniforms) {
             if (u.type === 'sampler2D' || u.type === 'samplerCube') continue;   // the bind group's

@@ -6,7 +6,7 @@ import { IDENTITY_LUT_SIZE } from '../colorGrading';
 import { Framebuffer } from '../framebuffer';
 import { device } from '../rhi/deviceHandle';
 import { Texture } from '../texture';
-import { ProbePreviewProgram, IrradianceProgram, PrefilterProgram, PresentProgram } from './programs';
+import { ProbePreviewProgram, IrradianceProgram, PresentProgram } from './programs';
 import { SkyPasses } from './sky';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
@@ -151,17 +151,10 @@ export class Capture {
         this._sky.convolveCubeFaces('irradiance', IrradianceProgram, sourceCube, irradiance, 0,
                                 SkyPasses.IRRADIANCE_SIZE);
 
-        // Prefiltered specular (mip level encodes roughness).
+        // Prefiltered specular (mip level encodes roughness). The capture is linear HDR: no decode.
         const prefiltered = new Texture({ target: 'cubemap', precision: 'high', mipMap: true });
         prefiltered.createCubemapTarget(SkyPasses.PREFILTER_SIZE, SkyPasses.PREFILTER_MIPS);
-        for (let mip = 0; mip < SkyPasses.PREFILTER_MIPS; mip++) {
-            const mipSize = Math.max(1, Math.floor(SkyPasses.PREFILTER_SIZE * Math.pow(0.5, mip)));
-            const roughness = SkyPasses.PREFILTER_MIPS > 1 ? mip / (SkyPasses.PREFILTER_MIPS - 1) : 0;
-            this._sky.convolveCubeFaces('prefilter', PrefilterProgram, sourceCube, prefiltered, mip, mipSize, () => {
-                this._shaderManager.setUniform('u_roughness', roughness);
-                this._shaderManager.setUniform('u_resolution', sourceRes);
-            });
-        }
+        this._sky.prefilterInto(sourceCube, sourceRes, prefiltered);
 
         this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
         return { irradiance, prefiltered };

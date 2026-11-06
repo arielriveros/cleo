@@ -40,6 +40,7 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     foliageImpostorInstanced: 'feature', shadowMapImpostorInstanced: 'feature',
     tilemap: 'feature',
     ssil: 'feature', ssilTemporal: 'feature', ssilBlur: 'feature', ssilHistory: 'feature',
+    ssr: 'feature', ssrResolve: 'feature', ssrTemporal: 'feature',
     shadowMapSkinned: 'feature', shadowMapInstanced: 'feature', shadowMapInstancedCutout: 'feature',
     shadowMapCutout: 'feature', shadowMapSkinnedCutout: 'feature', shadowMapBasicCutout: 'feature',
     shadowMapBasicSkinnedCutout: 'feature',
@@ -221,6 +222,8 @@ export function usageFromRenderSettings(settings: Partial<RenderSettings> | null
     use.filters.add(filter);
     if (on('bloomEnabled', 'bloomEnabled')) add('bloom', 'bloomDownsample', 'bloomUpsample');
     if (on('ssaoEnabled', 'ssaoEnabled')) add('ssil', 'ssilTemporal', 'ssilBlur', 'ssilHistory');
+    // Reflections trace the same copy of last frame's light SSIL bounces, so they need its program too.
+    if (on('ssrEnabled', 'ssrEnabled')) add('ssr', 'ssrResolve', 'ssrTemporal', 'ssilHistory');
     if (on('autoExposureEnabled')) add('exposureMeter');
     if (on('dofEnabled')) add('dofCoc', 'dofGather', 'dofComposite');
     if (positive('lensFlareIntensity')) add('lensFlare', 'lensFlareComposite');

@@ -39,6 +39,7 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | cloud resolution / steps / light steps | 1.0 / 48 / 6 | 0.5 / 40 / 5 | 0.35 / 28 / 4 | 0.25 / 20 / 3 |
 | `ssaoEnabled` / `ssaoSamples` / `ssaoResolutionScale` | on / 64 / 1.0 | on / 24 / 0.5 | on / 16 / 0.5 | **off** / 16 / 0.5 |
 | `ssilEnabled` | on | on | off | off |
+| `ssrEnabled` / `ssrResolutionScale` / `ssrSteps` | on / 1.0 / 64 | on / 0.5 / 32 | **off** / 0.5 / 24 | **off** / 0.5 / 16 |
 | `shadowMapResolution` / `shadowCascades` | 4096 / 4 | 2048 / 3 | 1024 / 3 | 1024 / 2 |
 | `shadowFilterMode` / `shadowFilterRadius` | 1 / 2.0 | 0 / 1.0 | 0 / 1.0 | 0 / **0.0** |
 | `bloomEnabled` | on | on | on | off |
@@ -155,11 +156,12 @@ with a real aperture, so the near field blurs harder than the far field.
 
 Per-object motion blur can be suppressed on a node with `node.motionBlur = 'objectOnly' | 'none'`.
 
-## Ambient occlusion, indirect light and shading
+## Ambient occlusion, indirect light, reflections and shading
 
 The `ssao*` fields drive one screen-space pass, SSIL (screen-space indirect lighting with a visibility
 bitmask), which gives the ambient occlusion and, with `ssilEnabled`, one bounce of nearby light.
-The names predate it and are kept so saved settings still load.
+The names predate it and are kept so saved settings still load. The `ssr*` fields drive the
+screen-space reflections, which reflect the same copy of last frame's image SSIL bounces.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
@@ -172,6 +174,12 @@ The names predate it and are kept so saved settings still load.
 | `ssaoBias` | `number` | `0.025` | Samples nearer than this, in world units, are ignored, to stop a surface occluding itself. |
 | `ssaoSamples` | `number` | `24` | Per-pixel cost budget. The trace spends about two thirds of it in depth samples, split into directions and steps. |
 | `ssaoResolutionScale` | `number` | `0.5` | Buffer size as a fraction of the render size. |
+| `ssrEnabled` | `boolean` | preset | Screen-space reflections on deferred surfaces. Where a ray finds nothing, the light probe, then `Scene.environmentMap`, then the Sky Light's sky reflects. |
+| `ssrResolutionScale` | `number` | preset | Trace resolution as a fraction of the render size, `0.25`–`1`. |
+| `ssrSteps` | `number` | preset | March steps per ray across the screen, `8`–`128`. |
+| `ssrMaxRoughness` | `number` | `0.6` | Rougher surfaces than this reflect the environment alone; the screen's share fades out over the last `0.1`. |
+| `ssrMaxDistance` | `number` | `50` | How far a reflection ray travels, in world units. |
+| `ssrThickness` | `number` | `0.3` | How deep a surface is assumed to extend behind the depth buffer, in world units. |
 | `specularOcclusionEnabled` | `boolean` | `true` | Give the indirect specular lobe its own occlusion term. Off multiplies both lobes by the same number, which visibly strips the reflection off a polished floor in a corner. |
 | `specularAaEnabled` | `boolean` | `true` | Widen roughness by sub-pixel normal variance so highlights stop flickering. PBR and terrain only. |
 | `horizonOcclusionEnabled` | `boolean` | `true` | Drop indirect specular where the reflection ray points into the surface. This is the fix for the wet-looking rim on strongly normal-mapped surfaces at glancing angles. |

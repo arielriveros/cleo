@@ -7,8 +7,8 @@ import type { ExposureCurveKey } from '../lighting';
 /** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
 export type DebugView =
     'final' | 'scene' | 'albedo' | 'metallic' | 'normal' | 'roughness' |
-    'emissive' | 'ao' | 'depth' | 'ssao' | 'ssil' | 'shadow' | 'cascades' | 'bloom' | 'bloomMask' | 'mask' | 'velocity' |
-    'taaHistory' | 'overdraw';
+    'emissive' | 'ao' | 'depth' | 'ssao' | 'ssil' | 'ssr' | 'ssrConfidence' | 'shadow' | 'cascades' | 'bloom' |
+    'bloomMask' | 'mask' | 'velocity' | 'taaHistory' | 'overdraw';
 
 /** How much the CPU occlusion culling uses: nothing, the landscape, or the landscape and Occluder volumes. */
 export type OcclusionMode = 'off' | 'terrain' | 'all';
@@ -211,6 +211,22 @@ export interface RenderSettings {
     ssilEnabled: boolean;
     /** Scale on that bounce light. 1 is energy-correct; the occlusion itself is unaffected. */
     ssilIntensity: number;
+    /**
+     * Screen-space reflections: what is on screen reflected in glossy deferred surfaces, one GGX ray per
+     * pixel, with the light probes, the environment map and then the sky reflecting wherever a ray finds
+     * nothing. A quality-tier field. Absent = the tier's value (on at high and ultra).
+     */
+    ssrEnabled?: boolean;
+    /** Trace resolution as a fraction of the render size (0.25..1). A quality-tier field. Absent = the tier's. */
+    ssrResolutionScale?: number;
+    /** March steps per ray across the screen (8..128). A quality-tier field. Absent = the tier's. */
+    ssrSteps?: number;
+    /** Rougher surfaces than this (0..1) take the environment reflection alone. Absent = 0.6. */
+    ssrMaxRoughness?: number;
+    /** How far a reflection ray travels, world units. Absent = 50. */
+    ssrMaxDistance?: number;
+    /** How far behind its visible face a surface is assumed to extend, world units. Absent = 0.3. */
+    ssrThickness?: number;
     motionBlurEnabled: boolean;
     motionBlurIntensity: number;
     motionBlurSamples: number;
@@ -338,6 +354,10 @@ export interface QualityTier {
     ssaoResolutionScale: number;
     /** SSIL's bounce light on top of the AO (see RenderSettings.ssilEnabled). */
     ssilEnabled: boolean;
+    /** Screen-space reflections (see RenderSettings.ssrEnabled), their trace resolution and march steps. */
+    ssrEnabled: boolean;
+    ssrResolutionScale: number;
+    ssrSteps: number;
     shadowMapResolution: number;
     shadowCascades: number;
     /** 0 = 3x3 tap grid, 1 = 16-tap rotated Poisson. */
@@ -371,6 +391,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         renderScale: 1.0,
         cloudResolutionScale: 1.0, cloudSteps: 48, cloudLightSteps: 6,
         ssaoEnabled: true, ssaoSamples: 64, ssaoResolutionScale: 1.0, ssilEnabled: true,
+        ssrEnabled: true, ssrResolutionScale: 1.0, ssrSteps: 64,
         shadowMapResolution: 4096, shadowCascades: 4, shadowFilterMode: 1, shadowFilterRadius: 2.0,
         bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true, fxaaEnabled: false,
         particleLodDistanceScale: 1.5,
@@ -379,6 +400,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         renderScale: 1.0,
         cloudResolutionScale: 0.5, cloudSteps: 40, cloudLightSteps: 5,
         ssaoEnabled: true, ssaoSamples: 24, ssaoResolutionScale: 0.5, ssilEnabled: true,
+        ssrEnabled: true, ssrResolutionScale: 0.5, ssrSteps: 32,
         shadowMapResolution: 2048, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
         bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true, fxaaEnabled: false,
         particleLodDistanceScale: 1,
@@ -388,6 +410,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         cloudResolutionScale: 0.35, cloudSteps: 28, cloudLightSteps: 4,
         // AO alone: the bounce costs a normal and a radiance fetch per visible sample on top.
         ssaoEnabled: true, ssaoSamples: 16, ssaoResolutionScale: 0.5, ssilEnabled: false,
+        ssrEnabled: false, ssrResolutionScale: 0.5, ssrSteps: 24,
         shadowMapResolution: 1024, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
         // Kept at medium: one fullscreen resolve is cheap next to what this tier already spends on
         // clouds and shadows, and aliasing is the most visible artefact left at a reduced tier.
@@ -398,6 +421,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         renderScale: 0.75,
         cloudResolutionScale: 0.25, cloudSteps: 20, cloudLightSteps: 3,
         ssaoEnabled: false, ssaoSamples: 16, ssaoResolutionScale: 0.5, ssilEnabled: false,
+        ssrEnabled: false, ssrResolutionScale: 0.5, ssrSteps: 16,
         shadowMapResolution: 1024, shadowCascades: 2, shadowFilterMode: 0, shadowFilterRadius: 0.0,
         bloomEnabled: false, motionBlurEnabled: false, taaEnabled: false, fxaaEnabled: true,
         particleLodDistanceScale: 0.5,

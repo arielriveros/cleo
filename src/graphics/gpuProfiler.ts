@@ -44,6 +44,10 @@ export const RENDER_PASSES = [
     'ssao',
     'ssao.temporal',
     'ssao.blur',
+    // Screen-space reflections: the trace, the ray-sharing resolve and the temporal accumulation.
+    'ssr',
+    'ssr.resolve',
+    'ssr.temporal',
     'lighting',
     'sky',
     'clouds',
@@ -91,7 +95,7 @@ export type RenderPass = typeof RENDER_PASSES[number];
 
 /** Passes the profiler panel offers as on/off switches. Excludes any pass the image cannot do without. */
 export const TOGGLEABLE_PASSES: RenderPass[] = [
-    'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'decals', 'decals.emissive', 'ssao', 'ssao.temporal', 'ssao.blur', 'ssao.history', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
+    'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'decals', 'decals.emissive', 'ssao', 'ssao.temporal', 'ssao.blur', 'ssao.history', 'ssr', 'ssr.temporal', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
     'transparent', 'particles', '2d', 'gizmos', 'overlay', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
     'bloom.blur', 'bloom.composite', 'chromatic', 'screenMaterials',
     // `dof.coc` switches depth of field as a whole. Its other two passes report their own timings
@@ -116,6 +120,9 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     'ssao.temporal': 'ssao.temporal',
     'ssao.blur': 'ssao.blur',
     'ssao.history': 'ssao.history',
+    ssr: 'ssr',
+    'ssr.resolve': 'ssr.resolve',
+    'ssr.temporal': 'ssr.temporal',
     sky: 'sky',
     clouds: 'clouds',
     'clouds.resolve': 'clouds.resolve',
