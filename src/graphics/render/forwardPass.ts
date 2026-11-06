@@ -32,7 +32,7 @@ import type { FluidVolumePasses } from './fluids';
 import type { ParticlePasses } from './particlePasses';
 import type { Sprite2DPasses } from './sprites2d';
 import type { Visibility } from './visibility';
-import type { SsilPasses } from './ssil';
+import type { SceneRadianceCopy } from './sceneRadiance';
 import type { LightingPasses } from './lighting';
 import type { SkyPasses } from './sky';
 import { ShaderManager } from '../systems/shaderManager';
@@ -77,7 +77,7 @@ export class ForwardPass {
                 private readonly _particlePasses: ParticlePasses,
                 private readonly _sprites: Sprite2DPasses,
                 private readonly _visibility: Visibility,
-                private readonly _ssil: SsilPasses,
+                private readonly _radiance: SceneRadianceCopy,
                 private readonly _lighting: LightingPasses,
                 private readonly _sky: SkyPasses,
                 private readonly _modelDraw: ModelDraw,
@@ -202,8 +202,9 @@ export class ForwardPass {
         this._temporal.produceVelocity();
         this._temporal.taaResolvePass();
         this._projection.endJitterPhase();
-        // And the same image, reduced, as next frame's bounce light — before anything above is drawn.
-        this._ssil.ssilHistoryPass();
+        // And the same image, reduced, as next frame's bounce light and reflections — before anything
+        // above is drawn.
+        this._radiance.capture();
 
         // Smoke-and-fire volumes, over the resolved image like the transparents (a volume has no velocity
         // and animates every frame, so TAA history would only smear it), occluded by the depth snapshot.
@@ -248,7 +249,7 @@ export class ForwardPass {
         for (const node of queue) {
             const materials = node.model?.materials ?? [];
             for (const m of materials)
-                if (m instanceof CustomMaterial && m.renderMode === 'forward' && /\b(u_sceneColor|cleoSceneColor)\b/.test(m.fragmentSource))
+                if (m instanceof CustomMaterial && m.renderMode === 'forward' && /\b(u_sceneColor|cleoSceneColor|cleoScreenReflection)\b/.test(m.fragmentSource))
                     return true;
         }
         return false;
@@ -465,11 +466,13 @@ export class ForwardPass {
             (shaderType === 'blinn_phong' || shaderType === 'blinn_phongSkinned' ||
              shaderType === 'pbr' || shaderType === 'pbrSkinned' || shaderType.startsWith('custom:'))) {
             // Reflections are all the forward path takes from a probe; its lighting is the sky and ambient.
+            // Without a probe or an environment map, the sky light's prefiltered sky — linear, like a probe's.
             const probe = this._view.scene.probeForPoint(node.worldPosition, true);
             const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
-            const cube = probeCube ?? this._view.scene.environmentMap;
+            const linearCube = probeCube ?? (this._view.scene.environmentMap ? null : this._sky.skyReflectionCube);
+            const cube = linearCube ?? this._view.scene.environmentMap;
             this._shaderManager.setUniform('u_useEnvMap', cube ? true : false);
-            this._shaderManager.setUniform('u_envMapLinear', probeCube ? true : false);
+            this._shaderManager.setUniform('u_envMapLinear', linearCube ? true : false);
             // A group 0 entry: the material's bind group carries it.
             envCube = cube ?? null;
         }

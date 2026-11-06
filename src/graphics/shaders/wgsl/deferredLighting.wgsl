@@ -32,6 +32,11 @@ const AO_DEPTH_TOLERANCE: f32 = 0.02;
 // SSIL (ssil.wgsl): rgb = one bounce of nearby indirect light as E/pi, a = screen-space visibility.
 @group(0) @binding(8) var u_ssao_texture: texture_2d<f32>;
 @group(0) @binding(9) var u_ssao_sampler: sampler;
+// Screen-space reflections (ssr.ts): rgb = reflected light, normalised as a prefiltered cube is, and
+// a = the share of the reflection the screen answered. The 16th sampled texture of this pass — the
+// GLSL ES 3.00 guaranteed minimum, and so the last one (tests/deferredLightingSamplers.test.ts).
+@group(0) @binding(10) var u_ssr_texture: texture_2d<f32>;
+@group(0) @binding(11) var u_ssr_sampler: sampler;
 
 // --- IBL ----------------------------------------------------------------------------------------
 //
@@ -49,7 +54,9 @@ const AO_DEPTH_TOLERANCE: f32 = 0.02;
 @group(2) @binding(7) var u_prefiltered1_sampler: sampler;
 @group(2) @binding(8) var u_brdfLUT_texture: texture_2d<f32>;            // BRDF LUT, shared by both slots
 @group(2) @binding(9) var u_brdfLUT_sampler: sampler;
-// Fallback crude environment reflection (used where no probe volume applies)
+// The environment reflection where no probe volume applies: the scene's environment map (8-bit sRGB,
+// box-filtered mips) or, without one, the sky light's sky GGX-prefiltered (linear HDR, mip = roughness).
+// Which one is `u_envMapMode`.
 @group(2) @binding(10) var u_envMap_texture: texture_cube<f32>;
 @group(2) @binding(11) var u_envMap_sampler: sampler;
 
@@ -69,8 +76,12 @@ struct Lighting {
     u_sceneAmbient: vec3<f32>,
     u_probeBlend0: vec3<f32>,       // per-axis feather as a fraction of the unit cube (0 = hard edge)
     u_probeBlend1: vec3<f32>,
+    /** The sky light's intensity x tint, on the sky reflection (`u_envMapMode` 2). */
+    u_skyReflectionScale: vec3<f32>,
     /** One AO texel in this pass's UV space; (0,0) means the AO buffer is full resolution. */
     u_ssaoTexelSize: vec2<f32>,
+    /** The same for the SSR buffer. */
+    u_ssrTexelSize: vec2<f32>,
     // What each probe slot contributes: x = lighting (diffuse irradiance), y = reflections (specular),
     // each 0 or 1. See the probe blend in the fragment stage.
     u_probeLobes0: vec2<f32>,
@@ -84,12 +95,15 @@ struct Lighting {
     // i32 rather than bool: WGSL forbids bool in a uniform buffer.
     u_probeUnbounded0: i32,         // true = legacy whole-scene probe (weight 1 everywhere)
     u_probeUnbounded1: i32,
-    u_useEnvMap: i32,
+    /** 0 = no environment reflection, 1 = the scene environment map, 2 = the prefiltered sky. */
+    u_envMapMode: i32,
     u_ssaoEnabled: i32,
     /** 0 restores the pre-phase-4 behaviour of occluding both lobes by the same hemisphere term. */
     u_specularOcclusion: i32,
     /** 0 lets a normal-mapped surface keep reflecting the sky along rays that point into itself. */
     u_horizonOcclusion: i32,
+    /** Whether the SSR pass produced a result THIS frame (SsrPasses.ssrProducedThisFrame). */
+    u_ssrEnabled: i32,
 };
 @group(1) @binding(0) var<uniform> u_lighting: Lighting;
 
@@ -213,18 +227,17 @@ fn probeIBL(irr: texture_cube<f32>, irrSampler: sampler,
 }
 
 /**
- * Fetch SSIL (bounce in `.rgb`, visibility in `.a`), upsampling depth-aware when its buffer is smaller
- * than this pass. Disabled reads as no bounce and full visibility.
+ * Fetch a buffer smaller than this pass — SSIL's or SSR's — upsampling it depth-aware.
  *
- * A plain bilinear fetch blends the four nearest AO texels regardless of what geometry they belong to.
- * At half resolution that blends a foreground silhouette's AO into the background behind it and vice
- * versa, which reads as a halo hugging every object edge. Weighting each tap by how close its depth is
- * to this pixel's confines the blend to texels that are actually on the same surface; where none are (a
- * hard depth discontinuity) it falls back to the single nearest tap, which is aliased but correct
+ * A plain bilinear fetch blends the four nearest texels regardless of what geometry they belong to. At
+ * half resolution that blends a foreground silhouette's AO (or reflection) into the background behind it
+ * and vice versa, which reads as a halo hugging every object edge. Weighting each tap by how close its
+ * depth is to this pixel's confines the blend to texels that are actually on the same surface; where none
+ * are (a hard depth discontinuity) it falls back to the single nearest tap, which is aliased but correct
  * rather than smeared.
  *
- * Skipped entirely when the AO buffer is already full resolution — there is nothing to reconstruct, and
- * the hardware bilinear fetch is exact.
+ * Skipped entirely when the buffer is already full resolution (`texelSize` x <= 0) — there is nothing to
+ * reconstruct, and the hardware bilinear fetch is exact.
  */
 // `textureSampleLevel`, not `textureSample`: this helper is reached from a loop and from behind
 // an early return, which WGSL treats as NON-UNIFORM control flow - and implicit-LOD sampling is
@@ -232,13 +245,13 @@ fn probeIBL(irr: texture_cube<f32>, irrSampler: sampler,
 // only be called from uniform control flow". An invalid module means an invalid pipeline, and an
 // invalid pipeline draws nothing while its pass still clears. Explicit level 0 is exactly what the
 // implicit form resolved to anyway: every texture sampled here is screen-sized and un-mipped.
-fn sampleSSIL(uv: vec2<f32>, centerDepth: f32) -> vec4<f32> {
-    if (u_lighting.u_ssaoEnabled == 0) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
-    if (u_lighting.u_ssaoTexelSize.x <= 0.0) {
-        return textureSampleLevel(u_ssao_texture, u_ssao_sampler, uv, 0.0);   // full-res: nothing to do
+fn depthAwareUpsample(tex: texture_2d<f32>, smp: sampler, uv: vec2<f32>, centerDepth: f32,
+                      texelSize: vec2<f32>) -> vec4<f32> {
+    if (texelSize.x <= 0.0) {
+        return textureSampleLevel(tex, smp, uv, 0.0);   // full-res: nothing to do
     }
 
-    // The four SSIL texels surrounding this pixel, and the depths they were computed from.
+    // The four texels surrounding this pixel, and the depths they were computed from.
     var offsets = array<vec2<f32>, 4>(
         vec2<f32>(-0.5, -0.5), vec2<f32>(0.5, -0.5),
         vec2<f32>(-0.5,  0.5), vec2<f32>(0.5,  0.5),
@@ -246,12 +259,12 @@ fn sampleSSIL(uv: vec2<f32>, centerDepth: f32) -> vec4<f32> {
 
     var total = vec4<f32>(0.0);
     var weightSum = 0.0;
-    var nearest = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    var nearest = vec4<f32>(0.0);
     var nearestDelta = 1e9;
 
     for (var i = 0; i < 4; i++) {
-        let tapUV = uv + offsets[i] * u_lighting.u_ssaoTexelSize;
-        let tap = textureSampleLevel(u_ssao_texture, u_ssao_sampler, tapUV, 0.0);
+        let tapUV = uv + offsets[i] * texelSize;
+        let tap = textureSampleLevel(tex, smp, tapUV, 0.0);
         // Compare in linear-ish terms: raw device depth is wildly non-linear, so a fixed epsilon on it
         // would be far too strict near the camera and far too loose in the distance. Dividing by the
         // centre depth makes the tolerance relative, which behaves at both ends.
@@ -269,6 +282,21 @@ fn sampleSSIL(uv: vec2<f32>, centerDepth: f32) -> vec4<f32> {
     // rather than averaging across the edge.
     if (weightSum < 1e-4) { return nearest; }
     return total / weightSum;
+}
+
+/** SSIL: bounce in `.rgb`, visibility in `.a`. Disabled reads as no bounce and full visibility. */
+fn sampleSSIL(uv: vec2<f32>, centerDepth: f32) -> vec4<f32> {
+    if (u_lighting.u_ssaoEnabled == 0) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
+    return depthAwareUpsample(u_ssao_texture, u_ssao_sampler, uv, centerDepth, u_lighting.u_ssaoTexelSize);
+}
+
+/** SSR: reflected light in `.rgb`, its share in `.a`. Disabled reads as no share at all. */
+fn sampleSSR(uv: vec2<f32>, centerDepth: f32) -> vec4<f32> {
+    if (u_lighting.u_ssrEnabled == 0) { return vec4<f32>(0.0); }
+    let s = depthAwareUpsample(u_ssr_texture, u_ssr_sampler, uv, centerDepth, u_lighting.u_ssrTexelSize);
+    // One bad texel would otherwise be lit into the frame and then reflected again next frame.
+    let ok = all(s >= vec4<f32>(0.0)) && all(s.rgb <= vec3<f32>(6.0e4)) && s.a <= 1.0;
+    return select(vec4<f32>(0.0), s, ok);
 }
 
 @fragment
@@ -331,7 +359,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                           * surfaceAlbedo * (translucency * TRANSMISSION_AMBIENT);
     }
     indirect.specular = vec3<f32>(0.0);
-    if (u_lighting.u_useEnvMap != 0) {
+    if (u_lighting.u_envMapMode == 2) {
+        // The sky, GGX-prefiltered exactly as a probe's capture is (SkyPasses.updateSkyReflection), so it
+        // takes the probe's split-sum term and no roughness ramp: the blur is real here.
+        let NoV = max(dot(N, V), 0.0);
+        let R = reflect(-V, N);
+        let sky = textureSampleLevel(u_envMap_texture, u_envMap_sampler, R, roughness * MAX_REFLECTION_LOD).rgb;
+        let F = fresnelSchlickRoughness(NoV, F0, roughness);
+        let brdf = textureSampleLevel(u_brdfLUT_texture, u_brdfLUT_sampler, vec2<f32>(NoV, roughness), 0.0).rg;
+        indirect.specular = sky * u_lighting.u_skyReflectionScale * (F * brdf.x + brdf.y)
+                          * energyCompensation(F0, NoV, roughness);
+    } else if (u_lighting.u_envMapMode == 1) {
         let NoV = max(dot(N, V), 0.0);
         let R = reflect(-V, N);
         let env = textureSampleLevel(u_envMap_texture, u_envMap_sampler, R,
@@ -455,11 +493,30 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // of the specular lobe survives. One multiply here covers BOTH indirect specular sources — the
     // probe blend and the env fallback — which is why it is applied to the factor and not to either
     // term. The geometric normal is rebuilt from depth; see `geometricNormal`.
+    var horizon = 1.0;
     if (u_lighting.u_horizonOcclusion != 0) {
         let Ng = geometricNormal(uv, depth, worldPos);
-        specularAO *= horizonOcclusion(reflect(-V, N), Ng);
+        horizon = horizonOcclusion(reflect(-V, N), Ng);
     }
-    var color = indirect.diffuse * diffuseAO + indirect.specular * specularAO + Lo + emissive;
+    specularAO *= horizon;
+    var specular = indirect.specular * specularAO;
+
+    // Screen-space reflections, over whichever environment reflection the probe blend above settled on.
+    // The SSR light is already normalised the way a prefiltered cube is (see ssrResolve.wgsl), so it
+    // takes the very split-sum term `probeIBL` applies — the two cannot disagree about energy. Only the
+    // environment's share takes the specular occlusion: a ray that FOUND something has its occlusion in
+    // it already, and a corner's mirror reflection of the wall beside it is not darkened by that wall.
+    // Horizon occlusion is a statement about the ray direction rather than about nearby geometry, so it
+    // applies to both.
+    let ssr = sampleSSR(uv, depth);
+    if (ssr.a > 0.0) {
+        let NoV = max(dot(N, V), 0.0);
+        let F = fresnelSchlickRoughness(NoV, F0, roughness);
+        let brdf = textureSampleLevel(u_brdfLUT_texture, u_brdfLUT_sampler, vec2<f32>(NoV, roughness), 0.0).rg;
+        let ssrSpecular = ssr.rgb * (F * brdf.x + brdf.y) * energyCompensation(F0, NoV, roughness) * horizon;
+        specular = mix(specular, ssrSpecular, ssr.a);
+    }
+    var color = indirect.diffuse * diffuseAO + specular + Lo + emissive;
     // SSIL's bounce: the light the occluders above send back, in the directions `ssil.a` just took the
     // ambient away from — so this replaces what AO removed rather than adding on top of it. Diffuse
     // only, hence (1 - metallic); the material AO still applies, as it does to every indirect term.

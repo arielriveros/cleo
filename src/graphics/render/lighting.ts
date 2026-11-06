@@ -181,15 +181,17 @@ export class LightingPasses {
         // `u_envMapLinear` tells the shader which decode to apply.
         const probe = scene.probeForPoint(this._view.camera.position, true);
         const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
-        const envCube = probeCube ?? scene.environmentMap;
+        const linearCube = probeCube ?? (scene.environmentMap ? null : this._sys.sky.skyReflectionCube);
+        const envCube = linearCube ?? scene.environmentMap;
         for (const shaderName of this._forwardShaders()) {
             this._shaderManager.bind(shaderName);
             this._shaderManager.setUniform('u_useEnvMap', envCube ? true : false);
-            this._shaderManager.setUniform('u_envMapLinear', probeCube ? true : false);
+            this._shaderManager.setUniform('u_envMapLinear', linearCube ? true : false);
         }
     }
 
     private readonly _probeLobes: [number[], number[]] = [[1, 1], [1, 1]];
+    private readonly _skyReflectionScale: Float32Array = new Float32Array(3);
 
     public deferredLightingPass(scene: Scene, shadowLight: LightNode | null): void {
         const w = this._host.renderWidth, h = this._host.renderHeight;
@@ -208,11 +210,14 @@ export class LightingPasses {
         const pipeline = this._pipelines.fullscreen('deferredLighting', DeferredLightingProgram);
         pass.setPipeline(pipeline);
 
-        // Group 0: the G-buffer plus SSIL. SSIL always binds a complete texture even when disabled —
-        // the shader gates on u_ssaoEnabled, but the sampler still has to point somewhere valid.
+        // Group 0: the G-buffer plus SSIL and SSR. Both always bind a complete texture even when disabled —
+        // the shader gates on u_ssaoEnabled / u_ssrEnabled, but the sampler still has to point somewhere valid.
+        const ssr = this._sys.ssr;
+        const ssrLive = ssr.ssrProducedThisFrame && ssr.ssrResult !== null;
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
             this._targets.gBuffer.colors[0], this._targets.gBuffer.colors[1], this._targets.gBuffer.colors[2],
             this._targets.gBuffer.depth, (this._ssil.ssaoResult ?? this._ssil.ssaoBlurFBO).colors[0],
+            ssrLive ? ssr.ssrResult!.colors[0] : this._bindGroups.fallbackTexture,
         ]));
 
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
@@ -228,10 +233,20 @@ export class LightingPasses {
         pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline));
 
         // Split-sum IBL from up to 2 probe volumes, blended per pixel by feathered containment;
-        // uncovered pixels fall back to flat ambient plus the `u_envMap` reflection.
+        // uncovered pixels fall back to flat ambient plus the `u_envMap` reflection: the scene's
+        // environment map, else the sky light's sky, prefiltered (SkyPasses.updateSkyReflection).
         // EVERY sampler unit is assigned every frame, used or not — an unassigned cube sampler aliases
         // the 2D G-buffer sampler on unit 0, which is a draw-time type collision.
-        this._shaderManager.setUniform('u_useEnvMap', scene.environmentMap ? true : false);
+        const skyReflection = scene.environmentMap ? null : this._sys.sky.skyReflectionCube;
+        const skyLight = scene.skyLight;
+        this._shaderManager.setUniform('u_envMapMode', scene.environmentMap ? 1 : skyReflection ? 2 : 0);
+        if (skyReflection && skyLight) {
+            const k = skyLight.intensity, tint = skyLight.tint;
+            this._skyReflectionScale[0] = k * tint[0];
+            this._skyReflectionScale[1] = k * tint[1];
+            this._skyReflectionScale[2] = k * tint[2];
+            this._shaderManager.setUniform('u_skyReflectionScale', this._skyReflectionScale);
+        }
         const probes = scene.probesForFrame(this._view.camera.position, 2);
         this._shaderManager.setUniform('u_probeCount', probes.length);
 
@@ -247,7 +262,7 @@ export class LightingPasses {
         }
         pass.setBindGroup(2, this._bindGroups.textureGroup(pipeline, 2, [
             cubes[0], cubes[1], cubes[2], cubes[3],
-            this._sys.sky.brdfFBO.colors[0], scene.environmentMap ?? this._bindGroups.fallbackCube,
+            this._sys.sky.brdfFBO.colors[0], scene.environmentMap ?? skyReflection ?? this._bindGroups.fallbackCube,
         ]));
 
         for (let i = 0; i < 2; i++) {
@@ -273,6 +288,9 @@ export class LightingPasses {
         // resolution, which tells the shader to take the plain (and then exact) bilinear fetch.
         this._shaderManager.setUniform('u_ssaoTexelSize',
             this._ssil.ssaoResolutionScale >= 0.999 ? [0, 0] : [1 / this._ssil.ssaoWidth, 1 / this._ssil.ssaoHeight]);
+        this._shaderManager.setUniform('u_ssrEnabled', ssrLive);
+        this._shaderManager.setUniform('u_ssrTexelSize',
+            ssr.ssrResolutionScale >= 0.999 ? [0, 0] : [1 / ssr.ssrWidth, 1 / ssr.ssrHeight]);
 
         this._passes.drawFullscreen(pass);
         this._passes.endFullscreenPass(pass);

@@ -6,7 +6,9 @@
 //               with the mesh and any number of quads meet seamlessly.
 //   fresnel     Schlick at water's F0 (0.02, IOR 1.33): you see INTO the water looking down and a mirror
 //               at grazing angles.
-//   reflection  the light probe / environment cube when there is one, otherwise a sky gradient.
+//   reflection  what is on screen above the water (cleoScreenReflection: the trees, the banks, the
+//               houses), and the light probe / environment cube — otherwise a sky gradient — wherever
+//               the screen has nothing to show.
 //   sun glint   the engine's own GGX sun at low roughness, shadowed by the cascades.
 //   refraction  the opaque scene behind the water, offset by the wave normal and absorbed per channel
 //               by how much water the ray crosses (Beer-Lambert), fading to deepColor in the deep.
@@ -87,6 +89,12 @@ vec4 fragment() {
     if (u_useEnvMap) {
         vec3 e = textureLod(u_envMap, R, u_roughness * 4.0).rgb;
         reflection = u_envMapLinear ? e : toLinear(e);
+    }
+    // The screen's own image where it has one; the cube above where it does not. Seen from below the
+    // surface there is nothing to reflect.
+    if (!below) {
+        vec4 ssr = cleoScreenReflection(fragPos, R);
+        reflection = mix(reflection, ssr.rgb, ssr.a);
     }
     float F = below ? 0.0 : fresnelSchlick(NoV, vec3(0.02)).x;
     F = clamp(F * u_reflectivity, 0.0, 1.0);

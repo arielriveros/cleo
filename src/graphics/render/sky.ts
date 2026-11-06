@@ -18,7 +18,7 @@ import { nightFactor, moonDirection } from '../skyNight';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { VolumetricCloudPasses } from './clouds';
-import { BRDFProgram, SkyProjectProgram, SkyAtmosphereProgram, SkyFogProgram, SkyboxProgram, VolumetricCloudsProgram } from './programs';
+import { BRDFProgram, PrefilterProgram, SkyProjectProgram, SkyAtmosphereProgram, SkyFogProgram, SkyboxProgram, VolumetricCloudsProgram } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -162,7 +162,7 @@ export class SkyPasses {
     // Render a convolution shader (irradiance/prefilter) into all 6 faces of `target` at a mip level.
     public convolveCubeFaces(shaderName: string, reflection: { resources: readonly ShaderResource[] },
                                sourceCube: Texture, target: Texture, mip: number, size: number,
-                               perFace?: () => void): void {
+                               perFace?: () => void, faces: readonly number[] = SkyPasses._ALL_FACES): void {
         // One pass PER FACE, because a face is a different render target — the cube framebuffer
         // re-points its colour attachment at each one, and `createRenderTarget` dedupes them so six
         // faces cost six cached framebuffers rather than six per bake.
@@ -178,7 +178,7 @@ export class SkyPasses {
                                                                     target: faceTarget });
         this._shaderManager.setUniform('u_projection', this._projection.clipProjection(this._captureProj));
         if (perFace) perFace();
-        for (let face = 0; face < 6; face++) {
+        for (const face of faces) {
             const pass = this._passes.beginFullscreenPass(
                 this.cubeFBO.targetFor(target, face, mip, false, size),
                 'iblConvolve', true, [0, 0, 0, 1], false);
@@ -188,6 +188,110 @@ export class SkyPasses {
             this._passes.recordDraw(pass, this.iblCubeMesh, 0, 0);
             this._passes.endFullscreenPass(pass);
         }
+    }
+
+    /**
+     * GGX-prefilter `source` into `target`'s mip chain, where a mip's index is roughness x 4 (mip 0 a
+     * mirror, mip 4 fully rough) — the layout every reflection lookup samples with `roughness * 4`.
+     * `faces` limits the work to some faces, for a bake spread over several frames.
+     */
+    public prefilterInto(source: Texture, sourceRes: number, target: Texture,
+                         options: { samples?: number; decodeSrgb?: boolean; faces?: readonly number[] } = {}): void {
+        const samples = options.samples ?? SkyPasses.PREFILTER_SAMPLES;
+        const decode = options.decodeSrgb ? 1 : 0;
+        for (let mip = 0; mip < SkyPasses.PREFILTER_MIPS; mip++) {
+            const mipSize = Math.max(1, Math.floor(SkyPasses.PREFILTER_SIZE * Math.pow(0.5, mip)));
+            const roughness = SkyPasses.PREFILTER_MIPS > 1 ? mip / (SkyPasses.PREFILTER_MIPS - 1) : 0;
+            this.convolveCubeFaces('prefilter', PrefilterProgram, source, target, mip, mipSize, () => {
+                this._shaderManager.setUniform('u_roughness', roughness);
+                this._shaderManager.setUniform('u_resolution', sourceRes);
+                this._shaderManager.setUniform('u_sampleCount', samples);
+                this._shaderManager.setUniform('u_decodeSrgb', decode);
+            }, options.faces);
+        }
+        this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
+    }
+
+    /** GGX samples per texel for a light probe's prefiltered cube. */
+    public static readonly PREFILTER_SAMPLES = 1024;
+
+    // ---- Sky reflection ----------------------------------------------------------------------------
+    // The last tier of the reflection fallback: what a glossy surface reflects where no light probe
+    // covers it, the scene has no environment map, and screen-space reflection found nothing. It is the
+    // sky light's own source cube, GGX-prefiltered like a probe's, so a probe-less outdoor scene reflects
+    // its sky and clouds instead of black. Rebuilt on the sky light's re-projection cadence — whenever
+    // the atmosphere or cloud bake refreshes the sky, at most once a second — one face a frame into a
+    // back cube, so a moving sun never stalls a frame on a whole bake.
+
+    /** Samples per texel: the prefilter's mip selection keeps 256 clean on a sky's smooth gradients. */
+    private static readonly SKY_REFLECTION_SAMPLES = 256;
+    private static readonly SKY_REFLECTION_INTERVAL_MS = 1000;
+
+    private _skyReflectionCubes: (Texture | null)[] = [null, null];
+    private _skyReflectionFront = -1;
+    private _skyReflectionSource: Texture | null = null;
+    /** Set when the sky changed since the front cube was filtered; turned into a bake by the throttle. */
+    private _skyReflectionDirty = true;
+    private _skyReflectionAt = -Infinity;
+    private _skyReflectionBake: { cube: number; face: number } | null = null;
+
+    /** The sky reflection to sample, linear HDR with roughness in its mips; null without a Sky Light. */
+    public get skyReflectionCube(): Texture | null {
+        return this._skyReflectionFront >= 0 ? this._skyReflectionCubes[this._skyReflectionFront] : null;
+    }
+
+    /** Both cubes, for the memory estimate. */
+    public get skyReflectionCubes(): readonly (Texture | null)[] { return this._skyReflectionCubes; }
+
+    private _releaseSkyReflection(): void {
+        for (const cube of this._skyReflectionCubes) cube?.delete();
+        this._skyReflectionCubes = [null, null];
+        this._skyReflectionFront = -1;
+        this._skyReflectionSource = null;
+        this._skyReflectionBake = null;
+        this._skyReflectionDirty = true;
+    }
+
+    /** Start, continue or finish the sky reflection's prefilter. After the sky light, before the probes. */
+    public updateSkyReflection(scene: Scene): void {
+        if (this._view.capturing || this._host.thumbnailMode) return;
+        const source = scene.skyLight ? this._skySource(scene) : null;
+        if (!source) {
+            if (this._skyReflectionCubes[0] || this._skyReflectionCubes[1]) this._releaseSkyReflection();
+            return;
+        }
+        if (source.cube !== this._skyReflectionSource) {
+            this._skyReflectionSource = source.cube;
+            this._skyReflectionDirty = true;
+        }
+
+        const now = performance.now();
+        const fresh = this._skyReflectionFront < 0;
+        if (!this._skyReflectionBake && this._skyReflectionDirty
+            && (fresh || now - this._skyReflectionAt >= SkyPasses.SKY_REFLECTION_INTERVAL_MS)) {
+            const cube = fresh ? 0 : 1 - this._skyReflectionFront;
+            if (!this._skyReflectionCubes[cube]) {
+                const texture = new Texture({ target: 'cubemap', precision: 'high', mipMap: true });
+                texture.createCubemapTarget(SkyPasses.PREFILTER_SIZE, SkyPasses.PREFILTER_MIPS);
+                this._skyReflectionCubes[cube] = texture;
+            }
+            this._skyReflectionBake = { cube, face: 0 };
+            this._skyReflectionDirty = false;
+            this._skyReflectionAt = now;
+        }
+
+        const bake = this._skyReflectionBake;
+        if (!bake) return;
+        // The first bake is done whole: until it lands there is nothing to reflect at all. Later ones
+        // spread a face per frame over the back cube while the front one keeps reflecting.
+        const faces = fresh ? SkyPasses._ALL_FACES : [bake.face];
+        this.prefilterInto(source.cube, Math.max(1, source.cube.width), this._skyReflectionCubes[bake.cube]!, {
+            samples: SkyPasses.SKY_REFLECTION_SAMPLES, decodeSrgb: !source.linear, faces,
+        });
+        bake.face += faces.length;
+        if (bake.face < 6) return;
+        this._skyReflectionFront = bake.cube;
+        this._skyReflectionBake = null;
     }
 
     /**
@@ -455,8 +559,9 @@ export class SkyPasses {
         this._passes.generateMipsAfterRender(cube);
         node.markBaked(sun);
         // The sky light follows the sky. Nothing used to tell it to, so ambient froze at the first sun
-        // position; the re-projection is throttled because it is a readback.
+        // position; the re-projection is throttled because it is a readback. Its reflection follows too.
         this._skyLightReprojectPending = true;
+        this._skyReflectionDirty = true;
         this._clearSkyStale = true;
     }
 
@@ -733,6 +838,7 @@ export class SkyPasses {
         node.markBaked(bake.sun, bake.time, bake.signature);
         this._cloudSkyBake = null;
         this._skyLightReprojectPending = true;
+        this._skyReflectionDirty = true;
     }
 
     /**

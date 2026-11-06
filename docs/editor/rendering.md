@@ -28,8 +28,8 @@ in use is marked *running*; a WebGPU request that could not be met says why and 
 Blit one internal buffer instead of the final composite. This is the fastest way to answer "why does
 this look wrong":
 
-**Final, Lit Scene, Albedo, Metallic, Normal, Roughness, Emissive, AO, Depth, SSAO, Indirect, Shadow,
-Cascades, Bloom, Bloom Mask, Velocity, TAA History, Overdraw.**
+**Final, Lit Scene, Albedo, Metallic, Normal, Roughness, Emissive, AO, Depth, SSAO, Indirect,
+Reflections, Refl. Share, Shadow, Cascades, Bloom, Bloom Mask, Velocity, TAA History, Overdraw.**
 
 ![Final, Albedo, Normal and Cascades on the same view of the Valley](../media/debug-views.jpg)
 
@@ -40,6 +40,7 @@ it is multiplied by each surface's colour.
 |---|---|
 | A material that lights oddly | **Normal** — a normal map imported as sRGB is obvious here. |
 | Something too shiny or too flat | **Metallic**, **Roughness** |
+| A reflection that is missing or in the wrong place | **Reflections**, **Refl. Share** |
 | Shadows in the wrong place | **Shadow**, **Cascades** |
 | Bloom on the wrong things | **Bloom Mask** |
 | Ghosting or smearing | **Velocity**, **TAA History** |
@@ -357,6 +358,37 @@ emissive surface lighting what is next to it.
 It only sees what is on screen: light from something behind the camera, or hidden behind another
 object, is not bounced. Blinn-Phong, cel and custom forward materials neither receive it nor, being
 outside the G-buffer, occlude.
+
+### Screen-space reflections
+
+Glossy surfaces reflect what is on screen: a polished floor shows the pillars standing on it, wet
+stone shows the lamp above it, a metal panel shows the room. Each pixel traces one ray through the
+depth buffer, drawn from its material's real reflection lobe, so a rough surface's reflection stretches
+the way its highlight does instead of simply blurring. Rays are shared between neighbouring pixels and
+accumulated over frames, which is what turns one ray per pixel into a clean reflection.
+
+Where a ray finds nothing (it leaves the screen, runs behind something, or reaches the sky) the
+environment reflects instead: the light probe covering the surface, else the scene's
+[Environment Map](scene-authoring.md), else the sky of the scene's Sky Light. So a reflection fades
+into the probe's at the edge of the frame rather than ending in black. On in the High and Ultra
+presets; deferred PBR and landscape surfaces only.
+
+| Setting | What it does |
+|---|---|
+| **Enabled** | The whole pass. Off, reflections come from the probes and the environment alone. |
+| **Max Roughness** | Rougher surfaces than this trace nothing and keep the environment reflection, fading over the last 0.1. Rough reflections are blurred past recognising anyway, and are the noisiest to trace. |
+| **Max Distance** | How far, in world units, a ray travels before it gives up and the environment takes over. |
+| **Thickness** | How deep each surface is assumed to be behind what the depth buffer shows. Too thin and rays slip through thin objects; too thick and a reflection smears behind them. |
+| **Steps** | Samples along each ray. More catches thinner objects in long reflections; the cost is per glossy pixel. |
+| **Resolution** | **Half** traces a quarter of the pixels and filters back up; **Full** keeps mirror reflections sharp (the Ultra preset). |
+
+Like the indirect light, it reflects only what is on screen, and last frame's image of it: something
+behind the camera, or hidden behind another object, cannot appear in a reflection. Transparent
+surfaces, particles and sprites are not reflected. A transparent custom material can reflect the
+screen itself with `cleoScreenReflection` (see [Rendering](../scripting/rendering.md)), as the Valley's
+pond does. The **Reflections** channel shows the reflected
+light, and **Refl. Share** how much of each pixel's reflection the screen supplied (white) rather than
+the environment (black).
 
 ### Shading
 

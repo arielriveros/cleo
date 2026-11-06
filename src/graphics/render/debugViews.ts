@@ -17,6 +17,7 @@ import type { PostEffects } from './postEffects';
 import type { FoliagePasses } from './foliage';
 import type { ShadowPasses } from './shadows';
 import type { SsilPasses } from './ssil';
+import type { SsrPasses } from './ssr';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 
@@ -46,6 +47,7 @@ export class DebugViews {
                 private readonly _foliage: FoliagePasses,
                 private readonly _shadows: ShadowPasses,
                 private readonly _ssil: SsilPasses,
+                private readonly _ssr: SsrPasses,
                 private readonly _fullscreen: FullscreenPasses) {}
 
     // Editor "Renderer" debug view: which buffer to blit to the screen ('final' = normal image).
@@ -177,7 +179,7 @@ export class DebugViews {
             return;
         }
 
-        // mode: 0 passthrough RGB · 1 normal remap · 2 alpha->grayscale · 3 depth · 4 red->grayscale · 8 signed metallic
+        // mode: 0 passthrough RGB · 1 normal remap · 2 alpha->grayscale · 3 depth · 4 red->grayscale · 8 signed metallic · 9 black
         let tex: Texture;
         let mode = 0;
         switch (this.debugView) {
@@ -199,6 +201,17 @@ export class DebugViews {
             case 'ssao':      tex = (this._ssil.ssaoResult ?? this._ssil.ssaoBlurFBO).colors[0]; mode = 2; break;
             // The bounce light, before albedo, through the same exposure and curve as the image.
             case 'ssil':      tex = (this._ssil.ssaoResult ?? this._ssil.ssaoBlurFBO).colors[0]; mode = 6; break;
+            // What the lighting pass blends in: the reflected light, through the image's own curve, and the
+            // share of it the screen could answer (white = all of it, black = the environment's alone).
+            // Black while the pass has not run, rather than a stale result nobody is reading.
+            case 'ssr':
+                if (!this._ssr.ssrProducedThisFrame || !this._ssr.ssrResult) { tex = this._bindGroups.fallbackTexture; mode = 9; }
+                else { tex = this._ssr.ssrResult.colors[0]; mode = 6; }
+                break;
+            case 'ssrConfidence':
+                if (!this._ssr.ssrProducedThisFrame || !this._ssr.ssrResult) { tex = this._bindGroups.fallbackTexture; mode = 9; }
+                else { tex = this._ssr.ssrResult.colors[0]; mode = 2; }
+                break;
             case 'bloom':     tex = this._post.bloomMips[0].colors[0];  mode = 6; break;
             // The bloom-eligibility mask itself: the scene buffer's ALPHA, as greyscale. White blooms,
             // black cannot. Exists because "bloom does nothing" is otherwise indistinguishable between

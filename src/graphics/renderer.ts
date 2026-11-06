@@ -58,6 +58,9 @@ import { FoliagePasses } from './render/foliage';
 import { ShadowPasses } from './render/shadows';
 import { Visibility } from './render/visibility';
 import { SsilPasses } from './render/ssil';
+import { SsrPasses } from './render/ssr';
+import { SceneRadianceCopy } from './render/sceneRadiance';
+import { ssrStepCount } from './ssrSettings';
 import { LightingPasses } from './render/lighting';
 import { SkyPasses } from './render/sky';
 import { ModelDraw } from './render/modelDraw';
@@ -164,6 +167,10 @@ export class Renderer {
     private readonly _visibility: Visibility;
     /** Screen-space indirect light and ambient occlusion: trace, temporal accumulation, blur, radiance copy (render/ssil.ts). */
     private readonly _ssil: SsilPasses;
+    /** Screen-space reflections: trace, ray-sharing resolve, temporal accumulation (render/ssr.ts). */
+    private readonly _ssr: SsrPasses;
+    /** Last frame's lit opaque image, which SSIL bounces and SSR reflects (render/sceneRadiance.ts). */
+    private readonly _radiance: SceneRadianceCopy;
     /** The frame's lights: key light, clustered light grid, cloud grade, forward uploads, deferred lighting (render/lighting.ts). */
     private readonly _lighting: LightingPasses;
     /** The sky: IBL baking, light probes, the sky light's SH, atmosphere and cloud-sky bakes, sky draw and fog (render/sky.ts). */
@@ -286,6 +293,7 @@ export class Renderer {
             renderHeight: () => this._renderHeight,
             sceneBuffersLive: () => this._forward.sceneBuffersLive,
             thumbnailMode: () => this._thumbnailMode,
+            ssrForward: () => this._ssrForwardParams(),
         }, this._view, this._targets, this._bindGroups);
         this._projection = new ViewProjection({
             renderWidth: () => this._renderWidth,
@@ -342,12 +350,23 @@ export class Renderer {
             get selectedNodeId() { return renderer._selectedNodeId; },
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._subsystems);
-        this._ssil = new SsilPasses({
+        this._radiance = new SceneRadianceCopy({
             get jitteredCameraProj() { return renderer._jitteredCameraProj; },
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._temporal, this._fullscreen);
+            get radianceScale() { return renderer._radianceScale; },
+        }, this._view, this._targets, this._passes, this._projection, this._temporal, this._fullscreen);
+        this._ssil = new SsilPasses({
+            get jitteredCameraProj() { return renderer._jitteredCameraProj; },
+            get renderHeight() { return renderer._renderHeight; },
+            get renderWidth() { return renderer._renderWidth; },
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._radiance, this._fullscreen);
+        this._ssr = new SsrPasses({
+            get jitteredCameraProj() { return renderer._jitteredCameraProj; },
+            get renderHeight() { return renderer._renderHeight; },
+            get renderWidth() { return renderer._renderWidth; },
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._radiance, this._fullscreen);
         this._lighting = new LightingPasses({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
@@ -368,14 +387,14 @@ export class Renderer {
             get renderWidth() { return renderer._renderWidth; },
             get selectedNodeId() { return renderer._selectedNodeId; },
             get thumbnailMode() { return renderer._thumbnailMode; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._temporal, this._clouds, this._decals, this._fluids, this._particlePasses, this._sprites, this._visibility, this._ssil, this._lighting, this._sky, this._modelDraw, this._subsystems);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._temporal, this._clouds, this._decals, this._fluids, this._particlePasses, this._sprites, this._visibility, this._radiance, this._lighting, this._sky, this._modelDraw, this._subsystems);
         this._overlays = new EditorOverlays({
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._post, this._decals, this._sprites, this._fullscreen, this._modelDraw);
         this._debugViews = new DebugViews({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._temporal, this._post, this._foliage, this._shadows, this._ssil, this._fullscreen);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._temporal, this._post, this._foliage, this._shadows, this._ssil, this._ssr, this._fullscreen);
         this._capture = new Capture({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
@@ -392,9 +411,10 @@ export class Renderer {
             get renderWidth() { return renderer._renderWidth; },
             get objectTableBytes() { return renderer._objects.gpuBytes; },
         }, this._targets, this._temporal, this._post, this._clouds, this._decals, this._shadows, this._ssil, this._sky, this._debugViews,
-           this._fluids);
+           this._fluids, this._ssr, this._radiance);
         Object.assign(this._subsystems, {
             lighting: this._lighting,
+            ssr: this._ssr,
             sky: this._sky,
             shadows: this._shadows,
             visibility: this._visibility,
@@ -813,8 +833,10 @@ export class Renderer {
         // capture below, so a probe baked this frame sees the same sky the scene is lit by.
         this._sky.updateSkyLight(scene);
 
-        // Bake/refresh IBL (light probes + scene environment) before the main passes.
+        // Bake/refresh IBL (light probes + scene environment) before the main passes, and the sky
+        // reflection — the sky light's cube, prefiltered — that glossy surfaces fall back to.
         this._passes.scope('ibl.bake');
+        this._sky.updateSkyReflection(scene);
         this._sky.updateIBL(scene);
         this._passes.endScope();
 
@@ -1040,6 +1062,13 @@ export class Renderer {
             this._ssil.ssilPass();
             this._ssil.ssaoProducedThisFrame = true;
         }
+        // 1c. Screen-space reflections from the same G-buffer and the same copy of last frame's light.
+        //     Perspective cameras only: an orthographic view reflects along parallel rays the march does
+        //     not model, and the 2D scenes that use one have nothing glossy to reflect in.
+        this._ssr.ssrProducedThisFrame = false;
+        if (this._ssr.ssrEnabled && gBufferHasGeometry && this._view.camera.type !== 'orthographic'
+            && this._passes.beginPass('ssr'))
+            this._ssr.ssrProducedThisFrame = this._ssr.ssrPass();
         // 2. Light the G-buffer in a single fullscreen pass into the scene FBO.
         this._passes.scope('lighting');
         this._lighting.deferredLightingPass(scene, shadowLight);
@@ -1069,7 +1098,30 @@ export class Renderer {
         this._temporal.taaHistory.invalidate();
         this._fluids.fluidHistory.invalidate();
         this._ssil.ssilHistoryFrame = -1;
-        this._ssil.ssilRadianceFrame = -1;
+        this._ssr.invalidate();
+        this._radiance.invalidate();
+    }
+
+    private readonly _ssrForward: number[] = [0, 0, 0, 0];
+
+    /** What a forward material's `cleoScreenReflection` marches with: [steps, thickness, max distance, on]. */
+    private _ssrForwardParams(): readonly number[] {
+        const p = this._ssrForward, ssr = this._ssr;
+        p[0] = ssrStepCount(ssr.ssrSteps);
+        p[1] = Math.max(0.001, ssr.ssrThickness);
+        p[2] = Math.max(0.01, ssr.ssrMaxDistance);
+        p[3] = ssr.ssrEnabled && ssr.supported ? 1 : 0;
+        return p;
+    }
+
+    /**
+     * The resolution the copy of last frame's light is kept at: the largest any of its readers wants, or
+     * 0 when neither SSIL nor SSR runs (and the copy is then not taken at all).
+     */
+    private get _radianceScale(): number {
+        const ssil = this._ssil.ssaoEnabled ? this._ssil.ssaoResolutionScale : 0;
+        const ssr = this._ssr.ssrEnabled && this._ssr.supported && this._deferred ? this._ssr.ssrResolutionScale : 0;
+        return Math.max(ssil, ssr);
     }
 
     // --- Shared helpers ---------------------------------------------------------------------------
@@ -1834,6 +1886,36 @@ export class Renderer {
     public get ssaoBias(): number { return this._ssil.ssaoBias; }
     public set ssaoBias(bias: number) { this._ssil.ssaoBias = Math.max(0, bias); }
 
+    /** See {@link RenderSettings.ssrEnabled}. A quality-tier field, like `ssaoEnabled`. */
+    public get ssrEnabled(): boolean { return this._ssr.ssrEnabled; }
+    public set ssrEnabled(enabled: boolean) { this._ssr.ssrEnabled = !!enabled; }
+    /**
+     * False once the float-format guard has fired. Read-only: a property of the DEVICE, not a setting,
+     * so the editor's toggle keeps reading back what the user chose.
+     */
+    public get ssrSupported(): boolean { return this._ssr.supported; }
+    /** Trace resolution as a fraction of the render size. The targets size themselves on the next frame. */
+    public get ssrResolutionScale(): number { return this._ssr.ssrResolutionScale; }
+    public set ssrResolutionScale(scale: number) {
+        const clamped = clampFinite(scale, 0.25, 1, 0.5);
+        if (clamped === this._ssr.ssrResolutionScale) return;
+        this._ssr.ssrResolutionScale = clamped;
+        this._quality = 'custom';
+    }
+    public get ssrSteps(): number { return this._ssr.ssrSteps; }
+    public set ssrSteps(steps: number) {
+        const n = ssrStepCount(steps);
+        if (n === this._ssr.ssrSteps) return;
+        this._ssr.ssrSteps = n;
+        this._quality = 'custom';
+    }
+    public get ssrMaxRoughness(): number { return this._ssr.ssrMaxRoughness; }
+    public set ssrMaxRoughness(v: number) { this._ssr.ssrMaxRoughness = clampFinite(v, 0, 1, 0.6); }
+    public get ssrMaxDistance(): number { return this._ssr.ssrMaxDistance; }
+    public set ssrMaxDistance(v: number) { this._ssr.ssrMaxDistance = clampFinite(v, 0.5, 10000, 50); }
+    public get ssrThickness(): number { return this._ssr.ssrThickness; }
+    public set ssrThickness(v: number) { this._ssr.ssrThickness = clampFinite(v, 0.01, 10, 0.3); }
+
     /** See {@link RenderSettings.specularOcclusionEnabled}. */
     public get specularOcclusionEnabled(): boolean { return this._lighting.specularOcclusionEnabled; }
     public set specularOcclusionEnabled(on: boolean) { this._lighting.specularOcclusionEnabled = on; }
@@ -1987,6 +2069,9 @@ export class Renderer {
         this._ssil.ssaoEnabled = t.ssaoEnabled;
         this._ssil.ssaoSamples = t.ssaoSamples;
         this._ssil.ssilEnabled = t.ssilEnabled;
+        this._ssr.ssrEnabled = t.ssrEnabled;
+        this._ssr.ssrResolutionScale = t.ssrResolutionScale;
+        this._ssr.ssrSteps = t.ssrSteps;
         this._temporal.motionBlurEnabled = t.motionBlurEnabled;
         if (this._temporal.taaEnabled !== t.taaEnabled) {
             this._temporal.taaEnabled = t.taaEnabled;
@@ -2292,6 +2377,12 @@ export class Renderer {
             ssaoThickness: this._ssil.ssaoThickness,
             ssilEnabled: this._ssil.ssilEnabled,
             ssilIntensity: this._ssil.ssilIntensity,
+            ssrEnabled: this._ssr.ssrEnabled,
+            ssrResolutionScale: this._ssr.ssrResolutionScale,
+            ssrSteps: this._ssr.ssrSteps,
+            ssrMaxRoughness: this._ssr.ssrMaxRoughness,
+            ssrMaxDistance: this._ssr.ssrMaxDistance,
+            ssrThickness: this._ssr.ssrThickness,
             motionBlurEnabled: this._temporal.motionBlurEnabled,
             motionBlurIntensity: this._temporal.motionBlurIntensity,
             motionBlurSamples: this._temporal.motionBlurSamples,
@@ -2418,6 +2509,12 @@ export class Renderer {
         if (s.ssaoThickness !== undefined) this.ssaoThickness = s.ssaoThickness;
         if (s.ssilEnabled !== undefined) this.ssilEnabled = s.ssilEnabled;
         if (s.ssilIntensity !== undefined) this.ssilIntensity = s.ssilIntensity;
+        if (s.ssrEnabled !== undefined) this.ssrEnabled = s.ssrEnabled;
+        if (s.ssrResolutionScale !== undefined) this.ssrResolutionScale = s.ssrResolutionScale;
+        if (s.ssrSteps !== undefined) this.ssrSteps = s.ssrSteps;
+        if (s.ssrMaxRoughness !== undefined) this.ssrMaxRoughness = s.ssrMaxRoughness;
+        if (s.ssrMaxDistance !== undefined) this.ssrMaxDistance = s.ssrMaxDistance;
+        if (s.ssrThickness !== undefined) this.ssrThickness = s.ssrThickness;
         if (s.motionBlurEnabled !== undefined) this.motionBlurEnabled = s.motionBlurEnabled;
         if (s.motionBlurIntensity !== undefined) this.motionBlurIntensity = s.motionBlurIntensity;
         if (s.motionBlurSamples !== undefined) this.motionBlurSamples = s.motionBlurSamples;
