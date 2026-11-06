@@ -8,7 +8,7 @@
 
 import { DEFAULT_TREE, type BushParams, type TreeParams } from './foliageParams';
 import { add, cross, normalize, rotateAxis, type FoliageLevel, type V3 } from './mesh';
-import { stream } from './rng';
+import { stream } from '../core/texture/rng';
 import { bendLeafNormals, buildSkeleton, type LeafCard, type Skeleton, type Stem } from './tree/skeleton';
 import { treeLevels, type LodSpec } from './tree/treeMesh';
 

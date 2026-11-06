@@ -11,14 +11,15 @@
 
 import type { GenericParamSpec } from '@cleo/app-kit/params/ParamField';
 import type { MaterialKey } from './mesh';
+import type { Rgba } from '../core/texture/image';
 import { normaliseOverrides, type MaterialOverrides } from './materials';
 
 export type FoliageKind = 'grass' | 'rock' | 'tree' | 'bush';
 export type FoliageSide = 'material' | 'lod' | 'export';
 export interface FoliageGroup { title: string; specs: GenericParamSpec[]; side?: FoliageSide; material?: MaterialKey }
 
-/** [r, g, b, a], linear 0..1 -- what ParamForm's colour field edits. */
-export type Rgba = [number, number, number, number];
+/** [r, g, b, a], linear 0..1 (core/texture/image), re-exported for the foliage modules that read it from here. */
+export type { Rgba };
 
 // --- Grass ---------------------------------------------------------------------------------------
 

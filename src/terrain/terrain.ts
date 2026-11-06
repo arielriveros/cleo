@@ -1443,6 +1443,9 @@ export class Terrain {
             // `renderDensity` and `targetVertsPerTile` may be present in a blob saved while terrain
             // relief was geometry. They are ignored: the mesh is one vertex per height-grid point again.
             size: json.size, resolution: json.resolution, chunkQuads: json.chunkQuads,
+            // The stack saves its own mask resolution; without it here the masks would be resampled to
+            // the default on every load, losing a resolution chosen at Rebuild or by an import.
+            maskResolution: json.maskResolution ?? json.layerStack?.maskRes,
         }, material);
         // `heightsU16` / `splatData` are pre-decoded typed arrays supplied by the published-game loader
         // (which inflates them out of game.bin); `heights` / `splat` are the base64 form the editor saves.

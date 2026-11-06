@@ -471,6 +471,8 @@ export { applySculpt, brushWeight, curveWeight, readRegion, writeRegion, unionRe
 export type { SculptTool, FalloffCurve, BrushShape, BrushSpec, SculptParams, GridRegion, HeightGrid, StampAlpha } from "./terrain/sculpt";
 export { decodeHeightmap, decodePng, decodeRaw16, encodePng16, encodeRaw16, heightsFromImage, imageFromHeights, sampleHeight } from "./terrain/heightmapIO";
 export type { HeightImage, HeightImportOptions } from "./terrain/heightmapIO";
+export { decodePngChannels, weightsToOverAlphas, weightPlanesToAlphaPlanes, readWorldManifest, weightPlanesFromImages, resamplePlane } from "./terrain/splatmapIO";
+export type { DecodedPng, WorldManifest, WorldManifestLayer } from "./terrain/splatmapIO";
 export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush, TerrainChunk, TerrainLodSettings, FoliageGenerateResult } from "./terrain/terrain";
 export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES, FOLIAGE_DRAW_TRIANGLE_BUDGET, foliageEffectiveCull, foliageLodBands } from "./terrain/foliage";
 export type { FoliageKind, FoliageParams } from "./terrain/foliage";

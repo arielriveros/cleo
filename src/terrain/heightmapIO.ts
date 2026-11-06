@@ -56,16 +56,35 @@ function paeth(a: number, b: number, c: number): number {
 }
 
 /**
- * Decode a PNG to a single 0..1 channel: grey for greyscale, RED for colour (the channel heightmap tools
- * write), palette entries by their red. 1/2/4/8/16-bit, every colour type, NOT interlaced — Adam7 is
- * rare in heightmaps and is refused with a message rather than decoded wrong.
+ * A PNG's header and its unfiltered scanlines: what every decoder here reads pixels out of. `rows` holds
+ * `height` rows of `stride` bytes, samples packed as the file stores them (16-bit big-endian, sub-byte
+ * samples MSB first). Shared by {@link decodePng} (one 0..1 channel) and splatmapIO's
+ * `decodePngChannels` (every channel, at the source depth).
  */
-export async function decodePng(bytes: Uint8Array): Promise<HeightImage> {
+export interface PngRows {
+    width: number;
+    height: number;
+    bitDepth: number;
+    /** 0 grey, 2 RGB, 3 palette, 4 grey + alpha, 6 RGBA. */
+    colorType: number;
+    /** Samples per pixel as stored (1 for a palette index). */
+    channels: number;
+    stride: number;
+    rows: Uint8Array;
+    /** PLTE: RGB triplets. */
+    palette: Uint8Array | null;
+    /** tRNS: for a palette, one alpha byte per entry. */
+    transparency: Uint8Array | null;
+}
+
+/** Parse and unfilter a PNG. Every colour type and depth; interlaced files are refused. */
+export async function parsePng(bytes: Uint8Array): Promise<PngRows> {
     if (!isPng(bytes)) throw new Error('Not a PNG file');
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     let pos = 8;
     let width = 0, height = 0, bitDepth = 8, colorType = 0, interlace = 0;
     let palette: Uint8Array | null = null;
+    let transparency: Uint8Array | null = null;
     const idat: Uint8Array[] = [];
     while (pos + 8 <= bytes.length) {
         const length = view.getUint32(pos);
@@ -78,6 +97,7 @@ export async function decodePng(bytes: Uint8Array): Promise<HeightImage> {
             colorType = bytes[pos + 17];
             interlace = bytes[pos + 20];
         } else if (type === 'PLTE') palette = body;
+        else if (type === 'tRNS') transparency = body;
         else if (type === 'IDAT') idat.push(body);
         else if (type === 'IEND') break;
         pos += 12 + length;
@@ -117,7 +137,16 @@ export async function decodePng(bytes: Uint8Array): Promise<HeightImage> {
             rows[dst + x] = v & 255;
         }
     }
+    return { width, height, bitDepth, colorType, channels, stride, rows, palette, transparency };
+}
 
+/**
+ * Decode a PNG to a single 0..1 channel: grey for greyscale, RED for colour (the channel heightmap tools
+ * write), palette entries by their red. 1/2/4/8/16-bit, every colour type, NOT interlaced — Adam7 is
+ * rare in heightmaps and is refused with a message rather than decoded wrong.
+ */
+export async function decodePng(bytes: Uint8Array): Promise<HeightImage> {
+    const { width, height, bitDepth, colorType, channels, stride, rows, palette } = await parsePng(bytes);
     const data = new Float32Array(width * height);
     const maxValue = (1 << bitDepth) - 1;
     for (let y = 0; y < height; y++) {

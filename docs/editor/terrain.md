@@ -12,7 +12,8 @@ Landscape mode is only available in **3D scenes**.
 Two different places, and the split matters:
 
 - **Landscape** — the node's section in the inspector (Scene mode). It holds the terrain's
-  **structure**: size, resolution, chunk quads, paint resolution, and heightmap import/export.
+  **structure**: size, resolution, chunk quads, paint resolution, heightmap import/export, and
+  [Import world](#import-world).
   **Rebuild terrain** applies them, resampling the sculpted shape, the painted layers and the
   scattered foliage onto the new grid, so nothing authored is lost. Positioning uses the normal
   gizmo.
@@ -293,10 +294,8 @@ live on the landscape and applied as one undo step. **Cancel** puts the ground b
 painting and the foliage stay either way. A 16-bit file Cleo exported opens with its range already
 filled in.
 
-**From Creator ▾** — beside Import, when [Cleo Creator](../creator/index.md#saved-assets) has saved
-worlds: the world's 16-bit heightmap, with the range it was generated at filled in, into the same
-dialog. The landscape remembers the world; when it changes in the Creator, the inspector shows
-**Re-apply**, which opens the dialog again with the new heights. Nothing is replaced until you confirm.
+A world from [Cleo Creator](../creator/index.md#saved-assets), or any World export, comes in through
+[Import world](#import-world) instead: its heights and its surfaces together.
 
 Export writes 16-bit PNG or RAW R16 and records the range in the file name, so a round trip through
 an external tool keeps absolute heights. An 8-bit PNG export is normalised to the terrain's own range
@@ -304,6 +303,57 @@ and records none.
 
 > A 16-bit import is worth insisting on for large landscapes: 8 bits over a 300 m range quantizes
 > to about 1.2 m, which reads as terracing on any gentle slope.
+
+## Import world
+
+A World export — the heightmap, the splatmaps or weightmaps that say where each surface is, and the
+`.json` manifest — imported into a landscape in one step: the heights, and each world surface onto a
+**paint-only slot** of the landscape's material. The world brings no materials: its layers say *where*
+sand or rock is, and the landscape material's slots say what sand and rock look like.
+
+**From Creator ▾** — beside Import heightmap in the node inspector, when Cleo Creator has saved worlds:
+opens the dialog on that world, read at full precision straight from the Creator library.
+
+**Import world files** — the same dialog on files from disk: pick the heightmap, the splat or weight
+maps and the `.json` together, or the zip the Creator downloads. Any tool writing the same files and
+manifest works.
+
+The dialog:
+
+- **Lowest / Highest** — the heights a black and a white heightmap pixel map onto, filled in from the
+  manifest.
+- **Rotate / Flip** — turn the world; the heights and the surfaces turn together.
+- **Match world size** — on by default: Import rebuilds the landscape at the world's size, so a metre
+  there is a metre here. Resolution and paint resolution stay the landscape's. The rebuild is not
+  undoable, like **Rebuild terrain**; off, the world is stretched over the landscape as it is.
+- **Live preview** — the heights follow the settings on the landscape while the dialog is open; the
+  surfaces are written on Import. **Cancel** puts the ground back exactly.
+
+**Surfaces** — each world surface, topmost first, with its colour and how much of the world it covers,
+and where it goes: one of the landscape material's paint-only slots, the **Ground**, a **New paint
+slot**, or **Ignore**. Several surfaces on one slot add up; an ignored surface shows the Ground. The
+landscape draws exactly the world's surfaces when nothing else covers them.
+
+**Add missing slots** — gives every ignored surface a paint-only slot of its own, named after it and
+tinted with the world's colour until you choose its material in the landscape-material editor (✎).
+Grass and forest slots allow foliage. A landscape with no landscape material gets one; an embedded one
+is saved to the library first. Slots are added on Import, to the landscape material in the library, so
+every landscape painted with it gets them. Close that material's editor tab first: saving it afterwards
+would remove them.
+
+**Reset rules on mapped slots** — shown when a mapped slot's own rule (an elevation or slope test,
+noise, opacity, height blend) would reshape what the world painted. On Import it switches those off in
+the landscape material, keeping their numbers. The dialog also points out *automatic* slots that blend
+in by their rule above the imported surfaces and would cover them where the rule allows: make them
+paint-only if the world should decide.
+
+Import is one undo step for the heights and every mapped slot's painting. The **Match world size**
+rebuild and the edits to the landscape material are not part of it.
+
+**Re-apply** — a landscape remembers the Creator world it came from, with the mapping and orientation.
+When the world's exported files change (an edit only to how the Creator previews it does not count), the
+inspector offers **Re-apply**, which imports the new heights and surfaces again in one click; **Review…**
+opens the dialog first. A landscape that only ever took a world's heights opens the dialog.
 
 ## Physics
 

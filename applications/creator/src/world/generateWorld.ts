@@ -1,12 +1,11 @@
 // World Creator's generate(): evaluate the landform stack, run the erosion passes, derive the masks.
 // A deterministic function of the document (its settings carry the seed).
 
-import { encodePng16, encodeRaw16, imageFromHeights } from 'cleo/terrain/heightmapIO';
-import { encodePngGray8 } from '../core/png';
-import { SILENT_CONTEXT, sidecar, type ExportFile, type GenerateContext } from '../core/generator';
+import { SILENT_CONTEXT, type GenerateContext } from '../core/generator';
 import { applyLayer } from './features';
 import { dropletErosion, pipeErosion, thermalErosion, type PipeMasks, type PipeParams, type WorldFrame } from './erosion';
-import { computeMasks, MASK_KINDS, type WorldMasks } from './masks';
+import { computeMasks, type WorldMasks } from './masks';
+import type { ErosionHistory } from './fields';
 import type { WorldDoc } from './worldDoc';
 
 export interface WorldOutput {
@@ -14,6 +13,8 @@ export interface WorldOutput {
   /** Normalised heights (a fraction of heightScale), row-major, `resolution` squared. */
   heights: Float32Array;
   masks: WorldMasks;
+  /** What the erosion passes did to each cell, metres (the surfaces' Deposits, Wear and Talus). */
+  history: ErosionHistory;
   /** Which path the pipe erosion took, for the status line. */
   pipeBackend: 'gpu' | 'cpu' | null;
 }
@@ -53,8 +54,13 @@ export async function generateWorld(doc: WorldDoc, ctx: GenerateContext = SILENT
 
   let pipe: PipeMasks | null = null;
   let pipeBackend: WorldOutput['pipeBackend'] = null;
+  // Each pass's net change, split by what kind of pass made it: no erosion kernel needs to know.
+  const N = heights.length;
+  const history: ErosionHistory = { deposits: new Float32Array(N), wear: new Float32Array(N), talus: new Float32Array(N) };
+  const before = passes.length ? new Float32Array(N) : null;
   for (const pass of passes) {
     const c = sub(pass.kind);
+    before!.set(heights);
     switch (pass.kind) {
       case 'thermal': await thermalErosion(heights, frame, pass.params, c); break;
       case 'droplet': await dropletErosion(heights, frame, { ...pass.params, seed: pass.params.seed + doc.settings.seed * 1013 }, c); break;
@@ -63,40 +69,23 @@ export async function generateWorld(doc: WorldDoc, ctx: GenerateContext = SILENT
         else { pipe = await pipeErosion(heights, frame, pass.params, c); pipeBackend = 'cpu'; }
         break;
     }
+    const k = doc.settings.heightScale;
+    if (pass.kind === 'thermal') {
+      for (let i = 0; i < N; i++) { const d = heights[i] - before![i]; if (d > 0) history.talus[i] += d * k; }
+    } else {
+      for (let i = 0; i < N; i++) {
+        const d = heights[i] - before![i];
+        if (d > 0) history.deposits[i] += d * k; else if (d < 0) history.wear[i] -= d * k;
+      }
+    }
     step++;
   }
 
   ctx.progress(step / steps, 'Masks');
   const masks = computeMasks(heights, frame, pipe);
   ctx.progress(1, 'Done');
-  return { frame, heights, masks, pipeBackend };
+  return { frame, heights, masks, history, pipeBackend };
 }
 
-/**
- * The export bundle: a 16-bit PNG and a RAW16 of the heights (normalised over their own range, which the
- * sidecar records), one 8-bit PNG per mask, and `world.json` with everything needed to import the
- * heightmap at the right scale -- the Editor's landscape import takes the min/max heights from it.
- */
-export async function exportWorld(out: WorldOutput, doc: WorldDoc, name = 'world'): Promise<ExportFile[]> {
-  const res = out.frame.resolution;
-  const { image, min, max } = imageFromHeights(out.heights, res);
-  const files: ExportFile[] = [
-    { name: `${name}_height.png`, mime: 'image/png', bytes: await encodePng16(image) },
-    { name: `${name}_height.r16`, mime: 'application/octet-stream', bytes: encodeRaw16(image) },
-  ];
-  for (const kind of MASK_KINDS)
-    files.push({ name: `${name}_${kind}.png`, mime: 'image/png', bytes: await encodePngGray8(res, res, out.masks[kind]) });
-  const meta = sidecar('world', doc, doc.settings.seed, {
-    resolution: res,
-    size: out.frame.size,
-    // World heights of a 0 and a 1 sample, for the import dialog's Min/Max fields.
-    minHeight: min * out.frame.heightScale,
-    maxHeight: max * out.frame.heightScale,
-    seaLevel: doc.settings.seaLevel * out.frame.heightScale,
-    files: files.map(f => f.name),
-    orientation: 'row 0 is the -Z edge, column 0 the -X edge (the engine heightmap convention)',
-  });
-  meta.name = `${name}.json`;
-  files.push(meta);
-  return files;
-}
+// The export lives in exportWorld.ts; re-exported so existing callers keep their import.
+export { exportWorld } from './exportWorld';

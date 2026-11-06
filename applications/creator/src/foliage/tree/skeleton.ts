@@ -14,8 +14,8 @@
 
 import type { CrownShape, TreeParams } from '../foliageParams';
 import { add, cross, dot, length, normalize, perpendicular, rotateAxis, scale, sub, type V3 } from '../mesh';
-import { fbm3, noiseSeed } from '../noise';
-import { stream, type Rng } from '../rng';
+import { fbm3, noiseSeed } from '../../core/texture/noise';
+import { stream, type Rng } from '../../core/texture/rng';
 
 export interface Stem {
   level: number;

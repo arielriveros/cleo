@@ -8,8 +8,9 @@
 //            Creator's octahedral impostor, which a foliage rule made from the model starts with;
 //   fx       the flipbook atlases as textures, and a particle system drawing the flipbook; for a liquid
 //            with a floor decal, two decal materials too: the settled pool, and its animated atlases;
-//   world    the heightmap and the masks as textures (a landscape imports the heightmap at full
-//            precision through Import heightmap ▸ From Creator).
+//   world    the heightmap and the masks as textures. The splat and weight maps stay in the library: a
+//            landscape reads them, with the heightmap at full precision, through Import world (the
+//            Landscape inspector's From Creator ▾).
 //   character  a rigged model uploaded to the Creator: one `.anim` per clip it keeps (renamed there), on
 //            its skeleton's rig. The model itself is not imported -- the editor imports models with + Add --
 //            but any model on the same skeleton plays the clips.
@@ -48,7 +49,7 @@ import type { AnimationAsset, StoredClip, StoredSkin } from '../../utils/animati
 import type { RigAsset } from '../../utils/rigAssets'
 import type { PoseAsset } from '../../utils/poseAssets'
 import {
-  creatorFolder, creatorIds, keepClipEvents, planCreatorSync, REMOVED_FOLDER, type CreatorLink, type CreatorLinks,
+  creatorFolder, creatorIds, isWorldImportData, keepClipEvents, planCreatorSync, REMOVED_FOLDER, type CreatorLink, type CreatorLinks,
 } from './creatorLinks'
 import { pinKey, setCreatorPins } from './creatorPins'
 
@@ -365,7 +366,10 @@ export class CreatorSync {
   // --- world --------------------------------------------------------------------------------------
 
   private async upsertWorld(meta: CreatorAssetMeta, files: CreatorFile[], prev: CreatorLink | undefined): Promise<CreatorLink | null> {
-    const pngs = files.filter(f => f.mime === 'image/png')
+    // The splat and weight maps are not textures anyone draws with: Import world reads them straight
+    // from the library into a landscape's paint masks. Registered, they would be 4-16 more large images
+    // in every project, each re-uploaded on every re-sync.
+    const pngs = files.filter(f => f.mime === 'image/png' && !isWorldImportData(f.name))
     if (!pngs.length) return null
     const folder = creatorFolder('world', meta.name)
     const textureIds: string[] = []

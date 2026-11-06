@@ -1,11 +1,12 @@
-// The texture plumbing every foliage texture shares: an RGBA8 image, colour conversion, a triangle
+// The texture plumbing every procedural texture shares (foliage, the World's surface materials): an RGBA8 image, colour conversion, a triangle
 // rasterizer (for baking into a mesh's UV layout and for drawing card pictures), push-pull colour
 // dilation under cutout alpha, and a height-to-normal filter.
 //
 // Images are rows top to bottom, straight alpha, sRGB colour: what PNG stores and what glTF expects of
 // a base-colour texture. Parameters arrive LINEAR (ParamForm's colour field), so they are encoded here.
 
-import type { Rgba } from '../foliageParams';
+/** [r, g, b, a], linear 0..1 -- what ParamForm's colour field edits. */
+export type Rgba = [number, number, number, number];
 
 export interface Image {
   width: number;

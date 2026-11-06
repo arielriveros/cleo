@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CreatorAssetMeta } from '@cleo/app-kit/creatorLibrary';
-import { creatorFolder, creatorIds, keepClipEvents, planCreatorSync, type CreatorLinks } from '../src/features/creator/creatorLinks';
+import { creatorFolder, creatorIds, isWorldImportData, keepClipEvents, planCreatorSync, type CreatorLinks } from '../src/features/creator/creatorLinks';
 import { isCreatorPath } from '../src/features/creator/creatorPins';
 import { reconcileVfs, type LibSnapshot } from '../src/utils/vfs';
 import { impostorBillboardOf } from '../src/utils/foliageRules';
@@ -377,5 +377,29 @@ describe('FX Creator liquids', () => {
     const after = systems[0].system.emitters[0].render;
     expect(after.textureId).toBe(creatorIds.texture('fx_hg', 'flipbook'));
     expect([after.normalTextureId, after.ormTextureId, after.metallic]).toEqual([null, null, 0]);
+  });
+});
+
+describe('Creator worlds', () => {
+  it('register the heightmap and the data masks as textures, but not the splat and weight maps Import world reads', async () => {
+    const { CreatorSync } = await import('../src/features/creator/creatorSync');
+    const sync = new CreatorSync({ isUsed: () => false, texturesChanged: () => {} } as any) as any;
+    const put: string[] = [];
+    sync.putTexture = async (_id: string, f: { name: string }) => { put.push(f.name); };
+    sync.dropTextures = async () => {};
+    sync.publishPins = () => {};
+    const png = (name: string) => ({ name, mime: 'image/png', blob: new Blob() });
+    const files = ['world_height.png', 'world_slope.png', 'world_splat_0.png', 'world_splat_1.png',
+                   'world_weight_00_grass.png', 'world_weight_03_forest-floor.png'].map(png);
+    files.push({ name: 'world.json', mime: 'application/json', blob: new Blob() });
+    const link = await sync.upsertWorld(meta({ id: 'world_v', kind: 'world', name: 'Valley' }), files, undefined);
+    expect(put).toEqual(['world_height.png', 'world_slope.png']);
+    expect(link.textureIds).toEqual([creatorIds.texture('world_v', 'world_height.png'), creatorIds.texture('world_v', 'world_slope.png')]);
+  });
+
+  it('tell import data from textures by name alone', () => {
+    expect(['valley_splat_2.png', 'valley_weight_12_snow.png', 'X_WEIGHT_01_A.PNG'].every(isWorldImportData)).toBe(true);
+    // A mask or a heightmap whose world happens to be called "splat" or "weight" is still a texture.
+    expect(['splat_height.png', 'weight_slope.png', 'world_wetness.png', 'world_splat.png', 'world_weight_x.png'].some(isWorldImportData)).toBe(false);
   });
 });

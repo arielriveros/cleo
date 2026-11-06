@@ -1,4 +1,4 @@
-// Seeded randomness for the Foliage Creator.
+// Seeded randomness for the Creator's generators (first written for the Foliage Creator).
 //
 // Every random choice draws from a STREAM keyed by what it decides -- (seed, 'branch', level, index),
 // (seed, 'leaf', stem, k) -- rather than from one sequence consumed in order. With a single sequence,

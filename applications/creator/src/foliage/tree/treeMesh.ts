@@ -20,7 +20,7 @@
 
 import type { TreeParams } from '../foliageParams';
 import { add, cross, dot, length, MeshBuilder, normalize, perpendicular, scale, sub, type FoliageLevel, type FoliagePart, type V3 } from '../mesh';
-import { fbm3, noiseSeed, ridged3 } from '../noise';
+import { fbm3, noiseSeed, ridged3 } from '../../core/texture/noise';
 import { atlasCell } from '../textures/leaves';
 import { levelImperfections, type LeafCard, type Skeleton, type Stem } from './skeleton';
 

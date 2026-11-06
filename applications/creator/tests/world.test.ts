@@ -151,12 +151,14 @@ describe('world export', () => {
     const out = await generateWorld(doc);
     const files = await exportWorld(out, doc);
     const names = files.map(f => f.name);
-    expect(names).toEqual(['world_height.png', 'world_height.r16', 'world_slope.png', 'world_curvature.png', 'world_flow.png', 'world_wetness.png', 'world.json']);
+    // The classic files keep their order; the surfaces' splat and weight maps follow; the sidecar is last.
+    expect(names.slice(0, 6)).toEqual(['world_height.png', 'world_height.r16', 'world_slope.png', 'world_curvature.png', 'world_flow.png', 'world_wetness.png']);
+    expect(names.at(-1)).toBe('world.json');
 
     const png = await decodePng(files[0].bytes);
     expect(png.width).toBe(33);
     expect(png.bitDepth).toBe(16);
-    const meta = JSON.parse(new TextDecoder().decode(files[6].bytes));
+    const meta = JSON.parse(new TextDecoder().decode(files.at(-1)!.bytes));
     const span = meta.output.maxHeight - meta.output.minHeight;
     for (let i = 0; i < out.heights.length; i += 37) {
       const world = meta.output.minHeight + png.data[i] * span;

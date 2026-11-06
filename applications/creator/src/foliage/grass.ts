@@ -11,9 +11,9 @@
 
 import type { GrassParams } from './foliageParams';
 import { MeshBuilder, normalize, cross, rotateAxis, type FoliageLevel, type FoliagePart, type V3 } from './mesh';
-import { fbm2, noiseSeed } from './noise';
-import { stream } from './rng';
-import { createImage, dilateColor, mixRgb, putLinear, rasterTriangle, rgb, scaleRgb, type Image } from './textures/image';
+import { fbm2, noiseSeed } from '../core/texture/noise';
+import { stream } from '../core/texture/rng';
+import { createImage, dilateColor, mixRgb, putLinear, rasterTriangle, rgb, scaleRgb, type Image } from '../core/texture/image';
 
 const VARIANTS = 4;
 const DRY_VARIANT = 3;

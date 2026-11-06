@@ -8,7 +8,7 @@ export type Tool = AppId | 'home';
 
 /** The Creator's apps, in the order the home page lists them. */
 export const APPS: { id: AppId; label: string; description: string }[] = [
-  { id: 'world', label: 'World Creator', description: 'Landscape heightmaps from landforms and erosion' },
+  { id: 'world', label: 'World Creator', description: 'Landscapes from landforms and erosion, textured by rule-placed surfaces' },
   { id: 'fx', label: 'FX Creator', description: 'Fire and smoke flipbooks from a volumetric fluid simulation' },
   { id: 'foliage', label: 'Foliage Creator', description: 'Grass, bushes, rocks and trees with LODs, exported as glTF' },
   { id: 'motion', label: 'Motion Creator', description: 'Character animation from a few key poses, exported as an .anim clip' },

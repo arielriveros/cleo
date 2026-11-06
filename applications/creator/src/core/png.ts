@@ -65,6 +65,11 @@ export function encodePngGray8(width: number, height: number, values: ArrayLike<
   return encode(width, height, 1, px);
 }
 
+/** 8-bit greyscale from bytes, as they are. */
+export function encodePngGray8Bytes(width: number, height: number, bytes: Uint8Array): Promise<Uint8Array> {
+  return encode(width, height, 1, bytes);
+}
+
 /** RGBA8, rows top to bottom, straight (not premultiplied) alpha. */
 export function encodePngRgba8(width: number, height: number, rgba: Uint8Array): Promise<Uint8Array> {
   return encode(width, height, 4, rgba);

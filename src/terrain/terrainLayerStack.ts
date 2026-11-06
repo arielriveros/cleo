@@ -11,6 +11,7 @@ import {
 } from './terrainLayers';
 import { MaskGrid, type MaskPaint, type MaskRegion, type MaskPatch } from './terrainMasks';
 import { TerrainSurfaceArrays, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from './terrainSurfaceArrays';
+import { resamplePlane } from './splatmapIO';
 
 // A landscape's layer stack: the BASE layer (one landscape material, covering everything) and the PAINT
 // layers over it (each a landscape material plus a painted mask), with the GPU resources that draw them.
@@ -363,6 +364,20 @@ export class TerrainLayerStack {
             this._masks.writePatch(p);
             this._markMaskDirty(p.channel, p.region);
         }
+    }
+
+    /**
+     * Replace a whole mask from one byte plane (`srcRes`² texels, texel-centred, row 0 at -Z): resampled
+     * to this stack's mask resolution and written through the dirty-tracked path, so it uploads on the next
+     * sync. `id` is a paint-only base slot's (or a paint layer's). False when it has no channel or `data`
+     * is not `srcRes`².
+     */
+    public writeChannel(id: string, data: Uint8Array, srcRes: number): boolean {
+        const channel = this.channelOf(id);
+        if (channel === undefined || srcRes < 1 || data.length !== srcRes * srcRes) return false;
+        const res = this._masks.resolution;
+        this.writeMaskPatches([{ channel, region: this._masks.fullRegion(), data: resamplePlane(data, srcRes, res) }]);
+        return true;
     }
 
     /** Mask value of a layer at landscape-local x/z, 0..1. */

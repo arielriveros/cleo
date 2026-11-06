@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AliasOptions, Connect, Plugin } from 'vite';
 
@@ -44,3 +46,45 @@ export function crossOriginIsolationPlugin(): Plugin {
   };
 }
 
+
+const NAGA_DIR = fileURLToPath(new URL('../../src/graphics/rhi/webgpu/naga/', import.meta.url));
+const NAGA_MIME: Record<string, string> = { '.js': 'text/javascript', '.wasm': 'application/wasm' };
+
+/**
+ * The vendored naga WASM (GLSL <-> WGSL), loaded on demand by app-kit's engine/wgslTranslator for custom
+ * shaders on WebGPU. Kept in the engine's tree rather than duplicated into each app's public/, so the
+ * repository keeps one copy, and OUT of the module graph so only users who need it download 1.3 MB of
+ * shader compiler. Served and emitted under `<base>naga/`: the editor's base is `/`, the Creator's
+ * `/creator/` (it is served under the editor's origin, and alone on its own port, at that same path).
+ */
+export function nagaAssetsPlugin(base = '/'): Plugin {
+  const prefix = `${base.endsWith('/') ? base : base + '/'}naga/`;
+  return {
+    name: 'cleo:naga-assets',
+
+    // Dev: serve <base>naga/* straight off disk. Registered inside configureServer (not the returned
+    // post-hook) so it runs BEFORE Vite's transform and SPA-fallback middlewares -- otherwise a request
+    // for nagaGlsl.js would come back as the app's index.html with a 200.
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = req.url?.split('?')[0];
+        if (!url?.startsWith(prefix)) return next();
+        const file = path.join(NAGA_DIR, decodeURIComponent(url.slice(prefix.length)));
+        if (!file.startsWith(NAGA_DIR)) { res.statusCode = 403; return res.end('Forbidden'); }
+        let body: Buffer;
+        try { body = readFileSync(file); } catch { return next(); }
+        // WebAssembly.instantiateStreaming refuses anything that is not application/wasm.
+        res.setHeader('Content-Type', NAGA_MIME[path.extname(file)] ?? 'application/octet-stream');
+        res.end(body);
+      });
+    },
+
+    // Build: emit verbatim under a fixed name (relative to the build's base). As `type: 'asset'`, never a
+    // module -- nagaGlsl.js is fetched at runtime by a `/* @vite-ignore */` dynamic import and must not
+    // be rewritten or hashed.
+    generateBundle() {
+      for (const name of readdirSync(NAGA_DIR))
+        this.emitFile({ type: 'asset', fileName: `naga/${name}`, source: readFileSync(path.join(NAGA_DIR, name)) });
+    },
+  };
+}

@@ -1,9 +1,14 @@
-// World Creator presets. Each is a whole document, so picking one replaces the stack; the seed stays
-// the artist's, which is how a preset becomes a family of variations.
+// World Creator presets. Each is a whole document; picking one replaces the terrain (landforms, erosion,
+// settings) but keeps the artist's seed and surfaces, which is how a preset becomes a family of
+// variations. A fresh document of a preset starts with the surfaces that suit it.
 
 import type { Preset } from '../core/generator';
-import { defaultErosion, defaultLayer, DEFAULT_SETTINGS, type ErosionPass, type WorldDoc } from './worldDoc';
+import { defaultErosion, defaultLayer, DEFAULT_SETTINGS, worldExtras, type ErosionPass, type WorldDoc } from './worldDoc';
+import { BIOME_SETS, type BiomeId } from './surfaces/presets';
 import type { WorldLayer } from './features';
+
+/** The version-2 parts with the surfaces of `biome` (what a fresh document of this preset starts with). */
+const extras = (biome: BiomeId) => ({ ...worldExtras(), surfaces: BIOME_SETS.find(b => b.id === biome)!.make() });
 
 function layer<K extends WorldLayer['kind']>(kind: K, patch: Partial<Extract<WorldLayer, { kind: K }>>): WorldLayer {
   return { ...(defaultLayer(kind) as Extract<WorldLayer, { kind: K }>), ...patch };
@@ -15,6 +20,7 @@ function layer<K extends WorldLayer['kind']>(kind: K, patch: Partial<Extract<Wor
  */
 export function coastalRange(): WorldDoc {
   return {
+    ...extras('temperate'),
     settings: { ...DEFAULT_SETTINGS },
     layers: [
       layer('noise', { name: 'Base relief', fractal: 'fbm', scale: 3, octaves: 6, amplitude: 0.22, offset: 0.12, warp: 0.6 }),
@@ -31,6 +37,7 @@ export function coastalRange(): WorldDoc {
 
 export function rollingHills(): WorldDoc {
   return {
+    ...extras('temperate'),
     settings: { ...DEFAULT_SETTINGS, heightScale: 220 },
     layers: [
       layer('noise', { name: 'Hills', fractal: 'billow', scale: 3.5, octaves: 5, gain: 0.45, amplitude: 0.55, warp: 0.8 }),
@@ -43,6 +50,7 @@ export function rollingHills(): WorldDoc {
 
 export function alpineMassif(): WorldDoc {
   return {
+    ...extras('alpine'),
     settings: { ...DEFAULT_SETTINGS, heightScale: 1800 },
     layers: [
       layer('noise', { name: 'Ranges', fractal: 'ridged', scale: 2.5, octaves: 8, gain: 0.55, amplitude: 0.85, warp: 0.5 }),
@@ -55,6 +63,7 @@ export function alpineMassif(): WorldDoc {
 
 export function mesaDesert(): WorldDoc {
   return {
+    ...extras('desert'),
     settings: { ...DEFAULT_SETTINGS, heightScale: 350, seaLevel: 0 },
     layers: [
       layer('noise', { name: 'Ground', fractal: 'fbm', scale: 2, octaves: 5, amplitude: 0.25, warp: 1.2 }),
