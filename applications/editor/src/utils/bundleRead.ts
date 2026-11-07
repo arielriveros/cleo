@@ -102,7 +102,8 @@ export async function readBundle(src: BundleSource): Promise<ReadBundleResult> {
     // A v2 bundle without its blob is truncated, not empty; importing it yields a project of empty meshes.
     if (!index || !blob) throw new Error('Bundle is missing assets.bin');
     await inflateBundleAssets(bundle, blob, index);
-    return { bundle, transfer: [...bundle.textures.map(t => t.bytes), ...(bundle.audio ?? []).map(a => a.bytes)] };
+    return { bundle, transfer: [...bundle.textures.map(t => t.bytes), ...(bundle.audio ?? []).map(a => a.bytes),
+                                ...(bundle.giBakes ?? []).map(g => g.bytes)] };
   }
 
   // --- Format 1: one payload file per texture -----------------------------------------------------

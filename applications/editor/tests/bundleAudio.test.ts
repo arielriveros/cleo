@@ -206,3 +206,14 @@ describe('planMerge — audio', () => {
     expect(plan.soundSamples[0].settings.bus).toBe('music');
   });
 });
+
+describe('assets.bin round-trip — GI Volume bakes', () => {
+  it('restores each bake byte for byte, and reads an older bundle as having none', async () => {
+    const out = await roundTrip(bundleWith({ giBakes: [{ id: 'gi-a', bytes: bytes(333, 7) }, { id: 'gi-b', bytes: bytes(40, 3) }] }));
+    expect(out.giBakes!.map(g => g.id)).toEqual(['gi-a', 'gi-b']);
+    expect(new Uint8Array(out.giBakes![0].bytes)).toEqual(new Uint8Array(bytes(333, 7)));
+    expect(new Uint8Array(out.giBakes![1].bytes)).toEqual(new Uint8Array(bytes(40, 3)));
+    const none = await roundTrip(bundleWith());
+    expect(none.giBakes).toEqual([]);
+  });
+});
