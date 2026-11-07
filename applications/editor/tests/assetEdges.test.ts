@@ -329,6 +329,22 @@ describe('edgesOfAsset', () => {
       const asset = { id: 'ts', name: 'ts', textureId: 'atlas', textureIds: ['atlas'] }
       expect(shape(edgesOfAsset('tileset', asset))).toEqual(['texture:atlas@textureId'])
     })
+
+    it('points at its lighting maps, each under its own field', () => {
+      const asset = {
+        id: 'ts', name: 'ts', textureId: 'atlas', normalTextureId: 'n', ormTextureId: 'orm',
+        sixWayPositiveTextureId: 'p', sixWayNegativeTextureId: 'm', textureIds: ['atlas', 'p', 'm', 'n', 'orm'],
+      }
+      expect(shape(edgesOfAsset('tileset', asset))).toEqual([
+        'texture:atlas@textureId', 'texture:m@sixWayNegativeTextureId', 'texture:n@normalTextureId',
+        'texture:orm@ormTextureId', 'texture:p@sixWayPositiveTextureId',
+      ])
+    })
+
+    it('finds the lighting maps of a tileset embedded in a sprite', () => {
+      const asset = { id: 't', name: 't', nodeJson: { sprite: { tileset: { id: 'smoke', textureId: 'a', sixWayPositiveTextureId: 'p' } } } }
+      expect(targets(edgesOfAsset('template', asset))).toEqual(['texture:a', 'texture:p', 'tileset:smoke'])
+    })
   })
 
   describe('template variant', () => {

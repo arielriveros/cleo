@@ -2,22 +2,38 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button, cn } from '@cleo/app-kit/ui'
 import { token } from '@cleo/app-kit/utils/cssTokens'
 import type { TilesetAsset } from '../../utils/tilesets'
-import { awaitTextureImage, textureImage } from '../../utils/textureReady'
 import { clamp } from '@cleo/app-kit/utils/math';
+import { useAtlasSrc } from './TileThumb'
 
 // The atlas with its slicing grid drawn over it, plus rectangular selection. Shared by the tileset editor
 // (picking the tile being edited) and the tilemap palette (picking the brush, a rectangle being a stamp).
 // The image is an <img>, not a canvas draw, so `image-rendering: pixelated` works at any zoom; only the
 // grid, the metadata markers and the selection are drawn on a canvas over the top.
+//
+// Ctrl+wheel zooms about the cursor and middle-drag pans, for every host.
 
 export type TileRect = { col: number; row: number; w: number; h: number }
+
+/** The modifier keys held when a selection gesture started. */
+export type TileSelectMods = {
+  /** Shift: add to the selection rather than replace it. */
+  additive: boolean
+  /** Ctrl / Cmd: toggle the tiles in or out of the selection. */
+  toggle: boolean
+}
+
+export const MIN_TILE_ZOOM = 0.25
+export const MAX_TILE_ZOOM = 16
 
 export interface TileGridProps {
   asset: TilesetAsset
   /** Selected tile indices. */
   selection: number[]
-  /** Fired on selection change. `rect` is present for a drag, and is what a multi-tile stamp is built from. */
-  onSelect: (indices: number[], rect: TileRect) => void
+  /**
+   * Fired on selection change. `rect` is present for a drag, and is what a multi-tile stamp is built from.
+   * `mods` says whether the gesture adds or toggles; a host that has only one selection can ignore it.
+   */
+  onSelect: (indices: number[], rect: TileRect, mods: TileSelectMods) => void
   /** Allow dragging out a rectangle. Single-click selection only when false. */
   rectSelect?: boolean
   zoom?: number
@@ -35,6 +51,13 @@ export interface TileGridProps {
   anchor?: number | null
   /** Right-click on a cell. The browser menu is suppressed only when this is given. */
   onCellContextMenu?: (index: number) => void
+  /** The tile under the pointer, or null when it leaves the grid. Its cell is outlined while hovered. */
+  onHover?: (index: number | null) => void
+  /**
+   * Dim the image outside the grid — the margin and whatever the slicing leaves over at the right and the
+   * bottom — so a tile size that does not divide the atlas shows on the atlas itself.
+   */
+  showLeftover?: boolean
   /** Cursor over the atlas. Crosshair by default. */
   cursor?: string
   className?: string
@@ -44,21 +67,25 @@ export interface TileGridProps {
 const gridColor = () => token('--text', 0.22)
 const selectFill = () => token('--highlight', 0.28)
 const selectStroke = () => token('--highlight', 0.95)
+const hoverStroke = () => token('--text', 0.7)
 const anchorStroke = () => token('--warning', 0.95)
 const badgeFill = () => token('--surface-sunken', 0.85)
 const badgeText = () => token('--warning')
+const leftoverFill = () => token('--bg', 0.6)
 
 export default function TileGrid({
   asset, selection, onSelect, rectSelect = true, zoom: zoomProp, onZoomChange, markerOf, onImport,
-  badges, anchor, onCellContextMenu, cursor = 'crosshair', className,
+  badges, anchor, onCellContextMenu, onHover, showLeftover = false, cursor = 'crosshair', className,
 }: TileGridProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const wrapRef = useRef<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
   const [internalZoom, setInternalZoom] = useState(1)
   const zoom = zoomProp ?? internalZoom
   const setZoom = onZoomChange ?? setInternalZoom
   /** Where the drag started, in cells. Null when no drag is in progress. */
   const dragRef = useRef<{ col: number; row: number } | null>(null)
+  const dragModsRef = useRef<TileSelectMods>({ additive: false, toggle: false })
   const [drag, setDrag] = useState<TileRect | null>(null)
   /**
    * The live drag rect, mirrored out of state.
@@ -66,18 +93,14 @@ export default function TileGrid({
    * reducer, and React may run an updater more than once, re-firing `onSelect` onto the event bus.
    */
   const dragRectRef = useRef<TileRect | null>(null)
+  const [hover, setHover] = useState<number | null>(null)
+  const hoverRef = useRef<number | null>(null)
+  /** A middle-button pan in progress: where it started, and the scroll position then. */
+  const panRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
+  /** The image point to keep under the cursor across a zoom step, applied once the new size is laid out. */
+  const zoomAnchorRef = useRef<{ ux: number; uy: number; clientX: number; clientY: number } | null>(null)
 
-  // Resolved in an effect, not a memo: TextureManager decodes asynchronously, so a just-registered texture
-  // has no image yet and a memo would never recompute when the decode landed.
-  const [src, setSrc] = useState('')
-  useEffect(() => {
-    let cancelled = false
-    setSrc(textureImage(asset.textureId)?.src ?? '')
-    void awaitTextureImage(asset.textureId).then(image => {
-      if (!cancelled) setSrc(image?.src ?? '')
-    })
-    return () => { cancelled = true }
-  }, [asset.textureId])
+  const src = useAtlasSrc(asset.textureId)
 
   const width = asset.imageWidth * zoom
   const height = asset.imageHeight * zoom
@@ -101,6 +124,18 @@ export default function TileGrid({
     const th = asset.tileHeight * zoom
     const originX = asset.margin * zoom
     const originY = asset.margin * zoom
+    const count = asset.columns * asset.rows
+
+    if (showLeftover) {
+      // Everything outside the grid's own rectangle, as one even-odd fill.
+      const gridW = (asset.columns - 1) * stepX + tw
+      const gridH = (asset.rows - 1) * stepY + th
+      ctx.beginPath()
+      ctx.rect(0, 0, width, height)
+      ctx.rect(originX, originY, gridW, gridH)
+      ctx.fillStyle = leftoverFill()
+      ctx.fill('evenodd')
+    }
 
     // Grid. One stroke per line rather than per cell: a 4096-tile atlas is ~130 lines, not 4096 rects.
     ctx.lineWidth = 1
@@ -130,7 +165,7 @@ export default function TileGrid({
 
     if (markerOf) {
       const size = clamp(tw * 0.25, 3, 6)
-      for (let i = 0; i < asset.columns * asset.rows; i++) {
+      for (let i = 0; i < count; i++) {
         const colour = markerOf(i)
         if (!colour) continue
         const c = i % asset.columns, r = Math.floor(i / asset.columns)
@@ -153,13 +188,26 @@ export default function TileGrid({
       ctx.strokeRect(x + 1, y + 1, rw - 2, rh - 2)
     }
 
+    // A replacing drag shows only the rectangle it will select; an adding or toggling one shows it on top
+    // of what is already selected.
+    const mods = dragModsRef.current
+    if (!drag || mods.additive || mods.toggle) {
+      for (const i of selected) {
+        if (i < 0 || i >= count) continue
+        paint(i % asset.columns, Math.floor(i / asset.columns), 1, 1)
+      }
+    }
     if (drag) paint(drag.col, drag.row, drag.w, drag.h)
-    else for (const i of selected) {
-      if (i < 0 || i >= asset.columns * asset.rows) continue
-      paint(i % asset.columns, Math.floor(i / asset.columns), 1, 1)
+
+    if (hover !== null && hover >= 0 && hover < count && !drag) {
+      const x = originX + (hover % asset.columns) * stepX
+      const y = originY + Math.floor(hover / asset.columns) * stepY
+      ctx.strokeStyle = hoverStroke()
+      ctx.lineWidth = 1
+      ctx.strokeRect(x + 0.5, y + 0.5, tw - 1, th - 1)
     }
 
-    if (anchor !== null && anchor !== undefined && anchor >= 0 && anchor < asset.columns * asset.rows) {
+    if (anchor !== null && anchor !== undefined && anchor >= 0 && anchor < count) {
       const x = originX + (anchor % asset.columns) * stepX
       const y = originY + Math.floor(anchor / asset.columns) * stepY
       ctx.strokeStyle = anchorStroke()
@@ -175,7 +223,7 @@ export default function TileGrid({
       ctx.font = `600 ${font}px ui-sans-serif, system-ui, sans-serif`
       ctx.textBaseline = 'bottom'
       for (const [i, text] of badges) {
-        if (i < 0 || i >= asset.columns * asset.rows) continue
+        if (i < 0 || i >= count) continue
         const x = originX + (i % asset.columns) * stepX
         const y = originY + Math.floor(i / asset.columns) * stepY
         const w = Math.min(tw - 2, ctx.measureText(text).width + 6)
@@ -188,9 +236,46 @@ export default function TileGrid({
         ctx.restore()
       }
     }
-  }, [asset, zoom, width, height, selected, drag, markerOf, badges, anchor])
+  }, [asset, zoom, width, height, selected, drag, markerOf, badges, anchor, hover, showLeftover, src])
 
-  const cellAt = (e: React.MouseEvent): { col: number; row: number } | null => {
+  // After a zoom step, scroll so the image point that was under the cursor is under it again.
+  useLayoutEffect(() => {
+    const a = zoomAnchorRef.current
+    const wrap = wrapRef.current, scroller = scrollRef.current
+    zoomAnchorRef.current = null
+    if (!a || !wrap || !scroller) return
+    const rect = wrap.getBoundingClientRect()
+    scroller.scrollLeft += rect.left + a.ux * zoom - a.clientX
+    scroller.scrollTop += rect.top + a.uy * zoom - a.clientY
+  }, [zoom])
+
+  // Ctrl+wheel zoom on a NATIVE, non-passive listener: React registers wheel handlers as passive, where
+  // preventDefault is ignored and the browser zooms the whole page instead.
+  const zoomRef = useRef({ zoom, setZoom })
+  zoomRef.current = { zoom, setZoom }
+  useEffect(() => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const { zoom: z, setZoom: set } = zoomRef.current
+      const next = clamp(z * (e.deltaY < 0 ? 1.15 : 1 / 1.15), MIN_TILE_ZOOM, MAX_TILE_ZOOM)
+      if (next === z) return
+      const wrap = wrapRef.current
+      if (wrap) {
+        const rect = wrap.getBoundingClientRect()
+        zoomAnchorRef.current = {
+          ux: (e.clientX - rect.left) / z, uy: (e.clientY - rect.top) / z, clientX: e.clientX, clientY: e.clientY,
+        }
+      }
+      set(next)
+    }
+    scroller.addEventListener('wheel', onWheel, { passive: false })
+    return () => scroller.removeEventListener('wheel', onWheel)
+  }, [src])
+
+  const cellAt = (e: { clientX: number; clientY: number }): { col: number; row: number } | null => {
     const wrap = wrapRef.current
     if (!wrap) return null
     const rect = wrap.getBoundingClientRect()
@@ -206,7 +291,7 @@ export default function TileGrid({
     const indices: number[] = []
     for (let r = 0; r < rect.h; r++)
       for (let c = 0; c < rect.w; c++) indices.push((rect.row + r) * asset.columns + rect.col + c)
-    onSelect(indices, rect)
+    onSelect(indices, rect, dragModsRef.current)
   }
   // Behind a ref so the window listener below can register ONCE: `emit` closes over `asset` and the
   // `onSelect` prop, both of which change identity on most renders.
@@ -218,21 +303,37 @@ export default function TileGrid({
     setDrag(rect)
   }
 
+  const setHovered = (index: number | null) => {
+    if (hoverRef.current === index) return
+    hoverRef.current = index
+    setHover(index)
+    onHover?.(index)
+  }
+
   const onDown = (e: React.MouseEvent) => {
+    if (e.button === 1) {
+      // Middle button: pan. preventDefault stops the browser's own autoscroll.
+      const scroller = scrollRef.current
+      if (!scroller) return
+      e.preventDefault()
+      panRef.current = { x: e.clientX, y: e.clientY, left: scroller.scrollLeft, top: scroller.scrollTop }
+      return
+    }
     if (e.button !== 0) return
     const cell = cellAt(e)
     if (!cell) return
     e.preventDefault()
+    dragModsRef.current = { additive: e.shiftKey, toggle: e.ctrlKey || e.metaKey }
     if (!rectSelect) { emit({ ...cell, w: 1, h: 1 }); return }
     dragRef.current = cell
     setDragRect({ ...cell, w: 1, h: 1 })
   }
 
   const onMove = (e: React.MouseEvent) => {
-    const start = dragRef.current
-    if (!start) return
     const cell = cellAt(e)
-    if (!cell) return
+    setHovered(cell ? cell.row * asset.columns + cell.col : null)
+    const start = dragRef.current
+    if (!start || !cell) return
     setDragRect({
       col: Math.min(start.col, cell.col),
       row: Math.min(start.row, cell.row),
@@ -241,10 +342,17 @@ export default function TileGrid({
     })
   }
 
-  // On window rather than the element: a drag that leaves the grid must still finish. Registered once —
-  // everything it touches is a ref.
+  // On window rather than the element: a drag or a pan that leaves the grid must still finish. Registered
+  // once — everything it touches is a ref.
   useEffect(() => {
+    const onWinMove = (e: MouseEvent) => {
+      const pan = panRef.current, scroller = scrollRef.current
+      if (!pan || !scroller) return
+      scroller.scrollLeft = pan.left - (e.clientX - pan.x)
+      scroller.scrollTop = pan.top - (e.clientY - pan.y)
+    }
     const onUp = () => {
+      panRef.current = null
       if (!dragRef.current) return
       dragRef.current = null
       const rect = dragRectRef.current
@@ -253,8 +361,12 @@ export default function TileGrid({
       // other components.
       if (rect) emitRef.current(rect)
     }
+    window.addEventListener('mousemove', onWinMove)
     window.addEventListener('mouseup', onUp)
-    return () => window.removeEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onWinMove)
+      window.removeEventListener('mouseup', onUp)
+    }
   }, [])
 
   const onContextMenu = (e: React.MouseEvent) => {
@@ -262,12 +374,6 @@ export default function TileGrid({
     e.preventDefault()
     const cell = cellAt(e)
     if (cell) onCellContextMenu(cell.row * asset.columns + cell.col)
-  }
-
-  const onWheel = (e: React.WheelEvent) => {
-    if (!e.ctrlKey && !e.metaKey) return
-    e.preventDefault()
-    setZoom(clamp(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 0.25, 16))
   }
 
   if (!src) {
@@ -282,14 +388,17 @@ export default function TileGrid({
   }
 
   return (
-    <div className={cn('overflow-auto', className)} onWheel={onWheel}>
+    <div ref={scrollRef} className={cn('overflow-auto', className)}>
       <div
         ref={wrapRef}
         className='relative select-none'
-        style={{ width, height, cursor }}
+        style={{ width, height, cursor: panRef.current ? 'grabbing' : cursor }}
         onMouseDown={onDown}
         onMouseMove={onMove}
+        onMouseLeave={() => setHovered(null)}
         onContextMenu={onContextMenu}
+        // Middle-click on some platforms pastes or opens an autoscroll; the pan owns that button here.
+        onAuxClick={(e) => { if (e.button === 1) e.preventDefault() }}
       >
         <img
           src={src}

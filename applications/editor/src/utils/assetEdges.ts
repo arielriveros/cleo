@@ -72,10 +72,10 @@ export function walkRefs(obj: any, out: EdgeSpec[]): void {
       for (const slot of Object.keys(val)) push(out, 'texture', val[slot], `textures.${slot}`)
       continue
     }
-    if (key === 'textureId' || key === 'displacementMap') { push(out, 'texture', val, key); continue }
-    // A lit sprite tileset's lighting maps, and a lit particle emitter's, beside its `textureId`.
-    if (key === 'normalTextureId' || key === 'ormTextureId' || key === 'sixWayPositiveTextureId'
-        || key === 'sixWayNegativeTextureId') { push(out, 'texture', val, key); continue }
+    // Lit sprites and particle emitters keep their lighting maps beside `textureId` (a tileset's six-way,
+    // normal and ORM maps, embedded in every sprite and tilemap that draws from it).
+    if (key === 'textureId' || key === 'displacementMap' || key === 'normalTextureId' || key === 'ormTextureId'
+        || key === 'sixWayPositiveTextureId' || key === 'sixWayNegativeTextureId') { push(out, 'texture', val, key); continue }
     // A terrain paint layer's `materialId` names a TERRAIN material, not a material. The two libraries are
     // separate and the ids are not interchangeable.
     if (key === 'materialId') { push(out, 'terrainMaterial', val, key); continue }
@@ -291,6 +291,10 @@ export function edgesOfAsset(kind: AssetKind, asset: any): EdgeSpec[] {
       // Deliberately `textureId` alone. `textureIds` is a mirror of it, kept because `referencedTextureIds`
       // scans that field (tilesets.ts:33) — counting both would double every atlas edge.
       push(out, 'texture', asset.textureId, 'textureId')
+      // The lighting maps lit sprites shade with: without these a normal map used only by a tileset read as
+      // unreferenced, safe to delete.
+      for (const key of ['sixWayPositiveTextureId', 'sixWayNegativeTextureId', 'normalTextureId', 'ormTextureId'] as const)
+        push(out, 'texture', asset[key], key)
       break
     case 'animationField':
       // A blend space is defined by a skeleton and clip names, so it points at the RIG, not at one of the

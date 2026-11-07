@@ -325,9 +325,29 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   a dynamic body is moved by physics with its node's local pose solved under the parent. New
   `setWorldPosition` / `setWorldQuaternion`; character facing and root motion now work in world space.
   The editor no longer limits bodies to root-level nodes, or blocks moving a bodied node in the tree.
+- **The tileset editor, reworked.** Every value scrubs (drag a field's label) or slides, with reset
+  buttons, a square-tile lock, tile-size presets and **Guess**. The atlas dims whatever the slicing leaves
+  over, and the Atlas card says how many pixels that is. The atlas and the lighting maps use the material
+  editor's texture slot: search with thumbnails, upload, drop a file or an Assets texture. **Selected
+  tiles** shows the tile as it will draw, its animation playing, with a **mixed** tag on fields a
+  multi-selection disagrees on, and **Copy** / **Paste** / **Clear** of tile metadata. Frames, variant
+  and auto-tile sets list tile thumbnails instead of numbers; a variant shows its share of picks and
+  can lose a single tile; **Select on atlas** selects a set's tiles. On the atlas: Shift adds and Ctrl
+  toggles a selection, arrows, Ctrl+A, Delete and Ctrl+C / Ctrl+V work on the tiles, Ctrl+wheel zooms
+  about the pointer, middle-drag pans, **Fit** and **1:1**, and the status bar names the tile under the
+  pointer. Tileset edits are undoable, and unsaved edits survive switching tabs.
 
 ### Fixes & refactors
 
+- **Fixed: changing a tileset's tile size dropped its lighting maps from the project's references.**
+  The re-slice kept only the atlas in `textureIds`, so a normal or six-way map used only by a tileset
+  stopped persisting and shipping with it. The asset reference graph also never listed a tileset's
+  lighting maps, so they read as unreferenced and safe to delete.
+- **Fixed: a tileset tab restored on reload showed "no atlas image"** until it was reopened: the atlas
+  view looked for the texture before the texture store had registered it.
+- **Texture slots** (the material editor's, now shared with the tileset editor) draw their texture list
+  over the panel instead of inside the section, which could cut it off, close it on Esc, and upload an
+  image file dropped on the slot. The engine's `Null` placeholder is no longer offered.
 - **Fixed: a scene was marked unsaved on its own.** Anything a node's per-frame update or the physics
   write-back changed (a decorative script turning a windmill's sails) reached the editor as an edit.
   Those writes are now counted as the scene ticking (`authoring.derived`), not as authoring, and setting
