@@ -19,6 +19,7 @@ import { ForceFieldNode } from "./nodes/forceFieldNode";
 import { ClothNode } from "./nodes/clothNode";
 import { WaterVolumeNode } from "./nodes/waterVolumeNode";
 import { ExposureVolumeNode } from "./nodes/exposureVolumeNode";
+import { GIVolumeNode } from "./nodes/giVolumeNode";
 import { VolumetricFogNode } from "./nodes/volumetricFogNode";
 import { OcclusionVolumeNode } from "./nodes/occlusionVolumeNode";
 import { SkyboxNode } from "./nodes/skyboxNode";
@@ -129,6 +130,7 @@ export class Scene {
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
     private _exposureVolumes: Set<ExposureVolumeNode> = new Set();
+    private _giVolumes: Set<GIVolumeNode> = new Set();
     private _volumetricFogs: Set<VolumetricFogNode> = new Set();
     private _occlusionVolumes: Set<OcclusionVolumeNode> = new Set();
     private _sounds: Set<SoundNode> = new Set();
@@ -849,6 +851,7 @@ export class Scene {
         this._forceFields = new Set();
         this._waterVolumes = new Set();
         this._exposureVolumes = new Set();
+        this._giVolumes = new Set();
         this._volumetricFogs = new Set();
         this._occlusionVolumes = new Set();
         this._sounds = new Set();
@@ -905,6 +908,8 @@ export class Scene {
                 this._waterVolumes.add(node);
             if (node instanceof ExposureVolumeNode)
                 this._exposureVolumes.add(node);
+            if (node instanceof GIVolumeNode)
+                this._giVolumes.add(node);
             if (node instanceof VolumetricFogNode)
                 this._volumetricFogs.add(node);
             if (node instanceof OcclusionVolumeNode)
@@ -1355,6 +1360,13 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._exposureVolumes;
+    }
+
+    /** Every GI volume in the scene: the probe grids that light what is inside them (render/gi/). */
+    public get giVolumes(): Set<GIVolumeNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._giVolumes;
     }
 
     /**

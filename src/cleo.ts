@@ -32,6 +32,8 @@ export { LandscapeNode } from "./core/scene/nodes/landscapeNode";
 export { TilemapNode } from "./core/scene/nodes/tilemapNode";
 export { LightNode } from "./core/scene/nodes/lightNode";
 export { LightProbeNode } from "./core/scene/nodes/lightProbeNode";
+export { GIVolumeNode, GI_RAY_COUNTS, GI_CAPTURE_RESOLUTIONS, MIN_GI_PROBES_PER_AXIS, MAX_GI_PROBES_PER_AXIS } from "./core/scene/nodes/giVolumeNode";
+export type { GiRayCount, GiCaptureResolution, GiVolumeOptions } from "./core/scene/nodes/giVolumeNode";
 export { FluidVolumeNode, FLUID_BRICK, OCCUPANCY_MARGIN, occupancyFromVolume, floatToHalf, floatsToHalves } from "./core/scene/nodes/fluidVolumeNode";
 export { ExposureVolumeNode, EXPOSURE_OVERRIDE_KEYS, MIN_EXPOSURE_VOLUME_SIZE } from "./core/scene/nodes/exposureVolumeNode";
 export type { ExposureOverrides } from "./core/scene/nodes/exposureVolumeNode";
