@@ -97,7 +97,8 @@ const X22 = Y22 * 4 * P / 15;
 
 /**
  * Irradiance coefficients -> the radiance form `shEval` reads: band l divided by Ramamoorthi's A_l / pi
- * (1, 2/3, 1/4). shProject.ts `irradianceToRadianceSH` does the same for the light probes' cubes.
+ * (1, 2/3, 1/4). The light probes project their RADIANCE cube straight into that form (sky.ts
+ * `_projectProbe`); an ambient cube already holds irradiance, so it takes the division instead.
  */
 const BAND_SCALE = [1, 1.5, 1.5, 1.5, 4, 4, 4, 4, 4];
 

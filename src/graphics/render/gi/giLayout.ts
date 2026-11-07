@@ -18,8 +18,9 @@
  * A probe has a GLOBAL index in the shared atlases (its volume's base plus its own) and a LOCAL one in its
  * volume's hit cache: probe (i, j, k) is local `i + nx * (j + ny * k)`.
  *
- * Directions use chunks/octNormal.wgsl's octahedral encoding — the G-buffer's — so a shader and this file
- * agree on which texel is which direction.
+ * Directions use chunks/octNormal.wgsl's octahedral encoding — the G-buffer's and the reflection atlas's
+ * (reflectionAtlas.ts `octEncodeDir`, pinned equal by tests/giLayout.test.ts) — so a shader and this file
+ * agree on which texel is which direction. The copies here keep this module free of the device.
  */
 
 // --- The octahedral map (chunks/octNormal.wgsl) ---

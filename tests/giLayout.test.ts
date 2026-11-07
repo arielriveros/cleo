@@ -5,6 +5,7 @@ import {
     irradianceTileOrigin, maxProbesPerVolume, probeDataTexel, tileBorderSource, tileDirections,
     tileSolidAngleIntegral, tileSolidAngles, tileTexelDirection, visibilityTileOrigin,
 } from '../src/graphics/render/gi/giLayout';
+import { octDecodeDir, octEncodeDir, octWrapOutside } from '../src/graphics/render/reflectionAtlas';
 
 const dot = (a: ArrayLike<number>, b: ArrayLike<number>) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
@@ -16,6 +17,21 @@ describe('the octahedral map', () => {
             const e = giOctEncode(n);
             const back = giOctDecode(e[0], e[1]);
             expect(dot(back, n)).toBeGreaterThan(0.99999);
+        }
+    });
+
+    it("is the reflection atlas's map, exactly", () => {
+        for (const d of [[0, 0, 1], [0.2, -0.9, -0.38], [-0.7, 0.1, 0.7], [0.5, 0.5, -0.707]]) {
+            expect(giOctEncode(d)).toEqual(octEncodeDir(d));
+        }
+        for (const [u, v] of [[0.3, -0.2], [0.9, 0.8], [-0.95, 0.6]]) {
+            const a = giOctDecode(u, v), b = octDecodeDir([u, v]);
+            for (let i = 0; i < 3; i++) expect(a[i]).toBeCloseTo(b[i], 6);
+        }
+        for (const [u, v] of [[1.1, 0.3], [-1.05, -0.5], [0.2, 1.2], [1.1, 1.1], [-1.1, 1.05]]) {
+            const a = giOctWrapOutside(u, v), b = octWrapOutside([u, v]);
+            expect(a[0]).toBeCloseTo(b[0], 9);
+            expect(a[1]).toBeCloseTo(b[1], 9);
         }
     });
 
