@@ -3,6 +3,7 @@ import {
     GI_LIMITS, GI_TIERS, clampGiFillDrawsPerFrame, clampGiRaysPerFrame, clampGiResolutionScale,
     clampGiSunThreshold, giProbesPerFrame, giShadowMapSize,
 } from '../src/graphics/render/gi/giSettings';
+import { QUALITY_TIERS } from '../src/graphics/render/settingsTypes';
 
 const ORDER = ['ultra', 'high', 'medium', 'low'] as const;
 
@@ -15,6 +16,14 @@ describe('GI tiers', () => {
             expect(down.giSunThreshold).toBeGreaterThanOrEqual(up.giSunThreshold);
             expect(down.giShadowTexel).toBeGreaterThanOrEqual(up.giShadowTexel);
             expect(down.giFillDrawsPerFrame).toBeLessThanOrEqual(up.giFillDrawsPerFrame);
+        }
+    });
+
+    it('are what the renderer quality tiers carry', () => {
+        for (const name of ORDER) {
+            const t = QUALITY_TIERS[name], g = GI_TIERS[name];
+            expect([t.giEnabled, t.giResolutionScale, t.giRaysPerFrame, t.giFillDrawsPerFrame])
+                .toEqual([g.giEnabled, g.giResolutionScale, g.giRaysPerFrame, g.giFillDrawsPerFrame]);
         }
     });
 

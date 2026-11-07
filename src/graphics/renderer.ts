@@ -78,6 +78,7 @@ import { EditorOverlays } from './render/editorOverlays';
 import { DebugViews } from './render/debugViews';
 import { Capture } from './render/capture';
 import { GiSystem } from './render/gi/giSystem';
+import { GI_TIERS, clampGiFillDrawsPerFrame, clampGiRaysPerFrame, clampGiResolutionScale } from './render/gi/giSettings';
 import { RenderStats } from './render/stats';
 import type { RenderSubsystems } from './render/subsystems';
 import { ProgramRegistry } from './render/programRegistry';
@@ -2030,6 +2031,22 @@ export class Renderer {
     /** GI Volumes: state, counters and settings (render/gi/giSystem.ts). */
     public get gi(): GiSystem { return this._gi; }
 
+    /** See {@link RenderSettings.giEnabled}. A quality-tier field. */
+    public get giEnabled(): boolean { return this._gi.enabled; }
+    public set giEnabled(enabled: boolean) { this._gi.enabled = !!enabled; }
+    /** See {@link RenderSettings.giResolutionScale}. A quality-tier field. */
+    public get giResolutionScale(): number { return this._gi.resolutionScale; }
+    public set giResolutionScale(v: number) { this._gi.resolutionScale = clampGiResolutionScale(v); }
+    /** See {@link RenderSettings.giRaysPerFrame}. A quality-tier field. */
+    public get giRaysPerFrame(): number { return this._gi.raysPerFrame; }
+    public set giRaysPerFrame(v: number) { this._gi.raysPerFrame = clampGiRaysPerFrame(v); }
+    /** See {@link RenderSettings.giFillDrawsPerFrame}. A quality-tier field. */
+    public get giFillDrawsPerFrame(): number { return this._gi.fillDrawsPerFrame; }
+    public set giFillDrawsPerFrame(v: number) { this._gi.fillDrawsPerFrame = clampGiFillDrawsPerFrame(v); }
+    /** See {@link RenderSettings.giMultiBounce}. */
+    public get giMultiBounce(): boolean { return this._gi.multiBounce; }
+    public set giMultiBounce(v: boolean) { this._gi.multiBounce = !!v; }
+
     public get ssrEnabled(): boolean { return this._ssr.ssrEnabled; }
     public set ssrEnabled(enabled: boolean) { this._ssr.ssrEnabled = !!enabled; }
     /**
@@ -2238,6 +2255,13 @@ export class Renderer {
         this._ssil.ssaoSamples = t.ssaoSamples;
         this._ssil.ssilEnabled = t.ssilEnabled;
         this._ssr.ssrEnabled = t.ssrEnabled;
+        this._gi.enabled = t.giEnabled;
+        this._gi.resolutionScale = t.giResolutionScale;
+        this._gi.raysPerFrame = t.giRaysPerFrame;
+        this._gi.fillDrawsPerFrame = t.giFillDrawsPerFrame;
+        this._gi.sunThreshold = GI_TIERS[preset].giSunThreshold;
+        this._gi.shadowTexel = GI_TIERS[preset].giShadowTexel;
+        this._gi.shadowMaxSize = GI_TIERS[preset].giShadowMaxSize;
         this._post.localExposure.enabled = t.localExposureEnabled;
         this._fog.enabled = t.volumetricFogEnabled;
         this._fog.tileSize = t.volumetricFogTileSize;
@@ -2559,6 +2583,11 @@ export class Renderer {
             ssilEnabled: this._ssil.ssilEnabled,
             ssilIntensity: this._ssil.ssilIntensity,
             ssrEnabled: this._ssr.ssrEnabled,
+            giEnabled: this._gi.enabled,
+            giResolutionScale: this._gi.resolutionScale,
+            giRaysPerFrame: this._gi.raysPerFrame,
+            giFillDrawsPerFrame: this._gi.fillDrawsPerFrame,
+            giMultiBounce: this._gi.multiBounce,
             localExposureEnabled: this._post.localExposure.enabled,
             localExposureStrength: this._post.localExposure.strength,
             localExposureShadows: this._post.localExposure.shadowStops,
@@ -2711,6 +2740,11 @@ export class Renderer {
         if (s.ssilEnabled !== undefined) this.ssilEnabled = s.ssilEnabled;
         if (s.ssilIntensity !== undefined) this.ssilIntensity = s.ssilIntensity;
         if (s.ssrEnabled !== undefined) this.ssrEnabled = s.ssrEnabled;
+        if (s.giEnabled !== undefined) this.giEnabled = s.giEnabled;
+        if (s.giResolutionScale !== undefined) this.giResolutionScale = s.giResolutionScale;
+        if (s.giRaysPerFrame !== undefined) this.giRaysPerFrame = s.giRaysPerFrame;
+        if (s.giFillDrawsPerFrame !== undefined) this.giFillDrawsPerFrame = s.giFillDrawsPerFrame;
+        if (s.giMultiBounce !== undefined) this.giMultiBounce = s.giMultiBounce;
         if (s.localExposureEnabled !== undefined) this.localExposureEnabled = s.localExposureEnabled;
         if (s.localExposureStrength !== undefined) this.localExposureStrength = s.localExposureStrength;
         if (s.localExposureShadows !== undefined) this.localExposureShadows = s.localExposureShadows;
