@@ -32,7 +32,7 @@ import {
     GI_IRRADIANCE_TILE, GI_VISIBILITY_TILE, giAtlasLayout, giAtlasSizes, gridCoords, hitCacheSize,
     tileSolidAngles, type GiAtlasLayout,
 } from './giLayout';
-import { GI_PROBE_ACTIVE, GI_PROBE_SKIPPED, GI_PROBE_UNCAPTURED, classifyHitRows, isUnderground } from './giClassify';
+import { GI_PROBE_ACTIVE, GI_PROBE_PENDING, GI_PROBE_SKIPPED, GI_PROBE_UNCAPTURED, classifyHitRows, isUnderground } from './giClassify';
 import { ModelDraw } from '../modelDraw';
 import {
     GI_AMBIENT_CUBE_FLOATS, MAX_GI_VOLUMES, giAmbientAt, giLightingAt, orderGiVolumes, type GiVolumeCpu,
@@ -436,6 +436,8 @@ export class GiSystem {
             if (p < 0) continue;
             lo = Math.min(lo, p); hi = Math.max(hi, p);
         }
+        for (const p of batch.probes) if (p >= 0) { v.states[p] = GI_PROBE_PENDING; this._writeProbeData(v, p); }
+        this._probeDataDirty = true;
         if (lo <= hi) {
             v.visibilityDirty = [lo, hi];
             this._updateVisibility(v);
@@ -459,7 +461,6 @@ export class GiSystem {
             .then((pixels) => {
                 if (this._volumes.get(v.node) !== v) return;
                 const states = new Uint8Array(v.probes);
-                for (const p of probes) states[p] = GI_PROBE_UNCAPTURED;
                 classifyHitRows(pixels, firstRow, rows, v.rays, lo, hi - lo + 1, states);
                 for (const p of probes) {
                     v.states[p] = states[p] || GI_PROBE_ACTIVE;

@@ -15,7 +15,10 @@ export const GI_PROBE_UNCAPTURED = 0;
 export const GI_PROBE_ACTIVE = 1;
 export const GI_PROBE_INACTIVE = 2;
 export const GI_PROBE_SKIPPED = 3;
-export type GiProbeState = typeof GI_PROBE_UNCAPTURED | typeof GI_PROBE_ACTIVE | typeof GI_PROBE_INACTIVE | typeof GI_PROBE_SKIPPED;
+/** Captured, its classification not back yet: lights nothing, and is not captured again meanwhile. */
+export const GI_PROBE_PENDING = 4;
+export type GiProbeState = typeof GI_PROBE_UNCAPTURED | typeof GI_PROBE_ACTIVE | typeof GI_PROBE_INACTIVE
+    | typeof GI_PROBE_SKIPPED | typeof GI_PROBE_PENDING;
 
 /** What a ray met, as hit cache A stores it in its alpha byte. */
 export const GI_HIT_MISS = 0;
