@@ -32,7 +32,8 @@ import {
     GI_IRRADIANCE_TILE, GI_VISIBILITY_TILE, giAtlasLayout, giAtlasSizes, gridCoords, hitCacheSize,
     tileSolidAngles, type GiAtlasLayout,
 } from './giLayout';
-import { GI_PROBE_ACTIVE, GI_PROBE_SKIPPED, GI_PROBE_UNCAPTURED, isUnderground } from './giClassify';
+import { GI_PROBE_ACTIVE, GI_PROBE_SKIPPED, GI_PROBE_UNCAPTURED, classifyHitRows, isUnderground } from './giClassify';
+import { ModelDraw } from '../modelDraw';
 import {
     GI_AMBIENT_CUBE_FLOATS, MAX_GI_VOLUMES, giAmbientAt, giLightingAt, orderGiVolumes, type GiVolumeCpu,
 } from './giLighting';
@@ -133,7 +134,11 @@ export class GiSystem {
     private _probeDataDirty = false;
     private _atlasProbes = 0;
     private _capture: Framebuffer | null = null;
+    /** The back faces of what encloses each probe, in the capture atlas's tiles (giReduce.wgsl u_capBack). */
+    private _captureBack: Framebuffer | null = null;
     private _captureSide = 0;
+    /** Classifications in flight (async readbacks of hit cache A). */
+    private _classifying = 0;
     private _batch: CaptureBatch | null = null;
     private _target: Framebuffer | null = null;
     private _scale = 0;
@@ -392,13 +397,18 @@ export class GiSystem {
         let budget = Math.max(1, this.fillDrawsPerFrame);
         const include = (node: ModelNode) => inCapture(node);
         this._withCaptureState(v.node, () => {
+            if (batch!.slot === 0 && batch!.face === 0 && batch!.cursor === 0) {
+                for (const fb of [atlas, this._captureBack!]) {
+                    const clear = this._passes.beginFullscreenPass(fb.renderTarget, 'giCapture', true, [0, 0, 0, 0], true, true);
+                    this._passes.endFullscreenPass(clear);
+                }
+            }
             while (batch!.slot < GI_CAPTURE_SLOTS && budget > 0) {
                 const probe = batch!.probes[batch!.slot];
                 if (probe < 0) { batch!.slot++; batch!.face = 0; batch!.cursor = 0; continue; }
-                const first = batch!.slot === 0 && batch!.face === 0 && batch!.cursor === 0;
                 this._aim(v, probe, batch!.face);
                 const frustum = this._frustum;
-                const pass = this._passes.beginFullscreenPass(atlas.renderTarget, 'giCapture', first, [0, 0, 0, 0], first, true);
+                const pass = this._passes.beginFullscreenPass(atlas.renderTarget, 'giCapture', false, undefined, false);
                 pass.setViewport(batch!.face * S, batch!.slot * S, S, S);
                 const admitted = this._sys.geometry.captureInto(pass, scene, include, (node) => {
                     const s = node.getBoundingSphere();
@@ -410,6 +420,7 @@ export class GiSystem {
                 batch!.cursor += drawn;
                 budget -= Math.max(1, drawn);
                 if (batch!.cursor >= admitted) {
+                    this._drawBackfaces(scene, v, probe, batch!.slot, batch!.face, S);
                     batch!.cursor = 0;
                     if (++batch!.face >= 6) { batch!.face = 0; batch!.slot++; }
                 }
@@ -417,22 +428,85 @@ export class GiSystem {
         });
         if (batch.slot < GI_CAPTURE_SLOTS) return;
 
-        // All faces drawn: the hit cache tiles, then the states, then the visibility.
+        // All faces drawn: the hit cache tiles and the visibility now; the states once the rays' kinds are
+        // read back (a probe inside something is switched off before it ever lights anything).
         this._reduce(batch);
         let lo = Infinity, hi = -Infinity;
         for (const p of batch.probes) {
             if (p < 0) continue;
-            v.states[p] = GI_PROBE_ACTIVE;
-            this._writeProbeData(v, p);
             lo = Math.min(lo, p); hi = Math.max(hi, p);
-            this.stats.capturedProbes++;
         }
-        this._probeDataDirty = true;
-        if (lo <= hi) v.visibilityDirty = v.visibilityDirty ? [Math.min(v.visibilityDirty[0], lo), Math.max(v.visibilityDirty[1], hi)] : [lo, hi];
+        if (lo <= hi) {
+            v.visibilityDirty = [lo, hi];
+            this._updateVisibility(v);
+            this._classify(v, batch.probes.filter(p => p >= 0), lo, hi);
+        }
         this._batch = null;
-        this._uploadProbeData();
-        this._updateVisibility(v);
-        v.sweep.request(v.lit ? 'relight' : 'reset');
+    }
+
+    /**
+     * Read back hit cache A's rows under `probes` and set their states: active, or inactive past a quarter of
+     * back-face rays (giClassify.ts). The volume relights once they land.
+     */
+    private _classify(v: VolumeGpu, probes: number[], lo: number, hi: number): void {
+        const side = v.side;
+        const firstRow = Math.floor(lo / 64) * side;
+        const rows = (Math.floor(hi / 64) + 1) * side - firstRow;
+        // Submit first: the readback runs on its own encoder (sky.ts does the same).
+        this._passes.flushFrameEncoder(true);
+        this._classifying++;
+        void device.readPixels(v.hit.colors[0].attachmentView, 0, firstRow, v.hit.width, rows)
+            .then((pixels) => {
+                if (this._volumes.get(v.node) !== v) return;
+                const states = new Uint8Array(v.probes);
+                for (const p of probes) states[p] = GI_PROBE_UNCAPTURED;
+                classifyHitRows(pixels, firstRow, rows, v.rays, lo, hi - lo + 1, states);
+                for (const p of probes) {
+                    v.states[p] = states[p] || GI_PROBE_ACTIVE;
+                    this._writeProbeData(v, p);
+                    this.stats.capturedProbes++;
+                }
+                this._probeDataDirty = true;
+                v.sweep.request(v.lit ? 'relight' : 'reset');
+            })
+            .catch((e) => {
+                Logger.warn(`GI classification failed: ${(e as Error)?.message ?? e}`, 'Renderer');
+                for (const p of probes) { v.states[p] = GI_PROBE_ACTIVE; this._writeProbeData(v, p); }
+                this._probeDataDirty = true;
+            })
+            .then(() => { this._classifying--; });
+    }
+
+    /**
+     * The back faces of the static, single-sided nodes whose bounds hold the probe, into the back atlas's
+     * tile: a ray that meets one nearer than any front face is a back-face hit (the probe is inside that
+     * node). Double-sided materials have no inside and are left out.
+     */
+    private _drawBackfaces(scene: Scene, v: VolumeGpu, probe: number, slot: number, face: number, S: number): void {
+        const x = v.positions[probe * 3], y = v.positions[probe * 3 + 1], z = v.positions[probe * 3 + 2];
+        const eps = 1e-3;
+        const holds = (node: ModelNode): boolean => {
+            if (!inCapture(node) || node.model.material.config.side === 'double') return false;
+            const b = node.getBoundingBox();
+            return x >= b.min[0] - eps && x <= b.max[0] + eps && y >= b.min[1] - eps && y <= b.max[1] + eps
+                && z >= b.min[2] - eps && z <= b.max[2] + eps;
+        };
+        let any = false;
+        for (const node of scene.models) if (holds(node)) { any = true; break; }
+        if (!any) return;
+        const frustum = this._frustum;
+        const pass = this._passes.beginFullscreenPass(this._captureBack!.renderTarget, 'giBackface', false, undefined, false);
+        pass.setViewport(face * S, slot * S, S, S);
+        ModelDraw.invertCull = true;
+        try {
+            this._sys.geometry.captureInto(pass, scene, holds, (node) => {
+                const s = node.getBoundingSphere();
+                return frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius);
+            }, 200 + slot * 6 + face);
+        } finally {
+            ModelDraw.invertCull = false;
+            this._passes.endFullscreenPass(pass);
+        }
     }
 
     /** The next capture batch: the uncaptured probes nearest the camera, of the volume they are in. */
@@ -479,10 +553,13 @@ export class GiSystem {
     private _ensureCaptureAtlas(S: number): void {
         if (this._capture && this._captureSide === S) return;
         this._capture?.destroy();
+        this._captureBack?.destroy();
         // The frame G-buffer's own layout (three rgba16f targets and depth), so the frame's geometry
-        // pipelines draw into it unchanged.
+        // pipelines draw into it unchanged — the back-face atlas too, for the same pipelines.
         this._capture = new Framebuffer({ colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' } });
         this._capture.create(6 * S, GI_CAPTURE_SLOTS * S);
+        this._captureBack = new Framebuffer({ colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' } });
+        this._captureBack.create(6 * S, GI_CAPTURE_SLOTS * S);
         this._captureSide = S;
     }
 
@@ -539,7 +616,7 @@ export class GiSystem {
         const pipeline = this._pipelines.get('giReduce', GiReduceProgram, { vertex: 'model', builtFor: 'giReduce', targets: 3 });
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0,
-            [atlas.colors[0], atlas.colors[1], atlas.colors[2], atlas.depth, atlas.depth]));
+            [atlas.colors[0], atlas.colors[1], atlas.colors[2], atlas.depth, this._captureBack!.depth]));
         this._shaderManager.bind('giReduce');
         this._shaderManager.setUniform('u_faceViewProj', this._faceViewProj);
         this._shaderManager.setUniform('u_faceInvViewProj', this._faceInvViewProj);
@@ -548,7 +625,7 @@ export class GiSystem {
         this._shaderManager.setUniform('u_raySide', v.side);
         this._shaderManager.setUniform('u_captureSide', S);
         this._shaderManager.setUniform('u_originTopLeft', device.capabilities.conventions.originTopLeft ? 1 : 0);
-        this._shaderManager.setUniform('u_hasBackfaces', 0);
+        this._shaderManager.setUniform('u_hasBackfaces', 1);
         this._shaderManager.setUniform('u_captureSize', [atlas.width, atlas.height]);
         this._passes.setViewport(v.hit.width, v.hit.height);
         this._passes.drawFullscreenAndEnd(pass);
@@ -875,6 +952,7 @@ export class GiSystem {
         this._visibility?.destroy(); this._visibility = null;
         this._probeData?.delete(); this._probeData = null;
         this._capture?.destroy(); this._capture = null;
+        this._captureBack?.destroy(); this._captureBack = null;
         this._target?.destroy(); this._target = null;
     }
 }

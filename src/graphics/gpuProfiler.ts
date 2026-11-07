@@ -189,6 +189,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     probeFilter: 'ibl.bake',
     // GI Volumes' capture and relight, all inside the gi.update scope.
     giCapture: 'gi.update',
+    giBackface: 'gi.update',
     giClear: 'gi.update',
     giReduce: 'gi.update',
     giVisibility: 'gi.update',
