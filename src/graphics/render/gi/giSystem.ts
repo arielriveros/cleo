@@ -937,9 +937,9 @@ export class GiSystem {
     }
 
     /** The volumes' state, for the harness and the editor. */
-    public describe(): { name: string; probes: number; base: number; captured: number; active: number; idle: boolean }[] {
+    public describe(): { id: string; name: string; probes: number; base: number; captured: number; active: number; idle: boolean }[] {
         return [...this._volumes.values()].map(v => ({
-            name: v.node.name, probes: v.probes, base: v.base,
+            id: v.node.id, name: v.node.name, probes: v.probes, base: v.base,
             captured: v.states.filter(s => s !== GI_PROBE_UNCAPTURED).length,
             active: v.states.filter(s => s === GI_PROBE_ACTIVE).length,
             idle: v.sweep.idle,

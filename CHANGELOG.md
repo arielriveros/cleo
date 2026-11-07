@@ -16,6 +16,17 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **GI Volumes.** A new node, **GI Volume**, fills a box with irradiance probes that light what is inside
+  with the light bounced off the scene round it.
+  - *Relit, not rebaked.* Each probe's view of the static scene is captured once; the sun with its
+    shadow, the lights set to Bake, the sky, emissive surfaces and further bounces are put back on it as
+    the light changes, so a day and night cycle needs no new capture.
+  - *No light through walls.* Probes inside walls, rocks or the ground are found and switched off, and
+    each probe's view of the scene keeps it from lighting what is behind a wall.
+  - *Everywhere.* Deferred surfaces take it per pixel ahead of the light probes and the sky light;
+    forward materials, lit particles and lit sprites at their centre. On WebGL2 and WebGPU alike, at
+    every quality preset (half resolution on Medium and Low).
+
 - **Lighting that holds together from noon to midnight.** Torches now light the night in the editor
   as they do in the game, and glare no longer floods the screen.
   - *Moonlight in lux.* The Sky Atmosphere's **Moonlight (lux)** replaces the 0-1 share of the sun,

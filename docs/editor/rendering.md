@@ -418,6 +418,26 @@ It only sees what is on screen: light from something behind the camera, or hidde
 object, is not bounced. Blinn-Phong, cel and custom forward materials neither receive it nor, being
 outside the G-buffer, occlude.
 
+### GI Volumes
+
+A [GI Volume](node-inspector.md#gi-volume) lights what is inside it with the light bounced off the scene
+round it, from what its probes captured of the static geometry, relit as the sun, the baked lights and the
+sky change. It applies to deferred surfaces per pixel and to forward materials, lit particles and lit
+sprites at their centre. The screen-space bounce above still adds the contact detail on top, and its
+occlusion darkens the volume's light in corners.
+
+The capture runs a batch of probes at a time, nearest the camera first, within a draw budget a frame; a
+volume lights more of its box as its probes come in. The relight runs only while the light changes, in
+sweeps spread over frames.
+
+| Setting | What it does |
+|---|---|
+| **Enabled** | The volumes' light. Off, the light probes and the sky light light everything. |
+| **Resolution** | The apply's resolution, full on High and Ultra and half on Medium and Low, brought back up along depth edges. |
+| **Rays per frame** | How many probe rays a frame relights while a relight is due. |
+| **Capture draws** | How many scene draws a frame the capture spends. |
+| **Multi-bounce** | The bounces after the first. |
+
 ### Screen-space reflections
 
 Glossy surfaces reflect what is on screen: a polished floor shows the pillars standing on it, wet

@@ -40,6 +40,7 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `ssaoEnabled` / `ssaoSamples` / `ssaoResolutionScale` | on / 64 / 1.0 | on / 24 / 0.5 | on / 16 / 0.5 | **off** / 16 / 0.5 |
 | `ssilEnabled` | on | on | off | off |
 | `ssrEnabled` / `ssrResolutionScale` / `ssrSteps` | on / 1.0 / 64 | on / 0.5 / 32 | **off** / 0.5 / 24 | **off** / 0.5 / 16 |
+| `giEnabled` / `giResolutionScale` / `giRaysPerFrame` / `giFillDrawsPerFrame` | on / 1.0 / 262144 / 96 | on / 1.0 / 131072 / 64 | on / 0.5 / 65536 / 48 | on / 0.5 / 32768 / 32 |
 | `localExposureEnabled` | on | on | off | off |
 | `volumetricFogEnabled` / `TileSize` / `Slices` / `LocalShadows` | on / 12 / 96 / on | on / 16 / 64 / on | on / 20 / 48 / off | **off** / 24 / 32 / off |
 | `weatherShelterEnabled` / `weatherShelterResolution` | on / 2048 | on / 1024 | on / 1024 | **off** / 512 |
@@ -202,6 +203,11 @@ screen-space reflections, which reflect the same copy of last frame's image SSIL
 | `ssaoBias` | `number` | `0.025` | Samples nearer than this, in world units, are ignored, to stop a surface occluding itself. |
 | `ssaoSamples` | `number` | `24` | Per-pixel cost budget. The trace spends about two thirds of it in depth samples, split into directions and steps. |
 | `ssaoResolutionScale` | `number` | `0.5` | Buffer size as a fraction of the render size. |
+| `giEnabled` | `boolean` | preset | GI Volumes: their probes' relit irradiance as the indirect diffuse inside them, ahead of the light probes and the sky light. |
+| `giResolutionScale` | `number` | preset | The GI apply's resolution as a fraction of the render size, `0.25`–`1`. |
+| `giRaysPerFrame` | `number` | preset | Probe rays relit per frame while a relight is due, `4096`–`1048576`. Nothing is relit while the light holds still. |
+| `giFillDrawsPerFrame` | `number` | preset | Scene draws a GI capture spends per frame, `0`–`512`. |
+| `giMultiBounce` | `boolean` | `true` | The bounces after the first. |
 | `ssrEnabled` | `boolean` | preset | Screen-space reflections on deferred surfaces. Where a ray finds nothing, the light probe, then `Scene.environmentMap`, then the Sky Light's sky reflects. |
 | `ssrResolutionScale` | `number` | preset | Trace resolution as a fraction of the render size, `0.25`–`1`. |
 | `ssrSteps` | `number` | preset | March steps per ray across the screen, `8`–`128`. |

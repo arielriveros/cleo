@@ -202,6 +202,11 @@ export default function RendererSettingsPanel() {
   const [ssrMaxRoughness, setSsrMaxRoughness] = useState<number>(() => renderer?.ssrMaxRoughness ?? 0.6);
   const [ssrMaxDistance, setSsrMaxDistance] = useState<number>(() => renderer?.ssrMaxDistance ?? 50);
   const [ssrThickness, setSsrThickness] = useState<number>(() => renderer?.ssrThickness ?? 0.3);
+  const [giEnabled, setGiEnabled] = useState<boolean>(() => renderer?.giEnabled ?? true);
+  const [giResolution, setGiResolution] = useState<number>(() => renderer?.giResolutionScale ?? 1);
+  const [giRays, setGiRays] = useState<number>(() => renderer?.giRaysPerFrame ?? 131072);
+  const [giFill, setGiFill] = useState<number>(() => renderer?.giFillDrawsPerFrame ?? 64);
+  const [giMultiBounce, setGiMultiBounce] = useState<boolean>(() => renderer?.giMultiBounce ?? true);
   const [gridVisible, setGridVisible] = useState<boolean>(() => renderer?.gridVisible ?? true);
   const [gridPlane, setGridPlane] = useState<string>(() => renderer?.gridPlane ?? 'xz');
   const [frustumCulling, setFrustumCulling] = useState<boolean>(() => renderer?.frustumCulling ?? true);
@@ -339,6 +344,11 @@ export default function RendererSettingsPanel() {
     setSsrMaxRoughness(renderer.ssrMaxRoughness);
     setSsrMaxDistance(renderer.ssrMaxDistance);
     setSsrThickness(renderer.ssrThickness);
+    setGiEnabled(renderer.giEnabled);
+    setGiResolution(renderer.giResolutionScale);
+    setGiRays(renderer.giRaysPerFrame);
+    setGiFill(renderer.giFillDrawsPerFrame);
+    setGiMultiBounce(renderer.giMultiBounce);
     setGridVisible(renderer.gridVisible);
     setGridPlane(renderer.gridPlane);
     setFrustumCulling(renderer.frustumCulling);
@@ -984,6 +994,35 @@ export default function RendererSettingsPanel() {
             options={[
               { value: 'half' as const, label: 'Half', title: 'Half resolution: a quarter of the cost' },
               { value: 'full' as const, label: 'Full', title: 'Full resolution: sharp mirrors' },
+            ]}
+          />
+        </div>
+      </div></Collapsable>
+
+      {/* GI Volumes: their captured probes, relit as the light changes, as the indirect diffuse inside them. */}
+      <Collapsable title='GI Volumes' persistKey='renderer.gi-volumes' defaultOpen={false}><div className='w-full p-2'>
+        <Toggle label='Enabled' checked={giEnabled} className='my-1'
+          onChange={(c) => { renderer.giEnabled = c; setGiEnabled(c); touch(); }} />
+        {giEnabled && !renderer.gi.supported &&
+          <Hint>Disabled on this device: half-float render targets are unavailable. The light probes and the
+            sky light light everything.</Hint>}
+        <Slider label='Rays per frame' labelClassName={LABEL_W} value={giRays} min={4096} max={524288} step={4096}
+          readout={(v) => `${Math.round(v / 1024)}k`}
+          onChange={(v) => { renderer.giRaysPerFrame = v; setGiRays(renderer.giRaysPerFrame); touch(); }} />
+        <Slider label='Capture draws' labelClassName={LABEL_W} value={giFill} min={0} max={256} step={1}
+          readout={(v) => v.toFixed(0)}
+          onChange={(v) => { renderer.giFillDrawsPerFrame = v; setGiFill(renderer.giFillDrawsPerFrame); touch(); }} />
+        <Toggle label='Multi-bounce' checked={giMultiBounce} className='my-1'
+          onChange={(c) => { renderer.giMultiBounce = c; setGiMultiBounce(c); touch(); }} />
+        <div className='flex items-center gap-1 my-1 text-ui'
+             title='The apply resolution. Half costs a quarter of Full and is brought back up along depth edges.'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Resolution</span>
+          <SegmentedControl
+            value={giResolution >= 0.999 ? 'full' : 'half'}
+            onChange={(r) => { renderer.giResolutionScale = r === 'full' ? 1 : 0.5; setGiResolution(renderer.giResolutionScale); touch(); }}
+            options={[
+              { value: 'half' as const, label: 'Half', title: 'Half resolution: a quarter of the cost' },
+              { value: 'full' as const, label: 'Full', title: 'Full resolution' },
             ]}
           />
         </div>
