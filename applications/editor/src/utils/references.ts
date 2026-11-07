@@ -416,6 +416,17 @@ export function collectPublishedSoundIds(node: any, set: Set<string>): void {
 }
 
 /**
+ * GI Volume bake ids named by a SERIALIZED node tree (`giVolume.bakeId`), walked recursively into `set`:
+ * the bakes a published game carries.
+ */
+export function collectGiBakeIds(node: any, set: Set<string>): void {
+  if (!node || typeof node !== 'object') return
+  const id = node.giVolume?.bakeId
+  if (typeof id === 'string' && id) set.add(id)
+  for (const child of (node.children ?? [])) collectGiBakeIds(child, set)
+}
+
+/**
  * Sound-sample asset ids played by any live Sound node.
  *
  * A sample has exactly one kind of referrer, unlike a texture — nothing embeds one, and no asset holds a

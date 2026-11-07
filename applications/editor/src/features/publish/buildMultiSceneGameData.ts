@@ -1,4 +1,4 @@
-import { Scene, TextureManager, AudioManager } from 'cleo'
+import { Scene, TextureManager, AudioManager, GiBakeRegistry } from 'cleo'
 import { sourceSkinFor } from '../../utils/rigAssets'
 import type { RenderSettings, InputMap } from 'cleo'
 import { isDefaultInputMap } from 'cleo'
@@ -7,7 +7,7 @@ import type { ProjectSettings } from '../options/projectSettings'
 import { buildGameData, bakeTemplates, attachScriptModules } from './buildGameData'
 import { compressTerrainData, compressTilemapData } from './terrainImages'
 import { stripDimensionData } from './stripDimensionData'
-import { collectPublishedTextureIds, collectPublishedSoundIds } from '../../utils/references'
+import { collectPublishedTextureIds, collectPublishedSoundIds, collectGiBakeIds } from '../../utils/references'
 import { collectPrograms } from './collectProgramUsage'
 import { extractNodeState } from '../../utils/projectStorage'
 import { resyncScene } from '../../utils/sceneResync'
@@ -229,6 +229,16 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
   if (Object.keys(retargets).length) out.retargets = retargets
 
   if (soundBytes.length) out.soundBytes = soundBytes
+  // GI Volume bakes, narrowed like the sounds: the ones the serialized scenes' volumes name. A volume
+  // whose bake is missing captures at runtime instead, so nothing here is required.
+  const wantedBakes = new Set<string>()
+  for (const entry of Object.values(scenes)) collectGiBakeIds(entry.scene, wantedBakes)
+  const giBakes: { id: string; bytes: Uint8Array }[] = []
+  for (const id of wantedBakes) {
+    const bytes = GiBakeRegistry.get(id)
+    if (bytes) giBakes.push({ id, bytes })
+  }
+  if (giBakes.length) out.giBakes = giBakes
   if (animations.length) { out.animations = animations; out.modelAnimations = modelAnimations }
   // One config for the whole game. `render` is per-project here even though a scene blob carries its
   // own copy; `input` is project-wide by design and has no per-scene form at all.

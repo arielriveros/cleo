@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, registerTemplates, Logger, InputSystem, shaderStats, nextFrame } from 'cleo';
+import { CleoEngine, PhysicsSystem, Scene, TextureManager, AudioManager, parseSoundSettings, setGameHost, setScriptProvider, setScriptModuleProvider, registerTemplates, Logger, InputSystem, shaderStats, nextFrame, GiBakeRegistry } from 'cleo';
 import type { LoadProgressListener } from 'cleo';
 import UILayer from '../features/gameUi/UILayer';
 import VirtualControlsLayer from '../features/gameUi/VirtualControlsLayer';
@@ -177,6 +177,10 @@ async function boot(): Promise<void> {
       }
     } catch { /* skip a sound the browser cannot take */ }
   }
+
+  // GI Volume bakes, before any scene parses, as the sounds are: a volume loads its capture instead of
+  // capturing again.
+  for (const b of pack.giBakes ?? []) GiBakeRegistry.set(b.id, b.bytes);
 
   // Templates once, globally: the registry backs scene.instantiate and must survive a Game.loadScene
   // switch. Geometry is inflated eagerly — a script may instantiate one at any moment.

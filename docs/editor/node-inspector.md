@@ -205,7 +205,10 @@ little past its walls, so its edge falls outside.
 | **Include grass** | Grass cards in the capture. Off by default: a meadow hides nothing a probe a metre up cares about. |
 
 Below the fields, a line gives the capture's progress, then how many probes light and how many are inside
-geometry. **Capture again** captures every probe again, after the static geometry inside the volume changed.
+geometry. **Save bake** saves the finished capture with the project: the scene opens with it instead of
+capturing again, and a published game carries it. A bake taken for another grid, or before the geometry
+round the volume changed, is refused and the volume captures again; save a new one. **Capture again**
+drops the saved bake and captures every probe again, after the static geometry inside the volume changed.
 
 #### Exposure Volume
 

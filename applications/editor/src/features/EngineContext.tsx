@@ -118,6 +118,7 @@ import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects
 import { activeProjectId } from "../utils/projectScope";
 import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf, deleteTextures } from "../utils/textureStore";
 import { preloadAudio, persistAudio } from "../utils/audioStore";
+import { preloadGiBakes } from "../utils/giBakeStore";
 import { startTask, StepStatus } from "@cleo/app-kit/feedback/progressStore";
 import { invalidateNavSoup, reconcileEditorHelpers } from "../utils/editorHelpers";
 import { readBackendPreference } from '@cleo/app-kit/renderer/backendPreference';
@@ -5964,6 +5965,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       boot.step('audio').fail(String(e));
     } finally {
       setAudioPreloaded(true);
+    }
+
+    // The GI Volumes' saved captures, before any scene parses: a volume loads its bake the first frame it
+    // is seen instead of capturing again. A failure only means the volumes capture at runtime.
+    try {
+      const loaded = await preloadGiBakes();
+      if (loaded) Logger.info(`Loaded ${loaded} GI bake${loaded === 1 ? '' : 's'}`, 'Editor');
+    } catch (e) {
+      Logger.warn(`Failed to load the GI bakes: ${e}`, 'Editor');
     }
 
     // Multi-scene project: load the meta (migrating a legacy single-scene 'cleo_project' blob once), then
