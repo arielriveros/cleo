@@ -29,7 +29,8 @@ Blit one internal buffer instead of the final composite. This is the fastest way
 this look wrong":
 
 **Final, Lit Scene, Albedo, Metallic, Normal, Roughness, Emissive, AO, Depth, SSAO, Indirect,
-Reflections, Refl. Share, Shadow, Cascades, Bloom, Bloom Mask, Velocity, TAA History, Overdraw.**
+Reflections, Refl. Share, GI, GI Share, Shadow, Cascades, Bloom, Bloom Mask, Velocity, TAA History,
+Overdraw.**
 
 ![Final, Albedo, Normal and Cascades on the same view of the Valley](../media/debug-views.jpg)
 
@@ -41,6 +42,7 @@ it is multiplied by each surface's colour.
 | A material that lights oddly | **Normal** — a normal map imported as sRGB is obvious here. |
 | Something too shiny or too flat | **Metallic**, **Roughness** |
 | A reflection that is missing or in the wrong place | **Reflections**, **Refl. Share** |
+| A room too bright or too dark, or light leaking through a wall | **GI**, **GI Share** |
 | Shadows in the wrong place | **Shadow**, **Cascades** |
 | Bloom on the wrong things | **Bloom Mask** |
 | Ghosting or smearing | **Velocity**, **TAA History** |
@@ -437,6 +439,10 @@ sweeps spread over frames.
 | **Rays per frame** | How many probe rays a frame relights while a relight is due. |
 | **Capture draws** | How many scene draws a frame the capture spends. |
 | **Multi-bounce** | The bounces after the first. |
+
+The **GI** debug channel shows the volumes' light as it falls on a mid-grey surface, and
+**GI Share** how much of each pixel they lit (white) rather than the light probes and the sky (black). A
+volume whose probes are still being captured shows grey in GI Share, filling in as they arrive.
 
 ### Screen-space reflections
 

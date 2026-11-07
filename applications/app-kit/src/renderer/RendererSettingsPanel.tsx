@@ -28,6 +28,8 @@ const CHANNELS: { key: string; label: string }[] = [
   { key: 'ssil',      label: 'Indirect' },
   { key: 'ssr',       label: 'Reflections' },
   { key: 'ssrConfidence', label: 'Refl. Share' },
+  { key: 'gi',        label: 'GI' },
+  { key: 'giCoverage', label: 'GI Share' },
   { key: 'shadow',    label: 'Shadow' },
   { key: 'cascades',  label: 'Cascades' },
   { key: 'bloom',     label: 'Bloom' },

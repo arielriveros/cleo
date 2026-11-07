@@ -420,6 +420,7 @@ export class Renderer {
         this._debugViews = new DebugViews({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
+            get giTexture() { return renderer._gi.texture; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._temporal, this._post, this._foliage, this._shadows, this._ssil, this._ssr, this._fullscreen);
         this._capture = new Capture({
             get renderHeight() { return renderer._renderHeight; },

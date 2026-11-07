@@ -26,6 +26,8 @@ import type { FullscreenPasses } from './fullscreenPasses';
 export interface DebugViewsHost {
     readonly renderHeight: number;
     readonly renderWidth: number;
+    /** The GI Volumes' apply target this frame (GiSystem.texture), null when none was produced. */
+    readonly giTexture: Texture | null;
 }
 
 /**
@@ -213,6 +215,17 @@ export class DebugViews {
                 if (!this._ssr.ssrProducedThisFrame || !this._ssr.ssrResult) { tex = this._bindGroups.fallbackTexture; mode = 9; }
                 else { tex = this._ssr.ssrResult.colors[0]; mode = 2; }
                 break;
+            // The GI Volumes' light as it falls on a mid-grey (18%) surface, through the image's curve
+            // (irradiance itself, unscaled, is several times what any surface reflects and reads white),
+            // and the share of each pixel the volumes claimed (white = all of it, black = the light
+            // probes' and the sky's alone). Black while no volume applied this frame.
+            case 'gi':
+            case 'giCoverage': {
+                const gi = this._host.giTexture;
+                if (!gi) { tex = this._bindGroups.fallbackTexture; mode = 9; }
+                else { tex = gi; mode = this.debugView === 'gi' ? 6 : 2; }
+                break;
+            }
             case 'bloom':     tex = this._post.bloomMips[0].colors[0];  mode = 6; break;
             // The bloom-eligibility mask itself: the scene buffer's ALPHA, as greyscale. White blooms,
             // black cannot. Exists because "bloom does nothing" is otherwise indistinguishable between
@@ -244,7 +257,8 @@ export class DebugViews {
         // curve, so "Lit Scene" cannot disagree with "Final" about what the frame looks like. No LUT
         // here on purpose — a debug channel is a picture of a BUFFER, and a grade would misreport it.
         this._shaderManager.setUniform('u_toneMapper', this._post.toneMapperId());
-        this._shaderManager.setUniform('u_exposure', displayExposure(this._view)); // used by the tonemapped channels
+        // Used by the tonemapped channels; the GI channel's light lands on an 18% grey card.
+        this._shaderManager.setUniform('u_exposure', displayExposure(this._view) * (this.debugView === 'gi' ? 0.18 : 1));
         // The depth attachment rides along on every channel, because WebGPU requires every binding the
         // shader declares to be present and only mode 3 actually reads it.
         this._passes.drawFullscreenAndEnd(pass);

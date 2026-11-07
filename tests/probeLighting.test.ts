@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { vec3 } from 'gl-matrix';
 import { LightProbeNode } from '../src/core/scene/nodes/lightProbeNode';
 import {
-    MAX_LIGHTING_PROBES, boxProjectedDirection, createLightingProbeArrays, createReflectionProbeArrays, orderLightingProbes,
-    orderReflectionProbes, packLightingProbes, packReflectionProbes, probeAmbientAt, probeLightingAt,
+    MAX_LIGHTING_PROBES, boxProjectedDirection, createLightingProbeArrays, createReflectionProbeArrays, irradianceLuminanceL1,
+    orderLightingProbes, orderReflectionProbes, packLightingProbes, packReflectionProbes, probeAmbientAt, probeLightingAt,
 } from '../src/graphics/render/probeLighting';
 import { skyAmbient } from '../src/graphics/particles/particleLighting';
 import {
@@ -217,6 +217,31 @@ describe('light probe reflections per pixel (orderReflectionProbes / packReflect
         expect(arrays.params[10]).toBe(0);                  // unbounded: never box-projected
         expect(arrays.blend[11]).toBe(1);                   // unbounded flag
         expect(Array.from(arrays.capture.subarray(0, 3))).toEqual([3, 1, 2]);
+    });
+
+    it('packs the irradiance luminance the GI Volumes normalize reflections against, L0 and L1', () => {
+        // A sky of uniform radiance L: E/pi = L in every direction (the radiance-form L00 is L x 2 sqrt(pi)).
+        const L = 0.25, sh = new Float32Array(SH_FLOATS);
+        sh[0] = sh[1] = sh[2] = L * 2 * Math.sqrt(Math.PI);
+        const out = new Float32Array(4);
+        irradianceLuminanceL1(sh, 1, out, 0);
+        expect(out[0]).toBeCloseTo(L, 4);
+        expect(Math.abs(out[1]) + Math.abs(out[2]) + Math.abs(out[3])).toBe(0);
+        // The linear term along the normal matches the full L2 evaluation's band-1 part, x the scale.
+        const dir = new Float32Array(SH_FLOATS);
+        dir[0 * 4 + 1] = 1;     // L00 green
+        dir[1 * 4 + 1] = 0.6;   // L1,-1 (y) green
+        dir[3 * 4 + 1] = -0.3;  // L1,1 (x) green
+        irradianceLuminanceL1(dir, 2, out, 0);
+        const n: [number, number, number] = [0, 1, 0];
+        const full = shEvalIrradiance(dir, n, 1) * 2 / Math.PI * 0.7152;
+        expect(out[0] + out[1] * n[0] + out[2] * n[1] + out[3] * n[2]).toBeCloseTo(full, 5);
+        // Packed per reflecting probe, once it has coefficients.
+        const room = lightingProbe('p-irr', [0, 0, 0], { size: [10, 4, 10], intensity: 2 });
+        room.setIrradianceSH(sh);
+        const arrays = createReflectionProbeArrays();
+        packReflectionProbes([room], 4, arrays);
+        expect(arrays.irradiance[0]).toBeCloseTo(L * 8, 4);
     });
 });
 

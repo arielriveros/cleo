@@ -7,8 +7,8 @@ import type { ExposureCurveKey } from '../lighting';
 /** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
 export type DebugView =
     'final' | 'scene' | 'albedo' | 'metallic' | 'normal' | 'roughness' |
-    'emissive' | 'ao' | 'depth' | 'ssao' | 'ssil' | 'ssr' | 'ssrConfidence' | 'shadow' | 'cascades' | 'bloom' |
-    'bloomMask' | 'mask' | 'velocity' | 'taaHistory' | 'overdraw';
+    'emissive' | 'ao' | 'depth' | 'ssao' | 'ssil' | 'ssr' | 'ssrConfidence' | 'gi' | 'giCoverage' | 'shadow' |
+    'cascades' | 'bloom' | 'bloomMask' | 'mask' | 'velocity' | 'taaHistory' | 'overdraw';
 
 /** How much occlusion culling does: nothing, the landscape, or the landscape and occlusion volumes. */
 export type OcclusionMode = 'off' | 'terrain' | 'all';

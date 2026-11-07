@@ -414,6 +414,7 @@ export class LightingPasses {
             this._shaderManager.setUniform('u_reflProbeBlend', refl.blend.subarray(0, reflectionCount * 4));
             this._shaderManager.setUniform('u_reflProbeParams', refl.params.subarray(0, reflectionCount * 4));
             this._shaderManager.setUniform('u_reflProbeCapture', refl.capture.subarray(0, reflectionCount * 4));
+            this._shaderManager.setUniform('u_reflProbeIrradiance', refl.irradiance.subarray(0, reflectionCount * 4));
         }
         const skyReflection = scene.environmentMap ? null : this._sys.sky.skyReflectionCube;
         const skyLight = scene.skyLight;

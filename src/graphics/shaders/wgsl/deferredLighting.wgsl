@@ -20,6 +20,8 @@
 const MAX_REFLECTION_LOD: f32 = 4.0;
 /** Relative depth difference beyond which an AO/SSIL neighbour is treated as a different surface. */
 const AO_DEPTH_TOLERANCE: f32 = 0.02;
+/** Rec. 709 luminance, for the GI Volumes' reflection normalization. */
+const GI_LUMA = vec3<f32>(0.2126, 0.7152, 0.0722);
 
 // --- G-buffer -----------------------------------------------------------------------------------
 @group(0) @binding(0) var u_gAlbedoMetallic_texture: texture_2d<f32>;    // rgb = albedo, a = metallic
@@ -92,6 +94,12 @@ struct Lighting {
     u_reflProbeParams: array<vec4<f32>, 16>,
     /** xyz = where the probe captured (its world position), for box projection. */
     u_reflProbeCapture: array<vec4<f32>, 16>,
+    /**
+     * Their irradiance's LUMINANCE, L0 and L1 (x the constant term, yzw the linear one in the normal's x,
+     * y, z), E/pi x intensity x pre-exposure: what the GI Volumes' reflection normalization compares the
+     * volumes' light with. x = 0 for a probe with none projected yet, which is left as it is.
+     */
+    u_reflProbeIrradiance: array<vec4<f32>, 16>,
 
     u_dirLight: DirectionalLight,
     u_skyLight: SkyLight,
@@ -493,6 +501,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // REFLECTIONS from the reflecting probes, as the lighting above: each claims its feathered weight of what
     // the ones before it left, the smallest box first, and the environment fallback keeps the rest. The same
     // answer wherever the camera is.
+    //
+    // Normalized by the GI Volumes where they light the pixel (Lagarde & de Rousiers 2014): a probe saw its
+    // room's light once, from one point, so where the volumes put more or less light on this surface than
+    // the probe received, its reflection scales by the same ratio. A corner reflects darker than the middle
+    // of the room, and a room the volumes darken stops reflecting the brighter light its probe captured.
+    // The sky reflection, below, scales the same way against the open sky's light: a room with no probe
+    // of its own no longer mirrors the bright sky from its floor.
+    let giLum = select(0.0, dot(gi.rgb, GI_LUMA) / max(gi.a, 1e-4), gi.a > 1e-3);
     var envShare = 1.0;
     var probeSpecular = vec3<f32>(0.0);
     let Rv = reflect(-V, N);
@@ -506,11 +522,22 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             dir = boxProjected(Rv, worldPos, u_lighting.u_reflProbeInvVolume[i], u_lighting.u_reflProbeCapture[i].xyz);
         }
         let claim = w * envShare;
-        probeSpecular += probeReflection(i32(params.x), dir, N, V, roughness, F0) * (params.y * claim);
+        var norm = 1.0;
+        let irr = u_lighting.u_reflProbeIrradiance[i];
+        if (gi.a > 1e-3 && irr.x > 0.0) {
+            let probeLum = max(irr.x + dot(irr.yzw, N), 0.05 * irr.x);
+            norm = mix(1.0, clamp(giLum / probeLum, 0.0, 2.0), gi.a);
+        }
+        probeSpecular += probeReflection(i32(params.x), dir, N, V, roughness, F0) * (params.y * claim * norm);
         envShare -= claim;
         if (envShare <= 1e-3) { break; }
     }
-    indirect.specular = indirect.specular * envShare + probeSpecular;
+    var envNorm = 1.0;
+    if (gi.a > 1e-3 && u_lighting.u_envMapMode == 2) {
+        let open = dot(u_lighting.u_sceneAmbient + skyIrradiance(u_lighting.u_skyLight, N), GI_LUMA);
+        if (open > 0.0) { envNorm = mix(1.0, clamp(giLum / open, 0.0, 1.0), gi.a); }
+    }
+    indirect.specular = indirect.specular * (envShare * envNorm) + probeSpecular;
 
     // Distance in front of the camera, which is what selects a cascade.
     let viewDepth = -(u_lighting.u_view * vec4<f32>(worldPos, 1.0)).z;

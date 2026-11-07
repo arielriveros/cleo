@@ -26,6 +26,15 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - *Everywhere.* Deferred surfaces take it per pixel ahead of the light probes and the sky light;
     forward materials, lit particles and lit sprites at their centre. On WebGL2 and WebGPU alike, at
     every quality preset (half resolution on Medium and Low).
+  - *Saved with the project.* **Save bake** stores the capture, deflated, beside the scene; it loads in
+    the editor and in a published game without capturing again, and is captured afresh only when the
+    geometry round the volume has moved. Moving things (a script's windmill sails, physics props) are
+    left out of it.
+  - *Reflections that match.* Inside a volume, a light probe's reflection is scaled to the light the
+    volume puts on each surface, so a room the volume darkens stops mirroring the brighter light its probe
+    captured, and a floor with no probe no longer reflects the open sky.
+  - *Debug channels.* **GI** shows the volumes' light on a mid-grey surface, **GI Share** where they
+    light the frame.
 
 - **Lighting that holds together from noon to midnight.** Torches now light the night in the editor
   as they do in the game, and glare no longer floods the screen.
