@@ -410,14 +410,19 @@ export class Sprite2DPasses {
         const local = gridLights ? NO_LOCAL_LIGHT : gatherParticleLocalLight([m[12], m[13], m[14]], light.localLights);
         material.properties.set('sunDir', [light.sunDirection[0], light.sunDirection[1], light.sunDirection[2]]);
         material.properties.set('sunColor', [light.sunColor[0], light.sunColor[1], light.sunColor[2]]);
+        // The fill where the sprite stands: a light probe's in its volume (a room's smoke is lit by the
+        // room), else the scene ambient and sky light (render/probeLighting.ts).
+        const ambient = this._sys.lighting.probeAmbientAt(scene, vec3.set(this._litPos, m[12], m[13], m[14]), light.ambient, this._litAmbient);
         // As lit particles: the fill of the local lights past the key joins the ambient, through the 1/π.
-        material.properties.set('ambient', [light.ambient[0] + local.fill[0] / Math.PI, light.ambient[1] + local.fill[1] / Math.PI,
-                                            light.ambient[2] + local.fill[2] / Math.PI]);
+        material.properties.set('ambient', [ambient[0] + local.fill[0] / Math.PI, ambient[1] + local.fill[1] / Math.PI,
+                                            ambient[2] + local.fill[2] / Math.PI]);
         material.properties.set('keyDir', local.keyDirection);
         material.properties.set('keyColor', local.keyColor);
     }
 
     private readonly _litRight = vec3.create();
+    private readonly _litPos = vec3.create();
+    private readonly _litAmbient: number[] = [0, 0, 0];
     private readonly _litUp = vec3.create();
     private readonly _litBack = vec3.create();
 

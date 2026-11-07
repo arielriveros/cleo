@@ -140,6 +140,8 @@ export class ParticlePasses {
             depth: this._host.thumbnailMode ? null : this._temporal.depthSource(),
             width: this._host.renderWidth, height: this._host.renderHeight,
             ambient, sunDirection, sunColor, localLights,
+            // The light probes' fill at an effect, as surfaces there get it (render/probeLighting.ts).
+            ambientAt: position => this._sys.lighting.probeAmbientAt(scene, position as vec3, ambient, this._probeAmbient),
             visible: this._sys.visibility.frustumCulling ? (min, max) => this._sys.visibility.frustum.intersectsAABB(min, max) : undefined,
             hidden: this._hiddenByVolume,
             lodDistanceScale: this.particleLodDistanceScale,
@@ -149,7 +151,7 @@ export class ParticlePasses {
             // during a probe capture, which would reflect the probe being captured.
             environment: this._view.capturing ? undefined : position => {
                 const probe = scene.probeForPoint(position, true);
-                const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
+                const probeCube = probe ? probe.envMap : null;
                 const cube = probeCube ?? scene.environmentMap;
                 return cube ? { cube, linear: !!probeCube } : null;
             },
@@ -219,6 +221,8 @@ export class ParticlePasses {
     private readonly _hiddenByVolume = (node: ParticleSystemNode) => this._sys.visibility.volumeCulled(node);
     private readonly _particleViewProj: mat4 = mat4.create();
     private readonly _particleLights: ParticleLocalLight[] = [];
+    /** Scratch for `ambientAt`: read by the particle renderer before its next call. */
+    private readonly _probeAmbient: number[] = [0, 0, 0];
     private _frameLight: FrameLight | null = null;
     private _frameLightScene: Scene | null = null;
     private _frameLightFrame = -1;

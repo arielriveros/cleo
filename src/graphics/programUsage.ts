@@ -25,7 +25,7 @@ import { QUALITY_TIERS, type RenderSettings, type QualityPreset } from './render
  */
 export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor'>> = {
     // Boot and every frame: the targets, IBL bakes, the deferred resolve, presentation.
-    screen: 'core', present: 'core', composer: 'core', brdf: 'core', irradiance: 'core', prefilter: 'core',
+    screen: 'core', present: 'core', composer: 'core', brdf: 'core', irradiance: 'core', prefilter: 'core', prefilterOct: 'feature',
     skybox: 'core', deferredLighting: 'core', shadowMap: 'core', basic: 'core', basicGeometry: 'core',
     // The default attribute layout foliage and other instanced meshes are initialised from.
     blinn_phongGeometry: 'core',
@@ -191,8 +191,9 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
             if (a.godRaysEnabled !== false) add('godRays');
             break;
         }
-        // A probe captures the scene through the forward programs, terrain included.
-        case 'lightProbe': add('terrainForward'); break;
+        // A probe captures its scene as a G-buffer through the scene's own geometry programs, relights it
+        // with the deferred pass, prefilters it into the reflection atlas and projects its lighting.
+        case 'lightProbe': add('prefilterOct'); add('skyProject'); break;
         case 'particleSystem': addParticles(node.particleSystem, use); break;
     }
     for (const child of Array.isArray(node.children) ? node.children : []) usageFromSceneJson(child, use, shadows);

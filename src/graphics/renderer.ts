@@ -423,7 +423,7 @@ export class Renderer {
             resizeBuffers: (width, height) => renderer._resizeBuffers(width, height),
             get clearColor() { return renderer.clearColor; },
             render: (scene) => renderer.render(scene),
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._temporal, this._post, this._shadows, this._lighting, this._sky, this._forward, this._fullscreen);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._temporal, this._post, this._shadows, this._lighting, this._sky, this._forward, this._fullscreen, this._subsystems);
         this._stats = new RenderStats({
             get canvas() { return renderer._canvas; },
             get deferred() { return renderer._deferred; },
@@ -562,6 +562,7 @@ export class Renderer {
         // 8-BIT ON PURPOSE, and RGBM-encoded by the shader. WebGL2's readback refuses anything but a
         // 4-byte colour format, so a float target here could be rendered but never read.
         this._sky.skyProjectFBO = new Framebuffer({ colorTextureOptions: { mipMap: false }, depth: false });
+        this._sky.probeProjectFBO = new Framebuffer({ colorTextureOptions: { mipMap: false }, depth: false });
         // Selection outline silhouette mask (low precision, no mipmaps).
         this._post.outlineMaskFBO = new Framebuffer({ colorTextureOptions: { mipMap: false } });
         // Editor overlay layer. `precision: 'high'` matches `_targets.scene`'s rgba16float, so the gizmo,
@@ -773,15 +774,19 @@ export class Renderer {
         // Everything from here to the sky bake runs BEFORE `_statsT0`, so none of it is inside the
         // `Render (CPU)` figure the HUD shows — it lands in "Unattributed" instead. That exclusion is
         // deliberate (an occasional probe bake must not spike the frame stat), but it also means a
-        // per-frame full-scene walk here is invisible. The CPU profiler scopes it so it is not.
-        this._passes.scope('prepare');
+        // per-frame full-scene walk here is invisible. The CPU profiler scopes it so it is not: one flat
+        // `prepare.*` row per stage, so the Performance page says WHICH walk a slow prepare is.
+        this._passes.scope('prepare.shaders');
 
         // Compile+register any custom-material programs before any pass calls initializeModel/getShader.
         this._ensureCustomShaders(scene);
 
         // Combine each material's separate metallic/roughness/occlusion (and specular/reflectivity) maps
         // into the single packed texture the shaders sample. Before any pass binds a material.
+        this._passes.scope('prepare.textures');
         this._ensurePackedTextures(scene);
+
+        this._passes.scope('prepare.view');
 
         // A teleport or a camera switch makes every temporal history an invalid predecessor. Once per
         // frame, before any pass reads one — see `_detectTemporalCut` for why it is not two tests.
@@ -825,6 +830,7 @@ export class Renderer {
 
         // Pick each terrain chunk's detail level for this camera. Before the shadow passes, so the
         // cascades/shadow map rasterize the same reduced terrain the color passes will.
+        this._passes.scope('prepare.lod');
         this._visibility.updateTerrainLOD(scene);
 
         // Same for per-mesh LOD groups: each picks its active level (or distance-culls) before shadows.
@@ -832,6 +838,7 @@ export class Renderer {
 
         // The occluders, rasterized for this view before anything asks what is visible: the foliage
         // prepare, the geometry pass, the forward overlay and the velocity pass all consult it.
+        this._passes.scope('prepare.occlusion');
         this._visibility.buildOcclusion(scene);
         this._visibility.beginGpuOcclusion();
         // Then the occlusion volumes, which read both: which boxes the camera cannot see, so every pass
@@ -842,6 +849,7 @@ export class Renderer {
         // Which models moved since last frame. AFTER LOD selection, so a level that was just swapped in
         // is already flagged not-visible-last-frame rather than reading as a teleport, and BEFORE post
         // processing, which is where the answer is needed — see `_temporal.detectObjectMotion`.
+        this._passes.scope('prepare.motion');
         this._temporal.detectObjectMotion(scene);
 
         // Decide the motion-blur gate here rather than in `_applyPostProcessing`: the velocity buffer
@@ -874,6 +882,8 @@ export class Renderer {
         this._passes.scope('ibl.bake');
         this._sky.updateSkyReflection(scene);
         this._sky.updateIBL(scene);
+        // A probe captured last frame or earlier gets the spherical harmonics its lighting is applied in.
+        this._sky.updateProbeLighting(scene);
         this._passes.endScope();
 
         // Reset per-frame perf counters AFTER the (occasional) IBL bake so bakes don't spike the RenderStats.stats.
@@ -1009,18 +1019,15 @@ export class Renderer {
         return this._capture.renderProbePreview(probe, width);
     }
 
-    /** Convolve a source environment cubemap into diffuse-irradiance and prefiltered-specular cubemaps. */
-    public bakeIBL(sourceCube: Texture, sourceRes: number): { irradiance: Texture, prefiltered: Texture } {
-        return this._capture.bakeIBL(sourceCube, sourceRes);
+    /**
+     * The light-probe bake in progress, if any (render/probeBaker.ts): which probe, whether a full bake,
+     * a relight or a filter, and how far through its steps (0..1). One runs at a time, a step a frame.
+     */
+    public get probeBakeProgress(): { probe: LightProbeNode; kind: 'bake' | 'relight' | 'filter'; fraction: number } | null {
+        return this._capture.probes.progress;
     }
 
-    /**
-     * Capture the full scene into a cubemap from a probe's position, then bake its irradiance and
-     * prefiltered specular maps. See {@link Capture.captureProbe}.
-     */
-    public captureProbe(scene: Scene, probe: LightProbeNode): void {
-        this._capture.captureProbe(scene, probe);
-    }
+
 
     /** Original forward pipeline: light all four material shaders and draw everything in one pass. */
     private _renderForward(scene: Scene, shadowLight: LightNode | null): void {
@@ -1059,7 +1066,8 @@ export class Renderer {
         // Each landscape draws its snow with the snowing weather volume's material that reaches it, baked
         // as one more layer of its surface arrays (render/weatherPack.ts `snowForLandscape`).
         for (const node of scene.landscapes) {
-            const snow = this._thumbnailMode ? null : snowForLandscape(scene.weatherVolumes, node.getBoundingBox());
+            const snow = this._thumbnailMode || scene.weatherVolumes.size === 0 ? null
+                : snowForLandscape(scene.weatherVolumes, node.getBoundingBox());
             node.terrain.syncPackedLayers(this._view.frameIndex, this._terrainLayerTextureSize,
                 snow?.snowMaterial ? { material: snow.snowMaterial, metresPerRepeat: snow.snowTiling } : null);
         }

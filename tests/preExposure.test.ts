@@ -108,16 +108,20 @@ describe('every pre-exposure site', () => {
         expect(body).not.toContain('preExposure');
     });
 
-    it('re-uploads every forward lighting uniform at pre-exposure 1 before a probe captures', () => {
-        // A capture runs at the start of a frame, before that frame's uploads: without its own reset the
-        // forward programs light the bake with last frame's pre-exposed ambient, sky light and emissive.
-        const capture = src('src/graphics/render/capture.ts');
-        const body = capture.slice(capture.indexOf('public captureProbe('), capture.indexOf('this._view.cubeFace = true;'));
-        const at1 = body.indexOf('this._view.preExposure = 1;');
-        const reset = body.indexOf('this._lighting.resetForwardLighting(scene);');
-        expect(at1).toBeGreaterThan(-1);
-        expect(reset).toBeGreaterThan(at1);
-        expect(body.indexOf('setDirectionalOnForward')).toBeGreaterThan(reset);
+    it('lights a probe at pre-exposure 1, and re-uploads the forward lighting there before forward draws', () => {
+        // A probe job step runs at the start of a frame, before that frame's uploads: the relight's own
+        // uploads (light records, deferred lighting) and, for forward-only models, a forward reset must all
+        // happen inside the capture state, at k = 1, or the bake is lit at last frame's pre-exposure.
+        const baker = src('src/graphics/render/probeBaker.ts');
+        const state = baker.slice(baker.indexOf('private _withCaptureState('), baker.indexOf('private _aimFace('));
+        expect(state.indexOf('this._view.preExposure = 1;')).toBeGreaterThan(-1);
+        expect(state.indexOf('this._view.preExposure = 1;')).toBeLessThan(state.indexOf('body();'));
+        const relight = baker.slice(baker.indexOf('private _relight('), baker.indexOf('private _forwardOnlyModels('));
+        expect(relight.indexOf('this._withCaptureState(')).toBeLessThan(relight.indexOf('packLightRecords(scene, true)'));
+        const forward = baker.slice(baker.indexOf('private _prepareForwardForCapture('), baker.indexOf('private _drawForwardOnly('));
+        const reset = forward.indexOf('lighting.resetForwardLighting(scene);');
+        expect(reset).toBeGreaterThan(-1);
+        expect(forward.indexOf('setDirectionalOnForward')).toBeGreaterThan(reset);
     });
 
     it('never touches the custom-material prelude chunks', () => {

@@ -3,6 +3,7 @@ import { mat4, vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 import { boxBlendFractions, boxInverseMatrix, boxWeight, boxWorldBounds } from "./boxVolume";
+import type { LightBakeSnapshot } from "./lightNode";
 
 /**
  * Baked irradiance probe with a bounded influence volume.
@@ -23,17 +24,19 @@ export class LightProbeNode extends Node {
     // the scene ambient — supplies it there instead.
     private _affectsLighting: boolean;
     private _affectsReflections: boolean;
+    // Parallax-correct the reflections against the box (bounded probes only).
+    private _boxProjection: boolean;
     private _needsBake: boolean = true;
+    private _needsRelight: boolean = false;
     private _lastBakeTime: number = 0;
     private _sourceCube: Texture | null = null;
-    private _irradiance: Texture | null = null;
-    private _prefiltered: Texture | null = null;
+    private _bakeVersion = 0;
     private _invVolScratch: mat4 = mat4.create();
 
     constructor(
         name: string,
         options: { resolution?: number, mode?: 'baked' | 'realtime', updateFrequency?: number, intensity?: number, size?: [number, number, number], blendDistance?: number,
-                   affectsLighting?: boolean, affectsReflections?: boolean } = {},
+                   affectsLighting?: boolean, affectsReflections?: boolean, boxProjection?: boolean } = {},
         id: string = uuidv4()
     ) {
         super(name, 'lightProbe', id);
@@ -45,6 +48,7 @@ export class LightProbeNode extends Node {
         this._blendDistance = options.blendDistance ?? 1;
         this._affectsLighting = options.affectsLighting ?? true;
         this._affectsReflections = options.affectsReflections ?? true;
+        this._boxProjection = options.boxProjection ?? false;
     }
 
     // --- Editor-facing properties (setting the ones that affect the capture flags a re-bake) ---
@@ -71,6 +75,14 @@ export class LightProbeNode extends Node {
     /** Whether the probe gives surfaces inside its volume their reflections (specular). */
     public get affectsReflections(): boolean { return this._affectsReflections; }
     public set affectsReflections(v: boolean) { this._affectsReflections = !!v; }
+    /**
+     * Box projection (parallax correction): a surface inside the box reflects what the probe saw where its
+     * reflected ray leaves the box, instead of what lies along that direction infinitely far away. Right
+     * for a room (its walls land where they are on a polished floor); wrong for an open landscape, whose
+     * horizon IS far away. Bounded probes only. No re-bake.
+     */
+    public get boxProjection(): boolean { return this._boxProjection; }
+    public set boxProjection(v: boolean) { this._boxProjection = !!v; }
 
     // --- Influence volume ---
     /** True when the probe has a finite influence box; false = unbounded (affects the whole scene). */
@@ -97,8 +109,8 @@ export class LightProbeNode extends Node {
     }
 
     /**
-     * World distance from `p` to the influence volume: 0 inside it (or anywhere, unbounded). The deferred
-     * slots are handed out by it (Scene.probesForFrame).
+     * World distance from `p` to the influence volume: 0 inside it (or anywhere, unbounded). Past the
+     * per-frame cap, the probes nearest the camera by it are the ones applied (render/probeLighting.ts).
      */
     public distanceToVolume(p: vec3): number {
         if (!this.bounded) return 0;
@@ -123,23 +135,67 @@ export class LightProbeNode extends Node {
     private readonly _boxScratch: mat4 = mat4.create();
 
     // --- Renderer-facing baking state ---
+    /** A full capture is asked for: the probe's scene (its G-buffer) is captured again, then lit. */
     public get needsBake(): boolean { return this._needsBake; }
+    /** A RELIGHT is asked for: the captured scene lit again (the sun moved, a light changed), no geometry. */
+    public get needsRelight(): boolean { return this._needsRelight; }
     public get lastBakeTime(): number { return this._lastBakeTime; }
-    public get hasBakedMaps(): boolean { return this._irradiance !== null && this._prefiltered !== null; }
-    public get irradiance(): Texture | null { return this._irradiance; }
-    public get prefiltered(): Texture | null { return this._prefiltered; }
+    public get hasBakedMaps(): boolean { return this._sourceCube !== null; }
+    /** Bumped by every installed bake: an asynchronous result taken from an older one is dropped. */
+    public get bakeVersion(): number { return this._bakeVersion; }
     /** The sharp, full-resolution scene capture (linear HDR) — best for clear/mirror-like reflections. */
     public get envMap(): Texture | null { return this._sourceCube; }
-    /** Request a (re)capture on the next frame — used by the editor "Bake" button. */
+    /**
+     * The layer of the reflection atlas (render/reflectionAtlas.ts) holding this probe's GGX-prefiltered
+     * environment, or -1 while it has none. Renderer-owned.
+     */
+    public reflectionLayer = -1;
+    /**
+     * What the lights the last bake saw were then, by light id: what the editor compares the lights
+     * against to say the probe is out of date (probeBakeState.ts). Null before any bake.
+     */
+    public bakedLights: Map<string, LightBakeSnapshot> | null = null;
+    /** Request a full (re)capture — the editor "Bake" button, a probe that moved. */
     public bake(): void { this._needsBake = true; }
+    /**
+     * Request a relight: the captured scene lit again by the lights and sky as they are now. Far cheaper
+     * than a bake (no geometry but the sun's shadow), which is what a time of day asks for as the sun
+     * moves. A probe never captured is baked instead.
+     */
+    public relight(): void { this._needsRelight = true; }
+    /** Renderer-facing: a bake or relight has started; requests made from here on queue another. */
+    public takeBakeRequests(): void { this._needsBake = false; this._needsRelight = false; }
     public markBaked(time: number): void { this._needsBake = false; this._lastBakeTime = time; }
-    public setBakedMaps(source: Texture, irradiance: Texture, prefiltered: Texture): void {
-        this._sourceCube?.delete();
-        this._irradiance?.delete();
-        this._prefiltered?.delete();
+    /**
+     * Install a capture. The source cube may be the one already installed (a relight writes into it in
+     * place); it is deleted only when replaced. Its lighting (`irradianceSH`) is projected from it next.
+     */
+    public setBakedMaps(source: Texture): void {
+        if (this._sourceCube && this._sourceCube !== source) this._sourceCube.delete();
         this._sourceCube = source;
-        this._irradiance = irradiance;
-        this._prefiltered = prefiltered;
+        this._bakeVersion++;
+        // The coefficients are re-projected from the new irradiance cube a frame or two later
+        // (SkyPasses.updateProbeLighting). The old ones keep lighting meanwhile: a re-bake as the sun
+        // moves must not flash the volume to the sky's fill while the readback is in flight.
+        this._shStale = true;
+    }
+
+    // --- Lighting: the irradiance as spherical harmonics ---
+    private _irradianceSH: Float32Array | null = null;
+    private _shStale = true;
+    /**
+     * The diffuse light this probe gives the surfaces in its volume: its irradiance cube projected onto
+     * nine L2 spherical harmonics (rgb, 4 floats apart), in the radiance form the sky light's are in
+     * (shProject.ts). Null until the first projection lands. What lets the lighting loop over every probe
+     * per pixel (render/probeLighting.ts) where the two cubemap slots are handed out by the camera.
+     * Derived at runtime, never saved: a probe re-bakes on load.
+     */
+    public get irradianceSH(): Float32Array | null { return this._irradianceSH; }
+    /** True while the coefficients are missing or older than the irradiance cube. */
+    public get shStale(): boolean { return this._shStale; }
+    public setIrradianceSH(sh: Float32Array): void {
+        this._irradianceSH = sh;
+        this._shStale = false;
     }
 
     public getBoundingBox(): { min: vec3, max: vec3 } {
@@ -163,6 +219,7 @@ export class LightProbeNode extends Node {
                     blendDistance: this._blendDistance,
                     affectsLighting: this._affectsLighting,
                     affectsReflections: this._affectsReflections,
+                    boxProjection: this._boxProjection,
         };
     }
 
@@ -176,6 +233,7 @@ export class LightProbeNode extends Node {
             blendDistance: json.blendDistance,
             affectsLighting: json.affectsLighting,         // absent in older scenes -> true
             affectsReflections: json.affectsReflections,
+            boxProjection: json.boxProjection,             // absent in older scenes -> off
         }, json.id);
         Node.finishParse(node, parent, json);
     }
