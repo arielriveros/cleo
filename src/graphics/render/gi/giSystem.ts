@@ -342,6 +342,8 @@ export class GiSystem {
         for (const land of scene.landscapes) {
             if (!land.authoredVisible) continue;
             sig.addString(land.id).addNumbers(land.worldTransform);
+            // Its plants, by layer and count: a repaint is a change the capture saw.
+            for (const layer of land.terrain.foliage) sig.addString(layer.name).addNumber(layer.count);
             const inv = mat4.invert(this._invScratch, land.worldTransform);
             if (!inv) continue;
             const terrain = land.terrain, half = terrain.size / 2;
@@ -625,6 +627,7 @@ export class GiSystem {
                 batch!.cursor += drawn;
                 budget -= Math.max(1, drawn);
                 if (batch!.cursor >= admitted) {
+                    this._drawFoliage(scene, v, batch!.slot, batch!.face, S);
                     this._drawBackfaces(scene, v, probe, batch!.slot, batch!.face, S);
                     batch!.cursor = 0;
                     if (++batch!.face >= 6) { batch!.face = 0; batch!.slot++; }
@@ -713,6 +716,21 @@ export class GiSystem {
             ModelDraw.invertCull = false;
             this._passes.endFullscreenPass(pass);
         }
+    }
+
+    /**
+     * The landscape's plants into the face just drawn (trees and bushes; grass only when the volume asks):
+     * packed into this face's own buffers before its pass opens, depth-tested against what is already there.
+     */
+    private _drawFoliage(scene: Scene, v: VolumeGpu, slot: number, face: number, S: number): void {
+        const foliage = this._sys.foliage;
+        if (!foliage || scene.landscapes.size === 0) return;
+        const index = slot * 6 + face;
+        if (!foliage.prepareCapture(scene, index, this._camera.position, this._frustum, v.node.maxRayDistance, v.node.includeGrass)) return;
+        const pass = this._passes.beginFullscreenPass(this._capture!.renderTarget, 'giCapture', false, undefined, false);
+        pass.setViewport(face * S, slot * S, S, S);
+        this.stats.captureDraws += foliage.drawCapture(scene, pass, index);
+        this._passes.endFullscreenPass(pass);
     }
 
     /** The next capture batch: the uncaptured probes nearest the camera, of the volume they are in. */

@@ -29,7 +29,7 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - *Saved with the project.* **Save bake** stores the capture, deflated, beside the scene; it loads in
     the editor and in a published game without capturing again, and is captured afresh only when the
     geometry round the volume has moved. Moving things (a script's windmill sails, physics props) are
-    left out of it.
+    left out of it. Trees and bushes painted on a landscape are in it, so a canopy shades what is under it.
   - *Reflections that match.* Inside a volume, a light probe's reflection is scaled to the light the
     volume puts on each surface, so a room the volume darkens stops mirroring the brighter light its probe
     captured, and a floor with no probe no longer reflects the open sky.

@@ -457,6 +457,7 @@ export class Renderer {
             programs: this._programs,
             objects: this._objects,
             gi: this._gi,
+            foliage: this._foliage,
         } satisfies RenderSubsystems);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._shadows.shadowDistance = config.shadowDistance ?? 100;

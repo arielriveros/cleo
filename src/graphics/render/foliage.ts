@@ -1,4 +1,5 @@
 import { vec3, mat4 } from 'gl-matrix';
+import type { Frustum } from '../../core/frustum';
 import { Scene } from '../../core/scene/scene';
 import { FOLIAGE_DENSITY_FALLOFF, collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes, foliageEffectiveCull, foliageLodBands, foliageCullLimitSq, foliageAdmitCount, FOLIAGE_SORT_REFRESH, sortFoliageFrontToBack, foliageKeepFraction, createFoliageBatch, foliageBatchStale, foliageBatchInstances, rememberFoliageBatch, foliageChunkBounds, foliageChunkLimit, packFoliageInstances } from '../../terrain/foliage';
 import type { FoliageCell, FoliageLayer, FoliageBand, FoliageBatch } from '../../terrain/foliage';
@@ -145,15 +146,7 @@ export class FoliagePasses {
             for (const layer of landscape.terrain.foliage) {
                 if (layer.count === 0) continue;
 
-                if (!layer.initialized) {
-                    const initModel = (model: Model) => {
-                        const g = model.geometry;
-                        model.mesh.create(g.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']), g.vertexCount, g.indices);
-                    };
-                    for (const level of layer.levels) for (const m of level.models) initModel(m);
-                    if (layer.billboardModel) initModel(layer.billboardModel);
-                    layer.initialized = true;
-                }
+                if (!layer.initialized) FoliagePasses._initLayer(layer);
 
                 // Keep the layer's grid at the current global cell size (re-buckets only on change).
                 if (layer.cellSize !== this.foliageCellSize) layer.setCellSize(this.foliageCellSize);
@@ -170,6 +163,17 @@ export class FoliagePasses {
         }
 
         this._prepareFoliage(scene);
+    }
+
+    /** Create a layer's prototype meshes (every level and its billboard) the first time it is drawn. */
+    private static _initLayer(layer: FoliageLayer): void {
+        const initModel = (model: Model) => {
+            const g = model.geometry;
+            model.mesh.create(g.getData(['position', 'normal', 'uv', 'tangent', 'bitangent']), g.vertexCount, g.indices);
+        };
+        for (const level of layer.levels) for (const m of level.models) initModel(m);
+        if (layer.billboardModel) initModel(layer.billboardModel);
+        layer.initialized = true;
     }
 
     /**
@@ -904,6 +908,145 @@ export class FoliagePasses {
     private static _meshUvOnly(materials: readonly Material[]): boolean {
         return materials.every(m => !((m.properties.get('uvProjection') as number) > 0));
     }
+
+    // --- GI Volume captures ------------------------------------------------------------------------------
+
+    /**
+     * A GI capture face, before its pass opens: each layer's cells within `reach` of `eye` that `frustum`
+     * sees, packed into capture slot `index`'s OWN buffers. Every face of a capture batch is drawn in one
+     * frame, and a buffer written twice before the frame's submit would hold only the second write.
+     * Mesh layers pack their cheapest real level; billboard layers (grass) only when `grass`. Whatever the
+     * main camera's distance culls, LOD bands and density thinning, a probe sees every plant in reach.
+     * Returns whether there is anything to draw.
+     */
+    public prepareCapture(scene: Scene, index: number, eye: ArrayLike<number>, frustum: Frustum,
+                          reach: number, grass: boolean): boolean {
+        let any = false;
+        const reach2 = reach * reach;
+        for (const landscape of scene.landscapes) {
+            if (!landscape.authoredVisible) continue;
+            for (const layer of landscape.terrain.foliage) {
+                let lists = this._captureBatches.get(layer);
+                if (!lists) { lists = []; this._captureBatches.set(layer, lists); }
+                const chunks = lists[index];
+                if (chunks) for (const c of chunks) c.count = 0;
+                if (layer.count === 0 || layer.levels.length === 0) continue;
+                if (!grass && (layer.kind === 'billboard' || this._grassLike(layer))) continue;
+                // A capture can run before the frame first draws the layer (a bake loading with the scene).
+                if (!layer.initialized) FoliagePasses._initLayer(layer);
+                const near = this._foliageCellsNear(layer, eye, reach);
+                const cells = this._captureCells;
+                cells.length = 0;
+                for (let k = 0; k < near.count; k++) {
+                    const cell = near.cells[k];
+                    if (this._sys.visibility.aabbDistSq(eye as vec3, cell.min, cell.max) > reach2) continue;
+                    if (!frustum.intersectsAABB(cell.min, cell.max)) continue;
+                    cells.push(cell);
+                }
+                if (cells.length === 0) continue;
+                // A fresh version each time: the batch's own change test compares cell lists, and this
+                // slot's list is another probe's every batch.
+                if (chunks) for (const c of chunks) c.version = -1;
+                this._packFoliageBucket(layer, lists, index, cells, FoliagePasses._captureModels(layer), 1);
+                any = true;
+            }
+        }
+        return any;
+    }
+
+    /**
+     * A GI capture face's plants into the capture G-buffer (`pass`, its viewport set), through the frame's
+     * instanced G-buffer programs with no wind, no LOD band and no camera hole: what `prepareCapture` packed
+     * for `index`. The view is the frame view's camera, which the capture has swapped for its own.
+     */
+    public drawCapture(scene: Scene, pass: RenderPassEncoder, index: number): number {
+        let draws = 0;
+        const cam = this._view.camera;
+        for (const landscape of scene.landscapes) {
+            if (!landscape.authoredVisible) continue;
+            for (const layer of landscape.terrain.foliage) {
+                const chunks = this._captureBatches.get(layer)?.[index];
+                if (!chunks || !chunks.some(c => c.count > 0 && !!c.buffer)) continue;
+                const billboard = layer.kind === 'billboard';
+                for (const model of FoliagePasses._captureModels(layer)) {
+                    const pbr = model.material.type === 'pbr';
+                    const parallax = !billboard && pbr && usesParallax(model.materials);
+                    const lean = !parallax && FoliagePasses._meshUvOnly(model.materials);
+                    const shaderType = foliageProgramFor({ billboard, sway: false, foliage: false, parallax,
+                                                           afterPrepass: false, lean, pbr });
+                    const reflection = billboard ? GeometryFoliageBillboardProgram : GEOMETRY_PROGRAMS[shaderType];
+                    this._shaderManager.bind(shaderType);
+                    this._shaderManager.setUniform('u_view', cam.viewMatrix);
+                    this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(cam.projectionMatrix));
+                    this._setCaptureLodUniforms(layer);
+                    const pipeline = this._pipelines.get(shaderType, reflection, {
+                        cullMode: billboard ? 'none' : ModelDraw.cullFor(model.material.config.side),
+                        depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                        targets: 3,
+                        vertex: 'model+instance',
+                        builtFor: 'blinn_phongGeometry',
+                    });
+                    pass.setPipeline(pipeline);
+                    if (billboard) {
+                        const tex = layer.textureId ? TextureManager.Instance.getTexture(layer.textureId) : null;
+                        pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [tex ?? this._bindGroups.fallbackTexture]));
+                    } else {
+                        this._materials.applyProperties(model.material);
+                        pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, model.material));
+                    }
+                    for (const batch of chunks) {
+                        if (batch.count === 0 || !batch.buffer) continue;
+                        this.recordFoliageDraw(pass, model.mesh, batch.buffer, batch.count, batch);
+                        draws++;
+                    }
+                }
+            }
+        }
+        return draws;
+    }
+
+    /**
+     * Whether a mesh layer is grass in all but name: a prototype under 0.8 m tall (meadow tufts, the
+     * Foliage Creator's grass), which a GI capture leaves out with the billboard grass unless asked.
+     */
+    private _grassLike(layer: FoliageLayer): boolean {
+        let known = this._grassLayers.get(layer);
+        if (known !== undefined) return known;
+        let lo = Infinity, hi = -Infinity;
+        for (const model of layer.levels[0]?.models ?? []) {
+            const pos = model.geometry?.positions;
+            if (!pos) continue;
+            for (let i = 1; i < pos.length; i += 3) { if (pos[i] < lo) lo = pos[i]; if (pos[i] > hi) hi = pos[i]; }
+        }
+        known = Number.isFinite(lo) && hi - lo < 0.8;
+        this._grassLayers.set(layer, known);
+        return known;
+    }
+
+    private readonly _grassLayers = new WeakMap<FoliageLayer, boolean>();
+
+    /** What a capture draws of `layer`: a billboard layer's cards, a mesh layer's cheapest real level. */
+    private static _captureModels(layer: FoliageLayer): Model[] {
+        return layer.kind === 'billboard' ? layer.levels[0].models : layer.levels[layer.levels.length - 1].models;
+    }
+
+    /** The LOD block of a capture draw: no band (every plant whole), no dither phase, no camera hole. */
+    private _setCaptureLodUniforms(layer: FoliageLayer): void {
+        const [b, c, f] = this._lodVec;
+        b[0] = b[1] = b[2] = b[3] = 0;
+        const cam = this._view.camera.position;
+        c[0] = cam[0]; c[1] = cam[1]; c[2] = cam[2]; c[3] = 0;
+        f[0] = 0;
+        f[1] = layer.farTranslucency;
+        this._shaderManager.setUniform('u_lodBand', b);
+        this._shaderManager.setUniform('u_lodCamera', c);
+        this._shaderManager.setUniform('u_lodFrame', f);
+        this._materials.setCameraHole(false);
+    }
+
+    /** Per layer, per GI capture slot: the batches `prepareCapture` packed. */
+    private readonly _captureBatches = new WeakMap<FoliageLayer, FoliageBatch[][]>();
+    private readonly _captureCells: FoliageCell[] = [];
 
     public foliagePass(scene: Scene, pass: RenderPassEncoder): void {
         for (const landscape of scene.landscapes) {

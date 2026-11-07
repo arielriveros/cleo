@@ -11,6 +11,7 @@ import type { Capture } from './capture';
 import type { ProgramRegistry } from './programRegistry';
 import type { ObjectTable } from '../objectTable';
 import type { GiSystem } from './gi/giSystem';
+import type { FoliagePasses } from './foliage';
 
 /**
  * The renderer's subsystems, for the ones that reach each other while drawing. Filled once, at the end of
@@ -36,4 +37,6 @@ export interface RenderSubsystems {
     readonly objects: ObjectTable;
     /** GI Volumes: their capture, relight and apply (render/gi/giSystem.ts). */
     readonly gi: GiSystem;
+    /** The landscape's plants, which a GI capture draws too. */
+    readonly foliage: FoliagePasses;
 }
