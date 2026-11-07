@@ -73,6 +73,8 @@ export interface LensLookPresetOptions {
     bloomThreshold?: number;
     bloomKnee?: number;
     bloomIntensity?: number;
+    bloomMode?: 'physical' | 'threshold';
+    bloomMix?: number;
     lensFlareIntensity?: number;
     lensFlareThreshold?: number;
     lensFlareGhosts?: number;
@@ -90,7 +92,7 @@ export type LensLookPreset = Preset<LensLookPresetOptions>;
 
 const LOOK_BASE: LensLookPresetOptions = {
     saturation: 1, chromaticAberrationStrength: 0,
-    bloomThreshold: 2, bloomKnee: 0.5, bloomIntensity: 0.35,
+    bloomThreshold: 2, bloomKnee: 0.5, bloomIntensity: 0.35, bloomMode: 'physical', bloomMix: 0.04,
     lensFlareIntensity: 0, lensFlareThreshold: 1, lensFlareGhosts: 4, lensFlareHaloWidth: 0.45, lensDirtIntensity: 0,
     vignetteStrength: 0, vignetteRoundness: 0, vignetteSmoothness: 0.4,
     filmGrainIntensity: 0, filmGrainSize: 2, filmGrainColored: false,
@@ -100,22 +102,22 @@ export const LENS_LOOK_PRESETS: LensLookPreset[] = definePresets(LOOK_BASE, [
     ['clean', 'Clean', 'Engine defaults: a little bloom and nothing else.', {}],
     ['cinematic', 'Cinematic', 'A soft vignette, faint grain, the barest colour fringe in the corners, slightly richer bloom.',
         { saturation: 0.95, chromaticAberrationStrength: 0.25, bloomThreshold: 1.8, bloomKnee: 0.5, bloomIntensity: 0.4,
-          vignetteStrength: 0.22, vignetteSmoothness: 0.5, filmGrainIntensity: 0.02, filmGrainSize: 2 }],
+          bloomMix: 0.05, vignetteStrength: 0.22, vignetteSmoothness: 0.5, filmGrainIntensity: 0.02, filmGrainSize: 2 }],
     ['vivid', 'Vivid', 'Punchier colour and a touch more glow — stylised, sunny games.',
-        { saturation: 1.15, bloomThreshold: 1.6, bloomIntensity: 0.45, vignetteStrength: 0.12 }],
+        { saturation: 1.15, bloomThreshold: 1.6, bloomIntensity: 0.45, bloomMix: 0.06, vignetteStrength: 0.12 }],
     ['vintage', 'Vintage Film', 'Faded colour, coloured grain, a dark rounded vignette and visible lens fringing.',
         { saturation: 0.8, chromaticAberrationStrength: 0.7, bloomThreshold: 1.2, bloomKnee: 0.5, bloomIntensity: 0.45,
-          vignetteStrength: 0.45, vignetteRoundness: 0.3, vignetteSmoothness: 0.6,
+          bloomMix: 0.07, vignetteStrength: 0.45, vignetteRoundness: 0.3, vignetteSmoothness: 0.6,
           filmGrainIntensity: 0.06, filmGrainSize: 2.5, filmGrainColored: true }],
     ['dreamy', 'Dreamy Glow', 'A low threshold, wide bloom and a dusty lens — flashbacks, fairy tales.',
-        { saturation: 1.05, bloomThreshold: 1.0, bloomKnee: 0.5, bloomIntensity: 0.6, lensDirtIntensity: 0.4,
+        { saturation: 1.05, bloomThreshold: 1.0, bloomKnee: 0.5, bloomIntensity: 0.6, bloomMix: 0.12, lensDirtIntensity: 0.4,
           vignetteStrength: 0.2, vignetteSmoothness: 0.7 }],
     ['gritty', 'Gritty / Horror', 'Drained colour, a heavy vignette, coarse grain.',
-        { saturation: 0.65, chromaticAberrationStrength: 0.4, bloomThreshold: 2.5, bloomIntensity: 0.25,
+        { saturation: 0.65, chromaticAberrationStrength: 0.4, bloomThreshold: 2.5, bloomIntensity: 0.25, bloomMix: 0.03,
           vignetteStrength: 0.55, vignetteRoundness: 0.2, vignetteSmoothness: 0.45,
           filmGrainIntensity: 0.05, filmGrainSize: 2 }],
     ['sciFi', 'Sci-fi Lens', 'Flares and ghosts off bright lights, a dirty lens and slight fringing.',
-        { chromaticAberrationStrength: 0.3, bloomThreshold: 1.5, bloomIntensity: 0.5,
+        { chromaticAberrationStrength: 0.3, bloomThreshold: 1.5, bloomIntensity: 0.5, bloomMix: 0.07,
           lensFlareIntensity: 0.35, lensFlareThreshold: 1.5, lensFlareGhosts: 5, lensFlareHaloWidth: 0.5,
           lensDirtIntensity: 0.8, vignetteStrength: 0.15 }],
 ]);

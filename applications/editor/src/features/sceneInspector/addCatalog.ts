@@ -7,6 +7,7 @@ import {
   LightNode,
   LightProbeNode,
   ExposureVolumeNode,
+  VolumetricFogNode,
   DecalNode,
   DirectionalLight,
   PointLight,
@@ -65,7 +66,7 @@ import {
 } from './primitiveIcons'
 import {
   EmptyIcon, TriggerIcon, CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon,
-  DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon, ExposureVolumeIcon,
+  DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon, ExposureVolumeIcon, VolumetricFogIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon, WeatherIcon,
   SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
@@ -359,6 +360,12 @@ export const ADD_ITEMS: AddItem[] = [
     // overriding nothing, so dropping one changes nothing until a field or preset is picked.
     id: 'exposureVolume', label: 'Exposure Volume', icon: ExposureVolumeIcon, category: 'environment',
     create: async () => new ExposureVolumeNode('exposure volume', { size: [10, 10, 10] }),
+  },
+  {
+    // A bank of fog the sun, the torches and the sky light scatter into (the renderer's froxel fog).
+    // Placeable, like the probe: a box centred on the node, adjusted with the box gizmo's face handles.
+    id: 'volumetricFog', label: 'Volumetric Fog', icon: VolumetricFogIcon, category: 'environment',
+    create: async () => new VolumetricFogNode('volumetric fog', { size: [20, 6, 20] }),
   },
   {
     // Placeable, like the probe: the box is centred on the node, so a viewport drop puts the surface under

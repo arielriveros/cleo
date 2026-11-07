@@ -5,6 +5,7 @@ import { useEventBus } from '../../EventBusContext'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { PropertyTable, PropertyRow, Select, Slider, Toggle, ColorInput, Hint } from '@cleo/app-kit/ui'
 import { AppearanceIcon } from '../sectionIcons'
+import FollowLightRows from './FollowLightRows'
 
 // Tint / opacity / blending for a sprite, inline. A sprite's image comes from its tileset, not a material.
 
@@ -72,6 +73,7 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
               sprite.exposureWeight = v; setExposureWeight(v); changed()
             }} />
           </PropertyRow>
+          <FollowLightRows node={props.node} target={sprite} onChange={changed} />
           <PropertyRow label='Soft fade'>
             <Slider min={0} max={1} step={0.01} value={softness} onChange={(v) => {
               sprite.softness = v; setSoftness(v); changed()

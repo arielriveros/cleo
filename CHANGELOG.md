@@ -16,6 +16,58 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Lighting that holds together from noon to midnight.** Torches now light the night in the editor
+  as they do in the game, and glare no longer floods the screen.
+  - *Moonlight in lux.* The Sky Atmosphere's **Moonlight (lux)** replaces the 0-1 share of the sun,
+    which put up to 1,000 lux of moon on an edited night. Old scenes keep their share until it is set.
+  - *Ambient that fades.* With the Sky Light deleted, the flat ambient still falls at night (a new Sky
+    Light's night ambient is 0.0001 of its day). Probe captures keep point and spot shadows, so a probe
+    no longer smears torchlight across a valley.
+  - *Pre-exposure.* Every light, the sky, emissives and effects are stored multiplied by a power of two
+    near the frame's exposure, so moonlit and torch-lit frames keep the precision a sunlit one has in
+    half floats. A day frame is unchanged. Histories rescale exactly instead of resetting. Custom
+    materials that add their own light opt in with `cleoPreExposure()`.
+  - *Physical sky.* With **Physical Units** (new skies), the sky, the sun disc and the ground are lit by
+    the scene sun's own lux, so a reflected sun is no brighter than the one in the sky.
+  - *Metering.* The meter reads the opaque scene before transparents, particles and sprites, so a fire
+    or a glint coming into view no longer pumps the exposure. Turning metering on eases from the
+    current EV instead of snapping. The present dithers before its 8-bit store.
+- **A physical look.**
+  - *Bloom.* The new **Physical** mode is the default: no threshold, a **Mix** share (0.04) of the
+    blurred frame is mixed in, so glare follows energy (Jimenez 2014). **Threshold** stays available.
+    Fireflies at night are gone: the Karis weight uses exposed luma.
+  - *Night Vision* (`purkinjeStrength`). Below a few cd/m² colour drains toward a bluish grey and reds
+    darken, per pixel on absolute luminance, so moonlight reads as night while a torch pool stays warm.
+  - *Local Exposure.* Exposure fusion gives each region of the frame its own exposure (Shadow Lift,
+    Highlight Hold, Local Strength), with an edge-aware upsample so silhouettes keep no halo. On from
+    the High tier.
+- **Fire that burns on one beat.**
+  - *Flicker.* Point and spot lights get **Flicker** and **Flicker Speed**: seeded noise on the
+    intensity only, so cached shadow maps stay valid.
+  - *Follow Light.* Sprites and particle systems get **Follow Light** and **Follow Amount**: a flame's
+    brightness and its embers' brightness and spawn rate swell with the light they follow.
+  - *Lit sprites.* Lit sprites take every clustered point and spot light per pixel, so six-way smoke is
+    lit by each torch round it.
+  - *Draw order.* Additive particles draw after the sprites, so embers stay in front of the smoke.
+- **Volumetric Fog volumes.** A new **Volumetric Fog** node is a box of mist, smoke or dust, sized with
+  the viewport's face handles.
+  - *Medium.* Density, albedo, anisotropy, height falloff, drifting noise, emission and per-source
+    scattering, with six presets.
+  - *Lighting.* The sun or moon scatters into it through its cascades, and so do every point and spot
+    light (through their shadow maps from the High tier) and the sky's fill.
+  - *Rendering.* A froxel grid, integrated front to back with energy-conserving steps and blended with
+    the last frame's. It runs as fullscreen passes on both WebGL2 and WebGPU. Overlapping volumes add.
+  - *Fog Glow.* A particle system's **Fog Glow** lights the fog alone, in the colour and on the
+    flicker of the light it follows.
+  - The height fog and god rays are unchanged. A scene with no volume runs nothing.
+  - Player contract 19.
+- **The Valley at night.**
+  - *Sky.* A 2 lux moon, near white, with the blue left to night vision, and a physical sky.
+  - *Fire.* Fire lights flicker, and their flames and embers follow them. The bonfire and fire pits
+    glow into the fog.
+  - *Fog.* Mist over the pond and a valley-floor haze, both gathering at night and at dawn, and smoke
+    in the dungeon halls.
+  - *Probe.* The valley probe gives reflections only.
 - **Surfaces, water and standard outputs in the World Creator.** A stack of surfaces (sand, grass,
   rock, scree, snow...) placed by rules over the terrain's own values and what erosion did to it:
   height, height above water, slope, aspect, curvature, cavity, flow area, wetness, water depth, shore

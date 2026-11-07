@@ -8,6 +8,7 @@ import { device } from '../rhi/deviceHandle';
 import { Texture } from '../texture';
 import { ProbePreviewProgram, IrradianceProgram, PresentProgram } from './programs';
 import { SkyPasses } from './sky';
+import { displayExposure } from './frameView';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -178,15 +179,29 @@ export class Capture {
         cam.resize(res, res); // aspect 1
         const prevCamera = this._view.camera;
         this._view.camera = cam;
+        // A probe is baked ABSOLUTE (pre-exposure 1): its cube is sampled by later frames at whatever
+        // pre-exposure they have, through the intensity uploads that carry it (LightingPasses).
+        const prevPreExposure = this._view.preExposure, prevDrawPreExposure = this._view.drawPreExposure;
+        this._view.preExposure = 1;
+        this._view.drawPreExposure = 1;
         // Everything below swaps renderer state (the camera, the cube-face winding, suppressed shadows, a
         // one-cluster light grid). A throw anywhere in the capture used to leave `_view.capturing` set, and
         // `_sky.updateIBL` then never refreshed a probe again; the `finally` puts all of it back.
         let baked = false;
         try {
-            // Forward lighting for the capture, with no probe IBL bound, to avoid feedback. Shadows are
-            // suppressed throughout: the cascades are fit to the MAIN camera, so a probe elsewhere falls
-            // outside them. The BIND still happens — an incomplete texture is a draw-time error.
+            // Forward lighting for the capture, with no probe IBL bound, to avoid feedback. The SUN's
+            // shadows are suppressed throughout: the cascades are fit to the MAIN camera, so a probe
+            // elsewhere falls outside them. Point and spot shadows stay on — their maps are world-space —
+            // so a torch behind a wall does not light the bake through it. The BIND still happens — an
+            // incomplete texture is a draw-time error.
             this._shadows.shadowsSuppressed = true;
+            // Every forward lighting uniform again, at pre-exposure 1: a capture runs at the START of a
+            // frame (Renderer: `updateIBL`), before this frame's own uploads, so the forward programs still
+            // hold LAST frame's — its ambient, sky light, emissive and environment scaled by its
+            // pre-exposure. A probe re-baked while the eye was night-adapted (k = 32) came out 32 times too
+            // bright and lit the next noon with reflections four stops over the sun. The frame's own
+            // `resetForwardLighting` puts the frame's values back.
+            this._lighting.resetForwardLighting(scene);
             for (const light of scene.lights) this._lighting.setDirectionalOnForward(light);
             this._lighting.bindShadowsToForwardShaders();
             this._lighting.bindEnvToForwardShaders(scene);
@@ -268,6 +283,8 @@ export class Capture {
             // uniforms would otherwise send every fragment of the next frame to cluster 0.
             this._lighting.bindShadowsToForwardShaders();
             this._lighting.lightGrid.restoreGrid();
+            this._view.preExposure = prevPreExposure;
+            this._view.drawPreExposure = prevDrawPreExposure;
             this._view.capturing = false;
         }
     }
@@ -287,8 +304,13 @@ export class Capture {
                                                true, [0, 0, 0, 0]);
         this._fullscreen.bind(pass, 'present', PresentProgram, [
             this._targets.scene.colors[0], this._temporal.depthSource(), this._post.colorLut.volumeFor(null),
+            this._bindGroups.fallbackTexture,
         ]);
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
+        // No local exposure on a picture of an asset; the binding is satisfied with the fallback.
+        this._shaderManager.setUniform('u_localExposure', [0, 0, 0, 0]);
+        this._shaderManager.setUniform('u_exposure', displayExposure(this._view));
+        // No night vision on a picture of an asset (uniforms persist across binds, so it is reset).
+        this._shaderManager.setUniform('u_purkinjeStrength', 0);
         // Ungraded on purpose: an asset thumbnail is a picture of the ASSET, and it should not change
         // because the scene it was captured in happens to be overcast — or because someone hung a
         // teal-and-orange LUT on the project. The tone CURVE is kept, because that is the shape of

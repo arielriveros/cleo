@@ -108,6 +108,11 @@ import SsilHistoryProgram from '../shaders/wgsl/ssilHistory.wgsl';
 import SsrProgram from '../shaders/wgsl/ssr.wgsl';
 import SsrResolveProgram from '../shaders/wgsl/ssrResolve.wgsl';
 import SsrTemporalProgram from '../shaders/wgsl/ssrTemporal.wgsl';
+import LocalExposureLumProgram from '../shaders/wgsl/localExposureLum.wgsl';
+import LocalExposureDownProgram from '../shaders/wgsl/localExposureDown.wgsl';
+import VolumetricFogInjectProgram from '../shaders/wgsl/volumetricFogInject.wgsl';
+import VolumetricFogIntegrateProgram from '../shaders/wgsl/volumetricFogIntegrate.wgsl';
+import VolumetricFogApplyProgram from '../shaders/wgsl/volumetricFogApply.wgsl';
 
 // IBL (image-based lighting) precompute shaders
 import IrradianceProgram from '../shaders/wgsl/irradiance.wgsl';
@@ -138,7 +143,8 @@ export {
     GeometryBasicProgram, GeometryBasicSkinnedProgram, DeferredLightingProgram, SsilProgram,
     SsilTemporalProgram, SsilBlurProgram, SsilHistoryProgram, IrradianceProgram,
     PrefilterProgram, BRDFProgram, SpriteLitProgram, SsrProgram,
-    SsrResolveProgram, SsrTemporalProgram,
+    SsrResolveProgram, SsrTemporalProgram, LocalExposureLumProgram, LocalExposureDownProgram,
+    VolumetricFogInjectProgram, VolumetricFogIntegrateProgram, VolumetricFogApplyProgram,
 };
 
 // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
@@ -291,6 +297,13 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['ssr',                          SsrProgram],
         ['ssrResolve',                   SsrResolveProgram],
         ['ssrTemporal',                  SsrTemporalProgram],
+        // Local exposure: the region weights and their pyramid (render/localExposure.ts). APPENDED.
+        ['localExposureLum',             LocalExposureLumProgram],
+        ['localExposureDown',            LocalExposureDownProgram],
+        // Froxel volumetric fog for VolumetricFogNode (render/volumetricFog.ts). APPENDED.
+        ['volumetricFogInject',          VolumetricFogInjectProgram],
+        ['volumetricFogIntegrate',       VolumetricFogIntegrateProgram],
+        ['volumetricFogApply',           VolumetricFogApplyProgram],
     ];
 }
 

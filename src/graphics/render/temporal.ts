@@ -11,6 +11,7 @@ import type { RenderTarget, RenderPipeline } from '../rhi/resources';
 import { Texture } from '../texture';
 import { TaaResolveProgram, TaaSharpenProgram, ScreenProgram, MotionBlurVelocityProgram, VELOCITY_PROGRAMS, MotionBlurTileMaxProgram, MotionBlurNeighborMaxProgram, MotionBlurGatherProgram } from './programs';
 import type { TaaHistoryFilter } from './settingsTypes';
+import { displayExposure } from './frameView';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -356,8 +357,10 @@ export class TemporalPasses {
         this._shaderManager.setUniform('u_near', this._view.camera.near);
         this._shaderManager.setUniform('u_far', this._view.camera.far);
         // Last frame's exposure: `_resolveExposure` runs at the top of `_applyPostProcessing`, which is
-        // now AFTER this pass. Correct for a weight, which is all it is used for.
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
+        // now AFTER this pass. Correct for a weight, which is all it is used for. The DISPLAY exposure
+        // (exposure / k): the scene buffer holds pre-exposed values.
+        this._shaderManager.setUniform('u_exposure', displayExposure(this._view));
+        this._shaderManager.setUniform('u_historyRescale', this.taaHistory.rescale(this._view.preExposure));
         this._shaderManager.setUniform('u_feedbackMin', Math.min(this.taaMotionFeedback, this.taaFeedback));
         this._shaderManager.setUniform('u_feedbackMax', this.taaFeedback);
         this._shaderManager.setUniform('u_varianceGamma', this.taaClipStrength);
@@ -382,7 +385,7 @@ export class TemporalPasses {
         if (sharpen) {
             this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
             this._shaderManager.setUniform('u_sharpness', this.taaSharpness);
-            this._shaderManager.setUniform('u_exposure', this._view.exposure);
+            this._shaderManager.setUniform('u_exposure', displayExposure(this._view));
         }
         this._passes.drawFullscreenAndEnd(copy);
 
@@ -391,7 +394,7 @@ export class TemporalPasses {
         // `ForwardPass.copySceneDepth` already does exactly this, on both backends.
         this._passes.copyDepth(this.depthSource(), this._taaPrevDepthFBO.depth, w, h);
 
-        this.taaHistory.swap();
+        this.taaHistory.swap(this._view.preExposure);
     }
 
     // Velocity in two stages. First the camera reprojection: reconstruct each pixel's world position

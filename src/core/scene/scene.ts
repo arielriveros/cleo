@@ -19,6 +19,7 @@ import { ForceFieldNode } from "./nodes/forceFieldNode";
 import { ClothNode } from "./nodes/clothNode";
 import { WaterVolumeNode } from "./nodes/waterVolumeNode";
 import { ExposureVolumeNode } from "./nodes/exposureVolumeNode";
+import { VolumetricFogNode } from "./nodes/volumetricFogNode";
 import { OcclusionVolumeNode } from "./nodes/occlusionVolumeNode";
 import { SkyboxNode } from "./nodes/skyboxNode";
 import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
@@ -128,6 +129,7 @@ export class Scene {
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
     private _exposureVolumes: Set<ExposureVolumeNode> = new Set();
+    private _volumetricFogs: Set<VolumetricFogNode> = new Set();
     private _occlusionVolumes: Set<OcclusionVolumeNode> = new Set();
     private _sounds: Set<SoundNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
@@ -845,6 +847,7 @@ export class Scene {
         this._forceFields = new Set();
         this._waterVolumes = new Set();
         this._exposureVolumes = new Set();
+        this._volumetricFogs = new Set();
         this._occlusionVolumes = new Set();
         this._sounds = new Set();
         this._lightProbes = new Set();
@@ -899,6 +902,8 @@ export class Scene {
                 this._waterVolumes.add(node);
             if (node instanceof ExposureVolumeNode)
                 this._exposureVolumes.add(node);
+            if (node instanceof VolumetricFogNode)
+                this._volumetricFogs.add(node);
             if (node instanceof OcclusionVolumeNode)
                 this._occlusionVolumes.add(node);
             if (node instanceof SoundNode)
@@ -1320,6 +1325,13 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._skyLight;
+    }
+
+    /** Every volumetric fog volume in the scene (render/volumetricFog.ts draws them). */
+    public get volumetricFogs(): Set<VolumetricFogNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._volumetricFogs;
     }
 
     /** Every exposure volume in the scene: the regions that override the scene's exposure settings. */

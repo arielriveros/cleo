@@ -75,6 +75,8 @@ struct BlinnPhongLighting {
     u_sceneAmbient: vec3<f32>,
     u_useEnvMap: i32,
     u_envMapLinear: i32,        // env cube is linear HDR (a light probe) -> skip the sRGB decode
+    /** The frame's pre-exposure: the lights arrive multiplied by it; the env cube and emissive do not. */
+    u_preExposure: f32,
 };
 @group(1) @binding(3) var<uniform> u_lighting: BlinnPhongLighting;
 
@@ -218,17 +220,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let envC = textureSample(u_envMap_texture, u_envMap_sampler, R).rgb;
         var env = toLinear(envC);
         if (u_lighting.u_envMapLinear != 0) { env = envC; }
-        let reflection = env * matSpecular;
+        let reflection = env * matSpecular * u_lighting.u_preExposure;
         result = mix(result, reflection, reflectivity / 2.0);
     }
 
     // Emissive (sRGB-decoded map). Output stays LINEAR HDR — tonemap and gamma happen at the present.
+    var emission = u_material.emissive * 1.25 * u_material.emissiveIntensity;
     if (u_material.hasEmissiveMap != 0) {
-        result += toLinear(sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, su.uv0).rgb)
-                  * u_material.emissive * 1.25 * u_material.emissiveIntensity;
-    } else {
-        result += u_material.emissive * 1.25 * u_material.emissiveIntensity;
+        emission *= toLinear(sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, su.uv0).rgb);
     }
+    // Stored pre-exposed, and below the half-float ceiling (graphics/preExposure.ts HDR_STORE_MAX).
+    result = min(result + emission * u_lighting.u_preExposure, vec3<f32>(32768.0));
 
     return vec4<f32>(result, u_material.opacity);
 }

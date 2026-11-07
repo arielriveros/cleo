@@ -45,10 +45,25 @@ export interface FrameView {
     // A linear scale applied before the ACES tonemap. The default compensates for the Lambertian
     // albedo/PI diffuse, which otherwise leaves a white surface at ~0.3 raw radiance.
     /**
-     * The EFFECTIVE exposure the shaders use. With metering live this is the adapted value, rewritten
-     * every frame; otherwise it is the renderer's authored `_baseExposure`.
+     * The EFFECTIVE, ABSOLUTE exposure: what one unit of the internal radiance scale is multiplied by on
+     * the way to the display. With metering live this is the adapted value, rewritten every frame;
+     * otherwise it is the renderer's authored `_baseExposure`. Every `exposureWeight` (emissive, sprites,
+     * particles, fluids) reads THIS, never the display exposure below.
      */
     exposure: number;
+    /**
+     * Pre-exposure (k): the power of two every radiance source was multiplied by before it was stored this
+     * frame (see graphics/preExposure.ts), fixed for the whole frame. The frame's buffers hold
+     * `absolute × k`; a pass that turns a stored value into a display value uses `displayExposure`.
+     * 1 for previews, thumbnails, probe captures and whenever the setting is off.
+     */
+    preExposure: number;
+    /**
+     * The pre-exposure a draw applies right now: `preExposure` while the scene renders, 1 while something
+     * display-referred is drawn with the same programs (the editor's overlay layer). Read by the programs
+     * that carry their own pre-exposure multiply (basic, sprites).
+     */
+    drawPreExposure: number;
     // The sun's world direction, refreshed at the top of the geometry pass — that pass writes a
     // G-buffer and never sees the light list, but parallax self-shadowing needs it.
     // `[0, 0, 0]` means no directional light and switches self-shadowing off.
@@ -80,6 +95,8 @@ export function createFrameView(): FrameView {
         invViewProj: mat4.create(),
         invViewProjStable: mat4.create(),
         exposure: 2.0,
+        preExposure: 1,
+        drawPreExposure: 1,
         sunDirection: [0, 0, 0],
         windTime: 0,
         windTimePrev: 0,
@@ -88,4 +105,12 @@ export function createFrameView(): FrameView {
         hasPrevViewProj: false,
         scene: null,
     };
+}
+
+/**
+ * The exposure that turns a STORED (pre-exposed) value into a display value: `exposure / preExposure`.
+ * Every post pass, threshold and tonemap that reads the frame's buffers uses this.
+ */
+export function displayExposure(view: Pick<FrameView, 'exposure' | 'preExposure'>): number {
+    return view.exposure / (view.preExposure > 0 ? view.preExposure : 1);
 }

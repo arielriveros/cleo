@@ -104,6 +104,12 @@ struct Lighting {
     u_horizonOcclusion: i32,
     /** Whether the SSR pass produced a result THIS frame (SsrPasses.ssrProducedThisFrame). */
     u_ssrEnabled: i32,
+    /**
+     * The frame's pre-exposure (graphics/preExposure.ts). The lights, ambient, sky light, probes and sky
+     * reflection arrive multiplied by it; the G-buffer emissive and the scene environment map are
+     * absolute, so this pass scales those two itself.
+     */
+    u_preExposure: f32,
 };
 @group(1) @binding(0) var<uniform> u_lighting: Lighting;
 
@@ -332,7 +338,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let N = octDecode(vec2<f32>(normalRoughness.x, normalRoughness.y));
     let reflectance = select(normalRoughness.b, 0.5, translucency > 0.0);
     let roughness = normalRoughness.a;
-    let emissive = emissiveAO.rgb;
+    let emissive = emissiveAO.rgb * u_lighting.u_preExposure;
     let ao = emissiveAO.a;
 
     let worldPos = reconstructWorldPos(uv, depth);
@@ -378,7 +384,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // midtones, and brighter than the same cube reflected by a forward material, which decodes.
         // The engine's own decode (chunks/tonemap.wgsl toLinear), as forward and the sky light use.
         let env = pow(textureSampleLevel(u_envMap_texture, u_envMap_sampler, R,
-                                         roughness * MAX_REFLECTION_LOD).rgb, vec3<f32>(2.2));
+                                         roughness * MAX_REFLECTION_LOD).rgb, vec3<f32>(2.2))
+                  * u_lighting.u_preExposure;
         // TWO SEPARATE FACTORS that used to be one, and the distinction is the whole point.
         //
         // The DFG pair is ENERGY: how much of the incoming environment a surface of this roughness and
@@ -541,5 +548,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // material surfaces bloom.
     var bloomMask = 0.0;
     if (dot(albedo, albedo) > 0.0) { bloomMask = 1.0; }
-    return vec4<f32>(color, bloomMask);
+    // Below the half-float ceiling (graphics/preExposure.ts HDR_STORE_MAX): a dark-adapted camera's
+    // pre-exposure can push a sunlit glint past it, and an Inf is turned to black downstream.
+    return vec4<f32>(min(color, vec3<f32>(32768.0)), bloomMask);
 }

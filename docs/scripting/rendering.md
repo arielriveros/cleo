@@ -164,6 +164,24 @@ reflection = mix(reflection, ssr.rgb, ssr.a);
 Only a material whose source names `cleoScreenReflection` gets the helper and its two uniforms
 (`u_ssrProjection`, `u_ssrParams`); every other material's prelude, and so its saved WGSL, is unchanged.
 
+The frame stores light **pre-exposed** — multiplied by a power of two near the camera's exposure, so a
+dark scene keeps the half-float buffers' precision (see
+[Rendering](../editor/rendering.md#tone-and-post)). The engine's light inputs (`u_dirLight`,
+`u_sceneAmbient`, the clustered lights, the sky light) and `cleoSceneColor` already carry it. Light your
+material makes or reads raw does not, so multiply it by:
+
+```glsl
+float cleoPreExposure()   // the frame's pre-exposure; 1 by day, larger the darker the scene
+```
+
+```glsl
+vec3 reflection = textureLod(u_envMap, R, roughness * 4.0).rgb * cleoPreExposure();
+vec3 glow = u_glowColor * u_glowStrength * cleoPreExposure();
+```
+
+Without it such a term reads darker the darker the scene, by whole stops. Like the reflection helper,
+it is opt-in: only a material that names it gets it, so no saved material's WGSL changes.
+
 On WebGPU, a published game has no GLSL translator: a custom material renders from the WGSL saved
 with it (`compiledWgsl`), which the material inspector writes when it compiles the shader, and which is
 ignored if the source or the engine prelude changed since (`compiledWgslHash`).

@@ -40,6 +40,8 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `ssaoEnabled` / `ssaoSamples` / `ssaoResolutionScale` | on / 64 / 1.0 | on / 24 / 0.5 | on / 16 / 0.5 | **off** / 16 / 0.5 |
 | `ssilEnabled` | on | on | off | off |
 | `ssrEnabled` / `ssrResolutionScale` / `ssrSteps` | on / 1.0 / 64 | on / 0.5 / 32 | **off** / 0.5 / 24 | **off** / 0.5 / 16 |
+| `localExposureEnabled` | on | on | off | off |
+| `volumetricFogEnabled` / `TileSize` / `Slices` / `LocalShadows` | on / 12 / 96 / on | on / 16 / 64 / on | on / 20 / 48 / off | **off** / 24 / 32 / off |
 | `shadowMapResolution` / `shadowCascades` | 4096 / 4 | 2048 / 3 | 1024 / 3 | 1024 / 2 |
 | `shadowFilterMode` / `shadowFilterRadius` | 1 / 2.0 | 0 / 1.0 | 0 / 1.0 | 0 / **0.0** |
 | `bloomEnabled` | on | on | on | off |
@@ -52,7 +54,12 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `exposure` | `number` | `2.0` | The **authored** exposure. Used only while auto-exposure is off. |
-| `autoExposureEnabled` | `boolean` | `true` | Meter the frame and drive exposure from it. |
+| `autoExposureEnabled` | `boolean` | `true` | Meter the frame and drive exposure from it. It meters the opaque scene before transparents, particles and sprites are drawn, so a fire or a glint coming into view does not pump the exposure. |
+| `preExposure` | `boolean` | `true` | Store each frame's light multiplied by a power of two near its exposure, so a moonlit or torch-lit scene keeps the precision a sunlit one has (the frame's buffers are half floats). Exactly 1 at EV100 15, so a day frame is unchanged; off stores absolute radiance. |
+| `purkinjeStrength` | `number` | `1` | Night vision, 0..1: below a few cd/m² colour drains toward a bluish grey and reds darken, per pixel on absolute luminance, as the eye's rods take over. A moonlit field reads as night while a torch's pool keeps its warmth; a daylit pixel is never touched. Absent = 1. |
+| `localExposureEnabled` | `boolean` | tier | Local exposure (exposure fusion): regions of the frame get their own exposure, so a torch pool and the moonlit field round it are both readable, the detail in each untouched. On from High up; absent in an old scene = off. |
+| `localExposureStrength` | `number` | `0.6` | 0..1: how much of the fused shift is applied. |
+| `localExposureShadows` / `localExposureHighlights` | `number` | `1.5` / `1.5` | Stops the darkest regions can be lifted / the brightest held back. |
 | `exposureCompensation` | `number` | `1.0` | Artist trim on the metered result, **in stops**. Positive is brighter. |
 | `exposureCompensationCurve` | `[number, number][]` | `[]` | Extra trim in stops keyed on the **metered** scene EV100: `[ev100, stops]` keys, linear between, held past the ends. Keeps nights and caves darker than full adaptation. |
 | `exposureMinEV` | `number` | `2.0` | Lower clamp on metered EV100. |
@@ -85,14 +92,27 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `bloomEnabled` | `boolean` | derived | True whenever `bloomIntensity > 0`. |
-| `bloomIntensity` | `number` | `0.35` | How much bloom is added back. `0` disables it. |
-| `bloomThreshold` | `number` | `2.0` | Linear-HDR radiance a pixel must exceed to bloom. |
-| `bloomKnee` | `number` | `0.5` | Softness of the threshold. |
+| `bloomMode` | `'physical' \| 'threshold'` | `'physical'` | **Physical** has no threshold: a `bloomMix` share of the blurred image is mixed into the frame, so every pixel glows in proportion to its energy, a torch at night far more than a lit wall at noon (energy-conserving, as in Call of Duty: Advanced Warfare). **Threshold** blooms only what clears `bloomThreshold`, added on top at `bloomIntensity`. A scene saved without it re-grades to physical. |
+| `bloomMix` | `number` | `0.04` | Physical bloom's share of the blurred image, 0..1. |
+| `bloomIntensity` | `number` | `0.35` | Threshold bloom: how much is added back. `0` disables bloom in either mode. |
+| `bloomThreshold` | `number` | `2.0` | Threshold bloom: the radiance, after exposure, a pixel must exceed to bloom. |
+| `bloomKnee` | `number` | `0.5` | Threshold bloom: softness of the threshold. |
 | `bloomMaskEnabled` | `boolean` | `false` | Restrict bloom to lit surfaces. |
 
-A texel at full white sits on the default threshold, so an unlit surface needs a multiplier above 1 to
-bloom: `emissiveIntensity` on a material, `render.emissive` on a particle renderer, and the tileset's
+In threshold mode a texel at full white sits on the default threshold, so an unlit surface needs a
+multiplier above 1 to bloom: `emissiveIntensity` on a material, `render.emissive` on a particle renderer, and the tileset's
 **Overdrive** (`TilesetConfig.overdrive`, per tile `TileMeta.overdrive`) for sprites and tilemap tiles.
+
+## Volumetric fog
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `volumetricFogEnabled` | `boolean` | tier | Draw the scene's VolumetricFogNode volumes (froxel fog). Off on the Low tier. |
+| `volumetricFogTileSize` / `volumetricFogSlices` | `number` | tier | The froxel grid: screen pixels per column (12 / 16 / 20 / 24) and depth slices (96 / 64 / 48 / 32). |
+| `volumetricFogDistance` | `number` | `128` | Metres the fog reaches from the camera. |
+| `volumetricFogTemporal` | `boolean` | `true` | Blend each froxel with the last frame's. |
+| `volumetricFogLocalLights` | `boolean` | `true` | Scatter the point and spot lights into the fog. |
+| `volumetricFogLocalShadows` | `boolean` | tier | Shade that through the lights' shadow maps, so a torch behind a wall lights none of the fog on this side. On from High up. |
 
 ## Depth of field
 

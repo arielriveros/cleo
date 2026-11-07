@@ -89,9 +89,15 @@ export class ParticlePasses {
     }
 
     /** Draw every particle system of a 3D scene into the scene buffer. 2D scenes draw theirs in the 2D pass. */
-    public renderParticles(scene: Scene): void {
+    /**
+     * The scene's particles, in two calls around the sprite pass: `'nonAdditive'` first (alpha and cut-out
+     * emitters, sorted with the transparents' depth), then `'additive'` after the sprites, so a lit smoke
+     * sprite never covers the embers and sparks in front of it. Additive light is order-independent, so
+     * drawing it last costs nothing in correctness.
+     */
+    public renderParticles(scene: Scene, emitters: 'all' | 'nonAdditive' | 'additive' = 'all'): void {
         if (scene.particleSystems.size === 0 || this._isFlatParticleScene(scene)) return;
-        this._drawParticleNodes(scene, scene.particleSystems, this._targets.scene.renderTarget);
+        this._drawParticleNodes(scene, scene.particleSystems, this._targets.scene.renderTarget, emitters);
     }
 
     /** A 2D scene: an orthographic camera over tilemaps. Its particles join the Y-sorted 2D pass. */
@@ -99,11 +105,15 @@ export class ParticlePasses {
         return this._view.camera.type === 'orthographic' && scene.tilemaps.size > 0;
     }
 
-    private _drawParticleNodes(scene: Scene, nodes: Iterable<ParticleSystemNode>, target: RenderTarget): void {
-        // The sort runs passes of its own, so it goes before the particle pass opens.
-        this.particles.sort(nodes, this._passes.acquireEncoder('particles.sort'), this._view.camera.position);
+    private _drawParticleNodes(scene: Scene, nodes: Iterable<ParticleSystemNode>, target: RenderTarget,
+                               emitters: 'all' | 'nonAdditive' | 'additive' = 'all'): void {
+        // The sort runs passes of its own, so it goes before the particle pass opens — once a frame.
+        if (emitters !== 'additive')
+            this.particles.sort(nodes, this._passes.acquireEncoder('particles.sort'), this._view.camera.position);
         const pass = this._passes.beginFullscreenPass(target, 'particles', false, undefined, false);
-        this.particles.draw(nodes, this.particleDrawFrame(scene, pass, target));
+        const frame = this.particleDrawFrame(scene, pass, target);
+        frame.emitters = emitters;
+        this.particles.draw(nodes, frame);
         this._passes.endFullscreenPass(pass);
     }
 
@@ -134,6 +144,7 @@ export class ParticlePasses {
             hidden: this._hiddenByVolume,
             lodDistanceScale: this.particleLodDistanceScale,
             exposure: this._view.exposure,
+            preExposure: this._view.preExposure,
             // As the forward path picks a mesh's reflection: the probe containing it, else the sky. Never
             // during a probe capture, which would reflect the probe being captured.
             environment: this._view.capturing ? undefined : position => {
@@ -187,7 +198,8 @@ export class ParticlePasses {
             if (this._sys.visibility.lightOccludedMemo.get(node) === true || this._sys.visibility.volumeCulled(node)) continue;
             const light = node.light as PointLight | Spotlight;
             const record: ParticleLocalLight = {
-                position: node.worldPosition, intensity: light.internalIntensity, color: light.color,
+                // Flickering with the light, as the light grid does, so torch smoke pulses with its torch.
+                position: node.worldPosition, intensity: light.internalIntensity * node.flickerFactor, color: light.color,
                 range: light.range, sourceRadius: light.sourceRadius,
             };
             if (node.type === 'spotlight') {

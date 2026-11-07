@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SkyLightNode } from '../src/core/scene/nodes/skyLightNode';
+import { SkyLightNode, DEFAULT_NIGHT_AMBIENT, nightAmbientScale } from '../src/core/scene/nodes/skyLightNode';
 import { Node } from '../src/core/scene/nodes/node';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 
@@ -49,11 +49,16 @@ describe('SkyLightNode', () => {
         expect(node.needsProjection).toBe(true);
     });
 
-    it('leaves the scene ambient alone by default, day and night', () => {
+    it("keeps the day fill and fades a new sky light's to the default share at night", () => {
         const node = new SkyLightNode('sky light');
+        expect(node.nightAmbient).toBe(DEFAULT_NIGHT_AMBIENT);
         expect(node.ambientScale(0.8)).toBe(1);
-        expect(node.ambientScale(-0.5)).toBe(1);
+        expect(node.ambientScale(-0.5)).toBeCloseTo(DEFAULT_NIGHT_AMBIENT);
         expect(node.ambientScale(null)).toBe(1);
+        // The same curve a scene with no sky light gets, so deleting the sky light changes nothing.
+        expect(nightAmbientScale(DEFAULT_NIGHT_AMBIENT, -0.5)).toBeCloseTo(node.ambientScale(-0.5));
+        expect(nightAmbientScale(DEFAULT_NIGHT_AMBIENT, 0.8)).toBe(1);
+        expect(nightAmbientScale(DEFAULT_NIGHT_AMBIENT, null)).toBe(1);
     });
 
     it('fades the ambient to the night share once the sun is down', () => {

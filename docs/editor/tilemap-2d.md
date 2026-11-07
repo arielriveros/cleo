@@ -144,15 +144,16 @@ better choice when the same animation is used in several places.
 - **Random start** — each copy starts on a random frame of its own list, so a row of the same sprite
   (torches along a wall) does not flicker in step. It applies when the sprite spawns.
 
-**Appearance** — tint, opacity, blending, lit, exposure weight, soft fade, transparency, which sides draw, and wireframe. A tileset with
+**Appearance** — tint, opacity, blending, lit, exposure weight, follow light, soft fade, transparency, which sides draw, and wireframe. A tileset with
 **overdrive** makes its sprites glow through bloom; the value belongs to the tileset, and the section
 only reports it.
 
 - **Blending** — **Alpha** draws the sprite over what is behind it. **Additive** adds it as light, for
   fire and glows: black parts vanish and overlapping sprites brighten each other.
 - **Lit** — the sprite takes the scene's light instead of showing its texture as it is: the key light
-  (the sun, or the moon) and the shadows it casts on the sprite, the sky and ambient light, and the
-  strongest light near it. Its tileset's **Lighting maps** decide how: relit from each light's
+  (the sun, or the moon) and the shadows it casts on the sprite, the sky and ambient light, and every
+  point and spot light that reaches it, per pixel, so smoke over a fire is lit from below by the fire and
+  from the side by a torch beside it. Its tileset's **Lighting maps** decide how: relit from each light's
   direction with six-way lightmaps (smoke), shaded as a surface with a normal map (a liquid's splash),
   or flat with neither. The **Tint** is then the colour of what scatters the light: a grey for smoke.
   A lit sprite takes the camera's whole exposure, like a model; **Exposure weight** applies only to what
@@ -162,6 +163,9 @@ only reports it.
   daylight turns to a white smear at night or in a dark interior, where the exposure is hundreds of times
   higher. At 0 it keeps the same brightness under any exposure; fire usually wants a little (0.1), so it
   still glows brighter in the dark.
+- **Follow Light** — a point or spot light nearby, by name, whose flicker the sprite's brightness follows,
+  with **Follow Amount** for how much of it: a flame swelling on the beat of its torch's light (the light's
+  own **Flicker**). Lights are found under the sprite's parent and a couple of levels above.
 - **Soft fade** — in metres: the sprite fades out over that distance as it nears the opaque surface behind
   it, as soft particles do. At 0 a sprite is cut along a hard line wherever it goes into a surface, so a
   flame set into its torch shows a straight edge at the torch head. Above 0 the edge melts away. The sprite

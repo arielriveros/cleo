@@ -374,6 +374,8 @@ export class DecalPasses {
         sm.setUniform('u_affectNormal', decal.affects.normal);
         sm.setUniform('u_affectSurface', decal.affects.surface);
         sm.setUniform('u_decalMode', mode);
+        // The emissive mode adds light to the pre-exposed scene; the overlay mode is display-referred.
+        sm.setUniform('u_decalPreExposure', mode === 0 ? this._view.preExposure : 1);
         sm.setUniform('u_albedoOpacity', decal.albedoOpacity);
         const flip = decalFlipbookFrame(decal.flipbook, decal.flipbookTime, this._decalFlip);
         sm.setUniform('u_flipA', flip.a);

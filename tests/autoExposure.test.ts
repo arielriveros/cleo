@@ -332,6 +332,29 @@ describe('the shader and the renderer agree on the window', () => {
     it('meters the lit scene rather than the composed frame', () => {
         // After bloom, exposure and bloom chase each other: bloom brightens, the meter darkens, which
         // moves bloom's display-referred threshold, and round again.
-        expect(methodBody('exposurePass')).toContain("'exposureMeter', ExposureMeterProgram, [this._targets.scene.colors[0]]");
+        expect(methodBody('meterPass')).toContain("'exposureMeter', ExposureMeterProgram, [this._targets.scene.colors[0]]");
+    });
+
+    it('never snaps its first reading to an empty frame', () => {
+        // A scene still loading meters at the floor of the window; snapping to that opened every load on
+        // the darkest adaptation there is, a white screen that took the slow eye-adaptation to undo.
+        const src = readFileSync(join(__dirname, '../src/graphics/render/autoExposure.ts'), 'utf-8');
+        const body = src.slice(src.indexOf('private _onExposureSample('), src.indexOf('private _exposureTargetEV'));
+        expect(body).toMatch(/if \(!this\.exposureMetered && !\(encoded > AutoExposure\.EMPTY_FRAME_SAMPLE\)\) return;/);
+        // An empty frame encodes to the floor, and a moonlit scene well above the threshold.
+        expect(encode(1e-12)).toBeLessThanOrEqual(0.5 / 255);
+        expect(encode(2e-6)).toBeGreaterThan(0.5 / 255);
+    });
+
+    it('meters before the transparents, particles and sprites are drawn', () => {
+        // A flame, embers or a glint are a few pixels many stops above the world; metered, they pump the
+        // camera dark every time a fire comes into view.
+        const forward = readFileSync(join(__dirname, '../src/graphics/render/forwardPass.ts'), 'utf-8');
+        const overlay = forward.slice(forward.indexOf('this._radiance.capture();'));
+        const meter = overlay.indexOf('this._host.meterScene();');
+        expect(meter).toBeGreaterThan(-1);
+        expect(meter).toBeLessThan(overlay.indexOf("beginPass('transparent')"));
+        expect(meter).toBeLessThan(overlay.indexOf("beginPass('particles')"));
+        expect(meter).toBeLessThan(overlay.indexOf("beginPass('2d')"));
     });
 });

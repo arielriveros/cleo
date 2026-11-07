@@ -52,6 +52,13 @@ export interface ForwardPassHost {
     readonly renderWidth: number;
     readonly selectedNodeId: string | null;
     readonly thumbnailMode: boolean;
+    /**
+     * Meter the resolved opaque scene for auto exposure, if metering is live this frame. Called at the
+     * temporal boundary, before any transparent, particle or sprite is drawn — see `AutoExposure.meterPass`.
+     */
+    meterScene(): void;
+    /** Light, integrate and composite the froxel fog over the opaque scene (render/volumetricFog.ts). */
+    renderVolumetricFog(scene: Scene): void;
 }
 
 /**
@@ -190,6 +197,10 @@ export class ForwardPass {
         // Drawn before the grid/transparents so editor overlays stay crisp.
         if (!this._host.thumbnailMode && this._passes.beginPass('skyFog')) this._sky.renderSkyFog(scene);
 
+        // Volumetric fog volumes, over the opaque scene and the height fog: local fog is usually nearer than
+        // the distance haze. Before the temporal resolve, which smooths its per-frame jitter.
+        this._host.renderVolumetricFog(scene);
+
         // --- The temporal boundary. ---------------------------------------------------------------
         // Everything ABOVE is the scene: sky, clouds, opaques, fog. It is full render resolution,
         // linear HDR, pre-tonemap, and matched by the depth snapshot taken a few lines up — the only
@@ -205,6 +216,8 @@ export class ForwardPass {
         // And the same image, reduced, as next frame's bounce light and reflections — before anything
         // above is drawn.
         this._radiance.capture();
+        // The meter reads the same image: the world's light, without the flames and glints drawn next.
+        this._host.meterScene();
 
         // Smoke-and-fire volumes, over the resolved image like the transparents (a volume has no velocity
         // and animates every frame, so TAA history would only smear it), occluded by the depth snapshot.
@@ -224,12 +237,17 @@ export class ForwardPass {
         this.sceneBuffersLive = false;
 
         // GPU particles: after the transparents (and so after TAA — they never enter history), depth
-        // tested against the opaque scene, soft-faded against its depth snapshot.
-        if (this._passes.beginPass('particles')) this._particlePasses.renderParticles(scene);
+        // tested against the opaque scene, soft-faded against its depth snapshot. Alpha and cut-out
+        // emitters here; the additive ones after the sprites, below.
+        if (this._passes.beginPass('particles')) this._particlePasses.renderParticles(scene, 'nonAdditive');
 
         // Tiles + sprites, depth-sorted together (always transparent, forward). Scene content only —
         // the editor's icon billboards are filtered out and drawn in the overlay below.
         if (this._passes.beginPass('2d')) this._sprites.render2DPass(scene);
+
+        // Additive emitters last: embers and sparks are light added on top, so drawn after a smoke sprite
+        // they show through it where they are in front of it instead of being painted over.
+        if (this._passes.beginPass('particles')) this._particlePasses.renderParticles(scene, 'additive');
 
         // Editor chrome, into the overlay buffer. Last of the scene render and first thing after the
         // post chain, which is the whole point: nothing between those two moments can see it.
@@ -345,12 +363,16 @@ export class ForwardPass {
         // there is nothing for a surface decal to write into.
         if (this._decals.emissiveDecals.length > 0 && this._passes.beginPass('decals.emissive')) this._decals.emissiveDecalPass();
 
+        // Volumetric fog volumes over the opaque scene, before the temporal resolve (as the deferred path).
+        this._host.renderVolumetricFog(scene);
+
         // The temporal boundary — see the matching block in `renderForwardOverlay`. This pipeline has
         // no clouds, no fog and no grid, so the opaque snapshot above is the whole scene and the
         // transparents below are the first thing that must stay out of history.
         this._temporal.produceVelocity();
         this._temporal.taaResolvePass();
         this._projection.endJitterPhase();
+        this._host.meterScene();
 
         // Sort transparent draw queue by distance to camera
         transparentDrawQueue.sort((a, b) => {

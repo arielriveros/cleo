@@ -63,6 +63,22 @@ struct SkyUniforms {
      * too, and its auto exposure opens up to it instead of the sky lighting the ground at 6% of day.
      */
     u_nightScale: f32,
+    /**
+     * Physical units (SkyAtmosphereNode.physicalUnits): 1 when `u_sunIntensity` IS the scene sun's
+     * illuminance on the internal scale, so the sky's radiance follows from the atmosphere integral alone.
+     * The discs and the lit ground below then take their physical radiance too. 0 = the legacy, artistic
+     * scale, where the sun's intensity is a sky-only brightness knob and the discs are fractions of it.
+     */
+    u_physical: f32,
+    /** Physical units: the sun disc's radiance, its illuminance spread over the disc (E / (pi r^2)). */
+    u_sunDiskRadiance: f32,
+    /** Physical units: the full moon disc's radiance, the same way from the moon's own illuminance. */
+    u_moonDiskRadiance: f32,
+    /**
+     * The lit ground's radiance per unit of `u_sunIntensity`: 0.05, the legacy tuning, or in physical units
+     * a Lambertian 1/pi with the sky's multiple-scattering gain taken back out (the ground is lit directly).
+     */
+    u_groundScale: f32,
 };
 @group(0) @binding(0) var<uniform> u_sky: SkyUniforms;
 // Group 1 is the cube transform (cubeVertex.wgsl). Both textures are bound always — a 1x1 fallback when
@@ -299,7 +315,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let diskCos = cos(radians(max(u_sky.u_sunDiskSize, 0.001)));
     if (!viewHitsGround && sunDir.y > -0.02 && sunCos > diskCos) {
         let disk = smoothstep(diskCos, mix(diskCos, 1.0, 0.35), sunCos);
-        col += u_sky.u_sunColor * u_sky.u_sunIntensity * 0.35 * disk;
+        // Physical: the disc as bright as the light it sends, so a mirror's reflection of the sun and the
+        // sun in the sky agree. Legacy: a fixed fraction of the sky's own brightness knob.
+        let diskRadiance = select(u_sky.u_sunIntensity * 0.35, u_sky.u_sunDiskRadiance, u_sky.u_physical > 0.5);
+        col += u_sky.u_sunColor * diskRadiance * disk;
     }
 
     // Night: everything the sun no longer drowns out. `u_night` is 0 in daylight, so none of this runs.
@@ -332,8 +351,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             col += u_sky.u_airglowColor * (u_sky.u_airglowIntensity * 0.15 * night * (0.35 + 0.65 * pow(1.0 - up, 4.0)));
             // The moon disc, reddened near the horizon like the sun.
             if (moonScale > 0.0) {
+                // Physical: the moon's own illuminance over its disc (the shading averages ~0.6, hence the
+                // division), faded only as the sun leaves; it is an absolute brightness, not the night scale.
+                let moonRadiance = select(u_sky.u_sunIntensity * 0.35 * MOON_DISC * night,
+                                          u_sky.u_moonDiskRadiance / 0.6 * u_sky.u_night,
+                                          u_sky.u_physical > 0.5);
                 col += moon.rgb * transmittanceTo(ro, moonDir) * u_sky.u_moonColor
-                       * (u_sky.u_sunIntensity * 0.35 * MOON_DISC * u_sky.u_moonIntensity * night);
+                       * (moonRadiance * u_sky.u_moonIntensity);
             }
         }
     }
@@ -345,10 +369,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // `1 - u_night` a midnight ground glowed at a tenth of noon's, and that tint is what the sky
         // light projects into the night's ambient.
         let lambert = (max(sunDir.y, 0.0) * 0.9 + 0.1) * (1.0 - u_sky.u_night);
-        var ground = u_sky.u_groundColor * lambert * u_sky.u_sunColor * (u_sky.u_sunIntensity * 0.05);
+        let groundScale = u_sky.u_groundScale;
+        var ground = u_sky.u_groundColor * lambert * u_sky.u_sunColor * (u_sky.u_sunIntensity * groundScale);
         let moonLambert = max(moonDir.y, 0.0) * 0.9 + 0.1;
         ground += u_sky.u_groundColor * moonLambert * u_sky.u_moonColor
-                  * (u_sky.u_sunIntensity * 0.05 * MOON_SKY * moonScale * u_sky.u_night * u_sky.u_nightScale);
+                  * (u_sky.u_sunIntensity * groundScale * MOON_SKY * moonScale * u_sky.u_night * u_sky.u_nightScale);
         let blend = smoothstep(0.0, -0.15, dir.y);
         col = mix(col, ground, blend);
     }

@@ -17,6 +17,7 @@ import type { ShaderResource } from '../rhi/types';
 import { nightFactor, moonDirection } from '../skyNight';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
+import { DirectionalLight, REFERENCE_ILLUMINANCE } from '../lighting';
 import { VolumetricCloudPasses } from './clouds';
 import { BRDFProgram, PrefilterProgram, SkyProjectProgram, SkyAtmosphereProgram, SkyFogProgram, SkyboxProgram, VolumetricCloudsProgram } from './programs';
 import type { FrameView } from './frameView';
@@ -344,8 +345,10 @@ export class SkyPasses {
 
         const atmo = scene.skyAtmosphere;
         const atmoCube = atmo?.cubemap ?? null;
-        // A night sky is orders of magnitude darker than a day one; scale it up for the 8-bit readback.
-        const projectScale = atmo ? 1 + 15 * nightFactor(atmo.lastSunDir[1]) : 1;
+        // A night sky is orders of magnitude darker than a day one; scale it up for the 8-bit readback. So
+        // is a physical sky against the artistic one the RGBM range was set for (sun 22 x exposure 1.3).
+        const unitScale = atmo ? Math.min(4096, Math.max(1 / 16, 28.6 / Math.max(1e-6, this.skySunScale(atmo)))) : 1;
+        const projectScale = atmo ? (1 + 15 * nightFactor(atmo.lastSunDir[1])) * unitScale : 1;
         // The clear sky's coefficients are what the CLOUDS are lit by. While the scene's come from the
         // clouded sky, they are projected on their own, so the clouds never light themselves.
         if (atmoCube && source.cube !== atmoCube && (this._clearSkyStale || this._clearSkySource !== atmoCube)) {
@@ -539,8 +542,82 @@ export class SkyPasses {
         if (this._skyTexturesPending
             && (!node.nightSkyTexture || TextureManager.Instance.getTexture(node.nightSkyTexture))
             && (!node.moonTexture || TextureManager.Instance.getTexture(node.moonTexture))) node.markDirty();
-        if (node.needsBake || dot < SUN_EPS)
+        // The night sky's brightness is the moon-to-sun ratio. A moon in lux against a sun whose lux moves
+        // (a time-of-day script) changes it with no setter firing, so a drift re-bakes too — only at night,
+        // where it shows, and only past a few percent, so a per-frame sun write is not a per-frame bake.
+        const ratio = this.nightRatio(scene, node);
+        this._nightRatio = ratio;
+        const baked = node.bakedNightRatio;
+        const drifted = node.nightEnabled && nightFactor(sun[1]) > 0
+            && !(Math.abs(ratio - baked) <= 0.02 * Math.max(ratio, baked));
+        // In physical units the sky is lit by the light's own lux, so a change of it re-bakes the same way.
+        this._skySun = node.physicalUnits ? this.sceneSunIlluminance(scene, node) : null;
+        const e = this._skySun, eBaked = node.bakedSunIlluminance;
+        const relit = e !== null && !(Math.abs(e - eBaked) <= 0.02 * Math.max(e, eBaked));
+        if (node.needsBake || dot < SUN_EPS || drifted || relit)
             this._bakeSkyAtmosphere(node, sun);
+    }
+
+    /** The physical sky's sun (internal scale), as of the last `updateSkyAtmosphere`; null = artistic. */
+    private _skySun: number | null = null;
+
+    /**
+     * What a physical sky's single-scattering integral is multiplied by, standing in for the multiple
+     * scattering it leaves out. Measured on the Nishita march with Earth's coefficients: the zenith comes
+     * out at ~0.01 of the sun's illuminance per steradian and the horizon at ~0.04, about half of a real
+     * clear sky (zenith 3-8 kcd/m2 under a 100 klx sun). Two is where the sky over a sunlit ground reads as
+     * it does in a photograph; the node's Exposure trims it from there.
+     */
+    public static readonly PHYSICAL_SKY_MULTISCATTER = 2;
+
+    /**
+     * The sun irradiance the sky is drawn with (the `u_sunIntensity × u_exposure` the bake uses): the scene
+     * sun's own in physical units, else the node's artistic knob. Whatever relates its own units to the
+     * sky's (the clouds' lighting, the sky-light readback range) goes through this.
+     */
+    public skySunScale(atmo: SkyAtmosphereNode): number {
+        const sun = this._skySun !== null ? this._skySun * SkyPasses.PHYSICAL_SKY_MULTISCATTER : atmo.sunIntensity;
+        return sun * atmo.exposure;
+    }
+
+    /**
+     * How much brighter (or darker) the sky is than the artistic default it was tuned at (sun 22, exposure
+     * 1.3). A physical sky is ~20x darker, so its readback range and the clouds' units scale by this.
+     */
+    public skyUnitScale(atmo: SkyAtmosphereNode): number {
+        return atmo.sunIntensity > 0 ? (this._skySun !== null ? this._skySun * SkyPasses.PHYSICAL_SKY_MULTISCATTER / atmo.sunIntensity : 1) : 1;
+    }
+
+    /**
+     * The scene sun's illuminance on the internal scale (its lux / REFERENCE_ILLUMINANCE) when the
+     * atmosphere takes its sun from the scene, else null: a manual atmosphere sun has no lux to be lit by.
+     */
+    public sceneSunIlluminance(scene: Scene, node: SkyAtmosphereNode): number | null {
+        if (!node.useSceneSun) return null;
+        for (const light of scene.lights)
+            if (light.type === 'directional') return (light.light as DirectionalLight).internalIntensity;
+        return null;
+    }
+
+    /** The moon-to-sun ratio the night sky is drawn at, as of the last `updateSkyAtmosphere`. */
+    private _nightRatio: number = DEFAULT_MOONLIGHT_INTENSITY;
+
+    /**
+     * The moon's illuminance over the sun's: how much darker the moonlit air is than the sunlit air. The
+     * sun is the scene's when the atmosphere takes it (`useSceneSun`), otherwise the reference illuminance
+     * (internal 1). A legacy sky's fraction is the ratio as it stands.
+     */
+    public nightRatio(scene: Scene, node: SkyAtmosphereNode): number {
+        if (node.usesLegacyMoonRatio) return node.moonlightIntensity;
+        let sunLux = REFERENCE_ILLUMINANCE;
+        if (node.useSceneSun) {
+            for (const light of scene.lights) {
+                if (light.type !== 'directional') continue;
+                sunLux = (light.light as DirectionalLight).internalIntensity * REFERENCE_ILLUMINANCE;
+                break;
+            }
+        }
+        return sunLux > 0 ? node.moonLux(sunLux) / sunLux : 0;
     }
 
     // Bake the Nishita single-scattering atmosphere into the node's cubemap (6 faces via the IBL cube
@@ -558,6 +635,8 @@ export class SkyPasses {
         this._renderAtmosphereFaces(node, sun, cube, res, SkyPasses._ALL_FACES);
         this._passes.generateMipsAfterRender(cube);
         node.markBaked(sun);
+        node.bakedNightRatio = this._nightRatio;
+        node.bakedSunIlluminance = this._skySun ?? NaN;
         // The sky light follows the sky. Nothing used to tell it to, so ambient froze at the first sun
         // position; the re-projection is throttled because it is a readback. Its reflection follows too.
         this._skyLightReprojectPending = true;
@@ -587,7 +666,20 @@ export class SkyPasses {
         this._shaderManager.setUniform('u_projection', this._projection.clipProjection(this._captureProj));
         this._shaderManager.setUniform('u_sunDir', sun);
         this._shaderManager.setUniform('u_sunColor', node.sunColor);
-        this._shaderManager.setUniform('u_sunIntensity', node.sunIntensity);
+        // Physical units: the sky is lit by the scene sun's own illuminance, and the discs take the radiance
+        // that illuminance has spread over their size — so the sun and its reflection agree with everything
+        // the light itself lights. Otherwise `sunIntensity` is the sky's own brightness knob.
+        const physicalSun = this._skySun;
+        const physical = physicalSun !== null;
+        const DEG_RAD = Math.PI / 180;
+        const sunDisk = Math.max(1e-3, node.sunDiskSize) * DEG_RAD;
+        const moonDisk = Math.max(1e-3, node.moonSize) * DEG_RAD;
+        const moonLight = physical ? node.moonLux(physicalSun! * REFERENCE_ILLUMINANCE) / REFERENCE_ILLUMINANCE : 0;
+        this._shaderManager.setUniform('u_sunIntensity', physical ? physicalSun! * SkyPasses.PHYSICAL_SKY_MULTISCATTER : node.sunIntensity);
+        this._shaderManager.setUniform('u_physical', physical ? 1 : 0);
+        this._shaderManager.setUniform('u_sunDiskRadiance', physical ? physicalSun! / (Math.PI * sunDisk * sunDisk) : 0);
+        this._shaderManager.setUniform('u_moonDiskRadiance', physical ? moonLight / (Math.PI * moonDisk * moonDisk) : 0);
+        this._shaderManager.setUniform('u_groundScale', physical ? 1 / (Math.PI * SkyPasses.PHYSICAL_SKY_MULTISCATTER) : 0.05);
         // Earth Rayleigh scattering coefficients (per metre), scaled by the user multiplier.
         const rs = node.rayleighScatter;
         this._shaderManager.setUniform('u_rayleigh', [5.8e-6 * rs, 13.5e-6 * rs, 33.1e-6 * rs]);
@@ -623,7 +715,7 @@ export class SkyPasses {
         this._shaderManager.setUniform('u_nightTexture', !!nightTex);
         this._shaderManager.setUniform('u_moonTexture', !!moonTex);
         this._shaderManager.setUniform('u_moonEnabled', node.moonEnabled);
-        this._shaderManager.setUniform('u_nightScale', node.moonlightIntensity / DEFAULT_MOONLIGHT_INTENSITY);
+        this._shaderManager.setUniform('u_nightScale', this._nightRatio / DEFAULT_MOONLIGHT_INTENSITY);
         const nightGroup = this._bindGroups.textureGroup(skyPipeline, 2, [nightTex ?? this._bindGroups.fallbackTexture,
                                                                     moonTex ?? this._bindGroups.fallbackTexture]);
         // A texture still loading bakes the procedural fallback; remember to bake again once it is in.
@@ -664,6 +756,7 @@ export class SkyPasses {
         this._shaderManager.setUniform('u_fogHeight', node.fogHeight);
         this._shaderManager.setUniform('u_fogHeightFalloff', node.fogHeightFalloff);
         this._shaderManager.setUniform('u_fogMaxOpacity', node.fogMaxOpacity);
+        this._shaderManager.setUniform('u_preExposure', this._view.preExposure);
         this._shaderManager.setUniform('u_fogColor', node.fogColor);
         this._shaderManager.setUniform('u_fogColorBlend', node.fogColorBlend);
         // Sample the atmosphere well up the mip chain so fog is a smooth colour haze (no crisp sun disk
@@ -695,6 +788,7 @@ export class SkyPasses {
         // cube-face and capture guards rather than by picking call sites.
         this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(proj));
         this._shaderManager.setUniform('u_linearInput', linearInput);
+        this._shaderManager.setUniform('u_preExposure', this._view.preExposure);
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [cubemap]));
         this._passes.recordDraw(pass, mesh, 0, 0);
     }
@@ -866,6 +960,8 @@ export class SkyPasses {
                                                            this._clouds.cloudDetailNoise]);
         this._clouds.setCloudUniforms(scene, node, this._cloudFaceInv, bake.eye, bake.time);
         this._shaderManager.setUniform('u_ignoreDepth', true);
+        // The cloud-sky cube is a bake: absolute, like the atmosphere cube it paints over.
+        this._shaderManager.setUniform('u_preExposure', 1);
         this._shaderManager.setUniform('u_temporal', false);
         this._shaderManager.setUniform('u_jitter', false);
         this._shaderManager.setUniform('u_jitterSlot', 0);

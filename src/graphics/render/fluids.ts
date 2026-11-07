@@ -130,6 +130,7 @@ export class FluidVolumePasses {
             // Sprite.exposureWeight's rule: divide by the share of the exposure the fire does not take.
             const fw = Math.min(1, Math.max(0, node.fireExposureWeight));
             sm.setUniform('u_fireScale', fw < 1 && this._view.exposure > 0 ? Math.pow(this._view.exposure, fw - 1) : 1);
+            sm.setUniform('u_preExposure', this._view.preExposure);
             sm.setUniform('u_stepScale', step);
             sm.setUniform('u_blend', node.previousVolume ? Math.min(1, Math.max(0, node.blend)) : 1);
             sm.setUniform('u_anisotropy', node.anisotropy);
@@ -182,8 +183,9 @@ export class FluidVolumePasses {
             // Moving or editing: lean on the new samples so nothing smears; still: accumulate.
             sm.setUniform('u_feedback', moving || lead.interacting ? 0.6 : 0.9);
             sm.setUniform('u_historyValid', this.fluidHistory.valid && this._view.hasPrevViewProj ? 1 : 0);
+            sm.setUniform('u_historyRescale', this.fluidHistory.rescale(this._view.preExposure));
             this._passes.drawFullscreenAndEnd(pass);
-            this.fluidHistory.swap();
+            this.fluidHistory.swap(this._view.preExposure);
             image = this.fluidHistory.read.colors[0];
         }
 

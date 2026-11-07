@@ -142,6 +142,10 @@ export const ParticlesIcon = () => (
 export const OcclusionVolumeIcon = () => (
   <S><path d="M3.5 3.5h17v17h-17Z" strokeDasharray="2.6 2.2" /><path d="M8 11h8v6.5H8Z" fill="currentColor" fillOpacity="0.35" /><path d="M6 18.5 18 6.5" /></S>
 );
+/** Volumetric fog: a dashed box with two drifting bands of mist in it. */
+export const VolumetricFogIcon = () => (
+  <S><path d="M3.5 3.5h17v17h-17Z" strokeDasharray="2.6 2.2" /><path d="M6 10.5c1.5-1.2 3-1.2 4.5 0s3 1.2 4.5 0 3-1.2 4.5 0M6 14.5c1.5-1.2 3-1.2 4.5 0s3 1.2 4.5 0 3-1.2 4.5 0" /></S>
+);
 /** Exposure volume: a dashed box around a half-lit disc, the exposure it sets inside. */
 export const ExposureVolumeIcon = () => (
   <S><path d="M3.5 3.5h17v17h-17Z" strokeDasharray="2.6 2.2" /><circle cx="12" cy="12" r="4.5" /><path d="M12 7.5a4.5 4.5 0 0 1 0 9Z" fill="currentColor" stroke="none" /></S>

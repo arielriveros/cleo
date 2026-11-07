@@ -59,7 +59,7 @@ describe('programsFor', () => {
         // The puddles are decals; the bonfire's smoke a lit sprite.
         for (const name of ['pbrSkinned~pcf', 'pbrGeometrySkinned~flat', 'pbrGeometry~flat', 'deferredLighting~pcf',
                             'screen', 'present', 'skyAtmosphere', 'volumetricClouds', 'particleBillboard', 'ssil', 'vignette',
-                            'decalSurface', 'spriteLit'])
+                            'decalSurface', 'spriteLit', 'ssr', 'localExposureLum', 'volumetricFogInject', 'volumetricFogApply'])
             expect(list, name).toContain(name);
         // Particles as stripped variants.
         expect(list.some(n => /^particleSim~s\d+$/.test(n))).toBe(true);
@@ -67,8 +67,9 @@ describe('programsFor', () => {
                             'dofCoc', 'taaResolve', 'motionBlur', 'exposureMeter', 'lensFlare'])
             expect(list, name).not.toContain(name);
         // 60 with the impostor shadow program the Valley's pines cast through in the outer cascades, and
-        // the knight's cut-out skinned variants on top; the puddles' three decal programs and the smoke's.
-        expect(list.length).toBeLessThan(68);
+        // the knight's cut-out skinned variants on top; the puddles' three decal programs and the smoke's;
+        // the High tier's screen-space reflections (three) and local exposure (two); the fog volumes' three.
+        expect(list.length).toBeLessThan(78);
     });
 
     it('builds the parallax variant only for a material that marches', () => {

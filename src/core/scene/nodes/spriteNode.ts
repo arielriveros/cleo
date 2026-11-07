@@ -1,6 +1,7 @@
 import { Sprite, remapLegacyFrame } from "../../../graphics/sprite";
 import { ShaderManager } from "../../../graphics/systems/shaderManager";
 import { Tileset } from "../../../graphics/tilemap/tileset";
+import { FollowedLight } from "./lightNode";
 import { Logger } from "../../logger";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
@@ -20,6 +21,13 @@ export class SpriteNode extends Node {
      * set it. Not serialized.
      */
     public maxScreenSize: number = 0;
+
+    private readonly _followed = new FollowedLight();
+
+    /** This frame's multiplier from the light the sprite follows (Sprite.followLight); 1 when none. */
+    public get lightFollowScale(): number {
+        return this._followed.factor(this, this._sprite.followLight, this._sprite.followAmount);
+    }
 
     constructor(
         name: string,

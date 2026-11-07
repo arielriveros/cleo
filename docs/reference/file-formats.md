@@ -122,7 +122,15 @@ manifest contract is newer than itself.
 | 8 | `DecalNode` *(unreleased — a v7 player has no such class, so every decal loads as a plain node and the game draws none of them)* |
 | 9 | The landscape layer stack (`masksChunk`, base + paint layers, slot rules) |
 | 10 | Controller layers and action slots, pose states, clip events, skeleton sockets |
-| **11** | `ParticleSystemNode` and `ForceFieldNode` *(unreleased — a v10 player has no such classes, so every effect and force field loads as a plain node and the game draws and applies none of them)* |
+| 11 | `ParticleSystemNode` and `ForceFieldNode` *(unreleased — a v10 player has no such classes, so every effect and force field loads as a plain node and the game draws and applies none of them)* |
+| 12 | `WaterVolumeNode` |
+| 13 | Anatomical ragdoll profiles (`skin.ragdollProfile`) |
+| 14 | Per-scene render settings (`scenes[].render`) |
+| 15 | `ExposureVolumeNode` |
+| 16 | `ClothNode` |
+| 17 | Trigger options (`trigger.enabled/group/mask/detectTriggers/continuous`) and trigger-to-trigger overlaps |
+| 18 | `OcclusionVolumeNode` replaces `OccluderNode` |
+| **19** | `VolumetricFogNode`, moonlight in lux (`atmosphere.moonIlluminance`), physical sky units (`atmosphere.physicalUnits`), light flicker (`light.flicker`), light-following sprites and particle systems (`followLight`, `fogGlow`) *(unreleased — a v18 player has no fog class, so every fog bank is missing, and it reads a lux moon as the default share of the sun: a moon as bright as day)* |
 
 ### What a build strips
 

@@ -6,6 +6,7 @@ import { Scene } from '../core/scene/scene';
 import { LightNode } from '../core/scene/nodes/lightNode';
 import type { LightProbeNode } from '../core/scene/nodes/lightProbeNode';
 import { type ExposureCurveKey, REFERENCE_ILLUMINANCE } from './lighting';
+import { lightFlickerClock } from './lightFlicker';
 import { Mesh } from './mesh';
 import type { ShaderProgram, ShaderProgramDescriptor } from './rhi/shaderProgram';
 import { Framebuffer } from './framebuffer';
@@ -63,6 +64,8 @@ import { SsrPasses } from './render/ssr';
 import { SceneRadianceCopy } from './render/sceneRadiance';
 import { ssrStepCount } from './ssrSettings';
 import { LightingPasses } from './render/lighting';
+import { VolumetricFogPasses } from './render/volumetricFog';
+import type { VolumetricFogNode } from '../core/scene/nodes/volumetricFogNode';
 import { SkyPasses } from './render/sky';
 import { ModelDraw } from './render/modelDraw';
 import { ObjectTable } from './objectTable';
@@ -158,6 +161,8 @@ export class Renderer {
     private readonly _fluids: FluidVolumePasses;
     /** GPU particle simulation, sorting and drawing, and the per-frame data they are handed (render/particlePasses.ts). */
     private readonly _particlePasses: ParticlePasses;
+    /** Froxel volumetric fog for VolumetricFogNode volumes (render/volumetricFog.ts). */
+    private readonly _fog: VolumetricFogPasses;
     /** Sprites, tilemap chunks and the Y-sorted 2D pass (render/sprites2d.ts). */
     private readonly _sprites: Sprite2DPasses;
     /** Landscape foliage: upload, culling (CPU and GPU), wind, impostors, shadows and the colour pass (render/foliage.ts). */
@@ -334,6 +339,11 @@ export class Renderer {
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._projection, this._temporal, this._subsystems);
+        this._fog = new VolumetricFogPasses({
+            get renderHeight() { return renderer._renderHeight; },
+            get renderWidth() { return renderer._renderWidth; },
+            get thumbnailMode() { return renderer._thumbnailMode; },
+        }, this._view, this._targets, this._passes, this._bindGroups, this._fullscreen, this._projection, this._particlePasses, this._subsystems);
         this._sprites = new Sprite2DPasses({
             get canvas() { return renderer._canvas; },
             get thumbnailMode() { return renderer._thumbnailMode; },
@@ -388,6 +398,10 @@ export class Renderer {
             get renderWidth() { return renderer._renderWidth; },
             get selectedNodeId() { return renderer._selectedNodeId; },
             get thumbnailMode() { return renderer._thumbnailMode; },
+            meterScene: () => renderer._meterScene(),
+            renderVolumetricFog: (scene: Scene) => {
+                if (renderer._passes.beginPass('volumetricFog')) renderer._fog.render(scene);
+            },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._temporal, this._clouds, this._decals, this._fluids, this._particlePasses, this._sprites, this._visibility, this._radiance, this._lighting, this._sky, this._modelDraw, this._subsystems);
         this._overlays = new EditorOverlays({
             get thumbnailMode() { return renderer._thumbnailMode; },
@@ -734,7 +748,13 @@ export class Renderer {
         this._materials.updateCameraHole(scene);
         // Kept for per-draw lookups (forward light-probe selection) that don't receive the scene.
         this._view.scene = scene;
+        // This frame's pre-exposure, before ANY light, sky or emissive is uploaded — they are all stored
+        // multiplied by it. A preview (thumbnail, offscreen capture, non-scene tab) renders at k = 1.
+        this._autoExposure.beginFrame(this._thumbnailMode || !!this._subsystems.capture.presentTarget
+                                      || !this._autoExposure.exposureMeteringAllowed);
         this._foliage.advanceWindTime();
+        // One clock for every flickering light and everything that follows one (graphics/lightFlicker.ts).
+        lightFlickerClock.time = this._view.windTime;
         // What is pushing foliage aside this frame (characters, moving bodies, blasts): stamps for the
         // instanced foliage programs, aged against the same clock as the wind.
         this._foliage.foliageInteraction.update(gatherFoliageInteractors(scene), this._view.windTime, this._view.camera.position);
@@ -1108,6 +1128,7 @@ export class Renderer {
         this._ssil.ssilHistoryFrame = -1;
         this._ssr.invalidate();
         this._radiance.invalidate();
+        this._fog.invalidate();
     }
 
     private readonly _ssrForward: number[] = [0, 0, 0, 0];
@@ -1420,8 +1441,8 @@ export class Renderer {
         const nowMs = performance.now();
         const dt = Math.min(0.25, Math.max(0, (nowMs - this._autoExposure.lastExposureMs) / 1000));
         this._autoExposure.lastExposureMs = nowMs;
-        // It reads `_targets.scene` and writes its own 1x1 targets, so it touches no chain resource at all —
-        // which is why its position is fixed by the comment above rather than by a dependency.
+        // The meter itself ran during the scene render (`_meterScene`, before the transparents); this node
+        // only eases the exposure toward its last reading, so it touches no chain resource at all.
         if (this._autoExposure.meteringActive() && this._passEnabled['exposure'])
             graph.addPass({ id: 'exposure', scope: 'exposure', execute: () => this._autoExposure.exposurePass(dt) });
 
@@ -1578,6 +1599,18 @@ export class Renderer {
                 execute: ctx => this._post.fxaaPass(ctx.read(from), ctx.target(to)),
             });
             src = to;
+        }
+
+        // --- local exposure: the regions the display resolve shifts, from the chain's final image ---
+        // After FXAA and everything else, so the shift is measured on exactly what the resolve shows.
+        this._post.localExposure.beginFrame();
+        if (this._post.localExposure.enabled && this._post.localExposure.strength > 0 && this._passEnabled['localExposure']
+            && this._debugViews.debugView === 'final' && this._view.camera.type !== 'orthographic') {
+            const from = src;
+            graph.addPass({
+                id: 'localExposure', scope: 'localExposure', reads: [from],
+                execute: ctx => this._post.localExposure.generate(ctx.read(from), this._renderWidth, this._renderHeight),
+            });
         }
 
         // --- tail: the single display resolve -----------------------------------------------------
@@ -1757,6 +1790,15 @@ export class Renderer {
         this._post.bloomIntensityUser = this._post.bloomIntensity;
     }
 
+    /** See {@link RenderSettings.bloomMode}. */
+    public get bloomMode(): 'physical' | 'threshold' { return this._post.bloomMode; }
+    public set bloomMode(v: 'physical' | 'threshold') { this._post.bloomMode = v === 'threshold' ? 'threshold' : 'physical'; }
+    /** See {@link RenderSettings.purkinjeStrength}. */
+    public get purkinjeStrength(): number { return this._post.purkinjeStrength; }
+    public set purkinjeStrength(v: number) { this._post.purkinjeStrength = Math.min(1, Math.max(0, Number.isFinite(+v) ? +v : 1)); }
+    /** See {@link RenderSettings.bloomMix}. */
+    public get bloomMix(): number { return this._post.bloomMix; }
+    public set bloomMix(v: number) { this._post.bloomMix = Math.min(1, Math.max(0, Number.isFinite(+v) ? +v : 0.04)); }
     public get bloomMaskEnabled(): boolean { return this._post.bloomMaskEnabled; }
     public set bloomMaskEnabled(v: boolean) { this._post.bloomMaskEnabled = v; }
 
@@ -1894,6 +1936,35 @@ export class Renderer {
     public get ssaoBias(): number { return this._ssil.ssaoBias; }
     public set ssaoBias(bias: number) { this._ssil.ssaoBias = Math.max(0, bias); }
 
+    /** See {@link RenderSettings.volumetricFogEnabled}. A quality-tier field. */
+    public get volumetricFogEnabled(): boolean { return this._fog.enabled; }
+    public set volumetricFogEnabled(on: boolean) { this._fog.enabled = !!on; }
+    public get volumetricFogTileSize(): number { return this._fog.tileSize; }
+    public set volumetricFogTileSize(v: number) { this._fog.tileSize = Math.min(64, Math.max(4, Math.round(Number.isFinite(+v) ? +v : 16))); this._fog.invalidate(); }
+    public get volumetricFogSlices(): number { return this._fog.slices; }
+    public set volumetricFogSlices(v: number) { this._fog.slices = Math.min(128, Math.max(8, Math.round(Number.isFinite(+v) ? +v : 64))); this._fog.invalidate(); }
+    public get volumetricFogDistance(): number { return this._fog.distance; }
+    public set volumetricFogDistance(v: number) { this._fog.distance = Math.min(500, Math.max(5, Number.isFinite(+v) ? +v : 128)); this._fog.invalidate(); }
+    public get volumetricFogTemporal(): boolean { return this._fog.temporal; }
+    public set volumetricFogTemporal(on: boolean) { this._fog.temporal = !!on; }
+    public get volumetricFogLocalLights(): boolean { return this._fog.localLights; }
+    public set volumetricFogLocalLights(on: boolean) { this._fog.localLights = !!on; }
+    /** See {@link RenderSettings.volumetricFogLocalShadows}. A quality-tier field. */
+    public get volumetricFogLocalShadows(): boolean { return this._fog.localShadows; }
+    public set volumetricFogLocalShadows(on: boolean) { this._fog.localShadows = !!on; }
+    /** The fog volumes that drew last frame (the inspector's status). */
+    public get volumetricFogFrameVolumes(): readonly VolumetricFogNode[] { return this._fog.frameVolumes; }
+
+    /** See {@link RenderSettings.localExposureEnabled}. A quality-tier field. */
+    public get localExposureEnabled(): boolean { return this._post.localExposure.enabled; }
+    public set localExposureEnabled(on: boolean) { this._post.localExposure.enabled = !!on; }
+    public get localExposureStrength(): number { return this._post.localExposure.strength; }
+    public set localExposureStrength(v: number) { this._post.localExposure.strength = Math.min(1, Math.max(0, Number.isFinite(+v) ? +v : 0.6)); }
+    public get localExposureShadows(): number { return this._post.localExposure.shadowStops; }
+    public set localExposureShadows(v: number) { this._post.localExposure.shadowStops = Math.min(4, Math.max(0, Number.isFinite(+v) ? +v : 1.5)); }
+    public get localExposureHighlights(): number { return this._post.localExposure.highlightStops; }
+    public set localExposureHighlights(v: number) { this._post.localExposure.highlightStops = Math.min(4, Math.max(0, Number.isFinite(+v) ? +v : 1.5)); }
+
     /** See {@link RenderSettings.ssrEnabled}. A quality-tier field, like `ssaoEnabled`. */
     public get ssrEnabled(): boolean { return this._ssr.ssrEnabled; }
     public set ssrEnabled(enabled: boolean) { this._ssr.ssrEnabled = !!enabled; }
@@ -1936,19 +2007,22 @@ export class Renderer {
     public get horizonOcclusionEnabled(): boolean { return this._lighting.horizonOcclusionEnabled; }
     public set horizonOcclusionEnabled(on: boolean) { this._lighting.horizonOcclusionEnabled = on; }
 
+    /** See {@link RenderSettings.preExposure}. */
+    public get preExposureEnabled(): boolean { return this._autoExposure.preExposureEnabled; }
+    public set preExposureEnabled(on: boolean) { this._autoExposure.preExposureEnabled = !!on; }
+    /** This frame's pre-exposure factor (1 when off, and for previews). */
+    public get preExposure(): number { return this._view.preExposure; }
+
     /** See {@link RenderSettings.autoExposureEnabled}. */
     public get autoExposureEnabled(): boolean { return this._autoExposure.autoExposureEnabled; }
     /**
      * Allow or suppress metering for this host. See `_autoExposure.exposureMeteringAllowed`.
      *
-     * Re-allowing re-seeds the adaptation from the current picture, so returning to the scene tab eases
-     * rather than snapping — the same thing the `autoExposureEnabled` setter does.
+     * Re-allowing picks the adaptation up where it was left: the meter never ran on the other tabs and
+     * never overwrote `exposureEV`, so returning to the scene tab continues from the scene's own adapted
+     * exposure — neither a snap nor a fade from the preview's fixed one.
      */
     public setExposureMeteringAllowed(allowed: boolean): void {
-        if (allowed && !this._autoExposure.exposureMeteringAllowed) {
-            this._autoExposure.exposureEV = this.ev100;
-            this._autoExposure.exposureMetered = false;
-        }
         this._autoExposure.exposureMeteringAllowed = allowed;
     }
     public get exposureMeteringAllowed(): boolean { return this._autoExposure.exposureMeteringAllowed; }
@@ -1960,12 +2034,25 @@ export class Renderer {
      * temporal history that DOES persist belongs to TAA, which never stopped running.
      */
     public setPostProcessingAllowed(allowed: boolean): void { this._postProcessingAllowed = allowed; }
+
+    /**
+     * Meter the resolved opaque scene for auto exposure (`ForwardPassHost.meterScene`): at the temporal
+     * boundary, before the transparents, particles and sprites, so flames and glints never pump the camera.
+     * Not for a thumbnail or an offscreen capture, which render another view — metered, it would adapt the
+     * scene's camera to whatever the capture was looking at.
+     */
+    private _meterScene(): void {
+        if (this._thumbnailMode || this._subsystems.capture.presentTarget) return;
+        if (!this._autoExposure.meteringActive()) return;
+        if (!this._passes.beginPass('exposure')) return;
+        this._autoExposure.meterPass();
+    }
     public get postProcessingAllowed(): boolean { return this._postProcessingAllowed; }
 
     public set autoExposureEnabled(on: boolean) {
         // Seed the adaptation from wherever the manual value stands, so switching it on eases away
         // from the current picture instead of snapping to the metered one.
-        if (on && !this._autoExposure.autoExposureEnabled) { this._autoExposure.exposureEV = this.ev100; this._autoExposure.exposureMetered = false; }
+        if (on && !this._autoExposure.autoExposureEnabled) this._autoExposure.seedAdaptation(this.ev100);
         this._autoExposure.autoExposureEnabled = on;
     }
     public get exposureCompensation(): number { return this._autoExposure.exposureCompensation; }
@@ -2087,6 +2174,12 @@ export class Renderer {
         this._ssil.ssaoSamples = t.ssaoSamples;
         this._ssil.ssilEnabled = t.ssilEnabled;
         this._ssr.ssrEnabled = t.ssrEnabled;
+        this._post.localExposure.enabled = t.localExposureEnabled;
+        this._fog.enabled = t.volumetricFogEnabled;
+        this._fog.tileSize = t.volumetricFogTileSize;
+        this._fog.slices = t.volumetricFogSlices;
+        this._fog.localShadows = t.volumetricFogLocalShadows;
+        this._fog.invalidate();
         this._ssr.ssrResolutionScale = t.ssrResolutionScale;
         this._ssr.ssrSteps = t.ssrSteps;
         this._temporal.motionBlurEnabled = t.motionBlurEnabled;
@@ -2354,6 +2447,9 @@ export class Renderer {
             bloomThreshold: this._post.bloomThreshold,
             bloomKnee: this._post.bloomKnee,
             bloomIntensity: this._post.bloomIntensity,
+            bloomMode: this._post.bloomMode,
+            bloomMix: this._post.bloomMix,
+            purkinjeStrength: this._post.purkinjeStrength,
             bloomMaskEnabled: this._post.bloomMaskEnabled,
             chromaticAberrationStrength: this._post.chromaticAberrationStrength,
             dofEnabled: this._post.dofEnabled,
@@ -2382,6 +2478,7 @@ export class Renderer {
             specularAaEnabled: this._modelDraw.specularAaEnabled,
             horizonOcclusionEnabled: this._lighting.horizonOcclusionEnabled,
             autoExposureEnabled: this._autoExposure.autoExposureEnabled,
+            preExposure: this._autoExposure.preExposureEnabled,
             exposureCompensation: this._autoExposure.exposureCompensation,
             exposureCompensationCurve: this._autoExposure.exposureCompensationCurve.map(k => [k[0], k[1]] as ExposureCurveKey),
             exposureMinEV: this._autoExposure.exposureMinEV,
@@ -2395,6 +2492,17 @@ export class Renderer {
             ssilEnabled: this._ssil.ssilEnabled,
             ssilIntensity: this._ssil.ssilIntensity,
             ssrEnabled: this._ssr.ssrEnabled,
+            localExposureEnabled: this._post.localExposure.enabled,
+            localExposureStrength: this._post.localExposure.strength,
+            localExposureShadows: this._post.localExposure.shadowStops,
+            localExposureHighlights: this._post.localExposure.highlightStops,
+            volumetricFogEnabled: this._fog.enabled,
+            volumetricFogTileSize: this._fog.tileSize,
+            volumetricFogSlices: this._fog.slices,
+            volumetricFogDistance: this._fog.distance,
+            volumetricFogTemporal: this._fog.temporal,
+            volumetricFogLocalLights: this._fog.localLights,
+            volumetricFogLocalShadows: this._fog.localShadows,
             ssrResolutionScale: this._ssr.ssrResolutionScale,
             ssrSteps: this._ssr.ssrSteps,
             ssrMaxRoughness: this._ssr.ssrMaxRoughness,
@@ -2479,6 +2587,12 @@ export class Renderer {
         if (s.bloomKnee !== undefined) this.bloomKnee = s.bloomKnee;
         if (s.bloomIntensity !== undefined) this.bloomIntensity = s.bloomIntensity;
         if (s.bloomMaskEnabled !== undefined) this._post.bloomMaskEnabled = s.bloomMaskEnabled;
+        // Absent = physical, deliberately: a scene saved under threshold bloom re-grades to it, as every
+        // scene re-graded to AgX. `bloomMode: 'threshold'` pins the old look back.
+        this.bloomMode = s.bloomMode ?? 'physical';
+        if (s.bloomMix !== undefined) this.bloomMix = s.bloomMix;
+        // Absent = on: rod vision is how a night looks, and it never touches a lit pixel.
+        this.purkinjeStrength = s.purkinjeStrength ?? 1;
         if (s.chromaticAberrationStrength !== undefined) this.chromaticAberrationStrength = s.chromaticAberrationStrength;
         if (s.dofEnabled !== undefined) this.dofEnabled = s.dofEnabled;
         if (s.dofFocusDistance !== undefined) this.dofFocusDistance = s.dofFocusDistance;
@@ -2513,6 +2627,7 @@ export class Renderer {
         if (s.horizonOcclusionEnabled !== undefined)
             this.horizonOcclusionEnabled = s.horizonOcclusionEnabled;
         if (s.autoExposureEnabled !== undefined) this.autoExposureEnabled = s.autoExposureEnabled;
+        if (s.preExposure !== undefined) this.preExposureEnabled = s.preExposure;
         if (s.exposureCompensation !== undefined) this._autoExposure.exposureCompensation = s.exposureCompensation;
         // Whole-blob semantics like the tone mapper: a scene without a curve must not inherit the last one.
         this.exposureCompensationCurve = s.exposureCompensationCurve ?? [];
@@ -2527,6 +2642,17 @@ export class Renderer {
         if (s.ssilEnabled !== undefined) this.ssilEnabled = s.ssilEnabled;
         if (s.ssilIntensity !== undefined) this.ssilIntensity = s.ssilIntensity;
         if (s.ssrEnabled !== undefined) this.ssrEnabled = s.ssrEnabled;
+        if (s.localExposureEnabled !== undefined) this.localExposureEnabled = s.localExposureEnabled;
+        if (s.localExposureStrength !== undefined) this.localExposureStrength = s.localExposureStrength;
+        if (s.localExposureShadows !== undefined) this.localExposureShadows = s.localExposureShadows;
+        if (s.localExposureHighlights !== undefined) this.localExposureHighlights = s.localExposureHighlights;
+        if (s.volumetricFogEnabled !== undefined) this.volumetricFogEnabled = s.volumetricFogEnabled;
+        if (s.volumetricFogTileSize !== undefined) this.volumetricFogTileSize = s.volumetricFogTileSize;
+        if (s.volumetricFogSlices !== undefined) this.volumetricFogSlices = s.volumetricFogSlices;
+        if (s.volumetricFogDistance !== undefined) this.volumetricFogDistance = s.volumetricFogDistance;
+        if (s.volumetricFogTemporal !== undefined) this.volumetricFogTemporal = s.volumetricFogTemporal;
+        if (s.volumetricFogLocalLights !== undefined) this.volumetricFogLocalLights = s.volumetricFogLocalLights;
+        if (s.volumetricFogLocalShadows !== undefined) this.volumetricFogLocalShadows = s.volumetricFogLocalShadows;
         if (s.ssrResolutionScale !== undefined) this.ssrResolutionScale = s.ssrResolutionScale;
         if (s.ssrSteps !== undefined) this.ssrSteps = s.ssrSteps;
         if (s.ssrMaxRoughness !== undefined) this.ssrMaxRoughness = s.ssrMaxRoughness;

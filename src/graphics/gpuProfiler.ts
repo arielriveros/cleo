@@ -61,6 +61,8 @@ export const RENDER_PASSES = [
     'grid',
     // Smoke-and-fire volumes (FluidVolumeNode), over the resolved image just before the transparents.
     'fluidVolumes',
+    // Froxel fog for VolumetricFogNode: lit, integrated and composited over the opaque scene.
+    'volumetricFog',
     'transparent',
     'particles',
     '2d',
@@ -79,6 +81,7 @@ export const RENDER_PASSES = [
     'vignette',
     'filmGrain',
     'fxaa',
+    'localExposure',
     'exposure',
     'bloom.bright',
     'bloom.blur',
@@ -101,7 +104,7 @@ export const TOGGLEABLE_PASSES: RenderPass[] = [
     // `dof.coc` switches depth of field as a whole. Its other two passes report their own timings
     // but are deliberately NOT switchable: the gather and the composite are halves of one effect,
     // and a composite that did not run would leave the next stage of the chain unwritten.
-    'dof.coc', 'lensFlare', 'vignette', 'filmGrain', 'fxaa',
+    'dof.coc', 'lensFlare', 'vignette', 'filmGrain', 'fxaa', 'localExposure', 'volumetricFog',
 ];
 
 /**
@@ -145,6 +148,10 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     'dof.composite': 'dof.composite',
     lensFlare: 'lensFlare',
     lensFlareComposite: 'lensFlare',
+    localExposure: 'localExposure',
+    'volumetricFog.inject': 'volumetricFog',
+    'volumetricFog.integrate': 'volumetricFog',
+    'volumetricFog.apply': 'volumetricFog',
     vignette: 'vignette',
     filmGrain: 'filmGrain',
     fxaa: 'fxaa',

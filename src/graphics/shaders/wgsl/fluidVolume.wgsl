@@ -107,6 +107,8 @@ struct FluidVolumeUniforms {
     u_hasLut: i32,
     u_hasOccupancy: i32,
     u_shading: i32,                  // 0 gas, 1 liquid
+    /** The frame's pre-exposure (graphics/preExposure.ts): the trace's light is stored multiplied by it. */
+    u_preExposure: f32,
 };
 @group(1) @binding(4) var<uniform> u_fluid: FluidVolumeUniforms;   // not `u_volume`: GLSL names the u_volume_texture sampler that, and the two would clash
 
@@ -324,7 +326,8 @@ fn liquid_trace(lo: vec3<f32>, ld: vec3<f32>, safe: vec3<f32>, t0: f32, t1: f32,
     let Fm = (F.x + F.y + F.z) / 3.0;
     let glass = min(1.0, 1.0 - Tm * (1.0 - Fm) * (1.0 - fo));
     let alpha = glass + (1.0 - glass) * m;
-    out.color = vec4<f32>(diffuse * (vec3<f32>(1.0) - F) * (1.0 - m) + spec + env, alpha);
+    out.color = vec4<f32>(min((diffuse * (vec3<f32>(1.0) - F) * (1.0 - m) + spec + env) * u_fluid.u_preExposure,
+                              vec3<f32>(32768.0)), alpha);
     out.depth = vec4<f32>(b * dlen * alpha, 0.0, 0.0, alpha);
     return out;
 }
@@ -466,7 +469,7 @@ fn fs_main(in: VertexOutput) -> TraceOutput {
         t = t + dt;
     }
     let alpha = 1.0 - (T.x + T.y + T.z) / 3.0;
-    out.color = vec4<f32>(col, alpha);
+    out.color = vec4<f32>(min(col * u_fluid.u_preExposure, vec3<f32>(32768.0)), alpha);
     // Coverage-weighted distance from the near plane, premultiplied like the colour.
     out.depth = vec4<f32>(depthSum, 0.0, 0.0, alpha);
     return out;

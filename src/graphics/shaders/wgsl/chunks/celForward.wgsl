@@ -88,6 +88,8 @@ struct CelLighting {
     u_viewPos: vec3<f32>,
     /** Scene-wide indirect fill, in internal radiance units. Replaces the per-light ambient. */
     u_sceneAmbient: vec3<f32>,
+    /** The frame's pre-exposure: the lights arrive multiplied by it; the rim and emissive do not. */
+    u_preExposure: f32,
 };
 @group(1) @binding(3) var<uniform> u_lighting: CelLighting;
 
@@ -305,15 +307,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // even a fragment no light reaches, which is exactly what separates a character from its background.
     let rimW = celEdgeWidth();
     let fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), max(u_material.rimPower, 0.001));
-    result += smoothstep(0.5 - rimW, 0.5 + rimW, fresnel) * u_material.rimStrength * u_material.rimColor;
+    var unlit = smoothstep(0.5 - rimW, 0.5 + rimW, fresnel) * u_material.rimStrength * u_material.rimColor;
 
     // Emissive (sRGB-decoded map). Output stays LINEAR HDR — tonemap and gamma happen at the present.
+    var emission = u_material.emissive * 1.25 * u_material.emissiveIntensity;
     if (u_material.hasEmissiveMap != 0) {
-        result += toLinear(sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, su.uv0).rgb)
-                  * u_material.emissive * 1.25 * u_material.emissiveIntensity;
-    } else {
-        result += u_material.emissive * 1.25 * u_material.emissiveIntensity;
+        emission *= toLinear(sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, su.uv0).rgb);
     }
+    unlit += emission;
+    // The rim and the emission are absolute; the lit result is already pre-exposed.
+    result = min(result + unlit * u_lighting.u_preExposure, vec3<f32>(32768.0));
 
     return vec4<f32>(result, u_material.opacity);
 }

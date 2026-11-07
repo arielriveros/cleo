@@ -102,6 +102,9 @@ export class MaterialBinder {
         // The same for a sprite's soft fade: a Basic material without one must not inherit it.
         if (material.type === 'basic' && !material.properties.has('softness'))
             this._shaderManager.setUniform('u_material.softness', 0);
+        // Pre-exposure for the programs that carry their own (basic, lit sprites): the frame's while the
+        // scene draws, 1 while the display-referred editor overlay does. A no-op where undeclared.
+        this._shaderManager.setUniform('u_material.preExposure', this._view.drawPreExposure);
         // The same sticky-uniform guard for the texture mapping (chunks/uvProjection.wgsl): a lit material
         // built without the factories would otherwise inherit the last draw's tiling or projection.
         if (!material.properties.has('uvTransform')) {
@@ -154,6 +157,8 @@ export class MaterialBinder {
             else mat4.copy(this._ssrProjection, cam.projectionMatrix);
             this._shaderManager.setUniform('u_ssrProjection', this._ssrProjection);
             this._shaderManager.setUniform('u_ssrParams', this._host.ssrForward());
+            // `cleoPreExposure()` (opt-in): a no-op for a material that does not name it.
+            this._shaderManager.setUniform('u_preExposure', this._view.preExposure);
         }
         for (const u of material.uniforms) {
             if (u.type === 'sampler2D' || u.type === 'samplerCube') continue;   // the bind group's
@@ -164,7 +169,7 @@ export class MaterialBinder {
 
     /**
      * The per-view values a material write depends on ({@link MATERIAL_VIEW_SIZE}): view-projection,
-     * camera position, sun direction, specular AA. See MaterialSync for why they are compared, not versioned.
+     * camera position, sun direction, specular AA, the draw's pre-exposure. See MaterialSync for why they are compared, not versioned.
      */
     private _viewValues(): Float64Array {
         const cam = this._view.camera;
@@ -174,6 +179,8 @@ export class MaterialBinder {
         view[16] = eye[0]; view[17] = eye[1]; view[18] = eye[2];
         view[19] = sun[0]; view[20] = sun[1]; view[21] = sun[2];
         view[22] = this._host.specularAa() ? 1 : 0;
+        // The overlay draws the same materials at pre-exposure 1, so it must not skip their write.
+        view[23] = this._view.drawPreExposure;
         return view;
     }
 

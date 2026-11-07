@@ -68,6 +68,8 @@ struct SsilUniforms {
     u_hasRadiance: i32,             // 0 = AO only (first frame, a cut, no float targets, or switched off)
     u_ortho: i32,
     u_maxRadiusPx: f32,             // screen-space cap on the search, in full-resolution pixels
+    /** k_now / k_copy: brings last frame's radiance copy to this frame's pre-exposure. */
+    u_radianceRescale: f32,
 };
 @group(1) @binding(0) var<uniform> u_ssil: SsilUniforms;
 
@@ -336,7 +338,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                             // foreshortening is in it, and a cosine here would count it twice — a wall
                             // seen at a grazing angle from the floor at its foot is still a wall.
                             let facing = smoothstep(0.0, 0.05, dot(viewNormalAt(suv), -H));
-                            sliceLight += radiance.rgb * (f32(popcount(fresh)) / SECTORS) * facing;
+                            sliceLight += radiance.rgb * u_ssil.u_radianceRescale * (f32(popcount(fresh)) / SECTORS) * facing;
                         }
                     }
                 }

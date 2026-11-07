@@ -1,4 +1,5 @@
 import { DirectionalLight, Light, LIGHT_UNIT, PointLight, Spotlight } from "../../../graphics/lighting";
+import { flickerFactor, flickerSeed, followFlicker, lightFlickerClock } from "../../../graphics/lightFlicker";
 import { Logger } from "../../logger";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
@@ -53,6 +54,7 @@ export class LightNode extends Node {
                 lightData.range = p.range;
                 lightData.sourceRadius = p.sourceRadius;
                 lightData.legacyFalloff = p.legacyFalloff;
+                if (p.flickerAmount > 0) lightData.flicker = { amount: p.flickerAmount, speed: p.flickerSpeed };
                 break;
             }
             case 'spotlight': {
@@ -63,6 +65,7 @@ export class LightNode extends Node {
                 lightData.cutOff = s.cutOff;
                 lightData.outerCutOff = s.outerCutOff;
                 lightData.legacyFalloff = s.legacyFalloff;
+                if (s.flickerAmount > 0) lightData.flicker = { amount: s.flickerAmount, speed: s.flickerSpeed };
                 break;
             }
         }
@@ -98,6 +101,19 @@ export class LightNode extends Node {
     }
 
     public get light(): Light { return this._light; }
+
+    private _flickerSeed: number = -1;
+
+    /**
+     * This frame's flicker multiplier (graphics/lightFlicker.ts): 1 for a steady light or a directional
+     * one. What the light grid multiplies the intensity by, and what a follower's brightness tracks.
+     */
+    public get flickerFactor(): number {
+        const l = this._light as PointLight | Spotlight;
+        if (this._type === 'directional' || !(l.flickerAmount > 0)) return 1;
+        if (this._flickerSeed < 0) this._flickerSeed = flickerSeed(this.id);
+        return flickerFactor(lightFlickerClock.time, l.flickerAmount, l.flickerSpeed, this._flickerSeed);
+    }
     public get type(): 'directional' | 'point' | 'spotlight' { return this._type; }
     public get index(): number { return this._index; }
     public set index(value: number) { this._index = value; }
@@ -132,5 +148,58 @@ export class LightNode extends Node {
         );
         
         return { min, max };
+    }
+}
+
+/**
+ * The point or spot light named `name` that `from` follows (Sprite.followLight, ParticleSystemNode
+ * .followLight): searched under `from`'s parent, then under each ancestor up to `MAX_FOLLOW_LEVELS` above
+ * it, nearest first, a few levels deep. By NAME so a template's instances each find their own light.
+ */
+export function findFollowedLight(from: Node, name: string): LightNode | null {
+    let scope: Node | null = from.parent;
+    for (let level = 0; scope && level < MAX_FOLLOW_LEVELS; level++, scope = scope.parent) {
+        const found = searchLight(scope, name, 3);
+        if (found) return found;
+    }
+    return null;
+}
+
+const MAX_FOLLOW_LEVELS = 3;
+
+function searchLight(node: Node, name: string, depth: number): LightNode | null {
+    for (const child of node.children) {
+        if (child instanceof LightNode && child.name === name && child.type !== 'directional') return child;
+    }
+    if (depth <= 1) return null;
+    for (const child of node.children) {
+        const found = searchLight(child, name, depth - 1);
+        if (found) return found;
+    }
+    return null;
+}
+
+/** A small per-follower cache, so resolving a followed light is a lookup most frames rather than a search. */
+export class FollowedLight {
+    private _name: string | null = null;
+    private _node: LightNode | null = null;
+    private _owner: Node | null = null;
+
+    /** The flicker multiplier `owner` takes from the light named `name`, at `amount` (1 = steady). */
+    public factor(owner: Node, name: string | null, amount: number): number {
+        if (!(amount > 0)) return 1;
+        const node = this.resolve(owner, name);
+        return node ? followFlicker(node.flickerFactor, amount) : 1;
+    }
+
+    /** The light named `name` that `owner` follows, or null. */
+    public resolve(owner: Node, name: string | null): LightNode | null {
+        if (!name) return null;
+        if (name !== this._name || this._owner !== owner || !this._node || this._node.scene !== owner.scene || this._node.name !== name) {
+            this._name = name;
+            this._owner = owner;
+            this._node = findFollowedLight(owner, name);
+        }
+        return this._node;
     }
 }

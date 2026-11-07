@@ -81,6 +81,7 @@ volumes that tune how the scene is lit and culled.
 | **Sky Atmosphere** | Not placeable. **Removes any Skybox.** |
 | **Light Probe** | Default `10 × 10 × 10` influence volume. |
 | **Exposure Volume** | A `10 × 10 × 10` box with its own exposure while the camera is inside. Overrides nothing until a field or preset is picked. |
+| **Volumetric Fog** | A `20 × 6 × 20` box of mist the sun, torches and sky light scatter into. Size it with the face handles; the presets set the medium. |
 | **Clouds (volumetric)** | Not placeable. |
 | **Landscape** | Not placeable. `size 200`, `resolution 129`, `chunkQuads 32`. |
 | **Wind** | Not placeable: one wind for the whole scene. Plants sway only where their material asks for it. |

@@ -42,6 +42,20 @@ export interface RenderSettings {
     bloomThreshold: number;
     bloomKnee: number;
     bloomIntensity: number;
+    /**
+     * 'physical' (the default; a scene saved without it re-grades to it, as with the tone mapper): no
+     * threshold, a `bloomMix` share of the blurred image is lerped in, so glare follows energy.
+     * 'threshold': only what clears `bloomThreshold` blooms, added on top at `bloomIntensity`.
+     */
+    bloomMode?: 'physical' | 'threshold';
+    /** Physical bloom's share of the blurred image, 0..1 (default 0.04). */
+    bloomMix?: number;
+    /**
+     * Night vision 0..1 (default 1; absent = 1): colour drains toward a bluish grey and reds darken below a
+     * few cd/m2, per pixel on absolute luminance — moonlight reads as night while a torch's pool keeps its
+     * warmth. Never affects a daylit pixel.
+     */
+    purkinjeStrength?: number;
     bloomMaskEnabled: boolean;
     chromaticAberrationStrength: number;
     /**
@@ -176,6 +190,12 @@ export interface RenderSettings {
      * EV100 15 a 1500 lm bulb two metres away is invisible, and that is physics rather than a bug.
      */
     autoExposureEnabled: boolean;
+    /**
+     * Pre-exposure (graphics/preExposure.ts): store every frame's light multiplied by its exposure, as a
+     * power of two, so a moonlit scene keeps the half-float precision a sunlit one has. On by default and
+     * invisible by day (it is 1 at EV100 15); off stores absolute radiance, the A/B for it. Absent = on.
+     */
+    preExposure?: boolean;
     /** Artist trim on the metered result, in stops. Positive is brighter, as on a camera. */
     exposureCompensation: number;
     /**
@@ -217,6 +237,39 @@ export interface RenderSettings {
      * nothing. A quality-tier field. Absent = the tier's value (on at high and ultra).
      */
     ssrEnabled?: boolean;
+    /**
+     * Local exposure (render/localExposure.ts): exposure fusion over regions of the frame, so a torch pool
+     * and the moonlit field round it are both readable — the field lifted, the pool held back, the detail
+     * in each untouched. A quality-tier field (high and ultra on).
+     */
+    localExposureEnabled?: boolean;
+    /** 0..1: how much of the fused shift is applied (default 0.6). */
+    localExposureStrength?: number;
+    /** Stops the darkest regions can be lifted (default 1.5). */
+    localExposureShadows?: number;
+    /** Stops the brightest regions can be held back (default 1.5). */
+    localExposureHighlights?: number;
+    /**
+     * Volumetric fog (render/volumetricFog.ts): the VolumetricFogNode volumes, lit by the sun, the torches
+     * and the sky, drawn with a froxel grid. A quality-tier field (on from medium up). Nothing runs in a
+     * scene with no fog volume.
+     */
+    volumetricFogEnabled?: boolean;
+    /** Screen pixels per froxel column (tier: 12 ultra, 16 high, 20 medium). */
+    volumetricFogTileSize?: number;
+    /** Depth slices of the froxel grid (tier: 96 ultra, 64 high, 48 medium). */
+    volumetricFogSlices?: number;
+    /** Metres the fog reaches from the camera (default 128). */
+    volumetricFogDistance?: number;
+    /** Blend each froxel with the last frame's (default on): smooth, at a little lag. */
+    volumetricFogTemporal?: boolean;
+    /** Scatter the point and spot lights into the fog (default on): halos round torches. */
+    volumetricFogLocalLights?: boolean;
+    /**
+     * Shade the light they scatter through their shadow maps, so a torch behind a wall lights none of the
+     * fog on this side (tier: on from high up).
+     */
+    volumetricFogLocalShadows?: boolean;
     /** Trace resolution as a fraction of the render size (0.25..1). A quality-tier field. Absent = the tier's. */
     ssrResolutionScale?: number;
     /** March steps per ray across the screen (8..128). A quality-tier field. Absent = the tier's. */
@@ -358,6 +411,13 @@ export interface QualityTier {
     ssrEnabled: boolean;
     ssrResolutionScale: number;
     ssrSteps: number;
+    /** Local exposure (see RenderSettings.localExposureEnabled). */
+    localExposureEnabled: boolean;
+    /** Volumetric fog (see RenderSettings.volumetricFogEnabled), its froxel tile and slice count. */
+    volumetricFogEnabled: boolean;
+    volumetricFogTileSize: number;
+    volumetricFogSlices: number;
+    volumetricFogLocalShadows: boolean;
     shadowMapResolution: number;
     shadowCascades: number;
     /** 0 = 3x3 tap grid, 1 = 16-tap rotated Poisson. */
@@ -391,7 +451,8 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         renderScale: 1.0,
         cloudResolutionScale: 1.0, cloudSteps: 48, cloudLightSteps: 6,
         ssaoEnabled: true, ssaoSamples: 64, ssaoResolutionScale: 1.0, ssilEnabled: true,
-        ssrEnabled: true, ssrResolutionScale: 1.0, ssrSteps: 64,
+        ssrEnabled: true, ssrResolutionScale: 1.0, ssrSteps: 64, localExposureEnabled: true,
+        volumetricFogEnabled: true, volumetricFogTileSize: 12, volumetricFogSlices: 96, volumetricFogLocalShadows: true,
         shadowMapResolution: 4096, shadowCascades: 4, shadowFilterMode: 1, shadowFilterRadius: 2.0,
         bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true, fxaaEnabled: false,
         particleLodDistanceScale: 1.5,
@@ -400,7 +461,8 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         renderScale: 1.0,
         cloudResolutionScale: 0.5, cloudSteps: 40, cloudLightSteps: 5,
         ssaoEnabled: true, ssaoSamples: 24, ssaoResolutionScale: 0.5, ssilEnabled: true,
-        ssrEnabled: true, ssrResolutionScale: 0.5, ssrSteps: 32,
+        ssrEnabled: true, ssrResolutionScale: 0.5, ssrSteps: 32, localExposureEnabled: true,
+        volumetricFogEnabled: true, volumetricFogTileSize: 16, volumetricFogSlices: 64, volumetricFogLocalShadows: true,
         shadowMapResolution: 2048, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
         bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true, fxaaEnabled: false,
         particleLodDistanceScale: 1,
@@ -410,7 +472,8 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         cloudResolutionScale: 0.35, cloudSteps: 28, cloudLightSteps: 4,
         // AO alone: the bounce costs a normal and a radiance fetch per visible sample on top.
         ssaoEnabled: true, ssaoSamples: 16, ssaoResolutionScale: 0.5, ssilEnabled: false,
-        ssrEnabled: false, ssrResolutionScale: 0.5, ssrSteps: 24,
+        ssrEnabled: false, ssrResolutionScale: 0.5, ssrSteps: 24, localExposureEnabled: false,
+        volumetricFogEnabled: true, volumetricFogTileSize: 20, volumetricFogSlices: 48, volumetricFogLocalShadows: false,
         shadowMapResolution: 1024, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
         // Kept at medium: one fullscreen resolve is cheap next to what this tier already spends on
         // clouds and shadows, and aliasing is the most visible artefact left at a reduced tier.
@@ -421,7 +484,8 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         renderScale: 0.75,
         cloudResolutionScale: 0.25, cloudSteps: 20, cloudLightSteps: 3,
         ssaoEnabled: false, ssaoSamples: 16, ssaoResolutionScale: 0.5, ssilEnabled: false,
-        ssrEnabled: false, ssrResolutionScale: 0.5, ssrSteps: 16,
+        ssrEnabled: false, ssrResolutionScale: 0.5, ssrSteps: 16, localExposureEnabled: false,
+        volumetricFogEnabled: false, volumetricFogTileSize: 24, volumetricFogSlices: 32, volumetricFogLocalShadows: false,
         shadowMapResolution: 1024, shadowCascades: 2, shadowFilterMode: 0, shadowFilterRadius: 0.0,
         bloomEnabled: false, motionBlurEnabled: false, taaEnabled: false, fxaaEnabled: true,
         particleLodDistanceScale: 0.5,

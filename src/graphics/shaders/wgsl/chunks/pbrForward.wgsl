@@ -177,6 +177,11 @@ struct ForwardLighting {
     /** 0 lets a normal-mapped surface keep reflecting the sky along rays that point into itself. */
     u_horizonOcclusion: i32,
     u_isTransparent: i32,       // set by the renderer from material.config.transparent
+    /**
+     * The frame's pre-exposure (graphics/preExposure.ts). The lights, ambient and sky light arrive already
+     * multiplied by it; the environment cube and the emissive are absolute, so this program scales them.
+     */
+    u_preExposure: f32,
 };
 @group(1) @binding(3) var<uniform> u_lighting: ForwardLighting;
 
@@ -383,6 +388,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
                                       roughness * MAX_REFLECTION_LOD).rgb;
         var env = toLinear(envC);
         if (u_lighting.u_envMapLinear != 0) { env = envC; }
+        env *= u_lighting.u_preExposure;
         // The DFG pair is the ENERGY, replacing the `kS` Fresnel this used to use. The roughness ramp
         // covers what the mip chain cannot: `generateMipmap` box-filters each face on its own, which is
         // not a GGX prefilter and does not cross face seams on WebGL2. Identical to deferredLighting,
@@ -452,12 +458,12 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     var color = ambientDiffuse * ao + ambientSpecular * specularAO + Lo;
 
     // Emission (sRGB-decoded map). Output stays LINEAR HDR — tonemap and gamma happen at the present.
+    var emission = u_material.emissiveFactor * u_material.emissiveIntensity;
     if (u_material.hasEmissiveMap != 0) {
-        color += toLinear(sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, uv).rgb)
-                 * u_material.emissiveFactor * u_material.emissiveIntensity;
-    } else {
-        color += u_material.emissiveFactor * u_material.emissiveIntensity;
+        emission *= toLinear(sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, uv).rgb);
     }
+    // Stored pre-exposed, and below the half-float ceiling (graphics/preExposure.ts HDR_STORE_MAX).
+    color = min(color + emission * u_lighting.u_preExposure, vec3<f32>(32768.0));
 
     var alpha = 1.0;
     if (u_lighting.u_isTransparent != 0) { alpha = u_material.opacity; }

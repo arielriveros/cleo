@@ -39,6 +39,8 @@ struct TaaUniforms {
     u_historyValid: i32,
     // 0 = one bilinear tap, 1 = 5-tap Catmull-Rom. See `sampleHistory`.
     u_historyFilter: i32,
+    /** k_now / k_written: brings the history to this frame's pre-exposure (TemporalHistory.rescale). */
+    u_historyRescale: f32,
 };
 @group(1) @binding(0) var<uniform> u_taa: TaaUniforms;
 
@@ -123,7 +125,8 @@ fn yCoCgToRgb(c: vec3<f32>) -> vec3<f32> {
 }
 
 fn historyTap(p: vec2<f32>) -> vec3<f32> {
-    return sanitize(textureSampleLevel(u_history_texture, u_history_sampler, p, 0.0).rgb);
+    // Rescaled to this frame's pre-exposure: a power of two, exact, and 1 while the factor holds.
+    return sanitize(textureSampleLevel(u_history_texture, u_history_sampler, p, 0.0).rgb * u_taa.u_historyRescale);
 }
 
 /**

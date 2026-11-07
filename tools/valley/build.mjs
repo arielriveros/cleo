@@ -214,8 +214,8 @@ for (const [file, name] of [['ValleyWindmill', 'Windmill Sails'], ['ValleyFireLi
 // Every fire here is the same three things: FLAMES, animated sprites playing a flipbook baked by the FX
 // Creator (creatorFx.mjs): Torch Fire, in tall 128 x 256 frames, on the torches, braziers and candles, and
 // Bonfire Fire on the bonfire, the fire pits and the hearth; EMBERS rising off it and, now and then, a
-// burst of SPARKS that fall and bounce across the floor; and a point LIGHT. A FireLight script on the root
-// flickers the light. The flames take only a tenth of the exposure (FLAME_EXPOSURE_WEIGHT), so they read
+// burst of SPARKS that fall and bounce across the floor; and a point LIGHT that flickers (its own flicker,
+// which the flames and embers follow). A FireLight script on the root puts the fire out and lights it. The flames take only a tenth of the exposure (FLAME_EXPOSURE_WEIGHT), so they read
 // as fire at the valley's noon, its night and in the dungeon alike.
 
 const FIRE = '/Props/Fire'
@@ -329,6 +329,8 @@ function flame(key, height, base = [0, 0, 0], name = 'Flame', kind = TORCH_FLAME
       constraints: 'cylindrical', tilesetId: kind.tileset.id, tileset: kind.tileset, tileIndex: 0,
       tint: [1, 1, 1], opacity: 1, transparent: true, side: 'double', wireframe: false, blend: 'additive',
       exposureWeight: FLAME_EXPOSURE_WEIGHT,
+      // Burns with its fire's Light: the flame swells on the beat the light flickers.
+      followLight: 'Light',
       // Its base sits inside the torch head or the fire pit's logs: it fades into them over a few centimetres
       // instead of being cut along a line, and is still hidden by whatever stands in front of it.
       softness: Math.round(Math.min(0.15, height * 0.25) * 100) / 100,
@@ -363,10 +365,13 @@ function smoke(key, base, scale = SMOKE_SCALE, name = 'Smoke') {
  * renders everything in its range six times, again whenever something moves near it, and the renderer
  * shadows only the nearest four, so the torches, spaced well apart, are the ones that get them.
  */
-function fireLight(key, lumens, range, position, castShadows = false) {
+function fireLight(key, lumens, range, position, castShadows = false, flicker = 0.18) {
+  // The flicker is the light's own (PunctualLight.flickerAmount): the flames and embers under the same fire
+  // follow it (followLight), so the three swell together.
   return node('Light', 'light', {
     id: id(`fire-light:${key}`), position, lightType: 'point', castShadows,
-    light: { unit: 'photometric', color: [1, 0.58, 0.28], intensity: lumens, range, sourceRadius: 0.08, legacyFalloff: false },
+    light: { unit: 'photometric', color: [1, 0.58, 0.28], intensity: lumens, range, sourceRadius: 0.08, legacyFalloff: false,
+             flicker: { amount: flicker, speed: 7 } },
   })
 }
 
@@ -427,8 +432,18 @@ const TORCH_FX = souls.vfx('valley:torch-embers', 'Torch Embers',
 const HEARTH_FX = souls.vfx('valley:hearth-embers', 'Hearth Embers',
   emberEmitters('hearth', { rate: 16, radius: 0.3, interval: 1.4, chance: 0.9, bursts: 3, speed: [1.6, 3.6] }),
   { center: [0, 0.8, 0], extents: [2.6, 2.4, 2.6] }, fxLod(12, 24, 45))
-const fx = (key, asset, position) => {
-  return souls.particles(`valley:${key}`, 'Embers', asset, { position })
+/**
+ * Lumens a smoky fire (the bonfire, the fire pits) lights the VOLUMETRIC FOG round it with, the fog alone
+ * (ParticleSystemNode.fogGlow): its smoke and the mist it stands in glow orange on its light's beat. Its
+ * Light already scatters into the fog; this is the glow of the fire's own body, which no point light has.
+ */
+const HEARTH_FOG_GLOW = 450
+const fx = (key, asset, position, fogGlow = 0) => {
+  const n = souls.particles(`valley:${key}`, 'Embers', asset, { position })
+  // The embers burn on the fire's own beat: they thicken and brighten as its Light swells.
+  n.particleSystem.followLight = 'Light'
+  if (fogGlow > 0) n.particleSystem.fogGlow = fogGlow
+  return n
 }
 
 // =====================================================================================================
@@ -704,7 +719,7 @@ function hearth(key, { height = 1.2, lumens = 1100, range = 10, base = [0, 0.3, 
       flame(`hearth:${key}:a`, height * 1.35, base, 'Flame', BONFIRE_FLAME),
       flame(`hearth:${key}:b`, height * 0.95, [base[0] + 0.12, base[1], base[2] - 0.14], 'Flame', BONFIRE_FLAME),
       ...(smoky ? [smoke(`hearth:${key}`, [base[0], base[1] + height * 0.75, base[2]])] : []),
-      fx(`hearth:${key}:embers`, HEARTH_FX, base),
+      fx(`hearth:${key}:embers`, HEARTH_FX, base, smoky ? HEARTH_FOG_GLOW : 0),
       fireLight(`hearth:${key}`, lumens, range, [base[0], base[1] + height * 0.75, base[2]]),
     ],
   }), 'ValleyFireLight')
@@ -753,9 +768,9 @@ function candleNode(key, position = [0, 0, 0]) {
     children: [
       ...meshNodes(`candle:${key}`, candle.parts, () => CANDLE_MAT),
       flame(`candle:${key}`, 0.13, [0, candle.flame - 0.01, 0]),
-      fireLight(`candle:${key}`, 60, 3, [0, candle.flame + 0.08, 0]),
+      fireLight(`candle:${key}`, 60, 3, [0, candle.flame + 0.08, 0], false, 0.12),
     ],
-  }), 'ValleyFireLight', { flicker: 0.12 })
+  }), 'ValleyFireLight')
 }
 
 /** An iron cage hung from the ceiling with a fire in it. */
@@ -1810,17 +1825,21 @@ function puddles() {
 }
 
 /**
- * One probe for the whole valley: lighting and reflections for the hamlet, its houses and torches, and what
- * the pond's water reflects. Unbounded (size 0), so every surface in the valley takes it at full weight, with
- * no seam where one probe's box gives way to another's. Captured between the hamlet and the pond, and
- * re-captured as the day turns (ValleyDayNight).
+ * One probe for the whole valley's REFLECTIONS: what the hamlet's wet and polished surfaces and the pond's
+ * water reflect. Unbounded (size 0), so there is no seam where one probe's box gives way to another's.
+ * Captured between the hamlet and the pond, and re-captured as the day turns (ValleyDayNight).
+ *
+ * Not its diffuse lighting (`affectsLighting: false`): one point's irradiance on every surface in the valley
+ * was the sun-lit hamlet's under the forest by day, and at night the torches that point can see smeared over
+ * the whole valley as ambient, which washed out every pool of torchlight. The diffuse fill is the sky light,
+ * the scene ambient (faded at night) and SSIL's bounce instead.
  */
 function valleyProbe() {
   const probe = souls.sourceNode('light probe')
   probe.name = 'Valley Probe'
   probe.id = id('valley:probe')
   probe.position = at((HAMLET.x + POND.x) / 2, (HAMLET.z + POND.z) / 2, 8)
-  Object.assign(probe, { resolution: 256, mode: 'baked', intensity: 1, size: [0, 0, 0], blendDistance: 0 })
+  Object.assign(probe, { resolution: 256, mode: 'baked', intensity: 1, size: [0, 0, 0], blendDistance: 0, affectsLighting: false })
   return probe
 }
 
@@ -2025,6 +2044,46 @@ function exposureVolumes() {
   return out
 }
 
+// =====================================================================================================
+// Volumetric fog
+// =====================================================================================================
+//
+// VolumetricFogNode boxes the sun, the moon, the torches and the sky scatter into (the renderer's froxel
+// fog; the sky's own distance haze and god rays are separate). Overlapping boxes add. ValleyDayNight
+// thickens them at night and at dawn (fogNightScale), from these daytime values.
+
+/** One fog volume node, axis-aligned. `fog` is the medium (VolumetricFogOptions). */
+function fogVolume(key, name, center, size, fog, { priority = 0, blendDistance = 4 } = {}) {
+  return node(name, 'volumetricFog', {
+    id: id(`fog:${key}`), position: center.map(round3),
+    volumetricFog: { size: size.map(round3), blendDistance, priority, enabled: true, ...fog },
+  })
+}
+
+function fogVolumes() {
+  const out = []
+  // Over the pond: a mist on the water, thick at its surface and gone two metres up, bright and a little
+  // forward-scattering, so the torches round the bank glow in it. Priority 1: it is the one that matters
+  // most when the camera sees more than the tier draws.
+  const pondHalf = POND_HALF + 6
+  out.push(fogVolume('pond', 'Pond Mist', [POND.x, POND_LEVEL + 2.5, POND.z], [pondHalf * 2, 5.5, pondHalf * 2], {
+    density: 0.018, albedo: [0.92, 0.94, 0.96], anisotropy: 0.35, heightFalloff: 0.9,
+    noiseStrength: 0.55, noiseScale: 5, windVelocity: [0.25, 0, 0.1],
+  }, { priority: 1, blendDistance: 5 }))
+
+  // The valley floor: a thin haze pooling in its low ground, gone over the hills (it thins from the lowest
+  // ground up). By day it is what the sun's shafts through the trees and round the houses show in; at dawn
+  // and at night ValleyDayNight lets it gather.
+  const [lo] = groundRange(-150, 150, -150, 110, 8)
+  const floorTop = lo + 40
+  out.push(fogVolume('valley-floor', 'Valley Haze', [0, (lo - 2 + floorTop) / 2, -20], [300, floorTop - lo + 2, 260], {
+    density: 0.004, albedo: [0.9, 0.92, 0.95], anisotropy: 0.45, heightFalloff: 0.12,
+    noiseStrength: 0.35, noiseScale: 18, windVelocity: [0.6, 0, 0.25],
+  }, { blendDistance: 12 }))
+  log('fog volumes', `pond mist, valley haze from ${lo.toFixed(1)} m`)
+  return out
+}
+
 function valleyScene() {
   const sun = souls.sourceNode('light')
   sun.name = 'Sun'
@@ -2038,15 +2097,19 @@ function valleyScene() {
   sun.castShadows = true
   const sky = souls.sourceNode('sky atmosphere')
   sky.id = id('sky')
-  // The god rays have no preset; their reach is the valley's scale. The night: a bright, cool moon well up
-  // the sky, more stars, a faint airglow. The moon's LIGHT is the Time of Day's (moonlightIntensity).
+  // The god rays have no preset; their reach is the valley's scale. The night: a bright moon well up the
+  // sky, more stars, a faint airglow. The moon is near white: the blue of a moonlit night is the eye's (the
+  // renderer's night vision, purkinjeStrength), so a torch pool under it stays warm. The moon's light is its own lux (a storybook moon, 8x a real one),
+  // so the editor's night is the game's: no script has to tie it to the sun.
   sky.atmosphere = {
-    ...sky.atmosphere, ...PRESETS.sky, godRayMaxDistance: 160,
+    // Lit by the sun's own lux: the sky, the sun disc and what the pond reflects share one scale with
+    // the ground the sun lights, so neither the sky nor a reflection of the sun is brighter than it is.
+    ...sky.atmosphere, ...PRESETS.sky, physicalUnits: true, godRayMaxDistance: 160,
     // Distance fog only past 300 m: the valley reads clear, and only its far ridges go into the air.
     fogEnabled: true, fogDensity: 0.0004, fogStart: 300, fogMaxOpacity: 0.5,
     nightEnabled: true, starIntensity: 1.6, starDensity: 0.6, airglowIntensity: 0.8,
-    moonEnabled: true, moonSize: 2.4, moonPhase: 1, moonOffsetYaw: 20, moonOffsetPitch: 22, moonColor: [0.74, 0.82, 1], moonIntensity: 1.3,
-    moonlightIntensity: 0.02,
+    moonEnabled: true, moonSize: 2.4, moonPhase: 1, moonOffsetYaw: 20, moonOffsetPitch: 22, moonColor: [0.93, 0.96, 1], moonIntensity: 1.3,
+    moonIlluminance: 2,
   }
   const clouds = souls.sourceNode('volumetric clouds')
   clouds.id = id('clouds')
@@ -2161,6 +2224,7 @@ function valleyScene() {
       valleyProbe(),
       souls.group('buildings', 'Buildings', placedBuildings),
       souls.group('exposure-volumes', 'Exposure Volumes', exposureVolumes()),
+      souls.group('fog-volumes', 'Fog Volumes', fogVolumes()),
       barrels,
       torches,
       interactables,

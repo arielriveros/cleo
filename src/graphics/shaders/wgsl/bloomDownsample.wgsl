@@ -23,6 +23,12 @@ struct BloomDownsampleUniforms {
     // host-shareable). Call sites still pass a JavaScript boolean — the std140 writer converts it,
     // because the reflected member type is integer.
     u_karisAverage: i32,
+    /**
+     * The display exposure (exposure / pre-exposure), so the Karis weight is taken on what the screen
+     * shows. On raw radiance `1 / (1 + luma)` is ~1 for everything at night (luma ~1e-3) and suppressed
+     * nothing; on exposed luma it tames a hot ember or glint the same at noon and at midnight.
+     */
+    u_exposure: f32,
 };
 @group(1) @binding(0) var<uniform> u_bloom: BloomDownsampleUniforms;
 
@@ -47,7 +53,7 @@ fn sourceBlockUV(uv: vec2<f32>, dstResolution: vec2<f32>, srcTexelSize: vec2<f32
 
 fn karisWeight(c: vec3<f32>) -> f32 {
     // Weight by inverse luma so bright outliers cannot dominate the average.
-    let luma = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let luma = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722)) * max(u_bloom.u_exposure, 1e-8);
     return 1.0 / (1.0 + luma);
 }
 

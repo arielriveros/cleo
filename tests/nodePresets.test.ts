@@ -57,7 +57,7 @@ const CASES: Case[] = [
     { name: 'sky', table: SKY_ATMOSPHERE_PRESETS, make: () => new SkyAtmosphereNode('sky'),
       reserved: ['useSceneSun', 'sunDirection', 'sunColor', 'sunIntensity', 'sunDiskSize', 'planetRadius',
           'atmosphereRadius', 'resolution', 'viewSteps', 'lightSteps', 'fogHeight', 'godRaysEnabled',
-          'nightEnabled', 'moonEnabled', 'moonlightIntensity'] },
+          'nightEnabled', 'moonEnabled', 'moonlightIntensity', 'moonIlluminance'] },
     { name: 'cameraRig', table: CAMERA_RIG_PRESETS, make: () => new CameraRigNode('rig'),
       reserved: ['followId', 'lookAtId', 'cameraNodeId', 'collisionIgnoreIds', 'invertPitch',
           'yawSensitivity', 'pitchSensitivity', 'shakeFrequency', 'shakeDecay', 'shakeSustained'] },

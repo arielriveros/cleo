@@ -331,9 +331,15 @@ export class ShadowPasses {
     /** Editor debug: which cascade layer the 'shadow' channel blits. */
     public shadowDebugLayer: number = 0;
 
-    // Suppress shadow lookups for the current draw. Set while capturing a light probe: the cascades
-    // are fit to the MAIN camera, so a probe elsewhere samples outside all of them.
+    // Suppress the SUN's shadow lookups for the current draw. Set while capturing a light probe: the
+    // cascades are fit to the MAIN camera, so a probe elsewhere samples outside all of them. Point and spot
+    // maps are world-space (a cube or a frustum around the light), so a capture keeps those: a torch the
+    // probe sees through a wall must not light its bake as if the wall were not there.
     public shadowsSuppressed: boolean = false;
+
+    // Suppress point and spot shadow lookups as well. Nothing sets it today; it is the switch a caller
+    // that cannot trust this frame's punctual maps would use.
+    public punctualShadowsSuppressed: boolean = false;
 
     // The frame's shadow-casting light so post passes (volumetric god rays) know the sun.
     public shadowLight: LightNode | null = null;
@@ -612,7 +618,7 @@ export class ShadowPasses {
 
 
         // --- spot shadows ---
-        this._shaderManager.setUniform('u_spotShadowsEnabled', this.spotShadowsActive && !this.shadowsSuppressed);
+        this._shaderManager.setUniform('u_spotShadowsEnabled', this.spotShadowsActive && !this.punctualShadowsSuppressed);
 
         this._shaderManager.setUniform('u_spotShadowTexel', [1 / this.spotShadowResolution, 1 / this.spotShadowResolution]);
         this._shaderManager.setUniform('u_spotShadowBias', this.spotShadowBias);
@@ -620,7 +626,7 @@ export class ShadowPasses {
         this._shaderManager.setUniform('u_spotShadowTexelScale', this._spotShadowTexelScalePacked);
 
         // --- point shadows ---
-        this._shaderManager.setUniform('u_pointShadowsEnabled', this.pointShadowsActive && !this.shadowsSuppressed);
+        this._shaderManager.setUniform('u_pointShadowsEnabled', this.pointShadowsActive && !this.punctualShadowsSuppressed);
 
         this._shaderManager.setUniform('u_pointShadowTexel',
                                        [1 / this.pointShadowResolution, 1 / this.pointShadowResolution]);
@@ -703,7 +709,8 @@ export class ShadowPasses {
         // sun), so a 2 lux moon draws shafts 40,000 times fainter than the sun's, and the sun's fade at
         // the horizon fades them with it. Without the term the moon's haze was the sun's, and once
         // lights kept real values it was the brightest thing in a night scene.
-        this._shaderManager.setUniform('u_intensity', node.godRayExposure * (key ? key.intensity : 1));
+        // Pre-exposed like every source: the shafts are added to the chain's pre-exposed image.
+        this._shaderManager.setUniform('u_intensity', node.godRayExposure * (key ? key.intensity : 1) * this._view.preExposure);
         this._shaderManager.setUniform('u_density', node.godRayDensity);
         this._shaderManager.setUniform('u_anisotropy', node.godRayAnisotropy);
         this._shaderManager.setUniform('u_maxDistance', node.godRayMaxDistance);

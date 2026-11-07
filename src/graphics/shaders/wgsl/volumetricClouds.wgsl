@@ -97,6 +97,11 @@ struct CloudUniforms {
     // 1 while baking the clouds into the sky cubemap: nothing occludes a sky face, and the G-buffer
     // depth bound here belongs to the camera view, not to the face being drawn.
     u_ignoreDepth: i32,
+    /**
+     * The frame's pre-exposure (graphics/preExposure.ts) for the live pass, whose output is stored in the
+     * frame's buffers; 1 for the sky bake, whose cube stays absolute like every bake.
+     */
+    u_preExposure: f32,
 };
 @group(1) @binding(0) var<uniform> u_cloud: CloudUniforms;
 
@@ -466,5 +471,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // `scatteredLight` is ALREADY premultiplied: it is radiance reaching the eye, accumulated under the
     // view transmittance. It used to be multiplied by alpha a second time, which squared the coverage
     // and darkened every thin edge and wisp toward black.
-    return vec4<f32>(scatteredLight * fade, alpha);
+    return vec4<f32>(min(scatteredLight * (fade * u_cloud.u_preExposure), vec3<f32>(32768.0)), alpha);
 }

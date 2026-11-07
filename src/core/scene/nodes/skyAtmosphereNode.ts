@@ -16,6 +16,13 @@ export interface SkyAtmosphereOptions {
     sunDirection?: [number, number, number];    // override: direction TOWARD the sun (used when useSceneSun=false / no light)
     sunColor?: [number, number, number];
     sunIntensity?: number;
+    /**
+     * Light the sky with the scene sun's real illuminance (its lux) rather than `sunIntensity`, so the sky,
+     * the sun disc and what reflects them share one scale with every lit surface. Needs `useSceneSun` and a
+     * directional light; without them the sky falls back to `sunIntensity`. New skies default to true; a
+     * scene saved before this existed keeps its artistic sky (false).
+     */
+    physicalUnits?: boolean;
     // Atmosphere
     rayleighScatter?: number;   // multiplier on the Earth Rayleigh coefficients
     rayleighHeight?: number;    // Rayleigh scale height (m)
@@ -67,14 +74,27 @@ export interface SkyAtmosphereOptions {
     moonOffsetPitch?: number;     // degrees — moon elevation away from the point opposite the sun
     moonColor?: [number, number, number]; // tint of the moon and its light
     moonIntensity?: number;       // brightness of the moon disc and the moonlit sky
-    moonlightIntensity?: number;  // moonlight as a fraction of the sun light: the moon's key light, and the night sky's brightness
+    /** Lux the full moon gives the scene at full night: the key light's illuminance once the sun has set. */
+    moonIlluminance?: number;
+    /**
+     * LEGACY: moonlight as a fraction of the sun light. Scenes saved before `moonIlluminance` carry only
+     * this, and keep the moon they were made with (the fraction of the scene sun's lux) until edited.
+     */
+    moonlightIntensity?: number;
 }
 
 /**
- * The default moonlight ratio, at which the baked night sky keeps the brightness it was tuned at. The sky
- * scales with `moonlightIntensity / DEFAULT_MOONLIGHT_INTENSITY`: a real moon is about 2e-6 of the sun.
+ * The moon-to-sun illuminance ratio the baked night sky was tuned at. The sky's night brightness scales
+ * with `ratio / DEFAULT_MOONLIGHT_INTENSITY`, where the ratio is the moon's lux over the sun's: a real
+ * moon is about 2e-6 of the sun.
  */
 export const DEFAULT_MOONLIGHT_INTENSITY = 0.08;
+
+/**
+ * The moon's illuminance for a new sky, in lux. A real full moon gives about 0.25 lx; this is a bright,
+ * storybook one that still reads under the Day–Night exposure curve without lifting the night to grey.
+ */
+export const DEFAULT_MOON_LUX = 1;
 
 /**
  * Scene-wide physically-based sky. Holds only parameters; the runtime cubemap is NOT serialized. The
@@ -87,6 +107,7 @@ export class SkyAtmosphereNode extends Node {
     private _sunDirection: [number, number, number];
     private _sunColor: [number, number, number];
     private _sunIntensity: number;
+    private _physicalUnits: boolean;
     // Atmosphere
     private _rayleighScatter: number;
     private _rayleighHeight: number;
@@ -137,7 +158,10 @@ export class SkyAtmosphereNode extends Node {
     private _moonOffsetPitch: number;
     private _moonColor: [number, number, number];
     private _moonIntensity: number;
-    private _moonlightIntensity: number;
+    /** The moon's illuminance in lux, or null while a legacy scene still uses `_legacyMoonRatio`. */
+    private _moonIlluminance: number | null;
+    /** A legacy scene's moonlight as a fraction of the sun's lux; null once the node speaks lux. */
+    private _legacyMoonRatio: number | null;
     // Runtime bake state (not serialized)
     private _cubemap: Texture | null = null;
     private _cubemapResolution: number = 0;
@@ -150,6 +174,7 @@ export class SkyAtmosphereNode extends Node {
         this._sunDirection = options.sunDirection ?? [0.0, 0.35, -0.94];
         this._sunColor = options.sunColor ?? [1.0, 1.0, 1.0];
         this._sunIntensity = options.sunIntensity ?? 22.0;
+        this._physicalUnits = options.physicalUnits ?? true;
 
         this._rayleighScatter = options.rayleighScatter ?? 1.0;
         this._rayleighHeight = options.rayleighHeight ?? 8000.0;
@@ -200,7 +225,18 @@ export class SkyAtmosphereNode extends Node {
         this._moonOffsetPitch = options.moonOffsetPitch ?? 15;
         this._moonColor = options.moonColor ?? [0.82, 0.88, 1.0];
         this._moonIntensity = options.moonIntensity ?? 1.0;
-        this._moonlightIntensity = options.moonlightIntensity ?? DEFAULT_MOONLIGHT_INTENSITY;
+        // Lux wins. A payload with only the old ratio keeps it, so a saved scene's night does not move;
+        // a payload with neither (a new sky) gets the lux default.
+        if (options.moonIlluminance !== undefined) {
+            this._moonIlluminance = Math.max(0, +options.moonIlluminance || 0);
+            this._legacyMoonRatio = null;
+        } else if (options.moonlightIntensity !== undefined) {
+            this._moonIlluminance = null;
+            this._legacyMoonRatio = Math.min(1, Math.max(0, +options.moonlightIntensity || 0));
+        } else {
+            this._moonIlluminance = DEFAULT_MOON_LUX;
+            this._legacyMoonRatio = null;
+        }
     }
 
     // --- Sun ---
@@ -212,6 +248,15 @@ export class SkyAtmosphereNode extends Node {
     public set sunColor(v: [number, number, number]) { this._sunColor = v; this._needsBake = true; }
     public get sunIntensity(): number { return this._sunIntensity; }
     public set sunIntensity(v: number) { this._sunIntensity = Math.max(0, v); this._needsBake = true; }
+    /** See SkyAtmosphereOptions.physicalUnits. */
+    public get physicalUnits(): boolean { return this._physicalUnits; }
+    public set physicalUnits(v: boolean) { if (v !== this._physicalUnits) { this._physicalUnits = !!v; this._needsBake = true; } }
+
+    /**
+     * The sun illuminance (internal scale) the sky was last baked with in physical units (runtime only), so
+     * a change in the light's lux — a time-of-day script, an edit — re-bakes it.
+     */
+    public bakedSunIlluminance: number = NaN;
 
     // --- Atmosphere ---
     public get rayleighScatter(): number { return this._rayleighScatter; }
@@ -312,14 +357,51 @@ export class SkyAtmosphereNode extends Node {
     public set moonColor(v: [number, number, number]) { this._moonColor = v; this._needsBake = true; }
     public get moonIntensity(): number { return this._moonIntensity; }
     public set moonIntensity(v: number) { this._moonIntensity = Math.max(0, v); this._needsBake = true; }
-    public get moonlightIntensity(): number { return this._moonlightIntensity; }
+    /**
+     * The moon's illuminance in lux: what the key light gives the scene once the sun has set, independent of
+     * the sun's own lux (a light has ONE intensity for the whole game). Null while a legacy scene still uses
+     * `moonlightIntensity`; setting it converts the node.
+     */
+    public get moonIlluminance(): number | null { return this._moonIlluminance; }
+    public set moonIlluminance(v: number | null) {
+        const next = v === null ? null : Math.max(0, +v || 0);
+        if (next === null) return;
+        // The night sky's brightness follows the moon (see DEFAULT_MOONLIGHT_INTENSITY): a change re-bakes.
+        // Only a change, since a time-of-day script may write the same value every frame.
+        if (next !== this._moonIlluminance || this._legacyMoonRatio !== null) this._needsBake = true;
+        this._moonIlluminance = next;
+        this._legacyMoonRatio = null;
+    }
+
+    /**
+     * LEGACY: moonlight as a fraction of the sun light, for scenes saved before `moonIlluminance` and for
+     * scripts written against it. Reads 0 once the node speaks lux; writing it puts the node back on the
+     * ratio, which ties the moon to the sun's lux again.
+     * @deprecated Use `moonIlluminance` (lux).
+     */
+    public get moonlightIntensity(): number { return this._legacyMoonRatio ?? 0; }
     public set moonlightIntensity(v: number) {
         const next = Math.min(1, Math.max(0, v));
-        // The night sky's brightness follows it (see DEFAULT_MOONLIGHT_INTENSITY): a change re-bakes. Only a
-        // change, since a time-of-day script writes the same value every frame.
-        if (next !== this._moonlightIntensity) this._needsBake = true;
-        this._moonlightIntensity = next;
+        if (next !== this._legacyMoonRatio) this._needsBake = true;
+        this._legacyMoonRatio = next;
+        this._moonIlluminance = null;
     }
+
+    /** Whether the moon is still a fraction of the sun (a legacy scene that has not been edited). */
+    public get usesLegacyMoonRatio(): boolean { return this._legacyMoonRatio !== null; }
+
+    /** The moon's illuminance in lux for a sun of `sunLux`: its own lux, or a legacy scene's fraction. */
+    public moonLux(sunLux: number): number {
+        if (this._moonIlluminance !== null) return this._moonIlluminance;
+        return (this._legacyMoonRatio ?? 0) * Math.max(0, sunLux);
+    }
+
+    /**
+     * The moon-to-sun ratio the night sky was last baked with (runtime only). The renderer re-bakes when the
+     * live ratio drifts from it, since a moon in lux against a sun whose lux changes moves the ratio
+     * without any setter here firing.
+     */
+    public bakedNightRatio: number = NaN;
 
     // --- Runtime bake state (renderer-facing) ---
     public get cubemap(): Texture | null { return this._cubemap; }
@@ -360,6 +442,7 @@ export class SkyAtmosphereNode extends Node {
                         sunDirection: this._sunDirection,
                         sunColor: this._sunColor,
                         sunIntensity: this._sunIntensity,
+                        physicalUnits: this._physicalUnits,
                         rayleighScatter: this._rayleighScatter,
                         rayleighHeight: this._rayleighHeight,
                         mieScatter: this._mieScatter,
@@ -405,13 +488,17 @@ export class SkyAtmosphereNode extends Node {
                         moonOffsetPitch: this._moonOffsetPitch,
                         moonColor: this._moonColor,
                         moonIntensity: this._moonIntensity,
-                        moonlightIntensity: this._moonlightIntensity
+                        // One or the other: a node that speaks lux never writes the legacy ratio back.
+                        ...(this._moonIlluminance !== null
+                            ? { moonIlluminance: this._moonIlluminance }
+                            : { moonlightIntensity: this._legacyMoonRatio ?? 0 }),
                     },
         };
     }
 
     public static parse(parent: Node, json: any) {
-        const node = new SkyAtmosphereNode(json.name, json.atmosphere ?? {}, json.id);
+        // A sky saved before physical units keeps the artistic one it was tuned with.
+        const node = new SkyAtmosphereNode(json.name, { physicalUnits: false, ...(json.atmosphere ?? {}) }, json.id);
         Node.finishParse(node, parent, json);
     }
 }

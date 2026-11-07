@@ -43,7 +43,12 @@ export interface MoonLightParams {
     moonEnabled: boolean;
     moonColor: ArrayLike<number>;
     moonPhase: number;          // 0 = new .. 1 = full
-    moonlightIntensity: number; // fraction of the sun light's intensity
+    /**
+     * The full moon's light on the engine's internal scale (its lux / REFERENCE_ILLUMINANCE), before phase
+     * and elevation. Its own value, not a fraction of the sun: the caller resolves it
+     * (`SkyAtmosphereNode.moonLux`).
+     */
+    moonLight: number;
 }
 
 export interface KeyLight {
@@ -79,7 +84,7 @@ export function keyLight(toSun: ArrayLike<number>, toMoon: ArrayLike<number>, su
     return {
         dir: [-toMoon[0], -toMoon[1], -toMoon[2]],
         color: [p.moonColor[0], p.moonColor[1], p.moonColor[2]],
-        intensity: sunIntensity * p.moonlightIntensity * moonWeight,
+        intensity: p.moonLight * moonWeight,
         isMoon: true,
     };
 }

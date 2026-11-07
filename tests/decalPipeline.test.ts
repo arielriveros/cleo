@@ -161,7 +161,9 @@ describe('the programs', () => {
         expect(entries.slice(at + 3)).toEqual(['overdrawInstanced', 'foliageImpostorInstanced', 'occlusionBox',
                                               'shadowMapImpostorInstanced', 'taaSharpen', 'fxaa', 'fluidVolume',
                                               'fluidVolumeResolve', 'fluidVolumeComposite', 'spriteLit',
-                                              'ssr', 'ssrResolve', 'ssrTemporal']);
+                                              'ssr', 'ssrResolve', 'ssrTemporal', 'localExposureLum',
+                                              'localExposureDown', 'volumetricFogInject', 'volumetricFogIntegrate',
+                                              'volumetricFogApply']);
     });
 
     it('read every map through the flipbook cells, inset per cell so no neighbouring frame bleeds in', () => {

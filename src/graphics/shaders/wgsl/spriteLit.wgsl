@@ -22,6 +22,10 @@
 #include "./chunks/objectData.wgsl"
 #include "./chunks/tonemap.wgsl"
 #include "./chunks/shadows.wgsl"
+// The clustered lights: every point and spot light reaching the pixel, not one CPU-picked key per sprite.
+// pbrLighting first, for the SpotLight struct and the falloff the surfaces use.
+#include "./chunks/pbrLighting.wgsl"
+#include "./chunks/clusteredLights.wgsl"
 
 const SPRITE_PI: f32 = 3.14159265359;
 
@@ -102,6 +106,13 @@ struct SpriteLitMaterial {
     back: vec3<f32>,
     /** The camera (MaterialBinder sets it on every material). */
     viewPos: vec3<f32>,
+    /** The draw's pre-exposure (FrameView.drawPreExposure); the lights above are absolute. 0 reads as 1. */
+    preExposure: f32,
+    /**
+     * 1 when the frame's clustered light grid is bound: every local light is then evaluated per pixel
+     * (`localLights`) and `keyColor` / the local share of `ambient` are zero. 0 = the CPU key and fill alone.
+     */
+    gridLights: i32,
 };
 @group(1) @binding(1) var<uniform> u_material: SpriteLitMaterial;
 
@@ -133,6 +144,52 @@ fn spriteSpecular(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>, roughness: f32, f0: 
     let G = (nl / (nl * (1.0 - k) + k)) * (nv / (nv * (1.0 - k) + k));
     let F = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
     return D * G * F / max(4.0 * nl * nv, 1e-4) * nl;
+}
+
+/** What the clustered local lights add, by mode, for one pixel. */
+struct LocalLight {
+    /** Six-way: the sum of each light's irradiance times the six-way response to its direction. */
+    sixWay: vec3<f32>,
+    /** Surface and flat: the sum of each light's irradiance times its N.L (half-Lambert for flat). */
+    diffuse: vec3<f32>,
+    /** Surface: the GGX highlights. */
+    specular: vec3<f32>,
+};
+
+/**
+ * Every point and spot light that reaches `p`, through the frame's cluster grid (the same lights, falloff
+ * and cone the surfaces use). The light records are pre-exposed, so the sums come back divided by the
+ * pre-exposure: absolute, like the rest of this program's light, which multiplies it in once at the end.
+ */
+fn localLights(p: vec3<f32>, viewDepth: f32, fragXY: vec2<f32>, mode: i32, N: vec3<f32>, V: vec3<f32>,
+               roughness: f32, f0: vec3<f32>, pos: vec4<f32>, neg: vec4<f32>, preExposure: f32) -> LocalLight {
+    var out: LocalLight;
+    out.sixWay = vec3<f32>(0.0);
+    out.diffuse = vec3<f32>(0.0);
+    out.specular = vec3<f32>(0.0);
+    let cluster = cleoClusterOf(fragXY, viewDepth);
+    let first = cleoClusterOffset(cluster);
+    let count = cleoClusterCount(cluster);
+    let k = 1.0 / max(preExposure, 1e-8);
+    for (var i = 0; i < count; i++) {
+        let cl = cleoLight(cleoClusterLight(first + i));
+        if (cleoLightReaches(cl.light, p)) {
+            let toLight = cl.light.position - p;
+            let d2 = max(dot(toLight, toLight), cl.light.sourceRadius * cl.light.sourceRadius);
+            let L = toLight * inverseSqrt(max(dot(toLight, toLight), 1e-8));
+            let cone = spotAttenuation(dot(-L, cl.light.direction), cl.light.coneScale, cl.light.coneOffset);
+            let E = cl.light.color * (cl.light.intensity * distanceAttenuation(d2, cl.light.invRangeSquared) * cone * k);
+            if (mode == 1) {
+                out.sixWay += E * sixWayLight(spriteFrame(L), pos, neg);
+            } else if (mode == 2) {
+                out.diffuse += E * max(dot(N, L), 0.0);
+                out.specular += E * spriteSpecular(N, V, L, roughness, f0);
+            } else {
+                out.diffuse += E * (dot(N, L) * 0.5 + 0.5);
+            }
+        }
+    }
+    return out;
 }
 
 /** A window depth's distance along the camera axis (as chunks/basicForward.wgsl `basicViewDepth`). */
@@ -170,6 +227,11 @@ fn fs_main(in: SpriteLitVaryings) -> @location(0) vec4<f32> {
         // Light from everywhere at once: the six responses' mean.
         let fill = (mapA.r + mapA.g + mapA.b + mapB.r + mapB.g + mapB.b) / 6.0;
         rgb = tint * (m.ambient * fill + (m.sunColor * vis * sun + m.keyColor * key) / SPRITE_PI);
+        if (m.gridLights != 0) {
+            let local = localLights(in.worldPos, in.viewDepth, in.position.xy, 1, vec3<f32>(0.0, 0.0, 1.0),
+                                    vec3<f32>(0.0, 0.0, 1.0), 1.0, vec3<f32>(0.04), mapA, mapB, m.preExposure);
+            rgb += tint * local.sixWay / SPRITE_PI;
+        }
         // A fire inside the smoke: the colour atlas where the negative map says it emits.
         if (m.hasTexture != 0) { rgb += toLinear(tex.rgb) * mapB.a * m.intensity; }
         alpha *= mapA.a;
@@ -193,6 +255,11 @@ fn fs_main(in: SpriteLitVaryings) -> @location(0) vec4<f32> {
         rgb = diffuse * (m.ambient * occlusion + (m.sunColor * vis * sunL + m.keyColor * keyL) / SPRITE_PI);
         rgb += m.sunColor * vis * spriteSpecular(N, V, m.sunDir, roughness, f0)
              + m.keyColor * spriteSpecular(N, V, m.keyDir, roughness, f0);
+        if (m.gridLights != 0) {
+            let local = localLights(in.worldPos, in.viewDepth, in.position.xy, 2, N, V, roughness, f0,
+                                    mapA, mapB, m.preExposure);
+            rgb += diffuse * local.diffuse / SPRITE_PI + local.specular;
+        }
         // A little of the fill in the highlight, so a glossy liquid is not flat away from the lights.
         rgb += m.ambient * f0 * occlusion * (1.0 - roughness) * 0.5;
     } else {
@@ -203,6 +270,11 @@ fn fs_main(in: SpriteLitVaryings) -> @location(0) vec4<f32> {
         let sunWrap = dot(n, m.sunDir) * 0.5 + 0.5;
         let keyWrap = dot(n, m.keyDir) * 0.5 + 0.5;
         rgb = albedo * (m.ambient + (m.sunColor * vis * sunWrap + m.keyColor * keyWrap) / SPRITE_PI);
+        if (m.gridLights != 0) {
+            let local = localLights(in.worldPos, in.viewDepth, in.position.xy, 0, n, n, 1.0, vec3<f32>(0.04),
+                                    mapA, mapB, m.preExposure);
+            rgb += albedo * local.diffuse / SPRITE_PI;
+        }
     }
 
     // Soft fade: the view depths of the scene behind and of this fragment, from the same window depth.
@@ -211,5 +283,6 @@ fn fs_main(in: SpriteLitVaryings) -> @location(0) vec4<f32> {
         let scene = spriteViewDepth(textureSampleLevel(u_sceneDepth_texture, u_sceneDepth_sampler, uv, 0));
         alpha *= clamp((scene - spriteViewDepth(in.position.z)) / m.softness, 0.0, 1.0);
     }
-    return vec4<f32>(rgb, alpha);
+    let preExposure = select(1.0, m.preExposure, m.preExposure > 0.0);
+    return vec4<f32>(min(rgb * preExposure, vec3<f32>(32768.0)), alpha);
 }

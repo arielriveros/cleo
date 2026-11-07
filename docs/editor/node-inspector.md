@@ -110,6 +110,10 @@ starts at 1500 lm, brightened the same way.
   lights. Brightness lives in the intensity, not the colour: keep the colour as the light's tint. A
   light converted from the old constant / linear / quadratic falloff says so, and **Reset to
   physical defaults** re-authors it in real units.
+- **Flicker** — point and spot lights: how far the intensity wanders, as a share of it (a torch about
+  0.15–0.25, a candle 0.1, a lamp 0), and **Flicker Speed**, roughly how many swells a second. Each light
+  wanders on a beat of its own. It changes the intensity only, so a shadowed light keeps its cached shadow
+  map. Flames and particle systems that follow the light (**Follow Light**) swell on the same beat.
 - **Shadows** — **Cast Shadows**. The first directional light with it on is the scene's sun, and the
   renderer fits its shadow cascades around the camera. Spot and point lights get shadow maps of their
   own, reaching as far as the light's range, a few at a time
@@ -154,6 +158,31 @@ here; an unticked one shows the scene's value, dimmed, and passes it through. Ed
 Above them, a line says whether the camera is inside the volume now, how strongly, and the EV it is
 exposed at.
 
+#### Volumetric Fog
+
+A box of fog, mist, smoke or dust that the sun, the moon, the torches and the sky light scatter into: a
+torch glows in the mist round it, shafts cross a smoky hall, a valley floor fills with haze at dawn. The
+renderer draws it with a grid of cells over the camera's view, so everything behind the fog is dimmed by
+it and lit by it. Overlapping volumes add up, as two banks of fog would. The scene's own height fog and god
+rays are separate. Size it with the face handles in the viewport; the *Fog* presets set the medium.
+
+| Field | Meaning |
+|---|---|
+| **Enabled** | Off leaves the volume in the scene without it drawing anything. |
+| **Size** | Full extents of the box in metres, before the node transform, which it follows, rotation included. |
+| **Blend Distance** | How far inside its faces the fog fades in, in metres. |
+| **Priority** | Which volumes are drawn first when more are in view than the renderer draws (16). It never makes one volume hide another: they add. |
+| **Density** | Extinction per metre: how fast the fog hides what is behind it. Visibility is about 3.9 / density metres. |
+| **Albedo** | The share of the light the fog takes that it scatters rather than absorbs: near white for mist, darker and warmer for smoke. |
+| **Anisotropy** | 0 scatters evenly; toward 1 the fog glows round a light seen through it, as mist does round a lamp. |
+| **Height Falloff** | Per metre: the fog thins from the bottom face up. 0 is even through the box. |
+| **Noise** | How much a drifting noise breaks the fog into wisps, with **Noise Scale** (metres per wisp) and **Wind** (metres per second). |
+| **Emissive** | Light the fog gives off itself, colour and nits: a glowing haze, smoke over a fire. |
+| **Sun Scattering** | Multipliers on what the fog scatters: the sun or moon (its shafts), the point and spot lights (**Light Scattering**, the halos round torches) and the sky's fill (**Ambient Scattering**). |
+
+A line above the fields says when the volume is not drawn and why: Volumetric Fog switched off in the
+Renderer settings, the box out of view or past the fog distance, or over the volume cap.
+
 #### Skybox
 
 Six cube faces, laid out as an unfolded cube, each with its own image. Mutually exclusive with Sky
@@ -165,17 +194,23 @@ A physically based sky, baked to a cubemap whenever the sun moves, with air and 
 [Node types](../reference/node-types.md#skyatmospherenode--skyatmosphere).
 
 - **Sun** — follow the scene's directional light (**Use Scene Directional Light**) or point the sun
-  yourself; its colour, intensity and disk size.
+  yourself; its colour, intensity and disk size. With the scene's light, **Physical Units** (on for a
+  new sky) lights the sky with that light's own lux instead of **Sun Intensity**: the sky, the sun disc
+  and what reflects them then share one scale with every surface the sun lights, so neither the sky
+  nor a mirror's reflection of the sun is brighter than it really is. **Exposure** trims it from there.
+  A sky saved before physical units keeps its artistic one.
 - **Atmosphere** — Rayleigh scattering (the blue of the sky) and Mie scattering (the haze around the
   sun) with their heights, exposure, ground colour, and the planet and atmosphere radii.
 - **Night Sky** — procedural stars (brightness, density, colour variance) or a night-sky texture with
   its own intensity and rotation, plus airglow.
 - **Moon** — part of the night sky. It rises opposite the sun, moved by the azimuth and elevation
   offsets, with a phase, size, colour and brightness. Once the sun has set, the scene's directional
-  light shines from the moon at **Moonlight on Scene** times its intensity, shadows included. The
-  whole night sky (moonlit air, stars, airglow and the disc) scales with it too, at the brightness it
-  was tuned for at the default 0.08: a real moon is about 0.000002 of the sun, and with lights in real
-  units an auto exposure opens up to a sky that dark rather than the sky lighting the night.
+  light shines from the moon at **Moonlight (lux)**, shadows included: the moon's own illuminance,
+  whatever the sun's lux is, so the night in the editor is the night in the game. A real full moon
+  gives about 0.25 lux; the default 1 is a bright, storybook one. The whole night sky (moonlit air,
+  stars, airglow and the disc) follows the moon-to-sun ratio, so with lights in real units an auto
+  exposure opens up to a sky that dark rather than the sky lighting the night. A scene saved before
+  this stored the moonlight as a fraction of the sun and keeps it until the field is edited.
 - **Quality** — the baked sky's resolution, and the view and light march steps.
 - **Fog** — height fog, measured along each line of sight: density, start distance, maximum opacity,
   and the **Height** below which it is uniform and the **Height Falloff** with which it thins above
@@ -200,7 +235,9 @@ Intensity, tint, ambient and night ambient, cloud response — and, while the sc
 clouds, **Cloud Shadows** with a strength — plus an L0 read-out that separates "the projection has
 not landed yet" from "the sky really is that dim". **Ambient** scales the scene's flat ambient fill
 (Scene settings → Ambient); **Night Ambient** is how much of it is kept after sunset, so a night
-without a moon can go almost pitch black while the day is unchanged.
+without a moon can go almost pitch black while the day is unchanged. A new sky light keeps 0.0001 of
+it, the same share a scene with a sky but no sky light keeps, so adding or deleting a sky light does
+not change the night.
 
 #### Volumetric Clouds
 

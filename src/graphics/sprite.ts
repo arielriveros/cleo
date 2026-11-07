@@ -24,6 +24,10 @@ export interface SpriteOptions {
     exposureWeight?: number;
     softness?: number;
     lit?: boolean;
+    /** Burn with a light: the NAME of a point or spot light near the sprite (see `followLight`). */
+    followLight?: string | null;
+    /** How much of the followed light's flicker the sprite takes, 0..1 (default 1). */
+    followAmount?: number;
 }
 
 /** A soft-fade distance: non-negative metres, capped where it stops meaning "near the surface". */
@@ -56,6 +60,8 @@ export class Sprite {
   private _exposureWeight: number;
   private _softness: number;
   private _lit: boolean;
+  private _followLight: string | null;
+  private _followAmount: number;
   /** A lit sprite's private material, made on first lit draw (see {@link drawMaterial}). */
   private _litMaterial: Material | null = null;
 
@@ -68,6 +74,8 @@ export class Sprite {
       this._exposureWeight = unitOr1(options?.exposureWeight);
       this._softness = softnessOf(options?.softness);
       this._lit = options?.lit === true;
+      this._followLight = typeof options?.followLight === 'string' && options.followLight ? options.followLight : null;
+      this._followAmount = unitOr1(options?.followAmount);
       this._material = Material.Basic(
           { color: this._tint, opacity: this._opacity, texture: this._tileset?.textureId },
           {
@@ -167,6 +175,18 @@ export class Sprite {
   public set softness(value: number) { this._softness = softnessOf(value); }
 
   /**
+   * Burn with a light (graphics/lightFlicker.ts): the NAME of a point or spot light near the sprite — a
+   * sibling, or under an ancestor a level or two up, as a torch's Flame and Light sit under the torch.
+   * The sprite's brightness then follows that light's flicker, so the flame swells on the beat its light
+   * does. A name rather than an id so a template's instances each follow their own light. Null: steady.
+   */
+  public get followLight(): string | null { return this._followLight; }
+  public set followLight(value: string | null) { this._followLight = typeof value === 'string' && value ? value : null; }
+  /** How much of the followed light's flicker the sprite takes: 0 none, 1 all of it. */
+  public get followAmount(): number { return this._followAmount; }
+  public set followAmount(value: number) { this._followAmount = unitOr1(value); }
+
+  /**
    * Lit: the sprite takes the scene's light instead of showing its texture as it is -- the sun (and the
    * shadows it casts on the sprite), the sky and ambient light, and the strongest light near it. How, its
    * tileset decides (Tileset.lighting): with six-way lightmaps, the effect relit from the light's direction
@@ -238,6 +258,7 @@ export class Sprite {
           ...(this._exposureWeight < 1 ? { exposureWeight: this._exposureWeight } : {}),
           ...(this._softness > 0 ? { softness: this._softness } : {}),
           ...(this._lit ? { lit: true } : {}),
+          ...(this._followLight ? { followLight: this._followLight, ...(this._followAmount < 1 ? { followAmount: this._followAmount } : {}) } : {}),
       };
   }
 
@@ -255,6 +276,8 @@ export class Sprite {
           exposureWeight: data?.exposureWeight,
           softness: data?.softness,
           lit: data?.lit === true,
+          followLight: data?.followLight ?? null,
+          followAmount: data?.followAmount,
       });
   }
 }
