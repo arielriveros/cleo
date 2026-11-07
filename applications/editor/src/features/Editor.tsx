@@ -24,6 +24,7 @@ import DimensionSwitchModal from "./dialogs/DimensionSwitchModal";
 import { useDocument } from "./DocumentContext";
 import { useAssetLibrary } from "./AssetLibraryContext";
 import { groupTabStrip } from "../utils/animationWorkspace";
+import AgentBridgeHost from "./agentBridge/AgentBridgeHost";
 
 // Ctrl/Cmd+S saves the active tab, Ctrl/Cmd+Shift+S saves everything. Bound on the window (capture phase)
 // so it fires wherever focus is — including inside the Monaco script editor, which handles Ctrl+S itself
@@ -116,6 +117,8 @@ function Shell() {
       <UnsavedSceneModal />
       {/* Warns when switching a scene's dimension would strand the other dimension's authoring. */}
       <DimensionSwitchModal />
+      {/* The link to a Cleo MCP server (applications/mcp): an AI agent's commands run here. Renders nothing. */}
+      <AgentBridgeHost />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { useVfs } from "./assets/VfsContext";
 import { buildMultiSceneGameData } from "./publish/buildMultiSceneGameData";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
 import WorkspaceStatusChip from "./scriptWorkspace/WorkspaceStatusChip";
+import AgentBridgeChip from "./agentBridge/AgentBridgeChip";
 import { importBundleJob } from "../workers/workerClient";
 import { exportBundle } from "../utils/bundleExport";
 import { applyBundleReplace, applyBundleMerge, applyBundleAsNewProject, IMPORT_WRITE_STEPS } from "../utils/bundleImport";
@@ -325,6 +326,8 @@ export default function MenuBar() {
         {/* The script workspace appears here only when it needs attention (paused sync, error, conflict);
             setting it up and its everyday status live in Options ▸ Editor ▸ Scripts. */}
         <WorkspaceStatusChip />
+        {/* The AI agent link (Cleo MCP server), shown only while a server is running on this machine. */}
+        <AgentBridgeChip />
         {/* The bundle is dropped only once the import commits. New project and Merge ask about
             unsaved work first (see bundleImport), and a declined confirm leaves this modal up so the
             choice can be made again rather than dumping the user back into the editor. A successful

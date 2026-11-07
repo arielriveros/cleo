@@ -41,6 +41,7 @@ If you are new, read [Core concepts](../concepts.md) first, then
 | [AI agents](ai-agents.md) | The Controller node, perception, steering, navmesh baking |
 | [Input](input.md) | Action maps, bindings, processors, rebinding |
 | [Scripting workflow](scripting-workflow.md) | Script assets, the code editor, editing in VS Code |
+| [AI agent link](ai-agent-link.md) | Letting an AI agent (Claude, over MCP) build, script and play-test in the editor |
 
 ### Look and ship
 

@@ -37,6 +37,15 @@ type HistoryContextValue = {
   endBatch: () => void
   /** Run a block with recording off — nothing inside it becomes an undo step. */
   silently: <T>(fn: () => T) => T
+  /**
+   * Run a PROGRAMMATIC edit (the agent bridge) as ONE undo step on the tab that is active when it starts.
+   * The selection-baseline recorder cannot cover it: it only diffs nodes the user selected, and closes
+   * its step 450 ms later, after any batch has ended. So inside a transaction that recorder is off, and
+   * `track(node)` — awaited BEFORE the node is changed — snapshots the node explicitly; the after-image is
+   * taken when `fn` resolves. Structure changes (add/remove/reparent) still record their exact inverses
+   * into the same step, and `push` entries made meanwhile (bodies, triggers) join it too.
+   */
+  transaction: <T>(label: string, fn: (track: (node: Node) => Promise<void>) => Promise<T>) => Promise<T>
 }
 
 const HistoryContext = createContext<HistoryContextValue | null>(null)
@@ -60,7 +69,10 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
   } = useCleoEngine()
 
   const managersRef = useRef(new Map<string, HistoryManager>())
-  const [, force] = useState(0)
+  // Bumped by every stack change. It must be a dependency of the context value below: `active` is the same
+  // manager object across pushes, so without it the memo kept handing out the first render's canUndo/undoLabel
+  // and the Undo/Redo buttons stayed disabled until a tab switch.
+  const [version, force] = useState(0)
   const rerender = useCallback(() => force(x => x + 1), [])
 
   const managerFor = useCallback((tabId: string): HistoryManager => {
@@ -154,6 +166,10 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
   // The interaction currently being collected into one snapshot step, and the timer that closes it.
   const openRef = useRef<{ tabId: string; nodeId: string; before: any; kind: string } | null>(null)
   const timerRef = useRef<number | null>(null)
+  // The open programmatic transaction, if any: node id -> its before-image (null while being taken).
+  const txRef = useRef<{ tracked: Map<string, any> } | null>(null)
+  const activeTabRef = useRef(activeTabId)
+  activeTabRef.current = activeTabId
 
   const closeInteraction = useCallback(() => {
     if (timerRef.current !== null) { window.clearTimeout(timerRef.current); timerRef.current = null }
@@ -195,6 +211,9 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
         if (entry) manager.push({ ...entry, time: Date.now() })
         return
       }
+
+      // A transaction snapshots the nodes it tracks itself (see `transaction`).
+      if (txRef.current) return
 
       // Everything else is snapshot-diffed across an interaction.
       const before = baselineRef.current.get(node.id)
@@ -257,6 +276,44 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
     for (const id of [...managersRef.current.keys()]) if (!live.has(id)) managersRef.current.delete(id)
   }, [tabs])
 
+  const transaction = useCallback(async <T,>(
+    label: string, fn: (track: (node: Node) => Promise<void>) => Promise<T>,
+  ): Promise<T> => {
+    const trackInto = async (into: Map<string, any>, node: Node) => {
+      if (into.has(node.id) || !canSnapshot(node, sceneRef.current)) return
+      into.set(node.id, null)
+      into.set(node.id, await snapshot(node, baselineRef.current.get(node.id)))
+    }
+    // Nested: the outer transaction already owns the step.
+    const outer = txRef.current
+    if (outer) return fn(node => trackInto(outer.tracked, node))
+
+    // Whatever the user was in the middle of becomes its own step first, so it is not swallowed by ours.
+    closeInteraction()
+    const manager = managerFor(activeTabRef.current)
+    const tracked = new Map<string, any>()
+    txRef.current = { tracked }
+    manager.beginBatch(label)
+    try {
+      const result = await fn(node => trackInto(tracked, node))
+      for (const [id, before] of tracked) {
+        if (!before) continue
+        const node = sceneRef.current.getNodeById(id)
+        if (!node) continue // deleted later in the same transaction: its structure entry covers it
+        const after = await snapshot(node, before)
+        if (!after) continue
+        // The node now IS this state; the user's next edit must diff against it, not the pre-agent one.
+        baselineRef.current.set(id, after)
+        if (sameSnapshot(before, after)) continue
+        manager.push({ label, time: Date.now(), undo: () => restore(before), redo: () => restore(after) })
+      }
+      return result
+    } finally {
+      txRef.current = null
+      manager.endBatch()
+    }
+  }, [closeInteraction, managerFor, restore, snapshot])
+
   const value = useMemo<HistoryContextValue>(() => ({
     canUndo: active.canUndo,
     canRedo: active.canRedo,
@@ -268,7 +325,8 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
     beginBatch: (label) => active.beginBatch(label),
     endBatch: () => active.endBatch(),
     silently: (fn) => active.silently(fn),
-  }), [active, closeInteraction])
+    transaction,
+  }), [active, closeInteraction, transaction, version])
 
   return <HistoryContext.Provider value={value}>{children}</HistoryContext.Provider>
 }

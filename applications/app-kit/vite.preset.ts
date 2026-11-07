@@ -1,4 +1,5 @@
 import { readFileSync, readdirSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AliasOptions, Connect, Plugin } from 'vite';
@@ -85,6 +86,45 @@ export function nagaAssetsPlugin(base = '/'): Plugin {
     generateBundle() {
       for (const name of readdirSync(NAGA_DIR))
         this.emitFile({ type: 'asset', fileName: `naga/${name}`, source: readFileSync(path.join(NAGA_DIR, name)) });
+    },
+  };
+}
+
+/**
+ * Where the Cleo MCP server (applications/mcp) advertises its editor bridge: `{port, token, pid, ...}`.
+ * Same rule as applications/mcp/src/discovery.mjs -- keep the two in step.
+ */
+function agentBridgeFile(): string {
+  return process.env.CLEO_AGENT_BRIDGE_FILE || path.join(os.homedir(), '.cleo', 'agent-bridge.json');
+}
+
+/**
+ * Dev only: `GET /__cleo/agent-bridge` answers the MCP server's discovery file, so the editor page (which
+ * cannot read the filesystem) can find and authenticate to a running server. 404 while none runs.
+ *
+ * The file holds the bridge's token, so only this origin's own pages may read it: a fetch from another
+ * site is refused on its `Sec-Fetch-Site`, and Vite's default CORS policy already keeps a cross-origin
+ * page from reading the response. Not in the build: the packaged desktop app needs its own route
+ * (preload), and a hosted web build has no local server to find.
+ */
+export function agentBridgeDiscoveryPlugin(): Plugin {
+  return {
+    name: 'cleo:agent-bridge-discovery',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url?.split('?')[0] !== '/__cleo/agent-bridge') return next();
+        const site = req.headers['sec-fetch-site'];
+        if (site && site !== 'same-origin' && site !== 'none') { res.statusCode = 403; return res.end('Forbidden'); }
+        res.setHeader('Cache-Control', 'no-store');
+        let body: string;
+        try { body = readFileSync(agentBridgeFile(), 'utf8'); } catch { res.statusCode = 404; return res.end('{}'); }
+        try {
+          const info = JSON.parse(body);
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ port: info.port, token: info.token, pid: info.pid, version: info.version }));
+        } catch { res.statusCode = 404; res.end('{}'); }
+      });
     },
   };
 }
