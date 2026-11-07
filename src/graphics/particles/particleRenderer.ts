@@ -129,6 +129,11 @@ export interface ParticleDrawFrame {
     height: number;
     /** Lit particles: the scene's indirect fill (scene ambient + sky light), irradiance. */
     ambient: readonly number[];
+    /**
+     * Lit particles: the indirect fill at a world point, the effect's bounds centre: the light probes
+     * that hold it (render/probeLighting.ts), else `ambient`. Absent: `ambient` everywhere.
+     */
+    ambientAt?: (position: ArrayLike<number>) => readonly number[];
     sunDirection: readonly number[];
     sunColor: readonly number[];
     /** Lit particles: the punctual lights, gathered per effect at its bounds centre. */
@@ -1083,13 +1088,20 @@ export class ParticleRenderer {
                 // What its PBR emitters reflect, once for all of them (undefined: not looked up yet).
                 let reflected: { cube: Texture; linear: boolean } | null | undefined;
                 const envFor = () => (reflected === undefined ? (reflected = frame.environment?.(node.worldPosition) ?? null) : reflected);
+                let centre: number[] | null = null;
+                const centreOf = (): number[] => {
+                    if (centre) return centre;
+                    const box = node.getBoundingBox();
+                    return (centre = [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2]);
+                };
                 const localFor = (): ParticleLocalLighting => {
                     if (local) return local;
                     if (!frame.localLights?.length) return (local = NO_LOCAL);
-                    const box = node.getBoundingBox();
-                    const centre = [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2];
-                    return (local = gatherParticleLocalLight(centre, frame.localLights));
+                    return (local = gatherParticleLocalLight(centreOf(), frame.localLights));
                 };
+                // The fill at the effect, once for all its lit emitters: a room's probe in a room.
+                let fill: readonly number[] | null = null;
+                const fillFor = (): readonly number[] => fill ?? (fill = frame.ambientAt ? frame.ambientAt(centreOf()) : frame.ambient);
                 for (const emitter of gpu.drawOrder) {
                     const render = emitter.runtime.def.render;
                     if (which !== 'all' && (render.blend === 'additive') !== (which === 'additive')) continue;
@@ -1155,8 +1167,9 @@ export class ParticleRenderer {
                     shaders.setUniform('u_depthParams', [frame.near, frame.far, frame.orthographic ? 1 : 0, frame.depth ? 1 : 0]);
                     shaders.setUniform('u_fragMask', [sprite ? 1 : 0, render.lit ? 1 : 0, 1 / frame.width, 1 / frame.height]);
                     const lights = render.lit ? localFor() : NO_LOCAL;
-                    shaders.setUniform('u_ambient', [frame.ambient[0] + lights.fill[0] / Math.PI, frame.ambient[1] + lights.fill[1] / Math.PI,
-                                                     frame.ambient[2] + lights.fill[2] / Math.PI, mesh ? 1 : 0]);
+                    const ambient = render.lit ? fillFor() : frame.ambient;
+                    shaders.setUniform('u_ambient', [ambient[0] + lights.fill[0] / Math.PI, ambient[1] + lights.fill[1] / Math.PI,
+                                                     ambient[2] + lights.fill[2] / Math.PI, mesh ? 1 : 0]);
                     shaders.setUniform('u_sunDir', [frame.sunDirection[0], frame.sunDirection[1], frame.sunDirection[2], 0]);
                     shaders.setUniform('u_sunColor', [frame.sunColor[0], frame.sunColor[1], frame.sunColor[2], 0]);
                     shaders.setUniform('u_keyDir', [lights.keyDirection[0], lights.keyDirection[1], lights.keyDirection[2], 0]);

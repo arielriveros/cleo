@@ -44,6 +44,10 @@ const FORWARD_SKINNED: Readonly<Record<string, string>> = {
 };
 /** The parallax variant of each forward program that has one. */
 const FORWARD_POM: Readonly<Record<string, string>> = { pbr: 'pbrPom', pbrSkinned: 'pbrSkinnedPom' };
+/** The forward programs lit by the light probes per draw (`u_probeSH` / `u_probeShare` in their chunks). */
+const PROBE_LIT_FORWARD: ReadonlySet<string> = new Set([
+    'pbr', 'pbrSkinned', 'pbrPom', 'pbrSkinnedPom', 'blinn_phong', 'blinn_phongSkinned', 'cel', 'celSkinned',
+]);
 
 /** What ForwardPass reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface ForwardPassHost {
@@ -92,6 +96,10 @@ export class ForwardPass {
 
     /** True while the transparent queue runs after this frame's depth/colour snapshots. */
     public sceneBuffersLive = false;
+
+    /** Scratch for the per-draw probe lighting (`_renderModel`). */
+    private readonly _probeSH = new Float32Array(36);
+    private readonly _probeCentre = vec3.create();
 
     // Depth writes for the forward model pipelines, set by whichever queue is drawing: opaque writes,
     // transparent does not. Thumbnails are the exception — their coverage alpha comes from scene depth.
@@ -490,13 +498,27 @@ export class ForwardPass {
             // Reflections are all the forward path takes from a probe; its lighting is the sky and ambient.
             // Without a probe or an environment map, the sky light's prefiltered sky — linear, like a probe's.
             const probe = this._view.scene.probeForPoint(node.worldPosition, true);
-            const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
+            const probeCube = probe ? probe.envMap : null;
             const linearCube = probeCube ?? (this._view.scene.environmentMap ? null : this._sky.skyReflectionCube);
             const cube = linearCube ?? this._view.scene.environmentMap;
             this._shaderManager.setUniform('u_useEnvMap', cube ? true : false);
             this._shaderManager.setUniform('u_envMapLinear', linearCube ? true : false);
             // A group 0 entry: the material's bind group carries it.
             envCube = cube ?? null;
+        }
+
+        // Per-draw light probe LIGHTING, at the centre of the object's bounds (where Unity anchors a
+        // renderer's probe): the probes that hold that point, blended as the deferred pass blends them per
+        // pixel, in their share of the ambient and sky light. Zero share during a capture, which is never
+        // lit by probes (LightingPasses.lightingProbes). Custom materials and the forward terrain do not
+        // take it: the one has no slot for it, the other is one draw across the whole landscape.
+        if (this._view.scene && PROBE_LIT_FORWARD.has(shaderType)) {
+            const box = node.getBoundingBox();
+            const centre = vec3.set(this._probeCentre, (box.min[0] + box.max[0]) * 0.5,
+                                    (box.min[1] + box.max[1]) * 0.5, (box.min[2] + box.max[2]) * 0.5);
+            const share = this._lighting.probeLightingAt(this._view.scene, centre, this._probeSH);
+            this._shaderManager.setUniform('u_probeShare', share);
+            if (share > 0) this._shaderManager.setUniform('u_probeSH', this._probeSH);
         }
 
         frameStats.objects++;

@@ -43,9 +43,23 @@ describe('the WebGL2 texture-unit budget', () => {
     });
 
     it('counts the deferred lighting pass the way the header describes it', () => {
-        // A drop below 16 is fine — update this number and the header. A rise cannot happen: the sweep
-        // above fails first.
+        // A drop is fine — update this number and the header. A rise past 16 cannot happen: the sweep above
+        // fails first. 14 once the light probes' LIGHTING moved into the uniform block as spherical
+        // harmonics (the two irradiance cubes retired), 13 once their REFLECTIONS moved into one atlas
+        // array (the two prefiltered cubes retired).
         const source = modules().find(m => m.name === 'deferredLighting.wgsl')!.source;
-        expect(textureCount(source)).toBe(16);
+        expect(textureCount(source)).toBe(13);
+    });
+
+    it('lights from every lighting probe per pixel, not from the camera-chosen slots', () => {
+        const source = modules().find(m => m.name === 'deferredLighting.wgsl')!.source;
+        expect(source).not.toMatch(/u_irradiance[01]/);
+        expect(source).not.toMatch(/u_probeLobes/);
+        // Reflections the same way: one atlas array with a dynamic layer, looped per pixel.
+        expect(source).not.toMatch(/u_prefiltered[01]|u_probeInvVolume[01]|u_probeCount/);
+        expect(source).toMatch(/u_reflectionAtlas_texture: texture_2d_array<f32>/);
+        expect(source).toMatch(/for \(var i = 0; i < min\(u_lighting\.u_reflProbeCount, MAX_REFLECTION_PROBES\); i\+\+\)/);
+        expect(source).toMatch(/u_lightProbeSH: array<vec4<f32>, 144>/);
+        expect(source).toMatch(/for \(var i = 0; i < min\(u_lighting\.u_lightProbeCount, MAX_LIGHT_PROBES\); i\+\+\)/);
     });
 });

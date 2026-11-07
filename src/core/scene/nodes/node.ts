@@ -2308,6 +2308,8 @@ export class Node {
    * culling, so it can read `false` on a node you never hid — see {@link setLodVisible}.
    */
   public get visible(): boolean { return this._visible && this._lodVisible && this._drawCullDepth === 0; }
+  /** The AUTHORED visibility alone, without the renderer's LOD and draw-distance culls. */
+  public get authoredVisible(): boolean { return this._visible; }
   /** Sets authored visibility, recursively for every descendant. */
   public set visible(value: boolean) {
     const changed = this._visible !== value;

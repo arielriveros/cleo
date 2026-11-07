@@ -224,36 +224,67 @@ routePoints(name: string): vec3[]
 get light: DirectionalLight | PointLight | Spotlight
 get type: 'directional' | 'point' | 'spotlight'
 get/set castShadows: boolean
+get/set bake: boolean      // captured into the light probes (default true); off = live only
+bakeSnapshot(): LightBakeSnapshot   // what a probe's bake of it depends on (probeBakeState.ts)
 get/set index: number      // record slot; -1 once past MAX_LIGHTS (1024)
 ```
+
+`probeBakeStaleness(probes, lights)` (core/scene/probeBakeState.ts) lists the baked probes whose bake no
+longer matches the lights set to bake that reach them, and what changed (`moved`, `turned`, `colour`,
+`intensity`, `range`, `size`, `cone`, `shadows`, `shown`, `added`, `removed`). The editor shows it.
 
 Intensities are photometric: directional in **lux** (default 100000), point and spot in **lumens**
 (default 1500). See [Rendering (scripting)](../scripting/rendering.md#lights).
 
 ### LightProbeNode — `'lightProbe'`
 
-Captures local reflections and irradiance inside a bounded volume.
+Captures local reflections and lighting (irradiance) inside a bounded volume.
 
 ```ts
 resolution: number ; mode: 'baked' | 'realtime' ; updateFrequency: number
 intensity: number ; size: vec3 ; blendDistance: number
 affectsLighting: boolean ; affectsReflections: boolean   // both true by default
+boxProjection: boolean                 // parallax-correct the reflections against the box (bounded)
 get bounded: boolean ; get invVolumeMatrix: mat4 ; get volumeBlend: number
 probeWeight(p: vec3): number
 distanceToVolume(p: vec3): number      // 0 inside the box (or unbounded)
 get volumeSize: number                 // cubic metres; Infinity unbounded
-bake(): void ; markBaked(t: number): void
-setBakedMaps(source, irradiance, prefiltered): void
-get hasBakedMaps / irradiance / prefiltered / envMap / needsBake / lastBakeTime
+bake(): void                           // a full capture (the scene as a G-buffer), then a relight
+relight(): void                        // the captured scene lit again; a probe never captured bakes
+get needsBake / needsRelight ; takeBakeRequests(): void ; markBaked(t: number): void
+setBakedMaps(source): void ; get bakeVersion: number
+get hasBakedMaps / envMap / lastBakeTime
+reflectionLayer: number                // its layer of the reflection atlas, -1 while it has none
+bakedLights: Map<string, LightBakeSnapshot> | null   // the lights its bake saw (probeBakeState.ts)
+get irradianceSH: Float32Array | null   // 9 L2 SH coefficients (rgb, 4 floats apart), radiance form
+get shStale: boolean ; setIrradianceSH(sh: Float32Array): void
 ```
 
 Probes saved before volumes existed deserialize as unbounded.
 
 A capture is shadowed by the key light through a map of its own, fit round the probe
-(`ShadowPasses.beginProbeShadows`). The renderer captures at most one probe a frame (`nextProbeToBake`:
-never baked, then asked for, then realtime, nearest first). `Scene.probesForFrame(camera, 2)` hands the
-deferred pass the smallest box containing the camera (else the nearest box by distance to the box), and
-keeps the last slot for the nearest unbounded probe.
+(`ShadowPasses.renderProbeShadows`), and lit only by the lights whose `bake` is on. One probe job runs at
+a time (`nextProbeJob`: never baked, then a reflection lost to a regrown atlas, then a bake asked for, then
+a relight, then a realtime refresh, nearest first).
+
+Both lobes apply per pixel, whatever the camera does:
+- **Lighting.** After a capture, `SkyPasses.updateProbeLighting` projects the capture's ~16-texel mip onto
+  radiance spherical harmonics (`irradianceSH`, a frame or two later; the old ones light until then); the
+  evaluation's cosine-lobe constants are the diffuse convolution, so no irradiance cube is made. Every
+  lighting probe in view, up to 16, is applied per pixel by the deferred pass, the smallest box first and
+  unbounded probes last (`render/probeLighting.ts`), the same wherever the camera is. Forward PBR,
+  Blinn-Phong and cel draws take the same blend at their bounds' centre; lit particles and lit sprites
+  take its mean as their ambient. Never during a capture.
+- **Reflections.** A bake GGX-prefilters the capture into one layer of the octahedral reflection atlas
+  (`render/reflectionAtlas.ts`, a 2D array; mips are roughness). The deferred pass loops over every
+  reflecting probe in view the same way as over the lighting ones, sampling its layer with a dynamic index,
+  box-projected when `boxProjection` is on. Forward draws and lit particles take `Scene.probeForPoint`'s
+  sharp capture.
+- **Bakes** are time-sliced and relightable (`render/probeBaker.ts`, `render/probeJobs.ts`): a bake draws
+  the probe's six G-buffer faces through the frame's geometry programs, a draw budget a frame, culled to
+  each face; a relight draws the probe's sun shadow, then lights the faces with the deferred pass into the
+  source cube; three filter steps prefilter into a free atlas layer and swap it and the
+  lights it saw in. One step a frame, one probe at a time. `Renderer.probeBakeProgress` says which.
 
 ### WeatherNode — `'weather'`
 

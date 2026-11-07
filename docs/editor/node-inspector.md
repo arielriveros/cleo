@@ -119,6 +119,11 @@ starts at 1500 lm, brightened the same way.
   own, reaching as far as the light's range, a few at a time
   ([Spot shadows](rendering.md#spot-shadows), [Point shadows](rendering.md#point-shadows)); any
   beyond that cap go unshadowed.
+- **Baking** — **Bake**, on by default: the light is captured into the light probes (and, in time, into
+  baked lighting). Off, it still lights the scene live but no probe sees it — a flashlight, a muzzle flash,
+  a light that moves or switches with gameplay, whose light frozen into a probe would linger where it no
+  longer is. When a light with Bake on is moved, turned, recoloured, dimmed, resized or hidden after the
+  probes were baked, this card says so with **Re-bake probes**.
 - **Cone** — spot lights: **Inner Angle** and **Outer Angle**, half-angles in degrees. Full
   brightness inside the inner cone, nothing past the outer one. Narrowing the cone does not brighten
   the light.
@@ -135,14 +140,38 @@ without changing how the sky and ambient light it.
 **Cubemap Preview** — what the probe last captured, unwrapped into a 2 : 1 panorama. **Bake Probe**
 captures again.
 
-A capture draws the sun's shadow round the probe, with a shadow map of its own fit to the probe's box
-(300 m round an unbounded probe). A probe in a room, or under a cliff, sees shade where there is shade.
-Probes are captured one a frame, those never captured first and then the nearest, so a scene that opens
-with many probes, or re-captures them all as the sun moves, spreads the work over a few frames.
+**Box Projection** — parallax-correct the reflections against the box: a surface inside it reflects what
+the probe saw where its reflected ray leaves the box, so a room's walls land where they are on a polished
+or wet floor. For rooms and corridors; leave it off for open ground, whose horizon is far away. Bounded
+probes only.
 
-The lighting uses two probes at a time. The first is the probe whose box the camera is in (the smallest
-one, such as a room inside a village) or, outside every box, the nearest box. The second is the scene's
-unbounded probe, when it has one, as the fallback everywhere else.
+A bake captures the probe's scene once, as a G-buffer, a few dozen objects a frame, and then lights it:
+the sun's shadow from a map of the probe's own (a probe in a room, or under a cliff, sees shade where
+there is shade), the lights set to **Bake**, the sky. A **relight** lights that captured scene again
+without drawing it — what a time of day asks for as the sun moves, a few frames per probe and no frame
+over about 2 ms. One probe is worked on at a time, a step a frame, those never baked first and then the
+nearest, and a probe keeps lighting and reflecting with its previous bake until the new one is complete.
+
+When a light with Bake on changes after a probe was baked, the probe says it is **out of date**, with
+which light and what changed, and **Re-bake** relights it. The Assets toolbar counts the out-of-date
+probes in a warning badge; its list selects a probe and relights them all with **Re-bake all**. Only
+lights that reach the probe count, and only while editing.
+
+**Lighting** (Affects Lighting) reaches everything inside the probe's box, wherever the camera is: a room
+lit by its probe is as dark seen through its door as from inside, so walking in changes nothing. Where
+boxes overlap, the smallest one wins (a room inside a village), feathered into the next over the blend
+distance. Outside every lighting probe, the ambient and the sky light light the scene. It applies to
+every surface (meshes, the landscape, plants), to the forward materials (PBR, Blinn-Phong and cel, taken
+at each object's centre), and to lit particles and lit sprites. Custom materials and the volumetric fog
+keep the ambient and the sky light. Up to 16 lighting probes are used at a time, those in view. A probe's
+lighting reaches the scene a frame or two after it is captured, and the previous capture keeps lighting
+until then.
+
+**Reflections** (Affects Reflections) work the same way: every reflecting probe in view, up to 16, gives
+the surfaces inside its box their reflections, the smallest box first, wherever the camera is. A polished
+floor in a room reflects the room whether you look at it from the doorway or stand on it. Outside every
+probe, glossy surfaces reflect the sky. Forward materials and lit particles reflect the probe whose box
+holds them.
 
 A bounded probe's box shows as a wireframe while it is selected, with square handles on its six faces
 for sizing it in the viewport — see [Volume handles](scene-authoring.md#volume-handles).

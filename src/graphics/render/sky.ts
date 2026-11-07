@@ -16,6 +16,7 @@ import { device } from '../rhi/deviceHandle';
 import { DEFAULT_BLEND } from '../rhi/types';
 import type { ShaderResource } from '../rhi/types';
 import { nightFactor, moonDirection } from '../skyNight';
+import { projectEquirectToSH } from '../shProject';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
 import { DirectionalLight, REFERENCE_ILLUMINANCE } from '../lighting';
@@ -113,8 +114,15 @@ export class SkyPasses {
     private static readonly SKY_PROJECT_W = 32;
     private static readonly SKY_PROJECT_H = 16;
 
-    /** Must match RGBM_RANGE in skyProject.wgsl. */
-    private static readonly SKY_RGBM_RANGE = 64.0;
+    /**
+     * The light probes' own unwrap target (`updateProbeLighting`), apart from the sky's so neither readback
+     * waits on the other. 64 x 32 point samples of a 32-texel irradiance cube: the cube is already
+     * convolved and smooth, so they integrate it with nothing to alias.
+     */
+    public probeProjectFBO!: Framebuffer;
+    private static readonly PROBE_PROJECT_W = 64;
+    private static readonly PROBE_PROJECT_H = 32;
+    private _probeProjectionPending = false;
 
     // One-time IBL setup: cube capture camera/mesh/framebuffer, per-face view matrices, and the
     // shared BRDF integration LUT.
@@ -389,6 +397,8 @@ export class SkyPasses {
         this._shaderManager.bind('skyProject');
         this._shaderManager.setUniform('u_linearInput', linear ? 1 : 0);
         this._shaderManager.setUniform('u_projectScale', scale);
+        this._shaderManager.setUniform('u_encoding', 0);
+        this._shaderManager.setUniform('u_level', 0);
         this._passes.drawFullscreenAndEnd(pass);
 
         // Restored before the await, for the same reason `renderProbePreview` does it: a game-loop
@@ -413,72 +423,71 @@ export class SkyPasses {
         }
     }
 
-    // Project an RGBM equirect map onto L2 spherical harmonics. Row 0 is the south pole on BOTH
-    // backends, so no per-backend flip. The `cos(lat)` weight is the solid angle a texel subtends —
-    // without it the oversampled poles dominate the integral.
+    // Project an RGBM equirect map onto L2 spherical harmonics (shProject.ts, where it is tested).
     private static _projectEquirectToSH(pixels: Uint8Array, w: number, h: number,
                                         tint: [number, number, number]): Float32Array {
-        const sh = new Float32Array(9 * 4);
-        let weightSum = 0;
-        for (let row = 0; row < h; row++) {
-            const v = (row + 0.5) / h;
-            const lat = (v - 0.5) * Math.PI;
-            const cosLat = Math.cos(lat);
-            const sinLat = Math.sin(lat);
-            for (let col = 0; col < w; col++) {
-                const u = (col + 0.5) / w;
-                const lon = (u - 0.5) * 2 * Math.PI;
-                const x = cosLat * Math.sin(lon);
-                const y = sinLat;
-                const z = -cosLat * Math.cos(lon);
-
-                const i = (row * w + col) * 4;
-                const m = pixels[i + 3] / 255 * SkyPasses.SKY_RGBM_RANGE;
-                const r = (pixels[i] / 255) * m * tint[0];
-                const g = (pixels[i + 1] / 255) * m * tint[1];
-                const b = (pixels[i + 2] / 255) * m * tint[2];
-
-                const weight = cosLat;
-                weightSum += weight;
-
-                // Real SH basis, l = 0..2, in the order chunks/pbrLighting.wgsl evaluates them.
-                const basis = [
-                    0.282095,
-                    0.488603 * y, 0.488603 * z, 0.488603 * x,
-                    1.092548 * x * y, 1.092548 * y * z,
-                    0.315392 * (3 * z * z - 1),
-                    1.092548 * x * z, 0.546274 * (x * x - y * y),
-                ];
-                for (let k = 0; k < 9; k++) {
-                    const c = basis[k] * weight;
-                    sh[k * 4] += r * c;
-                    sh[k * 4 + 1] += g * c;
-                    sh[k * 4 + 2] += b * c;
-                }
-            }
-        }
-        // 4*PI is the sphere's solid angle and the weight sum is its discrete counterpart, so this turns
-        // the Riemann sum into the integral the coefficients are defined as.
-        const norm = weightSum > 0 ? (4 * Math.PI) / weightSum : 0;
-        for (let k = 0; k < 9 * 4; k++) sh[k] *= norm;
-        return sh;
+        return projectEquirectToSH(pixels, w, h, tint, 'rgbm');
     }
 
-    // Bake a light probe flagged for baking or due for a realtime refresh. IBL applies only where the
-    // user has placed a probe; a scene without one keeps flat ambient plus the crude env map.
-    //
-    // ONE capture per frame (`nextProbeToBake`): a capture is six scene renders, a shadow map and a
-    // prefilter, and a scene that loads with eight probes, or re-bakes them all as the sun moves, used to
-    // take all of them in a single frame. A probe waiting its turn keeps the maps it has (or, never baked,
-    // is skipped by the lighting until it has some).
+    /**
+     * Project one light probe's capture onto spherical harmonics, the form its LIGHTING is applied in
+     * (LightProbeNode.irradianceSH, render/probeLighting.ts): one probe at a time. The unwrap is
+     * skyProject.wgsl in RGBE (a probe is absolute, so its range is anything) of the capture's ~16-texel
+     * mip, read back asynchronously; the coefficients land a frame or two after the bake, and until then
+     * the probe keeps the ones it had. They are RADIANCE coefficients, as the sky light's are: the
+     * evaluation's cosine-lobe constants turn them into irradiance (Ramamoorthi & Hanrahan). That is the
+     * whole diffuse convolution — the 32-texel irradiance cube it replaced cost 9 ms of GPU a probe.
+     * Never during a capture.
+     */
+    public updateProbeLighting(scene: Scene): void {
+        if (this._view.capturing || this._probeProjectionPending) return;
+        let probe: LightProbeNode | null = null;
+        for (const p of scene.lightProbes) {
+            if (p.affectsLighting && p.shStale && p.envMap) { probe = p; break; }
+        }
+        if (!probe) return;
+        const cube = probe.envMap!;
+        const version = probe.bakeVersion;
+        this._probeProjectionPending = true;
+        void this._projectProbe(cube)
+            .then((sh) => {
+                // A bake that landed while this one was in flight stays stale and goes again.
+                if (sh && probe!.bakeVersion === version) probe!.setIrradianceSH(sh);
+            })
+            // Named, as the sky's is: a probe that never projects lights its room with the open sky's fill.
+            .catch((e) => Logger.warn(`Light probe projection failed (${probe!.name}): ${(e && e.message) || e}`, 'Runtime'))
+            .then(() => { this._probeProjectionPending = false; });
+    }
+
+    private async _projectProbe(cube: Texture): Promise<Float32Array | null> {
+        const w = SkyPasses.PROBE_PROJECT_W, h = SkyPasses.PROBE_PROJECT_H;
+        if (this.probeProjectFBO.width !== w || this.probeProjectFBO.height !== h)
+            this.probeProjectFBO.create(w, h);
+
+        const pass = this._passes.beginFullscreenPass(this.probeProjectFBO.renderTarget, 'skyProject', false);
+        this._fullscreen.bind(pass, 'skyProject', SkyProjectProgram, [cube]);
+        this._shaderManager.bind('skyProject');
+        this._shaderManager.setUniform('u_linearInput', 1);
+        this._shaderManager.setUniform('u_projectScale', 1);
+        this._shaderManager.setUniform('u_encoding', 1);
+        // About 16 texels a face, whatever the capture's resolution.
+        this._shaderManager.setUniform('u_level', Math.max(0, Math.log2(Math.max(1, cube.width) / 16)));
+        this._passes.drawFullscreenAndEnd(pass);
+        this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
+        // Submit before reading, as `_projectSkyLight` does: the readback runs on its own encoder.
+        this._passes.flushFrameEncoder(true);
+
+        const pixels = await device.readPixels(this.probeProjectFBO.colors[0].attachmentView, 0, 0, w, h);
+        return projectEquirectToSH(pixels, w, h, [1, 1, 1], 'rgbe');
+    }
+
+    // The light probes' bakes: ONE step of ONE probe's job a frame (render/probeBaker.ts) — a G-buffer face,
+    // its sun shadow, the relight, half the filter — so neither a scene that opens with eight probes nor a
+    // time of day relighting them all as the sun moves puts a whole capture into a frame. A probe waiting
+    // its turn keeps the maps it has (or, never baked, is skipped by the lighting until it has some).
     public updateIBL(scene: Scene): void {
         if (this._view.capturing) return;
-
-        const now = performance.now();
-        const probe = nextProbeToBake(scene.lightProbes, this._view.camera.position, now);
-        if (!probe) return;
-        this._sys.capture.captureProbe(scene, probe);
-        probe.markBaked(now);
+        this._sys.capture.probes.update(scene);
     }
 
     // Direction TOWARD the sun for a SkyAtmosphere node: the scene directional light (negated travel
@@ -991,26 +1000,3 @@ export class SkyPasses {
     }
 }
 
-/**
- * The light probe to capture this frame, of those flagged for a bake or due a realtime refresh: one never
- * baked first (it lights nothing until it is), then one asked for (a Bake, a time-of-day re-bake), then a
- * realtime refresh, so a realtime probe refreshing every frame cannot starve the rest; within each, the
- * nearest to the camera, whose maps are the ones on screen. Null when none is due. Pure, so the order is
- * tested without a device.
- */
-export function nextProbeToBake(probes: Iterable<LightProbeNode>, camera: ArrayLike<number>, now: number): LightProbeNode | null {
-    let best: LightProbeNode | null = null;
-    let bestTier = Infinity;
-    let bestDistance = Infinity;
-    for (const probe of probes) {
-        const due = probe.mode === 'realtime' && (now - probe.lastBakeTime) >= probe.updateFrequency * 1000;
-        if (!probe.needsBake && !due) continue;
-        const tier = !probe.hasBakedMaps ? 0 : probe.needsBake ? 1 : 2;
-        const p = probe.worldPosition;
-        const d = (p[0] - camera[0]) ** 2 + (p[1] - camera[1]) ** 2 + (p[2] - camera[2]) ** 2;
-        if (tier < bestTier || (tier === bestTier && d < bestDistance)) {
-            best = probe; bestTier = tier; bestDistance = d;
-        }
-    }
-    return best;
-}

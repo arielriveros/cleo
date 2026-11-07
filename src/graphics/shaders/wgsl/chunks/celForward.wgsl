@@ -1,4 +1,5 @@
 #include "./alphaCutout.wgsl"
+#include "./shIrradiance.wgsl"
 // Forward Cel (toon) shading, shared by the plain and skinned programs.
 //
 // Uses the light STRUCTS from chunks/pbrLighting.wgsl (the same lights feed every material model) but
@@ -85,11 +86,18 @@ struct CelLighting {
     u_view: mat4x4<f32>,        // only to get the view-space depth that selects a cascade
     u_dirLight: DirectionalLight,
     u_skyLight: SkyLight,
+    /**
+     * The light probes' irradiance at THIS draw (LightingPasses.probeLightingAt at the object's centre):
+     * radiance-form SH like `u_skyLight`'s, already x intensity x pre-exposure.
+     */
+    u_probeSH: array<vec4<f32>, 9>,
     u_viewPos: vec3<f32>,
     /** Scene-wide indirect fill, in internal radiance units. Replaces the per-light ambient. */
     u_sceneAmbient: vec3<f32>,
     /** The frame's pre-exposure: the lights arrive multiplied by it; the rim and emissive do not. */
     u_preExposure: f32,
+    /** How much of the scene ambient and sky light the probes replace at this draw: 0 none, 1 all. */
+    u_probeShare: f32,
 };
 @group(1) @binding(3) var<uniform> u_lighting: CelLighting;
 
@@ -280,8 +288,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Single ambient term: the SCENE ambient plus its sky light, against the material's own ambient
     // tint. Zeroed when the scene sets neither. NOT quantized — it has no direction to band along, and
     // it is what keeps the darkest band from being pure black.
-    var result = (u_lighting.u_sceneAmbient
-                  + skyIrradiance(u_lighting.u_skyLight, normal)) * matAmbient;
+    // Where a light probe lights this object, its irradiance takes the probes' share of the fill.
+    var fill = (u_lighting.u_sceneAmbient + skyIrradiance(u_lighting.u_skyLight, normal))
+             * (1.0 - u_lighting.u_probeShare);
+    if (u_lighting.u_probeShare > 0.0) { fill += shEval(u_lighting.u_probeSH, normal) * (1.0 / PI); }
+    var result = fill * matAmbient;
 
     result += computeDirectionalLight(fragPos, normal, viewDir, u_lighting.u_dirLight,
                                       matDiffuse, matSpecular);

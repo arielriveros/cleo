@@ -5,6 +5,20 @@ import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 
+/** What a light probe's bake of a light depended on (LightNode.bakeSnapshot). */
+export interface LightBakeSnapshot {
+    type: 'directional' | 'point' | 'spotlight';
+    position: [number, number, number];
+    forward: [number, number, number];
+    color: [number, number, number];
+    intensity: number;
+    range: number;
+    sourceRadius: number;
+    cone: [number, number];
+    castShadows: boolean;
+    shown: boolean;
+}
+
 /**
  * Directional, point and spot lights.
  */
@@ -14,6 +28,7 @@ export class LightNode extends Node {
     private readonly _type: 'directional' | 'point' | 'spotlight';
     private _index: number;
     private _castShadows: boolean;
+    private _bake: boolean = true;
 
     constructor(name: string, light: Light, castShadows: boolean = false, id: string = uuidv4()) {
         super(name, 'light', id);
@@ -74,6 +89,7 @@ export class LightNode extends Node {
             lightType: this._type,
             light: lightData,
             castShadows: this._castShadows,
+            bake: this._bake,
         };
     }
 
@@ -97,6 +113,8 @@ export class LightNode extends Node {
         // nothing else does.
         const castShadows = json.castShadows ?? (json.lightType === 'directional');
         const node = new LightNode(json.name, light, castShadows, json.id);
+        // Absent in saves from before the flag: every light was baked into the probes then.
+        node._bake = json.bake !== false;
         Node.finishParse(node, parent, json);
     }
 
@@ -128,6 +146,37 @@ export class LightNode extends Node {
      */
     public get castShadows(): boolean { return this._castShadows; }
     public set castShadows(value: boolean) { this._castShadows = value; }
+
+    /**
+     * Whether this light is BAKED: captured into the light probes (and, later, into baked lightmaps). On by
+     * default. Off, the light still lights the scene live, frame by frame, but no probe sees it — a
+     * flashlight, a muzzle flash, a light that moves or switches with gameplay, whose light frozen into a
+     * probe would linger where it no longer is.
+     */
+    public get bake(): boolean { return this._bake; }
+    public set bake(value: boolean) { this._bake = !!value; }
+
+    /**
+     * What a bake of this light depends on, for telling a probe it is out of date (probeBakeState.ts):
+     * where it is and points, its colour, its authored intensity (not the flicker, which is live), its
+     * reach and cone, its shadow and whether it shows. Allocates; call at UI rate, not per frame.
+     */
+    public bakeSnapshot(): LightBakeSnapshot {
+        const l = this._light as PointLight & Spotlight;
+        const p = this.worldPosition, f = this.worldForward;
+        return {
+            type: this._type,
+            position: [p[0], p[1], p[2]],
+            forward: [f[0], f[1], f[2]],
+            color: [l.color[0], l.color[1], l.color[2]],
+            intensity: l.intensity,
+            range: this._type === 'directional' ? 0 : l.range,
+            sourceRadius: this._type === 'directional' ? (this._light as DirectionalLight).angularRadius : l.sourceRadius,
+            cone: this._type === 'spotlight' ? [l.cutOff, l.outerCutOff] : [0, 0],
+            castShadows: this._castShadows,
+            shown: this.authoredVisible,
+        };
+    }
 
     /** Selection bounds: a small box around the light's origin. */
     public getBoundingBox(): { min: vec3, max: vec3 } {

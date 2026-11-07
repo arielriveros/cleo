@@ -117,6 +117,7 @@ import VolumetricFogApplyProgram from '../shaders/wgsl/volumetricFogApply.wgsl';
 // IBL (image-based lighting) precompute shaders
 import IrradianceProgram from '../shaders/wgsl/irradiance.wgsl';
 import PrefilterProgram from '../shaders/wgsl/prefilter.wgsl';
+import PrefilterOctProgram from '../shaders/wgsl/prefilterOct.wgsl';
 import BRDFProgram from '../shaders/wgsl/brdf.wgsl';
 
 export {
@@ -142,7 +143,7 @@ export {
     GeometryFoliageBillboardProgram, GeometryFoliageImpostorProgram, OcclusionBoxProgram, ShadowMapImpostorProgram,
     GeometryBasicProgram, GeometryBasicSkinnedProgram, DeferredLightingProgram, SsilProgram,
     SsilTemporalProgram, SsilBlurProgram, SsilHistoryProgram, IrradianceProgram,
-    PrefilterProgram, BRDFProgram, SpriteLitProgram, SsrProgram,
+    PrefilterProgram, PrefilterOctProgram, BRDFProgram, SpriteLitProgram, SsrProgram,
     SsrResolveProgram, SsrTemporalProgram, LocalExposureLumProgram, LocalExposureDownProgram,
     VolumetricFogInjectProgram, VolumetricFogIntegrateProgram, VolumetricFogApplyProgram,
 };
@@ -191,6 +192,8 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         // IBL precompute.
         ['irradiance',                   IrradianceProgram],
         ['prefilter',                    PrefilterProgram],
+        // A light probe's reflection, prefiltered into its layer of the octahedral reflection atlas.
+        ['prefilterOct',                 PrefilterOctProgram],
         ['brdf',                         BRDFProgram],
         // Environment.
         ['shadowMap',                    ShadowMapProgram],

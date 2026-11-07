@@ -498,7 +498,9 @@ project; click it again (in Play or out) to unlock. Its sections, in order:
   Physics only steps in Play mode. Three rows account for the rest of the frame, each measured per
   frame by the engine loop itself, with its average and its worst frame since the last refresh:
   *prologue & bakes* is renderer work Render (CPU) leaves out on purpose (prepare, the shader compile
-  queue, sky and probe bakes, the submit); *Unattributed* is engine-loop time in none of the phases,
+  queue, sky and probe bakes, the submit), split under Passes into **prepare.shaders**, **prepare.textures**,
+  **prepare.view**, **prepare.lod**, **prepare.occlusion** and **prepare.motion**, then **sky.bake** and
+  **ibl.bake** (one light-probe bake step a frame, about 2 ms at most); *Unattributed* is engine-loop time in none of the phases,
   near zero unless something untimed runs; *Outside the loop* is the time between one engine frame and
   the next — waiting for the display refresh when the frame finished early, for the GPU, or for browser
   work such as garbage collection.

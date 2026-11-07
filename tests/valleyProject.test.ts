@@ -397,9 +397,11 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             const p: any = byName.get(name);
             expect(p, name).toBeDefined();
             expect(p.size.every((v: number) => v > 0), name).toBe(true);
-            // Out of doors the diffuse fill stays the sky light's: reflections only.
+            // Out of doors the diffuse fill stays the sky light's: reflections only, not box-projected (the
+            // horizon is far away).
             expect(p.affectsLighting, name).toBe(false);
             expect(p.affectsReflections, name).toBe(true);
+            expect(p.boxProjection ?? false, name).toBe(false);
             // Captured near the ground it stands over, at about eye height.
             const lift = p.position[1] - heightAt(p.position[0], p.position[2]);
             if (name !== 'Pond Probe') expect(lift, name).toBeGreaterThan(1.5);
@@ -410,12 +412,20 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(interiors.length).toBe(2);
         for (const p of interiors) {
             expect(p.affectsLighting, p.name).toBe(true);
+            // A room's reflections box-projected, so its walls land where they are on its floor.
+            expect(p.boxProjection, p.name).toBe(true);
             const exposure = nodes().find(n => n.type === 'exposureVolume' && n.name === p.name.replace(' Probe', ' Exposure'));
             expect(exposure, p.name).toBeDefined();
             expect(p.position).toEqual(exposure.position);
             expect(p.size).toEqual(exposure.exposureVolume.size);
             expect(p.rotation).toEqual(exposure.rotation);
         }
+    });
+
+    it('relights its probes as the sun moves, not re-captures them', () => {
+        const script = readFileSync(join(__dirname, '..', 'examples', 'scripts', 'ValleyDayNight.ts'), 'utf8');
+        expect(script).toMatch(/probe\.relight \?\? probe\.bake/);
+        expect(script).toMatch(/public probeDegrees: number = 4/);
     });
 
     it('burns a 2.7 s bonfire loop, and lights a bonfire with its ignition played once', () => {

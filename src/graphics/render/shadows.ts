@@ -1677,17 +1677,30 @@ export class ShadowPasses {
 
     /**
      * Draw the key light's shadow map round `centre` (`radius` metres) for a light-probe capture and make
-     * the forward lighting read it, until `endProbeShadows`. False, and nothing changed, when there is no
-     * shadow-casting directional light or shadows are off: the capture is then unshadowed, as before.
+     * the lighting read it, until `endProbeShadows`. False, and nothing changed, when there is no
+     * shadow-casting directional light set to bake, or shadows are off: the capture is then unshadowed.
      * Call it BEFORE the capture swaps the camera or sets its cube-face state: the casters draw from the
      * light, with the frame's own pipelines.
      */
     public beginProbeShadows(scene: Scene, centre: ArrayLike<number>, radius: number): boolean {
+        const drawn = this.renderProbeShadows(scene, centre, radius);
+        if (drawn) this.activateProbeShadows();
+        return drawn;
+    }
+
+    /**
+     * Draw the probe's sun shadow map and keep it, without the lighting reading it yet: a time-sliced bake
+     * draws it one frame (`ProbeJobStep` 'shadow') and lights with it the next (`activateProbeShadows`).
+     * The map stays valid until the next call; one probe job runs at a time.
+     */
+    public renderProbeShadows(scene: Scene, centre: ArrayLike<number>, radius: number): boolean {
         this.probeShadowsActive = false;
+        this._probeShadowReady = false;
         if (!this.shadowsEnabled || this.shadowsSuppressed || !this._host.deviceReady) return false;
         let sun: LightNode | null = null;
         for (const node of scene.lights) {
-            if (node.castShadows && node.type === 'directional') { sun = node; break; }
+            // Only a light set to bake is captured into probes (LightNode.bake), its shadow with it.
+            if (node.castShadows && node.type === 'directional' && node.bake) { sun = node; break; }
         }
         if (!sun) return false;
         const size = Math.max(256, Math.min(4096, 1 << Math.round(Math.log2(Math.max(1, this.probeShadowResolution)))));
@@ -1718,7 +1731,7 @@ export class ShadowPasses {
             this._probeDepthScalePacked.fill(cascadeDepthScale(fit.depthRange));
             this._probeTexelPacked.fill(fit.texelWorldSize);
             this._probeShadowSize = size;
-            this.probeShadowsActive = true;
+            this._probeShadowReady = true;
         } finally {
             this._layerLodMode = 'camera';
             this._captureCasters = false;
@@ -1728,6 +1741,13 @@ export class ShadowPasses {
         }
         return true;
     }
+
+    /** Read the probe map drawn by the last `renderProbeShadows`, if it drew one. True when it did. */
+    public activateProbeShadows(): boolean {
+        this.probeShadowsActive = this._probeShadowReady && this.probeShadowFBO !== null;
+        return this.probeShadowsActive;
+    }
+    private _probeShadowReady = false;
 
     /** Stop reading the probe's map: the forward lighting goes back to the frame's cascades. */
     public endProbeShadows(): void { this.probeShadowsActive = false; }

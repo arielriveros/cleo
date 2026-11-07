@@ -1427,38 +1427,6 @@ export class Scene {
         return best ?? nearestUnbounded;
     }
 
-    /**
-     * Up to `max` baked probes for the deferred lighting pass's per-pixel volume selection (slot 0 claims
-     * its volume's weight, the next fills what is left, the sky and ambient the rest).
-     *
-     * - Bounded probes first: one whose volume CONTAINS the camera before any other (the smallest such
-     *   volume first: a room's probe inside the hamlet's), then by the camera's distance to the volume,
-     *   not to its centre (a large volume's centre can be far while the camera stands at its edge).
-     * - An unbounded probe, when there is one, always keeps the LAST slot: it is the scene's fallback, and
-     *   two bounded probes near the camera used to push it out, leaving every pixel outside their boxes
-     *   with the bare sky's reflection.
-     */
-    public probesForFrame(cameraPos: vec3, max: number): LightProbeNode[] {
-        if (max <= 0) return [];
-        const bounded: { probe: LightProbeNode; inside: boolean; volume: number; distance: number }[] = [];
-        const unbounded: LightProbeNode[] = [];
-        for (const probe of this.lightProbes) {
-            if (!probe.hasBakedMaps) continue;
-            // A probe that contributes nothing would only take a slot from one that does.
-            if (!probe.affectsLighting && !probe.affectsReflections) continue;
-            if (!probe.bounded) { unbounded.push(probe); continue; }
-            const distance = probe.distanceToVolume(cameraPos);
-            bounded.push({ probe, inside: distance <= 0, volume: probe.volumeSize, distance });
-        }
-        bounded.sort((a, b) => (a.inside === b.inside ? 0 : a.inside ? -1 : 1)
-            || (a.inside ? a.volume - b.volume : a.distance - b.distance));
-        unbounded.sort((a, b) =>
-            vec3.squaredDistance(cameraPos, a.worldPosition) - vec3.squaredDistance(cameraPos, b.worldPosition));
-        const out = bounded.slice(0, max - (unbounded.length > 0 ? 1 : 0)).map(b => b.probe);
-        for (const probe of unbounded) { if (out.length >= max) break; out.push(probe); }
-        return out;
-    }
-
     /** Scene-wide indirect fill, in lux. See {@link _ambientLight}. */
     public get ambientLight(): vec3 { return this._ambientLight; }
     public set ambientLight(value: vec3) { this._ambientLight = vec3.clone(value as vec3); }

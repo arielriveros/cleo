@@ -1875,7 +1875,7 @@ function valleyProbe() {
 }
 
 /** A bounded light probe: the seed probe's node with this one's box and lobes. Captured at its centre. */
-function boxProbe(key, name, position, size, { yawDeg = 0, blendDistance = 6, lighting = false, resolution = 128 } = {}) {
+function boxProbe(key, name, position, size, { yawDeg = 0, blendDistance = 6, lighting = false, resolution = 128, boxProjection = false } = {}) {
   const probe = souls.sourceNode('light probe')
   probe.name = name
   probe.id = id(`probe:${key}`)
@@ -1883,7 +1883,7 @@ function boxProbe(key, name, position, size, { yawDeg = 0, blendDistance = 6, li
   probe.rotation = [0, round3(yawDeg), 0]
   Object.assign(probe, {
     resolution, mode: 'baked', intensity: 1, size: size.map(round3), blendDistance,
-    affectsLighting: lighting, affectsReflections: true,
+    affectsLighting: lighting, affectsReflections: true, boxProjection,
   })
   return probe
 }
@@ -1909,10 +1909,11 @@ function groundProbe(key, name, x, z, width, depth, { lift = 2.5, above = 15, ..
  *
  * The house interiors take their LIGHTING from their probes too: a room's own irradiance, its door and
  * windows lit and its walls in shade, in place of the open sky's fill through the roof. That is what makes
- * a room darker than the street, as it is. Their boxes are the interior exposure volumes'.
+ * a room darker than the street, as it is, seen from inside or through its door alike (a probe's lighting
+ * is applied per pixel wherever the camera is). Their boxes are the interior exposure volumes'.
  *
- * The deferred lighting takes the volume the camera is in (the smallest, a room inside the hamlet) and the
- * Valley Probe as the fallback round it; the pond's water picks the probe its surface is in.
+ * The REFLECTIONS take the volume the camera is in (the smallest, a room inside the hamlet) and the Valley
+ * Probe as the fallback round it; the pond's water picks the probe its surface is in.
  */
 function localProbes() {
   const out = []
@@ -1931,7 +1932,8 @@ function localProbes() {
     const house = houseShapes.get(b.key)
     if (!house?.interior) continue
     out.push(boxProbe(`interior:${b.key}`, `${b.prop.name} Interior Probe`, buildingToWorld(b, house.interior.center),
-      house.interior.size, { yawDeg: b.yaw * 180 / Math.PI, blendDistance: 1, lighting: true }))
+      // Box-projected: a room's walls land where they are in its polished and wet surfaces.
+      house.interior.size, { yawDeg: b.yaw * 180 / Math.PI, blendDistance: 1, lighting: true, boxProjection: true }))
   }
   log('light probes', `Valley Probe + ${out.length} local (${out.filter(p => p.affectsLighting).length} interiors lit by theirs)`)
   return out

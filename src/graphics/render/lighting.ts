@@ -1,5 +1,7 @@
 import { vec3, mat4 } from 'gl-matrix';
+import { Frustum } from '../../core/frustum';
 import { Logger } from '../../core/logger';
+import type { LightProbeNode } from '../../core/scene/nodes/lightProbeNode';
 import { LightNode } from '../../core/scene/nodes/lightNode';
 import { DEFAULT_NIGHT_AMBIENT, nightAmbientScale } from '../../core/scene/nodes/skyLightNode';
 import { Scene } from '../../core/scene/scene';
@@ -15,6 +17,11 @@ import type { KeyLight } from '../skyNight';
 import { customForwardTypes } from '../systems/customShaders';
 import { Texture } from '../texture';
 import { DeferredLightingProgram } from './programs';
+import { createLightingProbeArrays, createReflectionProbeArrays, orderLightingProbes, orderReflectionProbes,
+         packLightingProbes, packReflectionProbes, probeAmbientAt, probeLightingAt } from './probeLighting';
+import type { Framebuffer } from '../framebuffer';
+import type { RenderTarget } from '../rhi/resources';
+import type { RenderPassEncoder } from '../rhi/device';
 import { ShadowPasses } from './shadows';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
@@ -109,7 +116,6 @@ export class LightingPasses {
     public readonly coneSphere = { center: new Float32Array(3), radius: 0 };
     public specularOcclusionEnabled: boolean = true;
     public horizonOcclusionEnabled: boolean = true;
-    private static readonly _IDENTITY_MAT4: mat4 = mat4.create();
 
     /**
      * The forward programs that exist: a published game builds only the ones it uses, and the per-frame
@@ -184,7 +190,7 @@ export class LightingPasses {
         // capture rather than the convolved prefilter, falling back to the sRGB scene environment;
         // `u_envMapLinear` tells the shader which decode to apply.
         const probe = scene.probeForPoint(this._view.camera.position, true);
-        const probeCube = probe ? (probe.envMap ?? probe.prefiltered) : null;
+        const probeCube = probe ? probe.envMap : null;
         const linearCube = probeCube ?? (scene.environmentMap ? null : this._sys.sky.skyReflectionCube);
         const envCube = linearCube ?? scene.environmentMap;
         for (const shaderName of this._forwardShaders()) {
@@ -194,10 +200,64 @@ export class LightingPasses {
         }
     }
 
-    private readonly _probeLobes: [number[], number[]] = [[1, 1], [1, 1]];
     private readonly _skyReflectionScale: Float32Array = new Float32Array(3);
 
-    public deferredLightingPass(scene: Scene, shadowLight: LightNode | null): void {
+    // --- Light probe LIGHTING (render/probeLighting.ts) -------------------------------------------------
+    private _lightingProbes: LightProbeNode[] = [];
+    private _lightingProbesFrame = -1;
+    private _lightingProbesScene: Scene | null = null;
+    private _lightingProbesCamera: unknown = null;
+    private readonly _lightingProbeArrays = createLightingProbeArrays();
+    private readonly _reflectionProbeArrays = createReflectionProbeArrays();
+    private _reflectionProbes: LightProbeNode[] = [];
+    private readonly _probeFrustum = new Frustum();
+    private static readonly _NO_PROBES: LightProbeNode[] = [];
+
+    /**
+     * The probes that light this frame, in the order they claim a point: every probe set to light whose
+     * volume is in view, the smallest first. Built once a frame and shared by the deferred pass, the
+     * forward draws, lit particles and lit sprites, so all of them agree. None during a probe capture: a
+     * capture lit by probes would feed a probe's light back into itself.
+     */
+    public lightingProbes(scene: Scene): readonly LightProbeNode[] {
+        if (this._view.capturing) return LightingPasses._NO_PROBES;
+        // Keyed on the camera too: a second view in the same frame (a camera preview) has its own frustum.
+        if (this._lightingProbesFrame === this._view.frameIndex && this._lightingProbesScene === scene
+            && this._lightingProbesCamera === this._view.camera) return this._lightingProbes;
+        this._probeFrustum.setFromViewProjection(this._view.viewProj);
+        const inView = (min: vec3, max: vec3) => this._probeFrustum.intersectsAABB(min, max);
+        this._lightingProbes = orderLightingProbes(scene.lightProbes, this._view.camera.position, inView);
+        this._reflectionProbes = orderReflectionProbes(scene.lightProbes, this._view.camera.position, inView);
+        this._lightingProbesFrame = this._view.frameIndex;
+        this._lightingProbesScene = scene;
+        this._lightingProbesCamera = this._view.camera;
+        return this._lightingProbes;
+    }
+
+    /**
+     * The probes that give this frame its REFLECTIONS, in the same claim order: every reflecting probe
+     * with its environment in the reflection atlas whose volume is in view. None during a capture.
+     */
+    public reflectionProbes(scene: Scene): readonly LightProbeNode[] {
+        if (this._view.capturing) return LightingPasses._NO_PROBES;
+        this.lightingProbes(scene);
+        return this._reflectionProbes;
+    }
+
+    /**
+     * The probes' light at `position` for one forward draw: the blended coefficients, pre-exposed, into
+     * `outSH`, and the share of the ambient and sky light they replace (0 outside every probe).
+     */
+    public probeLightingAt(scene: Scene, position: vec3, outSH: Float32Array): number {
+        return probeLightingAt(this.lightingProbes(scene), position, outSH, this._view.preExposure);
+    }
+
+    /** A flat ambient at `position` (lit particles, lit sprites): `fallback` where no probe lights it. */
+    public probeAmbientAt(scene: Scene, position: vec3, fallback: ArrayLike<number>, out?: number[]): number[] {
+        return probeAmbientAt(this.lightingProbes(scene), position, fallback, out);
+    }
+
+    public deferredLightingPass(scene: Scene, _shadowLight: LightNode | null): void {
         const w = this._host.renderWidth, h = this._host.renderHeight;
 
         // Copy the opaque depth into the scene FBO so forward passes depth-test correctly.
@@ -211,36 +271,98 @@ export class LightingPasses {
         // still sample the cascade array at 6 and the spot atlas at 15, bound once per frame.
         const pass = this._passes.beginFullscreenPass(this._targets.scene.renderTarget, 'deferredLighting', true,
                                                [bg[0], bg[1], bg[2], 0.0], false);
+        const ssr = this._sys.ssr;
+        const ssrLive = ssr.ssrProducedThisFrame && ssr.ssrResult !== null;
+        this._drawDeferredLighting(pass, scene, this._targets.gBuffer, {
+            ssao: (this._ssil.ssaoResult ?? this._ssil.ssaoBlurFBO).colors[0],
+            ssr: ssrLive ? ssr.ssrResult!.colors[0] : this._bindGroups.fallbackTexture,
+            invViewProj: this._view.invViewProj, viewPos: this._view.camera.position, view: this._view.camera.viewMatrix,
+            ssaoEnabled: this._ssil.ssaoProducedThisFrame,
+            ssilIntensity: this._ssil.ssilBounceThisFrame ? this._ssil.ssilIntensity : 0,
+            // Texel size drives the depth-aware upsample. Zero when the buffer is already full resolution,
+            // which tells the shader to take the plain (and then exact) bilinear fetch.
+            ssaoTexelSize: this._ssil.ssaoResolutionScale >= 0.999 ? [0, 0] : [1 / this._ssil.ssaoWidth, 1 / this._ssil.ssaoHeight],
+            ssrEnabled: ssrLive,
+            ssrTexelSize: ssr.ssrResolutionScale >= 0.999 ? [0, 0] : [1 / ssr.ssrWidth, 1 / ssr.ssrHeight],
+            bakeOnly: false,
+        });
+        this._passes.endFullscreenPass(pass);
+    }
+
+    /**
+     * RELIGHT one face of a light probe (render/probeBaker.ts): this very pass, over the face's captured
+     * G-buffer, into the face of the probe's source cube that already holds its sky (the pass discards the
+     * background, so the sky shows through). Lit by the lights set to bake, the probe's own sun shadow
+     * (ShadowPasses.activateProbeShadows) and the sky light; no screen-space terms and no probes — a probe
+     * lit by probes would feed its own light back. Called with the capture state set (pre-exposure 1, the
+     * one-cluster light grid, `capturing`).
+     */
+    public relightProbeFace(scene: Scene, gBuffer: Framebuffer, target: RenderTarget,
+                            invViewProj: mat4, viewPos: vec3, view: mat4): void {
+        const pass = this._passes.beginFullscreenPass(target, 'probeRelight', false, undefined, false);
+        this._drawDeferredLighting(pass, scene, gBuffer, {
+            ssao: this._bindGroups.fallbackTexture, ssr: this._bindGroups.fallbackTexture,
+            invViewProj, viewPos, view,
+            ssaoEnabled: false, ssilIntensity: 0, ssaoTexelSize: [0, 0], ssrEnabled: false, ssrTexelSize: [0, 0],
+            bakeOnly: true,
+        });
+        this._passes.endFullscreenPass(pass);
+    }
+
+    private _drawDeferredLighting(pass: RenderPassEncoder, scene: Scene, gBuffer: Framebuffer, o: {
+        ssao: Texture; ssr: Texture; invViewProj: mat4; viewPos: vec3; view: mat4;
+        ssaoEnabled: boolean; ssilIntensity: number; ssaoTexelSize: number[];
+        ssrEnabled: boolean; ssrTexelSize: number[]; bakeOnly: boolean;
+    }): void {
         const pipeline = this._pipelines.fullscreen('deferredLighting', DeferredLightingProgram);
         pass.setPipeline(pipeline);
 
         // Group 0: the G-buffer plus SSIL and SSR. Both always bind a complete texture even when disabled —
         // the shader gates on u_ssaoEnabled / u_ssrEnabled, but the sampler still has to point somewhere valid.
-        const ssr = this._sys.ssr;
-        const ssrLive = ssr.ssrProducedThisFrame && ssr.ssrResult !== null;
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            this._targets.gBuffer.colors[0], this._targets.gBuffer.colors[1], this._targets.gBuffer.colors[2],
-            this._targets.gBuffer.depth, (this._ssil.ssaoResult ?? this._ssil.ssaoBlurFBO).colors[0],
-            ssrLive ? ssr.ssrResult!.colors[0] : this._bindGroups.fallbackTexture,
+            gBuffer.colors[0], gBuffer.colors[1], gBuffer.colors[2], gBuffer.depth, o.ssao, o.ssr,
         ]));
 
-        this._shaderManager.setUniform('u_invViewProj', this._view.invViewProj);
-        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
+        this._shaderManager.setUniform('u_invViewProj', o.invViewProj);
+        this._shaderManager.setUniform('u_viewPos', o.viewPos);
 
         // Upload all lights once for the whole screen.
-        this._setDeferredLighting(scene);
+        this._setDeferredLighting(scene, o.bakeOnly);
 
         // Shadows
         this._shaderManager.bind('deferredLighting');
-        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+        this._shaderManager.setUniform('u_view', o.view);
         this._shadows.uploadShadowUniforms('deferredLighting');
         pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline));
 
-        // Split-sum IBL from up to 2 probe volumes, blended per pixel by feathered containment;
-        // uncovered pixels fall back to flat ambient plus the `u_envMap` reflection: the scene's
-        // environment map, else the sky light's sky, prefiltered (SkyPasses.updateSkyReflection).
-        // EVERY sampler unit is assigned every frame, used or not — an unassigned cube sampler aliases
-        // the 2D G-buffer sampler on unit 0, which is a draw-time type collision.
+        // The light probes, both lobes the same way: every probe in view, looped over per pixel in claim
+        // order (render/probeLighting.ts) — their LIGHTING as spherical harmonics in the uniform block, their
+        // REFLECTIONS as layers of the reflection atlas. Uncovered pixels fall back to the scene ambient and
+        // sky light, and to the `u_envMap` reflection: the scene's environment map, else the sky light's sky,
+        // prefiltered (SkyPasses.updateSkyReflection). EVERY sampler unit is assigned every frame, used or
+        // not — an unassigned cube sampler aliases the 2D G-buffer sampler on unit 0, which is a draw-time
+        // type collision.
+        const lightingProbes = this.lightingProbes(scene);
+        const arrays = this._lightingProbeArrays;
+        const lightingCount = packLightingProbes(lightingProbes, this._view.preExposure, arrays);
+        this._shaderManager.setUniform('u_lightProbeCount', lightingCount);
+        if (lightingCount > 0) {
+            // Only the probes in use: a short write leaves the tail, which the loop never reaches.
+            this._shaderManager.setUniform('u_lightProbeSH', arrays.sh.subarray(0, lightingCount * 36));
+            this._shaderManager.setUniform('u_lightProbeInvVolume', arrays.invVolume.subarray(0, lightingCount * 16));
+            this._shaderManager.setUniform('u_lightProbeBlend', arrays.blend.subarray(0, lightingCount * 4));
+        }
+        const atlas = this._sys.capture.probes.atlas;
+        const reflections = atlas.texture ? this.reflectionProbes(scene) : LightingPasses._NO_PROBES;
+        const refl = this._reflectionProbeArrays;
+        const reflectionCount = packReflectionProbes(reflections, this._view.preExposure, refl);
+        this._shaderManager.setUniform('u_reflProbeCount', reflectionCount);
+        if (reflectionCount > 0) {
+            this._shaderManager.setUniform('u_reflProbeInvVolume', refl.invVolume.subarray(0, reflectionCount * 16));
+            this._shaderManager.setUniform('u_reflProbeBlend', refl.blend.subarray(0, reflectionCount * 4));
+            this._shaderManager.setUniform('u_reflProbeParams', refl.params.subarray(0, reflectionCount * 4));
+            this._shaderManager.setUniform('u_reflProbeCapture', refl.capture.subarray(0, reflectionCount * 4));
+        }
         const skyReflection = scene.environmentMap ? null : this._sys.sky.skyReflectionCube;
         const skyLight = scene.skyLight;
         this._shaderManager.setUniform('u_envMapMode', scene.environmentMap ? 1 : skyReflection ? 2 : 0);
@@ -251,57 +373,27 @@ export class LightingPasses {
             this._skyReflectionScale[2] = k * tint[2];
             this._shaderManager.setUniform('u_skyReflectionScale', this._skyReflectionScale);
         }
-        const probes = scene.probesForFrame(this._view.camera.position, 2);
-        this._shaderManager.setUniform('u_probeCount', probes.length);
 
-        // Group 2: the IBL cubes, the BRDF LUT and the environment fallback. Every slot resolves to a
-        // COMPLETE cubemap — the probe's, else the other probe's, else the scene environment, else the
-        // 1x1 fallback — because a bind group has no way to say "leave this one unbound".
-        const cubes: Texture[] = [];
-        for (let i = 0; i < 2; i++) {
-            const fill = probes[i] ?? probes[0] ?? null;
-            const irradiance = fill?.irradiance ?? scene.environmentMap ?? this._bindGroups.fallbackCube;
-            const prefiltered = fill?.prefiltered ?? scene.environmentMap ?? this._bindGroups.fallbackCube;
-            cubes.push(irradiance, prefiltered);
-        }
+        // Group 2: the reflection atlas, the BRDF LUT and the environment fallback.
         pass.setBindGroup(2, this._bindGroups.textureGroup(pipeline, 2, [
-            cubes[0], cubes[1], cubes[2], cubes[3],
-            this._sys.sky.brdfFBO.colors[0], scene.environmentMap ?? skyReflection ?? this._bindGroups.fallbackCube,
+            atlas.bindable(), this._sys.sky.brdfFBO.colors[0],
+            scene.environmentMap ?? skyReflection ?? this._bindGroups.fallbackCube,
         ]));
-
-        for (let i = 0; i < 2; i++) {
-            const slot = probes[i] ?? null;
-            // Probe cubes are baked absolute (k = 1); this frame's pre-exposure rides on their intensity.
-            this._shaderManager.setUniform(`u_iblIntensity${i}`, slot ? slot.intensity * this._view.preExposure : 0);
-            this._shaderManager.setUniform(`u_probeUnbounded${i}`, slot ? !slot.bounded : false);
-            this._shaderManager.setUniform(`u_probeInvVolume${i}`, slot && slot.bounded ? slot.invVolumeMatrix : LightingPasses._IDENTITY_MAT4);
-            this._shaderManager.setUniform(`u_probeBlend${i}`, slot && slot.bounded ? slot.volumeBlend : [0, 0, 0]);
-            // Which lobes the probe claims: x = lighting (diffuse), y = reflections (specular).
-            const lobes = this._probeLobes[i];
-            lobes[0] = slot && slot.affectsLighting ? 1 : 0;
-            lobes[1] = slot && slot.affectsReflections ? 1 : 0;
-            this._shaderManager.setUniform(`u_probeLobes${i}`, lobes);
-        }
 
         // SSIL. Always bind a complete texture so the sampler is valid; the shader only reads it when
         // u_ssaoEnabled is true. The bounce is scaled to nothing when it was not gathered this frame.
-        this._shaderManager.setUniform('u_ssaoEnabled', this._ssil.ssaoProducedThisFrame);
-        this._shaderManager.setUniform('u_ssilIntensity', this._ssil.ssilBounceThisFrame ? this._ssil.ssilIntensity : 0);
+        this._shaderManager.setUniform('u_ssaoEnabled', o.ssaoEnabled);
+        this._shaderManager.setUniform('u_ssilIntensity', o.ssilIntensity);
         this._shaderManager.setUniform('u_specularOcclusion', this.specularOcclusionEnabled);
         this._shaderManager.setUniform('u_horizonOcclusion', this.horizonOcclusionEnabled);
-        // Texel size drives the depth-aware upsample. Zero when the AO buffer is already full
-        // resolution, which tells the shader to take the plain (and then exact) bilinear fetch.
-        this._shaderManager.setUniform('u_ssaoTexelSize',
-            this._ssil.ssaoResolutionScale >= 0.999 ? [0, 0] : [1 / this._ssil.ssaoWidth, 1 / this._ssil.ssaoHeight]);
-        this._shaderManager.setUniform('u_ssrEnabled', ssrLive);
-        this._shaderManager.setUniform('u_ssrTexelSize',
-            ssr.ssrResolutionScale >= 0.999 ? [0, 0] : [1 / ssr.ssrWidth, 1 / ssr.ssrHeight]);
+        this._shaderManager.setUniform('u_ssaoTexelSize', o.ssaoTexelSize);
+        this._shaderManager.setUniform('u_ssrEnabled', o.ssrEnabled);
+        this._shaderManager.setUniform('u_ssrTexelSize', o.ssrTexelSize);
 
         this._passes.drawFullscreen(pass);
-        this._passes.endFullscreenPass(pass);
     }
 
-    private _setDeferredLighting(scene: Scene): void {
+    private _setDeferredLighting(scene: Scene, bakeOnly: boolean = false): void {
         this._shaderManager.bind('deferredLighting');
         this._uploadSkyLight();
         const grade = this.cloudGrade(scene);
@@ -314,6 +406,8 @@ export class LightingPasses {
         let hasDirectional = false;
         for (const node of scene.lights) {
             if (node.type !== 'directional') continue;
+            // A probe is lit by the lights set to bake alone (LightNode.bake).
+            if (bakeOnly && !node.bake) continue;
             hasDirectional = true;
             this._uploadDirectional(node, grade);
         }
@@ -550,7 +644,7 @@ export class LightingPasses {
      * with no branch on light type. `spotAttenuation` returns exactly 1.0 for that cone, and the two
      * evaluate functions differ by nothing else — see chunks/clusteredLights.wgsl.
      */
-    public packLightRecords(scene: Scene): void {
+    public packLightRecords(scene: Scene, bakeOnly: boolean = false): void {
         let i = 0;
         // Pre-exposed: the light texture is shared by the deferred pass, every forward program and every
         // custom material, so it is scaled here, once, rather than in any of them.
@@ -560,21 +654,22 @@ export class LightingPasses {
             if (i >= MAX_LIGHTS) break;
             // A light inside an occlusion volume the camera cannot see keeps its record (its index is
             // fixed) but at no intensity: the orthographic grid's one cluster holds every record whatever
-            // its radius, so radius 0 alone would not put it out there.
-            const off = this._visibility.volumeCulled(node);
+            // its radius, so radius 0 alone would not put it out there. For a probe bake, a light not set
+            // to bake is out the same way, and the rest are taken steady: the flicker is live, the bake not.
+            const off = bakeOnly ? !node.bake : this._visibility.volumeCulled(node);
 
             if (node.type === 'spotlight') {
                 const spot = node.light as Spotlight;
                 const [coneScale, coneOffset] = spot.coneScaleOffset;
                 this.lightGrid.packRecord(i, node.worldPosition, spot.invRangeSquared,
-                                           spot.color, off ? 0 : spot.internalIntensity * node.flickerFactor * k,
+                                           spot.color, off ? 0 : spot.internalIntensity * (bakeOnly ? 1 : node.flickerFactor) * k,
                                            node.worldForward, spot.sourceRadius,
                                            coneScale, coneOffset,
                                            this._shadows.spotSlots.layerOf(node.id), NO_SHADOW_SLOT);
             } else {
                 const point = node.light as PointLight;
                 this.lightGrid.packRecord(i, node.worldPosition, point.invRangeSquared,
-                                           point.color, off ? 0 : point.internalIntensity * node.flickerFactor * k,
+                                           point.color, off ? 0 : point.internalIntensity * (bakeOnly ? 1 : node.flickerFactor) * k,
                                            ShadowPasses.POINT_DIRECTION, point.sourceRadius,
                                            POINT_CONE_SCALE, POINT_CONE_OFFSET,
                                            NO_SHADOW_SLOT, this._shadows.pointSlots.layerOf(node.id));

@@ -176,7 +176,13 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     // Unambiguous sums: each runs inside the named scope.
     'decals.resolve': 'decals',
     iblConvolve: 'ibl.bake',
-    probeCapture: 'ibl.bake',
+    // A light probe's bake steps (render/probeBaker.ts): its G-buffer faces, sky, relight, forward-only
+    // models and atlas filter, all inside the ibl.bake scope.
+    probeGBuffer: 'ibl.bake',
+    probeSky: 'ibl.bake',
+    probeRelight: 'ibl.bake',
+    probeForward: 'ibl.bake',
+    probeFilter: 'ibl.bake',
     godRaysUpsample: 'godRays',
     // The per-object velocity draws run inside the 'velocity' scope, right after the fullscreen
     // camera-reprojection pass that seeds the same buffer.

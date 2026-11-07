@@ -100,9 +100,31 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     split sum that already holds one, so rough ground and cliffs seen at grazing angles reflected two to
     three times what they should.
 - **Light probes that see shade.** A probe capture draws the sun's shadow round the probe with a map of
-  its own, and the forward terrain is shadowed. Probes are captured one a frame, nearest first. The
-  lighting takes the smallest probe box the camera is in, and keeps the second slot for the scene's
-  unbounded probe as the fallback everywhere else.
+  its own, and the forward terrain is shadowed.
+- **A probe lights its volume wherever the camera is.** A probe's lighting is nine spherical
+  harmonics now, projected from its capture, and every lighting probe in view (up to 16) lights the
+  pixels inside its box, the smallest box first. A house looked into through its door is as dark as it is
+  from inside, so walking in changes nothing; it used to be lit like the street until the camera crossed
+  the threshold. Forward PBR, Blinn-Phong and cel objects take the same light at their centre, and lit
+  particles and lit sprites at theirs. Player contract 23.
+- **Reflections the same way.** Every probe's GGX-filtered capture is a layer of one octahedral reflection
+  atlas, and every reflecting probe in view gives the surfaces in its box their reflections per pixel, the
+  smallest box first, wherever the camera is: a polished floor reflects its room from the doorway as from
+  inside. **Box Projection** (per probe) puts a room's walls where they are in its floor. The deferred
+  pass samples one texture fewer.
+- **Relightable, time-sliced probe bakes.** A bake captures the probe's scene once as a G-buffer, a few
+  dozen objects a frame, each face culled to what it sees, and a **relight** lights that capture again
+  with no geometry drawn but the sun's shadow. One step a frame, one probe at a time, the old bake shown
+  until the new is complete. The Valley's time of day relights every 4 degrees of sun: a frame's probe work
+  went from 35-46 ms of CPU (a whole capture at once) to under 2 ms, and from about 10 ms of GPU to under 1:
+  a probe's lighting is projected from its capture, with no irradiance cube to convolve.
+- **Bake on lights, and out-of-date probes.** Point, spot and directional lights have **Bake**, on by
+  default: off, a light lights the scene live and no probe sees it. When a light set to bake is moved,
+  turned, recoloured or dimmed after the probes were baked, the probes it reaches say they are out of
+  date — on the light's and the probe's cards and as a warning badge in the Assets toolbar, with
+  **Re-bake**. Player contract 24.
+- **A faster prepare.** The landscape's bounds are cached against its heights, not scanned every frame
+  (5.6 ms of the Valley's prepare: it is 0.4 ms now). The Performance page splits prepare into its stages.
 - **Billboards that face the eye.** A cylindrical sprite turns about its own upright axis to face the
   camera's position, instead of lying parallel to the screen. Flames and smoke at the corners of a wide
   view no longer look squashed and leaning.

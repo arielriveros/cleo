@@ -519,7 +519,7 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
             which still runs on this thread every frame: the per-frame prepare walks, the shader compile
             queue, the bakes and the frame's submit. Average and worst frame since the last refresh. */}
         <Row label='· prologue & bakes' value={`${fmt(d.renderExtraMs)} ms · peak ${fmt(d.renderExtraPeakMs, 1)}`}
-             title='Renderer work outside the Render (CPU) figure: prepare (culling, LOD, occlusion), the shader compile queue, sky and probe bakes, and the frame submit. Their split is under Passes (prepare, sky.bake, ibl.bake).' />
+             title='Renderer work outside the Render (CPU) figure: prepare (culling, LOD, occlusion), the shader compile queue, sky and probe bakes, and the frame submit. Their split is under Passes (prepare.*, sky.bake, ibl.bake).' />
         {d.gpuOn
           ? <Row label='Render (GPU)' value={`${fmt(d.gpuMs)} ms`} hl={d.gpuMs > budgetMs} />
           : <Row label='Render (GPU)' value={d.gpuAvailable ? 'off' : 'n/a'}
