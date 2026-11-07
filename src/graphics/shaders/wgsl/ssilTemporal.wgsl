@@ -40,6 +40,8 @@ struct SsilTemporalUniforms {
     u_texelSize: vec2<f32>,         // one texel of THIS pass's target
     u_feedback: f32,                // history weight when it is trusted
     u_historyValid: i32,
+    /** k_now / k_written: brings the history's bounce to this frame's pre-exposure (visibility untouched). */
+    u_historyRescale: f32,
 };
 @group(1) @binding(0) var<uniform> u_temporal: SsilTemporalUniforms;
 
@@ -103,6 +105,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let seen = textureSampleLevel(u_radiance_texture, u_radiance_sampler, prevUV, 0.0).a;
     if (abs(seen - expected) > 0.05 * expected + 0.05) { return now; }
 
-    let history = clamp(sanitize(textureSampleLevel(u_history_texture, u_history_sampler, prevUV, 0.0)), lo, hi);
+    let stored = sanitize(textureSampleLevel(u_history_texture, u_history_sampler, prevUV, 0.0));
+    let history = clamp(vec4<f32>(stored.rgb * u_temporal.u_historyRescale, stored.a), lo, hi);
     return mix(now, history, u_temporal.u_feedback);
 }

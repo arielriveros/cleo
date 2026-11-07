@@ -189,6 +189,7 @@ export class SsilPasses {
         // whole session loses the fraction the hash lives in.
         this._shaderManager.setUniform('u_frame', this._view.frameIndex % 64);
         this._shaderManager.setUniform('u_hasRadiance', this.ssilBounceThisFrame);
+        this._shaderManager.setUniform('u_radianceRescale', this._radiance.rescale(this._view.preExposure));
         this._shaderManager.setUniform('u_ortho', this._view.camera.type === 'orthographic');
         // A cap on the screen-space search, so a surface right in front of the camera does not send its
         // samples across the whole frame and through every cache line on the way.
@@ -215,8 +216,9 @@ export class SsilPasses {
             this._shaderManager.setUniform('u_texelSize', [1 / w, 1 / h]);
             this._shaderManager.setUniform('u_feedback', SsilPasses.SSIL_FEEDBACK);
             this._shaderManager.setUniform('u_historyValid', historyValid);
+            this._shaderManager.setUniform('u_historyRescale', this.ssilHistory.rescale(this._view.preExposure));
             this._passes.drawFullscreenAndEnd(pass);
-            this.ssilHistory.swap();
+            this.ssilHistory.swap(this._view.preExposure);
             this.ssilHistoryFrame = this._view.frameIndex;
             this.ssaoResult = dst;
             accumulated = true;

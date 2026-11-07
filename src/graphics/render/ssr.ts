@@ -169,6 +169,7 @@ export class SsrPasses {
         this._shaderManager.setUniform('u_frame', frame);
         this._shaderManager.setUniform('u_steps', ssrStepCount(this.ssrSteps));
         this._shaderManager.setUniform('u_hasRadiance', this._radiance.fresh);
+        this._shaderManager.setUniform('u_radianceRescale', this._radiance.rescale(this._view.preExposure));
         this._passes.drawFullscreen(tracePass);
         this._passes.endFullscreenPass(tracePass);
 
@@ -208,8 +209,9 @@ export class SsrPasses {
             this._shaderManager.setUniform('u_feedback', SSR_FEEDBACK);
             this._shaderManager.setUniform('u_maxRoughness', fade[1]);
             this._shaderManager.setUniform('u_historyValid', historyValid);
+            this._shaderManager.setUniform('u_historyRescale', this.history.rescale(this._view.preExposure));
             this._passes.drawFullscreenAndEnd(pass);
-            this.history.swap();
+            this.history.swap(this._view.preExposure);
             this.historyFrame = this._view.frameIndex;
             this.ssrResult = dst;
         }

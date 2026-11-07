@@ -32,6 +32,8 @@ struct SsrTemporalUniforms {
     u_feedback: vec2<f32>,
     u_maxRoughness: f32,
     u_historyValid: i32,
+    /** k_now / k_written: brings the history's reflection to this frame's pre-exposure (confidence untouched). */
+    u_historyRescale: f32,
 };
 @group(1) @binding(0) var<uniform> u_temporal: SsrTemporalUniforms;
 
@@ -81,6 +83,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let feedback = mix(u_temporal.u_feedback.x, u_temporal.u_feedback.y,
                        clamp(roughness / max(u_temporal.u_maxRoughness, 1e-3), 0.0, 1.0));
-    let history = clamp(sanitize(textureSampleLevel(u_history_texture, u_history_sampler, prevUV, 0.0)), lo, hi);
+    let stored = textureSampleLevel(u_history_texture, u_history_sampler, prevUV, 0.0);
+    let history = clamp(sanitize(vec4<f32>(stored.rgb * u_temporal.u_historyRescale, stored.a)), lo, hi);
     return mix(now, history, feedback);
 }

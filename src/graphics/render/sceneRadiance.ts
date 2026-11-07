@@ -117,5 +117,12 @@ export class SceneRadianceCopy {
         this._shaderManager.setUniform('u_invProjection', this._invProjection);
         this._passes.drawFullscreenAndEnd(pass);
         this.frame = this._view.frameIndex;
+        this.preExposure = this._view.preExposure;
     }
+
+    /** The pre-exposure the copy was taken at: its readers bring it to theirs (`rescale`). */
+    public preExposure = 1;
+
+    /** What the copy's colour must be multiplied by to be in a frame pre-exposed by `k`. */
+    public rescale(k: number): number { return (k > 0 ? k : 1) / (this.preExposure > 0 ? this.preExposure : 1); }
 }

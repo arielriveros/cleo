@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react'
-import { SkyAtmosphereNode, SKY_ATMOSPHERE_PRESETS, type SkyAtmospherePreset } from 'cleo'
+import { SkyAtmosphereNode, SKY_ATMOSPHERE_PRESETS, REFERENCE_ILLUMINANCE, type SkyAtmospherePreset } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import AxisInput from '@cleo/app-kit/ui/AxisInput'
 import { ColorInput } from './LightEditor'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import { useEventBus } from '../../EventBusContext'
-import { PresetMenu, SectionTitle, Select, Slider, TexturePicker, Toggle, labelClass } from '@cleo/app-kit/ui'
+import { Hint, NumberInput, PresetMenu, SectionTitle, Select, Slider, TexturePicker, Toggle, labelClass } from '@cleo/app-kit/ui'
 import { SkyIcon } from '../sectionIcons'
 
 type Vec3 = [number, number, number]
 
 interface AtmoState {
-  useSceneSun: boolean; sunDirection: Vec3; sunColor: Vec3; sunIntensity: number;
+  useSceneSun: boolean; sunDirection: Vec3; sunColor: Vec3; sunIntensity: number; physicalUnits: boolean;
   rayleighScatter: number; rayleighHeight: number; mieScatter: number; mieHeight: number; mieG: number;
   planetRadius: number; atmosphereRadius: number; sunDiskSize: number; exposure: number; groundColor: Vec3;
   resolution: number; viewSteps: number; lightSteps: number;
@@ -23,12 +23,14 @@ interface AtmoState {
   nightSkyTexture: string | null; nightSkyIntensity: number; nightSkyRotation: number;
   airglowColor: Vec3; airglowIntensity: number;
   moonEnabled: boolean; moonTexture: string | null; moonSize: number; moonPhase: number;
-  moonOffsetYaw: number; moonOffsetPitch: number; moonColor: Vec3; moonIntensity: number; moonlightIntensity: number;
+  moonOffsetYaw: number; moonOffsetPitch: number; moonColor: Vec3; moonIntensity: number; moonIlluminance: number;
+  legacyMoon: boolean;
 }
 
 function readNode(node: SkyAtmosphereNode): AtmoState {
   return {
     useSceneSun: node.useSceneSun, sunDirection: node.sunDirection, sunColor: node.sunColor, sunIntensity: node.sunIntensity,
+    physicalUnits: node.physicalUnits,
     rayleighScatter: node.rayleighScatter, rayleighHeight: node.rayleighHeight,
     mieScatter: node.mieScatter, mieHeight: node.mieHeight, mieG: node.mieG,
     planetRadius: node.planetRadius, atmosphereRadius: node.atmosphereRadius,
@@ -46,8 +48,17 @@ function readNode(node: SkyAtmosphereNode): AtmoState {
     airglowColor: node.airglowColor, airglowIntensity: node.airglowIntensity,
     moonEnabled: node.moonEnabled, moonTexture: node.moonTexture, moonSize: node.moonSize, moonPhase: node.moonPhase,
     moonOffsetYaw: node.moonOffsetYaw, moonOffsetPitch: node.moonOffsetPitch, moonColor: node.moonColor,
-    moonIntensity: node.moonIntensity, moonlightIntensity: node.moonlightIntensity
+    moonIntensity: node.moonIntensity, moonIlluminance: node.moonIlluminance ?? node.moonLux(sceneSunLux(node)),
+    legacyMoon: node.usesLegacyMoonRatio,
   }
+}
+
+/** The scene sun's lux, which a legacy sky's moonlight is a fraction of (the reference when there is none). */
+function sceneSunLux(node: SkyAtmosphereNode): number {
+  for (const light of (node.scene as any)?.lights ?? []) {
+    if (light.type === 'directional') return light.light.internalIntensity * REFERENCE_ILLUMINANCE
+  }
+  return REFERENCE_ILLUMINANCE
 }
 
 export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) {
@@ -58,7 +69,7 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
 
   // Write changed fields to the live node (setters flip needsBake → the renderer re-bakes next frame).
   const apply = (patch: Partial<AtmoState>) => {
-    for (const k in patch) (props.node as any)[k] = (patch as any)[k]
+    for (const k in patch) if (k !== 'legacyMoon') (props.node as any)[k] = (patch as any)[k]
     setState(prev => ({ ...prev, ...patch }))
     eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node })
   }
@@ -112,7 +123,10 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
           </div>
         }
         {color('Sun Color', 'sunColor')}
-        {slider('Sun Intensity', 'sunIntensity', 0, 40, 0.1)}
+        {state.useSceneSun && check('Physical Units', 'physicalUnits')}
+        {state.useSceneSun && state.physicalUnits
+          ? <Hint>Lit by the scene sun's own {Math.round(sceneSunLux(props.node)).toLocaleString()} lux, so the sky, the sun disc and their reflections match what the sun lights. Exposure below trims it.</Hint>
+          : slider('Sun Intensity', 'sunIntensity', 0, 40, 0.1)}
         {slider('Sun Disk Size (deg)', 'sunDiskSize', 0, 10, 0.1)}
 
         <SectionTitle title='Atmosphere' className='mt-3 mb-1' />
@@ -153,7 +167,14 @@ export default function SkyAtmosphereEditor(props: { node: SkyAtmosphereNode }) 
             {slider('Offset Elevation', 'moonOffsetPitch', -60, 60, 1, 0)}
             {color('Moon Color', 'moonColor')}
             {slider('Moon Brightness', 'moonIntensity', 0, 4, 0.01)}
-            {slider('Moonlight on Scene', 'moonlightIntensity', 0, 1, 0.01)}
+            <div className='flex items-center justify-between gap-2 my-1'>
+              <span className={labelClass}>Moonlight (lux)</span>
+              <NumberInput className='w-28' value={state.moonIlluminance} min={0} step={0.1}
+                onChange={(v) => apply({ moonIlluminance: Math.max(0, v), legacyMoon: false })} />
+            </div>
+            {state.legacyMoon && <Hint>
+              Saved as a fraction of the sun, so it moves whenever the sun's lux does. Editing it stores lux.
+            </Hint>}
           </>}
         </>}
 

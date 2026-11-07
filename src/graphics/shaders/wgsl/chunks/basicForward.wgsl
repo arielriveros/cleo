@@ -46,6 +46,11 @@ struct BasicMaterial {
     softness: f32,
     /** x near, y far, z 1 = orthographic, w 1 = the depth snapshot is live: for `softness`. */
     depthParams: vec4<f32>,
+    /**
+     * The draw's pre-exposure (FrameView.drawPreExposure): the frame's while the scene draws, 1 for the
+     * display-referred editor overlay. 0 — never written — reads as 1.
+     */
+    preExposure: f32,
 };
 @group(1) @binding(1) var<uniform> u_material: BasicMaterial;
 
@@ -82,7 +87,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         alpha *= clamp((scene - basicViewDepth(in.position.z)) / softness, 0.0, 1.0);
     }
 
-    return vec4<f32>(color * u_material.intensity, alpha);
+    let preExposure = select(1.0, u_material.preExposure, u_material.preExposure > 0.0);
+    return vec4<f32>(min(color * (u_material.intensity * preExposure), vec3<f32>(32768.0)), alpha);
 }
 
 /** A window depth's distance along the camera axis (as particleDraw.wgsl `linearSceneDepth`). */

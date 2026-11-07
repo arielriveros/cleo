@@ -11,7 +11,7 @@ import { Logger } from '../core/logger';
 import { authoring } from '../core/eventBus';
 import { FoliageLayer } from './foliage';
 import { TerrainLayerStack, defaultMaskResolution, legacyAlbedoMaterial, type TerrainLayerWeights } from './terrainLayerStack';
-import { deriveSurface, legacyAutoRule } from './terrainLayers';
+import { deriveSurface, legacyAutoRule, type SurfaceMaterialLike } from './terrainLayers';
 import { DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from './terrainSurfaceArrays';
 import { applySculpt, readRegion, writeRegion, type BrushSpec, type SculptParams, type GridRegion } from './sculpt';
 import type { MaskRegion } from './terrainMasks';
@@ -868,9 +868,12 @@ export class Terrain {
      * Bring the layer stack's GPU copies up to date and write its uniforms. Called once per frame by the
      * renderer, where no pass is open; a surface whose maps are still decoding is retried next frame.
      */
-    public syncPackedLayers(_frame: number, layerTextureSize: number = DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE): void {
+    public syncPackedLayers(_frame: number, layerTextureSize: number = DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE,
+                            snow: { material: SurfaceMaterialLike, metresPerRepeat: number } | null = null): void {
         this._stack.setOriginY(this._origin[1]);
-        this._stack.sync(this._material, layerTextureSize, this.elevationRemap ?? undefined, this.tilingScale);
+        // The weather's snow material (render/weatherPack.ts `snowForLandscape`), as repeats across the landscape.
+        const source = snow ? { material: snow.material, tiling: this.size / Math.max(0.05, snow.metresPerRepeat) } : null;
+        this._stack.sync(this._material, layerTextureSize, this.elevationRemap ?? undefined, this.tilingScale, source);
     }
 
     /** A brush at a WORLD point as the landscape-local spec the stack and the sculpt tools take. */

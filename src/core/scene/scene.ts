@@ -19,6 +19,7 @@ import { ForceFieldNode } from "./nodes/forceFieldNode";
 import { ClothNode } from "./nodes/clothNode";
 import { WaterVolumeNode } from "./nodes/waterVolumeNode";
 import { ExposureVolumeNode } from "./nodes/exposureVolumeNode";
+import { VolumetricFogNode } from "./nodes/volumetricFogNode";
 import { OcclusionVolumeNode } from "./nodes/occlusionVolumeNode";
 import { SkyboxNode } from "./nodes/skyboxNode";
 import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
@@ -128,6 +129,7 @@ export class Scene {
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
     private _exposureVolumes: Set<ExposureVolumeNode> = new Set();
+    private _volumetricFogs: Set<VolumetricFogNode> = new Set();
     private _occlusionVolumes: Set<OcclusionVolumeNode> = new Set();
     private _sounds: Set<SoundNode> = new Set();
     private _lightProbes: Set<LightProbeNode>;
@@ -148,6 +150,7 @@ export class Scene {
     private _skyLight: SkyLightNode | null = null;
     private _wind: WindNode | null = null;
     private _weather: WeatherNode | null = null;
+    private _weatherVolumes: Set<WeatherNode> = new Set();
     private _environmentMap: Texture | null = null;
     /**
      * Scene-wide indirect fill, in LUX. What every surface receives from nothing in particular.
@@ -218,6 +221,7 @@ export class Scene {
         this._skyLight = null;
         this._wind = null;
         this._weather = null;
+        this._weatherVolumes = new Set();
 
         // TODO: Move this to a LightManager class
         this._numPointLights = 0;
@@ -845,6 +849,7 @@ export class Scene {
         this._forceFields = new Set();
         this._waterVolumes = new Set();
         this._exposureVolumes = new Set();
+        this._volumetricFogs = new Set();
         this._occlusionVolumes = new Set();
         this._sounds = new Set();
         this._lightProbes = new Set();
@@ -854,6 +859,7 @@ export class Scene {
         this._skyLight = null;
         this._wind = null;
         this._weather = null;
+        this._weatherVolumes = new Set();
         this._nodesByName = new Map();
         this._nodesById = new Map();
         for (const node of this._nodes) {
@@ -899,6 +905,8 @@ export class Scene {
                 this._waterVolumes.add(node);
             if (node instanceof ExposureVolumeNode)
                 this._exposureVolumes.add(node);
+            if (node instanceof VolumetricFogNode)
+                this._volumetricFogs.add(node);
             if (node instanceof OcclusionVolumeNode)
                 this._occlusionVolumes.add(node);
             if (node instanceof SoundNode)
@@ -915,8 +923,11 @@ export class Scene {
                 this._skyLight = node;
             if (node instanceof WindNode)
                 this._wind = node;
-            if (node instanceof WeatherNode)
-                this._weather = node;
+            if (node instanceof WeatherNode) {
+                this._weatherVolumes.add(node);
+                // The highest priority (the first found among equals): what `weather` hands a script.
+                if (!this._weather || node.priority > this._weather.priority) this._weather = node;
+            }
             if (node instanceof CameraNode)
                 this._cameras.add(node);
             // A root is also a UINode and lands in both sets: _uiRoots drives the layout pass, _uiNodes is
@@ -1309,17 +1320,34 @@ export class Scene {
         return this._wind;
     }
 
-    /** The scene's weather (wetness, snow), or null — in which case it is dry. */
+    /**
+     * The scene's highest-priority weather volume, or null — in which case it is dry. A scene may hold
+     * several (bounded boxes, overlapping); see {@link weatherVolumes}.
+     */
     public get weather(): WeatherNode | null {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._weather;
     }
 
+    /** Every weather volume in the scene (render/weather.ts composites them). */
+    public get weatherVolumes(): Set<WeatherNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._weatherVolumes;
+    }
+
     public get skyLight(): SkyLightNode | null {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._skyLight;
+    }
+
+    /** Every volumetric fog volume in the scene (render/volumetricFog.ts draws them). */
+    public get volumetricFogs(): Set<VolumetricFogNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._volumetricFogs;
     }
 
     /** Every exposure volume in the scene: the regions that override the scene's exposure settings. */
@@ -1388,24 +1416,35 @@ export class Scene {
     }
 
     /**
-     * Up to `max` baked probes for the deferred lighting pass's per-pixel volume selection:
-     * bounded probes (nearest volume centre to the camera first), then unbounded probes (nearest
-     * first) as the tail fallback slot(s).
+     * Up to `max` baked probes for the deferred lighting pass's per-pixel volume selection (slot 0 claims
+     * its volume's weight, the next fills what is left, the sky and ambient the rest).
+     *
+     * - Bounded probes first: one whose volume CONTAINS the camera before any other (the smallest such
+     *   volume first: a room's probe inside the hamlet's), then by the camera's distance to the volume,
+     *   not to its centre (a large volume's centre can be far while the camera stands at its edge).
+     * - An unbounded probe, when there is one, always keeps the LAST slot: it is the scene's fallback, and
+     *   two bounded probes near the camera used to push it out, leaving every pixel outside their boxes
+     *   with the bare sky's reflection.
      */
     public probesForFrame(cameraPos: vec3, max: number): LightProbeNode[] {
-        const bounded: LightProbeNode[] = [];
+        if (max <= 0) return [];
+        const bounded: { probe: LightProbeNode; inside: boolean; volume: number; distance: number }[] = [];
         const unbounded: LightProbeNode[] = [];
         for (const probe of this.lightProbes) {
             if (!probe.hasBakedMaps) continue;
             // A probe that contributes nothing would only take a slot from one that does.
             if (!probe.affectsLighting && !probe.affectsReflections) continue;
-            (probe.bounded ? bounded : unbounded).push(probe);
+            if (!probe.bounded) { unbounded.push(probe); continue; }
+            const distance = probe.distanceToVolume(cameraPos);
+            bounded.push({ probe, inside: distance <= 0, volume: probe.volumeSize, distance });
         }
-        const byDist = (a: LightProbeNode, b: LightProbeNode) =>
-            vec3.squaredDistance(cameraPos, a.worldPosition) - vec3.squaredDistance(cameraPos, b.worldPosition);
-        bounded.sort(byDist);
-        unbounded.sort(byDist);
-        return [...bounded, ...unbounded].slice(0, max);
+        bounded.sort((a, b) => (a.inside === b.inside ? 0 : a.inside ? -1 : 1)
+            || (a.inside ? a.volume - b.volume : a.distance - b.distance));
+        unbounded.sort((a, b) =>
+            vec3.squaredDistance(cameraPos, a.worldPosition) - vec3.squaredDistance(cameraPos, b.worldPosition));
+        const out = bounded.slice(0, max - (unbounded.length > 0 ? 1 : 0)).map(b => b.probe);
+        for (const probe of unbounded) { if (out.length >= max) break; out.push(probe); }
+        return out;
     }
 
     /** Scene-wide indirect fill, in lux. See {@link _ambientLight}. */

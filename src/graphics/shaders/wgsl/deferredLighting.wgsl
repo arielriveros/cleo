@@ -104,6 +104,12 @@ struct Lighting {
     u_horizonOcclusion: i32,
     /** Whether the SSR pass produced a result THIS frame (SsrPasses.ssrProducedThisFrame). */
     u_ssrEnabled: i32,
+    /**
+     * The frame's pre-exposure (graphics/preExposure.ts). The lights, ambient, sky light, probes and sky
+     * reflection arrive multiplied by it; the G-buffer emissive and the scene environment map are
+     * absolute, so this pass scales those two itself.
+     */
+    u_preExposure: f32,
 };
 @group(1) @binding(0) var<uniform> u_lighting: Lighting;
 
@@ -197,6 +203,14 @@ struct IndirectLight {
 };
 
 /**
+ * The split sum's environment BRDF for reflectance `F0`, from the baked LUT's pair (brdf.wgsl): `F0 * A + B`.
+ * The pair already integrates Fresnel over the GGX lobe, so nothing multiplies a Fresnel term onto it.
+ */
+fn envSplitSum(F0: vec3<f32>, brdf: vec2<f32>) -> vec3<f32> {
+    return F0 * brdf.x + vec3<f32>(brdf.y);
+}
+
+/**
  * Split-sum IBL from one probe slot's cubemaps.
  *
  * The slot's textures are passed by value rather than indexed, because a sampler array cannot be
@@ -207,7 +221,6 @@ fn probeIBL(irr: texture_cube<f32>, irrSampler: sampler,
             N: vec3<f32>, V: vec3<f32>, albedo: vec3<f32>,
             metallic: f32, roughness: f32, F0: vec3<f32>) -> IndirectLight {
     let NoV = max(dot(N, V), 0.0);
-    let F = fresnelSchlickRoughness(NoV, F0, roughness);
     // `(1 - metallic)` alone, matching `accumulateLight`. The `(1 - F)` factor this used to carry is
     // not in any modern reference BRDF and double-counted Fresnel; a metal's reflection and its
     // highlight have to split energy the same way or one of them is wrong.
@@ -222,7 +235,12 @@ fn probeIBL(irr: texture_cube<f32>, irrSampler: sampler,
     // The split-sum term uses the REAL baked LUT, which this pass has bound and the forward paths
     // cannot. Only the multi-scatter multiplier is the analytic fit — deliberately, so that a surface
     // shaded forward and the same surface shaded deferred recover the same amount of energy.
-    result.specular = prefiltered * (F * brdf.x + brdf.y) * energyCompensation(F0, NoV, roughness);
+    //
+    // `F0 * A + B`, Karis's split sum: the LUT's two terms ARE the Fresnel integral (brdf.wgsl: A takes
+    // (1 - Fc), B takes Fc over the lobe). Scaling A by a Schlick Fresnel of NoV on top, as this used to,
+    // counted Fresnel twice, and most at grazing angles: rough ground and cliffs seen across the valley
+    // reflected two to three times what they should and read glossy from a distance. See `envSplitSum`.
+    result.specular = prefiltered * envSplitSum(F0, brdf) * energyCompensation(F0, NoV, roughness);
     return result;
 }
 
@@ -332,7 +350,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let N = octDecode(vec2<f32>(normalRoughness.x, normalRoughness.y));
     let reflectance = select(normalRoughness.b, 0.5, translucency > 0.0);
     let roughness = normalRoughness.a;
-    let emissive = emissiveAO.rgb;
+    let emissive = emissiveAO.rgb * u_lighting.u_preExposure;
     let ao = emissiveAO.a;
 
     let worldPos = reconstructWorldPos(uv, depth);
@@ -365,9 +383,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let NoV = max(dot(N, V), 0.0);
         let R = reflect(-V, N);
         let sky = textureSampleLevel(u_envMap_texture, u_envMap_sampler, R, roughness * MAX_REFLECTION_LOD).rgb;
-        let F = fresnelSchlickRoughness(NoV, F0, roughness);
         let brdf = textureSampleLevel(u_brdfLUT_texture, u_brdfLUT_sampler, vec2<f32>(NoV, roughness), 0.0).rg;
-        indirect.specular = sky * u_lighting.u_skyReflectionScale * (F * brdf.x + brdf.y)
+        indirect.specular = sky * u_lighting.u_skyReflectionScale * envSplitSum(F0, brdf)
                           * energyCompensation(F0, NoV, roughness);
     } else if (u_lighting.u_envMapMode == 1) {
         let NoV = max(dot(N, V), 0.0);
@@ -378,7 +395,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // midtones, and brighter than the same cube reflected by a forward material, which decodes.
         // The engine's own decode (chunks/tonemap.wgsl toLinear), as forward and the sky light use.
         let env = pow(textureSampleLevel(u_envMap_texture, u_envMap_sampler, R,
-                                         roughness * MAX_REFLECTION_LOD).rgb, vec3<f32>(2.2));
+                                         roughness * MAX_REFLECTION_LOD).rgb, vec3<f32>(2.2))
+                  * u_lighting.u_preExposure;
         // TWO SEPARATE FACTORS that used to be one, and the distinction is the whole point.
         //
         // The DFG pair is ENERGY: how much of the incoming environment a surface of this roughness and
@@ -516,9 +534,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let ssr = sampleSSR(uv, depth);
     if (ssr.a > 0.0) {
         let NoV = max(dot(N, V), 0.0);
-        let F = fresnelSchlickRoughness(NoV, F0, roughness);
         let brdf = textureSampleLevel(u_brdfLUT_texture, u_brdfLUT_sampler, vec2<f32>(NoV, roughness), 0.0).rg;
-        let ssrSpecular = ssr.rgb * (F * brdf.x + brdf.y) * energyCompensation(F0, NoV, roughness) * horizon;
+        let ssrSpecular = ssr.rgb * envSplitSum(F0, brdf) * energyCompensation(F0, NoV, roughness) * horizon;
         specular = mix(specular, ssrSpecular, ssr.a);
     }
     var color = indirect.diffuse * diffuseAO + specular + Lo + emissive;
@@ -541,5 +558,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // material surfaces bloom.
     var bloomMask = 0.0;
     if (dot(albedo, albedo) > 0.0) { bloomMask = 1.0; }
-    return vec4<f32>(color, bloomMask);
+    // Below the half-float ceiling (graphics/preExposure.ts HDR_STORE_MAX): a dark-adapted camera's
+    // pre-exposure can push a sunlit glint past it, and an Inf is turned to black downstream.
+    return vec4<f32>(min(color, vec3<f32>(32768.0)), bloomMask);
 }

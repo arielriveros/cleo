@@ -39,6 +39,8 @@ struct SkyFogUniforms {
     u_fogColorBlend: f32,   // 0 = pure atmosphere colour, 1 = pure custom colour
     // Mip to sample the atmosphere at: a few texels per face, so the fog is a smooth colour haze.
     u_fogSkyLod: f32,
+    /** The frame's pre-exposure: the fog's colour is in-scattered light, stored multiplied by it. */
+    u_preExposure: f32,
 };
 @group(1) @binding(0) var<uniform> u_fog: SkyFogUniforms;
 
@@ -119,7 +121,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let horizonDir = normalize(vec3<f32>(heading.x, HORIZON_LIFT, heading.y));
     let atmoColor = textureSampleLevel(u_atmosphere_texture, u_atmosphere_sampler, horizonDir,
                                        u_fog.u_fogSkyLod).rgb;
-    let fogColor = mix(atmoColor, u_fog.u_fogColor, u_fog.u_fogColorBlend);
+    let fogColor = mix(atmoColor, u_fog.u_fogColor, u_fog.u_fogColorBlend) * u_fog.u_preExposure;
 
     return vec4<f32>(fogColor, f);
 }

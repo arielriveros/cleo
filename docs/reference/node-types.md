@@ -11,7 +11,7 @@ type NodeType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite'
   | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup'
   | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
-  | 'particleSystem' | 'forceField' | 'waterVolume' | 'occlusionVolume' | 'exposureVolume' | 'cloth'
+  | 'particleSystem' | 'forceField' | 'waterVolume' | 'occlusionVolume' | 'exposureVolume' | 'volumetricFog' | 'cloth'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 ```
@@ -240,12 +240,62 @@ intensity: number ; size: vec3 ; blendDistance: number
 affectsLighting: boolean ; affectsReflections: boolean   // both true by default
 get bounded: boolean ; get invVolumeMatrix: mat4 ; get volumeBlend: number
 probeWeight(p: vec3): number
+distanceToVolume(p: vec3): number      // 0 inside the box (or unbounded)
+get volumeSize: number                 // cubic metres; Infinity unbounded
 bake(): void ; markBaked(t: number): void
 setBakedMaps(source, irradiance, prefiltered): void
 get hasBakedMaps / irradiance / prefiltered / envMap / needsBake / lastBakeTime
 ```
 
 Probes saved before volumes existed deserialize as unbounded.
+
+A capture is shadowed by the key light through a map of its own, fit round the probe
+(`ShadowPasses.beginProbeShadows`). The renderer captures at most one probe a frame (`nextProbeToBake`:
+never baked, then asked for, then realtime, nearest first). `Scene.probesForFrame(camera, 2)` hands the
+deferred pass the smallest box containing the camera (else the nearest box by distance to the box), and
+keeps the last slot for the nearest unbounded probe.
+
+### WeatherNode — `'weather'`
+
+A box of weather (render/weather.ts): wetness, puddles and snow on the landscape
+(`chunks/terrainWeather.wgsl`) and on foliage materials, per plant (`chunks/instancedVertex.wgsl`).
+Overlapping volumes composite in ascending `priority` (`mix` by each one's weight); at most 4 near the
+camera draw a frame. `size` [0, 0, 0] is unbounded, the whole scene (what JSON from before volumes reads
+as). With `shelter`, a top-down depth map of the static, solid shadow casters round the camera keeps what
+is under them dry (`ShadowPasses.renderShelter`). `scene.weather` is the highest-priority one;
+`scene.weatherVolumes` all of them.
+
+```ts
+size: [number, number, number]       // [0,0,0] = unbounded ; min 0.01 a side otherwise
+blendDistance: number ; priority: number ; enabled: boolean
+wetness: number ; snow: number ; puddles: number        // 0..1
+snowMaterial: Material | null ; snowMaterialId: string | null   // embedded copy + asset link
+snowTiling: number                   // metres per repeat
+snowSlope: number                    // degrees
+snowBreakup: number                  // 0..1
+shelter: boolean
+get bounded: boolean ; get active: boolean
+weightAt(p): number ; applyPreset(idOrPreset): boolean  // WEATHER_PRESETS
+```
+
+### VolumetricFogNode — `'volumetricFog'`
+
+A box of participating medium drawn by the renderer's froxel fog (`render/volumetricFog.ts`): density
+(extinction per metre), albedo, emission, Henyey-Greenstein anisotropy, a height falloff from the box's
+bottom face and drifting noise. Lit by the key light (sun or moon, with its cascaded shadow), the clustered
+point and spot lights, the sky's ambient, and particle systems' `fogGlow`. Overlapping volumes add; at most
+16 draw a frame, by `priority` then distance.
+
+```ts
+size: [number, number, number]       // full extents, before the node transform; min 0.01
+blendDistance: number ; priority: number ; enabled: boolean
+density: number ; albedo: vec3 ; emissiveColor: vec3 ; emissiveIntensity: number   // nits
+anisotropy: number                   // -0.9..0.9
+heightFalloff: number ; noiseStrength: number ; noiseScale: number ; windVelocity: vec3
+sunScattering: number ; localLightScattering: number ; ambientScattering: number
+get visibilityDistance: number       // 3.9 / density
+weightAt(p): number ; applyPreset(idOrPreset): boolean   // VOLUMETRIC_FOG_PRESETS
+```
 
 ### ExposureVolumeNode — `'exposureVolume'`
 
@@ -309,13 +359,28 @@ adding one removes the other.
 
 Physically-based sky, baked to a cubemap whenever the sun moves.
 
-Option groups: **sun** (`useSceneSun`, `sunDirection`, `sunColor`, `sunIntensity`), **atmosphere**
+Option groups: **sun** (`useSceneSun`, `sunDirection`, `sunColor`, `sunIntensity`, `physicalUnits`), **atmosphere**
 (`rayleighScatter`, `rayleighHeight`, `mieScatter`, `mieHeight`, `mieG`, `planetRadius`,
 `atmosphereRadius`, `sunDiskSize`, `exposure`, `groundColor`), **quality** (`resolution`,
 `viewSteps`, `lightSteps`), **fog** (`fogEnabled`, `fogDensity`, `fogStart`, `fogHeight`,
 `fogHeightFalloff`, `fogMaxOpacity`, `fogColor`, `fogColorBlend`), **god rays** (`godRaysEnabled`,
 `godRaySamples`, `godRayDensity`, `godRayExposure`, `godRayTint`, `godRayAnisotropy`,
-`godRayMaxDistance`).
+`godRayMaxDistance`), **moon** (`moonEnabled`, `moonPhase`, `moonSize`, `moonOffsetYaw`,
+`moonOffsetPitch`, `moonColor`, `moonIntensity`, `moonIlluminance`).
+
+`moonIlluminance` is the moon's light in lux (default `DEFAULT_MOON_LUX`, 1), independent of the sun's:
+the key light becomes the moon at that illuminance once the sun has set. A payload saved before it
+carries the legacy `moonlightIntensity`, a fraction of the sun's lux, and keeps it until
+`moonIlluminance` is set; `moonLux(sunLux)` returns whichever is in force.
+
+`physicalUnits` (new skies: true; saved skies without it: false) lights the sky with the scene sun's
+own lux, divided by `REFERENCE_ILLUMINANCE`, instead of `sunIntensity`, times
+`SkyPasses.PHYSICAL_SKY_CALIBRATION` (3): the single-scattering march, calibrated to measured clear-sky
+light. Its march converges — it stops 12 scale heights up and steps quadratically — so `planetRadius` and
+`atmosphereRadius` shape the horizon without starving the integral; an artistic sky keeps the even march
+its `sunIntensity` was tuned against. The sun and moon discs then take the radiance their illuminance spreads over their
+size, and `exposure` is a trim on top. It
+needs `useSceneSun` and a directional light.
 
 > Writing `sunDirection`, `sunColor`, `sunIntensity`, `exposure` or `groundColor` sets the re-bake
 > flag **unconditionally**, ahead of the ~0.3° angular throttle. Touch any of them every frame and
@@ -329,7 +394,7 @@ Ambient light projected from the sky.
 ```ts
 intensity: number ; tint: vec3 ; cloudResponse: number   // 0..1
 ambient: number        // x the scene's flat ambient (Scene settings), default 1
-nightAmbient: number   // 0..1, share of that ambient kept after sunset, default 1
+nightAmbient: number   // 0..1, share of that ambient kept after sunset; new: DEFAULT_NIGHT_AMBIENT (1e-4), saved without it: 1
 ambientScale(sunElevationSin: number | null): number
 get needsProjection: boolean
 markDirty(): void ; markProjected(): void
@@ -339,7 +404,9 @@ The scene's flat ambient (`Scene.ambientLight`, lux) is added to every shaded pi
 darken with the sky. With a sky light in the scene, the renderer scales it by `ambientScale`: `ambient`
 always, and `nightAmbient` faded in by `nightFactor` of the sun's elevation (full from about 8° below
 the horizon). The sun is the Sky Atmosphere's baked sun, or else the first directional light. Set
-`nightAmbient` near 0 and a moonless night goes almost black while the day keeps its fill.
+`nightAmbient` near 0 and a moonless night goes almost black while the day keeps its fill. A scene with
+a Sky Atmosphere but no sky light fades the flat ambient the same way, by `DEFAULT_NIGHT_AMBIENT`; a
+scene with no sky at all (a dungeon) keeps it.
 
 > The spherical-harmonic projection decides it is stale by comparing cubemap **object identity**,
 > and a sky re-bake renders into the same texture. So indirect light freezes at the first sun
@@ -502,7 +569,7 @@ setTilemap(t: Tilemap): void
 
 ```ts
 get sprite: Sprite
-get/set constraints: 'free' | 'spherical' | 'cylindrical'    // billboarding
+get/set constraints: 'free' | 'spherical' | 'cylindrical'    // billboarding (render/billboard.ts)
 tileset: string ; tileIndex: number ; tint: vec3 ; opacity: number
 sprite.blend: 'alpha' | 'additive'                           // additive adds light: fire, glows
 uvRect(): [number, number, number, number]

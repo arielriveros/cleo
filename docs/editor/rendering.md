@@ -88,8 +88,8 @@ buckets draw indirectly. On WebGL2 the toggle is disabled and foliage is packed 
 ### Tone and post
 
 **Auto exposure** (compensation, compensation curve, min/max EV, adaptation speeds) or manual **EV100**; **tone map**
-(AgX default, ACES, Neutral, None); saturation; chromatic aberration; a **colour LUT** and its
-amount. The section's *Exposure* and *Look* presets set metering and lens looks in one click; a look
+(AgX default, AgX Punchy, ACES, Neutral, None); saturation; **night vision**; **local exposure**; chromatic
+aberration; a **colour LUT** and its amount. The section's *Exposure* and *Look* presets set metering and lens looks in one click; a look
 leaves the tone map and the LUT alone.
 
 Exposure is written as a photographic EV100, the number a light meter reads. Lights carry real
@@ -108,6 +108,31 @@ treat light. The artistic control is in the exposure, not the lights: the EV ran
 magic, UI in the world) take less of the exposure through their **Exposure weight** (materials,
 sprites and particles).
 
+**What the meter reads.** The opaque scene — sky, clouds, surfaces, fog — before the transparents,
+particles and sprites are drawn over it. A flame, a cloud of embers or the sun's glint on water covers a
+few pixels many stops brighter than the world around it; metered, it darkened the whole frame every time
+it came into view. The camera adapts to the light the world receives, and the effects are then exposed
+by it.
+
+**Pre-exposure.** The frame's buffers are half floats, which keep their precision only above about
+0.00006. Light is stored on a scale where a sunlit wall is about 0.1, so a moonlit one used to sit far
+below that and banded. Every light, the sky, emissives and effects are now stored multiplied by a power
+of two near the frame's exposure (1 at EV100 15, so a day frame is untouched), and the present divides it
+back out. A custom material that adds its own light (an emissive constant, a raw `u_envMap` reflection)
+multiplies it by `cleoPreExposure()`; the engine's light inputs already carry it.
+
+**Night Vision** — below a few cd/m² the eye's rods take over: colour drains toward a bluish grey and
+reds darken first (the Purkinje shift). The renderer does this per pixel, on the light each pixel really
+carries, so a moonlit field reads as night while the pool under a torch keeps its warmth, and a daylit
+pixel is never touched. A moon needs no blue tint of its own for a night to look like one. 0 turns it off.
+
+**Local Exposure** — one exposure cannot show both a torch pool and the moonlit field round it: metered for
+one, the other is crushed or blown. Local exposure fuses three exposures of the frame (Mertens' exposure
+fusion, as Ghost of Tsushima and Wronski describe it) into a map of how far each region is shifted:
+**Shadow Lift** stops for the darkest, **Highlight Hold** for the brightest, at **Local Strength**. It is
+smooth across a region and stops at its edges, so detail inside each is untouched and no halo rings a
+silhouette. On from the High quality tier.
+
 **Compensation curve** — extra compensation, in stops, keyed on the metered scene EV100 (Unreal's
 exposure compensation curve), added to Compensation. Between keys it is linear; past the first and last
 key it holds. A fully adapted eye lifts a moonlit night or a torch-lit crypt to a grey day; a negative
@@ -120,7 +145,10 @@ scene is metered at now.
 
 The tone map is the curve that turns linear HDR into a displayable image, and it is the single
 biggest lever here. *AgX* rolls a saturated highlight toward white instead of clipping it to a
-primary; *ACES* is the older filmic fit every scene was graded under before the curve was
+primary; *AgX Punchy* is AgX with Blender's Punchy look (Filament's `AgxLook::PUNCHY`): more contrast,
+and saturated colour kept rich where plain AgX drains it toward grey — a clear sky stays blue instead of
+turning steel-grey — with middle grey held where AgX puts it, so switching between the two keeps the
+exposure; *ACES* is the older filmic fit every scene was graded under before the curve was
 selectable; *Neutral* (Khronos PBR Neutral) leaves in-gamut albedo untouched, for asset viewing;
 *None* is exposure and sRGB only, hard-clamped — what the buffer actually holds.
 
@@ -157,9 +185,12 @@ map, on display colour, which is the space a `.cube` LUT from a grading tool was
 
 ### Bloom
 
-An HDR bright-pass. **Threshold** is a luminance cutoff measured *after* exposure, so it means "bloom
-what would clip on screen"; **Knee** softens the ramp around it; **Intensity** is how much is added
-back. **Restrict to lit surfaces** uses the scene buffer's alpha mask — sprites, tilemaps,
+**Physical** (the default) has no threshold: a small share (**Mix**, 0.04) of a blurred copy of the frame
+is mixed into it, so everything glows in proportion to its energy, the way a lens scatters light. A torch
+seen at night blooms, a sunlit wall at noon barely does, and a bright glint spreads only its own share
+rather than flooding the screen. **Threshold** is the older HDR bright-pass: **Threshold** is a luminance
+cutoff measured *after* exposure, so it means "bloom what would clip on screen"; **Knee** softens the ramp
+around it; **Intensity** is how much is added back. **Restrict to lit surfaces** uses the scene buffer's alpha mask — sprites, tilemaps,
 transparents and unlit materials cannot set it, so they never bloom while it is on (see the **Bloom
 Mask** channel).
 
@@ -167,6 +198,32 @@ Bloom says it is inactive, and why, when something outside the section switches 
 intensity of 0 (the Low quality preset does that) or a bloom pass turned off under **Pass switches**
 on the Performance page. Bloom that emits nothing with neither is usually a threshold in the wrong
 space, not a broken effect.
+
+### Weather
+
+Draws the scene's [Weather](node-inspector.md#weather) volumes on the landscape and its plants: up to 4
+near the camera, composited where they overlap. **Shelter** keeps what stands under a roof or anything
+solid dry and free of snow. It uses a depth map, seen from straight above, of the 96 m round the camera:
+every still, solid, shadow-casting model (not plants, glass, or anything moving or under half a metre
+across), redrawn only when the camera has moved an eighth of it or something in it moved.
+**Shelter Resolution** is that map's size; the quality tier sets both, and Low has no shelter. A scene
+with no weather volume runs nothing.
+
+### Volumetric Fog
+
+Draws the scene's [Volumetric Fog](node-inspector.md#volumetric-fog) volumes. The camera's view, out to
+**Distance**, is cut into a grid of cells; each is lit once a frame by the sun or moon through its
+shadows, every point and spot light that reaches it (**Point & Spot Lights**; with **Light Shadows**,
+through the shadow maps of the lights that cast them, so a torch behind a wall lights none of the fog on
+this side of it) and the sky's fill, then
+integrated from the camera outward, so a surface behind fog is dimmed by it and the fog in front of it
+glows. **Temporal** blends each cell with the last frame's, which smooths it at a little lag; a light that
+flickers is followed faster. The quality tier sets the grid (finer on Ultra, off on Low). Nothing runs in
+a scene with no fog volume.
+
+A particle system's **Fog Glow** (lumens) lights the fog only: a fire lighting its own smoke and the mist
+round it without a light that every surface pays for. It takes the colour and the flicker of the light the
+system follows (**Follow Light**).
 
 ### Depth of field
 
@@ -403,7 +460,9 @@ doing.
   standing in a corner visibly loses its reflection.
 - **Specular antialiasing** — widens roughness by sub-pixel normal variance so highlights stop
   flickering as they move. MSAA cannot fix that, because the aliasing is in the shading rather than
-  the coverage. PBR and terrain only.
+  the coverage. It also adds back the bumps a normal map's far mips average away (Toksvig): a mip
+  texel's normal comes back shorter than unit length, and that loss goes into the roughness, so rock
+  across a valley stays as rough as it is up close. PBR and terrain only.
 - **Horizon occlusion** — drops indirect specular where the reflection ray points into the surface.
   This is the fix for the wet-looking rim on strongly normal-mapped surfaces at glancing angles.
 

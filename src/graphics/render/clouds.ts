@@ -167,7 +167,10 @@ export class VolumetricCloudPasses {
                 this._cloudSunTKey = key;
             }
             effSunColor = [0, 1, 2].map(i => sunColor[i] * this._cloudSunT[i]);
-            // The key light's strength: fades out at sunset, and is the moonlight fraction at night.
+            // The key light's strength: fades out at sunset, and is the moonlight fraction at night. Not
+            // rescaled to the sky's units: the clouds are lit by the sun that lights the ground, and were
+            // tuned against that ground. A physical sky now converges to the radiance the artistic one
+            // was tuned at, so the balance against the sky holds as well.
             effSunIntensity = node.sunIntensity * this._sys.lighting.keyLightScale();
         } else {
             effSunColor = [0, 1, 2].map(i =>
@@ -188,7 +191,7 @@ export class VolumetricCloudPasses {
             // The real sky's radiance: it already darkens, reddens and goes blue-hour with the sun.
             // Re-expressed in the clouds' units: sky radiance per unit of the atmosphere's sun
             // irradiance, times the clouds' own sun irradiance.
-            const toCloudUnits = node.sunIntensity / Math.max(1e-4, atmo.sunIntensity * atmo.exposure);
+            const toCloudUnits = node.sunIntensity / Math.max(1e-4, this._sys.sky.skySunScale(atmo));
             const up = shHemisphereMeans(skySH).up.map(v => v * toCloudUnits);
             effAmbientColor = up;
             // The ground under the clouds is a Lambertian reflector of albedo `groundColor`, lit by the
@@ -326,6 +329,7 @@ export class VolumetricCloudPasses {
         this.setCloudUniforms(scene, node, this._view.invViewProj, this._view.camera.position,
                                performance.now() * 0.001);
         this._shaderManager.setUniform('u_ignoreDepth', false);
+        this._shaderManager.setUniform('u_preExposure', this._view.preExposure);
 
         const scale = node.resolutionScale;
         // Temporal reprojection is bypassed at full resolution (nothing to reconstruct), while
@@ -547,7 +551,7 @@ export class VolumetricCloudPasses {
             tracePass.setPipeline(pipeline);
             tracePass.setBindGroup(0, group(pipeline));
             this._passes.drawFullscreenAndEnd(tracePass);
-            this.cloudHistory.swap();
+            this.cloudHistory.swap(this._view.preExposure);
             return this.cloudHistory.read.colors[0];
         }
 
@@ -586,9 +590,10 @@ export class VolumetricCloudPasses {
         // returns early, but must stay set — an unset uniform silently reads as false.
         this._shaderManager.setUniform('u_historyValid', this.cloudHistory.valid && this._view.hasPrevViewProj);
         this._shaderManager.setUniform('u_slabMid', node.baseAltitude + node.thickness * 0.5);
+        this._shaderManager.setUniform('u_historyRescale', this.cloudHistory.rescale(this._view.preExposure));
         this._passes.drawFullscreenAndEnd(resolvePass);
 
-        this.cloudHistory.swap();
+        this.cloudHistory.swap(this._view.preExposure);
         return this.cloudHistory.read.colors[0];
     }
 

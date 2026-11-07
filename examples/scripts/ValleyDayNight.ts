@@ -8,9 +8,10 @@ import { Node, kelvinToRgb } from 'cleo'
  * follow it does, every frame and smoothly:
  *
  *   - the sun's colour (warm and dim at the horizon, white at noon) and brightness;
- *   - the moon: below the horizon the renderer hands the key light to the moon, opposite the sun. Its light
- *     is the sun's times the sky's `moonlightIntensity`, set here so the moon gives `moonLux`;
- *   - the valley mist, thick at dawn and burning off by mid-morning;
+ *   - the moon: below the horizon the renderer hands the key light to the moon, opposite the sun, at the
+ *     sky's own `moonIlluminance` (lux). Nothing here sets it, so the editor's night is the game's;
+ *   - the valley mist, thick at dawn and burning off by mid-morning, and the fog volumes (the pond's mist,
+ *     the cave mouth's) with it: `fogNightScale` times as dense at night and at dawn;
  *   - the god rays, strongest with a low sun.
  *
  * What it does NOT touch is the camera or the lamps. Every light keeps its real value all day — the sun
@@ -41,13 +42,10 @@ export default class ValleyDayNightNode extends Node {
   public declination: number = 10
   /** The sun's illuminance (lux) once it is well up. */
   public sunLux: number = 79600
-  /**
-   * The moon's illuminance (lux) at full night. A real full moon gives about 0.25 lx; this is a storybook
-   * one, bright enough to show the shape of the valley between the torches.
-   */
-  public moonLux: number = 2
   /** The Sky Light's intensity at full night: the night sky lights the valley as well as the moon does. */
   public nightSkyLight: number = 0.4
+  /** How many times denser the scene's fog volumes are at night and at dawn than by day. */
+  public fogNightScale: number = 3
   /** Degrees the sun moves between light-probe captures. */
   public probeDegrees: number = 12
   /** Runtime: the hour now, 0-24. */
@@ -63,6 +61,7 @@ export default class ValleyDayNightNode extends Node {
   private _wasDead: boolean = false
   private _fog: { density: number, falloff: number, opacity: number } = null
   private _godRays: number = 0
+  private _fogVolumes: { node: any, density: number }[] = []
   private _lastStep: number = NaN
   private _probeAt: number[] = null
 
@@ -73,6 +72,8 @@ export default class ValleyDayNightNode extends Node {
     this._sky = scene?.skyAtmosphere ?? null
     this._skyLight = scene?.skyLight ?? null
     if (this._skyLight) this._skyLightIntensity = this._skyLight.intensity
+    // Every fog volume at its daytime density, as authored.
+    this._fogVolumes = [...(scene?.volumetricFogs ?? [])].map((node: any) => ({ node, density: node.density }))
     if (this._sky) {
       this._fog = { density: this._sky.fogDensity, falloff: this._sky.fogHeightFalloff, opacity: this._sky.fogMaxOpacity }
       this._godRays = this._sky.godRayExposure
@@ -123,13 +124,12 @@ export default class ValleyDayNightNode extends Node {
     const light = this._sun?.light
     if (light) {
       // Warm and dim near the horizon, white and full once it is high. Below the horizon the renderer fades
-      // the sun out by itself, so the lux stays put there: the moon is a fraction of it.
+      // the sun out by itself, so the lux stays put there (the moon has its own).
       const kelvin = 2100 + 3300 * smooth(-2, 35, elevation)
       light.color = kelvinToRgb(kelvin)
       light.intensity = elevation > 0 ? this.sunLux * (0.3 + 0.7 * day) : this.sunLux
     }
     if (this._sky) {
-      this._sky.moonlightIntensity = Math.min(1, this.moonLux / Math.max(1, this.sunLux))
       // Mist: gathering before dawn, thickest as the sun clears the ridge, burnt off once it is 14° up; a
       // thinner one at dusk, and a veil all night.
       const low = smooth(-12, -2, elevation) * (1 - smooth(4, 14, elevation))
@@ -141,6 +141,10 @@ export default class ValleyDayNightNode extends Node {
       }
       this._sky.godRayExposure = this._godRays * (1 + 1.4 * (1 - smooth(5, 30, elevation)) * (1 - this.nightFactor) - 0.4 * this.nightFactor)
     }
+    // The fog volumes: gathered all night and thickest at dawn, back to their daytime density by mid-morning.
+    const dawn = smooth(-12, -2, elevation) * (1 - smooth(4, 14, elevation))
+    const gathered = Math.max(this.nightFactor, dawn * (this.hour < 12 ? 1 : 0.4))
+    for (const f of this._fogVolumes) f.node.density = f.density * (1 + (this.fogNightScale - 1) * gathered)
 
     if (this._skyLight) this._skyLight.intensity = this._skyLightIntensity * (1 + (this.nightSkyLight - 1) * this.nightFactor)
 

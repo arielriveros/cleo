@@ -27,6 +27,12 @@ struct BloomUniforms {
     u_exposure: f32,                // the same exposure the final present applies
     // i32 rather than bool: WGSL forbids bool in a uniform buffer. Call sites still pass a boolean.
     u_bloomMaskEnabled: i32,        // restrict bloom to surfaces that set the mask
+    /**
+     * 0 = threshold bloom (only what clears `u_bloomThreshold`, added on top); 1 = physical bloom
+     * (Jimenez 2014): no threshold, the whole image goes into the pyramid and the composite LERPS a small
+     * share of it in — glare in proportion to how bright a thing is, the way a lens scatters it.
+     */
+    u_bloomMode: i32,
 };
 @group(1) @binding(0) var<uniform> u_bloom: BloomUniforms;
 
@@ -72,6 +78,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (u_bloom.u_bloomMaskEnabled != 0) {
         mask = step(0.5, textureSample(u_bloomMask_texture, u_bloomMask_sampler, uv).a);
     }
+
+    // Physical: everything, unthresholded. The composite takes a fixed share of it (`bloomMix`), so a
+    // source glows in proportion to its energy and nothing switches on or off with the exposure.
+    if (u_bloom.u_bloomMode == 1) { return vec4<f32>(color * mask, 1.0); }
 
     // Perceptual luminance, measured after exposure so the threshold is display-referred.
     let luma = dot(color * u_bloom.u_exposure, vec3<f32>(0.2126, 0.7152, 0.0722));

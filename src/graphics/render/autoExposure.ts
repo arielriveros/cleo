@@ -2,8 +2,10 @@ import { blendExposure, effectiveCurveStops } from '../exposureBlend';
 import type { EffectiveExposure, ExposureLayer } from '../exposureBlend';
 import { Framebuffer } from '../framebuffer';
 import { REFERENCE_ILLUMINANCE } from '../lighting';
+import { quantizePreExposure } from '../preExposure';
 import type { ExposureCurveKey } from '../lighting';
 import { device } from '../rhi/deviceHandle';
+import { ShaderManager } from '../systems/shaderManager';
 import { ExposureMeterProgram } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
@@ -25,6 +27,8 @@ export interface AutoExposureHost {
  * the result into `FrameView.exposure`. Split out of Renderer.
  */
 export class AutoExposure {
+    private readonly _shaderManager = ShaderManager.Instance;
+
     constructor(private readonly _host: AutoExposureHost,
                 private readonly _view: FrameView,
                 private readonly _targets: FrameTargets,
@@ -98,12 +102,60 @@ export class AutoExposure {
     /** A volume around the camera sets the manual EV; otherwise the authored `baseExposure` stands exactly. */
     private _effManualFromVolume: boolean = false;
 
+    /**
+     * Pre-exposure on or off (`RenderSettings.preExposure`). Off pins it at 1 — the frame then stores
+     * absolute radiance, as it did before pre-exposure existed, which is the A/B for it.
+     */
+    public preExposureEnabled: boolean = true;
+
+    /** The last scene frame's pre-exposure, so a preview frame in between does not reset the hysteresis. */
+    private _scenePreExposure: number = 1;
+
+    /** The last scene frame's absolute exposure: what the next one is predicted to render at. */
+    private _lastSceneExposure: number = AutoExposure.PREVIEW_EXPOSURE;
+
+    /**
+     * Decide this frame's pre-exposure, before anything uploads a light (see graphics/preExposure.ts).
+     *
+     * From the exposure the LAST scene frame rendered at: this frame's is not known until its meter runs,
+     * and a one-frame lag is invisible — it only decides the scale values are stored at; post divides it
+     * back out with this frame's exact exposure. `preview` frames (thumbnails, offscreen captures, the
+     * editor's non-scene tabs) render at the fixed preview exposure, which is k = 1, so they are what they
+     * were without pre-exposure — and they never disturb the scene's own hysteresis.
+     */
+    public beginFrame(preview: boolean): void {
+        if (preview || !this.preExposureEnabled) {
+            this._view.preExposure = 1;
+        } else {
+            this._scenePreExposure = quantizePreExposure(this._lastSceneExposure, this._scenePreExposure);
+            this._view.preExposure = this._scenePreExposure;
+        }
+        this._view.drawPreExposure = this._view.preExposure;
+    }
+
     /** Two 1x1 metering targets. See `exposurePass` for why they are read a frame late. */
     public exposureFBOs: Framebuffer[] = [];
     private _exposureWrite: number = 0;
 
     /** True once a readback has landed; until then the hand-set exposure stands. */
     public exposureMetered: boolean = false;
+
+    /**
+     * The next sample EASES from `exposureEV` instead of snapping to the metered value. Set by
+     * `seedAdaptation`: switching metering on mid-scene should fade from the picture on screen. A scene's
+     * very first sample still snaps, or every load would open on a fade.
+     */
+    private _easeFromSeed: boolean = false;
+
+    /**
+     * Start adapting from `ev` (EV100) — what is on screen when metering is switched on — so the meter's
+     * first reading is eased toward rather than snapped to. Until that reading lands the picture holds.
+     */
+    public seedAdaptation(ev: number): void {
+        this.exposureEV = ev;
+        this.exposureMetered = false;
+        this._easeFromSeed = true;
+    }
     private _exposureReadPending: boolean = false;
 
     /** Which metering target the end of the frame should read, or -1 for none. */
@@ -130,25 +182,32 @@ export class AutoExposure {
     private static readonly EXPOSURE_KEY = 0.18;
 
     /**
-     * Meter the lit scene into a 1x1 target, and adapt `_view.exposure` toward what LAST frame measured.
+     * Meter the lit scene into a 1x1 target. Called by the scene render at the temporal boundary — after
+     * TAA has resolved the opaque scene (sky, clouds, opaques, fog) and BEFORE transparents, particles and
+     * sprites are drawn over it (`ForwardPassHost.meterScene`).
      *
-     * A FRAME LATE, deliberately. Reading a target the GPU finished with a frame ago costs nothing;
-     * reading the one just written forces the pipeline to drain, and `readPixels` is synchronous under
-     * the hood on WebGL2. One frame of lag is invisible against an adaptation half-life measured in
-     * seconds — the smoothing below would swallow far more than that.
+     * Before the effects, deliberately: a torch flame, a cloud of embers or the sun's glint on the pond
+     * covers few pixels but is many stops brighter than the world around it, and metered it pumps the
+     * exposure every time it enters the frame — the camera darkened when it saw a fire, which is the
+     * opposite of what an eye does and what the fire is there for. What the camera adapts to is the light
+     * the world receives; the effects are then exposed by it. (Ghost of Tsushima meters illuminance for
+     * the same reason.)
+     *
+     * The READ is a frame late, deliberately. Reading a target the GPU finished with a frame ago costs
+     * nothing; reading the one just written forces the pipeline to drain, and `readPixels` is synchronous
+     * under the hood on WebGL2. One frame of lag is invisible against an adaptation half-life measured in
+     * seconds.
      *
      * `_targets.scene`, not the compose buffer: metering has to happen on the lit scene before bloom adds
-     * light back into it, or exposure and bloom chase each other — bloom brightens the frame, the meter
-     * darkens the exposure, which changes bloom's display-referred threshold, and so on.
+     * light back into it, or exposure and bloom chase each other.
      */
-    public exposurePass(dtSeconds: number): void {
-        // No gate and no scope of its own: the node is added only when metering is live and the pass is
-        // switched on (see `_buildPostGraph`), and the graph opens the scope for every node it runs.
+    public meterPass(): void {
         const write = this._exposureWrite;
         const read = 1 - write;
         const pass = this._passes.beginFullscreenPass(this.exposureFBOs[write].renderTarget, 'exposure', true,
                                                undefined, false);
         this._fullscreen.bind(pass, 'exposureMeter', ExposureMeterProgram, [this._targets.scene.colors[0]]);
+        this._shaderManager.setUniform('u_logPreExposure', Math.log2(this._view.preExposure > 0 ? this._view.preExposure : 1));
         this._passes.drawFullscreenAndEnd(pass);
         this._exposureWrite = read;
 
@@ -158,6 +217,14 @@ export class AutoExposure {
         // outright (error 37442, CONTEXT_LOST_WEBGL, raised at the next frame's prologue). It is
         // deferred to `readExposureSample`, after the frame is finished.
         this._exposureReadDue = read;
+    }
+
+    /**
+     * Adapt `_view.exposure` toward what the meter last measured. The post graph's `exposure` node: added
+     * only when metering is live and the pass is switched on (see `_buildPostGraph`), and the graph opens
+     * the scope for every node it runs.
+     */
+    public exposurePass(dtSeconds: number): void {
         this._adaptExposure(dtSeconds);
     }
 
@@ -193,10 +260,7 @@ export class AutoExposure {
         this.effExposureVolumes = found.map(f => ({ id: f.volume.id, weight: f.weight }));
         this._effManualFromVolume = found.some(f => f.volume.overridesView.ev100 !== undefined);
         const auto = this.effExposure.autoExposureEnabled;
-        if (auto && !this._effAutoWas) {
-            this.exposureEV = this._host.ev100;
-            this.exposureMetered = false;
-        }
+        if (auto && !this._effAutoWas) this.seedAdaptation(this._host.ev100);
         this._effAutoWas = auto;
     }
 
@@ -232,6 +296,7 @@ export class AutoExposure {
                 ? REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, this.effExposure.ev100))
                 : this.baseExposure;
         }
+        this._lastSceneExposure = this._view.exposure;
     }
 
     /**
@@ -239,7 +304,10 @@ export class AutoExposure {
      * the preview scenes were authored against long before auto-exposure existed. Deliberately a
      * constant rather than the project's setting — see `resolveExposure`.
      */
-    private static readonly PREVIEW_EXPOSURE = 2.0;
+    public static readonly PREVIEW_EXPOSURE = 2.0;
+
+    /** The encoded meter value of an empty frame: the bottom eighth-bit of the window (see `_onExposureSample`). */
+    public static readonly EMPTY_FRAME_SAMPLE = 0.5 / 255;
 
     /**
      * Pull the metering result back, at the very end of the frame and only every few frames.
@@ -266,6 +334,11 @@ export class AutoExposure {
 
     /** Decode one metering sample into the target EV100 the adaptation is chasing. */
     private _onExposureSample(encoded: number): void {
+        // A first reading at the very floor of the window is a frame with nothing in it yet (a scene still
+        // loading: no sky, no geometry), not a scene. Snapping to it opened every load on the darkest
+        // adaptation there is, a white screen that took the whole slow eye-adaptation to come back from.
+        // Wait for a frame that has something in it.
+        if (!this.exposureMetered && !(encoded > AutoExposure.EMPTY_FRAME_SAMPLE)) return;
         const [lo, hi] = AutoExposure.LOG_LUMINANCE_WINDOW;
         const avgLuminance = Math.pow(2, lo + encoded * (hi - lo));
         // Place the metered average at middle grey, then read that exposure back as an EV100 so the
@@ -273,8 +346,10 @@ export class AutoExposure {
         const wanted = AutoExposure.EXPOSURE_KEY / Math.max(avgLuminance, 1e-9);
         this._exposureTargetEV = Math.log2(REFERENCE_ILLUMINANCE / (1.2 * Math.max(1e-9, wanted)));
         if (!this.exposureMetered) {
-            // First sample: snap rather than ease, or the opening second of every scene is a fade-in.
-            this.exposureEV = this._clampExposureEV(this._exposureTargetEV);
+            // First sample: snap rather than ease, or the opening second of every scene is a fade-in —
+            // unless metering was switched on mid-scene (`seedAdaptation`), which eases from the seed.
+            if (!this._easeFromSeed) this.exposureEV = this._clampExposureEV(this._exposureTargetEV);
+            this._easeFromSeed = false;
             this.exposureMetered = true;
         }
     }
@@ -317,5 +392,6 @@ export class AutoExposure {
         const t = speed <= 0 ? 1 : 1 - Math.exp(-Math.max(0, dtSeconds) * speed);
         this.exposureEV += (target - this.exposureEV) * t;
         this._view.exposure = REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, this.exposureEV));
+        this._lastSceneExposure = this._view.exposure;
     }
 }

@@ -289,35 +289,43 @@ export class EditorOverlays {
         // composite node is ever built, so this is belt and braces — but it is the cheap half.
         if (this._host.thumbnailMode) return;
 
-        // Editor infinite grid, composited over the scene/skybox and occluded by geometry.
-        if (this._passes.beginPass('grid')) this._renderGrid();
+        // The overlay buffer is DISPLAY-referred (composited after the post chain), so the programs it
+        // shares with the scene — basic, sprites — draw here at pre-exposure 1, not the frame's.
+        const sceneDrawPreExposure = this._view.drawPreExposure;
+        this._view.drawPreExposure = 1;
+        try {
+            // Editor infinite grid, composited over the scene/skybox and occluded by geometry.
+            if (this._passes.beginPass('grid')) this._renderGrid();
 
-        const icons: SpriteNode[] = [];
-        for (const node of scene.sprites) if (node.visible && isEditorOnlyNode(node)) icons.push(node);
+            const icons: SpriteNode[] = [];
+            for (const node of scene.sprites) if (node.visible && isEditorOnlyNode(node)) icons.push(node);
 
-        const overlayDecals = this._decals.overlayDecals.length > 0;
-        if ((helperNodes.length > 0 || icons.length > 0 || overlayDecals) && this._passes.beginPass('overlay')) {
-            // Editor-only decals (the landscape brush) first, so helper wireframes draw over them.
-            // Reconstructed with the STABLE inverse: this layer sits after the TAA resolve, and the
-            // jittered one would make a projected cursor shimmer by a sub-pixel every frame.
-            if (overlayDecals) {
-                const decalPass = this._beginOverlayPass('overlay.decals');
-                this._decals.drawColorDecals(decalPass, this._decals.overlayDecals, OVERLAY_BLEND, this._view.invViewProjStable, 1);
-                this._passes.endFullscreenPass(decalPass);
+            const overlayDecals = this._decals.overlayDecals.length > 0;
+            if ((helperNodes.length > 0 || icons.length > 0 || overlayDecals) && this._passes.beginPass('overlay')) {
+                // Editor-only decals (the landscape brush) first, so helper wireframes draw over them.
+                // Reconstructed with the STABLE inverse: this layer sits after the TAA resolve, and the
+                // jittered one would make a projected cursor shimmer by a sub-pixel every frame.
+                if (overlayDecals) {
+                    const decalPass = this._beginOverlayPass('overlay.decals');
+                    this._decals.drawColorDecals(decalPass, this._decals.overlayDecals, OVERLAY_BLEND, this._view.invViewProjStable, 1);
+                    this._passes.endFullscreenPass(decalPass);
+                }
+                // Occluded by real geometry, exactly as these drew when they went through the G-buffer.
+                // No depth writes: the attachment is the scene's own.
+                const depthTested = DEPTH_TEST;
+                const pass = this._beginOverlayPass('overlay.helpers');
+                for (const node of helperNodes) this._drawOverlayNode(pass, node, depthTested);
+                // Icons are billboards and always transparent; `_sprites.renderSprite` handles the constraint.
+                for (const node of icons) this._sprites.renderSprite(node, pass, OVERLAY_BLEND);
+                this._passes.endFullscreenPass(pass);
             }
-            // Occluded by real geometry, exactly as these drew when they went through the G-buffer.
-            // No depth writes: the attachment is the scene's own.
-            const depthTested = DEPTH_TEST;
-            const pass = this._beginOverlayPass('overlay.helpers');
-            for (const node of helperNodes) this._drawOverlayNode(pass, node, depthTested);
-            // Icons are billboards and always transparent; `_sprites.renderSprite` handles the constraint.
-            for (const node of icons) this._sprites.renderSprite(node, pass, OVERLAY_BLEND);
-            this._passes.endFullscreenPass(pass);
-        }
 
-        // Gizmos on top (also draws the editor skeleton overlay when set).
-        if ((gizmoNodes.length > 0 || this.skeletonOverlay) && this._passes.beginPass('gizmos'))
-            this._renderGizmos(gizmoNodes);
+            // Gizmos on top (also draws the editor skeleton overlay when set).
+            if ((gizmoNodes.length > 0 || this.skeletonOverlay) && this._passes.beginPass('gizmos'))
+                this._renderGizmos(gizmoNodes);
+        } finally {
+            this._view.drawPreExposure = sceneDrawPreExposure;
+        }
     }
 
     private _renderGizmos(gizmoNodes: ModelNode[]): void {

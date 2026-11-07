@@ -291,10 +291,11 @@ pushers with `scene.addFoliageInteractor({ position, radius, strength })`.
 turns its **Hue** a little either way, is a little lighter or darker (**Brightness**), and a **Dry
 share** of them turn toward the **Dry colour**.
 
-**Weather** — how the plant answers the scene's [Weather](node-inspector.md#weather): **Wet response**
-darkens it and makes it glossy in rain, **Snow cover** is how much snow settles on its up-facing
-surfaces (and how much less light then comes through), and **Weight droop** is how far rain or snow
-bows it down, as a fraction of its height.
+**Weather** — how the plant answers the [Weather](node-inspector.md#weather) volumes it stands in, per
+plant: **Wet response** darkens it and makes it glossy in rain, **Snow cover** is how much snow settles
+on its up-facing surfaces (in the weather's snow colour, and how much less light then comes through), and
+**Weight droop** is how far rain or snow bows it down, as a fraction of its height. A plant under a roof
+stays dry where the volume keeps **Shelter**. Distant billboard cards and impostors show no weather.
 
 **Gusts** — what the wind's gusts do to the surface. **Ripple sheen** brightens a plant as a gust
 passes over it, so gusts show as waves rolling across a meadow. On a **Leaves** material, **Leaf

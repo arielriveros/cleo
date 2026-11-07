@@ -27,7 +27,8 @@ export default function LightEditor(props: {node: LightNode}) {
     intensity: number, angularRadius: number,
     range: number, sourceRadius: number,
     cutOff: number, outerCutOff: number,
-  }>({ intensity: 0, angularRadius: 0, range: 0, sourceRadius: 0, cutOff: 0, outerCutOff: 0 });
+    flickerAmount: number, flickerSpeed: number,
+  }>({ intensity: 0, angularRadius: 0, range: 0, sourceRadius: 0, cutOff: 0, outerCutOff: 0, flickerAmount: 0, flickerSpeed: 7 });
   const [legacy, setLegacy] = useState(false);
 
   const read = () => {
@@ -39,6 +40,8 @@ export default function LightEditor(props: {node: LightNode}) {
       sourceRadius: l instanceof DirectionalLight ? 0 : (l as Punctual).sourceRadius,
       cutOff: l instanceof Spotlight ? l.cutOff : 0,
       outerCutOff: l instanceof Spotlight ? l.outerCutOff : 0,
+      flickerAmount: l instanceof DirectionalLight ? 0 : (l as Punctual).flickerAmount,
+      flickerSpeed: l instanceof DirectionalLight ? 7 : (l as Punctual).flickerSpeed,
     });
     setLegacy(l.legacyFalloff);
   };
@@ -62,6 +65,8 @@ export default function LightEditor(props: {node: LightNode}) {
     if (patch.angularRadius !== undefined && l instanceof DirectionalLight) l.angularRadius = Math.max(0, patch.angularRadius);
     if (patch.range !== undefined && !(l instanceof DirectionalLight)) (l as Punctual).range = patch.range;
     if (patch.sourceRadius !== undefined && !(l instanceof DirectionalLight)) (l as Punctual).sourceRadius = patch.sourceRadius;
+    if (patch.flickerAmount !== undefined && !(l instanceof DirectionalLight)) (l as Punctual).flickerAmount = Math.min(1, Math.max(0, patch.flickerAmount));
+    if (patch.flickerSpeed !== undefined && !(l instanceof DirectionalLight)) (l as Punctual).flickerSpeed = Math.max(0, patch.flickerSpeed);
     if (l instanceof Spotlight) {
       if (patch.cutOff !== undefined) l.cutOff = patch.cutOff;
       if (patch.outerCutOff !== undefined) l.outerCutOff = patch.outerCutOff;
@@ -120,9 +125,17 @@ export default function LightEditor(props: {node: LightNode}) {
             hint='Where the falloff reaches zero, and also the light’s culling radius.'>
             <NumberInput value={values.range} min={0.01} step={0.5} onChange={(v) => set({ range: v })} />
           </PropertyRow>}
-          {!isDirectional && <PropertyRow label='Source Radius (m)' divider={false}
+          {!isDirectional && <PropertyRow label='Source Radius (m)'
             hint='How big the bulb is. It spreads the highlight into an image of the source rather than a point, dimming its peak by the same amount it widens. Dramatic on polished surfaces, invisible on rough ones.'>
             <NumberInput value={values.sourceRadius} min={0} step={0.01} onChange={(v) => set({ sourceRadius: v })} />
+          </PropertyRow>}
+          {!isDirectional && <PropertyRow label='Flicker'
+            hint='How far the intensity wanders, as a fraction of it: a torch about 0.15–0.25, a candle 0.1, a lamp 0. Intensity only, so the shadow map stays cached. Flames and particle systems that follow this light (Follow Light) burn on the same beat.'>
+            <NumberInput value={values.flickerAmount} min={0} max={1} step={0.01} onChange={(v) => set({ flickerAmount: v })} />
+          </PropertyRow>}
+          {!isDirectional && values.flickerAmount > 0 && <PropertyRow label='Flicker Speed' divider={false}
+            hint='Roughly how many swells a second its slowest layer makes; the faster layers ride on top.'>
+            <NumberInput value={values.flickerSpeed} min={0} step={0.5} onChange={(v) => set({ flickerSpeed: v })} />
           </PropertyRow>}
         </PropertyTable>
 

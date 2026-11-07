@@ -18,6 +18,12 @@ struct TilemapTransform {
 };
 @group(1) @binding(0) var<uniform> u_transform: TilemapTransform;
 
+struct TilemapShade {
+    /** The frame's pre-exposure (graphics/preExposure.ts): tiles are stored multiplied by it. 0 reads as 1. */
+    u_preExposure: f32,
+};
+@group(1) @binding(1) var<uniform> u_shade: TilemapShade;
+
 @group(0) @binding(0) var u_tileset_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_tileset_sampler: sampler;
 
@@ -46,5 +52,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Both the texture and the authored tint are sRGB; this shader writes into the linear-HDR scene
     // buffer and is tonemapped once at the final present, like every other surface.
-    return vec4<f32>(toLinear(texel.rgb) * toLinear(in.tint.rgb), texel.a * in.tint.a);
+    let preExposure = select(1.0, u_shade.u_preExposure, u_shade.u_preExposure > 0.0);
+    return vec4<f32>(toLinear(texel.rgb) * toLinear(in.tint.rgb) * preExposure, texel.a * in.tint.a);
 }

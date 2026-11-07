@@ -3,6 +3,7 @@ import { ParticleSystemNode, type ParticleCullingMode } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { Button, ColorInput, DocScope, Hint, NumberInput, PropertyRow, PropertyTable, Select, Slider, Toggle } from '@cleo/app-kit/ui'
 import { ParticlesIcon } from '../sectionIcons'
+import FollowLightRows from './FollowLightRows'
 import { useEventBus } from '../../EventBusContext'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
 import ParticleSystemSlot from './ParticleSystemSlot'
@@ -22,6 +23,7 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
     spawnRateScale: props.node.spawnRateScale,
     tint: [...props.node.tint] as [number, number, number, number],
     exposureWeight: props.node.exposureWeight,
+    fogGlow: props.node.fogGlow,
     cullingMode: props.node.cullingMode,
     lodEnabled: props.node.lodEnabled,
   })
@@ -35,6 +37,7 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
     if (patch.spawnRateScale !== undefined) n.spawnRateScale = patch.spawnRateScale
     if (patch.tint !== undefined) n.tint = patch.tint
     if (patch.exposureWeight !== undefined) n.exposureWeight = patch.exposureWeight
+    if (patch.fogGlow !== undefined) n.fogGlow = patch.fogGlow
     if (patch.cullingMode !== undefined) n.cullingMode = patch.cullingMode
     if (patch.lodEnabled !== undefined) n.lodEnabled = patch.lodEnabled
     setValues(read())
@@ -87,6 +90,13 @@ export default function ParticleSystemEditor(props: { node: ParticleSystemNode }
               + '(0.1), or they blaze white at night and in a dark interior.'}>
             <Slider min={0} max={1} step={0.05} value={values.exposureWeight} readout onChange={exposureWeight => set({ exposureWeight })} />
           </PropertyRow>
+          <PropertyRow label='Fog Glow (lm)'
+            hint={'Lumens the effect lights VOLUMETRIC FOG with, and only the fog: a fire lighting its own smoke and the mist round it, '
+              + 'without a light every surface pays for. In the colour of the light it follows, on its flicker. 0: none.'}>
+            <NumberInput value={values.fogGlow} min={0} step={50} onChange={fogGlow => set({ fogGlow })} />
+          </PropertyRow>
+          <FollowLightRows node={props.node} target={props.node}
+            onChange={() => eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })} />
           <PropertyRow label='Tint' hint="Multiplies every particle's colour, alpha included.">
             <div className='flex items-center gap-2'>
               <ColorInput color={vec3ToHex(values.tint.slice(0, 3) as [number, number, number])}

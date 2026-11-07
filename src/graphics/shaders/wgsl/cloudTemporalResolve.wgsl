@@ -45,6 +45,8 @@ struct CloudResolveUniforms {
     u_slabMid: f32,                // world-space altitude of the cloud slab's midpoint
     u_bayerIndex: i32,             // which of the 16 sub-positions was traced this frame
     u_historyValid: i32,           // 0 on the first frame / after a cut: ignore history entirely
+    /** k_now / k_written: brings the history's colour to this frame's pre-exposure (TemporalHistory.rescale). */
+    u_historyRescale: f32,
 };
 @group(1) @binding(0) var<uniform> u_resolve: CloudResolveUniforms;
 
@@ -250,7 +252,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Clamp history into the freshly observed range, in unpremultiplied space so colour and coverage
     // come back out consistent with each other (see clampSample).
-    let history = clampSample(textureSampleLevel(u_history_texture, u_history_sampler, prevUV, 0.0), bounds);
+    let stored = textureSampleLevel(u_history_texture, u_history_sampler, prevUV, 0.0);
+    let history = clampSample(vec4<f32>(stored.rgb * u_resolve.u_historyRescale, stored.a), bounds);
 
     // A pixel traced this frame accumulates its new sample over the history rather than replacing it,
     // so the march dither averages across the 16-frame cycle. Every other pixel is history alone.

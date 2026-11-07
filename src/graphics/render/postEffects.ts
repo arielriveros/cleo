@@ -14,6 +14,9 @@ import { Texture } from '../texture';
 import { PresentProgram, OutlinePostProgram, BloomProgram, BloomDownsampleProgram, BloomUpsampleProgram, ComposerProgram, DofCocProgram, DofGatherProgram, DofCompositeProgram, LensFlareProgram, LensFlareCompositeProgram, FxaaProgram, VignetteProgram, FilmGrainProgram, ChromaticAberrationProgram } from './programs';
 import { FXAA_SEARCH_STEPS } from './settingsTypes';
 import type { FxaaQuality, ToneMapper } from './settingsTypes';
+import { displayExposure } from './frameView';
+import { LocalExposurePasses } from './localExposure';
+import { REFERENCE_ILLUMINANCE } from '../lighting';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -50,7 +53,12 @@ export class PostEffects {
                 private readonly _materials: MaterialBinder,
                 private readonly _temporal: TemporalPasses,
                 private readonly _fullscreen: FullscreenPasses,
-                private readonly _sys: RenderSubsystems) {}
+                private readonly _sys: RenderSubsystems) {
+        this.localExposure = new LocalExposurePasses(_view, _passes, _fullscreen, _bindGroups);
+    }
+
+    /** Local exposure's region pyramid, which both display resolves (present, outline) read. */
+    public readonly localExposure: LocalExposurePasses;
 
     /**
      * HDR bloom: luminance where bloom starts, soft-knee width around it, and additive strength.
@@ -87,6 +95,26 @@ export class PostEffects {
     // zeroes `bloomIntensity`, and this is what it restores from. Must track the default above, or a
     // quality switch silently reinstates the old value.
     public bloomIntensityUser: number = 0.35;
+
+    /**
+     * 'physical' (the default): no threshold — the whole image is blurred and a small share of it,
+     * `bloomMix`, is LERPED in (Jimenez, "Next Generation Post Processing in Call of Duty: Advanced
+     * Warfare", 2014). Glare is then in proportion to a thing's energy: a torch at midnight, five stops
+     * over the world around it, glows; the same torch at noon barely does; a glint never floods the frame,
+     * because it can only ever hand on its own share. 'threshold': the old behaviour, only what clears
+     * `bloomThreshold` blooms, added on top at `bloomIntensity`.
+     */
+    public bloomMode: 'physical' | 'threshold' = 'physical';
+
+    /** Physical bloom's share of the blurred image, 0..1. Call of Duty ships 0.04. */
+    public bloomMix: number = 0.04;
+
+    /**
+     * Night vision, 0..1 (chunks/grade.wgsl purkinjeShift): below a few cd/m2 colour drains toward a
+     * bluish grey and reds darken, as rod vision does, while lit areas keep their colour. Decided per
+     * pixel on absolute luminance, so it never touches a day frame. 1 = the full shift.
+     */
+    public purkinjeStrength: number = 1;
 
     // Restrict bloom to surfaces that set the scene buffer's alpha mask. Off by default: only
     // deferred-lit geometry, a baked sky and clouds can set it, so sprites and transparents never bloom.
@@ -187,6 +215,7 @@ export class PostEffects {
             case 'aces': return 1;
             case 'neutral': return 2;
             case 'none': return 3;
+            case 'agxPunchy': return 4;
             default: return 0;   // agx
         }
     }
@@ -235,13 +264,16 @@ export class PostEffects {
         const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'present', true);
         const lut = this.colorLut.volumeFor(this.colorGradingLut);
         this._fullscreen.bind(pass, 'present', PresentProgram, [
-            source.colors[0], this._targets.scene.depth, lut,
+            source.colors[0], this._targets.scene.depth, lut, this.localExposure.texture,
         ]);
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
+        this._shaderManager.setUniform('u_localExposure', this.localExposure.params());
+        this._shaderManager.setUniform('u_exposure', displayExposure(this._view));
         this._shaderManager.setUniform('u_saturation', this._effectiveSaturation());
         this._shaderManager.setUniform('u_toneMapper', this.toneMapperId());
         this._shaderManager.setUniform('u_lutSize', this.colorLut.size);
         this._shaderManager.setUniform('u_lutIntensity', this._lutIntensity());
+        this._shaderManager.setUniform('u_purkinjeStrength', this.purkinjeStrength);
+        this._shaderManager.setUniform('u_nitsPerUnit', REFERENCE_ILLUMINANCE / Math.max(1e-9, this._view.preExposure));
         // Opaque. The flag is reset rather than assumed because uniforms persist across binds, and a
         // preceding thumbnail capture would otherwise leave it on and punch the page background
         // through the viewport.
@@ -293,7 +325,7 @@ export class PostEffects {
         this._shaderManager.setUniform('u_sunDir', sun.dir);
         this._shaderManager.setUniform('u_sunUV', sun.uv);
         this._shaderManager.setUniform('u_sunVisible', sun.visible);
-        this._shaderManager.setUniform('u_exposure', this._view.exposure); // lets a pass invert the final present resolve
+        this._shaderManager.setUniform('u_exposure', displayExposure(this._view)); // lets a pass invert the final present resolve
         this._materials.applyCustom(mat);   // u_time, u_viewPos + user VALUE uniforms only
         this._passes.drawFullscreenAndEnd(pass);
     }
@@ -306,16 +338,19 @@ export class PostEffects {
         const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'outline', true);
         const lut = this.colorLut.volumeFor(this.colorGradingLut);
         this._fullscreen.bind(pass, 'outlinePost', OutlinePostProgram, [
-            source.colors[0], this.outlineMaskFBO.colors[0], lut,
+            source.colors[0], this.outlineMaskFBO.colors[0], lut, this.localExposure.texture,
         ]);
+        this._shaderManager.setUniform('u_localExposure', this.localExposure.params());
         // This pass does the final resolve, so it carries the WHOLE grade and not just the exposure.
         // It used to set only that, which meant selecting an object dropped the saturation trim and
         // the frame changed colour under the artist.
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
+        this._shaderManager.setUniform('u_exposure', displayExposure(this._view));
         this._shaderManager.setUniform('u_saturation', this._effectiveSaturation());
         this._shaderManager.setUniform('u_toneMapper', this.toneMapperId());
         this._shaderManager.setUniform('u_lutSize', this.colorLut.size);
         this._shaderManager.setUniform('u_lutIntensity', this._lutIntensity());
+        this._shaderManager.setUniform('u_purkinjeStrength', this.purkinjeStrength);
+        this._shaderManager.setUniform('u_nitsPerUnit', REFERENCE_ILLUMINANCE / Math.max(1e-9, this._view.preExposure));
         this._shaderManager.setUniform('u_texelSize', [1 / this._host.renderWidth, 1 / this._host.renderHeight]);
         this._shaderManager.setUniform('u_outlineColor', this.outlineColor);
         this._shaderManager.setUniform('u_outlineWidth', this.outlineWidth);
@@ -345,8 +380,9 @@ export class PostEffects {
         // reaches the screen, and at the default 1.0 nothing in an ordinary scene ever clears it.
         this._shaderManager.setUniform('u_bloomThreshold', this.bloomThreshold);
         this._shaderManager.setUniform('u_bloomKnee', this.bloomKnee);
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
+        this._shaderManager.setUniform('u_exposure', displayExposure(this._view));
         this._shaderManager.setUniform('u_bloomMaskEnabled', this.bloomMaskEnabled);
+        this._shaderManager.setUniform('u_bloomMode', this.bloomMode === 'physical' ? 1 : 0);
         // The bright pass halves the resolution, so it needs both grids to box-filter rather than
         // point-sample (see sourceBlockUV in bloom.fs).
         this._shaderManager.setUniform('u_srcTexelSize', [1 / this._host.renderWidth, 1 / this._host.renderHeight]);
@@ -375,6 +411,7 @@ export class PostEffects {
                 // Karis average on the first step only — it tames fireflies but is not energy
                 // conserving, so applying it all the way down would visibly dim the bloom.
                 this._shaderManager.setUniform('u_karisAverage', i === 1);
+                this._shaderManager.setUniform('u_exposure', displayExposure(this._view));
                 this._passes.drawFullscreenAndEnd(pass);
             }
 
@@ -410,6 +447,11 @@ export class PostEffects {
         ]);
         this._shaderManager.setUniform('u_bloomIntensity', this.bloomIntensity);
         this._shaderManager.setUniform('u_dirtIntensity', this._lensDirtStrength(dirt));
+        // Physical bloom lerps; a tier that switched bloom off zeroes `bloomIntensity`, which turns the
+        // physical mix off with it.
+        const physical = this.bloomMode === 'physical' && this.bloomIntensity > 0;
+        this._shaderManager.setUniform('u_bloomMix', physical ? Math.min(1, Math.max(0, this.bloomMix)) : 0);
+        this._shaderManager.setUniform('u_bloomNorm', 1 / Math.max(1, this.bloomMips.length));
         // The unit numbers are gone: the bind group assigns them and sets u_buffer1/u_buffer2 from the
         // shader's own reflection, so the order here is the order the shader declares.
         this._passes.drawFullscreenAndEnd(pass);
@@ -572,7 +614,7 @@ export class PostEffects {
         this._fullscreen.bind(genPass, 'lensFlare', LensFlareProgram, [target.colors[0]]);
         // The threshold is on the EXPOSED image, as bloom's is, so it means the same brightness on screen in
         // a sunlit field and in a cave; the buffer is pre-exposure, so it is uploaded divided back out.
-        this._shaderManager.setUniform('u_flareThreshold', this.lensFlareThreshold / Math.max(1e-8, this._view.exposure));
+        this._shaderManager.setUniform('u_flareThreshold', this.lensFlareThreshold / Math.max(1e-8, displayExposure(this._view)));
         this._shaderManager.setUniform('u_flareGhosts', this.lensFlareGhosts);
         // Not a setting: the spacing that puts the ghosts across the frame rather than piled at the
         // centre. Exposing it alongside the ghost count would mostly be a way to hide them all.
@@ -598,7 +640,7 @@ export class PostEffects {
         const pass = this._passes.beginFullscreenPass(target.renderTarget, 'fxaa', true);
         this._fullscreen.bind(pass, 'fxaa', FxaaProgram, [source.colors[0]]);
         this._shaderManager.setUniform('u_texelSize', [1 / Math.max(1, this._host.renderWidth), 1 / Math.max(1, this._host.renderHeight)]);
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
+        this._shaderManager.setUniform('u_exposure', displayExposure(this._view));
         this._shaderManager.setUniform('u_edgeThreshold', this.fxaaEdgeThreshold);
         this._shaderManager.setUniform('u_subpixel', this.fxaaSubpixel);
         this._shaderManager.setUniform('u_searchSteps', FXAA_SEARCH_STEPS[this.fxaaQuality]);
@@ -629,7 +671,7 @@ export class PostEffects {
         // speed to the frame rate, so it would crawl on a slow machine and shimmer on a fast one.
         this._shaderManager.setUniform('u_time', performance.now() * 0.001);
         this._shaderManager.setUniform('u_resolution', [this._host.renderWidth, this._host.renderHeight]);
-        this._shaderManager.setUniform('u_exposure', this._view.exposure);
+        this._shaderManager.setUniform('u_exposure', displayExposure(this._view));
         this._passes.drawFullscreenAndEnd(pass);
     }
 

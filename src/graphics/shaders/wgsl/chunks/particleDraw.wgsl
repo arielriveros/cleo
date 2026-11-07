@@ -38,7 +38,7 @@ struct ParticleDrawFragment {
     u_sunDir: vec4<f32>,          // lit: direction TO the sun, xyz
     u_sunColor: vec4<f32>,        // lit: key light (sun, or the moon at night) irradiance rgb
     u_keyDir: vec4<f32>,          // lit: direction TO the strongest point / spot light reaching the effect
-    u_keyColor: vec4<f32>,        // lit: that light's irradiance rgb (zero when none reaches)
+    u_keyColor: vec4<f32>,        // lit: that light's irradiance rgb (zero when none reaches); w = pre-exposure
     u_surface: vec4<f32>,         // lit: roughness, metallic, normal strength, SURFACE_* bits
     u_viewPos: vec4<f32>,         // lit: camera xyz; w = reflections: 0 the ambient, 1 sRGB cube, 2 linear cube
 };
@@ -335,6 +335,11 @@ fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
         let reflection = env * (f0 * dfg.x + dfg.y) * occlusion;
         rgb = diffuse + highlight + reflection;
     }
+
+    // Stored pre-exposed like every source (graphics/preExposure.ts); 0 — a host that never set it —
+    // reads as 1. Below the half-float ceiling.
+    let preExposure = select(1.0, u_frag.u_keyColor.w, u_frag.u_keyColor.w > 0.0);
+    rgb = min(rgb * preExposure, vec3<f32>(32768.0));
 
     // Premultiplied out. Alpha blends `one, one-minus-src-alpha`; additive drops the alpha term; cutout
     // is opaque. The scene buffer's own alpha is the bloom mask and the pipelines leave it alone.

@@ -16,6 +16,114 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Lighting that holds together from noon to midnight.** Torches now light the night in the editor
+  as they do in the game, and glare no longer floods the screen.
+  - *Moonlight in lux.* The Sky Atmosphere's **Moonlight (lux)** replaces the 0-1 share of the sun,
+    which put up to 1,000 lux of moon on an edited night. Old scenes keep their share until it is set.
+  - *Ambient that fades.* With the Sky Light deleted, the flat ambient still falls at night (a new Sky
+    Light's night ambient is 0.0001 of its day). Probe captures keep point and spot shadows, so a probe
+    no longer smears torchlight across a valley.
+  - *Pre-exposure.* Every light, the sky, emissives and effects are stored multiplied by a power of two
+    near the frame's exposure, so moonlit and torch-lit frames keep the precision a sunlit one has in
+    half floats. A day frame is unchanged. Histories rescale exactly instead of resetting. Custom
+    materials that add their own light opt in with `cleoPreExposure()`.
+  - *Physical sky.* With **Physical Units** (new skies), the sky, the sun disc and the ground are lit by
+    the scene sun's own lux, so a reflected sun is no brighter than the one in the sky. Its march
+    converges: it stops where the air has thinned out and steps densely near the ground, where an even
+    march to a thick atmosphere's top (the Valley's is 1,300 km) skipped the air and left the zenith 17
+    times too dark, a navy-black sky over sunlit ground. It is calibrated to measured clear-sky light,
+    and the clouds keep the balance against the ground they were tuned to.
+  - *Metering.* The meter reads the opaque scene before transparents, particles and sprites, so a fire
+    or a glint coming into view no longer pumps the exposure. Turning metering on eases from the
+    current EV instead of snapping. The present dithers before its 8-bit store.
+- **A physical look.**
+  - *Bloom.* The new **Physical** mode is the default: no threshold, a **Mix** share (0.04) of the
+    blurred frame is mixed in, so glare follows energy (Jimenez 2014). **Threshold** stays available.
+    Fireflies at night are gone: the Karis weight uses exposed luma.
+  - *Night Vision* (`purkinjeStrength`). Below a few cd/m² colour drains toward a bluish grey and reds
+    darken, per pixel on absolute luminance, so moonlight reads as night while a torch pool stays warm.
+  - *AgX Punchy.* A new tone mapper: AgX with Blender's Punchy look, more contrast and saturated colour
+    kept rich, so a clear sky stays blue where plain AgX turns it steel-grey. Middle grey is held where
+    AgX puts it, so switching keeps the exposure. Player contract 21.
+  - *Local Exposure.* Exposure fusion gives each region of the frame its own exposure (Shadow Lift,
+    Highlight Hold, Local Strength), with an edge-aware upsample so silhouettes keep no halo. On from
+    the High tier.
+- **Fire that burns on one beat.**
+  - *Flicker.* Point and spot lights get **Flicker** and **Flicker Speed**: seeded noise on the
+    intensity only, so cached shadow maps stay valid.
+  - *Follow Light.* Sprites and particle systems get **Follow Light** and **Follow Amount**: a flame's
+    brightness and its embers' brightness and spawn rate swell with the light they follow.
+  - *Lit sprites.* Lit sprites take every clustered point and spot light per pixel, so six-way smoke is
+    lit by each torch round it.
+  - *Draw order.* Additive particles draw after the sprites, so embers stay in front of the smoke.
+- **Volumetric Fog volumes.** A new **Volumetric Fog** node is a box of mist, smoke or dust, sized with
+  the viewport's face handles.
+  - *Medium.* Density, albedo, anisotropy, height falloff, drifting noise, emission and per-source
+    scattering, with six presets.
+  - *Lighting.* The sun or moon scatters into it through its cascades, and so do every point and spot
+    light (through their shadow maps from the High tier) and the sky's fill.
+  - *Rendering.* A froxel grid, integrated front to back with energy-conserving steps and blended with
+    the last frame's. It runs as fullscreen passes on both WebGL2 and WebGPU. Overlapping volumes add.
+  - *Fog Glow.* A particle system's **Fog Glow** lights the fog alone, in the colour and on the
+    flicker of the light it follows.
+  - The height fog and god rays are unchanged. A scene with no volume runs nothing.
+  - Player contract 19.
+- **Weather volumes on the landscape and its plants.** The Weather node is now a box, sized with the
+  viewport's face handles like a fog volume, and the weather falls only inside it.
+  - *Several at once.* Volumes may overlap; the higher **Priority** draws over the lower, so a dry box
+    inside a snowy one carves out a dry pocket. Up to 4 near the camera draw a frame.
+  - *Wet ground.* The landscape darkens and glosses in rain, and water stands in its low, flat spots
+    (**Puddles**).
+  - *Snow.* It settles on ground flatter than **Snow Slope**, low ground first, its edge broken up by
+    **Snow Breakup**, and is drawn with a chosen **Snow Material**. That material's maps are baked as one
+    more layer of the landscape's surface arrays, so it costs no binding. Without one, flat white.
+  - *Plants, one at a time.* Foliage takes the weather of the volume each plant stands in, and bows
+    under it individually.
+  - *Shelter.* A depth map seen from straight above, of every still, solid model round the camera, keeps
+    the ground and plants under a roof or an overhang dry and free of snow. It is redrawn only when
+    something in it moves. Each volume can turn it off. Renderer setting `weatherShelterEnabled` and
+    `weatherShelterResolution`; off on the Low tier.
+  - *Old scenes.* A weather node saved before boxes covers the whole scene, as it did. Player contract 20.
+- **The Valley at night.**
+  - *Sky.* A 2 lux moon, near white, with the blue left to night vision, and a physical sky graded with
+    AgX Punchy.
+  - *Fire.* Fire lights flicker, and their flames and embers follow them. The bonfire and fire pits
+    glow into the fog.
+  - *Fog.* Mist over the pond and at the skull cave's mouth, both gathering at night and at dawn, and
+    smoke in the dungeon halls.
+  - *Probe.* The valley probe gives reflections only.
+- **Rough things stay rough at a distance.**
+  - *Normal-map specular antialiasing.* A normal map's far mips average its bumps away, and the lost
+    spread now goes into the roughness (Toksvig), on meshes and on every landscape surface. Rock across
+    a valley is as rough as it is up close. It is part of **Specular antialiasing**.
+  - *Split-sum Fresnel.* The probe, sky and screen-space reflections multiplied a Fresnel term onto a
+    split sum that already holds one, so rough ground and cliffs seen at grazing angles reflected two to
+    three times what they should.
+- **Light probes that see shade.** A probe capture draws the sun's shadow round the probe with a map of
+  its own, and the forward terrain is shadowed. Probes are captured one a frame, nearest first. The
+  lighting takes the smallest probe box the camera is in, and keeps the second slot for the scene's
+  unbounded probe as the fallback everywhere else.
+- **Billboards that face the eye.** A cylindrical sprite turns about its own upright axis to face the
+  camera's position, instead of lying parallel to the screen. Flames and smoke at the corners of a wide
+  view no longer look squashed and leaning.
+- **Smoke without a white orb.** A six-way or flat lit sprite takes each local light no nearer than its
+  own thickness (half the quad's width). The fire's light at the root of its smoke made a white orb there
+  at night.
+- **The Valley, more real.**
+  - *Shade.* Open shade on a fair morning is about a quarter of the sunlit ground (it measured 58%). The
+    flat ambient is only the ground's bounce now; the sky's own light is the Sky Light's. The Sky Light's
+    cloud response is 0.35, since the clouds' shadows already take the sun where they pass.
+  - *Rock.* The cliffs' rock has weathered rock's roughness (about 0.79, was 0.52). The campfire's stones,
+    logs and embers are no longer metal: glTF metallic and roughness factors are applied to their maps.
+  - *Landscape materials.* Every surface of the landscape is a library material under
+    Landscape/Materials (Ground, Dirt, Rocky Dirt, Forest Floor, Rock, Snow, Pond Clay, Shore Sand, Trail,
+    Stone Path), linked from its slot. The Snow can be picked as a weather's snow material.
+  - *Probes.* Local probes at the bonfire, the hamlet, the pond, the windmill and the cave mouth. The two
+    house interiors are lit by probes of their own, so a room is darker than the street.
+  - *Bonfire.* The bonfire's loop runs 2.7 s (was 0.9 s), filmed after its ignition has cleared the
+    frame, so no puff is cut at the sprite's edges. Lighting a bonfire plays a new FX Creator flare,
+    **Bonfire Ignition**, that settles into the loop as the light swells and the smoke thickens.
+  - Player contract 22.
 - **Surfaces, water and standard outputs in the World Creator.** A stack of surfaces (sand, grass,
   rock, scree, snow...) placed by rules over the terrain's own values and what erosion did to it:
   height, height above water, slope, aspect, curvature, cavity, flow area, wetness, water depth, shore

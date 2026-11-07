@@ -95,6 +95,8 @@ struct DecalUniforms {
     u_affectNormal: i32,
     u_affectSurface: i32,
     u_decalMode: i32,               // decalColor only: 0 = emissive, 1 = editor overlay
+    /** decalColor only: the frame's pre-exposure for the emissive mode (graphics/preExposure.ts). 0 reads as 1. */
+    u_decalPreExposure: f32,
 };
 @group(1) @binding(4) var<uniform> u_decal: DecalUniforms;
 

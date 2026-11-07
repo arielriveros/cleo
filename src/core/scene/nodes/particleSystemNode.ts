@@ -1,6 +1,7 @@
 import { mat4, vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
+import { FollowedLight, type LightNode } from "./lightNode";
 import { authoring } from "../../eventBus";
 import {
     cloneParticleSystem, defaultParticleSystem, parseParticleSystem, type ParticleSystemDef,
@@ -22,6 +23,12 @@ export interface ParticleSystemNodeOptions {
     tint?: [number, number, number, number];
     /** How much the camera's exposure brightens the particles, 0..1 (see the property). */
     exposureWeight?: number;
+    /** Burn with a light: the NAME of a point or spot light near the system (see the property). */
+    followLight?: string | null;
+    /** How much of that light's flicker the system takes, 0..1 (default 1). */
+    followAmount?: number;
+    /** Lumens the effect glows with into volumetric fog only (see the property). 0 = none. */
+    fogGlow?: number;
     /** What the system does while its bounds are out of view. See {@link ParticleCullingMode}. */
     cullingMode?: ParticleCullingMode;
     /** Follow the system's distance LOD (its `.vfx` `lod`). Off = full detail at any distance, never culled. */
@@ -109,8 +116,43 @@ export class ParticleSystemNode extends Node {
         this._cullingMode = CULLING_MODES.includes(options.cullingMode as ParticleCullingMode)
             ? options.cullingMode as ParticleCullingMode : 'auto';
         this._lodEnabled = options.lodEnabled !== false;
+        this.followLight = options.followLight ?? null;
+        this.followAmount = options.followAmount ?? 1;
+        this.fogGlow = options.fogGlow ?? 0;
         this._runtime = new ParticleSystemRuntime(this._system.emitters, seedSalt(this.id));
     }
+
+    private _followLight: string | null = null;
+    private _followAmount = 1;
+    private readonly _followed = new FollowedLight();
+
+    /**
+     * Burn with a light (graphics/lightFlicker.ts): the NAME of a point or spot light near the system — a
+     * sibling, or under an ancestor a level or two up, as a torch's Embers and Light sit under the torch.
+     * The particles' brightness and their spawn rate then follow that light's flicker, so the embers thicken
+     * as the flame swells. Null: steady.
+     */
+    public get followLight(): string | null { return this._followLight; }
+    public set followLight(value: string | null) { this._followLight = typeof value === 'string' && value ? value : null; }
+    /** How much of the followed light's flicker the system takes: 0 none, 1 all of it. */
+    public get followAmount(): number { return this._followAmount; }
+    public set followAmount(value: number) { this._followAmount = Math.min(1, Math.max(0, num(value, 1))); }
+
+    private _fogGlow = 0;
+    /**
+     * Lumens the effect glows with into VOLUMETRIC FOG only (a VolumetricFogNode around it): a fire lighting
+     * its own smoke and the mist round it, without a light that costs every surface a cluster slot. In the
+     * colour of the light it follows (`followLight`) and on its flicker, times the system's tint. 0 (the
+     * default) gives the fog nothing.
+     */
+    public get fogGlow(): number { return this._fogGlow; }
+    public set fogGlow(value: number) { this._fogGlow = Math.max(0, num(value, 0)); }
+
+    /** This frame's multiplier from the followed light's flicker (1 when it follows none). */
+    public get lightFollowScale(): number { return this._followed.factor(this, this._followLight, this._followAmount); }
+
+    /** The light this effect follows (`followLight`), or null: its colour is the fog glow's. */
+    public get followedLight(): LightNode | null { return this._followed.resolve(this, this._followLight); }
 
     // -----------------------------------------------------------------------------------------------
     // Definition
@@ -321,7 +363,7 @@ export class ParticleSystemNode extends Node {
         const { spawnScale, stepScale } = particleLodFactors(lod, this.lod.level);
         // Despawning gradually (Node.remove): stop feeding the system and let what is alive play out
         // over the dissolve, rather than cutting a burst off mid-air.
-        const rate = this.effectiveFade < 1 ? 0 : this._spawnRateScale;
+        const rate = this.effectiveFade < 1 ? 0 : this._spawnRateScale * this.lightFollowScale;
         this._runtime.advance(delta * this._simulationSpeed, this.worldTransform, rate, undefined,
             { level: this.lod.level, spawnScale, stepScale, scaleBursts: lod?.scaleBursts === true });
     }
@@ -341,6 +383,8 @@ export class ParticleSystemNode extends Node {
                 tint: [...this._tint],
                 // Only when set, so a system that follows the exposure serializes as it always did.
                 ...(this._exposureWeight < 1 ? { exposureWeight: this._exposureWeight } : {}),
+                ...(this._followLight ? { followLight: this._followLight, ...(this._followAmount < 1 ? { followAmount: this._followAmount } : {}) } : {}),
+                ...(this._fogGlow > 0 ? { fogGlow: this._fogGlow } : {}),
                 cullingMode: this._cullingMode,
                 lodEnabled: this._lodEnabled,
             },

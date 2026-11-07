@@ -45,10 +45,31 @@ export class TemporalHistory {
     /** This frame's target. */
     public get write(): Framebuffer { return this._targets[this._index ^ 1]; }
 
-    /** After writing {@link write}: it becomes {@link read}, and is trusted from now on. */
-    public swap(): void {
+    /**
+     * After writing {@link write}: it becomes {@link read}, and is trusted from now on. `preExposure` is the
+     * factor the frame stored its values with (FrameView.preExposure), remembered so the next frame can
+     * bring them to ITS factor ({@link rescale}). Required, so no owner can forget to stamp it.
+     */
+    public swap(preExposure: number): void {
         this._index ^= 1;
         this.valid = true;
+        this._readPreExposure = preExposure > 0 ? preExposure : 1;
+    }
+
+    /** The pre-exposure {@link read} was written with. */
+    private _readPreExposure = 1;
+
+    /** The pre-exposure {@link read} was written with: what `rescale` divides out. */
+    public get readPreExposure(): number { return this._readPreExposure; }
+
+    /**
+     * What {@link read}'s colour must be multiplied by to be in a frame pre-exposed by `preExposure`:
+     * `k_now / k_written`. Exactly 1 while the factor holds, and an exact power of two when it changes,
+     * so a history survives an exposure change without a pop or a loss of precision. Never a reason to
+     * invalidate one.
+     */
+    public rescale(preExposure: number): number {
+        return (preExposure > 0 ? preExposure : 1) / this._readPreExposure;
     }
 
     /** Stop trusting the history; the next frame starts it over. */

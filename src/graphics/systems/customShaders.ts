@@ -451,6 +451,42 @@ function usesScreenReflection(fragmentSource: string): boolean {
     return /\bcleoScreenReflection\b/.test(fragmentSource);
 }
 
+/** The input `cleoPreExposure` reads. OPT-IN for the same reason as the reflection helper's. */
+const PRE_EXPOSURE_UNIFORMS: ValueDecl[] = [
+    { name: 'u_preExposure', type: 'float', comment: "the frame's pre-exposure (cleoPreExposure)" },
+];
+
+const PRE_EXPOSURE_BODY = `
+/**
+ * The factor the frame stores light multiplied by (pre-exposure: it keeps a dark scene inside the
+ * half-float buffers' precision). The engine's light inputs - u_dirLight, u_sceneAmbient, the clustered
+ * lights, the sky light - arrive already multiplied by it, and so does cleoSceneColor. Anything your
+ * material MAKES or reads raw does not: an emissive colour, a constant glow, a u_envMap reflection.
+ * Multiply those by this, or they read darker the darker the scene's exposure, by a power of two.
+ */
+float cleoPreExposure() { return u_preExposure > 0.0 ? u_preExposure : 1.0; }
+`;
+
+/** Whether a forward material's source uses the pre-exposure helper. */
+function usesPreExposure(fragmentSource: string): boolean {
+    return /\bcleoPreExposure\b/.test(fragmentSource);
+}
+
+/**
+ * The forward interface a material's source asks for: the plain one, or with the opt-in helpers it names
+ * (screen reflections, pre-exposure). A material naming neither assembles exactly as it always has.
+ */
+function forwardInterfaceFor(fragmentSource: string): PreludeInterface {
+    const reflect = usesScreenReflection(fragmentSource);
+    const base = reflect ? FORWARD_REFLECTION_INTERFACE : FORWARD_INTERFACE;
+    if (!usesPreExposure(fragmentSource)) return base;
+    return {
+        ...base,
+        uniforms: [...base.uniforms, ...PRE_EXPOSURE_UNIFORMS],
+        body: (dialect) => (typeof base.body === 'string' ? base.body : base.body(dialect)) + PRE_EXPOSURE_BODY,
+    };
+}
+
 const FORWARD_EPILOGUE = `
 void main() {
     TBN = mat3(fragTangent, fragBitangent, fragNormal);
@@ -892,7 +928,7 @@ export function assembleCustomFragment(
     // and there is no second copy of any prelude to drift.
     const iface = renderMode === 'screen' ? SCREEN_INTERFACE
                 : renderMode === 'deferred' ? DEFERRED_INTERFACE
-                : usesScreenReflection(fragmentSource) ? FORWARD_REFLECTION_INTERFACE : FORWARD_INTERFACE;
+                : forwardInterfaceFor(fragmentSource);
     const epilogue = renderMode === 'screen' ? SCREEN_EPILOGUE
                    : renderMode === 'deferred' ? DEFERRED_EPILOGUE : FORWARD_EPILOGUE;
 

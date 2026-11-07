@@ -1,6 +1,7 @@
 import { vec3, mat4 } from 'gl-matrix';
 import { Logger } from '../../core/logger';
 import { LightNode } from '../../core/scene/nodes/lightNode';
+import { DEFAULT_NIGHT_AMBIENT, nightAmbientScale } from '../../core/scene/nodes/skyLightNode';
 import { Scene } from '../../core/scene/scene';
 import { spotBoundingSphere, DEFAULT_CLUSTER_GRID } from '../clusters';
 import type { ClusterLight } from '../clusters';
@@ -153,7 +154,10 @@ export class LightingPasses {
             this._shaderManager.bind(shaderName);
             this.lightGrid.uploadUniforms(this._shaderManager);
             this._clearDirectional();
-            this._shaderManager.setUniform('u_sceneAmbient', this.internalAmbient(scene));
+            this._shaderManager.setUniform('u_sceneAmbient', this._preExposedAmbient(scene));
+            // Pre-exposure for the terms the built-in forward programs multiply themselves (emissive, the
+            // environment cube). Custom materials take only the CPU-scaled light uniforms above and below.
+            this._shaderManager.setUniform('u_preExposure', this._view.preExposure);
             // The forward path has no SSAO, but it does have the material AO map, so it needs the same
             // flag. Declared in chunks/pbrForward.wgsl and uploaded nowhere would mean it read 0 and
             // specular occlusion was silently off in every forward material.
@@ -241,7 +245,7 @@ export class LightingPasses {
         const skyLight = scene.skyLight;
         this._shaderManager.setUniform('u_envMapMode', scene.environmentMap ? 1 : skyReflection ? 2 : 0);
         if (skyReflection && skyLight) {
-            const k = skyLight.intensity, tint = skyLight.tint;
+            const k = skyLight.intensity * this._view.preExposure, tint = skyLight.tint;
             this._skyReflectionScale[0] = k * tint[0];
             this._skyReflectionScale[1] = k * tint[1];
             this._skyReflectionScale[2] = k * tint[2];
@@ -267,7 +271,8 @@ export class LightingPasses {
 
         for (let i = 0; i < 2; i++) {
             const slot = probes[i] ?? null;
-            this._shaderManager.setUniform(`u_iblIntensity${i}`, slot ? slot.intensity : 0);
+            // Probe cubes are baked absolute (k = 1); this frame's pre-exposure rides on their intensity.
+            this._shaderManager.setUniform(`u_iblIntensity${i}`, slot ? slot.intensity * this._view.preExposure : 0);
             this._shaderManager.setUniform(`u_probeUnbounded${i}`, slot ? !slot.bounded : false);
             this._shaderManager.setUniform(`u_probeInvVolume${i}`, slot && slot.bounded ? slot.invVolumeMatrix : LightingPasses._IDENTITY_MAT4);
             this._shaderManager.setUniform(`u_probeBlend${i}`, slot && slot.bounded ? slot.volumeBlend : [0, 0, 0]);
@@ -301,7 +306,10 @@ export class LightingPasses {
         this._uploadSkyLight();
         const grade = this.cloudGrade(scene);
         this.lightGrid.uploadUniforms(this._shaderManager);
-        this._shaderManager.setUniform('u_sceneAmbient', this.internalAmbient(scene));
+        this._shaderManager.setUniform('u_sceneAmbient', this._preExposedAmbient(scene));
+        // The G-buffer's emissive and the scene environment map are absolute; the lighting pass
+        // pre-exposes them itself. Everything else it reads arrives pre-exposed through these uploads.
+        this._shaderManager.setUniform('u_preExposure', this._view.preExposure);
         // Punctual lights are in the grid; only the sun still travels as uniforms.
         let hasDirectional = false;
         for (const node of scene.lights) {
@@ -376,7 +384,8 @@ export class LightingPasses {
         // grade splits in two: cloud whitening is a COLOUR change and dimming is an INTENSITY
         // change, which is what those two things physically are.
         this._shaderManager.setUniform('u_dirLight.color', this._whitenedSun(key ? key.color : light.color, grade));
-        this._shaderManager.setUniform('u_dirLight.intensity', (key ? key.intensity : light.internalIntensity) * grade.sun);
+        this._shaderManager.setUniform('u_dirLight.intensity',
+                                       (key ? key.intensity : light.internalIntensity) * grade.sun * this._view.preExposure);
         this._shaderManager.setUniform('u_dirLight.angularRadius', light.angularRadius);
         this._shaderManager.setUniform('u_dirLight.direction', this.dirOf(node));
     }
@@ -399,7 +408,12 @@ export class LightingPasses {
         const toSun = [-f[0] / len, -f[1] / len, -f[2] / len];
         const toMoon = moonDirection(toSun, atmo.moonOffsetYaw, atmo.moonOffsetPitch);
         const light = node.light as DirectionalLight;
-        this.keyLight = keyLight(toSun, toMoon, light.color, light.internalIntensity, atmo);
+        // The moon is its own lux (a legacy scene's: a fraction of this sun's), on the internal scale.
+        const moonLight = atmo.moonLux(light.internalIntensity * REFERENCE_ILLUMINANCE) / REFERENCE_ILLUMINANCE;
+        this.keyLight = keyLight(toSun, toMoon, light.color, light.internalIntensity, {
+            nightEnabled: atmo.nightEnabled, moonEnabled: atmo.moonEnabled, moonColor: atmo.moonColor,
+            moonPhase: atmo.moonPhase, moonLight,
+        });
         this.keyLightNode = node;
         vec3.set(this.keyLightDir, this.keyLight.dir[0], this.keyLight.dir[1], this.keyLight.dir[2]);
     }
@@ -538,6 +552,9 @@ export class LightingPasses {
      */
     public packLightRecords(scene: Scene): void {
         let i = 0;
+        // Pre-exposed: the light texture is shared by the deferred pass, every forward program and every
+        // custom material, so it is scaled here, once, rather than in any of them.
+        const k = this._view.preExposure;
         for (const node of scene.lights) {
             if (node.type === 'directional' || node.index < 0) continue;
             if (i >= MAX_LIGHTS) break;
@@ -550,14 +567,14 @@ export class LightingPasses {
                 const spot = node.light as Spotlight;
                 const [coneScale, coneOffset] = spot.coneScaleOffset;
                 this.lightGrid.packRecord(i, node.worldPosition, spot.invRangeSquared,
-                                           spot.color, off ? 0 : spot.internalIntensity,
+                                           spot.color, off ? 0 : spot.internalIntensity * node.flickerFactor * k,
                                            node.worldForward, spot.sourceRadius,
                                            coneScale, coneOffset,
                                            this._shadows.spotSlots.layerOf(node.id), NO_SHADOW_SLOT);
             } else {
                 const point = node.light as PointLight;
                 this.lightGrid.packRecord(i, node.worldPosition, point.invRangeSquared,
-                                           point.color, off ? 0 : point.internalIntensity,
+                                           point.color, off ? 0 : point.internalIntensity * node.flickerFactor * k,
                                            ShadowPasses.POINT_DIRECTION, point.sourceRadius,
                                            POINT_CONE_SCALE, POINT_CONE_OFFSET,
                                            NO_SHADOW_SLOT, this._shadows.pointSlots.layerOf(node.id));
@@ -574,8 +591,15 @@ export class LightingPasses {
         this._shaderManager.setUniform('u_dirLight.angularRadius', 0);
     }
 
+    /** `internalAmbient`, pre-exposed: what the lighting programs are handed as `u_sceneAmbient`. */
+    private _preExposedAmbient(scene: Scene): number[] {
+        const a = this.internalAmbient(scene), k = this._view.preExposure;
+        return [a[0] * k, a[1] * k, a[2] * k];
+    }
+
     /**
-     * The scene's indirect fill on the internal radiance scale.
+     * The scene's indirect fill on the internal radiance scale. ABSOLUTE — never pre-exposed here, because
+     * the particles, fluids and fog read it too and apply the frame's pre-exposure at their own outputs.
      *
      * NOT cloud-graded, deliberately. The overcast fill the grade describes is already delivered by the
      * sky light, which receives what the sun loses (see _uploadSkyLight and CLOUD_SKY_FILL); applying
@@ -584,12 +608,18 @@ export class LightingPasses {
      *
      * A sky light, when there is one, owns how much of that floor survives: its `ambient` scale and its
      * `nightAmbient` share. Unlike the sky's own projection, the floor does not darken with the sky, so
-     * without that a moonless night stays as lit as the shade at noon.
+     * without that a moonless night stays as lit as the shade at noon. A scene with a sky but no sky light
+     * fades it by DEFAULT_NIGHT_AMBIENT.
      */
     public internalAmbient(scene: Scene | null): number[] {
         const lux = scene ? scene.ambientLight : [DEFAULT_SCENE_AMBIENT_LUX, DEFAULT_SCENE_AMBIENT_LUX, DEFAULT_SCENE_AMBIENT_LUX];
         const sky = scene?.skyLight ?? null;
-        const k = (sky ? sky.ambientScale(this._sunElevation(scene!)) : 1) / REFERENCE_ILLUMINANCE;
+        // With no sky light, a scene that has a sky still has a night: the fill fades with the sun by the
+        // default share, as a new sky light's does, so deleting the sky light never brightens the dark.
+        // A scene with no sky (a dungeon, a preview rig) has no day or night and keeps its fill.
+        const scale = sky ? sky.ambientScale(this._sunElevation(scene!))
+            : scene?.skyAtmosphere ? nightAmbientScale(DEFAULT_NIGHT_AMBIENT, this._sunElevation(scene)) : 1;
+        const k = scale / REFERENCE_ILLUMINANCE;
         return [lux[0] * k, lux[1] * k, lux[2] * k];
     }
 
@@ -628,7 +658,9 @@ export class LightingPasses {
         const grade = scene ? this.cloudGrade(scene) : { sun: 1, white: 0, sky: 1, flat: 0 };
 
         this._shaderManager.setUniform('u_skyLight.enabled', on ? 1 : 0);
-        this._shaderManager.setUniform('u_skyLight.intensity', node ? node.intensity * grade.sky : 0);
+        // The SH coefficients stay absolute (they are shared with the clouds and particles); the frame's
+        // pre-exposure rides on the intensity the shader multiplies them by.
+        this._shaderManager.setUniform('u_skyLight.intensity', node ? node.intensity * grade.sky * this._view.preExposure : 0);
 
         let sh = LightingPasses._ZERO_SH;
         if (on) {

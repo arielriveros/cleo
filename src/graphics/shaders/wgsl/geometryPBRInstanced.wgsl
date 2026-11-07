@@ -20,5 +20,7 @@
 // @variant leanOpaque CLEO_POM=0 CLEO_LEAN=1 CLEO_OPAQUE=1
 // @variant leanOpaqueFoliage CLEO_POM=0 CLEO_WIND=1 CLEO_FOLIAGE=1 CLEO_LEAN=1 CLEO_OPAQUE=1
 
+// Every variant evaluates the weather volumes and the shelter map per plant (chunks/instancedVertex.wgsl).
+#define CLEO_INSTANCED_WEATHER 1
 #include "./chunks/instancedVertex.wgsl"
 #include "./chunks/pbrGBuffer.wgsl"

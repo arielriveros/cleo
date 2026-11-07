@@ -34,9 +34,25 @@ export interface SkyLightOptions {
     /**
      * Share of that fill kept once the sun is down, 0..1. It fades on the sky's own dusk curve
      * (`nightFactor`), so the day keeps its fill and a moonless night can go almost black.
-     * 1 = the night keeps the full fill, as it always did.
+     * 1 = the night keeps the full fill, as it always did. A new sky light defaults to
+     * DEFAULT_NIGHT_AMBIENT, the share a scene with no sky light gets, so adding or deleting one does not
+     * change the night; a saved one without the field keeps 1.
      */
     nightAmbient?: number;
+}
+
+/**
+ * The share of the scene's flat ambient kept at full night when nothing says otherwise: a scene with a sky
+ * but no sky light, and a new sky light. The flat ambient is a DAYLIGHT fill (thousands of lux in a sunny
+ * scene); kept at night it lit the dark as brightly as the shade at noon, and no torch could show against
+ * it. 1e-4 leaves a ~7,600 lx fill at under a lux.
+ */
+export const DEFAULT_NIGHT_AMBIENT = 0.0001;
+
+/** The flat-ambient multiplier for a night share at a sun elevation (sine), on the sky's dusk curve. */
+export function nightAmbientScale(nightShare: number, sunElevationSin: number | null): number {
+    if (sunElevationSin === null || nightShare >= 1) return 1;
+    return 1 + (nightShare - 1) * nightFactor(sunElevationSin);
 }
 
 export class SkyLightNode extends Node {
@@ -62,7 +78,7 @@ export class SkyLightNode extends Node {
         this._cloudShadows = options.cloudShadows ?? false;
         this._cloudShadowStrength = Math.min(1, Math.max(0, options.cloudShadowStrength ?? 0.85));
         this._ambient = Math.max(0, options.ambient ?? 1);
-        this._nightAmbient = Math.min(1, Math.max(0, options.nightAmbient ?? 1));
+        this._nightAmbient = Math.min(1, Math.max(0, options.nightAmbient ?? DEFAULT_NIGHT_AMBIENT));
     }
 
     public get intensity(): number { return this._intensity; }
@@ -96,8 +112,7 @@ export class SkyLightNode extends Node {
      * never applies.
      */
     public ambientScale(sunElevationSin: number | null): number {
-        if (sunElevationSin === null || this._nightAmbient >= 1) return this._ambient;
-        return this._ambient * (1 + (this._nightAmbient - 1) * nightFactor(sunElevationSin));
+        return this._ambient * nightAmbientScale(this._nightAmbient, sunElevationSin);
     }
 
     public get needsProjection(): boolean { return this._needsProjection; }
@@ -130,7 +145,8 @@ export class SkyLightNode extends Node {
     }
 
     public static parse(parent: Node, json: any) {
-        const node = new SkyLightNode(json.name, json.skyLight ?? {}, json.id);
+        // A payload from before `nightAmbient` existed kept the full fill at night; it still does.
+        const node = new SkyLightNode(json.name, { nightAmbient: 1, ...(json.skyLight ?? {}) }, json.id);
         Node.finishParse(node, parent, json);
     }
 }

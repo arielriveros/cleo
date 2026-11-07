@@ -38,11 +38,12 @@ describe('findResources', () => {
         // GLSL ES has only combined samplers, so the pair is one `uniform sampler2D`.
         const resources = findResources(compose('present.wgsl'));
         const pairs = resources.filter(r => r.kind === 'texture' || r.kind === 'sampler');
-        // Three pairs: the scene colour, the coverage depth, and the 3D colour LUT that
-        // chunks/colorLut.wgsl contributes. A 3D texture collapses exactly like a 2D one.
-        expect(pairs).toHaveLength(6);
+        // Four pairs: the scene colour, the coverage depth, the 3D colour LUT that chunks/colorLut.wgsl
+        // contributes, and the local exposure regions from chunks/localExposure.wgsl. A 3D texture
+        // collapses exactly like a 2D one.
+        expect(pairs).toHaveLength(8);
         expect(new Set(pairs.map(r => r.glslName)))
-            .toEqual(new Set(['u_screenTexture', 'u_coverageDepth', 'u_colorLut']));
+            .toEqual(new Set(['u_screenTexture', 'u_coverageDepth', 'u_colorLut', 'u_localExposure']));
     });
 
     it('classifies a uniform buffer by its address space, not its type', () => {
@@ -83,8 +84,12 @@ describe('findUniformBlocks', () => {
                 { name: 'u_lutIntensity', type: 'f32', offset: 12 },
                 { name: 'u_lutSize', type: 'f32', offset: 16 },
                 { name: 'u_alphaFromDepth', type: 'f32', offset: 20 },
+                { name: 'u_purkinjeStrength', type: 'f32', offset: 24 },
+                { name: 'u_nitsPerUnit', type: 'f32', offset: 28 },
+                // A vec4 after eight scalars: 16-byte aligned, which 32 already is.
+                { name: 'u_localExposure', type: 'vec4<f32>', offset: 32 },
             ]);
-        expect(blocks[0].size).toBe(32);   // six 4-byte scalars, padded to the struct's 16-byte alignment
+        expect(blocks[0].size).toBe(48);   // eight 4-byte scalars, then a vec4
     });
 
     it('does not lose a member to the comment above it', () => {

@@ -166,6 +166,16 @@ at night, as the torch's own light does, and a lit effect is as bright as the li
 hold an effect closer to one look under every exposure; keep that for the rare effect that must not adapt,
 such as a UI-like marker in the world.
 
+**Follow Light** — a point or spot light nearby, by name (under the node's parent and a couple of levels
+above), whose flicker the effect follows: its particles brighten and its spawn rate rises as the light
+swells, so a fire's embers burn on its light's beat. **Follow Amount** is how much of the flicker it takes.
+Sprites and animated sprites have the same two fields under **Appearance**: a flame sprite following its
+torch's light.
+
+**Fog Glow** — lumens the effect lights [volumetric fog](node-inspector.md#volumetric-fog) with, and only
+the fog: a fire lighting its own smoke and the mist round it, without a light that every surface pays for.
+It takes the colour and the flicker of the light the effect follows. 0, the default, adds nothing.
+
 **Effect** — the `.vfx` asset the node plays, with ✎ into the particle editor. Linking one copies it
 onto the node, so the effect still plays where the library is not around (a published game ships
 none); ✕ unlinks without changing what plays. A node always holds an effect — a new one starts with

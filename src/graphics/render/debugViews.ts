@@ -6,6 +6,7 @@ import type { BlendState, DepthStencilState } from '../rhi/types';
 import { Texture } from '../texture';
 import { OverdrawProgram, OverdrawInstancedProgram, ShadowDebugProgram, DebugViewProgram } from './programs';
 import type { DebugView } from './settingsTypes';
+import { displayExposure } from './frameView';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -243,7 +244,7 @@ export class DebugViews {
         // curve, so "Lit Scene" cannot disagree with "Final" about what the frame looks like. No LUT
         // here on purpose — a debug channel is a picture of a BUFFER, and a grade would misreport it.
         this._shaderManager.setUniform('u_toneMapper', this._post.toneMapperId());
-        this._shaderManager.setUniform('u_exposure', this._view.exposure); // used by the tonemapped channels
+        this._shaderManager.setUniform('u_exposure', displayExposure(this._view)); // used by the tonemapped channels
         // The depth attachment rides along on every channel, because WebGPU requires every binding the
         // shader declares to be present and only mode 3 actually reads it.
         this._passes.drawFullscreenAndEnd(pass);

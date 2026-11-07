@@ -139,6 +139,15 @@ export interface ParticleDrawFrame {
     hidden?: (node: ParticleSystemNode) => boolean;
     /** Multiplies every system's LOD distances (the renderer's `particleLodDistanceScale`). Default 1. */
     lodDistanceScale?: number;
+    /** The frame's pre-exposure (FrameView.preExposure): what every particle's light is stored multiplied by. Default 1. */
+    preExposure?: number;
+    /**
+     * Which emitters this call draws: all of them (the default), every one but the additive ones, or only
+     * the additive ones. The renderer draws additive emitters (embers, sparks) AFTER the sprites so a
+     * smoke sprite never covers the sparks in front of it; the 'additive' call reuses the systems the
+     * previous call measured, so visibility and LOD are decided once a frame.
+     */
+    emitters?: 'all' | 'nonAdditive' | 'additive';
     /** The camera exposure the frame is shown at, for `ParticleSystemNode.exposureWeight`. */
     exposure?: number;
     /**
@@ -154,9 +163,10 @@ const SURFACE = { NORMAL_MAP: 1, ORM_MAP: 2, PBR: 4 } as const;
 
 /** A node's tint, its colour divided by the part of the exposure it does not take (alpha untouched). */
 const compensatedTint: [number, number, number, number] = [1, 1, 1, 1];
-function exposureTint(tint: readonly number[], weight: number, exposure: number | undefined): readonly number[] {
-    if (!(weight < 1) || !(exposure! > 0)) return tint;
-    const k = Math.pow(exposure!, weight - 1);
+function exposureTint(tint: readonly number[], weight: number, exposure: number | undefined, follow = 1): readonly number[] {
+    if ((!(weight < 1) || !(exposure! > 0)) && follow === 1) return tint;
+    // `follow`: the followed light's flicker (ParticleSystemNode.lightFollowScale), on the colour only.
+    const k = (weight < 1 && exposure! > 0 ? Math.pow(exposure!, weight - 1) : 1) * follow;
     compensatedTint[0] = tint[0] * k; compensatedTint[1] = tint[1] * k; compensatedTint[2] = tint[2] * k; compensatedTint[3] = tint[3];
     return compensatedTint;
 }
@@ -1029,7 +1039,10 @@ export class ParticleRenderer {
         const up = [view[1], view[5], view[9]];
         const forward = [-view[2], -view[6], -view[10]];
 
+        const which = frame.emitters ?? 'all';
+        if (which === 'additive') { this._drawList(this._lastList, frame, which, right, up, forward); return; }
         const list: { node: ParticleSystemNode; gpu: SystemGpu; distance: number }[] = [];
+        this._lastList = list;
         for (const node of nodes) {
             if (!ParticleRenderer._active(node)) continue;
             // The view test runs for every system, drawn or not: it is also what tells an off-screen
@@ -1050,7 +1063,16 @@ export class ParticleRenderer {
         }
         if (list.length === 0) return;
         list.sort((a, b) => b.distance - a.distance);
+        this._drawList(list, frame, which, right, up, forward);
+    }
 
+    /** The systems the last non-additive `draw` measured, far to near, for the additive call that follows it. */
+    private _lastList: { node: ParticleSystemNode; gpu: SystemGpu; distance: number }[] = [];
+
+    private _drawList(list: readonly { node: ParticleSystemNode; gpu: SystemGpu; distance: number }[],
+                      frame: ParticleDrawFrame, which: 'all' | 'nonAdditive' | 'additive',
+                      right: number[], up: number[], forward: number[]): void {
+        if (list.length === 0) return;
         const shaders = ShaderManager.Instance;
         const depth = this._depthOr(frame.depth);
         const NO_LOCAL: ParticleLocalLighting = { fill: [0, 0, 0], keyDirection: [0, 1, 0], keyColor: [0, 0, 0] };
@@ -1070,6 +1092,7 @@ export class ParticleRenderer {
                 };
                 for (const emitter of gpu.drawOrder) {
                     const render = emitter.runtime.def.render;
+                    if (which !== 'all' && (render.blend === 'additive') !== (which === 'additive')) continue;
                     const sorted = emitter.sorted && emitter.sort ? emitter.sort.textures[emitter.sort.result] : null;
                     // Only the live window — unless sorted, when the order texture indexes the whole pool.
                     const instances = sorted ? emitter.runtime.capacity : emitter.liveCount;
@@ -1124,7 +1147,7 @@ export class ParticleRenderer {
                                                      frame.cameraPosition[2], packed.draw.alignment[0]]);
                     shaders.setUniform('u_camForward', [forward[0], forward[1], forward[2], packed.draw.stretch[0]]);
                     shaders.setUniform('u_drawMask', [mask, scale, sorted ? 0 : emitter.liveStart, emitter.runtime.capacity]);
-                    shaders.setUniform('u_tint', exposureTint(node.tint, node.exposureWeight, frame.exposure));
+                    shaders.setUniform('u_tint', exposureTint(node.tint, node.exposureWeight, frame.exposure, node.lightFollowScale));
                     shaders.setUniform('u_flipbook', packed.draw.u_flipbook);
                     shaders.setUniform('u_flipbook2', packed.draw.u_flipbook2);
                     shaders.setUniform('u_speedRange', packed.draw.u_speedRange);
@@ -1137,7 +1160,7 @@ export class ParticleRenderer {
                     shaders.setUniform('u_sunDir', [frame.sunDirection[0], frame.sunDirection[1], frame.sunDirection[2], 0]);
                     shaders.setUniform('u_sunColor', [frame.sunColor[0], frame.sunColor[1], frame.sunColor[2], 0]);
                     shaders.setUniform('u_keyDir', [lights.keyDirection[0], lights.keyDirection[1], lights.keyDirection[2], 0]);
-                    shaders.setUniform('u_keyColor', [lights.keyColor[0], lights.keyColor[1], lights.keyColor[2], 0]);
+                    shaders.setUniform('u_keyColor', [lights.keyColor[0], lights.keyColor[1], lights.keyColor[2], frame.preExposure ?? 1]);
                     shaders.setUniform('u_surface', [roughness, metallic, render.normalStrength ?? 1,
                                                      (normalMap ? SURFACE.NORMAL_MAP : 0) | (ormMap ? SURFACE.ORM_MAP : 0) | (pbr ? SURFACE.PBR : 0)]);
                     shaders.setUniform('u_viewPos', [frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2],

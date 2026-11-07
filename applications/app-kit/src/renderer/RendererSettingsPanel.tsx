@@ -85,6 +85,7 @@ const POINT_RES: { label: string; size: number }[] = [
 // existed was graded under, which is why it stays on the list rather than being replaced.
 const TONE_MAPPERS: { value: string; label: string; title: string }[] = [
   { value: 'agx',     label: 'AgX',     title: 'Rolls saturated highlights toward white instead of clipping them to a primary — the default' },
+  { value: 'agxPunchy', label: 'AgX Punchy', title: "AgX with more contrast and saturation (Blender's Punchy look), so a clear sky stays blue; middle grey stays where AgX puts it" },
   { value: 'aces',    label: 'ACES',    title: 'The Narkowicz filmic fit; what this engine used before the curve was selectable' },
   { value: 'neutral', label: 'Neutral', title: 'Khronos PBR Neutral — leaves in-gamut albedo untouched, for asset and product viewing' },
   { value: 'none',    label: 'None',    title: 'Exposure and sRGB only, hard-clamped: what the buffer actually holds' },
@@ -152,8 +153,22 @@ export default function RendererSettingsPanel() {
   const [bloomKnee, setBloomKnee] = useState<number>(() => renderer?.bloomKnee ?? 0.5);
   const [bloomIntensity, setBloomIntensity] = useState<number>(() => renderer?.bloomIntensity ?? 0.35);
   const [bloomMask, setBloomMask] = useState<boolean>(() => renderer?.bloomMaskEnabled ?? false);
+  const [bloomMode, setBloomMode] = useState<'physical' | 'threshold'>(() => renderer?.bloomMode ?? 'physical');
+  const [bloomMix, setBloomMix] = useState<number>(() => renderer?.bloomMix ?? 0.04);
   const [chromatic, setChromatic] = useState<number>(() => renderer?.chromaticAberrationStrength ?? 0);
   const [saturation, setSaturation] = useState<number>(() => renderer?.saturation ?? 1);
+  const [purkinje, setPurkinje] = useState<number>(() => renderer?.purkinjeStrength ?? 1);
+  const [localExposure, setLocalExposure] = useState<boolean>(() => renderer?.localExposureEnabled ?? false);
+  const [localStrength, setLocalStrength] = useState<number>(() => renderer?.localExposureStrength ?? 0.6);
+  const [localShadows, setLocalShadows] = useState<number>(() => renderer?.localExposureShadows ?? 1.5);
+  const [localHighlights, setLocalHighlights] = useState<number>(() => renderer?.localExposureHighlights ?? 1.5);
+  const [fogOn, setFogOn] = useState<boolean>(() => renderer?.volumetricFogEnabled ?? true);
+  const [fogDistance, setFogDistance] = useState<number>(() => renderer?.volumetricFogDistance ?? 128);
+  const [fogTemporal, setFogTemporal] = useState<boolean>(() => renderer?.volumetricFogTemporal ?? true);
+  const [fogLights, setFogLights] = useState<boolean>(() => renderer?.volumetricFogLocalLights ?? true);
+  const [fogShadows, setFogShadows] = useState<boolean>(() => renderer?.volumetricFogLocalShadows ?? true);
+  const [shelterOn, setShelterOn] = useState<boolean>(() => renderer?.weatherShelterEnabled ?? true);
+  const [shelterRes, setShelterRes] = useState<number>(() => renderer?.weatherShelterResolution ?? 1024);
   const [toneMapper, setToneMapper] = useState<string>(() => renderer?.toneMapper ?? 'agx');
   const [lutId, setLutId] = useState<string | null>(() => renderer?.colorGradingLut ?? null);
   const [dofEnabled, setDofEnabled] = useState<boolean>(() => renderer?.dofEnabled ?? false);
@@ -275,8 +290,22 @@ export default function RendererSettingsPanel() {
     setBloomKnee(renderer.bloomKnee);
     setBloomIntensity(renderer.bloomIntensity);
     setBloomMask(renderer.bloomMaskEnabled);
+    setBloomMode(renderer.bloomMode);
+    setBloomMix(renderer.bloomMix);
     setChromatic(renderer.chromaticAberrationStrength);
     setSaturation(renderer.saturation);
+    setPurkinje(renderer.purkinjeStrength);
+    setLocalExposure(renderer.localExposureEnabled);
+    setLocalStrength(renderer.localExposureStrength);
+    setLocalShadows(renderer.localExposureShadows);
+    setLocalHighlights(renderer.localExposureHighlights);
+    setFogOn(renderer.volumetricFogEnabled);
+    setFogDistance(renderer.volumetricFogDistance);
+    setFogTemporal(renderer.volumetricFogTemporal);
+    setFogLights(renderer.volumetricFogLocalLights);
+    setFogShadows(renderer.volumetricFogLocalShadows);
+    setShelterOn(renderer.weatherShelterEnabled);
+    setShelterRes(renderer.weatherShelterResolution);
     setToneMapper(renderer.toneMapper);
     setLutId(renderer.colorGradingLut);
     setDofEnabled(renderer.dofEnabled);
@@ -574,6 +603,18 @@ export default function RendererSettingsPanel() {
         </div>
         <Slider label='Saturation' value={saturation} min={0} max={2} step={0.01}
           onChange={(v) => { renderer.saturation = v; setSaturation(v); touch(); }} />
+        <Slider label='Night Vision' value={purkinje} min={0} max={1} step={0.01}
+          onChange={(v) => { renderer.purkinjeStrength = v; setPurkinje(v); touch(); }} />
+        <Toggle label='Local Exposure' checked={localExposure} className='my-1'
+          onChange={(v) => { renderer.localExposureEnabled = v; setLocalExposure(v); touch(); }} />
+        {localExposure && <>
+          <Slider label='Local Strength' value={localStrength} min={0} max={1} step={0.01}
+            onChange={(v) => { renderer.localExposureStrength = v; setLocalStrength(v); touch(); }} />
+          <Slider label='Shadow Lift' value={localShadows} min={0} max={4} step={0.05}
+            onChange={(v) => { renderer.localExposureShadows = v; setLocalShadows(v); touch(); }} />
+          <Slider label='Highlight Hold' value={localHighlights} min={0} max={4} step={0.05}
+            onChange={(v) => { renderer.localExposureHighlights = v; setLocalHighlights(v); touch(); }} />
+        </>}
         <Slider label='Chromatic' value={chromatic} min={0} max={2} step={0.01}
           onChange={(v) => { renderer.chromaticAberrationStrength = v; setChromatic(v); touch(); }} />
         <Field labelClassName={LABEL_W} label='Colour LUT'>
@@ -586,15 +627,54 @@ export default function RendererSettingsPanel() {
       </div></Collapsable>
 
       <Collapsable title='Bloom' persistKey='renderer.bloom' defaultOpen={false}><div className='w-full p-2'>
-        <Slider label='Threshold' value={bloomThreshold} min={0} max={5} step={0.05}
-          onChange={(v) => { renderer.bloomThreshold = v; setBloomThreshold(v); touch(); }} />
-        <Slider label='Knee' value={bloomKnee} min={0} max={2} step={0.05}
-          onChange={(v) => { renderer.bloomKnee = v; setBloomKnee(v); touch(); }} />
-        <Slider label='Intensity' value={bloomIntensity} min={0} max={3} step={0.05}
-          onChange={(v) => { renderer.bloomIntensity = v; setBloomIntensity(v); touch(); }} />
+        <SegmentedControl
+          className='grid grid-cols-2 gap-1 mb-2'
+          size='sm'
+          value={bloomMode}
+          onChange={(v) => { renderer.bloomMode = v as 'physical' | 'threshold'; setBloomMode(renderer.bloomMode); touch(); }}
+          options={[{ value: 'physical', label: 'Physical', title: 'No threshold: a share of the whole image glows, in proportion to its energy' },
+                    { value: 'threshold', label: 'Threshold', title: 'Only what clears the threshold blooms, added on top' }]} />
+        {bloomMode === 'physical' ? <>
+          <Slider label='Mix' value={bloomMix} min={0} max={0.3} step={0.005}
+            onChange={(v) => { renderer.bloomMix = v; setBloomMix(v); touch(); }} />
+        </> : <>
+          <Slider label='Threshold' value={bloomThreshold} min={0} max={5} step={0.05}
+            onChange={(v) => { renderer.bloomThreshold = v; setBloomThreshold(v); touch(); }} />
+          <Slider label='Knee' value={bloomKnee} min={0} max={2} step={0.05}
+            onChange={(v) => { renderer.bloomKnee = v; setBloomKnee(v); touch(); }} />
+          <Slider label='Intensity' value={bloomIntensity} min={0} max={3} step={0.05}
+            onChange={(v) => { renderer.bloomIntensity = v; setBloomIntensity(v); touch(); }} />
+        </>}
         <Toggle label='Restrict to lit surfaces' checked={bloomMask}
           onChange={(v) => { renderer.bloomMaskEnabled = v; setBloomMask(v); touch(); }} />
         {bloomOff && <Hint>Bloom is currently inactive: {bloomOff}</Hint>}
+      </div></Collapsable>
+
+      <Collapsable title='Volumetric Fog' persistKey='renderer.volumetricFog' defaultOpen={false}><div className='w-full p-2'>
+        <Toggle label='Enabled' checked={fogOn} className='my-1'
+          onChange={(v) => { renderer.volumetricFogEnabled = v; setFogOn(v); touch(); }} />
+        <Slider label='Distance (m)' value={fogDistance} min={10} max={500} step={1}
+          onChange={(v) => { renderer.volumetricFogDistance = v; setFogDistance(v); touch(); }} />
+        <Toggle label='Temporal' checked={fogTemporal} className='my-1'
+          onChange={(v) => { renderer.volumetricFogTemporal = v; setFogTemporal(v); touch(); }} />
+        <Toggle label='Point & Spot Lights' checked={fogLights} className='my-1'
+          onChange={(v) => { renderer.volumetricFogLocalLights = v; setFogLights(v); touch(); }} />
+        {fogLights && <Toggle label='Light Shadows' checked={fogShadows} className='my-1'
+          onChange={(v) => { renderer.volumetricFogLocalShadows = v; setFogShadows(v); touch(); }} />}
+        <Hint>Draws the scene's Volumetric Fog volumes, lit by the sun, the sky and the torches. The quality tier sets the grid; nothing runs in a scene without a fog volume.</Hint>
+      </div></Collapsable>
+
+      <Collapsable title='Weather' persistKey='renderer.weather' defaultOpen={false}><div className='w-full p-2'>
+        <Toggle label='Shelter' checked={shelterOn} className='my-1'
+          onChange={(v) => { renderer.weatherShelterEnabled = v; setShelterOn(v); touch(); }} />
+        {shelterOn && <Field labelClassName={LABEL_W} label='Shelter Resolution'>
+          <Select value={String(shelterRes)} onChange={(e) => {
+            const v = Number(e.target.value); renderer.weatherShelterResolution = v; setShelterRes(renderer.weatherShelterResolution); touch();
+          }}>
+            {[512, 1024, 2048].map(r => <option key={r} value={r}>{r}</option>)}
+          </Select>
+        </Field>}
+        <Hint>The scene's Weather volumes wet and snow the landscape and its plants. Shelter keeps what stands under a roof or anything solid dry, from a map of the 96 m round the camera, redrawn only when something in it moves.</Hint>
       </div></Collapsable>
 
       <Collapsable

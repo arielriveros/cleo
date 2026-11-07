@@ -30,6 +30,8 @@ export const RENDER_PASSES = [
     'shadows.cascades',
     'shadows.spot',
     'shadows.point',
+    // The weather's shelter map: what stands over the ground, seen from straight above (redrawn rarely).
+    'weather.shelter',
     // Particle simulation steps: compute dispatches on WebGPU, ping-pong draws on WebGL2.
     'particles.sim',
     'geometry',
@@ -61,6 +63,8 @@ export const RENDER_PASSES = [
     'grid',
     // Smoke-and-fire volumes (FluidVolumeNode), over the resolved image just before the transparents.
     'fluidVolumes',
+    // Froxel fog for VolumetricFogNode: lit, integrated and composited over the opaque scene.
+    'volumetricFog',
     'transparent',
     'particles',
     '2d',
@@ -79,6 +83,7 @@ export const RENDER_PASSES = [
     'vignette',
     'filmGrain',
     'fxaa',
+    'localExposure',
     'exposure',
     'bloom.bright',
     'bloom.blur',
@@ -95,13 +100,13 @@ export type RenderPass = typeof RENDER_PASSES[number];
 
 /** Passes the profiler panel offers as on/off switches. Excludes any pass the image cannot do without. */
 export const TOGGLEABLE_PASSES: RenderPass[] = [
-    'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'decals', 'decals.emissive', 'ssao', 'ssao.temporal', 'ssao.blur', 'ssao.history', 'ssr', 'ssr.temporal', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
+    'shadows.cascades', 'shadows.spot', 'shadows.point', 'weather.shelter', 'foliage', 'decals', 'decals.emissive', 'ssao', 'ssao.temporal', 'ssao.blur', 'ssao.history', 'ssr', 'ssr.temporal', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
     'transparent', 'particles', '2d', 'gizmos', 'overlay', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
     'bloom.blur', 'bloom.composite', 'chromatic', 'screenMaterials',
     // `dof.coc` switches depth of field as a whole. Its other two passes report their own timings
     // but are deliberately NOT switchable: the gather and the composite are halves of one effect,
     // and a composite that did not run would leave the next stage of the chain unwritten.
-    'dof.coc', 'lensFlare', 'vignette', 'filmGrain', 'fxaa',
+    'dof.coc', 'lensFlare', 'vignette', 'filmGrain', 'fxaa', 'localExposure', 'volumetricFog',
 ];
 
 /**
@@ -145,6 +150,10 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     'dof.composite': 'dof.composite',
     lensFlare: 'lensFlare',
     lensFlareComposite: 'lensFlare',
+    localExposure: 'localExposure',
+    'volumetricFog.inject': 'volumetricFog',
+    'volumetricFog.integrate': 'volumetricFog',
+    'volumetricFog.apply': 'volumetricFog',
     vignette: 'vignette',
     filmGrain: 'filmGrain',
     fxaa: 'fxaa',
@@ -159,6 +168,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     cascade: 'shadows.cascades',
     spotShadow: 'shadows.spot',
     pointShadow: 'shadows.point',
+    shelter: 'weather.shelter',
     deferredLighting: 'lighting',
     screenMaterial: 'screenMaterials',
     skyAtmosphereBake: 'sky.bake',

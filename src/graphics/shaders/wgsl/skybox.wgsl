@@ -21,6 +21,8 @@ struct SkyboxUniforms {
     // linear; the baked SkyAtmosphere cubemap is already linear HDR and must pass through untouched.
     // i32 rather than bool: WGSL forbids bool in a uniform buffer.
     u_linearInput: i32,
+    /** The frame's pre-exposure (graphics/preExposure.ts): the sky is stored multiplied by it like every source. */
+    u_preExposure: f32,
 };
 @group(1) @binding(1) var<uniform> u_sky: SkyboxUniforms;
 
@@ -50,5 +52,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // blooms; a plain user cubemap is treated as flat background and stays out of the bloom pass.
     var mask = 0.0;
     if (u_sky.u_linearInput != 0) { mask = 1.0; }
-    return vec4<f32>(c, mask);
+    // Clamped below the half-float ceiling: a physical sun disc seen by a dark-adapted camera exceeds it.
+    return vec4<f32>(min(c * u_sky.u_preExposure, vec3<f32>(32768.0)), mask);
 }

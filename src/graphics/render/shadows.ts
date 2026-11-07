@@ -11,7 +11,7 @@ import { spotBoundingSphere } from '../clusters';
 import { Framebuffer } from '../framebuffer';
 import { LayeredDepthFramebuffer } from '../layeredDepthFramebuffer';
 import { DirectionalLight, DEFAULT_ANGULAR_RADIUS, Spotlight, PointLight } from '../lighting';
-import { Material } from '../material';
+import { Material, isFoliageMaterial } from '../material';
 import { Mesh } from '../mesh';
 import { Model } from '../model';
 import { frameStats } from '../renderStats';
@@ -37,6 +37,7 @@ import type { FoliagePasses } from './foliage';
 import { ShaderManager } from '../systems/shaderManager';
 import { DEPTH_WRITE } from './pipelineCache';
 import type { RenderSubsystems } from './subsystems';
+import { shelterMatrix, footprintKey, type ShelterFootprint } from './weatherPack';
 
 /**
  * One punctual-light shadow atlas, spot or point, as the shared layer routine sees it. The FBOs are read
@@ -331,9 +332,15 @@ export class ShadowPasses {
     /** Editor debug: which cascade layer the 'shadow' channel blits. */
     public shadowDebugLayer: number = 0;
 
-    // Suppress shadow lookups for the current draw. Set while capturing a light probe: the cascades
-    // are fit to the MAIN camera, so a probe elsewhere samples outside all of them.
+    // Suppress the SUN's shadow lookups for the current draw. Set while capturing a light probe: the
+    // cascades are fit to the MAIN camera, so a probe elsewhere samples outside all of them. Point and spot
+    // maps are world-space (a cube or a frustum around the light), so a capture keeps those: a torch the
+    // probe sees through a wall must not light its bake as if the wall were not there.
     public shadowsSuppressed: boolean = false;
+
+    // Suppress point and spot shadow lookups as well. Nothing sets it today; it is the switch a caller
+    // that cannot trust this frame's punctual maps would use.
+    public punctualShadowsSuppressed: boolean = false;
 
     // The frame's shadow-casting light so post passes (volumetric god rays) know the sun.
     public shadowLight: LightNode | null = null;
@@ -576,11 +583,15 @@ export class ShadowPasses {
         // Every uniform here goes through `setUniform`, arrays included. Never a raw
         // `getUniformLocation`: that returns null for a std140 block member — indistinguishable from an
         // unused uniform — so an `if (loc)` guard silently drops every write on a WGSL program.
-        const active = this.shadowsActive && !this.shadowsSuppressed;
+        // A light-probe capture reads its own map in the cascades' place: one layer fit round the probe,
+        // whose split reaches past everything the probe sees (see `beginProbeShadows`).
+        const probe = this.probeShadowsActive;
+        const active = probe || (this.shadowsActive && !this.shadowsSuppressed);
         this._shaderManager.setUniform('u_shadowsEnabled', active);
-        this._shaderManager.setUniform('u_cascadeCount', this.cascadeCount);
+        this._shaderManager.setUniform('u_cascadeCount', probe ? 1 : this.cascadeCount);
 
-        this._shaderManager.setUniform('u_shadowTexel', [1 / this.shadowMapResolution, 1 / this.shadowMapResolution]);
+        const texel = 1 / (probe ? this._probeShadowSize : this.shadowMapResolution);
+        this._shaderManager.setUniform('u_shadowTexel', [texel, texel]);
         this._shaderManager.setUniform('u_shadowDepthBias', this.shadowDepthBias);
         this._shaderManager.setUniform('u_shadowNormalBias', this.shadowNormalBias);
         this._shaderManager.setUniform('u_shadowFilterRadius',
@@ -590,12 +601,12 @@ export class ShadowPasses {
         this._shaderManager.setUniform('u_cascadeBlend', this.cascadeBlend);
         this._shaderManager.setUniform('u_debugCascades', this.debugCascades && active);
 
-        this._shaderManager.setUniform('u_cascadeMatrices', this._cascadeMatPacked);
-        this._shaderManager.setUniform('u_cascadeSplits', this._cascadeSplitPacked);
-        this._shaderManager.setUniform('u_cascadeDepthScale', this._cascadeDepthScalePacked);
-        this._shaderManager.setUniform('u_cascadeTexelSize', this._cascadeTexelPacked);
+        this._shaderManager.setUniform('u_cascadeMatrices', probe ? this._probeMatPacked : this._cascadeMatPacked);
+        this._shaderManager.setUniform('u_cascadeSplits', probe ? this._probeSplitPacked : this._cascadeSplitPacked);
+        this._shaderManager.setUniform('u_cascadeDepthScale', probe ? this._probeDepthScalePacked : this._cascadeDepthScalePacked);
+        this._shaderManager.setUniform('u_cascadeTexelSize', probe ? this._probeTexelPacked : this._cascadeTexelPacked);
         this._shaderManager.setUniform('u_farCascadeMatrix', this._farCascadeMatPacked);
-        this._shaderManager.setUniform('u_farCascadeDistance', this._farCascadeActiveDistance);
+        this._shaderManager.setUniform('u_farCascadeDistance', probe ? 0 : this._farCascadeActiveDistance);
         this._shaderManager.setUniform('u_farCascadeDepthScale', this._farCascadeDepthScale);
         this._shaderManager.setUniform('u_farCascadeTexelSize', this._farCascadeTexelSize);
 
@@ -612,7 +623,7 @@ export class ShadowPasses {
 
 
         // --- spot shadows ---
-        this._shaderManager.setUniform('u_spotShadowsEnabled', this.spotShadowsActive && !this.shadowsSuppressed);
+        this._shaderManager.setUniform('u_spotShadowsEnabled', this.spotShadowsActive && !this.punctualShadowsSuppressed);
 
         this._shaderManager.setUniform('u_spotShadowTexel', [1 / this.spotShadowResolution, 1 / this.spotShadowResolution]);
         this._shaderManager.setUniform('u_spotShadowBias', this.spotShadowBias);
@@ -620,7 +631,7 @@ export class ShadowPasses {
         this._shaderManager.setUniform('u_spotShadowTexelScale', this._spotShadowTexelScalePacked);
 
         // --- point shadows ---
-        this._shaderManager.setUniform('u_pointShadowsEnabled', this.pointShadowsActive && !this.shadowsSuppressed);
+        this._shaderManager.setUniform('u_pointShadowsEnabled', this.pointShadowsActive && !this.punctualShadowsSuppressed);
 
         this._shaderManager.setUniform('u_pointShadowTexel',
                                        [1 / this.pointShadowResolution, 1 / this.pointShadowResolution]);
@@ -703,7 +714,8 @@ export class ShadowPasses {
         // sun), so a 2 lux moon draws shafts 40,000 times fainter than the sun's, and the sun's fade at
         // the horizon fades them with it. Without the term the moon's haze was the sun's, and once
         // lights kept real values it was the brightest thing in a night scene.
-        this._shaderManager.setUniform('u_intensity', node.godRayExposure * (key ? key.intensity : 1));
+        // Pre-exposed like every source: the shafts are added to the chain's pre-exposed image.
+        this._shaderManager.setUniform('u_intensity', node.godRayExposure * (key ? key.intensity : 1) * this._view.preExposure);
         this._shaderManager.setUniform('u_density', node.godRayDensity);
         this._shaderManager.setUniform('u_anisotropy', node.godRayAnisotropy);
         this._shaderManager.setUniform('u_maxDistance', node.godRayMaxDistance);
@@ -881,9 +893,10 @@ export class ShadowPasses {
             // Casting or not, anything visible receives: a ground plane that casts nothing still ends the
             // shadow volume of the cube floating over it. Not a model its occlusion volume hides from the
             // camera this frame: nothing sees it receive.
-            if (s.center[1] - s.radius < floor && !this._sys.visibility.volumeCulled(node)) floor = s.center[1] - s.radius;
+            if (s.center[1] - s.radius < floor && (this._captureCasters || !this._sys.visibility.volumeCulled(node))) floor = s.center[1] - s.radius;
             // Inside an occlusion volume the camera cannot see, whose Shadows switch is on: casts nothing.
-            if (this._sys.visibility.volumeShadowCulled(node)) continue;
+            // Except for a probe capture: what the main camera cannot see, a probe elsewhere may.
+            if (!this._captureCasters && this._sys.visibility.volumeShadowCulled(node)) continue;
             // A despawn dissolve drops its shadow halfway through: depth has no screen-door to share.
             if (node.effectiveFade < 0.5) continue;
             // A merged model can have a non-casting submesh among casting ones, so the test is "any
@@ -1538,6 +1551,192 @@ export class ShadowPasses {
         }
         out.staticHash = sh; out.dynamicHash = dh;
         return out;
+    }
+
+    // ---- Weather shelter ----------------------------------------------------------------------
+    // The depth, seen from straight above, of everything solid over the weather's footprint: what keeps
+    // the ground under a roof dry (chunks/terrainWeather.wgsl, foliage per plant). One layer, drawn by the
+    // sun's caster pipelines through the same caster records, and only again when the footprint moves or
+    // a static caster in it does.
+
+    /** The shelter map; 1x1 until the weather needs it. */
+    public shelterFBO!: LayeredDepthFramebuffer;
+    /** RenderSettings.weatherShelterEnabled / weatherShelterResolution. */
+    public shelterEnabled: boolean = true;
+    public shelterResolution: number = 1024;
+    /** This frame's world -> clip (GL convention) matrix of the map, valid while `shelterValid`. */
+    public readonly shelterMatrix: mat4 = mat4.create();
+    public shelterValid: boolean = false;
+    /** The footprint the map was last drawn over. */
+    public shelterFootprint: ShelterFootprint | null = null;
+    /** Times the map has been redrawn (tests, the profiler). */
+    public shelterDraws: number = 0;
+    private _shelterKey: string = '';
+    private readonly _shelterCasters: ShadowCasterRecord[] = [];
+
+    /** Below this bounding radius (metres) a model shelters nothing: a stone, a barrel's hoop, a cup. */
+    public static readonly SHELTER_MIN_RADIUS = 0.5;
+
+    /**
+     * Whether a gathered caster shelters what is under it: static, not foliage (plants do not keep the
+     * rain off the ground under them here), not wholly transparent, and big enough. Cut-outs count: a
+     * thatch roof is one. Pure in its inputs, so it is tested directly.
+     */
+    public static isShelterCaster(materials: readonly Material[], radius: number, dynamic: boolean): boolean {
+        if (dynamic || radius < ShadowPasses.SHELTER_MIN_RADIUS) return false;
+        let solid = false;
+        for (const m of materials) {
+            if (isFoliageMaterial(m)) return false;
+            if (m.config.castShadow && !m.config.transparent && !m.config.wireframe) solid = true;
+        }
+        return solid;
+    }
+
+    /**
+     * Draw the shelter map over `footprint` (render/weatherPack.ts `shelterFootprint`), or mark it absent
+     * with none. Redrawn only when the footprint or a static caster in it changed: a still scene draws it
+     * once. Never during a capture or a thumbnail (their caster states are keyed on another view).
+     */
+    public renderShelter(scene: Scene, footprint: ShelterFootprint | null): void {
+        if (!footprint || !this.shelterEnabled) {
+            this.shelterValid = false;
+            this.shelterFootprint = null;
+            return;
+        }
+        const res = Math.max(64, Math.min(4096, Math.round(this.shelterResolution)));
+        this.shelterFBO.create(res, 1, true);
+        shelterMatrix(this.shelterMatrix, footprint);
+
+        this._ensureShadowCasters(scene);
+        const casters = this._shelterCasters;
+        casters.length = 0;
+        let h = HASH_SEED;
+        const frame = this._view.frameIndex;
+        for (let k = 0; k < this._nonTerrainCount; k++) {
+            const r = this._casterRecords[k];
+            const node = r.node;
+            const dynamic = this._casterMotion.isDynamic(node, node.transformVersion, frame, r.state.skinned);
+            if (!ShadowPasses.isShelterCaster(node.model.materials, r.sphere.radius, dynamic)) continue;
+            const c = r.sphere.center, half = footprint.size / 2 + r.sphere.radius;
+            if (Math.abs(c[0] - footprint.centre[0]) > half || Math.abs(c[2] - footprint.centre[1]) > half) continue;
+            casters.push(r);
+            h = mixTransform(mixString(h, node.id), node.worldTransform);
+        }
+        const key = `${footprintKey(footprint, res)}|${h}|${casters.length}`;
+        this.shelterValid = true;
+        this.shelterFootprint = footprint;
+        if (key === this._shelterKey) return;
+        this._shelterKey = key;
+        this.shelterDraws++;
+
+        const pass = this._passes.beginDepthPass(this.shelterFBO.renderTarget, 'shelter', 0);
+        if (casters.length > 0) this._renderShadowCasters(pass, casters, casters.length, this.shelterMatrix);
+        this._passes.endDepthPass(pass);
+    }
+
+    /** Forget the drawn shelter map, so the next frame redraws it (a resolution change, a scene switch). */
+    public invalidateShelter(): void { this._shelterKey = ''; }
+
+    // ---- Light-probe capture shadows ----------------------------------------------------------
+    // A probe's six faces look out from somewhere the cascades were never fit to: they follow the MAIN
+    // camera's frustum, and a probe a hundred metres off, or behind it, falls outside them. So a capture
+    // draws one map of its own, fit round the probe: the key light's casters, every one of them (an
+    // occlusion volume the main camera cannot see still shadows what a probe sees), with the landscape as
+    // its coarse blocks, as the far cascade draws it. The forward lighting reads it in the cascades' place,
+    // one layer whose split reaches past everything the probe sees, until `endProbeShadows`. Without it a
+    // probe saw every slope lit, shaded cliffs reflected a sunlit valley, and a room lit itself through its
+    // own roof.
+
+    /** The probe capture's sun shadow map; allocated by the first shadowed capture. */
+    public probeShadowFBO: LayeredDepthFramebuffer | null = null;
+    /** Texels on a side of the probe capture's map (a power of two, 256..4096). */
+    public probeShadowResolution: number = 2048;
+    /** True between `beginProbeShadows` and `endProbeShadows`: the forward lighting reads the probe's map. */
+    public probeShadowsActive: boolean = false;
+    /** Shadow maps probe captures have drawn (tests, the profiler). */
+    public probeShadowDraws: number = 0;
+    /** The split the probe's one layer is given: past anything a capture can see, so it never fades. */
+    public static readonly PROBE_SHADOW_SPLIT = 1e7;
+    /** The probe map's reach round an UNBOUNDED probe (a bounded one is fit to its volume). */
+    public static readonly PROBE_SHADOW_UNBOUNDED_RADIUS = 300;
+    /** Metres added round a bounded probe's volume: what stands just outside still shadows what it sees. */
+    public static readonly PROBE_SHADOW_MARGIN = 20;
+    private readonly _probeShadowMatrix: mat4 = mat4.create();
+    private readonly _probeMatPacked: Float32Array = new Float32Array(MAX_CASCADES * 16);
+    private readonly _probeSplitPacked: Float32Array = new Float32Array(MAX_CASCADES);
+    private readonly _probeDepthScalePacked: Float32Array = new Float32Array(MAX_CASCADES);
+    private readonly _probeTexelPacked: Float32Array = new Float32Array(MAX_CASCADES);
+    private _probeShadowSize: number = 1;
+    /** Gathering casters for a probe capture: none are dropped for the main camera's occlusion volumes. */
+    private _captureCasters: boolean = false;
+
+    /** The cascade array the lighting binds: the probe's own map while a capture reads it. */
+    public get cascadeTexture(): Texture {
+        return this.probeShadowsActive && this.probeShadowFBO ? this.probeShadowFBO.texture : this.shadowCascadeFBO.texture;
+    }
+
+    /**
+     * Draw the key light's shadow map round `centre` (`radius` metres) for a light-probe capture and make
+     * the forward lighting read it, until `endProbeShadows`. False, and nothing changed, when there is no
+     * shadow-casting directional light or shadows are off: the capture is then unshadowed, as before.
+     * Call it BEFORE the capture swaps the camera or sets its cube-face state: the casters draw from the
+     * light, with the frame's own pipelines.
+     */
+    public beginProbeShadows(scene: Scene, centre: ArrayLike<number>, radius: number): boolean {
+        this.probeShadowsActive = false;
+        if (!this.shadowsEnabled || this.shadowsSuppressed || !this._host.deviceReady) return false;
+        let sun: LightNode | null = null;
+        for (const node of scene.lights) {
+            if (node.castShadows && node.type === 'directional') { sun = node; break; }
+        }
+        if (!sun) return false;
+        const size = Math.max(256, Math.min(4096, 1 << Math.round(Math.log2(Math.max(1, this.probeShadowResolution)))));
+        this.probeShadowFBO ??= new LayeredDepthFramebuffer();
+        this.probeShadowFBO.create(size, 1, true);
+
+        const previous = this.shadowLight;
+        this.shadowLight = sun;
+        this._captureCasters = true;
+        this._castersFrame = -1;
+        try {
+            this._ensureShadowCasters(scene);
+            const sphere = this._csmSphere;
+            vec3.set(sphere.center, centre[0], centre[1], centre[2]);
+            sphere.radius = Math.max(1, radius);
+            this._layerLodMode = 'coarse';
+            this._selectLayerCasters(sphere, null, 0, 0, this._farTerrainBlocks(scene));
+            const fit = buildCascadeMatrix(sphere, this._sys.lighting.dirOf(sun), size, this.shadowCasterPad,
+                                           this._probeShadowMatrix, this._csmScratch, false, this._casterBounds);
+            const pass = this._passes.beginDepthPass(this.probeShadowFBO.renderTarget, 'cascade', 0);
+            this._renderShadowCasters(pass, this._layerCasters, this._layerCasterCount, this._probeShadowMatrix);
+            this._passes.endDepthPass(pass);
+            this.probeShadowDraws++;
+
+            this._probeMatPacked.fill(0);
+            this._probeMatPacked.set(this._projection.uvProducing(this._probeShadowMatrix), 0);
+            this._probeSplitPacked.fill(ShadowPasses.PROBE_SHADOW_SPLIT);
+            this._probeDepthScalePacked.fill(cascadeDepthScale(fit.depthRange));
+            this._probeTexelPacked.fill(fit.texelWorldSize);
+            this._probeShadowSize = size;
+            this.probeShadowsActive = true;
+        } finally {
+            this._layerLodMode = 'camera';
+            this._captureCasters = false;
+            // The frame's cascades gather their own casters again, through the camera's occlusion volumes.
+            this._castersFrame = -1;
+            this.shadowLight = previous;
+        }
+        return true;
+    }
+
+    /** Stop reading the probe's map: the forward lighting goes back to the frame's cascades. */
+    public endProbeShadows(): void { this.probeShadowsActive = false; }
+
+    /** The probe map's reach: a bounded probe's volume half-diagonal and a margin, or a wide disc unbounded. */
+    public probeShadowRadius(bounded: boolean, size: ArrayLike<number>, scale: ArrayLike<number>): number {
+        if (!bounded) return ShadowPasses.PROBE_SHADOW_UNBOUNDED_RADIUS;
+        const x = size[0] * Math.abs(scale[0]), y = size[1] * Math.abs(scale[1]), z = size[2] * Math.abs(scale[2]);
+        return 0.5 * Math.hypot(x, y, z) + ShadowPasses.PROBE_SHADOW_MARGIN;
     }
 
     /** Render the directional light's cascaded shadow maps (one array layer per view-frustum slice). */

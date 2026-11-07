@@ -14,6 +14,8 @@
 // colorLut.wgsl brings bindings 4/5 with it.
 #include "./chunks/grade.wgsl"
 #include "./chunks/colorLut.wgsl"
+// Bindings 6/7: the local exposure regions (chunks/localExposure.wgsl).
+#include "./chunks/localExposure.wgsl"
 
 /** Search radius in texels. Bounds the maximum outline width. */
 const R: i32 = 10;
@@ -34,15 +36,21 @@ struct OutlinePostUniforms {
     u_toneMapper: i32,
     u_lutIntensity: f32,
     u_lutSize: f32,
+    u_purkinjeStrength: f32,
+    u_nitsPerUnit: f32,
+    u_localExposure: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> u_outline: OutlinePostUniforms;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let hdr = textureSample(u_screenTexture_texture, u_screenTexture_sampler, in.uv).rgb;
+    var seen = purkinjeShift(hdr, u_outline.u_nitsPerUnit, u_outline.u_purkinjeStrength);
+    let exposedLum = dot(seen, vec3<f32>(0.2126, 0.7152, 0.0722)) * u_outline.u_exposure;
+    seen *= exp2(localExposureStops(in.uv, exposedLum, u_outline.u_localExposure));
     let scene = applyColorLut(
-        gradeToDisplay(hdr, u_outline.u_exposure, u_outline.u_saturation, u_outline.u_toneMapper),
-        u_outline.u_lutSize, u_outline.u_lutIntensity);
+        gradeToDisplay(seen, u_outline.u_exposure, u_outline.u_saturation, u_outline.u_toneMapper),
+        u_outline.u_lutSize, u_outline.u_lutIntensity) + displayDither(in.position.xy);
     // The mask is read with `textureSampleLevel` at level 0, both here and in the search loop below.
     // The `center > 0.5` return is a per-fragment branch, so the loop after it is non-uniform control
     // flow, where WGSL forbids `textureSample` and rejects the module — which invalidated `outlinePost`

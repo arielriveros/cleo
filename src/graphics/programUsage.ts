@@ -48,6 +48,8 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     skyAtmosphere: 'feature', skyProject: 'feature', skyFog: 'feature', godRays: 'feature',
     chromaticAberration: 'feature', dofCoc: 'feature', dofGather: 'feature', dofComposite: 'feature',
     lensFlare: 'feature', lensFlareComposite: 'feature', vignette: 'feature', filmGrain: 'feature',
+    localExposureLum: 'feature', localExposureDown: 'feature',
+    volumetricFogInject: 'feature', volumetricFogIntegrate: 'feature', volumetricFogApply: 'feature',
     taaResolve: 'feature', taaSharpen: 'feature', fxaa: 'feature',
     motionBlurVelocity: 'feature', motionBlurTileMax: 'feature', motionBlurNeighborMax: 'feature', motionBlur: 'feature',
     objectVelocity: 'feature', objectVelocitySkinned: 'feature', objectVelocityBasicSkinned: 'feature',
@@ -178,6 +180,7 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
         case 'tilemap': add('tilemap'); break;
         case 'decal': add('decalSurface'); add('decalResolve'); add('decalColor'); break;
         case 'fluidVolume': add('fluidVolume'); add('fluidVolumeResolve'); add('fluidVolumeComposite'); break;
+        case 'volumetricFog': add('volumetricFogInject'); add('volumetricFogIntegrate'); add('volumetricFogApply'); break;
         case 'volumetricClouds':
             for (const n of ['volumetricClouds', 'cloudNoiseBake', 'cloudTemporalResolve', 'cloudUpsample']) add(n);
             break;
@@ -227,6 +230,7 @@ export function usageFromRenderSettings(settings: Partial<RenderSettings> | null
     if (on('autoExposureEnabled')) add('exposureMeter');
     if (on('dofEnabled')) add('dofCoc', 'dofGather', 'dofComposite');
     if (positive('lensFlareIntensity')) add('lensFlare', 'lensFlareComposite');
+    if (on('localExposureEnabled', 'localExposureEnabled')) add('localExposureLum', 'localExposureDown');
     if (positive('chromaticAberrationStrength')) add('chromaticAberration');
     if (positive('vignetteStrength')) add('vignette');
     if (positive('filmGrainIntensity')) add('filmGrain');

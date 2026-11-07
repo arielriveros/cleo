@@ -2800,7 +2800,9 @@ export function writeProject({
 }) {
   ENEMY_MODELS = enemyModels
   ENEMY_DRAW_DISTANCE = enemyDrawDistance
-  fs.rmSync(out, { recursive: true, force: true })
+  // Retried: a dev server watching editor/public holds the folder's handles for a moment after a delete
+  // (EBUSY on Windows), and gives them back.
+  fs.rmSync(out, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
   fs.mkdirSync(path.join(out, 'libraries'), { recursive: true })
   fs.mkdirSync(path.join(out, 'scenes'), { recursive: true })
 

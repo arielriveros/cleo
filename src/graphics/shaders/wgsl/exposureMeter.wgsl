@@ -27,6 +27,16 @@
 @group(0) @binding(0) var u_screenTexture_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_screenTexture_sampler: sampler;
 
+struct MeterUniforms {
+    /**
+     * log2 of the frame's pre-exposure (graphics/preExposure.ts). The scene buffer holds absolute radiance
+     * times it; the meter takes it back out before anything else, so its window — and the EV it reports —
+     * stay absolute.
+     */
+    u_logPreExposure: f32,
+};
+@group(1) @binding(0) var<uniform> u_meter: MeterUniforms;
+
 /**
  * The encode window, in log2 of internal radiance. Must match `Renderer.LOG_LUMINANCE_WINDOW`.
  *
@@ -59,8 +69,9 @@ fn tapLogLuminance(index: i32) -> f32 {
     // nothing about the frame and the taps have to be placed explicitly.
     let uv = (vec2<f32>(f32(index % GRID), f32(index / GRID)) + 0.5) / f32(GRID);
     let c = textureSampleLevel(u_screenTexture_texture, u_screenTexture_sampler, uv, 0.0).rgb;
-    let lum = max(dot(c, vec3<f32>(0.2126, 0.7152, 0.0722)), 1e-8);
-    return clamp(log2(lum), LOG_LUM_MIN, LOG_LUM_MAX);
+    // The floor is applied to the ABSOLUTE luminance, as before pre-exposure: 1e-8 below the window.
+    let lum = max(dot(c, vec3<f32>(0.2126, 0.7152, 0.0722)), 1e-30);
+    return clamp(max(log2(lum) - u_meter.u_logPreExposure, -26.5754), LOG_LUM_MIN, LOG_LUM_MAX);
 }
 
 @fragment

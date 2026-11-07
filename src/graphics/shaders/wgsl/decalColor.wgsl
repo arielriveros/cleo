@@ -73,7 +73,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let a = clamp(alpha * coverage, 0.0, 1.0);
 
     if (u_decal.u_decalMode == 0) {
-        return vec4<f32>(emissive * a, 0.0);
+        // Additive light on the lit, pre-exposed image: stored multiplied by the frame's pre-exposure.
+        let preExposure = select(1.0, u_decal.u_decalPreExposure, u_decal.u_decalPreExposure > 0.0);
+        return vec4<f32>(min(emissive * (a * preExposure), vec3<f32>(32768.0)), 0.0);
     }
     return vec4<f32>(color, a);
 }

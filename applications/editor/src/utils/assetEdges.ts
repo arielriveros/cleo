@@ -81,6 +81,9 @@ export function walkRefs(obj: any, out: EdgeSpec[]): void {
     if (key === 'materialId') { push(out, 'terrainMaterial', val, key); continue }
     // A landscape-material slot's surface, linked to a plain Material asset — hence a key of its own.
     if (key === 'surfaceMaterialId') { push(out, 'material', val, key); continue }
+    // A weather volume's snow, linked to the Material asset it was taken from; its embedded copy is
+    // walked on for its textures.
+    if (key === 'snowMaterialId') { push(out, 'material', val, key); continue }
     if (key === 'materialIds' && Array.isArray(val)) {
       val.forEach((x, i) => push(out, 'material', x, `materialIds[${i}]`))
       continue

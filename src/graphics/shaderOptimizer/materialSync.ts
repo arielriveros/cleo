@@ -28,7 +28,7 @@ import { shaderOptimizerStats } from './stats';
  * Anything that writes `u_material.*` by hand must call {@link invalidate} for the program it wrote, or
  * the next draw of the remembered material would skip over the foreign values.
  */
-export const MATERIAL_VIEW_SIZE = 23;
+export const MATERIAL_VIEW_SIZE = 24;
 
 interface Last { material: object; frame: number; view: Float64Array }
 

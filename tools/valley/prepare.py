@@ -105,7 +105,22 @@ def unpack() -> None:
             print(f"unpacked {z.relative_to(SRC)}")
 
 
-def terrain(prefix: str, folder: str, base: str) -> None:
+# The Rock slot's roughness: rock_05's ARM reads about 0.52, a damp, half-polished stone; the valley's cliffs
+# are weathered, dry rock, about 0.75-0.85. At 0.52 the cliffs took screen-space reflections (cut off at
+# 0.6) and read glossy across the valley. Remapped as `offset + scale * g`, so the map's own variation (the
+# smoother faces, the rougher cracks) is kept: a mean of about 0.79. The map replaces the material's scalar
+# in the shader, so this is the only place it can be set.
+ROCK_ROUGHNESS = (0.45, 0.65)
+
+
+def remap_roughness(arm: Image.Image, offset: float, scale: float) -> Image.Image:
+    """An ARM image with its roughness (G) remapped to `offset + scale * g`, clamped to 0..1."""
+    r, g, b = arm.convert("RGB").split()
+    g = g.point(lambda v: max(0, min(255, round(offset * 255 + scale * v))))
+    return Image.merge("RGB", (r, g, b))
+
+
+def terrain(prefix: str, folder: str, base: str, roughness: tuple | None = None) -> None:
     tex = SRC / "terrain_textures" / folder / "textures"
     # Most sets name the colour map `_diff_`; forest_leaves_02 spells it `_diffuse_`.
     diff = tex / f"{base}_diff_1k.png"
@@ -113,7 +128,10 @@ def terrain(prefix: str, folder: str, base: str) -> None:
         diff = tex / f"{base}_diffuse_1k.png"
     save_jpeg(load(diff), f"{prefix}_diff", 1024)
     save_png(load(tex / f"{base}_nor_gl_1k.png"), f"{prefix}_nor", 1024)
-    save_jpeg(load(tex / f"{base}_arm_1k.png"), f"{prefix}_arm", 1024)
+    arm = load(tex / f"{base}_arm_1k.png")
+    if roughness:
+        arm = remap_roughness(arm, *roughness)
+    save_jpeg(arm, f"{prefix}_arm", 1024)
     save_png(load(tex / f"{base}_disp_1k.png"), f"{prefix}_disp", 512, "L")
 
 
@@ -144,11 +162,16 @@ def props() -> None:
         save_jpeg(load(tex / f"{base}_rough_1k.png"), f"{base}_rough", 1024, grey=True)
 
 
-def gltf_material(path: Path, index: int, prefix: str, size: int = 1024) -> None:
+def gltf_material(path: Path, index: int, prefix: str, size: int = 1024, metallic: float | None = None) -> None:
     """One glTF material's maps as this example's set: `_diff`, `_nor`, `_arm`, and `_emissive` when it
     has one. glTF keeps roughness in G and metal in B; an occlusion map that shares that image (an ORM
     pack) already has AO in R, so the image IS an ARM. Without one, R is set to 1 (no occlusion).
-    A metal/rough map on a second UV set is skipped: parts carry one UV set, and the scalars stand in."""
+    A metal/rough map on a second UV set is skipped: parts carry one UV set, and the scalars stand in.
+
+    The material's `metallicFactor` and `roughnessFactor` are applied to the map, as glTF defines them
+    (the texture times the factor): the engine's map REPLACES its scalar, so a factor dropped here is lost.
+    The campfire's stones declare metal 0 over a map whose blue is all but 1, and rendered as metal.
+    `metallic` overrides the metal channel outright, for a set whose map is simply wrong."""
     doc, images = glb_images(path)
     tex = [t["source"] for t in doc["textures"]]
     m = doc["materials"][index]
@@ -162,6 +185,14 @@ def gltf_material(path: Path, index: int, prefix: str, size: int = 1024) -> None
         r, g, b = pick(mr).convert("RGB").split()
         if m.get("occlusionTexture", {}).get("index") != mr["index"]:
             r = Image.new("L", g.size, 255)
+        rf = float(pbr.get("roughnessFactor", 1.0))
+        mf = float(pbr.get("metallicFactor", 1.0))
+        if rf != 1.0:
+            g = g.point(lambda v: max(0, min(255, round(v * rf))))
+        if metallic is not None:
+            b = Image.new("L", g.size, max(0, min(255, round(metallic * 255))))
+        elif mf != 1.0:
+            b = b.point(lambda v: max(0, min(255, round(v * mf))))
         save_jpeg(Image.merge("RGB", (r, g, b)), f"{prefix}_arm", size)
     if "emissiveTexture" in m:
         save_jpeg(pick(m["emissiveTexture"]), f"{prefix}_emissive", min(size, 512))
@@ -179,8 +210,9 @@ def dungeon_props() -> None:
     gltf_material(SRC / "props" / "medieval_torch.glb", 0, "standing_torch")
     campfire = SRC / "props" / "campfire_fire_with_stones.glb"
     doc, _ = glb_images(campfire)
+    # Stones, logs and embers: none of them is metal, whatever the maps' blue says (0.99, 0.31, 0.18).
     for i, m in enumerate(doc["materials"]):
-        gltf_material(campfire, i, f"campfire_{m['name']}")
+        gltf_material(campfire, i, f"campfire_{m['name']}", metallic=0)
     gltf_material(SRC / "props" / "bookcase.glb", 0, "bookcase")
     gltf_material(SRC / "props" / "dungeon_cage.glb", 0, "cage")
 
@@ -305,11 +337,33 @@ def barks() -> None:
             (OUT / f"{prefix}_diff_512.rgba").write_bytes(diff.resize((512, 512), Image.LANCZOS).convert("RGBA").tobytes())
 
 
+def dilate_zero(im: Image.Image, passes: int = 1024, floor: int = 16) -> Image.Image:
+    """A one-channel map with its near-ZERO texels (the gutters between a set's UV islands, and the
+    antialiased ramp into them, below `floor`) filled from the nearest island, a texel ring per pass. Left
+    at zero they are a mirror's roughness, and every mip below the first averages them into the islands'
+    edges: rubble far off came out with glossy rims."""
+    import numpy as np
+    a = np.asarray(im, dtype=np.float32)
+    filled = a >= floor
+    for _ in range(passes):
+        if filled.all():
+            break
+        total = np.zeros_like(a)
+        count = np.zeros_like(a)
+        for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            total += np.roll(np.where(filled, a, 0), (dy, dx), axis=(0, 1))
+            count += np.roll(filled, (dy, dx), axis=(0, 1))
+        grow = (~filled) & (count > 0)
+        a = np.where(grow, total / np.maximum(count, 1), a)
+        filled = filled | grow
+    return Image.fromarray(a.round().clip(0, 255).astype("uint8"))
+
+
 def rock_moss() -> None:
     """The moss rocks ship roughness but no ARM: one is assembled (AO 1, roughness, metal 0), the layout
-    every lit material in this example reads."""
+    every lit material in this example reads. Its gutters are dilated (`dilate_zero`)."""
     tex = SRC / "foliage" / "rock_moss_set_02_1k.gltf" / "textures"
-    rough = grey8(load(tex / "rock_moss_set_02_rough_1k.jpg"))
+    rough = dilate_zero(grey8(load(tex / "rock_moss_set_02_rough_1k.jpg")))
     white = Image.new("L", rough.size, 255)
     black = Image.new("L", rough.size, 0)
     save_jpeg(Image.merge("RGB", (white, rough, black)), "rock_moss_arm", 1024)
@@ -367,7 +421,7 @@ def main() -> None:
     unpack()
     terrain("ground", "brown_mud_leaves_01_1k", "brown_mud_leaves_01")
     terrain("trail", "rocky_trail_02_1k", "rocky_trail_02")
-    terrain("rock", "rock_05_1k", "rock_05")
+    terrain("rock", "rock_05_1k", "rock_05", roughness=ROCK_ROUGHNESS)
     terrain("snow", "snow_02_1k", "snow_02")
     terrain("forest", "forest_leaves_02_1k", "forest_leaves_02")
     terrain("rockydirt", "rocks_ground_05_1k", "rocks_ground_05")

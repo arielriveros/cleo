@@ -177,8 +177,19 @@ struct ForwardLighting {
     /** 0 lets a normal-mapped surface keep reflecting the sky along rays that point into itself. */
     u_horizonOcclusion: i32,
     u_isTransparent: i32,       // set by the renderer from material.config.transparent
+    /**
+     * The frame's pre-exposure (graphics/preExposure.ts). The lights, ambient and sky light arrive already
+     * multiplied by it; the environment cube and the emissive are absolute, so this program scales them.
+     */
+    u_preExposure: f32,
 };
 @group(1) @binding(3) var<uniform> u_lighting: ForwardLighting;
+
+/**
+ * The UN-normalised length of the normal-map texel `getNormal` decoded (1 with no map, or a projected
+ * one): the spread a far mip averaged out of the bumps, which `normalMapRoughness` folds into the lobe.
+ */
+var<private> cleoNormalMapLength: f32 = 1.0;
 
 /** The shading normal, flipped for a BACK face — see chunks/pbrGBuffer.wgsl. */
 fn getNormal(in: VertexOutput, front: bool, su: SurfaceUv, uv: vec2<f32>) -> vec3<f32> {
@@ -192,7 +203,10 @@ fn getNormal(in: VertexOutput, front: bool, su: SurfaceUv, uv: vec2<f32>) -> vec
         // Explicit gradients from the UN-offset uv; see the twin in chunks/pbrGBuffer.wgsl.
         var n = textureSampleGrad(u_material_normalMap_texture, u_material_normalMap_sampler,
                                   uv, ddx, ddy).rgb;
-        n = normalize(n * 2.0 - 1.0);
+        n = n * 2.0 - 1.0;
+        // Its length before normalising: what a far mip averaged away (see normalMapRoughness).
+        if (su.mode == UV_MESH) { cleoNormalMapLength = length(n); }
+        n = normalize(n);
         N = normalize(tbn * n);
         // Never let a degenerate frame (or map texel) make the normal NaN: see safeNormalize.
         N = select(tbn[2], N, dot(N, N) > 1e-12);
@@ -349,8 +363,9 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     }
 
     let N = getNormal(in, front, su, uv);
-    // Inline, where the deferred twin bakes it into the G-buffer instead. Same filter, same constants,
-    // so a surface still shades identically down both paths.
+    // Inline, where the deferred twin bakes it into the G-buffer instead. Same filters, same constants,
+    // so a surface still shades identically down both paths: the normal map's own mips, then the geometry.
+    roughness = normalMapRoughness(roughness, cleoNormalMapLength, 1.0, u_material.specularAA);
     roughness = filterSpecularRoughness(roughness, N, u_material.specularAA);
     let V = normalize(u_lighting.u_viewPos - fragPos);
 
@@ -383,6 +398,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
                                       roughness * MAX_REFLECTION_LOD).rgb;
         var env = toLinear(envC);
         if (u_lighting.u_envMapLinear != 0) { env = envC; }
+        env *= u_lighting.u_preExposure;
         // The DFG pair is the ENERGY, replacing the `kS` Fresnel this used to use. The roughness ramp
         // covers what the mip chain cannot: `generateMipmap` box-filters each face on its own, which is
         // not a GGX prefilter and does not cross face seams on WebGL2. Identical to deferredLighting,
@@ -452,12 +468,12 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     var color = ambientDiffuse * ao + ambientSpecular * specularAO + Lo;
 
     // Emission (sRGB-decoded map). Output stays LINEAR HDR — tonemap and gamma happen at the present.
+    var emission = u_material.emissiveFactor * u_material.emissiveIntensity;
     if (u_material.hasEmissiveMap != 0) {
-        color += toLinear(sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, uv).rgb)
-                 * u_material.emissiveFactor * u_material.emissiveIntensity;
-    } else {
-        color += u_material.emissiveFactor * u_material.emissiveIntensity;
+        emission *= toLinear(sampleSurface(u_material_emissiveMap_texture, u_material_emissiveMap_sampler, su, uv).rgb);
     }
+    // Stored pre-exposed, and below the half-float ceiling (graphics/preExposure.ts HDR_STORE_MAX).
+    color = min(color + emission * u_lighting.u_preExposure, vec3<f32>(32768.0));
 
     var alpha = 1.0;
     if (u_lighting.u_isTransparent != 0) { alpha = u_material.opacity; }

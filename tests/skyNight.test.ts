@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { keyLight, moonDirection, nightFactor } from '../src/graphics/skyNight';
-import { SkyAtmosphereNode } from '../src/core/scene/nodes/skyAtmosphereNode';
+import { SkyAtmosphereNode, DEFAULT_MOON_LUX } from '../src/core/scene/nodes/skyAtmosphereNode';
 import { VolumetricCloudsNode } from '../src/core/scene/nodes/volumetricCloudsNode';
 
 const dirAt = (elevationDeg: number, azimuthDeg = 0): [number, number, number] => {
     const e = elevationDeg * Math.PI / 180, a = azimuthDeg * Math.PI / 180;
     return [Math.cos(e) * Math.sin(a), Math.sin(e), Math.cos(e) * Math.cos(a)];
 };
-const MOON = { nightEnabled: true, moonEnabled: true, moonColor: [0.8, 0.9, 1], moonPhase: 1, moonlightIntensity: 0.1 };
+const MOON = { nightEnabled: true, moonEnabled: true, moonColor: [0.8, 0.9, 1], moonPhase: 1, moonLight: 0.5 };
 
 describe('moon direction', () => {
     it('sits opposite the sun with no offset', () => {
@@ -46,12 +46,19 @@ describe('key light', () => {
         expect(k.dir[1]).toBeLessThan(0); // travels downward
     });
 
-    it('becomes the moon at night, at the moonlight fraction, from the moon side', () => {
+    it("becomes the moon at night, at the moon's own intensity, from the moon side", () => {
         const toMoon = dirAt(35, 180);
         const k = keyLight(dirAt(-20), toMoon, [1, 1, 1], 5, MOON);
         expect(k.isMoon).toBe(true);
         expect(k.intensity).toBeCloseTo(0.5);
         for (let i = 0; i < 3; i++) expect(k.dir[i]).toBeCloseTo(-toMoon[i], 6);
+    });
+
+    it("does not depend on the sun light's intensity at night", () => {
+        const toMoon = dirAt(35, 180);
+        const dim = keyLight(dirAt(-20), toMoon, [1, 1, 1], 0.1, MOON);
+        const bright = keyLight(dirAt(-20), toMoon, [1, 1, 1], 50, MOON);
+        expect(dim.intensity).toBeCloseTo(bright.intensity, 9);
     });
 
     it('swaps sun for moon only while both are dark, so nothing pops', () => {
@@ -92,15 +99,49 @@ describe('night sky fields', () => {
     it('re-bakes the sky for night-sky edits, and for a moonlight change but not a rewrite of the same value', () => {
         const node = new SkyAtmosphereNode('sky');
         node.markBaked([0, 1, 0]);
-        // The night sky's brightness follows the moonlight (u_nightScale), so a change re-bakes...
-        node.moonlightIntensity = 0.2;
+        // The night sky's brightness follows the moon (u_nightScale), so a change re-bakes...
+        node.moonIlluminance = 0.5;
         expect(node.needsBake).toBe(true);
         // ...but a time-of-day script writing the same value every frame must not re-bake every frame.
         node.markBaked([0, 1, 0]);
-        node.moonlightIntensity = 0.2;
+        node.moonIlluminance = 0.5;
         expect(node.needsBake).toBe(false);
         node.starIntensity = 2;
         expect(node.needsBake).toBe(true);
+    });
+});
+
+describe('moonlight in lux', () => {
+    it('defaults a new sky to its own lux, independent of the sun', () => {
+        const node = new SkyAtmosphereNode('sky');
+        expect(node.moonIlluminance).toBe(DEFAULT_MOON_LUX);
+        expect(node.usesLegacyMoonRatio).toBe(false);
+        expect(node.moonLux(50000)).toBe(DEFAULT_MOON_LUX);
+        expect(node.moonLux(100)).toBe(DEFAULT_MOON_LUX);
+    });
+
+    it('keeps a legacy payload on its fraction of the sun until it is edited', () => {
+        const legacy = new SkyAtmosphereNode('sky', { moonlightIntensity: 0.02 });
+        expect(legacy.usesLegacyMoonRatio).toBe(true);
+        expect(legacy.moonIlluminance).toBeNull();
+        expect(legacy.moonLux(50000)).toBeCloseTo(1000);
+        // Round trip: still the ratio, and no lux appears from nowhere.
+        const saved = (legacy as any)._serializePayload().atmosphere;
+        expect(saved.moonlightIntensity).toBeCloseTo(0.02);
+        expect(saved.moonIlluminance).toBeUndefined();
+        // Editing it in lux converts the node for good.
+        legacy.moonIlluminance = 2;
+        expect(legacy.usesLegacyMoonRatio).toBe(false);
+        expect(legacy.moonLux(50000)).toBe(2);
+        const converted = (legacy as any)._serializePayload().atmosphere;
+        expect(converted.moonIlluminance).toBe(2);
+        expect(converted.moonlightIntensity).toBeUndefined();
+        expect(new SkyAtmosphereNode('sky', converted).moonLux(79600)).toBe(2);
+    });
+
+    it('prefers lux when a payload carries both', () => {
+        const both = new SkyAtmosphereNode('sky', { moonIlluminance: 3, moonlightIntensity: 0.5 });
+        expect(both.moonLux(10000)).toBe(3);
     });
 });
 

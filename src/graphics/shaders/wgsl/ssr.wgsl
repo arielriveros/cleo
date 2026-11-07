@@ -62,6 +62,8 @@ struct SsrUniforms {
     u_frame: f32,                   // rotates the noise every frame
     u_steps: i32,                   // march steps along the whole on-screen ray
     u_hasRadiance: i32,             // 0 = no usable copy of last frame (first frame, a cut, 8-bit targets)
+    /** k_now / k_copy: brings last frame's radiance copy to this frame's pre-exposure. */
+    u_radianceRescale: f32,
 };
 @group(1) @binding(0) var<uniform> u_ssr: SsrUniforms;
 
@@ -322,7 +324,7 @@ fn fs_main(in: VertexOutput) -> SsrOutput {
     // Looser than SSIL's 5%: the copy is bilinear and usually smaller than the screen, and a hit lands
     // on silhouettes far more often than an SSIL sample does.
     if (abs(prevLight.a - expected) > 0.1 * expected + 0.1) { return out; }
-    let colour = prevLight.rgb;
+    let colour = prevLight.rgb * u_ssr.u_radianceRescale;
     if (!(all(colour >= vec3<f32>(0.0)) && all(colour <= vec3<f32>(6.0e4)))) { return out; }
 
     // How far to trust it: not near the edge of either frame (the reflection would end in a hard line

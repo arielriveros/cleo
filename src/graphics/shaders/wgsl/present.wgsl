@@ -12,6 +12,8 @@
 // there are no include guards. colorLut.wgsl brings bindings 4/5 with it.
 #include "./chunks/grade.wgsl"
 #include "./chunks/colorLut.wgsl"
+// Bindings 6/7: the local exposure regions (chunks/localExposure.wgsl).
+#include "./chunks/localExposure.wgsl"
 
 struct PresentUniforms {
     u_exposure: f32,
@@ -34,6 +36,12 @@ struct PresentUniforms {
     // scene colour's alpha, which carries the bloom mask and would erase dark, non-blooming assets.
     // 0 = opaque background (on-screen), 1 = transparent (thumbnail).
     u_alphaFromDepth: f32,
+    /** Night vision (chunks/grade.wgsl purkinjeShift): 0 off .. 1 full. RenderSettings.purkinjeStrength. */
+    u_purkinjeStrength: f32,
+    /** cd/m2 per stored unit: REFERENCE_ILLUMINANCE over the frame's pre-exposure. */
+    u_nitsPerUnit: f32,
+    /** Local exposure (chunks/localExposure.wgsl): strength, shadow stops, highlight stops, guide sharpness. */
+    u_localExposure: vec4<f32>,
 };
 
 @group(0) @binding(0) var u_screenTexture_texture: texture_2d<f32>;
@@ -53,7 +61,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         alpha = select(0.0, 1.0, coverage < 1.0);
     }
 
-    let display = gradeToDisplay(hdr, u_present.u_exposure, u_present.u_saturation,
+    var seen = purkinjeShift(hdr, u_present.u_nitsPerUnit, u_present.u_purkinjeStrength);
+    // Local exposure: a smooth per-region shift, in stops, on top of the camera's (see the chunk).
+    let exposedLum = dot(seen, vec3<f32>(0.2126, 0.7152, 0.0722)) * u_present.u_exposure;
+    seen *= exp2(localExposureStops(in.uv, exposedLum, u_present.u_localExposure));
+    let display = gradeToDisplay(seen, u_present.u_exposure, u_present.u_saturation,
                                  u_present.u_toneMapper);
-    return vec4<f32>(applyColorLut(display, u_present.u_lutSize, u_present.u_lutIntensity), alpha);
+    let graded = applyColorLut(display, u_present.u_lutSize, u_present.u_lutIntensity);
+    return vec4<f32>(max(graded + displayDither(in.position.xy), vec3<f32>(0.0)), alpha);
 }

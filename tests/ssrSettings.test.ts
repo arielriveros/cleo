@@ -58,7 +58,8 @@ describe('screen-space reflection settings', () => {
         // The resolve normalises the reflected light the way a prefiltered cube holds it, so the lighting
         // pass must scale it by the same LUT term `probeIBL` uses — never the analytic fit, never bare.
         const lighting = shader('deferredLighting.wgsl');
-        expect(lighting).toMatch(/ssr\.rgb \* \(F \* brdf\.x \+ brdf\.y\) \* energyCompensation\(F0, NoV, roughness\)/);
+        expect(lighting).toMatch(/ssr\.rgb \* envSplitSum\(F0, brdf\) \* energyCompensation\(F0, NoV, roughness\)/);
+        expect(lighting).toMatch(/result\.specular = prefiltered \* envSplitSum\(F0, brdf\) \* energyCompensation\(F0, NoV, roughness\)/);
         expect(lighting).toMatch(/specular = mix\(specular, ssrSpecular, ssr\.a\)/);
     });
 });

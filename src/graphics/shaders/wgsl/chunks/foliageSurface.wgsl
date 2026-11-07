@@ -6,8 +6,9 @@
 //   GUSTS. The gust the wind is giving this plant (also from the vertex stage, 0 without wind) brightens it
 //   a little -- a gust front rolling over a meadow shows as a travelling sheen -- and turns leaves over to
 //   show their paler undersides.
-//   WEATHER. The scene's WeatherNode: rain darkens the surface and makes it glossy, snow settles on what
-//   faces up. The weight both put on the plant is a vertex bend (chunks/foliageWind.wgsl `droop`).
+//   WEATHER. The weather volumes the plant stands in (WeatherNode), per plant, kept off it under shelter:
+//   rain darkens the surface and makes it glossy, snow settles on what faces up. The weight both put on
+//   the plant is a vertex bend (chunks/foliageWind.wgsl `droop`).
 //
 // Included by chunks/pbrGBuffer.wgsl under `#if CLEO_FOLIAGE`; it uses chunks/foliageWind.wgsl's noise,
 // which the instanced vertex stage brings in.
@@ -29,10 +30,11 @@ fn foliageRecolour(c: vec3<f32>, tint: vec3<f32>) -> vec3<f32> {
 
 /**
  * Apply variation, gusts and weather to a foliage fragment. `f` is the vertex stage's `foliage` varying:
- * x = the plant's hash, y = its gust (0..~1, 0 without wind), z = 1 for a leaves material.
+ * x = the plant's hash, y = its gust (0..~1, 0 without wind), z = 1 for a leaves material. `weather` is
+ * its `foliageWeather`: x = wet, y = snow at this plant.
  */
 fn foliageShade(albedo: ptr<function, vec3<f32>>, roughness: ptr<function, f32>, translucency: ptr<function, f32>,
-                N: vec3<f32>, worldPos: vec3<f32>, f: vec4<f32>) {
+                N: vec3<f32>, worldPos: vec3<f32>, f: vec4<f32>, weather: vec2<f32>) {
     var c = *albedo;
     // Variation: three independent numbers from one hash.
     let h = f.x;
@@ -52,13 +54,14 @@ fn foliageShade(albedo: ptr<function, vec3<f32>>, roughness: ptr<function, f32>,
         c = mix(c, foliageRecolour(c, u_material.undersideColor) * 1.3, turned);
     }
 
-    // Weather: wet is darker and glossier; snow settles on what faces up and lets little light through.
-    let wet = saturate(u_material.foliageWeather.x * u_material.wetResponse);
+    // Weather, per plant (the volumes it stands in, kept off it under shelter): wet is darker and
+    // glossier; snow, in the weather's snow colour, settles on what faces up and lets little light through.
+    let wet = saturate(weather.x * u_material.wetResponse);
     c *= mix(1.0, 0.55, wet);
     *roughness = mix(*roughness, 0.25, wet);
-    let cover = saturate(u_material.foliageWeather.y * u_material.snowCover) * smoothstep(0.2, 0.8, N.y);
-    c = mix(c, vec3<f32>(0.9), cover);
-    *roughness = mix(*roughness, 0.85, cover);
+    let cover = saturate(weather.y * u_material.snowCover) * smoothstep(0.2, 0.8, N.y);
+    c = mix(c, u_material.foliageSnow.rgb, cover);
+    *roughness = mix(*roughness, u_material.foliageSnow.a, cover);
     *translucency = *translucency * (1.0 - cover);
 
     *albedo = c;

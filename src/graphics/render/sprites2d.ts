@@ -31,7 +31,20 @@ import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
 import { gatherParticleLocalLight } from '../particles/particleLighting';
+import { billboardMatrix } from './billboard';
 import type { Material } from '../material';
+
+/**
+ * The nearest a local light is taken to be from a lit sprite's pixels (spriteLit.wgsl `lightRadius`): half
+ * the placed quad's smaller world extent. A six-way or flat lit sprite is a billboard standing for a volume
+ * of smoke about as deep as it is wide, so a light inside it lights that depth of medium, not the single
+ * pixel it happens to sit on.
+ */
+export function spriteLightRadius(m: mat4): number {
+    const width = Math.hypot(m[0], m[1], m[2]);
+    const height = Math.hypot(m[4], m[5], m[6]);
+    return 0.5 * Math.min(width, height);
+}
 
 /** What Sprite2DPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface Sprite2DPassesHost {
@@ -67,6 +80,10 @@ export function capSpriteScreenSize(m: mat4, maxCssPx: number, camera: Camera, c
  * Y-sorted pass that interleaves tilemap chunk bands, sprites and particles in a 2D scene. Split out
  * of Renderer.
  */
+/** No CPU-gathered local light: what a lit sprite takes when the cluster grid lights it per pixel. */
+const NO_LOCAL_LIGHT = { fill: [0, 0, 0] as [number, number, number], keyDirection: [0, 1, 0] as [number, number, number],
+                         keyColor: [0, 0, 0] as [number, number, number] };
+
 export class Sprite2DPasses {
     private readonly _shaderManager = ShaderManager.Instance;
 
@@ -246,6 +263,7 @@ export class Sprite2DPasses {
             origin[2] + layer.cfg.zOffset,
         ]);
         this._shaderManager.setUniform('u_model', model);
+        this._shaderManager.setUniform('u_preExposure', this._view.drawPreExposure);
 
         const texture = TextureManager.Instance.getTexture(tileset.textureId)
             || TextureManager.Instance.getTexture('Null');
@@ -300,37 +318,9 @@ export class Sprite2DPasses {
         this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         
-        // constraint the sprite to always face the camera based on the node's constraints
-        const spriteMatrix = mat4.clone(node.worldTransform);
-        const constraints: 'free' | 'spherical' | 'cylindrical' = node.constraints;
-
-        if (constraints === 'spherical') {
-            spriteMatrix[0] = this._view.camera.viewMatrix[0];
-            spriteMatrix[1] = this._view.camera.viewMatrix[4];
-            spriteMatrix[2] = this._view.camera.viewMatrix[8];
-            spriteMatrix[4] = this._view.camera.viewMatrix[1];
-            spriteMatrix[5] = this._view.camera.viewMatrix[5];
-            spriteMatrix[6] = this._view.camera.viewMatrix[9];
-            spriteMatrix[8] = this._view.camera.viewMatrix[2];
-            spriteMatrix[9] = this._view.camera.viewMatrix[6];
-            spriteMatrix[10] = this._view.camera.viewMatrix[10];
-            // reapply scaling
-            mat4.scale(spriteMatrix, spriteMatrix, node.worldScale);
-        }
-        else if (constraints === 'cylindrical') {
-            spriteMatrix[0] = this._view.camera.viewMatrix[0];
-            spriteMatrix[1] = this._view.camera.viewMatrix[4];
-            spriteMatrix[2] = this._view.camera.viewMatrix[8];
-            spriteMatrix[4] = 0;
-            spriteMatrix[5] = 1;
-            spriteMatrix[6] = 0;
-            spriteMatrix[8] = this._view.camera.viewMatrix[2];
-            spriteMatrix[9] = this._view.camera.viewMatrix[6];
-            spriteMatrix[10] = this._view.camera.viewMatrix[10];
-
-            // reapply scaling
-            mat4.scale(spriteMatrix, spriteMatrix, node.worldScale);
-        }
+        // The camera-facing constraint (render/billboard.ts): screen-aligned, or turned about its upright axis
+        // to face the camera's position.
+        const spriteMatrix = this.spriteBillboardMatrix(node);
 
         // SpriteNode.maxScreenSize: no taller than that many CSS pixels (the editor's viewport icons).
         if (node.maxScreenSize > 0)
@@ -349,14 +339,19 @@ export class Sprite2DPasses {
         this._shaderManager.setUniform('u_model', spriteMatrix);
         this._materials.setDissolve(node.effectiveFade);
         const lit = material.type === 'spriteLit';
-        if (lit) this._setSpriteLight(node, material, spriteMatrix);
+        // The frame's cluster grid, when the lit program has it bound: every local light per pixel.
+        const gridLights = lit && this._bindGroups.declaresFrameLighting(pipeline) && !this._host.thumbnailMode && !this._view.capturing;
+        if (lit) this._setSpriteLight(node, material, spriteMatrix, gridLights);
+        if (gridLights) this._sys.lighting.lightGrid.uploadUniforms(this._shaderManager);
 
         // Per draw, from the tile on screen: an animated sprite follows its frame's overdrive, and two
         // sprites sharing a tileset never fight over one value. A sprite that takes less than the whole
         // exposure (Sprite.exposureWeight) is divided by the rest of it here; the tonemapper multiplies by all.
         const weight = node.sprite.exposureWeight;
+        // A sprite that burns with a light (Sprite.followLight) swells and dims on the light's own beat.
+        const drive = node.overdrive * node.lightFollowScale;
         material.properties.set('intensity', weight < 1 && this._view.exposure > 0
-            ? node.overdrive * Math.pow(this._view.exposure, weight - 1) : node.overdrive);
+            ? drive * Math.pow(this._view.exposure, weight - 1) : drive);
 
         // Set material uniforms + bind textures
         let record = 0;
@@ -386,7 +381,8 @@ export class Sprite2DPasses {
      * and BACK (away from the camera), the frame the Creator bakes six-way lightmaps and normals in. A
      * quad seen from behind (a free sprite) shows its texture mirrored, so its frame is mirrored with it.
      */
-    private _setSpriteLight(node: SpriteNode, material: Material, m: mat4): void {
+    private _setSpriteLight(node: SpriteNode, material: Material, m: mat4, gridLights: boolean): void {
+        material.properties.set('gridLights', gridLights ? 1 : 0);
         const right = vec3.normalize(this._litRight, vec3.set(this._litRight, m[0], m[1], m[2]));
         const up = vec3.normalize(this._litUp, vec3.set(this._litUp, m[4], m[5], m[6]));
         const back = vec3.cross(this._litBack, right, up);
@@ -399,6 +395,7 @@ export class Sprite2DPasses {
         material.properties.set('right', [right[0], right[1], right[2]]);
         material.properties.set('up', [up[0], up[1], up[2]]);
         material.properties.set('back', [back[0], back[1], back[2]]);
+        material.properties.set('lightRadius', spriteLightRadius(m));
 
         const scene = node.scene;
         if (!scene) {
@@ -408,7 +405,9 @@ export class Sprite2DPasses {
             return;
         }
         const light = this._particlePasses.frameLight(scene);
-        const local = gatherParticleLocalLight([m[12], m[13], m[14]], light.localLights);
+        // With the grid, every local light is evaluated per pixel (spriteLit.wgsl localLights): no CPU key,
+        // and none of their fill folded into the ambient.
+        const local = gridLights ? NO_LOCAL_LIGHT : gatherParticleLocalLight([m[12], m[13], m[14]], light.localLights);
         material.properties.set('sunDir', [light.sunDirection[0], light.sunDirection[1], light.sunDirection[2]]);
         material.properties.set('sunColor', [light.sunColor[0], light.sunColor[1], light.sunColor[2]]);
         // As lit particles: the fill of the local lights past the key joins the ambient, through the 1/π.
@@ -422,22 +421,10 @@ export class Sprite2DPasses {
     private readonly _litUp = vec3.create();
     private readonly _litBack = vec3.create();
 
-    /** Builds a sprite's world matrix with its camera-facing billboard constraint applied. */
+    /** Builds a sprite's world matrix with its camera-facing billboard constraint applied (render/billboard.ts). */
     public spriteBillboardMatrix(node: SpriteNode): mat4 {
-        const m = mat4.clone(node.worldTransform);
-        const view = this._view.camera.viewMatrix;
-        const constraints: 'free' | 'spherical' | 'cylindrical' = node.constraints;
-        if (constraints === 'spherical') {
-            m[0] = view[0]; m[1] = view[4]; m[2] = view[8];
-            m[4] = view[1]; m[5] = view[5]; m[6] = view[9];
-            m[8] = view[2]; m[9] = view[6]; m[10] = view[10];
-            mat4.scale(m, m, node.worldScale);
-        } else if (constraints === 'cylindrical') {
-            m[0] = view[0]; m[1] = view[4]; m[2] = view[8];
-            m[4] = 0; m[5] = 1; m[6] = 0;
-            m[8] = view[2]; m[9] = view[6]; m[10] = view[10];
-            mat4.scale(m, m, node.worldScale);
-        }
-        return m;
+        const cam = this._view.camera;
+        return billboardMatrix(mat4.create(), node.worldTransform, node.worldScale, node.constraints,
+                               cam.viewMatrix, cam.position, cam.type !== 'orthographic');
     }
 }

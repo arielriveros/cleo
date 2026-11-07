@@ -90,7 +90,8 @@ describe('WeatherNode', () => {
         expect([w.wetness, w.snow]).toEqual([1, 0]);
         expect(w.applyPreset('snowedIn')).toBe(true);
         expect([w.wetness, w.snow]).toEqual([0, 1]);
-        expect((w as any)._serializePayload()).toEqual({ weather: { wetness: 0, snow: 1 } });
+        // The weather, then the box (unbounded: a scene-wide node, as every scene saved before boxes has).
+        expect((w as any)._serializePayload().weather).toMatchObject({ wetness: 0, snow: 1, puddles: 0, size: [0, 0, 0] });
         expect(WEATHER_PRESETS.map(p => p.id)).toEqual(['dry', 'drizzle', 'rain', 'lightSnow', 'snowedIn']);
     });
 });

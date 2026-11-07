@@ -7,6 +7,7 @@
 #include "./chunks/modelVertex.wgsl"
 #include "./chunks/tonemap.wgsl"
 #include "./chunks/terrainStack.wgsl"
+#include "./chunks/terrainWeather.wgsl"
 
 struct GBuffer {
     @location(0) albedoMetallic: vec4<f32>,    // rgb = albedo, a = metallic
@@ -16,7 +17,10 @@ struct GBuffer {
 
 @fragment
 fn fs_main(in: VertexOutput) -> GBuffer {
-    let surface = resolveTerrainSurface(in.fragPos, in.uv, tbnOf(in));
+    let tbn = tbnOf(in);
+    var surface = resolveTerrainSurface(in.fragPos, in.uv, tbn);
+    // Rain and snow inside the weather volumes (chunks/terrainWeather.wgsl), before the roughness filter.
+    applyTerrainWeather(&surface, in.fragPos, tbn);
 
     var out: GBuffer;
     // No height-field self-shadow to fold in any more: it belonged to the parallax march, which the layer

@@ -285,6 +285,24 @@ export function buildDungeon(kit) {
     })
   }
 
+  /**
+   * The halls' air: one smoky-interior fog volume (VolumetricFogNode) over the whole structure, thicker at
+   * the floor. The torches glow in it, their halos stopped by the walls (their cube shadows), and the
+   * moonlight through the windows and the oculus shows as shafts.
+   */
+  function smoke() {
+    const b = structure.bounds
+    return node('Hall Smoke', 'volumetricFog', {
+      id: id('dungeon:fog:halls'),
+      position: [round((b.min[0] + b.max[0]) / 2), round((b.min[1] + b.max[1]) / 2), round((b.min[2] + b.max[2]) / 2)],
+      volumetricFog: {
+        size: [round(b.size[0] + 2), round(b.size[1] + 2), round(b.size[2] + 2)], blendDistance: 1, priority: 0, enabled: true,
+        density: 0.03, albedo: [0.72, 0.68, 0.62], anisotropy: 0.45, heightFalloff: 0.08,
+        noiseStrength: 0.3, noiseScale: 3, windVelocity: [0.08, 0.02, 0.05],
+      },
+    })
+  }
+
   /** The ladder back up: rails to a dark hatch in the ceiling, daylight falling through it, and the door. */
   function wayOut() {
     const { position: p, yaw, ceiling } = L.LADDER
@@ -400,6 +418,7 @@ export function buildDungeon(kit) {
         props, barrels,
         souls.group('dungeon:fires', 'Fires', fireNodes),
         souls.group('dungeon:shafts', 'Moonlight', shafts()),
+        souls.group('dungeon:fog', 'Fog Volumes', [smoke()]),
         wayOut(),
         interactables, spawns, navMesh,
       ],

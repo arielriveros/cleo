@@ -22,6 +22,8 @@ struct FluidResolveUniforms {
     u_prevViewProj: mat4x4<f32>,   // last frame's world -> clip (uv-producing form)
     u_feedback: f32,               // history weight, 0..1
     u_historyValid: i32,
+    /** k_now / k_written: brings the history to this frame's pre-exposure (TemporalHistory.rescale). */
+    u_historyRescale: f32,
 };
 @group(1) @binding(0) var<uniform> u_resolve: FluidResolveUniforms;
 
@@ -61,6 +63,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let prevUv = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
     if (any(prevUv < vec2<f32>(0.0)) || any(prevUv > vec2<f32>(1.0))) { return current; }
 
-    let history = clamp(textureSampleLevel(u_history_texture, u_history_sampler, prevUv, 0.0), lo, hi);
+    let stored = textureSampleLevel(u_history_texture, u_history_sampler, prevUv, 0.0);
+    let history = clamp(vec4<f32>(stored.rgb * u_resolve.u_historyRescale, stored.a), lo, hi);
     return mix(current, history, u_resolve.u_feedback);
 }

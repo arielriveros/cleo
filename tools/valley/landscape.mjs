@@ -59,13 +59,31 @@ function surface(tex, extra = {}) {
 }
 
 /**
+ * The landscape's surfaces, by the texture set each wears: every one is a LIBRARY material too (the asset
+ * explorer's /Environment/Landscape/Materials), linked from its slot by `surfaceMaterialId`, so it can be
+ * opened and edited like any material and picked anywhere one is (the weather's snow material, say). The
+ * Dirt slot and the Dirt Road slot wear the same one.
+ */
+export const LANDSCAPE_SURFACES = [
+  { key: 'ground', name: 'Ground' }, { key: 'dirt', name: 'Dirt' }, { key: 'rockydirt', name: 'Rocky Dirt' },
+  { key: 'forest', name: 'Forest Floor' }, { key: 'rock', name: 'Rock' }, { key: 'snow', name: 'Snow' },
+  { key: 'clay', name: 'Pond Clay' }, { key: 'sand', name: 'Shore Sand' }, { key: 'trail', name: 'Trail' },
+  { key: 'path', name: 'Stone Path' },
+]
+
+/** The material of surface `key` (LANDSCAPE_SURFACES): what its library asset holds and its slot copies. */
+export const landscapeSurface = (tex, key) => surface(tex[key])
+
+/**
  * The landscape material, as TerrainMaterial.serialize() writes it.
  *
  * @param tex     ground/rock/snow/trail -> { diff, nor, arm, disp } texture ids
  * @param foliage ground foliage rules (grass, trees and bushes), library-linked by modelId
+ * @param materialIds LANDSCAPE_SURFACES key -> its library material's id, linked from each slot
  */
-export function valleyTerrainMaterial(tex, foliage, grassNames, { forestFoliage = [] } = {}) {
+export function valleyTerrainMaterial(tex, foliage, grassNames, { forestFoliage = [], materialIds = {} } = {}) {
   const base = surface(tex.ground)
+  const linked = (key) => materialIds[key] ?? null
   return {
     ...base,
     terrainMaterial: true,
@@ -75,15 +93,15 @@ export function valleyTerrainMaterial(tex, foliage, grassNames, { forestFoliage 
     foliageInclude: [], foliageExclude: [],
     groundFoliageInclude: foliage,
     rule: rule(),
-    allowFoliage: true, surfaceMaterialId: null, normalStrength: 1, antiTiling: 0.6,
+    allowFoliage: true, surfaceMaterialId: linked('ground'), normalStrength: 1, antiTiling: 0.6,
     slots: [
       {
-        id: DIRT_SLOT, name: 'Dirt', material: surface(tex.dirt), surfaceMaterialId: null, tiling: tilingFor(5),
+        id: DIRT_SLOT, name: 'Dirt', material: surface(tex.dirt), surfaceMaterialId: linked('dirt'), tiling: tilingFor(5),
         rule: rule({ noise: { amount: 0.4, scale: 4, seed: 31 }, heightBlend: 0.5 }),
         allowFoliage: false, manual: true, normalStrength: 1, antiTiling: 0.5,
       },
       {
-        id: ROCKY_DIRT_SLOT, name: 'Rocky Dirt', material: surface(tex.rockydirt), surfaceMaterialId: null, tiling: tilingFor(5),
+        id: ROCKY_DIRT_SLOT, name: 'Rocky Dirt', material: surface(tex.rockydirt), surfaceMaterialId: linked('rockydirt'), tiling: tilingFor(5),
         rule: rule({
           slope: { enabled: true, min: 24, max: 90, falloff: 6 },
           elevation: { enabled: true, min: -100, max: 190, falloff: 30 },
@@ -93,19 +111,19 @@ export function valleyTerrainMaterial(tex, foliage, grassNames, { forestFoliage 
         allowFoliage: false, manual: false, normalStrength: 1.1, antiTiling: 0.5,
       },
       {
-        id: FOREST_SLOT, name: 'Forest Floor', material: surface(tex.forest), surfaceMaterialId: null, tiling: tilingFor(4),
+        id: FOREST_SLOT, name: 'Forest Floor', material: surface(tex.forest), surfaceMaterialId: linked('forest'), tiling: tilingFor(4),
         rule: rule({ noise: { amount: 0.45, scale: 5, seed: 23 }, heightBlend: 0.35 }),
         // Its own foliage: the undergrowth (Foliage Creator bushes).
         allowFoliage: false, manual: true, normalStrength: 1, antiTiling: 0.5,
         foliageInclude: forestFoliage,
       },
       {
-        id: 'slot_rock', name: 'Rock', material: surface(tex.rock), surfaceMaterialId: null, tiling: tilingFor(9),
+        id: 'slot_rock', name: 'Rock', material: surface(tex.rock), surfaceMaterialId: linked('rock'), tiling: tilingFor(9),
         rule: rule({ slope: { enabled: true, min: 36, max: 90, falloff: 8 }, noise: { amount: 0.55, scale: 7, seed: 3 }, heightBlend: 0.35 }),
         allowFoliage: false, manual: false, normalStrength: 1.2, antiTiling: 0.6,
       },
       {
-        id: 'slot_snow', name: 'Snow', material: surface(tex.snow), surfaceMaterialId: null, tiling: tilingFor(10),
+        id: 'slot_snow', name: 'Snow', material: surface(tex.snow), surfaceMaterialId: linked('snow'), tiling: tilingFor(10),
         rule: rule({
           elevation: { enabled: true, min: 250, max: 2000, falloff: 60 },
           slope: { enabled: true, min: 0, max: 42, falloff: 10 },
@@ -114,32 +132,32 @@ export function valleyTerrainMaterial(tex, foliage, grassNames, { forestFoliage 
         allowFoliage: false, manual: false, normalStrength: 1, antiTiling: 0.5,
       },
       {
-        id: CLAY_SLOT, name: 'Pond Clay', material: surface(tex.clay), surfaceMaterialId: null, tiling: tilingFor(3),
+        id: CLAY_SLOT, name: 'Pond Clay', material: surface(tex.clay), surfaceMaterialId: linked('clay'), tiling: tilingFor(3),
         rule: rule({ noise: { amount: 0.3, scale: 3, seed: 41 }, heightBlend: 0.4 }),
         allowFoliage: false, manual: true, normalStrength: 1, antiTiling: 0.5,
         foliageExclude: grassNames,
       },
       {
-        id: SAND_SLOT, name: 'Shore Sand', material: surface(tex.sand), surfaceMaterialId: null, tiling: tilingFor(3),
+        id: SAND_SLOT, name: 'Shore Sand', material: surface(tex.sand), surfaceMaterialId: linked('sand'), tiling: tilingFor(3),
         rule: rule({ noise: { amount: 0.4, scale: 2, seed: 43 }, heightBlend: 0.5 }),
         allowFoliage: false, manual: true, normalStrength: 1, antiTiling: 0.5,
         foliageExclude: grassNames,
       },
       {
-        id: DIRT_ROAD_SLOT, name: 'Dirt Road', material: surface(tex.dirt), surfaceMaterialId: null, tiling: tilingFor(4),
+        id: DIRT_ROAD_SLOT, name: 'Dirt Road', material: surface(tex.dirt), surfaceMaterialId: linked('dirt'), tiling: tilingFor(4),
         rule: rule({ noise: { amount: 0.35, scale: 2.5, seed: 47 }, heightBlend: 0.45 }),
         allowFoliage: false, manual: true, normalStrength: 1, antiTiling: 0.4,
         foliageExclude: grassNames,
       },
       {
-        id: TRAIL_SLOT, name: 'Trail', material: surface(tex.trail), surfaceMaterialId: null, tiling: tilingFor(4),
+        id: TRAIL_SLOT, name: 'Trail', material: surface(tex.trail), surfaceMaterialId: linked('trail'), tiling: tilingFor(4),
         rule: rule({ noise: { amount: 0.35, scale: 2.5, seed: 11 }, heightBlend: 0.45 }),
         allowFoliage: false, manual: true, normalStrength: 1, antiTiling: 0.4,
         // Keep the small plants off the roads wherever the trail shows at all (weight >= 0.15).
         foliageExclude: grassNames,
       },
       {
-        id: PATH_SLOT, name: 'Stone Path', material: surface(tex.path), surfaceMaterialId: null, tiling: tilingFor(3),
+        id: PATH_SLOT, name: 'Stone Path', material: surface(tex.path), surfaceMaterialId: linked('path'), tiling: tilingFor(3),
         rule: rule({ noise: { amount: 0.25, scale: 2, seed: 53 }, heightBlend: 0.5 }),
         allowFoliage: false, manual: true, normalStrength: 1.1, antiTiling: 0.4,
         foliageExclude: grassNames,

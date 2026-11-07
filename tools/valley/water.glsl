@@ -70,8 +70,10 @@ vec3 waveNormal(vec2 xz, out float crest) {
 
 vec3 skyFallback(vec3 R) {
     float up = clamp(R.y, 0.0, 1.0);
-    vec3 horizon = u_skyColor * 0.55 + u_sceneAmbient * 0.15;
-    return mix(horizon, u_skyColor, pow(up, 0.6));
+    // u_skyColor is the material's own (absolute) colour; the engine's light inputs arrive pre-exposed.
+    vec3 sky = u_skyColor * cleoPreExposure();
+    vec3 horizon = sky * 0.55 + u_sceneAmbient * 0.15;
+    return mix(horizon, sky, pow(up, 0.6));
 }
 
 vec4 fragment() {
@@ -88,7 +90,8 @@ vec4 fragment() {
     vec3 reflection = skyFallback(R);
     if (u_useEnvMap) {
         vec3 e = textureLod(u_envMap, R, u_roughness * 4.0).rgb;
-        reflection = u_envMapLinear ? e : toLinear(e);
+        // The probe cube is absolute; the scene it is mixed with below is pre-exposed.
+        reflection = (u_envMapLinear ? e : toLinear(e)) * cleoPreExposure();
     }
     // The screen's own image where it has one; the cube above where it does not. Seen from below the
     // surface there is nothing to reflect.
@@ -120,7 +123,7 @@ vec4 fragment() {
     // Path length through the water, for the absorption below.
     refractedThickness = max(refractedThickness, 0.0) * axisToRay;
 
-    vec3 behind = cleoHasScene() ? cleoSceneColor(refractedUv) : u_deepColor;
+    vec3 behind = cleoHasScene() ? cleoSceneColor(refractedUv) : u_deepColor * cleoPreExposure();
     // Beer-Lambert along the ray, then in-scattering toward the water's own colour with depth.
     vec3 transmitted = behind * exp(-u_absorption * refractedThickness);
     float murk = 1.0 - exp(-refractedThickness * u_turbidity);

@@ -17,6 +17,7 @@ const TONE_AGX: i32 = 0;
 const TONE_ACES: i32 = 1;
 const TONE_NEUTRAL: i32 = 2;
 const TONE_NONE: i32 = 3;
+const TONE_AGX_PUNCHY: i32 = 4;
 
 // ---------------------------------------------------------------------------------------------
 // AgX — Troy Sobotka's curve, Filament's polynomial fit; the same operator Godot 4.6 and three.js
@@ -65,24 +66,56 @@ fn agxDefaultContrastApprox(x: vec3<f32>) -> vec3<f32> {
          - 0.00232;
 }
 
-/**
- * Linear HDR in, LINEAR sRGB [0,1] out.
- *
- * The trailing pow(2.2) undoes the display encode baked into the sigmoid's output, so the caller's
- * toSrgb() is the single encode rather than a second one — this composition is correct, not a
- * double gamma.
- */
-fn agx(hdr: vec3<f32>) -> vec3<f32> {
+/** AgX's first half: linear HDR into the inset Rec.2020 log encoding, through the sigmoid. */
+fn agxEncode(hdr: vec3<f32>) -> vec3<f32> {
     var c = AGX_SRGB_TO_REC2020 * hdr;
     c = AGX_INSET * c;
     // log2(0) is -inf. 1e-10 sits far below AGX_MIN_EV, so it clamps to black either way.
     c = max(vec3<f32>(1e-10), c);
     c = (log2(c) - AGX_MIN_EV) / (AGX_MAX_EV - AGX_MIN_EV);
     c = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
-    c = agxDefaultContrastApprox(c);
-    c = AGX_OUTSET * c;
+    return agxDefaultContrastApprox(c);
+}
+
+/**
+ * AgX's second half: the outset, then back to LINEAR sRGB [0,1].
+ *
+ * The pow(2.2) undoes the display encode baked into the sigmoid's output, so the caller's toSrgb() is
+ * the single encode rather than a second one — this composition is correct, not a double gamma.
+ */
+fn agxDecode(sigmoid: vec3<f32>) -> vec3<f32> {
+    var c = AGX_OUTSET * sigmoid;
     c = pow(max(vec3<f32>(0.0), c), vec3<f32>(2.2));
     return clamp(AGX_REC2020_TO_SRGB * c, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+/** Linear HDR in, LINEAR sRGB [0,1] out. */
+fn agx(hdr: vec3<f32>) -> vec3<f32> {
+    return agxDecode(agxEncode(hdr));
+}
+
+// ---------------------------------------------------------------------------------------------
+// AgX Punchy — AgX with Filament's AgxLook::PUNCHY (Blender's "Punchy" look): an ASC CDL on the
+// sigmoid's output, power 1.35 and saturation 1.4, so saturated colours stay rich instead of draining
+// toward grey. A clear sky is the case it is for: plain AgX turns a Rayleigh blue steel-grey.
+//
+// The look on its own also takes middle grey about a stop darker (and the shadows more), which an
+// auto-exposed scene would read as a darker picture the meter never sees, since it meters before the
+// curve. So the input is raised first by AGX_PUNCHY_GAIN, chosen so 0.18 comes out exactly as bright
+// as plain AgX makes it: the look's contrast and colour without its darkening, and switching between
+// the two keeps the exposure (tests/toneMappers.test.ts pins the match).
+// ---------------------------------------------------------------------------------------------
+const AGX_PUNCHY_POWER: f32 = 1.35;
+const AGX_PUNCHY_SATURATION: f32 = 1.4;
+const AGX_PUNCHY_GAIN: f32 = 2.09;
+
+/** Linear HDR in, LINEAR sRGB [0,1] out. */
+fn agxPunchy(hdr: vec3<f32>) -> vec3<f32> {
+    let c = agxEncode(hdr * AGX_PUNCHY_GAIN);
+    // Filament's order: the luma is taken BEFORE the power, and the saturation pivots on it.
+    let luma = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let p = pow(max(c, vec3<f32>(0.0)), vec3<f32>(AGX_PUNCHY_POWER));
+    return agxDecode(vec3<f32>(luma) + AGX_PUNCHY_SATURATION * (p - vec3<f32>(luma)));
 }
 
 /**
@@ -126,6 +159,7 @@ fn toneCurve(hdr: vec3<f32>, mapper: i32) -> vec3<f32> {
     if (mapper == TONE_ACES) { return acesFilm(x); }
     if (mapper == TONE_NEUTRAL) { return pbrNeutral(x); }
     if (mapper == TONE_NONE) { return clamp(x, vec3<f32>(0.0), vec3<f32>(1.0)); }
+    if (mapper == TONE_AGX_PUNCHY) { return agxPunchy(x); }
     return agx(x);   // the default, and where an out-of-range id lands
 }
 
@@ -146,3 +180,43 @@ fn gradeToDisplay(hdr: vec3<f32>, exposure: f32, saturation: f32, mapper: i32) -
     return toSrgb(toneCurve(trimmed * exposure, mapper));
 }
 
+
+/** Night vision's colour at full rod vision: the bluish grey Jensen et al. (2001) shift toward, luminance 1. */
+const PURKINJE_NIGHT_TINT: vec3<f32> = vec3<f32>(0.853, 0.995, 1.483);
+
+/**
+ * The Purkinje shift: how an eye sees in the dark. Below a few cd/m2 the rods take over from the cones,
+ * and they see no colour, see blue-green better than red, and see red barely at all — a moonlit field is
+ * grey-blue, and a red cloak in it goes nearly black, while the torch-lit patch beside it keeps its warmth.
+ *
+ * Per pixel and on ABSOLUTE luminance (`nitsPerUnit` turns the stored value into cd/m2: the internal
+ * scale's REFERENCE_ILLUMINANCE over the frame's pre-exposure), so it is what the light IS that decides,
+ * not what the exposure makes of it. Rod luminance is Larson, Rushmeier & Piatko's (1997) scotopic fit,
+ * normalised so a neutral white keeps its brightness; the blend runs across the CIE mesopic range
+ * (0.005 to 5 cd/m2, CIE 191:2010), on a log scale. Above it — every daylit and most lamp-lit pixels —
+ * this returns the colour untouched.
+ */
+fn purkinjeShift(rgb: vec3<f32>, nitsPerUnit: f32, strength: f32) -> vec3<f32> {
+    if (strength <= 0.0) { return rgb; }
+    let c = max(rgb, vec3<f32>(0.0));
+    let X = dot(c, vec3<f32>(0.4124, 0.3576, 0.1805));
+    let Y = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let Z = dot(c, vec3<f32>(0.0193, 0.1192, 0.9505));
+    if (Y <= 0.0) { return rgb; }
+    // Scotopic luminance, over the 2.573 a D65 white gives, so white is unchanged in brightness.
+    let V = max(Y * (1.33 * (1.0 + (Y + Z) / max(X, 1e-12)) - 1.68), 0.0) / 2.573;
+    let log10L = log2(max(Y * nitsPerUnit, 1e-12)) * 0.30103;
+    let w = (1.0 - smoothstep(-2.3, 0.7, log10L)) * clamp(strength, 0.0, 1.0);
+    return mix(rgb, V * PURKINJE_NIGHT_TINT, w);
+}
+
+/**
+ * Half a display step of interleaved gradient noise (Jimenez 2014), added before an 8-bit store. A dark
+ * gradient stretched by a large exposure — a moonlit wall, a torch's falloff into the night — otherwise
+ * lands on a handful of display codes and bands into contour rings. Fixed per pixel, so a still frame
+ * stays still.
+ */
+fn displayDither(p: vec2<f32>) -> vec3<f32> {
+    let n = fract(52.9829189 * fract(dot(floor(p), vec2<f32>(0.06711056, 0.00583715))));
+    return vec3<f32>((n - 0.5) / 255.0);
+}

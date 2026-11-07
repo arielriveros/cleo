@@ -306,6 +306,8 @@ export interface PointLightProperties extends LightProperties {
     range?: number;
     /** Radius of the emitting sphere, in metres. Widens the specular highlight and softens shadows. */
     sourceRadius?: number;
+    /** Flicker (graphics/lightFlicker.ts): how far the intensity wanders, as a fraction, and how fast. */
+    flicker?: { amount?: number, speed?: number };
 
     /** @deprecated Pre-photometric attenuation denominator. */
     constant?: number;
@@ -326,9 +328,23 @@ abstract class PunctualLight extends Light {
     private _range: number;
     private _sourceRadius: number;
 
+    /**
+     * Flicker (graphics/lightFlicker.ts): the fraction the intensity wanders by, 0 = steady. Intensity only —
+     * a flickering light keeps its cached shadow map. Followers (`followLight` on sprites and particle
+     * systems) take the same beat.
+     */
+    public flickerAmount: number = 0;
+    /** Roughly the swells per second of the flicker's slowest layer. */
+    public flickerSpeed: number = 7;
+
     constructor(properties: PointLightProperties) {
         super(properties);
         this._sourceRadius = properties.sourceRadius ?? DEFAULT_SOURCE_RADIUS;
+        const flicker = properties.flicker;
+        if (flicker) {
+            this.flickerAmount = Math.min(1, Math.max(0, +(flicker.amount ?? 0) || 0));
+            this.flickerSpeed = Math.max(0, Number.isFinite(+(flicker.speed as number)) ? +(flicker.speed as number) : 7);
+        }
 
         if (properties.unit === LIGHT_UNIT || properties.intensity !== undefined) {
             this._intensity = properties.intensity ?? DEFAULT_LUMENS;

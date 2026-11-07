@@ -262,3 +262,29 @@ describe('area lights — the sun disc', () => {
     });
 });
 
+
+describe('the deferred split sum (deferredLighting.wgsl)', () => {
+    const schlickRoughness = (NoV: number, f0: number, r: number) => f0 + (Math.max(1 - r, f0) - f0) * Math.pow(1 - NoV, 5);
+
+    it('is F0 * A + B: the old F(NoV) * A + B counted Fresnel twice, most at the grazing angles distant ground is seen at', () => {
+        // Rock across the valley: a dielectric, roughness 0.5-0.7, seen at NoV 0.05-0.15.
+        for (const r of [0.5, 0.7]) for (const NoV of [0.05, 0.1]) {
+            const [A, B] = envBRDFApprox(NoV, r);
+            const right = 0.04 * A + B;
+            const old = schlickRoughness(NoV, 0.04, r) * A + B;
+            expect(old / right).toBeGreaterThan(1.5);
+        }
+        // Head on they agree, so a surface faced square on is untouched by the fix.
+        const [A, B] = envBRDFApprox(1, 0.6);
+        expect(schlickRoughness(1, 0.04, 0.6) * A + B).toBeCloseTo(0.04 * A + B, 9);
+    });
+
+    it('is what every deferred environment term uses: probes, the sky reflection and SSR', async () => {
+        const { readFileSync } = await import('node:fs');
+        const src = readFileSync('src/graphics/shaders/wgsl/deferredLighting.wgsl', 'utf8');
+        expect(src).toContain('return F0 * brdf.x + vec3<f32>(brdf.y);');
+        expect(src).not.toMatch(/F \* brdf\.x/);
+        expect(src).not.toContain('fresnelSchlickRoughness');
+        expect(src.match(/envSplitSum\(F0, brdf\)/g)?.length).toBe(3);
+    });
+});
