@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-    GI_BAKE_VERSION, GiBakeFormatError, GiSignature, decodeGiBake, encodeGiBake, giBakeByteLength,
-    sameGiSignature, type GiBake,
+    GI_BAKE_VERSION, GiBakeFormatError, GiSignature, decodeGiBake, encodeGiBake, giBakeByteLength, packGiBake,
+    readGiBakeHeader, sameGiSignature, unpackGiBake, type GiBake,
 } from '../src/graphics/render/gi/giBakeFormat';
 import { hitCacheSize } from '../src/graphics/render/gi/giLayout';
 
@@ -35,6 +35,31 @@ describe('GI bake format', () => {
         expect(Buffer.from(back.hitA).equals(Buffer.from(bake.hitA))).toBe(true);
         expect(Buffer.from(back.hitB).equals(Buffer.from(bake.hitB))).toBe(true);
         expect(Buffer.from(back.hitC).equals(Buffer.from(bake.hitC))).toBe(true);
+    });
+
+    it('packs to a fraction of its size, keeps the header readable, and unpacks byte for byte', async () => {
+        // Hit caches with the structure real ones have: runs of equal bytes (misses, one wall's albedo).
+        const bake = makeBake([6, 4, 6], 64);
+        for (const hit of [bake.hitA, bake.hitB, bake.hitC]) for (let i = 0; i < hit.length; i++) hit[i] = (i >> 9) & 0xff;
+        const raw = encodeGiBake(bake);
+        const packed = await packGiBake(raw);
+        expect(packed.byteLength).toBeLessThan(raw.byteLength / 3);
+        const header = readGiBakeHeader(packed);
+        expect(header.packed).toBe(true);
+        expect(header.counts).toEqual([6, 4, 6]);
+        expect(sameGiSignature(header.signature, bake.signature)).toBe(true);
+        // A packed bake is not read directly, and packing twice changes nothing.
+        expect(() => decodeGiBake(packed)).toThrow(GiBakeFormatError);
+        expect(await packGiBake(packed)).toBe(packed);
+        const back = await unpackGiBake(packed);
+        expect(readGiBakeHeader(back).packed).toBe(false);
+        expect(Buffer.from(back).equals(Buffer.from(raw))).toBe(true);
+        // A plain bake unpacks as itself.
+        expect(await unpackGiBake(raw)).toBe(raw);
+        // Corrupt packed sections are refused by name.
+        const broken = packed.slice();
+        broken.fill(0x5a, 110, 200);
+        await expect(unpackGiBake(broken)).rejects.toThrow(GiBakeFormatError);
     });
 
     it('reads from an ArrayBuffer and from a misaligned chunk of a bigger file', () => {

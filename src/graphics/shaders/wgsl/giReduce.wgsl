@@ -91,11 +91,14 @@ fn fs_main(in: VertexOutput) -> HitOut {
     var out: HitOut;
     let atUv = (vec2<f32>(at) + vec2<f32>(0.5)) / u_reduce.u_captureSize;
     let depth = textureSampleLevel(u_capDepth_texture, u_capDepth_sampler, atUv, 0);
+    let normal = textureLoad(u_capNormal_texture, at, 0).rg;
     var kind = 0;          // miss
     var distance = maxDistance;
+    var hit = vec3<f32>(0.0);
     if (depth < 1.0) {
         let p = u_reduce.u_faceInvViewProj[face] * vec4<f32>(centre, depth * 2.0 - 1.0, 1.0);
-        distance = length(p.xyz / p.w);
+        hit = p.xyz / p.w;
+        distance = length(hit);
         kind = 2;
     }
     if (u_reduce.u_hasBackfaces != 0) {
@@ -106,10 +109,18 @@ fn fs_main(in: VertexOutput) -> HitOut {
             if (backDistance < distance - 0.02) { kind = 1; distance = backDistance; }
         }
     }
+    // The depth belongs to the face texel's centre, whose direction is up to half a texel off the ray's:
+    // at a grazing angle the point `distance` along the RAY can be most of a metre under the ground it
+    // hit, and the sun map then shadows it. Where the ray meets that texel's own surface plane is on the
+    // surface; clamped, so a plane the ray nearly parallels cannot fling it.
+    if (kind == 2) {
+        let n = octDecode(normal);
+        let dn = dot(d, n);
+        if (dn < -0.05) { distance = clamp(dot(hit, n) / dn, 0.5 * distance, 2.0 * distance); }
+    }
     if (distance >= maxDistance) { kind = 0; distance = maxDistance; }
 
     let albedoMetallic = textureLoad(u_capAlbedo_texture, at, 0);
-    let normal = textureLoad(u_capNormal_texture, at, 0).rg;
     let emissive = textureLoad(u_capEmissive_texture, at, 0).rgb;
     // A metal has no diffuse; a translucent leaf stores -translucency where metallic goes.
     let diffuse = albedoMetallic.rgb * (1.0 - saturate(albedoMetallic.a));

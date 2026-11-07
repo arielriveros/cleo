@@ -286,7 +286,7 @@ export class ShadowPasses {
     private readonly _shadowLayerDrawn = new Float64Array(MAX_CASCADES + 1).fill(-Infinity);
 
     /** How the layer being drawn picks a terrain chunk's level — see `_shadowLodFor`. */
-    private _layerLodMode: 'camera' | 'beyond' | 'coarse' = 'camera';
+    private _layerLodMode: 'camera' | 'beyond' | 'coarse' | 'finest' = 'camera';
     private _layerLodRadius: number = 0;
     private readonly _farReachSphere: CascadeSphere = { center: vec3.create(), radius: 0 };
 
@@ -1237,12 +1237,20 @@ export class ShadowPasses {
      * The index level a caster draws with in the layer being drawn; -1 = the camera's own. Only terrain
      * chunks are re-levelled. In an outer cascade a chunk wholly beyond every pixel the cascade shades
      * only CASTS there, and casts from its coarsest level; a chunk the cascade's pixels can land on keeps
-     * the camera's level, so terrain never self-shadows against a surface it is not drawn as.
+     * the camera's level, so terrain never self-shadows against a surface it is not drawn as. A GI
+     * Volume's map ('finest') draws a chunk that reaches the map's sphere at full detail, the level its
+     * capture saw, and one wholly outside it, which only casts there, at its coarsest.
      */
     private _shadowLodFor(record: ShadowCasterRecord): number {
         if (record.terrainVersion < 0 || this._layerLodMode === 'camera') return -1;
         const mesh = record.node.model.mesh;
         if (!mesh.hasLods) return -1;
+        if (this._layerLodMode === 'finest') {
+            const c = record.sphere.center, s = this._csmSphere;
+            const dx = c[0] - s.center[0], dy = c[1] - s.center[1], dz = c[2] - s.center[2];
+            if (Math.sqrt(dx * dx + dy * dy + dz * dz) - record.sphere.radius <= s.radius) return 0;
+            return mesh.lodLevels - 1;
+        }
         if (this._layerLodMode === 'beyond') {
             const c = record.sphere.center, e = this._view.camera.position;
             const dx = c[0] - e[0], dy = c[1] - e[1], dz = c[2] - e[2];
@@ -1720,9 +1728,14 @@ export class ShadowPasses {
      * Draw the probe's sun shadow map and keep it, without the lighting reading it yet: a time-sliced bake
      * draws it one frame (`ProbeJobStep` 'shadow') and lights with it the next (`activateProbeShadows`).
      * The map stays valid until the next call; one probe job runs at a time.
+     *
+     * `terrain` 'blocks' casts the landscape as the far cascade's coarse blocks (cheap, and a probe sees the
+     * ground from a distance); 'finest' casts every chunk at full detail. A GI Volume needs the latter: its
+     * rays land on the ground at full detail, and coarse blocks standing over it shadow the ground itself.
      */
     public renderProbeShadows(scene: Scene, centre: ArrayLike<number>, radius: number,
-                              map: ProbeShadowMap = this._probeMap, resolution: number = this.probeShadowResolution): boolean {
+                              map: ProbeShadowMap = this._probeMap, resolution: number = this.probeShadowResolution,
+                              terrain: 'blocks' | 'finest' = 'blocks'): boolean {
         if (this._activeProbeMap === map) this._activeProbeMap = null;
         map.ready = false;
         if (!this.shadowsEnabled || this.shadowsSuppressed || !this._host.deviceReady) return false;
@@ -1745,8 +1758,8 @@ export class ShadowPasses {
             const sphere = this._csmSphere;
             vec3.set(sphere.center, centre[0], centre[1], centre[2]);
             sphere.radius = Math.max(1, radius);
-            this._layerLodMode = 'coarse';
-            this._selectLayerCasters(sphere, null, 0, 0, this._farTerrainBlocks(scene));
+            this._layerLodMode = terrain === 'finest' ? 'finest' : 'coarse';
+            this._selectLayerCasters(sphere, null, 0, 0, terrain === 'finest' ? null : this._farTerrainBlocks(scene));
             const lightDir = this._sys.lighting.dirOf(sun);
             const fit = buildCascadeMatrix(sphere, lightDir, size, this.shadowCasterPad,
                                            map.matrix, this._csmScratch, false, this._casterBounds);

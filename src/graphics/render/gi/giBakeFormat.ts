@@ -13,7 +13,7 @@ import { GI_HIT_PROBES_PER_ROW, hitCacheSize } from './giLayout';
  *
  *   0   'CGIB'                     magic
  *   4   u32 version                GI_BAKE_VERSION
- *   8   u32 flags                  0 (reserved)
+ *   8   u32 flags                  bit 0: the sections are deflated (GI_BAKE_DEFLATED)
  *   12  u32 nx, ny, nz             probe counts
  *   24  u32 rays                   64 | 256
  *   28  u32 captureResolution      16 | 32
@@ -28,12 +28,30 @@ import { GI_HIT_PROBES_PER_ROW, hitCacheSize } from './giLayout';
  *
  * Probe data is four f32 a probe: xyz an offset from its grid position (0 in v1), w its state
  * (giClassify.ts). The hit caches are RGBA8, `hitWidth` x `hitHeight`.
+ *
+ * PACKED: a saved bake is stored with everything after the header deflated (zlib, `packGiBake`), a third to
+ * a sixth of its size; the header stays as it is, so a load checks the shape and the signature before it
+ * inflates anything. The offsets in the header are those of the inflated layout (`unpackGiBake`).
  */
 
 export const GI_BAKE_MAGIC = 0x42494743; // 'CGIB' read little-endian
 export const GI_BAKE_VERSION = 1;
+/** `flags` bit: everything after the header is deflated (zlib). */
+export const GI_BAKE_DEFLATED = 1;
 const HEADER_BYTES = 104;
 const SECTIONS = 4;
+
+/** What a bake's header says, readable without inflating it. */
+export interface GiBakeHeader {
+    counts: [number, number, number];
+    rays: number;
+    captureResolution: number;
+    maxRayDistance: number;
+    size: [number, number, number];
+    signature: [number, number];
+    /** The sections are deflated: `unpackGiBake` before `decodeGiBake`. */
+    packed: boolean;
+}
 
 export interface GiBake {
     counts: [number, number, number];
@@ -107,21 +125,78 @@ export function encodeGiBake(bake: GiBake): Uint8Array {
     return out;
 }
 
-/**
- * Read a bake. The sections are VIEWS onto `bytes` where its alignment allows (a game.bin chunk is mapped
- * in place), copies where it does not. Throws {@link GiBakeFormatError} on anything malformed.
- */
-export function decodeGiBake(bytes: Uint8Array | ArrayBuffer): GiBake {
+/** The header of `bytes`, packed or not. Throws {@link GiBakeFormatError} on a malformed one. */
+export function readGiBakeHeader(bytes: Uint8Array | ArrayBuffer): GiBakeHeader {
     const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     if (data.byteLength < HEADER_BYTES) throw new GiBakeFormatError(`${data.byteLength} bytes is shorter than the header`);
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
     if (view.getUint32(0, true) !== GI_BAKE_MAGIC) throw new GiBakeFormatError('not a GI bake (bad magic)');
     const version = view.getUint32(4, true);
     if (version !== GI_BAKE_VERSION) throw new GiBakeFormatError(`version ${version} is not supported (this build reads ${GI_BAKE_VERSION})`);
-    const counts: [number, number, number] = [view.getUint32(12, true), view.getUint32(16, true), view.getUint32(20, true)];
     const rays = view.getUint32(24, true);
     if (rays !== 64 && rays !== 256) throw new GiBakeFormatError(`${rays} rays per probe`);
     if (view.getUint32(48, true) !== GI_HIT_PROBES_PER_ROW) throw new GiBakeFormatError('unknown hit cache layout');
+    return {
+        counts: [view.getUint32(12, true), view.getUint32(16, true), view.getUint32(20, true)],
+        rays,
+        captureResolution: view.getUint32(28, true),
+        maxRayDistance: view.getFloat32(32, true),
+        size: [view.getFloat32(36, true), view.getFloat32(40, true), view.getFloat32(44, true)],
+        signature: [view.getUint32(52, true), view.getUint32(56, true)],
+        packed: (view.getUint32(8, true) & GI_BAKE_DEFLATED) !== 0,
+    };
+}
+
+/** `bytes` through a compression or decompression stream (browsers, Electron and Node 18+ all have them). */
+async function throughStream(bytes: Uint8Array, stream: CompressionStream | DecompressionStream): Promise<Uint8Array> {
+    const blob = new Blob([bytes as BlobPart]);
+    return new Uint8Array(await new Response(blob.stream().pipeThrough(stream as any)).arrayBuffer());
+}
+
+/**
+ * A bake as it is saved: the header as it was (its `flags` marked) and the rest deflated. A bake the
+ * deflate would not shrink stays as it is. Idempotent.
+ */
+export async function packGiBake(raw: Uint8Array): Promise<Uint8Array> {
+    if (readGiBakeHeader(raw).packed) return raw;
+    const body = await throughStream(raw.subarray(HEADER_BYTES), new CompressionStream('deflate'));
+    if (HEADER_BYTES + body.byteLength >= raw.byteLength) return raw;
+    const out = new Uint8Array(HEADER_BYTES + body.byteLength);
+    out.set(raw.subarray(0, HEADER_BYTES), 0);
+    out.set(body, HEADER_BYTES);
+    const view = new DataView(out.buffer);
+    view.setUint32(8, view.getUint32(8, true) | GI_BAKE_DEFLATED, true);
+    return out;
+}
+
+/** The plain form of a bake `packGiBake` packed (`decodeGiBake` reads it); one already plain as it is. */
+export async function unpackGiBake(bytes: Uint8Array): Promise<Uint8Array> {
+    if (!readGiBakeHeader(bytes).packed) return bytes;
+    let body: Uint8Array;
+    try {
+        body = await throughStream(bytes.subarray(HEADER_BYTES), new DecompressionStream('deflate'));
+    } catch (e) {
+        throw new GiBakeFormatError(`the packed sections do not inflate (${(e as Error)?.message ?? e})`);
+    }
+    const out = new Uint8Array(HEADER_BYTES + body.byteLength);
+    out.set(bytes.subarray(0, HEADER_BYTES), 0);
+    out.set(body, HEADER_BYTES);
+    const view = new DataView(out.buffer);
+    view.setUint32(8, view.getUint32(8, true) & ~GI_BAKE_DEFLATED, true);
+    return out;
+}
+
+/**
+ * Read a plain bake (a packed one throws: `unpackGiBake` it first). The sections are VIEWS onto `bytes`
+ * where its alignment allows, copies where it does not. Throws {@link GiBakeFormatError} on anything
+ * malformed.
+ */
+export function decodeGiBake(bytes: Uint8Array | ArrayBuffer): GiBake {
+    const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const header = readGiBakeHeader(data);
+    if (header.packed) throw new GiBakeFormatError('the bake is packed: unpack it first');
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    const counts = header.counts, rays = header.rays;
     const probes = counts[0] * counts[1] * counts[2];
     const [w, h] = hitCacheSize(probes, rays);
     if (view.getUint32(60, true) !== w || view.getUint32(64, true) !== h) throw new GiBakeFormatError('hit cache size does not match the grid');

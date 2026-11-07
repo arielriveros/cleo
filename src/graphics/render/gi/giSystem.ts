@@ -9,6 +9,7 @@ import { AnimatedModel } from '../../../animation/animatedModel';
 import type { Scene } from '../../../core/scene/scene';
 import { Logger } from '../../../core/logger';
 import { Framebuffer } from '../../framebuffer';
+import type { Mesh } from '../../mesh';
 import { device } from '../../rhi/deviceHandle';
 import { DEFAULT_BLEND } from '../../rhi/types';
 import type { BindGroup, RenderPipeline } from '../../rhi/resources';
@@ -38,7 +39,10 @@ import {
     GI_AMBIENT_CUBE_FLOATS, MAX_GI_VOLUMES, giAmbientAt, giLightingAt, orderGiVolumes, type GiVolumeCpu,
 } from './giLighting';
 import { GI_TIERS, giProbesPerFrame, giShadowMapSize } from './giSettings';
-import { GiBakeFormatError, GiSignature, decodeGiBake, encodeGiBake, sameGiSignature } from './giBakeFormat';
+import {
+    GiBakeFormatError, GiSignature, decodeGiBake, encodeGiBake, packGiBake, readGiBakeHeader, sameGiSignature,
+    unpackGiBake, type GiBake,
+} from './giBakeFormat';
 import { GiBakeRegistry } from './giBakeRegistry';
 import {
     GiSweepState, hashNumbers, isLightJump, nearestUncaptured, needsRelight, needsShadowRender,
@@ -107,6 +111,10 @@ interface VolumeGpu {
     ambientValid: boolean;
     cubes: Framebuffer;
     cpu: GiVolumeCpu;
+    /** A packed bake inflating: the volume neither captures nor relights until it lands. */
+    loading: boolean;
+    /** An inflated bake to apply at the next update (uploads belong inside a frame). */
+    pendingBake: GiBake | null;
 }
 
 interface CaptureBatch {
@@ -211,6 +219,9 @@ export class GiSystem {
         if (!this.enabled || this._view.capturing || !device.capabilities || !this.supported) return;
         this._sync(scene);
         if (this._volumes.size === 0) return;
+        for (const v of this._volumes.values()) {
+            if (v.pendingBake) { this._applyBake(v, v.pendingBake); v.pendingBake = null; }
+        }
         this._watchLight(scene);
         try {
             this._captureStep(scene);
@@ -287,9 +298,7 @@ export class GiSystem {
         if (changed) this._layoutAtlases();
         // A volume with a saved capture loads it instead of capturing; one whose bake no longer matches
         // it, or the geometry round it, captures again (and the host is told).
-        for (const v of built) {
-            if (this._loadBake(scene, v)) this._updateVisibility(v);
-        }
+        for (const v of built) this._loadBake(scene, v);
     }
 
     // --- Saved captures ------------------------------------------------------------------------------
@@ -303,8 +312,12 @@ export class GiSystem {
         const r = v.node.maxRayDistance;
         const sig = new GiSignature();
         const nodes: ModelNode[] = [];
+        this._linked.clear();
         for (const node of scene.models) {
-            if (!inCapture(node)) continue;
+            // Authored visibility: which LOD level or draw-distance cull the camera has in force must not
+            // make a bake taken from one place stale at another. The landscape's chunks are generated
+            // nodes with ids of their own each load; its heights stand for them below.
+            if (node.isTerrainChunk || !inCapture(node, true) || this._moves(node, true)) continue;
             const b = node.getBoundingBox();
             if (b.max[0] < box.min[0] - r || b.min[0] > box.max[0] + r || b.max[1] < box.min[1] - r
                 || b.min[1] > box.max[1] + r || b.max[2] < box.min[2] - r || b.min[2] > box.max[2] + r) continue;
@@ -313,19 +326,70 @@ export class GiSystem {
         nodes.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
         for (const node of nodes) {
             sig.addString(node.id).addNumbers(node.worldTransform);
-            sig.addString(node.model.material.type).addNumber(node.model.mesh?.indexCount ?? 0);
+            // The CPU geometry's sizes, not the GPU mesh's: a model the camera has not drawn yet has no mesh.
+            const geometry = node.model.geometry;
+            sig.addString(node.model.material.type)
+                .addNumber(geometry?.indices.length ?? 0).addNumber(geometry?.positions.length ?? 0);
+        }
+        // The ground within reach, by its heights on a 2 m grid (to the millimetre): a sculpt anywhere the
+        // rays could land makes the bake stale, and nothing else about the landscape does.
+        for (const land of scene.landscapes) {
+            if (!land.authoredVisible) continue;
+            sig.addString(land.id);
+            // On the world's own 2 m lattice, so a volume moved by a rounding error samples the same points.
+            const step = GI_SIGNATURE_GROUND_STEP;
+            const x0 = Math.floor((box.min[0] - r) / step), x1 = Math.ceil((box.max[0] + r) / step);
+            const z0 = Math.floor((box.min[2] - r) / step), z1 = Math.ceil((box.max[2] + r) / step);
+            for (let zi = z0; zi <= z1; zi++) {
+                const z = zi * step;
+                for (let xi = x0; xi <= x1; xi++) {
+                    const x = xi * step;
+                    const h = this._groundAt(scene, x, z);
+                    sig.addNumber(h === null ? -1e9 : Math.round(h * 1000));
+                }
+            }
         }
         return sig.value;
     }
 
-    /** Load `v`'s saved capture from the registry. False when it has none, or none that fits. */
+    /**
+     * Whether something moves `node` at runtime, so a capture leaves it out (it would be baked where it
+     * happened to be): a script updating it or an ancestor (the windmill's sails), or a dynamic body.
+     *
+     * `linked` (the signature) asks of what is AUTHORED instead: any node a script asset is linked to
+     * (`__scriptId`, set at parse), whether or not its script has been compiled and attached yet. A load's
+     * signature is taken in its first frames and an export's long after, so only that answer is the same
+     * at both; a scripted node that never moves (the skull cave's entrance) is still captured, it just
+     * does not make a bake stale. Cached per batch.
+     */
+    private _moves(node: ModelNode, linked: boolean = false): boolean {
+        const cache = linked ? this._linked : this._moving;
+        let known = cache.get(node);
+        if (known !== undefined) return known;
+        known = false;
+        for (let p: any = node; p; p = p.parent) {
+            if (Object.prototype.hasOwnProperty.call(p, 'onUpdate') || (p.body && p.body.isDynamic)
+                || (linked && typeof p.getVariable === 'function' && p.getVariable('__scriptId') != null)) { known = true; break; }
+        }
+        cache.set(node, known);
+        return known;
+    }
+
+    private readonly _moving = new Map<ModelNode, boolean>();
+    private readonly _linked = new Map<ModelNode, boolean>();
+
+    /**
+     * Load `v`'s saved capture from the registry: at once when it is plain, a frame or so later when it is
+     * packed (it inflates meanwhile, and the volume waits rather than capturing). False when it has none,
+     * or none that fits.
+     */
     private _loadBake(scene: Scene, v: VolumeGpu): boolean {
         const node = v.node;
         const bytes = GiBakeRegistry.get(node.bakeId);
         if (!bytes) return false;
         let bake;
         try {
-            bake = decodeGiBake(bytes);
+            bake = readGiBakeHeader(bytes);
         } catch (e) {
             Logger.warn(`GI bake ${node.bakeId} (${node.name}) cannot be read: ${(e as GiBakeFormatError)?.message ?? e}; capturing again.`, 'Renderer');
             return false;
@@ -344,6 +408,22 @@ export class GiSystem {
             this.staleBakes.add(node.id);
             return false;
         }
+        this.staleBakes.delete(node.id);
+        if (!bake.packed) {
+            this._applyBake(v, decodeGiBake(bytes));
+            return true;
+        }
+        v.loading = true;
+        void unpackGiBake(bytes).then((raw) => {
+            if (this._volumes.get(node) === v) v.pendingBake = decodeGiBake(raw);
+        }).catch((e) => {
+            Logger.warn(`GI bake ${node.bakeId} (${node.name}) cannot be read: ${(e as Error)?.message ?? e}; capturing again.`, 'Renderer');
+        }).finally(() => { v.loading = false; });
+        return true;
+    }
+
+    /** Upload a decoded bake into `v`: its hit caches and probe states, then its visibility and a relight. */
+    private _applyBake(v: VolumeGpu, bake: GiBake): void {
         const [w, h] = hitCacheSize(v.probes, v.rays);
         device.writeTexture(v.hit.colors[0].rhiTexture, bake.hitA, w, h);
         device.writeTexture(v.hit.colors[1].rhiTexture, bake.hitB, w, h);
@@ -354,11 +434,10 @@ export class GiSystem {
             this._writeProbeData(v, p);
         }
         this._probeDataDirty = true;
-        this.staleBakes.delete(node.id);
         v.visibilityDirty = [0, v.probes - 1];
+        this._updateVisibility(v);
         v.sweep.request('reset');
         this.stats.loadedBakes++;
-        return true;
     }
 
     /** Volumes whose saved capture no longer fits them (by node id): the editor offers to save a new one. */
@@ -383,14 +462,14 @@ export class GiSystem {
         if (this._volumes.get(node) !== v) return null;
         const probeData = new Float32Array(v.probes * 4);
         for (let p = 0; p < v.probes; p++) probeData[p * 4 + 3] = v.states[p];
-        return encodeGiBake({
+        return packGiBake(encodeGiBake({
             counts: [v.counts[0], v.counts[1], v.counts[2]], rays: v.rays, captureResolution: node.captureResolution,
             maxRayDistance: node.maxRayDistance, size: [node.size[0], node.size[1], node.size[2]],
             signature: this._signature(scene, v), probeData,
             hitA: new Uint8Array(hitA.buffer, hitA.byteOffset, w * h * 4),
             hitB: new Uint8Array(hitB.buffer, hitB.byteOffset, w * h * 4),
             hitC: new Uint8Array(hitC.buffer, hitC.byteOffset, w * h * 4),
-        });
+        }));
     }
 
     private _build(node: GIVolumeNode, key: string): VolumeGpu {
@@ -427,6 +506,7 @@ export class GiSystem {
             node, key, counts, rays, side, probes, base: 0, hit, radiance,
             states, positions, sweep, shadow: new ProbeShadowMap(), lit: null,
             visibilityDirty: null, gridToWorld, worldToGrid, ambient, ambientDirty: false, ambientValid: false, cubes, cpu,
+            loading: false, pendingBake: null,
         };
     }
 
@@ -500,14 +580,15 @@ export class GiSystem {
             batch = this._nextBatch(scene);
             if (!batch) return;
             this._batch = batch;
+            this._moving.clear();
         }
         const v = batch.volume;
         const S = v.node.captureResolution;
         this._ensureCaptureAtlas(S);
         const atlas = this._capture!;
         let budget = Math.max(1, this.fillDrawsPerFrame);
-        const include = (node: ModelNode) => inCapture(node);
-        this._withCaptureState(v.node, () => {
+        const include = (node: ModelNode) => inCapture(node) && !this._moves(node);
+        this._withCaptureState(scene, v.node, () => {
             if (batch!.slot === 0 && batch!.face === 0 && batch!.cursor === 0) {
                 for (const fb of [atlas, this._captureBack!]) {
                     const clear = this._passes.beginFullscreenPass(fb.renderTarget, 'giCapture', true, [0, 0, 0, 0], true, true);
@@ -517,6 +598,7 @@ export class GiSystem {
             while (batch!.slot < GI_CAPTURE_SLOTS && budget > 0) {
                 const probe = batch!.probes[batch!.slot];
                 if (probe < 0) { batch!.slot++; batch!.face = 0; batch!.cursor = 0; continue; }
+                this._levelsFrom(scene, v, probe);
                 this._aim(v, probe, batch!.face);
                 const frustum = this._frustum;
                 const pass = this._passes.beginFullscreenPass(atlas.renderTarget, 'giCapture', false, undefined, false);
@@ -598,7 +680,7 @@ export class GiSystem {
         const x = v.positions[probe * 3], y = v.positions[probe * 3 + 1], z = v.positions[probe * 3 + 2];
         const eps = 1e-3;
         const holds = (node: ModelNode): boolean => {
-            if (!inCapture(node) || node.model.material.config.side === 'double') return false;
+            if (!inCapture(node) || node.model.material.config.side === 'double' || this._moves(node)) return false;
             const b = node.getBoundingBox();
             return x >= b.min[0] - eps && x <= b.max[0] + eps && y >= b.min[1] - eps && y <= b.max[1] + eps
                 && z >= b.min[2] - eps && z <= b.max[2] + eps;
@@ -624,7 +706,7 @@ export class GiSystem {
     /** The next capture batch: the uncaptured probes nearest the camera, of the volume they are in. */
     private _nextBatch(scene: Scene): CaptureBatch | null {
         const cam = this._view.camera.position;
-        const vols = [...this._volumes.values()].filter(v => v.base + v.probes <= (this._layout?.capacity ?? 0));
+        const vols = [...this._volumes.values()].filter(v => !v.loading && !v.pendingBake && v.base + v.probes <= (this._layout?.capacity ?? 0));
         const nearest = nearestUncaptured(vols, cam, 1);
         if (nearest.length === 0) return null;
         const v = vols[nearest[0].volume];
@@ -675,24 +757,73 @@ export class GiSystem {
         this._captureSide = S;
     }
 
-    /** Everything a capture swaps: the camera (90 degrees, square, out to the volume's ray reach), `capturing`. */
-    private _withCaptureState(node: GIVolumeNode, body: () => void): void {
+    /**
+     * Everything a capture swaps: the camera (90 degrees, square, out to the volume's ray reach),
+     * `capturing`, and the landscape's detail. Its chunks draw at full detail, whatever level the main
+     * camera's distance gave them: what a probe's rays meet is the ground the frame shades, and the sun
+     * map they are lit through casts it at that level too (`renderProbeShadows` 'finest'). The far plane
+     * keeps that to the chunks within ray reach.
+     */
+    private _withCaptureState(scene: Scene, node: GIVolumeNode, body: () => void): void {
         const cam = this._camera;
         cam.fov = 90;
         cam.near = 0.05;
         cam.far = node.maxRayDistance;
         cam.resize(1, 1);
         const prevCamera = this._view.camera;
+        const meshes = this._terrainMeshes, levels = this._terrainLevels;
+        meshes.length = 0;
+        levels.length = 0;
+        for (const land of scene.landscapes) {
+            for (const chunk of land.chunkNodes) {
+                if (!chunk.initialized) continue;
+                const mesh = chunk.model.mesh;
+                meshes.push(mesh);
+                levels.push(mesh.activeLod);
+                mesh.activeLod = 0;
+            }
+        }
         this._view.capturing = true;
         this._view.camera = cam;
         try {
             body();
         } finally {
+            for (let i = 0; i < meshes.length; i++) meshes[i].activeLod = levels[i];
+            meshes.length = 0;
             this._view.camera = prevCamera;
             this._view.capturing = false;
+            // The camera's own LOD levels and draw-distance culls back, as the frame picked them.
+            if (this._levelsVolume !== null) {
+                this._sys.visibility.updateModelLOD(scene);
+                this._levelsVolume = null;
+                this._levelsProbe = -1;
+            }
             this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
         }
     }
+
+    /**
+     * The LOD groups' levels and the draw-distance culls as probe `probe` of `v` would see them, not the
+     * camera: a house the camera is too far from to draw in full is drawn in full for a probe beside it,
+     * and nothing the camera's distance hides is missing from a capture. Once per probe; a probe whose
+     * faces span frames gets the same levels each time, so its draw cursor walks the same list.
+     */
+    private _levelsFrom(scene: Scene, v: VolumeGpu, probe: number): void {
+        if (this._levelsVolume === v && this._levelsProbe === probe) return;
+        const eye = vec3.set(this._levelsEye, v.positions[probe * 3], v.positions[probe * 3 + 1], v.positions[probe * 3 + 2]);
+        for (const group of scene.lodGroups) group.updateLod(eye);
+        for (const node of scene.drawDistanceNodes) node.updateDrawCull(eye);
+        this._levelsVolume = v;
+        this._levelsProbe = probe;
+    }
+
+    private _levelsVolume: VolumeGpu | null = null;
+    private _levelsProbe = -1;
+    private readonly _levelsEye = vec3.create();
+
+    /** Scratch: the landscape chunks' meshes and their levels across a capture step. */
+    private readonly _terrainMeshes: Mesh[] = [];
+    private readonly _terrainLevels: number[] = [];
 
     private _aim(v: VolumeGpu, probe: number, face: number): void {
         const cam = this._camera;
@@ -811,7 +942,7 @@ export class GiSystem {
             const node = v.node;
             const radius = this._shadows.probeShadowRadius(true, node.size, node.worldScale);
             const size = giShadowMapSize(2 * radius, this.shadowTexel, this.shadowMaxSize);
-            if (this._shadows.renderProbeShadows(scene, node.worldPosition, radius, v.shadow, size)) {
+            if (this._shadows.renderProbeShadows(scene, node.worldPosition, radius, v.shadow, size, 'finest')) {
                 shadowBudget--;
                 this.stats.shadowDraws++;
                 if (v.sweep.idle) v.sweep.request('relight');
@@ -1069,9 +1200,15 @@ export class GiSystem {
     }
 }
 
-/** What a GI capture draws: visible, opaque, static scene geometry a material has not opted out of. */
-function inCapture(node: ModelNode): boolean {
-    if (!node.visible) return false;
+/** The ground's sample step in a bake's geometry signature (metres). */
+const GI_SIGNATURE_GROUND_STEP = 2;
+
+/**
+ * What a GI capture draws: visible, opaque, static scene geometry a material has not opted out of.
+ * `authored` asks of the authored visibility alone, ignoring LOD and draw-distance culls (the signature).
+ */
+function inCapture(node: ModelNode, authored: boolean = false): boolean {
+    if (!(authored ? node.authoredVisible : node.visible)) return false;
     if (isEditorOnlyNode(node)) return false;
     if (node.name.startsWith('__editor__') || node.name.startsWith('__debug__')) return false;
     if (node.model instanceof AnimatedModel) return false;
