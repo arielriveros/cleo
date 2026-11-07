@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-    GI_HYSTERESIS, GI_SETTLE_RESIDUAL, GiSweepState, angleBetween, hashNumbers, isLightJump, nearestUncaptured,
+    GI_HYSTERESIS, GI_RESET_BOUNCE_SWEEPS, GI_SETTLE_RESIDUAL, GiSweepState, angleBetween, hashNumbers, isLightJump, nearestUncaptured,
     needsRelight, needsShadowRender, planRelightFrame, settleSweeps, type GiLightInputs,
 } from '../src/graphics/render/gi/giJobs';
 
@@ -81,7 +81,7 @@ describe('GI sweeps', () => {
         expect(settleSweeps(0)).toBe(1);
     });
 
-    it('reset: one sweep without bounces, then two with, each replacing the old light', () => {
+    it('reset: one sweep without bounces, then the bounce sweeps, each replacing the old light', () => {
         const s = new GiSweepState(10);
         s.request('reset');
         const sweeps: { bounce: boolean; h: number }[] = [];
@@ -93,7 +93,7 @@ describe('GI sweeps', () => {
             expect(b.endsSweep).toBe(true);
             sweeps.push({ bounce: b.bounce, h: b.hysteresis });
         }
-        expect(sweeps).toEqual([{ bounce: false, h: 0 }, { bounce: true, h: 0 }, { bounce: true, h: 0 }]);
+        expect(sweeps).toEqual([{ bounce: false, h: 0 }, ...Array(GI_RESET_BOUNCE_SWEEPS).fill({ bounce: true, h: 0 })]);
         expect(s.idle).toBe(true);
     });
 

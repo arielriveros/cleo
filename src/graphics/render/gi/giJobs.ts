@@ -15,7 +15,8 @@
  * enough to bring the old light under {@link GI_SETTLE_RESIDUAL}, and then the volume goes idle. A
  * RESET (a scene load, the clock jumping hours, a light many times brighter at once) throws the old
  * light away: one sweep without bounces, so the first light is the direct light's alone and nothing
- * stale bounces into it, then two with, each replacing outright.
+ * stale bounces into it, then {@link GI_RESET_BOUNCE_SWEEPS} with, each replacing outright and adding a
+ * bounce (a pale room's light takes several to gather).
  */
 
 // --- Capture order ---
@@ -161,6 +162,8 @@ export function hashNumbers(values: ArrayLike<number>, seed: number = 0x811c9dc5
 
 /** Of the old light kept by each normal sweep. */
 export const GI_HYSTERESIS = 0.3;
+/** Bounce sweeps a reset runs after its direct-light one: 0.7-albedo walls gather 88% of their light. */
+export const GI_RESET_BOUNCE_SWEEPS = 5;
 /** Settle sweeps run until less than this much of the light before the change is left. */
 export const GI_SETTLE_RESIDUAL = 0.05;
 
@@ -207,9 +210,10 @@ export class GiSweepState {
         if (kind === 'reset') {
             this._cursor = 0;
             this._pending = false;
-            this._queue = this.multiBounce
-                ? [{ bounce: false, hysteresis: 0 }, { bounce: true, hysteresis: 0 }, { bounce: true, hysteresis: 0 }]
-                : [{ bounce: false, hysteresis: 0 }];
+            this._queue = [{ bounce: false, hysteresis: 0 }];
+            if (this.multiBounce) {
+                for (let i = 0; i < GI_RESET_BOUNCE_SWEEPS; i++) this._queue.push({ bounce: true, hysteresis: 0 });
+            }
             return;
         }
         if (this._queue.length === 0) this._queue = this._settle();

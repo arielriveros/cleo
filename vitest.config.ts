@@ -106,6 +106,7 @@ export default mergeConfig(engineConfig, defineConfig({
                 'src/graphics/dofMath.ts',
                 'src/graphics/indexFormat.ts',
                 'src/graphics/render/gi/giBakeFormat.ts',
+                'src/graphics/render/gi/giBakeRegistry.ts',
                 'src/graphics/render/gi/giClassify.ts',
                 'src/graphics/render/gi/giJobs.ts',
                 'src/graphics/render/gi/giLayout.ts',

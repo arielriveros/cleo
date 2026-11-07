@@ -38,6 +38,8 @@ import {
     GI_AMBIENT_CUBE_FLOATS, MAX_GI_VOLUMES, giAmbientAt, giLightingAt, orderGiVolumes, type GiVolumeCpu,
 } from './giLighting';
 import { GI_TIERS, giProbesPerFrame, giShadowMapSize } from './giSettings';
+import { GiBakeFormatError, GiSignature, decodeGiBake, encodeGiBake, sameGiSignature } from './giBakeFormat';
+import { GiBakeRegistry } from './giBakeRegistry';
 import {
     GiSweepState, hashNumbers, isLightJump, nearestUncaptured, needsRelight, needsShadowRender,
     planRelightFrame, type GiLightInputs,
@@ -166,7 +168,7 @@ export class GiSystem {
     public fillDrawsPerFrame = GI_TIERS.high.giFillDrawsPerFrame;
     public multiBounce = true;
     /** Counters for tests and the harness. */
-    public readonly stats = { capturedProbes: 0, captureDraws: 0, relitProbes: 0, sweeps: 0, shadowDraws: 0, resolves: 0 };
+    public readonly stats = { capturedProbes: 0, captureDraws: 0, relitProbes: 0, sweeps: 0, shadowDraws: 0, resolves: 0, loadedBakes: 0 };
 
     constructor(private readonly _host: GiSystemHost,
                 private readonly _view: FrameView,
@@ -270,16 +272,125 @@ export class GiSystem {
         for (const [node, v] of this._volumes) {
             if (!present.has(node)) { this._release(v); this._volumes.delete(node); changed = true; }
         }
+        const built: VolumeGpu[] = [];
         for (const node of present) {
             const key = this._volumeKey(node);
             const v = this._volumes.get(node);
             if (v && v.key === key && !node.captureRequested) continue;
             if (v) this._release(v);
-            this._volumes.set(node, this._build(node, key));
+            const fresh = this._build(node, key);
+            this._volumes.set(node, fresh);
+            built.push(fresh);
             node.markCaptured();
             changed = true;
         }
         if (changed) this._layoutAtlases();
+        // A volume with a saved capture loads it instead of capturing; one whose bake no longer matches
+        // it, or the geometry round it, captures again (and the host is told).
+        for (const v of built) {
+            if (this._loadBake(scene, v)) this._updateVisibility(v);
+        }
+    }
+
+    // --- Saved captures ------------------------------------------------------------------------------
+
+    /**
+     * What a capture of `v` depends on, as a signature: every static node it could draw within its rays'
+     * reach — its id, its transform, its mesh and material — so a load can tell the scene moved on.
+     */
+    private _signature(scene: Scene, v: VolumeGpu): [number, number] {
+        const box = v.node.getBoundingBox();
+        const r = v.node.maxRayDistance;
+        const sig = new GiSignature();
+        const nodes: ModelNode[] = [];
+        for (const node of scene.models) {
+            if (!inCapture(node)) continue;
+            const b = node.getBoundingBox();
+            if (b.max[0] < box.min[0] - r || b.min[0] > box.max[0] + r || b.max[1] < box.min[1] - r
+                || b.min[1] > box.max[1] + r || b.max[2] < box.min[2] - r || b.min[2] > box.max[2] + r) continue;
+            nodes.push(node);
+        }
+        nodes.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        for (const node of nodes) {
+            sig.addString(node.id).addNumbers(node.worldTransform);
+            sig.addString(node.model.material.type).addNumber(node.model.mesh?.indexCount ?? 0);
+        }
+        return sig.value;
+    }
+
+    /** Load `v`'s saved capture from the registry. False when it has none, or none that fits. */
+    private _loadBake(scene: Scene, v: VolumeGpu): boolean {
+        const node = v.node;
+        const bytes = GiBakeRegistry.get(node.bakeId);
+        if (!bytes) return false;
+        let bake;
+        try {
+            bake = decodeGiBake(bytes);
+        } catch (e) {
+            Logger.warn(`GI bake ${node.bakeId} (${node.name}) cannot be read: ${(e as GiBakeFormatError)?.message ?? e}; capturing again.`, 'Renderer');
+            return false;
+        }
+        const sameShape = bake.counts[0] === v.counts[0] && bake.counts[1] === v.counts[1] && bake.counts[2] === v.counts[2]
+            && bake.rays === v.rays && bake.captureResolution === node.captureResolution
+            && Math.abs(bake.maxRayDistance - node.maxRayDistance) < 1e-3
+            && bake.size.every((s, i) => Math.abs(s - node.size[i]) < 1e-3);
+        if (!sameShape) {
+            Logger.warn(`GI bake of ${node.name} was taken for a different grid; capturing again.`, 'Renderer');
+            this.staleBakes.add(node.id);
+            return false;
+        }
+        if (!sameGiSignature(bake.signature, this._signature(scene, v))) {
+            Logger.warn(`The geometry round ${node.name} changed since its GI bake; capturing again.`, 'Renderer');
+            this.staleBakes.add(node.id);
+            return false;
+        }
+        const [w, h] = hitCacheSize(v.probes, v.rays);
+        device.writeTexture(v.hit.colors[0].rhiTexture, bake.hitA, w, h);
+        device.writeTexture(v.hit.colors[1].rhiTexture, bake.hitB, w, h);
+        device.writeTexture(v.hit.colors[2].rhiTexture, bake.hitC, w, h);
+        for (let p = 0; p < v.probes; p++) {
+            const state = Math.round(bake.probeData[p * 4 + 3]);
+            v.states[p] = state === GI_PROBE_ACTIVE || state === 2 || state === GI_PROBE_SKIPPED ? state : GI_PROBE_UNCAPTURED;
+            this._writeProbeData(v, p);
+        }
+        this._probeDataDirty = true;
+        this.staleBakes.delete(node.id);
+        v.visibilityDirty = [0, v.probes - 1];
+        v.sweep.request('reset');
+        this.stats.loadedBakes++;
+        return true;
+    }
+
+    /** Volumes whose saved capture no longer fits them (by node id): the editor offers to save a new one. */
+    public readonly staleBakes = new Set<string>();
+
+    /** Whether every probe of `node`'s volume is captured and classified: a bake can be saved. */
+    public isCaptured(node: GIVolumeNode): boolean {
+        const v = this._volumes.get(node);
+        return !!v && v.states.every(s => s !== GI_PROBE_UNCAPTURED && s !== GI_PROBE_PENDING);
+    }
+
+    /**
+     * The `.cgib` bytes of `node`'s capture (giBakeFormat.ts), for a host to save and name in `bakeId`.
+     * Null until every probe is captured. Reads the hit caches back, so it resolves a frame or so later.
+     */
+    public async exportBake(node: GIVolumeNode, scene: Scene): Promise<Uint8Array | null> {
+        const v = this._volumes.get(node);
+        if (!v || !this.isCaptured(node)) return null;
+        const [w, h] = hitCacheSize(v.probes, v.rays);
+        this._passes.flushFrameEncoder(true);
+        const [hitA, hitB, hitC] = await Promise.all(v.hit.colors.map(c => device.readPixels(c.attachmentView, 0, 0, w, h)));
+        if (this._volumes.get(node) !== v) return null;
+        const probeData = new Float32Array(v.probes * 4);
+        for (let p = 0; p < v.probes; p++) probeData[p * 4 + 3] = v.states[p];
+        return encodeGiBake({
+            counts: [v.counts[0], v.counts[1], v.counts[2]], rays: v.rays, captureResolution: node.captureResolution,
+            maxRayDistance: node.maxRayDistance, size: [node.size[0], node.size[1], node.size[2]],
+            signature: this._signature(scene, v), probeData,
+            hitA: new Uint8Array(hitA.buffer, hitA.byteOffset, w * h * 4),
+            hitB: new Uint8Array(hitB.buffer, hitB.byteOffset, w * h * 4),
+            hitC: new Uint8Array(hitC.buffer, hitC.byteOffset, w * h * 4),
+        });
     }
 
     private _build(node: GIVolumeNode, key: string): VolumeGpu {
