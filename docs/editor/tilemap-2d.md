@@ -10,35 +10,62 @@ Set the dimension in [Scene settings](scene-authoring.md#scene-settings).
 A **tileset** (`.tileset`) is a sliced atlas plus per-tile metadata. Create one with
 **+ Add ▸ Tileset** and pick an atlas image.
 
-Tileset mode gives you:
+Tileset mode shows the atlas with its slicing grid in the main area, and the tileset's settings in the
+Properties panel, card by card. Every edit is undoable (**Ctrl+Z**), and dragging a value is one step.
+**Save** (or **Ctrl+S**) writes the tileset and updates every tilemap and sprite using it. Unsaved edits
+survive switching to another tab and back.
 
-**Atlas** — the image and how it is sliced: **Tile size**, **Margin** (a border around the whole
-atlas) and **Spacing** (the gap between tiles), drawn as a grid over the atlas. Import an image, drop
-one — or a texture from the Assets explorer — on the atlas box, or link a texture already imported.
-The tileset's **Overdrive** is here too.
+Numbers scrub: drag a field's label (**W**, **px**, **rows**…) sideways to change it, click the box to
+type, double-click the label to reset it. Sliders take a typed value past their end: click the readout.
 
-**Selected tiles** — what the tiles selected on the atlas mean: **Solid** (a collider, on any layer
-with parallax 1), **Anchor row** and **Z bias** (where it depth-sorts — a two-tall tree anchors at its
-trunk), **Span** (its footprint in cells, for a prop larger than one tile), **Tint**, **Opacity**, its
-own **Overdrive**, and **Animated**. With several tiles selected the fields show the first one's
-values, and every change applies to all of them.
+### Atlas
+
+The image and how it is sliced into tiles. The grid is drawn over the atlas as you change it, and
+whatever the slicing leaves over (the margin, and any strip at the right or bottom that no whole tile
+fits in) is dimmed, so a wrong tile size shows at once.
+
+| Field | What it does |
+|---|---|
+| **Image** | The atlas texture, in the same slot as a material's: hover it for **Select** (search the project's textures), upload, or drop an image file or a texture from the Assets explorer on it. A new image keeps the slicing you set; only a tileset with no atlas yet guesses its tile size. Beside it: how many tiles the grid makes, and a warning when the slicing does not divide the image. |
+| **Tile size** | Width and height of one tile, in pixels. The link button keeps them equal (square tiles). The chips set a common size in one click, and **Guess** takes the largest of 64, 32, 16 and 8 that divides the image into at least 4 × 4 tiles, or 16 when none does. |
+| **Margin** | A border around the whole atlas, in pixels, before the first tile. |
+| **Spacing** | The gap between adjacent tiles, in pixels. |
+| **Overdrive** | Brightness past white, in linear light (default 1). A tint can only darken a tile; overdrive makes it brighter than its texture, so fire, lava or magic crosses the bloom threshold and glows. Every sprite and tilemap tile drawn from the tileset gets it, unless a tile has its own. Around 3–4 is a strong glow at the default bloom settings; the slider runs to 8, and a typed value can go to 32. |
+
+### Selected tiles
+
+What the tiles selected on the atlas mean. The card shows the first selected tile as it will draw —
+animated, tinted, faded and brightened — with its position. With several tiles selected the fields show
+the first one's values, a **mixed** tag marks a field the others disagree on, and every change applies to
+all of them as one undo step. **Copy** and **Paste** carry a tile's collision, sorting and look to other
+tiles (not its animation or auto-tile membership); **Clear** removes everything a tile carries.
+
+| Field | What it does |
+|---|---|
+| **Solid** | The tile is a collider, on any tilemap layer with parallax 1. |
+| **Anchor row** | Rows down from this tile that it depth-sorts at: a two-tall tree anchors at its trunk. |
+| **Z bias** | A world-space nudge to the tile's depth sort, for when anchoring alone gets it wrong. |
+| **Span** | The tile's footprint in cells, for a prop larger than one tile. |
+| **Tint** | Multiplied into the tile's colour wherever it is placed. The reset button goes back to white. |
+| **Opacity** | How opaque the tile draws. |
+| **Overdrive** | This tile's own overdrive, for example a flare frame brighter than the rest of the flame, or an unlit tile in a glowing set. A tile that has none follows the tileset's, and the slider says **tileset**; moving it gives the tile its own value, and the reset button makes it follow the tileset again. An animated sprite uses the overdrive of the frame on screen; an animated tilemap tile keeps its base tile's. |
+| **Animated** | The tile plays an animation. Turning it on narrows the selection to one tile and goes straight into frame picking (below). |
+| **FPS** | How fast the animation plays, in frames per second. The slider runs to 30; a typed value can go to 120. |
 
 **Animated tiles** — select a tile, turn on **Animated** and the editor goes straight into frame
 picking: click tiles on the atlas in the order they play (drag a rectangle to add a row at once),
-right-click a tile to remove its last use, **Done** to keep the frames, or **Cancel** (or Esc) to put the tile back exactly as it was before picking — including turning Animated off again if picking started from the toggle. The atlas numbers each tile with
-its place in the sequence (a tile used twice shows both, e.g. `2,4`), and the frame chips under
-**Selected tiles** reorder (‹ ›) or remove (×) a frame. The anchor tile is outlined while picking.
+right-click a tile to remove its last use, **Done** to keep the frames, or **Cancel** (or Esc) to put the
+tile back exactly as it was before picking — including turning Animated off again if picking started from
+the toggle. The atlas numbers each tile with its place in the sequence (a tile used twice shows both,
+e.g. `2,4`), and the frame chips under **Selected tiles** show each frame's tile, reorder it (‹ ›) or
+remove it (×). The anchor tile is outlined while picking.
 
-**Overdrive** — brightness past white, in linear light (**Atlas ▸ Overdrive**, default 1). A tint
-can only darken a tile; overdrive makes it brighter than its texture, so fire, lava or magic crosses
-the bloom threshold and glows. Every sprite and tilemap tile drawn from the tileset gets it. A tile
-can set its own **Overdrive** under **Selected tiles**, for example a flare frame brighter than the rest
-of the flame or an unlit tile in a glowing set; set it back to the tileset's value to follow the
-tileset again. An animated sprite uses the overdrive of the frame on screen. An animated tilemap
-tile keeps its base tile's value. Around 3–4 is a strong glow at the default bloom settings.
+### Lighting maps
 
-**Lighting maps** — the atlases a **lit** sprite (**Appearance ▸ Lit**) shades with instead of drawing
-the atlas as it is, cut into the same cells. Every sprite drawn from the tileset uses them.
+The atlases a **lit** sprite (**Appearance ▸ Lit**) shades with instead of drawing the atlas as it is,
+cut into the same cells. Every sprite drawn from the tileset uses them. Each is a texture slot like the
+atlas's, and the card's badge says how lit sprites from the tileset shade: **Six-way**, **Surface** or
+**Flat**.
 
 - **Six-way +** and **Six-way −** — six-way lightmaps, for smoke, steam, dust: anything soft and
   see-through. The FX Creator bakes them (**Bake ▸ Six-way lightmaps**, the Six-way + and Six-way −
@@ -54,14 +81,40 @@ the atlas as it is, cut into the same cells. Every sprite drawn from the tileset
 
 Six-way wins when both six-way maps are set. With no maps a lit sprite is shaded flat.
 
-**Variants** — variant sets: several tiles that mean the same thing, which the **Random** brush picks
-from at random, by weight. This is what stops a large area of ground looking obviously repeated.
-**+ Variant set** adds one; select tiles on the atlas and add them to it, each with its weight.
+### Variants
 
-**Auto-tiling** — terrain sets (Wang sets), where the engine picks the right tile from the
-neighbours: paint a shape with the **Auto** brush and the edges and corners resolve themselves. A set
-is **Edge**, **Corner** or **Blob**; select its tiles in the Wang sheet's order and **Assign** them,
-which records the neighbour mask each one fills.
+Variant sets: several tiles that mean the same thing, which the **Random** brush picks from at random,
+by weight. This is what stops a large area of ground looking obviously repeated. **+ Variant set** adds
+one; select tiles on the atlas and **Add** them to it. Each tile in a set shows its weight and the share
+of picks that weight gives it, and × takes it out of the set. **Select on atlas** selects the set's tiles.
+
+### Auto-tiling
+
+Terrain sets (Wang sets), where the engine picks the right tile from the neighbours: paint a shape with
+the **Auto** brush and the edges and corners resolve themselves. A set is **Edge**, **Corner** or
+**Blob**; select its tiles in the Wang sheet's order and **Assign** them, which records the neighbour
+mask each one fills. The set's tiles are shown in mask order, and **Select on atlas** selects them in
+that order, so assigning them again gives the same rules.
+
+### Working on the atlas
+
+The atlas takes the keyboard when you click it, so these keys act on the tiles and never reach the scene.
+The status bar names the tile under the pointer and what it carries, and explains the corner marks:
+red for solid, yellow for animated, green for any other metadata.
+
+| Control | Does |
+|---|---|
+| **Click / drag** | Selects a tile, or a rectangle of tiles. |
+| **Shift + drag** | Adds the rectangle to the selection. |
+| **Ctrl + click** | Toggles tiles in or out of the selection. |
+| **Arrow keys** | Move the selection one tile; with **Shift**, extend it. |
+| **Ctrl+A** | Selects every tile. |
+| **Esc** | Clears the selection (or cancels frame picking). |
+| **Delete** | Clears the selected tiles' metadata. |
+| **Ctrl+C / Ctrl+V** | Copies the first selected tile's metadata, and pastes it onto the selection. |
+| **Ctrl + wheel** | Zooms about the pointer. |
+| **Middle-drag** | Pans. |
+| **Fit / 1:1** | Fit the whole atlas in view, or show it at one atlas pixel per screen pixel. A tileset opens fitted. |
 
 > Sprites reference a **tileset and a tile index**, not a raw texture. That is what lets one atlas
 > back a whole set of sprites and animations.

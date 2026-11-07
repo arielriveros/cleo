@@ -126,7 +126,10 @@ export function normalizeTilesetAsset(asset: TilesetAsset): TilesetAsset {
 
 /** Re-derive `columns`/`rows` after a slicing change. Returns a new asset; the old one is left alone. */
 export function resliceTileset(asset: TilesetAsset, patch: Partial<TilesetAsset>): TilesetAsset {
-  const next = { ...asset, ...patch, textureIds: [patch.textureId ?? asset.textureId] }
+  const next = { ...asset, ...patch }
+  // The atlas AND its lighting maps: re-deriving from the atlas alone dropped the maps from the reference
+  // scans the moment the tile size changed, so they stopped persisting and shipping with the tileset.
+  next.textureIds = tilesetTextureIds(next)
   const { columns, rows } = gridOf(next.imageWidth, next.imageHeight, next.tileWidth, next.tileHeight,
                                    next.margin, next.spacing)
   next.columns = columns
@@ -172,6 +175,142 @@ export function moveFrame(frames: readonly number[], from: number, to: number): 
   const [tile] = next.splice(from, 1)
   next.splice(to, 0, tile)
   return next
+}
+
+// --- Reading the grid ----------------------------------------------------------------------------------
+
+type Slicing = Pick<TilesetAsset, 'imageWidth' | 'imageHeight' | 'tileWidth' | 'tileHeight' | 'margin' | 'spacing' | 'columns' | 'rows'>
+
+/** Where a tile sits in the atlas, in image pixels from the top-left. Tile 0 is the top-left tile. */
+export function tileRect(asset: Slicing, index: number): { x: number; y: number; w: number; h: number } {
+  const col = index % asset.columns
+  const row = Math.floor(index / asset.columns)
+  return {
+    x: asset.margin + col * (asset.tileWidth + asset.spacing),
+    y: asset.margin + row * (asset.tileHeight + asset.spacing),
+    w: asset.tileWidth,
+    h: asset.tileHeight,
+  }
+}
+
+/**
+ * Image pixels the grid leaves unused at the right and the bottom, inside the far margin. Non-zero means the
+ * slicing does not divide the image — usually a wrong tile size, margin or spacing.
+ */
+export function leftoverPixels(asset: Slicing): { right: number; bottom: number } {
+  const used = (count: number, tile: number) => count * tile + Math.max(0, count - 1) * asset.spacing
+  return {
+    right: Math.max(0, asset.imageWidth - 2 * asset.margin - used(asset.columns, asset.tileWidth)),
+    bottom: Math.max(0, asset.imageHeight - 2 * asset.margin - used(asset.rows, asset.tileHeight)),
+  }
+}
+
+// --- Per-tile metadata, as the inspector writes it -----------------------------------------------------
+
+/**
+ * `meta` without the fields that hold their default (absent, null, false), or undefined when nothing is
+ * left: a husk record would ship in every embedded copy and make the atlas markers lie.
+ */
+export function compactTileMeta(meta: TileMeta): TileMeta | undefined {
+  const out: TileMeta = { ...meta }
+  for (const key of Object.keys(out) as (keyof TileMeta)[]) {
+    const v = out[key]
+    if (v === undefined || v === null || v === false) delete out[key]
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+/** `asset` with `patch` merged into every tile in `indices` — one step, so one undo entry. */
+export function applyTileMeta(asset: TilesetAsset, indices: readonly number[], patch: Partial<TileMeta>): TilesetAsset {
+  const tiles = { ...asset.tiles }
+  for (const index of indices) {
+    // Each tile gets its OWN copy of an array or object value (a tint, an animation): one shared between
+    // tiles would change all of them the moment anything edited one in place. Field by field rather than a
+    // JSON round trip, which would drop the `undefined`s that mean "clear this field".
+    const own: Record<string, unknown> = {}
+    for (const [key, v] of Object.entries(patch)) own[key] = v && typeof v === 'object' ? structuredClone(v) : v
+    const merged = compactTileMeta({ ...(tiles[index] ?? {}), ...own })
+    if (merged) tiles[index] = merged
+    else delete tiles[index]
+  }
+  return { ...asset, tiles }
+}
+
+/** `asset` with every tile in `indices` back to plain. */
+export function clearTileMeta(asset: TilesetAsset, indices: readonly number[]): TilesetAsset {
+  const tiles = { ...asset.tiles }
+  for (const index of indices) delete tiles[index]
+  return { ...asset, tiles }
+}
+
+/** The fields the Selected tiles card edits, in the order it shows them. */
+const EDITED_TILE_FIELDS: (keyof TileMeta)[] = [
+  'solid', 'anchorRow', 'zBias', 'spanX', 'spanY', 'tint', 'opacity', 'overdrive', 'animation',
+]
+
+const sameField = (key: keyof TileMeta, a: unknown, b: unknown): boolean => {
+  // Animated is a yes/no across a selection: the frames belong to one tile and are edited one at a time.
+  if (key === 'animation') return !!a === !!b
+  const norm = (v: unknown) => (v === undefined || v === null || v === false ? undefined : v)
+  return JSON.stringify(norm(a)) === JSON.stringify(norm(b))
+}
+
+/**
+ * What the multi-tile editor shows: the first selected tile's metadata (the fields display it, and a write
+ * applies to all), plus the fields on which the rest of the selection disagrees with it.
+ */
+export function selectionFieldState(asset: TilesetAsset, indices: readonly number[]): { primary: TileMeta; mixed: Set<keyof TileMeta> } {
+  const primary = (indices.length ? asset.tiles[indices[0]] : undefined) ?? {}
+  const mixed = new Set<keyof TileMeta>()
+  for (const index of indices.slice(1)) {
+    const meta = asset.tiles[index] ?? {}
+    for (const key of EDITED_TILE_FIELDS) if (!sameField(key, primary[key], meta[key])) mixed.add(key)
+  }
+  return { primary, mixed }
+}
+
+/**
+ * The fields Copy / Paste carry between tiles: what a tile IS (collision, sorting, look). Animation frames,
+ * terrain membership and variant weights name specific tiles and stay where they are.
+ */
+export const COPYABLE_TILE_FIELDS = ['solid', 'shape', 'anchorRow', 'zBias', 'spanX', 'spanY', 'tint', 'opacity', 'overdrive'] as const
+export type TileMetaClip = Pick<TileMeta, typeof COPYABLE_TILE_FIELDS[number]>
+
+/** A detached copy of the copyable fields of `meta`. */
+export function copyableTileMeta(meta: TileMeta | undefined): TileMetaClip {
+  const out: Record<string, unknown> = {}
+  if (meta) {
+    for (const key of COPYABLE_TILE_FIELDS) {
+      if (meta[key] !== undefined) out[key] = JSON.parse(JSON.stringify(meta[key]))
+    }
+  }
+  return out as TileMetaClip
+}
+
+/**
+ * `asset` with `clip` pasted onto every tile in `indices`. The copyable fields are replaced WHOLESALE — a
+ * field the copied tile lacked is cleared on the targets — so a paste makes the tiles match the source.
+ */
+export function pasteTileMeta(asset: TilesetAsset, indices: readonly number[], clip: TileMetaClip): TilesetAsset {
+  const reset: Partial<TileMeta> = {}
+  for (const key of COPYABLE_TILE_FIELDS) (reset as Record<string, unknown>)[key] = undefined
+  return applyTileMeta(asset, indices, { ...reset, ...JSON.parse(JSON.stringify(clip)) })
+}
+
+/** A one-line description of a tile's metadata, for the atlas status bar: "solid · animated, 4 frames". */
+export function tileMetaSummary(meta: TileMeta | undefined): string {
+  if (!meta) return 'plain'
+  const parts: string[] = []
+  if (meta.solid) parts.push('solid')
+  if (meta.animation) parts.push(`animated, ${meta.animation.frames.length} frame${meta.animation.frames.length === 1 ? '' : 's'}`)
+  if ((meta.spanX ?? 1) > 1 || (meta.spanY ?? 1) > 1) parts.push(`${meta.spanX ?? 1}x${meta.spanY ?? 1} cells`)
+  if (meta.anchorRow) parts.push(`anchor row ${meta.anchorRow}`)
+  if (meta.zBias) parts.push(`z bias ${meta.zBias}`)
+  if (meta.tint) parts.push('tinted')
+  if (meta.opacity !== undefined && meta.opacity < 1) parts.push(`opacity ${meta.opacity}`)
+  if (meta.overdrive !== undefined) parts.push(`overdrive ${meta.overdrive}`)
+  if (meta.terrain) parts.push('auto-tile')
+  return parts.length ? parts.join(' · ') : 'plain'
 }
 
 /** The lighting-map fields of a tileset asset, in the order the inspector lists them. */

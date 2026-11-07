@@ -44,6 +44,11 @@ export interface SliderProps {
   title?: string;
   /** Docs key for the label when its text is not the term (see resolveDocKey); `false` opts out. */
   doc?: string | false;
+  /**
+   * A soft range: the track ends at `max`, but a value TYPED into the readout may go up to this. For a
+   * field whose useful range is small but whose legal range is not (overdrive: 0-8 on the track, 32 typed).
+   */
+  hardMax?: number;
 }
 
 /**
@@ -64,15 +69,17 @@ export function Slider({
   labelClassName,
   title,
   doc,
+  hardMax,
 }: SliderProps) {
   const [editing, setEditing] = useState(false);
+  const typedMax = Math.max(max, hardMax ?? max);
   const entry = useDocEntry(label, doc, 'field');
   const pct = max > min ? clamp(((value - min) / (max - min)) * 100, 0, 100) : 0;
   const text = typeof readout === 'function' ? readout(value) : sliderReadout(value, step);
 
   const commit = (raw: string) => {
     const v = parseFloat(raw);
-    if (Number.isFinite(v)) onChange(clamp(v, min, max));
+    if (Number.isFinite(v)) onChange(clamp(v, min, typedMax));
     setEditing(false);
   };
 
@@ -101,7 +108,7 @@ export function Slider({
             autoFocus
             defaultValue={value}
             min={min}
-            max={max}
+            max={typedMax}
             step={step}
             onClick={(e) => e.preventDefault()}
             onBlur={(e) => commit(e.target.value)}
