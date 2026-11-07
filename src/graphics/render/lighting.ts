@@ -276,13 +276,32 @@ export class LightingPasses {
      * `outSH`, and the share of the ambient and sky light they replace (0 outside every probe).
      */
     public probeLightingAt(scene: Scene, position: vec3, outSH: Float32Array): number {
-        return probeLightingAt(this.lightingProbes(scene), position, outSH, this._view.preExposure);
+        const k = this._view.preExposure;
+        const probes = probeLightingAt(this.lightingProbes(scene), position, outSH, k);
+        // The GI Volumes claim FIRST, as they do per pixel in the deferred pass; the probes take their share
+        // of what the volumes left. Never during a capture, which no indirect light reaches.
+        if (this._view.capturing) return probes;
+        const gi = this._sys.gi.lightingAt(position, this._giSH, k);
+        if (gi <= 0) return probes;
+        const rest = 1 - gi;
+        for (let j = 0; j < outSH.length; j++) outSH[j] = this._giSH[j] + outSH[j] * rest;
+        return gi + probes * rest;
     }
 
     /** A flat ambient at `position` (lit particles, lit sprites): `fallback` where no probe lights it. */
     public probeAmbientAt(scene: Scene, position: vec3, fallback: ArrayLike<number>, out?: number[]): number[] {
-        return probeAmbientAt(this.lightingProbes(scene), position, fallback, out);
+        const result = probeAmbientAt(this.lightingProbes(scene), position, fallback, out);
+        if (this._view.capturing) return result;
+        const gi = this._sys.gi.ambientAt(position, this._giAmbient);
+        if (gi <= 0) return result;
+        const rest = 1 - gi;
+        for (let c = 0; c < 3; c++) result[c] = this._giAmbient[c] + result[c] * rest;
+        return result;
     }
+
+    /** Scratch for the GI Volumes' share of a forward draw's SH, and of a flat ambient. */
+    private readonly _giSH = new Float32Array(36);
+    private readonly _giAmbient: number[] = [0, 0, 0];
 
     public deferredLightingPass(scene: Scene, _shadowLight: LightNode | null): void {
         const w = this._host.renderWidth, h = this._host.renderHeight;
