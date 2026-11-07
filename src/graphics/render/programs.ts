@@ -113,6 +113,13 @@ import LocalExposureDownProgram from '../shaders/wgsl/localExposureDown.wgsl';
 import VolumetricFogInjectProgram from '../shaders/wgsl/volumetricFogInject.wgsl';
 import VolumetricFogIntegrateProgram from '../shaders/wgsl/volumetricFogIntegrate.wgsl';
 import VolumetricFogApplyProgram from '../shaders/wgsl/volumetricFogApply.wgsl';
+// GI Volumes (render/gi/): capture reduce, visibility, relight radiance and integrate, apply.
+import GiReduceProgram from '../shaders/wgsl/giReduce.wgsl';
+import GiVisibilityProgram from '../shaders/wgsl/giVisibility.wgsl';
+import GiRadianceProgram from '../shaders/wgsl/giRadiance.wgsl';
+import GiIntegrateProgram from '../shaders/wgsl/giIntegrate.wgsl';
+import GiResolveProgram from '../shaders/wgsl/giResolve.wgsl';
+import GiAmbientCubeProgram from '../shaders/wgsl/giAmbientCube.wgsl';
 
 // IBL (image-based lighting) precompute shaders
 import IrradianceProgram from '../shaders/wgsl/irradiance.wgsl';
@@ -146,6 +153,8 @@ export {
     PrefilterProgram, PrefilterOctProgram, BRDFProgram, SpriteLitProgram, SsrProgram,
     SsrResolveProgram, SsrTemporalProgram, LocalExposureLumProgram, LocalExposureDownProgram,
     VolumetricFogInjectProgram, VolumetricFogIntegrateProgram, VolumetricFogApplyProgram,
+    GiReduceProgram, GiVisibilityProgram, GiRadianceProgram, GiIntegrateProgram, GiResolveProgram,
+    GiAmbientCubeProgram,
 };
 
 // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
@@ -307,6 +316,13 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['volumetricFogInject',          VolumetricFogInjectProgram],
         ['volumetricFogIntegrate',       VolumetricFogIntegrateProgram],
         ['volumetricFogApply',           VolumetricFogApplyProgram],
+        // GI Volumes (render/gi/). APPENDED.
+        ['giReduce',                     GiReduceProgram],
+        ['giVisibility',                 GiVisibilityProgram],
+        ['giRadiance',                   GiRadianceProgram],
+        ['giIntegrate',                  GiIntegrateProgram],
+        ['giResolve',                    GiResolveProgram],
+        ['giAmbientCube',                GiAmbientCubeProgram],
     ];
 }
 

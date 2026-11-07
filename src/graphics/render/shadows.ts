@@ -151,6 +151,34 @@ export interface ShadowPassesHost {
  * spot atlas and point cubes with their static caches, the packed uniforms the lit programs read,
  * and the volumetric god rays that march them. Split out of Renderer.
  */
+/**
+ * A sun shadow map fit round ONE place — a light probe, a GI volume — that a bake lights with in the
+ * cascades' place (one layer whose split reaches past everything it sees). Each owner keeps its own, so a
+ * bake drawn one frame and relit the next is not clobbered by another's in between.
+ */
+export class ProbeShadowMap {
+    public fbo: LayeredDepthFramebuffer | null = null;
+    /** Texels on a side of the map last drawn. */
+    public size = 1;
+    /** Whether the last `renderProbeShadows` drew it. */
+    public ready = false;
+    /** The key light's direction (its travel) when it was drawn. */
+    public readonly lightDir: vec3 = vec3.create();
+    public readonly matrix: mat4 = mat4.create();
+    public readonly matPacked: Float32Array = new Float32Array(MAX_CASCADES * 16);
+    public readonly splitPacked: Float32Array = new Float32Array(MAX_CASCADES);
+    public readonly depthScalePacked: Float32Array = new Float32Array(MAX_CASCADES);
+    public readonly texelPacked: Float32Array = new Float32Array(MAX_CASCADES);
+    /** Times drawn (tests, the profiler). */
+    public draws = 0;
+
+    public delete(): void {
+        this.fbo?.delete();
+        this.fbo = null;
+        this.ready = false;
+    }
+}
+
 export class ShadowPasses {
     private readonly _shaderManager = ShaderManager.Instance;
 
@@ -585,12 +613,13 @@ export class ShadowPasses {
         // unused uniform — so an `if (loc)` guard silently drops every write on a WGSL program.
         // A light-probe capture reads its own map in the cascades' place: one layer fit round the probe,
         // whose split reaches past everything the probe sees (see `beginProbeShadows`).
-        const probe = this.probeShadowsActive;
+        const map = this._activeProbeMap;
+        const probe = map !== null;
         const active = probe || (this.shadowsActive && !this.shadowsSuppressed);
         this._shaderManager.setUniform('u_shadowsEnabled', active);
         this._shaderManager.setUniform('u_cascadeCount', probe ? 1 : this.cascadeCount);
 
-        const texel = 1 / (probe ? this._probeShadowSize : this.shadowMapResolution);
+        const texel = 1 / (map ? map.size : this.shadowMapResolution);
         this._shaderManager.setUniform('u_shadowTexel', [texel, texel]);
         this._shaderManager.setUniform('u_shadowDepthBias', this.shadowDepthBias);
         this._shaderManager.setUniform('u_shadowNormalBias', this.shadowNormalBias);
@@ -601,10 +630,10 @@ export class ShadowPasses {
         this._shaderManager.setUniform('u_cascadeBlend', this.cascadeBlend);
         this._shaderManager.setUniform('u_debugCascades', this.debugCascades && active);
 
-        this._shaderManager.setUniform('u_cascadeMatrices', probe ? this._probeMatPacked : this._cascadeMatPacked);
-        this._shaderManager.setUniform('u_cascadeSplits', probe ? this._probeSplitPacked : this._cascadeSplitPacked);
-        this._shaderManager.setUniform('u_cascadeDepthScale', probe ? this._probeDepthScalePacked : this._cascadeDepthScalePacked);
-        this._shaderManager.setUniform('u_cascadeTexelSize', probe ? this._probeTexelPacked : this._cascadeTexelPacked);
+        this._shaderManager.setUniform('u_cascadeMatrices', map ? map.matPacked : this._cascadeMatPacked);
+        this._shaderManager.setUniform('u_cascadeSplits', map ? map.splitPacked : this._cascadeSplitPacked);
+        this._shaderManager.setUniform('u_cascadeDepthScale', map ? map.depthScalePacked : this._cascadeDepthScalePacked);
+        this._shaderManager.setUniform('u_cascadeTexelSize', map ? map.texelPacked : this._cascadeTexelPacked);
         this._shaderManager.setUniform('u_farCascadeMatrix', this._farCascadeMatPacked);
         this._shaderManager.setUniform('u_farCascadeDistance', probe ? 0 : this._farCascadeActiveDistance);
         this._shaderManager.setUniform('u_farCascadeDepthScale', this._farCascadeDepthScale);
@@ -1647,12 +1676,16 @@ export class ShadowPasses {
     // probe saw every slope lit, shaded cliffs reflected a sunlit valley, and a room lit itself through its
     // own roof.
 
-    /** The probe capture's sun shadow map; allocated by the first shadowed capture. */
-    public probeShadowFBO: LayeredDepthFramebuffer | null = null;
+    /** The light probes' sun shadow map (one probe job runs at a time); a GI volume keeps its own. */
+    private readonly _probeMap = new ProbeShadowMap();
+    /** The map the lighting reads in the cascades' place, between `activateProbeShadows` and `endProbeShadows`. */
+    private _activeProbeMap: ProbeShadowMap | null = null;
+    /** The light probes' map, once a shadowed capture has drawn it. */
+    public get probeShadowFBO(): LayeredDepthFramebuffer | null { return this._probeMap.fbo; }
     /** Texels on a side of the probe capture's map (a power of two, 256..4096). */
     public probeShadowResolution: number = 2048;
-    /** True between `beginProbeShadows` and `endProbeShadows`: the forward lighting reads the probe's map. */
-    public probeShadowsActive: boolean = false;
+    /** True between `activateProbeShadows` and `endProbeShadows`: the lighting reads a probe or volume map. */
+    public get probeShadowsActive(): boolean { return this._activeProbeMap !== null; }
     /** Shadow maps probe captures have drawn (tests, the profiler). */
     public probeShadowDraws: number = 0;
     /** The split the probe's one layer is given: past anything a capture can see, so it never fades. */
@@ -1661,18 +1694,13 @@ export class ShadowPasses {
     public static readonly PROBE_SHADOW_UNBOUNDED_RADIUS = 300;
     /** Metres added round a bounded probe's volume: what stands just outside still shadows what it sees. */
     public static readonly PROBE_SHADOW_MARGIN = 20;
-    private readonly _probeShadowMatrix: mat4 = mat4.create();
-    private readonly _probeMatPacked: Float32Array = new Float32Array(MAX_CASCADES * 16);
-    private readonly _probeSplitPacked: Float32Array = new Float32Array(MAX_CASCADES);
-    private readonly _probeDepthScalePacked: Float32Array = new Float32Array(MAX_CASCADES);
-    private readonly _probeTexelPacked: Float32Array = new Float32Array(MAX_CASCADES);
-    private _probeShadowSize: number = 1;
     /** Gathering casters for a probe capture: none are dropped for the main camera's occlusion volumes. */
     private _captureCasters: boolean = false;
 
     /** The cascade array the lighting binds: the probe's own map while a capture reads it. */
     public get cascadeTexture(): Texture {
-        return this.probeShadowsActive && this.probeShadowFBO ? this.probeShadowFBO.texture : this.shadowCascadeFBO.texture;
+        const map = this._activeProbeMap;
+        return map && map.fbo ? map.fbo.texture : this.shadowCascadeFBO.texture;
     }
 
     /**
@@ -1693,9 +1721,10 @@ export class ShadowPasses {
      * draws it one frame (`ProbeJobStep` 'shadow') and lights with it the next (`activateProbeShadows`).
      * The map stays valid until the next call; one probe job runs at a time.
      */
-    public renderProbeShadows(scene: Scene, centre: ArrayLike<number>, radius: number): boolean {
-        this.probeShadowsActive = false;
-        this._probeShadowReady = false;
+    public renderProbeShadows(scene: Scene, centre: ArrayLike<number>, radius: number,
+                              map: ProbeShadowMap = this._probeMap, resolution: number = this.probeShadowResolution): boolean {
+        if (this._activeProbeMap === map) this._activeProbeMap = null;
+        map.ready = false;
         if (!this.shadowsEnabled || this.shadowsSuppressed || !this._host.deviceReady) return false;
         let sun: LightNode | null = null;
         for (const node of scene.lights) {
@@ -1703,9 +1732,9 @@ export class ShadowPasses {
             if (node.castShadows && node.type === 'directional' && node.bake) { sun = node; break; }
         }
         if (!sun) return false;
-        const size = Math.max(256, Math.min(4096, 1 << Math.round(Math.log2(Math.max(1, this.probeShadowResolution)))));
-        this.probeShadowFBO ??= new LayeredDepthFramebuffer();
-        this.probeShadowFBO.create(size, 1, true);
+        const size = Math.max(256, Math.min(4096, 1 << Math.round(Math.log2(Math.max(1, resolution)))));
+        map.fbo ??= new LayeredDepthFramebuffer();
+        if (map.fbo.size !== size) map.fbo.create(size, 1, true);
 
         const previous = this.shadowLight;
         this.shadowLight = sun;
@@ -1718,20 +1747,23 @@ export class ShadowPasses {
             sphere.radius = Math.max(1, radius);
             this._layerLodMode = 'coarse';
             this._selectLayerCasters(sphere, null, 0, 0, this._farTerrainBlocks(scene));
-            const fit = buildCascadeMatrix(sphere, this._sys.lighting.dirOf(sun), size, this.shadowCasterPad,
-                                           this._probeShadowMatrix, this._csmScratch, false, this._casterBounds);
-            const pass = this._passes.beginDepthPass(this.probeShadowFBO.renderTarget, 'cascade', 0);
-            this._renderShadowCasters(pass, this._layerCasters, this._layerCasterCount, this._probeShadowMatrix);
+            const lightDir = this._sys.lighting.dirOf(sun);
+            const fit = buildCascadeMatrix(sphere, lightDir, size, this.shadowCasterPad,
+                                           map.matrix, this._csmScratch, false, this._casterBounds);
+            const pass = this._passes.beginDepthPass(map.fbo.renderTarget, 'cascade', 0);
+            this._renderShadowCasters(pass, this._layerCasters, this._layerCasterCount, map.matrix);
             this._passes.endDepthPass(pass);
             this.probeShadowDraws++;
+            map.draws++;
 
-            this._probeMatPacked.fill(0);
-            this._probeMatPacked.set(this._projection.uvProducing(this._probeShadowMatrix), 0);
-            this._probeSplitPacked.fill(ShadowPasses.PROBE_SHADOW_SPLIT);
-            this._probeDepthScalePacked.fill(cascadeDepthScale(fit.depthRange));
-            this._probeTexelPacked.fill(fit.texelWorldSize);
-            this._probeShadowSize = size;
-            this._probeShadowReady = true;
+            map.matPacked.fill(0);
+            map.matPacked.set(this._projection.uvProducing(map.matrix), 0);
+            map.splitPacked.fill(ShadowPasses.PROBE_SHADOW_SPLIT);
+            map.depthScalePacked.fill(cascadeDepthScale(fit.depthRange));
+            map.texelPacked.fill(fit.texelWorldSize);
+            map.size = size;
+            vec3.set(map.lightDir, lightDir[0], lightDir[1], lightDir[2]);
+            map.ready = true;
         } finally {
             this._layerLodMode = 'camera';
             this._captureCasters = false;
@@ -1742,15 +1774,14 @@ export class ShadowPasses {
         return true;
     }
 
-    /** Read the probe map drawn by the last `renderProbeShadows`, if it drew one. True when it did. */
-    public activateProbeShadows(): boolean {
-        this.probeShadowsActive = this._probeShadowReady && this.probeShadowFBO !== null;
-        return this.probeShadowsActive;
+    /** Read `map` (the light probes' by default), as its last `renderProbeShadows` drew it. True when it did. */
+    public activateProbeShadows(map: ProbeShadowMap = this._probeMap): boolean {
+        this._activeProbeMap = map.ready && map.fbo !== null ? map : null;
+        return this._activeProbeMap !== null;
     }
-    private _probeShadowReady = false;
 
     /** Stop reading the probe's map: the forward lighting goes back to the frame's cascades. */
-    public endProbeShadows(): void { this.probeShadowsActive = false; }
+    public endProbeShadows(): void { this._activeProbeMap = null; }
 
     /** The probe map's reach: a bounded probe's volume half-diagonal and a margin, or a wide disc unbounded. */
     public probeShadowRadius(bounded: boolean, size: ArrayLike<number>, scale: ArrayLike<number>): number {

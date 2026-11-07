@@ -77,6 +77,7 @@ import { ForwardPass } from './render/forwardPass';
 import { EditorOverlays } from './render/editorOverlays';
 import { DebugViews } from './render/debugViews';
 import { Capture } from './render/capture';
+import { GiSystem } from './render/gi/giSystem';
 import { RenderStats } from './render/stats';
 import type { RenderSubsystems } from './render/subsystems';
 import { ProgramRegistry } from './render/programRegistry';
@@ -199,6 +200,8 @@ export class Renderer {
     private readonly _debugViews: DebugViews;
     /** Captures: offscreen screenshots and thumbnails, light-probe capture and IBL bake, probe previews (render/capture.ts). */
     private readonly _capture: Capture;
+    /** GI Volumes: their capture, relight and per-pixel apply (render/gi/giSystem.ts). */
+    private readonly _gi: GiSystem;
     /** Frame statistics for the performance HUD, the GPU memory estimate and the opt-in GL error check (render/stats.ts). */
     private readonly _stats: RenderStats;
     /** The subsystems, for the ones that reach each other while drawing (render/subsystems.ts). Filled at the end of the constructor. */
@@ -424,6 +427,10 @@ export class Renderer {
             get clearColor() { return renderer.clearColor; },
             render: (scene) => renderer.render(scene),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._temporal, this._post, this._shadows, this._lighting, this._sky, this._forward, this._fullscreen, this._subsystems);
+        this._gi = new GiSystem({
+            get renderHeight() { return renderer._renderHeight; },
+            get renderWidth() { return renderer._renderWidth; },
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._shadows, this._lighting, this._fullscreen, this._subsystems);
         this._stats = new RenderStats({
             get canvas() { return renderer._canvas; },
             get deferred() { return renderer._deferred; },
@@ -447,6 +454,7 @@ export class Renderer {
             capture: this._capture,
             programs: this._programs,
             objects: this._objects,
+            gi: this._gi,
         } satisfies RenderSubsystems);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._shadows.shadowDistance = config.shadowDistance ?? 100;
@@ -885,6 +893,10 @@ export class Renderer {
         // A probe captured last frame or earlier gets the spherical harmonics its lighting is applied in.
         this._sky.updateProbeLighting(scene);
         this._passes.endScope();
+        // GI Volumes: a capture batch and the relight the light calls for, before anything shades.
+        this._passes.scope('gi.update');
+        this._gi.update(scene);
+        this._passes.endScope();
 
         // Reset per-frame perf counters AFTER the (occasional) IBL bake so bakes don't spike the RenderStats.stats.
         resetFrameStats();
@@ -1128,6 +1140,9 @@ export class Renderer {
         if (this._ssr.ssrEnabled && gBufferHasGeometry && this._view.camera.type !== 'orthographic'
             && this._passes.beginPass('ssr'))
             this._ssr.ssrProducedThisFrame = this._ssr.ssrPass();
+        // 1d. GI Volumes: the volumes' irradiance at every pixel, the most specific indirect diffuse.
+        this._gi.producedThisFrame = false;
+        if (gBufferHasGeometry && this._passes.beginPass('gi')) this._gi.resolve(scene);
         // 2. Light the G-buffer in a single fullscreen pass into the scene FBO.
         this._passes.scope('lighting');
         this._lighting.deferredLightingPass(scene, shadowLight);
@@ -2012,6 +2027,9 @@ export class Renderer {
     public set localExposureHighlights(v: number) { this._post.localExposure.highlightStops = Math.min(4, Math.max(0, Number.isFinite(+v) ? +v : 1.5)); }
 
     /** See {@link RenderSettings.ssrEnabled}. A quality-tier field, like `ssaoEnabled`. */
+    /** GI Volumes: state, counters and settings (render/gi/giSystem.ts). */
+    public get gi(): GiSystem { return this._gi; }
+
     public get ssrEnabled(): boolean { return this._ssr.ssrEnabled; }
     public set ssrEnabled(enabled: boolean) { this._ssr.ssrEnabled = !!enabled; }
     /**

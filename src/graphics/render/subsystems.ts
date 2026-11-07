@@ -10,6 +10,7 @@ import type { EditorOverlays } from './editorOverlays';
 import type { Capture } from './capture';
 import type { ProgramRegistry } from './programRegistry';
 import type { ObjectTable } from '../objectTable';
+import type { GiSystem } from './gi/giSystem';
 
 /**
  * The renderer's subsystems, for the ones that reach each other while drawing. Filled once, at the end of
@@ -33,4 +34,6 @@ export interface RenderSubsystems {
     readonly programs: ProgramRegistry;
     /** The per-object table every converted draw reads its matrix and per-object values from. */
     readonly objects: ObjectTable;
+    /** GI Volumes: their capture, relight and apply (render/gi/giSystem.ts). */
+    readonly gi: GiSystem;
 }

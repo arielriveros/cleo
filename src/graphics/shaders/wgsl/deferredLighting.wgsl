@@ -38,6 +38,10 @@ const AO_DEPTH_TOLERANCE: f32 = 0.02;
 // ES 3.00 guarantees (tests/deferredLightingSamplers.test.ts).
 @group(0) @binding(10) var u_ssr_texture: texture_2d<f32>;
 @group(0) @binding(11) var u_ssr_sampler: sampler;
+// GI Volumes (render/gi/giSystem.ts): rgb = the volumes' irradiance (E/pi, pre-exposed, x intensity, summed
+// over their claims), a = the share they claimed. The most specific indirect diffuse: it claims first.
+@group(0) @binding(12) var u_gi_texture: texture_2d<f32>;
+@group(0) @binding(13) var u_gi_sampler: sampler;
 
 // --- IBL ----------------------------------------------------------------------------------------
 //
@@ -101,6 +105,8 @@ struct Lighting {
     u_ssaoTexelSize: vec2<f32>,
     /** The same for the SSR buffer. */
     u_ssrTexelSize: vec2<f32>,
+    /** The same for the GI buffer. */
+    u_giTexelSize: vec2<f32>,
 
     /** Scale on SSIL's bounce (`.rgb`); 0 leaves its visibility as plain ambient occlusion. */
     u_ssilIntensity: f32,
@@ -116,6 +122,8 @@ struct Lighting {
     u_horizonOcclusion: i32,
     /** Whether the SSR pass produced a result THIS frame (SsrPasses.ssrProducedThisFrame). */
     u_ssrEnabled: i32,
+    /** Whether the GI Volumes' apply produced a result THIS frame (GiSystem.producedThisFrame). */
+    u_giEnabled: i32,
     /**
      * The frame's pre-exposure (graphics/preExposure.ts). The lights, ambient, sky light, probes and sky
      * reflection arrive multiplied by it; the G-buffer emissive and the scene environment map are
@@ -344,6 +352,14 @@ fn sampleSSR(uv: vec2<f32>, centerDepth: f32) -> vec4<f32> {
     return select(vec4<f32>(0.0), s, ok);
 }
 
+/** GI Volumes: claimed irradiance in `.rgb`, the claim in `.a`. Disabled reads as nothing claimed. */
+fn sampleGI(uv: vec2<f32>, centerDepth: f32) -> vec4<f32> {
+    if (u_lighting.u_giEnabled == 0) { return vec4<f32>(0.0); }
+    let s = depthAwareUpsample(u_gi_texture, u_gi_sampler, uv, centerDepth, u_lighting.u_giTexelSize);
+    let ok = all(s >= vec4<f32>(0.0)) && all(s.rgb <= vec3<f32>(6.0e4)) && s.a <= 1.0001;
+    return select(vec4<f32>(0.0), vec4<f32>(s.rgb, min(s.a, 1.0)), ok);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // The shadow library reads the fragment coordinate through a module-scope global, because only an
@@ -450,10 +466,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     //
     // `(1 - metallic)` on the probe term, matching `accumulateLight`: a metal has no diffuse. The `(1 - F)`
     // factor this once carried is not in any modern reference BRDF and double-counted Fresnel.
-    var fallbackShare = 1.0;
-    var probeDiffuse = vec3<f32>(0.0);
-    var probeBack = vec3<f32>(0.0);
+    //
+    // The GI Volumes claim FIRST: theirs is the most specific light there is, per point inside the box
+    // rather than one value for it. What they leave the probes share as before.
+    let gi = sampleGI(uv, depth);            // rgb = sum of claim x E/pi (pre-exposed, x intensity), a = claim
+    var fallbackShare = 1.0 - gi.a;
+    var probeDiffuse = gi.rgb;
+    var probeBack = gi.rgb;                  // a translucent surface's back takes the front's GI (v1)
     for (var i = 0; i < min(u_lighting.u_lightProbeCount, MAX_LIGHT_PROBES); i++) {
+        if (fallbackShare <= 1e-3) { break; }
         let blend = u_lighting.u_lightProbeBlend[i];
         let w = probeWeight(worldPos, u_lighting.u_lightProbeInvVolume[i], blend.xyz, i32(blend.w));
         if (w <= 0.0) { continue; }

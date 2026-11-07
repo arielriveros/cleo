@@ -311,6 +311,10 @@ export class LightingPasses {
             ssaoTexelSize: this._ssil.ssaoResolutionScale >= 0.999 ? [0, 0] : [1 / this._ssil.ssaoWidth, 1 / this._ssil.ssaoHeight],
             ssrEnabled: ssrLive,
             ssrTexelSize: ssr.ssrResolutionScale >= 0.999 ? [0, 0] : [1 / ssr.ssrWidth, 1 / ssr.ssrHeight],
+            gi: this._sys.gi.texture ?? this._bindGroups.fallbackTexture,
+            giEnabled: this._sys.gi.texture !== null,
+            giTexelSize: this._sys.gi.resolutionScale >= 0.999 || !this._sys.gi.texture
+                ? [0, 0] : [1 / this._sys.gi.targetWidth, 1 / this._sys.gi.targetHeight],
             bakeOnly: false,
         });
         this._passes.endFullscreenPass(pass);
@@ -331,6 +335,7 @@ export class LightingPasses {
             ssao: this._bindGroups.fallbackTexture, ssr: this._bindGroups.fallbackTexture,
             invViewProj, viewPos, view,
             ssaoEnabled: false, ssilIntensity: 0, ssaoTexelSize: [0, 0], ssrEnabled: false, ssrTexelSize: [0, 0],
+            gi: this._bindGroups.fallbackTexture, giEnabled: false, giTexelSize: [0, 0],
             bakeOnly: true,
         });
         this._passes.endFullscreenPass(pass);
@@ -340,6 +345,7 @@ export class LightingPasses {
         ssao: Texture; ssr: Texture; invViewProj: mat4; viewPos: vec3; view: mat4;
         ssaoEnabled: boolean; ssilIntensity: number; ssaoTexelSize: number[];
         ssrEnabled: boolean; ssrTexelSize: number[]; bakeOnly: boolean;
+        gi: Texture; giEnabled: boolean; giTexelSize: number[];
     }): void {
         const pipeline = this._pipelines.fullscreen('deferredLighting', DeferredLightingProgram);
         pass.setPipeline(pipeline);
@@ -347,7 +353,7 @@ export class LightingPasses {
         // Group 0: the G-buffer plus SSIL and SSR. Both always bind a complete texture even when disabled —
         // the shader gates on u_ssaoEnabled / u_ssrEnabled, but the sampler still has to point somewhere valid.
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            gBuffer.colors[0], gBuffer.colors[1], gBuffer.colors[2], gBuffer.depth, o.ssao, o.ssr,
+            gBuffer.colors[0], gBuffer.colors[1], gBuffer.colors[2], gBuffer.depth, o.ssao, o.ssr, o.gi,
         ]));
 
         this._shaderManager.setUniform('u_invViewProj', o.invViewProj);
@@ -416,12 +422,23 @@ export class LightingPasses {
         this._shaderManager.setUniform('u_ssaoTexelSize', o.ssaoTexelSize);
         this._shaderManager.setUniform('u_ssrEnabled', o.ssrEnabled);
         this._shaderManager.setUniform('u_ssrTexelSize', o.ssrTexelSize);
+        this._shaderManager.setUniform('u_giEnabled', o.giEnabled);
+        this._shaderManager.setUniform('u_giTexelSize', o.giTexelSize);
 
         this._passes.drawFullscreen(pass);
     }
 
-    private _setDeferredLighting(scene: Scene, bakeOnly: boolean = false): void {
-        this._shaderManager.bind('deferredLighting');
+    /**
+     * The frame's lighting uploads — sky light, sun, flat ambient, pre-exposure, the active light grid's
+     * addressing — onto `program` (which declares them by the deferred pass's names). `bakeOnly`: the
+     * lights set to bake alone, as a probe or GI relight lights its capture.
+     */
+    public uploadSceneLighting(program: string, scene: Scene, bakeOnly: boolean = false): void {
+        this._setDeferredLighting(scene, bakeOnly, program);
+    }
+
+    private _setDeferredLighting(scene: Scene, bakeOnly: boolean = false, program: string = 'deferredLighting'): void {
+        this._shaderManager.bind(program);
         this._uploadSkyLight();
         const grade = this.cloudGrade(scene);
         this.activeLightGrid.uploadUniforms(this._shaderManager);
