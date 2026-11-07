@@ -341,17 +341,23 @@ export class GiSystem {
         // rays could land makes the bake stale, and nothing else about the landscape does.
         for (const land of scene.landscapes) {
             if (!land.authoredVisible) continue;
-            sig.addString(land.id);
-            // On the world's own 2 m lattice, so a volume moved by a rounding error samples the same points.
-            const step = GI_SIGNATURE_GROUND_STEP;
-            const x0 = Math.floor((box.min[0] - r) / step), x1 = Math.ceil((box.max[0] + r) / step);
-            const z0 = Math.floor((box.min[2] - r) / step), z1 = Math.ceil((box.max[2] + r) / step);
+            sig.addString(land.id).addNumbers(land.worldTransform);
+            const inv = mat4.invert(this._invScratch, land.worldTransform);
+            if (!inv) continue;
+            const terrain = land.terrain, half = terrain.size / 2;
+            // On a world-aligned lattice, so a volume moved by a rounding error samples the same points: 2 m,
+            // doubled until a side holds at most 128 samples (a huge reach stays a few milliseconds).
+            const x0w = box.min[0] - r, x1w = box.max[0] + r, z0w = box.min[2] - r, z1w = box.max[2] + r;
+            let step = GI_SIGNATURE_GROUND_STEP;
+            while (Math.max(x1w - x0w, z1w - z0w) / step > 128) step *= 2;
+            const x0 = Math.floor(x0w / step), x1 = Math.ceil(x1w / step);
+            const z0 = Math.floor(z0w / step), z1 = Math.ceil(z1w / step);
+            const p = this._vec;
             for (let zi = z0; zi <= z1; zi++) {
-                const z = zi * step;
                 for (let xi = x0; xi <= x1; xi++) {
-                    const x = xi * step;
-                    const h = this._groundAt(scene, x, z);
-                    sig.addNumber(h === null ? -1e9 : Math.round(h * 1000));
+                    vec3.transformMat4(p, vec3.set(p, xi * step, 0, zi * step), inv);
+                    const inside = Math.abs(p[0]) <= half && Math.abs(p[2]) <= half;
+                    sig.addNumber(inside ? Math.round(terrain.heightAt(p[0], p[2]) * 1000) : -1e9);
                 }
             }
         }
