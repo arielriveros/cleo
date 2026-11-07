@@ -88,7 +88,7 @@ buckets draw indirectly. On WebGL2 the toggle is disabled and foliage is packed 
 ### Tone and post
 
 **Auto exposure** (compensation, compensation curve, min/max EV, adaptation speeds) or manual **EV100**; **tone map**
-(AgX default, ACES, Neutral, None); saturation; **night vision**; **local exposure**; chromatic
+(AgX default, AgX Punchy, ACES, Neutral, None); saturation; **night vision**; **local exposure**; chromatic
 aberration; a **colour LUT** and its amount. The section's *Exposure* and *Look* presets set metering and lens looks in one click; a look
 leaves the tone map and the LUT alone.
 
@@ -145,7 +145,10 @@ scene is metered at now.
 
 The tone map is the curve that turns linear HDR into a displayable image, and it is the single
 biggest lever here. *AgX* rolls a saturated highlight toward white instead of clipping it to a
-primary; *ACES* is the older filmic fit every scene was graded under before the curve was
+primary; *AgX Punchy* is AgX with Blender's Punchy look (Filament's `AgxLook::PUNCHY`): more contrast,
+and saturated colour kept rich where plain AgX drains it toward grey — a clear sky stays blue instead of
+turning steel-grey — with middle grey held where AgX puts it, so switching between the two keeps the
+exposure; *ACES* is the older filmic fit every scene was graded under before the curve was
 selectable; *Neutral* (Khronos PBR Neutral) leaves in-gamut albedo untouched, for asset viewing;
 *None* is exposure and sRGB only, hard-clamped — what the buffer actually holds.
 
@@ -457,7 +460,9 @@ doing.
   standing in a corner visibly loses its reflection.
 - **Specular antialiasing** — widens roughness by sub-pixel normal variance so highlights stop
   flickering as they move. MSAA cannot fix that, because the aliasing is in the shading rather than
-  the coverage. PBR and terrain only.
+  the coverage. It also adds back the bumps a normal map's far mips average away (Toksvig): a mip
+  texel's normal comes back shorter than unit length, and that loss goes into the roughness, so rock
+  across a valley stays as rough as it is up close. PBR and terrain only.
 - **Horizon occlusion** — drops indirect specular where the reflection ray points into the surface.
   This is the fix for the wet-looking rim on strongly normal-mapped surfaces at glancing angles.
 

@@ -113,6 +113,14 @@ struct SpriteLitMaterial {
      * (`localLights`) and `keyColor` / the local share of `ambient` are zero. 0 = the CPU key and fill alone.
      */
     gridLights: i32,
+    /**
+     * Metres: the nearest a local light is taken to be, in the six-way and flat modes. Such a sprite stands
+     * for a VOLUME of smoke as thick as the quad is wide (half its smaller world extent, set per draw), so a
+     * light inside it lights that volume, not the one quad pixel it sits on: without the floor a fire's light
+     * at the smoke's root was a 1/d^2 spike over its 8 cm source, a white orb at night. The surface mode (a
+     * liquid's skin) keeps the true distance. 0 = the light's source radius alone.
+     */
+    lightRadius: f32,
 };
 @group(1) @binding(1) var<uniform> u_material: SpriteLitMaterial;
 
@@ -175,7 +183,9 @@ fn localLights(p: vec3<f32>, viewDepth: f32, fragXY: vec2<f32>, mode: i32, N: ve
         let cl = cleoLight(cleoClusterLight(first + i));
         if (cleoLightReaches(cl.light, p)) {
             let toLight = cl.light.position - p;
-            let d2 = max(dot(toLight, toLight), cl.light.sourceRadius * cl.light.sourceRadius);
+            // A medium's light floor (`lightRadius`), a surface's own source radius: see the material block.
+            let floorRadius = select(cl.light.sourceRadius, max(cl.light.sourceRadius, u_material.lightRadius), mode != 2);
+            let d2 = max(dot(toLight, toLight), floorRadius * floorRadius);
             let L = toLight * inverseSqrt(max(dot(toLight, toLight), 1e-8));
             let cone = spotAttenuation(dot(-L, cl.light.direction), cl.light.coneScale, cl.light.coneOffset);
             let E = cl.light.color * (cl.light.intensity * distanceAttenuation(d2, cl.light.invRangeSquared) * cone * k);

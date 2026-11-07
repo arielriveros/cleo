@@ -52,8 +52,8 @@ export async function packFormat2(dir) {
   // Only after everything is packed in memory: a failure above leaves the format-1 folder intact.
   for (const name of fs.readdirSync(dir)) {
     const full = path.join(dir, name)
-    if (OWNED.has(name) || OWNED_PART.test(name)) fs.rmSync(full)
-    else if (OWNED_DIRS.includes(name)) fs.rmSync(full, { recursive: true, force: true })
+    if (OWNED.has(name) || OWNED_PART.test(name)) fs.rmSync(full, { maxRetries: 20, retryDelay: 250 })
+    else if (OWNED_DIRS.includes(name)) fs.rmSync(full, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
   }
   let largest = 0
   for (const e of entries) {

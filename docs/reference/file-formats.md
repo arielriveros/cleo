@@ -131,7 +131,8 @@ manifest contract is newer than itself.
 | 17 | Trigger options (`trigger.enabled/group/mask/detectTriggers/continuous`) and trigger-to-trigger overlaps |
 | 18 | `OcclusionVolumeNode` replaces `OccluderNode` |
 | 19 | `VolumetricFogNode`, moonlight in lux (`atmosphere.moonIlluminance`), physical sky units (`atmosphere.physicalUnits`), light flicker (`light.flicker`), light-following sprites and particle systems (`followLight`, `fogGlow`) *(unreleased — a v18 player has no fog class, so every fog bank is missing, and it reads a lux moon as the default share of the sun: a moon as bright as day)* |
-| **20** | `WeatherNode` as a box volume (`weather.size/blendDistance/priority/enabled`), puddles, a snow material (`weather.snowMaterial`, `snowMaterialId`, `snowTiling/Slope/Breakup`) and shelter (`weather.shelter`), drawn on the landscape *(unreleased — a v19 player reads a bounded volume as scene-wide weather on the foliage alone: a snowy hilltop box snows every plant in the game and leaves the ground bare)* |
+| 20 | `WeatherNode` as a box volume (`weather.size/blendDistance/priority/enabled`), puddles, a snow material (`weather.snowMaterial`, `snowMaterialId`, `snowTiling/Slope/Breakup`) and shelter (`weather.shelter`), drawn on the landscape *(unreleased — a v19 player reads a bounded volume as scene-wide weather on the foliage alone: a snowy hilltop box snows every plant in the game and leaves the ground bare)* |
+| **21** | The AgX Punchy tone mapper (`render.toneMapper: 'agxPunchy'`) and a physical sky whose march converges, calibrated to measured daylight *(unreleased — a v20 player falls back to plain AgX, so a clear sky turns steel-grey again, and marches a thick atmosphere in even steps, up to 17 times too dark)* |
 
 ### What a build strips
 

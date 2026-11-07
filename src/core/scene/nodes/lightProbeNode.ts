@@ -96,6 +96,32 @@ export class LightProbeNode extends Node {
         return boxWeight(p, this.invVolumeMatrix, this.volumeBlend);
     }
 
+    /**
+     * World distance from `p` to the influence volume: 0 inside it (or anywhere, unbounded). The deferred
+     * slots are handed out by it (Scene.probesForFrame).
+     */
+    public distanceToVolume(p: vec3): number {
+        if (!this.bounded) return 0;
+        const inv = this.invVolumeMatrix;
+        const q = vec3.transformMat4(this._distScratch, p, inv);
+        const cx = Math.min(0.5, Math.max(-0.5, q[0])), cy = Math.min(0.5, Math.max(-0.5, q[1])), cz = Math.min(0.5, Math.max(-0.5, q[2]));
+        if (cx === q[0] && cy === q[1] && cz === q[2]) return 0;
+        const box = mat4.invert(this._boxScratch, inv);
+        if (!box) return vec3.distance(p, this.worldPosition);
+        const nearest = vec3.transformMat4(this._distScratch, vec3.set(this._distScratch, cx, cy, cz), box);
+        return vec3.distance(p, nearest);
+    }
+
+    /** The influence volume in cubic metres (Infinity unbounded): a smaller volume is the more specific probe. */
+    public get volumeSize(): number {
+        if (!this.bounded) return Infinity;
+        const s = this.worldScale;
+        return Math.abs(this._size[0] * s[0] * this._size[1] * s[1] * this._size[2] * s[2]);
+    }
+
+    private readonly _distScratch: vec3 = vec3.create();
+    private readonly _boxScratch: mat4 = mat4.create();
+
     // --- Renderer-facing baking state ---
     public get needsBake(): boolean { return this._needsBake; }
     public get lastBakeTime(): number { return this._lastBakeTime; }

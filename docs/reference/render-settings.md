@@ -67,7 +67,7 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `exposureMaxEV` | `number` | `17.0` | Upper clamp on metered EV100. |
 | `exposureSpeedUp` | `number` | `3.0` | Adaptation rate as the scene gets brighter. `0` snaps. |
 | `exposureSpeedDown` | `number` | `1.0` | Adaptation rate as it gets darker. |
-| `toneMapper` | `ToneMapper` | `'agx'` | `'agx' \| 'aces' \| 'neutral' \| 'none'`. |
+| `toneMapper` | `ToneMapper` | `'agx'` | `'agx' \| 'agxPunchy' \| 'aces' \| 'neutral' \| 'none'`. `'agxPunchy'` is AgX with Blender's Punchy look: more contrast and saturation, middle grey unchanged. |
 | `saturation` | `number` | `1.0` | Final saturation trim; `1` is untouched. |
 | `colorGradingLut` | `string \| null` | `null` | Texture id of a grading LUT. `null` = no LUT. |
 | `colorGradingIntensity` | `number` | `1.0` | How far toward the LUT the image is pulled. |
@@ -209,7 +209,7 @@ screen-space reflections, which reflect the same copy of last frame's image SSIL
 | `ssrMaxDistance` | `number` | `50` | How far a reflection ray travels, in world units. |
 | `ssrThickness` | `number` | `0.3` | How deep a surface is assumed to extend behind the depth buffer, in world units. |
 | `specularOcclusionEnabled` | `boolean` | `true` | Give the indirect specular lobe its own occlusion term. Off multiplies both lobes by the same number, which visibly strips the reflection off a polished floor in a corner. |
-| `specularAaEnabled` | `boolean` | `true` | Widen roughness by sub-pixel normal variance so highlights stop flickering. PBR and terrain only. |
+| `specularAaEnabled` | `boolean` | `true` | Widen roughness by sub-pixel normal variance so highlights stop flickering, and by the detail a normal map's far mips average away, so distant rough surfaces stay rough. PBR and terrain only. |
 | `horizonOcclusionEnabled` | `boolean` | `true` | Drop indirect specular where the reflection ray points into the surface. This is the fix for the wet-looking rim on strongly normal-mapped surfaces at glancing angles. |
 
 ## Shadows

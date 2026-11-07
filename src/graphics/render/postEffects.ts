@@ -215,6 +215,7 @@ export class PostEffects {
             case 'aces': return 1;
             case 'neutral': return 2;
             case 'none': return 3;
+            case 'agxPunchy': return 4;
             default: return 0;   // agx
         }
     }

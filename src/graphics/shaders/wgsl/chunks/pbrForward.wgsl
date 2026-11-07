@@ -185,6 +185,12 @@ struct ForwardLighting {
 };
 @group(1) @binding(3) var<uniform> u_lighting: ForwardLighting;
 
+/**
+ * The UN-normalised length of the normal-map texel `getNormal` decoded (1 with no map, or a projected
+ * one): the spread a far mip averaged out of the bumps, which `normalMapRoughness` folds into the lobe.
+ */
+var<private> cleoNormalMapLength: f32 = 1.0;
+
 /** The shading normal, flipped for a BACK face — see chunks/pbrGBuffer.wgsl. */
 fn getNormal(in: VertexOutput, front: bool, su: SurfaceUv, uv: vec2<f32>) -> vec3<f32> {
     let ddx = su.dx0;
@@ -197,7 +203,10 @@ fn getNormal(in: VertexOutput, front: bool, su: SurfaceUv, uv: vec2<f32>) -> vec
         // Explicit gradients from the UN-offset uv; see the twin in chunks/pbrGBuffer.wgsl.
         var n = textureSampleGrad(u_material_normalMap_texture, u_material_normalMap_sampler,
                                   uv, ddx, ddy).rgb;
-        n = normalize(n * 2.0 - 1.0);
+        n = n * 2.0 - 1.0;
+        // Its length before normalising: what a far mip averaged away (see normalMapRoughness).
+        if (su.mode == UV_MESH) { cleoNormalMapLength = length(n); }
+        n = normalize(n);
         N = normalize(tbn * n);
         // Never let a degenerate frame (or map texel) make the normal NaN: see safeNormalize.
         N = select(tbn[2], N, dot(N, N) > 1e-12);
@@ -354,8 +363,9 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     }
 
     let N = getNormal(in, front, su, uv);
-    // Inline, where the deferred twin bakes it into the G-buffer instead. Same filter, same constants,
-    // so a surface still shades identically down both paths.
+    // Inline, where the deferred twin bakes it into the G-buffer instead. Same filters, same constants,
+    // so a surface still shades identically down both paths: the normal map's own mips, then the geometry.
+    roughness = normalMapRoughness(roughness, cleoNormalMapLength, 1.0, u_material.specularAA);
     roughness = filterSpecularRoughness(roughness, N, u_material.specularAA);
     let V = normalize(u_lighting.u_viewPos - fragPos);
 

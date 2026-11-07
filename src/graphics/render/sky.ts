@@ -1,3 +1,4 @@
+import type { LightProbeNode } from '../../core/scene/nodes/lightProbeNode';
 import { mat4 } from 'gl-matrix';
 import { Camera } from '../../core/camera';
 import { authoring } from '../../core/eventBus';
@@ -463,19 +464,21 @@ export class SkyPasses {
         return sh;
     }
 
-    // Bake any light probe flagged for baking or due for a realtime refresh. IBL applies only where
-    // the user has placed a probe; a scene without one keeps flat ambient plus the crude env map.
+    // Bake a light probe flagged for baking or due for a realtime refresh. IBL applies only where the
+    // user has placed a probe; a scene without one keeps flat ambient plus the crude env map.
+    //
+    // ONE capture per frame (`nextProbeToBake`): a capture is six scene renders, a shadow map and a
+    // prefilter, and a scene that loads with eight probes, or re-bakes them all as the sun moves, used to
+    // take all of them in a single frame. A probe waiting its turn keeps the maps it has (or, never baked,
+    // is skipped by the lighting until it has some).
     public updateIBL(scene: Scene): void {
         if (this._view.capturing) return;
 
         const now = performance.now();
-        for (const probe of scene.lightProbes) {
-            const due = probe.mode === 'realtime' && (now - probe.lastBakeTime) >= probe.updateFrequency * 1000;
-            if (probe.needsBake || due) {
-                this._sys.capture.captureProbe(scene, probe);
-                probe.markBaked(now);
-            }
-        }
+        const probe = nextProbeToBake(scene.lightProbes, this._view.camera.position, now);
+        if (!probe) return;
+        this._sys.capture.captureProbe(scene, probe);
+        probe.markBaked(now);
     }
 
     // Direction TOWARD the sun for a SkyAtmosphere node: the scene directional light (negated travel
@@ -562,13 +565,17 @@ export class SkyPasses {
     private _skySun: number | null = null;
 
     /**
-     * What a physical sky's single-scattering integral is multiplied by, standing in for the multiple
-     * scattering it leaves out. Measured on the Nishita march with Earth's coefficients: the zenith comes
-     * out at ~0.01 of the sun's illuminance per steradian and the horizon at ~0.04, about half of a real
-     * clear sky (zenith 3-8 kcd/m2 under a 100 klx sun). Two is where the sky over a sunlit ground reads as
-     * it does in a photograph; the node's Exposure trims it from there.
+     * What a physical sky's single-scattering integral is multiplied by, standing in for the light it
+     * leaves out: multiple scattering, and the aerosols a clean Mie term barely has. Calibrated on the
+     * light the sky gives the ground. Clear skies measure a diffuse illuminance of about 0.1-0.2 of the
+     * beam with the sun 38 degrees up, and a zenith of about 5.5 sin(elevation) kcd/m2 at a diffuse ratio
+     * of 0.1 (some 0.04 of the beam per steradian). The converged march with Earth's coefficients gives
+     * 0.043 and 0.008: three puts the diffuse light at 0.13 and the zenith at 0.024 — inside the measured
+     * range for both, where five would match the zenith but flood the shadows with twice the measured
+     * sky light (single scattering over-weights the horizon). Multiple scattering alone, integrated
+     * Hillaire-style, adds half again. The node's Exposure trims it from here.
      */
-    public static readonly PHYSICAL_SKY_MULTISCATTER = 2;
+    public static readonly PHYSICAL_SKY_CALIBRATION = 3;
 
     /**
      * The sun irradiance the sky is drawn with (the `u_sunIntensity × u_exposure` the bake uses): the scene
@@ -576,16 +583,8 @@ export class SkyPasses {
      * sky's (the clouds' lighting, the sky-light readback range) goes through this.
      */
     public skySunScale(atmo: SkyAtmosphereNode): number {
-        const sun = this._skySun !== null ? this._skySun * SkyPasses.PHYSICAL_SKY_MULTISCATTER : atmo.sunIntensity;
+        const sun = this._skySun !== null ? this._skySun * SkyPasses.PHYSICAL_SKY_CALIBRATION : atmo.sunIntensity;
         return sun * atmo.exposure;
-    }
-
-    /**
-     * How much brighter (or darker) the sky is than the artistic default it was tuned at (sun 22, exposure
-     * 1.3). A physical sky is ~20x darker, so its readback range and the clouds' units scale by this.
-     */
-    public skyUnitScale(atmo: SkyAtmosphereNode): number {
-        return atmo.sunIntensity > 0 ? (this._skySun !== null ? this._skySun * SkyPasses.PHYSICAL_SKY_MULTISCATTER / atmo.sunIntensity : 1) : 1;
     }
 
     /**
@@ -675,11 +674,11 @@ export class SkyPasses {
         const sunDisk = Math.max(1e-3, node.sunDiskSize) * DEG_RAD;
         const moonDisk = Math.max(1e-3, node.moonSize) * DEG_RAD;
         const moonLight = physical ? node.moonLux(physicalSun! * REFERENCE_ILLUMINANCE) / REFERENCE_ILLUMINANCE : 0;
-        this._shaderManager.setUniform('u_sunIntensity', physical ? physicalSun! * SkyPasses.PHYSICAL_SKY_MULTISCATTER : node.sunIntensity);
+        this._shaderManager.setUniform('u_sunIntensity', physical ? physicalSun! * SkyPasses.PHYSICAL_SKY_CALIBRATION : node.sunIntensity);
         this._shaderManager.setUniform('u_physical', physical ? 1 : 0);
         this._shaderManager.setUniform('u_sunDiskRadiance', physical ? physicalSun! / (Math.PI * sunDisk * sunDisk) : 0);
         this._shaderManager.setUniform('u_moonDiskRadiance', physical ? moonLight / (Math.PI * moonDisk * moonDisk) : 0);
-        this._shaderManager.setUniform('u_groundScale', physical ? 1 / (Math.PI * SkyPasses.PHYSICAL_SKY_MULTISCATTER) : 0.05);
+        this._shaderManager.setUniform('u_groundScale', physical ? 1 / (Math.PI * SkyPasses.PHYSICAL_SKY_CALIBRATION) : 0.05);
         // Earth Rayleigh scattering coefficients (per metre), scaled by the user multiplier.
         const rs = node.rayleighScatter;
         this._shaderManager.setUniform('u_rayleigh', [5.8e-6 * rs, 13.5e-6 * rs, 33.1e-6 * rs]);
@@ -990,4 +989,28 @@ export class SkyPasses {
         }
         this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
     }
+}
+
+/**
+ * The light probe to capture this frame, of those flagged for a bake or due a realtime refresh: one never
+ * baked first (it lights nothing until it is), then one asked for (a Bake, a time-of-day re-bake), then a
+ * realtime refresh, so a realtime probe refreshing every frame cannot starve the rest; within each, the
+ * nearest to the camera, whose maps are the ones on screen. Null when none is due. Pure, so the order is
+ * tested without a device.
+ */
+export function nextProbeToBake(probes: Iterable<LightProbeNode>, camera: ArrayLike<number>, now: number): LightProbeNode | null {
+    let best: LightProbeNode | null = null;
+    let bestTier = Infinity;
+    let bestDistance = Infinity;
+    for (const probe of probes) {
+        const due = probe.mode === 'realtime' && (now - probe.lastBakeTime) >= probe.updateFrequency * 1000;
+        if (!probe.needsBake && !due) continue;
+        const tier = !probe.hasBakedMaps ? 0 : probe.needsBake ? 1 : 2;
+        const p = probe.worldPosition;
+        const d = (p[0] - camera[0]) ** 2 + (p[1] - camera[1]) ** 2 + (p[2] - camera[2]) ** 2;
+        if (tier < bestTier || (tier === bestTier && d < bestDistance)) {
+            best = probe; bestTier = tier; bestDistance = d;
+        }
+    }
+    return best;
 }

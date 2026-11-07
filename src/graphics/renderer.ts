@@ -291,7 +291,8 @@ export class Renderer {
         }, config.programs, !!config.shaderVariants, this._subsystems);
         this._pipelines = new PipelineCache(this._programs, this._view, this._passes, parseRecipes(config.pipelines));
         this._bindGroups = new BindGroupCache({
-            shadowCascades: () => this._shadows.shadowCascadeFBO.texture,
+            // The frame's cascades, or a light-probe capture's own map while one is being baked.
+            shadowCascades: () => this._shadows.cascadeTexture,
             spotShadows: () => this._shadows.spotShadowFBO.texture,
             pointShadows: () => this._shadows.pointShadowFBO.texture,
             lightGrid: () => this._lighting.lightGrid.texture,

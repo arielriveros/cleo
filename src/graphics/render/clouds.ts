@@ -167,10 +167,11 @@ export class VolumetricCloudPasses {
                 this._cloudSunTKey = key;
             }
             effSunColor = [0, 1, 2].map(i => sunColor[i] * this._cloudSunT[i]);
-            // The key light's strength: fades out at sunset, and is the moonlight fraction at night. In the
-            // sky's units: a physical sky is far darker than the artistic one these were authored against,
-            // and the clouds keep the balance they were tuned to against it.
-            effSunIntensity = node.sunIntensity * this._sys.lighting.keyLightScale() * this._sys.sky.skyUnitScale(atmo);
+            // The key light's strength: fades out at sunset, and is the moonlight fraction at night. Not
+            // rescaled to the sky's units: the clouds are lit by the sun that lights the ground, and were
+            // tuned against that ground. A physical sky now converges to the radiance the artistic one
+            // was tuned at, so the balance against the sky holds as well.
+            effSunIntensity = node.sunIntensity * this._sys.lighting.keyLightScale();
         } else {
             effSunColor = [0, 1, 2].map(i =>
                 sunColor[i] * mix1(1, sunsetColor[i], sunset) * mix1(1, NIGHT_SUN_DIM, night));
@@ -190,7 +191,7 @@ export class VolumetricCloudPasses {
             // The real sky's radiance: it already darkens, reddens and goes blue-hour with the sun.
             // Re-expressed in the clouds' units: sky radiance per unit of the atmosphere's sun
             // irradiance, times the clouds' own sun irradiance.
-            const toCloudUnits = node.sunIntensity * this._sys.sky.skyUnitScale(atmo) / Math.max(1e-4, this._sys.sky.skySunScale(atmo));
+            const toCloudUnits = node.sunIntensity / Math.max(1e-4, this._sys.sky.skySunScale(atmo));
             const up = shHemisphereMeans(skySH).up.map(v => v * toCloudUnits);
             effAmbientColor = up;
             // The ground under the clouds is a Lambertian reflector of albedo `groundColor`, lit by the
@@ -201,7 +202,7 @@ export class VolumetricCloudPasses {
         } else {
             effAmbientColor = [0, 1, 2].map(i =>
                 node.ambientColor[i] * mix1(1, sunsetCast[i], sunset) * mix1(1, NIGHT_AMBIENT[i], night));
-            effAmbientIntensity *= mix1(1, NIGHT_AMBIENT_DIM, night) * (atmo ? this._sys.sky.skyUnitScale(atmo) : 1);
+            effAmbientIntensity *= mix1(1, NIGHT_AMBIENT_DIM, night);
             effGroundColor = [0, 1, 2].map(i =>
                 node.groundColor[i] * mix1(1, sunsetCast[i], sunset) * mix1(1, NIGHT_GROUND_DIM, night));
         }

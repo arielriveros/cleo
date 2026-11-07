@@ -17,7 +17,7 @@ The source art in `build/` is gitignored, so this generator is run by hand and i
 |---|---|
 | `valley_height_4097_16bit.png` | The landscape. It covers the whole 2048 m map; every second sample is kept, giving a 2049² grid at 1 m spacing. |
 | `terrain_textures/brown_mud_leaves_01_1k` | Ground, the base surface. |
-| `terrain_textures/rock_05_1k` | Rock slot: slopes of 36° and steeper. |
+| `terrain_textures/rock_05_1k` | Rock slot: slopes of 36° and steeper. `prepare.py` lifts its roughness to weathered rock's (about 0.79, `ROCK_ROUGHNESS`). |
 | `terrain_textures/snow_02_1k` | Snow slot: above 250 m, on slopes up to 42°. |
 | `terrain_textures/rocky_trail_02_1k` | Trail slot: paint-only. It is masked along the reference's road splines. |
 | `terrain_textures/dirt_1k` | Dirt (paint-only noise patches and worn ground about the buildings) and Dirt Road (the lesser roads of `DIRT_ROADS` and the forest tracks). |
@@ -54,7 +54,7 @@ into `creatorFoliage.mjs`.
 
 - `layout.mjs` holds every position from the map's technical reference: spawn, pads, roads, gate plaza and sun. Heights are always sampled, never stored here.
 - `heights.mjs` decodes the PNG with the engine's `heightmapIO.ts`.
-- `landscape.mjs` builds the landscape material, the painted masks (seven channels in two slices: trail, forest floor, dirt road, stone path, clay, sand, dirt), and the CPU surface weights. The weights come from the engine's `terrainLayers.ts`, so the pre-baked foliage respects the same rules the shader draws.
+- `landscape.mjs` builds the landscape material, the painted masks (seven channels in two slices: trail, forest floor, dirt road, stone path, clay, sand, dirt), and the CPU surface weights. The weights come from the engine's `terrainLayers.ts`, so the pre-baked foliage respects the same rules the shader draws. Every surface (Ground, Dirt, Rocky Dirt, Forest Floor, Rock, Snow, Pond Clay, Shore Sand, Trail, Stone Path) is also a library material under `/Environment/Landscape/Materials`, linked from its slot (`LANDSCAPE_SURFACES`).
 - `creatorFoliage.mjs` lists the plants and generates them with the Foliage Creator (`genFoliage.ts`, through `vite-node`); `build.mjs` turns each one's levels, materials and impostor into a library model, library materials and a foliage rule.
 - `creatorFx.mjs` lists the effects (the two flames, their smoke, the blood, the splashes) and bakes them with the FX Creator (`genFx.ts`, through `vite-node`, its CPU solvers), cached in `build/valley_creator/fx-*`; `build.mjs` makes the flames' and the smoke's tilesets (the smoke's with its six-way lightmaps), the blood splatter's (with its surface maps), the splash particle systems, the puddles, and the blood decals' materials and templates from them. A first build bakes for about a quarter of an hour (the flames are most of it).
 - `foliage.mjs` holds the library-asset helpers, the dungeon's moss rocks and the seeded scatter. Placement is pre-baked because opening a scene never scatters.
@@ -74,7 +74,8 @@ into `creatorFoliage.mjs`.
 ## Light and time
 
 - **The Time of Day** node (`examples/scripts/ValleyDayNight.ts`) runs the valley's day: the sun's path and colour, the moon, the exposure, the morning mist and the god rays, and how bright the fires are. A death skips half a day.
-- **Fires** (`examples/scripts/ValleyFireLight.ts`) are linked templates with a flame, embers, sparks that bounce on the floor, and a flickering light. The flames are FX Creator flipbooks: Torch Fire (tall 128 x 256 frames) on the torches, braziers and candles, Bonfire Fire on the bonfire, fire pits and hearth.
+- **Fires** (`examples/scripts/ValleyFireLight.ts`) are linked templates with a flame, embers, sparks that bounce on the floor, and a flickering light. The flames are FX Creator flipbooks: Torch Fire (tall 128 x 256 frames) on the torches, braziers and candles, Bonfire Fire (a 2.7 s loop) on the bonfire, fire pits and hearth. Lighting a bonfire plays Bonfire Ignition once, a flare that settles into the loop as the light swells and the smoke thickens.
+- **Light probes.** The Valley Probe (unbounded, reflections only) is the fallback everywhere. Local probes reflect their own surroundings: the Bonfire, the Hamlet, the Pond (the water reflects it), the Windmill and the Cave Mouth. Each house interior is lit and reflected by its own probe, its box the interior exposure volume's. Every capture is shadowed by the sun, and the Time of Day re-captures them all, one a frame, as the sun moves.
 - **Smoke** rises off the bonfires and fire pits: the Creator's smoke plume on a lit sprite, relit by its six-way lightmaps (the sun and its shadows, the fire below).
 - **Blood and splashes** are FX Creator liquids too: a hit's blood is a lit Blood Burst splatter at the contact point and the Blood Spatter decal (three quarters of the bake's size) as the blood lands, no particles; the Blood Pool decal is the bloodstain where the player last died. The pond throws a Water Splash crown where something enters it and a small Water Step at a wading character's feet.
 - **The Dungeon** is held at EV 15, the valley's noon, and its fires are lit for that: the souls content (glyphs, glows, bolts) is tuned for an exposure about that. The Time of Day scales the fires down by day and up at night.

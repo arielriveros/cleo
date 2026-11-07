@@ -114,6 +114,30 @@ fn filterSpecularRoughness(perceptualRoughness: f32, N: vec3<f32>, enabled: i32)
     let filtered = sqrt(sqrt(clamp(alpha * alpha + kernel, 0.0, 1.0)));
     return select(perceptualRoughness, filtered, enabled != 0);
 }
+
+/**
+ * Specular antialiasing from a NORMAL MAP's own mips (Toksvig): what `filterSpecularRoughness` cannot see.
+ *
+ * Far away a normal map is read from a small mip, and a mip texel is the AVERAGE of the bumps under it, so
+ * its normal comes back SHORTER than unit length (the bumps cancel). Normalised, as a shading normal must
+ * be, it is a flat surface: the bumps' spread of directions, which widened the highlight up close, is gone,
+ * and rough rock reads polished across a valley. The geometric filter misses it because a minified map is
+ * smooth from pixel to pixel. The length is the measure of what was lost: a unit-vector average of length
+ * `r` has a spread of about `(1 - r) / r` (Toksvig 2005; the vMF reading Neubelt & Pettineo use), folded
+ * into the lobe the same way the geometric variance is, in alpha, with the same threshold.
+ *
+ * `rawLength` is the UN-normalised length of the decoded map texel (`texel * 2 - 1`), `strength` the
+ * normal strength applied to its tilt (the variance scales with its square). At full resolution a map's
+ * texels are unit length, so up close nothing changes.
+ */
+fn normalMapRoughness(perceptualRoughness: f32, rawLength: f32, strength: f32, enabled: i32) -> f32 {
+    let r = clamp(rawLength, 1e-3, 1.0);
+    let variance = (1.0 - r) / r * strength * strength;
+    let kernel = min(2.0 * variance, SPECULAR_AA_THRESHOLD);
+    let alpha = perceptualRoughness * perceptualRoughness;
+    let filtered = sqrt(sqrt(clamp(alpha * alpha + kernel, 0.0, 1.0)));
+    return select(perceptualRoughness, filtered, enabled != 0);
+}
 /** Rebuild the TBN basis from the three varyings. Columns are tangent, bitangent, normal. */
 fn tbnOf(in: VertexOutput) -> mat3x3<f32> {
     return mat3x3<f32>(in.tangent, in.bitangent, in.normal);

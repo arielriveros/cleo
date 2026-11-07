@@ -124,6 +124,39 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         for (const id of asset.textureIds) expect(shipped.has(id), id).toBe(true);
     });
 
+    it('links every surface of the landscape to a library material, the Snow among them', () => {
+        const tmat = library('terrainMaterials')[0].material;
+        const materials = library('materials');
+        const byId = new Map(materials.map((m: any) => [m.id, m]));
+        const linked = [{ name: 'Ground', surfaceMaterialId: tmat.surfaceMaterialId, material: null }, ...tmat.slots];
+        for (const slot of linked) {
+            const asset: any = byId.get(slot.surfaceMaterialId);
+            expect(asset, slot.name).toBeDefined();
+            // The slot holds a copy of what the library holds (a library edit is pushed into it).
+            if (slot.material) expect(slot.material, slot.name).toEqual(asset.material);
+        }
+        const snow: any = materials.find((m: any) => m.name === 'Snow');
+        expect(snow).toBeDefined();
+        expect(tmat.slots.find((x: any) => x.name === 'Snow').surfaceMaterialId).toBe(snow.id);
+        expect(Object.values(snow.material.textures).length).toBeGreaterThanOrEqual(4);
+        // Listed in the explorer, under the landscape.
+        const vfs = read('vfs.json');
+        const entries = (vfs.entries ?? vfs) as any[];
+        const entry = entries.find((e: any) => e.assetId === snow.id || e.id === snow.id);
+        expect(entry, 'a vfs entry for Snow').toBeDefined();
+        expect(JSON.stringify(entry)).toContain('/Environment/Landscape/Materials');
+    });
+
+    it('gives the Rock slot weathered rock\'s roughness, above the screen-space reflections\' cut-off', () => {
+        // build/valley_prepared/rock_arm.jpg's green, remapped by prepare.py (ROCK_ROUGHNESS): the map replaces
+        // the scalar in the shader, so only the shipped texture can say it. Checked where the source is present.
+        const arm = join(__dirname, '..', 'build', 'valley_prepared', 'rock_arm.jpg');
+        if (!existsSync(arm)) return;
+        const src = readFileSync(join(__dirname, '..', 'tools', 'valley', 'prepare.py'), 'utf8');
+        expect(src).toMatch(/ROCK_ROUGHNESS = \(0\.45, 0\.65\)/);
+        expect(src).toContain('terrain("rock", "rock_05_1k", "rock_05", roughness=ROCK_ROUGHNESS)');
+    });
+
     it('paints the trail along the roads and nowhere far from them', () => {
         for (const [x, z] of [[-12, 82], [-30, 48], [-22, 10], [-4, -50], [5, -8], [54, -38]]) expect(trailAt(x, z), `${x},${z}`).toBeGreaterThan(0.6);
         for (const [x, z] of [[40, 60], [-80, -20], [300, 300]]) expect(trailAt(x, z), `${x},${z}`).toBe(0);
@@ -346,10 +379,71 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             expect(level, `bank at ${a}°`).toBeLessThan(heightAt(px + Math.cos(a * Math.PI / 180) * r, pz + Math.sin(a * Math.PI / 180) * r));
         }
         expect(level - heightAt(px, pz)).toBeGreaterThan(0.5);    // there is a pond, not a puddle
-        // One probe lights and reflects the whole valley, the pond included: unbounded, so it holds everywhere.
+        // The pond's own probe, just over the water, holds the water's surface: what the water reflects.
+        const pond = nodes().find(n => n.type === 'lightProbe' && n.name === 'Pond Probe');
+        expect(pond).toBeDefined();
+        for (let i = 0; i < 3; i++) expect(Math.abs(water.position[i] - pond.position[i]), `axis ${i}`).toBeLessThan(pond.size[i] / 2);
+        expect(pond.position[1] - level).toBeGreaterThan(0.5);
+    });
+
+    it('lights and reflects the valley with one unbounded probe, and its places with probes of their own', () => {
         const probes = nodes().filter(n => n.type === 'lightProbe');
-        expect(probes.map(p => p.name)).toEqual(['Valley Probe']);
-        expect(probes[0].size).toEqual([0, 0, 0]);
+        const byName = new Map(probes.map(p => [p.name, p]));
+        // The fallback everywhere: unbounded, reflections only.
+        const valleyProbe: any = byName.get('Valley Probe');
+        expect(valleyProbe.size).toEqual([0, 0, 0]);
+        expect(valleyProbe.affectsLighting).toBe(false);
+        for (const name of ['Bonfire Probe', 'Hamlet Probe', 'Pond Probe', 'Windmill Probe', 'Cave Mouth Probe']) {
+            const p: any = byName.get(name);
+            expect(p, name).toBeDefined();
+            expect(p.size.every((v: number) => v > 0), name).toBe(true);
+            // Out of doors the diffuse fill stays the sky light's: reflections only.
+            expect(p.affectsLighting, name).toBe(false);
+            expect(p.affectsReflections, name).toBe(true);
+            // Captured near the ground it stands over, at about eye height.
+            const lift = p.position[1] - heightAt(p.position[0], p.position[2]);
+            if (name !== 'Pond Probe') expect(lift, name).toBeGreaterThan(1.5);
+            if (name !== 'Pond Probe') expect(lift, name).toBeLessThan(4);
+        }
+        // Each house interior is lit by its own probe, its box the interior exposure volume's.
+        const interiors = probes.filter(p => p.name.endsWith('Interior Probe'));
+        expect(interiors.length).toBe(2);
+        for (const p of interiors) {
+            expect(p.affectsLighting, p.name).toBe(true);
+            const exposure = nodes().find(n => n.type === 'exposureVolume' && n.name === p.name.replace(' Probe', ' Exposure'));
+            expect(exposure, p.name).toBeDefined();
+            expect(p.position).toEqual(exposure.position);
+            expect(p.size).toEqual(exposure.exposureVolume.size);
+            expect(p.rotation).toEqual(exposure.rotation);
+        }
+    });
+
+    it('burns a 2.7 s bonfire loop, and lights a bonfire with its ignition played once', () => {
+        const tilesets = library('tilesets');
+        const loop = tilesets.find((t: any) => t.name === 'Bonfire Fire');
+        const ignition = tilesets.find((t: any) => t.name === 'Bonfire Ignition');
+        expect(loop).toBeDefined();
+        expect(ignition).toBeDefined();
+        const bonfire = library('templates').find((t: any) => t.name === 'Bonfire').nodeJson;
+        const sprites: any[] = [];
+        const walk = (n: any) => { if (n.type === 'animatedSprite') sprites.push(n); (n.children ?? []).forEach(walk); };
+        walk(bonfire);
+        const flames = sprites.filter(n => n.name === 'Flame');
+        expect(flames.length).toBe(2);
+        for (const f of flames) {
+            expect(f.animation.frames.length).toBe(96);
+            expect(f.animation.frames.length / f.animation.fps).toBeGreaterThan(2.5);
+            expect(f.animation.loop).toBe(true);
+        }
+        const ign = sprites.find(n => n.name === 'Ignition');
+        expect(ign, "an Ignition sprite under the bonfire's fire").toBeDefined();
+        expect(ign.animation.loop).toBe(false);
+        expect(ign.animation.randomStart ?? false).toBe(false);
+        expect(ign.visible).toBe(false);
+        expect(ign.sprite.tilesetId).toBe(ignition.id);
+        // The same frame as the loop flame it hands over to.
+        expect(ign.position).toEqual(flames[0].position);
+        expect(ign.scale).toEqual(flames[0].scale);
     });
 
     it("shadows the torches' lights, and only theirs", () => {
@@ -516,6 +610,24 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(mist.volumetricFog.heightFalloff).toBeGreaterThan(0);
     });
 
+    it('fills the shade with the sky, a little bounce and a third of the overcast grade, not a flat floor', () => {
+        // The flat ambient lights like pi times its lux (it is added straight onto the albedo): kept to the
+        // ground's bounce, so open shade is about a quarter of the sunlit ground, not more than half.
+        const ambient = scene().scene.ambientLight ?? scene().ambientLight;
+        const lum = 0.2126 * ambient[0] + 0.7152 * ambient[1] + 0.0722 * ambient[2];
+        expect(lum).toBeGreaterThan(300);
+        expect(lum).toBeLessThan(1000);
+        const sky = nodes().find(n => n.type === 'skyLight');
+        expect(sky.skyLight.cloudShadows).toBe(true);
+        expect(sky.skyLight.cloudResponse).toBeCloseTo(0.35, 6);
+    });
+
+    it('grades the valley with AgX Punchy, so its clear sky stays blue, and the dungeon with plain AgX', () => {
+        expect(scene().config.render.toneMapper).toBe('agxPunchy');
+        const dungeon = read('scenes', `${manifest().sceneMetas[1].id}.json`);
+        expect(dungeon.config.render.toneMapper ?? 'agx').toBe('agx');
+    });
+
     const dungeonNodes = () => allNodes(read('scenes', `${manifest().sceneMetas[1].id}.json`).scene);
 
     it('ships the dungeon as a second scene, with the way back to the valley', () => {
@@ -606,20 +718,25 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(count('Fire Pit')).toBe(3);
         expect(count('Bonfire')).toBe(1);
         expect(count('Hanging Brazier')).toBe(2);
-        // Fire is the FX Creator's: the torches' and the hearths' flames, each in tall 128 x 256 frames
-        // (8 x 4); additive (a flame is light: it never darkens what is behind it) and taking a tenth of the
-        // exposure (fire at noon as at night), each copy on a frame of its own.
+        // Fire is the FX Creator's: the torches' and the hearths' flames, each in tall 128 x 256 frames;
+        // additive (a flame is light: it never darkens what is behind it) and taking a tenth of the
+        // exposure (fire at noon as at night), each burning copy on a frame of its own. The torch loops in
+        // 32 frames (8 x 4), the bonfire in 96 (2.7 s); the bonfire's ignition plays once, from its start.
         const flames = all.filter(n => n.type === 'animatedSprite' && n.name !== 'Smoke');
         expect(flames.length).toBeGreaterThan(30);
         const tilesets = new Set(flames.map(f => f.sprite.tileset.name));
-        expect([...tilesets].sort()).toEqual(['Bonfire Fire', 'Torch Fire']);
+        expect([...tilesets].sort()).toEqual(['Bonfire Fire', 'Bonfire Ignition', 'Torch Fire']);
+        const frames: Record<string, number> = { 'Torch Fire': 32, 'Bonfire Fire': 96, 'Bonfire Ignition': 64 };
         for (const f of flames) {
             const t = f.sprite.tileset;
-            expect([t.tileWidth, t.tileHeight, t.columns, t.rows], t.name).toEqual([128, 256, 8, 4]);
+            expect([t.tileWidth, t.tileHeight], t.name).toEqual([128, 256]);
+            expect(t.columns * t.rows, t.name).toBeGreaterThanOrEqual(frames[t.name]);
             expect(f.sprite.blend).toBe('additive');
             expect(f.sprite.exposureWeight).toBe(0.1);
-            expect(f.animation.randomStart).toBe(true);
-            expect(f.animation.frames).toHaveLength(32);
+            const once = f.name === 'Ignition';
+            expect(f.animation.randomStart ?? false, f.name).toBe(!once);
+            expect(f.animation.loop, f.name).toBe(!once);
+            expect(f.animation.frames, t.name).toHaveLength(frames[t.name]);
             // The flame's base sits inside its torch or pit: it fades into it over a few centimetres, never
             // more than a torch head is deep (the head in front of it must still hide it).
             expect(f.sprite.softness, f.name).toBeGreaterThan(0);

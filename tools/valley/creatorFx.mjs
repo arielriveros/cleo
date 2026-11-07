@@ -8,6 +8,7 @@
 //   torch-fire     the torch preset in TALL tiles (128 x 256, 8 x 4): wall and standing torches, the hanging
 //                  braziers and, small, the candles
 //   bonfire-fire   the bonfire preset, tall too: the bonfire, the fire pits and the hearth
+//   bonfire-ignite the bonfire catching, played once when a bonfire is lit, then cross-faded into the loop
 //   fire-smoke     the smoke plume preset with its SIX-WAY LIGHTMAPS (lit from right/top/back, left/bottom/
 //                  front): a lit sprite over the bonfire and the fire pits, shaded by the sun, its shadows
 //                  and the fire's light in the engine
@@ -48,15 +49,30 @@ const FLAME_LOOK = {
   },
 }
 
+/** The bonfire's look and its room: FLAME_LOOK in a region wider and taller than the preset's (see below). */
+const BONFIRE_ROOM = { ...FLAME_LOOK, regionSize: [2.9, 5.8, 2.9], voxelSize: 0.06 }
+
 export const CREATOR_FX = [
   // A region just wide enough for the flame, so it fills its tall frame: the torch preset's, framed three
   // quarters as wide (its emitter a little wider and higher, its eddies a little smaller), in metres.
   { key: 'torch-fire', name: 'Torch Fire', medium: 'gas', preset: 'torch', seed: 7,
     params: { ...FLAME_LOOK, regionSize: [0.552, 1.104, 0.552], emitterPosition: [0, 0.1165, 0], emitterRadius: 0.0717, turbulenceSize: 0.138, tileSize: 128, tileAspect: 'tall', frames: 32, loopBlend: 8, warmup: 60, view: 'front' } },
-  // The bonfire preset as it is: a ball of fuel above the floor in a tall region (a bed's flames would run
-  // out along the floor to the frame's edges, a hard bright band at the sprite's bottom).
+  // The bonfire preset: a ball of fuel above the floor (a bed's flames would run out along the floor to the
+  // frame's edges, a hard bright band at the sprite's bottom), in a region with ROOM round the flame. The
+  // preset's own 2.1 x 4.3 m region is just the 2.4 m flame's width, and the loop used to start while the
+  // fire's IGNITION was still in it: the first ball of flame rising and spreading into a mushroom wider than
+  // the frame, cut flat at the tile's sides and top, every 0.9 s. 2.9 x 5.8 m (still 1:2, the tall tile) at
+  // voxels a little coarser than the preset's, and a warm-up of 160 frames (4.4 s), by which time the
+  // ignition has left the region and only the steady fire is filmed (that start is Bonfire Ignition's).
+  // 96 frames at 36 fps loop every 2.7 s, long enough that the repeat no longer shows; the last 16
+  // cross-fade into the first.
   { key: 'bonfire-fire', name: 'Bonfire Fire', medium: 'gas', preset: 'bonfire', seed: 11,
-    params: { ...FLAME_LOOK, tileSize: 128, tileAspect: 'tall', frames: 32, loopBlend: 8, warmup: 60, view: 'front' } },
+    params: { ...BONFIRE_ROOM, tileSize: 128, tileAspect: 'tall', frames: 96, loopBlend: 16, warmup: 160, view: 'front' } },
+  // The bonfire catching when it is lit: the same fire, from nothing (no warm-up), with a short pressure
+  // pulse at the fuel as it goes up (`blast`, the first 0.1 s), so it flares and settles; played once, then
+  // cross-faded into Bonfire Fire's loop (ValleyFireLight). Same region and framing, so the two line up.
+  { key: 'bonfire-ignite', name: 'Bonfire Ignition', medium: 'gas', preset: 'bonfire', seed: 11,
+    params: { ...BONFIRE_ROOM, blast: 8, tileSize: 128, tileAspect: 'tall', frames: 64, loopBlend: 0, warmup: 0, view: 'front' } },
   // The wound 0.9 m behind the region's centre. The Valley lays it at twice its size from
   // SoulsGameManager.bloodDropsOffset (0.9 m) ahead of the target, so it starts at their feet (build.mjs).
   // A column rising off a fire, in tall tiles like the flames; a 1.8 s loop (smoke rises slowly: a shorter

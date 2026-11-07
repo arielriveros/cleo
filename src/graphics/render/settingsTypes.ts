@@ -31,8 +31,12 @@ export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra' | 'custom';
  * `aces` is the Narkowicz fit this engine shipped before the choice existed. `neutral` is Khronos
  * PBR Neutral, which leaves in-gamut albedo untouched — what an asset or product viewer wants.
  * `none` clamps, which is how you see what the buffer actually holds.
+ *
+ * `agxPunchy` is AgX with Filament's Punchy look (Blender's): more contrast, and saturated colour kept
+ * rich instead of drained toward grey — a clear sky stays blue. Its input is raised so middle grey lands
+ * where plain AgX puts it, so switching between the two keeps the exposure.
  */
-export type ToneMapper = 'agx' | 'aces' | 'neutral' | 'none';
+export type ToneMapper = 'agx' | 'aces' | 'neutral' | 'none' | 'agxPunchy';
 
 export interface RenderSettings {
     quality: QualityPreset;

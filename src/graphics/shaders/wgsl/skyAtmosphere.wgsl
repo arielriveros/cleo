@@ -103,20 +103,49 @@ fn raySphere(ro: vec3<f32>, rd: vec3<f32>, r: f32) -> vec2<f32> {
     return vec2<f32>(-b - d, -b + d);
 }
 
+/**
+ * Where the marches stop. The legacy (artistic) sky marches to the atmosphere's radius in even steps, and
+ * its Sun Intensity was tuned against whatever that gave. A physical sky is lit by the real sun, so its
+ * integral has to converge: it stops where the air has thinned to nothing (12 scale heights, e^-12) and
+ * steps quadratically, densely near the ground where the air is. A 1,300 km atmosphere marched evenly in
+ * 15 steps put its first sample 43 km up and missed the air entirely — the zenith came out 17x too dark,
+ * the horizon 2x (measured against a converged march), which read as a black sky over a sunlit valley.
+ */
+fn marchTop() -> f32 {
+    let thin = u_sky.u_planetRadius + 12.0 * max(u_sky.u_rayleighHeight, u_sky.u_mieHeight);
+    return select(u_sky.u_atmosphereRadius, min(u_sky.u_atmosphereRadius, thin), u_sky.u_physical > 0.5);
+}
+
+/** The step distribution's exponent: 1 = even steps (the legacy sky's), 2 = quadratic. */
+fn marchWarp() -> f32 {
+    return select(1.0, 2.0, u_sky.u_physical > 0.5);
+}
+
+/** Segment `i` of `n` along a ray of length `len` under `warp`: (distance to its midpoint, its length). */
+fn marchSegment(i: i32, n: i32, len: f32, warp: f32) -> vec2<f32> {
+    let count = f32(n);
+    let a = pow(f32(i) / count, warp);
+    let b = pow(f32(i + 1) / count, warp);
+    let mid = pow((f32(i) + 0.5) / count, warp);
+    return vec2<f32>(mid * len, (b - a) * len);
+}
+
 /** Transmittance of the atmosphere from `ro` along `rd` (toward a light). Zero through the planet. */
 fn transmittanceTo(ro: vec3<f32>, rd: vec3<f32>) -> vec3<f32> {
-    let hit = raySphere(ro, rd, u_sky.u_atmosphereRadius);
+    let hit = raySphere(ro, rd, marchTop());
     let steps = u_sky.u_lightSteps;
-    let stepLen = max(hit.y, 0.0) / f32(steps);
+    let len = max(hit.y, 0.0);
+    let warp = marchWarp();
     var odR = 0.0;
     var odM = 0.0;
     for (var j = 0; j < MAX_LIGHT_STEPS; j++) {
         if (j >= steps) { break; }
-        let p = ro + rd * (stepLen * (f32(j) + 0.5));
+        let seg = marchSegment(j, steps, len, warp);
+        let p = ro + rd * seg.x;
         let h = length(p) - u_sky.u_planetRadius;
         if (h < 0.0) { return vec3<f32>(0.0); }
-        odR += exp(-h / u_sky.u_rayleighHeight) * stepLen;
-        odM += exp(-h / u_sky.u_mieHeight) * stepLen;
+        odR += exp(-h / u_sky.u_rayleighHeight) * seg.y;
+        odM += exp(-h / u_sky.u_mieHeight) * seg.y;
     }
     return exp(-(u_sky.u_rayleigh * odR + u_sky.u_mie * 1.1 * odM));
 }
@@ -214,7 +243,9 @@ fn moonDisc(dir: vec3<f32>, sunDir: vec3<f32>) -> vec4<f32> {
 }
 
 fn atmosphere(rd: vec3<f32>, ro: vec3<f32>, sunDir: vec3<f32>) -> vec3<f32> {
-    let atmHit = raySphere(ro, rd, u_sky.u_atmosphereRadius);
+    let top = marchTop();
+    let warp = marchWarp();
+    let atmHit = raySphere(ro, rd, top);
     if (atmHit.x > atmHit.y) { return vec3<f32>(0.0); }
     let tStart = max(atmHit.x, 0.0);
     var tEnd = atmHit.y;
@@ -223,7 +254,7 @@ fn atmosphere(rd: vec3<f32>, ro: vec3<f32>, sunDir: vec3<f32>) -> vec3<f32> {
     if (planetHit.x > 0.0) { tEnd = min(tEnd, planetHit.x); }
 
     let viewSteps = u_sky.u_viewSteps;
-    let stepSize = (tEnd - tStart) / f32(viewSteps);
+    let viewLen = tEnd - tStart;
 
     let betaR = u_sky.u_rayleigh;
     let betaM = u_sky.u_mie;
@@ -242,31 +273,30 @@ fn atmosphere(rd: vec3<f32>, ro: vec3<f32>, sunDir: vec3<f32>) -> vec3<f32> {
     var odR = 0.0;   // view-ray optical depth (Rayleigh)
     var odM = 0.0;   // view-ray optical depth (Mie)
 
-    var t = tStart;
     for (var i = 0; i < MAX_VIEW_STEPS; i++) {
         if (i >= viewSteps) { break; }
-        let pos = ro + rd * (t + stepSize * 0.5);
+        let seg = marchSegment(i, viewSteps, viewLen, warp);
+        let pos = ro + rd * (tStart + seg.x);
         let height = length(pos) - u_sky.u_planetRadius;
-        let hr = exp(-height / u_sky.u_rayleighHeight) * stepSize;
-        let hm = exp(-height / u_sky.u_mieHeight) * stepSize;
+        let hr = exp(-height / u_sky.u_rayleighHeight) * seg.y;
+        let hm = exp(-height / u_sky.u_mieHeight) * seg.y;
         odR += hr;
         odM += hm;
 
         // Secondary ray toward the sun.
-        let lightHit = raySphere(pos, sunDir, u_sky.u_atmosphereRadius);
-        let lightStep = lightHit.y / f32(u_sky.u_lightSteps);
+        let lightHit = raySphere(pos, sunDir, top);
+        let lightLen = max(lightHit.y, 0.0);
         var odLR = 0.0;
         var odLM = 0.0;
-        var tl = 0.0;
         var inShadow = false;
         for (var j = 0; j < MAX_LIGHT_STEPS; j++) {
             if (j >= u_sky.u_lightSteps) { break; }
-            let lpos = pos + sunDir * (tl + lightStep * 0.5);
+            let lseg = marchSegment(j, u_sky.u_lightSteps, lightLen, warp);
+            let lpos = pos + sunDir * lseg.x;
             let lheight = length(lpos) - u_sky.u_planetRadius;
             if (lheight < 0.0) { inShadow = true; break; }   // occluded by the planet
-            odLR += exp(-lheight / u_sky.u_rayleighHeight) * lightStep;
-            odLM += exp(-lheight / u_sky.u_mieHeight) * lightStep;
-            tl += lightStep;
+            odLR += exp(-lheight / u_sky.u_rayleighHeight) * lseg.y;
+            odLM += exp(-lheight / u_sky.u_mieHeight) * lseg.y;
         }
 
         if (!inShadow) {
@@ -277,7 +307,6 @@ fn atmosphere(rd: vec3<f32>, ro: vec3<f32>, sunDir: vec3<f32>) -> vec3<f32> {
             sumR += attenuation * hr;
             sumM += attenuation * hm;
         }
-        t += stepSize;
     }
 
     return u_sky.u_sunIntensity * (sumR * betaR * phaseR + sumM * betaM * phaseM);

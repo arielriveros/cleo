@@ -32,6 +32,7 @@ import {
 import {
   DIRT_ROAD_CHANNEL, FOREST_CHANNEL, paintDirtPatches, FOREST_SLOT, MASK_RES, MASK_SLICES, PATH_CHANNEL, SLOT_CHANNELS, TRAIL_CHANNEL,
   TRAIL_SLOT, loadLayerMath, paintForestFloor, paintPolyline, paintPond, sampleMask, surfaceWeights, trailMask, valleyTerrainMaterial,
+  LANDSCAPE_SURFACES, landscapeSurface,
 } from './landscape.mjs'
 import {
   buildMossRocks, cliffDistanceField, instancesBlob, jitteredCandidates, layerModels, modelAsset, onGround, onSurface, rng, triangles,
@@ -281,13 +282,23 @@ function creatorTileset(key, name, folder, { lighting = null, overdrive = 1 } = 
 /**
  * A Creator flame: its tileset, and where in the cell the flame's root sits (`root`, a share of the
  * height up from the bottom edge: the emitter's height in the framed region).
+ *
+ * `tunedHeight` is the region height (metres) the fires' sprite sizes and `root` were tuned against. A bake
+ * in a taller region frames the same flame smaller in its cell, so the sprite is drawn `frameScale` taller
+ * (and its root share lowered to match) and the fire keeps its size on screen: `flame()` applies both.
  */
-function creatorFlame(key, name, root, widen = 1) {
-  return { ...creatorTileset(key, name, FIRE, { overdrive: FLAME_OVERDRIVE }), root, widen }
+function creatorFlame(key, name, root, widen = 1, tunedHeight = null) {
+  const region = CREATOR[key].manifest.params?.regionSize
+  const frameScale = tunedHeight && region ? region[1] / tunedHeight : 1
+  return { ...creatorTileset(key, name, FIRE, { overdrive: FLAME_OVERDRIVE }), root: root / frameScale, widen, frameScale }
 }
 // The torch's flame is a narrow tongue in its cell: drawn half as wide again, a torch's fuller flame.
 const TORCH_FLAME = creatorFlame('torch-fire', 'Torch Fire', 0.1, 1.5)
-const BONFIRE_FLAME = creatorFlame('bonfire-fire', 'Bonfire Fire', 0.1, 1.6)
+/** The bonfire preset's own region height: what the hearths' flame sizes were tuned against. */
+const BONFIRE_TUNED_HEIGHT = 4.269
+const BONFIRE_FLAME = creatorFlame('bonfire-fire', 'Bonfire Fire', 0.1, 1.6, BONFIRE_TUNED_HEIGHT)
+/** The bonfire catching as it is lit (creatorFx.mjs `bonfire-ignite`): played once, then into the loop. */
+const BONFIRE_IGNITION = creatorFlame('bonfire-ignite', 'Bonfire Ignition', 0.1, 1.6, BONFIRE_TUNED_HEIGHT)
 /**
  * The smoke over the bonfires and the fire pits: the Creator's smoke plume with its six-way lightmaps, a
  * LIT sprite (Sprite.lit): the sun lights the side facing it and its shadows darken it, the fire lights it
@@ -322,9 +333,14 @@ const FIRE_SMOKE = (() => {
  * to what is behind it and never darkens it, whatever the exposure. The cell's root sits `flame.root` up
  * from its bottom edge, so the sprite is sunk by that much to put the root on `base`.
  */
-function flame(key, height, base = [0, 0, 0], name = 'Flame', kind = TORCH_FLAME) {
+function flame(key, height, base = [0, 0, 0], name = 'Flame', kind = TORCH_FLAME, { once = false } = {}) {
+  // Softness from the flame's own size, before the frame scale: the logs it melts into are the same.
+  const soft = Math.round(Math.min(0.15, height * 0.25) * 100) / 100
+  height *= kind.frameScale ?? 1
   return node(name, 'animatedSprite', {
     id: id(`flame:${key}`), position: [base[0], base[1] + height * (0.5 - kind.root), base[2]], scale: [height * kind.aspect * kind.widen, height, 1],
+    // A one-shot (the bonfire's ignition) waits hidden for its fire's script to play it.
+    ...(once ? { visible: false } : {}),
     sprite: {
       constraints: 'cylindrical', tilesetId: kind.tileset.id, tileset: kind.tileset, tileIndex: 0,
       tint: [1, 1, 1], opacity: 1, transparent: true, side: 'double', wireframe: false, blend: 'additive',
@@ -333,9 +349,11 @@ function flame(key, height, base = [0, 0, 0], name = 'Flame', kind = TORCH_FLAME
       followLight: 'Light',
       // Its base sits inside the torch head or the fire pit's logs: it fades into them over a few centimetres
       // instead of being cut along a line, and is still hidden by whatever stands in front of it.
-      softness: Math.round(Math.min(0.15, height * 0.25) * 100) / 100,
+      softness: soft,
     },
-    animation: { frames: kind.frames, frameSource: 'node', fps: kind.fps, loop: true, randomStart: true },
+    animation: once
+      ? { frames: kind.frames, frameSource: 'node', fps: kind.fps, loop: false }
+      : { frames: kind.frames, frameSource: 'node', fps: kind.fps, loop: true, randomStart: true },
   })
 }
 
@@ -712,12 +730,15 @@ function standingTorchNode(key, position = [0, 0, 0], rotation = [0, 0, 0], scal
  * smaller and set back, gives it depth as the view turns. With `smoke` (the bonfire and the fire pits, not
  * a fireplace), the smoke rising off it, from just inside the flame tips.
  */
-function hearth(key, { height = 1.2, lumens = 1100, range = 10, base = [0, 0.3, 0], name = 'Fire', smoke: smoky = false } = {}) {
+function hearth(key, { height = 1.2, lumens = 1100, range = 10, base = [0, 0.3, 0], name = 'Fire', smoke: smoky = false, ignition = false } = {}) {
   return withScript(node(name, 'node', {
     id: id(`hearth:${key}`),
     children: [
       flame(`hearth:${key}:a`, height * 1.35, base, 'Flame', BONFIRE_FLAME),
       flame(`hearth:${key}:b`, height * 0.95, [base[0] + 0.12, base[1], base[2] - 0.14], 'Flame', BONFIRE_FLAME),
+      // A bonfire's lighting: the fire catching, played once by ValleyFireLight when it is lit, then
+      // cross-faded into the two flames' loop.
+      ...(ignition ? [flame(`hearth:${key}:ignition`, height * 1.35, base, 'Ignition', BONFIRE_IGNITION, { once: true })] : []),
       ...(smoky ? [smoke(`hearth:${key}`, [base[0], base[1] + height * 0.75, base[2]])] : []),
       fx(`hearth:${key}:embers`, HEARTH_FX, base, smoky ? HEARTH_FOG_GLOW : 0),
       fireLight(`hearth:${key}`, lumens, range, [base[0], base[1] + height * 0.75, base[2]]),
@@ -731,7 +752,7 @@ function bonfireNode(key, position = [0, 0, 0], rotation = [0, 0, 0]) {
     id: id(`bonfire:${key}`), position, rotation,
     children: [
       souls.group(`valley:bonfire:${key}:model`, 'Model', meshNodes(`bonfire:${key}`, campfire.parts, (p) => CAMPFIRE_MATS[p.material])),
-      hearth(`bonfire:${key}`, { smoke: true }),
+      hearth(`bonfire:${key}`, { smoke: true, ignition: true }),
       node('RespawnPoint', 'node', { id: id(`bonfire:${key}:respawn`), position: [0, 0.05, -1.6] }),
     ],
     // The interaction zone, as the souls bonfire's (a trigger cylinder the player's capsule overlaps).
@@ -819,9 +840,14 @@ function translateCustom(request) {
 
 // The engine presets the valley's look is made of (tools/valley/presets.ts), resolved through vite-node
 // because the tables are TypeScript. Every effect below is one named preset; nothing is hand-tuned.
-// Keep the sun readable against the terrain. Higher ambient lifted every shaded prop and made the
-// valley look uniformly overcast even under the sunny cloud preset.
-const VALLEY_AMBIENT = [7000, 7600, 9000]
+// The flat ambient: only the light the sky light cannot give, the bounce off the sunlit ground, a little
+// warm. The sky's own light comes from the Sky Light (the physical sky, projected), and the local bounce
+// from SSIL. The engine adds this floor straight onto the albedo (no 1/pi, unlike a light's lux), so it
+// lights like pi times its value: the old 7000-9000 lit open shade like 24,000 lux, more than the whole
+// sky, and the shade at a morning sun was 58% of the sunlit ground's (measured in Play, sun at 45 degrees).
+// Real open shade under a fair-weather sky is about a fifth to a quarter of it; the valley now measures
+// about a quarter (see the Sky Light's cloud response below).
+const VALLEY_AMBIENT = [640, 620, 580]
 const PRESETS = (() => {
   const res = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx',
     ['vite-node', '--config', 'vitest.config.ts', 'tools/valley/presets.ts'],
@@ -1212,7 +1238,12 @@ const RULES = FOLIAGE_PROTOS.map((f, i) => ({
 // Ground rules on the Ground, the undergrowth on the Forest Floor that carries it. Every painted road,
 // path and the pond keep the small plants (grass and bushes) off.
 const SMALL_PLANTS = FOLIAGE_PROTOS.filter(f => f.kind !== 'tree').map(f => f.name)
+// Every surface of the landscape is a library material too (Ground, Rock, Snow, ...), linked from its slot:
+// the explorer lists them under Landscape/Materials, and the snow can be picked as a weather's snow material.
+const LANDSCAPE_MATERIAL_IDS = Object.fromEntries(LANDSCAPE_SURFACES.map(({ key, name }) =>
+  [key, libraryMaterial(`landscape:${key}`, name, `${LANDSCAPE}/Materials`, landscapeSurface(TERRAIN_TEX, key))]))
 const terrainMaterial = valleyTerrainMaterial(TERRAIN_TEX, RULES.filter((_, i) => !FOLIAGE_PROTOS[i].surface), SMALL_PLANTS, {
+  materialIds: LANDSCAPE_MATERIAL_IDS,
   forestFoliage: RULES.filter((_, i) => FOLIAGE_PROTOS[i].surface === FOREST_SLOT),
 })
 /** Index of a slot's surface in `surfaceWeights` (0 is the ground). */
@@ -1843,6 +1874,69 @@ function valleyProbe() {
   return probe
 }
 
+/** A bounded light probe: the seed probe's node with this one's box and lobes. Captured at its centre. */
+function boxProbe(key, name, position, size, { yawDeg = 0, blendDistance = 6, lighting = false, resolution = 128 } = {}) {
+  const probe = souls.sourceNode('light probe')
+  probe.name = name
+  probe.id = id(`probe:${key}`)
+  probe.position = position.map(round3)
+  probe.rotation = [0, round3(yawDeg), 0]
+  Object.assign(probe, {
+    resolution, mode: 'baked', intensity: 1, size: size.map(round3), blendDistance,
+    affectsLighting: lighting, affectsReflections: true,
+  })
+  return probe
+}
+
+/**
+ * A probe over an x/z box of open ground, captured at eye height (`lift` over the ground at its centre):
+ * the box is centred on the capture point, so it reaches from under the lowest ground to `above` over
+ * the highest.
+ */
+function groundProbe(key, name, x, z, width, depth, { lift = 2.5, above = 15, ...opts } = {}) {
+  const [lo, hi] = groundRange(x - width / 2, x + width / 2, z - depth / 2, z + depth / 2)
+  const p = at(x, z, lift)
+  const half = Math.max(p[1] - (lo - 3), hi + above - p[1])
+  return boxProbe(key, name, p, [width, half * 2, depth], opts)
+}
+
+/**
+ * The valley's LOCAL probes, over the places the player stands: each reflects its own surroundings (the
+ * houses round the hamlet's street, the banks round the pond, the cliffs of the cave's notch) where the
+ * one Valley Probe, captured between the hamlet and the pond, reflects that one spot everywhere. Each is
+ * captured with the sun's shadow fit round it, so a shaded slope reflects shade. Reflections only out of
+ * doors (the diffuse fill stays the sky light's and the ambient's, see valleyProbe).
+ *
+ * The house interiors take their LIGHTING from their probes too: a room's own irradiance, its door and
+ * windows lit and its walls in shade, in place of the open sky's fill through the roof. That is what makes
+ * a room darker than the street, as it is. Their boxes are the interior exposure volumes'.
+ *
+ * The deferred lighting takes the volume the camera is in (the smallest, a room inside the hamlet) and the
+ * Valley Probe as the fallback round it; the pond's water picks the probe its surface is in.
+ */
+function localProbes() {
+  const out = []
+  out.push(groundProbe('bonfire', 'Bonfire Probe', BONFIRE.x, BONFIRE.z, 36, 36))
+  // The hamlet: its houses and a street's width round them (the village exposure volume's box).
+  const village = buildings.filter(b => b.key !== 'windmill')
+  const vMinX = Math.min(...village.map(b => b.x - b.radius)) - 10, vMaxX = Math.max(...village.map(b => b.x + b.radius)) + 10
+  const vMinZ = Math.min(...village.map(b => b.z - b.radius)) - 10, vMaxZ = Math.max(...village.map(b => b.z + b.radius)) + 10
+  out.push(groundProbe('hamlet', 'Hamlet Probe', (vMinX + vMaxX) / 2, (vMinZ + vMaxZ) / 2, vMaxX - vMinX, vMaxZ - vMinZ, { blendDistance: 8 }))
+  // The pond: captured just over the water, so its banks stand where the water sees them.
+  const pondHalf = POND_HALF + 5
+  out.push(boxProbe('pond', 'Pond Probe', [POND.x, POND_LEVEL + 1.5, POND.z], [pondHalf * 2, 16, pondHalf * 2], { blendDistance: 5 }))
+  out.push(groundProbe('windmill', 'Windmill Probe', WATCHTOWER.x, WATCHTOWER.z, 50, 50, { blendDistance: 8 }))
+  out.push(groundProbe('cave-mouth', 'Cave Mouth Probe', 0, -121, 30, 30, { lift: 3, above: 20 }))
+  for (const b of buildings) {
+    const house = houseShapes.get(b.key)
+    if (!house?.interior) continue
+    out.push(boxProbe(`interior:${b.key}`, `${b.prop.name} Interior Probe`, buildingToWorld(b, house.interior.center),
+      house.interior.size, { yawDeg: b.yaw * 180 / Math.PI, blendDistance: 1, lighting: true }))
+  }
+  log('light probes', `Valley Probe + ${out.length} local (${out.filter(p => p.affectsLighting).length} interiors lit by theirs)`)
+  return out
+}
+
 /**
  * The navmesh, baked as the editor's Bake button would: the terrain inside the volume at a 2 m step (the
  * full 2049-sample landscape would be eight million triangles), the static colliders, and every tree
@@ -2127,7 +2221,11 @@ function valleyScene() {
   // Lights the valley with its own sky, and lets the clouds' shadows sweep across it. At night the flat
   // The flat ambient (VALLEY_AMBIENT, a daylight fill) falls to about a lux with the sun (nightAmbient), so
   // the moon and the torches carry the night. Anything more and the metering lifts the night to a grey day.
-  const skyLight = node('Sky Light', 'skyLight', { id: id('skylight'), skyLight: { cloudShadows: true, nightAmbient: 0.0001 } })
+  // Cloud response 0.35: the clouds' own shadows already take the sun away where they pass, so the
+  // scene-wide overcast grade (the sun dimmed, the sky filled, everywhere at once) is kept to a third. At
+  // its full 1 the sunny clouds' half cover dimmed the sun by 43% in every gap and lifted the sky 60%: a
+  // flat, overcast valley under a sky with blue in it.
+  const skyLight = node('Sky Light', 'skyLight', { id: id('skylight'), skyLight: { cloudShadows: true, cloudResponse: 0.35, nightAmbient: 0.0001 } })
   const timeOfDay = withScript(node('Time of Day', 'node', { id: id('time-of-day') }), 'ValleyDayNight')
 
   const placedBuildings = buildings.map(b => placedBuilding(b, propAssets[props.indexOf(b.prop)]))
@@ -2222,7 +2320,7 @@ function valleyScene() {
       landscapeNode(),
       souls.group('water', 'Water', [pondWater(), pondVolume(), pondZone(), ...floaters()]),
       souls.group('puddles', 'Puddles', puddles()),
-      valleyProbe(),
+      souls.group('light-probes', 'Light Probes', [valleyProbe(), ...localProbes()]),
       souls.group('buildings', 'Buildings', placedBuildings),
       souls.group('exposure-volumes', 'Exposure Volumes', exposureVolumes()),
       souls.group('fog-volumes', 'Fog Volumes', fogVolumes()),
@@ -2245,6 +2343,9 @@ function valleyScene() {
     ...PRESETS.exposure, ...PRESETS.look, ...PRESETS.dof, dofFocusDistance: PLAYER_ARM,
     // Where metering starts before its first sample, and what a host that cannot meter shows: noon.
     exposure: REFERENCE_ILLUMINANCE / (1.2 * 2 ** 15),
+    // AgX Punchy: plain AgX turns the clear sky over the cliffs steel-grey; this keeps it blue, and the
+    // greens and the fire rich, at the same middle grey. Presets never set the tone mapper.
+    toneMapper: 'agxPunchy',
     // The torches' cube shadows, for the nearest four: what makes the hamlet's night.
     pointShadowsEnabled: true, pointShadowResolution: 512, pointShadowDistance: 40,
     foliageCullDistance: TREE_CULL, foliageCellSize: 13,
@@ -2309,7 +2410,7 @@ const result = souls.writeProject({
   bloodstain: BLOODSTAIN_TEMPLATE,
   // The souls fires' flame particles (the valley's flames are Creator sprites) and its placeholder spray.
   excludeParticleSystems: [souls.VFX.fire.id, souls.VFX.torch.id, souls.VFX.bloodSpray.id],
-  tilesets: [TORCH_FLAME.tileset, BONFIRE_FLAME.tileset, FIRE_SMOKE.tileset, BLOOD_BURST.tileset],
+  tilesets: [TORCH_FLAME.tileset, BONFIRE_FLAME.tileset, BONFIRE_IGNITION.tileset, FIRE_SMOKE.tileset, BLOOD_BURST.tileset],
   extraScenes: [{ id: DUNGEON_ID, name: DUNGEON_NAME, build: dungeon.scene, refs: { modelIds: [souls.MANNEQUIN_MODEL, ...CHARACTER_MODELS.map(a => a.id), ...dungeon.models.map(a => a.id)] } }],
   // 2 km of valley: barrels, debris and enemies far from the camera freeze in place instead of
   // simulating against the terrain. The player opts out (simulationMode 'always').
@@ -2329,7 +2430,7 @@ const result = souls.writeProject({
       ...Object.fromEntries(Object.values(FIRE_TEMPLATES).map(t => [t.name, FIRE])),
       'Water Splash': WATER_FX_DIR, 'Water Step': WATER_FX_DIR,
     },
-    tileset: { 'Torch Fire': FIRE, 'Bonfire Fire': FIRE, 'Fire Smoke': FIRE, 'Blood Burst': BLOOD_DIR },
+    tileset: { 'Torch Fire': FIRE, 'Bonfire Fire': FIRE, 'Bonfire Ignition': FIRE, 'Fire Smoke': FIRE, 'Blood Burst': BLOOD_DIR },
     model: {
       ...foliageFolder, ...buildingFolder, ...dungeon.folders, Knight: `${KNIGHT_DIR}/Models`,
       Hollow: `${HOLLOW_DIR}/Models`, 'Strong Knight': `${ELITE_DIR}/Models`,

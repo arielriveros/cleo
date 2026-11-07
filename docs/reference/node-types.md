@@ -240,12 +240,20 @@ intensity: number ; size: vec3 ; blendDistance: number
 affectsLighting: boolean ; affectsReflections: boolean   // both true by default
 get bounded: boolean ; get invVolumeMatrix: mat4 ; get volumeBlend: number
 probeWeight(p: vec3): number
+distanceToVolume(p: vec3): number      // 0 inside the box (or unbounded)
+get volumeSize: number                 // cubic metres; Infinity unbounded
 bake(): void ; markBaked(t: number): void
 setBakedMaps(source, irradiance, prefiltered): void
 get hasBakedMaps / irradiance / prefiltered / envMap / needsBake / lastBakeTime
 ```
 
 Probes saved before volumes existed deserialize as unbounded.
+
+A capture is shadowed by the key light through a map of its own, fit round the probe
+(`ShadowPasses.beginProbeShadows`). The renderer captures at most one probe a frame (`nextProbeToBake`:
+never baked, then asked for, then realtime, nearest first). `Scene.probesForFrame(camera, 2)` hands the
+deferred pass the smallest box containing the camera (else the nearest box by distance to the box), and
+keeps the last slot for the nearest unbounded probe.
 
 ### WeatherNode — `'weather'`
 
@@ -366,8 +374,12 @@ carries the legacy `moonlightIntensity`, a fraction of the sun's lux, and keeps 
 `moonIlluminance` is set; `moonLux(sunLux)` returns whichever is in force.
 
 `physicalUnits` (new skies: true; saved skies without it: false) lights the sky with the scene sun's
-own lux, divided by `REFERENCE_ILLUMINANCE`, instead of `sunIntensity`. The sun and moon discs then
-take the radiance their illuminance spreads over their size, and `exposure` is a trim on top. It
+own lux, divided by `REFERENCE_ILLUMINANCE`, instead of `sunIntensity`, times
+`SkyPasses.PHYSICAL_SKY_CALIBRATION` (3): the single-scattering march, calibrated to measured clear-sky
+light. Its march converges — it stops 12 scale heights up and steps quadratically — so `planetRadius` and
+`atmosphereRadius` shape the horizon without starving the integral; an artistic sky keeps the even march
+its `sunIntensity` was tuned against. The sun and moon discs then take the radiance their illuminance spreads over their
+size, and `exposure` is a trim on top. It
 needs `useSceneSun` and a directional light.
 
 > Writing `sunDirection`, `sunColor`, `sunIntensity`, `exposure` or `groundColor` sets the re-bake
@@ -557,7 +569,7 @@ setTilemap(t: Tilemap): void
 
 ```ts
 get sprite: Sprite
-get/set constraints: 'free' | 'spherical' | 'cylindrical'    // billboarding
+get/set constraints: 'free' | 'spherical' | 'cylindrical'    // billboarding (render/billboard.ts)
 tileset: string ; tileIndex: number ; tint: vec3 ; opacity: number
 sprite.blend: 'alpha' | 'additive'                           // additive adds light: fire, glows
 uvRect(): [number, number, number, number]

@@ -174,6 +174,20 @@ export class Capture {
         const sourceCube = new Texture({ target: 'cubemap', precision: 'high', mipMap: true });
         sourceCube.createCubemapTarget(res, levels);
 
+        // The key light's shadow, fit round THIS probe (ShadowPasses.beginProbeShadows): drawn before the camera
+        // and the cube-face state are swapped below, since its casters draw from the light. Without a
+        // shadow-casting sun the capture stays unshadowed.
+        try {
+            this._shadows.beginProbeShadows(scene, probe.worldPosition,
+                this._shadows.probeShadowRadius(probe.bounded, probe.size, probe.worldScale));
+        } catch (e) {
+            // Nothing else is swapped yet: put back what is, so the next capture is not refused forever.
+            this._shadows.endProbeShadows();
+            sourceCube.delete();
+            this._view.capturing = false;
+            throw e;
+        }
+
         const cam = this._sky.captureCamera;
         cam.fov = 90;
         cam.resize(res, res); // aspect 1
@@ -189,11 +203,12 @@ export class Capture {
         // `_sky.updateIBL` then never refreshed a probe again; the `finally` puts all of it back.
         let baked = false;
         try {
-            // Forward lighting for the capture, with no probe IBL bound, to avoid feedback. The SUN's
-            // shadows are suppressed throughout: the cascades are fit to the MAIN camera, so a probe
-            // elsewhere falls outside them. Point and spot shadows stay on — their maps are world-space —
-            // so a torch behind a wall does not light the bake through it. The BIND still happens — an
-            // incomplete texture is a draw-time error.
+            // Forward lighting for the capture, with no probe IBL bound, to avoid feedback. The frame's
+            // CASCADES are suppressed throughout: they are fit to the MAIN camera, so a probe elsewhere falls
+            // outside them. The sun's shadow comes from the probe's own map instead (begun above, read in
+            // the cascades' place). Point and spot shadows stay on — their maps are world-space — so a torch
+            // behind a wall does not light the bake through it. The BIND still happens — an incomplete
+            // texture is a draw-time error.
             this._shadows.shadowsSuppressed = true;
             // Every forward lighting uniform again, at pre-exposure 1: a capture runs at the START of a
             // frame (Renderer: `updateIBL`), before this frame's own uploads, so the forward programs still
@@ -278,6 +293,7 @@ export class Capture {
             if (!baked) sourceCube.delete();
             this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
             this._shadows.shadowsSuppressed = false;
+            this._shadows.endProbeShadows();
             // The forward programs still hold the capture's u_shadowsEnabled = false; restore them so the
             // frame that follows this bake is not silently unshadowed. Same for the one-cluster grid — its
             // uniforms would otherwise send every fragment of the next frame to cluster 0.

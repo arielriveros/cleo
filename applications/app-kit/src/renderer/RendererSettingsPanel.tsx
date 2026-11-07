@@ -85,6 +85,7 @@ const POINT_RES: { label: string; size: number }[] = [
 // existed was graded under, which is why it stays on the list rather than being replaced.
 const TONE_MAPPERS: { value: string; label: string; title: string }[] = [
   { value: 'agx',     label: 'AgX',     title: 'Rolls saturated highlights toward white instead of clipping them to a primary — the default' },
+  { value: 'agxPunchy', label: 'AgX Punchy', title: "AgX with more contrast and saturation (Blender's Punchy look), so a clear sky stays blue; middle grey stays where AgX puts it" },
   { value: 'aces',    label: 'ACES',    title: 'The Narkowicz filmic fit; what this engine used before the curve was selectable' },
   { value: 'neutral', label: 'Neutral', title: 'Khronos PBR Neutral — leaves in-gamut albedo untouched, for asset and product viewing' },
   { value: 'none',    label: 'None',    title: 'Exposure and sRGB only, hard-clamped: what the buffer actually holds' },

@@ -741,6 +741,7 @@ export class Material {
         material.properties.set('right', [1, 0, 0]);
         material.properties.set('up', [0, 1, 0]);
         material.properties.set('back', [0, 0, -1]);
+        material.properties.set('lightRadius', 0);
         if (properties.texture) material.textures.set('texture', properties.texture);
         return material;
     }

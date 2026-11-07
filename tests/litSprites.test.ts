@@ -96,3 +96,22 @@ describe('Sprite.lit', () => {
         expect(unlit.names.has('spriteLit')).toBe(false);
     });
 });
+
+describe('lit sprite light radius', () => {
+    it('is half the placed quad\'s smaller extent: the depth of medium a light inside the smoke lights', async () => {
+        const { mat4 } = await import('gl-matrix');
+        const { spriteLightRadius } = await import('../src/graphics/render/sprites2d');
+        // The Valley's smoke: 1.5 m wide, 3 m tall.
+        expect(spriteLightRadius(mat4.fromScaling(mat4.create(), [1.5, 3, 1]))).toBeCloseTo(0.75, 6);
+        // Turned and moved, the extent is the same.
+        const m = mat4.fromRotationTranslationScale(mat4.create(), [0, 0.38268, 0, 0.92388], [4, 1, -2], [2, 0.8, 1]);
+        expect(spriteLightRadius(m)).toBeCloseTo(0.4, 5);
+    });
+
+    it('floors only the six-way and flat modes in the shader; a surface keeps the true distance', async () => {
+        const { readFileSync } = await import('node:fs');
+        const src = readFileSync('src/graphics/shaders/wgsl/spriteLit.wgsl', 'utf8');
+        expect(src).toMatch(/lightRadius: f32,\s*\};/);
+        expect(src).toContain('select(cl.light.sourceRadius, max(cl.light.sourceRadius, u_material.lightRadius), mode != 2)');
+    });
+});

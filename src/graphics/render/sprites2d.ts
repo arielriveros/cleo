@@ -31,7 +31,20 @@ import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
 import { gatherParticleLocalLight } from '../particles/particleLighting';
+import { billboardMatrix } from './billboard';
 import type { Material } from '../material';
+
+/**
+ * The nearest a local light is taken to be from a lit sprite's pixels (spriteLit.wgsl `lightRadius`): half
+ * the placed quad's smaller world extent. A six-way or flat lit sprite is a billboard standing for a volume
+ * of smoke about as deep as it is wide, so a light inside it lights that depth of medium, not the single
+ * pixel it happens to sit on.
+ */
+export function spriteLightRadius(m: mat4): number {
+    const width = Math.hypot(m[0], m[1], m[2]);
+    const height = Math.hypot(m[4], m[5], m[6]);
+    return 0.5 * Math.min(width, height);
+}
 
 /** What Sprite2DPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface Sprite2DPassesHost {
@@ -305,37 +318,9 @@ export class Sprite2DPasses {
         this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         
-        // constraint the sprite to always face the camera based on the node's constraints
-        const spriteMatrix = mat4.clone(node.worldTransform);
-        const constraints: 'free' | 'spherical' | 'cylindrical' = node.constraints;
-
-        if (constraints === 'spherical') {
-            spriteMatrix[0] = this._view.camera.viewMatrix[0];
-            spriteMatrix[1] = this._view.camera.viewMatrix[4];
-            spriteMatrix[2] = this._view.camera.viewMatrix[8];
-            spriteMatrix[4] = this._view.camera.viewMatrix[1];
-            spriteMatrix[5] = this._view.camera.viewMatrix[5];
-            spriteMatrix[6] = this._view.camera.viewMatrix[9];
-            spriteMatrix[8] = this._view.camera.viewMatrix[2];
-            spriteMatrix[9] = this._view.camera.viewMatrix[6];
-            spriteMatrix[10] = this._view.camera.viewMatrix[10];
-            // reapply scaling
-            mat4.scale(spriteMatrix, spriteMatrix, node.worldScale);
-        }
-        else if (constraints === 'cylindrical') {
-            spriteMatrix[0] = this._view.camera.viewMatrix[0];
-            spriteMatrix[1] = this._view.camera.viewMatrix[4];
-            spriteMatrix[2] = this._view.camera.viewMatrix[8];
-            spriteMatrix[4] = 0;
-            spriteMatrix[5] = 1;
-            spriteMatrix[6] = 0;
-            spriteMatrix[8] = this._view.camera.viewMatrix[2];
-            spriteMatrix[9] = this._view.camera.viewMatrix[6];
-            spriteMatrix[10] = this._view.camera.viewMatrix[10];
-
-            // reapply scaling
-            mat4.scale(spriteMatrix, spriteMatrix, node.worldScale);
-        }
+        // The camera-facing constraint (render/billboard.ts): screen-aligned, or turned about its upright axis
+        // to face the camera's position.
+        const spriteMatrix = this.spriteBillboardMatrix(node);
 
         // SpriteNode.maxScreenSize: no taller than that many CSS pixels (the editor's viewport icons).
         if (node.maxScreenSize > 0)
@@ -410,6 +395,7 @@ export class Sprite2DPasses {
         material.properties.set('right', [right[0], right[1], right[2]]);
         material.properties.set('up', [up[0], up[1], up[2]]);
         material.properties.set('back', [back[0], back[1], back[2]]);
+        material.properties.set('lightRadius', spriteLightRadius(m));
 
         const scene = node.scene;
         if (!scene) {
@@ -435,22 +421,10 @@ export class Sprite2DPasses {
     private readonly _litUp = vec3.create();
     private readonly _litBack = vec3.create();
 
-    /** Builds a sprite's world matrix with its camera-facing billboard constraint applied. */
+    /** Builds a sprite's world matrix with its camera-facing billboard constraint applied (render/billboard.ts). */
     public spriteBillboardMatrix(node: SpriteNode): mat4 {
-        const m = mat4.clone(node.worldTransform);
-        const view = this._view.camera.viewMatrix;
-        const constraints: 'free' | 'spherical' | 'cylindrical' = node.constraints;
-        if (constraints === 'spherical') {
-            m[0] = view[0]; m[1] = view[4]; m[2] = view[8];
-            m[4] = view[1]; m[5] = view[5]; m[6] = view[9];
-            m[8] = view[2]; m[9] = view[6]; m[10] = view[10];
-            mat4.scale(m, m, node.worldScale);
-        } else if (constraints === 'cylindrical') {
-            m[0] = view[0]; m[1] = view[4]; m[2] = view[8];
-            m[4] = 0; m[5] = 1; m[6] = 0;
-            m[8] = view[2]; m[9] = view[6]; m[10] = view[10];
-            mat4.scale(m, m, node.worldScale);
-        }
-        return m;
+        const cam = this._view.camera;
+        return billboardMatrix(mat4.create(), node.worldTransform, node.worldScale, node.constraints,
+                               cam.viewMatrix, cam.position, cam.type !== 'orthographic');
     }
 }

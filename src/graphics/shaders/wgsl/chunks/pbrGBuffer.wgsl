@@ -226,6 +226,12 @@ struct GBuffer {
 };
 
 /**
+ * The UN-normalised length of the normal-map texel `getNormal` decoded (1 with no map, or a projected
+ * one): the spread a far mip averaged out of the bumps, which `normalMapRoughness` folds into the lobe.
+ */
+var<private> cleoNormalMapLength: f32 = 1.0;
+
+/**
  * The shading normal, flipped for a BACK face.
  *
  * A `side: 'double'` material draws both windings, but the interpolated normal always belongs to the
@@ -250,7 +256,10 @@ fn getNormal(in: VertexOutput, front: bool, su: SurfaceUv, uv: vec2<f32>) -> vec
         // sample it replaces: uv is then in.uv, whose screen-space derivative is exactly ddx/ddy.
         var n = textureSampleGrad(u_material_normalMap_texture, u_material_normalMap_sampler,
                                   uv, ddx, ddy).rgb;
-        n = normalize(n * 2.0 - 1.0);
+        n = n * 2.0 - 1.0;
+        // Its length before normalising: what a far mip averaged away (see normalMapRoughness).
+        if (su.mode == UV_MESH) { cleoNormalMapLength = length(n); }
+        n = normalize(n);
         N = normalize(tbn * n);
         // Never let a degenerate frame (or map texel) make the normal NaN: see safeNormalize.
         N = select(tbn[2], N, dot(N, N) > 1e-12);
@@ -484,8 +493,10 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     // and foliage is rough enough that its specular barely aliases.
     out.gNormalRoughness = vec4<f32>(octN.x, octN.y, reflectanceOrTint, roughness);
 #else
+    // The normal map's own mips first (what a far texel averaged out of the bumps), then the geometry's.
+    let mapRoughness = normalMapRoughness(roughness, cleoNormalMapLength, 1.0, u_material.specularAA);
     out.gNormalRoughness = vec4<f32>(octN.x, octN.y, reflectanceOrTint,
-                                     filterSpecularRoughness(roughness, N, u_material.specularAA));
+                                     filterSpecularRoughness(mapRoughness, N, u_material.specularAA));
 #endif
     out.gEmissiveAO = vec4<f32>(emissive, ao);
 #if CLEO_POM

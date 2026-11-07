@@ -135,6 +135,15 @@ without changing how the sky and ambient light it.
 **Cubemap Preview** — what the probe last captured, unwrapped into a 2 : 1 panorama. **Bake Probe**
 captures again.
 
+A capture draws the sun's shadow round the probe, with a shadow map of its own fit to the probe's box
+(300 m round an unbounded probe). A probe in a room, or under a cliff, sees shade where there is shade.
+Probes are captured one a frame, those never captured first and then the nearest, so a scene that opens
+with many probes, or re-captures them all as the sun moves, spreads the work over a few frames.
+
+The lighting uses two probes at a time. The first is the probe whose box the camera is in (the smallest
+one, such as a room inside a village) or, outside every box, the nearest box. The second is the scene's
+unbounded probe, when it has one, as the fallback everywhere else.
+
 A bounded probe's box shows as a wireframe while it is selected, with square handles on its six faces
 for sizing it in the viewport — see [Volume handles](scene-authoring.md#volume-handles).
 
@@ -197,7 +206,9 @@ A physically based sky, baked to a cubemap whenever the sun moves, with air and 
   yourself; its colour, intensity and disk size. With the scene's light, **Physical Units** (on for a
   new sky) lights the sky with that light's own lux instead of **Sun Intensity**: the sky, the sun disc
   and what reflects them then share one scale with every surface the sun lights, so neither the sky
-  nor a mirror's reflection of the sun is brighter than it really is. **Exposure** trims it from there.
+  nor a mirror's reflection of the sun is brighter than it really is. The sky is calibrated to measured
+  clear-sky light, standing in for the multiple and aerosol scattering a single-scattering sky leaves
+  out, and its integral converges whatever the planet and atmosphere radii. **Exposure** trims it from there.
   A sky saved before physical units keeps its artistic one.
 - **Atmosphere** — Rayleigh scattering (the blue of the sky) and Mie scattering (the haze around the
   sun) with their heights, exposure, ground colour, and the planet and atmosphere radii.

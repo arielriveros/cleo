@@ -6,15 +6,18 @@
 // here exactly as in the deferred twin. The blend is the shared chunk; the lighting below mirrors
 // pbrForward's, minus the parts this pass deliberately cannot afford.
 //
-// NO shadow cascades and NO environment cube here. They were impossible while the terrain layer samplers
-// took texture units 0..8 (colliding with the shared shadow unit 6 and env cube 7); the layer stack binds
-// three, so that constraint is gone — but this shader only runs during probe capture, where shadows are
-// suppressed anyway, so nothing has been added back.
+// SHADOWED, NO environment cube. The sun's shadow is the frame's cascades in the forward pipeline's main
+// view; in a light-probe capture it is the probe's own map (ShadowPasses.beginProbeShadows), one layer fit
+// round the probe, so a cliff's shadow falls across the ground a probe sees as it does on screen. Before,
+// this pass had no shadows at all and every probe saw a valley lit through its own hills. Point and spot
+// shadows apply too: a torch behind a wall does not light the ground through it. The environment cube stays
+// out: a capture binds no probe (that would feed back), and the main view's terrain is deferred.
 
 #include "./chunks/modelVertex.wgsl"
 #include "./chunks/tonemap.wgsl"
 #include "./chunks/pbrLighting.wgsl"
 #include "./chunks/clusteredLights.wgsl"
+#include "./chunks/shadows.wgsl"
 #include "./chunks/terrainStack.wgsl"
 #include "./chunks/terrainWeather.wgsl"
 
@@ -29,6 +32,7 @@ struct TerrainLightingUniforms {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // The sun comes from the light list here, not from u_transform: this pass HAS the light list, and
     // taking it from the same place it lights with keeps the two from ever disagreeing.
+    cleoFragCoord = in.position.xy;
     let tbn = tbnOf(in);
     var surface = resolveTerrainSurface(in.fragPos, in.uv, tbn);
     applyTerrainWeather(&surface, in.fragPos, tbn);
@@ -47,26 +51,28 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     var lo = vec3<f32>(0.0);
 
+    // RADIAL distance for the cascade pick and the cluster, not the planar view depth every other path uses,
+    // because this shader has no view matrix: its lighting block carries no `u_view`. In a capture both are
+    // degenerate on purpose: the probe's shadow map is one layer whose split covers everything, and the
+    // renderer hands the capture a 1x1x1 light grid (see `buildSingleCluster`), so every fragment resolves to
+    // cluster 0. Written this way rather than as constants, so a real grid or cascades here would be slightly
+    // conservative rather than silently wrong.
+    let depth = distance(u_terrain.u_viewPos, in.fragPos);
+    let sun = 1.0 - directionalShadow(in.fragPos, surface.normal, depth);
     lo += evaluateDirectionalLight(u_lighting.u_dirLight, surface.normal, v, surface.albedo,
-                                   surface.metallic, roughness, 1.0);
+                                   surface.metallic, roughness, sun);
 
-    // Visibility is a flat 1.0: this pass has no shadow maps bound at all (see the header), so there
-    // is nothing to ask. That is also why it can skip `cleoPunctualVisibility`, which lives in
-    // chunks/shadows.wgsl and would drag the whole shadow group in with it.
-    //
-    // RADIAL distance, not the planar view depth every other path uses, because this shader has no
-    // view matrix — its lighting block carries no `u_view`. The renderer hands the probe capture a
-    // DEGENERATE 1x1x1 grid (see `buildSingleCluster`), since the grid describes the main camera and
-    // means nothing to a cube face, so every fragment resolves to cluster 0 and the difference cannot
-    // matter. It is written this way rather than as a hard-coded 0 so that a real grid here would be
-    // slightly conservative rather than silently wrong.
-    let cluster = cleoClusterOf(in.position.xy, distance(u_terrain.u_viewPos, in.fragPos));
+    let cluster = cleoClusterOf(in.position.xy, depth);
     let first = cleoClusterOffset(cluster);
     let count = cleoClusterCount(cluster);
     for (var i = 0; i < count; i++) {
         let cl = cleoLight(cleoClusterLight(first + i));
-        lo += evaluateSpotLight(cl.light, in.fragPos, surface.normal, v,
-                                surface.albedo, surface.metallic, roughness, 1.0);
+        if (cleoLightReaches(cl.light, in.fragPos)) {
+            let visibility = cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+                                                    in.fragPos, surface.normal, cl.light.position);
+            lo += evaluateSpotLight(cl.light, in.fragPos, surface.normal, v,
+                                    surface.albedo, surface.metallic, roughness, visibility);
+        }
     }
 
     // Output stays LINEAR HDR: the probe capture bakes it, and IBL/present tonemap later.

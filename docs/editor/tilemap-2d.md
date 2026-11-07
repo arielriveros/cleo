@@ -175,6 +175,13 @@ only reports it.
 Both support **billboarding** (**Constraints**: `free`, `spherical`, `cylindrical`), which matters in
 3D scenes where sprites are used for effects.
 
+- **Free** — the sprite keeps its own rotation.
+- **Spherical** — the sprite lies in the screen's plane, the usual choice for particles and icons.
+- **Cylindrical** — the sprite keeps its own upright axis and turns about it to face the camera's
+  position. A flame, a tree card or a smoke column at the edge of a wide view faces the eye, rather than
+  lying parallel to the screen, squashed and leaning. With an orthographic camera it faces the view
+  direction.
+
 ## Picking in the viewport
 
 A tilemap uses an analytic picker and **only registers a hit where a tile is actually painted**, so

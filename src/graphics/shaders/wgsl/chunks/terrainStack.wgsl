@@ -293,6 +293,9 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
             if (flags.z > 0.5) {
                 let tn = texel.rgb * 2.0 - 1.0;
                 n = normalize(tbn * vec3<f32>(tn.xy * blend.z, tn.z));
+                // What a far mip averages out of this surface's bumps goes into its roughness, before the
+                // blend: see normalMapRoughness (chunks/modelVarying.wgsl).
+                surfRoughness = normalMapRoughness(surfRoughness, length(tn), blend.z, u_terrain.u_specularAA);
             }
             if (flags.w > 0.5) { height = select(texel.a, 1.0 - texel.a, color.a > 0.5); }
         }
