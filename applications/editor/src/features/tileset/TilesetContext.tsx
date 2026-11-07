@@ -1,14 +1,18 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useCleoEngine } from '../EngineContext'
 import { useDocument } from '../DocumentContext'
-import type { TilesetAsset, TileMeta } from '../../utils/tilesets'
-import { guessTileSize, resliceTileset } from '../../utils/tilesets'
+import { useHistory } from '../HistoryContext'
+import type { TilesetAsset, TileMeta, TileMetaClip } from '../../utils/tilesets'
+import { applyTileMeta, guessTileSize, resliceTileset } from '../../utils/tilesets'
 import { importAtlasImage } from './importAtlas'
 
 // The tileset editing session: one working copy of the open tileset asset, shared by the atlas grid in the
 // viewport slot and the inspector in the Properties panel.
 // It wraps the whole dock (see Editor.tsx): either panel can be dragged anywhere, so the working copy must
 // not be tied to one panel's mount.
+//
+// Every edit goes through `update`, which records it on the tab's undo stack. Edits carry a coalescing key
+// built from the fields they touch, so scrubbing a value is one undo step, not one per mouse move.
 
 type TilesetContextValue = {
   /** The working copy, or null when no tileset tab is active. */
@@ -23,11 +27,18 @@ type TilesetContextValue = {
   importAtlas: (file: File) => Promise<boolean>
   /** Replace one tile's metadata; passing undefined (or an empty object) clears it. */
   setTileMeta: (index: number, meta: TileMeta | undefined) => void
+  /** Merge `patch` into every tile in `indices`, as ONE undo step. A field set to undefined is cleared. */
+  setTilesMeta: (indices: readonly number[], patch: Partial<TileMeta>) => void
+  /** Apply a whole-asset edit (a paste, a clear) as one undo step. */
+  edit: (fn: (asset: TilesetAsset) => TilesetAsset, label: string) => void
   /** Read one tile's metadata from the working copy. */
   tileMeta: (index: number) => TileMeta | undefined
   /** Selected tile indices. The atlas grid writes it; the inspector edits whatever is in it. */
   selection: number[]
   setSelection: (indices: number[]) => void
+  /** Tile metadata copied with Copy (or Ctrl+C on the atlas), for Paste. */
+  clipboard: TileMetaClip | null
+  setClipboard: (clip: TileMetaClip | null) => void
   /**
    * The tile whose animation the atlas is currently picking frames for, or null. While set, clicking a
    * tile in the atlas APPENDS it to this tile's frames instead of selecting it.
@@ -61,19 +72,39 @@ const SLICING_KEYS: (keyof TilesetAsset)[] = [
   'tileWidth', 'tileHeight', 'margin', 'spacing', 'imageWidth', 'imageHeight', 'textureId',
 ]
 
+/** Undo-menu names for the fields a patch touches. */
+const PATCH_LABELS: Partial<Record<keyof TilesetAsset, string>> = {
+  name: 'Rename tileset', textureId: 'Atlas', tileWidth: 'Tile size', tileHeight: 'Tile size',
+  margin: 'Margin', spacing: 'Spacing', overdrive: 'Overdrive', terrains: 'Auto-tiling',
+  variantSets: 'Variants', sixWayPositiveTextureId: 'Lighting map', sixWayNegativeTextureId: 'Lighting map',
+  normalTextureId: 'Lighting map', ormTextureId: 'Lighting map',
+}
+
 export function TilesetProvider({ children }: { children: React.ReactNode }) {
   const { editingTilesetId, tilesets, saveTileset, activeTab, eventEmitter, registerTilesetApply } = useCleoEngine()
   const { markTabDirty, dirtyTabs } = useDocument()
+  const { push } = useHistory()
 
   const [asset, setAsset] = useState<TilesetAsset | null>(null)
-  // Mirrored so importAtlas can read the CURRENT atlas without re-creating itself on every edit.
+  // Mirrored so edits compute from the CURRENT copy without re-creating their callbacks on every change,
+  // and without doing their work inside a setState updater (React may run an updater twice).
   const assetRef = useRef<TilesetAsset | null>(null)
   assetRef.current = asset
   const [selection, setSelection] = useState<number[]>([])
+  const [clipboard, setClipboard] = useState<TileMetaClip | null>(null)
   const [framePick, setFramePick] = useState<number | null>(null)
   /** The picked tile's metadata as it was before picking — what Cancel restores. `null` = it had none. */
   const pickBeforeRef = useRef<{ tile: number; meta: TileMeta | null } | null>(null)
   const loadedIdRef = useRef<string | null>(null)
+  /**
+   * Unsaved working copies by tileset id. Switching to another tileset tab and back would otherwise reload
+   * the library's copy and silently throw the edits away while the tab still showed as dirty.
+   */
+  const workingCopiesRef = useRef(new Map<string, TilesetAsset>())
+
+  const tabId = activeTab.kind === 'tileset' ? activeTab.id : null
+  const dirtyRef = useRef(dirtyTabs)
+  dirtyRef.current = dirtyTabs
 
   // Adopt the tab's asset when it changes. Guarded on the id rather than the library array, so a save
   // (which rewrites the library) does not throw away the working copy still being edited.
@@ -89,36 +120,63 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
     const found = tilesets.find(t => t.id === editingTilesetId)
     if (!found) return
     loadedIdRef.current = editingTilesetId
-    setAsset(JSON.parse(JSON.stringify(found)))
+    // Only while the tab is still dirty: a tab closed without saving discards its edits.
+    const unsaved = tabId && dirtyRef.current[tabId] ? workingCopiesRef.current.get(editingTilesetId) : undefined
+    setAsset(unsaved ?? JSON.parse(JSON.stringify(found)))
     setSelection([])
     setFramePick(null)
-  }, [editingTilesetId, tilesets])
+  }, [editingTilesetId, tilesets, tabId])
 
-
-  const tabId = activeTab.kind === 'tileset' ? activeTab.id : null
-
-  const patch = useCallback((p: Partial<TilesetAsset>) => {
-    setAsset(prev => {
-      if (!prev) return prev
-      const resliced = SLICING_KEYS.some(k => k in p && p[k] !== prev[k])
-      const next = resliced ? resliceTileset(prev, p) : { ...prev, ...p }
-      return next
-    })
+  /** Adopt a working copy without recording it. Undo and redo use this too. */
+  const restore = useCallback((next: TilesetAsset) => {
+    assetRef.current = next
+    workingCopiesRef.current.set(next.id, next)
+    setAsset(next)
     if (tabId) markTabDirty(tabId, 'tileset-edit')
   }, [tabId, markTabDirty])
 
+  const update = useCallback((fn: (prev: TilesetAsset) => TilesetAsset, label: string, coalesceKey?: string) => {
+    const before = assetRef.current
+    if (!before) return
+    const next = fn(before)
+    if (next === before) return
+    restore(next)
+    const id = before.id
+    // An undo for a tileset no longer open would write it over whichever one is: do nothing instead.
+    const guard = (target: TilesetAsset) => () => { if (loadedIdRef.current === id) restore(target) }
+    push({ label, coalesceKey, undo: guard(before), redo: guard(next) })
+  }, [restore, push])
+
+  const patch = useCallback((p: Partial<TilesetAsset>) => {
+    const keys = Object.keys(p) as (keyof TilesetAsset)[]
+    const labelled = keys.find(k => PATCH_LABELS[k])
+    const label = (labelled && PATCH_LABELS[labelled]) || 'Edit tileset'
+    update(prev => {
+      const resliced = SLICING_KEYS.some(k => k in p && p[k] !== prev[k])
+      return resliced ? resliceTileset(prev, p) : { ...prev, ...p }
+    }, label, `tileset:${[...keys].sort().join(',')}`)
+  }, [update])
+
   const setTileMeta = useCallback((index: number, meta: TileMeta | undefined) => {
-    setAsset(prev => {
-      if (!prev) return prev
+    update(prev => {
       const tiles = { ...prev.tiles }
       // An empty record is dropped rather than stored: a husk would ship in every embedded copy and make
       // the grid's "has metadata" markers lie.
       if (!meta || Object.keys(meta).length === 0) delete tiles[index]
       else tiles[index] = meta
       return { ...prev, tiles }
-    })
-    if (tabId) markTabDirty(tabId, 'tileset-edit')
-  }, [tabId, markTabDirty])
+    }, 'Tile', `tileset:tile:${index}`)
+  }, [update])
+
+  const setTilesMeta = useCallback((indices: readonly number[], p: Partial<TileMeta>) => {
+    if (indices.length === 0) return
+    update(prev => applyTileMeta(prev, indices, p), 'Tile',
+      `tileset:tiles:${Object.keys(p).sort().join(',')}:${indices.join(',')}`)
+  }, [update])
+
+  const edit = useCallback((fn: (prev: TilesetAsset) => TilesetAsset, label: string) => {
+    update(fn, label)
+  }, [update])
 
   const tileMeta = useCallback((index: number) => asset?.tiles[index], [asset])
 
@@ -153,7 +211,7 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
     if (before) setTileMeta(before.tile, before.meta ?? undefined)
   }, [setTileMeta])
 
-  // Escape CANCELS picking, wherever focus is — the atlas has no keyboard focus of its own. Done keeps.
+  // Escape CANCELS picking, wherever focus is. Done keeps.
   useEffect(() => {
     if (framePick === null) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') cancelFramePick() }
@@ -161,7 +219,11 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [framePick, cancelFramePick])
 
-  const save = useCallback(() => { if (asset) saveTileset(asset) }, [asset, saveTileset])
+  const save = useCallback(() => {
+    if (!asset) return
+    saveTileset(asset)
+    workingCopiesRef.current.delete(asset.id)
+  }, [asset, saveTileset])
 
   // Hand the save back to EngineContext so Ctrl+S, Save All and the close-tab prompt can reach the working
   // copy — they only know tab ids.
@@ -172,11 +234,11 @@ export function TilesetProvider({ children }: { children: React.ReactNode }) {
   }, [tabId, save, registerTilesetApply])
 
   const value = useMemo<TilesetContextValue>(() => ({
-    asset, patch, importAtlas, setTileMeta, tileMeta, selection, setSelection,
-    framePick, startFramePick, finishFramePick, cancelFramePick, save,
+    asset, patch, importAtlas, setTileMeta, setTilesMeta, edit, tileMeta, selection, setSelection,
+    clipboard, setClipboard, framePick, startFramePick, finishFramePick, cancelFramePick, save,
     dirty: !!(tabId && dirtyTabs[tabId]),
-  }), [asset, patch, importAtlas, setTileMeta, tileMeta, selection, framePick, startFramePick, finishFramePick,
-       cancelFramePick, save, tabId, dirtyTabs])
+  }), [asset, patch, importAtlas, setTileMeta, setTilesMeta, edit, tileMeta, selection, clipboard, framePick,
+       startFramePick, finishFramePick, cancelFramePick, save, tabId, dirtyTabs])
 
   return <TilesetContext.Provider value={value}>{children}</TilesetContext.Provider>
 }

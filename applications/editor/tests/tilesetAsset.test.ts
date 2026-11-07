@@ -3,6 +3,8 @@ import {
   DEFAULT_TILE_SIZE, buildTilesetAsset, gridOf, guessTileSize, resliceTileset, toRuntimeTileset,
   reembedTilesets, detachTileset, tilesetIdsInScene, fromRuntimeTileset,
   frameBadges, appendFrames, removeLastFrame, moveFrame, normalizeTilesetAsset,
+  tileRect, leftoverPixels, applyTileMeta, clearTileMeta, selectionFieldState, copyableTileMeta, pasteTileMeta,
+  tileMetaSummary,
 } from '../src/utils/tilesets';
 import { Scene, SpriteNode, Sprite } from 'cleo';
 
@@ -123,6 +125,98 @@ describe('resliceTileset', () => {
     resliceTileset(original, { tileWidth: 32, tileHeight: 32 });
     expect(original.columns).toBe(4);
     expect(original.tiles[15]).toEqual({ zBias: 0.5 });
+  });
+
+  it('keeps the lighting maps in textureIds when the slicing changes', () => {
+    // A reslice used to re-derive textureIds from the atlas alone, which dropped the maps from every
+    // reference scan the moment the tile size moved.
+    const lit = { ...sheet(), normalTextureId: 'n.png', ormTextureId: 'orm.png', textureIds: ['a.png', 'n.png', 'orm.png'] };
+    expect(resliceTileset(lit, { tileWidth: 8, tileHeight: 8 }).textureIds).toEqual(['a.png', 'n.png', 'orm.png']);
+    expect(resliceTileset(lit, { textureId: 'b.png' }).textureIds).toEqual(['b.png', 'n.png', 'orm.png']);
+  });
+});
+
+describe('reading the grid', () => {
+  const spaced = () => buildTilesetAsset('S', 'a.png', 100, 70, { tileWidth: 10, tileHeight: 10, margin: 5, spacing: 2 });
+
+  it('tileRect puts each tile past the margin and the gaps before it', () => {
+    const a = spaced(); // (100 - 10 + 2) / 12 = 7 columns
+    expect(a.columns).toBe(7);
+    expect(tileRect(a, 0)).toEqual({ x: 5, y: 5, w: 10, h: 10 });
+    expect(tileRect(a, 1)).toEqual({ x: 17, y: 5, w: 10, h: 10 });
+    expect(tileRect(a, 7)).toEqual({ x: 5, y: 17, w: 10, h: 10 }); // first tile of row 1
+  });
+
+  it('leftoverPixels is what the grid does not reach inside the far margin', () => {
+    // Width: 100 - 10 (margins) - (7*10 + 6*2 = 82) = 8. Height: rows = (70 - 10 + 2) / 12 = 5 -> 60 - 58 = 2.
+    expect(leftoverPixels(spaced())).toEqual({ right: 8, bottom: 2 });
+    expect(leftoverPixels(buildTilesetAsset('E', 'a.png', 64, 64, { tileWidth: 16, tileHeight: 16 }))).toEqual({ right: 0, bottom: 0 });
+  });
+
+  it('leftoverPixels never goes negative when a tile is bigger than the image', () => {
+    expect(leftoverPixels(buildTilesetAsset('B', 'a.png', 8, 8, { tileWidth: 64, tileHeight: 64 }))).toEqual({ right: 0, bottom: 0 });
+  });
+});
+
+describe('editing tile metadata', () => {
+  const sheet = () => {
+    const a = buildTilesetAsset('Sheet', 'a.png', 64, 64, { tileWidth: 16, tileHeight: 16 });
+    a.tiles[0] = { solid: true, tint: [1, 0, 0], animation: { frames: [0, 1], fps: 8 } };
+    a.tiles[1] = { opacity: 0.5, terrain: { id: 1, mask: 3 } };
+    return a;
+  };
+
+  it('applyTileMeta merges into every tile and drops fields reset to their default', () => {
+    const next = applyTileMeta(sheet(), [0, 1, 2], { solid: false, zBias: 0.25 });
+    expect(next.tiles[0]).toEqual({ tint: [1, 0, 0], animation: { frames: [0, 1], fps: 8 }, zBias: 0.25 });
+    expect(next.tiles[1]).toEqual({ opacity: 0.5, terrain: { id: 1, mask: 3 }, zBias: 0.25 });
+    expect(next.tiles[2]).toEqual({ zBias: 0.25 });
+  });
+
+  it('applyTileMeta removes a tile whose record ends up empty', () => {
+    const a = buildTilesetAsset('S', 'a.png', 64, 64);
+    a.tiles[4] = { solid: true };
+    expect(applyTileMeta(a, [4], { solid: false }).tiles[4]).toBeUndefined();
+    expect(a.tiles[4]).toEqual({ solid: true }); // untouched
+  });
+
+  it('clearTileMeta empties exactly the given tiles', () => {
+    const next = clearTileMeta(sheet(), [0]);
+    expect(next.tiles[0]).toBeUndefined();
+    expect(next.tiles[1]).toBeDefined();
+  });
+
+  it('selectionFieldState shows the first tile and flags the fields the others disagree on', () => {
+    const { primary, mixed } = selectionFieldState(sheet(), [0, 1]);
+    expect(primary.solid).toBe(true);
+    expect([...mixed].sort()).toEqual(['animation', 'opacity', 'solid', 'tint']);
+    // One tile, or tiles that agree, are never mixed; false and absent mean the same thing.
+    expect(selectionFieldState(sheet(), [0]).mixed.size).toBe(0);
+    const a = sheet();
+    a.tiles[2] = { solid: false } as any;
+    a.tiles[3] = {};
+    expect(selectionFieldState(a, [2, 3]).mixed.size).toBe(0);
+  });
+
+  it('copy and paste carry what a tile is, never its animation or auto-tile membership', () => {
+    const clip = copyableTileMeta(sheet().tiles[0]);
+    expect(clip).toEqual({ solid: true, tint: [1, 0, 0] });
+    const next = pasteTileMeta(sheet(), [1], clip);
+    // opacity was not on the source, so the paste clears it: the target now matches the source.
+    expect(next.tiles[1]).toEqual({ terrain: { id: 1, mask: 3 }, solid: true, tint: [1, 0, 0] });
+  });
+
+  it('a pasted clip is a copy, not a shared reference', () => {
+    const clip = copyableTileMeta(sheet().tiles[0]);
+    const next = pasteTileMeta(sheet(), [2, 3], clip);
+    next.tiles[2].tint![0] = 0;
+    expect(next.tiles[3].tint).toEqual([1, 0, 0]);
+    expect(clip.tint).toEqual([1, 0, 0]);
+  });
+
+  it('tileMetaSummary names what a tile carries', () => {
+    expect(tileMetaSummary(undefined)).toBe('plain');
+    expect(tileMetaSummary(sheet().tiles[0])).toBe('solid · animated, 2 frames · tinted');
   });
 });
 
