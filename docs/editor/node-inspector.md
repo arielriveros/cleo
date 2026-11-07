@@ -189,6 +189,10 @@ where volumes overlap the smaller claims first (a room's inside the street's). A
 a wall, a rock or under the ground is switched off and the others light round it. Grow a room's box a
 little past its walls, so its edge falls outside.
 
+What a capture sees is the static geometry: models and the landscape. Anything a script or a dynamic body
+moves is left out, and so, for now, are the plants painted on a landscape, trees included: under a canopy
+a volume's probes see the sky through it.
+
 | Field | Meaning |
 |---|---|
 | **Enabled** | Off leaves the volume in the scene without it lighting anything. |
@@ -202,7 +206,7 @@ little past its walls, so its edge falls outside.
 | **Normal bias** | How far a lookup point is pushed off a surface along its normal, as a fraction of the smallest spacing: against a surface shadowing itself. |
 | **View bias** | How far a lookup point is pulled toward the camera, as the same fraction. |
 | **Multi-bounce** | The bounces after the first: the volume lighting what its probes see with its own light. |
-| **Include grass** | Grass cards in the capture. Off by default: a meadow hides nothing a probe a metre up cares about. |
+| **Include grass** | Grass cards in the capture, once painted plants are captured (they are not yet). Off by default: a meadow hides nothing a probe a metre up cares about. |
 
 Below the fields, a line gives the capture's progress, then how many probes light and how many are inside
 geometry. **Save bake** saves the finished capture with the project: the scene opens with it instead of

@@ -11,13 +11,13 @@ import { Logger } from '../../../core/logger';
 import { Framebuffer } from '../../framebuffer';
 import type { Mesh } from '../../mesh';
 import { device } from '../../rhi/deviceHandle';
-import { DEFAULT_BLEND } from '../../rhi/types';
+import { DEFAULT_BLEND, type BlendState } from '../../rhi/types';
 import type { BindGroup, RenderPipeline } from '../../rhi/resources';
 import { Texture } from '../../texture';
 import { ShaderManager } from '../../systems/shaderManager';
 import {
     GiReduceProgram, GiVisibilityProgram, GiRadianceProgram, GiIntegrateProgram, GiResolveProgram,
-    GiAmbientCubeProgram,
+    GiAmbientCubeProgram, GiRescaleProgram,
 } from '../programs';
 import type { BindGroupCache } from '../bindGroups';
 import type { FrameView } from '../frameView';
@@ -75,6 +75,12 @@ import {
 export const GI_CAPTURE_SLOTS = 8;
 /** Pre-exposure drift (factor) that resets the store scale. */
 const GI_SCALE_DRIFT = 4;
+
+/** Destination x source in colour; the destination's alpha kept (giRescale.wgsl). */
+const MULTIPLY_BLEND: BlendState = {
+    color: { srcFactor: 'dst', dstFactor: 'zero', operation: 'add' },
+    alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' },
+};
 
 export interface GiSystemHost {
     readonly renderWidth: number;
@@ -176,7 +182,7 @@ export class GiSystem {
     public fillDrawsPerFrame = GI_TIERS.high.giFillDrawsPerFrame;
     public multiBounce = true;
     /** Counters for tests and the harness. */
-    public readonly stats = { capturedProbes: 0, captureDraws: 0, relitProbes: 0, sweeps: 0, shadowDraws: 0, resolves: 0, loadedBakes: 0 };
+    public readonly stats = { capturedProbes: 0, captureDraws: 0, relitProbes: 0, sweeps: 0, shadowDraws: 0, resolves: 0, loadedBakes: 0, rescales: 0 };
 
     constructor(private readonly _host: GiSystemHost,
                 private readonly _view: FrameView,
@@ -898,15 +904,39 @@ export class GiSystem {
         const now = this._lightInputs(scene);
         const k = this._view.preExposure;
         const drifted = this._scale > 0 && (k / this._scale > GI_SCALE_DRIFT || this._scale / k > GI_SCALE_DRIFT);
-        if (this._scale <= 0 || drifted || isLightJump(this._lastLight, now)) {
+        if (this._scale <= 0 || isLightJump(this._lastLight, now)) {
             this._scale = k;
             for (const v of this._volumes.values()) v.sweep.request('reset');
+        } else if (drifted) {
+            // The exposure moved a long way (into a cave, out into noon): the stored light follows it
+            // exactly, and nothing is relit for it.
+            if (this._rescale(k / this._scale)) this._scale = k;
+            else { this._scale = k; for (const v of this._volumes.values()) v.sweep.request('reset'); }
         } else {
             for (const v of this._volumes.values()) {
                 if (v.lit && v.sweep.idle && needsRelight(v.lit, now)) v.sweep.request('relight');
             }
         }
         this._lastLight = now;
+    }
+
+    /**
+     * Multiply every stored irradiance by `factor` in place (giRescale.wgsl, a multiply blend), so the
+     * store follows a new scale without a relight. False when there is nothing to rescale.
+     */
+    private _rescale(factor: number): boolean {
+        const atlas = this._irradiance;
+        if (!atlas || !(factor > 0) || !Number.isFinite(factor)) return false;
+        const pass = this._passes.beginFullscreenPass(atlas.renderTarget, 'giRescale', false, undefined, false);
+        this._fullscreen.bind(pass, 'giRescale', GiRescaleProgram, [this._bindGroups.fallbackTexture], MULTIPLY_BLEND);
+        this._shaderManager.bind('giRescale');
+        this._shaderManager.setUniform('u_scale', factor);
+        this._passes.setViewport(atlas.width, atlas.height);
+        this._passes.drawFullscreenAndEnd(pass);
+        this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
+        this.stats.rescales++;
+        for (const v of this._volumes.values()) v.ambientDirty = true;
+        return true;
     }
 
     private _lightInputs(scene: Scene): GiLightInputs {

@@ -164,7 +164,7 @@ describe('the programs', () => {
                                               'ssr', 'ssrResolve', 'ssrTemporal', 'localExposureLum',
                                               'localExposureDown', 'volumetricFogInject', 'volumetricFogIntegrate',
                                               'volumetricFogApply', 'giReduce', 'giVisibility', 'giRadiance',
-                                              'giIntegrate', 'giResolve', 'giAmbientCube']);
+                                              'giIntegrate', 'giResolve', 'giAmbientCube', 'giRescale']);
     });
 
     it('read every map through the flipbook cells, inset per cell so no neighbouring frame bleeds in', () => {

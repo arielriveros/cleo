@@ -52,6 +52,7 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     volumetricFogInject: 'feature', volumetricFogIntegrate: 'feature', volumetricFogApply: 'feature',
     giReduce: 'feature', giVisibility: 'feature', giRadiance: 'feature', giIntegrate: 'feature', giResolve: 'feature',
     giAmbientCube: 'feature',
+    giRescale: 'feature',
     taaResolve: 'feature', taaSharpen: 'feature', fxaa: 'feature',
     motionBlurVelocity: 'feature', motionBlurTileMax: 'feature', motionBlurNeighborMax: 'feature', motionBlur: 'feature',
     objectVelocity: 'feature', objectVelocitySkinned: 'feature', objectVelocityBasicSkinned: 'feature',
@@ -196,7 +197,7 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
         // A probe captures its scene as a G-buffer through the scene's own geometry programs, relights it
         // with the deferred pass, prefilters it into the reflection atlas and projects its lighting.
         case 'lightProbe': add('prefilterOct'); add('skyProject'); break;
-        case 'giVolume': add('giReduce'); add('giVisibility'); add('giRadiance'); add('giIntegrate'); add('giResolve'); add('giAmbientCube'); break;
+        case 'giVolume': add('giReduce'); add('giVisibility'); add('giRadiance'); add('giIntegrate'); add('giResolve'); add('giAmbientCube'); add('giRescale'); break;
         case 'particleSystem': addParticles(node.particleSystem, use); break;
     }
     for (const child of Array.isArray(node.children) ? node.children : []) usageFromSceneJson(child, use, shadows);
