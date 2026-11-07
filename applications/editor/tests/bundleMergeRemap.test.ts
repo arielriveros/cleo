@@ -155,3 +155,15 @@ describe('rig references on merge', () => {
     expect(src).toContain('sub(r.rig, sourceRigId)')
   })
 })
+
+describe('remapDeep — weather snow materials', () => {
+  it("moves a weather volume's snow link with the material's re-mint, and the snow copy's textures with theirs", () => {
+    const node = {
+      type: 'weather',
+      weather: { snow: 1, snowMaterialId: 'old-snow', snowMaterial: { type: 'pbr', textures: { baseColorTexture: 'old-tex' } } },
+    };
+    remapDeep(node, remaps({ mat: new Map([['old-snow', 'new-snow']]), tex: new Map([['old-tex', 'new-tex']]) }));
+    expect(node.weather.snowMaterialId).toBe('new-snow');
+    expect(node.weather.snowMaterial.textures.baseColorTexture).toBe('new-tex');
+  });
+});

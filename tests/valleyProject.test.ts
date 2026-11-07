@@ -505,6 +505,17 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(template.triggers[template.nodeJson.id].shapes[0].offset[2]).toBeGreaterThan(0);
     });
 
+    it('breathes a mist out of the skull cave, and keeps the rest of the valley clear but the pond', () => {
+        const fogs = nodes().filter(n => n.type === 'volumetricFog');
+        expect(fogs.map(n => n.name).sort()).toEqual(['Cave Mouth Mist', 'Pond Mist']);
+        const mist = fogs.find(n => n.name === 'Cave Mouth Mist');
+        // Round the cave's door (its trigger, in front of the arch), and low on the plaza.
+        const door = [0, 6.19, -116];
+        const half = mist.volumetricFog.size.map((s: number) => s / 2);
+        for (let a = 0; a < 3; a++) expect(Math.abs(door[a] - mist.position[a])).toBeLessThan(half[a]);
+        expect(mist.volumetricFog.heightFalloff).toBeGreaterThan(0);
+    });
+
     const dungeonNodes = () => allNodes(read('scenes', `${manifest().sceneMetas[1].id}.json`).scene);
 
     it('ships the dungeon as a second scene, with the way back to the valley', () => {

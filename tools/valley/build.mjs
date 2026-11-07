@@ -2052,6 +2052,9 @@ function exposureVolumes() {
 // fog; the sky's own distance haze and god rays are separate). Overlapping boxes add. ValleyDayNight
 // thickens them at night and at dawn (fogNightScale), from these daytime values.
 
+/** The cliff notch the skull cave's face stands on (world z): the cave reaches back from it, over the plaza. */
+const CAVE_NOTCH_Z = -117.5
+
 /** One fog volume node, axis-aligned. `fog` is the medium (VolumetricFogOptions). */
 function fogVolume(key, name, center, size, fog, { priority = 0, blendDistance = 4 } = {}) {
   return node(name, 'volumetricFog', {
@@ -2071,16 +2074,14 @@ function fogVolumes() {
     noiseStrength: 0.55, noiseScale: 5, windVelocity: [0.25, 0, 0.1],
   }, { priority: 1, blendDistance: 5 }))
 
-  // The valley floor: a thin haze pooling in its low ground, gone over the hills (it thins from the lowest
-  // ground up). By day it is what the sun's shafts through the trees and round the houses show in; at dawn
-  // and at night ValleyDayNight lets it gather.
-  const [lo] = groundRange(-150, 150, -150, 110, 8)
-  const floorTop = lo + 40
-  out.push(fogVolume('valley-floor', 'Valley Haze', [0, (lo - 2 + floorTop) / 2, -20], [300, floorTop - lo + 2, 260], {
-    density: 0.004, albedo: [0.9, 0.92, 0.95], anisotropy: 0.45, heightFalloff: 0.12,
-    noiseStrength: 0.35, noiseScale: 18, windVelocity: [0.6, 0, 0.25],
-  }, { blendDistance: 12 }))
-  log('fog volumes', `pond mist, valley haze from ${lo.toFixed(1)} m`)
+  // The skull cave's mouth: a cold, dense mist breathing out of it, thick at the plaza's ground and gone a
+  // few metres up, half in the arch and half over the plaza in front of it, drifting out toward the valley.
+  // Priority 2: the cave is where the eye goes.
+  out.push(fogVolume('cave-mouth', 'Cave Mouth Mist', at(0, CAVE_NOTCH_Z + 1, 2.6), [9, 5.5, 9], {
+    density: 0.06, albedo: [0.8, 0.85, 0.88], anisotropy: 0.2, heightFalloff: 0.7,
+    noiseStrength: 0.6, noiseScale: 3, windVelocity: [0, 0, 0.35],
+  }, { priority: 2, blendDistance: 2.5 }))
+  log('fog volumes', 'pond mist, cave mouth mist')
   return out
 }
 
@@ -2135,7 +2136,7 @@ function valleyScene() {
 
   // The skull cave fills the cliff notch where the boss's fog wall used to stand: its face on the notch
   // line, the rest of it reaching back over the plaza.
-  const notchZ = -117.5
+  const notchZ = CAVE_NOTCH_Z
   const caveCentreZ = notchZ - caveBounds.size[2] / 2
   const caveEntrance = linkInstance(CAVE_TEMPLATE, caveEntranceNode(at(0, caveCentreZ, -0.4)))
 

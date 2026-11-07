@@ -1,4 +1,4 @@
-import { ExposureVolumeNode, LightProbeNode, MIN_EXPOSURE_VOLUME_SIZE, MIN_FOG_VOLUME_SIZE, OcclusionVolumeNode, VolumetricFogNode, type Node } from 'cleo';
+import { ExposureVolumeNode, LightProbeNode, MIN_EXPOSURE_VOLUME_SIZE, MIN_FOG_VOLUME_SIZE, MIN_WEATHER_VOLUME_SIZE, OcclusionVolumeNode, VolumetricFogNode, WeatherNode, type Node } from 'cleo';
 import BoxVolumeGizmoView, { type VolumeTarget } from '@cleo/app-kit/gizmo/BoxVolumeGizmo';
 import { useCleoEngine } from '../EngineContext';
 import { usePlayback } from '../PlaybackContext';
@@ -21,6 +21,10 @@ export function boxVolumeTarget(node: Node | null | undefined): VolumeTarget | n
   // A bank of fog: dragged out over the pond, down into a valley floor, in to a room's walls.
   if (node instanceof VolumetricFogNode) {
     return { size: () => [...node.size] as [number, number, number], setSize: s => { node.size = s; }, minSize: MIN_FOG_VOLUME_SIZE };
+  }
+  // Rain or snow over part of the map. An unbounded one (size [0, 0, 0]) covers the scene: no box to grab.
+  if (node instanceof WeatherNode && node.bounded) {
+    return { size: () => [...node.size] as [number, number, number], setSize: s => { node.size = s; }, minSize: MIN_WEATHER_VOLUME_SIZE };
   }
   // Fitted to a room's interior by dragging its faces in to the walls.
   if (node instanceof OcclusionVolumeNode) {

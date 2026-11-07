@@ -132,6 +132,9 @@ export function remapDeep(obj: any, r: Remaps): void {
     // A landscape-material SLOT's link to the plain Material asset its surface came from. A key of its
     // own precisely because `materialId` above means a TERRAIN material.
     if (key === 'surfaceMaterialId') { obj[key] = sub(r.mat, val); continue }
+    // A weather volume's link to the Material asset its snow is drawn with. The `snowMaterial` beside it
+    // is the embedded copy, walked on only for the textures it names.
+    if (key === 'snowMaterialId') { obj[key] = sub(r.mat, val); continue }
     if (key === 'materialIds' && Array.isArray(val)) { obj[key] = val.map((x: any) => sub(r.mat, x)); continue }
     // 'meshId' is the legacy spelling of 'modelId'; both point at a model asset.
     if (key === 'modelId' || key === 'meshId') { obj[key] = sub(r.model, val); continue }

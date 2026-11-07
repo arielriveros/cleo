@@ -270,6 +270,14 @@ export interface RenderSettings {
      * fog on this side (tier: on from high up).
      */
     volumetricFogLocalShadows?: boolean;
+    /**
+     * The weather's shelter map (render/shadows.ts `renderShelter`): a depth map from straight above of
+     * everything solid round the camera, so the ground and the plants under a roof stay dry and free of
+     * snow. A quality-tier field (off on Low, where weather reaches everything inside its volume).
+     */
+    weatherShelterEnabled?: boolean;
+    /** Its resolution over the 96 m it covers (tier: 2048 ultra, 1024 high and medium). */
+    weatherShelterResolution?: number;
     /** Trace resolution as a fraction of the render size (0.25..1). A quality-tier field. Absent = the tier's. */
     ssrResolutionScale?: number;
     /** March steps per ray across the screen (8..128). A quality-tier field. Absent = the tier's. */
@@ -418,6 +426,9 @@ export interface QualityTier {
     volumetricFogTileSize: number;
     volumetricFogSlices: number;
     volumetricFogLocalShadows: boolean;
+    /** The weather's shelter map (see RenderSettings.weatherShelterEnabled) and its resolution. */
+    weatherShelterEnabled: boolean;
+    weatherShelterResolution: number;
     shadowMapResolution: number;
     shadowCascades: number;
     /** 0 = 3x3 tap grid, 1 = 16-tap rotated Poisson. */
@@ -453,6 +464,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         ssaoEnabled: true, ssaoSamples: 64, ssaoResolutionScale: 1.0, ssilEnabled: true,
         ssrEnabled: true, ssrResolutionScale: 1.0, ssrSteps: 64, localExposureEnabled: true,
         volumetricFogEnabled: true, volumetricFogTileSize: 12, volumetricFogSlices: 96, volumetricFogLocalShadows: true,
+        weatherShelterEnabled: true, weatherShelterResolution: 2048,
         shadowMapResolution: 4096, shadowCascades: 4, shadowFilterMode: 1, shadowFilterRadius: 2.0,
         bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true, fxaaEnabled: false,
         particleLodDistanceScale: 1.5,
@@ -463,6 +475,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         ssaoEnabled: true, ssaoSamples: 24, ssaoResolutionScale: 0.5, ssilEnabled: true,
         ssrEnabled: true, ssrResolutionScale: 0.5, ssrSteps: 32, localExposureEnabled: true,
         volumetricFogEnabled: true, volumetricFogTileSize: 16, volumetricFogSlices: 64, volumetricFogLocalShadows: true,
+        weatherShelterEnabled: true, weatherShelterResolution: 1024,
         shadowMapResolution: 2048, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
         bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true, fxaaEnabled: false,
         particleLodDistanceScale: 1,
@@ -474,6 +487,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         ssaoEnabled: true, ssaoSamples: 16, ssaoResolutionScale: 0.5, ssilEnabled: false,
         ssrEnabled: false, ssrResolutionScale: 0.5, ssrSteps: 24, localExposureEnabled: false,
         volumetricFogEnabled: true, volumetricFogTileSize: 20, volumetricFogSlices: 48, volumetricFogLocalShadows: false,
+        weatherShelterEnabled: true, weatherShelterResolution: 1024,
         shadowMapResolution: 1024, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
         // Kept at medium: one fullscreen resolve is cheap next to what this tier already spends on
         // clouds and shadows, and aliasing is the most visible artefact left at a reduced tier.
@@ -486,6 +500,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         ssaoEnabled: false, ssaoSamples: 16, ssaoResolutionScale: 0.5, ssilEnabled: false,
         ssrEnabled: false, ssrResolutionScale: 0.5, ssrSteps: 16, localExposureEnabled: false,
         volumetricFogEnabled: false, volumetricFogTileSize: 24, volumetricFogSlices: 32, volumetricFogLocalShadows: false,
+        weatherShelterEnabled: false, weatherShelterResolution: 512,
         shadowMapResolution: 1024, shadowCascades: 2, shadowFilterMode: 0, shadowFilterRadius: 0.0,
         bloomEnabled: false, motionBlurEnabled: false, taaEnabled: false, fxaaEnabled: true,
         particleLodDistanceScale: 0.5,

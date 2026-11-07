@@ -166,6 +166,8 @@ export default function RendererSettingsPanel() {
   const [fogTemporal, setFogTemporal] = useState<boolean>(() => renderer?.volumetricFogTemporal ?? true);
   const [fogLights, setFogLights] = useState<boolean>(() => renderer?.volumetricFogLocalLights ?? true);
   const [fogShadows, setFogShadows] = useState<boolean>(() => renderer?.volumetricFogLocalShadows ?? true);
+  const [shelterOn, setShelterOn] = useState<boolean>(() => renderer?.weatherShelterEnabled ?? true);
+  const [shelterRes, setShelterRes] = useState<number>(() => renderer?.weatherShelterResolution ?? 1024);
   const [toneMapper, setToneMapper] = useState<string>(() => renderer?.toneMapper ?? 'agx');
   const [lutId, setLutId] = useState<string | null>(() => renderer?.colorGradingLut ?? null);
   const [dofEnabled, setDofEnabled] = useState<boolean>(() => renderer?.dofEnabled ?? false);
@@ -301,6 +303,8 @@ export default function RendererSettingsPanel() {
     setFogTemporal(renderer.volumetricFogTemporal);
     setFogLights(renderer.volumetricFogLocalLights);
     setFogShadows(renderer.volumetricFogLocalShadows);
+    setShelterOn(renderer.weatherShelterEnabled);
+    setShelterRes(renderer.weatherShelterResolution);
     setToneMapper(renderer.toneMapper);
     setLutId(renderer.colorGradingLut);
     setDofEnabled(renderer.dofEnabled);
@@ -657,6 +661,19 @@ export default function RendererSettingsPanel() {
         {fogLights && <Toggle label='Light Shadows' checked={fogShadows} className='my-1'
           onChange={(v) => { renderer.volumetricFogLocalShadows = v; setFogShadows(v); touch(); }} />}
         <Hint>Draws the scene's Volumetric Fog volumes, lit by the sun, the sky and the torches. The quality tier sets the grid; nothing runs in a scene without a fog volume.</Hint>
+      </div></Collapsable>
+
+      <Collapsable title='Weather' persistKey='renderer.weather' defaultOpen={false}><div className='w-full p-2'>
+        <Toggle label='Shelter' checked={shelterOn} className='my-1'
+          onChange={(v) => { renderer.weatherShelterEnabled = v; setShelterOn(v); touch(); }} />
+        {shelterOn && <Field labelClassName={LABEL_W} label='Shelter Resolution'>
+          <Select value={String(shelterRes)} onChange={(e) => {
+            const v = Number(e.target.value); renderer.weatherShelterResolution = v; setShelterRes(renderer.weatherShelterResolution); touch();
+          }}>
+            {[512, 1024, 2048].map(r => <option key={r} value={r}>{r}</option>)}
+          </Select>
+        </Field>}
+        <Hint>The scene's Weather volumes wet and snow the landscape and its plants. Shelter keeps what stands under a roof or anything solid dry, from a map of the 96 m round the camera, redrawn only when something in it moves.</Hint>
       </div></Collapsable>
 
       <Collapsable

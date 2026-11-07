@@ -7,7 +7,8 @@ import { Logger } from '../core/logger';
 import {
     MAX_TERRAIN_SURFACES, MAX_PAINT_LAYERS, MASK_CHANNELS_PER_SLICE, deriveSurface, flattenSurfaces,
     surfaceWeightsAt, legacyAutoRule, legacySplatAlphas, slopeDegreesFromNormalY, cloneBlendRule,
-    type TerrainFlatSurface, type TerrainLayerSource, type TerrainSlotSource,
+    type TerrainFlatSurface, type TerrainLayerSource, type TerrainSlotSource, type SurfaceMaterialLike,
+    type TerrainSurfaceData,
 } from './terrainLayers';
 import { MaskGrid, type MaskPaint, type MaskRegion, type MaskPatch } from './terrainMasks';
 import { TerrainSurfaceArrays, DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE } from './terrainSurfaceArrays';
@@ -21,6 +22,15 @@ import { resamplePlane } from './splatmapIO';
 // one place, with the height field, chunks and physics on the other side of the line.
 
 /** A layer's identity, as the editor and serialization see it. */
+/**
+ * The weather's snow on a landscape (chunks/terrainWeather.wgsl): a material whose maps are baked as one
+ * more layer of the surface arrays, outside the composite. `tiling` is repeats across the landscape.
+ */
+export interface TerrainSnowSource {
+    material: SurfaceMaterialLike;
+    tiling: number;
+}
+
 export interface TerrainPaintLayer {
     id: string;
     name: string;
@@ -482,17 +492,29 @@ export class TerrainLayerStack {
      *                  onto a material's rule span with this.
      */
     public sync(material: Material, layerTextureSize = DEFAULT_TERRAIN_LAYER_TEXTURE_SIZE,
-                elevRemap?: [number, number], tilingScale = 1): void {
+                elevRemap?: [number, number], tilingScale = 1, snow: TerrainSnowSource | null = null): void {
         this._syncMaskTexture();
-        this._arrays.sync(this.surfaces().map(s => s.surface), layerTextureSize);
-        this.writeUniforms(material, elevRemap, tilingScale);
+        const surfaces = this.surfaces().map(s => s.surface);
+        const snowSurface = this._snowSurface(snow, surfaces.length);
+        // The snow is one more array layer, never one more surface: the composite, foliage scatter and
+        // every coverage query see the stack alone. Its layer keeps its bake when the weather leaves, so
+        // coming back costs nothing.
+        this._arrays.sync(snowSurface ? [...surfaces, snowSurface] : surfaces, layerTextureSize);
+        this.writeUniforms(material, elevRemap, tilingScale, snow);
+    }
+
+    /** The snow's surface, or null without one, or when the stack already fills every layer. */
+    private _snowSurface(snow: TerrainSnowSource | null, used: number): TerrainSurfaceData | null {
+        if (!snow || used >= MAX_TERRAIN_SURFACES) return null;
+        return deriveSurface(snow.material, snow.tiling);
     }
 
     /**
      * Write the stack's textures and every surface uniform into `material` — the CPU half of
      * {@link sync}, with no device involved, so what the shader is told can be tested directly.
      */
-    public writeUniforms(material: Material, elevRemap?: [number, number], tilingScale = 1): void {
+    public writeUniforms(material: Material, elevRemap?: [number, number], tilingScale = 1,
+                         snow: TerrainSnowSource | null = null): void {
         const surfaces = this.surfaces();
         const m = material;
         if (this._maskId) m.textures.set('u_masks', this._maskId); else m.textures.delete('u_masks');
@@ -504,6 +526,18 @@ export class TerrainLayerStack {
         const color = new Float32Array(n), mat = new Float32Array(n), flags = new Float32Array(n);
         const elevation = new Float32Array(n), slope = new Float32Array(n), noise = new Float32Array(n);
         const blend = new Float32Array(n), shade = new Float32Array(n);
+        // The weather's snow: its row at the layer after the stack's, read by terrainWeather.wgsl alone.
+        const snowSurface = this._snowSurface(snow, surfaces.length);
+        if (snowSurface) {
+            const o = surfaces.length * 4, d = snowSurface;
+            color[o] = d.color[0] ?? 1; color[o + 1] = d.color[1] ?? 1; color[o + 2] = d.color[2] ?? 1;
+            mat[o] = d.metallic; mat[o + 1] = d.roughness; mat[o + 2] = d.tiling * tilingScale; mat[o + 3] = -1;
+            flags[o] = d.albedoId ? 1 : 0; flags[o + 1] = (d.aoId || d.roughnessId || d.metallicId) ? 1 : 0;
+            flags[o + 2] = d.normalId ? 1 : 0; flags[o + 3] = d.heightId ? 1 : 0;
+            blend[o + 2] = d.normalStrength ?? 1; blend[o + 3] = 0.6;
+            shade[o] = Math.max(0, Math.min(1, d.reflectance ?? 0.5));
+        }
+        m.properties.set('u_snowLayer', snowSurface ? surfaces.length : -1);
         for (let i = 0; i < surfaces.length; i++) {
             const s = surfaces[i], o = i * 4, d = s.surface, r = s.rule;
             color[o] = d.color[0] ?? 1; color[o + 1] = d.color[1] ?? 1; color[o + 2] = d.color[2] ?? 1;

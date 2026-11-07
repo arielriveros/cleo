@@ -356,7 +356,10 @@ export class ModelDraw {
      * same rule WebGPU enforces through `layout: 'auto'`.
      */
     private _bindFrameLighting(pass: RenderPassEncoder, pipeline: RenderPipeline, state: MaterialDrawState): void {
-        if (state.frameLighting && this._bindGroups.declaresFrameLighting(pipeline))
+        // The deferred landscape lights nothing in the geometry pass (`frameLighting` off) but reads the
+        // weather's shelter map from group 3, so a program that declares it gets the group regardless.
+        if ((state.frameLighting || this._bindGroups.declaresWeatherShelter(pipeline))
+            && this._bindGroups.declaresFrameLighting(pipeline))
             pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline));
     }
 

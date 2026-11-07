@@ -1,8 +1,9 @@
 // FORWARD-lit terrain.
 //
 // The main scene renders terrain through the deferred G-buffer (geometryTerrain), but the light-probe
-// capture is a forward pass with a single colour attachment, so it needs a shader that both blends the
-// terrain layers AND lights them in one draw. The blend is the shared chunk; the lighting below mirrors
+// capture (and the forward pipeline's main view) is a forward pass with a single colour attachment, so it
+// needs a shader that both blends the terrain layers AND lights them in one draw. The weather applies
+// here exactly as in the deferred twin. The blend is the shared chunk; the lighting below mirrors
 // pbrForward's, minus the parts this pass deliberately cannot afford.
 //
 // NO shadow cascades and NO environment cube here. They were impossible while the terrain layer samplers
@@ -15,6 +16,7 @@
 #include "./chunks/pbrLighting.wgsl"
 #include "./chunks/clusteredLights.wgsl"
 #include "./chunks/terrainStack.wgsl"
+#include "./chunks/terrainWeather.wgsl"
 
 struct TerrainLightingUniforms {
     u_dirLight: DirectionalLight,
@@ -27,7 +29,9 @@ struct TerrainLightingUniforms {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // The sun comes from the light list here, not from u_transform: this pass HAS the light list, and
     // taking it from the same place it lights with keeps the two from ever disagreeing.
-    let surface = resolveTerrainSurface(in.fragPos, in.uv, tbnOf(in));
+    let tbn = tbnOf(in);
+    var surface = resolveTerrainSurface(in.fragPos, in.uv, tbn);
+    applyTerrainWeather(&surface, in.fragPos, tbn);
 
     // Filtered here rather than inside resolveTerrainSurface, because a derivative belongs at the top
     // level of a fragment stage where control flow is still uniform, and the blend runs branches.

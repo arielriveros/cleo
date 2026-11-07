@@ -429,9 +429,10 @@ export const ADD_ITEMS: AddItem[] = [
     create: async () => new WindNode('wind'),
   },
   {
-    // Scene-wide, so unplaceable. Foliage materials answer it by their Weather settings.
-    id: 'weather', label: 'Weather', icon: WeatherIcon, category: 'environment', placeable: false,
-    create: async () => new WeatherNode('weather'),
+    // Placeable, like the fog: a box of rain or snow centred on the node, adjusted with the box gizmo's face
+    // handles. The landscape and foliage materials inside it answer it.
+    id: 'weather', label: 'Weather', icon: WeatherIcon, category: 'environment',
+    create: async () => new WeatherNode('weather', { size: [40, 20, 40] }),
   },
   {
     id: 'volumetricClouds', label: 'Clouds', icon: CloudsIcon, category: 'environment', placeable: false,

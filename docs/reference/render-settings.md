@@ -42,6 +42,7 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `ssrEnabled` / `ssrResolutionScale` / `ssrSteps` | on / 1.0 / 64 | on / 0.5 / 32 | **off** / 0.5 / 24 | **off** / 0.5 / 16 |
 | `localExposureEnabled` | on | on | off | off |
 | `volumetricFogEnabled` / `TileSize` / `Slices` / `LocalShadows` | on / 12 / 96 / on | on / 16 / 64 / on | on / 20 / 48 / off | **off** / 24 / 32 / off |
+| `weatherShelterEnabled` / `weatherShelterResolution` | on / 2048 | on / 1024 | on / 1024 | **off** / 512 |
 | `shadowMapResolution` / `shadowCascades` | 4096 / 4 | 2048 / 3 | 1024 / 3 | 1024 / 2 |
 | `shadowFilterMode` / `shadowFilterRadius` | 1 / 2.0 | 0 / 1.0 | 0 / 1.0 | 0 / **0.0** |
 | `bloomEnabled` | on | on | on | off |
@@ -113,6 +114,13 @@ multiplier above 1 to bloom: `emissiveIntensity` on a material, `render.emissive
 | `volumetricFogTemporal` | `boolean` | `true` | Blend each froxel with the last frame's. |
 | `volumetricFogLocalLights` | `boolean` | `true` | Scatter the point and spot lights into the fog. |
 | `volumetricFogLocalShadows` | `boolean` | tier | Shade that through the lights' shadow maps, so a torch behind a wall lights none of the fog on this side. On from High up. |
+
+## Weather
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `weatherShelterEnabled` | `boolean` | tier | Keep what stands under something solid dry and free of snow, from a depth map seen from straight above. Off on the Low tier. |
+| `weatherShelterResolution` | `number` | tier | That map's size over the 96 m it covers round the camera (2048 / 1024 / 1024 / 512). |
 
 ## Depth of field
 

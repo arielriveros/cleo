@@ -11,7 +11,7 @@ import { Node, kelvinToRgb } from 'cleo'
  *   - the moon: below the horizon the renderer hands the key light to the moon, opposite the sun, at the
  *     sky's own `moonIlluminance` (lux). Nothing here sets it, so the editor's night is the game's;
  *   - the valley mist, thick at dawn and burning off by mid-morning, and the fog volumes (the pond's mist,
- *     the valley's haze) with it: `fogNightScale` times as dense at night and at dawn;
+ *     the cave mouth's) with it: `fogNightScale` times as dense at night and at dawn;
  *   - the god rays, strongest with a low sun.
  *
  * What it does NOT touch is the camera or the lamps. Every light keeps its real value all day — the sun

@@ -107,7 +107,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'skyAtmosphere' && <SkyAtmosphereEditor node={props.node as SkyAtmosphereNode} /> }
           { props.node.nodeType === 'skyLight' && <SkyLightEditor node={props.node as SkyLightNode} /> }
           { props.node.nodeType === 'wind' && <WindEditor node={props.node as WindNode} /> }
-          { props.node.nodeType === 'weather' && <WeatherEditor node={props.node as WeatherNode} /> }
+          { props.node.nodeType === 'weather' && <WeatherEditor key={props.node.id} node={props.node as WeatherNode} /> }
           { isUI && <UIEditor node={props.node as UINode} /> }
           {/* Last: a secondary option. Renders itself away unless the node is attached already or sits
               inside a character with sockets — see SocketAttachSlot. */}

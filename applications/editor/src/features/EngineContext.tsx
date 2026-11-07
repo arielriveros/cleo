@@ -4135,6 +4135,21 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
   };
 
+  /**
+   * And the fourth: weather volumes, whose snow embeds a copy of a Material asset (`snowMaterialId`).
+   * The landscapes re-bake their snow layer from it on their next frame.
+   */
+  const syncWeatherSnowMaterials = (materialId: string, asset: MaterialAsset, exceptTabId?: string) => {
+    let changed = false;
+    for (const scene of liveScenes(exceptTabId)) {
+      for (const w of Array.from((scene as any).weatherVolumes ?? []) as any[]) {
+        if (w.snowMaterialId !== materialId) continue;
+        try { w.snowMaterial = Material.parse(asset.material); changed = true; } catch { /* keep the old copy */ }
+      }
+    }
+    if (changed) eventEmitter.current.emit('SCENE_CHANGED');
+  };
+
   // The other half of "the model changed": a foliage prototype bakes its material INLINE, so editing a
   // shared Material asset never reached scattered foliage at all — syncMaterialInstances only walks
   // scene nodes, and a prototype is reachable from none. Re-derive through the model path for every
@@ -5281,6 +5296,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           syncFoliageRulesForMaterial(tab.materialId!, tab.id);
           // …and the landscape-material slots that embed a copy of it.
           syncTerrainMaterialSlots(tab.materialId!, asset, tab.id);
+          // …and the weather volumes that draw their snow with it.
+          syncWeatherSnowMaterials(tab.materialId!, asset, tab.id);
         });
         // …and the generated LOD levels derived from it — after their texture twins exist.
         void refreshLodLevelsForMaterial(tab.materialId, asset, tab.id);

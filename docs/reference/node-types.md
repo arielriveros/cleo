@@ -247,6 +247,29 @@ get hasBakedMaps / irradiance / prefiltered / envMap / needsBake / lastBakeTime
 
 Probes saved before volumes existed deserialize as unbounded.
 
+### WeatherNode — `'weather'`
+
+A box of weather (render/weather.ts): wetness, puddles and snow on the landscape
+(`chunks/terrainWeather.wgsl`) and on foliage materials, per plant (`chunks/instancedVertex.wgsl`).
+Overlapping volumes composite in ascending `priority` (`mix` by each one's weight); at most 4 near the
+camera draw a frame. `size` [0, 0, 0] is unbounded, the whole scene (what JSON from before volumes reads
+as). With `shelter`, a top-down depth map of the static, solid shadow casters round the camera keeps what
+is under them dry (`ShadowPasses.renderShelter`). `scene.weather` is the highest-priority one;
+`scene.weatherVolumes` all of them.
+
+```ts
+size: [number, number, number]       // [0,0,0] = unbounded ; min 0.01 a side otherwise
+blendDistance: number ; priority: number ; enabled: boolean
+wetness: number ; snow: number ; puddles: number        // 0..1
+snowMaterial: Material | null ; snowMaterialId: string | null   // embedded copy + asset link
+snowTiling: number                   // metres per repeat
+snowSlope: number                    // degrees
+snowBreakup: number                  // 0..1
+shelter: boolean
+get bounded: boolean ; get active: boolean
+weightAt(p): number ; applyPreset(idOrPreset): boolean  // WEATHER_PRESETS
+```
+
 ### VolumetricFogNode — `'volumetricFog'`
 
 A box of participating medium drawn by the renderer's froxel fog (`render/volumetricFog.ts`): density

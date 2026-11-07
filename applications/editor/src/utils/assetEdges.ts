@@ -73,11 +73,17 @@ export function walkRefs(obj: any, out: EdgeSpec[]): void {
       continue
     }
     if (key === 'textureId' || key === 'displacementMap') { push(out, 'texture', val, key); continue }
+    // A lit sprite tileset's lighting maps, and a lit particle emitter's, beside its `textureId`.
+    if (key === 'normalTextureId' || key === 'ormTextureId' || key === 'sixWayPositiveTextureId'
+        || key === 'sixWayNegativeTextureId') { push(out, 'texture', val, key); continue }
     // A terrain paint layer's `materialId` names a TERRAIN material, not a material. The two libraries are
     // separate and the ids are not interchangeable.
     if (key === 'materialId') { push(out, 'terrainMaterial', val, key); continue }
     // A landscape-material slot's surface, linked to a plain Material asset — hence a key of its own.
     if (key === 'surfaceMaterialId') { push(out, 'material', val, key); continue }
+    // A weather volume's snow, linked to the Material asset it was taken from; its embedded copy is
+    // walked on for its textures.
+    if (key === 'snowMaterialId') { push(out, 'material', val, key); continue }
     if (key === 'materialIds' && Array.isArray(val)) {
       val.forEach((x, i) => push(out, 'material', x, `materialIds[${i}]`))
       continue

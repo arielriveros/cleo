@@ -199,8 +199,12 @@ struct PBRMaterial {
     rippleSheen: f32,
     leafFlip: f32,
     undersideColor: vec3<f32>,
-    /** The scene's weather (WeatherNode): x = wetness, y = snow. Renderer state, written per foliage draw. */
-    foliageWeather: vec4<f32>,
+    /**
+     * The weather's snow on foliage: linear albedo rgb, roughness a (the snow volume's material, or flat
+     * white). How much snow and how wet arrive per plant (`in.foliageWeather`). Renderer state, written per
+     * foliage draw.
+     */
+    foliageSnow: vec4<f32>,
 };
 @group(1) @binding(1) var<uniform> u_material: PBRMaterial;
 
@@ -437,7 +441,7 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> GBuffer {
     let N = normalize(getNormal(in, front, su, uv));
 #if CLEO_FOLIAGE
     var foliageTranslucency = saturate(u_material.translucency);
-    foliageShade(&albedo, &roughness, &foliageTranslucency, N, in.fragPos, in.foliage);
+    foliageShade(&albedo, &roughness, &foliageTranslucency, N, in.fragPos, in.foliage, in.foliageWeather);
 #endif
 
     var out: GBuffer;

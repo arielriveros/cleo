@@ -47,9 +47,11 @@ export interface FoliageState {
     foliage: boolean;
     lean: number; stiffness: number; minY: number; height: number; radius: number; fadeEnd: number;
     bend: number; recovery: number;
-    /** The weather's weight, as a fraction of the plant's height. */
+    /**
+     * How far the plant bows under a full load of rain or snow, as a fraction of its height (its materials'
+     * weightDroop). The weather AT each plant scales it, in the vertex stage (chunks/instancedVertex.wgsl).
+     */
     droop: number;
-    wet: number; snow: number;
 }
 
 /** What FoliagePasses reads from the renderer that owns it: its own state, not another subsystem's. */
@@ -422,7 +424,9 @@ export class FoliagePasses {
                     hash = mixNumber(mixNumber(hash, this._sys.modelDraw.objectId(model.mesh)), model.mesh.activeIndexCount);
                 if (cascade === 0) {
                     const w = this._foliageWind(scene, layer);
-                    if (w) hash = mixNumber(mixNumber(hash, this._view.windTime), w.droop);
+                    // The droop is per plant now, from the weather volumes: their hash moves the bend.
+                    if (w) hash = mixNumber(mixNumber(mixNumber(hash, this._view.windTime), w.droop),
+                                            w.droop > 0 ? this.weatherHash : 0);
                 }
             }
         }
@@ -785,11 +789,8 @@ export class FoliagePasses {
         // Leaves that flutter on a plant that does not lean still move: the trunk simply stays put.
         if (!windOn) { lean = 0; flutters = false; }
         if (!pushed) bend = 0;
-        const weather = scene.weather;
-        const wet = weather && weather.visible ? weather.wetness : 0;
-        const snow = weather && weather.visible ? weather.snow : 0;
-        // Water weighs a plant down less than a load of snow does.
-        droop *= Math.max(wet * 0.4, snow);
+        // No weather volume in the frame: nothing bows, whatever the materials could.
+        if (this.weatherHash === 0) droop = 0;
         if (!foliage && !(lean > 0) && !flutters) return null;
         let shape = this._windShapes.get(models[0]);
         if (!shape) {
@@ -810,7 +811,7 @@ export class FoliagePasses {
         // (foliageInteraction INTERACT_RANGE).
         const fadeEnd = windOn ? Math.max(node!.fadeEnd, pushed ? 45 : 0) : 45;
         return { foliage, lean, stiffness, minY: shape[0], height: shape[1], radius: shape[2], fadeEnd, bend, recovery,
-                 droop, wet, snow };
+                 droop };
     }
 
     private readonly _windVec: number[][] = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
@@ -850,13 +851,21 @@ export class FoliagePasses {
 
     private readonly _droopVec: number[] = [0, 0, 0, 0];
 
-    /** The surface half of the weather (chunks/foliageSurface.wgsl), after the material block is written. */
-    private _setFoliageWeather(w: FoliageState): void {
-        this._weatherVec[0] = w.wet; this._weatherVec[1] = w.snow;
-        this._shaderManager.setUniform('u_material.foliageWeather', this._weatherVec);
+    /**
+     * The frame's weather volumes (render/weather.ts), as foliage needs them: their hash (0 with none),
+     * which the shadow cache keys the droop on, and the snow's colour (linear rgb) and roughness.
+     */
+    public weatherHash: number = 0;
+    public readonly snowColor: number[] = [0.9, 0.9, 0.9, 0.85];
+
+    /**
+     * The surface half of the weather (chunks/foliageSurface.wgsl), after the material block is written:
+     * the snow's colour. How wet and how snowy each plant is arrives per plant from the vertex stage.
+     */
+    private _setFoliageWeather(_w: FoliageState): void {
+        this._shaderManager.setUniform('u_material.foliageSnow', this.snowColor);
     }
 
-    private readonly _weatherVec: number[] = [0, 0, 0, 0];
     private readonly _interactVec: number[] = [0, 0, 0, 0];
 
     /** Each foliage layer's per-bucket fade bands, as `_prepareFoliage` last computed them. */

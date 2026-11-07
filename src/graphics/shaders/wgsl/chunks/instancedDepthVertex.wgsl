@@ -29,10 +29,35 @@ struct InstancedDepthUniforms {
     // Foliage interaction, as in chunks/instancedVertex.wgsl: the shadow parts with the grass.
     u_interact: vec4<f32>,
     u_interactStamps: array<vec4<f32>, 32>,
-    // As in chunks/instancedVertex.wgsl: x = the weather's droop.
+    // As in chunks/instancedVertex.wgsl: x = the plant's full droop, scaled by the weather at its root.
     u_foliageDroop: vec4<f32>,
+    // Weather volumes (chunks/weatherVolumes.wgsl), evaluated per plant at its root; written once a frame
+    // by render/weather.ts into every instanced program. Declared in every variant, read by the PBR
+    // family (CLEO_INSTANCED_WEATHER) and the foliage shadows (CLEO_FOLIAGE).
+    u_weatherInv: array<mat4x4<f32>, 4>,
+    u_weatherBlend: array<vec4<f32>, 4>,
+    u_weatherAmount: array<vec4<f32>, 4>,
+    u_weatherShape: array<vec4<f32>, 4>,
+    u_weatherInfo: vec4<f32>,
+    u_shelterMatrix: mat4x4<f32>,
+    u_shelterParams: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> u_depth: InstancedDepthUniforms;
+
+fn weatherCount() -> i32 { return i32(u_depth.u_weatherInfo.x); }
+fn weatherInv(i: i32) -> mat4x4<f32> { return u_depth.u_weatherInv[i]; }
+fn weatherBlend(i: i32) -> vec4<f32> { return u_depth.u_weatherBlend[i]; }
+fn weatherAmount(i: i32) -> vec4<f32> { return u_depth.u_weatherAmount[i]; }
+fn weatherShape(i: i32) -> vec4<f32> { return u_depth.u_weatherShape[i]; }
+
+#include "./weatherVolumes.wgsl"
+
+/** As in chunks/instancedVertex.wgsl: how much the weather bows a plant at `origin`. */
+fn weatherDroopAt(origin: vec3<f32>) -> f32 {
+    if (weatherCount() <= 0) { return 0.0; }
+    let w = weatherAt(origin);
+    return max(w.wet * 0.4, w.snow);
+}
 
 @vertex
 fn vs_main(
@@ -57,7 +82,7 @@ fn vs_main(
     let nw = (instanceModel * vec4<f32>(normal, 0.0)).xyz;
 #if CLEO_FOLIAGE
     let push = interactLean(instanceModel[3].xyz, u_depth.u_windTime.x, u_depth.u_interact, u_depth.u_interactStamps);
-    let droop = u_depth.u_foliageDroop.x;
+    let droop = u_depth.u_foliageDroop.x * weatherDroopAt(instanceModel[3].xyz);
 #else
     let push = vec2<f32>(0.0);
     let droop = 0.0;

@@ -9,6 +9,7 @@ import type { RenderPipeline } from '../src/graphics/rhi/resources';
 const texture = (name: string) => ({ name, sampledView: { name }, rhiTexture: { generation: 0 } }) as unknown as Texture;
 
 const cascades = texture('cascades'), spots = texture('spots'), points = texture('points'), grid = texture('grid');
+const shelter = texture('shelter');
 
 /** A pipeline whose group 3 declares exactly these resources. */
 function pipeline(label: string, group3: { name: string; binding: number }[]): RenderPipeline {
@@ -28,6 +29,7 @@ beforeEach(() => {
 function cache() {
     return new BindGroupCache({
         shadowCascades: () => cascades, spotShadows: () => spots, pointShadows: () => points, lightGrid: () => grid,
+        weatherShelter: () => shelter,
     }, {} as FrameTargets);
 }
 
@@ -51,6 +53,22 @@ describe('the frame-lighting group', () => {
         expect(created[0].entries.map(e => e.binding)).toEqual([6]);
     });
 
+    it("binds the weather's shelter map at 8, alone for the deferred landscape and after the grid for the forward one", () => {
+        const c = cache();
+        const deferred = pipeline('terrainGeometry', [{ name: 'u_weatherShelter', binding: 8 }]);
+        const forward = pipeline('terrainForward', [{ name: 'u_lightData', binding: 6 }, { name: 'u_weatherShelter', binding: 8 }]);
+        expect(c.declaresFrameLighting(deferred)).toBe(true);
+        expect(c.declaresWeatherShelter(deferred)).toBe(true);
+        expect(c.declaresShadowGroup(deferred)).toBe(false);
+        c.frameLightingGroup(deferred, false);
+        c.frameLightingGroup(forward);
+        expect(created.map(g => g.entries.map(e => e.binding))).toEqual([[8], [6, 8]]);
+        expect((created[0].entries[0].textureView as { name: string }).name).toBe('shelter');
+        // Never named for a program that does not declare it.
+        c.frameLightingGroup(pipeline('pbr', [{ name: 'u_shadowCascades', binding: 0 }]));
+        expect(created[2].entries.map(e => e.binding)).toEqual([0]);
+    });
+
     it('leaves the punctual atlases out when the caller says so', () => {
         const lit = pipeline('pbr', [{ name: 'u_shadowCascades', binding: 0 }, { name: 'u_spotShadows', binding: 2 },
                                      { name: 'u_pointShadows', binding: 4 }, { name: 'u_lightData', binding: 6 }]);
@@ -59,6 +77,28 @@ describe('the frame-lighting group', () => {
         c.frameLightingGroup(lit, true);
         expect(created.map(g => g.entries.map(e => e.binding))).toEqual([[0, 6], [0, 2, 4, 6]]);
         expect(created[1].entries.map(e => (e.textureView as { name: string }).name)).toEqual(['cascades', 'spots', 'points', 'grid']);
+    });
+});
+
+describe('a material group', () => {
+    it('binds each map at its own binding, whatever order the shader declared them in', () => {
+        // The instanced PBR family declares the shelter map (binding 12) in its vertex chunk, ahead of the
+        // material maps (0-11): counted off by twos in declaration order, it landed on binding 0.
+        const c = cache();
+        c.fallbackTexture = texture('white');
+        const p = {
+            label: 'pbrGeometryInstanced~foliage',
+            resources: [
+                { group: 0, binding: 12, glslName: 'u_weatherShelter', kind: 'texture', type: 'texture_depth_2d_array' },
+                { group: 0, binding: 0, glslName: 'u_material_baseColorTexture', kind: 'texture', type: 'texture_2d<f32>' },
+                { group: 0, binding: 2, glslName: 'u_material_ormTexture', kind: 'texture', type: 'texture_2d<f32>' },
+            ],
+            layoutForGroup: () => ({}),
+        } as unknown as RenderPipeline;
+        const material = { textures: new Map<string, string>() } as any;
+        c.materialGroup(p, material);
+        const entries = created[0].entries.map(e => [e.binding, (e.textureView as { name: string }).name]);
+        expect(entries).toEqual([[0, 'white'], [2, 'white'], [12, 'shelter']]);
     });
 });
 

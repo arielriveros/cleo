@@ -46,6 +46,8 @@ struct VertexOutput {
 #if CLEO_FOLIAGE
     // The foliage surface (chunks/foliageSurface.wgsl): x = the plant's hash, y = its gust, z = leaves.
     @location(10) foliage: vec4<f32>,
+    // The weather on this plant (chunks/instancedVertex.wgsl `instanceWeather`): x = wet, y = snow.
+    @location(11) foliageWeather: vec2<f32>,
 #endif
 };
 

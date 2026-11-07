@@ -11,7 +11,7 @@ import { spotBoundingSphere } from '../clusters';
 import { Framebuffer } from '../framebuffer';
 import { LayeredDepthFramebuffer } from '../layeredDepthFramebuffer';
 import { DirectionalLight, DEFAULT_ANGULAR_RADIUS, Spotlight, PointLight } from '../lighting';
-import { Material } from '../material';
+import { Material, isFoliageMaterial } from '../material';
 import { Mesh } from '../mesh';
 import { Model } from '../model';
 import { frameStats } from '../renderStats';
@@ -37,6 +37,7 @@ import type { FoliagePasses } from './foliage';
 import { ShaderManager } from '../systems/shaderManager';
 import { DEPTH_WRITE } from './pipelineCache';
 import type { RenderSubsystems } from './subsystems';
+import { shelterMatrix, footprintKey, type ShelterFootprint } from './weatherPack';
 
 /**
  * One punctual-light shadow atlas, spot or point, as the shared layer routine sees it. The FBOs are read
@@ -1546,6 +1547,90 @@ export class ShadowPasses {
         out.staticHash = sh; out.dynamicHash = dh;
         return out;
     }
+
+    // ---- Weather shelter ----------------------------------------------------------------------
+    // The depth, seen from straight above, of everything solid over the weather's footprint: what keeps
+    // the ground under a roof dry (chunks/terrainWeather.wgsl, foliage per plant). One layer, drawn by the
+    // sun's caster pipelines through the same caster records, and only again when the footprint moves or
+    // a static caster in it does.
+
+    /** The shelter map; 1x1 until the weather needs it. */
+    public shelterFBO!: LayeredDepthFramebuffer;
+    /** RenderSettings.weatherShelterEnabled / weatherShelterResolution. */
+    public shelterEnabled: boolean = true;
+    public shelterResolution: number = 1024;
+    /** This frame's world -> clip (GL convention) matrix of the map, valid while `shelterValid`. */
+    public readonly shelterMatrix: mat4 = mat4.create();
+    public shelterValid: boolean = false;
+    /** The footprint the map was last drawn over. */
+    public shelterFootprint: ShelterFootprint | null = null;
+    /** Times the map has been redrawn (tests, the profiler). */
+    public shelterDraws: number = 0;
+    private _shelterKey: string = '';
+    private readonly _shelterCasters: ShadowCasterRecord[] = [];
+
+    /** Below this bounding radius (metres) a model shelters nothing: a stone, a barrel's hoop, a cup. */
+    public static readonly SHELTER_MIN_RADIUS = 0.5;
+
+    /**
+     * Whether a gathered caster shelters what is under it: static, not foliage (plants do not keep the
+     * rain off the ground under them here), not wholly transparent, and big enough. Cut-outs count: a
+     * thatch roof is one. Pure in its inputs, so it is tested directly.
+     */
+    public static isShelterCaster(materials: readonly Material[], radius: number, dynamic: boolean): boolean {
+        if (dynamic || radius < ShadowPasses.SHELTER_MIN_RADIUS) return false;
+        let solid = false;
+        for (const m of materials) {
+            if (isFoliageMaterial(m)) return false;
+            if (m.config.castShadow && !m.config.transparent && !m.config.wireframe) solid = true;
+        }
+        return solid;
+    }
+
+    /**
+     * Draw the shelter map over `footprint` (render/weatherPack.ts `shelterFootprint`), or mark it absent
+     * with none. Redrawn only when the footprint or a static caster in it changed: a still scene draws it
+     * once. Never during a capture or a thumbnail (their caster states are keyed on another view).
+     */
+    public renderShelter(scene: Scene, footprint: ShelterFootprint | null): void {
+        if (!footprint || !this.shelterEnabled) {
+            this.shelterValid = false;
+            this.shelterFootprint = null;
+            return;
+        }
+        const res = Math.max(64, Math.min(4096, Math.round(this.shelterResolution)));
+        this.shelterFBO.create(res, 1, true);
+        shelterMatrix(this.shelterMatrix, footprint);
+
+        this._ensureShadowCasters(scene);
+        const casters = this._shelterCasters;
+        casters.length = 0;
+        let h = HASH_SEED;
+        const frame = this._view.frameIndex;
+        for (let k = 0; k < this._nonTerrainCount; k++) {
+            const r = this._casterRecords[k];
+            const node = r.node;
+            const dynamic = this._casterMotion.isDynamic(node, node.transformVersion, frame, r.state.skinned);
+            if (!ShadowPasses.isShelterCaster(node.model.materials, r.sphere.radius, dynamic)) continue;
+            const c = r.sphere.center, half = footprint.size / 2 + r.sphere.radius;
+            if (Math.abs(c[0] - footprint.centre[0]) > half || Math.abs(c[2] - footprint.centre[1]) > half) continue;
+            casters.push(r);
+            h = mixTransform(mixString(h, node.id), node.worldTransform);
+        }
+        const key = `${footprintKey(footprint, res)}|${h}|${casters.length}`;
+        this.shelterValid = true;
+        this.shelterFootprint = footprint;
+        if (key === this._shelterKey) return;
+        this._shelterKey = key;
+        this.shelterDraws++;
+
+        const pass = this._passes.beginDepthPass(this.shelterFBO.renderTarget, 'shelter', 0);
+        if (casters.length > 0) this._renderShadowCasters(pass, casters, casters.length, this.shelterMatrix);
+        this._passes.endDepthPass(pass);
+    }
+
+    /** Forget the drawn shelter map, so the next frame redraws it (a resolution change, a scene switch). */
+    public invalidateShelter(): void { this._shelterKey = ''; }
 
     /** Render the directional light's cascaded shadow maps (one array layer per view-frustum slice). */
     public renderCascades(scene: Scene, light: LightNode): void {

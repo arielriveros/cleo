@@ -65,7 +65,10 @@ import { SceneRadianceCopy } from './render/sceneRadiance';
 import { ssrStepCount } from './ssrSettings';
 import { LightingPasses } from './render/lighting';
 import { VolumetricFogPasses } from './render/volumetricFog';
+import { WeatherPasses } from './render/weather';
+import { snowForLandscape } from './render/weatherPack';
 import type { VolumetricFogNode } from '../core/scene/nodes/volumetricFogNode';
+import type { WeatherNode } from '../core/scene/nodes/weatherNode';
 import { SkyPasses } from './render/sky';
 import { ModelDraw } from './render/modelDraw';
 import { ObjectTable } from './objectTable';
@@ -163,6 +166,7 @@ export class Renderer {
     private readonly _particlePasses: ParticlePasses;
     /** Froxel volumetric fog for VolumetricFogNode volumes (render/volumetricFog.ts). */
     private readonly _fog: VolumetricFogPasses;
+    private readonly _weather: WeatherPasses;
     /** Sprites, tilemap chunks and the Y-sorted 2D pass (render/sprites2d.ts). */
     private readonly _sprites: Sprite2DPasses;
     /** Landscape foliage: upload, culling (CPU and GPU), wind, impostors, shadows and the colour pass (render/foliage.ts). */
@@ -291,6 +295,7 @@ export class Renderer {
             spotShadows: () => this._shadows.spotShadowFBO.texture,
             pointShadows: () => this._shadows.pointShadowFBO.texture,
             lightGrid: () => this._lighting.lightGrid.texture,
+            weatherShelter: () => this._shadows.shelterFBO.texture,
         }, this._targets);
         this._fullscreen = new FullscreenPasses(this._pipelines, this._bindGroups);
         this._materials = new MaterialBinder({
@@ -357,6 +362,7 @@ export class Renderer {
             get renderWidth() { return renderer._renderWidth; },
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._clouds, this._foliage, this._subsystems);
+        this._weather = new WeatherPasses(this._view, this._projection, this._shadows, this._foliage);
         this._visibility = new Visibility({
             get selectedNodeId() { return renderer._selectedNodeId; },
             get thumbnailMode() { return renderer._thumbnailMode; },
@@ -514,6 +520,7 @@ export class Renderer {
         this._shadows.pointShadowFBO = new LayeredDepthFramebuffer();
         this._shadows.pointStaticFBO = new LayeredDepthFramebuffer();
         this._shadows.spotStaticFBO = new LayeredDepthFramebuffer();
+        this._shadows.shelterFBO = new LayeredDepthFramebuffer();
         this._targets.gBuffer = new Framebuffer({ colorAttachments: 3, colorTextureOptions: { mipMap: false, precision: 'high' } });
         // Bloom carries linear HDR (bright pixels can far exceed 1.0), so both the bright buffer and the
         // ping-pong blur targets are float — an RGBA8 bloom would clamp and defeat the HDR bright-pass.
@@ -688,6 +695,9 @@ export class Renderer {
         this._shadows.shadowCascadeFBO.create(SHADOW_MAP_SIZE, this._shadows.shadowLayerCount);
         this._shadows.spotShadowFBO.create(this._shadows.spotShadowResolution, ShadowPasses.MAX_SPOT_SHADOWS);
         this._shadows.pointShadowFBO.create(this._shadows.pointShadowResolution, MAX_POINT_SHADOWS * 6);
+        // 1x1 and open sky until the weather draws a shelter map: bound for every program that reads it.
+        this._shadows.shelterFBO.create(1, 1, true);
+        this._shadows.shelterFBO.clearAll();
 
         this._post.createBloomMips(rw, rh);
 
@@ -889,6 +899,10 @@ export class Renderer {
         this._shadows.shadowLight = shadowLight; // post passes (volumetric god rays) need the sun
         this._shadows.prepareCloudShadow(scene);
 
+        // The weather volumes, before the shadows: the foliage shadows bow by them. A preview draws none.
+        const weatherPreview = this._thumbnailMode || !!this._subsystems.capture.presentTarget;
+        this._weather.prepare(scene, weatherPreview);
+
         // Foliage GPU state must be current BEFORE the shadow pass, which can now draw it. Timed under
         // its own scope: a layer whose prototypes were just re-derived re-uploads every cell here, and
         // that cost is invisible if it is charged to whichever pass happens to open next.
@@ -910,6 +924,8 @@ export class Renderer {
         this._stats.checkGLErrors('spotShadows');
         this._shadows.renderPointShadows(scene);
         this._stats.checkGLErrors('pointShadows');
+        // What keeps the ground under a roof dry: drawn by the caster pipelines, only when it changed.
+        if (this._passes.beginPass('weather.shelter')) this._weather.renderShelter(scene, weatherPreview);
 
         if (!this._shadows.shadowsActive) {
             // No caster: the pass above is skipped, so the layers still hold the LAST scene's depth and
@@ -1039,7 +1055,13 @@ export class Renderer {
         // landscape chunks: their terrain material's layers are synced per landscape just below
         // (`sync` has nothing to do for a 'terrain' material).
         for (const node of scene.modelsExceptTerrain) for (const mat of node.model.materials) packer.sync(mat, this._view.frameIndex);
-        for (const node of scene.landscapes) node.terrain.syncPackedLayers(this._view.frameIndex, this._terrainLayerTextureSize);
+        // Each landscape draws its snow with the snowing weather volume's material that reaches it, baked
+        // as one more layer of its surface arrays (render/weatherPack.ts `snowForLandscape`).
+        for (const node of scene.landscapes) {
+            const snow = this._thumbnailMode ? null : snowForLandscape(scene.weatherVolumes, node.getBoundingBox());
+            node.terrain.syncPackedLayers(this._view.frameIndex, this._terrainLayerTextureSize,
+                snow?.snowMaterial ? { material: snow.snowMaterial, metresPerRepeat: snow.snowTiling } : null);
+        }
         // Foliage prototypes are not scene models, so they were never synced: a foliage tree never got
         // its ORM pack, nor its cutout's edge-padded colour. Every level of every mesh layer, so a LOD
         // switch never meets an unbaked material.
@@ -1949,6 +1971,21 @@ export class Renderer {
     public set volumetricFogTemporal(on: boolean) { this._fog.temporal = !!on; }
     public get volumetricFogLocalLights(): boolean { return this._fog.localLights; }
     public set volumetricFogLocalLights(on: boolean) { this._fog.localLights = !!on; }
+    /** See {@link RenderSettings.weatherShelterEnabled}. A quality-tier field. */
+    public get weatherShelterEnabled(): boolean { return this._shadows.shelterEnabled; }
+    public set weatherShelterEnabled(on: boolean) { this._shadows.shelterEnabled = !!on; this._shadows.invalidateShelter(); }
+    /** See {@link RenderSettings.weatherShelterResolution}. A quality-tier field. */
+    public get weatherShelterResolution(): number { return this._shadows.shelterResolution; }
+    public set weatherShelterResolution(v: number) {
+        const n = Math.round(Number.isFinite(+v) ? +v : 1024);
+        this._shadows.shelterResolution = Math.min(4096, Math.max(256, n));
+        this._shadows.invalidateShelter();
+    }
+    /** The frame's weather volumes, packed (the inspector's status line, tests). */
+    public get weatherFrameVolumes(): readonly WeatherNode[] { return this._weather.pack.volumes; }
+    /** Whether a shelter map is in use this frame. */
+    public get weatherShelterActive(): boolean { return this._shadows.shelterValid; }
+
     /** See {@link RenderSettings.volumetricFogLocalShadows}. A quality-tier field. */
     public get volumetricFogLocalShadows(): boolean { return this._fog.localShadows; }
     public set volumetricFogLocalShadows(on: boolean) { this._fog.localShadows = !!on; }
@@ -2180,6 +2217,9 @@ export class Renderer {
         this._fog.slices = t.volumetricFogSlices;
         this._fog.localShadows = t.volumetricFogLocalShadows;
         this._fog.invalidate();
+        this._shadows.shelterEnabled = t.weatherShelterEnabled;
+        this._shadows.shelterResolution = t.weatherShelterResolution;
+        this._shadows.invalidateShelter();
         this._ssr.ssrResolutionScale = t.ssrResolutionScale;
         this._ssr.ssrSteps = t.ssrSteps;
         this._temporal.motionBlurEnabled = t.motionBlurEnabled;
@@ -2503,6 +2543,8 @@ export class Renderer {
             volumetricFogTemporal: this._fog.temporal,
             volumetricFogLocalLights: this._fog.localLights,
             volumetricFogLocalShadows: this._fog.localShadows,
+            weatherShelterEnabled: this._shadows.shelterEnabled,
+            weatherShelterResolution: this._shadows.shelterResolution,
             ssrResolutionScale: this._ssr.ssrResolutionScale,
             ssrSteps: this._ssr.ssrSteps,
             ssrMaxRoughness: this._ssr.ssrMaxRoughness,
@@ -2653,6 +2695,8 @@ export class Renderer {
         if (s.volumetricFogTemporal !== undefined) this.volumetricFogTemporal = s.volumetricFogTemporal;
         if (s.volumetricFogLocalLights !== undefined) this.volumetricFogLocalLights = s.volumetricFogLocalLights;
         if (s.volumetricFogLocalShadows !== undefined) this.volumetricFogLocalShadows = s.volumetricFogLocalShadows;
+        if (s.weatherShelterEnabled !== undefined) this.weatherShelterEnabled = s.weatherShelterEnabled;
+        if (s.weatherShelterResolution !== undefined) this.weatherShelterResolution = s.weatherShelterResolution;
         if (s.ssrResolutionScale !== undefined) this.ssrResolutionScale = s.ssrResolutionScale;
         if (s.ssrSteps !== undefined) this.ssrSteps = s.ssrSteps;
         if (s.ssrMaxRoughness !== undefined) this.ssrMaxRoughness = s.ssrMaxRoughness;

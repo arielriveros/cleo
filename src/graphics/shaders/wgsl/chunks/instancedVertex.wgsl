@@ -23,8 +23,19 @@ struct InstancedTransform {
     // the stamps themselves, two vec4s each (graphics/foliageInteraction.ts).
     u_interact: vec4<f32>,
     u_interactStamps: array<vec4<f32>, 32>,
-    // Foliage weather (CLEO_FOLIAGE): x = droop, the weather's weight as a fraction of the plant's height.
+    // Foliage weather (CLEO_FOLIAGE): x = how far the plant bows under a full load of rain or snow (its
+    // materials' weightDroop); the weather at the plant scales it (instanceWeather).
     u_foliageDroop: vec4<f32>,
+    // Weather volumes (chunks/weatherVolumes.wgsl), evaluated per plant at its root; written once a frame
+    // by render/weather.ts into every instanced program. Declared in every variant, read by the PBR
+    // family (CLEO_INSTANCED_WEATHER) and the foliage shadows (CLEO_FOLIAGE).
+    u_weatherInv: array<mat4x4<f32>, 4>,
+    u_weatherBlend: array<vec4<f32>, 4>,
+    u_weatherAmount: array<vec4<f32>, 4>,
+    u_weatherShape: array<vec4<f32>, 4>,
+    u_weatherInfo: vec4<f32>,
+    u_shelterMatrix: mat4x4<f32>,
+    u_shelterParams: vec4<f32>,
     // Foliage LOD crossfade, per instance. Band: x..y fade-in ramp, z..w fade-out ramp (metres from
     // the camera; an empty ramp means no fade on that side). Camera: xyz = position, w = mode (0 off,
     // 1 dithered dissolve, 2 shrink — grass). Frame: x = dither phase.
@@ -36,6 +47,48 @@ struct InstancedTransform {
     u_camHolePivot: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> u_transform: InstancedTransform;
+
+fn weatherCount() -> i32 { return i32(u_transform.u_weatherInfo.x); }
+fn weatherInv(i: i32) -> mat4x4<f32> { return u_transform.u_weatherInv[i]; }
+fn weatherBlend(i: i32) -> vec4<f32> { return u_transform.u_weatherBlend[i]; }
+fn weatherAmount(i: i32) -> vec4<f32> { return u_transform.u_weatherAmount[i]; }
+fn weatherShape(i: i32) -> vec4<f32> { return u_transform.u_weatherShape[i]; }
+
+#include "./weatherVolumes.wgsl"
+
+/** How much the weather bows a plant at `origin` (0..1 of its full droop): rain a little, snow fully. */
+fn weatherDroopAt(origin: vec3<f32>) -> f32 {
+    if (weatherCount() <= 0) { return 0.0; }
+    let w = weatherAt(origin);
+    return max(w.wet * 0.4, w.snow);
+}
+
+#if CLEO_INSTANCED_WEATHER
+// The weather's shelter map (render/shadows.ts `renderShelter`), after the material maps (pbrGBuffer's
+// 0-11). Sampled here, once per vertex of a plant at its root, never per fragment: the whole family
+// declares and reads it, so the block layout and the bind group never depend on the variant.
+@group(0) @binding(12) var u_weatherShelter_texture: texture_depth_2d_array;
+@group(0) @binding(13) var u_weatherShelter_sampler: sampler_comparison;
+
+/** 1 = open sky over the plant's root, 0 = something solid over it. Off the map: open. */
+fn instanceShelterOpen(origin: vec3<f32>) -> f32 {
+    let params = u_transform.u_shelterParams;
+    let c = u_transform.u_shelterMatrix * vec4<f32>(origin, 1.0);
+    let q = c.xyz / c.w * 0.5 + 0.5;
+    // `all`, never `&&` (see weatherBoxWeight).
+    let inside = all(vec4<bool>(params.x > 0.5, all(q.xy >= vec2<f32>(0.0)), all(q.xy <= vec2<f32>(1.0)), q.z <= 1.0));
+    let open = textureSampleCompareLevel(u_weatherShelter_texture, u_weatherShelter_sampler, q.xy, 0, q.z - params.y);
+    return select(1.0, open, inside);
+}
+
+/** The weather a plant shows, per plant: x = wet, y = snow, both kept off it under shelter. */
+fn instanceWeather(origin: vec3<f32>) -> vec2<f32> {
+    if (weatherCount() <= 0) { return vec2<f32>(0.0); }
+    let w = weatherAt(origin);
+    let reach = mix(1.0, instanceShelterOpen(origin), w.shelter);
+    return vec2<f32>(w.wet, w.snow) * reach;
+}
+#endif
 
 @vertex
 fn vs_main(
@@ -77,7 +130,9 @@ fn vs_main(
                           u_transform.u_windShape, u_transform.u_windCamera);
 #if CLEO_FOLIAGE
     let push = interactLean(model[3].xyz, u_transform.u_windTime.x, u_transform.u_interact, u_transform.u_interactStamps);
-    let droop = u_transform.u_foliageDroop.x;
+    // Per plant, from the weather at its root. Never sheltered: the shadow and prepass programs bow it the
+    // same way without the shelter map, and their depth must match this pass's exactly.
+    let droop = u_transform.u_foliageDroop.x * weatherDroopAt(model[3].xyz);
     // For the surface (chunks/foliageSurface.wgsl): the plant's hash, the gust it is in, whether it is leaves.
     let origin = model[3].xyz;
     out.foliage = vec4<f32>(windHash(origin.xz * 1.37 + vec2<f32>(origin.y, 0.0)),
@@ -89,6 +144,14 @@ fn vs_main(
     let droop = 0.0;
 #endif
     out.fragPos = windDisplace(out.fragPos, position, out.normal, model, u_transform.u_windTime.x, wind, push, droop);
+#endif
+#if CLEO_INSTANCED_WEATHER
+    // Every variant of the family reads the shelter map (its resources must not depend on the variant);
+    // only the foliage surface shows the result.
+    let weather = instanceWeather(model[3].xyz);
+#if CLEO_FOLIAGE
+    out.foliageWeather = weather;
+#endif
 #endif
     cameraHoleVarying(&out, u_transform.u_camHole, u_transform.u_camHolePivot, u_transform.u_lodFrame.x);
     // From fragPos, which IS model * position unless the wind moved it.

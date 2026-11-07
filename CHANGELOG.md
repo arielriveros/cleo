@@ -61,12 +61,28 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     flicker of the light it follows.
   - The height fog and god rays are unchanged. A scene with no volume runs nothing.
   - Player contract 19.
+- **Weather volumes on the landscape and its plants.** The Weather node is now a box, sized with the
+  viewport's face handles like a fog volume, and the weather falls only inside it.
+  - *Several at once.* Volumes may overlap; the higher **Priority** draws over the lower, so a dry box
+    inside a snowy one carves out a dry pocket. Up to 4 near the camera draw a frame.
+  - *Wet ground.* The landscape darkens and glosses in rain, and water stands in its low, flat spots
+    (**Puddles**).
+  - *Snow.* It settles on ground flatter than **Snow Slope**, low ground first, its edge broken up by
+    **Snow Breakup**, and is drawn with a chosen **Snow Material**. That material's maps are baked as one
+    more layer of the landscape's surface arrays, so it costs no binding. Without one, flat white.
+  - *Plants, one at a time.* Foliage takes the weather of the volume each plant stands in, and bows
+    under it individually.
+  - *Shelter.* A depth map seen from straight above, of every still, solid model round the camera, keeps
+    the ground and plants under a roof or an overhang dry and free of snow. It is redrawn only when
+    something in it moves. Each volume can turn it off. Renderer setting `weatherShelterEnabled` and
+    `weatherShelterResolution`; off on the Low tier.
+  - *Old scenes.* A weather node saved before boxes covers the whole scene, as it did. Player contract 20.
 - **The Valley at night.**
   - *Sky.* A 2 lux moon, near white, with the blue left to night vision, and a physical sky.
   - *Fire.* Fire lights flicker, and their flames and embers follow them. The bonfire and fire pits
     glow into the fog.
-  - *Fog.* Mist over the pond and a valley-floor haze, both gathering at night and at dawn, and smoke
-    in the dungeon halls.
+  - *Fog.* Mist over the pond and at the skull cave's mouth, both gathering at night and at dawn, and
+    smoke in the dungeon halls.
   - *Probe.* The valley probe gives reflections only.
 - **Surfaces, water and standard outputs in the World Creator.** A stack of surfaces (sand, grass,
   rock, scree, snow...) placed by rules over the terrain's own values and what erosion did to it:

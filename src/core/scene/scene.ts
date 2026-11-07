@@ -150,6 +150,7 @@ export class Scene {
     private _skyLight: SkyLightNode | null = null;
     private _wind: WindNode | null = null;
     private _weather: WeatherNode | null = null;
+    private _weatherVolumes: Set<WeatherNode> = new Set();
     private _environmentMap: Texture | null = null;
     /**
      * Scene-wide indirect fill, in LUX. What every surface receives from nothing in particular.
@@ -220,6 +221,7 @@ export class Scene {
         this._skyLight = null;
         this._wind = null;
         this._weather = null;
+        this._weatherVolumes = new Set();
 
         // TODO: Move this to a LightManager class
         this._numPointLights = 0;
@@ -857,6 +859,7 @@ export class Scene {
         this._skyLight = null;
         this._wind = null;
         this._weather = null;
+        this._weatherVolumes = new Set();
         this._nodesByName = new Map();
         this._nodesById = new Map();
         for (const node of this._nodes) {
@@ -920,8 +923,11 @@ export class Scene {
                 this._skyLight = node;
             if (node instanceof WindNode)
                 this._wind = node;
-            if (node instanceof WeatherNode)
-                this._weather = node;
+            if (node instanceof WeatherNode) {
+                this._weatherVolumes.add(node);
+                // The highest priority (the first found among equals): what `weather` hands a script.
+                if (!this._weather || node.priority > this._weather.priority) this._weather = node;
+            }
             if (node instanceof CameraNode)
                 this._cameras.add(node);
             // A root is also a UINode and lands in both sets: _uiRoots drives the layout pass, _uiNodes is
@@ -1314,11 +1320,21 @@ export class Scene {
         return this._wind;
     }
 
-    /** The scene's weather (wetness, snow), or null — in which case it is dry. */
+    /**
+     * The scene's highest-priority weather volume, or null — in which case it is dry. A scene may hold
+     * several (bounded boxes, overlapping); see {@link weatherVolumes}.
+     */
     public get weather(): WeatherNode | null {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._weather;
+    }
+
+    /** Every weather volume in the scene (render/weather.ts composites them). */
+    public get weatherVolumes(): Set<WeatherNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._weatherVolumes;
     }
 
     public get skyLight(): SkyLightNode | null {

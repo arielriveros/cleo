@@ -83,6 +83,9 @@ export function collectSceneTextureIds(
       }
       collectFoliageLayerTextureIds(terrain.foliage, set)
     }
+    // A weather volume's snow material (its embedded copy): the landscape draws its maps.
+    for (const w of scene.weatherVolumes ?? [])
+      for (const id of w.snowMaterial?.textures?.values?.() ?? []) if (!isDerivedTextureId(id as string)) set.add(id)
     // Live tilemaps: each layer's tileset draws from one atlas texture.
     for (const tn of scene.tilemaps)
       for (const ts of tn.tilemap.tilesets.values()) if (ts.textureId) set.add(ts.textureId)
@@ -193,6 +196,9 @@ export function collectSceneMaterialIds(scene: Scene | null | undefined): Set<st
       if (node.nodeType === 'camera')
         for (const sid of getScreenMaterialIds(node as CameraNode)) set.add(sid)
     }
+    // A weather volume draws its snow with a copy of a Material asset.
+    for (const w of scene.weatherVolumes ?? [])
+      if (typeof w.snowMaterialId === 'string' && w.snowMaterialId) set.add(w.snowMaterialId)
     // A landscape material's slots take their surfaces from Material assets, and the landscape embeds
     // those landscape materials: a material used only as a rock slot is still used by this scene.
     for (const ln of scene.landscapes) {

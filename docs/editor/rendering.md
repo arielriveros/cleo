@@ -196,6 +196,16 @@ intensity of 0 (the Low quality preset does that) or a bloom pass turned off und
 on the Performance page. Bloom that emits nothing with neither is usually a threshold in the wrong
 space, not a broken effect.
 
+### Weather
+
+Draws the scene's [Weather](node-inspector.md#weather) volumes on the landscape and its plants: up to 4
+near the camera, composited where they overlap. **Shelter** keeps what stands under a roof or anything
+solid dry and free of snow. It uses a depth map, seen from straight above, of the 96 m round the camera:
+every still, solid, shadow-casting model (not plants, glass, or anything moving or under half a metre
+across), redrawn only when the camera has moved an eighth of it or something in it moved.
+**Shelter Resolution** is that map's size; the quality tier sets both, and Low has no shelter. A scene
+with no weather volume runs nothing.
+
 ### Volumetric Fog
 
 Draws the scene's [Volumetric Fog](node-inspector.md#volumetric-fog) volumes. The camera's view, out to

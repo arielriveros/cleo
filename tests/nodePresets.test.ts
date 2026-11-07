@@ -1,3 +1,5 @@
+import { WeatherNode } from '../src/core/scene/nodes/weatherNode';
+import { WEATHER_PRESETS } from '../src/core/scene/nodes/weatherPresets';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { applyPreset, type Preset } from '../src/core/presets';
 import { WindNode } from '../src/core/scene/nodes/windNode';
@@ -72,6 +74,9 @@ const CASES: Case[] = [
     { name: 'pointLight', table: POINT_LIGHT_PRESETS, make: () => new PointLight({}), reserved: [] },
     { name: 'spotLight', table: SPOT_LIGHT_PRESETS, make: () => new Spotlight({}), reserved: [] },
     { name: 'surface', table: PHYSICS_SURFACE_PRESETS, make: () => ({ friction: 0.3, restitution: 0 }), reserved: [] },
+    { name: 'weather', table: WEATHER_PRESETS, make: () => new WeatherNode('weather'),
+      reserved: ['size', 'blendDistance', 'priority', 'enabled', 'snowMaterial', 'snowMaterialId', 'snowTiling',
+          'snowSlope', 'snowBreakup', 'shelter'] },
 ];
 
 function expectHolds(target: any, options: object, label: string): void {

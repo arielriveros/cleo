@@ -11,10 +11,11 @@
 // layer's paint mask times its blend rule (elevation, slope, noise, height blend, opacity), and each
 // surface is laid OVER everything below it. Erasing a road reveals whatever was under it.
 //
-// THREE TEXTURES, WHATEVER THE SURFACE COUNT. Every surface's albedo+AO and normal+height live in two
-// 2D ARRAYS at one common size (built by TexturePacker.bakeInto), and the paint masks in a third, four
-// layers per RGBA slice. The old stack bound nine textures for four layers; this binds three for
-// sixteen, which is the whole reason more slots became possible at all.
+// FOUR TEXTURES, WHATEVER THE SURFACE COUNT. Every surface's albedo, ORM and normal+height live in three
+// 2D ARRAYS at one common size (built by TexturePacker.bakeInto), and the paint masks in a fourth, four
+// layers per RGBA slice. The old stack bound nine textures for four layers; this binds four for
+// sixteen, which is the whole reason more slots became possible at all. The weather's snow material is
+// one more layer of the same arrays (`u_snowLayer`), outside the composite.
 //
 // FRONT TO BACK, WITH AN EARLY OUT. Iterating top-down, each surface takes its alpha of whatever is
 // still uncovered, and the loop stops once nothing is. The base surface covers, so a fragment pays for
@@ -67,6 +68,11 @@ struct TerrainUniforms {
      */
     u_debugSurface: i32,
     /**
+     * The layer of the surface arrays holding the weather's snow (chunks/terrainWeather.wgsl), its row
+     * of the per-surface arrays below at the same index. -1: no snow material, flat snow.
+     */
+    u_snowLayer: i32,
+    /**
      * Elevation in rule units = fragPos.y * x + y. On a landscape (1, -origin.y): metres above its
      * origin, so moving the landscape does not move its snow line. A preview remaps its small subject
      * onto the material's rule span instead.
@@ -107,6 +113,12 @@ struct TerrainSurface {
     /** Dielectric specular level, blended like roughness; `dielectricF0` turns it into F0. */
     reflectance: f32,
     normal: vec3<f32>,
+    /** Composited height, 0..1 (0.5 where no surface has a height map): where water pools, snow drifts. */
+    height: f32,
+    /** The landscape chart and its screen derivatives, for the weather's snow fetch below the loop. */
+    uv: vec2<f32>,
+    uvDx: vec2<f32>,
+    uvDy: vec2<f32>,
 };
 
 /** Mirrors `rangeCoverage`: 1 inside min..max, a smoothstep fade to 0 across the falloff outside. */
@@ -212,6 +224,7 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
     var roughness = 0.0;
     var reflectance = 0.0;
     var normal = vec3<f32>(0.0);
+    var heightSum = 0.0;
     var remaining = 1.0;
     var debugWeight = 0.0;
     var debugColor = vec3<f32>(0.0);
@@ -297,6 +310,7 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
         roughness += w * surfRoughness;
         reflectance += w * u_terrain.u_surfShade[i].x;
         normal += w * n;
+        heightSum += w * height;
         if (i == u_terrain.u_debugSurface) { debugWeight = w; }
         debugColor += w * surfaceDebugColor(i);
         remaining *= 1.0 - a;
@@ -311,6 +325,7 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
         roughness += remaining * 0.9;
         reflectance += remaining * 0.5;
         normal += remaining * nGeom;
+        heightSum += remaining * 0.5;
     }
 
     var out: TerrainSurface;
@@ -321,6 +336,10 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
     out.reflectance = reflectance;
     let len = length(normal);
     out.normal = select(nGeom, normal / len, len > 1e-5);
+    out.height = heightSum;
+    out.uv = baseUv;
+    out.uvDx = ddxUv;
+    out.uvDy = ddyUv;
 
     // Authoring views. Unlit colour would read better, but the G-buffer has no such channel, so the
     // view is carried in albedo and lit like the ground it describes.

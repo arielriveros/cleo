@@ -295,10 +295,34 @@ follow it too.
 
 #### Weather
 
-The scene's weather: **Wetness** (0 dry, 1 soaked) and **Snow** (0 none, 1 thick). Foliage materials
-answer it by their [Weather](models-and-materials.md#foliage-materials) settings — rain darkens and
-glosses leaves and blades, snow settles on what faces up, and both weigh plants down. **Presets** go
-from Dry through Rain to Snowed In. A scene without one is dry.
+A box of rain or snow: inside it the landscape and its plants get wet or snowed on, and outside it
+nothing changes. Size it with the face handles in the viewport, as a fog volume. Several may overlap;
+where they do, the higher **Priority** is drawn over the lower, so a dry box inside a snowy one carves out
+a dry pocket, and up to 4 near the camera draw at once. On the landscape, rain darkens and glosses the
+ground and stands in puddles in its low, flat spots; snow settles on ground flat enough to hold it, low
+ground first, drawn with the **Snow Material**. Foliage materials answer by their
+[Weather](models-and-materials.md#foliage-materials) settings, per plant: rain darkens and glosses leaves
+and blades, snow settles on what faces up, and both weigh plants down. **Presets** go from Dry through
+Rain to Snowed In and set the weather alone, never the box. A scene without one is dry; a weather node
+saved before volumes covers the whole scene, and **Make bounded** gives it a box.
+
+| Field | Meaning |
+|---|---|
+| **Enabled** | Off leaves the volume in the scene without it doing anything. |
+| **Size** | Full extents of the box in metres, before the node transform, which it follows, rotation included. |
+| **Blend Distance** | How far inside its faces the weather fades in, in metres. |
+| **Priority** | Where volumes overlap, the higher draws over the lower; it also decides which 4 draw when more are near. |
+| **Wetness** | 0 dry, 1 soaked: darker, glossier ground and leaves. |
+| **Puddles** | How much of the wet ground's low, flat spots holds standing water: 0 none, 1 every hollow. |
+| **Snow** | 0 none, 1 thick: snow on flat ground and on what faces up on foliage. |
+| **Snow Material** | What the landscape draws its snow with: a PBR material's colour, normal and roughness maps. Plants take its colour and roughness. None: flat white snow. |
+| **Snow Tiling** | Metres per repeat of the snow material on the landscape. |
+| **Snow Slope** | Degrees: ground steeper than this sheds its snow. |
+| **Snow Breakup** | How much a noise breaks the snow's edge into patches: 0 a clean line, 1 ragged drifts. |
+| **Shelter** | Covered ground and plants stay dry and free of snow: under a roof, an overhang, anything solid that casts a shadow from straight above. Off: the weather reaches everything in the box. |
+
+A line above the fields says when the volume does nothing and why: disabled, dry, too far from the
+camera, or over the volume cap.
 
 #### Water Volume
 

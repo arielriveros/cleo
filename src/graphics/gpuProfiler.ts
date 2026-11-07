@@ -30,6 +30,8 @@ export const RENDER_PASSES = [
     'shadows.cascades',
     'shadows.spot',
     'shadows.point',
+    // The weather's shelter map: what stands over the ground, seen from straight above (redrawn rarely).
+    'weather.shelter',
     // Particle simulation steps: compute dispatches on WebGPU, ping-pong draws on WebGL2.
     'particles.sim',
     'geometry',
@@ -98,7 +100,7 @@ export type RenderPass = typeof RENDER_PASSES[number];
 
 /** Passes the profiler panel offers as on/off switches. Excludes any pass the image cannot do without. */
 export const TOGGLEABLE_PASSES: RenderPass[] = [
-    'shadows.cascades', 'shadows.spot', 'shadows.point', 'foliage', 'decals', 'decals.emissive', 'ssao', 'ssao.temporal', 'ssao.blur', 'ssao.history', 'ssr', 'ssr.temporal', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
+    'shadows.cascades', 'shadows.spot', 'shadows.point', 'weather.shelter', 'foliage', 'decals', 'decals.emissive', 'ssao', 'ssao.temporal', 'ssao.blur', 'ssao.history', 'ssr', 'ssr.temporal', 'sky', 'clouds', 'skyFog', 'taa', 'grid',
     'transparent', 'particles', '2d', 'gizmos', 'overlay', 'velocity', 'motionBlur', 'godRays', 'bloom.bright',
     'bloom.blur', 'bloom.composite', 'chromatic', 'screenMaterials',
     // `dof.coc` switches depth of field as a whole. Its other two passes report their own timings
@@ -166,6 +168,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     cascade: 'shadows.cascades',
     spotShadow: 'shadows.spot',
     pointShadow: 'shadows.point',
+    shelter: 'weather.shelter',
     deferredLighting: 'lighting',
     screenMaterial: 'screenMaterials',
     skyAtmosphereBake: 'sky.bake',

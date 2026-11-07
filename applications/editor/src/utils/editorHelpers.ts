@@ -13,6 +13,7 @@ import {
   LightProbeNode,
   ExposureVolumeNode,
   VolumetricFogNode,
+  WeatherNode,
   DecalNode,
   SoundNode,
   Vec,
@@ -70,6 +71,7 @@ const PROBE_HELPER = '__editor__ProbeHelper';
 const EXPOSURE_HELPER = '__editor__ExposureVolumeHelper';
 const OCCLUSION_VOLUME_ICON = '__editor__OcclusionVolumeIcon';
 const FOG_VOLUME_ICON = '__editor__VolumetricFogIcon';
+const WEATHER_VOLUME_ICON = '__editor__WeatherIcon';
 const SOUND_ICON = '__editor__SoundSprite';
 const SOUND_RADIUS = '__debug__SoundRadius';
 const BODY_PREFIX = '__debug__body_';
@@ -492,13 +494,24 @@ function ensureFogVolumeIcon(volume: VolumetricFogNode) {
   volume.addChild(icon);
 }
 
+// The same billboard under a weather volume, a rain blue. What a click selects it by (`WeatherNode.pickBox`).
+function ensureWeatherIcon(volume: WeatherNode) {
+  if (volume.getChildByName(WEATHER_VOLUME_ICON).length) return;
+  const icon = chrome(new SpriteNode(WEATHER_VOLUME_ICON, Sprite.fromTexture('__editor__probe_icon', {
+    tint: [0.55, 0.75, 1],
+  })));
+  icon.setUniformScale(0.5);
+  icon.maxScreenSize = ICON_MAX_PX;
+  volume.addChild(icon);
+}
+
 /**
  * A box volume whose extent the selection shows as an oriented wireframe: an exposure volume, an
- * occlusion volume, a fog volume, a bounded probe.
+ * occlusion volume, a fog volume, a bounded weather volume, a bounded probe.
  */
-const isOrientedVolume = (node: unknown): node is ExposureVolumeNode | OcclusionVolumeNode | VolumetricFogNode | LightProbeNode =>
+const isOrientedVolume = (node: unknown): node is ExposureVolumeNode | OcclusionVolumeNode | VolumetricFogNode | WeatherNode | LightProbeNode =>
   node instanceof ExposureVolumeNode || node instanceof OcclusionVolumeNode || node instanceof VolumetricFogNode
-  || (node instanceof LightProbeNode && node.bounded);
+  || (node instanceof WeatherNode && node.bounded) || (node instanceof LightProbeNode && node.bounded);
 
 // Attach a billboard icon under a decal, so a decal that projects nothing visible yet (no material, or
 // nothing inside its box) still shows where it is. Tinted amber, like its selection box. It is also what
@@ -578,7 +591,7 @@ function lineGeometry(lines: { positions: [number, number, number][]; indices: n
  * one thing an author must size by eye), or a force field's sphere or box. Top-level and re-placed every
  * frame, like the decal box, so the transform gizmo and inspector edits are followed.
  */
-function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode | WaterVolumeNode | OcclusionVolumeNode | ExposureVolumeNode | VolumetricFogNode | LightProbeNode) {
+function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode | WaterVolumeNode | OcclusionVolumeNode | ExposureVolumeNode | VolumetricFogNode | WeatherNode | LightProbeNode) {
   const sphere = node instanceof ForceFieldNode && node.shape === 'sphere';
   const name = `${EFFECTSHAPE_PREFIX}${node.id}:${sphere ? 's' : 'b'}`;
   let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
@@ -586,7 +599,7 @@ function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNo
     existing = wireModel(name, sphere ? unitSphereLines() : unitBoxLines(),
       node instanceof ParticleSystemNode ? [1, 0.55, 0.3] : node instanceof WaterVolumeNode ? [0.3, 0.6, 1]
         : node instanceof OcclusionVolumeNode ? [0.75, 0.45, 1] : node instanceof ExposureVolumeNode ? [1, 0.8, 0.3]
-        : node instanceof VolumetricFogNode ? [0.75, 0.85, 0.95]
+        : node instanceof VolumetricFogNode ? [0.75, 0.85, 0.95] : node instanceof WeatherNode ? [0.55, 0.75, 1]
         : node instanceof LightProbeNode ? [0.4, 0.8, 1] : [0.45, 0.85, 1]);
     scene.addNode(existing);
   }
@@ -604,7 +617,7 @@ function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNo
     // culling uses. So do the exposure volume and light probe boxes: all are oriented boxes under the node
     // transform.
     if (node instanceof OcclusionVolumeNode || node instanceof ExposureVolumeNode || node instanceof VolumetricFogNode
-        || node instanceof LightProbeNode) {
+        || node instanceof WeatherNode || node instanceof LightProbeNode) {
       helper.setPosition(node.worldPosition).setQuaternion(node.worldQuaternion)
             .setScale([node.size[0] * Math.hypot(m[0], m[1], m[2]), node.size[1] * Math.hypot(m[4], m[5], m[6]),
                        node.size[2] * Math.hypot(m[8], m[9], m[10])]);
@@ -1289,6 +1302,10 @@ export function reconcileEditorHelpers(
     } else if (node instanceof VolumetricFogNode) {
       const existing = node.getChildByName(FOG_VOLUME_ICON)[0];
       if (icons && !existing) ensureFogVolumeIcon(node);
+      else if (!icons && existing) node.removeChild(existing);
+    } else if (node instanceof WeatherNode) {
+      const existing = node.getChildByName(WEATHER_VOLUME_ICON)[0];
+      if (icons && !existing) ensureWeatherIcon(node);
       else if (!icons && existing) node.removeChild(existing);
     } else if (node instanceof OcclusionVolumeNode) {
       const existing = node.getChildByName(OCCLUSION_VOLUME_ICON)[0];

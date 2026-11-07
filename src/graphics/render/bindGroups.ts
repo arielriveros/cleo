@@ -9,6 +9,12 @@ import type { FrameTargets } from './frameTargets';
 /** A Basic program's group-0 slot for the opaque depth snapshot (chunks/basicForward.wgsl), not a material map. */
 export const SCENE_DEPTH_FIELD = 'u_sceneDepth';
 
+/**
+ * The instanced PBR family's group-0 slot for the weather's shelter map (chunks/instancedVertex.wgsl,
+ * sampled per plant in the vertex stage), not a material map. The landscape reads the same map from group 3.
+ */
+export const WEATHER_SHELTER_FIELD = 'u_weatherShelter';
+
 /** One owner's last bind group for a pipeline and group index. See `BindGroupCache._lastGroups`. */
 interface LastGroup {
     readonly pipeline: RenderPipeline;
@@ -22,6 +28,8 @@ interface LastGroup {
 interface LightingFacts {
     readonly shadows: boolean;
     readonly lightGrid: boolean;
+    /** The weather's shelter map (chunks/terrainWeather.wgsl), binding 8. */
+    readonly weather: boolean;
     readonly bindings: ReadonlySet<number>;
 }
 
@@ -31,6 +39,8 @@ export interface BindGroupHost {
     spotShadows(): Texture;
     pointShadows(): Texture;
     lightGrid(): Texture;
+    /** The weather's shelter map (render/shadows.ts `renderShelter`), or its 1x1 fallback. */
+    weatherShelter(): Texture;
 }
 
 /**
@@ -54,7 +64,7 @@ export class BindGroupCache {
      */
     public fallbackArray: Texture | null = null;
 
-    private readonly _materialFields = new WeakMap<RenderPipeline, (string | null)[]>();
+    private readonly _materialFields = new WeakMap<RenderPipeline, { fields: (string | null)[]; bindings: number[] }>();
 
     private readonly _materialTextureScratch: Texture[] = [];
 
@@ -234,12 +244,15 @@ export class BindGroupCache {
         // A scratch list, not a new array per draw: _textureBindGroup only reads it.
         const textures = this._materialTextureScratch;
         textures.length = 0;
-        for (const field of this._materialTextureFields(pipeline)) {
+        const slots = this._materialTextureFields(pipeline);
+        for (const field of slots.fields) {
             // The environment cube rides in group 0 alongside the material maps but must NOT be looked
             // up as one: the miss falls back to a 2D texture, a sampler-type mismatch at draw time.
             if (field === null) { textures.push(envCube ?? this.fallbackCube); continue; }
             // The opaque depth snapshot (a soft sprite's fade, chunks/basicForward.wgsl) is the frame's.
             if (field === SCENE_DEPTH_FIELD) { textures.push(this._targets.sceneDepth.depth); continue; }
+            // The weather's shelter map is the frame's too.
+            if (field === WEATHER_SHELTER_FIELD) { textures.push(this._host.weatherShelter()); continue; }
             // A cutout's edge-padded base colour stands in for the authored one (TexturePacker
             // `_syncDilation`); until it is baked, or once it is swept, the authored map draws.
             const dilated = field === 'baseColorTexture' ? material.textures.get(DILATED_BASE_SLOT) : undefined;
@@ -248,7 +261,7 @@ export class BindGroupCache {
             const texture = dilatedTexture ?? (id ? TextureManager.Instance.getTexture(id) : null);
             textures.push(texture ?? this.fallbackTexture);
         }
-        return this.textureGroup(pipeline, 0, textures, undefined, material);
+        return this.textureGroup(pipeline, 0, textures, slots.bindings, material);
     }
 
     /**
@@ -259,18 +272,21 @@ export class BindGroupCache {
      * cannot change, but stripping the `u_material_` prefix off each one used to run a regex per texture
      * per draw — six throwaway strings on every PBR mesh in the scene, every frame.
      */
-    private _materialTextureFields(pipeline: RenderPipeline): readonly (string | null)[] {
-        let fields = this._materialFields.get(pipeline);
-        if (fields) return fields;
-        fields = [];
-        for (const resource of pipeline.resources) {
-            if (resource.group !== 0 || resource.kind !== 'texture') continue;
-            fields.push(resource.glslName === 'u_envMap'
-                ? null
-                : resource.glslName.replace(/^u_material_/, ''));
-        }
-        this._materialFields.set(pipeline, fields);
-        return fields;
+    private _materialTextureFields(pipeline: RenderPipeline): { readonly fields: readonly (string | null)[]; readonly bindings: readonly number[] } {
+        let slots = this._materialFields.get(pipeline);
+        if (slots) return slots;
+        // In BINDING order, each at its own binding: a resource declared ahead of the material maps (the
+        // instanced family's shelter map comes in with its vertex chunk, before pbrGBuffer) must not shift
+        // every map after it by a pair.
+        const resources = pipeline.resources
+            .filter(r => r.group === 0 && r.kind === 'texture')
+            .sort((a, b) => a.binding - b.binding);
+        slots = {
+            fields: resources.map(resource => resource.glslName === 'u_envMap' ? null : resource.glslName.replace(/^u_material_/, '')),
+            bindings: resources.map(resource => resource.binding),
+        };
+        this._materialFields.set(pipeline, slots);
+        return slots;
     }
 
     /**
@@ -351,10 +367,18 @@ export class BindGroupCache {
         return this._factsOf(pipeline).lightGrid;
     }
 
-    /** Does this program declare group 3 at all, in either half? */
+    /** Does this program declare group 3 at all, in any part? */
     public declaresFrameLighting(pipeline: RenderPipeline): boolean {
         const facts = this._factsOf(pipeline);
-        return facts.shadows || facts.lightGrid;
+        return facts.shadows || facts.lightGrid || facts.weather;
+    }
+
+    /**
+     * Does this program read the weather's shelter map (group 3, binding 8)? The deferred landscape does
+     * and reads nothing else of the group, so its draw binds group 3 for this alone.
+     */
+    public declaresWeatherShelter(pipeline: RenderPipeline): boolean {
+        return this._factsOf(pipeline).weather;
     }
 
     private _factsOf(pipeline: RenderPipeline): LightingFacts {
@@ -364,6 +388,7 @@ export class BindGroupCache {
             facts = {
                 shadows: group3.some(r => r.glslName === 'u_shadowCascades'),
                 lightGrid: group3.some(r => r.glslName === 'u_lightData'),
+                weather: group3.some(r => r.glslName === 'u_weatherShelter'),
                 bindings: new Set(group3.map(r => r.binding)),
             };
             this._lightingFacts.set(pipeline, facts);
@@ -404,6 +429,8 @@ export class BindGroupCache {
         }
         // One texture and no sampler beside it — the light data is only ever `textureLoad`ed.
         if (facts.lightGrid && declared.has(6)) { textures.push(this._host.lightGrid()); bindings.push(6); }
+        // The weather's shelter map, after the light grid (chunks/terrainWeather.wgsl).
+        if (facts.weather && declared.has(8)) { textures.push(this._host.weatherShelter()); bindings.push(8); }
         return this.textureGroup(pipeline, 3, textures, bindings, pipeline);
     }
 }

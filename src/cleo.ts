@@ -101,7 +101,7 @@ export { SkyAtmosphereNode, DEFAULT_MOON_LUX } from "./core/scene/nodes/skyAtmos
 export type { SkyAtmosphereOptions } from "./core/scene/nodes/skyAtmosphereNode";
 export { SkyLightNode, DEFAULT_NIGHT_AMBIENT } from "./core/scene/nodes/skyLightNode";
 export { WindNode, WIND_DEFAULTS, type WindOptions } from "./core/scene/nodes/windNode";
-export { WeatherNode, WEATHER_DEFAULTS, type WeatherOptions } from "./core/scene/nodes/weatherNode";
+export { WeatherNode, WEATHER_DEFAULTS, MIN_WEATHER_VOLUME_SIZE, type WeatherOptions } from "./core/scene/nodes/weatherNode";
 export { OcclusionVolumeNode, OCCLUSION_VOLUME_CULL_KEYS, defaultOcclusionVolumeCull, type OcclusionVolumeCull } from "./core/scene/nodes/occlusionVolumeNode";
 export { OcclusionBuffer } from "./graphics/occlusion/occlusionBuffer";
 export { TerrainOccluder } from "./graphics/occlusion/terrainOccluder";
