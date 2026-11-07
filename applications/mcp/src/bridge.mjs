@@ -10,6 +10,13 @@
 //   server -> editor   {type:'call', id, method, params}
 //   editor -> server   {type:'result', id, ok:true, result} | {type:'result', id, ok:false, error:{message}}
 //   editor -> server   {type:'status', client:{...}}           (project switched, play state, ...)
+//   editor -> server   {type:'chat', op, ...}                  (the in-editor chat panel; see chat.mjs)
+//   server -> editor   {type:'chat-event', event}
+//
+// PEERS. When this bridge runs in the agent host (host.mjs), other processes -- the stdio MCP server each
+// Claude Code session launches -- connect as peers ({type:'hello', role:'peer', token}) and send
+// {type:'call', id, method, params, timeoutMs}; the host runs each through its one editor link and answers
+// {type:'result', ...}. So any number of agents share the editor without fighting over its single socket.
 //
 // Security (the holes behind CVE-2025-52882 / CVE-2025-49596 were exactly an unauthenticated localhost
 // socket): bound to 127.0.0.1 only; the Host header must name the loopback address (DNS rebinding); a
@@ -66,7 +73,7 @@ function sameToken(a, b) {
 export class EditorBridge extends EventEmitter {
     /**
      * @param {{ port: number, token: string, allowedOrigins?: string[], serverInfo?: {name: string, version: string},
-     *           log?: (msg: string) => void, helloTimeoutMs?: number }} opts
+     *           log?: (msg: string) => void, helloTimeoutMs?: number, capabilities?: string[] }} opts
      */
     constructor(opts) {
         super();
@@ -76,6 +83,8 @@ export class EditorBridge extends EventEmitter {
         this.serverInfo = opts.serverInfo ?? { name: 'cleo-mcp', version: '0.0.0' };
         this.log = opts.log ?? (() => {});
         this.helloTimeoutMs = opts.helloTimeoutMs ?? 5000;
+        /** What this end offers the editor beyond tool calls: 'chat' when the chat manager runs here. */
+        this.capabilities = opts.capabilities ?? [];
         /** @type {number} */
         this.port = 0;
         /** @type {import('ws').WebSocket | null} */
@@ -85,6 +94,9 @@ export class EditorBridge extends EventEmitter {
         this.nextId = 1;
         /** @type {Map<number, {resolve: (v: any) => void, reject: (e: Error) => void, timer: NodeJS.Timeout, method: string}>} */
         this.pending = new Map();
+        /** Connected peer processes (see the header). */
+        /** @type {Set<import('ws').WebSocket>} */
+        this.peers = new Set();
         this.http = http.createServer((req, res) => {
             // Nothing but the WebSocket lives here. Say what this is, without any project data.
             res.writeHead(426, { 'Content-Type': 'text/plain' }).end('Cleo MCP editor bridge: WebSocket only.\n');
@@ -116,6 +128,7 @@ export class EditorBridge extends EventEmitter {
     async close() {
         this._failPending(new BridgeError('closed', 'The MCP server is shutting down.'));
         this.socket?.close(1001, 'server shutting down');
+        for (const p of this.peers) p.close(1001, 'host shutting down');
         this.wss.close();
         await new Promise(resolve => this.http.close(() => resolve(undefined)));
     }
@@ -187,6 +200,7 @@ export class EditorBridge extends EventEmitter {
                 }
                 authed = true;
                 clearTimeout(helloTimer);
+                if (msg.role === 'peer') { this._acceptPeer(ws, msg); return; }
                 // One editor at a time, the newest wins: a reload or a second tab replaces the old socket,
                 // whose calls in flight fail rather than land in a page the user has left.
                 if (this.socket && this.socket !== ws) {
@@ -195,7 +209,7 @@ export class EditorBridge extends EventEmitter {
                 }
                 this.socket = ws;
                 this.client = { ...(msg.client ?? {}), origin: origin ?? msg.client?.origin };
-                ws.send(JSON.stringify({ type: 'welcome', server: this.serverInfo }));
+                ws.send(JSON.stringify({ type: 'welcome', server: this.serverInfo, capabilities: this.capabilities }));
                 this.log(`editor connected: ${describeClient(this.client)}`);
                 this.emit('connected', this.client);
                 return;
@@ -209,6 +223,8 @@ export class EditorBridge extends EventEmitter {
                 else entry.reject(new BridgeError(msg.error?.code ?? 'editor_error', msg.error?.message ?? 'The editor reported an error.'));
             } else if (msg?.type === 'status') {
                 this.client = { ...this.client, ...(msg.client ?? {}) };
+            } else if (msg?.type === 'chat') {
+                this.emit('chat', msg);
             }
         });
 
@@ -224,6 +240,36 @@ export class EditorBridge extends EventEmitter {
             this.emit('disconnected');
         });
         ws.on('error', err => this.log(`socket error: ${err.message}`));
+    }
+
+    /** Send a frame to the connected editor; false when there is none. @param {object} frame */
+    sendToEditor(frame) {
+        if (!this.socket || this.socket.readyState !== 1 || !this.client) return false;
+        this.socket.send(JSON.stringify(frame));
+        return true;
+    }
+
+    /** @param {import('ws').WebSocket} ws @param {any} hello */
+    _acceptPeer(ws, hello) {
+        this.peers.add(ws);
+        ws.send(JSON.stringify({ type: 'welcome', server: this.serverInfo, role: 'host' }));
+        this.log(`peer connected: ${hello.client?.name ?? 'unnamed'} (${this.peers.size} now)`);
+        this.emit('peer-connected');
+        ws.on('message', raw => {
+            let msg;
+            try { msg = JSON.parse(String(raw)); } catch { return; }
+            if (msg?.type !== 'call' || typeof msg.id !== 'number') return;
+            const reply = (/** @type {object} */ body) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'result', id: msg.id, ...body })); };
+            this.call(String(msg.method), msg.params, { timeoutMs: msg.timeoutMs, waitForEditorMs: msg.waitForEditorMs })
+                .then(result => reply({ ok: true, result }),
+                    err => reply({ ok: false, error: { code: err?.code ?? 'editor_error', message: err?.message ?? String(err) } }));
+        });
+        ws.on('close', () => {
+            this.peers.delete(ws);
+            this.log(`peer disconnected (${this.peers.size} left)`);
+            this.emit('peer-disconnected');
+        });
+        ws.on('error', err => this.log(`peer socket error: ${err.message}`));
     }
 
     /** @param {Error} err */

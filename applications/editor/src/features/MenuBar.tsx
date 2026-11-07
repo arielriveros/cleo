@@ -7,6 +7,7 @@ import { buildMultiSceneGameData } from "./publish/buildMultiSceneGameData";
 import { publishWeb, publishDesktop, isDesktop } from "./publish/publishClient";
 import WorkspaceStatusChip from "./scriptWorkspace/WorkspaceStatusChip";
 import AgentBridgeChip from "./agentBridge/AgentBridgeChip";
+import { AgentChatToggle } from "./agentChat/AgentChatPanel";
 import { importBundleJob } from "../workers/workerClient";
 import { exportBundle } from "../utils/bundleExport";
 import { applyBundleReplace, applyBundleMerge, applyBundleAsNewProject, IMPORT_WRITE_STEPS } from "../utils/bundleImport";
@@ -426,6 +427,8 @@ export default function MenuBar() {
           <LayoutIcon /> Reset Layout
         </Button>
         {resetDoc.card}
+        {/* Opens the Claude chat docked at the right edge (agentChat/AgentChatPanel). */}
+        <AgentChatToggle />
       </div>
     </Topbar>
   )

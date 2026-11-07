@@ -41,22 +41,40 @@ const READ = { readOnlyHint: true, destructiveHint: false, openWorldHint: false 
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 
 /**
- * @param {import('@modelcontextprotocol/sdk/server/mcp.js').McpServer} server
- * @param {import('./bridge.mjs').EditorBridge} bridge
+ * @typedef {{ name: string, config: { title: string, description: string, inputSchema: Record<string, any>,
+ *   annotations: Record<string, boolean>, _meta?: Record<string, unknown> }, handler: (args: any) => Promise<any> }} ToolDef
  */
-export function registerTools(server, bridge) {
+
+/** Anything that can run an editor command: the editor bridge itself, or a peer of the host that owns it. */
+/** @typedef {{ call(method: string, params: unknown, opts?: { timeoutMs?: number }): Promise<any> }} Caller */
+
+/** Register every tool on an MCP server (the stdio server Claude Code launches). */
+export function registerTools(/** @type {import('@modelcontextprotocol/sdk/server/mcp.js').McpServer} */ server, /** @type {Caller} */ bridge) {
+    for (const d of toolDefinitions(bridge)) server.registerTool(d.name, d.config, d.handler);
+}
+
+/**
+ * The tool catalog as plain definitions, so the same tools serve both the stdio MCP server and the in-editor
+ * chat's in-process SDK MCP server (chat.mjs). Each handler relays to the editor and maps the answer to MCP
+ * content.
+ * @param {Caller} bridge
+ * @returns {ToolDef[]}
+ */
+export function toolDefinitions(bridge) {
+    /** @type {ToolDef[]} */
+    const defs = [];
     /**
      * @param {string} name @param {string} method @param {any} config
      * @param {{ timeoutMs?: number | ((args: any) => number) }} [opts]
      */
-    const relay = (name, method, config, opts = {}) => server.registerTool(name, config, async (/** @type {any} */ args) => {
+    const relay = (name, method, config, opts = {}) => defs.push({ name, config, handler: async (/** @type {any} */ args) => {
         try {
             const timeoutMs = typeof opts.timeoutMs === 'function' ? opts.timeoutMs(args) : opts.timeoutMs;
             return toToolResult(await bridge.call(method, args ?? {}, { timeoutMs }));
         } catch (err) {
             return toErrorResult(err);
         }
-    });
+    } });
 
     relay('editor_status', 'status', {
         title: 'Editor status',
@@ -288,4 +306,5 @@ export function registerTools(server, bridge) {
         // Claude Code asks the user on every call, even in a bypass-permissions session.
         _meta: { 'anthropic/requiresUserInteraction': true },
     }, { timeoutMs: (/** @type {any} */ a) => (a?.timeoutMs ?? 30000) + 5000 });
+    return defs;
 }

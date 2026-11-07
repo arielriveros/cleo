@@ -25,6 +25,7 @@ import { useDocument } from "./DocumentContext";
 import { useAssetLibrary } from "./AssetLibraryContext";
 import { groupTabStrip } from "../utils/animationWorkspace";
 import AgentBridgeHost from "./agentBridge/AgentBridgeHost";
+import AgentChatPanel from "./agentChat/AgentChatPanel";
 
 // Ctrl/Cmd+S saves the active tab, Ctrl/Cmd+Shift+S saves everything. Bound on the window (capture phase)
 // so it fires wherever focus is — including inside the Monaco script editor, which handles Ctrl+S itself
@@ -82,6 +83,10 @@ function Shell() {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
       <MenuBar />
+      {/* The editor's work area beside the Claude chat (agentChat/), which docks at the right edge, outside
+          dockview, so it stays up in every mode and during Play. */}
+      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-col flex-1 min-w-0 min-h-0">
       {/* Each authoring session wraps the whole dock so its panels keep the working copy wherever the
           user drags them. Only one is ever live at a time — each keys off the active tab. */}
       <StateMachineProvider>
@@ -105,6 +110,9 @@ function Shell() {
           </TilesetProvider>
         </AnimationFieldProvider>
       </StateMachineProvider>
+      </div>
+      <AgentChatPanel />
+      </div>
       {/* Global mesh-import review modal — overlays the whole editor while an import awaits the user. */}
       <ModelImportModal />
       {/* The editor's one progress surface — import, publish, export, save, thumbnail refresh all report

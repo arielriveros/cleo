@@ -34,6 +34,10 @@ export interface BridgeActivity { method: string; startedAt: number }
 
 export interface BridgeStatus {
   state: BridgeState
+  /** Bumped on every new connection, so a listener can tell a reconnect from a re-render. */
+  link: number
+  /** What the server offers beyond tool calls: 'chat' when it is the agent host (the chat panel's backend). */
+  capabilities: string[]
   /** A server's discovery file is there, whether or not this tab is connected to it. */
   available: boolean
   server: { name: string; version: string; port: number } | null
@@ -66,7 +70,7 @@ export interface HelloClient {
 }
 
 class AgentBridgeClient {
-  private status: BridgeStatus = { state: 'off', available: false, server: null, activity: null, calls: 0, lastMethod: null, lastError: null }
+  private status: BridgeStatus = { state: 'off', link: 0, capabilities: [], available: false, server: null, activity: null, calls: 0, lastMethod: null, lastError: null }
   private listeners = new Set<() => void>()
   private socket: WebSocket | null = null
   private timer: number | null = null
@@ -75,6 +79,7 @@ class AgentBridgeClient {
     app: 'cleo-editor', version: '0', origin: location.origin, desktop: false, project: { id: null, name: null },
   })
   private queue: Promise<void> = Promise.resolve()
+  private chatListeners = new Set<(event: any) => void>()
   private running = false
   /** A token this tab must not retry: refused, or handed over to another tab. */
   private parkedToken: string | null = null
@@ -108,6 +113,22 @@ class AgentBridgeClient {
   }
   /** Only a dev server serves the discovery route. */
   get supported(): boolean { return import.meta.env.DEV }
+
+  // --- chat channel --------------------------------------------------------------------------------------
+
+  /** Events from the agent host's chat manager (applications/mcp/src/chat.mjs). */
+  onChatEvent(cb: (event: any) => void): () => void {
+    this.chatListeners.add(cb)
+    return () => { this.chatListeners.delete(cb) }
+  }
+
+  /** Send a chat op to the host. False when there is no host link that offers chat. */
+  sendChat(op: string, extra: Record<string, unknown> = {}): boolean {
+    const s = this.socket
+    if (!s || s.readyState !== WebSocket.OPEN || this.status.state !== 'connected' || !this.status.capabilities.includes('chat')) return false
+    s.send(JSON.stringify({ type: 'chat', op, ...extra }))
+    return true
+  }
 
   // --- lifecycle -----------------------------------------------------------------------------------------
 
@@ -158,6 +179,9 @@ class AgentBridgeClient {
 
   private async poll() {
     if (!this.running || this.socket) return
+    // Not before the editor has installed its host: the hello must name the open project, and a call that
+    // arrived first would only be refused.
+    if (!this.handler) { this.schedule(250); return }
     const found = await discover()
     if (!this.running || this.socket) return
     if (this.status.available !== !!found) this.set({ available: !!found })
@@ -189,7 +213,13 @@ class AgentBridgeClient {
       let msg: any
       try { msg = JSON.parse(String(ev.data)) } catch { return }
       if (msg?.type === 'welcome') {
-        this.set({ state: 'connected', server: { name: msg.server?.name ?? 'MCP server', version: msg.server?.version ?? '', port: found.port }, lastError: null })
+        this.set({
+          state: 'connected', link: this.status.link + 1,
+          capabilities: Array.isArray(msg.capabilities) ? msg.capabilities.map(String) : [],
+          server: { name: msg.server?.name ?? 'MCP server', version: msg.server?.version ?? '', port: found.port }, lastError: null,
+        })
+      } else if (msg?.type === 'chat-event') {
+        for (const cb of [...this.chatListeners]) cb(msg.event)
       } else if (msg?.type === 'call' && typeof msg.id === 'number') {
         this.enqueue(socket, msg.id, String(msg.method), msg.params)
       }
@@ -198,9 +228,9 @@ class AgentBridgeClient {
     socket.onclose = ev => {
       if (this.socket !== socket) return
       this.socket = null
-      if (ev.code === BAD_TOKEN) { this.parkedToken = found.token; this.set({ state: 'rejected', server: null }) }
-      else if (ev.code === REPLACED) { this.parkedToken = found.token; this.set({ state: 'standby', server: null }) }
-      else this.set({ state: this.enabled ? 'searching' : 'off', server: null })
+      if (ev.code === BAD_TOKEN) { this.parkedToken = found.token; this.set({ state: 'rejected', server: null, capabilities: [] }) }
+      else if (ev.code === REPLACED) { this.parkedToken = found.token; this.set({ state: 'standby', server: null, capabilities: [] }) }
+      else this.set({ state: this.enabled ? 'searching' : 'off', server: null, capabilities: [] })
       if (this.running) this.schedule(POLL_MS)
     }
   }

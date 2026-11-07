@@ -1,7 +1,7 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AliasOptions, Connect, Plugin } from 'vite';
 
 /**
@@ -113,9 +113,18 @@ export function agentBridgeDiscoveryPlugin(): Plugin {
     apply: 'serve',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (req.url?.split('?')[0] !== '/__cleo/agent-bridge') return next();
+        const route = req.url?.split('?')[0];
+        if (route !== '/__cleo/agent-bridge' && route !== '/__cleo/agent-host/start') return next();
         const site = req.headers['sec-fetch-site'];
         if (site && site !== 'same-origin' && site !== 'none') { res.statusCode = 403; return res.end('Forbidden'); }
+        if (route === '/__cleo/agent-host/start') {
+          // POST only, and only from this origin's own pages (above): it starts a process on this machine.
+          if (req.method !== 'POST') { res.statusCode = 405; return res.end('POST only'); }
+          void startAgentHost().then(
+            info => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: true, port: info.port })); },
+            err => { res.statusCode = 500; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: false, error: String(err?.message ?? err) })); });
+          return;
+        }
         res.setHeader('Cache-Control', 'no-store');
         let body: string;
         try { body = readFileSync(agentBridgeFile(), 'utf8'); } catch { res.statusCode = 404; return res.end('{}'); }
@@ -127,4 +136,18 @@ export function agentBridgeDiscoveryPlugin(): Plugin {
       });
     },
   };
+}
+
+const MCP_DIR = fileURLToPath(new URL('../mcp/', import.meta.url));
+
+/**
+ * Start the Cleo agent host (applications/mcp/src/host.mjs) unless one runs: the chat panel's backend. The
+ * finding and starting live in the MCP package (ensureHost.mjs) so the stdio server and this agree on them.
+ */
+async function startAgentHost(): Promise<{ port: number }> {
+  if (!existsSync(path.join(MCP_DIR, 'node_modules', '@anthropic-ai', 'claude-agent-sdk')))
+    throw new Error(`The agent host is not installed. Run "npm install" in ${MCP_DIR}`);
+  const url = pathToFileURL(path.join(MCP_DIR, 'src', 'ensureHost.mjs')).href;
+  const { ensureHost } = await import(/* @vite-ignore */ url);
+  return ensureHost({ file: agentBridgeFile() });
 }
