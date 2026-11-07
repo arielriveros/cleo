@@ -295,7 +295,7 @@ export class Renderer {
             shadowCascades: () => this._shadows.cascadeTexture,
             spotShadows: () => this._shadows.spotShadowFBO.texture,
             pointShadows: () => this._shadows.pointShadowFBO.texture,
-            lightGrid: () => this._lighting.lightGrid.texture,
+            lightGrid: () => this._lighting.activeLightGrid.texture,
             weatherShelter: () => this._shadows.shelterFBO.texture,
         }, this._targets);
         this._fullscreen = new FullscreenPasses(this._pipelines, this._bindGroups);

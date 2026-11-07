@@ -337,11 +337,9 @@ export class ProbeBaker {
             this._shadows.activateProbeShadows();
             this._shadows.shadowsSuppressed = true;
             try {
-                // A DEGENERATE light grid: one cluster holding every light set to bake. The real grid
+                // The BAKE light grid: one cluster holding every light set to bake. The frame's grid
                 // describes the main camera's frustum; these faces look elsewhere from somewhere else.
-                lighting.lightGrid.buildSingle(lighting.punctualLightCount(scene));
-                lighting.packLightRecords(scene, true);
-                lighting.lightGrid.upload();
+                lighting.beginBakeLights(scene);
                 if (forwardOnly.length > 0) this._prepareForwardForCapture(scene);
 
                 const cam = this._sky.captureCamera;
@@ -364,7 +362,7 @@ export class ProbeBaker {
                 this._shadows.endProbeShadows();
                 // The forward programs hold the capture's shadow state only if forward models were drawn.
                 if (forwardOnly.length > 0) lighting.bindShadowsToForwardShaders();
-                lighting.lightGrid.restoreGrid();
+                lighting.endBakeLights();
             }
         });
     }
