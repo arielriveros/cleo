@@ -134,6 +134,8 @@ export class TemporalPasses {
     // `_projection.uvProducing` returns a single shared scratch, so two live results need two homes of their own.
     private readonly _uvViewProjScratch: mat4 = mat4.create();
     private readonly _uvPrevViewProjScratch: mat4 = mat4.create();
+    private readonly _uvVmViewProjScratch: mat4 = mat4.create();
+    private readonly _vmViewProj: mat4 = mat4.create();
     private readonly _prevBoneScratch: Float32Array = new Float32Array(100 * 16);
 
     // Reused selection buffer for the object-velocity pass, so picking the movers allocates nothing.
@@ -544,18 +546,30 @@ export class TemporalPasses {
 
             const prevWorld = this._prevWorldOf(node);
 
+            // A viewmodel rides the camera: its world motion is the camera's, and projected by the camera's
+            // previous matrices it would smear across the whole screen. It is drawn with its own projection
+            // (the one the geometry pass used), and held against ITS OWN view-projection and its own
+            // current model matrix, so what remains is the animation: the bones' motion since last frame.
+            const vm = node.viewmodel;
+            if (vm) {
+                const vmProj = this._projection.viewmodelProjection(this._view.camera);
+                mat4.multiply(this._vmViewProj, vmProj, this._view.camera.viewMatrix);
+                mat4.copy(this._uvVmViewProjScratch, this._projection.uvProducing(this._vmViewProj));
+            }
             this._shaderManager.setUniform('u_model', node.worldTransform);
             this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
-            this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
-            this._shaderManager.setUniform('u_uvViewProj', this._uvViewProjScratch);
+            this._shaderManager.setUniform('u_projection', vm
+                ? this._projection.viewmodelProjection(this._view.camera)
+                : this._projection.rasterProjection(this._view.camera.projectionMatrix));
+            this._shaderManager.setUniform('u_uvViewProj', vm ? this._uvVmViewProjScratch : this._uvViewProjScratch);
             // 'objectOnly' is handed THIS frame's view-projection as its previous one, so the camera
             // term appears on both sides of the subtraction and divides out exactly rather than being
             // approximated away. What is left is the node's own world-space motion — see MotionBlurMode
             // for which cases that actually makes sharper, which is not all of them.
             this._shaderManager.setUniform('u_uvPrevViewProj',
-                mode === 'objectOnly' ? this._uvViewProjScratch : this._uvPrevViewProjScratch);
+                vm ? this._uvVmViewProjScratch : mode === 'objectOnly' ? this._uvViewProjScratch : this._uvPrevViewProjScratch);
             // No usable history means no motion: previous == current, and the object writes zeros.
-            this._shaderManager.setUniform('u_prevModel', prevWorld ?? node.worldTransform);
+            this._shaderManager.setUniform('u_prevModel', vm ? node.worldTransform : prevWorld ?? node.worldTransform);
             // A motion-blur opt-out, and only that. The velocity written is still the true one, so TAA
             // can reproject the object rather than ghost it — see `encodeVelocity`.
             this._shaderManager.setUniform('u_noBlur', mode === 'none' ? 1 : 0);

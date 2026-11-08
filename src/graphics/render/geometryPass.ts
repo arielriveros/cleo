@@ -241,7 +241,8 @@ export class GeometryPass {
         const eye = this._view.camera.position, far = this._view.camera.far;
         let admitted = 0;
         for (const node of scene.models) {
-            if (!this.inGBuffer(node) || !include(node) || !inView(node)) continue;
+            // A probe never sees the viewmodel: it is the player's, drawn for the player's eye only.
+            if (node.viewmodel || !this.inGBuffer(node) || !include(node) || !inView(node)) continue;
             const index = admitted++;
             if (index < skip || index >= skip + limit) continue;
             if (!node.initialized) node.initializeModel();

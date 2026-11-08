@@ -253,6 +253,9 @@ function playerNode() {
   })
   const camera = rig.children[0]
   camera.id = stableId('player:camera')
+  // The viewmodels are drawn through this lens whatever the world's field of view (Node.viewmodel), and the
+  // arms start close to the eye: a near plane to match.
+  camera.camera = { ...camera.camera, near: 0.05, viewmodelFov: 58 }
   camera.children = [group('viewmodels', 'Viewmodels', ['ak47', 'pistol', 'shotgun'].map(k => {
     const n = clone(viewmodels[k].nodeJson)
     n.viewmodel = true

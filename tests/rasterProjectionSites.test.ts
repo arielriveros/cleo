@@ -97,6 +97,10 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // else here.
             'nudgedProjection',
             'overdrawPass',
+            // A viewmodel's projection (Node.viewmodel): the raster projection, then the camera's viewmodel
+            // matrix. Reached from ModelDraw.beginModel and the velocity pass for a flagged node only, so it
+            // jitters on the same side of the resolve as the model it serves.
+            'viewmodelProjection',
             // GPU particles: drawn after the transparents, in both pipelines and in the 2D pass.
             'particleDrawFrame',
             // Smoke-and-fire volumes, ray-marched over the resolved image (`FluidVolumePasses.renderFluidVolumes`).

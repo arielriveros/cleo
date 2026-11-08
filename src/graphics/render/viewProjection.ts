@@ -141,6 +141,22 @@ export class ViewProjection {
     private readonly _nudgeProjScratch: mat4 = mat4.create();
 
     /**
+     * The projection a VIEWMODEL node is drawn with (Node.viewmodel): the raster projection after the
+     * camera's viewmodel matrix, which narrows the lens and pulls the node toward the camera along each view
+     * ray. Because it is the ordinary projection of a point on the same ray, the depth it writes reconstructs,
+     * through the main camera's inverse, to that nearer point: lighting, shadows and the screen-space
+     * effects all see one consistent place. The same as {@link rasterProjection} when the camera sets neither.
+     */
+    public viewmodelProjection(camera: { projectionMatrix: mat4; viewmodelMatrix: mat4 | null }): mat4 {
+        const raster = this.rasterProjection(camera.projectionMatrix);
+        const d = camera.viewmodelMatrix;
+        if (!d) return raster;
+        return mat4.multiply(this._viewmodelProjScratch, raster, d);
+    }
+
+    private readonly _viewmodelProjScratch: mat4 = mat4.create();
+
+    /**
      * The screen-space Y flip for matrices crossing between a fullscreen pass's UV and clip space,
      * which are MIRRORED between backends. A matrix that CONSUMES a clip vector built from `uv` is
      * post-multiplied; one that PRODUCES a clip vector read back as a uv is pre-multiplied.

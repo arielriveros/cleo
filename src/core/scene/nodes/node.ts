@@ -153,6 +153,7 @@ export class Node {
   // Whether a CameraRig in 'dither' collision mode may cut its see-through hole into this node. Authored
   // (inspector + serialized) and read by the renderer's model draws, never by anything else.
   protected _cameraDither = false;
+  protected _viewmodel = false;
 
   // See SocketAttachment. Read by the scene's late socket pass.
   protected _socketAttachment: SocketAttachment | null = null;
@@ -930,6 +931,7 @@ export class Node {
       spawnOnStart: this._spawnOnStart,
       ...(this._motionBlur !== 'full' ? { motionBlur: this._motionBlur } : {}),
       ...(this._cameraDither ? { cameraDither: true } : {}),
+      ...(this._viewmodel ? { viewmodel: true } : {}),
       ...(this._drawDistance > 0 ? { drawDistance: this._drawDistance } : {}),
       ...(this._socketAttachment ? { socketAttachment: { ...this._socketAttachment } } : {}),
       ...(await this._serializePayload()),
@@ -973,6 +975,7 @@ export class Node {
     // through the setter: the setter fans out to children, and this node has none yet.
     if (json.motionBlur === 'objectOnly' || json.motionBlur === 'none') node._motionBlur = json.motionBlur;
     if (json.cameraDither === true) node._cameraDither = true;
+    if (json.viewmodel === true) node._viewmodel = true;
     if (typeof json.drawDistance === 'number' && json.drawDistance > 0) node._drawDistance = json.drawDistance;
 
     if (json.socketAttachment && typeof json.socketAttachment.socket === 'string') {
@@ -1319,6 +1322,25 @@ export class Node {
     this._cameraDither = !!value;
     for (const child of this._children) child.cameraDither = value;
     this._notifyChange('component', 'cameraDither', prev, this._cameraDither);
+  }
+
+  /**
+   * Whether this node is drawn as a first-person VIEWMODEL (default false): arms and a weapon under the
+   * active camera. Such a node is projected with the camera's `viewmodelFov` instead of the world's, so a
+   * weapon can be drawn at a narrow lens whatever the field of view the player runs at, and it is drawn at
+   * the camera's `viewmodelDepth` of its true distance along every view ray, which keeps it on the screen
+   * where it was while pulling it clear of a wall the player stands against. It is never culled. Fans out
+   * to descendants like {@link motionBlur}.
+   *
+   * Lit and shaded like everything else: the depth it writes is the squeezed depth it was drawn at, so
+   * lighting, shadows and the screen-space effects read a consistent position for it.
+   */
+  public get viewmodel(): boolean { return this._viewmodel; }
+  public set viewmodel(value: boolean) {
+    const prev = this._viewmodel;
+    this._viewmodel = !!value;
+    for (const child of this._children) child.viewmodel = value;
+    this._notifyChange('component', 'viewmodel', prev, this._viewmodel);
   }
 
   /** The socket this node is pinned to, or null. See {@link SocketAttachment}. */

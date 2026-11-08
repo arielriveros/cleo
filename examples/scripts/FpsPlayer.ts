@@ -1,7 +1,7 @@
 import { CameraRigNode, Input, ModelNode, Node } from 'cleo'
 import type { Animator } from 'cleo'
 import FpsCombatantNode from './FpsCombatant'
-import { WEAPONS, aimDirection, approach, clamp, findByVariable, findDescendant, lerp, manager, playCue } from './FpsShared'
+import { WEAPONS, aimDirection, approach, clamp, combatantOf, findByVariable, findDescendant, lerp, manager, playCue } from './FpsShared'
 
 /** One weapon's state in the player's hands. */
 interface Slot { key: string, ammo: number, reserve: number, view: ModelNode | null, muzzle: Node | null }
@@ -160,6 +160,7 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     this._fireInput()
     this._recover(delta)
     this._viewmodelPose(delta, moving)
+    this._viewmodelClearance(delta)
     this._viewmodelClip(moving)
 
     // ----- spread (read by the HUD's crosshair)
@@ -305,27 +306,52 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     const m: any = this.slot?.muzzle
     const cam: any = this._rig?.camera
     if (!m?.worldPosition || !cam) return origin
-    // The viewmodel is drawn with a narrower field of view than the world, so its muzzle is not where its
-    // node is: the same squeeze the renderer applies, across the camera's axis.
+    // The viewmodel is drawn through the camera's viewmodel lens and at a share of its true distance
+    // (Node.viewmodel), so its muzzle is not where its node is: it is at the same point squeezed the way the
+    // renderer squeezes it, about the camera and in its frame (x and y by lens x depth, z by depth).
     const w = m.worldPosition
-    const inv = (cam as any).worldTransform
-    const k = Math.tan(this._fov * Math.PI / 360) / Math.tan(this.viewmodelFov * Math.PI / 360)
-    const local = this._toCamera(w, inv)
-    local[0] *= k; local[1] *= k
-    return this._fromCamera(local, inv)
+    const t = cam.worldTransform
+    const dx = w[0] - t[12], dy = w[1] - t[13], dz = w[2] - t[14]
+    const x = t[0] * dx + t[1] * dy + t[2] * dz, y = t[4] * dx + t[5] * dy + t[6] * dz, z = t[8] * dx + t[9] * dy + t[10] * dz
+    const k = this._vmDepth
+    const f = Math.tan(this._fov * Math.PI / 360) / Math.tan(this.viewmodelFov * Math.PI / 360)
+    const lx = x * f * k, ly = y * f * k, lz = z * k
+    return [t[0] * lx + t[4] * ly + t[8] * lz + t[12], t[1] * lx + t[5] * ly + t[9] * lz + t[13], t[2] * lx + t[6] * ly + t[10] * lz + t[14]]
   }
 
-  /** Field of view the viewmodels are drawn at (the renderer's viewmodel layer). */
+  /** The lens the viewmodels are drawn at (the camera's `viewmodelFov`), degrees. */
   public viewmodelFov: number = 58
+  /** How far in front of the camera the viewmodel reaches (its muzzle), metres: what a wall must leave room for. */
+  public viewmodelReach: number = 0.95
+  private _vmDepth: number = 1
 
-  private _toCamera(world: ArrayLike<number>, m: ArrayLike<number>): number[] {
-    // m is a column-major world matrix: rigid, so its inverse is its transpose in the rotation block.
-    const dx = world[0] - m[12], dy = world[1] - m[13], dz = world[2] - m[14]
-    return [m[0] * dx + m[1] * dy + m[2] * dz, m[4] * dx + m[5] * dy + m[6] * dz, m[8] * dx + m[9] * dy + m[10] * dz]
-  }
-
-  private _fromCamera(l: ArrayLike<number>, m: ArrayLike<number>): number[] {
-    return [m[0] * l[0] + m[4] * l[1] + m[8] * l[2] + m[12], m[1] * l[0] + m[5] * l[1] + m[9] * l[2] + m[13], m[2] * l[0] + m[6] * l[1] + m[10] * l[2] + m[14]]
+  /**
+   * Keep the weapon out of a wall: the share of its true distance the renderer draws the viewmodel at, from
+   * the clearest of a few rays ahead. The weapon shrinks toward the camera along every view ray, so it stays
+   * the same size on the screen and lies in front of the wall, lit as the place it is drawn at.
+   */
+  private _viewmodelClearance(delta: number): void {
+    const cam: any = this._rig?.camera
+    const physics: any = this.scene?.physics
+    if (!cam || !physics) return
+    cam.viewmodelFov = this.viewmodelFov
+    const p = cam.worldPosition
+    const t = cam.worldTransform
+    // Camera-local +Z is forward, +X left, +Y up; a ray each for the centre and four points about it.
+    const rays: number[][] = [[0, 0], [0.22, 0], [-0.22, 0], [0, 0.18], [0, -0.22]]
+    let nearest = Infinity
+    for (const [lx, ly] of rays) {
+      const dir = [t[8] + t[0] * lx + t[4] * ly, t[9] + t[1] * lx + t[5] * ly, t[10] + t[2] * lx + t[6] * ly]
+      const len = Math.hypot(dir[0], dir[1], dir[2])
+      const reach = this.viewmodelReach + 0.1
+      const hit = physics.raycast([p[0], p[1], p[2]], [p[0] + dir[0] / len * reach, p[1] + dir[1] / len * reach, p[2] + dir[2] / len * reach],
+        { reject: (owner: Node | null) => combatantOf(owner) === this })
+      if (hit) nearest = Math.min(nearest, hit.distance)
+    }
+    const want = nearest === Infinity ? 1 : clamp((nearest - 0.05) / this.viewmodelReach, 0.3, 1)
+    // In fast (never through a wall), out a little slower.
+    this._vmDepth = approach(this._vmDepth, want, want < this._vmDepth ? 40 : 9, delta)
+    cam.viewmodelDepth = this._vmDepth
   }
 
   private _flash(): void {

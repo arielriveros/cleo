@@ -222,7 +222,9 @@ export class ModelDraw {
         this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
         this._shaderManager.setUniform('u_projection', depthNudge
             ? this._projection.nudgedProjection(this._view.camera.projectionMatrix, depthNudge)
-            : this._projection.rasterProjection(this._view.camera.projectionMatrix));
+            : node.viewmodel && !this._view.cubeFace
+                ? this._projection.viewmodelProjection(this._view.camera)
+                : this._projection.rasterProjection(this._view.camera.projectionMatrix));
         if (declares.model) this._shaderManager.setUniform('u_model', node.worldTransform);
         // A model shows its whole texture: the Basic family's UV transform is a sprite-sheet tile, and
         // a uniform keeps the last sprite's. This used to be written only in the forward pass, and only

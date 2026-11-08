@@ -296,7 +296,7 @@ export function buildViewmodel(key) {
     if (sharedKey && armMaterials.has(sharedKey)) { materialIds.push(armMaterials.get(sharedKey)); continue }
     const w = weaponMaterial(null, m, key, p.material)
     const id = material(`vm:${sharedKey ? 'arms:' + m.name : key + ':' + p.material}`, sharedKey ? `Viewmodel ${m.name.replace(/^M_/, '').replace(/_/g, ' ')}` : `${spec.name} ${m.name}`,
-      pbr([1, 1, 1], { metallic: w.metallic, roughness: 1, side: 'double', textures: w.textures }),
+      pbr([1, 1, 1], { metallic: w.metallic, roughness: 1, side: 'double', castShadow: false, textures: w.textures }),
       Object.values(w.textures))
     if (sharedKey) armMaterials.set(sharedKey, id)
     materialIds.push(id)
