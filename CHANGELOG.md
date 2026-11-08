@@ -39,6 +39,8 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     switched-off probes are red. The debug visibility menu's **GI probes** shows every volume's.
   - *Cheaper on High.* The GI pass runs at half resolution on High as on Medium and Low, brought back up
     along depth and normal edges (about a third of its cost), and not at all when no volume is in view.
+    Each probe's on/off state now rides in its light's alpha, so a lookup reads two textures a probe
+    instead of three (another tenth off the pass, and off the bounces of a relight).
 
 - **Lighting that holds together from noon to midnight.** Torches now light the night in the editor
   as they do in the game, and glare no longer floods the screen.

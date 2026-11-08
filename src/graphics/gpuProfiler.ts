@@ -197,6 +197,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     giIntegrate: 'gi.update',
     giAmbientCube: 'gi.update',
     giRescale: 'gi.update',
+    giStateStamp: 'gi.update',
     godRaysUpsample: 'godRays',
     // The per-object velocity draws run inside the 'velocity' scope, right after the fullscreen
     // camera-reprojection pass that seeds the same buffer.

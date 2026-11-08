@@ -18,7 +18,7 @@ import { Texture } from '../../texture';
 import { ShaderManager } from '../../systems/shaderManager';
 import {
     GiReduceProgram, GiVisibilityProgram, GiRadianceProgram, GiIntegrateProgram, GiResolveProgram,
-    GiAmbientCubeProgram, GiRescaleProgram, GiProbeOverlayProgram,
+    GiAmbientCubeProgram, GiRescaleProgram, GiProbeOverlayProgram, GiStateStampProgram,
 } from '../programs';
 import type { BindGroupCache } from '../bindGroups';
 import type { FrameView } from '../frameView';
@@ -87,6 +87,12 @@ const GI_BAKE_SETTLE_MS = 10000;
 const MULTIPLY_BLEND: BlendState = {
     color: { srcFactor: 'dst', dstFactor: 'zero', operation: 'add' },
     alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' },
+};
+
+/** The destination's colour kept, the source's alpha written (giStateStamp.wgsl). */
+const ALPHA_ONLY_BLEND: BlendState = {
+    color: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' },
+    alpha: { srcFactor: 'one', dstFactor: 'zero', operation: 'add' },
 };
 
 export interface GiSystemHost {
@@ -245,6 +251,8 @@ export class GiSystem {
         this._watchLight(scene);
         try {
             this._captureStep(scene);
+            // The states the capture just classified, before the relight's bounce looks them up.
+            this._uploadProbeData();
             this._relightStep(scene);
             this._readbackStep();
         } catch (e) {
@@ -646,7 +654,8 @@ export class GiSystem {
             this._probeDataCpu = new Float32Array(sizes.probeData[0] * sizes.probeData[1] * 4);
             this._atlasProbes = total;
             // Cleared atlases: every captured probe's visibility is rebuilt, every volume relit from scratch.
-            const clearIrr = this._passes.beginFullscreenPass(this._irradiance.renderTarget, 'giClear', true, [0, 0, 0, 1], false);
+            // The irradiance's alpha is the probe states (giStateStamp.wgsl): none active until stamped.
+            const clearIrr = this._passes.beginFullscreenPass(this._irradiance.renderTarget, 'giClear', true, [0, 0, 0, 0], false);
             this._passes.endFullscreenPass(clearIrr);
             const clearVis = this._passes.beginFullscreenPass(this._visibility.renderTarget, 'giClear', true, [1, 1, 0, 1], false);
             this._passes.endFullscreenPass(clearVis);
@@ -673,6 +682,25 @@ export class GiSystem {
         const tex = this._probeData;
         device.writeTexture(tex.rhiTexture, this._probeDataCpu, tex.width, tex.height);
         this._probeDataDirty = false;
+        this._stampStates();
+    }
+
+    /**
+     * Every probe's state into the irradiance atlas's alpha (giStateStamp.wgsl): 1 where it is active. The
+     * lookup reads it there with the light, instead of a probe-data fetch for each of a cage's eight probes.
+     */
+    private _stampStates(): void {
+        const atlas = this._irradiance;
+        if (!atlas || !this._probeData || !this._layout) return;
+        const pass = this._passes.beginFullscreenPass(atlas.renderTarget, 'giStateStamp', false, undefined, false);
+        this._fullscreen.bind(pass, 'giStateStamp', GiStateStampProgram, [this._probeData], ALPHA_ONLY_BLEND);
+        this._shaderManager.bind('giStateStamp');
+        this._shaderManager.setUniform('u_tilesPerRow', this._layout.irradiancePerRow);
+        this._shaderManager.setUniform('u_dataPerRow', this._layout.probeDataPerRow);
+        this._shaderManager.setUniform('u_probeCount', this._atlasProbes);
+        this._passes.setViewport(atlas.width, atlas.height);
+        this._passes.drawFullscreenAndEnd(pass);
+        this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
     }
 
     // --- Capture ---------------------------------------------------------------------------------------

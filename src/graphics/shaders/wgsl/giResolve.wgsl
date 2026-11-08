@@ -40,14 +40,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Depth SAMPLED at the texel's centre: naga's GLSL cannot textureLoad a depth texture.
     let uv = (vec2<f32>(texel) + vec2<f32>(0.5)) / u_resolve.u_sizes.xy;
     let depth = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, uv, 0);
-    if (depth >= 1.0) { return vec4<f32>(0.0); }
+    if (depth >= 1.0) {
+        // The normal's sampler and the probe data, read for nothing and only by the sky: a pipeline layout
+        // drops what the shader never reaches, and the groups bind one for every texture (see
+        // giAmbientCube's anchors). The lookup itself reads neither (the states are in the irradiance's
+        // alpha, giStateStamp.wgsl).
+        return vec4<f32>(textureSampleLevel(u_gNormalRoughness_texture, u_gNormalRoughness_sampler, uv, 0.0).a
+                       + giProbeData(0).w) * 0.0;
+    }
     let clip = vec4<f32>(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
     let world = u_resolve.u_invViewProj * clip;
     let P = world.xyz / world.w;
     let N = octDecode(textureLoad(u_gNormalRoughness_texture, texel, 0).rg);
-    // The sampler, read for nothing: a pipeline layout drops what the shader never reaches, and the
-    // group binds one for every texture (see giAmbientCube's anchors).
-    let anchor = textureSampleLevel(u_gNormalRoughness_texture, u_gNormalRoughness_sampler, uv, 0.0).a * 0.0;
     let V = normalize(u_resolve.u_viewPos - P);
-    return giIrradianceAt(P, N, V) + vec4<f32>(anchor);
+    return giIrradianceAt(P, N, V);
 }

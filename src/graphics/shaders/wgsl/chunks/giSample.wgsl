@@ -130,14 +130,16 @@ fn giSampleVolume(v: i32, P: vec3<f32>, N: vec3<f32>, V: vec3<f32>) -> vec4<f32>
         let oz = (s >> 2u) & 1;
         let offset = vec3<f32>(f32(ox), f32(oy), f32(oz));
         let probe = probe0 + ox + oy * counts.x + oz * strideZ;
-        let data = giProbeData(probe);
-        if (abs(data.w - 1.0) > 0.25) { continue; }   // only ACTIVE probes answer
+        // The probe's light first: its alpha is the probe's state (giStateStamp.wgsl, 1 = active), and
+        // only ACTIVE probes answer. No probe-data fetch: v1 keeps every probe on its grid point.
+        let irradiance = textureSampleLevel(u_giIrradiance_texture, u_giIrradiance_sampler, giIrradianceTileUV(probe, octN), 0.0);
+        if (irradiance.a < 0.5) { continue; }
 
         let tri = mix(vec3<f32>(1.0) - frac, frac, offset);
         let trilinear = max(tri.x * tri.y * tri.z, 1e-6);
         valid += tri.x * tri.y * tri.z;
 
-        let probePos = corner0 + axisX * offset.x + axisY * offset.y + axisZ * offset.z + data.xyz;
+        let probePos = corner0 + axisX * offset.x + axisY * offset.y + axisZ * offset.z;
         // Smooth back-face weight: a probe behind the surface still contributes a little.
         let toProbe = normalize(probePos - P);
         let facing = (dot(toProbe, N) + 1.0) * 0.5;
@@ -161,8 +163,7 @@ fn giSampleVolume(v: i32, P: vec3<f32>, N: vec3<f32>, V: vec3<f32>) -> vec4<f32>
         if (w < 0.2) { w *= w * w * (1.0 / (0.2 * 0.2)); }
         w *= trilinear;
 
-        let e = textureSampleLevel(u_giIrradiance_texture, u_giIrradiance_sampler, giIrradianceTileUV(probe, octN), 0.0).rgb;
-        sum += e * w;
+        sum += irradiance.rgb * w;
         weightSum += w;
     }
     if (weightSum <= 0.0) { return vec4<f32>(0.0); }
