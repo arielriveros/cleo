@@ -114,6 +114,7 @@ unique name, `"$alias"` from an earlier create in the same call, or `"@selected"
 | `history` | Undo or redo whole steps. |
 | `scene_save` | Save the active tab. |
 | `execute_js` | Escape hatch: async JavaScript in the editor page. The user approves every run. |
+| `engine_api` (core) | The scripting API and docs as small lookups, answered by the server itself (no editor needed): a word search, a class with every member, one member's signatures and doc, or one docs section. |
 
 So *"add a red cube and show me"* is one `scene_edit` (a create op with `material`, `as`, and `capture`), and
 *"make the selected node spin"* is `script_write` with `attach: ["@selected"]` plus one `play_control`
@@ -124,6 +125,17 @@ steps), but pure reads (`status`, `scene.tree`, `node.get`, `asset.list`, `logs.
 that queue, so a look at the scene never waits behind a capture, a Play run or a type check. The script type
 checker loads in the background after the first call. Results are compact JSON and cut at 40,000 characters,
 under Claude Code's 50,000-character limit, past which a result is spilled to a file.
+
+**Engine API lookup** (`src/engineApi.mjs`). `engine_api` answers from the engine's own type declarations
+(`dist/**/*.d.ts`, written by `npm run build`): exactly what `import { ... } from 'cleo'` gives a script and
+what `script_write` type-checks against, with the engine's JSDoc. The docs come along split at their
+headings.
+- The index (about 5,800 symbols and 800 doc sections) is built with the TypeScript compiler in under 2 s.
+  It is cached in `~/.cleo/engine-api/`, keyed by the size and time of every declaration and doc file, and
+  loads from there in about 0.2 s. The stdio server loads it at startup, off the first lookup's path.
+- Answers stay small. A search is under 3,500 characters, and a whole class is listed by name (all 146
+  members of `Node` in 2.6k) when signatures would not fit. A docs section replaces reading a 10–43k file.
+- When the engine source is newer than its declarations, answers say to run `npm run build`.
 
 Resources: `cleo://docs/...` (all of `docs/`) and `cleo://examples/scripts/...`.
 

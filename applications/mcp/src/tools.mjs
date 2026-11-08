@@ -8,8 +8,24 @@
 // request like "add a red cube and show me" is one call. The schemas stay small, because every always-loaded
 // tool's schema is in every request; the node-ref grammar and the conventions live once, in INSTRUCTIONS.
 
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { BridgeError } from './bridge.mjs';
+import { discoveryFilePath } from './discovery.mjs';
+import { EngineApi } from './engineApi.mjs';
+
+/** This checkout's root: applications/mcp/src -> the engine repo. */
+const ENGINE_ROOT = process.env.CLEO_ENGINE_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+
+/** The engine_api index for an engine checkout, cached in the agent host's data folder. */
+export function createEngineApi(/** @type {{ engineRoot?: string, dataDir?: string, log?: (m: string) => void }} */ opts = {}) {
+    return new EngineApi({
+        engineRoot: opts.engineRoot ?? ENGINE_ROOT,
+        cacheDir: path.join(opts.dataDir ?? path.dirname(discoveryFilePath()), 'engine-api'),
+        log: opts.log,
+    });
+}
 
 const vec3 = z.array(z.number()).length(3);
 const unit = z.number().min(0).max(1);
@@ -50,7 +66,7 @@ const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: fals
 const CORE = { 'anthropic/alwaysLoad': true };
 
 /** The tools that load up front (CORE); tests hold their size down. */
-export const CORE_TOOLS = ['editor_status', 'scene_tree', 'node_get', 'scene_edit', 'script_write', 'view_capture', 'play_control'];
+export const CORE_TOOLS = ['editor_status', 'scene_tree', 'node_get', 'scene_edit', 'script_write', 'view_capture', 'play_control', 'engine_api'];
 
 /** A screenshot taken after the change, in the same call. */
 const capture = z.union([z.boolean(), z.object({
@@ -89,9 +105,11 @@ const TYPES = 'empty, trigger, character, controller, navMesh, perspectiveCamera
 /**
  * Register every tool on an MCP server (the stdio server Claude Code launches). The input shapes are wrapped
  * in `z.object` here (MCP SDK v2's form), always, so a handler is always called with its arguments first.
+ * @param {import('@modelcontextprotocol/server').McpServer} server @param {Caller} bridge
+ * @param {{ engineApi?: EngineApi }} [opts]
  */
-export function registerTools(/** @type {import('@modelcontextprotocol/server').McpServer} */ server, /** @type {Caller} */ bridge) {
-    for (const d of toolDefinitions(bridge)) {
+export function registerTools(server, bridge, opts = {}) {
+    for (const d of toolDefinitions(bridge, opts)) {
         server.registerTool(d.name, { ...d.config, inputSchema: z.object(d.config.inputSchema) }, (/** @type {any} */ args) => d.handler(args));
     }
 }
@@ -101,13 +119,23 @@ const extraMs = (/** @type {any} */ a) => (a?.capture ? 10_000 : 0) + (a?.stopAf
 
 /**
  * The tool catalog as plain definitions (tests read them without a server). Each handler relays to the
- * editor and maps the answer to MCP content.
+ * editor and maps the answer to MCP content, except engine_api, which answers in-process (no editor needed).
  * @param {Caller} bridge
+ * @param {{ engineApi?: EngineApi }} [opts]
  * @returns {ToolDef[]}
  */
-export function toolDefinitions(bridge) {
+export function toolDefinitions(bridge, opts = {}) {
     /** @type {ToolDef[]} */
     const defs = [];
+    // Built lazily: nothing is read until the first lookup (or index.mjs's warm-up).
+    const engineApi = opts.engineApi ?? createEngineApi();
+    /**
+     * A tool answered here, without the editor.
+     * @param {string} name @param {any} config @param {(args: any) => Promise<any>} fn
+     */
+    const local = (name, config, fn) => defs.push({ name, config, handler: async (/** @type {any} */ args) => {
+        try { return toToolResult(await fn(args ?? {})); } catch (err) { return toErrorResult(err); }
+    } });
     /**
      * @param {string} name @param {string} method @param {any} config
      * @param {{ timeoutMs?: number | ((args: any) => number) }} [opts]
@@ -221,6 +249,22 @@ export function toolDefinitions(bridge) {
         annotations: WRITE,
         _meta: CORE,
     }, { timeoutMs: 90000 });
+
+    local('engine_api', {
+        title: 'Engine API',
+        description: 'Look up the Cleo scripting API (what `import ... from \'cleo\'` gives a script, read from the engine\'s type '
+            + 'declarations) and its docs, in small answers: much cheaper than reading doc files. query: words ("play animation '
+            + 'action") -> matching classes, members and doc sections. symbol: "Animator" (its members) or "Animator.playAction" '
+            + '(signatures and full doc). doc: one docs section ("scripting/node-api.md#transform"), or a file to list its sections.',
+        inputSchema: {
+            query: z.string().optional(),
+            symbol: z.string().optional(),
+            doc: z.string().optional(),
+            limit: z.number().int().min(1).max(40).optional().describe('query: most symbols to list (default 12).'),
+        },
+        annotations: READ,
+        _meta: CORE,
+    }, args => engineApi.answer(args));
 
     relay('script_read', 'script.read', {
         title: 'Read script',

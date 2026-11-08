@@ -18,7 +18,7 @@ test('the core tools load up front, the rest stay deferred', () => {
 test('the up-front catalog stays within budget', () => {
     const core = defs.filter(d => CORE_TOOLS.includes(d.name));
     const total = core.reduce((n, d) => n + size(d), 0);
-    assert.ok(total < 10_000, `core tools: ${total} characters`);
+    assert.ok(total < 11_000, `core tools: ${total} characters`);
     const edit = defs.find(d => d.name === 'scene_edit');
     assert.ok(size(edit) < 5_000, `scene_edit: ${size(edit)} characters`);
     // Claude Code cuts up-front descriptions at 4,096 characters.
@@ -35,6 +35,15 @@ test('scene_edit takes every op the editor runs, with create taking the update f
     });
     assert.equal(parsed.ops[0].material.baseColor[0], 1);
     assert.ok(z.object(edit.config.inputSchema).safeParse({ ops: [{ op: 'update', node: '@selected', material: 'Red' }], capture: true }).success);
+});
+
+test('engine_api answers in-process, with no editor behind it', async () => {
+    const calls = [];
+    const local = toolDefinitions({ call: async (m) => { calls.push(m); return {}; } }).find(d => d.name === 'engine_api');
+    const res = await local.handler({ query: 'x', symbol: 'y' });
+    assert.equal(res.isError, true);
+    assert.match(res.content[0].text, /exactly one of/);
+    assert.deepEqual(calls, [], 'nothing was relayed to the editor');
 });
 
 test('results are compact JSON', () => {

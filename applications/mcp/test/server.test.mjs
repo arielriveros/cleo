@@ -29,7 +29,7 @@ test('tools/list advertises the catalog with its metadata and descriptions intac
     try {
         const { tools } = await client.listTools();
         const byName = Object.fromEntries(tools.map(t => [t.name, t]));
-        assert.equal(tools.length, 14);
+        assert.equal(tools.length, 15);
         assert.equal(byName.editor_status._meta?.['anthropic/alwaysLoad'], true);
         assert.equal(byName.scene_edit._meta?.['anthropic/alwaysLoad'], true);
         assert.equal(byName.asset_list._meta?.['anthropic/alwaysLoad'], undefined);
@@ -39,6 +39,15 @@ test('tools/list advertises the catalog with its metadata and descriptions intac
         // Property descriptions survive the schema conversion (zod >= 4.2 with SDK v2).
         assert.match(String(byName.scene_tree.inputSchema.properties?.depth?.description), /Levels below root/);
         assert.match(client.getInstructions() ?? '', /Cleo MCP/);
+    } finally { await client.close(); }
+});
+
+test('engine_api answers through the server without an editor', { skip: !fs.existsSync(path.join(HERE, '..', '..', '..', 'dist', 'cleo.d.ts')) && 'dist not built' }, async () => {
+    const client = await connect();
+    try {
+        const res = await client.callTool({ name: 'engine_api', arguments: { symbol: 'Node.setPosition' } });
+        assert.equal(res.isError, false);
+        assert.match(res.content[0].text, /Node\.setPosition\(pos: vec3\): Node/);
     } finally { await client.close(); }
 });
 

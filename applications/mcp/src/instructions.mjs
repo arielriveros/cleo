@@ -31,4 +31,4 @@ Engine conventions
 - Animation one-shots play by action NAME (animator.playAction('Attack')); scripts never play clips directly.
 - Prefer existing templates and models (asset_list) over primitives when they fit.
 
-Docs: resources under cleo://docs/ (scripting/getting-started.md, scripting/node-api.md, scripting/patterns.md, reference/node-types.md) and examples under cleo://examples/scripts/. Read them before non-trivial scripts.`;
+Engine API: before writing a script, look the API up with engine_api instead of reading whole doc files: {"query":"play animation action"} finds classes, members and doc sections; {"symbol":"Animator"} lists members; {"symbol":"Animator.playAction"} gives the signature and doc; {"doc":"scripting/node-api.md#transform"} reads one docs section. Whole docs are resources under cleo://docs/, working examples under cleo://examples/scripts/.`;

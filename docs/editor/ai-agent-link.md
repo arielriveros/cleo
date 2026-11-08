@@ -51,6 +51,8 @@ same Claude Code you would run in a terminal yourself, with the Cleo tools alrea
   undoes any of it); running its own JavaScript in the editor still asks every time.
 - **This, here.** Claude can work on whatever you have selected: *"make this spin"* means the selected
   node. It can also show you what it did: it takes screenshots of the viewport as part of its changes.
+- **It knows the engine.** Before writing a script, Claude looks up the engine API it needs (classes,
+  methods, their documentation) straight from the engine, so its scripts use what the engine really has.
 - **Copy and paste.** Select text and press Ctrl+C to copy it; without a selection, Ctrl+C is Claude Code's
   own interrupt. Ctrl+V pastes. Every other key, such as Esc, goes to Claude Code.
 - **It keeps running.** Closing the panel, switching tabs or reloading the editor leaves the session

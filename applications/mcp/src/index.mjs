@@ -21,7 +21,7 @@ import { EditorBridge, describeClient } from './bridge.mjs';
 import { PeerBridge } from './peer.mjs';
 import { ensureHost } from './ensureHost.mjs';
 import { DEFAULT_PORT, discoveryFilePath, removeDiscovery, writeDiscovery } from './discovery.mjs';
-import { registerTools } from './tools.mjs';
+import { createEngineApi, registerTools } from './tools.mjs';
 import { registerResources } from './resources.mjs';
 import { INSTRUCTIONS } from './instructions.mjs';
 
@@ -71,6 +71,9 @@ async function standalone() {
     await serve(bridge, async () => { removeDiscovery(discovery); await bridge.close(); });
 }
 
+/** The engine_api index: one per process, shared by every server instance the factory makes. */
+const engineApi = createEngineApi({ engineRoot: ENGINE_ROOT, log });
+
 /**
  * One MCP server instance: the tool catalog and the docs resources, running tools through `caller`.
  * @param {import('./tools.mjs').Caller} caller
@@ -80,7 +83,7 @@ function buildServer(caller) {
         instructions: INSTRUCTIONS,
         capabilities: { tools: {}, resources: {} },
     });
-    registerTools(server, caller);
+    registerTools(server, caller, { engineApi });
     registerResources(server, ENGINE_ROOT);
     return server;
 }
@@ -108,6 +111,9 @@ async function serve(caller, cleanup) {
     process.stdin.on('end', () => void shutdown('stdin closed'));
 
     log(`MCP server ${PKG.version} ready on stdio`);
+    // Load (or build) the engine_api index now, off the first lookup's path. A missing dist only means the
+    // tool answers with how to build it.
+    setTimeout(() => { engineApi.load().catch(err => log(`engine_api: ${err?.message ?? err}`)); }, 0);
 }
 
 main().catch(err => {
