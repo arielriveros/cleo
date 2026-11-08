@@ -6,7 +6,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { ResourceTemplate } from '@modelcontextprotocol/server';
 
 /** @param {string} dir @param {(name: string) => boolean} keep @returns {string[]} paths relative to dir, '/'-separated */
 function walk(dir, keep) {
@@ -34,7 +34,7 @@ function titleOf(file) {
 }
 
 /**
- * @param {import('@modelcontextprotocol/sdk/server/mcp.js').McpServer} server
+ * @param {import('@modelcontextprotocol/server').McpServer} server
  * @param {string} engineRoot
  */
 export function registerResources(server, engineRoot) {

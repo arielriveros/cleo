@@ -48,9 +48,14 @@ const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: fals
 /** Anything that can run an editor command: the editor bridge itself, or a peer of the host that owns it. */
 /** @typedef {{ call(method: string, params: unknown, opts?: { timeoutMs?: number }): Promise<any> }} Caller */
 
-/** Register every tool on an MCP server (the stdio server Claude Code launches). */
-export function registerTools(/** @type {import('@modelcontextprotocol/sdk/server/mcp.js').McpServer} */ server, /** @type {Caller} */ bridge) {
-    for (const d of toolDefinitions(bridge)) server.registerTool(d.name, d.config, d.handler);
+/**
+ * Register every tool on an MCP server (the stdio server Claude Code launches). The input shapes are wrapped
+ * in `z.object` here (MCP SDK v2's form), always, so a handler is always called with its arguments first.
+ */
+export function registerTools(/** @type {import('@modelcontextprotocol/server').McpServer} */ server, /** @type {Caller} */ bridge) {
+    for (const d of toolDefinitions(bridge)) {
+        server.registerTool(d.name, { ...d.config, inputSchema: z.object(d.config.inputSchema) }, (/** @type {any} */ args) => d.handler(args));
+    }
 }
 
 /**

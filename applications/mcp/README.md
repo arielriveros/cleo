@@ -114,7 +114,7 @@ Resources: `cleo://docs/...` (all of `docs/`) and `cleo://examples/scripts/...`.
 ## Testing
 
 ```sh
-npm test                    # bridge security, peer relay, hosted terminal (node:test, real sockets, a real pty)
+npm test                    # bridge security, peer relay, the stdio server through the SDK v2 client, hosted terminal (node:test, real sockets, a real pty)
 node scripts/smoke.mjs      # end to end through the host against a running editor (--keep leaves the result)
 ```
 
@@ -142,4 +142,5 @@ The editor half is tested by `applications/editor/tests/agentBridge.test.ts` and
 - **Missing:** input injection during Play, scene open/create, imports.
 - **One hosted Claude Code at a time**, per host. It runs in the engine checkout, not in a folder of the
   project (projects live in IndexedDB).
-- **Protocol version.** The stdio server is on MCP SDK v1 (protocol 2025-11-25).
+- **Protocol version.** The stdio server is on MCP SDK v2 (`@modelcontextprotocol/server`); `serveStdio`
+  answers both protocol 2026-07-28 clients and 2025-era ones from the same tool catalog.

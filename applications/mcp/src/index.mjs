@@ -15,8 +15,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { McpServer } from '@modelcontextprotocol/server';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { EditorBridge, describeClient } from './bridge.mjs';
 import { PeerBridge } from './peer.mjs';
 import { ensureHost } from './ensureHost.mjs';
@@ -72,22 +72,33 @@ async function standalone() {
 }
 
 /**
- * The MCP server itself, over stdio, running its tools through `caller`.
- * @param {import('./tools.mjs').Caller} caller @param {() => Promise<void>} cleanup
+ * One MCP server instance: the tool catalog and the docs resources, running tools through `caller`.
+ * @param {import('./tools.mjs').Caller} caller
  */
-async function serve(caller, cleanup) {
+function buildServer(caller) {
     const server = new McpServer({ name: PKG.name, version: PKG.version }, {
         instructions: INSTRUCTIONS,
         capabilities: { tools: {}, resources: {} },
     });
     registerTools(server, caller);
     registerResources(server, ENGINE_ROOT);
+    return server;
+}
+
+/**
+ * The MCP server over stdio. `serveStdio` (MCP SDK v2) answers both protocol eras: a 2026-07-28 client and
+ * a 2025-era one (an `initialize` opening) get the same tools from the same factory.
+ * @param {import('./tools.mjs').Caller} caller @param {() => Promise<void>} cleanup
+ */
+async function serve(caller, cleanup) {
+    const handle = serveStdio(() => buildServer(caller), { onerror: err => log(`protocol error: ${err?.message ?? err}`) });
 
     let closing = false;
     const shutdown = async (/** @type {string} */ why) => {
         if (closing) return;
         closing = true;
         log(`shutting down (${why})`);
+        await handle.close().catch(() => {});
         await cleanup().catch(() => {});
         process.exit(0);
     };
@@ -96,7 +107,6 @@ async function serve(caller, cleanup) {
     // The client owns our lifetime: when it closes stdin, we are done.
     process.stdin.on('end', () => void shutdown('stdin closed'));
 
-    await server.connect(new StdioServerTransport());
     log(`MCP server ${PKG.version} ready on stdio`);
 }
 
