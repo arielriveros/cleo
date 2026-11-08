@@ -100,6 +100,12 @@ export interface ReflectionProbeArrays {
     params: Float32Array;
     /** `u_reflProbeCapture`: xyz the probe's world position, where it captured from. */
     capture: Float32Array;
+    /**
+     * `u_reflProbeIrradiance`: the probe's irradiance LUMINANCE as L0 and L1, x intensity x pre-exposure
+     * (x constant, yzw linear in the normal's x, y, z; E/pi), for the GI Volumes' reflection normalization.
+     * All zero for a probe with no projection yet.
+     */
+    irradiance: Float32Array;
 }
 
 export function createReflectionProbeArrays(): ReflectionProbeArrays {
@@ -108,7 +114,28 @@ export function createReflectionProbeArrays(): ReflectionProbeArrays {
         blend: new Float32Array(MAX_LIGHTING_PROBES * 4),
         params: new Float32Array(MAX_LIGHTING_PROBES * 4),
         capture: new Float32Array(MAX_LIGHTING_PROBES * 4),
+        irradiance: new Float32Array(MAX_LIGHTING_PROBES * 4),
     };
+}
+
+/** Rec. 709 luminance weights. */
+const LUMA_R = 0.2126, LUMA_G = 0.7152, LUMA_B = 0.0722;
+/** Ramamoorthi & Hanrahan's band constants, as skyIrradiance applies them: c4 on L0, 2 x c2 on L1. */
+const SH_C4 = 0.886227, SH_2C2 = 2 * 0.511664;
+
+/**
+ * `sh`'s irradiance luminance as L0 and L1 into `out` at `o`: the constant term, then the linear one in
+ * the normal's x, y, z (E/pi, x `k`). The cosine lobe of skyIrradiance cut at band 1, which is what a
+ * luminance RATIO needs: smooth, never ringing. `sh` is radiance-form, rgb in xyz of 9 vec4s.
+ */
+export function irradianceLuminanceL1(sh: ArrayLike<number>, k: number, out: Float32Array, o: number): void {
+    const lum = (c: number) => sh[c * 4] * LUMA_R + sh[c * 4 + 1] * LUMA_G + sh[c * 4 + 2] * LUMA_B;
+    const s = k / Math.PI;
+    out[o] = SH_C4 * lum(0) * s;
+    // SH order: 1 = L1,-1 (y), 2 = L1,0 (z), 3 = L1,1 (x).
+    out[o + 1] = SH_2C2 * lum(3) * s;
+    out[o + 2] = SH_2C2 * lum(1) * s;
+    out[o + 3] = SH_2C2 * lum(2) * s;
 }
 
 /** Pack the reflecting probes (already ordered) for the upload; returns the count the shader loops to. */
@@ -126,6 +153,9 @@ export function packReflectionProbes(list: readonly LightProbeNode[], preExposur
         out.params[i * 4 + 3] = 0;
         const p = probe.worldPosition;
         out.capture[i * 4] = p[0]; out.capture[i * 4 + 1] = p[1]; out.capture[i * 4 + 2] = p[2]; out.capture[i * 4 + 3] = 1;
+        const sh = probe.irradianceSH;
+        if (sh) irradianceLuminanceL1(sh, probe.intensity * preExposure, out.irradiance, i * 4);
+        else out.irradiance.fill(0, i * 4, i * 4 + 4);
     }
     return n;
 }

@@ -20,6 +20,8 @@
 const MAX_REFLECTION_LOD: f32 = 4.0;
 /** Relative depth difference beyond which an AO/SSIL neighbour is treated as a different surface. */
 const AO_DEPTH_TOLERANCE: f32 = 0.02;
+/** Rec. 709 luminance, for the GI Volumes' reflection normalization. */
+const GI_LUMA = vec3<f32>(0.2126, 0.7152, 0.0722);
 
 // --- G-buffer -----------------------------------------------------------------------------------
 @group(0) @binding(0) var u_gAlbedoMetallic_texture: texture_2d<f32>;    // rgb = albedo, a = metallic
@@ -38,6 +40,10 @@ const AO_DEPTH_TOLERANCE: f32 = 0.02;
 // ES 3.00 guarantees (tests/deferredLightingSamplers.test.ts).
 @group(0) @binding(10) var u_ssr_texture: texture_2d<f32>;
 @group(0) @binding(11) var u_ssr_sampler: sampler;
+// GI Volumes (render/gi/giSystem.ts): rgb = the volumes' irradiance (E/pi, pre-exposed, x intensity, summed
+// over their claims), a = the share they claimed. The most specific indirect diffuse: it claims first.
+@group(0) @binding(12) var u_gi_texture: texture_2d<f32>;
+@group(0) @binding(13) var u_gi_sampler: sampler;
 
 // --- IBL ----------------------------------------------------------------------------------------
 //
@@ -88,6 +94,12 @@ struct Lighting {
     u_reflProbeParams: array<vec4<f32>, 16>,
     /** xyz = where the probe captured (its world position), for box projection. */
     u_reflProbeCapture: array<vec4<f32>, 16>,
+    /**
+     * Their irradiance's LUMINANCE, L0 and L1 (x the constant term, yzw the linear one in the normal's x,
+     * y, z), E/pi x intensity x pre-exposure: what the GI Volumes' reflection normalization compares the
+     * volumes' light with. x = 0 for a probe with none projected yet, which is left as it is.
+     */
+    u_reflProbeIrradiance: array<vec4<f32>, 16>,
 
     u_dirLight: DirectionalLight,
     u_skyLight: SkyLight,
@@ -101,6 +113,8 @@ struct Lighting {
     u_ssaoTexelSize: vec2<f32>,
     /** The same for the SSR buffer. */
     u_ssrTexelSize: vec2<f32>,
+    /** The same for the GI buffer. */
+    u_giTexelSize: vec2<f32>,
 
     /** Scale on SSIL's bounce (`.rgb`); 0 leaves its visibility as plain ambient occlusion. */
     u_ssilIntensity: f32,
@@ -116,6 +130,8 @@ struct Lighting {
     u_horizonOcclusion: i32,
     /** Whether the SSR pass produced a result THIS frame (SsrPasses.ssrProducedThisFrame). */
     u_ssrEnabled: i32,
+    /** Whether the GI Volumes' apply produced a result THIS frame (GiSystem.producedThisFrame). */
+    u_giEnabled: i32,
     /**
      * The frame's pre-exposure (graphics/preExposure.ts). The lights, ambient, sky light, probes and sky
      * reflection arrive multiplied by it; the G-buffer emissive and the scene environment map are
@@ -344,6 +360,60 @@ fn sampleSSR(uv: vec2<f32>, centerDepth: f32) -> vec4<f32> {
     return select(vec4<f32>(0.0), s, ok);
 }
 
+/**
+ * The GI Volumes' light, computed at reduced resolution (giResolve.wgsl), brought up to this pixel.
+ *
+ * Depth alone, as `depthAwareUpsample` weighs SSIL and SSR, is not enough here: a volume's light depends
+ * on the surface's NORMAL, and at a crease — a wall meeting the floor — the depths on either side agree
+ * while the light does not, so a depth-only blend paints a band of floor light up the foot of every wall.
+ * Each of the four low-resolution texels round the pixel is weighed by its bilinear share, by how close the
+ * depth it was computed at is to this pixel's, and by how closely the normal it was computed with
+ * (`pow(n . N, 8)`) matches; read at the G-buffer texel the resolve took it from (`giSourceTexel`), so the
+ * comparison is exact. Where none agrees (a silhouette, a thin edge), the best-matching one.
+ */
+fn giUpsample(centerDepth: f32, N: vec3<f32>) -> vec4<f32> {
+    let full = vec2<f32>(textureDimensions(u_gNormalRoughness_texture));
+    let low = vec2<f32>(textureDimensions(u_gi_texture));
+    // This pixel's centre in the low-resolution grid, whose texel centres sit at +0.5.
+    let here = (floor(cleoFragCoord) + vec2<f32>(0.5)) * low / full - vec2<f32>(0.5);
+    let q0 = floor(here);
+    let f = here - q0;
+    var total = vec4<f32>(0.0);
+    var weightSum = 0.0;
+    var best = vec4<f32>(0.0);
+    var bestScore = -1.0;
+    for (var i = 0; i < 4; i++) {
+        let o = vec2<f32>(f32(i & 1), f32((i >> 1u) & 1));
+        let q = clamp(q0 + o, vec2<f32>(0.0), low - vec2<f32>(1.0));
+        let tap = textureLoad(u_gi_texture, vec2<i32>(q), 0);
+        let src = vec2<i32>(floor(q * full / low));
+        // Depth SAMPLED at the texel's centre: naga's GLSL cannot textureLoad a depth texture.
+        let d = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, (vec2<f32>(src) + vec2<f32>(0.5)) / full, 0);
+        let n = octDecode(textureLoad(u_gNormalRoughness_texture, src, 0).rg);
+        let depthW = 1.0 - smoothstep(0.0, AO_DEPTH_TOLERANCE, abs(d - centerDepth) / max(centerDepth, 1e-5));
+        let score = depthW * pow(saturate(dot(N, n)), 8.0);
+        let w = mix(1.0 - f.x, f.x, o.x) * mix(1.0 - f.y, f.y, o.y) * score;
+        total += tap * w;
+        weightSum += w;
+        if (score > bestScore) { bestScore = score; best = tap; }
+    }
+    if (weightSum < 1e-4) { return best; }
+    return total / weightSum;
+}
+
+/** GI Volumes: claimed irradiance in `.rgb`, the claim in `.a`. Disabled reads as nothing claimed. */
+fn sampleGI(uv: vec2<f32>, centerDepth: f32, N: vec3<f32>) -> vec4<f32> {
+    if (u_lighting.u_giEnabled == 0) { return vec4<f32>(0.0); }
+    var s: vec4<f32>;
+    if (u_lighting.u_giTexelSize.x <= 0.0) {
+        s = textureSampleLevel(u_gi_texture, u_gi_sampler, uv, 0.0);   // full resolution: nothing to do
+    } else {
+        s = giUpsample(centerDepth, N);
+    }
+    let ok = all(s >= vec4<f32>(0.0)) && all(s.rgb <= vec3<f32>(6.0e4)) && s.a <= 1.0001;
+    return select(vec4<f32>(0.0), vec4<f32>(s.rgb, min(s.a, 1.0)), ok);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // The shadow library reads the fragment coordinate through a module-scope global, because only an
@@ -450,10 +520,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     //
     // `(1 - metallic)` on the probe term, matching `accumulateLight`: a metal has no diffuse. The `(1 - F)`
     // factor this once carried is not in any modern reference BRDF and double-counted Fresnel.
-    var fallbackShare = 1.0;
-    var probeDiffuse = vec3<f32>(0.0);
-    var probeBack = vec3<f32>(0.0);
+    //
+    // The GI Volumes claim FIRST: theirs is the most specific light there is, per point inside the box
+    // rather than one value for it. What they leave the probes share as before.
+    // An ADDITIVE volume's claim is not in `a`: its light goes on top of the fill rather than in its place.
+    let gi = sampleGI(uv, depth, N);            // rgb = sum of claim x E/pi (pre-exposed, x intensity), a = share replaced
+    var fallbackShare = 1.0 - gi.a;
+    var probeDiffuse = gi.rgb;
+    var probeBack = gi.rgb;                  // a translucent surface's back takes the front's GI (v1)
     for (var i = 0; i < min(u_lighting.u_lightProbeCount, MAX_LIGHT_PROBES); i++) {
+        if (fallbackShare <= 1e-3) { break; }
         let blend = u_lighting.u_lightProbeBlend[i];
         let w = probeWeight(worldPos, u_lighting.u_lightProbeInvVolume[i], blend.xyz, i32(blend.w));
         if (w <= 0.0) { continue; }
@@ -472,6 +548,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // REFLECTIONS from the reflecting probes, as the lighting above: each claims its feathered weight of what
     // the ones before it left, the smallest box first, and the environment fallback keeps the rest. The same
     // answer wherever the camera is.
+    //
+    // Normalized by the GI Volumes where they light the pixel (Lagarde & de Rousiers 2014): a probe saw its
+    // room's light once, from one point, so where the volumes put more or less light on this surface than
+    // the probe received, its reflection scales by the same ratio. A corner reflects darker than the middle
+    // of the room, and a room the volumes darken stops reflecting the brighter light its probe captured.
+    // The sky reflection, below, scales the same way against the open sky's light: a room with no probe
+    // of its own no longer mirrors the bright sky from its floor. Additive volumes replace nothing (`a` 0),
+    // so under them the reflections stay the fill's, unscaled.
+    let giLum = select(0.0, dot(gi.rgb, GI_LUMA) / max(gi.a, 1e-4), gi.a > 1e-3);
     var envShare = 1.0;
     var probeSpecular = vec3<f32>(0.0);
     let Rv = reflect(-V, N);
@@ -485,11 +570,22 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             dir = boxProjected(Rv, worldPos, u_lighting.u_reflProbeInvVolume[i], u_lighting.u_reflProbeCapture[i].xyz);
         }
         let claim = w * envShare;
-        probeSpecular += probeReflection(i32(params.x), dir, N, V, roughness, F0) * (params.y * claim);
+        var norm = 1.0;
+        let irr = u_lighting.u_reflProbeIrradiance[i];
+        if (gi.a > 1e-3 && irr.x > 0.0) {
+            let probeLum = max(irr.x + dot(irr.yzw, N), 0.05 * irr.x);
+            norm = mix(1.0, clamp(giLum / probeLum, 0.0, 2.0), gi.a);
+        }
+        probeSpecular += probeReflection(i32(params.x), dir, N, V, roughness, F0) * (params.y * claim * norm);
         envShare -= claim;
         if (envShare <= 1e-3) { break; }
     }
-    indirect.specular = indirect.specular * envShare + probeSpecular;
+    var envNorm = 1.0;
+    if (gi.a > 1e-3 && u_lighting.u_envMapMode == 2) {
+        let open = dot(u_lighting.u_sceneAmbient + skyIrradiance(u_lighting.u_skyLight, N), GI_LUMA);
+        if (open > 0.0) { envNorm = mix(1.0, clamp(giLum / open, 0.0, 1.0), gi.a); }
+    }
+    indirect.specular = indirect.specular * (envShare * envNorm) + probeSpecular;
 
     // Distance in front of the camera, which is what selects a cascade.
     let viewDepth = -(u_lighting.u_view * vec4<f32>(worldPos, 1.0)).z;

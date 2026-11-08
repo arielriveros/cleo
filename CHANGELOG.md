@@ -16,6 +16,41 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **GI Volumes.** A new node, **GI Volume**, fills a box with irradiance probes that light what is inside
+  with the light bounced off the scene round it.
+  - *Relit, not rebaked.* Each probe's view of the static scene is captured once; the sun with its
+    shadow, the lights set to Bake, the sky, emissive surfaces and further bounces are put back on it as
+    the light changes, so a day and night cycle needs no new capture.
+  - *No light through walls.* Probes inside walls, rocks or the ground are found and switched off, and
+    each probe's view of the scene keeps it from lighting what is behind a wall.
+  - *Everywhere.* Deferred surfaces take it per pixel ahead of the light probes and the sky light;
+    forward materials, lit particles and lit sprites at their centre. On WebGL2 and WebGPU alike, at
+    every quality preset (half resolution on Medium and Low).
+  - *Saved with the project.* **Save bake** stores the capture, deflated, beside the scene; it loads in
+    the editor and in a published game without capturing again, and is captured afresh only when the
+    geometry round the volume has moved. Moving things (a script's windmill sails, physics props) are
+    left out of it. Trees and bushes painted on a landscape are in it, so a canopy shades what is under it.
+  - *Reflections that match.* Inside a volume, a light probe's reflection is scaled to the light the
+    volume puts on each surface, so a room the volume darkens stops mirroring the brighter light its probe
+    captured, and a floor with no probe no longer reflects the open sky.
+  - *Debug channels.* **GI** shows the volumes' light on a mid-grey surface, **GI Share** where they
+    light the frame.
+  - *Probes in the viewport.* A selected GI Volume shows its probes, each lit by the light it holds;
+    switched-off probes are red. The debug visibility menu's **GI probes** shows every volume's.
+  - *Cheaper on High.* The GI pass runs at half resolution on High as on Medium and Low, brought back up
+    along depth and normal edges (about a third of its cost), and not at all when no volume is in view.
+    Each probe's on/off state now rides in its light's alpha, so a lookup reads two textures a probe
+    instead of three (another tenth off the pass, and off the bounces of a relight).
+  - *Additive volumes.* A GI Volume's **Additive** puts its light on top of the light probes, the scene
+    ambient and the sky light instead of in their place, for a scene whose ambient is the dark's own faint
+    light rather than the open sky's that a room's walls shut out.
+  - *The Valley's dungeon.* Thirteen baked, additive volumes, one a room (3,787 probes): the torches' and
+    the moon's light bounced off the stone, warm round a fire, over the dungeon's dim ambient. In its place
+    the bounce alone, a fifth to a tenth of that ambient away from the fires, left every cell and corner
+    black, and the knight's armour with them. `tools/valley/bakeGI.cjs` bakes both scenes (`--scene`).
+    A bake whose scene takes longer than ten seconds to settle (WebGL2 compiling its programs on first
+    use) still loads within the minute after, the capture started in its place dropped.
+
 - **Lighting that holds together from noon to midnight.** Torches now light the night in the editor
   as they do in the game, and glare no longer floods the screen.
   - *Moonlight in lux.* The Sky Atmosphere's **Moonlight (lux)** replaces the 0-1 share of the sun,

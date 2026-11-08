@@ -176,6 +176,50 @@ holds them.
 A bounded probe's box shows as a wireframe while it is selected, with square handles on its six faces
 for sizing it in the viewport — see [Volume handles](scene-authoring.md#volume-handles).
 
+#### GI Volume
+
+A box filled with a grid of irradiance probes that light every surface inside it with the light bounced
+off the scene round them: a room lit through its door, the warm floor under a sunlit red wall, the
+ceiling over a bonfire. Each probe's view of the scene is captured once, from the static geometry, and
+relit whenever the light changes — the sun moving, a light set to **Bake** changed, the sky — so a time
+of day needs no new capture. Only a change to the geometry inside asks for one (**Capture again**).
+
+Inside the box the volume's light replaces the light probes' and the sky light's, wherever the camera is;
+where volumes overlap the smaller claims first (a room's inside the street's). A probe that ends up inside
+a wall, a rock or under the ground is switched off and the others light round it. Grow a room's box a
+little past its walls, so its edge falls outside.
+
+Selecting the volume shows its probes in the viewport, each a small sphere lit by the light it holds,
+from the direction each side of the sphere faces: a probe by a sunlit wall is bright on that side. A
+small red probe is inside geometry and switched off; a small grey one is not captured yet; a probe under
+the ground is not drawn. The debug visibility menu's **GI probes** shows every volume's probes at once.
+
+What a capture sees is the static geometry: models, the landscape, and the trees and bushes painted on it
+(each at its simplest level). Anything a script or a dynamic body moves is left out, and so is grass unless
+**Include grass** is on.
+
+| Field | Meaning |
+|---|---|
+| **Enabled** | Off leaves the volume in the scene without it lighting anything. |
+| **Size** | Full extents of the box in metres, before the node transform, which it follows, rotation included. The face handles in the viewport size it too. |
+| **Probes** | How many probes along each axis, corner to corner (at least 2). The spacing, shown below the fields, is what decides how fine the light is: about 1 m in a room, 4 to 8 m over a street. |
+| **Rays** | Rays per probe: 64, or 256 for small rooms and fine detail. |
+| **Ray reach** | How far, in metres, a probe sees; beyond that a ray sees the sky. |
+| **Capture resolution** | The size of each cube face a probe's capture draws. |
+| **Blend distance** | How far inside its faces the volume's light fades in, in metres. |
+| **Intensity** | Scales the volume's light. |
+| **Normal bias** | How far a lookup point is pushed off a surface along its normal, as a fraction of the smallest spacing: against a surface shadowing itself. |
+| **View bias** | How far a lookup point is pulled toward the camera, as the same fraction. |
+| **Multi-bounce** | The bounces after the first: the volume lighting what its probes see with its own light. |
+| **Additive** | Adds the volume's light to the fill that lights the box without it (the light probes, the scene ambient, the sky light) instead of replacing it. Off by default: a room is as dark as what its probes saw. On for a scene whose ambient is the dark's own faint light, a dungeon's, rather than the open sky's that walls shut out. |
+| **Include grass** | Grass in the capture: billboard grass, and painted plants under 0.8 m. Off by default: a meadow hides nothing a probe a metre up cares about, and it is most of the plants. |
+
+Below the fields, a line gives the capture's progress, then how many probes light and how many are inside
+geometry. **Save bake** saves the finished capture with the project: the scene opens with it instead of
+capturing again, and a published game carries it. A bake taken for another grid, or before the geometry
+round the volume changed, is refused and the volume captures again; save a new one. **Capture again**
+drops the saved bake and captures every probe again, after the static geometry inside the volume changed.
+
 #### Exposure Volume
 
 A region with its own exposure. While the camera is inside the box, the fields it overrides replace the

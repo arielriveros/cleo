@@ -146,6 +146,10 @@ export const OcclusionVolumeIcon = () => (
 export const VolumetricFogIcon = () => (
   <S><path d="M3.5 3.5h17v17h-17Z" strokeDasharray="2.6 2.2" /><path d="M6 10.5c1.5-1.2 3-1.2 4.5 0s3 1.2 4.5 0 3-1.2 4.5 0M6 14.5c1.5-1.2 3-1.2 4.5 0s3 1.2 4.5 0 3-1.2 4.5 0" /></S>
 );
+/** GI volume: a dashed box holding a grid of probes. */
+export const GiVolumeIcon = () => (
+  <S><path d="M3.5 3.5h17v17h-17Z" strokeDasharray="2.6 2.2" /><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" /><circle cx="16" cy="8" r="1.4" fill="currentColor" stroke="none" /><circle cx="8" cy="16" r="1.4" fill="currentColor" stroke="none" /><circle cx="16" cy="16" r="1.4" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="2.2" /></S>
+);
 /** Exposure volume: a dashed box around a half-lit disc, the exposure it sets inside. */
 export const ExposureVolumeIcon = () => (
   <S><path d="M3.5 3.5h17v17h-17Z" strokeDasharray="2.6 2.2" /><circle cx="12" cy="12" r="4.5" /><path d="M12 7.5a4.5 4.5 0 0 1 0 9Z" fill="currentColor" stroke="none" /></S>

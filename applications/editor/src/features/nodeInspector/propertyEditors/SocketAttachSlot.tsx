@@ -27,7 +27,7 @@ function socketModelsIn(root: Node, exclude: Node, out: ModelNode[]): void {
  * landscape riding a hand bone is never what anyone meant, so the section never offers it.
  */
 const NEVER_HELD = new Set([
-  'navMesh', 'skybox', 'landscape', 'tilemap', 'volumetricClouds', 'skyAtmosphere', 'skyLight', 'wind', 'weather', 'lightProbe', 'exposureVolume', 'volumetricFog', 'occlusionVolume',
+  'navMesh', 'skybox', 'landscape', 'tilemap', 'volumetricClouds', 'skyAtmosphere', 'skyLight', 'wind', 'weather', 'lightProbe', 'exposureVolume', 'giVolume', 'volumetricFog', 'occlusionVolume',
   'decal', 'character', 'controller',
 ])
 

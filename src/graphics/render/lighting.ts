@@ -98,6 +98,33 @@ export class LightingPasses {
     public readonly lightGrid: LightGrid = new LightGrid();
 
     /**
+     * The BAKE light grid: the lights set to bake, steady (no flicker), in one cluster — what a light-probe
+     * relight and a GI relight light their captures with. Its own texture, not the frame grid's: a bake
+     * runs at the start of the frame and the frame's grid is uploaded after it, and on WebGPU both
+     * `writeTexture`s land before the frame's single submit, so one shared texture handed the bake's draws
+     * the FRAME's records (lights not set to bake, the camera's cluster addressing).
+     */
+    public readonly bakeLightGrid: LightGrid = new LightGrid();
+    private _bakeLightsActive = false;
+
+    /** The grid draws read now: the bake grid between `beginBakeLights` and `endBakeLights`, else the frame's. */
+    public get activeLightGrid(): LightGrid { return this._bakeLightsActive ? this.bakeLightGrid : this.lightGrid; }
+
+    /**
+     * Pack the lights set to bake into the bake grid and make every lighting draw read it (its texture
+     * through the frame-lighting group, its addressing through the uniform uploads) until `endBakeLights`.
+     */
+    public beginBakeLights(scene: Scene): void {
+        this.bakeLightGrid.buildSingle(this.punctualLightCount(scene));
+        this.packLightRecords(scene, true, this.bakeLightGrid);
+        this.bakeLightGrid.upload();
+        this._bakeLightsActive = true;
+    }
+
+    /** Back to the frame's grid. */
+    public endBakeLights(): void { this._bakeLightsActive = false; }
+
+    /**
      * How far the cluster grid reaches, in world units.
      *
      * NOT the camera's far plane, for the same reason `_shadows.shadowDistance` is not: the editor camera runs
@@ -158,7 +185,7 @@ export class LightingPasses {
     public resetForwardLighting(scene: Scene): void {
         for (const shaderName of this._forwardShaders()) {
             this._shaderManager.bind(shaderName);
-            this.lightGrid.uploadUniforms(this._shaderManager);
+            this.activeLightGrid.uploadUniforms(this._shaderManager);
             this._clearDirectional();
             this._shaderManager.setUniform('u_sceneAmbient', this._preExposedAmbient(scene));
             // Pre-exposure for the terms the built-in forward programs multiply themselves (emissive, the
@@ -249,13 +276,33 @@ export class LightingPasses {
      * `outSH`, and the share of the ambient and sky light they replace (0 outside every probe).
      */
     public probeLightingAt(scene: Scene, position: vec3, outSH: Float32Array): number {
-        return probeLightingAt(this.lightingProbes(scene), position, outSH, this._view.preExposure);
+        const k = this._view.preExposure;
+        const probes = probeLightingAt(this.lightingProbes(scene), position, outSH, k);
+        // The GI Volumes claim FIRST, as they do per pixel in the deferred pass; the probes take their share
+        // of what the volumes left. Never during a capture, which no indirect light reaches.
+        if (this._view.capturing) return probes;
+        // `gi` is the share the volumes REPLACE: an additive volume lights the point (its SH) and replaces none.
+        const gi = this._sys.gi.lightingAt(position, this._giSH, k);
+        if (gi <= 0 && this._giSH[0] <= 0 && this._giSH[1] <= 0 && this._giSH[2] <= 0) return probes;
+        const rest = 1 - gi;
+        for (let j = 0; j < outSH.length; j++) outSH[j] = this._giSH[j] + outSH[j] * rest;
+        return gi + probes * rest;
     }
 
     /** A flat ambient at `position` (lit particles, lit sprites): `fallback` where no probe lights it. */
     public probeAmbientAt(scene: Scene, position: vec3, fallback: ArrayLike<number>, out?: number[]): number[] {
-        return probeAmbientAt(this.lightingProbes(scene), position, fallback, out);
+        const result = probeAmbientAt(this.lightingProbes(scene), position, fallback, out);
+        if (this._view.capturing) return result;
+        const gi = this._sys.gi.ambientAt(position, this._giAmbient);
+        if (gi <= 0 && this._giAmbient[0] <= 0 && this._giAmbient[1] <= 0 && this._giAmbient[2] <= 0) return result;
+        const rest = 1 - gi;
+        for (let c = 0; c < 3; c++) result[c] = this._giAmbient[c] + result[c] * rest;
+        return result;
     }
+
+    /** Scratch for the GI Volumes' share of a forward draw's SH, and of a flat ambient. */
+    private readonly _giSH = new Float32Array(36);
+    private readonly _giAmbient: number[] = [0, 0, 0];
 
     public deferredLightingPass(scene: Scene, _shadowLight: LightNode | null): void {
         const w = this._host.renderWidth, h = this._host.renderHeight;
@@ -284,6 +331,10 @@ export class LightingPasses {
             ssaoTexelSize: this._ssil.ssaoResolutionScale >= 0.999 ? [0, 0] : [1 / this._ssil.ssaoWidth, 1 / this._ssil.ssaoHeight],
             ssrEnabled: ssrLive,
             ssrTexelSize: ssr.ssrResolutionScale >= 0.999 ? [0, 0] : [1 / ssr.ssrWidth, 1 / ssr.ssrHeight],
+            gi: this._sys.gi.texture ?? this._bindGroups.fallbackTexture,
+            giEnabled: this._sys.gi.texture !== null,
+            giTexelSize: this._sys.gi.resolutionScale >= 0.999 || !this._sys.gi.texture
+                ? [0, 0] : [1 / this._sys.gi.targetWidth, 1 / this._sys.gi.targetHeight],
             bakeOnly: false,
         });
         this._passes.endFullscreenPass(pass);
@@ -304,6 +355,7 @@ export class LightingPasses {
             ssao: this._bindGroups.fallbackTexture, ssr: this._bindGroups.fallbackTexture,
             invViewProj, viewPos, view,
             ssaoEnabled: false, ssilIntensity: 0, ssaoTexelSize: [0, 0], ssrEnabled: false, ssrTexelSize: [0, 0],
+            gi: this._bindGroups.fallbackTexture, giEnabled: false, giTexelSize: [0, 0],
             bakeOnly: true,
         });
         this._passes.endFullscreenPass(pass);
@@ -313,6 +365,7 @@ export class LightingPasses {
         ssao: Texture; ssr: Texture; invViewProj: mat4; viewPos: vec3; view: mat4;
         ssaoEnabled: boolean; ssilIntensity: number; ssaoTexelSize: number[];
         ssrEnabled: boolean; ssrTexelSize: number[]; bakeOnly: boolean;
+        gi: Texture; giEnabled: boolean; giTexelSize: number[];
     }): void {
         const pipeline = this._pipelines.fullscreen('deferredLighting', DeferredLightingProgram);
         pass.setPipeline(pipeline);
@@ -320,7 +373,7 @@ export class LightingPasses {
         // Group 0: the G-buffer plus SSIL and SSR. Both always bind a complete texture even when disabled —
         // the shader gates on u_ssaoEnabled / u_ssrEnabled, but the sampler still has to point somewhere valid.
         pass.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, [
-            gBuffer.colors[0], gBuffer.colors[1], gBuffer.colors[2], gBuffer.depth, o.ssao, o.ssr,
+            gBuffer.colors[0], gBuffer.colors[1], gBuffer.colors[2], gBuffer.depth, o.ssao, o.ssr, o.gi,
         ]));
 
         this._shaderManager.setUniform('u_invViewProj', o.invViewProj);
@@ -362,6 +415,7 @@ export class LightingPasses {
             this._shaderManager.setUniform('u_reflProbeBlend', refl.blend.subarray(0, reflectionCount * 4));
             this._shaderManager.setUniform('u_reflProbeParams', refl.params.subarray(0, reflectionCount * 4));
             this._shaderManager.setUniform('u_reflProbeCapture', refl.capture.subarray(0, reflectionCount * 4));
+            this._shaderManager.setUniform('u_reflProbeIrradiance', refl.irradiance.subarray(0, reflectionCount * 4));
         }
         const skyReflection = scene.environmentMap ? null : this._sys.sky.skyReflectionCube;
         const skyLight = scene.skyLight;
@@ -389,15 +443,26 @@ export class LightingPasses {
         this._shaderManager.setUniform('u_ssaoTexelSize', o.ssaoTexelSize);
         this._shaderManager.setUniform('u_ssrEnabled', o.ssrEnabled);
         this._shaderManager.setUniform('u_ssrTexelSize', o.ssrTexelSize);
+        this._shaderManager.setUniform('u_giEnabled', o.giEnabled);
+        this._shaderManager.setUniform('u_giTexelSize', o.giTexelSize);
 
         this._passes.drawFullscreen(pass);
     }
 
-    private _setDeferredLighting(scene: Scene, bakeOnly: boolean = false): void {
-        this._shaderManager.bind('deferredLighting');
+    /**
+     * The frame's lighting uploads — sky light, sun, flat ambient, pre-exposure, the active light grid's
+     * addressing — onto `program` (which declares them by the deferred pass's names). `bakeOnly`: the
+     * lights set to bake alone, as a probe or GI relight lights its capture.
+     */
+    public uploadSceneLighting(program: string, scene: Scene, bakeOnly: boolean = false): void {
+        this._setDeferredLighting(scene, bakeOnly, program);
+    }
+
+    private _setDeferredLighting(scene: Scene, bakeOnly: boolean = false, program: string = 'deferredLighting'): void {
+        this._shaderManager.bind(program);
         this._uploadSkyLight();
         const grade = this.cloudGrade(scene);
-        this.lightGrid.uploadUniforms(this._shaderManager);
+        this.activeLightGrid.uploadUniforms(this._shaderManager);
         this._shaderManager.setUniform('u_sceneAmbient', this._preExposedAmbient(scene));
         // The G-buffer's emissive and the scene environment map are absolute; the lighting pass
         // pre-exposes them itself. Everything else it reads arrives pre-exposed through these uploads.
@@ -621,7 +686,7 @@ export class LightingPasses {
         for (const shaderName of this._forwardShaders()) {
             try {
                 this._shaderManager.bind(shaderName);
-                this.lightGrid.uploadUniforms(this._shaderManager);
+                this.activeLightGrid.uploadUniforms(this._shaderManager);
             } catch (_) { /* an unlit program has no cluster block; see BindGroupCache.declaresLightGrid */ }
         }
     }
@@ -644,7 +709,7 @@ export class LightingPasses {
      * with no branch on light type. `spotAttenuation` returns exactly 1.0 for that cone, and the two
      * evaluate functions differ by nothing else — see chunks/clusteredLights.wgsl.
      */
-    public packLightRecords(scene: Scene, bakeOnly: boolean = false): void {
+    public packLightRecords(scene: Scene, bakeOnly: boolean = false, grid: LightGrid = this.lightGrid): void {
         let i = 0;
         // Pre-exposed: the light texture is shared by the deferred pass, every forward program and every
         // custom material, so it is scaled here, once, rather than in any of them.
@@ -661,14 +726,14 @@ export class LightingPasses {
             if (node.type === 'spotlight') {
                 const spot = node.light as Spotlight;
                 const [coneScale, coneOffset] = spot.coneScaleOffset;
-                this.lightGrid.packRecord(i, node.worldPosition, spot.invRangeSquared,
+                grid.packRecord(i, node.worldPosition, spot.invRangeSquared,
                                            spot.color, off ? 0 : spot.internalIntensity * (bakeOnly ? 1 : node.flickerFactor) * k,
                                            node.worldForward, spot.sourceRadius,
                                            coneScale, coneOffset,
                                            this._shadows.spotSlots.layerOf(node.id), NO_SHADOW_SLOT);
             } else {
                 const point = node.light as PointLight;
-                this.lightGrid.packRecord(i, node.worldPosition, point.invRangeSquared,
+                grid.packRecord(i, node.worldPosition, point.invRangeSquared,
                                            point.color, off ? 0 : point.internalIntensity * (bakeOnly ? 1 : node.flickerFactor) * k,
                                            ShadowPasses.POINT_DIRECTION, point.sourceRadius,
                                            POINT_CONE_SCALE, POINT_CONE_OFFSET,

@@ -112,6 +112,12 @@ export interface BundleAudio {
   bytes: ArrayBuffer
 }
 
+/** One GI Volume bake (`.cgib` bytes) as it crosses the worker boundary and lives inside assets.bin. */
+export interface BundleGiBake {
+  id: string
+  bytes: ArrayBuffer
+}
+
 /** The fully-gathered bundle contents — the shape both the export job (in) and import job (out) use. */
 export interface BundleData {
   manifest: BundleManifest
@@ -122,6 +128,8 @@ export interface BundleData {
   textures: BundleTexture[]
   /** Optional so a bundle written before audio existed reads as one with no sounds. */
   audio?: BundleAudio[]
+  /** GI Volume bakes. Optional: a bundle written before them, or with none, has no table. */
+  giBakes?: BundleGiBake[]
 }
 
 // Fixed paths inside the archive. `texturesDir`/`texturesIndex` are format 1 only: read, never written.
@@ -188,6 +196,8 @@ export interface BundleAssetIndex {
   textures: { id: string; mime: string; config: any; o: number; l: number }[]
   /** Absent in a bundle written before audio existed; read as "no sounds". */
   audio?: { id: string; mime: string; o: number; l: number }[]
+  /** GI Volume bakes. Absent in a bundle written before them; read as none. */
+  giBakes?: { id: string; o: number; l: number }[]
   /**
    * Byte length of each file the blob is split across, in order (see `assetPartPath`). Absent — the
    * normal case, and every export — means one `assets.bin`. Only checked-in example folders split it,

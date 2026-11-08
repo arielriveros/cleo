@@ -336,7 +336,17 @@ export async function packBundleAssets(bundle: BundleData): Promise<PackBundleRe
   }
   bundle.audio = []
 
-  return { blob: writer.finish(), index: { version: 1, geometries, textures, audio } }
+  // GI Volume bakes after the audio: each bake's .cgib bytes, whole.
+  const giBakes: NonNullable<BundleAssetIndex['giBakes']> = []
+  for (const g of (bundle.giBakes ?? [])) {
+    const bytes = g.bytes instanceof Uint8Array ? g.bytes : new Uint8Array(g.bytes)
+    if (bytes.length === 0) continue
+    const ref = writer.addInterned(bytes)
+    giBakes.push({ id: g.id, o: ref.o, l: ref.l })
+  }
+  bundle.giBakes = []
+
+  return { blob: writer.finish(), index: { version: 1, geometries, textures, audio, ...(giBakes.length ? { giBakes } : {}) } }
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -445,5 +455,11 @@ export async function inflateBundleAssets(
     id: a.id,
     mime: a.mime,
     bytes: reader.bytes({ o: a.o, l: a.l })!.slice().buffer as ArrayBuffer,
+  }))
+
+  // Sliced like the audio. A bundle written before GI bakes existed has no table: none.
+  bundle.giBakes = (index.giBakes ?? []).map(g => ({
+    id: g.id,
+    bytes: reader.bytes({ o: g.o, l: g.l })!.slice().buffer as ArrayBuffer,
   }))
 }

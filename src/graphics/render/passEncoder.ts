@@ -299,6 +299,23 @@ export class PassEncoder {
     private static _warnedBoneless = false;
 
     /**
+     * Record `count` instances of `mesh` with no per-instance buffer, for a program that derives each
+     * instance from `instance_index` alone (the GI probe overlay): its vertices in slot 0, its active
+     * index level when it has one.
+     */
+    public recordDrawInstances(pass: RenderPassEncoder, mesh: Mesh, count: number): void {
+        if (count <= 0) return;
+        pass.setVertexBuffer(0, mesh.vertexBuffer);
+        const indices = mesh.activeIndexBuffer;
+        if (indices) {
+            pass.setIndexBuffer(indices, mesh.activeIndexFormat);
+            pass.drawIndexed(mesh.activeIndexCount, count);
+        } else if (mesh.vertexCount > 0) {
+            pass.draw(mesh.vertexCount, count);
+        }
+    }
+
+    /**
      * Record `count` instances of `mesh`: its vertices in slot 0, the per-instance data (`instances`, from
      * `instanceOffset` bytes) in slot 1. Indexed through the mesh's ACTIVE index level when it has one —
      * an LOD level is an alternate index buffer over the same vertices — an array draw otherwise.

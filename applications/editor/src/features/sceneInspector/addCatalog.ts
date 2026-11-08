@@ -7,6 +7,7 @@ import {
   LightNode,
   LightProbeNode,
   ExposureVolumeNode,
+  GIVolumeNode,
   VolumetricFogNode,
   DecalNode,
   DirectionalLight,
@@ -66,7 +67,7 @@ import {
 } from './primitiveIcons'
 import {
   EmptyIcon, TriggerIcon, CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon,
-  DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon, ExposureVolumeIcon, VolumetricFogIcon,
+  DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon, ExposureVolumeIcon, GiVolumeIcon, VolumetricFogIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon, WeatherIcon,
   SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
@@ -360,6 +361,13 @@ export const ADD_ITEMS: AddItem[] = [
     // overriding nothing, so dropping one changes nothing until a field or preset is picked.
     id: 'exposureVolume', label: 'Exposure Volume', icon: ExposureVolumeIcon, category: 'environment',
     create: async () => new ExposureVolumeNode('exposure volume', { size: [10, 10, 10] }),
+  },
+  {
+    // A box of irradiance probes that light what is inside it with the light bounced off the scene round
+    // them, relit as the sun and lights change. Placeable, sized with the box gizmo's face handles; starts
+    // at 2 m spacing.
+    id: 'giVolume', label: 'GI Volume', icon: GiVolumeIcon, category: 'environment',
+    create: async () => new GIVolumeNode('GI volume', { size: [10, 4, 10], probeCounts: [6, 3, 6] }),
   },
   {
     // A bank of fog the sun, the torches and the sky light scatter into (the renderer's froxel fog).

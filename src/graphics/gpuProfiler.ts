@@ -50,6 +50,9 @@ export const RENDER_PASSES = [
     'ssr',
     'ssr.resolve',
     'ssr.temporal',
+    // GI Volumes: the apply, and the capture and relight work (render/gi/giSystem.ts).
+    'gi',
+    'gi.update',
     'lighting',
     'sky',
     'clouds',
@@ -128,6 +131,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     ssr: 'ssr',
     'ssr.resolve': 'ssr.resolve',
     'ssr.temporal': 'ssr.temporal',
+    gi: 'gi',
     sky: 'sky',
     clouds: 'clouds',
     'clouds.resolve': 'clouds.resolve',
@@ -183,6 +187,17 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     probeRelight: 'ibl.bake',
     probeForward: 'ibl.bake',
     probeFilter: 'ibl.bake',
+    // GI Volumes' capture and relight, all inside the gi.update scope.
+    giCapture: 'gi.update',
+    giBackface: 'gi.update',
+    giClear: 'gi.update',
+    giReduce: 'gi.update',
+    giVisibility: 'gi.update',
+    giRadiance: 'gi.update',
+    giIntegrate: 'gi.update',
+    giAmbientCube: 'gi.update',
+    giRescale: 'gi.update',
+    giStateStamp: 'gi.update',
     godRaysUpsample: 'godRays',
     // The per-object velocity draws run inside the 'velocity' scope, right after the fullscreen
     // camera-reprojection pass that seeds the same buffer.
@@ -198,6 +213,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     // The overlay layer's two labels: the helper/icon draws during the scene render, and the
     // composite past the end of the post chain. Both report under the one scope.
     'overlay.helpers': 'overlay',
+    'overlay.giProbes': 'overlay',
     'overlay.composite': 'overlay',
 };
 

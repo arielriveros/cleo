@@ -7,6 +7,7 @@ import { inputMapKey, libKey, metaKey, projectSettingsKey, sceneKey, scenePrefix
 import { parseProjectSettings } from '../features/options/projectSettings'
 import { getAllTextures, putTextures, deleteTextures, StoredTexture } from './textureStore'
 import { getAllAudio, putAudio, deleteAudio, StoredAudio } from './audioStore'
+import { deleteGiBakes, getAllGiBakes, putGiBake } from './giBakeStore'
 import { planMerge, LocalState } from './bundleMerge'
 import { createProject, switchToProject } from './projects'
 import { confirmDiscard, reloadDiscarding } from '../features/unloadGuard'
@@ -147,6 +148,11 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
   await deleteAudio(existingAudio, pid)
   await putAudio(audioToRecords(bundle.audio), pid)
   if (bundle.audio?.length) audioStep.done(`${bundle.audio.length} written`); else audioStep.skip('none')
+
+  // GI Volume bakes: the same wipe-and-rewrite. The boot after this import registers them.
+  const existingBakes = (await getAllGiBakes(pid)).map(b => b.id)
+  await deleteGiBakes(existingBakes, pid)
+  for (const g of bundle.giBakes ?? []) await putGiBake(g.id, new Uint8Array(g.bytes), pid)
 
   Logger.info(`Imported ${isProject ? 'project' : 'asset pack'} (replace) — reloading`, 'Editor')
   handOff()

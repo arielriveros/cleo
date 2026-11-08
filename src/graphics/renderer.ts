@@ -77,6 +77,8 @@ import { ForwardPass } from './render/forwardPass';
 import { EditorOverlays } from './render/editorOverlays';
 import { DebugViews } from './render/debugViews';
 import { Capture } from './render/capture';
+import { GiSystem } from './render/gi/giSystem';
+import { GI_TIERS, clampGiFillDrawsPerFrame, clampGiRaysPerFrame, clampGiResolutionScale } from './render/gi/giSettings';
 import { RenderStats } from './render/stats';
 import type { RenderSubsystems } from './render/subsystems';
 import { ProgramRegistry } from './render/programRegistry';
@@ -199,6 +201,8 @@ export class Renderer {
     private readonly _debugViews: DebugViews;
     /** Captures: offscreen screenshots and thumbnails, light-probe capture and IBL bake, probe previews (render/capture.ts). */
     private readonly _capture: Capture;
+    /** GI Volumes: their capture, relight and per-pixel apply (render/gi/giSystem.ts). */
+    private readonly _gi: GiSystem;
     /** Frame statistics for the performance HUD, the GPU memory estimate and the opt-in GL error check (render/stats.ts). */
     private readonly _stats: RenderStats;
     /** The subsystems, for the ones that reach each other while drawing (render/subsystems.ts). Filled at the end of the constructor. */
@@ -295,7 +299,7 @@ export class Renderer {
             shadowCascades: () => this._shadows.cascadeTexture,
             spotShadows: () => this._shadows.spotShadowFBO.texture,
             pointShadows: () => this._shadows.pointShadowFBO.texture,
-            lightGrid: () => this._lighting.lightGrid.texture,
+            lightGrid: () => this._lighting.activeLightGrid.texture,
             weatherShelter: () => this._shadows.shelterFBO.texture,
         }, this._targets);
         this._fullscreen = new FullscreenPasses(this._pipelines, this._bindGroups);
@@ -412,10 +416,13 @@ export class Renderer {
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._temporal, this._clouds, this._decals, this._fluids, this._particlePasses, this._sprites, this._visibility, this._radiance, this._lighting, this._sky, this._modelDraw, this._subsystems);
         this._overlays = new EditorOverlays({
             get thumbnailMode() { return renderer._thumbnailMode; },
+            get selectedNodeId() { return renderer._selectedNodeId; },
+            get gi() { return renderer._gi; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._post, this._decals, this._sprites, this._fullscreen, this._modelDraw);
         this._debugViews = new DebugViews({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
+            get giTexture() { return renderer._gi.texture; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._temporal, this._post, this._foliage, this._shadows, this._ssil, this._ssr, this._fullscreen);
         this._capture = new Capture({
             get renderHeight() { return renderer._renderHeight; },
@@ -424,6 +431,10 @@ export class Renderer {
             get clearColor() { return renderer.clearColor; },
             render: (scene) => renderer.render(scene),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._temporal, this._post, this._shadows, this._lighting, this._sky, this._forward, this._fullscreen, this._subsystems);
+        this._gi = new GiSystem({
+            get renderHeight() { return renderer._renderHeight; },
+            get renderWidth() { return renderer._renderWidth; },
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._projection, this._shadows, this._lighting, this._fullscreen, this._subsystems);
         this._stats = new RenderStats({
             get canvas() { return renderer._canvas; },
             get deferred() { return renderer._deferred; },
@@ -447,6 +458,8 @@ export class Renderer {
             capture: this._capture,
             programs: this._programs,
             objects: this._objects,
+            gi: this._gi,
+            foliage: this._foliage,
         } satisfies RenderSubsystems);
         this._ssil.ssaoEnabled = config.ssao !== false; // default: SSAO on
         this._shadows.shadowDistance = config.shadowDistance ?? 100;
@@ -885,6 +898,10 @@ export class Renderer {
         // A probe captured last frame or earlier gets the spherical harmonics its lighting is applied in.
         this._sky.updateProbeLighting(scene);
         this._passes.endScope();
+        // GI Volumes: a capture batch and the relight the light calls for, before anything shades.
+        this._passes.scope('gi.update');
+        this._gi.update(scene);
+        this._passes.endScope();
 
         // Reset per-frame perf counters AFTER the (occasional) IBL bake so bakes don't spike the RenderStats.stats.
         resetFrameStats();
@@ -1128,6 +1145,9 @@ export class Renderer {
         if (this._ssr.ssrEnabled && gBufferHasGeometry && this._view.camera.type !== 'orthographic'
             && this._passes.beginPass('ssr'))
             this._ssr.ssrProducedThisFrame = this._ssr.ssrPass();
+        // 1d. GI Volumes: the volumes' irradiance at every pixel, the most specific indirect diffuse.
+        this._gi.producedThisFrame = false;
+        if (gBufferHasGeometry && this._passes.beginPass('gi')) this._gi.resolve(scene);
         // 2. Light the G-buffer in a single fullscreen pass into the scene FBO.
         this._passes.scope('lighting');
         this._lighting.deferredLightingPass(scene, shadowLight);
@@ -1361,6 +1381,14 @@ export class Renderer {
     /** Show/hide the editor infinite grid overlay. Off by default (published builds never draw it). */
     public setGridVisible(visible: boolean): void {
         this._overlays.gridEnabled = visible;
+    }
+
+    /**
+     * Show every GI Volume's probes in the editor's overlay (the debug visibility menu's GI Probes). A
+     * selected volume shows its own regardless. Off by default; a published build never draws it.
+     */
+    public setGiProbesVisible(visible: boolean): void {
+        this._overlays.giProbesVisible = !!visible;
     }
 
     /** Orient the grid: 'xz' = ground plane (3D perspective), 'xy' = front plane (2D orthographic). */
@@ -2012,6 +2040,25 @@ export class Renderer {
     public set localExposureHighlights(v: number) { this._post.localExposure.highlightStops = Math.min(4, Math.max(0, Number.isFinite(+v) ? +v : 1.5)); }
 
     /** See {@link RenderSettings.ssrEnabled}. A quality-tier field, like `ssaoEnabled`. */
+    /** GI Volumes: state, counters and settings (render/gi/giSystem.ts). */
+    public get gi(): GiSystem { return this._gi; }
+
+    /** See {@link RenderSettings.giEnabled}. A quality-tier field. */
+    public get giEnabled(): boolean { return this._gi.enabled; }
+    public set giEnabled(enabled: boolean) { this._gi.enabled = !!enabled; }
+    /** See {@link RenderSettings.giResolutionScale}. A quality-tier field. */
+    public get giResolutionScale(): number { return this._gi.resolutionScale; }
+    public set giResolutionScale(v: number) { this._gi.resolutionScale = clampGiResolutionScale(v); }
+    /** See {@link RenderSettings.giRaysPerFrame}. A quality-tier field. */
+    public get giRaysPerFrame(): number { return this._gi.raysPerFrame; }
+    public set giRaysPerFrame(v: number) { this._gi.raysPerFrame = clampGiRaysPerFrame(v); }
+    /** See {@link RenderSettings.giFillDrawsPerFrame}. A quality-tier field. */
+    public get giFillDrawsPerFrame(): number { return this._gi.fillDrawsPerFrame; }
+    public set giFillDrawsPerFrame(v: number) { this._gi.fillDrawsPerFrame = clampGiFillDrawsPerFrame(v); }
+    /** See {@link RenderSettings.giMultiBounce}. */
+    public get giMultiBounce(): boolean { return this._gi.multiBounce; }
+    public set giMultiBounce(v: boolean) { this._gi.multiBounce = !!v; }
+
     public get ssrEnabled(): boolean { return this._ssr.ssrEnabled; }
     public set ssrEnabled(enabled: boolean) { this._ssr.ssrEnabled = !!enabled; }
     /**
@@ -2220,6 +2267,13 @@ export class Renderer {
         this._ssil.ssaoSamples = t.ssaoSamples;
         this._ssil.ssilEnabled = t.ssilEnabled;
         this._ssr.ssrEnabled = t.ssrEnabled;
+        this._gi.enabled = t.giEnabled;
+        this._gi.resolutionScale = t.giResolutionScale;
+        this._gi.raysPerFrame = t.giRaysPerFrame;
+        this._gi.fillDrawsPerFrame = t.giFillDrawsPerFrame;
+        this._gi.sunThreshold = GI_TIERS[preset].giSunThreshold;
+        this._gi.shadowTexel = GI_TIERS[preset].giShadowTexel;
+        this._gi.shadowMaxSize = GI_TIERS[preset].giShadowMaxSize;
         this._post.localExposure.enabled = t.localExposureEnabled;
         this._fog.enabled = t.volumetricFogEnabled;
         this._fog.tileSize = t.volumetricFogTileSize;
@@ -2541,6 +2595,11 @@ export class Renderer {
             ssilEnabled: this._ssil.ssilEnabled,
             ssilIntensity: this._ssil.ssilIntensity,
             ssrEnabled: this._ssr.ssrEnabled,
+            giEnabled: this._gi.enabled,
+            giResolutionScale: this._gi.resolutionScale,
+            giRaysPerFrame: this._gi.raysPerFrame,
+            giFillDrawsPerFrame: this._gi.fillDrawsPerFrame,
+            giMultiBounce: this._gi.multiBounce,
             localExposureEnabled: this._post.localExposure.enabled,
             localExposureStrength: this._post.localExposure.strength,
             localExposureShadows: this._post.localExposure.shadowStops,
@@ -2693,6 +2752,11 @@ export class Renderer {
         if (s.ssilEnabled !== undefined) this.ssilEnabled = s.ssilEnabled;
         if (s.ssilIntensity !== undefined) this.ssilIntensity = s.ssilIntensity;
         if (s.ssrEnabled !== undefined) this.ssrEnabled = s.ssrEnabled;
+        if (s.giEnabled !== undefined) this.giEnabled = s.giEnabled;
+        if (s.giResolutionScale !== undefined) this.giResolutionScale = s.giResolutionScale;
+        if (s.giRaysPerFrame !== undefined) this.giRaysPerFrame = s.giRaysPerFrame;
+        if (s.giFillDrawsPerFrame !== undefined) this.giFillDrawsPerFrame = s.giFillDrawsPerFrame;
+        if (s.giMultiBounce !== undefined) this.giMultiBounce = s.giMultiBounce;
         if (s.localExposureEnabled !== undefined) this.localExposureEnabled = s.localExposureEnabled;
         if (s.localExposureStrength !== undefined) this.localExposureStrength = s.localExposureStrength;
         if (s.localExposureShadows !== undefined) this.localExposureShadows = s.localExposureShadows;

@@ -21,7 +21,7 @@ import fs from 'fs'
 import { spawnSync } from 'child_process'
 import path from 'path'
 import { node, vars, loadScriptReflector, mb } from '../exampleKit/bundle.mjs'
-import { packFormat2 } from '../exampleKit/packFormat2.mjs'
+import { packFormat2, readGiBakes } from '../exampleKit/packFormat2.mjs'
 import { ASSET_HASH_VERSION } from '../exampleKit/editorConstants.mjs'
 import * as souls from '../soulsDemo/build.mjs'
 import { loadHeights } from './heights.mjs'
@@ -2141,6 +2141,75 @@ function exposureVolumes() {
 }
 
 // =====================================================================================================
+// GI Volumes
+// =====================================================================================================
+//
+// Probe grids that light what is inside them with the light bounced off the scene round them, relit as the
+// sun and the sky turn (render/gi). The hamlet's street and yards, the cave-mouth plaza, and every house
+// interior: there the volume is what makes the room as dark as its door and windows let it be, with the
+// walls' colour bounced onto the floor. The interior light probes keep their lighting too, for a renderer
+// with GI off; the volumes claim first wherever they are on.
+//
+// The captures are baked (tools/valley/bakeGI.cjs) and stored in the example's assets under each volume's
+// bakeId. A volume whose bake is missing, or no longer fits the geometry round it, captures at load instead.
+
+/** Every bake id the scene's GI volumes name: the bakes the build carries over. */
+const GI_BAKE_IDS = new Set()
+
+/**
+ * One GI Volume node. `spacing` is the probe spacing aimed at along each local axis. `additive` puts its light
+ * over the scene's fill instead of in its place (the Dungeon's, whose ambient is the dark's own light).
+ */
+function giVolume(key, name, center, size, spacing, { yawDeg = 0, rays = 64, maxRayDistance = 60, blendDistance = 2, additive = false } = {}) {
+  const counts = size.map((s, i) => Math.max(2, Math.min(128, Math.round(s / spacing[i]) + 1)))
+  GI_BAKE_IDS.add(id(`gi-bake:${key}`))
+  return node(name, 'giVolume', {
+    id: id(`gi:${key}`), position: center.map(round3), rotation: [0, round3(yawDeg), 0],
+    giVolume: {
+      size: size.map(round3), probeCounts: counts, rays, maxRayDistance, captureResolution: 32, includeGrass: false,
+      blendDistance, intensity: 1, normalBias: 0.1, viewBias: 0.4, multiBounce: true, additive, enabled: true,
+      bakeId: id(`gi-bake:${key}`),
+    },
+  })
+}
+
+/** Grown past an interior box's walls: the volume's outer probes stand in the walls, its feather outdoors. */
+const GI_WALL_MARGIN = 0.3
+
+function giVolumes() {
+  const out = []
+  // The hamlet: the village exposure volume's box, from under its lowest ground to well over its roofs. A
+  // probe every 5.5 m along the ground and 4 m up; those under the ground switch off.
+  const village = buildings.filter(b => b.key !== 'windmill')
+  const vMinX = Math.min(...village.map(b => b.x - b.radius)) - 10, vMaxX = Math.max(...village.map(b => b.x + b.radius)) + 10
+  const vMinZ = Math.min(...village.map(b => b.z - b.radius)) - 10, vMaxZ = Math.max(...village.map(b => b.z + b.radius)) + 10
+  const [lo, hi] = groundRange(vMinX, vMaxX, vMinZ, vMaxZ)
+  const y0 = lo - 1, y1 = hi + 14
+  out.push(giVolume('hamlet', 'Hamlet GI', [(vMinX + vMaxX) / 2, (y0 + y1) / 2, (vMinZ + vMaxZ) / 2],
+    [vMaxX - vMinX, y1 - y0, vMaxZ - vMinZ], [5.5, 4, 5.5], { rays: 64, maxRayDistance: 60, blendDistance: 6 }))
+  // The plaza before the skull cave, under its cliffs: a probe every 3 m, from its floor to 15 m over it
+  // (the cliff tops round it are ground the probes would only sit inside).
+  {
+    const x = 0, z = -121, w = 30, d = 30
+    const [plo] = groundRange(x - w / 2, x + w / 2, z - d / 2, z + d / 2)
+    const py0 = plo - 1, py1 = plo + 15
+    out.push(giVolume('cave-mouth', 'Cave Mouth GI', [x, (py0 + py1) / 2, z], [w, py1 - py0, d], [3, 3, 3],
+      { rays: 64, maxRayDistance: 50, blendDistance: 4 }))
+  }
+  // Each house interior: a probe a metre apart, 256 rays, for a room's corners and its doorway.
+  for (const b of buildings) {
+    const house = houseShapes.get(b.key)
+    if (!house?.interior) continue
+    const size = house.interior.size.map(s => s + 2 * GI_WALL_MARGIN)
+    out.push(giVolume(`interior:${b.key}`, `${b.prop.name} Interior GI`, buildingToWorld(b, house.interior.center), size,
+      [1, 1.2, 1], { yawDeg: b.yaw * 180 / Math.PI, rays: 256, maxRayDistance: 30, blendDistance: 0.5 }))
+  }
+  const probes = out.reduce((n, v) => n + v.giVolume.probeCounts.reduce((a, c) => a * c, 1), 0)
+  log('gi volumes', `${out.length} (${probes} probes)`)
+  return out
+}
+
+// =====================================================================================================
 // Volumetric fog
 // =====================================================================================================
 //
@@ -2325,6 +2394,7 @@ function valleyScene() {
       souls.group('light-probes', 'Light Probes', [valleyProbe(), ...localProbes()]),
       souls.group('buildings', 'Buildings', placedBuildings),
       souls.group('exposure-volumes', 'Exposure Volumes', exposureVolumes()),
+      souls.group('gi-volumes', 'GI Volumes', giVolumes()),
       souls.group('fog-volumes', 'Fog Volumes', fogVolumes()),
       barrels,
       torches,
@@ -2374,7 +2444,7 @@ const DUNGEON_NAME = 'Dungeon'
 const dungeon = buildDungeon({
   playerModel: knight.playerModel,
   id, node, vars, souls, withScript, linkInstance, tex, pbrMaterial, libraryMaterial, modelNode, matJson, texIdsOf, log,
-  placeFire, wallTorch, brazierCage, campfire, CAMPFIRE_MATS, CAGE_MAT, CAVE_DARK_MAT, SURFACES, rayHit, BLOOD_MANAGER_FIELDS,
+  placeFire, wallTorch, brazierCage, campfire, CAMPFIRE_MATS, CAGE_MAT, CAVE_DARK_MAT, SURFACES, rayHit, BLOOD_MANAGER_FIELDS, giVolume,
   BARREL_TEMPLATE, breakableBarrelNode, mossRocks, MOSS_ROCK_MAT,
   ROOT, BUILD, PROPS, PROJECT_NAME, PRESETS, PLAYER_ARM, widenCamera, playerCamera, REFERENCE_ILLUMINANCE, ASSET_HASH_VERSION,
 })
@@ -2387,6 +2457,11 @@ const KEEP_ONLY = ['Stone (placeholder)', 'Flagstones (placeholder)']
 // The souls blood's placeholder materials, the bloodstain's included, are replaced by the Creator's decals.
 const excludeMaterials = [...souls.materials.filter(m => KEEP_ONLY.includes(m.name)).map(m => m.id), souls.BLOOD.splat, souls.BLOOD.drops, souls.BLOOD.stain]
 const SHARED_PROPS = '/Props/Shared/Materials'
+
+// The GI bakes the example already carries (bakeGI.cjs), read before the folder is rewritten: the volumes
+// keep their ids from build to build, so a bake lands back under the volume it was taken for. One whose
+// geometry has since moved is caught at load (its signature) and captured again.
+const carriedGiBakes = readGiBakes(OUT)
 
 const foliageFolder = Object.fromEntries(foliageAssets.map(a => [a.name, `${FOLIAGE}/Models`]))
 const buildingFolder = Object.fromEntries(propAssets.map(a => [a.name, `${BUILDINGS}/Models`]))
@@ -2467,7 +2542,9 @@ const sceneBytes = fs.statSync(sceneFile).size
 // Format 1 is what writeProject can author; format 2 is what can be checked in. Every plant's levels are
 // stored in the model library, the terrain material and the scene's foliage layer as decimal text;
 // packing interns them once, as binary, in split parts, under GitHub's 100 MB file limit.
-const largest = await packFormat2(OUT)
+const giBakes = carriedGiBakes.filter(b => GI_BAKE_IDS.has(b.id))
+const largest = await packFormat2(OUT, { giBakes })
+if (carriedGiBakes.length) log('gi bakes', `${giBakes.length} of ${carriedGiBakes.length} carried over`)
 log(`${PROJECT_NAME} written to applications/editor/public/examples/valley/`)
 log(`  templates ${result.templates} · materials ${result.materials} · textures ${result.textureCount} · scene ${mb(sceneBytes)} unpacked · largest file ${mb(largest)}`)
 log('Next:  npm --prefix editor run examples:list')

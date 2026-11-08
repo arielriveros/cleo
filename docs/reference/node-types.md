@@ -328,6 +328,30 @@ get visibilityDistance: number       // 3.9 / density
 weightAt(p): number ; applyPreset(idOrPreset): boolean   // VOLUMETRIC_FOG_PRESETS
 ```
 
+### GIVolumeNode — `'giVolume'`
+
+A box filled corner to corner with a grid of irradiance probes. The renderer captures what each probe's
+rays hit in the static scene (render/gi/), relights those hits as the light changes and applies the
+volumes' irradiance per pixel as the most specific indirect diffuse, ahead of the light probes and the sky
+light. Forward materials, lit particles and lit sprites take it at their centre.
+
+```ts
+size: [number, number, number]           // full extents, before the node transform; min 0.01
+probeCounts: [number, number, number]    // probes along each axis, 2..128
+rays: 64 | 256 ; maxRayDistance: number ; captureResolution: 16 | 32 ; includeGrass: boolean
+blendDistance: number ; intensity: number ; normalBias: number ; viewBias: number   // biases: fractions of the smallest spacing
+multiBounce: boolean ; enabled: boolean ; bakeId: string | null
+additive: boolean                        // added to the light probes' / ambient's / sky light's fill instead of replacing it
+requestCapture(): void                   // capture every probe again (the static geometry changed)
+gridToWorld(out: mat4): mat4 ; worldToGrid(out: mat4): mat4 ; probeWorldPosition(out, i, j, k)
+worldSpacing: [number, number, number] ; minSpacing: number ; probeCount: number
+weightAt(p: vec3): number                // 0..1, 0 when disabled
+```
+
+Changing the grid (`size`, `probeCounts`, `rays`, `maxRayDistance`, `captureResolution`) or the node's
+transform captures it again; the other fields apply at once. `renderer.gi` exposes the volumes' state
+(`describe()`), the CPU twin (`lightingAt`, `ambientAt`) and `resetLighting()`.
+
 ### ExposureVolumeNode — `'exposureVolume'`
 
 A box with its own exposure. While the active camera is inside, the fields in `overrides` replace the

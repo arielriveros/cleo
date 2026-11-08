@@ -29,7 +29,8 @@ Blit one internal buffer instead of the final composite. This is the fastest way
 this look wrong":
 
 **Final, Lit Scene, Albedo, Metallic, Normal, Roughness, Emissive, AO, Depth, SSAO, Indirect,
-Reflections, Refl. Share, Shadow, Cascades, Bloom, Bloom Mask, Velocity, TAA History, Overdraw.**
+Reflections, Refl. Share, GI, GI Share, Shadow, Cascades, Bloom, Bloom Mask, Velocity, TAA History,
+Overdraw.**
 
 ![Final, Albedo, Normal and Cascades on the same view of the Valley](../media/debug-views.jpg)
 
@@ -41,6 +42,7 @@ it is multiplied by each surface's colour.
 | A material that lights oddly | **Normal** — a normal map imported as sRGB is obvious here. |
 | Something too shiny or too flat | **Metallic**, **Roughness** |
 | A reflection that is missing or in the wrong place | **Reflections**, **Refl. Share** |
+| A room too bright or too dark, or light leaking through a wall | **GI**, **GI Share** |
 | Shadows in the wrong place | **Shadow**, **Cascades** |
 | Bloom on the wrong things | **Bloom Mask** |
 | Ghosting or smearing | **Velocity**, **TAA History** |
@@ -417,6 +419,32 @@ emissive surface lighting what is next to it.
 It only sees what is on screen: light from something behind the camera, or hidden behind another
 object, is not bounced. Blinn-Phong, cel and custom forward materials neither receive it nor, being
 outside the G-buffer, occlude.
+
+### GI Volumes
+
+A [GI Volume](node-inspector.md#gi-volume) lights what is inside it with the light bounced off the scene
+round it, from what its probes captured of the static geometry, relit as the sun, the baked lights and the
+sky change. It applies to deferred surfaces per pixel and to forward materials, lit particles and lit
+sprites at their centre. The screen-space bounce above still adds the contact detail on top, and its
+occlusion darkens the volume's light in corners.
+
+The capture runs a batch of probes at a time, nearest the camera first, within a draw budget a frame; a
+volume lights more of its box as its probes come in. The relight runs only while the light changes, in
+sweeps spread over frames.
+
+| Setting | What it does |
+|---|---|
+| **Enabled** | The volumes' light. Off, the light probes and the sky light light everything. |
+| **Resolution** | The apply's resolution: full on Ultra, half on High, Medium and Low, brought back up along depth and normal edges, so a crease or a silhouette stays clean. Half costs about a third. |
+| **Rays per frame** | How many probe rays a frame relights while a relight is due. |
+| **Capture draws** | How many scene draws a frame the capture spends. |
+| **Multi-bounce** | The bounces after the first. |
+
+The **GI** debug channel shows the volumes' light as it falls on a mid-grey surface, and
+**GI Share** how much of each pixel they lit (white) rather than the light probes and the sky (black). A
+volume whose probes are still being captured shows grey in GI Share, filling in as they arrive. An
+**Additive** volume's light goes on top of the light probes, the ambient and the sky light rather than in
+their place, so GI Share stays black under it.
 
 ### Screen-space reflections
 

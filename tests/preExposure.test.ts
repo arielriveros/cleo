@@ -117,7 +117,9 @@ describe('every pre-exposure site', () => {
         expect(state.indexOf('this._view.preExposure = 1;')).toBeGreaterThan(-1);
         expect(state.indexOf('this._view.preExposure = 1;')).toBeLessThan(state.indexOf('body();'));
         const relight = baker.slice(baker.indexOf('private _relight('), baker.indexOf('private _forwardOnlyModels('));
-        expect(relight.indexOf('this._withCaptureState(')).toBeLessThan(relight.indexOf('packLightRecords(scene, true)'));
+        // The bake lights are packed (lighting.beginBakeLights) inside the capture state too.
+        expect(relight.indexOf('beginBakeLights(scene)')).toBeGreaterThan(-1);
+        expect(relight.indexOf('this._withCaptureState(')).toBeLessThan(relight.indexOf('beginBakeLights(scene)'));
         const forward = baker.slice(baker.indexOf('private _prepareForwardForCapture('), baker.indexOf('private _drawForwardOnly('));
         const reset = forward.indexOf('lighting.resetForwardLighting(scene);');
         expect(reset).toBeGreaterThan(-1);

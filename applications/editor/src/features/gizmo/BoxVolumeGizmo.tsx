@@ -1,4 +1,4 @@
-import { ExposureVolumeNode, LightProbeNode, MIN_EXPOSURE_VOLUME_SIZE, MIN_FOG_VOLUME_SIZE, MIN_WEATHER_VOLUME_SIZE, OcclusionVolumeNode, VolumetricFogNode, WeatherNode, type Node } from 'cleo';
+import { ExposureVolumeNode, GIVolumeNode, LightProbeNode, MIN_EXPOSURE_VOLUME_SIZE, MIN_FOG_VOLUME_SIZE, MIN_WEATHER_VOLUME_SIZE, OcclusionVolumeNode, VolumetricFogNode, WeatherNode, type Node } from 'cleo';
 import BoxVolumeGizmoView, { type VolumeTarget } from '@cleo/app-kit/gizmo/BoxVolumeGizmo';
 import { useCleoEngine } from '../EngineContext';
 import { usePlayback } from '../PlaybackContext';
@@ -17,6 +17,10 @@ export const BOX_VOLUME_EDITED = 'BOX_VOLUME_EDITED';
 export function boxVolumeTarget(node: Node | null | undefined): VolumeTarget | null {
   if (node instanceof ExposureVolumeNode) {
     return { size: () => [...node.size] as [number, number, number], setSize: s => { node.size = s; }, minSize: MIN_EXPOSURE_VOLUME_SIZE };
+  }
+  // A GI volume: grown past a room's walls, or over a street.
+  if (node instanceof GIVolumeNode) {
+    return { size: () => [...node.size] as [number, number, number], setSize: s => { node.size = s; }, minSize: 0.01 };
   }
   // A bank of fog: dragged out over the pond, down into a valley floor, in to a room's walls.
   if (node instanceof VolumetricFogNode) {

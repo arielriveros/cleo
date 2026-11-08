@@ -286,6 +286,22 @@ export function buildDungeon(kit) {
   }
 
   /**
+   * The rooms' GI Volumes (layout.GI_ROOMS): the fires' and the moon's light bounced off the stone, warm
+   * round a torch, on top of the ambient. Their captures are baked (tools/valley/bakeGI.cjs).
+   */
+  function giVolumes() {
+    const m = L.GI_WALL_MARGIN
+    const volumes = L.GI_ROOMS.map((r) => {
+      const min = r.min.map(v => v - m), max = r.max.map(v => v + m)
+      return kit.giVolume(`dungeon:${r.key}`, r.name, min.map((v, i) => (v + max[i]) / 2), max.map((v, i) => v - min[i]), r.spacing,
+        { rays: r.rays, maxRayDistance: r.maxRayDistance ?? 20, blendDistance: 0.5, additive: true })
+    })
+    const probes = volumes.reduce((n, v) => n + v.giVolume.probeCounts.reduce((a, c) => a * c, 1), 0)
+    log('dungeon', `${volumes.length} GI volumes (${probes} probes)`)
+    return volumes
+  }
+
+  /**
    * The halls' air: one smoky-interior fog volume (VolumetricFogNode) over the whole structure, thicker at
    * the floor. The torches glow in it, their halos stopped by the walls (their cube shadows), and the
    * moonlight through the windows and the oculus shows as shafts.
@@ -419,6 +435,7 @@ export function buildDungeon(kit) {
         souls.group('dungeon:fires', 'Fires', fireNodes),
         souls.group('dungeon:shafts', 'Moonlight', shafts()),
         souls.group('dungeon:fog', 'Fog Volumes', [smoke()]),
+        souls.group('dungeon:gi', 'GI Volumes', giVolumes()),
         wayOut(),
         interactables, spawns, navMesh,
       ],

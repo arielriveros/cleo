@@ -37,6 +37,8 @@ export interface UnpackedGame {
   textures: UnpackedTexture[];
   /** Empty for a game published before audio existed, or one with no Sound nodes. */
   sounds: UnpackedSound[];
+  /** GI Volume bakes by id (views into game.bin). Empty for a game with none. */
+  giBakes: { id: string; bytes: Uint8Array }[];
   /** Geometry arrays for a `model.geometryRef`, or undefined if the ref is unknown. */
   geometryFor(ref: string): GeometryArrays | undefined;
   /** Raw bytes of a blob chunk (terrain splat/height payloads), bounds-checked. */
@@ -118,7 +120,12 @@ export function unpackGameBin(buffer: ArrayBuffer): UnpackedGame {
     return floats ? floats.slice() : undefined;
   };
 
-  return { manifest, textures, sounds, geometryFor, chunkBytes, chunkFloats };
+  const giBakes = (manifest.giBakes ?? []).map((b: { id: string; o: number; l: number }) => ({
+    id: b.id,
+    bytes: reader.bytes({ o: b.o, l: b.l })!,
+  })).filter((b: { bytes?: Uint8Array }) => !!b.bytes);
+
+  return { manifest, textures, sounds, giBakes, geometryFor, chunkBytes, chunkFloats };
 }
 
 function inflateModelJson(model: any, game: UnpackedGame): void {

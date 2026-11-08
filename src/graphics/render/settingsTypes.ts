@@ -7,8 +7,8 @@ import type { ExposureCurveKey } from '../lighting';
 /** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
 export type DebugView =
     'final' | 'scene' | 'albedo' | 'metallic' | 'normal' | 'roughness' |
-    'emissive' | 'ao' | 'depth' | 'ssao' | 'ssil' | 'ssr' | 'ssrConfidence' | 'shadow' | 'cascades' | 'bloom' |
-    'bloomMask' | 'mask' | 'velocity' | 'taaHistory' | 'overdraw';
+    'emissive' | 'ao' | 'depth' | 'ssao' | 'ssil' | 'ssr' | 'ssrConfidence' | 'gi' | 'giCoverage' | 'shadow' |
+    'cascades' | 'bloom' | 'bloomMask' | 'mask' | 'velocity' | 'taaHistory' | 'overdraw';
 
 /** How much occlusion culling does: nothing, the landscape, or the landscape and occlusion volumes. */
 export type OcclusionMode = 'off' | 'terrain' | 'all';
@@ -242,6 +242,19 @@ export interface RenderSettings {
      */
     ssrEnabled?: boolean;
     /**
+     * GI Volumes (GIVolumeNode, render/gi/): the volumes' captured probes, relit as the light changes, as
+     * the indirect diffuse inside them. A quality-tier field. Absent = the tier's value (on at every tier).
+     */
+    giEnabled?: boolean;
+    /** The GI apply's resolution as a fraction of the render size (0.25..1). A quality-tier field. */
+    giResolutionScale?: number;
+    /** Probe rays relit per frame while a relight is due (4096..1048576). A quality-tier field. */
+    giRaysPerFrame?: number;
+    /** Scene draws a GI capture spends per frame, for volumes with no saved bake (0..512). A quality-tier field. */
+    giFillDrawsPerFrame?: number;
+    /** The bounces after the first. Absent = on. */
+    giMultiBounce?: boolean;
+    /**
      * Local exposure (render/localExposure.ts): exposure fusion over regions of the frame, so a torch pool
      * and the moonlit field round it are both readable — the field lifted, the pool held back, the detail
      * in each untouched. A quality-tier field (high and ultra on).
@@ -423,6 +436,11 @@ export interface QualityTier {
     ssrEnabled: boolean;
     ssrResolutionScale: number;
     ssrSteps: number;
+    /** GI Volumes (see RenderSettings.giEnabled), the apply's resolution, the relight and fill budgets. */
+    giEnabled: boolean;
+    giResolutionScale: number;
+    giRaysPerFrame: number;
+    giFillDrawsPerFrame: number;
     /** Local exposure (see RenderSettings.localExposureEnabled). */
     localExposureEnabled: boolean;
     /** Volumetric fog (see RenderSettings.volumetricFogEnabled), its froxel tile and slice count. */
@@ -467,6 +485,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         cloudResolutionScale: 1.0, cloudSteps: 48, cloudLightSteps: 6,
         ssaoEnabled: true, ssaoSamples: 64, ssaoResolutionScale: 1.0, ssilEnabled: true,
         ssrEnabled: true, ssrResolutionScale: 1.0, ssrSteps: 64, localExposureEnabled: true,
+        giEnabled: true, giResolutionScale: 1.0, giRaysPerFrame: 262144, giFillDrawsPerFrame: 96,
         volumetricFogEnabled: true, volumetricFogTileSize: 12, volumetricFogSlices: 96, volumetricFogLocalShadows: true,
         weatherShelterEnabled: true, weatherShelterResolution: 2048,
         shadowMapResolution: 4096, shadowCascades: 4, shadowFilterMode: 1, shadowFilterRadius: 2.0,
@@ -478,6 +497,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         cloudResolutionScale: 0.5, cloudSteps: 40, cloudLightSteps: 5,
         ssaoEnabled: true, ssaoSamples: 24, ssaoResolutionScale: 0.5, ssilEnabled: true,
         ssrEnabled: true, ssrResolutionScale: 0.5, ssrSteps: 32, localExposureEnabled: true,
+        giEnabled: true, giResolutionScale: 0.5, giRaysPerFrame: 131072, giFillDrawsPerFrame: 64,
         volumetricFogEnabled: true, volumetricFogTileSize: 16, volumetricFogSlices: 64, volumetricFogLocalShadows: true,
         weatherShelterEnabled: true, weatherShelterResolution: 1024,
         shadowMapResolution: 2048, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
@@ -490,6 +510,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         // AO alone: the bounce costs a normal and a radiance fetch per visible sample on top.
         ssaoEnabled: true, ssaoSamples: 16, ssaoResolutionScale: 0.5, ssilEnabled: false,
         ssrEnabled: false, ssrResolutionScale: 0.5, ssrSteps: 24, localExposureEnabled: false,
+        giEnabled: true, giResolutionScale: 0.5, giRaysPerFrame: 65536, giFillDrawsPerFrame: 48,
         volumetricFogEnabled: true, volumetricFogTileSize: 20, volumetricFogSlices: 48, volumetricFogLocalShadows: false,
         weatherShelterEnabled: true, weatherShelterResolution: 1024,
         shadowMapResolution: 1024, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
@@ -503,6 +524,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         cloudResolutionScale: 0.25, cloudSteps: 20, cloudLightSteps: 3,
         ssaoEnabled: false, ssaoSamples: 16, ssaoResolutionScale: 0.5, ssilEnabled: false,
         ssrEnabled: false, ssrResolutionScale: 0.5, ssrSteps: 16, localExposureEnabled: false,
+        giEnabled: true, giResolutionScale: 0.5, giRaysPerFrame: 32768, giFillDrawsPerFrame: 32,
         volumetricFogEnabled: false, volumetricFogTileSize: 24, volumetricFogSlices: 32, volumetricFogLocalShadows: false,
         weatherShelterEnabled: false, weatherShelterResolution: 512,
         shadowMapResolution: 1024, shadowCascades: 2, shadowFilterMode: 0, shadowFilterRadius: 0.0,

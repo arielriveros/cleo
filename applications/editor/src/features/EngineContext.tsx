@@ -118,6 +118,7 @@ import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects
 import { activeProjectId } from "../utils/projectScope";
 import { preloadTextures, persistTextures, adoptLegacyTextures, referencedTextureIds, legacyTexturesOf, deleteTextures } from "../utils/textureStore";
 import { preloadAudio, persistAudio } from "../utils/audioStore";
+import { preloadGiBakes } from "../utils/giBakeStore";
 import { startTask, StepStatus } from "@cleo/app-kit/feedback/progressStore";
 import { invalidateNavSoup, reconcileEditorHelpers } from "../utils/editorHelpers";
 import { readBackendPreference } from '@cleo/app-kit/renderer/backendPreference';
@@ -5966,6 +5967,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setAudioPreloaded(true);
     }
 
+    // The GI Volumes' saved captures, before any scene parses: a volume loads its bake the first frame it
+    // is seen instead of capturing again. A failure only means the volumes capture at runtime.
+    try {
+      const loaded = await preloadGiBakes();
+      if (loaded) Logger.info(`Loaded ${loaded} GI bake${loaded === 1 ? '' : 's'}`, 'Editor');
+    } catch (e) {
+      Logger.warn(`Failed to load the GI bakes: ${e}`, 'Editor');
+    }
+
     // Multi-scene project: load the meta (migrating a legacy single-scene 'cleo_project' blob once), then
     // parse the last-open scene's blob. A fresh install gets a meta with one empty "Main" scene — the
     // "a project always has ≥1 scene" invariant. The legacy import is gated per PROJECT.
@@ -6165,6 +6175,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // is in force. Skipped in options mode, where Engine > Renderer owns its own grid switch.
       if (editorMode !== 'options')
         instanceRef.current?.renderer.setGridVisible(isPlayMode && !isSimulating ? vis.grid.runtime : vis.grid.editor);
+      // The GI Volumes' probes: renderer chrome like the grid, asserted the same way. A selected volume shows
+      // its own probes whatever this says (the renderer knows the selection).
+      instanceRef.current?.renderer.setGiProbesVisible(isPlayMode && !isSimulating ? vis.giProbes.runtime : vis.giProbes.editor);
       // Particle preview is a property of the authored scene; the particle editor's own stage always
       // previews (that is its whole job), and play mode always simulates regardless of the flag.
       const liveScene = instanceRef.current?.scene;

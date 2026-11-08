@@ -168,8 +168,16 @@ export class ModelDraw {
      */
     public static cullFor(side: 'front' | 'back' | 'double' | undefined): CullMode {
         if (side === 'double') return 'none';
-        return side === 'back' ? 'front' : 'back';
+        const cull: CullMode = side === 'back' ? 'front' : 'back';
+        if (!ModelDraw.invertCull) return cull;
+        return cull === 'back' ? 'front' : 'back';
     }
+
+    /**
+     * Draw the faces single-sided materials normally hide, and hide the ones they show: a GI capture's
+     * back-face pass (render/gi/giSystem.ts), which finds what encloses a probe. Set only around that pass.
+     */
+    public static invertCull = false;
 
     // Whether this material has a program behind it at all.
     private static _drawable(mat: Material): boolean {

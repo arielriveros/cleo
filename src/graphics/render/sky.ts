@@ -442,8 +442,10 @@ export class SkyPasses {
     public updateProbeLighting(scene: Scene): void {
         if (this._view.capturing || this._probeProjectionPending) return;
         let probe: LightProbeNode | null = null;
+        // A reflection-only probe is projected too: the GI Volumes' reflection normalization compares its
+        // irradiance with theirs (deferredLighting.wgsl `u_reflProbeIrradiance`).
         for (const p of scene.lightProbes) {
-            if (p.affectsLighting && p.shStale && p.envMap) { probe = p; break; }
+            if ((p.affectsLighting || p.affectsReflections) && p.shStale && p.envMap) { probe = p; break; }
         }
         if (!probe) return;
         const cube = probe.envMap!;

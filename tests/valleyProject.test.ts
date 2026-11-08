@@ -422,6 +422,48 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
     });
 
+    it('lights the hamlet, the cave mouth and every house interior with GI volumes, baked', async () => {
+        const { decodeGiBake, readGiBakeHeader, unpackGiBake } = await import('../src/graphics/render/gi/giBakeFormat');
+        const volumes = nodes().filter(n => n.type === 'giVolume');
+        const byName = new Map(volumes.map(v => [v.name, v]));
+        for (const name of ['Hamlet GI', 'Cave Mouth GI']) {
+            const v: any = byName.get(name);
+            expect(v, name).toBeDefined();
+            expect(v.giVolume.rays, name).toBe(64);
+        }
+        // An interior's volume is its exposure box grown past the walls, so its feather falls out of doors.
+        const interiors = volumes.filter(v => v.name.endsWith('Interior GI'));
+        expect(interiors.length).toBe(nodes().filter(n => n.type === 'exposureVolume' && n.name.endsWith('Interior Exposure')).length);
+        for (const v of interiors) {
+            const exposure = nodes().find(n => n.type === 'exposureVolume' && n.name === v.name.replace(' GI', ' Exposure'));
+            expect(exposure, v.name).toBeDefined();
+            expect(v.position).toEqual(exposure.position);
+            expect(v.rotation).toEqual(exposure.rotation);
+            v.giVolume.size.forEach((s: number, a: number) => expect(s, v.name).toBeCloseTo(exposure.exposureVolume.size[a] + 0.6, 3));
+            expect(v.giVolume.rays, v.name).toBe(256);
+            // About a metre between probes: a room's corners and its doorway resolve.
+            v.giVolume.size.forEach((s: number, a: number) => expect(s / (v.giVolume.probeCounts[a] - 1), v.name).toBeLessThanOrEqual(1.25));
+        }
+        // Every volume names its bake, and the whole set fits the atlas a WebGL2 device is guaranteed.
+        const probes = volumes.reduce((n, v) => n + v.giVolume.probeCounts.reduce((a: number, c: number) => a * c, 1), 0);
+        expect(probes).toBeLessThanOrEqual(16384);
+        for (const v of volumes) expect(typeof v.giVolume.bakeId, v.name).toBe('string');
+        // The bakes the example carries are packed, belong to a volume (of either scene), and fit its grid.
+        const bakes: { id: string; bytes: ArrayBuffer }[] = valley!.bundle.giBakes ?? [];
+        const everyVolume = [...volumes, ...dungeonNodes().filter(n => n.type === 'giVolume')];
+        for (const bake of bakes) {
+            const v: any = everyVolume.find(x => x.giVolume.bakeId === bake.id);
+            expect(v, bake.id).toBeDefined();
+            const bytes = new Uint8Array(bake.bytes);
+            const header = readGiBakeHeader(bytes);
+            expect(header.packed, v.name).toBe(true);
+            expect(header.counts, v.name).toEqual(v.giVolume.probeCounts);
+            expect(header.rays, v.name).toBe(v.giVolume.rays);
+            const decoded = decodeGiBake(await unpackGiBake(bytes));
+            expect(decoded.probeData.length, v.name).toBe(header.counts[0] * header.counts[1] * header.counts[2] * 4);
+        }
+    });
+
     it('relights its probes as the sun moves, not re-captures them', () => {
         const script = readFileSync(join(__dirname, '..', 'examples', 'scripts', 'ValleyDayNight.ts'), 'utf8');
         expect(script).toMatch(/probe\.relight \?\? probe\.bake/);
@@ -652,6 +694,24 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         // The cave and the ladder name each other, so a trip down and back ends where it began.
         expect(exit.scriptVars.exitTo).toBe('Skull Cave Entrance');
         expect(nodes().find(n => n.name === 'Skull Cave Entrance').scriptVars.exitTo).toBe('Way Out');
+    });
+
+    it('lights every dungeon room with an additive GI volume, baked', () => {
+        const volumes = dungeonNodes().filter(n => n.type === 'giVolume');
+        expect(volumes.length).toBe(13);
+        const probes = volumes.reduce((n, v) => n + v.giVolume.probeCounts.reduce((a: number, c: number) => a * c, 1), 0);
+        expect(probes).toBeLessThanOrEqual(16384);
+        const baked = new Set((valley!.bundle.giBakes ?? []).map((b: { id: string }) => b.id));
+        for (const v of volumes) {
+            // On top of the dungeon's ambient, which is the dark's own light: in its place, the corners went black.
+            expect(v.giVolume.additive, v.name).toBe(true);
+            expect([64, 256], v.name).toContain(v.giVolume.rays);
+            // A probe every 2.5 m or so at most: a hall's pillars and a room's torch resolve.
+            v.giVolume.size.forEach((s: number, a: number) => expect(s / (v.giVolume.probeCounts[a] - 1), v.name).toBeLessThanOrEqual(2.75));
+            expect(baked.has(v.giVolume.bakeId), v.name).toBe(true);
+        }
+        // The valley's volumes replace its ambient: the open sky's fill, which a house's walls shut out.
+        for (const v of nodes().filter(n => n.type === 'giVolume')) expect(v.giVolume.additive ?? false, v.name).toBe(false);
     });
 
     it('places the dungeon props as LOD groups that cull with distance', () => {

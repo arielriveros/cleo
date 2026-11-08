@@ -364,3 +364,23 @@ describe('game.bin — skinned models and typed arrays', () => {
     expect(PLAYER_CONTRACT).toBeGreaterThanOrEqual(6);
   });
 });
+
+describe('GI bakes in game.bin', () => {
+  it('round-trip byte-for-byte, 4-byte aligned for an in-place read', () => {
+    const a = new Uint8Array(1001).map((_, i) => (i * 7) & 0xff);
+    const b = new Uint8Array(64).fill(9);
+    const data: any = gameWith([model(cube())]);
+    data.giBakes = [{ id: 'gi-a', bytes: a }, { id: 'gi-b', bytes: b }];
+    const game = unpackGameBin(packGameBin(data).buffer);
+    expect(game.giBakes.map(x => x.id)).toEqual(['gi-a', 'gi-b']);
+    expect([...game.giBakes[0].bytes]).toEqual([...a]);
+    expect([...game.giBakes[1].bytes]).toEqual([...b]);
+    for (const x of game.giBakes) expect(x.bytes.byteOffset % 4).toBe(0);
+  });
+
+  it('read as none from a game that carries none', () => {
+    const game = unpackGameBin(packGameBin(gameWith([model(cube())])).buffer);
+    expect(game.giBakes).toEqual([]);
+    expect(game.manifest.giBakes).toBeUndefined();
+  });
+});
