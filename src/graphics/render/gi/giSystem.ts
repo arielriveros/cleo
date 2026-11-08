@@ -76,6 +76,12 @@ export const GI_CAPTURE_SLOTS = 8;
 /** Pre-exposure drift (factor) that resets the store scale. */
 const GI_SCALE_DRIFT = 4;
 
+/**
+ * How long a volume whose saved bake does not match the scene yet waits for the scene to settle (models
+ * and linked copies still arriving) before it captures again instead.
+ */
+const GI_BAKE_SETTLE_MS = 10000;
+
 /** Destination x source in colour; the destination's alpha kept (giRescale.wgsl). */
 const MULTIPLY_BLEND: BlendState = {
     color: { srcFactor: 'dst', dstFactor: 'zero', operation: 'add' },
@@ -121,6 +127,8 @@ interface VolumeGpu {
     loading: boolean;
     /** An inflated bake to apply at the next update (uploads belong inside a frame). */
     pendingBake: GiBake | null;
+    /** A saved bake whose signature has not matched the scene yet (see `_recheckBakes`). */
+    bakeCheck: { bytes: Uint8Array; signature: [number, number]; packed: boolean; until: number; next: number } | null;
 }
 
 interface CaptureBatch {
@@ -225,6 +233,7 @@ export class GiSystem {
         if (!this.enabled || this._view.capturing || !device.capabilities || !this.supported) return;
         this._sync(scene);
         if (this._volumes.size === 0) return;
+        this._recheckBakes(scene);
         for (const v of this._volumes.values()) {
             if (v.pendingBake) { this._applyBake(v, v.pendingBake); v.pendingBake = null; }
         }
@@ -329,19 +338,25 @@ export class GiSystem {
                 || b.min[1] > box.max[1] + r || b.max[2] < box.min[2] - r || b.min[2] > box.max[2] + r) continue;
             nodes.push(node);
         }
-        nodes.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        // Each by what it IS, not by its id: the copies a linked asset or a template expands into are given
+        // new ids every time a project is opened or imported. Its world transform (to 1e-4), its material's
+        // type and its CPU geometry's sizes (not the GPU mesh's: a model not drawn yet has none), sorted so
+        // the order the scene lists them in does not matter either.
+        const keys: string[] = [];
         for (const node of nodes) {
-            sig.addString(node.id).addNumbers(node.worldTransform);
-            // The CPU geometry's sizes, not the GPU mesh's: a model the camera has not drawn yet has no mesh.
             const geometry = node.model.geometry;
-            sig.addString(node.model.material.type)
-                .addNumber(geometry?.indices.length ?? 0).addNumber(geometry?.positions.length ?? 0);
+            let key = '';
+            const m = node.worldTransform;
+            for (let i = 0; i < 16; i++) key += Math.round(m[i] * 1e4) + ',';
+            keys.push(key + node.model.material.type + ',' + (geometry?.indices.length ?? 0) + ',' + (geometry?.positions.length ?? 0));
         }
+        keys.sort();
+        for (const key of keys) sig.addString(key);
         // The ground within reach, by its heights on a 2 m grid (to the millimetre): a sculpt anywhere the
         // rays could land makes the bake stale, and nothing else about the landscape does.
         for (const land of scene.landscapes) {
             if (!land.authoredVisible) continue;
-            sig.addString(land.id).addNumbers(land.worldTransform);
+            sig.addNumbers(land.worldTransform);
             // Its plants, by layer and count: a repaint is a change the capture saw.
             for (const layer of land.terrain.foliage) sig.addString(layer.name).addNumber(layer.count);
             const inv = mat4.invert(this._invScratch, land.worldTransform);
@@ -418,14 +433,44 @@ export class GiSystem {
             return false;
         }
         if (!sameGiSignature(bake.signature, this._signature(scene, v))) {
-            Logger.warn(`The geometry round ${node.name} changed since its GI bake; capturing again.`, 'Renderer');
-            this.staleBakes.add(node.id);
-            return false;
-        }
-        this.staleBakes.delete(node.id);
-        if (!bake.packed) {
-            this._applyBake(v, decodeGiBake(bytes));
+            // Not yet a verdict: a scene's linked copies and streamed models are still arriving in its first
+            // frames, and the scene round the volume only matches its bake once they have. The volume waits
+            // (neither captures nor relights) and is checked again until GI_BAKE_SETTLE_MS have passed.
+            v.loading = true;
+            v.bakeCheck = { bytes, signature: bake.signature, packed: bake.packed, until: performance.now() + GI_BAKE_SETTLE_MS, next: 0 };
             return true;
+        }
+        this._acceptBake(v, bytes, bake.packed);
+        return true;
+    }
+
+    /** A bake whose signature did not match yet, checked again every half second until it does or time runs out. */
+    private _recheckBakes(scene: Scene): void {
+        const now = performance.now();
+        for (const v of this._volumes.values()) {
+            const check = v.bakeCheck;
+            if (!check || now < check.next) continue;
+            check.next = now + 500;
+            if (sameGiSignature(check.signature, this._signature(scene, v))) {
+                v.bakeCheck = null;
+                v.loading = false;
+                this._acceptBake(v, check.bytes, check.packed);
+            } else if (now >= check.until) {
+                v.bakeCheck = null;
+                v.loading = false;
+                Logger.warn(`The geometry round ${v.node.name} changed since its GI bake; capturing again.`, 'Renderer');
+                this.staleBakes.add(v.node.id);
+            }
+        }
+    }
+
+    /** Load a bake whose signature matched: at once when it is plain, a frame or so later when it is packed. */
+    private _acceptBake(v: VolumeGpu, bytes: Uint8Array, packed: boolean): void {
+        const node = v.node;
+        this.staleBakes.delete(node.id);
+        if (!packed) {
+            this._applyBake(v, decodeGiBake(bytes));
+            return;
         }
         v.loading = true;
         void unpackGiBake(bytes).then((raw) => {
@@ -433,7 +478,6 @@ export class GiSystem {
         }).catch((e) => {
             Logger.warn(`GI bake ${node.bakeId} (${node.name}) cannot be read: ${(e as Error)?.message ?? e}; capturing again.`, 'Renderer');
         }).finally(() => { v.loading = false; });
-        return true;
     }
 
     /** Upload a decoded bake into `v`: its hit caches and probe states, then its visibility and a relight. */
@@ -520,7 +564,7 @@ export class GiSystem {
             node, key, counts, rays, side, probes, base: 0, hit, radiance,
             states, positions, sweep, shadow: new ProbeShadowMap(), lit: null,
             visibilityDirty: null, gridToWorld, worldToGrid, ambient, ambientDirty: false, ambientValid: false, cubes, cpu,
-            loading: false, pendingBake: null,
+            loading: false, pendingBake: null, bakeCheck: null,
         };
     }
 
