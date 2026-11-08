@@ -27,7 +27,10 @@ const ROOT = path.resolve(HERE, '..', '..')
 const OUT = path.join(ROOT, 'build', 'fps_prepared', 'weapons')
 
 export const WEAPONS = {
-  ak47: { file: 'fps_character_animation_pack_ak-47.glb', name: 'AK-47' },
+  // The AK's weapon rig is moved by animation on an OBJECT node above it (SKEL_AK_47_Rifle: translation, rotation and
+  // scale channels), not by its joints. `bake` re-parents the weapon rig's root under the arms' weapon bone and bakes
+  // what that object's motion did, relative to the bone, into the root's own channels.
+  ak47: { file: 'fps_character_animation_pack_ak-47.glb', name: 'AK-47', bake: { object: /^SKEL_AK_47_Rifle$/, to: /^CB_Weapon/ } },
   // The pistol's and the SAPS-12's weapon rigs sit in the file as separate armatures, kept on the hand in the
   // artist's tool by a parent constraint the glTF does not carry (their root bone's baked placement is
   // 1.5x off the arms' own weapon bone). `attach` re-creates the constraint: the weapon rig's root becomes a
@@ -99,6 +102,88 @@ async function prepare(key) {
     skin.nodeTransforms = skin.nodeTransforms.map(([i, m]) => (i === rootNode ? [i, Array.from(mat4.fromRotationTranslation(mat4.create(), rel, [0, 0, 0]))] : [i, m]))
     skin.joints = skin.joints.map(j => (j.nodeIndex === rootNode ? { ...j, parentIndex: toNode } : j))
     attachedRoot = rootNode
+  }
+
+  // ----- baked object motion (see WEAPONS): the weapon rig's root, re-parented under the arms' weapon bone
+  let bakedRoot = null
+  const bakedTracks = new Map()
+  if (WEAPONS[key].bake) {
+    const names = new Map(skin.nodeNames)
+    const find = (re) => [...names].find(([, n]) => re.test(n))?.[0]
+    const objectNode = find(WEAPONS[key].bake.object), toNode = find(WEAPONS[key].bake.to)
+    if (objectNode === undefined || toNode === undefined) throw new Error(`${key}: cannot bake the weapon rig`)
+    const parents0 = new Map(skin.nodeParents)
+    const joints0 = new Set(skin.joints.map(j => j.nodeIndex))
+    // The weapon rig's root: the joint nearest the object, below it.
+    let rootNode = null
+    for (const [c] of skin.nodeParents) {
+      if (!joints0.has(c)) continue
+      for (let n = parents0.get(c); n !== undefined; n = parents0.get(n)) { if (n === objectNode) { rootNode = rootNode ?? c; break } if (joints0.has(n)) break }
+    }
+    if (rootNode === null) throw new Error(`${key}: no joint under ${names.get(objectNode)}`)
+    const rest = new Map(skin.nodeTransforms.map(([i, m]) => [i, mat4.fromValues(...m)]))
+    const sample = (ch, t) => {
+      const { times, values, per } = ch
+      if (t <= times[0]) return Array.from(values.subarray(0, per))
+      const last = times.length - 1
+      if (t >= times[last]) return Array.from(values.subarray(last * per, last * per + per))
+      let i = 0
+      while (i < last - 1 && times[i + 1] < t) i++
+      const k = (t - times[i]) / Math.max(1e-9, times[i + 1] - times[i])
+      const a = values.subarray(i * per, i * per + per), b = values.subarray((i + 1) * per, (i + 1) * per + per)
+      if (ch.step) return Array.from(a)
+      if (per === 4) return Array.from(quat.slerp(quat.create(), a, b, k))
+      return Array.from(a, (v, j) => v + (b[j] - v) * k)
+    }
+    for (const anim of gltf.animations) {
+      const byNode = new Map()
+      for (const c of anim.channels) {
+        const smp = anim.samplers[c.sampler]
+        const entry = byNode.get(c.target.node) ?? {}
+        entry[c.target.path] = { times: accessor(doc, smp.input), values: accessor(doc, smp.output), per: c.target.path === 'rotation' ? 4 : 3, step: smp.interpolation === 'STEP' }
+        byNode.set(c.target.node, entry)
+      }
+      const localAt = (n, t) => {
+        const ch = byNode.get(n)
+        if (!ch) return rest.get(n)
+        const m = rest.get(n)
+        const tr = ch.translation ? sample(ch.translation, t) : Array.from(mat4.getTranslation(vec3.create(), m))
+        const sc = ch.scale ? sample(ch.scale, t) : Array.from(mat4.getScaling(vec3.create(), m))
+        const ro = ch.rotation ? sample(ch.rotation, t) : Array.from(pureRotation(m))
+        return mat4.fromRotationTranslationScale(mat4.create(), ro, tr, sc)
+      }
+      const worldAt = (n, t, memo) => {
+        if (memo.has(n)) return memo.get(n)
+        const p = parents0.get(n)
+        const m = p === undefined ? localAt(n, t) : mat4.multiply(mat4.create(), worldAt(p, t, memo), localAt(n, t))
+        memo.set(n, m)
+        return m
+      }
+      // The key times that matter: every animated node above the root and above the bone.
+      const times = new Set()
+      for (const start of [rootNode, toNode]) for (let n = start; n !== undefined; n = parents0.get(n)) {
+        const ch = byNode.get(n)
+        if (ch) for (const path of Object.values(ch)) for (const t of path.times) times.add(+t.toFixed(5))
+      }
+      const ts = [...times].sort((a, b) => a - b)
+      if (!ts.length) continue
+      const tr = [], ro = []
+      for (const t of ts) {
+        const memo = new Map()
+        const rel = mat4.multiply(mat4.create(), mat4.invert(mat4.create(), worldAt(toNode, t, memo)), worldAt(rootNode, t, memo))
+        tr.push(...mat4.getTranslation(vec3.create(), rel))
+        ro.push(...pureRotation(rel))
+      }
+      bakedTracks.set(anim.name, { times: ts, translation: tr, rotation: ro })
+    }
+    // The root's rest, under its new parent, is its pose at the first frame of Idle.
+    const idle = bakedTracks.get([...bakedTracks.keys()].find(n => /_Idle$/.test(n)))
+    skin.nodeParents = skin.nodeParents.map(([c, p]) => (c === rootNode ? [c, toNode] : [c, p]))
+    skin.nodeTransforms = skin.nodeTransforms.map(([i, m]) => (i === rootNode
+      ? [i, Array.from(mat4.fromRotationTranslation(mat4.create(), idle.rotation.slice(0, 4), idle.translation.slice(0, 3)))] : [i, m]))
+    skin.joints = skin.joints.map(j => (j.nodeIndex === rootNode ? { ...j, parentIndex: toNode } : j))
+    bakedRoot = rootNode
+    console.log(`  ${key}: weapon rig root ${names.get(rootNode)} baked onto ${names.get(toNode)} (${bakedTracks.size} clips)`)
   }
 
   // ----- rest worlds before the skin is re-expressed ---------------------------------------------------
@@ -189,6 +274,16 @@ async function prepare(key) {
       usedSamplers.push(sampler)
       channels.push({ samplerIndex: usedSamplers.length - 1, targetNodeIndex: node, targetPath: c.target.path })
     })
+    // The baked root motion of an object-driven weapon rig (see `bake`): translation and rotation under its new parent.
+    const track = bakedRoot !== null ? bakedTracks.get(anim.name) : null
+    if (track) {
+      const f = frames.get(bakedRoot)
+      const trans = track.translation.map(v => v * f.s * scale)
+      usedSamplers.push({ input: track.times, output: trans, interpolation: 'LINEAR' })
+      channels.push({ samplerIndex: usedSamplers.length - 1, targetNodeIndex: bakedRoot, targetPath: 'translation' })
+      usedSamplers.push({ input: track.times, output: track.rotation, interpolation: 'LINEAR' })
+      channels.push({ samplerIndex: usedSamplers.length - 1, targetNodeIndex: bakedRoot, targetPath: 'rotation' })
+    }
     clips.push({ name: cname, samplers: usedSamplers, channels })
   }
   if (droppedScale) console.log(`${key}: ${droppedScale} scale channels left out`)
