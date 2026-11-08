@@ -4,6 +4,7 @@ import {
     giOctEncode, giOctWrapOutside, giProbeBytes, gridCage, gridCoords, gridIndex, hitCacheSize, hitTileOrigin,
     irradianceTileOrigin, maxProbesPerVolume, probeDataTexel, tileBorderSource, tileDirections,
     tileSolidAngleIntegral, tileSolidAngles, tileTexelDirection, visibilityTileOrigin,
+    giProbeDrawFlips, giProbeOfInstance, giProbeOverlayRadius,
 } from '../src/graphics/render/gi/giLayout';
 import { octDecodeDir, octEncodeDir, octWrapOutside } from '../src/graphics/render/reflectionAtlas';
 
@@ -171,5 +172,37 @@ describe('atlases', () => {
     it('cost a few kilobytes a probe', () => {
         expect(giProbeBytes(64)).toBe(768 + 512 + 2048 + 16);
         expect(giProbeBytes(256)).toBe(3072 + 512 + 2048 + 16);
+    });
+});
+
+describe('the probe overlay', () => {
+    it('draws probes a fraction of their spacing across, held to 5-50 cm', () => {
+        expect(giProbeOverlayRadius(1)).toBeCloseTo(0.12);
+        expect(giProbeOverlayRadius(0.1)).toBe(0.05);
+        expect(giProbeOverlayRadius(20)).toBe(0.5);
+        expect(giProbeOverlayRadius(NaN)).toBe(0.05);
+    });
+
+    it('walks every probe once, farthest first and nearest last, from any side', () => {
+        const counts = [4, 3, 5];
+        const n = counts[0] * counts[1] * counts[2];
+        for (const camera of [[-6, -2, -9], [9, 8, 12], [-6, 8, -3], [-6, 8, 1.5], [1.5, 1, 2]]) {
+            const flips = giProbeDrawFlips(camera, counts);
+            const seen = new Set<string>();
+            const dist = (p: number[]) => Math.hypot(p[0] - camera[0], p[1] - camera[1], p[2] - camera[2]);
+            const order: number[][] = [];
+            for (let i = 0; i < n; i++) {
+                const p = giProbeOfInstance(i, counts, flips);
+                seen.add(p.join(','));
+                order.push(p);
+            }
+            expect(seen.size).toBe(n);
+            // Beyond the grid along every axis, the first is the farthest corner and the last the nearest.
+            if (camera.every((c, a) => c < 0 || c > counts[a] - 1)) {
+                const far = Math.max(...order.map(dist)), near = Math.min(...order.map(dist));
+                expect(dist(order[0])).toBeCloseTo(far, 6);
+                expect(dist(order[n - 1])).toBeCloseTo(near, 6);
+            }
+        }
     });
 });

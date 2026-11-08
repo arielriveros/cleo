@@ -435,7 +435,7 @@ sweeps spread over frames.
 | Setting | What it does |
 |---|---|
 | **Enabled** | The volumes' light. Off, the light probes and the sky light light everything. |
-| **Resolution** | The apply's resolution, full on High and Ultra and half on Medium and Low, brought back up along depth edges. |
+| **Resolution** | The apply's resolution: full on Ultra, half on High, Medium and Low, brought back up along depth and normal edges, so a crease or a silhouette stays clean. Half costs about a third. |
 | **Rays per frame** | How many probe rays a frame relights while a relight is due. |
 | **Capture draws** | How many scene draws a frame the capture spends. |
 | **Multi-bounce** | The bounces after the first. |

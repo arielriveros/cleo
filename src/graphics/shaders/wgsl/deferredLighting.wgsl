@@ -360,10 +360,56 @@ fn sampleSSR(uv: vec2<f32>, centerDepth: f32) -> vec4<f32> {
     return select(vec4<f32>(0.0), s, ok);
 }
 
+/**
+ * The GI Volumes' light, computed at reduced resolution (giResolve.wgsl), brought up to this pixel.
+ *
+ * Depth alone, as `depthAwareUpsample` weighs SSIL and SSR, is not enough here: a volume's light depends
+ * on the surface's NORMAL, and at a crease — a wall meeting the floor — the depths on either side agree
+ * while the light does not, so a depth-only blend paints a band of floor light up the foot of every wall.
+ * Each of the four low-resolution texels round the pixel is weighed by its bilinear share, by how close the
+ * depth it was computed at is to this pixel's, and by how closely the normal it was computed with
+ * (`pow(n . N, 8)`) matches; read at the G-buffer texel the resolve took it from (`giSourceTexel`), so the
+ * comparison is exact. Where none agrees (a silhouette, a thin edge), the best-matching one.
+ */
+fn giUpsample(centerDepth: f32, N: vec3<f32>) -> vec4<f32> {
+    let full = vec2<f32>(textureDimensions(u_gNormalRoughness_texture));
+    let low = vec2<f32>(textureDimensions(u_gi_texture));
+    // This pixel's centre in the low-resolution grid, whose texel centres sit at +0.5.
+    let here = (floor(cleoFragCoord) + vec2<f32>(0.5)) * low / full - vec2<f32>(0.5);
+    let q0 = floor(here);
+    let f = here - q0;
+    var total = vec4<f32>(0.0);
+    var weightSum = 0.0;
+    var best = vec4<f32>(0.0);
+    var bestScore = -1.0;
+    for (var i = 0; i < 4; i++) {
+        let o = vec2<f32>(f32(i & 1), f32((i >> 1u) & 1));
+        let q = clamp(q0 + o, vec2<f32>(0.0), low - vec2<f32>(1.0));
+        let tap = textureLoad(u_gi_texture, vec2<i32>(q), 0);
+        let src = vec2<i32>(floor(q * full / low));
+        // Depth SAMPLED at the texel's centre: naga's GLSL cannot textureLoad a depth texture.
+        let d = textureSampleLevel(u_gDepth_texture, u_gDepth_sampler, (vec2<f32>(src) + vec2<f32>(0.5)) / full, 0);
+        let n = octDecode(textureLoad(u_gNormalRoughness_texture, src, 0).rg);
+        let depthW = 1.0 - smoothstep(0.0, AO_DEPTH_TOLERANCE, abs(d - centerDepth) / max(centerDepth, 1e-5));
+        let score = depthW * pow(saturate(dot(N, n)), 8.0);
+        let w = mix(1.0 - f.x, f.x, o.x) * mix(1.0 - f.y, f.y, o.y) * score;
+        total += tap * w;
+        weightSum += w;
+        if (score > bestScore) { bestScore = score; best = tap; }
+    }
+    if (weightSum < 1e-4) { return best; }
+    return total / weightSum;
+}
+
 /** GI Volumes: claimed irradiance in `.rgb`, the claim in `.a`. Disabled reads as nothing claimed. */
-fn sampleGI(uv: vec2<f32>, centerDepth: f32) -> vec4<f32> {
+fn sampleGI(uv: vec2<f32>, centerDepth: f32, N: vec3<f32>) -> vec4<f32> {
     if (u_lighting.u_giEnabled == 0) { return vec4<f32>(0.0); }
-    let s = depthAwareUpsample(u_gi_texture, u_gi_sampler, uv, centerDepth, u_lighting.u_giTexelSize);
+    var s: vec4<f32>;
+    if (u_lighting.u_giTexelSize.x <= 0.0) {
+        s = textureSampleLevel(u_gi_texture, u_gi_sampler, uv, 0.0);   // full resolution: nothing to do
+    } else {
+        s = giUpsample(centerDepth, N);
+    }
     let ok = all(s >= vec4<f32>(0.0)) && all(s.rgb <= vec3<f32>(6.0e4)) && s.a <= 1.0001;
     return select(vec4<f32>(0.0), vec4<f32>(s.rgb, min(s.a, 1.0)), ok);
 }
@@ -477,7 +523,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     //
     // The GI Volumes claim FIRST: theirs is the most specific light there is, per point inside the box
     // rather than one value for it. What they leave the probes share as before.
-    let gi = sampleGI(uv, depth);            // rgb = sum of claim x E/pi (pre-exposed, x intensity), a = claim
+    let gi = sampleGI(uv, depth, N);            // rgb = sum of claim x E/pi (pre-exposed, x intensity), a = claim
     var fallbackShare = 1.0 - gi.a;
     var probeDiffuse = gi.rgb;
     var probeBack = gi.rgb;                  // a translucent surface's back takes the front's GI (v1)

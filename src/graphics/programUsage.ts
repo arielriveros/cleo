@@ -53,6 +53,7 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     giReduce: 'feature', giVisibility: 'feature', giRadiance: 'feature', giIntegrate: 'feature', giResolve: 'feature',
     giAmbientCube: 'feature',
     giRescale: 'feature',
+    giProbeOverlay: 'editor',
     taaResolve: 'feature', taaSharpen: 'feature', fxaa: 'feature',
     motionBlurVelocity: 'feature', motionBlurTileMax: 'feature', motionBlurNeighborMax: 'feature', motionBlur: 'feature',
     objectVelocity: 'feature', objectVelocitySkinned: 'feature', objectVelocityBasicSkinned: 'feature',

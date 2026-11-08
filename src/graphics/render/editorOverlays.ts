@@ -27,10 +27,16 @@ import type { DecalPasses } from './decals';
 import type { Sprite2DPasses } from './sprites2d';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
+import type { GiSystem } from './gi/giSystem';
+import type { GIVolumeNode } from '../../core/scene/nodes/giVolumeNode';
 
 /** What EditorOverlays reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface EditorOverlaysHost {
     readonly thumbnailMode: boolean;
+    /** The node the editor has selected (Renderer.setSelectedNode), for the GI probe overlay. */
+    readonly selectedNodeId: string | null;
+    /** The GI Volumes, which draw their own probes (they hold the atlases the spheres are lit from). */
+    readonly gi: GiSystem;
 }
 
 /**
@@ -65,6 +71,10 @@ export class EditorOverlays {
 
     // Editor skeleton overlay: drawn instanced + always-on-top in the gizmo pass (set by the editor).
     public skeletonOverlay: SkeletonOverlay | null = null;
+
+    /** Every GI Volume's probes shown (Renderer.setGiProbesVisible); a selected volume shows its own anyway. */
+    public giProbesVisible: boolean = false;
+    private readonly _giProbeNodes: GIVolumeNode[] = [];
     private _overlaySphereMesh: Mesh | null = null;
     private _overlayBoneMesh: Mesh | null = null;
     private _overlayRingMesh: Mesh | null = null;
@@ -320,12 +330,35 @@ export class EditorOverlays {
                 this._passes.endFullscreenPass(pass);
             }
 
+            // GI Volume probes: occluded by the scene like the helpers, under the gizmos.
+            const probeVolumes = this._giProbeVolumes(scene);
+            if (probeVolumes.length > 0 && this._passes.beginPass('overlay')) {
+                this._ensureOverlayMeshes();
+                if (this._overlaySphereMesh) {
+                    const pass = this._beginOverlayPass('overlay.giProbes');
+                    this._host.gi.drawProbeOverlay(pass, probeVolumes, this._overlaySphereMesh, this._post.toneMapperId());
+                    this._passes.endFullscreenPass(pass);
+                }
+            }
+
             // Gizmos on top (also draws the editor skeleton overlay when set).
             if ((gizmoNodes.length > 0 || this.skeletonOverlay) && this._passes.beginPass('gizmos'))
                 this._renderGizmos(gizmoNodes);
         } finally {
             this._view.drawPreExposure = sceneDrawPreExposure;
         }
+    }
+
+    /** The GI Volumes whose probes show: all of them with the menu's switch on, else the selected one. */
+    private _giProbeVolumes(scene: Scene): GIVolumeNode[] {
+        const out = this._giProbeNodes;
+        out.length = 0;
+        const selected = this._host.selectedNodeId;
+        for (const node of scene.giVolumes) {
+            if (!node.enabled) continue;
+            if (this.giProbesVisible || node.id === selected) out.push(node);
+        }
+        return out;
     }
 
     private _renderGizmos(gizmoNodes: ModelNode[]): void {

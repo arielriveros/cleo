@@ -121,6 +121,7 @@ import GiIntegrateProgram from '../shaders/wgsl/giIntegrate.wgsl';
 import GiResolveProgram from '../shaders/wgsl/giResolve.wgsl';
 import GiAmbientCubeProgram from '../shaders/wgsl/giAmbientCube.wgsl';
 import GiRescaleProgram from '../shaders/wgsl/giRescale.wgsl';
+import GiProbeOverlayProgram from '../shaders/wgsl/giProbeOverlay.wgsl';
 
 // IBL (image-based lighting) precompute shaders
 import IrradianceProgram from '../shaders/wgsl/irradiance.wgsl';
@@ -155,7 +156,7 @@ export {
     SsrResolveProgram, SsrTemporalProgram, LocalExposureLumProgram, LocalExposureDownProgram,
     VolumetricFogInjectProgram, VolumetricFogIntegrateProgram, VolumetricFogApplyProgram,
     GiReduceProgram, GiVisibilityProgram, GiRadianceProgram, GiIntegrateProgram, GiResolveProgram,
-    GiAmbientCubeProgram, GiRescaleProgram,
+    GiAmbientCubeProgram, GiRescaleProgram, GiProbeOverlayProgram,
 };
 
 // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
@@ -325,6 +326,8 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['giResolve',                    GiResolveProgram],
         ['giAmbientCube',                GiAmbientCubeProgram],
         ['giRescale',                    GiRescaleProgram],
+        // The editor's GI probe overlay (render/editorOverlays.ts). APPENDED.
+        ['giProbeOverlay',               GiProbeOverlayProgram],
     ];
 }
 

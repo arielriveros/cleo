@@ -283,3 +283,34 @@ export function maxProbesPerVolume(rays: number, maxTextureSize: number): number
 export function giProbeBytes(rays: number): number {
     return rays * 12 + GI_IRRADIANCE_TILE * GI_IRRADIANCE_TILE * 8 + GI_VISIBILITY_TILE * GI_VISIBILITY_TILE * 8 + 16;
 }
+
+// --- The editor's probe overlay (giProbeOverlay.wgsl) ----------------------------------------------------
+
+/** Radius (m) an active probe is drawn at in the editor's overlay: an eighth of the spacing, held to 5-50 cm. */
+export function giProbeOverlayRadius(minSpacing: number): number {
+    const r = 0.12 * (Number.isFinite(minSpacing) ? minSpacing : 0);
+    return Math.min(0.5, Math.max(0.05, r));
+}
+
+/**
+ * Which grid axes the probe overlay walks from their high end, so its instances draw BACK TO FRONT: the
+ * overlay never writes depth, so where two spheres overlap on screen the later one must be the nearer.
+ * Each axis starts at the end farther from the camera; `cameraGrid` is the camera in grid coordinates
+ * (probe (i, j, k) at (i, j, k)). Exact for a camera beyond the grid along every axis; along an axis the
+ * camera stands within, the probes level with it draw a little early (small spheres rarely overlap there).
+ */
+export function giProbeDrawFlips(cameraGrid: ArrayLike<number>, counts: ArrayLike<number>): [boolean, boolean, boolean] {
+    const flip = (a: number) => cameraGrid[a] < (counts[a] - 1) / 2;
+    return [flip(0), flip(1), flip(2)];
+}
+
+/** The grid cell overlay instance `i` draws: x fastest, then y, then z, each flipped as `flips` says. */
+export function giProbeOfInstance(i: number, counts: ArrayLike<number>, flips: readonly boolean[]): [number, number, number] {
+    let x = i % counts[0];
+    let y = Math.floor(i / counts[0]) % counts[1];
+    let z = Math.floor(i / (counts[0] * counts[1]));
+    if (flips[0]) x = counts[0] - 1 - x;
+    if (flips[1]) y = counts[1] - 1 - y;
+    if (flips[2]) z = counts[2] - 1 - z;
+    return [x, y, z];
+}

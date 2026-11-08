@@ -11,13 +11,14 @@ import { Logger } from '../../../core/logger';
 import { Framebuffer } from '../../framebuffer';
 import type { Mesh } from '../../mesh';
 import { device } from '../../rhi/deviceHandle';
-import { DEFAULT_BLEND, type BlendState } from '../../rhi/types';
+import { DEFAULT_BLEND, OVERLAY_BLEND, type BlendState } from '../../rhi/types';
+import type { RenderPassEncoder } from '../../rhi/device';
 import type { BindGroup, RenderPipeline } from '../../rhi/resources';
 import { Texture } from '../../texture';
 import { ShaderManager } from '../../systems/shaderManager';
 import {
     GiReduceProgram, GiVisibilityProgram, GiRadianceProgram, GiIntegrateProgram, GiResolveProgram,
-    GiAmbientCubeProgram, GiRescaleProgram,
+    GiAmbientCubeProgram, GiRescaleProgram, GiProbeOverlayProgram,
 } from '../programs';
 import type { BindGroupCache } from '../bindGroups';
 import type { FrameView } from '../frameView';
@@ -25,13 +26,13 @@ import type { FrameTargets } from '../frameTargets';
 import type { FullscreenPasses } from '../fullscreenPasses';
 import type { LightingPasses } from '../lighting';
 import type { PassEncoder } from '../passEncoder';
-import type { PipelineCache } from '../pipelineCache';
+import { DEPTH_TEST, type PipelineCache } from '../pipelineCache';
 import { ProbeShadowMap, type ShadowPasses } from '../shadows';
 import type { ViewProjection } from '../viewProjection';
 import type { RenderSubsystems } from '../subsystems';
 import {
-    GI_IRRADIANCE_TILE, GI_VISIBILITY_TILE, giAtlasLayout, giAtlasSizes, gridCoords, hitCacheSize,
-    tileSolidAngles, type GiAtlasLayout,
+    GI_IRRADIANCE_TILE, GI_VISIBILITY_TILE, giAtlasLayout, giAtlasSizes, giProbeDrawFlips, giProbeOverlayRadius,
+    gridCoords, hitCacheSize, tileSolidAngles, type GiAtlasLayout,
 } from './giLayout';
 import { GI_PROBE_ACTIVE, GI_PROBE_PENDING, GI_PROBE_SKIPPED, GI_PROBE_UNCAPTURED, classifyHitRows, isUnderground } from './giClassify';
 import { ModelDraw } from '../modelDraw';
@@ -169,6 +170,10 @@ export class GiSystem {
     private _lastLight: GiLightInputs | null = null;
     private readonly _camera = new Camera({ type: 'perspective', fov: 90, near: 0.05, far: 50 });
     private readonly _frustum = new Frustum();
+    /** The main camera's, for the apply (`resolve`), apart from the capture's own. */
+    private readonly _viewFrustum = new Frustum();
+    private readonly _inView = (min: ArrayLike<number>, max: ArrayLike<number>) => this._viewFrustum.intersectsAABB(min, max);
+    private readonly _litNodes: GIVolumeNode[] = [];
     private readonly _vp = mat4.create();
     private readonly _faceViewProj = new Float32Array(6 * 16);
     private readonly _faceInvViewProj = new Float32Array(6 * 16);
@@ -257,8 +262,14 @@ export class GiSystem {
         this.producedThisFrame = false;
         if (!this.enabled || !this._irradiance || this._volumes.size === 0 || !this.supported) return false;
         const cam = this._view.camera;
-        const list = orderGiVolumes([...this._volumes.keys()].filter(n => this._volumes.get(n)!.states.some(s => s === GI_PROBE_ACTIVE)),
-            cam.position);
+        // Only the volumes the camera can see a point of, and none means no pass at all: the deferred
+        // pass then lights from the probes and the sky, as it does outside every volume.
+        mat4.multiply(this._vp, cam.projectionMatrix, cam.viewMatrix);
+        this._viewFrustum.setFromViewProjection(this._vp);
+        const lit = this._litNodes;
+        lit.length = 0;
+        for (const [node, v] of this._volumes) if (v.states.includes(GI_PROBE_ACTIVE)) lit.push(node);
+        const list = orderGiVolumes(lit, cam.position, this._inView);
         if (list.length === 0) return false;
         const w = Math.max(1, Math.round(this._host.renderWidth * this.resolutionScale));
         const h = Math.max(1, Math.round(this._host.renderHeight * this.resolutionScale));
@@ -274,6 +285,7 @@ export class GiSystem {
         mat4.invert(invVP, invVP);
         this._shaderManager.setUniform('u_invViewProj', this._projection.uvConsuming(this._invScratch, invVP));
         this._shaderManager.setUniform('u_viewPos', cam.position);
+        this._shaderManager.setUniform('u_sizes', [this._host.renderWidth, this._host.renderHeight, w, h]);
         this._uploadVolumes(list, this._view.preExposure / this._scaleOrOne());
         this._passes.setViewport(w, h);
         this._passes.drawFullscreenAndEnd(pass);
@@ -281,6 +293,39 @@ export class GiSystem {
         this.producedThisFrame = true;
         this.stats.resolves++;
         return true;
+    }
+
+    // --- The editor's probe overlay ----------------------------------------------------------------------
+
+    /**
+     * Draw `nodes`' probes into the editor's overlay layer (`pass`, already open on it): one instanced
+     * `sphere` a probe, shaded by the light it holds (giProbeOverlay.wgsl). The overlay is display-referred,
+     * so the light is scaled by the frame's exposure over the store scale, and `toneMapper` is the image's.
+     * Volumes not set up yet (no atlases) draw nothing.
+     */
+    public drawProbeOverlay(pass: RenderPassEncoder, nodes: readonly GIVolumeNode[], sphere: Mesh, toneMapper: number): void {
+        if (!this._irradiance || !this._visibility || !this._probeData || !this._layout) return;
+        const list = nodes.filter(n => this._volumes.has(n)).slice(0, MAX_GI_VOLUMES);
+        if (list.length === 0) return;
+        this._shaderManager.bind('giProbeOverlay');
+        const pipeline = this._pipelines.get('giProbeOverlay', GiProbeOverlayProgram, {
+            cullMode: 'back', depthStencil: DEPTH_TEST, blend: OVERLAY_BLEND, vertex: 'model', builtFor: 'shadowMap',
+        });
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(2, this._atlasGroup(pipeline));
+        this._uploadVolumes(list, this._view.exposure / this._scaleOrOne());
+        const cam = this._view.camera;
+        this._shaderManager.setUniform('u_view', cam.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(cam.projectionMatrix));
+        for (let i = 0; i < list.length; i++) {
+            const v = this._volumes.get(list[i])!;
+            const radius = giProbeOverlayRadius(v.node.minSpacing);
+            const cameraGrid = vec3.transformMat4(this._vec, cam.position as vec3, v.worldToGrid);
+            const flips = giProbeDrawFlips(cameraGrid, v.counts);
+            this._shaderManager.setUniform('u_params', [radius, radius * 0.5, i, toneMapper]);
+            this._shaderManager.setUniform('u_flip', [flips[0] ? 1 : 0, flips[1] ? 1 : 0, flips[2] ? 1 : 0, 0]);
+            this._passes.recordDrawInstances(pass, sphere, v.probes);
+        }
     }
 
     // --- Volumes and atlases -----------------------------------------------------------------------------
@@ -1154,8 +1199,9 @@ export class GiSystem {
     /** The volume descriptors (giSample.wgsl GiVolumeBlock) for `list`, each light scaled by `scale`. */
     private _uploadVolumes(list: readonly GIVolumeNode[], scale: number): void {
         const n = Math.min(list.length, MAX_GI_VOLUMES);
-        const w2g = new Float32Array(16 * 16), g2w = new Float32Array(16 * 16), inv = new Float32Array(16 * 16);
-        const counts = new Array(16 * 4).fill(0), blend = new Float32Array(16 * 4), bias = new Float32Array(16 * 4);
+        // Scratch, every frame's: setUniform copies what it is handed.
+        const { w2g, g2w, inv, counts, blend, bias } = this._volumeBlock;
+        counts.fill(0);
         for (let i = 0; i < n; i++) {
             const v = this._volumes.get(list[i])!;
             w2g.set(v.worldToGrid, i * 16);
@@ -1179,6 +1225,11 @@ export class GiSystem {
         this._shaderManager.setUniform('u_giAtlasSize', [this._irradiance!.width, this._irradiance!.height, this._visibility!.width, this._visibility!.height]);
         this._shaderManager.setUniform('u_giVolumeCount', n);
     }
+
+    private readonly _volumeBlock = {
+        w2g: new Float32Array(16 * 16), g2w: new Float32Array(16 * 16), inv: new Float32Array(16 * 16),
+        counts: new Array<number>(16 * 4).fill(0), blend: new Float32Array(16 * 4), bias: new Float32Array(16 * 4),
+    };
 
     private _scaleOrOne(): number { return this._scale > 0 ? this._scale : 1; }
 

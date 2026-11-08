@@ -189,6 +189,11 @@ where volumes overlap the smaller claims first (a room's inside the street's). A
 a wall, a rock or under the ground is switched off and the others light round it. Grow a room's box a
 little past its walls, so its edge falls outside.
 
+Selecting the volume shows its probes in the viewport, each a small sphere lit by the light it holds,
+from the direction each side of the sphere faces: a probe by a sunlit wall is bright on that side. A
+small red probe is inside geometry and switched off; a small grey one is not captured yet; a probe under
+the ground is not drawn. The debug visibility menu's **GI probes** shows every volume's probes at once.
+
 What a capture sees is the static geometry: models, the landscape, and the trees and bushes painted on it
 (each at its simplest level). Anything a script or a dynamic body moves is left out, and so is grass unless
 **Include grass** is on.

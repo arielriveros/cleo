@@ -263,6 +263,7 @@ off in Play, or turn navmesh display on *during* Play to see what an agent is wa
 | Animation blend | off |
 | Navigation mesh | off |
 | Foliage colliders | on |
+| GI probes | off — every GI Volume's probes; a selected GI Volume shows its own with this off |
 | Preview particles | on — whether particle effects simulate while you author; editor only, since a running game always simulates them |
 | Game UI | off — always shown in UI mode and in Play |
 | Reference grid | on |

@@ -40,7 +40,7 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `ssaoEnabled` / `ssaoSamples` / `ssaoResolutionScale` | on / 64 / 1.0 | on / 24 / 0.5 | on / 16 / 0.5 | **off** / 16 / 0.5 |
 | `ssilEnabled` | on | on | off | off |
 | `ssrEnabled` / `ssrResolutionScale` / `ssrSteps` | on / 1.0 / 64 | on / 0.5 / 32 | **off** / 0.5 / 24 | **off** / 0.5 / 16 |
-| `giEnabled` / `giResolutionScale` / `giRaysPerFrame` / `giFillDrawsPerFrame` | on / 1.0 / 262144 / 96 | on / 1.0 / 131072 / 64 | on / 0.5 / 65536 / 48 | on / 0.5 / 32768 / 32 |
+| `giEnabled` / `giResolutionScale` / `giRaysPerFrame` / `giFillDrawsPerFrame` | on / 1.0 / 262144 / 96 | on / 0.5 / 131072 / 64 | on / 0.5 / 65536 / 48 | on / 0.5 / 32768 / 32 |
 | `localExposureEnabled` | on | on | off | off |
 | `volumetricFogEnabled` / `TileSize` / `Slices` / `LocalShadows` | on / 12 / 96 / on | on / 16 / 64 / on | on / 20 / 48 / off | **off** / 24 / 32 / off |
 | `weatherShelterEnabled` / `weatherShelterResolution` | on / 2048 | on / 1024 | on / 1024 | **off** / 512 |

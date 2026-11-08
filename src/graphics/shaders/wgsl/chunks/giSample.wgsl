@@ -67,12 +67,20 @@ fn giBoxWeight(v: i32, p: vec3<f32>) -> f32 {
     return w;
 }
 
-/** Atlas uv of direction `d` in probe `g`'s irradiance tile (bilinear-safe: the border is one texel). */
-fn giIrradianceUV(g: i32, d: vec3<f32>) -> vec2<f32> {
+/**
+ * Atlas uv of the octahedral position `oct` (`octEncode(d) * 0.5 + 0.5`, 0..1) in probe `g`'s irradiance
+ * tile (bilinear-safe: the border is one texel). Split from the direction so a lookup that reads eight
+ * probes along one normal encodes it once.
+ */
+fn giIrradianceTileUV(g: i32, oct: vec2<f32>) -> vec2<f32> {
     let perRow = i32(u_giVolumes.u_giAtlas.x);
     let origin = vec2<f32>(f32(g % perRow), f32(g / perRow)) * GI_IRR_TILE;
-    let local = (octEncode(d) * 0.5 + 0.5) * GI_IRR_INTERIOR + vec2<f32>(1.0);
-    return (origin + local) / u_giVolumes.u_giAtlasSize.xy;
+    return (origin + oct * GI_IRR_INTERIOR + vec2<f32>(1.0)) / u_giVolumes.u_giAtlasSize.xy;
+}
+
+/** Atlas uv of direction `d` in probe `g`'s irradiance tile. */
+fn giIrradianceUV(g: i32, d: vec3<f32>) -> vec2<f32> {
+    return giIrradianceTileUV(g, octEncode(d) * 0.5 + 0.5);
 }
 
 fn giVisibilityUV(g: i32, d: vec3<f32>) -> vec2<f32> {
@@ -101,15 +109,27 @@ fn giSampleVolume(v: i32, P: vec3<f32>, N: vec3<f32>, V: vec3<f32>) -> vec4<f32>
     let base = min(floor(g), n - vec3<f32>(2.0));
     let frac = g - base;
     let maxDistance = bias.z;
+    let moments2 = vec2<f32>(maxDistance, maxDistance * maxDistance);
+    // Once for the cage, not once a probe: the normal's place in every irradiance tile, the cage's first
+    // probe, and the grid's axes in the world (gridToWorld is affine, so each corner is a step along them).
+    let octN = octEncode(N) * 0.5 + 0.5;
+    let toWorld = u_giVolumes.u_giGridToWorld[v];
+    let corner0 = (toWorld * vec4<f32>(base, 1.0)).xyz;
+    let axisX = toWorld[0].xyz;
+    let axisY = toWorld[1].xyz;
+    let axisZ = toWorld[2].xyz;
+    let probe0 = counts.w + i32(base.x) + counts.x * (i32(base.y) + counts.y * i32(base.z));
+    let strideZ = counts.x * counts.y;
 
     var sum = vec3<f32>(0.0);
     var weightSum = 0.0;
     var valid = 0.0;
     for (var s = 0; s < 8; s++) {
-        let offset = vec3<f32>(f32(s & 1), f32((s >> 1u) & 1), f32((s >> 2u) & 1));
-        let corner = base + offset;
-        let local = i32(corner.x) + counts.x * (i32(corner.y) + counts.y * i32(corner.z));
-        let probe = counts.w + local;
+        let ox = s & 1;
+        let oy = (s >> 1u) & 1;
+        let oz = (s >> 2u) & 1;
+        let offset = vec3<f32>(f32(ox), f32(oy), f32(oz));
+        let probe = probe0 + ox + oy * counts.x + oz * strideZ;
         let data = giProbeData(probe);
         if (abs(data.w - 1.0) > 0.25) { continue; }   // only ACTIVE probes answer
 
@@ -117,7 +137,7 @@ fn giSampleVolume(v: i32, P: vec3<f32>, N: vec3<f32>, V: vec3<f32>) -> vec4<f32>
         let trilinear = max(tri.x * tri.y * tri.z, 1e-6);
         valid += tri.x * tri.y * tri.z;
 
-        let probePos = (u_giVolumes.u_giGridToWorld[v] * vec4<f32>(corner, 1.0)).xyz + data.xyz;
+        let probePos = corner0 + axisX * offset.x + axisY * offset.y + axisZ * offset.z + data.xyz;
         // Smooth back-face weight: a probe behind the surface still contributes a little.
         let toProbe = normalize(probePos - P);
         let facing = (dot(toProbe, N) + 1.0) * 0.5;
@@ -128,7 +148,7 @@ fn giSampleVolume(v: i32, P: vec3<f32>, N: vec3<f32>, V: vec3<f32>) -> vec4<f32>
         let r = length(fromProbe);
         if (r > 1e-4) {
             let moments = textureSampleLevel(u_giVisibility_texture, u_giVisibility_sampler,
-                                             giVisibilityUV(probe, fromProbe / r), 0.0).rg * vec2<f32>(maxDistance, maxDistance * maxDistance);
+                                             giVisibilityUV(probe, fromProbe / r), 0.0).rg * moments2;
             if (r > moments.x) {
                 let variance = abs(moments.y - moments.x * moments.x);
                 let d = r - moments.x;
@@ -141,7 +161,7 @@ fn giSampleVolume(v: i32, P: vec3<f32>, N: vec3<f32>, V: vec3<f32>) -> vec4<f32>
         if (w < 0.2) { w *= w * w * (1.0 / (0.2 * 0.2)); }
         w *= trilinear;
 
-        let e = textureSampleLevel(u_giIrradiance_texture, u_giIrradiance_sampler, giIrradianceUV(probe, N), 0.0).rgb;
+        let e = textureSampleLevel(u_giIrradiance_texture, u_giIrradiance_sampler, giIrradianceTileUV(probe, octN), 0.0).rgb;
         sum += e * w;
         weightSum += w;
     }

@@ -416,6 +416,8 @@ export class Renderer {
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._temporal, this._clouds, this._decals, this._fluids, this._particlePasses, this._sprites, this._visibility, this._radiance, this._lighting, this._sky, this._modelDraw, this._subsystems);
         this._overlays = new EditorOverlays({
             get thumbnailMode() { return renderer._thumbnailMode; },
+            get selectedNodeId() { return renderer._selectedNodeId; },
+            get gi() { return renderer._gi; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._post, this._decals, this._sprites, this._fullscreen, this._modelDraw);
         this._debugViews = new DebugViews({
             get renderHeight() { return renderer._renderHeight; },
@@ -1379,6 +1381,14 @@ export class Renderer {
     /** Show/hide the editor infinite grid overlay. Off by default (published builds never draw it). */
     public setGridVisible(visible: boolean): void {
         this._overlays.gridEnabled = visible;
+    }
+
+    /**
+     * Show every GI Volume's probes in the editor's overlay (the debug visibility menu's GI Probes). A
+     * selected volume shows its own regardless. Off by default; a published build never draws it.
+     */
+    public setGiProbesVisible(visible: boolean): void {
+        this._overlays.giProbesVisible = !!visible;
     }
 
     /** Orient the grid: 'xz' = ground plane (3D perspective), 'xy' = front plane (2D orthographic). */

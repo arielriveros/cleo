@@ -212,6 +212,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     // The overlay layer's two labels: the helper/icon draws during the scene render, and the
     // composite past the end of the post chain. Both report under the one scope.
     'overlay.helpers': 'overlay',
+    'overlay.giProbes': 'overlay',
     'overlay.composite': 'overlay',
 };
 

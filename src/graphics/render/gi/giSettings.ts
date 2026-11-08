@@ -2,8 +2,9 @@
  * What GI Volumes cost at each quality tier, and the clamps on the user-facing settings. Free of GL so the
  * table is unit-tested, like ssilSettings.ts.
  *
- * The apply (giResolve) is the per-frame cost: a full-screen pass, at full resolution on the upper tiers
- * and half on the lower, brought back up depth-aware. The RELIGHT is paid only while something changes —
+ * The apply (giResolve) is the per-frame cost: a full-screen pass, at full resolution on Ultra and half on
+ * the others, brought back up by depth and normal (deferredLighting.wgsl `giUpsample`). Half costs about a
+ * third (0.54 -> 0.16 ms at 1904x929, Valley street, WebGPU) and shows no difference at creases or edges. The RELIGHT is paid only while something changes —
  * the sun moved past the tier's threshold, a light changed, a capture landed — and is spread over frames
  * by the rays-per-frame budget. The FILL is the runtime capture of volumes that have no saved bake: the
  * scene draws spent on it per frame, nearest probes first.
@@ -36,7 +37,7 @@ export const GI_TIERS: Record<GiTierName, GiTier> = {
         giShadowTexel: 0.1, giShadowMaxSize: 2048, giFillDrawsPerFrame: 96, giMultiBounce: true,
     },
     high: {
-        giEnabled: true, giResolutionScale: 1.0, giRaysPerFrame: 131072, giSunThreshold: 2,
+        giEnabled: true, giResolutionScale: 0.5, giRaysPerFrame: 131072, giSunThreshold: 2,
         giShadowTexel: 0.1, giShadowMaxSize: 2048, giFillDrawsPerFrame: 64, giMultiBounce: true,
     },
     medium: {

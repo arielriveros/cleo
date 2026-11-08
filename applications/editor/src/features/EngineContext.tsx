@@ -6175,6 +6175,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // is in force. Skipped in options mode, where Engine > Renderer owns its own grid switch.
       if (editorMode !== 'options')
         instanceRef.current?.renderer.setGridVisible(isPlayMode && !isSimulating ? vis.grid.runtime : vis.grid.editor);
+      // The GI Volumes' probes: renderer chrome like the grid, asserted the same way. A selected volume shows
+      // its own probes whatever this says (the renderer knows the selection).
+      instanceRef.current?.renderer.setGiProbesVisible(isPlayMode && !isSimulating ? vis.giProbes.runtime : vis.giProbes.editor);
       // Particle preview is a property of the authored scene; the particle editor's own stage always
       // previews (that is its whole job), and play mode always simulates regardless of the flag.
       const liveScene = instanceRef.current?.scene;

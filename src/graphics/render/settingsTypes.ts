@@ -497,7 +497,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         cloudResolutionScale: 0.5, cloudSteps: 40, cloudLightSteps: 5,
         ssaoEnabled: true, ssaoSamples: 24, ssaoResolutionScale: 0.5, ssilEnabled: true,
         ssrEnabled: true, ssrResolutionScale: 0.5, ssrSteps: 32, localExposureEnabled: true,
-        giEnabled: true, giResolutionScale: 1.0, giRaysPerFrame: 131072, giFillDrawsPerFrame: 64,
+        giEnabled: true, giResolutionScale: 0.5, giRaysPerFrame: 131072, giFillDrawsPerFrame: 64,
         volumetricFogEnabled: true, volumetricFogTileSize: 16, volumetricFogSlices: 64, volumetricFogLocalShadows: true,
         weatherShelterEnabled: true, weatherShelterResolution: 1024,
         shadowMapResolution: 2048, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,

@@ -35,6 +35,10 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     captured, and a floor with no probe no longer reflects the open sky.
   - *Debug channels.* **GI** shows the volumes' light on a mid-grey surface, **GI Share** where they
     light the frame.
+  - *Probes in the viewport.* A selected GI Volume shows its probes, each lit by the light it holds;
+    switched-off probes are red. The debug visibility menu's **GI probes** shows every volume's.
+  - *Cheaper on High.* The GI pass runs at half resolution on High as on Medium and Low, brought back up
+    along depth and normal edges (about a third of its cost), and not at all when no volume is in view.
 
 - **Lighting that holds together from noon to midnight.** Torches now light the night in the editor
   as they do in the game, and glare no longer floods the screen.

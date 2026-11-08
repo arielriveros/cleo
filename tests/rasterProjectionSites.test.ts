@@ -87,6 +87,8 @@ describe('the camera projection reaches every pass through one wrapper', () => {
 
             // --- After the resolve: the flag is already false, and these must stay put. ---
             '_drawSkeletonOverlay',
+            // The editor's GI probe spheres, in the overlay layer like the skeleton.
+            'drawProbeOverlay',
             '_drawTileBand',
             // A helper with a coplanar depth nudge reaches `_rasterProjection` through this thin wrapper
             // (ModelDraw.beginModel calls it only when the nudge is non-zero); every other overlay draw goes
