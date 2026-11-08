@@ -221,6 +221,73 @@ export class GeometryPass {
         this._passes.endScope();
     }
 
+    /**
+     * A light probe's G-buffer capture (render/probeBaker.ts): the nodes `include` admits, culled by
+     * `inView` (the face's own frustum) rather than by the main camera's, drawn into `pass` exactly as the
+     * frame's geometry pass draws them — same programs, same sort, same instancing — so a relit probe
+     * shades the scene as the frame does. `face` keeps each face's instance buffers apart: two faces in
+     * one frame must not write one buffer, which the queue would apply before either face's draws.
+     *
+     * A face can be drawn over several frames: the first `skip` nodes it admits are passed over and at most
+     * `limit` drawn. Returns how many it admitted in all, so the caller knows when the face is complete.
+     */
+    public captureInto(pass: RenderPassEncoder, scene: Scene, include: (node: ModelNode) => boolean,
+                       inView: (node: ModelNode) => boolean, face: number,
+                       skip: number = 0, limit: number = Infinity): number {
+        const groups = this._instanceGroups, order = this._groupOrder;
+        const list = this._sortList, pool = this._sortPool;
+        order.length = 0;
+        list.length = 0;
+        const eye = this._view.camera.position, far = this._view.camera.far;
+        let admitted = 0;
+        for (const node of scene.models) {
+            if (!this.inGBuffer(node) || !include(node) || !inView(node)) continue;
+            const index = admitted++;
+            if (index < skip || index >= skip + limit) continue;
+            if (!node.initialized) node.initializeModel();
+            const mat = node.model.material;
+            const animated = node.model instanceof AnimatedModel;
+            if (!animated && !node.model.hasSubmeshes && (mat.type === 'pbr' || mat.type === 'blinn_phong')) {
+                const key = this._modelDraw.objectId(node.model.mesh) * INSTANCE_KEY_SPAN + this._modelDraw.objectId(mat);
+                let group = groups.get(key);
+                if (!group) { group = []; groups.set(key, group); }
+                if (group.length === 0) order.push(key);
+                group.push(node);
+            } else {
+                const s = node.getBoundingSphere();
+                const depth = Math.max(0, vec3.distance(eye, s.center) - s.radius);
+                let record = pool[list.length];
+                if (!record) { record = { node, key: 0, shader: '' }; pool.push(record); }
+                record.node = node;
+                record.shader = this._geometryShaderFor(node);
+                record.key = this._drawSortKeys.key(record.shader, mat, depth, far);
+                list.push(record);
+            }
+        }
+        list.sort(GeometryPass._bySortKey);
+        for (let i = 0; i < list.length; i++) this._modelDraw.ensureRow(list[i].node);
+        for (let i = 0; i < order.length; i++) {
+            const group = groups.get(order[i])!;
+            if (group.length === 1) this._modelDraw.ensureRow(group[0]);
+        }
+        this._modelDraw.flushRows();
+        for (let i = 0; i < list.length; i++) this._drawGeometryNode(pass, list[i].node, list[i].shader);
+        const buffers = this._captureInstanceBuffers[face] ??= new Map();
+        for (let i = 0; i < order.length; i++) {
+            const key = order[i], group = groups.get(key)!;
+            if (group.length >= 2) this._drawInstancedGroup(pass, group, key, buffers);
+            else this._drawGeometryNode(pass, group[0]);
+        }
+        for (const [key, group] of groups) {
+            if (group.length === 0) groups.delete(key);
+            else group.length = 0;
+        }
+        return admitted;
+    }
+
+    /** Per cube face, the capture's own instance buffers (see `captureInto`). */
+    private readonly _captureInstanceBuffers: Map<number, RhiBuffer>[] = [];
+
     private _geometryShaderFor(node: ModelNode): string {
         const type = node.model.material.type;
         // A deferred custom material is drawn with its own runtime-compiled G-buffer program.
@@ -252,7 +319,8 @@ export class GeometryPass {
         frameStats.objects++;
     }
 
-    private _drawInstancedGroup(pass: RenderPassEncoder, group: ModelNode[], key: number): void {
+    private _drawInstancedGroup(pass: RenderPassEncoder, group: ModelNode[], key: number,
+                                buffers: Map<number, RhiBuffer> = this._instanceBuffers): void {
         const first = group[0];
         const type = first.model.material.type;
         // Placed instanced copies never dissolve as a group or crossfade (u_lodCamera is turned off below),
@@ -290,11 +358,11 @@ export class GeometryPass {
         pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
 
         const mesh = first.model.mesh;
-        let instances = this._instanceBuffers.get(key)
+        let instances = buffers.get(key)
             ?? device.createBuffer({ label: `renderer.instanceMatrices:${key}`, size: 0,
                                      usage: BufferUsage.VERTEX | BufferUsage.COPY_DST });
         instances = device.reallocateBuffer(instances, this._instanceScratch.subarray(0, needed));
-        this._instanceBuffers.set(key, instances);
+        buffers.set(key, instances);
 
         // The ACTIVE index level, and no `hasLods` bail: a level is an alternate index buffer over the
         // same vertices. A mesh without indices draws as an array.

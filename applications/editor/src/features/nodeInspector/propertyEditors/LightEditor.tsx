@@ -6,6 +6,7 @@ import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { Button, ColorInput, PresetMenu, PropertyTable, PropertyRow, NumberInput, Slider, Section, Toggle, Hint } from '@cleo/app-kit/ui'
 import { LightIcon } from '../sectionIcons'
 import { cloudBakeWarning, useCloudBakeStatus } from '../../../utils/cloudBake'
+import { lightBakeWarning, rebakeStale, useProbeBakeStatus } from '../../../utils/probeBake'
 
 // Re-exported so SkyAtmosphereEditor and VolumetricCloudsEditor keep resolving ColorInput from here.
 export { ColorInput };
@@ -21,6 +22,7 @@ export default function LightEditor(props: {node: LightNode}) {
   const markLightDirty = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'light', node: props.node });
 
   const [castShadows, setCastShadows] = useState(props.node.castShadows);
+  const [bake, setBake] = useState(props.node.bake);
   const [color, setColor] = useState(vec3ToHex(light.color));
   // One state bag for every numeric property; which of them are shown depends on the light type.
   const [values, setValues] = useState<{
@@ -48,6 +50,7 @@ export default function LightEditor(props: {node: LightNode}) {
 
   useEffect(() => {
     setCastShadows(props.node.castShadows);
+    setBake(props.node.bake);
     setColor(vec3ToHex(props.node.light.color));
     read();
   }, [props.node])
@@ -100,11 +103,19 @@ export default function LightEditor(props: {node: LightNode}) {
   const cloudBake = useCloudBakeStatus(props.node.scene);
   const cloudBakeStale = isDirectional && cloudBake.clouds && cloudBake.staleness === 'sun'
     ? cloudBakeWarning('sun') : null;
+  // A light set to bake that changed since the light probes captured it.
+  const probeBake = useProbeBakeStatus(props.node.scene);
+  const staleProbes = probeBake.probesOf(props.node);
+  const probeBakeStale = lightBakeWarning(props.node, staleProbes);
 
   return (
     <Collapsable title='Light' icon={<LightIcon />} persistKey='light'
       right={<PresetMenu presets={presets} onApply={applyLightPreset} title='Real-world lights, brightened as far as this scene needs to show them' />}>
     <div className='w-full p-2'>
+      {probeBakeStale && <div className='flex items-center gap-2 mb-2'>
+        <span className='text-warning text-ui flex-1'>{probeBakeStale}</span>
+        <Button size='sm' onClick={() => { rebakeStale(staleProbes); eventEmitter.emit('SCENE_CHANGED'); }}>Re-bake probes</Button>
+      </div>}
       {cloudBakeStale && <div className='flex items-center gap-2 mb-2'>
         <span className='text-warning text-ui flex-1'>Volumetric clouds are baked into the sky: this sun direction needs a new bake.</span>
         <Button size='sm' onClick={() => { cloudBake.clouds!.requestBake(); eventEmitter.emit('SCENE_CHANGED'); }}>Regenerate</Button>
@@ -158,6 +169,12 @@ export default function LightEditor(props: {node: LightNode}) {
               ? 'Spot lights get their own shadow map, sized to the outer cone and reaching as far as the light’s range. A few can cast at once (see Spot Shadows in Options › Engine › Renderer); any beyond that cap go unshadowed.'
               : 'Point lights cast in every direction, through a cube map rendered as six depth maps — one per face — reaching as far as the light’s range. A few can cast at once (see Point Shadows in Options › Engine › Renderer); the nearest to the camera get the maps, and any beyond that cap go unshadowed.'}
           onChange={(c) => { props.node.castShadows = c; setCastShadows(c); markLightDirty(); }} />
+      </Section>
+
+      <Section title='Baking'>
+        <Toggle label='Bake' checked={bake} className='my-1'
+          title='Captured into the light probes (and, later, baked lighting). Off, the light still lights the scene live but no probe sees it: a flashlight, a muzzle flash, a light that moves or switches with gameplay.'
+          onChange={(c) => { props.node.bake = c; setBake(c); markLightDirty(); }} />
       </Section>
 
       { isSpot &&

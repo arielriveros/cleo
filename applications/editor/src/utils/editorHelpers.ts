@@ -12,6 +12,7 @@ import {
   CameraNode,
   LightProbeNode,
   ExposureVolumeNode,
+  GIVolumeNode,
   VolumetricFogNode,
   WeatherNode,
   DecalNode,
@@ -509,9 +510,9 @@ function ensureWeatherIcon(volume: WeatherNode) {
  * A box volume whose extent the selection shows as an oriented wireframe: an exposure volume, an
  * occlusion volume, a fog volume, a bounded weather volume, a bounded probe.
  */
-const isOrientedVolume = (node: unknown): node is ExposureVolumeNode | OcclusionVolumeNode | VolumetricFogNode | WeatherNode | LightProbeNode =>
+const isOrientedVolume = (node: unknown): node is ExposureVolumeNode | OcclusionVolumeNode | VolumetricFogNode | WeatherNode | LightProbeNode | GIVolumeNode =>
   node instanceof ExposureVolumeNode || node instanceof OcclusionVolumeNode || node instanceof VolumetricFogNode
-  || (node instanceof WeatherNode && node.bounded) || (node instanceof LightProbeNode && node.bounded);
+  || (node instanceof WeatherNode && node.bounded) || (node instanceof LightProbeNode && node.bounded) || node instanceof GIVolumeNode;
 
 // Attach a billboard icon under a decal, so a decal that projects nothing visible yet (no material, or
 // nothing inside its box) still shows where it is. Tinted amber, like its selection box. It is also what
@@ -591,7 +592,7 @@ function lineGeometry(lines: { positions: [number, number, number][]; indices: n
  * one thing an author must size by eye), or a force field's sphere or box. Top-level and re-placed every
  * frame, like the decal box, so the transform gizmo and inspector edits are followed.
  */
-function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode | WaterVolumeNode | OcclusionVolumeNode | ExposureVolumeNode | VolumetricFogNode | WeatherNode | LightProbeNode) {
+function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNode | WaterVolumeNode | OcclusionVolumeNode | ExposureVolumeNode | VolumetricFogNode | WeatherNode | LightProbeNode | GIVolumeNode) {
   const sphere = node instanceof ForceFieldNode && node.shape === 'sphere';
   const name = `${EFFECTSHAPE_PREFIX}${node.id}:${sphere ? 's' : 'b'}`;
   let existing = scene.getNodesByName(name)[0] as ModelNode | undefined;
@@ -600,7 +601,7 @@ function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNo
       node instanceof ParticleSystemNode ? [1, 0.55, 0.3] : node instanceof WaterVolumeNode ? [0.3, 0.6, 1]
         : node instanceof OcclusionVolumeNode ? [0.75, 0.45, 1] : node instanceof ExposureVolumeNode ? [1, 0.8, 0.3]
         : node instanceof VolumetricFogNode ? [0.75, 0.85, 0.95] : node instanceof WeatherNode ? [0.55, 0.75, 1]
-        : node instanceof LightProbeNode ? [0.4, 0.8, 1] : [0.45, 0.85, 1]);
+        : node instanceof LightProbeNode ? [0.4, 0.8, 1] : node instanceof GIVolumeNode ? [1, 0.6, 0.85] : [0.45, 0.85, 1]);
     scene.addNode(existing);
   }
   const helper = existing;
@@ -617,7 +618,7 @@ function ensureEffectShape(scene: Scene, node: ParticleSystemNode | ForceFieldNo
     // culling uses. So do the exposure volume and light probe boxes: all are oriented boxes under the node
     // transform.
     if (node instanceof OcclusionVolumeNode || node instanceof ExposureVolumeNode || node instanceof VolumetricFogNode
-        || node instanceof WeatherNode || node instanceof LightProbeNode) {
+        || node instanceof WeatherNode || node instanceof LightProbeNode || node instanceof GIVolumeNode) {
       helper.setPosition(node.worldPosition).setQuaternion(node.worldQuaternion)
             .setScale([node.size[0] * Math.hypot(m[0], m[1], m[2]), node.size[1] * Math.hypot(m[4], m[5], m[6]),
                        node.size[2] * Math.hypot(m[8], m[9], m[10])]);

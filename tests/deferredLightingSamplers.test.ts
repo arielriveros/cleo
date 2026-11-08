@@ -11,9 +11,9 @@ import { findResources } from '../tools/wgslLayout.mjs';
  * D3D11 — every Windows browser — reports exactly that. A program over the limit compiles and then
  * fails to LINK, and a failed link here is a black frame with a console line, not an exception.
  *
- * The deferred lighting pass sits at the limit: the G-buffer and SSIL and SSR in group 0, two probe
- * slots with the BRDF LUT and the environment in group 2, the three shadow atlases and the light grid in
- * group 3. Anything it needs next has to make room first — merging two textures, or dropping one.
+ * The deferred lighting pass: the G-buffer, SSIL, SSR and the GI Volumes' result in group 0, the
+ * reflection atlas with the BRDF LUT and the environment in group 2, the three shadow atlases and the light
+ * grid in group 3 — 14 of the 16. Anything it needs past 16 has to make room first.
  */
 
 const WGSL = join(__dirname, '..', 'src', 'graphics', 'shaders', 'wgsl');
@@ -43,9 +43,29 @@ describe('the WebGL2 texture-unit budget', () => {
     });
 
     it('counts the deferred lighting pass the way the header describes it', () => {
-        // A drop below 16 is fine — update this number and the header. A rise cannot happen: the sweep
-        // above fails first.
+        // A drop is fine — update this number and the header. A rise past 16 cannot happen: the sweep above
+        // fails first. 14 once the light probes' LIGHTING moved into the uniform block as spherical
+        // harmonics (the two irradiance cubes retired), 13 once their REFLECTIONS moved into one atlas
+        // array (the two prefiltered cubes retired), 14 again with the GI Volumes' result.
         const source = modules().find(m => m.name === 'deferredLighting.wgsl')!.source;
-        expect(textureCount(source)).toBe(16);
+        expect(textureCount(source)).toBe(14);
+    });
+
+    it('lets the GI Volumes claim the indirect diffuse first', () => {
+        const source = modules().find(m => m.name === 'deferredLighting.wgsl')!.source;
+        expect(source).toMatch(/var fallbackShare = 1\.0 - gi\.a;/);
+        expect(source).toMatch(/u_gi_texture: texture_2d<f32>/);
+    });
+
+    it('lights from every lighting probe per pixel, not from the camera-chosen slots', () => {
+        const source = modules().find(m => m.name === 'deferredLighting.wgsl')!.source;
+        expect(source).not.toMatch(/u_irradiance[01]/);
+        expect(source).not.toMatch(/u_probeLobes/);
+        // Reflections the same way: one atlas array with a dynamic layer, looped per pixel.
+        expect(source).not.toMatch(/u_prefiltered[01]|u_probeInvVolume[01]|u_probeCount/);
+        expect(source).toMatch(/u_reflectionAtlas_texture: texture_2d_array<f32>/);
+        expect(source).toMatch(/for \(var i = 0; i < min\(u_lighting\.u_reflProbeCount, MAX_REFLECTION_PROBES\); i\+\+\)/);
+        expect(source).toMatch(/u_lightProbeSH: array<vec4<f32>, 144>/);
+        expect(source).toMatch(/for \(var i = 0; i < min\(u_lighting\.u_lightProbeCount, MAX_LIGHT_PROBES\); i\+\+\)/);
     });
 });

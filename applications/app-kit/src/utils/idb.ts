@@ -11,9 +11,11 @@ const DB_NAME = 'cleo';
 const STORE = 'kv';
 export const TEXTURE_STORE = 'textures';
 export const AUDIO_STORE = 'audio';
-// 3 added the 'audio' store. The upgrade handler creates whatever is missing, so a v1 or v2 database
-// gains it without touching a single existing row.
-const VERSION = 3;
+/** GI Volume bakes keyed by bake id, held as bytes (see the editor's giBakeStore.ts). */
+export const GI_BAKE_STORE = 'giBakes';
+// 3 added the 'audio' store, 4 the 'giBakes' store. The upgrade handler creates whatever is missing, so
+// an older database gains them without touching a single existing row.
+const VERSION = 4;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -27,6 +29,7 @@ export function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
       if (!db.objectStoreNames.contains(TEXTURE_STORE)) db.createObjectStore(TEXTURE_STORE);
       if (!db.objectStoreNames.contains(AUDIO_STORE)) db.createObjectStore(AUDIO_STORE);
+      if (!db.objectStoreNames.contains(GI_BAKE_STORE)) db.createObjectStore(GI_BAKE_STORE);
     };
     // Another tab holds the DB open at the old version. Must surface: a silent hang here looks like the
     // editor failing to load.

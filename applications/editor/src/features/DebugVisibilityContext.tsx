@@ -16,6 +16,7 @@ export type DebugCategory =
   | 'animation'
   | 'navMesh'
   | 'foliageColliders'
+  | 'giProbes'
   | 'particles'
   | 'gameUi'
   | 'grid';
@@ -53,6 +54,9 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   // The colliders foliage props get in Play, drawn on the scattered instances near the camera — the same
   // disc and cap the physics uses — so a trunk collider can be checked against the trunks it stands on.
   { key: 'foliageColliders', label: 'Foliage colliders', runtimeAvailable: true },
+  // Every GI Volume's probes, lit by the light each holds. Renderer chrome (asserted from EngineContext's
+  // reconcile, like the grid); a selected volume shows its own probes with this off.
+  { key: 'giProbes', label: 'GI probes', runtimeAvailable: true },
   // Not an overlay: whether particle systems SIMULATE while authoring, like Niagara's realtime toggle.
   // Editor only — a playing game always simulates them.
   { key: 'particles', label: 'Preview particles', runtimeAvailable: false },

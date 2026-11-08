@@ -65,6 +65,35 @@ export const FIRES = [
  */
 export const SHAFTS = { lumens: 4400, oculusLumens: 21500, range: 18, oculusRange: 20 }
 
+/**
+ * The GI Volumes: one a room, its box the room's walls, floor and ceiling (the ceilings measured off the
+ * structure's own geometry, rays cast up from the floor), grown by GI_WALL_MARGIN so the outermost probes
+ * stand in the walls and the feather falls outside. `spacing` is the probe spacing aimed at along x, y, z.
+ * The rooms take 256 rays a probe, for a torch's pool of light on the wall beside it; the three halls 64, at
+ * a wider spacing. Where two boxes meet (a doorway), the smaller claims first.
+ *
+ * Every volume is ADDITIVE: its light goes on top of the scene's ambient rather than in its place. That
+ * ambient is the dark's own faint light, a lux or two the eye just makes out (scene.mjs), and what the fires
+ * bounce off this dark stone is a fifth to a tenth of it away from them: in its place, every cell and corner
+ * the torches miss went black, and the knight's armour, a metal with no room to reflect, with them.
+ */
+export const GI_WALL_MARGIN = 0.3
+export const GI_ROOMS = [
+  { key: 'entry', name: 'Entry Hall GI', min: [-6, 0, -8], max: [6, 4.2, 8], spacing: [1.5, 1.4, 1.5], rays: 256 },
+  { key: 'cells', name: 'Cell Corridor GI', min: [-5.5, 0, -20.3], max: [5.5, 3.85, -8.3], spacing: [1.25, 1.4, 1.5], rays: 256 },
+  { key: 'cell-room', name: 'Cell Room GI', min: [-3, 0, -26], max: [3, 3.4, -20.3], spacing: [1.25, 1.3, 1.25], rays: 256 },
+  { key: 'east-corridor', name: 'East Corridor GI', min: [6, 0, -1.25], max: [18.6, 3.85, 1.25], spacing: [1.5, 1.4, 1.25], rays: 256 },
+  { key: 'crypt', name: 'Crypt GI', min: [10, 0, 1.25], max: [14, 3.8, 7], spacing: [1.25, 1.4, 1.25], rays: 256 },
+  { key: 'great-hall', name: 'Great Hall GI', min: [18.6, 0, -8], max: [32.6, 9, 8], spacing: [2, 1.9, 2], rays: 64, maxRayDistance: 30 },
+  { key: 'south-lower', name: 'South Room GI', min: [26.6, 0, 8.3], max: [32.6, 4.2, 14.6], spacing: [1.5, 1.4, 1.5], rays: 256 },
+  { key: 'south-upper', name: 'Upper South Room GI', min: [26.6, 4.5, 8.3], max: [32.6, 7.7, 14.6], spacing: [1.5, 1.3, 1.5], rays: 256 },
+  { key: 'stair-hall', name: 'Stair Hall GI', min: [24.6, 0, -24], max: [36.6, 5.2, -8.3], spacing: [1.75, 1.5, 1.75], rays: 64, maxRayDistance: 30 },
+  { key: 'guard-room', name: 'Stair & Guard Room GI', min: [36.6, -6, -24.3], max: [43.2, 5.2, -15], spacing: [1.5, 1.5, 1.5], rays: 256 },
+  { key: 'arena-hall', name: 'Arena Hall GI', min: [28, -6, -50], max: [52, 8.3, -24.6], spacing: [2.5, 2.4, 2.5], rays: 64, maxRayDistance: 40 },
+  { key: 'catacombs', name: 'Catacombs GI', min: [15.3, -6, -38.6], max: [28, -2.55, -36], spacing: [1.5, 1.2, 1.3], rays: 256 },
+  { key: 'ossuary', name: 'Ossuary GI', min: [10.6, -6, -40.4], max: [15.3, -1.6, -34], spacing: [1.25, 1.5, 1.25], rays: 256 },
+]
+
 // ---------------------------------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------------------------------

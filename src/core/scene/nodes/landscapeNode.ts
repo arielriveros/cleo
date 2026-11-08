@@ -137,21 +137,38 @@ export class LandscapeNode extends Node {
         }
     }
 
+    /**
+     * The landscape's world box: its square, from the lowest to the highest sample. The height range is
+     * cached against `Terrain.heightsVersion` (bumped by every sculpt, region write and height swap): a
+     * scan of the whole grid is 4.2 million samples at the Valley's 2049 resolution, about 5.6 ms, and
+     * the renderer asks for this box every frame (the snow lookup in `_ensurePackedTextures`), which made
+     * it most of the frame's `prepare`.
+     */
     public getBoundingBox(): { min: vec3, max: vec3 } {
         const p = this.worldPosition;
         const half = this._terrain.size / 2;
-        const heights = this._terrain.heights;
-        let minY = Infinity, maxY = -Infinity;
-        for (let i = 0; i < heights.length; i++) {
-            if (heights[i] < minY) minY = heights[i];
-            if (heights[i] > maxY) maxY = heights[i];
+        const version = this._terrain.heightsVersion;
+        if (this._heightRangeVersion !== version || this._heightRangeHeights !== this._terrain.heights) {
+            const heights = this._terrain.heights;
+            let minY = Infinity, maxY = -Infinity;
+            for (let i = 0; i < heights.length; i++) {
+                if (heights[i] < minY) minY = heights[i];
+                if (heights[i] > maxY) maxY = heights[i];
+            }
+            if (!isFinite(minY)) { minY = 0; maxY = 0; }
+            this._heightRange[0] = minY;
+            this._heightRange[1] = maxY;
+            this._heightRangeVersion = version;
+            this._heightRangeHeights = heights;
         }
-        if (!isFinite(minY)) { minY = 0; maxY = 0; }
         return {
-            min: vec3.fromValues(p[0] - half, p[1] + minY - 0.1, p[2] - half),
-            max: vec3.fromValues(p[0] + half, p[1] + maxY + 0.1, p[2] + half),
+            min: vec3.fromValues(p[0] - half, p[1] + this._heightRange[0] - 0.1, p[2] - half),
+            max: vec3.fromValues(p[0] + half, p[1] + this._heightRange[1] + 0.1, p[2] + half),
         };
     }
+    private readonly _heightRange: [number, number] = [0, 0];
+    private _heightRangeVersion = -1;
+    private _heightRangeHeights: Float32Array | null = null;
 
     /** The generated terrain chunks are children in the live tree but are rebuilt from the blob on parse. */
     protected _serializableChildren(): Node[] {

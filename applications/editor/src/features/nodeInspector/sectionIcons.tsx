@@ -22,6 +22,8 @@ export const SkyIcon = () => (<S><circle cx='7' cy='8' r='3' /><path d='M4 18h13
 export const CloudsIcon = () => (<S><path d='M6 16a4 4 0 0 1 .6-7.9A5 5 0 0 1 16 8a3.5 3.5 0 0 1-.5 8Z' /></S>);
 export const VolumetricFogIcon = () => (<S><path d='M3.5 3.5h17v17h-17Z' strokeDasharray='2.6 2.2' /><path d='M6 10.5c1.5-1.2 3-1.2 4.5 0s3 1.2 4.5 0 3-1.2 4.5 0M6 14.5c1.5-1.2 3-1.2 4.5 0s3 1.2 4.5 0 3-1.2 4.5 0' /></S>);
 export const ExposureVolumeIcon = () => (<S><path d='M3.5 3.5h17v17h-17Z' strokeDasharray='2.6 2.2' /><circle cx='12' cy='12' r='4.5' /><path d='M12 7.5a4.5 4.5 0 0 1 0 9Z' fill='currentColor' stroke='none' /></S>);
+/** GI volume: a dashed box holding a grid of probes. */
+export const GiVolumeIcon = () => (<S><path d='M3.5 3.5h17v17h-17Z' strokeDasharray='2.6 2.2' /><circle cx='8' cy='8' r='1.4' fill='currentColor' stroke='none' /><circle cx='16' cy='8' r='1.4' fill='currentColor' stroke='none' /><circle cx='8' cy='16' r='1.4' fill='currentColor' stroke='none' /><circle cx='16' cy='16' r='1.4' fill='currentColor' stroke='none' /><circle cx='12' cy='12' r='2.2' /></S>);
 export const ProbeIcon = () => (<S><circle cx='12' cy='12' r='4' /><circle cx='12' cy='12' r='9' strokeDasharray='2 3' /></S>);
 // A dashed projector box pressing a mark onto the ground: the decal volume, its direction and its print.
 export const DecalIcon = () => (<S><path d='M4 3.5h16v10H4Z' strokeDasharray='2.6 2.2' /><path d='M12 6v8.8M9.3 12.1 12 14.8l2.7-2.7' /><ellipse cx='12' cy='19' rx='8' ry='2.4' /></S>);

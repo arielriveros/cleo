@@ -69,6 +69,9 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             '_drawSky',               // the horizon aliases harder than anything else in a scene
             'foliagePass',
             '_drawOctahedralImpostors',   // the foliage pass's impostor bucket, inside it
+            // A GI Volume capture face's plants (FoliagePasses.drawCapture): drawn while `_view.capturing`,
+            // which the wrapper answers with the unjittered projection, as every capture draw.
+            'drawCapture',
             // Occlusion query boxes, tested against the jittered G-buffer depth they must agree with.
             'gpuOcclusionPass',
             // Its draws depth-test `less-equal` against the JITTERED depth buffer; unjittered here and
@@ -84,6 +87,8 @@ describe('the camera projection reaches every pass through one wrapper', () => {
 
             // --- After the resolve: the flag is already false, and these must stay put. ---
             '_drawSkeletonOverlay',
+            // The editor's GI probe spheres, in the overlay layer like the skeleton.
+            'drawProbeOverlay',
             '_drawTileBand',
             // A helper with a coplanar depth nudge reaches `_rasterProjection` through this thin wrapper
             // (ModelDraw.beginModel calls it only when the nudge is non-zero); every other overlay draw goes

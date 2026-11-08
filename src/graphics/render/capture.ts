@@ -1,13 +1,11 @@
-import { vec3 } from 'gl-matrix';
-import { isEditorOnlyNode } from '../../core/scene/editorNodes';
 import { LightProbeNode } from '../../core/scene/nodes/lightProbeNode';
 import { Scene } from '../../core/scene/scene';
 import { IDENTITY_LUT_SIZE } from '../colorGrading';
 import { Framebuffer } from '../framebuffer';
 import { device } from '../rhi/deviceHandle';
-import { Texture } from '../texture';
-import { ProbePreviewProgram, IrradianceProgram, PresentProgram } from './programs';
-import { SkyPasses } from './sky';
+import { ProbePreviewProgram, PresentProgram } from './programs';
+import { ProbeBaker } from './probeBaker';
+import type { SkyPasses } from './sky';
 import { displayExposure } from './frameView';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
@@ -21,6 +19,7 @@ import type { LightingPasses } from './lighting';
 import type { ForwardPass } from './forwardPass';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
+import type { RenderSubsystems } from './subsystems';
 
 /** What Capture reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface CaptureHost {
@@ -33,9 +32,9 @@ export interface CaptureHost {
 
 /**
  * Everything that renders somewhere other than the viewport: an offscreen screenshot or thumbnail
- * (the whole frame retargeted at a square, with a transparent background), a light probe's
- * six-face capture and its IBL bake, and the equirect preview of a baked probe. Split out of
- * Renderer, which keeps the public methods as delegates.
+ * (the whole frame retargeted at a square, with a transparent background), the light probes' bakes
+ * (`probes`, render/probeBaker.ts) and the equirect preview of a baked probe. Split out of Renderer,
+ * which keeps the public methods as delegates.
  */
 export class Capture {
     private readonly _shaderManager = ShaderManager.Instance;
@@ -52,7 +51,13 @@ export class Capture {
                 private readonly _lighting: LightingPasses,
                 private readonly _sky: SkyPasses,
                 private readonly _forward: ForwardPass,
-                private readonly _fullscreen: FullscreenPasses) {}
+                private readonly _fullscreen: FullscreenPasses,
+                sys: RenderSubsystems) {
+        this.probes = new ProbeBaker(_host, _view, _passes, _shadows, _lighting, _sky, _forward, _fullscreen, sys);
+    }
+
+    /** The light probes' time-sliced, relightable bakes and their reflection atlas. */
+    public readonly probes: ProbeBaker;
 
     // Offscreen thumbnail capture. While `presentTarget` is set the pipeline renders at the target's
     // size, skips every background draw and resolves into it, never touching the canvas.
@@ -142,167 +147,6 @@ export class Capture {
         // Synthesised, not resampled: probePreview.wgsl reads `uv.y` as a LATITUDE, and the screen
         // quad hands row 0 the same uv.y on both backends — so row 0 is the south pole either way.
         return Capture._encodePNG(pixels, w, h, true);
-    }
-
-    /** Convolve a source environment cubemap into diffuse-irradiance and prefiltered-specular cubemaps. */
-    public bakeIBL(sourceCube: Texture, sourceRes: number): { irradiance: Texture, prefiltered: Texture } {
-        // Diffuse irradiance (small, no mips).
-        const irradiance = new Texture({ target: 'cubemap', precision: 'high', mipMap: false });
-        irradiance.createCubemapTarget(SkyPasses.IRRADIANCE_SIZE, 1);
-        this._sky.convolveCubeFaces('irradiance', IrradianceProgram, sourceCube, irradiance, 0,
-                                SkyPasses.IRRADIANCE_SIZE);
-
-        // Prefiltered specular (mip level encodes roughness). The capture is linear HDR: no decode.
-        const prefiltered = new Texture({ target: 'cubemap', precision: 'high', mipMap: true });
-        prefiltered.createCubemapTarget(SkyPasses.PREFILTER_SIZE, SkyPasses.PREFILTER_MIPS);
-        this._sky.prefilterInto(sourceCube, sourceRes, prefiltered);
-
-        this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
-        return { irradiance, prefiltered };
-    }
-
-    /**
-     * Capture the full scene (skybox + opaque geometry) into a cubemap from a probe's position, then
-     * bake its irradiance + prefiltered specular maps. Guarded so probe capture never re-enters itself.
-     */
-    public captureProbe(scene: Scene, probe: LightProbeNode): void {
-        if (this._view.capturing) return;
-        this._view.capturing = true;
-
-        const res = probe.resolution;
-        const levels = Math.floor(Math.log2(res)) + 1;
-        const sourceCube = new Texture({ target: 'cubemap', precision: 'high', mipMap: true });
-        sourceCube.createCubemapTarget(res, levels);
-
-        // The key light's shadow, fit round THIS probe (ShadowPasses.beginProbeShadows): drawn before the camera
-        // and the cube-face state are swapped below, since its casters draw from the light. Without a
-        // shadow-casting sun the capture stays unshadowed.
-        try {
-            this._shadows.beginProbeShadows(scene, probe.worldPosition,
-                this._shadows.probeShadowRadius(probe.bounded, probe.size, probe.worldScale));
-        } catch (e) {
-            // Nothing else is swapped yet: put back what is, so the next capture is not refused forever.
-            this._shadows.endProbeShadows();
-            sourceCube.delete();
-            this._view.capturing = false;
-            throw e;
-        }
-
-        const cam = this._sky.captureCamera;
-        cam.fov = 90;
-        cam.resize(res, res); // aspect 1
-        const prevCamera = this._view.camera;
-        this._view.camera = cam;
-        // A probe is baked ABSOLUTE (pre-exposure 1): its cube is sampled by later frames at whatever
-        // pre-exposure they have, through the intensity uploads that carry it (LightingPasses).
-        const prevPreExposure = this._view.preExposure, prevDrawPreExposure = this._view.drawPreExposure;
-        this._view.preExposure = 1;
-        this._view.drawPreExposure = 1;
-        // Everything below swaps renderer state (the camera, the cube-face winding, suppressed shadows, a
-        // one-cluster light grid). A throw anywhere in the capture used to leave `_view.capturing` set, and
-        // `_sky.updateIBL` then never refreshed a probe again; the `finally` puts all of it back.
-        let baked = false;
-        try {
-            // Forward lighting for the capture, with no probe IBL bound, to avoid feedback. The frame's
-            // CASCADES are suppressed throughout: they are fit to the MAIN camera, so a probe elsewhere falls
-            // outside them. The sun's shadow comes from the probe's own map instead (begun above, read in
-            // the cascades' place). Point and spot shadows stay on — their maps are world-space — so a torch
-            // behind a wall does not light the bake through it. The BIND still happens — an incomplete
-            // texture is a draw-time error.
-            this._shadows.shadowsSuppressed = true;
-            // Every forward lighting uniform again, at pre-exposure 1: a capture runs at the START of a
-            // frame (Renderer: `updateIBL`), before this frame's own uploads, so the forward programs still
-            // hold LAST frame's — its ambient, sky light, emissive and environment scaled by its
-            // pre-exposure. A probe re-baked while the eye was night-adapted (k = 32) came out 32 times too
-            // bright and lit the next noon with reflections four stops over the sun. The frame's own
-            // `resetForwardLighting` puts the frame's values back.
-            this._lighting.resetForwardLighting(scene);
-            for (const light of scene.lights) this._lighting.setDirectionalOnForward(light);
-            this._lighting.bindShadowsToForwardShaders();
-            this._lighting.bindEnvToForwardShaders(scene);
-
-            // A DEGENERATE light grid for the capture: one cluster holding every light. The real grid
-            // describes the main camera's frustum, and these six faces look elsewhere from somewhere else,
-            // so its clusters would silently drop lights from the bake. Rebuilding a real grid per face
-            // would cost six assignments for a low-resolution bake nobody watches; one cluster costs a loop
-            // over the lights and needs no second path in any shader. Restored below.
-            this._lighting.lightGrid.buildSingle(this._lighting.punctualLightCount(scene));
-            this._lighting.packLightRecords(scene);
-            this._lighting.lightGrid.upload();
-            this._lighting.uploadLightGridToForwardShaders();
-
-            const probePos = probe.worldPosition;
-            const eye = vec3.create();
-            const clear = this._host.clearColor;
-            // Every draw below writes a CUBE FACE. See `_projection.clipProjection`: on WebGPU that needs the same
-            // Y inversion `SkyPasses._captureProj` carries for the sky and IBL bakes, and the reversed winding that
-            // comes with it. Restored in the `finally` at the end of the capture.
-            this._view.cubeFace = true;
-            for (let face = 0; face < 6; face++) {
-                const f = SkyPasses.CUBE_FACES[face];
-                const dir = vec3.fromValues(f.dir[0], f.dir[1], f.dir[2]);
-                const up = vec3.fromValues(f.up[0], f.up[1], f.up[2]);
-                cam.position = probePos;
-                vec3.add(eye, probePos, dir);
-                cam.eye = eye;
-                cam.up = up;
-
-                // One pass per face — a face is its own render target, and the cube framebuffer re-points
-                // its colour attachment at each. Colour AND depth are cleared; the depth attachment is the
-                // cube framebuffer's scratch one at this resolution.
-                const pass = this._passes.beginFullscreenPass(
-                    this._sky.cubeFBO.targetFor(sourceCube, face, 0, true, res),
-                    'probeCapture', true, [clear[0], clear[1], clear[2], clear[3]], true);
-
-                // Sky first, at depth 1.0 and without writing depth, then the opaque geometry over it.
-                this._sky.renderSky(pass, scene, cam);
-
-                this._forward.forwardDepthWrite = true;
-                // Every model's record in one upload; the faces after the first find them all there.
-                this._forward.prepareRows(scene.models);
-                for (const node of scene.models) {
-                    if (!node.visible) continue;
-                    // Exclude editor-only helpers (probe sphere, light icons, camera model, etc.) so they
-                    // don't pollute the captured environment. BOTH tests: the flag is the overlay layer's
-                    // definition of chrome, the name prefix is the wider "hidden from the tree" set this
-                    // pass has always excluded — including preview-scene props like `__editor__ground`,
-                    // which are real geometry and must keep being left out of a capture.
-                    if (isEditorOnlyNode(node)) continue;
-                    if (node.name.startsWith('__editor__') || node.name.startsWith('__debug__')) continue;
-                    if (node.model.material.config.transparent) continue;
-                    // Per-material opt-out: a mesh flagged non-probeable is excluded from probe captures
-                    // (===false so legacy/default materials with the flag unset still render).
-                    if (node.model.material.config.probeable === false) continue;
-                    this._forward.renderModel(node, pass);
-                }
-                this._passes.endFullscreenPass(pass);
-            }
-
-            // Cleared before `bakeIBL` below, which renders its own cube faces through `SkyPasses._captureProj` -
-            // that matrix already carries the inversion, and applying it twice would undo it.
-            this._view.cubeFace = false;
-            this._view.camera = prevCamera;
-            this._passes.generateMipsAfterRender(sourceCube);
-
-            const { irradiance, prefiltered } = this.bakeIBL(sourceCube, res);
-            probe.setBakedMaps(sourceCube, irradiance, prefiltered);
-            baked = true;
-        } finally {
-            this._view.cubeFace = false;
-            this._view.camera = prevCamera;
-            if (!baked) sourceCube.delete();
-            this._passes.setViewport(this._host.renderWidth, this._host.renderHeight);
-            this._shadows.shadowsSuppressed = false;
-            this._shadows.endProbeShadows();
-            // The forward programs still hold the capture's u_shadowsEnabled = false; restore them so the
-            // frame that follows this bake is not silently unshadowed. Same for the one-cluster grid — its
-            // uniforms would otherwise send every fragment of the next frame to cluster 0.
-            this._lighting.bindShadowsToForwardShaders();
-            this._lighting.lightGrid.restoreGrid();
-            this._view.preExposure = prevPreExposure;
-            this._view.drawPreExposure = prevDrawPreExposure;
-            this._view.capturing = false;
-        }
     }
 
     /**

@@ -20,6 +20,8 @@
 const PI: f32 = 3.14159265359;
 /** Shared with the decoder in renderer.ts. Comfortably above the sky's peak, including the sun disk. */
 const RGBM_RANGE: f32 = 64.0;
+/** Shared with shProject.ts RGBE_BIAS: the alpha byte stores the exponent plus this. */
+const RGBE_BIAS: f32 = 128.0;
 
 @group(0) @binding(0) var u_cube_texture: texture_cube<f32>;
 @group(0) @binding(1) var u_cube_sampler: sampler;
@@ -33,6 +35,19 @@ struct SkyProjectUniforms {
      * bits; scaling it up first keeps the moonlit ambient from quantizing into banded colour casts.
      */
     u_projectScale: f32,
+    /**
+     * 0 = RGBM over RGBM_RANGE (the sky). 1 = RGBE: rgb over a shared power-of-two exponent in alpha
+     * (biased by RGBE_BIAS), for a light probe's irradiance cube. A probe is baked absolute, from a sunlit
+     * street near 3e4 to a room at night near 1e-2, a span no fixed RGBM window holds; a shared exponent
+     * holds any of it at the same relative precision. Decoded by shProject.ts.
+     */
+    u_encoding: f32,
+    /**
+     * The source mip to read. The sky reads level 0. A light probe reads its capture at a level about 16
+     * texels a face: box-filtered mips keep the mean, so 64 x 32 point samples of it integrate the whole
+     * capture, where level 0 would alias a small bright source (a fire, the sun) in or out.
+     */
+    u_level: f32,
 };
 @group(1) @binding(0) var<uniform> u_project: SkyProjectUniforms;
 
@@ -47,9 +62,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Level 0 explicitly. This is a small target sampling a large cube, so the implicit derivative would
     // pick a high mip and hand back a pre-blurred sky — harmless for a preview, wrong for an integral
     // that is about to do its own averaging with proper solid-angle weights.
-    var radiance = textureSampleLevel(u_cube_texture, u_cube_sampler, dir, 0.0).rgb;
+    var radiance = textureSampleLevel(u_cube_texture, u_cube_sampler, dir, u_project.u_level).rgb;
     if (u_project.u_linearInput < 0.5) { radiance = toLinear(radiance); }
     radiance *= u_project.u_projectScale;
+
+    if (u_project.u_encoding > 0.5) {
+        let peak = max(max(radiance.r, radiance.g), radiance.b);
+        if (!(peak > 1e-30)) { return vec4<f32>(0.0); }
+        // The smallest exponent that keeps the peak at or under 1, so no channel clips; `log2` rounding a
+        // hair low is caught by the step after it.
+        var e = clamp(ceil(log2(peak)), -127.0, 127.0);
+        if (peak * exp2(-e) > 1.0) { e = e + 1.0; }
+        return vec4<f32>(radiance * exp2(-e), (e + RGBE_BIAS) / 255.0);
+    }
 
     let peak = max(max(radiance.r, radiance.g), radiance.b);
     // `ceil` to 1/255 rather than round: the multiplier must never quantize BELOW the value it is

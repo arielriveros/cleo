@@ -28,13 +28,17 @@ const PART_BYTES = 48 * 1024 * 1024
 /**
  * Convert `dir` (a format-1 example folder) to format 2 in place. A folder already in format 2 is
  * re-read and re-written, which is harmless. Returns the size of the largest file written, in bytes.
+ *
+ * `giBakes` ({ id, bytes }[]) replaces the GI Volume bakes the folder carries in its assets (a format-1
+ * folder carries none; a format-2 one keeps its own when this is not given).
  */
-export async function packFormat2(dir) {
+export async function packFormat2(dir, { giBakes } = {}) {
   const { readBundle, bundleEntries, assetPartPath, BUNDLE_PATHS } = bundleModules()
   const file = (p) => path.join(dir, ...p.split('/'))
 
   const { bundle } = await readBundle(folderSource(dir))
   bundle.manifest = { ...bundle.manifest, formatVersion: 2 }
+  if (giBakes) bundle.giBakes = giBakes.map(b => ({ id: b.id, bytes: toArrayBuffer(b.bytes) }))
   typedGeometry(bundle)
   const entries = await bundleEntries(bundle)
 
@@ -65,6 +69,49 @@ export async function packFormat2(dir) {
     largest = Math.max(largest, Buffer.byteLength(data))
   }
   return largest
+}
+
+/** `bytes` (a Buffer, a typed array or an ArrayBuffer) as an ArrayBuffer of exactly its bytes. */
+function toArrayBuffer(bytes) {
+  if (bytes instanceof ArrayBuffer) return bytes
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+}
+
+/**
+ * The GI Volume bakes a format-2 example folder carries ({ id, bytes: Buffer }[]), read straight out of
+ * its assets index and parts without inflating the rest of the bundle. None for a format-1 folder, or a
+ * folder with none. A build reads them before it rewrites the folder, and hands back the ones its scenes
+ * still name (`packFormat2`'s `giBakes`).
+ */
+export function readGiBakes(dir) {
+  const indexFile = path.join(dir, 'assets.json')
+  if (!fs.existsSync(indexFile)) return []
+  const index = JSON.parse(fs.readFileSync(indexFile, 'utf8'))
+  if (!Array.isArray(index.giBakes) || index.giBakes.length === 0) return []
+  const { assetPartPath } = bundleModules()
+  const sizes = Array.isArray(index.parts) ? index.parts : [fs.statSync(path.join(dir, assetPartPath(0))).size]
+  const fds = sizes.map((_, i) => fs.openSync(path.join(dir, ...assetPartPath(i).split('/')), 'r'))
+  try {
+    return index.giBakes.map(({ id, o, l }) => {
+      const out = Buffer.alloc(l)
+      // [o, o + l) of the parts laid end to end.
+      let at = 0, start = 0
+      for (let i = 0; i < sizes.length && at < l; i++) {
+        const end = start + sizes[i]
+        const from = Math.max(o + at, start)
+        if (from < end) {
+          const n = Math.min(end - from, l - at)
+          fs.readSync(fds[i], out, at, n, from - start)
+          at += n
+        }
+        start = end
+      }
+      if (at !== l) throw new Error(`GI bake ${id} runs past the end of the assets`)
+      return { id, bytes: out }
+    })
+  } finally {
+    for (const fd of fds) fs.closeSync(fd)
+  }
 }
 
 const FLOAT_ATTRS = ['positions', 'normals', 'tangents', 'bitangents', 'texCoords']

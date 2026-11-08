@@ -46,8 +46,11 @@ export default class ValleyDayNightNode extends Node {
   public nightSkyLight: number = 0.4
   /** How many times denser the scene's fog volumes are at night and at dawn than by day. */
   public fogNightScale: number = 3
-  /** Degrees the sun moves between light-probe captures. */
-  public probeDegrees: number = 12
+  /**
+   * Degrees the sun moves between light-probe RELIGHTS. A relight lights each probe's captured scene again
+   * (no geometry but the sun's shadow, spread over a few frames), so it can follow the sun closely.
+   */
+  public probeDegrees: number = 4
   /** Runtime: the hour now, 0-24. */
   public hour: number = 9.5
   /** Runtime: 0 by day, 1 at full night. */
@@ -148,11 +151,14 @@ export default class ValleyDayNightNode extends Node {
 
     if (this._skyLight) this._skyLight.intensity = this._skyLightIntensity * (1 + (this.nightSkyLight - 1) * this.nightFactor)
 
-    // Light probes, each time the sun has moved far enough (and right after a jump).
+    // Light probes relit each time the sun has moved far enough (and right after a jump): their captured
+    // scene lit again by the sun, sky and lights as they are now. A probe never captured is baked instead.
     if (force || !this._probeAt || Math.acos(Math.min(1, pos[0] * this._probeAt[0] + pos[1] * this._probeAt[1] + pos[2] * this._probeAt[2])) * 180 / Math.PI > this.probeDegrees) {
       this._probeAt = pos
       // A moment later: the sky re-bakes first, and the probes should see the new one.
-      this.after(force ? 1.1 : 0.4, () => { for (const probe of (this.scene as any)?.lightProbes ?? []) probe.bake?.() })
+      this.after(force ? 1.1 : 0.4, () => {
+        for (const probe of (this.scene as any)?.lightProbes ?? []) (probe.relight ?? probe.bake)?.call(probe)
+      })
     }
   }
 }

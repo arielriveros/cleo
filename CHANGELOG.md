@@ -16,6 +16,41 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **GI Volumes.** A new node, **GI Volume**, fills a box with irradiance probes that light what is inside
+  with the light bounced off the scene round it.
+  - *Relit, not rebaked.* Each probe's view of the static scene is captured once; the sun with its
+    shadow, the lights set to Bake, the sky, emissive surfaces and further bounces are put back on it as
+    the light changes, so a day and night cycle needs no new capture.
+  - *No light through walls.* Probes inside walls, rocks or the ground are found and switched off, and
+    each probe's view of the scene keeps it from lighting what is behind a wall.
+  - *Everywhere.* Deferred surfaces take it per pixel ahead of the light probes and the sky light;
+    forward materials, lit particles and lit sprites at their centre. On WebGL2 and WebGPU alike, at
+    every quality preset (half resolution on Medium and Low).
+  - *Saved with the project.* **Save bake** stores the capture, deflated, beside the scene; it loads in
+    the editor and in a published game without capturing again, and is captured afresh only when the
+    geometry round the volume has moved. Moving things (a script's windmill sails, physics props) are
+    left out of it. Trees and bushes painted on a landscape are in it, so a canopy shades what is under it.
+  - *Reflections that match.* Inside a volume, a light probe's reflection is scaled to the light the
+    volume puts on each surface, so a room the volume darkens stops mirroring the brighter light its probe
+    captured, and a floor with no probe no longer reflects the open sky.
+  - *Debug channels.* **GI** shows the volumes' light on a mid-grey surface, **GI Share** where they
+    light the frame.
+  - *Probes in the viewport.* A selected GI Volume shows its probes, each lit by the light it holds;
+    switched-off probes are red. The debug visibility menu's **GI probes** shows every volume's.
+  - *Cheaper on High.* The GI pass runs at half resolution on High as on Medium and Low, brought back up
+    along depth and normal edges (about a third of its cost), and not at all when no volume is in view.
+    Each probe's on/off state now rides in its light's alpha, so a lookup reads two textures a probe
+    instead of three (another tenth off the pass, and off the bounces of a relight).
+  - *Additive volumes.* A GI Volume's **Additive** puts its light on top of the light probes, the scene
+    ambient and the sky light instead of in their place, for a scene whose ambient is the dark's own faint
+    light rather than the open sky's that a room's walls shut out.
+  - *The Valley's dungeon.* Thirteen baked, additive volumes, one a room (3,787 probes): the torches' and
+    the moon's light bounced off the stone, warm round a fire, over the dungeon's dim ambient. In its place
+    the bounce alone, a fifth to a tenth of that ambient away from the fires, left every cell and corner
+    black, and the knight's armour with them. `tools/valley/bakeGI.cjs` bakes both scenes (`--scene`).
+    A bake whose scene takes longer than ten seconds to settle (WebGL2 compiling its programs on first
+    use) still loads within the minute after, the capture started in its place dropped.
+
 - **Lighting that holds together from noon to midnight.** Torches now light the night in the editor
   as they do in the game, and glare no longer floods the screen.
   - *Moonlight in lux.* The Sky Atmosphere's **Moonlight (lux)** replaces the 0-1 share of the sun,
@@ -100,9 +135,31 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     split sum that already holds one, so rough ground and cliffs seen at grazing angles reflected two to
     three times what they should.
 - **Light probes that see shade.** A probe capture draws the sun's shadow round the probe with a map of
-  its own, and the forward terrain is shadowed. Probes are captured one a frame, nearest first. The
-  lighting takes the smallest probe box the camera is in, and keeps the second slot for the scene's
-  unbounded probe as the fallback everywhere else.
+  its own, and the forward terrain is shadowed.
+- **A probe lights its volume wherever the camera is.** A probe's lighting is nine spherical
+  harmonics now, projected from its capture, and every lighting probe in view (up to 16) lights the
+  pixels inside its box, the smallest box first. A house looked into through its door is as dark as it is
+  from inside, so walking in changes nothing; it used to be lit like the street until the camera crossed
+  the threshold. Forward PBR, Blinn-Phong and cel objects take the same light at their centre, and lit
+  particles and lit sprites at theirs. Player contract 23.
+- **Reflections the same way.** Every probe's GGX-filtered capture is a layer of one octahedral reflection
+  atlas, and every reflecting probe in view gives the surfaces in its box their reflections per pixel, the
+  smallest box first, wherever the camera is: a polished floor reflects its room from the doorway as from
+  inside. **Box Projection** (per probe) puts a room's walls where they are in its floor. The deferred
+  pass samples one texture fewer.
+- **Relightable, time-sliced probe bakes.** A bake captures the probe's scene once as a G-buffer, a few
+  dozen objects a frame, each face culled to what it sees, and a **relight** lights that capture again
+  with no geometry drawn but the sun's shadow. One step a frame, one probe at a time, the old bake shown
+  until the new is complete. The Valley's time of day relights every 4 degrees of sun: a frame's probe work
+  went from 35-46 ms of CPU (a whole capture at once) to under 2 ms, and from about 10 ms of GPU to under 1:
+  a probe's lighting is projected from its capture, with no irradiance cube to convolve.
+- **Bake on lights, and out-of-date probes.** Point, spot and directional lights have **Bake**, on by
+  default: off, a light lights the scene live and no probe sees it. When a light set to bake is moved,
+  turned, recoloured or dimmed after the probes were baked, the probes it reaches say they are out of
+  date — on the light's and the probe's cards and as a warning badge in the Assets toolbar, with
+  **Re-bake**. Player contract 24.
+- **A faster prepare.** The landscape's bounds are cached against its heights, not scanned every frame
+  (5.6 ms of the Valley's prepare: it is 0.4 ms now). The Performance page splits prepare into its stages.
 - **Billboards that face the eye.** A cylindrical sprite turns about its own upright axis to face the
   camera's position, instead of lying parallel to the screen. Flames and smoke at the corners of a wide
   view no longer look squashed and leaning.

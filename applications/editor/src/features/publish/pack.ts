@@ -96,6 +96,8 @@ export interface PackManifest {
   textures: PackedTexture[];
   /** Absent on games published before audio existed, which read back as games with no sound. */
   sounds?: PackedSound[];
+  /** GI Volume bakes (`.cgib`), by bake id. Absent on older games and on games with none. */
+  giBakes?: { id: string; o: number; l: number }[];
 }
 
 export interface PackStats {
@@ -318,6 +320,16 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     sounds.push({ id: a.id, mime: a.mime || 'audio/mpeg', settings: a.settings, o: ref.o, l: ref.l });
   }
 
+  // --- GI Volume bakes: their .cgib bytes, aligned like every chunk (the player maps them in place) ---
+
+  const giBakes: { id: string; o: number; l: number }[] = [];
+  for (const b of (data?.giBakes ?? [])) {
+    if (!b?.bytes || b.bytes.length === 0) continue;
+    const bytes: Uint8Array = b.bytes instanceof Uint8Array ? b.bytes : new Uint8Array(b.bytes);
+    const ref = addChunk(bytes);
+    giBakes.push({ id: b.id, o: ref.o, l: ref.l });
+  }
+
   // --- Assemble ---------------------------------------------------------------------------------
 
   const manifest: PackManifest = {
@@ -333,6 +345,7 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     geometries,
     textures,
     sounds,
+    ...(giBakes.length ? { giBakes } : {}),
   };
 
   // Last line of defence before the manifest becomes text. Anything still holding a typed array —

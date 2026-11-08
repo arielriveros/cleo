@@ -3,8 +3,10 @@ import { useState, useEffect, useCallback } from 'react';
 import Collapsable from '@cleo/app-kit/ui/Collapsable';
 import { PropertyTable, PropertyRow, Select, NumberInput, Slider, Button, Toggle, SectionTitle } from '@cleo/app-kit/ui';
 import { ProbeIcon } from '../sectionIcons';
+import { probeBakeWarning, rebakeStale, useProbeBakeStatus } from '../../../utils/probeBake';
 
 const BOUNDS_HINT = 'Set all three sizes above 0 and the probe only lights meshes/pixels inside its box volume, which moves and rotates with the node; the IBL feathers out over the blend distance. Any size at 0 leaves the probe unbounded: it affects the whole scene (legacy behavior).';
+const BOX_PROJECTION_HINT = 'Parallax-correct the reflections against the box: a surface inside it reflects what the probe saw where the reflected ray leaves the box, so a room\'s walls land where they are on a polished floor. For rooms and corridors; leave it off for open ground, whose horizon is far away. Bounded probes only.';
 const AFFECTS_HINT = 'What the probe gives surfaces inside its volume. Lighting is the light it bounces onto them; Reflections is what they mirror. Turn Lighting off to keep the area lit by the sky light and ambient (or another probe) while still reflecting this probe\'s surroundings. No re-bake needed.';
 import { useEventBus } from '../../EventBusContext';
 import { useCleoEngine } from '../../EngineContext';
@@ -23,6 +25,7 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     blendDistance: props.node.blendDistance,
     affectsLighting: props.node.affectsLighting,
     affectsReflections: props.node.affectsReflections,
+    boxProjection: props.node.boxProjection,
   });
 
   useEffect(() => {
@@ -37,6 +40,7 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
       blendDistance: props.node.blendDistance,
       affectsLighting: props.node.affectsLighting,
       affectsReflections: props.node.affectsReflections,
+      boxProjection: props.node.boxProjection,
     });
   }, [props.node]);
 
@@ -49,6 +53,7 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     props.node.blendDistance = state.blendDistance;
     props.node.affectsLighting = state.affectsLighting;
     props.node.affectsReflections = state.affectsReflections;
+    props.node.boxProjection = state.boxProjection;
   }, [state, props.node]);
 
   const eventEmitter = useEventBus();
@@ -116,9 +121,18 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     requestAnimationFrame(tick);
   };
 
+  // Lights set to bake that changed since this probe captured them.
+  const probeBake = useProbeBakeStatus(props.node.scene);
+  const stale = probeBake.of(props.node);
+  const staleLine = probeBakeWarning(stale);
+
   return (
     <Collapsable title='Light Probe' icon={<ProbeIcon />} persistKey='lightProbe'>
       <div className='w-full p-2'>
+        {staleLine && <div className='flex items-center gap-2 mb-2'>
+          <span className='text-warning text-ui flex-1'>{staleLine}</span>
+          <Button size='sm' onClick={() => { if (stale) rebakeStale([stale]); eventEmitter.emit('SCENE_CHANGED'); }}>Re-bake</Button>
+        </div>}
         <PropertyTable columns={['45%', '55%']}>
           <PropertyRow label='Resolution'>
             <Select value={state.resolution} onChange={(e) => update({ resolution: parseInt(e.target.value) })}>
@@ -149,6 +163,9 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
               <Toggle label='Reflections' checked={state.affectsReflections}
                       onChange={(v) => update({ affectsReflections: v })} />
             </div>
+          </PropertyRow>
+          <PropertyRow label='Box Projection' hint={BOX_PROJECTION_HINT}>
+            <Toggle checked={state.boxProjection} onChange={(v) => update({ boxProjection: v })} />
           </PropertyRow>
           <PropertyRow label='Size X' hint={BOUNDS_HINT}>
             <NumberInput min={0} step={0.5} value={state.sizeX} onChange={(v) => update({ sizeX: Math.max(0, v) })} />

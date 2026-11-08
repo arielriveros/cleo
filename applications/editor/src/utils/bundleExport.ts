@@ -1,4 +1,4 @@
-import { Logger, TextureManager, AudioManager } from 'cleo'
+import { Logger, TextureManager, AudioManager, GiBakeRegistry } from 'cleo'
 import type { VfsIndex } from './vfs'
 import type { ProjectMeta } from './sceneStorage'
 import { loadSceneData } from './sceneStorage'
@@ -93,7 +93,13 @@ export async function exportBundle(opts: {
     bytes: a.bytes.slice().buffer as ArrayBuffer,
   }))
 
-  const bundle: BundleData = { manifest, scenes, libraries, vfs: exportedVfs, textures, audio }
+  // GI Volume bakes: a project carries every bake its open session holds (what the store preloaded and
+  // any saved since); an asset pack none, as it carries no scenes.
+  const giBakes = kind === 'project'
+    ? GiBakeRegistry.ids().map(id => ({ id, bytes: GiBakeRegistry.get(id)!.slice().buffer as ArrayBuffer }))
+    : []
+
+  const bundle: BundleData = { manifest, scenes, libraries, vfs: exportedVfs, textures, audio, giBakes }
   const zip = await exportBundleJob(bundle)
   const slug = (projectName || 'project').trim().replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || 'project'
   const filename = kind === 'project' ? `${slug}.cleoproj.zip` : 'assets.cleopack.zip'

@@ -119,6 +119,11 @@ starts at 1500 lm, brightened the same way.
   own, reaching as far as the light's range, a few at a time
   ([Spot shadows](rendering.md#spot-shadows), [Point shadows](rendering.md#point-shadows)); any
   beyond that cap go unshadowed.
+- **Baking** — **Bake**, on by default: the light is captured into the light probes (and, in time, into
+  baked lighting). Off, it still lights the scene live but no probe sees it — a flashlight, a muzzle flash,
+  a light that moves or switches with gameplay, whose light frozen into a probe would linger where it no
+  longer is. When a light with Bake on is moved, turned, recoloured, dimmed, resized or hidden after the
+  probes were baked, this card says so with **Re-bake probes**.
 - **Cone** — spot lights: **Inner Angle** and **Outer Angle**, half-angles in degrees. Full
   brightness inside the inner cone, nothing past the outer one. Narrowing the cone does not brighten
   the light.
@@ -135,17 +140,85 @@ without changing how the sky and ambient light it.
 **Cubemap Preview** — what the probe last captured, unwrapped into a 2 : 1 panorama. **Bake Probe**
 captures again.
 
-A capture draws the sun's shadow round the probe, with a shadow map of its own fit to the probe's box
-(300 m round an unbounded probe). A probe in a room, or under a cliff, sees shade where there is shade.
-Probes are captured one a frame, those never captured first and then the nearest, so a scene that opens
-with many probes, or re-captures them all as the sun moves, spreads the work over a few frames.
+**Box Projection** — parallax-correct the reflections against the box: a surface inside it reflects what
+the probe saw where its reflected ray leaves the box, so a room's walls land where they are on a polished
+or wet floor. For rooms and corridors; leave it off for open ground, whose horizon is far away. Bounded
+probes only.
 
-The lighting uses two probes at a time. The first is the probe whose box the camera is in (the smallest
-one, such as a room inside a village) or, outside every box, the nearest box. The second is the scene's
-unbounded probe, when it has one, as the fallback everywhere else.
+A bake captures the probe's scene once, as a G-buffer, a few dozen objects a frame, and then lights it:
+the sun's shadow from a map of the probe's own (a probe in a room, or under a cliff, sees shade where
+there is shade), the lights set to **Bake**, the sky. A **relight** lights that captured scene again
+without drawing it — what a time of day asks for as the sun moves, a few frames per probe and no frame
+over about 2 ms. One probe is worked on at a time, a step a frame, those never baked first and then the
+nearest, and a probe keeps lighting and reflecting with its previous bake until the new one is complete.
+
+When a light with Bake on changes after a probe was baked, the probe says it is **out of date**, with
+which light and what changed, and **Re-bake** relights it. The Assets toolbar counts the out-of-date
+probes in a warning badge; its list selects a probe and relights them all with **Re-bake all**. Only
+lights that reach the probe count, and only while editing.
+
+**Lighting** (Affects Lighting) reaches everything inside the probe's box, wherever the camera is: a room
+lit by its probe is as dark seen through its door as from inside, so walking in changes nothing. Where
+boxes overlap, the smallest one wins (a room inside a village), feathered into the next over the blend
+distance. Outside every lighting probe, the ambient and the sky light light the scene. It applies to
+every surface (meshes, the landscape, plants), to the forward materials (PBR, Blinn-Phong and cel, taken
+at each object's centre), and to lit particles and lit sprites. Custom materials and the volumetric fog
+keep the ambient and the sky light. Up to 16 lighting probes are used at a time, those in view. A probe's
+lighting reaches the scene a frame or two after it is captured, and the previous capture keeps lighting
+until then.
+
+**Reflections** (Affects Reflections) work the same way: every reflecting probe in view, up to 16, gives
+the surfaces inside its box their reflections, the smallest box first, wherever the camera is. A polished
+floor in a room reflects the room whether you look at it from the doorway or stand on it. Outside every
+probe, glossy surfaces reflect the sky. Forward materials and lit particles reflect the probe whose box
+holds them.
 
 A bounded probe's box shows as a wireframe while it is selected, with square handles on its six faces
 for sizing it in the viewport — see [Volume handles](scene-authoring.md#volume-handles).
+
+#### GI Volume
+
+A box filled with a grid of irradiance probes that light every surface inside it with the light bounced
+off the scene round them: a room lit through its door, the warm floor under a sunlit red wall, the
+ceiling over a bonfire. Each probe's view of the scene is captured once, from the static geometry, and
+relit whenever the light changes — the sun moving, a light set to **Bake** changed, the sky — so a time
+of day needs no new capture. Only a change to the geometry inside asks for one (**Capture again**).
+
+Inside the box the volume's light replaces the light probes' and the sky light's, wherever the camera is;
+where volumes overlap the smaller claims first (a room's inside the street's). A probe that ends up inside
+a wall, a rock or under the ground is switched off and the others light round it. Grow a room's box a
+little past its walls, so its edge falls outside.
+
+Selecting the volume shows its probes in the viewport, each a small sphere lit by the light it holds,
+from the direction each side of the sphere faces: a probe by a sunlit wall is bright on that side. A
+small red probe is inside geometry and switched off; a small grey one is not captured yet; a probe under
+the ground is not drawn. The debug visibility menu's **GI probes** shows every volume's probes at once.
+
+What a capture sees is the static geometry: models, the landscape, and the trees and bushes painted on it
+(each at its simplest level). Anything a script or a dynamic body moves is left out, and so is grass unless
+**Include grass** is on.
+
+| Field | Meaning |
+|---|---|
+| **Enabled** | Off leaves the volume in the scene without it lighting anything. |
+| **Size** | Full extents of the box in metres, before the node transform, which it follows, rotation included. The face handles in the viewport size it too. |
+| **Probes** | How many probes along each axis, corner to corner (at least 2). The spacing, shown below the fields, is what decides how fine the light is: about 1 m in a room, 4 to 8 m over a street. |
+| **Rays** | Rays per probe: 64, or 256 for small rooms and fine detail. |
+| **Ray reach** | How far, in metres, a probe sees; beyond that a ray sees the sky. |
+| **Capture resolution** | The size of each cube face a probe's capture draws. |
+| **Blend distance** | How far inside its faces the volume's light fades in, in metres. |
+| **Intensity** | Scales the volume's light. |
+| **Normal bias** | How far a lookup point is pushed off a surface along its normal, as a fraction of the smallest spacing: against a surface shadowing itself. |
+| **View bias** | How far a lookup point is pulled toward the camera, as the same fraction. |
+| **Multi-bounce** | The bounces after the first: the volume lighting what its probes see with its own light. |
+| **Additive** | Adds the volume's light to the fill that lights the box without it (the light probes, the scene ambient, the sky light) instead of replacing it. Off by default: a room is as dark as what its probes saw. On for a scene whose ambient is the dark's own faint light, a dungeon's, rather than the open sky's that walls shut out. |
+| **Include grass** | Grass in the capture: billboard grass, and painted plants under 0.8 m. Off by default: a meadow hides nothing a probe a metre up cares about, and it is most of the plants. |
+
+Below the fields, a line gives the capture's progress, then how many probes light and how many are inside
+geometry. **Save bake** saves the finished capture with the project: the scene opens with it instead of
+capturing again, and a published game carries it. A bake taken for another grid, or before the geometry
+round the volume changed, is refused and the volume captures again; save a new one. **Capture again**
+drops the saved bake and captures every probe again, after the static geometry inside the volume changed.
 
 #### Exposure Volume
 

@@ -11,6 +11,7 @@ import { TilemapNode } from '../src/core/scene/nodes/tilemapNode';
 import { LightNode } from '../src/core/scene/nodes/lightNode';
 import { LightProbeNode } from '../src/core/scene/nodes/lightProbeNode';
 import { ExposureVolumeNode } from '../src/core/scene/nodes/exposureVolumeNode';
+import { GIVolumeNode } from '../src/core/scene/nodes/giVolumeNode';
 import { OcclusionVolumeNode } from '../src/core/scene/nodes/occlusionVolumeNode';
 import { VolumetricCloudsNode } from '../src/core/scene/nodes/volumetricCloudsNode';
 import { SkyAtmosphereNode } from '../src/core/scene/nodes/skyAtmosphereNode';
@@ -61,6 +62,7 @@ const CASES: { label: string, make: () => Node, cls: Function }[] = [
     { label: 'light-spot', make: () => new LightNode('spot', new Spotlight({})), cls: LightNode },
     { label: 'lightProbe', make: () => new LightProbeNode('probe', { size: [4, 4, 4] }), cls: LightProbeNode },
     { label: 'exposureVolume', make: () => new ExposureVolumeNode('exposure', { size: [4, 4, 4], overrides: { exposureMinEV: 3 } }), cls: ExposureVolumeNode },
+    { label: 'giVolume', make: () => new GIVolumeNode('gi', { size: [6, 3, 6], probeCounts: [4, 2, 4], rays: 256, bakeId: 'b' }), cls: GIVolumeNode },
     { label: 'occlusionVolume', make: () => {
         const v = new OcclusionVolumeNode('room', [6, 3, 5]);
         v.setCull('lights', false);

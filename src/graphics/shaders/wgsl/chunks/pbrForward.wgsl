@@ -1,4 +1,5 @@
 #include "./alphaCutout.wgsl"
+#include "./shIrradiance.wgsl"
 #include "./translucencyTint.wgsl"
 // Forward PBR (metallic-roughness) shading, shared by the plain and skinned programs.
 //
@@ -167,6 +168,11 @@ struct ForwardLighting {
     u_view: mat4x4<f32>,        // only to get the view-space depth that selects a cascade
     u_dirLight: DirectionalLight,
     u_skyLight: SkyLight,
+    /**
+     * The light probes' irradiance at THIS draw (LightingPasses.probeLightingAt at the object's centre):
+     * radiance-form SH like `u_skyLight`'s, already x intensity x pre-exposure.
+     */
+    u_probeSH: array<vec4<f32>, 9>,
     u_viewPos: vec3<f32>,
     /** Scene-wide indirect fill, in internal radiance units. Replaces the per-light ambient. */
     u_sceneAmbient: vec3<f32>,
@@ -177,6 +183,8 @@ struct ForwardLighting {
     /** 0 lets a normal-mapped surface keep reflecting the sky along rays that point into itself. */
     u_horizonOcclusion: i32,
     u_isTransparent: i32,       // set by the renderer from material.config.transparent
+    /** How much of the scene ambient and sky light the probes replace at this draw: 0 none, 1 all. */
+    u_probeShare: f32,
     /**
      * The frame's pre-exposure (graphics/preExposure.ts). The lights, ambient and sky light arrive already
      * multiplied by it; the environment cube and the emissive are absolute, so this program scales them.
@@ -385,11 +393,18 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
     // What comes through the back: the surface's colour, blended toward its transmission tint.
     let surfaceAlbedo = transmissionAlbedo(albedo, u_material.translucencyTint.rgb, u_material.translucencyTint.a);
     let frontAlbedo = albedo;
+    // Where a light probe lights this object, its irradiance takes the probes' share of the fill, as the
+    // deferred pass blends them per pixel; `(1 - metallic)` on the probe term, as there.
+    let fallbackShare = 1.0 - u_lighting.u_probeShare;
     var ambientDiffuse = (u_lighting.u_sceneAmbient
-                          + skyIrradiance(u_lighting.u_skyLight, N)) * frontAlbedo;
+                          + skyIrradiance(u_lighting.u_skyLight, N)) * frontAlbedo * fallbackShare;
+    if (u_lighting.u_probeShare > 0.0) {
+        ambientDiffuse += shEval(u_lighting.u_probeSH, N) * (1.0 / PI) * (1.0 - metallic) * frontAlbedo;
+    }
     if (translucency > 0.0) {
-        ambientDiffuse += (u_lighting.u_sceneAmbient + skyIrradiance(u_lighting.u_skyLight, -N))
-                        * surfaceAlbedo * (translucency * TRANSMISSION_AMBIENT);
+        var back = (u_lighting.u_sceneAmbient + skyIrradiance(u_lighting.u_skyLight, -N)) * fallbackShare;
+        if (u_lighting.u_probeShare > 0.0) { back += shEval(u_lighting.u_probeSH, -N) * (1.0 / PI); }
+        ambientDiffuse += back * surfaceAlbedo * (translucency * TRANSMISSION_AMBIENT);
     }
     var ambientSpecular = vec3<f32>(0.0);
     if (u_lighting.u_useEnvMap != 0) {
