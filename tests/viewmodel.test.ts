@@ -113,9 +113,7 @@ describe('viewmodel projection', () => {
     });
 
     it('casts no shadow: the shadow pass gathers no viewmodel node', () => {
-        const src = readFileSync(join(__dirname, '..', 'src', 'graphics', 'render', 'shadows.ts'), 'utf8').replace(/
-/g, '
-');
+        const src = readFileSync(join(__dirname, '..', 'src', 'graphics', 'render', 'shadows.ts'), 'utf8').replace(/\r\n/g, '\n');
         expect(src).toMatch(/isEditorOnlyNode\(node\)\) continue;[\s\S]{0,400}if \(node\.viewmodel\) continue;/);
     });
 });
