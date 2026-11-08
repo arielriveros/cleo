@@ -53,9 +53,22 @@ function accessorValues(gltf, bin, index) {
  * joint's inverse bind carries them to where the node draws them at rest. Unskinned meshes are otherwise
  * skipped.
  */
-export function readSkinnedGltf({ gltf, bin }, { keepMesh = () => true, rigidMeshes = () => false } = {}) {
-  const gskin = gltf.skins?.[0]
-  if (!gskin) throw new Error('the document has no skin')
+export function readSkinnedGltf({ gltf, bin }, { keepMesh = () => true, rigidMeshes = () => false, mergeSkins = false } = {}) {
+  // `mergeSkins`: a document with several skins over one node graph (a first-person arms rig plus a weapon
+  // rig, both driven by the same clips) becomes ONE skin whose joints are every skin's in order. A mesh's
+  // JOINTS_0 is offset by the joints before its own skin, so the whole figure is one animated model.
+  if (!gltf.skins?.length) throw new Error('the document has no skin')
+  const skinList = mergeSkins ? gltf.skins : [gltf.skins[0]]
+  const jointBase = []
+  const gskin = { joints: [] }
+  const ibmParts = []
+  for (const sk of skinList) {
+    jointBase.push(gskin.joints.length)
+    gskin.joints.push(...sk.joints)
+    ibmParts.push(sk.inverseBindMatrices !== undefined ? accessorValues(gltf, bin, sk.inverseBindMatrices)
+      : sk.joints.flatMap(() => Array.from(mat4.create())))
+  }
+  gskin.name = skinList[0].name
 
   const nodeParents = [], nodeTransforms = [], nodeNames = []
   const parentOf = new Map()
@@ -65,7 +78,7 @@ export function readSkinnedGltf({ gltf, bin }, { keepMesh = () => true, rigidMes
     for (const c of n.children ?? []) nodeParents.push([c, i])
     nodeTransforms.push([i, Array.from(localMatrix(n))])
   })
-  const ibm = gskin.inverseBindMatrices !== undefined ? accessorValues(gltf, bin, gskin.inverseBindMatrices) : null
+  const ibm = ibmParts.flat()
   const joints = gskin.joints.map((nodeIndex, i) => ({
     nodeIndex,
     inverseBindMatrix: ibm ? ibm.slice(i * 16, i * 16 + 16) : Array.from(mat4.create()),
@@ -125,6 +138,8 @@ export function readSkinnedGltf({ gltf, bin }, { keepMesh = () => true, rigidMes
       } else {
         ji = accessorValues(gltf, bin, a.JOINTS_0)
         jw = accessorValues(gltf, bin, a.WEIGHTS_0)
+        const base = jointBase[n.skin ?? 0] ?? 0
+        if (base) for (let k = 0; k < ji.length; k++) ji[k] += base
       }
       const idx = prim.indices !== undefined ? accessorValues(gltf, bin, prim.indices) : [...Array(count).keys()]
       const key = prim.material ?? 0
