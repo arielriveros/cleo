@@ -137,6 +137,7 @@ with a real aperture, so the near field blurs harder than the far field.
 | `dofFocusRange` | `number` | `0.0` | Metres around the plane that stay perfectly sharp. |
 | `dofAperture` | `number` | `2.8` | f-number as written on a lens barrel. Smaller is wider and shallower. |
 | `dofMaxBlur` | `number` | `24.0` | Blur-radius clamp in pixels. This is a **cost** control: it caps the near field, while the sky blurs only as far as the lens blurs infinity. |
+| `dofNearCutoff` | `number` | `0` | Metres. Nothing nearer than this is blurred, so a [viewmodel](../scripting/node-api.md#viewmodel) stays sharp under a shallow focus. `0` = off. |
 
 ## Lens
 

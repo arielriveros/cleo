@@ -88,6 +88,8 @@ export interface RenderSettings {
     dofAperture: number;
     /** Clamp on the blur radius in pixels. A COST control: the gather samples for a fixed radius. */
     dofMaxBlur: number;
+    /** Metres. Nothing nearer than this is blurred, so a held weapon stays sharp under a shallow focus. 0 = off. */
+    dofNearCutoff: number;
     /**
      * Lens flare. 0 = off. Ghosts and a halo, generated from image brightness rather than anchored to
      * the sun — see lensFlare.wgsl for why that is the occlusion-correct choice, not just the cheap one.

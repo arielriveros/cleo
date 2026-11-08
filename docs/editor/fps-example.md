@@ -47,6 +47,13 @@ Shift, Crouch C, Jump Space, weapons 1 2 3 or Q / E. A gamepad is bound too (`to
 The arms and weapon are drawn with [`Node.viewmodel`](../scripting/node-api.md#viewmodel): a narrower lens than
 the world's, and pulled clear of walls by `FpsPlayer._viewmodelClearance`.
 
+## Aiming
+
+Holding Aim softens the background with depth of field (`FpsPlayer._depthOfField`): the focal plane follows the
+crosshair, and [`dofNearCutoff`](../reference/render-settings.md) keeps the weapon sharp. The effect is only
+enabled while aiming, so it costs nothing otherwise. Tune it on the player: `dofAperture`, `dofMaxBlur`,
+`dofNearCutoff`.
+
 ## Regenerating
 
 ```

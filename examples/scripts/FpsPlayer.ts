@@ -1,4 +1,4 @@
-import { CameraRigNode, Input, ModelNode, Node } from 'cleo'
+import { CameraRigNode, Game, Input, ModelNode, Node } from 'cleo'
 import type { Animator } from 'cleo'
 import FpsCombatantNode from '@/FPS/Scripts/FpsCombatant'
 import { WEAPONS, aimDirection, approach, clamp, combatantOf, findByVariable, findDescendant, lerp, manager, playCue } from '@/FPS/Scripts/FpsShared'
@@ -52,6 +52,14 @@ export default class FpsPlayerNode extends FpsCombatantNode {
 
   // ----- runtime, read by the HUD ----------------------------------------------------------------------
   public ads: number = 0
+  /** Depth of field while aiming: the aperture f-stop, the blur cap (px), the metres nearer than which nothing blurs, and the focus reach. */
+  public dofAperture: number = 2.0
+  public dofMaxBlur: number = 14
+  public dofNearCutoff: number = 1.2
+  public dofFarFocus: number = 60
+  private _dofOn: boolean = false
+  private _dofKey: string = ''
+  private _dofFocus: number = 30
   public reloading: boolean = false
   public sprinting: boolean = false
   public spreadNow: number = 0
@@ -164,6 +172,7 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     this._viewmodelPose(delta, moving)
     this._viewmodelClearance(delta)
     this._viewmodelClip(moving)
+    this._depthOfField(delta)
 
     // ----- spread (read by the HUD's crosshair)
     this.spreadNow = this._spread(moving)
@@ -356,6 +365,40 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     cam.viewmodelDepth = this._vmDepth
   }
 
+  /**
+   * Depth of field while aiming: the background softens and the focal plane sits where the crosshair points; the
+   * weapon (nearer than `dofNearCutoff`) stays sharp. The pass costs nothing when it is off, so it is only
+   * enabled while the aim amount is above zero, and settings are written only when they change.
+   */
+  private _depthOfField(delta: number): void {
+    const cam: any = this._rig?.camera
+    const physics: any = this.scene?.physics
+    const a = this.ads
+    if (a < 0.01) {
+      if (this._dofOn) { Game.updateRenderSettings({ dofEnabled: false }); this._dofOn = false }
+      return
+    }
+    let focus = this.dofFarFocus
+    if (cam && physics) {
+      const p = cam.worldPosition, t = cam.worldTransform
+      const len = Math.hypot(t[8], t[9], t[10]) || 1
+      const reach = this.dofFarFocus
+      const hit = physics.raycast([p[0], p[1], p[2]], [p[0] + t[8] / len * reach, p[1] + t[9] / len * reach, p[2] + t[10] / len * reach],
+        { reject: (owner: Node | null) => combatantOf(owner) === this })
+      if (hit) focus = Math.max(1.5, hit.distance)
+    }
+    this._dofFocus = approach(this._dofFocus, focus, 8, delta)
+    const q = Math.round(a * 20) / 20, f = Math.round(this._dofFocus * 10) / 10
+    const key = q + ':' + f
+    if (this._dofOn && key === this._dofKey) return
+    this._dofOn = true
+    this._dofKey = key
+    Game.updateRenderSettings({
+      dofEnabled: true, dofNearCutoff: this.dofNearCutoff, dofFocusDistance: f,
+      dofFocusRange: lerp(12, 2, q), dofAperture: lerp(16, this.dofAperture, q), dofMaxBlur: lerp(0.5, this.dofMaxBlur, q),
+    })
+  }
+
   private _flash(): void {
     const cam: any = this._rig?.camera
     const at = this.muzzleWorld([0, 0, 0])
@@ -423,6 +466,7 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     this.respawnIn = manager()?.playerRespawnSeconds ?? 0
     for (const s of this._slots) if (s.view) s.view.visible = false
     this.ads = 0
+    if (this._dofOn) { Game.updateRenderSettings({ dofEnabled: false }); this._dofOn = false }
     this.reloading = false
     this._reloadToken++
     playCue(this, 'Death')

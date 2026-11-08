@@ -31,13 +31,15 @@ struct DofUniforms {
     u_cocScale: f32,
     /** Clamp on the CoC in full-resolution pixels. A cost control: the gather samples for a radius. */
     u_maxCocPx: f32,
+    /** Metres. Anything nearer than this has no CoC at all (a viewmodel stays sharp). 0 = off. */
+    u_nearCutoff: f32,
     u_srcTexelSize: vec2<f32>,
 };
 @group(1) @binding(0) var<uniform> u_dof: DofUniforms;
 
 /** Signed CoC in pixels at a view depth, mirroring `circleOfConfusion` in dofMath.ts. */
 fn cocPixels(depth: f32) -> f32 {
-    if (depth <= 1e-4) { return 0.0; }
+    if (depth <= 1e-4 || depth < u_dof.u_nearCutoff) { return 0.0; }
 
     // The sharp band, measured from its EDGE rather than its centre — zeroing the CoC inside instead
     // leaves a visible step where a pixel just outside jumps to the CoC it would have had at the centre.
