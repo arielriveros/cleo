@@ -1,3 +1,4 @@
+import { SoundNode } from 'cleo'
 import type { Node } from 'cleo'
 
 /**
@@ -51,13 +52,13 @@ export const WEAPONS: Record<string, WeaponSpec> = {
   pistol: {
     key: 'pistol', name: 'Pistol', damage: 26, rpm: 380, auto: false, mag: 12, reserve: 84, pellets: 1,
     hipSpread: 1.6, adsSpread: 0.25, recoilPitch: 1.5, recoilYaw: 0.45, range: 140, falloffRange: 70, falloff: 0.55,
-    adsFov: 62, adsMove: 0.7, adsOffset: [0, 0, 0], reloadSeconds: 2.2, equipSeconds: 1.2, hasAimClips: true,
+    adsFov: 62, adsMove: 0.7, adsOffset: [0, 0.012, 0], reloadSeconds: 2.2, equipSeconds: 1.2, hasAimClips: true,
     botRange: 30, botBurst: [1, 3],
   },
   ak47: {
     key: 'ak47', name: 'AK-47', damage: 31, rpm: 600, auto: true, mag: 30, reserve: 150, pellets: 1,
     hipSpread: 2.6, adsSpread: 0.4, recoilPitch: 1.1, recoilYaw: 0.5, range: 220, falloffRange: 110, falloff: 0.6,
-    adsFov: 52, adsMove: 0.6, adsOffset: [0, 0, 0], reloadSeconds: 4.4, equipSeconds: 1.6, hasAimClips: true,
+    adsFov: 52, adsMove: 0.6, adsOffset: [0, 0.032, 0], reloadSeconds: 4.4, equipSeconds: 1.6, hasAimClips: true,
     botRange: 45, botBurst: [3, 7],
   },
   shotgun: {
@@ -72,7 +73,14 @@ export const WEAPON_ORDER = ['pistol', 'ak47', 'shotgun']
 
 // ----- the match --------------------------------------------------------------------------------------
 
-export type FpsMode = 'ffa' | 'team2v2' | 'oneVsThree'
+export type FpsGameType = 'oneVsThree' | 'team2v2' | 'ffa'
+
+/** The Game Manager's list of game types: what the dropdown offers, and what each needs of the scene. */
+export const GAME_TYPES: Record<FpsGameType, { label: string, minFighters: number }> = {
+  oneVsThree: { label: 'One against all', minFighters: 4 },
+  team2v2: { label: 'Team deathmatch', minFighters: 4 },
+  ffa: { label: 'Free for all', minFighters: 4 },
+}
 
 /**
  * The one global: the scene's Game Manager. Module state survives `Game.loadScene`, so the manager sets it in
@@ -202,10 +210,34 @@ export function findByVariable(root: Node, variable: string): Node[] {
   return out
 }
 
-/** Play a SoundNode cue by name from the nearest `Sounds` group at or above `from`. Silent when absent. */
+/** Spare emitters per cue, so a new shot rings over the tail of the last one instead of cutting it off. */
+const overlaps = new WeakMap<Node, SoundNode[]>()
+const MAX_OVERLAP = 6
+
+/**
+ * Play a SoundNode cue by name from the nearest `Sounds` group at or above `from`. Silent when absent. A
+ * SoundNode restarts when played while sounding, so a cue that is still playing is handed to a spare emitter
+ * (copied from it, made on first need) and the earlier shot rings out.
+ */
 export function playCue(from: Node, name: string): void {
   for (let n: Node | null = from; n; n = n.parent) {
     const group = n.getChildByName('Sounds')[0]
-    if (group) { (group.getChildByName(name)[0] as any)?.play?.(); return }
+    if (!group) continue
+    const cue = group.getChildByName(name)[0] as SoundNode | undefined
+    if (!cue?.play) return
+    if (!cue.isPlaying) { cue.play(); return }
+    let pool = overlaps.get(cue)
+    if (!pool) { pool = []; overlaps.set(cue, pool) }
+    let spare = pool.find(s => !s.isPlaying)
+    if (!spare && pool.length < MAX_OVERLAP) {
+      spare = new SoundNode(name + ' (overlap)', {
+        mode: cue.mode, sampleId: cue.sampleId ?? undefined, volume: cue.volume, loopMode: cue.loopMode, playOnStart: false,
+        distanceModel: cue.distanceModel, refDistance: cue.refDistance, maxDistance: cue.maxDistance, rolloffFactor: cue.rolloffFactor,
+      })
+      group.addChild(spare)
+      pool.push(spare)
+    }
+    if (spare) spare.play(); else cue.play()
+    return
   }
 }

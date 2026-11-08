@@ -96,7 +96,7 @@ export default class FpsHudNode extends UIRootNode {
       const standings = gm.standings()
       const mine = standings.find((s: any) => s.team === p.team)
       const best = standings.find((s: any) => s.team !== p.team)
-      this._text('Score', gm.mode === 'ffa'
+      this._text('Score', gm.gameType === 'ffa'
         ? `${mine?.score ?? 0}`  + (best ? `   best ${best.score}` : '')
         : `${gm.teamName(p.team)} ${mine?.score ?? 0}   -   ${best ? gm.teamName(best.team) : ''} ${best?.score ?? 0}`)
       this._text('Timer', gm.timeLimit > 0 ? this._clock(gm.timeLeft) : '')

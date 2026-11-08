@@ -14,12 +14,12 @@
     {
       "slug": "firing-line",
       "name": "Firing Line",
-      "description": "A first-person shooter: walk, sprint, crouch, aim down sights, hip and aimed fire, reloads and three weapons against bots that search, take cover, retreat when hurt and call for reinforcements. Free for all, 2v2 or one against three, all from the templates: put a Game Manager and some fighters in any scene and it plays.",
+      "description": "A first-person shooter: walk, sprint, crouch, aim down sights, hip and aimed fire, reloads and three weapons against bots that search, take cover, retreat when hurt and call for reinforcements. One scene, one Game Manager with a game-type list (one against all, team deathmatch, free for all): put the manager and some fighters in any scene and it plays.",
       "order": 1,
-      "bytes": 132561633,
-      "sceneCount": 4,
-      "textureCount": 52,
-      "createdAt": 1790000000000
+      "bytes": 249192529,
+      "sceneCount": 1,
+      "textureCount": 106,
+      "createdAt": 1794173811120
     }
   ]
 }

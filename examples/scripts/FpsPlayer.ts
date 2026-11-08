@@ -52,6 +52,8 @@ export default class FpsPlayerNode extends FpsCombatantNode {
 
   // ----- runtime, read by the HUD ----------------------------------------------------------------------
   public ads: number = 0
+  /** Metres the viewmodel group rises while aimed with an aim clip: the clip's sights sit below the crosshair, where the shots go. */
+  public aimClipRaise: number = 0.028
   /** Depth of field while aiming: the aperture f-stop, the blur cap (px), the metres nearer than which nothing blurs, and the focus reach. */
   public dofAperture: number = 2.0
   public dofMaxBlur: number = 14
@@ -447,7 +449,7 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     const g = this._viewmodels
     if (!g) return
     const spec = this.spec
-    const shift = spec.hasAimClips ? [0, 0, 0] : spec.adsOffset
+    const shift = spec.hasAimClips ? [0, this.aimClipRaise, 0] : spec.adsOffset
     const t = this.ads
     g.setPosition([this._vmBase[0] + shift[0] * t, this._vmBase[1] + shift[1] * t, this._vmBase[2] + shift[2] * t])
   }

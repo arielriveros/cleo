@@ -1,11 +1,11 @@
 import { Game, Logger, Node } from 'cleo'
-import { distance3, fps, findByVariable, planarDistance } from '@/FPS/Scripts/FpsShared'
-import type { FpsMode } from '@/FPS/Scripts/FpsShared'
+import type { TemplateName } from 'cleo'
+import { GAME_TYPES, distance3, fps, findByVariable, planarDistance } from '@/FPS/Scripts/FpsShared'
 
 /**
  * FPS example — the match. Put ONE of these (the "FPS Game Manager" template) at the scene root and the
  * scene plays: it finds whatever combatants the scene holds, the player and any bot template instances,
- * deals them into teams by `mode`, puts them on the spawn points, scores kills, respawns the dead and ends
+ * deals them into teams by `gameType`, puts them on the spawn points, scores kills, respawns the dead and ends
  * the match at the score or time limit. Nothing here knows the scene's geometry; it only reads three things
  * a scene may hold, all of them optional:
  *
@@ -13,7 +13,7 @@ import type { FpsMode } from '@/FPS/Scripts/FpsShared'
  *   Cover Point (template)   a spot a bot may duck behind. None: bots find cover themselves (see bestCover).
  *   a baked Nav Mesh         bots walk it; without one they walk straight lines.
  *
- * ## Modes
+ * ## Game types (the `gameType` dropdown; GAME_TYPES in FpsShared)
  *
  *   ffa          everyone for themselves
  *   team2v2      two teams, split down the middle (the player and the first bot against the rest)
@@ -31,7 +31,13 @@ import type { FpsMode } from '@/FPS/Scripts/FpsShared'
  * It lives on its own node at the scene root, because its timers die with it.
  */
 export default class FpsGameManagerNode extends Node {
-  public mode: FpsMode = 'ffa'
+  /** The game type: how the scene's fighters are dealt into teams (the dropdown lists GAME_TYPES in FpsShared). */
+  public gameType: 'oneVsThree' | 'team2v2' | 'ffa' = 'oneVsThree'
+  /**
+   * Bot templates the manager spawns when the scene holds fewer fighters than the game type needs, cycling
+   * through the list, at spawn points. A scene with enough bots of its own never uses it.
+   */
+  public botTemplates: TemplateName[] = ['FPS Bot', 'FPS Vanguard', 'FPS Raider', 'FPS Swat'] as TemplateName[]
   /** Team kills that win the match (0: none). */
   public scoreLimit: number = 20
   /** Minutes (0: none). */
@@ -106,6 +112,30 @@ export default class FpsGameManagerNode extends Node {
     this._sweep()
     this._spawns = findByVariable(this.scene!.root, 'fpsSpawn')
     this._covers = findByVariable(this.scene!.root, 'fpsCover')
+    // A scene with too few fighters for the game type gets bots from `botTemplates`; they register on their
+    // first tick, so the teams are dealt just after.
+    if (this._fillIn()) this.after(0.15, () => { this._sweep(); this._deal() })
+    else this._deal()
+  }
+
+  /** Spawn bots until the scene holds the game type's minimum. Returns whether any were spawned. */
+  private _fillIn(): boolean {
+    const need = (GAME_TYPES[this.gameType] ?? GAME_TYPES.oneVsThree).minFighters - this._fighters.size
+    const templates = (this.botTemplates ?? []).filter(Boolean)
+    if (need <= 0 || !templates.length) return false
+    const parent = this.scene!.root.getChildByName('Bots')[0] ?? undefined
+    let made = 0
+    for (let i = 0; i < need; i++) {
+      const spawn = this._spawns.length ? this._spawns[(this._usedSpawns.size + i) % this._spawns.length] : null
+      const at = spawn ? spawn.worldPosition : [i * 2, 0, 0]
+      const bot = (this.scene as any).instantiate(templates[i % templates.length], { position: [at[0], at[1] + 0.05, at[2]], ...(parent ? { parent } : {}) })
+      if (bot) made++
+      else Logger.warn(`FPS: no "${templates[i % templates.length]}" template to fill the match with`, 'Script')
+    }
+    return made > 0
+  }
+
+  private _deal(): void {
     this._assignTeams()
     if (this.spawnAtStart && this._spawns.length) {
       for (const f of this._ordered()) this._place(f, this._pickSpawn(f))
@@ -146,17 +176,17 @@ export default class FpsGameManagerNode extends Node {
     this._teamNames.clear()
     list.forEach((f, i) => {
       let team: string
-      if (this.mode === 'ffa') team = `solo-${i}`
-      else if (this.mode === 'oneVsThree') team = i === 0 ? 'blue' : 'red'
+      if (this.gameType === 'ffa') team = `solo-${i}`
+      else if (this.gameType === 'oneVsThree') team = i === 0 ? 'blue' : 'red'
       else team = i < Math.ceil(n / 2) ? 'blue' : 'red'
       f.team = team
       this._scores.set(team, 0)
-      this._teamNames.set(team, this.mode === 'ffa' ? (f.displayName || `Fighter ${i + 1}`) : team === 'blue' ? 'Blue' : 'Red')
+      this._teamNames.set(team, this.gameType === 'ffa' ? (f.displayName || `Fighter ${i + 1}`) : team === 'blue' ? 'Blue' : 'Red')
     })
   }
 
   private _joinLate(c: any): void {
-    if (this.mode === 'ffa') {
+    if (this.gameType === 'ffa') {
       const team = `solo-${this._scores.size}`
       c.team = team
       this._scores.set(team, 0)
@@ -165,7 +195,7 @@ export default class FpsGameManagerNode extends Node {
     }
     const counts = new Map<string, number>()
     for (const f of this._fighters) if (f !== c) counts.set(f.team, (counts.get(f.team) ?? 0) + 1)
-    if (this.mode === 'oneVsThree') c.team = 'red'
+    if (this.gameType === 'oneVsThree') c.team = 'red'
     else c.team = (counts.get('blue') ?? 0) <= (counts.get('red') ?? 0) ? 'blue' : 'red'
     if (!this._scores.has(c.team)) this._scores.set(c.team, 0)
   }
@@ -187,7 +217,7 @@ export default class FpsGameManagerNode extends Node {
   }
 
   private _modeName(): string {
-    return this.mode === 'ffa' ? 'Free for all' : this.mode === 'team2v2' ? 'Team deathmatch' : 'One against all'
+    return (GAME_TYPES[this.gameType] ?? GAME_TYPES.oneVsThree).label
   }
 
   private _leader(): string {
