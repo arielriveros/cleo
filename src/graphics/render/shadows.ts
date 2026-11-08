@@ -918,6 +918,10 @@ export class ShadowPasses {
             // A node added this frame has no mesh yet: shadows render BEFORE the geometry pass that calls
             // `initializeModel`, so its `Mesh` is still the empty one the constructor made.
             if (!node.visible || !node.initialized || isEditorOnlyNode(node)) continue;
+            // A viewmodel is drawn at its own depth under the player's eye: neither a shadow of its real place in the
+            // world nor part of the floor the shadow volume is fitted to. (A material's castShadow cannot be the switch:
+            // the ModelNode.visible setter rewrites it.)
+            if (node.viewmodel) continue;
             const s = node.getBoundingSphere();
             // Casting or not, anything visible receives: a ground plane that casts nothing still ends the
             // shadow volume of the cube floating over it. Not a model its occlusion volume hides from the

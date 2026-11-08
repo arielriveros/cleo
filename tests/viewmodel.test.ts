@@ -111,4 +111,11 @@ describe('viewmodel projection', () => {
         expect(src).toContain('viewmodelProjection');
         expect(typeof ViewProjection.prototype.viewmodelProjection).toBe('function');
     });
+
+    it('casts no shadow: the shadow pass gathers no viewmodel node', () => {
+        const src = readFileSync(join(__dirname, '..', 'src', 'graphics', 'render', 'shadows.ts'), 'utf8').replace(/
+/g, '
+');
+        expect(src).toMatch(/isEditorOnlyNode\(node\)\) continue;[\s\S]{0,400}if \(node\.viewmodel\) continue;/);
+    });
 });

@@ -95,6 +95,8 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     }
     this._viewmodels = this.getChildByName('Viewmodels')[0] ?? (this._rig?.camera ? findDescendant(this._rig.camera, 'Viewmodels') : null)
     const views = this._viewmodels ? findByVariable(this._viewmodels, 'fpsViewmodel') : []
+    // Set here as well as in the template: whatever rebuilt a node from the library must not lose them.
+    for (const v of views) { v.viewmodel = true; v.motionBlur = 'none' }
     this._slots = this.loadout.filter(k => WEAPONS[k]).map((key) => {
       const view = (views.find(v => v.getVariable('fpsViewmodel') === key) as ModelNode) ?? null
       return { key, ammo: WEAPONS[key].mag, reserve: WEAPONS[key].reserve, view, muzzle: view ? findDescendant(view, 'Muzzle') : null }
@@ -374,30 +376,27 @@ export default class FpsPlayerNode extends FpsCombatantNode {
   // The viewmodel
   // =================================================================================================
 
-  /** Play clip `name` on a viewmodel, returning its length in seconds (undefined: no such clip). */
-  private _playClip(name: string, loop: boolean, view: ModelNode | null, restart: boolean = false): number | undefined {
+  /**
+   * Fire the one-shot `name` on a viewmodel's animator (its Actions layer state of that name; a second fire while
+   * it plays restarts it) and return how long it lasts in seconds, or undefined when the weapon has no such clip.
+   * A weapon's graph is built by tools/fps/characters.mjs viewmodelMachine.
+   */
+  private _playClip(name: string, _loop: boolean, view: ModelNode | null, _restart: boolean = false): number | undefined {
     const anim: any = (view as any)?.animator
-    if (!anim) return undefined
-    const has = anim.hasAnimation ? anim.hasAnimation(name) : true
-    if (!has) return undefined
-    try {
-      anim.playAnimationByName(name, loop, !restart)
-    } catch { return undefined }
+    const info = anim?.triggerInfo?.(name)
+    if (!info) return undefined
+    anim.setTrigger(name)
     this._clip = name
-    const d = anim.duration
-    return typeof d === 'number' && d > 0 ? d : undefined
+    return info.seconds > 0 ? info.seconds : info.clipLength
   }
 
-  /** The loop for what the player is doing, unless a one-shot (equip, reload, a shot) is still playing. */
+  /** The base layer follows what the player is doing: Idle / IdleAim / Walk / WalkAim / Run, by three bools. */
   private _viewmodelClip(moving: boolean): void {
-    if (this._time < this._busyUntil || this._time < this._fireUntil || this.reloading) return
-    const spec = this.spec
-    const aimed = this.ads > 0.4 && spec.hasAimClips
-    let want: string
-    if (moving && this.sprinting) want = 'Run'
-    else if (moving) want = aimed ? 'WalkAim' : 'Walk'
-    else want = aimed ? 'IdleAim' : 'Idle'
-    if (want !== this._clip) this._playClip(want, true, this.slot.view)
+    const anim: any = (this.slot?.view as any)?.animator
+    if (!anim) return
+    anim.setBool('Moving', moving)
+    anim.setBool('Sprinting', moving && this.sprinting)
+    anim.setBool('Aim', this.ads > 0.4 && this.spec.hasAimClips)
   }
 
   /** A weapon with no aim clip comes to the centre by shifting the whole viewmodel group. */

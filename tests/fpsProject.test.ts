@@ -90,11 +90,22 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
         for (const d of deaths) expect(names.has(d.clipName), d.clipName).toBe(true);
     });
 
-    it('gives every viewmodel the clips FpsPlayer plays', () => {
+    it('gives every viewmodel a rig holding the clips FpsPlayer plays, and keeps its flags in the library', () => {
         const need = ['Idle', 'Walk', 'Run', 'Fire', 'Reload', 'Equip'];
+        const rigs = library('rigs'), anims = library('animations');
         for (const m of library('models').filter((x: any) => /Viewmodel/.test(x.name))) {
-            const clips = allNodes(m.nodeJson).find((n: any) => n.model?.animations)?.model.animations.map((a: any) => a.name) ?? [];
+            const rig = rigs.find((r: any) => r.id === m.rigId);
+            expect(rig, `${m.name} rig`).toBeTruthy();
+            const clips = rig.animationIds.map((id: any) => anims.find((a: any) => a.id === id).clips[0].name);
             for (const c of need) expect(clips, `${m.name} ${c}`).toContain(c);
+            // The clips are on the rig, not embedded: a rebuild from the library takes them from there.
+            const node = allNodes(m.nodeJson).find((n: any) => n.model?.skin);
+            expect(node.model.animations, m.name).toBeNull();
+            // And the flags survive a rebuild from the library.
+            expect(node.viewmodel, m.name).toBe(true);
+            expect(node.motionBlur, m.name).toBe('none');
+            // A model with no machine is held in its bind pose every frame: the weapon plays through one.
+            expect(node.stateMachine?.layers?.some((l: any) => l.name === 'Actions'), m.name).toBe(true);
         }
     });
 

@@ -49,7 +49,8 @@ const log = (what, detail) => console.log(`  ${what.padEnd(14)} ${detail}`)
 // =====================================================================================================
 
 // The AK first: its sleeves and gloves are the smallest of the three files', and the arms are shared.
-const viewmodels = Object.fromEntries(['ak47', 'pistol', 'shotgun'].map(k => [k, buildViewmodel(k)]))
+const VM_KEYS = ['ak47', 'pistol', 'shotgun']
+const viewmodels = Object.fromEntries(VM_KEYS.map(k => [k, buildViewmodel(k)]))
 for (const [k, v] of Object.entries(viewmodels)) log(`viewmodel ${k}`, v.report)
 const bots = Object.fromEntries(BOT_KEYS.map(k => [k, buildBot(k)]))
 for (const [k, b] of Object.entries(bots)) log(`bot ${k}`, b.report)
@@ -258,8 +259,6 @@ function playerNode() {
   camera.camera = { ...camera.camera, near: 0.05, viewmodelFov: 58 }
   camera.children = [group('viewmodels', 'Viewmodels', ['ak47', 'pistol', 'shotgun'].map(k => {
     const n = clone(viewmodels[k].nodeJson)
-    n.viewmodel = true
-    n.motionBlur = 'none'
     return n
   }))]
   rig.children = [camera]
@@ -309,10 +308,24 @@ const brainAsset = {
  * viewmodel's frame: barrel along +Z), posed in the right hand by `GRIP`. The grip numbers are by eye on
  * the Ranger: change them and every bot's weapon moves together, since the hand frames are shared.
  */
+/**
+ * A grip rotation: the engine's Rz.Ry.Rx Euler (degrees) with `roll` more degrees about the weapon's own barrel
+ * axis (its +Z), as Euler again. The barrel pointed along the bot's facing from the first guess; the sights then
+ * pointed DOWN (checked by the weapon's world up in game for every character and weapon), so the roll is 180.
+ */
+function gripRotation([x, y, z], roll) {
+  const d = Math.PI / 180
+  const m = mat4.create()
+  const part = (axis, deg) => mat4.fromRotation(mat4.create(), deg * d, axis)
+  mat4.multiply(m, part([0, 0, 1], z), part([0, 1, 0], y))
+  mat4.multiply(m, m, part([1, 0, 0], x))
+  mat4.multiply(m, m, part([0, 0, 1], roll))
+  return eulerFromQuat(mat4.getRotation(quat.create(), m))
+}
 const GRIP = {
-  ak47: { position: [0.02, 0.02, 0.04], rotation: [0, 90, 90], about: [0.1, -0.14, 0.2] },
-  pistol: { position: [0.02, 0.02, 0.04], rotation: [0, 90, 90], about: [0.1, -0.14, 0.2] },
-  shotgun: { position: [0.02, 0.02, 0.04], rotation: [0, 90, 90], about: [0.1, -0.14, 0.2] },
+  ak47: { position: [0.02, 0.02, 0.04], rotation: gripRotation([0, 90, 90], 180), about: [0.1, -0.14, 0.2] },
+  pistol: { position: [0.02, 0.02, 0.04], rotation: gripRotation([0, 90, 90], 180), about: [0.1, -0.14, 0.2] },
+  shotgun: { position: [0.02, 0.02, 0.04], rotation: gripRotation([0, 90, 90], 180), about: [0.1, -0.14, 0.2] },
 }
 
 function botWeapon(key) {
@@ -570,13 +583,19 @@ const FOLDERS = {
     'FPS Muzzle Flash': '/FPS/Effects', 'FPS Impact': '/FPS/Effects', 'FPS Blood Hit': '/FPS/Effects',
     'FPS Bullet Hole': '/FPS/Effects', 'FPS Tracer': '/FPS/Effects',
   },
-  rig: { 'Mixamo Rifle Pack': '/FPS/Bots/Rigs', Ranger: '/FPS/Bots/Rigs', Vanguard: '/FPS/Bots/Rigs', Raider: '/FPS/Bots/Rigs', Swat: '/FPS/Bots/Rigs' },
+  rig: {
+    'Mixamo Rifle Pack': '/FPS/Bots/Rigs', Ranger: '/FPS/Bots/Rigs', Vanguard: '/FPS/Bots/Rigs', Raider: '/FPS/Bots/Rigs', Swat: '/FPS/Bots/Rigs',
+    'AK-47 Viewmodel': '/FPS/Weapons/Rigs', 'Pistol Viewmodel': '/FPS/Weapons/Rigs', 'SAPS-12 Viewmodel': '/FPS/Weapons/Rigs',
+  },
   model: {
     Ranger: '/FPS/Bots/Models', Vanguard: '/FPS/Bots/Models', Raider: '/FPS/Bots/Models', Swat: '/FPS/Bots/Models',
     'AK-47 Viewmodel': '/FPS/Weapons/Models', 'Pistol Viewmodel': '/FPS/Weapons/Models', 'SAPS-12 Viewmodel': '/FPS/Weapons/Models',
   },
   animationField: { 'Fps Locomotion': '/FPS/Bots/Animations', 'Fps Crouch Locomotion': '/FPS/Bots/Animations' },
-  animController: { 'Fps Bot': '/FPS/Bots/Animations' },
+  animController: {
+    'Fps Bot': '/FPS/Bots/Animations',
+    'AK-47 Viewmodel': '/FPS/Weapons/Animations', 'Pistol Viewmodel': '/FPS/Weapons/Animations', 'SAPS-12 Viewmodel': '/FPS/Weapons/Animations',
+  },
   aiBrain: { 'Fps Bot Brain': '/FPS/Bots/AI' },
   particleSystem: { 'Muzzle Flash': '/FPS/Effects/Particles', 'Bullet Impact': '/FPS/Effects/Particles', 'Blood Hit': '/FPS/Effects/Particles' },
 }
@@ -607,7 +626,7 @@ function vfs(libraries, textureIds, scenes) {
   add('rig', libraries.rigs, i => FOLDERS.rig[i.name])
   add('animationField', libraries.animationFields, i => FOLDERS.animationField[i.name])
   add('animController', libraries.animControllers, i => FOLDERS.animController[i.name])
-  add('animation', libraries.animations, () => '/FPS/Bots/Animations/Clips')
+  add('animation', libraries.animations, a => (/^(AK-47|Pistol|SAPS-12) /.test(a.name) ? '/FPS/Weapons/Animations' : '/FPS/Bots/Animations/Clips'))
   add('particleSystem', libraries.particleSystems, i => FOLDERS.particleSystem[i.name])
   add('aiBrain', libraries.aiBrains, i => FOLDERS.aiBrain[i.name])
   // A texture's record and its source image share the texture's id; the editor re-derives both on import.
@@ -641,12 +660,11 @@ function main() {
 
   // Models: the four bots and the three viewmodels, as library assets.
   const models = [...BOT_KEYS.map(k => bots[k].model), ...['ak47', 'pistol', 'shotgun'].map(k => viewmodels[k].model)]
-  const rigs = [clipRig, ...BOT_KEYS.map(k => bots[k].rig)]
+  const rigs = [clipRig, ...BOT_KEYS.map(k => bots[k].rig), ...VM_KEYS.map(k => viewmodels[k].rig)]
   const libraries = {
-    models, materials, terrainMaterials: [], animationFields: fields, animControllers: [botController], boneMasks: [],
-    animations, rigs, tilesets: [], scripts: scripts.assets, templates, particleSystems, aiBrains: [brainAsset],
+    models, materials, terrainMaterials: [], animationFields: fields, animControllers: [botController, ...VM_KEYS.map(k => viewmodels[k].controller)], boneMasks: [],
+    animations: [...animations, ...VM_KEYS.flatMap(k => viewmodels[k].animations)], rigs, tilesets: [], scripts: scripts.assets, templates, particleSystems, aiBrains: [brainAsset],
   }
-  // Model assets carry no embedded clips (the viewmodels' are their own: they play by name).
   for (const [name, value] of Object.entries(libraries)) writeJson(path.join(OUT, 'libraries', `${name}.json`), value)
   writeJson(path.join(OUT, 'libraries', 'inputMap.json'), FPS_INPUT_MAP)
 
@@ -663,7 +681,7 @@ function main() {
   const refs = () => sceneRefs({
     materialIds: materials.map(m => m.id), modelIds: models.map(m => m.id), templateIds: templates.map(t => t.id),
     textureIds: textures.included, scriptIds: scripts.assets.map(s => s.id), animationFieldIds: fields.map(f => f.id),
-    animationIds: animations.map(a => a.id), particleSystemIds: particleSystems.map(p => p.id), aiBrainIds: [brainAsset.id],
+    animationIds: [...animations, ...VM_KEYS.flatMap(k => viewmodels[k].animations)].map(a => a.id), particleSystemIds: particleSystems.map(p => p.id), aiBrainIds: [brainAsset.id],
   })
   writeJson(path.join(OUT, 'manifest.json'), {
     formatVersion: 1, kind: 'project', createdAt: CREATED_AT, projectName: PROJECT_NAME,

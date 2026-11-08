@@ -252,6 +252,61 @@ export function eulerFromQuat(q) {
   return [deg(x), deg(y), deg(z)]
 }
 
+/**
+ * A viewmodel's animation graph. A model with no state machine is held in its bind pose every frame (the legacy
+ * key-mapping animator), so the weapon plays through a machine like the bots do:
+ *
+ *   base layer     Idle / IdleAim / Walk / WalkAim / Run, picked by the bools `Moving`, `Sprinting`, `Aim`
+ *                  (a weapon without aim clips holds its normal ones)
+ *   Actions layer  Equip, Fire, AimFire, Reload, ReloadStart, ReloadEnd, Pump: each entered directly by its
+ *                  trigger (the same name), played once over the base and faded out with the clip
+ *
+ * FpsPlayer sets the bools and fires the triggers, and asks `animator.triggerInfo(name).seconds` how long one lasts.
+ */
+export function viewmodelMachine(clipNames, lengthOf) {
+  const has = (n) => clipNames.includes(n)
+  const base = [
+    ['Idle', 'Idle', (m, a) => !m && !a],
+    ['IdleAim', has('IdleAim') ? 'IdleAim' : 'Idle', (m, a) => !m && a],
+    ['Walk', 'Walk', (m, a) => m && !a],
+    ['WalkAim', has('WalkAim') ? 'WalkAim' : 'Walk', (m, a) => m && a],
+    ['Run', 'Run', (m, a) => m && !a],
+  ]
+  // The five targets are disjoint over (moving, sprinting, aiming): Run is Moving + Sprinting, Walk is Moving
+  // without; the conditions are written out per target.
+  const conds = {
+    Idle: all(cond('Moving', 'false'), cond('Aim', 'false')),
+    IdleAim: all(cond('Moving', 'false'), cond('Aim', 'true')),
+    Walk: all(cond('Moving', 'true'), cond('Sprinting', 'false'), cond('Aim', 'false')),
+    WalkAim: all(cond('Moving', 'true'), cond('Aim', 'true')),
+    Run: all(cond('Moving', 'true'), cond('Sprinting', 'true'), cond('Aim', 'false')),
+  }
+  const states = base.map(([name, clip], i) => ({ name, clipName: clip, loop: true, speed: 1, isEntry: name === 'Idle', x: 40 + (i % 3) * 230, y: 40 + Math.floor(i / 3) * 140 }))
+  const transitions = []
+  for (const [from] of base) for (const [to] of base) {
+    if (from !== to) transitions.push(edge(from, to, conds[to], { minDwell: 0.04, blendTime: 0.16 }))
+  }
+  const machine = {
+    parameters: [
+      { name: 'Moving', type: 'bool', default: false }, { name: 'Sprinting', type: 'bool', default: false }, { name: 'Aim', type: 'bool', default: false },
+    ],
+    states, transitions, layers: [], events: [],
+  }
+  const shots = ['Equip', 'Fire', 'AimFire', 'Reload', 'ReloadStart', 'ReloadEnd', 'Pump'].filter(has)
+  const out = { in: 0.06, out: 0.18 }
+  const off = { name: 'Off', clipName: '', loop: true, speed: 1, isEntry: true, x: 40, y: 40 }
+  const exits = []
+  const actionStates = shots.map((name, i) => {
+    machine.parameters.push({ name, type: 'trigger', default: false })
+    // The blend-out ends with the clip: it starts `out` seconds before the last frame.
+    const length = lengthOf(name)
+    exits.push({ ...edge(name, 'Off'), hasExitTime: true, exitTime: Math.max(0, Math.round((1 - out.out / length) * 1000) / 1000), blendTime: out.out })
+    return { name, clipName: name, loop: false, speed: 1, isEntry: false, ikWeight: 0, triggers: [{ trigger: name, blendTime: out.in }], x: 300 + (i % 4) * 200, y: 40 + Math.floor(i / 4) * 120 }
+  })
+  machine.layers.push({ name: 'Actions', blend: 'override', weight: 1, states: [off, ...actionStates], transitions: exits })
+  return machine
+}
+
 export const VIEWMODELS = {
   ak47: { key: 'ak47', name: 'AK-47' },
   pistol: { key: 'pistol', name: 'Pistol' },
@@ -380,23 +435,36 @@ export function buildViewmodel(key) {
     geometry: geometryJson({ positions, normals, uvs, indices }),
     material: matJson(materialIds[0]), materials: materialIds.map(matJson), submeshes,
     skin: skinJson, jointIndices, jointWeights,
-    animations: data.clips,
+    // The clips live on the weapon's own rig (below), never embedded: the editor rebuilds a node from its library
+    // model and takes the clips from the rig the asset names, so embedded ones are lost.
+    animations: null,
   }
   const modelId = stableId(`model:vm:${key}`)
+  const clipLen = (n) => { const c = data.clips.find(x => x.name === n); return Math.max(...c.samplers.map(sm => sm.input[sm.input.length - 1])) }
+  const machine = viewmodelMachine(data.clips.map(c => c.name), clipLen)
+  const controller = { id: stableId(`controller:vm:${key}`), name: `${spec.name} Viewmodel`, rigId: stableId(`rig:vm:${key}`), machine }
   const materialVars = { __materialId: materialIds[0], __materialIds: JSON.stringify(materialIds) }
   const nodeJson = node(`${spec.name} View`, 'model', {
     id: stableId(`vm:${key}:node`),
     position: placePos.map(round3), rotation: eulerFromQuat(placeRot),
     variables: vars({ __modelId: modelId, ...materialVars, fpsViewmodel: key }),
-    model: modelJson, animationMappings: [], stateMachine: null, ragdoll: null,
+    model: modelJson, animationMappings: [], stateMachine: { ...machine, controllerId: controller.id }, ragdoll: null,
+    // On the node a rebuild from the library keeps (the asset's copy, below), not only on the template's placement.
+    viewmodel: true, motionBlur: 'none',
     // `muzzle` is in the camera's frame; the model node sits at `place`, so its child is that point taken back through it.
     children: [node('Muzzle', 'node', { id: stableId(`vm:${key}:muzzle`), position: Array.from(vec3.transformMat4(vec3.create(), muzzle, mat4.invert(mat4.create(), place)), round3) })],
   })
   const textureIds = [...new Set(materialIds.flatMap(id => Object.values(matJson(id).textures ?? {})).filter(Boolean))]
+  // ----- the weapon's own rig and its clips: one rig per weapon (their skeletons differ), a `.anim` asset per clip
+  const rig = { id: stableId(`rig:vm:${key}`), name: `${spec.name} Viewmodel`, skin: storeSkin(clone(skinJson)), sockets: [], animationIds: [] }
+  const animations = data.clips.map(clip => ({
+    id: stableId(`anim:vm:${key}:${clip.name}`), name: `${spec.name} ${clip.name}`, clips: [clip], rigId: rig.id, sourceSkin: rig.skin,
+  }))
+  rig.animationIds = animations.map(a => a.id)
   const model = {
     id: modelId, name: `${spec.name} Viewmodel`,
     nodeJson: node(spec.name, 'node', { id: stableId(`model:vm:${key}:root`), children: [clone(nodeJson)] }),
-    textureIds, materialIds: [...new Set(materialIds)], thumbnail: '', rigId: null,
+    textureIds, materialIds: [...new Set(materialIds)], thumbnail: '', rigId: rig.id,
   }
 
   // ----- the weapon alone, for a bot's hand: the weapon parts at rest, in the viewmodel's frame
@@ -406,7 +474,7 @@ export function buildViewmodel(key) {
     return { material: materialIds[i], positions: q.positions, normals: q.normals, uvs: p.uvs.slice(), indices: p.indices.slice() }
   })
   return {
-    model, nodeJson, muzzle, weaponParts, textureIds, materialIds,
+    model, rig, animations, controller, nodeJson, muzzle, weaponParts, textureIds, materialIds,
     report: `${positions.length / 3} vertices, ${indices.length / 3} triangles, ${skin.joints.length} joints, ${data.clips.length} clips, muzzle ${muzzle}`,
   }
 }
