@@ -142,7 +142,7 @@ function fxRoot(key, name, lifetime, children, scriptVars = {}) {
 
 const flashTemplate = () => fxRoot('flash', 'FPS Muzzle Flash', 0.7, [
   particles('flash:ps', 'Flash', FX.flash, { rotation: [90, 0, 0] }),
-  pointLight('flash:light', 'Light', [1, 0.72, 0.4], 9000, 9, [0, 0, 0.15]),
+  pointLight('flash:light', 'Light', [1, 0.72, 0.4], 9000, 9, [0, 0, 0.15], { bake: false }),
 ], { lightFalloff: 4 })
 const impactTemplate = () => fxRoot('impact', 'FPS Impact', 1.6, [particles('impact:ps', 'Impact', FX.impact)])
 const bloodTemplate = () => fxRoot('blood', 'FPS Blood Hit', 1.2, [particles('blood:ps', 'Blood', FX.blood)])
@@ -444,7 +444,7 @@ function environment({ rain = false } = {}) {
   const sky = sourceNode('sky atmosphere')
   sky.id = stableId('sky')
   sky.atmosphere = {
-    ...sky.atmosphere, ...PRESETS.sky, physicalUnits: true, godRaysEnabled: true, godRayMaxDistance: 140, godRayDensity: 0.2,
+    ...sky.atmosphere, ...PRESETS.sky, physicalUnits: true, godRaysEnabled: true, godRayMaxDistance: 80, godRayDensity: 0.2,
     fogEnabled: true, fogDensity: 0.00035, fogStart: 60, fogMaxOpacity: 0.35,
   }
   const clouds = sourceNode('volumetric clouds')
@@ -458,19 +458,16 @@ function environment({ rain = false } = {}) {
   })
   const fog = node('Ground Fog', 'volumetricFog', {
     id: stableId('fog'), position: [0, 3, 0],
-    volumetricFog: { size: [110, 8, 110], blendDistance: 6, priority: 0, enabled: true, ...PRESETS.groundFog, density: 0.004 },
-  })
-  const dust = node('Dust', 'volumetricFog', {
-    id: stableId('dust'), position: [0, 5, 0],
-    volumetricFog: { size: [60, 10, 60], blendDistance: 8, priority: 1, enabled: true, ...PRESETS.dust, density: 0.002 },
+    volumetricFog: { size: [110, 10, 110], blendDistance: 6, priority: 0, enabled: true, ...PRESETS.groundFog, density: 0.005 },
   })
   const probe = sourceNode('light probe')
   probe.id = stableId('probe')
   probe.position = [0, 4, 0]
   probe.size = [110, 20, 110]
   probe.blendDistance = 30
-  probe.mode = 'realtime'
-  return [sun, sky, skyLight, clouds, wind, weather, fog, dust, probe]
+  // Baked once at load: a realtime probe re-captures and relights its cube every second, a periodic GPU hitch.
+  probe.mode = 'baked'
+  return [sun, sky, skyLight, clouds, wind, weather, fog, probe]
 }
 
 function floodLights(points) {
@@ -535,7 +532,8 @@ function arenaScene({ key, name, mode, scoreLimit = 20, botList, minimal = false
   Object.assign(config.render, {
     quality: 'high', motionBlurEnabled: true, motionBlurIntensity: 0.6,
     ...PRESETS.exposure, exposureCompensation: 0.65, ...PRESETS.look, ...PRESETS.dof, dofEnabled: false,
-    toneMapper: 'agxPunchy', shadowMapResolution: 4096, shadowCascades: 4, shadowDistance: 120,
+    toneMapper: 'agxPunchy', shadowMapResolution: 2048, shadowCascades: 3, shadowDistance: 80,
+    volumetricFogTileSize: 20, volumetricFogLocalShadows: false, volumetricFogLocalLights: false,
     clearColor: [0.5, 0.6, 0.72, 1],
   })
   config.graphics.clearColor = [0.5, 0.6, 0.72, 1]

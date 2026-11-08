@@ -54,6 +54,14 @@ crosshair, and [`dofNearCutoff`](../reference/render-settings.md) keeps the weap
 enabled while aiming, so it costs nothing otherwise. Tune it on the player: `dofAperture`, `dofMaxBlur`,
 `dofNearCutoff`.
 
+## Performance notes
+
+The example's look is tuned to stay cheap in the lighting pass: sun shadows at 2048 x 3 cascades out to 80 m, one
+ground-fog volume (no local-light shadows in the fog, tile size 20), a light probe baked once at load rather than
+realtime (a realtime probe recaptures its cube every second), and at most three muzzle-flash lights alive at once
+(`FpsFx.ts`; the rest of a flash is particles). Measured headless with the GPU profiler, during a firefight:
+`lighting` averaged about 0.7 ms with a 3 ms worst frame (before: 1.2-1.5 ms average, 3 ms worst).
+
 ## Regenerating
 
 ```
