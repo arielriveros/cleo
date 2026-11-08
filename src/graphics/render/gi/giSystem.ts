@@ -83,6 +83,13 @@ const GI_SCALE_DRIFT = 4;
  */
 const GI_BAKE_SETTLE_MS = 10000;
 
+/**
+ * How long after that a volume capturing in its bake's place keeps checking it: a scene that took longer
+ * to settle (WebGL2 compiling its programs on first use stalls the frames the models stream in on) still
+ * loads its bake, the capture so far dropped.
+ */
+const GI_BAKE_LATE_MS = 60000;
+
 /** Destination x source in colour; the destination's alpha kept (giRescale.wgsl). */
 const MULTIPLY_BLEND: BlendState = {
     color: { srcFactor: 'dst', dstFactor: 'zero', operation: 'add' },
@@ -135,7 +142,7 @@ interface VolumeGpu {
     /** An inflated bake to apply at the next update (uploads belong inside a frame). */
     pendingBake: GiBake | null;
     /** A saved bake whose signature has not matched the scene yet (see `_recheckBakes`). */
-    bakeCheck: { bytes: Uint8Array; signature: [number, number]; packed: boolean; until: number; next: number } | null;
+    bakeCheck: { bytes: Uint8Array; signature: [number, number]; packed: boolean; until: number; next: number; late: boolean } | null;
 }
 
 interface CaptureBatch {
@@ -490,27 +497,37 @@ export class GiSystem {
             // frames, and the scene round the volume only matches its bake once they have. The volume waits
             // (neither captures nor relights) and is checked again until GI_BAKE_SETTLE_MS have passed.
             v.loading = true;
-            v.bakeCheck = { bytes, signature: bake.signature, packed: bake.packed, until: performance.now() + GI_BAKE_SETTLE_MS, next: 0 };
+            v.bakeCheck = { bytes, signature: bake.signature, packed: bake.packed, until: performance.now() + GI_BAKE_SETTLE_MS, next: 0, late: false };
             return true;
         }
         this._acceptBake(v, bytes, bake.packed);
         return true;
     }
 
-    /** A bake whose signature did not match yet, checked again every half second until it does or time runs out. */
+    /**
+     * A bake whose signature did not match yet, checked again every half second until it does or the scene
+     * has had GI_BAKE_SETTLE_MS to settle; then the volume captures, and is checked every second for
+     * GI_BAKE_LATE_MS more, a late match dropping the capture for the bake.
+     */
     private _recheckBakes(scene: Scene): void {
         const now = performance.now();
         for (const v of this._volumes.values()) {
             const check = v.bakeCheck;
             if (!check || now < check.next) continue;
-            check.next = now + 500;
+            check.next = now + (check.late ? 1000 : 500);
             if (sameGiSignature(check.signature, this._signature(scene, v))) {
                 v.bakeCheck = null;
                 v.loading = false;
+                if (check.late) {
+                    if (this._batch?.volume === v) this._batch = null;
+                    Logger.info(`The geometry round ${v.node.name} settled and fits its GI bake after all; loading it.`, 'Renderer');
+                }
                 this._acceptBake(v, check.bytes, check.packed);
             } else if (now >= check.until) {
-                v.bakeCheck = null;
                 v.loading = false;
+                if (check.late) { v.bakeCheck = null; continue; }
+                check.late = true;
+                check.until = now + GI_BAKE_LATE_MS;
                 Logger.warn(`The geometry round ${v.node.name} changed since its GI bake; capturing again.`, 'Renderer');
                 this.staleBakes.add(v.node.id);
             }
@@ -611,7 +628,7 @@ export class GiSystem {
         const ambient = new Float32Array(probes * GI_AMBIENT_CUBE_FLOATS);
         const cpu: GiVolumeCpu = {
             counts, worldToGrid, weightAt: (p) => node.weightAt(p as vec3), get intensity() { return node.intensity; },
-            states, ambient,
+            get additive() { return node.additive; }, states, ambient,
         };
         return {
             node, key, counts, rays, side, probes, base: 0, hit, radiance,
@@ -1241,6 +1258,7 @@ export class GiSystem {
             const spacing = v.node.minSpacing;
             bias[i * 4] = v.node.normalBias * spacing; bias[i * 4 + 1] = v.node.viewBias * spacing;
             bias[i * 4 + 2] = v.node.maxRayDistance;
+            bias[i * 4 + 3] = v.node.additive ? 1 : 0;
         }
         const layout = this._layout!;
         this._shaderManager.setUniform('u_giWorldToGrid', w2g);

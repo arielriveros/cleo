@@ -15,7 +15,7 @@ function cpuVolume(node: GIVolumeNode, cubeOf: (p: number) => number[]): GiVolum
     for (let p = 0; p < n; p++) ambient.set(cubeOf(p), p * GI_AMBIENT_CUBE_FLOATS);
     return {
         counts: node.probeCounts, worldToGrid: node.worldToGrid(mat4.create()),
-        weightAt: (q) => node.weightAt(q as vec3), intensity: node.intensity,
+        weightAt: (q) => node.weightAt(q as vec3), intensity: node.intensity, additive: node.additive,
         states: new Uint8Array(n).fill(GI_PROBE_ACTIVE), ambient,
     };
 }
@@ -137,6 +137,20 @@ describe('giLightingAt', () => {
         const flat = [0, 0, 0];
         giAmbientAt(cpu, [0, 0, 0], flat);
         expect(flat[0]).toBeCloseTo(1, 5);
+    });
+
+    it('gives an additive volume its light without taking the fill from under it', () => {
+        const outer = cpuVolume(new GIVolumeNode('v', { size: [2, 2, 2], probeCounts: [2, 2, 2], additive: true }), () => uniform(1));
+        const flat = [0, 0, 0];
+        expect(giAmbientAt([outer], [0, 0, 0], flat)).toBe(0);
+        expect(flat).toEqual([1, 1, 1]);
+        const sh = new Float32Array(GI_SH_FLOATS);
+        expect(giLightingAt([outer], [0, 0, 0], sh)).toBe(0);
+        expect(giShEval(sh, [0, 1, 0], 0) / Math.PI).toBeCloseTo(1, 4);
+        // A replacing volume nested in it claims first, and replaces its share.
+        const inner = cpuVolume(new GIVolumeNode('in', { size: [1, 1, 1], probeCounts: [2, 2, 2], blendDistance: 0 }), () => uniform(3));
+        expect(giAmbientAt([inner, outer], [0, 0, 0], flat)).toBeCloseTo(1, 6);
+        expect(flat[0]).toBeCloseTo(3, 5);
     });
 });
 

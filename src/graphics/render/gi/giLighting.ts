@@ -38,6 +38,8 @@ export interface GiVolumeCpu {
     weightAt(p: ArrayLike<number>): number;
     /** The volume's intensity. */
     intensity: number;
+    /** Its light added to the fill rather than replacing it (GIVolumeNode.additive): its claim is not returned. */
+    additive: boolean;
     /** Per probe, its state (giClassify.ts). */
     states: ArrayLike<number>;
     /** Per probe, its ambient cube: {@link GI_AMBIENT_CUBE_FLOATS} floats, E/pi. */
@@ -142,13 +144,14 @@ export function giShEval(sh: ArrayLike<number>, n: ArrayLike<number>, channel: n
 
 /**
  * The volumes' light at one point as radiance-form SH: `outSH` receives the blend (x each volume's
- * intensity x `scale`), the return is the share the volumes took — 0 outside them all, 1 well inside a
- * captured one. `volumes` is in claim order ({@link orderGiVolumes}).
+ * intensity x `scale`), the return is the share of the fill they replace — 0 outside them all, 1 well
+ * inside a captured one, an additive volume's claim left out (its light goes on top of the fill).
+ * `volumes` is in claim order ({@link orderGiVolumes}).
  */
 export function giLightingAt(volumes: readonly GiVolumeCpu[], p: ArrayLike<number>, outSH: Float32Array,
                              scale: number = 1): number {
     outSH.fill(0);
-    let remaining = 1;
+    let remaining = 1, replaced = 0;
     for (const volume of volumes) {
         const w = volume.weightAt(p);
         if (w <= 0) continue;
@@ -156,21 +159,23 @@ export function giLightingAt(volumes: readonly GiVolumeCpu[], p: ArrayLike<numbe
         const claim = w * coverage * remaining;
         if (claim <= 0) continue;
         addAmbientCubeSH(_cube, claim * volume.intensity * scale, outSH);
+        if (!volume.additive) replaced += claim;
         remaining -= claim;
         if (remaining <= CLAIMED) break;
     }
-    return 1 - remaining;
+    return replaced;
 }
 
 /**
  * The volumes' light at one point as one flat colour — the mean irradiance (E/pi) over every direction,
  * which is the mean of the cube's six sides — for what is lit by a single ambient value (lit particles,
- * lit sprites). `out` receives the blend x intensity x `scale`; the return is the share the volumes took.
+ * lit sprites). `out` receives the blend x intensity x `scale`; the return is the share of the fill they
+ * replace (as {@link giLightingAt}).
  */
 export function giAmbientAt(volumes: readonly GiVolumeCpu[], p: ArrayLike<number>, out: number[] | Float32Array,
                             scale: number = 1): number {
     out[0] = 0; out[1] = 0; out[2] = 0;
-    let remaining = 1;
+    let remaining = 1, replaced = 0;
     for (const volume of volumes) {
         const w = volume.weightAt(p);
         if (w <= 0) continue;
@@ -181,10 +186,11 @@ export function giAmbientAt(volumes: readonly GiVolumeCpu[], p: ArrayLike<number
         for (let c = 0; c < 3; c++) {
             out[c] += (_cube[c] + _cube[3 + c] + _cube[6 + c] + _cube[9 + c] + _cube[12 + c] + _cube[15 + c]) * k;
         }
+        if (!volume.additive) replaced += claim;
         remaining -= claim;
         if (remaining <= CLAIMED) break;
     }
-    return 1 - remaining;
+    return replaced;
 }
 
 /** What {@link orderGiVolumes} needs of a volume. */

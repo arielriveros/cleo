@@ -2156,15 +2156,18 @@ function exposureVolumes() {
 /** Every bake id the scene's GI volumes name: the bakes the build carries over. */
 const GI_BAKE_IDS = new Set()
 
-/** One GI Volume node. `spacing` is the probe spacing aimed at along each local axis. */
-function giVolume(key, name, center, size, spacing, { yawDeg = 0, rays = 64, maxRayDistance = 60, blendDistance = 2 } = {}) {
+/**
+ * One GI Volume node. `spacing` is the probe spacing aimed at along each local axis. `additive` puts its light
+ * over the scene's fill instead of in its place (the Dungeon's, whose ambient is the dark's own light).
+ */
+function giVolume(key, name, center, size, spacing, { yawDeg = 0, rays = 64, maxRayDistance = 60, blendDistance = 2, additive = false } = {}) {
   const counts = size.map((s, i) => Math.max(2, Math.min(128, Math.round(s / spacing[i]) + 1)))
   GI_BAKE_IDS.add(id(`gi-bake:${key}`))
   return node(name, 'giVolume', {
     id: id(`gi:${key}`), position: center.map(round3), rotation: [0, round3(yawDeg), 0],
     giVolume: {
       size: size.map(round3), probeCounts: counts, rays, maxRayDistance, captureResolution: 32, includeGrass: false,
-      blendDistance, intensity: 1, normalBias: 0.1, viewBias: 0.4, multiBounce: true, enabled: true,
+      blendDistance, intensity: 1, normalBias: 0.1, viewBias: 0.4, multiBounce: true, additive, enabled: true,
       bakeId: id(`gi-bake:${key}`),
     },
   })
@@ -2441,7 +2444,7 @@ const DUNGEON_NAME = 'Dungeon'
 const dungeon = buildDungeon({
   playerModel: knight.playerModel,
   id, node, vars, souls, withScript, linkInstance, tex, pbrMaterial, libraryMaterial, modelNode, matJson, texIdsOf, log,
-  placeFire, wallTorch, brazierCage, campfire, CAMPFIRE_MATS, CAGE_MAT, CAVE_DARK_MAT, SURFACES, rayHit, BLOOD_MANAGER_FIELDS,
+  placeFire, wallTorch, brazierCage, campfire, CAMPFIRE_MATS, CAGE_MAT, CAVE_DARK_MAT, SURFACES, rayHit, BLOOD_MANAGER_FIELDS, giVolume,
   BARREL_TEMPLATE, breakableBarrelNode, mossRocks, MOSS_ROCK_MAT,
   ROOT, BUILD, PROPS, PROJECT_NAME, PRESETS, PLAYER_ARM, widenCamera, playerCamera, REFERENCE_ILLUMINANCE, ASSET_HASH_VERSION,
 })

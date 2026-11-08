@@ -442,7 +442,9 @@ sweeps spread over frames.
 
 The **GI** debug channel shows the volumes' light as it falls on a mid-grey surface, and
 **GI Share** how much of each pixel they lit (white) rather than the light probes and the sky (black). A
-volume whose probes are still being captured shows grey in GI Share, filling in as they arrive.
+volume whose probes are still being captured shows grey in GI Share, filling in as they arrive. An
+**Additive** volume's light goes on top of the light probes, the ambient and the sky light rather than in
+their place, so GI Share stays black under it.
 
 ### Screen-space reflections
 

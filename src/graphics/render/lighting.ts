@@ -281,8 +281,9 @@ export class LightingPasses {
         // The GI Volumes claim FIRST, as they do per pixel in the deferred pass; the probes take their share
         // of what the volumes left. Never during a capture, which no indirect light reaches.
         if (this._view.capturing) return probes;
+        // `gi` is the share the volumes REPLACE: an additive volume lights the point (its SH) and replaces none.
         const gi = this._sys.gi.lightingAt(position, this._giSH, k);
-        if (gi <= 0) return probes;
+        if (gi <= 0 && this._giSH[0] <= 0 && this._giSH[1] <= 0 && this._giSH[2] <= 0) return probes;
         const rest = 1 - gi;
         for (let j = 0; j < outSH.length; j++) outSH[j] = this._giSH[j] + outSH[j] * rest;
         return gi + probes * rest;
@@ -293,7 +294,7 @@ export class LightingPasses {
         const result = probeAmbientAt(this.lightingProbes(scene), position, fallback, out);
         if (this._view.capturing) return result;
         const gi = this._sys.gi.ambientAt(position, this._giAmbient);
-        if (gi <= 0) return result;
+        if (gi <= 0 && this._giAmbient[0] <= 0 && this._giAmbient[1] <= 0 && this._giAmbient[2] <= 0) return result;
         const rest = 1 - gi;
         for (let c = 0; c < 3; c++) result[c] = this._giAmbient[c] + result[c] * rest;
         return result;

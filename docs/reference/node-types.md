@@ -341,6 +341,7 @@ probeCounts: [number, number, number]    // probes along each axis, 2..128
 rays: 64 | 256 ; maxRayDistance: number ; captureResolution: 16 | 32 ; includeGrass: boolean
 blendDistance: number ; intensity: number ; normalBias: number ; viewBias: number   // biases: fractions of the smallest spacing
 multiBounce: boolean ; enabled: boolean ; bakeId: string | null
+additive: boolean                        // added to the light probes' / ambient's / sky light's fill instead of replacing it
 requestCapture(): void                   // capture every probe again (the static geometry changed)
 gridToWorld(out: mat4): mat4 ; worldToGrid(out: mat4): mat4 ; probeWorldPosition(out, i, j, k)
 worldSpacing: [number, number, number] ; minSpacing: number ; probeCount: number

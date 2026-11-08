@@ -41,6 +41,15 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     along depth and normal edges (about a third of its cost), and not at all when no volume is in view.
     Each probe's on/off state now rides in its light's alpha, so a lookup reads two textures a probe
     instead of three (another tenth off the pass, and off the bounces of a relight).
+  - *Additive volumes.* A GI Volume's **Additive** puts its light on top of the light probes, the scene
+    ambient and the sky light instead of in their place, for a scene whose ambient is the dark's own faint
+    light rather than the open sky's that a room's walls shut out.
+  - *The Valley's dungeon.* Thirteen baked, additive volumes, one a room (3,787 probes): the torches' and
+    the moon's light bounced off the stone, warm round a fire, over the dungeon's dim ambient. In its place
+    the bounce alone, a fifth to a tenth of that ambient away from the fires, left every cell and corner
+    black, and the knight's armour with them. `tools/valley/bakeGI.cjs` bakes both scenes (`--scene`).
+    A bake whose scene takes longer than ten seconds to settle (WebGL2 compiling its programs on first
+    use) still loads within the minute after, the capture started in its place dropped.
 
 - **Lighting that holds together from noon to midnight.** Torches now light the night in the editor
   as they do in the game, and glare no longer floods the screen.

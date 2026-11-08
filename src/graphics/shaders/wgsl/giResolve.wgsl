@@ -3,7 +3,9 @@
 // specific indirect diffuse, ahead of the light probes and the sky (deferredLighting.wgsl `sampleGI`).
 //
 // .rgb = sum of claim x E/pi on the FRAME's scale (intensity x pre-exposure / store scale, in each volume's
-// blend w), .a = the share the volumes claimed. A background pixel writes nothing claimed.
+// blend w), .a = the share of the fill (light probes, ambient, sky light) the volumes REPLACE: what they
+// claimed, less an additive volume's claim, whose light goes on top of the fill. A background pixel writes
+// nothing claimed.
 
 #include "./chunks/fullscreen.wgsl"
 #include "./chunks/octNormal.wgsl"
@@ -53,5 +55,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let P = world.xyz / world.w;
     let N = octDecode(textureLoad(u_gNormalRoughness_texture, texel, 0).rg);
     let V = normalize(u_resolve.u_viewPos - P);
-    return giIrradianceAt(P, N, V);
+    let g = giLightAt(P, N, V);
+    return vec4<f32>(g.light, g.replaced);
 }

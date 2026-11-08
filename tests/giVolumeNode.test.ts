@@ -10,7 +10,7 @@ describe('GIVolumeNode', () => {
         const v = new GIVolumeNode('room', {
             size: [6, 3, 8], probeCounts: [7, 4, 9], rays: 256, maxRayDistance: 20, captureResolution: 16,
             includeGrass: true, blendDistance: 0.5, intensity: 1.5, normalBias: 0.2, viewBias: 0.3,
-            multiBounce: false, enabled: false, bakeId: 'bake-1',
+            multiBounce: false, additive: true, enabled: false, bakeId: 'bake-1',
         });
         const parent = new Node('parent');
         parseNodeJson(parent, await v.serialize());
@@ -28,6 +28,7 @@ describe('GIVolumeNode', () => {
         expect(r.normalBias).toBe(0.2);
         expect(r.viewBias).toBe(0.3);
         expect(r.multiBounce).toBe(false);
+        expect(r.additive).toBe(true);
         expect(r.enabled).toBe(false);
         expect(r.bakeId).toBe('bake-1');
     });
@@ -42,6 +43,7 @@ describe('GIVolumeNode', () => {
         expect(r.bakeId).toBeNull();
         expect(r.enabled).toBe(true);
         expect(r.multiBounce).toBe(true);
+        expect(r.additive).toBe(false);
     });
 
     it('holds its settings to their ranges', () => {
@@ -63,6 +65,7 @@ describe('GIVolumeNode', () => {
         const v = new GIVolumeNode('v');
         v.markCaptured();
         v.intensity = 2;
+        v.additive = true;
         v.blendDistance = 3;
         v.normalBias = 0.3;
         v.enabled = false;

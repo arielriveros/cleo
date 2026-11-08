@@ -51,6 +51,7 @@ export interface GiVolumeOptions {
     normalBias?: number;
     viewBias?: number;
     multiBounce?: boolean;
+    additive?: boolean;
     enabled?: boolean;
     bakeId?: string | null;
 }
@@ -69,6 +70,12 @@ export class GIVolumeNode extends Node {
     public includeGrass: boolean;
     /** The bounces after the first (the volume lighting what its rays hit). Off: one bounce. */
     public multiBounce: boolean;
+    /**
+     * The volume's light ADDED to the fill that lights the box without it (the light probes, the scene
+     * ambient, the sky light) instead of replacing it: for a scene whose ambient stands for the dark's own
+     * faint light (a dungeon's) rather than the open sky's, which a room's walls would shut out.
+     */
+    public additive: boolean;
     /** Off leaves the volume in the scene without it lighting anything. */
     public enabled: boolean;
     /** The saved capture this volume loads (a node-owned bake asset), or null: captured at runtime. */
@@ -93,6 +100,7 @@ export class GIVolumeNode extends Node {
         if (options.viewBias !== undefined) this.viewBias = options.viewBias;
         this.includeGrass = options.includeGrass ?? false;
         this.multiBounce = options.multiBounce ?? true;
+        this.additive = options.additive ?? false;
         this.enabled = options.enabled ?? true;
         this.bakeId = typeof options.bakeId === 'string' && options.bakeId.length > 0 ? options.bakeId : null;
     }
@@ -260,7 +268,7 @@ export class GIVolumeNode extends Node {
                 size: [...this._size], probeCounts: [...this._probeCounts], rays: this._rays,
                 maxRayDistance: this._maxRayDistance, captureResolution: this._captureResolution,
                 includeGrass: this.includeGrass, blendDistance: this._blendDistance, intensity: this._intensity,
-                normalBias: this._normalBias, viewBias: this._viewBias, multiBounce: this.multiBounce,
+                normalBias: this._normalBias, viewBias: this._viewBias, multiBounce: this.multiBounce, additive: this.additive,
                 enabled: this.enabled, bakeId: this.bakeId,
             },
         };

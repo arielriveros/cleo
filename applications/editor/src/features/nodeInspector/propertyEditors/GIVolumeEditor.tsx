@@ -23,6 +23,7 @@ interface Fields {
   normalBias: number
   viewBias: number
   multiBounce: boolean
+  additive: boolean
   includeGrass: boolean
 }
 
@@ -35,7 +36,7 @@ export default function GIVolumeEditor(props: { node: GIVolumeNode }) {
       enabled: n.enabled, size: [...n.size] as [number, number, number],
       probeCounts: [...n.probeCounts] as [number, number, number], rays: n.rays, maxRayDistance: n.maxRayDistance,
       captureResolution: n.captureResolution, blendDistance: n.blendDistance, intensity: n.intensity,
-      normalBias: n.normalBias, viewBias: n.viewBias, multiBounce: n.multiBounce, includeGrass: n.includeGrass,
+      normalBias: n.normalBias, viewBias: n.viewBias, multiBounce: n.multiBounce, additive: n.additive, includeGrass: n.includeGrass,
     }
   }
   const [v, setV] = useState(read)
@@ -61,6 +62,7 @@ export default function GIVolumeEditor(props: { node: GIVolumeNode }) {
     if (patch.normalBias !== undefined) n.normalBias = patch.normalBias
     if (patch.viewBias !== undefined) n.viewBias = patch.viewBias
     if (patch.multiBounce !== undefined) n.multiBounce = patch.multiBounce
+    if (patch.additive !== undefined) n.additive = patch.additive
     if (patch.includeGrass !== undefined) n.includeGrass = patch.includeGrass
     setV(read())
     eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node })
@@ -157,6 +159,9 @@ export default function GIVolumeEditor(props: { node: GIVolumeNode }) {
           </PropertyRow>
           <PropertyRow label='Multi-bounce' divider>
             <Toggle checked={v.multiBounce} onChange={multiBounce => set({ multiBounce })} />
+          </PropertyRow>
+          <PropertyRow label='Additive' divider>
+            <Toggle checked={v.additive} onChange={additive => set({ additive })} />
           </PropertyRow>
           <PropertyRow label='Include grass' divider={false}>
             <Toggle checked={v.includeGrass} onChange={includeGrass => set({ includeGrass })} />

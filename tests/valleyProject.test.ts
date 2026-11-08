@@ -448,10 +448,11 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const probes = volumes.reduce((n, v) => n + v.giVolume.probeCounts.reduce((a: number, c: number) => a * c, 1), 0);
         expect(probes).toBeLessThanOrEqual(16384);
         for (const v of volumes) expect(typeof v.giVolume.bakeId, v.name).toBe('string');
-        // The bakes the example carries are packed, belong to a volume, and fit its grid.
+        // The bakes the example carries are packed, belong to a volume (of either scene), and fit its grid.
         const bakes: { id: string; bytes: ArrayBuffer }[] = valley!.bundle.giBakes ?? [];
+        const everyVolume = [...volumes, ...dungeonNodes().filter(n => n.type === 'giVolume')];
         for (const bake of bakes) {
-            const v: any = volumes.find(x => x.giVolume.bakeId === bake.id);
+            const v: any = everyVolume.find(x => x.giVolume.bakeId === bake.id);
             expect(v, bake.id).toBeDefined();
             const bytes = new Uint8Array(bake.bytes);
             const header = readGiBakeHeader(bytes);
@@ -693,6 +694,24 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         // The cave and the ladder name each other, so a trip down and back ends where it began.
         expect(exit.scriptVars.exitTo).toBe('Skull Cave Entrance');
         expect(nodes().find(n => n.name === 'Skull Cave Entrance').scriptVars.exitTo).toBe('Way Out');
+    });
+
+    it('lights every dungeon room with an additive GI volume, baked', () => {
+        const volumes = dungeonNodes().filter(n => n.type === 'giVolume');
+        expect(volumes.length).toBe(13);
+        const probes = volumes.reduce((n, v) => n + v.giVolume.probeCounts.reduce((a: number, c: number) => a * c, 1), 0);
+        expect(probes).toBeLessThanOrEqual(16384);
+        const baked = new Set((valley!.bundle.giBakes ?? []).map((b: { id: string }) => b.id));
+        for (const v of volumes) {
+            // On top of the dungeon's ambient, which is the dark's own light: in its place, the corners went black.
+            expect(v.giVolume.additive, v.name).toBe(true);
+            expect([64, 256], v.name).toContain(v.giVolume.rays);
+            // A probe every 2.5 m or so at most: a hall's pillars and a room's torch resolve.
+            v.giVolume.size.forEach((s: number, a: number) => expect(s / (v.giVolume.probeCounts[a] - 1), v.name).toBeLessThanOrEqual(2.75));
+            expect(baked.has(v.giVolume.bakeId), v.name).toBe(true);
+        }
+        // The valley's volumes replace its ambient: the open sky's fill, which a house's walls shut out.
+        for (const v of nodes().filter(n => n.type === 'giVolume')) expect(v.giVolume.additive ?? false, v.name).toBe(false);
     });
 
     it('places the dungeon props as LOD groups that cull with distance', () => {

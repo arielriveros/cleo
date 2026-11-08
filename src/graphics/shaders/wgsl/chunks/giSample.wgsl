@@ -25,7 +25,7 @@ struct GiVolumeBlock {
     u_giCounts: array<vec4<i32>, 16>,
     /** xyz feather as a fraction of the unit box, w intensity x (frame pre-exposure / store scale). */
     u_giBlend: array<vec4<f32>, 16>,
-    /** x normal bias (m), y view bias (m), z max ray distance (m), w unused. */
+    /** x normal bias (m), y view bias (m), z max ray distance (m), w 1 when the volume is additive. */
     u_giBias: array<vec4<f32>, 16>,
     /** x irradiance tiles a row, y visibility tiles a row, z probe-data texels a row. */
     u_giAtlas: vec4<f32>,
@@ -170,23 +170,41 @@ fn giSampleVolume(v: i32, P: vec3<f32>, N: vec3<f32>, V: vec3<f32>) -> vec4<f32>
     return vec4<f32>(sum / weightSum, valid);
 }
 
+struct GiLight {
+    /** Sum of claim x E/pi x the volume's blend w (intensity and scale). */
+    light: vec3<f32>,
+    /** The share the volumes claimed, 0..1. */
+    claimed: f32,
+    /** The share claimed by volumes that REPLACE the fill (not additive): what the fill gives up. */
+    replaced: f32,
+};
+
 /**
  * Every volume's light at `P`, smallest first, each claiming its feathered weight times its coverage of
- * what the ones before it left. `.rgb` = sum of claim x E/pi x the volume's blend w (intensity and scale),
- * `.a` = the share claimed.
+ * what the ones before it left.
  */
-fn giIrradianceAt(P: vec3<f32>, N: vec3<f32>, V: vec3<f32>) -> vec4<f32> {
+fn giLightAt(P: vec3<f32>, N: vec3<f32>, V: vec3<f32>) -> GiLight {
     var remaining = 1.0;
-    var light = vec3<f32>(0.0);
+    var out: GiLight;
+    out.light = vec3<f32>(0.0);
+    out.replaced = 0.0;
     for (var v = 0; v < min(u_giVolumes.u_giVolumeCount, MAX_GI_VOLUMES); v++) {
         let w = giBoxWeight(v, P);
         if (w <= 0.0) { continue; }
         let s = giSampleVolume(v, P, N, V);
         let claim = w * saturate(s.a / GI_FULL_COVERAGE) * remaining;
         if (claim <= 0.0) { continue; }
-        light += s.rgb * (claim * u_giVolumes.u_giBlend[v].w);
+        out.light += s.rgb * (claim * u_giVolumes.u_giBlend[v].w);
+        if (u_giVolumes.u_giBias[v].w < 0.5) { out.replaced += claim; }
         remaining -= claim;
         if (remaining <= 1e-3) { break; }
     }
-    return vec4<f32>(light, 1.0 - remaining);
+    out.claimed = 1.0 - remaining;
+    return out;
+}
+
+/** `giLightAt` as `.rgb` the light, `.a` the share claimed (the relight's bounce). */
+fn giIrradianceAt(P: vec3<f32>, N: vec3<f32>, V: vec3<f32>) -> vec4<f32> {
+    let g = giLightAt(P, N, V);
+    return vec4<f32>(g.light, g.claimed);
 }

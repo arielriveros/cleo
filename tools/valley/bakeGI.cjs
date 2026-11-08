@@ -1,11 +1,12 @@
 // Bake the Valley's GI Volumes into the example: the editor on a private dev server, in Chrome with WebGPU,
-// the Valley imported, every volume captured afresh, its capture exported, and the bakes written into the
-// example's assets under each volume's bakeId.
+// the Valley imported, every volume of both its scenes (the Valley, then the Dungeon) captured afresh, its
+// capture exported, and the bakes written into the example's assets under each volume's bakeId.
 //
 //   node tools/valley/build.mjs          # first: it writes the volumes, and carries the last bakes over
 //   node tools/valley/bakeGI.cjs         # then: fresh captures of every volume
 //   node tools/valley/bakeGI.cjs --url http://127.0.0.1:8090/    # an editor dev server already running
 //   node tools/valley/bakeGI.cjs --only "Hamlet GI"              # one volume (by name); the rest keep theirs
+//   node tools/valley/bakeGI.cjs --scene Dungeon                 # one scene's volumes; the other's keep theirs
 //   node tools/valley/bakeGI.cjs --vite-config vite.other.config.ts  # the private dev server on another config
 //
 // With --url the dev server is someone else's and stays up: stop it before the bakes are written if it
@@ -40,6 +41,9 @@ const args = process.argv.slice(2);
 const arg = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
 const URL_ARG = arg('--url');
 const ONLY = arg('--only');
+const SCENE = arg('--scene');
+/** The example's scenes, in the order they are baked: the one it opens with, then the others by name. */
+const SCENES = ['Valley', 'Dungeon'];
 const VITE_CONFIG = arg('--vite-config');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -171,17 +175,47 @@ async function main() {
     await until(BOOTED, 15 * 60 * 1000, 'the Valley to boot');
     log('the Valley is open');
 
-    const volumes = await evaluate(`
-        const s = await scene();
-        return [...s.giVolumes].map(v => ({ id: v.id, name: v.name, bakeId: v.bakeId, probes: v.probeCount,
-            centre: [...v.worldPosition] }));`);
-    const chosen = volumes.filter(v => v.bakeId && (!ONLY || v.name === ONLY));
-    log(`${volumes.length} GI volumes, baking ${chosen.length}: ${chosen.map(v => `${v.name} (${v.probes})`).join(', ')}`);
-
     // Start from what the example carries: a volume this run does not bake keeps its bake.
     const { packFormat2, readGiBakes } = await import(pathToFileURL(path.join(ROOT, 'tools', 'exampleKit', 'packFormat2.mjs')).href);
     const bakes = new Map(readGiBakes(OUT).map(b => [b.id, b.bytes]));
 
+    // Every scene is opened, even one this run does not bake: its volumes name the bakes it keeps.
+    const volumes = [];
+    for (const name of SCENES) {
+        const seen = new Set(volumes.map(v => v.id));
+        if (name !== SCENES[0]) {
+            await evaluate(`await openAsset(${JSON.stringify(name)}); return true;`);
+            // Open once the engine holds the scene's own volumes and the editor has settled.
+            await until(`
+                const opened = await engine();
+                const ids = [...(opened?.scene?.giVolumes ?? [])].map(v => v.id);
+                if (ids.length === 0 || ids.some(id => ${JSON.stringify([...seen])}.includes(id))) return false;
+                ${BOOTED}`, 5 * 60 * 1000, `the ${name} scene to open`);
+            log(`the ${name} scene is open`);
+        }
+        const own = await evaluate(`
+            const s = await scene();
+            return [...s.giVolumes].map(v => ({ id: v.id, name: v.name, bakeId: v.bakeId, probes: v.probeCount,
+                centre: [...v.worldPosition] }));`);
+        volumes.push(...own);
+        const chosen = own.filter(v => v.bakeId && (!SCENE || SCENE === name) && (!ONLY || v.name === ONLY));
+        log(`${name}: ${own.length} GI volumes, baking ${chosen.length}: ${chosen.map(v => `${v.name} (${v.probes})`).join(', ')}`);
+        await bakeVolumes(chosen, bakes);
+    }
+
+    // Only the bakes a volume of the example names.
+    const wanted = new Set(volumes.map(v => v.bakeId).filter(Boolean));
+    const giBakes = [...bakes].filter(([id]) => wanted.has(id)).map(([id, bytes]) => ({ id, bytes }));
+    stopAll();
+    children.length = 0;
+    await sleep(1000);
+    const largest = await packFormat2(OUT, { giBakes });
+    const total = giBakes.reduce((n, b) => n + b.bytes.length, 0);
+    log(`${giBakes.length} GI bakes (${(total / 1048576).toFixed(1)} MB) written into applications/editor/public/examples/valley/; largest file ${(largest / 1048576).toFixed(1)} MB`);
+}
+
+/** Capture each of `chosen` (volumes of the open scene) afresh and put its bake in `bakes` by bakeId. */
+async function bakeVolumes(chosen, bakes) {
     for (const v of chosen) {
         const started = Date.now();
         // The camera inside the volume (its capture runs nearest the camera first) and the editor's fill
@@ -223,16 +257,6 @@ async function main() {
         bakes.set(v.bakeId, bytes);
         log(`${v.name}: ${out.active} of ${out.probes} probes active, ${(bytes.length / 1048576).toFixed(2)} MB, ${((Date.now() - started) / 1000).toFixed(0)} s`);
     }
-
-    // Only the bakes a volume of the scene names.
-    const wanted = new Set(volumes.map(v => v.bakeId).filter(Boolean));
-    const giBakes = [...bakes].filter(([id]) => wanted.has(id)).map(([id, bytes]) => ({ id, bytes }));
-    stopAll();
-    children.length = 0;
-    await sleep(1000);
-    const largest = await packFormat2(OUT, { giBakes });
-    const total = giBakes.reduce((n, b) => n + b.bytes.length, 0);
-    log(`${giBakes.length} GI bakes (${(total / 1048576).toFixed(1)} MB) written into applications/editor/public/examples/valley/; largest file ${(largest / 1048576).toFixed(1)} MB`);
 }
 
 process.on('SIGINT', () => { stopAll(); process.exit(1); });

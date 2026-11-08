@@ -523,7 +523,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     //
     // The GI Volumes claim FIRST: theirs is the most specific light there is, per point inside the box
     // rather than one value for it. What they leave the probes share as before.
-    let gi = sampleGI(uv, depth, N);            // rgb = sum of claim x E/pi (pre-exposed, x intensity), a = claim
+    // An ADDITIVE volume's claim is not in `a`: its light goes on top of the fill rather than in its place.
+    let gi = sampleGI(uv, depth, N);            // rgb = sum of claim x E/pi (pre-exposed, x intensity), a = share replaced
     var fallbackShare = 1.0 - gi.a;
     var probeDiffuse = gi.rgb;
     var probeBack = gi.rgb;                  // a translucent surface's back takes the front's GI (v1)
@@ -553,7 +554,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // the probe received, its reflection scales by the same ratio. A corner reflects darker than the middle
     // of the room, and a room the volumes darken stops reflecting the brighter light its probe captured.
     // The sky reflection, below, scales the same way against the open sky's light: a room with no probe
-    // of its own no longer mirrors the bright sky from its floor.
+    // of its own no longer mirrors the bright sky from its floor. Additive volumes replace nothing (`a` 0),
+    // so under them the reflections stay the fill's, unscaled.
     let giLum = select(0.0, dot(gi.rgb, GI_LUMA) / max(gi.a, 1e-4), gi.a > 1e-3);
     var envShare = 1.0;
     var probeSpecular = vec3<f32>(0.0);

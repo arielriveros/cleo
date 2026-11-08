@@ -211,6 +211,7 @@ What a capture sees is the static geometry: models, the landscape, and the trees
 | **Normal bias** | How far a lookup point is pushed off a surface along its normal, as a fraction of the smallest spacing: against a surface shadowing itself. |
 | **View bias** | How far a lookup point is pulled toward the camera, as the same fraction. |
 | **Multi-bounce** | The bounces after the first: the volume lighting what its probes see with its own light. |
+| **Additive** | Adds the volume's light to the fill that lights the box without it (the light probes, the scene ambient, the sky light) instead of replacing it. Off by default: a room is as dark as what its probes saw. On for a scene whose ambient is the dark's own faint light, a dungeon's, rather than the open sky's that walls shut out. |
 | **Include grass** | Grass in the capture: billboard grass, and painted plants under 0.8 m. Off by default: a meadow hides nothing a probe a metre up cares about, and it is most of the plants. |
 
 Below the fields, a line gives the capture's progress, then how many probes light and how many are inside
