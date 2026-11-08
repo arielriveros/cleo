@@ -96,12 +96,15 @@ export function restHeightOf(skin, parts) {
  * @param boneMap    for a custom skeleton: [[mannequin base name, this skin's bone name | null], …]
  * @param optional   mannequin bones allowed to go unmapped (a RegExp on the source name)
  * @param ragdoll    true to author a ragdoll profile (for a skeleton the automatic humanoid cannot read)
+ * @param checkHands false to skip the arms-at-the-sides check of the reference clip (a rifle idle)
  * @param clothOf    the model's cloth parts (AnimatedModel.skinnedCloth), from the merged mesh:
  *                   `({ positions, indices, submeshes, jointIndices, jointWeights, skin }) => data | null`
  */
 export function buildCharacter({
   ROOT, souls, idOf, node, vars, matJson, materialIds,
   key, name, skin, parts, scale, height, nodeOf, boneMap = null, optional = /Pinky/i, ragdoll = false, clothOf = null,
+  // False when the reference clip is not a pose with the arms at the sides (a rifle idle holds them forward).
+  checkHands = true,
 }) {
   if (parts.length !== materialIds.length) throw new Error(`${name} has ${parts.length} materials, ${materialIds.length} given`)
   const names = new Map(skin.nodeNames)
@@ -156,7 +159,7 @@ export function buildCharacter({
   const pose = posedWorld(skin, ownIdle)
   // At Idle the hands hang at the sides: below the shoulders and outside the chest. An A-pose bind
   // retargeted as an offset from bind folds them into the torso (see retargetPose in the engine).
-  for (const side of ['Left', 'Right']) {
+  for (const side of checkHands ? ['Left', 'Right'] : []) {
     const hand = mat4.getTranslation(vec3.create(), pose(nodeOf(`${side}Hand`)))
     const shoulder = mat4.getTranslation(vec3.create(), pose(nodeOf(`${side}Arm`)))
     if (!(hand[1] < shoulder[1] - 0.35 && Math.abs(hand[0]) > 0.15))

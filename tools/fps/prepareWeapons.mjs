@@ -20,6 +20,7 @@ import { fileURLToPath } from 'url'
 import { mat4, quat, vec3 } from 'gl-matrix'
 import { readGltf } from '../valley/meshes.mjs'
 import { normalizeSkin, readSkinnedGltf, restWorld } from '../exampleKit/skinnedGlb.mjs'
+import { posedWorld, rotationOf } from '../exampleKit/character.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
@@ -27,8 +28,12 @@ const OUT = path.join(ROOT, 'build', 'fps_prepared', 'weapons')
 
 export const WEAPONS = {
   ak47: { file: 'fps_character_animation_pack_ak-47.glb', name: 'AK-47' },
-  pistol: { file: 'fps_character_animation_pack_pistol.glb', name: 'Pistol' },
-  shotgun: { file: 'fps_character_animation_pack_saps-12.glb', name: 'SAPS-12' },
+  // The pistol's and the SAPS-12's weapon rigs sit in the file as separate armatures, kept on the hand in the
+  // artist's tool by a parent constraint the glTF does not carry (their root bone's baked placement is
+  // 1.5x off the arms' own weapon bone). `attach` re-creates the constraint: the weapon rig's root becomes a
+  // child of the arms rig's weapon bone, turned as it was turned against it at Idle.
+  pistol: { file: 'fps_character_animation_pack_pistol.glb', name: 'Pistol', attach: { root: /^Root_01$/, to: /^CB_Weapon/ } },
+  shotgun: { file: 'fps_character_animation_pack_saps-12.glb', name: 'SAPS-12', attach: { root: /^CTRL-Root/, to: /^CB_Weapon/ } },
 }
 
 /** The file's clip suffix -> the canonical clip name every weapon shares (null: left out). */
@@ -76,6 +81,26 @@ async function prepare(key) {
   const dir = path.join(OUT, key)
   fs.mkdirSync(dir, { recursive: true })
 
+  // ----- the parent constraint, re-created (see WEAPONS)
+  let attachedRoot = null
+  if (WEAPONS[key].attach) {
+    const names = new Map(skin.nodeNames)
+    const find = (re) => [...names].find(([, n]) => re.test(n))?.[0]
+    const rootNode = find(WEAPONS[key].attach.root), toNode = find(WEAPONS[key].attach.to)
+    if (rootNode === undefined || toNode === undefined) throw new Error(`${key}: cannot attach the weapon rig`)
+    const idle = gltf.animations.find(a => /_Idle$/.test(a.name))
+    const idleClip = {
+      samplers: idle.samplers.map(s => ({ input: Array.from(accessor(doc, s.input)), output: Array.from(accessor(doc, s.output)) })),
+      channels: idle.channels.map(c => ({ samplerIndex: c.sampler, targetNodeIndex: c.target.node, targetPath: c.target.path })),
+    }
+    const world = posedWorld(skin, idleClip)
+    const rel = quat.multiply(quat.create(), quat.invert(quat.create(), rotationOf(world(toNode))), rotationOf(world(rootNode)))
+    skin.nodeParents = skin.nodeParents.map(([c, p]) => (c === rootNode ? [c, toNode] : [c, p]))
+    skin.nodeTransforms = skin.nodeTransforms.map(([i, m]) => (i === rootNode ? [i, Array.from(mat4.fromRotationTranslation(mat4.create(), rel, [0, 0, 0]))] : [i, m]))
+    skin.joints = skin.joints.map(j => (j.nodeIndex === rootNode ? { ...j, parentIndex: toNode } : j))
+    attachedRoot = rootNode
+  }
+
   // ----- rest worlds before the skin is re-expressed ---------------------------------------------------
   const parents = new Map(skin.nodeParents)
   const locals = new Map(skin.nodeTransforms)
@@ -106,6 +131,7 @@ async function prepare(key) {
   }
   const frames = new Map()
   for (const node of jointNodes) frames.set(node, frame(node))
+  if (process.env.FPS_DEBUG) { const nm = new Map(skin.nodeNames); for (const [n, f] of frames) if (/^(_rootJoint|Root_01|root_0\d|CB_Weapon|CTRL-Root)/.test(nm.get(n) ?? '')) console.log(`  [frame ${key}] ${nm.get(n)} root=${f.root} s=${f.s ?? ''} scale=${scale}`) }
 
   normalizeSkin(skin, parts, scale)
 
@@ -140,6 +166,8 @@ async function prepare(key) {
     anim.channels.forEach((c) => {
       const node = c.target.node
       if (!jointNodes.has(node)) return
+      // The attached root rides its bone: the placement its own channels baked is replaced by the constraint.
+      if (node === attachedRoot) return
       const f = frames.get(node)
       const sampler = { ...samplers[c.sampler], output: samplers[c.sampler].output.slice() }
       const out = sampler.output
