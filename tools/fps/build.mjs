@@ -675,5 +675,9 @@ function main() {
 }
 
 const result = main()
+// Format 1 is what this writes; format 2 is what can be checked in: the clips and the models' geometry are
+// stored once as binary, in split parts under GitHub's 100 MB file limit (exampleKit/packFormat2.mjs).
+const largest = await packFormat2(OUT, { giBakes: [] })
 console.log(`${PROJECT_NAME} written to ${path.relative(ROOT, OUT)}/`)
-console.log(`  scripts ${scripts.assets.length} - templates ${result.templates} - materials ${result.materials} - clips ${animations.length} - effects ${particleSystems.length} - textures ${result.textureCount} - ${mb(result.total)}`)
+console.log(`  scripts ${scripts.assets.length} - templates ${result.templates} - materials ${result.materials} - clips ${animations.length} - effects ${particleSystems.length} - textures ${result.textureCount} - ${mb(result.total)} unpacked - largest file ${mb(largest)}`)
+console.log('Next:  npm --prefix editor run examples:list')
