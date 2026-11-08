@@ -232,12 +232,13 @@ export default class FpsCombatantNode extends CharacterNode {
   protected spawnFx(template: string, position: ArrayLike<number>, rotation?: number[], parent?: Node): Node | null {
     if (!template || this._missing.has(template)) return null
     const scene = this.scene as any
-    if (!scene?.getTemplate?.(template)) {
+    const node = scene?.instantiate(template, { position: [position[0], position[1], position[2]], ...(rotation ? { rotation } : {}), ...(parent ? { parent } : {}) })
+    if (!node) {
+      // instantiate has said which templates it knows; say once that this effect is skipped.
       this._missing.add(template)
       Logger.warn(`FPS: no "${template}" template, so that effect is skipped`, 'Script')
-      return null
     }
-    return scene.instantiate(template, { position: [position[0], position[1], position[2]], ...(rotation ? { rotation } : {}), ...(parent ? { parent } : {}) })
+    return node ?? null
   }
 
   private _impact(hit: any, onCorpse: boolean): void {

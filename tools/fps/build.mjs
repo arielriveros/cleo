@@ -176,14 +176,14 @@ function hud() {
   const C = [0.5, 0.5], BL = [0, 1], BR = [1, 1], TC = [0.5, 0], TR = [1, 0], BC = [0.5, 1]
   const bar2 = (key, name, r, tint) => panel(`hud:${key}`, name, r, tint)
   const arm = (name, r) => bar2(`cross:${name}`, name, r, [1, 1, 1, 0.92])
-  const edge = (name, anchorMin, anchorMax, min, max) => panel(`hud:${name}`, name, { anchorMin, anchorMax, offsetMin: min, offsetMax: max }, [0.75, 0.02, 0.02, 1], [], { ui: { opacity: 0 } })
+  const edge = (name, anchorMin, anchorMax, min, max) => panel(`hud:${name}`, name, { anchorMin, anchorMax, offsetMin: min, offsetMax: max }, [0.8, 0.03, 0.03, 0.55], [], { ui: { opacity: 0 } })
   return withScript(screenRoot('HUD', 'hud', [
     // The vignette: red edges that come up as health falls.
     panel('hud:vignette', 'Vignette', stretch(0), [0, 0, 0, 0], [
-      panel('hud:vig:t', 'VigTop', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [0, 0], offsetMax: [0, 120] }, [0.55, 0, 0, 0.5]),
-      panel('hud:vig:b', 'VigBottom', { anchorMin: [0, 1], anchorMax: [1, 1], offsetMin: [0, -120], offsetMax: [0, 0] }, [0.55, 0, 0, 0.5]),
-      panel('hud:vig:l', 'VigLeft', { anchorMin: [0, 0], anchorMax: [0, 1], offsetMin: [0, 0], offsetMax: [140, 0] }, [0.55, 0, 0, 0.5]),
-      panel('hud:vig:r', 'VigRight', { anchorMin: [1, 0], anchorMax: [1, 1], offsetMin: [-140, 0], offsetMax: [0, 0] }, [0.55, 0, 0, 0.5]),
+      panel('hud:vig:t', 'VigTop', { anchorMin: [0, 0], anchorMax: [1, 0], offsetMin: [0, 0], offsetMax: [0, 120] }, [0.5, 0, 0, 0.22]),
+      panel('hud:vig:b', 'VigBottom', { anchorMin: [0, 1], anchorMax: [1, 1], offsetMin: [0, -120], offsetMax: [0, 0] }, [0.5, 0, 0, 0.22]),
+      panel('hud:vig:l', 'VigLeft', { anchorMin: [0, 0], anchorMax: [0, 1], offsetMin: [0, 0], offsetMax: [140, 0] }, [0.5, 0, 0, 0.22]),
+      panel('hud:vig:r', 'VigRight', { anchorMin: [1, 0], anchorMax: [1, 1], offsetMin: [-140, 0], offsetMax: [0, 0] }, [0.5, 0, 0, 0.22]),
     ], { ui: { opacity: 0 } }),
     // Where damage came from.
     edge('HitFront', [0.3, 0], [0.7, 0], [0, 0], [0, 54]),
@@ -219,7 +219,7 @@ function hud() {
     text('hud:score', 'Score', '', rect(TC, [-420, 26], [420, 74]), { size: 36, align: 'center', weight: 700 }),
     text('hud:timer', 'Timer', '', rect(TC, [-200, 76], [200, 112]), { size: 26, align: 'center', tint: DIM }),
     text('hud:mode', 'Mode', '', rect(TC, [-300, 112], [300, 140]), { size: 20, align: 'center', tint: DIM }),
-    text('hud:feed', 'Feed', '', rect(TR, [-560, 28], [-36, 220]), { size: 22, align: 'right', vAlign: 'top', tint: INK, lineHeight: 1.35 }),
+    text('hud:feed', 'Feed', '', rect(TR, [-600, 28], [-96, 220]), { size: 22, align: 'right', vAlign: 'top', tint: INK, lineHeight: 1.35 }),
     text('hud:message', 'Message', '', rect(C, [-600, -170], [600, -70]), { size: 84, align: 'center', weight: 800, tint: [0.9, 0.18, 0.12, 1] }),
     text('hud:submessage', 'SubMessage', '', rect(C, [-500, -64], [500, -20]), { size: 30, align: 'center', tint: INK }),
   ]), 'FpsHud')
@@ -432,7 +432,7 @@ function environment({ rain = false } = {}) {
   sky.id = stableId('sky')
   sky.atmosphere = {
     ...sky.atmosphere, ...PRESETS.sky, physicalUnits: true, godRaysEnabled: true, godRayMaxDistance: 140, godRayDensity: 0.2,
-    fogEnabled: true, fogDensity: 0.0009, fogStart: 40, fogMaxOpacity: 0.55,
+    fogEnabled: true, fogDensity: 0.00035, fogStart: 60, fogMaxOpacity: 0.35,
   }
   const clouds = sourceNode('volumetric clouds')
   clouds.id = stableId('clouds')
@@ -445,11 +445,11 @@ function environment({ rain = false } = {}) {
   })
   const fog = node('Ground Fog', 'volumetricFog', {
     id: stableId('fog'), position: [0, 3, 0],
-    volumetricFog: { size: [110, 8, 110], blendDistance: 6, priority: 0, enabled: true, ...PRESETS.groundFog, density: 0.012 },
+    volumetricFog: { size: [110, 8, 110], blendDistance: 6, priority: 0, enabled: true, ...PRESETS.groundFog, density: 0.004 },
   })
   const dust = node('Dust', 'volumetricFog', {
     id: stableId('dust'), position: [0, 5, 0],
-    volumetricFog: { size: [60, 10, 60], blendDistance: 8, priority: 1, enabled: true, ...PRESETS.dust, density: 0.006 },
+    volumetricFog: { size: [60, 10, 60], blendDistance: 8, priority: 1, enabled: true, ...PRESETS.dust, density: 0.002 },
   })
   const probe = sourceNode('light probe')
   probe.id = stableId('probe')
@@ -492,6 +492,8 @@ function arenaScene({ key, name, mode, scoreLimit = 20, botList, minimal = false
     const n = botNode(b.bot, { name: tmpl.name, weapon: b.weapon ?? 'ak47' })
     withScript(n, 'FpsBot', { displayName: b.name, respawnTemplate: 'FPS Bot', weapon: b.weapon ?? 'ak47', skill: b.skill ?? 0.55 })
     n.id = stableId(`${key}:bot:${i}`)
+    // The brain possesses its own character, by id.
+    n.children.find(c => c.type === 'controller').possessedId = n.id
     return linkInstance(tmpl, place(n, b.at[0], b.at[1], b.yaw ?? 0))
   })
 
@@ -510,7 +512,7 @@ function arenaScene({ key, name, mode, scoreLimit = 20, botList, minimal = false
       group('fighters', 'Bots', botNodes),
       navMesh,
     ],
-    ambientLight: [1800, 1900, 2200],
+    ambientLight: [700, 750, 900],
   })
   const { surface, obstacles } = navBaker.gather(root, { skip: isMover })
   const baked = navBaker.bakeInto(navMesh, { surface, obstacles })
@@ -519,7 +521,7 @@ function arenaScene({ key, name, mode, scoreLimit = 20, botList, minimal = false
   const config = clone(seedScene.config)
   Object.assign(config.render, {
     quality: 'high', motionBlurEnabled: true, motionBlurIntensity: 0.6,
-    ...PRESETS.exposure, ...PRESETS.look, ...PRESETS.dof, dofEnabled: false,
+    ...PRESETS.exposure, exposureCompensation: 0.65, ...PRESETS.look, ...PRESETS.dof, dofEnabled: false,
     toneMapper: 'agxPunchy', shadowMapResolution: 4096, shadowCascades: 4, shadowDistance: 120,
     clearColor: [0.5, 0.6, 0.72, 1],
   })

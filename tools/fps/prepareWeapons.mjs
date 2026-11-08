@@ -215,6 +215,37 @@ async function prepare(key) {
     }
   })
 
+  // ----- the engine's animator holds 100 bones: keep the joints the mesh is skinned to, and the joints above
+  // them (their animation reaches the skin through those). The rest are controllers and helpers.
+  {
+    const nodeOfJoint = skin.joints.map(j => j.nodeIndex)
+    const jointOfNode = new Map(nodeOfJoint.map((n, i) => [n, i]))
+    const parentOf = new Map(skin.nodeParents)
+    const keep = new Set()
+    for (const p of parts) for (let v = 0; v < p.jointIndices.length; v++) if (p.jointWeights[v] > 0) keep.add(p.jointIndices[v])
+    for (const j of [...keep]) for (let n = parentOf.get(nodeOfJoint[j]); n !== undefined; n = parentOf.get(n)) if (jointOfNode.has(n)) keep.add(jointOfNode.get(n))
+    if (keep.size > 100) throw new Error(`${key}: ${keep.size} joints are needed, the animator holds 100`)
+    const remap = new Map()
+    const joints = []
+    skin.joints.forEach((j, i) => { if (keep.has(i)) { remap.set(i, joints.length); joints.push(j) } })
+    for (const p of parts) p.jointIndices = p.jointIndices.map(i => remap.get(i) ?? 0)
+    const keptNodes = new Set(joints.map(j => j.nodeIndex))
+    for (const clip of clips) {
+      const used = []
+      const channels = []
+      for (const c of clip.channels) {
+        if (!keptNodes.has(c.targetNodeIndex)) continue
+        let k = used.indexOf(c.samplerIndex)
+        if (k < 0) { used.push(c.samplerIndex); k = used.length - 1 }
+        channels.push({ ...c, samplerIndex: k })
+      }
+      clip.samplers = used.map(i => clip.samplers[i])
+      clip.channels = channels
+    }
+    console.log(`  ${key}: ${skin.joints.length} joints -> ${joints.length} (the mesh's and what drives them)`)
+    skin.joints = joints
+  }
+
   fs.writeFileSync(path.join(dir, `${key}.json`), JSON.stringify({
     name, skin, parts, materials, clips,
     eye: { position: Array.from(eyePos), rotation: Array.from(eyeRot) }, eyeRel: Array.from(eyeRel),

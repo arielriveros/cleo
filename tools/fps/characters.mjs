@@ -389,7 +389,8 @@ export function buildViewmodel(key) {
     position: placePos.map(round3), rotation: eulerFromQuat(placeRot),
     variables: vars({ __modelId: modelId, ...materialVars, fpsViewmodel: key }),
     model: modelJson, animationMappings: [], stateMachine: null, ragdoll: null,
-    children: [node('Muzzle', 'node', { id: stableId(`vm:${key}:muzzle`), position: muzzle })],
+    // `muzzle` is in the camera's frame; the model node sits at `place`, so its child is that point taken back through it.
+    children: [node('Muzzle', 'node', { id: stableId(`vm:${key}:muzzle`), position: Array.from(vec3.transformMat4(vec3.create(), muzzle, mat4.invert(mat4.create(), place)), round3) })],
   })
   const textureIds = [...new Set(materialIds.flatMap(id => Object.values(matJson(id).textures ?? {})).filter(Boolean))]
   const model = {
