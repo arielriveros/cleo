@@ -5,6 +5,7 @@
 //   node tools/valley/build.mjs          # first: it writes the volumes, and carries the last bakes over
 //   node tools/valley/bakeGI.cjs         # then: fresh captures of every volume
 //   node tools/valley/bakeGI.cjs --url http://127.0.0.1:8090/    # an editor dev server already running
+//   node tools/valley/bakeGI.cjs --example firing-line --scenes "Firing Line"   # another example (its volumes already name a bakeId)
 //   node tools/valley/bakeGI.cjs --only "Hamlet GI"              # one volume (by name); the rest keep theirs
 //   node tools/valley/bakeGI.cjs --scene Dungeon                 # one scene's volumes; the other's keep theirs
 //   node tools/valley/bakeGI.cjs --vite-config vite.other.config.ts  # the private dev server on another config
@@ -27,7 +28,10 @@ const { spawn, execSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const OUT = path.join(ROOT, 'applications', 'editor', 'public', 'examples', 'valley');
+const args = process.argv.slice(2);
+const arg = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
+const EXAMPLE = arg('--example') ?? 'valley';
+const OUT = path.join(ROOT, 'applications', 'editor', 'public', 'examples', EXAMPLE);
 const EDITOR_PORT = Number(process.env.GI_BAKE_PORT ?? 8092), CDP_PORT = Number(process.env.GI_BAKE_CDP ?? 9336);
 const CHROME = process.env.CHROME ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const PROFILE = path.join(os.tmpdir(), 'cleo-gi-bake-chrome');
@@ -37,13 +41,11 @@ const PRELUDE = 'const CLEO_URL = ' + JSON.stringify(CLEO_URL) + ';\n'
 /** Per volume: how long its capture may take before the bake gives up on it (it keeps its old bake). */
 const VOLUME_TIMEOUT_MS = 20 * 60 * 1000;
 
-const args = process.argv.slice(2);
-const arg = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
 const URL_ARG = arg('--url');
 const ONLY = arg('--only');
 const SCENE = arg('--scene');
 /** The example's scenes, in the order they are baked: the one it opens with, then the others by name. */
-const SCENES = ['Valley', 'Dungeon'];
+const SCENES = arg('--scenes') ? arg('--scenes').split(',') : ['Valley', 'Dungeon'];
 const VITE_CONFIG = arg('--vite-config');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -166,7 +168,7 @@ async function main() {
     await sleep(3000);
     await until(`
         const ex = await import('/src/utils/examples.ts');
-        const entry = (await ex.loadExampleIndex()).find(x => x.slug === 'valley');
+        const entry = (await ex.loadExampleIndex()).find(x => x.slug === ${JSON.stringify(EXAMPLE)});
         if (!entry) return false;
         setTimeout(() => ex.importExample(entry, undefined, true), 0);
         return true;`, 120000, 'the example index');
@@ -211,7 +213,7 @@ async function main() {
     await sleep(1000);
     const largest = await packFormat2(OUT, { giBakes });
     const total = giBakes.reduce((n, b) => n + b.bytes.length, 0);
-    log(`${giBakes.length} GI bakes (${(total / 1048576).toFixed(1)} MB) written into applications/editor/public/examples/valley/; largest file ${(largest / 1048576).toFixed(1)} MB`);
+    log(`${giBakes.length} GI bakes (${(total / 1048576).toFixed(1)} MB) written into applications/editor/public/examples/${EXAMPLE}/; largest file ${(largest / 1048576).toFixed(1)} MB`);
 }
 
 /** Capture each of `chosen` (volumes of the open scene) afresh and put its bake in `bakes` by bakeId. */

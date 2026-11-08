@@ -20,7 +20,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { loadScriptReflector, stableId as nsId } from '../exampleKit/bundle.mjs'
-import { packFormat2 } from '../exampleKit/packFormat2.mjs'
+import { packFormat2, readGiBakes } from '../exampleKit/packFormat2.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
@@ -101,6 +101,34 @@ function refreshScripts(dir) {
   }
 }
 
+// ----- GI bakes -------------------------------------------------------------------------------------------
+
+/**
+ * Every GI Volume names a bake by a stable id (derived from its node id), so a bake made by
+ * `node tools/valley/bakeGI.cjs --example firing-line --scenes "Firing Line"` is found again after the next ingest.
+ * A volume the project holds without one is given its id here; its bake is then captured by that tool.
+ */
+function ensureBakeIds(dir) {
+  for (const name of fs.readdirSync(path.join(dir, 'scenes'))) {
+    const file = path.join(dir, 'scenes', name)
+    const scene = readJson(file)
+    const walk = (n) => {
+      if (n.type === 'giVolume' && n.giVolume && !n.giVolume.bakeId) n.giVolume.bakeId = nsId('fps:gi:' + n.id)
+      for (const c of n.children ?? []) walk(c)
+    }
+    walk(scene.scene)
+    writeJson(file, scene)
+  }
+}
+
+/** The bakes the example already carries, for the volumes the freshly ingested scene still names. */
+function carriedBakes(dir) {
+  const named = new Set()
+  const walk = (n) => { if (n.type === 'giVolume' && n.giVolume?.bakeId) named.add(n.giVolume.bakeId); for (const c of n.children ?? []) walk(c) }
+  for (const name of fs.readdirSync(path.join(dir, 'scenes'))) walk(readJson(path.join(dir, 'scenes', name)).scene)
+  return readGiBakes(EXAMPLE).filter(b => named.has(b.id))
+}
+
 // ----- the project ------------------------------------------------------------------------------------------
 
 async function unzip(zip, dir) {
@@ -147,8 +175,10 @@ if (scriptsOnly) {
   await unzip(zipPath, work)
   singleScene(work)
   refreshScripts(work)
-  console.log('repacking')
-  const largest = await packFormat2(work)
+  ensureBakeIds(work)
+  const giBakes = carriedBakes(work)
+  console.log(`repacking (${giBakes.length} GI bakes carried over)`)
+  const largest = await packFormat2(work, { giBakes })
   install(work, EXAMPLE)
   fs.rmSync(work, { recursive: true, force: true })
   console.log(`${EXAMPLE} written - largest file ${(largest / 1048576).toFixed(1)} MB`)
