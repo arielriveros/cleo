@@ -147,11 +147,14 @@ export class ViewProjection {
      * through the main camera's inverse, to that nearer point: lighting, shadows and the screen-space
      * effects all see one consistent place. The same as {@link rasterProjection} when the camera sets neither.
      */
-    public viewmodelProjection(camera: { projectionMatrix: mat4; viewmodelMatrix: mat4 | null }): mat4 {
+    public viewmodelProjection(camera: { projectionMatrix: mat4; viewmodelMatrix: mat4 | null }, nudge: number = 0): mat4 {
         const raster = this.rasterProjection(camera.projectionMatrix);
         const d = camera.viewmodelMatrix;
-        if (!d) return raster;
-        return mat4.multiply(this._viewmodelProjScratch, raster, d);
+        const out = d ? mat4.multiply(this._viewmodelProjScratch, raster, d) : mat4.copy(this._viewmodelProjScratch, raster);
+        // A second draw of the same surface (the velocity pass) is pulled a hair toward the camera so the
+        // `less-equal` test against the depth the first draw wrote cannot lose an ULP and leave pixels unflagged.
+        if (nudge) out[10] += nudge;
+        return out;
     }
 
     private readonly _viewmodelProjScratch: mat4 = mat4.create();

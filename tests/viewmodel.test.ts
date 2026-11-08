@@ -116,4 +116,12 @@ describe('viewmodel projection', () => {
         const src = readFileSync(join(__dirname, '..', 'src', 'graphics', 'render', 'shadows.ts'), 'utf8').replace(/\r\n/g, '\n');
         expect(src).toMatch(/isEditorOnlyNode\(node\)\) continue;[\s\S]{0,400}if \(node\.viewmodel\) continue;/);
     });
+
+    it('the velocity draw is nudged toward the camera so no viewmodel pixel misses the depth test', () => {
+        const vp = readFileSync(join(__dirname, '..', 'src', 'graphics', 'render', 'viewProjection.ts'), 'utf8');
+        expect(vp).toMatch(/viewmodelProjection\(camera[^)]*nudge: number = 0\)/);
+        expect(vp).toContain('out[10] += nudge');
+        const src = readFileSync(join(__dirname, '..', 'src', 'graphics', 'render', 'temporal.ts'), 'utf8');
+        expect(src).toContain('VIEWMODEL_VELOCITY_NUDGE');
+    });
 });

@@ -466,6 +466,9 @@ export class TemporalPasses {
      * Depth-tested `less-equal` against the opaque depth and writing none of it, so an occluded object
      * contributes nothing and the buffer keeps the reprojected value for whatever is actually visible.
      */
+    /** NDC depth the viewmodel's velocity draw is pulled toward the camera (see viewmodelProjection). */
+    private static readonly VIEWMODEL_VELOCITY_NUDGE = 2e-5;
+
     /** Add `node` to the velocity pass's draw list if it needs a draw there. */
     private _selectMover(node: ModelNode, movers: ModelNode[]): void {
         if (!this._sys.geometry.inGBuffer(node)) return;
@@ -559,7 +562,7 @@ export class TemporalPasses {
             this._shaderManager.setUniform('u_model', node.worldTransform);
             this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
             this._shaderManager.setUniform('u_projection', vm
-                ? this._projection.viewmodelProjection(this._view.camera)
+                ? this._projection.viewmodelProjection(this._view.camera, TemporalPasses.VIEWMODEL_VELOCITY_NUDGE)
                 : this._projection.rasterProjection(this._view.camera.projectionMatrix));
             this._shaderManager.setUniform('u_uvViewProj', vm ? this._uvVmViewProjScratch : this._uvViewProjScratch);
             // 'objectOnly' is handed THIS frame's view-projection as its previous one, so the camera
