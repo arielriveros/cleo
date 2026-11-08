@@ -2184,11 +2184,12 @@ function giVolumes() {
   const y0 = lo - 1, y1 = hi + 14
   out.push(giVolume('hamlet', 'Hamlet GI', [(vMinX + vMaxX) / 2, (y0 + y1) / 2, (vMinZ + vMaxZ) / 2],
     [vMaxX - vMinX, y1 - y0, vMaxZ - vMinZ], [5.5, 4, 5.5], { rays: 64, maxRayDistance: 60, blendDistance: 6 }))
-  // The plaza before the skull cave, under its cliffs: a probe every 3 m.
+  // The plaza before the skull cave, under its cliffs: a probe every 3 m, from its floor to 15 m over it
+  // (the cliff tops round it are ground the probes would only sit inside).
   {
     const x = 0, z = -121, w = 30, d = 30
-    const [plo, phi] = groundRange(x - w / 2, x + w / 2, z - d / 2, z + d / 2)
-    const py0 = plo - 1, py1 = phi + 12
+    const [plo] = groundRange(x - w / 2, x + w / 2, z - d / 2, z + d / 2)
+    const py0 = plo - 1, py1 = plo + 15
     out.push(giVolume('cave-mouth', 'Cave Mouth GI', [x, (py0 + py1) / 2, z], [w, py1 - py0, d], [3, 3, 3],
       { rays: 64, maxRayDistance: 50, blendDistance: 4 }))
   }

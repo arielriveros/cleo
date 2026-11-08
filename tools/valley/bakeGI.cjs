@@ -6,6 +6,10 @@
 //   node tools/valley/bakeGI.cjs         # then: fresh captures of every volume
 //   node tools/valley/bakeGI.cjs --url http://127.0.0.1:8090/    # an editor dev server already running
 //   node tools/valley/bakeGI.cjs --only "Hamlet GI"              # one volume (by name); the rest keep theirs
+//   node tools/valley/bakeGI.cjs --vite-config vite.other.config.ts  # the private dev server on another config
+//
+// With --url the dev server is someone else's and stays up: stop it before the bakes are written if it
+// watches applications/editor/public (a watcher holding the old parts open fails the write with EBUSY).
 //
 // Why Chrome and not Electron: as tools/docsMedia/run.cjs explains, the desktop shell's Dawn runs out of
 // memory on the Valley. The installed Chrome runs the editor on WebGPU. The page is the editor exactly as a
@@ -36,6 +40,7 @@ const args = process.argv.slice(2);
 const arg = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
 const URL_ARG = arg('--url');
 const ONLY = arg('--only');
+const VITE_CONFIG = arg('--vite-config');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const t0 = Date.now();
@@ -57,9 +62,10 @@ async function waitFor(url, ms = 180000) {
 
 // --- DevTools protocol ------------------------------------------------------------------------------------
 
-let ws, nextId = 1;
+let ws, nextId = 1, closed = false;
 const pending = new Map();
 function cdp(method, params = {}) {
+    if (closed) return Promise.reject(new Error('the DevTools connection closed'));
     const id = nextId++;
     ws.send(JSON.stringify({ id, method, params }));
     return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
@@ -69,6 +75,13 @@ async function connect() {
     const page = targets.find(t => t.type === 'page');
     ws = new WebSocket(page.webSocketDebuggerUrl);
     await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+    // A closed connection fails what is waiting on it: a pending reply alone keeps nothing alive, and the
+    // script would otherwise just stop, exit code 0, with nothing said.
+    ws.onclose = () => {
+        for (const p of pending.values()) p.reject(new Error('the DevTools connection closed'));
+        pending.clear();
+        closed = true;
+    };
     ws.onmessage = (m) => {
         const msg = JSON.parse(m.data);
         if (msg.id && pending.has(msg.id)) {
@@ -97,6 +110,7 @@ async function evaluate(body) {
 async function until(body, ms, label) {
     const start = Date.now();
     while (Date.now() - start < ms) {
+        if (closed) throw new Error(`the browser went away waiting for ${label}`);
         try { const v = await evaluate(body); if (v) return v; } catch { /* between pages */ }
         await sleep(2000);
     }
@@ -117,7 +131,9 @@ async function main() {
     let url = URL_ARG;
     if (!url) {
         const editor = path.join(ROOT, 'applications', 'editor');
-        const child = spawn('npx', ['vite', '--port', String(EDITOR_PORT), '--strictPort', '--host', '127.0.0.1'], {
+        const viteArgs = ['vite', '--port', String(EDITOR_PORT), '--strictPort', '--host', '127.0.0.1'];
+        if (VITE_CONFIG) viteArgs.push('--config', VITE_CONFIG);
+        const child = spawn('npx', viteArgs, {
             cwd: editor, shell: true, stdio: ['ignore', 'pipe', 'pipe'],
         });
         child.stdout.on('data', d => process.stdout.write(`[vite] ${d}`));
@@ -126,6 +142,12 @@ async function main() {
         url = `http://127.0.0.1:${EDITOR_PORT}/`;
     }
     await waitFor(url);
+    // A browser already on the port (a run that was killed leaves its Chrome behind) would take this
+    // run's window and drop it: refuse instead.
+    try {
+        await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`);
+        throw new Error(`something already listens on ${CDP_PORT} (a Chrome left by an earlier run?): close it, or set GI_BAKE_CDP`);
+    } catch (e) { if (String(e.message).startsWith('something already')) throw e; }
     fs.rmSync(PROFILE, { recursive: true, force: true });
     children.push(spawn(CHROME, [
         `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${PROFILE}`, '--no-first-run', '--no-default-browser-check',
