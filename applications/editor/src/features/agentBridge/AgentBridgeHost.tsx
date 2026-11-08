@@ -3,7 +3,7 @@ import { useCleoEngine } from '../EngineContext'
 import { useHistory } from '../HistoryContext'
 import { APP_VERSION } from '../../version'
 import { agentBridge } from './bridgeClient'
-import { projectInfo, runCommand, type BridgeHost } from './commands'
+import { CONCURRENT_METHODS, projectInfo, runCommand, type BridgeHost } from './commands'
 import { attachAgentLogs } from './agentLogs'
 
 /**
@@ -30,6 +30,7 @@ export default function AgentBridgeHost() {
         desktop: typeof (window as any).cleoDesktop === 'object',
         project: await projectInfo(),
       }),
+      CONCURRENT_METHODS,
     )
     agentBridge.start()
     return () => { agentBridge.setHost(null); agentBridge.stop() }

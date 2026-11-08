@@ -1,18 +1,20 @@
 // @ts-check
 // The server instructions every client loads up front. Claude Code truncates them at 4,096 characters, so
-// this stays well under that (a test asserts it): the workflow plus the conventions an agent otherwise gets
-// wrong. The long-form knowledge is in the docs resources.
+// this stays under that (a test asserts it): how to get a request done in few calls, the node-ref grammar
+// (stated once here instead of in every schema) and the conventions an agent otherwise gets wrong. The
+// long-form knowledge is in the docs resources.
 
-export const INSTRUCTIONS = `Cleo MCP drives a RUNNING Cleo editor (a TypeScript WebGL2/WebGPU game engine). Every tool acts live on the project open in that editor.
+export const INSTRUCTIONS = `Cleo MCP drives a RUNNING Cleo editor (a TypeScript WebGL2/WebGPU game engine). Every tool acts live on the project open in that editor, and the user watches the viewport.
 
-Workflow
-1. editor_status first: is an editor connected, which project, scene and tab are open, play state.
-2. Look before you change: scene_tree (outline), node_get (one node: transform, settable props, script fields, body, trigger), asset_list (templates, models, materials, scripts).
-3. Change with scene_edit (batch many ops per call; each call is ONE undo step), script_write (class scripts, returns type errors), material_write.
-4. Verify: view_capture (screenshot), play_control (run the game, returns new log lines), logs_read. Fix and repeat.
-5. scene_save when the work should be kept. history undoes whole calls.
+Fewest calls
+- Act directly: scene_tree when you need to know what exists (its header names the selection), node_get for one node's props and world bounds. No status call needed first; tools say when no editor is connected.
+- scene_edit does a whole build in one call (each call = ONE undo step). A create op takes everything update does, so make whole objects at once, and add capture to see them:
+  {"ops":[{"op":"create","type":"cube","as":"$c","position":[0,0.5,0],"material":{"baseColor":[0.8,0.1,0.1]},"body":{"mass":1}}],"capture":{"focus":"$c"}}
+- Scripts: script_write (with attach) returns compile and type errors; then play_control {"action":"simulate","runSeconds":2,"capture":true,"stopAfter":true} runs it, returns new logs (early on the first error) and shows it.
+- Big outputs cost time: use scene_tree root/depth/name filters rather than the whole scene.
+- scene_save only when asked to keep the work. history undoes whole calls.
 
-Nodes are addressed by "/Parent/Child" path from the scene root, "#<id>", or a unique bare name. A create op can set as:"$name" for later ops in the same call.
+Node refs: "/Parent/Child" path from the scene root, "#<id>", a unique bare name, "$alias" (set by a create op's "as" earlier in the same call), or "@selected" (the user's selection: "make this spin" means @selected).
 
 Engine conventions
 - Metres; +Y is up; a node faces +Z. Rotations are Euler DEGREES [x, y, z]; positive x pitch tilts the view down.
@@ -25,8 +27,8 @@ Engine conventions
     onUpdate(delta: number, time: number) { this.rotateY(this.speed * delta) }
   }
   Handlers: onStart, onUpdate(delta, time), onCollision(other), onTriggerEnter(other), onTriggerExit(other), onSpawn, onDespawn. Import everything from 'cleo' (Input, Logger, Game, Vec...); there is no global object. Other scripts are imported by their asset path ('@/Shared/Math').
-- Physics: a node collides only once it has a body (scene_edit update body). mass 0 = static; a moving player body usually locks rotation: angularConstraints [0,0,0]. Move a body-driven node through this.velocity, not setPosition. Triggers detect overlap without collision.
+- Physics: a node collides only once it has a body. mass 0 = static; a moving player body usually locks rotation: angularConstraints [0,0,0]. Move a body-driven node through this.velocity, not setPosition. Triggers detect overlap without collision.
 - Animation one-shots play by action NAME (animator.playAction('Attack')); scripts never play clips directly.
 - Prefer existing templates and models (asset_list) over primitives when they fit.
 
-Docs: resources under cleo://docs/ (start with scripting/getting-started.md, scripting/node-api.md, scripting/patterns.md, reference/node-types.md) and working examples under cleo://examples/scripts/. Read them before writing non-trivial scripts.`;
+Docs: resources under cleo://docs/ (scripting/getting-started.md, scripting/node-api.md, scripting/patterns.md, reference/node-types.md) and examples under cleo://examples/scripts/. Read them before non-trivial scripts.`;

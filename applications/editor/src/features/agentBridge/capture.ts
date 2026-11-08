@@ -50,8 +50,10 @@ function encode(source: HTMLCanvasElement, { maxSize, format }: { maxSize: numbe
   return { data: url.slice(url.indexOf(',') + 1), mimeType, width: out.width, height: out.height }
 }
 
+export interface SubtreeBounds { min: number[]; max: number[]; center: number[]; size: number[]; radius: number }
+
 /** World-space box around a node and its visible descendants, or null if nothing in it has extent. */
-export function subtreeBounds(node: Node): { center: number[]; radius: number } | null {
+export function subtreeBounds(node: Node): SubtreeBounds | null {
   let min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity]
   const grow = (n: Node) => {
     try {
@@ -65,8 +67,9 @@ export function subtreeBounds(node: Node): { center: number[]; radius: number } 
   grow(node)
   if (!Number.isFinite(min[0])) return null
   const center = [0, 1, 2].map(i => (min[i] + max[i]) / 2)
-  const radius = Math.max(0.25, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2)
-  return { center, radius }
+  const size = [0, 1, 2].map(i => max[i] - min[i])
+  const radius = Math.max(0.25, Math.hypot(size[0], size[1], size[2]) / 2)
+  return { min, max, center, size, radius }
 }
 
 /**

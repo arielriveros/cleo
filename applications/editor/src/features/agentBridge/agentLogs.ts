@@ -56,9 +56,31 @@ export function readLogs(opts: { since?: number; level?: 'all' | 'warn' | 'error
   return hits.slice(-(opts.limit ?? 60))
 }
 
-export function formatLogs(entries: AgentLogEntry[]): string {
-  return entries.map(e => {
+/** A log line is cut here: a stack or a dumped object past this rarely helps and costs the agent tokens. */
+const LINE_MAX = 600
+
+/**
+ * The entries as the agent reads them, one line each: `seq time LEVEL [scope] text`. A run of identical
+ * entries (a script logging every frame) becomes one line with "(xN)". With `maxLines`, only the newest that
+ * many lines are shown, after a note of how many were left out and how to page back to them.
+ */
+export function formatLogs(entries: AgentLogEntry[], opts: { maxLines?: number } = {}): string {
+  const lines: string[] = []
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i]
+    let repeats = 1
+    while (i + repeats < entries.length) {
+      const next = entries[i + repeats]
+      if (next.level !== e.level || next.scope !== e.scope || next.text !== e.text) break
+      repeats++
+    }
     const t = new Date(e.time).toISOString().slice(11, 19)
-    return `${e.seq} ${t} ${e.level.toUpperCase()} [${e.scope}] ${e.text}`
-  }).join('\n')
+    const text = e.text.length > LINE_MAX ? `${e.text.slice(0, LINE_MAX)}… [${e.text.length - LINE_MAX} more chars]` : e.text
+    lines.push(`${e.seq} ${t} ${e.level.toUpperCase()} [${e.scope}] ${text}${repeats > 1 ? ` (x${repeats}, last #${entries[i + repeats - 1].seq})` : ''}`)
+    i += repeats - 1
+  }
+  const max = opts.maxLines ?? Infinity
+  if (lines.length <= max) return lines.join('\n')
+  const cut = lines.length - max
+  return [`… ${cut} older line${cut === 1 ? '' : 's'} not shown (logs_read with since ${entries[0].seq - 1} pages through them)`, ...lines.slice(-max)].join('\n')
 }

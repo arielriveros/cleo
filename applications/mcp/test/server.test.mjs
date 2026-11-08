@@ -31,6 +31,8 @@ test('tools/list advertises the catalog with its metadata and descriptions intac
         const byName = Object.fromEntries(tools.map(t => [t.name, t]));
         assert.equal(tools.length, 14);
         assert.equal(byName.editor_status._meta?.['anthropic/alwaysLoad'], true);
+        assert.equal(byName.scene_edit._meta?.['anthropic/alwaysLoad'], true);
+        assert.equal(byName.asset_list._meta?.['anthropic/alwaysLoad'], undefined);
         assert.equal(byName.execute_js._meta?.['anthropic/requiresUserInteraction'], true);
         assert.equal(byName.scene_tree.annotations?.readOnlyHint, true);
         assert.equal(byName.execute_js.annotations?.destructiveHint, true);

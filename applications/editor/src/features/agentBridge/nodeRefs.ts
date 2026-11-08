@@ -1,8 +1,9 @@
 import { isEditorOwnedName, type Node, type Scene } from 'cleo'
 
 // How an agent names nodes: "/Parent/Child" paths of names from the scene root, "#<id>", a unique bare
-// name, or a "$alias" bound earlier in the same scene_edit call. Names are what the user sees in the scene
-// tree and what scripts look nodes up by, so paths read naturally in both directions; ids disambiguate.
+// name, a "$alias" bound earlier in the same scene_edit call, or "@selected" (what the user has selected in
+// the editor). Names are what the user sees in the scene tree and what scripts look nodes up by, so paths
+// read naturally in both directions; ids disambiguate.
 //
 // The visible tree is the SceneInspector's: editor helpers (named __editor__/__debug__) and terrain chunks
 // are hidden, by NAME, exactly as `isHiddenInTree` there does.
@@ -37,14 +38,26 @@ export class NodeRefError extends Error {}
 const list = (nodes: Node[], root: Node, max = 8) =>
   nodes.slice(0, max).map(n => `${nodePath(n, root)} (#${n.id})`).join(', ') + (nodes.length > max ? `, … ${nodes.length - max} more` : '')
 
+/** The ref that names the editor's selection. */
+export const SELECTED_REF = '@selected'
+
 /**
  * The node `ref` names in `scene`, or a NodeRefError that says what exists instead: the agent reads that
- * message and corrects itself, so it names the near misses rather than just failing.
+ * message and corrects itself, so it names the near misses rather than just failing. `selectedId` is the
+ * editor's selection, for "@selected".
  */
-export function resolveNodeRef(scene: Scene, ref: string, aliases?: ReadonlyMap<string, Node>): Node {
+export function resolveNodeRef(scene: Scene, ref: string, aliases?: ReadonlyMap<string, Node>, selectedId?: string | null): Node {
   const root = scene.root
   const r = ref.trim()
   if (!r) throw new NodeRefError('Empty node reference.')
+
+  if (r.toLowerCase() === SELECTED_REF) {
+    if (!selectedId) throw new NodeRefError('Nothing is selected in the editor. Ask the user to select a node, or name one by path.')
+    const node = scene.getNodeById(selectedId)
+    if (!node || isHiddenNode(node))
+      throw new NodeRefError('The selected node is not in this scene. During Play the running game has its own nodes: stop first, or name one by path.')
+    return node
+  }
 
   if (r.startsWith('$')) {
     const node = aliases?.get(r)

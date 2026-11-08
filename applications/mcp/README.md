@@ -57,8 +57,10 @@ For Claude Desktop, put the same command in `claude_desktop_config.json` under `
   a pseudo-terminal (node-pty) and streams it to an xterm.js terminal in the panel
   (`features/agentChat/ClaudeCodeView.tsx`, `terminalStore.ts`, `panelStore.ts`).
   - It is started with `--mcp-config` naming this checkout's stdio server, so the session gets the Cleo
-    tools whatever is configured, plus a short `--append-system-prompt` saying it runs inside the editor.
-    It starts in the engine checkout (`CLEO_CLAUDE_CWD` to change it).
+    tools whatever is configured, `--allowedTools "mcp__cleo__*"` so they run without a permission prompt
+    each (every change is still one undo step; `execute_js` asks every time regardless), and a short
+    `--append-system-prompt` saying it runs inside the editor. It starts in the engine checkout
+    (`CLEO_CLAUDE_CWD` to change it).
   - It signs in the way Claude Code always does: its own login, through Anthropic. The host never reads,
     stores or passes on a credential, and nothing limits how Claude Code signs in. That is what lets it run
     on the user's Claude plan.
@@ -93,29 +95,43 @@ and are safe to delete.
 
 ## Tools
 
+The tools marked **core** load with the session (`_meta["anthropic/alwaysLoad"]`), so Claude Code calls them
+without a tool-search turn first; the rest load on demand. Node refs everywhere: `"/A/B"` path, `"#id"`, a
+unique name, `"$alias"` from an earlier create in the same call, or `"@selected"` (the editor's selection).
+
 | Tool | What it does |
 | --- | --- |
-| `editor_status` | Project, scenes, active tab, play state, unsaved work, selection. Always loaded. |
-| `scene_tree` | Outline of the scene, or a type/name search returning paths and ids. |
-| `node_get` | One node: transform, script fields, body, trigger, material, and its **settable props**. |
-| `scene_edit` | A batch of ops as one undo step: `create` (from the Add catalog, a template or a model), `update` (transform, props, script fields, material, body, trigger), `delete`, `move`, `attachScript`, `detachScript`, `select`. |
-| `script_write` / `script_read` | Create or replace a class script and attach it; returns the runtime-compile and TypeScript diagnostics. |
-| `material_write` | Create or update a PBR material and assign it. |
+| `editor_status` (core) | Project, scenes, active tab, play state, unsaved work, selection. |
+| `scene_tree` (core) | Outline of the scene, or a type/name search returning paths and ids; the header names the selection. |
+| `node_get` (core) | One node: transform, world bounds, script fields, body, trigger, material, and its **settable props**. |
+| `scene_edit` (core) | A batch of ops as one undo step: `create` (from the Add catalog, a template or a model, taking every field `update` does: material, body, script, script fields, props), `update`, `delete`, `move`, `attachScript`, `detachScript`, `select`. A material can be a PBR spec inline. `capture` returns a screenshot of the result. |
+| `script_write` (core) / `script_read` | Create or replace a class script and attach it; returns the runtime-compile and TypeScript diagnostics. |
+| `material_write` | Create or update a PBR material and assign it; `capture` too. |
 | `asset_list` | Templates, models, materials, scripts, clips, brains, particles, sounds, textures, tilesets. |
-| `view_capture` | Screenshot of the viewport (the game view during Play), optionally framing a node first. |
-| `play_control` | Play, Simulate, pause, stop. Can run for N seconds and return the new log lines. |
-| `logs_read` | Console entries after a cursor. |
+| `view_capture` (core) | Screenshot of the viewport (the game view during Play), optionally framing a node first. |
+| `play_control` (core) | Play, Simulate, pause, stop. Runs for N seconds (returning early on the first error) with the new log lines; `capture` and `stopAfter` make a test run one call. |
+| `logs_read` | Console entries after a cursor; repeated lines collapsed. |
 | `history` | Undo or redo whole steps. |
 | `scene_save` | Save the active tab. |
-| `execute_js` | Escape hatch: async JavaScript in the editor page. |
+| `execute_js` | Escape hatch: async JavaScript in the editor page. The user approves every run. |
+
+So *"add a red cube and show me"* is one `scene_edit` (a create op with `material`, `as`, and `capture`), and
+*"make the selected node spin"* is `script_write` with `attach: ["@selected"]` plus one `play_control`
+`{action: "simulate", capture: true, stopAfter: true}`.
+
+**Speed.** The editor runs changes one at a time (two history transactions at once would merge their undo
+steps), but pure reads (`status`, `scene.tree`, `node.get`, `asset.list`, `logs.read`, `script.read`) skip
+that queue, so a look at the scene never waits behind a capture, a Play run or a type check. The script type
+checker loads in the background after the first call. Results are compact JSON and cut at 40,000 characters,
+under Claude Code's 50,000-character limit, past which a result is spilled to a file.
 
 Resources: `cleo://docs/...` (all of `docs/`) and `cleo://examples/scripts/...`.
 
 ## Testing
 
 ```sh
-npm test                    # bridge security, peer relay, the stdio server through the SDK v2 client, hosted terminal (node:test, real sockets, a real pty)
-node scripts/smoke.mjs      # end to end through the host against a running editor (--keep leaves the result)
+npm test                    # bridge security, peer relay, the stdio server through the SDK v2 client, the catalog's size budget, hosted terminal (node:test, real sockets, a real pty)
+node scripts/smoke.mjs      # end to end through the host against a running editor: inline material + capture, @selected, reads during a script write, a one-call test run, undo (--keep leaves the result)
 ```
 
 The editor half is tested by `applications/editor/tests/agentBridge.test.ts` and `claudePanel.test.ts`.

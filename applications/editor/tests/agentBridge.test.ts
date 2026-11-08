@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { LightNode, Node, PointLight, Scene } from 'cleo'
 import { NodeRefError, nodePath, resolveNodeRef, userChildren } from '../src/features/agentBridge/nodeRefs'
 import { applyProp, elide, outline, settableProps, simpleValue } from '../src/features/agentBridge/inspect'
+import { formatLogs, type AgentLogEntry } from '../src/features/agentBridge/agentLogs'
 
 // The agent bridge's pure half: how an agent names nodes, what it is shown of them, and how its property
 // writes are checked. The command layer above it needs the live editor; this is what can be pinned here.
@@ -56,6 +57,39 @@ describe('node references', () => {
     const { s, player } = scene()
     expect(resolveNodeRef(s, '$hero', new Map([['$hero', player]]))).toBe(player)
     expect(() => resolveNodeRef(s, '$hero')).toThrow(/Unknown alias/)
+  })
+
+  it('resolves @selected to the editor selection, and says so when there is none', () => {
+    const { s, model, helper } = scene()
+    expect(resolveNodeRef(s, '@selected', undefined, model.id)).toBe(model)
+    expect(resolveNodeRef(s, ' @Selected ', undefined, model.id)).toBe(model)
+    expect(() => resolveNodeRef(s, '@selected', undefined, null)).toThrow(/Nothing is selected/)
+    expect(() => resolveNodeRef(s, '@selected', undefined, 'not-in-scene')).toThrow(/not in this scene/)
+    expect(() => resolveNodeRef(s, '@selected', undefined, helper.id)).toThrow(NodeRefError)
+  })
+})
+
+// What play_control and logs_read return: a script logging every frame must not flood the agent's context.
+describe('log formatting', () => {
+  const entry = (seq: number, text: string, level: AgentLogEntry['level'] = 'log', scope = 'Script'): AgentLogEntry =>
+    ({ seq, level, scope, time: Date.UTC(2026, 0, 1, 12, 0, 0), text })
+
+  it('collapses a run of identical entries into one line', () => {
+    const out = formatLogs([entry(1, 'tick'), entry(2, 'tick'), entry(3, 'tick'), entry(4, 'boom', 'error'), entry(5, 'tick')])
+    expect(out.split('\n')).toEqual([
+      '1 12:00:00 LOG [Script] tick (x3, last #3)',
+      '4 12:00:00 ERROR [Script] boom',
+      '5 12:00:00 LOG [Script] tick',
+    ])
+  })
+
+  it('cuts long lines and keeps the newest lines, saying how to page back', () => {
+    expect(formatLogs([entry(1, 'x'.repeat(2000))])).toMatch(/x{600}… \[1400 more chars\]$/)
+    const many = Array.from({ length: 50 }, (_, i) => entry(i + 10, `line ${i}`))
+    const lines = formatLogs(many, { maxLines: 40 }).split('\n')
+    expect(lines).toHaveLength(41)
+    expect(lines[0]).toMatch(/^… 10 older lines not shown \(logs_read with since 9/)
+    expect(lines.at(-1)).toMatch(/line 49$/)
   })
 })
 

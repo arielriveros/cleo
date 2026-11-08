@@ -1,6 +1,6 @@
 // The editor's end of the agent bridge: finds a running Cleo MCP server (applications/mcp), connects OUT to
-// it over a loopback WebSocket, and runs the commands it relays, one at a time, through the handler the
-// AgentBridgeHost installs. No React here: a module singleton with a tiny external store, so the menu-bar
+// it over a loopback WebSocket, and runs the commands it relays through the handler the AgentBridgeHost
+// installs: changes one at a time, pure reads as they come. No React here: a module singleton with a tiny external store, so the menu-bar
 // chip and the host component share one connection.
 //
 // Wire protocol: see applications/mcp/src/bridge.mjs (the server is the authority on it).
@@ -79,6 +79,10 @@ class AgentBridgeClient {
     app: 'cleo-editor', version: '0', origin: location.origin, desktop: false, project: { id: null, name: null },
   })
   private queue: Promise<void> = Promise.resolve()
+  /** Methods that only read, run as they arrive (see `dispatch`). */
+  private concurrent = new Set<string>()
+  /** What is running now, oldest first: the chip shows the newest. */
+  private inflight: BridgeActivity[] = []
   private termListeners = new Set<(event: any) => void>()
   private running = false
   /** A token this tab must not retry: refused, or handed over to another tab. */
@@ -132,10 +136,14 @@ class AgentBridgeClient {
 
   // --- lifecycle -----------------------------------------------------------------------------------------
 
-  /** Installed by AgentBridgeHost once the editor is up. Replaces any previous one. */
-  setHost(handler: CommandHandler | null, hello?: () => Promise<HelloClient>) {
+  /**
+   * Installed by AgentBridgeHost once the editor is up. Replaces any previous one. `concurrent` names the
+   * methods that only read, which need not wait their turn.
+   */
+  setHost(handler: CommandHandler | null, hello?: () => Promise<HelloClient>, concurrent?: Iterable<string>) {
     this.handler = handler
     if (hello) this.hello = hello
+    if (concurrent) this.concurrent = new Set(concurrent)
   }
 
   start() {
@@ -221,7 +229,7 @@ class AgentBridgeClient {
       } else if (msg?.type === 'term-event') {
         for (const cb of [...this.termListeners]) cb(msg.event)
       } else if (msg?.type === 'call' && typeof msg.id === 'number') {
-        this.enqueue(socket, msg.id, String(msg.method), msg.params)
+        this.dispatch(socket, msg.id, String(msg.method), msg.params)
       }
     }
     socket.onerror = () => { /* onclose follows and decides */ }
@@ -235,23 +243,33 @@ class AgentBridgeClient {
     }
   }
 
-  /** Commands run strictly one after another: the editor is one thread of React state and engine mutation. */
-  private enqueue(socket: WebSocket, id: number, method: string, params: unknown) {
-    this.queue = this.queue.then(async () => {
-      this.set({ activity: { method, startedAt: Date.now() } })
-      let reply: object
-      try {
-        if (!this.handler) throw new Error('The editor is still starting up; try again in a moment.')
-        reply = { type: 'result', id, ok: true, result: await this.handler(method, params) }
-        this.set({ lastError: null })
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        reply = { type: 'result', id, ok: false, error: { message } }
-        this.set({ lastError: message })
-      }
-      this.set({ activity: null, calls: this.status.calls + 1, lastMethod: method })
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(reply))
-    })
+  /**
+   * Changes run strictly one after another: the editor is one thread of React state and engine mutation, and
+   * two open history transactions would fold into one undo step. Pure reads (the host's `concurrent` list)
+   * skip the line, so a look at the scene never waits behind a capture, a Play run or a cold type check.
+   */
+  private dispatch(socket: WebSocket, id: number, method: string, params: unknown) {
+    if (this.concurrent.has(method)) { void this.run(socket, id, method, params); return }
+    this.queue = this.queue.then(() => this.run(socket, id, method, params))
+  }
+
+  private async run(socket: WebSocket, id: number, method: string, params: unknown) {
+    const activity = { method, startedAt: Date.now() }
+    this.inflight.push(activity)
+    this.set({ activity })
+    let reply: object
+    try {
+      if (!this.handler) throw new Error('The editor is still starting up; try again in a moment.')
+      reply = { type: 'result', id, ok: true, result: await this.handler(method, params) }
+      this.set({ lastError: null })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      reply = { type: 'result', id, ok: false, error: { message } }
+      this.set({ lastError: message })
+    }
+    this.inflight.splice(this.inflight.indexOf(activity), 1)
+    this.set({ activity: this.inflight.at(-1) ?? null, calls: this.status.calls + 1, lastMethod: method })
+    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(reply))
   }
 }
 

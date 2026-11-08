@@ -46,6 +46,13 @@ export const TERMINAL_PROMPT = 'You are running in a terminal panel inside the C
     + 'engine and its docs.';
 
 /**
+ * The hosted session runs the Cleo tools without asking (an ordinary CLI permission flag): each change is one
+ * undo step in the editor the user is watching. execute_js still asks every time: it is marked
+ * `anthropic/requiresUserInteraction`, which no allow rule overrides.
+ */
+export const ALLOWED_TOOLS = 'mcp__cleo__*';
+
+/**
  * Where the user's `claude` is: CLEO_CLAUDE_PATH, then PATH, then where the native installer puts it.
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} [env]
  * @returns {string | null}
@@ -269,7 +276,7 @@ export class TerminalManager {
         this.serializer = new this.modules.SerializeAddon();
         this.mirror.loadAddon(this.serializer);
 
-        const args = ['--mcp-config', this.writeMcpConfig(), '--append-system-prompt', TERMINAL_PROMPT];
+        const args = ['--mcp-config', this.writeMcpConfig(), '--allowedTools', ALLOWED_TOOLS, '--append-system-prompt', TERMINAL_PROMPT];
         if (opts.resume) args.push('--continue');
         const { file, args: argv } = claudeCommand(this.claudePath, args);
         const env = {
@@ -291,7 +298,7 @@ export class TerminalManager {
         this.exitCode = null;
         this.problem = null;
         this.pending = '';
-        this.log(`Claude Code started (pid ${proc.pid}, ${this.cols}x${this.rows}) in ${this.cwd}`);
+        this.log(`Claude Code started (pid ${proc.pid}, ${this.cols}x${this.rows}) in ${this.cwd}: ${args.filter(a => a !== TERMINAL_PROMPT).join(' ')}`);
         proc.onData((/** @type {string} */ d) => { if (this.proc === proc) this.onOutput(d); });
         proc.onExit((/** @type {{ exitCode: number }} */ e) => {
             releaseExited(proc);

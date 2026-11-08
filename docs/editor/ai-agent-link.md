@@ -47,8 +47,10 @@ same Claude Code you would run in a terminal yourself, with the Cleo tools alrea
   instead.)
 - **First start.** It starts in the engine folder and asks once whether you trust that folder.
 - **Using it.** Type to Claude as in any terminal. Its changes to the project show up in the viewport as
-  they happen, and each request is one undo step. Claude Code asks before it uses a tool for the first
-  time; pick the answer that stops it asking again to let the Cleo tools run freely.
+  they happen, and each request is one undo step. The Cleo tools run without asking each time (Ctrl+Z
+  undoes any of it); running its own JavaScript in the editor still asks every time.
+- **This, here.** Claude can work on whatever you have selected: *"make this spin"* means the selected
+  node. It can also show you what it did: it takes screenshots of the viewport as part of its changes.
 - **Copy and paste.** Select text and press Ctrl+C to copy it; without a selection, Ctrl+C is Claude Code's
   own interrupt. Ctrl+V pastes. Every other key, such as Esc, goes to Claude Code.
 - **It keeps running.** Closing the panel, switching tabs or reloading the editor leaves the session

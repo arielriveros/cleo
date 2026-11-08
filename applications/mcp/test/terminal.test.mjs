@@ -8,7 +8,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import headless from '@xterm/headless';
 import serialize from '@xterm/addon-serialize';
-import { TERMINAL_PROMPT, TerminalManager, claudeCommand, findClaude } from '../src/terminal.mjs';
+import { ALLOWED_TOOLS, TERMINAL_PROMPT, TerminalManager, claudeCommand, findClaude } from '../src/terminal.mjs';
 import { olderThan, withoutClaudeSession } from '../src/env.mjs';
 
 const XTERM = { Terminal: headless.Terminal, SerializeAddon: serialize.SerializeAddon };
@@ -96,11 +96,16 @@ test('start runs claude with the cleo MCP server, a clean environment and the ed
     bridge.op('start', { cols: 120, rows: 40 });
     const p = await until(() => pty.spawned[0]);
     assert.equal(p.file, process.execPath);
-    assert.deepEqual(p.args.slice(0, 1), ['--mcp-config']);
-    assert.deepEqual(p.args.slice(2), ['--append-system-prompt', TERMINAL_PROMPT]);
-    const config = JSON.parse(fs.readFileSync(p.args[1], 'utf8'));
+    const flag = (/** @type {string} */ name) => p.args[p.args.indexOf(name) + 1];
+    // The Cleo tools run without a permission prompt each (execute_js still asks: requiresUserInteraction).
+    assert.equal(flag('--allowedTools'), ALLOWED_TOOLS);
+    assert.equal(ALLOWED_TOOLS, 'mcp__cleo__*');
+    assert.equal(flag('--append-system-prompt'), TERMINAL_PROMPT);
+    const config = JSON.parse(fs.readFileSync(flag('--mcp-config'), 'utf8'));
     assert.match(config.mcpServers.cleo.args[0], /index\.mjs$/);
     assert.equal(config.mcpServers.cleo.env.CLEO_AGENT_BRIDGE_FILE, path.join(dataDir, 'agent-bridge.json'));
+    // A session the host runs must never replace that host (index.mjs reads this).
+    assert.equal(config.mcpServers.cleo.env.CLEO_HOSTED_BY, String(process.pid));
     assert.equal(p.opts.cols, 120);
     assert.equal(p.opts.rows, 40);
     assert.equal(p.opts.cwd, dataDir);

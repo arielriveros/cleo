@@ -2,15 +2,21 @@
 // The tool catalog. Schemas and descriptions live HERE, so `tools/list` answers even while no editor is
 // connected; every handler relays to the editor (applications/editor/src/features/agentBridge/commands.ts),
 // which runs it against the live project. Method names below must match that file's registry.
+//
+// Written for few round trips: the core tools load up front (no tool-search turn before their first use),
+// a create takes everything a node needs (material included) and a change can return a screenshot, so a
+// request like "add a red cube and show me" is one call. The schemas stay small, because every always-loaded
+// tool's schema is in every request; the node-ref grammar and the conventions live once, in INSTRUCTIONS.
 
 import { z } from 'zod';
 import { BridgeError } from './bridge.mjs';
 
 const vec3 = z.array(z.number()).length(3);
-const nodeRef = z.string().min(1).describe('A node: "/Parent/Child" path from the scene root, "#<id>", a unique bare name, or a "$alias" set by an earlier create op in the same call.');
+const unit = z.number().min(0).max(1);
+const ref = z.string().min(1).describe('Node ref');
 
-/** Text results past this are cut, with a note; the editor already pages its big answers. */
-const MAX_TEXT = 60_000;
+/** Text results past this are cut, with a note: under Claude Code's 50,000 characters, past which a result is spilled to a file. */
+const MAX_TEXT = 40_000;
 
 /** @param {string} s */
 function clip(s) {
@@ -18,14 +24,15 @@ function clip(s) {
 }
 
 /**
- * What the editor returned, as MCP content: `{text?, data?, images?, isError?}`.
+ * What the editor returned, as MCP content: `{text?, data?, images?, isError?}`. Data is compact JSON: the
+ * model reads it as well as an indented copy, at two thirds of the tokens.
  * @param {any} r
  */
 export function toToolResult(r) {
     /** @type {any[]} */
     const content = [];
     if (typeof r?.text === 'string' && r.text) content.push({ type: 'text', text: clip(r.text) });
-    if (r?.data !== undefined) content.push({ type: 'text', text: clip(JSON.stringify(r.data, null, 1)) });
+    if (r?.data !== undefined) content.push({ type: 'text', text: clip(JSON.stringify(r.data)) });
     for (const img of r?.images ?? []) content.push({ type: 'image', data: img.data, mimeType: img.mimeType });
     if (!content.length) content.push({ type: 'text', text: 'OK' });
     return { content, isError: !!r?.isError };
@@ -39,6 +46,37 @@ export function toErrorResult(err) {
 
 const READ = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
+/** Loaded with the session instead of found through tool search: the tools nearly every request uses. */
+const CORE = { 'anthropic/alwaysLoad': true };
+
+/** The tools that load up front (CORE); tests hold their size down. */
+export const CORE_TOOLS = ['editor_status', 'scene_tree', 'node_get', 'scene_edit', 'script_write', 'view_capture', 'play_control'];
+
+/** A screenshot taken after the change, in the same call. */
+const capture = z.union([z.boolean(), z.object({
+    focus: z.string().optional(),
+    yaw: z.number().optional(),
+    pitch: z.number().optional(),
+    maxSize: z.number().int().optional(),
+})]).optional().describe('Screenshot afterwards: true = the view as it is; {focus:"$alias"} frames that node first.');
+
+const pbr = {
+    baseColor: vec3.optional(),
+    metallic: unit.optional(),
+    roughness: unit.optional(),
+    emissive: vec3.optional(),
+    emissiveIntensity: z.number().min(0).optional(),
+    opacity: unit.optional(),
+    transparent: z.boolean().optional(),
+};
+
+/** Add-catalog ids a create op takes as `type`. */
+const TYPES = 'empty, trigger, character, controller, navMesh, perspectiveCamera, orthographicCamera, cameraRig, directionalLight, '
+    + 'pointLight, spotlight, skyLight, cube, sphere, capsule, cylinder, cone, torus, pyramid, quad, plane, circle, triangle, ramp, '
+    + 'cornerRamp, stairs, spiralStairs, arch, tube, hollowBox, skybox, skyAtmosphere, lightProbe, exposureVolume, volumetricFog, '
+    + 'waterVolume, occlusionVolume, wind, weather, volumetricClouds, landscape, decal, particleSystem, forceField, cloth, spatialSound, '
+    + 'ambientSound, sprite, animatedSprite, tilemap, uiCanvas, uiWorldRoot, uiStackColumn, uiStackRow, uiSpacer, uiPanel, uiText, '
+    + 'uiImage, uiButton, uiProgressBar, uiSlider, uiToggle, uiTextInput';
 
 /**
  * @typedef {{ name: string, config: { title: string, description: string, inputSchema: Record<string, any>,
@@ -57,6 +95,9 @@ export function registerTools(/** @type {import('@modelcontextprotocol/server').
         server.registerTool(d.name, { ...d.config, inputSchema: z.object(d.config.inputSchema) }, (/** @type {any} */ args) => d.handler(args));
     }
 }
+
+/** Extra time a call needs when it also captures (frames settle) or stops the game afterwards. */
+const extraMs = (/** @type {any} */ a) => (a?.capture ? 10_000 : 0) + (a?.stopAfter ? 20_000 : 0);
 
 /**
  * The tool catalog as plain definitions (tests read them without a server). Each handler relays to the
@@ -82,123 +123,103 @@ export function toolDefinitions(bridge) {
 
     relay('editor_status', 'status', {
         title: 'Editor status',
-        description: 'Start here. Reports whether a Cleo editor is connected and what it has open: the project, its scenes '
-            + '(which is open, which is the main one), the active tab and editor mode, play state, unsaved changes, the '
-            + 'selected node and the renderer backend. Cheap; call it again after a project switch or a reload.',
+        description: 'Whether a Cleo editor is connected and what it has open: the project, its scenes (open, main), the active '
+            + 'tab and editor mode, play state, unsaved changes, the selected node, the renderer. Cheap. Other tools already '
+            + 'say when no editor is connected, so call this when you need those facts.',
         inputSchema: {},
         annotations: READ,
-        _meta: { 'anthropic/alwaysLoad': true },
+        _meta: CORE,
     }, { timeoutMs: 10000 });
 
     relay('scene_tree', 'scene.tree', {
         title: 'Scene tree',
-        description: 'An outline of the open scene (or, during Play, the running game scene): one line per node with its '
-            + 'name, [type] and flags (script=<name>, body, trigger, hidden, template=<name>, model=<name>). '
-            + 'Indentation is nesting; paths are built from the names. Editor helpers are left out. '
-            + 'Use `root` and `depth` to zoom into a subtree, and `type`/`name` to search the whole scene (a search returns '
-            + 'full paths instead of an outline). Large scenes are cut at `limit` lines.',
+        description: 'The open scene (during Play, the running game) as an outline: one line per node with its name, [type] and '
+            + 'flags (script=, body, trigger, material=, hidden, template=, model=); indentation is nesting. The header names '
+            + 'the selection and unsaved state. `root`/`depth` zoom into a subtree; `type`/`name` search the whole scene and '
+            + 'return full paths.',
         inputSchema: {
-            root: nodeRef.optional().describe('Subtree to outline (default: the scene root).'),
+            root: ref.optional().describe('Subtree to outline (default: the scene root).'),
             depth: z.number().int().min(1).max(32).optional().describe('Levels below root to show (default 4).'),
-            type: z.string().optional().describe('Only nodes of this type (e.g. "model", "light", "camera", "character").'),
-            name: z.string().optional().describe('Only nodes whose name contains this text (case-insensitive).'),
+            type: z.string().optional().describe('Only nodes of this type (e.g. "model", "light", "camera").'),
+            name: z.string().optional().describe('Only names containing this (case-insensitive).'),
             limit: z.number().int().min(10).max(2000).optional().describe('Maximum lines (default 300).'),
         },
         annotations: READ,
+        _meta: CORE,
     });
 
     relay('node_get', 'node.get', {
         title: 'Get node',
-        description: 'Everything about one node: path, id, type, transform (position metres, rotation Euler degrees, scale), '
-            + 'visibility, children, its script (asset name + per-node field values), physics body, trigger, variables, '
-            + 'material link, and `props`: the node\'s settable properties with their current values. Those prop names are '
-            + 'exactly what scene_edit update `props` accepts (dotted paths reach into objects, e.g. "light.intensity"). '
-            + 'Set `json: true` to also get the serialized node (vertex buffers and images elided).',
+        description: 'One node: path, id, type, transform (metres, Euler degrees), world position and world bounds (center, '
+            + 'size, min, max of it and its children), children, script and its field values, body, trigger, variables, '
+            + 'material, and `props`: its settable properties with current values, by the names scene_edit `props` takes '
+            + '(dotted paths reach into objects, e.g. "light.intensity"). `json: true` adds the serialized node.',
         inputSchema: {
-            node: nodeRef,
-            json: z.boolean().optional().describe('Include the serialized node JSON (default false).'),
+            node: ref,
+            json: z.boolean().optional(),
         },
         annotations: READ,
+        _meta: CORE,
     });
 
-    const createOp = z.object({
-        op: z.literal('create'),
-        type: z.string().optional().describe('An Add-catalog id. Gameplay: empty, trigger, character, controller, navMesh. '
-            + 'Cameras: perspectiveCamera, orthographicCamera, cameraRig. Lights: directionalLight, pointLight, spotlight, skyLight. '
-            + 'Primitives: cube, sphere, capsule, cylinder, cone, torus, pyramid, quad, plane, circle, triangle. '
-            + 'Complex: ramp, cornerRamp, stairs, spiralStairs, arch, tube, hollowBox. Environment: skybox, skyAtmosphere, '
-            + 'lightProbe, exposureVolume, volumetricFog, waterVolume, occlusionVolume, wind, weather, volumetricClouds, landscape. '
-            + 'Effects: decal, particleSystem, forceField, cloth. Audio: spatialSound, ambientSound. Sprites: sprite, animatedSprite, tilemap. '
-            + 'UI: uiCanvas, uiWorldRoot, uiStackColumn, uiStackRow, uiSpacer, uiPanel, uiText, uiImage, uiButton, uiProgressBar, uiSlider, uiToggle, uiTextInput.'),
-        template: z.string().optional().describe('Instead of `type`: instantiate the template (prefab) with this name. See asset_list.'),
-        model: z.string().optional().describe('Instead of `type`: instantiate the imported model asset with this name. See asset_list.'),
-        parent: nodeRef.optional().describe('Parent node (default: the scene root; UI elements go under a UI canvas automatically).'),
+    const op = z.object({
+        op: z.enum(['create', 'update', 'delete', 'move', 'attachScript', 'detachScript', 'select']),
+        node: z.string().nullable().optional().describe('Target of every op but create (select null clears).'),
+        type: z.string().optional().describe(`create: ${TYPES}.`),
+        template: z.string().optional().describe('create: a template (prefab) by name instead.'),
+        model: z.string().optional().describe('create: an imported model by name instead.'),
+        as: z.string().optional().describe('create: "$alias" for later ops and capture.focus.'),
+        parent: z.string().optional().describe('create/move (default: scene root).'),
+        index: z.number().int().optional().describe('move: position among siblings.'),
+        script: z.string().optional().describe('create/attachScript: script asset name.'),
         name: z.string().optional(),
-        position: vec3.optional().describe('Local position in metres.'),
-        rotation: vec3.optional().describe('Local Euler rotation in DEGREES.'),
-        scale: vec3.optional(),
-        as: z.string().regex(/^\$[A-Za-z0-9_]+$/).optional().describe('Alias ("$coin") later ops in this call can use as a node ref.'),
-    });
-    const updateOp = z.object({
-        op: z.literal('update'),
-        node: nodeRef,
-        name: z.string().optional(),
-        position: vec3.optional(),
-        rotation: vec3.optional().describe('Euler DEGREES.'),
+        position: vec3.optional().describe('Local metres.'),
+        rotation: vec3.optional().describe('Local Euler DEGREES.'),
         scale: vec3.optional(),
         visible: z.boolean().optional(),
-        props: z.record(z.string(), z.any()).optional().describe('Property assignments by name, as listed in node_get `props` '
-            + '(e.g. {"light.intensity": 800, "castShadows": true}).'),
-        scriptFields: z.record(z.string(), z.any()).optional().describe('Per-node values of the attached script\'s public fields.'),
-        material: z.string().optional().describe('Link the material asset with this name (see asset_list / material_write).'),
-        body: z.record(z.string(), z.any()).nullable().optional().describe('Rigid body, merged over the current one; null removes it. '
-            + 'Fields: mass (0 = static), friction, restitution, linearDamping, angularDamping, linearConstraints [x,y,z] (1 free, 0 locked), '
-            + 'angularConstraints, simulatePhysics, groundProbeDistance, canSleep, shapes: [{type:"box", width, height, depth, offset:[0,0,0], rotation:[0,0,0]} | '
-            + '{type:"sphere", radius, ...} | {type:"capsule", radius, height, numSegments:12, ...} | {type:"cylinder", radius, height, numSegments:12, ...}]. '
-            + 'Shapes are in the node\'s local units. A body with no shapes gets a box fitted to the node\'s mesh, or a 1 m box.'),
-        trigger: z.record(z.string(), z.any()).nullable().optional().describe('Trigger volume {shapes:[...], enabled?, detectTriggers?}; null removes it. '
-            + 'Scripts receive onTriggerEnter(other)/onTriggerExit(other).'),
+        props: z.record(z.string(), z.any()).optional().describe('By node_get `props` names, e.g. {"light.intensity": 800}.'),
+        scriptFields: z.record(z.string(), z.any()).optional().describe('The attached script\'s public fields.'),
+        material: z.union([z.string(), z.object({ name: z.string().optional(), ...pbr })]).optional()
+            .describe('Asset name, or a PBR spec (linear RGB) making one named after the node.'),
+        body: z.record(z.string(), z.any()).nullable().optional().describe('Rigid body merged over the current one; null removes. '
+            + 'mass (0 = static), friction, restitution, linearDamping, angularDamping, linearConstraints/angularConstraints '
+            + '[x,y,z] 1 free 0 locked, shapes [{type: box|sphere|capsule|cylinder, width/height/depth or radius/height, offset}] '
+            + '(default: a box fitted to the mesh).'),
+        trigger: z.record(z.string(), z.any()).nullable().optional().describe('{shapes, enabled?}; null removes. '
+            + 'Scripts get onTriggerEnter/Exit.'),
     });
-    const op = z.discriminatedUnion('op', [
-        createOp,
-        updateOp,
-        z.object({ op: z.literal('delete'), node: nodeRef }),
-        z.object({ op: z.literal('move'), node: nodeRef, parent: nodeRef, index: z.number().int().min(0).optional().describe('Position among the parent\'s children (default: last).') }),
-        z.object({ op: z.literal('attachScript'), node: nodeRef, script: z.string().describe('Script asset name.') }),
-        z.object({ op: z.literal('detachScript'), node: nodeRef }),
-        z.object({ op: z.literal('select'), node: nodeRef.nullable() }),
-    ]);
 
     relay('scene_edit', 'scene.edit', {
         title: 'Edit scene',
-        description: 'Apply a list of edits to the open scene as ONE undo step (the editor\'s Undo, or the history tool, reverts the '
-            + 'whole call). Ops run in order and stop at the first failure; earlier ops of that call stay applied and are still one '
-            + 'undo step. Ops: create (from the Add catalog, a template or a model), update (name, transform, visible, props, '
-            + 'scriptFields, material, body, trigger), delete, move (reparent/reorder), attachScript, detachScript, select. '
-            + 'Batch related edits into one call: build a whole level in a single scene_edit. Returns each op\'s result, '
-            + 'including created nodes\' paths and ids. Refused while the game is playing.',
+        description: 'Change the open scene: a list of ops applied in order as ONE undo step, stopping at the first failure. '
+            + 'create (a catalog type, template or model, and every field update takes: material, body, script, scriptFields, '
+            + 'props), update, delete, move, attachScript, detachScript, select. Node refs: "/A/B" path, "#id", unique name, '
+            + '"$alias" from an earlier create, "@selected". Batch a whole build in one call, and add `capture` to see the '
+            + 'result. Returns each op\'s result with created paths and ids. Refused during Play.',
         inputSchema: {
             ops: z.array(op).min(1).max(500),
-            label: z.string().optional().describe('Undo label shown in the editor (default "Claude edit").'),
+            label: z.string().optional().describe('Undo label.'),
+            capture,
         },
         annotations: WRITE,
-    }, { timeoutMs: 60000 });
+        _meta: CORE,
+    }, { timeoutMs: a => 60000 + extraMs(a) });
 
     relay('script_write', 'script.write', {
         title: 'Write script',
-        description: 'Create or replace a script asset (by name) with TypeScript source, optionally attaching it to nodes, and check it: '
-            + 'the runtime compile (syntax, module shape) and the editor\'s TypeScript type-check against the engine API. Returns the '
-            + 'diagnostics (line:col message) and the public fields the inspector will show. A script with errors is still saved, so '
-            + 'fix and call again. Form: `import { Node } from \'cleo\'; export default class Name extends Node { public speed = 2; '
-            + 'onUpdate(delta: number, time: number) { ... } }`. Extend the class of the node type it attaches to (Node attaches '
-            + 'anywhere; ModelNode only to models, CharacterNode to characters, ...). Updating a script re-seeds every node using it.',
+        description: 'Create or replace a script asset (by name) with TypeScript, optionally attach it, and check it: the runtime '
+            + 'compile and the editor\'s type-check against the engine API. Returns diagnostics (line:col message) and the '
+            + 'public fields. A script with errors is still saved: fix it and call again. The class extends the type of the node '
+            + 'it attaches to (Node attaches anywhere). Updating a script re-seeds every node using it. To see it run, follow '
+            + 'with play_control {action:"simulate", capture:true, stopAfter:true}.',
         inputSchema: {
-            name: z.string().min(1).describe('Script asset name (also its class name\'s source of truth in the explorer).'),
+            name: z.string().min(1).describe('Script asset name.'),
             source: z.string().min(1),
-            attach: z.array(nodeRef).optional().describe('Nodes to attach the script to (replacing their current script).'),
-            check: z.boolean().optional().describe('Run the TypeScript type-check (default true; the first one loads the checker, ~5 s).'),
+            attach: z.array(ref).optional().describe('Nodes to attach it to (replacing their script), e.g. ["@selected"].'),
+            check: z.boolean().optional().describe('Run the type-check (default true).'),
         },
         annotations: WRITE,
+        _meta: CORE,
     }, { timeoutMs: 90000 });
 
     relay('script_read', 'script.read', {
@@ -210,21 +231,17 @@ export function toolDefinitions(bridge) {
 
     relay('material_write', 'material.write', {
         title: 'Write material',
-        description: 'Create or update a PBR material asset by name and optionally link it to nodes. Colours are linear RGB 0..1. '
-            + 'Updating an existing material re-applies it to every node in the open scene that links it.',
+        description: 'Create or update a PBR material asset by name and optionally link it to nodes. Colours are linear RGB 0..1; '
+            + 'opacity below 1 needs transparent: true. Updating a material re-applies it to every node in the open scene that '
+            + 'links it. (A create or update op in scene_edit can also make a material inline.)',
         inputSchema: {
             name: z.string().min(1),
-            baseColor: vec3.optional(),
-            metallic: z.number().min(0).max(1).optional(),
-            roughness: z.number().min(0).max(1).optional(),
-            emissive: vec3.optional().describe('Emissive colour.'),
-            emissiveIntensity: z.number().min(0).optional(),
-            opacity: z.number().min(0).max(1).optional().describe('Below 1 needs transparent: true.'),
-            transparent: z.boolean().optional(),
-            assignTo: z.array(nodeRef).optional(),
+            ...pbr,
+            assignTo: z.array(ref).optional(),
+            capture,
         },
         annotations: WRITE,
-    }, { timeoutMs: 30000 });
+    }, { timeoutMs: a => 30000 + extraMs(a) });
 
     relay('asset_list', 'asset.list', {
         title: 'List assets',
@@ -239,22 +256,23 @@ export function toolDefinitions(bridge) {
 
     relay('view_capture', 'view.capture', {
         title: 'Capture viewport',
-        description: 'A screenshot of the editor viewport exactly as rendered (during Play: the game view). Use it to check your '
-            + 'work visually. Optionally frame a node first (moves the EDITOR camera, not the game camera) from a viewing angle.',
+        description: 'A screenshot of the editor viewport as rendered (during Play: the game view). Optionally frame a node first '
+            + '(moves the EDITOR camera, not the game camera). Changing tools take `capture` too, which saves this call.',
         inputSchema: {
-            focus: nodeRef.optional().describe('Frame this node before capturing.'),
-            yaw: z.number().optional().describe('With focus: orbit angle in degrees around the node (0 = looking along +Z, default 35).'),
-            pitch: z.number().optional().describe('With focus: degrees above the horizon (default 25).'),
+            focus: ref.optional().describe('Frame this node first.'),
+            yaw: z.number().optional().describe('Orbit angle in degrees around it (0 = looking along +Z, default 35).'),
+            pitch: z.number().optional().describe('Degrees above the horizon (default 25).'),
             maxSize: z.number().int().min(128).max(2048).optional().describe('Longest side in pixels (default 1024).'),
-            format: z.enum(['jpeg', 'png']).optional().describe('Default jpeg.'),
+            format: z.enum(['jpeg', 'png']).optional(),
         },
         annotations: READ,
+        _meta: CORE,
     }, { timeoutMs: 20000 });
 
     relay('logs_read', 'logs.read', {
         title: 'Read logs',
         description: 'The editor console: script errors, Logger output, warnings. Pass the `cursor` from a previous call (or from '
-            + 'play_control) to get only what arrived since. Script errors carry the scope "Script".',
+            + 'play_control) to get only what arrived since. Repeated lines are collapsed. Script errors carry the scope "Script".',
         inputSchema: {
             since: z.number().int().optional().describe('Cursor from an earlier call: only newer entries.'),
             level: z.enum(['all', 'warn', 'error']).optional().describe('Minimum level (default all).'),
@@ -266,16 +284,19 @@ export function toolDefinitions(bridge) {
 
     relay('play_control', 'play.control', {
         title: 'Play / stop',
-        description: 'Run the game in the editor to test it. play = the game with the player possessed; simulate = physics and '
-            + 'scripts run while the editor camera stays free; pause; stop returns to editing (edits made during play are '
-            + 'discarded). With play/simulate, `runSeconds` lets it run before answering, then returns the log entries that '
-            + 'appeared plus a cursor. Combine with view_capture to see the game.',
+        description: 'Run the game in the editor to test it. play = the player possessed; simulate = physics and scripts run with '
+            + 'the editor camera free; pause; stop returns to editing (edits made during play are discarded). play/simulate run '
+            + '`runSeconds` (returning early on the first error) and report the new log lines and a cursor; with `capture` and '
+            + '`stopAfter` one call is a whole test run.',
         inputSchema: {
             action: z.enum(['play', 'simulate', 'pause', 'stop', 'status']),
-            runSeconds: z.number().min(0).max(30).optional().describe('After play/simulate, wait this long before answering (default 1.5).'),
+            runSeconds: z.number().min(0).max(30).optional().describe('How long to run before answering (default 1.5).'),
+            capture,
+            stopAfter: z.boolean().optional().describe('Stop the game before answering.'),
         },
         annotations: WRITE,
-    }, { timeoutMs: (/** @type {any} */ a) => 20000 + (a?.runSeconds ?? 1.5) * 1000 });
+        _meta: CORE,
+    }, { timeoutMs: (/** @type {any} */ a) => 20000 + (a?.runSeconds ?? 1.5) * 1000 + extraMs(a) });
 
     relay('history', 'history', {
         title: 'Undo / redo',
@@ -301,7 +322,7 @@ export function toolDefinitions(bridge) {
             + '`scene` (the open scene, or the play scene during Play), `editor` (the editor context: libraries, scripts/bodies/'
             + 'triggers maps, actions), `find(ref)` (resolve a node ref), `log(...args)`. `return` a JSON-serialisable value. '
             + 'Structure changes (add/remove) made here are undoable as one step; property changes are not. Plain JavaScript, not '
-            + 'TypeScript. Prefer the dedicated tools when they fit.',
+            + 'TypeScript. The user approves every run, so prefer the dedicated tools when they fit.',
         inputSchema: {
             code: z.string().min(1).describe('Function body, e.g. `const n = find("/Player"); return n.position;`'),
             timeoutMs: z.number().int().min(100).max(120000).optional(),

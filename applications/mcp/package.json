@@ -1,6 +1,6 @@
 {
   "name": "cleo-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "The Cleo agent host and MCP server: lets AI agents (Claude Code hosted in the editor, Claude Code anywhere, Claude Desktop) drive a running Cleo editor.",
   "type": "module",
