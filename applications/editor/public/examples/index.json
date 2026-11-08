@@ -6,9 +6,19 @@
       "name": "Valley",
       "description": "A souls-like on a 2 km mountain valley with a day and night cycle: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass, spruce forest, oaks about the hamlet and bushes made with the Foliage Creator, a torch-lit hamlet with breakable barrels, and a skull cave down into a three-level dungeon with a boss in its throne arena.",
       "order": 0,
-      "bytes": 320339095,
+      "bytes": 322747990,
       "sceneCount": 2,
       "textureCount": 244,
+      "createdAt": 1790000000000
+    },
+    {
+      "slug": "firing-line",
+      "name": "Firing Line",
+      "description": "A first-person shooter: walk, sprint, crouch, aim down sights, hip and aimed fire, reloads and three weapons against bots that search, take cover, retreat when hurt and call for reinforcements. Free for all, 2v2 or one against three, all from the templates: put a Game Manager and some fighters in any scene and it plays.",
+      "order": 1,
+      "bytes": 132561633,
+      "sceneCount": 4,
+      "textureCount": 52,
       "createdAt": 1790000000000
     }
   ]

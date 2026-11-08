@@ -40,7 +40,7 @@ script publishes (`navMode`); the decisions are in `FpsBot.ts`.
 ## Controls
 
 Move W A S D, look with the mouse (click to capture), Fire left mouse, Aim right mouse, Reload R, Sprint
-Shift, Crouch C or Ctrl, Jump Space, weapons 1 2 3 or Q / E. A gamepad is bound too (`tools/fps/inputMap.mjs`).
+Shift, Crouch C, Jump Space, weapons 1 2 3 or Q / E. A gamepad is bound too (`tools/fps/inputMap.mjs`).
 
 ## The viewmodel
 

@@ -44,7 +44,8 @@ export const FPS_INPUT_MAP = {
         button('Aim', [b('aim:mouse', mouse('right')), b('aim:pad', pad('leftTrigger'))]),
         button('Reload', [b('reload:r', key('KeyR')), b('reload:pad', pad('x'))]),
         button('Sprint', [b('sprint:shift', key('ShiftLeft')), b('sprint:pad', pad('leftStick'))]),
-        button('Crouch', [b('crouch:c', key('KeyC')), b('crouch:ctrl', key('ControlLeft')), b('crouch:pad', pad('rightStick'))]),
+        // C only: Ctrl is the browser's (Ctrl+W closes the tab, and crouch + forward is exactly that).
+        button('Crouch', [b('crouch:c', key('KeyC')), b('crouch:pad', pad('rightStick'))]),
         button('Jump', [b('jump:space', key('Space')), b('jump:pad', pad('a'))]),
         button('Slot1', [b('slot1:key', key('Digit1')), b('slot1:pad', pad('dpadUp'))]),
         button('Slot2', [b('slot2:key', key('Digit2')), b('slot2:pad', pad('dpadRight'))]),
@@ -75,7 +76,7 @@ export const CONTROLS = [
   ['Aim down sights', 'Right mouse (hold)', 'LT'],
   ['Reload', 'R', 'X'],
   ['Sprint', 'Shift (hold)', 'L3'],
-  ['Crouch', 'C or Ctrl (hold)', 'R3'],
+  ['Crouch', 'C (hold)', 'R3'],
   ['Jump', 'Space', 'A'],
   ['Weapons', '1 2 3, or Q / E', 'D-pad, or bumpers'],
 ]
