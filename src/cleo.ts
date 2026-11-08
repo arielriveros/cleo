@@ -108,7 +108,26 @@ export { SkyAtmosphereNode, DEFAULT_MOON_LUX } from "./core/scene/nodes/skyAtmos
 export type { SkyAtmosphereOptions } from "./core/scene/nodes/skyAtmosphereNode";
 export { SkyLightNode, DEFAULT_NIGHT_AMBIENT } from "./core/scene/nodes/skyLightNode";
 export { WindNode, WIND_DEFAULTS, type WindOptions } from "./core/scene/nodes/windNode";
-export { WeatherNode, WEATHER_DEFAULTS, MIN_WEATHER_VOLUME_SIZE, type WeatherOptions } from "./core/scene/nodes/weatherNode";
+// The wind as a vector field (Ghost of Tsushima's): one function on the CPU and in chunks/windField.wgsl.
+export {
+    sampleWindField, sampleSceneWind, packWindSources, windGustAt, windVeerAt, windPerlin, windPerlinGrad,
+    createWindSample, WindFieldSnapshot, windFieldClock,
+    WIND_REFERENCE_SPEED, MAX_WIND_SOURCES, WIND_SOURCE_FLOATS, WIND_DEFAULT_GUSTINESS, WIND_DEFAULT_VEER,
+    type WindSample, type WindFieldParams, type WindFieldSource,
+} from "./core/wind/windField";
+export {
+    WeatherNode, WEATHER_DEFAULTS, MIN_WEATHER_VOLUME_SIZE, PRECIPITATION_KINDS, parsePrecipitationSprite,
+    type WeatherOptions, type PrecipitationKind, type PrecipitationSprite,
+} from "./core/scene/nodes/weatherNode";
+// Falling rain and snow: the particle system a WeatherNode's precipitation falls with, and its own sprites.
+export { PrecipitationRig } from "./core/scene/precipitationRig";
+export {
+    precipitationSystem, PRECIPITATION_DEFAULTS, builtinSpriteOf,
+    type FallingKind, type PrecipitationStyle, type PrecipitationEnvironment,
+} from "./particles/precipitation";
+export {
+    BUILTIN_RAIN_SPRITE, BUILTIN_SNOW_SPRITE, BUILTIN_SPRITE_PREFIX, isBuiltinTextureId, builtinSpriteSheet,
+} from "./particles/precipitationSprites";
 export { OcclusionVolumeNode, OCCLUSION_VOLUME_CULL_KEYS, defaultOcclusionVolumeCull, type OcclusionVolumeCull } from "./core/scene/nodes/occlusionVolumeNode";
 export { OcclusionBuffer } from "./graphics/occlusion/occlusionBuffer";
 export { TerrainOccluder } from "./graphics/occlusion/terrainOccluder";

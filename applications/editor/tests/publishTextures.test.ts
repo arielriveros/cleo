@@ -122,6 +122,17 @@ describe('published texture references', () => {
       .toEqual(['old_dirt']);
   });
 
+  it('finds a weather volume\'s rain or snow sprite sheet, never the engine\'s own sprites', () => {
+    // Its sprite is a bare texture id on `weather.precipitationSprite`, not in a `textures` map: missing it
+    // ships a game whose rain samples nothing.
+    expect(ids({
+      children: [
+        { type: 'weather', weather: { precipitation: 'snow', precipitationSprite: { textureId: 'flakes', columns: 4, rows: 2, frames: 8, fps: 0 } }, children: [] },
+        { type: 'particleSystem', particleSystem: { system: { emitters: [{ render: { textureId: '__builtin__/rain' } }] } }, children: [] },
+      ],
+    })).toEqual(['flakes']);
+  });
+
   it('survives nulls and empty trees without throwing', () => {
     expect(ids(null)).toEqual([]);
     expect(ids({ children: [null, { terrain: null, children: null }] })).toEqual([]);

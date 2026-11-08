@@ -21,6 +21,13 @@ export interface ForceFieldOptions {
     /** Turbulence noise frequency, per metre. */
     frequency?: number;
     enabled?: boolean;
+    /**
+     * Also move the scene's AIR: the field joins the wind field (core/wind/windField.ts) that foliage,
+     * Scene-wind particles and `WindNode.sampleAt` read — Ghost of Tsushima's "vorticles". In wind terms
+     * strength is air speed in m/s (directional along +Y; radial inward, negative a blast; vortex round
+     * +Y; turbulence the eddy speed), and for drag the fraction of the wind it blocks (0..1, a shelter).
+     */
+    affectsWind?: boolean;
 }
 
 const KINDS: readonly ForceFieldKind[] = ['directional', 'radial', 'vortex', 'turbulence', 'drag'];
@@ -36,6 +43,9 @@ export const MAX_FORCE_FIELDS = 16;
  * Particles opt in per emitter with the Force Fields module, so one gust can move the smoke without
  * dragging the sparks with it. Direction and vortex axis are the node's local +Y, so a field is aimed
  * by rotating it like anything else in the scene.
+ *
+ * With `affectsWind` the field is also local WIND: it joins the scene's wind field, so the grass under a
+ * whirlwind swirls, a blast flattens a meadow outward and a drag box shelters a courtyard.
  */
 export class ForceFieldNode extends Node {
     private _kind: ForceFieldKind;
@@ -46,6 +56,7 @@ export class ForceFieldNode extends Node {
     private _falloff: number;
     private _frequency: number;
     private _enabled: boolean;
+    private _affectsWind: boolean;
 
     constructor(name: string, options: ForceFieldOptions = {}, id: string = uuidv4()) {
         super(name, 'forceField', id);
@@ -58,6 +69,7 @@ export class ForceFieldNode extends Node {
         this._falloff = Math.min(1, Math.max(0, num(options.falloff, 0.5)));
         this._frequency = Math.max(0.001, num(options.frequency, 0.5));
         this._enabled = options.enabled !== false;
+        this._affectsWind = options.affectsWind === true;
     }
 
     public get kind(): ForceFieldKind { return this._kind; }
@@ -103,10 +115,18 @@ export class ForceFieldNode extends Node {
         this._enabled = !!v;
         this._notifyChange('component', 'enabled');
     }
+    /** Whether the field also moves the scene's air (see ForceFieldOptions.affectsWind). */
+    public get affectsWind(): boolean { return this._affectsWind; }
+    public set affectsWind(v: boolean) {
+        if (!!v === this._affectsWind) return;
+        this._affectsWind = !!v;
+        this._notifyChange('component', 'affectsWind');
+    }
 
     /**
      * Write this field's four texels at `offset` of `out`, in world space: (position, kind)
-     * (direction, strength) (shape, radius, falloff, frequency) (box half extents, 0). Scale is folded in.
+     * (direction, strength) (shape, radius, falloff, frequency) (box half extents, affects wind 0/1).
+     * Scale is folded in. The particles and the wind field (chunks/windField.wgsl) read the same record.
      */
     public packInto(out: Float32Array, offset: number): void {
         const m = this.worldTransform;
@@ -117,7 +137,7 @@ export class ForceFieldNode extends Node {
         out.set([m[12], m[13], m[14], KINDS.indexOf(this._kind)], offset);
         out.set([up[0], up[1], up[2], this._strength], offset + 4);
         out.set([SHAPES.indexOf(this._shape), this._radius * Math.max(sx, sy, sz), this._falloff, this._frequency], offset + 8);
-        out.set([this._extents[0] * sx, this._extents[1] * sy, this._extents[2] * sz, 0], offset + 12);
+        out.set([this._extents[0] * sx, this._extents[1] * sy, this._extents[2] * sz, this._affectsWind ? 1 : 0], offset + 12);
     }
 
     /** Applies a preset by id (see FORCE_FIELD_PRESETS) or a preset object. Returns false for an unknown id. */
@@ -130,7 +150,7 @@ export class ForceFieldNode extends Node {
             forceField: {
                 kind: this._kind, shape: this._shape, strength: this._strength, radius: this._radius,
                 extents: [...this._extents], falloff: this._falloff, frequency: this._frequency,
-                enabled: this._enabled,
+                enabled: this._enabled, affectsWind: this._affectsWind,
             },
         };
     }

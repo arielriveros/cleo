@@ -24,6 +24,8 @@
  * which is what makes a flag ripple instead of standing straight out.
  */
 
+import { windGustAt } from "../../core/wind/windField";
+
 export interface ClothCapsule {
     /** Segment end points (equal for a sphere) and radius, world space. */
     a: [number, number, number];
@@ -506,26 +508,14 @@ export function gridIndices(cols: number, rows: number): Uint32Array {
 }
 
 
-/** Smooth 2D value noise in [0, 1]: the gust field `chunks/foliageWind.wgsl` scrolls, ported. */
-export function windNoise(x: number, y: number): number {
-    const hash = (px: number, py: number) => {
-        const s = Math.sin(px * 127.1 + py * 311.7) * 43758.5453;
-        return s - Math.floor(s);
-    };
-    const ix = Math.floor(x), iy = Math.floor(y);
-    const fx = x - ix, fy = y - iy;
-    const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
-    const a = hash(ix, iy), b = hash(ix + 1, iy), c = hash(ix, iy + 1), d = hash(ix + 1, iy + 1);
-    return (a + (b - a) * ux) * (1 - uy) + (c + (d - c) * ux) * uy;
-}
+const _gustParams = [1, 0, 1, 18, 0, 4, 0, 0];
 
 /**
- * The gust at world (x, z), 0..1, as `windGust` in chunks/foliageWind.wgsl computes it: two octaves of
- * noise scrolled along the wind, so the cloth and the trees around it catch the same gusts.
+ * The gust at world (x, z), 0..1: the wind field's own (core/wind/windField.ts `windGustAt`, the Perlin
+ * the foliage shader scrolls), so the cloth and the trees around it catch the same gusts.
  */
 export function windGust(x: number, z: number, t: number, dirX: number, dirZ: number, gustScale: number, gustSpeed: number): number {
-    const wavelength = Math.max(gustScale, 0.5);
-    const sx = dirX * (gustSpeed * t / wavelength), sz = dirZ * (gustSpeed * t / wavelength);
-    const px = x / wavelength - sx, pz = z / wavelength - sz;
-    return windNoise(px, pz) * 0.7 + windNoise(px * 2.13 + 17, pz * 2.13 + 3) * 0.3;
+    const p = _gustParams;
+    p[0] = dirX; p[1] = dirZ; p[3] = gustScale; p[4] = t; p[5] = gustSpeed;
+    return windGustAt(x, z, p);
 }

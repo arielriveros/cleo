@@ -41,6 +41,7 @@ import type { DebugVisibility, DebugChannel, DebugCategory } from '../features/D
 import { shapeScaleFactors } from '../features/gizmo/collisionGizmoMath';
 import { selectedCollisionShape, type CollisionChannel } from '../features/gizmo/collisionSelection';
 import { ensureLiveTriggerOverlay, dropLiveTriggerOverlay, LIVE_TRIGGERS, type LiveTriggerSource } from './liveTriggerOverlay';
+import { ensureWindFieldOverlay, dropWindFieldOverlay, windOverlayWanted, WIND_FIELD_OVERLAY } from './windFieldOverlay';
 
 /**
  * Editor-only visual helpers (light/probe icons, camera frustum gizmos, physics debug wireframes),
@@ -1398,6 +1399,12 @@ export function reconcileEditorHelpers(
       || isOrientedVolume(selected) || (selected instanceof ForceFieldNode && selected.shape !== 'global'))
     ensureEffectShape(scene, selected);
 
+  // 4f. The wind field (windFieldOverlay.ts): arrows, tracers and the sources, sampled live every frame. On
+  // with the eye menu's switch, or while the Wind node or a Force Field that moves the air is selected —
+  // selecting one is the request to see the air it makes. Off with no settings supplied: it is opt-in.
+  const windWanted = windOverlayWanted(!!visibility?.windField?.[channel], selected ?? null, scene);
+  if (windWanted) ensureWindFieldOverlay(scene);
+
   // 5. Trigger wireframes (green), following the target's world transform. While the game runs, the live
   // overlay draws every trigger in the physics world instead — the authored ones included.
   const physics = (scene as any).physics as LiveTriggerSource | undefined;
@@ -1437,6 +1444,8 @@ export function reconcileEditorHelpers(
       if (!show('triggers') || live || !triggers.has(id) || !scene.getNodeById(id)) drop();
     } else if (node.name === LIVE_TRIGGERS) {
       if (!show('triggers') || !live) { dropLiveTriggerOverlay(scene); cache.delete(node.name); }
+    } else if (node.name === WIND_FIELD_OVERLAY) {
+      if (!windWanted) { dropWindFieldOverlay(scene); cache.delete(node.name); }
     } else if (node.name.startsWith(TERRAIN_PREFIX)) {
       const id = node.name.slice(TERRAIN_PREFIX.length);
       if (!show('colliders') || !landscapeIds.has(id)) drop();

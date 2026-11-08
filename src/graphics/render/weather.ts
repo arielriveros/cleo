@@ -7,6 +7,7 @@ import type { FrameView } from './frameView';
 import type { ViewProjection } from './viewProjection';
 import type { ShadowPasses } from './shadows';
 import type { FoliagePasses } from './foliage';
+import type { Texture } from '../texture';
 import { emptyWeatherPack, gatherWeather, packWeather, shelterClearanceDepth, shelterFootprint, type ShelterFootprint, type WeatherPack } from './weatherPack';
 
 /** Flat snow: what the weather draws without a snow material (linear albedo, roughness). */
@@ -17,7 +18,9 @@ const FLAT_SNOW: readonly number[] = [0.9, 0.9, 0.9, 0.85];
  * - the landscape, through its fragment-only block (chunks/terrainWeather.wgsl);
  * - instanced foliage, per plant, through the instanced vertex blocks (chunks/instancedVertex.wgsl and
  *   chunks/instancedDepthVertex.wgsl, the shadows bowing the same way);
- * - the shelter map, drawn by the shadow subsystem over the volumes' footprint round the camera.
+ * - the shelter map, drawn by the shadow subsystem over the volumes' footprint round the camera;
+ * - the particle simulation (the `weather` module the volumes' rain and snow fall with), through
+ *   {@link particleWeather}: it keeps its own copy of the members, per emitter step.
  *
  * Written straight into every program that declares the members, once a frame: block members are CPU
  * memory until a draw flushes them, so no program has to be bound (and none is built on demand). A
@@ -35,6 +38,7 @@ export class WeatherPasses {
     private readonly _info: number[] = [0, 0, 0, 0];
     private readonly _shelterParams: number[] = [0, 0, 0, 0];
     private readonly _shelterUv: mat4 = mat4.create();
+    private _particleWeather: ParticleWeather | null = null;
 
     constructor(private readonly _view: FrameView,
                 private readonly _projection: ViewProjection,
@@ -59,6 +63,8 @@ export class WeatherPasses {
             ? shelterFootprint(volumes, camera, this._shadows.shelterResolution, this._footprint)
             : null;
         this._info[0] = this.pack.count;
+        // The weather clock (scene time), what the ground's raindrops animate by.
+        this._info[1] = preview ? 0 : scene.precipitation.clock;
         this._shelterParams[0] = 0;
         this._upload(false);
     }
@@ -77,6 +83,24 @@ export class WeatherPasses {
             this._shelterParams[0] = 0;
         }
         this._upload(true);
+    }
+
+    /**
+     * The frame's weather as the particle simulation reads it: the pack, the clock, the shelter map and its
+     * matrix. One persistent object whose arrays this class rewrites each frame; valid after
+     * {@link renderShelter}.
+     */
+    public particleWeather(): ParticleWeather {
+        const shadows = this._shadows;
+        if (!this._particleWeather) {
+            this._particleWeather = {
+                pack: this.pack, info: this._info, shelterMatrix: this._shelterUv, shelterParams: this._shelterParams,
+                shelter: shadows.shelterFBO.texture,
+            };
+        }
+        // The map is reallocated when its resolution changes: hand out the current one.
+        this._particleWeather.shelter = shadows.shelterFBO.texture;
+        return this._particleWeather;
     }
 
     /** The snow colour: linear albedo and roughness of the highest-priority snowing volume's material. */
@@ -124,4 +148,17 @@ export class WeatherPasses {
             program.setUniform('u_shelterParams', this._shelterParams);
         }
     }
+}
+
+/** What the particle simulation reads of the frame's weather (see WeatherPasses.particleWeather). */
+export interface ParticleWeather {
+    pack: WeatherPack;
+    /** x = volume count, y = the weather clock. */
+    info: readonly number[];
+    /** world -> shelter map clip, uv-producing. */
+    shelterMatrix: mat4;
+    /** x = map present, y = clearance (depth units), z = one texel in uv. */
+    shelterParams: readonly number[];
+    /** The shelter map (always allocated; cleared to open sky while nothing shelters). */
+    shelter: Texture;
 }

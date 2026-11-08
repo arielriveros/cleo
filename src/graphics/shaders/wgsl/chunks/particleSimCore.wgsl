@@ -14,6 +14,9 @@
 // state textures, so no event list, no readback, and the same code on both backends.
 // Feature flags are bits of `u_mask.x`, set by src/particles/particlePack.ts. Every flag is a uniform
 // branch — no permutations, one program for every emitter.
+// WEATHER (the `weather` module, what a WeatherNode's rain and snow fall with): a particle lives only
+// where the frame's weather volumes make its kind fall, thinned to their rate, and dies under shelter —
+// the shelter map the landscape keeps dry by, so rain stops at a roof.
 
 #include "./particleCommon.wgsl"
 #include "./particleLut.wgsl"
@@ -35,6 +38,9 @@ const SIM_KILL_ON_HIT: u32    = 8192u;
 const SIM_CUSTOM: u32         = 16384u;
 const SIM_FLAT: u32           = 32768u;
 const SIM_COLLIDE_BODIES: u32 = 65536u;
+// The Wind module rides the scene's wind field (chunks/windField.wgsl), not a velocity of its own.
+const SIM_SCENE_WIND: u32     = 262144u;
+const SIM_WEATHER: u32        = 131072u;
 
 // Collider kinds in `u_colliders` — COLLIDER_KIND in src/particles/particleColliders.ts.
 const COLLIDER_CAPSULE: i32 = 1;
@@ -67,6 +73,9 @@ struct ParticleSimUniforms {
     u_emitterVel: vec4<f32>,          // emitter velocity (world), 0
     u_gravity: vec4<f32>,             // gravity (sim space), linear drag
     u_wind: vec4<f32>,                // wind velocity (sim space), coupling
+    u_windScene: vec4<f32>,           // scene wind multiplier (SIM_SCENE_WIND), 0, 0, 0
+    u_windBase: vec4<f32>,            // the frame's wind field: dir xz, strength, gust wavelength
+    u_windMotion: vec4<f32>,          // ... time, gust speed, gustiness, veer (rad)
     u_noise: vec4<f32>,               // strength, frequency, scroll, octaves
     u_vortex: vec4<f32>,              // axis (sim space, unit), strength
     u_vortexCenter: vec4<f32>,        // centre (sim space), pull
@@ -85,8 +94,26 @@ struct ParticleSimUniforms {
     u_sub2: vec4<f32>,                // parent capacity, 0, 0, 0
     u_colliderInfo: vec4<f32>,        // physics collider count, 0, 0, 0
     u_colliders: array<vec4<f32>, 48>,// 12 physics colliders x 4 texels, see `collideBodies`
+    // The weather module, and the frame's weather volumes (render/weatherPack.ts) and shelter map.
+    u_precipSim: vec4<f32>,           // kind (0 rain, 1 snow), obey shelter 0/1, 1 / full rate, 0
+    u_precipInfo: vec4<f32>,          // volume count, 0, 0, 0
+    u_precipInv: array<mat4x4<f32>, 4>,
+    u_precipBlend: array<vec4<f32>, 4>,
+    u_precipAmount: array<vec4<f32>, 4>,
+    u_precipShape: array<vec4<f32>, 4>,
+    u_precipShelterMatrix: mat4x4<f32>, // world -> shelter map clip (uv-producing, GL convention)
+    u_precipShelterParams: vec4<f32>,   // map present 0/1, clearance (depth units), texel uv, 0
 };
 @group(1) @binding(0) var<uniform> u_sim: ParticleSimUniforms;
+
+// The scene wind's sources are the force-field records that `affectsWind` (the last texel's w), read
+// straight out of `u_fields`: particlePasses packs those first, so a field moves the air the foliage
+// and the particles ride alike.
+const WIND_SOURCE_SLOTS: i32 = 16;
+fn windSourceCount() -> i32 { return i32(u_sim.u_fieldInfo.x); }
+fn windSourceTexel(i: i32, k: i32) -> vec4<f32> { return u_sim.u_fields[i * 4 + k]; }
+
+#include "./windField.wgsl"
 
 @group(0) @binding(0) var u_p0_texture: texture_2d<f32>;
 @group(0) @binding(1) var u_p1_texture: texture_2d<f32>;
@@ -105,6 +132,37 @@ struct ParticleSimUniforms {
 @group(0) @binding(9) var u_parentP2_texture: texture_2d<f32>;
 @group(0) @binding(10) var u_parentPrevP0_texture: texture_2d<f32>;
 @group(0) @binding(11) var u_parentPrevP1_texture: texture_2d<f32>;
+// The weather's shelter map (render/shadows.ts `renderShelter`): the depth, from straight above, of
+// everything solid. Always bound; read only by an emitter with the weather module.
+@group(0) @binding(12) var u_weatherShelter_texture: texture_depth_2d_array;
+@group(0) @binding(13) var u_weatherShelter_sampler: sampler_comparison;
+
+fn weatherCount() -> i32 { return i32(u_sim.u_precipInfo.x); }
+fn weatherInv(i: i32) -> mat4x4<f32> { return u_sim.u_precipInv[i]; }
+fn weatherBlend(i: i32) -> vec4<f32> { return u_sim.u_precipBlend[i]; }
+fn weatherAmount(i: i32) -> vec4<f32> { return u_sim.u_precipAmount[i]; }
+fn weatherShape(i: i32) -> vec4<f32> { return u_sim.u_precipShape[i]; }
+
+#include "./weatherVolumes.wgsl"
+
+/**
+ * 1 = open sky over world point `p`, 0 = something solid over it (one filtered tap: a particle is a
+ * point). A falling particle counts as under a roof a fifth of the ground's clearance below its top, so
+ * a drop dies just under the surface it hit. Off the map, above it, or with no map: open.
+ */
+fn particleShelterOpen(p: vec3<f32>) -> f32 {
+    let params = u_sim.u_precipShelterParams;
+    let c = u_sim.u_precipShelterMatrix * vec4<f32>(p, 1.0);
+    let q = c.xyz / c.w * 0.5 + 0.5;
+    let inside = all(vec4<bool>(params.x > 0.5, all(q.xy >= vec2<f32>(0.0)), all(q.xy <= vec2<f32>(1.0)), q.z <= 1.0));
+    let uv = clamp(q.xy, vec2<f32>(0.0), vec2<f32>(1.0));
+    let open = textureSampleCompareLevel(u_weatherShelter_texture, u_weatherShelter_sampler, uv, 0, q.z - params.y * 0.2);
+    return select(1.0, open, inside);
+}
+
+// The shelter over the particle being stepped, where this step leaves it: fetched once per slot by
+// `simulateSlot`, OUTSIDE the per-slot `alive` branch (see the ANGLE note there).
+var<private> shelterOpenHere: f32 = 1.0;
 
 // The collision flag a particle carries for ONE step, so a collision sub-emitter can see it: added to
 // the seed (always in 0..1) and stripped at the start of the next step.
@@ -344,6 +402,9 @@ fn turbulence(p: vec3<f32>) -> vec3<f32> {
 // falloff, frequency) (box half extents.xyz, 0). World space. See ForceFieldNode.packInto.
 fn forceFieldAccel(worldPos: vec3<f32>, worldVel: vec3<f32>) -> vec3<f32> {
     let count = i32(u_sim.u_fieldInfo.x);
+    // An emitter on the scene wind already rides the fields that move the air; pushing it again here
+    // would apply them twice.
+    let windFieldsAsWind = hasFeature(u_sim.u_mask.x, SIM_SCENE_WIND);
     var total = vec3<f32>(0.0);
     for (var i = 0; i < MAX_FORCE_FIELDS; i++) {
         if (i >= count) { break; }
@@ -351,6 +412,7 @@ fn forceFieldAccel(worldPos: vec3<f32>, worldVel: vec3<f32>) -> vec3<f32> {
         let b = u_sim.u_fields[i * 4 + 1];
         let c = u_sim.u_fields[i * 4 + 2];
         let d = u_sim.u_fields[i * 4 + 3];
+        if (windFieldsAsWind && d.w > 0.5) { continue; }
         let kind = i32(a.w);
         let shape = i32(c.x);
         let toP = worldPos - a.xyz;
@@ -602,10 +664,23 @@ fn updateParticle(dt: f32) {
 
     // World-space position/velocity for the things that live in the world: fields and depth.
     let toWorld = u_sim.u_emitterCur;
+    // The weather module's draw for this particle, fixed for its life: it lives where the local rate,
+    // as a fraction of the rate the emitter spawns for, is above it. Its own hash, not the seed itself,
+    // which picks the flipbook cell: thinning by the seed would keep only the low cells in light rain.
+    let weatherGate = f32(pcgHash(bitcast<u32>(current.seed) ^ 0x9E3779B9u) >> 8u) / 16777216.0;
 
     var acc = vec3<f32>(0.0);
     if (hasFeature(mask, SIM_GRAVITY)) { acc = acc + u_sim.u_gravity.xyz; }
-    if (hasFeature(mask, SIM_WIND)) { acc = acc + (u_sim.u_wind.xyz - v) * u_sim.u_wind.w; }
+    if (hasFeature(mask, SIM_WIND)) {
+        var windTarget = u_sim.u_wind.xyz;
+        if (hasFeature(mask, SIM_SCENE_WIND)) {
+            // The air where the particle is, in world space, brought into the simulation's.
+            let wp = select(x, transformPoint(toWorld, x), isLocal);
+            let air = windFieldAt(wp, WindFieldParams(u_sim.u_windBase, u_sim.u_windMotion)).velocity * u_sim.u_windScene.x;
+            windTarget = select(air, transformDir(u_sim.u_worldToSim, air), isLocal);
+        }
+        acc = acc + (windTarget - v) * u_sim.u_wind.w;
+    }
 #ifndef SIM_STRIP_NOISE
     if (hasFeature(mask, SIM_NOISE)) { acc = acc + turbulence(x) * u_sim.u_noise.x; }
 #endif
@@ -688,6 +763,17 @@ fn updateParticle(dt: f32) {
         }
     }
 #endif
+
+    // Weather: only where its kind falls, as thinly as it falls there, and never under shelter. Inert
+    // with no volume in the frame (the particle editor's preview, a scene with no weather).
+    if (hasFeature(mask, SIM_WEATHER)) {
+        if (weatherCount() > 0) {
+            let w = precipitationAt(select(x, transformPoint(toWorld, x), isLocal));
+            let rate = select(w.x, w.y, u_sim.u_precipSim.x > 0.5);
+            if (weatherGate >= rate * u_sim.u_precipSim.z) { killed = true; }
+            if (mix(1.0, shelterOpenHere, w.z * u_sim.u_precipSim.y) < 0.5) { killed = true; }
+        }
+    }
 
     var spinScale = 1.0;
     if (hasFeature(mask, SIM_SPIN_LIFE)) { spinScale = particleLut(LUT_SCALARS, life).z; }
@@ -793,6 +879,13 @@ fn simulateSlot(slot: u32, texel: vec2<i32>) -> Particle {
     let wasAlive = p.lifetime > 0.0;
     p.age = select(p.age, p.age + stepDt, wasAlive);
     let alive = wasAlive && p.age < p.lifetime;
+    // The shelter where this step leaves the particle, fetched here in uniform control flow (one uniform
+    // test), never inside the per-slot branch below.
+    shelterOpenHere = 1.0;
+    if (hasFeature(u_sim.u_mask.x, SIM_WEATHER)) {
+        let ahead = p.position + p.velocity * stepDt;
+        shelterOpenHere = particleShelterOpen(select(ahead, transformPoint(u_sim.u_emitterCur, ahead), hasFeature(u_sim.u_mask.x, SIM_LOCAL)));
+    }
     current = p;
     if (alive) { updateParticle(stepDt); }
     current.lifetime = select(0.0, current.lifetime, alive && current.lifetime > 0.0);

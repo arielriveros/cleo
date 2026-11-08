@@ -76,7 +76,8 @@ const CASES: Case[] = [
     { name: 'surface', table: PHYSICS_SURFACE_PRESETS, make: () => ({ friction: 0.3, restitution: 0 }), reserved: [] },
     { name: 'weather', table: WEATHER_PRESETS, make: () => new WeatherNode('weather'),
       reserved: ['size', 'blendDistance', 'priority', 'enabled', 'snowMaterial', 'snowMaterialId', 'snowTiling',
-          'snowSlope', 'snowBreakup', 'shelter'] },
+          'snowSlope', 'snowBreakup', 'shelter', 'precipitationSprite', 'precipitationSize', 'precipitationSpeed',
+          'precipitationTrailMin', 'precipitationTrailMax'] },
 ];
 
 function expectHolds(target: any, options: object, label: string): void {

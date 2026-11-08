@@ -27,6 +27,7 @@ import { VolumetricCloudsNode } from "./nodes/volumetricCloudsNode";
 import { SkyAtmosphereNode } from "./nodes/skyAtmosphereNode";
 import { SkyLightNode } from "./nodes/skyLightNode";
 import { WindNode } from "./nodes/windNode";
+import { sampleSceneWind, windFieldClock } from "../wind/windField";
 import { WeatherNode } from "./nodes/weatherNode";
 import { CameraNode } from "./nodes/cameraNode";
 import { SpriteNode } from "./nodes/spriteNode";
@@ -50,6 +51,7 @@ import { authoring } from "../eventBus";
 import { cloneNodeJson, regenerateNodeIds } from "./nodeJson";
 import { getTemplate, templateNames } from "./templates";
 import { followSocket, resolveSocketOwner } from "./socketFollow";
+import { PrecipitationRig } from "./precipitationRig";
 
 /** Object-space up, rotated by the camera's world orientation to give the audio listener its up axis. */
 const UP_AXIS: vec3 = vec3.fromValues(0, 1, 0);
@@ -190,6 +192,12 @@ export class Scene {
     public particlePreview: boolean = true;
 
     /**
+     * The rain and snow falling from this scene's weather volumes (WeatherNode `precipitation`): one
+     * particle system per kind round the camera, outside the tree. See PrecipitationRig.
+     */
+    public readonly precipitation: PrecipitationRig = new PrecipitationRig(this);
+
+    /**
      * The navigation system serving this scene (set by `CleoEngine.setScene`). Reachable from a script
      * as `scene.ai`.
      *
@@ -286,6 +294,7 @@ export class Scene {
     public dispose(): void {
         CleoEngine.eventEmitter.off('SCENE_CHANGED', this._onSceneChanged);
         this.stop();
+        this.precipitation.dispose();
 
         // Both are idempotent, and each falls back to the World it registered with, so no world argument
         // is needed here.
@@ -587,6 +596,14 @@ export class Scene {
                 } finally {
                     authoring.derived--;
                 }
+            }
+
+            // The rain and snow, once the camera has moved for good: they fall round where it looks from.
+            if (this._hasStarted && !paused) {
+                authoring.derived++;
+                try { this.precipitation.update(delta, time); }
+                catch (e) { Logger.error(`Error in the precipitation: ${e}`); }
+                finally { authoring.derived--; }
             }
 
             this._updateAudio();
@@ -1318,11 +1335,33 @@ export class Scene {
         return this._skyAtmosphere;
     }
 
-    /** The scene's wind, or null — in which case nothing sways and no wind shader is ever bound. */
+    /**
+     * The scene's wind, or null — in which case there is no base wind, and nothing sways unless a Force
+     * Field moves the air (`affectsWind`).
+     */
     public get wind(): WindNode | null {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._wind;
+    }
+
+    /**
+     * The air velocity, in m/s, at world `position`: the {@link wind}'s gusting, veering field plus every
+     * Force Field that `affectsWind` — the function the foliage bends to on the GPU. Works without a
+     * WindNode (the local wind alone). Written into `out` and returned.
+     *
+     * `time` defaults to the frame's wind clock (`windFieldClock`), so the answer is the gust the plants
+     * are showing right now.
+     *
+     * @example
+     * // A kite that drifts with the wind it is flying in.
+     * const air = this.scene!.windAt(this.worldPosition);
+     * const p = this.position;
+     * this.setPosition([p[0] + air[0] * dt * 0.1, p[1], p[2] + air[2] * dt * 0.1]);
+     */
+    public windAt(position: ArrayLike<number>, out: number[] | Float32Array = [0, 0, 0],
+                  time: number = windFieldClock.time): number[] | Float32Array {
+        return sampleSceneWind(this, position, out, time);
     }
 
     /**

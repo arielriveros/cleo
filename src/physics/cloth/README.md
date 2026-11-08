@@ -89,7 +89,7 @@ solvers.
 | Compute on WebGL2 | Ping-pong between RGBA32F render targets (the GPU particles' fallback) | `particleRenderer.ts` `_stepRaster` |
 | Body proxies | The ragdoll's per-bone capsules, posed from the live animation without physics bodies | `ragdollLayout` / `ragdollPartPose` in `src/physics/ragdollProfile.ts` |
 | World proxies | Analytic colliders packed for the GPU, and `overlap*` queries | `src/particles/particleColliders.ts`; `PhysicsSystem.overlapCapsule` |
-| Wind | `WindNode` (direction, strength, gusts), the gust noise, and `ForceFieldNode` | `windNode.ts`; `chunks/foliageWind.wgsl`; `forceFieldNode.ts` |
+| Wind | `WindNode` (direction, strength, gusts), the wind field's gust noise (`windGustAt`), and `ForceFieldNode` | `windNode.ts`; `core/wind/windField.ts` / `chunks/windField.wgsl`; `forceFieldNode.ts` |
 | Timing | The scene's late pass, after animation and the socket followers | `Scene.update` |
 
 ## 3. Phase 1 (shipped): ClothNode, CPU XPBD

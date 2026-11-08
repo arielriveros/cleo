@@ -304,6 +304,21 @@ export class Texture {
         this._finishUpload();
     }
 
+    /**
+     * Create the texture from GENERATED pixels, exactly as if they were a decoded image: RGBA8 rows
+     * top-down, uploaded through the same path (flip, mipmaps, sampling) an image takes, so an atlas laid
+     * out like an image file (a sprite sheet, cell 0 top-left) samples like one. What the engine's own
+     * particle sprites are made with (graphics/particles/builtinSprites.ts).
+     */
+    public createFromPixels(rgba: Uint8ClampedArray, width: number, height: number): void {
+        this._data = null;
+        this._width = width;
+        this._height = height;
+        this._syncGpuSize();   // allocate before uploading - see _syncGpuSize
+        this._gpu.upload2D(new ImageData(rgba as Uint8ClampedArray<ArrayBuffer>, width, height), width, height, this._mipMap);
+        this._finishUpload();
+    }
+
     /** Upload a sub-rectangle of RGBA bytes (row-major, tightly packed) into an existing data texture. */
     public updateRegion(x: number, y: number, width: number, height: number, data: Uint8Array): void {
         this._gpu.uploadRegion(x, y, width, height, data);

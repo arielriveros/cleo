@@ -1,5 +1,5 @@
 import { Tileset, TilemapNode, isInlineTilesetId } from 'cleo'
-import type { Scene, TileMeta, TerrainSet, VariantSet, TilesetConfig } from 'cleo'
+import type { Scene, TileMeta, TerrainSet, VariantSet, TilesetConfig, PrecipitationSprite } from 'cleo'
 import { cryptoRandomId } from './ids'
 
 // A reusable, named Tileset asset — an atlas image sliced into a grid, plus the per-tile metadata that
@@ -378,6 +378,31 @@ export function fromRuntimeTileset(ts: Tileset, name: string): TilesetAsset {
 }
 
 /**
+ * A weather volume's falling-rain-or-snow sprite sheet cut from a tileset: its atlas and grid, copied in
+ * (the volume embeds them, as a tilemap embeds its tileset) and linked back by `tilesetId`. `previous`
+ * keeps the frame count (clamped to the grid) and the playback rate; a fresh pick uses every cell, one
+ * random still cell per particle.
+ */
+export function weatherSpriteFromTileset(asset: TilesetAsset, previous: PrecipitationSprite | null = null): PrecipitationSprite {
+  const cells = Math.max(1, asset.columns * asset.rows)
+  const sameSheet = previous?.tilesetId === asset.id
+  return {
+    textureId: asset.textureId, tilesetId: asset.id, columns: Math.max(1, asset.columns), rows: Math.max(1, asset.rows),
+    frames: sameSheet ? Math.min(cells, Math.max(1, previous!.frames)) : cells,
+    fps: previous?.fps ?? 0,
+  }
+}
+
+/**
+ * Whether a tileset's grid covers its whole atlas with no margin or spacing: what a particle flipbook (a
+ * weather sprite sheet) assumes. Otherwise its cells draw slightly off.
+ */
+export function tilesetGridIsTight(asset: Pick<TilesetAsset, 'margin' | 'spacing' | 'columns' | 'rows' | 'tileWidth' | 'tileHeight' | 'imageWidth' | 'imageHeight'>): boolean {
+  return !asset.margin && !asset.spacing
+    && asset.columns * asset.tileWidth === asset.imageWidth && asset.rows * asset.tileHeight === asset.imageHeight
+}
+
+/**
  * Push the current library into every tilemap in a live scene, so an edited tileset reaches maps that
  * already embedded an older copy. Returns true when anything changed, so the caller can skip a save.
  */
@@ -408,6 +433,17 @@ export function reembedTilesets(scene: Scene | null | undefined, tilesets: Tiles
     sprite.tileset = next
     changed = true
   }
+  // Weather volumes copy a tileset's atlas and grid into their falling rain or snow.
+  for (const weather of scene.weatherVolumes) {
+    const current = weather.precipitationSprite
+    if (!current?.tilesetId) continue
+    const asset = tilesets.find(t => t.id === current.tilesetId)
+    if (!asset) continue
+    const next = weatherSpriteFromTileset(asset, current)
+    if ((['textureId', 'tilesetId', 'columns', 'rows', 'frames', 'fps'] as const).every(k => next[k] === current[k])) continue
+    weather.precipitationSprite = next
+    changed = true
+  }
   return changed
 }
 
@@ -428,10 +464,17 @@ export function detachTileset(scene: Scene | null | undefined, tilesetId: string
     sprite.tileset = null
     changed = true
   }
+  // A weather sprite keeps the atlas it copied (it draws on its own); only the link goes.
+  for (const weather of scene.weatherVolumes) {
+    const current = weather.precipitationSprite
+    if (current?.tilesetId !== tilesetId) continue
+    weather.precipitationSprite = { ...current, tilesetId: null }
+    changed = true
+  }
   return changed
 }
 
-/** Tileset ASSET ids a live scene references, from tilemap layers and sprites alike. */
+/** Tileset ASSET ids a live scene references, from tilemap layers, sprites and weather sprites alike. */
 export function tilesetIdsInScene(scene: Scene | null | undefined): string[] {
   const ids = new Set<string>()
   for (const node of scene?.tilemaps ?? []) {
@@ -440,6 +483,10 @@ export function tilesetIdsInScene(scene: Scene | null | undefined): string[] {
   for (const sprite of scene?.sprites ?? []) {
     const id = sprite.tileset?.id
     if (id && !isInlineTilesetId(id)) ids.add(id)
+  }
+  for (const weather of scene?.weatherVolumes ?? []) {
+    const id = weather.precipitationSprite?.tilesetId
+    if (id) ids.add(id)
   }
   return [...ids]
 }

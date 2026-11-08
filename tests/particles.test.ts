@@ -6,7 +6,7 @@ import {
 } from '../src/particles/curves';
 import {
     defaultParticleSystem, parseParticleSystem, makeModule, defaultEmitter, maxLifetime,
-    MAX_EMITTER_CAPACITY, particleSystemReferences,
+    MAX_EMITTER_CAPACITY, particleSystemReferences, parseEmitter,
 } from '../src/particles/particleSystemAsset';
 import {
     EmitterRuntime, ParticleSystemRuntime, particleTextureLayout, resolveSubEmitters, LIVE_WINDOW_MARGIN,
@@ -26,6 +26,20 @@ function emitterWith(mutate: (e: ReturnType<typeof defaultEmitter>) => void) {
     mutate(e);
     return e;
 }
+
+describe('the render settings a lit, stretched emitter adds', () => {
+    it('default to the look every effect had: no translucency, every streak one length', () => {
+        const r = parseEmitter({}).render;
+        expect([r.translucency, r.stretchRange]).toEqual([0, [1, 1]]);
+    });
+
+    it('clamp what they are given and order the stretch range', () => {
+        const r = parseEmitter({ render: { translucency: 9, stretchRange: [5, -2] } }).render;
+        expect(r.translucency).toBe(2);
+        expect(r.stretchRange).toEqual([0, 5]);
+        expect(parseEmitter({ render: { stretchRange: 'wide' } }).render.stretchRange).toEqual([1, 1]);
+    });
+});
 
 describe('curves', () => {
     it('evaluates linear curves exactly at the ends and midpoint', () => {

@@ -44,6 +44,7 @@ Game.updateRenderSettings(settings: Partial<RenderSettings>): void
 | `localExposureEnabled` | on | on | off | off |
 | `volumetricFogEnabled` / `TileSize` / `Slices` / `LocalShadows` | on / 12 / 96 / on | on / 16 / 64 / on | on / 20 / 48 / off | **off** / 24 / 32 / off |
 | `weatherShelterEnabled` / `weatherShelterResolution` | on / 2048 | on / 1024 | on / 1024 | **off** / 512 |
+| `precipitationDensity` | 1 | 1 | 0.7 | 0.4 |
 | `shadowMapResolution` / `shadowCascades` | 4096 / 4 | 2048 / 3 | 1024 / 3 | 1024 / 2 |
 | `shadowFilterMode` / `shadowFilterRadius` | 1 / 2.0 | 0 / 1.0 | 0 / 1.0 | 0 / **0.0** |
 | `bloomEnabled` | on | on | on | off |
@@ -122,6 +123,7 @@ multiplier above 1 to bloom: `emissiveIntensity` on a material, `render.emissive
 |---|---|---|---|
 | `weatherShelterEnabled` | `boolean` | tier | Keep what stands under something solid dry and free of snow, from a depth map seen from straight above. Off on the Low tier. |
 | `weatherShelterResolution` | `number` | tier | That map's size over the 96 m it covers round the camera (2048 / 1024 / 1024 / 512). |
+| `precipitationDensity` | `number` | tier | How much of the weather's falling rain and snow is drawn, 0..1: a multiplier on every volume's rate, as particles round the camera. 0 draws none; the ground's raindrops still play (1 / 1 / 0.7 / 0.4). |
 
 ## Depth of field
 

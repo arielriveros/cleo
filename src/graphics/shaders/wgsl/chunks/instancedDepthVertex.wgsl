@@ -26,6 +26,9 @@ struct InstancedDepthUniforms {
     u_windResponse: vec4<f32>,
     u_windShape: vec4<f32>,
     u_windCamera: vec4<f32>,
+    // The wind field and its sources, as in chunks/instancedVertex.wgsl.
+    u_windField: vec4<f32>,
+    u_windSources: array<vec4<f32>, 32>,
     // Foliage interaction, as in chunks/instancedVertex.wgsl: the shadow parts with the grass.
     u_interact: vec4<f32>,
     u_interactStamps: array<vec4<f32>, 32>,
@@ -43,6 +46,11 @@ struct InstancedDepthUniforms {
     u_shelterParams: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> u_depth: InstancedDepthUniforms;
+
+// The wind sources chunks/windField.wgsl sums, as in chunks/instancedVertex.wgsl.
+const WIND_SOURCE_SLOTS: i32 = 8;
+fn windSourceCount() -> i32 { return i32(u_depth.u_windField.z); }
+fn windSourceTexel(i: i32, k: i32) -> vec4<f32> { return u_depth.u_windSources[i * 4 + k]; }
 
 fn weatherCount() -> i32 { return i32(u_depth.u_weatherInfo.x); }
 fn weatherInv(i: i32) -> mat4x4<f32> { return u_depth.u_weatherInv[i]; }
@@ -78,7 +86,8 @@ fn vs_main(
 #if CLEO_WIND
     // The same displacement as the colour pass, so a swaying plant's shadow sways with it.
     let wind = WindParams(u_depth.u_windGlobal, u_depth.u_windTime, u_depth.u_windResponse,
-                          u_depth.u_windShape, u_depth.u_windCamera);
+                          u_depth.u_windShape, u_depth.u_windCamera, u_depth.u_windField);
+    let plant = windPlantAt(instanceModel[3].xyz, u_depth.u_windTime.x, wind);
     let nw = (instanceModel * vec4<f32>(normal, 0.0)).xyz;
 #if CLEO_FOLIAGE
     let push = interactLean(instanceModel[3].xyz, u_depth.u_windTime.x, u_depth.u_interact, u_depth.u_interactStamps);
@@ -88,7 +97,7 @@ fn vs_main(
     let droop = 0.0;
 #endif
     world = windDisplace(world, position, nw * inverseSqrt(max(dot(nw, nw), 1e-12)), instanceModel,
-                         u_depth.u_windTime.x, wind, push, droop);
+                         u_depth.u_windTime.x, wind, push, droop, plant);
 #endif
     out.position = u_depth.u_lightSpace * vec4<f32>(world, 1.0);
     return out;

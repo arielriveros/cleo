@@ -16,7 +16,7 @@ import { EditorSessionsContext, type EditorSessionsContextValue } from "./Editor
 import { useStableActions } from "@cleo/app-kit/utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
-import { resetScriptModules, addScriptModuleSources, nextFrame } from "cleo";
+import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode } from "cleo";
 import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, FOLIAGE_STARTER, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener, RenderSettings } from "cleo";
 import NullImage from '../images/null.png';
@@ -6221,7 +6221,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const schedule = (e?: SceneChange) => {
       // Structural/visibility/name changes affect which helper icons + wireframes are needed; the per-setter
       // transform/material/... events do not, so skip them (PHYSICS_CHANGED passes no payload and still runs).
-      if (e && e.kind !== 'structure' && e.kind !== 'visibility' && e.kind !== 'name') return;
+      // A Force Field's own edits are the exception: its shape decides which outline it wears, and whether it
+      // moves the air decides whether selecting it shows the wind field.
+      const forceField = e?.kind === 'component' && e.node instanceof ForceFieldNode;
+      if (e && !forceField && e.kind !== 'structure' && e.kind !== 'visibility' && e.kind !== 'name') return;
       // Nor does a change to an editor-owned node: helpers are derived FROM content, so a helper, cursor or
       // gizmo handle coming or going changes nothing a reconcile reads. The walkable soup excludes helpers
       // too, so dropping it for one only forces the next reconcile to re-walk the whole level.

@@ -11,7 +11,8 @@ import { WeatherNode, MIN_WEATHER_VOLUME_SIZE } from '../src/core/scene/nodes/we
 import { WEATHER_PRESETS } from '../src/core/scene/nodes/weatherPresets';
 import {
     MAX_WEATHER_VOLUMES, gatherWeather, packWeather, resolveWeatherAt, snowForLandscape, shelterFootprint,
-    shelterMatrix, shelterClearanceDepth, SHELTER_RANGE, SHELTER_CLEARANCE,
+    shelterMatrix, shelterClearanceDepth, SHELTER_RANGE, SHELTER_CLEARANCE, resolvePrecipitationAt,
+    RAINDROP_PERIODS, WEATHER_CLOCK_WRAP,
 } from '../src/graphics/render/weatherPack';
 import { ShadowPasses } from '../src/graphics/render/shadows';
 import { Material } from '../src/graphics/material';
@@ -70,11 +71,17 @@ describe('the weather node', () => {
         const n = box('w', {
             size: [30, 8, 12], blendDistance: 3, priority: 2, enabled: false, wetness: 0.4, snow: 0.8, puddles: 0.25,
             snowTiling: 6, snowSlope: 30, snowBreakup: 0.7, shelter: false, snowMaterial: snow.serialize(), snowMaterialId: 'mat-snow',
+            precipitation: 'snow', precipitationRate: 0.8, precipitationSize: 1.5, precipitationSpeed: 0.7, precipitationWind: 0.25,
+            precipitationTrailMin: 0.4, precipitationTrailMax: 2.5,
+            precipitationSprite: { textureId: 'flakes', tilesetId: 'ts-flakes', columns: 4, rows: 2, frames: 6, fps: 0 },
         });
         const json = (n as any)._serializePayload().weather;
-        const back = new WeatherNode('again', json);
-        for (const key of ['size', 'blendDistance', 'priority', 'enabled', 'wetness', 'snow', 'puddles', 'snowTiling', 'snowSlope', 'snowBreakup', 'shelter', 'snowMaterialId'] as const)
+        const back = new WeatherNode('again', JSON.parse(JSON.stringify(json)));
+        for (const key of ['size', 'blendDistance', 'priority', 'enabled', 'wetness', 'snow', 'puddles', 'snowTiling', 'snowSlope', 'snowBreakup', 'shelter', 'snowMaterialId',
+                           'precipitation', 'precipitationRate', 'precipitationSize', 'precipitationSpeed', 'precipitationWind', 'precipitationSprite',
+                           'precipitationTrailMin', 'precipitationTrailMax'] as const)
             expect((back as any)[key], key).toEqual((n as any)[key]);
+        expect(back.precipitationSprite).toEqual({ textureId: 'flakes', tilesetId: 'ts-flakes', columns: 4, rows: 2, frames: 6, fps: 0 });
         expect(back.snowMaterial?.properties.get('roughness')).toBeCloseTo(0.7);
     });
 
@@ -85,7 +92,34 @@ describe('the weather node', () => {
         expect(n.size).toEqual([10, 10, 10]);
         expect(n.shelter).toBe(false);
         for (const p of WEATHER_PRESETS) for (const key of Object.keys(p.options))
-            expect(['wetness', 'snow', 'puddles'], `${p.id}.${key}`).toContain(key);
+            expect(['wetness', 'snow', 'puddles', 'precipitation', 'precipitationRate', 'precipitationWind'], `${p.id}.${key}`).toContain(key);
+        // What falls, too: rain from the rainy ones, snow from the snowy ones, nothing from Dry.
+        const kind = (id: string) => WEATHER_PRESETS.find(p => p.id === id)!.options.precipitation;
+        expect(['drizzle', 'rain', 'storm'].map(kind)).toEqual(['rain', 'rain', 'rain']);
+        expect(['lightSnow', 'snowedIn', 'blizzard'].map(kind)).toEqual(['snow', 'snow', 'snow']);
+        expect(kind('dry')).toBe('none');
+    });
+
+    it('precipitates: a kind at a rate above 0 is active on its own, its rate counted only for its kind', () => {
+        const n = new WeatherNode('w', { precipitation: 'rain', precipitationRate: 0.5 });
+        expect(n.active).toBe(true);
+        expect([n.rainRate, n.snowfallRate]).toEqual([0.5, 0]);
+        n.precipitationRate = 0;
+        expect(n.active).toBe(false);
+        n.precipitationRate = 0.3; n.precipitation = 'snow';
+        expect([n.rainRate, n.snowfallRate]).toEqual([0, 0.3]);
+        n.precipitation = 'hail' as any;
+        expect(n.precipitation).toBe('snow');
+    });
+
+    it('clamps what falls, and parses a sprite sheet into range or reads none', () => {
+        const n = new WeatherNode('w', { precipitationRate: 4, precipitationSize: 10, precipitationSpeed: 0, precipitationWind: -1 });
+        expect([n.precipitationRate, n.precipitationSize, n.precipitationSpeed, n.precipitationWind]).toEqual([1, 3, 0.25, 0]);
+        n.precipitationSprite = { textureId: 'sheet', columns: 0, rows: 3.6, frames: 99, fps: -2 };
+        expect(n.precipitationSprite).toEqual({ textureId: 'sheet', columns: 1, rows: 4, frames: 4, fps: 0 });
+        n.precipitationSprite = { textureId: '', columns: 2, rows: 2, frames: 4, fps: 0 };
+        expect(n.precipitationSprite).toBeNull();
+        expect(new WeatherNode('w').precipitation).toBe('none');
     });
 
     it('is parsed back by the scene loader as a weather node with its box', () => {
@@ -145,6 +179,52 @@ describe('the frame’s volumes', () => {
         v.wetness = 0.6;
         expect(packWeather([v]).hash).not.toBe(a);
         expect(packWeather([]).count).toBe(0);
+    });
+});
+
+describe('what falls', () => {
+    it('packs the rain and the snow falling in the free shape lanes, by kind', () => {
+        const rain = box('rain', { size: [10, 10, 10], precipitation: 'rain', precipitationRate: 0.7 });
+        const snow = box('snow', { size: [10, 10, 10], precipitation: 'snow', precipitationRate: 0.4, priority: 1 }, [30, 0, 0]);
+        const pack = packWeather(gatherWeather([rain, snow], camera));
+        expect(Array.from(pack.shape.subarray(2, 4))).toEqual([expect.closeTo(0.7, 5), 0]);
+        expect(Array.from(pack.shape.subarray(6, 8))).toEqual([0, expect.closeTo(0.4, 5)]);
+    });
+
+    it('comes into a box from the sky above it: its top is open, its floor and side faces are not', () => {
+        const w = box('w', { size: [20, 10, 20], blendDistance: 2, precipitation: 'rain', precipitationRate: 1 });
+        const pack = packWeather(gatherWeather([w], camera));
+        expect(resolvePrecipitationAt(pack, vec3.fromValues(0, 0, 0)).rain).toBe(1);
+        expect(resolvePrecipitationAt(pack, vec3.fromValues(0, 40, 0)).rain).toBe(1);
+        expect(resolvePrecipitationAt(pack, vec3.fromValues(0, -6, 0)).rain).toBe(0);
+        const side = resolvePrecipitationAt(pack, vec3.fromValues(9.5, 20, 0)).rain;
+        expect(side).toBeGreaterThan(0);
+        expect(side).toBeLessThan(1);
+        expect(resolvePrecipitationAt(pack, vec3.fromValues(11, 20, 0)).rain).toBe(0);
+        // The surfaces still see the box as it is: no wetness above it.
+        expect(w.weightAt(vec3.fromValues(0, 40, 0))).toBe(0);
+        expect(w.columnWeightAt(vec3.fromValues(0, 40, 0))).toBe(1);
+    });
+
+    it('is carved out by a higher-priority dry box, and carries the shelter flag', () => {
+        const storm = box('storm', { size: [100, 40, 100], blendDistance: 0, wetness: 1, precipitation: 'rain', precipitationRate: 1 });
+        const barn = box('barn', { size: [8, 8, 8], blendDistance: 0, priority: 1, wetness: 0.001, shelter: false });
+        const pack = packWeather(gatherWeather([storm, barn], camera));
+        expect(resolvePrecipitationAt(pack, vec3.fromValues(0, 0, 0))).toEqual({ rain: 0, snowfall: 0, shelter: 0 });
+        expect(resolvePrecipitationAt(pack, vec3.fromValues(20, 0, 20))).toEqual({ rain: 1, snowfall: 0, shelter: 1 });
+    });
+
+    it('animates the ground by a clock whose wrap every raindrop period divides, in step with the shader', () => {
+        for (const period of RAINDROP_PERIODS) expect(Number.isInteger(WEATHER_CLOCK_WRAP / period), String(period)).toBe(true);
+        const chunk = readFileSync(join(WGSL_DIR, 'chunks', 'terrainWeather.wgsl'), 'utf-8');
+        RAINDROP_PERIODS.forEach((period, i) => {
+            const m = new RegExp(`const RAINDROP_PERIOD_${i}: f32 = ([0-9.]+);`).exec(chunk);
+            expect(Number(m?.[1]), `RAINDROP_PERIOD_${i}`).toBe(period);
+        });
+        // Raindrops follow the rain composited at the point, and the clock.
+        const apply = chunk.slice(chunk.indexOf('fn applyTerrainWeather'));
+        expect(apply).toMatch(/precipitationAt\(p\)/);
+        expect(apply).toMatch(/u_weatherInfo\.y/);
     });
 });
 
@@ -244,6 +324,15 @@ describe('the weather shaders', () => {
         const depth = await translateWgsl(compose('shadowMapInstanced.wgsl', { CLEO_WIND: 1, CLEO_FOLIAGE: 1 }),
                                           join(WGSL_DIR, 'shadowMapInstanced.wgsl'));
         expect(depth.vertex).toMatch(/weatherCount/);
+    });
+
+    it('reach the particle simulation: the shelter map in group 0 after the parent state, on both backends', async () => {
+        const out = await translateWgsl(compose('particleSim.wgsl'), join(WGSL_DIR, 'particleSim.wgsl'));
+        expect(out.fragment).toMatch(/uniform highp sampler2DArrayShadow u_weatherShelter;/);
+        expect(out.resources.find((r: any) => r.glslName === 'u_weatherShelter' && r.kind === 'texture')).toMatchObject({ group: 0, binding: 12 });
+        const compute = compose('particleSimCompute.wgsl');
+        expect(compute).toMatch(/textureSampleCompareLevel\(u_weatherShelter_texture/);
+        expect(compute).toMatch(/fn precipitationAt/);
     });
 
     it('leave the landscape in uniform control flow: no derivative, no implicit fetch, no early return', () => {

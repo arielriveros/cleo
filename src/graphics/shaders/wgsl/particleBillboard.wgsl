@@ -33,7 +33,9 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32,
         var side = cross(axis, toCam);
         if (dot(side, side) < 1e-10) { side = right; }
         side = normalize(side);
-        let halfLength = half * (1.0 + look.speed * u_draw.u_camForward.w);
+        // Its own random draw (not the flipbook's `floor(seed * frames)`) picks this drop's trail length.
+        let trail = mix(u_draw.u_stretchRange.x, u_draw.u_stretchRange.y, fract(fract(look.seed) * 37.7 + 0.31));
+        let halfLength = half * (1.0 + look.speed * u_draw.u_camForward.w * trail);
         offset = side * (corner.x * half) + axis * (corner.y * halfLength);
         normal = normalize(cross(side, axis));
     } else {

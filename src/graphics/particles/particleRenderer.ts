@@ -32,6 +32,9 @@ import { FULL_DETAIL, particleLodDistance, selectParticleLod } from '../../parti
 import type { RenderSettings } from '../../particles/particleModules';
 import type { ParticleSystemNode } from '../../core/scene/nodes/particleSystemNode';
 import type { Scene } from '../../core/scene/scene';
+import type { ParticleWeather } from '../render/weather';
+import { LayeredDepthFramebuffer } from '../layeredDepthFramebuffer';
+import { builtinSpriteTexture, releaseBuiltinSprites } from './builtinSprites';
 import { gatherParticleLocalLight, type ParticleLocalLight, type ParticleLocalLighting } from './particleLighting';
 // @ts-ignore -- WGSL modules, typed by the loader
 import ParticleSimComputeProgram from '../shaders/wgsl/particleSimCompute.wgsl';
@@ -92,7 +95,11 @@ const PREMULTIPLIED_KEEP_ALPHA: BlendState = {
 };
 
 /** A sub-emitter link as uniforms, for an emitter with none: event 0, "no parent". */
+/** No scene wind: calm air, a unit direction so nothing divides by zero. */
+const NO_WIND_BASE = [1, 0, 0, 18];
+const NO_WIND_MOTION = [0, 4, 0.8, 0];
 const NO_SUB = [0, 1, 0, 1];
+const NO_WEATHER_INFO = [0, 0, 0, 0];
 const NO_SUB2 = [0, 0, 0, 0];
 
 /** The largest pool the sort runs on. Beyond it, `log2(N)^2 / 2` passes a frame stops being cheap. */
@@ -108,9 +115,20 @@ export interface ParticleSimFrame {
     viewProj: mat4 | null;
     cameraPosition: vec3;
     orthographic: boolean;
-    /** Force fields, world space, four texels each. */
+    /** Force fields, world space, four texels each. The ones that move the air come first. */
     fields: Float32Array;
     fieldCount: number;
+    /**
+     * The scene's wind field (core/wind/windField.ts): [dirX, dirZ, strength, gust wavelength] and
+     * [time, gust speed, gustiness, veer]. Read by emitters whose Wind module is on the scene wind.
+     */
+    windBase?: ArrayLike<number>;
+    windMotion?: ArrayLike<number>;
+    /**
+     * The frame's weather volumes and shelter map, for the `weather` module (render/weather.ts). Null or
+     * absent: no weather (a preview), and the module does nothing.
+     */
+    weather?: ParticleWeather | null;
 }
 
 export interface ParticleDrawFrame {
@@ -348,6 +366,8 @@ export class ParticleRenderer {
     private _white: Texture | null = null;
     private _blackCube: Texture | null = null;
     private _depthFallback: Texture | null = null;
+    /** A 1x1 shelter map at open sky, bound when the frame has no weather (a preview). */
+    private _shelterFallback: LayeredDepthFramebuffer | null = null;
     private _failed = false;
     private _warnedNoFloat = false;
     /** Released emitter state by pool shape (`width x height`), waiting for the next system to take it. */
@@ -447,6 +467,7 @@ export class ParticleRenderer {
         this._uniformGroups.clear();
         for (const mesh of this._meshes.values()) { mesh.vertices.destroy(); mesh.indices.destroy(); }
         this._meshes.clear();
+        releaseBuiltinSprites();
     }
 
     private get _whiteTexture(): Texture {
@@ -476,6 +497,17 @@ export class ParticleRenderer {
         return this._depthFallback;
     }
 
+    /** The shelter map the weather module reads: the frame's, or open sky everywhere. */
+    private _shelterOf(frame: ParticleSimFrame): Texture {
+        if (frame.weather) return frame.weather.shelter;
+        if (!this._shelterFallback) {
+            this._shelterFallback = new LayeredDepthFramebuffer();
+            this._shelterFallback.create(1, 1, true);
+            this._shelterFallback.clearAll();
+        }
+        return this._shelterFallback.texture;
+    }
+
     /** Whether `node` is shown at all: in the editor, only while the scene previews particles. */
     private static _active(node: ParticleSystemNode): boolean {
         return !node.previewSuppressed;
@@ -489,15 +521,15 @@ export class ParticleRenderer {
      * Run every pending step of every particle system in `scene`. Call where no pass is open; WebGPU
      * records into the frame encoder so the steps run before this frame's draws read the results.
      */
-    public simulate(scene: Scene, frame: ParticleSimFrame): void {
+    public simulate(scene: Scene, frame: ParticleSimFrame,
+                    systems: Iterable<ParticleSystemNode> & ({ readonly size: number } | { readonly length: number }) = scene.particleSystems): void {
         this._frame++;
         this.stepsLastFrame = 0;
         // Every uniform slot the previous frame used has been submitted; start the arenas over.
         this._simUniforms?.resetCursor();
         this._sortUniforms?.resetCursor();
         if (this._failed) return;
-        const systems = scene.particleSystems;
-        if (systems.size === 0) { this._sweep(); return; }
+        if (('size' in systems ? systems.size : systems.length) === 0) { this._sweep(); return; }
         if (!this.supported) {
             if (!this._warnedNoFloat) {
                 this._warnedNoFloat = true;
@@ -646,7 +678,7 @@ export class ParticleRenderer {
      * The sampled inputs of one step: this emitter's state, its LUT, the scene depth, and its parent's
      * state after and before the parent's own step — or its own state again when it has no parent.
      */
-    private _simInputs(emitter: EmitterGpu, depth: Texture, parent: EmitterGpu | null) {
+    private _simInputs(emitter: EmitterGpu, depth: Texture, parent: EmitterGpu | null, shelter: Texture) {
         // The parent has already stepped (and swapped), so its READ set is the new state and its WRITE
         // set the one it just replaced.
         const now = parent ? parent.read : emitter.read;
@@ -660,6 +692,8 @@ export class ParticleRenderer {
             { binding: 9, textureView: now[2].sampledView },
             { binding: 10, textureView: was[0].sampledView },
             { binding: 11, textureView: was[1].sampledView },
+            // Its comparison sampler (13) is implied by the texture, as the depth's (6) is.
+            { binding: 12, textureView: shelter.sampledView },
         ];
     }
 
@@ -676,6 +710,19 @@ export class ParticleRenderer {
         set('u_collideScreen', this._frameScreen);
         set('u_collideCam', this._frameCam);
         set('u_fields', frame.fields);
+        set('u_windBase', frame.windBase ?? NO_WIND_BASE);
+        set('u_windMotion', frame.windMotion ?? NO_WIND_MOTION);
+        // The weather the `weather` module lives by. No weather: a count of 0, and the module is inert.
+        const weather = frame.weather;
+        set('u_precipInfo', weather ? weather.info : NO_WEATHER_INFO);
+        if (weather) {
+            set('u_precipInv', weather.pack.inv);
+            set('u_precipBlend', weather.pack.blend);
+            set('u_precipAmount', weather.pack.amount);
+            set('u_precipShape', weather.pack.shape);
+            set('u_precipShelterMatrix', weather.shelterMatrix);
+            set('u_precipShelterParams', weather.shelterParams);
+        } else set('u_precipShelterParams', NO_WEATHER_INFO);
     }
 
     /** Everything one step writes: the emitter's static uniforms, the step's, and the frame's. */
@@ -702,11 +749,12 @@ export class ParticleRenderer {
 
         const write = emitter.write;
         const depth = this._depthOr(frame.depth);
-        const inputs = emitter.group(`c0:${pid}:${emitter.current}:${parent?.current ?? '-'}:${idOf(depth)}`,
+        const shelter = this._shelterOf(frame);
+        const inputs = emitter.group(`c0:${pid}:${emitter.current}:${parent?.current ?? '-'}:${idOf(depth)}:${idOf(shelter)}`,
             () => device.createBindGroup({
                 label: 'particleSim.inputs',
                 layout: pipeline.bindGroupLayouts.find(l => l.group === 0)!,
-                entries: this._simInputs(emitter, depth, parent),
+                entries: this._simInputs(emitter, depth, parent, shelter),
             }));
         const outputs = emitter.group(`c2:${pid}:${emitter.current}`, () => device.createBindGroup({
             label: 'particleSim.outputs',
@@ -742,12 +790,13 @@ export class ParticleRenderer {
         });
         pass.setPipeline(pipeline);
         const depth = this._depthOr(frame.depth);
+        const shelter = this._shelterOf(frame);
         pass.setBindGroup(0, emitter.group(
-            `r0:${pipelineId(pipeline)}:${emitter.current}:${parent?.current ?? '-'}:${idOf(depth)}`,
+            `r0:${pipelineId(pipeline)}:${emitter.current}:${parent?.current ?? '-'}:${idOf(depth)}:${idOf(shelter)}`,
             () => device.createBindGroup({
                 label: 'particleSim.inputs',
                 layout: pipeline.layoutForGroup(0)!,
-                entries: this._simInputs(emitter, depth, parent),
+                entries: this._simInputs(emitter, depth, parent, shelter),
             })));
         shaders.bind(program);
         this._writeStep(emitter, values, frame, program, (name, value) => shaders.setUniform(name, value));
@@ -1113,7 +1162,9 @@ export class ParticleRenderer {
                     const pipeline = this._drawPipeline(frame.target, render, !!mesh);
                     frame.pass.setPipeline(pipeline);
 
-                    const sprite = (render.textureId && TextureManager.Instance.getTexture(render.textureId)) || null;
+                    // The engine's own sprites (rain, snow) are resolved here, never through the TextureManager.
+                    const sprite = (render.textureId && (builtinSpriteTexture(render.textureId)
+                        ?? TextureManager.Instance.getTexture(render.textureId))) || null;
                     const spriteTex = sprite && sprite.sampledView ? sprite : this._whiteTexture;
                     const orderTex = sorted ?? this._whiteTexture;
                     // A lit emitter's surface. PBR (a highlight, metallic) only when something asks for it,
@@ -1163,6 +1214,7 @@ export class ParticleRenderer {
                     shaders.setUniform('u_flipbook', packed.draw.u_flipbook);
                     shaders.setUniform('u_flipbook2', packed.draw.u_flipbook2);
                     shaders.setUniform('u_speedRange', packed.draw.u_speedRange);
+                    shaders.setUniform('u_stretchRange', packed.draw.u_stretchRange);
                     shaders.setUniform('u_fragParams', packed.frag.u_fragParams);
                     shaders.setUniform('u_depthParams', [frame.near, frame.far, frame.orthographic ? 1 : 0, frame.depth ? 1 : 0]);
                     shaders.setUniform('u_fragMask', [sprite ? 1 : 0, render.lit ? 1 : 0, 1 / frame.width, 1 / frame.height]);
@@ -1170,8 +1222,8 @@ export class ParticleRenderer {
                     const ambient = render.lit ? fillFor() : frame.ambient;
                     shaders.setUniform('u_ambient', [ambient[0] + lights.fill[0] / Math.PI, ambient[1] + lights.fill[1] / Math.PI,
                                                      ambient[2] + lights.fill[2] / Math.PI, mesh ? 1 : 0]);
-                    shaders.setUniform('u_sunDir', [frame.sunDirection[0], frame.sunDirection[1], frame.sunDirection[2], 0]);
-                    shaders.setUniform('u_sunColor', [frame.sunColor[0], frame.sunColor[1], frame.sunColor[2], 0]);
+                    shaders.setUniform('u_sunDir', [frame.sunDirection[0], frame.sunDirection[1], frame.sunDirection[2], render.nearFade ?? 0]);
+                    shaders.setUniform('u_sunColor', [frame.sunColor[0], frame.sunColor[1], frame.sunColor[2], render.lit ? render.translucency ?? 0 : 0]);
                     shaders.setUniform('u_keyDir', [lights.keyDirection[0], lights.keyDirection[1], lights.keyDirection[2], 0]);
                     shaders.setUniform('u_keyColor', [lights.keyColor[0], lights.keyColor[1], lights.keyColor[2], frame.preExposure ?? 1]);
                     shaders.setUniform('u_surface', [roughness, metallic, render.normalStrength ?? 1,

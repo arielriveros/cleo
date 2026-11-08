@@ -46,6 +46,17 @@ the same API your scripts are.
 
 Full details: [Node types](node-types.md).
 
+### Wind
+
+| Export | What it is |
+|---|---|
+| `WindNode`, `WIND_DEFAULTS`, `WIND_PRESETS`, `WindOptions` / `WindPreset` *(types)* | The scene's wind: direction, strength, gusts, gustiness, veer. `sampleAt(position)` reads the air there. |
+| `sampleSceneWind`, `windFieldClock` | The air velocity (m/s) at a point of a scene (what `scene.windAt` calls), and the wind's clock. |
+| `WindFieldSnapshot` | The field captured once (base wind plus packed sources) for many `sample(x, y, z)` calls a frame. |
+| `sampleWindField`, `windGustAt`, `windVeerAt`, `packWindSources`, `createWindSample`, `WindSample` / `WindFieldParams` / `WindFieldSource` *(types)* | The field's pieces: the Perlin gust, the veered direction, the source packing. The CPU twin of `chunks/windField.wgsl`. |
+| `windPerlin`, `windPerlinGrad` | The 2D Perlin noise (and its analytic gradient) the field and the shader share. |
+| `WIND_REFERENCE_SPEED`, `MAX_WIND_SOURCES`, `WIND_SOURCE_FLOATS`, `WIND_DEFAULT_GUSTINESS`, `WIND_DEFAULT_VEER` | 7 m/s for strength 1; at most 8 Force Fields move the air. |
+
 ## UI
 
 Classes: `UINode`, `UIRootNode`, `UIPanelNode`, `UIStackNode`, `UISpacerNode`, `UITextNode`,

@@ -30,6 +30,7 @@ import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
+import { WindFieldSnapshot, windFieldClock } from '../../core/wind/windField';
 
 /** A foliage layer's cells bucketed on the ground plane, for the shadow pass's range query. */
 export interface FoliageCellGrid {
@@ -748,6 +749,18 @@ export class FoliagePasses {
         this._windClock = now;
         this._view.windTimePrev = this._view.windTime;
         this._view.windTime += dt;
+        windFieldClock.time = this._view.windTime;
+    }
+
+    /**
+     * The scene's wind field this frame (core/wind/windField.ts): the WindNode's parameters and the Force
+     * Fields that move the air, captured once per frame, after `advanceWindTime`. Foliage uploads it to
+     * every wind program; the particles sample the same snapshot, so everything rides one air.
+     */
+    public readonly windField = new WindFieldSnapshot();
+
+    public prepareWindField(scene: Scene): void {
+        this.windField.capture(scene, this._view.windTime);
     }
 
     /**
@@ -764,8 +777,9 @@ export class FoliagePasses {
      * the whole prototype, and the bend is measured against the whole prototype's height.
      */
     private _foliageWind(scene: Scene, layer: FoliageLayer): FoliageState | null {
-        const node = scene.wind;
-        const windOn = !!node && node.visible && node.strength > 0;
+        // Any air at all: a visible WindNode, or a Force Field that moves the air (prepareWindField).
+        const field = this.windField;
+        const windOn = field.active;
         const pushed = this.foliageInteraction.count > 0;
         const billboard = layer.kind === 'billboard';
         const models = billboard ? [layer.model] : layer.levels[0]?.models ?? [];
@@ -813,37 +827,42 @@ export class FoliagePasses {
         }
         // The motion fades by the wind's own distances; interaction alone, as far as stamps are made
         // (foliageInteraction INTERACT_RANGE).
-        const fadeEnd = windOn ? Math.max(node!.fadeEnd, pushed ? 45 : 0) : 45;
+        const fadeEnd = windOn ? Math.max(field.fadeEnd, pushed ? 45 : 0) : 45;
         return { foliage, lean, stiffness, minY: shape[0], height: shape[1], radius: shape[2], fadeEnd, bend, recovery,
                  droop };
     }
 
-    private readonly _windVec: number[][] = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
+    private readonly _windVec: number[][] = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
 
     /**
      * The vertex-stage wind block of the program just bound; see WindParams in foliageWind.wgsl. Per
      * MODEL: the bend is the layer's, but whether these surfaces add leaf motion is their material's.
      * A foliage program also gets the interaction stamps, the droop and (for the surface) the weather.
+     * The field (base wind and sources) is the frame's snapshot, the same for every model of every layer.
      */
     private _setWindUniforms(scene: Scene, w: FoliageState, material: Material): void {
-        const node = scene.wind;
-        const windOn = !!node && node.visible && node.strength > 0;
-        const [dx, dz] = windOn ? node!.directionXZ : [1, 0];
+        const field = this.windField;
+        const windOn = field.active;
+        const p = field.params;
         const cam = this._view.camera.position;
-        const [g, t, r, sh, c] = this._windVec;
-        g[0] = dx; g[1] = dz; g[2] = windOn ? node!.strength : 0; g[3] = windOn ? node!.gustScale : 18;
-        t[0] = this._view.windTime; t[1] = this._view.windTimePrev; t[2] = windOn ? node!.gustSpeed : 4; t[3] = w.fadeEnd;
+        const [g, t, r, sh, c, f] = this._windVec;
+        g[0] = p[0]; g[1] = p[1]; g[2] = p[2]; g[3] = p[3];
+        t[0] = this._view.windTime; t[1] = this._view.windTimePrev; t[2] = p[5]; t[3] = w.fadeEnd;
         r[0] = w.lean; r[1] = w.stiffness;
         const leaves = material.properties.get('windRole') === 'leaves';
         r[2] = leaves ? Math.max(0, Number(material.properties.get('windFlutter') ?? 0.5) || 0) : 0;
         r[3] = leaves ? 1 : 0;
-        sh[0] = w.minY; sh[1] = w.height; sh[2] = windOn ? Math.min(node!.fadeStart, w.fadeEnd - 1) : w.fadeEnd - 10; sh[3] = w.radius;
+        sh[0] = w.minY; sh[1] = w.height; sh[2] = windOn ? Math.min(field.fadeStart, w.fadeEnd - 1) : w.fadeEnd - 10; sh[3] = w.radius;
         c[0] = cam[0]; c[1] = cam[1]; c[2] = cam[2];
+        f[0] = p[6]; f[1] = p[7]; f[2] = windOn ? field.count : 0; f[3] = 0;
         this._shaderManager.setUniform('u_windGlobal', g);
         this._shaderManager.setUniform('u_windTime', t);
         this._shaderManager.setUniform('u_windResponse', r);
         this._shaderManager.setUniform('u_windShape', sh);
         this._shaderManager.setUniform('u_windCamera', c);
+        this._shaderManager.setUniform('u_windField', f);
+        // Only read up to the count, so a stale array behind a count of 0 is never seen.
+        if (f[2] > 0) this._shaderManager.setUniform('u_windSources', field.sources);
         if (!w.foliage) return;
         const ix = this._interactVec;
         ix[0] = w.bend > 0 ? this.foliageInteraction.count : 0; ix[1] = w.bend; ix[2] = w.recovery; ix[3] = w.radius;

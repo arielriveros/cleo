@@ -82,7 +82,7 @@ volumes that tune how the scene is lit and culled.
 | **Light Probe** | Default `10 × 10 × 10` influence volume. |
 | **Exposure Volume** | A `10 × 10 × 10` box with its own exposure while the camera is inside. Overrides nothing until a field or preset is picked. |
 | **Volumetric Fog** | A `20 × 6 × 20` box of mist the sun, torches and sky light scatter into. Size it with the face handles; the presets set the medium. |
-| **Weather** | A `40 × 20 × 40` box of rain or snow on the landscape and the plants inside it. Size it with the face handles; the presets set the weather. |
+| **Weather** | A `40 × 20 × 40` box of rain or snow on the landscape and the plants inside it, and falling through it if you ask (**Falling**). Size it with the face handles; the presets set the weather. |
 | **Clouds (volumetric)** | Not placeable. |
 | **Landscape** | Not placeable. `size 200`, `resolution 129`, `chunkQuads 32`. |
 | **Wind** | Not placeable: one wind for the whole scene. Plants sway only where their material asks for it. |
@@ -264,6 +264,7 @@ off in Play, or turn navmesh display on *during* Play to see what an agent is wa
 | Navigation mesh | off |
 | Foliage colliders | on |
 | GI probes | off — every GI Volume's probes; a selected GI Volume shows its own with this off |
+| Wind field | off — the scene's wind: arrows of the air round the camera, streaks it carries and the Force Fields that move it; shown anyway while the Wind node or such a field is selected |
 | Preview particles | on — whether particle effects simulate while you author; editor only, since a running game always simulates them |
 | Game UI | off — always shown in UI mode and in Play |
 | Reference grid | on |
@@ -276,6 +277,13 @@ parameters to its pose, sampled live, with how much each value moved over the la
 value reads 0, a buzzing one its amplitude) and the last few state changes — so a state machine
 ping-ponging between two states names the pair. Turn its **Runtime** switch on to read it in Play: a
 blend driven by measured motion reads 0 in the editor, which has no physics.
+
+**Wind field** samples the wind itself every frame, on the clock the foliage sways by, so it shows the
+air the grass is in. The arrows sit on a grid round the camera, spaced to its height and fixed in the
+world as you move; each points the way the air goes, and its length and colour — blue calm, green, yellow,
+red at 14 m/s, a storm's gust — follow the gusts as they roll through. The streaks are carried by the air, so a whirlwind
+draws a ring, a blast bursts outward and the lee of a shelter goes quiet. Each Force Field that affects
+the wind draws its outline and a glyph of what it does.
 
 Every helper is an editor-only node: never serialized, never lit, and structurally absent from a
 published build.

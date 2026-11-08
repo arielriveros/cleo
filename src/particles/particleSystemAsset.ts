@@ -8,6 +8,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { moduleDefinition, defaultRenderSettings, type ParticleStage, type RenderSettings } from './particleModules';
 import { parseParticleMesh } from './particleMesh';
+import { isBuiltinTextureId } from './precipitationSprites';
 
 export const PARTICLE_SYSTEM_VERSION = 1;
 
@@ -144,6 +145,13 @@ function parseModules(raw: unknown, stage: ParticleStage): ParticleModule[] {
     return out;
 }
 
+/** A [min, max] stretch multiplier, each 0..8, min no more than max; anything else is [1, 1]. */
+function parseStretchRange(raw: unknown): [number, number] {
+    if (!Array.isArray(raw)) return [1, 1];
+    const a = Math.min(8, Math.max(0, num(raw[0], 1))), b = Math.min(8, Math.max(0, num(raw[1], 1)));
+    return [Math.min(a, b), Math.max(a, b)];
+}
+
 function parseRender(raw: any): RenderSettings {
     const base = defaultRenderSettings();
     if (!raw || typeof raw !== 'object') return base;
@@ -155,6 +163,7 @@ function parseRender(raw: any): RenderSettings {
         alignment: pick(raw.alignment, ['camera', 'velocity', 'vertical', 'horizontal'] as const, base.alignment),
         blend: pick(raw.blend, ['alpha', 'additive', 'cutout'] as const, base.blend),
         stretch: Math.max(0, num(raw.stretch, base.stretch)),
+        stretchRange: parseStretchRange(raw.stretchRange),
         cutoff: Math.min(1, Math.max(0, num(raw.cutoff, base.cutoff))),
         textureId: typeof raw.textureId === 'string' && raw.textureId ? raw.textureId : null,
         flipbook: {
@@ -168,8 +177,10 @@ function parseRender(raw: any): RenderSettings {
             blend: fb.blend !== false,
         },
         softness: Math.max(0, num(raw.softness, base.softness)),
+        nearFade: Math.max(0, num(raw.nearFade, base.nearFade)),
         emissive: Math.max(0, num(raw.emissive, base.emissive)),
         lit: raw.lit === true,
+        translucency: Math.min(2, Math.max(0, num(raw.translucency, base.translucency))),
         normalTextureId: typeof raw.normalTextureId === 'string' && raw.normalTextureId ? raw.normalTextureId : null,
         ormTextureId: typeof raw.ormTextureId === 'string' && raw.ormTextureId ? raw.ormTextureId : null,
         normalStrength: Math.max(0, num(raw.normalStrength, base.normalStrength)),
@@ -261,11 +272,14 @@ export function maxLifetime(emitter: EmitterDef): number {
     return Array.isArray(range) ? Math.max(num(range[0], 1), num(range[1], 1)) : 1;
 }
 
-/** Every asset id the system references, by kind — for the asset graph and bundle remapping. */
+/**
+ * Every asset id the system references, by kind — for the asset graph and bundle remapping. The engine's
+ * own sprites (precipitationSprites.ts) are not assets, and never listed.
+ */
 export function particleSystemReferences(def: ParticleSystemDef): { textures: string[]; models: string[] } {
     const textures = new Set<string>(), models = new Set<string>();
     for (const e of def.emitters) {
-        if (e.render.textureId) textures.add(e.render.textureId);
+        if (e.render.textureId && !isBuiltinTextureId(e.render.textureId)) textures.add(e.render.textureId);
         if (e.render.normalTextureId) textures.add(e.render.normalTextureId);
         if (e.render.ormTextureId) textures.add(e.render.ormTextureId);
         if (e.render.modelId) models.add(e.render.modelId);

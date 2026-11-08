@@ -27,6 +27,7 @@ struct ParticleDrawVertex {
     u_flipbook: vec4<f32>,        // columns, rows, frames, mode (0 over life, 1 fps)
     u_flipbook2: vec4<f32>,       // fps, cycles, random start, frame blend
     u_speedRange: vec4<f32>,      // colour-by-speed min, max, size-by-speed min, max
+    u_stretchRange: vec4<f32>,    // velocity stretch multiplier: min, max (random per particle), 0, 0
 };
 @group(1) @binding(0) var<uniform> u_draw: ParticleDrawVertex;
 
@@ -35,8 +36,8 @@ struct ParticleDrawFragment {
     u_depthParams: vec4<f32>,     // near, far, orthographic, depth valid
     u_fragMask: vec4<f32>,        // has texture, lit, 1 / screen width, 1 / screen height
     u_ambient: vec4<f32>,         // lit: ambient rgb; w = 1 for a mesh (no procedural disc)
-    u_sunDir: vec4<f32>,          // lit: direction TO the sun, xyz
-    u_sunColor: vec4<f32>,        // lit: key light (sun, or the moon at night) irradiance rgb
+    u_sunDir: vec4<f32>,          // lit: direction TO the sun, xyz; w = near fade (m, 0 off), lit or not
+    u_sunColor: vec4<f32>,        // lit: key light (sun, or the moon at night) irradiance rgb; w = translucency
     u_keyDir: vec4<f32>,          // lit: direction TO the strongest point / spot light reaching the effect
     u_keyColor: vec4<f32>,        // lit: that light's irradiance rgb (zero when none reaches); w = pre-exposure
     u_surface: vec4<f32>,         // lit: roughness, metallic, normal strength, SURFACE_* bits
@@ -235,6 +236,19 @@ fn particleMappedNormal(n: vec3<f32>, t: vec3<f32>, dpx: vec3<f32>, dpy: vec3<f3
     return normalize(T * (invmax * t.x) + B * (invmax * t.y) + n * t.z);
 }
 
+/**
+ * Light passing THROUGH a thin particle (a raindrop, a flake) and leaving its unlit side: the same model
+ * as a leaf, `thinTransmission` in chunks/pbrLighting.wgsl. A small Lambert leak about -n plus a forward
+ * lobe about the light as seen from the camera, so it glows when looked through toward the light and is
+ * faint from the side. Additive on top of the front face; tinted by the particle's own colour `c`.
+ */
+fn particleTransmission(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, c: vec3<f32>, t: f32) -> vec3<f32> {
+    let back = clamp(-dot(n, l), 0.0, 1.0);
+    let lobe = pow(clamp(dot(-v, l), 0.0, 1.0), 6.0);
+    let glow = 0.2 * back + 3.0 * lobe * (0.35 + 0.65 * back);
+    return c * (t * glow / PARTICLE_PI);
+}
+
 fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
     // Everything with an implicit or explicit derivative comes first, in uniform control flow (before any
     // discard): the sprite, the surface maps, and the frame the normal map needs.
@@ -258,6 +272,10 @@ fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
         let falloff = clamp(1.0 - r * r, 0.0, 1.0);
         color.a = color.a * falloff * falloff;
     }
+
+    // Near fade: gone by the lens, so a drop or a mote passing the camera never fills the view.
+    let nearFade = u_frag.u_sunDir.w;
+    if (nearFade > 0.0) { color.a = color.a * smoothstep(0.0, nearFade, in.viewDepth); }
 
     let blend = i32(u_frag.u_fragParams.x);
     if (blend == 2 && color.a < u_frag.u_fragParams.y) { discard; }
@@ -285,7 +303,15 @@ fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
         let sunWrap = dot(n, u_frag.u_sunDir.xyz) * 0.5 + 0.5;
         let keyWrap = dot(n, u_frag.u_keyDir.xyz) * 0.5 + 0.5;
         let direct = (u_frag.u_sunColor.rgb * sunWrap + u_frag.u_keyColor.rgb * keyWrap) * 0.31830988618; // 1 / PI
+        let base = rgb;
         rgb = rgb * (u_frag.u_ambient.rgb + direct);
+        // Translucency: the sun and the key light through the particle (a drop lit from behind glows).
+        let translucency = u_frag.u_sunColor.w;
+        if (translucency > 0.0) {
+            let view = normalize(u_frag.u_viewPos.xyz - in.worldPos);
+            rgb += u_frag.u_sunColor.rgb * particleTransmission(n, view, u_frag.u_sunDir.xyz, base, translucency)
+                 + u_frag.u_keyColor.rgb * particleTransmission(n, view, u_frag.u_keyDir.xyz, base, translucency);
+        }
     } else if (u_frag.u_fragMask.y > 0.5) {
         // Lit with a surface: a normal map, roughness and metallic, shaded as the forward PBR path shades
         // (GGX highlights from the key and local light, the probe or sky reflected, metals tinting both).
@@ -334,6 +360,12 @@ fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
         let dfg = particleEnvBrdf(nv, roughness);
         let reflection = env * (f0 * dfg.x + dfg.y) * occlusion;
         rgb = diffuse + highlight + reflection;
+        let translucency = u_frag.u_sunColor.w;
+        if (translucency > 0.0) {
+            let glow = color.rgb * u_frag.u_fragParams.w;
+            rgb += u_frag.u_sunColor.rgb * particleTransmission(n, V, sunL, glow, translucency)
+                 + u_frag.u_keyColor.rgb * particleTransmission(n, V, keyL, glow, translucency);
+        }
     }
 
     // Stored pre-exposed like every source (graphics/preExposure.ts); 0 — a host that never set it —

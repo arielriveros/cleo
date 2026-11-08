@@ -171,6 +171,7 @@ export default function RendererSettingsPanel() {
   const [fogShadows, setFogShadows] = useState<boolean>(() => renderer?.volumetricFogLocalShadows ?? true);
   const [shelterOn, setShelterOn] = useState<boolean>(() => renderer?.weatherShelterEnabled ?? true);
   const [shelterRes, setShelterRes] = useState<number>(() => renderer?.weatherShelterResolution ?? 1024);
+  const [precipDensity, setPrecipDensity] = useState<number>(() => renderer?.precipitationDensity ?? 1);
   const [toneMapper, setToneMapper] = useState<string>(() => renderer?.toneMapper ?? 'agx');
   const [lutId, setLutId] = useState<string | null>(() => renderer?.colorGradingLut ?? null);
   const [dofEnabled, setDofEnabled] = useState<boolean>(() => renderer?.dofEnabled ?? false);
@@ -313,6 +314,7 @@ export default function RendererSettingsPanel() {
     setFogShadows(renderer.volumetricFogLocalShadows);
     setShelterOn(renderer.weatherShelterEnabled);
     setShelterRes(renderer.weatherShelterResolution);
+    setPrecipDensity(renderer.precipitationDensity);
     setToneMapper(renderer.toneMapper);
     setLutId(renderer.colorGradingLut);
     setDofEnabled(renderer.dofEnabled);
@@ -686,7 +688,9 @@ export default function RendererSettingsPanel() {
             {[512, 1024, 2048].map(r => <option key={r} value={r}>{r}</option>)}
           </Select>
         </Field>}
-        <Hint>The scene's Weather volumes wet and snow the landscape and its plants. Shelter keeps what stands under a roof or anything solid dry, from a map of the 96 m round the camera, redrawn only when something in it moves.</Hint>
+        <Slider label='Rain & Snow' value={precipDensity} min={0} max={1} step={0.05}
+          onChange={(v) => { renderer.precipitationDensity = v; setPrecipDensity(renderer.precipitationDensity); touch(); }} />
+        <Hint>The scene's Weather volumes wet and snow the landscape and its plants, and make rain and snow fall. Rain & Snow is how much of what falls is drawn, as particles round the camera (0: none; the ground's raindrops stay). Shelter keeps what stands under a roof or anything solid dry, and out of the rain, from a map of the 96 m round the camera, redrawn only when something in it moves.</Hint>
       </div></Collapsable>
 
       <Collapsable
