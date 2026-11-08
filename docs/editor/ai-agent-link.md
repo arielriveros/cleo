@@ -10,34 +10,64 @@ An AI agent such as Claude Code or Claude Desktop can work in the editor alongsi
 - take screenshots of the viewport
 - play the game and read its console
 
-There are two ways to work with it:
+**Claude** at the right end of the menu bar opens the Claude panel at the right edge of the editor. It has
+two tabs:
 
-- **The Claude chat, inside the editor.** Click **Claude** at the right end of the menu bar.
-- **An external agent**, such as Claude Code in a terminal or VS Code, or Claude Desktop, connected
-  through the **Cleo MCP server** (`applications/mcp`).
+- **Claude Code**: your own Claude Code, running in a terminal inside the panel. It signs in with your
+  Claude account, so it runs on your Claude plan with no extra charge.
+- **API chat**: a chat that runs Claude on an Anthropic API key, billed per use.
 
-Both go through the **Cleo agent host**, a small background program that holds the editor's link. It
-carries out each request on the project you have open, and it lets the chat and any number of external
-agents share one editor.
+An **external agent** works too, such as Claude Code in a terminal or VS Code, or Claude Desktop, connected
+through the **Cleo MCP server** (`applications/mcp`).
+
+All of them go through the **Cleo agent host**, a small background program that holds the editor's link.
+It carries out each request on the project you have open, and it lets everything share one editor.
+
+The panel stays open in every mode and during Play. Drag its left edge to resize it.
 
 ## Setting it up
 
 1. Install the agent package once: `cd applications/mcp && npm install`.
 2. Start the editor (`npm run editor:dev`) and open a project.
 
-That is enough for the chat: opening it starts the agent host. For an external agent, also register the
-MCP server with it. For Claude Code:
+That is enough for the panel: opening it starts the agent host. The **Claude Code** tab also needs Claude
+Code installed on this machine (`claude` on the PATH); see the Claude Code setup guide at
+https://code.claude.com/docs/en/setup.
+
+For an external agent, also register the MCP server with it. For Claude Code:
 `claude mcp add cleo -- node <engine>/applications/mcp/src/index.mjs`.
 
-## The Claude chat
+## Claude Code in the editor
 
-**Claude** in the menu bar opens the chat at the right edge of the editor. It stays open in every mode and
-during Play. Drag its left edge to resize it.
+The **Claude Code** tab runs the `claude` program installed on this machine, unchanged, in a terminal. It
+is the same Claude Code you would run in a terminal yourself, with the Cleo tools already connected.
+
+- **Signing in.** Claude Code signs in on its own, through Anthropic: the first time, it opens your browser
+  to log in. Type `/login` to sign in or switch accounts, and `/status` to see which account it uses. Cleo
+  never sees your login.
+- **Cost.** With a Claude subscription, it counts toward your plan's usage limits. Nothing extra is billed.
+  (If `ANTHROPIC_API_KEY` is set where the editor started, Claude Code asks whether to use that key
+  instead.)
+- **First start.** It starts in the engine folder and asks once whether you trust that folder.
+- **Using it.** Type to Claude as in any terminal. Its changes to the project show up in the viewport as
+  they happen, and each request is one undo step. Claude Code asks before it uses a tool for the first
+  time; pick the answer that stops it asking again to let the Cleo tools run freely.
+- **Copy and paste.** Select text and press Ctrl+C to copy it; without a selection, Ctrl+C is Claude Code's
+  own interrupt. Ctrl+V pastes. Every other key, such as Esc, goes to Claude Code.
+- **It keeps running.** Closing the panel, switching tabs or reloading the editor leaves the session
+  running: the screen comes back as it was. It stops 15 minutes after the last editor window closes.
+- **New session** (+ in the header) ends the running session and starts a fresh one. When Claude Code
+  exits, **New session** and **Continue last** (its most recent conversation) start it again.
+
+## The API chat
+
+The **API chat** tab is a chat panel of its own, run by the agent host on an Anthropic API key.
 
 - **API key.** The chat runs Claude with your own Anthropic API key, from the Claude Console. The first
   time you open it, it asks for the key and stores it on this machine only, in `~/.cleo/agent-host.json`.
-  If `ANTHROPIC_API_KEY` was set before the editor started, that key is used instead. A Claude.ai
-  subscription login is not used.
+  If `ANTHROPIC_API_KEY` was set before the editor started, that key is used instead. A Claude
+  subscription is not used here: Anthropic allows apps like this chat only API keys. To use your plan, use
+  the **Claude Code** tab.
 - **What it knows.** Each message carries the open tab, the selected node and whether the game is running.
   So *"make this spin"* means the selection.
 - **What it does.** Claude uses the same tools as an external agent. Each tool call shows as a card that

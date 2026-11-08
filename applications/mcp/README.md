@@ -4,9 +4,12 @@ Lets an AI agent drive a **running Cleo editor**: build and change scenes, write
 type errors reported back), make materials, look at the viewport, play the game and read its logs. It
 works live on the project you have open, and each change is one step on the editor's undo stack.
 
-There are two ways in:
-- **The Claude chat inside the editor.** Click **Claude** in the menu bar. It runs Claude through the
-  Claude Agent SDK with the same tools.
+There are three ways in:
+- **Claude Code inside the editor.** Click **Claude** in the menu bar; the **Claude Code** tab runs the
+  user's own `claude` CLI in a terminal, with these tools connected. It signs in with the user's Claude
+  account, so it runs on their plan.
+- **The API chat inside the editor**, the panel's other tab. It runs Claude through the Claude Agent SDK
+  on an Anthropic API key, with the same tools.
 - **External agents** such as Claude Code or Claude Desktop, through the stdio MCP server.
 
 Status: **proof of concept** (`feature/agent-mcp`). Dev builds of the editor only.
@@ -18,9 +21,12 @@ cd applications/mcp && npm install          # once
 npm run editor:dev                          # engine root; open a project
 ```
 
-**In-editor chat:** click **Claude** at the right end of the menu bar and paste an Anthropic API key the
-first time (or set `ANTHROPIC_API_KEY` before starting the editor). Opening the panel starts the agent
-host.
+**Claude Code in the editor:** click **Claude** at the right end of the menu bar. The **Claude Code** tab
+starts the agent host and then Claude Code (it must be installed: `claude` on the PATH). The first time,
+Claude Code asks you to trust the folder and, if needed, to log in.
+
+**API chat:** the panel's **API chat** tab. Paste an Anthropic API key the first time (or set
+`ANTHROPIC_API_KEY` before starting the editor).
 
 **Claude Code / Claude Desktop:**
 ```sh
@@ -31,13 +37,14 @@ For Claude Desktop, put the same command in `claude_desktop_config.json` under `
 ## How it works
 
 ```
- Claude chat panel ──┐                     Claude Code ── stdio ── index.mjs ─┐ (peer)
- (in the editor)     │                     Claude Desktop ─ stdio ─ index.mjs ─┤ (peer)
-                     ▼                                                          ▼
- Cleo editor ◀──── ws://127.0.0.1 ────▶  agent host (host.mjs)  ◀─────────────┘
- features/agentBridge   (editor connects out)   ├─ bridge.mjs   the one editor link + peer relay
- runs each command,                             └─ chat.mjs     Claude Agent SDK sessions for the panel
- one undo step per call
+ Claude panel ──┐                          Claude Code ── stdio ── index.mjs ─┐ (peer)
+ (in the editor)│                          Claude Desktop ─ stdio ─ index.mjs ─┤ (peer)
+                ▼                                                               ▼
+ Cleo editor ◀──── ws://127.0.0.1 ────▶  agent host (host.mjs)  ◀─────────────┤
+ features/agentBridge   (editor connects out)   ├─ bridge.mjs    the one editor link + peer relay
+ runs each command,                             ├─ chat.mjs      Agent SDK sessions for the API chat
+ one undo step per call                         └─ terminal.mjs  the user's `claude` in a pty ──┐
+                                                                 its own index.mjs is a peer ───┘
 ```
 
 - **The agent host** (`src/host.mjs`) is one long-lived background process that owns the editor link.
@@ -59,6 +66,24 @@ For Claude Desktop, put the same command in `claude_desktop_config.json` under `
     working directory, and so one session history, per project (`~/.cleo/agent/<projectId>`).
   - Events stream to the panel (`features/agentChat/`). The host keeps the conversation, so a reload
     replays it.
+- **Claude Code in the editor** (`src/terminal.mjs`): the host runs the user's own `claude`, unmodified, in
+  a pseudo-terminal (node-pty) and streams it to an xterm.js terminal in the panel
+  (`features/agentChat/ClaudeCodeView.tsx`, `terminalStore.ts`).
+  - It is started with `--mcp-config` naming this checkout's stdio server, so the session gets the Cleo
+    tools whatever is configured, plus a short `--append-system-prompt` saying it runs inside the editor.
+    It starts in the engine checkout (`CLEO_CLAUDE_CWD` to change it).
+  - It signs in the way Claude Code always does: its own login, through Anthropic. The host never reads,
+    stores or passes on a credential, and nothing limits how Claude Code signs in. That is what lets it run
+    on the user's Claude plan, which an app built on the Agent SDK may not.
+  - A headless xterm in the host mirrors the screen, so an editor that reloads (or a second tab) gets the
+    exact screen back as a serialized snapshot.
+  - A parent Claude Code session's variables (`CLAUDECODE`, its session id, its messaging socket) are
+    removed from the host and from the hosted session: the host is often started by one such session's MCP
+    server but outlives it (`src/env.mjs`).
+  - The session keeps running with the panel closed. It is stopped once no editor has been connected for
+    `CLEO_AGENT_HOST_IDLE_MS`, since its own MCP server would otherwise keep the host up for good.
+- **Versions.** The host's version is in the discovery file. A stdio server or a dev server that finds an
+  OLDER host running replaces it (`ensureHost({ replaceOutdated })`), never a newer one.
 
 **Discovery.** The host writes `~/.cleo/agent-bridge.json` containing `{role, port, token, pid}`. The
 editor's Vite dev server serves it to its own pages at `GET /__cleo/agent-bridge`. `POST
@@ -104,7 +129,7 @@ Resources: `cleo://docs/...` (all of `docs/`) and `cleo://examples/scripts/...`.
 ## Testing
 
 ```sh
-npm test                    # bridge security, peer relay, normalizer, chat flows (node:test, real sockets)
+npm test                    # bridge security, peer relay, normalizer, chat flows, hosted terminal (node:test, real sockets, a real pty)
 node scripts/smoke.mjs      # end to end through the host against a running editor (--keep leaves the result)
 CLEO_AGENT_MOCK=1 npm run editor:dev   # engine root: the chat runs a scripted agent; no API key needed
 ```
@@ -118,7 +143,9 @@ The editor half is tested by `applications/editor/tests/agentBridge.test.ts` and
 | `ANTHROPIC_API_KEY` | (none) | The chat's key; takes precedence over one saved from the panel. |
 | `CLEO_MCP_PORT` | `47615` | Bridge port. If it is busy, a free one is taken, and the discovery file says which. |
 | `CLEO_AGENT_BRIDGE_FILE` | `~/.cleo/agent-bridge.json` | The discovery file. The host's data (key, log, chat working directories) sits next to it. |
-| `CLEO_AGENT_HOST_IDLE_MS` | 15 min | How long the host waits with nothing connected before it exits. |
+| `CLEO_AGENT_HOST_IDLE_MS` | 15 min | How long the host waits with nothing connected before it exits; also how long a hosted Claude Code keeps running after the last editor left. |
+| `CLEO_CLAUDE_PATH` | (the PATH) | The `claude` the editor's Claude Code tab runs. |
+| `CLEO_CLAUDE_CWD` | the engine checkout | The folder it starts in. |
 | `CLEO_AGENT_MOCK` | (off) | `1`: the chat runs a scripted agent that uses the real tools. For tests. |
 | `CLEO_MCP_STANDALONE` | (off) | `1`: the stdio server owns the editor link itself, with no host. |
 | `CLEO_MCP_ALLOWED_ORIGINS` | (none) | Extra exact origins allowed to connect, comma-separated. |
@@ -130,6 +157,8 @@ The editor half is tested by `applications/editor/tests/agentBridge.test.ts` and
   tab)".
 - **Not undoable:** asset-library changes (new scripts, materials), and property changes made by
   `execute_js`.
-- **Missing:** input injection during Play, scene open/create, imports. The chat cannot attach images or
-  files yet.
+- **Missing:** input injection during Play, scene open/create, imports. The API chat cannot attach images
+  or files yet.
+- **One hosted Claude Code at a time**, per host. It runs in the engine checkout, not in a folder of the
+  project (projects live in IndexedDB).
 - **Protocol version.** The stdio server is on MCP SDK v1 (protocol 2025-11-25).

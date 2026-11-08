@@ -36,7 +36,7 @@ export interface BridgeStatus {
   state: BridgeState
   /** Bumped on every new connection, so a listener can tell a reconnect from a re-render. */
   link: number
-  /** What the server offers beyond tool calls: 'chat' when it is the agent host (the chat panel's backend). */
+  /** What the server offers beyond tool calls: 'chat' and 'terminal' when it is the agent host (the panel's backend). */
   capabilities: string[]
   /** A server's discovery file is there, whether or not this tab is connected to it. */
   available: boolean
@@ -80,6 +80,7 @@ class AgentBridgeClient {
   })
   private queue: Promise<void> = Promise.resolve()
   private chatListeners = new Set<(event: any) => void>()
+  private termListeners = new Set<(event: any) => void>()
   private running = false
   /** A token this tab must not retry: refused, or handed over to another tab. */
   private parkedToken: string | null = null
@@ -127,6 +128,22 @@ class AgentBridgeClient {
     const s = this.socket
     if (!s || s.readyState !== WebSocket.OPEN || this.status.state !== 'connected' || !this.status.capabilities.includes('chat')) return false
     s.send(JSON.stringify({ type: 'chat', op, ...extra }))
+    return true
+  }
+
+  // --- terminal channel ----------------------------------------------------------------------------------
+
+  /** Events from the Claude Code the agent host runs for the editor (applications/mcp/src/terminal.mjs). */
+  onTermEvent(cb: (event: any) => void): () => void {
+    this.termListeners.add(cb)
+    return () => { this.termListeners.delete(cb) }
+  }
+
+  /** Send a terminal op to the host. False when there is no host link that offers the terminal. */
+  sendTerm(op: string, extra: Record<string, unknown> = {}): boolean {
+    const s = this.socket
+    if (!s || s.readyState !== WebSocket.OPEN || this.status.state !== 'connected' || !this.status.capabilities.includes('terminal')) return false
+    s.send(JSON.stringify({ type: 'term', op, ...extra }))
     return true
   }
 
@@ -220,6 +237,8 @@ class AgentBridgeClient {
         })
       } else if (msg?.type === 'chat-event') {
         for (const cb of [...this.chatListeners]) cb(msg.event)
+      } else if (msg?.type === 'term-event') {
+        for (const cb of [...this.termListeners]) cb(msg.event)
       } else if (msg?.type === 'call' && typeof msg.id === 'number') {
         this.enqueue(socket, msg.id, String(msg.method), msg.params)
       }

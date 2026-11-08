@@ -149,5 +149,6 @@ async function startAgentHost(): Promise<{ port: number }> {
     throw new Error(`The agent host is not installed. Run "npm install" in ${MCP_DIR}`);
   const url = pathToFileURL(path.join(MCP_DIR, 'src', 'ensureHost.mjs')).href;
   const { ensureHost } = await import(/* @vite-ignore */ url);
-  return ensureHost({ file: agentBridgeFile() });
+  // replaceOutdated: a host an older checkout left running lacks what this editor needs (the terminal).
+  return ensureHost({ file: agentBridgeFile(), replaceOutdated: true });
 }

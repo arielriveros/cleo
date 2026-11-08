@@ -34,9 +34,9 @@ const log = (/** @type {string} */ msg) => process.stderr.write(`[cleo-mcp] ${ms
 async function main() {
     if (process.env.CLEO_MCP_STANDALONE !== '1') {
         try {
-            const host = await ensureHost({ log });
+            const host = await ensureHost({ log, replaceOutdated: true });
             log(`using the agent host (pid ${host.pid}, port ${host.port})`);
-            return serve(new PeerBridge({ resolveHost: () => ensureHost({ log }), name: `${PKG.name} ${PKG.version}`, log }), async () => {});
+            return serve(new PeerBridge({ resolveHost: () => ensureHost({ log, replaceOutdated: true }), name: `${PKG.name} ${PKG.version}`, log }), async () => {});
         } catch (err) {
             log(`no agent host (${/** @type {any} */ (err)?.message ?? err}); opening the editor bridge here instead`);
         }

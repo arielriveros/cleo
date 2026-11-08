@@ -5,12 +5,17 @@ import { cn } from '@cleo/app-kit/ui/cn'
 import { useCleoEngine } from '../EngineContext'
 import { nodePath } from '../agentBridge/nodeRefs'
 import ChatMarkdown from './ChatMarkdown'
-import { chatActions, chatStore, CHAT_MIN_WIDTH, type ChatBlock, type ChatItem, type PermissionRequest } from './chatStore'
+import ClaudeCodeView from './ClaudeCodeView'
+import { chatActions, chatStore, CHAT_MIN_WIDTH, type ChatBlock, type ChatItem, type ChatState, type PanelView, type PermissionRequest } from './chatStore'
+import { terminalActions, terminalStore } from './terminalStore'
 import { ChatIcon, ChevronIcon, HistoryIcon, KeyIcon, NewChatIcon, SendIcon, StopIcon, ToolIcon } from './chatIcons'
 
-// The Claude chat, docked at the right edge of the editor (like an IDE's assistant panel). It talks to the
-// agent host's chat manager (applications/mcp/src/chat.mjs) over the agent bridge; Claude acts on the
-// project through the same tools the MCP server offers, and each of its edits is one undo step.
+// The Claude panel, docked at the right edge of the editor (like an IDE's assistant panel). Two views:
+// - Claude Code: the user's own Claude Code CLI, hosted in a terminal (ClaudeCodeView). It signs in with the
+//   user's Claude account, so it runs on their plan.
+// - API chat: a chat run by the agent host's chat manager (applications/mcp/src/chat.mjs) on an Anthropic
+//   API key, billed per use.
+// Both act on the project through the same tools the MCP server offers, and each edit is one undo step.
 
 const TOOL_LABEL: Record<string, string> = {
   editor_status: 'Check the editor', scene_tree: 'Read the scene tree', node_get: 'Inspect a node',
@@ -166,14 +171,18 @@ function KeySetup() {
     <div className='m-2 p-3 rounded border border-border bg-surface-raised flex flex-col gap-2 text-ui-sm'>
       <div className='flex items-center gap-1.5 text-fg font-semibold'><span className='w-4 h-4'><KeyIcon /></span>Add an Anthropic API key</div>
       <div className='text-muted leading-snug'>
-        The chat runs Claude with your own API key (from the Claude Console). It is stored on this machine only, in
-        {' '}<code className='font-mono'>~/.cleo/agent-host.json</code>; or set <code className='font-mono'>ANTHROPIC_API_KEY</code> before starting the editor.
+        The API chat runs Claude with your own API key (from the Claude Console), billed per use. It is stored on
+        this machine only, in <code className='font-mono'>~/.cleo/agent-host.json</code>; or set <code className='font-mono'>ANTHROPIC_API_KEY</code> before starting the editor.
       </div>
       <form className='flex gap-1.5' onSubmit={e => { e.preventDefault(); if (key.trim()) { chatActions.setKey(key.trim()); setKey('') } }}>
         {/* A raw input on controlClass: TextInput has no password type. */}
         <input type='password' value={key} onChange={e => setKey(e.target.value)} placeholder='sk-ant-…' className={cn(controlClass, 'flex-1 min-w-0')} autoComplete='off' />
         <Button size='sm' variant='primary' type='submit' disabled={!key.trim()}>Save</Button>
       </form>
+      <div className='text-muted leading-snug border-t border-border-subtle pt-2'>
+        Have a Claude plan? Claude Code signs in with your Claude account and runs on your plan, with no API charges.
+      </div>
+      <Button size='sm' className='self-start' onClick={() => chatActions.setView('code')}>Use Claude Code</Button>
     </div>
   )
 }
@@ -191,34 +200,33 @@ function useEditorContext(): string {
   }, [activeTab, selectedNode, editorScene, isPlayMode, isSimulating])
 }
 
+function ViewTab({ view, current, label, title }: { view: PanelView; current: PanelView; label: string; title: string }) {
+  const active = view === current
+  return (
+    <button type='button' role='tab' aria-selected={active} title={title} onClick={() => chatActions.setView(view)}
+      className={cn('px-1.5 h-[22px] rounded text-ui-sm', active ? 'bg-control text-fg' : 'text-muted hover:text-fg')}>
+      {label}
+    </button>
+  )
+}
+
 export default function AgentChatPanel() {
   const s = useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot)
-  const context = useEditorContext()
-  const [draft, setDraft] = useState('')
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const stickRef = useRef(true)
-  const inputRef = useRef<HTMLTextAreaElement>(null)
-
-  // Follow the conversation while the user is at the bottom; leave them be when they scrolled up to read.
-  useLayoutEffect(() => {
-    const el = scrollRef.current
-    if (el && stickRef.current) el.scrollTop = el.scrollHeight
-  }, [s.items, s.permissions])
-
-  useEffect(() => { if (s.open) inputRef.current?.focus() }, [s.open])
+  const t = useSyncExternalStore(terminalStore.subscribe, terminalStore.getSnapshot)
 
   if (!s.open) return null
 
+  const code = s.view === 'code'
   const host = s.host
   const busy = !!host?.busy
-  const ready = s.link === 'ready' && !!host
-  const lastAssistant = [...s.items].reverse().find(i => i.kind === 'assistant')?.id
-
-  const submit = () => {
-    const text = draft.trim()
-    if (!text || busy || !ready || host?.auth === 'missing') return
-    if (chatActions.send(text, context)) setDraft('')
-  }
+  const chatReady = s.link === 'ready' && !!host
+  const term = t.term
+  const dot = code
+    ? (term?.running ? 'bg-success' : t.link === 'ready' ? 'bg-muted' : s.link === 'error' ? 'bg-danger' : 'bg-muted animate-pulse')
+    : (chatReady ? (busy ? 'bg-highlight animate-pulse' : 'bg-success') : s.link === 'error' ? 'bg-danger' : 'bg-muted animate-pulse')
+  const dotTitle = code
+    ? (term?.running ? 'Claude Code is running' : t.link === 'ready' ? 'Claude Code is not running' : s.linkError ?? 'Connecting to the agent host')
+    : (chatReady ? (busy ? 'Working' : 'Ready') : s.linkError ?? 'Connecting to the agent host')
 
   const onResizeStart = (e: React.PointerEvent) => {
     e.preventDefault()
@@ -233,20 +241,67 @@ export default function AgentChatPanel() {
     <aside className='relative flex flex-col shrink-0 min-h-0 border-l border-border bg-surface text-ui' style={{ width: Math.max(CHAT_MIN_WIDTH, s.width) }}>
       <div onPointerDown={onResizeStart} className='absolute left-0 top-0 bottom-0 w-1 -ml-0.5 cursor-col-resize hover:bg-primary/40 z-10' title='Drag to resize' />
 
-      {/* Header */}
+      {/* Header: the two views, their status, their actions */}
       <div className='flex items-center gap-1.5 h-[30px] px-2 border-b border-border shrink-0'>
-        <span className='w-4 h-4 text-highlight'><ChatIcon /></span>
-        <span className='font-semibold text-fg'>Claude</span>
-        <span className={cn('w-1.5 h-1.5 rounded-full', ready ? (busy ? 'bg-highlight animate-pulse' : 'bg-success') : s.link === 'error' ? 'bg-danger' : 'bg-muted animate-pulse')}
-          title={ready ? (busy ? 'Working' : 'Ready') : s.linkError ?? 'Connecting to the agent host'} />
-        {host?.mock && <span className='text-ui-xs text-warning'>scripted test agent</span>}
+        <span className='w-4 h-4 text-highlight shrink-0'><ChatIcon /></span>
+        <div className='flex items-center gap-0.5' role='tablist' aria-label='Claude'>
+          <ViewTab view='code' current={s.view} label='Claude Code'
+            title='Your own Claude Code, in a terminal. It signs in with your Claude account, so it runs on your plan.' />
+          <ViewTab view='chat' current={s.view} label='API chat'
+            title='A chat that runs Claude on an Anthropic API key, billed per use.' />
+        </div>
+        <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', dot)} title={dotTitle} />
+        {!code && host?.mock && <span className='text-ui-xs text-warning truncate'>scripted test agent</span>}
         <div className='ml-auto flex items-center gap-0.5'>
-          <Button variant='ghost' size='icon' title='Past conversations' disabled={!ready} onClick={() => chatActions.loadHistory()}><span className='w-3.5 h-3.5'><HistoryIcon /></span></Button>
-          <Button variant='ghost' size='icon' title='New conversation' disabled={!ready || busy} onClick={() => chatActions.newChat()}><span className='w-3.5 h-3.5'><NewChatIcon /></span></Button>
-          <Button variant='ghost' size='icon' title='Close the chat' onClick={() => chatActions.setOpen(false)}><span className='text-ui leading-none'>✕</span></Button>
+          {code ? (
+            <Button variant='ghost' size='icon' title='Start a new Claude Code session (ends the running one)'
+              disabled={t.link !== 'ready' || !term?.available} onClick={() => terminalActions.restart()}>
+              <span className='w-3.5 h-3.5'><NewChatIcon /></span>
+            </Button>
+          ) : (
+            <>
+              <Button variant='ghost' size='icon' title='Past conversations' disabled={!chatReady} onClick={() => chatActions.loadHistory()}><span className='w-3.5 h-3.5'><HistoryIcon /></span></Button>
+              <Button variant='ghost' size='icon' title='New conversation' disabled={!chatReady || busy} onClick={() => chatActions.newChat()}><span className='w-3.5 h-3.5'><NewChatIcon /></span></Button>
+            </>
+          )}
+          <Button variant='ghost' size='icon' title='Close the panel' onClick={() => chatActions.setOpen(false)}><span className='text-ui leading-none'>✕</span></Button>
         </div>
       </div>
 
+      {code ? <ClaudeCodeView /> : <ApiChatBody s={s} />}
+    </aside>
+  )
+}
+
+/** The API chat: model and mode, the transcript, permission prompts and the composer. */
+function ApiChatBody({ s }: { s: ChatState }) {
+  const context = useEditorContext()
+  const [draft, setDraft] = useState('')
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const stickRef = useRef(true)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // Follow the conversation while the user is at the bottom; leave them be when they scrolled up to read.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (el && stickRef.current) el.scrollTop = el.scrollHeight
+  }, [s.items, s.permissions])
+
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  const host = s.host
+  const busy = !!host?.busy
+  const ready = s.link === 'ready' && !!host
+  const lastAssistant = [...s.items].reverse().find(i => i.kind === 'assistant')?.id
+
+  const submit = () => {
+    const text = draft.trim()
+    if (!text || busy || !ready || host?.auth === 'missing') return
+    if (chatActions.send(text, context)) setDraft('')
+  }
+
+  return (
+    <>
       {/* Model and permission mode */}
       {host && (
         <div className='flex items-center gap-1.5 px-2 py-1 border-b border-border-subtle shrink-0'>
@@ -334,7 +389,7 @@ export default function AgentChatPanel() {
           {!!host?.cost && <span className='ml-auto shrink-0'>${host.cost.toFixed(4)}</span>}
         </div>
       </div>
-    </aside>
+    </>
   )
 }
 

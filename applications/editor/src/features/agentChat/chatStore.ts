@@ -32,9 +32,16 @@ export interface HostState {
 
 export type LinkState = 'idle' | 'starting' | 'connecting' | 'ready' | 'no-chat' | 'error'
 
+/**
+ * What the panel shows: Claude Code itself, hosted in a terminal (runs on the user's Claude plan; see
+ * terminalStore), or the API-key chat this store drives.
+ */
+export type PanelView = 'code' | 'chat'
+
 export interface ChatState {
   open: boolean
   width: number
+  view: PanelView
   link: LinkState
   linkError: string | null
   host: HostState | null
@@ -45,6 +52,7 @@ export interface ChatState {
 
 const OPEN_KEY = 'cleo_agent_chat_open'
 const WIDTH_KEY = 'cleo_agent_chat_width'
+const VIEW_KEY = 'cleo_agent_panel_view'
 export const CHAT_MIN_WIDTH = 300
 
 function readLs(key: string): string | null { try { return localStorage.getItem(key) } catch { return null } }
@@ -53,6 +61,7 @@ function writeLs(key: string, v: string) { try { localStorage.setItem(key, v) } 
 let state: ChatState = {
   open: readLs(OPEN_KEY) === '1',
   width: Math.max(CHAT_MIN_WIDTH, Number(readLs(WIDTH_KEY)) || 400),
+  view: readLs(VIEW_KEY) === 'chat' ? 'chat' : 'code',
   link: 'idle',
   linkError: null,
   host: null,
@@ -215,13 +224,19 @@ agentBridge.subscribe(() => {
 
 let starting: Promise<void> | null = null
 
-/** Make sure the agent host runs and the bridge is linked to it: what opening the panel does. */
-export function ensureHost(): Promise<void> {
+/** The host capability the current view needs. */
+const requiredFor = (view: PanelView) => (view === 'code' ? 'terminal' : 'chat')
+
+/**
+ * Make sure the agent host runs and the bridge is linked to it: what opening the panel does. A link to a
+ * host without what the view needs (an older one) goes through the dev server too, which replaces it.
+ */
+export function ensureHost(required: 'chat' | 'terminal' = requiredFor(state.view)): Promise<void> {
   if (starting) return starting
   const b = agentBridge.getSnapshot()
-  if (b.state === 'connected' && b.capabilities.includes('chat')) return Promise.resolve()
+  if (b.state === 'connected' && b.capabilities.includes(required)) return Promise.resolve()
   if (!agentBridge.supported) {
-    set({ link: 'error', linkError: 'The chat needs the editor dev server (npm run editor:dev); the packaged app has no agent host yet.' })
+    set({ link: 'error', linkError: 'The Claude panel needs the editor dev server (npm run editor:dev); the packaged app has no agent host yet.' })
     return Promise.resolve()
   }
   set({ link: 'starting', linkError: null })
@@ -261,6 +276,11 @@ export const chatActions = {
     if (open) void ensureHost()
   },
   toggle() { chatActions.setOpen(!state.open) },
+  setView(view: PanelView) {
+    writeLs(VIEW_KEY, view)
+    set({ view }, true)
+    if (state.open) void ensureHost(requiredFor(view))
+  },
   setWidth(width: number) {
     const w = Math.round(Math.max(CHAT_MIN_WIDTH, Math.min(window.innerWidth * 0.6, width)))
     writeLs(WIDTH_KEY, String(w))

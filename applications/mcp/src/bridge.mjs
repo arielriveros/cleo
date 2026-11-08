@@ -12,6 +12,8 @@
 //   editor -> server   {type:'status', client:{...}}           (project switched, play state, ...)
 //   editor -> server   {type:'chat', op, ...}                  (the in-editor chat panel; see chat.mjs)
 //   server -> editor   {type:'chat-event', event}
+//   editor -> server   {type:'term', op, ...}                  (Claude Code hosted in the editor; terminal.mjs)
+//   server -> editor   {type:'term-event', event}
 //
 // PEERS. When this bridge runs in the agent host (host.mjs), other processes -- the stdio MCP server each
 // Claude Code session launches -- connect as peers ({type:'hello', role:'peer', token}) and send
@@ -83,7 +85,7 @@ export class EditorBridge extends EventEmitter {
         this.serverInfo = opts.serverInfo ?? { name: 'cleo-mcp', version: '0.0.0' };
         this.log = opts.log ?? (() => {});
         this.helloTimeoutMs = opts.helloTimeoutMs ?? 5000;
-        /** What this end offers the editor beyond tool calls: 'chat' when the chat manager runs here. */
+        /** What this end offers the editor beyond tool calls: 'chat' and 'terminal' in the agent host. */
         this.capabilities = opts.capabilities ?? [];
         /** @type {number} */
         this.port = 0;
@@ -225,6 +227,9 @@ export class EditorBridge extends EventEmitter {
                 this.client = { ...this.client, ...(msg.client ?? {}) };
             } else if (msg?.type === 'chat') {
                 this.emit('chat', msg);
+            } else if (msg?.type === 'term') {
+                // Only the editor drives the hosted terminal: peers never get here (_acceptPeer).
+                this.emit('term', msg);
             }
         });
 
