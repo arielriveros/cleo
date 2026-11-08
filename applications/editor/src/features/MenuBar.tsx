@@ -427,7 +427,7 @@ export default function MenuBar() {
           <LayoutIcon /> Reset Layout
         </Button>
         {resetDoc.card}
-        {/* Opens the Claude chat docked at the right edge (agentChat/AgentChatPanel). */}
+        {/* Opens the Claude panel (Claude Code in a terminal) docked at the right edge (agentChat/AgentChatPanel). */}
         <AgentChatToggle />
       </div>
     </Topbar>

@@ -83,7 +83,7 @@ function Shell() {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
       <MenuBar />
-      {/* The editor's work area beside the Claude chat (agentChat/), which docks at the right edge, outside
+      {/* The editor's work area beside the Claude panel (agentChat/), which docks at the right edge, outside
           dockview, so it stays up in every mode and during Play. */}
       <div className="flex flex-1 min-h-0">
       <div className="flex flex-col flex-1 min-w-0 min-h-0">

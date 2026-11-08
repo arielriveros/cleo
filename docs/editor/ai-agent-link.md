@@ -10,12 +10,9 @@ An AI agent such as Claude Code or Claude Desktop can work in the editor alongsi
 - take screenshots of the viewport
 - play the game and read its console
 
-**Claude** at the right end of the menu bar opens the Claude panel at the right edge of the editor. It has
-two tabs:
-
-- **Claude Code**: your own Claude Code, running in a terminal inside the panel. It signs in with your
-  Claude account, so it runs on your Claude plan with no extra charge.
-- **API chat**: a chat that runs Claude on an Anthropic API key, billed per use.
+**Claude** at the right end of the menu bar opens the Claude panel at the right edge of the editor: your own
+Claude Code, running in a terminal inside the panel. It signs in with your Claude account, so it runs on
+your Claude plan with no extra charge.
 
 An **external agent** works too, such as Claude Code in a terminal or VS Code, or Claude Desktop, connected
 through the **Cleo MCP server** (`applications/mcp`).
@@ -30,8 +27,8 @@ The panel stays open in every mode and during Play. Drag its left edge to resize
 1. Install the agent package once: `cd applications/mcp && npm install`.
 2. Start the editor (`npm run editor:dev`) and open a project.
 
-That is enough for the panel: opening it starts the agent host. The **Claude Code** tab also needs Claude
-Code installed on this machine (`claude` on the PATH); see the Claude Code setup guide at
+That is enough for the panel: opening it starts the agent host. The panel also needs Claude Code installed
+on this machine (`claude` on the PATH); see the Claude Code setup guide at
 https://code.claude.com/docs/en/setup.
 
 For an external agent, also register the MCP server with it. For Claude Code:
@@ -39,8 +36,8 @@ For an external agent, also register the MCP server with it. For Claude Code:
 
 ## Claude Code in the editor
 
-The **Claude Code** tab runs the `claude` program installed on this machine, unchanged, in a terminal. It
-is the same Claude Code you would run in a terminal yourself, with the Cleo tools already connected.
+The Claude panel runs the `claude` program installed on this machine, unchanged, in a terminal. It is the
+same Claude Code you would run in a terminal yourself, with the Cleo tools already connected.
 
 - **Signing in.** Claude Code signs in on its own, through Anthropic: the first time, it opens your browser
   to log in. Type `/login` to sign in or switch accounts, and `/status` to see which account it uses. Cleo
@@ -58,28 +55,6 @@ is the same Claude Code you would run in a terminal yourself, with the Cleo tool
   running: the screen comes back as it was. It stops 15 minutes after the last editor window closes.
 - **New session** (+ in the header) ends the running session and starts a fresh one. When Claude Code
   exits, **New session** and **Continue last** (its most recent conversation) start it again.
-
-## The API chat
-
-The **API chat** tab is a chat panel of its own, run by the agent host on an Anthropic API key.
-
-- **API key.** The chat runs Claude with your own Anthropic API key, from the Claude Console. The first
-  time you open it, it asks for the key and stores it on this machine only, in `~/.cleo/agent-host.json`.
-  If `ANTHROPIC_API_KEY` was set before the editor started, that key is used instead. A Claude
-  subscription is not used here: Anthropic allows apps like this chat only API keys. To use your plan, use
-  the **Claude Code** tab.
-- **What it knows.** Each message carries the open tab, the selected node and whether the game is running.
-  So *"make this spin"* means the selection.
-- **What it does.** Claude uses the same tools as an external agent. Each tool call shows as a card that
-  opens to show what it sent and what came back. Screenshots it takes appear in the conversation.
-- **Model.** Choose Opus 5.5 (the default), Sonnet 5.5, Haiku 5.5 or Fable 5.1 in the panel header.
-- **Edit automatically / Ask before edits.** In the first mode, Claude changes the project without
-  asking, and each change is still one undo step. In the second, every change waits for **Allow**,
-  **Always allow in this chat** or **Deny**. Looking at the project never asks. Running code always does.
-- **Stop** interrupts Claude mid-task. **New conversation** (+) starts over. **Past conversations**
-  (the clock) reopens an earlier one for this project and continues it.
-- **Reloads keep the conversation.** The agent host holds it, so a reload or a crash of the editor tab
-  brings the conversation back, and Claude keeps working meanwhile.
 
 ## The Agent chip
 

@@ -1,6 +1,6 @@
 // @ts-check
 // Find the Cleo agent host, or start it. Shared by the stdio MCP server (index.mjs) and the editor's dev
-// server (app-kit vite.preset.ts imports this module to start the host when the chat panel opens), so both
+// server (app-kit vite.preset.ts imports this module to start the host when the Claude panel opens), so both
 // agree on what "running" means: the discovery file names a host whose process is alive and whose port
 // answers.
 
@@ -14,8 +14,13 @@ import { olderThan, withoutClaudeSession } from './env.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOST_ENTRY = path.join(HERE, 'host.mjs');
-/** This checkout's host version: an older host found running is replaced when the caller asks. */
-export const HOST_VERSION = String(JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8')).version);
+/**
+ * This checkout's host version: an older host found running is replaced when the caller asks. Read on each
+ * call, because the editor's dev server keeps this module loaded across package updates.
+ */
+export function hostVersion() {
+    try { return String(JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8')).version); } catch { return '0'; }
+}
 const sleep = (/** @type {number} */ ms) => new Promise(r => setTimeout(r, ms));
 
 /** @param {number} pid */
@@ -52,14 +57,16 @@ export async function findHost(file = discoveryFilePath()) {
  *
  * `replaceOutdated`: a host OLDER than this checkout is stopped and replaced, so an editor that needs a newer
  * capability (the hosted terminal) is not stuck with the host an earlier version left running. Never a newer
- * one, so two checkouts settle on the newest rather than taking turns.
+ * one, so two checkouts settle on the newest rather than taking turns. A Claude Code session the host runs
+ * itself must never ask: its MCP server would kill the host it lives in (index.mjs checks CLEO_HOSTED_BY).
  * @param {{ file?: string, timeoutMs?: number, env?: NodeJS.ProcessEnv, log?: (m: string) => void, replaceOutdated?: boolean }} [opts]
  */
 export async function ensureHost(opts = {}) {
     const file = opts.file ?? discoveryFilePath(opts.env ?? process.env);
     let found = await findHost(file);
-    if (found && opts.replaceOutdated && olderThan(found.version, HOST_VERSION)) {
-        opts.log?.(`replacing the agent host ${found.version ?? '?'} (pid ${found.pid}) with ${HOST_VERSION}`);
+    const version = hostVersion();
+    if (found && opts.replaceOutdated && olderThan(found.version, version)) {
+        opts.log?.(`replacing the agent host ${found.version ?? '?'} (pid ${found.pid}) with ${version}`);
         try { process.kill(found.pid); } catch { /* gone already */ }
         for (let i = 0; i < 50 && alive(found.pid); i++) await sleep(100);
         found = null;

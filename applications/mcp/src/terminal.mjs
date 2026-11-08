@@ -330,10 +330,14 @@ export class TerminalManager {
         this.mirror = null;
     }
 
-    /** The `cleo` server for the hosted session: this checkout's stdio server, talking to this host. */
+    /**
+     * The `cleo` server for the hosted session: this checkout's stdio server, talking to this host.
+     * CLEO_HOSTED_BY tells it so: it must never replace the host it runs inside (index.mjs).
+     */
     writeMcpConfig() {
         const file = path.join(this.dataDir, 'claude-code-mcp.json');
-        const config = { mcpServers: { cleo: { type: 'stdio', command: process.execPath, args: [MCP_ENTRY], env: { CLEO_AGENT_BRIDGE_FILE: this.discoveryFile } } } };
+        const env = { CLEO_AGENT_BRIDGE_FILE: this.discoveryFile, CLEO_HOSTED_BY: String(process.pid) };
+        const config = { mcpServers: { cleo: { type: 'stdio', command: process.execPath, args: [MCP_ENTRY], env } } };
         fs.writeFileSync(file, JSON.stringify(config, null, 2));
         return file;
     }

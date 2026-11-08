@@ -141,11 +141,13 @@ export function agentBridgeDiscoveryPlugin(): Plugin {
 const MCP_DIR = fileURLToPath(new URL('../mcp/', import.meta.url));
 
 /**
- * Start the Cleo agent host (applications/mcp/src/host.mjs) unless one runs: the chat panel's backend. The
+ * Start the Cleo agent host (applications/mcp/src/host.mjs) unless one runs: the Claude panel's backend. The
  * finding and starting live in the MCP package (ensureHost.mjs) so the stdio server and this agree on them.
  */
 async function startAgentHost(): Promise<{ port: number }> {
-  if (!existsSync(path.join(MCP_DIR, 'node_modules', '@anthropic-ai', 'claude-agent-sdk')))
+  // `ws` carries the editor link, so the host cannot start without it. A missing terminal package (node-pty,
+  // @xterm) shows in the panel instead, as the terminal's own problem.
+  if (!existsSync(path.join(MCP_DIR, 'node_modules', 'ws')))
     throw new Error(`The agent host is not installed. Run "npm install" in ${MCP_DIR}`);
   const url = pathToFileURL(path.join(MCP_DIR, 'src', 'ensureHost.mjs')).href;
   const { ensureHost } = await import(/* @vite-ignore */ url);

@@ -10,8 +10,6 @@
 //   server -> editor   {type:'call', id, method, params}
 //   editor -> server   {type:'result', id, ok:true, result} | {type:'result', id, ok:false, error:{message}}
 //   editor -> server   {type:'status', client:{...}}           (project switched, play state, ...)
-//   editor -> server   {type:'chat', op, ...}                  (the in-editor chat panel; see chat.mjs)
-//   server -> editor   {type:'chat-event', event}
 //   editor -> server   {type:'term', op, ...}                  (Claude Code hosted in the editor; terminal.mjs)
 //   server -> editor   {type:'term-event', event}
 //
@@ -85,7 +83,7 @@ export class EditorBridge extends EventEmitter {
         this.serverInfo = opts.serverInfo ?? { name: 'cleo-mcp', version: '0.0.0' };
         this.log = opts.log ?? (() => {});
         this.helloTimeoutMs = opts.helloTimeoutMs ?? 5000;
-        /** What this end offers the editor beyond tool calls: 'chat' and 'terminal' in the agent host. */
+        /** What this end offers the editor beyond tool calls: 'terminal' in the agent host. */
         this.capabilities = opts.capabilities ?? [];
         /** @type {number} */
         this.port = 0;
@@ -225,8 +223,6 @@ export class EditorBridge extends EventEmitter {
                 else entry.reject(new BridgeError(msg.error?.code ?? 'editor_error', msg.error?.message ?? 'The editor reported an error.'));
             } else if (msg?.type === 'status') {
                 this.client = { ...this.client, ...(msg.client ?? {}) };
-            } else if (msg?.type === 'chat') {
-                this.emit('chat', msg);
             } else if (msg?.type === 'term') {
                 // Only the editor drives the hosted terminal: peers never get here (_acceptPeer).
                 this.emit('term', msg);

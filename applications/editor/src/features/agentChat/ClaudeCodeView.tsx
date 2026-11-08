@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { Button } from '@cleo/app-kit/ui/Button'
 import { cn } from '@cleo/app-kit/ui/cn'
-import { chatActions, chatStore } from './chatStore'
+import { panelActions, panelStore } from './panelStore'
 import { terminalActions, terminalKeyAction, terminalStore, type TerminalSink } from './terminalStore'
 
 // Claude Code itself, in a terminal in the Claude panel. The agent host runs the user's own `claude` CLI in a
@@ -86,7 +86,7 @@ function Notice({ tone = 'info', children }: { tone?: 'info' | 'error'; children
 export default function ClaudeCodeView() {
   const ref = useRef<HTMLDivElement>(null)
   const t = useSyncExternalStore(terminalStore.subscribe, terminalStore.getSnapshot)
-  const panel = useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot)
+  const panel = useSyncExternalStore(panelStore.subscribe, panelStore.getSnapshot)
 
   useEffect(() => {
     const el = ref.current
@@ -118,14 +118,14 @@ export default function ClaudeCodeView() {
     notice = (
       <Notice tone='error'>
         <div>{panel.linkError ?? 'Could not reach the agent host.'}</div>
-        <Button size='sm' className='self-start' onClick={() => chatActions.retry()}>Retry</Button>
+        <Button size='sm' className='self-start' onClick={() => panelActions.retry()}>Retry</Button>
       </Notice>
     )
   } else if (t.link === 'outdated') {
     notice = (
       <Notice>
-        <div className='text-fg'>The agent host that is running is an older one and cannot host Claude Code.</div>
-        <Button size='sm' className='self-start' onClick={() => chatActions.retry()}>Restart the agent host</Button>
+        <div className='text-fg'>The editor is linked to an MCP server that cannot host Claude Code (an older agent host, or a standalone server).</div>
+        <Button size='sm' className='self-start' onClick={() => panelActions.retry()}>Start the agent host</Button>
       </Notice>
     )
   } else if (t.link !== 'ready' || !s) {

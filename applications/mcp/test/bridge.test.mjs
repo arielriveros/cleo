@@ -136,3 +136,10 @@ test('results map to MCP content; images pass through', () => {
 test('server instructions fit the 4,096 characters Claude Code loads up front', () => {
     assert.ok(INSTRUCTIONS.length < 4096, `${INSTRUCTIONS.length} characters`);
 });
+
+test('server instructions carry the engine conventions agents otherwise get wrong', () => {
+    assert.match(INSTRUCTIONS, /from 'cleo'/);
+    assert.match(INSTRUCTIONS, /DEGREES/);
+    assert.match(INSTRUCTIONS, /lux/);
+    assert.match(INSTRUCTIONS, /one-shots|playAction/);
+});

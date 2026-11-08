@@ -36,7 +36,7 @@ export interface BridgeStatus {
   state: BridgeState
   /** Bumped on every new connection, so a listener can tell a reconnect from a re-render. */
   link: number
-  /** What the server offers beyond tool calls: 'chat' and 'terminal' when it is the agent host (the panel's backend). */
+  /** What the server offers beyond tool calls: 'terminal' when it is the agent host (the Claude panel's backend). */
   capabilities: string[]
   /** A server's discovery file is there, whether or not this tab is connected to it. */
   available: boolean
@@ -79,7 +79,6 @@ class AgentBridgeClient {
     app: 'cleo-editor', version: '0', origin: location.origin, desktop: false, project: { id: null, name: null },
   })
   private queue: Promise<void> = Promise.resolve()
-  private chatListeners = new Set<(event: any) => void>()
   private termListeners = new Set<(event: any) => void>()
   private running = false
   /** A token this tab must not retry: refused, or handed over to another tab. */
@@ -114,22 +113,6 @@ class AgentBridgeClient {
   }
   /** Only a dev server serves the discovery route. */
   get supported(): boolean { return import.meta.env.DEV }
-
-  // --- chat channel --------------------------------------------------------------------------------------
-
-  /** Events from the agent host's chat manager (applications/mcp/src/chat.mjs). */
-  onChatEvent(cb: (event: any) => void): () => void {
-    this.chatListeners.add(cb)
-    return () => { this.chatListeners.delete(cb) }
-  }
-
-  /** Send a chat op to the host. False when there is no host link that offers chat. */
-  sendChat(op: string, extra: Record<string, unknown> = {}): boolean {
-    const s = this.socket
-    if (!s || s.readyState !== WebSocket.OPEN || this.status.state !== 'connected' || !this.status.capabilities.includes('chat')) return false
-    s.send(JSON.stringify({ type: 'chat', op, ...extra }))
-    return true
-  }
 
   // --- terminal channel ----------------------------------------------------------------------------------
 
@@ -235,8 +218,6 @@ class AgentBridgeClient {
           capabilities: Array.isArray(msg.capabilities) ? msg.capabilities.map(String) : [],
           server: { name: msg.server?.name ?? 'MCP server', version: msg.server?.version ?? '', port: found.port }, lastError: null,
         })
-      } else if (msg?.type === 'chat-event') {
-        for (const cb of [...this.chatListeners]) cb(msg.event)
       } else if (msg?.type === 'term-event') {
         for (const cb of [...this.termListeners]) cb(msg.event)
       } else if (msg?.type === 'call' && typeof msg.id === 'number') {

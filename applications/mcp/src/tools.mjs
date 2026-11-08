@@ -54,9 +54,8 @@ export function registerTools(/** @type {import('@modelcontextprotocol/sdk/serve
 }
 
 /**
- * The tool catalog as plain definitions, so the same tools serve both the stdio MCP server and the in-editor
- * chat's in-process SDK MCP server (chat.mjs). Each handler relays to the editor and maps the answer to MCP
- * content.
+ * The tool catalog as plain definitions (tests read them without a server). Each handler relays to the
+ * editor and maps the answer to MCP content.
  * @param {Caller} bridge
  * @returns {ToolDef[]}
  */

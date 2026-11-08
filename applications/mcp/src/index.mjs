@@ -6,7 +6,8 @@
 //
 // It serves the tool catalog (tools.mjs) and the engine docs as resources (resources.mjs), and runs every
 // tool through the Cleo agent host (host.mjs), the one process that owns the editor link. The host is
-// started on demand (ensureHost.mjs), so several Claude sessions and the in-editor chat share one editor.
+// started on demand (ensureHost.mjs), so several Claude sessions, including the one the editor hosts, share
+// one editor.
 // CLEO_MCP_STANDALONE=1 skips the host and opens the editor bridge here instead (the original setup).
 // stdout carries the MCP protocol, so everything else goes to stderr.
 
@@ -34,9 +35,12 @@ const log = (/** @type {string} */ msg) => process.stderr.write(`[cleo-mcp] ${ms
 async function main() {
     if (process.env.CLEO_MCP_STANDALONE !== '1') {
         try {
-            const host = await ensureHost({ log, replaceOutdated: true });
+            // A session the host itself runs (CLEO_HOSTED_BY, terminal.mjs) never replaces it: that would kill
+            // the process its own terminal lives in.
+            const replaceOutdated = !process.env.CLEO_HOSTED_BY;
+            const host = await ensureHost({ log, replaceOutdated });
             log(`using the agent host (pid ${host.pid}, port ${host.port})`);
-            return serve(new PeerBridge({ resolveHost: () => ensureHost({ log, replaceOutdated: true }), name: `${PKG.name} ${PKG.version}`, log }), async () => {});
+            return serve(new PeerBridge({ resolveHost: () => ensureHost({ log, replaceOutdated }), name: `${PKG.name} ${PKG.version}`, log }), async () => {});
         } catch (err) {
             log(`no agent host (${/** @type {any} */ (err)?.message ?? err}); opening the editor bridge here instead`);
         }
