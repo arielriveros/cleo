@@ -981,7 +981,7 @@ export class FoliagePasses {
                     this._setCaptureLodUniforms(layer);
                     const pipeline = this._pipelines.get(shaderType, reflection, {
                         cullMode: billboard ? 'none' : ModelDraw.cullFor(model.material.config.side),
-                        depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less-equal' },
+                        depthStencil: DEPTH_WRITE,
                         targets: 3,
                         vertex: 'model+instance',
                         builtFor: 'blinn_phongGeometry',

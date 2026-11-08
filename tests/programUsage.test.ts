@@ -68,8 +68,9 @@ describe('programsFor', () => {
             expect(list, name).not.toContain(name);
         // 60 with the impostor shadow program the Valley's pines cast through in the outer cascades, and
         // the knight's cut-out skinned variants on top; the puddles' three decal programs and the smoke's;
-        // the High tier's screen-space reflections (three) and local exposure (two); the fog volumes' three.
-        expect(list.length).toBeLessThan(78);
+        // the High tier's screen-space reflections (three) and local exposure (two); the fog volumes' three;
+        // the GI Volumes' seven (capture reduce, visibility, radiance, integrate, resolve, ambient cube, rescale).
+        expect(list.length).toBeLessThan(85);
     });
 
     it('builds the parallax variant only for a material that marches', () => {
