@@ -1,7 +1,7 @@
 import { CameraRigNode, Input, ModelNode, Node } from 'cleo'
 import type { Animator } from 'cleo'
-import FpsCombatantNode from './FpsCombatant'
-import { WEAPONS, aimDirection, approach, clamp, combatantOf, findByVariable, findDescendant, lerp, manager, playCue } from './FpsShared'
+import FpsCombatantNode from '@/FPS/Scripts/FpsCombatant'
+import { WEAPONS, aimDirection, approach, clamp, combatantOf, findByVariable, findDescendant, lerp, manager, playCue } from '@/FPS/Scripts/FpsShared'
 
 /** One weapon's state in the player's hands. */
 interface Slot { key: string, ammo: number, reserve: number, view: ModelNode | null, muzzle: Node | null }

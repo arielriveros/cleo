@@ -1,7 +1,7 @@
 import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
 import type { Animator } from 'cleo'
-import FpsCombatantNode from './FpsCombatant'
-import { angleDiff, clamp, combatantOf, distance3, findByVariable, findDescendant, hostile, manager, planarDistance, playCue, yawTo } from './FpsShared'
+import FpsCombatantNode from '@/FPS/Scripts/FpsCombatant'
+import { angleDiff, clamp, combatantOf, distance3, findByVariable, findDescendant, hostile, manager, planarDistance, playCue, yawTo } from '@/FPS/Scripts/FpsShared'
 
 /** The death clips, in the order the animator's `Die0..Die5` triggers play them. */
 const DEATHS = ['DeathFromTheFront', 'DeathFromFrontHeadshot', 'DeathFromTheBack', 'DeathFromBackHeadshot', 'DeathFromRight', 'DeathCrouchingHeadshotFront']

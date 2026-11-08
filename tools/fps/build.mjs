@@ -463,8 +463,8 @@ function environment({ rain = false } = {}) {
 function floodLights(points) {
   return group('floods', 'Flood Lights', points.map(([x, y, z], i) => node(`Flood ${i + 1}`, 'light', {
     id: stableId(`flood:${i}`), position: [x, y, z], rotation: [Math.atan2(Math.hypot(x, z), y) * 180 / Math.PI * 0 + 62, Math.round(Math.atan2(-x, -z) * 180 / Math.PI), 0],
-    lightType: 'spot', castShadows: false,
-    light: { unit: 'photometric', color: [1, 0.93, 0.8], intensity: 90000, range: 70, sourceRadius: 0.2, innerCone: 22, outerCone: 38, legacyFalloff: false },
+    lightType: 'spotlight', castShadows: false,
+    light: { unit: 'photometric', color: [1, 0.93, 0.8], intensity: 60000, range: 70, sourceRadius: 0.2, cutOff: 40, outerCutOff: 55, legacyFalloff: false },
   })))
 }
 

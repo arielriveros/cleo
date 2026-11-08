@@ -1,7 +1,7 @@
 import { CharacterNode, Logger } from 'cleo'
 import type { Node, TemplateName } from 'cleo'
-import { WEAPONS, aimDirection, canDamage, clamp, combatantOf, manager, rotationOntoNormal, spreadDirection } from './FpsShared'
-import type { WeaponSpec } from './FpsShared'
+import { WEAPONS, aimDirection, canDamage, clamp, combatantOf, manager, rotationOntoNormal, spreadDirection } from '@/FPS/Scripts/FpsShared'
+import type { WeaponSpec } from '@/FPS/Scripts/FpsShared'
 
 /**
  * FPS example — what every fighter is: the player and each bot. A base script; FpsPlayer and FpsBot extend it.

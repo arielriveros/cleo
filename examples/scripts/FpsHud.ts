@@ -1,5 +1,5 @@
 import { Node, UIProgressBarNode, UIRootNode, UITextNode } from 'cleo'
-import { WEAPONS, angleDiff, clamp, manager, yawTo } from './FpsShared'
+import { WEAPONS, angleDiff, clamp, manager, yawTo } from '@/FPS/Scripts/FpsShared'
 
 /**
  * FPS example — the player's HUD. Attach to the `HUD` node, a screen-space UI Root that is a CHILD of the

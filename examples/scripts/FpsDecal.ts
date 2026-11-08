@@ -1,5 +1,5 @@
 import { Node } from 'cleo'
-import { clamp } from './FpsShared'
+import { clamp } from '@/FPS/Scripts/FpsShared'
 
 /**
  * FPS example — a bullet hole. Attach to the root of a template whose children are Decal nodes; the shooter

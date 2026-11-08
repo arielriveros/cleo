@@ -1,6 +1,6 @@
 import { Game, Logger, Node } from 'cleo'
-import { distance3, fps, findByVariable, planarDistance } from './FpsShared'
-import type { FpsMode } from './FpsShared'
+import { distance3, fps, findByVariable, planarDistance } from '@/FPS/Scripts/FpsShared'
+import type { FpsMode } from '@/FPS/Scripts/FpsShared'
 
 /**
  * FPS example — the match. Put ONE of these (the "FPS Game Manager" template) at the scene root and the
