@@ -1,7 +1,7 @@
 import { mat4 } from 'gl-matrix';
 import type { ReadonlyVec3 } from 'gl-matrix';
 import type { WeatherNode } from '../../core/scene/nodes/weatherNode';
-import { boxWeight } from '../../core/scene/nodes/boxVolume';
+import { boxColumnWeight, boxWeight } from '../../core/scene/nodes/boxVolume';
 
 /**
  * The weather volumes a frame draws, packed for the shaders (chunks/weatherVolumes.wgsl), and the CPU
@@ -16,6 +16,17 @@ import { boxWeight } from '../../core/scene/nodes/boxVolume';
 export const MAX_WEATHER_VOLUMES = 4;
 /** Bounded volumes further than this (metres, to the box) from the camera are not drawn. */
 export const WEATHER_REACH = 400;
+/**
+ * Seconds the weather clock (`u_weatherInfo.y`, what the ground's raindrops animate by) wraps at, so it
+ * keeps its precision in a float however long the game runs. Every drop period divides it exactly
+ * (RAINDROP_PERIODS), so the wrap never shows.
+ */
+export const WEATHER_CLOCK_WRAP = 4096;
+/**
+ * The cycle, in seconds, of each layer of the ground's raindrops (chunks/terrainWeather.wgsl): the two
+ * ripple layers in puddles, then the two drop-hit layers round them. Mirrored there.
+ */
+export const RAINDROP_PERIODS: readonly number[] = [1.0, 0.8, 0.5, 0.64];
 
 /** One frame's volumes in shader layout. */
 export interface WeatherPack {
@@ -26,7 +37,7 @@ export interface WeatherPack {
     blend: Float32Array;
     /** Per volume: wetness, snow, puddles, shelter 0/1. */
     amount: Float32Array;
-    /** Per volume: cos(snowSlope), snowBreakup, 0, 0. */
+    /** Per volume: cos(snowSlope), snowBreakup, rain falling (rate, 0 unless it rains), snow falling. */
     shape: Float32Array;
     /** The volumes, in composite order (ascending priority). */
     volumes: WeatherNode[];
@@ -55,7 +66,7 @@ export function distanceToWeather(v: WeatherNode, p: ReadonlyVec3): number {
 }
 
 /**
- * The volumes a frame draws: active ones (enabled, visible, wet or snowy) within WEATHER_REACH of the
+ * The volumes a frame draws: active ones (enabled, visible, wet, snowy or precipitating) within WEATHER_REACH of the
  * camera, the highest priority first and the nearest among equals, at most MAX_WEATHER_VOLUMES; returned
  * in COMPOSITE order (ascending priority, the nearer last among equals).
  */
@@ -88,7 +99,7 @@ export function packWeather(volumes: readonly WeatherNode[], out: WeatherPack = 
         const f = bounded ? v.blendFractions : [0, 0, 0];
         out.blend.set([f[0], f[1], f[2], bounded ? 0 : 1], i * 4);
         out.amount.set([v.wetness, v.snow, v.puddles, v.shelter ? 1 : 0], i * 4);
-        out.shape.set([Math.cos(v.snowSlope * Math.PI / 180), v.snowBreakup, 0, 0], i * 4);
+        out.shape.set([Math.cos(v.snowSlope * Math.PI / 180), v.snowBreakup, v.rainRate, v.snowfallRate], i * 4);
         for (let k = 0; k < 16; k++) mix(out.inv[i * 16 + k]);
         for (let k = 0; k < 4; k++) { mix(out.blend[i * 4 + k]); mix(out.amount[i * 4 + k]); mix(out.shape[i * 4 + k]); }
     }
@@ -130,6 +141,37 @@ export function resolveWeatherAt(pack: WeatherPack, p: ReadonlyVec3): WeatherSam
         s.shelter = lerp(s.shelter, pack.amount[i * 4 + 3], w);
         s.slopeCos = lerp(s.slopeCos, pack.shape[i * 4], w);
         s.breakup = lerp(s.breakup, pack.shape[i * 4 + 1], w);
+    }
+    return s;
+}
+
+/** What falls at one point: mirrors `precipitationAt` in chunks/weatherVolumes.wgsl. */
+export interface PrecipitationSample {
+    /** 0..1: the rain falling here, composited. */
+    rain: number;
+    /** 0..1: the snow falling here, composited. */
+    snowfall: number;
+    /** 0..1: how much shelter applies here. */
+    shelter: number;
+}
+
+/** Feathered COLUMN weight of packed volume `i` at `p` (its top open): mirrors `weatherColumnWeight`. */
+export function packedPrecipitationWeight(pack: WeatherPack, i: number, p: ReadonlyVec3): number {
+    if (pack.blend[i * 4 + 3] > 0.5) return 1;
+    const inv = pack.inv.subarray(i * 16, i * 16 + 16) as unknown as mat4;
+    return boxColumnWeight(p, inv, [pack.blend[i * 4], pack.blend[i * 4 + 1], pack.blend[i * 4 + 2]]);
+}
+
+/** The CPU twin of `precipitationAt`: what falls at `p`, the packed volumes' columns composited. */
+export function resolvePrecipitationAt(pack: WeatherPack, p: ReadonlyVec3): PrecipitationSample {
+    const s: PrecipitationSample = { rain: 0, snowfall: 0, shelter: 0 };
+    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+    for (let i = 0; i < pack.count; i++) {
+        const w = packedPrecipitationWeight(pack, i, p);
+        if (w <= 0) continue;
+        s.rain = lerp(s.rain, pack.shape[i * 4 + 2], w);
+        s.snowfall = lerp(s.snowfall, pack.shape[i * 4 + 3], w);
+        s.shelter = lerp(s.shelter, pack.amount[i * 4 + 3], w);
     }
     return s;
 }

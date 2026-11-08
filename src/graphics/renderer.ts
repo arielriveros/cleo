@@ -778,6 +778,8 @@ export class Renderer {
         this._autoExposure.beginFrame(this._thumbnailMode || !!this._subsystems.capture.presentTarget
                                       || !this._autoExposure.exposureMeteringAllowed);
         this._foliage.advanceWindTime();
+        // The scene's wind field (core/wind/windField.ts) on that clock: foliage and particles share it.
+        this._foliage.prepareWindField(scene);
         // One clock for every flickering light and everything that follows one (graphics/lightFlicker.ts).
         lightFlickerClock.time = this._view.windTime;
         // What is pushing foliage aside this frame (characters, moving bodies, blasts): stamps for the
@@ -912,10 +914,6 @@ export class Renderer {
         frameStats.volumeCulledNodes = this._visibility.volumeFrameStats.culledNodes;
         const _statsT0 = performance.now();
 
-        // Particle simulation steps. Here because no pass is open and every pass that READS the state
-        // textures comes later; on WebGPU the dispatches go into the frame encoder ahead of those draws.
-        this._particlePasses.simulateParticles(scene);
-
         // Shadow map depth pass, shared by both pipelines. The caster is the FIRST directional light
         // flagged to cast, in traversal order — not whichever the light Set happens to yield last.
         let shadowLight: LightNode | null = null;
@@ -960,6 +958,12 @@ export class Renderer {
             // every lighting shader samples them regardless. Clear to the far plane, once.
             this._shadows.clearShadowMaps();
         }
+
+        // Particle simulation steps. Here because no pass is open and every pass that READS the state
+        // textures comes later; on WebGPU the dispatches go into the frame encoder ahead of those draws.
+        // After the weather and its shelter map: rain and snow (the `weather` module) live by this frame's
+        // volumes and die under its shelter. Collision still reads the PREVIOUS frame's depth.
+        this._particlePasses.simulateParticles(scene, weatherPreview ? null : this._weather.particleWeather());
 
         // AFTER the shadow passes and before anything shades: the passes above are what hand out the
         // spot atlas layers and point cube slots, and each light's slot travels inside its record.
@@ -2018,6 +2022,11 @@ export class Renderer {
         this._shadows.shelterResolution = Math.min(4096, Math.max(256, n));
         this._shadows.invalidateShelter();
     }
+    /** See {@link RenderSettings.precipitationDensity}. A quality-tier field. */
+    public get precipitationDensity(): number { return this._particlePasses.precipitationDensity; }
+    public set precipitationDensity(v: number) {
+        this._particlePasses.precipitationDensity = Number.isFinite(+v) ? Math.min(1, Math.max(0, +v)) : 1;
+    }
     /** The frame's weather volumes, packed (the inspector's status line, tests). */
     public get weatherFrameVolumes(): readonly WeatherNode[] { return this._weather.pack.volumes; }
     /** Whether a shelter map is in use this frame. */
@@ -2283,6 +2292,7 @@ export class Renderer {
         this._shadows.shelterEnabled = t.weatherShelterEnabled;
         this._shadows.shelterResolution = t.weatherShelterResolution;
         this._shadows.invalidateShelter();
+        this._particlePasses.precipitationDensity = t.precipitationDensity;
         this._ssr.ssrResolutionScale = t.ssrResolutionScale;
         this._ssr.ssrSteps = t.ssrSteps;
         this._temporal.motionBlurEnabled = t.motionBlurEnabled;
@@ -2613,6 +2623,7 @@ export class Renderer {
             volumetricFogLocalShadows: this._fog.localShadows,
             weatherShelterEnabled: this._shadows.shelterEnabled,
             weatherShelterResolution: this._shadows.shelterResolution,
+            precipitationDensity: this._particlePasses.precipitationDensity,
             ssrResolutionScale: this._ssr.ssrResolutionScale,
             ssrSteps: this._ssr.ssrSteps,
             ssrMaxRoughness: this._ssr.ssrMaxRoughness,
@@ -2770,6 +2781,7 @@ export class Renderer {
         if (s.volumetricFogLocalShadows !== undefined) this.volumetricFogLocalShadows = s.volumetricFogLocalShadows;
         if (s.weatherShelterEnabled !== undefined) this.weatherShelterEnabled = s.weatherShelterEnabled;
         if (s.weatherShelterResolution !== undefined) this.weatherShelterResolution = s.weatherShelterResolution;
+        if (s.precipitationDensity !== undefined) this.precipitationDensity = s.precipitationDensity;
         if (s.ssrResolutionScale !== undefined) this.ssrResolutionScale = s.ssrResolutionScale;
         if (s.ssrSteps !== undefined) this.ssrSteps = s.ssrSteps;
         if (s.ssrMaxRoughness !== undefined) this.ssrMaxRoughness = s.ssrMaxRoughness;

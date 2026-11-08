@@ -47,6 +47,26 @@ export function boxWeight(p: ReadonlyVec3, invVolume: ReadonlyMat4, blend: Reado
     return w;
 }
 
+/**
+ * {@link boxWeight} with the box's TOP face open: the column above the box's middle (up to the sky) weighs
+ * as its middle does, so rain or snow falling in from above it is already inside. The bottom and the
+ * four sides feather as before.
+ */
+export function boxColumnWeight(p: ReadonlyVec3, invVolume: ReadonlyMat4, blend: ReadonlyVec3): number {
+    const local = vec3.transformMat4(_pointScratch, p, invVolume);
+    local[1] = Math.min(local[1], 0);
+    let w = 1;
+    for (let i = 0; i < 3; i++) {
+        const edge = 0.5 - Math.abs(local[i]);
+        if (edge <= 0) return 0;
+        if (blend[i] > 0) {
+            const t = Math.min(1, edge / blend[i]);
+            w = Math.min(w, t * t * (3 - 2 * t));
+        }
+    }
+    return w;
+}
+
 /** World AABB of the oriented box. */
 export function boxWorldBounds(world: ReadonlyMat4, size: ReadonlyVec3): { min: vec3, max: vec3 } {
     const m = mat4.scale(_volScratch, world, [size[0], size[1], size[2]]);

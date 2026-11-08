@@ -16,6 +16,50 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Rain and snow.** A Weather volume's new **Falling** setting makes rain or snow come down inside it,
+  through the particle system with only the parameters changed.
+  - *Realistic out of the box.* Rain falls in thin streaks at about 8.5 m/s, slanting with the scene's
+    wind; snow flutters down at about 1 m/s, spinning and drifting. The engine draws both with sprites it
+    generates itself, so nothing has to be imported. **Rate**, **Drop/Flake Size**, **Fall Speed** and
+    **Wind** tune them.
+  - *Matte, and glowing against the light.* Drops have no highlight; like a leaf they let the sun through,
+    so rain brightens when the sun is behind it. **Trail Min** and **Trail Max** set each streak's length
+    at random between them. Particles gain **Translucency** and **Stretch variation** render settings.
+  - *Your own sprites.* **Sprite** takes a tileset's atlas and grid, or any texture cut into a grid. Each
+    particle picks a random cell, or plays through them.
+  - *One system, however many volumes.* One rain and one snow system follow the camera and keep each
+    drop only where the volumes ask for it, as thinly as they ask. Overlapping volumes never double it, a
+    dry box nested in a wet one carves it out, and it falls into a box from the sky above.
+  - *Stops at the roof.* Where a volume keeps **Shelter**, drops and flakes die on whatever is above, so
+    none fall indoors.
+  - *Raindrops on wet ground.* While rain falls, rings run across the landscape's puddles and drops hit
+    the wet ground round them, as strongly as the ground is wet. Sheltered ground stays still, and the
+    ground goes quiet once the rain stops.
+  - *Presets.* Drizzle, Rain, a new Storm, Light Snow, Snowed In and a new Blizzard set what falls too.
+  - *Open to any effect.* The new particle **Weather** module lives by the volumes and the shelter, and a
+    **Near fade** render setting fades particles out by the lens.
+  - *Renderer.* **Rain & Snow** (`precipitationDensity`) is how much of it is drawn: 1 on Ultra and High,
+    0.7 on Medium, 0.4 on Low. Player contract 26.
+- **Wind as a vector field.** The Wind node's air now has a speed and a direction at every point, the
+  same function on the CPU and the GPU, built the way Ghost of Tsushima built its wind.
+  - *Gusts that roll and veer.* One authored wind whose strength rides Perlin noise scrolled along it, so
+    gusts sweep across a meadow, and a broader noise that turns it by up to **Veer** degrees from one
+    meadow to the next. **Gustiness** says how much of the air the gusts carry. Each plant leans the way
+    the air at its root is going, bark and leaves alike, and its shadow with it. Strength 1 is about 7 m/s
+    at a gust's crest. The presets set the new knobs; older scenes load with their defaults.
+  - *Local wind.* A Force Field's new **Affects wind** makes it part of the air: a whirlwind the grass
+    swirls round, a blast that flattens a meadow outward, a corridor the wind funnels through, eddies
+    carried downwind, or a shelter that stills a courtyard. **Wind:** presets for each; the first 8 count.
+  - *Particles in the same air.* The particle **Wind** module's **Scene wind** rides the field at each
+    particle, the wind fields included, without their pushing twice through the Force Fields module.
+  - *Read it from a script.* `scene.windAt(position)` and `WindNode.sampleAt` return the air (m/s) the
+    plants are bending to, on the same clock. Cloth catches the same gusts as the trees round it.
+  - *See it in the viewport.* The eye menu's **Wind field**, or selecting the Wind node or a wind Force
+    Field, draws arrows of the air round the camera, coloured from calm blue to gale red and pulsing with
+    the gusts, streaks carried by it, and a glyph for every field that moves it.
+  - *Force Field outlines follow their shape.* Switching a field between sphere and box redraws its
+    outline at once, not on the next selection.
+
 - **GI Volumes.** A new node, **GI Volume**, fills a box with irradiance probes that light what is inside
   with the light bounced off the scene round it.
   - *Relit, not rebaked.* Each probe's view of the static scene is captured once; the sun with its

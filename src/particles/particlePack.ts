@@ -21,6 +21,8 @@ export const SIM = {
     GRAVITY: 1, DRAG: 2, WIND: 4, NOISE: 8, VORTEX: 16, ATTRACTOR: 32, LIMIT: 64, SPEED_LIFE: 128,
     COLLIDE_DEPTH: 256, COLLIDE_PLANES: 512, SPIN_LIFE: 1024, FIELDS: 2048, LOCAL: 4096,
     KILL_ON_HIT: 8192, CUSTOM: 16384, FLAT: 32768, COLLIDE_BODIES: 65536,
+    /** The Wind module rides the scene's wind field (chunks/windField.wgsl) instead of its own velocity. */
+    SCENE_WIND: 262144, WEATHER: 131072,
 } as const;
 
 /**
@@ -139,6 +141,10 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
 
     const wind = activeModule(def, 'wind')?.params;
     if (wind) simMask |= SIM.WIND;
+    const sceneWind = !!wind && wind.source === 'scene';
+    if (sceneWind) simMask |= SIM.SCENE_WIND;
+    // x = the scene wind's multiplier. Always written, so a recycled program never keeps a stale one.
+    sim.u_windScene = [sceneWind ? num(wind!.scale, 1) : 0, 0, 0, 0];
 
     const noise = activeModule(def, 'curlNoise')?.params;
     if (noise) simMask |= SIM.NOISE;
@@ -188,6 +194,15 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
         sim.u_collide1 = [0, 0, 0, 0];
     }
 
+    // Weather: kind (0 rain, 1 snow), obey shelter, and 1 / the rate the spawn rate stands for. A plain
+    // runtime bit, never a strip: four box tests and one shadow fetch are not worth doubling the variants.
+    const weather = activeModule(def, 'weather')?.params;
+    if (weather) simMask |= SIM.WEATHER;
+    sim.u_precipSim = weather
+        ? [weather.kind === 'snow' ? 1 : 0, weather.shelter !== false ? 1 : 0,
+           1 / Math.min(1, Math.max(0.01, num(weather.fullRate, 1))), 0]
+        : [0, 0, 1, 0];
+
     // Only a VALIDATED compile of this exact source runs; see particleCustomCode.ts.
     const customModule = activeModule(def, 'customCode');
     const custom = validatedCustomCode(customModule);
@@ -215,6 +230,7 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
     draw.u_flipbook = [fb.columns, fb.rows, Math.min(fb.frames, fb.columns * fb.rows), fb.mode === 'fps' ? 1 : 0];
     draw.u_flipbook2 = [fb.fps, fb.cycles, fb.randomStart ? 1 : 0, fb.blend && fb.frames > 1 ? 1 : 0];
     draw.u_speedRange = [colorSpeedRange[0], colorSpeedRange[1], sizeSpeedRange[0], sizeSpeedRange[1]];
+    draw.u_stretchRange = [render.stretchRange[0], render.stretchRange[1], 0, 0];
     draw.alignment = [ALIGNMENT[render.alignment] ?? 0];
     draw.stretch = [render.stretch];
     frag.u_fragParams = [BLEND[render.blend] ?? 0, render.cutoff, render.softness, render.emissive];

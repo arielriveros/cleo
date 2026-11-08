@@ -17,6 +17,8 @@ import { physicalFor, particleSimProgram, type ShadowFilter } from './programVar
 import { packEmitter, simStripMask } from '../particles/particlePack';
 import { parseParticleSystem } from '../particles/particleSystemAsset';
 import { resolveSubEmitters } from '../particles/particleRuntime';
+import { precipitationSystem, type FallingKind } from '../particles/precipitation';
+import { parsePrecipitationSprite } from '../core/scene/nodes/weatherNode';
 import { QUALITY_TIERS, type RenderSettings, type QualityPreset } from './render/settingsTypes';
 
 /**
@@ -178,9 +180,14 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
                              'pbrGeometryInstancedFoliage', 'pbrGeometryInstancedLeanFoliage',
                              'shadowMapInstancedFoliage', 'shadowMapInstancedCutoutFoliage']) add(n);
             break;
-        // The far cards' wind: built only for a game that has a Wind node.
+        // The far cards' wind: built only for a game that has a Wind node, or a Force Field that moves the
+        // air (local wind sways the cards on its own).
         case 'wind':
             for (const n of ['foliageBillboardInstancedWind', 'shadowMapInstancedCutoutWind']) add(n);
+            break;
+        case 'forceField':
+            if (node.forceField?.affectsWind === true)
+                for (const n of ['foliageBillboardInstancedWind', 'shadowMapInstancedCutoutWind']) add(n);
             break;
         case 'tilemap': add('tilemap'); break;
         case 'decal': add('decalSurface'); add('decalResolve'); add('decalColor'); break;
@@ -201,6 +208,16 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
         case 'lightProbe': add('prefilterOct'); add('skyProject'); break;
         case 'giVolume': add('giReduce'); add('giVisibility'); add('giRadiance'); add('giIntegrate'); add('giResolve'); add('giAmbientCube'); add('giRescale'); add('giStateStamp'); break;
         case 'particleSystem': addParticles(node.particleSystem, use); break;
+        // Rain or snow falls from it: the scene's precipitation runs it as a particle system (Scene.precipitation).
+        case 'weather': {
+            const w = node.weather ?? {};
+            if (w.precipitation === 'rain' || w.precipitation === 'snow') {
+                const kind = w.precipitation as FallingKind;
+                const style = { rate: 1, size: 1, speed: 1, sprite: parsePrecipitationSprite(w.precipitationSprite) };
+                addParticles({ system: precipitationSystem(kind, style, { wind: [0, 0], density: 1, prewarm: true }) }, use);
+            }
+            break;
+        }
     }
     for (const child of Array.isArray(node.children) ? node.children : []) usageFromSceneJson(child, use, shadows);
 }

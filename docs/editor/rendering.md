@@ -211,6 +211,15 @@ across), redrawn only when the camera has moved an eighth of it or something in 
 **Shelter Resolution** is that map's size; the quality tier sets both, and Low has no shelter. A scene
 with no weather volume runs nothing.
 
+Rain and snow that a volume makes fall are particles: one system for rain and one for snow, round the
+camera, whatever the number of volumes. Each lives only where the volumes make its kind fall, as thinly
+as they do there, and dies on reaching anything under which Shelter keeps the ground dry, so no drop falls
+through a roof. Without Shelter (Low) rain falls indoors, as the ground gets wet there. **Rain & Snow**
+is how much of it is drawn, 0 to 1 (the tier sets it: 1 on Ultra and High, 0.7 Medium, 0.4 Low); at 0
+nothing falls, but the ground's raindrops (rings in the puddles, drops hitting the wet ground, as long as
+rain falls on it) still play. Drops collide with what is on screen, so a drop off screen falls through
+the ground until it dies. Neither thumbnails nor probe captures draw them.
+
 ### Volumetric Fog
 
 Draws the scene's [Volumetric Fog](node-inspector.md#volumetric-fog) volumes. The camera's view, out to

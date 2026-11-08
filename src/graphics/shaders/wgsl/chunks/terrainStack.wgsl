@@ -119,6 +119,8 @@ struct TerrainSurface {
     uv: vec2<f32>,
     uvDx: vec2<f32>,
     uvDy: vec2<f32>,
+    /** Metres of ground one pixel spans here: what the weather's raindrops fade out by before they alias. */
+    footprint: f32,
 };
 
 /** Mirrors `rangeCoverage`: 1 inside min..max, a smoothstep fade to 0 across the falloff outside. */
@@ -213,6 +215,7 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
     // The only derivatives in this file, taken where control flow is still uniform.
     let ddxUv = dpdx(baseUv);
     let ddyUv = dpdy(baseUv);
+    let footprint = max(length(dpdx(fragPos)), length(dpdy(fragPos)));
 
     let nGeom = normalize(tbn[2]);
     let elevation = fragPos.y * u_terrain.u_elevRemap.x + u_terrain.u_elevRemap.y;
@@ -343,6 +346,7 @@ fn resolveTerrainSurface(fragPos: vec3<f32>, baseUv: vec2<f32>, tbn: mat3x3<f32>
     out.uv = baseUv;
     out.uvDx = ddxUv;
     out.uvDy = ddyUv;
+    out.footprint = footprint;
 
     // Authoring views. Unlit colour would read better, but the G-buffer has no such channel, so the
     // view is carried in albedo and lit like the ground it describes.

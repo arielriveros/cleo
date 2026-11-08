@@ -109,7 +109,8 @@ const CHARACTER_RADIUS = 0.45;
 
 /**
  * This frame's interactors in `scene`: its characters, its dynamic physics bodies that are moving, its
- * enabled radial force fields (a blast pushes everything outward over its radius), and whatever was
+ * enabled radial force fields that do not move the air (a blast pushes everything outward over its
+ * radius; one that `affectsWind` does it through the wind field instead), and whatever was
  * registered with `scene.addFoliageInteractor`.
  */
 export function gatherFoliageInteractors(scene: Scene): { key: object; interactor: FoliageInteractor }[] {
@@ -132,7 +133,8 @@ export function gatherFoliageInteractors(scene: Scene): { key: object; interacto
         }
     }
     for (const f of scene.forceFields) {
-        if (!f.enabled || !f.visible || f.kind !== 'radial' || !(Math.abs(f.strength) > 0)) continue;
+        // A field that moves the air already bends the foliage through the wind field; a stamp would push twice.
+        if (!f.enabled || !f.visible || f.affectsWind || f.kind !== 'radial' || !(Math.abs(f.strength) > 0)) continue;
         out.push({ key: f, interactor: { position: f.worldPosition, radius: f.radius, strength: Math.min(2, Math.abs(f.strength) / 10) } });
     }
     for (const [key, interactor] of scene.foliageInteractors) out.push({ key, interactor });

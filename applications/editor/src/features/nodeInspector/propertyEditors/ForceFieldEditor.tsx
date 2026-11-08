@@ -8,6 +8,17 @@ import { useEventBus } from '../../EventBusContext'
 
 // The Force Field inspector. Direction (wind) and axis (vortex) are the node's local +Y, so they are set
 // by rotating the node — the gizmo is the direction control, and there is deliberately no vector here.
+// "Affects wind" makes the field local WIND as well (core/wind/windField.ts): foliage bends to it and
+// Scene-wind particles ride it, and its strength reads as air speed rather than acceleration.
+
+/** What strength means for each kind once the field moves the air. */
+const WIND_STRENGTH_HINTS: Record<ForceFieldKind, string> = {
+  directional: 'Air speed along local +Y, m/s. Rotate the node to aim it across the ground.',
+  radial: 'Air speed toward the centre, m/s; negative is a blast outward.',
+  vortex: 'Air speed round local +Y, m/s; negative turns the other way. The eye, a fifth of the size, is calm.',
+  turbulence: 'Eddy speed, m/s.',
+  drag: 'The share of the wind it blocks: 1 is still air inside, 0.5 halves it.',
+}
 
 const KINDS: { value: ForceFieldKind; label: string; hint: string }[] = [
   { value: 'directional', label: 'Wind', hint: 'Pulls particle velocity toward local +Y × strength (m/s).' },
@@ -28,7 +39,7 @@ export default function ForceFieldEditor(props: { node: ForceFieldNode }) {
   const read = () => ({
     kind: props.node.kind, shape: props.node.shape, strength: props.node.strength, radius: props.node.radius,
     extents: [...props.node.extents], falloff: props.node.falloff, frequency: props.node.frequency,
-    enabled: props.node.enabled,
+    enabled: props.node.enabled, affectsWind: props.node.affectsWind,
   })
   const [v, setV] = useState(read)
   useEffect(() => { setV(read()) }, [props.node])
@@ -43,6 +54,7 @@ export default function ForceFieldEditor(props: { node: ForceFieldNode }) {
     if (patch.falloff !== undefined) n.falloff = patch.falloff
     if (patch.frequency !== undefined) n.frequency = patch.frequency
     if (patch.enabled !== undefined) n.enabled = patch.enabled
+    if (patch.affectsWind !== undefined) n.affectsWind = patch.affectsWind
     setV(read())
     eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
   }
@@ -56,19 +68,26 @@ export default function ForceFieldEditor(props: { node: ForceFieldNode }) {
   const kind = KINDS.find(k => k.value === v.kind)
   return (
     <Collapsable title='Force Field' icon={<ForceFieldIcon />} persistKey='forceFieldEditor'
-      right={<PresetMenu presets={FORCE_FIELD_PRESETS} onApply={applyPreset} title='Force presets — kind, shape and strength; size and aim stay yours' />}>
+      right={<PresetMenu presets={FORCE_FIELD_PRESETS} onApply={applyPreset} title='Force presets — kind, shape and strength (the Wind ones move the air); size and aim stay yours' />}>
       <div className='p-2 flex flex-col gap-2'>
         <PropertyTable columns={['45%', '55%']}>
           <PropertyRow label='Enabled' divider>
             <Toggle checked={v.enabled} onChange={enabled => set({ enabled })} />
+          </PropertyRow>
+          <PropertyRow label='Affects wind' divider
+            hint='Also move the scene’s air: foliage bends to this field, Scene-wind particles ride it, and scripts read it with windAt. Selecting it shows the wind field in the viewport.'>
+            <Toggle checked={v.affectsWind} onChange={affectsWind => set({ affectsWind })} />
           </PropertyRow>
           <PropertyRow label='Force' hint={kind?.hint} divider>
             <Select value={v.kind} onChange={e => set({ kind: e.target.value as ForceFieldKind })}>
               {KINDS.map(k => <option key={k.value} value={k.value}>{k.label}</option>)}
             </Select>
           </PropertyRow>
-          <PropertyRow label='Strength' hint={v.kind === 'directional' ? 'Wind speed, m/s.' : 'm/s² (drag: per second).'} divider>
-            <NumberInput value={v.strength} step={0.5} onChange={strength => set({ strength })} />
+          <PropertyRow label='Strength' divider
+            hint={v.affectsWind ? WIND_STRENGTH_HINTS[v.kind] : v.kind === 'directional' ? 'Wind speed, m/s.' : 'm/s² (drag: per second).'}>
+            {v.affectsWind && v.kind === 'drag'
+              ? <Slider min={0} max={1} step={0.01} value={Math.min(1, Math.max(0, v.strength))} onChange={strength => set({ strength })} />
+              : <NumberInput value={v.strength} step={0.5} onChange={strength => set({ strength })} />}
           </PropertyRow>
           {v.kind === 'turbulence' && (
             <PropertyRow label='Frequency' hint='Noise features per metre. Lower is broader swirls.' divider>

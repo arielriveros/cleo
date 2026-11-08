@@ -60,12 +60,13 @@ The order is fixed so that one precompiled program serves every emitter.
 | | **Velocity** | From the shape, a fixed direction, or radial, with spread and speed range; can inherit the emitter's motion. |
 | | **Rotation** | Starting angle and spin. |
 | | **Color** | Constant, random between two colours, or random from a gradient, with an HDR intensity. |
-| Update | **Gravity**, **Drag**, **Wind** | Scene gravity (scaled), linear drag, coupling to a wind velocity. |
+| Update | **Gravity**, **Drag**, **Wind** | Scene gravity (scaled), linear drag, coupling to a wind velocity: one of its own, or **Scene wind** — the air the foliage bends to, where each particle is. |
 | | **Turbulence** | Curl noise: swirling without bunching up. |
 | | **Vortex**, **Point Attractor** | Spin around an axis; pull toward (or push from) a point, with a kill radius. |
 | | **Force Fields** | Responds to Force Field nodes in the scene. |
 | | **Limit Velocity** | Caps speed, softly. |
 | | **Collision** | Against physics bodies, the visible scene (its depth buffer) and up to four planes: bounce, friction, lifetime loss, or kill. |
+| | **Weather** | Lives only where the scene's [Weather](node-inspector.md#weather) volumes make rain (or snow) fall, thinned to their rate, and dies under shelter. See below. |
 | | **Color / Size / Spin / Speed over Life** | Curves and gradients over each particle's life. |
 | | **Color / Size by Speed** | The same, over a speed range. |
 | | **Custom Code** | Your own WGSL. See below. |
@@ -86,6 +87,18 @@ assets authored before it keep their old behaviour until you turn it on.
 does. It is cheap and works against any geometry, but it only knows what the camera sees: a particle off
 screen, or further behind a surface than **Surface thickness**, passes through. **Planes** work
 everywhere, including 2D scenes and off screen.
+
+### Weather
+
+What a Weather volume's falling rain and snow are made of, and open to any emitter: a particle lives only
+where the scene's Weather volumes make its kind (**Falls as**) fall, and dies the moment that stops being
+true. Where the volumes' rate is lower than the one the emitter's spawn rate stands for (**Spawns for
+rate**), only that share of its particles lives, so one emitter spawning at the heaviest rate in reach
+thins itself out over a drizzle, feathers at a volume's side faces and is carved out by a higher-priority
+dry box. A volume's top is open: what falls comes in from the sky above it. With **Obey shelter** a
+particle dies on reaching anything solid over which the volume keeps the ground dry (the Renderer's
+shelter map), so rain stops at a roof. With no volume in the scene the module does nothing, so the
+particle editor's preview still plays.
 
 ### Sub-emitters
 
@@ -116,6 +129,9 @@ so one effect can mix additive sparks with alpha-blended smoke.
 | **Blend** | Alpha, additive, or cutout. |
 | **Texture** | A texture asset; with no texture a billboard is a soft round puff. Flipbook settings appear once one is set. |
 | **Soft fade** | Fades particles out where they meet opaque geometry instead of clipping. |
+| **Stretch variation** | Velocity alignment only: each particle's stretch is the **Stretch** times a random multiplier between these two (a min and a max), so streaks differ in length. 1 and 1: all alike. |
+| **Translucency** | Lit only. Light passing through the particle, as a leaf's: it glows when the sun or the strongest local light is behind it, tinted by the particle's colour, and looks faint from the side. 0 off, 1 a leaf. |
+| **Near fade** | Fades particles out this many metres from the camera or nearer, so one passing the lens never fills the view (rain, snow, dust). 0 is off. |
 | **Brightness** | Multiplies the colour's luminance (and, on a lit emitter, the lit result). |
 | **Lit** | Shaded by the scene's light, as surfaces are: the scene ambient and sky light, the sun (or the moon at night), and the strongest point or spot light reaching the effect, half-Lambert so thin smoke is never black on its far side. Off, the emitter is emissive: it glows at its colour's luminance. |
 | **Normal map** | Lit only. A tangent-space normal map laid over the sprite (or a mesh's texture coordinates), cut into the same flipbook cells as the **Texture**, OpenGL convention (green up). It gives a flat card relief: light rakes across it and highlights follow its shape. With one, the diffuse is plain Lambert rather than half-Lambert. |
@@ -206,3 +222,10 @@ if (!sparks.isAlive) sparks.despawn()
 **Turbulence**, or **Drag**. A field is global, a sphere, or a box, with a falloff from its edge inward.
 Selecting a field draws its shape. Only emitters with the **Force Fields** module respond; up to 16
 fields act at once.
+
+A field set to **Affects wind** is also local wind (see [Wind](node-inspector.md#wind)). An emitter whose
+**Wind** module is on **Scene wind** rides the scene's wind field — the Wind node's gusts and veer plus
+those fields — sampled at each particle, with **Scale** for light dust or heavy embers. Such an emitter
+feels the wind fields only as wind: its **Force Fields** module skips them, so none pushes twice. Add
+**Turbulence** for the higher-frequency swirl smoke wants on top. In the particle editor's own stage there
+is no Wind node, so the scene wind is calm there.

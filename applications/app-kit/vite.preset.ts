@@ -1,6 +1,7 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AliasOptions, Connect, Plugin } from 'vite';
 
 /**
@@ -87,4 +88,69 @@ export function nagaAssetsPlugin(base = '/'): Plugin {
         this.emitFile({ type: 'asset', fileName: `naga/${name}`, source: readFileSync(path.join(NAGA_DIR, name)) });
     },
   };
+}
+
+/**
+ * Where the Cleo MCP server (applications/mcp) advertises its editor bridge: `{port, token, pid, ...}`.
+ * Same rule as applications/mcp/src/discovery.mjs -- keep the two in step.
+ */
+function agentBridgeFile(): string {
+  return process.env.CLEO_AGENT_BRIDGE_FILE || path.join(os.homedir(), '.cleo', 'agent-bridge.json');
+}
+
+/**
+ * Dev only: `GET /__cleo/agent-bridge` answers the MCP server's discovery file, so the editor page (which
+ * cannot read the filesystem) can find and authenticate to a running server. 404 while none runs.
+ *
+ * The file holds the bridge's token, so only this origin's own pages may read it: a fetch from another
+ * site is refused on its `Sec-Fetch-Site`, and Vite's default CORS policy already keeps a cross-origin
+ * page from reading the response. Not in the build: the packaged desktop app needs its own route
+ * (preload), and a hosted web build has no local server to find.
+ */
+export function agentBridgeDiscoveryPlugin(): Plugin {
+  return {
+    name: 'cleo:agent-bridge-discovery',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const route = req.url?.split('?')[0];
+        if (route !== '/__cleo/agent-bridge' && route !== '/__cleo/agent-host/start') return next();
+        const site = req.headers['sec-fetch-site'];
+        if (site && site !== 'same-origin' && site !== 'none') { res.statusCode = 403; return res.end('Forbidden'); }
+        if (route === '/__cleo/agent-host/start') {
+          // POST only, and only from this origin's own pages (above): it starts a process on this machine.
+          if (req.method !== 'POST') { res.statusCode = 405; return res.end('POST only'); }
+          void startAgentHost().then(
+            info => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: true, port: info.port })); },
+            err => { res.statusCode = 500; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: false, error: String(err?.message ?? err) })); });
+          return;
+        }
+        res.setHeader('Cache-Control', 'no-store');
+        let body: string;
+        try { body = readFileSync(agentBridgeFile(), 'utf8'); } catch { res.statusCode = 404; return res.end('{}'); }
+        try {
+          const info = JSON.parse(body);
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ port: info.port, token: info.token, pid: info.pid, version: info.version }));
+        } catch { res.statusCode = 404; res.end('{}'); }
+      });
+    },
+  };
+}
+
+const MCP_DIR = fileURLToPath(new URL('../mcp/', import.meta.url));
+
+/**
+ * Start the Cleo agent host (applications/mcp/src/host.mjs) unless one runs: the Claude panel's backend. The
+ * finding and starting live in the MCP package (ensureHost.mjs) so the stdio server and this agree on them.
+ */
+async function startAgentHost(): Promise<{ port: number }> {
+  // `ws` carries the editor link, so the host cannot start without it. A missing terminal package (node-pty,
+  // @xterm) shows in the panel instead, as the terminal's own problem.
+  if (!existsSync(path.join(MCP_DIR, 'node_modules', 'ws')))
+    throw new Error(`The agent host is not installed. Run "npm install" in ${MCP_DIR}`);
+  const url = pathToFileURL(path.join(MCP_DIR, 'src', 'ensureHost.mjs')).href;
+  const { ensureHost } = await import(/* @vite-ignore */ url);
+  // replaceOutdated: a host an older checkout left running lacks what this editor needs (the terminal).
+  return ensureHost({ file: agentBridgeFile(), replaceOutdated: true });
 }

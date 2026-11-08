@@ -19,6 +19,10 @@ struct InstancedTransform {
     u_windResponse: vec4<f32>,
     u_windShape: vec4<f32>,
     u_windCamera: vec4<f32>,
+    // The wind field (chunks/windField.wgsl): x = gustiness, y = veer (rad), z = sources in use; and the
+    // sources, the Force Fields that move the air, four texels each (ForceFieldNode.packInto).
+    u_windField: vec4<f32>,
+    u_windSources: array<vec4<f32>, 32>,
     // Foliage interaction (interactLean): x = stamps, y = bend, z = recovery (s), w = plant radius; and
     // the stamps themselves, two vec4s each (graphics/foliageInteraction.ts).
     u_interact: vec4<f32>,
@@ -47,6 +51,11 @@ struct InstancedTransform {
     u_camHolePivot: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> u_transform: InstancedTransform;
+
+// The wind sources chunks/windField.wgsl sums (MAX_WIND_SOURCES in core/wind/windField.ts).
+const WIND_SOURCE_SLOTS: i32 = 8;
+fn windSourceCount() -> i32 { return i32(u_transform.u_windField.z); }
+fn windSourceTexel(i: i32, k: i32) -> vec4<f32> { return u_transform.u_windSources[i * 4 + k]; }
 
 fn weatherCount() -> i32 { return i32(u_transform.u_weatherInfo.x); }
 fn weatherInv(i: i32) -> mat4x4<f32> { return u_transform.u_weatherInv[i]; }
@@ -127,23 +136,25 @@ fn vs_main(
     }
 #if CLEO_WIND
     let wind = WindParams(u_transform.u_windGlobal, u_transform.u_windTime, u_transform.u_windResponse,
-                          u_transform.u_windShape, u_transform.u_windCamera);
+                          u_transform.u_windShape, u_transform.u_windCamera, u_transform.u_windField);
+    // The wind field once, at the plant's origin: every part of it (and its shadow) bends by this.
+    let origin = model[3].xyz;
+    let plant = windPlantAt(origin, u_transform.u_windTime.x, wind);
 #if CLEO_FOLIAGE
-    let push = interactLean(model[3].xyz, u_transform.u_windTime.x, u_transform.u_interact, u_transform.u_interactStamps);
+    let push = interactLean(origin, u_transform.u_windTime.x, u_transform.u_interact, u_transform.u_interactStamps);
     // Per plant, from the weather at its root. Never sheltered: the shadow and prepass programs bow it the
     // same way without the shelter map, and their depth must match this pass's exactly.
-    let droop = u_transform.u_foliageDroop.x * weatherDroopAt(model[3].xyz);
+    let droop = u_transform.u_foliageDroop.x * weatherDroopAt(origin);
     // For the surface (chunks/foliageSurface.wgsl): the plant's hash, the gust it is in, whether it is leaves.
-    let origin = model[3].xyz;
     out.foliage = vec4<f32>(windHash(origin.xz * 1.37 + vec2<f32>(origin.y, 0.0)),
-                            windGust(origin, u_transform.u_windTime.x, wind) * wind.dirStrength.z * windFade(origin, wind),
+                            plant.gust * plant.strength * plant.fade,
                             u_transform.u_windResponse.w, 0.0);
 #else
     // The far cards: wind alone.
     let push = vec2<f32>(0.0);
     let droop = 0.0;
 #endif
-    out.fragPos = windDisplace(out.fragPos, position, out.normal, model, u_transform.u_windTime.x, wind, push, droop);
+    out.fragPos = windDisplace(out.fragPos, position, out.normal, model, u_transform.u_windTime.x, wind, push, droop, plant);
 #endif
 #if CLEO_INSTANCED_WEATHER
     // Every variant of the family reads the shelter map (its resources must not depend on the variant);

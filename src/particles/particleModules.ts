@@ -191,10 +191,15 @@ export const MODULES: readonly ModuleDefinition[] = [
     },
     {
         type: 'wind', stage: 'update', label: 'Wind', unique: true,
-        description: 'Pulls velocity toward a wind velocity, plus any directional force fields in the scene.',
-        defaults: () => ({ velocity: [2, 0, 0], influence: 1 }),
+        description: 'Pulls velocity toward a wind velocity: one of its own, or the scene’s wind field where each particle is.',
+        defaults: () => ({ source: 'custom', velocity: [2, 0, 0], scale: 1, influence: 1 }),
         params: [
-            { key: 'velocity', label: 'Velocity', kind: 'vec3', unit: 'm/s' },
+            { key: 'source', label: 'Wind', kind: 'enum',
+              options: [{ value: 'custom', label: 'Custom velocity' }, { value: 'scene', label: 'Scene wind' }],
+              hint: 'Scene wind rides the air the foliage bends to — the Wind node’s gusts and veer, plus every Force Field set to Affect wind — sampled where each particle is. Those fields then reach this emitter as wind only, not again through its Force Fields module.' },
+            { key: 'velocity', label: 'Velocity', kind: 'vec3', unit: 'm/s', when: p => p.source !== 'scene' },
+            { key: 'scale', label: 'Scale', kind: 'float', step: 0.05, when: p => p.source === 'scene',
+              hint: 'Multiplier on the scene wind: below 1 for heavy embers, above for light dust.' },
             { key: 'influence', label: 'Coupling', kind: 'float', min: 0, step: 0.05, unit: '/s', hint: 'How fast particles reach the wind speed.' },
         ],
     },
@@ -267,6 +272,19 @@ export const MODULES: readonly ModuleDefinition[] = [
             { key: 'friction', label: 'Friction', kind: 'float', min: 0, max: 1, step: 0.05 },
             { key: 'lifetimeLoss', label: 'Lifetime loss', kind: 'float', min: 0, max: 1, step: 0.05, hint: 'Fraction of the lifetime removed per hit.' },
             { key: 'kill', label: 'Kill on hit', kind: 'bool' },
+        ],
+    },
+    {
+        type: 'weather', stage: 'update', label: 'Weather', unique: true,
+        description: 'Lives only where Weather volumes make it rain (or snow), as thinly as it falls there, and never under shelter.',
+        defaults: () => ({ kind: 'rain', shelter: true, fullRate: 1 }),
+        params: [
+            { key: 'kind', label: 'Falls as', kind: 'enum', options: [{ value: 'rain', label: 'Rain' }, { value: 'snow', label: 'Snow' }],
+              hint: 'Which of the volumes\' precipitation it follows. With no volume in the scene the module does nothing.' },
+            { key: 'shelter', label: 'Obey shelter', kind: 'bool',
+              hint: 'Dies under anything solid (a roof, an overhang) where the volume keeps shelter. Needs Renderer ▸ Weather ▸ Shelter.' },
+            { key: 'fullRate', label: 'Spawns for rate', kind: 'float', min: 0.01, max: 1, step: 0.01,
+              hint: 'The volume rate this emitter\'s spawn rate stands for. Where the volumes ask for less, that fraction of the particles lives.' },
         ],
     },
     {
@@ -347,6 +365,11 @@ export interface RenderSettings {
     blend: 'alpha' | 'additive' | 'cutout';
     /** Extra length per m/s of speed, in sizes, for `velocity` alignment. */
     stretch: number;
+    /**
+     * `velocity` alignment: each particle's stretch is `stretch` times a random draw between these two
+     * multipliers, so a shower's streaks are not all one length. [1, 1]: every streak the same.
+     */
+    stretchRange: [number, number];
     /** Alpha below which `cutout` discards. */
     cutoff: number;
     /** A texture asset id, or a tileset id for a flipbook. Null draws a soft procedural disc. */
@@ -355,6 +378,11 @@ export interface RenderSettings {
     flipbook: { columns: number; rows: number; frames: number; mode: 'life' | 'fps'; fps: number; cycles: number; randomStart: boolean; blend: boolean };
     /** Fade near opaque geometry over this many metres; 0 disables. */
     softness: number;
+    /**
+     * Fade out particles this many metres from the camera or nearer, so one passing the lens never fills
+     * the view (rain, snow, dust). 0 disables.
+     */
+    nearFade: number;
     /** Multiplies the final colour — HDR, in the scene's internal radiance units. */
     emissive: number;
     /** Simple lighting: sky ambient plus the sun. Off draws unlit. */
@@ -366,6 +394,11 @@ export interface RenderSettings {
     normalTextureId: string | null;
     /** Lit: R occlusion, G roughness, B metallic, cut like `textureId`, times the factors below. */
     ormTextureId: string | null;
+    /**
+     * Lit: light passing THROUGH the particle, as a leaf's translucency: it glows when the sun (or the
+     * strongest local light) is behind it. 0 off; 1 a leaf's strength. Tinted by the particle's colour.
+     */
+    translucency: number;
     /** Lit: how far the normal map bends the card; 1 as authored. */
     normalStrength: number;
     /** Lit: roughness, times the ORM map's G. 1 is matte; low values give a tight highlight. */
@@ -389,10 +422,10 @@ export interface RenderSettings {
 
 export function defaultRenderSettings(): RenderSettings {
     return {
-        mode: 'billboard', alignment: 'camera', blend: 'alpha', stretch: 0.1, cutoff: 0.5,
+        mode: 'billboard', alignment: 'camera', blend: 'alpha', stretch: 0.1, stretchRange: [1, 1], cutoff: 0.5,
         textureId: null,
         flipbook: { columns: 1, rows: 1, frames: 1, mode: 'life', fps: 24, cycles: 1, randomStart: false, blend: true },
-        softness: 0.3, emissive: 1, lit: false, normalTextureId: null, ormTextureId: null, normalStrength: 1, roughness: 1, metallic: 0,
+        softness: 0.3, nearFade: 0, emissive: 1, lit: false, translucency: 0, normalTextureId: null, ormTextureId: null, normalStrength: 1, roughness: 1, metallic: 0,
         mesh: 'cube', modelId: null, meshData: null, sort: false, sortingOrder: 0,
     };
 }
@@ -408,17 +441,23 @@ export const RENDER_PARAMS: ParamSpec[] = [
         { value: 'camera', label: 'Face camera' }, { value: 'velocity', label: 'Stretch along velocity' },
         { value: 'vertical', label: 'Vertical (about Y)' }, { value: 'horizontal', label: 'Horizontal' }] },
     { key: 'stretch', label: 'Stretch', kind: 'float', min: 0, step: 0.01, when: p => p.alignment === 'velocity' },
+    { key: 'stretchRange', label: 'Stretch variation', kind: 'range', min: 0, max: 8, step: 0.05, when: p => p.alignment === 'velocity',
+      hint: 'Each particle draws its stretch as a random multiplier between these two: 1 and 1 keep every streak the same length.' },
     { key: 'blend', label: 'Blend', kind: 'enum', options: [
         { value: 'alpha', label: 'Alpha' }, { value: 'additive', label: 'Additive' }, { value: 'cutout', label: 'Cutout' }] },
     { key: 'cutoff', label: 'Cutoff', kind: 'float', min: 0, max: 1, step: 0.05, when: p => p.blend === 'cutout' },
     { key: 'textureId', label: 'Texture', kind: 'asset', assetKind: 'texture' },
     { key: 'softness', label: 'Soft fade', kind: 'float', min: 0, step: 0.05, unit: 'm' },
+    { key: 'nearFade', label: 'Near fade', kind: 'float', min: 0, step: 0.05, unit: 'm',
+      hint: 'Fades particles out this close to the camera, so one passing the lens never fills the view. 0 is off.' },
     { key: 'emissive', label: 'Brightness', kind: 'float', min: 0, step: 0.1,
       hint: "Multiplies the colour's luminance (Color ▸ Intensity). Lit particles: multiplies the lit result." },
     { key: 'lit', label: 'Lit', kind: 'bool' },
     { key: 'normalTextureId', label: 'Normal map', kind: 'asset', assetKind: 'texture', when: p => p.lit },
     { key: 'normalStrength', label: 'Normal strength', kind: 'float', min: 0, max: 4, step: 0.05, when: p => p.lit && !!p.normalTextureId },
     { key: 'ormTextureId', label: 'ORM map', kind: 'asset', assetKind: 'texture', when: p => p.lit },
+    { key: 'translucency', label: 'Translucency', kind: 'float', min: 0, max: 2, step: 0.05, when: p => p.lit,
+      hint: "Light passing through the particle, as a leaf's: it glows when the sun is behind it and looks faint from the side. 0 off, 1 a leaf." },
     { key: 'roughness', label: 'Roughness', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.lit },
     { key: 'metallic', label: 'Metallic', kind: 'float', min: 0, max: 1, step: 0.01, when: p => p.lit },
     { key: 'sort', label: 'Sort particles', kind: 'bool', when: p => p.blend === 'alpha',

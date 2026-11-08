@@ -9,9 +9,10 @@ existing saves — which is why some names look dated.
 ```ts
 type NodeType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite'
-  | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'lodGroup'
+  | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'wind' | 'weather' | 'lodGroup'
   | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
-  | 'particleSystem' | 'forceField' | 'waterVolume' | 'occlusionVolume' | 'exposureVolume' | 'volumetricFog' | 'cloth'
+  | 'particleSystem' | 'forceField' | 'waterVolume' | 'occlusionVolume' | 'exposureVolume' | 'volumetricFog'
+  | 'fluidVolume' | 'cloth' | 'giVolume'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 ```
@@ -286,6 +287,37 @@ Both lobes apply per pixel, whatever the camera does:
   source cube; three filter steps prefilter into a free atlas layer and swap it and the
   lights it saw in. One step a frame, one probe at a time. `Renderer.probeBakeProgress` says which.
 
+### WindNode — `'wind'`
+
+The scene's wind, as a vector field: air velocity in m/s at any point and time, the same function on the
+CPU (`core/wind/windField.ts`) and the GPU (`chunks/windField.wgsl`). Scene singleton, `scene.wind`. It
+follows Ghost of Tsushima: one authored vector (`direction`, `strength`) whose magnitude rides 2D Perlin
+noise scrolled along it at `gustSpeed`, `gustScale` metres between crests, so gusts roll across a field;
+`gustiness` is how much of the air the gusts carry; a broader noise turns the direction by up to `veer`
+degrees either way. Force Fields with `affectsWind` add local wind on top (GoT's "vorticles"), at most 8
+at once (`MAX_WIND_SOURCES`).
+
+Foliage samples the field once per plant at its root and leans along the air there; Scene-wind particles
+sample it per particle; cloth takes its gusts; volumetric clouds drift with its direction and strength.
+Strength 1 is about 7 m/s in a full gust (`WIND_REFERENCE_SPEED`), what wind-enabled materials are
+authored for. A scene saved before `gustiness` and `veer` loads with their defaults.
+
+```ts
+direction: number                    // degrees the wind blows TOWARD, CCW from +X in XZ (30)
+strength: number                     // 0 calm .. 1 authored .. 2 storm (1)
+gustScale: number ; gustSpeed: number   // metres between crests (18), m/s they travel (4)
+gustiness: number                    // 0..1: 0 a steady stream, 1 still air between gusts (0.8)
+veer: number                         // 0..90 degrees the direction wanders either way (20)
+fadeStart: number ; fadeEnd: number  // camera distance the foliage motion fades over (40, 70)
+get directionXZ: [number, number]    // unit direction in world XZ
+sampleAt(position, out?, time?): number[]   // air velocity (m/s) here, Force Field sources included
+applyPreset(idOrPreset): boolean     // WIND_PRESETS: calm, lightBreeze, breezy, rollingFields, windy, gale, storm
+```
+
+`scene.windAt(position, out?, time?)` is the same reading without a WindNode (the local wind alone).
+`time` defaults to `windFieldClock.time`, the renderer's wind clock, so a script reads the gust the plants
+are showing. For many samples a frame, capture a `WindFieldSnapshot` once and call its `sample`.
+
 ### WeatherNode — `'weather'`
 
 A box of weather (render/weather.ts): wetness, puddles and snow on the landscape
@@ -296,6 +328,21 @@ as). With `shelter`, a top-down depth map of the static, solid shadow casters ro
 is under them dry (`ShadowPasses.renderShelter`). `scene.weather` is the highest-priority one;
 `scene.weatherVolumes` all of them.
 
+**Precipitation.** `precipitation` `'rain'` or `'snow'` makes it fall, through the particle system:
+`scene.precipitation` (`PrecipitationRig`) runs ONE system per kind round the camera, built by
+`precipitationSystem()` (particles/precipitation.ts) from the ordinary module catalogue, spawning at the
+highest `precipitationRate` in reach. Its `weather` module keeps each particle only where the volumes make
+that kind fall, as thinly as they do there, and kills it under the shelter map, so overlapping volumes
+never double it, a nested dry box carves it out and rain stops at a roof. What falls comes from the sky
+above a box: its top face is open (`columnWeightAt`). Rain falls straight at about 8.5 m/s and snow
+flutters down at about 1 m/s, both slanted by the scene's WindNode times `precipitationWind`. The
+look is the highest-priority such volume's: `precipitationSprite` is a sprite sheet (a tileset's atlas, or
+a texture cut `columns` x `rows`), each particle taking a random cell or playing them at `fps`; null is the
+engine's own streaks and flakes (`BUILTIN_RAIN_SPRITE`, `BUILTIN_SNOW_SPRITE`, generated, never assets).
+While rain falls, the landscape's wet ground stirs: rings run across its puddles and drops hit the ground
+round them, by the rain times the wetness, so sheltered ground stays still. The systems are not in the
+tree; the renderer draws them beside the scene's own, never in a thumbnail or a probe capture.
+
 ```ts
 size: [number, number, number]       // [0,0,0] = unbounded ; min 0.01 a side otherwise
 blendDistance: number ; priority: number ; enabled: boolean
@@ -305,8 +352,16 @@ snowTiling: number                   // metres per repeat
 snowSlope: number                    // degrees
 snowBreakup: number                  // 0..1
 shelter: boolean
-get bounded: boolean ; get active: boolean
-weightAt(p): number ; applyPreset(idOrPreset): boolean  // WEATHER_PRESETS
+precipitation: 'none' | 'rain' | 'snow'
+precipitationRate: number            // 0..1 (0.6)
+precipitationSize: number ; precipitationSpeed: number   // multipliers, 0.25..3 (1)
+precipitationWind: number            // 0..1: how much scene wind slants it (0.5)
+precipitationTrailMin: number ; precipitationTrailMax: number   // rain streak length multipliers, 0.1..4 (0.7, 1.3); min <= max
+precipitationSprite: { textureId, tilesetId?, columns, rows, frames, fps } | null   // null = built-in
+get bounded: boolean ; get active: boolean ; get precipitating: boolean
+get rainRate: number ; get snowfallRate: number          // the rate when it is that kind, else 0
+weightAt(p): number ; columnWeightAt(p): number           // columnWeightAt: the top face open
+applyPreset(idOrPreset): boolean     // WEATHER_PRESETS: dry, drizzle, rain, storm, lightSnow, snowedIn, blizzard
 ```
 
 ### VolumetricFogNode — `'volumetricFog'`
@@ -688,7 +743,16 @@ A volume that pushes particles of emitters with the Force Fields module. Up to 1
 
 Properties: `kind` (`'directional' | 'radial' | 'vortex' | 'turbulence' | 'drag'`), `shape`
 (`'global' | 'sphere' | 'box'`), `strength`, `radius`, `extents` (box half extents), `falloff`
-(0..1), `frequency` (turbulence), `enabled`. Direction and vortex axis are the node's local +Y.
+(0..1), `frequency` (turbulence), `enabled`, `affectsWind`. Direction and vortex axis are the node's
+local +Y; a box is axis-aligned in the world.
+
+With `affectsWind` the field is also local WIND: it joins the WindNode's field, so foliage bends to it,
+Scene-wind particles ride it and `windAt` reads it. In wind terms strength is air speed in m/s —
+directional along +Y, radial toward the centre (negative is a blast), vortex round +Y with a calm eye a
+fifth of the size, turbulence the speed of divergence-free eddies carried by the wind — and for drag the
+fraction of the wind it blocks (a shelter). The first 8 such fields count; particle passes list them
+first, so foliage, particles and the CPU see the same ones. The Wind presets (`gustCorridor`,
+`whirlwind`, `windBlast`, `windEddies`, `windShelter`) set it.
 
 ### ClothNode — `'cloth'` *(unreleased)*
 

@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_TILE_SIZE, buildTilesetAsset, gridOf, guessTileSize, resliceTileset, toRuntimeTileset,
-  reembedTilesets, detachTileset, tilesetIdsInScene, fromRuntimeTileset,
+  reembedTilesets, detachTileset, tilesetIdsInScene, fromRuntimeTileset, weatherSpriteFromTileset, tilesetGridIsTight,
   frameBadges, appendFrames, removeLastFrame, moveFrame, normalizeTilesetAsset,
   tileRect, leftoverPixels, applyTileMeta, clearTileMeta, selectionFieldState, copyableTileMeta, pasteTileMeta,
   tileMetaSummary,
 } from '../src/utils/tilesets';
-import { Scene, SpriteNode, Sprite } from 'cleo';
+import { Scene, SpriteNode, Sprite, WeatherNode } from 'cleo';
+import { collectReferencedTilesetIds, collectSceneTextureIds } from '../src/utils/references';
 
 // The pure half of the tileset asset: how an atlas is cut into a grid, and what happens to per-tile
 // metadata when that grid changes underneath it.
@@ -307,6 +308,43 @@ describe('sprites and the tileset library', () => {
     expect(icon.tileset).toBeNull();
   });
 });
+
+describe('weather sprite sheets and the tileset library', () => {
+  const sheet = () => buildTilesetAsset('Flakes', 'flakes.png', 64, 32, { tileWidth: 16, tileHeight: 16 });
+  const raining = (asset: ReturnType<typeof sheet>) => {
+    const weather = new WeatherNode('w', { precipitation: 'snow', precipitationRate: 1, precipitationSprite: weatherSpriteFromTileset(asset) })
+    const scene = new Scene()
+    scene.addNode(weather)
+    return { scene, weather }
+  }
+
+  it('copies a tileset\'s atlas and grid in, every cell a still pick', () => {
+    const asset = sheet()
+    expect(weatherSpriteFromTileset(asset)).toEqual({ textureId: 'flakes.png', tilesetId: asset.id, columns: 4, rows: 2, frames: 8, fps: 0 })
+    expect(tilesetGridIsTight(asset)).toBe(true)
+    expect(tilesetGridIsTight({ ...asset, spacing: 1 })).toBe(false)
+  })
+
+  it('follows an edit to the tileset, keeping its own frame count and rate', () => {
+    const asset = sheet()
+    const { scene, weather } = raining(asset)
+    weather.precipitationSprite = { ...weather.precipitationSprite!, frames: 3, fps: 6 }
+    expect(reembedTilesets(scene, [{ ...asset, columns: 2, rows: 1, textureId: 'flakes2.png' }])).toBe(true)
+    expect(weather.precipitationSprite).toEqual({ textureId: 'flakes2.png', tilesetId: asset.id, columns: 2, rows: 1, frames: 2, fps: 6 })
+    expect(reembedTilesets(scene, [{ ...asset, columns: 2, rows: 1, textureId: 'flakes2.png' }])).toBe(false)
+  })
+
+  it('keeps its atlas when the tileset is deleted, and is a reference while linked', () => {
+    const asset = sheet()
+    const { scene, weather } = raining(asset)
+    expect(tilesetIdsInScene(scene)).toEqual([asset.id])
+    expect([...collectReferencedTilesetIds(scene)]).toEqual([asset.id])
+    expect([...collectSceneTextureIds(scene)]).toContain('flakes.png')
+    expect(detachTileset(scene, asset.id)).toBe(true)
+    expect(weather.precipitationSprite).toEqual({ textureId: 'flakes.png', columns: 4, rows: 2, frames: 8, fps: 0 })
+    expect(tilesetIdsInScene(scene)).toEqual([])
+  })
+})
 
 describe('animation frames picked on the atlas', () => {
   it('labels each tile with its 1-based position(s) in the sequence', () => {

@@ -371,11 +371,27 @@ darkens what it lands on while its roughness and normal still land whole: wet gr
 
 #### Wind
 
-One wind for the whole scene. Plants sway only where their [Foliage material](models-and-materials.md#foliage-materials)
-or a billboard foliage rule has a wind strength above 0; this node sets the direction, how strong every plant's lean is, and how gusts travel across
-the landscape. Past **Fade end** plants stop moving, and distant foliage then uses the cheaper still
-shaders. **Presets** set the strength and gusts and leave the direction alone. Volumetric clouds can
-follow it too.
+One wind for the whole scene, and it is a field: the air has a speed and a direction at every point, and
+both change from place to place and moment to moment. Plants sway only where their [Foliage material](models-and-materials.md#foliage-materials)
+or a billboard foliage rule has a wind strength above 0; each one leans the way the air at its root is
+going, as hard as it is blowing there.
+
+- **Direction** and **Strength** are the wind as a whole. Strength 1 is about 7 m/s at the crest of a
+  gust, which is what wind-enabled materials are authored for. The line under the sliders reads the air
+  between gusts and at their crest.
+- **Gust size** and **Gust speed**: gusts are Perlin noise rolling across the ground along the wind, this
+  many metres between crests and travelling this fast, so you can watch them sweep a meadow.
+- **Gustiness** is how much of the air the gusts carry: 0 is a steady stream, 1 still air between gusts.
+- **Veer** is how far the wind turns away from its direction, either way, from one meadow to the next and
+  as the gusts pass. 0 blows the same way everywhere.
+- Past **Fade end** plants stop moving, and distant foliage then uses the cheaper still shaders.
+- **Show field** keeps the [wind field overlay](scene-authoring.md#debug-overlays) up. Selecting this node
+  shows it anyway: arrows of the air round the camera, coloured from blue (calm) to red (a gale) and
+  pulsing with the gusts the grass is in, streaks carried by the air, and the Force Fields that move it.
+
+**Presets** set the strength, gusts and veer and leave the direction alone. Local wind — a whirlwind, a
+blast, a gap the wind funnels through, a sheltered courtyard — is a [Force Field](#effects) set to
+**Affects wind**. Volumetric clouds can follow the wind too, and scripts read it with `windAt`.
 
 #### Weather
 
@@ -386,9 +402,13 @@ a dry pocket, and up to 4 near the camera draw at once. On the landscape, rain d
 ground and stands in puddles in its low, flat spots; snow settles on ground flat enough to hold it, low
 ground first, drawn with the **Snow Material**. Foliage materials answer by their
 [Weather](models-and-materials.md#foliage-materials) settings, per plant: rain darkens and glosses leaves
-and blades, snow settles on what faces up, and both weigh plants down. **Presets** go from Dry through
-Rain to Snowed In and set the weather alone, never the box. A scene without one is dry; a weather node
-saved before volumes covers the whole scene, and **Make bounded** gives it a box.
+and blades, snow settles on what faces up, and both weigh plants down. **Falling** makes rain or snow
+come down inside the box as particles round the camera, stopping at roofs; falling rain also stirs the
+wet ground, with rings running across its puddles and drops hitting the ground round them. **Presets** go
+from Dry through Rain and Storm to Snowed In and Blizzard and set the weather alone (what falls and how
+hard included), never the box, the snow material, the shelter, or the sprite, size and speed of what
+falls. A scene without one is dry; a weather node saved before volumes covers the whole scene, and **Make
+bounded** gives it a box.
 
 | Field | Meaning |
 |---|---|
@@ -398,6 +418,13 @@ saved before volumes covers the whole scene, and **Make bounded** gives it a box
 | **Priority** | Where volumes overlap, the higher draws over the lower; it also decides which 4 draw when more are near. |
 | **Wetness** | 0 dry, 1 soaked: darker, glossier ground and leaves. |
 | **Puddles** | How much of the wet ground's low, flat spots holds standing water: 0 none, 1 every hollow. |
+| **Falling** | Nothing, Rain or Snow, drawn as particles round the camera. It falls in from the sky above the box and stops under anything solid where **Shelter** is on. Overlapping volumes never double it; a higher-priority dry box carves it out. |
+| **Rate** | How hard it falls: 0 nothing, 1 a downpour or a blizzard. Rain also sets how many drops stir the wet ground. |
+| **Drop Size** / **Flake Size** | Times the realistic size. |
+| **Fall Speed** | Times the realistic terminal velocity: 8.5 m/s for rain, 1 m/s for snow. |
+| **Trail Min** / **Trail Max** | Rain only. The length of each drop's streak as a multiple of the realistic default (1); every drop draws its own length at random between the two. Equal values give streaks all one length. |
+| **Wind** | How much the scene's Wind node slants the rain and drifts the snow: 0 straight down, 1 with all of it. |
+| **Sprite** | What each drop or flake looks like. **Built-in**: the engine's own streaks and flakes. **Tileset**: a tileset's atlas and grid, copied in, following later edits to the tileset. **Texture**: any texture cut into **Columns** x **Rows** cells over the whole image, the first **Frames** of them used. Each particle shows one random cell, or plays through them at **Frame Rate**. A rain cell's top is the end that leads as it falls. |
 | **Snow** | 0 none, 1 thick: snow on flat ground and on what faces up on foliage. |
 | **Snow Material** | What the landscape draws its snow with: a PBR material's colour, normal and roughness maps. Plants take its colour and roughness. None: flat white snow. |
 | **Snow Tiling** | Metres per repeat of the snow material on the landscape. |
@@ -406,7 +433,9 @@ saved before volumes covers the whole scene, and **Make bounded** gives it a box
 | **Shelter** | Covered ground and plants stay dry and free of snow: under a roof, an overhang, anything solid that casts a shadow from straight above. Off: the weather reaches everything in the box. |
 
 A line above the fields says when the volume does nothing and why: disabled, dry, too far from the
-camera, or over the volume cap.
+camera, or over the volume cap. Lines below them say when what falls is not drawn: the viewport's
+particle preview is off, or **Rain & Snow** is at 0 in the Renderer settings; and when Shelter is off
+there, so rain falls indoors.
 
 #### Water Volume
 
@@ -451,11 +480,18 @@ last frame. It acts only with **Occlusion** at **+ Volumes** in
 **Particle System** — the effect asset it plays and how this instance plays it. See
 [Particles](particles.md#in-a-scene).
 
-**Force Field** — pushes the particles of emitters that have the **Force Fields** module; nothing
-else responds, and up to 16 fields act at once. **Force** picks what it does — **Wind** along the
-node's local +Y, **Radial**, **Vortex** around local +Y, **Turbulence** or **Drag** — and **Shape**
-where: everywhere, a sphere or a box, fading in over **Falloff** from its edge. Direction and axis
-come from rotating the node, so there is no vector to type. See [Particles](particles.md#force-fields).
+**Force Field** — pushes the particles of emitters that have the **Force Fields** module, and up to 16
+fields act at once. **Force** picks what it does — **Wind** along the node's local +Y, **Radial**,
+**Vortex** around local +Y, **Turbulence** or **Drag** — and **Shape** where: everywhere, a sphere or a
+box (axis-aligned in the world), fading in over **Falloff** from its edge. Direction and axis come from
+rotating the node, so there is no vector to type. See [Particles](particles.md#force-fields).
+
+**Affects wind** makes it local wind as well: it joins the scene's [wind](#wind), so the foliage under it
+bends, particles on **Scene wind** ride it and scripts read it. Its strength then reads as air speed
+(m/s) — along +Y, toward the centre (negative is a blast outward), round +Y with a calm eye, or the speed
+of its eddies — and a **Drag** field becomes a shelter, its strength the share of the wind it blocks.
+Selecting it shows the wind field with its glyph: arrows, spokes in or out, a turning ring, eddies, or a
+cross. The **Wind:** presets set it up; the first 8 such fields count.
 
 **Cloth** — a rectangular panel that hangs, swings and blows in the wind: a cape, a banner, a flag.
 It simulates while the scene plays (Play and Simulate) and shows its rest shape while you edit. The

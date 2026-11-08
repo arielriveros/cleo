@@ -295,6 +295,12 @@ export interface RenderSettings {
     weatherShelterEnabled?: boolean;
     /** Its resolution over the 96 m it covers (tier: 2048 ultra, 1024 high and medium). */
     weatherShelterResolution?: number;
+    /**
+     * How much of the weather's falling rain and snow is drawn (WeatherNode `precipitation`), 0..1: a
+     * multiplier on every volume's rate, as particles. 0 draws none (the ground's raindrops stay). A
+     * quality-tier field (tier: 1 ultra and high, 0.7 medium, 0.4 low).
+     */
+    precipitationDensity?: number;
     /** Trace resolution as a fraction of the render size (0.25..1). A quality-tier field. Absent = the tier's. */
     ssrResolutionScale?: number;
     /** March steps per ray across the screen (8..128). A quality-tier field. Absent = the tier's. */
@@ -451,6 +457,8 @@ export interface QualityTier {
     /** The weather's shelter map (see RenderSettings.weatherShelterEnabled) and its resolution. */
     weatherShelterEnabled: boolean;
     weatherShelterResolution: number;
+    /** The falling rain and snow drawn (see RenderSettings.precipitationDensity). */
+    precipitationDensity: number;
     shadowMapResolution: number;
     shadowCascades: number;
     /** 0 = 3x3 tap grid, 1 = 16-tap rotated Poisson. */
@@ -487,7 +495,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         ssrEnabled: true, ssrResolutionScale: 1.0, ssrSteps: 64, localExposureEnabled: true,
         giEnabled: true, giResolutionScale: 1.0, giRaysPerFrame: 262144, giFillDrawsPerFrame: 96,
         volumetricFogEnabled: true, volumetricFogTileSize: 12, volumetricFogSlices: 96, volumetricFogLocalShadows: true,
-        weatherShelterEnabled: true, weatherShelterResolution: 2048,
+        weatherShelterEnabled: true, weatherShelterResolution: 2048, precipitationDensity: 1,
         shadowMapResolution: 4096, shadowCascades: 4, shadowFilterMode: 1, shadowFilterRadius: 2.0,
         bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true, fxaaEnabled: false,
         particleLodDistanceScale: 1.5,
@@ -499,7 +507,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         ssrEnabled: true, ssrResolutionScale: 0.5, ssrSteps: 32, localExposureEnabled: true,
         giEnabled: true, giResolutionScale: 0.5, giRaysPerFrame: 131072, giFillDrawsPerFrame: 64,
         volumetricFogEnabled: true, volumetricFogTileSize: 16, volumetricFogSlices: 64, volumetricFogLocalShadows: true,
-        weatherShelterEnabled: true, weatherShelterResolution: 1024,
+        weatherShelterEnabled: true, weatherShelterResolution: 1024, precipitationDensity: 1,
         shadowMapResolution: 2048, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
         bloomEnabled: true, motionBlurEnabled: true, taaEnabled: true, fxaaEnabled: false,
         particleLodDistanceScale: 1,
@@ -512,7 +520,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         ssrEnabled: false, ssrResolutionScale: 0.5, ssrSteps: 24, localExposureEnabled: false,
         giEnabled: true, giResolutionScale: 0.5, giRaysPerFrame: 65536, giFillDrawsPerFrame: 48,
         volumetricFogEnabled: true, volumetricFogTileSize: 20, volumetricFogSlices: 48, volumetricFogLocalShadows: false,
-        weatherShelterEnabled: true, weatherShelterResolution: 1024,
+        weatherShelterEnabled: true, weatherShelterResolution: 1024, precipitationDensity: 0.7,
         shadowMapResolution: 1024, shadowCascades: 3, shadowFilterMode: 0, shadowFilterRadius: 1.0,
         // Kept at medium: one fullscreen resolve is cheap next to what this tier already spends on
         // clouds and shadows, and aliasing is the most visible artefact left at a reduced tier.
@@ -526,7 +534,7 @@ export const QUALITY_TIERS: Record<Exclude<QualityPreset, 'custom'>, QualityTier
         ssrEnabled: false, ssrResolutionScale: 0.5, ssrSteps: 16, localExposureEnabled: false,
         giEnabled: true, giResolutionScale: 0.5, giRaysPerFrame: 32768, giFillDrawsPerFrame: 32,
         volumetricFogEnabled: false, volumetricFogTileSize: 24, volumetricFogSlices: 32, volumetricFogLocalShadows: false,
-        weatherShelterEnabled: false, weatherShelterResolution: 512,
+        weatherShelterEnabled: false, weatherShelterResolution: 512, precipitationDensity: 0.4,
         shadowMapResolution: 1024, shadowCascades: 2, shadowFilterMode: 0, shadowFilterRadius: 0.0,
         bloomEnabled: false, motionBlurEnabled: false, taaEnabled: false, fxaaEnabled: true,
         particleLodDistanceScale: 0.5,

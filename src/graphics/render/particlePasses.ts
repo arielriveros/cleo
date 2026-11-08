@@ -1,5 +1,6 @@
 import { mat4, vec3 } from 'gl-matrix';
 import { MAX_FORCE_FIELDS } from '../../core/scene/nodes/forceFieldNode';
+import { packFrameFields } from '../../particles/particleFields';
 import { LightNode } from '../../core/scene/nodes/lightNode';
 import type { ParticleSystemNode } from '../../core/scene/nodes/particleSystemNode';
 import { Scene } from '../../core/scene/scene';
@@ -17,6 +18,7 @@ import type { PassEncoder } from './passEncoder';
 import type { ViewProjection } from './viewProjection';
 import type { TemporalPasses } from './temporal';
 import type { RenderSubsystems } from './subsystems';
+import type { ParticleWeather } from './weather';
 
 /** What ParticlePasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface ParticlePassesHost {
@@ -55,26 +57,46 @@ export class ParticlePasses {
 
     /** See RenderSettings.particleLodDistanceScale. */
     public particleLodDistanceScale: number = 1;
+    /** See RenderSettings.precipitationDensity. Handed to each scene's precipitation as it simulates. */
+    public precipitationDensity: number = 1;
+    private readonly _systemList: ParticleSystemNode[] = [];
 
     // Keep every material's derived texture slots in step with its authored sources. Per frame rather
     // than on assignment: sources decode asynchronously, and an unresolved pack simply retries.
-    /** Run the particle systems' queued simulation steps. See {@link ParticleRenderer.simulate}. */
-    public simulateParticles(scene: Scene): void {
+    /**
+     * Run the particle systems' queued simulation steps. See {@link ParticleRenderer.simulate}. `weather`:
+     * the frame's weather volumes and shelter map (WeatherPasses.particleWeather), null in a preview.
+     */
+    public simulateParticles(scene: Scene, weather: ParticleWeather | null = null): void {
+        scene.precipitation.density = this.precipitationDensity;
         const frame = this._particleSimFrame(scene);
-        if (scene.particleSystems.size === 0) { this.particles.simulate(scene, frame); return; }
+        frame.weather = weather;
+        const systems = this.frameSystems(scene);
+        if (systems.length === 0) { this.particles.simulate(scene, frame, systems); return; }
         this._passes.scope('particles.sim');
-        this.particles.simulate(scene, frame);
+        this.particles.simulate(scene, frame, systems);
         this._passes.endScope();
     }
 
+    /**
+     * The particle systems this frame runs and draws: the scene's own, and the rain and snow falling from
+     * its weather (Scene.precipitation) — except in a thumbnail or a capture (a probe must not bake rain
+     * into its reflection), and in a flat 2D scene. The same list for the simulation and the draws.
+     */
+    public frameSystems(scene: Scene): readonly ParticleSystemNode[] {
+        const out = this._systemList;
+        out.length = 0;
+        for (const node of scene.particleSystems) out.push(node);
+        const precipitation = scene.precipitation.systems;
+        if (precipitation.length > 0 && !this._host.thumbnailMode && !this._view.capturing && !this._isFlatParticleScene(scene))
+            for (const node of precipitation) out.push(node);
+        return out;
+    }
+
     private _particleSimFrame(scene: Scene): ParticleSimFrame {
-        // Force fields, packed once for every emitter this frame.
-        let fieldCount = 0;
-        for (const field of scene.forceFields) {
-            if (!field.enabled || !field.visible || fieldCount >= MAX_FORCE_FIELDS) continue;
-            field.packInto(this._forceFieldScratch, fieldCount * 16);
-            fieldCount++;
-        }
+        // Force fields, packed once for every emitter this frame: the ones that move the air first, the
+        // wind sources the foliage sees too (particleFields.ts).
+        const fieldCount = packFrameFields(scene.forceFields, this._forceFieldScratch, MAX_FORCE_FIELDS);
         const live = this.particleCollideValid && !this._host.thumbnailMode && !this._view.capturing;
         return {
             encoder: this._passes.acquireEncoder('particles.sim'),
@@ -85,6 +107,9 @@ export class ParticlePasses {
             orthographic: this.particleCollideOrtho,
             fields: this._forceFieldScratch,
             fieldCount,
+            // The scene's wind field this frame (FoliagePasses.prepareWindField), for Scene-wind emitters.
+            windBase: this._sys.foliage.windField.params.subarray(0, 4),
+            windMotion: this._sys.foliage.windField.params.subarray(4, 8),
         };
     }
 
@@ -96,8 +121,10 @@ export class ParticlePasses {
      * drawing it last costs nothing in correctness.
      */
     public renderParticles(scene: Scene, emitters: 'all' | 'nonAdditive' | 'additive' = 'all'): void {
-        if (scene.particleSystems.size === 0 || this._isFlatParticleScene(scene)) return;
-        this._drawParticleNodes(scene, scene.particleSystems, this._targets.scene.renderTarget, emitters);
+        if (this._isFlatParticleScene(scene)) return;
+        const systems = this.frameSystems(scene);
+        if (systems.length === 0) return;
+        this._drawParticleNodes(scene, systems, this._targets.scene.renderTarget, emitters);
     }
 
     /** A 2D scene: an orthographic camera over tilemaps. Its particles join the Y-sorted 2D pass. */

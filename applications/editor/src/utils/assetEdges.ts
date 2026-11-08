@@ -1,4 +1,4 @@
-import { isDerivedTextureId, isInlineTilesetId, particleSystemReferences } from 'cleo'
+import { isBuiltinTextureId, isDerivedTextureId, isInlineTilesetId, particleSystemReferences } from 'cleo'
 import type { AssetRef } from 'cleo'
 import { isBinaryPayload } from './binaryPayload'
 import type { AssetKind } from './vfs'
@@ -36,6 +36,8 @@ const ref = (kind: AssetKind, id: string): AssetRef => ({ kind, id })
 function push(out: EdgeSpec[], kind: AssetKind, id: any, field: string): void {
   if (typeof id !== 'string' || !id) return
   if (kind === 'texture' && isDerivedTextureId(id)) return
+  // The engine's own sprites (rain, snow) are generated, not assets.
+  if (kind === 'texture' && isBuiltinTextureId(id)) return
   if (kind === 'tileset' && isInlineTilesetId(id)) return
   out.push({ to: ref(kind, id), field })
 }

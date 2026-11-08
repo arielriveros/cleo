@@ -348,6 +348,37 @@ hit wakes either.
 
 `Game.gravity` is the same value, reachable without going through the scene.
 
+## Wind
+
+The scene's wind is a field: `windAt` reads the air velocity (m/s) anywhere — the Wind node's gusting,
+veering base wind plus every Force Field set to **Affects wind** — with the same function the foliage
+bends to on the GPU, on the same clock. Use it for anything that should move with the weather: a sail, a
+kite, smoke a script spawns, an arrow's drift, a guiding wind.
+
+```ts
+scene.windAt(position, out?, time?): number[]      // m/s; works without a Wind node (local wind alone)
+scene.wind?.sampleAt(position, out?, time?)        // the same, from the Wind node
+windFieldClock.time                                 // the wind's clock (s): what `time` defaults to
+```
+
+```ts
+import { Node } from 'cleo'
+
+/** A loose banner that the wind pushes: a force along the air, scaled by how hard it blows. */
+export default class Banner extends Node {
+  private _air = [0, 0, 0]
+  onUpdate(dt: number) {
+    const air = this.scene!.windAt(this.worldPosition, this._air)
+    this.body?.applyForce([air[0] * 0.4, air[1] * 0.4, air[2] * 0.4])
+  }
+}
+```
+
+Pass an `out` array to read many points a frame without allocating; for hundreds, capture a
+`WindFieldSnapshot` once (`new WindFieldSnapshot().capture(scene, windFieldClock.time)`) and call its
+`sample(x, y, z)`. Strength 1 on the Wind node is about 7 m/s at the crest of a gust
+(`WIND_REFERENCE_SPEED`).
+
 ## Ragdolls
 
 ```ts

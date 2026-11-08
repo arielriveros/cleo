@@ -1,4 +1,4 @@
-import { Scene, CameraNode, isDerivedTextureId, isInlineTilesetId, particleSystemReferences, allTerrainFoliageRules } from 'cleo'
+import { Scene, CameraNode, isDerivedTextureId, isInlineTilesetId, isBuiltinTextureId, particleSystemReferences, allTerrainFoliageRules } from 'cleo'
 import { getNodeMaterial, getMaterialIdsOf, MaterialAsset } from './materials'
 import { getScreenMaterialIds } from './screenMaterials'
 import { collectTextureIds } from './nodeSubtree'
@@ -84,8 +84,12 @@ export function collectSceneTextureIds(
       collectFoliageLayerTextureIds(terrain.foliage, set)
     }
     // A weather volume's snow material (its embedded copy): the landscape draws its maps.
-    for (const w of scene.weatherVolumes ?? [])
+    // And its falling rain or snow's sprite sheet (the engine's own sprites are not assets).
+    for (const w of scene.weatherVolumes ?? []) {
       for (const id of w.snowMaterial?.textures?.values?.() ?? []) if (!isDerivedTextureId(id as string)) set.add(id)
+      const sprite = w.precipitationSprite?.textureId
+      if (sprite && !isBuiltinTextureId(sprite)) set.add(sprite)
+    }
     // Live tilemaps: each layer's tileset draws from one atlas texture.
     for (const tn of scene.tilemaps)
       for (const ts of tn.tilemap.tilesets.values()) if (ts.textureId) set.add(ts.textureId)
@@ -145,8 +149,11 @@ export function collectPublishedTextureIds(node: any, set: Set<string>): void {
     // Missing them ships an effect whose billboards sample nothing — silently, in the published game only.
     for (const e of n?.particleSystem?.system?.emitters ?? []) {
       for (const id of [e?.render?.textureId, e?.render?.normalTextureId, e?.render?.ormTextureId])
-        if (typeof id === 'string' && id) set.add(id)
+        if (typeof id === 'string' && id && !isBuiltinTextureId(id)) set.add(id)
     }
+    // A weather volume's falling rain or snow draws its sprite sheet from a bare texture id too.
+    const weatherSprite = n?.weather?.precipitationSprite?.textureId
+    if (typeof weatherSprite === 'string' && weatherSprite && !isBuiltinTextureId(weatherSprite)) set.add(weatherSprite)
     for (const child of n?.children ?? []) walkTilesets(child)
   }
   walkTilesets(node)
@@ -383,7 +390,7 @@ export function collectReferencedAnimationIds(
   return set
 }
 
-/** Tileset asset ids referenced by any live tilemap layer or sprite. */
+/** Tileset asset ids referenced by any live tilemap layer, sprite or weather volume's sprite sheet. */
 export function collectReferencedTilesetIds(scene: Scene | null | undefined): Set<string> {
   const set = new Set<string>()
   if (scene) {
@@ -396,6 +403,11 @@ export function collectReferencedTilesetIds(scene: Scene | null | undefined): Se
     for (const sn of scene.sprites) {
       const id = sn.tileset?.id
       if (id && !isInlineTilesetId(id)) set.add(id)
+    }
+    // A weather volume's rain or snow sprite sheet, when it was cut from a tileset.
+    for (const w of scene.weatherVolumes ?? []) {
+      const id = w.precipitationSprite?.tilesetId
+      if (id) set.add(id)
     }
   }
   return set
@@ -485,7 +497,8 @@ export function collectReferencedTerrainMaterialIds(scene: Scene | null | undefi
  * scene genuinely uses none of whatever the old build did not collect.
  */
 // 2: particle system links (`particleSystemIds`).
-export const SCENE_REFS_VERSION = 2
+// 3: a weather volume's rain or snow sprite sheet (its texture, and the tileset it was cut from).
+export const SCENE_REFS_VERSION = 3
 
 /**
  * Everything a scene DIRECTLY references: what its placed nodes, terrain layers, tilemaps, sounds and

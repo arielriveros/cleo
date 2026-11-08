@@ -9,7 +9,7 @@
 //   fn weatherInv(i: i32) -> mat4x4<f32>    world -> the volume's unit cube
 //   fn weatherBlend(i: i32) -> vec4<f32>    feather fractions xyz, w = 1 unbounded
 //   fn weatherAmount(i: i32) -> vec4<f32>   wetness, snow, puddles, shelter 0/1
-//   fn weatherShape(i: i32) -> vec4<f32>    cos(snow slope), snow breakup
+//   fn weatherShape(i: i32) -> vec4<f32>    cos(snow slope), snow breakup, rain falling, snow falling
 //
 // COMPOSITING: in the order packed (ascending priority), each volume mixed over the ones below it by its
 // own weight, so a dry box nested in a snowy one carves out a dry pocket.
@@ -43,6 +43,37 @@ fn weatherBoxWeight(i: i32, p: vec3<f32>) -> f32 {
     let t = clamp(edge / max(b.xyz, vec3<f32>(1e-6)), vec3<f32>(0.0), vec3<f32>(1.0));
     let s = select(t * t * (3.0 - 2.0 * t), vec3<f32>(1.0), b.xyz <= vec3<f32>(0.0));
     return min(s.x, min(s.y, s.z));
+}
+
+/**
+ * Mirrors `packedPrecipitationWeight` (boxColumnWeight): `weatherBoxWeight` with the box's top open, so
+ * the column above its middle, up to the sky, weighs as its middle does. What falls comes in from above.
+ */
+fn weatherColumnWeight(i: i32, p: vec3<f32>) -> f32 {
+    let b = weatherBlend(i);
+    if (b.w > 0.5) { return 1.0; }
+    var inCube = (weatherInv(i) * vec4<f32>(p, 1.0)).xyz;
+    inCube.y = min(inCube.y, 0.0);
+    let edge = vec3<f32>(0.5) - abs(inCube);
+    if (any(edge <= vec3<f32>(0.0))) { return 0.0; }
+    let t = clamp(edge / max(b.xyz, vec3<f32>(1e-6)), vec3<f32>(0.0), vec3<f32>(1.0));
+    let s = select(t * t * (3.0 - 2.0 * t), vec3<f32>(1.0), b.xyz <= vec3<f32>(0.0));
+    return min(s.x, min(s.y, s.z));
+}
+
+/**
+ * What falls at `p`: x = rain, y = snow (each 0..1, the volumes' rates composited by their columns), z =
+ * how much shelter applies. Mirrors `resolvePrecipitationAt`.
+ */
+fn precipitationAt(p: vec3<f32>) -> vec3<f32> {
+    var s = vec3<f32>(0.0);
+    let n = min(weatherCount(), MAX_WEATHER_VOLUMES);
+    for (var i = 0; i < n; i++) {
+        let w = weatherColumnWeight(i, p);
+        if (w <= 0.0) { continue; }
+        s = mix(s, vec3<f32>(weatherShape(i).zw, weatherAmount(i).w), w);
+    }
+    return s;
 }
 
 fn weatherAt(p: vec3<f32>) -> WeatherSample {

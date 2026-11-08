@@ -1,12 +1,15 @@
 // Foliage wind: the vertex displacement every wind variant of the instanced programs runs.
 //
 // The method is the one most engines ship (Crytek, GPU Gems 3 ch.16; Unreal's SimpleGrassWind), cut
-// down to what needs no baked data:
+// down to what needs no baked data, and driven by the scene's wind FIELD (chunks/windField.wgsl):
 //
-//   GUSTS. A 2D value noise scrolled along the wind direction and sampled at the INSTANCE origin, so a
-//   whole plant leans as one and gusts visibly roll across a field as waves. No texture fetch.
-//   SWAY. A per-instance phase (from its position — no instance data) on a slow sine, so neighbours
-//   never move in lockstep and a calm still breathes.
+//   AIR. The wind field sampled once at the INSTANCE origin, so a whole plant leans as one: the base
+//   wind's Perlin gusts rolling across a field along a direction that veers from meadow to meadow, plus
+//   the local wind of any Force Field that moves the air. The lean is that air's XZ vector (in units of
+//   WIND_REFERENCE_SPEED), so a plant in a whirlwind leans round it and one in a shelter stands still.
+//   No texture fetch.
+//   SWAY. A per-instance phase (from its position — no instance data) on a slow sine, along the local air,
+//   so neighbours never move in lockstep and a calm still breathes.
 //   BEND. The plant bends about its BASE: the displacement grows with the square of the height above
 //   it, so the root stays planted, and the vector from the base is renormalised to its original length
 //   so a blade arcs over rather than stretching.
@@ -15,10 +18,10 @@
 //
 // Everything the BEND depends on is per LAYER (shape) or global (wind, time), never per sub-model: a
 // tree's bark and its needles are separate models, and they stay attached only because they bend by
-// exactly the same function. A LEAVES material then adds its own motion on top (windLeafOffset):
-// sprigs swinging more the further they are from the trunk, and a fast flutter along the leaf normal.
-// Both vanish at the trunk axis and at the root, so the needles move on their branches without leaving
-// them: the trunk sways like a tree while the canopy moves like grass.
+// exactly the same function (`windPlantAt`, at the instance origin). A LEAVES material then adds its own
+// motion on top (windLeafOffset): sprigs swinging more the further they are from the trunk, and a fast
+// flutter along the leaf normal. Both vanish at the trunk axis and at the root, so the needles move on
+// their branches without leaving them: the trunk sways like a tree while the canopy moves like grass.
 //
 // INTERACTION rides the same bend: what moves through the foliage (graphics/foliageInteraction.ts) arrives
 // as a few stamps -- spheres with a direction, a strength and a birth time -- and `interactLean` leans each
@@ -30,7 +33,10 @@
 // outward from its own axis, through the same arc, so a wet meadow and a snowed-on bush hang lower.
 //
 // Included by chunks/instancedVertex.wgsl and chunks/instancedDepthVertex.wgsl, so a plant and its
-// shadow sway together. Only the FOLIAGE variants (Material.Foliage) and the far-card billboards run it.
+// shadow sway together; each provides the wind sources (windSourceCount / windSourceTexel). Only the
+// FOLIAGE variants (Material.Foliage) and the far-card billboards run it.
+
+#include "./windField.wgsl"
 
 struct WindParams {
     /** xy = unit wind direction in world XZ, z = global strength, w = gust wavelength (m). */
@@ -50,6 +56,8 @@ struct WindParams {
     shape: vec4<f32>,
     /** xyz = camera position, for the distance fade. */
     camera: vec4<f32>,
+    /** x = gustiness (0..1), y = veer (radians), z = wind sources in use (windSourceCount), w = 0. */
+    field: vec4<f32>,
 };
 
 fn windHash(p: vec2<f32>) -> f32 {
@@ -73,27 +81,37 @@ fn windFade(origin: vec3<f32>, w: WindParams) -> f32 {
     return 1.0 - smoothstep(w.shape.z, max(w.timing.w, w.shape.z + 0.001), distance(origin, w.camera.xyz));
 }
 
-/** The gust at a plant's origin, 0..1: two octaves of noise scrolled along the wind. */
-fn windGust(origin: vec3<f32>, t: f32, w: WindParams) -> f32 {
-    let dir = w.dirStrength.xy;
-    let wavelength = max(w.dirStrength.w, 0.5);
-    let scroll = dir * (w.timing.z * t / wavelength);
-    let p = origin.xz / wavelength - scroll;
-    return windNoise(p) * 0.7 + windNoise(p * 2.13 + vec2<f32>(17.0, 3.0)) * 0.3;
-}
+/** What the wind does to one plant, sampled once at its origin and shared by every part of it. */
+struct WindPlant {
+    /** Tip displacement in XZ, as a fraction of the plant's height (gust, sway, stiffness and fade in). */
+    lean: vec2<f32>,
+    /** Unit direction of the air at the plant, XZ. */
+    dir: vec2<f32>,
+    /** The base wind's gust here, 0..1. */
+    gust: f32,
+    /** The ungusted air speed here, in units of WIND_REFERENCE_SPEED (the old global strength). */
+    strength: f32,
+    /** The distance fade, 1 near the camera, 0 past the fade end. */
+    fade: f32,
+};
 
 /**
- * How far a plant at `origin` leans at time `t`, in units of its own height: gust plus sway, scaled by
- * the global and material strengths and faded with camera distance. Shared by the position and (later)
- * the motion-vector program, which evaluates it at two times.
+ * How a plant at `origin` leans at time `t`: the wind field's air there, plus a sway along it, scaled by
+ * the layer's lean and stiffness and faded with camera distance. Shared by the colour, depth and shadow
+ * programs, which all evaluate it at the instance origin, so a plant and its shadow agree.
  */
-fn windLean(origin: vec3<f32>, t: f32, w: WindParams) -> f32 {
-    let gust = windGust(origin, t, w);
+fn windPlantAt(origin: vec3<f32>, t: f32, w: WindParams) -> WindPlant {
+    let fade = windFade(origin, w);
+    if (fade <= 0.0) { return WindPlant(vec2<f32>(0.0), w.dirStrength.xy, 0.0, 0.0, 0.0); }
+    let s = windFieldAt(origin, WindFieldParams(w.dirStrength, vec4<f32>(t, w.timing.z, w.field.x, w.field.y)));
+    let n = s.velocity.xz / WIND_REFERENCE_SPEED;
+    let m = length(n);
+    let dir = select(w.dirStrength.xy, n / max(m, 1e-4), m > 1e-4);
     let stiffness = max(w.response.y, 0.05);
-    let phase = windHash(floor(origin.xz * 4.0)) * 6.2831853;
-    let sway = sin(t * (1.7 / stiffness) + phase);
-    let lean = w.dirStrength.z * w.response.x * (0.2 + 0.8 * gust + 0.2 * sway) / stiffness;
-    return lean * windFade(origin, w);
+    let sway = sin(t * (1.7 / stiffness) + windHash(floor(origin.xz * 4.0)) * 6.2831853);
+    let strength = s.steady / WIND_REFERENCE_SPEED;
+    let lean = (n + dir * (0.2 * strength * sway)) * (w.response.x / stiffness * fade);
+    return WindPlant(lean, dir, s.gust, strength, fade);
 }
 
 /** How many stamps `u_interactStamps` carries (graphics/foliageInteraction.ts MAX_INTERACT_STAMPS). */
@@ -140,16 +158,17 @@ fn windWave(x: f32) -> f32 {
 
 /**
  * The LEAVES layers, in world units: a sprig sway and a fast flutter. `obj` is the object-space vertex,
- * `normalW` its unit world normal, `h` its 0..1 height in the plant, `heightW` the plant's world height.
+ * `normalW` its unit world normal, `h` its 0..1 height in the plant, `heightW` the plant's world height,
+ * `plant` the wind at it (windPlantAt): the sprigs swing along the local air.
  * Weighted by `b`, the distance from the trunk axis (radius 0: by height alone, for a trunkless card),
  * so the inner ends of the branches stay put and the needles never come away from them.
  */
 fn windLeafOffset(obj: vec3<f32>, normalW: vec3<f32>, origin: vec3<f32>, h: f32, heightW: f32,
-                  t: f32, w: WindParams) -> vec3<f32> {
+                  t: f32, w: WindParams, plant: WindPlant) -> vec3<f32> {
     let r = w.shape.w;
     let b = select(h, smoothstep(0.15 * r, r, length(obj.xz)) * h, r > 1e-4);
-    let flutter = w.response.z * b * windFade(origin, w) * w.dirStrength.z;
-    let gust = windGust(origin, t, w);
+    let flutter = w.response.z * b * plant.fade * plant.strength;
+    let gust = plant.gust;
     let stiffness = max(w.response.y, 0.05);
 
     // Sprigs: clusters about a quarter of the plant's radius across share one phase, so neighbouring
@@ -160,7 +179,7 @@ fn windLeafOffset(obj: vec3<f32>, normalW: vec3<f32>, origin: vec3<f32>, h: f32,
     let swing = windWave(t * (1.6 / stiffness) + phase);
     let lift = windWave(t * (1.1 / stiffness) + phase * 1.7 + 0.25);
     let sprig = flutter * 0.05 * heightW * (0.4 + 0.6 * gust);
-    let dir = vec3<f32>(w.dirStrength.x, 0.0, w.dirStrength.y);
+    let dir = vec3<f32>(plant.dir.x, 0.0, plant.dir.y);
     let sway = (dir * swing + vec3<f32>(0.0, 0.35 * lift, 0.0)) * sprig;
 
     // Flutter: fast and tiny, along the normal, with a phase per vertex so adjacent cards shimmer apart.
@@ -170,24 +189,24 @@ fn windLeafOffset(obj: vec3<f32>, normalW: vec3<f32>, origin: vec3<f32>, h: f32,
 }
 
 /**
- * `world` (a vertex already through its instance matrix) displaced by the wind at time `t`, by `push`,
- * the interaction lean from `interactLean`, and by `droop`, the weather's weight as a fraction of the
- * plant's height. `obj` is the object-space vertex, `normalW` its unit world normal and `model` its
- * instance matrix.
+ * `world` (a vertex already through its instance matrix) displaced by the wind at time `t` — `plant`,
+ * from windPlantAt at the instance origin —, by `push`, the interaction lean from `interactLean`, and by
+ * `droop`, the weather's weight as a fraction of the plant's height. `obj` is the object-space vertex,
+ * `normalW` its unit world normal and `model` its instance matrix.
  */
 fn windDisplace(world: vec3<f32>, obj: vec3<f32>, normalW: vec3<f32>, model: mat4x4<f32>, t: f32,
-                w: WindParams, push: vec2<f32>, droop: f32) -> vec3<f32> {
+                w: WindParams, push: vec2<f32>, droop: f32, plant: WindPlant) -> vec3<f32> {
     let origin = model[3].xyz;
     let base = (model * vec4<f32>(0.0, w.shape.x, 0.0, 1.0)).xyz;
     let heightW = max(w.shape.y, 1e-4) * length(model[1].xyz);
     let h = clamp((obj.y - w.shape.x) / max(w.shape.y, 1e-4), 0.0, 1.0);
-    let bend = windLean(origin, t, w) * h * h * heightW;
+    let bend = plant.lean * (h * h * heightW);
 
     let rel = world - base;
     let len = length(rel);
     var bent = rel;
-    bent.x += w.dirStrength.x * bend + push.x * h * h * heightW;
-    bent.z += w.dirStrength.y * bend + push.y * h * h * heightW;
+    bent.x += bend.x + push.x * h * h * heightW;
+    bent.z += bend.y + push.y * h * h * heightW;
     if (droop > 0.0) {
         // Outward from the plant's own axis (a card with no axis: a direction of its own), and through the
         // arc below, so the tips bow down rather than stretch out.
@@ -202,5 +221,5 @@ fn windDisplace(world: vec3<f32>, obj: vec3<f32>, normalW: vec3<f32>, model: mat
     let bl = length(bent);
     let trunk = base + select(rel, bent * (len / bl), bl > 1e-5);
     if (w.response.w < 0.5) { return trunk; }
-    return trunk + windLeafOffset(obj, normalW, origin, h, heightW, t, w);
+    return trunk + windLeafOffset(obj, normalW, origin, h, heightW, t, w, plant);
 }

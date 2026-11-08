@@ -17,6 +17,7 @@ export type DebugCategory =
   | 'navMesh'
   | 'foliageColliders'
   | 'giProbes'
+  | 'windField'
   | 'particles'
   | 'gameUi'
   | 'grid';
@@ -57,6 +58,10 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   // Every GI Volume's probes, lit by the light each holds. Renderer chrome (asserted from EngineContext's
   // reconcile, like the grid); a selected volume shows its own probes with this off.
   { key: 'giProbes', label: 'GI probes', runtimeAvailable: true },
+  // The scene's wind field (utils/windFieldOverlay.ts): arrows of the air round the camera, tracers carried
+  // by it, and the Force Fields that move it. Off by default, and shown anyway while the Wind node or such a
+  // field is selected, like a selected GI Volume's probes.
+  { key: 'windField', label: 'Wind field', runtimeAvailable: true },
   // Not an overlay: whether particle systems SIMULATE while authoring, like Niagara's realtime toggle.
   // Editor only — a playing game always simulates them.
   { key: 'particles', label: 'Preview particles', runtimeAvailable: false },
