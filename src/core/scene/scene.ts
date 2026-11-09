@@ -97,6 +97,43 @@ interface ScheduledTimer {
 /** How long a despawn dissolves by default during play, in seconds. See `Scene.despawnFadeSeconds`. */
 export const DEFAULT_DESPAWN_FADE_SECONDS = 0.8;
 
+/** The node kinds the scene's typed lists are built from, one bit each (see {@link kindsOf}). */
+const K = {
+    LIGHT: 1, MODEL: 2, SPRITE: 4, LANDSCAPE: 8, TILEMAP: 16, LOD_GROUP: 32, CAMERA_RIG: 64, CHARACTER: 128,
+    CONTROLLER: 256, NAV_MESH: 512, DECAL: 1024, FLUID: 2048, CLOTH: 4096, PARTICLES: 8192, FORCE_FIELD: 16384,
+    WATER: 32768, EXPOSURE: 65536, GI: 131072, FOG: 262144, OCCLUSION: 524288, SOUND: 1048576, PROBE: 2097152,
+    SKYBOX: 4194304, CLOUDS: 8388608, ATMOSPHERE: 16777216, SKY_LIGHT: 33554432, WIND: 67108864,
+    WEATHER: 134217728, CAMERA: 268435456, UI_NODE: 536870912, UI_ROOT: 1073741824,
+} as const;
+
+let kindTable: [number, Function][] | null = null;
+const kindsByConstructor = new Map<Function, number>();
+
+/**
+ * Which typed lists a node of this class belongs to, as a bitmask, worked out once per class. The class tests
+ * are `instanceof` ones (a subclass of a ModelNode is a model), so they are evaluated against the prototype chain
+ * the first time a constructor is seen and remembered.
+ */
+function kindsOf(ctor: Function): number {
+    let mask = kindsByConstructor.get(ctor);
+    if (mask !== undefined) return mask;
+    kindTable ??= [
+        [K.LIGHT, LightNode], [K.MODEL, ModelNode], [K.SPRITE, SpriteNode], [K.LANDSCAPE, LandscapeNode],
+        [K.TILEMAP, TilemapNode], [K.LOD_GROUP, LodGroupNode], [K.CAMERA_RIG, CameraRigNode],
+        [K.CHARACTER, CharacterNode], [K.CONTROLLER, ControllerNode], [K.NAV_MESH, NavMeshNode],
+        [K.DECAL, DecalNode], [K.FLUID, FluidVolumeNode], [K.CLOTH, ClothNode], [K.PARTICLES, ParticleSystemNode],
+        [K.FORCE_FIELD, ForceFieldNode], [K.WATER, WaterVolumeNode], [K.EXPOSURE, ExposureVolumeNode],
+        [K.GI, GIVolumeNode], [K.FOG, VolumetricFogNode], [K.OCCLUSION, OcclusionVolumeNode], [K.SOUND, SoundNode],
+        [K.PROBE, LightProbeNode], [K.SKYBOX, SkyboxNode], [K.CLOUDS, VolumetricCloudsNode],
+        [K.ATMOSPHERE, SkyAtmosphereNode], [K.SKY_LIGHT, SkyLightNode], [K.WIND, WindNode], [K.WEATHER, WeatherNode],
+        [K.CAMERA, CameraNode], [K.UI_NODE, UINode], [K.UI_ROOT, UIRootNode],
+    ];
+    mask = 0;
+    for (const [bit, cls] of kindTable) if (ctor === cls || ctor.prototype instanceof cls) mask |= bit;
+    kindsByConstructor.set(ctor, mask);
+    return mask;
+}
+
 export class Scene {
     private _root: Node = new Node('root');
     private _nodes: Set<Node>;
@@ -883,81 +920,86 @@ export class Scene {
         this._nodesByName = new Map();
         this._nodesById = new Map();
         for (const node of this._nodes) {
-            if (node instanceof LightNode)
-                this._lights.add(node);
-            if (node instanceof ModelNode) {
-                this._models.add(node);
-                if (!node.isTerrainChunk) this._modelsExceptTerrain.add(node);
+            // One lookup by constructor for the whole `instanceof` ladder this loop used to run per node (45 tests
+            // x every node, on every structural change: each spawned effect and each removal).
+            const kinds = kindsOf(node.constructor as Function);
+            if (kinds === 0 && !node.socketAttachment && !(node.drawDistance > 0)) continue;
+            if (kinds & K.LIGHT)
+                this._lights.add(node as LightNode);
+            if (kinds & K.MODEL) {
+                this._models.add(node as ModelNode);
+                if (!(node as ModelNode).isTerrainChunk) this._modelsExceptTerrain.add(node as ModelNode);
             }
-            if (node instanceof SpriteNode)
-                this._sprites.add(node);
-            if (node instanceof LandscapeNode)
-                this._landscapes.add(node);
-            if (node instanceof TilemapNode)
-                this._tilemaps.add(node);
-            if (node instanceof LodGroupNode)
-                this._lodGroups.add(node);
-            if (node instanceof CameraRigNode)
-                this._cameraRigs.add(node);
+            if (kinds & K.SPRITE)
+                this._sprites.add(node as SpriteNode);
+            if (kinds & K.LANDSCAPE)
+                this._landscapes.add(node as LandscapeNode);
+            if (kinds & K.TILEMAP)
+                this._tilemaps.add(node as TilemapNode);
+            if (kinds & K.LOD_GROUP)
+                this._lodGroups.add(node as LodGroupNode);
+            if (kinds & K.CAMERA_RIG)
+                this._cameraRigs.add(node as CameraRigNode);
             if (node.socketAttachment)
                 this._socketFollowers.set(node, null);
             if (node.drawDistance > 0)
                 this._drawDistanceNodes.add(node);
-            if (node instanceof CharacterNode)
-                this._characters.add(node);
-            if (node instanceof ControllerNode)
-                this._controllers.add(node);
-            if (node instanceof NavMeshNode)
-                this._navMeshes.add(node);
-            if (node instanceof DecalNode)
-                this._decals.add(node);
-            if (node instanceof FluidVolumeNode)
-                this._fluidVolumes.add(node);
-            if (node instanceof ClothNode)
-                this._cloths.add(node);
-            else if (node instanceof ModelNode && node.hasSkinnedCloth)
-                this._skinnedCloths.add(node);
-            if (node instanceof ParticleSystemNode)
-                this._particleSystems.add(node);
-            if (node instanceof ForceFieldNode)
-                this._forceFields.add(node);
-            if (node instanceof WaterVolumeNode)
-                this._waterVolumes.add(node);
-            if (node instanceof ExposureVolumeNode)
-                this._exposureVolumes.add(node);
-            if (node instanceof GIVolumeNode)
-                this._giVolumes.add(node);
-            if (node instanceof VolumetricFogNode)
-                this._volumetricFogs.add(node);
-            if (node instanceof OcclusionVolumeNode)
-                this._occlusionVolumes.add(node);
-            if (node instanceof SoundNode)
-                this._sounds.add(node);
-            if (node instanceof LightProbeNode)
-                this._lightProbes.add(node);
-            if (node instanceof SkyboxNode)
-                this._skybox = node;
-            if (node instanceof VolumetricCloudsNode)
-                this._volumetricClouds = node;
-            if (node instanceof SkyAtmosphereNode)
-                this._skyAtmosphere = node;
-            if (node instanceof SkyLightNode)
-                this._skyLight = node;
-            if (node instanceof WindNode)
-                this._wind = node;
-            if (node instanceof WeatherNode) {
-                this._weatherVolumes.add(node);
+            if (kinds & K.CHARACTER)
+                this._characters.add(node as CharacterNode);
+            if (kinds & K.CONTROLLER)
+                this._controllers.add(node as ControllerNode);
+            if (kinds & K.NAV_MESH)
+                this._navMeshes.add(node as NavMeshNode);
+            if (kinds & K.DECAL)
+                this._decals.add(node as DecalNode);
+            if (kinds & K.FLUID)
+                this._fluidVolumes.add(node as FluidVolumeNode);
+            if (kinds & K.CLOTH)
+                this._cloths.add(node as ClothNode);
+            else if ((kinds & K.MODEL) && (node as ModelNode).hasSkinnedCloth)
+                this._skinnedCloths.add(node as ModelNode);
+            if (kinds & K.PARTICLES)
+                this._particleSystems.add(node as ParticleSystemNode);
+            if (kinds & K.FORCE_FIELD)
+                this._forceFields.add(node as ForceFieldNode);
+            if (kinds & K.WATER)
+                this._waterVolumes.add(node as WaterVolumeNode);
+            if (kinds & K.EXPOSURE)
+                this._exposureVolumes.add(node as ExposureVolumeNode);
+            if (kinds & K.GI)
+                this._giVolumes.add(node as GIVolumeNode);
+            if (kinds & K.FOG)
+                this._volumetricFogs.add(node as VolumetricFogNode);
+            if (kinds & K.OCCLUSION)
+                this._occlusionVolumes.add(node as OcclusionVolumeNode);
+            if (kinds & K.SOUND)
+                this._sounds.add(node as SoundNode);
+            if (kinds & K.PROBE)
+                this._lightProbes.add(node as LightProbeNode);
+            if (kinds & K.SKYBOX)
+                this._skybox = node as SkyboxNode;
+            if (kinds & K.CLOUDS)
+                this._volumetricClouds = node as VolumetricCloudsNode;
+            if (kinds & K.ATMOSPHERE)
+                this._skyAtmosphere = node as SkyAtmosphereNode;
+            if (kinds & K.SKY_LIGHT)
+                this._skyLight = node as SkyLightNode;
+            if (kinds & K.WIND)
+                this._wind = node as WindNode;
+            if (kinds & K.WEATHER) {
+                const weather = node as WeatherNode;
+                this._weatherVolumes.add(weather);
                 // The highest priority (the first found among equals): what `weather` hands a script.
-                if (!this._weather || node.priority > this._weather.priority) this._weather = node;
+                if (!this._weather || weather.priority > this._weather.priority) this._weather = weather;
             }
-            if (node instanceof CameraNode)
-                this._cameras.add(node);
+            if (kinds & K.CAMERA)
+                this._cameras.add(node as CameraNode);
             // A root is also a UINode and lands in both sets: _uiRoots drives the layout pass, _uiNodes is
             // what the DOM layer and the editor enumerate.
-            if (node instanceof UINode)
-                this._uiNodes.add(node);
-            if (node instanceof UIRootNode)
-                this._uiRoots.add(node);
+            if (kinds & K.UI_NODE)
+                this._uiNodes.add(node as UINode);
+            if (kinds & K.UI_ROOT)
+                this._uiRoots.add(node as UIRootNode);
         }
 
         for (const node of visited) {
