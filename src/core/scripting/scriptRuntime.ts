@@ -55,8 +55,12 @@ export function createScriptImporter(overrides: ScriptModule = {}): (specifier: 
         const names = Object.keys(overrides).filter(name => name in module);
         if (names.length === 0) return module;
 
-        const scoped: ScriptModule = { ...module };
-        for (const name of names) scoped[name] = overrides[name];
+        // Not `{ ...module }`: the built-in 'cleo' module has about 800 exports, and copying them for every script
+        // instance cost ~0.3 ms a node, which is most of what it takes to spawn a script-carrying effect (a shot
+        // spawns several). An object that inherits the module and owns just the overrides reads the same for every
+        // `import { X } from 'cleo'`, in O(overrides).
+        const scoped: ScriptModule = Object.create(module);
+        for (const name of names) Object.defineProperty(scoped, name, { value: overrides[name], enumerable: true, writable: true, configurable: true });
         return scoped;
     };
 }

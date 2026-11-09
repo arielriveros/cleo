@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Node } from '../src/core/scene/nodes/node';
 import { Scene } from '../src/core/scene/scene';
 import { attachScriptFactory } from '../src/core/scene/nodes/nodeScripting';
-import { compileScript, scriptCompileCount, clearScriptCompileCache } from '../src/core/scripting/scriptRuntime';
+import { compileScript, scriptCompileCount, clearScriptCompileCache, createScriptImporter, resolveScriptModule } from '../src/core/scripting/scriptRuntime';
 import '../src/cleo';
 
 // Every spawn used to re-run the TypeScript transform + `new Function` for its script — four compiles
@@ -41,5 +41,21 @@ describe('compiled script cache', () => {
         one.bump(); one.bump();
         expect(two.bump()).toBe(1);
         expect(one.count).toBe(2);
+    });
+});
+
+describe('script importer', () => {
+    it('scopes a built-in module without copying it', () => {
+        const mine = () => 'mine';
+        const scoped = createScriptImporter({ unwrapScriptNode: mine, notAnExport: 1 })('cleo');
+        const real = resolveScriptModule('cleo');
+        // The override is what a script sees; everything else reads through to the real module.
+        expect(scoped.unwrapScriptNode).toBe(mine);
+        expect(real.unwrapScriptNode).not.toBe(mine);
+        expect(scoped.Node).toBe(real.Node);
+        // An override can never add a name the module does not export.
+        expect('notAnExport' in scoped).toBe(false);
+        // Own keys are only the overrides, so building it costs nothing like the ~800 exports.
+        expect(Object.keys(scoped)).toEqual(['unwrapScriptNode']);
     });
 });
