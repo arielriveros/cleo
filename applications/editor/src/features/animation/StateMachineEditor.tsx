@@ -9,6 +9,7 @@ import type { AnimationFieldAsset } from '../../utils/animationFields'
 import { useStateMachine, ANY_STATE } from './StateMachineContext'
 import ConditionTree from './ConditionTree'
 import { AssetDropRow, LayerSection, SlotsSection } from './LayerPanels'
+import { EventActionsSection } from './EventActionsPanel'
 import AnimationAssetPicker from './AnimationAssetPicker'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { BoltIcon, Button, cn, ComboSelect, controlClass, FileButton, hintClass, NumberInput, OptionalNumberInput, SectionTitle, SegmentedControl, Select, TextInput, Toggle } from '@cleo/app-kit/ui'
@@ -185,6 +186,7 @@ export function VariablesPanel() {
       </Collapsable>
 
       <SlotsSection />
+      <EventActionsSection />
     </div>
   )
 }

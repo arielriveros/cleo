@@ -3,7 +3,7 @@ import { useCleoEngine } from '../EngineContext'
 import type {
   AnimationStateMachine, AnimationParameter, AnimationState,
   AnimationTransition, AnimationCondition, AnimationConditionGroup, AnimationConditionNode,
-  AnimationParameterType, AnimationLayer, AnimationSlotDef,
+  AnimationParameterType, AnimationLayer, AnimationSlotDef, EventActionBinding,
 } from 'cleo'
 import { isConditionGroup } from 'cleo'
 import { getAnimationTarget, accessibleNodeVariables, AccessibleVariable, AnimationTarget } from './skeleton'
@@ -94,6 +94,8 @@ interface StateMachineContextValue {
   addParam: () => void
   setParam: (i: number, patch: Partial<AnimationParameter>) => void
   removeParam: (i: number) => void
+  /** Replace the machine's Event Actions (what each named animation event does). */
+  setEventActions: (next: EventActionBinding[]) => void
   /** Add a trigger parameter of this name unless the machine has one (a state's trigger, typed in). */
   addTriggerParam: (name: string) => void
 
@@ -460,6 +462,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     })
   }
   const removeParam = (i: number) => update(prev => ({ ...prev, parameters: prev.parameters.filter((_, idx) => idx !== i) }))
+  const setEventActions = (next: EventActionBinding[]) => update(prev => ({ ...prev, eventActions: next }))
   const addTriggerParam = (name: string) => {
     if (!name) return
     update(prev => prev.parameters.some(p => p.name === name) ? prev
@@ -698,7 +701,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     boneMasks, poseAssets, controller, saveAsController, detachController,
     selection, setSelection, graphView, setGraphView, simulate, setSimulate: setSimulateLive,
     apply, paramOf,
-    addParam, setParam, removeParam, addTriggerParam,
+    addParam, setParam, removeParam, setEventActions, addTriggerParam,
     addState, setState, removeState, stateIndex, commitLayout, deleteElements,
     links, linkOf, addTransition, setTransition, removeTransition, removeLink,
     addCondition, addGroup, setCondition, setGroupOp, removeNode, setTransitionCondition,
