@@ -453,16 +453,10 @@ export class EditorOverlays {
             buf = this._overlayInstanceBuffers[set] =
                 device.reallocateBuffer(buf, matrices.subarray(0, count * 16));
             if (!pipeline) return;
-            // The overlay never sets `hasTexture`, so nothing here is actually sampled — but every
-            // sampler the shader declares still has to reference a complete texture or the group
-            // is rejected whole. The count comes from the PIPELINE rather than a literal: this
-            // used to pass one fallback, and adding the cutout mask to the basic chunks turned
-            // that into "Number of entries (2) did not match the expected number (4)", which
-            // invalidated the group, then the command buffer, and rendered WebGPU entirely black.
-            const overlayTextures = pipeline.resources
-                .filter(r => r.group === 0 && r.kind === 'texture')
-                .map(() => this._bindGroups.fallbackTexture);
-            pass!.setBindGroup(0, this._bindGroups.textureGroup(pipeline, 0, overlayTextures));
+            // The overlay never sets `hasTexture`, so nothing here is sampled -- but every binding the
+            // shader declares must still reference a texture of its own TYPE (a depth binding takes a
+            // depth texture), or the group is rejected whole and the command buffer with it.
+            pass!.setBindGroup(0, this._bindGroups.fallbackGroup(pipeline));
             this._passes.recordInstancedDraw(pass!, mesh, buf!, count);
         };
 

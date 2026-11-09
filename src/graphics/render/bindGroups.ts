@@ -265,6 +265,26 @@ export class BindGroupCache {
     }
 
     /**
+     * Group 0 for a draw that has no material (the editor's skeleton overlay): every declared texture
+     * takes a fallback, except the opaque depth snapshot, which is a DEPTH-typed binding and is rejected
+     * whole -- group, then command buffer -- if given a colour texture.
+     */
+    public fallbackGroup(pipeline: RenderPipeline): BindGroup {
+        const textures = this._groupTextureScratch;
+        textures.length = 0;
+        const bindings = this._groupBindingScratch;
+        bindings.length = 0;
+        for (const resource of pipeline.resources) {
+            if (resource.group !== 0 || resource.kind !== 'texture') continue;
+            bindings.push(resource.binding);
+            if (resource.glslName === SCENE_DEPTH_FIELD) { textures.push(this._targets.sceneDepth.depth); continue; }
+            if (resource.glslName === WEATHER_SHELTER_FIELD) { textures.push(this._host.weatherShelter()); continue; }
+            textures.push(resource.glslName === 'u_envMap' ? this.fallbackCube : this.fallbackFor(resource.type));
+        }
+        return this.textureGroup(pipeline, 0, textures, bindings);
+    }
+
+    /**
      * A pipeline's group-0 material texture slots, as the MATERIAL names them, in binding order.
      * `null` marks the environment cube, which has no material slot behind it.
      *
