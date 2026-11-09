@@ -9,6 +9,12 @@ One scene, **Firing Line**: the player against three bots in a walled yard with 
 illumination, sky, clouds, weather and wind. Everything in it is made of templates, so the same pieces work in
 any scene.
 
+The yard is dressed with placeholder props under `Level > Props`: pallets, tires, drums, sandbag walls, dumpsters,
+generators, fuel tanks, cable spools, tarp stacks, tables, fences, planters, rubble, bollards and signs. Each is one
+box or cylinder node named `Prop <Kind> NN`, sized like the real thing and with its own collider, so a final model
+of the same size can replace it (swap the node's model, keep the transform and collider). The larger ones have an
+`FPS Cover Point` beside them. After changing props, rebake the navigation mesh and the global illumination.
+
 ## Using it in your own scene
 
 Copy these templates in (Assets > FPS):
@@ -54,6 +60,17 @@ Shift, Crouch C, Jump Space, weapons 1 2 3 or Q / E. A gamepad is bound too (`to
 
 The arms and weapon are drawn with [`Node.viewmodel`](../scripting/node-api.md#viewmodel): a narrower lens than
 the world's, and pulled clear of walls by `FpsPlayer._viewmodelClearance`.
+
+## Effects from animation events
+
+The shot, reload, equip and death effects are not in the scripts. The weapon clips carry markers (`shot` on
+`Fire` / `AimFire`, `reload` on the reload clip, `equip` on `Equip`; `death` on the bot death clips) and each
+controller binds them in its **Event actions** (Animator editor, Variables panel): the weapon's sound and the
+`FPS Muzzle Flash` template, spawned on the viewmodel's `Muzzle` where it is drawn and kept there while it lives.
+Bots have no fire clip, so `FpsBot` fires `shot.<weapon>` by name and its controller binds the same effects.
+Hit-position effects (impact, blood, tracer, bullet hole) and the player's hurt/hit/kill/empty sounds stay in
+`FpsCombatant` / `FpsPlayer`, because they depend on where a ray landed. The markers and bindings are applied by
+`tools/fps/eventActions.mjs` on every ingest.
 
 ## Aiming
 

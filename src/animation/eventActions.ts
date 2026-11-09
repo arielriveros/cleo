@@ -24,7 +24,7 @@ export type EventAction =
     | {
         kind: 'spawn'; template: string; /** Where: a node path, found like any target. Empty: the animated node. */ at?: string;
         /** Metres, in the target's frame. */ offset?: [number, number, number];
-        /** Orientation: the target's (default), the active camera's, or Euler degrees. */ rotation?: 'target' | 'camera' | [number, number, number];
+        /** Orientation: the target's (default), the animated node's own (`owner`: a character's facing), the active camera's, or Euler degrees. */ rotation?: 'target' | 'owner' | 'camera' | [number, number, number];
         /** Keep the spawned node on the target (where the target is DRAWN, so a viewmodel's muzzle carries it) for as long as it lives. */ follow?: boolean;
     };
 
@@ -58,7 +58,7 @@ export function parseEventAction(raw: unknown): EventAction | null {
                 ...(o.falloff !== undefined ? { falloff: Math.max(0.1, num(o.falloff, 2)) } : {}) } : null;
         case 'spawn': {
             if (!str(o.template)) return null;
-            const rotation = o.rotation === 'camera' ? 'camera' : vec(o.rotation);
+            const rotation = o.rotation === 'camera' || o.rotation === 'owner' ? o.rotation : vec(o.rotation);
             return { kind: 'spawn', template: str(o.template), ...(str(o.at) ? { at: str(o.at) } : {}), ...(vec(o.offset) ? { offset: vec(o.offset) } : {}),
                 ...(rotation ? { rotation } : {}), ...(o.follow === true ? { follow: true } : {}) };
         }
@@ -216,13 +216,13 @@ export function drawnWorldPosition(node: Node, out: vec3 = vec3.create()): vec3 
 
 /** Spawned nodes that follow a target, moved by one late update per scene (after the animation has posed it). */
 class Followers {
-    private readonly _list: { node: Node; at: Node; offset?: [number, number, number]; rotation?: EventActionRotation }[] = [];
+    private readonly _list: { node: Node; at: Node; owner: Node; offset?: [number, number, number]; rotation?: EventActionRotation }[] = [];
     private _remove: (() => void) | null = null;
 
     constructor(private readonly _scene: Scene) {}
 
-    public add(node: Node, at: Node, offset: [number, number, number] | undefined, rotation: EventActionRotation | undefined): void {
-        this._list.push({ node, at, offset, rotation });
+    public add(node: Node, at: Node, owner: Node, offset: [number, number, number] | undefined, rotation: EventActionRotation | undefined): void {
+        this._list.push({ node, at, owner, offset, rotation });
         this._remove ??= this._scene.addLateUpdate(() => this._tick());
     }
 
@@ -230,29 +230,30 @@ class Followers {
         for (let i = this._list.length - 1; i >= 0; i--) {
             const f = this._list[i];
             if (!f.node.scene || !f.at.scene) { this._list.splice(i, 1); continue; }
-            place(f.node, f.at, f.offset, f.rotation);
+            place(f.node, f.at, f.offset, f.rotation, f.owner);
         }
         if (this._list.length === 0 && this._remove) { this._remove(); this._remove = null; }
     }
 }
 
-type EventActionRotation = 'target' | 'camera' | [number, number, number];
+type EventActionRotation = 'target' | 'owner' | 'camera' | [number, number, number];
 
 const followers = new WeakMap<Scene, Followers>();
 
 /** Put `node` at `at`'s drawn position (plus `offset` in its frame) and turn it as `rotation` says. */
-function place(node: Node, at: Node, offset: [number, number, number] | undefined, rotation: EventActionRotation | undefined): void {
+function place(node: Node, at: Node, offset: [number, number, number] | undefined, rotation: EventActionRotation | undefined, owner: Node = at): void {
     const position = drawnWorldPosition(at);
     if (offset) {
         quat.copy(_q, at.worldQuaternion);
         vec3.add(position, position, vec3.transformQuat(vec3.create(), offset, _q));
     }
     node.setPosition([position[0], position[1], position[2]]);
-    const euler = turnTo(at, rotation);
+    const euler = turnTo(at, rotation, owner);
     if (euler) node.setRotation(euler);
 }
 
-function turnTo(at: Node, rotation: EventActionRotation | undefined): number[] | undefined {
+function turnTo(at: Node, rotation: EventActionRotation | undefined, owner: Node = at): number[] | undefined {
+    if (rotation === 'owner') return Array.from(eulerFromQuatDeg(vec3.create(), owner.worldQuaternion));
     if (rotation === 'camera') {
         const camera = at.scene?.activeCamera;
         return camera ? Array.from(eulerFromQuatDeg(vec3.create(), camera.worldQuaternion)) : undefined;
@@ -271,7 +272,7 @@ function spawn(owner: Node, action: Extract<EventAction, { kind: 'spawn' }>): vo
         quat.copy(_q, at.worldQuaternion);
         vec3.add(position, position, vec3.transformQuat(vec3.create(), action.offset, _q));
     }
-    const rotation = turnTo(at, action.rotation);
+    const rotation = turnTo(at, action.rotation, owner);
     const node = scene.instantiate(action.template, {
         position: [position[0], position[1], position[2]],
         ...(rotation ? { rotation } : {}),
@@ -279,7 +280,7 @@ function spawn(owner: Node, action: Extract<EventAction, { kind: 'spawn' }>): vo
     if (node && action.follow) {
         let list = followers.get(scene);
         if (!list) { list = new Followers(scene); followers.set(scene, list); }
-        list.add(node, at, action.offset, action.rotation);
+        list.add(node, at, owner, action.offset, action.rotation);
     }
 }
 

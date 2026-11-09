@@ -166,9 +166,9 @@ function ActionRow({ action, paths, templates, onChange, onRemove }: {
           <div className='flex items-center gap-1'>{label('At')}{pick('any', action.at ?? '', v => onChange({ ...action, at: v || undefined }), 'The node it appears at (empty: this character). A viewmodel node is placed where it is drawn')}</div>
           <div className='flex items-center gap-1'>
             {label('Turn')}
-            <Select className={cn(tight, 'flex-1 min-w-0')} value={action.rotation === 'camera' ? 'camera' : Array.isArray(action.rotation) ? 'fixed' : 'target'}
-              onChange={e => onChange({ ...action, rotation: e.target.value === 'camera' ? 'camera' : e.target.value === 'fixed' ? [0, 0, 0] : undefined })}>
-              <option value='target'>Like the node</option><option value='camera'>Like the camera</option><option value='fixed'>Fixed angles</option>
+            <Select className={cn(tight, 'flex-1 min-w-0')} value={action.rotation === 'camera' || action.rotation === 'owner' ? action.rotation : Array.isArray(action.rotation) ? 'fixed' : 'target'}
+              onChange={e => onChange({ ...action, rotation: e.target.value === 'camera' || e.target.value === 'owner' ? e.target.value : e.target.value === 'fixed' ? [0, 0, 0] : undefined })}>
+              <option value='target'>Like the node</option><option value='owner'>Like the character</option><option value='camera'>Like the camera</option><option value='fixed'>Fixed angles</option>
             </Select>
           </div>
           {Array.isArray(action.rotation) && (

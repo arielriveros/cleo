@@ -1,7 +1,7 @@
 import { Logger, ModelNode, Node, setMoveWorld } from 'cleo'
 import type { Animator } from 'cleo'
 import FpsCombatantNode from '@/FPS/Scripts/FpsCombatant'
-import { angleDiff, clamp, combatantOf, distance3, findByVariable, findDescendant, hostile, manager, planarDistance, playCue, yawTo } from '@/FPS/Scripts/FpsShared'
+import { angleDiff, clamp, combatantOf, distance3, findByVariable, findDescendant, hostile, manager, planarDistance, yawTo } from '@/FPS/Scripts/FpsShared'
 
 /** The death clips, in the order the animator's `Die0..Die5` triggers play them. */
 const DEATHS = ['DeathFromTheFront', 'DeathFromFrontHeadshot', 'DeathFromTheBack', 'DeathFromBackHeadshot', 'DeathFromRight', 'DeathCrouchingHeadshotFront']
@@ -508,10 +508,9 @@ export default class FpsBotNode extends FpsCombatantNode {
     this._animator?.setTrigger?.('Fire')
   }
 
+  /** A bot has no fire clip, so its shot is the same named event a clip marker would fire: the controller binds it to the flash and the sound. */
   private _muzzleFlash(): void {
-    const at = this.muzzleWorld(this._eye())
-    this.spawnFx('FPS Muzzle Flash', at, [0, this._yawNow(), 0])
-    playCue(this, 'Shot')
+    this._animator?.fireEvent?.(`shot.${this.weapon}`)
   }
 
   private _startReload(): void {
@@ -596,7 +595,7 @@ export default class FpsBotNode extends FpsCombatantNode {
     const seconds = info?.seconds && info.seconds > 0 ? info.seconds : 3
     this.after(seconds * this.ragdollAt, () => this._ragdoll(dir))
     this.after(this.corpseSeconds, () => this.remove({ fade: 1.2 }))
-    playCue(this, 'Death')
+    // The death sound is the `death` marker on the death clip.
   }
 
   private _pickDeath(killer: any, zone: string, dir?: ArrayLike<number>): string {

@@ -100,6 +100,57 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
         }
     });
 
+    it('drives the shot, reload, equip and death effects from clip events and controller Event Actions', () => {
+        const controllers = library('animControllers');
+        const templates = library('templates');
+        const names = new Set(templates.map((t: any) => t.name));
+        const clipEventNames = (assetPrefix: RegExp) => new Set(library('animations')
+            .filter((a: any) => assetPrefix.test(a.name)).flatMap((a: any) => a.clips.flatMap((c: any) => (c.events ?? []).map((e: any) => e.name))));
+        /** A path ('Sounds/Shot') exists in a template tree: its first name anywhere, the rest as direct children. */
+        const hasPath = (root: any, path: string) => {
+            const [first, ...rest] = path.split('/');
+            return allNodes(root).some((n: any) => n.name === first && rest.reduce((at: any, seg) => at?.children?.find((c: any) => c.name === seg) ?? null, n));
+        };
+        const treeOf = (name: string) => templates.find((t: any) => t.name === name).nodeJson;
+
+        const expected: Record<string, { tree: string; events: string[]; clips: RegExp }> = {
+            'AK-47 Viewmodel': { tree: 'FPS Player', events: ['shot', 'reload', 'equip'], clips: /^AK-47 / },
+            'Pistol Viewmodel': { tree: 'FPS Player', events: ['shot', 'reload', 'equip'], clips: /^Pistol / },
+            'SAPS-12 Viewmodel': { tree: 'FPS Player', events: ['shot', 'reload', 'equip'], clips: /^SAPS-12 / },
+            'Fps Bot': { tree: 'FPS Bot', events: ['shot.ak47', 'shot.pistol', 'shot.shotgun', 'death'], clips: /^Fps_Death/ },
+        };
+        for (const [name, want] of Object.entries(expected)) {
+            const controller = controllers.find((c: any) => c.name === name);
+            const bindings = controller.machine.eventActions ?? [];
+            expect(bindings.map((b: any) => b.event).sort(), name).toEqual([...want.events].sort());
+            const root = treeOf(want.tree);
+            for (const b of bindings) {
+                for (const a of b.actions) {
+                    if (a.kind === 'spawn') { expect(names.has(a.template), `${name} ${b.event}: ${a.template}`).toBe(true); if (a.at) expect(hasPath(root, a.at), `${name} ${b.event} at ${a.at}`).toBe(true); }
+                    else expect(hasPath(root, a.target), `${name} ${b.event} -> ${a.target}`).toBe(true);
+                }
+            }
+            // The clips carry the markers the script-free bindings wait for (a bot's `shot.*` is fired by name).
+            const carried = clipEventNames(want.clips);
+            for (const e of want.events.filter(e => !e.startsWith('shot.'))) expect(carried.has(e), `${name}: a clip marker "${e}"`).toBe(true);
+        }
+        // And every embedded copy of a machine carries them, so a node edited in a scene runs the same.
+        for (const t of templates) for (const n of allNodes(t.nodeJson).filter((x: any) => x.stateMachine?.controllerId)) {
+            const controller = controllers.find((c: any) => c.id === n.stateMachine.controllerId);
+            expect(n.stateMachine.eventActions, `${t.name}/${n.name}`).toEqual(controller.machine.eventActions);
+        }
+    });
+
+    it('keeps the effect timing out of the scripts', () => {
+        const source = (name: string) => lf(library('scripts').find((a: any) => a.name === name).source);
+        const player = source('FpsPlayer'), bot = source('FpsBot');
+        for (const cue of ['ShotRifle', 'ShotPistol', 'ShotShotgun', "'Equip'", "'Reload'"]) expect(player, cue).not.toMatch(new RegExp('playCue\\([^)]*' + cue));
+        expect(player).not.toContain('_flash()');
+        expect(bot).toContain('fireEvent');
+        expect(bot).not.toMatch(/playCue\(this, '(Shot|Death)'\)/);
+        expect(bot).not.toContain("spawnFx('FPS Muzzle Flash'");
+    });
+
     it('keeps a controller as the last child of every character', () => {
         for (const t of library('templates')) {
             for (const n of allNodes(t.nodeJson).filter((x: any) => x.type === 'character')) {

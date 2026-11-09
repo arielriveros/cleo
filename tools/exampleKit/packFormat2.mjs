@@ -32,12 +32,14 @@ const PART_BYTES = 48 * 1024 * 1024
  * `giBakes` ({ id, bytes }[]) replaces the GI Volume bakes the folder carries in its assets (a format-1
  * folder carries none; a format-2 one keeps its own when this is not given).
  */
-export async function packFormat2(dir, { giBakes } = {}) {
+export async function packFormat2(dir, { giBakes, mutate } = {}) {
   const { readBundle, bundleEntries, assetPartPath, BUNDLE_PATHS } = bundleModules()
   const file = (p) => path.join(dir, ...p.split('/'))
 
   const { bundle } = await readBundle(folderSource(dir))
   bundle.manifest = { ...bundle.manifest, formatVersion: 2 }
+  // The caller's last word on the inflated bundle (an idempotent pass over libraries and scenes), before it is packed.
+  if (mutate) await mutate(bundle)
   if (giBakes) bundle.giBakes = giBakes.map(b => ({ id: b.id, bytes: toArrayBuffer(b.bytes) }))
   typedGeometry(bundle)
   const entries = await bundleEntries(bundle)

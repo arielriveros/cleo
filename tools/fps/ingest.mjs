@@ -21,6 +21,7 @@ import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { loadScriptReflector, stableId as nsId } from '../exampleKit/bundle.mjs'
 import { packFormat2, readGiBakes } from '../exampleKit/packFormat2.mjs'
+import { applyEventActions } from './eventActions.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
@@ -164,7 +165,7 @@ if (scriptsOnly) {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'fps-scripts-'))
   fs.cpSync(EXAMPLE, work, { recursive: true })
   refreshScripts(work)
-  await packFormat2(work)
+  await packFormat2(work, { mutate: applyEventActions })
   install(work, EXAMPLE)
   fs.rmSync(work, { recursive: true, force: true })
   console.log('scripts refreshed in', EXAMPLE)
@@ -178,7 +179,7 @@ if (scriptsOnly) {
   ensureBakeIds(work)
   const giBakes = carriedBakes(work)
   console.log(`repacking (${giBakes.length} GI bakes carried over)`)
-  const largest = await packFormat2(work, { giBakes })
+  const largest = await packFormat2(work, { giBakes, mutate: applyEventActions })
   install(work, EXAMPLE)
   fs.rmSync(work, { recursive: true, force: true })
   console.log(`${EXAMPLE} written - largest file ${(largest / 1048576).toFixed(1)} MB`)

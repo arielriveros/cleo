@@ -215,7 +215,6 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     if (play) {
       const secs = this._playClip('Equip', false, s.view) ?? this.spec.equipSeconds
       this._busyUntil = this._time + Math.max(0.3, secs)
-      playCue(this, 'Equip')
     }
   }
 
@@ -246,7 +245,7 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     const token = ++this._reloadToken
     this.reloading = true
     this._fireUntil = 0
-    playCue(this, 'Reload')
+    // The reload sound is the `reload` marker on the weapon's reload clip.
     const done = () => {
       if (token !== this._reloadToken) return
       const take = Math.min(spec.mag - this.ammo, this.reserve)
@@ -310,8 +309,7 @@ export default class FpsPlayerNode extends FpsCombatantNode {
     const clip = this.ads > 0.5 && spec.hasAimClips ? 'AimFire' : 'Fire'
     const secs = this._playClip(clip, false, this.slot.view, true) ?? 0.4
     this._fireUntil = this._time + Math.min(secs * 0.9, 60 / spec.rpm * 1.1 + 0.05)
-    this._flash()
-    playCue(this, spec.key === 'pistol' ? 'ShotPistol' : spec.key === 'shotgun' ? 'ShotShotgun' : 'ShotRifle')
+    // The flash and the shot's sound are the weapon's `shot` marker on its Fire clip (Event Actions on its controller).
     if (spec.key === 'shotgun') this.after(0.35, () => { if (!this.reloading && !this.isDead) { const s = this.slot; this._playClip('Pump', false, s.view, true); this._fireUntil = this._time + 0.7 } })
   }
 
@@ -399,14 +397,6 @@ export default class FpsPlayerNode extends FpsCombatantNode {
       dofEnabled: true, dofNearCutoff: this.dofNearCutoff, dofFocusDistance: f,
       dofFocusRange: lerp(12, 2, q), dofAperture: lerp(16, this.dofAperture, q), dofMaxBlur: lerp(0.5, this.dofMaxBlur, q),
     })
-  }
-
-  private _flash(): void {
-    const cam: any = this._rig?.camera
-    const at = this.muzzleWorld([0, 0, 0])
-    if (!cam) return
-    const f = this.spawnFx('FPS Muzzle Flash', at, [this._rig!.pitch, this._rig!.yaw, 0])
-    void f
   }
 
   /** The view comes back down by a share of what the kick took, while no shot is firing. */

@@ -262,8 +262,8 @@ eventActions: [{
 - **Light** flashes an existing light node you author at intensity 0 (`falloff` shapes the fade).
   Between flashes it sits at no intensity and the smallest range, so it holds no cluster slot.
 - **Spawn** instantiates the template at the target node (default: the animated node), moved by
-  `offset` (in the target's frame) and turned to the target, the active `camera`, or fixed Euler
-  degrees; `follow: true` keeps it on the target for as long as it lives, so recoil and the weapon's
+  `offset` (in the target's frame) and turned to the target, the animated node (`owner`: a character's
+  facing), the active `camera`, or fixed Euler degrees; `follow: true` keeps it on the target for as long as it lives, so recoil and the weapon's
   clips carry it. A target inside a viewmodel is placed where it is DRAWN, through the camera's
   viewmodel lens.
 - **Scripts can fire the same event** for things with no clip: `animator.fireEvent('shot')` runs the
