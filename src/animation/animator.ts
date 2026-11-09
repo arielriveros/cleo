@@ -12,6 +12,7 @@ import { solveTwoBone, kneePole, ikTuning, validateIkRig, swingReleaseWeight, Ik
 import { Node } from '../core/scene/nodes/node';
 import { ModelNode } from '../core/scene/nodes/modelNode';
 import { canAccessVariable } from '../core/scene/nodes/nodeVariables';
+import { actionsFor, runEventActions, type EventActionBinding } from './eventActions';
 import { InputSystem } from '../input/inputSystem';
 import { Logger } from '../core/logger';
 import { LogTally, plural } from '../core/logTally';
@@ -287,6 +288,11 @@ export interface AnimationStateMachine {
     /** The BASE layer's transitions. */
     transitions: AnimationTransition[];
     events: AnimationEventMarker[];
+    /**
+     * What an event does: event name -> actions (a sound, a particle burst, a light flash, a spawned template), run by
+     * the animator when a clip marker of that name fires or a script calls `fireEvent`. See animation/eventActions.ts.
+     */
+    eventActions?: EventActionBinding[];
     /**
      * Layers ABOVE the base, applied in order. Each runs its own states and transitions over the shared
      * parameters, and is blended onto everything beneath it through an optional bone mask — the upper body
@@ -821,6 +827,8 @@ export class Animator {
     private _currentStateName: string | null = null;
     private _eventCallbacks: ((eventName: string, clipName: string) => void)[] = [];
     private _prevEventTime: number = 0;
+    /** A clip just started: the next event window opens before time 0, so a marker at 0 fires (see _fireDueEvents). */
+    private _eventFromStart: boolean = false;
     // Real seconds in the current state, what `minDwell` measures against. Not derived from
     // `_currentTime`, which a field re-scales and a looping state wraps.
     private _stateTime: number = 0;
@@ -1020,6 +1028,7 @@ export class Animator {
 
         this._currentAnimation = animation;
         this._currentTime = 0;
+        this._eventFromStart = true;
         this._loop = loop;
         this._playing = true;
         // Fresh clip, fresh budget: `_enterState` re-applies its own limit right after this.
@@ -2975,6 +2984,7 @@ export class Animator {
             // events nor the root travel before it count -- both are read from the previous frame's time.
             this._currentTime = Math.min(state.startTime, this._getAnimationDuration());
             this._prevEventTime = this._currentTime;
+            this._eventFromStart = false;
         }
         this._loopLimit = Math.max(0, Math.floor(state.loopCount ?? 0));
         this._loopsPlayed = 0;
@@ -3200,22 +3210,23 @@ export class Animator {
             forEachCondition(t.condition, t.conditions, c => updateLatch(ctx, c));
     }
 
-    /** Fire event markers on the current clip whose time was crossed in (prev, cur]. */
+    /**
+     * Fire event markers on the current clip whose time was crossed in (prev, cur]. The first window after a clip
+     * starts (or restarts) opens before time 0, so a marker AT 0 fires with the clip.
+     */
     private _fireDueEvents(prevTime: number, curTime: number, duration: number, looped: boolean): void {
+        const fromStart = this._eventFromStart;
+        this._eventFromStart = false;
         const machineEvents = this._stateMachine?.events ?? this._externalEvents ?? [];
         const clipEvents = this._currentAnimation?.events ?? [];
-        if ((machineEvents.length === 0 && clipEvents.length === 0) || !this._currentAnimation || this._eventCallbacks.length === 0) {
+        // A layer or slot forwards to the root, which owns the callbacks and the bound actions.
+        const hasListeners = this._eventCallbacks.length > 0 || (!this._isOverlay && (this._stateMachine?.eventActions?.length ?? 0) > 0);
+        if ((machineEvents.length === 0 && clipEvents.length === 0) || !this._currentAnimation || !hasListeners) {
             this._prevEventTime = curTime;
             return;
         }
         const clip = this._currentAnimation.name;
-        const emit = (eventName: string) => {
-            // Fired from the update loop, outside attachScriptFactory's handler guards.
-            for (const cb of this._eventCallbacks) {
-                try { cb(eventName, clip); }
-                catch (e) { Logger.error(`Error in onAnimationEvent('${eventName}') for node ${this._node?.name}: ${e}`, 'Script'); }
-            }
-        };
+        const emit = (eventName: string) => this._dispatchEvent(eventName, clip);
         const fire = (from: number, to: number) => {
             for (const ev of machineEvents) {
                 if (ev.clipName !== clip || ev.time <= from || ev.time > to) continue;
@@ -3234,9 +3245,33 @@ export class Animator {
             fire(prevTime, duration);
             fire(-1, curTime);
         } else {
-            fire(prevTime, curTime);
+            fire(fromStart ? -1 : prevTime, curTime);
         }
         this._prevEventTime = curTime;
+    }
+
+    /**
+     * One event: the effects bound to it on this machine's Event Actions first, then the `onAnimationEvent` listeners.
+     * A layer or slot has no bindings of its own; it hands its events to the character's root animator, which runs them.
+     */
+    private _dispatchEvent(eventName: string, clipName: string): void {
+        if (!this._isOverlay) {
+            const actions = actionsFor(this._stateMachine?.eventActions, eventName, clipName);
+            if (actions.length > 0 && this._node) runEventActions(this._node, actions);
+        }
+        // Fired from the update loop, outside attachScriptFactory's handler guards.
+        for (const cb of this._eventCallbacks) {
+            try { cb(eventName, clipName); }
+            catch (e) { Logger.error(`Error in onAnimationEvent('${eventName}') for node ${this._node?.name}: ${e}`, 'Script'); }
+        }
+    }
+
+    /**
+     * Fire the named event as if a clip marker had: its bound Event Actions run and `onAnimationEvent` listeners hear it.
+     * For things with no clip to carry a marker (a bot's shot), so their effects are still the machine's data.
+     */
+    public fireEvent(eventName: string): void {
+        this._dispatchEvent(eventName, this._currentAnimation?.name ?? '');
     }
 
     // ---- Layers and action slots --------------------------------------------------------------------
@@ -3272,12 +3307,7 @@ export class Animator {
         const child = new Animator(this._animatedModel!, undefined, { overlay: true });
         child._blendTime = this._blendTime;
         // A layer's or slot's events are the character's events.
-        child.onAnimationEvent((eventName, clipName) => {
-            for (const cb of this._eventCallbacks) {
-                try { cb(eventName, clipName); }
-                catch (e) { Logger.error(`Error in onAnimationEvent('${eventName}') for node ${this._node?.name}: ${e}`, 'Script'); }
-            }
-        });
+        child.onAnimationEvent((eventName, clipName) => this._dispatchEvent(eventName, clipName));
         return child;
     }
 
@@ -3509,6 +3539,7 @@ export class Animator {
             // events nor the root travel before it count -- the travel is read from the previous frame's time.
             child._currentTime = Math.min(options.startTime, child._getAnimationDuration());
             child._prevEventTime = child._currentTime;
+            child._eventFromStart = false;
         }
         slot.action = action;
         slot.presenceTarget = 1;
