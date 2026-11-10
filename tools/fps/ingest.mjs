@@ -22,6 +22,7 @@ import { createRequire } from 'module'
 import { loadScriptReflector, stableId as nsId } from '../exampleKit/bundle.mjs'
 import { packFormat2, readGiBakes } from '../exampleKit/packFormat2.mjs'
 import { applyEventActions } from './eventActions.mjs'
+import { applyWarehouse } from './warehouse.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '..', '..')
@@ -160,12 +161,18 @@ function install(from, to) {
   for (const name of fs.readdirSync(from)) fs.cpSync(path.join(from, name), path.join(to, name), { recursive: true })
 }
 
+/** What every pack applies to the inflated bundle (each idempotent): the clip event actions, then the warehouse annex. */
+async function applyPasses(bundle) {
+  applyEventActions(bundle)
+  await applyWarehouse(bundle)
+}
+
 if (scriptsOnly) {
   // The example folder itself: unpack format 2, refresh the scripts, pack it again.
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'fps-scripts-'))
   fs.cpSync(EXAMPLE, work, { recursive: true })
   refreshScripts(work)
-  await packFormat2(work, { mutate: applyEventActions })
+  await packFormat2(work, { mutate: applyPasses })
   install(work, EXAMPLE)
   fs.rmSync(work, { recursive: true, force: true })
   console.log('scripts refreshed in', EXAMPLE)
@@ -179,7 +186,7 @@ if (scriptsOnly) {
   ensureBakeIds(work)
   const giBakes = carriedBakes(work)
   console.log(`repacking (${giBakes.length} GI bakes carried over)`)
-  const largest = await packFormat2(work, { giBakes, mutate: applyEventActions })
+  const largest = await packFormat2(work, { giBakes, mutate: applyPasses })
   install(work, EXAMPLE)
   fs.rmSync(work, { recursive: true, force: true })
   console.log(`${EXAMPLE} written - largest file ${(largest / 1048576).toFixed(1)} MB`)

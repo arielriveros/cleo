@@ -56,7 +56,7 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
         }
     });
 
-    it('gives the scene a manager, a player and the three bots of one against three', () => {
+    it('gives the scene a manager, a player and the three bots the match is filled up from', () => {
         for (const s of scenes()) {
             const nodes = allNodes(s.json.scene);
             const scripts = (kind: string) => nodes.filter(n => n.script && n.script.includes(`class`) && n.variables?.__scriptId && library('scripts').find((a: any) => a.id === n.variables.__scriptId.value)?.name === kind);
@@ -71,7 +71,7 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
         expect(library('templates').filter((t: any) => /Game Manager/.test(t.name)).length).toBe(1);
         const field = manager.variables.find((v: any) => v.name === 'gameType');
         expect(field, 'gameType field').toBeTruthy();
-        expect([...field.choices].sort()).toEqual(['ffa', 'oneVsThree', 'team2v2']);
+        expect([...field.choices].sort()).toEqual(['ffa', 'oneVsAll', 'teamDeathmatch']);
         expect(manager.variables.find((v: any) => v.name === 'mode')).toBeUndefined();
         const shared = library('scripts').find((a: any) => a.name === 'FpsShared').source;
         for (const type of field.choices) expect(shared, type).toMatch(new RegExp(type + ':\\s*\\{ label'));
@@ -80,7 +80,7 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
     it('sets the manager to a valid game type and lists bot templates that exist', () => {
         const managerId = library('scripts').find((a: any) => a.name === 'FpsGameManager').id;
         const node = allNodes(scenes()[0].json.scene).find((n: any) => n.variables?.__scriptId?.value === managerId);
-        expect(['ffa', 'oneVsThree', 'team2v2']).toContain(node.scriptVars.gameType);
+        expect(['ffa', 'oneVsAll', 'teamDeathmatch']).toContain(node.scriptVars.gameType);
         expect(node.scriptVars.mode).toBeUndefined();
         const names = new Set(library('templates').map((t: any) => t.name));
         const defaults = library('scripts').find((a: any) => a.name === 'FpsGameManager').variables.find((v: any) => v.name === 'botTemplates');
@@ -90,7 +90,7 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
     it('fills a scene with too few fighters up to the game type minimum before dealing teams', () => {
         const src = lf(library('scripts').find((a: any) => a.name === 'FpsGameManager').source);
         expect(src).toMatch(/_begin\(\): void \{[\s\S]*?_fillIn\(\)[\s\S]*?_deal\(\)/);
-        expect(src).toContain('GAME_TYPES[this.gameType]');
+        expect(src).toContain('GAME_TYPES[this._type]');
     });
 
     it('keeps the scripts in the project the same as examples/scripts', () => {
@@ -211,5 +211,42 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
             for (const m of script.source.matchAll(/from\s+'@(\/[^']+)'/g)) expect(paths.has(m[1]), `${script.name} imports ${m[1]}`).toBe(true);
             expect(script.source, script.name).not.toMatch(/from\s+'\.\.?\//);
         }
+    });
+    it('makes every game type twelve fighters, the player and eleven bots', () => {
+        const shared = lf(library('scripts').find((a: any) => a.name === 'FpsShared').source);
+        const block = shared.slice(shared.indexOf('export const GAME_TYPES'), shared.indexOf('GAME_TYPE_ALIASES'));
+        const mins = [...block.matchAll(/minFighters:\s*(\d+)/g)].map(m => Number(m[1]));
+        expect(mins).toEqual([12, 12, 12]);
+    });
+
+    it('has a spawn point for every fighter and each bot respawns as its own template', () => {
+        const nodes = allNodes(scenes()[0].json.scene);
+        expect(nodes.filter(n => n.name?.startsWith('Spawn ') && n.type === 'node').length).toBeGreaterThanOrEqual(12);
+        for (const t of library('templates')) {
+            if (!/^FPS (Bot|Vanguard|Raider|Swat)$/.test(t.name)) continue;
+            expect(t.nodeJson.scriptVars.respawnTemplate, t.name).toBe(t.name);
+        }
+        for (const n of nodes) if (/^FPS (Bot|Vanguard|Raider|Swat)$/.test(n.name) && n.scriptVars?.respawnTemplate) expect(n.scriptVars.respawnTemplate).toBe(n.name);
+    });
+
+    it('holds the warehouse annex: its model, colliders, lights, volumes and a baked, linked navmesh', () => {
+        const nodes = allNodes(scenes()[0].json.scene);
+        const warehouse = nodes.find(n => n.name === 'Warehouse' && n.type === 'node');
+        expect(warehouse, 'Warehouse').toBeTruthy();
+        const inside = allNodes(warehouse);
+        expect(inside.filter(n => n.type === 'giVolume').length).toBeGreaterThanOrEqual(3);
+        for (const gi of nodes.filter(n => n.type === 'giVolume')) expect(gi.giVolume.bakeId, gi.name).toBeTruthy();
+        expect(inside.filter(n => n.type === 'lightProbe').length).toBeGreaterThanOrEqual(3);
+        expect(inside.filter(n => n.type === 'exposureVolume').length).toBeGreaterThanOrEqual(3);
+        for (const e of inside.filter(n => n.type === 'exposureVolume')) expect(e.exposureVolume.overrides.exposureMinEV, e.name).toBeLessThan(8);
+        expect(inside.filter(n => n.type === 'light').length).toBeGreaterThanOrEqual(8);
+        expect(inside.filter(n => n.body?.shapes?.length && n.body.mass === 0).length).toBeGreaterThanOrEqual(25);
+        const models = library('models').map((m: any) => m.name);
+        for (const m of ['abandoned_warehouse', 'cement_bags_low-poly', 'propane_and_gas_tanks', 'utility_shelves']) expect(models, m).toContain(m);
+        const nav = nodes.find(n => n.type === 'navMesh');
+        expect(nav.navMesh.counts.length).toBeGreaterThan(0);
+        expect(nav.links.length, 'stair and ramp links').toBeGreaterThan(0);
+        // the ground is tiled for the bake: a navmesh of hundreds of thousands of regions is a sign it was not
+        expect(nav.navMesh.vertices.length, 'navmesh size').toBeLessThan(6_000_000);
     });
 });

@@ -73,14 +73,17 @@ export const WEAPON_ORDER = ['pistol', 'ak47', 'shotgun']
 
 // ----- the match --------------------------------------------------------------------------------------
 
-export type FpsGameType = 'oneVsThree' | 'team2v2' | 'ffa'
+export type FpsGameType = 'oneVsAll' | 'teamDeathmatch' | 'ffa'
 
 /** The Game Manager's list of game types: what the dropdown offers, and what each needs of the scene. */
 export const GAME_TYPES: Record<FpsGameType, { label: string, minFighters: number }> = {
-  oneVsThree: { label: 'One against all', minFighters: 4 },
-  team2v2: { label: 'Team deathmatch', minFighters: 4 },
-  ffa: { label: 'Free for all', minFighters: 4 },
+  oneVsAll: { label: 'One against all', minFighters: 12 },
+  teamDeathmatch: { label: 'Team deathmatch', minFighters: 12 },
+  ffa: { label: 'Free for all', minFighters: 12 },
 }
+
+/** Game type keys an older project may still hold, and what they are called now. */
+export const GAME_TYPE_ALIASES: Record<string, FpsGameType> = { oneVsThree: 'oneVsAll', team2v2: 'teamDeathmatch' }
 
 /**
  * The one global: the scene's Game Manager. Module state survives `Game.loadScene`, so the manager sets it in

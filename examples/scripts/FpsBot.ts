@@ -94,6 +94,7 @@ export default class FpsBotNode extends FpsCombatantNode {
   private _calledAt: number = -999
   private _hurtAt: number = -999
   private _patrolWait: number = 0
+  private _coverRetryAt: number = 0
   private _losTimer: number = 0
   private _pathTimer: number = 0
   private _sinceCombat: number = 99
@@ -310,8 +311,11 @@ export default class FpsBotNode extends FpsCombatantNode {
     const from = this.worldPosition
     const threatAt = this._lastKnown ?? (this._target?.worldPosition as number[] | undefined)
     if (!gm || !threatAt) return false
+    // A search that found nothing is not repeated every frame: with a dozen fighters that is a ray fan and a path
+    // query per bot per frame. Retreating always searches (it is a decision, taken once).
+    if (!far && this._time < this._coverRetryAt) return false
     const cover = gm.bestCover([from[0], from[1], from[2]], threatAt, far ? 40 : 24)
-    if (!cover) return false
+    if (!cover) { this._coverRetryAt = this._time + 1; return false }
     this._coverPoint = cover
     this._inCover = false
     return true

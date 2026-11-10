@@ -1,6 +1,6 @@
 import { Game, Logger, Node } from 'cleo'
 import type { TemplateName } from 'cleo'
-import { GAME_TYPES, distance3, fps, findByVariable, planarDistance } from '@/FPS/Scripts/FpsShared'
+import { GAME_TYPES, GAME_TYPE_ALIASES, distance3, fps, findByVariable, planarDistance } from '@/FPS/Scripts/FpsShared'
 
 /**
  * FPS example — the match. Put ONE of these (the "FPS Game Manager" template) at the scene root and the
@@ -15,9 +15,11 @@ import { GAME_TYPES, distance3, fps, findByVariable, planarDistance } from '@/FP
  *
  * ## Game types (the `gameType` dropdown; GAME_TYPES in FpsShared)
  *
- *   ffa          everyone for themselves
- *   team2v2      two teams, split down the middle (the player and the first bot against the rest)
- *   oneVsThree   the player against everyone else (a scene with no player: the first fighter against the rest)
+ * Each fills the match up to twelve fighters (the player and eleven bots), from `botTemplates`, when the scene holds fewer.
+ *
+ *   ffa              everyone for themselves
+ *   teamDeathmatch   two teams, split down the middle (six against six)
+ *   oneVsAll         the player against everyone else (a scene with no player: the first fighter against the rest)
  *
  * ## For the other scripts
  *
@@ -32,7 +34,7 @@ import { GAME_TYPES, distance3, fps, findByVariable, planarDistance } from '@/FP
  */
 export default class FpsGameManagerNode extends Node {
   /** The game type: how the scene's fighters are dealt into teams (the dropdown lists GAME_TYPES in FpsShared). */
-  public gameType: 'oneVsThree' | 'team2v2' | 'ffa' = 'oneVsThree'
+  public gameType: 'oneVsAll' | 'teamDeathmatch' | 'ffa' = 'oneVsAll'
   /**
    * Bot templates the manager spawns when the scene holds fewer fighters than the game type needs, cycling
    * through the list, at spawn points. A scene with enough bots of its own never uses it.
@@ -65,6 +67,9 @@ export default class FpsGameManagerNode extends Node {
   public message: string = ''
   public timeLeft: number = 0
   public elapsed: number = 0
+
+  /** The game type under its current name (a project saved before the rename still says `oneVsThree` or `team2v2`). */
+  private get _type(): string { return GAME_TYPE_ALIASES[this.gameType as string] ?? this.gameType }
 
   private _fighters: Set<any> = new Set()
   private _scores: Map<string, number> = new Map()
@@ -120,7 +125,7 @@ export default class FpsGameManagerNode extends Node {
 
   /** Spawn bots until the scene holds the game type's minimum. Returns whether any were spawned. */
   private _fillIn(): boolean {
-    const need = (GAME_TYPES[this.gameType] ?? GAME_TYPES.oneVsThree).minFighters - this._fighters.size
+    const need = (GAME_TYPES[this._type] ?? GAME_TYPES.oneVsAll).minFighters - this._fighters.size
     const templates = (this.botTemplates ?? []).filter(Boolean)
     if (need <= 0 || !templates.length) return false
     const parent = this.scene!.root.getChildByName('Bots')[0] ?? undefined
@@ -129,8 +134,12 @@ export default class FpsGameManagerNode extends Node {
       const spawn = this._spawns.length ? this._spawns[(this._usedSpawns.size + i) % this._spawns.length] : null
       const at = spawn ? spawn.worldPosition : [i * 2, 0, 0]
       const bot = (this.scene as any).instantiate(templates[i % templates.length], { position: [at[0], at[1] + 0.05, at[2]], ...(parent ? { parent } : {}) })
-      if (bot) made++
-      else Logger.warn(`FPS: no "${templates[i % templates.length]}" template to fill the match with`, 'Script')
+      if (bot) {
+        made++
+        // Each keeps the template it came from when it dies, and a number so the feed can tell them apart.
+        ;(bot as any).respawnTemplate = templates[i % templates.length]
+        ;(bot as any).displayName = `${(bot as any).displayName || templates[i % templates.length]} ${this._fighters.size + made}`
+      } else Logger.warn(`FPS: no "${templates[i % templates.length]}" template to fill the match with`, 'Script')
     }
     return made > 0
   }
@@ -176,17 +185,17 @@ export default class FpsGameManagerNode extends Node {
     this._teamNames.clear()
     list.forEach((f, i) => {
       let team: string
-      if (this.gameType === 'ffa') team = `solo-${i}`
-      else if (this.gameType === 'oneVsThree') team = i === 0 ? 'blue' : 'red'
+      if (this._type === 'ffa') team = `solo-${i}`
+      else if (this._type === 'oneVsAll') team = i === 0 ? 'blue' : 'red'
       else team = i < Math.ceil(n / 2) ? 'blue' : 'red'
       f.team = team
       this._scores.set(team, 0)
-      this._teamNames.set(team, this.gameType === 'ffa' ? (f.displayName || `Fighter ${i + 1}`) : team === 'blue' ? 'Blue' : 'Red')
+      this._teamNames.set(team, this._type === 'ffa' ? (f.displayName || `Fighter ${i + 1}`) : team === 'blue' ? 'Blue' : 'Red')
     })
   }
 
   private _joinLate(c: any): void {
-    if (this.gameType === 'ffa') {
+    if (this._type === 'ffa') {
       const team = `solo-${this._scores.size}`
       c.team = team
       this._scores.set(team, 0)
@@ -195,7 +204,7 @@ export default class FpsGameManagerNode extends Node {
     }
     const counts = new Map<string, number>()
     for (const f of this._fighters) if (f !== c) counts.set(f.team, (counts.get(f.team) ?? 0) + 1)
-    if (this.gameType === 'oneVsThree') c.team = 'red'
+    if (this._type === 'oneVsAll') c.team = 'red'
     else c.team = (counts.get('blue') ?? 0) <= (counts.get('red') ?? 0) ? 'blue' : 'red'
     if (!this._scores.has(c.team)) this._scores.set(c.team, 0)
   }
@@ -217,7 +226,7 @@ export default class FpsGameManagerNode extends Node {
   }
 
   private _modeName(): string {
-    return (GAME_TYPES[this.gameType] ?? GAME_TYPES.oneVsThree).label
+    return (GAME_TYPES[this._type] ?? GAME_TYPES.oneVsAll).label
   }
 
   private _leader(): string {
@@ -306,7 +315,10 @@ export default class FpsGameManagerNode extends Node {
       let nearest = Infinity
       for (const e of enemies) nearest = Math.min(nearest, distance3(pos, e.worldPosition))
       const used = this._usedSpawns.has(p) ? -30 : 0
-      return { p, score: Math.min(nearest, 60) + used + Math.random() * 8 }
+      // Never on top of a fighter that is already standing there (twelve fighters share the points).
+      let crowded = 0
+      for (const o of this._fighters) if (o !== f && !o.isDead && distance3(pos, o.worldPosition) < 1.6) crowded = -200
+      return { p, score: Math.min(nearest, 60) + used + crowded + Math.random() * 8 }
     }).filter(s => enemies.length === 0 || s.score > this.spawnSafeDistance - 30).sort((a, b) => b.score - a.score)
     const pick = (scored[0] ?? { p: points[Math.floor(Math.random() * points.length)] }).p
     this._usedSpawns.add(pick)
