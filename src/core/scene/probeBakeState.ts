@@ -80,6 +80,12 @@ export function lightBakeChanges(then: LightBakeSnapshot, now: LightBakeSnapshot
     if (!close(now.range, then.range)) out.push('range');
     if (!close(now.sourceRadius, then.sourceRadius)) out.push('size');
     if (!close(now.cone[0], then.cone[0]) || !close(now.cone[1], then.cone[1])) out.push('cone');
+    // An area light resized, reshaped or made two-sided lights its surroundings differently.
+    const a = now.area, b = then.area;
+    if ((a === null) !== (b === null) || (a && b && (a.shape !== b.shape || a.twoSided !== b.twoSided
+        || !close(a.width, b.width) || !close(a.height, b.height)))) {
+        if (!out.includes('size')) out.push('size');
+    }
     if (now.castShadows !== then.castShadows) out.push('shadows');
     if (now.shown !== then.shown) out.push('shown');
     return out;

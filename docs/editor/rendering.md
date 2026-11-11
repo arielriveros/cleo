@@ -389,6 +389,9 @@ Shadows **Enabled** switch turns these off too.
 | **Max Dist** | The farthest a spot shadow reaches; a light with a shorter range stops at its range. |
 | **Bias** | In *depth* units, not world units — perspective depth does not convert linearly — so it is a small number. |
 
+A one-sided [area light](node-inspector.md#light) takes a spot map too, facing its emitting side, 75°
+each way, and counts against the same cap.
+
 #### Point shadows
 
 Up to **4** point lights cast shadows at once, flagged per light with **Cast Shadows**. A point
@@ -407,6 +410,8 @@ these off too.
 | **Resolution** | **Per cube face**, 256 to 1K — six times the memory it looks like. |
 | **Max Dist** | The farthest a point shadow reaches; a light with a shorter range stops at its range. |
 | **Bias** | In depth units, as for spot shadows. |
+
+A two-sided area light takes a cube from its centre, against the same cap.
 
 ### Ambient occlusion and indirect light
 
@@ -448,6 +453,11 @@ sweeps spread over frames.
 | **Rays per frame** | How many probe rays a frame relights while a relight is due. |
 | **Capture draws** | How many scene draws a frame the capture spends. |
 | **Multi-bounce** | The bounces after the first. |
+
+Each probe ray stands for its patch of the probe's view, not a single point of it: the capture averages
+what glows across the patch (a lamp's fixture, a screen) and its colour, so a small bright thing counts for
+the share of the view it fills instead of all of one ray or none. Bakes saved before this (format version 1)
+still load; the volume's inspector marks them outdated, and capturing and saving again brings them up to date.
 
 The **GI** debug channel shows the volumes' light as it falls on a mid-grey surface, and
 **GI Share** how much of each pixel they lit (white) rather than the light probes and the sky (black). A

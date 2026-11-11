@@ -1,5 +1,6 @@
 #include "./alphaCutout.wgsl"
 #include "./shIrradiance.wgsl"
+#include "./areaLights.wgsl"
 #include "./translucencyTint.wgsl"
 // Forward PBR (metallic-roughness) shading, shared by the plain and skinned programs.
 //
@@ -450,9 +451,17 @@ fn fs_main(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0)
         let cl = cleoLight(cleoClusterLight(first + i));
         if (cleoLightReaches(cl.light, fragPos)) {
             let shadowN = select(N, -N, translucency > 0.0 && dot(N, cl.light.position - fragPos) < 0.0);
-            let visibility = cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+            let ext = cleoAreaIndex(cl);
+            var visibility = 0.0;
+            if (ext >= 0) {
+                let area = cleoAreaLight(cl, ext);
+                visibility = cleoAreaVisibility(cl, area, fragPos, shadowN);
+                Lo += evaluateAreaLight(area, fragPos, N, V, frontAlbedo, metallic, roughness, visibility);
+            } else {
+                visibility = cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
                                                     fragPos, shadowN, cl.light.position);
-            Lo += evaluateSpotLight(cl.light, fragPos, N, V, frontAlbedo, metallic, roughness, visibility);
+                Lo += evaluateSpotLight(cl.light, fragPos, N, V, frontAlbedo, metallic, roughness, visibility);
+            }
             if (translucency > 0.0) {
                 Lo += evaluateSpotTransmission(cl.light, fragPos, N, V, surfaceAlbedo, translucency, visibility);
             }

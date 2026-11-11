@@ -155,3 +155,78 @@ describe('packClusterBuild', () => {
             expect(staged[layout.lightRecordTexel * 4 + i]).toBe(-1);
     });
 });
+
+describe('area lights in the light data', () => {
+    it('puts the LTC tables first only in a frame with an area light, and the extensions after the records', async () => {
+        const { AREA_EXT_TEXELS, LTC_ROWS, LTC_TEXELS } = await import('../src/graphics/lightData');
+        const plain = lightDataLayout(3456, 10, 40, 0);
+        expect(plain.clusterTableTexel).toBe(0);
+        expect(plain.ltc).toBe(false);
+        expect(plain.areaExtTexel).toBe(plain.lightIndexTexel);
+        const area = lightDataLayout(3456, 10, 40, 2);
+        expect(area.ltc).toBe(true);
+        expect(area.clusterTableTexel).toBe(LTC_TEXELS);
+        expect(LTC_TEXELS % LIGHT_DATA_WIDTH).toBe(0);
+        expect(LTC_ROWS).toBe(32);
+        expect(area.lightRecordTexel).toBe(LTC_TEXELS + 3456);
+        expect(area.areaExtTexel).toBe(area.lightRecordTexel + 10 * LIGHT_RECORD_TEXELS);
+        expect(area.lightIndexTexel).toBe(area.areaExtTexel + 2 * AREA_EXT_TEXELS);
+    });
+
+    it('marks an area light in the shadow field its kind leaves free, which an old path reads as no map', async () => {
+        const { areaMarker, areaExtensionOf } = await import('../src/graphics/lightData');
+        expect(areaMarker(0)).toBe(-2);
+        expect(areaExtensionOf(areaMarker(11728), 0)).toBe(11728);      // two-sided: the cube slot stays real
+        expect(areaExtensionOf(3, areaMarker(9000))).toBe(9000);        // one-sided: the spot layer stays real
+        expect(areaExtensionOf(NO_SHADOW_SLOT, areaMarker(5))).toBe(5);
+        // Points and spots, shadowed or not, are never read as area lights.
+        expect(areaExtensionOf(NO_SHADOW_SLOT, NO_SHADOW_SLOT)).toBe(-1);
+        expect(areaExtensionOf(2, NO_SHADOW_SLOT)).toBe(-1);
+        expect(areaExtensionOf(NO_SHADOW_SLOT, 1)).toBe(-1);
+        // A marker survives the f32 the texture holds, for any texel the texture can have.
+        expect(Math.fround(areaMarker(256 * 4096))).toBe(areaMarker(256 * 4096));
+    });
+
+    it('packs an area light as the spot or point an old path shades, plus its extension', async () => {
+        const { LightGrid } = await import('../src/graphics/lightGrid');
+        const { AREA_SHAPE_DISK, areaExtensionOf, ltcTableTexels } = await import('../src/graphics/lightData');
+        const grid = new LightGrid();
+        grid.buildSingle(3, 2);
+        grid.packAreaRecord(1, 0, [1, 2, 3], 0.01, [1, 0.9, 0.8], 5, [0, -1, 0], 0.4, false, 2,
+                            [1, 0, 0], 0.5, 0.25, 4, 0);
+        grid.packAreaRecord(2, 1, [4, 5, 6], 0.02, [1, 1, 1], 7, [0, 0, 1], 0.3, true, 1,
+                            [0, 1, 0], 0.2, 0.2, 8, AREA_SHAPE_DISK);
+        const staging = (grid as any)._staging as Float32Array;
+        const L = grid.layout;
+        const one = readLightRecord(staging, L.lightRecordTexel + LIGHT_RECORD_TEXELS);
+        expect(one.coneScale).toBe(1);
+        expect(one.coneOffset).toBe(0);
+        expect(one.spotShadowLayer).toBe(2);
+        expect(one.direction).toEqual([0, -1, 0]);
+        expect(one.sourceRadius).toBeCloseTo(0.4);
+        const ext1 = areaExtensionOf(one.spotShadowLayer, one.pointShadowSlot);
+        expect(ext1).toBe(L.areaExtTexel);
+        expect(Array.from(staging.subarray(ext1 * 4, ext1 * 4 + 8))).toEqual([1, 0, 0, 0.5, 4, 0.25, 0, 0]);
+        const two = readLightRecord(staging, L.lightRecordTexel + 2 * LIGHT_RECORD_TEXELS);
+        expect([two.coneScale, two.coneOffset]).toEqual([POINT_CONE_SCALE, POINT_CONE_OFFSET]);
+        expect(two.pointShadowSlot).toBe(1);
+        const ext2 = areaExtensionOf(two.spotShadowLayer, two.pointShadowSlot);
+        expect(ext2).toBe(L.areaExtTexel + 2);
+        expect(Array.from(staging.subarray(ext2 * 4, ext2 * 4 + 8)).map(x => +x.toFixed(5))).toEqual([0, 1, 0, 0.2, 8, 0.2, AREA_SHAPE_DISK, 1]);
+        // The tables are in the staging buffer's first rows, as the shader reads them.
+        expect(Array.from(staging.subarray(0, 64))).toEqual(Array.from(ltcTableTexels().subarray(0, 64)));
+        // A slot past the frame's area count writes nothing.
+        grid.packAreaRecord(0, 2, [9, 9, 9], 1, [1, 1, 1], 1, [0, 1, 0], 1, false, -1, [1, 0, 0], 1, 1, 1, 0);
+        expect(readLightRecord(staging, L.lightRecordTexel).position).not.toEqual([9, 9, 9]);
+    });
+
+    it('builds an area light tangent perpendicular to its normal from the node frame', async () => {
+        const { areaTangent } = await import('../src/graphics/lightData');
+        const t = areaTangent([2, 0, 0.5, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], [0, 0, 1], [0, 0, 0]);
+        expect(t[0]).toBeCloseTo(1);
+        expect(t[2]).toBeCloseTo(0);
+        const d = areaTangent([0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], [0, 1, 0], [0, 0, 0]);
+        expect(Math.hypot(d[0], d[1], d[2])).toBeCloseTo(1);
+        expect(Math.abs(d[1])).toBeLessThan(1e-9);
+    });
+});

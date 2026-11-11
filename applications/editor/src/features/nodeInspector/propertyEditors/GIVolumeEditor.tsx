@@ -15,6 +15,7 @@ interface Fields {
   enabled: boolean
   size: [number, number, number]
   probeCounts: [number, number, number]
+  probeInset: number
   rays: number
   maxRayDistance: number
   captureResolution: number
@@ -34,7 +35,7 @@ export default function GIVolumeEditor(props: { node: GIVolumeNode }) {
     const n = props.node
     return {
       enabled: n.enabled, size: [...n.size] as [number, number, number],
-      probeCounts: [...n.probeCounts] as [number, number, number], rays: n.rays, maxRayDistance: n.maxRayDistance,
+      probeCounts: [...n.probeCounts] as [number, number, number], probeInset: n.probeInset, rays: n.rays, maxRayDistance: n.maxRayDistance,
       captureResolution: n.captureResolution, blendDistance: n.blendDistance, intensity: n.intensity,
       normalBias: n.normalBias, viewBias: n.viewBias, multiBounce: n.multiBounce, additive: n.additive, includeGrass: n.includeGrass,
     }
@@ -54,6 +55,7 @@ export default function GIVolumeEditor(props: { node: GIVolumeNode }) {
     if (patch.enabled !== undefined) n.enabled = patch.enabled
     if (patch.size !== undefined) n.size = patch.size
     if (patch.probeCounts !== undefined) n.probeCounts = patch.probeCounts
+    if (patch.probeInset !== undefined) n.probeInset = patch.probeInset
     if (patch.rays !== undefined) n.rays = patch.rays
     if (patch.maxRayDistance !== undefined) n.maxRayDistance = patch.maxRayDistance
     if (patch.captureResolution !== undefined) n.captureResolution = patch.captureResolution
@@ -70,7 +72,7 @@ export default function GIVolumeEditor(props: { node: GIVolumeNode }) {
 
   // How far the capture has got: polled, since it runs a batch at a time on render frames.
   const [status, setStatus] = useState<{ probes: number, captured: number, active: number, idle: boolean,
-                                         complete: boolean, saved: boolean, stale: boolean } | null>(null)
+                                         complete: boolean, saved: boolean, stale: boolean, outdated: boolean } | null>(null)
   const [saving, setSaving] = useState(false)
   useEffect(() => {
     if (!renderer) return
@@ -80,6 +82,7 @@ export default function GIVolumeEditor(props: { node: GIVolumeNode }) {
         probes: entry.probes, captured: entry.captured, active: entry.active, idle: entry.idle,
         complete: renderer.gi.isCaptured(props.node),
         saved: GiBakeRegistry.has(props.node.bakeId), stale: renderer.gi.staleBakes.has(props.node.id),
+        outdated: renderer.gi.outdatedBakes.has(props.node.id),
       } : null)
     }
     poll()
@@ -130,6 +133,9 @@ export default function GIVolumeEditor(props: { node: GIVolumeNode }) {
             <VectorInput value={v.probeCounts} min={MIN_GI_PROBES_PER_AXIS} max={MAX_GI_PROBES_PER_AXIS} step={1}
               onChange={c => set({ probeCounts: c.map(x => Math.round(x)) as [number, number, number] })} />
           </PropertyRow>
+          <PropertyRow label='Probe inset' divider>
+            <NumberInput value={v.probeInset} min={0} max={0.5} step={0.05} onChange={probeInset => set({ probeInset })} />
+          </PropertyRow>
           <PropertyRow label='Rays' divider>
             <Select value={String(v.rays)} onChange={e => set({ rays: Number(e.target.value) })}>
               <option value='64'>64 (8 x 8)</option>
@@ -171,6 +177,8 @@ export default function GIVolumeEditor(props: { node: GIVolumeNode }) {
         <Hint>{statusText}</Hint>
         <Hint>{status?.stale
           ? 'The saved bake no longer matches this volume or the geometry round it: captured again. Save a new bake.'
+          : status?.outdated
+            ? 'The saved bake is from an older format: it loads, but Capture again and Save bake to take lamps and other small glowing things in evenly.'
           : status?.saved ? 'Saved bake: loads instead of capturing.' : 'No saved bake: captured each time the scene opens.'}</Hint>
         <div className='flex gap-2'>
           <Button size='sm' disabled={!status?.complete || saving}

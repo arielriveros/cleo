@@ -222,8 +222,8 @@ routePoints(name: string): vec3[]
 ### LightNode — `'light'`
 
 ```ts
-get light: DirectionalLight | PointLight | Spotlight
-get type: 'directional' | 'point' | 'spotlight'
+get light: DirectionalLight | PointLight | Spotlight | AreaLight
+get type: 'directional' | 'point' | 'spotlight' | 'area'
 get/set castShadows: boolean
 get/set bake: boolean      // captured into the light probes (default true); off = live only
 bakeSnapshot(): LightBakeSnapshot   // what a probe's bake of it depends on (probeBakeState.ts)
@@ -234,8 +234,27 @@ get/set index: number      // record slot; -1 once past MAX_LIGHTS (1024)
 longer matches the lights set to bake that reach them, and what changed (`moved`, `turned`, `colour`,
 `intensity`, `range`, `size`, `cone`, `shadows`, `shown`, `added`, `removed`). The editor shows it.
 
-Intensities are photometric: directional in **lux** (default 100000), point and spot in **lumens**
-(default 1500). See [Rendering (scripting)](../scripting/rendering.md#lights).
+Intensities are photometric: directional in **lux** (default 100000), point, spot and area in **lumens**
+(default 1500; 2000 for an area light). See [Rendering (scripting)](../scripting/rendering.md#lights).
+
+An **area light** (`AreaLight`, `lightType: 'area'`) is a glowing rectangle or disk in the light's local XY
+plane, emitting along its forward (local +Z, the way a spot points):
+
+```ts
+shape: 'rect' | 'disk'      // a disk's diameter is its width
+width: number ; height: number   // metres, min 0.01; a disk's height is its width
+twoSided: boolean           // both faces, half the lumens each
+intensity: number           // lumens out of the whole emitter: radiance = lm / (pi x area x faces)
+range: number               // where the window falloff reaches zero, from the centre
+area: number ; equivalentRadius: number ; internalRadiance: number   // read-only
+```
+
+It is shaded exactly, by linearly transformed cosines (Heitz et al. 2016): the specular highlight is a
+picture of the panel and the diffuse is its exact form factor. A one-sided light casts through a spot map
+facing its emitting side (75 degrees each way), a two-sided one through a point light's cube; both share
+those lights' caps. Deferred, forward PBR, terrain and the GI relight shade it as an area; Blinn-Phong,
+cel, lit sprites, lit particles, volumetric fog and custom materials shade it as the spot (one-sided) or
+point (two-sided) of the same lumens its record also is. Saved scenes with one need player contract 27.
 
 ### LightProbeNode — `'lightProbe'`
 
@@ -393,6 +412,7 @@ light. Forward materials, lit particles and lit sprites take it at their centre.
 ```ts
 size: [number, number, number]           // full extents, before the node transform; min 0.01
 probeCounts: [number, number, number]    // probes along each axis, 2..128
+probeInset: number                       // 0..0.5 of the spacing the outer probes stand in from the faces (0 = on them)
 rays: 64 | 256 ; maxRayDistance: number ; captureResolution: 16 | 32 ; includeGrass: boolean
 blendDistance: number ; intensity: number ; normalBias: number ; viewBias: number   // biases: fractions of the smallest spacing
 multiBounce: boolean ; enabled: boolean ; bakeId: string | null
@@ -403,8 +423,10 @@ worldSpacing: [number, number, number] ; minSpacing: number ; probeCount: number
 weightAt(p: vec3): number                // 0..1, 0 when disabled
 ```
 
-Changing the grid (`size`, `probeCounts`, `rays`, `maxRayDistance`, `captureResolution`) or the node's
-transform captures it again; the other fields apply at once. `renderer.gi` exposes the volumes' state
+Changing the grid (`size`, `probeCounts`, `probeInset`, `rays`, `maxRayDistance`, `captureResolution`) or
+the node's transform captures it again; the other fields apply at once. `rays` takes 64 or 256 only; any
+other number snaps to the nearer one, with a warning. A volume saved without `probeInset` keeps 0; one added
+in the editor starts at 0.5. `renderer.gi` exposes the volumes' state
 (`describe()`), the CPU twin (`lightingAt`, `ambientAt`) and `resetLighting()`.
 
 ### ExposureVolumeNode — `'exposureVolume'`

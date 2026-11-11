@@ -247,6 +247,7 @@ export class Scene {
     // TODO: Move this to a LightManager class
     private _numPointLights: number;
     private _numSpotlights: number;
+    private _numAreaLights = 0;
 
     // Backs this.wait/after/every. Ticked once per Scene.update and gated like node.update, so timers
     // pause with the game; cancelled per-node on despawn.
@@ -1116,7 +1117,7 @@ export class Scene {
     // TODO: Move this to a LightManager class
     private _asignLightIndices(): void {
         const nodes = this.nodes;
-        // ONE sequence for point and spot lights, where there used to be two.
+        // ONE sequence for point, spot and area lights, where there used to be two.
         //
         // They shared nothing before because each indexed its own fixed uniform array. They now share a
         // single record array in the light data texture, and `index` is the record — which is also what
@@ -1127,6 +1128,7 @@ export class Scene {
         let punctual = 0;
         let pointLights = 0;
         let spotlights = 0;
+        let areaLights = 0;
         for (const node of nodes) {
             if (!(node instanceof LightNode) || node.type === 'directional') continue;
 
@@ -1135,10 +1137,12 @@ export class Scene {
             // cube faces on a light no fragment can look up.
             node.index = punctual < MAX_LIGHTS ? punctual++ : -1;
             if (node.type === 'point') pointLights++;
+            else if (node.type === 'area') areaLights++;
             else spotlights++;
         }
         this._numPointLights = pointLights;
         this._numSpotlights = spotlights;
+        this._numAreaLights = areaLights;
     }
 
     private _onChange() {
@@ -1522,6 +1526,7 @@ export class Scene {
      */
     public get numPointLights(): number { return this._numPointLights; }
     public get numSpotlights(): number { return this._numSpotlights; }
-    /** Point plus spot: the number of records the light grid carries. */
-    public get numLights(): number { return this._numPointLights + this._numSpotlights; }
+    public get numAreaLights(): number { return this._numAreaLights; }
+    /** Point, spot and area: the number of records the light grid carries. */
+    public get numLights(): number { return this._numPointLights + this._numSpotlights + this._numAreaLights; }
 }

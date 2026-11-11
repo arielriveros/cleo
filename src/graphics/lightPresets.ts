@@ -1,6 +1,6 @@
 import {
-    DEFAULT_ANGULAR_RADIUS, DEFAULT_DIRECTIONAL_LUX, DEFAULT_LUMENS, DEFAULT_RANGE, DEFAULT_SOURCE_RADIUS,
-    DirectionalLight, Spotlight, type Light,
+    AreaLight, DEFAULT_ANGULAR_RADIUS, DEFAULT_AREA_HEIGHT, DEFAULT_AREA_LUMENS, DEFAULT_AREA_WIDTH, DEFAULT_DIRECTIONAL_LUX,
+    DEFAULT_LUMENS, DEFAULT_RANGE, DEFAULT_SOURCE_RADIUS, DirectionalLight, Spotlight, type AreaLightShape, type Light,
 } from "./lighting";
 import { kelvinToRgb } from "./colorTemperature";
 import { definePresets, type Preset } from "../core/presets";
@@ -17,6 +17,11 @@ export interface LightPresetOptions {
     sourceRadius?: number;
     cutOff?: number;
     outerCutOff?: number;
+    /** Area lights: the emitter's shape, its size in metres (a disk's diameter is its width), and its sides. */
+    shape?: AreaLightShape;
+    width?: number;
+    height?: number;
+    twoSided?: boolean;
     /** Cleared, as `resetToPhysicalDefaults` does: a preset re-authors the light in real units. */
     legacyFalloff?: boolean;
 }
@@ -108,10 +113,32 @@ export const SPOT_LIGHT_PRESETS: LightPreset[] = definePresets(SPOT_BASE, [
           cutOff: 40, outerCutOff: 55 }],
 ]);
 
+const AREA_BASE: LightPresetOptions = {
+    color: kelvinToRgb(4000), intensity: DEFAULT_AREA_LUMENS, range: 10, shape: 'rect', width: DEFAULT_AREA_WIDTH,
+    height: DEFAULT_AREA_HEIGHT, twoSided: false, legacyFalloff: false,
+};
+
+// An area light's lumens are the whole emitter's, out of its face (or faces): a fixture's rating as it is.
+export const AREA_LIGHT_PRESETS: LightPreset[] = definePresets(AREA_BASE, [
+    ['ceilingPanel', 'Ceiling Panel', 'A 60 x 60 cm 3600 lm neutral-white LED panel.',
+        { intensity: 3600, range: 10, width: 0.6, height: 0.6 }],
+    ['fluorescentTube', 'Fluorescent Tube', 'A 1.2 m, 2600 lm cool-white tube, glowing all round.',
+        { color: kelvinToRgb(5000), intensity: 2600, range: 8, width: 1.2, height: 0.04, twoSided: true }],
+    ['softbox', 'Softbox', 'A 60 x 90 cm 5000 K studio softbox, 8000 lm.',
+        { color: kelvinToRgb(5000), intensity: 8000, range: 12, width: 0.6, height: 0.9 }],
+    ['window', 'Window Fill', 'A 1.2 x 1.5 m overcast window: 6500 K, 20,000 lm into the room.',
+        { color: kelvinToRgb(6500), intensity: 20000, range: 15, width: 1.2, height: 1.5 }],
+    ['diskDownlight', 'Disk Downlight', 'A 20 cm round 1000 lm warm ceiling light.',
+        { color: kelvinToRgb(3000), intensity: 1000, range: 6, shape: 'disk', width: 0.2 }],
+    ['screen', 'TV Screen', 'A 55-inch screen showing a bright scene: about 400 lm of cool light.',
+        { color: kelvinToRgb(7500), intensity: 400, range: 5, width: 1.21, height: 0.68 }],
+]);
+
 /** The preset table that fits `light`'s type. */
 export function lightPresetsFor(light: Light): LightPreset[] {
     if (light instanceof DirectionalLight) return DIRECTIONAL_LIGHT_PRESETS;
     if (light instanceof Spotlight) return SPOT_LIGHT_PRESETS;
+    if (light instanceof AreaLight) return AREA_LIGHT_PRESETS;
     return POINT_LIGHT_PRESETS;
 }
 
@@ -119,7 +146,11 @@ export function lightPresetsFor(light: Light): LightPreset[] {
  * What a freshly added light starts with: the engine's photometric defaults (100,000 lx; a white 1500 lm,
  * 10 m lamp). The same in every scene — in a daylit one a 1500 lm lamp barely registers, which is physics.
  */
-export function newLightOptions(type: 'directional' | 'point' | 'spot'): LightPresetOptions {
+export function newLightOptions(type: 'directional' | 'point' | 'spot' | 'area'): LightPresetOptions {
     if (type === 'directional') return { intensity: DEFAULT_DIRECTIONAL_LUX, angularRadius: DEFAULT_ANGULAR_RADIUS };
+    if (type === 'area') {
+        return { color: [1, 1, 1], intensity: DEFAULT_AREA_LUMENS, range: DEFAULT_RANGE, shape: 'rect',
+                 width: DEFAULT_AREA_WIDTH, height: DEFAULT_AREA_HEIGHT, twoSided: false };
+    }
     return { color: [1, 1, 1], intensity: DEFAULT_LUMENS, range: DEFAULT_RANGE, sourceRadius: DEFAULT_SOURCE_RADIUS };
 }

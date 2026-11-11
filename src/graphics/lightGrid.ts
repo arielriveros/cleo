@@ -7,8 +7,8 @@ import {
     type ClusterBuild, type ClusterGrid, type ClusterLight, type ClusterView,
 } from './clusters';
 import {
-    INDICES_PER_TEXEL, LIGHT_DATA_WIDTH, LIGHT_DATA_WIDTH_SHIFT, LIGHT_RECORD_TEXELS,
-    lightDataFloats, lightDataLayout, packClusterBuild, packLightRecord,
+    AREA_EXT_TEXELS, INDICES_PER_TEXEL, LIGHT_DATA_WIDTH, LIGHT_DATA_WIDTH_SHIFT, LIGHT_RECORD_TEXELS, LTC_ROWS,
+    areaMarker, lightDataFloats, lightDataLayout, ltcTableTexels, packAreaExtension, packClusterBuild, packLightRecord,
     type LightDataLayout,
 } from './lightData';
 import type { ShaderManager } from './systems/shaderManager';
@@ -37,8 +37,13 @@ export class LightGrid {
     private _rows = 0;
 
     private _staging: Float32Array = new Float32Array(0);
+    /** The staging buffer's first rows hold the LTC tables (written once per buffer). */
+    private _stagingHasLtc = false;
+    /** The texture's first rows hold the LTC tables (uploaded once per allocation, kept while frames skip them). */
+    private _ltcOnGpu = false;
     private _build: ClusterBuild = { table: new Float32Array(0), indices: new Float32Array(0), used: 0, overflowed: 0 };
     private _layout: LightDataLayout = lightDataLayout(0, 0, 0);
+    private _areaCount = 0;
     private _grid: ClusterGrid = { ...DEFAULT_CLUSTER_GRID };
 
     /** `tile = fragCoord * scale + bias`, backend-corrected. See `clusterTileScaleBias`. */
@@ -87,11 +92,11 @@ export class LightGrid {
      * light records are still to be written, by `packRecord`.
      */
     public build(lights: readonly ClusterLight[], camera: ClusterView,
-                 viewportWidth: number, viewportHeight: number, flipY: boolean): void {
+                 viewportWidth: number, viewportHeight: number, flipY: boolean, areaCount: number = 0): void {
         this._build = buildClusters(lights, camera, this._grid, DEFAULT_CLUSTER_LIGHT_CAP, this._build);
         this._tile = clusterTileScaleBias(viewportWidth, viewportHeight, this._grid, flipY);
         this._z = clusterDepthScaleBias(camera.near, camera.far, this._grid.z);
-        this._layoutFrame(lights.length, this._clusterCount());
+        this._layoutFrame(lights.length, this._clusterCount(), areaCount);
     }
 
     /**
@@ -102,13 +107,13 @@ export class LightGrid {
      * second code path in any shader, and makes every fragment resolve to cluster 0 whatever it
      * computes from its own coordinate.
      */
-    public buildSingle(lightCount: number): void {
+    public buildSingle(lightCount: number, areaCount: number = 0): void {
         this._grid = { x: 1, y: 1, z: 1 };
         this._build = buildSingleCluster(Math.min(lightCount, MAX_LIGHTS), this._build);
         // Any finite mapping resolves to tile 0 / slice 0 once the shader clamps into a 1x1x1 grid.
         this._tile = [0, 0, 0, 0];
         this._z = [0, 0];
-        this._layoutFrame(lightCount, 1);
+        this._layoutFrame(lightCount, 1, areaCount);
     }
 
     /** Restore the normal grid after a `buildSingle` pass. */
@@ -120,12 +125,21 @@ export class LightGrid {
         return this._grid.x * this._grid.y * this._grid.z;
     }
 
-    private _layoutFrame(lightCount: number, clusterCount: number): void {
+    private _layoutFrame(lightCount: number, clusterCount: number, areaCount: number): void {
         this._lightCount = Math.min(lightCount, MAX_LIGHTS);
-        this._layout = lightDataLayout(clusterCount, this._lightCount, this._build.used);
+        this._areaCount = Math.min(areaCount, this._lightCount);
+        this._layout = lightDataLayout(clusterCount, this._lightCount, this._build.used, this._areaCount);
 
         const floats = lightDataFloats(this._layout.rows);
-        if (this._staging.length < floats) this._staging = new Float32Array(floats);
+        if (this._staging.length < floats) {
+            this._staging = new Float32Array(floats);
+            this._stagingHasLtc = false;
+        }
+        if (!this._layout.ltc) this._stagingHasLtc = false;   // this frame's table and records start at 0
+        else if (!this._stagingHasLtc) {
+            this._staging.set(ltcTableTexels(), 0);
+            this._stagingHasLtc = true;
+        }
         // The table and the index list, straight in. Records are written by the caller after this.
         packClusterBuild(this._staging, this._layout, this._build, clusterCount);
     }
@@ -146,6 +160,32 @@ export class LightGrid {
                         coneScale, coneOffset, spotShadowLayer, pointShadowSlot);
     }
 
+    /** The frame's layout (tests, the debug view). */
+    public get layout(): Readonly<LightDataLayout> { return this._layout; }
+
+    /**
+     * Write area light `index`'s record and its extension, `areaSlot` being its place among the frame's area
+     * lights (0 up to the `areaCount` the frame was built with). The record is the spot or point an old
+     * shader path shades it as, its free shadow field marking the extension (lightData.ts).
+     */
+    public packAreaRecord(index: number, areaSlot: number,
+                          position: ArrayLike<number>, invRangeSquared: number,
+                          color: ArrayLike<number>, intensity: number,
+                          normal: ArrayLike<number>, equivalentRadius: number, twoSided: boolean,
+                          shadowSlot: number,
+                          tangent: ArrayLike<number>, halfWidth: number, halfHeight: number,
+                          radianceScale: number, shape: number): void {
+        if (index < 0 || index >= this._lightCount || areaSlot < 0 || areaSlot >= this._areaCount) return;
+        const ext = this._layout.areaExtTexel + areaSlot * AREA_EXT_TEXELS;
+        const marker = areaMarker(ext);
+        // One-sided: a hemisphere spot (`saturate(cos)^2`), its map the spot atlas's. Two-sided: a point.
+        packLightRecord(this._staging, this._layout.lightRecordTexel + index * LIGHT_RECORD_TEXELS,
+                        position, invRangeSquared, color, intensity, normal, equivalentRadius,
+                        twoSided ? 0 : 1, twoSided ? 1 : 0,
+                        twoSided ? marker : shadowSlot, twoSided ? shadowSlot : marker);
+        packAreaExtension(this._staging, ext, tangent, halfWidth, radianceScale, halfHeight, shape, twoSided ? 1 : 0);
+    }
+
     /** Send the frame's rows to the GPU, growing the texture first if it has outgrown its storage. */
     public upload(): void {
         const rows = this._layout.rows;
@@ -158,15 +198,20 @@ export class LightGrid {
             while (next < rows) next *= 2;
             texture.create(null, LIGHT_DATA_WIDTH, next);
             this._rows = next;
+            this._ltcOnGpu = false;
             Logger.print('info', [`Light grid texture: ${LIGHT_DATA_WIDTH}x${next} rgba32float ` +
                                   `(${((LIGHT_DATA_WIDTH * next * 16) / 1024) | 0} KB)`], 'LightGrid');
         }
 
-        // Only the rows in use. Both back ends land this on a sub-image write from the origin, so the
-        // untouched tail of the texture keeps whatever it held and nothing reads it.
-        device.writeTexture(texture.rhiTexture, this._staging.subarray(0, rows * LIGHT_DATA_WIDTH * 4),
-                            LIGHT_DATA_WIDTH, rows);
-        this._uploadedRows = rows;
+        // Only the rows in use. Both back ends land this on a sub-image write, so the untouched tail of the
+        // texture keeps whatever it held and nothing reads it. A frame with area lights skips the LTC
+        // tables' rows once they are on this allocation; one without them writes from the origin, over them.
+        const first = this._layout.ltc && this._ltcOnGpu ? LTC_ROWS : 0;
+        device.writeTexture(texture.rhiTexture,
+                            this._staging.subarray(first * LIGHT_DATA_WIDTH * 4, rows * LIGHT_DATA_WIDTH * 4),
+                            LIGHT_DATA_WIDTH, rows - first, 0, 0, 0, first);
+        this._ltcOnGpu = this._layout.ltc;
+        this._uploadedRows = rows - first;
     }
 
     /**
@@ -192,6 +237,7 @@ export class LightGrid {
         this._texture?.delete();
         this._texture = null;
         this._rows = 0;
+        this._ltcOnGpu = false;
     }
 }
 

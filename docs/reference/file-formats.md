@@ -137,7 +137,8 @@ manifest contract is newer than itself.
 | 23 | Light-probe lighting per pixel, as spherical harmonics, from every lighting probe in view *(unreleased — a v22 player lights a room from its probe only while the camera stands inside it)* |
 | 24 | Probe reflections per pixel from one octahedral atlas, box projection (`lightProbe.boxProjection`), time-sliced bakes, `light.bake` *(unreleased — a v23 player reflects whatever probe box the camera stands in on every surface)* |
 | 25 | `GIVolumeNode` and the GI bakes `game.bin` carries (`giBakes`) *(unreleased — a v24 player loads every GI volume as a plain node, and the rooms it lights take the open sky's fill through their roofs)* |
-| **26** | A `WeatherNode`'s falling rain and snow (`weather.precipitation`, `precipitationRate/Size/Speed/Wind/Sprite`), stopping under shelter, and the raindrops on wet ground while it rains *(unreleased — a v25 player reads none of it: a rainy scene is wet, but nothing falls and its puddles lie still)* |
+| 26 | A `WeatherNode`'s falling rain and snow (`weather.precipitation`, `precipitationRate/Size/Speed/Wind/Sprite`), stopping under shelter, and the raindrops on wet ground while it rains *(unreleased — a v25 player reads none of it: a rainy scene is wet, but nothing falls and its puddles lie still)* |
+| **27** | Area lights (`lightType: 'area'`; `light.shape/width/height/twoSided`), GI volume probe insets (`giVolume.probeInset`), GI bakes of format 2 (each ray's emissive and albedo averaged over its patch; format 1 still loads) *(unreleased — a v26 player throws on the unknown light type and stops loading the scene)* |
 
 ### What a build strips
 

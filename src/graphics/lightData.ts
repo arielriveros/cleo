@@ -1,4 +1,5 @@
 import type { ClusterBuild } from './clusters';
+import { LTC_TABLE_1_HALF_BASE64, LTC_TABLE_2_HALF_BASE64, LTC_TABLE_SIZE } from './ltcTables';
 
 // -----------------------------------------------------------------------------------------------
 // The light data texture: one rgba32float 2D texture carrying the cluster table, the packed light
@@ -52,6 +53,94 @@ export const NO_SHADOW_SLOT = -1;
 export const POINT_CONE_SCALE = 0;
 export const POINT_CONE_OFFSET = 1;
 
+// -----------------------------------------------------------------------------------------------
+// AREA LIGHTS ride in the same records, without a field any shader that predates them reads.
+//
+// The record shape is frozen: `cleoLight` decodes it in chunks/clusteredLights.wgsl, which is compiled
+// into every custom material's prelude, so a stored custom shader breaks the moment it changes. An area
+// light is therefore written as the spot or point an old path shades sensibly (render/lighting.ts) and
+// says it is more in the one shadow field its kind leaves free:
+//
+//   one-sided  spotShadowLayer = its spot map (or -1)   pointShadowSlot = -(2 + ext)
+//   two-sided  spotShadowLayer = -(2 + ext)             pointShadowSlot = its cube (or -1)
+//
+// where `ext` is the ABSOLUTE texel of its two-texel extension record. Every old path reads a negative
+// shadow field as "no map", so it keeps the real one; chunks/areaLights.wgsl reads the marker as
+// `-min(spot, point) - 2`, which is >= 0 only for an area light.
+//
+//   ext texel 0:  tangent.xyz (local X)   half width
+//   ext texel 1:  radianceScale           half height     shape (0 rect, 1 disk)     flags (bit 0 two-sided)
+//
+// The LTC lookup tables (ltcTables.ts) sit at the very start of the texture, ahead of the cluster table,
+// in frames that have an area light at all: 2 x 64 x 64 texels, 32 rows, uploaded once per allocation.
+// -----------------------------------------------------------------------------------------------
+
+/** Texels of an area light's extension record. */
+export const AREA_EXT_TEXELS = 2;
+/** Texels of the two LTC tables at the start of the texture (64 x 64 each). */
+export const LTC_TEXELS = 2 * LTC_TABLE_SIZE * LTC_TABLE_SIZE;
+/** Whole rows the LTC tables fill. */
+export const LTC_ROWS = LTC_TEXELS / 256;
+/** Shape codes the extension record carries. */
+export const AREA_SHAPE_RECT = 0;
+export const AREA_SHAPE_DISK = 1;
+/** Extension flag bits. */
+export const AREA_FLAG_TWO_SIDED = 1;
+
+/** The shadow-field marker naming extension texel `ext`. */
+export function areaMarker(extTexel: number): number { return -(2 + extTexel); }
+
+/** The extension texel a record's two shadow fields name, or -1 when it is not an area light. */
+export function areaExtensionOf(spotShadowLayer: number, pointShadowSlot: number): number {
+    const ext = -Math.min(spotShadowLayer, pointShadowSlot) - 2;
+    return ext >= 0 ? ext : -1;
+}
+
+/** Write an area light's extension record at `texel`. */
+export function packAreaExtension(out: Float32Array, texel: number,
+                                  tangent: ArrayLike<number>, halfWidth: number,
+                                  radianceScale: number, halfHeight: number, shape: number, flags: number): void {
+    const o = texel * 4;
+    out[o] = tangent[0];
+    out[o + 1] = tangent[1];
+    out[o + 2] = tangent[2];
+    out[o + 3] = halfWidth;
+    out[o + 4] = radianceScale;
+    out[o + 5] = halfHeight;
+    out[o + 6] = shape;
+    out[o + 7] = flags;
+}
+
+let ltcTexels: Float32Array | null = null;
+
+/** The two LTC tables as rgba32float texels, table 1 then table 2 (decoded once). */
+export function ltcTableTexels(): Float32Array {
+    if (ltcTexels) return ltcTexels;
+    const out = new Float32Array(LTC_TEXELS * 4);
+    const half = LTC_TABLE_SIZE * LTC_TABLE_SIZE * 4;
+    decodeHalfBase64(LTC_TABLE_1_HALF_BASE64, out, 0);
+    decodeHalfBase64(LTC_TABLE_2_HALF_BASE64, out, half);
+    ltcTexels = out;
+    return out;
+}
+
+function decodeHalfBase64(b64: string, out: Float32Array, offset: number): void {
+    const bin = atob(b64);   // browsers, Electron and Node 16+
+    for (let i = 0; i + 1 < bin.length; i += 2) {
+        const h = bin.charCodeAt(i) | (bin.charCodeAt(i + 1) << 8);
+        out[offset + (i >> 1)] = halfToFloat(h);
+    }
+}
+
+function halfToFloat(h: number): number {
+    const sign = h & 0x8000 ? -1 : 1;
+    const exp = (h >> 10) & 0x1f;
+    const mant = h & 0x3ff;
+    if (exp === 0) return sign * mant * 2 ** -24;
+    if (exp === 31) return mant ? NaN : sign * Infinity;
+    return sign * (1 + mant / 1024) * 2 ** (exp - 15);
+}
+
 /**
  * Where each region starts, in texels.
  *
@@ -61,26 +150,35 @@ export const POINT_CONE_OFFSET = 1;
  * uploading it.
  */
 export interface LightDataLayout {
-    /** Always 0. Named anyway, because the shader reads it as a uniform like the other two. */
+    /** 0, or {@link LTC_TEXELS} in a frame with an area light (the LTC tables come first). */
     clusterTableTexel: number;
     lightRecordTexel: number;
+    /** The area lights' extension records, {@link AREA_EXT_TEXELS} each, after the light records. */
+    areaExtTexel: number;
     lightIndexTexel: number;
+    /** The frame carries the LTC tables (it has an area light). */
+    ltc: boolean;
     /** Total texels in use, before the round up to a whole row. */
     texelCount: number;
     /** Rows to upload. `texelCount` rounded up to {@link LIGHT_DATA_WIDTH}. */
     rows: number;
 }
 
-/** The region offsets for a frame with this many clusters, lights and index entries. */
+/** The region offsets for a frame with this many clusters, lights, index entries and area lights. */
 export function lightDataLayout(clusterCount: number, lightCount: number,
-                                indexCount: number): LightDataLayout {
-    const lightRecordTexel = clusterCount;
-    const lightIndexTexel = lightRecordTexel + lightCount * LIGHT_RECORD_TEXELS;
+                                indexCount: number, areaCount: number = 0): LightDataLayout {
+    const ltc = areaCount > 0;
+    const clusterTableTexel = ltc ? LTC_TEXELS : 0;
+    const lightRecordTexel = clusterTableTexel + clusterCount;
+    const areaExtTexel = lightRecordTexel + lightCount * LIGHT_RECORD_TEXELS;
+    const lightIndexTexel = areaExtTexel + areaCount * AREA_EXT_TEXELS;
     const texelCount = lightIndexTexel + Math.ceil(indexCount / INDICES_PER_TEXEL);
     return {
-        clusterTableTexel: 0,
+        clusterTableTexel,
         lightRecordTexel,
+        areaExtTexel,
         lightIndexTexel,
+        ltc,
         texelCount,
         rows: Math.max(1, Math.ceil(texelCount / LIGHT_DATA_WIDTH)),
     };
@@ -194,4 +292,25 @@ export function packClusterBuild(out: Float32Array, layout: LightDataLayout,
                                  build: ClusterBuild, clusterCount: number): void {
     out.set(build.table.subarray(0, clusterCount * 4), layout.clusterTableTexel * 4);
     out.set(build.indices.subarray(0, build.used), layout.lightIndexTexel * 4);
+}
+
+/**
+ * An area light's tangent (its width axis) in the world: the node's local X, made exactly perpendicular to
+ * its emitting `normal` (local +Z, `worldForward`). `transform` is the node's world matrix, column-major.
+ */
+export function areaTangent(transform: ArrayLike<number>, normal: ArrayLike<number>, out: Float32Array | number[]): Float32Array | number[] {
+    let x = transform[0], y = transform[1], z = transform[2];
+    const d = x * normal[0] + y * normal[1] + z * normal[2];
+    x -= d * normal[0]; y -= d * normal[1]; z -= d * normal[2];
+    let len = Math.hypot(x, y, z);
+    if (len < 1e-6) {
+        // A degenerate frame (zero scale on X): any axis perpendicular to the normal.
+        const a = Math.abs(normal[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+        x = a[1] * normal[2] - a[2] * normal[1];
+        y = a[2] * normal[0] - a[0] * normal[2];
+        z = a[0] * normal[1] - a[1] * normal[0];
+        len = Math.hypot(x, y, z);
+    }
+    out[0] = x / len; out[1] = y / len; out[2] = z / len;
+    return out;
 }

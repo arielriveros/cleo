@@ -32,7 +32,7 @@ import type { ViewProjection } from '../viewProjection';
 import type { RenderSubsystems } from '../subsystems';
 import {
     GI_IRRADIANCE_TILE, GI_VISIBILITY_TILE, giAtlasLayout, giAtlasSizes, giProbeDrawFlips, giProbeOverlayRadius,
-    gridCoords, hitCacheSize, tileSolidAngles, type GiAtlasLayout,
+    giReduceSubSamples, gridCoords, hitCacheSize, tileSolidAngles, type GiAtlasLayout,
 } from './giLayout';
 import { GI_PROBE_ACTIVE, GI_PROBE_PENDING, GI_PROBE_SKIPPED, GI_PROBE_UNCAPTURED, classifyHitRows, isUnderground } from './giClassify';
 import { ModelDraw } from '../modelDraw';
@@ -42,7 +42,7 @@ import {
 import { GI_TIERS, giProbesPerFrame, giShadowMapSize } from './giSettings';
 import {
     GiBakeFormatError, GiSignature, decodeGiBake, encodeGiBake, packGiBake, readGiBakeHeader, sameGiSignature,
-    unpackGiBake, type GiBake,
+    unpackGiBake, type GiBake, GI_BAKE_VERSION,
 } from './giBakeFormat';
 import { GiBakeRegistry } from './giBakeRegistry';
 import {
@@ -142,7 +142,7 @@ interface VolumeGpu {
     /** An inflated bake to apply at the next update (uploads belong inside a frame). */
     pendingBake: GiBake | null;
     /** A saved bake whose signature has not matched the scene yet (see `_recheckBakes`). */
-    bakeCheck: { bytes: Uint8Array; signature: [number, number]; packed: boolean; until: number; next: number; late: boolean } | null;
+    bakeCheck: { bytes: Uint8Array; signature: [number, number]; packed: boolean; version: number; until: number; next: number; late: boolean } | null;
 }
 
 interface CaptureBatch {
@@ -207,6 +207,12 @@ export class GiSystem {
     public shadowMaxSize = GI_TIERS.high.giShadowMaxSize;
     public fillDrawsPerFrame = GI_TIERS.high.giFillDrawsPerFrame;
     public multiBounce = true;
+    /**
+     * Harness switches, runtime only and never saved: `ignoreBakes` captures every volume afresh instead of
+     * loading its saved bake (an A/B of a capture change against the same scene); `reduceSubSamples` > 0
+     * overrides each ray's cell average (1 = the centre texel alone, as version-1 bakes were taken).
+     */
+    public readonly debug = { ignoreBakes: false, reduceSubSamples: 0 };
     /** Counters for tests and the harness. */
     public readonly stats = { capturedProbes: 0, captureDraws: 0, relitProbes: 0, sweeps: 0, shadowDraws: 0, resolves: 0, loadedBakes: 0, rescales: 0 };
 
@@ -349,7 +355,7 @@ export class GiSystem {
         const m = node.worldTransform;
         const t: number[] = [];
         for (let i = 0; i < 16; i++) t.push(Math.round(m[i] * 1e4));
-        return [...node.size, ...node.probeCounts, node.rays, node.maxRayDistance, node.captureResolution, ...t].join(',');
+        return [...node.size, ...node.probeCounts, node.probeInset, node.rays, node.maxRayDistance, node.captureResolution, ...t].join(',');
     }
 
     private _sync(scene: Scene): void {
@@ -386,6 +392,9 @@ export class GiSystem {
         const box = v.node.getBoundingBox();
         const r = v.node.maxRayDistance;
         const sig = new GiSignature();
+        // Where the probes stand: only an inset moves them off the grid a bake without one was taken on
+        // (left out at 0, so every bake taken before insets existed still matches).
+        if (v.node.probeInset !== 0) sig.addString('inset:' + v.node.probeInset);
         const nodes: ModelNode[] = [];
         this._linked.clear();
         for (const node of scene.models) {
@@ -474,7 +483,7 @@ export class GiSystem {
      */
     private _loadBake(scene: Scene, v: VolumeGpu): boolean {
         const node = v.node;
-        const bytes = GiBakeRegistry.get(node.bakeId);
+        const bytes = this.debug.ignoreBakes ? undefined : GiBakeRegistry.get(node.bakeId);
         if (!bytes) return false;
         let bake;
         try {
@@ -497,11 +506,19 @@ export class GiSystem {
             // frames, and the scene round the volume only matches its bake once they have. The volume waits
             // (neither captures nor relights) and is checked again until GI_BAKE_SETTLE_MS have passed.
             v.loading = true;
-            v.bakeCheck = { bytes, signature: bake.signature, packed: bake.packed, until: performance.now() + GI_BAKE_SETTLE_MS, next: 0, late: false };
+            v.bakeCheck = { bytes, signature: bake.signature, packed: bake.packed, version: bake.version, until: performance.now() + GI_BAKE_SETTLE_MS, next: 0, late: false };
             return true;
         }
         this._acceptBake(v, bytes, bake.packed);
+        this._noteOutdated(node, bake.version);
         return true;
+    }
+
+    /** A bake from an older format loads, but the editor offers to save it again (giBakeFormat.ts VERSIONS). */
+    private _noteOutdated(node: GIVolumeNode, version: number): void {
+        if (version >= GI_BAKE_VERSION) return;
+        this.outdatedBakes.add(node.id);
+        Logger.info(`The GI bake of ${node.name} is from an older format (v${version}); it loads, but a capture saved again lights small glowing fixtures evenly.`, 'Renderer');
     }
 
     /**
@@ -523,6 +540,7 @@ export class GiSystem {
                     Logger.info(`The geometry round ${v.node.name} settled and fits its GI bake after all; loading it.`, 'Renderer');
                 }
                 this._acceptBake(v, check.bytes, check.packed);
+                this._noteOutdated(v.node, check.version);
             } else if (now >= check.until) {
                 v.loading = false;
                 if (check.late) { v.bakeCheck = null; continue; }
@@ -538,6 +556,7 @@ export class GiSystem {
     private _acceptBake(v: VolumeGpu, bytes: Uint8Array, packed: boolean): void {
         const node = v.node;
         this.staleBakes.delete(node.id);
+        this.outdatedBakes.delete(node.id);
         if (!packed) {
             this._applyBake(v, decodeGiBake(bytes));
             return;
@@ -570,6 +589,11 @@ export class GiSystem {
 
     /** Volumes whose saved capture no longer fits them (by node id): the editor offers to save a new one. */
     public readonly staleBakes = new Set<string>();
+    /**
+     * Volumes whose saved capture loaded but is from an older bake format (by node id): it lights as it
+     * always did, and a capture saved again takes what the newer format adds (giBakeFormat.ts VERSIONS).
+     */
+    public readonly outdatedBakes = new Set<string>();
 
     /** Whether every probe of `node`'s volume is captured and classified: a bake can be saved. */
     public isCaptured(node: GIVolumeNode): boolean {
@@ -588,6 +612,8 @@ export class GiSystem {
         this._passes.flushFrameEncoder(true);
         const [hitA, hitB, hitC] = await Promise.all(v.hit.colors.map(c => device.readPixels(c.attachmentView, 0, 0, w, h)));
         if (this._volumes.get(node) !== v) return null;
+        // What is exported is this build's format: once saved, the volume's bake is current.
+        this.outdatedBakes.delete(node.id);
         const probeData = new Float32Array(v.probes * 4);
         for (let p = 0; p < v.probes; p++) probeData[p * 4 + 3] = v.states[p];
         return packGiBake(encodeGiBake({
@@ -1033,6 +1059,7 @@ export class GiSystem {
         this._shaderManager.setUniform('u_captureSide', S);
         this._shaderManager.setUniform('u_originTopLeft', device.capabilities.conventions.originTopLeft ? 1 : 0);
         this._shaderManager.setUniform('u_hasBackfaces', 1);
+        this._shaderManager.setUniform('u_subSamples', this.debug.reduceSubSamples > 0 ? this.debug.reduceSubSamples : giReduceSubSamples(v.rays));
         this._shaderManager.setUniform('u_captureSize', [atlas.width, atlas.height]);
         this._passes.setViewport(v.hit.width, v.hit.height);
         this._passes.drawFullscreenAndEnd(pass);
@@ -1111,6 +1138,14 @@ export class GiSystem {
             const p = node.worldPosition;
             const l = node.light as any;
             values.push(p[0], p[1], p[2], l.internalIntensity ?? 0, l.color?.[0] ?? 0, l.color?.[1] ?? 0, l.color?.[2] ?? 0, l.range ?? 0);
+            // Where it points, its cone and its emitter: a spot or a panel turned, narrowed or resized
+            // lights other hits (a point light's own axis means nothing, but costs nothing to include).
+            if (node.type !== 'point') {
+                const f = node.worldForward;
+                values.push(f[0], f[1], f[2], l.cutOff ?? 0, l.outerCutOff ?? 0, l.width ?? 0, l.height ?? 0, l.twoSided ? 1 : 0,
+                            l.shape === 'disk' ? 1 : 0);
+                if (node.type === 'area') { const m = node.worldTransform; values.push(m[0], m[1], m[2]); }
+            }
         }
         return { sunDir: sunDir ? [sunDir[0], sunDir[1], sunDir[2]] : null, sunIntensity, skyL0, lightSignature: hashNumbers(values) };
     }

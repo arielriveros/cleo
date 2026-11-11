@@ -488,3 +488,9 @@ export class CasterMotion {
         return skinned || frame - s.changedAt < STATIC_CASTER_FRAMES;
     }
 }
+
+/**
+ * Degrees either side of its normal that a one-sided area light's shadow map covers. Its light reaches the
+ * whole half-space, which no perspective map holds; past this, toward the panel's own plane, it is unshadowed.
+ */
+export const AREA_SHADOW_HALF_FOV = 75;

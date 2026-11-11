@@ -14,6 +14,7 @@
 #include "./chunks/pbrLighting.wgsl"
 #include "./chunks/shIrradiance.wgsl"
 #include "./chunks/clusteredLights.wgsl"
+#include "./chunks/areaLights.wgsl"
 #include "./chunks/octNormal.wgsl"
 #include "./chunks/translucencyTint.wgsl"
 
@@ -618,9 +619,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         if (cleoLightReaches(cl.light, worldPos)) {
             // Same normal turn as the sun's, for the same reason.
             let shadowN = select(N, -N, translucency > 0.0 && dot(N, cl.light.position - worldPos) < 0.0);
-            let visibility = cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+            let ext = cleoAreaIndex(cl);
+            var visibility = 0.0;
+            if (ext >= 0) {
+                // An area light: the panel's own integral (chunks/areaLights.wgsl). Its transmission
+                // below stays the spot's its record also is.
+                let area = cleoAreaLight(cl, ext);
+                visibility = cleoAreaVisibility(cl, area, worldPos, shadowN);
+                Lo += evaluateAreaLight(area, worldPos, N, V, albedo, metallic, roughness, visibility);
+            } else {
+                visibility = cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
                                                     worldPos, shadowN, cl.light.position);
-            Lo += evaluateSpotLight(cl.light, worldPos, N, V, albedo, metallic, roughness, visibility);
+                Lo += evaluateSpotLight(cl.light, worldPos, N, V, albedo, metallic, roughness, visibility);
+            }
             if (translucency > 0.0) {
                 Lo += evaluateSpotTransmission(cl.light, worldPos, N, V, surfaceAlbedo, translucency, visibility);
             }

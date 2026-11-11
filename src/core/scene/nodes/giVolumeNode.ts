@@ -1,6 +1,7 @@
 import { mat4, vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
+import { Logger } from "../../logger";
 import { boxBlendFractions, boxInverseMatrix, boxWeight, boxWorldBounds } from "./boxVolume";
 
 /**
@@ -16,8 +17,13 @@ import { boxBlendFractions, boxInverseMatrix, boxWeight, boxWorldBounds } from "
  * keeping a probe on the far side of a wall from lighting this side).
  *
  * The box is `size` (full extents, local units) centred on the node and carried by its world transform.
- * The grid spans it corner to corner: probe (0, 0, 0) sits at the box's minimum corner and
- * (nx-1, ny-1, nz-1) at its maximum, so every point inside has the whole cage of eight probes round it.
+ * With `probeInset` 0 the grid spans it corner to corner: probe (0, 0, 0) sits at the box's minimum corner
+ * and (nx-1, ny-1, nz-1) at its maximum, so every point inside has the whole cage of eight probes round it.
+ * An inset pulls the outer probes in from the faces by that fraction of the spacing (0.5: each probe at the
+ * centre of its cell), which is what a box drawn to a room's walls wants: probes ON the floor, the walls and
+ * the ceiling see through them, to the outside's light or the inside of the slab, and each one that does
+ * is a bright or a black cell in the room. Between the outer probes and the faces the lookup holds the
+ * outer probes' light.
  * Nested volumes apply the smaller first (the room's before the hamlet's round it), each claiming its
  * feathered weight of what the ones before it left, as light probes do.
  */
@@ -37,11 +43,16 @@ export const MAX_GI_PROBES_PER_AXIS = 128;
 export const MIN_GI_VOLUME_SIZE = 0.01;
 /** The farthest a probe's rays reach, metres. */
 export const MIN_GI_RAY_DISTANCE = 1;
+/** The largest probe inset: half a spacing puts each probe at the centre of its cell. */
+export const MAX_GI_PROBE_INSET = 0.5;
+/** The inset a volume added in the editor starts with (a saved volume without one keeps 0). */
+export const DEFAULT_NEW_GI_PROBE_INSET = 0.5;
 export const MAX_GI_RAY_DISTANCE = 2000;
 
 export interface GiVolumeOptions {
     size?: [number, number, number];
     probeCounts?: [number, number, number];
+    probeInset?: number;
     rays?: number;
     maxRayDistance?: number;
     captureResolution?: number;
@@ -59,6 +70,7 @@ export interface GiVolumeOptions {
 export class GIVolumeNode extends Node {
     private _size: [number, number, number] = [10, 10, 10];
     private _probeCounts: [number, number, number] = [5, 5, 5];
+    private _probeInset = 0;
     private _rays: GiRayCount = 64;
     private _maxRayDistance = 50;
     private _captureResolution: GiCaptureResolution = 32;
@@ -91,7 +103,12 @@ export class GIVolumeNode extends Node {
         super(name, 'giVolume', id);
         if (options.size) this.size = options.size;
         if (options.probeCounts) this.probeCounts = options.probeCounts;
-        if (options.rays !== undefined) this.rays = options.rays;
+        if (options.probeInset !== undefined) this.probeInset = options.probeInset;
+        if (options.rays !== undefined) {
+            this.rays = options.rays;
+            // 128 used to read as "between the two" and silently became 64: say what the volume got.
+            if (+options.rays !== this._rays) Logger.warn(`GI volume '${name}': ${options.rays} rays per probe is not a choice; it uses ${this._rays} (64 or 256).`, 'Scene');
+        }
         if (options.maxRayDistance !== undefined) this.maxRayDistance = options.maxRayDistance;
         if (options.captureResolution !== undefined) this.captureResolution = options.captureResolution;
         if (options.blendDistance !== undefined) this.blendDistance = options.blendDistance;
@@ -123,6 +140,17 @@ export class GIVolumeNode extends Node {
         const next: [number, number, number] = [c(v[0]), c(v[1]), c(v[2])];
         if (next[0] !== this._probeCounts[0] || next[1] !== this._probeCounts[1] || next[2] !== this._probeCounts[2]) this._captureRequested = true;
         this._probeCounts = next;
+    }
+
+    /**
+     * How far the outer probes stand in from the box's faces, as a fraction of the probe spacing (0 to 0.5).
+     * 0 puts them on the faces; 0.5 at the centres of the cells the box divides into.
+     */
+    public get probeInset(): number { return this._probeInset; }
+    public set probeInset(v: number) {
+        const next = Math.min(MAX_GI_PROBE_INSET, Math.max(0, Number.isFinite(+v) ? +v : 0));
+        if (next !== this._probeInset) this._captureRequested = true;
+        this._probeInset = next;
     }
 
     /** Every probe in the volume. */
@@ -189,8 +217,8 @@ export class GIVolumeNode extends Node {
 
     /** Distance between neighbouring probes along each local axis, in local units. */
     public get localSpacing(): [number, number, number] {
-        const s = this._size, n = this._probeCounts;
-        return [s[0] / (n[0] - 1), s[1] / (n[1] - 1), s[2] / (n[2] - 1)];
+        const s = this._size, n = this._probeCounts, e = 2 * this._probeInset;
+        return [s[0] / (n[0] - 1 + e), s[1] / (n[1] - 1 + e), s[2] / (n[2] - 1 + e)];
     }
 
     /** Distance between neighbouring probes along each axis, in world units. */
@@ -207,12 +235,12 @@ export class GIVolumeNode extends Node {
 
     /**
      * Grid coordinates -> world: (i, j, k) of a probe to its world position. Probe (0, 0, 0) sits at the
-     * box's minimum corner.
+     * box's minimum corner, moved in by the inset.
      */
     public gridToWorld(out: mat4): mat4 {
-        const s = this._size, n = this._probeCounts;
-        mat4.translate(out, this.worldTransform, [-0.5 * s[0], -0.5 * s[1], -0.5 * s[2]]);
-        return mat4.scale(out, out, [s[0] / (n[0] - 1), s[1] / (n[1] - 1), s[2] / (n[2] - 1)]);
+        const s = this._size, sp = this.localSpacing, e = this._probeInset;
+        mat4.translate(out, this.worldTransform, [(e * sp[0]) - 0.5 * s[0], (e * sp[1]) - 0.5 * s[1], (e * sp[2]) - 0.5 * s[2]]);
+        return mat4.scale(out, out, sp);
     }
 
     /** World -> grid coordinates (fractional), the inverse of {@link gridToWorld}. */
@@ -265,7 +293,7 @@ export class GIVolumeNode extends Node {
     protected _serializePayload(): any {
         return {
             giVolume: {
-                size: [...this._size], probeCounts: [...this._probeCounts], rays: this._rays,
+                size: [...this._size], probeCounts: [...this._probeCounts], probeInset: this._probeInset, rays: this._rays,
                 maxRayDistance: this._maxRayDistance, captureResolution: this._captureResolution,
                 includeGrass: this.includeGrass, blendDistance: this._blendDistance, intensity: this._intensity,
                 normalBias: this._normalBias, viewBias: this._viewBias, multiBounce: this.multiBounce, additive: this.additive,

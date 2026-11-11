@@ -9,6 +9,13 @@
 //
 // The back-face atlas holds, per ray, the nearest BACK face of what encloses the probe: a ray that meets
 // one before any front face is a back-face hit — the probe stands inside something (giClassify.ts).
+//
+// A ray stands for its whole octahedral cell (about 0.2 sr at 64 rays, 0.05 at 256), and the cell holds
+// dozens of capture texels. The hit (where, facing what, how far) is the cell centre's, because the
+// visibility and the relight need one point; the emissive and the albedo are the cell's AVERAGE over
+// u_subSamples^2 directions. Point-sampled, a lamp's glowing fixture a tenth of a cell across was caught by
+// one ray of one probe and missed by its neighbours, which made that probe tens of times brighter than the
+// ones round it: a bright cell in the lighting wherever it was interpolated.
 
 #include "./chunks/fullscreen.wgsl"
 #include "./chunks/octNormal.wgsl"
@@ -37,7 +44,8 @@ struct GiReduceUniforms {
     u_captureSide: i32,
     u_originTopLeft: i32,
     u_hasBackfaces: i32,
-    _pad0: i32,
+    /** Sub-directions a side of each ray's cell that the emissive and albedo average over (1 = the centre only). */
+    u_subSamples: i32,
     /** The capture atlas's size: depth is SAMPLED at texel centres (naga's GLSL cannot textureLoad a depth texture). */
     u_captureSize: vec2<f32>,
 };
@@ -57,6 +65,27 @@ fn giFaceOf(d: vec3<f32>) -> i32 {
     return select(5, 4, d.z >= 0.0);
 }
 
+/** The capture atlas texel (memory address) that direction `d` lands on in batch slot `slot`, and its face. */
+struct GiFaceTexel {
+    at: vec2<i32>,
+    face: i32,
+    col: i32,
+    row: i32,
+};
+
+fn giFaceTexel(d: vec3<f32>, slot: i32) -> GiFaceTexel {
+    var t: GiFaceTexel;
+    t.face = giFaceOf(d);
+    let clip = u_reduce.u_faceViewProj[t.face] * vec4<f32>(d, 1.0);
+    let ndc = clip.xy / clip.w;
+    let S = u_reduce.u_captureSide;
+    t.col = clamp(i32(floor((ndc.x * 0.5 + 0.5) * f32(S))), 0, S - 1);
+    t.row = clamp(i32(floor((ndc.y * 0.5 + 0.5) * f32(S))), 0, S - 1);
+    if (u_reduce.u_originTopLeft != 0) { t.row = S - 1 - t.row; }
+    t.at = vec2<i32>(t.face * S + t.col, slot * S + t.row);
+    return t;
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> HitOut {
     let side = u_reduce.u_raySide;
@@ -71,16 +100,13 @@ fn fs_main(in: VertexOutput) -> HitOut {
 
     let rayTexel = vec2<f32>(f32(texel.x % side), f32(texel.y % side));
     let d = giRayDirection(rayTexel, f32(side));
-    let face = giFaceOf(d);
-
     // Where this ray lands on its face: the face's NDC, then the texel of the face's tile.
-    let clip = u_reduce.u_faceViewProj[face] * vec4<f32>(d, 1.0);
-    let ndc = clip.xy / clip.w;
+    let ft = giFaceTexel(d, slot);
+    let face = ft.face;
+    let row = ft.row;
+    let col = ft.col;
+    let at = ft.at;
     let S = u_reduce.u_captureSide;
-    let col = clamp(i32(floor((ndc.x * 0.5 + 0.5) * f32(S))), 0, S - 1);
-    var row = clamp(i32(floor((ndc.y * 0.5 + 0.5) * f32(S))), 0, S - 1);
-    if (u_reduce.u_originTopLeft != 0) { row = S - 1 - row; }
-    let at = vec2<i32>(face * S + col, slot * S + row);
 
     // The texel centre's own NDC, which its depth belongs to (not the ray's exact point on the face).
     var centreY = (f32(row) + 0.5) / f32(S);
@@ -120,14 +146,35 @@ fn fs_main(in: VertexOutput) -> HitOut {
     }
     if (distance >= maxDistance) { kind = 0; distance = maxDistance; }
 
-    let albedoMetallic = textureLoad(u_capAlbedo_texture, at, 0);
-    let emissive = textureLoad(u_capEmissive_texture, at, 0).rgb;
-    // A metal has no diffuse; a translucent leaf stores -translucency where metallic goes.
-    let diffuse = albedoMetallic.rgb * (1.0 - saturate(albedoMetallic.a));
+    // The cell's average emissive (every sub-direction: one that meets nothing glows with nothing) and
+    // albedo (over the sub-directions that meet a surface). A metal has no diffuse; a translucent leaf
+    // stores -translucency where metallic goes.
+    let K = max(u_reduce.u_subSamples, 1);
+    var emissiveSum = vec3<f32>(0.0);
+    var diffuseSum = vec3<f32>(0.0);
+    var surfaces = 0.0;
+    for (var sy = 0; sy < K; sy++) {
+        for (var sx = 0; sx < K; sx++) {
+            var st = ft;
+            if (K > 1) {
+                let sub = (rayTexel + (vec2<f32>(f32(sx), f32(sy)) + vec2<f32>(0.5)) / f32(K)) / f32(side);
+                st = giFaceTexel(octDecode(sub * 2.0 - 1.0), slot);
+            }
+            let subUv = (vec2<f32>(st.at) + vec2<f32>(0.5)) / u_reduce.u_captureSize;
+            if (textureSampleLevel(u_capDepth_texture, u_capDepth_sampler, subUv, 0) >= 1.0) { continue; }
+            let am = textureLoad(u_capAlbedo_texture, st.at, 0);
+            emissiveSum += max(textureLoad(u_capEmissive_texture, st.at, 0).rgb, vec3<f32>(0.0));
+            diffuseSum += am.rgb * (1.0 - saturate(am.a));
+            surfaces += 1.0;
+        }
+    }
+    let emissive = emissiveSum / f32(K * K);
+    let diffuse = select(vec3<f32>(0.0), diffuseSum / max(surfaces, 1.0), surfaces > 0.0);
 
     let alpha = select(select(0.0, GI_HIT_BACK, kind == 1), GI_HIT_FRONT, kind == 2);
     out.outHitA = vec4<f32>(select(vec3<f32>(0.0), sqrt(saturate(diffuse)), kind == 2), alpha);
     out.outHitB = vec4<f32>(select(vec2<f32>(0.5), normal * 0.5 + 0.5, kind == 2), giEncode16(distance / maxDistance));
-    out.outHitC = select(vec4<f32>(0.0), giEncodeRGBE(max(emissive, vec3<f32>(0.0))), kind == 2);
+    // Written for a miss too: the cell's centre can see past a fixture its cell still holds.
+    out.outHitC = select(giEncodeRGBE(emissive), vec4<f32>(0.0), kind == 1);
     return out;
 }

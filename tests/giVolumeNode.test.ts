@@ -8,7 +8,7 @@ import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 describe('GIVolumeNode', () => {
     it('round-trips every setting', async () => {
         const v = new GIVolumeNode('room', {
-            size: [6, 3, 8], probeCounts: [7, 4, 9], rays: 256, maxRayDistance: 20, captureResolution: 16,
+            size: [6, 3, 8], probeCounts: [7, 4, 9], probeInset: 0.25, rays: 256, maxRayDistance: 20, captureResolution: 16,
             includeGrass: true, blendDistance: 0.5, intensity: 1.5, normalBias: 0.2, viewBias: 0.3,
             multiBounce: false, additive: true, enabled: false, bakeId: 'bake-1',
         });
@@ -18,6 +18,7 @@ describe('GIVolumeNode', () => {
         expect(r).toBeInstanceOf(GIVolumeNode);
         expect(r.size).toEqual([6, 3, 8]);
         expect(r.probeCounts).toEqual([7, 4, 9]);
+        expect(r.probeInset).toBe(0.25);
         expect(r.rays).toBe(256);
         expect(r.raySide).toBe(16);
         expect(r.maxRayDistance).toBe(20);
@@ -40,6 +41,7 @@ describe('GIVolumeNode', () => {
         expect(r.size).toEqual([10, 10, 10]);
         expect(r.probeCounts).toEqual([5, 5, 5]);
         expect(r.rays).toBe(64);
+        expect(r.probeInset).toBe(0);   // saved before insets existed: probes stay on the faces
         expect(r.bakeId).toBeNull();
         expect(r.enabled).toBe(true);
         expect(r.multiBounce).toBe(true);
@@ -59,6 +61,10 @@ describe('GIVolumeNode', () => {
         expect(v.maxRayDistance).toBeGreaterThanOrEqual(1);
         v.intensity = NaN;
         expect(v.intensity).toBe(1);
+        v.probeInset = 3;
+        expect(v.probeInset).toBe(0.5);
+        v.probeInset = -1;
+        expect(v.probeInset).toBe(0);
     });
 
     it('asks for a capture when the grid changes, not when only its look does', () => {
@@ -79,6 +85,9 @@ describe('GIVolumeNode', () => {
         expect(v.captureRequested).toBe(true);
         v.markCaptured();
         v.rays = 256;
+        expect(v.captureRequested).toBe(true);
+        v.markCaptured();
+        v.probeInset = 0.5;
         expect(v.captureRequested).toBe(true);
         v.markCaptured();
         v.requestCapture();
@@ -103,6 +112,25 @@ describe('GIVolumeNode', () => {
         expect(g[0]).toBeCloseTo(2.5);
         expect(g[1]).toBeCloseTo(1);
         expect(g[2]).toBeCloseTo(1.5);
+    });
+
+    it('moves the outer probes in by the inset, the grid evenly spaced inside the box', () => {
+        const v = new GIVolumeNode('v', { size: [10, 4, 6], probeCounts: [5, 2, 3], probeInset: 0.5 });
+        v.updateTransforms();
+        // Half a spacing in from each face: the centres of 5 x 2 x 3 equal cells.
+        expect(v.localSpacing).toEqual([2, 2, 2]);
+        const p = vec3.create();
+        v.probeWorldPosition(p, 0, 0, 0);
+        expect([...p].map(x => +x.toFixed(5))).toEqual([-4, -1, -2]);
+        v.probeWorldPosition(p, 4, 1, 2);
+        expect([...p].map(x => +x.toFixed(5))).toEqual([4, 1, 2]);
+        const g = vec3.transformMat4(vec3.create(), vec3.fromValues(0, 0, 0), v.worldToGrid(mat4.create()));
+        expect([...g].map(x => +x.toFixed(5))).toEqual([2, 0.5, 1]);
+        // A quarter: between the faces and the cell centres.
+        v.probeInset = 0.25;
+        expect(v.localSpacing[0]).toBeCloseTo(10 / 4.5);
+        v.probeWorldPosition(p, 0, 0, 0);
+        expect(p[0]).toBeCloseTo(-5 + 0.25 * 10 / 4.5);
     });
 
     it('scales its spacing with the world scale', () => {
