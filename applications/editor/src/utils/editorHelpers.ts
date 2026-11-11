@@ -9,6 +9,7 @@ import {
   Sprite,
   SpriteNode,
   LightNode,
+  AreaLight,
   CameraNode,
   LightProbeNode,
   ExposureVolumeNode,
@@ -68,6 +69,8 @@ const chrome = <T extends Node>(node: T): T => { markEditorOnly(node); return no
 const ICON_MAX_PX = 64;
 
 const LIGHT_ICON = '__editor__LightSprite';
+/** An area light's emitter outline (and its normal tick), under the light. */
+const AREA_OUTLINE = '__editor__AreaLightOutline';
 const CAMERA_GIZMO = '__debug__CameraModel';
 const PROBE_HELPER = '__editor__ProbeHelper';
 const EXPOSURE_HELPER = '__editor__ExposureVolumeHelper';
@@ -367,6 +370,44 @@ function ensureLightIcon(light: LightNode) {
   icon.setUniformScale(0.5);
   icon.maxScreenSize = ICON_MAX_PX;
   light.addChild(icon);
+}
+
+/**
+ * The outline of an area light's emitter, under the light (so it turns with it), and a tick along the
+ * side it emits from — both sides for a two-sided light. Rebuilt when the shape or size changes.
+ */
+function ensureAreaOutline(light: LightNode) {
+  const area = light.light instanceof AreaLight ? light.light : null;
+  const existing = light.getChildByName(AREA_OUTLINE)[0];
+  if (!area) { if (existing) light.removeChild(existing); return; }
+  const signature = `${area.shape}|${area.width}|${area.height}|${area.twoSided}`;
+  if (existing) {
+    if ((existing as any).__areaSignature === signature) return;
+    light.removeChild(existing);
+  }
+  const positions: [number, number, number][] = [];
+  const indices: number[] = [];
+  const hw = area.width / 2, hh = area.height / 2;
+  if (area.shape === 'disk') {
+    const segments = 40;
+    for (let i = 0; i < segments; i++) {
+      const a = (i / segments) * Math.PI * 2;
+      positions.push([Math.cos(a) * hw, Math.sin(a) * hw, 0]);
+      indices.push(i, (i + 1) % segments);
+    }
+  } else {
+    positions.push([-hw, -hh, 0], [hw, -hh, 0], [hw, hh, 0], [-hw, hh, 0]);
+    indices.push(0, 1, 1, 2, 2, 3, 3, 0);
+  }
+  // The emitting direction (local +Z, the light's forward), a quarter of the emitter's size long.
+  const tick = Math.max(0.1, 0.25 * Math.max(area.width, area.height));
+  const base = positions.length;
+  positions.push([0, 0, 0], [0, 0, tick]);
+  indices.push(base, base + 1);
+  if (area.twoSided) { positions.push([0, 0, -tick]); indices.push(base, base + 2); }
+  const outline = wireModel(AREA_OUTLINE, { positions, indices }, [1, 0.85, 0.4]);
+  ;(outline as any).__areaSignature = signature;
+  light.addChild(outline);
 }
 
 /**
@@ -1287,6 +1328,8 @@ export function reconcileEditorHelpers(
       const existing = node.getChildByName(LIGHT_ICON)[0];
       if (icons && !existing) ensureLightIcon(node);
       else if (!icons && existing) node.removeChild(existing);
+      if (icons) ensureAreaOutline(node);
+      else { const outline = node.getChildByName(AREA_OUTLINE)[0]; if (outline) node.removeChild(outline); }
     } else if (node instanceof LightProbeNode) {
       const existing = node.getChildByName(PROBE_HELPER)[0];
       if (icons && !existing) ensureProbeHelper(node);

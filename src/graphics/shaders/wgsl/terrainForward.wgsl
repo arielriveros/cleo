@@ -18,6 +18,7 @@
 #include "./chunks/pbrLighting.wgsl"
 #include "./chunks/clusteredLights.wgsl"
 #include "./chunks/shadows.wgsl"
+#include "./chunks/areaLights.wgsl"
 #include "./chunks/terrainStack.wgsl"
 #include "./chunks/terrainWeather.wgsl"
 
@@ -68,10 +69,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     for (var i = 0; i < count; i++) {
         let cl = cleoLight(cleoClusterLight(first + i));
         if (cleoLightReaches(cl.light, in.fragPos)) {
-            let visibility = cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
-                                                    in.fragPos, surface.normal, cl.light.position);
-            lo += evaluateSpotLight(cl.light, in.fragPos, surface.normal, v,
-                                    surface.albedo, surface.metallic, roughness, visibility);
+            let ext = cleoAreaIndex(cl);
+            if (ext >= 0) {
+                let area = cleoAreaLight(cl, ext);
+                let visibility = cleoAreaVisibility(cl, area, in.fragPos, surface.normal);
+                lo += evaluateAreaLight(area, in.fragPos, surface.normal, v,
+                                        surface.albedo, surface.metallic, roughness, visibility);
+            } else {
+                let visibility = cleoPunctualVisibility(cl.spotShadowLayer, cl.pointShadowSlot,
+                                                        in.fragPos, surface.normal, cl.light.position);
+                lo += evaluateSpotLight(cl.light, in.fragPos, surface.normal, v,
+                                        surface.albedo, surface.metallic, roughness, visibility);
+            }
         }
     }
 

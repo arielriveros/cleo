@@ -4,7 +4,7 @@ import { packFrameFields } from '../../particles/particleFields';
 import { LightNode } from '../../core/scene/nodes/lightNode';
 import type { ParticleSystemNode } from '../../core/scene/nodes/particleSystemNode';
 import { Scene } from '../../core/scene/scene';
-import { DirectionalLight, PointLight, Spotlight } from '../lighting';
+import { AreaLight, DirectionalLight, PointLight, Spotlight } from '../lighting';
 import { skyAmbient } from '../particles/particleLighting';
 import type { ParticleLocalLight } from '../particles/particleLighting';
 import { ParticleRenderer } from '../particles/particleRenderer';
@@ -234,6 +234,10 @@ export class ParticlePasses {
             if (node.type === 'spotlight') {
                 record.direction = node.worldForward;
                 record.cone = (light as Spotlight).coneScaleOffset;
+            } else if (node.type === 'area' && !(node.light as AreaLight).twoSided) {
+                // As its light record has it (render/lighting.ts): a one-sided panel lights its half-space.
+                record.direction = node.worldForward;
+                record.cone = [1, 0];
             }
             localLights.push(record);
         }

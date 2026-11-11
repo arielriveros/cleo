@@ -97,7 +97,7 @@ rather than moving the camera itself. Its groups:
 
 #### Light
 
-Photometric intensity — lux for directional, lumens for point and spot — colour, per-kind
+Photometric intensity — lux for directional, lumens for point, spot and area — colour, per-kind
 parameters and shadow casting. **Presets** sets real-world lights: the colour from the source's colour
 temperature, the range, cone and size of the real thing. Real brightness only shows in the setting a
 light belongs to — a real 800 lm bulb changes no pixel in a scene exposed for daylight — so a preset
@@ -106,8 +106,9 @@ brightly as that scene is exposed, a sun until it stands the right number of tim
 fill. In a dark scene exposed for it, the real values apply unchanged. A new point or spot light
 starts at 1500 lm, brightened the same way.
 
-- **Emission** — colour and intensity, plus **Range** and **Source Radius** on point and spot
-  lights. Brightness lives in the intensity, not the colour: keep the colour as the light's tint. A
+- **Emission** — colour and intensity, plus **Range** on point, spot and area lights and **Source
+  Radius** on point and spot lights. An area light's lumens are the whole panel's, so a bigger panel
+  of the same lumens glows less brightly per square metre. Brightness lives in the intensity, not the colour: keep the colour as the light's tint. A
   light converted from the old constant / linear / quadratic falloff says so, and **Reset to
   physical defaults** re-authors it in real units.
 - **Flicker** — point and spot lights: how far the intensity wanders, as a share of it (a torch about
@@ -124,6 +125,13 @@ starts at 1500 lm, brightened the same way.
   a light that moves or switches with gameplay, whose light frozen into a probe would linger where it no
   longer is. When a light with Bake on is moved, turned, recoloured, dimmed, resized or hidden after the
   probes were baked, this card says so with **Re-bake probes**.
+- **Emitter** — area lights: **Shape** (a rectangle, or a disk), **Width** and **Height** in metres (a
+  disk's **Diameter**), across the light's local X and Y, and **Two-sided**: both faces glow, half the
+  lumens each. The light emits along its forward, the way a spot points; added from the Add menu it
+  faces down, as a ceiling panel. The viewport draws its outline and a tick on the side it emits from.
+  A one-sided light casts through a spot shadow map facing its emitting side, 75° each way (light
+  grazing past that is unshadowed); a two-sided one through a point light's cube. Keep the fixture
+  mesh round it from casting, or it shadows its own light.
 - **Cone** — spot lights: **Inner Angle** and **Outer Angle**, half-angles in degrees. Full
   brightness inside the inner cone, nothing past the outer one. Narrowing the cone does not brighten
   the light.
@@ -187,7 +195,14 @@ of day needs no new capture. Only a change to the geometry inside asks for one (
 Inside the box the volume's light replaces the light probes' and the sky light's, wherever the camera is;
 where volumes overlap the smaller claims first (a room's inside the street's). A probe that ends up inside
 a wall, a rock or under the ground is switched off and the others light round it. Grow a room's box a
-little past its walls, so its edge falls outside.
+little past its walls (by its **Blend distance**), so its fade falls outside them and the floor and walls
+take its light in full, and keep **Probe inset** at 0.5 so no probe stands on a wall, the floor or the
+ceiling: one there sees through it to the outside's light, or the inside of the slab, and shows as a
+bright or a dark cell on everything near it.
+
+Rooms lit by lamps want **256** rays. A probe's rays each stand for a patch of its view; a lamp's glowing
+fixture or the hot spot on the ceiling right over a lamp is smaller than a patch at 64 rays, so
+neighbouring probes see it differently, and the difference shows as squares of light along the grid.
 
 Selecting the volume shows its probes in the viewport, each a small sphere lit by the light it holds,
 from the direction each side of the sphere faces: a probe by a sunlit wall is bright on that side. A
@@ -202,8 +217,9 @@ What a capture sees is the static geometry: models, the landscape, and the trees
 |---|---|
 | **Enabled** | Off leaves the volume in the scene without it lighting anything. |
 | **Size** | Full extents of the box in metres, before the node transform, which it follows, rotation included. The face handles in the viewport size it too. |
-| **Probes** | How many probes along each axis, corner to corner (at least 2). The spacing, shown below the fields, is what decides how fine the light is: about 1 m in a room, 4 to 8 m over a street. |
-| **Rays** | Rays per probe: 64, or 256 for small rooms and fine detail. |
+| **Probes** | How many probes along each axis (at least 2). The spacing, shown below the fields, is what decides how fine the light is: about 1 m in a room, 4 to 8 m over a street. |
+| **Probe inset** | How far the outer probes stand in from the box's faces, as a share of the spacing: 0 puts them on the faces, 0.5 (a new volume's) at the centres of the cells the box divides into. Between the outer probes and the faces the light holds theirs. |
+| **Rays** | Rays per probe: 64, or 256 for small rooms, rooms lit by lamps and fine detail. |
 | **Ray reach** | How far, in metres, a probe sees; beyond that a ray sees the sky. |
 | **Capture resolution** | The size of each cube face a probe's capture draws. |
 | **Blend distance** | How far inside its faces the volume's light fades in, in metres. |

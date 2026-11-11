@@ -7,9 +7,9 @@ import { DEFAULT_NIGHT_AMBIENT, nightAmbientScale } from '../../core/scene/nodes
 import { Scene } from '../../core/scene/scene';
 import { spotBoundingSphere, DEFAULT_CLUSTER_GRID } from '../clusters';
 import type { ClusterLight } from '../clusters';
-import { NO_SHADOW_SLOT, POINT_CONE_SCALE, POINT_CONE_OFFSET } from '../lightData';
+import { AREA_SHAPE_DISK, AREA_SHAPE_RECT, NO_SHADOW_SLOT, POINT_CONE_SCALE, POINT_CONE_OFFSET, areaTangent } from '../lightData';
 import { LightGrid, MAX_LIGHTS } from '../lightGrid';
-import { DirectionalLight, Spotlight, PointLight, DEFAULT_SCENE_AMBIENT_LUX, REFERENCE_ILLUMINANCE } from '../lighting';
+import { AreaLight, DirectionalLight, Spotlight, PointLight, DEFAULT_SCENE_AMBIENT_LUX, REFERENCE_ILLUMINANCE } from '../lighting';
 import { device } from '../rhi/deviceHandle';
 import type { ShaderProgram } from '../rhi/shaderProgram';
 import { keyLight, moonDirection } from '../skyNight';
@@ -115,7 +115,7 @@ export class LightingPasses {
      * through the frame-lighting group, its addressing through the uniform uploads) until `endBakeLights`.
      */
     public beginBakeLights(scene: Scene): void {
-        this.bakeLightGrid.buildSingle(this.punctualLightCount(scene));
+        this.bakeLightGrid.buildSingle(this.punctualLightCount(scene), this.areaLightCount(scene));
         this.packLightRecords(scene, true, this.bakeLightGrid);
         this.bakeLightGrid.upload();
         this._bakeLightsActive = true;
@@ -620,7 +620,17 @@ export class LightingPasses {
             let center = this._clusterCenters[count];
             if (!center) { center = new Float32Array(3); this._clusterCenters[count] = center; }
 
-            if (node.type === 'spotlight') {
+            if (node.type === 'area') {
+                const area = node.light as AreaLight;
+                const p = node.worldPosition;
+                center[0] = p[0]; center[1] = p[1]; center[2] = p[2];
+                // The range sphere round the centre, grown by the emitter's half diagonal: the windowed
+                // falloff is measured from the centre, and a one-sided light's half-space needs the whole
+                // sphere anyway (the smallest sphere round a hemisphere is the sphere).
+                const r = area.range + 0.5 * Math.hypot(area.width, area.height);
+                const hidden = this._visibility.volumeCulled(node) || this._visibility.lightOccluded(node, center, r);
+                this._setClusterLight(count, center, hidden ? 0 : r);
+            } else if (node.type === 'spotlight') {
                 const spot = node.light as Spotlight;
                 // The CONE's bounding sphere, not the range sphere. A narrow spot fills a fiftieth of
                 // the sphere around its own position, and clustering that sphere would light every
@@ -653,8 +663,9 @@ export class LightingPasses {
         // an orthographic one a sphere's extent is its own diameter wherever it sits, and running the
         // perspective solve would put lights in the wrong tiles. An ortho camera is an editor and
         // 2D-scene tool here, where the light counts are small and the acceleration is not missed.
+        const areas = this.areaLightCount(scene);
         if (camera.type === 'orthographic') {
-            this.lightGrid.buildSingle(count);
+            this.lightGrid.buildSingle(count, areas);
         } else {
             this.lightGrid.restoreGrid(DEFAULT_CLUSTER_GRID);
             // The last argument is the Y flip: WebGPU's fragment coordinate runs top-down while
@@ -666,7 +677,7 @@ export class LightingPasses {
                 far: Math.min(camera.far, this.clusterDistance),
                 fovY: camera.fov * Math.PI / 180,
                 aspect: camera.ratio,
-            }, this._targets.scene.width, this._targets.scene.height, device.capabilities.conventions.originTopLeft);
+            }, this._targets.scene.width, this._targets.scene.height, device.capabilities.conventions.originTopLeft, areas);
         }
 
         this.packLightRecords(scene);
@@ -678,6 +689,17 @@ export class LightingPasses {
         let n = 0;
         for (const node of scene.lights)
             if (node.type !== 'directional' && node.index >= 0 && n < MAX_LIGHTS) n++;
+        return n;
+    }
+
+    /** Area lights among those: each needs an extension record, and the frame the LTC tables. */
+    public areaLightCount(scene: Scene): number {
+        let n = 0, punctual = 0;
+        for (const node of scene.lights) {
+            if (node.type === 'directional' || node.index < 0 || punctual >= MAX_LIGHTS) continue;
+            punctual++;
+            if (node.type === 'area') n++;
+        }
         return n;
     }
 
@@ -711,6 +733,7 @@ export class LightingPasses {
      */
     public packLightRecords(scene: Scene, bakeOnly: boolean = false, grid: LightGrid = this.lightGrid): void {
         let i = 0;
+        let areaSlot = 0;
         // Pre-exposed: the light texture is shared by the deferred pass, every forward program and every
         // custom material, so it is scaled here, once, rather than in any of them.
         const k = this._view.preExposure;
@@ -723,7 +746,18 @@ export class LightingPasses {
             // to bake is out the same way, and the rest are taken steady: the flicker is live, the bake not.
             const off = bakeOnly ? !node.bake : this._visibility.volumeCulled(node);
 
-            if (node.type === 'spotlight') {
+            if (node.type === 'area') {
+                const area = node.light as AreaLight;
+                const normal = node.worldForward;
+                areaTangent(node.worldTransform, normal, this._areaTangent);
+                // A one-sided light's map is a spot's, facing its emitting side; a two-sided light's a cube.
+                const slot = area.twoSided ? this._shadows.pointSlots.layerOf(node.id) : this._shadows.spotSlots.layerOf(node.id);
+                grid.packAreaRecord(i, areaSlot++, node.worldPosition, area.invRangeSquared,
+                                    area.color, off ? 0 : area.internalIntensity * (bakeOnly ? 1 : node.flickerFactor) * k,
+                                    normal, area.equivalentRadius, area.twoSided, slot,
+                                    this._areaTangent, 0.5 * area.width, 0.5 * area.height, area.radianceScale,
+                                    area.shape === 'disk' ? AREA_SHAPE_DISK : AREA_SHAPE_RECT);
+            } else if (node.type === 'spotlight') {
                 const spot = node.light as Spotlight;
                 const [coneScale, coneOffset] = spot.coneScaleOffset;
                 grid.packRecord(i, node.worldPosition, spot.invRangeSquared,
@@ -742,6 +776,8 @@ export class LightingPasses {
             i++;
         }
     }
+
+    private readonly _areaTangent = new Float32Array(3);
 
     /** Zero the directional slot on the currently bound program: no light, not a black one. */
     private _clearDirectional(): void {

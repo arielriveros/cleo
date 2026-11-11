@@ -16,6 +16,30 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Area lights.** A new **Area** light is a glowing rectangle or disk: a ceiling panel, a window, a
+  softbox, a screen, a round downlight.
+  - *Shaded exactly.* Linearly transformed cosines (Heitz et al. 2016) give a specular highlight that is a
+    picture of the panel, crisp on a polished floor and stretched on a rough one, and diffuse from the
+    panel's exact form factor, clipped at each surface's horizon.
+  - *Real units.* **Intensity** is the whole panel's lumens; **Two-sided** emits from both faces, half
+    each. Presets: ceiling panel, fluorescent tube, softbox, window fill, disk downlight, TV screen.
+  - *Shadows.* A one-sided light casts through a spot shadow map facing its emitting side, a two-sided one
+    through a point light's cube.
+  - *Everywhere.* Deferred and forward PBR, terrain and the GI Volumes' relight shade it as an area. The
+    other shading models, lit particles and sprites, the fog and custom materials shade it as the spot or
+    point of the same lumens, so stored custom materials keep compiling.
+  - The viewport draws each one's outline and the side it emits from. Player contract 27.
+- **GI Volumes without squares in lamp-lit rooms.** A room lit by lamps showed bright and dark cells
+  along the probe grid.
+  - *What a ray sees is its whole patch.* A capture now averages what glows across each ray's patch of
+    view, and its colour, instead of one point of it. A lamp's glowing fixture caught by one ray of one
+    probe made that probe tens of times brighter than its neighbours; in the Firing Line warehouse the
+    probes far off their neighbours went from 101 to 47 of 880.
+  - *Probe inset.* A volume's outer probes can stand in from its faces (**Probe inset**, 0.5 for a new
+    volume): a probe on a floor, a wall or a ceiling sees through it.
+  - Bakes are format 2; format 1 still loads, and the inspector marks it outdated. A ray count other than
+    64 or 256 says what it snapped to. Turning or reshaping a spot or area light now relights the volumes.
+
 - **Rain and snow.** A Weather volume's new **Falling** setting makes rain or snow come down inside it,
   through the particle system with only the parameters changed.
   - *Realistic out of the box.* Rain falls in thin streaks at about 8.5 m/s, slanting with the scene's

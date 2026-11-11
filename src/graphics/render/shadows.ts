@@ -10,7 +10,7 @@ import { shadowBlockSpans, buildShadowBlock } from '../../terrain/terrainShadowB
 import { spotBoundingSphere } from '../clusters';
 import { Framebuffer } from '../framebuffer';
 import { LayeredDepthFramebuffer } from '../layeredDepthFramebuffer';
-import { DirectionalLight, DEFAULT_ANGULAR_RADIUS, Spotlight, PointLight } from '../lighting';
+import { AreaLight, DirectionalLight, DEFAULT_ANGULAR_RADIUS, Spotlight, PointLight } from '../lighting';
 import { Material, isFoliageMaterial } from '../material';
 import { Mesh } from '../mesh';
 import { Model } from '../model';
@@ -21,7 +21,7 @@ import type { RenderPipeline } from '../rhi/resources';
 import { ADDITIVE_BLEND } from '../rhi/types';
 import type { DepthStencilState, CullMode } from '../rhi/types';
 import { TerrainFloorGrid, ShadowLayerCache, unitDirection, shadowReach, sliceCornerFactor, cascadeSphereAroundEye, staggeredCascadeDue, EYE_FIT_MARGIN, receiverInnerRadius, isFreeShadowSlot } from '../shadowCasters';
-import { MAX_CASCADES, CascadeSphere, ShadowCasterBounds, SpotShadowSlots, MAX_POINT_SHADOWS, PointShadowCache, CasterMotion, lightViewMatrix, mixNumber, HASH_SEED, pushCasterBounds, mixTransform, spotShadowFar, pointShadowFov, POINT_SHADOW_FACES, mixString, computeCascadeSplits, staleCascadeCovers, STAGGER_MARGIN, quantizeRadius, cascadeDepthScale, cascadeSphereFromPerspective, cascadeSphereFromCorners, buildCascadeMatrix } from '../shadowMath';
+import { AREA_SHADOW_HALF_FOV, MAX_CASCADES, CascadeSphere, ShadowCasterBounds, SpotShadowSlots, MAX_POINT_SHADOWS, PointShadowCache, CasterMotion, lightViewMatrix, mixNumber, HASH_SEED, pushCasterBounds, mixTransform, spotShadowFar, pointShadowFov, POINT_SHADOW_FACES, mixString, computeCascadeSplits, staleCascadeCovers, STAGGER_MARGIN, quantizeRadius, cascadeDepthScale, cascadeSphereFromPerspective, cascadeSphereFromCorners, buildCascadeMatrix } from '../shadowMath';
 import { keyLight } from '../skyNight';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
@@ -1309,12 +1309,12 @@ export class ShadowPasses {
         const casters: LightNode[] = [];
         if (this.shadowsEnabled && this.spotShadowsEnabled) {
             for (const node of scene.lights) {
-                if (node.type !== 'spotlight' || !node.castShadows || node.index < 0) continue;
+                if (!castsSpotShadow(node) || !node.castShadows || node.index < 0) continue;
                 // As the point lights are filtered: a spot whose cone is off screen, or whose whole reach
                 // is hidden behind what is on screen, shadows nothing anyone can see.
-                const spot = node.light as Spotlight;
+                const spot = node.light as Spotlight | AreaLight;
                 spotBoundingSphere(node.worldPosition, node.worldForward, spot.range,
-                                   spot.outerCutOff * Math.PI / 180, this._sys.lighting.coneSphere);
+                                   spotShadowHalfAngle(node), this._sys.lighting.coneSphere);
                 const c = this._sys.lighting.coneSphere.center, r = this._sys.lighting.coneSphere.radius;
                 if (this._sys.visibility.frustumCulling && !this._sys.visibility.frustum.intersectsSphere(c[0], c[1], c[2], r)) continue;
                 casters.push(node);
@@ -1325,9 +1325,9 @@ export class ShadowPasses {
         if (casters.length > ShadowPasses.MAX_SPOT_SHADOWS) {
             const cam = this._view.camera.position;
             const rank = (n: LightNode) => {
-                const spot = n.light as Spotlight;
+                const spot = n.light as Spotlight | AreaLight;
                 spotBoundingSphere(n.worldPosition, n.worldForward, spot.range,
-                                   spot.outerCutOff * Math.PI / 180, this._sys.lighting.coneSphere);
+                                   spotShadowHalfAngle(n), this._sys.lighting.coneSphere);
                 return vec3.squaredDistance(n.worldPosition, cam)
                     + (this._sys.visibility.volumeCulled(n)
                        || this._sys.visibility.lightOccluded(n, this._sys.lighting.coneSphere.center, this._sys.lighting.coneSphere.radius) ? 1e12 : 0);
@@ -1359,7 +1359,7 @@ export class ShadowPasses {
             // catches up on whatever changed the frame it is seen again.
             if (this._sys.visibility.volumeCulled(node)) continue;
 
-            const light = node.light as Spotlight;
+            const light = node.light as Spotlight | AreaLight;
             const pos = node.worldPosition;
             const fwd = node.worldForward;
             // A cone pointing straight down is parallel to the default up; lookAt would go NaN.
@@ -1369,7 +1369,10 @@ export class ShadowPasses {
 
             // Widen slightly past the outer cone so the falloff's last degree is not clipped by the
             // map's own edge (which the shader treats as "unshadowed").
-            const halfFov = Math.min(89, light.outerCutOff * 1.05) * Math.PI / 180;
+            // A one-sided area light lights its whole half-space; a perspective map holds AREA_SHADOW_HALF_FOV
+            // of it, and the grazing rest goes unshadowed.
+            const halfFov = light instanceof AreaLight ? AREA_SHADOW_HALF_FOV * Math.PI / 180
+                : Math.min(89, light.outerCutOff * 1.05) * Math.PI / 180;
             const far = spotShadowFar(light.range, this.spotShadowDistance);
             mat4.perspective(this._spotProj, halfFov * 2, 1, 0.1, far);
             mat4.multiply(this.spotShadowMatrices[layer], this._spotProj, this._spotView);
@@ -1411,7 +1414,7 @@ export class ShadowPasses {
         const casters: LightNode[] = [];
         if (this.shadowsEnabled && this.pointShadowsEnabled) {
             for (const node of scene.lights) {
-                if (node.type !== 'point' || !node.castShadows) continue;
+                if (!castsPointShadow(node) || !node.castShadows) continue;
                 // Index -1 is a light past `MAX_LIGHTS`, which has no record in the light grid and so
                 // cannot be addressed at all. Six shadow passes for it would be six nothing reads.
                 if (node.index < 0) continue;
@@ -2160,4 +2163,19 @@ export class ShadowPasses {
     public get shadowLayerCount(): number {
         return this.cascadeCount + (this.shadowFarDistance > 0 ? 1 : 0);
     }
+}
+
+/** Lights that take a SPOT map: spots, and one-sided area lights (facing their emitting side). */
+function castsSpotShadow(node: LightNode): boolean {
+    return node.type === 'spotlight' || (node.type === 'area' && !(node.light as AreaLight).twoSided);
+}
+
+/** Lights that take a CUBE: points, and two-sided area lights (from their centre). */
+function castsPointShadow(node: LightNode): boolean {
+    return node.type === 'point' || (node.type === 'area' && (node.light as AreaLight).twoSided);
+}
+
+/** The half-angle (radians) a spot-mapped light lights: its outer cone, or a one-sided panel's hemisphere. */
+function spotShadowHalfAngle(node: LightNode): number {
+    return node.light instanceof AreaLight ? Math.PI / 2 : (node.light as Spotlight).outerCutOff * Math.PI / 180;
 }

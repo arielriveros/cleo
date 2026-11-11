@@ -1,4 +1,4 @@
-import { DirectionalLight, Light, LIGHT_UNIT, PointLight, Spotlight } from "../../../graphics/lighting";
+import { AreaLight, DirectionalLight, Light, LIGHT_UNIT, PointLight, Spotlight } from "../../../graphics/lighting";
 import { flickerFactor, flickerSeed, followFlicker, lightFlickerClock } from "../../../graphics/lightFlicker";
 import { Logger } from "../../logger";
 import { vec3 } from "gl-matrix";
@@ -6,8 +6,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 
 /** What a light probe's bake of a light depended on (LightNode.bakeSnapshot). */
+/** What kind of light a LightNode carries. */
+export type LightType = 'directional' | 'point' | 'spotlight' | 'area';
+
 export interface LightBakeSnapshot {
-    type: 'directional' | 'point' | 'spotlight';
+    type: LightType;
     position: [number, number, number];
     forward: [number, number, number];
     color: [number, number, number];
@@ -17,15 +20,17 @@ export interface LightBakeSnapshot {
     cone: [number, number];
     castShadows: boolean;
     shown: boolean;
+    /** An area light's emitter: shape, width, height, two-sided. Null for the others. */
+    area: { shape: string; width: number; height: number; twoSided: boolean } | null;
 }
 
 /**
- * Directional, point and spot lights.
+ * Directional, point, spot and area lights.
  */
 
 export class LightNode extends Node {
     private readonly _light: Light
-    private readonly _type: 'directional' | 'point' | 'spotlight';
+    private readonly _type: LightType;
     private _index: number;
     private _castShadows: boolean;
     private _bake: boolean = true;
@@ -42,6 +47,8 @@ export class LightNode extends Node {
             this._type = 'point';
         else if (light instanceof Spotlight)
             this._type = 'spotlight';
+        else if (light instanceof AreaLight)
+            this._type = 'area';
         else {
             const errMsg = "Light type not supported";
             Logger.error(errMsg)
@@ -83,6 +90,17 @@ export class LightNode extends Node {
                 if (s.flickerAmount > 0) lightData.flicker = { amount: s.flickerAmount, speed: s.flickerSpeed };
                 break;
             }
+            case 'area': {
+                const a = light as AreaLight;
+                lightData.intensity = a.intensity;           // lumens, out of the whole emitter
+                lightData.range = a.range;
+                lightData.shape = a.shape;
+                lightData.width = a.width;
+                lightData.height = a.height;
+                lightData.twoSided = a.twoSided;
+                if (a.flickerAmount > 0) lightData.flicker = { amount: a.flickerAmount, speed: a.flickerSpeed };
+                break;
+            }
         }
 
         return {
@@ -103,6 +121,7 @@ export class LightNode extends Node {
             case 'directional': light = new DirectionalLight(json.light); break;
             case 'point': light = new PointLight(json.light); break;
             case 'spotlight': light = new Spotlight(json.light); break;
+            case 'area': light = new AreaLight(json.light ?? {}); break;
             default:
                 const errMsg = `Light ${json} of type ${json.type} not supported`;
                 Logger.error(errMsg);
@@ -127,18 +146,19 @@ export class LightNode extends Node {
      * one. What the light grid multiplies the intensity by, and what a follower's brightness tracks.
      */
     public get flickerFactor(): number {
-        const l = this._light as PointLight | Spotlight;
+        const l = this._light as PointLight | Spotlight | AreaLight;
         if (this._type === 'directional' || !(l.flickerAmount > 0)) return 1;
         if (this._flickerSeed < 0) this._flickerSeed = flickerSeed(this.id);
         return flickerFactor(lightFlickerClock.time, l.flickerAmount, l.flickerSpeed, this._flickerSeed);
     }
-    public get type(): 'directional' | 'point' | 'spotlight' { return this._type; }
+    public get type(): LightType { return this._type; }
     public get index(): number { return this._index; }
     public set index(value: number) { this._index = value; }
     /**
-     * Whether this light casts shadows. Honoured for all three types, by three different mechanisms:
+     * Whether this light casts shadows. Honoured for every type, by three different mechanisms:
      * the FIRST flagged directional light in the scene gets the camera-fitted cascades; a SPOT light
-     * gets one perspective map matching its cone; a POINT light gets six, an unwrapped cube map.
+     * gets one perspective map matching its cone; a POINT light gets six, an unwrapped cube map. An AREA
+     * light takes a spot's map facing its emitting side when one-sided, a point's cube when two-sided.
      *
      * The last two are capped (see the renderer's MAX_SPOT_SHADOWS / MAX_POINT_SHADOWS) because each
      * caster is a whole extra depth rasterization — six of them, for a point light. Casters past the
@@ -175,6 +195,9 @@ export class LightNode extends Node {
             cone: this._type === 'spotlight' ? [l.cutOff, l.outerCutOff] : [0, 0],
             castShadows: this._castShadows,
             shown: this.authoredVisible,
+            area: this._light instanceof AreaLight
+                ? { shape: this._light.shape, width: this._light.width, height: this._light.height, twoSided: this._light.twoSided }
+                : null,
         };
     }
 

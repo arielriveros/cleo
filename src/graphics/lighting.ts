@@ -424,3 +424,106 @@ export class Spotlight extends PunctualLight {
         return [scale, -cosOuter * scale];
     }
 }
+
+// -----------------------------------------------------------------------------------------------
+// AREA LIGHTS: a glowing rectangle or disk, shaded exactly by linearly transformed cosines
+// (chunks/areaLights.wgsl, Heitz et al. 2016) rather than as a point with a radius.
+// -----------------------------------------------------------------------------------------------
+
+export type AreaLightShape = 'rect' | 'disk';
+export const AREA_LIGHT_SHAPES: readonly AreaLightShape[] = ['rect', 'disk'];
+
+/** A ceiling panel's flux: about two 1500 lm bulbs' worth, from a metre by half a metre. */
+export const DEFAULT_AREA_LUMENS = 2000;
+export const DEFAULT_AREA_WIDTH = 1;
+export const DEFAULT_AREA_HEIGHT = 0.5;
+/** The smallest side an area light keeps: below a centimetre it is a point light. */
+export const MIN_AREA_LIGHT_SIZE = 0.01;
+
+export interface AreaLightProperties extends PointLightProperties {
+    /** 'rect' (width x height) or 'disk' (width is the diameter). */
+    shape?: AreaLightShape;
+    /** Metres along the light's local X. A disk's diameter. */
+    width?: number;
+    /** Metres along the light's local Y. Ignored by a disk. */
+    height?: number;
+    /** Emits from both faces (a hanging tube, a lantern panel) instead of the front one only. */
+    twoSided?: boolean;
+}
+
+/**
+ * An emitting rectangle or disk. It lies in the light's local XY plane and emits along its forward
+ * (local +Z, the way a spot points), from that face only unless `twoSided`.
+ *
+ * Its brightness is LUMENS, the luminous flux out of the whole emitter, spread evenly (Lambertian), so
+ * its radiance is `lm / (pi x area)` from one face and half that from each of two. Resizing a light
+ * keeps its flux and changes how bright its face is, which is what a lamp of a given wattage does.
+ *
+ * In the light record it travels as the point or spot an old shader path can shade without knowing
+ * areas exist (render/lighting.ts, chunks/areaLights.wgsl): a one-sided light as a hemisphere spot of
+ * the panel's on-axis intensity, a two-sided one as a point of its flux, both the size of a sphere of
+ * the same area.
+ */
+export class AreaLight extends PunctualLight {
+    private _shape: AreaLightShape;
+    private _width: number;
+    private _height: number;
+    public twoSided: boolean;
+
+    constructor(properties: AreaLightProperties = { unit: LIGHT_UNIT }) {
+        super({ ...properties, unit: LIGHT_UNIT, intensity: properties.intensity ?? DEFAULT_AREA_LUMENS });
+        this._shape = properties.shape === 'disk' ? 'disk' : 'rect';
+        this._width = sizeOr(properties.width, DEFAULT_AREA_WIDTH);
+        this._height = sizeOr(properties.height, DEFAULT_AREA_HEIGHT);
+        this.twoSided = !!properties.twoSided;
+    }
+
+    public get shape(): AreaLightShape { return this._shape; }
+    public set shape(value: AreaLightShape) { this._shape = value === 'disk' ? 'disk' : 'rect'; }
+    /** Metres along local X; a disk's diameter. */
+    public get width(): number { return this._width; }
+    public set width(value: number) { this._width = sizeOr(value, this._width); }
+    /** Metres along local Y. A disk is round: its height is its width. */
+    public get height(): number { return this._shape === 'disk' ? this._width : this._height; }
+    public set height(value: number) { this._height = sizeOr(value, this._height); }
+
+    /** The emitting face's area, square metres. */
+    public get area(): number {
+        return this._shape === 'disk' ? Math.PI * 0.25 * this._width * this._width : this._width * this._height;
+    }
+
+    /** Radius of the sphere of the same area: the size an old shader path (and a shadow's softness) sees. */
+    public get equivalentRadius(): number { return Math.sqrt(this.area / Math.PI); }
+
+    /** An area light's size is its shape's; the point lights' radius does not apply. */
+    public get sourceRadius(): number { return this.equivalentRadius; }
+    public set sourceRadius(_value: number) { /* its size comes from width and height */ }
+
+    /**
+     * What the light record carries as the INTENSITY (internal scale, steady): the candela of the point or
+     * spot an old path shades it as. One-sided, the panel's on-axis intensity `lm / pi`; two-sided, the
+     * isotropic `lm / 4pi` of a point light of the same flux.
+     */
+    public get internalIntensity(): number {
+        return this.intensity / (this.twoSided ? 4 * Math.PI : Math.PI) / REFERENCE_ILLUMINANCE;
+    }
+
+    /** Radiance of the face over {@link internalIntensity}: `1 / area` one-sided, `2 / area` two-sided. */
+    public get radianceScale(): number { return (this.twoSided ? 2 : 1) / Math.max(this.area, 1e-8); }
+
+    /** The face's radiance on the internal scale: `lm / (pi x area x faces)`. */
+    public get internalRadiance(): number { return this.internalIntensity * this.radianceScale; }
+
+    public resetToPhysicalDefaults(): void {
+        super.resetToPhysicalDefaults();
+        this.intensity = DEFAULT_AREA_LUMENS;
+        this._shape = 'rect';
+        this._width = DEFAULT_AREA_WIDTH;
+        this._height = DEFAULT_AREA_HEIGHT;
+        this.twoSided = false;
+    }
+}
+
+function sizeOr(value: number | undefined, fallback: number): number {
+    return Number.isFinite(value) && (value as number) > 0 ? Math.max(MIN_AREA_LIGHT_SIZE, value as number) : fallback;
+}

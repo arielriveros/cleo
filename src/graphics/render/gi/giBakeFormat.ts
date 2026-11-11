@@ -29,13 +29,18 @@ import { GI_HIT_PROBES_PER_ROW, hitCacheSize } from './giLayout';
  * Probe data is four f32 a probe: xyz an offset from its grid position (0 in v1), w its state
  * (giClassify.ts). The hit caches are RGBA8, `hitWidth` x `hitHeight`.
  *
+ * VERSIONS: 1 point-sampled each ray's emissive and albedo; 2 averages them over the ray's cell (giReduce.wgsl).
+ * A version-1 bake still loads (its hits are as good as they were), and the host is told it is outdated.
+ *
  * PACKED: a saved bake is stored with everything after the header deflated (zlib, `packGiBake`), a third to
  * a sixth of its size; the header stays as it is, so a load checks the shape and the signature before it
  * inflates anything. The offsets in the header are those of the inflated layout (`unpackGiBake`).
  */
 
 export const GI_BAKE_MAGIC = 0x42494743; // 'CGIB' read little-endian
-export const GI_BAKE_VERSION = 1;
+export const GI_BAKE_VERSION = 2;
+/** The oldest version this build still loads. */
+export const GI_BAKE_MIN_VERSION = 1;
 /** `flags` bit: everything after the header is deflated (zlib). */
 export const GI_BAKE_DEFLATED = 1;
 const HEADER_BYTES = 104;
@@ -51,6 +56,8 @@ export interface GiBakeHeader {
     signature: [number, number];
     /** The sections are deflated: `unpackGiBake` before `decodeGiBake`. */
     packed: boolean;
+    /** The format version it was written in: older than {@link GI_BAKE_VERSION} loads, but is outdated. */
+    version: number;
 }
 
 export interface GiBake {
@@ -132,7 +139,9 @@ export function readGiBakeHeader(bytes: Uint8Array | ArrayBuffer): GiBakeHeader 
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
     if (view.getUint32(0, true) !== GI_BAKE_MAGIC) throw new GiBakeFormatError('not a GI bake (bad magic)');
     const version = view.getUint32(4, true);
-    if (version !== GI_BAKE_VERSION) throw new GiBakeFormatError(`version ${version} is not supported (this build reads ${GI_BAKE_VERSION})`);
+    if (version < GI_BAKE_MIN_VERSION || version > GI_BAKE_VERSION) {
+        throw new GiBakeFormatError(`version ${version} is not supported (this build reads ${GI_BAKE_MIN_VERSION}-${GI_BAKE_VERSION})`);
+    }
     const rays = view.getUint32(24, true);
     if (rays !== 64 && rays !== 256) throw new GiBakeFormatError(`${rays} rays per probe`);
     if (view.getUint32(48, true) !== GI_HIT_PROBES_PER_ROW) throw new GiBakeFormatError('unknown hit cache layout');
@@ -144,6 +153,7 @@ export function readGiBakeHeader(bytes: Uint8Array | ArrayBuffer): GiBakeHeader 
         size: [view.getFloat32(36, true), view.getFloat32(40, true), view.getFloat32(44, true)],
         signature: [view.getUint32(52, true), view.getUint32(56, true)],
         packed: (view.getUint32(8, true) & GI_BAKE_DEFLATED) !== 0,
+        version,
     };
 }
 

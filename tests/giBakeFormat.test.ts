@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-    GI_BAKE_VERSION, GiBakeFormatError, GiSignature, decodeGiBake, encodeGiBake, giBakeByteLength, packGiBake,
+    GI_BAKE_MIN_VERSION, GI_BAKE_VERSION, GiBakeFormatError, GiSignature, decodeGiBake, encodeGiBake, giBakeByteLength, packGiBake,
     readGiBakeHeader, sameGiSignature, unpackGiBake, type GiBake,
 } from '../src/graphics/render/gi/giBakeFormat';
 import { hitCacheSize } from '../src/graphics/render/gi/giLayout';
@@ -81,6 +81,17 @@ describe('GI bake format', () => {
         const grid = bytes.slice(); new DataView(grid.buffer).setUint32(12, 9, true);
         expect(() => decodeGiBake(grid)).toThrow(GiBakeFormatError);
         expect(() => decodeGiBake(bytes.subarray(0, bytes.byteLength - 4))).toThrow(/outside/);
+    });
+
+    it('writes the current version and still reads older ones, saying which', () => {
+        const bytes = encodeGiBake(makeBake([2, 2, 2], 64));
+        expect(readGiBakeHeader(bytes).version).toBe(GI_BAKE_VERSION);
+        expect(GI_BAKE_VERSION).toBe(2);
+        const older = bytes.slice(); new DataView(older.buffer).setUint32(4, GI_BAKE_MIN_VERSION, true);
+        expect(readGiBakeHeader(older).version).toBe(1);
+        expect(decodeGiBake(older).counts).toEqual([2, 2, 2]);
+        const ancient = bytes.slice(); new DataView(ancient.buffer).setUint32(4, 0, true);
+        expect(() => decodeGiBake(ancient)).toThrow(/version/);
     });
 
     it('refuses to write mismatched sections', () => {
