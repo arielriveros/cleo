@@ -57,7 +57,7 @@ new scene's first frames run smoothly. The progress is the host's real stages:
 To drive a loading UI of your own, use `Game.onLoadProgress`.
 
 ```ts
-Game.loadScene('Dungeon', { loadingScreen: { title: 'The Skull Cave' } })
+Game.loadScene('Crypt', { loadingScreen: { title: 'The Crypt' } })
 ```
 
 > A menu that turned the Gameplay input map off must turn it back on **before** `loadScene`. A scene

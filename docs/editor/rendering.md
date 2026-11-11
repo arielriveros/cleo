@@ -6,7 +6,7 @@ Each scene keeps its own: when a game switches scenes, the scene it loads brings
 and post with it, in the editor's Play and in a published game alike. Changes made during Play are
 undone by **Stop**, whether a script made them or the panel did.
 
-![The Valley example's Dungeon in Play: torch and fire point lights, shadows, bloom](../media/dungeon-torches.jpg)
+![The Dungeon example in Play: torch and fire point lights, shadows, bloom](../media/dungeon-torches.jpg)
 
 Every field with its type and default is in [Render settings](../reference/render-settings.md); this
 page is about using them.

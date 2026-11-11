@@ -468,7 +468,7 @@ export function buildDungeon(kit) {
   }
 
   function epilogue() {
-    const m = souls.messageNode('dungeon:epilogue', 'The Warden rests', 'The dungeon falls silent.\nThank you for playing the Valley.', L.EPILOGUE.position, L.EPILOGUE.yaw)
+    const m = souls.messageNode('dungeon:epilogue', 'The Warden rests', 'The dungeon falls silent.\nThank you for playing the Dungeon.', L.EPILOGUE.position, L.EPILOGUE.yaw)
     m.name = 'Epilogue Message'
     m.scriptVars.hiddenUntilRevealed = true
     return linkInstance(souls.LEVEL.message, m)

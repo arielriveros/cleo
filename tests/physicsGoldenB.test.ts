@@ -33,7 +33,7 @@ beforeAll(async () => {
     });
     setGLContext(gl as any);
     setDevice(new WebGL2Device(gl as unknown as WebGL2RenderingContext));
-    const lib = (await readExample('applications/editor/public/examples/valley')).read('libraries', 'models.json');
+    const lib = (await readExample('applications/editor/public/examples/dungeon')).read('libraries', 'models.json');
     const find = (node: any): any => node.model?.skin ? node : (node.children ?? []).map(find).find(Boolean);
     modelJson = find(lib[0].nodeJson).model;
 });

@@ -6,11 +6,12 @@ import { MAX_INSTANCES } from '../src/terrain/foliage';
 import { decodePng } from '../src/terrain/heightmapIO';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
 
-// The Valley example (tools/valley/build.mjs) is the souls content on a generated landscape. The joins
-// it shares with Hollow Keep are checked by soulsDemoProject.test.ts; this suite checks what the valley
-// adds — the landscape blob, its material and trail mask, the pre-baked foliage, the buildings — none of
-// which fails loudly: a mask at the wrong resolution is resampled with a warning, a foliage layer whose
-// key matches no rule is orphaned, a building on the wrong y floats.
+// The Valley example: the generated landscape (tools/valley/build.mjs) as scenery, its gameplay split off
+// into the Dungeon example (tools/valley/split.ts; dungeonProject.test.ts, dungeonSouls.test.ts). This suite
+// checks the valley itself — the landscape blob, its material and trail mask, the pre-baked foliage, the
+// buildings — none of which fails loudly: a mask at the wrong resolution is resampled with a warning, a
+// foliage layer whose key matches no rule is orphaned, a building on the wrong y floats. And that none of
+// the game it used to be is left in it.
 
 const PROJECT = join(__dirname, '..', 'applications', 'editor', 'public', 'examples', 'valley');
 const HEIGHTMAP = join(__dirname, '..', 'build', 'valley_height_4097_16bit.png');
@@ -227,10 +228,34 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
     });
 
-    it('ships no cloth simulation', () => {
-        const player = library('templates').find((t: any) => t.name === 'Player');
-        const knight = player.nodeJson.children.find((c: any) => c.name === 'Knight');
-        expect(knight.model.skinnedCloth).toBeUndefined();
+    it('ships no gameplay: one scene, no player, enemies, souls scripts, characters or clips', () => {
+        expect(manifest().sceneMetas.map((m: any) => m.name)).toEqual(['Valley']);
+        const names = new Set(nodes().map(n => n.name));
+        for (const name of ['Player', 'GameManager', 'Enemy Spawns', 'Interactables', 'Barrels', 'Nav Mesh', 'Bonfire', 'Skull Cave Entrance', 'Pond Zone'])
+            expect(names.has(name), name).toBe(false);
+        expect(nodes().some(n => ['character', 'controller', 'navMesh', 'uiRoot'].includes(n.type))).toBe(false);
+        // The libraries hold what the scenery uses and nothing of the game (split.ts prunes them).
+        for (const s of library('scripts')) expect(s.source, s.name).not.toMatch(/class Souls\w*Node/);
+        expect(library('scripts').map((s: any) => s.name).sort()).toEqual(['Day and Night', 'Fire Light', 'Fly Camera', 'Splash', 'Windmill Sails']);
+        expect(library('templates').map((t: any) => t.name).sort()).toEqual(['Torch', 'Wall Torch', 'Water Splash', 'Water Step']);
+        for (const lib of ['animations', 'animControllers', 'animationFields', 'rigs', 'aiBrains', 'boneMasks'])
+            expect(library(lib) ?? [], lib).toHaveLength(0);
+        expect(library('models').some((m: any) => /Knight|Hollow|mannequin/i.test(m.name))).toBe(false);
+        expect(read('vfs.json').entries.some((e: any) => e.path.startsWith('/Characters'))).toBe(false);
+    });
+
+    it('references only assets it ships', async () => {
+        const { walkRefs, edgesOfAsset } = await import('../applications/editor/src/utils/assetEdges');
+        const KINDS = { materials: 'material', terrainMaterials: 'terrainMaterial', templates: 'template', models: 'model', tilesets: 'tileset', particleSystems: 'particleSystem' };
+        const ids = new Set<string>([
+            ...read('textures', 'index.json').map((t: any) => `texture:${t.id}`),
+            ...Object.entries({ ...KINDS, scripts: 'script' }).flatMap(([lib, kind]) => (library(lib) ?? []).map((a: any) => `${kind}:${a.id}`)),
+        ]);
+        const edges: any[] = [];
+        walkRefs(scene(), edges);
+        for (const [lib, kind] of Object.entries(KINDS)) for (const a of library(lib) ?? []) edges.push(...edgesOfAsset(kind as any, a));
+        const missing = edges.map(e => `${e.to.kind}:${e.to.id}`).filter(k => !ids.has(k) && !k.endsWith('__impostor') && !k.startsWith('image:'));
+        expect([...new Set(missing)]).toEqual([]);
     });
 
     it('lets light through the leaves, and only the leaves', () => {
@@ -245,7 +270,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
         // Cards cut out on their base colour's alpha (no separate mask).
         for (const name of ['Spruce A Needles', 'Oak Leaves', 'Shrub A Leaves']) expect(byName.get(name)?.alphaCutoff, name).toBe(0.5);
-        for (const name of ['Spruce A Bark', 'Oak Bark', 'Shrub A Bark', 'Moss Rock'])
+        for (const name of ['Spruce A Bark', 'Oak Bark', 'Shrub A Bark'])
             expect(byName.get(name)?.translucency ?? 0, name).toBe(0);
     });
 
@@ -256,10 +281,9 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             expect(byName.get(name)?.interactBend ?? 0, name).toBeGreaterThan(0.3);
         for (const name of ['Spruce A Needles', 'Oak Leaves'])
             expect(byName.get(name)?.interactBend ?? 0, name).toBeLessThan(0.1);
-        // Only FOLIAGE materials run any of it (Material.Foliage): every plant's are, the rock's is not.
+        // Only FOLIAGE materials run any of it (Material.Foliage): every plant's are.
         for (const name of ['Meadow Grass A Grass', 'Spruce A Needles', 'Spruce A Bark', 'Oak Leaves', 'Shrub A Leaves', 'Juniper Needles'])
             expect(byName.get(name)?.type, name).toBe('foliage');
-        expect(byName.get('Moss Rock')?.type).toBe('pbr');
         // Grass varies plant by plant and shows gusts as waves; broad leaves flip in gusts, needles do not.
         expect(byName.get('Meadow Grass A Grass')?.variationValue ?? 0).toBeGreaterThan(0);
         expect(byName.get('Meadow Grass A Grass')?.rippleSheen ?? 0).toBeGreaterThan(0);
@@ -284,27 +308,50 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
     });
 
-    it('starts the player on open ground at the reference spawn, facing north', () => {
-        const player = nodes().find(n => n.name === 'Player');
-        const [x, y, z] = player.position;
+    it('flies a free camera from the reference spawn, facing north', () => {
+        const fly = nodes().find(n => n.name === 'Fly Camera');
+        expect(fly.type).toBe('cameraRig');
+        const [x, y, z] = fly.position;
         expect([x, z]).toEqual([-12, 82]);
-        expect(Math.abs(y - heightAt(x, z) - 0.05)).toBeLessThan(0.01);
+        // Eye height over open ground.
+        expect(y - heightAt(x, z)).toBeGreaterThan(1.5);
         expect(slopeAt(x, z)).toBeLessThan(20);
-        expect(player.rotation[1]).toBe(180);
+        expect(fly.yaw).toBe(180);
+        // Its own eye: no follow target, no arm, nothing to collide with.
+        expect([fly.followId, fly.armLength, fly.collisionEnabled]).toEqual([null, 0, false]);
+        const script = library('scripts').find((s: any) => s.id === fly.variables.__scriptId.value);
+        expect(script.name).toBe('Fly Camera');
+        expect(fly.script).toBe(script.source);
+        expect(script.source).toContain('class ValleyFlyCameraNode extends CameraRigNode');
         // A 2 km landscape needs more than the Playable's 100 m camera.
-        const camera = allNodes(player).find(n => n.type === 'camera');
+        const camera = fly.children.find((c: any) => c.type === 'camera');
         expect(camera.camera.far).toBeGreaterThanOrEqual(2000);
+        // Every action the script reads is bound, on a keyboard and mouse and on a pad (the wheel only on a mouse).
+        const map = library('inputMap');
+        const actions = new Map(map.maps[0].actions.map((a: any) => [a.name, a]));
+        for (const [name, pad] of [['Move', true], ['Look', true], ['Ascend', true], ['Descend', true], ['Sprint', true], ['Fly Speed', false]] as const) {
+            const a: any = actions.get(name);
+            expect(a, name).toBeDefined();
+            expect(script.source, name).toContain(`'${name}'`);
+            expect(a.bindings.some((b: any) => ['key', 'pointer', 'mouse'].includes(b.source.device)), name).toBe(true);
+            if (pad) expect(a.bindings.some((b: any) => b.source.device.startsWith('gamepad')), name).toBe(true);
+        }
+        // A free camera has no subject to focus on.
+        expect(scene().config.render.dofEnabled).toBe(false);
     });
 
-    it('stands every interactable and spawn on the ground', () => {
-        for (const group of ['Interactables', 'Enemy Spawns']) {
-            for (const n of nodes().find(g => g.name === group).children) {
-                const [x, y, z] = n.position;
-                // The gate hangs 2 m up its posts; the cave is sunk into the plaza so its base never floats.
-                const lift = n.name === 'Shortcut Gate' ? 2 : n.name === 'Skull Cave Entrance' ? -0.4 : 0;
-                expect(Math.abs(y - lift - heightAt(x, z)), n.name).toBeLessThan(0.1);
-            }
-        }
+    it('burns a campfire at the hamlet, on the ground, with nothing to rest at', () => {
+        const fire = nodes().find(n => n.name === 'Campfire');
+        expect(fire).toBeDefined();
+        const [x, y, z] = fire.position;
+        expect(Math.abs(y - heightAt(x, z))).toBeLessThan(0.1);
+        expect(fire.variables.__scriptId).toBeUndefined();
+        expect(fire.variables.__templateId).toBeUndefined();
+        expect(fire.trigger).toBeUndefined();
+        expect(fire.children.map((c: any) => c.name)).toEqual(['Model', 'Fire']);
+        const light = fire.children.find((c: any) => c.name === 'Fire');
+        expect(light.scriptVars.lit).toBe(true);
+        expect(light.script).toContain('class ValleyFireLightNode');
     });
 
     it('places each building as a linked copy, the houses enterable, nothing floating', () => {
@@ -364,12 +411,6 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             expect(allNodes(level).find(n => n.name === 'Sails')?.script, level.name).toContain('class ValleyWindmillNode');
     });
 
-    it('gives every enemy type a draw distance on its root, the base template and each variant alike', () => {
-        const enemies = library('templates').filter((t: any) => t.nodeJson?.type === 'character' && t.name !== 'Player');
-        expect(enemies.length).toBeGreaterThanOrEqual(3);
-        for (const t of enemies) expect(t.nodeJson.drawDistance, t.name).toBe(60);
-        expect(library('templates').find((t: any) => t.name === 'Player').nodeJson.drawDistance).toBeUndefined();
-    });
 
     it('fills the pond with water that stays below every bank, under a probe it reflects', () => {
         const water = nodes().find(n => n.name === 'Pond Water');
@@ -393,7 +434,8 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const valleyProbe: any = byName.get('Valley Probe');
         expect(valleyProbe.size).toEqual([0, 0, 0]);
         expect(valleyProbe.affectsLighting).toBe(false);
-        for (const name of ['Bonfire Probe', 'Hamlet Probe', 'Pond Probe', 'Windmill Probe', 'Cave Mouth Probe']) {
+        expect(byName.has('Cave Mouth Probe')).toBe(false);
+        for (const name of ['Bonfire Probe', 'Hamlet Probe', 'Pond Probe', 'Windmill Probe']) {
             const p: any = byName.get(name);
             expect(p, name).toBeDefined();
             expect(p.size.every((v: number) => v > 0), name).toBe(true);
@@ -422,11 +464,12 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
     });
 
-    it('lights the hamlet, the cave mouth and every house interior with GI volumes, baked', async () => {
+    it('lights the hamlet and every house interior with GI volumes, baked', async () => {
         const { decodeGiBake, readGiBakeHeader, unpackGiBake } = await import('../src/graphics/render/gi/giBakeFormat');
         const volumes = nodes().filter(n => n.type === 'giVolume');
         const byName = new Map(volumes.map(v => [v.name, v]));
-        for (const name of ['Hamlet GI', 'Cave Mouth GI']) {
+        expect(byName.has('Cave Mouth GI')).toBe(false);
+        for (const name of ['Hamlet GI']) {
             const v: any = byName.get(name);
             expect(v, name).toBeDefined();
             expect(v.giVolume.rays, name).toBe(64);
@@ -448,11 +491,13 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const probes = volumes.reduce((n, v) => n + v.giVolume.probeCounts.reduce((a: number, c: number) => a * c, 1), 0);
         expect(probes).toBeLessThanOrEqual(16384);
         for (const v of volumes) expect(typeof v.giVolume.bakeId, v.name).toBe('string');
-        // The bakes the example carries are packed, belong to a volume (of either scene), and fit its grid.
+        // The bakes the example carries are packed, belong to a volume, and fit its grid; every volume has one.
         const bakes: { id: string; bytes: ArrayBuffer }[] = valley!.bundle.giBakes ?? [];
-        const everyVolume = [...volumes, ...dungeonNodes().filter(n => n.type === 'giVolume')];
+        for (const v of volumes) expect(bakes.some(b => b.id === v.giVolume.bakeId), v.name).toBe(true);
+        // The valley's volumes replace its ambient: the open sky's fill, which a house's walls shut out.
+        for (const v of volumes) expect(v.giVolume.additive ?? false, v.name).toBe(false);
         for (const bake of bakes) {
-            const v: any = everyVolume.find(x => x.giVolume.bakeId === bake.id);
+            const v: any = volumes.find(x => x.giVolume.bakeId === bake.id);
             expect(v, bake.id).toBeDefined();
             const bytes = new Uint8Array(bake.bytes);
             const header = readGiBakeHeader(bytes);
@@ -470,16 +515,12 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(script).toMatch(/public probeDegrees: number = 4/);
     });
 
-    it('burns a 2.7 s bonfire loop, and lights a bonfire with its ignition played once', () => {
+    it('burns the campfire on the 2.7 s bonfire loop, already alight', () => {
         const tilesets = library('tilesets');
-        const loop = tilesets.find((t: any) => t.name === 'Bonfire Fire');
-        const ignition = tilesets.find((t: any) => t.name === 'Bonfire Ignition');
-        expect(loop).toBeDefined();
-        expect(ignition).toBeDefined();
-        const bonfire = library('templates').find((t: any) => t.name === 'Bonfire').nodeJson;
-        const sprites: any[] = [];
-        const walk = (n: any) => { if (n.type === 'animatedSprite') sprites.push(n); (n.children ?? []).forEach(walk); };
-        walk(bonfire);
+        expect(tilesets.find((t: any) => t.name === 'Bonfire Fire')).toBeDefined();
+        // Lit when the valley opens, so the one-shot ignition is never played and does not ship.
+        expect(tilesets.find((t: any) => t.name === 'Bonfire Ignition')).toBeUndefined();
+        const sprites = allNodes(nodes().find(n => n.name === 'Campfire')).filter((n: any) => n.type === 'animatedSprite');
         const flames = sprites.filter(n => n.name === 'Flame');
         expect(flames.length).toBe(2);
         for (const f of flames) {
@@ -487,15 +528,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             expect(f.animation.frames.length / f.animation.fps).toBeGreaterThan(2.5);
             expect(f.animation.loop).toBe(true);
         }
-        const ign = sprites.find(n => n.name === 'Ignition');
-        expect(ign, "an Ignition sprite under the bonfire's fire").toBeDefined();
-        expect(ign.animation.loop).toBe(false);
-        expect(ign.animation.randomStart ?? false).toBe(false);
-        expect(ign.visible).toBe(false);
-        expect(ign.sprite.tilesetId).toBe(ignition.id);
-        // The same frame as the loop flame it hands over to.
-        expect(ign.position).toEqual(flames[0].position);
-        expect(ign.scale).toEqual(flames[0].scale);
+        expect(sprites.some(n => n.name === 'Ignition')).toBe(false);
     });
 
     it("shadows the torches' lights, and only theirs", () => {
@@ -507,7 +540,6 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             return out;
         };
         for (const name of ['Torch', 'Wall Torch']) expect(lightsOf(name).map(l => l.castShadows), name).toEqual([true]);
-        for (const name of ['Candle', 'Hanging Brazier']) expect(lightsOf(name).map(l => l.castShadows), name).toEqual([false]);
     });
 
     it('gives the water a transparent forward custom material with WGSL a published WebGPU game can use', async () => {
@@ -545,6 +577,8 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         for (const name of ['Water Splash', 'Water Step']) {
             const t = templates.find((x: any) => x.name === name);
             expect(t, name).toBeTruthy();
+            // Played and removed by the Valley's own effect script.
+            expect(t.nodeJson.script, name).toContain('class ValleyFxNode');
             const ps = t.nodeJson.children.find((c: any) => c.type === 'particleSystem');
             // A crown sprite and droplets, both on Creator flipbooks, lit like the water they are.
             for (const e of ps.particleSystem.system.emitters) {
@@ -559,8 +593,8 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
     });
 
-    it('raises lit smoke over the valley bonfire', () => {
-        const bonfire = nodes().find(n => n.name === 'Bonfire' && n.type === 'node');
+    it('raises lit smoke over the campfire', () => {
+        const bonfire = nodes().find(n => n.name === 'Campfire');
         const smoke = allNodes(bonfire).filter((n: any) => n.type === 'animatedSprite' && n.name === 'Smoke');
         expect(smoke).toHaveLength(1);
         expect(smoke[0].sprite.lit).toBe(true);
@@ -595,19 +629,6 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         }
     });
 
-    it('slows and grounds whoever wades in through a water zone at the water level', () => {
-        const water = nodes().find(n => n.name === 'Pond Water');
-        const zone = nodes().find(n => n.name === 'Pond Zone');
-        expect(zone.variables.isWater.value).toBe(true);
-        expect(zone.variables.waterSpeedScale.value).toBeGreaterThan(0);
-        expect(zone.variables.waterSpeedScale.value).toBeLessThan(1);
-        expect(zone.variables.waterLevel.value).toBeCloseTo(water.position[1], 3);
-        const shape = zone.trigger.shapes[0];
-        expect(shape.type).toBe('cylinder');
-        expect(shape.radius).toBeGreaterThan(5);
-        // From the basin floor to above the surface, so a wading capsule is inside it.
-        expect(zone.position[1] + shape.offset[1] + shape.height / 2).toBeGreaterThan(water.position[1] + 1.5);
-    });
 
     it('drops props of different densities into the pond, above the water', () => {
         const water = nodes().find(n => n.name === 'Pond Water');
@@ -638,28 +659,16 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(asset.material.fragmentSource).not.toMatch(/foam/i);
     });
 
-    it('fills the cliff notch with the skull cave, which asks before loading the dungeon scene', () => {
-        expect(nodes().some(n => n.name === 'Fog Gate')).toBe(false);
-        expect(nodes().some(n => n.scriptVars?.isBossSpawn === true)).toBe(false);
-        const cave = nodes().find(n => n.name === 'Skull Cave Entrance');
-        expect(cave.scriptVars.targetScene).toBe('Dungeon');
-        expect(cave.scriptVars.frontOnly).toBe(true);
-        // Its face on the notch line, the rest of it back over the plaza.
-        expect(cave.position[2]).toBeLessThan(-117.5);
-        const template = library('templates').find((t: any) => t.id === cave.variables.__templateId.value);
-        expect(template.bodies[template.nodeJson.id].shapes[0].type).toBe('convex');
-        expect(template.triggers[template.nodeJson.id].shapes[0].offset[2]).toBeGreaterThan(0);
+    it('leaves the cliff notch bare: no cave, no door to another scene, no torches at it', () => {
+        expect(nodes().some(n => n.name === 'Skull Cave Entrance' || n.scriptVars?.targetScene)).toBe(false);
+        // The cave stood at the notch, its mouth about z = -116; its torches went with it.
+        for (const n of nodes().filter(n => n.script?.includes('class ValleyFireLightNode') && n.name !== 'Fire'))
+            expect(Math.hypot(n.position[0], n.position[2] + 125), n.name).toBeGreaterThan(20);
     });
 
-    it('breathes a mist out of the skull cave, and keeps the rest of the valley clear but the pond', () => {
+    it('keeps the valley clear of fog volumes but for the pond mist', () => {
         const fogs = nodes().filter(n => n.type === 'volumetricFog');
-        expect(fogs.map(n => n.name).sort()).toEqual(['Cave Mouth Mist', 'Pond Mist']);
-        const mist = fogs.find(n => n.name === 'Cave Mouth Mist');
-        // Round the cave's door (its trigger, in front of the arch), and low on the plaza.
-        const door = [0, 6.19, -116];
-        const half = mist.volumetricFog.size.map((s: number) => s / 2);
-        for (let a = 0; a < 3; a++) expect(Math.abs(door[a] - mist.position[a])).toBeLessThan(half[a]);
-        expect(mist.volumetricFog.heightFalloff).toBeGreaterThan(0);
+        expect(fogs.map(n => n.name)).toEqual(['Pond Mist']);
     });
 
     it('fills the shade with the sky, a little bounce and a third of the overcast grade, not a flat floor', () => {
@@ -674,204 +683,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(sky.skyLight.cloudResponse).toBeCloseTo(0.35, 6);
     });
 
-    it('grades the valley with AgX Punchy, so its clear sky stays blue, and the dungeon with plain AgX', () => {
+    it('grades the valley with AgX Punchy, so its clear sky stays blue', () => {
         expect(scene().config.render.toneMapper).toBe('agxPunchy');
-        const dungeon = read('scenes', `${manifest().sceneMetas[1].id}.json`);
-        expect(dungeon.config.render.toneMapper ?? 'agx').toBe('agx');
-    });
-
-    const dungeonNodes = () => allNodes(read('scenes', `${manifest().sceneMetas[1].id}.json`).scene);
-
-    it('ships the dungeon as a second scene, with the way back to the valley', () => {
-        const metas = manifest().sceneMetas;
-        expect(metas.map((m: any) => m.name)).toEqual(['Valley', 'Dungeon']);
-        const all = dungeonNodes();
-        expect(all.some(n => n.name === 'Player')).toBe(true);
-        expect(all.some(n => n.name === 'GameManager')).toBe(true);
-        const exit = all.find(n => n.name === 'Way Out' && n.scriptVars);
-        expect(exit.scriptVars.targetScene).toBe('Valley');
-        expect(exit.trigger.shapes.length).toBe(1);
-        // The cave and the ladder name each other, so a trip down and back ends where it began.
-        expect(exit.scriptVars.exitTo).toBe('Skull Cave Entrance');
-        expect(nodes().find(n => n.name === 'Skull Cave Entrance').scriptVars.exitTo).toBe('Way Out');
-    });
-
-    it('lights every dungeon room with an additive GI volume, baked', () => {
-        const volumes = dungeonNodes().filter(n => n.type === 'giVolume');
-        expect(volumes.length).toBe(13);
-        const probes = volumes.reduce((n, v) => n + v.giVolume.probeCounts.reduce((a: number, c: number) => a * c, 1), 0);
-        expect(probes).toBeLessThanOrEqual(16384);
-        const baked = new Set((valley!.bundle.giBakes ?? []).map((b: { id: string }) => b.id));
-        for (const v of volumes) {
-            // On top of the dungeon's ambient, which is the dark's own light: in its place, the corners went black.
-            expect(v.giVolume.additive, v.name).toBe(true);
-            expect([64, 256], v.name).toContain(v.giVolume.rays);
-            // A probe every 2.5 m or so at most: a hall's pillars and a room's torch resolve.
-            v.giVolume.size.forEach((s: number, a: number) => expect(s / (v.giVolume.probeCounts[a] - 1), v.name).toBeLessThanOrEqual(2.75));
-            expect(baked.has(v.giVolume.bakeId), v.name).toBe(true);
-        }
-        // The valley's volumes replace its ambient: the open sky's fill, which a house's walls shut out.
-        for (const v of nodes().filter(n => n.type === 'giVolume')) expect(v.giVolume.additive ?? false, v.name).toBe(false);
-    });
-
-    it('places the dungeon props as LOD groups that cull with distance', () => {
-        const models = new Map(library('models').map((m: any) => [m.id, m]));
-        const placed = dungeonNodes().filter(n => {
-            const m: any = models.get(n.variables?.__modelId?.value);
-            return m && (m.lods?.length || m.cullDistance);
-        });
-        expect(placed.length).toBeGreaterThan(20);
-        for (const n of placed) {
-            const m: any = models.get(n.variables.__modelId.value);
-            expect(n.type, n.name).toBe('lodGroup');
-            expect(n.cullDistance, n.name).toBe(m.cullDistance);
-            expect(n.cullDistance, n.name).toBeGreaterThan(0);
-            expect(n.children.length, n.name).toBe((m.lods?.length ?? 0) + 1);
-        }
-        // The scanned props really have levels; the bookcase and the weapons are the big ones.
-        for (const name of ['Bookcase', 'Ornate Mace', 'Barrel'])
-            expect([...models.values()].find((m: any) => m.name === name)?.lods?.length, name).toBeGreaterThan(0);
-    });
-
-    it('builds the dungeon from the medieval structure, chunked, every glb material mapped', () => {
-        const all = dungeonNodes();
-        const structure = all.find(n => n.name === 'Dungeon Structure');
-        const chunks = allNodes(structure).filter(n => n.type === 'model');
-        expect(chunks.length).toBeGreaterThan(60);
-        const materials = new Map(library('materials').map((m: any) => [m.id, m.name]));
-        const used = new Set(chunks.map(n => materials.get(n.variables.__materialId.value)));
-        // Rocky walls and slabs from build/wall_textures, wood and metal the model's own.
-        for (const name of ['Dungeon Castle Slates', 'Dungeon Cobblestone Floor', 'Dungeon Stone Brick Wall', 'Dungeon Stone Slabs',
-            'Dungeon Wood Planks', 'Dungeon Old Wood', 'Dungeon Iron']) expect(used.has(name), name).toBe(true);
-        // No chunk spans the dungeon: each is one 10 m cell's triangles (and their overhang).
-        for (const c of chunks.slice(0, 40)) {
-            const p = c.model.geometry.positions;
-            let minX = Infinity, maxX = -Infinity;
-            for (let i = 0; i < p.length; i += 3) { minX = Math.min(minX, p[i]); maxX = Math.max(maxX, p[i]); }
-            expect(maxX - minX, c.name).toBeLessThan(25);
-        }
-    });
-
-    it('gives the dungeon box colliders over its floors, walls, ramps and steps', () => {
-        const all = dungeonNodes();
-        const bodies = allNodes(all.find(n => n.name === 'Collision')).filter(n => n.body);
-        const shapes = bodies.flatMap(n => n.body.shapes);
-        // Merged hard (dungeon/collision.mjs: tolerances, pillars one box, diagonals one turned box): it
-        // was over 3000 boxes before.
-        expect(shapes.length).toBeGreaterThan(1000);
-        expect(shapes.length).toBeLessThan(2000);
-        expect(shapes.every((s: any) => s.type === 'box')).toBe(true);
-        // The stairs are ramps under 45 degrees.
-        const ramps = shapes.filter((s: any) => Math.abs(s.rotation[0]) > 20);
-        expect(ramps.length).toBeGreaterThanOrEqual(2);
-        for (const r of ramps) expect(Math.abs(r.rotation[0])).toBeLessThan(45);
-        // Walls and pillars are what swings bounce off; floors are walked on, never carved out of the navmesh.
-        // The pillars' bodies are see-through to the player camera, like the pillars; the walls' are not.
-        for (const n of bodies) {
-            if (n.name.startsWith('Walls') || n.name.startsWith('Pillars')) expect(n.variables.blocksSwings?.value, n.name).toBe(true);
-            else expect(n.variables.navObstacle?.value, n.name).toBe(false);
-            expect(!!n.cameraDither, n.name).toBe(n.name.startsWith('Pillars'));
-        }
-        expect(bodies.some(n => n.name.startsWith('Pillars'))).toBe(true);
-    });
-
-    it('hangs wall torches at the light rig sconces, spaced apart, and lights the dungeon with fire', () => {
-        const all = dungeonNodes();
-        const templates = library('templates');
-        const templateOf = (n: any) => templates.find((t: any) => t.id === n.variables?.__templateId?.value);
-        const count = (name: string) => all.filter(n => templateOf(n)?.name === name).length;
-        // Thinned (layout SCONCE_SPACING and the FIRES list): enough to light every room, never a cluster.
-        expect(count('Wall Torch')).toBeGreaterThan(12);
-        expect(count('Wall Torch')).toBeLessThan(30);
-        expect(count('Torch')).toBe(4);
-        expect(count('Candle')).toBe(8);
-        expect(count('Fire Pit')).toBe(3);
-        expect(count('Bonfire')).toBe(1);
-        expect(count('Hanging Brazier')).toBe(2);
-        // Fire is the FX Creator's: the torches' and the hearths' flames, each in tall 128 x 256 frames;
-        // additive (a flame is light: it never darkens what is behind it) and taking a tenth of the
-        // exposure (fire at noon as at night), each burning copy on a frame of its own. The torch loops in
-        // 32 frames (8 x 4), the bonfire in 96 (2.7 s); the bonfire's ignition plays once, from its start.
-        const flames = all.filter(n => n.type === 'animatedSprite' && n.name !== 'Smoke');
-        expect(flames.length).toBeGreaterThan(30);
-        const tilesets = new Set(flames.map(f => f.sprite.tileset.name));
-        expect([...tilesets].sort()).toEqual(['Bonfire Fire', 'Bonfire Ignition', 'Torch Fire']);
-        const frames: Record<string, number> = { 'Torch Fire': 32, 'Bonfire Fire': 96, 'Bonfire Ignition': 64 };
-        for (const f of flames) {
-            const t = f.sprite.tileset;
-            expect([t.tileWidth, t.tileHeight], t.name).toEqual([128, 256]);
-            expect(t.columns * t.rows, t.name).toBeGreaterThanOrEqual(frames[t.name]);
-            expect(f.sprite.blend).toBe('additive');
-            expect(f.sprite.exposureWeight).toBe(0.1);
-            const once = f.name === 'Ignition';
-            expect(f.animation.randomStart ?? false, f.name).toBe(!once);
-            expect(f.animation.loop, f.name).toBe(!once);
-            expect(f.animation.frames, t.name).toHaveLength(frames[t.name]);
-            // The flame's base sits inside its torch or pit: it fades into it over a few centimetres, never
-            // more than a torch head is deep (the head in front of it must still hide it).
-            expect(f.sprite.softness, f.name).toBeGreaterThan(0);
-            expect(f.sprite.softness, f.name).toBeLessThanOrEqual(0.15);
-        }
-        // Embers always; sparks one at a time, falling and bouncing off the floor.
-        const fx = library('particleSystems').find((p: any) => p.name === 'Torch Embers');
-        const sparks = fx.system.emitters.find((e: any) => e.name === 'Sparks');
-        const burst = sparks.spawn.find((m: any) => m.type === 'spawnBurst').params.bursts[0];
-        // Three single sparks a cycle, seconds apart: a crackle, not a fountain.
-        expect(burst.count).toBe(1);
-        expect(burst.cycles).toBe(3);
-        expect(burst.interval).toBeGreaterThan(1);
-        const collision = sparks.update.find((m: any) => m.type === 'collision').params;
-        // Off the scene depth, where the floor they land on is drawn; not the physics bodies, which would
-        // pack every collider near every torch into the simulation each frame.
-        expect(collision.depth).toBe(true);
-        expect(collision.bodies).toBe(false);
-        expect(collision.restitution).toBeGreaterThan(0.2);
-        expect(fx.system.emitters.some((e: any) => e.name === 'Embers')).toBe(true);
-
-        // Smoke over the bonfire and the fire pits: a LIT sprite relit by the Creator's six-way lightmaps
-        // (the fire below lights it), alpha-blended, soft where it meets the logs and the ceiling.
-        const smokes = all.filter(n => n.type === 'animatedSprite' && n.name === 'Smoke');
-        expect(smokes).toHaveLength(4);
-        const shipped = new Set(read('textures', 'index.json').map((t: any) => t.id));
-        for (const s of smokes) {
-            expect(s.sprite.lit, s.id).toBe(true);
-            expect(s.sprite.blend ?? 'alpha').toBe('alpha');
-            expect(s.sprite.softness).toBeGreaterThan(0.1);
-            expect(s.animation.loop).toBe(true);
-            const t = s.sprite.tileset;
-            expect(t.name).toBe('Fire Smoke');
-            for (const key of ['textureId', 'sixWayPositiveTextureId', 'sixWayNegativeTextureId']) expect(shipped.has(t[key]), key).toBe(true);
-            // Under the entry hall's 4.2 m ceiling: the column's top below 4 m over the fire.
-            expect(s.position[1] + s.scale[1] / 2).toBeLessThan(4.2);
-        }
-    });
-
-    it('makes the dungeon a level: enemies, a bonfire, and the Warden behind a fog gate', () => {
-        const all = dungeonNodes();
-        const spawns = all.filter(n => n.name?.startsWith('Spawn '));
-        expect(spawns.length).toBeGreaterThanOrEqual(10);
-        const boss = spawns.find(n => n.scriptVars?.isBossSpawn === true);
-        expect(boss.scriptVars.templateName).toBe('Hollow Warden');
-        expect(all.some(n => n.name === 'Fog Gate')).toBe(true);
-        expect(all.some(n => n.variables?.isBossArena?.value === true)).toBe(true);
-        for (const name of ['Boss Reward', 'Epilogue Message']) expect(all.some(n => n.name === name), name).toBe(true);
-        const nav = all.find(n => n.type === 'navMesh');
-        expect(nav?.navMesh, 'baked navmesh').toBeTruthy();
-    });
-
-    it('breaks barrels into a debris template whose pieces stand inside the barrel', () => {
-        const templates = library('templates');
-        const barrel = templates.find((t: any) => t.name === 'Breakable Barrel');
-        const debris = templates.find((t: any) => t.name === 'Barrel Debris');
-        expect(barrel.nodeJson.scriptVars.debrisTemplate ?? 'Barrel Debris').toBe(debris.name);
-        expect(barrel.bodies[barrel.nodeJson.id].mass).toBe(0);
-        expect(barrel.triggers[barrel.nodeJson.id].shapes.length).toBe(1);
-        expect(debris.nodeJson.children).toHaveLength(17);
-        for (const p of debris.nodeJson.children) {
-            expect(Math.hypot(p.position[0], p.position[2]), p.name).toBeLessThan(0.5);
-            expect(p.position[1], p.name).toBeGreaterThanOrEqual(0);
-            expect(p.position[1], p.name).toBeLessThan(1);
-        }
-        expect(nodes().filter(n => n.name === 'Breakable Barrel').length).toBeGreaterThan(8);
     });
 });

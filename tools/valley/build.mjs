@@ -2461,7 +2461,9 @@ const SHARED_PROPS = '/Props/Shared/Materials'
 // The GI bakes the example already carries (bakeGI.cjs), read before the folder is rewritten: the volumes
 // keep their ids from build to build, so a bake lands back under the volume it was taken for. One whose
 // geometry has since moved is caught at load (its signature) and captured again.
-const carriedGiBakes = readGiBakes(OUT)
+// Since the split (split.ts, below) the Dungeon's bakes live in its own example.
+const DUNGEON_OUT = path.join(ROOT, 'applications', 'editor', 'public', 'examples', 'dungeon')
+const carriedGiBakes = [...readGiBakes(OUT), ...readGiBakes(DUNGEON_OUT)]
 
 const foliageFolder = Object.fromEntries(foliageAssets.map(a => [a.name, `${FOLIAGE}/Models`]))
 const buildingFolder = Object.fromEntries(propAssets.map(a => [a.name, `${BUILDINGS}/Models`]))
@@ -2545,6 +2547,15 @@ const sceneBytes = fs.statSync(sceneFile).size
 const giBakes = carriedGiBakes.filter(b => GI_BAKE_IDS.has(b.id))
 const largest = await packFormat2(OUT, { giBakes })
 if (carriedGiBakes.length) log('gi bakes', `${giBakes.length} of ${carriedGiBakes.length} carried over`)
-log(`${PROJECT_NAME} written to applications/editor/public/examples/valley/`)
+log(`${PROJECT_NAME} and ${DUNGEON_NAME} written to applications/editor/public/examples/valley/`)
 log(`  templates ${result.templates} · materials ${result.materials} · textures ${result.textureCount} · scene ${mb(sceneBytes)} unpacked · largest file ${mb(largest)}`)
-log('Next:  npm --prefix editor run examples:list')
+
+// The two scenes ship as two examples: the Valley as scenery (its gameplay taken out, a free camera in),
+// the Dungeon as the souls game. split.ts does it on the folder just written, and prunes each to what it uses.
+{
+  const res = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx',
+    ['vite-node', '--config', 'vitest.config.ts', 'tools/valley/split.ts'],
+    { cwd: ROOT, stdio: 'inherit', shell: process.platform === 'win32', env: { ...process.env, NODE_OPTIONS: '--max-old-space-size=16384' } })
+  if (res.status !== 0) throw new Error('split.ts failed')
+}
+log('Next:  npm --prefix applications/editor run examples:list')

@@ -461,6 +461,19 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   toggles a selection, arrows, Ctrl+A, Delete and Ctrl+C / Ctrl+V work on the tiles, Ctrl+wheel zooms
   about the pointer, middle-drag pans, **Fit** and **1:1**, and the status bar names the tile under the
   pointer. Tileset edits are undoable, and unsaved edits survive switching tabs.
+- **Three examples: Valley, Dungeon and Firing Line.** The Valley and its Dungeon are no longer one
+  project.
+  - *Valley* is the mountain valley as scenery: the landscape, foliage, the hamlet and its houses, the
+    windmill, the pond, the day and night, GI and probes. The player, enemies, nav mesh, Game Manager,
+    barrels, messages, pickups, the shortcut and the skull cave are gone, and with them every asset only
+    they used (about 124 MB of textures, every character, clip and AI brain). The bonfire is a campfire.
+    Play flies a free camera: WASD and the mouse, Space / E up, C / Q down, Shift to sprint, the wheel for
+    speed, a pad too.
+  - *Dungeon* is the souls game on its own, its way back up to the valley removed; it opens at the
+    bonfire.
+  - `tools/valley/split.ts` does the split and prunes each project to the assets it reaches, through the
+    editor's own reference edges and the names scripts use. `build.mjs` runs it after a build;
+    `bakeGI.cjs` bakes an example's own scenes by default.
 
 ### Fixes & refactors
 

@@ -1,7 +1,9 @@
 # Docs media
 
-The screenshots and GIFs in `docs/media/` come from the bundled **Valley** example and its **Dungeon**
-scene. They were captured from the editor and from Play on WebGPU, plus the Foliage and FX Creators.
+The screenshots and GIFs in `docs/media/` come from the bundled **Valley** and **Dungeon** examples (one project
+with two scenes when they were taken; the knight's Valley shots predate the split, which left the Valley as
+scenery with a fly camera). They were captured from the editor and from Play on WebGPU, plus the Foliage and
+FX Creators.
 This folder is the tool that retakes them.
 
 | File | What | Where it is used |
@@ -52,7 +54,7 @@ The JPEGs were saved with Pillow at quality 88 and 1280 px wide.
 
 ## Taking the shots
 
-1. **Install the Valley once.** It persists in the capture profile:
+1. **Install the Valley once** (and the Dungeon, with `x.slug === 'dungeon'`). Each persists in the capture profile:
    ```
    curl -X POST 127.0.0.1:8095/eval -d "localStorage.setItem('cleo_renderer_backend','webgpu');
      const ex = await import('/src/utils/examples.ts'); const e = (await ex.loadExampleIndex()).find(x => x.slug === 'valley');
@@ -71,8 +73,8 @@ The JPEGs were saved with Pillow at quality 88 and 1280 px wide.
    3. Move with `keyDown('KeyW')` / `key('Space')`.
    4. Take a `/shot` with `crop=0,60,1600,840`, or a `/record`.
 
-   The Valley GIF holds W for 5.5 s from spawn. The Dungeon one holds W for 5 s with a roll at 2.2 s.
-5. **The Dungeon:** run `openAsset('Dungeon')` in the editor, then Play it. Do not `Game.loadScene` it from a playing Valley: see below.
+   The Valley GIF holds W for 5.5 s from spawn (the fly camera's, now). The Dungeon one holds W for 5 s with a roll at 2.2 s.
+5. **The Dungeon:** open the Dungeon project, then Play it.
 6. **The Creator:** navigate the page to `/creator/`, then:
    1. Pick Tree ▸ Oak and zoom with wheel events on the canvas.
    2. For the GIF, pick Grass, turn on Walk-through, and tilt the orbit with a mouse drag.
@@ -112,7 +114,7 @@ The JPEGs were saved with Pillow at quality 88 and 1280 px wide.
 - Even in Chrome, the **Valley is near the edge**. Three things lost the device or crashed the tab:
   - resizing the viewport repeatedly;
   - setting the Time of Day to night in Play (it re-bakes the sky);
-  - loading the Dungeon on top of a playing Valley.
+  - loading the Dungeon on top of a playing Valley (when the two were one project).
 
   Reload between sessions, and keep each session to one fullscreen resize. There is no night shot for that reason.
 - A **page screenshot per frame** takes about 0.8 s at this size. GIFs come from `Page.startScreencast`, which runs at about 23 fps.

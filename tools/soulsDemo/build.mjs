@@ -1265,7 +1265,7 @@ function characterModel(key, materialId, scale) {
 
 /**
  * The combat volumes' collision layers (trigger group/mask bits), as SoulsHitbox's `LAYER` has them —
- * tests/valleySouls.test.ts checks the two agree. 1 is every ordinary body and 2 the ragdoll bones.
+ * tests/dungeonSouls.test.ts checks the two agree. 1 is every ordinary body and 2 the ragdoll bones.
  */
 const COMBAT_LAYER = { PLAYER_HURTBOX: 1 << 8, ENEMY_HURTBOX: 1 << 9, HITBOX: 1 << 10 }
 

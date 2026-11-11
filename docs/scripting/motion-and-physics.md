@@ -209,7 +209,7 @@ const off = hitbox.onContact(c => { if (c.phase === 'enter') this.strike(c.node,
   returned remover and call it when you are done.
 - Overlap queries see hurtbox triggers with `{ includeTriggers: true, layerMask: HURTBOX }`; a disabled
   trigger is never found.
-- The Valley example's combat (`examples/scripts/SoulsHitbox.ts`) is built exactly like this.
+- The Dungeon example's combat (`examples/scripts/SoulsHitbox.ts`) is built exactly like this.
 
 ```ts
 export default class PickupNode extends Node {
