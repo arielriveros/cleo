@@ -246,7 +246,35 @@ scene.setActiveCamera(node: CameraNode | null): void
 ```
 
 This **pins** the active camera. Loading a scene clears the pin, so set it after the scene is in
-place rather than before.
+place rather than before. `scene.pinnedCamera` reads the pin back (null when nothing is pinned).
+
+## Sequences
+
+A **Sequence** node plays a cinematic: a timeline of tracks that move a camera along a path, cut between
+cameras, animate properties (a UI fade, a script field, a renderer setting, `Game.timeScale`) and call
+methods at given moments. Play one by name, or through the node:
+
+```ts
+const tour = Game.playSequence('Valley Tour')          // the player, or undefined (with a warning)
+await tour?.finished                                    // 'finished' or 'stopped'
+
+const intro = this.findNode('Intro') as SequenceNode
+intro.play({ from: 4, bindings: { Hero: this } })       // start 4 s in, with this node in the Hero slot
+intro.pause(); intro.resume(); intro.seek(10); intro.skip()
+intro.stop()                                            // and put back everything it changed
+intro.onFinished(reason => { /* ... */ })
+intro.onEvent((name, key) => { /* every event key it passes */ })
+```
+
+- **While it plays it owns what it drives.** Every target is captured the first time the sequence writes
+  it, and `stop()` restores all of them: the camera and the pin, a property, the time scale. A playback
+  that runs to its end keeps its final state (the camera cut hands the camera back) until `stop()`.
+- **Event keys** call a method on the Sequence node itself, so a script attached to it is the cinematic's
+  director, or on the node in a slot. They fire as the playhead passes them, never on a `seek`.
+- **It runs before every `onUpdate`**, in the scene's sequence pass, so a script reads this frame's values
+  and a camera the sequence moves renders the frame it moved.
+- **Its clock** is game time (it follows `Game.timeScale`, and stops with `Game.pause()`) unless the
+  sequence says `real`.
 
 ## Timers on the scene
 

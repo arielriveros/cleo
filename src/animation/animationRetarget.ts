@@ -3,6 +3,7 @@ import { Animation, AnimationChannel, AnimationSampler, Skin } from './animatedM
 import { normalizeBoneName, humanoidSlotOf } from './boneNames';
 import { skeletonTopology } from './skeletonTopology';
 import { sampleQuat, sampleVec3, unionKeyTimes } from './samplerSample';
+import { quatAngleDeg } from '../core/math';
 
 // Retargeting an imported animation clip onto a model's skeleton, in three stages so the editor can put
 // a mapping review between them: buildBoneMapping, mappingReport, retargetAnimation.
@@ -908,11 +909,6 @@ function nodeTransformsWorldBindRotation(skin: Skin, node: number): quat {
     return quat.normalize(q, q);
 }
 
-/** Rotation of a unit quaternion in degrees (0 = identity). */
-function angleDeg(q: quat): number {
-    return Math.acos(Math.min(1, Math.abs(q[3]))) * 2 * 180 / Math.PI;
-}
-
 /** Local-transform scale of a node, revealing unit scale and mirrors (a negative axis = reflected). */
 function nodeScale(skin: Skin, node: number): [number, number, number] {
     const nt = skin.nodeTransforms?.get(node);
@@ -945,7 +941,7 @@ const slotIndex = humanoidRigOf;
  * both ways. The two disagreeing on the source means its node transforms are not a bind pose.
  */
 export function describeRetarget(clips: Animation[], sourceSkin: Skin, targetSkin: Skin, mapping: BoneMapping): any {
-    const round = (q: quat) => `${angleDeg(q).toFixed(1)}°`;
+    const round = (q: quat) => `${quatAngleDeg(q).toFixed(1)}°`;
     const kinds: Record<string, number> = {};
     for (const e of mapping.entries) kinds[e.kind] = (kinds[e.kind] ?? 0) + 1;
 

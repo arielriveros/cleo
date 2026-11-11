@@ -19,6 +19,9 @@
  * bounce (a pale room's light takes several to gather).
  */
 
+import { angleBetween } from '../../../core/math';
+export { angleBetween } from '../../../core/math';
+
 // --- Capture order ---
 
 export interface GiCaptureVolume {
@@ -101,12 +104,6 @@ export interface GiTriggerOptions {
 }
 
 export const GI_TRIGGERS: GiTriggerOptions = { resetAngle: 10, resetRatio: 2, skyChange: 0.02 };
-
-/** The angle between two unit directions, degrees. */
-export function angleBetween(a: ArrayLike<number>, b: ArrayLike<number>): number {
-    const d = Math.min(1, Math.max(-1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
-    return Math.acos(d) * 180 / Math.PI;
-}
 
 function ratioOver(a: number, b: number, limit: number): boolean {
     const lo = Math.min(Math.abs(a), Math.abs(b)), hi = Math.max(Math.abs(a), Math.abs(b));

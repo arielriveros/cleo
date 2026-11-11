@@ -1,5 +1,7 @@
 import { LTC_TABLE_SIZE } from './ltcTables';
 import { ltcTableTexels } from './lightData';
+import { add3, cross3, dot3, normalize3, scale3, sub3 } from '../core/math';
+export { cross3 as cross, dot3 as dot, normalize3 as normalize } from '../core/math';
 
 // -----------------------------------------------------------------------------------------------
 // The CPU twin of chunks/areaLights.wgsl: the same polygon, the same edge integral, the same LTC lookup,
@@ -25,36 +27,29 @@ export interface AreaEmitter {
     twoSided: boolean;
 }
 
-const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-const add = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-const scale = (a: V3, s: number): V3 => [a[0] * s, a[1] * s, a[2] * s];
-export const dot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-export const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-export const normalize = (a: V3): V3 => scale(a, 1 / Math.hypot(a[0], a[1], a[2]));
-
 /** The emitter's polygon, counter-clockwise seen from its front (4 corners, or the disk's octagon). */
 export function areaPolygon(e: AreaEmitter): V3[] {
-    const b = cross(e.normal, e.tangent);
+    const b = cross3(e.normal, e.tangent);
     if (e.shape === 'disk') {
         const r = e.halfWidth * DISK_OCTAGON_SCALE;
         return Array.from({ length: DISK_SIDES }, (_, i) => {
             const a = (i * 2 * Math.PI) / DISK_SIDES;
-            return add(e.center, add(scale(e.tangent, Math.cos(a) * r), scale(b, Math.sin(a) * r)));
+            return add3(e.center, add3(scale3(e.tangent, Math.cos(a) * r), scale3(b, Math.sin(a) * r)));
         });
     }
-    const corner = (sx: number, sy: number) => add(e.center, add(scale(e.tangent, sx * e.halfWidth), scale(b, sy * e.halfHeight)));
+    const corner = (sx: number, sy: number) => add3(e.center, add3(scale3(e.tangent, sx * e.halfWidth), scale3(b, sy * e.halfHeight)));
     return [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
 }
 
 /** `cross(v1, v2) * theta / sin(theta) / 2pi` by the shader's rational fit. */
 export function ltcEdge(v1: V3, v2: V3): V3 {
-    const x = dot(v1, v2);
+    const x = dot3(v1, v2);
     const y = Math.abs(x);
     const a = 0.8543985 + (0.4965155 + 0.0145206 * y) * y;
     const b = 3.4175940 + (4.1616724 + y) * y;
     const v = a / b;
     const thetaSinTheta = x > 0 ? v : 0.5 / Math.sqrt(Math.max(1 - x * x, 1e-7)) - v;
-    return scale(cross(v1, v2), thetaSinTheta);
+    return scale3(cross3(v1, v2), thetaSinTheta);
 }
 
 /** Row-major 3x3 as nine numbers. */
@@ -68,13 +63,13 @@ export const IDENTITY3: M3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
 
 /** The shader's frame round N: T1 in the plane of N and V. */
 export function ltcFrame(N: V3, V: V3): [V3, V3, V3] {
-    let t1 = sub(V, scale(N, dot(V, N)));
-    if (dot(t1, t1) < 1e-8) {
+    let t1 = sub3(V, scale3(N, dot3(V, N)));
+    if (dot3(t1, t1) < 1e-8) {
         t1 = Math.abs(N[0]) > 0.9 ? [0, 1, 0] : [1, 0, 0];
-        t1 = sub(t1, scale(N, dot(t1, N)));
+        t1 = sub3(t1, scale3(N, dot3(t1, N)));
     }
-    t1 = normalize(t1);
-    return [t1, scale(cross(N, t1), -1), N];
+    t1 = normalize3(t1);
+    return [t1, scale3(cross3(N, t1), -1), N];
 }
 
 /**
@@ -83,15 +78,15 @@ export function ltcFrame(N: V3, V: V3): [V3, V3, V3] {
  * (z > 0) exactly, then Lambert's edge sum's z is the integral.
  */
 export function ltcIntegrate(e: AreaEmitter, P: V3, frame: [V3, V3, V3], minv: M3 = IDENTITY3): number {
-    const behind = dot(e.normal, sub(P, e.center)) < 0;
+    const behind = dot3(e.normal, sub3(P, e.center)) < 0;
     if (behind && !e.twoSided) return 0;
     let poly = areaPolygon(e).map(v => {
-        const d = sub(v, P);
-        return mulMV(minv, [dot(frame[0], d), dot(frame[1], d), dot(frame[2], d)]);
+        const d = sub3(v, P);
+        return mulMV(minv, [dot3(frame[0], d), dot3(frame[1], d), dot3(frame[2], d)]);
     });
     // Seen from behind, a two-sided panel winds the other way.
     if (behind) poly = poly.reverse();
-    const clipped = clipToHorizon(poly).map(normalize);
+    const clipped = clipToHorizon(poly).map(normalize3);
     if (clipped.length < 3) return 0;
     let fz = 0;
     for (let i = 0; i < clipped.length; i++) fz += ltcEdge(clipped[i], clipped[(i + 1) % clipped.length])[2];
@@ -144,7 +139,7 @@ export function ltcMinv(t1: [number, number, number, number]): M3 {
  * before the multi-scatter term: `(f0 x t2.x + (1 - f0) x t2.y) x FF(Minv)`.
  */
 export function ltcSpecular(e: AreaEmitter, P: V3, N: V3, V: V3, perceptual: number, f0: number): number {
-    const NoV = Math.min(1, Math.max(1e-4, dot(N, V)));
+    const NoV = Math.min(1, Math.max(1e-4, dot3(N, V)));
     const frame = ltcFrame(N, V);
     const t1 = ltcLookup(0, perceptual, NoV);
     const t2 = ltcLookup(1, perceptual, NoV);

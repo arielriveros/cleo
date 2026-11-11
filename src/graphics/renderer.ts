@@ -1177,6 +1177,9 @@ export class Renderer {
      * for as long as TAA, or the smoke-and-fire volumes, keep finding history to blend.
      */
     public invalidateTemporalHistory(): void {
+        // Motion blur reprojects through LAST frame's view-projection, so after a cut it would streak the
+        // whole first frame by the jump between the two cameras. Without a previous frame it simply skips.
+        this._view.hasPrevViewProj = false;
         this._clouds.cloudHistory.invalidate();
         this._temporal.taaHistory.invalidate();
         this._fluids.fluidHistory.invalidate();
@@ -1184,6 +1187,16 @@ export class Renderer {
         this._ssr.invalidate();
         this._radiance.invalidate();
         this._fog.invalidate();
+    }
+
+    /**
+     * Declare a camera cut: the next frame shares nothing with this one, so every temporal effect (TAA,
+     * motion blur, clouds, SSR, SSIL, fog) starts fresh instead of smearing across it. Switching the active
+     * camera, or a large jump, is detected by itself; call this for a cut the detector cannot see (a small
+     * jump on the same camera).
+     */
+    public cut(): void {
+        this.invalidateTemporalHistory();
     }
 
     private readonly _ssrForward: number[] = [0, 0, 0, 0];

@@ -1,5 +1,6 @@
 import { defaultBlendRule, parseBlendRule, cloneBlendRule, legacyAutoRule } from '../terrain/terrainLayers';
 import type { TerrainBlendRule } from '../terrain/terrainLayers';
+import { finiteOr } from '../core/math';
 
 interface MaterialConfig {
     side?: 'front' | 'back' | 'double';
@@ -347,7 +348,6 @@ export interface UvConfig {
 
 const UV_PROJECTION_CODE: Record<UvProjection, number> = { mesh: 0, box: 1, triplanar: 2 };
 const UV_PROJECTION_NAME: UvProjection[] = ['mesh', 'box', 'triplanar'];
-const finiteOr = (v: unknown, d: number): number => typeof v === 'number' && Number.isFinite(v) ? v : d;
 const pairOr = (v: unknown, d: [number, number]): [number, number] =>
     Array.isArray(v) && v.length >= 2 ? [finiteOr(v[0], d[0]), finiteOr(v[1], d[1])] : d;
 

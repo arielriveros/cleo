@@ -14,6 +14,8 @@
  * the frame — the light grid, the sprites, the particles — sees the same value.
  */
 
+import { valueNoise1 } from '../core/math';
+
 /** The frame's flicker time in seconds. Set by the renderer at the top of every frame. */
 export const lightFlickerClock = { time: 0 };
 
@@ -24,19 +26,6 @@ export function flickerSeed(id: string): number {
     return (h >>> 0) / 4294967296;
 }
 
-/** Hash of an integer lattice point and a seed, in [-1, 1]. */
-function lattice(i: number, seed: number): number {
-    const x = Math.sin(i * 127.1 + seed * 311.7) * 43758.5453;
-    return (x - Math.floor(x)) * 2 - 1;
-}
-
-/** Smooth 1D value noise in [-1, 1]. */
-function valueNoise(t: number, seed: number): number {
-    const i = Math.floor(t), f = t - i;
-    const u = f * f * (3 - 2 * f);
-    return lattice(i, seed) * (1 - u) + lattice(i + 1, seed) * u;
-}
-
 /**
  * The flicker multiplier at `time`: 1 + amount x (three octaves of smooth noise, at unrelated rates), never
  * below 0. `speed` is roughly the swells per second of the slowest octave. `amount` 0 is exactly 1.
@@ -44,9 +33,9 @@ function valueNoise(t: number, seed: number): number {
 export function flickerFactor(time: number, amount: number, speed: number, seed: number): number {
     if (!(amount > 0)) return 1;
     const t = time * Math.max(0, speed);
-    const n = valueNoise(t, seed) * 0.55
-            + valueNoise(t * 2.37 + 13.1, seed + 0.31) * 0.3
-            + valueNoise(t * 5.91 + 41.7, seed + 0.67) * 0.15;
+    const n = valueNoise1(t, seed) * 0.55
+            + valueNoise1(t * 2.37 + 13.1, seed + 0.31) * 0.3
+            + valueNoise1(t * 5.91 + 41.7, seed + 0.67) * 0.15;
     return Math.max(0, 1 + amount * n);
 }
 

@@ -1,3 +1,5 @@
+import { finiteOrUndefined } from '../../core/math';
+
 /**
  * Which parts of a skinned mesh are cloth, as stored on the model (`AnimatedModel.skinnedCloth`).
  *
@@ -50,8 +52,6 @@ export interface SkinnedClothData {
     colliders?: { joint: number; a: [number, number, number]; b: [number, number, number]; radius: number }[];
 }
 
-const num = (x: unknown): number | undefined => (typeof x === 'number' && Number.isFinite(x) ? x : undefined);
-
 /** Tolerant reader: anything unusable is null rather than a throw (a model must still load). */
 export function parseSkinnedCloth(json: any): SkinnedClothData | null {
     if (!json || !Array.isArray(json.vertices) || !Array.isArray(json.weights)) return null;
@@ -59,20 +59,20 @@ export function parseSkinnedCloth(json: any): SkinnedClothData | null {
     const out: SkinnedClothData = {
         vertices: json.vertices.map((v: unknown) => Math.max(0, Math.floor(Number(v) || 0))),
         weights: json.weights.map((w: unknown) => Math.min(1, Math.max(0, Number(w) || 0))),
-        maxDistance: Math.max(0, num(json.maxDistance) ?? 0.25),
+        maxDistance: Math.max(0, finiteOrUndefined(json.maxDistance) ?? 0.25),
     };
     for (const key of ['stiffness', 'bend', 'damping', 'mass', 'gravityScale', 'thickness', 'windResponse', 'backstop', 'substeps'] as const) {
-        const v = num(json[key]);
+        const v = finiteOrUndefined(json[key]);
         if (v !== undefined) out[key] = v;
     }
     if (Array.isArray(json.backstops) && json.backstops.length === out.vertices.length)
-        out.backstops = json.backstops.map((b: unknown) => Math.max(0, num(b) ?? 0));
+        out.backstops = json.backstops.map((b: unknown) => Math.max(0, finiteOrUndefined(b) ?? 0));
     const vec = (x: any): [number, number, number] | null =>
-        Array.isArray(x) && x.length === 3 && x.every((c: unknown) => num(c) !== undefined) ? [x[0], x[1], x[2]] : null;
+        Array.isArray(x) && x.length === 3 && x.every((c: unknown) => finiteOrUndefined(c) !== undefined) ? [x[0], x[1], x[2]] : null;
     if (Array.isArray(json.colliders)) {
         const colliders = [];
         for (const c of json.colliders) {
-            const a = vec(c?.a), b = vec(c?.b), joint = num(c?.joint), radius = num(c?.radius);
+            const a = vec(c?.a), b = vec(c?.b), joint = finiteOrUndefined(c?.joint), radius = finiteOrUndefined(c?.radius);
             if (a && b && joint !== undefined && joint >= 0 && radius !== undefined && radius > 0)
                 colliders.push({ joint: Math.floor(joint), a, b, radius });
         }

@@ -28,6 +28,7 @@
 
 import { vec3 } from "gl-matrix";
 import { DEG2RAD } from "../math";
+export { forwardFromYaw, rightFromYaw, shortestAngle } from "../math";
 
 /** A 2D value. Plain numbers rather than a vec2: nothing here needs the allocation. */
 export type Vec2 = [number, number];
@@ -138,20 +139,9 @@ export function decayRequests(out: ControlIntent, dt: number): void {
 // The handedness of this engine, written down ONCE. Forward at yaw θ is `(sin θ, 0, cos θ)`, so raising
 // θ swings forward from +Z toward +X. The character's RIGHT is `forward × up`, which is `(-cos θ, 0, sin θ)`
 // — i.e. -X at yaw 0, NOT +X. Every sign below follows from those two lines, and the controller script
-// this replaces spent about twenty lines of comment re-deriving them at each use.
+// this replaces spent about twenty lines of comment re-deriving them at each use. `forwardFromYaw`,
+// `rightFromYaw` and `shortestAngle` live in core/math.ts and are re-exported at the top of this file.
 // ---------------------------------------------------------------------------------------------------
-
-/** Unit forward for a world yaw in degrees. */
-export function forwardFromYaw(out: vec3, yawDeg: number): vec3 {
-    const r = yawDeg * DEG2RAD;
-    return vec3.set(out, Math.sin(r), 0, Math.cos(r));
-}
-
-/** Unit right for a world yaw in degrees — `forward × up`. */
-export function rightFromYaw(out: vec3, yawDeg: number): vec3 {
-    const r = yawDeg * DEG2RAD;
-    return vec3.set(out, -Math.cos(r), 0, Math.sin(r));
-}
 
 /**
  * The world direction `move` is asking for, scaled by its magnitude (so the analog throttle survives).
@@ -179,14 +169,6 @@ export function setMoveWorld(out: ControlIntent, worldX: number, worldZ: number)
     out.move[0] = worldX === 0 ? 0 : -worldX;
     out.move[1] = worldZ;
     return out;
-}
-
-/** Shortest signed step from `from` to `to` in degrees, in (-180, 180]. */
-export function shortestAngle(degrees: number): number {
-    let a = degrees % 360;
-    if (a > 180) a -= 360;
-    else if (a <= -180) a += 360;
-    return a;
 }
 
 // ---------------------------------------------------------------------------------------------------

@@ -21,6 +21,7 @@
  */
 import type { WindNode } from "../scene/nodes/windNode";
 import type { ForceFieldNode } from "../scene/nodes/forceFieldNode";
+import { smoothstep, windPerlin, windPerlinGrad } from "../math";
 
 /** Air speed (m/s) of strength 1 at the crest of a gust: what wind-enabled materials are authored for. */
 export const WIND_REFERENCE_SPEED = 7;
@@ -57,70 +58,11 @@ const [EDDY_DX, EDDY_DY] = WIND_FIELD_CONSTANTS.EDDY_DRIFT;
 export const windFieldClock = { time: 0 };
 
 // ---- Noise ------------------------------------------------------------------------------------------
+//
+// The field's noise (windPcg, windLatticeHash, windPerlin, windPerlinGrad) is pure math and lives in
+// core/math.ts, operation for operation the WGSL's; re-exported here, where the tests and the barrel find it.
 
-/** PCG hash of a u32 (as particleCommon.wgsl pcgHash). */
-export function windPcg(v: number): number {
-    const state = (Math.imul(v, 747796405) + 2891336453) >>> 0;
-    const word = Math.imul(((state >>> ((state >>> 28) + 4)) ^ state) >>> 0, 277803737) >>> 0;
-    return ((word >>> 22) ^ word) >>> 0;
-}
-
-/** Hash of an integer lattice point. */
-export function windLatticeHash(ix: number, iy: number): number {
-    return windPcg((Math.imul(ix, 1597334677) ^ Math.imul(iy, 3812015801)) >>> 0);
-}
-
-const SQRT1_2 = 0.70710678;
-
-/** One of 8 unit gradients (4 axes, 4 diagonals) from a hash; no trig. Written into `out` [x, y]. */
-function gradient(h: number, out: number[]): number[] {
-    const sx = (h & 1) !== 0 ? 1 : -1, sy = (h & 2) !== 0 ? 1 : -1;
-    if ((h & 4) !== 0) { out[0] = sx * SQRT1_2; out[1] = sy * SQRT1_2; }
-    else if ((h & 8) !== 0) { out[0] = 0; out[1] = sy; }
-    else { out[0] = sx; out[1] = 0; }
-    return out;
-}
-
-const _ga = [0, 0], _gb = [0, 0], _gc = [0, 0], _gd = [0, 0];
-
-/** 2D gradient (Perlin) noise with a quintic fade, roughly -0.7..0.7, 0 on every lattice point. */
-export function windPerlin(x: number, y: number): number {
-    const ix = Math.floor(x), iy = Math.floor(y);
-    const fx = x - ix, fy = y - iy;
-    const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10), uy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
-    const ga = gradient(windLatticeHash(ix, iy), _ga), gb = gradient(windLatticeHash(ix + 1, iy), _gb);
-    const gc = gradient(windLatticeHash(ix, iy + 1), _gc), gd = gradient(windLatticeHash(ix + 1, iy + 1), _gd);
-    const a = ga[0] * fx + ga[1] * fy;
-    const b = gb[0] * (fx - 1) + gb[1] * fy;
-    const c = gc[0] * fx + gc[1] * (fy - 1);
-    const d = gd[0] * (fx - 1) + gd[1] * (fy - 1);
-    const ab = a + (b - a) * ux, cd = c + (d - c) * ux;
-    return ab + (cd - ab) * uy;
-}
-
-/**
- * windPerlin and its analytic gradient (Quilez): `out` = [value, d/dx, d/dy]. Exact, so the turbulence
- * curl is divergence-free.
- */
-export function windPerlinGrad(x: number, y: number, out: number[] = [0, 0, 0]): number[] {
-    const ix = Math.floor(x), iy = Math.floor(y);
-    const fx = x - ix, fy = y - iy;
-    const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10), uy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
-    const dux = 30 * fx * fx * (fx * (fx - 2) + 1), duy = 30 * fy * fy * (fy * (fy - 2) + 1);
-    const ga = gradient(windLatticeHash(ix, iy), _ga), gb = gradient(windLatticeHash(ix + 1, iy), _gb);
-    const gc = gradient(windLatticeHash(ix, iy + 1), _gc), gd = gradient(windLatticeHash(ix + 1, iy + 1), _gd);
-    const a = ga[0] * fx + ga[1] * fy;
-    const b = gb[0] * (fx - 1) + gb[1] * fy;
-    const c = gc[0] * fx + gc[1] * (fy - 1);
-    const d = gd[0] * (fx - 1) + gd[1] * (fy - 1);
-    const k = a - b - c + d;
-    out[0] = a + (b - a) * ux + (c - a) * uy + k * ux * uy;
-    out[1] = ga[0] + (gb[0] - ga[0]) * ux + (gc[0] - ga[0]) * uy + (ga[0] - gb[0] - gc[0] + gd[0]) * ux * uy
-           + dux * ((b - a) + k * uy);
-    out[2] = ga[1] + (gb[1] - ga[1]) * ux + (gc[1] - ga[1]) * uy + (ga[1] - gb[1] - gc[1] + gd[1]) * ux * uy
-           + duy * ((c - a) + k * ux);
-    return out;
-}
+export { windLatticeHash, windPcg, windPerlin, windPerlinGrad } from "../math";
 
 // ---- The field --------------------------------------------------------------------------------------
 
@@ -134,11 +76,6 @@ export type WindFieldParams = Float32Array | number[];
 export interface WindSample { velocity: [number, number, number]; gust: number; steady: number; }
 
 export function createWindSample(): WindSample { return { velocity: [0, 0, 0], gust: 0, steady: 0 }; }
-
-const smoothstep = (e0: number, e1: number, x: number) => {
-    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-    return t * t * (3 - 2 * t);
-};
 
 /** The gust at world (x, z), 0..1: two octaves of Perlin scrolled along the wind (GoT). */
 export function windGustAt(x: number, z: number, params: WindFieldParams): number {

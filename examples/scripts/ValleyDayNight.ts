@@ -44,6 +44,11 @@ export default class ValleyDayNightNode extends Node {
    * (no geometry but the sun's shadow, spread over a few frames), so it can follow the sun closely.
    */
   public probeDegrees: number = 4
+  /**
+   * Whether the clock runs. A sequence that sets `hour` itself (the Valley Tour) turns this off while it does,
+   * so the two never fight over the time; the sun, sky and fog still follow whatever `hour` is.
+   */
+  public running: boolean = true
   /** Runtime: the hour now, 0-24. */
   public hour: number = 9.5
   /** Runtime: 0 by day, 1 at full night. */
@@ -76,7 +81,7 @@ export default class ValleyDayNightNode extends Node {
   }
 
   onUpdate(delta: number) {
-    this.hour = (this.hour + delta * 24 / Math.max(0.1, this.dayMinutes * 60)) % 24
+    if (this.running) this.hour = (this.hour + delta * 24 / Math.max(0.1, this.dayMinutes * 60)) % 24
     this._apply(false)
   }
 

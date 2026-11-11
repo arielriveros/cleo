@@ -1,4 +1,3 @@
-import { vec3 } from 'gl-matrix';
 import { MAX_CASTER_REACH, type CascadeSphere } from './shadowMath';
 
 // Which casters a shadow layer needs, and whether a layer would come out the same as last time. Pure
@@ -204,8 +203,3 @@ export class ShadowLayerCache {
     public invalidateAll(): void { this._valid.fill(0); }
 }
 
-/** Unit vector, for callers holding a light direction that may not be normalised. */
-export function unitDirection(d: ArrayLike<number>, out: vec3): vec3 {
-    vec3.set(out, d[0], d[1], d[2]);
-    return vec3.normalize(out, out);
-}

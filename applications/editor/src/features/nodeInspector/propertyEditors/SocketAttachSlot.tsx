@@ -28,7 +28,7 @@ function socketModelsIn(root: Node, exclude: Node, out: ModelNode[]): void {
  */
 const NEVER_HELD = new Set([
   'navMesh', 'skybox', 'landscape', 'tilemap', 'volumetricClouds', 'skyAtmosphere', 'skyLight', 'wind', 'weather', 'lightProbe', 'exposureVolume', 'giVolume', 'volumetricFog', 'occlusionVolume',
-  'decal', 'character', 'controller',
+  'decal', 'character', 'controller', 'sequence',
 ])
 
 export default function SocketAttachSlot({ node }: { node: Node }) {

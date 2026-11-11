@@ -11,6 +11,7 @@ import {
     autoHumanoidProfile, parseRagdollProfile, ragdollLayout, ragdollPartPose, rigidRotation,
     type RagdollProfile, type RagdollLayoutPart,
 } from './ragdollProfile';
+import { DEG2RAD } from '../core/math';
 
 export interface RagdollOptions {
     /**
@@ -74,7 +75,6 @@ export const RAGDOLL_DEFAULTS: Required<Omit<RagdollOptions, 'inheritVelocity' |
     impulse: [0, 0.3, -1.2],
 };
 
-const DEG2RAD = Math.PI / 180;
 /** Ragdoll bodies' collision group (the static world is group 1). Matches `overlap.ts`. */
 const RAGDOLL_GROUP = 2;
 /** Fastest a part may start, so a teleport or a hitch in the last frame cannot launch a corpse. */

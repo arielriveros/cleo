@@ -233,10 +233,12 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const names = new Set(nodes().map(n => n.name));
         for (const name of ['Player', 'GameManager', 'Enemy Spawns', 'Interactables', 'Barrels', 'Nav Mesh', 'Bonfire', 'Skull Cave Entrance', 'Pond Zone'])
             expect(names.has(name), name).toBe(false);
-        expect(nodes().some(n => ['character', 'controller', 'navMesh', 'uiRoot'].includes(n.type))).toBe(false);
+        expect(nodes().some(n => ['character', 'controller', 'navMesh'].includes(n.type))).toBe(false);
+        // The only UI is the start menu and the cinematic's overlay (cinematic.ts), not the game's HUD.
+        expect(nodes().filter(n => n.type === 'uiRoot').map(n => n.name).sort()).toEqual(['Cinematic Overlay', 'Start Menu']);
         // The libraries hold what the scenery uses and nothing of the game (split.ts prunes them).
         for (const s of library('scripts')) expect(s.source, s.name).not.toMatch(/class Souls\w*Node/);
-        expect(library('scripts').map((s: any) => s.name).sort()).toEqual(['Day and Night', 'Fire Light', 'Fly Camera', 'Splash', 'Windmill Sails']);
+        expect(library('scripts').map((s: any) => s.name).sort()).toEqual(['Day and Night', 'Fire Light', 'Fly Camera', 'Splash', 'Start Menu', 'Windmill Sails']);
         expect(library('templates').map((t: any) => t.name).sort()).toEqual(['Torch', 'Wall Torch', 'Water Splash', 'Water Step']);
         for (const lib of ['animations', 'animControllers', 'animationFields', 'rigs', 'aiBrains', 'boneMasks'])
             expect(library(lib) ?? [], lib).toHaveLength(0);
@@ -685,5 +687,82 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
 
     it('grades the valley with AgX Punchy, so its clear sky stays blue', () => {
         expect(scene().config.render.toneMapper).toBe('agxPunchy');
+    });
+
+    // ---- the start menu and the cinematic tour (tools/valley/cinematic.ts) ----------------------------
+
+    const tourNode = () => nodes().find(n => n.type === 'sequence');
+
+    it('opens on a start menu offering the cinematic tour or the free camera', () => {
+        const menu = nodes().find(n => n.type === 'uiRoot' && n.name === 'Start Menu');
+        expect(menu.visible).toBe(true);
+        const script = library('scripts').find((s: any) => s.id === menu.variables.__scriptId.value);
+        expect(script.name).toBe('Start Menu');
+        expect(menu.script).toBe(script.source);
+        expect(script.source).toBe(readFileSync(join(__dirname, '..', 'examples', 'scripts', 'ValleyStartMenu.ts'), 'utf8'));
+        expect(allNodes(menu).filter(n => n.type === 'uiButton').map(n => n.name)).toEqual(['Cinematic', 'Free']);
+        // The tour it plays is in the scene, under the name the script looks for.
+        expect(tourNode().name).toBe(menu.scriptVars?.tourName ?? 'Valley Tour');
+        // A map of its own, which still answers while the menu has the Gameplay map switched off.
+        const ui = library('inputMap').maps.find((m: any) => m.name === 'UI');
+        expect(ui?.enabled).toBe(true);
+        for (const action of ['Navigate', 'Submit', 'Pause']) {
+            expect(ui.actions.some((a: any) => a.name === action), action).toBe(true);
+            expect(script.source, action).toContain(`'${action}'`);
+        }
+        // The day clock can be held by the tour.
+        const clock = nodes().find(n => n.name === 'Time of Day');
+        expect(clock.script).toContain('public running: boolean = true');
+    });
+
+    it('ships the tour from its checked-in sequence file, every slot bound', async () => {
+        const seq = tourNode().sequence;
+        const file = JSON.parse(readFileSync(join(__dirname, '..', 'tools', 'valley', 'cinematic', 'valley-tour.sequence.json'), 'utf8'));
+        expect(seq).toEqual(file);
+        const byId = new Map(nodes().map(n => [n.id, n]));
+        for (const slot of seq.slots) expect(byId.has(tourNode().bindings[slot.id]), slot.name).toBe(true);
+        const camera = byId.get(tourNode().bindings.camera);
+        // A plain camera (a rig would overwrite it), off until the tour cuts to it, with the valley's reach.
+        expect(camera.type).toBe('camera');
+        expect(camera.active).toBe(false);
+        expect(camera.camera.far).toBeGreaterThanOrEqual(2000);
+        expect(byId.get(tourNode().bindings.clock).name).toBe('Time of Day');
+        // The sequence parses whole: nothing dropped as malformed.
+        const { parseSequence } = await import('../src/sequencer/parse');
+        expect(parseSequence(seq).tracks.length).toBe(seq.tracks.length);
+    });
+
+    it('flies the tour past every part of the valley, clear of the ground and inside the Long House', async () => {
+        const { Spline3 } = await import('../src/core/math');
+        const { SECTIONS } = await import('../tools/valley/cinematic/tour');
+        const { quat, vec3 } = await import('gl-matrix');
+        const path = tourNode().sequence.tracks.find((t: any) => t.type === 'path');
+        const samples: { shot: string, p: number[] }[] = [];
+        for (const section of path.sections) {
+            const spline = new Spline3(section.points);
+            for (let i = 0; i <= 400; i++) samples.push({ shot: section.id, p: spline.pointAt(i / 400) });
+        }
+        for (const s of SECTIONS) {
+            const nearest = Math.min(...samples.map(({ p }) => Math.hypot(p[0] - s.x, p[2] - s.z)));
+            expect(nearest, s.name).toBeLessThan(30);
+        }
+        // Above the ground (and the pond's surface), everywhere but inside the house.
+        const water = nodes().find(n => n.name === 'Pond Water');
+        for (const { shot, p } of samples) {
+            if (shot === 'shot:interior') continue;
+            let floor = heightAt(p[0], p[2]);
+            if (Math.hypot(p[0] - water.position[0], p[2] - water.position[2]) < 10.5) floor = Math.max(floor, water.position[1]);
+            expect(p[1] - floor, `${shot} at ${p.map(v => v.toFixed(1))}`).toBeGreaterThan(0.7);
+        }
+        // Inside the Long House: within its interior exposure box (the room, inside the walls), at standing height.
+        const room = nodes().find(n => n.type === 'exposureVolume' && n.name === 'Long House Interior Exposure');
+        expect(room).toBeDefined();
+        const q = quat.invert(quat.create(), quat.fromEuler(quat.create(), room.rotation[0], room.rotation[1], room.rotation[2]));
+        const half = room.exposureVolume.size.map((v: number) => v / 2);
+        for (const { shot, p } of samples) {
+            if (shot !== 'shot:interior') continue;
+            const local = vec3.transformQuat(vec3.create(), vec3.fromValues(p[0] - room.position[0], p[1] - room.position[1], p[2] - room.position[2]), q);
+            for (let c = 0; c < 3; c++) expect(Math.abs(local[c]), `interior axis ${c} at ${p.map(v => v.toFixed(1))}`).toBeLessThan(half[c] - 0.5);
+        }
     });
 });

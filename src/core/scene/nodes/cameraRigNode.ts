@@ -1,7 +1,7 @@
 import { Camera } from "../../camera";
 import { aimFromDirection, boomOffset, collisionRatio, shakeOffsets } from "../../cameraRigMath";
 import { Logger } from "../../logger";
-import { RAD2DEG, clamp, dampAngleDeg, dampTime, dampVec3Time, wrapDegrees } from "../../math";
+import { RAD2DEG, clamp, dampAngleDeg, dampTime, dampVec3Time, wrapDegrees, finiteOr } from "../../math";
 import type { Scene } from "../scene";
 import { unwrapScriptNode } from "./nodeScripting";
 import { mat4, quat, vec3 } from "gl-matrix";
@@ -672,7 +672,6 @@ export class CameraRigNode extends Node {
     public static parse(parent: Node, json: any) {
         const node = new CameraRigNode(json.name, json.id);
 
-        const num = (value: any, fallback: number) => typeof value === 'number' && isFinite(value) ? value : fallback;
         const bool = (value: any, fallback: boolean) => typeof value === 'boolean' ? value : fallback;
         const v3 = (out: vec3, value: any) => { if (Array.isArray(value) && value.length >= 3) vec3.set(out, +value[0], +value[1], +value[2]); };
 
@@ -692,41 +691,41 @@ export class CameraRigNode extends Node {
         if (json.aimMode === 'orbit' || json.aimMode === 'lookAt' || json.aimMode === 'none')
             node.aimMode = json.aimMode;
         v3(node.lookAtOffset, json.lookAtOffset);
-        node.aimDamping = num(json.aimDamping, node.aimDamping);
-        node.yawSensitivity = num(json.yawSensitivity, node.yawSensitivity);
-        node.pitchSensitivity = num(json.pitchSensitivity, node.pitchSensitivity);
+        node.aimDamping = finiteOr(json.aimDamping, node.aimDamping);
+        node.yawSensitivity = finiteOr(json.yawSensitivity, node.yawSensitivity);
+        node.pitchSensitivity = finiteOr(json.pitchSensitivity, node.pitchSensitivity);
         node.invertPitch = bool(json.invertPitch, node.invertPitch);
         node.yawMin = typeof json.yawMin === 'number' ? json.yawMin : -Infinity;
         node.yawMax = typeof json.yawMax === 'number' ? json.yawMax : Infinity;
-        node.pitchMin = num(json.pitchMin, node.pitchMin);
-        node.pitchMax = num(json.pitchMax, node.pitchMax);
-        node._yaw = num(json.yaw, node._yaw);
-        node._pitch = num(json.pitch, node._pitch);
+        node.pitchMin = finiteOr(json.pitchMin, node.pitchMin);
+        node.pitchMax = finiteOr(json.pitchMax, node.pitchMax);
+        node._yaw = finiteOr(json.yaw, node._yaw);
+        node._pitch = finiteOr(json.pitch, node._pitch);
 
-        node.armLength = num(json.armLength, node.armLength);
+        node.armLength = finiteOr(json.armLength, node.armLength);
         v3(node.socketOffset, json.socketOffset);
 
         node.fovEnabled = bool(json.fovEnabled, node.fovEnabled);
-        node.fov = num(json.fov, node.fov);
-        node.fovDamping = num(json.fovDamping, node.fovDamping);
+        node.fov = finiteOr(json.fov, node.fov);
+        node.fovDamping = finiteOr(json.fovDamping, node.fovDamping);
         node._currentFov = node.fov;
         node._cameraFov = typeof json.cameraFov === 'number' && Number.isFinite(json.cameraFov) ? json.cameraFov : null;
 
         node.collisionEnabled = bool(json.collisionEnabled, node.collisionEnabled);
-        node.collisionRadius = num(json.collisionRadius, node.collisionRadius);
-        node.collisionMinRatio = num(json.collisionMinRatio, node.collisionMinRatio);
-        node.collisionPullTime = num(json.collisionPullTime, node.collisionPullTime);
-        node.collisionReturnTime = num(json.collisionReturnTime, node.collisionReturnTime);
+        node.collisionRadius = finiteOr(json.collisionRadius, node.collisionRadius);
+        node.collisionMinRatio = finiteOr(json.collisionMinRatio, node.collisionMinRatio);
+        node.collisionPullTime = finiteOr(json.collisionPullTime, node.collisionPullTime);
+        node.collisionReturnTime = finiteOr(json.collisionReturnTime, node.collisionReturnTime);
         node.collisionIgnoreIds = Array.isArray(json.collisionIgnoreIds)
             ? json.collisionIgnoreIds.filter((id: any) => typeof id === 'string') : [];
         node.collisionMode = json.collisionMode === 'dither' ? 'dither' : 'retract';
-        node.ditherRadius = num(json.ditherRadius, node.ditherRadius);
-        node.ditherStrength = num(json.ditherStrength, node.ditherStrength);
+        node.ditherRadius = finiteOr(json.ditherRadius, node.ditherRadius);
+        node.ditherStrength = finiteOr(json.ditherStrength, node.ditherStrength);
 
         v3(node.shakePositionAmplitude, json.shakePositionAmplitude);
         v3(node.shakeRotationAmplitude, json.shakeRotationAmplitude);
-        node.shakeFrequency = num(json.shakeFrequency, node.shakeFrequency);
-        node.shakeDecay = num(json.shakeDecay, node.shakeDecay);
+        node.shakeFrequency = finiteOr(json.shakeFrequency, node.shakeFrequency);
+        node.shakeDecay = finiteOr(json.shakeDecay, node.shakeDecay);
 
         // _commonParse adds the node to its parent — do not addChild again.
         Node.finishParse(node, parent, json);

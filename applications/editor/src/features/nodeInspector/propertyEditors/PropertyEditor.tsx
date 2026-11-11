@@ -1,4 +1,4 @@
-import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, WeatherNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OcclusionVolumeNode, ExposureVolumeNode, GIVolumeNode, VolumetricFogNode, ClothNode } from 'cleo'
+import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, WeatherNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OcclusionVolumeNode, ExposureVolumeNode, GIVolumeNode, VolumetricFogNode, ClothNode, SequenceNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import RigSlot from './RigSlot';
@@ -31,6 +31,7 @@ import WaterVolumeEditor from './WaterVolumeEditor'
 import OcclusionVolumeEditor from './OcclusionVolumeEditor'
 import ExposureVolumeEditor from './ExposureVolumeEditor'
 import GIVolumeEditor from './GIVolumeEditor'
+import SequenceEditor from './SequenceEditor'
 import VolumetricFogEditor from './VolumetricFogEditor'
 import TilemapEditor from './TilemapEditor'
 import LandscapeEditor from './LandscapeEditor'
@@ -88,6 +89,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'exposureVolume' && <ExposureVolumeEditor key={props.node.id} node={props.node as ExposureVolumeNode} /> }
           { props.node.nodeType === 'giVolume' && <GIVolumeEditor key={props.node.id} node={props.node as GIVolumeNode} /> }
           { props.node.nodeType === 'volumetricFog' && <VolumetricFogEditor key={props.node.id} node={props.node as VolumetricFogNode} /> }
+          { props.node.nodeType === 'sequence' && <SequenceEditor key={props.node.id} node={props.node as SequenceNode} /> }
           {/* Keyed by id so selecting another decal starts from ITS values rather than writing this one's
               state into it for a frame. */}
           { props.node.nodeType === 'decal' && <DecalEditor key={props.node.id} node={props.node as DecalNode} /> }

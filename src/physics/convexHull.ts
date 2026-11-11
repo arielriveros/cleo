@@ -13,6 +13,7 @@
  */
 
 import { Logger } from "../core/logger";
+import { cross3, dot3, length3, normalize3OrZero, sub3 } from "../core/math";
 
 export type Hull = {
     /** Hull points, recentred so the centroid sits at the origin (see `center`). */
@@ -39,20 +40,6 @@ export const HULL_BUDGETS: Record<HullQuality, number> = {
 type V3 = number[];
 type Poly = { vertices: V3[]; faces: number[][] };
 
-const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-const dot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const cross = (a: V3, b: V3): V3 => [
-    a[1] * b[2] - a[2] * b[1],
-    a[2] * b[0] - a[0] * b[2],
-    a[0] * b[1] - a[1] * b[0],
-];
-const length = (a: V3): number => Math.sqrt(dot(a, a));
-
-function normalize(a: V3): V3 {
-    const l = length(a);
-    return l > 0 ? [a[0] / l, a[1] / l, a[2] / l] : [0, 0, 0];
-}
-
 /** Newell normal of a polygon loop (unnormalized; its length is twice the area). */
 function loopNormal(vertices: V3[], loop: number[]): V3 {
     const n: V3 = [0, 0, 0];
@@ -72,7 +59,7 @@ function volumeOf(poly: Poly): number {
     for (const f of poly.faces) {
         for (let i = 1; i < f.length - 1; i++) {
             const a = poly.vertices[f[0]], b = poly.vertices[f[i]], c = poly.vertices[f[i + 1]];
-            v += dot(a, cross(b, c)) / 6;
+            v += dot3(a, cross3(b, c)) / 6;
         }
     }
     return Math.abs(v);
@@ -119,7 +106,7 @@ function supportSample(points: V3[], budget: number): V3[] {
         let best = 0;
         let bestDot = -Infinity;
         for (let j = 0; j < points.length; j++) {
-            const v = dot(d, points[j]);
+            const v = dot3(d, points[j]);
             if (v > bestDot) { bestDot = v; best = j; }
         }
         keep.add(best);
@@ -154,12 +141,12 @@ interface Face {
 }
 
 function makeFace(points: V3[], a: number, b: number, c: number): Face | null {
-    const normal = normalize(cross(sub(points[b], points[a]), sub(points[c], points[a])));
+    const normal = normalize3OrZero(cross3(sub3(points[b], points[a]), sub3(points[c], points[a])));
     if (normal[0] === 0 && normal[1] === 0 && normal[2] === 0) return null;
-    return { idx: [a, b, c], normal, offset: dot(normal, points[a]), outside: [], dead: false };
+    return { idx: [a, b, c], normal, offset: dot3(normal, points[a]), outside: [], dead: false };
 }
 
-const distanceTo = (f: Face, p: V3): number => dot(f.normal, p) - f.offset;
+const distanceTo = (f: Face, p: V3): number => dot3(f.normal, p) - f.offset;
 
 /** Seed tetrahedron, or null if the cloud is degenerate (collinear / planar / too small). */
 function initialFaces(points: V3[], eps: number): Face[] | null {
@@ -178,25 +165,25 @@ function initialFaces(points: V3[], eps: number): Face[] | null {
     let a = -1, b = -1, bestLen = eps;
     for (let i = 0; i < extremes.length; i++) {
         for (let j = i + 1; j < extremes.length; j++) {
-            const d = length(sub(points[extremes[i]], points[extremes[j]]));
+            const d = length3(sub3(points[extremes[i]], points[extremes[j]]));
             if (d > bestLen) { bestLen = d; a = extremes[i]; b = extremes[j]; }
         }
     }
     if (a < 0) return null; // all points coincident
 
-    const ab = sub(points[b], points[a]);
+    const ab = sub3(points[b], points[a]);
     let c = -1, bestArea = eps;
     for (let i = 0; i < points.length; i++) {
-        const d = length(cross(ab, sub(points[i], points[a]))) / bestLen;
+        const d = length3(cross3(ab, sub3(points[i], points[a]))) / bestLen;
         if (d > bestArea) { bestArea = d; c = i; }
     }
     if (c < 0) return null; // collinear
 
-    const n = normalize(cross(ab, sub(points[c], points[a])));
-    const planeOffset = dot(n, points[a]);
+    const n = normalize3OrZero(cross3(ab, sub3(points[c], points[a])));
+    const planeOffset = dot3(n, points[a]);
     let d = -1, bestDist = eps;
     for (let i = 0; i < points.length; i++) {
-        const dist = Math.abs(dot(n, points[i]) - planeOffset);
+        const dist = Math.abs(dot3(n, points[i]) - planeOffset);
         if (dist > bestDist) { bestDist = dist; d = i; }
     }
     if (d < 0) return null; // planar
@@ -289,14 +276,14 @@ function mergeCoplanar(poly: Poly, eps: number): Poly {
     const groups: { normal: V3; offset: number; faces: number[][] }[] = [];
     for (const face of poly.faces) {
         const raw = loopNormal(poly.vertices, face);
-        const area = length(raw);
+        const area = length3(raw);
         if (area <= eps * eps) continue; // zero-area sliver — drop
         const n: V3 = [raw[0] / area, raw[1] / area, raw[2] / area];
-        const offset = dot(n, poly.vertices[face[0]]);
+        const offset = dot3(n, poly.vertices[face[0]]);
         // The tolerance must stay razor thin: faces on the same carve/box plane are exactly coplanar
         // by construction, and merging planes ~1 mrad apart tilts the representative plane enough to
         // read as a containment violation at the far corners.
-        const group = groups.find((g) => dot(g.normal, n) > 1 - 1e-9 && Math.abs(g.offset - offset) < eps * 2);
+        const group = groups.find((g) => dot3(g.normal, n) > 1 - 1e-9 && Math.abs(g.offset - offset) < eps * 2);
         if (group) group.faces.push(face);
         else groups.push({ normal: n, offset, faces: [face] });
     }
@@ -363,7 +350,7 @@ function weld(poly: Poly, eps: number): Poly {
             const l = loop.map((i) => remap[i]);
             return l.filter((v, i) => v !== l[(i + 1) % l.length]); // drop consecutive duplicates
         })
-        .filter((l) => l.length >= 3 && length(loopNormal(vertices, l)) > eps * eps);
+        .filter((l) => l.length >= 3 && length3(loopNormal(vertices, l)) > eps * eps);
 
     // 2. A vertex is removable only if it adds nothing to ANY face that uses it.
     const removable = new Map<number, boolean>();
@@ -373,15 +360,15 @@ function weld(poly: Poly, eps: number): Poly {
             const prev = vertices[loop[(i - 1 + loop.length) % loop.length]];
             const cur = vertices[v];
             const next = vertices[loop[(i + 1) % loop.length]];
-            const a = sub(cur, prev), b = sub(next, cur);
-            const collinearHere = length(cross(a, b)) <= eps * Math.max(length(a), length(b));
+            const a = sub3(cur, prev), b = sub3(next, cur);
+            const collinearHere = length3(cross3(a, b)) <= eps * Math.max(length3(a), length3(b));
             removable.set(v, (removable.get(v) ?? true) && collinearHere);
         }
     }
 
     faces = faces
         .map((loop) => loop.filter((v) => !removable.get(v)))
-        .filter((l) => l.length >= 3 && length(loopNormal(vertices, l)) > eps * eps);
+        .filter((l) => l.length >= 3 && length3(loopNormal(vertices, l)) > eps * eps);
 
     return { vertices, faces };
 }
@@ -405,7 +392,7 @@ function finalize(poly: Poly, eps: number, merge: boolean = true): Hull | null {
     center[0] /= vertices.length; center[1] /= vertices.length; center[2] /= vertices.length;
     for (const v of vertices) { v[0] -= center[0]; v[1] -= center[1]; v[2] -= center[2]; }
 
-    for (const face of faces) if (dot(loopNormal(vertices, face), vertices[face[0]]) < 0) face.reverse();
+    for (const face of faces) if (dot3(loopNormal(vertices, face), vertices[face[0]]) < 0) face.reverse();
 
     return { vertices, faces, center };
 }
@@ -431,10 +418,10 @@ function candidateNormals(poly: Poly, cap: number): V3[] {
     const list: { n: V3; area: number }[] = [];
     for (const loop of poly.faces) {
         const raw = loopNormal(poly.vertices, loop);
-        const area = length(raw);
+        const area = length3(raw);
         if (area <= 0) continue;
         const n: V3 = [raw[0] / area, raw[1] / area, raw[2] / area];
-        const existing = list.find((c) => dot(c.n, n) > 1 - 1e-9);
+        const existing = list.find((c) => dot3(c.n, n) > 1 - 1e-9);
         if (existing) existing.area += area;
         else list.push({ n, area });
     }
@@ -473,7 +460,7 @@ function boundingBoxPoly(positions: number[][]): Poly | null {
  * interpolation denominator below by 2·eps. Returns null when the cut degenerates.
  */
 function cutPoly(poly: Poly, n: V3, d: number, eps: number): Poly | null {
-    const dist = poly.vertices.map((v) => dot(n, v) - d);
+    const dist = poly.vertices.map((v) => dot3(n, v) - d);
 
     let overshoot = 0;
     for (const x of dist) overshoot = Math.max(overshoot, x);
@@ -535,7 +522,7 @@ export function hullFromPositions(positions: number[][], quality: HullQuality): 
         } else {
             const support = (n: V3): number => {
                 let max = -Infinity;
-                for (const p of positions) max = Math.max(max, dot(n, p));
+                for (const p of positions) max = Math.max(max, dot3(n, p));
                 return max;
             };
 
@@ -554,7 +541,7 @@ export function hullFromPositions(positions: number[][], quality: HullQuality): 
                 for (let i = 0; i < candidates.length; i++) {
                     if (used[i]) continue;
                     let depth = -Infinity;
-                    for (const v of poly.vertices) depth = Math.max(depth, dot(candidates[i], v));
+                    for (const v of poly.vertices) depth = Math.max(depth, dot3(candidates[i], v));
                     depth -= supports[i];
                     if (depth > bestDepth) { bestDepth = depth; best = i; }
                 }
@@ -591,15 +578,15 @@ export function hullFromPositions(positions: number[][], quality: HullQuality): 
     const tol = Math.max(eps * 20, extent * 5e-4);
     const containsAll = (hull: Hull): boolean => {
         const planes = hull.faces.map((f) => {
-            const n = normalize(loopNormal(hull.vertices, f));
+            const n = normalize3OrZero(loopNormal(hull.vertices, f));
             let d = -Infinity;
-            for (const i of f) d = Math.max(d, dot(n, hull.vertices[i]));
+            for (const i of f) d = Math.max(d, dot3(n, hull.vertices[i]));
             return { n, d };
         });
         for (const p of positions) {
             const local = [p[0] - hull.center[0], p[1] - hull.center[1], p[2] - hull.center[2]];
             for (const pl of planes) {
-                if (dot(pl.n, local) - pl.d > tol) return false;
+                if (dot3(pl.n, local) - pl.d > tol) return false;
             }
         }
         return true;

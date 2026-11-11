@@ -2,6 +2,7 @@ import { mat4 } from 'gl-matrix';
 import type { ReadonlyVec3 } from 'gl-matrix';
 import type { WeatherNode } from '../../core/scene/nodes/weatherNode';
 import { boxColumnWeight, boxWeight } from '../../core/scene/nodes/boxVolume';
+import { lerp } from '../../core/math';
 
 /**
  * The weather volumes a frame draws, packed for the shaders (chunks/weatherVolumes.wgsl), and the CPU
@@ -131,7 +132,6 @@ export function packedWeatherWeight(pack: WeatherPack, i: number, p: ReadonlyVec
 /** The CPU twin of `weatherAt`: the packed volumes composited at `p`. */
 export function resolveWeatherAt(pack: WeatherPack, p: ReadonlyVec3): WeatherSample {
     const s: WeatherSample = { wet: 0, snow: 0, puddles: 0, shelter: 0, slopeCos: Math.SQRT1_2, breakup: 0.4 };
-    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
     for (let i = 0; i < pack.count; i++) {
         const w = packedWeatherWeight(pack, i, p);
         if (w <= 0) continue;
@@ -165,7 +165,6 @@ export function packedPrecipitationWeight(pack: WeatherPack, i: number, p: Reado
 /** The CPU twin of `precipitationAt`: what falls at `p`, the packed volumes' columns composited. */
 export function resolvePrecipitationAt(pack: WeatherPack, p: ReadonlyVec3): PrecipitationSample {
     const s: PrecipitationSample = { rain: 0, snowfall: 0, shelter: 0 };
-    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
     for (let i = 0; i < pack.count; i++) {
         const w = packedPrecipitationWeight(pack, i, p);
         if (w <= 0) continue;

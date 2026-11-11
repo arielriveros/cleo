@@ -15,6 +15,7 @@
 // it as `cleo/terrain/splatmapIO`.
 
 import { parsePng } from './heightmapIO';
+import { clamp01, finiteOrUndefined } from '../core/math';
 
 /** A PNG with every channel kept, at the file's depth. */
 export interface DecodedPng {
@@ -83,7 +84,6 @@ export async function decodePngChannels(bytes: Uint8Array): Promise<DecodedPng> 
 // --- weights -> over-alphas ---------------------------------------------------------------------
 
 const EPS = 1e-6;
-const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 /**
  * One texel's weights, bottom to top (any scale; divided by their sum first), as the over-alphas that
@@ -249,7 +249,6 @@ export interface WorldManifest {
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
-const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
 const baseName = (file: string) => file.split(/[\\/]/).pop() ?? file;
 const CHANNELS: Record<string, 0 | 1 | 2 | 3> = { r: 0, g: 1, b: 2, a: 3, '0': 0, '1': 1, '2': 2, '3': 3 };
@@ -284,13 +283,13 @@ function filesByRole(files: unknown): { png?: string; raw?: string; masks: Recor
 export function readWorldManifest(json: unknown): WorldManifest | null {
     if (!isObj(json)) return null;
     const output = isObj(json.output) ? json.output : json;
-    const isV2 = output.format === 'cleo-world' && num(output.version) === 2;
+    const isV2 = output.format === 'cleo-world' && finiteOrUndefined(output.version) === 2;
     const isV1 = !isV2 && json.generator === 'world' && isObj(json.output);
     if (!isV1 && !isV2) return null;
 
-    const resolution = num(output.resolution), size = num(output.size);
-    const minHeight = num(output.minHeight) ?? (isObj(output.heightmap) ? num(output.heightmap.min) : undefined);
-    const maxHeight = num(output.maxHeight) ?? (isObj(output.heightmap) ? num(output.heightmap.max) : undefined);
+    const resolution = finiteOrUndefined(output.resolution), size = finiteOrUndefined(output.size);
+    const minHeight = finiteOrUndefined(output.minHeight) ?? (isObj(output.heightmap) ? finiteOrUndefined(output.heightmap.min) : undefined);
+    const maxHeight = finiteOrUndefined(output.maxHeight) ?? (isObj(output.heightmap) ? finiteOrUndefined(output.heightmap.max) : undefined);
     if (resolution === undefined || size === undefined || minHeight === undefined || maxHeight === undefined) return null;
 
     const derived = filesByRole(output.files);
@@ -298,7 +297,7 @@ export function readWorldManifest(json: unknown): WorldManifest | null {
     const manifest: WorldManifest = {
         version: isV2 ? 2 : 1,
         resolution, size, minHeight, maxHeight,
-        seaLevel: num(output.seaLevel),
+        seaLevel: finiteOrUndefined(output.seaLevel),
         heightmap: { png: str(hm.png) ?? derived.png, raw: str(hm.raw) ?? derived.raw, exr: str(hm.exr) },
         layers: [],
         masks: {},
@@ -314,7 +313,7 @@ export function readWorldManifest(json: unknown): WorldManifest | null {
 
     if (isObj(output.splat) && Array.isArray(output.splat.files)) {
         const files = output.splat.files.filter((f): f is string => typeof f === 'string' && !!f);
-        const res = num(output.splat.resolution);
+        const res = finiteOrUndefined(output.splat.resolution);
         if (files.length && res !== undefined) manifest.splat = { resolution: res, files };
     }
 
@@ -324,7 +323,7 @@ export function readWorldManifest(json: unknown): WorldManifest | null {
             const layer: WorldManifestLayer = {
                 id: str(l.id) ?? `layer-${k}`,
                 name: str(l.name) ?? `Layer ${k}`,
-                index: num(l.index) ?? k,
+                index: finiteOrUndefined(l.index) ?? k,
             };
             if (isObj(l.splat)) {
                 const file = str(l.splat.file), channel = channelOf(l.splat.channel);
@@ -332,11 +331,11 @@ export function readWorldManifest(json: unknown): WorldManifest | null {
             }
             const weightmap = str(l.weightmap);
             if (weightmap) layer.weightmap = weightmap;
-            const coverage = num(l.coverage);
+            const coverage = finiteOrUndefined(l.coverage);
             if (coverage !== undefined) layer.coverage = coverage;
             const kind = str(l.kind);
             if (kind) layer.kind = kind;
-            if (Array.isArray(l.color) && l.color.length >= 3 && l.color.slice(0, 3).every(c => num(c) !== undefined))
+            if (Array.isArray(l.color) && l.color.length >= 3 && l.color.slice(0, 3).every(c => finiteOrUndefined(c) !== undefined))
                 layer.color = [l.color[0] as number, l.color[1] as number, l.color[2] as number];
             manifest.layers.push(layer);
         });
@@ -348,12 +347,12 @@ export function readWorldManifest(json: unknown): WorldManifest | null {
     if (isObj(output.water)) {
         const lakes = Array.isArray(output.water.lakes) ? output.water.lakes.flatMap(l => {
             if (!isObj(l)) return [];
-            const level = num(l.level), area = num(l.area);
-            const b = Array.isArray(l.bounds) && l.bounds.length === 4 && l.bounds.every(v => num(v) !== undefined)
+            const level = finiteOrUndefined(l.level), area = finiteOrUndefined(l.area);
+            const b = Array.isArray(l.bounds) && l.bounds.length === 4 && l.bounds.every(v => finiteOrUndefined(v) !== undefined)
                 ? l.bounds as [number, number, number, number] : null;
             return level !== undefined && area !== undefined && b ? [{ level, area, bounds: [b[0], b[1], b[2], b[3]] as [number, number, number, number] }] : [];
         }) : [];
-        manifest.water = { seaLevel: num(output.water.seaLevel) ?? manifest.seaLevel ?? 0, lakes };
+        manifest.water = { seaLevel: finiteOrUndefined(output.water.seaLevel) ?? manifest.seaLevel ?? 0, lakes };
     }
     return manifest;
 }

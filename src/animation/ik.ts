@@ -1,5 +1,5 @@
 import { quat, vec3 } from 'gl-matrix';
-import { clamp } from '../core/math';
+import { clamp, nonNegativeOr } from '../core/math';
 
 // ---------------------------------------------------------------------------
 // Inverse kinematics. Pure vec3/quat maths — no GL, no scene, no engine imports.
@@ -89,16 +89,14 @@ export interface IkRig extends Partial<IkRigTuning> {
 
 /** A rig with every tuning value filled in. */
 export function ikTuning(rig: IkRig | null | undefined): IkRigTuning {
-    const num = (v: number | undefined, fallback: number) =>
-        typeof v === 'number' && isFinite(v) && v >= 0 ? v : fallback;
     return {
-        footHeight: num(rig?.footHeight, IK_DEFAULTS.footHeight),
-        traceUp: num(rig?.traceUp, IK_DEFAULTS.traceUp),
-        traceDown: num(rig?.traceDown, IK_DEFAULTS.traceDown),
-        swingRelease: num(rig?.swingRelease, IK_DEFAULTS.swingRelease),
-        maxHipDrop: num(rig?.maxHipDrop, IK_DEFAULTS.maxHipDrop),
-        maxSlopeDeg: num(rig?.maxSlopeDeg, IK_DEFAULTS.maxSlopeDeg),
-        smoothing: num(rig?.smoothing, IK_DEFAULTS.smoothing),
+        footHeight: nonNegativeOr(rig?.footHeight, IK_DEFAULTS.footHeight),
+        traceUp: nonNegativeOr(rig?.traceUp, IK_DEFAULTS.traceUp),
+        traceDown: nonNegativeOr(rig?.traceDown, IK_DEFAULTS.traceDown),
+        swingRelease: nonNegativeOr(rig?.swingRelease, IK_DEFAULTS.swingRelease),
+        maxHipDrop: nonNegativeOr(rig?.maxHipDrop, IK_DEFAULTS.maxHipDrop),
+        maxSlopeDeg: nonNegativeOr(rig?.maxSlopeDeg, IK_DEFAULTS.maxSlopeDeg),
+        smoothing: nonNegativeOr(rig?.smoothing, IK_DEFAULTS.smoothing),
     };
 }
 

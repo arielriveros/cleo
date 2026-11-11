@@ -31,6 +31,7 @@ import {
     updateLatch,
 } from "../conditions";
 import type { ConditionContext, ConditionGroup, ConditionNode } from "../conditions";
+import { finiteOr } from "../math";
 
 /**
  * What a state is trying to do. Shared with `ControllerNode.goal` — a state simply sets it, so a machine
@@ -230,10 +231,6 @@ export function stepBehavior(
 // Tolerant reader
 // ---------------------------------------------------------------------------------------------------
 
-function num(v: unknown, fallback: number): number {
-    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-}
-
 function str(v: unknown): string {
     return typeof v === 'string' ? v.trim() : '';
 }
@@ -264,7 +261,7 @@ function parseSource(raw: unknown): BehaviorParameterSource {
             return name ? { kind: 'fuzzy', name } : { kind: 'const', value: 0 };
         }
         default:
-            return { kind: 'const', value: typeof s.value === 'boolean' ? s.value : num(s.value, 0) };
+            return { kind: 'const', value: typeof s.value === 'boolean' ? s.value : finiteOr(s.value, 0) };
     }
 }
 
@@ -278,7 +275,7 @@ export function parseBehaviorParameter(raw: unknown): BehaviorParameter | null {
     return {
         name,
         type,
-        default: type === 'number' ? num(p.default, 0) : p.default === true,
+        default: type === 'number' ? finiteOr(p.default, 0) : p.default === true,
         source: parseSource(p.source),
     };
 }
@@ -295,7 +292,7 @@ export function parseBehaviorState(raw: unknown): BehaviorState | null {
     const targetKey = str(s.targetKey);
     if (targetKey) out.targetKey = targetKey;
     // Written only when it differs from full throttle, so an untouched state serializes no field.
-    const speedScale = num(s.speedScale, 1);
+    const speedScale = finiteOr(s.speedScale, 1);
     if (speedScale !== 1) out.speedScale = Math.max(0, Math.min(1, speedScale));
     if (s.isEntry === true) out.isEntry = true;
     if (typeof s.x === 'number' && Number.isFinite(s.x)) out.x = s.x;
@@ -316,7 +313,7 @@ export function parseBehaviorTransition(raw: unknown): BehaviorTransition | null
     if (condition) out.condition = 'children' in condition
         ? condition
         : { op: 'and', children: [condition as ConditionNode] };
-    const minDwell = num(t.minDwell, 0);
+    const minDwell = finiteOr(t.minDwell, 0);
     if (minDwell > 0) out.minDwell = minDwell;
     return out;
 }

@@ -11,6 +11,7 @@ import { BodyColliders } from "../../../physics/cloth/bodyColliders";
 import { XpbdCloth, gridIndices, windGust, type ClothCapsule } from "../../../physics/cloth/xpbdCloth";
 import { ModelNode } from "./modelNode";
 import { Node } from "./node";
+import { clamp01, finiteOr } from "../../math";
 
 export type ClothPinEdge = 'top' | 'left' | 'none';
 
@@ -46,8 +47,6 @@ export interface ClothOptions {
 }
 
 const PIN_EDGES: readonly ClothPinEdge[] = ['top', 'left', 'none'];
-const num = (x: unknown, fallback: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
-const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 
 /** Fixed simulation rate: steps are deterministic, and a slow frame takes a few of them. */
 const STEP = 1 / 60;
@@ -106,17 +105,17 @@ export class ClothNode extends ModelNode {
     private static _sanitize(o: ClothOptions): Required<ClothOptions> {
         const d = CLOTH_DEFAULTS;
         return {
-            width: Math.max(0.05, num(o.width, d.width)),
-            height: Math.max(0.05, num(o.height, d.height)),
-            columns: Math.min(64, Math.max(2, Math.round(num(o.columns, d.columns)))),
-            rows: Math.min(64, Math.max(2, Math.round(num(o.rows, d.rows)))),
+            width: Math.max(0.05, finiteOr(o.width, d.width)),
+            height: Math.max(0.05, finiteOr(o.height, d.height)),
+            columns: Math.min(64, Math.max(2, Math.round(finiteOr(o.columns, d.columns)))),
+            rows: Math.min(64, Math.max(2, Math.round(finiteOr(o.rows, d.rows)))),
             pinEdge: PIN_EDGES.includes(o.pinEdge as ClothPinEdge) ? o.pinEdge as ClothPinEdge : d.pinEdge,
-            stiffness: clamp01(num(o.stiffness, d.stiffness)),
-            bend: clamp01(num(o.bend, d.bend)),
-            damping: clamp01(num(o.damping, d.damping)),
-            mass: Math.max(0.01, num(o.mass, d.mass)),
-            thickness: Math.max(0, num(o.thickness, d.thickness)),
-            windResponse: Math.max(0, num(o.windResponse, d.windResponse)),
+            stiffness: clamp01(finiteOr(o.stiffness, d.stiffness)),
+            bend: clamp01(finiteOr(o.bend, d.bend)),
+            damping: clamp01(finiteOr(o.damping, d.damping)),
+            mass: Math.max(0.01, finiteOr(o.mass, d.mass)),
+            thickness: Math.max(0, finiteOr(o.thickness, d.thickness)),
+            windResponse: Math.max(0, finiteOr(o.windResponse, d.windResponse)),
             collideWithOwner: o.collideWithOwner !== undefined ? !!o.collideWithOwner : d.collideWithOwner,
             bone: typeof o.bone === 'string' ? o.bone : d.bone,
             enabled: o.enabled !== false,

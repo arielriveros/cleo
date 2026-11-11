@@ -1,5 +1,5 @@
 import { vec3 } from 'gl-matrix';
-import { damp, deltaAngleDeg, wrapDegrees } from '../core/math';
+import { damp, deltaAngleDeg, wrapDegrees, headingAngle, nonNegativeOr, planarSplit } from '../core/math';
 
 // ---------------------------------------------------------------------------
 // Measured motion: how fast a body ACTUALLY moved, from its position delta across the last physics step,
@@ -38,15 +38,13 @@ export const MOTION_DEFAULTS: MotionConfig = {
 /** A config with every field defaulted, so callers can pass a partial override or nothing at all. */
 export function motionConfig(over?: Partial<MotionConfig> | null): MotionConfig {
     if (!over) return MOTION_DEFAULTS;
-    const num = (v: number | undefined, fallback: number) =>
-        typeof v === 'number' && isFinite(v) && v >= 0 ? v : fallback;
-    const moveEnter = num(over.moveEnter, MOTION_DEFAULTS.moveEnter);
+    const moveEnter = nonNegativeOr(over.moveEnter, MOTION_DEFAULTS.moveEnter);
     return {
-        tau: num(over.tau, MOTION_DEFAULTS.tau),
+        tau: nonNegativeOr(over.tau, MOTION_DEFAULTS.tau),
         moveEnter,
         // Clamped below moveEnter: an exit at or above entry is not hysteresis.
-        moveExit: Math.min(num(over.moveExit, MOTION_DEFAULTS.moveExit), moveEnter * 0.9),
-        accelThreshold: num(over.accelThreshold, MOTION_DEFAULTS.accelThreshold),
+        moveExit: Math.min(nonNegativeOr(over.moveExit, MOTION_DEFAULTS.moveExit), moveEnter * 0.9),
+        accelThreshold: nonNegativeOr(over.accelThreshold, MOTION_DEFAULTS.accelThreshold),
     };
 }
 
@@ -171,75 +169,5 @@ export function sampleMotion(
     }
 }
 
-/**
- * Split a vector into its component perpendicular to gravity and its signed component along gravity-up.
- * `vertical` is positive when rising. Gravity-relative, not Y-relative.
- */
-export function planarSplit(v: vec3, up: vec3): { planar: vec3; vertical: number } {
-    const vertical = vec3.dot(v, up);
-    const planar = vec3.create();
-    vec3.scaleAndAdd(planar, v, up, -vertical);
-    return { planar, vertical };
-}
-
-/**
- * A reference axis lying in the plane perpendicular to `up`, against which planar angles are measured.
- * World +Z projected onto the plane, so under standard gravity angles reduce to `atan2(x, z)` — the
- * engine's yaw convention. Falls back to +X when gravity runs along Z and the projection is degenerate.
- */
-function planarReference(up: vec3): vec3 {
-    const ref = vec3.create();
-    const z = vec3.fromValues(0, 0, 1);
-    vec3.scaleAndAdd(ref, z, up, -vec3.dot(z, up));
-    if (vec3.length(ref) < 1e-4) {
-        const x = vec3.fromValues(1, 0, 0);
-        vec3.scaleAndAdd(ref, x, up, -vec3.dot(x, up));
-    }
-    vec3.normalize(ref, ref);
-    return ref;
-}
-
-/**
- * Signed angle from `from` to `to` around `up`, in DEGREES, wrapped to (-180, 180]. Both vectors are
- * flattened onto the plane first; returns 0 when either flattens to nothing.
- */
-export function signedAngleBetween(from: vec3, to: vec3, up: vec3): number {
-    const a = planarSplit(from, up).planar;
-    const b = planarSplit(to, up).planar;
-    if (vec3.length(a) < 1e-6 || vec3.length(b) < 1e-6) return 0;
-    vec3.normalize(a, a);
-    vec3.normalize(b, b);
-    const cross = vec3.create();
-    vec3.cross(cross, a, b);
-    return Math.atan2(vec3.dot(cross, up), vec3.dot(a, b)) * 180 / Math.PI;
-}
-
-/**
- * Split a velocity into how fast it travels ALONG a facing and how fast it slides ACROSS it. Both signed;
- * `forward` is negative when backpedalling. The lateral axis is `up x forward`, so `atan2(lateral, forward)`
- * in degrees equals {@link signedAngleBetween}`(forward, v, up)` and positive lateral is LEFT under standard
- * gravity. Both vectors are flattened onto the plane first; returns zeros if `forward` flattens to nothing.
- */
-export function facingComponents(v: vec3, forward: vec3, up: vec3): { forward: number; lateral: number } {
-    const f = planarSplit(forward, up).planar;
-    if (vec3.length(f) < 1e-6) return { forward: 0, lateral: 0 };
-    vec3.normalize(f, f);
-
-    const l = vec3.create();
-    vec3.cross(l, up, f);
-    if (vec3.length(l) < 1e-6) return { forward: 0, lateral: 0 };
-    vec3.normalize(l, l);
-
-    const planar = planarSplit(v, up).planar;
-    return { forward: vec3.dot(planar, f), lateral: vec3.dot(planar, l) };
-}
-
-/**
- * Absolute heading of a direction in the plane perpendicular to gravity, in DEGREES. Same convention as a
- * node's yaw — under standard gravity exactly `atan2(x, z)` — so it can be passed to `setRotation`.
- */
-export function headingAngle(dir: vec3, up: vec3): number {
-    return signedAngleBetween(planarReference(up), dir, up);
-}
-
-export { wrapDegrees };
+// The planar angle helpers are core/math.ts's; re-exported where Node and the tests have always found them.
+export { facingComponents, headingAngle, planarSplit, signedAngleBetween, wrapDegrees } from '../core/math';

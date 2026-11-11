@@ -474,8 +474,39 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - `tools/valley/split.ts` does the split and prunes each project to the assets it reaches, through the
     editor's own reference edges and the names scripts use. `build.mjs` runs it after a build;
     `bakeGI.cjs` bakes an example's own scenes by default.
+- **Cinematic sequences.** A new **Sequence** node plays a cinematic: a timeline of tracks that fly a
+  camera along a path, cut between cameras, animate properties and call script methods at given moments.
+  - *Tracks.* A **path** moves its subject along a centripetal Catmull-Rom spline at constant speed,
+    looking ahead, at a point, at a node or along a second path, with roll and field of view. The
+    **camera cut** switches the rendered camera. A **property** track drives any dotted path on a node (a UI
+    fade, a script field such as the time of day), the renderer's settings or the `Game` facade
+    (`timeScale`). An **event** track calls a method on the Sequence node's own script (the director) or
+    on a bound node.
+  - *Slots.* A sequence names its actors by slot, and the node binds each slot to a node in the scene,
+    so one sequence can drive other actors. The bindings follow a copied or spawned subtree.
+  - *It owns what it drives.* Every target is captured the first time the sequence writes it and
+    `stop()` puts all of it back. A section eases in over the value it found, and holds or restores its
+    target when the timeline leaves it.
+  - *Scripts.* `Game.playSequence(name, { bindings })` and `node.play()`, `pause`, `resume`, `seek`,
+    `skip`, `stop`, `finished`, `onFinished`, `onEvent`. Sequences run before every `onUpdate`, so a camera
+    they move renders that frame. Player contract 28.
+- **The Valley opens on a start menu: a cinematic tour, or Free mode.** The tour is a 410 s sequence over
+  every part of the valley: the campfire, the main road, the hamlet, the Old House and the Granary, the
+  meadow and the forest, a dolly down the Long House while the sun sets (the GI follows it), the night, the
+  windmill and the gate notch at twice the game's speed, the pond, and the whole valley from above.
+  Escape or P comes back to the menu from either mode. `tools/valley/applyCinematic.ts` applies it to the
+  shipped example from the checked-in `valley-tour.sequence.json` (the shot list is `cinematic/tour.ts`).
 
 ### Fixes & refactors
+
+- **One math module.** The engine's math helpers now live in `src/core/math.ts` and reach scripts as
+  `MathUtils`: scalar helpers and finite guards, damping, angles, seeded random and noise generators, the
+  particle curves and gradients, keyed curves, splines, tuple vector and quaternion helpers, and ray,
+  segment and box intersections. Thirteen copies of `clamp01`, 36 finite-or-fallback guards and the
+  duplicated lerps, smoothsteps, degree constants and octahedral encoders are gone. The old modules
+  re-export what they used to export.
+- **Fixed: a camera cut smeared its first frame with motion blur.** The blur reprojected the new view
+  through the previous camera; it now starts fresh after any cut (`renderer.cut()` declares one).
 
 - **Fixed: changing a tileset's tile size dropped its lighting maps from the project's references.**
   The re-slice kept only the atlas in `textureIds`, so a normal or six-way map used only by a tileset

@@ -20,52 +20,18 @@
  *
  * Directions use chunks/octNormal.wgsl's octahedral encoding — the G-buffer's and the reflection atlas's
  * (reflectionAtlas.ts `octEncodeDir`, pinned equal by tests/giLayout.test.ts) — so a shader and this file
- * agree on which texel is which direction. The copies here keep this module free of the device.
+ * agree on which texel is which direction. Both take it from core/math.ts, which keeps this module free of
+ * the device.
  */
+
+import { octDecode, octDecodeRaw, octEncode, octWrapOutside } from '../../../core/math';
 
 // --- The octahedral map (chunks/octNormal.wgsl) ---
 
 export type Vec3 = [number, number, number];
 
-/** The fold of chunks/octNormal.wgsl `octWrap`. */
-function octWrap(x: number, y: number): [number, number] {
-    return [(1 - Math.abs(y)) * (x >= 0 ? 1 : -1), (1 - Math.abs(x)) * (y >= 0 ? 1 : -1)];
-}
-
-/** A direction to [-1, 1]^2: chunks/octNormal.wgsl `octEncode`. */
-export function giOctEncode(d: ArrayLike<number>): [number, number] {
-    const l1 = Math.max(Math.abs(d[0]) + Math.abs(d[1]) + Math.abs(d[2]), 1e-6);
-    const x = d[0] / l1, y = d[1] / l1;
-    return d[2] >= 0 ? [x, y] : octWrap(x, y);
-}
-
-/** [-1, 1]^2 to the octahedron's surface, before normalizing: chunks/octNormal.wgsl `octDecode`. */
-function octDecodeRaw(u: number, v: number): Vec3 {
-    const z = 1 - Math.abs(u) - Math.abs(v);
-    if (z < 0) {
-        const w = octWrap(u, v);
-        return [w[0], w[1], z];
-    }
-    return [u, v, z];
-}
-
-/** [-1, 1]^2 to a unit direction: chunks/octNormal.wgsl `octDecode`. */
-export function giOctDecode(u: number, v: number): Vec3 {
-    const p = octDecodeRaw(u, v);
-    const len = Math.hypot(p[0], p[1], p[2]) || 1;
-    return [p[0] / len, p[1] / len, p[2] / len];
-}
-
-/**
- * A point just OUTSIDE [-1, 1]^2 to the point inside it that the octahedron's fold makes its neighbour:
- * past an edge the map continues mirrored along that edge, past a corner at the opposite corner.
- */
-export function giOctWrapOutside(u: number, v: number): [number, number] {
-    let x = u, y = v;
-    if (y > 1) { x = -x; y = 2 - y; } else if (y < -1) { x = -x; y = -2 - y; }
-    if (x > 1) { y = -y; x = 2 - x; } else if (x < -1) { y = -y; x = -2 - x; }
-    return [x, y];
-}
+/** The octahedral map under the names the GI code and its tests use: core/math.ts's, unchanged. */
+export { octEncode as giOctEncode, octDecode as giOctDecode, octWrapOutside as giOctWrapOutside };
 
 // --- Tiles ---
 
@@ -111,7 +77,7 @@ export function tileBorderSource(n: number, tx: number, ty: number): [number, nu
 
 /** The direction at the centre of interior texel (`x`, `y`) of an `n`-texel octahedral tile. */
 export function tileTexelDirection(n: number, x: number, y: number): Vec3 {
-    return giOctDecode(((x + 0.5) / n) * 2 - 1, ((y + 0.5) / n) * 2 - 1);
+    return octDecode(((x + 0.5) / n) * 2 - 1, ((y + 0.5) / n) * 2 - 1);
 }
 
 /** Every interior texel's direction, row-major, xyz interleaved. */

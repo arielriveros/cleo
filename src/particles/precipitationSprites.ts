@@ -9,6 +9,8 @@
 // uuids or file names): they are never registered with the TextureManager, never listed in a picker,
 // never saved, never published. The particle renderer resolves them itself.
 
+import { angularNoise, lcgRandom, smoothstep } from '../core/math';
+
 /** What every built-in sprite id starts with. */
 export const BUILTIN_SPRITE_PREFIX = '__builtin__/';
 /** Four rain streaks, 4 x 1 cells. A cell's TOP is the drop's leading end. */
@@ -53,7 +55,7 @@ export function builtinSpriteSheet(id: string): BuiltinSpriteSheet | null {
         const alpha = new Float32Array(cellW * cellH);
         for (let cell = 0; cell < layout.frames; cell++) {
             alpha.fill(0);
-            const rng = lcg(0x5eed + cell * 7919 + (id === BUILTIN_SNOW_SPRITE ? 104729 : 0));
+            const rng = lcgRandom(0x5eed + cell * 7919 + (id === BUILTIN_SNOW_SPRITE ? 104729 : 0));
             if (id === BUILTIN_RAIN_SPRITE) rainStreak(alpha, cellW, cellH, cell, rng);
             else snowflake(alpha, cellW, cellH, cell, rng);
             const ox = (cell % layout.columns) * cellW, oy = Math.floor(cell / layout.columns) * cellH;
@@ -74,20 +76,6 @@ export function builtinSpriteSheet(id: string): BuiltinSpriteSheet | null {
     }
     return sheet;
 }
-
-/** A seeded linear congruential stream in [0, 1): the same sheet on every machine, every run. */
-function lcg(seed: number): () => number {
-    let s = seed >>> 0;
-    return () => {
-        s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-        return s / 4294967296;
-    };
-}
-
-const smoothstep = (a: number, b: number, x: number) => {
-    const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-    return t * t * (3 - 2 * t);
-};
 
 /**
  * A rain streak down the cell: a drop's motion blur over one frame, Gaussian across, sharp at its
@@ -120,18 +108,6 @@ function rainStreak(out: Float32Array, w: number, h: number, variant: number, rn
             out[y * w + x] = Math.max(out[y * w + x], across * along * peak);
         }
     }
-}
-
-/** Value noise over an angle, period 2 pi: the irregular rim of a soft flake. */
-function angularNoise(rng: () => number, lobes: number): (angle: number) => number {
-    const knots = Array.from({ length: lobes }, () => rng());
-    return angle => {
-        const f = ((angle / (2 * Math.PI)) % 1 + 1) % 1 * lobes;
-        const i = Math.floor(f), t = f - i;
-        const a = knots[i % lobes], b = knots[(i + 1) % lobes];
-        const s = t * t * (3 - 2 * t);
-        return a + (b - a) * s;
-    };
 }
 
 /**

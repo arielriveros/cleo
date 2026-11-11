@@ -4,6 +4,7 @@ import { Node } from "./node";
 import { AudioManager } from "../../../audio/audioManager";
 import { DEFAULT_SPATIAL_SETTINGS, parseSpatialSettings } from "../../../audio/soundSettings";
 import type { DistanceModel, SpatialSettings } from "../../../audio/soundSettings";
+import { clamp01, finiteOr } from "../../math";
 
 /**
  * A sound emitter in the scene graph.
@@ -62,7 +63,7 @@ export class SoundNode extends Node {
         super(name, 'sound', id);
         this._mode = options.mode === 'ambient' ? 'ambient' : 'spatial';
         this._sampleId = options.sampleId ?? null;
-        this._volume = clamp01(options.volume ?? 1);
+        this._volume = clamp01(finiteOr(options.volume, 1));
         this._loopMode = readLoopMode(options.loopMode);
         this._playOnStart = options.playOnStart !== false;
         this._spatial = parseSpatialSettings({
@@ -136,7 +137,7 @@ export class SoundNode extends Node {
     /** Ramp this emitter's volume over `seconds`. Also updates `volume`, so it survives a re-sync. */
     public fadeTo(volume: number, seconds: number): void {
         const sound = this._sample();
-        const target = clamp01(volume);
+        const target = clamp01(finiteOr(volume, 1));
         if (sound && this._voice !== null) {
             const from = sound.settings.volume * this._volume;
             sound.fade(from, sound.settings.volume * target, seconds, this._voice);
@@ -191,7 +192,7 @@ export class SoundNode extends Node {
 
     public get volume(): number { return this._volume; }
     public set volume(value: number) {
-        this._volume = clamp01(value);
+        this._volume = clamp01(finiteOr(value, 1));
         const sound = this._sample();
         if (sound && this._voice !== null) sound.setVoiceVolume(this._voice, sound.settings.volume * this._volume);
         this._notifyChange('component', 'volume');
@@ -297,10 +298,6 @@ export class SoundNode extends Node {
         }
         this._notifyChange('component', 'spatial');
     }
-}
-
-function clamp01(v: number): number {
-    return !Number.isFinite(v) ? 1 : v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
 function readLoopMode(value: unknown): LoopMode {

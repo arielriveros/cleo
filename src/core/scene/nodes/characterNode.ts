@@ -13,6 +13,7 @@ import type {
 import { consumeRequest, createIntent, decayRequests } from "../../control/intent";
 import type { ControlIntent } from "../../control/intent";
 import type { ControllerNode } from "./controllerNode";
+import { finiteOr } from "../../math";
 
 /**
  * A pawn: something that walks, turns and jumps because a driver told it to.
@@ -320,22 +321,21 @@ export class CharacterNode extends Node {
     public static parse(parent: Node, json: any) {
         const node = new CharacterNode(json.name, json.id);
 
-        const num = (value: any, fallback: number) => typeof value === 'number' && isFinite(value) ? value : fallback;
         const bool = (value: any, fallback: boolean) => typeof value === 'boolean' ? value : fallback;
 
-        node.walkSpeed = num(json.walkSpeed, node.walkSpeed);
-        node.runSpeed = num(json.runSpeed, node.runSpeed);
-        node.jumpSpeed = num(json.jumpSpeed, node.jumpSpeed);
-        node.turnSpeed = num(json.turnSpeed, node.turnSpeed);
-        node.turnThreshold = num(json.turnThreshold, node.turnThreshold);
-        node.turnReleaseAngle = num(json.turnReleaseAngle, node.turnReleaseAngle);
-        node.turnSettleSeconds = num(json.turnSettleSeconds, node.turnSettleSeconds);
-        node.directionSmoothing = num(json.directionSmoothing, node.directionSmoothing);
-        node.acceleration = num(json.acceleration, node.acceleration);
-        node.airControl = num(json.airControl, node.airControl);
-        node.coyoteSeconds = num(json.coyoteSeconds, node.coyoteSeconds);
-        node.jumpBufferSeconds = num(json.jumpBufferSeconds, node.jumpBufferSeconds);
-        node.jumpLockoutSeconds = num(json.jumpLockoutSeconds, node.jumpLockoutSeconds);
+        node.walkSpeed = finiteOr(json.walkSpeed, node.walkSpeed);
+        node.runSpeed = finiteOr(json.runSpeed, node.runSpeed);
+        node.jumpSpeed = finiteOr(json.jumpSpeed, node.jumpSpeed);
+        node.turnSpeed = finiteOr(json.turnSpeed, node.turnSpeed);
+        node.turnThreshold = finiteOr(json.turnThreshold, node.turnThreshold);
+        node.turnReleaseAngle = finiteOr(json.turnReleaseAngle, node.turnReleaseAngle);
+        node.turnSettleSeconds = finiteOr(json.turnSettleSeconds, node.turnSettleSeconds);
+        node.directionSmoothing = finiteOr(json.directionSmoothing, node.directionSmoothing);
+        node.acceleration = finiteOr(json.acceleration, node.acceleration);
+        node.airControl = finiteOr(json.airControl, node.airControl);
+        node.coyoteSeconds = finiteOr(json.coyoteSeconds, node.coyoteSeconds);
+        node.jumpBufferSeconds = finiteOr(json.jumpBufferSeconds, node.jumpBufferSeconds);
+        node.jumpLockoutSeconds = finiteOr(json.jumpLockoutSeconds, node.jumpLockoutSeconds);
         if ((FACING_MODES as readonly string[]).includes(json.facingMode)) node.facingMode = json.facingMode;
         node.driveWhenUnpossessed = bool(json.driveWhenUnpossessed, node.driveWhenUnpossessed);
 

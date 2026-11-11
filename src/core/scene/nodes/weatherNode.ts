@@ -5,6 +5,7 @@ import { WEATHER_PRESETS, type WeatherPreset } from "./weatherPresets";
 import { applyPreset } from "../../presets";
 import { boxBlendFractions, boxColumnWeight, boxInverseMatrix, boxWeight, boxWorldBounds } from "./boxVolume";
 import { Material } from "../../../graphics/material";
+import { finiteOr } from "../../math";
 
 /**
  * Weather inside a box: how wet the ground and the plants are, how much snow lies on them, and whether
@@ -132,10 +133,8 @@ export const MIN_WEATHER_VOLUME_SIZE = 0.01;
 
 const unit = (v: unknown, fallback: number) =>
     Math.min(1, Math.max(0, typeof v === 'number' && Number.isFinite(v) ? v : fallback));
-const finite = (v: unknown, fallback: number): number =>
-    (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
-const trail = (v: unknown, fallback: number) => Math.min(4, Math.max(0.1, finite(v, fallback)));
-const multiplier = (v: unknown, fallback: number) => Math.min(3, Math.max(0.25, finite(v, fallback)));
+const trail = (v: unknown, fallback: number) => Math.min(4, Math.max(0.1, finiteOr(v, fallback)));
+const multiplier = (v: unknown, fallback: number) => Math.min(3, Math.max(0.25, finiteOr(v, fallback)));
 const kindOf = (v: unknown, fallback: PrecipitationKind): PrecipitationKind =>
     (PRECIPITATION_KINDS.includes(v as PrecipitationKind) ? v as PrecipitationKind : fallback);
 
@@ -172,13 +171,13 @@ export class WeatherNode extends Node {
         this._snow = unit(options.snow, WEATHER_DEFAULTS.snow);
         this._puddles = unit(options.puddles, WEATHER_DEFAULTS.puddles);
         if (options.size) this.size = options.size;
-        this._blendDistance = Math.max(0, finite(options.blendDistance, WEATHER_DEFAULTS.blendDistance));
-        this.priority = finite(options.priority, 0);
+        this._blendDistance = Math.max(0, finiteOr(options.blendDistance, WEATHER_DEFAULTS.blendDistance));
+        this.priority = finiteOr(options.priority, 0);
         this.enabled = options.enabled ?? true;
         this.snowMaterial = options.snowMaterial ? WeatherNode._parseMaterial(options.snowMaterial) : null;
         this.snowMaterialId = typeof options.snowMaterialId === 'string' && options.snowMaterialId ? options.snowMaterialId : null;
-        this._snowTiling = Math.max(0.05, finite(options.snowTiling, WEATHER_DEFAULTS.snowTiling));
-        this._snowSlope = Math.min(90, Math.max(0, finite(options.snowSlope, WEATHER_DEFAULTS.snowSlope)));
+        this._snowTiling = Math.max(0.05, finiteOr(options.snowTiling, WEATHER_DEFAULTS.snowTiling));
+        this._snowSlope = Math.min(90, Math.max(0, finiteOr(options.snowSlope, WEATHER_DEFAULTS.snowSlope)));
         this._snowBreakup = unit(options.snowBreakup, WEATHER_DEFAULTS.snowBreakup);
         this.shelter = options.shelter ?? true;
         this._precipitation = kindOf(options.precipitation, 'none');
@@ -203,9 +202,9 @@ export class WeatherNode extends Node {
     public get puddles(): number { return this._puddles; }
     public set puddles(v: number) { this._puddles = unit(v, this._puddles); }
     public get snowTiling(): number { return this._snowTiling; }
-    public set snowTiling(v: number) { this._snowTiling = Math.max(0.05, finite(+v, this._snowTiling)); }
+    public set snowTiling(v: number) { this._snowTiling = Math.max(0.05, finiteOr(+v, this._snowTiling)); }
     public get snowSlope(): number { return this._snowSlope; }
-    public set snowSlope(v: number) { this._snowSlope = Math.min(90, Math.max(0, finite(+v, this._snowSlope))); }
+    public set snowSlope(v: number) { this._snowSlope = Math.min(90, Math.max(0, finiteOr(+v, this._snowSlope))); }
     public get snowBreakup(): number { return this._snowBreakup; }
     public set snowBreakup(v: number) { this._snowBreakup = unit(v, this._snowBreakup); }
 

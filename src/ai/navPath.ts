@@ -30,6 +30,7 @@
 import { vec3 } from "gl-matrix";
 import { arrive, seek } from "../core/control/steering";
 import type { SteeringTuning } from "../core/control/steering";
+import { finiteOr } from "../core/math";
 
 /**
  * A path being walked. The caller owns it — same contract as `SteeringState` and `LocomotionState`.
@@ -220,16 +221,12 @@ export interface RepathPolicy {
 
 export const REPATH_DEFAULTS: RepathPolicy = { interval: 0.5, targetDrift: 1.5 };
 
-function num(v: unknown, fallback: number): number {
-    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-}
-
 /** Every field defaulted and clamped, so a partial or junk record passes. Mirrors `steeringTuning`. */
 export function repathPolicy(over?: Partial<RepathPolicy> | null): RepathPolicy {
     const o = (over ?? {}) as Partial<RepathPolicy>;
     return {
-        interval: Math.max(0, num(o.interval, REPATH_DEFAULTS.interval)),
-        targetDrift: Math.max(0, num(o.targetDrift, REPATH_DEFAULTS.targetDrift)),
+        interval: Math.max(0, finiteOr(o.interval, REPATH_DEFAULTS.interval)),
+        targetDrift: Math.max(0, finiteOr(o.targetDrift, REPATH_DEFAULTS.targetDrift)),
     };
 }
 

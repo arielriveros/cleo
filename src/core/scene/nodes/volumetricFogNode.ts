@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 import { boxBlendFractions, boxInverseMatrix, boxWeight, boxWorldBounds } from "./boxVolume";
 import { applyPreset, definePresets, type Preset } from "../../presets";
+import { finiteOr } from "../../math";
 
 /** Everything a fog volume is authored with. Every field optional: a missing one takes the default. */
 export interface VolumetricFogOptions {
@@ -64,7 +65,8 @@ export const MIN_FOG_VOLUME_SIZE = 0.01;
 
 const vec = (v: unknown, fallback: [number, number, number]): [number, number, number] =>
     Array.isArray(v) && v.length >= 3 && v.every(x => Number.isFinite(+x)) ? [+v[0], +v[1], +v[2]] : [...fallback] as [number, number, number];
-const finite = (v: unknown, fallback: number): number => (Number.isFinite(+(v as number)) && v !== null && v !== undefined ? +(v as number) : fallback);
+/** Like `finiteOr`, but a numeric string or boolean coerces (`+v`); null and undefined are missing. */
+const finite = (v: unknown, fallback: number): number => (v === null || v === undefined ? fallback : finiteOr(+(v as number), fallback));
 
 /**
  * A box of participating medium: fog, mist, smoke or dust that the sun, the moon, the torches and the

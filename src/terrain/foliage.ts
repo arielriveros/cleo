@@ -9,6 +9,7 @@ import {
 } from '../graphics/material';
 import type { FoliageOrientation } from '../graphics/material';
 import { parseOctahedralInfo, type OctahedralImpostorInfo } from './octahedralImpostor';
+import { hash01 } from '../core/math';
 
 export type FoliageKind = 'mesh' | 'billboard';
 
@@ -1204,12 +1205,3 @@ export function parseFoliageOrientation(v: unknown): FoliageOrientation {
     return v === 'normal' || v === 'free' ? v : 'up';
 }
 
-/** A deterministic value in [0, 1) from an instance's record and a salt. */
-function hash01(x: number, z: number, yaw: number, salt: number): number {
-    let h = Math.imul(Math.round(x * 1000) | 0, 0x9e3779b1) ^ Math.imul(Math.round(z * 1000) | 0, 0x85ebca77)
-        ^ Math.imul(Math.round(yaw * 1e5) | 0, 0xc2b2ae3d) ^ Math.imul(salt, 0x27d4eb2f);
-    h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d);
-    h ^= h >>> 12; h = Math.imul(h, 0x297a2d39);
-    h ^= h >>> 15;
-    return (h >>> 0) / 4294967296;
-}

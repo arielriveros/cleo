@@ -1,6 +1,7 @@
 import { device } from '../rhi/deviceHandle';
 import type { RenderTarget } from '../rhi/resources';
 import { Texture } from '../texture';
+import { octDecode, octEncode, octWrapOutside as octWrapOutsideUV } from '../../core/math';
 
 /**
  * Every light probe's REFLECTION in one texture: a 2D array, one layer per probe, each layer the probe's
@@ -27,28 +28,11 @@ export const MAX_REFLECTION_PROBES = 16;
 type Vec3 = [number, number, number];
 
 /** Unit direction -> [-1, 1]^2, the octahedral encoding of chunks/octNormal.wgsl `octEncode`. */
-export function octEncodeDir(d: ArrayLike<number>): [number, number] {
-    const l1 = Math.max(Math.abs(d[0]) + Math.abs(d[1]) + Math.abs(d[2]), 1e-6);
-    let x = d[0] / l1, y = d[1] / l1;
-    if (d[2] < 0) {
-        const wx = (1 - Math.abs(y)) * (x >= 0 ? 1 : -1);
-        const wy = (1 - Math.abs(x)) * (y >= 0 ? 1 : -1);
-        x = wx; y = wy;
-    }
-    return [x, y];
-}
+export { octEncode as octEncodeDir } from '../../core/math';
 
 /** [-1, 1]^2 -> unit direction, chunks/octNormal.wgsl `octDecode`. */
 export function octDecodeDir(e: ArrayLike<number>): Vec3 {
-    let x = e[0], y = e[1];
-    const z = 1 - Math.abs(x) - Math.abs(y);
-    if (z < 0) {
-        const wx = (1 - Math.abs(y)) * (x >= 0 ? 1 : -1);
-        const wy = (1 - Math.abs(x)) * (y >= 0 ? 1 : -1);
-        x = wx; y = wy;
-    }
-    const len = Math.hypot(x, y, z) || 1;
-    return [x / len, y / len, z / len];
+    return octDecode(e[0], e[1]);
 }
 
 /**
@@ -57,15 +41,12 @@ export function octDecodeDir(e: ArrayLike<number>): Vec3 {
  * point just inside it on the other side of the axis. What a border texel holds.
  */
 export function octWrapOutside(p: [number, number]): [number, number] {
-    let x = p[0], y = p[1];
-    if (x > 1) { x = 2 - x; y = -y; } else if (x < -1) { x = -2 - x; y = -y; }
-    if (y > 1) { y = 2 - y; x = -x; } else if (y < -1) { y = -2 - y; x = -x; }
-    return [x, y];
+    return octWrapOutsideUV(p[0], p[1]);
 }
 
 /** The atlas uv (0..1, any layer and mip) a direction is sampled at: deferredLighting.wgsl `reflectionAtlasUv`. */
 export function octAtlasUv(d: ArrayLike<number>): [number, number] {
-    const e = octEncodeDir(d);
+    const e = octEncode(d);
     const s = 1 - 2 * REFLECTION_BORDER;
     return [REFLECTION_BORDER + (e[0] * 0.5 + 0.5) * s, REFLECTION_BORDER + (e[1] * 0.5 + 0.5) * s];
 }

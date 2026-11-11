@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 import { FORCE_FIELD_PRESETS, type ForceFieldPreset } from "./forceFieldPresets";
 import { applyPreset } from "../../presets";
+import { finiteOr } from "../../math";
 
 export type ForceFieldKind = 'directional' | 'radial' | 'vortex' | 'turbulence' | 'drag';
 export type ForceFieldShape = 'global' | 'sphere' | 'box';
@@ -32,7 +33,6 @@ export interface ForceFieldOptions {
 
 const KINDS: readonly ForceFieldKind[] = ['directional', 'radial', 'vortex', 'turbulence', 'drag'];
 const SHAPES: readonly ForceFieldShape[] = ['global', 'sphere', 'box'];
-const num = (x: unknown, fallback: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
 
 /** Fields the GPU sees per frame. Matches MAX_FORCE_FIELDS in chunks/particleSimCore.wgsl. */
 export const MAX_FORCE_FIELDS = 16;
@@ -62,12 +62,12 @@ export class ForceFieldNode extends Node {
         super(name, 'forceField', id);
         this._kind = KINDS.includes(options.kind as ForceFieldKind) ? options.kind as ForceFieldKind : 'directional';
         this._shape = SHAPES.includes(options.shape as ForceFieldShape) ? options.shape as ForceFieldShape : 'sphere';
-        this._strength = num(options.strength, 5);
-        this._radius = Math.max(0.01, num(options.radius, 3));
+        this._strength = finiteOr(options.strength, 5);
+        this._radius = Math.max(0.01, finiteOr(options.radius, 3));
         const e = options.extents;
-        this._extents = Array.isArray(e) ? [Math.abs(num(e[0], 2)), Math.abs(num(e[1], 2)), Math.abs(num(e[2], 2))] : [2, 2, 2];
-        this._falloff = Math.min(1, Math.max(0, num(options.falloff, 0.5)));
-        this._frequency = Math.max(0.001, num(options.frequency, 0.5));
+        this._extents = Array.isArray(e) ? [Math.abs(finiteOr(e[0], 2)), Math.abs(finiteOr(e[1], 2)), Math.abs(finiteOr(e[2], 2))] : [2, 2, 2];
+        this._falloff = Math.min(1, Math.max(0, finiteOr(options.falloff, 0.5)));
+        this._frequency = Math.max(0.001, finiteOr(options.frequency, 0.5));
         this._enabled = options.enabled !== false;
         this._affectsWind = options.affectsWind === true;
     }
@@ -86,27 +86,27 @@ export class ForceFieldNode extends Node {
     }
     public get strength(): number { return this._strength; }
     public set strength(v: number) {
-        this._strength = num(v, this._strength);
+        this._strength = finiteOr(v, this._strength);
         this._notifyChange('component', 'strength');
     }
     public get radius(): number { return this._radius; }
     public set radius(v: number) {
-        this._radius = Math.max(0.01, num(v, this._radius));
+        this._radius = Math.max(0.01, finiteOr(v, this._radius));
         this._notifyChange('component', 'radius');
     }
     public get extents(): [number, number, number] { return this._extents; }
     public set extents(v: [number, number, number]) {
-        this._extents = [Math.abs(num(v?.[0], 2)), Math.abs(num(v?.[1], 2)), Math.abs(num(v?.[2], 2))];
+        this._extents = [Math.abs(finiteOr(v?.[0], 2)), Math.abs(finiteOr(v?.[1], 2)), Math.abs(finiteOr(v?.[2], 2))];
         this._notifyChange('component', 'extents');
     }
     public get falloff(): number { return this._falloff; }
     public set falloff(v: number) {
-        this._falloff = Math.min(1, Math.max(0, num(v, this._falloff)));
+        this._falloff = Math.min(1, Math.max(0, finiteOr(v, this._falloff)));
         this._notifyChange('component', 'falloff');
     }
     public get frequency(): number { return this._frequency; }
     public set frequency(v: number) {
-        this._frequency = Math.max(0.001, num(v, this._frequency));
+        this._frequency = Math.max(0.001, finiteOr(v, this._frequency));
         this._notifyChange('component', 'frequency');
     }
     public get enabled(): boolean { return this._enabled; }

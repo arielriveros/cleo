@@ -4,7 +4,9 @@
 
 import { CleoEngine } from "./engine";
 import { showLoadingOverlay, whenFramesSmooth } from "./loadingOverlay";
+import { Logger } from "./logger";
 import type { RenderSettings } from "../graphics/renderer";
+import type { SequenceNode, SequencePlayOptions } from "./scene/nodes/sequenceNode";
 
 /** Progress of a scene load: 0..1, and a short name for the stage it is in. */
 export type LoadProgressListener = (fraction: number, stage: string) => void;
@@ -172,6 +174,33 @@ export const Game = {
   set gravity(g: [number, number, number]) {
     const engine = CleoEngine.instance;
     if (engine) engine.physics.gravity = g;
+  },
+
+  /**
+   * The running scene's sequence player (a Sequence node) called `name`, or undefined.
+   *
+   *   Game.sequence('Intro')?.pause();
+   */
+  sequence(name: string): SequenceNode | undefined {
+    const scene = CleoEngine.instance?.scene;
+    if (!scene) return undefined;
+    for (const node of scene.sequences) if (node.name === name) return node;
+    return undefined;
+  },
+  /**
+   * Play the sequence called `name` from the start (or `options.from`), optionally binding its slots to other
+   * nodes for this playback. Returns the player, whose `finished` resolves when it ends; undefined (with a
+   * warning) when there is no such sequence.
+   *
+   *   await Game.playSequence('Intro', { bindings: { Hero: this } })?.finished;
+   */
+  playSequence(name: string, options?: SequencePlayOptions): SequenceNode | undefined {
+    const node = Game.sequence(name);
+    if (!node) {
+      Logger.warn(`Game.playSequence: no sequence named '${name}' in the running scene.`, 'Script');
+      return undefined;
+    }
+    return node.play(options);
   },
 
   /** A snapshot of the current render/post-processing settings (exposure, bloom, motion blur, ...). */

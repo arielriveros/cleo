@@ -1,5 +1,6 @@
 import { rackShapeOf } from "./soundSettings";
 import type { SoundEffect } from "./soundSettings";
+import { DEG2RAD } from "../core/math";
 
 /**
  * The DSP rack: an ordered chain of inserts between a fixed input and a fixed output node.
@@ -39,10 +40,9 @@ function distortionCurve(drive: number): Float32Array<ArrayBuffer> {
     const curve = new Float32Array(new ArrayBuffer(samples * Float32Array.BYTES_PER_ELEMENT));
     // Zero drive must be a straight line, or an insert nobody has turned up still colours the sound.
     const k = Math.max(0, drive) * 100;
-    const deg = Math.PI / 180;
     for (let i = 0; i < samples; i++) {
         const x = (i * 2) / samples - 1;
-        curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
+        curve[i] = ((3 + k) * x * 20 * DEG2RAD) / (Math.PI + k * Math.abs(x));
     }
     return curve;
 }

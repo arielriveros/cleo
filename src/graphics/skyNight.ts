@@ -10,13 +10,9 @@
  * Pure functions, so the crossfade can be tested without a renderer.
  */
 
-type Vec3 = [number, number, number];
+import { DEG2RAD, smoothstep } from '../core/math';
 
-const smooth = (a: number, b: number, x: number): number => {
-    const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-    return t * t * (3 - 2 * t);
-};
-const DEG = Math.PI / 180;
+type Vec3 = [number, number, number];
 
 /**
  * Direction TOWARD the moon: the point opposite the sun, moved by `yawDeg` in azimuth and `pitchDeg` in
@@ -26,16 +22,16 @@ const DEG = Math.PI / 180;
 export function moonDirection(toSun: ArrayLike<number>, yawDeg: number, pitchDeg: number): Vec3 {
     const len = Math.hypot(toSun[0], toSun[1], toSun[2]) || 1;
     const x = -toSun[0] / len, y = -toSun[1] / len, z = -toSun[2] / len;
-    const limit = 89 * DEG;
-    const el = Math.min(limit, Math.max(-limit, Math.asin(Math.min(1, Math.max(-1, y))) + pitchDeg * DEG));
-    const az = Math.atan2(x, z) + yawDeg * DEG;
+    const limit = 89 * DEG2RAD;
+    const el = Math.min(limit, Math.max(-limit, Math.asin(Math.min(1, Math.max(-1, y))) + pitchDeg * DEG2RAD));
+    const az = Math.atan2(x, z) + yawDeg * DEG2RAD;
     const c = Math.cos(el);
     return [c * Math.sin(az), Math.sin(el), c * Math.cos(az)];
 }
 
 /** 0 with the sun above ~2 degrees, 1 once it is ~8 degrees below the horizon (astronomical dusk-ish). */
 export function nightFactor(sunElevationSin: number): number {
-    return 1 - smooth(-0.139, 0.035, sunElevationSin);
+    return 1 - smoothstep(-0.139, 0.035, sunElevationSin);
 }
 
 export interface MoonLightParams {
@@ -67,11 +63,11 @@ export function keyLight(toSun: ArrayLike<number>, toMoon: ArrayLike<number>, su
                          sunIntensity: number, p: MoonLightParams): KeyLight {
     const sunY = toSun[1];
     // Sun: full above ~3 degrees, gone at -2 (below that it would light the ground from underneath).
-    const sunWeight = smooth(-0.035, 0.052, sunY);
+    const sunWeight = smoothstep(-0.035, 0.052, sunY);
     // Moon: only once the sun has gone (so the direction swap happens in the dark), only above its own
     // horizon, and only as bright as it is lit.
     const moonWeight = p.nightEnabled && p.moonEnabled
-        ? (1 - smooth(-0.105, -0.035, sunY)) * smooth(-0.02, 0.08, toMoon[1]) * Math.min(1, Math.max(0, p.moonPhase))
+        ? (1 - smoothstep(-0.105, -0.035, sunY)) * smoothstep(-0.02, 0.08, toMoon[1]) * Math.min(1, Math.max(0, p.moonPhase))
         : 0;
     if (sunWeight > 0 || moonWeight <= 0) {
         return {

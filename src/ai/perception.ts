@@ -43,7 +43,7 @@
  */
 
 import { vec3 } from "gl-matrix";
-import { clamp, DEG2RAD } from "../core/math";
+import { clamp, DEG2RAD, finiteOr } from "../core/math";
 import { GameEntity, MemorySystem, Vector3, Vision } from "./yuka";
 import { toYuka, yawToYukaRotation } from "./interop";
 import type { Vec3Like } from "./interop";
@@ -74,19 +74,15 @@ export const PERCEPTION_DEFAULTS: PerceptionTuning = {
     reactionTime: 0.25,
 };
 
-function num(v: unknown, fallback: number): number {
-    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-}
-
 /** Every field defaulted and clamped, so a partial or junk record passes. Mirrors `steeringTuning`. */
 export function perceptionTuning(over?: Partial<PerceptionTuning> | null): PerceptionTuning {
     const o = (over ?? {}) as Partial<PerceptionTuning>;
     const d = PERCEPTION_DEFAULTS;
     return {
-        fieldOfView: clamp(num(o.fieldOfView, d.fieldOfView), 0, 360),
-        range: Math.max(0, num(o.range, d.range)),
-        memorySpan: Math.max(0, num(o.memorySpan, d.memorySpan)),
-        reactionTime: Math.max(0, num(o.reactionTime, d.reactionTime)),
+        fieldOfView: clamp(finiteOr(o.fieldOfView, d.fieldOfView), 0, 360),
+        range: Math.max(0, finiteOr(o.range, d.range)),
+        memorySpan: Math.max(0, finiteOr(o.memorySpan, d.memorySpan)),
+        reactionTime: Math.max(0, finiteOr(o.reactionTime, d.reactionTime)),
     };
 }
 

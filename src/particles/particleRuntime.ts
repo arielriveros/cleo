@@ -14,6 +14,7 @@ import { mat4, vec3 } from 'gl-matrix';
 import { evaluateCurve, type Curve } from './curves';
 import { activeModule, maxLifetime, MAX_EMITTER_CAPACITY, type EmitterDef } from './particleSystemAsset';
 import type { Burst } from './particleModules';
+import { finiteOr, seededRandom } from '../core/math';
 
 /** Texels per row of an emitter's state textures. */
 export const PARTICLE_TEXTURE_WIDTH = 256;
@@ -61,8 +62,8 @@ export function resolveSubEmitters(defs: readonly EmitterDef[]): { defs: Emitter
         if (activeModule(enabled[parent], 'subEmitter')) return null;
         return {
             parent, event: m.params.event === 'collision' ? 'collision' : 'death',
-            count: Math.max(1, Math.min(8, Math.floor(num(m.params.count, 1)))),
-            inherit: num(m.params.inherit, 0),
+            count: Math.max(1, Math.min(8, Math.floor(finiteOr(m.params.count, 1)))),
+            inherit: finiteOr(m.params.inherit, 0),
         };
     });
     const sized = enabled.map((d, i) => {
@@ -104,20 +105,6 @@ export interface SimStep {
  * a slot outside it is never touched again, so whatever it last held must already be a corpse.
  */
 export const LIVE_WINDOW_MARGIN = 0.25;
-
-/** Deterministic 0..1 stream for burst probabilities. mulberry32. */
-function rng(seed: number): () => number {
-    let a = seed >>> 0;
-    return () => {
-        a = (a + 0x6D2B79F5) >>> 0;
-        let t = a;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-}
-
-const num = (x: unknown, fallback: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
 
 /**
  * A per-instance salt for emitter seeds, from a stable key (the node id). Two copies of one effect share
@@ -172,7 +159,7 @@ export class EmitterRuntime {
         this.capacity = layout.capacity;
         this.width = layout.width;
         this.height = layout.height;
-        this._random = rng(this.seed ^ 0x9E3779B9);
+        this._random = seededRandom(this.seed ^ 0x9E3779B9);
         this._maxLife = maxLifetime(def);
     }
 
@@ -245,7 +232,7 @@ export class EmitterRuntime {
         this._rateCarry = 0;
         this._burstCarry = 0;
         this._distanceCarry = 0;
-        this._random = rng(this.seed ^ 0x9E3779B9);
+        this._random = seededRandom(this.seed ^ 0x9E3779B9);
     }
 
     /** Stop spawning; live particles finish their lives. */
@@ -339,7 +326,7 @@ export class EmitterRuntime {
 
         const rate = activeModule(def, 'spawnRate');
         if (rate) {
-            this._distanceCarry += moved * Math.max(0, num(rate.params.perDistance, 0)) * rateScale;
+            this._distanceCarry += moved * Math.max(0, finiteOr(rate.params.perDistance, 0)) * rateScale;
             const fromDistance = Math.floor(this._distanceCarry);
             this._distanceCarry -= fromDistance;
             total += fromDistance;
@@ -358,7 +345,7 @@ export class EmitterRuntime {
             const mid = ((c0 + c1) * 0.5) / def.duration;
             const curve = rate.params.rateOverTime as Curve | undefined;
             const multiplier = curve ? Math.max(0, evaluateCurve(curve, mid)) : 1;
-            this._rateCarry += Math.max(0, num(rate.params.rate, 0)) * multiplier * rateScale * dt;
+            this._rateCarry += Math.max(0, finiteOr(rate.params.rate, 0)) * multiplier * rateScale * dt;
             const whole = Math.floor(this._rateCarry);
             this._rateCarry -= whole;
             total += whole;
@@ -367,10 +354,10 @@ export class EmitterRuntime {
         const bursts = activeModule(def, 'spawnBurst');
         if (bursts && Array.isArray(bursts.params.bursts)) {
             for (const burst of bursts.params.bursts as Burst[]) {
-                const time = num(burst.time, 0);
-                const interval = Math.max(0.01, num(burst.interval, 0.5));
-                const cycles = Math.max(0, Math.floor(num(burst.cycles, 1)));
-                const probability = Math.min(1, Math.max(0, num(burst.probability, 1)));
+                const time = finiteOr(burst.time, 0);
+                const interval = Math.max(0.01, finiteOr(burst.interval, 0.5));
+                const cycles = Math.max(0, Math.floor(finiteOr(burst.cycles, 1)));
+                const probability = Math.min(1, Math.max(0, finiteOr(burst.probability, 1)));
                 for (let k = 0; cycles === 0 || k < cycles; k++) {
                     const at = time + k * interval;
                     if (at >= def.duration || at >= c1) break;
@@ -378,7 +365,7 @@ export class EmitterRuntime {
                     if (at < c0 && !(at === 0 && c0 === 0)) continue;
                     if (probability >= 1 || this._random() < probability) {
                         // Scaled bursts carry their fraction, so ×0.5 of a 3-burst alternates 1 and 2.
-                        this._burstCarry += Math.max(0, Math.floor(num(burst.count, 0))) * burstScale;
+                        this._burstCarry += Math.max(0, Math.floor(finiteOr(burst.count, 0))) * burstScale;
                         const whole = Math.floor(this._burstCarry + 1e-9);
                         this._burstCarry -= whole;
                         total += whole;

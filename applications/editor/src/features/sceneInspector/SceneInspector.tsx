@@ -7,6 +7,7 @@ import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
   CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, ExposureVolumeIcon, GiVolumeIcon, VolumetricFogIcon, SkyboxIcon, SkyLightIcon, CloudsIcon, WindIcon, WeatherIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
+  SequenceIcon,
 } from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
@@ -31,6 +32,7 @@ const TYPE_ICONS: Record<string, () => JSX.Element> = {
   // One glyph for both modes: the tree shows what a node IS, and ambient vs spatial is a property of it.
   sound: SoundIcon,
   particleSystem: ParticlesIcon, forceField: ForceFieldIcon, cloth: ClothIcon, waterVolume: WaterVolumeIcon, occlusionVolume: OcclusionVolumeIcon,
+  sequence: SequenceIcon,
 };
 
 

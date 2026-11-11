@@ -50,6 +50,12 @@ export function remapNodeRefs(json: any, map: Map<string, string>): void {
     // health bar pointed at the template's anchor id, which is in no scene, and sat at the enemy's feet.
     const ui = json?.ui;
     if (ui && typeof ui.uiTargetId === 'string' && map.has(ui.uiTargetId)) ui.uiTargetId = map.get(ui.uiTargetId);
+    // A sequence player maps its slots to node ids in a `bindings` object. A copied cinematic must drive the
+    // copies of its actors, not the originals.
+    const bindings = json?.type === 'sequence' ? json.bindings : null;
+    if (bindings && typeof bindings === 'object')
+        for (const slot of Object.keys(bindings))
+            if (typeof bindings[slot] === 'string' && map.has(bindings[slot])) bindings[slot] = map.get(bindings[slot]);
     if (Array.isArray(json?.collisionIgnoreIds))
         json.collisionIgnoreIds = json.collisionIgnoreIds.map((id: any) =>
             typeof id === 'string' && map.has(id) ? map.get(id) : id);

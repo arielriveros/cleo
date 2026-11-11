@@ -4,7 +4,7 @@
 // Pure data and math — no GL, no scene, no engine imports — so the editor and runtime share it.
 // ---------------------------------------------------------------------------
 
-import { wrapSpan } from '../core/math';
+import { wrapSpan, clamp01 } from '../core/math';
 
 export type AnimationFieldMode = '1d' | '2d';
 
@@ -99,10 +99,6 @@ export interface FieldWeight {
 
 /** Weights below this are dropped before normalizing, so a large field still evaluates only a few clips. */
 const WEIGHT_EPSILON = 1e-4;
-
-function clamp01(v: number): number {
-    return v < 0 ? 0 : v > 1 ? 1 : v;
-}
 
 // Map a value onto 0..1 across an axis's authored range. A degenerate range collapses to 0 rather than
 // dividing by zero, which the weighting below handles as an even mix.

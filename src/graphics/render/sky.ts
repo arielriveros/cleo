@@ -33,6 +33,7 @@ import type { LightingPasses } from './lighting';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 import type { RenderSubsystems } from './subsystems';
+import { DEG2RAD } from '../../core/math';
 
 /** What SkyPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface SkyPassesHost {
@@ -681,9 +682,8 @@ export class SkyPasses {
         // the light itself lights. Otherwise `sunIntensity` is the sky's own brightness knob.
         const physicalSun = this._skySun;
         const physical = physicalSun !== null;
-        const DEG_RAD = Math.PI / 180;
-        const sunDisk = Math.max(1e-3, node.sunDiskSize) * DEG_RAD;
-        const moonDisk = Math.max(1e-3, node.moonSize) * DEG_RAD;
+        const sunDisk = Math.max(1e-3, node.sunDiskSize) * DEG2RAD;
+        const moonDisk = Math.max(1e-3, node.moonSize) * DEG2RAD;
         const moonLight = physical ? node.moonLux(physicalSun! * REFERENCE_ILLUMINANCE) / REFERENCE_ILLUMINANCE : 0;
         this._shaderManager.setUniform('u_sunIntensity', physical ? physicalSun! * SkyPasses.PHYSICAL_SKY_CALIBRATION : node.sunIntensity);
         this._shaderManager.setUniform('u_physical', physical ? 1 : 0);
@@ -706,7 +706,6 @@ export class SkyPasses {
         this._shaderManager.setUniform('u_lightSteps', node.lightSteps);
 
         // Night sky. `u_night` is 0 by day, which is what keeps a day bake from paying for any of it.
-        const DEG = Math.PI / 180;
         const nightTex = node.nightSkyTexture ? TextureManager.Instance.getTexture(node.nightSkyTexture) : null;
         const moonTex = node.moonTexture ? TextureManager.Instance.getTexture(node.moonTexture) : null;
         this._shaderManager.setUniform('u_night', node.nightEnabled ? nightFactor(sun[1]) : 0);
@@ -717,8 +716,8 @@ export class SkyPasses {
         this._shaderManager.setUniform('u_starDensity', node.starDensity);
         this._shaderManager.setUniform('u_starColorVariance', node.starColorVariance);
         this._shaderManager.setUniform('u_nightSkyIntensity', node.nightSkyIntensity);
-        this._shaderManager.setUniform('u_nightSkyRotation', node.nightSkyRotation * DEG);
-        this._shaderManager.setUniform('u_moonSize', node.moonSize * DEG);
+        this._shaderManager.setUniform('u_nightSkyRotation', node.nightSkyRotation * DEG2RAD);
+        this._shaderManager.setUniform('u_moonSize', node.moonSize * DEG2RAD);
         this._shaderManager.setUniform('u_moonPhase', node.moonPhase);
         this._shaderManager.setUniform('u_moonIntensity', node.moonIntensity);
         this._shaderManager.setUniform('u_airglowIntensity', node.airglowIntensity);

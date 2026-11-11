@@ -23,6 +23,7 @@ import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 import type { RenderSubsystems } from './subsystems';
+import { smoothstep } from '../../core/math';
 
 /** What VolumetricCloudPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface VolumetricCloudPassesHost {
@@ -129,12 +130,8 @@ export class VolumetricCloudPasses {
         const invLen = 1 / (Math.hypot(sunDir[0], sunDir[1], sunDir[2]) || 1);
         const toSun = [-sunDir[0] * invLen, -sunDir[1] * invLen, -sunDir[2] * invLen];
         const elevation = toSun[1];
-        const smooth01 = (a: number, b: number, x: number) => {
-            const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-            return t * t * (3 - 2 * t);
-        };
-        const day = smooth01(0.08, 0.35, elevation);         // 1 = sun clearly above the horizon
-        const night = 1 - smooth01(-0.22, -0.03, elevation); // 1 = sun clearly below it
+        const day = smoothstep(0.08, 0.35, elevation);         // 1 = sun clearly above the horizon
+        const night = 1 - smoothstep(-0.22, -0.03, elevation); // 1 = sun clearly below it
         const sunset = (1 - day) * (1 - night);              // peaks with the sun on the horizon
         const mix1 = (a: number, b: number, t: number) => a + (b - a) * t;
         const sunsetColor = node.sunsetColor;                // user-set sunrise/sunset glow color
@@ -178,7 +175,7 @@ export class VolumetricCloudPasses {
             // Sun intensity follows elevation: dimmest on the horizon (long atmospheric path), ramping
             // to the authored full value with the sun at the zenith.
             const HORIZON_SUN_INTENSITY = 0.25;
-            effSunIntensity = node.sunIntensity * mix1(HORIZON_SUN_INTENSITY, 1, smooth01(0, 1, elevation));
+            effSunIntensity = node.sunIntensity * mix1(HORIZON_SUN_INTENSITY, 1, smoothstep(0, 1, elevation));
         }
 
         let effAmbientColor: number[];

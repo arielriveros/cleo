@@ -3,6 +3,7 @@
 // 47-blob normalization). Hexagonal grids always use all six bits whatever the declared kind.
 
 import type { TerrainSet, VariantSet, WangKind } from "./tileset";
+export { cellNoise } from "../../core/math";
 
 /**
  * Fold a neighbour-sameness ring into the bitmask a terrain set is keyed by. `same` must be in
@@ -75,13 +76,3 @@ export function pickWeightedVariant(set: VariantSet, rng: () => number = Math.ra
     return set.tiles[set.tiles.length - 1].index;
 }
 
-/**
- * Deterministic per-cell hash in [0, 1). Used instead of `Math.random` when scattering variants, so
- * repainting the same cells — or reloading the map — produces the same result.
- */
-export function cellNoise(col: number, row: number, seed: number = 0): number {
-    let h = (col * 374761393 + row * 668265263 + seed * 1274126177) | 0;
-    h = Math.imul(h ^ (h >>> 13), 1274126177);
-    h = (h ^ (h >>> 16)) >>> 0;
-    return h / 4294967296;
-}

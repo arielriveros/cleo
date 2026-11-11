@@ -540,6 +540,22 @@ or from a brain. See [AI agents](ai-agents.md#the-controller-inspector).
 **Nav Mesh** — bake bounds, bake settings and the Bake button. See
 [AI agents](ai-agents.md#navigation-meshes).
 
+#### Sequence
+
+A Sequence node plays a cinematic: tracks laid out on a timeline that move a camera along a path, cut
+between cameras, animate properties of other nodes (a UI fade, the time of day, a light) and call script
+methods at given moments. The sequence names its actors by slot rather than by node, and this section
+binds each slot to a node in the scene, so one sequence can drive different actors. Play it from a script
+with `Game.playSequence('Name')` or `node.play()`; while it plays it owns what it drives, and `stop()` puts
+all of it back. See [Sequences](../scripting/scene-and-game.md#sequences).
+
+| Field | |
+|---|---|
+| **Sequence** | The sequence this node carries, and how long it runs. |
+| **Length** | Its duration in seconds and its number of tracks. |
+| **Autoplay** | Start playing on the first frame of Play or of the published game. Never while editing. |
+| **Slot rows** | One per slot: the node that slot drives. An unbound slot looks for the node its path names. |
+
 ### 2D
 
 **Sprite** — tileset plus one tile, chosen from a tile grid.

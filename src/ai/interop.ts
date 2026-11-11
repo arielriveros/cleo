@@ -31,8 +31,9 @@
  */
 
 import { vec3 } from "gl-matrix";
-import { DEG2RAD, RAD2DEG } from "../core/math";
+import { DEG2RAD } from "../core/math";
 import { Quaternion, Vector3 } from "./yuka";
+export { yawFromDirection } from "../core/math";
 
 /** A read-only 3-component vector, in whatever shape the caller already has one. */
 export type Vec3Like = Readonly<[number, number, number]> | Readonly<Float32Array> | vec3;
@@ -71,17 +72,6 @@ export function yawToYukaRotation(out: Quaternion, yawDegrees: number): Quaterni
     out.z = 0;
     out.w = Math.cos(half);
     return out;
-}
-
-/**
- * The world yaw of a planar direction, in DEGREES -- the inverse of Cleo's
- * `forward = (sin θ, 0, cos θ)`, and therefore `atan2(x, z)`, not the `atan2(z, x)` reflex.
- *
- * Agrees exactly with `Node.planarAngle` and with `intentFromDesired`'s `aimYaw`, so a value from here
- * can go straight into `setRotation([0, a, 0])`.
- */
-export function yawFromDirection(x: number, z: number): number {
-    return Math.atan2(x, z) * RAD2DEG;
 }
 
 // ---------------------------------------------------------------------------------------------------

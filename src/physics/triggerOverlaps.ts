@@ -1,6 +1,7 @@
 import { touch, type QueryShape } from "./overlap";
 import { Logger } from "../core/logger";
 import type { ColliderGeometry, ColliderPart } from "./pal/types";
+import { clamp01 } from "../core/math";
 
 // Trigger volumes overlapping OTHER trigger volumes — a weapon's hitbox entering a character's hurtbox.
 //
@@ -204,7 +205,6 @@ function lerpPose(a: Float64Array, b: Float64Array, t: number, out: Float64Array
 // Segment-segment closest points (Ericson 5.1.9), scalar and allocation-free. Writes c1 into SEG[0..2] and
 // c2 into SEG[3..5] and returns the squared distance.
 const SEG = new Float64Array(6);
-const clamp01 = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t);
 function segSeg(p1: Float64Array, q1: Float64Array, p2: Float64Array, q2: Float64Array): number {
     const d1x = q1[0] - p1[0], d1y = q1[1] - p1[1], d1z = q1[2] - p1[2];
     const d2x = q2[0] - p2[0], d2y = q2[1] - p2[1], d2z = q2[2] - p2[2];

@@ -1,0 +1,1633 @@
+{
+  "version": 1,
+  "name": "Valley Tour",
+  "duration": 410,
+  "fps": 30,
+  "clock": "game",
+  "loop": false,
+  "slots": [
+    {
+      "id": "camera",
+      "name": "Camera",
+      "nodeType": "camera",
+      "path": "Cinematic/Cinematic Camera"
+    },
+    {
+      "id": "clock",
+      "name": "Time of Day",
+      "path": "Time of Day"
+    },
+    {
+      "id": "barTop",
+      "name": "Letterbox top",
+      "nodeType": "uiPanel"
+    },
+    {
+      "id": "barBottom",
+      "name": "Letterbox bottom",
+      "nodeType": "uiPanel"
+    },
+    {
+      "id": "fade",
+      "name": "Fade",
+      "nodeType": "uiPanel"
+    },
+    {
+      "id": "title",
+      "name": "Title",
+      "nodeType": "uiText"
+    },
+    {
+      "id": "caption",
+      "name": "Caption",
+      "nodeType": "uiText"
+    }
+  ],
+  "tracks": [
+    {
+      "id": "camera",
+      "name": "Camera",
+      "type": "path",
+      "slot": "camera",
+      "sections": [
+        {
+          "id": "shot:valley",
+          "label": "The Valley",
+          "start": 0,
+          "end": 75,
+          "points": [
+            [
+              -6.5,
+              8.894,
+              89
+            ],
+            [
+              -7.5,
+              10.061,
+              85
+            ],
+            [
+              -10,
+              12.618,
+              78
+            ],
+            [
+              -16,
+              12.095,
+              66
+            ],
+            [
+              -24,
+              13.379,
+              55
+            ],
+            [
+              -40,
+              15.839,
+              58
+            ],
+            [
+              -58,
+              15.307,
+              54
+            ],
+            [
+              -73,
+              13.985,
+              40
+            ],
+            [
+              -66,
+              11.655,
+              20
+            ],
+            [
+              -52,
+              5.436,
+              4
+            ],
+            [
+              -50,
+              5.187,
+              -12
+            ],
+            [
+              -56,
+              24.24,
+              -30
+            ],
+            [
+              -66,
+              44.498,
+              -52
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 56.25,
+                "v": 0.75,
+                "interp": "linear"
+              },
+              {
+                "t": 75,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                -6.5,
+                6.989,
+                79
+              ],
+              [
+                -8,
+                6.658,
+                60
+              ],
+              [
+                -20,
+                6.279,
+                52
+              ],
+              [
+                -30,
+                5.432,
+                44
+              ],
+              [
+                -38,
+                4.307,
+                34
+              ],
+              [
+                -38,
+                4.307,
+                34
+              ],
+              [
+                -52,
+                5.307,
+                37
+              ],
+              [
+                -78,
+                5.11,
+                53
+              ],
+              [
+                -50,
+                4.673,
+                0
+              ],
+              [
+                -48,
+                3.595,
+                -14
+              ],
+              [
+                -58,
+                5.292,
+                -28
+              ],
+              [
+                -70,
+                14.669,
+                -70
+              ],
+              [
+                -85,
+                51.098,
+                -100
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 6.698,
+                  "v": 0.066
+                },
+                {
+                  "t": 11.523,
+                  "v": 0.116
+                },
+                {
+                  "t": 17.215,
+                  "v": 0.16
+                },
+                {
+                  "t": 21.961,
+                  "v": 0.205
+                },
+                {
+                  "t": 26.929,
+                  "v": 0.205
+                },
+                {
+                  "t": 32.036,
+                  "v": 0.255
+                },
+                {
+                  "t": 37.588,
+                  "v": 0.36
+                },
+                {
+                  "t": 43.315,
+                  "v": 0.567
+                },
+                {
+                  "t": 49.5,
+                  "v": 0.616
+                },
+                {
+                  "t": 54.609,
+                  "v": 0.676
+                },
+                {
+                  "t": 64.012,
+                  "v": 0.83
+                },
+                {
+                  "t": 75,
+                  "v": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:approach",
+          "label": "The Long House",
+          "start": 75,
+          "end": 85,
+          "points": [
+            [
+              -34,
+              8.524,
+              30
+            ],
+            [
+              -27,
+              6.786,
+              35
+            ],
+            [
+              -22,
+              5.701,
+              40
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 10,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                -9,
+                6.686,
+                39
+              ],
+              [
+                -9,
+                6.686,
+                39
+              ],
+              [
+                -9,
+                6.686,
+                39
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 5.341,
+                  "v": 0
+                },
+                {
+                  "t": 10,
+                  "v": 0
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:interior",
+          "label": "Long House interior",
+          "start": 85,
+          "end": 115,
+          "points": [
+            [
+              -2.552,
+              4.2,
+              43.671
+            ],
+            [
+              -5.72,
+              4.2,
+              40.064
+            ],
+            [
+              -9.171,
+              4.2,
+              36.444
+            ],
+            [
+              -12.358,
+              4.2,
+              33.261
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 30,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                -9.466,
+                3.6,
+                36.715
+              ],
+              [
+                -12.61,
+                3.7,
+                34.17
+              ],
+              [
+                -15.079,
+                3.8,
+                32.363
+              ],
+              [
+                -16.651,
+                3.8,
+                31.091
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 11.655,
+                  "v": 0.443
+                },
+                {
+                  "t": 18.78,
+                  "v": 0.779
+                },
+                {
+                  "t": 30,
+                  "v": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:night",
+          "label": "Night falls",
+          "start": 115,
+          "end": 125,
+          "points": [
+            [
+              -20,
+              4.944,
+              46
+            ],
+            [
+              -26,
+              7.445,
+              52
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 10,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                -38,
+                3.307,
+                34
+              ],
+              [
+                -38,
+                3.307,
+                34
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 10,
+                  "v": 0
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:night-crane",
+          "label": "Night over the hamlet",
+          "start": 125,
+          "end": 145,
+          "points": [
+            [
+              -28,
+              23.947,
+              64
+            ],
+            [
+              -36,
+              47.049,
+              58
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 20,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                -38,
+                4.307,
+                34
+              ],
+              [
+                -38,
+                4.307,
+                34
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 20,
+                  "v": 0
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:cloudy",
+          "label": "Clouds gather",
+          "start": 145,
+          "end": 185,
+          "points": [
+            [
+              24,
+              42.326,
+              74
+            ],
+            [
+              12,
+              34.38,
+              64
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 40,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                -30,
+                4.786,
+                36
+              ],
+              [
+                -30,
+                4.786,
+                36
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 40,
+                  "v": 0
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:drizzle",
+          "label": "First rain",
+          "start": 185,
+          "end": 215,
+          "points": [
+            [
+              -24,
+              2.339,
+              14
+            ],
+            [
+              -18,
+              1.839,
+              2
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 30,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                -14,
+                1.105,
+                -6
+              ],
+              [
+                -8,
+                1.286,
+                -22
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 30,
+                  "v": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:storm",
+          "label": "Storm at the windmill",
+          "start": 215,
+          "end": 265,
+          "points": [
+            [
+              5,
+              9.355,
+              -8
+            ],
+            [
+              30,
+              14.491,
+              -26
+            ],
+            [
+              44,
+              15.309,
+              -28
+            ],
+            [
+              66,
+              21.772,
+              -28
+            ],
+            [
+              78,
+              21.632,
+              -48
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 50,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                30,
+                6.491,
+                -26
+              ],
+              [
+                59,
+                13.001,
+                -45
+              ],
+              [
+                59,
+                13.001,
+                -45
+              ],
+              [
+                59,
+                13.001,
+                -45
+              ],
+              [
+                59,
+                13.001,
+                -45
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 19.529,
+                  "v": 1
+                },
+                {
+                  "t": 24.767,
+                  "v": 1
+                },
+                {
+                  "t": 33.475,
+                  "v": 1
+                },
+                {
+                  "t": 50,
+                  "v": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:snow",
+          "label": "Rain turns to snow",
+          "start": 265,
+          "end": 305,
+          "points": [
+            [
+              55,
+              37.768,
+              -75
+            ],
+            [
+              32,
+              30.544,
+              -88
+            ],
+            [
+              8,
+              26.229,
+              -95
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 40,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                10,
+                4.007,
+                -70
+              ],
+              [
+                -15,
+                4.053,
+                -60
+              ],
+              [
+                -35,
+                5.458,
+                -45
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 20.507,
+                  "v": 0.518
+                },
+                {
+                  "t": 40,
+                  "v": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:melt",
+          "label": "Snow melts",
+          "start": 305,
+          "end": 335,
+          "points": [
+            [
+              -3,
+              7.59,
+              -128
+            ],
+            [
+              4,
+              15.847,
+              -118
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 30,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                -10,
+                10.447,
+                0
+              ],
+              [
+                -10,
+                10.447,
+                0
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 30,
+                  "v": 0
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:clearing",
+          "label": "The sky clears",
+          "start": 335,
+          "end": 365,
+          "points": [
+            [
+              30,
+              55.506,
+              -70
+            ],
+            [
+              40,
+              50.167,
+              -30
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 30,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                -10,
+                2.522,
+                20
+              ],
+              [
+                -10,
+                2.522,
+                20
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 30,
+                  "v": 0
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:pond",
+          "label": "The pond",
+          "start": 365,
+          "end": 390,
+          "points": [
+            [
+              40,
+              1.729,
+              34
+            ],
+            [
+              43,
+              1.37,
+              29
+            ],
+            [
+              46,
+              1.37,
+              25
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 25,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                59,
+                13.001,
+                -45
+              ],
+              [
+                59,
+                13.001,
+                -45
+              ],
+              [
+                59,
+                13.001,
+                -45
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 13.151,
+                  "v": 0
+                },
+                {
+                  "t": 25,
+                  "v": 0
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:finale",
+          "label": "The whole valley",
+          "start": 390,
+          "end": 410,
+          "points": [
+            [
+              47,
+              1.67,
+              23
+            ],
+            [
+              58,
+              34.065,
+              52
+            ],
+            [
+              64,
+              92.368,
+              90
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 15,
+                "v": 0.75,
+                "interp": "linear"
+              },
+              {
+                "t": 20,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                10,
+                5.524,
+                10
+              ],
+              [
+                0,
+                1.511,
+                0
+              ],
+              [
+                0,
+                1.511,
+                0
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 9.197,
+                  "v": 1
+                },
+                {
+                  "t": 20,
+                  "v": 1
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cut",
+      "name": "Camera cut",
+      "type": "cameraCut",
+      "sections": [
+        {
+          "id": "cut:all",
+          "start": 0,
+          "end": 410,
+          "slot": "camera"
+        }
+      ]
+    },
+    {
+      "id": "clock-running",
+      "type": "property",
+      "slot": "clock",
+      "path": "running",
+      "valueType": "bool",
+      "sections": [
+        {
+          "id": "clock-running:all",
+          "start": 0,
+          "end": 410,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": false
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "clock-hour",
+      "type": "property",
+      "slot": "clock",
+      "path": "hour",
+      "valueType": "number",
+      "sections": [
+        {
+          "id": "clock-hour:all",
+          "start": 0,
+          "end": 410,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 10,
+                "interp": "constant"
+              },
+              {
+                "t": 75,
+                "v": 15,
+                "interp": "linear"
+              },
+              {
+                "t": 115,
+                "v": 20.5,
+                "interp": "linear"
+              },
+              {
+                "t": 125,
+                "v": 23,
+                "interp": "linear"
+              },
+              {
+                "t": 139.9,
+                "v": 23.9,
+                "interp": "constant"
+              },
+              {
+                "t": 140,
+                "v": 6.5,
+                "interp": "linear"
+              },
+              {
+                "t": 145,
+                "v": 7,
+                "interp": "linear"
+              },
+              {
+                "t": 185,
+                "v": 9,
+                "interp": "linear"
+              },
+              {
+                "t": 365,
+                "v": 14,
+                "interp": "linear"
+              },
+              {
+                "t": 410,
+                "v": 16.5,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "time-scale",
+      "name": "Time scale",
+      "type": "property",
+      "target": "game",
+      "path": "timeScale",
+      "valueType": "number",
+      "sections": [
+        {
+          "id": "time-scale:weather",
+          "start": 125,
+          "end": 365,
+          "whenFinished": "restore",
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 3,
+                "v": 2,
+                "interp": "linear"
+              },
+              {
+                "t": 237,
+                "v": 2,
+                "interp": "linear"
+              },
+              {
+                "t": 240,
+                "v": 1,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "bar-top",
+      "type": "property",
+      "slot": "barTop",
+      "path": "opacity",
+      "valueType": "number",
+      "sections": [
+        {
+          "id": "bar-top:all",
+          "start": 0,
+          "end": 410,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 1.5,
+                "v": 1,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "bar-bottom",
+      "type": "property",
+      "slot": "barBottom",
+      "path": "opacity",
+      "valueType": "number",
+      "sections": [
+        {
+          "id": "bar-bottom:all",
+          "start": 0,
+          "end": 410,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 1.5,
+                "v": 1,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "fade",
+      "type": "property",
+      "slot": "fade",
+      "path": "opacity",
+      "valueType": "number",
+      "sections": [
+        {
+          "id": "fade:all",
+          "start": 0,
+          "end": 410,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 1.5,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 136,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 139,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 141,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 144,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 404,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 410,
+                "v": 1,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "title-text",
+      "type": "property",
+      "slot": "title",
+      "path": "text",
+      "valueType": "string",
+      "sections": [
+        {
+          "id": "title-text:all",
+          "start": 0,
+          "end": 410,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": ""
+              },
+              {
+                "t": 2,
+                "v": "The Valley"
+              },
+              {
+                "t": 392,
+                "v": "Cleo Engine"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "title-opacity",
+      "type": "property",
+      "slot": "title",
+      "path": "opacity",
+      "valueType": "number",
+      "sections": [
+        {
+          "id": "title-opacity:all",
+          "start": 0,
+          "end": 410,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 2,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 3,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 7,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 8,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 392,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 393,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 403,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 404,
+                "v": 0,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "caption-text",
+      "type": "property",
+      "slot": "caption",
+      "path": "text",
+      "valueType": "string",
+      "sections": [
+        {
+          "id": "caption-text:all",
+          "start": 0,
+          "end": 410,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": ""
+              },
+              {
+                "t": 9,
+                "v": "I  ·  The Valley"
+              },
+              {
+                "t": 77,
+                "v": "II  ·  Light"
+              },
+              {
+                "t": 87,
+                "v": "Dynamic global illumination: the sun goes down, the bounce light follows"
+              },
+              {
+                "t": 127,
+                "v": "III  ·  Weather  ·  time ×2"
+              },
+              {
+                "t": 367,
+                "v": "IV  ·  Water  ·  screen-space reflections"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "caption-opacity",
+      "type": "property",
+      "slot": "caption",
+      "path": "opacity",
+      "valueType": "number",
+      "sections": [
+        {
+          "id": "caption-opacity:all",
+          "start": 0,
+          "end": 410,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 9,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 10,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 14,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 15,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 77,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 78,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 82,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 83,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 87,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 88,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 96,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 97,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 127,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 128,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 134,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 135,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 367,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 368,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 374,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 375,
+                "v": 0,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "markers": [
+    {
+      "t": 0,
+      "name": "I · The Valley"
+    },
+    {
+      "t": 75,
+      "name": "II · Light"
+    },
+    {
+      "t": 125,
+      "name": "III · Weather"
+    },
+    {
+      "t": 365,
+      "name": "IV · Water"
+    }
+  ]
+}

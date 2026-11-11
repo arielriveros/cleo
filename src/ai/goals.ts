@@ -34,7 +34,7 @@
  *     unwanted" and why an idle fallback is worth authoring rather than relying on nothing winning.
  */
 
-import { clamp } from "../core/math";
+import { clamp, finiteOr } from "../core/math";
 import { Goal, CompositeGoal, GoalEvaluator, Think } from "./yuka";
 import type { AiGoal, BehaviorParameterSource } from "../core/control/behavior";
 import type { ConditionGroup } from "../core/conditions";
@@ -119,10 +119,6 @@ export interface GoalContext {
 // Tolerant reader
 // ---------------------------------------------------------------------------------------------------
 
-function num(v: unknown, fallback: number): number {
-    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-}
-
 function str(v: unknown): string {
     return typeof v === 'string' ? v.trim() : '';
 }
@@ -136,7 +132,7 @@ export function parseGoalDefinition(raw: unknown): GoalDefinition | null {
     const out: GoalDefinition = { name, goal: str(g.goal) as AiGoal };
     const targetKey = str(g.targetKey);
     if (targetKey) out.targetKey = targetKey;
-    const speedScale = num(g.speedScale, 1);
+    const speedScale = finiteOr(g.speedScale, 1);
     if (speedScale !== 1) out.speedScale = clamp(speedScale, 0, 1);
 
     const subgoals: string[] = [];
@@ -169,15 +165,15 @@ export function parseDesirability(raw: unknown): DesirabilityDefinition | null {
     const source = (e.source && typeof e.source === 'object')
         ? e.source as BehaviorParameterSource
         : { kind: 'const', value: 1 } as BehaviorParameterSource;
-    const from = num(e.from, 0);
+    const from = finiteOr(e.from, 0);
     return {
         goalName,
         source,
         from,
         // Never equal to `from`: a zero-width range divides by zero, and the honest reading of
         // "0 maps to 0 and 0 maps to 1" is a step, which `to = from + epsilon` already gives.
-        to: num(e.to, from + 1) === from ? from + 1e-6 : num(e.to, from + 1),
-        bias: Math.max(0, num(e.bias, 1)),
+        to: finiteOr(e.to, from + 1) === from ? from + 1e-6 : finiteOr(e.to, from + 1),
+        bias: Math.max(0, finiteOr(e.bias, 1)),
     };
 }
 
@@ -228,7 +224,7 @@ export function parseGoalGraph(raw: unknown): GoalGraph {
     return {
         goals,
         evaluators,
-        arbitrationInterval: Math.max(0, num(g.arbitrationInterval, EMPTY_GOAL_GRAPH.arbitrationInterval)),
+        arbitrationInterval: Math.max(0, finiteOr(g.arbitrationInterval, EMPTY_GOAL_GRAPH.arbitrationInterval)),
     };
 }
 

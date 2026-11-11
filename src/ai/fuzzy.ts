@@ -33,7 +33,7 @@
  * a value outside every set is outside the variable.
  */
 
-import { clamp } from "../core/math";
+import { clamp, finiteOr } from "../core/math";
 import {
     FuzzyAND, FuzzyFAIRLY, FuzzyModule, FuzzyOR, FuzzyRule, FuzzyVariable, FuzzyVERY,
     LeftSCurveFuzzySet, LeftShoulderFuzzySet, NormalDistFuzzySet, RightSCurveFuzzySet,
@@ -113,10 +113,6 @@ export const EMPTY_FUZZY_MODEL: FuzzyModel = { variables: [], rules: [], defuzzi
 // Tolerant reader
 // ---------------------------------------------------------------------------------------------------
 
-function num(v: unknown, fallback: number): number {
-    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-}
-
 function str(v: unknown): string {
     return typeof v === 'string' ? v.trim() : '';
 }
@@ -127,8 +123,8 @@ export function parseFuzzySet(raw: unknown): FuzzySetDefinition | null {
     const name = str(s.name);
     if (!name) return null;
 
-    const left = num(s.left, 0);
-    const right = num(s.right, left + 1);
+    const left = finiteOr(s.left, 0);
+    const right = finiteOr(s.right, left + 1);
     return {
         name,
         shape: (FUZZY_SET_SHAPES as readonly string[]).includes(s.shape as string)
@@ -136,7 +132,7 @@ export function parseFuzzySet(raw: unknown): FuzzySetDefinition | null {
         left,
         // Clamped INTO the span: a midpoint outside its own set makes every membership zero, which
         // reads as a rule that never fires and is invisible from the outside.
-        mid: clamp(num(s.mid, (left + right) / 2), Math.min(left, right), Math.max(left, right)),
+        mid: clamp(finiteOr(s.mid, (left + right) / 2), Math.min(left, right), Math.max(left, right)),
         right,
         ...(typeof s.deviation === 'number' && isFinite(s.deviation) && s.deviation > 0
             ? { deviation: s.deviation } : {}),

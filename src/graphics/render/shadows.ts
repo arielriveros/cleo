@@ -20,7 +20,7 @@ import { device } from '../rhi/deviceHandle';
 import type { RenderPipeline } from '../rhi/resources';
 import { ADDITIVE_BLEND } from '../rhi/types';
 import type { DepthStencilState, CullMode } from '../rhi/types';
-import { TerrainFloorGrid, ShadowLayerCache, unitDirection, shadowReach, sliceCornerFactor, cascadeSphereAroundEye, staggeredCascadeDue, EYE_FIT_MARGIN, receiverInnerRadius, isFreeShadowSlot } from '../shadowCasters';
+import { TerrainFloorGrid, ShadowLayerCache, shadowReach, sliceCornerFactor, cascadeSphereAroundEye, staggeredCascadeDue, EYE_FIT_MARGIN, receiverInnerRadius, isFreeShadowSlot } from '../shadowCasters';
 import { AREA_SHADOW_HALF_FOV, MAX_CASCADES, CascadeSphere, ShadowCasterBounds, SpotShadowSlots, MAX_POINT_SHADOWS, PointShadowCache, CasterMotion, lightViewMatrix, mixNumber, HASH_SEED, pushCasterBounds, mixTransform, spotShadowFar, pointShadowFov, POINT_SHADOW_FACES, mixString, computeCascadeSplits, staleCascadeCovers, STAGGER_MARGIN, quantizeRadius, cascadeDepthScale, cascadeSphereFromPerspective, cascadeSphereFromCorners, buildCascadeMatrix } from '../shadowMath';
 import { keyLight } from '../skyNight';
 import { TextureManager } from '../systems/textureManager';
@@ -38,6 +38,7 @@ import { ShaderManager } from '../systems/shaderManager';
 import { DEPTH_WRITE } from './pipelineCache';
 import type { RenderSubsystems } from './subsystems';
 import { shelterMatrix, footprintKey, type ShelterFootprint } from './weatherPack';
+import { unitDirection } from '../../core/math';
 
 /**
  * One punctual-light shadow atlas, spot or point, as the shared layer routine sees it. The FBOs are read

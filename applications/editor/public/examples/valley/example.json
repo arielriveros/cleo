@@ -1,5 +1,5 @@
 {
   "name": "Valley",
-  "description": "A 2 km mountain valley to fly through, with a day and night cycle: landscape layers for ground, rock, snow, forest floor, roads and trails; meadow grass, spruce forest, oaks about the hamlet and bushes made with the Foliage Creator; a torch-lit hamlet with enterable houses, a windmill, a campfire, a pond with floating crates, mist and god rays, all lit by baked GI volumes and light probes. Play flies a free camera.",
+  "description": "A 2 km mountain valley to fly through, with a day and night cycle: landscape layers for ground, rock, snow, forest floor, roads and trails; meadow grass, spruce forest, oaks about the hamlet and bushes made with the Foliage Creator; a torch-lit hamlet with enterable houses, a windmill, a campfire, a pond with floating crates, mist and god rays, all lit by baked GI volumes and light probes. Play opens a menu: a cinematic tour of the valley (made with the sequencer) or a free camera to fly.",
   "order": 0
 }
