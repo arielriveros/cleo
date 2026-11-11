@@ -46,6 +46,52 @@ const r3 = (v) => Math.round(v * 1000) / 1000
 const r3v = (a) => a.map(r3)
 
 // ---------------------------------------------------------------------------------------------------
+// The interior GI volumes
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Metres each interior GI box reaches past its room's walls, floor and ceiling. The volume's light fades in
+ * over its blend distance inside its faces: a box drawn to the walls gave the floor and the walls none of it.
+ */
+const GI_WALL_MARGIN = 0.3
+/**
+ * What a lamp-lit room's GI volume needs. 256 rays: at 64 a lamp's fixture and the hot spot over it are
+ * smaller than a ray's patch, and neighbouring probes see them differently (cells of light along the grid).
+ * Inset 0.5: no probe on a floor, a wall or the deck, where it sees through to the other side.
+ */
+const GI_INTERIOR = { rays: 256, probeInset: 0.5, blendDistance: GI_WALL_MARGIN }
+
+/** The interior volumes: name, the room's centre and size (world metres), probes along each axis. */
+const giRooms = () => [
+  ['GI Hall', W(0, 2.65, 1.5), [SCALE * 15.2, wy(5.3), SCALE * 33.2], [10, 4, 22]],
+  ['GI Wing', W(-14.6, 2.65, 11.05), [SCALE * 14.2, wy(5.3), SCALE * 13.9], [10, 4, 10]],
+  ['GI Office', W(3.1, 4.9, 13.6), [SCALE * 8.7, wy(2.8), SCALE * 8.5], [6, 3, 6]],
+]
+
+/** An interior volume's box and settings: the room grown by the margin, the interior settings. */
+const giInteriorBox = (size) => r3v(size.map(s => s + 2 * GI_WALL_MARGIN))
+
+/**
+ * Bring a scene's interior GI volumes to the current settings (an exported project carries the older ones):
+ * idempotent, by name. Returns how many changed; a change makes their bakes stale, captured again by
+ * `node tools/valley/bakeGI.cjs --example firing-line --scenes "Firing Line"`.
+ */
+function tuneGiVolumes(root) {
+  let changed = 0
+  for (const [name, , size] of giRooms()) {
+    const node = findNode(root, n => n.type === 'giVolume' && n.name === name)
+    if (!node?.giVolume) continue
+    const g = node.giVolume
+    const want = { ...GI_INTERIOR, size: giInteriorBox(size) }
+    if (JSON.stringify(want.size) === JSON.stringify(g.size) && Object.entries(GI_INTERIOR).every(([k, v]) => g[k] === v)) continue
+    Object.assign(g, want)
+    changed++
+  }
+  if (changed) console.log(`warehouse: ${changed} interior GI volumes brought to the current settings`)
+  return changed
+}
+
+// ---------------------------------------------------------------------------------------------------
 // Small JSON helpers
 // ---------------------------------------------------------------------------------------------------
 
@@ -373,15 +419,13 @@ function addScene(bundle, scene, imports, lib) {
 
   // ----- volumes: GI, probes and exposure, one set per room
   const vols = []
-  const gi = (name, c, size, probes, rays = 128) => {
-    const node = b.empty(name, 'giVolume', c, { giVolume: { size: r3v(size), probeCounts: probes, rays, maxRayDistance: 40, captureResolution: 32, includeGrass: false, blendDistance: 1, intensity: 1, normalBias: 0.1, viewBias: 0.4, multiBounce: true, additive: false, enabled: true } })
+  const gi = (name, c, size, probes, rays = 64, interior = false) => {
+    const node = b.empty(name, 'giVolume', c, { giVolume: { size: interior ? giInteriorBox(size) : r3v(size), probeCounts: probes, rays, maxRayDistance: 40, captureResolution: 32, includeGrass: false, blendDistance: 1, intensity: 1, normalBias: 0.1, viewBias: 0.4, multiBounce: true, additive: false, enabled: true, ...(interior ? GI_INTERIOR : {}) } })
     node.giVolume.bakeId = stableId('fps:gi:' + node.id)
     vols.push(node)
   }
   const hallC = W(0, 2.65, 1.5), hallS = [SCALE * 15.2, wy(5.3), SCALE * 33.2]
-  gi('GI Hall', hallC, hallS, [10, 4, 22])
-  gi('GI Wing', W(-14.6, 2.65, 11.05), [SCALE * 14.2, wy(5.3), SCALE * 13.9], [10, 4, 10])
-  gi('GI Office', W(3.1, 4.9, 13.6), [SCALE * 8.7, wy(2.8), SCALE * 8.5], [6, 3, 6])
+  for (const [name, c, size, probes] of giRooms()) gi(name, c, size, probes, GI_INTERIOR.rays, true)
   gi('GI Courtyard', [6.2, 4.4, 66.5], [43, 8.8, 31.5], [8, 3, 6], 64)
   const probe = (name, c, size, res = 64) => vols.push(b.empty(name, 'lightProbe', c, { resolution: res, mode: 'baked', updateFrequency: 1, intensity: 1, size: r3v(size), blendDistance: 1.5, affectsLighting: true, affectsReflections: true, boxProjection: true }))
   probe('Probe Hall South', W(0, 2.65, -6.5), [SCALE * 15, wy(5.3), SCALE * 17])
@@ -634,7 +678,7 @@ function recomputeHashes(bundle, scene) {
 export async function applyWarehouse(bundle) {
   const scene = Object.values(bundle.scenes)[0]
   const root = scene.scene
-  if (findNode(root, n => n.name === 'Warehouse' && n.type === 'node')) { fixMatch(bundle, scene); return }
+  if (findNode(root, n => n.name === 'Warehouse' && n.type === 'node')) { fixMatch(bundle, scene); tuneGiVolumes(root); return }
   const missing = MODELS.filter(m => !fs.existsSync(path.join(BUILD, m.file)))
   if (missing.length) { console.warn(`warehouse: ${missing.map(m => m.file).join(', ')} not in build/ - the annex is skipped`); fixMatch(bundle, scene); return }
 
