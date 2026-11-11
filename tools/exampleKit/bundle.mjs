@@ -191,7 +191,7 @@ export function node(name, type, extra = {}) {
  *
  * Written out in full rather than only where they differ, because `_parseUIBase` reads several fields
  * through a fallback to the BASE default rather than the subclass's — so an omitted key does not mean
- * "use the sensible value", it means "use the wrong one". `tests/valleySouls.test.ts` compares
+ * "use the sensible value", it means "use the wrong one". `tests/dungeonSouls.test.ts` compares
  * these key sets against what the classes actually serialize.
  */
 const UI_TYPE_DEFAULTS = {

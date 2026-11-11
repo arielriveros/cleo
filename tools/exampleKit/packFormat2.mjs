@@ -33,14 +33,24 @@ const PART_BYTES = 48 * 1024 * 1024
  * folder carries none; a format-2 one keeps its own when this is not given).
  */
 export async function packFormat2(dir, { giBakes, mutate } = {}) {
-  const { readBundle, bundleEntries, assetPartPath, BUNDLE_PATHS } = bundleModules()
-  const file = (p) => path.join(dir, ...p.split('/'))
-
+  const { readBundle } = bundleModules()
   const { bundle } = await readBundle(folderSource(dir))
-  bundle.manifest = { ...bundle.manifest, formatVersion: 2 }
   // The caller's last word on the inflated bundle (an idempotent pass over libraries and scenes), before it is packed.
   if (mutate) await mutate(bundle)
   if (giBakes) bundle.giBakes = giBakes.map(b => ({ id: b.id, bytes: toArrayBuffer(b.bytes) }))
+  return writeBundleFolder(dir, bundle)
+}
+
+/**
+ * Write an inflated bundle (`readBundle`'s shape) to `dir` as format 2, replacing the bundle files there and
+ * leaving anything else (example.json, thumbnail.png) alone; `dir` is created when missing. MUTATES `bundle`
+ * (its payloads become markers). Returns the size of the largest file written, in bytes.
+ */
+export async function writeBundleFolder(dir, bundle) {
+  const { bundleEntries, assetPartPath, BUNDLE_PATHS } = bundleModules()
+  const file = (p) => path.join(dir, ...p.split('/'))
+  fs.mkdirSync(dir, { recursive: true })
+  bundle.manifest = { ...bundle.manifest, formatVersion: 2 }
   typedGeometry(bundle)
   const entries = await bundleEntries(bundle)
 

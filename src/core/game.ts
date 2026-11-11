@@ -69,7 +69,7 @@ export const Game = {
    * Load another scene by name or id. Resets scripts, physics, input and UI for the new scene, and
    * resolves once it has started (and, with a loading screen, once its first frames run smoothly).
    *
-   *   await Game.loadScene('Dungeon', { loadingScreen: { title: 'The Skull Cave' } });
+   *   await Game.loadScene('Crypt', { loadingScreen: { title: 'The Crypt' } });
    *
    * The loading screen belongs to the host, not to either scene, so it stays up across the swap.
    */

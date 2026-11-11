@@ -14,8 +14,8 @@ import { UITextNode } from '../src/core/scene/nodes/ui/uiContent';
 import { UIButtonNode, UIProgressBarNode } from '../src/core/scene/nodes/ui/uiWidgets';
 import { LAYER } from '../examples/scripts/SoulsHitbox';
 
-// The Valley example is AUTHORED BY CODE (tools/valley/build.mjs, on the souls content of
-// tools/soulsDemo/build.mjs) and wired together by NAME:
+// The Dungeon example was AUTHORED BY CODE (tools/valley/build.mjs, on the souls content of
+// tools/soulsDemo/build.mjs; split out of the Valley by tools/valley/split.ts) and is wired together by NAME:
 // scripts find nodes with findNode('HUD'), moves name their clips, spawns name their templates, sounds
 // are played by node name. Every one of those joins fails silently — a missing clip is a warning and a
 // frozen pose, a missing sound is simply quiet. This suite reads the generated folder and checks each
@@ -34,16 +34,16 @@ const allNodes = (root: any): any[] => {
 const scriptSources = () => readdirSync(SCRIPTS).filter(f => f.startsWith('Souls') && f.endsWith('.ts'))
     .map(f => readFileSync(join(SCRIPTS, f), 'utf8'));
 
-const PROJECT = join(__dirname, '..', 'applications', 'editor', 'public', 'examples', 'valley');
+const PROJECT = join(__dirname, '..', 'applications', 'editor', 'public', 'examples', 'dungeon');
 const present = existsSync(join(PROJECT, 'manifest.json'));
 
 // Read once, up front, through the editor's own bundle reader: the example is checked in as format 2,
 // whose JSON holds markers into assets.bin rather than the payloads these tests look at. Every test
 // treats what it reads as read-only.
-const valley = present ? await readExample(PROJECT) : null;
-const read = (...parts: string[]) => valley!.read(...parts);
+const dungeon = present ? await readExample(PROJECT) : null;
+const read = (...parts: string[]) => dungeon!.read(...parts);
 
-describe.skipIf(!present)('the Valley example project', () => {
+describe.skipIf(!present)('the Dungeon example project', () => {
     const manifest = () => read('manifest.json');
     const scene = () => read('scenes', `${manifest().mainSceneId}.json`);
     const library = (name: string) => read('libraries', `${name}.json`);
@@ -104,9 +104,8 @@ describe.skipIf(!present)('the Valley example project', () => {
 
     it('has every node the scripts find by name', () => {
         const names = new Set(allNodes(scene().scene).map(n => n.name));
-        // No boss: the fog wall became the skull cave, which loads the dungeon scene.
         for (const name of ['GameManager', 'Player', 'HUD', 'Banner', 'BonfireMenu', 'ConfirmDialog', 'LockReticle', 'Sounds',
-            'Shortcut Gate', 'Bonfire', 'Skull Cave Entrance']) {
+            'Bonfire', 'Fog Gate', 'Boss Arena']) {
             expect(names.has(name), name).toBe(true);
         }
     });
@@ -220,14 +219,12 @@ describe.skipIf(!present)('the Valley example project', () => {
         expect(asset.variables.find((v: any) => v.name === 'spawnables')?.type).toBe('stringList');
         expect(asset.variables.find((v: any) => v.name === 'templateName')?.options).toBe('spawnables');
         const placed = allNodes(scene().scene).filter(n => scriptOf(n) === asset);
-        // The original seven, the patrolling hollows and the landmarks' guards.
-        expect(placed.length).toBeGreaterThanOrEqual(15);
-        // Every patrol walks a route the Nav Mesh actually has.
+        // Hollows through the three levels, the sorcerer, the elite knight and the Warden.
+        expect(placed.length).toBeGreaterThanOrEqual(10);
+        // Any patrol walks a route the Nav Mesh actually has.
         const nav = allNodes(scene().scene).find(n => n.type === 'navMesh');
         const routes = new Set((nav?.routes ?? []).map((r: any) => r.name));
-        const patrols = placed.filter(n => n.scriptVars.patrolRoute);
-        expect(patrols.length).toBeGreaterThan(4);
-        for (const n of patrols) expect(routes.has(n.scriptVars.patrolRoute), n.name).toBe(true);
+        for (const n of placed.filter(n => n.scriptVars.patrolRoute)) expect(routes.has(n.scriptVars.patrolRoute), n.name).toBe(true);
         for (const n of placed) {
             expect(n.variables.__templateId?.value, n.name).toBe(spawnTemplate.id);
             expect(list, n.name).toContain(n.scriptVars.templateName);
@@ -251,7 +248,7 @@ describe.skipIf(!present)('the Valley example project', () => {
 
     it('gives every decal a PBR library material whose textures ship with the project', () => {
         const decals = everyNode().filter(n => n.type === 'decal');
-        expect(decals.length).toBeGreaterThanOrEqual(3);    // drops, the bloodstain's pool, the puddles
+        expect(decals.length).toBeGreaterThanOrEqual(2);    // the drops and the bloodstain's pool
         const materials = library('materials');
         const shipped = new Set(read('textures', 'index.json').map((t: any) => t.id));
         const refs = new Set(manifest().sceneMetas[0].refs.textureIds);
@@ -821,14 +818,14 @@ describe.skipIf(!present)('the Valley example project', () => {
     it('places the player, torches and interactables as linked template copies', () => {
         const count = (name: string) => instances().filter(n => templateOf(n)?.name === name).length;
         expect(count('Player')).toBe(1);
-        // The cave mouth's pair, and the hamlet's lamps for the night, well apart: down the road and on the walls.
-        expect(count('Torch')).toBeGreaterThanOrEqual(4);
-        expect(count('Wall Torch')).toBeGreaterThanOrEqual(2);
-        expect(count('Message')).toBe(6);
-        expect(count('Pickup')).toBe(3);
-        for (const name of ['Bonfire', 'Lever', 'Gate']) expect(count(name), name).toBe(1);
-        expect(count('Fog Gate')).toBe(0);
-        expect(count('Skull Cave Entrance')).toBe(1);
+        expect(count('Torch')).toBe(4);
+        expect(count('Wall Torch')).toBeGreaterThan(12);
+        // Four on the way down, and the epilogue past the Warden.
+        expect(count('Message')).toBe(5);
+        expect(count('Pickup')).toBe(5);
+        for (const name of ['Bonfire', 'Fog Gate']) expect(count(name), name).toBe(1);
+        // No way out to another scene: the Dungeon is the whole game.
+        for (const name of ['Lever', 'Gate', 'Skull Cave Entrance']) expect(count(name), name).toBe(0);
         expect(count('Breakable Barrel')).toBeGreaterThan(8);
         for (const n of instances()) expect(templateOf(n), n.name).toBeDefined();
     });
@@ -853,14 +850,12 @@ describe.skipIf(!present)('the Valley example project', () => {
 
     it('keeps the names scripts look up as name overrides, so a template rebuild cannot lose them', () => {
         const named = (name: string) => instances().find(n => n.name === name);
-        for (const name of ['Shortcut Gate', 'Shortcut Lever']) {
+        for (const name of ['Spawn Hollow Warden', 'Boss Reward', 'Epilogue Message']) {
             const n = named(name);
             expect(n, name).toBeDefined();
             expect(JSON.parse(n.variables.__overrides.value)[''].name).toBe(name);
         }
         expect(named('Player')).toBeDefined();
-        const lever = named('Shortcut Lever');
-        expect(named(lever.scriptVars.doorName)).toBeDefined();
     });
 
     it('records the asset hashes the editor computes, so opening the scene rebuilds nothing', () => {
@@ -888,16 +883,19 @@ describe.skipIf(!present)('the Valley example project', () => {
         });
     }
 
-    // Baked by the generator (tools/navBakeHeadless.mjs), obstacles carved. Without a bake every
+    // Baked by the generator (tools/navBakeHeadless.mjs) from the walkable area its reachability check found. Without a bake every
     // `path` goal falls back to a straight line and enemies walk into walls and trees.
-    it('ships a baked navmesh every enemy spawn can be reached on from the player', () => {
+    // The dungeon's three levels are separate islands of the navmesh (its stairs are box ramps the bake does
+    // not join), so a spawn is reached from the player on the entry level only; below and above, the enemies
+    // hold their ground.
+    it('ships a baked navmesh every enemy spawn on the entry level can be reached on from the player', () => {
         const nav = allNodes(scene().scene).find((n: any) => n.type === 'navMesh');
         expect(nav?.navMesh, 'baked navmesh').toBeTruthy();
-        expect(nav.bake.carve).toBe(true);
         const mesh = buildNavMesh(parseNavMeshData(nav.navMesh), { merge: false })!;
         const player = allNodes(scene().scene).find((n: any) => n.type === 'character');
         const spawns = allNodes(scene().scene).filter((n: any) => n.name?.startsWith('Spawn '));
-        expect(spawns.length).toBeGreaterThan(4);
-        for (const spawn of spawns) expect(mesh.findPath(player.position, spawn.position).length, spawn.name).toBeGreaterThan(1);
+        const level = spawns.filter((n: any) => Math.abs(n.position[1] - player.position[1]) < 1);
+        expect(level.length).toBeGreaterThanOrEqual(4);
+        for (const spawn of level) expect(mesh.findPath(player.position, spawn.position).length, spawn.name).toBeGreaterThan(1);
     });
 });

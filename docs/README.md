@@ -21,8 +21,9 @@ publishing the result as a self-contained web page or desktop application.
 
 ## What it looks like
 
-Every picture here is the bundled **Valley** example and its **Dungeon** scene (Projects ▸ Examples),
-captured from the editor and from Play on WebGPU. [tools/docsMedia](../tools/docsMedia/README.md) retakes them.
+Every picture here is from the bundled **Valley** and **Dungeon** examples (Projects ▸ Examples),
+captured from the editor and from Play on WebGPU, back when the two were one project (the Valley now
+ships as scenery with a fly camera; the knight plays in the Dungeon). [tools/docsMedia](../tools/docsMedia/README.md) retakes them.
 
 | | |
 |---|---|

@@ -10,6 +10,7 @@ import { readExample } from '../tools/exampleKit/readExample.mjs';
 import { rendererSource } from './helpers/rendererSource';
 
 const VALLEY_EXAMPLE = await readExample(join(__dirname, '..', 'applications', 'editor', 'public', 'examples', 'valley'));
+const DUNGEON_EXAMPLE = await readExample(join(__dirname, '..', 'applications', 'editor', 'public', 'examples', 'dungeon'));
 
 /**
  * A published game builds only the programs `programsFor` lists. Two ways that goes wrong quietly:
@@ -55,22 +56,31 @@ describe('programsFor', () => {
                                   dofEnabled: false, autoExposureEnabled: false, lensFlareIntensity: 0,
                                   chromaticAberrationStrength: 0, filmGrainIntensity: 0, vignetteStrength: 0.35 }, use);
         const list = programsFor(use);
-        // Skinned PBR characters, static PBR geometry, one shadow filter, the deferred resolve.
-        // The puddles are decals; the bonfire's smoke a lit sprite.
-        for (const name of ['pbrSkinned~pcf', 'pbrGeometrySkinned~flat', 'pbrGeometry~flat', 'deferredLighting~pcf',
+        // Static PBR geometry, one shadow filter, the deferred resolve. The puddles are decals; the
+        // campfire's smoke a lit sprite.
+        for (const name of ['pbrGeometry~flat', 'deferredLighting~pcf',
                             'screen', 'present', 'skyAtmosphere', 'volumetricClouds', 'particleBillboard', 'ssil', 'vignette',
                             'decalSurface', 'spriteLit', 'ssr', 'localExposureLum', 'volumetricFogInject', 'volumetricFogApply'])
             expect(list, name).toContain(name);
         // Particles as stripped variants.
         expect(list.some(n => /^particleSim~s\d+$/.test(n))).toBe(true);
+        // No characters walk the valley any more: nothing skinned.
         for (const name of ['cel', 'cel~pcf', 'grid', 'outline', 'debugView', 'pbr~poisson',
-                            'dofCoc', 'taaResolve', 'motionBlur', 'exposureMeter', 'lensFlare'])
+                            'dofCoc', 'taaResolve', 'motionBlur', 'exposureMeter', 'lensFlare', 'pbrSkinned~pcf', 'pbrGeometrySkinned~flat'])
             expect(list, name).not.toContain(name);
-        // 60 with the impostor shadow program the Valley's pines cast through in the outer cascades, and
-        // the knight's cut-out skinned variants on top; the puddles' three decal programs and the smoke's;
-        // the High tier's screen-space reflections (three) and local exposure (two); the fog volumes' three;
-        // the GI Volumes' seven (capture reduce, visibility, radiance, integrate, resolve, ambient cube, rescale).
+        // 60 with the impostor shadow program the Valley's pines cast through in the outer cascades; the
+        // puddles' three decal programs and the smoke's; the High tier's screen-space reflections (three)
+        // and local exposure (two); the fog volumes' three; the GI Volumes' seven (capture reduce,
+        // visibility, radiance, integrate, resolve, ambient cube, rescale).
         expect(list.length).toBeLessThan(85);
+    });
+
+    it('lists the skinned programs for the Dungeon, whose knight and enemies are skinned', () => {
+        const DUNGEON = DUNGEON_EXAMPLE.read('scenes', `${DUNGEON_EXAMPLE.read('manifest.json').mainSceneId}.json`);
+        const use = createProgramUsage();
+        usageFromSceneJson(DUNGEON.scene, use, castsShadows(DUNGEON.scene));
+        const list = programsFor(use);
+        for (const name of ['pbrSkinned~pcf', 'pbrGeometrySkinned~flat', 'pbrGeometry~flat']) expect(list, name).toContain(name);
     });
 
     it('builds the parallax variant only for a material that marches', () => {

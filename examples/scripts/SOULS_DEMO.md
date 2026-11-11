@@ -1,16 +1,16 @@
-# Valley — the souls-like example game
+# Dungeon — the souls-like example game
 
-*Valley* is the engine's example game: a souls-like on a 2 km mountain valley. The mechanics are all real;
-the characters are not final art. Every character is the engine's mannequin in a tinted material, and the
-combat clips are Mixamo motions plus a few procedural stubs. The world is real content — a layered
-landscape, meadow grass and pine forest, a thatched hamlet, a pond, and a skull cave that loads a second
-scene. This document covers how the game works and how to replace each placeholder with final art from
-inside the editor, without touching a script.
+*Dungeon* is the engine's example game: a souls-like in a three-level torch-lit dungeon. The mechanics are
+all real; the characters are not final art. The enemies are the engine's mannequin and scanned characters
+in tinted materials, the player a scanned knight, and the combat clips are Mixamo motions plus a few
+procedural stubs. The level is real content — a medieval dungeon structure, chunked, with box colliders,
+torches and fire pits, cages, bookcases and racked weapons. This document covers how the game works and how
+to replace each placeholder with final art from inside the editor, without touching a script.
 
 The souls content (characters, weapons, enemies, bonfire, UI) is authored by `tools/soulsDemo/build.mjs`;
-the level around it by `tools/valley/build.mjs`. The two used to ship separately, the first as a walled
-blockout level called *Hollow Keep* — sections below that describe the keep's own pieces (its fog gate,
-the Warden's arena) now describe templates that ship in the project but are not placed in the valley.
+the level around it by `tools/valley/build.mjs` (`tools/valley/dungeon/`). The game used to be played on
+the outdoor valley too, with the dungeon under its skull cave; the valley now ships as its own example, as
+scenery. Before that the souls content shipped as a walled blockout level called *Hollow Keep*.
 
 - [1. Opening and playing](#1-opening-and-playing)
 - [2. Controls](#2-controls)
@@ -30,8 +30,8 @@ the Warden's arena) now describe templates that ship in the project but are not 
 
 ## 1. Opening and playing
 
-1. Open the project launcher and go to **Examples ▸ Valley**, then press **Download**. The example
-   (about 370 MB) is copied into a **new project**, so your other projects are untouched.
+1. Open the project launcher and go to **Examples ▸ Dungeon**, then press **Download**. The example
+   (about 200 MB) is copied into a **new project**, so your other projects are untouched.
 2. Wait for the scene to finish loading, then press **Play** (▶).
 3. Click the game view to capture the mouse.
 
@@ -46,7 +46,7 @@ weapon, prop and effect has a folder holding everything it is made of, in type s
 so what a variant adds stays apart from what it inherits:
 
 ```
-Scenes/            Valley.scene, Dungeon.scene, and their materials
+Scenes/            Dungeon.scene
 Core/Scripts/      shared modules: SoulsMath, SoulsHitbox, SoulsAudio, SoulsCharacter
 Game/              Game Manager, and UI/ (HUD, Boss Bar, Banner, Bonfire Menu, Pause Menu)
 Characters/
@@ -89,25 +89,26 @@ LightAttack…"*, the map is missing; re-import the example or add the actions s
 
 ## 3. What is in the level
 
-The player starts at the south end of the valley and follows the road north to the cliffs.
+The player starts in the entry hall, under the ladder to a shut hatch, and goes down through three levels to
+the throne arena.
 
 | Place | Contents |
 |---|---|
-| Start and bonfire | Player start, the bonfire, the welcome and rolling messages. |
-| Hamlet | Four FBX buildings (houses, granary, windmill with spinning sails), breakable barrels, a souls pickup, Hollows on the road. |
-| Watchtower | The Hollow Sorcerer and an Estus Shard. |
-| Pond | Wading water that slows you and stops rolls, floating debris, the Elite Knight, a souls pickup. |
-| Windmill hill | The shortcut: a gate across the side path, its lever on the hill side. |
-| Skull cave | Two torches and a message at a skull carved into the cliff notch. Interacting asks to go in and loads the **Dungeon** scene; its exit returns you to the valley. |
+| Entry hall | Player start, the bonfire, the welcome message, a hanging brazier, breakable barrels. |
+| Cell corridor and cell room | Barred cells, two Hollows, the Jailer's souls. |
+| East corridor and crypt | Candles for a warden of old, and a message about him. |
+| Great hall | Two Hollows, the fireplace, the Hollow Sorcerer on the wooden gallery, souls; the south rooms below and above it, an Estus Shard upstairs. |
+| Stair hall | The Elite Knight among the pillars, two fire pits, a warning message at the stair. |
+| Guard room and catacombs | Down the stair: Hollows, a fire pit, the ossuary's souls. |
+| Arena hall | The fog gate, the Hollow Warden in the round arena, its reward and the epilogue. |
 
 The **game loop**:
 - **Bonfire:** light it, then rest to heal, refill flasks and level up. Resting respawns every enemy
   except a defeated boss, and the bonfire becomes your respawn point.
 - **Death:** your souls drop as a bloodstain where you fell. Touch it to recover them. Die again first
   and they are gone for good.
-- **Boss (not placed):** the Hollow Warden and Fog Gate templates ship in the project. Placed, the fog
-  wakes the boss; below half health it roars and enters phase two, faster and with a leap slam and a bolt
-  fan. Dying mid-fight resets the boss and the fog.
+- **Boss:** walking through the fog gate wakes the Hollow Warden; below half health it roars and enters
+  phase two, faster and with a leap slam and a bolt fan. Dying mid-fight resets the boss and the fog.
 
 ## 4. How the scripts fit together
 
@@ -230,7 +231,7 @@ holds **linked copies** of it:
 | `Level/Player` | `Player` |
 | `Level/Torch` | the 19 torches under `Torches` |
 | `Level/Bonfire` | `Interactables/Bonfire` |
-| `Level/Lever`, `Level/Gate` | `Interactables/Shortcut Lever`, `Interactables/Shortcut Gate` |
+| `Level/Lever`, `Level/Gate` | none placed: the shortcut pair ships for a level of your own |
 | `Level/Fog Gate` | `Interactables/Fog Gate` |
 | `Interactables/Message` | the 7 `Message: …` nodes and `Epilogue Message` |
 | `Interactables/Pickup` | `Souls Pickup`, `Estus Shard`, `Hall Souls`, `Boss Reward` |
@@ -255,10 +256,10 @@ meshes, materials, colliders, which script is attached) comes from the template.
 - each message overrides its `title` and `text` (and its name);
 - each pickup overrides what it gives: `kind`, `amount` and `itemName` (and its name);
 - `Boss Reward` and `Epilogue Message` also override `hiddenUntilRevealed`;
-- `Shortcut Lever` and `Shortcut Gate` override only their names, which is how the lever finds its door
+- a placed `Lever` and `Gate` override only their names, which is how the lever finds its door
   (`doorName`) and how the scripts find both.
 
-Scripts look nodes up **by name** (`Player`, `Boss Reward`, `Epilogue Message`, `Shortcut Gate`, the
+Scripts look nodes up **by name** (`Player`, `Boss Reward`, `Epilogue Message`, a lever's door, the
 `Fire` inside a bonfire), so keep those names when you rename or replace things.
 
 ## 5. The asset manifest
@@ -313,8 +314,8 @@ weapon stays where it is, and its swings hit nothing until you add the socket.
 | ~60 boxes and cylinders with colliders | Scene: `Level/*` | Your level art. Keep, or rebuild, **colliders** where people walk: the bake and the characters use colliders, not meshes. |
 | Torch posts with a fire particle and a point light | Template **Torch** (19 copies under `Torches`) | Torch props. One edit to the template changes every torch. |
 | Ash disc, stones and a sword (`Bonfire/Model`) | Template **Bonfire**: `Bonfire/Model` | The bonfire. Keep `Fire`, `Fire Light` and `RespawnPoint`; the respawn point is where, and facing where, you stand up. |
-| Iron box (`Gate/Bars`) | Template **Gate** (copy: `Interactables/Shortcut Gate`) | Portcullis or door. The collider is on the template root (3.2 × 4 × 0.4), and it slides by `openOffset`. |
-| Stone block and bar (`Lever/Base`, `Handle/Stick`) | Template **Lever** (copy: `Interactables/Shortcut Lever`) | The lever. `Handle` swings about its X axis. |
+| Iron box (`Gate/Bars`) | Template **Gate** (not placed) | Portcullis or door. The collider is on the template root (3.2 × 4 × 0.4), and it slides by `openOffset`. |
+| Stone block and bar (`Lever/Base`, `Handle/Stick`) | Template **Lever** (not placed) | The lever. `Handle` swings about its X axis. |
 | Translucent sheet (`Fog Gate/FogWall`) plus `Fog` particles | Template **Fog Gate** | The fog wall. The collider is on the template root (6 × 4 × 0.5), and local +Z points into the arena. |
 | Orange glyph (`Message/Glyph`) | Template **Message** (7 copies + `Epilogue Message`) | Message sigil |
 | Glowing sphere (`Pickup/Item`) | Template **Pickup** (4 copies) | Item or corpse prop |
@@ -604,7 +605,7 @@ its decals about the slope's normal, so the spatter still runs along the blow), 
 between `minSize` and `maxSize` times the hit's size, and after `lifetime` seconds fades out over
 `fadeSeconds` and is removed. A decal with a **flipbook** plays it from that moment, `flipbookStart`
 seconds in (0: from its first frame; skip the frames where the liquid is still in the air when no spray
-covers them): the Valley's are the FX Creator's liquid decals, the blood landing and spreading into a
+covers them): the Dungeon's are the FX Creator's liquid decals, the blood landing and spreading into a
 pool. The splat scales with damage:
 `bloodReferenceDamage` (120) is a full-size splat, from 0.6× to 1.6×, and the spray the same. The spray
 is spawned turned along the blow, so its droplets fly on away from the attacker. `receiveHit(damage,
@@ -616,7 +617,7 @@ the decal alone), `bloodDropsTemplate`, `bloodDropsOffset` (0.9 m: how far along
 spatter's centre lies), `maxBloodDecals` (24; the oldest is removed first, so a long fight never piles up
 decals), `bloodReferenceDamage`.
 
-**The Valley's blood** is the FX Creator's liquid simulations (`tools/valley/creatorFx.mjs`), flipbooks
+**The Dungeon's blood** is the FX Creator's liquid simulations (`tools/valley/creatorFx.mjs`), flipbooks
 only, no particles. `Blood Spray` is the Blood Burst bake on a **lit** animated sprite: its Surface maps
 (the albedo atlas, a normal and an ORM map) are its tileset's, so the scene's light shades the wet blood
 -- dark in the dungeon, glossy under a torch -- and it plays once at the contact point (0.8 m across at
@@ -664,7 +665,7 @@ stay. A missing widget is simply skipped.
 
 ## 11. Step-by-step swap procedures
 
-> Open the imported **Valley** project first. Save (Ctrl+S) after each step.
+> Open the imported **Dungeon** project first. Save (Ctrl+S) after each step.
 
 ### 11.1 Import a character model
 
@@ -915,13 +916,13 @@ Retreat, and plays reactions. Editing a brain asset updates every enemy of that 
 
 ## 13. Regenerating the example, tests, limitations
 
-The example folder `applications/editor/public/examples/valley/` is **generated** (see `tools/valley/README.md` for
-the source art it needs):
+The example folder `applications/editor/public/examples/dungeon/` is **generated** with the Valley's (see
+`tools/valley/README.md` for the source art it needs, and for `split.ts`, which makes the two projects):
 
 ```
 node --max-old-space-size=12288 tools/valley/build.mjs   # rebuild (deterministic; re-runs are byte-identical)
-npm --prefix editor run examples:list                    # refresh the gallery index
-npx vitest run tests/soulsDemo tests/valley              # rules + generated-project checks
+npm --prefix applications/editor run examples:list       # refresh the gallery index
+npx vitest run tests/soulsDemo tests/dungeon             # rules + generated-project checks
 ```
 
 - `tools/soulsDemo/build.mjs` holds the templates, UI, materials and effects; `tools/valley/` the level.
@@ -931,7 +932,7 @@ npx vitest run tests/soulsDemo tests/valley              # rules + generated-pro
 - `inputMap.mjs` holds the bindings.
 - Your art swaps happen in **your imported project**, not here. Edit the generator only to change what
   the example ships with.
-- `tests/valleySouls.test.ts` checks every name-based join: clips and their events, templates,
+- `tests/dungeonSouls.test.ts` checks every name-based join: clips and their events, templates,
   sounds, widgets, input actions, sockets and child order. Run it after changing the generator.
 
 **Known limitations:**

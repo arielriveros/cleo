@@ -1,13 +1,13 @@
-// Bake the Valley's GI Volumes into the example: the editor on a private dev server, in Chrome with WebGPU,
-// the Valley imported, every volume of both its scenes (the Valley, then the Dungeon) captured afresh, its
-// capture exported, and the bakes written into the example's assets under each volume's bakeId.
+// Bake an example's GI Volumes into it: the editor on a private dev server, in Chrome with WebGPU, the
+// example imported, every volume of its scenes captured afresh, its capture exported, and the bakes written
+// into the example's assets under each volume's bakeId.
 //
-//   node tools/valley/build.mjs          # first: it writes the volumes, and carries the last bakes over
-//   node tools/valley/bakeGI.cjs         # then: fresh captures of every volume
+//   node tools/valley/bakeGI.cjs                     # the Valley: fresh captures of every volume
+//   node tools/valley/bakeGI.cjs --example dungeon   # the Dungeon
 //   node tools/valley/bakeGI.cjs --url http://127.0.0.1:8090/    # an editor dev server already running
 //   node tools/valley/bakeGI.cjs --example firing-line --scenes "Firing Line"   # another example (its volumes already name a bakeId)
 //   node tools/valley/bakeGI.cjs --only "Hamlet GI"              # one volume (by name); the rest keep theirs
-//   node tools/valley/bakeGI.cjs --scene Dungeon                 # one scene's volumes; the other's keep theirs
+//   node tools/valley/bakeGI.cjs --scene <name>                  # one scene's volumes; the others keep theirs
 //   node tools/valley/bakeGI.cjs --vite-config vite.other.config.ts  # the private dev server on another config
 //
 // With --url the dev server is someone else's and stays up: stop it before the bakes are written if it
@@ -44,8 +44,12 @@ const VOLUME_TIMEOUT_MS = 20 * 60 * 1000;
 const URL_ARG = arg('--url');
 const ONLY = arg('--only');
 const SCENE = arg('--scene');
-/** The example's scenes, in the order they are baked: the one it opens with, then the others by name. */
-const SCENES = arg('--scenes') ? arg('--scenes').split(',') : ['Valley', 'Dungeon'];
+/** The example's scenes, in the order they are baked: the one it opens with, then the others by name (its manifest's, by default). */
+const SCENES = arg('--scenes') ? arg('--scenes').split(',') : (() => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(OUT, 'manifest.json'), 'utf8'));
+    const metas = manifest.sceneMetas ?? [];
+    return [...metas.filter(m => m.id === manifest.mainSceneId), ...metas.filter(m => m.id !== manifest.mainSceneId)].map(m => m.name);
+})();
 const VITE_CONFIG = arg('--vite-config');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));

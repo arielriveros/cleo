@@ -215,7 +215,7 @@ export const PICKUPS = [
 ]
 
 export const MESSAGES = [
-  ['dungeon-welcome', 'The Dungeon', 'Below the skull, the old keep\'s dungeon.\nRest at the bonfire. The ladder behind you climbs back to the valley.', [1.2, 0, 3.4], 180],
+  ['dungeon-welcome', 'The Dungeon', 'Below the skull, the old keep\'s dungeon.\nRest at the bonfire.', [1.2, 0, 3.4], 180],
   ['crypt', 'A warden of old', 'Candles still burn for him.\nWhoever lights them has not been seen.', [12, 0, 0.6], 0],
   ['stair', 'Down the stair', 'The keeper waits below.\nIts halberd reaches far: roll inside the swing.', [35.2, 0, -13.4], 90],
   ['warden', 'The Hollow Warden', 'Beyond the fog waits the keeper of this place.\nWhen it bleeds, it rages.', [38.4, -6, -22.6], 180],

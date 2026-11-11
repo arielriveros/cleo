@@ -4,21 +4,31 @@
     {
       "slug": "valley",
       "name": "Valley",
-      "description": "A souls-like on a 2 km mountain valley with a day and night cycle: stamina combat, rolls, lock-on, bonfires and Estus, on landscape layers for ground, rock, snow, forest floor and trails, meadow grass, spruce forest, oaks about the hamlet and bushes made with the Foliage Creator, a torch-lit hamlet with breakable barrels, and a skull cave down into a three-level dungeon with a boss in its throne arena.",
+      "description": "A 2 km mountain valley to fly through, with a day and night cycle: landscape layers for ground, rock, snow, forest floor, roads and trails; meadow grass, spruce forest, oaks about the hamlet and bushes made with the Foliage Creator; a torch-lit hamlet with enterable houses, a windmill, a campfire, a pond with floating crates, mist and god rays, all lit by baked GI volumes and light probes. Play flies a free camera.",
       "order": 0,
-      "bytes": 322747990,
-      "sceneCount": 2,
-      "textureCount": 244,
+      "bytes": 125693492,
+      "sceneCount": 1,
+      "textureCount": 131,
+      "createdAt": 1790000000000
+    },
+    {
+      "slug": "dungeon",
+      "name": "Dungeon",
+      "description": "A souls-like in a three-level torch-lit dungeon: stamina combat, rolls, lock-on, a bonfire and Estus, Hollows, a sorcerer and an elite knight, breakable barrels, messages and pickups, and a boss behind a fog gate in its throne arena.",
+      "order": 1,
+      "bytes": 203532748,
+      "sceneCount": 1,
+      "textureCount": 131,
       "createdAt": 1790000000000
     },
     {
       "slug": "firing-line",
       "name": "Firing Line",
       "description": "A first-person shooter: walk, sprint, crouch, aim down sights, hip and aimed fire, reloads and three weapons against bots that search, take cover, retreat when hurt and call for reinforcements. One scene, one Game Manager with a game-type list (one against all, team deathmatch, free for all): put the manager and some fighters in any scene and it plays.",
-      "order": 1,
-      "bytes": 249192529,
+      "order": 2,
+      "bytes": 314988387,
       "sceneCount": 1,
-      "textureCount": 106,
+      "textureCount": 149,
       "createdAt": 1794173811120
     }
   ]

@@ -10,8 +10,8 @@ import { Node, kelvinToRgb } from 'cleo'
  *   - the sun's colour (warm and dim at the horizon, white at noon) and brightness;
  *   - the moon: below the horizon the renderer hands the key light to the moon, opposite the sun, at the
  *     sky's own `moonIlluminance` (lux). Nothing here sets it, so the editor's night is the game's;
- *   - the valley mist, thick at dawn and burning off by mid-morning, and the fog volumes (the pond's mist,
- *     the cave mouth's) with it: `fogNightScale` times as dense at night and at dawn;
+ *   - the valley mist, thick at dawn and burning off by mid-morning, and the fog volumes (the pond's mist)
+ *     with it: `fogNightScale` times as dense at night and at dawn;
  *   - the god rays, strongest with a low sun.
  *
  * What it does NOT touch is the camera or the lamps. Every light keeps its real value all day — the sun
@@ -21,9 +21,6 @@ import { Node, kelvinToRgb } from 'cleo'
  *
  * The ambient fill falls with the sun on its own (the Sky Light's night ambient). Light probes are
  * re-captured each time the sun has moved `probeDegrees`, so reflections keep up.
- *
- * Dying skips half a day: while YOU DIED is up the clock jumps `deathSkipHours`, and the player gets up in
- * the other half of the day. The hour survives a trip to the dungeon and back (through the scene doors).
  */
 export default class ValleyDayNightNode extends Node {
   /** The directional light that is the sun. */
@@ -32,10 +29,6 @@ export default class ValleyDayNightNode extends Node {
   public dayMinutes: number = 24
   /** The hour the valley opens at, 0-24. */
   public startHour: number = 9.5
-  /** Hours the clock jumps when the player dies. */
-  public deathSkipHours: number = 12
-  /** Seconds after death before the jump: once the banner is up. */
-  public skipDelay: number = 1.8
   /** Latitude in degrees: with `declination`, how high the noon sun stands (90 - latitude + declination). */
   public latitude: number = 45
   /** The sun's declination in degrees: above 0, days are longer than nights. */
@@ -60,8 +53,6 @@ export default class ValleyDayNightNode extends Node {
   private _sky: any = null
   private _skyLight: any = null
   private _skyLightIntensity: number = 1
-  private _player: any = null
-  private _wasDead: boolean = false
   private _fog: { density: number, falloff: number, opacity: number } = null
   private _godRays: number = 0
   private _fogVolumes: { node: any, density: number }[] = []
@@ -70,7 +61,6 @@ export default class ValleyDayNightNode extends Node {
 
   onStart() {
     this._sun = this.findNode(this.sunName)
-    this._player = this.findNode('Player')
     const scene: any = this.scene
     this._sky = scene?.skyAtmosphere ?? null
     this._skyLight = scene?.skyLight ?? null
@@ -81,19 +71,13 @@ export default class ValleyDayNightNode extends Node {
       this._fog = { density: this._sky.fogDensity, falloff: this._sky.fogHeightFalloff, opacity: this._sky.fogMaxOpacity }
       this._godRays = this._sky.godRayExposure
     }
-    // Back from the dungeon (a scene door brought the player here): the clock carries on where it was.
-    const g = globalThis as any
-    this.hour = g.__soulsArrival && typeof g.__valleyHour === 'number' ? g.__valleyHour : this.startHour
+    this.hour = this.startHour
     this._apply(true)
   }
 
   onUpdate(delta: number) {
     this.hour = (this.hour + delta * 24 / Math.max(0.1, this.dayMinutes * 60)) % 24
-    const dead = !!this._player?.isDead
-    if (dead && !this._wasDead) this.after(this.skipDelay, () => { this.hour = (this.hour + this.deathSkipHours) % 24; this._apply(true) })
-    this._wasDead = dead
     this._apply(false)
-    ;(globalThis as any).__valleyHour = this.hour
   }
 
   /** Where the sun is at `hour`: [east, up, south] as a unit vector (the engine's +X, +Y, +Z). */
