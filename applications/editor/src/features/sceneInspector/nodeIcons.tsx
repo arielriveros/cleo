@@ -81,6 +81,10 @@ export const PointLightIcon = () => (
 export const SpotlightIcon = () => (
   <S><path d="M9 3.5h6l5 17H4z" /><path d="M9 3.5h6" /><path d="M7.2 12h9.6" opacity="0.6" /></S>
 );
+/** Area light: a glowing panel, its light falling evenly from the whole face. */
+export const AreaLightIcon = () => (
+  <S><rect x="4" y="4" width="16" height="5.5" rx="1" /><path d="M7 12.5v4M12 12.5v7M17 12.5v4" opacity="0.8" /></S>
+);
 /** Light probe: concentric rings, matching the viewport billboard it rasterises to. */
 export const LightProbeIcon = () => (
   <S><circle cx="12" cy="12" r="3.2" /><circle cx="12" cy="12" r="8" strokeDasharray="2.6 3" /></S>

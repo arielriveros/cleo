@@ -31,14 +31,14 @@ export type { FollowSpace, AimMode } from "./core/scene/nodes/cameraRigNode";
 export { LandscapeNode } from "./core/scene/nodes/landscapeNode";
 export { TilemapNode } from "./core/scene/nodes/tilemapNode";
 export { LightNode } from "./core/scene/nodes/lightNode";
+export type { LightType, LightBakeSnapshot } from "./core/scene/nodes/lightNode";
 export { LightProbeNode } from "./core/scene/nodes/lightProbeNode";
-export type { LightBakeSnapshot } from "./core/scene/nodes/lightNode";
 export { probeBakeStaleness, lightBakeChanges, describeLightChanges } from "./core/scene/probeBakeState";
 export type { StaleProbe, StaleLight, LightBakeChange } from "./core/scene/probeBakeState";
-export { GIVolumeNode, GI_RAY_COUNTS, GI_CAPTURE_RESOLUTIONS, MIN_GI_PROBES_PER_AXIS, MAX_GI_PROBES_PER_AXIS } from "./core/scene/nodes/giVolumeNode";
+export { GIVolumeNode, GI_RAY_COUNTS, GI_CAPTURE_RESOLUTIONS, MIN_GI_PROBES_PER_AXIS, MAX_GI_PROBES_PER_AXIS, MAX_GI_PROBE_INSET, DEFAULT_NEW_GI_PROBE_INSET } from "./core/scene/nodes/giVolumeNode";
 export type { GiRayCount, GiCaptureResolution, GiVolumeOptions } from "./core/scene/nodes/giVolumeNode";
 export { GiBakeRegistry, newGiBakeId } from "./graphics/render/gi/giBakeRegistry";
-export { encodeGiBake, decodeGiBake, GiBakeFormatError, GI_BAKE_VERSION } from "./graphics/render/gi/giBakeFormat";
+export { encodeGiBake, decodeGiBake, GiBakeFormatError, GI_BAKE_VERSION, GI_BAKE_MIN_VERSION } from "./graphics/render/gi/giBakeFormat";
 export { FluidVolumeNode, FLUID_BRICK, OCCUPANCY_MARGIN, occupancyFromVolume, floatToHalf, floatsToHalves } from "./core/scene/nodes/fluidVolumeNode";
 export { ExposureVolumeNode, EXPOSURE_OVERRIDE_KEYS, MIN_EXPOSURE_VOLUME_SIZE } from "./core/scene/nodes/exposureVolumeNode";
 export type { ExposureOverrides } from "./core/scene/nodes/exposureVolumeNode";
@@ -98,7 +98,7 @@ export {
     type AutoExposurePreset, type LensLookPreset, type DofPreset,
 } from "./graphics/renderPresets";
 export {
-    DIRECTIONAL_LIGHT_PRESETS, POINT_LIGHT_PRESETS, SPOT_LIGHT_PRESETS, lightPresetsFor,
+    DIRECTIONAL_LIGHT_PRESETS, POINT_LIGHT_PRESETS, SPOT_LIGHT_PRESETS, AREA_LIGHT_PRESETS, lightPresetsFor,
     spotEquivalentLumens, newLightOptions,
     type LightPreset, type LightPresetOptions,
 } from "./graphics/lightPresets";
@@ -437,11 +437,12 @@ export type {
 } from "./animation/animator";
 export { Sprite, gridTileset, legacySheetTileset, remapLegacyFrame, isInlineTilesetId, INLINE_TILESET_PREFIX } from "./graphics/sprite";
 export type { SpriteOptions, SpriteSide, SpriteBlend } from "./graphics/sprite";
-export { DirectionalLight, PointLight, Spotlight, LIGHT_UNIT, REFERENCE_ILLUMINANCE, DEFAULT_DIRECTIONAL_LUX,
+export { DirectionalLight, PointLight, Spotlight, AreaLight, AREA_LIGHT_SHAPES, DEFAULT_AREA_LUMENS, DEFAULT_AREA_WIDTH,
+         DEFAULT_AREA_HEIGHT, MIN_AREA_LIGHT_SIZE, LIGHT_UNIT, REFERENCE_ILLUMINANCE, DEFAULT_DIRECTIONAL_LUX,
          DEFAULT_LUMENS, DEFAULT_RANGE, DEFAULT_SOURCE_RADIUS, DEFAULT_ANGULAR_RADIUS,
          DEFAULT_SCENE_AMBIENT_LUX, MAX_LIGHTS, legacyRange,
          distanceAttenuation, legacyAmbientFromSceneJson, exposureCurveStops } from "./graphics/lighting";
-export type { ExposureCurveKey } from "./graphics/lighting";
+export type { ExposureCurveKey, AreaLightShape, AreaLightProperties } from "./graphics/lighting";
 export { Shape } from "./physics/shape";
 export { PhysicsSystem } from "./physics/physicsSystem";
 export type { PhysicsRaycastHit, PhysicsRaycastOptions, JointSpec } from "./physics/physicsSystem";

@@ -88,6 +88,15 @@ export function giRaySide(rays: number): number {
 }
 
 /**
+ * Sub-directions a side that giReduce.wgsl averages each ray's emissive and albedo over: 64 per ray at 64
+ * rays, 16 at 256 — about one per capture texel of the ray's cell at the 32-texel capture, so a small
+ * glowing fixture counts for the share of the cell it covers instead of all of a ray or none of it.
+ */
+export function giReduceSubSamples(rays: number): number {
+    return giRaySide(rays) >= 16 ? 4 : 8;
+}
+
+/**
  * The interior texel of an `n`-texel octahedral tile that tile texel (`tx`, `ty`) shows — itself inside,
  * its fold neighbour on the one-texel border (0 and n + 1). Coordinates are the tile's, border included:
  * 0..n+1 in, 0..n-1 out.

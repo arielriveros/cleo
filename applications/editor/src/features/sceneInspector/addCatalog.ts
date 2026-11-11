@@ -8,6 +8,7 @@ import {
   LightProbeNode,
   ExposureVolumeNode,
   GIVolumeNode,
+  DEFAULT_NEW_GI_PROBE_INSET,
   VolumetricFogNode,
   DecalNode,
   DirectionalLight,
@@ -19,6 +20,7 @@ import {
   CameraRigNode,
   Camera,
   Spotlight,
+  AreaLight,
   SpriteNode,
   Sprite,
   AnimatedSpriteNode,
@@ -67,7 +69,7 @@ import {
 } from './primitiveIcons'
 import {
   EmptyIcon, TriggerIcon, CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon,
-  DirectionalLightIcon, PointLightIcon, SpotlightIcon, LightProbeIcon, ExposureVolumeIcon, GiVolumeIcon, VolumetricFogIcon,
+  DirectionalLightIcon, PointLightIcon, SpotlightIcon, AreaLightIcon, LightProbeIcon, ExposureVolumeIcon, GiVolumeIcon, VolumetricFogIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon, WeatherIcon,
   SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
@@ -224,6 +226,15 @@ export const ADD_ITEMS: AddItem[] = [
     id: 'spotlight', label: 'Spotlight', icon: SpotlightIcon, category: 'lights',
     create: async () => new LightNode('spot light', new Spotlight({ unit: LIGHT_UNIT, ...newLightOptions('spot') })),
   },
+  {
+    id: 'areaLight', label: 'Area', icon: AreaLightIcon, category: 'lights',
+    create: async () => {
+      const node = new LightNode('area light', new AreaLight({ unit: LIGHT_UNIT, ...newLightOptions('area') }));
+      // Facing down, as a ceiling panel does: it emits along its forward, and +pitch looks down.
+      node.setRotation([90, 0, 0]);
+      return node;
+    },
+  },
 
   {
     id: 'sprite', label: 'Static', icon: SpriteIcon, category: 'sprites',
@@ -367,7 +378,7 @@ export const ADD_ITEMS: AddItem[] = [
     // them, relit as the sun and lights change. Placeable, sized with the box gizmo's face handles; starts
     // at 2 m spacing.
     id: 'giVolume', label: 'GI Volume', icon: GiVolumeIcon, category: 'environment',
-    create: async () => new GIVolumeNode('GI volume', { size: [10, 4, 10], probeCounts: [6, 3, 6] }),
+    create: async () => new GIVolumeNode('GI volume', { size: [10, 4, 10], probeCounts: [6, 3, 6], probeInset: DEFAULT_NEW_GI_PROBE_INSET }),
   },
   {
     // A bank of fog the sun, the torches and the sky light scatter into (the renderer's froxel fog).

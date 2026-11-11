@@ -16,6 +16,7 @@
 #include "./chunks/shadows.wgsl"
 #include "./chunks/pbrLighting.wgsl"
 #include "./chunks/clusteredLights.wgsl"
+#include "./chunks/areaLights.wgsl"
 #include "./chunks/octNormal.wgsl"
 #include "./chunks/giCommon.wgsl"
 #include "./chunks/giSample.wgsl"
@@ -60,6 +61,12 @@ fn giPunctualIrradiance(index: i32, p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     let cl = cleoLight(index);
     let light = cl.light;
     if (!cleoLightReaches(light, p)) { return vec3<f32>(0.0); }
+    let ext = cleoAreaIndex(cl);
+    if (ext >= 0) {
+        // An area light's exact form factor: smooth over the hit, no hotspot for a ray to alias.
+        let area = cleoAreaLight(cl, ext);
+        return areaLightIrradiance(area, p, n) * cleoAreaVisibility(cl, area, p, n);
+    }
     let toLight = light.position - p;
     let d2 = max(dot(toLight, toLight), light.sourceRadius * light.sourceRadius);
     let l = toLight * inverseSqrt(max(dot(toLight, toLight), 1e-12));
@@ -89,9 +96,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let kind = giHitKind(hitA.a);
     let d = giRayDirection(vec2<f32>(f32(texel.x % side), f32(texel.y % side)), f32(side));
     if (kind == 0) {
-        // Sky radiance, as the sky light holds it (radiance-form SH x its intensity, pre-exposed).
-        if (u_gi.u_skyLight.enabled == 0) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
-        return vec4<f32>(giShRadiance(u_gi.u_skyLight.sh, d) * u_gi.u_skyLight.intensity, 1.0);
+        // Sky radiance, as the sky light holds it (radiance-form SH x its intensity, pre-exposed), plus
+        // whatever glows in the rest of the ray's cell (giReduce.wgsl averages it over the cell).
+        let cellGlow = giDecodeRGBE(textureLoad(u_hitC_texture, texel, 0)) * u_gi.u_preExposure;
+        if (u_gi.u_skyLight.enabled == 0) { return vec4<f32>(cellGlow, 1.0); }
+        return vec4<f32>(giShRadiance(u_gi.u_skyLight.sh, d) * u_gi.u_skyLight.intensity + cellGlow, 1.0);
     }
     if (kind == 1) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
 
