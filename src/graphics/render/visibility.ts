@@ -169,6 +169,9 @@ export class Visibility {
      */
     public outsideFrustum(node: ModelNode): boolean {
         if (!this.frustumCulling) return false;
+        // A viewmodel is drawn with its own projection, at its own depth: the world's frustum and
+        // occluders say nothing about it.
+        if (node.viewmodel) return false;
         const s = node.getBoundingSphere();
         if (!this.frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) return true;
         // Before the occlusion tests: a node its volume hides is never offered for a query of its own.

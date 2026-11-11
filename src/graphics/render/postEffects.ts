@@ -128,6 +128,8 @@ export class PostEffects {
     public dofFocusRange: number = 0.0;
     public dofAperture: number = 2.8;
     public dofMaxBlur: number = 24.0;
+    /** Metres; nothing nearer than this is blurred. 0 = off. */
+    public dofNearCutoff: number = 0.0;
 
     /**
      * The last focus distance actually used, so a focus target that despawns HOLDS the focal plane
@@ -573,6 +575,7 @@ export class PostEffects {
         this._shaderManager.setUniform('u_focalLength', u.focal);
         this._shaderManager.setUniform('u_cocScale', u.scale);
         this._shaderManager.setUniform('u_maxCocPx', this.dofMaxBlur);
+        this._shaderManager.setUniform('u_nearCutoff', this.dofNearCutoff);
         this._shaderManager.setUniform('u_srcTexelSize', [1 / this._host.renderWidth, 1 / this._host.renderHeight]);
         this._passes.drawFullscreenAndEnd(cocPass);
 

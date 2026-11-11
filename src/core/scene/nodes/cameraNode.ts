@@ -82,6 +82,7 @@ export class CameraNode extends Node {
             bottom: json.camera.bottom,
             top: json.camera.top
         }), json.id);
+        if (typeof json.camera.viewmodelFov === 'number') node._camera.viewmodelFov = json.camera.viewmodelFov;
         Node.finishParse(node, parent, json);
     }
 
@@ -111,7 +112,8 @@ export class CameraNode extends Node {
                         left: this._camera.left,
                         right: this._camera.right,
                         bottom: this._camera.bottom,
-                        top: this._camera.top
+                        top: this._camera.top,
+                        ...(this._camera.viewmodelFov > 0 ? { viewmodelFov: this._camera.viewmodelFov } : {}),
                     },
                     active: this._active,
                     screenMaterials: this._screenMaterials.map(m => m.serialize()),
@@ -127,6 +129,12 @@ export class CameraNode extends Node {
     }
 
     public get camera(): Camera { return this._camera; }
+  /** The lens viewmodel nodes are drawn at, degrees (0: this camera's own). See {@link Node.viewmodel}. */
+  public get viewmodelFov(): number { return this._camera.viewmodelFov; }
+  public set viewmodelFov(v: number) { this._camera.viewmodelFov = Math.max(0, +v || 0); }
+  /** The share of its true distance a viewmodel is drawn at, 0.05..1. Runtime state: a script sets it each frame. */
+  public get viewmodelDepth(): number { return this._camera.viewmodelDepth; }
+  public set viewmodelDepth(v: number) { this._camera.viewmodelDepth = Math.min(1, Math.max(0.05, +v || 1)); }
     public get active(): boolean { return this._active; }
     public set active(value: boolean) { this._active = value; }
     public get screenMaterials(): CustomMaterial[] { return this._screenMaterials; }

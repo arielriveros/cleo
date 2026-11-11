@@ -362,7 +362,7 @@ frame or a particle burst stays locked to the animation rather than to a timer.
 Events are placed on the **Events** track, under the scrubber of the clip player's **Timeline** and of
 the Animator and Skeleton transports:
 
-- **+ Event** adds one at the playhead and asks for its name.
+- **+ Event** adds one at the playhead and asks for its name. A marker at time 0 fires when its clip starts.
 - **Drag** a marker to move it, **click** it to rename, **right-click** it to delete.
 
 Each change is written to the clip's `.anim` at once and can be undone. The Creator does not author
@@ -373,6 +373,26 @@ embedded in a model rather than kept in a `.anim` shows its events, read-only.
 > onto the clips they name and says how many moved; save the animator to finish — until then a moved
 > marker fires twice. A marker on a clip embedded in the model has no `.anim` to move to: it stays on
 > the animator, still fires, and shows on the track as a hollow circle.
+
+### Event actions: what an event does
+
+A marker says WHEN; the animator says WHAT. In the Parameters panel's **Event actions** section, add an
+**Event**, pick its name from the markers the animator's clips carry (or type a new one), and give it
+actions:
+
+- **Play sound** — a sound node, found by name below the character and then below its parents. A new
+  shot rings over the last one; turn **overlap** off to restart it.
+- **Particles** — burst, start or stop a particle system node.
+- **Flash light** — flash a light node you authored at intensity 0: a peak in lumens and the seconds it
+  takes to fade.
+- **Spawn** — instantiate a template at a node, turned like the node, like the camera or at fixed
+  angles; **follow** keeps it on the node while it lives. A node inside a viewmodel is placed where it
+  is *drawn*.
+
+The animator runs them itself when the marker fires, so the effect stays in sync with the clip and
+needs no script; `animator.fireEvent('name')` triggers the same bindings for something with no clip.
+The bindings belong to the animator (and its shared controller), so a rifle and a pistol can bind the same
+`shot` marker to different sounds. See [Event Actions](../scripting/animation.md#event-actions-effects-without-a-script).
 
 ## Blend spaces
 

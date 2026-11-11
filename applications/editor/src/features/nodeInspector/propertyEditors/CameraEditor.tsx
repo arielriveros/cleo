@@ -73,6 +73,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
     right: props.node.camera.right,
     bottom: props.node.camera.bottom,
     top: props.node.camera.top,
+    viewmodelFov: props.node.camera.viewmodelFov,
   });
 
   useEffect(() => {
@@ -85,6 +86,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
       right: props.node.camera.right,
       bottom: props.node.camera.bottom,
       top: props.node.camera.top,
+      viewmodelFov: props.node.camera.viewmodelFov,
     });
   }, [props.node]);
 
@@ -97,6 +99,7 @@ export default function CameraEditor(props: { node: CameraNode }) {
     props.node.camera.right = cameraState.right;
     props.node.camera.bottom = cameraState.bottom;
     props.node.camera.top = cameraState.top;
+    props.node.camera.viewmodelFov = cameraState.viewmodelFov;
   }, [cameraState, props.node]);
 
   const set = (patch: Partial<typeof cameraState>) => {
@@ -127,6 +130,12 @@ export default function CameraEditor(props: { node: CameraNode }) {
                 ) : (
                   <Slider min={1} max={179} step={1} value={cameraState.fov} onChange={(v) => set({ fov: v })} />
                 )}
+              </PropertyRow>
+            )}
+            {cameraState.type === 'perspective' && (
+              <PropertyRow label='Viewmodel FOV'>
+                <NumberInput value={cameraState.viewmodelFov} min={0} max={120} step={1} onChange={(v) => set({ viewmodelFov: v })} />
+                <Hint>The lens nodes marked Viewmodel are drawn at, degrees. 0 draws them as the world.</Hint>
               </PropertyRow>
             )}
             <PropertyRow label='Near'>

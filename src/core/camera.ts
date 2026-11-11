@@ -32,6 +32,33 @@ export class Camera {
     private _viewDirty: boolean = true;
     private _projDirty: boolean = true;
 
+  /** The field of view viewmodel nodes are drawn at, degrees (0: the camera's own). See Node.viewmodel. */
+  public viewmodelFov: number = 0;
+  /**
+   * The share of its true distance a viewmodel node is drawn at along each view ray, 0.05..1 (runtime, not
+   * serialized). A script lowers it while a wall is close in front, so the weapon stays clear of the wall at
+   * the same size on the screen.
+   */
+  public viewmodelDepth: number = 1;
+  private readonly _viewmodelMatrix: mat4 = mat4.create();
+
+  /**
+   * The matrix applied to a viewmodel's VIEW-space position before the projection, or null when
+   * viewmodels are drawn as the world is. x and y are scaled by the lens ratio (a narrower lens magnifies
+   * about the axis), and all three by the depth share. NDC x/y depend only on the lens ratio (the share
+   * cancels in the divide by w); NDC depth is that of the nearer point.
+   */
+  public get viewmodelMatrix(): mat4 | null {
+    if (this._type !== 'perspective') return null;
+    const k = Math.min(1, Math.max(0.05, this.viewmodelDepth));
+    const f = this.viewmodelFov > 0 ? Math.tan(this._fov * Math.PI / 360) / Math.tan(this.viewmodelFov * Math.PI / 360) : 1;
+    if (f === 1 && k === 1) return null;
+    const m = this._viewmodelMatrix;
+    mat4.identity(m);
+    m[0] = f * k; m[5] = f * k; m[10] = k;
+    return m;
+  }
+
     constructor(properties: CameraProperties = {}) {
         this._type = properties.type || 'perspective';
         this._fov = properties.fov || 60;

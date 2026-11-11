@@ -231,7 +231,47 @@ hold two listeners and do everything twice.
 
 Marker times are in CLIP seconds, so a state playing at `speed: 1.5` fires the marker at
 `time / 1.5` wall-clock seconds. A marker beyond a state's `exitTime` is never reached at all.
+A marker AT time 0 fires when its clip starts or restarts (a one-shot retriggered every shot fires it
+each time); a state that joins its clip part-way (`startTime`) fires only the markers after that.
 `examples/scripts/SoulsEnemy.ts` times its attacks' hits this way.
+
+### Event Actions: effects without a script
+
+A marker says WHEN; the state machine says WHAT. `AnimationStateMachine.eventActions` binds an event
+name to a list of actions the animator runs itself, before any `onAnimationEvent` listener hears it,
+so a sound, a particle burst, a light flash or a spawned template stays in sync with the clip and
+needs no code:
+
+```ts
+eventActions: [{
+  event: 'shot',                 // the marker's name; optional `clip` limits it to one clip
+  actions: [
+    { kind: 'sound', target: 'Sounds/Shot' },                               // plays it; a new shot rings over the last
+    { kind: 'particles', target: 'Muzzle/Sparks', mode: 'burst', count: 12 }, // or 'play' / 'stop'
+    { kind: 'light', target: 'Muzzle/Light', intensity: 9000, seconds: 0.06 }, // flash, then off
+    { kind: 'spawn', template: 'Muzzle Flash', at: 'Muzzle', rotation: 'camera' },
+  ],
+}]
+```
+
+- **Targets are paths** (`Sounds/Shot`), found from the animated node down and then from each
+  ancestor up, nearest first, so a weapon's own sounds win over its owner's. A path nothing has logs
+  one warning and the rest of the actions still run.
+- **Sound** plays the node; while it is still sounding a new one plays on a spare copy (up to six),
+  `overlap: false` restarts it instead.
+- **Light** flashes an existing light node you author at intensity 0 (`falloff` shapes the fade).
+  Between flashes it sits at no intensity and the smallest range, so it holds no cluster slot.
+- **Spawn** instantiates the template at the target node (default: the animated node), moved by
+  `offset` (in the target's frame) and turned to the target, the animated node (`owner`: a character's
+  facing), the active `camera`, or fixed Euler degrees; `follow: true` keeps it on the target for as long as it lives, so recoil and the weapon's
+  clips carry it. A target inside a viewmodel is placed where it is DRAWN, through the camera's
+  viewmodel lens.
+- **Scripts can fire the same event** for things with no clip: `animator.fireEvent('shot')` runs the
+  bindings and tells listeners, so a bot's shot is still the controller's data, not code.
+
+The bindings live on the machine, so they travel with the controller asset and the node, and a
+weapon and a character can bind the same marker name to different effects. Edit them in the Animator
+editor's Event Actions panel.
 
 ## Blend spaces
 

@@ -86,9 +86,11 @@ export function effectiveFocusDistance(depth: number, focusDistance: number, foc
 export function circleOfConfusion(
     depth: number, focusDistance: number, focusRange: number,
     fStop: number, focalLength: number, screenHeight: number, maxCocPixels: number,
+    nearCutoff: number = 0,
 ): number {
-    // A depth at or behind the lens has no meaningful projection, and would divide by ~0 below.
-    if (!(depth > 1e-4)) return 0;
+    // A depth at or behind the lens has no meaningful projection, and would divide by ~0 below. Nearer than the
+    // cutoff is a weapon or hands held up to the lens: never blurred.
+    if (!(depth > 1e-4) || depth < nearCutoff) return 0;
     const focus = effectiveFocusDistance(depth, focusDistance, focusRange);
     // Focusing at or inside the focal length is not a configuration a lens has; it would also flip the
     // sign of the whole expression. Treat it as "focused at the nearest distance that exists".

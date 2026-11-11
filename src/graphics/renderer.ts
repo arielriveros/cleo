@@ -1894,6 +1894,8 @@ export class Renderer {
     // Capped at the radius the 48-tap gather can still cover without the disc beading.
     public get dofMaxBlur(): number { return this._post.dofMaxBlur; }
     public set dofMaxBlur(v: number) { this._post.dofMaxBlur = Math.min(64, Math.max(0, v)); }
+    public get dofNearCutoff(): number { return this._post.dofNearCutoff; }
+    public set dofNearCutoff(v: number) { this._post.dofNearCutoff = Math.max(0, v); }
 
     public get lensFlareIntensity(): number { return this._post.lensFlareIntensity; }
     public set lensFlareIntensity(v: number) { this._post.lensFlareIntensity = Math.max(0, v); }
@@ -2570,6 +2572,7 @@ export class Renderer {
             dofFocusRange: this._post.dofFocusRange,
             dofAperture: this._post.dofAperture,
             dofMaxBlur: this._post.dofMaxBlur,
+            dofNearCutoff: this._post.dofNearCutoff,
             lensFlareIntensity: this._post.lensFlareIntensity,
             lensFlareThreshold: this._post.lensFlareThreshold,
             lensFlareGhosts: this._post.lensFlareGhosts,
@@ -2720,6 +2723,7 @@ export class Renderer {
         if (s.dofFocusRange !== undefined) this.dofFocusRange = s.dofFocusRange;
         if (s.dofAperture !== undefined) this.dofAperture = s.dofAperture;
         if (s.dofMaxBlur !== undefined) this.dofMaxBlur = s.dofMaxBlur;
+        if (s.dofNearCutoff !== undefined) this.dofNearCutoff = s.dofNearCutoff;
         if (s.lensFlareIntensity !== undefined) this.lensFlareIntensity = s.lensFlareIntensity;
         if (s.lensFlareThreshold !== undefined) this.lensFlareThreshold = s.lensFlareThreshold;
         if (s.lensFlareGhosts !== undefined) this.lensFlareGhosts = s.lensFlareGhosts;

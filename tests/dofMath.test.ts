@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { vec3 } from 'gl-matrix';
 import {
     SENSOR_HEIGHT, circleOfConfusion, effectiveFocusDistance, focalLengthFromFov,
@@ -162,5 +164,23 @@ describe('focus distance to a target node', () => {
         const camera = vec3.fromValues(0, 0, 0);
         expect(focusDistanceToTarget(camera, forward, vec3.fromValues(0, 0, 5))).toBeCloseTo(-5, 6);
         expect(coc(10, -5)).toBeGreaterThan(0);
+    });
+});
+
+describe('circleOfConfusion near cutoff', () => {
+    it('never blurs anything nearer than the cutoff, and leaves the rest alone', () => {
+        const f = focalLengthFromFov(1);
+        expect(circleOfConfusion(0.5, 10, 0, 2, f, 1080, 24, 1.2)).toBe(0);
+        const beyond = circleOfConfusion(30, 10, 0, 2, f, 1080, 24, 1.2);
+        expect(beyond).toBeGreaterThan(0);
+        expect(beyond).toBe(circleOfConfusion(30, 10, 0, 2, f, 1080, 24));
+        expect(circleOfConfusion(0.5, 10, 0, 2, f, 1080, 24)).toBeLessThan(0);
+    });
+
+    it('is mirrored in the shader and the renderer setting', () => {
+        const wgsl = readFileSync(join(__dirname, '..', 'src', 'graphics', 'shaders', 'wgsl', 'dofCoc.wgsl'), 'utf8');
+        expect(wgsl).toContain('u_nearCutoff');
+        expect(wgsl).toContain('depth < u_dof.u_nearCutoff');
+        expect(readFileSync(join(__dirname, '..', 'src', 'graphics', 'render', 'postEffects.ts'), 'utf8')).toContain("'u_nearCutoff'");
     });
 });

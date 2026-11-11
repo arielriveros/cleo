@@ -213,6 +213,23 @@ Lets a camera rig whose `collisionMode` is `'dither'` see through this node: whe
 the camera and the player, the blocking part is dithered away instead of the camera pulling in. The
 setter fans out to children. Foliage rules have the same switch (`cameraDither` on the rule).
 
+## Viewmodel
+
+```ts
+get viewmodel: boolean ; set viewmodel(v)          // fans out to children
+// on the CameraNode:
+viewmodelFov: number                               // degrees; 0 draws viewmodels as the world
+viewmodelDepth: number                             // 0.05..1, runtime: the share of true distance
+```
+
+Marks the arms and weapon of a first-person player. A viewmodel node is drawn through the camera's
+`viewmodelFov` lens instead of the world's, so a weapon keeps its size when the player zooms, and it is never
+culled. `viewmodelDepth` draws it at that share of its true distance along every view ray: it stays the same
+size and place on the screen but lies nearer the camera, which is how a weapon is kept out of a wall. Lower it
+from a script while a ray ahead of the camera hits something close, and ease it back. Lighting, shadows and
+the screen-space effects see the nearer point it was drawn at. It never casts a shadow; velocity is its own animation only, so TAA and motion blur do not smear it. Reference:
+`examples/scripts/FpsPlayer.ts` (`_viewmodelClearance`).
+
 ## Draw distance
 
 ```ts

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { isTextEntryEvent } from "cleo";
+import { InputSystem, isTextEntryEvent } from "cleo";
 import MenuBar from "./MenuBar";
 import TabBar from "./TabBar";
 import WorkspaceBar from "./characterAnimation/WorkspaceBar";
@@ -36,6 +36,8 @@ function useSaveShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== 's' || !(e.ctrlKey || e.metaKey)) return;
+      // A game playing owns the keyboard (its input system cancels the browser's Ctrl+S too): not a save.
+      if (InputSystem.instance.preventDefault) return;
       e.preventDefault();
       e.stopPropagation();
       if (e.shiftKey) { void saveAll(); return; }
@@ -64,6 +66,7 @@ function useUndoShortcuts() {
       const key = e.key.toLowerCase();
       if (key !== 'z' && key !== 'y') return;
       if (isTextEntryEvent(e)) return;
+      if (InputSystem.instance.preventDefault) return;
       e.preventDefault();
       if (key === 'y' || e.shiftKey) redo();
       else undo();

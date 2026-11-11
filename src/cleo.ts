@@ -395,6 +395,8 @@ export type { ClipEdit, ClipEditContext, PoseBone, MirrorAxis } from "./animatio
 export { swingReleaseWeight } from "./animation/ik";
 export { Animator, isConditionGroup, NODE_BUILTINS } from "./animation/animator";
 export type { NodeBuiltinName } from "./animation/animator";
+export { parseEventActions, runEventActions, resolveTarget, drawnWorldPosition } from "./animation/eventActions";
+export type { EventAction, EventActionBinding } from "./animation/eventActions";
 export {
     createMotionRecord, sampleMotion, planarSplit, facingComponents, headingAngle, signedAngleBetween, wrapDegrees,
     motionConfig, MOTION_DEFAULTS,

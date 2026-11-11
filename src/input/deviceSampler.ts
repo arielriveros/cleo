@@ -38,6 +38,27 @@ import { isTextEntryEvent, isTextEntryTarget } from "./textEntry";
 /** What the sampler asks its owner before deciding whether to swallow a browser default. */
 export type BoundCodeTest = (code: string) => boolean;
 
+/**
+ * Whether a key event's browser default is cancelled while the game owns the keyboard (`preventDefault` on, and
+ * the event is not text entry). A bound key is always cancelled. So is any Ctrl/Meta/Alt combination and any
+ * function key: Ctrl+D (bookmark), Ctrl+S (save page), Ctrl+F, Ctrl+P, F1, F3... are the browser talking over a
+ * game that is not listening for them. What stays reachable is what a developer or player needs: DevTools (F12,
+ * Ctrl+Shift+I/J/C), reload (F5, Ctrl+R), and the window's own shortcuts the page cannot cancel anyway.
+ * (Ctrl+W, Ctrl+T, Ctrl+N and Ctrl+Tab are not cancellable by a page in a normal tab, whatever this says: keep
+ * them off a game's own bindings.)
+ */
+export function shouldCancelKeyDefault(
+    e: { code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean },
+    bound: boolean,
+): boolean {
+    const mod = e.ctrlKey || e.metaKey;
+    if (e.code === 'F12' || e.code === 'F5') return false;
+    if (mod && e.code === 'KeyR') return false;
+    if (mod && e.shiftKey && (e.code === 'KeyI' || e.code === 'KeyJ' || e.code === 'KeyC' || e.code === 'Delete')) return false;
+    if (bound) return true;
+    return mod || e.altKey || /^F\d{1,2}$/.test(e.code);
+}
+
 export class DeviceSampler {
     private _canvas: HTMLElement | null = null;
     private _abort: AbortController | null = null;
@@ -233,9 +254,7 @@ export class DeviceSampler {
 
     private _maybePreventKeyDefault(event: KeyboardEvent): void {
         if (!this.preventDefault) return;
-        // Ctrl/Meta means the user is talking to the browser (Ctrl+T, Cmd+W), not to the game.
-        if (event.ctrlKey || event.metaKey) return;
-        if (this.isBoundCode(event.code)) event.preventDefault();
+        if (shouldCancelKeyDefault(event, this.isBoundCode(event.code))) event.preventDefault();
     }
 
     private _onBlur = (): void => {

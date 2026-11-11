@@ -598,10 +598,28 @@ export class ParticleRenderer {
         const center = [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2];
         const radius = Math.hypot(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]) / 2
             + ParticleRenderer.COLLIDER_MARGIN;
-        this._colliderCount = packParticleColliders(physics.bodies as unknown as ColliderBody[], center, radius, this._colliderData, physics.colliderGeometry);
+        // The gather walks every physics body and allocates per candidate, and a firefight has a dozen short effects
+        // each doing it every frame (about 0.3 ms a frame). The bodies near an effect hardly move in a few frames, so
+        // an effect keeps the colliders it gathered for a handful of frames while it stays put.
+        const cached = this._colliderCache.get(node);
+        if (cached && this._frame - cached.frame < ParticleRenderer.COLLIDER_REUSE_FRAMES
+            && Math.hypot(center[0] - cached.center[0], center[1] - cached.center[1], center[2] - cached.center[2]) < ParticleRenderer.COLLIDER_REUSE_MOVE
+            && radius <= cached.radius) {
+            this._colliderData.set(cached.data);
+            this._colliderCount = cached.count;
+        } else {
+            this._colliderCount = packParticleColliders(physics.bodies as unknown as ColliderBody[], center, radius, this._colliderData, physics.colliderGeometry);
+            this._colliderCache.set(node, { frame: this._frame, center, radius, count: this._colliderCount,
+                data: this._colliderData.slice(0, Math.max(1, this._colliderCount) * COLLIDER_FLOATS) });
+        }
         frameStats.particleColliders += this._colliderCount;
         return this._colliderCount;
     }
+
+    /** Frames an effect reuses its gathered colliders, and how far (metres) it may move meanwhile. */
+    public static readonly COLLIDER_REUSE_FRAMES = 6;
+    public static readonly COLLIDER_REUSE_MOVE = 0.5;
+    private readonly _colliderCache = new WeakMap<ParticleSystemNode, { frame: number; center: number[]; radius: number; count: number; data: Float32Array }>();
 
     /** Metres past a system's bounds that still count as near: a spark flies a little beyond them. */
     public static readonly COLLIDER_MARGIN = 2;

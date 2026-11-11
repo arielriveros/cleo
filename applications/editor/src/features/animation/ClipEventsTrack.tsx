@@ -56,7 +56,7 @@ export default function ClipEventsTrack({ assetId, clipName, duration, time, onS
   const onAdd = async () => {
     const at = time
     const name = await askName('Add an event', 'footstep',
-      `Fires at ${at.toFixed(2)}s every time "${clipName}" plays — in any state, layer or action. Scripts receive it in onAnimationEvent(name, clip).`)
+      `Fires at ${at.toFixed(2)}s every time "${clipName}" plays — in any state, layer or action. Scripts receive it in onAnimationEvent(name, clip), and the animator runs the actions bound to it (Event actions).`)
     if (name) add(at, name)
   }
 
