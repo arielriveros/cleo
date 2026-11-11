@@ -30,10 +30,12 @@ const path = require('node:path');
 const { spawn, execSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const EDITOR_PORT = 8090, CREATOR_PORT = 8091, CONTROL_PORT = Number(process.env.DOCS_MEDIA_PORT ?? 8095), CDP_PORT = 9333;
+// DOCS_MEDIA_EDITOR_PORT / _CREATOR_PORT / _CDP_PORT / _PROFILE let a second session (another worktree) run beside one.
+const EDITOR_PORT = Number(process.env.DOCS_MEDIA_EDITOR_PORT ?? 8090), CREATOR_PORT = Number(process.env.DOCS_MEDIA_CREATOR_PORT ?? 8091);
+const CONTROL_PORT = Number(process.env.DOCS_MEDIA_PORT ?? 8095), CDP_PORT = Number(process.env.DOCS_MEDIA_CDP_PORT ?? 9333);
 const WIDTH = 1600, HEIGHT = 900;
 const CHROME = process.env.CHROME ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const PROFILE = path.join(os.tmpdir(), 'cleo-docs-media-chrome');
+const PROFILE = process.env.DOCS_MEDIA_PROFILE ?? path.join(os.tmpdir(), 'cleo-docs-media-chrome');
 // The engine module exactly as the editor imports it (outside the editor root, so served under /@fs/).
 const CLEO_URL = '/@fs/' + ROOT.split(path.sep).join('/') + '/src/cleo.ts';
 // Read per call, so the helpers can be edited while the window stays up.
@@ -42,7 +44,10 @@ const prelude = () => 'const CLEO_URL = ' + JSON.stringify(CLEO_URL) + ';\n' + f
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const children = [];
 function serve(cwd, port, env = {}) {
-    const child = spawn('npx', ['vite', '--port', String(port), '--strictPort'], {
+    // DOCS_MEDIA_VITE_CONFIG: a config file name in each app folder (e.g. one with its own cacheDir, for a worktree
+    // whose node_modules is shared with another checkout's dev server).
+    const config = process.env.DOCS_MEDIA_VITE_CONFIG ? ['--config', process.env.DOCS_MEDIA_VITE_CONFIG] : [];
+    const child = spawn('npx', ['vite', ...config, '--port', String(port), '--strictPort'], {
         cwd, env: { ...process.env, ...env }, shell: true, stdio: ['ignore', 'pipe', 'pipe'],
     });
     child.stdout.on('data', d => process.stdout.write(`[vite ${port}] ${d}`));
