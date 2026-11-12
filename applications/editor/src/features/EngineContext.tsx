@@ -128,6 +128,7 @@ import { ImportStage, IMPORT_STAGES, AnimImportStage, ANIM_IMPORT_STAGES } from 
 import { usePersistedLibrary, usePersistedModelLibrary } from './persistLibrary';
 import { useAssetThumbnails } from './hooks/useAssetThumbnails';
 import { useSaving } from './hooks/useSaving';
+import { stopSequencePreviews } from './sequencer/previewRegistry';
 import { usePendingDecisions } from './hooks/usePendingDecisions';
 import { useTilesetEditor } from './hooks/useTilesetEditor';
 import { useAiBrainEditor } from './hooks/useAiBrainEditor';
@@ -5518,6 +5519,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const applyActiveTab = (tab: EditorTab) => {
     const instance = instanceRef.current;
     if (!instance) return;
+    stopSequencePreviews();
     // Disarm FIRST: everything below touches the scene (setScene, the helper reconcile it triggers, the
     // emits at the end), and any of it reaching mark() would land on the tab we are switching to. Re-armed
     // two frames later, once the editor-helper reconciler's opening pass has settled.
@@ -5761,6 +5763,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
    * reloading always lands on the scene's own dimension.
    */
   const setViewDimension = (dimension: '2D' | '3D') => {
+    // The 2D/3D switch re-rigs whatever camera is active: never a previewed shot camera.
+    stopSequencePreviews();
     setViewDimensionState(dimension);
     eventEmitter.current.emit('CHANGE_DIMENSION', dimension);
   };
@@ -5834,6 +5838,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const openScene = async (sceneId: string): Promise<boolean> => {
     const meta = projectMetaRef.current;
     if (!meta) return false;
+    stopSequencePreviews();
     const entry = meta.scenes.find(s => s.id === sceneId);
     if (!entry) return false;
     if (sceneId === openSceneIdRef.current) { setActiveTabId(SCENE_TAB_ID); return true; }
@@ -6640,6 +6645,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const startSession = async (simulate: boolean) => {
     const instance = instanceRef.current;
     if (!instance) return;
+    // The play scene is built from the authored one: a Sequencer preview must hand it back first.
+    stopSequencePreviews();
     // The two sessions are exclusive: switching between Play and Simulate goes through Stop.
     if (startedRef.current && isSimulatingRef.current !== simulate) return;
     if (startedRef.current) { eventEmitter.current.emit('SET_PLAY_STATE', simulate ? 'simulate' : 'play'); return; }

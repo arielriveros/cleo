@@ -48,7 +48,9 @@ const OLD_DOCK_LAYOUT_KEYS = [
 // 21 has nowhere for them.
 // 23: Options mode opens at a quarter of the width (sizeOptionsRail). Nothing else changed, so a store
 // at 22 is still read; only its Options tree is dropped, which rebuilds that one mode at the new size.
-const LAYOUT_VERSION = 23;
+// 24: the Sequencer arrived in the bottom strip of the scene and template modes; a tree stored at 23 has
+// nowhere for it.
+const LAYOUT_VERSION = 24;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -61,7 +63,7 @@ type LayoutStore = { version: typeof LAYOUT_VERSION; layouts: Partial<Record<Edi
  * survives a restricted mode's discarded arrangement, the buildDefaultLayout fallback, and a reload.
  */
 const bottomTabKey = () => lsKey(LS_KEYS.dockBottomTab);
-const BOTTOM_PANELS = ['logger', 'assets'] as const;
+const BOTTOM_PANELS = ['logger', 'assets', 'sequencer'] as const;
 type BottomPanel = (typeof BOTTOM_PANELS)[number];
 
 function loadBottomTab(): BottomPanel {
@@ -128,11 +130,17 @@ const ADD_PANELS = ['sceneAdd', 'uiAdd'] as const;
  */
 const OPTIONS_PANELS = ['optionsEngine', 'optionsEditor', 'optionsProject'] as const;
 
+/**
+ * The Sequencer: the timeline of the selected Sequence node, down in the bottom strip beside Logger and
+ * Assets. It edits the AUTHORED scene, so it shows in scene and template modes and not while Simulating.
+ */
+const SEQUENCER_PANELS = ['sequencer'] as const;
+
 
 const CHROME_PANELS = [
   'scene', 'properties', 'scripts', 'physics', 'logger', 'assets',
   ...STATE_MACHINE_PANELS, ...ANIMATION_FIELD_PANELS, ...CLIP_PANELS, ...PARTICLE_PANELS, ...TILEMAP_PANELS, ...LANDSCAPE_PANELS,
-  ...RIG_PANELS, ...ADD_PANELS,
+  ...RIG_PANELS, ...ADD_PANELS, ...SEQUENCER_PANELS,
 ] as const;
 
 
@@ -232,9 +240,15 @@ function buildDefaultLayout(api: DockviewApi) {
     id: 'particleTransport', component: 'particleTransport', title: PANEL_TITLES['particleTransport'],
     position: { referencePanel: 'logger', direction: 'within' },
   });
+  // The Sequencer: renderer:'always', so its preview clock keeps running behind another bottom tab.
+  const sequencer = api.addPanel({
+    id: 'sequencer', component: 'sequencer', title: PANEL_TITLES['sequencer'], renderer: 'always',
+    position: { referencePanel: 'logger', direction: 'within' },
+  });
   // Honour the remembered bottom tab; this is also the fallback when restoring a stashed layout fails.
   // animationField mode overrides this in restoreBottomTab, which runs after every layout build.
-  (loadBottomTab() === 'assets' ? assets : logger).api.setActive();
+  const remembered = loadBottomTab();
+  (remembered === 'assets' ? assets : remembered === 'sequencer' ? sequencer : logger).api.setActive();
   assertViewportLock(api);
 }
 
@@ -249,7 +263,7 @@ function buildDefaultLayout(api: DockviewApi) {
  * rig tabs re-read what they mirror when they mount instead (RAGDOLL_QUERY, QUERY_SELECTED_JOINT).
  */
 function assertRenderers(api: DockviewApi) {
-  for (const id of ['viewport', 'logger', 'assets', 'animFieldPlot', 'clipTimeline']) {
+  for (const id of ['viewport', 'logger', 'assets', 'animFieldPlot', 'clipTimeline', 'sequencer']) {
     const panel = api.getPanel(id);
     if (panel && panel.api.renderer !== 'always') panel.api.setRenderer('always');
   }
@@ -261,8 +275,7 @@ function loadLayouts(): LayoutStore['layouts'] {
     if (!raw) return {};
     const saved = JSON.parse(raw) as LayoutStore;
     if (!saved?.layouts) return {};
-    // See LAYOUT_VERSION 23: every arrangement but Options carries over.
-    if ((saved.version as number) === 22) { const { options: _options, ...rest } = saved.layouts; return rest; }
+    // See LAYOUT_VERSION 24: a stored tree cannot gain the Sequencer, so older arrangements are dropped.
     if (saved.version !== LAYOUT_VERSION) return {};
     return saved.layouts;
   } catch {
@@ -331,6 +344,7 @@ export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: b
   if (mode !== 'animation') for (const id of CLIP_PANELS) hidden.add(id);
   if (mode !== 'particleSystem') for (const id of PARTICLE_PANELS) hidden.add(id);
   if (mode !== 'rig') for (const id of RIG_PANELS) hidden.add(id);
+  if (mode !== 'scene' && mode !== 'template') for (const id of SEQUENCER_PANELS) hidden.add(id);
 
   const hide = (...ids: readonly string[]) => { for (const id of ids) hidden.add(id); };
 
@@ -399,6 +413,8 @@ export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: b
 
   // The Add palettes build into the AUTHORED scene, which is not the one on screen while Simulating.
   if (simulating) hide(...ADD_PANELS);
+  // The Sequencer previews and edits the authored scene too.
+  if (simulating) hide(...SEQUENCER_PANELS);
 
   return [...hidden];
 }
@@ -575,7 +591,7 @@ export default function DockLayout() {
     if (!api) return;
     const onFocus = (tab: unknown) => {
       // A programmatic focus is still the tab the user ends up on, so it becomes the remembered one.
-      const id: BottomPanel = tab === 'Logger' ? 'logger' : 'assets';
+      const id: BottomPanel = tab === 'Logger' ? 'logger' : tab === 'Sequencer' ? 'sequencer' : 'assets';
       bottomTabRef.current = id;
       try { localStorage.setItem(bottomTabKey(), id); } catch { /* ignore */ }
       api.getPanel(id)?.api.setActive();

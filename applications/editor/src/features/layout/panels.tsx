@@ -14,6 +14,7 @@ import ClipInspector from '../clip/ClipInspector';
 import ClipTimeline from '../clip/ClipTimeline';
 import ParticleStackPanel from '../particles/ParticleStackPanel';
 import ParticleTransportPanel from '../particles/ParticleTransportPanel';
+import SequencerPanel from '../sequencer/SequencerPanel';
 import LoadingScreen from '../../components/LoadingScreen';
 import SceneInspector from '../sceneInspector/SceneInspector';
 import AddNew from '../sceneInspector/AddNew';
@@ -274,6 +275,15 @@ function ClipTimelinePanel(_: IDockviewPanelProps) {
   return <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised"><ClipTimeline /></div>;
 }
 
+/**
+ * The Sequencer: the timeline of the selected Sequence node. `renderer: 'always'` in the dock, so a preview it
+ * is playing keeps going behind another bottom tab; `active` idles its keyboard while another tab is up.
+ */
+function SequencerDockPanel(props: IDockviewPanelProps) {
+  const active = useIsSelectedTab(props.api);
+  return <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised"><SequencerPanel active={active} /></div>;
+}
+
 /** The particle editor's transport: play / pause / restart over the preview, in the bottom strip. */
 function ParticleTransportDockPanel(_: IDockviewPanelProps) {
   return <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised"><ParticleTransportPanel /></div>;
@@ -348,6 +358,7 @@ const panelComponents = {
   clipInspector: ClipInspectorPanel,
   clipTimeline: ClipTimelinePanel,
   particleTransport: ParticleTransportDockPanel,
+  sequencer: SequencerDockPanel,
   tilePalette: TilePalettePanel,
   tilemapLayers: TilemapLayersDockPanel,
   landscapeTools: LandscapeToolsDockPanel,

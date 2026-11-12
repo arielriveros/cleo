@@ -19,6 +19,7 @@ import fs from 'fs'
 import path from 'path'
 import { uiNode } from '../exampleKit/bundle.mjs'
 import { parseInputMap } from '../../src/input/actionMap'
+import { parseSequence } from '../../src/sequencer/parse'
 import { FLY_INPUT_MAP } from './flyInputMap.mjs'
 import { buildTour } from './cinematic/tour'
 import { terrainHeightSampler } from './cinematic/terrainHeight'
@@ -73,11 +74,15 @@ function startMenu() {
   return screenRoot('menu', 'Start Menu', [backdrop], 40, true)
 }
 
-/** Read the tour file, or build it from the shot list against the shipped terrain (and write it). */
+/**
+ * Read the tour file, or build it from the shot list against the shipped terrain (and write it). Both go
+ * through the engine's `parseSequence`, so the file is in exactly the form the editor's Export writes and a
+ * tour exported over it differs only where it was edited.
+ */
 export function tourSequence(bundle: any, regenerate = false): any {
-  if (!regenerate && fs.existsSync(TOUR_FILE)) return JSON.parse(fs.readFileSync(TOUR_FILE, 'utf8'))
+  if (!regenerate && fs.existsSync(TOUR_FILE)) return parseSequence(JSON.parse(fs.readFileSync(TOUR_FILE, 'utf8')))
   const heightAt = terrainHeightSampler(bundle.scenes[VALLEY_SCENE].scene)
-  const tour = buildTour(heightAt)
+  const tour = parseSequence(buildTour(heightAt))
   fs.writeFileSync(TOUR_FILE, JSON.stringify(tour, null, 2) + '\n')
   log(`cinematic: tour written to ${path.relative(ROOT, TOUR_FILE)}`)
   return tour

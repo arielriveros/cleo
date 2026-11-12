@@ -40,6 +40,12 @@ export class SequenceNode extends Node {
     private _bindings: Record<string, string>;
     /** Start playing the first frame the game runs (never while editing). */
     public autoplay: boolean;
+    /**
+     * Runtime, never saved: whether the camera cut takes the scene's camera. The editor turns it off while it
+     * previews, so its viewport keeps the editor camera; the shot camera is then only reported in
+     * {@link shotCamera}.
+     */
+    public previewCuts: boolean = true;
 
     private _player: SequencePlayer | null = null;
     private _time = 0;
@@ -87,6 +93,8 @@ export class SequenceNode extends Node {
     public get time(): number { return this._time; }
     public get isPlaying(): boolean { return this._playing; }
     public get isPaused(): boolean { return this._paused; }
+    /** The camera the camera cut has on screen at the current time (reported even when `previewCuts` is off). */
+    public get shotCamera(): Node | null { return this._player?.shotCamera ?? null; }
 
     /** Resolves when the current (or last) playback ends, with why. */
     public get finished(): Promise<SequenceEndReason> { return this._finished; }
@@ -238,6 +246,7 @@ export class SequenceNode extends Node {
                 get scene() { return self.scene; },
                 get renderer() { return sequenceGlobals.renderer?.() ?? null; },
                 get game() { return sequenceGlobals.game?.() ?? null; },
+                get applyCuts() { return self.previewCuts; },
             });
         }
         return this._player;
@@ -261,7 +270,8 @@ export class SequenceNode extends Node {
 
     protected _serializePayload(): any {
         return {
-            sequence: this._data,
+            // A copy: a serialized snapshot (an undo baseline) must not alias the live sequence.
+            sequence: structuredClone(this._data),
             bindings: { ...this._bindings },
             ...(this.autoplay ? { autoplay: true } : {}),
         };

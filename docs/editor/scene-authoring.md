@@ -37,6 +37,7 @@ navigation mesh that AI and player characters are built from.
 | **Character** | A pawn. *(unreleased)* |
 | **Controller** | A driver that possesses a character. *(unreleased)* |
 | **Nav Mesh** | A navmesh node with a default `20 × 10 × 20` bake box. *(unreleased)* |
+| **Sequence** | A cinematic: a timeline of camera paths, cuts, property animation and script calls, edited in the [Sequencer](sequencer.md). *(unreleased)* |
 
 > The Nav Mesh box defaults to a real size rather than the class default of "whole scene", so a node
 > you just added shows its volume and cyan preview immediately. Scenes saved before volumes existed

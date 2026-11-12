@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { SequenceNode } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
-import { PropertyTable, PropertyRow, Toggle } from '@cleo/app-kit/ui'
+import { Button, PropertyTable, PropertyRow, Toggle } from '@cleo/app-kit/ui'
 import { useEventBus } from '../../EventBusContext'
 import { useCleoEngine } from '../../EngineContext'
 import NodeRefInput from '../NodeRefInput'
@@ -17,6 +17,12 @@ export default function SequenceEditor(props: { node: SequenceNode }) {
   const [, setVersion] = useState(0)
   const bump = () => setVersion(v => v + 1)
   useEffect(bump, [props.node])
+  // The Sequencer edits the same node: show its slots as they change there.
+  useEffect(() => {
+    const on = (e: any) => { if (e?.node === props.node) bump() }
+    eventEmitter.on('SCENE_CHANGED', on)
+    return () => { eventEmitter.off('SCENE_CHANGED', on) }
+  }, [eventEmitter, props.node])
 
   const node = props.node
   const seq = node.sequence
@@ -49,6 +55,8 @@ export default function SequenceEditor(props: { node: SequenceNode }) {
             </PropertyRow>
           ))}
         </PropertyTable>
+        <Button size='sm' className='mt-2' title='Show this sequence in the Sequencer, in the bottom strip'
+          onClick={() => eventEmitter.emit('FOCUS_BOTTOM_TAB', 'Sequencer')}>Open in Sequencer</Button>
       </div>
     </Collapsable>
   )

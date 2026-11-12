@@ -174,7 +174,7 @@ export type { NodeVariable, NodeVariableType, NodeVariableAccess } from "./core/
 
 export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
-export { TypedEmitter, engineEventBus } from "./core/eventBus";
+export { TypedEmitter, engineEventBus, asDerived } from "./core/eventBus";
 export type { EngineEventMap, SceneChange, ChangeKind, StructureOp, NodePlacement } from "./core/eventBus";
 // The cross-asset reference graph. Kind-agnostic on purpose: the editor owns the per-kind readers that
 // turn an asset record into edges, and feeds them in through `setEdges`.

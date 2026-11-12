@@ -52,9 +52,9 @@
       "sections": [
         {
           "id": "shot:valley",
-          "label": "The Valley",
           "start": 0,
           "end": 75,
+          "label": "The Valley",
           "points": [
             [
               -6.5,
@@ -269,9 +269,9 @@
         },
         {
           "id": "shot:approach",
-          "label": "The Long House",
           "start": 75,
           "end": 85,
+          "label": "The Long House",
           "points": [
             [
               -34,
@@ -341,9 +341,9 @@
         },
         {
           "id": "shot:interior",
-          "label": "Long House interior",
           "start": 85,
           "end": 115,
+          "label": "Long House interior",
           "points": [
             [
               -2.552,
@@ -427,9 +427,9 @@
         },
         {
           "id": "shot:night",
-          "label": "Night falls",
           "start": 115,
           "end": 125,
+          "label": "Night falls",
           "points": [
             [
               -20,
@@ -485,9 +485,9 @@
         },
         {
           "id": "shot:night-crane",
-          "label": "Night over the hamlet",
           "start": 125,
           "end": 145,
+          "label": "Night over the hamlet",
           "points": [
             [
               -28,
@@ -543,9 +543,9 @@
         },
         {
           "id": "shot:cloudy",
-          "label": "Clouds gather",
           "start": 145,
           "end": 185,
+          "label": "Clouds gather",
           "points": [
             [
               24,
@@ -601,9 +601,9 @@
         },
         {
           "id": "shot:drizzle",
-          "label": "First rain",
           "start": 185,
           "end": 215,
+          "label": "First rain",
           "points": [
             [
               -24,
@@ -659,9 +659,9 @@
         },
         {
           "id": "shot:storm",
-          "label": "Storm at the windmill",
           "start": 215,
           "end": 265,
+          "label": "Storm at the windmill",
           "points": [
             [
               5,
@@ -759,9 +759,9 @@
         },
         {
           "id": "shot:snow",
-          "label": "Rain turns to snow",
           "start": 265,
           "end": 305,
+          "label": "Rain turns to snow",
           "points": [
             [
               55,
@@ -831,9 +831,9 @@
         },
         {
           "id": "shot:melt",
-          "label": "Snow melts",
           "start": 305,
           "end": 335,
+          "label": "Snow melts",
           "points": [
             [
               -3,
@@ -889,9 +889,9 @@
         },
         {
           "id": "shot:clearing",
-          "label": "The sky clears",
           "start": 335,
           "end": 365,
+          "label": "The sky clears",
           "points": [
             [
               30,
@@ -947,9 +947,9 @@
         },
         {
           "id": "shot:pond",
-          "label": "The pond",
           "start": 365,
           "end": 390,
+          "label": "The pond",
           "points": [
             [
               40,
@@ -1019,9 +1019,9 @@
         },
         {
           "id": "shot:finale",
-          "label": "The whole valley",
           "start": 390,
           "end": 410,
+          "label": "The whole valley",
           "points": [
             [
               47,
@@ -1112,9 +1112,9 @@
     {
       "id": "clock-running",
       "type": "property",
-      "slot": "clock",
       "path": "running",
       "valueType": "bool",
+      "slot": "clock",
       "sections": [
         {
           "id": "clock-running:all",
@@ -1134,9 +1134,9 @@
     {
       "id": "clock-hour",
       "type": "property",
-      "slot": "clock",
       "path": "hour",
       "valueType": "number",
+      "slot": "clock",
       "sections": [
         {
           "id": "clock-hour:all",
@@ -1203,9 +1203,9 @@
       "id": "time-scale",
       "name": "Time scale",
       "type": "property",
-      "target": "game",
       "path": "timeScale",
       "valueType": "number",
+      "target": "game",
       "sections": [
         {
           "id": "time-scale:weather",
@@ -1242,9 +1242,9 @@
     {
       "id": "bar-top",
       "type": "property",
-      "slot": "barTop",
       "path": "opacity",
       "valueType": "number",
+      "slot": "barTop",
       "sections": [
         {
           "id": "bar-top:all",
@@ -1270,9 +1270,9 @@
     {
       "id": "bar-bottom",
       "type": "property",
-      "slot": "barBottom",
       "path": "opacity",
       "valueType": "number",
+      "slot": "barBottom",
       "sections": [
         {
           "id": "bar-bottom:all",
@@ -1298,9 +1298,9 @@
     {
       "id": "fade",
       "type": "property",
-      "slot": "fade",
       "path": "opacity",
       "valueType": "number",
+      "slot": "fade",
       "sections": [
         {
           "id": "fade:all",
@@ -1356,9 +1356,9 @@
     {
       "id": "title-text",
       "type": "property",
-      "slot": "title",
       "path": "text",
       "valueType": "string",
+      "slot": "title",
       "sections": [
         {
           "id": "title-text:all",
@@ -1386,9 +1386,9 @@
     {
       "id": "title-opacity",
       "type": "property",
-      "slot": "title",
       "path": "opacity",
       "valueType": "number",
+      "slot": "title",
       "sections": [
         {
           "id": "title-opacity:all",
@@ -1449,9 +1449,9 @@
     {
       "id": "caption-text",
       "type": "property",
-      "slot": "caption",
       "path": "text",
       "valueType": "string",
+      "slot": "caption",
       "sections": [
         {
           "id": "caption-text:all",
@@ -1491,9 +1491,9 @@
     {
       "id": "caption-opacity",
       "type": "property",
-      "slot": "caption",
       "path": "opacity",
       "valueType": "number",
+      "slot": "caption",
       "sections": [
         {
           "id": "caption-opacity:all",

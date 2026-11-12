@@ -173,6 +173,29 @@ describe('SequenceNode', () => {
         expect(cine.worldForward[2]).toBeGreaterThan(0.99);
     });
 
+    it('only reports the shot while previewCuts is off (the editor keeps its viewport camera)', () => {
+        const { scene, gameplay, cine, director } = cameraScene(tour);
+        scene.setActiveCamera(gameplay);
+        director.previewCuts = false;
+        director.seek(5);
+        expect(director.shotCamera).toBe(cine);
+        expect(scene.pinnedCamera).toBe(gameplay);
+        expect(cine.active).toBe(false);
+        // The path still moves the camera: a preview can look through it.
+        expect(cine.worldPosition[2]).toBeCloseTo(50, 0);
+        director.stop();
+        expect(director.shotCamera).toBe(null);
+        expect(scene.pinnedCamera).toBe(gameplay);
+    });
+
+    it('serializes a copy of its sequence, never the live object', async () => {
+        const { director } = cameraScene(tour);
+        const json = await director.serialize();
+        expect(json.sequence).toEqual(director.sequence);
+        expect(json.sequence).not.toBe(director.sequence);
+        expect(json.sequence.tracks[0]).not.toBe(director.sequence.tracks[0]);
+    });
+
     it('stop() restores the camera, its flag and the pin', () => {
         const { scene, gameplay, cine, director } = cameraScene(tour);
         cine.setPosition([7, 8, 9]);

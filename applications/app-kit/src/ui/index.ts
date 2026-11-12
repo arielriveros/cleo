@@ -19,6 +19,8 @@ export type { FileButtonProps } from './FileButton';
 
 export { MenuItem } from './MenuItem';
 export type { MenuItemProps } from './MenuItem';
+export { ContextMenu } from './ContextMenu';
+export type { ContextMenuProps } from './ContextMenu';
 
 
 export { TexturePicker } from './TexturePicker';
@@ -29,7 +31,10 @@ export type { ToggleProps } from './Toggle';
 
 export { Slider, sliderFill } from './Slider';
 
-export { Glyph, DiceIcon, BoltIcon, LinkIcon, PlayIcon, PauseIcon, RestartIcon } from './icons';
+export {
+  Glyph, DiceIcon, BoltIcon, LinkIcon, PlayIcon, PauseIcon, RestartIcon, StopIcon, LoopIcon, StepBackIcon,
+  StepForwardIcon, ToStartIcon, ToEndIcon, PilotIcon, SnapIcon,
+} from './icons';
 export type { SliderProps } from './Slider';
 
 export { StringListInput } from './StringListInput';

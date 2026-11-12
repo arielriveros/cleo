@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { Logger } from 'cleo';
 import { startTask } from '@cleo/app-kit/feedback/progressStore';
 import { KIND_LABEL, SCENE_TAB_ID } from '../engineContextTypes';
+import { stopSequencePreviews } from '../sequencer/previewRegistry';
 import type { EditorTab, SavingState, TabKind } from '../engineContextTypes';
 
 /**
@@ -170,6 +171,8 @@ export function useSaving(deps: {
    */
   const runSave = async (tabIds: string[], title: string): Promise<boolean> => {
     if (savingRef.current || !tabIds.length) return false;
+    // A Sequencer preview writes onto the authored scene; what is saved must be what was authored.
+    stopSequencePreviews();
     const named = tabIds.map(id => ({ id, tab: tabsRef.current.find(t => t.id === id) }));
     savingRef.current = true;
     setSavingState('saving');

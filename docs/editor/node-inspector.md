@@ -547,7 +547,8 @@ between cameras, animate properties of other nodes (a UI fade, the time of day, 
 methods at given moments. The sequence names its actors by slot rather than by node, and this section
 binds each slot to a node in the scene, so one sequence can drive different actors. Play it from a script
 with `Game.playSequence('Name')` or `node.play()`; while it plays it owns what it drives, and `stop()` puts
-all of it back. See [Sequences](../scripting/scene-and-game.md#sequences).
+all of it back. **Open in Sequencer** shows its timeline in the [Sequencer](sequencer.md). See
+[Sequences](../scripting/scene-and-game.md#sequences).
 
 | Field | |
 |---|---|

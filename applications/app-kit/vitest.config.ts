@@ -23,6 +23,7 @@ export default mergeConfig(engineConfig, defineConfig({
                 'src/gizmo/gizmoHandles.ts',
                 'src/gizmo/gizmoPick.ts',
                 'src/gizmo/gizmoMath.ts',
+                'src/timeline/timelineMath.ts',
             ],
             thresholds: { statements: 90, functions: 90, lines: 90, branches: 78, perFile: false },
         },

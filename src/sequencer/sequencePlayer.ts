@@ -37,6 +37,11 @@ export interface SequencePlayerHost {
     /** Roots for property tracks with a `target`. */
     readonly renderer?: any | null;
     readonly game?: any | null;
+    /**
+     * Whether the camera cut takes the scene's camera (pins it and switches it on). False while the editor
+     * previews: the viewport keeps the editor's camera, and the shot is only reported in `shotCamera`.
+     */
+    readonly applyCuts?: boolean;
 }
 
 export type SequenceEventListener = (name: string, key: EventKey) => void;
@@ -74,6 +79,7 @@ export class SequencePlayer {
     private readonly _splines = new WeakMap<object, Spline3>();
     private readonly _touched = new Set<any>();
     private readonly _listeners = new Set<SequenceEventListener>();
+    private _shotCamera: any | null = null;
 
     constructor(sequence: SequenceData, host: SequencePlayerHost) {
         this._seq = sequence;
@@ -92,6 +98,9 @@ export class SequencePlayer {
         this._listeners.add(listener);
         return () => { this._listeners.delete(listener); };
     }
+
+    /** The camera the camera cut has on screen now (or would, while cuts are only reported), else null. */
+    public get shotCamera(): any | null { return this._shotCamera; }
 
     /** Whether anything is captured, i.e. whether the scene currently differs from how the sequence found it. */
     public get hasCapturedState(): boolean { return this._restores.size > 0; }
@@ -132,6 +141,7 @@ export class SequencePlayer {
             try { restore(); } catch (e) { Logger.error(`Sequence '${this._seq.name}': restore failed: ${e}`, 'Script'); }
         }
         for (const s of this._states.values()) { s.influencing = false; s.cutCamera = null; s.cutTouched = undefined; }
+        this._shotCamera = null;
         return this._touched;
     }
 
@@ -371,11 +381,14 @@ export class SequencePlayer {
         const res = this._resolveSections(track, state, time, fireFrom, 'restore');
         if (!res) return;
         const key = `cut:${track.id}`;
-        if ('restore' in res) { this._restore(key); return; }
+        if ('restore' in res) { this._restore(key); this._shotCamera = null; return; }
         // The section that started last is the shot on screen.
         const sections = 'hold' in res ? [res.hold] : res.active;
         const shot = sections.reduce((a, b) => (b.start >= a.start ? b : a));
         const camera = this._host.resolveSlot(shot.slot);
+        this._shotCamera = camera ?? null;
+        // Reporting only (an editor preview): the scene's camera, its pin and every `active` flag stay as they are.
+        if (this._host.applyCuts === false) return;
         if (!camera || state.cutCamera === camera) return;
 
         const scene = this._host.scene;

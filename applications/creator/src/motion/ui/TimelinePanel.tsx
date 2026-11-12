@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button, Collapsable, NumberInput, Select, Toggle } from '@cleo/app-kit/ui';
+import { clampZoom, fitZoom, formatTick, rulerTicks, snapToFps, timeToX, xToTime, zoomStep } from '@cleo/app-kit/timeline';
 import { promptDialog } from '@cleo/app-kit/feedback/dialogStore';
 import {
   BUILTIN_PRESETS, cloneCurve, evalBlend, presetOf, storeSavedPresets, toKeys, type BlendCurve, type BlendPreset,
@@ -34,7 +35,6 @@ const laneY = (v: number) => LANE_H - 22 - v * (LANE_H - 44);
 const partY = (v: number) => PART_H - 4 - v * (PART_H - 8);
 
 const poseColor = (i: number) => `hsl(${(i * 67 + 200) % 360} 55% 58%)`;
-const STEPS = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10];
 const allPresets = (saved: BlendPreset[]) => [...BUILTIN_PRESETS, ...saved];
 const editable = (t: EventTarget) => /^(INPUT|TEXTAREA|SELECT)$/.test((t as HTMLElement).tagName);
 
@@ -56,11 +56,11 @@ export function TimelinePanel() {
   const duration = motionDuration(doc);
   const end = Math.max(duration, clip?.samplers[0]?.input.at(-1) ?? 0, 0.5);
   const fps = doc.fps;
-  const snap = (t: number) => Math.round(t * fps) / fps;
-  const x = (t: number) => GUTTER + t * pxPerSec;
+  const snap = (t: number) => snapToFps(t, fps);
+  const x = (t: number) => timeToX(t, pxPerSec, GUTTER);
   const tAt = (clientX: number) => {
     const el = scrollRef.current!;
-    return Math.max(0, (clientX - el.getBoundingClientRect().left + el.scrollLeft - GUTTER) / pxPerSec);
+    return xToTime(clientX, el.getBoundingClientRect().left, el.scrollLeft, pxPerSec, GUTTER);
   };
   const width = x(end) + 120;
   const height = RULER_H + TRACK_H + LANE_H + parts.length * PART_H;
@@ -68,7 +68,7 @@ export function TimelinePanel() {
 
   const fit = () => {
     const w = scrollRef.current?.clientWidth ?? 600;
-    setPxPerSec(Math.max(20, Math.min(2000, (w - GUTTER - 40) / end)));
+    setPxPerSec(fitZoom(w, end, GUTTER, 40));
   };
   // The first time the panel opens on a motion that does not fit, fit it.
   useLayoutEffect(() => { if (x(end) > (scrollRef.current?.clientWidth ?? Infinity)) fit(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -154,14 +154,11 @@ export function TimelinePanel() {
   const onWheel = (e: React.WheelEvent) => {
     if (!e.ctrlKey) return;
     e.preventDefault();
-    setPxPerSec(p => Math.max(20, Math.min(2000, p * (e.deltaY < 0 ? 1.15 : 1 / 1.15))));
+    setPxPerSec(p => zoomStep(p, e.deltaY));
   };
 
   // --- The ruler's ticks ---
-  const major = STEPS.find(s => s * pxPerSec >= 70) ?? 10;
-  const minor = major / 5;
-  const ticks: { t: number; major: boolean }[] = [];
-  for (let i = 0; i * minor <= end + 1e-6; i++) ticks.push({ t: i * minor, major: i % 5 === 0 });
+  const ticks = rulerTicks(0, end, pxPerSec);
 
   const poseIndex = (id: string) => doc.poses.findIndex(p => p.id === id);
   const poseName = (id: string) => doc.poses.find(p => p.id === id)?.name ?? '?';
@@ -186,8 +183,8 @@ export function TimelinePanel() {
                 onClick={() => addKey(view === 'motion' ? stageTime() : duration + 0.5, currentPose)}>+ Key</Button>
         <div className='flex-1' />
         <span className='text-ui-xs text-dim'>Ctrl+wheel zooms</span>
-        <Button size='sm' onClick={() => setPxPerSec(p => Math.max(20, p / 1.4))} title='Zoom out'>−</Button>
-        <Button size='sm' onClick={() => setPxPerSec(p => Math.min(2000, p * 1.4))} title='Zoom in'>+</Button>
+        <Button size='sm' onClick={() => setPxPerSec(p => clampZoom(p / 1.4))} title='Zoom out'>−</Button>
+        <Button size='sm' onClick={() => setPxPerSec(p => clampZoom(p * 1.4))} title='Zoom in'>+</Button>
         <Button size='sm' onClick={fit} title='Fit the motion in the panel'>Fit</Button>
       </div>
       <div className='flex min-h-0 flex-1'>
@@ -207,7 +204,7 @@ export function TimelinePanel() {
                      style={{ height: RULER_H }} onPointerDown={scrubFrom}>
                   {ticks.map(({ t, major: big }) => (
                     <div key={t.toFixed(4)} className='absolute bottom-0 border-l border-border' style={{ left: x(t), height: big ? 10 : 5 }}>
-                      {big && <span className='absolute -top-3 left-1 text-[9px] tabular-nums text-dim'>{+t.toFixed(2)}s</span>}
+                      {big && <span className='absolute -top-3 left-1 text-[9px] tabular-nums text-dim'>{formatTick(t)}</span>}
                     </div>
                   ))}
                   <div className='absolute bottom-0 top-0 bg-primary/10' style={{ left: x(duration), width: Math.max(0, x(end) - x(duration)) }}

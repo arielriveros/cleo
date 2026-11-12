@@ -490,6 +490,16 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - *Scripts.* `Game.playSequence(name, { bindings })` and `node.play()`, `pause`, `resume`, `seek`,
     `skip`, `stop`, `finished`, `onFinished`, `onEvent`. Sequences run before every `onUpdate`, so a camera
     they move renders that frame. Player contract 28.
+  - *The Sequencer panel* in the bottom strip edits the selected sequence like a video editor: a ruler that
+    scrubs, slots and their tracks, sections to drag, trim and ease, keys and events to retime, a razor (S),
+    markers (M), Ctrl+D to duplicate, Space and J/K/L to play. The details column edits what is selected:
+    a path's points (or **Add from viewport**), its look target and timing, a property's keys (**Key current
+    value**), an event's method and arguments, a slot's binding. Every edit is one undo step, and a drag
+    records once.
+  - *Previewing in the editor.* Scrubbing shows the sequence in the scene being edited, with the viewport
+    kept on the editor camera; **Pilot** looks through the shot's camera. Saving, Play, Simulate, a tab or
+    2D/3D switch, selecting another node and grabbing a gizmo all put the scene back first, so a preview is
+    never saved. **Export** / **Import** read and write `.sequence.json`.
 - **The Valley opens on a start menu: a cinematic tour, or Free mode.** The tour is a 410 s sequence over
   every part of the valley: the campfire, the main road, the hamlet, the Old House and the Granary, the
   meadow and the forest, a dolly down the Long House while the sun sets (the GI follows it), the night, the
