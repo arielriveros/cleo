@@ -39,6 +39,7 @@ export const VALLEY_SCRIPTS: [string, string, string, string][] = [
   ['ValleyFlyCamera', 'Fly Camera', 'cameraRig', '/Environment/Scripts'],
   ['ValleyFx', 'Splash', 'node', ''],
   ['ValleyStartMenu', 'Start Menu', 'uiRoot', '/Cinematic/Scripts'],
+  ['ValleyTourDirector', 'Tour Director', 'sequence', '/Cinematic/Scripts'],
 ]
 
 let reflector: ((source: string) => any) | null = null

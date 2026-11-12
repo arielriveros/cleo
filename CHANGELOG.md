@@ -484,6 +484,16 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     on a bound node. A **presets** track blends a Volumetric Clouds, Wind or Weather node from one of its
     own presets to the next, each section starting where the last one ended. A **foliage** track changes a
     landscape's layers live: their density, their draw and impostor distances, their shadows.
+  - *Gameplay tracks.* A **script** section calls a method of the director or of a bound node with a
+    context (`SequenceScriptContext`: enter, every frame inside, exit, on stop too), and a **hold** stops
+    the playback at its end until `ctx.resume()`. An **animation** track plays a clip on a character's
+    animator as an action, its clip time locked to the timeline (exact on a seek, drift-corrected in
+    playback so the clip's events fire) and exempt from animation LOD. An **audio** track plays a sound node
+    from where the timeline is, faded by the eases and a volume curve, at the sequence's speed. A **spawn**
+    track instantiates a template while its section lasts, and can put it in a slot for the other tracks. A
+    **possess** track has a controller possess a pawn for the section. `AnimationActionHandle.seek` and
+    `time`, and `SoundNode.play({ offset })`, `seek`, `playhead`, `duration`, `gain`, `playbackRate` are
+    new to scripts too.
   - *Slots.* A sequence names its actors by slot, and the node binds each slot to a node in the scene,
     so one sequence can drive other actors. The bindings follow a copied or spawned subtree.
   - *It owns what it drives.* Every target is captured the first time the sequence writes it and
@@ -496,8 +506,10 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     scrubs, slots and their tracks, sections to drag, trim and ease, keys and events to retime, a razor (S),
     markers (M), Ctrl+D to duplicate, Space and J/K/L to play. The details column edits what is selected:
     a path's points (or **Add from viewport**), its look target and timing, a property's keys (**Key current
-    value**), an event's method and arguments, a slot's binding. Every edit is one undo step, and a drag
-    records once.
+    value**), an event's method and arguments, a script's method, arguments and hold, an animation's clip,
+    start and speed, a sound's offset and volume keys, a spawn's template, placement and slot, a slot's
+    binding. A razor keeps a clip or a sound where it was on the timeline. Every edit is one undo step, and
+    a drag records once.
   - *Previewing in the editor.* Scrubbing shows the sequence in the scene being edited, with the viewport
     kept on the editor camera; **Pilot** looks through the shot's camera. Saving, Play, Simulate, a tab or
     2D/3D switch, selecting another node and grabbing a gizmo all put the scene back first, so a preview is
@@ -515,10 +527,11 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - *Act III, at twice the game's speed.* A clear night; clouds gathering over the hamlet's roofs; the first
     rain on the buildings, then down to a metre over the trail at the well square, its puddles filling,
     the Old House reflected in them and the raindrops ringing them; a storm, the wind up, the rain heavy,
-    the windmill's sails racing; the rain turning to snow; the snow melting into a wet valley; a clear day
+    the windmill's sails racing, lightning flashing (the tour's director script, a scrub-stable strike
+    schedule, an unbaked light so the GI never relights); the rain turning to snow; the snow melting into a wet valley; a clear day
     again.
-  - *Act IV.* The pond calming to a mirror, then the whole valley from above, and the Cleo logo and
-    wordmark on the final black.
+  - *Act IV.* Splashes on the pond (a spawn track), the pond calming to a mirror, then the whole valley
+    from above, and the Cleo logo and wordmark on the final black.
   - Escape or P comes back to the menu from either mode. `tools/valley/applyCinematic.ts` applies it to the
     shipped example from the checked-in `valley-tour.sequence.json` (the shot list is `cinematic/tour.ts`).
 - **Effects can follow the game's speed.** **Follow Time Scale** (Renderer ▸ Weather) runs the wind, the

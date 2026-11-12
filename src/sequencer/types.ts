@@ -174,7 +174,123 @@ export interface FoliageTrack extends TrackBase {
     sections: FoliageSection[];
 }
 
-export type SequenceTrack = PathTrack | CameraCutTrack | PropertyTrack | EventTrack | PresetTrack | FoliageTrack;
+/**
+ * A stretch of time a script method takes part in: the director's (the SequenceNode's own script) or a bound
+ * node's. The method is called with a {@link SequenceScriptContext}: once as the section is entered, every frame
+ * it is in after that, and once as it is left — on stop too.
+ */
+export interface ScriptSection extends SectionBase {
+    method: string;
+    /** Passed on in `ctx.args`. */
+    args?: unknown[];
+    /**
+     * Playback waits at this section's end, holding the frame, until something calls `ctx.resume()` (the
+     * method, once it has what it waited for: it is still called every frame while the playback waits) or the
+     * SequenceNode's `resume()`.
+     */
+    hold?: boolean;
+}
+
+/** What a script section's method receives. */
+export interface SequenceScriptContext {
+    phase: 'enter' | 'update' | 'exit';
+    /** Sequence seconds. */
+    time: number;
+    /** Seconds into the section, and its length. */
+    local: number;
+    duration: number;
+    /** `local / duration`, 0..1. */
+    alpha: number;
+    /** The section's ease-in / ease-out ramp, 0..1. */
+    weight: number;
+    /** Sequence seconds since the last call (0 on entering, and on a seek). */
+    dt: number;
+    /** The timeline jumped here (a seek or a scrub) rather than played here. */
+    seeking: boolean;
+    /** On `exit`: the playback was stopped (and the scene is being put back), rather than time moving on. */
+    stopped: boolean;
+    args: unknown[];
+    /** The SequenceNode playing. */
+    sequence: unknown;
+    /** Let a `hold` section go: playback carries on past its end. */
+    resume(): void;
+}
+
+export interface ScriptTrack extends TrackBase {
+    type: 'script';
+    /** The node whose method is called; absent means the director. */
+    slot?: string;
+    sections: ScriptSection[];
+}
+
+/**
+ * A clip played on the slot's animator as an ACTION (Animator.playAction), over whatever its controller does,
+ * eased in and out by the section's eases, its clip time locked to the timeline.
+ */
+export interface AnimationSection extends SectionBase {
+    clip: string;
+    /** Clip seconds at the section's start. Default 0. */
+    clipStart?: number;
+    /** Clip seconds per sequence second. Default 1. */
+    speed?: number;
+    loop?: boolean;
+}
+
+export interface AnimationTrack extends TrackBase {
+    type: 'animation';
+    slot: string;
+    /** The animator's action slot (a masked one keeps the legs on locomotion). Default 'Sequence'. */
+    animSlot?: string;
+    sections: AnimationSection[];
+}
+
+/** The slot's sound node playing over the section, from `offset` into its sample. */
+export interface AudioSection extends SectionBase {
+    /** Sample seconds at the section's start. Default 0. */
+    offset?: number;
+    /** A multiplier on the node's volume over the section, 0..1 (times the eases). */
+    volume?: SequenceCurve<number>;
+}
+
+export interface AudioTrack extends TrackBase {
+    type: 'audio';
+    slot: string;
+    sections: AudioSection[];
+}
+
+/** A template instantiated while the section is in, and removed when it is left (unless `keep`). */
+export interface SpawnSection extends SectionBase {
+    /** Template name or id. */
+    template: string;
+    /** World position (or local, under `parent`), and Euler degrees. */
+    position?: [number, number, number];
+    rotation?: [number, number, number];
+    /** Spawn under this slot's node instead of the scene root. */
+    parent?: string;
+    /** The new node's name. */
+    name?: string;
+    /** The slot the spawned node fills while it lives, so the other tracks can drive it. */
+    bindAs?: string;
+}
+
+export interface SpawnTrack extends TrackBase {
+    type: 'spawn';
+    sections: SpawnSection[];
+}
+
+/** The controller (the track's slot) possesses the pawn in the `pawn` slot over the section. */
+export interface PossessSection extends SectionBase {
+    pawn: string;
+}
+
+export interface PossessTrack extends TrackBase {
+    type: 'possess';
+    slot: string;
+    sections: PossessSection[];
+}
+
+export type SequenceTrack = PathTrack | CameraCutTrack | PropertyTrack | EventTrack | PresetTrack | FoliageTrack
+    | ScriptTrack | AnimationTrack | AudioTrack | SpawnTrack | PossessTrack;
 export type SequenceTrackType = SequenceTrack['type'];
 
 export interface SequenceMarker { t: number; name: string; }

@@ -191,6 +191,17 @@ export class Sound {
         return typeof at === 'number' ? at : 0;
     }
 
+    /** Move a voice's playhead to `seconds` into the sample. */
+    public seekVoice(voiceId: number, seconds: number): void {
+        if (!this._deleted && Number.isFinite(seconds)) this._howl.seek(Math.max(0, seconds), voiceId);
+    }
+
+    /** A voice's playback rate, as a multiple of the sample's own (howler's 0.5..4 range). */
+    public setVoiceRate(voiceId: number, rate: number): void {
+        if (this._deleted || !Number.isFinite(rate)) return;
+        this._howl.rate(Math.min(4, Math.max(0.5, rate * (this._settings.rate || 1))), voiceId);
+    }
+
     public fade(from: number, to: number, seconds: number, voiceId?: number): void {
         if (this._deleted) return;
         this._howl.fade(from, to, Math.max(0, seconds) * 1000, voiceId);

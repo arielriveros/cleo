@@ -7,8 +7,9 @@ import {
 import { compilePropertyPath, snapshotValue, type PropertyAccessor } from './propertyPath';
 import { blendPresetValue, presetFields, sequencePresetsFor } from './presetRegistry';
 import type {
-    CameraCutTrack, EventKey, EventTrack, FoliageTrack, PathSection, PathTrack, PresetSection, PresetTrack,
-    PropertyTrack, SectionBase, SequenceData, SequenceTrack,
+    AnimationTrack, AudioTrack, CameraCutTrack, EventKey, EventTrack, FoliageTrack, PathSection, PathTrack, PossessTrack,
+    PresetSection, PresetTrack, PropertyTrack, ScriptSection, ScriptTrack, SectionBase, SequenceData, SequenceScriptContext,
+    SequenceTrack, SpawnTrack,
 } from './types';
 
 /**
@@ -44,6 +45,14 @@ export interface SequencePlayerHost {
      * previews: the viewport keeps the editor's camera, and the shot is only reported in `shotCamera`.
      */
     readonly applyCuts?: boolean;
+    /** True while the editor previews: spawn tracks spawn nothing (the scene being edited is not the game's). */
+    readonly authoring?: boolean;
+    /** Sequence seconds per real second right now, which audio tracks play at. Default 1. */
+    readonly playbackRate?: number;
+    /** Fill a slot for the rest of this playback (a spawn track's `bindAs`), or clear it with null. */
+    setSlotOverride?(slotId: string, node: any | null): void;
+    /** Let a script section's hold go (its `ctx.resume()`). */
+    releaseHold?(sectionId: string): void;
 }
 
 export type SequenceEventListener = (name: string, key: EventKey) => void;
@@ -57,6 +66,16 @@ interface TrackState {
     /** The camera the cut track last pinned, and every camera it switched on with its authored flag. */
     cutCamera?: any | null;
     cutTouched?: Map<any, boolean>;
+    /** Script sections entered and not yet left, with the time each was last called at. */
+    entered?: Map<string, number>;
+    /** The action an animation track plays, for which section, and how it fades out. */
+    anim?: any;
+    animSection?: string;
+    animBlendOut?: number;
+    /** The section an audio track's voice was started for. */
+    audioSection?: string;
+    /** Spawn sections in, and the node each made. */
+    spawned?: Map<string, any>;
 }
 
 /** A world-space pose. */
@@ -124,6 +143,11 @@ export class SequencePlayer {
                     case 'event': if (fireFrom !== undefined) this._fireEvents(track, fireFrom, time); break;
                     case 'preset': this._evalPreset(track, time, fireFrom); break;
                     case 'foliage': this._evalFoliage(track, time, fireFrom); break;
+                    case 'script': this._evalScript(track, time, fireFrom); break;
+                    case 'animation': this._evalAnimation(track, time, fireFrom); break;
+                    case 'audio': this._evalAudio(track, time, fireFrom); break;
+                    case 'spawn': this._evalSpawn(track, time, fireFrom); break;
+                    case 'possess': this._evalPossess(track, time, fireFrom); break;
                 }
             } catch (e) {
                 Logger.error(`Sequence '${this._seq.name}': track ${track.name ?? track.id} failed: ${e}`, 'Script');
@@ -147,6 +171,20 @@ export class SequencePlayer {
         for (const s of this._states.values()) { s.influencing = false; s.cutCamera = null; s.cutTouched = undefined; }
         this._shotCamera = null;
         return this._touched;
+    }
+
+    /**
+     * The first `hold` script section ending in `(from, to]` that `released` does not hold, or null: where a
+     * playback advancing from `from` to `to` has to stop and wait.
+     */
+    public holdBetween(from: number, to: number, released: ReadonlySet<string>): { id: string; end: number } | null {
+        let best: { id: string; end: number } | null = null;
+        for (const track of this._seq.tracks) {
+            if (track.muted || track.type !== 'script') continue;
+            for (const s of track.sections)
+                if (s.hold && s.end > from && s.end <= to && !released.has(s.id) && (!best || s.end < best.end)) best = { id: s.id, end: s.end };
+        }
+        return best;
     }
 
     // ---- sections ------------------------------------------------------------------------------------
@@ -536,6 +574,224 @@ export class SequencePlayer {
         state.cutCamera = camera;
     }
 
+    // ---- script --------------------------------------------------------------------------------------
+
+    /**
+     * Calls into script sections: `enter` once, `update` each later evaluation inside, `exit` on leaving (on a
+     * stop too). A section a playback passes inside one frame still gets its enter and exit; a seek skips it.
+     */
+    private _evalScript(track: ScriptTrack, time: number, fireFrom: number | undefined): void {
+        const state = this._state(track);
+        const entered = state.entered ??= new Map<string, number>();
+        const seeking = fireFrom === undefined;
+        const key = `script:${track.id}`;
+        const ensureRestore = () => {
+            if (this._restores.has(key)) return;
+            this._restores.set(key, () => {
+                for (const id of Array.from(entered.keys())) {
+                    const s = track.sections.find(x => x.id === id);
+                    entered.delete(id);
+                    if (s) this._callScript(track, s, 'exit', Math.min(s.end, Math.max(s.start, time)), 0, false, true);
+                }
+            });
+        };
+        for (const s of track.sections) {
+            if (s.end <= s.start) continue;
+            const inside = time >= s.start && time <= s.end;
+            const last = entered.get(s.id);
+            if (inside) {
+                ensureRestore();
+                entered.set(s.id, time);
+                if (last === undefined) this._callScript(track, s, 'enter', time, 0, seeking, false);
+                else this._callScript(track, s, 'update', time, seeking ? 0 : Math.max(0, time - last), seeking, false);
+            } else if (last !== undefined) {
+                entered.delete(s.id);
+                this._callScript(track, s, 'exit', Math.min(s.end, Math.max(s.start, time)), 0, seeking, false);
+            } else if (!seeking && s.start > fireFrom! && s.end < time) {
+                this._callScript(track, s, 'enter', s.start, 0, false, false);
+                this._callScript(track, s, 'exit', s.end, 0, false, false);
+            }
+        }
+    }
+
+    private _callScript(track: ScriptTrack, s: ScriptSection, phase: SequenceScriptContext['phase'], at: number, dt: number,
+                        seeking: boolean, stopped: boolean): void {
+        const target = track.slot ? this._host.resolveSlot(track.slot) : this._host.director;
+        const fn = target?.[s.method];
+        if (typeof fn !== 'function') {
+            this._warnOnce(track, this._state(track), `no method '${s.method}' on ${track.slot ?? 'the director'}.`);
+            return;
+        }
+        const duration = s.end - s.start;
+        const local = Math.min(s.end, Math.max(s.start, at)) - s.start;
+        const ctx: SequenceScriptContext = {
+            phase, time: at, local, duration, alpha: duration > 0 ? local / duration : 1,
+            weight: rampWeight(s.start, s.end, s.easeIn, s.easeOut, at), dt, seeking, stopped,
+            args: s.args ?? [], sequence: this._host.director,
+            resume: () => this._host.releaseHold?.(s.id),
+        };
+        try { fn.call(target, ctx); }
+        catch (e) { Logger.error(`Sequence '${this._seq.name}': ${s.method}() (${phase}) threw: ${e}`, 'Script'); }
+    }
+
+    // ---- animation -----------------------------------------------------------------------------------
+
+    /**
+     * The section's clip as an action on the slot's animator, its clip time kept on the timeline: exactly on a
+     * seek, and corrected past a tenth of a second of drift while playing (so the clip's own events fire).
+     */
+    private _evalAnimation(track: AnimationTrack, time: number, fireFrom: number | undefined): void {
+        const state = this._state(track);
+        const res = this._resolveSections(track, state, time, fireFrom, 'restore');
+        if (!res) return;
+        const key = `anim:${track.id}`;
+        if ('restore' in res) { this._restore(key); return; }
+        // Kept: the action runs out on its own (a stop still fades it).
+        if ('hold' in res) return;
+        const node = this._host.resolveSlot(track.slot);
+        const animator = animatorOf(node);
+        if (!animator) { if (node) this._warnOnce(track, state, 'the slot has no animator.'); return; }
+        if (!this._restores.has(key)) {
+            // A cinematic character animates every frame wherever it is (no animation LOD).
+            const exempt = animator.lodExempt;
+            animator.lodExempt = true;
+            this._restores.set(key, () => {
+                if (state.anim && !state.anim.done) state.anim.stop(state.animBlendOut);
+                state.anim = undefined; state.animSection = undefined;
+                animator.lodExempt = exempt;
+            });
+        }
+        const s = res.active.reduce((a, b) => (b.start >= a.start ? b : a));
+        const speed = s.speed ?? 1;
+        const clipTime = (s.clipStart ?? 0) + Math.max(0, time - s.start) * speed;
+        const handle = state.anim;
+        if (state.animSection !== s.id || !handle || handle.done) {
+            state.anim = animator.playAction(s.clip, {
+                slot: track.animSlot ?? 'Sequence', blendIn: s.easeIn ?? 0.15, blendOut: s.easeOut ?? 0.2,
+                loop: s.loop === true, speed, ...(clipTime > 0 ? { startTime: clipTime } : {}),
+            });
+            state.animSection = s.id;
+            state.animBlendOut = s.easeOut ?? 0.2;
+            return;
+        }
+        const duration = Number(handle.duration) || 0;
+        const want = duration > 0 ? (s.loop ? clipTime % duration : Math.min(clipTime, duration)) : clipTime;
+        let off = Math.abs(handle.time - want);
+        if (s.loop && duration > 0) off = Math.min(off, duration - off);
+        if (fireFrom === undefined || off > 0.1) handle.seek(want);
+    }
+
+    // ---- audio ---------------------------------------------------------------------------------------
+
+    /**
+     * The slot's sound node playing over the section from `offset + local`, its gain the eases times the volume
+     * curve, its rate the sequence's own speed; re-seeked on a seek and past a fifth of a second of drift.
+     */
+    private _evalAudio(track: AudioTrack, time: number, fireFrom: number | undefined): void {
+        const state = this._state(track);
+        const res = this._resolveSections(track, state, time, fireFrom, 'restore');
+        if (!res) return;
+        const key = `audio:${track.id}`;
+        if ('restore' in res) { this._restore(key); return; }
+        if ('hold' in res) return;
+        const node = this._host.resolveSlot(track.slot);
+        if (!node || typeof node.play !== 'function') { if (node) this._warnOnce(track, state, 'the slot is not a sound.'); return; }
+        if (!this._restores.has(key)) {
+            const gain = node.gain, rate = node.playbackRate;
+            this._restores.set(key, () => {
+                node.stop?.();
+                if (typeof gain === 'number') node.gain = gain;
+                if (typeof rate === 'number') node.playbackRate = rate;
+                state.audioSection = undefined;
+            });
+        }
+        const s = res.active.reduce((a, b) => (b.start >= a.start ? b : a));
+        const local = Math.max(0, time - s.start);
+        const want = (s.offset ?? 0) + local;
+        const rate = this._host.playbackRate;
+        if (typeof rate === 'number' && Number.isFinite(rate) && rate > 0) node.playbackRate = rate;
+        const volume = s.volume ? evaluateKeyedNumber(s.volume, local, 1) : 1;
+        node.gain = clamp01(rampWeight(s.start, s.end, s.easeIn, s.easeOut, time) * volume);
+        const duration = Number(node.duration) || 0;
+        const past = duration > 0 && want >= duration;
+        if (state.audioSection !== s.id || fireFrom === undefined) {
+            const entering = state.audioSection !== s.id;
+            state.audioSection = s.id;
+            // Past a one-shot's end there is nothing left to hear.
+            if (past) { if (node.isPlaying) node.stop(); return; }
+            if (entering || !node.isPlaying) node.play({ offset: want }); else node.seek(want);
+            return;
+        }
+        if (!past && node.isPlaying && Math.abs(Number(node.playhead) - want) > 0.2) node.seek(want);
+    }
+
+    // ---- spawn ---------------------------------------------------------------------------------------
+
+    /** Templates instantiated while their sections are in, removed on leaving unless kept. */
+    private _evalSpawn(track: SpawnTrack, time: number, fireFrom: number | undefined): void {
+        const state = this._state(track);
+        const spawned = state.spawned ??= new Map<string, any>();
+        const key = `spawn:${track.id}`;
+        for (const s of track.sections) {
+            if (s.end <= s.start) continue;
+            const inside = time >= s.start && time <= s.end;
+            const made = spawned.get(s.id);
+            if (inside && !made) {
+                const scene = this._host.scene;
+                if (this._host.authoring || typeof scene?.instantiate !== 'function') continue;
+                // A section a playback passes inside one frame spawns nothing: it would be gone at once.
+                if (fireFrom !== undefined && time > s.end) continue;
+                const parent = s.parent ? this._host.resolveSlot(s.parent) : null;
+                const node = scene.instantiate(s.template, {
+                    ...(parent ? { parent } : {}), ...(s.position ? { position: s.position } : {}),
+                    ...(s.rotation ? { rotation: s.rotation } : {}), ...(s.name ? { name: s.name } : {}),
+                });
+                if (!node) { this._warnOnce(track, state, `no template '${s.template}'.`); continue; }
+                spawned.set(s.id, node);
+                if (s.bindAs) this._host.setSlotOverride?.(s.bindAs, node);
+                if (!this._restores.has(key)) this._restores.set(key, () => {
+                    for (const [id, n] of spawned) {
+                        const section = track.sections.find(x => x.id === id);
+                        if (section?.bindAs) this._host.setSlotOverride?.(section.bindAs, null);
+                        removeSpawned(n, this._host.scene);
+                    }
+                    spawned.clear();
+                });
+            } else if (!inside && made) {
+                spawned.delete(s.id);
+                if (s.bindAs) this._host.setSlotOverride?.(s.bindAs, null);
+                // Kept: it stays, and is no longer the sequence's to remove.
+                if ((s.whenFinished ?? 'restore') === 'restore') removeSpawned(made, this._host.scene);
+            }
+        }
+    }
+
+    // ---- possession ----------------------------------------------------------------------------------
+
+    /** The controller possesses the section's pawn; leaving (or a stop) hands it back to what it had. */
+    private _evalPossess(track: PossessTrack, time: number, fireFrom: number | undefined): void {
+        const state = this._state(track);
+        const res = this._resolveSections(track, state, time, fireFrom, 'restore');
+        if (!res) return;
+        const key = `possess:${track.id}`;
+        if ('restore' in res) { this._restore(key); return; }
+        const controller = this._host.resolveSlot(track.slot);
+        if (!controller || typeof controller.possess !== 'function') {
+            if (controller) this._warnOnce(track, state, 'the slot is not a controller.');
+            return;
+        }
+        if (!this._restores.has(key)) {
+            const previous = controller.possessed ?? null;
+            this._restores.set(key, () => {
+                if (previous) controller.possess(previous);
+                else controller.release?.();
+            });
+        }
+        const s = 'hold' in res ? res.hold : res.active.reduce((a, b) => (b.start >= a.start ? b : a));
+        const pawn = this._host.resolveSlot(s.pawn);
+        if (pawn && controller.possessed !== pawn) controller.possess(pawn);
+    }
+
     // ---- events --------------------------------------------------------------------------------------
 
     private _fireEvents(track: EventTrack, from: number, to: number): void {
@@ -570,6 +826,24 @@ interface FoliageSaved {
     cullDistance: number;
     billboardDistance: number;
     castShadows: boolean;
+}
+
+/** The animator a node animates with: its own, else the first one below it (a character's model). */
+function animatorOf(node: any): any | null {
+    if (!node) return null;
+    if (node.animator && typeof node.animator.playAction === 'function') return node.animator;
+    for (const child of node.children ?? []) {
+        const found = animatorOf(child);
+        if (found) return found;
+    }
+    return null;
+}
+
+/** Take a spawned node out of the scene, unless it already left (an effect that removes itself). */
+function removeSpawned(node: any, scene: any): void {
+    if (!node?.scene || node.markForRemoval) return;
+    if (typeof node.remove === 'function') node.remove();
+    else scene?.removeNode?.(node);
 }
 
 /** `v` in the shape the target holds: a typed array stays one (a gl-matrix vec3 field), else as is. */

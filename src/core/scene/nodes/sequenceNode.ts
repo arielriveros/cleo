@@ -2,6 +2,7 @@ import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 import { Logger } from "../../logger";
+import { authoring } from "../../eventBus";
 import { unwrapScriptNode } from "./nodeScripting";
 import { parseSequence, emptySequence } from "../../../sequencer/parse";
 import { SequencePlayer, type SequenceEventListener } from "../../../sequencer/sequencePlayer";
@@ -34,6 +35,14 @@ export interface SequencePlayOptions {
  *
  *   const intro = this.findNode('Intro') as SequenceNode
  *   await intro.play().finished
+ *
+ * Script sections call a method of the director (or of a bound node) with a context as they are entered, every
+ * frame inside, and as they are left; a `hold` section stops the playback at its end until the method calls
+ * `ctx.resume()` (or something calls this node's `resume()`):
+ *
+ *   waitForGate(ctx: SequenceScriptContext) {
+ *     if ((this.findNode('Gate') as any)?.isOpen) ctx.resume()   // called every frame, holding included
+ *   }
  */
 export class SequenceNode extends Node {
     private _data: SequenceData;
@@ -53,6 +62,11 @@ export class SequenceNode extends Node {
     private _paused = false;
     private _rate = 1;
     private _autoplayed = false;
+    /** The hold section playback waits at, and the holds already let go this playback. */
+    private _holding: string | null = null;
+    private readonly _released = new Set<string>();
+    /** Sequence seconds per real second over the last advance (audio tracks play at it). */
+    private _speed = 1;
     private readonly _overrides = new Map<string, Node>();
     private readonly _slotCache = new Map<string, Node>();
     private readonly _endListeners = new Set<(reason: SequenceEndReason) => void>();
@@ -93,6 +107,8 @@ export class SequenceNode extends Node {
     public get time(): number { return this._time; }
     public get isPlaying(): boolean { return this._playing; }
     public get isPaused(): boolean { return this._paused; }
+    /** Waiting at the end of a `hold` script section for a `resume()`. */
+    public get isHolding(): boolean { return this._holding !== null; }
     /** The camera the camera cut has on screen at the current time (reported even when `previewCuts` is off). */
     public get shotCamera(): Node | null { return this._player?.shotCamera ?? null; }
 
@@ -111,6 +127,8 @@ export class SequenceNode extends Node {
             if (node) this._overrides.set(id, unwrapScriptNode(node));
         }
         this._rate = typeof options.rate === 'number' && options.rate > 0 ? options.rate : 1;
+        this._holding = null;
+        this._released.clear();
         const from = Math.min(this._data.duration, Math.max(0, options.from ?? 0));
         this._finished = new Promise(resolve => { this._resolveFinished = resolve; });
         this._playing = true;
@@ -123,7 +141,20 @@ export class SequenceNode extends Node {
     }
 
     public pause(): void { if (this._playing) this._paused = true; }
-    public resume(): void { if (this._playing) this._paused = false; }
+
+    /** Carry on after `pause()`, and past a `hold` section the playback is waiting at. */
+    public resume(): void {
+        if (!this._playing) return;
+        this._paused = false;
+        this._releaseHold(this._holding);
+    }
+
+    /** Let hold `sectionId` go: now if playback waits at it, else when it gets there. */
+    private _releaseHold(sectionId: string | null): void {
+        if (!sectionId) return;
+        this._released.add(sectionId);
+        if (this._holding === sectionId) this._holding = null;
+    }
 
     /**
      * Stop and put back everything the sequence changed. After a playback that ran to its end (and kept its
@@ -137,6 +168,8 @@ export class SequenceNode extends Node {
     /** Jump to `time` without firing events (a scrub). Works while stopped too, for previews. */
     public seek(time: number): void {
         this._time = Math.min(this._data.duration, Math.max(0, time));
+        // A jump away from a hold leaves it behind (one jumped back to is held at again).
+        this._holding = null;
         this._apply(this._player_().evaluate(this._time));
     }
 
@@ -169,12 +202,25 @@ export class SequenceNode extends Node {
             return;
         }
         if (!this._playing || this._paused || !running) return;
+        const player = this._player_();
+        // Waiting at a hold: the frame stays, and the section's method is still called every frame, so it can
+        // watch for what it waits on and resume.
+        if (this._holding) { this._apply(player.evaluate(this._time, this._time)); return; }
         const dt = (this._data.clock === 'real' ? unscaledDelta : delta) * this._rate;
         if (!(dt > 0)) return;
+        if (unscaledDelta > 0) this._speed = dt / unscaledDelta;
         const duration = this._data.duration;
-        const player = this._player_();
         const prev = this._time;
         let next = prev + dt;
+        // A hold section ahead: land on its end and wait there.
+        const hold = player.holdBetween(prev, Math.min(next, duration), this._released);
+        if (hold) {
+            this._time = hold.end;
+            this._apply(player.evaluate(hold.end, prev));
+            // Its method may have let it go already, while it was being left.
+            if (!this._released.has(hold.id)) this._holding = hold.id;
+            return;
+        }
         if (next < duration) {
             this._time = next;
             this._apply(player.evaluate(next, prev));
@@ -196,6 +242,7 @@ export class SequenceNode extends Node {
     private _end(reason: SequenceEndReason, restore: boolean): void {
         this._playing = false;
         this._paused = false;
+        this._holding = null;
         // Step just past the end, so sections that run to it settle as they ask: the last shot of a cut track
         // hands the camera back (its default), a path or property holds its final value.
         if (reason === 'finished' && this._player) {
@@ -247,6 +294,13 @@ export class SequenceNode extends Node {
                 get renderer() { return sequenceGlobals.renderer?.() ?? null; },
                 get game() { return sequenceGlobals.game?.() ?? null; },
                 get applyCuts() { return self.previewCuts; },
+                // Editing: the scene is the one being authored, not a game's.
+                get authoring() { return authoring.enabled; },
+                get playbackRate() { return self._speed; },
+                setSlotOverride: (slot: string, node: any | null) => {
+                    if (node) self._overrides.set(slot, node); else self._overrides.delete(slot);
+                },
+                releaseHold: (sectionId: string) => self._releaseHold(sectionId),
             });
         }
         return this._player;

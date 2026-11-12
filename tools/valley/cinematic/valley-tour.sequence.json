@@ -2782,6 +2782,70 @@
           }
         }
       ]
+    },
+    {
+      "id": "lightning",
+      "name": "Lightning",
+      "type": "script",
+      "sections": [
+        {
+          "id": "lightning:storm",
+          "start": 211,
+          "end": 253,
+          "label": "Lightning",
+          "method": "lightning",
+          "args": [
+            7,
+            8
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pond-splashes",
+      "name": "Pond splashes",
+      "type": "spawn",
+      "sections": [
+        {
+          "id": "pond-splash:0",
+          "start": 357.2,
+          "end": 358.7,
+          "label": "Splash",
+          "template": "Water Splash",
+          "position": [
+            41.6,
+            0.465,
+            27.9
+          ],
+          "name": "Splash"
+        },
+        {
+          "id": "pond-splash:1",
+          "start": 358.4,
+          "end": 359.9,
+          "label": "Splash",
+          "template": "Water Splash",
+          "position": [
+            43.6,
+            0.465,
+            26.4
+          ],
+          "name": "Splash"
+        },
+        {
+          "id": "pond-splash:2",
+          "start": 359.4,
+          "end": 360.9,
+          "label": "Splash",
+          "template": "Water Splash",
+          "position": [
+            40.2,
+            0.465,
+            25.6
+          ],
+          "name": "Splash"
+        }
+      ]
     }
   ],
   "markers": [

@@ -238,7 +238,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(nodes().filter(n => n.type === 'uiRoot').map(n => n.name).sort()).toEqual(['Cinematic Overlay', 'Start Menu']);
         // The libraries hold what the scenery uses and nothing of the game (split.ts prunes them).
         for (const s of library('scripts')) expect(s.source, s.name).not.toMatch(/class Souls\w*Node/);
-        expect(library('scripts').map((s: any) => s.name).sort()).toEqual(['Day and Night', 'Fire Light', 'Fly Camera', 'Splash', 'Start Menu', 'Windmill Sails']);
+        expect(library('scripts').map((s: any) => s.name).sort()).toEqual(['Day and Night', 'Fire Light', 'Fly Camera', 'Splash', 'Start Menu', 'Tour Director', 'Windmill Sails']);
         // The standing Torch went with the torches the hamlet's light poles replaced (hamletDressing.ts).
         expect(library('templates').map((t: any) => t.name).sort()).toEqual(['Wall Torch', 'Water Splash', 'Water Step']);
         for (const lib of ['animations', 'animControllers', 'animationFields', 'rigs', 'aiBrains', 'boneMasks'])
@@ -698,6 +698,42 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         // The day clock can be held by the tour.
         const clock = nodes().find(n => n.name === 'Time of Day');
         expect(clock.script).toContain('public running: boolean = true');
+    });
+
+    it('lights the storm from the director and splashes the pond from a spawn track', async () => {
+        const { when, before } = await import('../tools/valley/cinematic/tour');
+        const tour = tourNode();
+        // The director: the library's Tour Director, its source the example script's, with the method the track calls.
+        const script = library('scripts').find((s: any) => s.id === tour.variables.__scriptId.value);
+        expect(script.name).toBe('Tour Director');
+        expect(tour.script).toBe(script.source);
+        expect(script.source).toBe(readFileSync(join(__dirname, '..', 'examples', 'scripts', 'ValleyTourDirector.ts'), 'utf8'));
+        const lightning = tour.sequence.tracks.find((t: any) => t.type === 'script');
+        expect(lightning.slot).toBeUndefined();
+        expect(lightning.sections).toHaveLength(1);
+        const strike = lightning.sections[0];
+        expect(strike.method).toBe('lightning');
+        expect(script.source).toContain(`${strike.method}(ctx`);
+        expect(strike.start).toBeGreaterThan(when('storm'));
+        expect(strike.end).toBeLessThan(before('storm'));
+        // What it flashes: a point light the GI and the probes never see, unshadowed, dark until a strike.
+        const light = nodes().find(n => n.name === 'Lightning');
+        expect(light).toMatchObject({ type: 'light', lightType: 'point', castShadows: false, bake: false });
+        expect(light.light.intensity).toBe(0);
+        expect(script.source).toContain(`lightningLight: string = '${light.name}'`);
+        // The pond's own splash effect, on its water, as the camera comes over it.
+        const splashes = tour.sequence.tracks.find((t: any) => t.type === 'spawn');
+        const pond = nodes().find(n => n.name === 'Pond Water');
+        const template = library('templates').find((t: any) => t.name === 'Water Splash');
+        expect(template).toBeDefined();
+        expect(splashes.sections.length).toBeGreaterThanOrEqual(3);
+        for (const s of splashes.sections) {
+            expect(s.template).toBe(template.name);
+            expect(s.position[1]).toBeCloseTo(pond.position[1], 2);
+            expect(Math.hypot(s.position[0] - pond.position[0], s.position[2] - pond.position[2])).toBeLessThan(8);
+            expect(s.start).toBeGreaterThanOrEqual(when('pond'));
+            expect(s.end).toBeLessThan(when('pond', 6));
+        }
     });
 
     it('ships the tour from its checked-in sequence file, every slot bound', async () => {

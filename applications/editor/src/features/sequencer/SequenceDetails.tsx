@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
+import { mat4, vec3 } from 'gl-matrix'
 import { CleoEngine, Game, compilePropertyPath, sequencePresetsFor, FOLIAGE_CHANNELS } from 'cleo'
 import type { SequenceNode } from 'cleo'
 import type {
-  FoliageChannel, FoliageSection, FoliageTrack, PathLook, PathSection, PresetSection, Scene, SequenceData, SequenceKey,
-  SequenceTrack,
+  AnimationSection, AudioSection, FoliageChannel, FoliageSection, FoliageTrack, PathLook, PathSection, PossessSection,
+  PresetSection, Scene, ScriptSection, SequenceCurve, SequenceData, SequenceKey, SequenceTrack, SpawnSection,
 } from 'cleo'
-import { Button, NumberInput, PropertyRow, PropertyTable, Select, TextInput, Toggle, VectorInput } from '@cleo/app-kit/ui'
+import { Button, ComboSelect, NumberInput, PropertyRow, PropertyTable, Select, TextInput, Toggle, VectorInput, cn } from '@cleo/app-kit/ui'
 import NodeRefInput from '../nodeInspector/NodeRefInput'
 import { useCleoEngine } from '../EngineContext'
+import { useAssetLibrary } from '../AssetLibraryContext'
 import * as E from './sequenceEdits'
+import { animatorNodeOf, clipNamesOf, newSectionInit, pawnSlotsFor } from './slotTargets'
 import type { SequencePreview } from './useSequencePreview'
 
 // The Sequencer's right-hand column: the selected section, key, event, track, slot or marker, editable, or the
@@ -91,9 +94,107 @@ function layerNamesOf(node: SequenceNode, track: SequenceTrack): string[] {
   return foliage.map(l => l.name)
 }
 
-/** What a new section on `track` starts as (a preset blend needs a preset). */
-function sectionInit(node: SequenceNode, track: SequenceTrack): Record<string, unknown> {
-  return track.type === 'preset' ? { preset: presetsOf(node, track)?.[0]?.id ?? 'clear' } : {}
+/** The editor camera's position, in `parent`'s space when given (a spawn under a slot's node). */
+function viewportPointIn(scene: Scene, parent: { worldTransform: mat4 } | null): Vec3 | null {
+  const pose = viewportPose(scene)
+  if (!pose || !parent) return pose?.pos ?? null
+  const inv = mat4.invert(mat4.create(), parent.worldTransform)
+  if (!inv) return pose.pos
+  const p = vec3.transformMat4(vec3.create(), pose.pos, inv)
+  return [round(p[0]), round(p[1]), round(p[2])]
+}
+
+/** A section's heading in the details, by its track's type. */
+const SECTION_TITLES: Record<SequenceTrack['type'], string> = {
+  path: 'Path section', cameraCut: 'Shot', property: 'Property section', event: 'Event', preset: 'Preset blend',
+  foliage: 'Foliage section', script: 'Script section', animation: 'Animation section', audio: 'Audio section',
+  spawn: 'Spawn', possess: 'Possession',
+}
+
+/** What "keep" and "restore" do once the timeline leaves a section of each type, and which it does unset. */
+interface FinishLabels { unset: string; keep: string; restore: string }
+const FINISH_DEFAULT: FinishLabels = { unset: 'Keep (default)', keep: 'Keep its last value', restore: 'Restore what was there' }
+const FINISH: Partial<Record<SequenceTrack['type'], FinishLabels>> = {
+  cameraCut: { ...FINISH_DEFAULT, unset: 'Restore (default)' },
+  animation: { unset: 'Fade the clip out (default)', keep: 'Let the clip play out', restore: 'Fade the clip out' },
+  audio: { unset: 'Stop the sound (default)', keep: 'Let the sound play on', restore: 'Stop the sound' },
+  spawn: { unset: 'Remove it (default)', keep: 'Leave it in the scene', restore: 'Remove it' },
+  possess: { unset: 'Hand the pawn back (default)', keep: 'Keep the pawn', restore: 'Hand the pawn back' },
+}
+
+/** A method name a script can declare. */
+const isMethodName = (text: string) => /^[A-Za-z_$][\w$]*$/.test(text.trim())
+
+/** Arguments typed as JSON: an array, nothing (none), or null while the text is not one yet. */
+function parseArgs(text: string): unknown[] | undefined | null {
+  if (!text.trim()) return undefined
+  try { const a = JSON.parse(text); return Array.isArray(a) ? a : null } catch { return null }
+}
+
+/**
+ * A text field over a draft: what is typed stays in the box, and only text `valid` accepts is handed on (an
+ * empty method would drop the section, half-typed JSON is not arguments yet). Flagged while the draft is not
+ * valid; back to the stored value on leaving the field. Key it by what it edits, so a new selection starts clean.
+ */
+function DraftInput({ value, valid, onChange, placeholder, title, invalidTitle }: {
+  value: string; valid: (text: string) => boolean; onChange: (text: string) => void
+  placeholder?: string; title?: string; invalidTitle?: string
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const ok = draft === null || valid(draft)
+  return (
+    <TextInput value={draft ?? value} placeholder={placeholder} title={ok ? title : invalidTitle ?? title}
+      className={cn(!ok && 'border-danger text-danger-fg')}
+      onChange={text => { setDraft(text); if (valid(text)) onChange(text) }}
+      onBlur={() => setDraft(null)} />
+  )
+}
+
+/** A call's arguments as JSON (`[1, "two"]`), handed on once the text is an array (or empty: none). */
+function ArgsInput({ value, onChange }: { value: unknown[] | undefined; onChange: (args: unknown[] | undefined) => void }) {
+  return (
+    <DraftInput value={value ? JSON.stringify(value) : ''} placeholder='[1, "two"]'
+      title='Passed on in ctx.args, as a JSON array' invalidTitle='Not a JSON array yet'
+      valid={text => parseArgs(text) !== null} onChange={text => onChange(parseArgs(text) ?? undefined)} />
+  )
+}
+
+/**
+ * One of a section's curves as a table of keys (section seconds, value, interpolation), with a Key button that
+ * adds one at the playhead: a Foliage channel, an Audio section's volume.
+ */
+function KeyTable({ seq, sref, field, curve, label, hint, unset, isBool, newKey, clampValue, local, settle, commit }: {
+  seq: SequenceData; sref: E.SectionRef; field: E.CurveField; curve: SequenceCurve | undefined
+  label: string; hint: string; unset: string; isBool?: boolean
+  /** The value a key added at section time `t` starts with. */
+  newKey: (t: number) => SequenceKey['v']
+  clampValue?: (v: number) => number
+  local: number; settle: (label: string, next: SequenceData) => void; commit: Commit
+}) {
+  return (
+    <div className='mt-2'>
+      <div className='mb-1 flex items-center gap-1 text-ui-xs text-dim' title={hint}>
+        <span className='flex-1'>{label}{curve ? '' : ` (${unset})`}</span>
+        <Button size='sm' title={`Add a ${label.toLowerCase()} key at the playhead`}
+          onClick={() => void commit(`Key ${label.toLowerCase()}`, E.setSectionKey(seq, sref, round(local), newKey(round(local)), undefined, field))}>Key</Button>
+      </div>
+      {curve?.keys.map((k, i) => (
+        <div key={i} className='mb-1 flex items-center gap-1 px-1'>
+          <NumberInput className='w-[56px]' value={k.t} step={0.1} onChange={v => settle('Move key', E.moveSectionKey(seq, sref, i, v, field))} />
+          <div className='min-w-0 flex-1'>
+            <ValueInput type={isBool ? 'bool' : 'number'} value={k.v}
+              onChange={v => settle('Edit key', E.patchSectionKey(seq, sref, i, { v: clampValue && typeof v === 'number' ? clampValue(v) : v }, field))} />
+          </div>
+          {!isBool && (
+            <Select className='w-[64px]' value={k.interp ?? 'auto'} onChange={e => void commit('Key interpolation', E.patchSectionKey(seq, sref, i, { interp: e.target.value as any }, field))}>
+              <option value='auto'>auto</option><option value='linear'>linear</option><option value='cubic'>cubic</option><option value='constant'>step</option>
+            </Select>
+          )}
+          <Button size='sm' variant='ghost' title='Delete key' onClick={() => void commit('Delete key', E.deleteSectionKey(seq, sref, i, field))}>×</Button>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 const FOLIAGE_LABELS: Record<FoliageChannel, { label: string; hint: string }> = {
@@ -117,6 +218,8 @@ function ValueInput({ type, value, onChange }: { type: string; value: SequenceKe
 export default function SequenceDetails({ node, seq, sel, setSel, commit, preview, scene }: Props) {
   const settle = useSettledCommit(node, commit, preview)
   const [, force] = useState(0)
+  const { templates } = useAssetLibrary()
+  const templateNames = templates.map(t => t.name)
 
   // ---- nothing selected: the sequence --------------------------------------------------------------------
   if (!sel) {
@@ -210,8 +313,7 @@ export default function SequenceDetails({ node, seq, sel, setSel, commit, previe
             </Select>
           </PropertyRow>
           <PropertyRow label='Arguments' divider={false}>
-            <TextInput value={k.args ? JSON.stringify(k.args) : ''} placeholder='[1, "two"]'
-              onChange={v => { try { const a = v.trim() ? JSON.parse(v) : undefined; if (a === undefined || Array.isArray(a)) patch({ args: a }) } catch { /* still typing */ } }} />
+            <ArgsInput key={`${track.id}:${sel.index}`} value={k.args} onChange={args => patch({ args })} />
           </PropertyRow>
         </PropertyTable>
       </div>
@@ -232,6 +334,33 @@ export default function SequenceDetails({ node, seq, sel, setSel, commit, previe
             </PropertyRow>
           )}
           {track.type === 'foliage' && <FoliageLayersRow node={node} seq={seq} track={track} commit={commit} />}
+          {track.type === 'script' && (
+            <PropertyRow label='Calls' divider={false}>
+              <Select value={track.slot ?? ''} title='Whose script the sections call'
+                onChange={e => void commit('Script target', E.patchTrack(seq, track.id, { slot: e.target.value || undefined } as any))}>
+                <option value=''>The director (this node's script)</option>
+                {seq.slots.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </Select>
+            </PropertyRow>
+          )}
+          {track.type === 'animation' && (() => {
+            const owner = animatorNodeOf(node.resolveSlot(track.slot)) as { name?: string } | null
+            const clips = clipNamesOf(node.resolveSlot(track.slot))
+            return <>
+              <PropertyRow label='Action slot'>
+                <TextInput value={track.animSlot ?? ''} placeholder='Sequence' title="The animator's action slot the clips play in (a masked one keeps the legs on locomotion)"
+                  onChange={v => settle('Action slot', E.patchTrack(seq, track.id, { animSlot: v || undefined } as any))} />
+              </PropertyRow>
+              <PropertyRow label='Clips' divider={false}>
+                <span className='text-ui-xs text-dim'>{owner ? `${clips.length} on ${owner.name ?? 'its animator'}` : node.resolveSlot(track.slot) ? 'No animator on the bound node' : 'The slot is unbound'}</span>
+              </PropertyRow>
+            </>
+          })()}
+          {(track.type === 'audio' || track.type === 'possess') && (
+            <PropertyRow label={track.type === 'audio' ? 'Sound' : 'Controller'} divider={false}>
+              <span className='text-ui-xs text-dim'>{node.resolveSlot(track.slot)?.name ?? 'The slot is unbound'}</span>
+            </PropertyRow>
+          )}
           {track.type === 'property' && <>
             <PropertyRow label='Path'><TextInput value={track.path} onChange={v => settle('Property path', E.patchTrack(seq, track.id, { path: v } as any))} /></PropertyRow>
             <PropertyRow label='Value' divider={false}>
@@ -241,10 +370,15 @@ export default function SequenceDetails({ node, seq, sel, setSel, commit, previe
             </PropertyRow>
           </>}
         </PropertyTable>
+        {track.type === 'spawn' && <div className='mt-2 text-ui-xs text-dim'>Spawns in Play only: the editor's preview spawns nothing.</div>}
+        {track.type === 'script' && <div className='mt-2 text-ui-xs text-dim'>Scripts run in Play only: the editor's preview calls nothing.</div>}
+        {track.type === 'audio' && <div className='mt-2 text-ui-xs text-dim'>Sounds stay quiet while you edit: the track is heard in Play.</div>}
         <div className='mt-2 flex flex-wrap gap-1'>
           {track.type !== 'event' && (
-            <Button size='sm' onClick={() => {
-              const r = E.addSection(seq, track.id, preview.timeRef.current, 5, sectionInit(node, track))
+            <Button size='sm' onClick={async () => {
+              const at = preview.timeRef.current
+              const init = await newSectionInit(node, seq, track, templateNames)
+              const r = init ? E.addSection(seq, track.id, at, 5, init) : null
               if (r) { void commit('Add section', r.seq); setSel({ kind: 'section', ...r.ref }) }
             }}>Add section at the playhead</Button>
           )}
@@ -263,25 +397,116 @@ export default function SequenceDetails({ node, seq, sel, setSel, commit, previe
   if (!s) return null
   const span = s.end - s.start
   const local = Math.min(span, Math.max(0, preview.timeRef.current - s.start))
+  const finish = FINISH[track.type] ?? FINISH_DEFAULT
+  // A script section's method is told when it is left (its exit): there is nothing for the sequence to keep.
+  const hasFinish = track.type !== 'script'
 
   return (
     <div className='p-2'>
-      <div className='mb-1 text-ui-sm text-fg'>{track.type === 'path' ? 'Path section' : track.type === 'cameraCut' ? 'Shot'
-        : track.type === 'preset' ? 'Preset blend' : track.type === 'foliage' ? 'Foliage section' : 'Property section'}</div>
+      <div className='mb-1 text-ui-sm text-fg'>{SECTION_TITLES[track.type]}</div>
       <PropertyTable columns={['40%', '60%']}>
         <PropertyRow label='Label'><TextInput value={s.label ?? ''} onChange={v => settle('Label', E.patchSection(seq, ref, { label: v || undefined }))} /></PropertyRow>
         <PropertyRow label='Start'><NumberInput value={round(s.start)} step={0.1} onChange={v => settle('Trim section', E.trimSectionStart(seq, ref, v))} /></PropertyRow>
         <PropertyRow label='End'><NumberInput value={round(s.end)} step={0.1} onChange={v => settle('Trim section', E.trimSectionEnd(seq, ref, v))} /></PropertyRow>
         <PropertyRow label='Ease in'><NumberInput value={s.easeIn ?? 0} step={0.1} min={0} onChange={v => settle('Ease section', E.patchSection(seq, ref, { easeIn: v }))} /></PropertyRow>
-        <PropertyRow label='Ease out'><NumberInput value={s.easeOut ?? 0} step={0.1} min={0} onChange={v => settle('Ease section', E.patchSection(seq, ref, { easeOut: v }))} /></PropertyRow>
-        <PropertyRow label='When finished' divider={false}>
-          <Select value={s.whenFinished ?? ''} onChange={e => void commit('When finished', E.patchSection(seq, ref, { whenFinished: (e.target.value || undefined) as any }))}>
-            <option value=''>{track.type === 'cameraCut' ? 'Restore (default)' : 'Keep (default)'}</option>
-            <option value='keep'>Keep its last value</option>
-            <option value='restore'>Restore what was there</option>
-          </Select>
-        </PropertyRow>
+        <PropertyRow label='Ease out' divider={hasFinish}><NumberInput value={s.easeOut ?? 0} step={0.1} min={0} onChange={v => settle('Ease section', E.patchSection(seq, ref, { easeOut: v }))} /></PropertyRow>
+        {hasFinish && (
+          <PropertyRow label='When finished' divider={false}>
+            <Select value={s.whenFinished ?? ''} onChange={e => void commit('When finished', E.patchSection(seq, ref, { whenFinished: (e.target.value || undefined) as any }))}>
+              <option value=''>{finish.unset}</option>
+              <option value='keep'>{finish.keep}</option>
+              <option value='restore'>{finish.restore}</option>
+            </Select>
+          </PropertyRow>
+        )}
       </PropertyTable>
+
+      {track.type === 'script' && (() => {
+        const ss = s as ScriptSection
+        const who = track.slot ? (seq.slots.find(sl => sl.id === track.slot)?.name ?? track.slot) : 'the director'
+        return <>
+          <PropertyTable columns={['40%', '60%']} className='mt-2'>
+            <PropertyRow label='Method'>
+              <DraftInput key={`${s.id}:method`} value={ss.method} placeholder={E.DEFAULT_SCRIPT_METHOD}
+                title='Called with a context on entering the section, every frame inside it and on leaving it'
+                invalidTitle='A method name: letters, digits and _, not starting with a digit'
+                valid={isMethodName} onChange={v => settle('Script method', E.patchSection(seq, ref, { method: v.trim() }))} />
+            </PropertyRow>
+            <PropertyRow label='Arguments'>
+              <ArgsInput key={`${s.id}:args`} value={ss.args} onChange={args => settle('Script arguments', E.patchSection(seq, ref, { args }))} />
+            </PropertyRow>
+            <PropertyRow label='Hold at the end' divider={false}>
+              <Toggle checked={!!ss.hold} title='Playback waits at the end of this section until the method calls ctx.resume()'
+                onChange={v => void commit('Hold', E.patchSection(seq, ref, { hold: v }))} />
+            </PropertyRow>
+          </PropertyTable>
+          <div className='mt-2 text-ui-xs text-dim'>
+            Calls {ss.method}(ctx) on {who}{ss.hold ? ', then waits at the end until ctx.resume()' : ''}. Scripts run in Play only.
+          </div>
+        </>
+      })()}
+
+      {track.type === 'animation' && (() => {
+        const an = s as AnimationSection
+        const clips = clipNamesOf(node.resolveSlot(track.slot))
+        return (
+          <PropertyTable columns={['40%', '60%']} className='mt-2'>
+            <PropertyRow label='Clip'>
+              {clips.length > 0
+                ? <ComboSelect value={an.clip} noun='clip' allowEmpty={false} allowCustom choices={clips.map(value => ({ value }))}
+                    title='The clip played as an action over the controller' onChange={v => { if (v.trim()) void commit('Clip', E.patchSection(seq, ref, { clip: v.trim() })) }} />
+                : <DraftInput key={`${s.id}:clip`} value={an.clip} title="The clip's name (the bound node shows no clips here)"
+                    valid={v => v.trim().length > 0} onChange={v => settle('Clip', E.patchSection(seq, ref, { clip: v.trim() }))} />}
+            </PropertyRow>
+            <PropertyRow label='Clip start'>
+              <NumberInput value={an.clipStart ?? 0} step={0.1} min={0} title="Clip seconds at the section's start"
+                onChange={v => settle('Clip start', E.patchSection(seq, ref, { clipStart: Math.max(0, v) }))} />
+            </PropertyRow>
+            <PropertyRow label='Speed'>
+              <NumberInput value={an.speed ?? 1} step={0.1} min={0} title='Clip seconds per sequence second'
+                onChange={v => settle('Clip speed', E.patchSection(seq, ref, { speed: Math.max(0, v) }))} />
+            </PropertyRow>
+            <PropertyRow label='Loop' divider={false}>
+              <Toggle checked={!!an.loop} onChange={v => void commit('Loop clip', E.patchSection(seq, ref, { loop: v }))} />
+            </PropertyRow>
+          </PropertyTable>
+        )
+      })()}
+
+      {track.type === 'audio' && (() => {
+        const au = s as AudioSection
+        return <>
+          <PropertyTable columns={['40%', '60%']} className='mt-2'>
+            <PropertyRow label='Offset' divider={false}>
+              <NumberInput value={au.offset ?? 0} step={0.1} min={0} title="Seconds into the sample at the section's start"
+                onChange={v => settle('Audio offset', E.patchSection(seq, ref, { offset: Math.max(0, v) }))} />
+            </PropertyRow>
+          </PropertyTable>
+          <KeyTable seq={seq} sref={ref} field='volume' curve={au.volume as SequenceCurve | undefined} label='Volume'
+            hint="× the sound node's volume over the section, 0 to 1 (times the eases)" unset='full'
+            newKey={t => (au.volume ? E.curveValueAt(au.volume as SequenceCurve, t) : 1)} clampValue={v => Math.min(1, Math.max(0, v))}
+            local={local} settle={settle} commit={commit} />
+        </>
+      })()}
+
+      {track.type === 'spawn' && <SpawnFields node={node} seq={seq} sref={ref} s={s as SpawnSection} scene={scene}
+        templates={templateNames} settle={settle} commit={commit} />}
+
+      {track.type === 'possess' && (() => {
+        const ps = s as PossessSection
+        const pawns = pawnSlotsFor(node, seq, track.slot)
+        return (
+          <PropertyTable columns={['40%', '60%']} className='mt-2'>
+            <PropertyRow label='Pawn' divider={false}>
+              <Select value={ps.pawn} title='The slot whose character the controller takes over'
+                onChange={e => void commit('Pawn', E.patchSection(seq, ref, { pawn: e.target.value }))}>
+                {!pawns.some(p => p.id === ps.pawn) && <option value={ps.pawn}>{ps.pawn} (missing)</option>}
+                {pawns.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Select>
+            </PropertyRow>
+          </PropertyTable>
+        )
+      })()}
 
       {track.type === 'cameraCut' && (
         <PropertyTable columns={['40%', '60%']} className='mt-2'>
@@ -317,32 +542,11 @@ export default function SequenceDetails({ node, seq, sel, setSel, commit, previe
       })()}
 
       {track.type === 'foliage' && FOLIAGE_CHANNELS.map(channel => {
-        const fs = s as FoliageSection
-        const curve = fs[channel]
         const { label, hint } = FOLIAGE_LABELS[channel]
-        const isBool = channel === 'shadows'
         return (
-          <div key={channel} className='mt-2'>
-            <div className='mb-1 flex items-center gap-1 text-ui-xs text-dim' title={hint}>
-              <span className='flex-1'>{label}{curve ? '' : ' (as authored)'}</span>
-              <Button size='sm' title={`Add a ${label.toLowerCase()} key at the playhead`}
-                onClick={() => void commit(`Key ${label.toLowerCase()}`, E.setSectionKey(seq, ref, round(local), isBool ? true : 1, undefined, channel))}>Key</Button>
-            </div>
-            {curve?.keys.map((k, i) => (
-              <div key={i} className='mb-1 flex items-center gap-1 px-1'>
-                <NumberInput className='w-[56px]' value={k.t} step={0.1} onChange={v => settle('Move key', E.moveSectionKey(seq, ref, i, v, channel))} />
-                <div className='min-w-0 flex-1'>
-                  <ValueInput type={isBool ? 'bool' : 'number'} value={k.v} onChange={v => settle('Edit key', E.patchSectionKey(seq, ref, i, { v }, channel))} />
-                </div>
-                {!isBool && (
-                  <Select className='w-[64px]' value={k.interp ?? 'auto'} onChange={e => void commit('Key interpolation', E.patchSectionKey(seq, ref, i, { interp: e.target.value as any }, channel))}>
-                    <option value='auto'>auto</option><option value='linear'>linear</option><option value='cubic'>cubic</option><option value='constant'>step</option>
-                  </Select>
-                )}
-                <Button size='sm' variant='ghost' title='Delete key' onClick={() => void commit('Delete key', E.deleteSectionKey(seq, ref, i, channel))}>×</Button>
-              </div>
-            ))}
-          </div>
+          <KeyTable key={channel} seq={seq} sref={ref} field={channel} curve={(s as FoliageSection)[channel] as SequenceCurve | undefined}
+            label={label} hint={hint} unset='as authored' isBool={channel === 'shadows'} newKey={() => (channel === 'shadows' ? true : 1)}
+            local={local} settle={settle} commit={commit} />
         )
       })}
 
@@ -459,6 +663,61 @@ function PathFields({ seq, sref, s, scene, settle, commit }: {
         <Button size='sm' variant='ghost' title='The same speed all along'
           onClick={() => void commit('Constant speed', E.patchSection(seq, sref, { progress: { keys: [{ t: 0, v: 0, interp: 'linear' }, { t: s.end - s.start, v: 1 }] } }))}>Constant speed</Button>
       </div>
+    </div>
+  )
+}
+
+/** A spawn section's template, where it appears, under what, and the slot it fills. */
+function SpawnFields({ node, seq, sref, s, scene, templates, settle, commit }: {
+  node: SequenceNode; seq: SequenceData; sref: E.SectionRef; s: SpawnSection; scene: Scene; templates: string[]
+  settle: (label: string, next: SequenceData) => void; commit: Commit
+}) {
+  const patch = (label: string, p: Partial<SpawnSection>) => void commit(label, E.patchSection(seq, sref, p))
+  const parentNode = s.parent ? node.resolveSlot(s.parent) : null
+  const slotOptions = seq.slots.map(sl => <option key={sl.id} value={sl.id}>{sl.name}</option>)
+  const vectorRow = (label: string, key: 'position' | 'rotation', note: string, extra?: React.ReactNode) => (
+    <div className='mt-2'>
+      <div className='mb-1 flex items-center gap-1 text-ui-xs text-dim'>
+        <span className='flex-1'>{label}{s[key] ? note : " (the template's own)"}</span>
+        {extra}
+        {s[key] && <Button size='sm' variant='ghost' title="Back to the template's own" onClick={() => patch(`Spawn ${label.toLowerCase()}`, { [key]: undefined })}>×</Button>}
+      </div>
+      <VectorInput value={s[key] ?? [0, 0, 0]} step={key === 'rotation' ? 1 : 0.1}
+        onChange={v => settle(`Spawn ${label.toLowerCase()}`, E.patchSection(seq, sref, { [key]: v.slice(0, 3) as Vec3 }))} />
+    </div>
+  )
+  return (
+    <div className='mt-2'>
+      <PropertyTable columns={['40%', '60%']}>
+        <PropertyRow label='Template'>
+          {templates.length > 0
+            ? <ComboSelect value={s.template} noun='template' allowEmpty={false} allowCustom choices={templates.map(value => ({ value }))}
+                title='The template instantiated while the section is in' onChange={v => { if (v.trim()) patch('Spawn template', { template: v.trim() }) }} />
+            : <DraftInput key={`${s.id}:template`} value={s.template} title="The template's name (the project has none yet)"
+                valid={v => v.trim().length > 0} onChange={v => settle('Spawn template', E.patchSection(seq, sref, { template: v.trim() }))} />}
+        </PropertyRow>
+        <PropertyRow label='Name'>
+          <TextInput value={s.name ?? ''} placeholder="The template's own" onChange={v => settle('Spawn name', E.patchSection(seq, sref, { name: v || undefined }))} />
+        </PropertyRow>
+        <PropertyRow label='Parent'>
+          <Select value={s.parent ?? ''} title="Spawn under this slot's node instead of the scene root"
+            onChange={e => patch('Spawn parent', { parent: e.target.value || undefined })}>
+            <option value=''>The scene root</option>
+            {slotOptions}
+          </Select>
+        </PropertyRow>
+        <PropertyRow label='Fills slot' divider={false}>
+          <Select value={s.bindAs ?? ''} title='The slot the spawned node fills while it lives, so other tracks drive it'
+            onChange={e => patch('Spawn slot', { bindAs: e.target.value || undefined })}>
+            <option value=''>None</option>
+            {slotOptions}
+          </Select>
+        </PropertyRow>
+      </PropertyTable>
+      {vectorRow('Position', 'position', s.parent ? ' (local to the parent)' : '',
+        <Button size='sm' title={s.parent ? "The editor camera's position, in the parent's space" : "The editor camera's position"}
+          onClick={() => { const p = viewportPointIn(scene, parentNode); if (p) patch('Spawn position', { position: p }) }}>Set from viewport</Button>)}
+      {vectorRow('Rotation', 'rotation', ' (degrees)')}
     </div>
   )
 }

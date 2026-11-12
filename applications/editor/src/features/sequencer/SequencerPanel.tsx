@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { isTextEntryEvent, SequenceNode, sequencePresetsFor } from 'cleo'
+import { isTextEntryEvent, SequenceNode } from 'cleo'
 import type { SequenceData, SequenceSlot, SequenceTrack } from 'cleo'
 import {
   Button, ContextMenu, MenuItem, Popover, LoopIcon, PauseIcon, PilotIcon, PlayIcon, SnapIcon, StepBackIcon,
@@ -9,12 +9,14 @@ import { TimeRuler, fitZoom, formatTimecode, snapTime, startPointerDrag, timeToX
 import { promptDialog } from '@cleo/app-kit/feedback/dialogStore'
 import { toast } from '@cleo/app-kit/feedback/toastStore'
 import { useCleoEngine } from '../EngineContext'
+import { useAssetLibrary } from '../AssetLibraryContext'
 import { useHistory } from '../HistoryContext'
 import { settableProps } from '../agentBridge/inspect'
 import { SequenceIcon } from '../sceneInspector/nodeIcons'
 import * as E from './sequenceEdits'
 import { downloadSequence, pickSequenceFile } from './sequenceFile'
 import { useSequencePreview } from './useSequencePreview'
+import { newSectionInit, slotTrackOffers } from './slotTargets'
 import SequenceDetails, { type Selection } from './SequenceDetails'
 
 // The Sequencer: the selected Sequence node's timeline, docked in the bottom strip.
@@ -51,6 +53,11 @@ const TRACK_COLORS: Record<SequenceTrack['type'], string> = {
   event: 'bg-highlight/50 border-highlight',
   preset: 'bg-axis-z/45 border-axis-z',
   foliage: 'bg-axis-y/40 border-axis-y',
+  script: 'bg-node-ui/35 border-node-ui',
+  animation: 'bg-axis-x/35 border-axis-x',
+  audio: 'bg-success-fg/30 border-success-fg',
+  spawn: 'bg-danger/35 border-danger',
+  possess: 'bg-muted/30 border-muted',
 }
 
 const trackLabel = (t: SequenceTrack): string => {
@@ -60,12 +67,20 @@ const trackLabel = (t: SequenceTrack): string => {
   if (t.type === 'event') return 'Events'
   if (t.type === 'preset') return 'Presets'
   if (t.type === 'foliage') return t.layers === 'all' ? 'Foliage (all layers)' : `Foliage (${t.layers.length} layer${t.layers.length === 1 ? '' : 's'})`
+  if (t.type === 'script') return t.slot ? 'Script' : 'Director script'
+  if (t.type === 'animation') return t.animSlot && t.animSlot !== 'Sequence' ? `Animation (${t.animSlot})` : 'Animation'
+  if (t.type === 'audio') return 'Audio'
+  if (t.type === 'spawn') return 'Spawn'
+  if (t.type === 'possess') return 'Possess'
   return t.target ? `${t.target}.${t.path}` : t.path
 }
 
-/** The slot a track drives, when it drives one (a renderer or game property, the cut and events do not). */
+/**
+ * The slot a track drives, when it drives one (a renderer or game property, the cut, events, spawns and the
+ * director's script do not).
+ */
 const slotOf = (t: SequenceTrack): string | undefined =>
-  t.type === 'path' || t.type === 'preset' || t.type === 'foliage' || (t.type === 'property' && !t.target) ? t.slot : undefined
+  t.type === 'cameraCut' || t.type === 'event' || t.type === 'spawn' || (t.type === 'property' && t.target) ? undefined : t.slot || undefined
 
 /** What a section block reads: its label, else what it does. */
 function sectionText(seq: SequenceData, t: SequenceTrack, s: any): string {
@@ -74,11 +89,18 @@ function sectionText(seq: SequenceData, t: SequenceTrack, s: any): string {
   if (t.type === 'path') return `${s.points?.length ?? 0} points`
   if (t.type === 'preset') return s.from ? `${s.from} → ${s.preset}` : `→ ${s.preset}`
   if (t.type === 'foliage') return ['density', 'cull', 'billboard', 'shadows'].filter(c => s[c]).join(' · ')
+  if (t.type === 'script') return `${s.method}()`
+  if (t.type === 'animation') return s.clip
+  if (t.type === 'audio') return 'Audio'
+  if (t.type === 'spawn') return s.template
+  if (t.type === 'possess') return seq.slots.find(sl => sl.id === s.pawn)?.name ?? s.pawn
   return ''
 }
 
 export default function SequencerPanel({ active }: { active: boolean }) {
   const { editorScene, selectedNode, eventEmitter, withoutDirty } = useCleoEngine()
+  const { templates } = useAssetLibrary()
+  const templateNames = useMemo(() => templates.map(t => t.name), [templates])
   const history = useHistory()
   const [targetId, setTargetId] = useState<string | null>(null)
   const [, setVersion] = useState(0)
@@ -157,9 +179,12 @@ export default function SequencerPanel({ active }: { active: boolean }) {
   const rows = useMemo<Row[]>(() => {
     if (!seq) return []
     const out: Row[] = []
+    // Slots a spawn fills while it lives: unbound in the editor, and that is fine.
+    const spawned = new Set(seq.tracks.flatMap(t => (t.type === 'spawn' ? t.sections.map(s => s.bindAs) : [])))
     for (const slot of seq.slots) {
       const bound = node?.resolveSlot(slot.id)
-      out.push({ kind: 'group', key: `slot:${slot.id}`, label: slot.name, detail: bound ? bound.name : (slot.path ? `(${slot.path})` : '(unbound)'), slot })
+      const detail = bound ? bound.name : slot.path ? `(${slot.path})` : spawned.has(slot.id) ? '(spawned)' : '(unbound)'
+      out.push({ kind: 'group', key: `slot:${slot.id}`, label: slot.name, detail, slot })
       for (const t of seq.tracks) if (slotOf(t) === slot.id) out.push({ kind: 'track', key: t.id, track: t })
     }
     const own = seq.tracks.filter(t => { const slot = slotOf(t); return !slot || !seq.slots.some(s => s.id === slot) })
@@ -346,27 +371,23 @@ export default function SequencerPanel({ active }: { active: boolean }) {
       void commit('Add event', E.addEventKey(seq, track.id, { t, name: 'event' }))
       return
     }
-    const r = E.addSection(seq, track.id, t, Math.min(5, Math.max(1, duration - t)), sectionInit(track))
-    if (r) { setSel({ kind: 'section', ...r.ref }); void commit('Add section', r.seq) }
+    void addSectionAt(track, t, Math.min(5, Math.max(1, duration - t)))
   }
 
-  /** What a new section on `track` starts as: a preset blend into the bound node's first preset. */
-  const sectionInit = (track: SequenceTrack): Record<string, unknown> => {
-    if (track.type !== 'preset') return {}
-    const list = sequencePresetsFor(node?.resolveSlot(track.slot) ?? null)
-    return { preset: list?.[0]?.id ?? 'clear' }
+  /**
+   * A new section on `track` from `t`, shaped for its type (a preset to blend to, a clip, a template, a pawn: see
+   * slotTargets.ts), selected.
+   */
+  const addSectionAt = async (track: SequenceTrack, t: number, length: number) => {
+    if (!seq || !node) return
+    const init = await newSectionInit(node, seq, track, templateNames)
+    if (!init) return
+    const r = E.addSection(seq, track.id, t, length, init)
+    if (r) { setSel({ kind: 'section', ...r.ref }); await commit('Add section', r.seq) }
   }
 
-  /** The tracks a slot's node can take beyond Path and Property: presets for a node with a preset list, foliage for a landscape. */
-  const extraTracksFor = (slot: SequenceSlot): { label: string; track: Omit<SequenceTrack, 'id'>; undo: string }[] => {
-    const bound = node?.resolveSlot(slot.id)
-    const out: { label: string; track: Omit<SequenceTrack, 'id'>; undo: string }[] = []
-    if (sequencePresetsFor(bound ?? (slot.nodeType ?? null)))
-      out.push({ label: 'Presets', track: { type: 'preset', slot: slot.id, sections: [] } as any, undo: 'Add presets track' })
-    if ((bound?.nodeType ?? slot.nodeType) === 'landscape')
-      out.push({ label: 'Foliage', track: { type: 'foliage', slot: slot.id, layers: 'all', sections: [] } as any, undo: 'Add foliage track' })
-    return out
-  }
+  /** The tracks a slot's node can take beyond Path and Property (slotTargets.ts). */
+  const extraTracksFor = (slot: SequenceSlot) => (node ? slotTrackOffers(node, slot) : [])
 
   // ---- commands ------------------------------------------------------------------------------------------
 
@@ -546,6 +567,8 @@ export default function SequencerPanel({ active }: { active: boolean }) {
             <div className='w-[220px]'>
               <MenuItem disabled={seq.tracks.some(t => t.type === 'cameraCut')} onClick={() => { close(); void addTrack({ type: 'cameraCut', sections: [] } as any, 'Add camera cut track') }}>Camera cut</MenuItem>
               <MenuItem onClick={() => { close(); void addTrack({ type: 'event', keys: [] } as any, 'Add event track') }}>Events</MenuItem>
+              <MenuItem title="Calls a method of the Sequence node's own script over each section" onClick={() => { close(); void addTrack({ type: 'script', sections: [] } as any, 'Add director script track') }}>Director script</MenuItem>
+              <MenuItem title='Spawns a template over each section (in Play only)' onClick={() => { close(); void addTrack({ type: 'spawn', sections: [] } as any, 'Add spawn track') }}>Spawn</MenuItem>
               <MenuItem onClick={() => { close(); void addPropertyTrack(null, 'renderer') }}>Renderer property…</MenuItem>
               <MenuItem onClick={() => { close(); void addPropertyTrack(null, 'game') }}>Game property…</MenuItem>
               {seq.slots.map(slot => (
@@ -624,7 +647,7 @@ export default function SequencerPanel({ active }: { active: boolean }) {
                       const t = r.track
                       setMenu({ x: e.clientX, y: e.clientY, items: [
                         { label: t.muted ? 'Unmute' : 'Mute', run: () => void commit(t.muted ? 'Unmute track' : 'Mute track', E.patchTrack(seq, t.id, { muted: !t.muted })) },
-                        { label: 'Add section at the playhead', run: () => { if (t.type === 'event') void commit('Add event', E.addEventKey(seq, t.id, { t: preview.timeRef.current, name: 'event' })); else { const res = E.addSection(seq, t.id, preview.timeRef.current, 5, sectionInit(t)); if (res) void commit('Add section', res.seq) } } },
+                        { label: 'Add section at the playhead', run: () => { if (t.type === 'event') void commit('Add event', E.addEventKey(seq, t.id, { t: preview.timeRef.current, name: 'event' })); else void addSectionAt(t, preview.timeRef.current, 5) } },
                         { label: 'Delete track', danger: true, run: () => void commit('Delete track', E.deleteTrack(seq, t.id)) },
                       ] })
                     }}>
@@ -665,7 +688,7 @@ export default function SequencerPanel({ active }: { active: boolean }) {
                       const ein = Math.min(w, (s.easeIn ?? 0) * pxPerSec), eout = Math.min(w, (s.easeOut ?? 0) * pxPerSec)
                       const text = sectionText(seq, r.track, s)
                       return (
-                        <div key={s.id} title={`${text || trackLabel(r.track)}: ${s.start.toFixed(2)}–${s.end.toFixed(2)} s · drag to move, edges to trim, top corners to ease`}
+                        <div key={s.id} title={`${text || trackLabel(r.track)}: ${s.start.toFixed(2)}–${s.end.toFixed(2)} s${s.hold ? ', then holds until resumed' : ''} · drag to move, edges to trim, top corners to ease`}
                           className={cn('absolute top-[3px] overflow-hidden rounded-sm border text-ui-xs text-fg', TRACK_COLORS[r.track.type],
                             isSel && 'ring-2 ring-fg', 'cursor-grab')}
                           style={{ left: x(s.start), width: w, height: ROW_H - 6 }}
@@ -687,6 +710,10 @@ export default function SequencerPanel({ active }: { active: boolean }) {
                           <div className='pointer-events-none absolute left-0 top-0 h-0 w-0 border-l-[7px] border-t-[7px] border-l-transparent border-t-white/70' style={{ left: ein }} />
                           <div className='pointer-events-none absolute right-0 top-0 h-0 w-0 border-r-[7px] border-t-[7px] border-r-transparent border-t-white/70' style={{ right: eout }} />
                           <span className='pointer-events-none absolute left-2 top-[3px] whitespace-nowrap'>{text}</span>
+                          {/* A hold: playback waits at the section's end for the script's resume(). */}
+                          {r.track.type === 'script' && s.hold && (
+                            <span className='pointer-events-none absolute right-1.5 top-1/2 block h-2.5 w-2.5 -translate-y-1/2 text-fg'><PauseIcon /></span>
+                          )}
                           {r.track.type === 'property' && s.curve?.keys.map((k: any, ki: number) => (
                             <span key={ki} title={`Key at ${(s.start + k.t).toFixed(2)} s: ${JSON.stringify(k.v)}`}
                               className={cn('absolute top-1/2 block h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 cursor-grab border border-white/80 bg-white/60',

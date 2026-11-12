@@ -581,6 +581,8 @@ export type {
     SectionBase, PathSection, PathTrack, PathLook, CameraCutSection, CameraCutTrack, PropertySection,
     PropertyTrack, PropertyValueType, EventKey, EventTrack, SequenceMarker,
     PresetSection, PresetTrack, FoliageSection, FoliageTrack, FoliageChannel,
+    ScriptSection, ScriptTrack, SequenceScriptContext, AnimationSection, AnimationTrack, AudioSection, AudioTrack,
+    SpawnSection, SpawnTrack, PossessSection, PossessTrack,
 } from "./sequencer/types";
 import { sequenceGlobals as installSequenceGlobals } from "./core/scene/nodes/sequenceNode";
 import { CleoEngine as SequenceEngine } from "./core/engine";

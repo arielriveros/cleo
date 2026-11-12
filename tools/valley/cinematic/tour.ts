@@ -319,6 +319,17 @@ const GRASS_DENSITY: Keys = ramp([[0.5, 1], [3.5, 0.1], [6, 0.1], [8.5, 1]])
 const TREE_CULL: Keys = ramp([[13, 1], [15.5, 0.15], [17.5, 0.15], [21, 1]])
 const FOLIAGE_SHADOWS: Keys = ramp([[13, 110], [15.5, 30], [17.5, 30], [21, 110]])
 
+/**
+ * The storm's lightning: the director's `lightning` (examples/scripts/ValleyTourDirector.ts) over most of the
+ * storm shot, with its seed and number of strikes.
+ */
+const LIGHTNING = () => ({ start: when('storm', 5), end: before('storm', 3), args: [7, 8] })
+/**
+ * Splashes on the pond as the camera comes over it, before it calms: [time, x, z] (the pond's Water Splash), a few
+ * metres ahead of it on the water, where a splash the size of a step reads.
+ */
+const SPLASHES = (): [number, number, number][] => [[when('pond', 1.2), 41.6, 27.9], [when('pond', 2.4), 43.6, 26.4], [when('pond', 3.4), 40.2, 25.6]]
+
 // ---- build -----------------------------------------------------------------------------------------------
 
 type HeightAt = (x: number, z: number) => number
@@ -388,8 +399,9 @@ function cameraPoints(shot: Shot, heightAt: HeightAt): number[][] {
   return pts
 }
 
-export function buildTour(terrainAt: HeightAt): SequenceData {
+export function buildTour(terrainAt: HeightAt, options: { pondLevel?: number } = {}): SequenceData {
   const heightAt = groundWith(terrainAt)
+  const pondLevel = options.pondLevel ?? terrainAt(44, 22)
   const pathSections = SHOTS.map(shot => {
     const span = shot.end - shot.start
     const [easeIn, easeOut] = shot.ease ?? [true, true]
@@ -477,6 +489,15 @@ export function buildTour(terrainAt: HeightAt): SequenceData {
     { id: 'pond-ssr', name: 'Reflection reach', type: 'property', target: 'renderer', path: 'ssrMaxDistance',
       valueType: 'number', sections: [{ id: 'pond-ssr:shot', start: when('pond'), end: D, whenFinished: 'restore',
         curve: { keys: [{ t: 0, v: 400 }] } }] } as any,
+
+    // ---- the director and the spawns ----
+    { id: 'lightning', name: 'Lightning', type: 'script',
+      sections: [{ id: 'lightning:storm', label: 'Lightning', method: 'lightning', ...LIGHTNING() }] } as any,
+    { id: 'pond-splashes', name: 'Pond splashes', type: 'spawn',
+      sections: SPLASHES().map(([t, x, z], i) => ({
+        id: `pond-splash:${i}`, label: 'Splash', start: t, end: t + 1.5, template: 'Water Splash', name: 'Splash',
+        position: [x, Math.round(pondLevel * 1000) / 1000, z],
+      })) } as any,
   ]
 
   return {

@@ -1,6 +1,7 @@
 import type {
-    CameraCutSection, EventKey, FoliageSection, PathLook, PathSection, PresetSection, PropertySection, PropertyValueType,
-    SectionBase, SequenceCurve, SequenceData, SequenceKey, SequenceSlot, SequenceTrack,
+    AnimationSection, AudioSection, CameraCutSection, EventKey, FoliageSection, PathLook, PathSection, PossessSection,
+    PresetSection, PropertySection, PropertyValueType, ScriptSection, SectionBase, SequenceCurve, SequenceData, SequenceKey,
+    SequenceSlot, SequenceTrack, SpawnSection,
 } from './types';
 import { FOLIAGE_CHANNELS, SEQUENCE_VERSION } from './types';
 import { finiteOr } from '../core/math';
@@ -160,6 +161,69 @@ function parseTrack(json: any): SequenceTrack | null {
                 ? json.layers.filter((n: unknown): n is string => typeof n === 'string' && n.length > 0) : 'all';
             return { ...base, type: 'foliage', slot: json.slot, layers, sections: sectionsOf(parseFoliageSection) };
         }
+        case 'script':
+            return {
+                ...base, type: 'script', ...(typeof json.slot === 'string' && json.slot ? { slot: json.slot } : {}),
+                sections: sectionsOf<ScriptSection>(s => {
+                    const method = str(s?.method);
+                    if (!method) return null;
+                    return {
+                        ...sectionBase(s, 'script'), method,
+                        ...(Array.isArray(s.args) ? { args: s.args } : {}), ...(s.hold === true ? { hold: true } : {}),
+                    };
+                }),
+            };
+        case 'animation':
+            if (typeof json.slot !== 'string') return null;
+            return {
+                ...base, type: 'animation', slot: json.slot,
+                ...(typeof json.animSlot === 'string' && json.animSlot ? { animSlot: json.animSlot } : {}),
+                sections: sectionsOf<AnimationSection>(s => {
+                    const clip = str(s?.clip);
+                    if (!clip) return null;
+                    const section: AnimationSection = { ...sectionBase(s, 'anim'), clip };
+                    if (typeof s.clipStart === 'number' && s.clipStart > 0) section.clipStart = s.clipStart;
+                    if (typeof s.speed === 'number' && Number.isFinite(s.speed) && s.speed >= 0 && s.speed !== 1) section.speed = s.speed;
+                    if (s.loop === true) section.loop = true;
+                    return section;
+                }),
+            };
+        case 'audio':
+            if (typeof json.slot !== 'string') return null;
+            return {
+                ...base, type: 'audio', slot: json.slot,
+                sections: sectionsOf<AudioSection>(s => {
+                    if (!s || typeof s !== 'object') return null;
+                    const section: AudioSection = sectionBase(s, 'audio');
+                    if (typeof s.offset === 'number' && s.offset > 0) section.offset = s.offset;
+                    const volume = parseSequenceCurve(s.volume);
+                    if (volume) {
+                        const keys = volume.keys.filter(k => typeof k.v === 'number');
+                        if (keys.length > 0) section.volume = { keys } as SequenceCurve<number>;
+                    }
+                    return section;
+                }),
+            };
+        case 'spawn':
+            return {
+                ...base, type: 'spawn',
+                sections: sectionsOf<SpawnSection>(s => {
+                    const template = str(s?.template);
+                    if (!template) return null;
+                    const section: SpawnSection = { ...sectionBase(s, 'spawn'), template };
+                    const position = vec3Of(s.position); if (position) section.position = position;
+                    const rotation = vec3Of(s.rotation); if (rotation) section.rotation = rotation;
+                    for (const f of ['parent', 'name', 'bindAs'] as const) if (typeof s[f] === 'string' && s[f]) section[f] = s[f];
+                    return section;
+                }),
+            };
+        case 'possess':
+            if (typeof json.slot !== 'string') return null;
+            return {
+                ...base, type: 'possess', slot: json.slot,
+                sections: sectionsOf<PossessSection>(s =>
+                    typeof s?.pawn === 'string' && s.pawn ? { ...sectionBase(s, 'possess'), pawn: s.pawn } : null),
+            };
         default:
             return null;
     }

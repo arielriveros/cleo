@@ -1,7 +1,8 @@
 import { evaluateKeyedNumber, evaluateKeyedStep, evaluateKeyedVector, FOLIAGE_CHANNELS } from 'cleo'
 import type {
-  CameraCutSection, EventKey, FoliageChannel, FoliageSection, PathSection, PresetSection, PropertySection, SectionBase,
-  SequenceCurve, SequenceData, SequenceKey, SequenceSlot, SequenceTrack,
+  AnimationSection, AudioSection, CameraCutSection, EventKey, FoliageChannel, FoliageSection, PathSection, PossessSection,
+  PresetSection, PropertySection, ScriptSection, SectionBase, SequenceCurve, SequenceData, SequenceKey, SequenceSlot,
+  SequenceTrack, SpawnSection,
 } from 'cleo'
 
 // The Sequencer's edits, as pure functions over SequenceData. Each returns a NEW sequence and never touches the
@@ -16,11 +17,18 @@ export const MIN_SECTION = 1 / 30
 
 export interface SectionRef { trackId: string; sectionId: string }
 
-type AnySection = SectionBase & Partial<PathSection & PropertySection & CameraCutSection & PresetSection & FoliageSection>
+type AnySection = SectionBase & Partial<PathSection & PropertySection & CameraCutSection & PresetSection & FoliageSection
+  & ScriptSection & AnimationSection & AudioSection & SpawnSection & PossessSection>
 
-/** Which of a section's curves a key edit is on: a property's value curve, or one of a Foliage section's channels. */
-export type CurveField = 'curve' | FoliageChannel
+/**
+ * Which of a section's curves a key edit is on: a property's value curve, one of a Foliage section's channels, or
+ * an Audio section's volume.
+ */
+export type CurveField = 'curve' | FoliageChannel | 'volume'
 type SectionTrack = Extract<SequenceTrack, { sections: unknown[] }>
+
+/** The method a new script section calls until it is renamed (an empty one is not a section: the parse drops it). */
+export const DEFAULT_SCRIPT_METHOD = 'onSequenceSection'
 
 let idCounter = 0
 /** A fresh id with `prefix`, unique within the session and across reloads (time-based). */
@@ -57,7 +65,7 @@ function cover(draft: SequenceData, t: number) {
 
 // ---- curves -------------------------------------------------------------------------------------------
 
-/** The section-local curves a section carries (property values, path progress, roll, fov, look progress). */
+/** The section-local curves a section carries (property values, path progress, roll, fov, look progress, volume). */
 function curvesOf(s: AnySection): SequenceCurve[] {
   const out: SequenceCurve[] = []
   if (s.curve) out.push(s.curve)
@@ -66,12 +74,28 @@ function curvesOf(s: AnySection): SequenceCurve[] {
   if (s.fov) out.push(s.fov as SequenceCurve)
   if (s.look && s.look.mode === 'path' && s.look.progress) out.push(s.look.progress as SequenceCurve)
   for (const c of FOLIAGE_CHANNELS) if (s[c]) out.push(s[c] as SequenceCurve)
+  if (s.volume) out.push(s.volume as SequenceCurve)
   return out
 }
 
 /** Shift every key of a curve by `dt` seconds, dropping none (a key before 0 still shapes the curve's start). */
 function shiftCurve(curve: SequenceCurve, dt: number) {
   for (const k of curve.keys) k.t = Math.round((k.t + dt) * 1e6) / 1e6
+}
+
+/**
+ * A section whose start moved by `dt` seconds with its media left where it was on the timeline: an Animation
+ * section's clip starts `dt * speed` clip seconds later, an Audio section's sample `dt` seconds later. Never
+ * before the clip's or the sample's own start (growing past it slides the media instead).
+ */
+function rebaseMedia(type: SequenceTrack['type'], s: AnySection, dt: number) {
+  const set = (key: 'clipStart' | 'offset', v: number) => {
+    const r = Math.round(v * 1e6) / 1e6
+    if (r > 0) s[key] = r
+    else delete s[key]
+  }
+  if (type === 'animation') set('clipStart', (s.clipStart ?? 0) + dt * (s.speed ?? 1))
+  else if (type === 'audio') set('offset', (s.offset ?? 0) + dt)
 }
 
 /** The value of a curve at `t`, of the same kind its keys hold. */
@@ -111,16 +135,21 @@ export function moveSection(seq: SequenceData, ref: SectionRef, dt: number): Seq
   })
 }
 
-/** Move a section's start to `start`, keeping its end and every key's place on the timeline. */
+/**
+ * Move a section's start to `start`, keeping its end and every key's place on the timeline. An Animation or
+ * Audio section keeps its clip or sample there too: trimming the head skips what was cut off.
+ */
 export function trimSectionStart(seq: SequenceData, ref: SectionRef, start: number): SequenceData {
   return editSequence(seq, d => {
     const s = findSection(d, ref)
     if (!s) return
+    const track = findTrack(d, ref.trackId)!
     const next = Math.min(s.end - MIN_SECTION, Math.max(0, start))
     const dt = next - s.start
     s.start = next
     for (const c of curvesOf(s)) shiftCurve(c, -dt)
-    sortSections(findTrack(d, ref.trackId)!)
+    rebaseMedia(track.type, s, dt)
+    sortSections(track)
   })
 }
 
@@ -134,13 +163,21 @@ export function trimSectionEnd(seq: SequenceData, ref: SectionRef, end: number):
   })
 }
 
-/** Set any of a section's plain fields (eases, label, when finished, a cut's slot, a path's look). */
+/**
+ * Set any of a section's plain fields (eases, label, when finished, a cut's slot, a path's look, a script's method,
+ * a clip, a template...). A field set to undefined, or to its default (an empty name, off, 0), is dropped, as the
+ * parse would.
+ */
 export function patchSection(seq: SequenceData, ref: SectionRef, patch: Partial<AnySection>): SequenceData {
   return editSequence(seq, d => {
     const s = findSection(d, ref)
     if (!s) return
     Object.assign(s, structuredClone(patch))
-    for (const key of ['easeIn', 'easeOut'] as const) if (s[key] !== undefined && !(s[key]! > 0)) delete s[key]
+    const fields = s as unknown as Record<string, unknown>
+    for (const key of Object.keys(fields)) if (fields[key] === undefined) delete fields[key]
+    for (const key of ['easeIn', 'easeOut', 'clipStart', 'offset'] as const) if (s[key] !== undefined && !(s[key]! > 0)) delete s[key]
+    for (const key of ['hold', 'loop'] as const) if (s[key] === false) delete s[key]
+    for (const key of ['parent', 'name', 'bindAs'] as const) if (s[key] === '') delete s[key]
     if (s.end < s.start + MIN_SECTION) s.end = s.start + MIN_SECTION
     cover(d, s.end)
     sortSections(findTrack(d, ref.trackId)!)
@@ -150,6 +187,9 @@ export function patchSection(seq: SequenceData, ref: SectionRef, patch: Partial<
 /**
  * Cut a section in two at sequence time `t` (the razor). Property, path and cut sections all split; a path's
  * two halves keep the same spline, each with its share of the progress (re-based), so the camera does not move.
+ * An Animation section's right half starts its clip where the cut is (clipStart + (t - start) * speed), an Audio
+ * section's its sample (offset + (t - start)), with the volume curve split like any other; script, spawn and
+ * possess sections split plainly, and a script section's hold stays on the right half (it holds at the end).
  * Returns the sequence and the new right-hand section's ref, or null when `t` is not inside the section.
  */
 export function splitSection(seq: SequenceData, ref: SectionRef, t: number): { seq: SequenceData; right: SectionRef } | null {
@@ -170,9 +210,12 @@ export function splitSection(seq: SequenceData, ref: SectionRef, t: number): { s
     s.end = t
     delete s.easeOut
     delete right.easeIn
+    delete s.hold
     if (s.curve) [s.curve, right.curve] = splitCurve(s.curve, local)
     for (const c of FOLIAGE_CHANNELS)
       if (s[c]) [s[c], right[c]] = splitCurve(s[c] as SequenceCurve, local) as [any, any]
+    if (s.volume) [s.volume, right.volume] = splitCurve(s.volume as SequenceCurve, local) as [SequenceCurve<number>, SequenceCurve<number>]
+    rebaseMedia(track.type, right, local)
     if (s.points) {
       // Progress absent means linear over the whole section: make it explicit before splitting it.
       const progress = (s.progress ?? { keys: [{ t: 0, v: 0, interp: 'linear' }, { t: span, v: 1 }] }) as SequenceCurve
@@ -212,27 +255,50 @@ export function deleteSection(seq: SequenceData, ref: SectionRef): SequenceData 
   })
 }
 
-/** A new section on a track, shaped for its type, from `start` for `length` seconds. Returns its ref. */
+/**
+ * A new section on a track, shaped for its type, from `start` for `length` seconds. Returns its ref, or null when
+ * the track takes no sections or the section would not survive the parse (a preset blend with no preset, an
+ * animation with no clip, a spawn with no template, a possession with no pawn): pass those in `init`.
+ */
 export function addSection(seq: SequenceData, trackId: string, start: number, length: number,
                            init: Partial<AnySection> = {}): { seq: SequenceData; ref: SectionRef } | null {
   const track = findTrack(seq, trackId)
   if (!track || !('sections' in track)) return null
   const id = newId('section')
+  const from = Math.max(0, start)
+  const section = shapeSection(seq, track, { id, start: from, end: from + Math.max(MIN_SECTION, length) }, init)
+  if (!section) return null
   const next = editSequence(seq, d => {
     const t = findTrack(d, trackId)!
-    const base: SectionBase = { id, start: Math.max(0, start), end: Math.max(0, start) + Math.max(MIN_SECTION, length) }
-    let section: AnySection
-    if (t.type === 'path') section = { ...base, points: [[0, 2, 0], [0, 2, 10]], look: { mode: 'ahead' }, ...init }
-    else if (t.type === 'cameraCut') section = { ...base, slot: d.slots.find(s => s.nodeType === 'camera')?.id ?? d.slots[0]?.id ?? '', ...init }
-    else if (t.type === 'preset') section = { ...base, preset: '', ...init }
-    // Foliage: one channel to start from, at the layers' own density (1 = as authored).
-    else if (t.type === 'foliage') section = { ...base, density: { keys: [{ t: 0, v: 1 }] }, ...init }
-    else section = { ...base, curve: { keys: [{ t: 0, v: defaultValue(t.type === 'property' ? t.valueType : 'number') }] }, ...init }
     sectionsOf(t)!.push(structuredClone(section))
-    cover(d, base.end)
+    cover(d, section.end)
     sortSections(t)
   })
   return { seq: next, ref: { trackId, sectionId: id } }
+}
+
+/** A new section for `t`'s type from `base` and `init`, or null when it lacks what the parse requires of it. */
+function shapeSection(seq: SequenceData, t: SequenceTrack, base: SectionBase, init: Partial<AnySection>): AnySection | null {
+  let s: AnySection
+  switch (t.type) {
+    case 'path': s = { ...base, points: [[0, 2, 0], [0, 2, 10]], look: { mode: 'ahead' }, ...init }; break
+    case 'cameraCut': s = { ...base, slot: seq.slots.find(sl => sl.nodeType === 'camera')?.id ?? seq.slots[0]?.id ?? '', ...init }; break
+    case 'preset': s = { ...base, preset: '', ...init }; break
+    // Foliage: one channel to start from, at the layers' own density (1 = as authored).
+    case 'foliage': s = { ...base, density: { keys: [{ t: 0, v: 1 }] }, ...init }; break
+    case 'script': s = { ...base, method: DEFAULT_SCRIPT_METHOD, ...init }; break
+    case 'animation': s = { ...base, clip: '', ...init }; break
+    // Audio: the sample from its start, at the node's own volume (eased by the section).
+    case 'audio': s = { ...base, ...init }; break
+    case 'spawn': s = { ...base, template: '', ...init }; break
+    // Possess: another slot than the controller's own.
+    case 'possess': s = { ...base, pawn: seq.slots.find(sl => sl.id !== t.slot)?.id ?? '', ...init }; break
+    case 'property': s = { ...base, curve: { keys: [{ t: 0, v: defaultValue(t.valueType) }] }, ...init }; break
+    default: return null
+  }
+  const required = t.type === 'preset' ? s.preset : t.type === 'script' ? s.method : t.type === 'animation' ? s.clip
+    : t.type === 'spawn' ? s.template : t.type === 'possess' ? s.pawn : 'ok'
+  return typeof required === 'string' && required.trim() ? s : null
 }
 
 function defaultValue(valueType: string): SequenceKey['v'] {
@@ -241,7 +307,7 @@ function defaultValue(valueType: string): SequenceKey['v'] {
 
 // ---- keys ---------------------------------------------------------------------------------------------
 
-/** A section's curve `field`, created when `create` and the field is a Foliage channel it does not have yet. */
+/** A section's curve `field`, created when `create` and the field is a Foliage channel or the volume it does not have yet. */
 function curveField(s: AnySection | undefined, field: CurveField, create = false): SequenceCurve | undefined {
   if (!s) return undefined
   if (field !== 'curve' && !s[field] && create) (s as any)[field] = { keys: [] }
@@ -249,8 +315,8 @@ function curveField(s: AnySection | undefined, field: CurveField, create = false
 }
 
 /**
- * Add (or replace) a key at section-local time `t` on a section's curve: a property's (`field` 'curve'), or a
- * Foliage section's channel, which is created by its first key.
+ * Add (or replace) a key at section-local time `t` on a section's curve: a property's (`field` 'curve'), a
+ * Foliage section's channel or an Audio section's volume, which is created by its first key.
  */
 export function setSectionKey(seq: SequenceData, ref: SectionRef, t: number, v: SequenceKey['v'],
                               interp?: SequenceKey['interp'], field: CurveField = 'curve'): SequenceData {
@@ -291,7 +357,8 @@ export function deleteSectionKey(seq: SequenceData, ref: SectionRef, index: numb
     const s = findSection(d, ref)
     const keys = curveField(s, field)?.keys
     if (!keys || !keys[index]) return
-    // A Foliage channel's last key takes the channel with it (the layers' own value again).
+    // A Foliage channel's last key takes the channel with it (the layers' own value again), the volume's the
+    // volume (the node's own).
     if (field !== 'curve' && keys.length <= 1) { delete (s as any)[field]; return }
     // A property curve keeps at least one key: an empty one would read as "no value".
     if (keys.length <= 1) return
@@ -358,8 +425,28 @@ export function deleteEventKey(seq: SequenceData, trackId: string, index: number
 
 // ---- tracks and slots ---------------------------------------------------------------------------------
 
+/** Track types that drive one slot's node and are nothing without it. */
+const SLOT_TRACKS: ReadonlySet<SequenceTrack['type']> = new Set(['path', 'preset', 'foliage', 'animation', 'audio', 'possess'])
+
+/**
+ * Add a track, shaped as the parse keeps it: its sections (or keys) present, empty optional fields dropped (a
+ * script track with no slot calls the director; an animation track with no action slot plays in 'Sequence'). A
+ * track the parse would drop — one that needs a slot and names none, a property with no path or target — is
+ * refused: the sequence comes back unchanged.
+ */
 export function addTrack(seq: SequenceData, track: SequenceTrack): SequenceData {
-  return editSequence(seq, d => { d.tracks.push(structuredClone(track)) })
+  const slot = (track as { slot?: unknown }).slot
+  const hasSlot = typeof slot === 'string' && slot.length > 0
+  if (SLOT_TRACKS.has(track.type) && !hasSlot) return seq
+  if (track.type === 'property' && (!track.path || (!track.target && !hasSlot))) return seq
+  return editSequence(seq, d => {
+    const t = structuredClone(track) as SequenceTrack & { sections?: unknown[]; keys?: unknown[]; slot?: string; animSlot?: string }
+    if (t.type === 'event') t.keys ??= []
+    else t.sections ??= []
+    if (t.type === 'script' && !t.slot) delete t.slot
+    if (t.type === 'animation' && !t.animSlot) delete t.animSlot
+    d.tracks.push(t)
+  })
 }
 
 export function patchTrack(seq: SequenceData, trackId: string, patch: Partial<SequenceTrack>): SequenceData {
@@ -397,7 +484,10 @@ export function patchSlot(seq: SequenceData, slotId: string, patch: Partial<Sequ
   })
 }
 
-/** Remove a slot and every track that drives it (cut sections naming it go too). */
+/**
+ * Remove a slot and every track that drives it. Cut sections naming it go too, and possessions of it; a spawn
+ * that was parented to it or filled it spawns at the scene root, filling nothing.
+ */
 export function deleteSlot(seq: SequenceData, slotId: string): SequenceData {
   return editSequence(seq, d => {
     d.slots = d.slots.filter(s => s.id !== slotId)
@@ -405,6 +495,8 @@ export function deleteSlot(seq: SequenceData, slotId: string): SequenceData {
     for (const t of d.tracks) {
       if (t.type === 'cameraCut') t.sections = t.sections.filter(s => s.slot !== slotId)
       if (t.type === 'event') t.keys = t.keys.filter(k => k.slot !== slotId)
+      if (t.type === 'possess') t.sections = t.sections.filter(s => s.pawn !== slotId)
+      if (t.type === 'spawn') for (const s of t.sections) { if (s.parent === slotId) delete s.parent; if (s.bindAs === slotId) delete s.bindAs }
     }
   })
 }

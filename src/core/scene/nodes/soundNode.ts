@@ -58,6 +58,9 @@ export class SoundNode extends Node {
 
     /** The howler voice this node is currently sounding, or null. One voice per node, not a pool. */
     private _voice: number | null = null;
+    /** Runtime only, never saved: a multiplier on `volume`, and the voice's rate (a sequence's fades and speed). */
+    private _gain = 1;
+    private _rate = 1;
 
     constructor(name: string, options: SoundNodeOptions = {}, id: string = uuidv4()) {
         super(name, 'sound', id);
@@ -97,7 +100,7 @@ export class SoundNode extends Node {
      * sounds quiet while you author it: the viewport scene runs started and unpaused so the camera can
      * fly, so without that gate every emitter in the level would fire the moment a project opened.
      */
-    public play(): void {
+    public play(options: { offset?: number } = {}): void {
         if (this._scene?.soundsEnabled === false) return;
         const sound = this._sample();
         if (!sound) return;
@@ -108,7 +111,10 @@ export class SoundNode extends Node {
         this._voice = voice;
 
         if (this._loopMode !== 'inherit') sound.howl.loop(this._loopMode === 'on', voice);
-        sound.setVoiceVolume(voice, sound.settings.volume * this._volume);
+        sound.setVoiceVolume(voice, sound.settings.volume * this._volume * this._gain);
+        if (this._rate !== 1) sound.setVoiceRate(voice, this._rate);
+        // Part-way in: a cinematic's sound joined at the moment its timeline is at.
+        if (typeof options.offset === 'number' && options.offset > 0) sound.seekVoice(voice, options.offset);
 
         if (this._mode === 'spatial') {
             sound.setVoiceSpatial(voice, this._spatial);
@@ -139,10 +145,46 @@ export class SoundNode extends Node {
         const sound = this._sample();
         const target = clamp01(finiteOr(volume, 1));
         if (sound && this._voice !== null) {
-            const from = sound.settings.volume * this._volume;
-            sound.fade(from, sound.settings.volume * target, seconds, this._voice);
+            const from = sound.settings.volume * this._volume * this._gain;
+            sound.fade(from, sound.settings.volume * target * this._gain, seconds, this._voice);
         }
         this._volume = target;
+    }
+
+    /** Seconds into the sample the voice is at (0 when silent). */
+    public get playhead(): number {
+        return this._voice === null ? 0 : (this._sample()?.seek(this._voice) ?? 0);
+    }
+
+    /** The sample's length in seconds (0 until it has decoded, or with no sample). */
+    public get duration(): number { return this._sample()?.duration ?? 0; }
+
+    /** Move the playing voice to `seconds` into the sample. */
+    public seek(seconds: number): void {
+        if (this._voice !== null) this._sample()?.seekVoice(this._voice, seconds);
+    }
+
+    /**
+     * Runtime only, never saved: a 0..1 multiplier on {@link volume}, applied to the voice at once — what a
+     * sequence's audio track fades with, leaving the authored volume alone.
+     */
+    public get gain(): number { return this._gain; }
+    public set gain(value: number) {
+        const g = clamp01(finiteOr(value, 1));
+        if (g === this._gain) return;
+        this._gain = g;
+        const sound = this._sample();
+        if (sound && this._voice !== null) sound.setVoiceVolume(this._voice, sound.settings.volume * this._volume * g);
+    }
+
+    /** Runtime only, never saved: the voice's rate as a multiple of the sample's own (0.5..4). */
+    public get playbackRate(): number { return this._rate; }
+    public set playbackRate(value: number) {
+        const r = Math.min(4, Math.max(0.5, finiteOr(value, 1)));
+        if (r === this._rate) return;
+        this._rate = r;
+        const sound = this._sample();
+        if (sound && this._voice !== null) sound.setVoiceRate(this._voice, r);
     }
 
     public get isPlaying(): boolean {

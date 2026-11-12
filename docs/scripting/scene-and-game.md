@@ -275,6 +275,41 @@ intro.onEvent((name, key) => { /* every event key it passes */ })
   and a camera the sequence moves renders the frame it moved.
 - **Its clock** is game time (it follows `Game.timeScale`, and stops with `Game.pause()`) unless the
   sequence says `real`.
+- **Script sections** give a method a stretch of time instead of a moment. It is called with a context as
+  the playhead enters the section, every frame inside it, and as it leaves (on `stop()` too), so the
+  method can animate anything code can reach. A section the playhead passes inside one frame still gets
+  its enter and exit; a `seek` skips it. Work from `ctx.local` (or `ctx.alpha`) rather than counting
+  frames, and a scrub or a seek shows what playback would.
+- **A hold section** stops the playback at its end, holding the frame, until the method calls
+  `ctx.resume()` or something calls the node's `resume()`: a cinematic that waits for a door to open, a
+  line of dialogue to be read, a level to load. The method is still called every frame while it waits
+  (`update`, with `dt` 0), so it can watch for what it waits on. `isHolding` says whether it is waiting.
+
+```ts
+export default class IntroDirector extends SequenceNode {
+  // A Script track section with method 'flicker' calls this over its span.
+  flicker(ctx: SequenceScriptContext) {
+    const lamp = this.findNode('Lamp') as LightNode
+    if (ctx.phase === 'exit') { lamp.light.intensity = 800; return }
+    lamp.light.intensity = 800 * (0.5 + 0.5 * Math.sin(ctx.local * 30)) * ctx.weight
+  }
+  // A hold section: the playback waits at its end until the gate's script says it is open.
+  waitForGate(ctx: SequenceScriptContext) {
+    if ((this.findNode('Gate') as any)?.isOpen) ctx.resume()
+  }
+}
+```
+
+The context: `phase` (`'enter'`, `'update'` or `'exit'`), `time` (sequence seconds), `local` and
+`duration` (seconds into the section, and its length), `alpha` (`local / duration`), `weight` (its ease-in
+and ease-out ramp), `dt` (since the last call; 0 on entering and on a seek), `seeking`, `stopped` (an exit
+because the playback was stopped), `args` (the section's), `sequence` (the node playing) and `resume()`.
+
+The other tracks a sequence can carry, which need no code: **Animation** plays a clip on a character's
+animator as an action, its time locked to the timeline; **Audio** plays a sound node from the point the
+timeline is at, faded by the section's eases; **Spawn** instantiates a template while its section lasts
+(and can put the new node in a slot for the other tracks to drive); **Possess** has a controller possess a
+pawn for the section. See [Sequencer](../editor/sequencer.md).
 
 ## Timers on the scene
 

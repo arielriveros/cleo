@@ -6,7 +6,9 @@
 //
 //   Cinematic
 //     Cinematic Camera    a plain camera, inactive until the tour cuts to it
-//     Valley Tour         a Sequence node playing tools/valley/cinematic/valley-tour.sequence.json
+//     Valley Tour         a Sequence node playing tools/valley/cinematic/valley-tour.sequence.json, its director
+//                         examples/scripts/ValleyTourDirector.ts (the storm's lightning)
+//     Lightning           the point light the director flashes, unbaked and unshadowed
 //     Cinematic Overlay   letterbox bars, a fade to black, a title and a caption the tour animates, and the
 //                         Cleo logo and wordmark it ends on (the logo a texture of its own, /Cinematic/Textures)
 //     Start Menu          "Cinematic demo" or "Free mode" (examples/scripts/ValleyStartMenu.ts)
@@ -128,8 +130,10 @@ function startMenu() {
  */
 export function tourSequence(bundle: any, regenerate = false): any {
   if (!regenerate && fs.existsSync(TOUR_FILE)) return parseSequence(JSON.parse(fs.readFileSync(TOUR_FILE, 'utf8')))
-  const heightAt = terrainHeightSampler(bundle.scenes[VALLEY_SCENE].scene)
-  const tour = parseSequence(buildTour(heightAt))
+  const root = bundle.scenes[VALLEY_SCENE].scene
+  const heightAt = terrainHeightSampler(root)
+  const pond = child(child(root, 'Water'), 'Pond Water')
+  const tour = parseSequence(buildTour(heightAt, { pondLevel: pond?.position?.[1] }))
   fs.writeFileSync(TOUR_FILE, JSON.stringify(tour, null, 2) + '\n')
   log(`cinematic: tour written to ${path.relative(ROOT, TOUR_FILE)}`)
   return tour
@@ -177,9 +181,10 @@ export function applyCinematic(bundle: any, options: { regenerate?: boolean } = 
   // Time x2 runs the wind, the clouds and the water at x2 too.
   data.config.render.effectsFollowTimeScale = true
 
-  refreshValleyScripts(bundle, ['ValleyStartMenu', 'ValleyDayNight'])
+  refreshValleyScripts(bundle, ['ValleyStartMenu', 'ValleyDayNight', 'ValleyTourDirector'])
   logoTexture(bundle)
   const menuScript = bundle.libraries.scripts.find((s: any) => s.id === id('script:ValleyStartMenu'))
+  const directorScript = bundle.libraries.scripts.find((s: any) => s.id === id('script:ValleyTourDirector'))
   const tour = tourSequence(bundle, options.regenerate)
 
   // A plain camera (a rig would overwrite it every frame), shaped like the fly camera's, switched off.
@@ -209,11 +214,22 @@ export function applyCinematic(bundle: any, options: { regenerate?: boolean } = 
       clouds: clouds.id, wind: wind.id, weather: weather.id, landscape: landscape.id, pond: pond.id,
     },
   }
+  // The tour's director: the Script track's methods (the storm's lightning).
+  attach(sequence, directorScript, {})
+
+  // What the lightning flashes: a point light high in the clouds, off until a strike. Not baked (the GI and the
+  // probes never see it) and unshadowed; the director moves it over the camera.
+  const lightning = {
+    id: id('cinematic:lightning'), name: 'Lightning', type: 'light',
+    position: [0, 700, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: [], variables: {}, spawnOnStart: true,
+    lightType: 'point', castShadows: false, bake: false,
+    light: { unit: 'photometric', color: [0.78, 0.84, 1], intensity: 0, range: 2500, sourceRadius: 2, legacyFalloff: false },
+  }
 
   const group = {
     id: id('cinematic'), name: 'Cinematic', type: 'node',
     position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], variables: {}, spawnOnStart: true,
-    children: [camera, sequence, over, menu],
+    children: [camera, sequence, lightning, over, menu],
   }
   const at = root.children.findIndex((c: any) => c.id === group.id)
   if (at >= 0) root.children[at] = group
