@@ -530,6 +530,42 @@ export class FoliageLayer {
             for (const m of model.materials) t = Math.max(t, (m.properties.get('translucency') as number | undefined) ?? 0);
         return t;
     }
+    /**
+     * The weather the far octahedral impostor shows, as [wetResponse, snowCover]: the highest among the
+     * coarsest mesh level's materials, the level it replaces, so a tree does not lose its snow at the hand-off.
+     */
+    public get farWeather(): [number, number] {
+        const level = this.levels[this.levels.length - 1];
+        let wet = 0, snow = 0;
+        for (const model of level?.models ?? [])
+            for (const m of model.materials) {
+                wet = Math.max(wet, Number(m.properties.get('wetResponse') ?? 0) || 0);
+                snow = Math.max(snow, Number(m.properties.get('snowCover') ?? 0) || 0);
+            }
+        return [Math.min(1, wet), Math.min(1, snow)];
+    }
+
+    /**
+     * The crown's radius (model units) the octahedral impostor is given depth by: its shadow's bulge toward the
+     * sun and how far toward the eye the colour pass draws it. Half the coarsest level's mean horizontal span,
+     * never more than the capture radius; 0 with nothing to measure. The capture sphere itself is wider than
+     * the crown by the trunk and the framing, which put both depths metres in front of the leaves.
+     */
+    public get farCrownRadius(): number {
+        const level = this.levels[this.levels.length - 1];
+        let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+        for (const model of level?.models ?? []) {
+            const b = model.geometry?.boundingBox;
+            if (!b) continue;
+            minX = Math.min(minX, b.min[0]); maxX = Math.max(maxX, b.max[0]);
+            minZ = Math.min(minZ, b.min[2]); maxZ = Math.max(maxZ, b.max[2]);
+        }
+        if (!(maxX > minX) || !(maxZ > minZ)) return 0;
+        const r = ((maxX - minX) + (maxZ - minZ)) / 4;
+        const cap = this.billboardOctahedral?.radius;
+        return cap && cap > 0 ? Math.min(r, cap) : r;
+    }
+
     /** Hide instances beyond this camera distance; 0 = use the renderer's global foliage cull distance. */
     public cullDistance = 0;
     /**

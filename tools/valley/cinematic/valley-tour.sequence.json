@@ -1,7 +1,7 @@
 {
   "version": 1,
   "name": "Valley Tour",
-  "duration": 387,
+  "duration": 405,
   "fps": 30,
   "clock": "game",
   "loop": false,
@@ -40,6 +40,16 @@
     {
       "id": "caption",
       "name": "Caption",
+      "nodeType": "uiText"
+    },
+    {
+      "id": "logo",
+      "name": "Logo",
+      "nodeType": "uiImage"
+    },
+    {
+      "id": "wordmark",
+      "name": "Wordmark",
       "nodeType": "uiText"
     },
     {
@@ -406,24 +416,24 @@
           "label": "Long House interior",
           "points": [
             [
-              -3.055,
+              -3.393,
               4.2,
-              43.047
+              42.679
             ],
             [
-              -6.162,
+              -5.757,
               4.2,
-              39.655
+              40.098
             ],
             [
-              -8.999,
+              -7.783,
               4.2,
-              36.558
+              37.885
             ],
             [
-              -11.836,
+              -9.269,
               4.2,
-              33.461
+              36.263
             ]
           ],
           "progress": {
@@ -443,24 +453,24 @@
             "mode": "path",
             "points": [
               [
-                -9.466,
+                -10.289,
                 3.6,
-                36.715
+                36.112
               ],
               [
-                -12.61,
-                3.7,
-                34.17
+                -10.573,
+                3,
+                39.356
               ],
               [
-                -15.079,
-                3.8,
-                32.363
+                -10.18,
+                2.9,
+                40.081
               ],
               [
-                -16.651,
-                3.8,
-                31.091
+                -9.922,
+                2.9,
+                40.658
               ]
             ],
             "progress": {
@@ -470,12 +480,12 @@
                   "v": 0
                 },
                 {
-                  "t": 12.042,
-                  "v": 0.443
+                  "t": 13.039,
+                  "v": 0.693
                 },
                 {
-                  "t": 18.61,
-                  "v": 0.779
+                  "t": 20.141,
+                  "v": 0.868
                 },
                 {
                   "t": 30,
@@ -544,9 +554,81 @@
           }
         },
         {
-          "id": "shot:night-crane",
+          "id": "shot:candles",
           "start": 102,
-          "end": 122,
+          "end": 116,
+          "label": "Candlelight",
+          "points": [
+            [
+              -6.567,
+              4,
+              39.213
+            ],
+            [
+              -8.459,
+              4,
+              37.148
+            ],
+            [
+              -10.35,
+              3.9,
+              35.083
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 14,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                -11.586,
+                3.25,
+                38.25
+              ],
+              [
+                -13.139,
+                3.4,
+                36.554
+              ],
+              [
+                -14.263,
+                3.5,
+                35.549
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 7,
+                  "v": 0.604
+                },
+                {
+                  "t": 14,
+                  "v": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:night-crane",
+          "start": 116,
+          "end": 136,
           "label": "Night over the hamlet",
           "points": [
             [
@@ -603,19 +685,19 @@
         },
         {
           "id": "shot:cloudy",
-          "start": 122,
-          "end": 162,
+          "start": 136,
+          "end": 176,
           "label": "Clouds gather",
           "points": [
             [
-              24,
-              42.326,
-              74
+              -30.9,
+              3.669,
+              55
             ],
             [
-              12,
-              34.38,
-              64
+              -24.6,
+              3.987,
+              56
             ]
           ],
           "progress": {
@@ -635,14 +717,14 @@
             "mode": "path",
             "points": [
               [
-                -30,
-                4.786,
-                36
+                34.2,
+                28,
+                -2.7
               ],
               [
-                -30,
-                4.786,
-                36
+                35.9,
+                48,
+                -0.9
               ]
             ],
             "progress": {
@@ -653,7 +735,7 @@
                 },
                 {
                   "t": 40,
-                  "v": 0
+                  "v": 1
                 }
               ]
             }
@@ -661,19 +743,29 @@
         },
         {
           "id": "shot:drizzle",
-          "start": 162,
-          "end": 192,
+          "start": 176,
+          "end": 206,
           "label": "First rain",
           "points": [
             [
-              -24,
-              2.339,
-              14
+              -17,
+              5.905,
+              61
             ],
             [
-              -18,
-              1.839,
-              2
+              -23,
+              4.999,
+              55
+            ],
+            [
+              -28.5,
+              3.583,
+              48
+            ],
+            [
+              -31.2,
+              2.468,
+              42.5
             ]
           ],
           "progress": {
@@ -693,14 +785,24 @@
             "mode": "path",
             "points": [
               [
-                -14,
-                1.105,
-                -6
+                -26,
+                5.773,
+                40
               ],
               [
-                -8,
-                1.286,
-                -22
+                -31,
+                4.208,
+                38
+              ],
+              [
+                -38,
+                2.307,
+                35
+              ],
+              [
+                -44,
+                1.907,
+                34
               ]
             ],
             "progress": {
@@ -708,6 +810,14 @@
                 {
                   "t": 0,
                   "v": 0
+                },
+                {
+                  "t": 12.146,
+                  "v": 0.287
+                },
+                {
+                  "t": 19.938,
+                  "v": 0.688
                 },
                 {
                   "t": 30,
@@ -719,8 +829,8 @@
         },
         {
           "id": "shot:storm",
-          "start": 192,
-          "end": 242,
+          "start": 206,
+          "end": 256,
           "label": "Storm at the windmill",
           "points": [
             [
@@ -819,8 +929,8 @@
         },
         {
           "id": "shot:snow",
-          "start": 242,
-          "end": 282,
+          "start": 256,
+          "end": 296,
           "label": "Rain turns to snow",
           "points": [
             [
@@ -891,8 +1001,8 @@
         },
         {
           "id": "shot:melt",
-          "start": 282,
-          "end": 312,
+          "start": 296,
+          "end": 326,
           "label": "Snow melts",
           "points": [
             [
@@ -949,8 +1059,8 @@
         },
         {
           "id": "shot:clearing",
-          "start": 312,
-          "end": 342,
+          "start": 326,
+          "end": 356,
           "label": "The sky clears",
           "points": [
             [
@@ -1007,8 +1117,8 @@
         },
         {
           "id": "shot:pond",
-          "start": 342,
-          "end": 367,
+          "start": 356,
+          "end": 381,
           "label": "The pond",
           "points": [
             [
@@ -1079,8 +1189,8 @@
         },
         {
           "id": "shot:finale",
-          "start": 367,
-          "end": 387,
+          "start": 381,
+          "end": 405,
           "label": "The whole valley",
           "points": [
             [
@@ -1107,12 +1217,12 @@
                 "interp": "auto"
               },
               {
-                "t": 15,
+                "t": 18,
                 "v": 0.75,
                 "interp": "linear"
               },
               {
-                "t": 20,
+                "t": 24,
                 "v": 1
               }
             ]
@@ -1143,11 +1253,11 @@
                   "v": 0
                 },
                 {
-                  "t": 9.197,
+                  "t": 11.036,
                   "v": 1
                 },
                 {
-                  "t": 20,
+                  "t": 24,
                   "v": 1
                 }
               ]
@@ -1164,7 +1274,7 @@
         {
           "id": "cut:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "slot": "camera"
         }
       ]
@@ -1179,7 +1289,7 @@
         {
           "id": "clock-running:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -1201,7 +1311,7 @@
         {
           "id": "clock-hour:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -1211,8 +1321,18 @@
               },
               {
                 "t": 52,
-                "v": 15,
+                "v": 13.25,
                 "interp": "linear"
+              },
+              {
+                "t": 62,
+                "v": 13.65,
+                "interp": "linear"
+              },
+              {
+                "t": 91,
+                "v": 15.75,
+                "interp": "constant"
               },
               {
                 "t": 92,
@@ -1220,37 +1340,37 @@
                 "interp": "linear"
               },
               {
-                "t": 102,
+                "t": 116,
                 "v": 23,
                 "interp": "linear"
               },
               {
-                "t": 116.9,
+                "t": 130.9,
                 "v": 23.9,
                 "interp": "constant"
               },
               {
-                "t": 117,
+                "t": 131,
                 "v": 6.5,
                 "interp": "linear"
               },
               {
-                "t": 122,
+                "t": 136,
                 "v": 7,
                 "interp": "linear"
               },
               {
-                "t": 162,
+                "t": 176,
                 "v": 9,
                 "interp": "linear"
               },
               {
-                "t": 342,
+                "t": 356,
                 "v": 14,
                 "interp": "linear"
               },
               {
-                "t": 387,
+                "t": 405,
                 "v": 16.5,
                 "interp": "linear"
               }
@@ -1269,8 +1389,8 @@
       "sections": [
         {
           "id": "time-scale:weather",
-          "start": 102,
-          "end": 342,
+          "start": 116,
+          "end": 356,
           "whenFinished": "restore",
           "curve": {
             "keys": [
@@ -1309,7 +1429,7 @@
         {
           "id": "bar-top:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -1337,7 +1457,7 @@
         {
           "id": "bar-bottom:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -1365,7 +1485,7 @@
         {
           "id": "fade:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -1379,32 +1499,97 @@
                 "interp": "linear"
               },
               {
-                "t": 113,
+                "t": 90.8,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 116,
+                "t": 91.8,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 118,
+                "t": 92.6,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 121,
+                "t": 93.8,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 381,
+                "t": 101.2,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 387,
+                "t": 101.9,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 102.4,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 103.4,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 115.2,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 115.9,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 116.3,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 117.3,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 127,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 130,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 132,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 135,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 396,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 398,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 405,
                 "v": 1,
                 "interp": "linear"
               }
@@ -1423,7 +1608,7 @@
         {
           "id": "title-text:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -1433,10 +1618,6 @@
               {
                 "t": 2,
                 "v": "The Valley"
-              },
-              {
-                "t": 369,
-                "v": "Cleo Engine"
               }
             ]
           }
@@ -1453,7 +1634,7 @@
         {
           "id": "title-opacity:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -1480,26 +1661,6 @@
                 "t": 8,
                 "v": 0,
                 "interp": "linear"
-              },
-              {
-                "t": 369,
-                "v": 0,
-                "interp": "linear"
-              },
-              {
-                "t": 370,
-                "v": 1,
-                "interp": "linear"
-              },
-              {
-                "t": 380,
-                "v": 1,
-                "interp": "linear"
-              },
-              {
-                "t": 381,
-                "v": 0,
-                "interp": "linear"
               }
             ]
           }
@@ -1516,7 +1677,7 @@
         {
           "id": "caption-text:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -1541,38 +1702,46 @@
               },
               {
                 "t": 64,
-                "v": "Dynamic global illumination: the sun goes down, the bounce light follows"
+                "v": "Dynamic global illumination: the sunlight through the door bounces round the room"
               },
               {
                 "t": 104,
+                "v": "At night, candlelight: the GI carries it round the room, and the eye adapts to it"
+              },
+              {
+                "t": 118,
                 "v": "III  ·  Weather  ·  time ×2"
               },
               {
-                "t": 125,
+                "t": 139,
                 "v": "Clouds gather"
               },
               {
-                "t": 165,
+                "t": 179,
                 "v": "First rain"
               },
               {
-                "t": 196,
+                "t": 193,
+                "v": "Wet ground and puddles: screen-space reflections, raindrop ripples"
+              },
+              {
+                "t": 210,
                 "v": "Storm"
               },
               {
-                "t": 246,
+                "t": 260,
                 "v": "Rain turns to snow"
               },
               {
-                "t": 285,
+                "t": 299,
                 "v": "The snow melts"
               },
               {
-                "t": 315,
+                "t": 329,
                 "v": "Clear again"
               },
               {
-                "t": 344,
+                "t": 358,
                 "v": "IV  ·  Water  ·  screen-space reflections"
               }
             ]
@@ -1590,7 +1759,7 @@
         {
           "id": "caption-opacity:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -1709,153 +1878,269 @@
                 "interp": "linear"
               },
               {
-                "t": 111,
+                "t": 112,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 112,
+                "t": 113,
                 "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 118,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 119,
+                "v": 1,
                 "interp": "linear"
               },
               {
                 "t": 125,
-                "v": 0,
+                "v": 1,
                 "interp": "linear"
               },
               {
                 "t": 126,
-                "v": 1,
-                "interp": "linear"
-              },
-              {
-                "t": 134,
-                "v": 1,
-                "interp": "linear"
-              },
-              {
-                "t": 135,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 165,
+                "t": 139,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 166,
+                "t": 140,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 174,
+                "t": 148,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 175,
+                "t": 149,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 196,
+                "t": 179,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 197,
+                "t": 180,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 205,
+                "t": 188,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 206,
+                "t": 189,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 246,
+                "t": 193,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 247,
+                "t": 194,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 255,
+                "t": 203,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 256,
+                "t": 204,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 285,
+                "t": 210,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 286,
+                "t": 211,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 294,
+                "t": 219,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 295,
+                "t": 220,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 315,
+                "t": 260,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 316,
+                "t": 261,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 324,
+                "t": 269,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 325,
+                "t": 270,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 344,
+                "t": 299,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 345,
+                "t": 300,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 351,
+                "t": 308,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 352,
+                "t": 309,
                 "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 329,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 330,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 338,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 339,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 358,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 359,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 365,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 366,
+                "v": 0,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "logo-opacity",
+      "type": "property",
+      "path": "opacity",
+      "valueType": "number",
+      "slot": "logo",
+      "sections": [
+        {
+          "id": "logo-opacity:all",
+          "start": 0,
+          "end": 405,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 398.5,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 400,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 405,
+                "v": 1,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "wordmark-opacity",
+      "type": "property",
+      "path": "opacity",
+      "valueType": "number",
+      "slot": "wordmark",
+      "sections": [
+        {
+          "id": "wordmark-opacity:all",
+          "start": 0,
+          "end": 405,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 398.5,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 400,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 405,
+                "v": 1,
                 "interp": "linear"
               }
             ]
@@ -1878,50 +2163,50 @@
         },
         {
           "id": "clouds-presets:1",
-          "start": 122,
-          "end": 137,
+          "start": 136,
+          "end": 151,
           "label": "partlyCloudy",
           "preset": "partlyCloudy"
         },
         {
           "id": "clouds-presets:2",
-          "start": 140,
-          "end": 160,
+          "start": 154,
+          "end": 174,
           "label": "overcast",
           "preset": "overcast"
         },
         {
           "id": "clouds-presets:3",
-          "start": 162,
-          "end": 176,
+          "start": 176,
+          "end": 190,
           "label": "rainy",
           "preset": "rainy"
         },
         {
           "id": "clouds-presets:4",
-          "start": 192,
-          "end": 208,
+          "start": 206,
+          "end": 222,
           "label": "stormy",
           "preset": "stormy"
         },
         {
           "id": "clouds-presets:5",
-          "start": 244,
-          "end": 262,
+          "start": 258,
+          "end": 276,
           "label": "overcast",
           "preset": "overcast"
         },
         {
           "id": "clouds-presets:6",
-          "start": 286,
-          "end": 308,
+          "start": 300,
+          "end": 322,
           "label": "partlyCloudy",
           "preset": "partlyCloudy"
         },
         {
           "id": "clouds-presets:7",
-          "start": 314,
-          "end": 338,
+          "start": 328,
+          "end": 352,
           "label": "clear",
           "preset": "clear"
         }
@@ -1935,29 +2220,29 @@
       "sections": [
         {
           "id": "wind-presets:0",
-          "start": 162,
-          "end": 182,
+          "start": 176,
+          "end": 196,
           "label": "windy",
           "preset": "windy"
         },
         {
           "id": "wind-presets:1",
-          "start": 192,
-          "end": 206,
+          "start": 206,
+          "end": 220,
           "label": "storm",
           "preset": "storm"
         },
         {
           "id": "wind-presets:2",
-          "start": 246,
-          "end": 266,
+          "start": 260,
+          "end": 280,
           "label": "breezy",
           "preset": "breezy"
         },
         {
           "id": "wind-presets:3",
-          "start": 312,
-          "end": 336,
+          "start": 326,
+          "end": 350,
           "label": "calm",
           "preset": "calm"
         }
@@ -1973,7 +2258,7 @@
         {
           "id": "weather-precipitationRate:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -1982,42 +2267,42 @@
                 "interp": "linear"
               },
               {
-                "t": 164,
+                "t": 178,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 170,
-                "v": 0.15,
+                "t": 184,
+                "v": 0.3,
                 "interp": "linear"
               },
               {
-                "t": 192,
-                "v": 0.15,
+                "t": 206,
+                "v": 0.3,
                 "interp": "linear"
               },
               {
-                "t": 204,
+                "t": 218,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 242,
+                "t": 256,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 252,
+                "t": 266,
                 "v": 0.6,
                 "interp": "linear"
               },
               {
-                "t": 282,
+                "t": 296,
                 "v": 0.6,
                 "interp": "linear"
               },
               {
-                "t": 290,
+                "t": 304,
                 "v": 0,
                 "interp": "linear"
               }
@@ -2036,7 +2321,7 @@
         {
           "id": "weather-precipitationSnowShare:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -2045,12 +2330,12 @@
                 "interp": "linear"
               },
               {
-                "t": 246,
+                "t": 260,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 270,
+                "t": 284,
                 "v": 1,
                 "interp": "linear"
               }
@@ -2069,7 +2354,7 @@
         {
           "id": "weather-wetness:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -2078,42 +2363,42 @@
                 "interp": "linear"
               },
               {
-                "t": 164,
+                "t": 178,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 190,
-                "v": 0.4,
-                "interp": "linear"
-              },
-              {
                 "t": 192,
-                "v": 0.4,
-                "interp": "linear"
-              },
-              {
-                "t": 212,
-                "v": 1,
-                "interp": "linear"
-              },
-              {
-                "t": 282,
-                "v": 1,
-                "interp": "linear"
-              },
-              {
-                "t": 286,
                 "v": 0.9,
                 "interp": "linear"
               },
               {
-                "t": 312,
+                "t": 206,
+                "v": 0.95,
+                "interp": "linear"
+              },
+              {
+                "t": 218,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 296,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 300,
                 "v": 0.9,
                 "interp": "linear"
               },
               {
-                "t": 340,
+                "t": 326,
+                "v": 0.9,
+                "interp": "linear"
+              },
+              {
+                "t": 354,
                 "v": 0.3,
                 "interp": "linear"
               }
@@ -2132,7 +2417,7 @@
         {
           "id": "weather-puddles:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -2141,52 +2426,47 @@
                 "interp": "linear"
               },
               {
-                "t": 168,
+                "t": 180,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 190,
-                "v": 0.3,
-                "interp": "linear"
-              },
-              {
-                "t": 192,
-                "v": 0.3,
-                "interp": "linear"
-              },
-              {
-                "t": 216,
+                "t": 194,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 252,
+                "t": 230,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 277,
+                "t": 266,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 291,
                 "v": 0.7,
                 "interp": "linear"
               },
               {
-                "t": 282,
+                "t": 296,
                 "v": 0.7,
                 "interp": "linear"
               },
               {
-                "t": 302,
+                "t": 316,
                 "v": 0.85,
                 "interp": "linear"
               },
               {
-                "t": 312,
+                "t": 326,
                 "v": 0.85,
                 "interp": "linear"
               },
               {
-                "t": 340,
+                "t": 354,
                 "v": 0.2,
                 "interp": "linear"
               }
@@ -2205,7 +2485,7 @@
         {
           "id": "weather-snow:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -2214,22 +2494,22 @@
                 "interp": "linear"
               },
               {
-                "t": 250,
+                "t": 264,
                 "v": 0.001,
                 "interp": "linear"
               },
               {
-                "t": 280,
+                "t": 294,
                 "v": 0.8,
                 "interp": "linear"
               },
               {
-                "t": 284,
+                "t": 298,
                 "v": 0.8,
                 "interp": "linear"
               },
               {
-                "t": 306,
+                "t": 320,
                 "v": 0.001,
                 "interp": "linear"
               }
@@ -2248,7 +2528,7 @@
         {
           "id": "clock-overcast:all",
           "start": 0,
-          "end": 387,
+          "end": 405,
           "curve": {
             "keys": [
               {
@@ -2257,47 +2537,47 @@
                 "interp": "linear"
               },
               {
-                "t": 127,
+                "t": 141,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 160,
+                "t": 174,
                 "v": 0.5,
                 "interp": "linear"
               },
               {
-                "t": 176,
+                "t": 190,
                 "v": 0.7,
                 "interp": "linear"
               },
               {
-                "t": 192,
+                "t": 206,
                 "v": 0.7,
                 "interp": "linear"
               },
               {
-                "t": 207,
+                "t": 221,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 262,
+                "t": 276,
                 "v": 0.8,
                 "interp": "linear"
               },
               {
-                "t": 308,
+                "t": 322,
                 "v": 0.5,
                 "interp": "linear"
               },
               {
-                "t": 314,
+                "t": 328,
                 "v": 0.5,
                 "interp": "linear"
               },
               {
-                "t": 338,
+                "t": 352,
                 "v": 0,
                 "interp": "linear"
               }
@@ -2449,8 +2729,8 @@
       "sections": [
         {
           "id": "pond-waves:shot",
-          "start": 342,
-          "end": 387,
+          "start": 356,
+          "end": 405,
           "whenFinished": "restore",
           "curve": {
             "keys": [
@@ -2489,8 +2769,8 @@
       "sections": [
         {
           "id": "pond-ssr:shot",
-          "start": 342,
-          "end": 387,
+          "start": 356,
+          "end": 405,
           "whenFinished": "restore",
           "curve": {
             "keys": [
@@ -2514,11 +2794,11 @@
       "name": "II · Light"
     },
     {
-      "t": 102,
+      "t": 116,
       "name": "III · Weather"
     },
     {
-      "t": 342,
+      "t": 356,
       "name": "IV · Water"
     }
   ]

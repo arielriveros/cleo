@@ -73,7 +73,7 @@ struct ParticleSimUniforms {
     u_emitterVel: vec4<f32>,          // emitter velocity (world), 0
     u_gravity: vec4<f32>,             // gravity (sim space), linear drag
     u_wind: vec4<f32>,                // wind velocity (sim space), coupling
-    u_windScene: vec4<f32>,           // scene wind multiplier (SIM_SCENE_WIND), 0, 0, 0
+    u_windScene: vec4<f32>,           // scene wind multiplier (SIM_SCENE_WIND), then the still-air velocity xyz
     u_windBase: vec4<f32>,            // the frame's wind field: dir xz, strength, gust wavelength
     u_windMotion: vec4<f32>,          // ... time, gust speed, gustiness, veer (rad)
     u_noise: vec4<f32>,               // strength, frequency, scroll, octaves
@@ -676,7 +676,9 @@ fn updateParticle(dt: f32) {
         if (hasFeature(mask, SIM_SCENE_WIND)) {
             // The air where the particle is, in world space, brought into the simulation's.
             let wp = select(x, transformPoint(toWorld, x), isLocal);
-            let air = windFieldAt(wp, WindFieldParams(u_sim.u_windBase, u_sim.u_windMotion)).velocity * u_sim.u_windScene.x;
+            // Plus the particle's own motion through still air (u_windScene.yzw): a drop's fall.
+            let air = windFieldAt(wp, WindFieldParams(u_sim.u_windBase, u_sim.u_windMotion)).velocity * u_sim.u_windScene.x
+                    + u_sim.u_windScene.yzw;
             windTarget = select(air, transformDir(u_sim.u_worldToSim, air), isLocal);
         }
         acc = acc + (windTarget - v) * u_sim.u_wind.w;

@@ -7,7 +7,8 @@
 //   Cinematic
 //     Cinematic Camera    a plain camera, inactive until the tour cuts to it
 //     Valley Tour         a Sequence node playing tools/valley/cinematic/valley-tour.sequence.json
-//     Cinematic Overlay   letterbox bars, a fade to black, a title and a caption the tour animates
+//     Cinematic Overlay   letterbox bars, a fade to black, a title and a caption the tour animates, and the
+//                         Cleo logo and wordmark it ends on (the logo a texture of its own, /Cinematic/Textures)
 //     Start Menu          "Cinematic demo" or "Free mode" (examples/scripts/ValleyStartMenu.ts)
 //
 // and, beside the Wind at the root, the `Weather` the tour's Act III keys: one unbounded volume falling
@@ -32,6 +33,13 @@ import { ROOT, VALLEY_SCENE, id, log, child, refreshValleyScripts, attach } from
 export const TOUR_FILE = path.join(ROOT, 'tools', 'valley', 'cinematic', 'valley-tour.sequence.json')
 
 const INK = [0.94, 0.91, 0.85, 1]
+/** The editor's loading screen's wordmark: its colour and its font (app-kit theme.css `--font-ui`). */
+const WORDMARK_INK = [0.898, 0.906, 0.922, 1]
+const WORDMARK_FONT = 'Consolas, monaco, monospace'
+/** The Cleo logo the tour ends on: the editor's own (applications/editor/public/brand/logo.png, 404x366). */
+const LOGO_FILE = path.join(ROOT, 'applications', 'editor', 'public', 'brand', 'logo.png')
+const LOGO_TEXTURE = id('texture:cleo-logo')
+const LOGO_FOLDER = '/Cinematic/Textures'
 const DIM = [0.72, 0.69, 0.62, 1]
 const GOLD = [0.92, 0.78, 0.46, 1]
 const SERIF = 'Georgia, "Times New Roman", serif'
@@ -62,7 +70,42 @@ function overlay() {
     text('title', 'Title', '', rect([0.5, 0.5], [0.5, 0.5], [-900, -90], [900, 90]), { size: 92, opacity: 0, z: 2, tint: INK }),
     text('caption', 'Caption', '', rect([0.5, 1], [0.5, 1], [-860, -104], [860, -20]), { size: 30, opacity: 0, z: 2, tint: DIM }),
     panel('fade', 'Fade', stretch(), [0, 0, 0, 1], { opacity: 0, z: 3 }),
+    // Over the fade: the Cleo logo and its wordmark, as the editor's loading screen shows them.
+    uiNode('Logo', 'uiImage', {
+      ...rect([0.5, 0.5], [0.5, 0.5], [-170, -250], [170, 58]), textureId: LOGO_TEXTURE, fit: 'contain', opacity: 0, zOrder: 4,
+    }, { id: id('cinematic:logo') }),
+    uiNode('Wordmark', 'uiText', {
+      ...rect([0.5, 0.5], [0.5, 0.5], [-700, 86], [700, 166]), text: 'CLEO ENGINE', fontSize: 56, fontFamily: WORDMARK_FONT,
+      fontWeight: 600, letterSpacing: 0.3, align: 'center', vAlign: 'middle', wrap: false, lineHeight: 1.25,
+      tint: WORDMARK_INK, opacity: 0, zOrder: 4,
+    }, { id: id('cinematic:wordmark') }),
   ], 30, true)
+}
+
+/** The logo's texture, its two Assets entries (the record and its source image) and their folders. Idempotent. */
+function logoTexture(bundle: any) {
+  const bytes = fs.readFileSync(LOGO_FILE)
+  const texture = {
+    id: LOGO_TEXTURE, mime: 'image/png',
+    config: { flipY: false, usage: 'color', wrapping: 'clamp', mipMap: false, mipMapFilter: 'linear', precision: 'low', target: 'texture2D' },
+    bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+  }
+  const at = bundle.textures.findIndex((t: any) => t.id === LOGO_TEXTURE)
+  if (at >= 0) bundle.textures[at] = texture
+  else bundle.textures.push(texture)
+  bundle.vfs.entries = bundle.vfs.entries.filter((e: any) => e.assetId !== LOGO_TEXTURE)
+  bundle.vfs.entries.push(
+    { path: `${LOGO_FOLDER}/Cleo Logo.tex`, kind: 'texture', assetId: LOGO_TEXTURE, created: bundle.manifest.createdAt },
+    { path: `${LOGO_FOLDER}/Source/Cleo Logo.png`, kind: 'image', assetId: LOGO_TEXTURE, created: bundle.manifest.createdAt },
+  )
+  for (let d = `${LOGO_FOLDER}/Source`; d && d !== '/'; d = path.posix.dirname(d))
+    if (!bundle.vfs.folders.includes(d)) bundle.vfs.folders.push(d)
+  // The scene names it now: its refs list it, as the editor's own save would.
+  for (const meta of bundle.manifest.sceneMetas) {
+    if (meta.id !== VALLEY_SCENE) continue
+    const refs = (meta.refs ??= {})
+    refs.textureIds = [...new Set([...(refs.textureIds ?? []), LOGO_TEXTURE])]
+  }
 }
 
 function startMenu() {
@@ -135,6 +178,7 @@ export function applyCinematic(bundle: any, options: { regenerate?: boolean } = 
   data.config.render.effectsFollowTimeScale = true
 
   refreshValleyScripts(bundle, ['ValleyStartMenu', 'ValleyDayNight'])
+  logoTexture(bundle)
   const menuScript = bundle.libraries.scripts.find((s: any) => s.id === id('script:ValleyStartMenu'))
   const tour = tourSequence(bundle, options.regenerate)
 
@@ -161,6 +205,7 @@ export function applyCinematic(bundle: any, options: { regenerate?: boolean } = 
       camera: camera.id, clock: clock.id,
       barTop: ui(over, 'Letterbox Top').id, barBottom: ui(over, 'Letterbox Bottom').id, fade: ui(over, 'Fade').id,
       title: ui(over, 'Title').id, caption: ui(over, 'Caption').id,
+      logo: ui(over, 'Logo').id, wordmark: ui(over, 'Wordmark').id,
       clouds: clouds.id, wind: wind.id, weather: weather.id, landscape: landscape.id, pond: pond.id,
     },
   }

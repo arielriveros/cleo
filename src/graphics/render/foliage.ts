@@ -450,18 +450,22 @@ export class FoliagePasses {
     /** The one-model list an impostor-cast bucket is chunked by. Never holds a model past the call. */
     private readonly _impostorModels: Model[] = [undefined!];
 
-    /** From this cascade out, a layer with an octahedral impostor casts through it. See `_impostorCasts`. */
+    /** Never before this cascade does a layer cast through its impostor. See `_impostorCasts`. */
     private static readonly IMPOSTOR_SHADOW_CASCADE = 1;
 
     /**
      * Does `layer` cast into `cascade` through its octahedral impostor (shadowMapImpostor.wgsl) rather than
-     * its cheapest mesh level? From IMPOSTOR_SHADOW_CASCADE out, where a texel is a few centimetres and the
-     * shadow's penumbra wider still, so the impostor's own resolution never shows; never in cascade 0. Only
-     * once its atlas is decoded, and never for a card impostor, which has no view from the sun.
+     * its cheapest mesh level? Only where the camera sees impostors too: in a cascade whose near edge (less
+     * its blend band) lies at or past the layer's impostor hand-off (`impostorShadowFrom`). Nearer, the trees
+     * the camera sees are meshes, and their impostor's shadow — a round canopy from one baked view — falls on
+     * them, darkening their sunlit side. Never in cascade 0; only once the atlas is decoded; never for a card
+     * impostor, which has no view from the sun.
      */
     private _impostorCasts(layer: FoliageLayer, cascade: number): boolean {
-        if (cascade < FoliagePasses.IMPOSTOR_SHADOW_CASCADE || layer.kind === 'billboard') return false;
-        if (!layer.billboardModel || !layer.billboardOctahedral || !layer.billboardTextureId) return false;
+        if (layer.kind === 'billboard' || !layer.billboardModel || !layer.billboardOctahedral || !layer.billboardTextureId) return false;
+        const sh = this._sys.shadows;
+        const near = cascade > 0 ? sh.cascadeSplits[cascade - 1] ?? Infinity : 0;
+        if (!impostorShadowFrom(cascade, near, sh.cascadeBlend, layer.billboardDistance, FoliagePasses.IMPOSTOR_SHADOW_CASCADE)) return false;
         return !!TextureManager.Instance.getTexture(layer.billboardTextureId);
     }
 
@@ -490,7 +494,7 @@ export class FoliagePasses {
         const d = this._sys.shadows.shadowLightUnit, v = this._impostorShadowVec;
         v[0][0] = d[0]; v[0][1] = d[1]; v[0][2] = d[2];
         v[0][3] = (clip[2] * d[0] + clip[6] * d[1] + clip[10] * d[2]) * (device.capabilities.conventions.clipDepthZeroToOne ? 1 : 0.5);
-        v[1][0] = info.frames; v[1][1] = info.radius; v[1][2] = albedo.config.flipY ? 1 : 0;
+        v[1][0] = info.frames; v[1][1] = info.radius; v[1][2] = albedo.config.flipY ? 1 : 0; v[1][3] = layer.farCrownRadius;
         v[2][0] = info.center[0]; v[2][1] = info.center[1]; v[2][2] = info.center[2];
         this._shaderManager.setUniform('u_lightDir', v[0]);
         this._shaderManager.setUniform('u_impostor', v[1]);
@@ -933,9 +937,11 @@ export class FoliagePasses {
         c[3] = !band ? 0 : layer.kind === 'billboard' ? 2 : 1;
         // A different dither phase every frame, so TAA resolves the screen-door into a smooth blend.
         f[0] = ((this._view.frameIndex * 7) % 16) / 16;
-        // The leaf translucency the impostor program writes into the G-buffer (the mesh
-        // levels read it off their own materials instead).
+        // The leaf translucency and the weather responses the impostor program uses (the mesh levels read
+        // them off their own materials instead).
         f[1] = layer.farTranslucency;
+        const [wet, snow] = layer.farWeather;
+        f[2] = wet; f[3] = snow;
         this._shaderManager.setUniform('u_lodBand', b);
         this._shaderManager.setUniform('u_lodCamera', c);
         this._shaderManager.setUniform('u_lodFrame', f);
@@ -1248,7 +1254,7 @@ export class FoliagePasses {
         this._setLodFadeUniforms(layer, slot);
         const v = this._impostorVec;
         // Which way up the atlas sits in its texture: see `atlasUv` in geometryFoliageImpostor.wgsl.
-        v[0][0] = info.frames; v[0][1] = info.radius; v[0][2] = albedo.config.flipY ? 1 : 0;
+        v[0][0] = info.frames; v[0][1] = info.radius; v[0][2] = albedo.config.flipY ? 1 : 0; v[0][3] = layer.farCrownRadius;
         v[1][0] = info.center[0]; v[1][1] = info.center[1]; v[1][2] = info.center[2];
         this._shaderManager.setUniform('u_impostor', v[0]);
         this._shaderManager.setUniform('u_impostorCenter', v[1]);
@@ -1401,4 +1407,15 @@ export class FoliagePasses {
     public colourChunks(layer: FoliageLayer, slot: number): FoliageBatch[] | undefined {
         return layer.gpuCulled ? layer.gpuBatches[slot] : layer.batches[slot];
     }
+}
+
+/**
+ * Whether a cascade starting `near` metres out (blended over the last `blend` of it) casts a layer's shadow
+ * through its octahedral impostor: from `firstCascade` on, once that near edge is at or past where the camera
+ * swaps the layer's meshes for the impostor (`handOff`, FoliageLayer.billboardDistance).
+ */
+export function impostorShadowFrom(cascade: number, near: number, blend: number, handOff: number, firstCascade = 1): boolean {
+    if (cascade < firstCascade) return false;
+    if (!Number.isFinite(handOff)) return false;
+    return near * (1 - Math.min(1, Math.max(0, blend))) >= handOff;
 }

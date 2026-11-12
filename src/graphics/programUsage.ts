@@ -218,6 +218,8 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
                 const style = { rate: 1, size: 1, speed: 1, sprite: parsePrecipitationSprite(w.precipitationSprite) };
                 addParticles({ system: precipitationSystem(kind, style, { wind: [0, 0], density: 1, prewarm: true }) }, use);
             }
+            // Rain thickens the air into sheets: the rig's haze is a fog volume (PrecipitationRig.haze).
+            if (kinds.includes('rain')) { add('volumetricFogInject'); add('volumetricFogIntegrate'); add('volumetricFogApply'); }
             break;
         }
     }

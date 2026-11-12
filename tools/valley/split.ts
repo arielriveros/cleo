@@ -22,13 +22,11 @@
 
 import fs from 'fs'
 import path from 'path'
-import { walkRefs, edgesOfAsset, type EdgeSpec } from '../../applications/editor/src/utils/assetEdges'
-import { isFlatBuffer, isTupleBuffer } from '../../applications/editor/src/utils/binaryPayload'
 import { parseInputMap } from '../../src/input/actionMap'
 import { FLY_INPUT_MAP } from './flyInputMap.mjs'
 import {
   VALLEY_DIR, DUNGEON_DIR, VALLEY_SCENE, DUNGEON_SCENE, id, log, nodes, scriptIdOf, attach, refreshValleyScripts,
-  checkNodeRefs, assetHashes, read, write as writeBundle,
+  checkNodeRefs, assetHashes, read, write as writeBundle, prune,
 } from './bundleOps'
 import { applyCinematic } from './cinematic'
 
@@ -93,6 +91,8 @@ function toValley(bundle: any) {
   }
 
   log('valley: gameplay', dropNamed(root, ['GameManager', 'Player', 'Barrels', 'Interactables', 'Enemy Spawns', 'Nav Mesh']))
+  // The puddle decals: the weather volume's puddles stand in the ground's own hollows now (valleyFixes.ts).
+  log('valley: puddle decals', dropNamed(root, ['Puddles']))
   log('valley: wading zone', dropNamed(child(root, 'Water'), ['Pond Zone']))
   log('valley: cave mouth', dropNamed(child(root, 'Light Probes'), ['Cave Mouth Probe'])
     + dropNamed(child(root, 'GI Volumes'), ['Cave Mouth GI']) + dropNamed(child(root, 'Fog Volumes'), ['Cave Mouth Mist']))
@@ -218,147 +218,6 @@ function refile(bundle: any, moves: Record<string, string>) {
   for (const e of bundle.vfs.entries) for (let d = path.posix.dirname(e.path); d && d !== '/'; d = path.posix.dirname(d)) folders.add(d)
   bundle.vfs.folders = [...folders].sort()
   return moved
-}
-
-// ----- prune -----------------------------------------------------------------------------------------------
-
-const LIB_KIND: Record<string, string> = {
-  materials: 'material', terrainMaterials: 'terrainMaterial', templates: 'template', models: 'model', scripts: 'script',
-  animationFields: 'animationField', animations: 'animation', rigs: 'rig', tilesets: 'tileset', aiBrains: 'aiBrain',
-  particleSystems: 'particleSystem', animControllers: 'animController', boneMasks: 'boneMask', poseAssets: 'pose',
-  audioSources: 'audioSource', soundSamples: 'soundSample',
-}
-/** Kinds a script or a node field may name by NAME (a template to spawn, a clip to play, a sound). */
-const NAMED_KINDS = new Set(['template', 'particleSystem', 'soundSample', 'animation', 'tileset', 'aiBrain', 'animController', 'boneMask', 'animationField'])
-/** A SceneMeta.refs field and the kind its ids are. */
-const REF_FIELDS: Record<string, string> = {
-  materialIds: 'material', modelIds: 'model', meshIds: 'model', foliageModelIds: 'model', templateIds: 'template',
-  terrainMaterialIds: 'terrainMaterial', tilesetIds: 'tileset', aiBrainIds: 'aiBrain', particleSystemIds: 'particleSystem',
-  textureIds: 'texture', scriptIds: 'script', animationFieldIds: 'animationField', animControllerIds: 'animController',
-  boneMaskIds: 'boneMask', poseAssetIds: 'pose', animationIds: 'animation', soundSampleIds: 'soundSample', audioSourceIds: 'audioSource',
-}
-/** Keys whose strings name the thing itself, not something it uses. */
-const SELF_KEYS = new Set(['id', 'name', 'type', 'nodeType', 'kind', 'baseType', 'path'])
-
-/** Every string literal in a script's source, and the module each import names (by its last path segment). */
-function scriptStrings(source: string, out: Set<string>) {
-  for (const m of source.matchAll(/(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g)) out.add(m[2])
-  for (const m of source.matchAll(/from\s+['"]([^'"]+)['"]/g)) out.add(m[1].split('/').pop()!)
-}
-
-/** Strings in a JSON value that could name an asset, skipping buffers and the keys that name the value itself. */
-function jsonStrings(v: any, out: Set<string>) {
-  if (!v || typeof v !== 'object' || ArrayBuffer.isView(v) || isFlatBuffer(v) || isTupleBuffer(v)) return
-  if (Array.isArray(v)) { for (const x of v) typeof x === 'string' ? out.add(x) : jsonStrings(x, out); return }
-  for (const [k, x] of Object.entries(v)) {
-    if (SELF_KEYS.has(k)) continue
-    if (typeof x === 'string') { if (k === 'script' || k === 'source') scriptStrings(x, out); else out.add(x) }
-    else jsonStrings(x, out)
-  }
-}
-
-/**
- * Delete every library asset, texture, sound payload and VFS entry that nothing in the bundle reaches.
- *
- * Reached: what the scenes reference, then what those reference, to a fixpoint, through the editor's own
- * edge table (assetEdges.ts, the asset reference graph's), plus anything named by a string in a reached
- * script or node field (a template spawned by name) and the ids in `keep`. A model's `__impostor` comes with
- * it. Returns what was removed, per kind.
- */
-function prune(bundle: any, keep: Set<string> = new Set()) {
-  const L = bundle.libraries
-  const assets = new Map<string, { kind: string, asset: any }>()
-  const byName = new Map<string, string[]>()
-  for (const [lib, kind] of Object.entries(LIB_KIND)) for (const a of L[lib] ?? []) {
-    assets.set(`${kind}:${a.id}`, { kind, asset: a })
-    if (NAMED_KINDS.has(kind) && a.name) byName.set(a.name, [...(byName.get(a.name) ?? []), `${kind}:${a.id}`])
-  }
-  for (const t of bundle.textures) assets.set(`texture:${t.id}`, { kind: 'texture', asset: null })
-  const scriptByName = new Map((L.scripts ?? []).map((s: any) => [s.name, `script:${s.id}`]))
-
-  const reached = new Set<string>()
-  const queue: string[] = []
-  const dangling = new Set<string>()
-  const reach = (key: string) => {
-    if (reached.has(key)) return
-    if (!assets.has(key)) { if (!key.startsWith('image:')) dangling.add(key); return }
-    reached.add(key)
-    queue.push(key)
-  }
-  const follow = (edges: EdgeSpec[], strings: Set<string>) => {
-    for (const e of edges) reach(`${e.to.kind}:${e.to.id}`)
-    for (const s of strings) {
-      for (const key of byName.get(s) ?? []) reach(key)
-      const script = scriptByName.get(s)
-      if (script) reach(script as string)
-    }
-  }
-
-  for (const scene of Object.values(bundle.scenes) as any[]) {
-    const edges: EdgeSpec[] = []
-    walkRefs(scene, edges)
-    const strings = new Set<string>()
-    jsonStrings(scene.scene, strings)
-    follow(edges, strings)
-  }
-  for (const key of keep) reach(key)
-  while (queue.length) {
-    const key = queue.pop()!
-    const { kind, asset } = assets.get(key)!
-    if (!asset) continue
-    const strings = new Set<string>()
-    if (kind === 'script') scriptStrings(asset.source ?? '', strings)
-    else if (kind !== 'animation' && kind !== 'rig') jsonStrings(asset, strings)
-    follow(edgesOfAsset(kind as any, asset), strings)
-    if (kind === 'model') reach(`model:${asset.id}__impostor`)
-  }
-  for (const d of dangling) if (!d.endsWith('__impostor')) log(`  dangling reference: ${d}`)
-
-  const removed: Record<string, string[]> = {}
-  const gone = (kind: string, a: any) => { (removed[kind] ??= []).push(a.name ?? a.id); return false }
-  for (const [lib, kind] of Object.entries(LIB_KIND))
-    if (Array.isArray(L[lib])) L[lib] = L[lib].filter((a: any) => reached.has(`${kind}:${a.id}`) || gone(kind, a))
-  const textureNames = new Map(bundle.vfs.entries.filter((e: any) => e.kind === 'texture').map((e: any) => [e.assetId, path.basename(e.path, '.tex')]))
-  let textureBytes = 0
-  bundle.textures = bundle.textures.filter((t: any) => {
-    if (reached.has(`texture:${t.id}`)) return true
-    textureBytes += t.bytes?.byteLength ?? 0
-    return gone('texture', { id: t.id, name: textureNames.get(t.id) ?? t.id })
-  })
-  if (bundle.audio) bundle.audio = bundle.audio.filter((a: any) => reached.has(`audioSource:${a.id}`) || gone('audio', a))
-
-  // The VFS: an entry for an asset that went, and any folder left with nothing in it.
-  const sceneIds = new Set(Object.keys(bundle.scenes))
-  bundle.vfs.entries = bundle.vfs.entries.filter((e: any) => {
-    if (e.kind === 'scene') return sceneIds.has(e.assetId)
-    const kind = e.kind === 'image' ? 'texture' : e.kind
-    return !assets.has(`${kind}:${e.assetId}`) || reached.has(`${kind}:${e.assetId}`)
-  })
-  const used = new Set<string>()
-  for (const e of bundle.vfs.entries) for (let d = path.posix.dirname(e.path); d && d !== '/'; d = path.posix.dirname(d)) used.add(d)
-  bundle.vfs.folders = bundle.vfs.folders.filter((f: string) => used.has(f))
-
-  // Each scene's refs: what survives, plus what the scene now names directly (a new script).
-  for (const meta of bundle.manifest.sceneMetas) {
-    const refs = meta.refs ?? {}
-    const direct: EdgeSpec[] = []
-    walkRefs(bundle.scenes[meta.id], direct)
-    for (const [field, kind] of Object.entries(REF_FIELDS)) {
-      if (!Array.isArray(refs[field])) continue
-      const ids = refs[field].filter((x: string) => reached.has(`${kind}:${x}`))
-      for (const e of direct) if (e.to.kind === kind && reached.has(`${kind}:${e.to.id}`)) ids.push(e.to.id)
-      refs[field] = [...new Set(ids)]
-    }
-    meta.refs = refs
-  }
-
-  // The GI bakes the remaining volumes name.
-  const bakeIds = new Set<string>()
-  for (const scene of Object.values(bundle.scenes) as any[]) for (const n of nodes(scene.scene))
-    if (n.type === 'giVolume' && n.giVolume?.bakeId) bakeIds.add(n.giVolume.bakeId)
-  if (bundle.giBakes) bundle.giBakes = bundle.giBakes.filter((b: any) => bakeIds.has(b.id) || gone('giBake', b))
-
-  return { removed, textureBytes }
 }
 
 // ----- run -------------------------------------------------------------------------------------------------

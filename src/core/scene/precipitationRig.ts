@@ -1,6 +1,8 @@
 import { vec3 } from 'gl-matrix';
 import type { Scene } from './scene';
 import { ParticleSystemNode } from './nodes/particleSystemNode';
+import { VolumetricFogNode } from './nodes/volumetricFogNode';
+import { windFieldClock } from '../wind/windField';
 import type { WeatherNode } from './nodes/weatherNode';
 import { gatherWeather, WEATHER_CLOCK_WRAP } from '../../graphics/render/weatherPack';
 import {
@@ -14,6 +16,26 @@ const MAX_OFFSET = 0.3;
 const KINDS: readonly FallingKind[] = ['rain', 'snow'];
 /** Metres the camera may move in one update and still be moving rather than cut away. */
 const JUMP = 15;
+
+/**
+ * The rain's haze: one camera-following fog volume whose density rises with the rain falling round the
+ * camera and whose noise, drifting with the wind, breaks it into sheets sweeping across the view — what heavy
+ * rain looks like past the nearest drops. Reaches as far as the renderer's froxel fog does.
+ */
+export const RAIN_HAZE = {
+    /** Box size, metres: wider than the fog's 128 m reach, its bottom below the camera. */
+    size: [320, 140, 320] as [number, number, number],
+    /** Extinction per metre at rain rate 1 (visibility ~3.9 / it: about 650 m). */
+    density: 0.006,
+    noiseStrength: 0.85,
+    noiseScale: 35,
+    albedo: [0.8, 0.82, 0.86] as [number, number, number],
+    anisotropy: 0.3,
+    /** How much faster than the air the sheets sweep (gust fronts outrun the mean wind). */
+    drift: 1.2,
+    /** Seconds the haze takes to follow a change in the rain (so a keyed rate eases it in). */
+    response: 2,
+};
 
 interface Slot {
     node: ParticleSystemNode;
@@ -45,6 +67,10 @@ export class PrecipitationRig {
     private readonly _velocity = vec3.create();
     private _hasLast = false;
     private _clock = 0;
+    private _haze: VolumetricFogNode | null = null;
+    private _hazeAmount = 0;
+    private readonly _hazeDrift = [0, 0, 0];
+    private _hazeClock = -1;
 
     /**
      * The renderer's precipitation density, 0..1 (RenderSettings.precipitationDensity): a multiplier on
@@ -62,6 +88,9 @@ export class PrecipitationRig {
 
     /** The system of one kind, or null while that kind has never fallen. */
     public systemOf(kind: FallingKind): ParticleSystemNode | null { return this._slots[kind]?.node ?? null; }
+
+    /** The rain's haze (RAIN_HAZE), while any rain has fallen; the renderer's fog draws it beside the scene's. */
+    public get haze(): VolumetricFogNode | null { return this._haze && this._haze.enabled ? this._haze : null; }
 
     /** Advance by `delta` seconds of scene time. Called by Scene.update while the scene runs. */
     public update(delta: number, time: number): void {
@@ -87,10 +116,61 @@ export class PrecipitationRig {
         this._hasLast = true;
 
         const gathered = cameraNode && !orthographic ? gatherWeather(volumes, camera) : [];
-        for (const kind of KINDS) this._updateKind(kind, gathered, camera, delta, time, jump);
+        let rain = 0;
+        for (const kind of KINDS) {
+            const rate = this._updateKind(kind, gathered, camera, delta, time, jump);
+            if (kind === 'rain') rain = rate;
+        }
+        this._updateHaze(rain, camera, delta, jump);
     }
 
-    private _updateKind(kind: FallingKind, gathered: readonly WeatherNode[], camera: vec3, delta: number, time: number, jump: number): void {
+    /**
+     * Keep the haze over the camera, as thick as the rain round it (eased), its noise carried on by the wind.
+     * The fog shader moves its noise by windVelocity × its clock (the render clock), so the drift the wind
+     * has carried it is integrated here and handed over as drift ÷ clock: a wind that changes speed carries
+     * the sheets on instead of racing them (the clouds' and the gusts' rule).
+     */
+    private _updateHaze(rainRate: number, camera: vec3, delta: number, jump: number): void {
+        const target = Math.min(1, Math.max(0, rainRate));
+        const k = jump > JUMP ? 1 : Math.min(1, Math.max(0, delta) / RAIN_HAZE.response);
+        this._hazeAmount += (target - this._hazeAmount) * k;
+        if (this._hazeAmount < 1e-3 && target <= 0) {
+            this._hazeAmount = 0;
+            if (this._haze) this._haze.enabled = false;
+            return;
+        }
+        if (!this._haze) {
+            const h = new VolumetricFogNode('Rain Haze', {
+                size: RAIN_HAZE.size, blendDistance: 30, density: 0, albedo: RAIN_HAZE.albedo, anisotropy: RAIN_HAZE.anisotropy,
+                noiseStrength: RAIN_HAZE.noiseStrength, noiseScale: RAIN_HAZE.noiseScale, windVelocity: [0, 0, 0],
+            }, '__precipitation__/haze');
+            h.editorOwned = true;
+            h.scene = this._scene;
+            this._haze = h;
+        }
+        const h = this._haze;
+        h.enabled = true;
+        h.density = RAIN_HAZE.density * this._hazeAmount;
+        // The box over the camera, its bottom a little below it (the rain falls to the ground everywhere).
+        h.setPosition(vec3.fromValues(camera[0], camera[1] + RAIN_HAZE.size[1] / 2 - 20, camera[2]));
+        h.updateTransforms();
+        // Its drift: the steady wind, integrated on the fog's clock.
+        const clock = windFieldClock.time;
+        const dt = this._hazeClock < 0 ? 0 : Math.max(0, clock - this._hazeClock);
+        this._hazeClock = clock;
+        const wind = this._scene.wind;
+        if (wind && wind.visible && dt > 0 && dt < 1) {
+            const [dx, dz] = wind.directionXZ;
+            const speed = wind.strength * WIND_AIR_SPEED * RAIN_HAZE.drift;
+            this._hazeDrift[0] += dx * speed * dt;
+            this._hazeDrift[2] += dz * speed * dt;
+        }
+        const t = Math.max(clock, 1e-3);
+        h.windVelocity = [this._hazeDrift[0] / t, 0, this._hazeDrift[2] / t];
+    }
+
+    /** Update one kind's system; returns the highest rate any volume in reach asks for (0 when none). */
+    private _updateKind(kind: FallingKind, gathered: readonly WeatherNode[], camera: vec3, delta: number, time: number, jump: number): number {
         const column = precipitationColumn(kind);
         const halfX = column.box[0] / 2, halfZ = column.box[2] / 2;
         let maxRate = 0;
@@ -113,16 +193,18 @@ export class PrecipitationRig {
         if (!style || maxRate <= 0) {
             if (slot?.falling) { slot.node.stop(false); slot.falling = false; }
             if (slot) this._step(slot.node, delta, time);
-            return;
+            return 0;
         }
 
-        const rate = Math.min(1, Math.ceil(maxRate * 64) / 64);
+        // Neither the rate nor the wind rebuilds the system: it spawns at the full rate and keeps each particle
+        // where the volumes' own rate is above its draw (the `weather` module), and the drops read the scene's
+        // wind as they fall. A storm building up thins and fills and slants the rain with no reset.
         const wind = this._windOf(style);
         const look: PrecipitationStyle = {
-            rate, size: style.precipitationSize, speed: style.precipitationSpeed, sprite: style.precipitationSprite,
-            trail: [style.precipitationTrailMin, style.precipitationTrailMax],
+            rate: 1, size: style.precipitationSize, speed: style.precipitationSpeed, sprite: style.precipitationSprite,
+            trail: [style.precipitationTrailMin, style.precipitationTrailMax], wind: style.precipitationWind,
         };
-        const key = JSON.stringify([rate, look.size, look.speed, wind, look.sprite, look.trail]);
+        const key = JSON.stringify([look.size, look.speed, look.wind, look.sprite, look.trail]);
         if (!slot) {
             const def = precipitationSystem(kind, look, { wind, density: 1, prewarm: true });
             const node = new ParticleSystemNode(kind === 'rain' ? 'Rain' : 'Snow', {
@@ -159,21 +241,23 @@ export class PrecipitationRig {
         else node.play();
         slot.falling = true;
         this._step(node, delta, time);
+        return maxRate;
     }
 
     private _step(node: ParticleSystemNode, delta: number, time: number): void {
         node.update(delta, time);
     }
 
-    /** The wind a volume's precipitation drifts with: the scene's WindNode, steady part, times its `precipitationWind`. */
+    /**
+     * The steady wind a volume's precipitation drifts with: the scene's WindNode times its
+     * `precipitationWind`. Only where the column stands (leaned upwind); the drops read the full field.
+     */
     private _windOf(v: WeatherNode): [number, number] {
         const wind = this._scene.wind;
         if (!wind || !wind.visible || !(v.precipitationWind > 0)) return [0, 0];
         const [dx, dz] = wind.directionXZ;
         const speed = wind.strength * WIND_AIR_SPEED * v.precipitationWind;
-        // Rounded, so a wind tweaked by a slider does not repack the system every frame.
-        const r = (x: number) => Math.round(x * 4) / 4;
-        return [r(dx * speed), r(dz * speed)];
+        return [dx * speed, dz * speed];
     }
 
     /** Let go of the systems (the scene is going away). */
@@ -186,5 +270,8 @@ export class PrecipitationRig {
         this._slots.rain = null;
         this._slots.snow = null;
         this._hasLast = false;
+        if (this._haze) { this._haze.scene = null; this._haze = null; }
+        this._hazeAmount = 0;
+        this._hazeClock = -1;
     }
 }

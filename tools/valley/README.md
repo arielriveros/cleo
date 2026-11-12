@@ -17,6 +17,16 @@ npx vitest run tests/valleyProject.test.ts tests/dungeonProject.test.ts tests/du
 
 # without build/: re-apply the split to the shipped examples (after editing a Valley script, say)
 NODE_OPTIONS=--max-old-space-size=16384 npx vite-node --config vitest.config.ts tools/valley/split.ts
+
+# the Valley's own patches over the shipped folder, each idempotent: the puddle decals removed (valleyFixes.ts),
+# the houses' furniture (interiorProps.ts), the hamlet's well and light poles (hamletDressing.ts), then the start menu
+# and the cinematic tour (cinematic.ts)
+NODE_OPTIONS=--max-old-space-size=16384 npx vite-node --config vitest.config.ts tools/valley/applyCinematic.ts [--regenerate]
+# the furniture alone; --reimport rebuilds its models from build/additional_valley_props (glTF zips and GLBs).
+# Moving a piece makes the Hamlet and both Interior GI bakes stale: run bakeGI.cjs after it.
+NODE_OPTIONS=--max-old-space-size=16384 npx vite-node --config vitest.config.ts tools/valley/applyInteriorProps.ts [--reimport]
+# the hamlet's well and light poles (hamletDressing.ts, in place of the standing torches) alone; --reimport as above. Makes the Hamlet GI bake stale.
+NODE_OPTIONS=--max-old-space-size=16384 npx vite-node --config vitest.config.ts tools/valley/applyHamletDressing.ts [--reimport]
 ```
 
 The source art in `build/` is gitignored, so this generator is run by hand and its output is committed.
@@ -66,7 +76,7 @@ into `creatorFoliage.mjs`.
 - `heights.mjs` decodes the PNG with the engine's `heightmapIO.ts`.
 - `landscape.mjs` builds the landscape material, the painted masks (seven channels in two slices: trail, forest floor, dirt road, stone path, clay, sand, dirt), and the CPU surface weights. The weights come from the engine's `terrainLayers.ts`, so the pre-baked foliage respects the same rules the shader draws. Every surface (Ground, Dirt, Rocky Dirt, Forest Floor, Rock, Snow, Pond Clay, Shore Sand, Trail, Stone Path) is also a library material under `/Environment/Landscape/Materials`, linked from its slot (`LANDSCAPE_SURFACES`).
 - `creatorFoliage.mjs` lists the plants and generates them with the Foliage Creator (`genFoliage.ts`, through `vite-node`); `build.mjs` turns each one's levels, materials and impostor into a library model, library materials and a foliage rule.
-- `creatorFx.mjs` lists the effects (the two flames, their smoke, the blood, the splashes) and bakes them with the FX Creator (`genFx.ts`, through `vite-node`, its CPU solvers), cached in `build/valley_creator/fx-*`; `build.mjs` makes the flames' and the smoke's tilesets (the smoke's with its six-way lightmaps), the blood splatter's (with its surface maps), the splash particle systems, the puddles, and the blood decals' materials and templates from them. A first build bakes for about a quarter of an hour (the flames are most of it).
+- `creatorFx.mjs` lists the effects (the two flames, their smoke, the blood, the splashes) and bakes them with the FX Creator (`genFx.ts`, through `vite-node`, its CPU solvers), cached in `build/valley_creator/fx-*`; `build.mjs` makes the flames' and the smoke's tilesets (the smoke's with its six-way lightmaps), the blood splatter's (with its surface maps), the splash particle systems and the blood decals' materials and templates from them. A first build bakes for about a quarter of an hour (the flames are most of it).
 - `foliage.mjs` holds the library-asset helpers, the dungeon's moss rocks and the seeded scatter. Placement is pre-baked because opening a scene never scatters.
 - `props.mjs` handles the FBX props: assimp to parts, with scaling. Some files carry no unit stamp, so those props are sized to a stated height. It also measures the windmill hub.
 - `water.glsl` / `water.mjs` hold the pond's water: a transparent forward custom material (waves from a generated tiling normal map, Fresnel reflection of the pond's light probe, a sun glint, refraction with depth absorption, shore foam and a soft edge) and its uniforms. `compileCustomWgsl.ts` translates it to WGSL at build time (through `vite-node`), so a published WebGPU game can render it.

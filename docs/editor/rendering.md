@@ -220,6 +220,15 @@ nothing falls, but the ground's raindrops (rings in the puddles, drops hitting t
 rain falls on it) still play. Drops collide with what is on screen, so a drop off screen falls through
 the ground until it dies. Neither thumbnails nor probe captures draw them.
 
+Raindrops are drawn as a camera sees them: each 3 to 6 mm across, its streak the motion blur of its fall
+through a 1/30 s shutter (about 28 cm), never thinner than a pixel. A drop too thin for one is drawn one
+pixel wide and that much fainter, so far rain is a haze of fine lines rather than a shimmer. A drop is
+shaded as a tiny lens, not a lit card: it shows the light round it, so it stands out against a dark wood
+and all but vanishes against a bright sky, and it glints when the sun or a lamp is behind it. Rain and
+snow fall through the scene's wind field, its gusts and its veer, so a storm sweeps them across the view;
+a rate or a wind that changes thins, fills and slants them where they are. Heavy rain also thickens the air
+round the camera into sheets that drift with the wind, as far as the volumetric fog reaches.
+
 **Follow Time Scale** — runs the render clock at the game's speed (`Game.timeScale`, a hit-stop's slow
 motion included): the wind and its gusts, the clouds' drift, fog, flickering lights, water ripples and
 custom materials' `u_time` all go twice as fast at ×2, so a sped-up day reads as a time-lapse rather than
@@ -374,9 +383,12 @@ What keeps cascades cheap, all automatic:
 - **Turning is free.** With Stagger on, the distant cascades are fit around the camera, not its
   view, so mouse-look never forces them to redraw early. Walking does once the camera has
   travelled past their margin.
-- **Cheaper far detail.** Beyond the nearest cascade, a mesh foliage layer with an octahedral
-  impostor casts through the impostor, and terrain that only casts (no pixel of that cascade lands
-  on it) draws at its coarsest level. The far cascade draws the landscape as a few dozen coarse
+- **Cheaper far detail.** In the cascades that start past where a mesh foliage layer turns into its
+  octahedral impostor, it casts through the impostor (nearer, where the camera still sees the trees as
+  meshes, their coarsest level casts). The impostor's shadow blends the baked views round the sun, so it
+  morphs as the sun moves rather than snapping, and it takes its depth from the crown, not the impostor's
+  wider bounds. Terrain that only casts (no pixel of that cascade lands on it) draws at its coarsest
+  level. The far cascade draws the landscape as a few dozen coarse
   blocks. The nearest cascade always draws the real meshes.
 
 #### Spot shadows

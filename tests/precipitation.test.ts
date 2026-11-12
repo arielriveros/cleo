@@ -7,6 +7,8 @@ import { CameraNode } from '../src/core/scene/nodes/cameraNode';
 import { WeatherNode } from '../src/core/scene/nodes/weatherNode';
 import { WindNode } from '../src/core/scene/nodes/windNode';
 import { precipitationSystem, PRECIPITATION_DEFAULTS, type PrecipitationStyle } from '../src/particles/precipitation';
+import { RAIN_HAZE } from '../src/core/scene/precipitationRig';
+import { windFieldClock } from '../src/core/wind/windField';
 import {
     BUILTIN_RAIN_SPRITE, BUILTIN_SNOW_SPRITE, SPRITE_BORDER, builtinSpriteSheet, isBuiltinTextureId,
 } from '../src/particles/precipitationSprites';
@@ -25,24 +27,32 @@ const look = (patch: Partial<PrecipitationStyle> = {}): PrecipitationStyle => ({
 const env = { wind: [0, 0] as [number, number], density: 1, prewarm: true };
 
 describe('the precipitation system', () => {
-    it('rains: fast straight streaks above the camera, killed by what they hit, at its rate', () => {
+    it('rains: fast streaks above the camera, carried by the air, killed by what they hit', () => {
         const def = precipitationSystem('rain', look({ rate: 0.5 }), env);
         const e = def.emitters[0];
         const d = PRECIPITATION_DEFAULTS.rain;
         expect(def.emitters.length).toBe(1);
         expect(e.simSpace).toBe('world');
         expect(e.capacity).toBe(d.capacity);
-        expect(activeModule(e, 'spawnRate')!.params.rate).toBe(d.spawnRate * 0.5);
+        // At the full rate whatever the volume's: the weather module keeps each drop where the volumes'
+        // rate is above its draw, so a rate that changes never rebuilds the system.
+        expect(activeModule(e, 'spawnRate')!.params.rate).toBe(d.spawnRate);
+        expect(activeModule(precipitationSystem('rain', look({ rate: 0 }), env).emitters[0], 'spawnRate')!.params.rate).toBe(0);
         expect(activeModule(e, 'shape')!.params).toMatchObject({ shape: 'box', box: [36, 1, 36], offset: [0, 12, 0] });
         const v = activeModule(e, 'velocity')!.params;
         expect(v.direction).toEqual([0, -8.5, 0]);
         expect(v.speed[0]).toBeCloseTo(8.5 * 0.88);
-        // A drop at terminal velocity: no force at all, no gravity (a game's gravity is not the rain's).
+        // No gravity (a game's gravity is not the rain's): the air it falls through, the scene's wind field,
+        // plus its fall through still air, with a drop's tight coupling.
         expect(activeModule(e, 'gravity')).toBeUndefined();
-        expect(activeModule(e, 'wind')).toBeUndefined();
+        expect(activeModule(e, 'wind')!.params).toMatchObject({ source: 'scene', scale: 0.5, fall: [0, -8.5, 0], influence: d.coupling });
         expect(activeModule(e, 'collision')!.params).toMatchObject({ depth: true, kill: true, bodies: false });
-        expect(activeModule(e, 'weather')!.params).toEqual({ kind: 'rain', shelter: true, fullRate: 0.5 });
+        expect(activeModule(e, 'weather')!.params).toEqual({ kind: 'rain', shelter: true, fullRate: 1 });
         expect(e.render).toMatchObject({ alignment: 'velocity', blend: 'alpha', lit: true, textureId: BUILTIN_RAIN_SPRITE });
+        // Drops of 3-6 mm, drawn as their motion blur through a 1/30 s shutter, never thinner than a pixel,
+        // and shaded as drops (a lens), not as lit cards.
+        expect(d.size[1]).toBeLessThanOrEqual(0.006);
+        expect(e.render).toMatchObject({ stretch: 0, streakShutter: 1 / 30, minPixelWidth: 1, shading: 'rain' });
         expect(e.render.flipbook).toMatchObject({ columns: 4, rows: 1, frames: 4, mode: 'fps', fps: 0, randomStart: true, blend: false });
         expect(e.render.nearFade).toBeGreaterThan(0);
         expect(def.lod.enabled).toBe(false);
@@ -65,13 +75,16 @@ describe('the precipitation system', () => {
         expect(range([0, 99])).toEqual([0.1, 4]);
         expect(precipitationSystem('snow', look({ trail: [2, 3] }), env).emitters[0].render.stretchRange).toEqual([1, 1]);
         const packed = packEmitter(precipitationSystem('rain', look({ trail: [0.5, 1.5] }), env).emitters[0]);
-        expect(packed.draw.u_stretchRange).toEqual([0.5, 1.5, 0, 0]);
+        // ... with the shutter and the narrowest width riding beside the range.
+        expect(packed.draw.u_stretchRange).toEqual([0.5, 1.5, 1 / 30, 1]);
+        expect(packEmitter(precipitationSystem('snow', look(), env).emitters[0]).draw.u_stretchRange).toEqual([1, 1, 0, 0]);
     });
 
-    it('snows: slow, fluttering, spinning flakes pulled to their fall in the wind', () => {
-        const def = precipitationSystem('snow', look(), { ...env, wind: [3, -2] });
+    it('snows: slow, fluttering, spinning flakes pulled to their fall in the air', () => {
+        const def = precipitationSystem('snow', look({ wind: 0.8 }), { ...env, wind: [3, -2] });
         const e = def.emitters[0];
-        expect(activeModule(e, 'wind')!.params).toMatchObject({ velocity: [3, -1, -2], influence: PRECIPITATION_DEFAULTS.snow.coupling });
+        expect(activeModule(e, 'wind')!.params).toMatchObject({ source: 'scene', scale: 0.8, fall: [0, -1, 0], influence: PRECIPITATION_DEFAULTS.snow.coupling });
+        expect(e.render.shading).toBeUndefined();
         expect(activeModule(e, 'curlNoise')).toBeDefined();
         expect(activeModule(e, 'rotation')!.params.spin).toEqual([-60, 60]);
         expect(activeModule(e, 'weather')!.params.kind).toBe('snow');
@@ -104,7 +117,8 @@ describe('the precipitation system', () => {
     it('packs the weather module as a runtime bit, never a strip variant', () => {
         const rain = packEmitter(precipitationSystem('rain', look({ rate: 0.5 }), env).emitters[0]);
         expect(rain.simMask & SIM.WEATHER).toBeTruthy();
-        expect(rain.sim.u_precipSim).toEqual([0, 1, 2, 0]);
+        // z = 1 / the rate it spawns for: the full one, whatever the volume's.
+        expect(rain.sim.u_precipSim).toEqual([0, 1, 1, 0]);
         const snow = packEmitter(precipitationSystem('snow', look(), env).emitters[0]);
         expect(snow.sim.u_precipSim).toEqual([1, 1, 1, 0]);
         // Rain needs no noise, fields or parent; snow needs its turbulence.
@@ -134,6 +148,8 @@ describe('the precipitation system', () => {
             { type: 'weather', weather: { precipitation: 'snow', precipitationRate: 0.6 } },
         ] }, use);
         for (const name of ['particleSim~s11', 'particleSim~s10', 'particleBillboard']) expect(use.names.has(name), name).toBe(true);
+        // The rain's haze is a fog volume.
+        for (const name of ['volumetricFogInject', 'volumetricFogIntegrate', 'volumetricFogApply']) expect(use.names.has(name), name).toBe(true);
         const dry = createProgramUsage();
         usageFromSceneJson({ type: 'weather', weather: { wetness: 1 } }, dry);
         expect(dry.names.has('particleBillboard')).toBe(false);
@@ -222,7 +238,7 @@ describe("the scene's precipitation", () => {
         scene.addNode(new WeatherNode('heavy', { precipitation: 'rain', precipitationRate: 0.9, precipitationSize: 0.5 }));
         step(scene);
         const e = scene.precipitation.systemOf('rain')!.system.emitters[0];
-        expect(activeModule(e, 'weather')!.params.fullRate).toBeCloseTo(Math.ceil(0.9 * 64) / 64);
+        expect(activeModule(e, 'weather')!.params.fullRate).toBe(1);
         expect(activeModule(e, 'size')!.params.range[0]).toBeCloseTo(PRECIPITATION_DEFAULTS.rain.size[0] * 2);
     });
 
@@ -268,14 +284,74 @@ describe("the scene's precipitation", () => {
         expect(rain.system.emitters[0].render.stretchRange).toEqual([0.5, 0.5]);
     });
 
-    it('slants with the scene wind, as much as the volume asks', () => {
+    it('slants with the scene wind, as much as the volume asks, its column leaned upwind', () => {
         const { scene } = setup();
-        scene.addNode(new WindNode('wind', { direction: 0, strength: 1 }));
+        const wind = new WindNode('wind', { direction: 0, strength: 1 });
+        scene.addNode(wind);
         scene.addNode(new WeatherNode('rain', { precipitation: 'rain', precipitationRate: 1, precipitationWind: 0.5 }));
         step(scene);
-        const dir = activeModule(scene.precipitation.systemOf('rain')!.system.emitters[0], 'velocity')!.params.direction;
-        expect(dir[0]).toBeCloseTo(3.5);
-        expect(dir[2]).toBeCloseTo(0);
+        const rain = scene.precipitation.systemOf('rain')!;
+        expect(activeModule(rain.system.emitters[0], 'wind')!.params).toMatchObject({ source: 'scene', scale: 0.5 });
+        const [dx, dz] = wind.directionXZ;
+        const at = rain.worldPosition;
+        // Upwind: against the wind's direction.
+        expect(at[0] * dx + at[2] * dz).toBeLessThan(0);
+    });
+
+    it('never rebuilds while the rain builds and the wind rises: it thins, fills and slants in place', () => {
+        const { scene } = setup();
+        const wind = new WindNode('wind', { direction: 30, strength: 1 });
+        scene.addNode(wind);
+        const w = new WeatherNode('rain', { precipitation: 'rain', precipitationRate: 0.1 });
+        scene.addNode(w);
+        step(scene);
+        const rain = scene.precipitation.systemOf('rain')!;
+        const system = rain.system;
+        for (let i = 1; i <= 30; i++) {
+            w.precipitationRate = 0.1 + i * 0.03;
+            wind.strength = 1 + i * 0.03;
+            step(scene);
+        }
+        expect(rain.system).toBe(system);
+    });
+
+    it('thickens the air into sheets drifting with the wind, as heavy as the rain round the camera', () => {
+        const { scene, camera } = setup([10, 2, -4]);
+        const wind = new WindNode('wind', { direction: 0, strength: 1 });
+        scene.addNode(wind);
+        expect(scene.precipitation.haze).toBeNull();
+        const w = new WeatherNode('rain', { precipitation: 'rain', precipitationRate: 1 });
+        scene.addNode(w);
+        const clock = windFieldClock.time;
+        try {
+            let last = NaN, worst = 0;
+            for (let i = 0; i < 600; i++) {
+                windFieldClock.time = clock + i / 60;
+                if (i > 300) wind.strength = 1 + Math.min(1, (i - 300) / 120);
+                step(scene);
+                const h = scene.precipitation.haze!;
+                // The noise offset the fog shader applies: windVelocity × its clock.
+                const offset = h.windVelocity[0] * Math.max(windFieldClock.time, 1e-3);
+                if (i > 1) worst = Math.max(worst, Math.abs(offset - last));
+                last = offset;
+            }
+            const h = scene.precipitation.haze!;
+            // Eased in to the full density over the box round the camera.
+            expect(h.density).toBeCloseTo(RAIN_HAZE.density, 4);
+            expect(Array.from(h.worldPosition)[0]).toBeCloseTo(10, 6);
+            expect(h.isEditorOwned).toBe(true);
+            // Never more than a frame of the fastest sheets, however the wind rose.
+            expect(worst).toBeLessThan(2 * 7 * RAIN_HAZE.drift / 60 * 1.01);
+            // Not in the scene, nor its save.
+            expect([...scene.volumetricFogs]).not.toContain(h);
+            // The rain stops: it thins out and goes.
+            w.precipitationRate = 0;
+            for (let i = 0; i < 1200; i++) { windFieldClock.time += 1 / 60; step(scene); }
+            expect(scene.precipitation.haze).toBeNull();
+        } finally {
+            windFieldClock.time = 0;
+        }
+        void camera;
     });
 
     it('falls for no orthographic camera, and lets go of its systems with the scene', () => {

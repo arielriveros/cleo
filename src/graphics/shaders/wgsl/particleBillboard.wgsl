@@ -27,6 +27,8 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32,
     var up = u_draw.u_camUp.xyz;
     var normal = -u_draw.u_camForward.xyz;
     var offset: vec3<f32>;
+    // The share of its quad a streak really covers (minPixelWidth): its alpha, scaled.
+    var coverage = 1.0;
     if (alignment == 1 && look.speed > 1e-4) {
         // Stretched along the motion, turned about it to face the camera as squarely as it can.
         let axis = look.velocity / look.speed;
@@ -35,8 +37,29 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32,
         side = normalize(side);
         // Its own random draw (not the flipbook's `floor(seed * frames)`) picks this drop's trail length.
         let trail = mix(u_draw.u_stretchRange.x, u_draw.u_stretchRange.y, fract(fract(look.seed) * 37.7 + 0.31));
-        let halfLength = half * (1.0 + look.speed * u_draw.u_camForward.w * trail);
-        offset = side * (corner.x * half) + axis * (corner.y * halfLength);
+        // A shutter: the streak is the drop's motion blur, its speed times the exposure, beside its size.
+        // Otherwise the authored stretch, in sizes per m/s.
+        let shutter = u_draw.u_stretchRange.z;
+        let halfLength = select(half * (1.0 + look.speed * u_draw.u_camForward.w * trail),
+                                half + 0.5 * look.speed * shutter * trail, shutter > 0.0);
+        // Never thinner than `minPixelWidth` (u_stretchRange.w): widened to it, its alpha scaled by how much
+        // thinner it is, so a far drop fades to a fine line instead of flickering between pixels.
+        var halfWidth = half;
+        coverage = 1.0;
+        let minPx = u_draw.u_stretchRange.w;
+        if (minPx > 0.0) {
+            let c0 = u_draw.u_viewProj * vec4<f32>(look.center, 1.0);
+            let c1 = u_draw.u_viewProj * vec4<f32>(look.center + side * half, 1.0);
+            if (min(c0.w, c1.w) > 1e-4) {
+                let px = length((c1.xy / c1.w - c0.xy / c0.w) * u_draw.u_viewport.xy * 0.5);
+                let want = 0.5 * minPx;
+                if (px > 1e-6 && px < want) {
+                    coverage = px / want;
+                    halfWidth = half / coverage;
+                }
+            }
+        }
+        offset = side * (corner.x * halfWidth) + axis * (corner.y * halfLength);
         normal = normalize(cross(side, axis));
     } else {
         if (alignment == 2) {
@@ -58,7 +81,7 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32,
     let world = look.center + offset;
     out.position = u_draw.u_viewProj * vec4<f32>(world, 1.0);
     out.viewDepth = dot(world - u_draw.u_camPos.xyz, u_draw.u_camForward.xyz);
-    out.color = look.color;
+    out.color = vec4<f32>(look.color.rgb, look.color.a * coverage);
     out.normal = normal;
     out.worldPos = world;
     applyFlipbook(&out, look, corner * 0.5 + 0.5);

@@ -239,7 +239,8 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         // The libraries hold what the scenery uses and nothing of the game (split.ts prunes them).
         for (const s of library('scripts')) expect(s.source, s.name).not.toMatch(/class Souls\w*Node/);
         expect(library('scripts').map((s: any) => s.name).sort()).toEqual(['Day and Night', 'Fire Light', 'Fly Camera', 'Splash', 'Start Menu', 'Windmill Sails']);
-        expect(library('templates').map((t: any) => t.name).sort()).toEqual(['Torch', 'Wall Torch', 'Water Splash', 'Water Step']);
+        // The standing Torch went with the torches the hamlet's light poles replaced (hamletDressing.ts).
+        expect(library('templates').map((t: any) => t.name).sort()).toEqual(['Wall Torch', 'Water Splash', 'Water Step']);
         for (const lib of ['animations', 'animControllers', 'animationFields', 'rigs', 'aiBrains', 'boneMasks'])
             expect(library(lib) ?? [], lib).toHaveLength(0);
         expect(library('models').some((m: any) => /Knight|Hollow|mannequin/i.test(m.name))).toBe(false);
@@ -533,15 +534,17 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(sprites.some(n => n.name === 'Ignition')).toBe(false);
     });
 
-    it("shadows the torches' lights, and only theirs", () => {
+    it("shadows the wall torches' lights and the hamlet's light poles'", () => {
         const templates = library('templates');
-        const lightsOf = (name: string) => {
+        const lightsOf = (n: any) => {
             const out: any[] = [];
             const walk = (n: any) => { if (n.type === 'light') out.push(n); (n.children ?? []).forEach(walk); };
-            walk(templates.find((t: any) => t.name === name).nodeJson);
+            walk(n);
             return out;
         };
-        for (const name of ['Torch', 'Wall Torch']) expect(lightsOf(name).map(l => l.castShadows), name).toEqual([true]);
+        expect(lightsOf(templates.find((t: any) => t.name === 'Wall Torch').nodeJson).map(l => l.castShadows)).toEqual([true]);
+        const poles = nodes().find(n => n.name === 'Light Poles');
+        for (const pole of poles.children) expect(lightsOf(pole).map(l => l.castShadows), pole.name).toEqual([true]);
     });
 
     it('gives the water a transparent forward custom material with WGSL a published WebGPU game can use', async () => {
@@ -606,29 +609,11 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             expect(allNodes(h).some((n: any) => n.name === 'Smoke'), h.id).toBe(false);
     });
 
-    it('lays rain puddles from the FX Creator in the low spots of the trails', () => {
-        const group = nodes().find(n => n.name === 'Puddles');
-        expect(group).toBeTruthy();
-        const puddles = group.children;
-        expect(puddles.length).toBeGreaterThanOrEqual(15);
-        expect(puddles.length).toBeLessThanOrEqual(35);
-        const materials = library('materials');
-        for (const p of puddles) {
-            const d = p.children.find((c: any) => c.type === 'decal');
-            expect(d, p.name).toBeTruthy();
-            // The Water Puddle bake's settled decal: a still, on the ground only.
-            expect(d.decal.flipbook).toBeUndefined();
-            expect(d.decal.receivers).toBe('terrain');
-            const m = materials.find((x: any) => x.id === d.variables.__materialId?.value);
-            expect(m?.name, p.name).toBe('Water Puddle Decal');
-            // On the ground it marks: its box stands at the terrain height there.
-            expect(Math.abs(p.position[1] - heightAt(p.position[0], p.position[2]))).toBeLessThan(0.05);
-        }
-        // Sparse: never two within a few metres.
-        for (let i = 0; i < puddles.length; i++) for (let j = i + 1; j < puddles.length; j++) {
-            const a = puddles[i].position, b = puddles[j].position;
-            expect(Math.hypot(a[0] - b[0], a[2] - b[2])).toBeGreaterThan(8.5);
-        }
+    it('leaves the puddles to the weather: no puddle decals, nor their material', () => {
+        // The Weather volume fills the ground's own low, flat spots with water as it rains (tools/valley/valleyFixes.ts).
+        expect(nodes().some(n => n.name === 'Puddles')).toBe(false);
+        expect(nodes().some(n => n.type === 'decal')).toBe(false);
+        expect(library('materials').some((m: any) => m.name === 'Water Puddle Decal')).toBe(false);
     });
 
 
@@ -734,8 +719,10 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
 
     it('flies the tour past every part of the valley, clear of the ground and inside the Long House', async () => {
         const { Spline3 } = await import('../src/core/math');
-        const { SECTIONS } = await import('../tools/valley/cinematic/tour');
+        const { SECTIONS, INTERIOR_SHOTS } = await import('../tools/valley/cinematic/tour');
         const { quat, vec3 } = await import('gl-matrix');
+        // The afternoon interior and the candlelit one, both inside the Long House.
+        expect(INTERIOR_SHOTS).toEqual(['shot:interior', 'shot:candles']);
         const path = tourNode().sequence.tracks.find((t: any) => t.type === 'path');
         const samples: { shot: string, p: number[] }[] = [];
         for (const section of path.sections) {
@@ -749,7 +736,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         // Above the ground (and the pond's surface), everywhere but inside the house.
         const water = nodes().find(n => n.name === 'Pond Water');
         for (const { shot, p } of samples) {
-            if (shot === 'shot:interior') continue;
+            if (INTERIOR_SHOTS.includes(shot)) continue;
             let floor = heightAt(p[0], p[2]);
             if (Math.hypot(p[0] - water.position[0], p[2] - water.position[2]) < 10.5) floor = Math.max(floor, water.position[1]);
             expect(p[1] - floor, `${shot} at ${p.map(v => v.toFixed(1))}`).toBeGreaterThan(0.7);
@@ -760,7 +747,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const q = quat.invert(quat.create(), quat.fromEuler(quat.create(), room.rotation[0], room.rotation[1], room.rotation[2]));
         const half = room.exposureVolume.size.map((v: number) => v / 2);
         for (const { shot, p } of samples) {
-            if (shot !== 'shot:interior') continue;
+            if (!INTERIOR_SHOTS.includes(shot)) continue;
             const local = vec3.transformQuat(vec3.create(), vec3.fromValues(p[0] - room.position[0], p[1] - room.position[1], p[2] - room.position[2]), q);
             for (let c = 0; c < 3; c++) expect(Math.abs(local[c]), `interior axis ${c} at ${p.map(v => v.toFixed(1))}`).toBeLessThan(half[c] - 0.5);
         }
@@ -806,6 +793,12 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         // The pond's calm and the day clock's overcast are fields their nodes have.
         expect(bound('pond').model.material.properties.waveStrength).toBeGreaterThan(0.08);
         expect(bound('clock').script).toContain('public overcast: number = 0');
+        // It ends on the Cleo logo and wordmark: a texture the project ships, and the loading screen's font.
+        const logo = bound('logo'), wordmark = bound('wordmark');
+        expect(logo.type).toBe('uiImage');
+        expect(new Set(read('textures', 'index.json').map((t: any) => t.id)).has(logo.ui.textureId)).toBe(true);
+        expect(new Set(manifest().sceneMetas[0].refs.textureIds).has(logo.ui.textureId)).toBe(true);
+        expect(wordmark.ui).toMatchObject({ text: 'CLEO ENGINE', fontFamily: 'Consolas, monaco, monospace', fontWeight: 600, letterSpacing: 0.3 });
         // The sails follow the wind, on every level of detail.
         const sails = nodes().filter(n => n.name === 'Sails');
         expect(sails.length).toBe(3);
@@ -815,6 +808,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
     it('keeps the tour clear of every wall it passes: measured against the buildings\' own triangles', async () => {
         const { Spline3, closestOnTriangle } = await import('../src/core/math');
         const { mat4, quat, vec3 } = await import('gl-matrix');
+        const { INTERIOR_SHOTS } = await import('../tools/valley/cinematic/tour');
         // World-space triangles of each building's most detailed level, composed down its node chain.
         const local = (n: any) => mat4.fromRotationTranslationScale(mat4.create(),
             quat.fromEuler(quat.create(), ...((n.rotation ?? [0, 0, 0]) as [number, number, number])), n.position ?? [0, 0, 0], n.scale ?? [1, 1, 1]);
@@ -854,7 +848,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         for (const section of path.sections) {
             const spline = new Spline3(section.points);
             // Inside the Long House the aisle allows about 1.4 m either side; outside, nothing comes close.
-            const inside = section.id === 'shot:interior', need = inside ? 1.0 : 1.5;
+            const inside = INTERIOR_SHOTS.includes(section.id), need = inside ? 1.0 : 1.5;
             for (let i = 0; i <= 400; i++) {
                 const p = spline.pointAt(i / 400);
                 for (const b of buildings) {

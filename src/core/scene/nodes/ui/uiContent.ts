@@ -15,6 +15,7 @@ export class UITextNode extends UINode {
     private _vAlign: UITextVAlign = 'top';
     private _wrap: boolean = true;
     private _lineHeight: number = 1.2;
+    private _letterSpacing: number = 0;
 
     constructor(name: string = 'text', id?: string) {
         super(name, 'uiText', id);
@@ -44,12 +45,22 @@ export class UITextNode extends UINode {
     public set wrap(v: boolean) { const p = this._wrap; this._wrap = v; this._touch(); this._notifyChange('component', 'wrap', p, v); }
     public get lineHeight(): number { return this._lineHeight; }
     public set lineHeight(v: number) { const p = this._lineHeight; this._lineHeight = Math.max(0, v); this._touch(); this._notifyChange('component', 'lineHeight', p, this._lineHeight); }
+    /** Extra space between letters, in em (0.3 spreads a wordmark); negative tightens. */
+    public get letterSpacing(): number { return this._letterSpacing; }
+    public set letterSpacing(v: number) {
+        const p = this._letterSpacing;
+        this._letterSpacing = Number.isFinite(+v) ? Math.min(2, Math.max(-0.5, +v)) : 0;
+        this._touch();
+        this._notifyChange('component', 'letterSpacing', p, this._letterSpacing);
+    }
 
     protected _serializeUIPayload(): any {
         return {
             text: this._text, fontSize: this._fontSize, fontFamily: this._fontFamily,
             fontWeight: this._fontWeight, align: this._align, vAlign: this._vAlign,
             wrap: this._wrap, lineHeight: this._lineHeight,
+            // Only when set: a text saved before the field, or without spacing, keeps its exact payload.
+            ...(this._letterSpacing !== 0 ? { letterSpacing: this._letterSpacing } : {}),
         };
     }
 
@@ -62,6 +73,7 @@ export class UITextNode extends UINode {
         if (ui.vAlign === 'top' || ui.vAlign === 'middle' || ui.vAlign === 'bottom') this._vAlign = ui.vAlign;
         if (typeof ui.wrap === 'boolean') this._wrap = ui.wrap;
         if (typeof ui.lineHeight === 'number') this._lineHeight = Math.max(0, ui.lineHeight);
+        if (typeof ui.letterSpacing === 'number' && Number.isFinite(ui.letterSpacing)) this._letterSpacing = Math.min(2, Math.max(-0.5, ui.letterSpacing));
     }
 
     public static parse(parent: Node, json: any): void {

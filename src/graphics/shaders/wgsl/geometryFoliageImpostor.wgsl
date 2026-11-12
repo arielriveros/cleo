@@ -4,7 +4,10 @@
 // the three nearest of the N x N baked views (hemi-octahedral grid) and their barycentric weights; each
 // quad corner is reprojected into each of the three frames, so the fragment stage only samples and blends.
 // The bake is UNLIT albedo plus a model-space normal, so the G-buffer gets a real surface and the impostor
-// is lit, shadowed and fogged like the mesh it stands in for.
+// is lit, shadowed and fogged like the mesh it stands in for — and wetted and snowed on like it: the weather
+// volumes are read per instance at its root, as the mesh levels read them (chunks/instancedVertex.wgsl
+// `instanceWeather`, without the shelter, which reaches 48 m and so never as far as an impostor), scaled by
+// the coarsest level's own `wetResponse` and `snowCover`, and applied with chunks/foliageSurface.wgsl's maths.
 //
 // The conventions — frame layout, direction, basis, uv — are pinned by tests/octahedralImpostor.test.ts
 // against the TypeScript twins in octahedralImpostor.ts, which the baker uses. A disagreement draws the
@@ -26,15 +29,33 @@ struct ImpostorTransform {
     // Foliage LOD crossfade, exactly as chunks/instancedVertex.wgsl reads it (xyz of u_lodCamera is the eye).
     u_lodBand: vec4<f32>,
     u_lodCamera: vec4<f32>,
-    // x = dither phase, y = the layer's leaf translucency (passed on as the `translucency` varying).
+    // x = dither phase, y = the layer's leaf translucency (passed on as the `translucency` varying), z, w =
+    // the coarsest level's wetResponse and snowCover (FoliageLayer.farWeather).
     u_lodFrame: vec4<f32>,
     // x = frames per side, y = capture radius (model units), z = 1 when the atlas texture keeps the image's
-    // rows top-down, 0 when it was flipped on upload (the engine's default, `TextureConfig.flipY` false).
+    // rows top-down, 0 when it was flipped on upload (the engine's default, `TextureConfig.flipY` false); w =
+    // the crown's radius (model units, FoliageLayer.farCrownRadius), 0 for none known.
     u_impostor: vec4<f32>,
     // xyz = capture centre (model space).
     u_impostorCenter: vec4<f32>,
+    // The weather volumes (chunks/weatherVolumes.wgsl) and the snow's colour (linear rgb) and roughness,
+    // written once a frame by render/weather.ts into every program that declares them.
+    u_weatherInv: array<mat4x4<f32>, 4>,
+    u_weatherBlend: array<vec4<f32>, 4>,
+    u_weatherAmount: array<vec4<f32>, 4>,
+    u_weatherShape: array<vec4<f32>, 4>,
+    u_weatherInfo: vec4<f32>,
+    u_snowColor: vec4<f32>,
 };
 @group(1) @binding(0) var<uniform> u_transform: ImpostorTransform;
+
+fn weatherCount() -> i32 { return i32(u_transform.u_weatherInfo.x); }
+fn weatherInv(i: i32) -> mat4x4<f32> { return u_transform.u_weatherInv[i]; }
+fn weatherBlend(i: i32) -> vec4<f32> { return u_transform.u_weatherBlend[i]; }
+fn weatherAmount(i: i32) -> vec4<f32> { return u_transform.u_weatherAmount[i]; }
+fn weatherShape(i: i32) -> vec4<f32> { return u_transform.u_weatherShape[i]; }
+
+#include "./chunks/weatherVolumes.wgsl"
 
 struct ImpostorVarying {
     @builtin(position) position: vec4<f32>,
@@ -55,6 +76,10 @@ struct ImpostorVarying {
     @location(9) @interpolate(flat) atlasTopDown: f32,
     // u_lodFrame.y, the layer's leaf translucency: a varying for the same reason.
     @location(10) @interpolate(flat) translucency: f32,
+    // The weather on this plant: x = wet, y = snow (each times the layer's response), z = the snow's
+    // roughness; and the snow's colour (linear rgb).
+    @location(11) @interpolate(flat) weather: vec3<f32>,
+    @location(12) @interpolate(flat) snowColor: vec3<f32>,
 };
 
 /** Unit direction (y >= 0) -> hemi-octahedral uv in [0, 1]². Below the horizon folds up. */
@@ -160,6 +185,14 @@ fn vs_main(
     // The LOD crossfade, as chunks/instancedVertex.wgsl: each INSTANCE fades by its own distance.
     out.lodFade = vec3<f32>(1.0, 1.0, 0.0);
     out.translucency = u_transform.u_lodFrame.y;
+    // The weather at the plant's root, as the mesh levels take it (no shelter this far out).
+    var weather = vec2<f32>(0.0);
+    if (weatherCount() > 0) {
+        let ws = weatherAt(model[3].xyz);
+        weather = vec2<f32>(ws.wet, ws.snow) * u_transform.u_lodFrame.zw;
+    }
+    out.weather = vec3<f32>(weather, u_transform.u_snowColor.a);
+    out.snowColor = u_transform.u_snowColor.rgb;
     var hidden = false;
     if (u_transform.u_lodCamera.w > 0.5) {
         let dist = distance(model[3].xyz, eye);
@@ -170,9 +203,13 @@ fn vs_main(
         hidden = min(fadeIn, fadeOut) <= 0.0;
     }
 
-    // Rasterized half a radius toward the eye, ALONG the eye ray so nothing moves on screen: a quad through
-    // the centre would sink its lower half into a slope it stands on, cutting the trunk off at the ground.
-    let pulled = world + normalize(eye - world) * radius * 0.5;
+    // Rasterized toward the eye by the crown's radius, ALONG the eye ray so nothing moves on screen: a quad
+    // through the centre would sink its lower half into a slope it stands on, cutting the trunk off at the
+    // ground. By the CROWN's radius (the canopy's front), not the capture sphere's, which put the surface the
+    // G-buffer holds metres in front of the leaves, so each impostor looked its shadow up beside itself and
+    // its light and dark slid about as the camera moved.
+    let crown = select(u_transform.u_impostor.y, u_transform.u_impostor.w, u_transform.u_impostor.w > 0.0) * s;
+    let pulled = world + normalize(eye - world) * crown;
     out.position = u_transform.u_projection * u_transform.u_view * vec4<f32>(pulled, 1.0);
     if (hidden) { out.position = vec4<f32>(0.0, 0.0, 2.0, 1.0); }
     return out;
@@ -230,14 +267,25 @@ fn fs_main(in: ImpostorVarying) -> GBuffer {
     let ao = n0.a * wk.x + n1.a * wk.y + n2.a * wk.z;
     let nWorld = normalize(in.axisX * nLocal.x + in.axisY * nLocal.y + in.axisZ * nLocal.z);
 
+    // The weather, as chunks/foliageSurface.wgsl applies it: wet is darker and glossier; snow, in the
+    // weather's snow colour, settles on what faces up (the baked normals lean outward, so the crown's top)
+    // and lets little light through.
+    var lin = toLinear(albedo);   // sRGB -> linear
+    let wet = saturate(in.weather.x);
+    lin *= mix(1.0, 0.55, wet);
+    // Matte foliage: dielectric reflectance, high roughness — what the leaf materials it replaces use.
+    var roughness = mix(0.8, 0.25, wet);
+    let cover = saturate(in.weather.y) * smoothstep(0.2, 0.8, nWorld.y);
+    lin = mix(lin, in.snowColor, cover);
+    roughness = mix(roughness, in.weather.z, cover);
+
     // Leaf translucency (FoliageLayer.farTranslucency), encoded as chunks/pbrGBuffer.wgsl does: a NEGATIVE
     // metallic, so the deferred lighting adds the back-lit glow the mesh levels have.
-    let translucency = in.translucency;
+    let translucency = in.translucency * (1.0 - cover);
     var out: GBuffer;
-    out.albedoMetallic = vec4<f32>(toLinear(albedo), select(0.0, -translucency, translucency > 0.0));   // sRGB -> linear
+    out.albedoMetallic = vec4<f32>(lin, select(0.0, -translucency, translucency > 0.0));
     let octN = octEncode(nWorld);
-    // Matte foliage: dielectric reflectance, high roughness — what the leaf materials it replaces use.
-    out.normalRoughness = vec4<f32>(octN.x, octN.y, 0.5, 0.8);
+    out.normalRoughness = vec4<f32>(octN.x, octN.y, 0.5, roughness);
     out.emissiveAO = vec4<f32>(0.0, 0.0, 0.0, ao);
     return out;
 }

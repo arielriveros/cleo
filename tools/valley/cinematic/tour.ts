@@ -7,7 +7,8 @@
 //
 // The shot list follows the plan (C:\Users\ariel\.claude\plans\plan-a-suggested-route-replicated-quiche.md):
 //   I    The Valley   campfire, main road, the hamlet, Old House, Granary; then the meadow and the forest  (10:00)
-//   II   Light        the Long House from outside, then inside while the sun goes down  (15:00 -> 20:30)
+//   II   Light        the Long House from outside, then inside in the afternoon sun (13:40 -> 15:45), the
+//                     night falling on the hamlet, and the same house by candlelight  (20:30 -> 21:30)
 //   III  Weather      night, dawn, the windmill, the gate notch, back over the valley  (game time x2)
 //   IV   Water        across the pond, then up over the whole valley
 // Times are sequence seconds on the GAME clock, so Act III, run at time scale 2, takes half as long. Shots
@@ -30,6 +31,8 @@ interface ShotSpec {
   ease?: [boolean, boolean]
   /** Lowest the camera may go above the ground on this shot (default 1.2 m). */
   clearance?: number
+  /** Inside the Long House: measured against its walls, not the ground (INTERIOR_SHOTS). */
+  inside?: boolean
 }
 export interface Shot extends ShotSpec { start: number, end: number }
 
@@ -81,20 +84,32 @@ const SHOT_LIST: ShotSpec[] = [
     points: [p(-34, 30, 7, at(-9, 39, 4)), p(-27, 35, 5, at(-9, 39, 4)), p(-22, 40, 4, at(-9, 39, 4))],
   },
   {
-    // A cut inside (the doors are gaps in the walls, too narrow to fly through), down the house while the sun
-    // goes down outside: the light bounced round the rooms follows it (GI volumes, relit). Read off its render
-    // mesh at camera height: the floor at 2.69 and the ceiling at 6.6; end walls at z -9.4 and 8.6 (a door at
-    // x 0 in the far one); the long -X wall's inner face at x -3.03; and two cross walls, at z -3.25 and 2.9,
-    // reaching in from the +X wall only as far as x -0.25. That leaves an aisle x -3.03..-0.25 through all
-    // three rooms. The dolly keeps to its middle, about 1.3 m from every wall, and stops 2.6 m short of the
-    // far one (tests/valleyProject.test.ts measures it against the house's triangles).
-    key: 'interior', label: 'Long House interior', dur: 30, ease: [true, true],
-    points: [py(lh(AISLE_X, -7.0, 4.2), lh(-1.2, 2, 3.6)), py(lh(AISLE_X, -2.4, 4.2), lh(-0.6, 6, 3.7)),
-             py(lh(AISLE_X, 1.8, 4.2), lh(0, 9, 3.8)), py(lh(AISLE_X, 6.0, 4.2), lh(0.3, 11, 3.8))],
+    // A cut inside (the doors are gaps in the walls, too narrow to fly through), in the early afternoon, when the
+    // sun still reaches the house: from about 15:30 the western ridge (32-34° high) shades it. Until then the sun
+    // comes in through the +X wall's door (local z -0.8..0.8), laying a patch on the middle room's floor that
+    // the GI volume bounces round the rooms, and through thin slots under the +X windows' eaves. The dolly
+    // comes down the aisle and turns to that patch while the hour runs on (HOUR_KEYS), until the ridge's shadow
+    // takes it and the room is left to the bounce.
+    // Read off the render mesh at camera height: the floor at 2.69 and the ceiling at 6.6; end walls at z -9.4
+    // and 8.6; the long -X wall's inner face at x -3.03; and two cross walls, at z -3.25 and 2.9, reaching in
+    // from the +X wall only as far as x -0.25. That leaves an aisle x -3.03..-0.25 through all three rooms: the
+    // dolly keeps to its middle, about 1.3 m from every wall (tests/valleyProject.test.ts measures it against
+    // the house's triangles).
+    key: 'interior', label: 'Long House interior', dur: 30, ease: [true, true], inside: true,
+    points: [py(lh(AISLE_X, -6.5, 4.2), lh(-1.0, 3, 3.6)), py(lh(AISLE_X, -3.0, 4.2), lh(1.4, 0.8, 3.0)),
+             py(lh(AISLE_X, 0.0, 4.2), lh(1.6, 0.0, 2.9)), py(lh(AISLE_X, 2.2, 4.2), lh(1.8, -0.6, 2.9))],
   },
   {
     key: 'night', label: 'Night falls', dur: 10, ease: [true, true],
     points: [p(-20, 46, 3, at(-38, 34, 2)), p(-26, 52, 6, at(-38, 34, 2))],
+  },
+  {
+    // The same house at night, lit by its candles (interiorProps.ts CANDLES): the GI carries their light round
+    // the rooms and the interior's exposure opens up to it, as the cut in from the dark street shows. Down the
+    // aisle from the middle room, past the low table's pair and the rug, into the kitchen and its table's three.
+    key: 'candles', label: 'Candlelight', dur: 14, ease: [true, true], inside: true,
+    points: [py(lh(AISLE_X, -1.8, 4.0), lh(1.4, 2.3, 3.25)), py(lh(AISLE_X, 1.0, 4.0), lh(1.4, 4.6, 3.4)),
+             py(lh(AISLE_X, 3.8, 3.9), lh(1.55, 6.1, 3.5))],
   },
   // ---- III: Weather (time x2) --------------------------------------------------------------------------
   {
@@ -102,12 +117,19 @@ const SHOT_LIST: ShotSpec[] = [
     points: [p(-28, 64, 20, at(-38, 34, 3)), p(-36, 58, 45, at(-38, 34, 3))],
   },
   {
+    // Low before the Long House's door side: the house, then a slow push and tilt up past its roof into the sky
+    // over the eastern rim (the farthest, so the most sky), half the frame by the end, while the clouds gather.
     key: 'cloudy', label: 'Clouds gather', dur: 40, ease: [true, true],
-    points: [p(24, 74, 34, at(-30, 36, 3)), p(12, 64, 30, at(-30, 36, 3))],
+    points: [p(-30.9, 55, 2, { x: 34.2, z: -2.7, y: 28 }), p(-24.6, 56, 2.6, { x: 35.9, z: -0.9, y: 48 })],
   },
   {
+    // The first rain on the buildings: from the main road north of the Long House, across it to the Old House.
+    // As the ground darkens and the puddles fill (WEATHER_KEYS), the camera comes down the trail to a metre over
+    // it at the well square, looking across the puddles to the Old House and its fence: their reflections
+    // (screen-space) in the water, the raindrops' rings on it.
     key: 'drizzle', label: 'First rain', dur: 30, ease: [true, true], clearance: 0.9,
-    points: [p(-24, 14, 1.4, at(-14, -6, 0.5)), p(-18, 2, 1.3, at(-8, -22, 0.8))],
+    points: [p(-17, 61, 4, at(-26, 40, 4)), p(-23, 55, 3.6, at(-31, 38, 2.5)), p(-28.5, 48, 2.2, at(-38, 35, 1.0)),
+             p(-31.2, 42.5, 1.1, at(-44, 34, 0.6))],
   },
   {
     key: 'storm', label: 'Storm at the windmill', dur: 50, ease: [true, true],
@@ -135,7 +157,8 @@ const SHOT_LIST: ShotSpec[] = [
     points: [p(40, 34, 1, at(59, -45, 10)), p(43, 29, 0.9, at(59, -45, 10)), p(46, 25, 0.9, at(59, -45, 10))],
   },
   {
-    key: 'finale', label: 'The whole valley', dur: 20, ease: [true, false],
+    // The crane up over the valley, a fade to black, and the Cleo logo and wordmark on it (LOGO_KEYS).
+    key: 'finale', label: 'The whole valley', dur: 24, ease: [true, false],
     points: [p(47, 23, 1.2, at(10, 10, 4)), p(58, 52, 30, at(0, 0, 0)), p(64, 90, 85, at(0, 0, 0))],
   },
 ]
@@ -147,6 +170,8 @@ export const SHOTS: Shot[] = (() => {
 })()
 
 export const TOUR_DURATION = SHOTS[SHOTS.length - 1].end
+/** The path sections inside the Long House (their ids), which the tests hold to its walls rather than the ground. */
+export const INTERIOR_SHOTS = SHOT_LIST.filter(s => s.inside).map(s => `shot:${s.key}`)
 
 /** `dt` seconds into shot `key`. */
 export function when(key: string, dt = 0): number {
@@ -177,17 +202,23 @@ const pulse = (a: number, b: number, fade = 1): [number, number, 'linear'][] =>
 
 const TITLES = (): [number, number, string][] => [
   [when('valley', 2), when('valley', 8), 'The Valley'],
-  [when('finale', 2), before('finale', 6), 'Cleo Engine'],
+]
+
+/** The Cleo logo and wordmark, faded in on the final black and held to the end. */
+const LOGO_KEYS = (): [number, number, SequenceKey['interp']][] => [
+  [0, 0, 'linear'], [before('finale', 6.5), 0, 'linear'], [before('finale', 5), 1, 'linear'], [TOUR_DURATION, 1, 'linear'],
 ]
 const CAPTIONS = (): [number, number, string][] => [
   [when('valley', 9), when('valley', 15), 'I  ·  The Valley'],
   [when('foliage', 1), when('foliage', 9), 'Foliage density  ·  100%  →  10%  →  100%'],
   [when('foliage', 12), when('foliage', 21), 'Draw distance  ·  trees 450 m  →  70 m  →  450 m'],
   [when('approach', 2), when('approach', 8), 'II  ·  Light'],
-  [when('interior', 2), when('interior', 12), 'Dynamic global illumination: the sun goes down, the bounce light follows'],
+  [when('interior', 2), when('interior', 12), 'Dynamic global illumination: the sunlight through the door bounces round the room'],
+  [when('candles', 2), when('candles', 11), 'At night, candlelight: the GI carries it round the room, and the eye adapts to it'],
   [when('night-crane', 2), when('night-crane', 10), 'III  ·  Weather  ·  time ×2'],
   [when('cloudy', 3), when('cloudy', 13), 'Clouds gather'],
   [when('drizzle', 3), when('drizzle', 13), 'First rain'],
+  [when('drizzle', 17), when('drizzle', 28), 'Wet ground and puddles: screen-space reflections, raindrop ripples'],
   [when('storm', 4), when('storm', 14), 'Storm'],
   [when('snow', 4), when('snow', 14), 'Rain turns to snow'],
   [when('melt', 3), when('melt', 13), 'The snow melts'],
@@ -195,20 +226,31 @@ const CAPTIONS = (): [number, number, string][] => [
   [when('pond', 2), when('pond', 10), 'IV  ·  Water  ·  screen-space reflections'],
 ]
 
-/** The hour of day across the tour: Act I at ten, Act II from three into the night, a new day for Act III. */
+/**
+ * The hour of day across the tour: Act I at ten; Act II from a quarter past one, the interior running on to
+ * 15:45 so the ridge's shadow takes the sunlit patch, then, behind a fade, the night; a new day for Act III.
+ */
 const HOUR_KEYS = (): [number, number, SequenceKey['interp']][] => [
-  [0, 10, 'constant'], [when('approach'), 15, 'linear'], [when('night'), 20.5, 'linear'], [when('night-crane'), 23, 'linear'],
+  [0, 10, 'constant'], [when('approach'), 13.25, 'linear'], [when('interior'), 13.65, 'linear'],
+  [before('interior', 1), 15.75, 'constant'], [when('night'), 20.5, 'linear'], [when('night-crane'), 23, 'linear'],
   // Midnight to dawn behind the fade (FADE_KEYS): one jump, rather than hours of sky re-bakes.
   [when('night-crane', 14.9), 23.9, 'constant'], [when('night-crane', 15), 6.5, 'linear'], [when('cloudy'), 7, 'linear'],
   [when('drizzle'), 9, 'linear'], [when('pond'), 14, 'linear'], [TOUR_DURATION, 16.5, 'linear'],
 ]
 
-/** Black over the night's jump in the hour, and over the very end. */
+/**
+ * Black over the two jumps in the hour (afternoon to night, midnight to dawn), a dip either side of the
+ * candlelit interior (the street to the house and back), and over the very end.
+ */
 const FADE_KEYS = (): [number, number, SequenceKey['interp']][] => [
   [0, 1, 'linear'], [1.5, 0, 'linear'],
+  [before('interior', 1.2), 0, 'linear'], [before('interior', 0.2), 1, 'linear'],
+  [when('night', 0.6), 1, 'linear'], [when('night', 1.8), 0, 'linear'],
+  [before('night', 0.8), 0, 'linear'], [before('night', 0.1), 1, 'linear'], [when('candles', 0.4), 1, 'linear'], [when('candles', 1.4), 0, 'linear'],
+  [before('candles', 0.8), 0, 'linear'], [before('candles', 0.1), 1, 'linear'], [when('night-crane', 0.3), 1, 'linear'], [when('night-crane', 1.3), 0, 'linear'],
   [when('night-crane', 11), 0, 'linear'], [when('night-crane', 14), 1, 'linear'],
   [when('night-crane', 16), 1, 'linear'], [when('night-crane', 19), 0, 'linear'],
-  [before('finale', 6), 0, 'linear'], [TOUR_DURATION, 1, 'linear'],
+  [before('finale', 9), 0, 'linear'], [before('finale', 7), 1, 'linear'], [TOUR_DURATION, 1, 'linear'],
 ]
 
 // ---- the environment -------------------------------------------------------------------------------------
@@ -246,12 +288,13 @@ const WIND_PRESETS = (): [number, number, string][] => [
 
 /** The Weather node, keyed. */
 const WEATHER_KEYS = (): Record<string, Keys> => ({
-  precipitationRate: ramp([[0, 0], [when('drizzle', 2), 0], [when('drizzle', 8), 0.15], [when('storm'), 0.15], [when('storm', 12), 1],
+  precipitationRate: ramp([[0, 0], [when('drizzle', 2), 0], [when('drizzle', 8), 0.3], [when('storm'), 0.3], [when('storm', 12), 1],
                            [when('snow'), 1], [when('snow', 10), 0.6], [when('melt'), 0.6], [when('melt', 8), 0]]),
   precipitationSnowShare: ramp([[0, 0], [when('snow', 4), 0], [when('snow', 28), 1]]),
-  wetness: ramp([[0, 0], [when('drizzle', 2), 0], [when('drizzle', 28), 0.4], [when('storm'), 0.4], [when('storm', 20), 1],
+  // The drizzle soaks the hamlet and fills its puddles by the time the camera is down among them.
+  wetness: ramp([[0, 0], [when('drizzle', 2), 0], [when('drizzle', 16), 0.9], [when('storm'), 0.95], [when('storm', 12), 1],
                  [when('melt'), 1], [when('melt', 4), 0.9], [when('clearing'), 0.9], [when('clearing', 28), 0.3]]),
-  puddles: ramp([[0, 0], [when('drizzle', 6), 0], [when('drizzle', 28), 0.3], [when('storm'), 0.3], [when('storm', 24), 1],
+  puddles: ramp([[0, 0], [when('drizzle', 4), 0], [when('drizzle', 18), 1], [when('storm', 24), 1],
                  [when('snow', 10), 1], [when('snow', 35), 0.7], [when('melt'), 0.7], [when('melt', 20), 0.85],
                  [when('clearing'), 0.85], [when('clearing', 28), 0.2]]),
   // A trace of snow from the first frame, behind the opening fade: the landscape bakes its snow layer then,
@@ -411,6 +454,8 @@ export function buildTour(terrainAt: HeightAt): SequenceData {
     property('title-opacity', 'title', 'opacity', 'number', pulses(TITLES())),
     property('caption-text', 'caption', 'text', 'string', textKeys(CAPTIONS())),
     property('caption-opacity', 'caption', 'opacity', 'number', pulses(CAPTIONS())),
+    property('logo-opacity', 'logo', 'opacity', 'number', keysFrom(0, LOGO_KEYS())),
+    property('wordmark-opacity', 'wordmark', 'opacity', 'number', keysFrom(0, LOGO_KEYS())),
 
     // ---- the environment ----
     presets('clouds-presets', 'Clouds', 'clouds', CLOUD_PRESETS()),
@@ -444,6 +489,8 @@ export function buildTour(terrainAt: HeightAt): SequenceData {
       { id: 'fade', name: 'Fade', nodeType: 'uiPanel' },
       { id: 'title', name: 'Title', nodeType: 'uiText' },
       { id: 'caption', name: 'Caption', nodeType: 'uiText' },
+      { id: 'logo', name: 'Logo', nodeType: 'uiImage' },
+      { id: 'wordmark', name: 'Wordmark', nodeType: 'uiText' },
       { id: 'clouds', name: 'Clouds', nodeType: 'volumetricClouds', path: 'volumetric clouds' },
       { id: 'wind', name: 'Wind', nodeType: 'wind', path: 'Wind' },
       { id: 'weather', name: 'Weather', nodeType: 'weather', path: 'Weather' },

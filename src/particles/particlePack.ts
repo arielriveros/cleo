@@ -142,8 +142,10 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
     if (wind) simMask |= SIM.WIND;
     const sceneWind = !!wind && wind.source === 'scene';
     if (sceneWind) simMask |= SIM.SCENE_WIND;
-    // x = the scene wind's multiplier. Always written, so a recycled program never keeps a stale one.
-    sim.u_windScene = [sceneWind ? finiteOr(wind!.scale, 1) : 0, 0, 0, 0];
+    // x = the scene wind's multiplier, yzw = the still-air velocity added to it (a drop's fall). Always
+    // written, so a recycled program never keeps a stale one.
+    const fall = sceneWind && Array.isArray(wind!.fall) ? wind!.fall as number[] : [0, 0, 0];
+    sim.u_windScene = [sceneWind ? finiteOr(wind!.scale, 1) : 0, finiteOr(fall[0], 0), finiteOr(fall[1], 0), finiteOr(fall[2], 0)];
 
     const noise = activeModule(def, 'curlNoise')?.params;
     if (noise) simMask |= SIM.NOISE;
@@ -229,7 +231,9 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
     draw.u_flipbook = [fb.columns, fb.rows, Math.min(fb.frames, fb.columns * fb.rows), fb.mode === 'fps' ? 1 : 0];
     draw.u_flipbook2 = [fb.fps, fb.cycles, fb.randomStart ? 1 : 0, fb.blend && fb.frames > 1 ? 1 : 0];
     draw.u_speedRange = [colorSpeedRange[0], colorSpeedRange[1], sizeSpeedRange[0], sizeSpeedRange[1]];
-    draw.u_stretchRange = [render.stretchRange[0], render.stretchRange[1], 0, 0];
+    // z = the streak's shutter (s, 0 = `stretch`), w = the narrowest it is drawn (px, 0 = off).
+    draw.u_stretchRange = [render.stretchRange[0], render.stretchRange[1],
+                           Math.max(0, finiteOr(render.streakShutter, 0)), Math.max(0, finiteOr(render.minPixelWidth, 0))];
     draw.alignment = [ALIGNMENT[render.alignment] ?? 0];
     draw.stretch = [render.stretch];
     frag.u_fragParams = [BLEND[render.blend] ?? 0, render.cutoff, render.softness, render.emissive];

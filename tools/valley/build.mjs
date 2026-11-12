@@ -558,7 +558,6 @@ function creatorDecal(key, name, folder = BLOOD_DIR, { still = false } = {}) {
 }
 const BLOOD_POOL_DECAL = creatorDecal('blood-pool', 'Blood Pool')
 const BLOOD_SPATTER_DECAL = creatorDecal('blood-splash', 'Blood Spatter')
-const PUDDLE_DECAL = creatorDecal('water-puddle', 'Water Puddle', WATER_FX_DIR, { still: true })
 
 /**
  * A blood decal template: SoulsBloodSplat snaps it to the floor, turns and sizes it and plays its
@@ -1815,47 +1814,6 @@ function floaters() {
 }
 
 /**
- * Rain puddles on the trails: the Water Puddle bake's settled decal (a Creator water simulation) where rain
- * would collect -- the low spots of the dirt roads and the forest tracks, where the ground dips below the
- * ring around it. Sparse: the deepest spots at least PUDDLE_SPACING apart, never on a steep stretch, in the
- * pond or under a cliff, each turned and sized at random.
- */
-const PUDDLE_COUNT = 30
-const PUDDLE_SPACING = 9
-function puddles() {
-  const candidates = []
-  for (const line of [...dirtRoadLines, ...trackLines]) {
-    for (let i = 0; i < line.length; i += 2) {
-      const [x, z] = line[i]
-      if (heights.slopeAt(x, z) > 12 || Math.hypot(x - POND.x, z - POND.z) < POND_HALF + 3 || cliffDistance(x, z) < 6) continue
-      const h = heights.heightAt(x, z)
-      let ring = 0
-      for (let a = 0; a < 8; a++) ring += heights.heightAt(x + Math.cos(a * Math.PI / 4) * 3, z + Math.sin(a * Math.PI / 4) * 3)
-      candidates.push({ x, z, h, dip: ring / 8 - h })
-    }
-  }
-  candidates.sort((a, b) => b.dip - a.dip)
-  const chosen = []
-  for (const c of candidates) {
-    if (chosen.length >= PUDDLE_COUNT) break
-    if (chosen.some(o => Math.hypot(o.x - c.x, o.z - c.z) < PUDDLE_SPACING)) continue
-    chosen.push(c)
-  }
-  const random = rng(0x9d1e)
-  log(`puddles: ${chosen.length} of ${candidates.length} trail spots`)
-  return chosen.map((c, i) => {
-    const yaw = Math.round(random() * 360)
-    const scale = Math.round((0.8 + random() * 0.8) * 100) / 100
-    return node(`Puddle ${i + 1}`, 'node', {
-      id: id(`puddle:${i}`), position: [c.x, Math.round(c.h * 1000) / 1000, c.z],
-      // Half a metre deep: the trail's own ruts and camber are well inside it.
-      // On the ground only: a puddle does not wet the boots of whoever walks through it.
-      children: [creatorDecalNode(`puddle:${i}:decal`, PUDDLE_DECAL, { scale, depth: 0.5, yaw, receivers: 'terrain' })],
-    })
-  })
-}
-
-/**
  * One probe for the whole valley's REFLECTIONS: what the hamlet's wet and polished surfaces and the pond's
  * water reflect. Unbounded (size 0), so there is no seam where one probe's box gives way to another's.
  * Captured between the hamlet and the pond, and re-captured as the day turns (ValleyDayNight).
@@ -2390,7 +2348,6 @@ function valleyScene() {
       sun, sky, skyLight, clouds, wind, timeOfDay,
       landscapeNode(),
       souls.group('water', 'Water', [pondWater(), pondVolume(), pondZone(), ...floaters()]),
-      souls.group('puddles', 'Puddles', puddles()),
       souls.group('light-probes', 'Light Probes', [valleyProbe(), ...localProbes()]),
       souls.group('buildings', 'Buildings', placedBuildings),
       souls.group('exposure-volumes', 'Exposure Volumes', exposureVolumes()),

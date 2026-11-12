@@ -191,6 +191,10 @@ function parseRender(raw: any): RenderSettings {
         meshData: parseParticleMesh(raw.meshData),
         sort: raw.sort === true,
         sortingOrder: Math.floor(finiteOr(raw.sortingOrder, 0)),
+        // Only when set, so an effect saved without them keeps its exact payload.
+        ...(Number(raw.streakShutter) > 0 ? { streakShutter: Math.min(1, Number(raw.streakShutter)) } : {}),
+        ...(Number(raw.minPixelWidth) > 0 ? { minPixelWidth: Math.min(8, Number(raw.minPixelWidth)) } : {}),
+        ...(raw.shading === 'rain' ? { shading: 'rain' as const } : {}),
     };
 }
 

@@ -69,7 +69,7 @@ export default class ValleyDayNightNode extends Node {
   private _fog: { density: number, falloff: number, opacity: number } = null
   private _godRays: number = 0
   private _fogVolumes: { node: any, density: number }[] = []
-  private _lastStep: number = NaN
+  private _lastDir: number[] = null
   private _probeAt: number[] = null
 
   onStart() {
@@ -112,11 +112,13 @@ export default class ValleyDayNightNode extends Node {
     const day = smooth(0, 25, elevation)
     const overcast = Math.min(1, Math.max(0, Number(this.overcast) || 0))
 
-    // The sun, in steps of half a degree: each step re-bakes the sky, so they should not come every frame
-    // (at the default day length, one every two seconds).
-    const step = Math.round(Math.atan2(pos[0], pos[2]) * 360 / Math.PI) * 1000 + Math.round(elevation * 2)
-    if (this._sun && (force || step !== this._lastStep)) {
-      this._lastStep = step
+    // The sun, turned every frame it has moved at all, so its shadows glide rather than step. What reacts to
+    // the sun keeps its own threshold: the sky re-bakes past 0.3°, the GI volumes relight past a couple of
+    // degrees, and the probes below relight every `probeDegrees`.
+    const last = this._lastDir
+    const moved = !last || Math.acos(Math.min(1, pos[0] * last[0] + pos[1] * last[1] + pos[2] * last[2])) > 0.01 * Math.PI / 180
+    if (this._sun && (force || moved)) {
+      this._lastDir = pos
       const travel = [-pos[0], -pos[1], -pos[2]]
       const pitch = Math.asin(-travel[1]) * 180 / Math.PI
       const yaw = Math.atan2(travel[0], travel[2]) * 180 / Math.PI
