@@ -481,7 +481,9 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     **camera cut** switches the rendered camera. A **property** track drives any dotted path on a node (a UI
     fade, a script field such as the time of day), the renderer's settings or the `Game` facade
     (`timeScale`). An **event** track calls a method on the Sequence node's own script (the director) or
-    on a bound node.
+    on a bound node. A **presets** track blends a Volumetric Clouds, Wind or Weather node from one of its
+    own presets to the next, each section starting where the last one ended. A **foliage** track changes a
+    landscape's layers live: their density, their draw and impostor distances, their shadows.
   - *Slots.* A sequence names its actors by slot, and the node binds each slot to a node in the scene,
     so one sequence can drive other actors. The bindings follow a copied or spawned subtree.
   - *It owns what it drives.* Every target is captured the first time the sequence writes it and
@@ -500,15 +502,35 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     kept on the editor camera; **Pilot** looks through the shot's camera. Saving, Play, Simulate, a tab or
     2D/3D switch, selecting another node and grabbing a gizmo all put the scene back first, so a preview is
     never saved. **Export** / **Import** read and write `.sequence.json`.
-- **The Valley opens on a start menu: a cinematic tour, or Free mode.** The tour is a 410 s sequence over
-  every part of the valley: the campfire, the main road, the hamlet, the Old House and the Granary, the
-  meadow and the forest, a dolly down the Long House while the sun sets (the GI follows it), the night, the
-  windmill and the gate notch at twice the game's speed, the pond, and the whole valley from above.
-  Escape or P comes back to the menu from either mode. `tools/valley/applyCinematic.ts` applies it to the
-  shipped example from the checked-in `valley-tour.sequence.json` (the shot list is `cinematic/tour.ts`).
+- **The Valley opens on a start menu: a cinematic tour, or Free mode.** The tour is a 387 s sequence over
+  every part of the valley.
+  - *Act I.* The campfire, the main road, the hamlet, the Old House and the Granary in 30 s. Then the
+    meadow, its grass thinning to a tenth and filling in again, and the forest, its draw distance closing in
+    to 70 m and opening out again.
+  - *Act II.* A dolly down the Long House while the sun sets, the GI following it. The dolly keeps to the
+    middle of the aisle, 1.3 m clear of every wall (a test measures it against the house's triangles).
+  - *Act III, at twice the game's speed.* A clear night; clouds gathering; the first rain; a storm, the wind
+    up, the rain heavy, the windmill's sails racing; the rain turning to snow; the snow melting into a wet
+    valley; a clear day again.
+  - *Act IV.* The pond calming to a mirror, then the whole valley from above.
+  - Escape or P comes back to the menu from either mode. `tools/valley/applyCinematic.ts` applies it to the
+    shipped example from the checked-in `valley-tour.sequence.json` (the shot list is `cinematic/tour.ts`).
+- **Effects can follow the game's speed.** **Follow Time Scale** (Renderer ▸ Weather) runs the wind, the
+  clouds' drift, fog, flicker, water ripples and custom materials' `u_time` at `Game.timeScale`, so a
+  sped-up day plays as a time-lapse. Off by default.
+- **Rain and snow at once.** A Weather volume's **Falling** can be **Rain and snow**, shared out by its
+  **Snow Share**: swept from 0 to 1 it turns the rain into snow. A **Sleet** preset uses it.
+- **Thinning foliage live.** `FoliageLayer.densityScale` draws a share of a layer, spread evenly over each
+  cell and nested, so sweeping it never swaps one plant for another; thinned plants stop colliding too.
 
 ### Fixes & refactors
 
+- **Clouds and gusts no longer race when the wind changes.** The clouds' drift and the gusts' travel are
+  integrated frame by frame, instead of a speed times a clock minutes along, which raced them across the
+  sky whenever a preset changed the wind's speed. The cloud shadows now stay under baked clouds whatever
+  the wind does after the bake.
+- **`Game.updateRenderSettings` keeps the bloom mode and the Purkinje strength.** A patch reset both to
+  their defaults.
 - **One math module.** The engine's math helpers now live in `src/core/math.ts` and reach scripts as
   `MathUtils`: scalar helpers and finite guards, damping, angles, seeded random and noise generators, the
   particle curves and gradients, keyed curves, splines, tuple vector and quaternion helpers, and ray,

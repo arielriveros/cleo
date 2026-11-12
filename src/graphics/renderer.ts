@@ -780,6 +780,8 @@ export class Renderer {
         this._foliage.advanceWindTime();
         // The scene's wind field (core/wind/windField.ts) on that clock: foliage and particles share it.
         this._foliage.prepareWindField(scene);
+        // The clouds' drift, on the same clock, before the sky bake and the cloud shadows read it.
+        this._clouds.advanceCloudWind(scene, this._view.windDelta);
         // One clock for every flickering light and everything that follows one (graphics/lightFlicker.ts).
         lightFlickerClock.time = this._view.windTime;
         // What is pushing foliage aside this frame (characters, moving bodies, blasts): stamps for the
@@ -2218,6 +2220,18 @@ export class Renderer {
     public set foliageShadowDistance(metres: number) {
         this._foliage.foliageShadowDistance = Number.isFinite(metres) ? Math.max(0, metres) : 0;
     }
+    /** See RenderSettings.effectsFollowTimeScale. */
+    public get effectsFollowTimeScale(): boolean { return this._foliage.effectsFollowTimeScale; }
+    public set effectsFollowTimeScale(on: boolean) { this._foliage.effectsFollowTimeScale = !!on; }
+    /**
+     * The game's time scale for the coming frame, which the render clock runs at while
+     * `effectsFollowTimeScale` is on. The engine passes it before every render (1 while paused).
+     */
+    public setEffectsTimeScale(scale: number): void {
+        this._foliage.effectsTimeScale = Number.isFinite(scale) ? Math.max(0, scale) : 1;
+    }
+    /** The render clock, seconds: what wind, clouds, fog, flicker and custom materials' `u_time` run on. */
+    public get effectsTime(): number { return this._view.windTime; }
     /** This frame's CPU occlusion buffer, for a debug view. Its contents are only meaningful mid-frame. */
     public get occlusionBuffer(): OcclusionBuffer { return this._visibility.occlusion; }
     /**
@@ -2665,6 +2679,7 @@ export class Renderer {
             foliageShadowDistance: this._foliage.foliageShadowDistance,
             foliagePrepass: this._foliage.foliagePrepass,
             foliageGpuCulling: this._foliage.foliageGpuCulling,
+            effectsFollowTimeScale: this._foliage.effectsFollowTimeScale,
             occlusionQueries: this._visibility.occlusionQueriesEnabled,
             lightOcclusionCulling: this._visibility.lightOcclusionCulling,
             foliageCullDistance: this._foliage.foliageCullDistance,
@@ -2824,6 +2839,7 @@ export class Renderer {
         if (s.foliageShadowDistance !== undefined) this.foliageShadowDistance = s.foliageShadowDistance;
         if (s.foliagePrepass !== undefined) this.foliagePrepass = s.foliagePrepass;
         if (s.foliageGpuCulling !== undefined) this.foliageGpuCulling = s.foliageGpuCulling;
+        if (s.effectsFollowTimeScale !== undefined) this.effectsFollowTimeScale = s.effectsFollowTimeScale;
         if (s.occlusionQueries !== undefined) this.occlusionQueries = s.occlusionQueries;
         if (s.lightOcclusionCulling !== undefined) this.lightOcclusionCulling = s.lightOcclusionCulling;
         if (s.foliageCullDistance !== undefined) this.foliageCullDistance = s.foliageCullDistance;

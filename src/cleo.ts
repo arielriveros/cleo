@@ -111,7 +111,7 @@ export { WindNode, WIND_DEFAULTS, type WindOptions } from "./core/scene/nodes/wi
 // The wind as a vector field (Ghost of Tsushima's): one function on the CPU and in chunks/windField.wgsl.
 export {
     sampleWindField, sampleSceneWind, packWindSources, windGustAt, windVeerAt,
-    createWindSample, WindFieldSnapshot, windFieldClock,
+    createWindSample, WindFieldSnapshot, windFieldClock, advanceGustTravel,
     WIND_REFERENCE_SPEED, MAX_WIND_SOURCES, WIND_SOURCE_FLOATS, WIND_DEFAULT_GUSTINESS, WIND_DEFAULT_VEER,
     type WindSample, type WindFieldParams, type WindFieldSource,
 } from "./core/wind/windField";
@@ -503,7 +503,7 @@ export type { HeightImage, HeightImportOptions } from "./terrain/heightmapIO";
 export { decodePngChannels, weightsToOverAlphas, weightPlanesToAlphaPlanes, readWorldManifest, weightPlanesFromImages, resamplePlane } from "./terrain/splatmapIO";
 export type { DecodedPng, WorldManifest, WorldManifestLayer } from "./terrain/splatmapIO";
 export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush, TerrainChunk, TerrainLodSettings, FoliageGenerateResult } from "./terrain/terrain";
-export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES, FOLIAGE_DRAW_TRIANGLE_BUDGET, foliageEffectiveCull, foliageLodBands } from "./terrain/foliage";
+export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES, FOLIAGE_DRAW_TRIANGLE_BUDGET, foliageEffectiveCull, foliageLodBands, foliageDensityScale, FOLIAGE_DENSITY_STEPS } from "./terrain/foliage";
 export type { FoliageKind, FoliageParams } from "./terrain/foliage";
 export { FoliageInteraction, gatherFoliageInteractors, MAX_INTERACT_STAMPS, INTERACT_RANGE, type FoliageInteractor } from "./graphics/foliageInteraction";
 export { bakeOctahedralImpostor, rgbaSampler, impostorSphere } from "./terrain/octahedralBake";
@@ -574,11 +574,13 @@ export {
     type Vec3Tuple, type KeyInterp, type TimedKey, type KeyedCurve,
 } from "./core/math";
 export { compilePropertyPath, type PropertyAccessor } from "./sequencer/propertyPath";
-export { SEQUENCE_VERSION } from "./sequencer/types";
+export { SEQUENCE_VERSION, FOLIAGE_CHANNELS } from "./sequencer/types";
+export { registerSequencePresets, sequencePresetsFor, presetFields, blendPresetValue } from "./sequencer/presetRegistry";
 export type {
     SequenceData, SequenceSlot, SequenceTrack, SequenceTrackType, SequenceKey, SequenceCurve,
     SectionBase, PathSection, PathTrack, PathLook, CameraCutSection, CameraCutTrack, PropertySection,
     PropertyTrack, PropertyValueType, EventKey, EventTrack, SequenceMarker,
+    PresetSection, PresetTrack, FoliageSection, FoliageTrack, FoliageChannel,
 } from "./sequencer/types";
 import { sequenceGlobals as installSequenceGlobals } from "./core/scene/nodes/sequenceNode";
 import { CleoEngine as SequenceEngine } from "./core/engine";

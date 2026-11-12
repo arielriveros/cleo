@@ -839,10 +839,14 @@ export class SkyPasses {
     private _cloudSkyRes: number[] = [0, 0];
     private _cloudSkyFront = -1;
 
-    /** The bake in progress: target cube, next face, and the sun, clock and eye it is made with. */
+    /**
+     * The bake in progress: target cube, next face, and the sun, wall-clock time, wind drift and eye it is
+     * made with.
+     */
     private _cloudSkyBake: {
         cube: number; face: number; perFrame: number;
-        sun: [number, number, number]; time: number; eye: [number, number, number]; signature: string;
+        sun: [number, number, number]; time: number; wind: [number, number, number];
+        eye: [number, number, number]; signature: string;
     } | null = null;
 
     private _cloudSkyWait = 0;
@@ -926,6 +930,7 @@ export class SkyPasses {
                 // loading overlay or the click covers the hitch); a moving sun gets a face a frame.
                 perFrame: fresh || requested ? 6 : 1,
                 sun: [sun[0], sun[1], sun[2]], time: performance.now() * 0.001,
+                wind: [this._clouds.windOffset[0], this._clouds.windOffset[1], this._clouds.windOffset[2]],
                 eye: [e[0], e[1], e[2]], signature: node.bakeSignature(),
             };
         }
@@ -938,7 +943,7 @@ export class SkyPasses {
 
         this._passes.generateMipsAfterRender(this._cloudSkyCubes[bake.cube]!);
         this._cloudSkyFront = bake.cube;
-        node.markBaked(bake.sun, bake.time, bake.signature);
+        node.markBaked(bake.sun, bake.time, bake.signature, bake.wind);
         this._cloudSkyBake = null;
         this._skyLightReprojectPending = true;
         this._skyReflectionDirty = true;
@@ -967,7 +972,7 @@ export class SkyPasses {
         // The depth texture is bound only because the layout has a slot for it; `u_ignoreDepth` skips it.
         const group = this._bindGroups.textureGroup(pipeline, 0, [this._targets.gBuffer.depth, this._clouds.cloudBaseNoise,
                                                            this._clouds.cloudDetailNoise]);
-        this._clouds.setCloudUniforms(scene, node, this._cloudFaceInv, bake.eye, bake.time);
+        this._clouds.setCloudUniforms(scene, node, this._cloudFaceInv, bake.eye, bake.wind);
         this._shaderManager.setUniform('u_ignoreDepth', true);
         // The cloud-sky cube is a bake: absolute, like the atmosphere cube it paints over.
         this._shaderManager.setUniform('u_preExposure', 1);

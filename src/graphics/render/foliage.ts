@@ -1,7 +1,7 @@
 import { vec3, mat4 } from 'gl-matrix';
 import type { Frustum } from '../../core/frustum';
 import { Scene } from '../../core/scene/scene';
-import { FOLIAGE_DENSITY_FALLOFF, collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes, foliageEffectiveCull, foliageLodBands, foliageCullLimitSq, foliageAdmitCount, FOLIAGE_SORT_REFRESH, sortFoliageFrontToBack, foliageKeepFraction, createFoliageBatch, foliageBatchStale, foliageBatchInstances, rememberFoliageBatch, foliageChunkBounds, foliageChunkLimit, packFoliageInstances } from '../../terrain/foliage';
+import { FOLIAGE_DENSITY_FALLOFF, collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes, foliageEffectiveCull, foliageLodBands, foliageCullLimitSq, foliageAdmitCount, FOLIAGE_SORT_REFRESH, sortFoliageFrontToBack, foliageKeepFraction, foliageDensityScale, createFoliageBatch, foliageBatchStale, foliageBatchInstances, rememberFoliageBatch, foliageChunkBounds, foliageChunkLimit, packFoliageInstances } from '../../terrain/foliage';
 import type { FoliageCell, FoliageLayer, FoliageBand, FoliageBatch } from '../../terrain/foliage';
 import { FoliageGpuCuller } from '../foliageGpuCulling';
 import type { GpuCullBucket, GpuFoliageSegment } from '../foliageGpuCulling';
@@ -30,7 +30,7 @@ import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
-import { WindFieldSnapshot, windFieldClock } from '../../core/wind/windField';
+import { WindFieldSnapshot, windFieldClock, advanceGustTravel } from '../../core/wind/windField';
 
 /** A foliage layer's cells bucketed on the ground plane, for the shadow pass's range query. */
 export interface FoliageCellGrid {
@@ -320,7 +320,7 @@ export class FoliagePasses {
                     // Density scaling rides on the BUCKET, not on raw distance: `cell.lod` is already
                     // hysteresis-damped and already decides membership, so the fraction is constant
                     // within a bucket and the batch's own staleness check covers a change for free.
-                    const keep = foliageKeepFraction(slot, layer.levels.length, this.foliageDensityFalloff, layer.kind);
+                    const keep = this._foliageKeep(layer, slot);
                     this._packFoliageBucket(layer, layer.batches, slot, buckets[slot] ??= [], models, keep);
                 }
             }
@@ -344,13 +344,22 @@ export class FoliagePasses {
                 cells: layer.buckets[slot] ?? [],
                 models,
                 band: bands[slot] ?? null,
-                keep: foliageKeepFraction(slot, layer.levels.length, this.foliageDensityFalloff, layer.kind),
+                keep: this._foliageKeep(layer, slot),
                 sphere: octa ? [octa.center[0], octa.center[1], octa.center[2], octa.radius * 1.05] : FoliagePasses._modelsSphere(models),
             });
         }
         layer.gpuBatches = this._foliageGpu.cull(this._passes.acquireEncoder('foliage.cull'), layer, buckets,
                                                  this._sys.visibility.frustum.planes, this._view.camera.position);
         layer.gpuCulled = true;
+    }
+
+    /**
+     * The share of each cell a draw bucket of `layer` keeps: the distance thinning of grass
+     * (`foliageKeepFraction`) times the layer's own `densityScale`. Both are prefixes, so their product is
+     * one too, and the shadow pass takes the same share of the same cells.
+     */
+    private _foliageKeep(layer: FoliageLayer, slot: number): number {
+        return foliageKeepFraction(slot, layer.levels.length, this.foliageDensityFalloff, layer.kind) * foliageDensityScale(layer);
     }
 
     /** The bounding sphere (model space) of a set of sub-models: centre and radius of their union box. */
@@ -416,8 +425,7 @@ export class FoliagePasses {
                 // The SAME fraction the cheapest colour level keeps. Thinning the two differently would
                 // leave shadows with no tree above them, or trees with no shadow beneath them, and the
                 // prefix rule makes the two sets identical rather than merely the same size.
-                const keep = foliageKeepFraction(layer.levels.length - 1, layer.levels.length,
-                                                 this.foliageDensityFalloff, layer.kind);
+                const keep = this._foliageKeep(layer, layer.levels.length - 1);
                 this._packFoliageBucket(layer, layer.shadowBatches, cascade, visible, models, keep);
 
                 // What this layer puts in the cascade: which cells, at which version and thinning, drawn
@@ -743,24 +751,40 @@ export class FoliagePasses {
     /** A layer prototype's [base height, plant height] in object space, keyed on its first model. */
     private readonly _windShapes = new WeakMap<Model, [number, number, number]>();
 
+    /** See RenderSettings.effectsFollowTimeScale. */
+    public effectsFollowTimeScale = false;
+    /** The game's time scale this frame (Renderer.setEffectsTimeScale): the clock's rate while effects follow it. */
+    public effectsTimeScale = 1;
+
+    /**
+     * Advance the render clock (`windTime`) by the wall-clock frame delta, clamped, and scaled by the game's
+     * time scale when effects follow it: at time ×2 the grass sways, the clouds drift and the rain falls
+     * twice as fast, a time-lapse rather than only the sun moving faster.
+     */
     public advanceWindTime(): void {
         const now = performance.now();
-        const dt = this._windClock < 0 ? 0 : Math.min(0.1, Math.max(0, (now - this._windClock) / 1000));
+        const wall = this._windClock < 0 ? 0 : Math.min(0.1, Math.max(0, (now - this._windClock) / 1000));
         this._windClock = now;
+        const rate = this.effectsFollowTimeScale && Number.isFinite(this.effectsTimeScale) ? Math.max(0, this.effectsTimeScale) : 1;
+        const dt = wall * rate;
         this._view.windTimePrev = this._view.windTime;
         this._view.windTime += dt;
+        this._view.windDelta = dt;
         windFieldClock.time = this._view.windTime;
     }
 
     /**
      * The scene's wind field this frame (core/wind/windField.ts): the WindNode's parameters and the Force
      * Fields that move the air, captured once per frame, after `advanceWindTime`. Foliage uploads it to
-     * every wind program; the particles sample the same snapshot, so everything rides one air.
+     * every wind program; the particles sample the same snapshot, so everything rides one air. The gusts'
+     * travel is integrated here first, so a wind whose gust speed or size is changing (a preset blending
+     * in) carries its gusts on rather than racing them.
      */
     public readonly windField = new WindFieldSnapshot();
 
     public prepareWindField(scene: Scene): void {
-        this.windField.capture(scene, this._view.windTime);
+        advanceGustTravel(windFieldClock, scene.wind, this._view.windDelta);
+        this.windField.capture(scene, this._view.windTime, windFieldClock.gustTravel);
     }
 
     /**

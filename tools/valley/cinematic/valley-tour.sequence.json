@@ -1,7 +1,7 @@
 {
   "version": 1,
   "name": "Valley Tour",
-  "duration": 410,
+  "duration": 387,
   "fps": 30,
   "clock": "game",
   "loop": false,
@@ -41,6 +41,36 @@
       "id": "caption",
       "name": "Caption",
       "nodeType": "uiText"
+    },
+    {
+      "id": "clouds",
+      "name": "Clouds",
+      "nodeType": "volumetricClouds",
+      "path": "volumetric clouds"
+    },
+    {
+      "id": "wind",
+      "name": "Wind",
+      "nodeType": "wind",
+      "path": "Wind"
+    },
+    {
+      "id": "weather",
+      "name": "Weather",
+      "nodeType": "weather",
+      "path": "Weather"
+    },
+    {
+      "id": "landscape",
+      "name": "Landscape",
+      "nodeType": "landscape",
+      "path": "Landscape"
+    },
+    {
+      "id": "pond",
+      "name": "Pond",
+      "nodeType": "model",
+      "path": "Water/Pond Water"
     }
   ],
   "tracks": [
@@ -53,7 +83,7 @@
         {
           "id": "shot:valley",
           "start": 0,
-          "end": 75,
+          "end": 30,
           "label": "The Valley",
           "points": [
             [
@@ -95,31 +125,6 @@
               -73,
               13.985,
               40
-            ],
-            [
-              -66,
-              11.655,
-              20
-            ],
-            [
-              -52,
-              5.436,
-              4
-            ],
-            [
-              -50,
-              5.187,
-              -12
-            ],
-            [
-              -56,
-              24.24,
-              -30
-            ],
-            [
-              -66,
-              44.498,
-              -52
             ]
           ],
           "progress": {
@@ -130,12 +135,12 @@
                 "interp": "auto"
               },
               {
-                "t": 56.25,
+                "t": 22.5,
                 "v": 0.75,
                 "interp": "linear"
               },
               {
-                "t": 75,
+                "t": 30,
                 "v": 1
               }
             ]
@@ -182,31 +187,6 @@
                 -78,
                 5.11,
                 53
-              ],
-              [
-                -50,
-                4.673,
-                0
-              ],
-              [
-                -48,
-                3.595,
-                -14
-              ],
-              [
-                -58,
-                5.292,
-                -28
-              ],
-              [
-                -70,
-                14.669,
-                -70
-              ],
-              [
-                -85,
-                51.098,
-                -100
               ]
             ],
             "progress": {
@@ -216,51 +196,131 @@
                   "v": 0
                 },
                 {
-                  "t": 6.698,
-                  "v": 0.066
+                  "t": 4.087,
+                  "v": 0.184
                 },
                 {
-                  "t": 11.523,
+                  "t": 7.153,
+                  "v": 0.323
+                },
+                {
+                  "t": 10.942,
+                  "v": 0.445
+                },
+                {
+                  "t": 14.315,
+                  "v": 0.569
+                },
+                {
+                  "t": 18.306,
+                  "v": 0.569
+                },
+                {
+                  "t": 23.52,
+                  "v": 0.709
+                },
+                {
+                  "t": 30,
+                  "v": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": "shot:foliage",
+          "start": 30,
+          "end": 52,
+          "label": "Meadow and forest",
+          "points": [
+            [
+              -62,
+              4.712,
+              16
+            ],
+            [
+              -53,
+              4.712,
+              3
+            ],
+            [
+              -50,
+              6.187,
+              -12
+            ],
+            [
+              -64,
+              24.837,
+              -30
+            ],
+            [
+              -92,
+              42.477,
+              -46
+            ]
+          ],
+          "progress": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "auto"
+              },
+              {
+                "t": 22,
+                "v": 1
+              }
+            ]
+          },
+          "look": {
+            "mode": "path",
+            "points": [
+              [
+                -50,
+                3.453,
+                -2
+              ],
+              [
+                -48,
+                3.295,
+                -14
+              ],
+              [
+                -40,
+                3.773,
+                -30
+              ],
+              [
+                0,
+                4.496,
+                -20
+              ],
+              [
+                30,
+                0.342,
+                -8
+              ]
+            ],
+            "progress": {
+              "keys": [
+                {
+                  "t": 0,
+                  "v": 0
+                },
+                {
+                  "t": 5.602,
                   "v": 0.116
                 },
                 {
-                  "t": 17.215,
-                  "v": 0.16
+                  "t": 8.322,
+                  "v": 0.292
                 },
                 {
-                  "t": 21.961,
-                  "v": 0.205
+                  "t": 12.851,
+                  "v": 0.69
                 },
                 {
-                  "t": 26.929,
-                  "v": 0.205
-                },
-                {
-                  "t": 32.036,
-                  "v": 0.255
-                },
-                {
-                  "t": 37.588,
-                  "v": 0.36
-                },
-                {
-                  "t": 43.315,
-                  "v": 0.567
-                },
-                {
-                  "t": 49.5,
-                  "v": 0.616
-                },
-                {
-                  "t": 54.609,
-                  "v": 0.676
-                },
-                {
-                  "t": 64.012,
-                  "v": 0.83
-                },
-                {
-                  "t": 75,
+                  "t": 22,
                   "v": 1
                 }
               ]
@@ -269,8 +329,8 @@
         },
         {
           "id": "shot:approach",
-          "start": 75,
-          "end": 85,
+          "start": 52,
+          "end": 62,
           "label": "The Long House",
           "points": [
             [
@@ -341,29 +401,29 @@
         },
         {
           "id": "shot:interior",
-          "start": 85,
-          "end": 115,
+          "start": 62,
+          "end": 92,
           "label": "Long House interior",
           "points": [
             [
-              -2.552,
+              -3.055,
               4.2,
-              43.671
+              43.047
             ],
             [
-              -5.72,
+              -6.162,
               4.2,
-              40.064
+              39.655
             ],
             [
-              -9.171,
+              -8.999,
               4.2,
-              36.444
+              36.558
             ],
             [
-              -12.358,
+              -11.836,
               4.2,
-              33.261
+              33.461
             ]
           ],
           "progress": {
@@ -410,11 +470,11 @@
                   "v": 0
                 },
                 {
-                  "t": 11.655,
+                  "t": 12.042,
                   "v": 0.443
                 },
                 {
-                  "t": 18.78,
+                  "t": 18.61,
                   "v": 0.779
                 },
                 {
@@ -427,8 +487,8 @@
         },
         {
           "id": "shot:night",
-          "start": 115,
-          "end": 125,
+          "start": 92,
+          "end": 102,
           "label": "Night falls",
           "points": [
             [
@@ -485,8 +545,8 @@
         },
         {
           "id": "shot:night-crane",
-          "start": 125,
-          "end": 145,
+          "start": 102,
+          "end": 122,
           "label": "Night over the hamlet",
           "points": [
             [
@@ -543,8 +603,8 @@
         },
         {
           "id": "shot:cloudy",
-          "start": 145,
-          "end": 185,
+          "start": 122,
+          "end": 162,
           "label": "Clouds gather",
           "points": [
             [
@@ -601,8 +661,8 @@
         },
         {
           "id": "shot:drizzle",
-          "start": 185,
-          "end": 215,
+          "start": 162,
+          "end": 192,
           "label": "First rain",
           "points": [
             [
@@ -659,8 +719,8 @@
         },
         {
           "id": "shot:storm",
-          "start": 215,
-          "end": 265,
+          "start": 192,
+          "end": 242,
           "label": "Storm at the windmill",
           "points": [
             [
@@ -759,8 +819,8 @@
         },
         {
           "id": "shot:snow",
-          "start": 265,
-          "end": 305,
+          "start": 242,
+          "end": 282,
           "label": "Rain turns to snow",
           "points": [
             [
@@ -831,8 +891,8 @@
         },
         {
           "id": "shot:melt",
-          "start": 305,
-          "end": 335,
+          "start": 282,
+          "end": 312,
           "label": "Snow melts",
           "points": [
             [
@@ -889,8 +949,8 @@
         },
         {
           "id": "shot:clearing",
-          "start": 335,
-          "end": 365,
+          "start": 312,
+          "end": 342,
           "label": "The sky clears",
           "points": [
             [
@@ -947,8 +1007,8 @@
         },
         {
           "id": "shot:pond",
-          "start": 365,
-          "end": 390,
+          "start": 342,
+          "end": 367,
           "label": "The pond",
           "points": [
             [
@@ -1019,8 +1079,8 @@
         },
         {
           "id": "shot:finale",
-          "start": 390,
-          "end": 410,
+          "start": 367,
+          "end": 387,
           "label": "The whole valley",
           "points": [
             [
@@ -1104,7 +1164,7 @@
         {
           "id": "cut:all",
           "start": 0,
-          "end": 410,
+          "end": 387,
           "slot": "camera"
         }
       ]
@@ -1119,7 +1179,7 @@
         {
           "id": "clock-running:all",
           "start": 0,
-          "end": 410,
+          "end": 387,
           "curve": {
             "keys": [
               {
@@ -1141,7 +1201,7 @@
         {
           "id": "clock-hour:all",
           "start": 0,
-          "end": 410,
+          "end": 387,
           "curve": {
             "keys": [
               {
@@ -1150,47 +1210,47 @@
                 "interp": "constant"
               },
               {
-                "t": 75,
+                "t": 52,
                 "v": 15,
                 "interp": "linear"
               },
               {
-                "t": 115,
+                "t": 92,
                 "v": 20.5,
                 "interp": "linear"
               },
               {
-                "t": 125,
+                "t": 102,
                 "v": 23,
                 "interp": "linear"
               },
               {
-                "t": 139.9,
+                "t": 116.9,
                 "v": 23.9,
                 "interp": "constant"
               },
               {
-                "t": 140,
+                "t": 117,
                 "v": 6.5,
                 "interp": "linear"
               },
               {
-                "t": 145,
+                "t": 122,
                 "v": 7,
                 "interp": "linear"
               },
               {
-                "t": 185,
+                "t": 162,
                 "v": 9,
                 "interp": "linear"
               },
               {
-                "t": 365,
+                "t": 342,
                 "v": 14,
                 "interp": "linear"
               },
               {
-                "t": 410,
+                "t": 387,
                 "v": 16.5,
                 "interp": "linear"
               }
@@ -1209,8 +1269,8 @@
       "sections": [
         {
           "id": "time-scale:weather",
-          "start": 125,
-          "end": 365,
+          "start": 102,
+          "end": 342,
           "whenFinished": "restore",
           "curve": {
             "keys": [
@@ -1249,7 +1309,7 @@
         {
           "id": "bar-top:all",
           "start": 0,
-          "end": 410,
+          "end": 387,
           "curve": {
             "keys": [
               {
@@ -1277,7 +1337,7 @@
         {
           "id": "bar-bottom:all",
           "start": 0,
-          "end": 410,
+          "end": 387,
           "curve": {
             "keys": [
               {
@@ -1305,7 +1365,7 @@
         {
           "id": "fade:all",
           "start": 0,
-          "end": 410,
+          "end": 387,
           "curve": {
             "keys": [
               {
@@ -1319,32 +1379,32 @@
                 "interp": "linear"
               },
               {
-                "t": 136,
+                "t": 113,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 139,
+                "t": 116,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 141,
+                "t": 118,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 144,
+                "t": 121,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 404,
+                "t": 381,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 410,
+                "t": 387,
                 "v": 1,
                 "interp": "linear"
               }
@@ -1363,7 +1423,7 @@
         {
           "id": "title-text:all",
           "start": 0,
-          "end": 410,
+          "end": 387,
           "curve": {
             "keys": [
               {
@@ -1375,7 +1435,7 @@
                 "v": "The Valley"
               },
               {
-                "t": 392,
+                "t": 369,
                 "v": "Cleo Engine"
               }
             ]
@@ -1393,7 +1453,7 @@
         {
           "id": "title-opacity:all",
           "start": 0,
-          "end": 410,
+          "end": 387,
           "curve": {
             "keys": [
               {
@@ -1422,22 +1482,22 @@
                 "interp": "linear"
               },
               {
-                "t": 392,
+                "t": 369,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 393,
+                "t": 370,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 403,
+                "t": 380,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 404,
+                "t": 381,
                 "v": 0,
                 "interp": "linear"
               }
@@ -1456,7 +1516,7 @@
         {
           "id": "caption-text:all",
           "start": 0,
-          "end": 410,
+          "end": 387,
           "curve": {
             "keys": [
               {
@@ -1468,19 +1528,51 @@
                 "v": "I  ·  The Valley"
               },
               {
-                "t": 77,
+                "t": 31,
+                "v": "Foliage density  ·  100%  →  10%  →  100%"
+              },
+              {
+                "t": 42,
+                "v": "Draw distance  ·  trees 450 m  →  70 m  →  450 m"
+              },
+              {
+                "t": 54,
                 "v": "II  ·  Light"
               },
               {
-                "t": 87,
+                "t": 64,
                 "v": "Dynamic global illumination: the sun goes down, the bounce light follows"
               },
               {
-                "t": 127,
+                "t": 104,
                 "v": "III  ·  Weather  ·  time ×2"
               },
               {
-                "t": 367,
+                "t": 125,
+                "v": "Clouds gather"
+              },
+              {
+                "t": 165,
+                "v": "First rain"
+              },
+              {
+                "t": 196,
+                "v": "Storm"
+              },
+              {
+                "t": 246,
+                "v": "Rain turns to snow"
+              },
+              {
+                "t": 285,
+                "v": "The snow melts"
+              },
+              {
+                "t": 315,
+                "v": "Clear again"
+              },
+              {
+                "t": 344,
                 "v": "IV  ·  Water  ·  screen-space reflections"
               }
             ]
@@ -1498,7 +1590,7 @@
         {
           "id": "caption-opacity:all",
           "start": 0,
-          "end": 410,
+          "end": 387,
           "curve": {
             "keys": [
               {
@@ -1527,52 +1619,112 @@
                 "interp": "linear"
               },
               {
-                "t": 77,
+                "t": 31,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 78,
+                "t": 32,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 82,
+                "t": 38,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 83,
+                "t": 39,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 87,
+                "t": 42,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 88,
+                "t": 43,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 96,
+                "t": 50,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 97,
+                "t": 51,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 127,
+                "t": 54,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 128,
+                "t": 55,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 59,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 60,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 64,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 65,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 73,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 74,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 104,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 105,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 111,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 112,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 125,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 126,
                 "v": 1,
                 "interp": "linear"
               },
@@ -1587,24 +1739,764 @@
                 "interp": "linear"
               },
               {
-                "t": 367,
+                "t": 165,
                 "v": 0,
                 "interp": "linear"
               },
               {
-                "t": 368,
+                "t": 166,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 374,
+                "t": 174,
                 "v": 1,
                 "interp": "linear"
               },
               {
-                "t": 375,
+                "t": 175,
                 "v": 0,
                 "interp": "linear"
+              },
+              {
+                "t": 196,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 197,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 205,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 206,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 246,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 247,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 255,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 256,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 285,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 286,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 294,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 295,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 315,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 316,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 324,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 325,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 344,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 345,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 351,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 352,
+                "v": 0,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "clouds-presets",
+      "name": "Clouds",
+      "type": "preset",
+      "slot": "clouds",
+      "sections": [
+        {
+          "id": "clouds-presets:0",
+          "start": 0,
+          "end": 1.5,
+          "label": "clear",
+          "preset": "clear"
+        },
+        {
+          "id": "clouds-presets:1",
+          "start": 122,
+          "end": 137,
+          "label": "partlyCloudy",
+          "preset": "partlyCloudy"
+        },
+        {
+          "id": "clouds-presets:2",
+          "start": 140,
+          "end": 160,
+          "label": "overcast",
+          "preset": "overcast"
+        },
+        {
+          "id": "clouds-presets:3",
+          "start": 162,
+          "end": 176,
+          "label": "rainy",
+          "preset": "rainy"
+        },
+        {
+          "id": "clouds-presets:4",
+          "start": 192,
+          "end": 208,
+          "label": "stormy",
+          "preset": "stormy"
+        },
+        {
+          "id": "clouds-presets:5",
+          "start": 244,
+          "end": 262,
+          "label": "overcast",
+          "preset": "overcast"
+        },
+        {
+          "id": "clouds-presets:6",
+          "start": 286,
+          "end": 308,
+          "label": "partlyCloudy",
+          "preset": "partlyCloudy"
+        },
+        {
+          "id": "clouds-presets:7",
+          "start": 314,
+          "end": 338,
+          "label": "clear",
+          "preset": "clear"
+        }
+      ]
+    },
+    {
+      "id": "wind-presets",
+      "name": "Wind",
+      "type": "preset",
+      "slot": "wind",
+      "sections": [
+        {
+          "id": "wind-presets:0",
+          "start": 162,
+          "end": 182,
+          "label": "windy",
+          "preset": "windy"
+        },
+        {
+          "id": "wind-presets:1",
+          "start": 192,
+          "end": 206,
+          "label": "storm",
+          "preset": "storm"
+        },
+        {
+          "id": "wind-presets:2",
+          "start": 246,
+          "end": 266,
+          "label": "breezy",
+          "preset": "breezy"
+        },
+        {
+          "id": "wind-presets:3",
+          "start": 312,
+          "end": 336,
+          "label": "calm",
+          "preset": "calm"
+        }
+      ]
+    },
+    {
+      "id": "weather-precipitationRate",
+      "type": "property",
+      "path": "precipitationRate",
+      "valueType": "number",
+      "slot": "weather",
+      "sections": [
+        {
+          "id": "weather-precipitationRate:all",
+          "start": 0,
+          "end": 387,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 164,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 170,
+                "v": 0.15,
+                "interp": "linear"
+              },
+              {
+                "t": 192,
+                "v": 0.15,
+                "interp": "linear"
+              },
+              {
+                "t": 204,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 242,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 252,
+                "v": 0.6,
+                "interp": "linear"
+              },
+              {
+                "t": 282,
+                "v": 0.6,
+                "interp": "linear"
+              },
+              {
+                "t": 290,
+                "v": 0,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "weather-precipitationSnowShare",
+      "type": "property",
+      "path": "precipitationSnowShare",
+      "valueType": "number",
+      "slot": "weather",
+      "sections": [
+        {
+          "id": "weather-precipitationSnowShare:all",
+          "start": 0,
+          "end": 387,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 246,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 270,
+                "v": 1,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "weather-wetness",
+      "type": "property",
+      "path": "wetness",
+      "valueType": "number",
+      "slot": "weather",
+      "sections": [
+        {
+          "id": "weather-wetness:all",
+          "start": 0,
+          "end": 387,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 164,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 190,
+                "v": 0.4,
+                "interp": "linear"
+              },
+              {
+                "t": 192,
+                "v": 0.4,
+                "interp": "linear"
+              },
+              {
+                "t": 212,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 282,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 286,
+                "v": 0.9,
+                "interp": "linear"
+              },
+              {
+                "t": 312,
+                "v": 0.9,
+                "interp": "linear"
+              },
+              {
+                "t": 340,
+                "v": 0.3,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "weather-puddles",
+      "type": "property",
+      "path": "puddles",
+      "valueType": "number",
+      "slot": "weather",
+      "sections": [
+        {
+          "id": "weather-puddles:all",
+          "start": 0,
+          "end": 387,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 168,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 190,
+                "v": 0.3,
+                "interp": "linear"
+              },
+              {
+                "t": 192,
+                "v": 0.3,
+                "interp": "linear"
+              },
+              {
+                "t": 216,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 252,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 277,
+                "v": 0.7,
+                "interp": "linear"
+              },
+              {
+                "t": 282,
+                "v": 0.7,
+                "interp": "linear"
+              },
+              {
+                "t": 302,
+                "v": 0.85,
+                "interp": "linear"
+              },
+              {
+                "t": 312,
+                "v": 0.85,
+                "interp": "linear"
+              },
+              {
+                "t": 340,
+                "v": 0.2,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "weather-snow",
+      "type": "property",
+      "path": "snow",
+      "valueType": "number",
+      "slot": "weather",
+      "sections": [
+        {
+          "id": "weather-snow:all",
+          "start": 0,
+          "end": 387,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0.001,
+                "interp": "linear"
+              },
+              {
+                "t": 250,
+                "v": 0.001,
+                "interp": "linear"
+              },
+              {
+                "t": 280,
+                "v": 0.8,
+                "interp": "linear"
+              },
+              {
+                "t": 284,
+                "v": 0.8,
+                "interp": "linear"
+              },
+              {
+                "t": 306,
+                "v": 0.001,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "clock-overcast",
+      "type": "property",
+      "path": "overcast",
+      "valueType": "number",
+      "slot": "clock",
+      "sections": [
+        {
+          "id": "clock-overcast:all",
+          "start": 0,
+          "end": 387,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 127,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 160,
+                "v": 0.5,
+                "interp": "linear"
+              },
+              {
+                "t": 176,
+                "v": 0.7,
+                "interp": "linear"
+              },
+              {
+                "t": 192,
+                "v": 0.7,
+                "interp": "linear"
+              },
+              {
+                "t": 207,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 262,
+                "v": 0.8,
+                "interp": "linear"
+              },
+              {
+                "t": 308,
+                "v": 0.5,
+                "interp": "linear"
+              },
+              {
+                "t": 314,
+                "v": 0.5,
+                "interp": "linear"
+              },
+              {
+                "t": 338,
+                "v": 0,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "foliage-grass",
+      "name": "Grass density",
+      "type": "foliage",
+      "slot": "landscape",
+      "layers": [
+        "Meadow Grass A",
+        "Meadow Grass B",
+        "Tall Grass",
+        "Forest Undergrowth A",
+        "Forest Undergrowth B"
+      ],
+      "sections": [
+        {
+          "id": "foliage-grass:shot",
+          "start": 30,
+          "end": 52,
+          "whenFinished": "restore",
+          "density": {
+            "keys": [
+              {
+                "t": 0.5,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 3.5,
+                "v": 0.1,
+                "interp": "linear"
+              },
+              {
+                "t": 6,
+                "v": 0.1,
+                "interp": "linear"
+              },
+              {
+                "t": 8.5,
+                "v": 1,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "foliage-trees",
+      "name": "Draw distance",
+      "type": "foliage",
+      "slot": "landscape",
+      "layers": [
+        "Spruce A",
+        "Spruce B",
+        "Highland Spruce",
+        "Oak",
+        "Shrub A",
+        "Shrub B",
+        "Juniper",
+        "Boxwood"
+      ],
+      "sections": [
+        {
+          "id": "foliage-trees:shot",
+          "start": 30,
+          "end": 52,
+          "whenFinished": "restore",
+          "cull": {
+            "keys": [
+              {
+                "t": 13,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 15.5,
+                "v": 0.15,
+                "interp": "linear"
+              },
+              {
+                "t": 17.5,
+                "v": 0.15,
+                "interp": "linear"
+              },
+              {
+                "t": 21,
+                "v": 1,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "foliage-shadows",
+      "name": "Foliage shadow distance",
+      "type": "property",
+      "path": "foliageShadowDistance",
+      "valueType": "number",
+      "target": "renderer",
+      "sections": [
+        {
+          "id": "foliage-shadows:shot",
+          "start": 30,
+          "end": 52,
+          "whenFinished": "restore",
+          "curve": {
+            "keys": [
+              {
+                "t": 13,
+                "v": 110,
+                "interp": "linear"
+              },
+              {
+                "t": 15.5,
+                "v": 30,
+                "interp": "linear"
+              },
+              {
+                "t": 17.5,
+                "v": 30,
+                "interp": "linear"
+              },
+              {
+                "t": 21,
+                "v": 110,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "pond-waves",
+      "name": "Pond calm",
+      "type": "property",
+      "path": "model.material.properties.waveStrength",
+      "valueType": "number",
+      "slot": "pond",
+      "sections": [
+        {
+          "id": "pond-waves:shot",
+          "start": 342,
+          "end": 387,
+          "whenFinished": "restore",
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0.32,
+                "interp": "linear"
+              },
+              {
+                "t": 4,
+                "v": 0.08,
+                "interp": "linear"
+              },
+              {
+                "t": 29,
+                "v": 0.08,
+                "interp": "linear"
+              },
+              {
+                "t": 37,
+                "v": 0.32,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "pond-ssr",
+      "name": "Reflection reach",
+      "type": "property",
+      "path": "ssrMaxDistance",
+      "valueType": "number",
+      "target": "renderer",
+      "sections": [
+        {
+          "id": "pond-ssr:shot",
+          "start": 342,
+          "end": 387,
+          "whenFinished": "restore",
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 400
               }
             ]
           }
@@ -1618,15 +2510,15 @@
       "name": "I · The Valley"
     },
     {
-      "t": 75,
+      "t": 52,
       "name": "II · Light"
     },
     {
-      "t": 125,
+      "t": 102,
       "name": "III · Weather"
     },
     {
-      "t": 365,
+      "t": 342,
       "name": "IV · Water"
     }
   ]

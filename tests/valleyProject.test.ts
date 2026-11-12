@@ -765,4 +765,104 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             for (let c = 0; c < 3; c++) expect(Math.abs(local[c]), `interior axis ${c} at ${p.map(v => v.toFixed(1))}`).toBeLessThan(half[c] - 0.5);
         }
     });
+
+    it('drives the weather, the wind, the clouds, the foliage and the pond from the tour, and keeps free mode dry', async () => {
+        const { parseSequence } = await import('../src/sequencer/parse');
+        const { sequencePresetsFor } = await import('../src/sequencer/presetRegistry');
+        const { GRASS_LAYERS, TREE_LAYERS } = await import('../tools/valley/cinematic/tour');
+        const seq = parseSequence(tourNode().sequence);
+        const byId = new Map(nodes().map(n => [n.id, n]));
+        const bound = (slot: string) => byId.get(tourNode().bindings[slot]);
+        // One unbounded Weather, dry and still until the tour keys it, snowing with the library's Snow.
+        const weather = nodes().filter(n => n.type === 'weather');
+        expect(weather.map(n => n.name)).toEqual(['Weather']);
+        const w = weather[0].weather;
+        expect(w).toMatchObject({ precipitation: 'mixed', precipitationRate: 0, wetness: 0, snow: 0, puddles: 0, size: [0, 0, 0], shelter: true });
+        expect(w.snowMaterialId).toBe(library('materials').find((m: any) => m.name === 'Snow').id);
+        expect(w.snowMaterial?.type).toBe('pbr');
+        expect(bound('weather')).toBe(weather[0]);
+        // Time x2 is a time-lapse: the wind, clouds and water follow it.
+        expect(scene().config.render.effectsFollowTimeScale).toBe(true);
+        // Every Preset section names a preset its node has; the chain walks the weather.
+        for (const t of seq.tracks.filter(t => t.type === 'preset') as any[]) {
+            const list = sequencePresetsFor(bound(t.slot).type)!;
+            for (const s of t.sections) expect(list.some(p => p.id === s.preset), `${t.id}: ${s.preset}`).toBe(true);
+        }
+        const clouds = (seq.tracks.find(t => t.id === 'clouds-presets') as any).sections.map((s: any) => s.preset);
+        expect(clouds).toEqual(['clear', 'partlyCloudy', 'overcast', 'rainy', 'stormy', 'overcast', 'partlyCloudy', 'clear']);
+        // The weather's keys, in the order the user asked for: rain, a storm, rain into snow, a melt, drying.
+        const keys = (path: string) => (seq.tracks.find(t => t.id === `weather-${path}`) as any).sections[0].curve.keys;
+        const at = (path: string, t: number) => { const k = keys(path); let v = k[0].v; for (const x of k) if (x.t <= t) v = x.v; return v; };
+        const { when } = await import('../tools/valley/cinematic/tour');
+        expect(at('precipitationRate', when('storm', 20))).toBe(1);
+        expect(at('precipitationSnowShare', when('melt'))).toBe(1);
+        expect(at('snow', when('melt', 2))).toBeCloseTo(0.8, 6);
+        expect(at('wetness', when('clearing'))).toBeCloseTo(0.9, 6);
+        expect(at('snow', 0)).toBeGreaterThan(0);
+        // The foliage tracks name layers the landscape has.
+        const layerNames = new Set(landscape().terrain.foliage.map((l: any) => l.name));
+        for (const name of [...GRASS_LAYERS, ...TREE_LAYERS]) expect(layerNames.has(name), name).toBe(true);
+        expect(bound('landscape').type).toBe('landscape');
+        // The pond's calm and the day clock's overcast are fields their nodes have.
+        expect(bound('pond').model.material.properties.waveStrength).toBeGreaterThan(0.08);
+        expect(bound('clock').script).toContain('public overcast: number = 0');
+        // The sails follow the wind, on every level of detail.
+        const sails = nodes().filter(n => n.name === 'Sails');
+        expect(sails.length).toBe(3);
+        for (const s of sails) expect(s.script).toContain('public followWind: boolean = true');
+    });
+
+    it('keeps the tour clear of every wall it passes: measured against the buildings\' own triangles', async () => {
+        const { Spline3, closestOnTriangle } = await import('../src/core/math');
+        const { mat4, quat, vec3 } = await import('gl-matrix');
+        // World-space triangles of each building's most detailed level, composed down its node chain.
+        const local = (n: any) => mat4.fromRotationTranslationScale(mat4.create(),
+            quat.fromEuler(quat.create(), ...((n.rotation ?? [0, 0, 0]) as [number, number, number])), n.position ?? [0, 0, 0], n.scale ?? [1, 1, 1]);
+        const buildings = nodes().find(n => n.name === 'Buildings').children.map((lod: any) => {
+            const tris: Float64Array[] = [];
+            const walk = (n: any, parent: any) => {
+                const world = mat4.multiply(mat4.create(), parent, local(n));
+                if (n.type === 'model') {
+                    const { positions: P, indices: I } = n.model.geometry, v = vec3.create();
+                    for (let i = 0; i < I.length; i += 3) {
+                        const t = new Float64Array(9);
+                        for (let k = 0; k < 3; k++) { vec3.transformMat4(v, [P[I[i + k] * 3], P[I[i + k] * 3 + 1], P[I[i + k] * 3 + 2]], world); t.set(v, k * 3); }
+                        tris.push(t);
+                    }
+                }
+                for (const c of n.children ?? []) walk(c, world);
+            };
+            walk(lod.children[0], local(lod));
+            const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+            for (const t of tris) for (let k = 0; k < 9; k++) { min[k % 3] = Math.min(min[k % 3], t[k]); max[k % 3] = Math.max(max[k % 3], t[k]); }
+            return { name: lod.name, tris, min, max };
+        });
+        expect(buildings.map((b: any) => b.name).sort()).toEqual(['Granary', 'Long House', 'Old House', 'Windmill']);
+        /** Distance from p to the nearest triangle, or `cap` when none is nearer. */
+        const clearance = (p: number[], tris: Float64Array[], cap: number) => {
+            let best = cap;
+            for (const t of tris) {
+                if (p[0] < Math.min(t[0], t[3], t[6]) - best || p[0] > Math.max(t[0], t[3], t[6]) + best) continue;
+                if (p[2] < Math.min(t[2], t[5], t[8]) - best || p[2] > Math.max(t[2], t[5], t[8]) + best) continue;
+                if (p[1] < Math.min(t[1], t[4], t[7]) - best || p[1] > Math.max(t[1], t[4], t[7]) + best) continue;
+                const q = closestOnTriangle(p, t.subarray(0, 3), t.subarray(3, 6), t.subarray(6, 9));
+                best = Math.min(best, Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]));
+            }
+            return best;
+        };
+        const path = tourNode().sequence.tracks.find((t: any) => t.type === 'path');
+        for (const section of path.sections) {
+            const spline = new Spline3(section.points);
+            // Inside the Long House the aisle allows about 1.4 m either side; outside, nothing comes close.
+            const inside = section.id === 'shot:interior', need = inside ? 1.0 : 1.5;
+            for (let i = 0; i <= 400; i++) {
+                const p = spline.pointAt(i / 400);
+                for (const b of buildings) {
+                    if ([0, 1, 2].some(c => p[c] < b.min[c] - need || p[c] > b.max[c] + need)) continue;
+                    const d = clearance(p, b.tris, need + 0.01);
+                    expect(d, `${section.id} at ${p.map((v: number) => v.toFixed(2))} from the ${b.name}`).toBeGreaterThan(need);
+                }
+            }
+        }
+    });
 });

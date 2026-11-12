@@ -1,7 +1,7 @@
-import { evaluateKeyedNumber, evaluateKeyedStep, evaluateKeyedVector } from 'cleo'
+import { evaluateKeyedNumber, evaluateKeyedStep, evaluateKeyedVector, FOLIAGE_CHANNELS } from 'cleo'
 import type {
-  CameraCutSection, EventKey, PathSection, PropertySection, SectionBase, SequenceCurve, SequenceData, SequenceKey,
-  SequenceSlot, SequenceTrack,
+  CameraCutSection, EventKey, FoliageChannel, FoliageSection, PathSection, PresetSection, PropertySection, SectionBase,
+  SequenceCurve, SequenceData, SequenceKey, SequenceSlot, SequenceTrack,
 } from 'cleo'
 
 // The Sequencer's edits, as pure functions over SequenceData. Each returns a NEW sequence and never touches the
@@ -16,7 +16,10 @@ export const MIN_SECTION = 1 / 30
 
 export interface SectionRef { trackId: string; sectionId: string }
 
-type AnySection = SectionBase & Partial<PathSection & PropertySection & CameraCutSection>
+type AnySection = SectionBase & Partial<PathSection & PropertySection & CameraCutSection & PresetSection & FoliageSection>
+
+/** Which of a section's curves a key edit is on: a property's value curve, or one of a Foliage section's channels. */
+export type CurveField = 'curve' | FoliageChannel
 type SectionTrack = Extract<SequenceTrack, { sections: unknown[] }>
 
 let idCounter = 0
@@ -62,6 +65,7 @@ function curvesOf(s: AnySection): SequenceCurve[] {
   if (s.roll) out.push(s.roll as SequenceCurve)
   if (s.fov) out.push(s.fov as SequenceCurve)
   if (s.look && s.look.mode === 'path' && s.look.progress) out.push(s.look.progress as SequenceCurve)
+  for (const c of FOLIAGE_CHANNELS) if (s[c]) out.push(s[c] as SequenceCurve)
   return out
 }
 
@@ -151,6 +155,8 @@ export function patchSection(seq: SequenceData, ref: SectionRef, patch: Partial<
 export function splitSection(seq: SequenceData, ref: SectionRef, t: number): { seq: SequenceData; right: SectionRef } | null {
   const s0 = findSection(seq, ref)
   if (!s0 || t <= s0.start + MIN_SECTION || t >= s0.end - MIN_SECTION) return null
+  // A preset blend is one eased move from one look to the next: halving it would change the picture.
+  if (findTrack(seq, ref.trackId)?.type === 'preset') return null
   const rightId = newId('section')
   const next = editSequence(seq, d => {
     const track = findTrack(d, ref.trackId)!
@@ -165,6 +171,8 @@ export function splitSection(seq: SequenceData, ref: SectionRef, t: number): { s
     delete s.easeOut
     delete right.easeIn
     if (s.curve) [s.curve, right.curve] = splitCurve(s.curve, local)
+    for (const c of FOLIAGE_CHANNELS)
+      if (s[c]) [s[c], right[c]] = splitCurve(s[c] as SequenceCurve, local) as [any, any]
     if (s.points) {
       // Progress absent means linear over the whole section: make it explicit before splitting it.
       const progress = (s.progress ?? { keys: [{ t: 0, v: 0, interp: 'linear' }, { t: span, v: 1 }] }) as SequenceCurve
@@ -216,6 +224,9 @@ export function addSection(seq: SequenceData, trackId: string, start: number, le
     let section: AnySection
     if (t.type === 'path') section = { ...base, points: [[0, 2, 0], [0, 2, 10]], look: { mode: 'ahead' }, ...init }
     else if (t.type === 'cameraCut') section = { ...base, slot: d.slots.find(s => s.nodeType === 'camera')?.id ?? d.slots[0]?.id ?? '', ...init }
+    else if (t.type === 'preset') section = { ...base, preset: '', ...init }
+    // Foliage: one channel to start from, at the layers' own density (1 = as authored).
+    else if (t.type === 'foliage') section = { ...base, density: { keys: [{ t: 0, v: 1 }] }, ...init }
     else section = { ...base, curve: { keys: [{ t: 0, v: defaultValue(t.type === 'property' ? t.valueType : 'number') }] }, ...init }
     sectionsOf(t)!.push(structuredClone(section))
     cover(d, base.end)
@@ -230,13 +241,23 @@ function defaultValue(valueType: string): SequenceKey['v'] {
 
 // ---- keys ---------------------------------------------------------------------------------------------
 
-/** Add (or replace) a key at section-local time `t` on a property section's curve. */
+/** A section's curve `field`, created when `create` and the field is a Foliage channel it does not have yet. */
+function curveField(s: AnySection | undefined, field: CurveField, create = false): SequenceCurve | undefined {
+  if (!s) return undefined
+  if (field !== 'curve' && !s[field] && create) (s as any)[field] = { keys: [] }
+  return s[field] as SequenceCurve | undefined
+}
+
+/**
+ * Add (or replace) a key at section-local time `t` on a section's curve: a property's (`field` 'curve'), or a
+ * Foliage section's channel, which is created by its first key.
+ */
 export function setSectionKey(seq: SequenceData, ref: SectionRef, t: number, v: SequenceKey['v'],
-                              interp?: SequenceKey['interp']): SequenceData {
+                              interp?: SequenceKey['interp'], field: CurveField = 'curve'): SequenceData {
   return editSequence(seq, d => {
-    const s = findSection(d, ref)
-    if (!s?.curve) return
-    const keys = s.curve.keys
+    const curve = curveField(findSection(d, ref), field, true)
+    if (!curve) return
+    const keys = curve.keys
     const at = keys.findIndex(k => Math.abs(k.t - t) < 1e-4)
     const key: SequenceKey = { t: Math.max(0, t), v: Array.isArray(v) ? v.slice() : v, ...(interp ? { interp } : {}) }
     if (at >= 0) keys[at] = { ...keys[at], ...key }
@@ -245,30 +266,35 @@ export function setSectionKey(seq: SequenceData, ref: SectionRef, t: number, v: 
   })
 }
 
-/** Move key `index` of a property section to section-local time `t`. */
-export function moveSectionKey(seq: SequenceData, ref: SectionRef, index: number, t: number): SequenceData {
+/** Move key `index` of a section's curve `field` to section-local time `t`. */
+export function moveSectionKey(seq: SequenceData, ref: SectionRef, index: number, t: number, field: CurveField = 'curve'): SequenceData {
   return editSequence(seq, d => {
-    const keys = findSection(d, ref)?.curve?.keys
+    const keys = curveField(findSection(d, ref), field)?.keys
     if (!keys || !keys[index]) return
     keys[index].t = Math.max(0, t)
     keys.sort((a, b) => a.t - b.t)
   })
 }
 
-export function patchSectionKey(seq: SequenceData, ref: SectionRef, index: number, patch: Partial<SequenceKey>): SequenceData {
+export function patchSectionKey(seq: SequenceData, ref: SectionRef, index: number, patch: Partial<SequenceKey>,
+                                field: CurveField = 'curve'): SequenceData {
   return editSequence(seq, d => {
-    const keys = findSection(d, ref)?.curve?.keys
+    const keys = curveField(findSection(d, ref), field)?.keys
     if (!keys || !keys[index]) return
     Object.assign(keys[index], structuredClone(patch))
     keys.sort((a, b) => a.t - b.t)
   })
 }
 
-export function deleteSectionKey(seq: SequenceData, ref: SectionRef, index: number): SequenceData {
+export function deleteSectionKey(seq: SequenceData, ref: SectionRef, index: number, field: CurveField = 'curve'): SequenceData {
   return editSequence(seq, d => {
-    const keys = findSection(d, ref)?.curve?.keys
-    // A curve keeps at least one key: an empty one would read as "no value".
-    if (!keys || keys.length <= 1 || !keys[index]) return
+    const s = findSection(d, ref)
+    const keys = curveField(s, field)?.keys
+    if (!keys || !keys[index]) return
+    // A Foliage channel's last key takes the channel with it (the layers' own value again).
+    if (field !== 'curve' && keys.length <= 1) { delete (s as any)[field]; return }
+    // A property curve keeps at least one key: an empty one would read as "no value".
+    if (keys.length <= 1) return
     keys.splice(index, 1)
   })
 }

@@ -357,6 +357,12 @@ export interface RenderSettings {
      */
     foliageShadowDistance?: number;
     /**
+     * Run the render clock at the game's time scale: at ×2 the wind, the clouds' drift, fog, flicker, water
+     * ripples and custom materials' `u_time` all go twice as fast, so a sped-up day reads as a time-lapse.
+     * Paused keeps real time. Off (or absent) = real time whatever the game's speed.
+     */
+    effectsFollowTimeScale?: boolean;
+    /**
      * Depth prepass for alpha-tested mesh foliage (the two nearest detail levels): its depth is written
      * first with a cutout-only program, then it is shaded ONCE per pixel with a no-discard program tested
      * 'equal'. Trades a second vertex pass for the fragment overdraw; a win only where foliage is

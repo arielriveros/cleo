@@ -1,8 +1,8 @@
 import type {
-    CameraCutSection, EventKey, PathLook, PathSection, PropertySection, PropertyValueType, SectionBase,
-    SequenceCurve, SequenceData, SequenceKey, SequenceSlot, SequenceTrack,
+    CameraCutSection, EventKey, FoliageSection, PathLook, PathSection, PresetSection, PropertySection, PropertyValueType,
+    SectionBase, SequenceCurve, SequenceData, SequenceKey, SequenceSlot, SequenceTrack,
 } from './types';
-import { SEQUENCE_VERSION } from './types';
+import { FOLIAGE_CHANNELS, SEQUENCE_VERSION } from './types';
 import { finiteOr } from '../core/math';
 
 /**
@@ -87,6 +87,28 @@ function parsePathSection(json: any): PathSection | null {
 
 const VALUE_TYPES: PropertyValueType[] = ['number', 'vector', 'bool', 'string'];
 
+function parsePresetSection(json: any): PresetSection | null {
+    const preset = str(json?.preset);
+    if (!preset) return null;
+    const section: PresetSection = { ...sectionBase(json, 'preset'), preset };
+    if (typeof json.from === 'string' && json.from) section.from = json.from;
+    return section;
+}
+
+/** A foliage section keeps the channels it has: numbers for the multipliers, on/off for the shadows. */
+function parseFoliageSection(json: any): FoliageSection | null {
+    if (!json || typeof json !== 'object') return null;
+    const section: FoliageSection = sectionBase(json, 'foliage');
+    for (const channel of FOLIAGE_CHANNELS) {
+        const curve = parseSequenceCurve(json[channel]);
+        if (!curve) continue;
+        const want = channel === 'shadows' ? 'boolean' : 'number';
+        const keys = curve.keys.filter(k => typeof k.v === want);
+        if (keys.length > 0) (section as any)[channel] = { keys };
+    }
+    return section;
+}
+
 function parseTrack(json: any): SequenceTrack | null {
     if (!json || typeof json !== 'object') return null;
     const base = { id: idOf(json.id, 'track'), ...(typeof json.name === 'string' ? { name: json.name } : {}),
@@ -128,6 +150,15 @@ function parseTrack(json: any): SequenceTrack | null {
                 }))
                 .sort((a: EventKey, b: EventKey) => a.t - b.t);
             return { ...base, type: 'event', keys };
+        }
+        case 'preset':
+            if (typeof json.slot !== 'string') return null;
+            return { ...base, type: 'preset', slot: json.slot, sections: sectionsOf(parsePresetSection) };
+        case 'foliage': {
+            if (typeof json.slot !== 'string') return null;
+            const layers = Array.isArray(json.layers)
+                ? json.layers.filter((n: unknown): n is string => typeof n === 'string' && n.length > 0) : 'all';
+            return { ...base, type: 'foliage', slot: json.slot, layers, sections: sectionsOf(parseFoliageSection) };
         }
         default:
             return null;

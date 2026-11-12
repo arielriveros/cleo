@@ -220,6 +220,12 @@ nothing falls, but the ground's raindrops (rings in the puddles, drops hitting t
 rain falls on it) still play. Drops collide with what is on screen, so a drop off screen falls through
 the ground until it dies. Neither thumbnails nor probe captures draw them.
 
+**Follow Time Scale** — runs the render clock at the game's speed (`Game.timeScale`, a hit-stop's slow
+motion included): the wind and its gusts, the clouds' drift, fog, flickering lights, water ripples and
+custom materials' `u_time` all go twice as fast at ×2, so a sped-up day reads as a time-lapse rather than
+only the sun moving faster. While the game is paused they keep real time. Off by default, where they keep
+real time whatever the game's speed.
+
 ### Volumetric Fog
 
 Draws the scene's [Volumetric Fog](node-inspector.md#volumetric-fog) volumes. The camera's view, out to

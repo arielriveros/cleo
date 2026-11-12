@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { CleoEngine, Game, compilePropertyPath } from 'cleo'
+import { CleoEngine, Game, compilePropertyPath, sequencePresetsFor, FOLIAGE_CHANNELS } from 'cleo'
 import type { SequenceNode } from 'cleo'
-import type { PathLook, PathSection, Scene, SequenceData, SequenceKey, SequenceTrack } from 'cleo'
+import type {
+  FoliageChannel, FoliageSection, FoliageTrack, PathLook, PathSection, PresetSection, Scene, SequenceData, SequenceKey,
+  SequenceTrack,
+} from 'cleo'
 import { Button, NumberInput, PropertyRow, PropertyTable, Select, TextInput, Toggle, VectorInput } from '@cleo/app-kit/ui'
 import NodeRefInput from '../nodeInspector/NodeRefInput'
 import { useCleoEngine } from '../EngineContext'
@@ -74,6 +77,30 @@ function propertyRoot(node: SequenceNode, track: SequenceTrack): unknown {
   if (track.target === 'renderer') return CleoEngine.instance?.renderer ?? null
   if (track.target === 'game') return Game
   return track.slot ? node.resolveSlot(track.slot) : null
+}
+
+/** The preset list a Preset track's node blends between, or none. */
+function presetsOf(node: SequenceNode, track: SequenceTrack) {
+  return track.type === 'preset' ? sequencePresetsFor(node.resolveSlot(track.slot) ?? null) : null
+}
+
+/** The layer names of a Foliage track's landscape. */
+function layerNamesOf(node: SequenceNode, track: SequenceTrack): string[] {
+  if (track.type !== 'foliage') return []
+  const foliage: { name: string }[] = (node.resolveSlot(track.slot) as { terrain?: { foliage?: { name: string }[] } } | null)?.terrain?.foliage ?? []
+  return foliage.map(l => l.name)
+}
+
+/** What a new section on `track` starts as (a preset blend needs a preset). */
+function sectionInit(node: SequenceNode, track: SequenceTrack): Record<string, unknown> {
+  return track.type === 'preset' ? { preset: presetsOf(node, track)?.[0]?.id ?? 'clear' } : {}
+}
+
+const FOLIAGE_LABELS: Record<FoliageChannel, { label: string; hint: string }> = {
+  density: { label: 'Density', hint: "× the layers' instances drawn: 1 all of them, 0.1 one in ten (a nested subset, spread evenly)" },
+  cull: { label: 'Draw distance', hint: "× the layers' draw distance: 0.15 brings a 450 m forest in to under 70 m, nearest trees kept" },
+  billboard: { label: 'Impostor distance', hint: "× where the layers turn into their impostor cards" },
+  shadows: { label: 'Shadows', hint: 'Whether the layers cast shadows, switched where the key says' },
 }
 
 /** A key value editor for a property track's value type. */
@@ -199,6 +226,12 @@ export default function SequenceDetails({ node, seq, sel, setSel, commit, previe
         <PropertyTable columns={['40%', '60%']}>
           <PropertyRow label='Name'><TextInput value={track.name ?? ''} placeholder={track.type} onChange={v => settle('Rename track', E.patchTrack(seq, track.id, { name: v || undefined }))} /></PropertyRow>
           <PropertyRow label='Muted'><Toggle checked={!!track.muted} onChange={v => void commit('Mute track', E.patchTrack(seq, track.id, { muted: v }))} /></PropertyRow>
+          {track.type === 'preset' && (
+            <PropertyRow label='Presets' divider={false}>
+              <span className='text-ui-xs text-dim'>{presetsOf(node, track)?.length ?? 0} on {node.resolveSlot(track.slot)?.name ?? 'the unbound slot'}</span>
+            </PropertyRow>
+          )}
+          {track.type === 'foliage' && <FoliageLayersRow node={node} seq={seq} track={track} commit={commit} />}
           {track.type === 'property' && <>
             <PropertyRow label='Path'><TextInput value={track.path} onChange={v => settle('Property path', E.patchTrack(seq, track.id, { path: v } as any))} /></PropertyRow>
             <PropertyRow label='Value' divider={false}>
@@ -211,7 +244,7 @@ export default function SequenceDetails({ node, seq, sel, setSel, commit, previe
         <div className='mt-2 flex flex-wrap gap-1'>
           {track.type !== 'event' && (
             <Button size='sm' onClick={() => {
-              const r = E.addSection(seq, track.id, preview.timeRef.current, 5)
+              const r = E.addSection(seq, track.id, preview.timeRef.current, 5, sectionInit(node, track))
               if (r) { void commit('Add section', r.seq); setSel({ kind: 'section', ...r.ref }) }
             }}>Add section at the playhead</Button>
           )}
@@ -233,7 +266,8 @@ export default function SequenceDetails({ node, seq, sel, setSel, commit, previe
 
   return (
     <div className='p-2'>
-      <div className='mb-1 text-ui-sm text-fg'>{track.type === 'path' ? 'Path section' : track.type === 'cameraCut' ? 'Shot' : 'Property section'}</div>
+      <div className='mb-1 text-ui-sm text-fg'>{track.type === 'path' ? 'Path section' : track.type === 'cameraCut' ? 'Shot'
+        : track.type === 'preset' ? 'Preset blend' : track.type === 'foliage' ? 'Foliage section' : 'Property section'}</div>
       <PropertyTable columns={['40%', '60%']}>
         <PropertyRow label='Label'><TextInput value={s.label ?? ''} onChange={v => settle('Label', E.patchSection(seq, ref, { label: v || undefined }))} /></PropertyRow>
         <PropertyRow label='Start'><NumberInput value={round(s.start)} step={0.1} onChange={v => settle('Trim section', E.trimSectionStart(seq, ref, v))} /></PropertyRow>
@@ -260,6 +294,57 @@ export default function SequenceDetails({ node, seq, sel, setSel, commit, previe
       )}
 
       {track.type === 'path' && <PathFields seq={seq} sref={ref} s={s as PathSection} scene={scene} settle={settle} commit={commit} />}
+
+      {track.type === 'preset' && (() => {
+        const list = presetsOf(node, track) ?? []
+        const ps = s as PresetSection
+        return (
+          <PropertyTable columns={['40%', '60%']} className='mt-2'>
+            <PropertyRow label='Blend to'>
+              <Select value={ps.preset} onChange={e => void commit('Preset', E.patchSection(seq, ref, { preset: e.target.value }))}>
+                {!list.some(p => p.id === ps.preset) && <option value={ps.preset}>{ps.preset} (unknown)</option>}
+                {list.map(p => <option key={p.id} value={p.id} title={p.description}>{p.label}</option>)}
+              </Select>
+            </PropertyRow>
+            <PropertyRow label='From' divider={false}>
+              <Select value={ps.from ?? ''} onChange={e => void commit('Preset start', E.patchSection(seq, ref, { from: e.target.value || undefined }))}>
+                <option value=''>Where the last blend ended</option>
+                {list.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </Select>
+            </PropertyRow>
+          </PropertyTable>
+        )
+      })()}
+
+      {track.type === 'foliage' && FOLIAGE_CHANNELS.map(channel => {
+        const fs = s as FoliageSection
+        const curve = fs[channel]
+        const { label, hint } = FOLIAGE_LABELS[channel]
+        const isBool = channel === 'shadows'
+        return (
+          <div key={channel} className='mt-2'>
+            <div className='mb-1 flex items-center gap-1 text-ui-xs text-dim' title={hint}>
+              <span className='flex-1'>{label}{curve ? '' : ' (as authored)'}</span>
+              <Button size='sm' title={`Add a ${label.toLowerCase()} key at the playhead`}
+                onClick={() => void commit(`Key ${label.toLowerCase()}`, E.setSectionKey(seq, ref, round(local), isBool ? true : 1, undefined, channel))}>Key</Button>
+            </div>
+            {curve?.keys.map((k, i) => (
+              <div key={i} className='mb-1 flex items-center gap-1 px-1'>
+                <NumberInput className='w-[56px]' value={k.t} step={0.1} onChange={v => settle('Move key', E.moveSectionKey(seq, ref, i, v, channel))} />
+                <div className='min-w-0 flex-1'>
+                  <ValueInput type={isBool ? 'bool' : 'number'} value={k.v} onChange={v => settle('Edit key', E.patchSectionKey(seq, ref, i, { v }, channel))} />
+                </div>
+                {!isBool && (
+                  <Select className='w-[64px]' value={k.interp ?? 'auto'} onChange={e => void commit('Key interpolation', E.patchSectionKey(seq, ref, i, { interp: e.target.value as any }, channel))}>
+                    <option value='auto'>auto</option><option value='linear'>linear</option><option value='cubic'>cubic</option><option value='constant'>step</option>
+                  </Select>
+                )}
+                <Button size='sm' variant='ghost' title='Delete key' onClick={() => void commit('Delete key', E.deleteSectionKey(seq, ref, i, channel))}>×</Button>
+              </div>
+            ))}
+          </div>
+        )
+      })}
 
       {track.type === 'property' && s.curve && (
         <div className='mt-2'>
@@ -378,3 +463,29 @@ function PathFields({ seq, sref, s, scene, settle, commit }: {
   )
 }
 
+/** A Foliage track's layers: every layer, or the ones ticked. */
+function FoliageLayersRow({ node, seq, track, commit }: { node: SequenceNode; seq: SequenceData; track: FoliageTrack; commit: Commit }) {
+  const names = layerNamesOf(node, track)
+  const all = track.layers === 'all'
+  const chosen = new Set(all ? names : track.layers)
+  const set = (layers: string[] | 'all') => void commit('Foliage layers', E.patchTrack(seq, track.id, { layers } as any))
+  return <>
+    <PropertyRow label='All layers' divider={all}>
+      <Toggle checked={all} onChange={v => set(v ? 'all' : names.slice())} />
+    </PropertyRow>
+    {!all && (
+      <PropertyRow label='Layers' divider={false}>
+        <div className='flex flex-col gap-0.5'>
+          {names.length === 0 && <span className='text-ui-xs text-dim'>The slot is not a landscape with foliage.</span>}
+          {names.map(n => (
+            <Toggle key={n} label={n} checked={chosen.has(n)}
+              onChange={v => set(v ? [...(track.layers as string[]), n] : (track.layers as string[]).filter(x => x !== n))} />
+          ))}
+          {(track.layers as string[]).filter(n => !names.includes(n)).map(n => (
+            <span key={n} className='text-ui-xs text-warning' title='No layer of this name on the landscape'>{n} (missing)</span>
+          ))}
+        </div>
+      </PropertyRow>
+    )}
+  </>
+}

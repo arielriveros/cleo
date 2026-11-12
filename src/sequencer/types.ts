@@ -82,6 +82,35 @@ export interface PropertySection extends SectionBase {
     curve: SequenceCurve;
 }
 
+/**
+ * A blend into one of the node's own presets (the Presets menu of its inspector: Clear Sky, Thunderstorm,
+ * Storm...) over the section, eased in and out. It starts from `from` (another preset of the same list) when
+ * given, else from the preset of the section before it on the track, else from the values the sequence found
+ * — so a chain of sections morphs the look from one preset to the next, and seeking anywhere gives the same
+ * picture. Numbers and colours interpolate; everything else switches halfway.
+ */
+export interface PresetSection extends SectionBase {
+    /** A preset id of the slot's node type (`stormy`, `windy`...). */
+    preset: string;
+    from?: string;
+}
+
+/**
+ * Live changes to a landscape's foliage layers: each channel a multiplier on the layers' own values, keyed
+ * over the section (1 = as authored). `density` thins them (FoliageLayer.densityScale), `cull` brings their
+ * draw distance in, `billboard` their impostor distance; `shadows` switches their shadow casting.
+ */
+export interface FoliageSection extends SectionBase {
+    density?: SequenceCurve<number>;
+    cull?: SequenceCurve<number>;
+    billboard?: SequenceCurve<number>;
+    shadows?: SequenceCurve<boolean>;
+}
+
+/** The Foliage track's channels, in the order the editor lists them. */
+export const FOLIAGE_CHANNELS = ['density', 'cull', 'billboard', 'shadows'] as const;
+export type FoliageChannel = typeof FOLIAGE_CHANNELS[number];
+
 /** A call at a moment: a method on the director (the SequenceNode's own script) or on a bound node. */
 export interface EventKey {
     t: number;
@@ -129,7 +158,23 @@ export interface EventTrack extends TrackBase {
     keys: EventKey[];
 }
 
-export type SequenceTrack = PathTrack | CameraCutTrack | PropertyTrack | EventTrack;
+/** Preset blends on one node with a preset list: Volumetric Clouds, Wind, Weather. */
+export interface PresetTrack extends TrackBase {
+    type: 'preset';
+    slot: string;
+    sections: PresetSection[];
+}
+
+/** Foliage changes on a landscape (the slot), to the layers named, or every layer. */
+export interface FoliageTrack extends TrackBase {
+    type: 'foliage';
+    slot: string;
+    /** Layer names (FoliageLayer.name), or 'all'. */
+    layers: string[] | 'all';
+    sections: FoliageSection[];
+}
+
+export type SequenceTrack = PathTrack | CameraCutTrack | PropertyTrack | EventTrack | PresetTrack | FoliageTrack;
 export type SequenceTrackType = SequenceTrack['type'];
 
 export interface SequenceMarker { t: number; name: string; }

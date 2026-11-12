@@ -92,12 +92,33 @@ describe('the weather node', () => {
         expect(n.size).toEqual([10, 10, 10]);
         expect(n.shelter).toBe(false);
         for (const p of WEATHER_PRESETS) for (const key of Object.keys(p.options))
-            expect(['wetness', 'snow', 'puddles', 'precipitation', 'precipitationRate', 'precipitationWind'], `${p.id}.${key}`).toContain(key);
+            expect(['wetness', 'snow', 'puddles', 'precipitation', 'precipitationRate', 'precipitationSnowShare', 'precipitationWind'], `${p.id}.${key}`).toContain(key);
         // What falls, too: rain from the rainy ones, snow from the snowy ones, nothing from Dry.
         const kind = (id: string) => WEATHER_PRESETS.find(p => p.id === id)!.options.precipitation;
         expect(['drizzle', 'rain', 'storm'].map(kind)).toEqual(['rain', 'rain', 'rain']);
         expect(['lightSnow', 'snowedIn', 'blizzard'].map(kind)).toEqual(['snow', 'snow', 'snow']);
+        expect(kind('sleet')).toBe('mixed');
         expect(kind('dry')).toBe('none');
+    });
+
+    it('mixed: both fall at once, shared out by the snow share, which round-trips', () => {
+        const n = new WeatherNode('w', { precipitation: 'mixed', precipitationRate: 0.8, precipitationSnowShare: 0.25 });
+        expect(n.precipitating).toBe(true);
+        expect(n.rainRate).toBeCloseTo(0.6, 9);
+        expect(n.snowfallRate).toBeCloseTo(0.2, 9);
+        // Swept across, the rain turns into snow and the total stays the rate.
+        for (const share of [0, 0.5, 1]) {
+            n.precipitationSnowShare = share;
+            expect(n.rainRate + n.snowfallRate).toBeCloseTo(0.8, 9);
+        }
+        expect([n.rainRate, n.snowfallRate]).toEqual([0, 0.8]);
+        n.precipitationSnowShare = 7;
+        expect(n.precipitationSnowShare).toBe(1);
+        const back = new WeatherNode('b', (n as any)._serializePayload().weather);
+        expect([back.precipitation, back.precipitationSnowShare]).toEqual(['mixed', 1]);
+        // Rain and snow alone ignore the share.
+        n.precipitation = 'rain';
+        expect([n.rainRate, n.snowfallRate]).toEqual([0.8, 0]);
     });
 
     it('precipitates: a kind at a rate above 0 is active on its own, its rate counted only for its kind', () => {

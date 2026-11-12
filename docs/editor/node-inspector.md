@@ -434,8 +434,9 @@ bounded** gives it a box.
 | **Priority** | Where volumes overlap, the higher draws over the lower; it also decides which 4 draw when more are near. |
 | **Wetness** | 0 dry, 1 soaked: darker, glossier ground and leaves. |
 | **Puddles** | How much of the wet ground's low, flat spots holds standing water: 0 none, 1 every hollow. |
-| **Falling** | Nothing, Rain or Snow, drawn as particles round the camera. It falls in from the sky above the box and stops under anything solid where **Shelter** is on. Overlapping volumes never double it; a higher-priority dry box carves it out. |
+| **Falling** | Nothing, Rain, Snow, or Rain and snow together, drawn as particles round the camera. It falls in from the sky above the box and stops under anything solid where **Shelter** is on. Overlapping volumes never double it; a higher-priority dry box carves it out. |
 | **Rate** | How hard it falls: 0 nothing, 1 a downpour or a blizzard. Rain also sets how many drops stir the wet ground. |
+| **Snow Share** | Rain and snow only: how much of what falls is snow, 0 all rain to 1 all snow, the rest rain. A sequence sweeping it from 0 to 1 turns the rain into snow, the two falling together on the way. |
 | **Drop Size** / **Flake Size** | Times the realistic size. |
 | **Fall Speed** | Times the realistic terminal velocity: 8.5 m/s for rain, 1 m/s for snow. |
 | **Trail Min** / **Trail Max** | Rain only. The length of each drop's streak as a multiple of the realistic default (1); every drop draws its own length at random between the two. Equal values give streaks all one length. |

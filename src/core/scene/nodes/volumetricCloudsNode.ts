@@ -134,6 +134,7 @@ export class VolumetricCloudsNode extends Node {
     // Runtime bake state (not serialized: the bake is redone at load)
     private _bakedSunDir: [number, number, number] | null = null;
     private _bakedAt = 0;
+    private readonly _bakedWindOffset: [number, number, number] = [0, 0, 0];
     private _bakedSignature = '';
     private _bakeRequested = false;
 
@@ -328,19 +329,26 @@ export class VolumetricCloudsNode extends Node {
 
     /** Sun direction (TOWARD the sun) of the current bake, or null before the first one. */
     public get bakedSunDir(): [number, number, number] | null { return this._bakedSunDir; }
-    /** `performance.now()` seconds the current bake was taken at — also the frozen wind clock. */
+    /** `performance.now()` seconds the current bake was taken at. */
     public get bakedAt(): number { return this._bakedAt; }
+    /** How far the wind had carried the clouds when the current bake was taken (world metres): the frozen drift. */
+    public get bakedWindOffset(): readonly number[] { return this._bakedWindOffset; }
     /** True once Regenerate was asked for and the renderer has not started on it yet. */
     public get bakeRequested(): boolean { return this._bakeRequested; }
     /** Ask the renderer for a fresh bake (the inspector's Regenerate). */
     public requestBake(): void { this._bakeRequested = true; }
     /** Renderer-facing: a bake has started, so the request is taken. */
     public takeBakeRequest(): void { this._bakeRequested = false; }
-    /** Renderer-facing: a bake finished, lit by `sunDir` with the wind frozen at `time` seconds. */
-    public markBaked(sunDir: ArrayLike<number>, time: number, signature = this.bakeSignature()): void {
+    /**
+     * Renderer-facing: a bake finished at `time` (wall-clock seconds), lit by `sunDir`, with the clouds
+     * where the wind had carried them by then (`windOffset`, world metres).
+     */
+    public markBaked(sunDir: ArrayLike<number>, time: number, signature = this.bakeSignature(),
+                     windOffset?: ArrayLike<number>): void {
         this._bakedSunDir = [sunDir[0], sunDir[1], sunDir[2]];
         this._bakedAt = time;
         this._bakedSignature = signature;
+        if (windOffset) for (let i = 0; i < 3; i++) this._bakedWindOffset[i] = windOffset[i];
     }
     /** Every field that changes what a bake looks like, as one comparable string. */
     public bakeSignature(): string {

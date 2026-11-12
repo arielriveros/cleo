@@ -49,6 +49,14 @@ export default class ValleyDayNightNode extends Node {
    * so the two never fight over the time; the sun, sky and fog still follow whatever `hour` is.
    */
   public running: boolean = true
+  /**
+   * How overcast the sky is, 0 clear .. 1 a storm's: the daylight goes grey (the sun's colour toward a flat
+   * 6500 K), the mist and the fog volumes thicken, the god rays fade and the sky's fill dims. It never
+   * touches the sun's lux, which would re-bake the sky; the clouds' own shadows darken the ground. A sequence
+   * keys it with the clouds (the Valley Tour's weather), and since this script sets the fog, god rays and
+   * sky fill every frame, this is the way to change them while it runs.
+   */
+  public overcast: number = 0
   /** Runtime: the hour now, 0-24. */
   public hour: number = 9.5
   /** Runtime: 0 by day, 1 at full night. */
@@ -102,6 +110,7 @@ export default class ValleyDayNightNode extends Node {
     // 0 with the sun 2° up, 1 once it is 10° down: the light the renderer's own night factor follows.
     this.nightFactor = 1 - smooth(-10, 2, elevation)
     const day = smooth(0, 25, elevation)
+    const overcast = Math.min(1, Math.max(0, Number(this.overcast) || 0))
 
     // The sun, in steps of half a degree: each step re-bakes the sky, so they should not come every frame
     // (at the default day length, one every two seconds).
@@ -117,7 +126,8 @@ export default class ValleyDayNightNode extends Node {
     if (light) {
       // Warm and dim near the horizon, white and full once it is high. Below the horizon the renderer fades
       // the sun out by itself, so the lux stays put there (the moon has its own).
-      const kelvin = 2100 + 3300 * smooth(-2, 35, elevation)
+      const clear = 2100 + 3300 * smooth(-2, 35, elevation)
+      const kelvin = clear + (6500 - clear) * 0.8 * overcast
       light.color = kelvinToRgb(kelvin)
       light.intensity = elevation > 0 ? this.sunLux * (0.3 + 0.7 * day) : this.sunLux
     }
@@ -125,20 +135,21 @@ export default class ValleyDayNightNode extends Node {
       // Mist: gathering before dawn, thickest as the sun clears the ridge, burnt off once it is 14° up; a
       // thinner one at dusk, and a veil all night.
       const low = smooth(-12, -2, elevation) * (1 - smooth(4, 14, elevation))
-      const mist = Math.max(0.08 * this.nightFactor, low * (this.hour < 12 ? 1 : 0.15))
+      const mist = Math.max(0.08 * this.nightFactor, low * (this.hour < 12 ? 1 : 0.15), 0.3 * overcast)
       if (this._fog) {
         this._sky.fogDensity = this._fog.density + (0.002 - this._fog.density) * mist
         this._sky.fogHeightFalloff = this._fog.falloff + (0.05 - this._fog.falloff) * mist
         this._sky.fogMaxOpacity = this._fog.opacity + (0.6 - this._fog.opacity) * mist
       }
       this._sky.godRayExposure = this._godRays * (1 + 1.4 * (1 - smooth(5, 30, elevation)) * (1 - this.nightFactor) - 0.4 * this.nightFactor)
+        * (1 - 0.85 * overcast)
     }
     // The fog volumes: gathered all night and thickest at dawn, back to their daytime density by mid-morning.
     const dawn = smooth(-12, -2, elevation) * (1 - smooth(4, 14, elevation))
     const gathered = Math.max(this.nightFactor, dawn * (this.hour < 12 ? 1 : 0.4))
-    for (const f of this._fogVolumes) f.node.density = f.density * (1 + (this.fogNightScale - 1) * gathered)
+    for (const f of this._fogVolumes) f.node.density = f.density * (1 + (this.fogNightScale - 1) * gathered) * (1 + overcast)
 
-    if (this._skyLight) this._skyLight.intensity = this._skyLightIntensity * (1 + (this.nightSkyLight - 1) * this.nightFactor)
+    if (this._skyLight) this._skyLight.intensity = this._skyLightIntensity * (1 + (this.nightSkyLight - 1) * this.nightFactor) * (1 - 0.35 * overcast)
 
     // Light probes relit each time the sun has moved far enough (and right after a jump): their captured
     // scene lit again by the sun, sky and lights as they are now. A probe never captured is baked instead.

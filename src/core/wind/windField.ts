@@ -54,8 +54,25 @@ const [VEER_OX, VEER_OY] = WIND_FIELD_CONSTANTS.VEER_OFFSET;
 const CORE = WIND_FIELD_CONSTANTS.CORE;
 const [EDDY_DX, EDDY_DY] = WIND_FIELD_CONSTANTS.EDDY_DRIFT;
 
-/** The frame's wind time in seconds, advanced by the renderer with the foliage's (see renderer.ts). */
-export const windFieldClock = { time: 0 };
+/**
+ * The frame's wind time in seconds, advanced by the renderer with the foliage's (see renderer.ts), and
+ * `gustTravel`: how far the gusts have rolled on that clock, in gust wavelengths (`advanceGustTravel`).
+ */
+export const windFieldClock = { time: 0, gustTravel: 0 };
+
+/**
+ * Roll the gusts on by `dt` seconds of `wind` (the scene's WindNode, or none for the defaults): `gustSpeed`
+ * over the gust wavelength, integrated, so a gust speed or size that changes — a preset blending in, a
+ * storm building — moves the gusts on from where they are instead of re-deriving their place from
+ * `speed × time`, which would race them across the field while it changed. The direction is not
+ * integrated: the gusts roll along the wind as it points now (wind presets never turn it).
+ */
+export function advanceGustTravel(clock: { gustTravel: number }, wind: WindNode | null, dt: number): void {
+    if (!(dt > 0)) return;
+    const speed = wind ? wind.gustSpeed : 4;
+    const lambda = Math.max(wind ? wind.gustScale : 18, 0.5);
+    clock.gustTravel += speed / lambda * dt;
+}
 
 // ---- Noise ------------------------------------------------------------------------------------------
 //
@@ -212,7 +229,14 @@ export class WindFieldSnapshot {
     /** Any wind at all: a base wind or a source. */
     public get active(): boolean { return this.baseOn || this.count > 0; }
 
-    public capture(scene: WindFieldSource, time: number): this {
+    /**
+     * `gustTravel` (windFieldClock's, wavelengths) places the gusts by how far they have actually rolled:
+     * the gust speed in the params becomes the one that reaches there at `time`, `travel × λ / time`, so
+     * every reader of the eight floats (this file, windField.wgsl, the particles) scrolls them the same
+     * way. Without it (or with no travel yet, or at time 0) the speed is the wind's own and the gusts sit
+     * at `speed × time`.
+     */
+    public capture(scene: WindFieldSource, time: number, gustTravel?: number): this {
         const wind = scene.wind;
         const p = this.params;
         this.baseOn = !!wind && wind.visible && wind.strength > 0;
@@ -222,6 +246,7 @@ export class WindFieldSnapshot {
         p[3] = wind ? wind.gustScale : 18;
         p[4] = time;
         p[5] = wind ? wind.gustSpeed : 4;
+        if (gustTravel !== undefined && gustTravel > 0 && Number.isFinite(gustTravel) && time > 1e-3) p[5] = gustTravel * Math.max(p[3], 0.5) / time;
         p[6] = wind ? wind.gustiness : WIND_DEFAULT_GUSTINESS;
         p[7] = (wind ? wind.veer : WIND_DEFAULT_VEER) * Math.PI / 180;
         this.fadeStart = wind ? wind.fadeStart : 40;
@@ -246,7 +271,9 @@ const _sample = createWindSample();
  */
 export function sampleSceneWind(scene: WindFieldSource, position: ArrayLike<number>, out: number[] | Float32Array = [0, 0, 0],
                                 time: number = windFieldClock.time): number[] | Float32Array {
-    _scratch.capture(scene, time).sample(position[0], position[1], position[2], _sample);
+    // On the frame's own clock, the gusts are where the renderer rolled them to (`gustTravel`).
+    _scratch.capture(scene, time, time === windFieldClock.time ? windFieldClock.gustTravel : undefined)
+        .sample(position[0], position[1], position[2], _sample);
     out[0] = _sample.velocity[0]; out[1] = _sample.velocity[1]; out[2] = _sample.velocity[2];
     return out;
 }

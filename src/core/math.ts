@@ -1338,6 +1338,31 @@ export function closestOnSegment(p: Vec3Tuple, a: Vec3Tuple, b: Vec3Tuple): Vec3
     return lerp3(a, b, clamp01(dot3(sub3(p, a), ab) / len2));
 }
 
+/**
+ * Closest point on triangle abc to p (Ericson, Real-Time Collision Detection 5.1.5): by Voronoi region, a
+ * corner, a point on an edge, or the projection onto the face.
+ */
+export function closestOnTriangle(p: ArrayLike<number>, a: ArrayLike<number>, b: ArrayLike<number>, c: ArrayLike<number>): Vec3Tuple {
+    const ab = sub3(b, a), ac = sub3(c, a), ap = sub3(p, a);
+    const d1 = dot3(ab, ap), d2 = dot3(ac, ap);
+    if (d1 <= 0 && d2 <= 0) return [a[0], a[1], a[2]];
+    const bp = sub3(p, b);
+    const d3 = dot3(ab, bp), d4 = dot3(ac, bp);
+    if (d3 >= 0 && d4 <= d3) return [b[0], b[1], b[2]];
+    const vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) return lerp3(a, b, d1 / (d1 - d3));
+    const cp = sub3(p, c);
+    const d5 = dot3(ab, cp), d6 = dot3(ac, cp);
+    if (d6 >= 0 && d5 <= d6) return [c[0], c[1], c[2]];
+    const vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) return lerp3(a, c, d2 / (d2 - d6));
+    const va = d3 * d6 - d5 * d4;
+    if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) return lerp3(b, c, (d4 - d3) / ((d4 - d3) + (d5 - d6)));
+    const denom = 1 / (va + vb + vc);
+    const v = vb * denom, w = vc * denom;
+    return [a[0] + ab[0] * v + ac[0] * w, a[1] + ab[1] * v + ac[1] * w, a[2] + ab[2] * v + ac[2] * w];
+}
+
 /** Closest points between segments p1q1 and p2q2 (Ericson, Real-Time Collision Detection 5.1.9). */
 export function closestSegmentSegment(p1: Vec3Tuple, q1: Vec3Tuple, p2: Vec3Tuple, q2: Vec3Tuple): { c1: Vec3Tuple; c2: Vec3Tuple; dist2: number } {
     const d1 = sub3(q1, p1), d2 = sub3(q2, p2), r = sub3(p1, p2);

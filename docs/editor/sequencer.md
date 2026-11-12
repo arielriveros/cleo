@@ -20,6 +20,8 @@ subtree's sequence drives the copies.
 | **Camera cut** | Which slot's camera the game looks through. A sequence has one; each section is a shot. |
 | **Property** | Animates a dotted path on a slot's node (`opacity`, `camera.fov`, a script field such as `hour`), on the renderer's settings (`ssrMaxDistance`), or on the game (`timeScale`). Numbers and vectors interpolate; text and on/off values step. |
 | **Events** | Keys that call a method at a moment: on the Sequence node's own script (the director) or on a slot's node. They fire as playback passes them, never on a scrub. |
+| **Presets** | Blends a Volumetric Clouds, Wind or Weather node into one of its own presets (the ones its inspector's **Presets** menu applies) over each section, eased. A section starts from its **From** preset, else from where the section before it ended, else from the node as the sequence found it: a row of sections morphs the sky from Clear to Thunderstorm and back. Numbers and colours blend; a kind switches halfway. |
+| **Foliage** | Changes a landscape's foliage layers live (all of them, or the ones ticked): **Density** thins them, **Draw distance** and **Impostor distance** bring their distances in, as multipliers on each layer's own (1 = as authored), and **Shadows** switches their shadow casting. A thinned layer draws a share of every cell, spread evenly and nested, so going from 0.1 back to 1 fills the field in without one plant swapping for another; what is thinned out of sight no longer collides either. |
 
 Tracks hold **sections**: spans of time that own their keys, so moving a section moves its animation. A
 section eases in over whatever value was there before it, and **When finished** decides whether its target
@@ -46,7 +48,9 @@ keeps the last value or goes back to what it was.
   - the ruler scrubs, and its flags are markers.
 - **Details:** what is selected, editable. A path section lists its points: **Add from viewport** appends
   the editor camera's position, and **View** moves a point there. A property section lists its keys:
-  **Key current value** adds a key at the playhead holding what the target shows now.
+  **Key current value** adds a key at the playhead holding what the target shows now. A preset section
+  picks the preset it blends to and where it starts from; a foliage section keys each channel (**Key**
+  adds one at the playhead), and the Foliage track's details pick its layers.
 
 Every edit is one undo step; a drag records once, when you let go.
 

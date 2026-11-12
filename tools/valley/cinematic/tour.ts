@@ -6,11 +6,13 @@
 // every path is lifted wherever its curve would dip below the clearance.
 //
 // The shot list follows the plan (C:\Users\ariel\.claude\plans\plan-a-suggested-route-replicated-quiche.md):
-//   I    The Valley   campfire, main road, the hamlet, Old House, Granary, meadow and forest  (10:00)
+//   I    The Valley   campfire, main road, the hamlet, Old House, Granary; then the meadow and the forest  (10:00)
 //   II   Light        the Long House from outside, then inside while the sun goes down  (15:00 -> 20:30)
 //   III  Weather      night, dawn, the windmill, the gate notch, back over the valley  (game time x2)
 //   IV   Water        across the pond, then up over the whole valley
-// Times are sequence seconds on the GAME clock, so Act III, run at time scale 2, takes half as long.
+// Times are sequence seconds on the GAME clock, so Act III, run at time scale 2, takes half as long. Shots
+// have durations and follow one another; everything else on the timeline is placed `when(shot, seconds)`, so
+// retiming a shot carries its captions, keys and fades with it.
 
 import { Spline3, evaluateKeyedNumber } from '../../../src/core/math'
 import type { SequenceData, SequenceKey, SequenceTrack } from '../../../src/sequencer/types'
@@ -18,17 +20,18 @@ import type { SequenceData, SequenceKey, SequenceTrack } from '../../../src/sequ
 /** A height above the ground (`h`) or an absolute one (`y`), at x/z. */
 type At = { x: number, z: number, h?: number, y?: number }
 interface Point extends At { look: At }
-interface Shot {
+interface ShotSpec {
   key: string
   label: string
-  start: number
-  end: number
+  /** Seconds on the game clock. */
+  dur: number
   points: Point[]
   /** Ease in and out at the ends of the move (default both). */
   ease?: [boolean, boolean]
   /** Lowest the camera may go above the ground on this shot (default 1.2 m). */
   clearance?: number
 }
+export interface Shot extends ShotSpec { start: number, end: number }
 
 /** The Long House's interior frame: centre, and the axes its walls run along (the house is turned -137.51°). */
 const LONG_HOUSE = { x: -9, z: 39, yaw: -137.51, floor: 2.69 }
@@ -41,12 +44,13 @@ const at = (x: number, z: number, h: number): At => ({ x, z, h })
 const p = (x: number, z: number, h: number, look: At): Point => ({ x, z, h, look })
 const py = (where: At, look: At): Point => ({ ...where, look })
 
-export const TOUR_DURATION = 410
+/** The middle of the Long House's aisle, in its frame (see the interior shot). */
+const AISLE_X = -1.65
 
-export const SHOTS: Shot[] = [
+const SHOT_LIST: ShotSpec[] = [
   // ---- I: The Valley -----------------------------------------------------------------------------------
   {
-    key: 'valley', label: 'The Valley', start: 0, end: 75, ease: [true, false],
+    key: 'valley', label: 'The Valley', dur: 30, ease: [true, false],
     points: [
       p(-6.5, 89, 1.7, at(-6.5, 79, 1)),          // behind the campfire, low
       p(-7.5, 85, 4, at(-8, 60, 3)),
@@ -56,75 +60,102 @@ export const SHOTS: Shot[] = [
       p(-40, 58, 14, at(-38, 34, 3)),
       p(-58, 54, 14, at(-52, 37, 4)),              // the Old House
       p(-73, 40, 13, at(-78, 53, 4)),              // the Granary
-      p(-66, 20, 10, at(-50, 0, 2)),
-      p(-52, 4, 3, at(-48, -14, 1.5)),             // low over the meadow
-      p(-50, -12, 3, at(-58, -28, 3)),
-      p(-56, -30, 22, at(-70, -70, 10)),           // up over the forest's edge, looking along it
-      p(-66, -52, 40, at(-85, -100, 20)),
+    ],
+  },
+  {
+    // A cut to the meadow: low through the grass while it thins out and fills in again, then up and back
+    // over the western grove, turning to look east across the whole valley floor, every tree and bush of it
+    // in view, while their draw distance closes in to the nearest and opens out again (FOLIAGE below).
+    key: 'foliage', label: 'Meadow and forest', dur: 22, ease: [true, true],
+    points: [
+      p(-62, 16, 2.4, at(-50, -2, 0.8)),
+      p(-53, 3, 2.4, at(-48, -14, 1.2)),           // low over the meadow
+      p(-50, -12, 4, at(-40, -30, 2)),
+      p(-64, -30, 22, at(0, -20, 2)),              // up over the grove, turning east
+      p(-92, -46, 34, at(30, -8, 0)),              // the whole valley floor ahead
     ],
   },
   // ---- II: Light ---------------------------------------------------------------------------------------
   {
-    key: 'approach', label: 'The Long House', start: 75, end: 85, ease: [true, true],
+    key: 'approach', label: 'The Long House', dur: 10, ease: [true, true],
     points: [p(-34, 30, 7, at(-9, 39, 4)), p(-27, 35, 5, at(-9, 39, 4)), p(-22, 40, 4, at(-9, 39, 4))],
   },
   {
     // A cut inside (the doors are gaps in the walls, too narrow to fly through), down the house while the sun
-    // goes down outside: the light bounced round the rooms follows it (GI volumes, relit). Read off its
-    // colliders: floor 2.69, a ceiling at 4.98, end walls at z -9.2 and 8.2 (a door at x 0 in the far one),
-    // and two cross walls at z ±3 that span only x 0..3.2, leaving an aisle along x -3..0 through all three
-    // rooms. The dolly keeps to that aisle.
-    key: 'interior', label: 'Long House interior', start: 85, end: 115, ease: [true, true],
-    points: [py(lh(-1.6, -7.8, 4.2), lh(-1.2, 2, 3.6)), py(lh(-1.7, -3, 4.2), lh(-0.6, 6, 3.7)),
-             py(lh(-1.6, 2, 4.2), lh(0, 9, 3.8)), py(lh(-1.4, 6.5, 4.2), lh(0.3, 11, 3.8))],
+    // goes down outside: the light bounced round the rooms follows it (GI volumes, relit). Read off its render
+    // mesh at camera height: the floor at 2.69 and the ceiling at 6.6; end walls at z -9.4 and 8.6 (a door at
+    // x 0 in the far one); the long -X wall's inner face at x -3.03; and two cross walls, at z -3.25 and 2.9,
+    // reaching in from the +X wall only as far as x -0.25. That leaves an aisle x -3.03..-0.25 through all
+    // three rooms. The dolly keeps to its middle, about 1.3 m from every wall, and stops 2.6 m short of the
+    // far one (tests/valleyProject.test.ts measures it against the house's triangles).
+    key: 'interior', label: 'Long House interior', dur: 30, ease: [true, true],
+    points: [py(lh(AISLE_X, -7.0, 4.2), lh(-1.2, 2, 3.6)), py(lh(AISLE_X, -2.4, 4.2), lh(-0.6, 6, 3.7)),
+             py(lh(AISLE_X, 1.8, 4.2), lh(0, 9, 3.8)), py(lh(AISLE_X, 6.0, 4.2), lh(0.3, 11, 3.8))],
   },
   {
-    key: 'night', label: 'Night falls', start: 115, end: 125, ease: [true, true],
+    key: 'night', label: 'Night falls', dur: 10, ease: [true, true],
     points: [p(-20, 46, 3, at(-38, 34, 2)), p(-26, 52, 6, at(-38, 34, 2))],
   },
   // ---- III: Weather (time x2) --------------------------------------------------------------------------
   {
-    key: 'night-crane', label: 'Night over the hamlet', start: 125, end: 145, ease: [true, true],
+    key: 'night-crane', label: 'Night over the hamlet', dur: 20, ease: [true, true],
     points: [p(-28, 64, 20, at(-38, 34, 3)), p(-36, 58, 45, at(-38, 34, 3))],
   },
   {
-    key: 'cloudy', label: 'Clouds gather', start: 145, end: 185, ease: [true, true],
+    key: 'cloudy', label: 'Clouds gather', dur: 40, ease: [true, true],
     points: [p(24, 74, 34, at(-30, 36, 3)), p(12, 64, 30, at(-30, 36, 3))],
   },
   {
-    key: 'drizzle', label: 'First rain', start: 185, end: 215, ease: [true, true], clearance: 0.9,
+    key: 'drizzle', label: 'First rain', dur: 30, ease: [true, true], clearance: 0.9,
     points: [p(-24, 14, 1.4, at(-14, -6, 0.5)), p(-18, 2, 1.3, at(-8, -22, 0.8))],
   },
   {
-    key: 'storm', label: 'Storm at the windmill', start: 215, end: 265, ease: [true, true],
+    key: 'storm', label: 'Storm at the windmill', dur: 50, ease: [true, true],
     points: [p(5, -8, 9, at(30, -26, 5)), p(30, -26, 13, at(59, -45, 10)), p(44, -28, 15, at(59, -45, 10)),
              p(66, -28, 16, at(59, -45, 10)), p(78, -48, 15, at(59, -45, 10))],
   },
   {
-    key: 'snow', label: 'Rain turns to snow', start: 265, end: 305, ease: [true, true],
+    key: 'snow', label: 'Rain turns to snow', dur: 40, ease: [true, true],
     // West over the northern forest, looking across it and down the valley. The gate notch comes next, from
     // inside it: from out here it is a narrow cut in a cliff, all rock.
     points: [p(55, -75, 30, at(10, -70, 4)), p(32, -88, 26, at(-15, -60, 4)), p(8, -95, 22, at(-35, -45, 4))],
   },
   {
-    key: 'melt', label: 'Snow melts', start: 305, end: 335, ease: [true, true],
+    key: 'melt', label: 'Snow melts', dur: 30, ease: [true, true],
     points: [p(-3, -128, 3, at(-10, 0, 10)), p(4, -118, 8, at(-10, 0, 10))],
   },
   {
-    key: 'clearing', label: 'The sky clears', start: 335, end: 365, ease: [true, true],
+    key: 'clearing', label: 'The sky clears', dur: 30, ease: [true, true],
     points: [p(30, -70, 55, at(-10, 20, 0)), p(40, -30, 48, at(-10, 20, 0))],
   },
   // ---- IV: Water ---------------------------------------------------------------------------------------
   {
     // Low across the water toward the windmill: reflections show at a grazing angle, not looking down.
-    key: 'pond', label: 'The pond', start: 365, end: 390, ease: [true, true], clearance: 0.8,
+    key: 'pond', label: 'The pond', dur: 25, ease: [true, true], clearance: 0.8,
     points: [p(40, 34, 1, at(59, -45, 10)), p(43, 29, 0.9, at(59, -45, 10)), p(46, 25, 0.9, at(59, -45, 10))],
   },
   {
-    key: 'finale', label: 'The whole valley', start: 390, end: 410, ease: [true, false],
+    key: 'finale', label: 'The whole valley', dur: 20, ease: [true, false],
     points: [p(47, 23, 1.2, at(10, 10, 4)), p(58, 52, 30, at(0, 0, 0)), p(64, 90, 85, at(0, 0, 0))],
   },
 ]
+
+/** The shots on the timeline, each starting where the one before it ends. */
+export const SHOTS: Shot[] = (() => {
+  let t = 0
+  return SHOT_LIST.map(s => { const shot = { ...s, start: t, end: t + s.dur }; t = shot.end; return shot })
+})()
+
+export const TOUR_DURATION = SHOTS[SHOTS.length - 1].end
+
+/** `dt` seconds into shot `key`. */
+export function when(key: string, dt = 0): number {
+  const shot = SHOTS.find(s => s.key === key)
+  if (!shot) throw new Error(`no shot "${key}"`)
+  return shot.start + dt
+}
+/** `dt` seconds before shot `key` ends. */
+export const before = (key: string, dt = 0): number => when(key, SHOTS.find(s => s.key === key)!.dur - dt)
 
 /** Points of interest every tour must pass near (the coverage test reads these). */
 export const SECTIONS: { name: string, x: number, z: number }[] = [
@@ -144,26 +175,106 @@ const keysFrom = (start: number, keys: [number, SequenceKey['v'], SequenceKey['i
 const pulse = (a: number, b: number, fade = 1): [number, number, 'linear'][] =>
   [[a, 0, 'linear'], [a + fade, 1, 'linear'], [b - fade, 1, 'linear'], [b, 0, 'linear']]
 
-const TITLES: [number, number, string][] = [[2, 8, 'The Valley'], [392, 404, 'Cleo Engine']]
-const CAPTIONS: [number, number, string][] = [
-  [9, 15, 'I  ·  The Valley'],
-  [77, 83, 'II  ·  Light'],
-  [87, 97, 'Dynamic global illumination: the sun goes down, the bounce light follows'],
-  [127, 135, 'III  ·  Weather  ·  time ×2'],
-  [367, 375, 'IV  ·  Water  ·  screen-space reflections'],
+const TITLES = (): [number, number, string][] => [
+  [when('valley', 2), when('valley', 8), 'The Valley'],
+  [when('finale', 2), before('finale', 6), 'Cleo Engine'],
+]
+const CAPTIONS = (): [number, number, string][] => [
+  [when('valley', 9), when('valley', 15), 'I  ·  The Valley'],
+  [when('foliage', 1), when('foliage', 9), 'Foliage density  ·  100%  →  10%  →  100%'],
+  [when('foliage', 12), when('foliage', 21), 'Draw distance  ·  trees 450 m  →  70 m  →  450 m'],
+  [when('approach', 2), when('approach', 8), 'II  ·  Light'],
+  [when('interior', 2), when('interior', 12), 'Dynamic global illumination: the sun goes down, the bounce light follows'],
+  [when('night-crane', 2), when('night-crane', 10), 'III  ·  Weather  ·  time ×2'],
+  [when('cloudy', 3), when('cloudy', 13), 'Clouds gather'],
+  [when('drizzle', 3), when('drizzle', 13), 'First rain'],
+  [when('storm', 4), when('storm', 14), 'Storm'],
+  [when('snow', 4), when('snow', 14), 'Rain turns to snow'],
+  [when('melt', 3), when('melt', 13), 'The snow melts'],
+  [when('clearing', 3), when('clearing', 13), 'Clear again'],
+  [when('pond', 2), when('pond', 10), 'IV  ·  Water  ·  screen-space reflections'],
 ]
 
 /** The hour of day across the tour: Act I at ten, Act II from three into the night, a new day for Act III. */
-const HOUR_KEYS: [number, number, SequenceKey['interp']][] = [
-  [0, 10, 'constant'], [75, 15, 'linear'], [115, 20.5, 'linear'], [125, 23, 'linear'],
-  [139.9, 23.9, 'constant'], [140, 6.5, 'linear'], [145, 7, 'linear'], [185, 9, 'linear'], [365, 14, 'linear'], [410, 16.5, 'linear'],
+const HOUR_KEYS = (): [number, number, SequenceKey['interp']][] => [
+  [0, 10, 'constant'], [when('approach'), 15, 'linear'], [when('night'), 20.5, 'linear'], [when('night-crane'), 23, 'linear'],
+  // Midnight to dawn behind the fade (FADE_KEYS): one jump, rather than hours of sky re-bakes.
+  [when('night-crane', 14.9), 23.9, 'constant'], [when('night-crane', 15), 6.5, 'linear'], [when('cloudy'), 7, 'linear'],
+  [when('drizzle'), 9, 'linear'], [when('pond'), 14, 'linear'], [TOUR_DURATION, 16.5, 'linear'],
 ]
 
 /** Black over the night's jump in the hour, and over the very end. */
-const FADE_KEYS: [number, number, SequenceKey['interp']][] = [
-  [0, 1, 'linear'], [1.5, 0, 'linear'], [136, 0, 'linear'], [139, 1, 'linear'], [141, 1, 'linear'], [144, 0, 'linear'],
-  [404, 0, 'linear'], [410, 1, 'linear'],
+const FADE_KEYS = (): [number, number, SequenceKey['interp']][] => [
+  [0, 1, 'linear'], [1.5, 0, 'linear'],
+  [when('night-crane', 11), 0, 'linear'], [when('night-crane', 14), 1, 'linear'],
+  [when('night-crane', 16), 1, 'linear'], [when('night-crane', 19), 0, 'linear'],
+  [before('finale', 6), 0, 'linear'], [TOUR_DURATION, 1, 'linear'],
 ]
+
+// ---- the environment -------------------------------------------------------------------------------------
+//
+// Act III's weather, as the user asked for it: a clear day and a clear night (Acts I and II), clouds
+// gathering, the first light rain, a storm with wind and heavy rain, the rain turning to snow, the snow
+// stopping and melting into a wet valley, and a clear day again, all at time x2. The clouds and the wind blend
+// from preset to preset (Preset tracks: each blend starts where the last one ended); the Weather node's rain,
+// snow, wetness and puddles are keyed (one 'mixed' volume: its snow share turns the rain into snow); and the
+// Time of Day's `overcast` greys the light, thickens the mist and dims the sky's fill with the clouds.
+
+type Keys = [number, number, SequenceKey['interp']?][]
+/** Keys that ease linearly through every point: `[time, value]` pairs on the tour's clock. */
+const ramp = (points: [number, number][]): Keys => points.map(([t, v]) => [t, v, 'linear'])
+
+/** The clouds' presets: clear for Acts I and II (a starry night), then the weather's sky. */
+const CLOUD_PRESETS = (): [number, number, string][] => [
+  [0, 1.5, 'clear'],                                    // behind the opening fade
+  [when('cloudy'), when('cloudy', 15), 'partlyCloudy'],
+  [when('cloudy', 18), when('cloudy', 38), 'overcast'],
+  [when('drizzle'), when('drizzle', 14), 'rainy'],
+  [when('storm'), when('storm', 16), 'stormy'],
+  [when('snow', 2), when('snow', 20), 'overcast'],
+  [when('melt', 4), when('melt', 26), 'partlyCloudy'],
+  [when('clearing', 2), when('clearing', 26), 'clear'],
+]
+
+/** The wind's: its own breeze until the rain, a storm's gale, and a calm for the clear day and the pond. */
+const WIND_PRESETS = (): [number, number, string][] => [
+  [when('drizzle'), when('drizzle', 20), 'windy'],
+  [when('storm'), when('storm', 14), 'storm'],
+  [when('snow', 4), when('snow', 24), 'breezy'],
+  [when('clearing'), when('clearing', 24), 'calm'],
+]
+
+/** The Weather node, keyed. */
+const WEATHER_KEYS = (): Record<string, Keys> => ({
+  precipitationRate: ramp([[0, 0], [when('drizzle', 2), 0], [when('drizzle', 8), 0.15], [when('storm'), 0.15], [when('storm', 12), 1],
+                           [when('snow'), 1], [when('snow', 10), 0.6], [when('melt'), 0.6], [when('melt', 8), 0]]),
+  precipitationSnowShare: ramp([[0, 0], [when('snow', 4), 0], [when('snow', 28), 1]]),
+  wetness: ramp([[0, 0], [when('drizzle', 2), 0], [when('drizzle', 28), 0.4], [when('storm'), 0.4], [when('storm', 20), 1],
+                 [when('melt'), 1], [when('melt', 4), 0.9], [when('clearing'), 0.9], [when('clearing', 28), 0.3]]),
+  puddles: ramp([[0, 0], [when('drizzle', 6), 0], [when('drizzle', 28), 0.3], [when('storm'), 0.3], [when('storm', 24), 1],
+                 [when('snow', 10), 1], [when('snow', 35), 0.7], [when('melt'), 0.7], [when('melt', 20), 0.85],
+                 [when('clearing'), 0.85], [when('clearing', 28), 0.2]]),
+  // A trace of snow from the first frame, behind the opening fade: the landscape bakes its snow layer then,
+  // not when the snow starts falling in the middle of a shot.
+  snow: ramp([[0, 0.001], [when('snow', 8), 0.001], [when('snow', 38), 0.8], [when('melt', 2), 0.8], [when('melt', 24), 0.001]]),
+})
+
+/** How overcast the Time of Day draws the light: with the clouds, a storm's at the storm. */
+const OVERCAST_KEYS = (): Keys => ramp([
+  [0, 0], [when('cloudy', 5), 0], [when('cloudy', 38), 0.5], [when('drizzle', 14), 0.7], [when('storm'), 0.7], [when('storm', 15), 1],
+  [when('snow', 20), 0.8], [when('melt', 26), 0.5], [when('clearing', 2), 0.5], [when('clearing', 26), 0],
+])
+
+/**
+ * The foliage shot's layers: the grass and undergrowth thin out; the trees' and bushes' draw distance closes
+ * in (the trees' 450 m to 70 m, the bushes' 90 m to 14 m) and opens out again.
+ */
+export const GRASS_LAYERS = ['Meadow Grass A', 'Meadow Grass B', 'Tall Grass', 'Forest Undergrowth A', 'Forest Undergrowth B']
+export const TREE_LAYERS = ['Spruce A', 'Spruce B', 'Highland Spruce', 'Oak', 'Shrub A', 'Shrub B', 'Juniper', 'Boxwood']
+/** Seconds into the foliage shot: the grass while the camera is low, the distances once it looks out. */
+const GRASS_DENSITY: Keys = ramp([[0.5, 1], [3.5, 0.1], [6, 0.1], [8.5, 1]])
+const TREE_CULL: Keys = ramp([[13, 1], [15.5, 0.15], [17.5, 0.15], [21, 1]])
+const FOLIAGE_SHADOWS: Keys = ramp([[13, 110], [15.5, 30], [17.5, 30], [21, 110]])
 
 // ---- build -----------------------------------------------------------------------------------------------
 
@@ -272,23 +383,55 @@ export function buildTour(terrainAt: HeightAt): SequenceData {
     [{ t: 0, v: '' }, ...items.map(([a, , s]) => ({ t: a, v: s }))] as SequenceKey[]
   const pulses = (items: [number, number, string][]) =>
     [{ t: 0, v: 0, interp: 'linear' as const }, ...items.flatMap(([a, b]) => pulse(a, b).map(([t, v, i]) => ({ t, v, interp: i })))] as SequenceKey[]
+  const presets = (id: string, name: string, slot: string, items: [number, number, string][]): SequenceTrack => ({
+    id, name, type: 'preset', slot,
+    sections: items.map(([start, end, preset], i) => ({ id: `${id}:${i}`, start, end, preset, label: preset })),
+  })
+  /** A Foliage track over the foliage shot, its channels keyed in seconds into the shot. */
+  const foliage = (id: string, name: string, layers: string[], channels: Record<string, { keys: SequenceKey[] }>): SequenceTrack => ({
+    id, name, type: 'foliage', slot: 'landscape', layers,
+    sections: [{ id: `${id}:shot`, start: when('foliage'), end: before('foliage'), whenFinished: 'restore', ...channels }],
+  } as any)
 
   const tracks: SequenceTrack[] = [
     { id: 'camera', name: 'Camera', type: 'path', slot: 'camera', sections: pathSections } as any,
     { id: 'cut', name: 'Camera cut', type: 'cameraCut', sections: [{ id: 'cut:all', start: 0, end: D, slot: 'camera' }] },
     property('clock-running', 'clock', 'running', 'bool', [{ t: 0, v: false }]),
-    property('clock-hour', 'clock', 'hour', 'number', keysFrom(0, HOUR_KEYS)),
+    property('clock-hour', 'clock', 'hour', 'number', keysFrom(0, HOUR_KEYS())),
     // Act III runs at twice the game speed: the weather's changes, the rain and the clouds in half the time.
     { id: 'time-scale', name: 'Time scale', type: 'property', target: 'game', path: 'timeScale', valueType: 'number',
-      sections: [{ id: 'time-scale:weather', start: 125, end: 365, whenFinished: 'restore', curve: { keys: keysFrom(125, [
-        [125, 1, 'linear'], [128, 2, 'linear'], [362, 2, 'linear'], [365, 1, 'linear']]) } }] } as any,
+      sections: [{ id: 'time-scale:weather', start: when('night-crane'), end: when('pond'), whenFinished: 'restore',
+        curve: { keys: keysFrom(when('night-crane'), [
+          [when('night-crane'), 1, 'linear'], [when('night-crane', 3), 2, 'linear'],
+          [before('clearing', 3), 2, 'linear'], [when('pond'), 1, 'linear']]) } }] } as any,
     property('bar-top', 'barTop', 'opacity', 'number', keysFrom(0, [[0, 0, 'linear'], [1.5, 1, 'linear']])),
     property('bar-bottom', 'barBottom', 'opacity', 'number', keysFrom(0, [[0, 0, 'linear'], [1.5, 1, 'linear']])),
-    property('fade', 'fade', 'opacity', 'number', keysFrom(0, FADE_KEYS)),
-    property('title-text', 'title', 'text', 'string', textKeys(TITLES)),
-    property('title-opacity', 'title', 'opacity', 'number', pulses(TITLES)),
-    property('caption-text', 'caption', 'text', 'string', textKeys(CAPTIONS)),
-    property('caption-opacity', 'caption', 'opacity', 'number', pulses(CAPTIONS)),
+    property('fade', 'fade', 'opacity', 'number', keysFrom(0, FADE_KEYS())),
+    property('title-text', 'title', 'text', 'string', textKeys(TITLES())),
+    property('title-opacity', 'title', 'opacity', 'number', pulses(TITLES())),
+    property('caption-text', 'caption', 'text', 'string', textKeys(CAPTIONS())),
+    property('caption-opacity', 'caption', 'opacity', 'number', pulses(CAPTIONS())),
+
+    // ---- the environment ----
+    presets('clouds-presets', 'Clouds', 'clouds', CLOUD_PRESETS()),
+    presets('wind-presets', 'Wind', 'wind', WIND_PRESETS()),
+    ...Object.entries(WEATHER_KEYS()).map(([path, keys]) =>
+      property(`weather-${path}`, 'weather', path, 'number', keysFrom(0, keys))),
+    property('clock-overcast', 'clock', 'overcast', 'number', keysFrom(0, OVERCAST_KEYS())),
+    // The foliage shot: the grass thins out and fills in again, then the forest's draw distance closes in to
+    // the nearest trees and opens out again, and the trees' shadows reach only as far.
+    foliage('foliage-grass', 'Grass density', GRASS_LAYERS, { density: { keys: keysFrom(0, GRASS_DENSITY) } }),
+    foliage('foliage-trees', 'Draw distance', TREE_LAYERS, { cull: { keys: keysFrom(0, TREE_CULL) } }),
+    { id: 'foliage-shadows', name: 'Foliage shadow distance', type: 'property', target: 'renderer', path: 'foliageShadowDistance',
+      valueType: 'number', sections: [{ id: 'foliage-shadows:shot', start: when('foliage'), end: before('foliage'), whenFinished: 'restore',
+        curve: { keys: keysFrom(0, FOLIAGE_SHADOWS) } }] } as any,
+    // The pond: its ripples calm to a mirror, and screen-space reflections reach the windmill and the hamlet.
+    { id: 'pond-waves', name: 'Pond calm', type: 'property', slot: 'pond', path: 'model.material.properties.waveStrength',
+      valueType: 'number', sections: [{ id: 'pond-waves:shot', start: when('pond'), end: D, whenFinished: 'restore',
+        curve: { keys: keysFrom(when('pond'), ramp([[when('pond'), 0.32], [when('pond', 4), 0.08], [when('finale', 4), 0.08], [when('finale', 12), 0.32]])) } }] } as any,
+    { id: 'pond-ssr', name: 'Reflection reach', type: 'property', target: 'renderer', path: 'ssrMaxDistance',
+      valueType: 'number', sections: [{ id: 'pond-ssr:shot', start: when('pond'), end: D, whenFinished: 'restore',
+        curve: { keys: [{ t: 0, v: 400 }] } }] } as any,
   ]
 
   return {
@@ -301,10 +444,16 @@ export function buildTour(terrainAt: HeightAt): SequenceData {
       { id: 'fade', name: 'Fade', nodeType: 'uiPanel' },
       { id: 'title', name: 'Title', nodeType: 'uiText' },
       { id: 'caption', name: 'Caption', nodeType: 'uiText' },
+      { id: 'clouds', name: 'Clouds', nodeType: 'volumetricClouds', path: 'volumetric clouds' },
+      { id: 'wind', name: 'Wind', nodeType: 'wind', path: 'Wind' },
+      { id: 'weather', name: 'Weather', nodeType: 'weather', path: 'Weather' },
+      { id: 'landscape', name: 'Landscape', nodeType: 'landscape', path: 'Landscape' },
+      { id: 'pond', name: 'Pond', nodeType: 'model', path: 'Water/Pond Water' },
     ],
     tracks,
     markers: [
-      { t: 0, name: 'I · The Valley' }, { t: 75, name: 'II · Light' }, { t: 125, name: 'III · Weather' }, { t: 365, name: 'IV · Water' },
+      { t: 0, name: 'I · The Valley' }, { t: when('approach'), name: 'II · Light' },
+      { t: when('night-crane'), name: 'III · Weather' }, { t: when('pond'), name: 'IV · Water' },
     ],
   }
 }

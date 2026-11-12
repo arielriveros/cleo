@@ -123,6 +123,36 @@ describe('sequence edits', () => {
     expect(seq.markers.map(m => m.name)).toEqual(['Start', 'A'])
   })
 
+  it('keys a Foliage section channel by channel, and its last key takes the channel away', () => {
+    let seq = parseSequence({ ...sample(), tracks: [{ id: 'f', type: 'foliage', slot: 'clock', layers: 'all', sections: [] }] })
+    const r = E.addSection(seq, 'f', 2, 10)!
+    seq = r.seq
+    expect(E.findSection(seq, r.ref)!.density!.keys).toEqual([{ t: 0, v: 1 }])
+    seq = E.setSectionKey(seq, r.ref, 4, 0.2, 'linear', 'cull')
+    seq = E.setSectionKey(seq, r.ref, 1, false, undefined, 'shadows')
+    const s = E.findSection(seq, r.ref)!
+    expect(s.cull!.keys).toEqual([{ t: 4, v: 0.2, interp: 'linear' }])
+    expect(s.shadows!.keys[0].v).toBe(false)
+    // Trimming the start keeps every channel's keys where they were on the timeline.
+    const trimmed = E.findSection(E.trimSectionStart(seq, r.ref, 3), r.ref)!
+    expect(trimmed.start + trimmed.cull!.keys[0].t).toBeCloseTo(6, 9)
+    // A razor cut splits every channel.
+    const cut = E.splitSection(seq, r.ref, 7)!
+    expect(E.findSection(cut.seq, cut.right)!.cull!.keys[0].v).toBeCloseTo(0.2, 9)
+    // The channel's last key removes the channel: the layers' own value again.
+    seq = E.deleteSectionKey(seq, r.ref, 0, 'cull')
+    expect(E.findSection(seq, r.ref)!.cull).toBeUndefined()
+    expect(parseSequence(seq).tracks[0].type).toBe('foliage')
+  })
+
+  it('adds preset blends with a preset, and never razors one', () => {
+    const seq0 = parseSequence({ ...sample(), tracks: [{ id: 'p', type: 'preset', slot: 'clock', sections: [] }] })
+    const r = E.addSection(seq0, 'p', 0, 10, { preset: 'stormy' })!
+    expect(E.findSection(r.seq, r.ref)!.preset).toBe('stormy')
+    expect(E.splitSection(r.seq, r.ref, 5)).toBeNull()
+    expect(parseSequence(r.seq).tracks[0]).toMatchObject({ type: 'preset', sections: [{ preset: 'stormy' }] })
+  })
+
   it('splits curves into halves that meet at the cut', () => {
     const [a, b] = E.splitCurve({ keys: [{ t: 0, v: 0, interp: 'linear' }, { t: 4, v: 8 }] }, 1)
     expect(a.keys.at(-1)).toMatchObject({ t: 1, v: 2 })

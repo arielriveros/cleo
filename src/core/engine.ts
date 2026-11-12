@@ -295,6 +295,9 @@ export class CleoEngine {
           physicsMs += now - mark;
         }
         mark = now;
+        // The render clock's rate, should the project ask effects to follow the game's speed
+        // (RenderSettings.effectsFollowTimeScale): this frame's scale, real time while paused.
+        this._renderer.setEffectsTimeScale(this._paused ? 1 : scale);
         this._renderer.render(this._scene);
         renderMs = performance.now() - mark;
       }

@@ -197,6 +197,21 @@ export function foliageKeepFraction(bucket: number, levelCount: number, falloff:
     return Math.max(FOLIAGE_DENSITY_FLOOR, Math.pow(falloff, level));
 }
 
+/** Steps `FoliageLayer.densityScale` is drawn at: a sweep repacks a layer's batches at most this many times. */
+export const FOLIAGE_DENSITY_STEPS = 32;
+
+/**
+ * The share of a layer's instances its `densityScale` keeps, on the {@link FOLIAGE_DENSITY_STEPS} grid. A
+ * prefix like the distance thinning ({@link foliageKeepFraction}), and multiplied into it: what a lower
+ * scale keeps is a subset of what a higher one keeps, at every distance.
+ */
+export function foliageDensityScale(layer: { densityScale?: number }): number {
+    const v = layer.densityScale;
+    if (v === undefined || !(v < 1)) return 1;
+    if (!(v > 0)) return 0;
+    return Math.round(v * FOLIAGE_DENSITY_STEPS) / FOLIAGE_DENSITY_STEPS;
+}
+
 /** Instances one draw may carry, given the triangle count of a single instance of the prototype. */
 export function foliageChunkLimit(trianglesPerInstance: number): number {
     if (!(trianglesPerInstance > 0)) return FOLIAGE_DRAW_MAX_INSTANCES;
@@ -517,6 +532,14 @@ export class FoliageLayer {
     }
     /** Hide instances beyond this camera distance; 0 = use the renderer's global foliage cull distance. */
     public cullDistance = 0;
+    /**
+     * Runtime thinning, 0..1: the share of every cell's instances drawn, cast and collided with, on top of
+     * the distance thinning ({@link foliageDensityScale}). A prefix of each cell's instances, which
+     * `_rebuild` orders by a hash of where they stand, so any share of them is spread evenly over the cell
+     * and sweeping it fills or thins a field without a plant flickering. Not saved: sequences and scripts
+     * set it (a Foliage track's Density channel).
+     */
+    public densityScale = 1;
     /**
      * Whether these instances rasterize into the shadow cascades. Off by default: switching it on adds
      * one instanced draw per cell PER CASCADE. This flag drives the shadow pass directly — the impostor
@@ -968,6 +991,7 @@ export class FoliageLayer {
     public forEachInstanceNear(
         x: number, z: number, radius: number,
         cb: (index: number, ix: number, iy: number, iz: number, yaw: number, scale: number) => void,
+        keep: number = 1,
     ): void {
         const r2 = radius * radius;
         for (const cell of this.cells) {
@@ -975,7 +999,10 @@ export class FoliageLayer {
             const dx = x < cell.min[0] ? cell.min[0] - x : x > cell.max[0] ? x - cell.max[0] : 0;
             const dz = z < cell.min[2] ? cell.min[2] - z : z > cell.max[2] ? z - cell.max[2] : 0;
             if (dx * dx + dz * dz > r2) continue;
-            for (let j = 0; j < cell.indices.length; j++) {
+            // `keep` < 1: only the prefix the renderer draws (`densityScale`), so what is thinned out of
+            // sight is thinned out of the way too.
+            const take = keep >= 1 ? cell.indices.length : Math.min(cell.indices.length, Math.ceil(cell.indices.length * Math.max(0, keep)));
+            for (let j = 0; j < take; j++) {
                 const i = cell.indices[j];
                 const b = i * 5;
                 const ex = this._instances[b] - x, ez = this._instances[b + 2] - z;
@@ -1056,6 +1083,22 @@ export class FoliageLayer {
         return out;
     }
 
+    /** `indices` sorted by a hash of each instance's x, z and yaw (ties by index): a stable, even shuffle. */
+    private _hashOrder(indices: number[]): number[] {
+        if (indices.length < 2) return indices;
+        const keys = new Float64Array(indices.length);
+        for (let j = 0; j < indices.length; j++) {
+            const b = indices[j] * 5;
+            keys[j] = hash01(this._instances[b], this._instances[b + 2], this._instances[b + 3], 0x5eed);
+        }
+        const order = new Uint32Array(indices.length);
+        for (let j = 0; j < order.length; j++) order[j] = j;
+        order.sort((a, b) => keys[a] - keys[b] || indices[a] - indices[b]);
+        const out = new Array<number>(indices.length);
+        for (let j = 0; j < order.length; j++) out[j] = indices[order[j]];
+        return out;
+    }
+
     private _rebuild(): void {
         this.count = this._instances.length / 5;
 
@@ -1077,7 +1120,11 @@ export class FoliageLayer {
         // cell bounds by the diagonal, or culling clips rocks lying on their side.
         const extent = this._instanceExtent() * (this.orientation === 'up' ? 1 : Math.SQRT2);
         const cells: FoliageCell[] = [];
-        for (const arr of buckets.values()) {
+        for (const placed of buckets.values()) {
+            // Each cell's instances in the order of a hash of where they stand, not the order they were
+            // placed (a scatter's rows, a brush's strokes): every thinning takes a PREFIX of the cell, and
+            // a prefix of a hashed order is spread evenly over it rather than being its first rows.
+            const arr = this._hashOrder(placed);
             const matrices = new Float32Array(arr.length * 16);
             let minX = Infinity, minY = Infinity, minZ = Infinity;
             let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;

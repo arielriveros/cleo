@@ -1,6 +1,7 @@
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { finiteOr } from "../../math";
+import { windFieldClock } from "../../wind/windField";
 /** What the water reads back from a body it buoyed: where it is and how it moves. */
 type FloatingBody = { position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number } };
 import { Node } from "./node";
@@ -195,8 +196,8 @@ export class WaterVolumeNode extends Node {
         }
     }
 
-    /** The clock the ripples are stamped on: the renderer's `u_time`. */
-    private static _now(): number { return performance.now() * 0.001; }
+    /** The clock the ripples are stamped on: the renderer's `u_time`, its render clock (`windFieldClock`). */
+    private static _now(): number { return windFieldClock.time; }
 
     private _surfaceActivity(delta: number): void {
         const scene = this._scene;

@@ -1,12 +1,14 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { Logger } from '../core/logger';
 import {
-    aimFromDirection, evaluateKeyedNumber, evaluateKeyedStep, evaluateKeyedVector, rampWeight, Spline3, type Vec3Tuple,
+    aimFromDirection, clamp01, evaluateKeyedNumber, evaluateKeyedStep, evaluateKeyedVector, rampWeight, smoothstep,
+    Spline3, type Vec3Tuple,
 } from '../core/math';
 import { compilePropertyPath, snapshotValue, type PropertyAccessor } from './propertyPath';
+import { blendPresetValue, presetFields, sequencePresetsFor } from './presetRegistry';
 import type {
-    CameraCutTrack, EventKey, EventTrack, PathSection, PathTrack, PropertyTrack, SectionBase, SequenceData,
-    SequenceTrack,
+    CameraCutTrack, EventKey, EventTrack, FoliageTrack, PathSection, PathTrack, PresetSection, PresetTrack,
+    PropertyTrack, SectionBase, SequenceData, SequenceTrack,
 } from './types';
 
 /**
@@ -120,6 +122,8 @@ export class SequencePlayer {
                     case 'property': this._evalProperty(track, time, fireFrom); break;
                     case 'cameraCut': this._evalCut(track, time, fireFrom); break;
                     case 'event': if (fireFrom !== undefined) this._fireEvents(track, fireFrom, time); break;
+                    case 'preset': this._evalPreset(track, time, fireFrom); break;
+                    case 'foliage': this._evalFoliage(track, time, fireFrom); break;
                 }
             } catch (e) {
                 Logger.error(`Sequence '${this._seq.name}': track ${track.name ?? track.id} failed: ${e}`, 'Script');
@@ -170,7 +174,9 @@ export class SequencePlayer {
         }
         if (active.length > 0) { state.influencing = true; return { active }; }
         // A section passed inside a single frame (a short one, or a long frame) still lands its end value.
-        const crossed = ended !== null && fireFrom !== undefined && ended.end > fireFrom;
+        // So does a SEEK past one: what holds after a section is part of the picture at that time, so a
+        // seek into the gap between two sections shows the first one's end, as playing there would have.
+        const crossed = ended !== null && (fireFrom === undefined || ended.end > fireFrom);
         if (!state.influencing && !crossed) return null;
         state.influencing = false;
         if (ended && (ended.whenFinished ?? defaultFinish) === 'keep') return { hold: ended };
@@ -374,6 +380,122 @@ export class SequencePlayer {
         accessor.set(value);
     }
 
+    // ---- presets -------------------------------------------------------------------------------------
+
+    /** Warn once per track. */
+    private _warnOnce(track: SequenceTrack, state: TrackState, message: string): void {
+        if (state.warned) return;
+        state.warned = true;
+        Logger.warn(`Sequence '${this._seq.name}': ${track.name ?? track.id}: ${message}`, 'Script');
+    }
+
+    /** The preset of the last section on `track` that starts before `section`: where a chain's next blend starts. */
+    private static _previousPreset(track: PresetTrack, section: PresetSection): string | undefined {
+        let best: PresetSection | undefined;
+        for (const s of track.sections)
+            if (s !== section && s.start < section.start && (!best || s.start >= best.start)) best = s;
+        return best?.preset;
+    }
+
+    private _evalPreset(track: PresetTrack, time: number, fireFrom: number | undefined): void {
+        const state = this._state(track);
+        const res = this._resolveSections(track, state, time, fireFrom, 'keep');
+        if (!res) return;
+        const key = `preset:${track.id}`;
+        if ('restore' in res) { this._restore(key); return; }
+        const node = this._host.resolveSlot(track.slot);
+        if (!node) return;
+        const list = sequencePresetsFor(node);
+        if (!list) { this._warnOnce(track, state, `a ${node.nodeType ?? 'node'} has no presets to blend.`); return; }
+
+        // Every field the list sets, captured once: a stop puts the node back exactly as it was.
+        if (!this._restores.has(key)) {
+            const original: Record<string, unknown> = {};
+            for (const f of presetFields(list)) {
+                const v = snapshotValue(node[f]);
+                if (v !== undefined) original[f] = v;
+            }
+            this._originals.set(key, original);
+            this._restores.set(key, () => {
+                for (const [f, v] of Object.entries(original)) node[f] = assignable(snapshotValue(v), node[f]);
+            });
+        }
+        const original = this._originals.get(key) as Record<string, unknown>;
+
+        // The section that started last is in charge; it blends from its base to its preset, eased.
+        const sections = 'hold' in res ? [res.hold] : res.active;
+        const section = sections.reduce((a, b) => (b.start >= a.start ? b : a));
+        const find = (id: string | undefined) => (id ? list.find(p => p.id === id) : undefined);
+        const target = find(section.preset);
+        if (!target) { this._warnOnce(track, state, `no preset '${section.preset}' for a ${node.nodeType}.`); return; }
+        const base = find(section.from) ?? find(SequencePlayer._previousPreset(track, section));
+        const baseOptions = base?.options as Record<string, unknown> | undefined;
+        const at = 'hold' in res ? section.end : time;
+        const t = section.end > section.start ? smoothstep(section.start, section.end, at) : 1;
+        for (const [f, b] of Object.entries(target.options as Record<string, unknown>)) {
+            if (!(f in original) || b === undefined) continue;
+            const a = baseOptions && baseOptions[f] !== undefined ? baseOptions[f] : original[f];
+            node[f] = assignable(blendPresetValue(a, b, t), node[f]);
+        }
+    }
+
+    // ---- foliage -------------------------------------------------------------------------------------
+
+    private _evalFoliage(track: FoliageTrack, time: number, fireFrom: number | undefined): void {
+        const state = this._state(track);
+        const res = this._resolveSections(track, state, time, fireFrom, 'keep');
+        if (!res) return;
+        const key = `foliage:${track.id}`;
+        if ('restore' in res) { this._restore(key); return; }
+
+        if (!this._restores.has(key)) {
+            const landscape = this._host.resolveSlot(track.slot);
+            const all: any[] = landscape?.terrain?.foliage ?? [];
+            const names = track.layers;
+            const layers = names === 'all' ? all : all.filter(l => names.includes(l.name));
+            if (layers.length === 0) {
+                if (landscape) this._warnOnce(track, state, 'no foliage layer matches.');
+                return;
+            }
+            // Each layer's own values: the channels are multipliers on them, and a stop puts them back.
+            const saved: FoliageSaved[] = layers.map(layer => ({
+                layer, densityScale: layer.densityScale ?? 1, cullDistance: layer.cullDistance,
+                billboardDistance: layer.billboardDistance, castShadows: layer.castShadows,
+            }));
+            this._originals.set(key, saved);
+            this._restores.set(key, () => {
+                for (const o of saved) {
+                    o.layer.densityScale = o.densityScale; o.layer.cullDistance = o.cullDistance;
+                    o.layer.billboardDistance = o.billboardDistance; o.layer.castShadows = o.castShadows;
+                }
+            });
+        }
+        const saved = this._originals.get(key) as FoliageSaved[];
+
+        const sections = 'hold' in res ? [res.hold] : res.active;
+        const at = 'hold' in res ? res.hold.end : time;
+        let density = 1, cull = 1, billboard = 1;
+        let shadows: boolean | undefined;
+        for (const s of sections) {
+            const w = 'hold' in res ? 1 : rampWeight(s.start, s.end, s.easeIn, s.easeOut, at);
+            if (w <= 0) continue;
+            const local = Math.min(at, s.end) - s.start;
+            if (s.density) density += (evaluateKeyedNumber(s.density, local, 1) - density) * w;
+            if (s.cull) cull += (evaluateKeyedNumber(s.cull, local, 1) - cull) * w;
+            if (s.billboard) billboard += (evaluateKeyedNumber(s.billboard, local, 1) - billboard) * w;
+            if (s.shadows && w >= 0.5) shadows = evaluateKeyedStep(s.shadows, local, shadows ?? true);
+        }
+        // A layer drawing out to the renderer's distance (its own 0) is brought in from that one.
+        const sceneCull = Number(this._host.renderer?.foliageCullDistance) || 0;
+        for (const o of saved) {
+            o.layer.densityScale = o.densityScale * clamp01(density);
+            const from = o.cullDistance > 0 ? o.cullDistance : sceneCull;
+            o.layer.cullDistance = cull === 1 || !(from > 0) ? o.cullDistance : Math.max(0.01, from * Math.max(0, cull));
+            if (Number.isFinite(o.billboardDistance)) o.layer.billboardDistance = o.billboardDistance * Math.max(0, billboard);
+            o.layer.castShadows = shadows ?? o.castShadows;
+        }
+    }
+
     // ---- camera cut ----------------------------------------------------------------------------------
 
     private _evalCut(track: CameraCutTrack, time: number, fireFrom: number | undefined): void {
@@ -439,4 +561,20 @@ export class SequencePlayer {
             try { listener(name, key); } catch (e) { Logger.error(`Sequence '${this._seq.name}': an event listener threw: ${e}`, 'Script'); }
         }
     }
+}
+
+/** A foliage layer's values as a Foliage track found them. */
+interface FoliageSaved {
+    layer: any;
+    densityScale: number;
+    cullDistance: number;
+    billboardDistance: number;
+    castShadows: boolean;
+}
+
+/** `v` in the shape the target holds: a typed array stays one (a gl-matrix vec3 field), else as is. */
+function assignable(v: unknown, current: unknown): unknown {
+    if (Array.isArray(v) && ArrayBuffer.isView(current) && !(current instanceof DataView))
+        return new (current.constructor as new (a: number[]) => unknown)(v);
+    return v;
 }

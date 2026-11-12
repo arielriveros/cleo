@@ -9,7 +9,7 @@ import { definePresets, type Preset } from "../../presets";
 export type WeatherPreset = Preset<WeatherOptions>;
 
 // The kind before its rate: the order the fields are assigned in.
-const BASE: WeatherOptions = { wetness: 0, snow: 0, puddles: 0, precipitation: 'none', precipitationRate: 0, precipitationWind: 0.5 };
+const BASE: WeatherOptions = { wetness: 0, snow: 0, puddles: 0, precipitation: 'none', precipitationRate: 0, precipitationSnowShare: 0.5, precipitationWind: 0.5 };
 
 export const WEATHER_PRESETS: WeatherPreset[] = definePresets(BASE, [
     ['dry', 'Dry', 'The default: nothing wet, no snow, nothing falling.', {}],
@@ -19,6 +19,8 @@ export const WEATHER_PRESETS: WeatherPreset[] = definePresets(BASE, [
         { wetness: 1, puddles: 0.7, precipitation: 'rain', precipitationRate: 0.6 }],
     ['storm', 'Storm', 'A downpour slanting in the wind, the hollows brimming.',
         { wetness: 1, puddles: 0.9, precipitation: 'rain', precipitationRate: 1, precipitationWind: 1 }],
+    ['sleet', 'Sleet', 'Rain and snow falling together on wet ground, a little of it settling.',
+        { wetness: 0.8, snow: 0.15, puddles: 0.4, precipitation: 'mixed', precipitationRate: 0.5, precipitationSnowShare: 0.5 }],
     ['lightSnow', 'Light Snow', 'Flakes drifting down onto a dusting on flat ground and the tops of leaves and blades.',
         { wetness: 0.2, snow: 0.35, precipitation: 'snow', precipitationRate: 0.3 }],
     ['snowedIn', 'Snowed In', 'Thick snow on everything flat enough to hold it, branches bowed under it, still snowing.',
