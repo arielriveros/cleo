@@ -24,7 +24,7 @@ import type { RenderTarget } from '../rhi/resources';
 import { DEFAULT_BLEND, SPRITE_ADDITIVE_BLEND, OVERLAY_BLEND } from '../rhi/types';
 import type { BlendState } from '../rhi/types';
 import { TextureManager } from '../systems/textureManager';
-import { TilemapProgram, FORWARD_PROGRAMS, SpriteProgram } from './programs';
+import { TilemapProgram, SpriteProgram, SpriteLitProgram } from './programs';
 import type { FrameView } from './frameView';
 import type { FrameTargets } from './frameTargets';
 import type { PassEncoder } from './passEncoder';
@@ -196,7 +196,9 @@ export class Sprite2DPasses {
     private _beginList(target: RenderTarget): void {
         this._spriteCount = 0;
         this._itemCount = 0;
+        this._recordCount = 0;
         this._unsortedCount = 0;
+        this._litGridState = -1;
         this._particleNodes.length = 0;
         this._tileCount = 0;
         const cam = this._view.camera;
@@ -226,11 +228,56 @@ export class Sprite2DPasses {
         // A scene sprite authored additive (fire, glows) adds its light; the overlay's icons never do.
         const additive = blendClass === BLEND_ALPHA && sprite.blend === 'additive';
         this._spriteAdditive[s] = additive ? 1 : 0;
-        // A lit sprite (Sprite.lit) draws with its own program and material, one draw each; icons are never lit.
-        this._spriteKeys[s] = !this.batching || (blendClass !== BLEND_OVERLAY && sprite.lit)
-            ? NO_BATCH : this._unlitKey(sprite, additive ? BLEND_ADDITIVE : blendClass);
+        const blendDigit = additive ? BLEND_ADDITIVE : blendClass;
+        // A lit sprite (Sprite.lit) draws with its own program and material; the overlay's icons are never lit.
+        const lit = blendClass !== BLEND_OVERLAY && sprite.lit;
+        this._spriteLit[s] = lit ? 1 : 0;
+        let key: number;
+        if (lit) {
+            // Kept in step with the sprite (its tint, sides and tileset's lighting maps) every frame.
+            const material = sprite.drawMaterial();
+            // Off the cluster grid (a thumbnail), a lit sprite takes its own CPU-gathered key light as
+            // uniforms: it draws alone.
+            key = this.batching && this._litGrid() ? this._litKey(material, blendDigit) : NO_BATCH;
+        } else {
+            key = this.batching ? this._unlitKey(sprite, blendDigit) : NO_BATCH;
+        }
+        this._spriteKeys[s] = key;
         this._spriteNodes[s] = node;
         this._spriteCount = s + 1;
+    }
+
+    /**
+     * Whether this pass's lit sprites light every local light per pixel through the frame's cluster grid
+     * (spriteLit.wgsl `localLights`), decided once per pass: the lit program binds it, and the frame is not
+     * a thumbnail (whose grid is not the scene's). Off it, each takes its strongest local light from the CPU.
+     */
+    private _litGrid(): boolean {
+        if (this._litGridState < 0) {
+            const pipeline = this._pipelines.memoized(this._memo, this, 'spriteLit', SpriteLitProgram, {
+                cullMode: 'none', depthStencil: DEPTH_TEST, blend: DEFAULT_BLEND, vertex: 'model', builtFor: 'sprite',
+                target: this._targets.scene.renderTarget,
+            });
+            this._litGridState = this._bindGroups.declaresFrameLighting(pipeline) && !this._host.thumbnailMode
+                && !this._view.capturing ? 1 : 0;
+        }
+        return this._litGridState === 1;
+    }
+
+    /**
+     * {@link _unlitKey} for a lit sprite's draw material: its three maps (colour, six-way positive or normal,
+     * six-way negative or ORM) and lighting mode, as one combination id, plus the same sides, wireframe and
+     * blend digits, tagged lit so a lit and an unlit sprite never share a draw.
+     */
+    private _litKey(material: Material, blendClass: number): number {
+        const combo = `${material.textures.get('texture') ?? ''}|${material.textures.get('mapA') ?? ''}|`
+            + `${material.textures.get('mapB') ?? ''}|${material.properties.get('mode') ?? 0}|`
+            + `${material.properties.get('hasOrm') ? 1 : 0}|${material.properties.get('hasTexture') ? 1 : 0}`;
+        let id = this._litCombos.get(combo) ?? 0;
+        if (id === 0) this._litCombos.set(combo, id = this._litCombos.size + 1);
+        const cull = CULL_DIGIT[ModelDraw.cullFor(material.config.side)];
+        const wire = material.config.wireframe ? 1 : 0;
+        return ((((id * 2 + wire) * 3 + cull) * 3 + blendClass) * 2) + 1;
     }
 
     /**
@@ -250,7 +297,7 @@ export class Sprite2DPasses {
         const hasTexture = material.properties.get('hasTexture') ? 1 : 0;
         const cull = CULL_DIGIT[ModelDraw.cullFor(material.config.side)];
         const wire = material.config.wireframe ? 1 : 0;
-        return (((tex * 2 + hasTexture) * 2 + wire) * 3 + cull) * 3 + blendClass;
+        return ((((tex * 2 + hasTexture) * 2 + wire) * 3 + cull) * 3 + blendClass) * 2;
     }
 
     /** The list's sprites, farthest from the camera first; stable for equal distances. */
@@ -382,11 +429,13 @@ export class Sprite2DPasses {
         const sprite = kind === KIND_SPRITE;
         this._itemKeys[i] = sprite ? this._spriteKeys[ref] : NO_BATCH;
         this._itemAdditive[i] = sprite ? this._spriteAdditive[ref] : 0;
+        if (sprite) this._recordCount++;
     }
 
     /**
-     * Draw the list into `pass`: plan the batches, give every batched sprite its record (contiguous per
-     * batch, in draw order), then walk the batches. `scene` is null for the overlay's icons (no particles).
+     * Draw the list into `pass`: plan the batches, give every sprite its record (contiguous per batch, in
+     * draw order), then walk the batches. A sprite that never merges is a batch of one. `scene` is null for
+     * the overlay's icons (no particles).
      */
     private _drawList(pass: RenderPassEncoder, scene: Scene | null, blend: BlendState, blendClass: number): void {
         const count = this._itemCount;
@@ -395,18 +444,16 @@ export class Sprite2DPasses {
         const runs = planner.plan(count, this._itemKeys, this._itemAdditive, this._boundsOf);
         const order = planner.order;
 
-        let batched = 0;
-        for (let i = 0; i < count; i++) if (this._itemKeys[i] >= 0) batched++;
         const objects = this._sys.objects;
         let record = 0;
-        if (batched > 0) {
+        if (this._recordCount > 0) {
             // Claimed, then filled before anything else can append: every batch's records are contiguous.
-            record = objects.appendRun(batched);
+            record = objects.appendRun(this._recordCount);
             const staging = objects.staging;
             let r = record;
             for (let p = 0; p < count; p++) {
                 const item = order[p];
-                if (this._itemKeys[item] < 0) continue;
+                if (this._itemKind[item] !== KIND_SPRITE) continue;
                 this._packSprite(staging, r++ * OBJECT_RECORD_FLOATS, this._itemRef[item], blendClass);
             }
         }
@@ -416,7 +463,6 @@ export class Sprite2DPasses {
             const ref = this._itemRef[item];
             const kind = this._itemKind[item];
             if (kind === KIND_SPRITE) {
-                if (this._itemKeys[item] < 0) { this.renderSprite(this._spriteNodes[ref], pass, blend); continue; }
                 const n = planner.runCount[b];
                 this._drawSpriteBatch(pass, ref, record, n, blend, blendClass);
                 record += n;
@@ -446,23 +492,54 @@ export class Sprite2DPasses {
         const weight = sprite.exposureWeight;
         const drive = node.overdrive * node.lightFollowScale;
         const intensity = weight < 1 && this._view.exposure > 0 ? drive * Math.pow(this._view.exposure, weight - 1) : drive;
+        const ambient = this._spriteLit[s] ? this._litAmbient(node, s) : null;
         packSpriteRecord(out, offset, this._spriteMatrices, s * 16, dissolveOf(node.effectiveFade), node.uvRectInto(this._uv),
-                         soft, sprite.tint, sprite.opacity, intensity, null);
+                         soft, sprite.tint, sprite.opacity, intensity, ambient);
         frameStats.objects++;
         frameStats.spritesDrawn++;
     }
 
     /**
-     * One instanced draw of `count` unlit sprites, records `first`.. on, led by sprite slot `s` (every member
-     * shares its key). The order of the calls is WebGL2's: `setPipeline` there neither binds the program the
-     * uniform writes go to nor keeps texture units, so the program is bound first and the groups set after.
+     * A lit sprite's fill where it stands, into its record: a light probe's in its volume (a room's smoke is lit
+     * by the room), else the scene ambient and sky light (render/probeLighting.ts). Off the cluster grid the
+     * local lights past the strongest one join it, through the 1/π, as lit particles take them, and the
+     * strongest is kept for the sprite's own draw (`_litKeyLight`).
+     */
+    private _litAmbient(node: SpriteNode, s: number): ArrayLike<number> {
+        const out = this._litAmbientOut;
+        const scene = node.scene;
+        const key = this._litKeyLight, k = s * 6;
+        for (let i = 0; i < 6; i++) key[k + i] = i === 1 ? 1 : 0;
+        if (!scene) { out[0] = 0; out[1] = 0; out[2] = 0; return out; }
+        const light = this._particlePasses.frameLight(scene);
+        const m = this._spriteMatrices, at = s * 16;
+        vec3.set(this._litPos, m[at + 12], m[at + 13], m[at + 14]);
+        const ambient = this._sys.lighting.probeAmbientAt(scene, this._litPos, light.ambient, this._litScratch);
+        out[0] = ambient[0]; out[1] = ambient[1]; out[2] = ambient[2];
+        if (!this._litGrid()) {
+            const local = gatherParticleLocalLight([this._litPos[0], this._litPos[1], this._litPos[2]], light.localLights);
+            out[0] += local.fill[0] / Math.PI; out[1] += local.fill[1] / Math.PI; out[2] += local.fill[2] / Math.PI;
+            key[k] = local.keyDirection[0]; key[k + 1] = local.keyDirection[1]; key[k + 2] = local.keyDirection[2];
+            key[k + 3] = local.keyColor[0]; key[k + 4] = local.keyColor[1]; key[k + 5] = local.keyColor[2];
+        }
+        return out;
+    }
+
+    /**
+     * One instanced draw of `count` sprites, records `first`.. on, led by sprite slot `s` (every member shares
+     * its key, so its program and material state). The order of the calls is WebGL2's: `setPipeline` there
+     * neither binds the program the uniform writes go to nor keeps texture units, so the program is bound
+     * first and the groups set after.
      */
     private _drawSpriteBatch(pass: RenderPassEncoder, s: number, first: number, count: number,
                              blend: BlendState, blendClass: number): void {
         const lead = this._spriteNodes[s];
-        const material = lead.sprite.material;
-        this._shaderManager.bind('sprite');
-        const pipeline = this._pipelines.memoized(this._memo, material, 'sprite', SpriteProgram, {
+        const lit = this._spriteLit[s] === 1;
+        const program = lit ? 'spriteLit' : 'sprite';
+        // A lit sprite's draw material was re-synced when it joined the list.
+        const material = lit ? lead.sprite.drawMaterial() : lead.sprite.material;
+        this._shaderManager.bind(program);
+        const pipeline = this._pipelines.memoized(this._memo, material, program, lit ? SpriteLitProgram : SpriteProgram, {
             cullMode: ModelDraw.cullFor(material.config.side),
             depthStencil: DEPTH_TEST,
             // DEFAULT_BLEND for a scene sprite (its alpha must not touch the bloom mask), OVERLAY_BLEND for an
@@ -483,14 +560,45 @@ export class Sprite2DPasses {
         // so a write past `applyProperties` would leave its memo describing a block it no longer matches.
         const live = blendClass !== BLEND_OVERLAY && !this._host.thumbnailMode ? 1 : 0;
         material.properties.set('depthParams', [cam.near, cam.far, cam.type === 'orthographic' ? 1 : 0, live]);
+        const grid = lit && this._litGrid();
+        if (lit) this._setBatchLight(lead, material, s, grid);
+        if (grid) this._sys.lighting.lightGrid.uploadUniforms(this._shaderManager);
         this._materials.applyProperties(material);
         pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
-        // Anything appended since (a lit sprite's own record) is uploaded, and a grown table rebinds.
+        if (lit && this._bindGroups.declaresShadowGroup(pipeline)) {
+            // The key light's cascades: a lit sprite takes the shadows the sun casts on it. Once per batch.
+            this._sys.shadows.uploadShadowUniforms('spriteLit');
+            pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline, false));
+        }
+        // Anything appended since is uploaded, and a grown table rebinds.
         const objects = this._sys.objects;
         objects.flush();
         pass.setBindGroup(2, this._bindGroups.objectDataGroup(pipeline, objects.texture));
         this._passes.recordDrawInstances(pass, this.spriteQuad, count, first);
         frameStats.spriteDraws++;
+    }
+
+    /**
+     * A lit batch's light, the same for every sprite in it (lit particles take it alike, render/particlePasses.ts):
+     * the frame's key light, whether the cluster grid lights the local lights per pixel, and, off it, the lead's
+     * own strongest local light (a batch of one there). Each sprite's frame -- right, up and back, the frame the
+     * Creator bakes six-way lightmaps and normals in -- and its light radius come from its matrix in the shader;
+     * its fill rides in its record.
+     */
+    private _setBatchLight(lead: SpriteNode, material: Material, s: number, grid: boolean): void {
+        material.properties.set('gridLights', grid ? 1 : 0);
+        const scene = lead.scene;
+        if (!scene) {
+            material.properties.set('sunColor', [0, 0, 0]);
+            material.properties.set('keyColor', [0, 0, 0]);
+            return;
+        }
+        const light = this._particlePasses.frameLight(scene);
+        material.properties.set('sunDir', [light.sunDirection[0], light.sunDirection[1], light.sunDirection[2]]);
+        material.properties.set('sunColor', [light.sunColor[0], light.sunColor[1], light.sunColor[2]]);
+        const key = this._litKeyLight, k = s * 6;
+        material.properties.set('keyDir', grid ? NO_LOCAL_LIGHT.keyDirection : [key[k], key[k + 1], key[k + 2]]);
+        material.properties.set('keyColor', grid ? NO_LOCAL_LIGHT.keyColor : [key[k + 3], key[k + 4], key[k + 5]]);
     }
 
     /** The planner's view of an item's screen rectangle (graphics/spriteBatching.ts). */
@@ -538,6 +646,8 @@ export class Sprite2DPasses {
         this._spriteBounded = grown(this._spriteBounded, new Uint8Array(size));
         this._spriteKeys = grown(this._spriteKeys, new Int32Array(size));
         this._spriteAdditive = grown(this._spriteAdditive, new Uint8Array(size));
+        this._spriteLit = grown(this._spriteLit, new Uint8Array(size));
+        this._litKeyLight = grown(this._litKeyLight, new Float64Array(size * 6));
     }
 
     // --- The draw list: reused pass to pass, its buffers only grow ------------------------------------
@@ -559,6 +669,15 @@ export class Sprite2DPasses {
     private _spriteBounded = new Uint8Array(0);
     private _spriteKeys = new Int32Array(0);
     private _spriteAdditive = new Uint8Array(0);
+    private _spriteLit = new Uint8Array(0);
+    /** Per lit sprite off the cluster grid: its strongest local light, direction then colour. */
+    private _litKeyLight = new Float64Array(0);
+    private readonly _litCombos = new Map<string, number>();
+    /** -1 not yet decided this pass, else 0/1: see `_litGrid`. */
+    private _litGridState = -1;
+    private readonly _litPos = vec3.create();
+    private readonly _litScratch: number[] = [0, 0, 0];
+    private readonly _litAmbientOut: number[] = [0, 0, 0];
     // Particle systems and tile draws, by slot.
     private readonly _particleNodes: ParticleSystemNode[] = [];
     private _tileCount = 0;
@@ -575,6 +694,8 @@ export class Sprite2DPasses {
     private _unsortedBand = new Float64Array(0);
     private _unsortedDepth = new Float64Array(0);
     private _itemCount = 0;
+    /** Sprites in the list: each gets a record. */
+    private _recordCount = 0;
     private _itemKind = new Uint8Array(0);
     private _itemRef = new Int32Array(0);
     private _itemKeys = new Int32Array(0);
@@ -654,158 +775,6 @@ export class Sprite2DPasses {
         frameStats.tilemapDraws++;
         frameStats.objects++;
     }
-
-    /** Record one sprite into `pass`, blended by `blend` (an editor icon passes OVERLAY_BLEND). */
-    public renderSprite(node: SpriteNode, pass?: RenderPassEncoder, blend: BlendState = DEFAULT_BLEND): void {
-        if (!node.initialized)
-            node.initializeSprite();
-        frameStats.objects++;
-        frameStats.spritesDrawn++;
-
-        // A lit sprite (Sprite.lit) draws with its own material and program; the overlay's icons never do.
-        const material = blend === OVERLAY_BLEND ? node.sprite.material : node.sprite.drawMaterial();
-        this._shaderManager.bind(material.type);
-
-        // A scene sprite authored additive (fire, glows) adds its light instead. The editor overlay's
-        // icons keep the blend they were handed.
-        const additive = blend === DEFAULT_BLEND && node.sprite.blend === 'additive';
-        if (additive) blend = SPRITE_ADDITIVE_BLEND;
-
-        // Everything the hand-written tail below sets, as pipeline state: always blended, never a
-        // depth write (a blended sprite that wrote depth would occlude the ones sorted behind it),
-        // and the material's own cull side and topology.
-        const reflection = FORWARD_PROGRAMS[material.type];
-        if (!pass || !reflection) return;
-        const pipeline = this._pipelines.get(material.type, reflection, {
-            cullMode: ModelDraw.cullFor(material.config.side),
-            depthStencil: DEPTH_TEST,
-            // DEFAULT_BLEND for a scene sprite (its alpha must not touch the bloom mask), OVERLAY_BLEND
-            // for an editor icon drawn into the overlay layer, where alpha IS coverage.
-            blend,
-            topology: material.config.wireframe ? 'line-list' : 'triangle-list',
-            vertex: 'model',
-            builtFor: material.type,
-        });
-        pass.setPipeline(pipeline);
-
-        // The sprite's tile, as a sub-rect of the atlas. `basic.vs` does
-        // `fragTexCoord = a_texCoord * u_uvScale + u_uvOffset` over the quad's baked 0..1 UVs, and
-        // `Tileset.uvOf` already applies the V flip, so static and animated sprites share one path.
-        const [u0, v0, u1, v1] = node.uvRect();
-        this._shaderManager.setUniform('u_uvOffset', [u0, v0]);
-        this._shaderManager.setUniform('u_uvScale', [u1 - u0, v1 - v0]);
-
-        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
-        this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
-        this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
-        
-        // The camera-facing constraint (render/billboard.ts): screen-aligned, or turned about its upright axis
-        // to face the camera's position.
-        const spriteMatrix = this._billboardInto(node, this._spriteMatrix);
-
-        // SpriteNode.maxScreenSize: no taller than that many CSS pixels (the editor's viewport icons).
-        if (node.maxScreenSize > 0)
-            capSpriteScreenSize(spriteMatrix, node.maxScreenSize, this._view.camera, this._host.canvas.clientHeight);
-
-        // Soft fade (Sprite.softness): the sprite keeps the plain depth test -- whatever stands in front of it
-        // hides it, a torch head seen from below included -- and fades out over `softness` metres as it nears
-        // the opaque surface BEHIND it (chunks/basicForward.wgsl, against the scene's depth snapshot), so a
-        // flame set into its torch head or logs melts into them instead of being cut along a line. Off where
-        // there is no live snapshot (a thumbnail, the overlay's icons).
-        const cam = this._view.camera;
-        const soft = blend !== OVERLAY_BLEND && !this._host.thumbnailMode ? node.sprite.softness : 0;
-        material.properties.set('softness', soft);
-        if (soft > 0) material.properties.set('depthParams', [cam.near, cam.far, cam.type === 'orthographic' ? 1 : 0, 1]);
-
-        this._shaderManager.setUniform('u_model', spriteMatrix);
-        this._materials.setDissolve(node.effectiveFade);
-        const lit = material.type === 'spriteLit';
-        // The frame's cluster grid, when the lit program has it bound: every local light per pixel.
-        const gridLights = lit && this._bindGroups.declaresFrameLighting(pipeline) && !this._host.thumbnailMode && !this._view.capturing;
-        if (lit) this._setSpriteLight(node, material, spriteMatrix, gridLights);
-        if (gridLights) this._sys.lighting.lightGrid.uploadUniforms(this._shaderManager);
-
-        // Per draw, from the tile on screen: an animated sprite follows its frame's overdrive, and two
-        // sprites sharing a tileset never fight over one value. A sprite that takes less than the whole
-        // exposure (Sprite.exposureWeight) is divided by the rest of it here; the tonemapper multiplies by all.
-        const weight = node.sprite.exposureWeight;
-        // A sprite that burns with a light (Sprite.followLight) swells and dims on the light's own beat.
-        const drive = node.overdrive * node.lightFollowScale;
-        material.properties.set('intensity', weight < 1 && this._view.exposure > 0
-            ? drive * Math.pow(this._view.exposure, weight - 1) : drive);
-
-        // Set material uniforms + bind textures
-        let record = 0;
-        this._materials.applyProperties(material);
-        pass.setBindGroup(0, this._bindGroups.materialGroup(pipeline, material));
-        if (lit && this._bindGroups.declaresShadowGroup(pipeline)) {
-            // The key light's cascades: a lit sprite takes the shadows the sun casts on it.
-            this._sys.shadows.uploadShadowUniforms(material.type);
-            pass.setBindGroup(3, this._bindGroups.frameLightingGroup(pipeline, false));
-        }
-        // The Basic program reads the matrix, the dissolve and the tile from the per-object table.
-        if (this._bindGroups.declaresObjectData(pipeline)) {
-            const objects = this._sys.objects;
-            record = objects.rowFor(node, spriteMatrix, dissolveOf(node.effectiveFade), false, 0,
-                                    u1 - u0, v1 - v0, u0, v0);
-            pass.setBindGroup(2, this._bindGroups.objectDataGroup(pipeline, objects.texture));
-        }
-
-        // Sprites are always transparent
-        this._shaderManager.setUniform('u_isTransparent', true);
-        this._passes.recordDraw(pass, node.sprite.mesh, 0, 0, -1, record);
-    }
-
-    /**
-     * A lit sprite's light (Sprite.lit, spriteLit.wgsl): the frame's key light and fill as lit particles
-     * take them, plus the strongest local light at the sprite, and the sprite's own frame -- its right, up
-     * and BACK (away from the camera), the frame the Creator bakes six-way lightmaps and normals in. A
-     * quad seen from behind (a free sprite) shows its texture mirrored, so its frame is mirrored with it.
-     */
-    private _setSpriteLight(node: SpriteNode, material: Material, m: mat4, gridLights: boolean): void {
-        material.properties.set('gridLights', gridLights ? 1 : 0);
-        const right = vec3.normalize(this._litRight, vec3.set(this._litRight, m[0], m[1], m[2]));
-        const up = vec3.normalize(this._litUp, vec3.set(this._litUp, m[4], m[5], m[6]));
-        const back = vec3.cross(this._litBack, right, up);
-        vec3.normalize(back, vec3.negate(back, back));
-        const cam = this._view.camera.position;
-        if ((m[12] - cam[0]) * back[0] + (m[13] - cam[1]) * back[1] + (m[14] - cam[2]) * back[2] < 0) {
-            vec3.negate(back, back);
-            vec3.negate(right, right);
-        }
-        material.properties.set('right', [right[0], right[1], right[2]]);
-        material.properties.set('up', [up[0], up[1], up[2]]);
-        material.properties.set('back', [back[0], back[1], back[2]]);
-        material.properties.set('lightRadius', spriteLightRadius(m));
-
-        const scene = node.scene;
-        if (!scene) {
-            material.properties.set('sunColor', [0, 0, 0]);
-            material.properties.set('keyColor', [0, 0, 0]);
-            material.properties.set('ambient', [0, 0, 0]);
-            return;
-        }
-        const light = this._particlePasses.frameLight(scene);
-        // With the grid, every local light is evaluated per pixel (spriteLit.wgsl localLights): no CPU key,
-        // and none of their fill folded into the ambient.
-        const local = gridLights ? NO_LOCAL_LIGHT : gatherParticleLocalLight([m[12], m[13], m[14]], light.localLights);
-        material.properties.set('sunDir', [light.sunDirection[0], light.sunDirection[1], light.sunDirection[2]]);
-        material.properties.set('sunColor', [light.sunColor[0], light.sunColor[1], light.sunColor[2]]);
-        // The fill where the sprite stands: a light probe's in its volume (a room's smoke is lit by the
-        // room), else the scene ambient and sky light (render/probeLighting.ts).
-        const ambient = this._sys.lighting.probeAmbientAt(scene, vec3.set(this._litPos, m[12], m[13], m[14]), light.ambient, this._litAmbient);
-        // As lit particles: the fill of the local lights past the key joins the ambient, through the 1/π.
-        material.properties.set('ambient', [ambient[0] + local.fill[0] / Math.PI, ambient[1] + local.fill[1] / Math.PI,
-                                            ambient[2] + local.fill[2] / Math.PI]);
-        material.properties.set('keyDir', local.keyDirection);
-        material.properties.set('keyColor', local.keyColor);
-    }
-
-    private readonly _litRight = vec3.create();
-    private readonly _litPos = vec3.create();
-    private readonly _litAmbient: number[] = [0, 0, 0];
-    private readonly _litUp = vec3.create();
-    private readonly _litBack = vec3.create();
 
     /** Builds a sprite's world matrix with its camera-facing billboard constraint applied (render/billboard.ts). */
     public spriteBillboardMatrix(node: SpriteNode): mat4 {

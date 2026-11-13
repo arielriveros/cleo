@@ -17,6 +17,10 @@
 // sky fill, and the strongest local light near the sprite as a second key (the rest folded into the fill).
 // The lit colour is scene-linear, like a model's: it takes the camera's whole exposure. Only the six-way
 // EMISSION (a fire inside its smoke) is scaled by the sprite's intensity (overdrive, exposure weight).
+//
+// BATCHED (render/sprites2d.ts): one draw holds every lit sprite that shares the tileset's maps. Each
+// instance's record (objectData.ts `packSpriteRecord`) carries its tint, opacity, intensity, soft fade and
+// fill; its frame and light radius come from its own matrix. The block holds what the batch shares.
 
 #include "./chunks/dither.wgsl"
 #include "./chunks/objectData.wgsl"
@@ -37,6 +41,16 @@ struct SpriteLitVaryings {
     @location(2) worldPos: vec3<f32>,
     // The positive distance in front of the camera: the cascade pick.
     @location(3) viewDepth: f32,
+    // The instance, the same for the whole quad: (tint r, g, b as authored, opacity) ...
+    @location(4) @interpolate(flat) look: vec4<f32>,
+    // ... (intensity, fill r, g, b) ...
+    @location(5) @interpolate(flat) extra: vec4<f32>,
+    // ... its right and up, unit (the matrix's first two columns), and its centre ...
+    @location(6) @interpolate(flat) right: vec3<f32>,
+    @location(7) @interpolate(flat) up: vec3<f32>,
+    @location(8) @interpolate(flat) centre: vec3<f32>,
+    // ... and (light radius, soft fade in metres).
+    @location(9) @interpolate(flat) params: vec2<f32>,
 };
 
 // The same block the Basic program reads (chunks/basicVertex.wgsl), so the 2D pass's uploads land alike.
@@ -55,11 +69,19 @@ fn vs_main(
 ) -> SpriteLitVaryings {
     let model = objectModel(objectIndex);
     let uvt = objectUvTransform(objectIndex);
+    let params = objectParams(objectIndex);
     let world = model * vec4<f32>(position, 1.0);
     let view = u_transform.u_view * world;
     var out: SpriteLitVaryings;
     out.uv = texCoord * uvt.xy + uvt.zw;
-    out.dissolve = vec2<f32>(objectParams(objectIndex).x, u_transform.u_ditherPhase);
+    out.dissolve = vec2<f32>(params.x, u_transform.u_ditherPhase);
+    out.look = objectSpriteLook(objectIndex);
+    out.extra = objectSpriteExtra(objectIndex);
+    out.right = normalize(model[0].xyz);
+    out.up = normalize(model[1].xyz);
+    out.centre = model[3].xyz;
+    // Half the placed quad's smaller world extent (render/sprites2d.ts `spriteLightRadius`): see `lightRadius`.
+    out.params = vec2<f32>(0.5 * min(length(model[0].xyz), length(model[1].xyz)), params.w);
     out.worldPos = world.xyz;
     out.viewDepth = -view.z;
     out.position = u_transform.u_projection * view;
@@ -79,14 +101,8 @@ fn vs_main(
 @group(0) @binding(7) var u_sceneDepth_sampler: sampler;
 
 struct SpriteLitMaterial {
-    color: vec3<f32>,
-    opacity: f32,
     // i32 rather than bool: WGSL forbids bool in a uniform buffer.
     hasTexture: i32,
-    /** The six-way emission's multiplier: the sprite's overdrive over the exposure it does not take. */
-    intensity: f32,
-    /** Soft fade, metres (Sprite.softness); 0 = off. */
-    softness: f32,
     /** 0 flat, 1 six-way, 2 surface. */
     mode: i32,
     /** x near, y far, z 1 = orthographic, w 1 = the depth snapshot is live. */
@@ -95,34 +111,37 @@ struct SpriteLitMaterial {
     sunDir: vec3<f32>,
     hasOrm: i32,
     sunColor: vec3<f32>,
-    /** The ambient and sky fill (deferredLighting's indirect diffuse), plus the local lights past the key. */
-    ambient: vec3<f32>,
-    /** The strongest local light at the sprite: unit direction toward it, and its colour at the sprite. */
+    /**
+     * The strongest local light at the sprite, off the cluster grid (a batch of one there): unit direction
+     * toward it, and its colour at the sprite. Zero colour on the grid.
+     */
     keyDir: vec3<f32>,
     keyColor: vec3<f32>,
-    /** The sprite's frame, unit vectors: its right, its up, and BACK, away from the camera (the bake's). */
-    right: vec3<f32>,
-    up: vec3<f32>,
-    back: vec3<f32>,
     /** The camera (MaterialBinder sets it on every material). */
     viewPos: vec3<f32>,
     /** The draw's pre-exposure (FrameView.drawPreExposure); the lights above are absolute. 0 reads as 1. */
     preExposure: f32,
     /**
      * 1 when the frame's clustered light grid is bound: every local light is then evaluated per pixel
-     * (`localLights`) and `keyColor` / the local share of `ambient` are zero. 0 = the CPU key and fill alone.
+     * (`localLights`) and `keyColor` / the local share of each sprite's fill are zero. 0 = the CPU key and fill alone.
      */
     gridLights: i32,
-    /**
-     * Metres: the nearest a local light is taken to be, in the six-way and flat modes. Such a sprite stands
-     * for a VOLUME of smoke as thick as the quad is wide (half its smaller world extent, set per draw), so a
-     * light inside it lights that volume, not the one quad pixel it sits on: without the floor a fire's light
-     * at the smoke's root was a 1/d^2 spike over its 8 cm source, a white orb at night. The surface mode (a
-     * liquid's skin) keeps the true distance. 0 = the light's source radius alone.
-     */
-    lightRadius: f32,
 };
 @group(1) @binding(1) var<uniform> u_material: SpriteLitMaterial;
+
+// This fragment's sprite, set once at the top of fs_main from its instance.
+//   spriteRight, spriteUp, spriteBack: its frame, unit vectors: its right, its up, and BACK, away from the
+//     camera (the bake's). A quad seen from behind (a free sprite) shows its texture mirrored, so its frame
+//     is mirrored with it.
+//   spriteLightRadius: metres, the nearest a local light is taken to be, in the six-way and flat modes. Such
+//     a sprite stands for a VOLUME of smoke as thick as the quad is wide (half its smaller world extent), so a
+//     light inside it lights that volume, not the one quad pixel it sits on: without the floor a fire's light
+//     at the smoke's root was a 1/d^2 spike over its 8 cm source, a white orb at night. The surface mode (a
+//     liquid's skin) keeps the true distance.
+var<private> spriteRight: vec3<f32>;
+var<private> spriteUp: vec3<f32>;
+var<private> spriteBack: vec3<f32>;
+var<private> spriteLightRadius: f32;
 
 /** Six-way: how much light from `l` (a unit direction toward it, in the sprite's frame) the frame scatters to the eye. */
 fn sixWayLight(l: vec3<f32>, pos: vec4<f32>, neg: vec4<f32>) -> f32 {
@@ -135,7 +154,7 @@ fn sixWayLight(l: vec3<f32>, pos: vec4<f32>, neg: vec4<f32>) -> f32 {
 
 /** `d`, a world direction, in the sprite's frame (right, up, back). */
 fn spriteFrame(d: vec3<f32>) -> vec3<f32> {
-    return vec3<f32>(dot(d, u_material.right), dot(d, u_material.up), dot(d, u_material.back));
+    return vec3<f32>(dot(d, spriteRight), dot(d, spriteUp), dot(d, spriteBack));
 }
 
 /** GGX highlight of one light (Cook-Torrance, Schlick Fresnel, Smith-Schlick visibility), times N.L. */
@@ -184,7 +203,7 @@ fn localLights(p: vec3<f32>, viewDepth: f32, fragXY: vec2<f32>, mode: i32, N: ve
         if (cleoLightReaches(cl.light, p)) {
             let toLight = cl.light.position - p;
             // A medium's light floor (`lightRadius`), a surface's own source radius: see the material block.
-            let floorRadius = select(cl.light.sourceRadius, max(cl.light.sourceRadius, u_material.lightRadius), mode != 2);
+            let floorRadius = select(cl.light.sourceRadius, max(cl.light.sourceRadius, spriteLightRadius), mode != 2);
             let d2 = max(dot(toLight, toLight), floorRadius * floorRadius);
             let L = toLight * inverseSqrt(max(dot(toLight, toLight), 1e-8));
             let cone = spotAttenuation(dot(-L, cl.light.direction), cl.light.coneScale, cl.light.coneOffset);
@@ -222,13 +241,23 @@ fn fs_main(in: SpriteLitVaryings) -> @location(0) vec4<f32> {
 
     let m = u_material;
     cleoFragCoord = in.position.xy;
+    // The sprite's frame (as render/sprites2d.ts built it per draw before batching): back = -(right x up),
+    // and both back and right turned over when the camera is behind the quad.
+    var right = in.right;
+    var back = normalize(-cross(right, in.up));
+    if (dot(in.centre - m.viewPos, back) < 0.0) { back = -back; right = -right; }
+    spriteRight = right;
+    spriteUp = in.up;
+    spriteBack = back;
+    spriteLightRadius = in.params.x;
+    let ambient = in.extra.yzw;
     // The key light's shadow ON THE QUAD (a single tap: smoke is soft, and its own self-shadow is baked),
     // at the shadow strength the scene sets, and the clouds'.
     let tap = shadowVisibility(in.worldPos, in.viewDepth);
     let vis = (1.0 - (1.0 - tap) * u_shadow.u_shadowStrength) * cleoCloudShadow(in.worldPos);
-    let tint = toLinear(m.color);
+    let tint = toLinear(in.look.rgb);
     var rgb = vec3<f32>(0.0);
-    var alpha = m.opacity;
+    var alpha = in.look.a;
 
     if (m.mode == 1) {
         // Six-way. The maps are lighting data (linear), not colour.
@@ -236,22 +265,22 @@ fn fs_main(in: SpriteLitVaryings) -> @location(0) vec4<f32> {
         let key = sixWayLight(spriteFrame(m.keyDir), mapA, mapB);
         // Light from everywhere at once: the six responses' mean.
         let fill = (mapA.r + mapA.g + mapA.b + mapB.r + mapB.g + mapB.b) / 6.0;
-        rgb = tint * (m.ambient * fill + (m.sunColor * vis * sun + m.keyColor * key) / SPRITE_PI);
+        rgb = tint * (ambient * fill + (m.sunColor * vis * sun + m.keyColor * key) / SPRITE_PI);
         if (m.gridLights != 0) {
             let local = localLights(in.worldPos, in.viewDepth, in.position.xy, 1, vec3<f32>(0.0, 0.0, 1.0),
                                     vec3<f32>(0.0, 0.0, 1.0), 1.0, vec3<f32>(0.04), mapA, mapB, m.preExposure);
             rgb += tint * local.sixWay / SPRITE_PI;
         }
         // A fire inside the smoke: the colour atlas where the negative map says it emits.
-        if (m.hasTexture != 0) { rgb += toLinear(tex.rgb) * mapB.a * m.intensity; }
+        if (m.hasTexture != 0) { rgb += toLinear(tex.rgb) * mapB.a * in.extra.x; }
         alpha *= mapA.a;
     } else if (m.mode == 2) {
         // Surface: base colour, normal, ORM.
         var albedo = tint;
         if (m.hasTexture != 0) { albedo *= toLinear(tex.rgb); alpha *= tex.a; }
         let nt = mapA.xyz * 2.0 - 1.0;
-        let toward = -m.back;
-        let N = normalize(m.right * nt.x + m.up * nt.y + toward * nt.z);
+        let toward = -spriteBack;
+        let N = normalize(spriteRight * nt.x + spriteUp * nt.y + toward * nt.z);
         let V = normalize(m.viewPos - in.worldPos);
         var occlusion = 1.0;
         var roughness = 0.5;
@@ -262,7 +291,7 @@ fn fs_main(in: SpriteLitVaryings) -> @location(0) vec4<f32> {
         let diffuse = albedo * (1.0 - metallic);
         let sunL = max(dot(N, m.sunDir), 0.0);
         let keyL = max(dot(N, m.keyDir), 0.0);
-        rgb = diffuse * (m.ambient * occlusion + (m.sunColor * vis * sunL + m.keyColor * keyL) / SPRITE_PI);
+        rgb = diffuse * (ambient * occlusion + (m.sunColor * vis * sunL + m.keyColor * keyL) / SPRITE_PI);
         rgb += m.sunColor * vis * spriteSpecular(N, V, m.sunDir, roughness, f0)
              + m.keyColor * spriteSpecular(N, V, m.keyDir, roughness, f0);
         if (m.gridLights != 0) {
@@ -271,15 +300,15 @@ fn fs_main(in: SpriteLitVaryings) -> @location(0) vec4<f32> {
             rgb += diffuse * local.diffuse / SPRITE_PI + local.specular;
         }
         // A little of the fill in the highlight, so a glossy liquid is not flat away from the lights.
-        rgb += m.ambient * f0 * occlusion * (1.0 - roughness) * 0.5;
+        rgb += ambient * f0 * occlusion * (1.0 - roughness) * 0.5;
     } else {
         // Flat: half-Lambert, a card facing the camera.
         var albedo = tint;
         if (m.hasTexture != 0) { albedo *= toLinear(tex.rgb); alpha *= tex.a; }
-        let n = -m.back;
+        let n = -spriteBack;
         let sunWrap = dot(n, m.sunDir) * 0.5 + 0.5;
         let keyWrap = dot(n, m.keyDir) * 0.5 + 0.5;
-        rgb = albedo * (m.ambient + (m.sunColor * vis * sunWrap + m.keyColor * keyWrap) / SPRITE_PI);
+        rgb = albedo * (ambient + (m.sunColor * vis * sunWrap + m.keyColor * keyWrap) / SPRITE_PI);
         if (m.gridLights != 0) {
             let local = localLights(in.worldPos, in.viewDepth, in.position.xy, 0, n, n, 1.0, vec3<f32>(0.04),
                                     mapA, mapB, m.preExposure);
@@ -288,10 +317,11 @@ fn fs_main(in: SpriteLitVaryings) -> @location(0) vec4<f32> {
     }
 
     // Soft fade: the view depths of the scene behind and of this fragment, from the same window depth.
-    if (m.softness > 0.0 && m.depthParams.w > 0.5) {
+    let softness = in.params.y;
+    if (softness > 0.0 && m.depthParams.w > 0.5) {
         let uv = in.position.xy / vec2<f32>(textureDimensions(u_sceneDepth_texture, 0));
         let scene = spriteViewDepth(textureSampleLevel(u_sceneDepth_texture, u_sceneDepth_sampler, uv, 0));
-        alpha *= clamp((scene - spriteViewDepth(in.position.z)) / m.softness, 0.0, 1.0);
+        alpha *= clamp((scene - spriteViewDepth(in.position.z)) / softness, 0.0, 1.0);
     }
     let preExposure = select(1.0, m.preExposure, m.preExposure > 0.0);
     return vec4<f32>(min(rgb * preExposure, vec3<f32>(32768.0)), alpha);

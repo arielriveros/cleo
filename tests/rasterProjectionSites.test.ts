@@ -106,7 +106,6 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             // Smoke-and-fire volumes, ray-marched over the resolved image (`FluidVolumePasses.renderFluidVolumes`).
             'renderFluidVolumes',
             'renderSelectionMask',
-            'renderSprite',
             // The batched sprite pass's raster projection, taken once per draw list (scene sprites and the
             // editor's icons, both after the resolve): every batch draws through it, and the batch planner
             // compares screen rectangles projected through it, so they match what the GPU rasterizes.
