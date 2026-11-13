@@ -704,6 +704,7 @@ get sprite: Sprite
 get/set constraints: 'free' | 'spherical' | 'cylindrical'    // billboarding (render/billboard.ts)
 tileset: string ; tileIndex: number ; tint: vec3 ; opacity: number
 sprite.blend: 'alpha' | 'additive'                           // additive adds light: fire, glows
+sortingOrder: number                                         // higher draws on top; 0 = by depth
 uvRect(): [number, number, number, number]
 initializeSprite(): void
 ```

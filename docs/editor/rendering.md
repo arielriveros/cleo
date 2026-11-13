@@ -74,6 +74,10 @@ hidden, such as a torch in the next room, lights no visible pixel, so it is left
 and goes to the back of the queue for shadow maps, which then go to the lights you can see the light of. A
 light can come back a frame late when you round a corner fast. Needs **GPU Occlusion Queries**.
 
+**Sprite batching** is always on: sprites that share a tileset, blend and sides draw as one instanced call,
+in the order they would have drawn one by one (see [Draw order and batching](tilemap-2d.md#draw-order-and-batching)),
+and a sprite wholly off screen is skipped.
+
 **GPU Foliage Culling** (WebGPU) moves the per-instance half of foliage culling to a compute pass:
 every tree faded out of its detail band, or off screen, is dropped before a vertex of it runs, and the
 buckets draw indirectly. On WebGL2 the toggle is disabled and foliage is packed on the CPU.
@@ -606,7 +610,8 @@ project; click it again (in Play or out) to unlock. Its sections, in order:
 - **Memory** — texture count and megabytes, estimated GPU memory, and the JS heap (Chromium only).
   *GPU est.* is computed from each texture's requested format and mip chain, so it estimates texture
   memory, not total VRAM.
-- **Scene** — lights, sprites, the display resolution and, below 100 % render scale, the internal
+- **Scene** — lights, sprites (and *draws*: how many were drawn this frame, editor icons included, and
+  in how many batched draw calls), the display resolution and, below 100 % render scale, the internal
   one the pipeline actually shades at; the backend and pipeline.
 - **Quality** — the quality preset and the render scale. Ultra reproduces the engine's original
   defaults exactly; High is the default. Render scale is the internal resolution: halving it quarters

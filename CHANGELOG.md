@@ -16,6 +16,21 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Batched sprites.** Sprites that share a tileset, a blend and their sides now go out as one instanced
+  draw call instead of one each, in 2D and in 3D, lit or not, and the editor's icons with them.
+  - *The same picture.* The draw order is kept: a sprite joins an earlier batch only where drawing it there
+    cannot change a pixel (two additive sprites, or two that do not overlap on screen). Measured against
+    the per-sprite path on WebGPU and WebGL2: no difference above frame-to-frame noise.
+  - *Per sprite, nothing splits a batch.* Tint, opacity, soft fade, overdrive, exposure weight, follow
+    light, the animation frame and a lit sprite's fill ride with each sprite. A new program, `sprite.wgsl`,
+    draws the unlit ones; `spriteLit.wgsl` reads the same per-sprite values.
+  - *Faster.* With 1,000 sprites on screen the 2D pass went from 14 ms to 2 ms of CPU a frame; with 5,000,
+    from 47 ms to 9 ms. Sprites wholly off screen are skipped. The Performance panel's **Scene** section shows
+    how many sprites were drawn and in how many draws.
+- **Sorting order for sprites.** **Appearance > Sorting order** (`Sprite.sortingOrder`, on `SpriteNode` too):
+  higher draws later, on top, whatever the distances. In 3D, sprites draw by sorting order first and back to
+  front within one; in a 2D scene it offsets the sprite from the tilemap's entity layer, as an emitter's
+  sorting order does. 0, the default, leaves the order to depth and is not saved.
 - **Area lights.** A new **Area** light is a glowing rectangle or disk: a ceiling panel, a window, a
   softbox, a screen, a round downlight.
   - *Shaded exactly.* Linearly transformed cosines (Heitz et al. 2016) give a specular highlight that is a
@@ -584,6 +599,9 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Fixes & refactors
 
+- **A sprite at opacity 0 is invisible.** One built or loaded with opacity 0 drew fully opaque until the
+  slider was touched: the material it drew with stored `opacity || 1`. The batched pass reads
+  `Sprite.opacity` itself.
 - **Far tree shadows.** An impostor now casts only in the cascades past its hand-off, where the camera sees
   impostors too; nearer, the coarsest mesh level casts, so mesh trees are no longer shadowed by a round
   blob of their own impostor. Its shadow and its depth take the crown's size, not the impostor's wider
