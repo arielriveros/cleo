@@ -21,6 +21,9 @@ import { Game, Input, InputSystem, Node, SequenceNode, UIButtonNode, UIRootNode 
  *
  * It listens in a LATE UPDATE (`scene.addLateUpdate`), which runs every frame whatever the game is doing,
  * so the menu answers while the tour has the camera.
+ *
+ * Rendered to a movie from the editor (the Sequencer's Render), nobody is there to press a button:
+ * `Game.movieRender` names what is filmed, and the menu goes straight into the tour, or out of the way.
  */
 export default class ValleyStartMenuNode extends UIRootNode {
   /** The Sequence node the Cinematic button plays. */
@@ -54,6 +57,9 @@ export default class ValleyStartMenuNode extends UIRootNode {
     this._stopFinished = this._tour?.onFinished(reason => { if (reason === 'finished') this._tourEnded() }) ?? null
     this._stopListening = this.scene?.addLateUpdate((_delta, unscaled) => this._listen(unscaled)) ?? null
     this.open()
+    const movie = Game.movieRender
+    if (movie && this._tour && movie.sequenceNodeId === this._tour.id) this.playCinematic()
+    else if (movie) this._close('movie')
   }
 
   onDespawn() {

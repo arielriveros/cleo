@@ -77,11 +77,14 @@ import { ForwardPass } from './render/forwardPass';
 import { EditorOverlays } from './render/editorOverlays';
 import { DebugViews } from './render/debugViews';
 import { Capture } from './render/capture';
+import { MovieCapture } from './render/movieCapture';
+import { TextureManager } from './systems/textureManager';
 import { GiSystem } from './render/gi/giSystem';
 import { GI_TIERS, clampGiFillDrawsPerFrame, clampGiRaysPerFrame, clampGiResolutionScale } from './render/gi/giSettings';
 import { RenderStats } from './render/stats';
 import type { RenderSubsystems } from './render/subsystems';
 import { ProgramRegistry } from './render/programRegistry';
+import { renderNow, renderClockOverridden } from './render/renderClock';
 export { QUALITY_TIERS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
 import { describeCapabilities } from './rhi/device';
@@ -201,6 +204,12 @@ export class Renderer {
     private readonly _debugViews: DebugViews;
     /** Captures: offscreen screenshots and thumbnails, light-probe capture and IBL bake, probe previews (render/capture.ts). */
     private readonly _capture: Capture;
+    /** A movie render's frames: the movie's size, its own target, the samples averaged (render/movieCapture.ts). */
+    private readonly _movie: MovieCapture;
+    /** Bumped by every temporal invalidation (a camera cut among them); see {@link cutEpoch}. */
+    private _cutEpoch = 0;
+    /** What {@link beginMovie} changed, put back by {@link endMovie}. */
+    private _movieRestore: { readInterval: number; admit: number; blocking: boolean } | null = null;
     /** GI Volumes: their capture, relight and per-pixel apply (render/gi/giSystem.ts). */
     private readonly _gi: GiSystem;
     /** Frame statistics for the performance HUD, the GPU memory estimate and the opt-in GL error check (render/stats.ts). */
@@ -431,6 +440,10 @@ export class Renderer {
             get clearColor() { return renderer.clearColor; },
             render: (scene) => renderer.render(scene),
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._temporal, this._post, this._shadows, this._lighting, this._sky, this._forward, this._fullscreen, this._subsystems);
+        this._movie = new MovieCapture({
+            get cutEpoch() { return renderer._cutEpoch; },
+            present: (source, target) => renderer._post.presentPass(source, target),
+        }, this._view, this._passes, this._fullscreen);
         this._gi = new GiSystem({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
@@ -746,7 +759,7 @@ export class Renderer {
         // `getCurrentTexture()` fails, and every pass recorded into the frame's command buffer goes
         // down with it, once per frame for as long as the panel stays hidden. Nothing is visible, so
         // there is nothing to render. An offscreen capture brings its own target and still renders.
-        if (!this._capture.presentTarget
+        if (!this._capture.presentTarget && !this._movie.active
             && (this._viewportEmpty || this._canvas.width === 0 || this._canvas.height === 0)) return;
         this._programs.pollVariantFilter();
         // The shader optimizer's frame: counters zeroed, material memos expired (a material may have been
@@ -834,7 +847,7 @@ export class Renderer {
         // unjittered inverse would place each pixel's world point half a texel off its own geometry.
         // Only the inverse, which exists solely so a fullscreen pass can turn a uv back into a world
         // position, carries the flip.
-        if (this._view.taaJitterActive) mat4.multiply(this._jitteredCameraProj, this._projection.jitterMatrix, proj);
+        if (this._view.taaJitterActive || this._view.movieJitter) mat4.multiply(this._jitteredCameraProj, this._projection.jitterMatrix, proj);
         else mat4.copy(this._jitteredCameraProj, proj);
         mat4.multiply(this._jitteredViewProj, this._jitteredCameraProj, view);
         mat4.invert(this._view.invViewProj, this._jitteredViewProj);
@@ -1031,6 +1044,8 @@ export class Renderer {
      * visible canvas is never bound. See {@link Capture.screenshotOffscreen}.
      */
     public screenshotOffscreen(scene: Scene, size: number = 256): Promise<string> {
+        // Not mid-movie: the square retarget would reallocate the movie's buffers and drop its histories.
+        if (this._movie.active) return Promise.resolve('');
         return this._capture.screenshotOffscreen(scene, size);
     }
 
@@ -1179,6 +1194,7 @@ export class Renderer {
      * for as long as TAA, or the smoke-and-fire volumes, keep finding history to blend.
      */
     public invalidateTemporalHistory(): void {
+        this._cutEpoch++;
         // Motion blur reprojects through LAST frame's view-projection, so after a cut it would streak the
         // whole first frame by the jump between the two cameras. Without a previous frame it simply skips.
         this._view.hasPrevViewProj = false;
@@ -1199,6 +1215,109 @@ export class Renderer {
      */
     public cut(): void {
         this.invalidateTemporalHistory();
+    }
+
+    // --- Movie render (src/sequencer/movie/) -----------------------------------------------------
+
+    /**
+     * Bumped by every temporal invalidation: a camera cut, a teleport, a resize. A movie frame's mean
+     * restarts on a change between its samples (render/movieCapture.ts).
+     */
+    public get cutEpoch(): number { return this._cutEpoch; }
+
+    /** The largest movie side this device can draw (its texture limit). */
+    public get maxMovieSize(): number { return device.capabilities.maxTextureSize; }
+
+    /** True between {@link beginMovie} and {@link endMovie}. */
+    public get movieActive(): boolean { return this._movie.active; }
+
+    /**
+     * Start drawing a movie: every frame at `width` x `height` into a target of its own (the canvas is
+     * left alone), averaged over the samples {@link setMovieSample} declares. For the duration every
+     * program builds before the frame that needs it (no stand-ins), the exposure meter is read every
+     * frame, and foliage admits every cell it should at once. {@link endMovie} puts it all back.
+     */
+    public beginMovie(width: number, height: number): void {
+        if (this._movie.active) this.endMovie();
+        const max = this.maxMovieSize;
+        if (!(width >= 1 && height >= 1) || width > max || height > max)
+            throw new Error(`A movie frame of ${width}x${height} is outside what this device can draw (1..${max})`);
+        this._movieRestore = {
+            readInterval: this._autoExposure.readInterval,
+            admit: this._foliage.foliageAdmitPerFrame,
+            blocking: shaderStats.blockingCompiles,
+        };
+        this._autoExposure.readInterval = 1;
+        this._foliage.foliageAdmitPerFrame = 0;
+        shaderStats.blockingCompiles = true;
+        this._programs.compileQueue.drain();
+        this._movie.begin(width, height);
+        if (this._deviceReady) this._resizeBuffers(this._renderWidth, this._renderHeight);
+    }
+
+    /** Back to the canvas, with everything {@link beginMovie} changed restored. */
+    public endMovie(): void {
+        if (!this._movie.active) return;
+        this._movie.end();
+        this._view.movieJitter = null;
+        const restore = this._movieRestore;
+        this._movieRestore = null;
+        if (restore) {
+            this._autoExposure.readInterval = restore.readInterval;
+            this._foliage.foliageAdmitPerFrame = restore.admit;
+            shaderStats.blockingCompiles = restore.blocking;
+        }
+        if (this._deviceReady) this._resizeBuffers(this._renderWidth, this._renderHeight);
+        this.resize();
+    }
+
+    /**
+     * Which sample of how many the next render is, and its sub-pixel offset in pixels (null: none). A
+     * one-sample frame resolves straight into the movie's target; a longer one on its last sample.
+     */
+    public setMovieSample(sample: number, samples: number, jitter: [number, number] | null): void {
+        this._movie.samples = Math.max(1, Math.floor(samples));
+        this._movie.sample = Math.min(this._movie.samples - 1, Math.max(0, Math.floor(sample)));
+        this._view.movieJitter = jitter ? [jitter[0], jitter[1]] : null;
+    }
+
+    /** Auto exposure jumps to its last reading instead of easing there (a movie's warm-up). */
+    public snapExposure(): void { this._autoExposure.snap(); }
+
+    /** True when the last render resolved a finished movie frame, ready for {@link readMovieFrame}. */
+    public get movieFramePresented(): boolean { return this._movie.framePresented; }
+
+    /** The finished movie frame: tightly packed RGBA, top row first. */
+    public readMovieFrame(): Promise<Uint8Array> { return this._movie.readFrame(); }
+
+    /**
+     * Resolves when nothing a frame shows is still on its way: every pending program compiled, every
+     * texture decoded, the exposure meter's reading landed. Gives up after `timeoutMs` (false), so a
+     * texture that never arrives cannot hang a movie.
+     */
+    public async whenAssetsReady(timeoutMs = 30000): Promise<boolean> {
+        this._programs.compileQueue.drain();
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const timeout = new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs); });
+        const ready = (async () => {
+            await TextureManager.Instance.whenLoaded();
+            await this._autoExposure.pendingRead;
+            return true as const;
+        })();
+        try {
+            return await Promise.race([ready, timeout]);
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    }
+
+    /**
+     * True when no lighting work is half done: GI volumes loaded and their sweeps finished, no light-probe
+     * job in flight, and no sky bake, prefilter or projection between steps. A movie renders the same
+     * moment again until this holds, so each frame shows its light converged rather than catching up.
+     */
+    public get lightingSettled(): boolean {
+        return this._gi.settled && this._capture.probes.progress === null && this._sky.settled;
     }
 
     private readonly _ssrForward: number[] = [0, 0, 0, 0];
@@ -1229,12 +1348,14 @@ export class Renderer {
     // the canvas otherwise. Everything in the frame (camera aspect, texel sizes) must read these rather
     // than the canvas, or a capture would be framed for the viewport it is deliberately bypassing.
     private get _renderWidth(): number {
-        return this._capture.presentTarget ? this._capture.presentTarget.width
-                                   : Math.max(1, Math.round(this._canvas.width * this._renderScale));
+        if (this._capture.presentTarget) return this._capture.presentTarget.width;
+        if (this._movie.active) return this._movie.width;
+        return Math.max(1, Math.round(this._canvas.width * this._renderScale));
     }
     private get _renderHeight(): number {
-        return this._capture.presentTarget ? this._capture.presentTarget.height
-                                   : Math.max(1, Math.round(this._canvas.height * this._renderScale));
+        if (this._capture.presentTarget) return this._capture.presentTarget.height;
+        if (this._movie.active) return this._movie.height;
+        return Math.max(1, Math.round(this._canvas.height * this._renderScale));
     }
 
     /** The viewport element had no area at the last `resize()`; see there and in `render`. */
@@ -1334,6 +1455,9 @@ export class Renderer {
         // Re-establish the surface configuration. Not needed for the resize itself — the swap chain
         // tracks the canvas — but this method also runs after the editor re-parents the canvas.
         device.reconfigureSurface();
+        // A movie draws at its own size, whatever the viewport does meanwhile: reallocating would only
+        // throw its temporal histories away. `endMovie` resizes to the canvas again.
+        if (this._movie.active) return;
         // Internal buffers follow renderScale; the canvas stays native so the present pass upscales.
         this._resizeBuffers(this._renderWidth, this._renderHeight);
 
@@ -1515,9 +1639,11 @@ export class Renderer {
 
         // --- anchor: auto-exposure meters the scene, not the chain --------------------------------
         // Clamped: a backgrounded tab or a shader compile can produce a multi-second gap, and letting
-        // that through would snap the exposure in one frame instead of easing.
-        const nowMs = performance.now();
-        const dt = Math.min(0.25, Math.max(0, (nowMs - this._autoExposure.lastExposureMs) / 1000));
+        // that through would snap the exposure in one frame instead of easing. Not under a movie's clock,
+        // whose step is exact (renderClock.ts).
+        const nowMs = renderNow();
+        const exposureCap = renderClockOverridden() ? Infinity : 0.25;
+        const dt = Math.min(exposureCap, Math.max(0, (nowMs - this._autoExposure.lastExposureMs) / 1000));
         this._autoExposure.lastExposureMs = nowMs;
         // The meter itself ran during the scene render (`_meterScene`, before the transparents); this node
         // only eases the exposure toward its last reading, so it touches no chain resource at all.
@@ -1696,6 +1822,8 @@ export class Renderer {
         graph.addPass({
             id: 'present', scope: 'present', reads: [result],
             execute: ctx => {
+                // A movie folds the frame into its sample mean and resolves into its own target.
+                if (this._movie.active) { this._movie.present(ctx.read(result)); return; }
                 if (this._debugViews.debugView !== 'final') {
                     // Editor Renderer-mode: blit one internal buffer instead of the composited image.
                     // Overdraw has no buffer of its own until it is asked for, so accumulate it first.
@@ -1732,7 +1860,7 @@ export class Renderer {
         // NOT on `_passEnabled['overlay']`, deliberately. That switch turns off the helper DRAWS; the
         // composite is the only way anything already in the buffer reaches the screen, so gating it
         // there would make one profiler toggle silently hide the grid and the gizmos too.
-        if (this._overlays.overlayDrawn && this._debugViews.debugView === 'final')
+        if (this._overlays.overlayDrawn && this._debugViews.debugView === 'final' && !this._movie.active)
             graph.addPass({ id: 'overlay', scope: 'overlay',
                             execute: () => this._overlays.overlayCompositePass() });
 

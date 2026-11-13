@@ -24,6 +24,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@cleo/app-kit": "*",
     "@svar-ui/react-filemanager": "^2.6.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
@@ -36,13 +37,13 @@
     "dockview-react": "^7.0.2",
     "javascript-obfuscator": "^4.2.2",
     "jszip": "^3.10.1",
+    "mediabunny": "^1.65.2",
     "monaco-editor": "^0.52.2",
     "react": "^18.2.0",
     "react-arborist": "^3.16.0",
     "react-dnd-html5-backend": "^14.1.0",
     "react-dom": "^18.2.0",
-    "tailwind-merge": "^3.6.0",
-    "@cleo/app-kit": "*"
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.48",

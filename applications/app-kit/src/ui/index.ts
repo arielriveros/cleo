@@ -33,7 +33,7 @@ export { Slider, sliderFill } from './Slider';
 
 export {
   Glyph, DiceIcon, BoltIcon, LinkIcon, PlayIcon, PauseIcon, RestartIcon, StopIcon, LoopIcon, StepBackIcon,
-  StepForwardIcon, ToStartIcon, ToEndIcon, PilotIcon, SnapIcon,
+  StepForwardIcon, ToStartIcon, ToEndIcon, PilotIcon, SnapIcon, FilmIcon,
 } from './icons';
 export type { SliderProps } from './Slider';
 

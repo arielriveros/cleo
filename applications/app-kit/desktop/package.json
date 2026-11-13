@@ -18,6 +18,7 @@
       "preload.js",
       "gameTemplates.js",
       "scriptWorkspace.js",
+      "movieFiles.js",
       "icons/**"
     ],
     "extraResources": [

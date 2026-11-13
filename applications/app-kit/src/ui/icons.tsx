@@ -89,3 +89,11 @@ export const LinkIcon = (props: IconProps) => (
     <path d='M14 10.5a4.5 4.5 0 0 0-6.4-.4l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.7-1.7' />
   </Glyph>
 );
+
+/** A strip of film: render a movie. */
+export const FilmIcon = (props: IconProps) => (
+  <Glyph {...props}>
+    <rect x='3.5' y='5' width='17' height='14' rx='1.5' />
+    <path d='M7.5 5v14M16.5 5v14M3.5 9.5h4M3.5 14.5h4M16.5 9.5h4M16.5 14.5h4' />
+  </Glyph>
+);

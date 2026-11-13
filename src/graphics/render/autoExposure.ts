@@ -14,6 +14,7 @@ import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { FullscreenPasses } from './fullscreenPasses';
 import type { RenderSubsystems } from './subsystems';
+import { renderNow } from './renderClock';
 
 /** What AutoExposure reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface AutoExposureHost {
@@ -148,6 +149,17 @@ export class AutoExposure {
     private _easeFromSeed: boolean = false;
 
     /**
+     * Jump to the metered target now instead of easing there: a movie's first frame must show the scene at
+     * its settled exposure, not the opening second of an adaptation. A no-op before the first reading.
+     */
+    public snap(): void {
+        if (!this.exposureMetered) return;
+        this.exposureEV = this._clampExposureEV(this._exposureTargetEV);
+        this._view.exposure = REFERENCE_ILLUMINANCE / (1.2 * Math.pow(2, this.exposureEV));
+        this._lastSceneExposure = this._view.exposure;
+    }
+
+    /**
      * Start adapting from `ev` (EV100) — what is on screen when metering is switched on — so the meter's
      * first reading is eased toward rather than snapped to. Until that reading lands the picture holds.
      */
@@ -168,6 +180,15 @@ export class AutoExposure {
      * in seconds.
      */
     private static readonly EXPOSURE_READ_INTERVAL = 6;
+
+    /**
+     * Frames between readbacks, {@link EXPOSURE_READ_INTERVAL} unless a movie render reads every frame
+     * (and waits for each, {@link pendingRead}), so its exposure follows the picture with no lag at all.
+     */
+    public readInterval = AutoExposure.EXPOSURE_READ_INTERVAL;
+
+    /** The readback in flight, or null: what a movie render awaits before its next frame. */
+    public pendingRead: Promise<void> | null = null;
 
     /** The adapted value, in EV100. Seeded from the initial exposure so frame one does not jump. */
     public exposureEV: number = 0;
@@ -321,15 +342,15 @@ export class AutoExposure {
         const due = this._exposureReadDue;
         this._exposureReadDue = -1;
         if (due < 0 || this._exposureReadPending) return;
-        if (this.exposureMetered && this._view.frameIndex % AutoExposure.EXPOSURE_READ_INTERVAL !== 0) return;
+        if (this.exposureMetered && this._view.frameIndex % Math.max(1, this.readInterval) !== 0) return;
         const target = this.exposureFBOs[due];
         if (!target || target.colors.length === 0) return;
 
         this._exposureReadPending = true;
-        device.readPixels(target.colors[0].attachmentView, 0, 0, 1, 1)
+        this.pendingRead = device.readPixels(target.colors[0].attachmentView, 0, 0, 1, 1)
             .then(px => { this._onExposureSample((px[0] + px[1] / 255) / 255); })
             .catch(() => { /* a resize can invalidate the view mid-flight; the next read recovers */ })
-            .finally(() => { this._exposureReadPending = false; });
+            .finally(() => { this._exposureReadPending = false; this.pendingRead = null; });
     }
 
     /** Decode one metering sample into the target EV100 the adaptation is chasing. */
@@ -355,7 +376,7 @@ export class AutoExposure {
     }
 
     private _exposureTargetEV: number = 0;
-    public lastExposureMs: number = performance.now();
+    public lastExposureMs: number = renderNow();
 
     private _clampExposureEV(ev: number): number {
         // Compensation is SUBTRACTED: +1 stop of exposure compensation means a brighter picture, which

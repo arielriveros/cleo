@@ -29,6 +29,8 @@ Game.gravity: [number, number, number]     // get and set
 
 Game.getRenderSettings(): RenderSettings | undefined
 Game.updateRenderSettings(settings: Partial<RenderSettings>): void
+
+Game.movieRender: { sequenceNodeId, sequenceName, width, height, fps } | null   // the movie being rendered
 ```
 
 ```ts
@@ -284,6 +286,22 @@ intro.onEvent((name, key) => { /* every event key it passes */ })
   `ctx.resume()` or something calls the node's `resume()`: a cinematic that waits for a door to open, a
   line of dialogue to be read, a level to load. The method is still called every frame while it waits
   (`update`, with `dt` 0), so it can watch for what it waits on. `isHolding` says whether it is waiting.
+
+### Movies
+
+The Sequencer's **Render** films a sequence offline ([Render Movie](../editor/sequencer.md#render-movie)).
+While it does, `Game.movieRender` names the Sequence node being filmed, from before the scene starts, and it
+is `null` the rest of the time. A game whose cinematic starts from its own UI (a title menu's "Play intro")
+checks it in `onStart` and plays the sequence at once, since nobody is there to press the button; otherwise
+the movie plays the sequence itself. The game's clock is the movie's for the duration: `onUpdate`'s delta is
+exactly a frame (or a sample) of it, and input is ignored.
+
+```ts
+onStart() {
+  this.openMenu()
+  if (Game.movieRender?.sequenceNodeId === this.intro.id) this.playIntro()
+}
+```
 
 ```ts
 export default class IntroDirector extends SequenceNode {

@@ -110,7 +110,7 @@ export class SoundNode extends Node {
         if (voice === null) return;
         this._voice = voice;
 
-        if (this._loopMode !== 'inherit') sound.howl.loop(this._loopMode === 'on', voice);
+        if (this._loopMode !== 'inherit') sound.setVoiceLoop(voice, this._loopMode === 'on');
         sound.setVoiceVolume(voice, sound.settings.volume * this._volume * this._gain);
         if (this._rate !== 1) sound.setVoiceRate(voice, this._rate);
         // Part-way in: a cinematic's sound joined at the moment its timeline is at.
@@ -245,7 +245,7 @@ export class SoundNode extends Node {
         this._loopMode = readLoopMode(value);
         const sound = this._sample();
         if (sound && this._voice !== null && this._loopMode !== 'inherit') {
-            sound.howl.loop(this._loopMode === 'on', this._voice);
+            sound.setVoiceLoop(this._voice, this._loopMode === 'on');
         }
         this._notifyChange('component', 'loopMode');
     }

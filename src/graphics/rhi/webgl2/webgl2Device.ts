@@ -507,13 +507,23 @@ export class WebGL2Device implements Device {
      * waits, but never fails); a lost context rejects.
      */
     public readPixels(view: WebGL2TextureView, x: number, y: number,
-                      width: number, height: number): Promise<Uint8Array> {
+                      width: number, height: number, options?: { immediate?: boolean }): Promise<Uint8Array> {
         try {
             this._checkReadable(view);
         } catch (e) {
             return Promise.reject(e);
         }
         const bytes = width * height * 4;
+        if (options?.immediate) {
+            // Into client memory: the call waits for everything queued before it, and nothing polls.
+            const out = new Uint8Array(bytes);
+            this._bindReadback(view);
+            gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, out);
+            this._unbindReadback();
+            return gl.isContextLost()
+                ? Promise.reject(new Error('readPixels: the WebGL2 context was lost'))
+                : Promise.resolve(out);
+        }
         const pack = this._takePackBuffer(bytes);
         this._bindReadback(view);
         gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pack.handle);

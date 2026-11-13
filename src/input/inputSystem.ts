@@ -47,6 +47,13 @@ export class InputSystem {
     private _map: InputMap = cloneInputMap(DEFAULT_INPUT_MAP);
     private _overlays: InputActionMap[] = [];
     private _enabled = new Set<string>();
+    /**
+     * While true nothing reaches the game: no action fires and no key reads as down, though the devices are
+     * still drained every frame. A movie render sets it: its game is filmed, not played, and a key pressed
+     * meanwhile (an Escape that would stop the cinematic) must not land in the film.
+     */
+    public muted = false;
+    private static readonly _NO_MAPS: ReadonlySet<string> = new Set<string>();
     private _resolveState: ResolveState = createResolveState();
     private _states = new Map<string, ActionState>();
     private _changed: ActionChange[] = [];
@@ -176,7 +183,8 @@ export class InputSystem {
 
         if (this._rebindResolve) { this._captureRebind(snapshot); return; }
 
-        const result = resolveFrame(this._allMaps, this._enabled, snapshot, this._resolveState, dt);
+        const result = resolveFrame(this._allMaps, this.muted ? InputSystem._NO_MAPS : this._enabled,
+                                    snapshot, this._resolveState, dt);
         this._states = result.states;
         this._changed = result.changed;
         this._resolveState = result.next;
@@ -246,6 +254,7 @@ export class InputSystem {
      * Unlike the system this replaces, ANY code works — there is no whitelist to fall outside of.
      */
     public isKeyDown(code: string): boolean {
+        if (this.muted) return false;
         return this._device.keys.has(code);
     }
 

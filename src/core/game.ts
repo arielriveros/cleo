@@ -37,6 +37,23 @@ function requireHost(): GameHost {
 
 const progressListeners = new Set<LoadProgressListener>();
 
+/** What {@link Game.movieRender} reports while the editor renders a sequence to video. */
+export interface MovieRenderInfo {
+  /** The Sequence node being filmed, and its name. */
+  sequenceNodeId: string;
+  sequenceName: string;
+  width: number;
+  height: number;
+  fps: number;
+}
+
+let movieRender: MovieRenderInfo | null = null;
+
+/** Host-facing: the movie being rendered, set before the scene starts and cleared after. */
+export function setMovieRender(info: MovieRenderInfo | null): void {
+  movieRender = info ? { ...info } : null;
+}
+
 export interface LoadSceneOptions {
   /**
    * Cover the switch with a loading screen and a progress bar, lifted once the new scene runs smoothly.
@@ -95,6 +112,18 @@ export const Game = {
   /** Every scene name the running game can load. */
   sceneNames(): string[] {
     return host ? host.sceneNames() : [];
+  },
+
+  /**
+   * The movie the editor is rendering, or null in a normal game. Set before the scene starts, so a game
+   * that starts its cinematics from its own UI — a title menu's "Play intro" — can see in `onStart` which
+   * sequence is being filmed and play it at once: nobody is there to press the button. Otherwise the
+   * renderer plays the sequence itself.
+   *
+   *   if (Game.movieRender?.sequenceNodeId === this.intro.id) this.playIntro()
+   */
+  get movieRender(): MovieRenderInfo | null {
+    return movieRender;
   },
 
   /** Whether the game loop is paused (onUpdate stops running, physics stops stepping). */

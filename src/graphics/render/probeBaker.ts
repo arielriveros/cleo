@@ -23,6 +23,7 @@ import type { ForwardPass } from './forwardPass';
 import type { FullscreenPasses } from './fullscreenPasses';
 import type { RenderSubsystems } from './subsystems';
 import { ShaderManager } from '../systems/shaderManager';
+import { renderNow } from './renderClock';
 
 /** What the probe baker reads from the renderer. */
 export interface ProbeBakerHost {
@@ -140,7 +141,7 @@ export class ProbeBaker {
             job = this._job = null;
         }
         if (!job) {
-            const choice = nextProbeJob(scene.lightProbes, this._view.camera.position, performance.now(),
+            const choice = nextProbeJob(scene.lightProbes, this._view.camera.position, renderNow(),
                                         p => this.hasGBuffer(p));
             if (!choice) return;
             // Taken now, so a request made while the job runs queues another.
@@ -442,7 +443,7 @@ export class ProbeBaker {
         if (job.kind !== 'filter') {
             probe.setBakedMaps(source);
             if (job.lights) probe.bakedLights = job.lights;
-            probe.markBaked(performance.now());
+            probe.markBaked(renderNow());
         }
         if (probe.reflectionLayer >= 0 && probe.reflectionLayer !== job.layer) this.atlas.layers.release(probe.reflectionLayer);
         probe.reflectionLayer = job.layer;

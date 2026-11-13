@@ -1,6 +1,7 @@
 import { Howler } from "howler";
 import { BUS_IDS } from "./soundSettings";
 import type { BusId } from "./soundSettings";
+import { audioRecorder } from "./movieAudio";
 
 /**
  * The fixed mixer: four buses a sample can route into, each a gain stage in front of howler's master.
@@ -72,7 +73,11 @@ export class Mixer {
 
     /** Master volume, 0..1 — howler's own, which every bus already feeds into. */
     public get masterVolume(): number { return Howler.volume(); }
-    public set masterVolume(value: number) { Howler.volume(Math.min(1, Math.max(0, value))); }
+    public set masterVolume(value: number) {
+        const volume = Math.min(1, Math.max(0, value));
+        audioRecorder()?.master(volume);
+        Howler.volume(volume);
+    }
 
     /** Serializable mixer state, for project prefs. */
     public serialize(): Record<string, BusState> {
@@ -96,6 +101,7 @@ export class Mixer {
     private _push(bus: BusId): void {
         const state = this._state.get(bus);
         if (!state) return;
+        audioRecorder()?.bus(bus, state.gain, state.muted);
         if (bus === 'master') {
             Howler.volume(state.muted ? 0 : state.gain);
             return;

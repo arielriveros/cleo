@@ -546,7 +546,7 @@ export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime
 // Typed name fields (clip/sound/socket/template/child): plain strings the inspector offers a picker for.
 export { SOUNDS_GROUP, ownedSoundsGroup } from "./core/scripting/fieldTypes";
 export type { ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, ProjectTriggers } from "./core/scripting/fieldTypes";
-export { Game, setGameHost } from "./core/game";
+export { Game, setGameHost, setMovieRender, type MovieRenderInfo } from "./core/game";
 export { TimeDilation, type DilateOptions } from "./core/timeDilation";
 export { showLoadingOverlay, nextFrame, whenFramesSmooth } from "./core/loadingOverlay";
 export type { LoadingOverlay, LoadingOverlayOptions } from "./core/loadingOverlay";
@@ -585,6 +585,23 @@ export type {
     ScriptSection, ScriptTrack, SequenceScriptContext, AnimationSection, AnimationTrack, AudioSection, AudioTrack,
     SpawnSection, SpawnTrack, PossessSection, PossessTrack,
 } from "./sequencer/types";
+// Rendering a sequence to video, offline (sequencer/movie/).
+export {
+    renderMovie, type MovieEngine, type MovieRenderOptions, type MovieFrame, type MovieSink, type MovieProgress,
+    type MovieResult, type MovieEndReason, type MovieRunControls,
+} from "./sequencer/movie/renderMovie";
+export { beginMovieEngine, type MovieEngineHandle, type MovieEngineOptions } from "./sequencer/movie/movieEngine";
+export { movieRenderSettings, type MovieQuality } from "./sequencer/movie/movieSettings";
+export {
+    frameRateOf, framesPerSecond, frameStart, frameTimestampUs, frameDurationUs, sampleTime, sampleJitter,
+    shutterFromAngle, frameCountFor, type FrameRate, type SampleSettings,
+} from "./sequencer/movie/movieTiming";
+export { renderNow, setRenderClock } from "./graphics/render/renderClock";
+export {
+    AudioRecorder, AudioMixdown, audioRecorder, buildAudioSchedule, mixAudioLog, keyValueAt,
+    type AudioLog, type AudioLogSound, type AudioOp, type AudioSchedule, type VoicePlan, type VoicePiece,
+    type AudioKey, type MixOptions,
+} from "./audio/movieAudio";
 import { sequenceGlobals as installSequenceGlobals } from "./core/scene/nodes/sequenceNode";
 import { CleoEngine as SequenceEngine } from "./core/engine";
 import { Game as SequenceGame } from "./core/game";

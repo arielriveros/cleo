@@ -267,6 +267,53 @@ export default class IntroDirector extends SequenceNode {
 }
 ```
 
+## Render Movie
+
+**Render…** on the toolbar renders the sequence to a movie: an MP4, or a folder of PNG frames. It plays the
+scene as **Play** would (scripts, physics, particles, the sequence as you have it, saved or not), but
+**offline**: every frame is exactly one frame-length of the game after the last, however long it takes to
+draw. A frame that takes ten seconds shows the same as one that takes ten milliseconds, so the movie never
+stutters, whatever the machine.
+
+- **Resolution** — the frame's size, a preset or **Custom** (a video frame needs an even width and height).
+  It has nothing to do with the viewport's: a 4K movie renders on a small screen.
+- **Frame rate** — frames per second. 23.976, 29.97 and 59.94 are held exactly (24000/1001 and so on).
+- **Range** — the sequence seconds to film, the whole sequence by default. A start past 0 is jumped to, so
+  event keys before it do not fire.
+- **Samples** — renders averaged into each frame. Each is shifted by a fraction of a pixel, which
+  anti-aliases the frame better than TAA can; with a shutter they are also spread through the frame's
+  time, which is real motion blur. **1** renders the frame as Play shows it (its own TAA and motion blur).
+- **Shutter** — how much of each frame's time the samples spread over, in degrees: 180 blurs half a frame's
+  movement, as a film camera does; 0 turns motion blur off; 360 blurs all of it.
+- **Pre-roll** — seconds the scene runs with the sequence held at its start before the first frame, for
+  particles, cloth or rain that need time to fill in.
+- **Cinematic quality** — raise every setting that only costs time: resolution scales to full, the Ultra
+  tier's clouds, more SSAO, SSR and fog samples, larger shadow maps, GI and probes converged before every
+  frame, shadows never staggered. The project's look — exposure, tone curve, grading, which effects are on,
+  draw distances — is never changed.
+- **Sound** — record what plays and mix it into the movie: sequence audio tracks, sound nodes and script
+  sounds, through their effects, buses and 3D placement. An MP4 gets AAC (or Opus); PNG frames get a
+  24-bit WAV beside them.
+- **Format** — **MP4**, or **PNG frames** (lossless, `name_000000.png`…, for grading or editing elsewhere).
+- **Codec** — the video codecs this machine can encode at this size and rate: H.264 plays everywhere; HEVC,
+  AV1 and VP9 are smaller at the same quality.
+- **Quality** — **Maximum** is near-transparent, **High** is smaller, **Custom** sets the codec's quantizer
+  (lower is better). Every frame is encoded to the same quality, not the same size.
+
+Before the first frame the light is settled (GI, light probes and the sky converged, the exposure metered),
+and before every frame each program it needs is built and each texture loaded: nothing pops in. The game UI
+is drawn into the frames at the movie's resolution; a world-space panel seen in perspective is the one thing
+left out. While the render runs the editor is busy: the dialog shows the latest frame, how far it has got and
+how long is left. **Cancel** keeps the frames rendered so far as a shorter, valid movie.
+
+A game that starts its cinematic from a menu of its own can see what is being filmed in `Game.movieRender`
+([Sequences in scripts](../scripting/scene-and-game.md#movies)); the Valley's start menu goes straight into
+the tour when the tour is rendered.
+
+It takes as long as it takes: samples x frames renders. The Valley's tour at 1080p, 30 fps and 16 samples
+is about 190,000 renders. Leave the desktop editor rendering in the background; a browser tab must stay
+visible, or the browser slows it down.
+
 ## Export and import
 
 **Export** saves the sequence as `<name>.sequence.json`, and **Import** replaces the asset's timeline with one

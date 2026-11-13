@@ -58,6 +58,14 @@ export class ViewProjection {
      * to an orthographic camera, and to `SkyPasses.renderSky`'s temporary perspective override of one.
      */
     public updateJitter(): void {
+        const movie = this._view.movieJitter;
+        if (movie) {
+            // A movie sample's offset, not a TAA phase: the same clip-space shift, by the given pixels.
+            mat4.identity(this.jitterMatrix);
+            this.jitterMatrix[12] = (2 * movie[0]) / Math.max(1, this._host.renderWidth());
+            this.jitterMatrix[13] = (2 * movie[1]) / Math.max(1, this._host.renderHeight());
+            return;
+        }
         if (!this._view.taaJitterActive) { mat4.identity(this.jitterMatrix); return; }
         jitterMatrix(this.jitterMatrix, this._view.frameIndex % TAA_PHASES,
                      this._host.renderWidth(), this._host.renderHeight());
@@ -95,7 +103,7 @@ export class ViewProjection {
      * `_projDirty` for every other reader in the frame.
      */
     public rasterProjection(projection: mat4): mat4 {
-        if (!this._view.taaJitterActive || this._view.cubeFace || this._view.capturing)
+        if ((!this._view.taaJitterActive && !this._view.movieJitter) || this._view.cubeFace || this._view.capturing)
             return this.clipProjection(projection);
         mat4.multiply(this._rasterProjScratch, this.jitterMatrix, projection);
         return this.clipProjection(this._rasterProjScratch);

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isTextEntryEvent } from 'cleo'
 import type { SequenceData, SequenceSlot, SequenceTrack } from 'cleo'
 import {
-  Button, ContextMenu, MenuItem, Popover, LoopIcon, PauseIcon, PilotIcon, PlayIcon, SnapIcon, StepBackIcon,
+  Button, ContextMenu, MenuItem, Popover, FilmIcon, LoopIcon, PauseIcon, PilotIcon, PlayIcon, SnapIcon, StepBackIcon,
   StepForwardIcon, StopIcon, ToEndIcon, ToStartIcon, cn,
 } from '@cleo/app-kit/ui'
 import { TimeRuler, fitZoom, formatTimecode, snapTime, startPointerDrag, timeToX, xToTime, zoomStep } from '@cleo/app-kit/timeline'
@@ -17,13 +17,14 @@ import { downloadSequence, pickSequenceFile } from './sequenceFile'
 import { namePathOf, useSequenceEditor } from './SequenceEditorContext'
 import { newSectionInit, slotTrackOffers } from './slotTargets'
 import SequenceDetails, { type Selection } from './SequenceDetails'
+import { openRenderMovie } from './movie/movieDialogStore'
 
 // The Sequencer: the timeline of the `.sequence` asset the active Sequencer tab edits, docked in the bottom strip
 // of Sequencer mode (the only mode that shows it). The working copy, its preview over the open scene and the
 // auto-key that turns property changes into keys live in SequenceEditorProvider.
 //
 //   toolbar   transport (start, frame back, play, frame forward, end, loop), the time, snap, zoom, Pilot,
-//             + Track, export and import
+//             + Track, export and import, and Render (movie/RenderMovieDialog.tsx)
 //   outliner  one group per slot (its tracks under it) and one for the sequence's own tracks
 //   lanes     sections as blocks (drag to move, edges to trim, top corners to ease), keys as diamonds,
 //             markers on the ruler; the ruler scrubs
@@ -540,6 +541,9 @@ export default function SequencerPanel({ active }: { active: boolean }) {
         </Popover>
         <Button size='sm' variant='ghost' title='Save the sequence as a .sequence.json file' onClick={() => downloadSequence(seq)}>Export</Button>
         <Button size='sm' variant='ghost' title='Replace the sequence with a .sequence.json file' onClick={importFile}>Import</Button>
+        <Button size='sm' variant='ghost' title='Render the sequence to a movie: MP4, or PNG frames' onClick={() => { preview.pause(); openRenderMovie() }}>
+          <span className='mr-1 inline-block h-3.5 w-3.5'><FilmIcon /></span>Render…
+        </Button>
       </div>
 
       <div className='flex min-h-0 flex-1'>

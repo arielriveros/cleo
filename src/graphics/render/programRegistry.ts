@@ -70,7 +70,7 @@ export class ProgramRegistry implements PipelineCacheHost {
         prepareShaderProgram: d => this._host.device.prepareShaderProgram?.(d),
         isShaderProgramReady: d => this._host.device.isShaderProgramReady?.(d) ?? true,
         createShaderProgram: d => this._host.device.createShaderProgram(d),
-    }, () => !!this._host.capabilities?.parallelShaderCompile && !shaderStats.syncEach);
+    }, () => !!this._host.capabilities?.parallelShaderCompile && !shaderStats.syncEach && !shaderStats.blockingCompiles);
 
     /**
      * The programs this boot builds. The editor: the whole table, plus the parallax (`pom`) variants

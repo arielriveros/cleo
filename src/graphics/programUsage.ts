@@ -66,6 +66,8 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     particleSim: 'feature', particleBillboard: 'feature', particleMesh: 'feature', particleSort: 'feature',
     basicInstanced: 'editor', probePreview: 'editor', overlayComposite: 'editor', debugView: 'editor',
     shadowDebug: 'editor', overdraw: 'editor', overdrawInstanced: 'editor', grid: 'editor', outline: 'editor', outlinePost: 'editor',
+    // Movies are rendered in the editor (sequencer/movie/), never by a published game.
+    movieAccumulate: 'editor',
 };
 
 /** What a game uses, accumulated over every scene and template. Logical names, plus the filter. */

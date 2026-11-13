@@ -27,6 +27,12 @@ export interface FrameView {
      */
     taaJitterActive: boolean;
     /**
+     * A movie sample's sub-pixel offset in pixels (render/movieCapture.ts), or null. Unlike TAA's it holds
+     * for the WHOLE frame, transparents and sprites included: nothing resolves it — the movie averages
+     * its samples instead, and everything in the picture has to be sampled the same way.
+     */
+    movieJitter: [number, number] | null;
+    /**
      * The UNJITTERED view-projection: the culling frustum is built from it, and it is both sides of every
      * motion-vector subtraction, where a jitter on one side only would read as motion.
      */
@@ -97,6 +103,7 @@ export function createFrameView(): FrameView {
         capturing: false,
         cubeFace: false,
         taaJitterActive: false,
+        movieJitter: null,
         viewProj: mat4.create(),
         invViewProj: mat4.create(),
         invViewProjStable: mat4.create(),

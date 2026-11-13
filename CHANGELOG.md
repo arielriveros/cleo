@@ -528,6 +528,16 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     the editor camera and the inspector reading the playhead; **Pilot** looks through the shot's camera.
     Saving, Play, Simulate and a tab or 2D/3D switch put the scene back first, so a preview is never saved.
     **Export** / **Import** read and write `.sequence.json`.
+  - *Render Movie.* **Render…** on the Sequencer's toolbar films the sequence to an MP4 (H.264, HEVC, AV1 or
+    VP9, whichever this machine encodes, at a constant quality) or to lossless PNG frames, at any resolution
+    and frame rate, with its sound. It is rendered offline: the game is stepped exactly one frame at a time
+    and each frame drawn for as long as it takes, so the movie has no frame-time lag whatever the machine.
+    Each frame averages its **Samples** (jittered for anti-aliasing and, with a **Shutter**, spread through
+    the frame for real motion blur), its light is settled before it is filmed (GI, probes, the sky, the
+    exposure), and nothing pops in (every shader built, every texture loaded). The game UI is drawn in at the
+    movie's resolution, and the sound is recorded as it is played and mixed offline through its effects,
+    buses and 3D placement. `Game.movieRender` tells a game which sequence is being filmed; the Valley's
+    start menu goes straight into the tour.
 - **The Valley opens on a start menu: a cinematic tour, or Free mode.** The tour is a 405 s sequence over
   every part of the valley.
   - *Act I.* The campfire, the main road, the hamlet, the Old House and the Granary in 30 s. Then the

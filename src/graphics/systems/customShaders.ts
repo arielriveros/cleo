@@ -2,6 +2,7 @@ import { device } from '../rhi/deviceHandle';
 import type { ShaderProgram, ShaderProgramDescriptor } from '../rhi/shaderProgram';
 import { authoring } from '../../core/eventBus';
 import { shaderOptimizerStats, recordStall } from '../shaderOptimizer/stats';
+import { shaderStats } from '../shaderStats';
 import { ShaderManager } from './shaderManager';
 import { Logger } from '../../core/logger';
 import PBR_VERTEX_SRC from '../shaders/materials/pbr.vs';
@@ -1180,7 +1181,7 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
             // The WebGPU half. Absent on WebGL2, and on WebGPU with no translator installed.
             ...webgpuHalf(mat, key),
         };
-        if (!authoring.enabled && device.prepareShaderProgram) {
+        if (!authoring.enabled && !shaderStats.blockingCompiles && device.prepareShaderProgram) {
             device.prepareShaderProgram(descriptor);
             pendingCompiles.set(key, descriptor);
             if (!ShaderManager.Instance.find(key)) {
@@ -1190,7 +1191,8 @@ export function ensureCustomShader(mat: CustomMaterial): boolean {
         }
     }
     if (pendingCompiles.has(key)) {
-        if (device.isShaderProgramReady && !device.isShaderProgramReady(descriptor)) return false;
+        // A movie (blockingCompiles) waits for it here instead of drawing a frame without it.
+        if (!shaderStats.blockingCompiles && device.isShaderProgramReady && !device.isShaderProgramReady(descriptor)) return false;
         pendingCompiles.delete(key);
     }
 

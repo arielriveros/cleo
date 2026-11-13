@@ -6,6 +6,7 @@ const fsp = fs.promises;
 const { pathToFileURL } = require('url');
 const { GAME_MAIN_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme } = require('./gameTemplates');
 const scriptWorkspace = require('./scriptWorkspace');
+const movieFiles = require('./movieFiles');
 
 const isDev = process.env.CLEO_DEV === '1';
 
@@ -431,3 +432,9 @@ ipcMain.handle('publish:desktop', async (event, files, options) => {
 // Electron pieces it needs.
 
 scriptWorkspace.registerIpc({ ipcMain, BrowserWindow, pickDirectory });
+
+// --- Movie output IPC --------------------------------------------------------------------------
+//
+// The editor's Render Movie streams its file (or folder of frames) through here; see movieFiles.js.
+
+movieFiles.registerIpc({ ipcMain, BrowserWindow, dialog, pickDirectory });

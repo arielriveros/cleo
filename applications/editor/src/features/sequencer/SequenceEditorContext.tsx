@@ -52,6 +52,8 @@ export interface SequenceEditorValue {
   seq: SequenceData | null
   /** The preview host: the editor-owned Sequence node playing the working copy in the open scene. */
   host: SequenceNode | null
+  /** The Sequence node the tab was opened from (whose bindings the preview borrows), or null. */
+  contextNodeId: string | null
   preview: SequencePreview
   /** Record `next` as one undo step. `before`: what to undo to, when a drag already showed `next` live. */
   commit: (label: string, next: SequenceData, before?: SequenceData, coalesceKey?: string) => Promise<void>
@@ -481,8 +483,9 @@ export function SequenceEditorProvider({ children }: { children: React.ReactNode
   const wrappedPreview = useMemo<SequencePreview>(() => ({ ...preview, seek }), [preview, seek])
 
   const value = useMemo<SequenceEditorValue>(() => ({
-    tabId, asset, seq: doc?.draft ?? null, host, preview: wrappedPreview, commit, live, slotOfNode, settleEdits,
-  }), [tabId, asset, doc?.draft, host, wrappedPreview, commit, live, slotOfNode, settleEdits])
+    tabId, asset, seq: doc?.draft ?? null, host, contextNodeId: doc?.contextNodeId ?? null, preview: wrappedPreview, commit, live,
+    slotOfNode, settleEdits,
+  }), [tabId, asset, doc?.draft, doc?.contextNodeId, host, wrappedPreview, commit, live, slotOfNode, settleEdits])
 
   return (
     <SequenceEditorContext.Provider value={value}>

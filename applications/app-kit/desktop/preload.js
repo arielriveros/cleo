@@ -24,6 +24,18 @@ contextBridge.exposeInMainWorld('cleoDesktop', {
     respondToUnload: (allow) => ipcRenderer.send('shell:unload-response', !!allow),
   },
 
+  // Movie output (the Sequencer's Render Movie): a save dialog and a file written at byte offsets, or a folder of
+  // numbered frames. Paths come only from the dialogs in movieFiles.js.
+  movie: {
+    pickFile: (suggestedName, extension) => ipcRenderer.invoke('movie:pick-file', suggestedName, extension),
+    pickFolder: () => ipcRenderer.invoke('movie:pick-folder'),
+    open: (target, name) => ipcRenderer.invoke('movie:open', target, name),
+    write: (handle, position, data) => ipcRenderer.invoke('movie:write', handle, position, data),
+    close: (handle, abort) => ipcRenderer.invoke('movie:close', handle, !!abort),
+    writeFile: (dir, name, data) => ipcRenderer.invoke('movie:write-file', dir, name, data),
+    setBackgroundThrottling: (allowed) => ipcRenderer.invoke('movie:background-throttling', !!allowed),
+  },
+
   // The script workspace: a folder on disk that mirrors the project's script library so it can be edited
   // in VSCode. `onChange` is push, not poll -- the main process watches the folder and sends a coalesced
   // changeset whenever the disk diverges from what it last wrote.

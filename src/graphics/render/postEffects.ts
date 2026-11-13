@@ -8,6 +8,7 @@ import { Framebuffer } from '../framebuffer';
 import { RenderPass } from '../gpuProfiler';
 import { CustomMaterial } from '../material';
 import { ADDITIVE_BLEND } from '../rhi/types';
+import type { RenderTarget } from '../rhi/resources';
 import { customShaderModules, screenShaderResources, screenUserSamplerNames } from '../systems/customShaders';
 import { TextureManager } from '../systems/textureManager';
 import { Texture } from '../texture';
@@ -27,6 +28,7 @@ import type { TemporalPasses } from './temporal';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 import type { RenderSubsystems } from './subsystems';
+import { renderNow } from './renderClock';
 
 /** What PostEffects reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface PostEffectsHost {
@@ -260,10 +262,10 @@ export class PostEffects {
     /**
      * The single display resolve: exposure -> tone curve -> LUT -> sRGB on the linear-HDR composite.
      * Uniform VALUES still travel by name through ShaderManager; the backend decides how a named
-     * uniform reaches the GPU.
+     * uniform reaches the GPU. Into the canvas, or `target` (a movie's frame, render/movieCapture.ts).
      */
-    public presentPass(source: Framebuffer): void {
-        const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'present', true);
+    public presentPass(source: Framebuffer, target: RenderTarget = this._passes.screenTarget()): void {
+        const pass = this._passes.beginFullscreenPass(target, 'present', true);
         const lut = this.colorLut.volumeFor(this.colorGradingLut);
         this._fullscreen.bind(pass, 'present', PresentProgram, [
             source.colors[0], this._targets.scene.depth, lut, this.localExposure.texture,
@@ -670,9 +672,9 @@ export class PostEffects {
         this._shaderManager.setUniform('u_grainIntensity', this.filmGrainIntensity);
         this._shaderManager.setUniform('u_grainSize', this.filmGrainSize);
         this._shaderManager.setUniform('u_grainColored', this.filmGrainColored ? 1 : 0);
-        // Wall-clock, as the other animated passes take it. A frame counter would tie the grain's
-        // speed to the frame rate, so it would crawl on a slow machine and shimmer on a fast one.
-        this._shaderManager.setUniform('u_time', performance.now() * 0.001);
+        // The render clock (renderClock.ts), as the other animated passes take it. A frame counter would tie
+        // the grain's speed to the frame rate, so it would crawl on a slow machine and shimmer on a fast one.
+        this._shaderManager.setUniform('u_time', renderNow() * 0.001);
         this._shaderManager.setUniform('u_resolution', [this._host.renderWidth, this._host.renderHeight]);
         this._shaderManager.setUniform('u_exposure', displayExposure(this._view));
         this._passes.drawFullscreenAndEnd(pass);

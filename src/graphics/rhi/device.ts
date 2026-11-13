@@ -346,8 +346,14 @@ export interface Device {
      * Read a colour attachment back to the CPU, as it stands at the call. Asynchronous on both backends —
      * WebGPU copies into a buffer and maps it, WebGL2 copies into a pixel-pack buffer and waits on a fence
      * — so it never stalls the frame; callers must finish rendering and restore their state BEFORE awaiting.
+     *
+     * `immediate` reads at the call, waiting for the GPU there (WebGL2: a plain `readPixels`), for a caller
+     * that would only wait anyway and must not depend on timers — a movie render, whose window may be
+     * hidden, where a timer-polled fence waits a second a frame. WebGPU's map never polls a timer and
+     * ignores it.
      */
-    readPixels(view: TextureView, x: number, y: number, width: number, height: number): Promise<Uint8Array>;
+    readPixels(view: TextureView, x: number, y: number, width: number, height: number,
+               options?: { immediate?: boolean }): Promise<Uint8Array>;
 
     /**
      * Read `size` bytes of a buffer created with `COPY_SRC` back to the CPU, as they stand once

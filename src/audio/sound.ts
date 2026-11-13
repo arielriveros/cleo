@@ -3,6 +3,7 @@ import { Logger } from "../core/logger";
 import { EffectRack } from "./effectRack";
 import { Mixer } from "./buses";
 import { rackShapeOf } from "./soundSettings";
+import { audioRecorder } from "./movieAudio";
 import type { SoundSettings, SpatialSettings } from "./soundSettings";
 
 /**
@@ -138,6 +139,9 @@ export class Sound {
      */
     public play(): number | null {
         if (this._deleted) return null;
+        // A movie is recording (movieAudio.ts): the voice is virtual, logged and mixed afterwards.
+        const recorder = audioRecorder();
+        if (recorder) return recorder.play(this);
         const region = this._settings.loop && this._settings.loopEnd > this._settings.loopStart;
         const voiceId = region ? this._howl.play(REGION_SPRITE) : this._howl.play();
         if (typeof voiceId !== 'number') return null;
@@ -155,6 +159,8 @@ export class Sound {
      */
     public stop(voiceId?: number): void {
         if (this._deleted) return;
+        const recorder = audioRecorder();
+        if (recorder) { recorder.stop(this, voiceId); return; }
         const fade = this._settings.fadeOut;
         if (fade > 0 && typeof voiceId === 'number') {
             const from = this._howl.volume(voiceId) as unknown as number;
@@ -170,40 +176,63 @@ export class Sound {
 
     public pause(voiceId?: number): void {
         if (this._deleted) return;
+        const recorder = audioRecorder();
+        if (recorder) { recorder.pause(this, voiceId); return; }
         if (typeof voiceId === 'number') this._howl.pause(voiceId); else this._howl.pause();
     }
 
     public resume(voiceId?: number): number | null {
         if (this._deleted) return null;
+        const recorder = audioRecorder();
+        if (recorder) return recorder.resume(this, voiceId);
         const id = typeof voiceId === 'number' ? this._howl.play(voiceId) : this._howl.play();
         return typeof id === 'number' ? id : null;
     }
 
     public isPlaying(voiceId?: number): boolean {
         if (this._deleted) return false;
+        const recorder = audioRecorder();
+        if (recorder) return recorder.isPlaying(this, voiceId);
         return typeof voiceId === 'number' ? this._howl.playing(voiceId) : this._howl.playing();
     }
 
     /** Playhead position in seconds, for the editor's transport. */
     public seek(voiceId?: number): number {
         if (this._deleted) return 0;
+        const recorder = audioRecorder();
+        if (recorder) return recorder.seek(this, voiceId);
         const at = typeof voiceId === 'number' ? this._howl.seek(voiceId) : this._howl.seek();
         return typeof at === 'number' ? at : 0;
     }
 
     /** Move a voice's playhead to `seconds` into the sample. */
     public seekVoice(voiceId: number, seconds: number): void {
+        const recorder = audioRecorder();
+        if (recorder) { if (!this._deleted) recorder.seekVoice(voiceId, seconds); return; }
         if (!this._deleted && Number.isFinite(seconds)) this._howl.seek(Math.max(0, seconds), voiceId);
     }
 
     /** A voice's playback rate, as a multiple of the sample's own (howler's 0.5..4 range). */
     public setVoiceRate(voiceId: number, rate: number): void {
         if (this._deleted || !Number.isFinite(rate)) return;
-        this._howl.rate(Math.min(4, Math.max(0.5, rate * (this._settings.rate || 1))), voiceId);
+        const effective = Math.min(4, Math.max(0.5, rate * (this._settings.rate || 1)));
+        const recorder = audioRecorder();
+        if (recorder) { recorder.setRate(voiceId, effective); return; }
+        this._howl.rate(effective, voiceId);
+    }
+
+    /** Loop one voice, or stop it looping, whatever the sample's own setting. */
+    public setVoiceLoop(voiceId: number, loop: boolean): void {
+        if (this._deleted) return;
+        const recorder = audioRecorder();
+        if (recorder) { recorder.setLoop(voiceId, loop); return; }
+        this._howl.loop(loop, voiceId);
     }
 
     public fade(from: number, to: number, seconds: number, voiceId?: number): void {
         if (this._deleted) return;
+        const recorder = audioRecorder();
+        if (recorder) { recorder.fade(this, from, to, seconds, voiceId); return; }
         this._howl.fade(from, to, Math.max(0, seconds) * 1000, voiceId);
     }
 
@@ -213,20 +242,28 @@ export class Sound {
 
     /** Voice gain, 0..1. The node's own volume multiplied by the sample's. */
     public setVoiceVolume(voiceId: number, volume: number): void {
+        const recorder = audioRecorder();
+        if (recorder) { if (!this._deleted) recorder.setVolume(voiceId, Math.min(1, Math.max(0, volume))); return; }
         if (!this._deleted) this._howl.volume(Math.min(1, Math.max(0, volume)), voiceId);
     }
 
     /** Stereo pan, -1..1. Ambient voices only — a spatial voice's panner owns the stereo field. */
     public setVoicePan(voiceId: number, pan: number): void {
+        const recorder = audioRecorder();
+        if (recorder) { if (!this._deleted) recorder.setPan(voiceId, Math.min(1, Math.max(-1, pan))); return; }
         if (!this._deleted) this._howl.stereo(Math.min(1, Math.max(-1, pan)), voiceId);
     }
 
     public setVoicePosition(voiceId: number, x: number, y: number, z: number): void {
+        const recorder = audioRecorder();
+        if (recorder) { if (!this._deleted) recorder.setPosition(voiceId, x, y, z); return; }
         if (!this._deleted) this._howl.pos(x, y, z, voiceId);
     }
 
     public setVoiceSpatial(voiceId: number, spatial: SpatialSettings): void {
         if (this._deleted) return;
+        const recorder = audioRecorder();
+        if (recorder) { recorder.setSpatial(voiceId, spatial); return; }
         this._howl.pannerAttr({
             // Cast: @types/howler narrows `distanceModel` to inverse|linear, but howler assigns it
             // straight onto the PannerNode, which takes all three of the Web Audio models.

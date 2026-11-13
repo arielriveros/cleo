@@ -27,6 +27,7 @@ import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
+import { renderNow, renderClockOverridden } from './renderClock';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
@@ -120,6 +121,9 @@ export class FoliagePasses {
      * imperceptible. 0 disables the budget.
      */
     private _foliageAdmitPerFrame: number = 4;
+    /** See {@link _foliageAdmitPerFrame}. A movie render sets 0: every frame shows all it should, at once. */
+    public get foliageAdmitPerFrame(): number { return this._foliageAdmitPerFrame; }
+    public set foliageAdmitPerFrame(n: number) { this._foliageAdmitPerFrame = Math.max(0, Math.floor(n) || 0); }
 
     /**
      * Density scaling: how much of a detail level's instances survive, per level away from the base.
@@ -761,13 +765,16 @@ export class FoliagePasses {
     public effectsTimeScale = 1;
 
     /**
-     * Advance the render clock (`windTime`) by the wall-clock frame delta, clamped, and scaled by the game's
+     * Advance the render clock (`windTime`) by the render clock's frame delta (renderClock.ts: the wall clock,
+     * or a movie's), clamped against a backgrounded tab, and scaled by the game's
      * time scale when effects follow it: at time ×2 the grass sways, the clouds drift and the rain falls
      * twice as fast, a time-lapse rather than only the sun moving faster.
      */
     public advanceWindTime(): void {
-        const now = performance.now();
-        const wall = this._windClock < 0 ? 0 : Math.min(0.1, Math.max(0, (now - this._windClock) / 1000));
+        const now = renderNow();
+        // No clamp when a movie drives the clock: its step is exact, and a slow movie's is longer than 0.1 s.
+        const cap = renderClockOverridden() ? Infinity : 0.1;
+        const wall = this._windClock < 0 ? 0 : Math.min(cap, Math.max(0, (now - this._windClock) / 1000));
         this._windClock = now;
         const rate = this.effectsFollowTimeScale && Number.isFinite(this.effectsTimeScale) ? Math.max(0, this.effectsTimeScale) : 1;
         const dt = wall * rate;

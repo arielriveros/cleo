@@ -16,7 +16,7 @@ import { EditorSessionsContext, type EditorSessionsContextValue } from "./Editor
 import { useStableActions } from "@cleo/app-kit/utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
-import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode } from "cleo";
+import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, setMovieRender } from "cleo";
 import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, FOLIAGE_STARTER, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener, RenderSettings } from "cleo";
 import NullImage from '../images/null.png';
@@ -297,6 +297,13 @@ const EngineContext = createContext<{
   startPlay: () => void;
   /** Play without possession: physics, AI and scripts run, viewed through the editor camera. */
   startSimulate: () => void;
+  /**
+   * Play's session for a movie render (features/sequencer/movie/): the play scene built and installed, but
+   * NOT started and with the frame loop detached — the movie starts it once it knows what it films and
+   * steps it frame by frame. Resolves with the scene, or null when a session is already running. End it
+   * with `stopPlay`.
+   */
+  startMovieSession: () => Promise<Scene | null>;
   stopPlay: () => void;
   pausePlay: () => void;
   /**
@@ -696,6 +703,7 @@ const EngineContext = createContext<{
     triggers: new Map(),
     startPlay: () => {},
     startSimulate: () => {},
+    startMovieSession: async () => null,
     stopPlay: () => {},
     pausePlay: () => {},
     templates: [],
@@ -950,6 +958,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const pendingPlayRef = useRef(false);
   /** Which session the pending switch starts: Play, or Simulate. */
   const pendingSimulateRef = useRef(false);
+  /** A movie render waiting on the same switch: what to hand the play scene to (see startMovieSession). */
+  const pendingMovieRef = useRef<((scene: Scene | null) => void) | null>(null);
   // Mirrored during RENDER, like tabsRef: startPlay reads it from an async/event path where the render-scoped
   // value would be a commit behind.
   const mainModeRef = useRef(mainMode);
@@ -6736,13 +6746,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   const startPlay = () => startSession(false);
   const startSimulate = () => startSession(true);
-  const startSession = async (simulate: boolean) => {
+  const startMovieSession = () => new Promise<Scene | null>(resolve => { void startSession(false, resolve); });
+  const startSession = async (simulate: boolean, movie?: (scene: Scene | null) => void) => {
     const instance = instanceRef.current;
-    if (!instance) return;
+    if (!instance) { movie?.(null); return; }
     // The play scene is built from the authored one: a Sequencer preview must hand it back first.
     stopSequencePreviews();
     // The two sessions are exclusive: switching between Play and Simulate goes through Stop.
-    if (startedRef.current && isSimulatingRef.current !== simulate) return;
+    if (startedRef.current && isSimulatingRef.current !== simulate) { movie?.(null); return; }
+    // A movie films a fresh session, never one already running.
+    if (startedRef.current && movie) { movie(null); return; }
     if (startedRef.current) { eventEmitter.current.emit('SET_PLAY_STATE', simulate ? 'simulate' : 'play'); return; }
 
     // Play always runs the game scene, from wherever the user happens to be; Stop brings them back.
@@ -6760,6 +6773,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       setActiveTab(SCENE_TAB_ID);
       pendingPlayRef.current = true;
       pendingSimulateRef.current = simulate;
+      pendingMovieRef.current = movie ?? null;
       return;
     }
 
@@ -6782,6 +6796,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setSimulatedScene(simulate ? newScene : null);
     instance.isPaused = false;
     installGameHost();
+    if (movie) {
+      // The movie starts the scene itself, once Game.movieRender names what it films, and steps every frame:
+      // no timer start, no free-running loop, no runtime debug helpers in the picture.
+      instance.detachLoop();
+      eventEmitter.current.emit('SET_PLAY_STATE', 'play');
+      startedRef.current = true;
+      movie(newScene);
+      return;
+    }
     // Rebuild runtime debug helpers AFTER scene.start() — the reconcile the isPlayMode flip triggers runs
     // before start(), which resets the scene and drops those just-added nodes. Emitting here mirrors the
     // live-toggle path, so Runtime toggles are honoured from the first frame of Play.
@@ -6793,6 +6816,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     startedRef.current = false;
     const instance = instanceRef.current;
     setGameHost(null);
+    setMovieRender(null);
+    // A movie session that ended early (an error before its engine took over) leaves the loop detached.
+    instance?.attachLoop();
     if (!instance) return;
     // Before the play scene is released: disposing it would take the editor camera down with it.
     if (isSimulatingRef.current) recallEditorCamera(playSceneRef.current);
@@ -6843,7 +6869,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (!pendingPlayRef.current) return;
     if (activeTabId !== SCENE_TAB_ID || mainMode !== 'scene') return;
     pendingPlayRef.current = false;
-    void startSession(pendingSimulateRef.current);
+    const movie = pendingMovieRef.current;
+    pendingMovieRef.current = null;
+    void startSession(pendingSimulateRef.current, movie ?? undefined);
   }, [activeTabId, mainMode]);
 
   // Return to wherever Play was pressed from. Deliberately an effect on isPlayMode rather than a call inside
@@ -7109,6 +7137,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       triggers: triggersRef.current,
       startPlay,
       startSimulate,
+      startMovieSession,
       stopPlay,
       pausePlay,
       templates,
