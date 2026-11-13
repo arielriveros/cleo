@@ -6,6 +6,7 @@ import JSZip from 'jszip';
 import { packGameBin } from '../features/publish/pack';
 import { obfuscateScripts } from '../features/publish/obfuscate';
 import { idbSet } from '@cleo/app-kit/utils/idb';
+import { putPlaySession } from '../features/playWindow/sessionStore';
 import { BundleData, BUNDLE_PATHS } from '../utils/bundle';
 import { BundleSource, bundleEntries, readBundle } from '../utils/bundleRead';
 // Dependency-free by construction — it works over typed arrays rather than `Geometry`, which is exactly
@@ -42,6 +43,12 @@ export type ProjectJob =
     }
   | { kind: 'exportBundle'; bundle: BundleData }
   | { kind: 'importBundle'; buffer: ArrayBuffer }
+  /**
+   * Play in window: pack the built game and leave it in the play-session store for the game window
+   * (features/playWindow/sessionStore.ts). The bytes are written HERE, not handed back: a packed game can
+   * be hundreds of megabytes, and the main thread has no use for them.
+   */
+  | { kind: 'playPack'; data: any; sessionId: string }
   /** LOD generation: decimate one model's geometry to `ratio` of its triangles. */
   | { kind: 'decimate'; buffers: SimplifyBuffers; ratio: number };
 
@@ -55,7 +62,8 @@ export type ProjectJobResult =
   | { kind: 'publish'; files?: PublishFiles; zip?: ArrayBuffer; warnings: string[] }
   | { kind: 'exportBundle'; zip: ArrayBuffer }
   | { kind: 'importBundle'; bundle: BundleData }
-  | { kind: 'decimate'; buffers: SimplifyBuffers };
+  | { kind: 'decimate'; buffers: SimplifyBuffers }
+  | { kind: 'playPack'; bytes: number };
 
 /** Result plus anything in it that should be transferred rather than cloned. */
 export interface JobOutcome {
@@ -168,5 +176,14 @@ export async function runJob(job: ProjectJob): Promise<JobOutcome> {
 
     case 'importBundle':
       return runImportBundle(job);
+
+    case 'playPack': {
+      // Scripts stay in the data as source (no extractScripts): the game window compiles them, as editor
+      // Play does. packGameBin mutates `data`, which is safe on the worker's own structured-clone copy; on
+      // the inline fallback it is the caller's throwaway build.
+      const { buffer } = packGameBin(job.data);
+      await putPlaySession(job.sessionId, buffer);
+      return { result: { kind: 'playPack', bytes: buffer.byteLength }, transfer: [] };
+    }
   }
 }

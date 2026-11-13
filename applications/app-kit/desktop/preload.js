@@ -36,6 +36,20 @@ contextBridge.exposeInMainWorld('cleoDesktop', {
     setBackgroundThrottling: (allowed) => ipcRenderer.invoke('movie:background-throttling', !!allowed),
   },
 
+  // Play in window: the game in a window -- and a renderer process -- of its own, which the main process
+  // creates (playWindow.js) from a session id; the URL is built there. `onEvent` reports the window's
+  // process, its closing and a crash. Returns an unsubscribe -- the raw listener never escapes here.
+  play: {
+    open: (options) => ipcRenderer.invoke('play:open', options),
+    close: (sessionId) => ipcRenderer.invoke('play:close', sessionId),
+    focus: (sessionId) => ipcRenderer.invoke('play:focus', sessionId),
+    onEvent: (cb) => {
+      const listener = (_event, payload) => cb(payload);
+      ipcRenderer.on('play:event', listener);
+      return () => ipcRenderer.removeListener('play:event', listener);
+    },
+  },
+
   // The script workspace: a folder on disk that mirrors the project's script library so it can be edited
   // in VSCode. `onChange` is push, not poll -- the main process watches the folder and sends a coalesced
   // changeset whenever the disk diverges from what it last wrote.

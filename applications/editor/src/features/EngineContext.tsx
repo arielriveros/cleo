@@ -57,7 +57,9 @@ import { TilesetAsset, reembedTilesets, detachTileset, normalizeTilesetAsset } f
 import { AiBrainAsset, AiBrainKind, buildAiBrainAsset, reembedBrains, detachBrain } from "../utils/aiBrains";
 import { ParticleSystemAsset, buildParticleSystemAsset, reembedParticleSystems, detachParticleSystem } from "../utils/particleSystems";
 import { SequenceAsset, buildSequenceAsset, detachSequence, reembedSequences } from "../utils/sequenceAssets";
-import { applySequenceWorkingCopies } from "./sequencer/workingCopies";
+import { applySequenceWorkingCopies, applySequenceWorkingCopiesToJson } from "./sequencer/workingCopies";
+import { buildMultiSceneGameData } from "./publish/buildMultiSceneGameData";
+import { isWindowPlayActive } from "./playWindow/windowPlay";
 import { sequenceKeyingActive } from "./sequencer/previewRegistry";
 import type { AnimControllerAsset } from "../utils/animationControllers";
 import { instantiateController, reembedMachine, pickControllerForRig, machineIsEmpty, buildControllerAsset } from "../utils/animationControllers";
@@ -307,6 +309,14 @@ const EngineContext = createContext<{
   startMovieSession: () => Promise<Scene | null>;
   stopPlay: () => void;
   pausePlay: () => void;
+  /**
+   * Play in window (features/playWindow/): the whole game as data — every scene, the open one live and as
+   * the entry, with the textures, sounds, clips and templates they use — built the way Publish builds it,
+   * ready for `packGameBin`. Scripts stay as source. Makes the same refreshes to the open scene that Play
+   * makes first, and puts the open Sequencer tabs' working copies in, as Play does. Never touches the
+   * running engine: the game runs in another window.
+   */
+  buildWindowPlayData: () => Promise<any>;
   /**
    * The project's input action map. Project-wide rather than per-scene: two scenes disagreeing about
    * what `Jump` is bound to would be inexplicable to a player. Persisted under its own storage key and
@@ -707,6 +717,7 @@ const EngineContext = createContext<{
     startMovieSession: async () => null,
     stopPlay: () => {},
     pausePlay: () => {},
+    buildWindowPlayData: async () => { throw new Error('No editor engine'); },
     templates: [],
     inputMap: DEFAULT_INPUT_MAP,
     setInputMap: () => {},
@@ -6776,10 +6787,41 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
   const startPlay = () => startSession(false);
   const startSimulate = () => startSession(true);
+  // Play in window's build. From the AUTHORED scene and the refs, never `activeScene`: the game is the scene
+  // tab's, whichever tab is in front. The open scene leads (it is the entry, as Play starts there), and it
+  // gets the refreshes startSession makes before it builds.
+  const buildWindowPlayData = async (): Promise<any> => {
+    const scene = editorSceneRef.current;
+    const instance = instanceRef.current;
+    if (!scene || !instance) throw new Error('No scene to play');
+    stopSequencePreviews();
+    reembedSceneFields(scene);
+    if (reembedSequences(scene, sequencesRef.current)) markTabDirty(SCENE_TAB_ID, 'sequence-reembed');
+    const openId = openSceneIdRef.current;
+    const listed = projectMetaRef.current?.scenes ?? [];
+    // A scene not saved into the project's list yet still plays: it is the one on screen.
+    const scenes = listed.some(s => s.id === openId) ? listed : [...listed, { id: openId, name: 'Scene' } as SceneMeta];
+    const data = await buildMultiSceneGameData({
+      mainSceneId: openId, openSceneId: openId, scenes,
+      liveScene: scene, liveScripts: scriptsRef.current, liveBodies: bodiesRef.current, liveTriggers: triggersRef.current,
+      libs: currentLibs(), scriptAssets: scriptAssetsRef.current, scriptPaths: scriptPathsRef.current,
+      liveDimension: dimensionOfScene(openId),
+      settings: instance.renderer.getRenderSettings(),
+      input: inputMap,
+      projectSettings: projectSettingsRef.current,
+      pipelines: instance.renderer.pipelineRecipes(),
+    });
+    const entry = data?.scenes?.[openId]?.scene;
+    if (entry) applySequenceWorkingCopiesToJson(entry);
+    return data;
+  };
   const startMovieSession = () => new Promise<Scene | null>(resolve => { void startSession(false, resolve); });
   const startSession = async (simulate: boolean, movie?: (scene: Scene | null) => void) => {
     const instance = instanceRef.current;
     if (!instance) { movie?.(null); return; }
+    // One game at a time: while one runs in its own window (Play in window), Play, Simulate and a movie
+    // render here wait for it to end, so the transport never drives two games.
+    if (isWindowPlayActive()) { movie?.(null); return; }
     // The play scene is built from the authored one: a Sequencer preview must hand it back first.
     stopSequencePreviews();
     // The two sessions are exclusive: switching between Play and Simulate goes through Stop.
@@ -7170,6 +7212,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       startMovieSession,
       stopPlay,
       pausePlay,
+      buildWindowPlayData,
       templates,
       // The project's input action map, and the setter the Input panel edits it through. Everything
       // downstream (persistence, the running InputSystem, publish) hangs off this one piece of state.

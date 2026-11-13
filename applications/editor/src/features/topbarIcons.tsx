@@ -38,3 +38,15 @@ export const SimulateGlyph = () => (
 );
 export const PauseGlyph =() => (<P><rect x='6' y='4.5' width='4.5' height='15' rx='1' /><rect x='13.5' y='4.5' width='4.5' height='15' rx='1' /></P>);
 export const StopGlyph = () => (<P><rect x='5.5' y='5.5' width='13' height='13' rx='1.5' /></P>);
+// Restart (Play in window): rebuild and reload the game window. An arrow coming round on itself.
+export const RestartGlyph = () => (
+  <S width='13' height='13' strokeWidth='2.2'><path d='M19.5 12a7.5 7.5 0 1 1-2.2-5.3' /><path d='M19.5 4v4h-4' /></S>
+);
+// Play in window: the play mark in a window of its own (the target menu, and the Play button's badge).
+export const PlayWindowIcon = () => (
+  <S><rect x='3' y='4.5' width='18' height='15' rx='1.5' /><path d='M3 8.5h18' /><path d='M10.5 11.2v5.6l4.6-2.8Z' fill='currentColor' /></S>
+);
+// Play in editor: the play mark in the editor's viewport, framed by its panels.
+export const PlayEditorIcon = () => (
+  <S><rect x='3' y='4.5' width='18' height='15' rx='1.5' /><path d='M8 4.5v15' /><path d='M12 9.6v5.8l4.8-2.9Z' fill='currentColor' /></S>
+);

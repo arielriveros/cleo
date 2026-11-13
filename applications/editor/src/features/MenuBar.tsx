@@ -23,8 +23,10 @@ import { Button, MenuItem, buttonVariants, cn, useDocEntry, useDocTooltip } from
 import {
   SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
   SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon, ProjectsIcon,
-  PlayGlyph, SimulateGlyph, PauseGlyph, StopGlyph,
+  PlayGlyph, SimulateGlyph, PauseGlyph, StopGlyph, RestartGlyph, PlayWindowIcon, PlayEditorIcon,
 } from "./topbarIcons";
+import { useWindowPlay, windowPlay } from "./playWindow/windowPlay";
+import { usePlayTarget, writePlayTarget } from "./playWindow/playTarget";
 import ProjectsModal from "./projects/ProjectsModal";
 import { useProjectName } from "./projects/useProjectName";
 
@@ -37,16 +39,19 @@ interface TransportProps {
   accent: string;     // hover color when idle
   activeClass: string; // fill when this is the current state
   onClick: () => void;
+  /** A narrow segment: the Play target's chevron. */
+  narrow?: boolean;
   children: React.ReactNode;
 }
-function Transport({ title, disabled, active, accent, activeClass, onClick, children }: TransportProps) {
+function Transport({ title, disabled, active, accent, activeClass, onClick, narrow, children }: TransportProps) {
   return (
     <Button
       title={title}
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'w-[30px] h-[25px] p-0 rounded-none border-0 border-r border-control-hover last:border-r-0 disabled:opacity-40',
+        narrow ? 'w-[16px]' : 'w-[30px]',
+        'h-[25px] p-0 rounded-none border-0 border-r border-control-hover last:border-r-0 disabled:opacity-40',
         active ? activeClass : cn('text-muted', accent),
       )}
     >
@@ -69,7 +74,7 @@ function useBarDoc(doc: string, title: string) {
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, startSimulate, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, startSimulate, stopPlay, pausePlay, buildWindowPlayData, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings } = useCleoEngine();
   const { vfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -103,6 +108,11 @@ export default function MenuBar() {
   const [publishing, setPublishing] = useState(false);
   const publishRef = useRef<HTMLDivElement>(null);
   const desktop = isDesktop();
+  // Play in window: where Play runs (per machine), and the window session when there is one.
+  const playTarget = usePlayTarget();
+  const windowSession = useWindowPlay();
+  const [showTargets, setShowTargets] = useState(false);
+  const targetsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handlePlayState = (state: 'play' | 'simulate' | 'pause' | 'stop') => {
@@ -187,6 +197,16 @@ export default function MenuBar() {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [showPublish]);
 
+  // ...and the Play target menu.
+  useEffect(() => {
+    if (!showTargets) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (targetsRef.current && !targetsRef.current.contains(e.target as Node)) setShowTargets(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [showTargets]);
+
   // Publish targets embed all assets: buildGameData with useCache=false so textures serialize to base64.
   // Split into two reported phases: serializing the scene (embedding every texture), then the build itself
   // (script obfuscation, asset packing, zipping), which runs in the project worker.
@@ -265,13 +285,42 @@ export default function MenuBar() {
     runPublish(installer ? 'Publishing desktop installer' : 'Publishing desktop build',
       data => publishDesktop(data, { installer, name: gameName || undefined, window: projectSettings.publish }));
 
-  const onPlay = () => startPlay();
+  // Play in window. The window opens inside this click (a web popup needs its user activation) and the
+  // build follows; pressed while a window game runs, Play resumes it or brings its window forward.
+  const windowActive = windowSession.active;
+  const windowSize = () => ({
+    width: projectSettings.publish.width, height: projectSettings.publish.height,
+    title: projectSettings.publish.title.trim() || projectName.trim() || 'Cleo Game',
+  });
+  const onPlay = () => {
+    if (windowActive) {
+      if (windowSession.status === 'paused') windowPlay().resume();
+      else windowPlay().start(buildWindowPlayData, windowSize());
+      return;
+    }
+    // A session in the editor (a paused one resumes through here) keeps the editor's Play, whatever the target.
+    if (playTarget === 'window' && playState === 'stopped') windowPlay().start(buildWindowPlayData, windowSize());
+    else startPlay();
+  };
 
   const onSimulate = () => startSimulate();
 
-  const onStop = () => stopPlay();
+  const onStop = () => { if (windowActive || windowSession.status === 'failed') windowPlay().stop(); else stopPlay(); };
 
-  const onPause = () => pausePlay();
+  const onPause = () => { if (windowActive) windowPlay().pause(); else pausePlay(); };
+
+  const onRestart = () => windowPlay().restart(buildWindowPlayData);
+
+  const inEditorSession = playState !== 'stopped';
+  const windowBusy = windowSession.status === 'building' || windowSession.status === 'starting' || windowSession.rebuilding;
+  const windowLabel =
+    windowSession.rebuilding ? 'Rebuilding…'
+    : windowSession.status === 'building' ? 'Building…'
+    : windowSession.status === 'starting' ? 'Starting…'
+    : windowSession.status === 'paused' ? `Paused${windowSession.scene ? ` · ${windowSession.scene}` : ''}`
+    : windowSession.status === 'running' ? `In window${windowSession.scene ? ` · ${windowSession.scene}` : ''}`
+    : windowSession.status === 'failed' ? 'Failed'
+    : '';
 
   const projectsDoc = useBarDoc('editor/interface#menu-bar::Projects', 'Switch, create or delete projects');
   const saveAllDoc = useBarDoc('editor/interface#menu-bar::Save All', 'Save every asset with unsaved changes');
@@ -379,42 +428,101 @@ export default function MenuBar() {
           )}
         </div>
       </div>
-      <div className='flex items-center h-full'>
+      <div className='relative flex items-center h-full gap-1.5' ref={targetsRef}>
         <div className='flex items-center rounded overflow-hidden border border-control-hover my-[2px]'>
           {/* Never gated by the active tab. Play runs the game scene from anywhere: startPlay switches to
-              the scene tab itself, and Stop returns to the tab you pressed it from. */}
+              the scene tab itself, and Stop returns to the tab you pressed it from. Play in window builds
+              from the scene tab's scene whichever tab is in front, and never leaves it. */}
           <Transport
-            title='Play' disabled={playState === 'playing' || sessionKind === 'simulate'}
-            active={playState === 'playing'} activeClass='bg-success hover:bg-success text-fg'
+            title={windowActive
+              ? (windowSession.status === 'paused' ? 'Resume the game in its window' : 'Bring the game window forward')
+              : playTarget === 'window' && playState === 'stopped' ? 'Play in window — the game runs in a window and a process of its own' : 'Play'}
+            disabled={windowActive ? false : (playState === 'playing' || sessionKind === 'simulate')}
+            active={windowActive ? windowSession.status === 'running' : playState === 'playing'}
+            activeClass='bg-success hover:bg-success text-fg'
             accent='hover:text-success' onClick={() => onPlay()}
           >
-            <PlayGlyph />
+            {windowActive || (playTarget === 'window' && playState === 'stopped') ? <PlayWindowIcon /> : <PlayGlyph />}
+          </Transport>
+          {/* Where Play runs. Fixed while a game runs, either way. */}
+          <Transport
+            narrow title='Where Play runs: in the editor, or in a window of its own'
+            disabled={windowActive || inEditorSession}
+            active={showTargets} activeClass='bg-control text-fg'
+            accent='hover:text-fg' onClick={() => setShowTargets(v => !v)}
+          >
+            <ChevronDownIcon />
           </Transport>
           {/* Play without possession: physics, AI and scripts run on a throwaway copy, watched through the
               editor camera. Stop puts the scene back exactly as it was. */}
           <Transport
             title='Simulate — run physics, AI and scripts, viewed from the editor camera'
-            disabled={playState === 'simulating' || sessionKind === 'play'}
+            disabled={windowActive || playState === 'simulating' || sessionKind === 'play'}
             active={playState === 'simulating'} activeClass='bg-primary hover:bg-primary text-fg'
             accent='hover:text-primary' onClick={() => onSimulate()}
           >
             <SimulateGlyph />
           </Transport>
           <Transport
-            title='Pause' disabled={playState === 'paused' || playState === 'stopped'}
-            active={playState === 'paused'} activeClass='bg-selected hover:bg-selected text-fg'
+            title='Pause'
+            disabled={windowActive ? windowSession.status !== 'running' : (playState === 'paused' || playState === 'stopped')}
+            active={windowActive ? windowSession.status === 'paused' : playState === 'paused'}
+            activeClass='bg-selected hover:bg-selected text-fg'
             accent='hover:text-fg' onClick={() => onPause()}
           >
             <PauseGlyph />
           </Transport>
           <Transport
-            title='Stop' disabled={playState === 'stopped'}
+            title={windowActive ? 'Stop — close the game window' : 'Stop'}
+            disabled={!windowActive && windowSession.status !== 'failed' && playState === 'stopped'}
             active={false} activeClass=''
             accent='hover:text-danger' onClick={() => onStop()}
           >
             <StopGlyph />
           </Transport>
+          {/* Play in window only: rebuild from what the editor holds now, and reload the window. The game
+              that is running keeps going until the new one is ready. */}
+          {windowActive && (
+            <Transport
+              title='Restart — rebuild the game from the editor and reload its window'
+              disabled={windowBusy}
+              active={false} activeClass=''
+              accent='hover:text-success' onClick={() => onRestart()}
+            >
+              <RestartGlyph />
+            </Transport>
+          )}
         </div>
+        {windowLabel && (
+          <button
+            type='button'
+            className={cn('h-[25px] max-w-[220px] truncate rounded px-1.5 text-ui-xs flex items-center gap-1',
+              windowSession.status === 'failed' ? 'text-danger-fg hover:bg-control' : 'text-muted hover:text-fg hover:bg-control')}
+            title={windowSession.status === 'failed'
+              ? `${windowSession.error ?? 'The game window failed.'} Click to dismiss.`
+              : 'The game is running in its own window. Click to bring it forward.'}
+            onClick={() => windowSession.status === 'failed' ? windowPlay().stop() : windowPlay().start(buildWindowPlayData, windowSize())}
+          >
+            {windowBusy && <SpinnerIcon />}
+            <span className='truncate'>{windowLabel}</span>
+          </button>
+        )}
+        {showTargets && (
+          <div className='absolute left-0 top-[29px] z-50 w-[260px] bg-surface-raised border border-control-hover rounded shadow-lg p-1 text-fg text-ui'>
+            <MenuItem className='py-1.5' icon={<PlayEditorIcon />} active={playTarget === 'editor'}
+              onClick={() => { writePlayTarget('editor'); setShowTargets(false); }}
+              hint='In the viewport. The editor locks until you press Stop.'>
+              <span className='font-semibold'>Play in editor</span>
+            </MenuItem>
+            <MenuItem className='py-1.5' icon={<PlayWindowIcon />} active={playTarget === 'window'}
+              onClick={() => { writePlayTarget('window'); setShowTargets(false); }}
+              hint={desktop
+                ? 'A window and a process of its own, built as Publish builds it. Keep editing; Restart picks it up.'
+                : 'A pop-up window of its own, built as Publish builds it. Keep editing; Restart picks it up.'}>
+              <span className='font-semibold'>Play in window</span>
+            </MenuItem>
+          </div>
+        )}
       </div>
       <ModeSelector />
       <div className='flex items-center h-full px-1.5 gap-1.5'>

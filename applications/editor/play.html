@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cleo Game</title>
+    <!-- Play in window: the editor's game, in a window and a process of its own (src/player/session.tsx).
+         The markup and the loading screen match the published player's (src/player/index.html), which
+         boot.tsx expects: #game-viewport, #ui-root, #cleo-loading / #cleo-loading-text. -->
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+        #game-viewport { position: absolute; inset: 0; width: 100%; height: 100%; }
+        #ui-root { position: absolute; inset: 0; pointer-events: none; }
+        #cleo-loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: #000; color: #9a968e; font-family: Georgia, 'Times New Roman', serif; font-size: 15px; letter-spacing: 0.08em; z-index: 9000; transition: opacity 0.4s; }
+        #cleo-loading.done { opacity: 0; pointer-events: none; }
+        #cleo-loading .spin { width: 28px; height: 28px; border: 2px solid #333; border-top-color: #9a968e; border-radius: 50%; animation: cleo-spin 0.9s linear infinite; }
+        @keyframes cleo-spin { to { transform: rotate(360deg); } }
+        #cleo-error { position: absolute; inset: 0; margin: 0; color: #ff6b6b; background: #111; font-family: monospace; font-size: 13px; padding: 16px; white-space: pre-wrap; overflow: auto; z-index: 9999; }
+    </style>
+</head>
+<body>
+    <div id="game-viewport"></div>
+    <div id="ui-root"></div>
+    <div id="cleo-loading"><div class="spin"></div><div id="cleo-loading-text">Loading…</div></div>
+    <script type="module" src="/src/player/session.tsx"></script>
+</body>
+</html>

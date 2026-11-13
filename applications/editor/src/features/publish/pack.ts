@@ -91,6 +91,19 @@ export interface PackManifest {
    */
   animations?: { id: string; name: string; clips: any[]; sourceSkin: any }[];
   modelAnimations?: Record<string, string[]>;
+  /**
+   * Rig retarget corrections, flattened to model id -> animation id -> overrides (see
+   * buildMultiSceneGameData), as player/animations.ts reads them. Packs before 2026-11 dropped them here, so
+   * those games play every corrected clip uncorrected. No contract bump: the player already reads the field.
+   */
+  retargets?: Record<string, Record<string, { sourceName: string; targetName: string | null }[]>>;
+  /**
+   * Script module SOURCES by module id, only in a pack whose scripts were NOT extracted (Play in window: the
+   * scene JSON keeps each node's `script` source and the engine compiles it). A published game moves them
+   * into game.scripts.js (extractScripts), so it never carries this; the only reader is the editor's own
+   * play window, built with this packer, so no contract bump either.
+   */
+  modules?: Record<string, string>;
   config?: any;
   geometries: Record<string, PackedGeometry>;
   textures: PackedTexture[];
@@ -341,6 +354,8 @@ export function packGameBin(data: any): { buffer: ArrayBuffer; stats: PackStats 
     templates: data?.templates,
     animations: data?.animations,
     modelAnimations: data?.modelAnimations,
+    ...(data?.retargets ? { retargets: data.retargets } : {}),
+    ...(data?.modules ? { modules: data.modules } : {}),
     config: data?.config,
     geometries,
     textures,

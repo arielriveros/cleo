@@ -153,6 +153,16 @@ export async function runPublishJob(input: PublishJobInput): Promise<PublishJobO
   return { files: result.files, zip: result.zip, warnings: result.warnings };
 }
 
+/**
+ * Play in window: pack a built game and store it under `sessionId` for the game window, off the main
+ * thread. Resolves with the packed size. `data` is cloned into the worker, so the caller's copy is intact.
+ */
+export async function playPackJob(data: any, sessionId: string): Promise<number> {
+  const result = await dispatch({ kind: 'playPack', data, sessionId });
+  if (result.kind !== 'playPack') throw new Error('Unexpected job result');
+  return result.bytes;
+}
+
 /** Zip a gathered project/asset-pack bundle off the main thread. Returns the archive bytes. */
 export async function exportBundleJob(bundle: BundleData): Promise<ArrayBuffer> {
   // Inputs must NOT be transferred: detaching the texture ArrayBuffers would strand the inline retry.
