@@ -1,6 +1,8 @@
 import { vec3 } from "gl-matrix";
 import { aiStats } from "./aiStats";
 import type { CleoNavMesh } from "./navMesh";
+import type { NavGraph2D } from "./navGraph2D";
+import type { NavPath } from "./navPath";
 
 /**
  * The navigation service: which navmesh answers a query, and how long the query took.
@@ -36,6 +38,15 @@ export interface NavMeshSource {
     readonly isBaked: boolean;
     readonly agentRadius: number;
     routePoints(name: string): vec3[];
+    /** '2D' for a 2D scene's navigation (a platform graph or an air grid), which answers through graph2D. */
+    readonly space?: '3D' | '2D';
+    readonly graph2D?: NavGraph2D | null;
+}
+
+/** What a controller looks for when it names no navmesh: a 2D graph for its kind of mover, or a 3D mesh. */
+export interface NavPreference {
+    space: '3D' | '2D';
+    movement?: 'walk' | 'fly';
 }
 
 /** The shape a scene presents. Structural for the same reason. */
@@ -81,7 +92,9 @@ export class AISystem {
         if (!scene) return 0;
         const start = performance.now();
         for (const source of scene.navMeshes) {
-            if (source.isBaked) void source.mesh;
+            if (!source.isBaked) continue;
+            if (source.space === '2D') void source.graph2D;
+            else void source.mesh;
         }
         return performance.now() - start;
     }
@@ -94,7 +107,7 @@ export class AISystem {
      * NOT baked resolves to that mesh anyway rather than silently falling back — an author who picked
      * a specific mesh and got a different one would have no way to tell.
      */
-    public navMeshFor(id: string | null | undefined): NavMeshSource | null {
+    public navMeshFor(id: string | null | undefined, prefer?: NavPreference): NavMeshSource | null {
         const scene = this._scene;
         if (!scene) return null;
 
@@ -105,10 +118,33 @@ export class AISystem {
             // A dangling id falls through to the default. The controller warns about it once; doing it
             // here would warn once per frame per agent.
         }
+        // The default is the first baked source of the kind the asker moves through: a 2D walker gets the
+        // first walk graph, a flier the first air grid, and a 3D agent never a 2D node.
+        const space = prefer?.space ?? '3D';
         for (const candidate of scene.navMeshes) {
-            if (candidate.isBaked) return candidate;
+            if (!candidate.isBaked || (candidate.space ?? '3D') !== space) continue;
+            if (space === '2D' && prefer?.movement && candidate.graph2D?.movement !== prefer.movement) continue;
+            return candidate;
         }
         return null;
+    }
+
+    /**
+     * A 2D route from `from` to `to` (feet for a walker, middles for a flier) into `out`, with the action of
+     * each leg. False, and `out` empty, when the source has no graph or the two are not connected.
+     */
+    public findPath2D(source: NavMeshSource | null, from: ArrayLike<number>, to: ArrayLike<number>, out: NavPath): boolean {
+        const graph = source?.graph2D;
+        if (!graph) { out.points.length = 0; out.actions.length = 0; out.throttles.length = 0; out.index = 0; return false; }
+        const start = performance.now();
+        const found = graph.findPath(from, to, out);
+        aiStats.pathMs += performance.now() - start;
+        aiStats.pathQueries++;
+        if (found) {
+            aiStats.pathsFound++;
+            aiStats.waypoints += out.points.length;
+        }
+        return found;
     }
 
     /** Whether anything in this scene can answer a path query at all. */

@@ -212,9 +212,17 @@ get data: NavMeshData ; setData(d): this ; get isBaked: boolean
 get mesh: CleoNavMesh | null
 route(name: string): NavRoute | null
 routePoints(name: string): vec3[]
+
+// 2D space: a platform graph or an air grid instead of a navmesh
+space: '3D' | '2D'
+agent2D: NavAgent2D                      // the profile the 2D graph is baked for
+bakedSource2D: string | null             // the fingerprint of what the 2D bake read
+setGraph2D(data, source?): this ; get graph2DData ; get graph2D: NavGraph2D | null
+get movement2D: 'walk' | 'fly' ; bounds2D(): [minX, minY, maxX, maxY]
 ```
 
-`getBoundingBox()` is overridden to return the world AABB of the **oriented** box.
+`getBoundingBox()` is overridden to return the world AABB of the **oriented** box. In 2D space, `mesh`
+is null and `bounded` needs only a width and a height.
 
 ---
 

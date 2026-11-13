@@ -35,6 +35,8 @@ import {
 } from "../../control/control2D";
 import type { Ground2DFn, Ray2DFn } from "../../control/control2D";
 import { intentFromDesired2D } from "../../control/steering";
+import { createFollow2DOut, createFollow2DState, followPath2D, navAgent2D } from "../../../ai/navFollow2D";
+import type { Follow2DOut, Follow2DState, NavAgent2D } from "../../../ai/navFollow2D";
 import { raiseRequest } from "../../control/intent";
 import { yawFromDirection } from "../../../ai/interop";
 import type { LineOfSightTest, PerceptionCandidate, PerceptionTuning } from "../../../ai/perception";
@@ -332,6 +334,12 @@ export class ControllerNode extends Node {
     /** A side-view walker's pacing direction for `wander`, and a jump its obstacle handling asked for. */
     private _paceDir: number = 1;
     private _wantJump: boolean = false;
+    /** The 2D path follower's memory and answer, and whether a 2D path is steering this frame. */
+    private readonly _follow2D: Follow2DState = createFollow2DState();
+    private readonly _follow2DOut: Follow2DOut = createFollow2DOut();
+    private _following2D: boolean = false;
+    private _wantDown: boolean = false;
+    private _warnedNavProfile: boolean = false;
     private readonly _selfPos: vec3 = vec3.create();
     private readonly _targetPos: vec3 = vec3.create();
     private readonly _targetVel: vec3 = vec3.create();
@@ -805,6 +813,9 @@ export class ControllerNode extends Node {
 
         const up = this._resolveUp();
         const body2D = pawn instanceof CharacterBody2DNode ? pawn : null;
+        this._following2D = false;
+        this._wantJump = false;
+        this._wantDown = false;
         const flier = body2D?.movement === 'fly';
         const self = pawn.worldPosition;
         // A 2D pawn lives in the picture plane: z flattened, and a flier steers by the middle of its box.
@@ -876,8 +887,11 @@ export class ControllerNode extends Node {
         }
 
         if (body2D) {
-            this._avoid2D(body2D, tuning, up);
+            // A path leg already knows its jumps and drops; the walker's own obstacle handling is for
+            // steering with no path (seek, wander, a straight-line fallback).
+            if (!this._following2D || body2D.movement === 'fly') this._avoid2D(body2D, tuning, up);
             intentFromDesired2D(this._intent, this._desired, tuning.maxSpeed, up);
+            if (this._wantDown) this._intent.move[1] = -1;
             if (this._wantJump) raiseRequest(this._intent, 'jump', body2D.jumpBufferSeconds);
             this._intent.speedScale *= stateScale;
             return;
@@ -903,7 +917,6 @@ export class ControllerNode extends Node {
      * unless the goal is below it, when walking off is the way there.
      */
     private _avoid2D(body: CharacterBody2DNode, tuning: SteeringTuning, up: vec3): void {
-        this._wantJump = false;
         if (!(tuning.avoidDistance > 0) || vec3.length(this._desired) <= 1e-6) return;
         const p = body.worldPosition;
         const halfWidth = body.size[0] / 2;
@@ -938,6 +951,7 @@ export class ControllerNode extends Node {
      * as it did before, rather than standing still for a reason nothing explains.
      */
     private _steerPath(pawn: Pawn, tuning: SteeringTuning, up: vec3, delta: number): void {
+        if (pawn instanceof CharacterBody2DNode) { this._steerPath2D(pawn, tuning, up, delta); return; }
         const source = this._resolveNavMesh();
         if (!source?.mesh) {
             clearNavPath(this._path);
@@ -1116,6 +1130,7 @@ export class ControllerNode extends Node {
      * one wraps to the first, which is what makes a patrol a patrol.
      */
     private _steerPatrol(pawn: Pawn, tuning: SteeringTuning, up: vec3): void {
+        if (pawn instanceof CharacterBody2DNode) { this._steerPatrol2D(pawn, tuning, up); return; }
         const source = this._resolveNavMesh();
         const points = this.routeName && source ? source.routePoints(this.routeName) : [];
         if (points.length === 0) {
@@ -1143,11 +1158,116 @@ export class ControllerNode extends Node {
         followPath(this._desired, this._selfPos, this._path, tuning, up);
     }
 
+    /**
+     * Walk (or fly) a 2D route to the current destination on the scene's 2D navigation: the platform graph
+     * for a walker -- walks, jumps, drops -- or the air grid for a flier, replanned on the repath policy but
+     * never in mid-air, where the leg under way has to finish first. The follower (navFollow2D) asks for
+     * the jump, and the down for a drop-through; with no graph, or no way there, it seeks in a straight line.
+     */
+    private _steerPath2D(pawn: CharacterBody2DNode, tuning: SteeringTuning, up: vec3, delta: number): void {
+        const source = this._resolveNavMesh();
+        const graph = source?.graph2D;
+        if (!graph) {
+            clearNavPath(this._path);
+            seek(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up);
+            return;
+        }
+        const flier = pawn.movement === 'fly';
+        const settled = flier || pawn.isGrounded;
+        if (settled && shouldRepath(this._repathState, delta, this._targetPos, this.repath)) {
+            this._plan2D(source!, this._targetPos);
+            markRepathed(this._repathState, this._targetPos);
+        }
+        if (!hasPath(this._path)) {
+            seek(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up);
+            return;
+        }
+        this._follow2DLeg(pawn, delta);
+    }
+
+    /** Plan a 2D path from the pawn to `to` into `_path`, resetting the follower. */
+    private _plan2D(source: NonNullable<ReturnType<ControllerNode['_resolveNavMesh']>>, to: vec3): boolean {
+        const found = this._scene?.ai?.findPath2D(source, this._selfPos, to, this._path) ?? false;
+        this._follow2D.leg = -1;
+        this._warnNavProfile(source);
+        if (!found) clearNavPath(this._path);
+        return found;
+    }
+
+    /** One frame of the 2D follower on `_path`: a desired velocity, and a jump or a down when a leg asks. */
+    private _follow2DLeg(pawn: CharacterBody2DNode, delta: number): void {
+        aiStats.navAgents++;
+        const agent = this._agentOf(pawn);
+        const out = followPath2D(this._path, this._selfPos[0], this._selfPos[1], pawn.isGrounded || pawn.movement === 'fly',
+            pawn.velocity2D[0], agent, Math.max(0.1, this.waypointRadius), this._follow2D, delta, this._follow2DOut);
+        vec3.set(this._desired, out.desired[0], out.desired[1], 0);
+        this._following2D = true;
+        if (out.jump) this._wantJump = true;
+        if (out.down) this._wantDown = true;
+        if (out.repath) { clearNavPath(this._path); this._repathState.planned = false; }
+    }
+
+    /** The pawn as the 2D follower sees it: its own box and moves, not the bake's profile. */
+    private _agentOf(pawn: CharacterBody2DNode): NavAgent2D {
+        return navAgent2D({
+            movement: pawn.movement, width: pawn.size[0], height: pawn.size[1], walkSpeed: pawn.walkSpeed,
+            acceleration: pawn.acceleration, airControl: pawn.airControl, jumpHeight: pawn.jumpHeight,
+            jumpTimeToApex: pawn.jumpTimeToApex, fallGravityMultiplier: pawn.fallGravityMultiplier,
+            maxFallSpeed: pawn.maxFallSpeed, stepHeight: pawn.stepHeight, oneWayPlatforms: pawn.oneWayPlatforms,
+        });
+    }
+
+    /** Once: a pawn that jumps lower, or walks slower, than the graph was baked for will miss its jumps. */
+    private _warnNavProfile(source: { name: string, agent2D?: NavAgent2D }): void {
+        const pawn = this._possessed;
+        const baked = source.agent2D;
+        if (this._warnedNavProfile || !baked || !(pawn instanceof CharacterBody2DNode) || pawn.movement !== 'walk') return;
+        if (pawn.jumpHeight < baked.jumpHeight - 0.05 || pawn.walkSpeed < baked.walkSpeed - 0.05) {
+            this._warnedNavProfile = true;
+            Logger.warn(
+                `Controller '${this._name}': '${pawn.name}' jumps ${pawn.jumpHeight} and walks ${pawn.walkSpeed}, but ` +
+                `'${source.name}' was baked for ${baked.jumpHeight} and ${baked.walkSpeed}. Rebake it for this ` +
+                `body, or its jumps will fall short.`, 'Scene');
+        }
+    }
+
+    /**
+     * Patrol an authored route in 2D, looping: each leg to the next route point is PLANNED on the 2D graph,
+     * because route points can stand on different platforms -- the way between two of them may be a jump.
+     */
+    private _steerPatrol2D(pawn: CharacterBody2DNode, tuning: SteeringTuning, up: vec3): void {
+        const source = this._resolveNavMesh();
+        const points = this.routeName && source ? source.routePoints(this.routeName) : [];
+        if (points.length === 0) { vec3.set(this._desired, 0, 0, 0); return; }
+        const index = this._routeIndex % points.length;
+        const goal = points[index];
+        const dx = goal[0] - this._selfPos[0], dy = goal[1] - this._selfPos[1];
+        const flier = pawn.movement === 'fly';
+        const here = flier ? Math.hypot(dx, dy) <= Math.max(0.3, this.waypointRadius)
+            : Math.abs(dx) <= Math.max(0.3, this.waypointRadius) && Math.abs(dy) < 1 && pawn.isGrounded;
+        if (here) {
+            this._routeIndex = (index + 1) % points.length;
+            clearNavPath(this._path);
+            vec3.set(this._desired, 0, 0, 0);
+            return;
+        }
+        vec3.set(this._targetPos, goal[0], goal[1], 0);
+        if (!source?.graph2D) { seek(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up); return; }
+        const settled = flier || pawn.isGrounded;
+        if (!hasPath(this._path) && settled) this._plan2D(source, this._targetPos);
+        if (!hasPath(this._path)) { seek(this._desired, this._selfPos, this._targetPos, tuning.maxSpeed, up); return; }
+        this._follow2DLeg(pawn, 1 / 60);
+    }
+
     /** The navmesh this controller paths on, warning once if its id names nothing. */
     private _resolveNavMesh() {
         const ai = this._scene?.ai;
         if (!ai) return null;
-        const source = ai.navMeshFor(this._navMeshId);
+        // A 2D pawn wants a 2D graph for its kind of mover; a 3D one a navmesh.
+        const pawn = this._possessed;
+        const source = pawn instanceof CharacterBody2DNode
+            ? ai.navMeshFor(this._navMeshId, { space: '2D', movement: pawn.movement })
+            : ai.navMeshFor(this._navMeshId);
         if (this._navMeshId && source?.id !== this._navMeshId && !this._warnedDanglingNavMesh) {
             this._warnedDanglingNavMesh = true;
             Logger.warn(

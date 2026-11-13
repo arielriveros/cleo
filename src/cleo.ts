@@ -293,9 +293,19 @@ export type { NavBakeInput, NavBakeSettings, NavBakeResult, TriangleSoup } from 
 export {
     REPATH_DEFAULTS, advancePath, clearNavPath, createNavPath, createRepathState, currentWaypoint,
     followPath, hasPath, insetCorners, markRepathed, onFinalWaypoint, remainingDistance, repathPolicy,
-    setNavPath, shouldRepath,
+    setNavPath, shouldRepath, NAV_ACTIONS,
 } from "./ai/navPath";
-export type { NavPath, RepathPolicy, RepathState } from "./ai/navPath";
+export type { NavPath, NavAction, RepathPolicy, RepathState } from "./ai/navPath";
+// 2D navigation: a platform graph (walks, jumps, drops) or an air grid, baked from the 2D collision world.
+export {
+    NavGraph2D, bakeNavGraph2D, serializeNavGraph2D, parseNavGraph2D, navGraph2DSourceHash, EMPTY_NAV_GRAPH_2D,
+    EDGE_WALK, EDGE_JUMP, EDGE_DROP, EDGE_DROP_THROUGH, EDGE_FLY,
+} from "./ai/navGraph2D";
+export type { NavGraph2DData, NavBakeStats2D, NavBounds2D } from "./ai/navGraph2D";
+export {
+    NAV_AGENT_2D_DEFAULTS, navAgent2D, followPath2D, simulatePath2D, createFollow2DState, createFollow2DOut,
+} from "./ai/navFollow2D";
+export type { NavAgent2D, Follow2DState, Follow2DOut, LegResult } from "./ai/navFollow2D";
 export { HistoryManager } from "./core/history";
 export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";

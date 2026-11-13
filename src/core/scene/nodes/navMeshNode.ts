@@ -8,6 +8,13 @@ import {
     EMPTY_NAV_MESH_DATA, buildNavMeshShared, isNavigableUp, parseNavMeshData, serializeNavMeshData,
 } from "../../../ai/navMesh";
 import type { CleoNavMesh, NavMeshData, NavRoute, OffMeshLink } from "../../../ai/navMesh";
+import { EMPTY_NAV_GRAPH_2D, NavGraph2D, parseNavGraph2D, serializeNavGraph2D } from "../../../ai/navGraph2D";
+import type { NavBounds2D, NavGraph2DData } from "../../../ai/navGraph2D";
+import { NAV_AGENT_2D_DEFAULTS, navAgent2D } from "../../../ai/navFollow2D";
+import type { NavAgent2D } from "../../../ai/navFollow2D";
+
+/** What a navmesh node navigates: a 3D scene's walkable ground, or a 2D scene's platforms (or air). */
+export type NavSpace = '3D' | '2D';
 
 /**
  * A baked navigation mesh, living in the scene.
@@ -88,6 +95,19 @@ export class NavMeshNode extends Node {
      */
     public bakedVolume: [number, number, number, number, number, number] | null = null;
 
+    /**
+     * '2D' bakes a 2D scene's navigation instead of a navmesh: a platform graph for a walker -- where it can
+     * stand, and the walks, jumps and drops between -- or a grid of open air for a flier, from the tilemaps'
+     * tiles and the 2D colliders inside the box (its width and height; depth unused).
+     */
+    public space: NavSpace = '3D';
+    /** The 2D agent the graph is baked for: its box, how it walks and how high it jumps. */
+    public agent2D: NavAgent2D = { ...NAV_AGENT_2D_DEFAULTS };
+    /** The fingerprint of what the 2D bake read (navGraph2DSourceHash), so a stale bake can be told. */
+    public bakedSource2D: string | null = null;
+    private _graphData: NavGraph2DData = EMPTY_NAV_GRAPH_2D;
+    private _graph: NavGraph2D | null = null;
+
     private _data: NavMeshData = EMPTY_NAV_MESH_DATA;
     private _mesh: CleoNavMesh | null = null;
     private _built: boolean = false;
@@ -111,7 +131,39 @@ export class NavMeshNode extends Node {
         return this;
     }
 
-    public get isBaked(): boolean { return this._data.counts.length > 0; }
+    public get isBaked(): boolean {
+        if (this.space === '2D') return this._graphData.nodes.length > 0 || this._graphData.free.length > 0;
+        return this._data.counts.length > 0;
+    }
+
+    // ----- 2D --------------------------------------------------------------------------------------
+
+    /** The baked 2D graph's data. Empty until a 2D bake stores one. */
+    public get graph2DData(): NavGraph2DData { return this._graphData; }
+
+    /** Store a 2D bake (and the fingerprint of what it read). Drops the built graph. */
+    public setGraph2D(data: NavGraph2DData, source: string | null = null): this {
+        this._graphData = data;
+        this._graph = null;
+        this.bakedSource2D = source;
+        return this;
+    }
+
+    /** The searchable 2D graph, built on first access, or null with nothing baked (or in 3D space). */
+    public get graph2D(): NavGraph2D | null {
+        if (this.space !== '2D' || !this.isBaked) return null;
+        return this._graph ??= new NavGraph2D(this._graphData);
+    }
+
+    /** Whether the 2D graph is for a flier (else a walker). */
+    public get movement2D(): 'walk' | 'fly' { return this._graphData.movement; }
+
+    /** The 2D bake box in world XY: [minX, minY, maxX, maxY], from the node's position and size. */
+    public bounds2D(): NavBounds2D {
+        const p = this.worldPosition;
+        const [w, h] = this._size;
+        return [p[0] - w / 2, p[1] - h / 2, p[0] + w / 2, p[1] + h / 2];
+    }
 
     // ----- bake volume -----------------------------------------------------------------------------
 
@@ -122,6 +174,8 @@ export class NavMeshNode extends Node {
 
     /** True when this node bakes a finite box; false = the whole scene. */
     public get bounded(): boolean {
+        // A 2D box has no depth to speak of: width and height are the whole of it.
+        if (this.space === '2D') return this._size[0] > 0 && this._size[1] > 0;
         return this._size[0] > 0 && this._size[1] > 0 && this._size[2] > 0;
     }
 
@@ -195,6 +249,8 @@ export class NavMeshNode extends Node {
      * below needs.
      */
     public get mesh(): CleoNavMesh | null {
+        // A 2D node has no navmesh: its graph (graph2D) answers instead, and 3D pathing must not find one.
+        if (this.space === '2D') return null;
         if (this._built) return this._mesh;
         this._built = true;
         if (!this.isBaked) return (this._mesh = null);
@@ -251,6 +307,12 @@ export class NavMeshNode extends Node {
             ...(data ? { navMesh: data } : {}),
             ...(this.routes.length > 0 ? { routes: this.routes } : {}),
             ...(this.links.length > 0 ? { links: this.links } : {}),
+            // Written only in 2D space, so a 3D navmesh is byte-identical to one saved before 2D existed.
+            ...(this.space === '2D' ? {
+                space: '2D', agent2D: { ...this.agent2D },
+                ...(serializeNavGraph2D(this._graphData) ? { graph2D: serializeNavGraph2D(this._graphData) } : {}),
+                ...(this.bakedSource2D ? { bakedSource2D: this.bakedSource2D } : {}),
+            } : {}),
         };
     }
 
@@ -264,6 +326,11 @@ export class NavMeshNode extends Node {
         node.setData(parseNavMeshData(json.navMesh));
         node.routes = parseRoutes(json.routes);
         node.links = parseLinks(json.links);
+        if (json.space === '2D') {
+            node.space = '2D';
+            node.agent2D = navAgent2D(json.agent2D);
+            node.setGraph2D(parseNavGraph2D(json.graph2D), typeof json.bakedSource2D === 'string' ? json.bakedSource2D : null);
+        }
 
         // _commonParse adds the node to its parent — do not addChild again.
         Node.finishParse(node, parent, json);

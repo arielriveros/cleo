@@ -231,6 +231,33 @@ scene.ai?.get hasNavigation: boolean
 > **`scene.ai` is genuinely optional** — it is `undefined` on any scene never handed to the AI
 > system. Always guard it.
 
+### Navigation in 2D
+
+A 2D scene navigates on a **NavMeshNode in 2D space** (`space: '2D'`), baked for one agent profile
+(`agent2D`: its box, walk speed, jump height and time, fall, step height, furthest drop) from the tilemaps'
+tiles and the 2D colliders inside its box:
+
+- for a **walker**, a platform graph: every surface the agent fits on, the walks between neighbours, and
+  the **jumps** between platforms, **drops** off ledges and **drop-throughs** of one-way platforms it can
+  make. Every jump and drop is flown before it is kept, with the same follower and body step the game
+  uses, from rest and at a run, so an edge the bake keeps is one the agent can take;
+- for a **flier**, a grid of the open air its box fits in, searched with no corner cutting and
+  string-pulled into straight legs.
+
+`path`, `investigate` and `patrol` plan on it, and the follower makes the jumps (and holds down for a
+drop-through). A controller naming no navmesh takes the first baked 2D node for its kind of mover — a
+flier the air grid, a walker the platforms. Replanning waits while the body is in the air. A pawn that
+jumps lower or walks slower than the profile the graph was baked for is warned about once: rebake for it.
+
+```ts
+scene.ai?.findPath2D(source, from: vec3, to: vec3, out: NavPath): boolean   // waypoints + their actions
+navMesh.graph2D?.findPath(from, to, out)
+bakeNavGraph2D(world2D, bounds, agent) // { data, stats }; navMesh.setGraph2D(data, hash)
+```
+
+`NavPath.actions[i]` says how the leg arriving at `points[i]` is travelled: `walk`, `jump`, `drop`,
+`dropThrough` or `fly`.
+
 Path queries are **pull-based**: there is deliberately no per-frame AI pass, so a thousand idle
 agents cost nothing in navigation.
 

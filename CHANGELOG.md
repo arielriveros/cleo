@@ -44,6 +44,11 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     drop unless its target is below; a flier's whiskers fan across the picture plane.
   - *Senses* are measured side-on (the horizontal distance, the height, the angle from the way it faces),
     and three new ones work in 2D and 3D: `wallAhead`, `ledgeAhead`, `targetInFront`.
+  - *Navigation.* A **Nav Mesh** in **2D** space bakes a platform graph for a walker — where it fits,
+    and the walks, jumps, drops and drop-throughs it can make, every jump and drop flown with the game's own
+    follower and body step before it is kept — or an air grid for a flier. `path`, `investigate` and
+    `patrol` plan on it and the agent jumps where its path says; patrol routes may stand on different
+    platforms.
 - **Duskwell, a 2D metroidvania example.** A new example project in the gallery, built on the flat 2D frame,
   the 2D physics and the sprite clips from the art in `build/platformer`: a warrior with a three-hit sword
   combo (a press during a swing, or just after it, chains the next), bats that wake as you pass and swoop,
