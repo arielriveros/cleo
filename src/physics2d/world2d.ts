@@ -1,15 +1,16 @@
 import { rects2DIntersect } from '../core/math';
-import { Input } from '../input/inputApi';
+import { decayRequests } from '../core/control/intent';
+import { Logger } from '../core/logger';
 import { Node } from '../core/scene/nodes/node';
 import { SpriteNode } from '../core/scene/nodes/spriteNode';
 import { CharacterBody2DNode } from '../core/scene/nodes/characterBody2DNode';
 import type { Body2DNode } from '../core/scene/nodes/body2DNode';
 import type { Area2DNode } from '../core/scene/nodes/area2DNode';
 import type { TilemapNode } from '../core/scene/nodes/tilemapNode';
-import { createMoveResult, moveAndSlide, overlapsSolid, raycast2D, wallTouching } from './collide2d';
-import type { Body2DShape, RayHit2D } from './collide2d';
-import { createPlatformerEvents, stepPlatformer } from './platformer';
-import type { PlatformerIntent } from './platformer';
+import { createMoveResult, floorBetween, overlapsSolid, raycast2D } from './collide2d';
+import type { RayHit2D } from './collide2d';
+import { stepBody2D } from './body2d';
+import type { Locomotion2DTuning } from './locomotion2d';
 import type { Box2D, CollisionWorld2D, Grid2D } from './types';
 
 /** What the 2D world reads from the scene each step (the scene's typed lists). */
@@ -20,9 +21,6 @@ export interface World2DSceneView {
     readonly areas2D: ReadonlySet<Area2DNode>;
 }
 
-/** The longest substep, seconds: fast enough that a jump's arc is the same at any frame rate. */
-const MAX_SUBSTEP = 1 / 120;
-
 /**
  * The scene's 2D physics (Scene.physics2D): each frame the game plays, it moves every 2D character body
  * through the tilemaps and 2D colliders, carries what stands on moving platforms, and tells 2D areas what
@@ -32,8 +30,10 @@ export class World2D {
     private readonly _world: CollisionWorld2D = { grids: [], boxes: [] };
     private readonly _boxByOwner = new Map<Node, Box2D>();
     private readonly _move = createMoveResult();
-    private readonly _events = createPlatformerEvents();
-    private readonly _intent: PlatformerIntent = { moveX: 0, moveY: 0, jumpPressed: false, jumpHeld: false, dashPressed: false };
+    /** The body whose script hook the bound {@link _hook} calls, and the tuning it may retune mid-frame. */
+    private _hookBody: CharacterBody2DNode | null = null;
+    private _hookTuning: Locomotion2DTuning | null = null;
+    private readonly _hook = (dt: number, substep: number): boolean => this._callHook(dt, substep);
     private readonly _bodyRect: [number, number, number, number] = [0, 0, 0, 0];
     private readonly _areaRect: [number, number, number, number] = [0, 0, 0, 0];
     private readonly _otherRect: [number, number, number, number] = [0, 0, 0, 0];
@@ -81,86 +81,58 @@ export class World2D {
         this._updateAreas(view);
     }
 
+    /**
+     * One body's frame: carried by the platform it stands on, then the pure step (src/physics2d/body2d.ts)
+     * -- its script's `onMove2D` each substep, the generic locomotion when something drove it this frame,
+     * gravity and move-and-slide. Its jump request ages a frame, as on a 3D Character.
+     */
     private _stepBody(body: CharacterBody2DNode, dt: number): void {
-        const intent = this._intent;
-        if (body.playerInput) {
-            const move = Input.vector(body.moveAction);
-            intent.moveX = move[0]; intent.moveY = move[1];
-            intent.jumpPressed = Input.started(body.jumpAction);
-            intent.jumpHeld = Input.pressed(body.jumpAction);
-            intent.dashPressed = Input.started(body.dashAction);
-        } else {
-            const own = body.intent;
-            intent.moveX = own.moveX; intent.moveY = own.moveY;
-            intent.jumpPressed = own.jumpPressed; intent.jumpHeld = own.jumpHeld; intent.dashPressed = own.dashPressed;
-            // Edges are spent by this step; the steer and the hold stand until the script changes them.
-            own.jumpPressed = false; own.dashPressed = false;
-        }
-
         const pos = body.position;
-        const shape: Body2DShape = { x: pos[0], y: pos[1], halfWidth: body.size[0] / 2, height: body.size[1] };
-        const contacts = body.contacts;
-        const state = body.controlState;
-        const ev = body.stepEvents;
-        ev.jumped = ev.airJumped = ev.wallJumped = ev.dashed = ev.landed = ev.droppedThrough = false;
+        const sim = body.sim;
+        sim.x = pos[0]; sim.y = pos[1];
+        sim.halfWidth = body.size[0] / 2; sim.height = body.size[1];
+        sim.stepHeight = body.stepHeight; sim.oneWayPlatforms = body.oneWayPlatforms;
 
         // Carried by the platform it stands on, by what the platform moved since the last step.
         const ground = body.groundNode ? this._boxByOwner.get(body.groundNode) : undefined;
-        if (ground && contacts.grounded && (ground.dx !== 0 || ground.dy !== 0)) {
-            shape.x += ground.dx;
-            shape.y += ground.dy;
+        if (ground && body.contacts.grounded && (ground.dx !== 0 || ground.dy !== 0)) {
+            sim.x += ground.dx;
+            sim.y += ground.dy;
         }
 
-        const steps = Math.max(1, Math.ceil(dt / MAX_SUBSTEP - 1e-6));
-        const h = dt / steps;
-        const moved = this._move;
-        for (let i = 0; i < steps; i++) {
-            const pressed = i === 0;
-            let vyStart: number;
-            if (body.controller === 'platformer') {
-                const jp = intent.jumpPressed, dp = intent.dashPressed;
-                intent.jumpPressed = pressed && jp; intent.dashPressed = pressed && dp;
-                stepPlatformer(state, intent, contacts, body.settings, body.abilities, h, this._events);
-                intent.jumpPressed = jp; intent.dashPressed = dp;
-                const e = this._events;
-                ev.jumped ||= e.jumped; ev.airJumped ||= e.airJumped; ev.wallJumped ||= e.wallJumped;
-                ev.dashed ||= e.dashed; ev.landed ||= e.landed; ev.droppedThrough ||= e.droppedThrough;
-                body.velocity2D[0] = state.vx; body.velocity2D[1] = state.vy;
-                vyStart = state.vyStart;
-            } else {
-                vyStart = body.velocity2D[1];
-                if (contacts.grounded && body.velocity2D[1] < 0) body.velocity2D[1] = 0;
-                else body.velocity2D[1] -= body.gravity * h;
-            }
-            const vx = body.velocity2D[0], vy = body.velocity2D[1];
-            // The average of the vertical speed before and after this step's gravity: exact under constant
-            // gravity, so the arc of a jump does not depend on the frame rate.
-            const fall = (vyStart + vy) * 0.5;
-            moveAndSlide(this._world, shape, vx * h, fall * h, {
-                dropThrough: state.dropLeft > 0 || !body.oneWayPlatforms,
-                stepUp: body.stepHeight,
-                snapDown: body.stepHeight,
-                grounded: contacts.grounded && vy <= 0,
-            }, moved);
-            shape.x = moved.x; shape.y = moved.y;
-            contacts.grounded = moved.grounded;
-            contacts.onSlope = moved.onSlope;
-            contacts.ceiling = moved.hitCeiling;
-            contacts.wallLeft = wallTouching(this._world, shape, -1);
-            contacts.wallRight = wallTouching(this._world, shape, 1);
-            body.groundNode = moved.groundBox ? moved.groundBox.owner as Node : null;
-            // What a wall, a floor or a ceiling stopped stops the velocity too.
-            if ((moved.hitLeft && vx < 0) || (moved.hitRight && vx > 0)) { body.velocity2D[0] = 0; state.vx = 0; }
-            if ((moved.grounded && vy < 0) || (moved.hitCeiling && vy > 0)) { body.velocity2D[1] = 0; state.vy = 0; }
-        }
-        if (body.controller !== 'platformer' && body.velocity2D[0] !== 0) body.facing = body.velocity2D[0];
-        body.setPosition([shape.x, shape.y, pos[2]]);
+        const tuning = body.tuning;
+        const driven = body._takeDriven();
+        const intent = driven ? body.drive() : null;
+        // Only a script that defines the hook pays for the call (a class script's methods are own properties).
+        const scripted = body.onMove2D !== CharacterBody2DNode.prototype.onMove2D;
+        this._hookBody = body; this._hookTuning = tuning;
+        stepBody2D(this._world, sim, intent, tuning, dt, scripted ? this._hook : null, this._move);
+        this._hookBody = null; this._hookTuning = null;
+        // `drive()` above marks it again; this frame is spent.
+        body._takeDriven();
+        if (intent) decayRequests(intent, dt);
+
+        body.groundNode = sim.groundBox ? sim.groundBox.owner as Node : null;
+        body.isJumping = sim.state.jumping;
+        body.setPosition([sim.x, sim.y, pos[2]]);
 
         if (body.flipSprites) {
-            const left = state.facing < 0;
+            const left = sim.state.facing < 0;
             for (const child of body.children)
                 if (child instanceof SpriteNode && child.sprite.flipX !== left) child.sprite.flipX = left;
         }
+    }
+
+    /** The bound hook: the body's `onMove2D`, then what it may have retuned for the rest of the frame. */
+    private _callHook(dt: number, substep: number): boolean {
+        const body = this._hookBody!, tuning = this._hookTuning!;
+        let owned = false;
+        try { owned = body.onMove2D(dt, substep) === true; }
+        catch (e) { Logger.error(`Error in onMove2D for node ${body.name}: ${e}`, 'Script'); }
+        tuning.maxFallSpeed = Math.max(0, Number.isFinite(body.maxFallSpeed) ? body.maxFallSpeed : tuning.maxFallSpeed);
+        tuning.gravityScale = Math.max(0, Number.isFinite(body.gravityScale) ? body.gravityScale : tuning.gravityScale);
+        tuning.movement = body.movement === 'fly' ? 'fly' : 'walk';
+        return owned;
     }
 
     /** The character body an area rides on (its nearest ancestor), whose facing mirrors the area's offset. */
@@ -205,6 +177,15 @@ export class World2D {
     /** The first solid thing along a ray from (x, y) in direction (dx, dy), within `maxDistance`. */
     public raycast(x: number, y: number, dx: number, dy: number, maxDistance: number): RayHit2D | null {
         return raycast2D(this._world, x, y, dx, dy, maxDistance);
+    }
+
+    /**
+     * The top of the ground under a body `halfWidth` either side of `x`, from `fromY` down to `fromY - depth`
+     * -- one-way platforms included, unlike {@link raycast} -- or -Infinity when there is none: a ledge test.
+     */
+    public groundBelow(x: number, halfWidth: number, fromY: number, depth: number): number {
+        const floor = floorBetween(this._world, { x, y: fromY, halfWidth, height: 0.1 }, fromY, fromY - Math.max(0, depth), false);
+        return Number.isFinite(floor) ? floor : -Infinity;
     }
 
     /** Whether the box [minX, minY, maxX, maxY] overlaps a solid tile or 2D collider. */

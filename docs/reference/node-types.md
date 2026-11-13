@@ -756,14 +756,17 @@ A 2D character's body: a box standing on its feet at the node, moved by the 2D p
 ```ts
 size: [number, number] ; layer: number ; stepHeight: number ; flipSprites: boolean
 oneWayPlatforms: boolean                           // off: passes through one-way platforms (a flier)
-controller: 'platformer' | 'none' ; playerInput: boolean
-moveAction ; jumpAction ; dashAction: string
-settings: PlatformerSettings ; abilities: { doubleJump, dash, wallJump }
-gravity: number                                    // with no controller
-velocity2D: [number, number]
-get isGrounded ; onWall ; onCeiling ; onSlope ; facing ; isDashing ; isWallSliding
-get justJumped ; justDashed ; justLanded
-move(x, y?) ; jump() ; releaseJump() ; dash() ; teleport(x, y)
+movement: 'walk' | 'fly'
+walkSpeed ; runSpeed ; acceleration ; deceleration ; airControl: number
+jumpHeight ; jumpTimeToApex ; fallGravityMultiplier ; maxFallSpeed: number
+coyoteSeconds ; jumpBufferSeconds ; gravityScale: number ; driveWhenUnpossessed: boolean
+velocity2D: [number, number] ; isJumping: boolean
+drive(): ControlIntent                             // world axes: move[0] +x, move[1] +y
+get controller: ControllerNode | null              // the one possessing it
+get isGrounded ; onWall ; onCeiling ; onSlope ; facing ; canJump ; jumpRequested
+get justJumped ; justLanded ; justDroppedThrough ; gravity ; jumpSpeed
+consumeJump(): boolean ; teleport(x, y)
+onMove2D(dt, substep): boolean | void              // a script's moves, every physics substep
 ```
 
 ### Body2DNode — `'body2D'`

@@ -25,6 +25,7 @@ export { CameraRigNode } from "./core/scene/nodes/cameraRigNode";
 // character turns intent into motion and never learns where it came from.
 export { CharacterNode } from "./core/scene/nodes/characterNode";
 export { ControllerNode, CONTROL_SOURCES, AIM_SOURCES, BRAIN_KINDS } from "./core/scene/nodes/controllerNode";
+export type { Pawn } from "./core/scene/nodes/controllerNode";
 export type { BrainKind } from "./core/scene/nodes/controllerNode";
 export type { ControlSource, AimSource, BlackboardValue } from "./core/scene/nodes/controllerNode";
 export type { FollowSpace, AimMode } from "./core/scene/nodes/cameraRigNode";
@@ -34,15 +35,21 @@ export { Camera2DNode } from "./core/scene/nodes/camera2DNode";
 export { Room2DNode } from "./core/scene/nodes/room2DNode";
 export { ParallaxLayerNode } from "./core/scene/nodes/parallaxLayerNode";
 export { CharacterBody2DNode } from "./core/scene/nodes/characterBody2DNode";
-export type { Body2DController } from "./core/scene/nodes/characterBody2DNode";
 export { Body2DNode } from "./core/scene/nodes/body2DNode";
 export type { Body2DKind } from "./core/scene/nodes/body2DNode";
 export { Area2DNode } from "./core/scene/nodes/area2DNode";
 export { World2D } from "./physics2d/world2d";
 export { advanceClip, clipLength, frameDuration, normalizedTime as clipNormalizedTime, stepSpriteMachine, parseSpriteAnimationSet, parseSpriteClip, cloneSpriteAnimationSet, createPlayhead } from "./animation/spriteAnimation";
 export type { SpriteAnimationSet, SpriteClip, SpriteFrame, SpriteFrameHitbox, SpriteClipLoop, SpriteStateMachine, SpriteMachineState, SpriteMachineTransition, ClipPlayhead } from "./animation/spriteAnimation";
-export { DEFAULT_PLATFORMER, jumpPhysics } from "./physics2d/platformer";
-export type { PlatformerSettings, PlatformerAbilities } from "./physics2d/platformer";
+export {
+    BODY2D_MOVEMENTS, LOCOMOTION_2D_DEFAULTS, jumpPhysics, locomotion2DTuning, stepLocomotion2D, tickLocomotion2D,
+    integrateGravity2D, createLocomotion2DState, createLocomotion2DEvents, createContacts2D,
+} from "./physics2d/locomotion2d";
+export type {
+    Body2DMovement, Locomotion2DTuning, Locomotion2DState, Locomotion2DEvents, Contacts2D,
+} from "./physics2d/locomotion2d";
+export { stepBody2D, MAX_SUBSTEP_2D } from "./physics2d/body2d";
+export type { Body2DSim, Body2DStepHook } from "./physics2d/body2d";
 export { TILE_NONE, TILE_SOLID, TILE_ONE_WAY, TILE_SLOPE } from "./physics2d/types";
 export type { RayHit2D } from "./physics2d/collide2d";
 export { LightNode } from "./core/scene/nodes/lightNode";
@@ -207,7 +214,7 @@ export type { Condition, ConditionGroup, ConditionNode, ConditionOp, ConditionCo
 // `CharacterNode` consumes it, so neither half knows about the other.
 export {
     INTENT_REQUESTS, createIntent, clearIntent, raiseRequest, isRequested, consumeRequest, decayRequests,
-    moveWorldDirection, setMoveWorld, applyPlayerReading,
+    moveWorldDirection, setMoveWorld, setMove2D, applyPlayerReading,
 } from "./core/control/intent";
 export type { ControlIntent, IntentRequest, PlayerReading, Vec2 as ControlVec2 } from "./core/control/intent";
 export {

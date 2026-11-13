@@ -282,6 +282,8 @@ export interface RayHit2D {
     distance: number;
     /** What was hit: a box's owner, or null for a tile. */
     owner: unknown;
+    /** The unit normal of the surface hit, pointing back out at the ray: a cell or box face, or a slope. */
+    normal: [number, number];
 }
 
 /**
@@ -322,10 +324,46 @@ export function raycast2D(world: CollisionWorld2D, ox: number, oy: number, dx: n
                 const m = (lo + hi) * 0.5;
                 if (solidAt(ox + ux * m, oy + uy * m) !== undefined) hi = m; else lo = m;
             }
-            return { x: ox + ux * hi, y: oy + uy * hi, distance: hi, owner };
+            const x = ox + ux * hi, y = oy + uy * hi;
+            return { x, y, distance: hi, owner, normal: rayNormal(world, ox + ux * lo, oy + uy * lo, x, y, ux, uy) };
         }
         prev = d;
         if (d === maxDistance) break;
     }
     return null;
+}
+
+/**
+ * The face a ray crossed into solid between (x0, y0), just outside, and (x1, y1), just inside: the side of
+ * the box or cell it entered through, or a slope's surface when it hit one inside its cell.
+ */
+function rayNormal(world: CollisionWorld2D, x0: number, y0: number, x1: number, y1: number,
+                   ux: number, uy: number): [number, number] {
+    for (const box of world.boxes) {
+        if (box.oneWay || x1 < box.minX || x1 > box.maxX || y1 < box.minY || y1 > box.maxY) continue;
+        // The face of the box nearest the point the ray entered by.
+        const d = [x0 - box.minX, box.maxX - x0, y0 - box.minY, box.maxY - y0];
+        const out = [x0 < box.minX, x0 > box.maxX, y0 < box.minY, y0 > box.maxY];
+        const normals: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+        for (let i = 0; i < 4; i++) if (out[i]) return normals[i];
+        let best = 0;
+        for (let i = 1; i < 4; i++) if (Math.abs(d[i]) < Math.abs(d[best])) best = i;
+        return normals[best];
+    }
+    for (const g of world.grids) {
+        const c0 = colOf(g, x0), r0 = rowOf(g, y0), c1 = colOf(g, x1), r1 = rowOf(g, y1);
+        const k = g.sample(c1, r1, _slope);
+        if (k === TILE_SLOPE && c0 === c1 && r0 === r1) {
+            // Inside the slope's own cell: its surface, rising from left to right by (right - left) cells.
+            const rise = (_slope[1] - _slope[0]) * g.cellHeight / g.cellWidth;
+            const len = Math.hypot(rise, 1);
+            return [-rise / len, 1 / len];
+        }
+        if (k !== TILE_SOLID && k !== TILE_SLOPE) continue;
+        if (c0 !== c1 && r0 === r1) return [ux > 0 ? -1 : 1, 0];
+        if (r0 !== r1 && c0 === c1) return [0, uy > 0 ? -1 : 1];
+        // Through a corner: the axis it travelled more along.
+        return Math.abs(ux) >= Math.abs(uy) ? [ux > 0 ? -1 : 1, 0] : [0, uy > 0 ? -1 : 1];
+    }
+    return [-ux, -uy];
 }

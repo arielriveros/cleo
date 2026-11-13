@@ -270,12 +270,12 @@ export class AnimatedSpriteNode extends SpriteNode {
             v.set('velocityY', body.velocity2D[1]);
             v.set('speedX', Math.abs(body.velocity2D[0]));
             v.set('onWall', body.onWall !== 0);
-            v.set('wallSliding', body.isWallSliding);
-            v.set('dashing', body.isDashing);
             v.set('facing', body.facing);
+            v.set('isJumping', body.isJumping);
             if (body.justJumped) v.set('jumped', true);
             if (body.justLanded) v.set('landed', true);
-            if (body.justDashed) v.set('dashed', true);
+            // A game's own moves (a dash, a wall slide) are its script's: `sprite.setParam('dashing', on)`,
+            // `sprite.fireTrigger('dashed')` -- the body knows only walking and jumping.
         }
         const machine = this._set?.machine;
         if (machine && this._machineOn && this._stateName) {

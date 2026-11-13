@@ -4,6 +4,7 @@ import { authoring } from "../../eventBus";
 import { Node } from "./node";
 import { isEditorOwnedName } from "../editorOwnership";
 import { CharacterNode } from "./characterNode";
+import { CharacterBody2DNode } from "./characterBody2DNode";
 import { CameraRigNode } from "./cameraRigNode";
 import { unwrapScriptNode } from "./nodeScripting";
 import { InputSystem } from "../../../input/inputSystem";
@@ -101,12 +102,19 @@ export type { AiGoal };
 /** What a blackboard entry may hold. A node id is a string — see `targetKey`. */
 export type BlackboardValue = number | boolean | string;
 
+/**
+ * What a controller can possess: a 3D {@link CharacterNode}, or a 2D {@link CharacterBody2DNode}. Both take
+ * a {@link ControlIntent} through `drive()`; a 2D body reads its `move` in world axes (+x right, +y up) and
+ * ignores the aim basis, so the player mapping and `_publish` need no branch -- only steering does.
+ */
+export type Pawn = CharacterNode | CharacterBody2DNode;
+
 export class ControllerNode extends Node {
     // ----- possession ------------------------------------------------------------------------------
     // The id is the truth and the node handle is a resolution cache — CameraRigNode's pattern, for the
     // same reason: parse is depth-first, so the target very often does not exist yet.
     private _possessedId: string | null = null;
-    private _possessed: CharacterNode | null = null;
+    private _possessed: Pawn | null = null;
     private _warnedDanglingPossessed: boolean = false;
     private _warnedStolen: boolean = false;
 
@@ -321,7 +329,7 @@ export class ControllerNode extends Node {
     // ----- possession ------------------------------------------------------------------------------
 
     /** The character this controller drives, or null. Resolved through a cache. */
-    public get possessed(): CharacterNode | null { return this._resolvePossessed(); }
+    public get possessed(): Pawn | null { return this._resolvePossessed(); }
 
     public get possessedId(): string | null { return this._possessedId; }
     public set possessedId(id: string | null) {
@@ -341,10 +349,10 @@ export class ControllerNode extends Node {
      * and pretending it cannot happen. Last-possess-wins is also what makes "the player takes over this
      * NPC" a single call rather than a handshake with the AI controller.
      */
-    public possess(node: CharacterNode | null): this {
+    public possess(node: Pawn | null): this {
         // The script proxy's `set` trap forwards values untouched, so an assignment from a script would
         // otherwise store a Proxy that never compares equal to the real node.
-        const raw = node ? unwrapScriptNode(node) as CharacterNode : null;
+        const raw = node ? unwrapScriptNode(node) as Pawn : null;
         if (raw === this._possessed && raw?.id === this._possessedId) return this;
 
         this._detach();
@@ -386,7 +394,7 @@ export class ControllerNode extends Node {
         this._possessed = null;
     }
 
-    private _resolvePossessed(): CharacterNode | null {
+    private _resolvePossessed(): Pawn | null {
         const id = this._possessedId;
         if (!id) return (this._possessed = null);
         const cache = this._possessed;
@@ -396,7 +404,7 @@ export class ControllerNode extends Node {
         const found = this._scene?.getNodeById(id) ?? null;
         // An id pointing at some other node type resolves to NULL rather than to something that cannot be
         // driven — a controller quietly steering a light would be harder to diagnose than one doing nothing.
-        this._possessed = found instanceof CharacterNode ? found : null;
+        this._possessed = found instanceof CharacterNode || found instanceof CharacterBody2DNode ? found : null;
         if (this._possessed) this._possessed._setController(this);
         return this._possessed;
     }
@@ -494,13 +502,15 @@ export class ControllerNode extends Node {
             if (this._possessedId && !this._warnedDanglingPossessed) {
                 this._warnedDanglingPossessed = true;
                 Logger.warn(
-                    `Controller '${this._name}' possesses '${this._possessedId}', which is not a Character ` +
+                    `Controller '${this._name}' possesses '${this._possessedId}', which is not a Character or a Character Body 2D ` +
                     `in this scene. It will drive nothing until that node exists.`, 'Scene');
             }
             return;
         }
 
-        const basisYaw = this._basisYaw();
+        // A 2D body moves in world axes: no camera basis, no aim rig to steer.
+        const flat = pawn instanceof CharacterBody2DNode;
+        const basisYaw = flat ? 0 : this._basisYaw();
 
         switch (this.controlSource) {
             case 'player':
@@ -512,7 +522,8 @@ export class ControllerNode extends Node {
                 applyPlayerReading(this._intent, this._reading, basisYaw, pawn.jumpBufferSeconds);
                 break;
             case 'ai':
-                this._steer(pawn, delta);
+                if (pawn instanceof CharacterNode) this._steer(pawn, delta);
+                else clearIntent(this._intent);
                 break;
             case 'none':
                 clearIntent(this._intent);
@@ -521,7 +532,7 @@ export class ControllerNode extends Node {
 
         // Steer the camera BEFORE the pawn consumes the intent, so the strafe matches this frame's look
         // rather than the previous one's.
-        if (this.driveAimTarget && this.controlSource !== 'none' && !authoring.enabled) this._driveAim(delta);
+        if (!flat && this.driveAimTarget && this.controlSource !== 'none' && !authoring.enabled) this._driveAim(delta);
 
         this._publish(pawn);
 
@@ -559,7 +570,7 @@ export class ControllerNode extends Node {
      */
     public perceive(delta: number): void {
         const pawn = this._resolvePossessed();
-        if (!pawn || this.controlSource !== 'ai') return;
+        if (!pawn || this.controlSource !== 'ai' || !(pawn instanceof CharacterNode)) return;
 
         // Every other pawn in the scene. A player and every NPC is a Character, so this is both the
         // set an agent cares about and a bounded one — as opposed to "every node", which is neither.
@@ -921,7 +932,7 @@ export class ControllerNode extends Node {
      */
     public get neighborCount(): number {
         const pawn = this._resolvePossessed();
-        if (pawn) this._gatherNeighbours(pawn);
+        if (pawn instanceof CharacterNode) this._gatherNeighbours(pawn);
         return this._neighbourCount;
     }
 
@@ -1010,7 +1021,7 @@ export class ControllerNode extends Node {
 
         if (!this._goalContext) {
             this._goalContext = {
-                read: (source) => this._readSource(source, this._possessed ?? pawn),
+                read: (source) => this._readSource(source, this._possessed instanceof CharacterNode ? this._possessed : pawn),
                 met: (condition) => !!condition
                     && conditionNodeMet(this._behaviorRuntime.ctx, condition),
                 drive: (goal, targetKey, speedScale) => {
@@ -1295,7 +1306,7 @@ export class ControllerNode extends Node {
      * A copy rather than handing over the record: two controllers briefly naming one pawn would otherwise
      * alias the same object, and the pawn's jump consumption would reach back into a controller's state.
      */
-    private _publish(pawn: CharacterNode): void {
+    private _publish(pawn: Pawn): void {
         const target = pawn.drive();
         target.move[0] = this._intent.move[0];
         target.move[1] = this._intent.move[1];

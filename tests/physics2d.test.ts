@@ -10,15 +10,17 @@ import { Tilemap } from '../src/graphics/tilemap/tilemap';
 import { Tileset } from '../src/graphics/tilemap/tileset';
 import { createMoveResult, moveAndSlide, raycast2D, wallTouching } from '../src/physics2d/collide2d';
 import type { Body2DShape, MoveOptions } from '../src/physics2d/collide2d';
-import {
-    DEFAULT_PLATFORMER, createPlatformerEvents, createPlatformerState, jumpPhysics, stepPlatformer,
-} from '../src/physics2d/platformer';
-import type { PlatformerAbilities, PlatformerIntent } from '../src/physics2d/platformer';
+import { LOCOMOTION_2D_DEFAULTS } from '../src/physics2d/locomotion2d';
+import { raiseRequest } from '../src/core/control/intent';
+import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
+import { ControllerNode } from '../src/core/scene/nodes/controllerNode';
 import { TILE_NONE, TILE_ONE_WAY, TILE_SLOPE, TILE_SOLID } from '../src/physics2d/types';
 import type { CollisionWorld2D, Grid2D } from '../src/physics2d/types';
 
-// The 2D physics: move-and-slide through tiles (solid, one-way, slopes) and boxes, the platformer
-// controller's feel, and the scene's 2D pass that runs both and reports area overlaps.
+// The 2D physics: move-and-slide through tiles (solid, one-way, slopes) and boxes, and the scene's 2D pass
+// that moves bodies by their generic locomotion (and their scripts' onMove2D) and reports area overlaps.
+// The locomotion's own rules are tests/locomotion2d.test.ts; a game's moves (Duskwell's dash, double and
+// wall jump) are tests/duskPlayerAbilities.test.ts.
 
 /** A grid from ASCII rows, top row first at row 0: # solid, = one-way, / rising 45, \ falling 45, < > a 26.5 slope's halves. */
 function gridOf(rows: string[], originX = 0, originY = 0): Grid2D {
@@ -155,99 +157,18 @@ describe('raycast2D', () => {
         expect(raycast2D(s, 3.5, 0, 0, -1, 20)?.y).toBeCloseTo(-5 + 0.5, 2);
         expect(raycast2D(w, 3.5, 0, 0, 1, 20)).toBeNull();
     });
-});
 
-describe('the platformer controller', () => {
-    const all: PlatformerAbilities = { doubleJump: true, dash: true, wallJump: true };
-    const none: PlatformerAbilities = { doubleJump: false, dash: false, wallJump: false };
-    const intent = (o: Partial<PlatformerIntent> = {}): PlatformerIntent =>
-        ({ moveX: 0, moveY: 0, jumpPressed: false, jumpHeld: false, dashPressed: false, ...o });
-    const air = { grounded: false, wallLeft: false, wallRight: false, ceiling: false };
-    const ground = { ...air, grounded: true };
-    const ev = createPlatformerEvents();
-
-    it('derives gravity and the launch speed from the jump\'s height and time', () => {
-        const { gravity, jumpSpeed } = jumpPhysics({ jumpHeight: 3, jumpTimeToApex: 0.5 });
-        expect(gravity).toBeCloseTo(24, 6);
-        expect(jumpSpeed).toBeCloseTo(12, 6);
-    });
-
-    it('jumps within coyote time after leaving a ledge, not after', () => {
-        const s = createPlatformerState();
-        stepPlatformer(s, intent(), ground, DEFAULT_PLATFORMER, none, 1 / 60, ev);
-        stepPlatformer(s, intent(), air, DEFAULT_PLATFORMER, none, 0.05, ev);
-        stepPlatformer(s, intent({ jumpPressed: true, jumpHeld: true }), air, DEFAULT_PLATFORMER, none, 1 / 60, ev);
-        expect(ev.jumped).toBe(true);
-        const late = createPlatformerState();
-        stepPlatformer(late, intent(), ground, DEFAULT_PLATFORMER, none, 1 / 60, ev);
-        stepPlatformer(late, intent(), air, DEFAULT_PLATFORMER, none, 0.2, ev);
-        stepPlatformer(late, intent({ jumpPressed: true, jumpHeld: true }), air, DEFAULT_PLATFORMER, none, 1 / 60, ev);
-        expect(ev.jumped).toBe(false);
-    });
-
-    it('remembers a jump pressed just before landing', () => {
-        const s = createPlatformerState();
-        stepPlatformer(s, intent({ jumpPressed: true, jumpHeld: true }), air, DEFAULT_PLATFORMER, none, 0.05, ev);
-        expect(ev.jumped).toBe(false);
-        stepPlatformer(s, intent({ jumpHeld: true }), ground, DEFAULT_PLATFORMER, none, 1 / 60, ev);
-        expect(ev.jumped).toBe(true);
-    });
-
-    it('double jumps only with the ability, once per landing', () => {
-        for (const [abilities, expected] of [[none, false], [all, true]] as const) {
-            const s = createPlatformerState();
-            stepPlatformer(s, intent(), ground, DEFAULT_PLATFORMER, abilities, 1 / 60, ev);
-            stepPlatformer(s, intent(), air, DEFAULT_PLATFORMER, abilities, 0.3, ev);
-            stepPlatformer(s, intent({ jumpPressed: true, jumpHeld: true }), air, DEFAULT_PLATFORMER, abilities, 1 / 60, ev);
-            expect(ev.airJumped).toBe(expected);
-        }
-        const s = createPlatformerState();
-        stepPlatformer(s, intent(), ground, DEFAULT_PLATFORMER, all, 1 / 60, ev);
-        stepPlatformer(s, intent(), air, DEFAULT_PLATFORMER, all, 0.3, ev);
-        stepPlatformer(s, intent({ jumpPressed: true, jumpHeld: true }), air, DEFAULT_PLATFORMER, all, 1 / 60, ev);
-        stepPlatformer(s, intent(), air, DEFAULT_PLATFORMER, all, 0.3, ev);
-        stepPlatformer(s, intent({ jumpPressed: true, jumpHeld: true }), air, DEFAULT_PLATFORMER, all, 1 / 60, ev);
-        expect(ev.airJumped).toBe(false);
-    });
-
-    it('dashes at dash speed with gravity off, then waits for its cooldown', () => {
-        const s = createPlatformerState();
-        stepPlatformer(s, intent({ dashPressed: true, moveX: 1 }), ground, DEFAULT_PLATFORMER, all, 1 / 60, ev);
-        expect(ev.dashed).toBe(true);
-        expect(s.vx).toBe(DEFAULT_PLATFORMER.dashSpeed);
-        expect(s.vy).toBe(0);
-        for (let t = 0; t < DEFAULT_PLATFORMER.dashTime; t += 1 / 60) stepPlatformer(s, intent({ moveX: 1 }), ground, DEFAULT_PLATFORMER, all, 1 / 60, ev);
-        stepPlatformer(s, intent({ dashPressed: true }), ground, DEFAULT_PLATFORMER, all, 1 / 60, ev);
-        expect(ev.dashed).toBe(false);
-        expect(createPlatformerState().dashLeft).toBe(0);
-        const gated = createPlatformerState();
-        stepPlatformer(gated, intent({ dashPressed: true }), ground, DEFAULT_PLATFORMER, none, 1 / 60, ev);
-        expect(ev.dashed).toBe(false);
-    });
-
-    it('slides down a wall it presses into, and jumps off it away from the wall', () => {
-        const s = createPlatformerState();
-        s.vy = -20;
-        const wall = { ...air, wallRight: true };
-        stepPlatformer(s, intent({ moveX: 1 }), wall, DEFAULT_PLATFORMER, all, 1 / 60, ev);
-        expect(s.wallSliding).toBe(true);
-        expect(s.vy).toBe(-DEFAULT_PLATFORMER.wallSlideSpeed);
-        stepPlatformer(s, intent({ moveX: 1, jumpPressed: true, jumpHeld: true }), wall, DEFAULT_PLATFORMER, all, 1 / 60, ev);
-        expect(ev.wallJumped).toBe(true);
-        expect(s.vx).toBeLessThan(0);
-        expect(s.vy).toBeGreaterThan(0);
-        const gated = createPlatformerState();
-        gated.vy = -20;
-        stepPlatformer(gated, intent({ moveX: 1 }), wall, DEFAULT_PLATFORMER, none, 1 / 60, ev);
-        expect(gated.wallSliding).toBe(false);
-    });
-
-    it('cuts the jump short when the button is let go', () => {
-        const s = createPlatformerState();
-        stepPlatformer(s, intent({ jumpPressed: true, jumpHeld: true }), ground, DEFAULT_PLATFORMER, none, 1 / 60, ev);
-        const v = s.vy;
-        stepPlatformer(s, intent(), air, DEFAULT_PLATFORMER, none, 1 / 60, ev);
-        expect(s.vy).toBeLessThan(v * DEFAULT_PLATFORMER.jumpCutMultiplier + 1);
+    it('reports the face it hit: a floor up, a wall back toward the ray, a slope along its rise', () => {
+        const w = world(FLOOR);
+        expect(raycast2D(w, 3.5, 0, 0, -1, 20)?.normal).toEqual([0, 1]);
+        const wall = world(['     #    ', '     #    ', '     #    ']);
+        const side = raycast2D(wall, 1, -1.5, 1, 0, 20);
+        expect(side?.x).toBeCloseTo(5, 3);
+        expect(side?.normal).toEqual([-1, 0]);
+        const s = world(['          ', '          ', '          ', '          ', '   /      ', '##########']);
+        const n = raycast2D(s, 3.5, 0, 0, -1, 20)!.normal;
+        expect(n[0]).toBeCloseTo(-Math.SQRT1_2, 3);
+        expect(n[1]).toBeCloseTo(Math.SQRT1_2, 3);
     });
 });
 
@@ -255,7 +176,7 @@ let authoring = false;
 beforeEach(() => { authoring = CleoEngine.authoringMode; CleoEngine.authoringMode = false; });
 afterEach(() => { CleoEngine.authoringMode = authoring; });
 
-/** A scene with a flat 1x1-cell floor from x = -20 to 20 at y = 0, and a scripted player body on it. */
+/** A scene with a flat 1x1-cell floor from x = -20 to 20 at y = 0, and a body a test drives directly. */
 function level() {
     const scene = new Scene();
     const ts = new Tileset({ id: 'ts', textureId: 'ts.png', imageWidth: 16, imageHeight: 16, tileWidth: 16, tileHeight: 16, columns: 1, rows: 1 });
@@ -266,7 +187,8 @@ function level() {
     for (let x = -20; x < 20; x++) map.setTile(0, x, 0, 0);
     scene.addNode(new TilemapNode('Map', map));
     const player = new CharacterBody2DNode('Player');
-    player.playerInput = false;
+    // No controller here: the test writes the intent itself, and this runs the locomotion on it.
+    player.driveWhenUnpossessed = true;
     player.setPosition([0, 2, 0]);
     scene.addNode(player);
     scene.start();
@@ -288,23 +210,77 @@ describe('the 2D physics pass', () => {
         const apex = (fps: number) => {
             const { scene, player } = level();
             run(scene, 0.5, fps);
-            player.jump();
+            raiseRequest(player.drive(), 'jump', 0.12);
             let top = 0;
             run(scene, 1, fps, () => { top = Math.max(top, player.position[1]); });
             return top;
         };
         const heights = [30, 60, 144].map(apex);
-        for (const h of heights) expect(h).toBeCloseTo(DEFAULT_PLATFORMER.jumpHeight, 1);
+        for (const h of heights) expect(h).toBeCloseTo(LOCOMOTION_2D_DEFAULTS.jumpHeight, 1);
         expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(0.08);
     });
 
     it('walks where a script steers it, and faces that way', () => {
         const { scene, player } = level();
         run(scene, 0.3);
-        player.move(-1);
+        player.drive().move[0] = -1;
         run(scene, 1);
         expect(player.position[0]).toBeLessThan(-5);
         expect(player.facing).toBe(-1);
+    });
+
+    it('leaves an undriven body inert: it falls, and keeps its velocity', () => {
+        const { scene, player } = level();
+        player.driveWhenUnpossessed = false;
+        // An intent nothing marked fresh this frame (no controller, no script calling drive()) is not acted on.
+        (player.intent as { move: number[] }).move[0] = 1;
+        run(scene, 0.5);
+        expect(player.isGrounded).toBe(true);
+        expect(player.position[0]).toBe(0);
+        const flier = new CharacterBody2DNode('Bat');
+        flier.movement = 'fly';
+        flier.setPosition([0, 5, 0]);
+        scene.addNode(flier);
+        flier.velocity2D[0] = 2;
+        run(scene, 0.5);
+        expect(flier.position[0]).toBeCloseTo(1, 3);
+        expect(flier.position[1]).toBeCloseTo(5, 6);
+        expect(flier.facing).toBe(1);
+    });
+
+    it('reports landing from the contacts, driven or not', () => {
+        for (const driven of [true, false]) {
+            const { scene, player } = level();
+            player.driveWhenUnpossessed = driven;
+            let landed = 0;
+            run(scene, 0.8, 60, () => { if (player.justLanded) landed++; });
+            expect(landed, `driven ${driven}`).toBe(1);
+        }
+    });
+
+    it("calls a script's onMove2D every substep, and lets it own one", () => {
+        const { scene, player } = level();
+        run(scene, 0.4);
+        const calls: number[] = [];
+        // A dash, as a game writes one: the hook owns the substep, so the engine's steering (toward the stick,
+        // left) is skipped, and gravity off keeps the height.
+        player.onMove2D = (_dt: number, substep: number) => {
+            calls.push(substep);
+            player.velocity2D[0] = 20;
+            player.velocity2D[1] = 0;
+            player.gravityScale = 0;
+            return true;
+        };
+        player.drive().move[0] = -1;
+        scene.update(1 / 30, 0, false);
+        expect(calls).toEqual([0, 1, 2, 3]);
+        expect(player.position[0]).toBeCloseTo(20 / 30, 4);
+        expect(player.position[1]).toBeCloseTo(0, 5);
+        // Not owning it hands the substep back to the engine, which steers to the stick: walk speed, left.
+        player.onMove2D = () => false;
+        player.gravityScale = 1;
+        run(scene, 0.6);
+        expect(player.velocity2D[0]).toBeCloseTo(-LOCOMOTION_2D_DEFAULTS.walkSpeed, 4);
     });
 
     it('carries a body standing on a moving platform', () => {
@@ -313,7 +289,7 @@ describe('the 2D physics pass', () => {
         platform.kind = 'oneWay';
         scene.addNode(platform);
         const player = new CharacterBody2DNode('Player');
-        player.playerInput = false;
+        player.driveWhenUnpossessed = true;
         player.setPosition([0, 1, 0]);
         scene.addNode(player);
         scene.start();
@@ -335,8 +311,6 @@ describe('the 2D physics pass', () => {
         const bat = new CharacterBody2DNode('Bat');
         bat.oneWayPlatforms = false;
         for (const [i, body] of [walker, bat].entries()) {
-            body.playerInput = false;
-            body.controller = 'none';
             body.size = [0.5, 0.5];
             body.setPosition([i - 0.5, 1, 0]);
             scene.addNode(body);
@@ -364,7 +338,7 @@ describe('the 2D physics pass', () => {
         zone.onTriggerExit = (n: Node) => { heard.push(`zone loses ${n.name}`); };
         player.onTriggerEnter = (n: Node) => { heard.push(`player in ${n.name}`); };
         run(scene, 0.3);
-        player.move(1);
+        player.drive().move[0] = 1;
         run(scene, 2);
         expect(heard).toEqual(['zone sees Player', 'player in Checkpoint', 'zone loses Player']);
     });
@@ -413,5 +387,57 @@ describe('Tilemap.collision2DAt', () => {
         expect(slope).toEqual([0.5, 0]);
         expect(map.collision2DAt(4, 0, slope)).toBe(TILE_SOLID);
         expect(map.collision2DAt(9, 0, slope)).toBe(TILE_NONE);
+    });
+});
+
+describe('2D bodies saved with the built-in platformer controller', () => {
+    const legacy = (extra: object = {}) => ({
+        type: 'characterBody2D', name: 'Player', id: 'p1', position: [0, 2, 0], rotation: [0, 0, 0], scale: [1, 1, 1],
+        children: [],
+        characterBody2D: {
+            size: [1, 2.2], layer: 1, controller: 'platformer', playerInput: true, moveAction: 'Walk', jumpAction: 'Hop',
+            dashAction: 'Dash', gravity: 40, stepHeight: 0.45, flipSprites: true,
+            settings: { runSpeed: 7, acceleration: 80, deceleration: 100, airAcceleration: 40, jumpHeight: 3, jumpTimeToApex: 0.4,
+                fallGravityMultiplier: 1.5, maxFallSpeed: 20, coyoteTime: 0.08, jumpBuffer: 0.1, dashSpeed: 22 },
+            abilities: { doubleJump: true, dash: false, wallJump: false },
+            ...extra,
+        },
+    });
+
+    it('keeps its running and jumping, and gets a Player Controller reading the same actions', () => {
+        const root = new Scene().root;
+        parseNodeJson(root, legacy());
+        const body = root.children[0] as CharacterBody2DNode;
+        expect(body).toBeInstanceOf(CharacterBody2DNode);
+        expect([body.walkSpeed, body.runSpeed, body.jumpHeight, body.jumpTimeToApex]).toEqual([7, 7, 3, 0.4]);
+        expect([body.fallGravityMultiplier, body.maxFallSpeed, body.coyoteSeconds, body.jumpBufferSeconds]).toEqual([1.5, 20, 0.08, 0.1]);
+        expect(body.airControl).toBeCloseTo(0.5, 6);
+        expect(body.movement).toBe('walk');
+        const controller = body.children.find(c => c instanceof ControllerNode) as ControllerNode;
+        expect(controller.controlSource).toBe('player');
+        expect([controller.moveAction, controller.jumpAction]).toEqual(['Walk', 'Hop']);
+        expect(controller.possessedId).toBe('p1');
+        // Saved again, it is a plain body: no settings, no abilities, and the controller is its own node.
+        const saved = (body as any)._serializePayload().characterBody2D;
+        expect(saved.settings).toBeUndefined();
+        expect(saved.abilities).toBeUndefined();
+        expect(saved.controller).toBeUndefined();
+    });
+
+    it('turns a velocity-driven body with no gravity into a flier, and gives a scripted one no controller', () => {
+        const root = new Scene().root;
+        parseNodeJson(root, legacy({ controller: 'none', gravity: 0, playerInput: false }));
+        const bat = root.children[0] as CharacterBody2DNode;
+        expect(bat.movement).toBe('fly');
+        expect(bat.children.some(c => c instanceof ControllerNode)).toBe(false);
+        const scripted = new Scene().root;
+        parseNodeJson(scripted, legacy({ playerInput: false }));
+        expect(scripted.children[0].children.length).toBe(0);
+    });
+
+    it('accepts an old script assigning a controller name, and does nothing with it', () => {
+        const body = new CharacterBody2DNode('Old');
+        expect(() => { (body as any).controller = 'none'; }).not.toThrow();
+        expect(body.controller).toBeNull();
     });
 });

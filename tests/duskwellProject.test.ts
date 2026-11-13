@@ -4,8 +4,10 @@ import { join } from 'path';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
 import { COLS, ROWS, GRID, ROOMS, roomBounds } from '../tools/duskwell/level';
 // The whole engine: it registers itself as the scripts' 'cleo' module, so the demo's scripts run headless.
-import { Scene, CleoEngine } from '../src/cleo';
+import { Scene, CleoEngine, ControllerNode } from '../src/cleo';
 import type { CharacterBody2DNode } from '../src/cleo';
+import { fakeInput } from './helpers/fakeInput';
+import type { FakeInput } from './helpers/fakeInput';
 
 // The Duskwell example: the 2D metroidvania slice built by tools/duskwell/build.ts on the flat 2D frame,
 // the 2D physics and the sprite clips. Most of what can go wrong with it does not fail loudly -- a scene
@@ -27,8 +29,9 @@ const allNodes = (root: any): any[] => {
 };
 
 let authoring = false;
-beforeEach(() => { authoring = CleoEngine.authoringMode; CleoEngine.authoringMode = false; });
-afterEach(() => { CleoEngine.authoringMode = authoring; });
+let input: FakeInput;
+beforeEach(() => { authoring = CleoEngine.authoringMode; CleoEngine.authoringMode = false; input = fakeInput(); });
+afterEach(() => { CleoEngine.authoringMode = authoring; input.restore(); });
 
 describe.skipIf(!present)('the Duskwell example project', { timeout: 60_000 }, () => {
     const manifest = () => read('manifest.json');
@@ -37,20 +40,37 @@ describe.skipIf(!present)('the Duskwell example project', { timeout: 60_000 }, (
     const library = (name: string) => read('libraries', `${name}.json`) ?? [];
     const named = (name: string) => nodes().find(n => n.name === name);
 
-    /** The scene, parsed and started the way the player starts it, scripts and all. */
+    /**
+     * The scene, parsed and started the way the player starts it, scripts and all. The player plays it
+     * through its Player Controller from scripted buttons (`input`), as a person would from the keyboard.
+     */
     const play = () => {
         const scene = new Scene();
         scene.parse(sceneFile(), true);
         scene.start();
-        const player = scene.findNode('Player') as CharacterBody2DNode;
-        // Scripted rather than read from the keyboard, with the same controller.
-        player.playerInput = false;
+        const player = scene.findNode('Player') as CharacterBody2DNode & Record<string, any>;
         return { scene, player };
     };
     const FRAME = 1 / 60;
     const run = (scene: Scene, seconds: number, each?: (t: number) => void) => {
-        for (let t = 0; t < seconds - 1e-9; t += FRAME) { each?.(t); scene.update(FRAME, 0, false); }
+        for (let t = 0; t < seconds - 1e-9; t += FRAME) { each?.(t); scene.update(FRAME, 0, false); input.endFrame(); }
     };
+
+    it('drives the player through a Player Controller, its moves in its script', () => {
+        const player = named('Player');
+        const controller = player.children.find((c: any) => c.type === 'controller');
+        expect(controller.controlSource).toBe('player');
+        expect(controller.possessedId).toBe(player.id);
+        expect([controller.moveAction, controller.jumpAction]).toEqual(['Move', 'Jump']);
+        // The body is generic: no built-in controller, no abilities.
+        expect(player.characterBody2D.settings).toBeUndefined();
+        expect(player.characterBody2D.abilities).toBeUndefined();
+        const { scene, player: live } = play();
+        // Possession resolves on the controller's first think, in the frame's control pass.
+        run(scene, FRAME);
+        expect(live.controller).toBeInstanceOf(ControllerNode);
+        expect([live.hasDash, live.hasDoubleJump, live.hasWallJump]).toEqual([false, false, false]);
+    });
 
     it('is one 2D scene, drawn by the flat 2D frame', () => {
         const metas = manifest().sceneMetas;
@@ -137,8 +157,11 @@ describe.skipIf(!present)('the Duskwell example project', { timeout: 60_000 }, (
         expect(player.isGrounded).toBe(true);
         expect(player.position[1]).toBeCloseTo(4, 4);
         // Walk right and jump onto the two-high step (columns 12-16, top at y = 6).
-        player.move(1);
-        run(scene, 1.4, (t) => { if (Math.abs(t - 0.65) < FRAME / 2) player.jump(); if (t > 0.95) player.releaseJump(); });
+        input.setMove(1, 0);
+        run(scene, 1.4, (t) => {
+            if (Math.abs(t - 0.65) < FRAME / 2) input.press('Jump');
+            if (t > 0.95) input.release('Jump');
+        });
         expect(player.position[0]).toBeGreaterThan(12);
         expect(player.position[0]).toBeLessThan(17);
         expect(player.position[1]).toBeCloseTo(6, 4);
@@ -147,29 +170,36 @@ describe.skipIf(!present)('the Duskwell example project', { timeout: 60_000 }, (
         scene.stop?.();
     });
 
-    it('gates the Long Hall\'s pit: a running jump falls in, a jump and a dash clears it', () => {
-        const attempt = (dash: boolean) => {
+    it("gates the Long Hall's pit: a running jump falls in, a jump and a dash clears it, as does a double jump", () => {
+        const attempt = (move: 'none' | 'dash' | 'doubleJump') => {
             const { scene, player } = play();
-            if (dash) player.abilities.dash = true;
+            player.hasDash = move === 'dash';
+            player.hasDoubleJump = move === 'doubleJump';
             player.teleport(56, 2);
             run(scene, 0.3);
             let jumpedAt = -1, lowest = Infinity;
-            player.move(1);
+            input.setMove(1, 0);
             run(scene, 1.6, (t) => {
-                if (jumpedAt < 0 && player.position[0] >= 61.2) { player.jump(); jumpedAt = t; }
-                if (jumpedAt >= 0 && t - jumpedAt > 0.32) player.releaseJump();
-                if (dash && jumpedAt >= 0 && Math.abs(t - jumpedAt - 0.14) < FRAME / 2) player.dash();
+                if (jumpedAt < 0 && player.position[0] >= 61.2) { input.press('Jump'); jumpedAt = t; }
+                const since = t - jumpedAt;
+                if (jumpedAt >= 0 && since > 0.32 && since < 0.34) input.release('Jump');
+                if (move === 'dash' && jumpedAt >= 0 && Math.abs(since - 0.14) < FRAME / 2) input.tap('Dash');
+                if (move === 'doubleJump' && jumpedAt >= 0 && Math.abs(since - 0.4) < FRAME / 2) input.press('Jump');
+                if (move === 'doubleJump' && since > 0.7) input.release('Jump');
                 lowest = Math.min(lowest, player.position[1]);
             });
+            input.release('Jump');
             scene.stop?.();
             return { x: player.position[0], y: player.position[1], lowest, grounded: player.isGrounded };
         };
-        const plain = attempt(false);
+        const plain = attempt('none');
         expect(plain.lowest).toBeLessThan(0);
-        const dashed = attempt(true);
-        expect(dashed.lowest).toBeGreaterThan(1.9);
-        expect(dashed.grounded).toBe(true);
-        expect(dashed.x).toBeGreaterThan(68.5);
+        for (const move of ['dash', 'doubleJump'] as const) {
+            const cleared = attempt(move);
+            expect(cleared.lowest, move).toBeGreaterThan(1.9);
+            expect(cleared.grounded, move).toBe(true);
+            expect(cleared.x, move).toBeGreaterThan(68.5);
+        }
     });
 
     it('wakes a bat that swoops through the plank to bite, and that the sword combo kills', () => {

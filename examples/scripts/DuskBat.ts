@@ -1,8 +1,8 @@
 import { AnimatedSpriteNode, Area2DNode, CharacterBody2DNode, Node } from 'cleo'
 
 /**
- * Duskwell -- a bat. Attach to a Character Body 2D with no controller and no gravity: it flies, and passes
- * through one-way platforms. Its children are `Sprite` (the bat's clips: sleep, wakeup, fly, attack, hurt,
+ * Duskwell -- a bat. Attach to a flying Character Body 2D (no gravity) that passes through one-way
+ * platforms. Its children are `Sprite` (the bat's clips: sleep, wakeup, fly, attack, hurt,
  * die) and `Bite` (an Area 2D that sees the player's layer: the player's script asks this node's
  * `contactDamage`).
  *
@@ -33,8 +33,7 @@ export default class DuskBat extends CharacterBody2DNode {
     this._sprite = this.getChildByName('Sprite')[0] as AnimatedSpriteNode
     this._bite = this.getChildByName('Bite')[0] as Area2DNode
     this._player = this.findNode('Player') ?? null
-    this.controller = 'none'
-    this.gravity = 0
+    this.movement = 'fly'
     this.flipSprites = false
     this.oneWayPlatforms = false
     this._bob = Math.random() * 6.28

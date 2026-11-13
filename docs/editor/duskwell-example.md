@@ -40,12 +40,14 @@ Everything in the scene is an ordinary node you can select and change:
   with a dead zone, look-ahead and a shake the player's script asks for on a hit.
 - **Backdrop** — five **Parallax Layers**, from a sky that stays on screen to near woods that move with most
   of the camera's travel.
-- **Player** — a **Character Body 2D** with the platformer controller. Its **Sprite** carries the warrior's
-  animation set (idle, run, jump, fall, three attacks, hurt, death) and a state machine that picks the
-  movement clips from the body on its own; its **Sword** is an Area 2D the attack frames switch on and size.
-  The `DuskPlayer` script adds the combo, health, the hit, death and the respawn.
-- **Enemies** — each bat is a Character Body 2D with no controller and no gravity that passes through one-way
-  platforms, moved by `DuskBat`. Its **Bite** is an Area 2D the player's script reads `contactDamage` from.
+- **Player** — a **Character Body 2D** the engine walks and jumps, driven by its last child, a **Player
+  Controller** reading Move and Jump, as a 3D Character is. Its **Sprite** carries the warrior's animation set
+  (idle, run, jump, fall, three attacks, hurt, death) and a state machine that picks the movement clips from
+  the body on its own; its **Sword** is an Area 2D the attack frames switch on and size. The `DuskPlayer`
+  script is the game's own moves: the double jump, the dash, the wall slide and wall jump (each off until its
+  pickup), the jump cut, and the combo, health, the hit, death and the respawn.
+- **Enemies** — each bat is a flying Character Body 2D that passes through one-way platforms, moved by
+  `DuskBat`. Its **Bite** is an Area 2D the player's script reads `contactDamage` from.
 - **Pickups** and **Checkpoints** — Area 2Ds with `DuskPickup` (its `kind`: `diamond`, `heart`, `dash`,
   `doubleJump` or `wallJump`) and `DuskCheckpoint`.
 - **HUD** — a UI root with three texts that `DuskHud` writes each frame.

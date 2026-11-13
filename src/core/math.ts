@@ -1645,3 +1645,16 @@ export function moveToward(current: number, target: number, maxDelta: number): n
     if (current < target) return Math.min(target, current + maxDelta);
     return Math.max(target, current - maxDelta);
 }
+
+/**
+ * Move the 2D vector `v` toward (tx, ty) by at most `maxDelta` along the straight line between them,
+ * in place: a flier easing to a new velocity, which a per-axis {@link moveToward} would bend.
+ */
+export function moveToward2D(v: [number, number], tx: number, ty: number, maxDelta: number): [number, number] {
+    const dx = tx - v[0], dy = ty - v[1];
+    const d = Math.hypot(dx, dy);
+    if (d <= maxDelta || d === 0) { v[0] = tx; v[1] = ty; return v; }
+    const k = maxDelta / d;
+    v[0] += dx * k; v[1] += dy * k;
+    return v;
+}

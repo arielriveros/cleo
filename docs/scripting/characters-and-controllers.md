@@ -20,11 +20,15 @@ Playable            <- CharacterNode. Has the RigidBody. Must sit at the scene R
 ## Possession
 
 ```ts
-possess(node: CharacterNode | null): this      // last-possess-wins, warns when stealing
+type Pawn = CharacterNode | CharacterBody2DNode
+possess(node: Pawn | null): this               // last-possess-wins, warns when stealing
 release(): this
-get possessed: CharacterNode | null
+get possessed: Pawn | null
 get/set possessedId: string | null
 ```
+
+A controller drives a 2D body (`CharacterBody2DNode`) exactly as it drives a Character — see
+[2D pawns](#2d-pawns).
 
 `possessedId` is remapped when a template is instantiated, so a spawned copy possesses **its own**
 character rather than the template's. That is why the controller belongs *inside* the template, as a
@@ -221,6 +225,55 @@ export default class PlayerNode extends CharacterNode {
 > Engine work on these nodes lives in `update()`, and your work in `onUpdate()`. They are separate
 > deliberately: a script's methods are installed as own properties on the node, so a script method
 > named `update` would shadow the engine's.
+
+## 2D pawns
+
+A `CharacterBody2DNode` is the 2D pawn: it walks or flies, runs and jumps from an intent, with coyote
+time and a jump buffer, and a Controller possesses it the same way. Put the controller last among its
+children, as in 3D:
+
+```
+Player              <- CharacterBody2DNode (its script: the game's moves)
+├── Sprite          <- AnimatedSpriteNode, its state machine reading the body
+├── Sword           <- Area2DNode
+└── Player Controller  <- ControllerNode, Source: Player, possessing Player
+```
+
+**The 2D intent is in world axes.** `move[0]` is +x (right), `move[1]` is +y (up): a flier climbs with
+it, and a walker holding it down with a jump drops through a one-way platform. `basisYaw`, the aim and
+the look mean nothing to a 2D body, so a player controller reads its Move stick straight into it.
+`setMove2D(intent, x, y)` writes one. Sprint picks the run speed; `speedScale` throttles; a raised `jump`
+request jumps.
+
+**A game's own moves go in `onMove2D`.** The engine walks and jumps the body; a dash, a double jump, a
+wall jump or a jump cut is the game's, as a roll or a sprint is over a 3D Character. The handler runs every
+physics substep (1/120 s or shorter), after the body's contacts are known and before the engine steers,
+so a move lasts the same time at any frame rate:
+
+```ts
+export default class Hero extends CharacterBody2DNode {
+  public hasDoubleJump = true
+  private _airJumps = 0
+
+  onMove2D(dt: number, substep: number): boolean {
+    if (this.isGrounded) this._airJumps = this.hasDoubleJump ? 1 : 0
+    // A press the engine's own jump cannot take (in the air): this game's double jump.
+    if (this.jumpRequested && !this.canJump && this._airJumps > 0) {
+      this.consumeJump()
+      this._airJumps--
+      this.velocity2D[1] = this.jumpSpeed * 0.9
+    }
+    return false   // true would own this substep: no engine steering or jump, your velocity2D stands
+  }
+}
+```
+
+Return `true` to own the substep — gravity (times `gravityScale`) and collision still run, so a dash sets
+`gravityScale = 0` for its length. `maxFallSpeed` is writable too (a wall slide). The body publishes what
+a script or a sprite's state machine reads: `isGrounded`, `onWall` (-1, 0, 1), `facing`, `canJump`,
+`jumpRequested`, `isJumping`, `justJumped`, `justLanded`, and the measured-motion builtins (`planarSpeed` is
+|vx| for a walker). Duskwell's warrior (`examples/scripts/DuskPlayer.ts`) is the full set: double jump,
+dash, wall slide and wall jump, jump cut, knock-back.
 
 ## Camera rigs
 

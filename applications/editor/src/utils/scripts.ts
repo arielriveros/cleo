@@ -488,6 +488,40 @@ export default class ${className} extends ${base} {
   }
 }
 `,
+  characterBody2D: (className, base) => `import { Input, Logger, ${base} } from 'cleo'
+
+// ${className} runs on a Character Body 2D -- a 2D pawn whose walking, flying and jumping the ENGINE owns,
+// driven by a Controller (Player: Move and Jump; AI: a brain) exactly as a 3D Character is.
+//
+// To influence movement, tune the body in the inspector, or patch this frame's intent:
+//
+//   this.drive().speedScale = 0.5     // half speed, whatever is driving
+//
+// A game's OWN moves -- a dash, a double jump, a wall jump -- go in onMove2D, which runs every physics
+// substep (1/120 s or shorter) before the engine steers, so they come out the same at any frame rate.
+// Return true from it to own the substep: the engine's steering and jump skip it, your velocity2D stands.
+export default class ${className} extends ${base} {
+  public hasDoubleJump: boolean = true
+  public airJumps: number = 1
+
+  private _airJumpsLeft: number = 0
+
+  onUpdate(delta: number, time: number) {
+    if (this.justLanded) Logger.log(this.name + ' landed', 'Script')
+  }
+
+  onMove2D(dt: number, substep: number): boolean {
+    if (this.isGrounded) this._airJumpsLeft = this.hasDoubleJump ? this.airJumps : 0
+    // A jump pressed in the air, where the engine's own jump cannot launch: the double jump.
+    if (this.jumpRequested && !this.canJump && this._airJumpsLeft > 0) {
+      this.consumeJump()
+      this._airJumpsLeft--
+      this.velocity2D[1] = this.jumpSpeed * 0.9
+    }
+    return false
+  }
+}
+`,
 }
 
 const UI_STARTERS: Partial<Record<ScriptBaseType, string>> = {

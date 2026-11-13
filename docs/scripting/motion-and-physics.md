@@ -357,15 +357,18 @@ and `Body2DNode` colliders every frame the game plays (see [Tilemaps and 2D](../
 const body = this as unknown as CharacterBody2DNode   // a script on the body
 body.isGrounded ; body.onWall ; body.onCeiling ; body.onSlope   // onWall: -1 left, 1 right, 0
 body.facing                                          // -1 left, 1 right
-body.isDashing ; body.isWallSliding
-body.justJumped ; body.justDashed ; body.justLanded    // this frame
-body.velocity2D                                      // [x, y] units per second; set it with no controller
-body.abilities.doubleJump = true                     // and .dash, .wallJump: hand them out as the game goes
+body.canJump ; body.jumpRequested ; body.consumeJump()
+body.isJumping ; body.justJumped ; body.justLanded    // this frame
+body.velocity2D                                      // [x, y] units per second
+body.gravityScale ; body.maxFallSpeed                // writable at run time
 body.teleport(x, y)                                  // at once, at rest
 
-// With `playerInput` off, a script steers it with the platformer's feel:
-body.move(-1) ; body.jump() ; body.releaseJump() ; body.dash()
+// A Controller drives it (Player or AI); a script patches the intent, in world axes:
+setMove2D(body.drive(), -1, 0)
 ```
+
+A game's own moves — a dash, a double jump, a wall jump — go in the body script's `onMove2D(dt, substep)`,
+run every physics substep; see [2D pawns](characters-and-controllers.md#2d-pawns).
 
 Areas (`Area2DNode`) report `onTriggerEnter` / `onTriggerExit` as 3D triggers do. Queries:
 

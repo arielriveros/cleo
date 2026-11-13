@@ -36,7 +36,7 @@
       "name": "Duskwell",
       "description": "A small 2D metroidvania on the flat 2D renderer: a warrior with a three-hit combo, bats that wake as you pass, two rooms the camera slides between, one-way platforms, checkpoints, diamonds, and the dash relic that carries you over the pit. Pixel-perfect at 480 x 270, with parallax backdrops and glowing torches.",
       "order": 3,
-      "bytes": 440634,
+      "bytes": 457388,
       "sceneCount": 1,
       "textureCount": 11,
       "createdAt": 1795000000000

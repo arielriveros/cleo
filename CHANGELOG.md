@@ -56,17 +56,21 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   triggers `jumped`, `landed`, `dashed`), and scripts add their own (`setParam`, `fireTrigger`). Scripts
   `play(name)`, and a `SpriteClipName` field picks a clip in the inspector. The **Clips** section shows
   what plays and previews any clip.
-- **2D physics and a platformer controller.** 2D games get physics of their own (`src/physics2d`), reading
+- **2D physics and 2D characters.** 2D games get physics of their own (`src/physics2d`), reading
   tilemaps' tiles directly and moving characters the moment a tile is painted or erased.
   - *Tiles.* A tile's **Collision** is now a choice: solid, a **one-way platform** (stood on from above,
     dropped through with down + jump), a 45° or 26° **slope** or a half block (`TileMeta.oneWay`, `slope`).
-  - *Sprites ▸ Character Body 2D.* A character's box, standing on its feet: it slides along walls, walks up
-    and down slopes and steps, and keeps its sprite facing the way it goes. Its **Platformer** controller
-    runs and jumps with the feel a designer tunes (a jump height and the time to reach it, the jump cut,
-    coyote time, a jump buffer), and hands out a metroidvania's abilities as toggles: **double jump**,
-    **dash**, **wall slide and wall jump**. It reads the player's input actions, or a script's `move`,
-    `jump` and `dash`, so an enemy moves with the same feel. A jump peaks at the same height at 30, 60
-    and 144 frames a second.
+  - *Sprites ▸ Character Body 2D.* A character's box, standing on its feet, and the 2D twin of a
+    Character: it slides along walls, walks up and down slopes and steps, and keeps its sprite facing the
+    way it goes. It **walks** or **flies**, runs and jumps with the feel a designer tunes (a jump height and
+    the time to reach it, a heavier fall, coyote time, a jump buffer, down + jump through a one-way
+    platform), and a **Controller** drives it as it drives a 3D Character: Source: Player reads Move and
+    Jump, Source: AI decides. **Driven by ▸ Add Player Controller / Add AI Controller** adds one. A jump
+    peaks at the same height at 30, 60 and 144 frames a second.
+  - *A game's own moves are its script's.* A dash, a double jump, a wall slide and wall jump, a jump cut:
+    written in the body script's `onMove2D(dt, substep)`, which runs every physics substep before the
+    engine steers (return `true` to own it), so each move comes out the same at any frame rate. The
+    **Character Body 2D** script starter shows a double jump. Duskwell's warrior has the whole set.
   - *Sprites ▸ Collider 2D* is a solid block or one-way platform that carries what stands on it when it
     moves; *Sprites ▸ Area 2D* is a trigger (`onTriggerEnter` / `onTriggerExit`, layers, area-to-area for
     hitboxes, its offset mirrored with the character it rides).

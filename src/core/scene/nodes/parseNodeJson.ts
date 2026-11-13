@@ -34,6 +34,7 @@ import { Camera2DNode } from "./camera2DNode";
 import { Room2DNode } from "./room2DNode";
 import { ParallaxLayerNode } from "./parallaxLayerNode";
 import { CharacterBody2DNode } from "./characterBody2DNode";
+import { migrateLegacyBody2DJson } from "./body2DLegacy";
 import { Body2DNode } from "./body2DNode";
 import { Area2DNode } from "./area2DNode";
 import { UIRootNode } from "./ui/uiRoot";
@@ -85,7 +86,7 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'camera2D': Camera2DNode.parse(parent, json); break;
     case 'room2D': Room2DNode.parse(parent, json); break;
     case 'parallaxLayer': ParallaxLayerNode.parse(parent, json); break;
-    case 'characterBody2D': CharacterBody2DNode.parse(parent, json); break;
+    case 'characterBody2D': CharacterBody2DNode.parse(parent, migrateLegacyBody2DJson(json)); break;
     case 'body2D': Body2DNode.parse(parent, json); break;
     case 'area2D': Area2DNode.parse(parent, json); break;
     case 'uiRoot': UIRootNode.parse(parent, json); break;

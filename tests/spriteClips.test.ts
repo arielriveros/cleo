@@ -122,7 +122,6 @@ function warrior(withMachine = false) {
     const scene = new Scene();
     const ts = new Tileset({ id: 'w', textureId: 'w.png', imageWidth: 30, imageHeight: 30, tileWidth: 1, tileHeight: 1, columns: 30, rows: 30 });
     const body = new CharacterBody2DNode('Warrior');
-    body.playerInput = false;
     const sword = new Area2DNode('Sword', [0.5, 0.5]);
     body.addChild(sword);
     const sprite = new AnimatedSpriteNode('Sprite', new Sprite({ tileset: ts }), { constraints: 'free' });
@@ -187,8 +186,7 @@ describe('AnimatedSpriteNode clips', () => {
     it('lets its machine follow the body, and a trigger interrupt it', () => {
         const { scene, sprite, body } = warrior(true);
         expect(sprite.state).toBe('idle');
-        body.velocity2D[0] = 0;
-        body.controller = 'none';
+        // Undriven, the body keeps the velocity it is given (no controller here).
         body.velocity2D[0] = 4;
         run(scene, 0.1);
         expect(sprite.state).toBe('run');

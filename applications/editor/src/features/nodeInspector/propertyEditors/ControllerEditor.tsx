@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AIM_SOURCES, AI_GOALS, CONTROL_SOURCES, CharacterNode, ControllerNode, Node } from 'cleo'
+import { AIM_SOURCES, AI_GOALS, CONTROL_SOURCES, CharacterBody2DNode, CharacterNode, ControllerNode, Node } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import NodeRefInput from '../NodeRefInput'
 import ActionSelect from '../../input/ActionSelect'
@@ -85,12 +85,13 @@ export default function ControllerEditor(props: { node: ControllerNode }) {
     </div>
   )
 
-  // A controller possesses a CHARACTER, and never itself.
-  const characters = (node: Node) => node instanceof CharacterNode
+  // A controller possesses a CHARACTER (3D) or a CHARACTER BODY 2D, and never itself.
+  const characters = (node: Node) => node instanceof CharacterNode || node instanceof CharacterBody2DNode
 
   // "Possess selected" is the fast path: pick the character in the tree, then one click here.
   const selected = selectedNode ? editorScene.getNodeById(selectedNode) : null
-  const canPossessSelected = selected instanceof CharacterNode && selected.id !== state.possessedId
+  const canPossessSelected = (selected instanceof CharacterNode || selected instanceof CharacterBody2DNode)
+    && selected.id !== state.possessedId
 
   // Documented on the AI agents page, not with the other node-type editors.
   return (

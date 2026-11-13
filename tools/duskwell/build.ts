@@ -19,6 +19,7 @@ import { fileURLToPath } from 'url'
 import {
     Scene, Node, Tilemap, TilemapNode, Tileset, Sprite, SpriteNode, AnimatedSpriteNode, CharacterBody2DNode,
     Area2DNode, Room2DNode, Camera2DNode, ParallaxLayerNode, UIRootNode, UITextNode, RENDER_2D_DEFAULTS,
+    ControllerNode,
 } from '../../src/cleo'
 import type { SpriteAnimationSet, SpriteClip, SpriteFrameHitbox, SpriteStateMachine } from '../../src/cleo'
 import { fromRuntimeTileset } from '../../applications/editor/src/utils/tilesets'
@@ -289,8 +290,8 @@ function buildPlayer(): CharacterBody2DNode {
     player.size = [1, 2.2]
     player.layer = 1
     player.stepHeight = 0.45
-    // A long dash (4.4 units): with a jump it clears the Long Hall's pit, which a jump alone does not.
-    player.settings.dashTime = 0.2
+    // The engine runs and jumps it (walk 8 u/s, a 3.4-unit jump); the dash, double jump and wall jump are
+    // DuskPlayer's own (its 0.2 s dash, 4.4 units, clears the Long Hall's pit with a jump; a jump alone does not).
     const sprite = named(animated('Sprite', warrior.tileset, warriorSet, [], { pivot: WARRIOR_PIVOT, sortingOrder: 2 }))
     player.addChild(sprite)
     const blade = named(new Area2DNode('Sword', [2.8, 2]))
@@ -298,7 +299,23 @@ function buildPlayer(): CharacterBody2DNode {
     blade.mask = 2
     blade.enabled = false
     player.addChild(blade)
+    // Last child, as in the 3D examples: the driver that reads Move and Jump into the body's intent.
+    player.addChild(playerController())
     return player
+}
+
+/** A controller reading the player's Move and Jump, world-relative (a 2D body has no camera basis). */
+function playerController(): ControllerNode {
+    const c = named(new ControllerNode('Player Controller'))
+    c.controlSource = 'player'
+    c.moveAction = 'Move'
+    c.jumpAction = 'Jump'
+    c.lookAction = ''
+    c.sprintAction = ''
+    c.crouchAction = ''
+    c.aimSource = 'world'
+    c.driveAimTarget = false
+    return c
 }
 
 function buildBat(i: number, c: number, r: number): CharacterBody2DNode {
@@ -307,9 +324,7 @@ function buildBat(i: number, c: number, r: number): CharacterBody2DNode {
     body.setPosition([x, y - 0.5, 0])
     body.size = [1.2, 1]
     body.layer = 2
-    body.controller = 'none'
-    body.playerInput = false
-    body.gravity = 0
+    body.movement = 'fly'
     body.flipSprites = false
     body.oneWayPlatforms = false
     body.addChild(named(animated('Sprite', bat.tileset, batSet, [], { pivot: [0.5, 0.35], sortingOrder: 1 })))
@@ -517,6 +532,14 @@ async function main() {
     })
     root.id = id('node:root')
     stableIds(root)
+    // A controller drives the body it is a child of: its possession names the parent's (now stable) id.
+    const possessParents = (n: any) => {
+        for (const c of n.children ?? []) {
+            if (c.type === 'controller') c.possessedId = n.id
+            possessParents(c)
+        }
+    }
+    possessParents(root)
 
     const tilesetAssets: TilesetAsset[] = [
         { ...fromRuntimeTileset(ruins, 'Ruins'), },

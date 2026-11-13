@@ -190,34 +190,43 @@ and 2D colliders, every frame the game plays.
 
 ### Character Body 2D
 
-A **Character Body 2D** (**Sprites ▸ Character Body 2D**) is a character's body, a box standing on its feet at the node's position —
-give its sprite a pivot at the feet and the two line up. It slides along walls, lands on floors and one-way
-platforms, walks up and down slopes and steps (up to its **step height**), and keeps its sprite children
-facing the way it faces (**flip sprites**).
+A **Character Body 2D** (**Sprites ▸ Character Body 2D**) is a character's body, the 2D twin of a
+[Character](ai-agents.md): a box standing on its feet at the node's position — give its sprite a pivot at the
+feet and the two line up. It slides along walls, lands on floors and one-way platforms, walks up and down
+slopes and steps (up to its **step height**), and keeps its sprite children facing the way it faces
+(**flip sprites**).
+
+It walks or flies, runs and jumps because something drives it: a **Controller** possesses it, as a 3D
+Character's does, reading the player's input actions or deciding as an AI. Undriven it falls and keeps
+whatever velocity a script gives it.
 
 - **Size** — the box's width and height.
 - **Layer** — the 2D layers it is on; an [Area 2D](#area-2d) sees it if the area looks for one of them.
-- **Controller** — **Platformer** (below), or **None**: it falls by its **gravity** and moves by the velocity
-  a script gives it.
 - **One-way platforms** — on, one-way platforms hold it up; off, it passes through them both ways, as a bat
   or a ghost does.
-- **Player input** — read the **move**, **jump** and **dash** input actions. Off, a script drives it with the
-  same feel (`move`, `jump`, `dash`): an enemy that walks and jumps like the player.
+- **Driven by** — the controller possessing it, or **Add Player Controller** (reads **Move** and **Jump**)
+  and **Add AI Controller**, which add one as its last child.
+- **Movement** — **Walk**, on the ground under gravity, or **Fly**, on both axes with no gravity; its
+  **walk speed**, **run speed** (while the controller sprints), **acceleration**, and for a walker its
+  **deceleration** and **air control** (the share of steering it keeps in the air).
+- **Jump** — **jump height** and **time to apex**, the way a designer thinks, rather than a gravity and a
+  launch speed (both are shown); **fall gravity** above 1 falls faster than it rose, which reads as weight;
+  **coyote time** still jumps just after walking off a ledge, and a press within **jump buffer** before
+  landing jumps on landing. Down and jump on a one-way platform drops through it.
+- **Advanced** — **gravity scale**, which scripts change at run time, and **drive without a controller**.
 
-### Platformer
+### Driving a 2D body
 
-The platformer controller's feel, tuned the way a designer thinks: **jump height** and **time to apex**
-rather than a gravity and a launch speed (both are shown). The jump is higher the longer jump is held
-(**jump cut** is what is kept when it is let go early), still works for **coyote time** after walking off a
-ledge, and a press within **jump buffer** before landing jumps on landing. **Fall gravity** above 1 falls
-faster than it rose, which reads as weight.
+The body owns walking and jumping; a game's own moves are its script's, the way the 3D examples add a roll
+or a lunge over a Character's walking. A dash, a double jump, a wall slide and wall jump, a jump that is
+shorter when the button is let go — Duskwell's warrior has all of them, in `examples/scripts/DuskPlayer.ts`.
 
-The three abilities a metroidvania hands out are toggles, off until the game turns them on:
-
-- **Double jump** — **air jumps** more jumps before landing, each a share of the full one.
-- **Dash** — a straight burst at **dash speed** for **dash time**, gravity off, once in the air.
-- **Wall jump** — pressing into a wall while falling slides down it no faster than **wall slide speed**;
-  jumping kicks off it at **wall jump speed**.
+They go in the script's `onMove2D(dt, substep)`, which runs every physics substep (1/120 s or shorter),
+before the engine steers, so a move comes out the same at any frame rate. The script reads the body
+(`isGrounded`, `onWall`, `canJump`, `jumpRequested`) and writes `velocity2D`; `consumeJump()` takes a jump
+press for its own jump. Return `true` to own the substep: the engine's steering and jump skip it while
+gravity (times **gravity scale**) and collision still run — a dash returns `true` with gravity scale 0.
+See [Characters and controllers](../scripting/characters-and-controllers.md).
 
 ### Collider 2D
 
@@ -320,8 +329,8 @@ and a once-clip can name the clip that follows it (an attack's recovery into idl
 A set can also carry a **state machine** that picks the clip: states that each play a clip, and transitions
 between them on conditions over parameters (an AND/OR tree, as the 3D animation machine's), after an
 **exit time** if given, from one state or from any. A sprite inside a Character Body 2D gets the body's state
-as parameters every frame — `grounded`, `velocityX`, `velocityY`, `speedX`, `onWall`, `wallSliding`, `dashing`,
-`facing`, and the one-frame triggers `jumped`, `landed`, `dashed` — and scripts add their own (`setParam`,
+as parameters every frame — `grounded`, `velocityX`, `velocityY`, `speedX`, `onWall`, `facing`, `isJumping`,
+and the one-frame triggers `jumped`, `landed` — and scripts add their own (`setParam('dashing', true)`,
 `fireTrigger('attack')`).
 
 The **Clips** section lists the set's clips, shows what is playing (and the state that chose it), and

@@ -251,13 +251,18 @@ function attachClassScript(node: Node, Ctor: new (...args: any[]) => any): void 
     const proto = Ctor.prototype;
     const n = node as any;
 
+    // A plain (non-promise) result is passed through: `onMove2D` returns whether it owns the substep.
     const guard = (name: string, fn: Function) => (...args: any[]) => {
         try {
             const result = fn.apply(node, args); // engine calls with the handler's own args; self is `this`
-            if (result && typeof result.then === 'function')
+            if (result && typeof result.then === 'function') {
                 result.catch((e: any) => Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'));
+                return undefined;
+            }
+            return result;
         }
         catch (e) { Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'); }
+        return undefined;
     };
 
     // The script's own class AND every script class it inherits from (`class Hollow extends EnemyBase`,
