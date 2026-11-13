@@ -434,7 +434,33 @@ export interface RenderSettings {
     pointShadowResolution: number;
     pointShadowDistance: number;
     pointShadowBias: number;
+    /**
+     * How a 2D scene (`Scene.dimension`) is drawn. 'flat' (the default; absent = flat): the dedicated 2D
+     * frame -- tiles, sprites, particles and 2D lights in one sorted pass, then the post chain at a fixed
+     * exposure of 1 -- with none of the 3D passes (shadows, G-buffer, deferred lighting, sky, TAA, motion
+     * blur, metering). 'full': the whole 3D frame under the 2D content, for a 2.5D scene that mixes models
+     * and 3D lights into its sprites. A 3D scene ignores it.
+     */
+    pipeline2D?: Pipeline2D;
 }
+
+/** How a 2D scene is drawn. See `RenderSettings.pipeline2D`. */
+export type Pipeline2D = 'flat' | 'full';
+
+/**
+ * The look a scene takes when it is switched to 2D (the editor applies it once, on the switch): authored
+ * pixels shown as authored -- no tone curve over the flat frame's exposure of 1 -- and bloom only from what
+ * is driven past white (a tileset's or sprite's overdrive), not the soft share of everything physical
+ * bloom lends a 3D image, which would haze every pixel edge.
+ */
+export const RENDER_2D_DEFAULTS: Readonly<Partial<RenderSettings>> = {
+    toneMapper: 'none', bloomMode: 'threshold', bloomThreshold: 1.2, bloomKnee: 0.2,
+};
+
+/** The same keys at the engine's 3D defaults: what switching back restores, if the 2D look was never retuned. */
+export const RENDER_3D_DEFAULTS: Readonly<Partial<RenderSettings>> = {
+    toneMapper: 'agx', bloomMode: 'physical', bloomThreshold: 2, bloomKnee: 0.5,
+};
 
 /** The knobs each quality tier sets. `custom` has no entry — it means "don't touch anything". */
 export interface QualityTier {

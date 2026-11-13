@@ -32,3 +32,15 @@ export function stripDimensionData(sceneJson: any, dimension: '2D' | '3D'): numb
   walk(sceneJson)
   return removed
 }
+
+/**
+ * Stamp a serialized scene root with its dimension, which is where the player's engine reads it
+ * (`Scene.dimension` picks the flat 2D frame): '2D' recorded, '3D' removed (absent reads as 3D). A scene
+ * saved before the engine knew its dimension does not carry it itself, so the build writes it from the
+ * project's record.
+ */
+export function stampSceneDimension(sceneJson: any, dimension: '2D' | '3D'): void {
+  if (!sceneJson || typeof sceneJson !== 'object') return
+  if (dimension === '2D') sceneJson.dimension = '2D'
+  else delete sceneJson.dimension
+}

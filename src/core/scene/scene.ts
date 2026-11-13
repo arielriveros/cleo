@@ -98,6 +98,14 @@ interface ScheduledTimer {
 /** How long a despawn dissolves by default during play, in seconds. See `Scene.despawnFadeSeconds`. */
 export const DEFAULT_DESPAWN_FADE_SECONDS = 0.8;
 
+/** What a scene is authored as. See `Scene.dimension`. */
+export type SceneDimension = '2D' | '3D';
+
+/** The dimension a serialized scene root (`json.scene`) records: '2D' only when it says so. */
+export function sceneDimensionOf(sceneJson: { dimension?: unknown } | null | undefined): SceneDimension {
+    return sceneJson?.dimension === '2D' ? '2D' : '3D';
+}
+
 /** The node kinds the scene's typed lists are built from, one bit each (see {@link kindsOf}). */
 const K = {
     LIGHT: 1, MODEL: 2, SPRITE: 4, LANDSCAPE: 8, TILEMAP: 16, LOD_GROUP: 32, CAMERA_RIG: 64, CHARACTER: 128,
@@ -468,6 +476,13 @@ export class Scene {
      * `Node.remove`). 0 makes every despawn immediate. Serialized with the scene.
      */
     public despawnFadeSeconds: number = DEFAULT_DESPAWN_FADE_SECONDS;
+    /**
+     * What the scene IS: a 2D scene (tilemaps, sprites, an orthographic camera) draws through the renderer's
+     * flat 2D frame instead of the deferred 3D one. The editor keeps it in step with the scene's authored
+     * dimension; the published player reads it from the scene JSON. Serialized only when '2D', so a 3D
+     * scene's JSON is unchanged and anything saved before the field existed reads as 3D.
+     */
+    public dimension: SceneDimension = '3D';
     private readonly _fadingNodes = new Set<Node>();
 
     /** @internal Node bookkeeping for a dissolve in progress. */
@@ -1066,6 +1081,7 @@ export class Scene {
                 output.scene.ambientLight = [this._ambientLight[0], this._ambientLight[1], this._ambientLight[2]];
                 if (this.despawnFadeSeconds !== DEFAULT_DESPAWN_FADE_SECONDS)
                     output.scene.despawnFadeSeconds = this.despawnFadeSeconds;
+                if (this.dimension === '2D') output.scene.dimension = '2D';
                 if (this._environmentMap) {
                     try {
                         output.scene.environmentMap = TextureManager.Instance.serializeCubeMap(this._environmentMap);
@@ -1106,6 +1122,7 @@ export class Scene {
         const fade = json.scene?.despawnFadeSeconds;
         this.despawnFadeSeconds = typeof fade === 'number' && Number.isFinite(fade) ? Math.max(0, fade)
             : DEFAULT_DESPAWN_FADE_SECONDS;
+        this.dimension = sceneDimensionOf(json.scene);
         for (const node of Array.from(this._fadingNodes)) node.cancelFade();
         this._fadingNodes.clear();
 

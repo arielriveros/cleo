@@ -125,8 +125,13 @@ Add one from **Sprites ▸ Tilemap** — orthogonal, 1×1 cells, one "Ground" la
 
 **Tilemap** — the node's inspector section: the grid kind — **orthogonal, isometric or hexagonal**,
 with an orientation, offset and side length for hexagons — the cell width and height, the
-[entity layer](#layers) sprites sort against, and the [collision depth](#collision). Painting and the
-layer stack are in [Tilemap mode](#painting).
+[entity layer](#layers) sprites sort against, the **sprite order** on it, and the
+[collision depth](#collision). Painting and the layer stack are in [Tilemap mode](#painting).
+
+- **Sprite order** — **By Y** (the default) suits a top-down map: a sprite sorts by the height of its base,
+  so a character lower on screen draws in front, and against a Y-sorted layer's tile rows. **Side view**
+  suits a platformer: sprites draw over the entity layer's tiles, by [sorting order](#sprites) and then
+  scene order, never by height, so a character jumping past another never slips behind it.
 
 Tilemaps are chunked and effectively infinite: you can paint outward as far as you like without
 declaring a size up front.
@@ -160,8 +165,9 @@ Each layer has its own tileset and its own place in the draw order. Use them to 
 detail, props and anything the player walks behind. Painting always targets the active layer, the
 one selected in the **Layers** panel; **+ Layer** adds one above.
 
-One layer can be marked the **entity layer**, which is the one gameplay treats as containing
-objects rather than scenery.
+One layer is the map's **entity layer**: the draw band sprites and particle systems join. Layers below it
+draw behind them and layers above it in front, and on it they order by the map's
+[sprite order](#tilemaps).
 
 ## Collision
 
@@ -242,8 +248,9 @@ Both support **billboarding** (**Constraints**: `free`, `spherical`, `cylindrica
 
 ### Draw order and batching
 
-Sprites draw in the order above: by sorting order, then by depth (back to front in 3D, by the base's Y in
-a 2D scene). They do not cost a draw call each: sprites that share a **tileset**, a **blending**, the same
+Sprites draw in the order above: by sorting order, then by depth — back to front in 3D; on a tilemap's
+entity layer, by the base's Y or in scene order, as its [sprite order](#tilemaps) says; in a 2D scene
+without a tilemap, by Z and then scene order. They do not cost a draw call each: sprites that share a **tileset**, a **blending**, the same
 **sides** and **wireframe** setting, and whether they are **Lit**, go out together as one draw, and so do
 the editor's icons. Everything else (tint, opacity, the tile or animation frame, exposure weight, follow
 light, soft fade, a lit sprite's light) is the sprite's own and never splits a draw.
@@ -263,6 +270,26 @@ clicking a gap selects what is behind it rather than the map.
 
 2D scenes use an orthographic camera. The wheel zooms, and the viewport's 2D/3D switch changes the
 view without changing the scene's authored dimension.
+
+## The 2D frame
+
+A 2D scene draws through the renderer's **flat 2D frame**: the background, then one sorted and batched
+pass of tilemap layers, sprites and particles, then bloom and the rest of the post chain. None of the 3D
+frame runs — no shadows, lighting pass, sky, fog, ambient occlusion, reflections, temporal antialiasing,
+motion blur or exposure meter — so a 2D game spends its frame on its own art. The exposure is fixed at
+1, so a pixel shows as it was drawn.
+
+Two things follow from that:
+
+- **3D content is not drawn** in a 2D scene: models, 3D lights' light, the sky. A scene that mixes them in
+  (2.5D) sets [Renderer › 2D Scenes › Pipeline](rendering.md#2d-scenes) to **Full 3D**, which draws the
+  whole 3D frame under the 2D content, as every 2D scene drew before.
+- **Lit sprites draw unlit** for now: 2D lights come with their own lighting.
+
+Switching a scene to 2D also gives it the **2D look**: no tone curve (Renderer › Tone and post ›
+Tone mapper **None**), and bloom only from what is driven past white — a tileset's or sprite's
+[overdrive](#atlas) — rather than the soft share of everything a 3D image gets. Switching back to 3D
+restores the 3D look, unless the 2D one was retuned.
 
 ## Switching dimension
 

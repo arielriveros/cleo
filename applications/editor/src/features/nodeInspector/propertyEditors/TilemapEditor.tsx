@@ -83,6 +83,17 @@ export default function TilemapEditor(props: { node: TilemapNode }) {
           </Select>
         </Field>
 
+        <Field className='my-0' labelClassName='w-auto' label='Sprite order' hint='How sprites order on the entity layer. By Y suits a top-down map: lower on screen draws in front. Side view suits a platformer: sprites draw over the layer’s tiles, by sorting order and then scene order, never by height.'>
+          <Select
+            className='w-28'
+            value={tilemap.entitySort}
+            onChange={(e) => { tilemap.entitySort = e.target.value === 'none' ? 'none' : 'y'; commit() }}
+          >
+            <option value='y'>By Y</option>
+            <option value='none'>Side view</option>
+          </Select>
+        </Field>
+
         <Field className='my-0' labelClassName='w-auto' label='Collision depth' hint='Half-depth along Z given to generated colliders. Only square grids merge their solid cells into large collider boxes; isometric and hexagonal maps emit one convex prism per solid cell.'>
           <NumberInput className='w-16' value={tilemap.collisionDepth} step={0.1} min={0.01}
             onChange={(v) => { tilemap.collisionDepth = Math.max(0.01, v); commit() }} />

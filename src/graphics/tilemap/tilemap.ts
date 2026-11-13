@@ -38,6 +38,9 @@ export interface TileOrientation {
     rot90?: boolean;
 }
 
+/** How sprites order inside a tilemap's entity band. See `Tilemap.entitySort`. */
+export type EntitySort = 'y' | 'none';
+
 /** Ceiling on cells a single bucket fill may touch. The map is infinite; a mis-click must not be. */
 export const DEFAULT_FILL_LIMIT = 100000;
 
@@ -55,6 +58,13 @@ export class Tilemap {
      * tiles and nothing else.
      */
     public entityLayer: number = 0;
+    /**
+     * How sprites order inside the entity layer's band. 'y' (the default, a top-down map): by the Y of their
+     * base, so a character lower on screen draws in front, and against a Y-sorted layer's tile rows. 'none'
+     * (a side view): on top of the entity layer's tiles, by sorting order and then scene order, never by
+     * height, so a character jumping past another does not slip behind it.
+     */
+    public entitySort: EntitySort = 'y';
     /** Half-extent along Z given to generated colliders, so a body on the XY plane actually hits them. */
     public collisionDepth: number = 0.5;
 
@@ -613,6 +623,7 @@ export class Tilemap {
         return {
             grid: { ...this._grid },
             entityLayer: this.entityLayer,
+            ...(this.entitySort !== 'y' ? { entitySort: this.entitySort } : {}),
             collisionDepth: this.collisionDepth,
             layers: this._layers.map(l => l.serialize()),
             tilesets,
@@ -622,6 +633,7 @@ export class Tilemap {
     public static deserialize(json: any): Tilemap {
         const tm = new Tilemap(json?.grid ?? { kind: 'orthogonal', cellWidth: 1, cellHeight: 1 });
         tm.entityLayer = json?.entityLayer ?? 0;
+        tm.entitySort = json?.entitySort === 'none' ? 'none' : 'y';
         tm.collisionDepth = json?.collisionDepth ?? 0.5;
         for (const tj of json?.tilesets ?? []) {
             const ts = Tileset.parse(tj);

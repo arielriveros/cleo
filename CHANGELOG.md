@@ -16,6 +16,22 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **The flat 2D frame.** A 2D scene now draws through a frame of its own: the background, one sorted and
+  batched pass of tilemap layers, sprites and particles, then bloom and the post chain, at a fixed exposure
+  of 1 so a pixel shows as it was drawn. None of the 3D frame runs under it any more (shadows, the lighting
+  pass, sky, fog, ambient occlusion, reflections, TAA, motion blur, the exposure meter): on a small test
+  scene the GPU frame went from 1.9 ms to 0.85 ms and nine full-screen passes went away.
+  - *The engine knows.* A scene's dimension is now part of the scene (`Scene.dimension`), written by the
+    editor and stamped on every 2D scene a build ships, so the published player draws it the same way.
+  - *The 2D look.* Switching a scene to 2D gives it no tone curve and bloom only from what an overdrive
+    drives past white. Switching back restores the 3D look unless you retuned it.
+  - *2.5D.* **Renderer › 2D Scenes › Pipeline › Full 3D** draws the whole 3D frame under a 2D scene again,
+    for one that mixes models and 3D lights in. In the flat frame 3D models are not drawn and lit sprites
+    draw unlit, until 2D lights arrive.
+- **Side-view sprite order on tilemaps.** **Tilemap › Sprite order › Side view** (`Tilemap.entitySort`):
+  sprites draw over the entity layer's tiles by sorting order and then scene order, never by height, so in
+  a platformer a character jumping past another no longer slips behind it. **By Y**, the default, keeps the
+  top-down order.
 - **Batched sprites.** Sprites that share a tileset, a blend and their sides now go out as one instanced
   draw call instead of one each, in 2D and in 3D, lit or not, and the editor's icons with them.
   - *The same picture.* The draw order is kept: a sprite joins an earlier batch only where drawing it there
@@ -599,6 +615,13 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Fixes & refactors
 
+- **Particles over a tilemap draw once.** Under a perspective camera a scene with a visible tilemap drew its
+  particles twice (in their own pass and in the 2D pass); under an orthographic one with every tilemap
+  hidden it drew them not at all.
+- **Existing 2D scenes look different.** They now draw through the flat 2D frame at an exposure of 1
+  instead of the 3D frame's metered or authored exposure, through the tone curve they were saved with.
+  Switch the scene's dimension to 3D and back to give it the 2D look, or set **Renderer › 2D Scenes ›
+  Pipeline** to **Full 3D** to keep the old picture.
 - **A sprite at opacity 0 is invisible.** One built or loaded with opacity 0 drew fully opaque until the
   slider was touched: the material it drew with stored `opacity || 1`. The batched pass reads
   `Sprite.opacity` itself.

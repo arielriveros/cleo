@@ -93,6 +93,13 @@ export interface FrameView {
     // The scene being rendered this frame, for per-draw lookups that don't receive it (forward
     // light-probe selection in ForwardPass.renderModel).
     scene: Scene | null;
+    /**
+     * True while the frame is drawn through the flat 2D frame (`Renderer._renderFrame2D`): a 2D scene
+     * (`Scene.dimension`), unless its render settings ask for the full 3D pipeline. Read by the passes
+     * that behave differently there: a fixed exposure of 1 and no metering, no depth snapshot for soft
+     * fades or particles, the post chain's depth and sky effects left out.
+     */
+    flat2D: boolean;
 }
 
 /** A FrameView at its defaults. `camera` is assigned at the top of every frame, before any read. */
@@ -118,6 +125,7 @@ export function createFrameView(): FrameView {
         prevView: mat4.create(),
         hasPrevViewProj: false,
         scene: null,
+        flat2D: false,
     };
 }
 

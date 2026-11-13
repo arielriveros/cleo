@@ -169,8 +169,10 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
             const type = node.sprite?.material?.type;
             add(FORWARD[type] ?? 'basic');
             if (type === 'pbr' || type === 'blinn_phong') add(`${type}Geometry`);
-            // A lit sprite draws with its own program (Sprite.lit); an unlit one with the batched one.
-            add(node.sprite?.lit === true ? 'spriteLit' : 'sprite');
+            // Every sprite can draw through the batched program: an unlit one always, a lit one in a flat 2D
+            // frame (Scene.dimension), which has no 3D lights for it. A lit one in 3D takes its own (Sprite.lit).
+            add('sprite');
+            if (node.sprite?.lit === true) add('spriteLit');
             break;
         }
         case 'landscape':

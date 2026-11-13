@@ -16,7 +16,8 @@ import { EditorSessionsContext, type EditorSessionsContextValue } from "./Editor
 import { useStableActions } from "@cleo/app-kit/utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
-import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, setMovieRender } from "cleo";
+import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, setMovieRender, engineEventBus } from "cleo";
+import { dimensionLookPatch } from "../utils/sceneDimension";
 import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, FOLIAGE_STARTER, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener, RenderSettings } from "cleo";
 import NullImage from '../images/null.png';
@@ -5895,8 +5896,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       ...m,
       scenes: m.scenes.map(s => s.id === sceneId ? { ...s, dimension } : s),
     }));
-    // Changing what the scene IS also changes what you look through, but only for the scene on screen.
-    if (sceneId === openSceneIdRef.current) setViewDimension(dimension);
+    // Changing what the scene IS also changes what you look through, but only for the scene on screen --
+    // and how the renderer draws it (Scene.dimension picks the flat 2D frame), which it saves with.
+    if (sceneId === openSceneIdRef.current) {
+      editorSceneRef.current.dimension = dimension;
+      // ...and its look: the 2D one (authored pixels as drawn) on the way in, the 3D one back if untouched.
+      const renderer = instanceRef.current?.renderer;
+      const look = renderer ? dimensionLookPatch(renderer.getRenderSettings(), dimension) : null;
+      if (renderer && look) {
+        renderer.applyRenderSettings(look);
+        engineEventBus.emit('RENDER_SETTINGS_CHANGED');
+      }
+      setViewDimension(dimension);
+    }
     markTabDirty(SCENE_TAB_ID, 'scene-dimension');
   };
 
@@ -6029,6 +6041,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       clearTabDirty(SCENE_TAB_ID);
       eventEmitter.current.emit('TEXTURES_CHANGED');
       eventEmitter.current.emit('SCENE_CHANGED');
+      // What the scene IS, for the renderer (Scene.dimension): the project's record, which a scene saved
+      // before the engine knew its dimension does not carry in its own JSON.
+      scene.dimension = dimensionOfScene(sceneId);
       // Parsing a scene can replace camera settings/onUpdate handlers; re-apply editor camera controls — with
       // the INCOMING scene's rig, not the outgoing one's. This is what makes the view follow the scene.
       setViewDimension(dimensionOfScene(sceneId));
@@ -6136,6 +6151,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setMainSceneIdState(meta.mainSceneId);
     setOpenSceneIdState(meta.openSceneId);
     openSceneIdRef.current = meta.openSceneId;
+    // The open scene's dimension, for the renderer (Scene.dimension), from the project's record.
+    editorSceneRef.current.dimension = dimensionOfScene(meta.openSceneId);
     scenesLoadedRef.current = true;
     sceneStep.done(meta.scenes.find(s => s.id === meta!.openSceneId)?.name ?? '');
   };
@@ -6659,6 +6676,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     registerTemplates(gd.templates);
     addScriptModuleSources(gd.modules); // adds what is new; an already-evaluated module keeps its state
     scene.parse(gd, true); // gd injects scripts into nodes → compiled here
+    // From the project's record: a scene saved before the engine knew its dimension does not carry it.
+    scene.dimension = dimensionOfScene(id);
     return { scene, render: data.config?.render ?? null };
   };
 
