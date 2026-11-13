@@ -1,7 +1,7 @@
 // Builds every small copy of the Cleo logo from the two masters in applications/app-kit/src/assets/logo:
-// the loading-screen logo and the favicons each app serves from its public/brand/ (the editor the colour
-// logo, the Creator the black-and-white one), the editor's Creator-button icon, and the desktop shell's
-// window/installer icons. The outputs
+// the loading-screen logo and its pixelated copy, and the favicons, which each app serves from its
+// public/brand/ (the editor the colour logo, the Creator the black-and-white one); the editor's
+// Creator-button icon; and the desktop shell's window/installer icons. The outputs
 // are committed, so no build depends on this; run it again (`npm run brand:icons`) when a master changes.
 //
 // Plain Node, no image library: the PNGs are decoded and encoded here with zlib, and resampled with an
@@ -202,7 +202,7 @@ function areaWeights(srcSize, srcStart, srcLen, dstSize, dstStart, dstLen) {
 
 /**
  * Draws the source's `rect` into a transparent `width`×`height` image, scaled to `fit`×`fit` at most
- * (keeping its aspect) and centred. Separable area average: rows first, then columns.
+ * (keeping its aspect) and centred.
  */
 function render(src, rect, width, height, fit) {
     const scale = Math.min(fit / rect.w, fit / rect.h);
@@ -210,7 +210,11 @@ function render(src, rect, width, height, fit) {
     const dx = (width - dw) / 2, dy = (height - dh) / 2;
     const xs = areaWeights(src.width, rect.x, rect.w, width, dx, dw);
     const ys = areaWeights(src.height, rect.y, rect.h, height, dy, dh);
+    return resample(src, xs, ys, width, height);
+}
 
+/** Separable area average by the given column and row taps (areaWeights): rows first, then columns. */
+function resample(src, xs, ys, width, height) {
     const mid = new Float32Array(width * src.height * 4);
     for (let y = 0; y < src.height; y++) {
         for (let x = 0; x < width; x++) {
@@ -248,13 +252,36 @@ function write(rel, bytes) {
     console.log(`cleo: ${rel} (${(bytes.length / 1024).toFixed(1)} KB)`);
 }
 
-/** The loading-screen logo: trimmed to the artwork, long side `long`, with a hairline of transparent margin. */
-function logo(src, rect, long) {
+/** The loading-screen logo's canvas: the artwork at long side `long` plus a hairline of transparent margin. */
+function logoCanvas(rect, long) {
     const scale = long / Math.max(rect.w, rect.h);
     const margin = 2;
-    const w = Math.round(rect.w * scale) + margin * 2, h = Math.round(rect.h * scale) + margin * 2;
+    return { scale, w: Math.round(rect.w * scale) + margin * 2, h: Math.round(rect.h * scale) + margin * 2 };
+}
+
+/** The loading-screen logo: trimmed to the artwork, long side `long`, with a hairline of transparent margin. */
+function logo(src, rect, long) {
+    const { w, h } = logoCanvas(rect, long);
     return encodePng(render(src, rect, w, h, long));
 }
+
+/**
+ * The loading screen's pixelated logo (app-kit feedback/LogoLoader.tsx): the same canvas as `logo()`,
+ * margin included, area-averaged down to `cols` columns. Shown stretched over logo.png's box with
+ * `image-rendering: pixelated`, so it covers exactly what logo.png covers and the two line up.
+ */
+function logoPixels(src, rect, long, cols) {
+    const { scale, w, h } = logoCanvas(rect, long);
+    const rows = Math.round(cols * h / w);
+    // logo.png's canvas in source pixels: render() centres the artwork, so the margin is split evenly.
+    const sx = rect.x - (w - rect.w * scale) / 2 / scale, sy = rect.y - (h - rect.h * scale) / 2 / scale;
+    const xs = areaWeights(src.width, sx, w / scale, cols, 0, cols);
+    const ys = areaWeights(src.height, sy, h / scale, rows, 0, rows);
+    return encodePng(resample(src, xs, ys, cols, rows));
+}
+
+/** The pixelated logo's columns: the loader is 180 CSS px wide, so 6 px blocks at 1x. */
+const PIXEL_COLS = 30;
 
 /** A square icon: the artwork centred with a little padding, which is what launchers and tabs expect. */
 const icon = (src, rect, size) => encodePng(render(src, rect, size, size, size * 0.9));
@@ -267,6 +294,7 @@ const bwRect = alphaBounds(fromFloat(bw));
 for (const [app, src, rect] of [['editor', color, colorRect], ['creator', bw, bwRect]]) {
     const dir = `applications/${app}/public/brand`;
     write(`${dir}/logo.png`, logo(src, rect, 400));
+    write(`${dir}/logo-pixel.png`, logoPixels(src, rect, 400, PIXEL_COLS));
     write(`${dir}/favicon-32.png`, icon(src, rect, 32));
     write(`${dir}/icon-192.png`, icon(src, rect, 192));
 }

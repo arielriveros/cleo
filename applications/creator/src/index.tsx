@@ -6,7 +6,7 @@ import { attachLogStore } from '@cleo/app-kit/feedback/logStore';
 import '@cleo/app-kit/styles/theme.css';
 import './docsSource';
 import App from './app/App';
-import { bootLoad, LOGO } from './app/bootLoad';
+import { bootLoad, LOGO, LOGO_PIXELS } from './app/bootLoad';
 
 // Capture logs (and uncaught errors) from the first frame, before the console panel mounts.
 attachLogStore();
@@ -14,4 +14,4 @@ attachLogStore();
 bootLoad();
 
 const root = document.getElementById('root');
-if (root) ReactDOM.createRoot(root).render(<><App /><LoadingScreen variant='fullscreen' subtitle='Creator' logo={LOGO} /><DialogHost /><ToastStack /></>);
+if (root) ReactDOM.createRoot(root).render(<><App /><LoadingScreen variant='fullscreen' subtitle='Creator' logo={LOGO} logoPixels={LOGO_PIXELS} /><DialogHost /><ToastStack /></>);

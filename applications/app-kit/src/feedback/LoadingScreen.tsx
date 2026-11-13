@@ -6,19 +6,23 @@ import LogoLoader from './LogoLoader'
 import './loadingQueue.css'
 
 // The Cleo loading screen, shared by every app, in one column with no card: the app's logo, which fills
-// as the total bar (weighted across the steps), over the CLEO ENGINE title and the app's name, then the
-// load's title with its total, and its steps as a queue: finished ones slide up and fade out, the running
-// ones show their count and percentage, and the pending ones wait below, fading out past the window's height. Each
-// step's timing goes to the console when the load ends (loadingStore.finish). Fed by loadingStore.ts.
+// as the total bar (weighted across the steps), coming into focus from pixels as it does, over the CLEO
+// ENGINE title and the app's name, then the load's title with its total, and its steps as a queue:
+// finished ones slide up and fade out, the running ones show their count and percentage, and the pending
+// ones wait below, fading out past the window's height. Each step's timing goes to the console when the
+// load ends (loadingStore.finish). Fed by loadingStore.ts.
 
 /**
- * Who is loading: the logo, the subtitle under CLEO ENGINE ('Editor', 'Creator') and an optional version
- * line. Without a logo the total is a plain bar under the steps.
+ * Who is loading: the logo (and its pixelated copy, which the logo fills from), the subtitle under CLEO
+ * ENGINE ('Editor', 'Creator') and an optional version line. Without a logo the total is a plain bar
+ * under the steps.
  */
 export interface LoadingBrand {
   subtitle: string
   versionLabel?: string
   logo?: string
+  /** brand/logo-pixel.png (tools/brandIcons.mjs). Without it the unloaded logo is only dimmed. */
+  logoPixels?: string
 }
 
 function StatusIcon({ status }: { status: LoadStepState['status'] }) {
@@ -93,7 +97,7 @@ function QueueRow({ entry }: { entry: QueueSlot }) {
 }
 
 /** The screen for one load. `variant` decides whether it covers the window or only its host. */
-export function LoadingView({ load, subtitle, versionLabel, logo }: { load: LoadState } & LoadingBrand) {
+export function LoadingView({ load, subtitle, versionLabel, logo, logoPixels }: { load: LoadState } & LoadingBrand) {
   const fraction = loadFraction(load)
   const pct = Math.round(fraction * 100)
   const position = load.variant === 'fullscreen' ? 'fixed inset-0 z-[1000]' : 'absolute inset-0 z-40'
@@ -106,7 +110,7 @@ export function LoadingView({ load, subtitle, versionLabel, logo }: { load: Load
          aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={load.title}>
       <div className='flex w-[340px] max-w-[90%] flex-col items-center gap-5'>
         <div className='flex flex-col items-center gap-2'>
-          {logo && <LogoLoader src={logo} progress={fraction} className='mb-3 w-[180px]' />}
+          {logo && <LogoLoader src={logo} pixels={logoPixels} progress={fraction} className='mb-3 w-[180px]' />}
           <h1 className='text-2xl font-semibold tracking-[0.3em] text-fg'>CLEO ENGINE</h1>
           <span className='text-ui-xs uppercase tracking-[0.3em] text-muted'>{subtitle}</span>
           {versionLabel && <span className='text-ui-xs tabular-nums tracking-[0.2em] text-dim'>{versionLabel}</span>}
@@ -138,7 +142,7 @@ export function LoadingView({ load, subtitle, versionLabel, logo }: { load: Load
  * Shows the current load, if it is of `variant`. Mount one fullscreen host at the app root, and one
  * overlay host inside the viewport for loads that cover only it (opening a scene).
  */
-export default function LoadingScreen({ variant = 'fullscreen', subtitle, versionLabel, logo }: { variant?: LoadState['variant'] } & LoadingBrand) {
+export default function LoadingScreen({ variant = 'fullscreen', subtitle, versionLabel, logo, logoPixels }: { variant?: LoadState['variant'] } & LoadingBrand) {
   const load = useLoad()
   // A load with a show delay renders nothing until the delay is up — re-checked by a timer, since
   // nothing in the store changes just because time passed.
@@ -150,5 +154,5 @@ export default function LoadingScreen({ variant = 'fullscreen', subtitle, versio
     return () => window.clearTimeout(t)
   }, [load?.id, hiddenFor > 0])
   if (!load || load.variant !== variant || hiddenFor > 0) return null
-  return <LoadingView load={load} subtitle={subtitle} versionLabel={versionLabel} logo={logo} />
+  return <LoadingView load={load} subtitle={subtitle} versionLabel={versionLabel} logo={logo} logoPixels={logoPixels} />
 }
