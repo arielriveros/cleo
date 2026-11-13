@@ -3,6 +3,7 @@ import { Node } from "./scene/nodes/node";
 import { isUINodeType } from "./scene/nodes/nodeType";
 import { Camera } from "./camera";
 import { BVH } from "./bvh";
+import { rayBoxIntersection } from "./math";
 
 export interface Ray {
     origin: vec3;
@@ -84,70 +85,6 @@ export class Raycaster {
         };
     }
     
-    /** Ray-sphere intersection test. */
-    private static raySphereIntersection(
-        ray: Ray, 
-        center: vec3, 
-        radius: number
-    ): number | null {
-        const oc = vec3.create();
-        vec3.subtract(oc, ray.origin, center);
-        
-        const a = vec3.dot(ray.direction, ray.direction);
-        const b = 2.0 * vec3.dot(oc, ray.direction);
-        const c = vec3.dot(oc, oc) - radius * radius;
-        
-        const discriminant = b * b - 4 * a * c;
-        
-        if (discriminant < 0) {
-            return null;
-        }
-        
-        const t1 = (-b - Math.sqrt(discriminant)) / (2 * a);
-        const t2 = (-b + Math.sqrt(discriminant)) / (2 * a);
-        
-        if (t1 > 0) return t1;
-        if (t2 > 0) return t2;
-        return null;
-    }
-    
-    /** Ray-box (AABB) intersection test. */
-    private static rayBoxIntersection(
-        ray: Ray, 
-        min: vec3, 
-        max: vec3
-    ): number | null {
-        let tMin = -Infinity;
-        let tMax = Infinity;
-        
-        for (let i = 0; i < 3; i++) {
-            if (Math.abs(ray.direction[i]) < 1e-8) {
-                if (ray.origin[i] < min[i] || ray.origin[i] > max[i]) {
-                    return null;
-                }
-            } else {
-                const t1 = (min[i] - ray.origin[i]) / ray.direction[i];
-                const t2 = (max[i] - ray.origin[i]) / ray.direction[i];
-                
-                const tNear = Math.min(t1, t2);
-                const tFar = Math.max(t1, t2);
-                
-                tMin = Math.max(tMin, tNear);
-                tMax = Math.min(tMax, tFar);
-                
-                if (tMin > tMax) {
-                    return null;
-                }
-            }
-        }
-        
-        if (tMax < 0) {
-            return null;
-        }
-        
-        return tMin > 0 ? tMin : tMax;
-    }
-    
     /** Bounding box for any node, via the node's own getBoundingBox. */
     private static getBoundingBox(node: Node): { min: vec3, max: vec3 } {
         // A node may pick by a box other than its bounds: a DecalNode (its bounds are a projection volume
@@ -189,7 +126,7 @@ export class Raycaster {
             }
 
             const boundingBox = this.getBoundingBox(node);
-            const distance = this.rayBoxIntersection(ray, boundingBox.min, boundingBox.max);
+            const distance = rayBoxIntersection(ray.origin, ray.direction, boundingBox.min, boundingBox.max);
             if (distance === null || distance <= 0 || distance >= maxDistance) continue;
 
             const bvh = precise ? node.getBVH() : null;
@@ -219,7 +156,7 @@ export class Raycaster {
         // Singular transform (e.g. zero scale) → can't invert; fall back to the AABB distance.
         if (!mat4.invert(inv, node.worldTransform)) {
             const box = node.getBoundingBox();
-            return this.rayBoxIntersection(ray, box.min, box.max);
+            return rayBoxIntersection(ray.origin, ray.direction, box.min, box.max);
         }
 
         // Origin transforms as a point, direction as a vector with translation stripped but scale KEPT

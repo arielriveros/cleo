@@ -16,7 +16,8 @@ describe('far foliage translucency', () => {
         const src = shader('geometryFoliageImpostor.wgsl');
         // Through a flat varying: a uniform block read by both stages does not link on GLSL ES 3.0.
         expect(src).toContain('out.translucency = u_transform.u_lodFrame.y;');
-        expect(src).toContain('let translucency = in.translucency;');
+        // Snow lying on the crown lets less light through, as on the mesh levels.
+        expect(src).toContain('let translucency = in.translucency * (1.0 - cover);');
         expect(src).toContain('select(0.0, -translucency, translucency > 0.0)');
     });
 

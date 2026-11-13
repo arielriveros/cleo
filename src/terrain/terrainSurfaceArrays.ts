@@ -5,6 +5,7 @@ import { TexturePacker } from '../graphics/systems/texturePacker';
 import type { PackSpec } from '../graphics/systems/texturePacker';
 import { MAX_TERRAIN_SURFACES } from './terrainLayers';
 import type { TerrainSurfaceData } from './terrainLayers';
+import { clamp01, finiteOr } from '../core/math';
 
 /** The layer-texture sizes a project may choose, smallest first. */
 export const TERRAIN_LAYER_TEXTURE_SIZES = [512, 1024, 2048] as const;
@@ -38,14 +39,12 @@ export function ormPackSpec(s: TerrainSurfaceData): PackSpec {
     const channelOf = (id: string, orm: 0 | 1 | 2): 0 | 1 | 2 => ((uses.get(id) ?? 0) > 1 ? orm : 0);
     return {
         r: ao ? { textureId: ao, channel: channelOf(ao, 0) } : { constant: 1 },
-        g: rough ? { textureId: rough, channel: channelOf(rough, 1) } : { constant: clamp01(s.roughness) },
-        b: metal ? { textureId: metal, channel: channelOf(metal, 2) } : { constant: clamp01(s.metallic) },
+        g: rough ? { textureId: rough, channel: channelOf(rough, 1) } : { constant: clamp01(finiteOr(s.roughness, 0)) },
+        b: metal ? { textureId: metal, channel: channelOf(metal, 2) } : { constant: clamp01(finiteOr(s.metallic, 0)) },
         a: { constant: 1 },
         wrapping: 'repeat',
     };
 }
-
-const clamp01 = (v: number) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
 
 /** The normal+height pack: rgb = tangent-space normal (flat where there is none), a = height (0 where none). */
 export function normalPackSpec(s: TerrainSurfaceData): PackSpec {

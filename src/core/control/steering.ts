@@ -20,7 +20,7 @@
  */
 
 import { vec3 } from "gl-matrix";
-import { clamp, noise1 } from "../math";
+import { clamp, noise1, finiteOr } from "../math";
 import { setMoveWorld } from "./intent";
 import type { ControlIntent } from "./intent";
 
@@ -60,28 +60,24 @@ export const STEERING_DEFAULTS: SteeringTuning = {
     avoidStrength: 1.5,
 };
 
-function num(v: unknown, fallback: number): number {
-    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-}
-
 /** Every field defaulted and clamped, so a partial or junk record passes. Mirrors `locomotionTuning`. */
 export function steeringTuning(over?: Partial<SteeringTuning> | null): SteeringTuning {
     const o = (over ?? {}) as Partial<SteeringTuning>;
     const d = STEERING_DEFAULTS;
-    const arriveRadius = Math.max(0, num(o.arriveRadius, d.arriveRadius));
+    const arriveRadius = Math.max(0, finiteOr(o.arriveRadius, d.arriveRadius));
     return {
-        maxSpeed: Math.max(0, num(o.maxSpeed, d.maxSpeed)),
+        maxSpeed: Math.max(0, finiteOr(o.maxSpeed, d.maxSpeed)),
         arriveRadius,
         // Strictly outside the arrive radius, or the easing band has zero width and arrive becomes a
         // hard stop — which reads as an NPC that slams to a halt at its destination.
-        slowRadius: Math.max(arriveRadius + 0.01, num(o.slowRadius, d.slowRadius)),
-        standoff: Math.max(0, num(o.standoff, d.standoff)),
-        wanderRadius: Math.max(0.01, num(o.wanderRadius, d.wanderRadius)),
-        wanderDistance: Math.max(0, num(o.wanderDistance, d.wanderDistance)),
-        wanderJitter: clamp(num(o.wanderJitter, d.wanderJitter), 0, 3600),
-        separationRadius: Math.max(0, num(o.separationRadius, d.separationRadius)),
-        avoidDistance: Math.max(0, num(o.avoidDistance, d.avoidDistance)),
-        avoidStrength: Math.max(0, num(o.avoidStrength, d.avoidStrength)),
+        slowRadius: Math.max(arriveRadius + 0.01, finiteOr(o.slowRadius, d.slowRadius)),
+        standoff: Math.max(0, finiteOr(o.standoff, d.standoff)),
+        wanderRadius: Math.max(0.01, finiteOr(o.wanderRadius, d.wanderRadius)),
+        wanderDistance: Math.max(0, finiteOr(o.wanderDistance, d.wanderDistance)),
+        wanderJitter: clamp(finiteOr(o.wanderJitter, d.wanderJitter), 0, 3600),
+        separationRadius: Math.max(0, finiteOr(o.separationRadius, d.separationRadius)),
+        avoidDistance: Math.max(0, finiteOr(o.avoidDistance, d.avoidDistance)),
+        avoidStrength: Math.max(0, finiteOr(o.avoidStrength, d.avoidStrength)),
     };
 }
 

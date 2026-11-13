@@ -6,6 +6,7 @@ import { humanoidRigOf, localBindRotation, localRestTranslation } from './animat
 import { Logger } from '../core/logger';
 import { bakeClipCubicSplines } from './samplerBake';
 import { keyIndexAt, sampleQuat, sampleVec3 } from './samplerSample';
+import { mirrorQuat, quatAngle, reflectVec3 } from '../core/math';
 
 // ---------------------------------------------------------------------------
 // Non-destructive clip edits: mirror, in-place bake, additive pose offset, trim, retime.
@@ -185,47 +186,9 @@ function modelBindPosition(skin: Skin, node: number, topo: SkeletonTopology): ve
     return mat4.getTranslation(vec3.create(), modelBindMatrix(skin, node, topo));
 }
 
-/** The angle of a unit quaternion, in radians. `acos(|w|)` is the half-angle. */
-function angleOf(q: quat): number {
-    return 2 * Math.acos(Math.min(1, Math.abs(q[3])));
-}
-
 // ---------------------------------------------------------------------------
 // Mirroring
 // ---------------------------------------------------------------------------
-
-/**
- * Reflect a rotation across the plane normal to `n`, in the frame the quaternion is expressed in.
- *
- * A reflection `M` is improper (det = -1) and has no quaternion of its own, but the conjugate `M R M`
- * (`M` is its own inverse) has det `(-1)(1)(-1) = +1` and IS a rotation: the one about the reflected axis
- * `H a` by the NEGATED angle `-t`. Negating the angle is the same as negating the axis, so:
- *
- *     v' = 2(v.n)n - v      (reflect the vector part, then negate it)   w' = w
- *
- * For n = x that is the familiar `(qx, -qy, -qz, qw)`; for n = y, `(-qx, qy, -qz, qw)`.
- *
- * NOTE the asymmetry with {@link reflectVec3}: a rotation reflects AND negates, a translation only
- * reflects. Getting that wrong is the classic mirror bug where the hips slide the wrong way while the
- * pelvis rotation looks right.
- */
-function mirrorQuat(out: quat, q: quat, n: vec3): quat {
-    const d = q[0] * n[0] + q[1] * n[1] + q[2] * n[2];
-    out[0] = 2 * d * n[0] - q[0];
-    out[1] = 2 * d * n[1] - q[1];
-    out[2] = 2 * d * n[2] - q[2];
-    out[3] = q[3];
-    return out;
-}
-
-/** Householder reflection of a vector across the plane normal to `n`: `v - 2(v.n)n`. No negation. */
-function reflectVec3(out: vec3, v: vec3, n: vec3): vec3 {
-    const d = vec3.dot(v, n) * 2;
-    out[0] = v[0] - d * n[0];
-    out[1] = v[1] - d * n[1];
-    out[2] = v[2] - d * n[2];
-    return out;
-}
 
 /**
  * The rig's left/right axis, measured rather than assumed.
@@ -402,7 +365,7 @@ export function mirrorClip(clip: Animation, skin: Skin, axis?: MirrorAxis, topo?
             const lhs = quat.multiply(quat.create(), frame.parentDst, frame.bindDst);
             const rhs = mirrorQuat(quat.create(), quat.multiply(quat.create(), frame.parentSrc, localBindRotation(skin, ch.targetNodeIndex)), n);
             const e = quat.multiply(quat.create(), quat.invert(quat.create(), lhs), rhs);
-            const deg = angleOf(quat.normalize(e, e)) * 180 / Math.PI;
+            const deg = quatAngle(quat.normalize(e, e)) * 180 / Math.PI;
             if (deg > ANGLE_EPS * 180 / Math.PI && (!asymmetric || deg > asymmetric.deg)) {
                 asymmetric = { bone: skin.nodeNames?.get(ch.targetNodeIndex) ?? String(ch.targetNodeIndex), deg };
             }
@@ -631,7 +594,7 @@ export function bakeInPlace(
             if (n > 1) {
                 const first = quat.fromValues(s.output[0], s.output[1], s.output[2], s.output[3]);
                 const last = quat.fromValues(s.output[(n - 1) * 4], s.output[(n - 1) * 4 + 1], s.output[(n - 1) * 4 + 2], s.output[(n - 1) * 4 + 3]);
-                loopResidual = angleOf(quat.normalize(last, quat.multiply(last, last, quat.invert(quat.create(), first))));
+                loopResidual = quatAngle(quat.normalize(last, quat.multiply(last, last, quat.invert(quat.create(), first))));
             }
         }
     }

@@ -204,9 +204,11 @@ const UI_TYPE_DEFAULTS = {
   uiStack: { direction: 'column', gap: 4, justify: 'start', align: 'stretch', reverse: false },
   uiSpacer: { flex: 1 },
   uiText: {
+    // `letterSpacing` (em) too when set: it is written only when not 0, so it is not a default here.
     text: 'Text', fontSize: 16, fontFamily: '', fontWeight: 400,
     align: 'left', vAlign: 'top', wrap: true, lineHeight: 1.2,
   },
+  uiImage: { textureId: null, fit: 'fill', uvRect: [0, 0, 1, 1] },
   uiButton: {
     label: 'Button', disabled: false, hoverTint: [1, 1, 1, 0.15],
     pressedTint: [0, 0, 0, 0.2], disabledTint: [0.5, 0.5, 0.5, 0.4],

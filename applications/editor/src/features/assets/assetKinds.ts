@@ -13,6 +13,7 @@ import type { AnimControllerAsset } from '../../utils/animationControllers'
 import type { BoneMaskAsset } from '../../utils/boneMasks'
 import type { PoseAsset } from '../../utils/poseAssets'
 import type { ParticleSystemAsset } from '../../utils/particleSystems'
+import type { SequenceAsset } from '../../utils/sequenceAssets'
 import { renderParticleSystemThumbnail } from '../../utils/particleThumbnails'
 import type { SceneMeta } from '../../utils/sceneStorage'
 import {
@@ -55,6 +56,7 @@ export type AssetDeps = {
   audioSources: AudioSourceAsset[]
   soundSamples: SoundSampleAsset[]
   particleSystems: ParticleSystemAsset[]
+  sequences: SequenceAsset[]
   scenes: SceneMeta[]
 
   addMaterial: (m: MaterialAsset) => void
@@ -111,6 +113,9 @@ export type AssetDeps = {
   addParticleSystem: (p: ParticleSystemAsset) => void
   updateParticleSystem: (id: string, p: ParticleSystemAsset) => void
   removeParticleSystem: (id: string) => void
+  addSequence: (q: SequenceAsset) => void
+  updateSequence: (id: string, q: SequenceAsset) => void
+  removeSequence: (id: string) => void
   createScene: (name?: string) => Promise<string>
   renameScene: (sceneId: string, name: string) => void
   deleteScene: (sceneId: string) => Promise<string | null>
@@ -133,11 +138,12 @@ export type AssetDeps = {
   enterTextureEditor: (id?: string) => void
   enterSoundEditor: (id?: string) => void
   enterParticleSystemEditor: (id?: string) => void
+  enterSequenceEditor: (id?: string) => void
 
   emit: (event: string, payload?: any) => void
 }
 
-type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | RigAsset | TilesetAsset | AiBrainAsset | AnimControllerAsset | BoneMaskAsset | PoseAsset | SceneMeta | ImageAsset | TextureAsset | AudioSourceAsset | SoundSampleAsset | ParticleSystemAsset
+type AnyAsset = MaterialAsset | TerrainMaterialAsset | Template | ModelAsset | ScriptAsset | AnimationFieldAsset | AnimationAsset | RigAsset | TilesetAsset | AiBrainAsset | AnimControllerAsset | BoneMaskAsset | PoseAsset | SceneMeta | ImageAsset | TextureAsset | AudioSourceAsset | SoundSampleAsset | ParticleSystemAsset | SequenceAsset
 
 /** The asset record behind an entry, or undefined. Every kind has one now, textures included. */
 export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsset | undefined {
@@ -161,6 +167,7 @@ export function findAsset(kind: AssetKind, id: string, deps: AssetDeps): AnyAsse
     case 'audioSource': return deps.audioSources.find(a => a.id === id)
     case 'soundSample': return deps.soundSamples.find(s => s.id === id)
     case 'particleSystem': return deps.particleSystems.find(p => p.id === id)
+    case 'sequence': return deps.sequences.find(q => q.id === id)
   }
 }
 
@@ -314,6 +321,11 @@ export function renameAsset(kind: AssetKind, id: string, stem: string, deps: Ass
       if (a) deps.updateSoundSample(id, { ...a, name: stem })
       break
     }
+    case 'sequence': {
+      const a = deps.sequences.find(q => q.id === id)
+      if (a) deps.updateSequence(id, { ...a, name: stem, sequence: { ...a.sequence, name: stem } })
+      break
+    }
     case 'particleSystem': {
       const a = deps.particleSystems.find(p => p.id === id)
       if (a) deps.updateParticleSystem(id, { ...a, name: stem })
@@ -339,6 +351,7 @@ export function deleteAsset(kind: AssetKind, id: string, deps: AssetDeps): void 
     case 'boneMask': deps.removeBoneMask(id); break
     case 'pose': deps.removePoseAsset(id); break
     case 'particleSystem': deps.removeParticleSystem(id); break
+    case 'sequence': deps.removeSequence(id); break
     case 'scene': {
       void deps.deleteScene(id)
       break
@@ -504,6 +517,13 @@ export function duplicateAsset(kind: AssetKind, id: string, stem: string, deps: 
       deps.addPoseAsset({ ...deepClone(a), id: newId, name: stem })
       return newId
     }
+    case 'sequence': {
+      const a = deps.sequences.find(q => q.id === id)
+      if (!a) return null
+      // Slot bindings (`nodeId`) carry over: the copy animates the same nodes until it is edited.
+      deps.addSequence({ ...deepClone(a), id: newId, name: stem, sequence: { ...deepClone(a.sequence), name: stem } })
+      return newId
+    }
     case 'particleSystem': {
       const a = deps.particleSystems.find(p => p.id === id)
       if (!a) return null
@@ -651,6 +671,8 @@ export async function regenerateThumbnail(
     // The audio kinds have no picture at all; their cards carry the kind glyph.
     case 'audioSource':
     case 'soundSample':
+    // A sequence is a timeline over a scene it does not own: its card shows the kind glyph.
+    case 'sequence':
       return false
   }
 }
@@ -673,6 +695,7 @@ export function openAsset(kind: AssetKind, id: string, deps: AssetDeps): boolean
     case 'texture': deps.enterTextureEditor(id); return true
     case 'soundSample': deps.enterSoundEditor(id); return true
     case 'particleSystem': deps.enterParticleSystemEditor(id); return true
+    case 'sequence': deps.enterSequenceEditor(id); return true
     // Raw bytes have nothing to author, so an image opens the preview pane instead. What makes an image
     // usable — wrap, filters, mipmaps — belongs to a texture, and that is what has an editor.
     case 'image': return false
@@ -721,6 +744,8 @@ export function deleteConsequence(kind: AssetKind): string {
     case 'pose': return 'states holding its poses hold nothing, and clip pose offsets using them are skipped'
     // Embedded like a brain: the node keeps the effect it copied and goes on playing it.
     case 'particleSystem': return 'particle systems keep the effect they copied, but stop tracking this asset'
+    // Embedded like an effect: a Sequence node keeps the timeline it copied and goes on playing it.
+    case 'sequence': return 'sequence nodes keep the timeline they copied, but stop tracking this asset'
     case 'scene': return 'the project switches to another scene'
     case 'texture': return 'materials and tilesets using it show no texture'
     case 'image': return 'textures sourcing it lose their pixels'
@@ -746,6 +771,7 @@ export function dragPayload(kind: AssetKind, assetId: string): [string, string][
     case 'boneMask': return [['text/cleo-bone-mask', assetId]]
     case 'pose': return [['text/cleo-pose', assetId]]
     case 'particleSystem': return [['text/cleo-particle-system', assetId]]
+    case 'sequence': return [['text/cleo-sequence', assetId]]
     case 'scene': return [['text/cleo-scene', assetId], ['text/plain', assetId]]
     // Deliberately NOT the texture payload: dropping raw bytes into a material slot must not appear to
     // work, because a slot needs a texture's sampling, not just an image.
@@ -814,6 +840,8 @@ const GLYPHS: Record<AssetKind | 'folder', Glyph> = {
   pose: { stroke: '#c9b28a', body: `<circle cx="12" cy="4.5" r="2" fill="#8a7350" fill-opacity=".5"/><path d="M12 6.5v7M12 9l-5-2.5M12 9l4.5 3.5M12 13.5l-4 6.5M12 13.5l4 6" stroke-opacity=".85"/>` },
   // Sparks rising from one point — the scene tree's ParticlesIcon, in a warm ember tint.
   particleSystem: { stroke: '#f0a35a', body: `<circle cx="12" cy="19.5" r="1.6" fill="#f0a35a" stroke="none"/><circle cx="7" cy="11" r="1.5"/><circle cx="12" cy="7" r="1.9" fill="#a8541c" fill-opacity=".35"/><circle cx="17" cy="10.5" r="1.4"/><circle cx="9.5" cy="4" r="0.9" fill="#f0a35a" stroke="none"/><circle cx="15.5" cy="4.5" r="1" fill="#f0a35a" stroke="none"/><path d="M12 17.5 7.8 12.6M12 17.5V9.2M12 17.5l4.3-5.5" stroke-dasharray="1.6 1.6" stroke-opacity=".75"/>` },
+  // A sequence: a film strip, the cinematic laid out over time.
+  sequence: { stroke: '#f5a95c', body: `<rect x="3" y="5" width="18" height="14" rx="2" fill="#b4621f" fill-opacity=".2"/><path d="M3 9h18M3 15h18M7.5 5v4M12 5v4M16.5 5v4M7.5 15v4M12 15v4M16.5 15v4"/>` },
   tileset: { stroke: '#7ec8a9', body: `<rect x="3.5" y="3.5" width="17" height="17" rx="2" fill="#2f7a63" fill-opacity=".2"/><path d="M9 3.5v17M14.5 3.5v17M3.5 9h17M3.5 14.5h17" stroke-opacity=".55"/><rect x="9" y="9" width="5.5" height="5.5" fill="#7ec8a9" fill-opacity=".45" stroke="none"/>` },
   // A raw picture: the photo frame, unadorned. Kept as the old texture glyph so an existing project's
   // image cards look like the texture cards they were.

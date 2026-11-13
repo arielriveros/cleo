@@ -27,7 +27,8 @@ struct ParticleDrawVertex {
     u_flipbook: vec4<f32>,        // columns, rows, frames, mode (0 over life, 1 fps)
     u_flipbook2: vec4<f32>,       // fps, cycles, random start, frame blend
     u_speedRange: vec4<f32>,      // colour-by-speed min, max, size-by-speed min, max
-    u_stretchRange: vec4<f32>,    // velocity stretch multiplier: min, max (random per particle), 0, 0
+    u_stretchRange: vec4<f32>,    // velocity stretch multiplier: min, max (random per particle), shutter (s), min width (px)
+    u_viewport: vec4<f32>,        // the target's width, height (px), 0, 0
 };
 @group(1) @binding(0) var<uniform> u_draw: ParticleDrawVertex;
 
@@ -50,6 +51,8 @@ struct ParticleDrawFragment {
 const SURFACE_NORMAL_MAP: u32 = 1u;
 const SURFACE_ORM_MAP: u32    = 2u;
 const SURFACE_PBR: u32        = 4u;
+// A raindrop (render `shading: 'rain'`): the light round it and a glint, not a lit card.
+const SURFACE_RAIN: u32       = 8u;
 const PARTICLE_PI: f32 = 3.14159265;
 /** The env cube's mip at roughness 1, as pbrForward's MAX_REFLECTION_LOD. */
 const PARTICLE_REFLECTION_LOD: f32 = 4.0;
@@ -295,7 +298,20 @@ fn shadeParticle(in: ParticleVaryings) -> vec4<f32> {
     var rgb = color.rgb * u_frag.u_fragParams.w;
     let surface = u_frag.u_surface;
     let flags = u32(surface.w + 0.5);
-    if (u_frag.u_fragMask.y > 0.5 && (flags & SURFACE_PBR) == 0u) {
+    if (u_frag.u_fragMask.y > 0.5 && (flags & SURFACE_RAIN) != 0u) {
+        // A raindrop is a tiny lens: what reaches the eye through it is the light round it — mostly the
+        // sky's, bent toward the eye — so it is about as bright as the ambient it falls through: visible
+        // against a dark wood, all but lost against a bright sky, never a milky white stick. No Lambert
+        // term (a drop does not scatter sunlight diffusely), but a tight forward glint where the sun or the
+        // strongest lamp is behind it, and a small reflection of them off its face.
+        let view = normalize(u_frag.u_viewPos.xyz - in.worldPos);
+        let sunCos = clamp(dot(-view, u_frag.u_sunDir.xyz), 0.0, 1.0);
+        let keyCos = clamp(dot(-view, u_frag.u_keyDir.xyz), 0.0, 1.0);
+        let sunGlint = pow(sunCos, 24.0) * 2.0 + pow(sunCos, 4.0) * 0.12 + 0.02;
+        let keyGlint = pow(keyCos, 16.0) * 3.0 + pow(keyCos, 3.0) * 0.25 + 0.04;
+        rgb = rgb * (u_frag.u_ambient.rgb * 1.15
+                     + (u_frag.u_sunColor.rgb * sunGlint + u_frag.u_keyColor.rgb * keyGlint) * 0.31830988618);
+    } else if (u_frag.u_fragMask.y > 0.5 && (flags & SURFACE_PBR) == 0u) {
         // Lit: the scene's light, as surfaces take it — the ambient and sky fill, then the key light and the
         // strongest local light through the diffuse 1/π. Half-Lambert rather than Lambert: particles are
         // thin and back-lit as often as not, so a hard term would leave half of every cloud black.

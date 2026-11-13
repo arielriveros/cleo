@@ -24,6 +24,7 @@ import type {
     BindingSource, DeviceKind, GamepadAxis, GamepadButton, ModifierSource, MouseButton, PointerAxis,
     StateFlag, TouchGesture,
 } from "./inputSources";
+import { clamp, finiteOr } from "../core/math";
 
 // ---------------------------------------------------------------------------------------------------
 // Vocabulary
@@ -386,14 +387,6 @@ export const DEFAULT_INPUT_MAP: InputMap = {
 // Tolerant readers
 // ---------------------------------------------------------------------------------------------------
 
-function num(v: unknown, fallback: number): number {
-    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-}
-
-function clamp(v: number, min: number, max: number): number {
-    return v < min ? min : v > max ? max : v;
-}
-
 function oneOf<T extends string>(v: unknown, allowed: readonly T[], fallback: T): T {
     return typeof v === 'string' && (allowed as readonly string[]).includes(v) ? v as T : fallback;
 }
@@ -491,25 +484,25 @@ export function normalizeProcessor(raw: unknown): Processor | null {
         case 'deadzone':
         case 'radialDeadzone': {
             const base = defaultProcessor(kind as 'deadzone') as Extract<Processor, { kind: 'deadzone' }>;
-            const min = clamp(num(p.min, base.min), 0, 0.99);
+            const min = clamp(finiteOr(p.min, base.min), 0, 0.99);
             return {
                 kind: kind as 'deadzone' | 'radialDeadzone',
                 min,
                 // Never at or below min: the rescale divides by (max - min) and would blow up or invert.
-                max: clamp(num(p.max, base.max), min + 0.01, 1),
+                max: clamp(finiteOr(p.max, base.max), min + 0.01, 1),
             };
         }
         case 'scale':
             // 1000x is already absurd for a sensitivity; beyond it a typo silently makes a game unplayable.
-            return { kind: 'scale', factor: clamp(num(p.factor, 1), -1000, 1000) };
+            return { kind: 'scale', factor: clamp(finiteOr(p.factor, 1), -1000, 1000) };
         case 'invert':
             return { kind: 'invert', x: p.x === true, y: p.y === true };
         case 'curve':
             // Below 0.1 the response is effectively binary; above 5 the first half of the travel is dead.
-            return { kind: 'curve', exponent: clamp(num(p.exponent, 1), 0.1, 5) };
+            return { kind: 'curve', exponent: clamp(finiteOr(p.exponent, 1), 0.1, 5) };
         case 'smooth':
             // A second of smoothing on input is already unusably mushy.
-            return { kind: 'smooth', seconds: clamp(num(p.seconds, 0.05), 0, 1) };
+            return { kind: 'smooth', seconds: clamp(finiteOr(p.seconds, 0.05), 0, 1) };
         case 'normalize':
             return { kind: 'normalize' };
     }
@@ -592,9 +585,9 @@ export function normalizeAction(raw: unknown): InputAction | null {
         // does nothing. Never 0: a press point of 0 makes an untouched analog trigger permanently held.
         // Written only when it differs from the default, so an untouched action serializes no field and
         // a round-trip through JSON comes back byte-identical (see isDefaultInputMap).
-        const pressPoint = clamp(num(a.pressPoint, DEFAULT_PRESS_POINT), 0.01, 1);
+        const pressPoint = clamp(finiteOr(a.pressPoint, DEFAULT_PRESS_POINT), 0.01, 1);
         if (pressPoint !== DEFAULT_PRESS_POINT) out.pressPoint = pressPoint;
-        const hold = clamp(num(a.holdSeconds, 0), 0, 10);
+        const hold = clamp(finiteOr(a.holdSeconds, 0), 0, 10);
         if (hold > 0) out.holdSeconds = hold;
     }
     return out;
@@ -628,12 +621,12 @@ export function normalizeVirtualControl(raw: unknown): VirtualControl | null {
     const out: VirtualControl = {
         id,
         kind,
-        x: clamp(num(c.x, 0.5), 0, 1),
-        y: clamp(num(c.y, 0.5), 0, 1),
+        x: clamp(finiteOr(c.x, 0.5), 0, 1),
+        y: clamp(finiteOr(c.y, 0.5), 0, 1),
         // Below ~2% of viewport height nothing is hittable by a thumb; above 40% it covers the game.
-        radius: clamp(num(c.radius, 0.1), 0.02, 0.4),
+        radius: clamp(finiteOr(c.radius, 0.1), 0.02, 0.4),
     };
-    if (kind === 'stick') out.deadzone = clamp(num(c.deadzone, 0.12), 0, 0.9);
+    if (kind === 'stick') out.deadzone = clamp(finiteOr(c.deadzone, 0.12), 0, 0.9);
     const label = str(c.label);
     if (kind === 'button' && label) out.label = label;
     return out;
@@ -641,16 +634,16 @@ export function normalizeVirtualControl(raw: unknown): VirtualControl | null {
 
 export function normalizeTouchConfig(raw: unknown): TouchGestureConfig {
     const t = (raw && typeof raw === 'object' ? raw : {}) as Partial<TouchGestureConfig>;
-    const tapMaxSeconds = clamp(num(t.tapMaxSeconds, DEFAULT_TOUCH_CONFIG.tapMaxSeconds), 0.05, 2);
+    const tapMaxSeconds = clamp(finiteOr(t.tapMaxSeconds, DEFAULT_TOUCH_CONFIG.tapMaxSeconds), 0.05, 2);
     return {
         tapMaxSeconds,
-        tapMaxPixels: clamp(num(t.tapMaxPixels, DEFAULT_TOUCH_CONFIG.tapMaxPixels), 1, 200),
-        doubleTapMaxSeconds: clamp(num(t.doubleTapMaxSeconds, DEFAULT_TOUCH_CONFIG.doubleTapMaxSeconds), 0.05, 2),
+        tapMaxPixels: clamp(finiteOr(t.tapMaxPixels, DEFAULT_TOUCH_CONFIG.tapMaxPixels), 1, 200),
+        doubleTapMaxSeconds: clamp(finiteOr(t.doubleTapMaxSeconds, DEFAULT_TOUCH_CONFIG.doubleTapMaxSeconds), 0.05, 2),
         // Must exceed tapMaxSeconds, or every tap would also be a long press and the two would fight.
         longPressSeconds: Math.max(tapMaxSeconds + 0.01,
-            clamp(num(t.longPressSeconds, DEFAULT_TOUCH_CONFIG.longPressSeconds), 0.05, 5)),
-        dragMinPixels: clamp(num(t.dragMinPixels, DEFAULT_TOUCH_CONFIG.dragMinPixels), 0, 200),
-        pinchMinPixels: clamp(num(t.pinchMinPixels, DEFAULT_TOUCH_CONFIG.pinchMinPixels), 0, 200),
+            clamp(finiteOr(t.longPressSeconds, DEFAULT_TOUCH_CONFIG.longPressSeconds), 0.05, 5)),
+        dragMinPixels: clamp(finiteOr(t.dragMinPixels, DEFAULT_TOUCH_CONFIG.dragMinPixels), 0, 200),
+        pinchMinPixels: clamp(finiteOr(t.pinchMinPixels, DEFAULT_TOUCH_CONFIG.pinchMinPixels), 0, 200),
     };
 }
 

@@ -141,7 +141,9 @@ export class MaterialBinder {
      * samplers belong to the bind group (`BindGroupCache.customGroup`).
      */
     public applyCustom(material: CustomMaterial): void {
-        this._shaderManager.setUniform('u_time', performance.now() * 0.001);
+        // The render clock (FrameView.windTime): the wind's and the water ripples' (WaterVolumeNode) clock,
+        // which runs at the game's speed when the project asks effects to follow it.
+        this._shaderManager.setUniform('u_time', this._view.windTime);
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
         if (material.renderMode === 'forward') {
             // The scene helpers' inputs (customShaders.ts FORWARD_SCENE_BODY). Set per draw: both names

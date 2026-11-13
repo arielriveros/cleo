@@ -302,6 +302,7 @@ function PayloadFields({ node, onChange }: { node: UINode, onChange: () => void 
             </PropertyRow>
             <PropertyRow label='Wrap'><Toggle checked={node.wrap} onChange={v => { node.wrap = v; onChange(); }} /></PropertyRow>
             <PropertyRow label='Line height'><NumberInput min={0} step={0.1} value={node.lineHeight} onChange={v => { node.lineHeight = v; onChange(); }} /></PropertyRow>
+            <PropertyRow label='Letter spacing'><NumberInput min={-0.5} max={2} step={0.05} value={node.letterSpacing} onChange={v => { node.letterSpacing = v; onChange(); }} /></PropertyRow>
         </PropertyTable>
     );
 

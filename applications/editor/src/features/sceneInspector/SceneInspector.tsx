@@ -7,6 +7,7 @@ import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
   CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, ExposureVolumeIcon, GiVolumeIcon, VolumetricFogIcon, SkyboxIcon, SkyLightIcon, CloudsIcon, WindIcon, WeatherIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
+  SequenceIcon,
 } from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
@@ -31,6 +32,7 @@ const TYPE_ICONS: Record<string, () => JSX.Element> = {
   // One glyph for both modes: the tree shows what a node IS, and ambient vs spatial is a property of it.
   sound: SoundIcon,
   particleSystem: ParticlesIcon, forceField: ForceFieldIcon, cloth: ClothIcon, waterVolume: WaterVolumeIcon, occlusionVolume: OcclusionVolumeIcon,
+  sequence: SequenceIcon,
 };
 
 
@@ -251,7 +253,10 @@ export default function SceneInspector() {
 
   // The scene tab's root row is labelled from SceneMeta; the engine node stays named 'root' because
   // Scene.parse re-finds the root by that literal name. Display only.
-  const sceneName = activeTab.kind === 'scene' ? sceneList.find(s => s.id === openSceneId)?.name : undefined;
+  // A Sequencer tab shows the same open scene, so it shows the same name.
+  const sceneName = activeTab.kind === 'scene' || activeTab.kind === 'sequence' ? sceneList.find(s => s.id === openSceneId)?.name : undefined;
+  // Sequencer mode keys nodes and never restructures the scene: selection (and the eye, which keys) only.
+  const structureLocked = editorMode === 'sequence';
 
   // In template mode the inspector is rooted at the template node itself, so the editor camera/light
   // (siblings under the real scene root) stay hidden. Mesh mode keeps the real scene root: its root row is
@@ -342,7 +347,7 @@ export default function SceneInspector() {
   // Rows stay draggable even when they cannot be re-parented (a node with a body, the root): the same
   // gesture drops a node onto the Assets explorer to save it as a template. What a move may do is here.
   const handleMove = ({ dragIds, parentId, index }: { dragIds: string[]; parentId: string | null; index: number }) => {
-    if (isPlayMode) return;
+    if (isPlayMode || structureLocked) return;
     const parent = parentId ? editorScene?.getNodeById(parentId) : undefined;
     if (!parent) return; // a drop past the root row would make a sibling of the scene root
     if (editorMode === 'scene' && isWithinTemplateInstance(parent)) {
@@ -383,6 +388,7 @@ export default function SceneInspector() {
   // --- rename / delete ------------------------------------------------------------------------------
 
   const handleRename = ({ id, name }: { id: string; name: string }) => {
+    if (structureLocked) return;
     const node = editorScene?.getNodeById(id);
     if (!node || name === node.name) return;
     const problem = validateNodeName(name);
@@ -400,7 +406,7 @@ export default function SceneInspector() {
   };
 
   const handleDelete = ({ ids }: { ids: string[] }) => {
-    if (isPlayMode) return;
+    if (isPlayMode || structureLocked) return;
     for (const id of ids) {
       if (id === rootId) continue;
       const node = editorScene?.getNodeById(id);
@@ -428,7 +434,7 @@ export default function SceneInspector() {
    * not own and throws "cannot hover while not dragging" on release.
    */
   const handleDragOver: React.DragEventHandler<HTMLDivElement> = (event) => {
-    if (!nativeDrag(event.dataTransfer.types)) return;
+    if (structureLocked || !nativeDrag(event.dataTransfer.types)) return;
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = 'copy';
@@ -436,7 +442,7 @@ export default function SceneInspector() {
 
   const handleDrop: React.DragEventHandler<HTMLDivElement> = (event) => {
     const kind = nativeDrag(event.dataTransfer.types);
-    if (!kind) return;
+    if (!kind || structureLocked) return;
     event.preventDefault();
     event.stopPropagation();
     // A Simulate session shows the running scene here: attaching a script writes the persistent script map
@@ -478,6 +484,7 @@ export default function SceneInspector() {
     if ((event.target as HTMLElement).closest('input')) return;
     if (event.key !== 'Delete' && event.key !== 'F2') return;
     event.preventDefault();
+    if (structureLocked) { event.stopPropagation(); return; }
     event.stopPropagation();
     if (event.key === 'Delete') {
       const ids = Array.from(tree.selectedIds);
@@ -491,6 +498,12 @@ export default function SceneInspector() {
   return (
     <div className='flex flex-col text-fg bg-surface-raised w-full h-full min-h-[40px] overflow-hidden'
          onDragOverCapture={handleDragOver} onDropCapture={handleDrop} onKeyDownCapture={handleKeyDown}>
+      {structureLocked && (
+        <div className='shrink-0 bg-sequence/20 px-2 py-1 text-ui-sm text-sequence'
+          title="Sequencer mode keys nodes; it doesn't add, remove, move or rename them. Do that from the scene tab.">
+          Select a node to key it. Drag one onto the Sequencer to give it a slot.
+        </div>
+      )}
       <div className='shrink-0 px-[5px] py-1'>
         <TextInput
           value={filter} placeholder='Filter nodes'
@@ -515,8 +528,8 @@ export default function SceneInspector() {
             onMove={handleMove}
             onRename={handleRename}
             onDelete={handleDelete}
-            disableEdit={(d) => isPlayMode || d.id === rootId}
-            disableDrop={({ parentNode }) => isPlayMode || !!parentNode.data.templateId || !editorScene?.getNodeById(parentNode.id)}
+            disableEdit={(d) => isPlayMode || structureLocked || d.id === rootId}
+            disableDrop={({ parentNode }) => isPlayMode || structureLocked || !!parentNode.data.templateId || !editorScene?.getNodeById(parentNode.id)}
             renderCursor={DropCursor}
             className='outline-none'>
             {SceneNodeRow}

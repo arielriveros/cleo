@@ -474,8 +474,142 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - `tools/valley/split.ts` does the split and prunes each project to the assets it reaches, through the
     editor's own reference edges and the names scripts use. `build.mjs` runs it after a build;
     `bakeGI.cjs` bakes an example's own scenes by default.
+- **Cinematic sequences.** A new **Sequence** node plays a cinematic: a timeline of tracks that fly a
+  camera along a path, cut between cameras, animate properties and call script methods at given moments.
+  - *Tracks.* A **path** moves its subject along a centripetal Catmull-Rom spline at constant speed,
+    looking ahead, at a point, at a node or along a second path, with roll and field of view. The
+    **camera cut** switches the rendered camera. A **property** track drives any dotted path on a node (a UI
+    fade, a script field such as the time of day), the renderer's settings or the `Game` facade
+    (`timeScale`). An **event** track calls a method on the Sequence node's own script (the director) or
+    on a bound node. A **presets** track blends a Volumetric Clouds, Wind or Weather node from one of its
+    own presets to the next, each section starting where the last one ended. A **foliage** track changes a
+    landscape's layers live: their density, their draw and impostor distances, their shadows.
+  - *Gameplay tracks.* A **script** section calls a method of the director or of a bound node with a
+    context (`SequenceScriptContext`: enter, every frame inside, exit, on stop too), and a **hold** stops
+    the playback at its end until `ctx.resume()`. An **animation** track plays a clip on a character's
+    animator as an action, its clip time locked to the timeline (exact on a seek, drift-corrected in
+    playback so the clip's events fire) and exempt from animation LOD. An **audio** track plays a sound node
+    from where the timeline is, faded by the eases and a volume curve, at the sequence's speed. A **spawn**
+    track instantiates a template while its section lasts, and can put it in a slot for the other tracks. A
+    **possess** track has a controller possess a pawn for the section. `AnimationActionHandle.seek` and
+    `time`, and `SoundNode.play({ offset })`, `seek`, `playhead`, `duration`, `gain`, `playbackRate` are
+    new to scripts too.
+  - *Sequences are assets.* A `.sequence` (Assets ▸ **+ Add ▾ Sequence**) is played by a Sequence node,
+    which keeps a copy of it the way a Particle System node keeps its effect: saving the asset updates the
+    nodes playing it, a scene opened or published later picks it up, and a published game ships no library.
+    Drop one in the viewport to add a node playing it, or on a node's **Timeline** slot.
+  - *Slots.* A sequence names its actors by slot. A slot is bound to the node it was authored against, falls
+    back to that node's name path in another scene, and a Sequence node can rebind it to a node of its own
+    scene, so one sequence can drive other actors.
+  - *It owns what it drives.* Every target is captured the first time the sequence writes it and
+    `stop()` puts all of it back. A section eases in over the value it found, and holds or restores its
+    target when the timeline leaves it.
+  - *Scripts.* `Game.playSequence(name, { bindings })` and `node.play()`, `pause`, `resume`, `seek`,
+    `skip`, `stop`, `finished`, `onFinished`, `onEvent`. Sequences run before every `onUpdate`, so a camera
+    they move renders that frame. Player contract 28.
+  - *Sequencer mode.* Opening a sequence opens it in a tab of its own over the scene you have open: the same
+    viewport, scene tree and node inspector as Scene mode, light orange panel headers, and the Sequencer
+    along the bottom (the only mode that shows it). Every change you make to a node there, in the inspector,
+    with the gizmo or on the tree's eye, is a key at the playhead: the first one of a property also keys
+    where it was at 0 s, so a cube moved at 2 s glides there from the start. The scene itself never changes,
+    and what can't be a key (adding, deleting, moving or renaming nodes, linking assets) isn't offered there.
+    A **Keys** card lists what is animated on the selected node, with jumps between its keys, and **Key
+    property…** keys any property the sequence can drive. Each tab keeps its unsaved keys across tab
+    switches, undoes them one by one, and Play plays them unsaved.
+  - *The Sequencer panel* edits the tab's sequence like a video editor: a ruler that
+    scrubs, slots and their tracks, sections to drag, trim and ease, keys and events to retime, a razor (S),
+    markers (M), Ctrl+D to duplicate, Space and J/K/L to play. The details column edits what is selected:
+    a path's points (or **Add from viewport**), its look target and timing, a property's keys (**Key current
+    value**), an event's method and arguments, a script's method, arguments and hold, an animation's clip,
+    start and speed, a sound's offset and volume keys, a spawn's template, placement and slot, a slot's
+    binding. A razor keeps a clip or a sound where it was on the timeline. Every edit is one undo step, and
+    a drag records once.
+  - *Previewing in the editor.* Scrubbing shows the sequence in the open scene, with the viewport kept on
+    the editor camera and the inspector reading the playhead; **Pilot** looks through the shot's camera.
+    Saving, Play, Simulate and a tab or 2D/3D switch put the scene back first, so a preview is never saved.
+    **Export** / **Import** read and write `.sequence.json`.
+  - *Render Movie.* **Render…** on the Sequencer's toolbar films the sequence to an MP4 (H.264, HEVC, AV1 or
+    VP9, whichever this machine encodes, at a constant quality) or to lossless PNG frames, at any resolution
+    and frame rate, with its sound. It is rendered offline: the game is stepped exactly one frame at a time
+    and each frame drawn for as long as it takes, so the movie has no frame-time lag whatever the machine.
+    Each frame averages its **Samples** (jittered for anti-aliasing and, with a **Shutter**, spread through
+    the frame for real motion blur), its light is settled before it is filmed (GI, probes, the sky, the
+    exposure), and nothing pops in (every shader built, every texture loaded). The game UI is drawn in at the
+    movie's resolution, and the sound is recorded as it is played and mixed offline through its effects,
+    buses and 3D placement. `Game.movieRender` tells a game which sequence is being filmed; the Valley's
+    start menu goes straight into the tour.
+- **The Valley opens on a start menu: a cinematic tour, or Free mode.** The tour is a 405 s sequence over
+  every part of the valley.
+  - *Act I.* The campfire, the main road, the hamlet, the Old House and the Granary in 30 s. Then the
+    meadow, its grass thinning to a tenth and filling in again, and the forest, its draw distance closing in
+    to 70 m and opening out again.
+  - *Act II.* A dolly down the Long House in the early afternoon: the sun comes in through its side door
+    and lays a patch on a rug before it that the GI bounces round the room, until the western ridge's
+    shadow takes it. Night falls on the hamlet, then the same house by candlelight, the GI carrying the
+    candles round the rooms and the exposure opening up to them. The dollies keep to the middle of the
+    aisle, 1.3 m clear of every wall (a test measures it against the house's triangles).
+  - *Act III, at twice the game's speed.* A clear night; clouds gathering over the hamlet's roofs; the first
+    rain on the buildings, then down to a metre over the trail at the well square, its puddles filling,
+    the Old House reflected in them and the raindrops ringing them; a storm, the wind up, the rain heavy,
+    the windmill's sails racing, lightning flashing (the tour's director script, a scrub-stable strike
+    schedule, an unbaked light so the GI never relights); the rain turning to snow; the snow melting into a wet valley; a clear day
+    again.
+  - *Act IV.* Splashes on the pond (a spawn track), the pond calming to a mirror, then the whole valley
+    from above, and the Cleo logo and wordmark on the final black.
+  - *Its day is keyed, not scripted.* The tour keys the sun's path, colour and lux, the sky's fill, the mist,
+    the god rays and the pond's mist directly, so scrubbing it in Sequencer mode moves the sun. Under the menu
+    and in Free mode a looping **Day Cycle** sequence runs a whole day in 24 minutes, paused while the tour
+    plays. The Time of Day node and its script are gone.
+  - Escape or P comes back to the menu from either mode. `tools/valley/applyCinematic.ts` applies it to the
+    shipped example from the checked-in `valley-tour.sequence.json` (the shot list is `cinematic/tour.ts`),
+    as the `/Cinematic/Valley Tour.sequence` asset its Sequence node plays.
+- **Light probes can follow the sun.** A probe's **Follow the sun** (`relightDegrees`) relights it each time the
+  scene's sun has turned that far, whatever turns it, so reflections keep up with a keyed or cycling day.
+- **Effects can follow the game's speed.** **Follow Time Scale** (Renderer ▸ Weather) runs the wind, the
+  clouds' drift, fog, flicker, water ripples and custom materials' `u_time` at `Game.timeScale`, so a
+  sped-up day plays as a time-lapse. Off by default.
+- **Rain like a camera sees it.** Raindrops are 3-6 mm, each streak its motion blur through a 1/30 s
+  shutter, twice as many of them, never thinner than a pixel (thinner drops fade instead), and shaded as tiny lenses that show the
+  light round them and glint when backlit, not as lit white sticks. Rain and snow fall through the scene's
+  wind field, gusts and veer included, and a rate or a wind that changes no longer rebuilds them. Heavy rain
+  thickens the air round the camera into sheets that drift with the wind. Particle render settings gain
+  `streakShutter`, `minPixelWidth` and `shading: 'rain'`; the scene-wind module a still-air velocity.
+- **Far trees take the weather.** Octahedral impostors are wetted and snowed on like the mesh levels they
+  stand in for.
+- **UI text letter spacing.** `uiText` has `letterSpacing` (em), in the inspector too.
+- **Rain and snow at once.** A Weather volume's **Falling** can be **Rain and snow**, shared out by its
+  **Snow Share**: swept from 0 to 1 it turns the rain into snow. A **Sleet** preset uses it.
+- **Thinning foliage live.** `FoliageLayer.densityScale` draws a share of a layer, spread evenly over each
+  cell and nested, so sweeping it never swaps one plant for another; thinned plants stop colliding too.
 
 ### Fixes & refactors
+
+- **Far tree shadows.** An impostor now casts only in the cascades past its hand-off, where the camera sees
+  impostors too; nearer, the coarsest mesh level casts, so mesh trees are no longer shadowed by a round
+  blob of their own impostor. Its shadow and its depth take the crown's size, not the impostor's wider
+  bounds, and the shadow blends the views round the sun instead of snapping between them.
+- **The Valley's sun turns smoothly.** It was stepped every half a degree, so its shadows jumped; each part
+  of the renderer already keeps its own threshold for what the sun's motion re-bakes.
+- **The Valley's puddle decals are gone:** the weather volume's puddles fill the ground's own hollows.
+- **The Valley's houses are furnished.** Beds, tables, shelves, cabinets and a workshop corner (a grindstone
+  and bellows) in the Long House and the Old House, 19 pieces from 10 new models, placed against the walls
+  clear of the doors and of the Long House's aisle; a rug lies in the patch the afternoon sun lays before
+  its side door, so the GI bounces its colours. Eleven candles on the tables and cabinets (60 lm each, no
+  shadows) light both houses at night. The Hamlet and both interior GI bakes were taken again with them.
+- **Clouds and gusts no longer race when the wind changes.** The clouds' drift and the gusts' travel are
+  integrated frame by frame, instead of a speed times a clock minutes along, which raced them across the
+  sky whenever a preset changed the wind's speed. The cloud shadows now stay under baked clouds whatever
+  the wind does after the bake.
+- **`Game.updateRenderSettings` keeps the bloom mode and the Purkinje strength.** A patch reset both to
+  their defaults.
+- **One math module.** The engine's math helpers now live in `src/core/math.ts` and reach scripts as
+  `MathUtils`: scalar helpers and finite guards, damping, angles, seeded random and noise generators, the
+  particle curves and gradients, keyed curves, splines, tuple vector and quaternion helpers, and ray,
+  segment and box intersections. Thirteen copies of `clamp01`, 36 finite-or-fallback guards and the
+  duplicated lerps, smoothsteps, degree constants and octahedral encoders are gone. The old modules
+  re-export what they used to export.
+- **Fixed: a camera cut smeared its first frame with motion blur.** The blur reprojected the new view
+  through the previous camera; it now starts fresh after any cut (`renderer.cut()` declares one).
 
 - **Fixed: changing a tileset's tile size dropped its lighting maps from the project's references.**
   The re-slice kept only the atlas in `textureIds`, so a normal or six-way map used only by a tileset

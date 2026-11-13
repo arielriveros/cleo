@@ -69,7 +69,7 @@ function useBarDoc(doc: string, title: string) {
 }
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, startSimulate, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, startSimulate, stopPlay, pausePlay, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings } = useCleoEngine();
   const { vfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -118,7 +118,7 @@ export default function MenuBar() {
   // The two project-I/O buttons both operate on the whole workspace as one portable .zip.
   const projectMeta = () => ({ version: 2 as const, mainSceneId, openSceneId, scenes: sceneList });
   // The input map travels only when it differs from the default — see BundleLibraries.inputMap.
-  const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, audioSources, soundSamples,
+  const libraries = () => ({ materials, terrainMaterials, templates, models, scripts: scriptAssets, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples,
     inputMap: isDefaultInputMap(inputMap) ? null : inputMap,
     projectSettings: isDefaultProjectSettings(projectSettings) ? null : projectSettings });
 
@@ -214,9 +214,10 @@ export default function MenuBar() {
           // Controllers, masks, poses and fields re-embed state machines in every scene that ships (see
           // `reembedMachine`); `poseAssets` also carries clip pose offsets into the published game.
           // `particleSystems` lets the resync refresh a CLOSED scene's embedded effects before it ships —
-          // the game itself needs no library, the copies ride inside the scenes.
+          // the game itself needs no library, the copies ride inside the scenes. `sequences` does the same for
+          // a closed scene's cinematics.
           libs: { materials, models, templates, terrainMaterials, scripts: scriptAssets, tilesets, aiBrains, animations, rigs,
-            animControllers, boneMasks, poseAssets, animationFields, particleSystems },
+            animControllers, boneMasks, poseAssets, animationFields, particleSystems, sequences },
           scriptAssets,
           // Script modules: each script's project path, so the build ships what the scripts import.
           scriptPaths,

@@ -12,6 +12,8 @@
  * throwing. Nothing else in the audio stack validates, because everything else comes through here.
  */
 
+import { clamp, finiteOr } from '../core/math';
+
 /** The fixed mixer buses. Project-level state; a sample only names the one it routes into. */
 export const BUS_IDS = ['master', 'music', 'sfx', 'ui'] as const;
 export type BusId = typeof BUS_IDS[number];
@@ -94,14 +96,6 @@ export function defaultEffect(kind: EffectKind): SoundEffect {
     }
 }
 
-function num(v: unknown, fallback: number): number {
-    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-}
-
-function clamp(v: number, min: number, max: number): number {
-    return v < min ? min : v > max ? max : v;
-}
-
 function oneOf<T extends string>(v: unknown, allowed: readonly T[], fallback: T): T {
     return typeof v === 'string' && (allowed as readonly string[]).includes(v) ? v as T : fallback;
 }
@@ -129,15 +123,15 @@ export function normalizeEffect(raw: unknown): SoundEffect | null {
                 type: oneOf<FilterKind>(e.type, ['lowpass', 'highpass', 'bandpass'], base.type),
                 // 20 Hz .. 20 kHz: outside audible range a filter is either a no-op or a mute, and both
                 // read to the user as "the slider is broken".
-                frequency: clamp(num(e.frequency, base.frequency), 20, 20000),
-                q: clamp(num(e.q, base.q), 0.0001, 30),
+                frequency: clamp(finiteOr(e.frequency, base.frequency), 20, 20000),
+                q: clamp(finiteOr(e.q, base.q), 0.0001, 30),
             };
         }
         case 'distortion': {
             const base = d as Extract<SoundEffect, { kind: 'distortion' }>;
             return {
                 kind: 'distortion', enabled,
-                drive: clamp(num(e.drive, base.drive), 0, 1),
+                drive: clamp(finiteOr(e.drive, base.drive), 0, 1),
                 oversample: oneOf<Oversample>(e.oversample, ['none', '2x', '4x'], base.oversample),
             };
         }
@@ -146,10 +140,10 @@ export function normalizeEffect(raw: unknown): SoundEffect | null {
             return {
                 kind: 'delay', enabled,
                 // 5 s is the DelayNode maxDelayTime the rack allocates; asking for more would throw there.
-                time: clamp(num(e.time, base.time), 0, 5),
+                time: clamp(finiteOr(e.time, base.time), 0, 5),
                 // Strictly below 1, or the feedback loop grows without bound and pins the output.
-                feedback: clamp(num(e.feedback, base.feedback), 0, 0.95),
-                mix: clamp(num(e.mix, base.mix), 0, 1),
+                feedback: clamp(finiteOr(e.feedback, base.feedback), 0, 0.95),
+                mix: clamp(finiteOr(e.mix, base.mix), 0, 1),
             };
         }
         case 'reverb': {
@@ -157,9 +151,9 @@ export function normalizeEffect(raw: unknown): SoundEffect | null {
             return {
                 kind: 'reverb', enabled,
                 // The impulse is generated, and its cost is linear in decay — 10 s is already a cathedral.
-                decay: clamp(num(e.decay, base.decay), 0.05, 10),
-                preDelay: clamp(num(e.preDelay, base.preDelay), 0, 0.5),
-                mix: clamp(num(e.mix, base.mix), 0, 1),
+                decay: clamp(finiteOr(e.decay, base.decay), 0.05, 10),
+                preDelay: clamp(finiteOr(e.preDelay, base.preDelay), 0, 0.5),
+                mix: clamp(finiteOr(e.mix, base.mix), 0, 1),
             };
         }
         case 'compressor': {
@@ -167,11 +161,11 @@ export function normalizeEffect(raw: unknown): SoundEffect | null {
             // Ranges are the DynamicsCompressorNode's own documented limits: outside them the setter throws.
             return {
                 kind: 'compressor', enabled,
-                threshold: clamp(num(e.threshold, base.threshold), -100, 0),
-                knee: clamp(num(e.knee, base.knee), 0, 40),
-                ratio: clamp(num(e.ratio, base.ratio), 1, 20),
-                attack: clamp(num(e.attack, base.attack), 0, 1),
-                release: clamp(num(e.release, base.release), 0, 1),
+                threshold: clamp(finiteOr(e.threshold, base.threshold), -100, 0),
+                knee: clamp(finiteOr(e.knee, base.knee), 0, 40),
+                ratio: clamp(finiteOr(e.ratio, base.ratio), 1, 20),
+                attack: clamp(finiteOr(e.attack, base.attack), 0, 1),
+                release: clamp(finiteOr(e.release, base.release), 0, 1),
             };
         }
     }
@@ -195,19 +189,19 @@ export function normalizeEffects(raw: unknown): SoundEffect[] {
 
 /** Bring every field of an already-typed settings object back inside its legal range. */
 export function clampSettings(s: SoundSettings): SoundSettings {
-    const loopStart = Math.max(0, num(s.loopStart, 0));
-    const loopEnd = Math.max(0, num(s.loopEnd, 0));
+    const loopStart = Math.max(0, finiteOr(s.loopStart, 0));
+    const loopEnd = Math.max(0, finiteOr(s.loopEnd, 0));
     return {
-        volume: clamp(num(s.volume, 1), 0, 1),
-        rate: clamp(num(s.rate, 1), 0.5, 4),
-        pan: clamp(num(s.pan, 0), -1, 1),
+        volume: clamp(finiteOr(s.volume, 1), 0, 1),
+        rate: clamp(finiteOr(s.rate, 1), 0.5, 4),
+        pan: clamp(finiteOr(s.pan, 0), -1, 1),
         loop: !!s.loop,
         loopStart,
         // A region that ends before it starts is not a region. Zeroing `loopEnd` reads as "to the end of
         // the file", which is the one interpretation that always produces audio.
         loopEnd: loopEnd > loopStart ? loopEnd : 0,
-        fadeIn: clamp(num(s.fadeIn, 0), 0, 60),
-        fadeOut: clamp(num(s.fadeOut, 0), 0, 60),
+        fadeIn: clamp(finiteOr(s.fadeIn, 0), 0, 60),
+        fadeOut: clamp(finiteOr(s.fadeOut, 0), 0, 60),
         bus: oneOf<BusId>(s.bus, BUS_IDS, 'sfx'),
         preload: s.preload !== false,
         effects: normalizeEffects(s.effects),
@@ -219,14 +213,14 @@ export function parseSoundSettings(raw: unknown): SoundSettings {
     if (!raw || typeof raw !== 'object') return { ...DEFAULT_SOUND_SETTINGS, effects: [] };
     const r = raw as Partial<SoundSettings>;
     return clampSettings({
-        volume: num(r.volume, DEFAULT_SOUND_SETTINGS.volume),
-        rate: num(r.rate, DEFAULT_SOUND_SETTINGS.rate),
-        pan: num(r.pan, DEFAULT_SOUND_SETTINGS.pan),
+        volume: finiteOr(r.volume, DEFAULT_SOUND_SETTINGS.volume),
+        rate: finiteOr(r.rate, DEFAULT_SOUND_SETTINGS.rate),
+        pan: finiteOr(r.pan, DEFAULT_SOUND_SETTINGS.pan),
         loop: r.loop === true,
-        loopStart: num(r.loopStart, 0),
-        loopEnd: num(r.loopEnd, 0),
-        fadeIn: num(r.fadeIn, 0),
-        fadeOut: num(r.fadeOut, 0),
+        loopStart: finiteOr(r.loopStart, 0),
+        loopEnd: finiteOr(r.loopEnd, 0),
+        fadeIn: finiteOr(r.fadeIn, 0),
+        fadeOut: finiteOr(r.fadeOut, 0),
         bus: oneOf<BusId>(r.bus, BUS_IDS, DEFAULT_SOUND_SETTINGS.bus),
         preload: r.preload !== false,
         effects: normalizeEffects(r.effects),
@@ -272,13 +266,13 @@ export const DEFAULT_SPATIAL_SETTINGS: SpatialSettings = {
 
 export function parseSpatialSettings(raw: unknown): SpatialSettings {
     const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<SpatialSettings>;
-    const refDistance = Math.max(0.0001, num(r.refDistance, DEFAULT_SPATIAL_SETTINGS.refDistance));
+    const refDistance = Math.max(0.0001, finiteOr(r.refDistance, DEFAULT_SPATIAL_SETTINGS.refDistance));
     return {
         distanceModel: oneOf<DistanceModel>(r.distanceModel, DISTANCE_MODELS, DEFAULT_SPATIAL_SETTINGS.distanceModel),
         refDistance,
         // Never below refDistance: `linear` divides by (max - ref) and would produce a negative gain.
-        maxDistance: Math.max(refDistance + 0.0001, num(r.maxDistance, DEFAULT_SPATIAL_SETTINGS.maxDistance)),
-        rolloffFactor: clamp(num(r.rolloffFactor, DEFAULT_SPATIAL_SETTINGS.rolloffFactor), 0, 10),
+        maxDistance: Math.max(refDistance + 0.0001, finiteOr(r.maxDistance, DEFAULT_SPATIAL_SETTINGS.maxDistance)),
+        rolloffFactor: clamp(finiteOr(r.rolloffFactor, DEFAULT_SPATIAL_SETTINGS.rolloffFactor), 0, 10),
     };
 }
 

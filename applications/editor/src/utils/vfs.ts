@@ -16,6 +16,7 @@ import type { TextureAsset } from './textureAssets'
 import type { AudioSourceAsset } from './audioSources'
 import type { SoundSampleAsset } from './soundSamples'
 import type { ParticleSystemAsset } from './particleSystems'
+import type { SequenceAsset } from './sequenceAssets'
 
 // The editor's virtual filesystem: a side table giving each flat asset library a folder path.
 //
@@ -24,7 +25,7 @@ import type { ParticleSystemAsset } from './particleSystems'
 // FileTree.normalizeFile, the extension is everything after the LAST dot.
 
 export type AssetKind = 'image' | 'texture' | 'audioSource' | 'soundSample' | 'material' | 'terrainMaterial' | 'template' | 'model' | 'scene' | 'script' | 'animationField' | 'animation' | 'rig' | 'tileset' | 'aiBrain'
-  | 'animController' | 'boneMask' | 'pose' | 'particleSystem'
+  | 'animController' | 'boneMask' | 'pose' | 'particleSystem' | 'sequence'
 
 /**
  * The BYTE kinds — image and audioSource — keep their real file extensions; every other kind carries a
@@ -53,6 +54,7 @@ export const KIND_EXT: Record<Exclude<AssetKind, RawByteKind>, string> = {
   boneMask: '.mask',
   pose: '.pose',
   particleSystem: '.vfx',
+  sequence: '.sequence',
 }
 
 /**
@@ -89,6 +91,7 @@ export const KIND_LABEL: Record<AssetKind, string> = {
   boneMask: 'bone mask',
   pose: 'pose asset',
   particleSystem: 'particle system',
+  sequence: 'sequence',
 }
 
 export type VfsEntry = {
@@ -133,6 +136,7 @@ export type LibSnapshot = {
   audioSources: AudioSourceAsset[]
   soundSamples: SoundSampleAsset[]
   particleSystems: ParticleSystemAsset[]
+  sequences: SequenceAsset[]
   /**
    * Every live TextureManager id. No longer drives entries — `textures` does — but bundle export and the
    * missing-asset audit still ask what is actually registered, which is not the same question.
@@ -185,6 +189,7 @@ export function kindOfExt(ext: string): AssetKind {
     case '.mask': return 'boneMask'
     case '.pose': return 'pose'
     case '.vfx': return 'particleSystem'
+    case '.sequence': return 'sequence'
     default: return 'image'
   }
 }
@@ -526,6 +531,7 @@ export function reconcileVfs(prev: VfsIndex, libs: LibSnapshot, opts: ReconcileO
   for (const m of libs.boneMasks) visit('boneMask', m.id, m.name)
   for (const p of libs.poseAssets) visit('pose', p.id, p.name)
   for (const p of libs.particleSystems) visit('particleSystem', p.id, p.name)
+  for (const q of libs.sequences) visit('sequence', q.id, q.name)
   for (const s of libs.scenes) visit('scene', s.id, s.name)
   // Both halves of the image/texture split are ordinary libraries now — the entries no longer come from
   // whatever happens to be registered in the TextureManager.
@@ -618,6 +624,7 @@ export function findMissingFromExplorer(vfs: VfsIndex, libs: LibSnapshot, treeId
   for (const m of libs.boneMasks) check('boneMask', m.id, m.name)
   for (const p of libs.poseAssets) check('pose', p.id, p.name)
   for (const p of libs.particleSystems) check('particleSystem', p.id, p.name)
+  for (const q of libs.sequences) check('sequence', q.id, q.name)
   for (const s of libs.scenes) check('scene', s.id, s.name)
   for (const i of libs.images) check('image', i.id, i.name)
   for (const t of libs.textures) check('texture', t.id, t.name)
@@ -671,6 +678,7 @@ function aliveIds(libs: LibSnapshot): Record<AssetKind, Set<string>> {
     boneMask: new Set(libs.boneMasks.map(m => m.id)),
     pose: new Set(libs.poseAssets.map(p => p.id)),
     particleSystem: new Set(libs.particleSystems.map(p => p.id)),
+    sequence: new Set(libs.sequences.map(q => q.id)),
     scene: new Set(libs.scenes.map(s => s.id)),
     image: new Set(libs.images.map(i => i.id)),
     // The RECORD, not the live registration: a texture whose image failed to decode is still an asset the

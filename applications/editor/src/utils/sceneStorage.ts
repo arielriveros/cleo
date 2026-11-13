@@ -42,6 +42,8 @@ export interface SceneRefs {
   audioSourceIds?: string[];
   /** ParticleSystemNode links (`particleSystemId`). Added at SCENE_REFS_VERSION 2. */
   particleSystemIds?: string[];
+  /** SequenceNode links (`sequenceId`). Added at SCENE_REFS_VERSION 4. */
+  sequenceIds?: string[];
   /** Models scattered as terrain FOLIAGE, kept apart from `modelIds` so the two reasons stay tellable. */
   foliageModelIds?: string[];
   /**

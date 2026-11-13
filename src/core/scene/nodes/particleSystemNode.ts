@@ -8,6 +8,7 @@ import {
 } from "../../../particles/particleSystemAsset";
 import { ParticleSystemRuntime, seedSalt } from "../../../particles/particleRuntime";
 import { FULL_DETAIL, particleLodFactors, type ParticleLodState } from "../../../particles/particleLod";
+import { finiteOr } from "../../math";
 
 export interface ParticleSystemNodeOptions {
     /** The system definition. Embedded, so a scene plays without its asset library. */
@@ -44,8 +45,6 @@ export interface ParticleSystemNodeOptions {
  */
 export type ParticleCullingMode = 'auto' | 'pause' | 'simulate';
 const CULLING_MODES: readonly ParticleCullingMode[] = ['auto', 'pause', 'simulate'];
-
-const num = (x: unknown, fallback: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
 
 /**
  * Plays a particle system in the scene.
@@ -108,11 +107,11 @@ export class ParticleSystemNode extends Node {
         this._system = options.system ? parseParticleSystem(options.system) : defaultParticleSystem();
         this._particleSystemId = typeof options.particleSystemId === 'string' ? options.particleSystemId : null;
         this._playOnStart = options.playOnStart !== false;
-        this._simulationSpeed = Math.max(0, num(options.simulationSpeed, 1));
-        this._spawnRateScale = Math.max(0, num(options.spawnRateScale, 1));
+        this._simulationSpeed = Math.max(0, finiteOr(options.simulationSpeed, 1));
+        this._spawnRateScale = Math.max(0, finiteOr(options.spawnRateScale, 1));
         const t = options.tint;
-        this._tint = Array.isArray(t) ? [num(t[0], 1), num(t[1], 1), num(t[2], 1), num(t[3], 1)] : [1, 1, 1, 1];
-        this._exposureWeight = Math.min(1, Math.max(0, num(options.exposureWeight, 1)));
+        this._tint = Array.isArray(t) ? [finiteOr(t[0], 1), finiteOr(t[1], 1), finiteOr(t[2], 1), finiteOr(t[3], 1)] : [1, 1, 1, 1];
+        this._exposureWeight = Math.min(1, Math.max(0, finiteOr(options.exposureWeight, 1)));
         this._cullingMode = CULLING_MODES.includes(options.cullingMode as ParticleCullingMode)
             ? options.cullingMode as ParticleCullingMode : 'auto';
         this._lodEnabled = options.lodEnabled !== false;
@@ -136,7 +135,7 @@ export class ParticleSystemNode extends Node {
     public set followLight(value: string | null) { this._followLight = typeof value === 'string' && value ? value : null; }
     /** How much of the followed light's flicker the system takes: 0 none, 1 all of it. */
     public get followAmount(): number { return this._followAmount; }
-    public set followAmount(value: number) { this._followAmount = Math.min(1, Math.max(0, num(value, 1))); }
+    public set followAmount(value: number) { this._followAmount = Math.min(1, Math.max(0, finiteOr(value, 1))); }
 
     private _fogGlow = 0;
     /**
@@ -146,7 +145,7 @@ export class ParticleSystemNode extends Node {
      * default) gives the fog nothing.
      */
     public get fogGlow(): number { return this._fogGlow; }
-    public set fogGlow(value: number) { this._fogGlow = Math.max(0, num(value, 0)); }
+    public set fogGlow(value: number) { this._fogGlow = Math.max(0, finiteOr(value, 0)); }
 
     /** This frame's multiplier from the followed light's flicker (1 when it follows none). */
     public get lightFollowScale(): number { return this._followed.factor(this, this._followLight, this._followAmount); }
@@ -210,7 +209,7 @@ export class ParticleSystemNode extends Node {
 
     public get simulationSpeed(): number { return this._simulationSpeed; }
     public set simulationSpeed(value: number) {
-        const next = Math.max(0, num(value, 1));
+        const next = Math.max(0, finiteOr(value, 1));
         if (next === this._simulationSpeed) return;
         this._simulationSpeed = next;
         this._notifyChange('component', 'simulationSpeed');
@@ -218,7 +217,7 @@ export class ParticleSystemNode extends Node {
 
     public get spawnRateScale(): number { return this._spawnRateScale; }
     public set spawnRateScale(value: number) {
-        const next = Math.max(0, num(value, 1));
+        const next = Math.max(0, finiteOr(value, 1));
         if (next === this._spawnRateScale) return;
         this._spawnRateScale = next;
         this._notifyChange('component', 'spawnRateScale');
@@ -226,7 +225,7 @@ export class ParticleSystemNode extends Node {
 
     public get tint(): [number, number, number, number] { return this._tint; }
     public set tint(value: [number, number, number, number]) {
-        this._tint = [num(value?.[0], 1), num(value?.[1], 1), num(value?.[2], 1), num(value?.[3], 1)];
+        this._tint = [finiteOr(value?.[0], 1), finiteOr(value?.[1], 1), finiteOr(value?.[2], 1), finiteOr(value?.[3], 1)];
         this._notifyChange('component', 'tint');
     }
 
@@ -238,7 +237,7 @@ export class ParticleSystemNode extends Node {
      */
     public get exposureWeight(): number { return this._exposureWeight; }
     public set exposureWeight(value: number) {
-        const next = Math.min(1, Math.max(0, num(value, 1)));
+        const next = Math.min(1, Math.max(0, finiteOr(value, 1)));
         if (next === this._exposureWeight) return;
         this._exposureWeight = next;
         this._notifyChange('component', 'exposureWeight');

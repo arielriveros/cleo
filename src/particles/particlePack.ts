@@ -6,7 +6,7 @@
 // simulation step for the parts that move with the emitter (matrices, spawn window, gravity in local
 // space). GL-free, so both halves are unit tested.
 
-import { mat4, vec3 } from 'gl-matrix';
+import { mat4 } from 'gl-matrix';
 import {
     LUT_ROW, bakeCurveChannel, bakeGradientRow, identityLut, type Curve, type Gradient,
 } from './curves';
@@ -15,6 +15,7 @@ import { validatedCustomCode } from './particleCustomCode';
 import { SIM_STRIP } from '../graphics/programVariants';
 import type { CollisionPlane } from './particleModules';
 import type { SimStep } from './particleRuntime';
+import { DEG2RAD, finiteOr, transformDirectionTuple, transformPointTuple } from '../core/math';
 
 /** Bits of `u_mask.x` — the SIM_* constants in chunks/particleSimCore.wgsl. */
 export const SIM = {
@@ -51,15 +52,13 @@ const COLOR_MODE: Record<string, number> = { constant: 0, between: 1, gradient: 
 const ALIGNMENT: Record<string, number> = { camera: 0, velocity: 1, vertical: 2, horizontal: 3 };
 const BLEND: Record<string, number> = { alpha: 0, additive: 1, cutout: 2 };
 
-const DEG = Math.PI / 180;
-const num = (x: unknown, fallback: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
 const pair = (x: unknown, fallback: [number, number]): [number, number] =>
-    Array.isArray(x) ? [num(x[0], fallback[0]), num(x[1], fallback[1])] : fallback;
+    Array.isArray(x) ? [finiteOr(x[0], fallback[0]), finiteOr(x[1], fallback[1])] : fallback;
 const triple = (x: unknown, fallback: [number, number, number]): [number, number, number] =>
-    Array.isArray(x) ? [num(x[0], fallback[0]), num(x[1], fallback[1]), num(x[2], fallback[2])] : fallback;
+    Array.isArray(x) ? [finiteOr(x[0], fallback[0]), finiteOr(x[1], fallback[1]), finiteOr(x[2], fallback[2])] : fallback;
 const quad = (x: unknown, fallback: [number, number, number, number]): [number, number, number, number] =>
     Array.isArray(x)
-        ? [num(x[0], fallback[0]), num(x[1], fallback[1]), num(x[2], fallback[2]), num(x[3], fallback[3])]
+        ? [finiteOr(x[0], fallback[0]), finiteOr(x[1], fallback[1]), finiteOr(x[2], fallback[2]), finiteOr(x[3], fallback[3])]
         : fallback;
 
 export interface PackedEmitter {
@@ -100,10 +99,10 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
     // --- Init ---
     const shape = activeModule(def, 'shape')?.params ?? {};
     const box = triple(shape.box, [1, 1, 1]);
-    sim.u_shape0 = [SHAPE_KIND[shape.shape] ?? 0, Math.max(0, num(shape.radius, 0)),
-                    num(shape.thickness, 1), num(shape.arc, 360) * DEG];
-    sim.u_shape1 = [box[0] * 0.5, box[1] * 0.5, box[2] * 0.5, num(shape.angle, 0) * DEG];
-    sim.u_shapeOffset = [...triple(shape.offset, [0, 0, 0]), shape.shape === 'circle' ? num(shape.orbit, 0) : 0];
+    sim.u_shape0 = [SHAPE_KIND[shape.shape] ?? 0, Math.max(0, finiteOr(shape.radius, 0)),
+                    finiteOr(shape.thickness, 1), finiteOr(shape.arc, 360) * DEG2RAD];
+    sim.u_shape1 = [box[0] * 0.5, box[1] * 0.5, box[2] * 0.5, finiteOr(shape.angle, 0) * DEG2RAD];
+    sim.u_shapeOffset = [...triple(shape.offset, [0, 0, 0]), shape.shape === 'circle' ? finiteOr(shape.orbit, 0) : 0];
 
     const life = pair(activeModule(def, 'lifetime')?.params.range, [1, 1]);
     const size = pair(activeModule(def, 'size')?.params.range, [0.1, 0.1]);
@@ -114,27 +113,27 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
     const dir = triple(velocity?.direction, [0, 1, 0]);
     const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
     sim.u_speed = [speed[0], speed[1], velocity ? VELOCITY_MODE[velocity.mode] ?? 0 : 0,
-                   velocity ? Math.max(0, num(velocity.inherit, 0)) : 0];
-    sim.u_dir = [dir[0] / len, dir[1] / len, dir[2] / len, velocity ? num(velocity.spread, 0) * DEG : 0];
+                   velocity ? Math.max(0, finiteOr(velocity.inherit, 0)) : 0];
+    sim.u_dir = [dir[0] / len, dir[1] / len, dir[2] / len, velocity ? finiteOr(velocity.spread, 0) * DEG2RAD : 0];
 
     const rotation = activeModule(def, 'rotation')?.params;
     const angle = pair(rotation?.angle, [0, 0]);
     const spin = pair(rotation?.spin, [0, 0]);
-    sim.u_rot = [angle[0] * DEG, angle[1] * DEG, spin[0] * DEG, spin[1] * DEG];
+    sim.u_rot = [angle[0] * DEG2RAD, angle[1] * DEG2RAD, spin[0] * DEG2RAD, spin[1] * DEG2RAD];
 
     const color = activeModule(def, 'color')?.params;
     sim.u_colorA = quad(color?.colorA, [1, 1, 1, 1]);
     sim.u_colorB = quad(color?.colorB, [1, 1, 1, 1]);
-    sim.u_colorMode = [color ? COLOR_MODE[color.mode] ?? 0 : 0, color ? Math.max(0, num(color.intensity, 1)) : 1, 0, 0];
+    sim.u_colorMode = [color ? COLOR_MODE[color.mode] ?? 0 : 0, color ? Math.max(0, finiteOr(color.intensity, 1)) : 1, 0, 0];
     if (color?.mode === 'gradient' && color.gradient) bakeGradientRow(lut, LUT_ROW.INIT_COLOR, color.gradient as Gradient);
 
     // --- Update ---
     const gravity = activeModule(def, 'gravity');
-    const gravityScale = gravity ? num(gravity.params.scale, 1) : 0;
+    const gravityScale = gravity ? finiteOr(gravity.params.scale, 1) : 0;
     if (gravity) simMask |= SIM.GRAVITY;
 
     const drag = activeModule(def, 'drag');
-    const dragCoefficient = drag ? Math.max(0, num(drag.params.coefficient, 0)) : 0;
+    const dragCoefficient = drag ? Math.max(0, finiteOr(drag.params.coefficient, 0)) : 0;
     if (drag) simMask |= SIM.DRAG;
     // u_gravity.w is the drag coefficient; xyz is filled per step.
     sim.u_gravity = [0, 0, 0, dragCoefficient];
@@ -143,14 +142,16 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
     if (wind) simMask |= SIM.WIND;
     const sceneWind = !!wind && wind.source === 'scene';
     if (sceneWind) simMask |= SIM.SCENE_WIND;
-    // x = the scene wind's multiplier. Always written, so a recycled program never keeps a stale one.
-    sim.u_windScene = [sceneWind ? num(wind!.scale, 1) : 0, 0, 0, 0];
+    // x = the scene wind's multiplier, yzw = the still-air velocity added to it (a drop's fall). Always
+    // written, so a recycled program never keeps a stale one.
+    const fall = sceneWind && Array.isArray(wind!.fall) ? wind!.fall as number[] : [0, 0, 0];
+    sim.u_windScene = [sceneWind ? finiteOr(wind!.scale, 1) : 0, finiteOr(fall[0], 0), finiteOr(fall[1], 0), finiteOr(fall[2], 0)];
 
     const noise = activeModule(def, 'curlNoise')?.params;
     if (noise) simMask |= SIM.NOISE;
     sim.u_noise = noise
-        ? [num(noise.strength, 1), Math.max(1e-3, num(noise.frequency, 1)), num(noise.scroll, 0),
-           Math.min(3, Math.max(1, Math.floor(num(noise.octaves, 1))))]
+        ? [finiteOr(noise.strength, 1), Math.max(1e-3, finiteOr(noise.frequency, 1)), finiteOr(noise.scroll, 0),
+           Math.min(3, Math.max(1, Math.floor(finiteOr(noise.octaves, 1))))]
         : [0, 1, 0, 1];
 
     const vortex = activeModule(def, 'vortex')?.params;
@@ -159,12 +160,12 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
     const attractor = activeModule(def, 'attractor')?.params;
     if (attractor) simMask |= SIM.ATTRACTOR;
     sim.u_attractor2 = attractor
-        ? [Math.max(0, num(attractor.radius, 0)), Math.max(0, num(attractor.killRadius, 0)), 0, 0]
+        ? [Math.max(0, finiteOr(attractor.radius, 0)), Math.max(0, finiteOr(attractor.killRadius, 0)), 0, 0]
         : [0, 0, 0, 0];
 
     const limit = activeModule(def, 'limitVelocity')?.params;
     if (limit) simMask |= SIM.LIMIT;
-    sim.u_limit = limit ? [Math.max(0, num(limit.maxSpeed, 0)), num(limit.dampen, 1), 0, 0] : [0, 0, 0, 0];
+    sim.u_limit = limit ? [Math.max(0, finiteOr(limit.maxSpeed, 0)), finiteOr(limit.dampen, 1), 0, 0] : [0, 0, 0, 0];
 
     const fields = activeModule(def, 'forceFields')?.params;
     if (fields) simMask |= SIM.FIELDS;
@@ -186,9 +187,9 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
                 planes.push({ point: triple(p?.point, [0, 0, 0]), normal: triple(p?.normal, [0, 1, 0]) });
         if (planes.length) simMask |= SIM.COLLIDE_PLANES;
         if (collision.kill === true) simMask |= SIM.KILL_ON_HIT;
-        sim.u_collide0 = [Math.max(0, num(collision.radius, 0.5)), num(collision.restitution, 0.4),
-                          num(collision.friction, 0.2), Math.max(0, num(collision.lifetimeLoss, 0))];
-        sim.u_collide1 = [Math.max(0.01, num(collision.thickness, 0.5)), planes.length, 0, 0];
+        sim.u_collide0 = [Math.max(0, finiteOr(collision.radius, 0.5)), finiteOr(collision.restitution, 0.4),
+                          finiteOr(collision.friction, 0.2), Math.max(0, finiteOr(collision.lifetimeLoss, 0))];
+        sim.u_collide1 = [Math.max(0.01, finiteOr(collision.thickness, 0.5)), planes.length, 0, 0];
     } else {
         sim.u_collide0 = [0, 0, 0, 0];
         sim.u_collide1 = [0, 0, 0, 0];
@@ -200,7 +201,7 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
     if (weather) simMask |= SIM.WEATHER;
     sim.u_precipSim = weather
         ? [weather.kind === 'snow' ? 1 : 0, weather.shelter !== false ? 1 : 0,
-           1 / Math.min(1, Math.max(0.01, num(weather.fullRate, 1))), 0]
+           1 / Math.min(1, Math.max(0.01, finiteOr(weather.fullRate, 1))), 0]
         : [0, 0, 1, 0];
 
     // Only a VALIDATED compile of this exact source runs; see particleCustomCode.ts.
@@ -230,7 +231,9 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
     draw.u_flipbook = [fb.columns, fb.rows, Math.min(fb.frames, fb.columns * fb.rows), fb.mode === 'fps' ? 1 : 0];
     draw.u_flipbook2 = [fb.fps, fb.cycles, fb.randomStart ? 1 : 0, fb.blend && fb.frames > 1 ? 1 : 0];
     draw.u_speedRange = [colorSpeedRange[0], colorSpeedRange[1], sizeSpeedRange[0], sizeSpeedRange[1]];
-    draw.u_stretchRange = [render.stretchRange[0], render.stretchRange[1], 0, 0];
+    // z = the streak's shutter (s, 0 = `stretch`), w = the narrowest it is drawn (px, 0 = off).
+    draw.u_stretchRange = [render.stretchRange[0], render.stretchRange[1],
+                           Math.max(0, finiteOr(render.streakShutter, 0)), Math.max(0, finiteOr(render.minPixelWidth, 0))];
     draw.alignment = [ALIGNMENT[render.alignment] ?? 0];
     draw.stretch = [render.stretch];
     frag.u_fragParams = [BLEND[render.blend] ?? 0, render.cutoff, render.softness, render.emissive];
@@ -238,29 +241,14 @@ export function packEmitter(def: EmitterDef, flat2D = false): PackedEmitter {
     return {
         simMask, drawMask, sim, draw, frag, lut, gravityScale, local, planes, custom,
         windVelocity: triple(wind?.velocity, [0, 0, 0]),
-        windCoupling: wind ? Math.max(0, num(wind.influence, 1)) : 0,
+        windCoupling: wind ? Math.max(0, finiteOr(wind.influence, 1)) : 0,
         vortexAxis: triple(vortex?.axis, [0, 1, 0]),
         vortexCenter: triple(vortex?.center, [0, 0, 0]),
-        vortexStrength: vortex ? num(vortex.strength, 0) : 0,
-        vortexPull: vortex ? num(vortex.pull, 0) : 0,
+        vortexStrength: vortex ? finiteOr(vortex.strength, 0) : 0,
+        vortexPull: vortex ? finiteOr(vortex.pull, 0) : 0,
         attractorPosition: triple(attractor?.position, [0, 0, 0]),
-        attractorStrength: attractor ? num(attractor.strength, 0) : 0,
+        attractorStrength: attractor ? finiteOr(attractor.strength, 0) : 0,
     };
-}
-
-const _v = vec3.create();
-
-function rotateDir(m: mat4, d: readonly number[], normalize: boolean): [number, number, number] {
-    vec3.set(_v, d[0], d[1], d[2]);
-    vec3.transformMat4(_v, _v, mat4.fromValues(m[0], m[1], m[2], 0, m[4], m[5], m[6], 0, m[8], m[9], m[10], 0, 0, 0, 0, 1));
-    if (normalize) vec3.normalize(_v, _v);
-    return [_v[0], _v[1], _v[2]];
-}
-
-function transformPoint(m: mat4, p: readonly number[]): [number, number, number] {
-    vec3.set(_v, p[0], p[1], p[2]);
-    vec3.transformMat4(_v, _v, m);
-    return [_v[0], _v[1], _v[2]];
 }
 
 /**
@@ -272,12 +260,12 @@ export function stepUniforms(packed: PackedEmitter, step: SimStep, capacity: num
                              gravity: readonly number[], seed: number): Record<string, number[] | Float32Array> {
     const world = step.matrix;
     const worldToSim = packed.local ? mat4.invert(mat4.create(), world) ?? mat4.create() : mat4.create();
-    const toSim = (d: readonly number[]) => (packed.local ? rotateDir(worldToSim, d, false) : [d[0], d[1], d[2]]);
-    const fromEmitterPoint = (p: readonly number[]) => (packed.local ? [p[0], p[1], p[2]] : transformPoint(world, p));
+    const toSim = (d: readonly number[]) => (packed.local ? transformDirectionTuple(worldToSim, d, false) : [d[0], d[1], d[2]]);
+    const fromEmitterPoint = (p: readonly number[]) => (packed.local ? [p[0], p[1], p[2]] : transformPointTuple(world, p));
     const fromEmitterDir = (d: readonly number[]) => (packed.local ? (() => {
         const l = Math.hypot(d[0], d[1], d[2]) || 1;
         return [d[0] / l, d[1] / l, d[2] / l];
-    })() : rotateDir(world, d, true));
+    })() : transformDirectionTuple(world, d, true));
 
     const g = toSim([gravity[0] * packed.gravityScale, gravity[1] * packed.gravityScale, gravity[2] * packed.gravityScale]);
     const wind = toSim(packed.windVelocity);
@@ -286,8 +274,8 @@ export function stepUniforms(packed: PackedEmitter, step: SimStep, capacity: num
     // as n . p + d = 0.
     const planes = new Float32Array(16);
     packed.planes.forEach((plane, i) => {
-        const point = transformPoint(world, plane.point);
-        const normal = rotateDir(world, plane.normal, true);
+        const point = transformPointTuple(world, plane.point);
+        const normal = transformDirectionTuple(world, plane.normal, true);
         planes.set([normal[0], normal[1], normal[2], -(normal[0] * point[0] + normal[1] * point[1] + normal[2] * point[2])], i * 4);
     });
 

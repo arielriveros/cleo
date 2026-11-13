@@ -170,6 +170,7 @@ export default function RendererSettingsPanel() {
   const [fogLights, setFogLights] = useState<boolean>(() => renderer?.volumetricFogLocalLights ?? true);
   const [fogShadows, setFogShadows] = useState<boolean>(() => renderer?.volumetricFogLocalShadows ?? true);
   const [shelterOn, setShelterOn] = useState<boolean>(() => renderer?.weatherShelterEnabled ?? true);
+  const [effectsFollow, setEffectsFollow] = useState<boolean>(() => renderer?.effectsFollowTimeScale ?? false);
   const [shelterRes, setShelterRes] = useState<number>(() => renderer?.weatherShelterResolution ?? 1024);
   const [precipDensity, setPrecipDensity] = useState<number>(() => renderer?.precipitationDensity ?? 1);
   const [toneMapper, setToneMapper] = useState<string>(() => renderer?.toneMapper ?? 'agx');
@@ -313,6 +314,7 @@ export default function RendererSettingsPanel() {
     setFogLights(renderer.volumetricFogLocalLights);
     setFogShadows(renderer.volumetricFogLocalShadows);
     setShelterOn(renderer.weatherShelterEnabled);
+    setEffectsFollow(renderer.effectsFollowTimeScale);
     setShelterRes(renderer.weatherShelterResolution);
     setPrecipDensity(renderer.precipitationDensity);
     setToneMapper(renderer.toneMapper);
@@ -690,6 +692,9 @@ export default function RendererSettingsPanel() {
         </Field>}
         <Slider label='Rain & Snow' value={precipDensity} min={0} max={1} step={0.05}
           onChange={(v) => { renderer.precipitationDensity = v; setPrecipDensity(renderer.precipitationDensity); touch(); }} />
+        <Toggle label='Follow Time Scale' checked={effectsFollow} className='my-1'
+          title="Run the wind, the clouds' drift, fog, flicker, water ripples and custom materials' time at the game's speed: at time ×2 a day plays as a time-lapse. Off keeps them on real time."
+          onChange={(v) => { renderer.effectsFollowTimeScale = v; setEffectsFollow(v); touch(); }} />
         <Hint>The scene's Weather volumes wet and snow the landscape and its plants, and make rain and snow fall. Rain & Snow is how much of what falls is drawn, as particles round the camera (0: none; the ground's raindrops stay). Shelter keeps what stands under a roof or anything solid dry, and out of the rain, from a map of the 96 m round the camera, redrawn only when something in it moves.</Hint>
       </div></Collapsable>
 

@@ -39,8 +39,7 @@
 
 import { shortestAngle } from "./intent";
 import type { ControlIntent } from "./intent";
-
-const RAD2DEG = 180 / Math.PI;
+import { clamp, finiteOr, RAD2DEG } from "../math";
 
 /** How the body decides where to face. */
 export const FACING_MODES = ['aim', 'velocity', 'none'] as const;
@@ -108,33 +107,25 @@ export const LOCOMOTION_DEFAULTS: LocomotionTuning = {
     facingMode: 'aim',
 };
 
-function num(v: unknown, fallback: number): number {
-    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-}
-
-function clamp(v: number, min: number, max: number): number {
-    return v < min ? min : v > max ? max : v;
-}
-
 /** Every field defaulted and clamped, so a partial, stale or junk record passes. Mirrors `motionConfig`. */
 export function locomotionTuning(over?: Partial<LocomotionTuning> | null): LocomotionTuning {
     const o = (over ?? {}) as Partial<LocomotionTuning>;
     const d = LOCOMOTION_DEFAULTS;
-    const turnThreshold = clamp(num(o.turnThreshold, d.turnThreshold), 1, 180);
+    const turnThreshold = clamp(finiteOr(o.turnThreshold, d.turnThreshold), 1, 180);
     return {
-        walkSpeed: Math.max(0, num(o.walkSpeed, d.walkSpeed)),
-        runSpeed: Math.max(0, num(o.runSpeed, d.runSpeed)),
-        jumpSpeed: Math.max(0, num(o.jumpSpeed, d.jumpSpeed)),
-        turnSpeed: Math.max(0, num(o.turnSpeed, d.turnSpeed)),
+        walkSpeed: Math.max(0, finiteOr(o.walkSpeed, d.walkSpeed)),
+        runSpeed: Math.max(0, finiteOr(o.runSpeed, d.runSpeed)),
+        jumpSpeed: Math.max(0, finiteOr(o.jumpSpeed, d.jumpSpeed)),
+        turnSpeed: Math.max(0, finiteOr(o.turnSpeed, d.turnSpeed)),
         turnThreshold,
         // Strictly below the threshold, or a turn releases on the frame it engages and nothing ever turns.
-        turnReleaseAngle: clamp(num(o.turnReleaseAngle, d.turnReleaseAngle), 0, turnThreshold - 0.5),
-        turnSettleSeconds: clamp(num(o.turnSettleSeconds, d.turnSettleSeconds), 0, 1),
-        directionSmoothing: Math.max(0, num(o.directionSmoothing, d.directionSmoothing)),
-        acceleration: Math.max(0, num(o.acceleration, d.acceleration)),
-        airControl: clamp(num(o.airControl, d.airControl), 0, 1),
-        coyoteSeconds: clamp(num(o.coyoteSeconds, d.coyoteSeconds), 0, 1),
-        jumpLockoutSeconds: clamp(num(o.jumpLockoutSeconds, d.jumpLockoutSeconds), 0, 2),
+        turnReleaseAngle: clamp(finiteOr(o.turnReleaseAngle, d.turnReleaseAngle), 0, turnThreshold - 0.5),
+        turnSettleSeconds: clamp(finiteOr(o.turnSettleSeconds, d.turnSettleSeconds), 0, 1),
+        directionSmoothing: Math.max(0, finiteOr(o.directionSmoothing, d.directionSmoothing)),
+        acceleration: Math.max(0, finiteOr(o.acceleration, d.acceleration)),
+        airControl: clamp(finiteOr(o.airControl, d.airControl), 0, 1),
+        coyoteSeconds: clamp(finiteOr(o.coyoteSeconds, d.coyoteSeconds), 0, 1),
+        jumpLockoutSeconds: clamp(finiteOr(o.jumpLockoutSeconds, d.jumpLockoutSeconds), 0, 2),
         facingMode: (FACING_MODES as readonly string[]).includes(o.facingMode as string)
             ? o.facingMode as FacingMode : d.facingMode,
     };
@@ -250,7 +241,7 @@ export function stepLocomotion(
     const dirLen = Math.hypot(dirX, dirZ);
     if (dirLen > 1e-6) { dirX /= dirLen; dirZ /= dirLen; }
 
-    const speedScale = clamp(num(intent.speedScale, 1), 0, 1);
+    const speedScale = clamp(finiteOr(intent.speedScale, 1), 0, 1);
     const baseSpeed = intent.sprint ? tuning.runSpeed : tuning.walkSpeed;
     const speed = moving ? baseSpeed * magnitude * speedScale : 0;
 

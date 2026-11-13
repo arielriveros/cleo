@@ -21,8 +21,6 @@
 //   blood-pool     blood pouring down into a pool: its floor decal is the Bloodstain's, where the player died
 //   water-splash   the crown a body entering the pond throws up, its sprite
 //   water-droplet  looping water drops for the splash's droplets
-//   water-puddle   rain water settling into a puddle: its settled floor decal lies in the low spots of the
-//                  trails (build.mjs `puddles`)
 //
 // The presets are the Creator's own, at real-world size (a torch flame 0.45 m tall, a bonfire's 2.4 m): the
 // overrides here only frame them for the Valley's tiles.
@@ -84,7 +82,6 @@ export const CREATOR_FX = [
   { key: 'blood-pool', name: 'Blood Pool', medium: 'liquid', preset: 'blood-pool', seed: 6, params: {} },
   { key: 'water-splash', name: 'Water Splash', medium: 'liquid', preset: 'water-splash', seed: 8, params: {} },
   { key: 'water-droplet', name: 'Water Droplets', medium: 'liquid', preset: 'water-droplet', seed: 9, params: {} },
-  { key: 'water-puddle', name: 'Water Puddle', medium: 'liquid', preset: 'water-puddle', seed: 12, params: {} },
 ]
 
 /** The sources a bake of each medium reads (applications/creator/src/fx/, then shared ones). */

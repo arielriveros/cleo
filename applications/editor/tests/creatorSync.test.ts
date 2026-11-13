@@ -55,7 +55,7 @@ describe('Creator ids and folders', () => {
 describe('reconcileVfs pinned folders', () => {
   const libs = (over: Partial<LibSnapshot> = {}): LibSnapshot => ({
     materials: [], terrainMaterials: [], templates: [], models: [],
-    scripts: [], animationFields: [], animations: [], rigs: [], tilesets: [], aiBrains: [], particleSystems: [], animControllers: [], boneMasks: [], poseAssets: [], scenes: [],
+    scripts: [], animationFields: [], animations: [], rigs: [], tilesets: [], aiBrains: [], particleSystems: [], sequences: [], animControllers: [], boneMasks: [], poseAssets: [], scenes: [],
     images: [], textures: [], audioSources: [], soundSamples: [], textureIds: [],
     ...over,
   });

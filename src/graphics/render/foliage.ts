@@ -1,7 +1,7 @@
 import { vec3, mat4 } from 'gl-matrix';
 import type { Frustum } from '../../core/frustum';
 import { Scene } from '../../core/scene/scene';
-import { FOLIAGE_DENSITY_FALLOFF, collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes, foliageEffectiveCull, foliageLodBands, foliageCullLimitSq, foliageAdmitCount, FOLIAGE_SORT_REFRESH, sortFoliageFrontToBack, foliageKeepFraction, createFoliageBatch, foliageBatchStale, foliageBatchInstances, rememberFoliageBatch, foliageChunkBounds, foliageChunkLimit, packFoliageInstances } from '../../terrain/foliage';
+import { FOLIAGE_DENSITY_FALLOFF, collectOrphanedFoliageBuffers, collectOrphanedFoliageMeshes, foliageEffectiveCull, foliageLodBands, foliageCullLimitSq, foliageAdmitCount, FOLIAGE_SORT_REFRESH, sortFoliageFrontToBack, foliageKeepFraction, foliageDensityScale, createFoliageBatch, foliageBatchStale, foliageBatchInstances, rememberFoliageBatch, foliageChunkBounds, foliageChunkLimit, packFoliageInstances } from '../../terrain/foliage';
 import type { FoliageCell, FoliageLayer, FoliageBand, FoliageBatch } from '../../terrain/foliage';
 import { FoliageGpuCuller } from '../foliageGpuCulling';
 import type { GpuCullBucket, GpuFoliageSegment } from '../foliageGpuCulling';
@@ -27,10 +27,11 @@ import type { PipelineCache } from './pipelineCache';
 import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
+import { renderNow, renderClockOverridden } from './renderClock';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
-import { WindFieldSnapshot, windFieldClock } from '../../core/wind/windField';
+import { WindFieldSnapshot, windFieldClock, advanceGustTravel } from '../../core/wind/windField';
 
 /** A foliage layer's cells bucketed on the ground plane, for the shadow pass's range query. */
 export interface FoliageCellGrid {
@@ -120,6 +121,9 @@ export class FoliagePasses {
      * imperceptible. 0 disables the budget.
      */
     private _foliageAdmitPerFrame: number = 4;
+    /** See {@link _foliageAdmitPerFrame}. A movie render sets 0: every frame shows all it should, at once. */
+    public get foliageAdmitPerFrame(): number { return this._foliageAdmitPerFrame; }
+    public set foliageAdmitPerFrame(n: number) { this._foliageAdmitPerFrame = Math.max(0, Math.floor(n) || 0); }
 
     /**
      * Density scaling: how much of a detail level's instances survive, per level away from the base.
@@ -320,7 +324,7 @@ export class FoliagePasses {
                     // Density scaling rides on the BUCKET, not on raw distance: `cell.lod` is already
                     // hysteresis-damped and already decides membership, so the fraction is constant
                     // within a bucket and the batch's own staleness check covers a change for free.
-                    const keep = foliageKeepFraction(slot, layer.levels.length, this.foliageDensityFalloff, layer.kind);
+                    const keep = this._foliageKeep(layer, slot);
                     this._packFoliageBucket(layer, layer.batches, slot, buckets[slot] ??= [], models, keep);
                 }
             }
@@ -344,13 +348,22 @@ export class FoliagePasses {
                 cells: layer.buckets[slot] ?? [],
                 models,
                 band: bands[slot] ?? null,
-                keep: foliageKeepFraction(slot, layer.levels.length, this.foliageDensityFalloff, layer.kind),
+                keep: this._foliageKeep(layer, slot),
                 sphere: octa ? [octa.center[0], octa.center[1], octa.center[2], octa.radius * 1.05] : FoliagePasses._modelsSphere(models),
             });
         }
         layer.gpuBatches = this._foliageGpu.cull(this._passes.acquireEncoder('foliage.cull'), layer, buckets,
                                                  this._sys.visibility.frustum.planes, this._view.camera.position);
         layer.gpuCulled = true;
+    }
+
+    /**
+     * The share of each cell a draw bucket of `layer` keeps: the distance thinning of grass
+     * (`foliageKeepFraction`) times the layer's own `densityScale`. Both are prefixes, so their product is
+     * one too, and the shadow pass takes the same share of the same cells.
+     */
+    private _foliageKeep(layer: FoliageLayer, slot: number): number {
+        return foliageKeepFraction(slot, layer.levels.length, this.foliageDensityFalloff, layer.kind) * foliageDensityScale(layer);
     }
 
     /** The bounding sphere (model space) of a set of sub-models: centre and radius of their union box. */
@@ -416,8 +429,7 @@ export class FoliagePasses {
                 // The SAME fraction the cheapest colour level keeps. Thinning the two differently would
                 // leave shadows with no tree above them, or trees with no shadow beneath them, and the
                 // prefix rule makes the two sets identical rather than merely the same size.
-                const keep = foliageKeepFraction(layer.levels.length - 1, layer.levels.length,
-                                                 this.foliageDensityFalloff, layer.kind);
+                const keep = this._foliageKeep(layer, layer.levels.length - 1);
                 this._packFoliageBucket(layer, layer.shadowBatches, cascade, visible, models, keep);
 
                 // What this layer puts in the cascade: which cells, at which version and thinning, drawn
@@ -442,18 +454,22 @@ export class FoliagePasses {
     /** The one-model list an impostor-cast bucket is chunked by. Never holds a model past the call. */
     private readonly _impostorModels: Model[] = [undefined!];
 
-    /** From this cascade out, a layer with an octahedral impostor casts through it. See `_impostorCasts`. */
+    /** Never before this cascade does a layer cast through its impostor. See `_impostorCasts`. */
     private static readonly IMPOSTOR_SHADOW_CASCADE = 1;
 
     /**
      * Does `layer` cast into `cascade` through its octahedral impostor (shadowMapImpostor.wgsl) rather than
-     * its cheapest mesh level? From IMPOSTOR_SHADOW_CASCADE out, where a texel is a few centimetres and the
-     * shadow's penumbra wider still, so the impostor's own resolution never shows; never in cascade 0. Only
-     * once its atlas is decoded, and never for a card impostor, which has no view from the sun.
+     * its cheapest mesh level? Only where the camera sees impostors too: in a cascade whose near edge (less
+     * its blend band) lies at or past the layer's impostor hand-off (`impostorShadowFrom`). Nearer, the trees
+     * the camera sees are meshes, and their impostor's shadow — a round canopy from one baked view — falls on
+     * them, darkening their sunlit side. Never in cascade 0; only once the atlas is decoded; never for a card
+     * impostor, which has no view from the sun.
      */
     private _impostorCasts(layer: FoliageLayer, cascade: number): boolean {
-        if (cascade < FoliagePasses.IMPOSTOR_SHADOW_CASCADE || layer.kind === 'billboard') return false;
-        if (!layer.billboardModel || !layer.billboardOctahedral || !layer.billboardTextureId) return false;
+        if (layer.kind === 'billboard' || !layer.billboardModel || !layer.billboardOctahedral || !layer.billboardTextureId) return false;
+        const sh = this._sys.shadows;
+        const near = cascade > 0 ? sh.cascadeSplits[cascade - 1] ?? Infinity : 0;
+        if (!impostorShadowFrom(cascade, near, sh.cascadeBlend, layer.billboardDistance, FoliagePasses.IMPOSTOR_SHADOW_CASCADE)) return false;
         return !!TextureManager.Instance.getTexture(layer.billboardTextureId);
     }
 
@@ -482,7 +498,7 @@ export class FoliagePasses {
         const d = this._sys.shadows.shadowLightUnit, v = this._impostorShadowVec;
         v[0][0] = d[0]; v[0][1] = d[1]; v[0][2] = d[2];
         v[0][3] = (clip[2] * d[0] + clip[6] * d[1] + clip[10] * d[2]) * (device.capabilities.conventions.clipDepthZeroToOne ? 1 : 0.5);
-        v[1][0] = info.frames; v[1][1] = info.radius; v[1][2] = albedo.config.flipY ? 1 : 0;
+        v[1][0] = info.frames; v[1][1] = info.radius; v[1][2] = albedo.config.flipY ? 1 : 0; v[1][3] = layer.farCrownRadius;
         v[2][0] = info.center[0]; v[2][1] = info.center[1]; v[2][2] = info.center[2];
         this._shaderManager.setUniform('u_lightDir', v[0]);
         this._shaderManager.setUniform('u_impostor', v[1]);
@@ -743,24 +759,43 @@ export class FoliagePasses {
     /** A layer prototype's [base height, plant height] in object space, keyed on its first model. */
     private readonly _windShapes = new WeakMap<Model, [number, number, number]>();
 
+    /** See RenderSettings.effectsFollowTimeScale. */
+    public effectsFollowTimeScale = false;
+    /** The game's time scale this frame (Renderer.setEffectsTimeScale): the clock's rate while effects follow it. */
+    public effectsTimeScale = 1;
+
+    /**
+     * Advance the render clock (`windTime`) by the render clock's frame delta (renderClock.ts: the wall clock,
+     * or a movie's), clamped against a backgrounded tab, and scaled by the game's
+     * time scale when effects follow it: at time ×2 the grass sways, the clouds drift and the rain falls
+     * twice as fast, a time-lapse rather than only the sun moving faster.
+     */
     public advanceWindTime(): void {
-        const now = performance.now();
-        const dt = this._windClock < 0 ? 0 : Math.min(0.1, Math.max(0, (now - this._windClock) / 1000));
+        const now = renderNow();
+        // No clamp when a movie drives the clock: its step is exact, and a slow movie's is longer than 0.1 s.
+        const cap = renderClockOverridden() ? Infinity : 0.1;
+        const wall = this._windClock < 0 ? 0 : Math.min(cap, Math.max(0, (now - this._windClock) / 1000));
         this._windClock = now;
+        const rate = this.effectsFollowTimeScale && Number.isFinite(this.effectsTimeScale) ? Math.max(0, this.effectsTimeScale) : 1;
+        const dt = wall * rate;
         this._view.windTimePrev = this._view.windTime;
         this._view.windTime += dt;
+        this._view.windDelta = dt;
         windFieldClock.time = this._view.windTime;
     }
 
     /**
      * The scene's wind field this frame (core/wind/windField.ts): the WindNode's parameters and the Force
      * Fields that move the air, captured once per frame, after `advanceWindTime`. Foliage uploads it to
-     * every wind program; the particles sample the same snapshot, so everything rides one air.
+     * every wind program; the particles sample the same snapshot, so everything rides one air. The gusts'
+     * travel is integrated here first, so a wind whose gust speed or size is changing (a preset blending
+     * in) carries its gusts on rather than racing them.
      */
     public readonly windField = new WindFieldSnapshot();
 
     public prepareWindField(scene: Scene): void {
-        this.windField.capture(scene, this._view.windTime);
+        advanceGustTravel(windFieldClock, scene.wind, this._view.windDelta);
+        this.windField.capture(scene, this._view.windTime, windFieldClock.gustTravel);
     }
 
     /**
@@ -909,9 +944,11 @@ export class FoliagePasses {
         c[3] = !band ? 0 : layer.kind === 'billboard' ? 2 : 1;
         // A different dither phase every frame, so TAA resolves the screen-door into a smooth blend.
         f[0] = ((this._view.frameIndex * 7) % 16) / 16;
-        // The leaf translucency the impostor program writes into the G-buffer (the mesh
-        // levels read it off their own materials instead).
+        // The leaf translucency and the weather responses the impostor program uses (the mesh levels read
+        // them off their own materials instead).
         f[1] = layer.farTranslucency;
+        const [wet, snow] = layer.farWeather;
+        f[2] = wet; f[3] = snow;
         this._shaderManager.setUniform('u_lodBand', b);
         this._shaderManager.setUniform('u_lodCamera', c);
         this._shaderManager.setUniform('u_lodFrame', f);
@@ -1224,7 +1261,7 @@ export class FoliagePasses {
         this._setLodFadeUniforms(layer, slot);
         const v = this._impostorVec;
         // Which way up the atlas sits in its texture: see `atlasUv` in geometryFoliageImpostor.wgsl.
-        v[0][0] = info.frames; v[0][1] = info.radius; v[0][2] = albedo.config.flipY ? 1 : 0;
+        v[0][0] = info.frames; v[0][1] = info.radius; v[0][2] = albedo.config.flipY ? 1 : 0; v[0][3] = layer.farCrownRadius;
         v[1][0] = info.center[0]; v[1][1] = info.center[1]; v[1][2] = info.center[2];
         this._shaderManager.setUniform('u_impostor', v[0]);
         this._shaderManager.setUniform('u_impostorCenter', v[1]);
@@ -1377,4 +1414,15 @@ export class FoliagePasses {
     public colourChunks(layer: FoliageLayer, slot: number): FoliageBatch[] | undefined {
         return layer.gpuCulled ? layer.gpuBatches[slot] : layer.batches[slot];
     }
+}
+
+/**
+ * Whether a cascade starting `near` metres out (blended over the last `blend` of it) casts a layer's shadow
+ * through its octahedral impostor: from `firstCascade` on, once that near edge is at or past where the camera
+ * swaps the layer's meshes for the impostor (`handOff`, FoliageLayer.billboardDistance).
+ */
+export function impostorShadowFrom(cascade: number, near: number, blend: number, handOff: number, firstCascade = 1): boolean {
+    if (cascade < firstCascade) return false;
+    if (!Number.isFinite(handOff)) return false;
+    return near * (1 - Math.min(1, Math.max(0, blend))) >= handOff;
 }

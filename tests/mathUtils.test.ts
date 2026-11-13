@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mat4, quat, vec3 } from 'gl-matrix';
 import {
     clamp, damp, dampTime, dampVec3Time, dampAngleDeg, deltaAngleDeg,
-    eulerFromQuatDeg, decomposeTRS, noise1, fbm1, wrapDegrees, wrapSpan, deltaWrapped, dampWrapped,
+    eulerFromQuatDeg, decomposeTRS, noise1, fbm1, wrapDegrees, wrapSpan, deltaWrapped, dampWrapped, closestOnTriangle,
 } from '../src/core/math';
 
 describe('damp', () => {
@@ -277,5 +277,37 @@ describe('decomposeTRS', () => {
         const d = split(m);
         expect(d.s[0]).toBeLessThan(0);
         expectMatClose(recompose(d), m);
+    });
+});
+
+describe('closestOnTriangle', () => {
+    const a = [0, 0, 0], b = [4, 0, 0], c = [0, 0, 4];
+    it('projects onto the face, an edge, or a corner by region', () => {
+        // Above the face: straight down.
+        expect(closestOnTriangle([1, 3, 1], a, b, c)).toEqual([1, 0, 1]);
+        // Beyond the hypotenuse: onto it.
+        const e = closestOnTriangle([3, 0, 3], a, b, c);
+        expect(e[0]).toBeCloseTo(2, 9); expect(e[2]).toBeCloseTo(2, 9);
+        // Past each corner: the corner.
+        expect(closestOnTriangle([-1, 2, -1], a, b, c)).toEqual([0, 0, 0]);
+        expect(closestOnTriangle([6, 0, -1], a, b, c)).toEqual([4, 0, 0]);
+        expect(closestOnTriangle([-1, 0, 6], a, b, c)).toEqual([0, 0, 4]);
+        // Off an edge's side: onto that edge.
+        expect(closestOnTriangle([2, 1, -3], a, b, c)).toEqual([2, 0, 0]);
+    });
+    it('is never farther than any vertex, and agrees with brute force over the face', () => {
+        const rng = (() => { let s = 7; return () => (s = (s * 16807) % 2147483647) / 2147483647; })();
+        for (let i = 0; i < 200; i++) {
+            const p = [rng() * 10 - 3, rng() * 6 - 3, rng() * 10 - 3];
+            const q = closestOnTriangle(p, a, b, c);
+            const d = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+            let brute = Infinity;
+            for (let u = 0; u <= 40; u++) for (let v = 0; u + v <= 40; v++) {
+                const x = 4 * u / 40, z = 4 * v / 40;
+                brute = Math.min(brute, Math.hypot(p[0] - x, p[1], p[2] - z));
+            }
+            expect(d).toBeLessThanOrEqual(brute + 1e-9);
+            expect(brute - d).toBeLessThan(0.08);
+        }
     });
 });

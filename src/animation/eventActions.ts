@@ -1,5 +1,5 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
-import { eulerFromQuatDeg } from '../core/math';
+import { eulerFromQuatDeg, finiteOr } from '../core/math';
 import { Logger } from '../core/logger';
 import type { Node } from '../core/scene/nodes/node';
 import type { Scene } from '../core/scene/scene';
@@ -36,7 +36,6 @@ export interface EventActionBinding {
     actions: EventAction[];
 }
 
-const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 const vec = (v: unknown): [number, number, number] | undefined =>
     Array.isArray(v) && v.length >= 3 && v.every(x => typeof x === 'number') ? [v[0], v[1], v[2]] : undefined;
@@ -50,12 +49,12 @@ export function parseEventAction(raw: unknown): EventAction | null {
         case 'particles': {
             if (!str(o.target)) return null;
             const mode = o.mode === 'play' || o.mode === 'stop' ? o.mode : 'burst';
-            return { kind: 'particles', target: str(o.target), mode, ...(o.count !== undefined ? { count: Math.max(0, Math.floor(num(o.count, 0))) } : {}),
+            return { kind: 'particles', target: str(o.target), mode, ...(o.count !== undefined ? { count: Math.max(0, Math.floor(finiteOr(o.count, 0))) } : {}),
                 ...(str(o.emitter) ? { emitter: str(o.emitter) } : {}) };
         }
         case 'light': return str(o.target)
-            ? { kind: 'light', target: str(o.target), intensity: Math.max(0, num(o.intensity, 5000)), seconds: Math.max(0.01, num(o.seconds, 0.08)),
-                ...(o.falloff !== undefined ? { falloff: Math.max(0.1, num(o.falloff, 2)) } : {}) } : null;
+            ? { kind: 'light', target: str(o.target), intensity: Math.max(0, finiteOr(o.intensity, 5000)), seconds: Math.max(0.01, finiteOr(o.seconds, 0.08)),
+                ...(o.falloff !== undefined ? { falloff: Math.max(0.1, finiteOr(o.falloff, 2)) } : {}) } : null;
         case 'spawn': {
             if (!str(o.template)) return null;
             const rotation = o.rotation === 'camera' || o.rotation === 'owner' ? o.rotation : vec(o.rotation);

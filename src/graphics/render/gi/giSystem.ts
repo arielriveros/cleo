@@ -45,6 +45,7 @@ import {
     unpackGiBake, type GiBake, GI_BAKE_VERSION,
 } from './giBakeFormat';
 import { GiBakeRegistry } from './giBakeRegistry';
+import { renderNow } from '../renderClock';
 import {
     GiSweepState, hashNumbers, isLightJump, nearestUncaptured, needsRelight, needsShadowRender,
     planRelightFrame, type GiLightInputs,
@@ -506,7 +507,7 @@ export class GiSystem {
             // frames, and the scene round the volume only matches its bake once they have. The volume waits
             // (neither captures nor relights) and is checked again until GI_BAKE_SETTLE_MS have passed.
             v.loading = true;
-            v.bakeCheck = { bytes, signature: bake.signature, packed: bake.packed, version: bake.version, until: performance.now() + GI_BAKE_SETTLE_MS, next: 0, late: false };
+            v.bakeCheck = { bytes, signature: bake.signature, packed: bake.packed, version: bake.version, until: performance.now() + GI_BAKE_SETTLE_MS, next: 0, late: false }; // wall-clock: a load, not a look
             return true;
         }
         this._acceptBake(v, bytes, bake.packed);
@@ -527,7 +528,7 @@ export class GiSystem {
      * GI_BAKE_LATE_MS more, a late match dropping the capture for the bake.
      */
     private _recheckBakes(scene: Scene): void {
-        const now = performance.now();
+        const now = performance.now(); // wall-clock: streamed geometry arrives in real time, a movie's clock or not
         for (const v of this._volumes.values()) {
             const check = v.bakeCheck;
             if (!check || now < check.next) continue;
@@ -1339,7 +1340,7 @@ export class GiSystem {
      */
     private _readbackStep(): void {
         if (this._readbackPending || !this._irradiance) return;
-        const now = performance.now() / 1000;
+        const now = renderNow() / 1000;
         if (now - this._lastReadback < GiSystem.READBACK_INTERVAL) return;
         const v = [...this._volumes.values()].find(x => x.ambientDirty);
         if (!v) return;
@@ -1406,6 +1407,22 @@ export class GiSystem {
         const v = [...this._volumes.values()].find(x => x.node.name === volumeName);
         if (!v || !v.ambientValid || probe < 0 || probe >= v.probes) return null;
         return [...v.ambient.subarray(probe * GI_AMBIENT_CUBE_FLOATS, (probe + 1) * GI_AMBIENT_CUBE_FLOATS)];
+    }
+
+    /**
+     * True while a volume's bake is still being matched against the scene or decoded: such a volume neither
+     * captures nor relights yet, so what it lights with is not final.
+     */
+    public get loading(): boolean {
+        for (const v of this._volumes.values()) if (v.loading || v.pendingBake) return true;
+        return false;
+    }
+
+    /** True when no volume is loading and every one's sweeps are done: the light it gives is converged. */
+    public get settled(): boolean {
+        if (!this.enabled) return true;
+        for (const v of this._volumes.values()) if (v.loading || v.pendingBake || !v.sweep.idle) return false;
+        return true;
     }
 
     /** The volumes' state, for the harness and the editor. */

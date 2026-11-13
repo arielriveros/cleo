@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useEngineViewport } from '@cleo/app-kit/engine/useEngineViewport';
 import { useCleoEngine } from "./EngineContext";
-import { Raycaster, Node, Vec, Logger } from "cleo";
+import { Raycaster, Node, Vec, Logger, SequenceNode } from "cleo";
 import TransformGizmo from "./gizmo/TransformGizmo";
 import CollisionGizmo from "./gizmo/CollisionGizmo";
 import BoxVolumeGizmo from "./gizmo/BoxVolumeGizmo";
@@ -40,7 +40,7 @@ const GIZMO_HIDDEN_MODES: EditorMode[] = ['landscape', 'tilemap', 'options', 'ma
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, editorMode, viewDimension, setViewDimension, isSceneReady,
             templateRootId, modelEditTargetId, templates, models, materials, animations, scripts, bodies, triggers,
-            animationFieldTargetId, adoptRigController, inspectedScene } = useCleoEngine();
+            animationFieldTargetId, adoptRigController, inspectedScene, sequences, linkSequenceToNode } = useCleoEngine();
     const { selectedNode, isGizmoDragging, gizmoMode, setGizmoMode, gizmoSpace, setGizmoSpace } = useSelection();
     const { isPlayMode, isSimulating } = usePlayback();
     const { graphView, setGraphView } = useStateMachine();
@@ -332,12 +332,20 @@ export default function EngineViewport() {
     // Drop a template (Templates panel), a model (Assets panel) or a new node (the Scene panel's Add
     // section) into the viewport; it is instantiated under the cursor.
     const onViewportDragOver = (e: React.DragEvent) => {
+        // Sequencer mode animates the open scene and adds nothing to it: every drop is refused there.
+        if (editorMode === 'sequence') return;
         const types = Array.from(e.dataTransfer.types);
-        if (types.includes('text/cleo-template') || types.includes('text/cleo-model') || types.includes(NEW_NODE_MIME))
+        if (types.includes('text/cleo-template') || types.includes('text/cleo-model') || types.includes(NEW_NODE_MIME)
+            || types.includes('text/cleo-sequence'))
             e.preventDefault();
     };
     const onViewportDrop = (e: React.DragEvent) => {
         if (!editorScene) return;
+        if (editorMode === 'sequence') {
+            e.preventDefault();
+            Logger.warn("Sequencer mode can't add to the scene: drop it from the scene tab", 'Editor');
+            return;
+        }
 
         // In a template tab the editable subtree is rooted at the template root (a child of the scene
         // root); drops must parent there so they show in the hierarchy and save with the template. A
@@ -368,6 +376,21 @@ export default function EngineViewport() {
                     if (point && item.placeable !== false) placeAt(node, point, dropParent);
                 })
                 .catch(err => console.error('Failed to add node:', err));
+            return;
+        }
+
+        // A sequence asset dropped in the scene becomes a Sequence node playing it (a cinematic has no place in
+        // the world, so the cursor's point is ignored).
+        const sequenceId = e.dataTransfer.getData('text/cleo-sequence');
+        if (sequenceId) {
+            e.preventDefault();
+            const asset = sequences.find(q => q.id === sequenceId);
+            if (!asset) return;
+            const node = new SequenceNode(asset.name);
+            linkSequenceToNode(node, asset.id);
+            dropParent.addChild(node);
+            eventEmitter.emit('SCENE_CHANGED');
+            eventEmitter.emit('SELECT_NODE', node.id);
             return;
         }
 

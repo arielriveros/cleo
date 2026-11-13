@@ -9,7 +9,8 @@
 // local (-size/2 + c * e, -size/2 + r * e) with `e = size / (resolution - 1)`.
 
 import { brushFalloffWeight } from './brushFalloff';
-import { valueNoise } from './terrainLayers';
+import { clamp01, fbm2 } from '../core/math';
+export { seededRandom, fbm2 as fbm } from '../core/math';
 
 /** Every tool the landscape brush offers in sculpt mode. */
 export type SculptTool =
@@ -90,8 +91,6 @@ export interface SculptParams {
     /** hydro: random source, injectable so a test is deterministic. */
     random?: () => number;
 }
-
-const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 /** World spacing between samples. */
 export function gridElement(g: HeightGrid): number {
@@ -198,19 +197,6 @@ export function unionRegion(a: GridRegion | null, b: GridRegion | null): GridReg
     return { c0: Math.min(a.c0, b.c0), r0: Math.min(a.r0, b.r0), c1: Math.max(a.c1, b.c1), r1: Math.max(a.r1, b.r1) };
 }
 
-/** Fractal value noise, zero-mean in roughly -1..1: four octaves of {@link valueNoise}. */
-export function fbm(x: number, z: number, seed = 0): number {
-    let sum = 0, amp = 0.5, freq = 1, norm = 0;
-    const ox = seed * 31.7, oz = seed * -17.3;
-    for (let o = 0; o < 4; o++) {
-        sum += amp * (valueNoise(x * freq + ox + o * 11.1, z * freq + oz - o * 7.7) * 2 - 1);
-        norm += amp;
-        amp *= 0.5;
-        freq *= 2.03;
-    }
-    return sum / norm;
-}
-
 /** A terraced height: flat treads every `step`, with risers whose steepness `sharpness` (0..1) sets. */
 export function terraceHeight(h: number, step: number, sharpness: number): number {
     if (step <= 1e-6) return h;
@@ -218,18 +204,6 @@ export function terraceHeight(h: number, step: number, sharpness: number): numbe
     const n = Math.floor(h / step);
     const f = h / step - n;
     return (n + Math.pow(f, k)) * step;
-}
-
-/** Deterministic 0..1 PRNG (mulberry32), for tests and for a reproducible erosion pass. */
-export function seededRandom(seed: number): () => number {
-    let a = seed >>> 0;
-    return () => {
-        a = (a + 0x6D2B79F5) >>> 0;
-        let t = a;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
 }
 
 /**
@@ -377,7 +351,7 @@ function applyNoise(g: HeightGrid, b: BrushSpec, amount: number, scale: number, 
     const e = gridElement(g), half = g.size / 2;
     const s = 1 / Math.max(scale, 1e-3);
     // Local coordinates, so the pattern belongs to the terrain and does not crawl when the brush moves.
-    return forEachBrushed(g, b, (c, r, w, _i, h) => h + fbm((-half + c * e) * s, (-half + r * e) * s, seed) * amount * w);
+    return forEachBrushed(g, b, (c, r, w, _i, h) => h + fbm2((-half + c * e) * s, (-half + r * e) * s, seed) * amount * w);
 }
 
 function applyTerrace(g: HeightGrid, b: BrushSpec, amount: number, step: number, sharpness: number): GridRegion | null {

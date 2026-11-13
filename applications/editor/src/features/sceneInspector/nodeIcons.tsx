@@ -127,6 +127,10 @@ export const WindIcon = () => (
 export const WeatherIcon = () => (
   <S><path d="M7 14.5h10a3.5 3.5 0 0 0 .5-6.96 5 5 0 0 0-9.6-1A3.5 3.5 0 0 0 7 14.5Z" /><path d="M8 17.5l-1 2.5M12 17.5l-1 2.5M16 17.5l-1 2.5" /></S>
 );
+/** Sequence: a film strip — a cinematic laid out over time. */
+export const SequenceIcon = () => (
+  <S><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 9h18M3 15h18M7.5 5v4M12 5v4M16.5 5v4M7.5 15v4M12 15v4M16.5 15v4" /></S>
+);
 /** Volumetric clouds. */
 export const CloudsIcon = () => (
   <S><path d="M7 18.5h10a4 4 0 0 0 .6-7.95 5.5 5.5 0 0 0-10.5-1.2A3.9 3.9 0 0 0 7 18.5Z" /></S>

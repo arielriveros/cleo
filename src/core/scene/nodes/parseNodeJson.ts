@@ -29,6 +29,7 @@ import { WaterVolumeNode } from "./waterVolumeNode";
 import { ExposureVolumeNode } from "./exposureVolumeNode";
 import { GIVolumeNode } from "./giVolumeNode";
 import { VolumetricFogNode } from "./volumetricFogNode";
+import { SequenceNode } from "./sequenceNode";
 import { UIRootNode } from "./ui/uiRoot";
 import { UIPanelNode, UIStackNode, UISpacerNode } from "./ui/uiContainers";
 import { UITextNode, UIImageNode } from "./ui/uiContent";
@@ -74,6 +75,7 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'exposureVolume': ExposureVolumeNode.parse(parent, json); break;
     case 'giVolume': GIVolumeNode.parse(parent, json); break;
     case 'volumetricFog': VolumetricFogNode.parse(parent, json); break;
+    case 'sequence': SequenceNode.parse(parent, json); break;
     case 'uiRoot': UIRootNode.parse(parent, json); break;
     case 'uiPanel': UIPanelNode.parse(parent, json); break;
     case 'uiText': UITextNode.parse(parent, json); break;

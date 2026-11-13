@@ -62,7 +62,7 @@ export function AssetGraphProvider({ children }: { children: React.ReactNode }) 
     assetsLoaded,
     materials, terrainMaterials, templates, models, scriptAssets, animationFields, animations,
     tilesets, aiBrains, images, textures, audioSources, soundSamples, rigs,
-    animControllers, boneMasks, poseAssets, particleSystems,
+    animControllers, boneMasks, poseAssets, particleSystems, sequences,
   } = useAssetLibrary()
 
   const [version, setVersion] = useState(0)
@@ -123,6 +123,7 @@ export function AssetGraphProvider({ children }: { children: React.ReactNode }) 
     for (const t of tilesets) visit('tileset', t)
     for (const b of aiBrains) visit('aiBrain', b)
     for (const p of particleSystems) visit('particleSystem', p)
+    for (const q of sequences) visit('sequence', q)
     for (const c of animControllers) visit('animController', c)
     for (const m of boneMasks) visit('boneMask', m)
     for (const p of poseAssets) visit('pose', p)
@@ -154,7 +155,7 @@ export function AssetGraphProvider({ children }: { children: React.ReactNode }) 
     if (changed) setVersion(v => v + 1)
   }, [
     assetsLoaded, materials, terrainMaterials, templates, models, scriptAssets, animationFields,
-    animations, rigs, tilesets, aiBrains, particleSystems, animControllers, boneMasks, poseAssets, images, textures,
+    animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, images, textures,
     audioSources, soundSamples, sceneList, openSceneId,
   ])
 

@@ -295,7 +295,9 @@ share** of them turn toward the **Dry colour**.
 plant: **Wet response** darkens it and makes it glossy in rain, **Snow cover** is how much snow settles
 on its up-facing surfaces (in the weather's snow colour, and how much less light then comes through), and
 **Weight droop** is how far rain or snow bows it down, as a fraction of its height. A plant under a roof
-stays dry where the volume keeps **Shelter**. Distant billboard cards and impostors show no weather.
+stays dry where the volume keeps **Shelter**. A far octahedral impostor shows the weather too, with its
+coarsest mesh level's **Wet response** and **Snow cover** (no droop, and no shelter that far out);
+crossed billboard cards show none.
 
 **Gusts** — what the wind's gusts do to the surface. **Ripple sheen** brightens a plant as a gust
 passes over it, so gusts show as waves rolling across a meadow. On a **Leaves** material, **Leaf

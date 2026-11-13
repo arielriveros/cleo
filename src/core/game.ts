@@ -4,7 +4,9 @@
 
 import { CleoEngine } from "./engine";
 import { showLoadingOverlay, whenFramesSmooth } from "./loadingOverlay";
+import { Logger } from "./logger";
 import type { RenderSettings } from "../graphics/renderer";
+import type { SequenceNode, SequencePlayOptions } from "./scene/nodes/sequenceNode";
 
 /** Progress of a scene load: 0..1, and a short name for the stage it is in. */
 export type LoadProgressListener = (fraction: number, stage: string) => void;
@@ -34,6 +36,23 @@ function requireHost(): GameHost {
 }
 
 const progressListeners = new Set<LoadProgressListener>();
+
+/** What {@link Game.movieRender} reports while the editor renders a sequence to video. */
+export interface MovieRenderInfo {
+  /** The Sequence node being filmed, and its name. */
+  sequenceNodeId: string;
+  sequenceName: string;
+  width: number;
+  height: number;
+  fps: number;
+}
+
+let movieRender: MovieRenderInfo | null = null;
+
+/** Host-facing: the movie being rendered, set before the scene starts and cleared after. */
+export function setMovieRender(info: MovieRenderInfo | null): void {
+  movieRender = info ? { ...info } : null;
+}
 
 export interface LoadSceneOptions {
   /**
@@ -93,6 +112,18 @@ export const Game = {
   /** Every scene name the running game can load. */
   sceneNames(): string[] {
     return host ? host.sceneNames() : [];
+  },
+
+  /**
+   * The movie the editor is rendering, or null in a normal game. Set before the scene starts, so a game
+   * that starts its cinematics from its own UI — a title menu's "Play intro" — can see in `onStart` which
+   * sequence is being filmed and play it at once: nobody is there to press the button. Otherwise the
+   * renderer plays the sequence itself.
+   *
+   *   if (Game.movieRender?.sequenceNodeId === this.intro.id) this.playIntro()
+   */
+  get movieRender(): MovieRenderInfo | null {
+    return movieRender;
   },
 
   /** Whether the game loop is paused (onUpdate stops running, physics stops stepping). */
@@ -174,6 +205,33 @@ export const Game = {
     if (engine) engine.physics.gravity = g;
   },
 
+  /**
+   * The running scene's sequence player (a Sequence node) called `name`, or undefined.
+   *
+   *   Game.sequence('Intro')?.pause();
+   */
+  sequence(name: string): SequenceNode | undefined {
+    const scene = CleoEngine.instance?.scene;
+    if (!scene) return undefined;
+    for (const node of scene.sequences) if (node.name === name) return node;
+    return undefined;
+  },
+  /**
+   * Play the sequence called `name` from the start (or `options.from`), optionally binding its slots to other
+   * nodes for this playback. Returns the player, whose `finished` resolves when it ends; undefined (with a
+   * warning) when there is no such sequence.
+   *
+   *   await Game.playSequence('Intro', { bindings: { Hero: this } })?.finished;
+   */
+  playSequence(name: string, options?: SequencePlayOptions): SequenceNode | undefined {
+    const node = Game.sequence(name);
+    if (!node) {
+      Logger.warn(`Game.playSequence: no sequence named '${name}' in the running scene.`, 'Script');
+      return undefined;
+    }
+    return node.play(options);
+  },
+
   /** A snapshot of the current render/post-processing settings (exposure, bloom, motion blur, ...). */
   getRenderSettings(): RenderSettings | undefined {
     return CleoEngine.instance?.renderer.getRenderSettings();
@@ -182,11 +240,13 @@ export const Game = {
   updateRenderSettings(settings: Partial<RenderSettings>): void {
     const renderer = CleoEngine.instance?.renderer;
     if (!renderer) return;
-    // `applyRenderSettings` resolves an absent tone mapper to the default (a whole scene blob without
-    // one predates the setting), and likewise an absent exposure compensation curve to none. A patch is
-    // not a scene: whatever curves are on now stay on.
+    // `applyRenderSettings` resolves an absent tone mapper, bloom mode and Purkinje strength to their
+    // defaults (a whole scene blob without one predates the setting), and likewise an absent exposure
+    // compensation curve to none. A patch is not a scene: whatever is on now stays on.
     renderer.applyRenderSettings({
       toneMapper: renderer.toneMapper,
+      bloomMode: renderer.bloomMode,
+      purkinjeStrength: renderer.purkinjeStrength,
       exposureCompensationCurve: renderer.exposureCompensationCurve,
       ...settings,
     });

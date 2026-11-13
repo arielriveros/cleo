@@ -58,6 +58,10 @@ function readScene(h: BridgeHost): Scene {
 function editScene(h: BridgeHost): Scene {
   if (h.engine.isPlayMode)
     throw new Error('The game is running, and edits to it are discarded on Stop. Call play_control {"action":"stop"} first.')
+  // A Sequencer tab shows the open scene but keys property changes into its sequence; an edit from here would
+  // bypass that and change the scene without it being recorded anywhere.
+  if (h.engine.editorMode === 'sequence')
+    throw new Error('A Sequencer tab is active: it keys changes rather than editing the scene. Ask the user to switch to the scene tab first.')
   return h.engine.editorScene
 }
 
@@ -786,7 +790,8 @@ const commands: Record<string, Command> = {
     const h = ready(getHost)
     const { asset, created } = upsertMaterial(h, getHost, p.name, p)
 
-    const scene = h.engine.isPlayMode ? null : h.engine.editorScene
+    // Never in Play (the play scene is thrown away) nor in a Sequencer tab (it keys rather than edits the scene).
+    const scene = h.engine.isPlayMode || h.engine.editorMode === 'sequence' ? null : h.engine.editorScene
     let relinked: string[] = []
     const assigned: string[] = []
     if (scene) {
@@ -822,6 +827,7 @@ const commands: Record<string, Command> = {
       animController: e.animControllers.map(c => ({ name: c.name })),
       aiBrain: e.aiBrains.map(b => ({ name: b.name, note: b.kind })),
       particleSystem: e.particleSystems.map(s => ({ name: s.name })),
+      sequence: e.sequences.map(s => ({ name: s.name, note: `${s.sequence.duration.toFixed(1)} s` })),
       sound: e.soundSamples.map(s => ({ name: s.name })),
       texture: e.textures.map(t => ({ name: t.name })),
       tileset: e.tilesets.map(t => ({ name: t.name })),

@@ -42,6 +42,13 @@ export const shaderStats = {
      */
     syncEach: false,
 
+    /**
+     * Every program builds before the frame that needs it, blocking: no background compile and no
+     * stand-in (an uber program, or a custom material's skipped draws). Set for a movie render
+     * (Renderer.beginMovie), where a frame may take as long as it likes but must show the real thing.
+     */
+    blockingCompiles: false,
+
     record(rec: ShaderBuildRecord): void {
         records.push(rec);
     },

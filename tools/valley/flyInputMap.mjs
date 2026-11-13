@@ -64,5 +64,28 @@ export const FLY_INPUT_MAP = {
         },
       ],
     },
+    // The start menu's (examples/scripts/ValleyStartMenu.ts): pick Cinematic demo or Free mode, and Pause to
+    // come back to it. Its own map, so the menu still answers while Gameplay is switched off.
+    {
+      name: 'UI',
+      enabled: true,
+      actions: [
+        {
+          name: 'Navigate', kind: 'vector',
+          bindings: [
+            b('nav:up', key('ArrowUp'), { part: 'up' }),
+            b('nav:down', key('ArrowDown'), { part: 'down' }),
+            b('nav:w', key('KeyW'), { part: 'up' }),
+            b('nav:s', key('KeyS'), { part: 'down' }),
+            b('nav:dpadUp', pad('dpadUp'), { part: 'up' }),
+            b('nav:dpadDown', pad('dpadDown'), { part: 'down' }),
+            b('nav:padY', axis('leftStickY'), { part: 'y', processors: [{ kind: 'deadzone', min: 0.5, max: 0.95 }] }),
+          ],
+        },
+        { name: 'Submit', kind: 'button', bindings: [b('submit:enter', key('Enter')), b('submit:space', key('Space')), b('submit:pad', pad('a'))] },
+        { name: 'Cancel', kind: 'button', bindings: [b('cancel:backspace', key('Backspace')), b('cancel:pad', pad('b'))] },
+        { name: 'Pause', kind: 'button', bindings: [b('pause:p', key('KeyP')), b('pause:escape', key('Escape')), b('pause:pad', pad('start'))] },
+      ],
+    },
   ],
 }

@@ -39,6 +39,6 @@ process.stdout.write(JSON.stringify({
     clouds: options(VOLUMETRIC_CLOUDS_PRESETS, 'sunny'),
     wind: options(WIND_PRESETS, 'breezy'),
     water: options(WATER_VOLUME_PRESETS, 'lake'),
-    // As stored: real lux. The Time of Day takes the sun from there.
+    // As stored: real lux. The Day Cycle and the tour key the sun from there (cinematic/dayPath.ts).
     sun: options(DIRECTIONAL_LIGHT_PRESETS, 'morning'),
 }))

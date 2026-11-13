@@ -1,5 +1,6 @@
 import { exposureCurveStops, type ExposureCurveKey } from "./lighting";
 import type { AutoExposurePresetOptions } from "./renderPresets";
+import { lerp } from "../core/math";
 
 /**
  * Blending exposure volumes over the scene's exposure settings — pure, so the rule is testable without a
@@ -33,8 +34,6 @@ export interface ExposureLayer {
 export interface EffectiveExposure extends Omit<ExposureSettings, 'exposureCompensationCurve'> {
     curveLayers: { curve: readonly ExposureCurveKey[], weight: number }[];
 }
-
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /**
  * Apply `layers` in order, each blended over the result so far by its weight: a field a layer does not

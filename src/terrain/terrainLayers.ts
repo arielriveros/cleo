@@ -15,6 +15,9 @@
 // so erasing a painted road reveals whatever is underneath, rules included, instead of the old splat's
 // renormalization, where painting one layer took weight away from all the others.
 
+import { clamp01, finiteOr, smoothstep, valueNoise } from '../core/math';
+export { hash12, smoothstep, valueNoise } from '../core/math';
+
 /** Surfaces the shader can composite in one pass: base slots + every paint layer's slots, flattened. */
 export const MAX_TERRAIN_SURFACES = 16;
 
@@ -88,16 +91,13 @@ export function defaultBlendRule(): TerrainBlendRule {
     };
 }
 
-const num = (v: any, fallback: number): number => (typeof v === 'number' && isFinite(v) ? v : fallback);
-const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
-
 function parseRange(j: any, d: TerrainRuleRange): TerrainRuleRange {
     if (!j || typeof j !== 'object') return { ...d };
     return {
         enabled: !!j.enabled,
-        min: num(j.min, d.min),
-        max: num(j.max, d.max),
-        falloff: Math.max(0, num(j.falloff, d.falloff)),
+        min: finiteOr(j.min, d.min),
+        max: finiteOr(j.max, d.max),
+        falloff: Math.max(0, finiteOr(j.falloff, d.falloff)),
     };
 }
 
@@ -109,12 +109,12 @@ export function parseBlendRule(json: any): TerrainBlendRule {
         elevation: parseRange(json.elevation, d.elevation),
         slope: parseRange(json.slope, d.slope),
         noise: {
-            amount: clamp01(num(json.noise?.amount, d.noise.amount)),
-            scale: Math.max(NOISE_SCALE_MIN, num(json.noise?.scale, d.noise.scale)),
-            seed: num(json.noise?.seed, d.noise.seed),
+            amount: clamp01(finiteOr(json.noise?.amount, d.noise.amount)),
+            scale: Math.max(NOISE_SCALE_MIN, finiteOr(json.noise?.scale, d.noise.scale)),
+            seed: finiteOr(json.noise?.seed, d.noise.seed),
         },
-        heightBlend: clamp01(num(json.heightBlend, d.heightBlend)),
-        opacity: clamp01(num(json.opacity, d.opacity)),
+        heightBlend: clamp01(finiteOr(json.heightBlend, d.heightBlend)),
+        opacity: clamp01(finiteOr(json.opacity, d.opacity)),
     };
 }
 
@@ -135,15 +135,6 @@ export function ruleRestricts(r: TerrainBlendRule): boolean {
 }
 
 // --- evaluation -----------------------------------------------------------------------------------
-
-const f32 = Math.fround;
-
-/** `smoothstep` with WGSL's semantics, including the degenerate edge0 == edge1 case the WGSL avoids. */
-export function smoothstep(e0: number, e1: number, x: number): number {
-    if (e1 === e0) return x < e0 ? 0 : 1;
-    const t = clamp01((x - e0) / (e1 - e0));
-    return t * t * (3 - 2 * t);
-}
 
 /**
  * Coverage of one range test at `v`: 1 inside `min..max`, a smoothstep fade to 0 across `falloff` outside
@@ -175,28 +166,6 @@ export function slopeDegreesFromNormalY(ny: number): number {
  */
 export function transitionShift(a: number, t: number, strength: number): number {
     return clamp01(a + 4 * a * (1 - a) * t * strength);
-}
-
-/** Hoskins' "hash without sine", evaluated in f32 like the GPU does. 0..1. Mirrors `hash12` in the WGSL. */
-export function hash12(x: number, y: number): number {
-    let px = f32(x * 0.1031), py = f32(y * 0.1031), pz = f32(x * 0.1031);
-    px = f32(px - Math.floor(px)); py = f32(py - Math.floor(py)); pz = f32(pz - Math.floor(pz));
-    // p3 += dot(p3, p3.yzx + 33.33)
-    const d = f32(f32(px * f32(py + 33.33)) + f32(py * f32(pz + 33.33)) + f32(pz * f32(px + 33.33)));
-    px = f32(px + d); py = f32(py + d); pz = f32(pz + d);
-    const v = f32(f32(px + py) * pz);
-    return v - Math.floor(v);
-}
-
-/** Smooth value noise on the integer lattice, 0..1. Mirrors `valueNoise` in the WGSL. */
-export function valueNoise(x: number, y: number): number {
-    const ix = Math.floor(x), iy = Math.floor(y);
-    const fx = x - ix, fy = y - iy;
-    const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
-    const a = hash12(ix, iy), b = hash12(ix + 1, iy);
-    const c = hash12(ix, iy + 1), d = hash12(ix + 1, iy + 1);
-    const top = a + (b - a) * ux, bot = c + (d - c) * ux;
-    return top + (bot - top) * uy;
 }
 
 /**
@@ -418,14 +387,14 @@ export function legacyAutoRule(auto: boolean, hRange: readonly number[] | undefi
                                sRange: readonly number[] | undefined, originY = 0): TerrainBlendRule {
     const rule = defaultBlendRule();
     if (!auto) return rule;
-    const hLo = num(hRange?.[0], 0), hHi = num(hRange?.[1], 100);
+    const hLo = finiteOr(hRange?.[0], 0), hHi = finiteOr(hRange?.[1], 100);
     const he = 2;
     let eMin = hLo + he - originY, eMax = hHi - he - originY;
     if (eMax < eMin) eMin = eMax = (eMin + eMax) / 2;
     rule.elevation = { enabled: true, min: eMin, max: eMax, falloff: 2 * he };
 
     const deg = (s: number) => Math.acos(1 - clamp01(s)) * (180 / Math.PI);
-    const sLo = clamp01(num(sRange?.[0], 0)), sHi = clamp01(num(sRange?.[1], 1));
+    const sLo = clamp01(finiteOr(sRange?.[0], 0)), sHi = clamp01(finiteOr(sRange?.[1], 1));
     const se = 0.08;
     let sMin = deg(sLo + se), sMax = deg(sHi - se);
     if (sMax < sMin) sMin = sMax = (sMin + sMax) / 2;

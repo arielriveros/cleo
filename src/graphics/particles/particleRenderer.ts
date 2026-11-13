@@ -182,7 +182,7 @@ export interface ParticleDrawFrame {
 }
 
 /** `u_surface.w` bits: the SURFACE_* constants in chunks/particleDraw.wgsl. */
-const SURFACE = { NORMAL_MAP: 1, ORM_MAP: 2, PBR: 4 } as const;
+const SURFACE = { NORMAL_MAP: 1, ORM_MAP: 2, PBR: 4, RAIN: 8 } as const;
 
 /** A node's tint, its colour divided by the part of the exposure it does not take (alpha untouched). */
 const compensatedTint: [number, number, number, number] = [1, 1, 1, 1];
@@ -1194,7 +1194,8 @@ export class ParticleRenderer {
                     const normalMap = surfaceMap(render.normalTextureId);
                     const ormMap = surfaceMap(render.ormTextureId);
                     const roughness = render.roughness ?? 1, metallic = render.metallic ?? 0;
-                    const pbr = render.lit && (!!normalMap || !!ormMap || metallic > 0 || roughness < 0.999);
+                    const rainDrop = render.lit && render.shading === 'rain';
+                    const pbr = render.lit && !rainDrop && (!!normalMap || !!ormMap || metallic > 0 || roughness < 0.999);
                     const env = pbr ? envFor() : null;
                     const normalTex = normalMap ?? this._whiteTexture, ormTex = ormMap ?? this._whiteTexture;
                     const envTex = env?.cube ?? this._cubeFallback;
@@ -1233,6 +1234,7 @@ export class ParticleRenderer {
                     shaders.setUniform('u_flipbook2', packed.draw.u_flipbook2);
                     shaders.setUniform('u_speedRange', packed.draw.u_speedRange);
                     shaders.setUniform('u_stretchRange', packed.draw.u_stretchRange);
+                    shaders.setUniform('u_viewport', [frame.width, frame.height, 0, 0]);
                     shaders.setUniform('u_fragParams', packed.frag.u_fragParams);
                     shaders.setUniform('u_depthParams', [frame.near, frame.far, frame.orthographic ? 1 : 0, frame.depth ? 1 : 0]);
                     shaders.setUniform('u_fragMask', [sprite ? 1 : 0, render.lit ? 1 : 0, 1 / frame.width, 1 / frame.height]);
@@ -1245,7 +1247,8 @@ export class ParticleRenderer {
                     shaders.setUniform('u_keyDir', [lights.keyDirection[0], lights.keyDirection[1], lights.keyDirection[2], 0]);
                     shaders.setUniform('u_keyColor', [lights.keyColor[0], lights.keyColor[1], lights.keyColor[2], frame.preExposure ?? 1]);
                     shaders.setUniform('u_surface', [roughness, metallic, render.normalStrength ?? 1,
-                                                     (normalMap ? SURFACE.NORMAL_MAP : 0) | (ormMap ? SURFACE.ORM_MAP : 0) | (pbr ? SURFACE.PBR : 0)]);
+                                                     (normalMap ? SURFACE.NORMAL_MAP : 0) | (ormMap ? SURFACE.ORM_MAP : 0) | (pbr ? SURFACE.PBR : 0)
+                                                     | (rainDrop ? SURFACE.RAIN : 0)]);
                     shaders.setUniform('u_viewPos', [frame.cameraPosition[0], frame.cameraPosition[1], frame.cameraPosition[2],
                                                      env ? (env.linear ? 2 : 1) : 0]);
                     if (mesh) {

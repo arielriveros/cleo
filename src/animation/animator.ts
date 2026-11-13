@@ -395,8 +395,16 @@ export interface AnimationActionHandle {
     readonly clipName: string;
     readonly done: boolean;
     readonly finished: Promise<void>;
+    /** Clip seconds the action is at, and the clip's length (both 0 once it is over). */
+    readonly time: number;
+    readonly duration: number;
     /** Fade the action out now. */
     stop(blendOut?: number): void;
+    /**
+     * Put the action at `clipSeconds` (wrapped when it loops, else held at the clip's end), firing none of
+     * the clip's events in between: a scrub, or a sequencer keeping the clip on its timeline.
+     */
+    seek(clipSeconds: number): void;
 }
 
 // A layer or slot: a child Animator that plays into a pose the parent blends in. Reusing a whole Animator
@@ -3510,11 +3518,24 @@ export class Animator {
         const handle: AnimationActionHandle = {
             slot: slotName, clipName, finished,
             get done() { return action.done; },
+            get time() { return action.done || target.action !== action ? 0 : target.animator._currentTime; },
+            get duration() { return action.done || target.action !== action ? 0 : target.animator._getAnimationDuration(); },
             stop: (blendOut?: number) => {
                 if (action.done || target.action !== action) return;
                 action.stopping = true;
                 target.presenceTarget = 0;
                 target.fadeSeconds = Math.max(1e-3, blendOut ?? action.blendOut);
+            },
+            seek: (clipSeconds: number) => {
+                if (action.done || target.action !== action || !Number.isFinite(clipSeconds)) return;
+                const child = target.animator;
+                const duration = child._getAnimationDuration();
+                let at = Math.max(0, clipSeconds);
+                if (duration > 0) at = action.loop ? at % duration : Math.min(at, duration);
+                // As a part-way start does: the clock moves, and no event between the old time and the new fires.
+                child._currentTime = at;
+                child._prevEventTime = at;
+                child._eventFromStart = false;
             },
         };
         if (!exists) {

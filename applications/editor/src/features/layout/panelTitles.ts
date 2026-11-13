@@ -15,6 +15,7 @@ export const PANEL_TITLES: Record<string, string> = {
   landscapeTools: 'Landscape Tools', landscapeLayers: 'Landscape Layers',
   rigRagdoll: 'Ragdoll', rigBoneMasks: 'Bone Masks',
   optionsEngine: 'Engine', optionsEditor: 'Editor', optionsProject: 'Project',
+  sequencer: 'Sequencer',
 };
 
 /** Every title `panelTitle` can return beyond PANEL_TITLES, for the coverage test. */
@@ -63,6 +64,7 @@ export const MODE_DOC_PAGE: Record<EditorMode, string> = {
   aiBrain: 'editor/ai-brains',
   rig: 'editor/animation',
   particleSystem: 'editor/particles',
+  sequence: 'editor/sequencer',
 };
 
 const PANEL_DOC_PAGE: Record<string, string> = {
@@ -78,6 +80,7 @@ const PANEL_DOC_PAGE: Record<string, string> = {
   // The ragdoll is documented with the rest of the ragdoll, in Physics.
   rigRagdoll: 'editor/physics', rigBoneMasks: 'editor/animation',
   optionsEngine: 'editor/options', optionsEditor: 'editor/options', optionsProject: 'editor/options',
+  sequencer: 'editor/sequencer',
 };
 
 /** The docs page a panel's content is described on, in a mode. */

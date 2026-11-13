@@ -15,6 +15,7 @@ import { isAttachable } from '../../../utils/scripts'
 import { TEMPLATE_ID_VAR } from '../../../utils/templates'
 import { isOverridden, setNameOverride } from '../../../utils/templateOverrides'
 import OverrideMark from '../OverrideMark'
+import { useInspectorLock } from '../inspectorLock';
 
 const MOTION_BLUR_OPTIONS: { value: MotionBlurMode; label: string; title: string }[] = [
   { value: 'full', label: 'Full', title: 'The true screen-space motion. A node travelling with the camera does not move on screen, so it already stays sharp.' },
@@ -27,7 +28,9 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
   // A placed template instance's ROOT keeps its own name (a per-instance override); everything inside it
   // keeps the template's names, which is what its children are found by.
   const instanceRoot = editorMode === 'scene' && !!props.node.getVariable(TEMPLATE_ID_VAR);
-  const nameLocked = !!props.readOnly && !instanceRoot;
+  // Sequencer mode keys nodes and never restructures them: no rename, type change or delete there.
+  const lock = useInspectorLock();
+  const nameLocked = (!!props.readOnly && !instanceRoot) || lock.locked;
   const { push, silently } = useHistory();
   const [nodeName, setNodeName] = useState(props.node.name);
   const [spawnOnStart, setSpawnOnStart] = useState(props.node.spawnOnStart);
@@ -207,7 +210,7 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
             hint={props.allowTypeChange
               ? 'What this template becomes when it is placed. Changing it rebuilds the root in place: its name, transform, children, variables, script and physics are kept, and everything specific to the old type — the mesh, the light, the camera — is replaced with a default for the new one. A Camera Rig arrives without its camera, since the children you already have are kept instead. Undoable.'
               : undefined}>
-            {props.allowTypeChange && !props.readOnly
+            {props.allowTypeChange && !props.readOnly && !lock.locked
               ? <Select className='w-full' value={props.node.nodeType} disabled={converting}
                   onChange={(e) => void handleTypeChange(e.target.value)}>
                   {/* A root that is already something not on the list — an old template rooted at a skybox —
@@ -262,7 +265,7 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
         </>}
         {/* Not for an editor-owned node (a LOD preview, a preview tab's holder): the editor built it and
             tracks it, deleting it records nothing and marks nothing, and the tab would stop working. */}
-        {props.node.name !== 'root' && !props.node.isEditorOwned &&
+        {props.node.name !== 'root' && !props.node.isEditorOwned && !lock.locked &&
           <div className='mt-2'>
             {/* Synchronous removal, not Node.remove(): that only sets markForRemoval and leaves the node
                 in the tree until a later Scene.update sweep. Anything reading the tree in between — the

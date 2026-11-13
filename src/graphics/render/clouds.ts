@@ -23,6 +23,7 @@ import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 import type { RenderSubsystems } from './subsystems';
+import { smoothstep } from '../../core/math';
 
 /** What VolumetricCloudPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface VolumetricCloudPassesHost {
@@ -129,12 +130,8 @@ export class VolumetricCloudPasses {
         const invLen = 1 / (Math.hypot(sunDir[0], sunDir[1], sunDir[2]) || 1);
         const toSun = [-sunDir[0] * invLen, -sunDir[1] * invLen, -sunDir[2] * invLen];
         const elevation = toSun[1];
-        const smooth01 = (a: number, b: number, x: number) => {
-            const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-            return t * t * (3 - 2 * t);
-        };
-        const day = smooth01(0.08, 0.35, elevation);         // 1 = sun clearly above the horizon
-        const night = 1 - smooth01(-0.22, -0.03, elevation); // 1 = sun clearly below it
+        const day = smoothstep(0.08, 0.35, elevation);         // 1 = sun clearly above the horizon
+        const night = 1 - smoothstep(-0.22, -0.03, elevation); // 1 = sun clearly below it
         const sunset = (1 - day) * (1 - night);              // peaks with the sun on the horizon
         const mix1 = (a: number, b: number, t: number) => a + (b - a) * t;
         const sunsetColor = node.sunsetColor;                // user-set sunrise/sunset glow color
@@ -178,7 +175,7 @@ export class VolumetricCloudPasses {
             // Sun intensity follows elevation: dimmest on the horizon (long atmospheric path), ramping
             // to the authored full value with the sun at the zenith.
             const HORIZON_SUN_INTENSITY = 0.25;
-            effSunIntensity = node.sunIntensity * mix1(HORIZON_SUN_INTENSITY, 1, smooth01(0, 1, elevation));
+            effSunIntensity = node.sunIntensity * mix1(HORIZON_SUN_INTENSITY, 1, smoothstep(0, 1, elevation));
         }
 
         let effAmbientColor: number[];
@@ -212,14 +209,14 @@ export class VolumetricCloudPasses {
 
     /**
      * Every raymarch uniform of the cloud pass but the per-target ones (temporal slot, depth flag). Shared
-     * by the live pass and the sky bake, which differ only in the view (`invViewProj`, `eye`) and clock.
-     * Expects the 'volumetricClouds' program to be bound.
+     * by the live pass and the sky bake, which differ only in the view (`invViewProj`, `eye`) and the wind's
+     * drift (`windOffset`, the bake's frozen one). Expects the 'volumetricClouds' program to be bound.
      */
     public setCloudUniforms(scene: Scene, node: VolumetricCloudsNode, invViewProj: mat4,
-                              eye: ArrayLike<number>, time: number): void {
+                              eye: ArrayLike<number>, windOffset: ArrayLike<number>): void {
         this._shaderManager.setUniform('u_invViewProj', invViewProj);
         this._shaderManager.setUniform('u_viewPos', eye);
-        this._shaderManager.setUniform('u_time', time);
+        this._shaderManager.setUniform('u_time', this._view.windTime);
         // Baked noise volumes. The inverse periods convert a lattice-space coordinate into the
         // volume's [0,1] UVW, and must match the periods the bake used or the field changes scale.
         this._shaderManager.setUniform('u_baseNoiseInvPeriod', 1 / VolumetricCloudPasses.CLOUD_BASE_NOISE_PERIOD);
@@ -274,10 +271,10 @@ export class VolumetricCloudPasses {
         this._shaderManager.setUniform('u_msExtinction', node.msExtinction);
         this._shaderManager.setUniform('u_msEccentricity', node.msEccentricity);
         this._shaderManager.setUniform('u_hazeDistance', node.hazeDistance);
-        // Animation
-        // The scene Wind's direction and strength when the node follows it, else its own.
+        // Animation: how far the wind has carried the clouds (`advanceCloudWind`), not a speed times a
+        // clock. The speed and the clock are still uploaded for the struct, but the shader reads the drift.
         const windSpeed = node.resolveWind(scene.wind, this._sys.shadows.cloudWindDir);
-        this._shaderManager.setUniform('u_wind', this._sys.shadows.cloudWindDir);
+        this._shaderManager.setUniform('u_wind', windOffset);
         this._shaderManager.setUniform('u_windSpeed', windSpeed);
         this._shaderManager.setUniform('u_detailWindFactor', node.detailWindFactor);
         // Quality
@@ -289,9 +286,28 @@ export class VolumetricCloudPasses {
         this._shaderManager.setUniform('u_opacity', node.opacity);
     }
 
-    /** The clouds' wind clock, in seconds: frozen at the bake while they are drawn from it. */
-    public cloudTime(scene: Scene, node: VolumetricCloudsNode): number {
-        return this._sys.sky.cloudSkyActive(scene) ? node.bakedAt : performance.now() * 0.001;
+    /**
+     * How far the wind has carried the clouds, world metres: the sum of direction × speed × dt over every
+     * frame, on the render clock. Integrated rather than `speed × time` so that a wind that strengthens,
+     * slows or turns (a preset blending from clear to storm) carries the clouds on from where they are; a
+     * product of a changing speed and a clock already minutes along would race them across the sky.
+     */
+    public readonly windOffset: [number, number, number] = [0, 0, 0];
+    private readonly _windDir: [number, number, number] = [0, 0, 0];
+
+    /** Carry the clouds on by `dt` seconds of the render clock, with the node's wind as it is now. */
+    public advanceCloudWind(scene: Scene, dt: number): void {
+        const node = scene.volumetricClouds;
+        if (!node || !(dt > 0)) return;
+        const speed = node.resolveWind(scene.wind, this._windDir);
+        if (!Number.isFinite(speed)) return;
+        const o = this.windOffset, d = this._windDir;
+        o[0] += d[0] * speed * dt; o[1] += d[1] * speed * dt; o[2] += d[2] * speed * dt;
+    }
+
+    /** The clouds' drift as drawn: frozen at the bake while they are drawn from it. */
+    public cloudWindOffset(scene: Scene, node: VolumetricCloudsNode): ArrayLike<number> {
+        return this._sys.sky.cloudSkyActive(scene) ? node.bakedWindOffset : this.windOffset;
     }
 
     /**
@@ -326,8 +342,7 @@ export class VolumetricCloudPasses {
         const rayGroup = (pipe: RenderPipeline) => this._bindGroups.textureGroup(pipe, 0, [
             this._targets.gBuffer.depth, this.cloudBaseNoise!, this.cloudDetailNoise!,
         ]);
-        this.setCloudUniforms(scene, node, this._view.invViewProj, this._view.camera.position,
-                               performance.now() * 0.001);
+        this.setCloudUniforms(scene, node, this._view.invViewProj, this._view.camera.position, this.windOffset);
         this._shaderManager.setUniform('u_ignoreDepth', false);
         this._shaderManager.setUniform('u_preExposure', this._view.preExposure);
 

@@ -1,5 +1,7 @@
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
+import { finiteOr } from "../../math";
+import { windFieldClock } from "../../wind/windField";
 /** What the water reads back from a body it buoyed: where it is and how it moves. */
 type FloatingBody = { position: { x: number; y: number; z: number }; velocity: { x: number; y: number; z: number } };
 import { Node } from "./node";
@@ -37,8 +39,6 @@ export interface WaterVolumeOptions {
     wadeSplashTemplate?: string;
     enabled?: boolean;
 }
-
-const num = (x: unknown, fallback: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
 
 /** Ripple slots a surface material can declare (`ripple0`..`ripple11`). */
 export const WATER_RIPPLE_SLOTS = 12;
@@ -89,12 +89,12 @@ export class WaterVolumeNode extends Node {
     constructor(name: string, options: WaterVolumeOptions = {}, id: string = uuidv4()) {
         super(name, 'waterVolume', id);
         const s = options.size;
-        this._size = Array.isArray(s) ? [Math.abs(num(s[0], 10)), Math.abs(num(s[1], 2)), Math.abs(num(s[2], 10))] : [10, 2, 10];
-        this._density = Math.max(1, num(options.density, 1000));
-        this._linearDrag = Math.max(0, num(options.linearDrag, 2.5));
-        this._angularDrag = Math.max(0, num(options.angularDrag, 1.5));
-        this._waveAmplitude = Math.max(0, num(options.waveAmplitude, 0.03));
-        this._waveFrequency = Math.max(0, num(options.waveFrequency, 0.6));
+        this._size = Array.isArray(s) ? [Math.abs(finiteOr(s[0], 10)), Math.abs(finiteOr(s[1], 2)), Math.abs(finiteOr(s[2], 10))] : [10, 2, 10];
+        this._density = Math.max(1, finiteOr(options.density, 1000));
+        this._linearDrag = Math.max(0, finiteOr(options.linearDrag, 2.5));
+        this._angularDrag = Math.max(0, finiteOr(options.angularDrag, 1.5));
+        this._waveAmplitude = Math.max(0, finiteOr(options.waveAmplitude, 0.03));
+        this._waveFrequency = Math.max(0, finiteOr(options.waveFrequency, 0.6));
         this._affectCharacters = !!options.affectCharacters;
         this._surfaceNodeId = typeof options.surfaceNodeId === 'string' && options.surfaceNodeId ? options.surfaceNodeId : null;
         this._splashTemplate = typeof options.splashTemplate === 'string' ? options.splashTemplate : '';
@@ -105,19 +105,19 @@ export class WaterVolumeNode extends Node {
     // ---- properties ----
     public get size(): [number, number, number] { return this._size; }
     public set size(v: [number, number, number]) {
-        this._size = [Math.abs(num(v?.[0], 10)), Math.abs(num(v?.[1], 2)), Math.abs(num(v?.[2], 10))];
+        this._size = [Math.abs(finiteOr(v?.[0], 10)), Math.abs(finiteOr(v?.[1], 2)), Math.abs(finiteOr(v?.[2], 10))];
         this._notifyChange('component', 'size');
     }
     public get density(): number { return this._density; }
-    public set density(v: number) { this._density = Math.max(1, num(v, this._density)); this._notifyChange('component', 'density'); }
+    public set density(v: number) { this._density = Math.max(1, finiteOr(v, this._density)); this._notifyChange('component', 'density'); }
     public get linearDrag(): number { return this._linearDrag; }
-    public set linearDrag(v: number) { this._linearDrag = Math.max(0, num(v, this._linearDrag)); this._notifyChange('component', 'linearDrag'); }
+    public set linearDrag(v: number) { this._linearDrag = Math.max(0, finiteOr(v, this._linearDrag)); this._notifyChange('component', 'linearDrag'); }
     public get angularDrag(): number { return this._angularDrag; }
-    public set angularDrag(v: number) { this._angularDrag = Math.max(0, num(v, this._angularDrag)); this._notifyChange('component', 'angularDrag'); }
+    public set angularDrag(v: number) { this._angularDrag = Math.max(0, finiteOr(v, this._angularDrag)); this._notifyChange('component', 'angularDrag'); }
     public get waveAmplitude(): number { return this._waveAmplitude; }
-    public set waveAmplitude(v: number) { this._waveAmplitude = Math.max(0, num(v, this._waveAmplitude)); this._notifyChange('component', 'waveAmplitude'); }
+    public set waveAmplitude(v: number) { this._waveAmplitude = Math.max(0, finiteOr(v, this._waveAmplitude)); this._notifyChange('component', 'waveAmplitude'); }
     public get waveFrequency(): number { return this._waveFrequency; }
-    public set waveFrequency(v: number) { this._waveFrequency = Math.max(0, num(v, this._waveFrequency)); this._notifyChange('component', 'waveFrequency'); }
+    public set waveFrequency(v: number) { this._waveFrequency = Math.max(0, finiteOr(v, this._waveFrequency)); this._notifyChange('component', 'waveFrequency'); }
     public get affectCharacters(): boolean { return this._affectCharacters; }
     public set affectCharacters(v: boolean) { this._affectCharacters = !!v; this._notifyChange('component', 'affectCharacters'); }
     public get surfaceNodeId(): string | null { return this._surfaceNodeId; }
@@ -196,8 +196,8 @@ export class WaterVolumeNode extends Node {
         }
     }
 
-    /** The clock the ripples are stamped on: the renderer's `u_time`. */
-    private static _now(): number { return performance.now() * 0.001; }
+    /** The clock the ripples are stamped on: the renderer's `u_time`, its render clock (`windFieldClock`). */
+    private static _now(): number { return windFieldClock.time; }
 
     private _surfaceActivity(delta: number): void {
         const scene = this._scene;

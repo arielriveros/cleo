@@ -65,8 +65,14 @@ const KIND_LABEL: Record<string, string> = {
 
 export function HistoryProvider({ children }: { children: React.ReactNode }) {
   const {
-    eventEmitter, editorScene, activeTabId, isPlayMode, isDirtySuppressed, selectedNode,
+    eventEmitter, editorScene, activeTabId, isPlayMode, isDirtySuppressed, selectedNode, tabs: allTabs,
   } = useCleoEngine()
+  // A Sequencer tab shows the OPEN scene and turns every property change into a key of its sequence: its own
+  // stack holds sequence edits (pushed by the Sequencer), and the scene recorder must not snapshot the scene
+  // for it — that scene belongs to the scene tab.
+  const keysScene = allTabs.find(t => t.id === activeTabId)?.kind === 'sequence'
+  const keysSceneRef = useRef(keysScene)
+  keysSceneRef.current = keysScene
 
   const managersRef = useRef(new Map<string, HistoryManager>())
   // Bumped by every stack change. It must be a dependency of the context value below: `active` is the same
@@ -111,14 +117,14 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (!selectedNode) return
+    if (!selectedNode || keysScene) return
     const node = sceneRef.current.getNodeById(selectedNode)
     if (!canSnapshot(node, sceneRef.current)) return
     let cancelled = false
     const previous = baselineRef.current.get(node.id)
     void snapshot(node, previous).then(json => { if (!cancelled && json) baselineRef.current.set(node.id, json) })
     return () => { cancelled = true }
-  }, [selectedNode, snapshot, activeTabId])
+  }, [selectedNode, snapshot, activeTabId, keysScene])
 
   /** Rebuild a node's subtree from a snapshot, in place and keeping its position among its siblings. */
   // Read by restore(), which is created once.
@@ -200,6 +206,7 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
       // Play-mode churn (scripts spawning bullets) and the editor's own bookkeeping (thumbnail renders,
       // asset propagation) are not user edits. `withoutDirty` already brackets the latter.
       if (isPlayMode || isDirtySuppressed() || manager.suspended) return
+      if (keysSceneRef.current) return
       if (!payload || !payload.node) return
       // Checked BEFORE anything reaches manager.push, which clears the redo stack: a helper icon appearing
       // must not cost the user their redo branch either.

@@ -29,6 +29,7 @@ Two kinds keep the real extension of the file their bytes arrived as; every othe
 | `tileset` | `.tileset` | |
 | `aiBrain` | `.brain` | *(unreleased)* |
 | `particleSystem` | `.vfx` | Emitters, each a module stack plus a renderer, plus `bounds` and `lod` (`{ enabled, levels: [{ distance, spawnScale, stepScale }], cullDistance, scaleBursts }`); each emitter's `maxLod` is the coarsest level it spawns at (99 = all). A `collision` module's `bodies: true` collides with physics bodies (absent = off). Embedded by value into Particle System nodes. *(unreleased)* |
+| `sequence` | `.sequence` | `{ id, name, sequence }`: a cinematic timeline (`version`, `duration`, `fps`, `clock`, `loop`, `slots`, `tracks`, `markers`; a slot's `nodeId` is the node it was authored against, `path` its fallback). Embedded by value into Sequence nodes, which record `sequenceId`. *(unreleased)* |
 | `animController` | `.animator` | A shared animator: parameters, states, layers, action slots. (`.controller` still opens.) |
 | `boneMask` | `.mask` | Per-bone weights, by bone name, on one rig. *(unreleased)* |
 | `pose` | `.pose` | Named static poses of one rig. *(unreleased)* |
@@ -58,9 +59,9 @@ old exports and the shipped example projects importable.
 Two bundle kinds exist: `'project'` (carries `mainSceneId`, `openSceneId`, `sceneMetas`, `prefs`,
 `projectName`) and `'assetpack'`.
 
-Each asset library is one JSON file under `libraries/`. Four are new *(unreleased)*:
-`animControllers.json`, `boneMasks.json`, `poseAssets.json` and `particleSystems.json`. All four are
-optional on read, so a bundle written before they existed imports as a project with none.
+Each asset library is one JSON file under `libraries/`. Five are new *(unreleased)*:
+`animControllers.json`, `boneMasks.json`, `poseAssets.json`, `particleSystems.json` and `sequences.json`. All
+five are optional on read, so a bundle written before they existed imports as a project with none.
 
 Audio sources and sound samples are carried **explicitly** rather than re-derived, because loop
 points, fades, bus assignment and effect racks cannot be recovered from a `.wav`. Images and
@@ -151,6 +152,8 @@ manifest contract is newer than itself.
   no brain assets — see [AI brains](../editor/ai-brains.md).
 - **The particle system library.** Effects are embedded on their Particle System nodes in the same
   way; only the sprite textures their emitters draw are shipped.
+- **The sequence library.** Each Sequence node embeds the sequence it plays (refreshed from the library as
+  the scene is published), so no `.sequence` asset ships.
 
 Scripts are extracted and obfuscated, and terrain data is DEFLATE-compressed.
 

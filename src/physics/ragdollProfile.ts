@@ -22,6 +22,7 @@ import type { Skin } from '../animation/animatedModel';
 import { humanoidRigOf } from '../animation/animationRetarget';
 import { normalizeBoneName } from '../animation/boneNames';
 import { skeletonTopology } from '../animation/skeletonTopology';
+import { DEG2RAD, finiteOr, quatFromBasis } from '../core/math';
 
 export type RagdollShape = 'capsule' | 'box' | 'sphere';
 export type RagdollJointType = 'cone' | 'hinge' | 'fixed';
@@ -133,8 +134,6 @@ export interface RagdollLayout {
     left: vec3;
 }
 
-const DEG = Math.PI / 180;
-
 /** Find a joint by bone name: exact first, then by normalized name. */
 export function findBoneJoint(skin: Skin, name: string | undefined): number {
     if (!name) return -1;
@@ -158,13 +157,7 @@ export function rigidRotation(out: quat, m: mat4): quat {
     const y = vec3.normalize(vec3.create(), vec3.scaleAndAdd(vec3.create(), yRaw, x, -vec3.dot(yRaw, x)));
     const z = vec3.cross(vec3.create(), x, y);
     // A mirrored matrix: keep the frame right-handed rather than inventing a reflection quat.
-    return basisToQuat(out, x, y, z);
-}
-
-function basisToQuat(out: quat, x: vec3, y: vec3, z: vec3): quat {
-    const m3 = [x[0], x[1], x[2], y[0], y[1], y[2], z[0], z[1], z[2]] as unknown as Parameters<typeof quat.fromMat3>[1];
-    quat.fromMat3(out, m3);
-    return quat.normalize(out, out);
+    return quatFromBasis(out, x, y, z);
 }
 
 /** Bind model-space transform of every joint: inverse(inverseBindMatrix). */
@@ -181,7 +174,7 @@ function turnToward(out: vec3, v: vec3, target: vec3, deg: number): vec3 {
     const axis = vec3.cross(vec3.create(), v, target);
     if (vec3.length(axis) < 1e-6 || Math.abs(deg) < 1e-6) return vec3.copy(out, v);
     vec3.normalize(axis, axis);
-    const q = quat.setAxisAngle(quat.create(), axis, deg * DEG);
+    const q = quat.setAxisAngle(quat.create(), axis, deg * DEG2RAD);
     return vec3.normalize(out, vec3.transformQuat(out, v, q));
 }
 
@@ -243,7 +236,7 @@ export function ragdollLayout(skin: Skin, profile: RagdollProfile): RagdollLayou
         if (vec3.length(x) < 1e-3) x = vec3.scaleAndAdd(vec3.create(), axes.forward, y, -vec3.dot(axes.forward, y));
         vec3.normalize(x, x);
         const z = vec3.cross(vec3.create(), x, y);
-        const rotation = basisToQuat(quat.create(), x, y, z);
+        const rotation = quatFromBasis(quat.create(), x, y, z);
         // The segment starts at the joint: a capsule's cap and a box's end sit on it.
         const center = vec3.scaleAndAdd(vec3.create(), bonePos, dir, length / 2);
 
@@ -252,17 +245,17 @@ export function ragdollLayout(skin: Skin, profile: RagdollProfile): RagdollLayou
         const childAxis = vec3.clone(dir);
         const parentAxis = vec3.clone(dir);
         let hingeAxis: vec3 | null = null;
-        let coneAngle = Math.max(0, jt.swing) * DEG;
-        const twistAngle = Math.max(0, jt.twist) * DEG;
+        let coneAngle = Math.max(0, jt.swing) * DEG2RAD;
+        const twistAngle = Math.max(0, jt.twist) * DEG2RAD;
         if (jt.type === 'hinge') {
             const bend = vec3.fromValues(...(jt.bendDir ?? [axes.forward[0], axes.forward[1], axes.forward[2]]));
             hingeAxis = vec3.cross(vec3.create(), dir, bend);
             if (vec3.length(hingeAxis) < 1e-6) hingeAxis = vec3.clone(axes.left);
             vec3.normalize(hingeAxis, hingeAxis);
             const lo = Math.min(jt.hingeMin, jt.hingeMax), hi = Math.max(jt.hingeMin, jt.hingeMax);
-            const mid = quat.setAxisAngle(quat.create(), hingeAxis, (lo + hi) / 2 * DEG);
+            const mid = quat.setAxisAngle(quat.create(), hingeAxis, (lo + hi) / 2 * DEG2RAD);
             vec3.transformQuat(parentAxis, dir, mid);
-            coneAngle = Math.max(1, (hi - lo) / 2) * DEG;
+            coneAngle = Math.max(1, (hi - lo) / 2) * DEG2RAD;
         } else if (jt.type === 'cone' && jt.tilt) {
             turnToward(parentAxis, parentAxis, axes.forward, jt.tilt[0]);
             turnToward(parentAxis, parentAxis, vec3.negate(vec3.create(), axes.up), jt.tilt[1]);
@@ -438,7 +431,7 @@ export function autoHumanoidProfile(skin: Skin): RagdollProfile | null {
             const upLen = dist(`upperArm.${S}`, `foreArm.${S}`);
             // The neutral arm hangs 45 degrees below horizontal; tilt whatever the bind is toward that.
             const armDir = vec3.normalize(vec3.create(), vec3.sub(vec3.create(), posOf(`foreArm.${S}`)!, posOf(`upperArm.${S}`)!));
-            const below = Math.asin(Math.max(-1, Math.min(1, vec3.dot(armDir, down)))) / DEG;
+            const below = Math.asin(Math.max(-1, Math.min(1, vec3.dot(armDir, down)))) / DEG2RAD;
             parts.push({
                 name: `Upper Arm ${side}`, bone: nameOf(`upperArm.${S}`)!, tipBone: nameOf(`foreArm.${S}`), shape: 'capsule',
                 radius: upLen * 0.17, massFraction: MASS.upperArm, joint: cone(80, 50, [20, Math.max(0, 45 - below)]),
@@ -497,7 +490,6 @@ export function parseRagdollProfile(raw: unknown): RagdollProfile | undefined {
     if (!raw || typeof raw !== 'object') return undefined;
     const r = raw as Partial<RagdollProfile>;
     if (!Array.isArray(r.parts)) return undefined;
-    const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
     const parts: RagdollPart[] = [];
     for (const p of r.parts as Partial<RagdollPart>[]) {
         if (!p || typeof p.bone !== 'string') continue;
@@ -507,26 +499,26 @@ export function parseRagdollProfile(raw: unknown): RagdollProfile | undefined {
             bone: p.bone,
             ...(typeof p.tipBone === 'string' ? { tipBone: p.tipBone } : {}),
             shape: p.shape === 'box' || p.shape === 'sphere' ? p.shape : 'capsule',
-            radius: num(p.radius, 0.05),
+            radius: finiteOr(p.radius, 0.05),
             ...(typeof p.length === 'number' ? { length: p.length } : {}),
             ...(typeof p.depth === 'number' ? { depth: p.depth } : {}),
-            massFraction: num(p.massFraction, 0.05),
+            massFraction: finiteOr(p.massFraction, 0.05),
             joint: {
                 type: j.type === 'hinge' || j.type === 'fixed' ? j.type : 'cone',
-                swing: num(j.swing, 45), twist: num(j.twist, 30),
-                hingeMin: num(j.hingeMin, 0), hingeMax: num(j.hingeMax, 120),
-                ...(Array.isArray(j.tilt) && j.tilt.length === 2 ? { tilt: [num(j.tilt[0], 0), num(j.tilt[1], 0)] as [number, number] } : {}),
-                ...(Array.isArray(j.bendDir) && j.bendDir.length === 3 ? { bendDir: j.bendDir.map(v => num(v, 0)) as [number, number, number] } : {}),
+                swing: finiteOr(j.swing, 45), twist: finiteOr(j.twist, 30),
+                hingeMin: finiteOr(j.hingeMin, 0), hingeMax: finiteOr(j.hingeMax, 120),
+                ...(Array.isArray(j.tilt) && j.tilt.length === 2 ? { tilt: [finiteOr(j.tilt[0], 0), finiteOr(j.tilt[1], 0)] as [number, number] } : {}),
+                ...(Array.isArray(j.bendDir) && j.bendDir.length === 3 ? { bendDir: j.bendDir.map(v => finiteOr(v, 0)) as [number, number, number] } : {}),
             },
         });
     }
     return {
         version: 1,
-        totalMass: num(r.totalMass, RAGDOLL_PROFILE_DEFAULTS.totalMass),
+        totalMass: finiteOr(r.totalMass, RAGDOLL_PROFILE_DEFAULTS.totalMass),
         parts,
         selfCollision: typeof r.selfCollision === 'boolean' ? r.selfCollision : RAGDOLL_PROFILE_DEFAULTS.selfCollision,
-        linearDamping: num(r.linearDamping, RAGDOLL_PROFILE_DEFAULTS.linearDamping),
-        angularDamping: num(r.angularDamping, RAGDOLL_PROFILE_DEFAULTS.angularDamping),
-        solverIterations: num(r.solverIterations, RAGDOLL_PROFILE_DEFAULTS.solverIterations),
+        linearDamping: finiteOr(r.linearDamping, RAGDOLL_PROFILE_DEFAULTS.linearDamping),
+        angularDamping: finiteOr(r.angularDamping, RAGDOLL_PROFILE_DEFAULTS.angularDamping),
+        solverIterations: finiteOr(r.solverIterations, RAGDOLL_PROFILE_DEFAULTS.solverIterations),
     };
 }

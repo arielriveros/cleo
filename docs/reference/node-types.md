@@ -833,7 +833,7 @@ Resolved, read-only, and **live objects rewritten in place**: `rect`, `localRect
 | `UIPanelNode` | `uiPanel` | A rectangle. Container and background. |
 | `UIStackNode` | `uiStack` | `direction: 'row' \| 'column'`, `gap`, `justify`, `align: 'start' \| 'center' \| 'end' \| 'stretch'`, `reverse` |
 | `UISpacerNode` | `uiSpacer` | `flex` |
-| `UITextNode` | `uiText` | `text`, `fontSize`, `fontFamily`, `fontWeight`, `align`, `vAlign`, `wrap`, `lineHeight` |
+| `UITextNode` | `uiText` | `text`, `fontSize`, `fontFamily`, `fontWeight`, `align`, `vAlign`, `wrap`, `lineHeight`, `letterSpacing` (em) |
 | `UIImageNode` | `uiImage` | `textureId`, `fit: 'fill' \| 'contain' \| 'cover' \| 'tile'`, `uvRect` |
 | `UIButtonNode` | `uiButton` | `label`, `disabled`, `hoverTint`, `pressedTint`, `disabledTint`; handler **`onPress()`**; `press()` |
 | `UIProgressBarNode` | `uiProgressBar` | `min`, `max`, `value`, `fillTint`, `direction: 'ltr' \| 'rtl' \| 'btt' \| 'ttb'`, `smoothing`, `get fraction` |

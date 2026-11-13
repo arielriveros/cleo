@@ -148,6 +148,10 @@ without changing how the sky and ambient light it.
 **Cubemap Preview** — what the probe last captured, unwrapped into a 2 : 1 panorama. **Bake Probe**
 captures again.
 
+**Follow the sun** — relight the probe each time the scene's sun has turned this many degrees (0 = only when
+baked), so its reflections and fill keep up with a moving sun, a sequence keying it or a day cycle, with no
+script. A relight lights the captured scene again over a few frames; it never captures it again.
+
 **Box Projection** — parallax-correct the reflections against the box: a surface inside it reflects what
 the probe saw where its reflected ray leaves the box, so a room's walls land where they are on a polished
 or wet floor. For rooms and corridors; leave it off for open ground, whose horizon is far away. Bounded
@@ -156,7 +160,7 @@ probes only.
 A bake captures the probe's scene once, as a G-buffer, a few dozen objects a frame, and then lights it:
 the sun's shadow from a map of the probe's own (a probe in a room, or under a cliff, sees shade where
 there is shade), the lights set to **Bake**, the sky. A **relight** lights that captured scene again
-without drawing it — what a time of day asks for as the sun moves, a few frames per probe and no frame
+without drawing it — what **Follow the sun** does as the sun moves, a few frames per probe and no frame
 over about 2 ms. One probe is worked on at a time, a step a frame, those never baked first and then the
 nearest, and a probe keeps lighting and reflecting with its previous bake until the new one is complete.
 
@@ -434,8 +438,9 @@ bounded** gives it a box.
 | **Priority** | Where volumes overlap, the higher draws over the lower; it also decides which 4 draw when more are near. |
 | **Wetness** | 0 dry, 1 soaked: darker, glossier ground and leaves. |
 | **Puddles** | How much of the wet ground's low, flat spots holds standing water: 0 none, 1 every hollow. |
-| **Falling** | Nothing, Rain or Snow, drawn as particles round the camera. It falls in from the sky above the box and stops under anything solid where **Shelter** is on. Overlapping volumes never double it; a higher-priority dry box carves it out. |
+| **Falling** | Nothing, Rain, Snow, or Rain and snow together, drawn as particles round the camera. It falls in from the sky above the box and stops under anything solid where **Shelter** is on. Overlapping volumes never double it; a higher-priority dry box carves it out. |
 | **Rate** | How hard it falls: 0 nothing, 1 a downpour or a blizzard. Rain also sets how many drops stir the wet ground. |
+| **Snow Share** | Rain and snow only: how much of what falls is snow, 0 all rain to 1 all snow, the rest rain. A sequence sweeping it from 0 to 1 turns the rain into snow, the two falling together on the way. |
 | **Drop Size** / **Flake Size** | Times the realistic size. |
 | **Fall Speed** | Times the realistic terminal velocity: 8.5 m/s for rain, 1 m/s for snow. |
 | **Trail Min** / **Trail Max** | Rain only. The length of each drop's streak as a multiple of the realistic default (1); every drop draws its own length at random between the two. Equal values give streaks all one length. |
@@ -539,6 +544,21 @@ or from a brain. See [AI agents](ai-agents.md#the-controller-inspector).
 
 **Nav Mesh** — bake bounds, bake settings and the Bake button. See
 [AI agents](ai-agents.md#navigation-meshes).
+
+#### Sequence
+
+A Sequence node plays a cinematic: a `.sequence` asset's tracks that move a camera along a path, cut
+between cameras, animate properties of other nodes (a UI fade, the time of day, a light) and call script
+methods at given moments. The node keeps its own copy of the sequence (a published game needs no library),
+refreshed whenever the asset is saved. Play it from a script with `Game.playSequence('Name')` or
+`node.play()`; while it plays it owns what it drives, and `stop()` puts all of it back. See
+[Sequencer](sequencer.md) and [Sequences](../scripting/scene-and-game.md#sequences).
+
+| Field | |
+|---|---|
+| **Timeline** | The sequence asset it plays, its length and tracks. **✎** opens it in Sequencer mode, **✕** unlinks it (the copy keeps playing). Unlinked: pick one, drop one from the Assets tab, or **Edit in Sequencer** to make the copy an asset. |
+| **Autoplay** | Start playing on the first frame of Play or of the published game. Never while editing. |
+| **Slot rows** | One per slot: this scene's node for it, overriding the node the sequence was authored against (shown in brackets), which in turn wins over the slot's name path. |
 
 ### 2D
 

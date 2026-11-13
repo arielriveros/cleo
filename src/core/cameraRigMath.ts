@@ -1,25 +1,11 @@
 import { vec3 } from "gl-matrix";
-import { clamp, noise1, RAD2DEG } from "./math";
+import { clamp, noise1 } from "./math";
+export { aimFromDirection } from "./math";
 
 /**
  * The camera rig's decision math as pure functions over plain vectors, testable without a GL context.
  * Angles are DEGREES, matching the rest of the engine (see `math.ts`).
  */
-
-/**
- * Yaw/pitch that make a node's forward (+Z, per `Node.worldForward`) point along `direction`, which
- * need not be normalized. forward = (cos(p)*sin(y), -sin(p), cos(p)*cos(y)), so positive pitch is DOWN.
- */
-export function aimFromDirection(direction: vec3): { yaw: number, pitch: number } {
-    const len = Math.hypot(direction[0], direction[1], direction[2]);
-    if (len < 1e-9) return { yaw: 0, pitch: 0 };
-
-    const dx = direction[0] / len, dy = direction[1] / len, dz = direction[2] / len;
-    return {
-        yaw: Math.atan2(dx, dz) * RAD2DEG,
-        pitch: -Math.asin(clamp(dy, -1, 1)) * RAD2DEG,
-    };
-}
 
 /**
  * The spring arm as a rig-local displacement: back along local -Z by `armLength`, plus the socket

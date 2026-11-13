@@ -274,11 +274,14 @@ describe('metering is suppressed outside the scene tab', () => {
         for (const kind of tabKinds()) expect(table, `no TAB_METERS_EXPOSURE entry for '${kind}'`).toHaveProperty(kind);
     });
 
-    it('allows it for the scene tab and nothing else', () => {
+    it('allows it for the scene tab, and the Sequencer tab that shows the same scene, and nothing else', () => {
         const table = tableEntries();
         expect(table.scene).toBe(true);
+        // A Sequencer tab has no preview scene of its own: it shows the open scene, and keys its lights and
+        // exposure, so it meters like the scene tab.
+        expect(table.sequence).toBe(true);
         for (const [kind, on] of Object.entries(table))
-            if (kind !== 'scene') expect(on, `'${kind}' is a preview and must not meter`).toBe(false);
+            if (kind !== 'scene' && kind !== 'sequence') expect(on, `'${kind}' is a preview and must not meter`).toBe(false);
     });
 
     it('drives it from all three places the renderer is configured per context', () => {

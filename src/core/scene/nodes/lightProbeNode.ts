@@ -26,6 +26,8 @@ export class LightProbeNode extends Node {
     private _affectsReflections: boolean;
     // Parallax-correct the reflections against the box (bounded probes only).
     private _boxProjection: boolean;
+    // Degrees the sun may move before the probe relights itself (0 = only when asked).
+    private _relightDegrees: number;
     private _needsBake: boolean = true;
     private _needsRelight: boolean = false;
     private _lastBakeTime: number = 0;
@@ -36,7 +38,7 @@ export class LightProbeNode extends Node {
     constructor(
         name: string,
         options: { resolution?: number, mode?: 'baked' | 'realtime', updateFrequency?: number, intensity?: number, size?: [number, number, number], blendDistance?: number,
-                   affectsLighting?: boolean, affectsReflections?: boolean, boxProjection?: boolean } = {},
+                   affectsLighting?: boolean, affectsReflections?: boolean, boxProjection?: boolean, relightDegrees?: number } = {},
         id: string = uuidv4()
     ) {
         super(name, 'lightProbe', id);
@@ -49,6 +51,7 @@ export class LightProbeNode extends Node {
         this._affectsLighting = options.affectsLighting ?? true;
         this._affectsReflections = options.affectsReflections ?? true;
         this._boxProjection = options.boxProjection ?? false;
+        this._relightDegrees = Math.max(0, options.relightDegrees ?? 0);
     }
 
     // --- Editor-facing properties (setting the ones that affect the capture flags a re-bake) ---
@@ -58,6 +61,14 @@ export class LightProbeNode extends Node {
     public set mode(v: 'baked' | 'realtime') { this._mode = v; if (v === 'realtime') this._needsBake = true; }
     public get updateFrequency(): number { return this._updateFrequency; }
     public set updateFrequency(v: number) { this._updateFrequency = Math.max(0, v); }
+    /**
+     * Follow the sun: once the scene's sun has turned this many degrees since the probe was last lit, it
+     * relights itself (its captured scene lit again, a few frames' work; never a re-capture). 0 = only when
+     * something asks (`relight()`). A day that moves the sun — a sequence keying it, a script — keeps the
+     * probe's reflections and fill in step without any code.
+     */
+    public get relightDegrees(): number { return this._relightDegrees; }
+    public set relightDegrees(v: number) { this._relightDegrees = Math.max(0, +v || 0); }
     public get intensity(): number { return this._intensity; }
     public set intensity(v: number) { this._intensity = Math.max(0, v); }
     // Volume setters do NOT flag a re-bake: the volume only governs where the probe applies, not what it captured.
@@ -220,6 +231,7 @@ export class LightProbeNode extends Node {
                     affectsLighting: this._affectsLighting,
                     affectsReflections: this._affectsReflections,
                     boxProjection: this._boxProjection,
+                    ...(this._relightDegrees > 0 ? { relightDegrees: this._relightDegrees } : {}),
         };
     }
 
@@ -234,6 +246,7 @@ export class LightProbeNode extends Node {
             affectsLighting: json.affectsLighting,         // absent in older scenes -> true
             affectsReflections: json.affectsReflections,
             boxProjection: json.boxProjection,             // absent in older scenes -> off
+            relightDegrees: typeof json.relightDegrees === 'number' ? json.relightDegrees : 0,
         }, json.id);
         Node.finishParse(node, parent, json);
     }

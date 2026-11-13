@@ -1,8 +1,10 @@
 // The renderer's settings vocabulary: the persisted RenderSettings shape, the quality tiers and the
-// small enums they use. A leaf (type-only imports) so modules split out of renderer.ts, and
-// programUsage.ts, can use them without importing the renderer. renderer.ts re-exports all of it.
+// small enums they use. A leaf (type-only imports, plus core/math.ts, itself a leaf) so modules split
+// out of renderer.ts, and programUsage.ts, can use them without importing the renderer. renderer.ts
+// re-exports all of it.
 
 import type { ExposureCurveKey } from '../lighting';
+export { clampFinite } from '../../core/math';
 
 /** Editor-only debug channels: which internal buffer the renderer blits to the screen. */
 export type DebugView =
@@ -355,6 +357,12 @@ export interface RenderSettings {
      */
     foliageShadowDistance?: number;
     /**
+     * Run the render clock at the game's time scale: at ×2 the wind, the clouds' drift, fog, flicker, water
+     * ripples and custom materials' `u_time` all go twice as fast, so a sped-up day reads as a time-lapse.
+     * Paused keeps real time. Off (or absent) = real time whatever the game's speed.
+     */
+    effectsFollowTimeScale?: boolean;
+    /**
      * Depth prepass for alpha-tested mesh foliage (the two nearest detail levels): its depth is written
      * first with a cutout-only program, then it is shaded ONCE per pixel with a no-discard program tested
      * 'equal'. Trades a second vertex pass for the fragment overdraw; a win only where foliage is
@@ -481,11 +489,6 @@ export type TaaHistoryFilter = 'bilinear' | 'catmullRom';
 export type FxaaQuality = 'low' | 'medium' | 'high';
 /** Edge search steps per FXAA quality preset. */
 export const FXAA_SEARCH_STEPS: Record<FxaaQuality, number> = { low: 5, medium: 8, high: 12 };
-
-/** `v` clamped to [lo, hi]; `fallback` when it is not a finite number (a hand-edited or old save). */
-export function clampFinite(v: number, lo: number, hi: number, fallback: number): number {
-    return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
-}
 
 // Tier definitions. Each step down roughly quarters the cost of the cloud raymarch and SSAO/SSIL, which
 // scale with resolution squared AND with their step/sample count.

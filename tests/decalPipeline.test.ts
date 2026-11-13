@@ -165,7 +165,7 @@ describe('the programs', () => {
                                               'localExposureDown', 'volumetricFogInject', 'volumetricFogIntegrate',
                                               'volumetricFogApply', 'giReduce', 'giVisibility', 'giRadiance',
                                               'giIntegrate', 'giResolve', 'giAmbientCube', 'giRescale',
-                                              'giProbeOverlay', 'giStateStamp']);
+                                              'giProbeOverlay', 'giStateStamp', 'movieAccumulate']);
     });
 
     it('read every map through the flipbook cells, inset per cell so no neighbouring frame bleeds in', () => {

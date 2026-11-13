@@ -122,7 +122,8 @@ export class VolumetricFogPasses {
         this.frameVolumes.length = 0;
         if (!this.enabled || this._host.thumbnailMode || this._view.capturing) return false;
         const camera = this._view.camera;
-        if (camera.type === 'orthographic' || scene.volumetricFogs.size === 0) return false;
+        // The scene's volumes, and the rain's haze (PrecipitationRig.haze), which is not in the tree.
+        if (camera.type === 'orthographic' || (scene.volumetricFogs.size === 0 && !scene.precipitation.haze)) return false;
         if (!this._gather(scene)) return false;
 
         this._ensure();
@@ -165,7 +166,9 @@ export class VolumetricFogPasses {
         const cam = this._view.camera.position;
         const frustum = this._sys.visibility.frustum;
         const candidates: { node: VolumetricFogNode, distance: number }[] = [];
-        for (const node of scene.volumetricFogs) {
+        const haze = scene.precipitation.haze;
+        const volumes = haze ? [...scene.volumetricFogs, haze] : scene.volumetricFogs;
+        for (const node of volumes) {
             if (!node.enabled || !node.visible || (node.density <= 0 && node.emissiveIntensity <= 0)) continue;
             const box = node.getBoundingBox();
             if (!frustum.intersectsAABB(box.min, box.max)) continue;

@@ -53,3 +53,18 @@
   --dv-tab-close-icon-size: inherit;
   --dv-drag-over-border: none;
 }
+
+/* Sequencer mode: light orange panel headers, so the mode is never mistaken for Scene mode, which it otherwise
+   looks just like. DockLayout puts the editor mode on the dock's wrapper as data-editor-mode. */
+[data-editor-mode="sequence"] .dockview-theme-cleo {
+  --dv-tabs-and-actions-container-background-color: rgb(var(--sequence-tint));
+  --dv-activegroup-visiblepanel-tab-background-color: rgb(var(--sequence-tint-strong));
+  --dv-activegroup-hiddenpanel-tab-background-color: rgb(var(--sequence-tint));
+  --dv-inactivegroup-visiblepanel-tab-background-color: rgb(var(--sequence-tint-mid));
+  --dv-inactivegroup-hiddenpanel-tab-background-color: rgb(var(--sequence-tint));
+  --dv-activegroup-visiblepanel-tab-color: rgb(var(--sequence-tint-fg));
+  --dv-activegroup-hiddenpanel-tab-color: rgb(var(--sequence-tint-fg) / 0.75);
+  --dv-inactivegroup-visiblepanel-tab-color: rgb(var(--sequence-tint-fg));
+  --dv-inactivegroup-hiddenpanel-tab-color: rgb(var(--sequence-tint-fg) / 0.7);
+  --dv-tab-divider-color: rgb(var(--sequence-tint-fg) / 0.2);
+}

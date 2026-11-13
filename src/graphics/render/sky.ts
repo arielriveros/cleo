@@ -33,6 +33,8 @@ import type { LightingPasses } from './lighting';
 import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 import type { RenderSubsystems } from './subsystems';
+import { DEG2RAD } from '../../core/math';
+import { renderNow } from './renderClock';
 
 /** What SkyPasses reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface SkyPassesHost {
@@ -95,6 +97,15 @@ export class SkyPasses {
 
     /** One readback in flight at a time; the sky can re-bake while the previous projection resolves. */
     private _skyProjectionPending: boolean = false;
+
+    /**
+     * No sky work is half done: no reflection prefilter or cloud-sky bake is between faces and no sky-light
+     * projection is waiting on its readback. A movie render settles until this holds (a throttle that has
+     * not come round yet is not "half done": Play waits for it too).
+     */
+    public get settled(): boolean {
+        return !this._skyProjectionPending && !this._skyReflectionBake && !this._cloudSkyBake;
+    }
 
     /** Set by every sky re-bake; `updateSkyLight` turns it into a throttled re-projection. */
     private _skyLightReprojectPending = false;
@@ -275,7 +286,7 @@ export class SkyPasses {
             this._skyReflectionDirty = true;
         }
 
-        const now = performance.now();
+        const now = renderNow();
         const fresh = this._skyReflectionFront < 0;
         if (!this._skyReflectionBake && this._skyReflectionDirty
             && (fresh || now - this._skyReflectionAt >= SkyPasses.SKY_REFLECTION_INTERVAL_MS)) {
@@ -344,7 +355,7 @@ export class SkyPasses {
         // A sky re-bake asks for a re-projection; at most once a second, since each one is a readback.
         // Kept pending rather than dropped, so the LAST position of a moving sun is always projected.
         if (this._skyLightReprojectPending) {
-            const now = performance.now();
+            const now = renderNow();
             if (now - this._skyLightReprojectAt >= 1000) {
                 node.markDirty();
                 this._skyLightReprojectPending = false;
@@ -681,9 +692,8 @@ export class SkyPasses {
         // the light itself lights. Otherwise `sunIntensity` is the sky's own brightness knob.
         const physicalSun = this._skySun;
         const physical = physicalSun !== null;
-        const DEG_RAD = Math.PI / 180;
-        const sunDisk = Math.max(1e-3, node.sunDiskSize) * DEG_RAD;
-        const moonDisk = Math.max(1e-3, node.moonSize) * DEG_RAD;
+        const sunDisk = Math.max(1e-3, node.sunDiskSize) * DEG2RAD;
+        const moonDisk = Math.max(1e-3, node.moonSize) * DEG2RAD;
         const moonLight = physical ? node.moonLux(physicalSun! * REFERENCE_ILLUMINANCE) / REFERENCE_ILLUMINANCE : 0;
         this._shaderManager.setUniform('u_sunIntensity', physical ? physicalSun! * SkyPasses.PHYSICAL_SKY_CALIBRATION : node.sunIntensity);
         this._shaderManager.setUniform('u_physical', physical ? 1 : 0);
@@ -706,7 +716,6 @@ export class SkyPasses {
         this._shaderManager.setUniform('u_lightSteps', node.lightSteps);
 
         // Night sky. `u_night` is 0 by day, which is what keeps a day bake from paying for any of it.
-        const DEG = Math.PI / 180;
         const nightTex = node.nightSkyTexture ? TextureManager.Instance.getTexture(node.nightSkyTexture) : null;
         const moonTex = node.moonTexture ? TextureManager.Instance.getTexture(node.moonTexture) : null;
         this._shaderManager.setUniform('u_night', node.nightEnabled ? nightFactor(sun[1]) : 0);
@@ -717,8 +726,8 @@ export class SkyPasses {
         this._shaderManager.setUniform('u_starDensity', node.starDensity);
         this._shaderManager.setUniform('u_starColorVariance', node.starColorVariance);
         this._shaderManager.setUniform('u_nightSkyIntensity', node.nightSkyIntensity);
-        this._shaderManager.setUniform('u_nightSkyRotation', node.nightSkyRotation * DEG);
-        this._shaderManager.setUniform('u_moonSize', node.moonSize * DEG);
+        this._shaderManager.setUniform('u_nightSkyRotation', node.nightSkyRotation * DEG2RAD);
+        this._shaderManager.setUniform('u_moonSize', node.moonSize * DEG2RAD);
         this._shaderManager.setUniform('u_moonPhase', node.moonPhase);
         this._shaderManager.setUniform('u_moonIntensity', node.moonIntensity);
         this._shaderManager.setUniform('u_airglowIntensity', node.airglowIntensity);
@@ -840,10 +849,14 @@ export class SkyPasses {
     private _cloudSkyRes: number[] = [0, 0];
     private _cloudSkyFront = -1;
 
-    /** The bake in progress: target cube, next face, and the sun, clock and eye it is made with. */
+    /**
+     * The bake in progress: target cube, next face, and the sun, wall-clock time, wind drift and eye it is
+     * made with.
+     */
     private _cloudSkyBake: {
         cube: number; face: number; perFrame: number;
-        sun: [number, number, number]; time: number; eye: [number, number, number]; signature: string;
+        sun: [number, number, number]; time: number; wind: [number, number, number];
+        eye: [number, number, number]; signature: string;
     } | null = null;
 
     private _cloudSkyWait = 0;
@@ -926,7 +939,8 @@ export class SkyPasses {
                 // All six at once when there is nothing to show yet or someone pressed Regenerate (the
                 // loading overlay or the click covers the hitch); a moving sun gets a face a frame.
                 perFrame: fresh || requested ? 6 : 1,
-                sun: [sun[0], sun[1], sun[2]], time: performance.now() * 0.001,
+                sun: [sun[0], sun[1], sun[2]], time: renderNow() * 0.001,
+                wind: [this._clouds.windOffset[0], this._clouds.windOffset[1], this._clouds.windOffset[2]],
                 eye: [e[0], e[1], e[2]], signature: node.bakeSignature(),
             };
         }
@@ -939,7 +953,7 @@ export class SkyPasses {
 
         this._passes.generateMipsAfterRender(this._cloudSkyCubes[bake.cube]!);
         this._cloudSkyFront = bake.cube;
-        node.markBaked(bake.sun, bake.time, bake.signature);
+        node.markBaked(bake.sun, bake.time, bake.signature, bake.wind);
         this._cloudSkyBake = null;
         this._skyLightReprojectPending = true;
         this._skyReflectionDirty = true;
@@ -968,7 +982,7 @@ export class SkyPasses {
         // The depth texture is bound only because the layout has a slot for it; `u_ignoreDepth` skips it.
         const group = this._bindGroups.textureGroup(pipeline, 0, [this._targets.gBuffer.depth, this._clouds.cloudBaseNoise,
                                                            this._clouds.cloudDetailNoise]);
-        this._clouds.setCloudUniforms(scene, node, this._cloudFaceInv, bake.eye, bake.time);
+        this._clouds.setCloudUniforms(scene, node, this._cloudFaceInv, bake.eye, bake.wind);
         this._shaderManager.setUniform('u_ignoreDepth', true);
         // The cloud-sky cube is a bake: absolute, like the atmosphere cube it paints over.
         this._shaderManager.setUniform('u_preExposure', 1);

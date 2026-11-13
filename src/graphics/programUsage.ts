@@ -66,6 +66,8 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     particleSim: 'feature', particleBillboard: 'feature', particleMesh: 'feature', particleSort: 'feature',
     basicInstanced: 'editor', probePreview: 'editor', overlayComposite: 'editor', debugView: 'editor',
     shadowDebug: 'editor', overdraw: 'editor', overdrawInstanced: 'editor', grid: 'editor', outline: 'editor', outlinePost: 'editor',
+    // Movies are rendered in the editor (sequencer/movie/), never by a published game.
+    movieAccumulate: 'editor',
 };
 
 /** What a game uses, accumulated over every scene and template. Logical names, plus the filter. */
@@ -211,11 +213,15 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
         // Rain or snow falls from it: the scene's precipitation runs it as a particle system (Scene.precipitation).
         case 'weather': {
             const w = node.weather ?? {};
-            if (w.precipitation === 'rain' || w.precipitation === 'snow') {
-                const kind = w.precipitation as FallingKind;
+            // `mixed` falls as both, so it warms both.
+            const kinds: FallingKind[] = w.precipitation === 'mixed' ? ['rain', 'snow']
+                : w.precipitation === 'rain' || w.precipitation === 'snow' ? [w.precipitation] : [];
+            for (const kind of kinds) {
                 const style = { rate: 1, size: 1, speed: 1, sprite: parsePrecipitationSprite(w.precipitationSprite) };
                 addParticles({ system: precipitationSystem(kind, style, { wind: [0, 0], density: 1, prewarm: true }) }, use);
             }
+            // Rain thickens the air into sheets: the rig's haze is a fog volume (PrecipitationRig.haze).
+            if (kinds.includes('rain')) { add('volumetricFogInject'); add('volumetricFogIntegrate'); add('volumetricFogApply'); }
             break;
         }
     }

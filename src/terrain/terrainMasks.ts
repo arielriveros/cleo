@@ -13,6 +13,7 @@
 
 import { brushWeight, type BrushSpec } from './sculpt';
 import { MASK_CHANNELS_PER_SLICE } from './terrainLayers';
+import { clamp01 } from '../core/math';
 
 /** An inclusive rectangle of mask texels. */
 export interface MaskRegion {
@@ -34,8 +35,6 @@ export interface MaskPaint {
     /** The value painting moves toward: the layer's target opacity, or 0 to erase. */
     target: number;
 }
-
-const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 /** Slices needed for `channels` mask channels. */
 export function maskSlicesFor(channels: number): number {

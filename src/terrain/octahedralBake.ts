@@ -22,6 +22,7 @@
 import {
     frameBasis, frameDirection, OCTA_DEFAULT_FRAMES, type OctahedralImpostorInfo, type V3,
 } from './octahedralImpostor';
+import { smoothstep } from "../core/math";
 
 /** One drawable part of the model: its triangles and how to colour them. */
 export interface OctahedralBakePart {
@@ -386,7 +387,3 @@ function toByte(v: number): number {
     return Math.round(Math.max(0, Math.min(1, v)) * 255);
 }
 
-function smoothstep(e0: number, e1: number, x: number): number {
-    const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
-    return t * t * (3 - 2 * t);
-}

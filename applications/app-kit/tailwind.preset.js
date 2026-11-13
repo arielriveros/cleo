@@ -56,6 +56,13 @@ module.exports = {
         node: {
           ui: rgbVar('--node-ui'),
         },
+        // Sequencer mode's chrome (theme.css): `bg-sequence`, `text-sequence-fg`, `bg-sequence-strong`.
+        sequence: {
+          DEFAULT: rgbVar('--sequence-tint'),
+          mid: rgbVar('--sequence-tint-mid'),
+          strong: rgbVar('--sequence-tint-strong'),
+          fg: rgbVar('--sequence-tint-fg'),
+        },
         axis: {
           x: rgbVar('--axis-x'),
           y: rgbVar('--axis-y'),

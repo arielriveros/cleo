@@ -1,4 +1,8 @@
 import { vec3 } from "gl-matrix";
+import { rayTriangleIntersection } from "./math";
+
+// It lives in math.ts; re-exported for the code and tests that import it from here.
+export { rayTriangleIntersection } from "./math";
 
 /**
  * Bounding Volume Hierarchy for exact ray/triangle picking against a mesh. The tree is built in the
@@ -38,41 +42,6 @@ export interface SerializedBVH {
 }
 
 const NODE_STRIDE = 10;
-
-// Möller–Trumbore scratch (reused; the routine is never re-entrant with itself).
-const _e1 = vec3.create();
-const _e2 = vec3.create();
-const _pv = vec3.create();
-const _tv = vec3.create();
-const _qv = vec3.create();
-
-/**
- * Möller–Trumbore ray/triangle intersection.
- * Returns the ray parameter `t` (> 0) of the front/back intersection, or `null` if the ray misses.
- */
-export function rayTriangleIntersection(
-    origin: vec3, direction: vec3,
-    v0: vec3, v1: vec3, v2: vec3
-): number | null {
-    const EPS = 1e-7;
-    vec3.subtract(_e1, v1, v0);
-    vec3.subtract(_e2, v2, v0);
-    vec3.cross(_pv, direction, _e2);
-    const det = vec3.dot(_e1, _pv);
-    if (det > -EPS && det < EPS) return null; // ray parallel to triangle
-    const invDet = 1.0 / det;
-
-    vec3.subtract(_tv, origin, v0);
-    const u = invDet * vec3.dot(_tv, _pv);
-    if (u < 0 || u > 1) return null;
-
-    vec3.cross(_qv, _tv, _e1);
-    const v = invDet * vec3.dot(direction, _qv);
-    if (v < 0 || u + v > 1) return null;
-
-    const t = invDet * vec3.dot(_e2, _qv);
-    return t > EPS ? t : null;
-}
 
 const LEAF_SIZE = 4;
 

@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { moduleDefinition, defaultRenderSettings, type ParticleStage, type RenderSettings } from './particleModules';
 import { parseParticleMesh } from './particleMesh';
 import { isBuiltinTextureId } from './precipitationSprites';
+import { finiteOr } from '../core/math';
 
 export const PARTICLE_SYSTEM_VERSION = 1;
 
@@ -120,9 +121,8 @@ export function defaultParticleSystem(): ParticleSystemDef {
 
 // --- Parsing --------------------------------------------------------------------------------------
 
-const num = (x: unknown, fallback: number): number => (typeof x === 'number' && Number.isFinite(x) ? x : fallback);
 const vec3Of = (x: unknown, fallback: [number, number, number]): [number, number, number] =>
-    Array.isArray(x) ? [num(x[0], fallback[0]), num(x[1], fallback[1]), num(x[2], fallback[2])] : [...fallback];
+    Array.isArray(x) ? [finiteOr(x[0], fallback[0]), finiteOr(x[1], fallback[1]), finiteOr(x[2], fallback[2])] : [...fallback];
 
 function parseModules(raw: unknown, stage: ParticleStage): ParticleModule[] {
     if (!Array.isArray(raw)) return [];
@@ -148,7 +148,7 @@ function parseModules(raw: unknown, stage: ParticleStage): ParticleModule[] {
 /** A [min, max] stretch multiplier, each 0..8, min no more than max; anything else is [1, 1]. */
 function parseStretchRange(raw: unknown): [number, number] {
     if (!Array.isArray(raw)) return [1, 1];
-    const a = Math.min(8, Math.max(0, num(raw[0], 1))), b = Math.min(8, Math.max(0, num(raw[1], 1)));
+    const a = Math.min(8, Math.max(0, finiteOr(raw[0], 1))), b = Math.min(8, Math.max(0, finiteOr(raw[1], 1)));
     return [Math.min(a, b), Math.max(a, b)];
 }
 
@@ -162,35 +162,39 @@ function parseRender(raw: any): RenderSettings {
         mode: pick(raw.mode, ['billboard', 'mesh'] as const, base.mode),
         alignment: pick(raw.alignment, ['camera', 'velocity', 'vertical', 'horizontal'] as const, base.alignment),
         blend: pick(raw.blend, ['alpha', 'additive', 'cutout'] as const, base.blend),
-        stretch: Math.max(0, num(raw.stretch, base.stretch)),
+        stretch: Math.max(0, finiteOr(raw.stretch, base.stretch)),
         stretchRange: parseStretchRange(raw.stretchRange),
-        cutoff: Math.min(1, Math.max(0, num(raw.cutoff, base.cutoff))),
+        cutoff: Math.min(1, Math.max(0, finiteOr(raw.cutoff, base.cutoff))),
         textureId: typeof raw.textureId === 'string' && raw.textureId ? raw.textureId : null,
         flipbook: {
-            columns: Math.max(1, Math.floor(num(fb.columns, 1))),
-            rows: Math.max(1, Math.floor(num(fb.rows, 1))),
-            frames: Math.max(1, Math.floor(num(fb.frames, Math.max(1, num(fb.columns, 1) * num(fb.rows, 1))))),
+            columns: Math.max(1, Math.floor(finiteOr(fb.columns, 1))),
+            rows: Math.max(1, Math.floor(finiteOr(fb.rows, 1))),
+            frames: Math.max(1, Math.floor(finiteOr(fb.frames, Math.max(1, finiteOr(fb.columns, 1) * finiteOr(fb.rows, 1))))),
             mode: pick(fb.mode, ['life', 'fps'] as const, 'life'),
-            fps: Math.max(0, num(fb.fps, 24)),
-            cycles: Math.max(0, num(fb.cycles, 1)),
+            fps: Math.max(0, finiteOr(fb.fps, 24)),
+            cycles: Math.max(0, finiteOr(fb.cycles, 1)),
             randomStart: fb.randomStart === true,
             blend: fb.blend !== false,
         },
-        softness: Math.max(0, num(raw.softness, base.softness)),
-        nearFade: Math.max(0, num(raw.nearFade, base.nearFade)),
-        emissive: Math.max(0, num(raw.emissive, base.emissive)),
+        softness: Math.max(0, finiteOr(raw.softness, base.softness)),
+        nearFade: Math.max(0, finiteOr(raw.nearFade, base.nearFade)),
+        emissive: Math.max(0, finiteOr(raw.emissive, base.emissive)),
         lit: raw.lit === true,
-        translucency: Math.min(2, Math.max(0, num(raw.translucency, base.translucency))),
+        translucency: Math.min(2, Math.max(0, finiteOr(raw.translucency, base.translucency))),
         normalTextureId: typeof raw.normalTextureId === 'string' && raw.normalTextureId ? raw.normalTextureId : null,
         ormTextureId: typeof raw.ormTextureId === 'string' && raw.ormTextureId ? raw.ormTextureId : null,
-        normalStrength: Math.max(0, num(raw.normalStrength, base.normalStrength)),
-        roughness: Math.min(1, Math.max(0, num(raw.roughness, base.roughness))),
-        metallic: Math.min(1, Math.max(0, num(raw.metallic, base.metallic))),
+        normalStrength: Math.max(0, finiteOr(raw.normalStrength, base.normalStrength)),
+        roughness: Math.min(1, Math.max(0, finiteOr(raw.roughness, base.roughness))),
+        metallic: Math.min(1, Math.max(0, finiteOr(raw.metallic, base.metallic))),
         mesh: pick(raw.mesh, ['cube', 'sphere', 'tetrahedron', 'cylinder', 'model'] as const, base.mesh),
         modelId: typeof raw.modelId === 'string' && raw.modelId ? raw.modelId : null,
         meshData: parseParticleMesh(raw.meshData),
         sort: raw.sort === true,
-        sortingOrder: Math.floor(num(raw.sortingOrder, 0)),
+        sortingOrder: Math.floor(finiteOr(raw.sortingOrder, 0)),
+        // Only when set, so an effect saved without them keeps its exact payload.
+        ...(Number(raw.streakShutter) > 0 ? { streakShutter: Math.min(1, Number(raw.streakShutter)) } : {}),
+        ...(Number(raw.minPixelWidth) > 0 ? { minPixelWidth: Math.min(8, Number(raw.minPixelWidth)) } : {}),
+        ...(raw.shading === 'rain' ? { shading: 'rain' as const } : {}),
     };
 }
 
@@ -201,14 +205,14 @@ export function parseEmitter(raw: any, index = 0): EmitterDef {
         id: typeof raw.id === 'string' && raw.id ? raw.id : base.id,
         name: typeof raw.name === 'string' && raw.name ? raw.name : base.name,
         enabled: raw.enabled !== false,
-        capacity: Math.min(MAX_EMITTER_CAPACITY, Math.max(1, Math.floor(num(raw.capacity, base.capacity)))),
+        capacity: Math.min(MAX_EMITTER_CAPACITY, Math.max(1, Math.floor(finiteOr(raw.capacity, base.capacity)))),
         simSpace: raw.simSpace === 'local' ? 'local' : 'world',
-        duration: Math.max(0.01, num(raw.duration, base.duration)),
+        duration: Math.max(0.01, finiteOr(raw.duration, base.duration)),
         looping: raw.looping !== false,
         prewarm: raw.prewarm === true,
-        startDelay: Math.max(0, num(raw.startDelay, 0)),
-        seed: Math.floor(num(raw.seed, base.seed)) >>> 0,
-        maxLod: Math.min(LOD_ALL_LEVELS, Math.max(0, Math.floor(num(raw.maxLod, LOD_ALL_LEVELS)))),
+        startDelay: Math.max(0, finiteOr(raw.startDelay, 0)),
+        seed: Math.floor(finiteOr(raw.seed, base.seed)) >>> 0,
+        maxLod: Math.min(LOD_ALL_LEVELS, Math.max(0, Math.floor(finiteOr(raw.maxLod, LOD_ALL_LEVELS)))),
         // Absent arrays mean an empty stack, NOT the defaults: an author who removed every module meant it.
         spawn: Array.isArray(raw.spawn) ? parseModules(raw.spawn, 'spawn') : base.spawn,
         init: Array.isArray(raw.init) ? parseModules(raw.init, 'init') : base.init,
@@ -240,15 +244,15 @@ export function parseParticleLod(raw: any): ParticleLod {
     const levels = (Array.isArray(raw.levels) ? raw.levels : [])
         .filter((l: any) => l && typeof l === 'object')
         .map((l: any): ParticleLodLevel => ({
-            distance: Math.max(0, num(l.distance, 0)),
-            spawnScale: Math.min(1, Math.max(0, num(l.spawnScale, 1))),
-            stepScale: Math.min(4, Math.max(1, Math.round(num(l.stepScale, 1)))),
+            distance: Math.max(0, finiteOr(l.distance, 0)),
+            spawnScale: Math.min(1, Math.max(0, finiteOr(l.spawnScale, 1))),
+            stepScale: Math.min(4, Math.max(1, Math.round(finiteOr(l.stepScale, 1)))),
         }))
         .sort((a: ParticleLodLevel, b: ParticleLodLevel) => a.distance - b.distance);
     return {
         enabled: raw.enabled !== false,
         levels,
-        cullDistance: Math.max(0, num(raw.cullDistance, 0)),
+        cullDistance: Math.max(0, finiteOr(raw.cullDistance, 0)),
         scaleBursts: raw.scaleBursts === true,
     };
 }
@@ -269,7 +273,7 @@ export function activeModule(emitter: EmitterDef, type: string): ParticleModule 
 export function maxLifetime(emitter: EmitterDef): number {
     const life = activeModule(emitter, 'lifetime');
     const range = life?.params.range;
-    return Array.isArray(range) ? Math.max(num(range[0], 1), num(range[1], 1)) : 1;
+    return Array.isArray(range) ? Math.max(finiteOr(range[0], 1), finiteOr(range[1], 1)) : 1;
 }
 
 /**

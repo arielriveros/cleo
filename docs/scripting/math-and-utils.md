@@ -70,12 +70,67 @@ import { shortestAngle, wrapDegrees, aimFromDirection, headingAngle, signedAngle
 | Function | Use |
 |---|---|
 | `wrapDegrees(deg)` | Fold into a canonical range. |
-| `shortestAngle(from, to)` | The signed difference, taking the short way round. This is what stops a turn going 350° the wrong way. |
+| `shortestAngle(degrees)` | Wrap an angle into (-180, 180]. Pass a difference, `shortestAngle(to - from)`, for the signed step the short way round: this is what stops a turn going 350° the wrong way. |
 | `aimFromDirection(dir)` | Yaw and pitch from a direction vector. |
 | `headingAngle(...)` / `signedAngleBetween(...)` | The primitives the measured-motion angles are built on. |
 
 Angles are **counter-clockwise**: right is negative. See
 [Core concepts](../concepts.md#coordinate-and-sign-conventions).
+
+## The rest of `MathUtils`
+
+Every math helper the engine uses lives in one module and is reachable as `MathUtils.name`:
+
+```ts
+import { MathUtils } from 'cleo'
+
+const rand = MathUtils.seededRandom(42)        // the same sequence on every run
+const gust = MathUtils.smoothstep(0.2, 0.8, rand())
+```
+
+Angles are degrees unless the name says otherwise. Tuple helpers take and return plain `[x, y, z]`
+arrays (`Vec3Tuple`); quaternions are `[x, y, z, w]`.
+
+| Function | Use |
+|---|---|
+| `DEG2RAD`, `RAD2DEG` | Degree and radian conversion factors. |
+| `clamp01(v)` | `clamp(v, 0, 1)`. NaN passes through. |
+| `clampFinite(v, lo, hi, fallback)` | Clamp, or `fallback` when `v` is not a finite number. |
+| `smoothstep(e0, e1, x)` | The shader `smoothstep`, including equal edges. |
+| `hermite(p0, m0, p1, m1, s)` | Cubic Hermite between two values with slopes. |
+| `finiteOr(v, fallback)` | `v` when it is a finite number, else `fallback`: for reading saved or authored data. |
+| `finiteOrUndefined(v)` / `nonNegativeOr(v, fallback)` | The same for optional fields, and for values that cannot be negative. |
+| `dampVec3` / `dampVec3Time` | `damp` / `dampTime` per component of a vector. |
+| `smoothToward(current, target, seconds, delta)` | `dampTime` that never moves on a paused frame. |
+| `dampWrapped` / `dampAngleDeg` / `wrapSpan` / `deltaWrapped` / `deltaAngleDeg` | Damping and differences along the short way round a cycle. |
+| `applyCurve(v, exponent)` | Response curve: the magnitude raised to `exponent`, sign kept. |
+| `normalizeVec2(out, x, y)` | Clamp a 2D input to the unit disc; `[0, 0]` stays `[0, 0]`. |
+| `forwardFromYaw(out, yaw)` / `rightFromYaw(out, yaw)` | A world yaw's forward and right vectors. |
+| `yawFromDirection(x, z)` | The yaw that faces a planar direction. |
+| `planarSplit(v, up)` / `facingComponents(v, forward, up)` | A vector split along and across gravity, or along and across a facing. |
+| `angleBetween(a, b)` | Unsigned angle between two unit directions. |
+| `quatAngle(q)` / `quatAngleDeg(q)` | A rotation's angle, in radians / degrees. |
+| `eulerFromQuatDeg(out, q)` / `decomposeTRS(m, t, r, s)` | Euler angles from a quaternion; a matrix split into translation, rotation and scale. |
+| `seededRandom(seed)` / `lcgRandom(seed)` | Deterministic random streams in [0, 1). |
+| `cellNoise(col, row, seed)` / `hash01(x, z, yaw, salt)` / `hash12(x, y)` | Deterministic hashes in [0, 1). |
+| `noise1(x, seed)` / `fbm1(x, seed, octaves)` / `valueNoise1(t, seed)` | Smooth 1D noise in [-1, 1]. |
+| `valueNoise(x, y)` / `fbm2(x, z, seed)` | Smooth 2D value noise, and four octaves of it. |
+| `windPerlin(x, y)` / `windPerlinGrad(x, y)` | The wind field's 2D Perlin noise, and its gradient. |
+| `angularNoise(rng, lobes)` | Noise around a circle, for irregular round shapes. |
+| `evaluateKeyedNumber` / `evaluateKeyedVector` / `evaluateKeyedStep` | A keyed curve (`KeyedCurve`, keys in seconds) at a time. |
+| `keyedCurveWidth(curve)` / `rampWeight(start, end, easeIn, easeOut, t)` | A keyed curve's vector size; the eased weight of a span of time. |
+| `evaluateCurve` / `evaluateGradient` / `parseCurve` / `parseGradient` | Normalized-time curves and colour gradients, as particle modules use. |
+| `constantCurve` / `linearCurve` / `whiteGradient` / `fadeGradient` | Ready-made curves and gradients. |
+| `new Spline3(points)` | A constant-speed path through points: `pointAt(u)`, `tangentAt(u)`, `length`. |
+| `dot3` / `cross3` / `add3` / `sub3` / `scale3` / `lerp3` / `length3` / `distSq3` | Tuple vector arithmetic. |
+| `normalize3(a)` / `normalize3OrZero(a)` | Unit vector; the second gives `[0, 0, 0]` for a zero vector. |
+| `quatRotateTuple` / `quatConjugateTuple` / `quatMultiplyTuple` / `quatFromBasis` | Tuple quaternion arithmetic, and a rotation from three axes. |
+| `mirrorQuat(out, q, n)` / `reflectVec3(out, v, n)` | Mirror a rotation or a vector across a plane. |
+| `unitDirection(d, out)` / `transformDirectionTuple` / `transformPointTuple` | Normalize a direction; a direction or point through a matrix. |
+| `octEncode` / `octDecode` / `octWrap` / `octWrapOutside` | The octahedral direction map the G-buffer and probes use. |
+| `rayTriangleIntersection` / `raySphereIntersection` / `rayBoxIntersection` | The ray distance to a triangle, sphere or box, or null. |
+| `closestOnSegment` / `closestSegmentSegment` / `closestSegmentBox` | Closest points between points, segments and boxes. |
+| `clampToBox(p, half)` / `boxesOverlap(...)` | The closest point in a box; whether two oriented boxes overlap. |
 
 ## Raycasting
 

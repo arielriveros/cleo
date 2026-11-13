@@ -9,7 +9,7 @@ A single toolbar row:
 
 | Control | Does |
 |---|---|
-| **+ Add ▾** | Material, Landscape Material, Template, Script, Tileset, **AI Brain (Machine)**, **AI Brain (Goals)**, **Particle System**, **Animator**, Sound, Animation, Scene, Folder. The menu opens upward, over the viewport. |
+| **+ Add ▾** | Material, Landscape Material, Template, Script, Tileset, **AI Brain (Machine)**, **AI Brain (Goals)**, **Particle System**, **Sequence**, **Animator**, Sound, Animation, Scene, Folder. The menu opens upward, over the viewport. |
 | **Import** | Picks models, textures and sounds from disk and imports them, as dropping them on the panel does. Reads **Importing…** while it works. |
 | **Creator** | Opens Cleo Creator in its own window. Assets you save there appear here under `/Creator`, in every project, and follow your edits. See [Creator assets](#creator-assets). |
 | **Search** | Filters by name. |
@@ -45,6 +45,7 @@ the project, e.g. **Valley Files**.
 | **Blend Space** | `.blendspace` | The workspace's **Blend Spaces ▾ → + New Blend Space** | The Character Animation workspace | a state in an animator |
 | **AI Brain** | `.brain` | **+ Add ▸ AI Brain (Machine \| Goals)** | [AI Brain mode](ai-brains.md) | linked from a Controller |
 | **Particle System** | `.vfx` | **+ Add ▸ Particle System**, or **Create asset from this effect** on a Particle System node | [Particle System mode](modes.md) | linked from a Particle System node, which embeds a copy |
+| **Sequence** | `.sequence` | **+ Add ▸ Sequence**, or **Edit in Sequencer** on a Sequence node | [Sequencer mode](sequencer.md#sequencer-mode), over the open scene | linked from a Sequence node, which embeds a copy |
 | **Tileset** | `.tileset` | **+ Add** (pick an atlas) | Tileset mode | tilemap layers, sprites |
 | **Audio source** | real | Import / drop | *no editor* | backs Sound samples |
 | **Sound sample** | `.sound` | **+ Add**, or derived | [Sound mode](audio.md) | sound nodes |
@@ -159,6 +160,8 @@ to acquire either.
 | A tileset | A sprite node's slot | Assigns it |
 | A brain | A Controller's Brain slot | Links it |
 | A particle system | A Particle System node's **Effect** slot | Copies the effect onto the node and links it |
+| A sequence | The viewport | Adds a Sequence node playing it |
+| A sequence | A Sequence node's **Timeline** slot | Copies the sequence onto the node and links it |
 | An animation controller | A character's **Animation** section | Runs it on that character |
 | A bone mask | A controller layer's or action slot's **Mask** row | Sets the mask |
 | A pose asset | A state's **Plays** row | Makes the state hold that asset's first pose |

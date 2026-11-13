@@ -3,6 +3,7 @@ import { useCleoEngine } from '../../EngineContext'
 import { ParticleSystemAsset } from '../../../utils/particleSystems'
 import { Select, Button, Hint, SectionTitle, cn, valueClass } from '@cleo/app-kit/ui'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
+import { useInspectorLock } from '../inspectorLock'
 
 /**
  * The effect reference control on a Particle System node — which `.vfx` asset this instance plays.
@@ -22,6 +23,7 @@ export default function ParticleSystemSlot(props: { node: ParticleSystemNode; on
     particleSystems, enterParticleSystemEditor, extractParticleSystemFromNode, linkParticleSystemToNode, eventEmitter,
   } = useCleoEngine()
 
+  const lock = useInspectorLock()
   const linkedId = props.node.particleSystemId
   const asset = linkedId ? particleSystems.find(p => p.id === linkedId) : undefined
 
@@ -57,6 +59,7 @@ export default function ParticleSystemSlot(props: { node: ParticleSystemNode; on
   }
 
   return (
+    <fieldset disabled={lock.locked} title={lock.locked ? lock.reason : undefined} className='border-0 m-0 p-0 min-w-0 w-full'>
     <div className='w-full' {...dropProps}>
       <SectionTitle title='Effect' className='mb-1' />
       {asset ? (
@@ -98,5 +101,6 @@ export default function ParticleSystemSlot(props: { node: ParticleSystemNode; on
         </div>
       )}
     </div>
+    </fieldset>
   )
 }

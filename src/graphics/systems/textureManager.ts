@@ -7,6 +7,9 @@ import { v4 as uuidv4 } from 'uuid';
 export class TextureManager {
     private static _instance: TextureManager | null = null;
     private _textures: Map<string, Texture>;
+    /** Images still decoding into a registered texture. See {@link pendingLoads}. */
+    private _pending = 0;
+    private _idle: (() => void)[] = [];
 
     private constructor() {
         this._textures = new Map<string, Texture>();
@@ -28,17 +31,40 @@ export class TextureManager {
         return identifier;
     }
 
+    /**
+     * Textures registered whose image has not arrived yet: they draw as nothing (or their fallback) until it
+     * does. A movie render waits for none before each frame ({@link whenLoaded}).
+     */
+    public get pendingLoads(): number { return this._pending; }
+
+    /** Resolves once no texture is still loading (at once when none is). */
+    public whenLoaded(): Promise<void> {
+        if (this._pending === 0) return Promise.resolve();
+        return new Promise(resolve => this._idle.push(resolve));
+    }
+
+    private _beginLoad(): void { this._pending++; }
+
+    private _endLoad(): void {
+        this._pending = Math.max(0, this._pending - 1);
+        if (this._pending > 0) return;
+        const waiting = this._idle;
+        this._idle = [];
+        for (const resolve of waiting) resolve();
+    }
+
     public addTextureFromPath(path: string, config?: TextureConfig, id?: string): string {
         const identifier = id || uuidv4();
         const texture = new Texture(config);
         this._textures.set(identifier, texture);
+        this._beginLoad();
         Loader.loadImage(path).then((image: HTMLImageElement) => {
             texture.create(image, image.width, image.height);
         }).catch((err) => {
             // Drop the texture rather than let the load promise surface as an unhandled rejection.
             Logger.print('warn', ['Failed to load texture from path:', path, err], 'Texture');
             this._textures.delete(identifier);
-        });
+        }).finally(() => this._endLoad());
         return identifier;
     }
 
@@ -75,15 +101,18 @@ export class TextureManager {
         this._textures.set(identifier, texture);
 
         const image = new Image();
+        this._beginLoad();
         image.onerror = () => {
             Logger.error('Failed to load image from data URI', 'Texture');
             this.createFallbackTexture(texture, identifier);
+            this._endLoad();
         };
         image.onload = () => {
             if (image.width > 0 && image.height > 0 && image.complete)
                 texture.create(image, image.width, image.height);
             else
                 this.createFallbackTexture(texture, identifier);
+            this._endLoad();
         };
         image.src = base64;
 
@@ -155,11 +184,13 @@ export class TextureManager {
         };
 
         const image = new Image();
+        this._beginLoad();
         image.onload = () => {
             if (image.width > 0 && image.height > 0) texture.create(image, image.width, image.height);
             else drop(`Invalid image dimensions from bytes: ${image.width}x${image.height}`);
+            this._endLoad();
         };
-        image.onerror = () => drop('Failed to decode texture bytes');
+        image.onerror = () => { drop('Failed to decode texture bytes'); this._endLoad(); };
         image.src = url;
     }
 
@@ -173,12 +204,14 @@ export class TextureManager {
         // a late registration lets an import serialize before the texture has decoded.
         this._textures.set(identifier, texture);
 
+        this._beginLoad();
         file.arrayBuffer()
             .then(buf => this._decodeInto(texture, identifier, new Uint8Array(buf), file.type || 'image/png'))
             .catch(() => {
                 Logger.print('warn', ['Failed to read texture file:', file.name], 'Texture');
                 this._textures.delete(identifier);
-            });
+            })
+            .finally(() => this._endLoad());
 
         return identifier;
     }

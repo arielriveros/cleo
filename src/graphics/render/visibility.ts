@@ -32,6 +32,7 @@ import type { PipelineCache } from './pipelineCache';
 import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import type { RenderSubsystems } from './subsystems';
+import { renderNow } from './renderClock';
 
 /** Built frames in a row that hid nothing before occlusion backs off, and how often it probes then. */
 const OCCLUSION_IDLE_FRAMES = 30;
@@ -425,7 +426,7 @@ export class Visibility {
                 // A rebuild walks the whole height grid (tens of ms for a 2k landscape), so a sculpt drag
                 // rebuilds at most twice a second — and until it does, this landscape occludes nothing:
                 // a stale mesh could stand above ground the brush just lowered.
-                const now = performance.now();
+                const now = renderNow();
                 if (entry && now - entry.builtAt < 500) { complete = false; continue; }
                 entry = {
                     version: terrain.heightsVersion,

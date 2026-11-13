@@ -1,4 +1,10 @@
-import React, { useState } from 'react';
+import React, { createContext, useContext, useState } from 'react';
+
+/**
+ * True inside a part of the UI that must not link assets (Sequencer mode's inspector, where only keyable
+ * property changes are allowed): every asset drop target under it ignores drops.
+ */
+export const AssetDropLockContext = createContext(false);
 
 /** What to spread onto the element that accepts the drop. */
 export interface AssetDropProps {
@@ -25,6 +31,8 @@ export function useAssetDrop(
     options: AssetDropOptions = {},
 ): { dragOver: boolean; dropProps: AssetDropProps } {
     const [dragOver, setDragOver] = useState(false);
+    const locked = useContext(AssetDropLockContext);
+    if (locked) return { dragOver: false, dropProps: { onDragOver: () => {}, onDragLeave: () => {}, onDrop: () => {} } };
     return {
         dragOver,
         dropProps: {

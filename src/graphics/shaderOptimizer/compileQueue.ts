@@ -91,6 +91,27 @@ export class ProgramCompileQueue<D, P> {
         return finished;
     }
 
+    /**
+     * Finish every pending compile now, waiting on each — for a caller that must draw the real programs
+     * from the next frame on (a movie render). Returns how many finished.
+     */
+    public drain(): number {
+        let finished = 0;
+        for (const [name, job] of [...this._jobs]) {
+            this._jobs.delete(name);
+            finished++;
+            try {
+                const program = this._device.createShaderProgram(job.descriptor);
+                shaderOptimizerStats.asyncCompiles++;
+                job.onReady(program);
+            } catch (error) {
+                job.onError?.(error);
+            }
+        }
+        shaderOptimizerStats.pendingCompiles = this._jobs.size;
+        return finished;
+    }
+
     /** Drop every pending job (a device teardown). The driver's work is simply abandoned. */
     public clear(): void {
         this._jobs.clear();

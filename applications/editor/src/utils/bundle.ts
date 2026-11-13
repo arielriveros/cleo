@@ -12,6 +12,7 @@ import type { AnimationFieldAsset } from './animationFields'
 import type { TilesetAsset } from './tilesets'
 import type { AiBrainAsset } from './aiBrains'
 import type { ParticleSystemAsset } from './particleSystems'
+import type { SequenceAsset } from './sequenceAssets'
 import type { AnimControllerAsset } from './animationControllers'
 import type { BoneMaskAsset } from './boneMasks'
 import type { PoseAsset } from './poseAssets'
@@ -65,6 +66,8 @@ export interface BundleLibraries {
   aiBrains?: AiBrainAsset[]
   /** Optional, so a bundle written before particle systems existed still reads. */
   particleSystems?: ParticleSystemAsset[]
+  /** Optional, so a bundle written before sequence assets existed still reads. */
+  sequences?: SequenceAsset[]
   /** Optional, so a bundle written before controllers, bone masks and pose assets existed still reads. */
   animControllers?: AnimControllerAsset[]
   boneMasks?: BoneMaskAsset[]

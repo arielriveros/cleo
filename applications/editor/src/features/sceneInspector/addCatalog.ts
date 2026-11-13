@@ -53,6 +53,7 @@ import {
   ClothNode,
   WaterVolumeNode,
   OcclusionVolumeNode,
+  SequenceNode,
   LIGHT_UNIT,
   newLightOptions,
 } from 'cleo'
@@ -73,6 +74,7 @@ import {
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon, WeatherIcon,
   SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
+  SequenceIcon,
 } from './nodeIcons'
 import { createLandscapeNode } from '../../utils/landscapeSlots'
 import { defaultDecalMaterial } from '../../utils/materials'
@@ -194,6 +196,12 @@ export const ADD_ITEMS: AddItem[] = [
   {
     id: 'controller', label: 'Controller', icon: ControllerAddIcon, category: 'gameplay',
     create: async () => new ControllerNode('controller'),
+  },
+  {
+    // A cinematic: its timeline is edited in the Sequencer panel. Not placeable — a sequence has no place,
+    // only the nodes it drives do.
+    id: 'sequence', label: 'Sequence', icon: SequenceIcon, category: 'gameplay', placeable: false,
+    create: async () => new SequenceNode('sequence'),
   },
   {
     // Placeable, because the transform now means something: it positions the BOX that decides which

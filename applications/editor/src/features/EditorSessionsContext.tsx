@@ -44,6 +44,9 @@ export type EditorSessionsContextValue = Pick<EngineValue,
   // Particle system (a `.vfx` effect: emitters and their module stacks, previewed on a ground plane)
   | 'enterParticleSystemEditor' | 'saveParticleSystem' | 'editingParticleSystemId'
   | 'linkParticleSystemToNode' | 'extractParticleSystemFromNode' | 'registerParticleSystemApply'
+  // Sequence (a `.sequence` timeline, edited in a Sequencer tab over the open scene)
+  | 'enterSequenceEditor' | 'saveSequence' | 'editingSequenceId'
+  | 'linkSequenceToNode' | 'extractSequenceFromNode' | 'registerSequenceApply'
   // Rig (a shared skeleton: its clips, its retarget corrections and its IK setup)
   | 'enterRigEditor' | 'setRigPreviewModel' | 'rigPreviewModelId' | 'saveRig' | 'modelsOnRig'
   | 'editingRigId' | 'registerRigApply'

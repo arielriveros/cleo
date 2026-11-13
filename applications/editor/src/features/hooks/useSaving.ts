@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { Logger } from 'cleo';
 import { startTask } from '@cleo/app-kit/feedback/progressStore';
 import { KIND_LABEL, SCENE_TAB_ID } from '../engineContextTypes';
+import { suspendSequencePreviews } from '../sequencer/previewRegistry';
 import type { EditorTab, SavingState, TabKind } from '../engineContextTypes';
 
 /**
@@ -56,6 +57,11 @@ export function useSaving(deps: {
   const particleSystemApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerParticleSystemApply = (reg: { tabId: string; apply: () => void } | null) => { particleSystemApplyRef.current = reg; };
 
+  // ...and the Sequencer. Its provider keeps EVERY open sequence tab's working copy (a tab switch must not
+  // drop keys), so it registers one saver for all of them and no tab has to be made live first.
+  const sequenceApplyRef = useRef<{ save: (tabId: string) => boolean } | null>(null);
+  const registerSequenceApply = (reg: { save: (tabId: string) => boolean } | null) => { sequenceApplyRef.current = reg; };
+
   // ...and the rig session, whose working copy lives in RigProvider.
   const rigApplyRef = useRef<{ tabId: string; apply: () => void } | null>(null);
   const registerRigApply = (reg: { tabId: string; apply: () => void } | null) => { rigApplyRef.current = reg; };
@@ -102,6 +108,11 @@ export function useSaving(deps: {
         const session = rigApplyRef.current;
         if (!session || session.tabId !== tabId) return false;
         session.apply();
+        break;
+      }
+      case 'sequence': {
+        const saver = sequenceApplyRef.current;
+        if (!saver || !saver.save(tabId)) return false;
         break;
       }
       case 'soundSample': {
@@ -170,6 +181,9 @@ export function useSaving(deps: {
    */
   const runSave = async (tabIds: string[], title: string): Promise<boolean> => {
     if (savingRef.current || !tabIds.length) return false;
+    // A Sequencer preview writes onto the authored scene; what is saved must be what was authored. Held off
+    // until the save is done, or a Sequencer tab would re-apply its preview while the scene is being read.
+    const resumePreviews = suspendSequencePreviews();
     const named = tabIds.map(id => ({ id, tab: tabsRef.current.find(t => t.id === id) }));
     savingRef.current = true;
     setSavingState('saving');
@@ -209,6 +223,7 @@ export function useSaving(deps: {
       if (activeTabIdRef.current !== returnTo && tabsRef.current.some(t => t.id === returnTo)) setActiveTab?.(returnTo);
       task.finish();
       savingRef.current = false;
+      resumePreviews();
       setTimeout(() => setSavingState('idle'), 2000);
     }
   };
@@ -242,6 +257,8 @@ export function useSaving(deps: {
       // A leaf asset: an effect only names textures and models, never the other way round, and the scene
       // that embeds it saves last anyway — so the re-embed lands before the scene is hashed and written.
       particleSystem: 0,
+      // Leaf too: a sequence names nodes and templates, and re-embeds into the scene before it is written.
+      sequence: 0,
       model: 1, template: 2, scene: 3,
     };
     // Snapshot taken up front, so the loop is finite by construction.
@@ -256,7 +273,7 @@ export function useSaving(deps: {
 
   return {
     registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply,
-    registerAiBrainApply, registerParticleSystemApply, registerRigApply, saveTabById, runSave,
+    registerAiBrainApply, registerParticleSystemApply, registerRigApply, registerSequenceApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   };
 }

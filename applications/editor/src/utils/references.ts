@@ -315,6 +315,18 @@ export function collectReferencedParticleSystemIds(scene: Scene | null | undefin
 }
 
 /**
+ * SEQUENCE asset ids a scene references: `sequenceId` on its Sequence nodes, beside the embedded copy that
+ * actually plays. The Sequencer's own preview node is editor-owned and never linked; skipped all the same.
+ */
+export function collectReferencedSequenceIds(scene: Scene | null | undefined): Set<string> {
+  const set = new Set<string>()
+  for (const node of scene?.sequences ?? []) {
+    if (node.sequenceId && !node.isEditorOwned) set.add(node.sequenceId)
+  }
+  return set
+}
+
+/**
  * Animation Field asset ids referenced by any node's animation state machine.
  * The link is NOT a node variable: it is `state.fieldId` inside the machine, which lives on the animator.
  */
@@ -498,7 +510,8 @@ export function collectReferencedTerrainMaterialIds(scene: Scene | null | undefi
  */
 // 2: particle system links (`particleSystemIds`).
 // 3: a weather volume's rain or snow sprite sheet (its texture, and the tileset it was cut from).
-export const SCENE_REFS_VERSION = 3
+// 4: sequence links (`sequenceIds`).
+export const SCENE_REFS_VERSION = 4
 
 /**
  * Everything a scene DIRECTLY references: what its placed nodes, terrain layers, tilemaps, sounds and
@@ -531,6 +544,7 @@ export function buildSceneRefs(
     tilesetIds: [...collectReferencedTilesetIds(scene)],
     aiBrainIds: [...collectReferencedAiBrainIds(scene)],
     particleSystemIds: [...collectReferencedParticleSystemIds(scene)],
+    sequenceIds: [...collectReferencedSequenceIds(scene)],
     scriptIds: [...collectReferencedScriptIds(scene)],
     animationFieldIds: [...collectReferencedAnimationFieldIds(scene)],
     animControllerIds: [...collectReferencedAnimControllerIds(scene)],
@@ -561,6 +575,7 @@ export type SceneRefsShape = {
   tilesetIds: string[]
   aiBrainIds: string[]
   particleSystemIds: string[]
+  sequenceIds: string[]
   textureIds: string[]
   scriptIds: string[]
   animationFieldIds: string[]

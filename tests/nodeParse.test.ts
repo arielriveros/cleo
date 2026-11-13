@@ -27,6 +27,8 @@ import { UIButtonNode, UIProgressBarNode, UISliderNode, UIToggleNode, UITextInpu
 import { NavMeshNode } from '../src/core/scene/nodes/navMeshNode';
 import { DecalNode } from '../src/core/scene/nodes/decalNode';
 import { Material } from '../src/graphics/material';
+import { SequenceNode } from '../src/core/scene/nodes/sequenceNode';
+import { parseSequence } from '../src/sequencer/parse';
 import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 
 /**
@@ -93,6 +95,11 @@ const CASES: { label: string, make: () => Node, cls: Function }[] = [
     { label: 'uiSlider', make: () => new UISliderNode('slider'), cls: UISliderNode },
     { label: 'uiToggle', make: () => new UIToggleNode('toggle'), cls: UIToggleNode },
     { label: 'uiTextInput', make: () => new UITextInputNode('input'), cls: UITextInputNode },
+    { label: 'sequence', make: () => new SequenceNode('tour', {
+        sequence: parseSequence({ name: 'Tour', duration: 4, slots: [{ id: 'cam', name: 'Camera' }],
+            tracks: [{ id: 'cut', type: 'cameraCut', sections: [{ id: 'c', start: 0, end: 4, slot: 'cam' }] }] }),
+        bindings: { cam: 'camera-id' }, autoplay: true,
+    }), cls: SequenceNode },
 ];
 
 /** Parse `json` under a fresh parent, capturing the structural events it emits. */

@@ -8,6 +8,7 @@ import { SoundIcon } from '../sectionIcons'
 import { AlertIcon } from '../../topbarIcons'
 import { formatDuration } from '../../../utils/audioSources'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
+import { useInspectorLock } from '../inspectorLock'
 
 // The sample reference on a Sound node, and the only way an emitter gets audio.
 //
@@ -17,6 +18,7 @@ import { useAssetDrop } from '../../../utils/useAssetDrop'
 
 export default function SoundSampleSlot(props: { node: SoundNode; onChange?: () => void }) {
   const { eventEmitter } = useCleoEngine()
+  const lock = useInspectorLock()
   const { soundSamples } = useAssetLibrary()
   const { enterSoundEditor } = useEditorSessions()
   const fileInput = useRef<HTMLInputElement>(null)
@@ -57,6 +59,7 @@ export default function SoundSampleSlot(props: { node: SoundNode; onChange?: () 
   const broken = !!props.node.sampleId && !asset
 
   return (
+    <fieldset disabled={lock.locked} title={lock.locked ? lock.reason : undefined} className='border-0 m-0 p-0 min-w-0 w-full'>
     <div className='w-full' {...dropProps}>
       <input
         ref={fileInput} type='file' className='hidden'
@@ -119,5 +122,6 @@ export default function SoundSampleSlot(props: { node: SoundNode; onChange?: () 
         </Button>
       </div>
     </div>
+    </fieldset>
   )
 }

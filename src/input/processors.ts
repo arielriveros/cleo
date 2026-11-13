@@ -14,8 +14,9 @@
  *     system replaces divided by `Math.hypot(dirX, dirZ)` unguarded and produced exactly that.
  */
 
-import { clamp, dampTime } from "../core/math";
+import { applyCurve, clamp, normalizeVec2, smoothToward } from "../core/math";
 import type { Processor } from "./actionMap";
+export { applyCurve, normalizeVec2, smoothToward } from "../core/math";
 
 /** A mutable 2D value. Plain numbers rather than gl-matrix: nothing here needs a vec2's allocation. */
 export type Vec2 = [number, number];
@@ -61,17 +62,6 @@ export function applyRadialDeadzone(out: Vec2, x: number, y: number, min: number
     return out;
 }
 
-/**
- * Response curve: `|v| ** exponent`, sign preserved. An exponent above 1 gives finer control near
- * centre (the usual choice for aiming); below 1 makes it twitchier. Exponent 1 is the identity, and a
- * non-positive or non-finite exponent is treated as 1 rather than producing infinities.
- */
-export function applyCurve(value: number, exponent: number): number {
-    if (!(exponent > 0) || !Number.isFinite(exponent) || exponent === 1) return value;
-    const magnitude = Math.abs(value);
-    return (value < 0 ? -1 : 1) * Math.pow(magnitude, exponent);
-}
-
 /** Multiply. Sensitivity, and the only processor that intentionally leaves the -1..1 range. */
 export function applyScale(value: number, factor: number): number {
     return Number.isFinite(factor) ? value * factor : value;
@@ -80,39 +70,6 @@ export function applyScale(value: number, factor: number): number {
 /** Flip a component's sign. Per-axis, because inverting look-Y is a preference and look-X almost never is. */
 export function applyInvert(value: number, invert: boolean): number {
     return invert ? -value : value;
-}
-
-/**
- * Scale a vector to unit length, or leave it alone if it is already inside the unit disc.
- *
- * The `[0, 0]` case returning `[0, 0]` rather than NaN is the whole reason this is a named function and
- * not an inline division. The clamp-rather-than-stretch behaviour is what makes a WASD diagonal (length
- * √2) come out the same speed as a cardinal, without also amplifying a gently-pushed analog stick to
- * full tilt — that distinction is exactly what the old controller got wrong.
- */
-export function normalizeVec2(out: Vec2, x: number, y: number): Vec2 {
-    const magnitude = Math.hypot(x, y);
-    if (magnitude <= 1e-9 || magnitude <= 1) {
-        out[0] = magnitude <= 1e-9 ? 0 : x;
-        out[1] = magnitude <= 1e-9 ? 0 : y;
-        return out;
-    }
-    out[0] = x / magnitude;
-    out[1] = y / magnitude;
-    return out;
-}
-
-/**
- * Frame-rate-independent approach toward `target`, authored as a time constant in seconds. `seconds <= 0`
- * is instant, and `dt <= 0` never moves — a paused frame must not advance a smoothed value.
- *
- * Delegates to `dampTime` so smoothing here and camera smoothing elsewhere in the engine cannot drift
- * apart in their definition of "0.1 seconds".
- */
-export function smoothToward(current: number, target: number, seconds: number, dt: number): number {
-    if (!(seconds > 1e-6)) return target;
-    if (!(dt > 0)) return current;
-    return dampTime(current, target, seconds, dt);
 }
 
 /**

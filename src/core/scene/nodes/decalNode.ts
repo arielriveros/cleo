@@ -3,6 +3,7 @@ import { mat4, vec3 } from "gl-matrix";
 import { Logger } from "../../logger";
 import { Node } from "./node";
 import { Material } from "../../../graphics/material";
+import { clamp01, finiteOr, finiteOrUndefined } from '../../math';
 
 /** The one shading model a decal can project, as a literal: the material type enum is not exported. */
 const PBR_TYPE = 'pbr';
@@ -137,12 +138,11 @@ export function decalFlipbookFrame(flipbook: DecalFlipbook | null, time: number,
 /** Tolerant reader for a flipbook block: anything that is not an object is no flipbook. */
 export function decalFlipbookFrom(v: any): DecalFlipbook | null {
     if (!v || typeof v !== 'object') return null;
-    const n = (x: unknown, fallback: number) => (typeof x === 'number' && isFinite(x) ? x : fallback);
-    const columns = Math.max(1, Math.round(n(v.columns, 1))), rows = Math.max(1, Math.round(n(v.rows, 1)));
+    const columns = Math.max(1, Math.round(finiteOr(v.columns, 1))), rows = Math.max(1, Math.round(finiteOr(v.rows, 1)));
     return {
         columns, rows,
-        frames: Math.min(columns * rows, Math.max(1, Math.round(n(v.frames, columns * rows)))),
-        fps: Math.max(0, n(v.fps, 24)),
+        frames: Math.min(columns * rows, Math.max(1, Math.round(finiteOr(v.frames, columns * rows)))),
+        fps: Math.max(0, finiteOr(v.fps, 24)),
         loop: v.loop === true,
         blend: v.blend !== false,
     };
@@ -222,7 +222,6 @@ export function radialDecalT(local: ArrayLike<number>, shape: DecalRadialShape =
         : Math.hypot(local[0], local[2]) * 2;
 }
 
-const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 const color = (v: unknown, fallback: DecalColor): DecalColor =>
     Array.isArray(v) && v.length >= 3
         ? [Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0, v.length > 3 ? (Number(v[3]) || 0) : 1]
@@ -504,7 +503,6 @@ export class DecalNode extends Node {
     /** Tolerant reader: anything missing or malformed falls back to the constructor default. */
     public static optionsFromJson(d: any): DecalOptions {
         if (!d || typeof d !== 'object') return {};
-        const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : undefined);
         let material: Material | null = null;
         if (d.material && typeof d.material === 'object') {
             try {
@@ -517,15 +515,15 @@ export class DecalNode extends Node {
         return {
             // All three components or none. A single non-number used to reach the setter as NaN, which
             // poisons the volume matrix, the bounds and the frustum test at once — and re-saves as `null`.
-            size: Array.isArray(d.size) && d.size.length === 3 && d.size.every((v: unknown) => num(v) !== undefined)
+            size: Array.isArray(d.size) && d.size.length === 3 && d.size.every((v: unknown) => finiteOrUndefined(v) !== undefined)
                 ? [d.size[0], d.size[1], d.size[2]] : undefined,
             material,
-            opacity: num(d.opacity),
-            albedoOpacity: num(d.albedoOpacity),
+            opacity: finiteOrUndefined(d.opacity),
+            albedoOpacity: finiteOrUndefined(d.albedoOpacity),
             flipbook: decalFlipbookFrom(d.flipbook),
-            sortOrder: num(d.sortOrder),
-            angleFade: num(d.angleFade),
-            depthFade: num(d.depthFade),
+            sortOrder: finiteOrUndefined(d.sortOrder),
+            angleFade: finiteOrUndefined(d.angleFade),
+            depthFade: finiteOrUndefined(d.depthFade),
             affects: d.affects && typeof d.affects === 'object' ? {
                 ...(typeof d.affects.albedo === 'boolean' ? { albedo: d.affects.albedo } : {}),
                 ...(typeof d.affects.normal === 'boolean' ? { normal: d.affects.normal } : {}),
@@ -545,17 +543,16 @@ export class DecalNode extends Node {
 
     private static _radialFrom(v: Partial<DecalRadialPattern> | undefined): DecalRadialPattern {
         const d = DEFAULT_RADIAL;
-        const num = (x: unknown, fallback: number) => (typeof x === 'number' && isFinite(x) ? x : fallback);
         return {
             innerColor: color(v?.innerColor, d.innerColor),
             outerColor: color(v?.outerColor, d.outerColor),
             curve: DECAL_RADIAL_CURVES.includes(v?.curve as DecalRadialCurve) ? v!.curve! : d.curve,
-            exponent: Math.max(0, num(v?.exponent, d.exponent)),
-            falloff: Math.min(1, Math.max(0, num(v?.falloff, d.falloff))),
+            exponent: Math.max(0, finiteOr(v?.exponent, d.exponent)),
+            falloff: Math.min(1, Math.max(0, finiteOr(v?.falloff, d.falloff))),
             shape: v?.shape === 'square' ? 'square' : 'circle',
             ringColor: color(v?.ringColor, d.ringColor),
-            ringWidthPx: Math.max(0, num(v?.ringWidthPx, d.ringWidthPx)),
-            emissive: Math.max(0, num(v?.emissive, d.emissive)),
+            ringWidthPx: Math.max(0, finiteOr(v?.ringWidthPx, d.ringWidthPx)),
+            emissive: Math.max(0, finiteOr(v?.emissive, d.emissive)),
         };
     }
 }

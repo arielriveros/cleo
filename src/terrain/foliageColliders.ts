@@ -4,7 +4,7 @@ import { Shape } from '../physics/shape';
 import { PhysicsBody } from '../physics/physicsBody';
 import { quatFromEuler } from '../physics/pal/math';
 import type { PhysicsSystem } from '../physics/physicsSystem';
-import { FoliageLayer } from './foliage';
+import { FoliageLayer, foliageDensityScale } from './foliage';
 import { foliageColliderPose } from './foliageColliderPose';
 
 // Re-exported: the pose lives in a module of its own so the navmesh baker can carve trunks without
@@ -44,6 +44,9 @@ const yawRotation = [0, 0, 0, 1];
  * dimensions, rounded), not by instance, so a recycled body only ever changes position — nothing rebuilds
  * its shapes or recomputes mass properties: an evicted body stays built in the world, disabled.
  */
+/** A layer's instance set as colliders see it: its rebuild version and the share its density keeps. */
+const layerState = (layer: FoliageLayer) => `${layer.version}:${foliageDensityScale(layer)}`;
+
 export class FoliageColliderField {
     private _physics: PhysicsSystem | null = null;
     /** Instance key -> the body currently representing it in the world. */
@@ -52,7 +55,8 @@ export class FoliageColliderField {
     private _free = new Map<string, PhysicsBody[]>();
     /** Layer KEY -> the layer.version the active set was computed against. Keyed by the stable
      *  identity, not the name: renaming a rule is not a reason to rebuild every collider. */
-    private _versions = new Map<string, number>();
+    /** Per layer, what its instances were when last collected (`layerState`): a change refreshes the bodies. */
+    private _versions = new Map<string, string>();
     private _lastCam: vec3 = [NaN, NaN, NaN];
     private _lastOrigin: vec3 = [NaN, NaN, NaN];
     private _lastRefresh = 0;
@@ -78,20 +82,21 @@ export class FoliageColliderField {
         this._lastRefresh = Date.now();
         vec3.copy(this._lastCam as vec3, camPos);
         vec3.copy(this._lastOrigin as vec3, origin);
-        for (const layer of layers) this._versions.set(layer.key, layer.version);
+        for (const layer of layers) this._versions.set(layer.key, layerState(layer));
 
         // 1. Collect every collidable instance inside the activation disc.
         const wanted = new Map<string, Wanted>();
         for (const layer of layers) {
             const col = layer.collision;
             if (!col || layer.count === 0) continue;
+            // Only what is drawn: a layer thinned by its `densityScale` collides as thinned.
             layer.forEachInstanceNear(camPos[0], camPos[2], settings.radius, (index, ix, iy, iz, yaw, scale) => {
                 const dx = ix - camPos[0], dy = iy - camPos[1], dz = iz - camPos[2];
                 wanted.set(`${layer.key}#${index}`, {
                     sig: signatureOf(col, scale), x: ix, y: iy, z: iz, yaw, scale,
                     d2: dx * dx + dy * dy + dz * dz, see: layer.cameraDither,
                 });
-            });
+            }, foliageDensityScale(layer));
         }
 
         // 2. Enforce the ceiling by keeping the nearest. Only pay for the sort when it actually overflows.
@@ -149,7 +154,7 @@ export class FoliageColliderField {
         // Instances are stored in world space, so moving the terrain invalidates every cached position.
         if (vec3.squaredDistance(origin, this._lastOrigin as vec3) > 1e-8) return true;
         for (const layer of layers)
-            if (this._versions.get(layer.key) !== layer.version) return true;
+            if (this._versions.get(layer.key) !== layerState(layer)) return true;
         return false;
     }
 

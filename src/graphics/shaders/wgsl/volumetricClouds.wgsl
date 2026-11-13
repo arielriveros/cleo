@@ -47,10 +47,10 @@ struct CloudUniforms {
     u_sunColor: vec3<f32>,
     u_ambientColor: vec3<f32>,
     u_groundColor: vec3<f32>,
-    u_wind: vec3<f32>,            // direction (x/z used)
+    u_wind: vec3<f32>,            // the wind's drift so far, world metres
     u_traceResolution: vec2<f32>, // size of the reduced trace target, in pixels
     u_bayerOffset: vec2<i32>,     // sub-position within the 4x4 block traced this frame
-    u_time: f32,                  // seconds, for wind animation
+    u_time: f32,                  // the render clock, seconds (unused: the drift is integrated)
     // Shape
     u_coverage: f32,
     u_density: f32,
@@ -277,7 +277,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     tExit = min(tExit, sceneDist);
     if (tEnter >= tExit) { return vec4<f32>(0.0); }
 
-    let wind = u_cloud.u_wind * (u_cloud.u_windSpeed * u_cloud.u_time);
+    // How far the wind has carried the clouds, world metres: integrated on the CPU (clouds.ts
+    // `windOffset`), so a changing wind carries them on rather than racing them.
+    let wind = u_cloud.u_wind;
 
     let steps = clamp(u_cloud.u_steps, 1, MAX_STEPS);
     let marchLen = tExit - tEnter;

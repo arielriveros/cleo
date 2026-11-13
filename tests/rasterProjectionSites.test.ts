@@ -137,7 +137,10 @@ describe('the camera projection reaches every pass through one wrapper', () => {
     it('gates the jitter and the resolve on the same flag', () => {
         // A jittered image that nothing resolves is strictly worse than no TAA: it is the same
         // aliasing, now crawling. One field decides both.
-        expect(RENDERER).toContain('if (!this._view.taaJitterActive || this._view.cubeFace');
+        expect(RENDERER).toContain('if ((!this._view.taaJitterActive && !this._view.movieJitter) || this._view.cubeFace');
         expect(RENDERER).toContain('if (!this._view.taaJitterActive || !this.velocityProducedThisFrame) return;');
+        // The one other jitter is a movie sample's (render/movieCapture.ts), which nothing resolves BY
+        // DESIGN: the movie averages its samples instead. It never turns the resolve on.
+        expect(RENDERER).not.toMatch(/movieJitter.*velocityProducedThisFrame/);
     });
 });

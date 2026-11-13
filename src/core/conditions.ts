@@ -18,6 +18,8 @@
  * same value — which reads as a machine that ping-pongs for no visible reason.
  */
 
+import { finiteOr } from './math';
+
 /** Comparison operator, interpreted per parameter type. */
 export const CONDITION_OPS = ['gt', 'lt', 'eq', 'neq', 'true', 'false', 'trigger'] as const;
 export type ConditionOp = typeof CONDITION_OPS[number];
@@ -182,10 +184,6 @@ export function consumeTriggers(
 // Tolerant reader
 // ---------------------------------------------------------------------------------------------------
 
-function num(v: unknown, fallback: number): number {
-    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-}
-
 /**
  * Read a condition leaf out of untrusted JSON, or null if it names no parameter. An unknown operator
  * falls back to 'true' rather than dropping the leaf: a condition that never holds silently disables the
@@ -200,9 +198,9 @@ export function parseCondition(raw: unknown): Condition | null {
     const op = typeof c.op === 'string' && (CONDITION_OPS as readonly string[]).includes(c.op)
         ? c.op as ConditionOp : 'true';
     const out: Condition = { param, op };
-    if (op === 'gt' || op === 'lt' || op === 'eq' || op === 'neq') out.value = num(c.value, 0);
+    if (op === 'gt' || op === 'lt' || op === 'eq' || op === 'neq') out.value = finiteOr(c.value, 0);
     // Only ever written when positive, so a round trip through the reader is byte-identical.
-    const hysteresis = num(c.hysteresis, 0);
+    const hysteresis = finiteOr(c.hysteresis, 0);
     if ((op === 'gt' || op === 'lt') && hysteresis > 0) out.hysteresis = hysteresis;
     return out;
 }

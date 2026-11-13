@@ -104,6 +104,11 @@ export class CleoEngine {
 
   private _paused: boolean = true;
 
+  /** True while the host steps the engine itself ({@link detachLoop}): no frame is scheduled. */
+  private _loopDetached = false;
+  /** The pending animation frame, so {@link detachLoop} can cancel it. */
+  private _rafHandle = 0;
+
   /** Why {@link initialize} failed, or null. See {@link initializeError}. */
   private _initializeError: Error | null = null;
 
@@ -233,7 +238,46 @@ export class CleoEngine {
     // _lastTimestamp is set at CONSTRUCTION, which can be long before run(); without this reset the
     // whole gap is charged to the first frame's delta.
     this._lastTimestamp = performance.now();
+    if (this._loopDetached) return;
     this._gameLoop();
+  }
+
+  /** Whether the loop is detached and the host steps the engine with {@link stepFrame}. */
+  public get loopDetached(): boolean { return this._loopDetached; }
+
+  /**
+   * Stop scheduling frames: from here the host advances the engine itself with {@link stepFrame}. A movie
+   * render does this so every frame is exactly 1/fps of game time, however long it took to draw.
+   */
+  public detachLoop(): void {
+    this._loopDetached = true;
+    if (this._rafHandle) cancelAnimationFrame(this._rafHandle);
+    this._rafHandle = 0;
+  }
+
+  /** Give the frame loop back after {@link detachLoop}. The first frame's delta starts from now. */
+  public attachLoop(): void {
+    if (!this._loopDetached) return;
+    this._loopDetached = false;
+    if (this._ready) this._startLoop();
+  }
+
+  /**
+   * Advance the engine by exactly `unscaledDt` seconds of real time — input, physics, the scene, then
+   * (unless `render` is false) a frame — the way the loop does, but with no wall clock and no clamp. The
+   * time scale and hit-stops apply to it as they do to a live frame. For a host that detached the loop.
+   */
+  public stepFrame(unscaledDt: number, options?: { render?: boolean }): void {
+    const dt = Number.isFinite(unscaledDt) ? Math.max(0, unscaledDt) : 0;
+    this._tick(dt, options?.render !== false, false);
+  }
+
+  /**
+   * Render the current state once, with no step: the same moment drawn again (a movie settling its light,
+   * or taking another sample of a frame).
+   */
+  public renderFrame(): void {
+    if (this._scene) this._renderer.render(this._scene);
   }
 
   public shutdown(): void {
@@ -247,85 +291,102 @@ export class CleoEngine {
   }
 
   private _gameLoop(): void {
+    this._rafHandle = 0;
+    if (this._loopDetached) return;
     try {
-      const currentTimestamp = performance.now();
       // Clamped at the source, not per-consumer: _timeSinceStart accumulates this same value, so
       // physics, timers, node.update, onUpdate and `time` stay on one clock. See MAX_DELTA.
-      const unscaled = Math.min((currentTimestamp - this._lastTimestamp) / 1000, this._maxFrameDelta);
-      // The time scale applies to everything that SIMULATES — physics, timers, scripts, animators, particles
-      // — and not to input, camera rigs or UI, which keep the frame's real delta. A dilation (a hit-stop)
-      // counts down in real time, and not while paused.
-      const scale = this._paused ? this._dilation.scale : this._dilation.update(unscaled);
-      const deltaTime = unscaled * scale;
-      this._unscaledDelta = unscaled;
-      this._frameTimeScale = scale;
-
-      // FIRST in the frame: poll the pads, step the gestures, resolve every action. Nothing downstream
-      // may read a half-built action table, and physics is downstream. Runs even while paused — a
-      // paused game still has to see the action that unpauses it, and the editor's camera map is live
-      // in edit mode. What pausing gates is DELIVERY to scripts, which Scene.update already handles.
-      // Each phase timed here, by the loop that runs it — see core/engineStats.ts for what that fixed.
-      let mark = performance.now();
-      InputSystem.instance.beginFrame(unscaled);
-      let now = performance.now();
-      const inputMs = now - mark;
-      let physicsMs = 0, sceneMs = 0, renderMs = 0;
-
-      if (!this._paused) {
-        mark = now;
-        this._physicsSystem.update(deltaTime, scale);
-        now = performance.now();
-        physicsMs += now - mark;
-        this._timeSinceStart += deltaTime * 1000;
-      }
-
-      if (this._scene) {
-        mark = now;
-        this._scene.update(deltaTime, this._timeSinceStart, this._paused, unscaled);
-        now = performance.now();
-        sceneMs = now - mark;
-        // After every script, before the render: with the physics worker, this frame's changes and its
-        // step go out now, and the worker steps while this thread renders. Nothing inline.
-        // The scale the NEXT frame starts at goes with it: a hit-stop landed in this frame's scripts has
-        // already lowered it, so the worker's step reaches only as far as that frame will go.
-        if (!this._paused) {
-          mark = now;
-          this._physicsSystem.endFrame(deltaTime, this._dilation.scale);
-          now = performance.now();
-          physicsMs += now - mark;
-        }
-        mark = now;
-        this._renderer.render(this._scene);
-        renderMs = performance.now() - mark;
-      }
-
-      this.onUpdate(deltaTime, this._timeSinceStart);
-  
-      // Sampled here, in the loop that owns the clock: the editor panels that read it unmount when
-      // hidden. Unclamped wall-clock on purpose — a 300ms hitch is precisely what a p95 should show.
-      frameHistory.push({
-        frameMs: currentTimestamp - this._lastTimestamp,
-        cpuRenderMs: frameStats.frameMs,
-        gpuMs: gpuProfiler.totalMs,
-      });
-
-      engineStats.periodMs = currentTimestamp - this._lastTimestamp;
-      engineStats.inputMs = inputMs;
-      engineStats.physicsMs = physicsMs;
-      engineStats.sceneMs = sceneMs;
-      engineStats.renderMs = renderMs;
-      this._lastTimestamp = currentTimestamp;
-      // LAST: clear the per-frame accumulators. Must be the END and not the start — DOM events land
-      // between rAF callbacks, so clearing here is what makes "everything that arrived during this
-      // frame is visible during this frame" true. Same reason resetMouseVelocity sat here.
-      InputSystem.instance.endFrame();
-      engineStats.loopMs = performance.now() - currentTimestamp;
-      // The first turn has no previous one to measure an interval from.
-      if (engineStats.periodMs < 1000) frameAccount.add(engineStats, frameStats.frameMs);
-      requestAnimationFrame(this._gameLoop.bind(this));
+      const unscaled = Math.min((performance.now() - this._lastTimestamp) / 1000, this._maxFrameDelta);
+      this._tick(unscaled, true, true);
+      if (!this._loopDetached) this._rafHandle = requestAnimationFrame(this._gameLoop.bind(this));
     } catch (e) {
       Logger.error(e);
     }
+  }
+
+  /**
+   * One frame: the body of the loop, shared by the rAF loop and {@link stepFrame}. `live` is the rAF loop,
+   * the only caller whose wall-clock period means anything to the frame statistics.
+   */
+  private _tick(unscaled: number, render: boolean, live: boolean): void {
+    const currentTimestamp = performance.now();
+    // The time scale applies to everything that SIMULATES — physics, timers, scripts, animators, particles
+    // — and not to input, camera rigs or UI, which keep the frame's real delta. A dilation (a hit-stop)
+    // counts down in real time, and not while paused.
+    const scale = this._paused ? this._dilation.scale : this._dilation.update(unscaled);
+    const deltaTime = unscaled * scale;
+    this._unscaledDelta = unscaled;
+    this._frameTimeScale = scale;
+
+    // FIRST in the frame: poll the pads, step the gestures, resolve every action. Nothing downstream
+    // may read a half-built action table, and physics is downstream. Runs even while paused — a
+    // paused game still has to see the action that unpauses it, and the editor's camera map is live
+    // in edit mode. What pausing gates is DELIVERY to scripts, which Scene.update already handles.
+    // Each phase timed here, by the loop that runs it — see core/engineStats.ts for what that fixed.
+    let mark = performance.now();
+    InputSystem.instance.beginFrame(unscaled);
+    let now = performance.now();
+    const inputMs = now - mark;
+    let physicsMs = 0, sceneMs = 0, renderMs = 0;
+
+    if (!this._paused) {
+      mark = now;
+      this._physicsSystem.update(deltaTime, scale);
+      now = performance.now();
+      physicsMs += now - mark;
+      this._timeSinceStart += deltaTime * 1000;
+    }
+
+    if (this._scene) {
+      mark = now;
+      this._scene.update(deltaTime, this._timeSinceStart, this._paused, unscaled);
+      now = performance.now();
+      sceneMs = now - mark;
+      // After every script, before the render: with the physics worker, this frame's changes and its
+      // step go out now, and the worker steps while this thread renders. Nothing inline.
+      // The scale the NEXT frame starts at goes with it: a hit-stop landed in this frame's scripts has
+      // already lowered it, so the worker's step reaches only as far as that frame will go.
+      if (!this._paused) {
+        mark = now;
+        this._physicsSystem.endFrame(deltaTime, this._dilation.scale);
+        now = performance.now();
+        physicsMs += now - mark;
+      }
+      mark = now;
+      // The render clock's rate, should the project ask effects to follow the game's speed
+      // (RenderSettings.effectsFollowTimeScale): this frame's scale, real time while paused.
+      this._renderer.setEffectsTimeScale(this._paused ? 1 : scale);
+      if (render) this._renderer.render(this._scene);
+      renderMs = performance.now() - mark;
+    }
+
+    this.onUpdate(deltaTime, this._timeSinceStart);
+    if (!live) {
+      InputSystem.instance.endFrame();
+      return;
+    }
+
+    // Sampled here, in the loop that owns the clock: the editor panels that read it unmount when
+    // hidden. Unclamped wall-clock on purpose — a 300ms hitch is precisely what a p95 should show.
+    frameHistory.push({
+      frameMs: currentTimestamp - this._lastTimestamp,
+      cpuRenderMs: frameStats.frameMs,
+      gpuMs: gpuProfiler.totalMs,
+    });
+
+    engineStats.periodMs = currentTimestamp - this._lastTimestamp;
+    engineStats.inputMs = inputMs;
+    engineStats.physicsMs = physicsMs;
+    engineStats.sceneMs = sceneMs;
+    engineStats.renderMs = renderMs;
+    this._lastTimestamp = currentTimestamp;
+    // LAST: clear the per-frame accumulators. Must be the END and not the start — DOM events land
+    // between rAF callbacks, so clearing here is what makes "everything that arrived during this
+    // frame is visible during this frame" true. Same reason resetMouseVelocity sat here.
+    InputSystem.instance.endFrame();
+    engineStats.loopMs = performance.now() - currentTimestamp;
+    // The first turn has no previous one to measure an interval from.
+    if (engineStats.periodMs < 1000) frameAccount.add(engineStats, frameStats.frameMs);
   }
 
   public setViewport(viewport: HTMLElement) {

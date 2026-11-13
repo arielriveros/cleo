@@ -5,6 +5,7 @@ import { WEATHER_PRESETS, type WeatherPreset } from "./weatherPresets";
 import { applyPreset } from "../../presets";
 import { boxBlendFractions, boxColumnWeight, boxInverseMatrix, boxWeight, boxWorldBounds } from "./boxVolume";
 import { Material } from "../../../graphics/material";
+import { finiteOr } from "../../math";
 
 /**
  * Weather inside a box: how wet the ground and the plants are, how much snow lies on them, and whether
@@ -59,10 +60,18 @@ export interface WeatherOptions {
     snowBreakup?: number;
     /** Keep what stands under something solid dry and free of snow (and, falling, out of the rain). */
     shelter?: boolean;
-    /** What falls from the sky inside the box: nothing, rain or snow (see {@link WeatherNode}). */
+    /**
+     * What falls from the sky inside the box: nothing, rain, snow, or both at once (`mixed`, shared out by
+     * `precipitationSnowShare`): see {@link WeatherNode}.
+     */
     precipitation?: PrecipitationKind;
     /** How hard it falls: 0 nothing, 1 a downpour (or a blizzard). */
     precipitationRate?: number;
+    /**
+     * `mixed` only: how much of what falls is snow, 0 all rain .. 1 all snow, the rest rain. Swept from 0 to 1
+     * it turns rain into snow, the two falling together on the way.
+     */
+    precipitationSnowShare?: number;
     /** Size of the drops or flakes, times the realistic default: 0.25..3. */
     precipitationSize?: number;
     /** How fast they fall, times the realistic default (8.5 m/s rain, 1 m/s snow): 0.25..3. */
@@ -83,9 +92,9 @@ export interface WeatherOptions {
     precipitationSprite?: PrecipitationSprite | null;
 }
 
-/** What a weather volume makes fall. */
-export type PrecipitationKind = 'none' | 'rain' | 'snow';
-export const PRECIPITATION_KINDS: readonly PrecipitationKind[] = ['none', 'rain', 'snow'];
+/** What a weather volume makes fall: `mixed` is rain and snow together, by `precipitationSnowShare`. */
+export type PrecipitationKind = 'none' | 'rain' | 'snow' | 'mixed';
+export const PRECIPITATION_KINDS: readonly PrecipitationKind[] = ['none', 'rain', 'snow', 'mixed'];
 
 /**
  * A sprite sheet for falling rain or snow: `columns` x `rows` cells over the WHOLE texture (no margin or
@@ -124,7 +133,7 @@ export function parsePrecipitationSprite(v: unknown): PrecipitationSprite | null
 export const WEATHER_DEFAULTS = {
     wetness: 0, snow: 0, puddles: 0.5, blendDistance: 4, snowTiling: 4, snowSlope: 45, snowBreakup: 0.4,
     precipitationRate: 0.6, precipitationSize: 1, precipitationSpeed: 1, precipitationWind: 0.5,
-    precipitationTrailMin: 0.7, precipitationTrailMax: 1.3,
+    precipitationTrailMin: 0.7, precipitationTrailMax: 1.3, precipitationSnowShare: 0.5,
 } as const;
 
 /** No side of a bounded weather box goes below this, so it never inverts. */
@@ -132,10 +141,8 @@ export const MIN_WEATHER_VOLUME_SIZE = 0.01;
 
 const unit = (v: unknown, fallback: number) =>
     Math.min(1, Math.max(0, typeof v === 'number' && Number.isFinite(v) ? v : fallback));
-const finite = (v: unknown, fallback: number): number =>
-    (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
-const trail = (v: unknown, fallback: number) => Math.min(4, Math.max(0.1, finite(v, fallback)));
-const multiplier = (v: unknown, fallback: number) => Math.min(3, Math.max(0.25, finite(v, fallback)));
+const trail = (v: unknown, fallback: number) => Math.min(4, Math.max(0.1, finiteOr(v, fallback)));
+const multiplier = (v: unknown, fallback: number) => Math.min(3, Math.max(0.25, finiteOr(v, fallback)));
 const kindOf = (v: unknown, fallback: PrecipitationKind): PrecipitationKind =>
     (PRECIPITATION_KINDS.includes(v as PrecipitationKind) ? v as PrecipitationKind : fallback);
 
@@ -158,6 +165,7 @@ export class WeatherNode extends Node {
     public shelter: boolean;
     private _precipitation: PrecipitationKind;
     private _precipitationRate: number;
+    private _precipitationSnowShare: number;
     private _precipitationSize: number;
     private _precipitationSpeed: number;
     private _precipitationWind: number;
@@ -172,17 +180,18 @@ export class WeatherNode extends Node {
         this._snow = unit(options.snow, WEATHER_DEFAULTS.snow);
         this._puddles = unit(options.puddles, WEATHER_DEFAULTS.puddles);
         if (options.size) this.size = options.size;
-        this._blendDistance = Math.max(0, finite(options.blendDistance, WEATHER_DEFAULTS.blendDistance));
-        this.priority = finite(options.priority, 0);
+        this._blendDistance = Math.max(0, finiteOr(options.blendDistance, WEATHER_DEFAULTS.blendDistance));
+        this.priority = finiteOr(options.priority, 0);
         this.enabled = options.enabled ?? true;
         this.snowMaterial = options.snowMaterial ? WeatherNode._parseMaterial(options.snowMaterial) : null;
         this.snowMaterialId = typeof options.snowMaterialId === 'string' && options.snowMaterialId ? options.snowMaterialId : null;
-        this._snowTiling = Math.max(0.05, finite(options.snowTiling, WEATHER_DEFAULTS.snowTiling));
-        this._snowSlope = Math.min(90, Math.max(0, finite(options.snowSlope, WEATHER_DEFAULTS.snowSlope)));
+        this._snowTiling = Math.max(0.05, finiteOr(options.snowTiling, WEATHER_DEFAULTS.snowTiling));
+        this._snowSlope = Math.min(90, Math.max(0, finiteOr(options.snowSlope, WEATHER_DEFAULTS.snowSlope)));
         this._snowBreakup = unit(options.snowBreakup, WEATHER_DEFAULTS.snowBreakup);
         this.shelter = options.shelter ?? true;
         this._precipitation = kindOf(options.precipitation, 'none');
         this._precipitationRate = unit(options.precipitationRate, WEATHER_DEFAULTS.precipitationRate);
+        this._precipitationSnowShare = unit(options.precipitationSnowShare, WEATHER_DEFAULTS.precipitationSnowShare);
         this._precipitationSize = multiplier(options.precipitationSize, WEATHER_DEFAULTS.precipitationSize);
         this._precipitationSpeed = multiplier(options.precipitationSpeed, WEATHER_DEFAULTS.precipitationSpeed);
         this._precipitationWind = unit(options.precipitationWind, WEATHER_DEFAULTS.precipitationWind);
@@ -203,9 +212,9 @@ export class WeatherNode extends Node {
     public get puddles(): number { return this._puddles; }
     public set puddles(v: number) { this._puddles = unit(v, this._puddles); }
     public get snowTiling(): number { return this._snowTiling; }
-    public set snowTiling(v: number) { this._snowTiling = Math.max(0.05, finite(+v, this._snowTiling)); }
+    public set snowTiling(v: number) { this._snowTiling = Math.max(0.05, finiteOr(+v, this._snowTiling)); }
     public get snowSlope(): number { return this._snowSlope; }
-    public set snowSlope(v: number) { this._snowSlope = Math.min(90, Math.max(0, finite(+v, this._snowSlope))); }
+    public set snowSlope(v: number) { this._snowSlope = Math.min(90, Math.max(0, finiteOr(+v, this._snowSlope))); }
     public get snowBreakup(): number { return this._snowBreakup; }
     public set snowBreakup(v: number) { this._snowBreakup = unit(v, this._snowBreakup); }
 
@@ -215,6 +224,9 @@ export class WeatherNode extends Node {
     /** See {@link WeatherOptions.precipitationRate}. */
     public get precipitationRate(): number { return this._precipitationRate; }
     public set precipitationRate(v: number) { this._precipitationRate = unit(v, this._precipitationRate); }
+    /** See {@link WeatherOptions.precipitationSnowShare}. */
+    public get precipitationSnowShare(): number { return this._precipitationSnowShare; }
+    public set precipitationSnowShare(v: number) { this._precipitationSnowShare = unit(v, this._precipitationSnowShare); }
     /** See {@link WeatherOptions.precipitationSize}. */
     public get precipitationSize(): number { return this._precipitationSize; }
     public set precipitationSize(v: number) { this._precipitationSize = multiplier(+v, this._precipitationSize); }
@@ -240,10 +252,19 @@ export class WeatherNode extends Node {
     public get precipitationSprite(): PrecipitationSprite | null { return this._precipitationSprite; }
     public set precipitationSprite(v: PrecipitationSprite | null) { this._precipitationSprite = parsePrecipitationSprite(v); }
 
-    /** The rain falling here: the rate when it rains, else 0. What the shaders and the rain particles composite. */
-    public get rainRate(): number { return this._precipitation === 'rain' ? this._precipitationRate : 0; }
-    /** The snow falling here: the rate when it snows, else 0. */
-    public get snowfallRate(): number { return this._precipitation === 'snow' ? this._precipitationRate : 0; }
+    /**
+     * The rain falling here: the rate when it rains, its rain share when `mixed`, else 0. What the shaders
+     * and the rain particles composite.
+     */
+    public get rainRate(): number {
+        const k = this._precipitation;
+        return k === 'rain' ? this._precipitationRate : k === 'mixed' ? this._precipitationRate * (1 - this._precipitationSnowShare) : 0;
+    }
+    /** The snow falling here: the rate when it snows, its snow share when `mixed`, else 0. */
+    public get snowfallRate(): number {
+        const k = this._precipitation;
+        return k === 'snow' ? this._precipitationRate : k === 'mixed' ? this._precipitationRate * this._precipitationSnowShare : 0;
+    }
     /** Whether anything falls: a kind, at a rate above 0. */
     public get precipitating(): boolean { return this._precipitation !== 'none' && this._precipitationRate > 0; }
 
@@ -310,6 +331,7 @@ export class WeatherNode extends Node {
                 size: [...this._size], blendDistance: this._blendDistance, priority: this.priority, enabled: this.enabled,
                 snowTiling: this._snowTiling, snowSlope: this._snowSlope, snowBreakup: this._snowBreakup, shelter: this.shelter,
                 precipitation: this._precipitation, precipitationRate: this._precipitationRate,
+                precipitationSnowShare: this._precipitationSnowShare,
                 precipitationSize: this._precipitationSize, precipitationSpeed: this._precipitationSpeed,
                 precipitationWind: this._precipitationWind,
                 precipitationTrailMin: this._precipitationTrailMin, precipitationTrailMax: this._precipitationTrailMax,

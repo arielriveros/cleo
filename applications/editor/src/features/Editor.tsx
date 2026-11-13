@@ -19,6 +19,8 @@ import { AiEditorProvider } from './ai/AiEditorContext';
 import { RigProvider } from './rig/RigContext';
 import { ClipProvider } from './clip/ClipContext';
 import { ParticleEditorProvider } from './particles/ParticleEditorContext';
+import { SequenceEditorProvider } from './sequencer/SequenceEditorContext';
+import RenderMovieHost from './sequencer/movie/RenderMovieHost';
 import { HistoryProvider, useHistory } from "./HistoryContext";
 import DimensionSwitchModal from "./dialogs/DimensionSwitchModal";
 import { useDocument } from "./DocumentContext";
@@ -98,7 +100,7 @@ function Shell() {
             <TextureProvider>
               <SoundProvider>
                 <AiEditorProvider>
-                  <RigProvider><ClipProvider><ParticleEditorProvider>
+                  <RigProvider><ClipProvider><ParticleEditorProvider><SequenceEditorProvider>
                   <TabBar />
                   {/* A skeleton's animation editors read as one document: its part switcher and Save. */}
                   <WorkspaceBar />
@@ -106,7 +108,8 @@ function Shell() {
                       editor cannot go silently stale the way a per-view banner would let it. */}
                   <StaleDependencyBanner />
                   <DockLayout />
-                  </ParticleEditorProvider></ClipProvider></RigProvider>
+                  <RenderMovieHost />
+                  </SequenceEditorProvider></ParticleEditorProvider></ClipProvider></RigProvider>
                 </AiEditorProvider>
               </SoundProvider>
             </TextureProvider>

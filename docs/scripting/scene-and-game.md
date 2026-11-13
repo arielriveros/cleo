@@ -29,6 +29,8 @@ Game.gravity: [number, number, number]     // get and set
 
 Game.getRenderSettings(): RenderSettings | undefined
 Game.updateRenderSettings(settings: Partial<RenderSettings>): void
+
+Game.movieRender: { sequenceNodeId, sequenceName, width, height, fps } | null   // the movie being rendered
 ```
 
 ```ts
@@ -246,7 +248,86 @@ scene.setActiveCamera(node: CameraNode | null): void
 ```
 
 This **pins** the active camera. Loading a scene clears the pin, so set it after the scene is in
-place rather than before.
+place rather than before. `scene.pinnedCamera` reads the pin back (null when nothing is pinned).
+
+## Sequences
+
+A **Sequence** node plays a cinematic: a timeline of tracks that move a camera along a path, cut between
+cameras, animate properties (a UI fade, a script field, a renderer setting, `Game.timeScale`) and call
+methods at given moments. Play one by name, or through the node:
+
+```ts
+const tour = Game.playSequence('Valley Tour')          // the player, or undefined (with a warning)
+await tour?.finished                                    // 'finished' or 'stopped'
+
+const intro = this.findNode('Intro') as SequenceNode
+intro.play({ from: 4, bindings: { Hero: this } })       // start 4 s in, with this node in the Hero slot
+intro.pause(); intro.resume(); intro.seek(10); intro.skip()
+intro.stop()                                            // and put back everything it changed
+intro.onFinished(reason => { /* ... */ })
+intro.onEvent((name, key) => { /* every event key it passes */ })
+```
+
+- **While it plays it owns what it drives.** Every target is captured the first time the sequence writes
+  it, and `stop()` restores all of them: the camera and the pin, a property, the time scale. A playback
+  that runs to its end keeps its final state (the camera cut hands the camera back) until `stop()`.
+- **Event keys** call a method on the Sequence node itself, so a script attached to it is the cinematic's
+  director, or on the node in a slot. They fire as the playhead passes them, never on a `seek`.
+- **It runs before every `onUpdate`**, in the scene's sequence pass, so a script reads this frame's values
+  and a camera the sequence moves renders the frame it moved.
+- **Its clock** is game time (it follows `Game.timeScale`, and stops with `Game.pause()`) unless the
+  sequence says `real`.
+- **Script sections** give a method a stretch of time instead of a moment. It is called with a context as
+  the playhead enters the section, every frame inside it, and as it leaves (on `stop()` too), so the
+  method can animate anything code can reach. A section the playhead passes inside one frame still gets
+  its enter and exit; a `seek` skips it. Work from `ctx.local` (or `ctx.alpha`) rather than counting
+  frames, and a scrub or a seek shows what playback would.
+- **A hold section** stops the playback at its end, holding the frame, until the method calls
+  `ctx.resume()` or something calls the node's `resume()`: a cinematic that waits for a door to open, a
+  line of dialogue to be read, a level to load. The method is still called every frame while it waits
+  (`update`, with `dt` 0), so it can watch for what it waits on. `isHolding` says whether it is waiting.
+
+### Movies
+
+The Sequencer's **Render** films a sequence offline ([Render Movie](../editor/sequencer.md#render-movie)).
+While it does, `Game.movieRender` names the Sequence node being filmed, from before the scene starts, and it
+is `null` the rest of the time. A game whose cinematic starts from its own UI (a title menu's "Play intro")
+checks it in `onStart` and plays the sequence at once, since nobody is there to press the button; otherwise
+the movie plays the sequence itself. The game's clock is the movie's for the duration: `onUpdate`'s delta is
+exactly a frame (or a sample) of it, and input is ignored.
+
+```ts
+onStart() {
+  this.openMenu()
+  if (Game.movieRender?.sequenceNodeId === this.intro.id) this.playIntro()
+}
+```
+
+```ts
+export default class IntroDirector extends SequenceNode {
+  // A Script track section with method 'flicker' calls this over its span.
+  flicker(ctx: SequenceScriptContext) {
+    const lamp = this.findNode('Lamp') as LightNode
+    if (ctx.phase === 'exit') { lamp.light.intensity = 800; return }
+    lamp.light.intensity = 800 * (0.5 + 0.5 * Math.sin(ctx.local * 30)) * ctx.weight
+  }
+  // A hold section: the playback waits at its end until the gate's script says it is open.
+  waitForGate(ctx: SequenceScriptContext) {
+    if ((this.findNode('Gate') as any)?.isOpen) ctx.resume()
+  }
+}
+```
+
+The context: `phase` (`'enter'`, `'update'` or `'exit'`), `time` (sequence seconds), `local` and
+`duration` (seconds into the section, and its length), `alpha` (`local / duration`), `weight` (its ease-in
+and ease-out ramp), `dt` (since the last call; 0 on entering and on a seek), `seeking`, `stopped` (an exit
+because the playback was stopped), `args` (the section's), `sequence` (the node playing) and `resume()`.
+
+The other tracks a sequence can carry, which need no code: **Animation** plays a clip on a character's
+animator as an action, its time locked to the timeline; **Audio** plays a sound node from the point the
+timeline is at, faded by the section's eases; **Spawn** instantiates a template while its section lasts
+(and can put the new node in a slot for the other tracks to drive); **Possess** has a controller possess a
+pawn for the section. See [Sequencer](../editor/sequencer.md).
 
 ## Timers on the scene
 

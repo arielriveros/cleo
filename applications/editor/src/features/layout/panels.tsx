@@ -14,6 +14,9 @@ import ClipInspector from '../clip/ClipInspector';
 import ClipTimeline from '../clip/ClipTimeline';
 import ParticleStackPanel from '../particles/ParticleStackPanel';
 import ParticleTransportPanel from '../particles/ParticleTransportPanel';
+import SequencerPanel from '../sequencer/SequencerPanel';
+import SequenceProperties from '../sequencer/SequenceProperties';
+import { KEYING_ROOT_ATTR } from '../sequencer/SequenceEditorContext';
 import LoadingScreen from '../../components/LoadingScreen';
 import SceneInspector from '../sceneInspector/SceneInspector';
 import AddNew from '../sceneInspector/AddNew';
@@ -107,6 +110,9 @@ function ScenePanel(_: IDockviewPanelProps) {
   const { editorMode } = useCleoEngine();
   // A rig tab is authored the same way an animation tab is: the Scene panel becomes the bone tree.
   const skeleton = editorMode === 'stateMachine' || editorMode === 'rig' || editorMode === 'animation';
+  // In Sequencer mode the tree is a keying root too: its visibility eye keys the node's visibility.
+  if (editorMode === 'sequence')
+    return <SidePanel scroll={false}><div {...{ [KEYING_ROOT_ATTR]: '' }} className='flex h-full min-h-0 flex-col'><SceneInspector /></div></SidePanel>;
   return <SidePanel scroll={false}>{skeleton ? <SkeletonTree /> : <SceneInspector />}</SidePanel>;
 }
 
@@ -158,6 +164,8 @@ function PropertiesPanel(_: IDockviewPanelProps) {
   // The particle tab's Properties is the effect itself — its emitters and module stacks — never the
   // editor-owned preview node, which carries nothing the author should edit.
   if (editorMode === 'particleSystem') return <SidePanel><ParticleStackPanel /></SidePanel>;
+  // Sequencer mode: the node inspector over the open scene, every change a key (see SequenceProperties).
+  if (editorMode === 'sequence') return <SidePanel><SequenceProperties node={node} /></SidePanel>;
   // Mesh mode keeps the normal node inspector below the mesh-level controls (LOD levels + cull).
   if (editorMode === 'model') return (
     <SidePanel>
@@ -274,6 +282,15 @@ function ClipTimelinePanel(_: IDockviewPanelProps) {
   return <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised"><ClipTimeline /></div>;
 }
 
+/**
+ * The Sequencer: the timeline of the selected Sequence node. `renderer: 'always'` in the dock, so a preview it
+ * is playing keeps going behind another bottom tab; `active` idles its keyboard while another tab is up.
+ */
+function SequencerDockPanel(props: IDockviewPanelProps) {
+  const active = useIsSelectedTab(props.api);
+  return <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised"><SequencerPanel active={active} /></div>;
+}
+
 /** The particle editor's transport: play / pause / restart over the preview, in the bottom strip. */
 function ParticleTransportDockPanel(_: IDockviewPanelProps) {
   return <div className="flex flex-col h-full w-full overflow-hidden bg-surface-raised"><ParticleTransportPanel /></div>;
@@ -348,6 +365,7 @@ const panelComponents = {
   clipInspector: ClipInspectorPanel,
   clipTimeline: ClipTimelinePanel,
   particleTransport: ParticleTransportDockPanel,
+  sequencer: SequencerDockPanel,
   tilePalette: TilePalettePanel,
   tilemapLayers: TilemapLayersDockPanel,
   landscapeTools: LandscapeToolsDockPanel,

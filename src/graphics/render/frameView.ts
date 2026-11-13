@@ -27,6 +27,12 @@ export interface FrameView {
      */
     taaJitterActive: boolean;
     /**
+     * A movie sample's sub-pixel offset in pixels (render/movieCapture.ts), or null. Unlike TAA's it holds
+     * for the WHOLE frame, transparents and sprites included: nothing resolves it — the movie averages
+     * its samples instead, and everything in the picture has to be sampled the same way.
+     */
+    movieJitter: [number, number] | null;
+    /**
      * The UNJITTERED view-projection: the culling frustum is built from it, and it is both sides of every
      * motion-vector subtraction, where a jitter on one side only would read as motion.
      */
@@ -68,10 +74,16 @@ export interface FrameView {
     // G-buffer and never sees the light list, but parallax self-shadowing needs it.
     // `[0, 0, 0]` means no directional light and switches self-shadowing off.
     sunDirection: number[];
-    /** Seconds of wind time, advanced by the frame delta (clamped, so a stall never makes plants jump). */
+    /**
+     * Seconds of the render clock, advanced by the frame delta (clamped, so a stall never makes plants
+     * jump), times the game's time scale when `effectsFollowTimeScale` is on. Wind, clouds, fog, flicker,
+     * water ripples and custom materials' `u_time` all run on it.
+     */
     windTime: number;
     /** Last frame's `windTime`, for the motion vectors. */
     windTimePrev: number;
+    /** `windTime - windTimePrev`: what this frame advanced the render clock by, seconds. */
+    windDelta: number;
     /** Last frame's unjittered view-projection, for motion blur, TAA and particle collision reprojection. */
     readonly prevViewProj: mat4;
     /** Last frame's view matrix, beside `prevViewProj`: SSIL compares depths in that camera's space. */
@@ -91,6 +103,7 @@ export function createFrameView(): FrameView {
         capturing: false,
         cubeFace: false,
         taaJitterActive: false,
+        movieJitter: null,
         viewProj: mat4.create(),
         invViewProj: mat4.create(),
         invViewProjStable: mat4.create(),
@@ -100,6 +113,7 @@ export function createFrameView(): FrameView {
         sunDirection: [0, 0, 0],
         windTime: 0,
         windTimePrev: 0,
+        windDelta: 0,
         prevViewProj: mat4.create(),
         prevView: mat4.create(),
         hasPrevViewProj: false,

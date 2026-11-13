@@ -129,6 +129,8 @@ import IrradianceProgram from '../shaders/wgsl/irradiance.wgsl';
 import PrefilterProgram from '../shaders/wgsl/prefilter.wgsl';
 import PrefilterOctProgram from '../shaders/wgsl/prefilterOct.wgsl';
 import BRDFProgram from '../shaders/wgsl/brdf.wgsl';
+// A movie's sample accumulation (render/movieCapture.ts).
+import MovieAccumulateProgram from '../shaders/wgsl/movieAccumulate.wgsl';
 
 export {
     BasicProgram, BasicInstancedProgram, BasicSkinnedProgram, BlinnPhongProgram,
@@ -158,6 +160,7 @@ export {
     VolumetricFogInjectProgram, VolumetricFogIntegrateProgram, VolumetricFogApplyProgram,
     GiReduceProgram, GiVisibilityProgram, GiRadianceProgram, GiIntegrateProgram, GiResolveProgram,
     GiAmbientCubeProgram, GiRescaleProgram, GiProbeOverlayProgram, GiStateStampProgram,
+    MovieAccumulateProgram,
 };
 
 // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
@@ -331,6 +334,8 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['giProbeOverlay',               GiProbeOverlayProgram],
         // The probe states in the irradiance atlas's alpha (render/gi/giSystem.ts). APPENDED.
         ['giStateStamp',                 GiStateStampProgram],
+        // A movie frame's samples, averaged before the display resolve (render/movieCapture.ts). APPENDED.
+        ['movieAccumulate',              MovieAccumulateProgram],
     ];
 }
 

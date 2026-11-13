@@ -20,7 +20,7 @@ import { device } from '../rhi/deviceHandle';
 import type { RenderPipeline } from '../rhi/resources';
 import { ADDITIVE_BLEND } from '../rhi/types';
 import type { DepthStencilState, CullMode } from '../rhi/types';
-import { TerrainFloorGrid, ShadowLayerCache, unitDirection, shadowReach, sliceCornerFactor, cascadeSphereAroundEye, staggeredCascadeDue, EYE_FIT_MARGIN, receiverInnerRadius, isFreeShadowSlot } from '../shadowCasters';
+import { TerrainFloorGrid, ShadowLayerCache, shadowReach, sliceCornerFactor, cascadeSphereAroundEye, staggeredCascadeDue, EYE_FIT_MARGIN, receiverInnerRadius, isFreeShadowSlot } from '../shadowCasters';
 import { AREA_SHADOW_HALF_FOV, MAX_CASCADES, CascadeSphere, ShadowCasterBounds, SpotShadowSlots, MAX_POINT_SHADOWS, PointShadowCache, CasterMotion, lightViewMatrix, mixNumber, HASH_SEED, pushCasterBounds, mixTransform, spotShadowFar, pointShadowFov, POINT_SHADOW_FACES, mixString, computeCascadeSplits, staleCascadeCovers, STAGGER_MARGIN, quantizeRadius, cascadeDepthScale, cascadeSphereFromPerspective, cascadeSphereFromCorners, buildCascadeMatrix } from '../shadowMath';
 import { keyLight } from '../skyNight';
 import { TextureManager } from '../systems/textureManager';
@@ -38,6 +38,7 @@ import { ShaderManager } from '../systems/shaderManager';
 import { DEPTH_WRITE } from './pipelineCache';
 import type { RenderSubsystems } from './subsystems';
 import { shelterMatrix, footprintKey, type ShelterFootprint } from './weatherPack';
+import { unitDirection } from '../../core/math';
 
 /**
  * One punctual-light shadow atlas, spot or point, as the shared layer routine sees it. The FBOs are read
@@ -591,12 +592,11 @@ export class ShadowPasses {
         // The raymarch's own density scale, times the composite opacity: a faded-out layer casts less.
         shape[2] = Math.min(1, Math.max(0, clouds.density / 2.5)) * clouds.opacity;
         shape[3] = clouds.absorption * ShadowPasses.CLOUD_SHADOW_EXTINCTION;
-        // The same wind offset the cloud pass computes from the same clock (`u_wind * windSpeed * time`),
-        // frozen at the bake while the clouds are drawn from it.
-        const dir = this.cloudWindDir;
-        const drift = clouds.resolveWind(scene.wind, dir) * this._clouds.cloudTime(scene, clouds);
+        // The same drift the cloud pass draws (clouds.ts `windOffset`), frozen at the bake while the
+        // clouds are drawn from it — so the shadows stay under the clouds whatever the wind did since.
+        const drift = this._clouds.cloudWindOffset(scene, clouds);
         const wind = this._cloudShadowWind;
-        wind[0] = dir[0] * drift; wind[1] = dir[1] * drift; wind[2] = dir[2] * drift;
+        wind[0] = drift[0]; wind[1] = drift[1]; wind[2] = drift[2];
     }
 
     /**

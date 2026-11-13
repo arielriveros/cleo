@@ -110,8 +110,8 @@ export { SkyLightNode, DEFAULT_NIGHT_AMBIENT } from "./core/scene/nodes/skyLight
 export { WindNode, WIND_DEFAULTS, type WindOptions } from "./core/scene/nodes/windNode";
 // The wind as a vector field (Ghost of Tsushima's): one function on the CPU and in chunks/windField.wgsl.
 export {
-    sampleWindField, sampleSceneWind, packWindSources, windGustAt, windVeerAt, windPerlin, windPerlinGrad,
-    createWindSample, WindFieldSnapshot, windFieldClock,
+    sampleWindField, sampleSceneWind, packWindSources, windGustAt, windVeerAt,
+    createWindSample, WindFieldSnapshot, windFieldClock, advanceGustTravel,
     WIND_REFERENCE_SPEED, MAX_WIND_SOURCES, WIND_SOURCE_FLOATS, WIND_DEFAULT_GUSTINESS, WIND_DEFAULT_VEER,
     type WindSample, type WindFieldParams, type WindFieldSource,
 } from "./core/wind/windField";
@@ -174,7 +174,7 @@ export type { NodeVariable, NodeVariableType, NodeVariableAccess } from "./core/
 
 export { Logger } from "./core/logger";
 export type { LogEntry, LogMethod, LogOptions } from "./core/logger";
-export { TypedEmitter, engineEventBus } from "./core/eventBus";
+export { TypedEmitter, engineEventBus, asDerived } from "./core/eventBus";
 export type { EngineEventMap, SceneChange, ChangeKind, StructureOp, NodePlacement } from "./core/eventBus";
 // The cross-asset reference graph. Kind-agnostic on purpose: the editor owns the per-kind readers that
 // turn an asset record into edges, and feeds them in through `setEdges`.
@@ -192,7 +192,7 @@ export type { Condition, ConditionGroup, ConditionNode, ConditionOp, ConditionCo
 // `CharacterNode` consumes it, so neither half knows about the other.
 export {
     INTENT_REQUESTS, createIntent, clearIntent, raiseRequest, isRequested, consumeRequest, decayRequests,
-    forwardFromYaw, rightFromYaw, moveWorldDirection, setMoveWorld, shortestAngle, applyPlayerReading,
+    moveWorldDirection, setMoveWorld, applyPlayerReading,
 } from "./core/control/intent";
 export type { ControlIntent, IntentRequest, PlayerReading, Vec2 as ControlVec2 } from "./core/control/intent";
 export {
@@ -329,8 +329,7 @@ export type {
     InputMap, Processor, ProcessorKind, TouchGestureConfig, VirtualControl,
 } from "./input/actionMap";
 export {
-    applyDeadzone1D, applyRadialDeadzone, applyCurve, applyScale, applyInvert, normalizeVec2,
-    smoothToward, runProcessors1D, runProcessors2D,
+    applyDeadzone1D, applyRadialDeadzone, applyScale, applyInvert, runProcessors1D, runProcessors2D,
 } from "./input/processors";
 export type { SmoothingState } from "./input/processors";
 export { createGestureState, stepTouchGestures } from "./input/gestures";
@@ -398,8 +397,7 @@ export type { NodeBuiltinName } from "./animation/animator";
 export { parseEventActions, runEventActions, resolveTarget, drawnWorldPosition } from "./animation/eventActions";
 export type { EventAction, EventActionBinding } from "./animation/eventActions";
 export {
-    createMotionRecord, sampleMotion, planarSplit, facingComponents, headingAngle, signedAngleBetween, wrapDegrees,
-    motionConfig, MOTION_DEFAULTS,
+    createMotionRecord, sampleMotion, motionConfig, MOTION_DEFAULTS,
 } from "./physics/motion";
 export type { MotionRecord, MotionConfig } from "./physics/motion";
 export {
@@ -505,7 +503,7 @@ export type { HeightImage, HeightImportOptions } from "./terrain/heightmapIO";
 export { decodePngChannels, weightsToOverAlphas, weightPlanesToAlphaPlanes, readWorldManifest, weightPlanesFromImages, resamplePlane } from "./terrain/splatmapIO";
 export type { DecodedPng, WorldManifest, WorldManifestLayer } from "./terrain/splatmapIO";
 export type { TerrainConfig, SculptBrush, SculptMode, TerrainLayer, PaintBrush, TerrainChunk, TerrainLodSettings, FoliageGenerateResult } from "./terrain/terrain";
-export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES, FOLIAGE_DRAW_TRIANGLE_BUDGET, foliageEffectiveCull, foliageLodBands } from "./terrain/foliage";
+export { FoliageLayer, crossQuadGeometry, MAX_INSTANCES, FOLIAGE_DRAW_TRIANGLE_BUDGET, foliageEffectiveCull, foliageLodBands, foliageDensityScale, FOLIAGE_DENSITY_STEPS } from "./terrain/foliage";
 export type { FoliageKind, FoliageParams } from "./terrain/foliage";
 export { FoliageInteraction, gatherFoliageInteractors, MAX_INTERACT_STAMPS, INTERACT_RANGE, type FoliageInteractor } from "./graphics/foliageInteraction";
 export { bakeOctahedralImpostor, rgbaSampler, impostorSphere } from "./terrain/octahedralBake";
@@ -528,12 +526,12 @@ export {
     CHUNK_SIZE, CELL_EMPTY, packCell, cellTile, cellFlags, cellFlipX, cellFlipY, cellRot90, withTile, chunkKey, chunkCoord,
 } from "./graphics/tilemap/chunk";
 export type { TileChunk } from "./graphics/tilemap/chunk";
-export { autoTileMask, resolveAutoTile, pickWeightedVariant, cellNoise } from "./graphics/tilemap/autotile";
+export { autoTileMask, resolveAutoTile, pickWeightedVariant } from "./graphics/tilemap/autotile";
 export { greedyMerge } from "./graphics/tilemap/tilemapCollision";
 export type { SolidBox } from "./graphics/tilemap/tilemapCollision";
 export { Raycaster } from "./core/raycaster";
 export type { Ray, RaycastHit } from "./core/raycaster";
-export { BVH, rayTriangleIntersection } from "./core/bvh";
+export { BVH } from "./core/bvh";
 export type { BVHHit } from "./core/bvh";
 export { Frustum } from "./core/frustum";
 export { bytesToBase64, base64ToBytes, bytesToDataUrl, parseBase64DataUri } from "./core/base64";
@@ -548,15 +546,68 @@ export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime
 // Typed name fields (clip/sound/socket/template/child): plain strings the inspector offers a picker for.
 export { SOUNDS_GROUP, ownedSoundsGroup } from "./core/scripting/fieldTypes";
 export type { ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, ProjectTriggers } from "./core/scripting/fieldTypes";
-export { Game, setGameHost } from "./core/game";
+export { Game, setGameHost, setMovieRender, type MovieRenderInfo } from "./core/game";
 export { TimeDilation, type DilateOptions } from "./core/timeDilation";
 export { showLoadingOverlay, nextFrame, whenFramesSmooth } from "./core/loadingOverlay";
 export type { LoadingOverlay, LoadingOverlayOptions } from "./core/loadingOverlay";
 export type { GameHost, LoadProgressListener, LoadSceneOptions } from "./core/game";
 export * as Vec from "gl-matrix";
 export * as MathUtils from "./core/math";
-export { clamp, lerp, damp, dampTime, eulerFromQuatDeg, decomposeTRS } from "./core/math";
-export { aimFromDirection } from "./core/cameraRigMath";
+// The most used of MathUtils by name as well. Each was once exported from the module that first needed it
+// (intent, processors, motion, windField, autotile, bvh); they all live in core/math.ts now. The particle
+// curve and gradient names come through `export * from "./particles/curves"` above.
+export {
+    clamp, lerp, damp, dampTime, eulerFromQuatDeg, decomposeTRS, aimFromDirection,
+    wrapDegrees, headingAngle, signedAngleBetween, planarSplit, facingComponents, forwardFromYaw, rightFromYaw,
+    shortestAngle, applyCurve, normalizeVec2, smoothToward, windPerlin, windPerlinGrad, cellNoise,
+    rayTriangleIntersection,
+} from "./core/math";
+// The cinematic sequencer: a SequenceNode plays a sequence (tracks of timed sections) against the scene.
+export {
+    SequenceNode, resolveNodePath, sequenceGlobals, type SequencePlayOptions, type SequenceEndReason,
+} from "./core/scene/nodes/sequenceNode";
+export { SequencePlayer, type SequencePlayerHost, type SequenceEventListener, type SequencePose } from "./sequencer/sequencePlayer";
+export { parseSequence, emptySequence, parseSequenceCurve } from "./sequencer/parse";
+// A sequence's keys are core/math.ts's keyed curves and its paths are Spline3s.
+export {
+    evaluateKeyedNumber, evaluateKeyedVector, evaluateKeyedStep, keyedCurveWidth, rampWeight, hermite, Spline3,
+    type Vec3Tuple, type KeyInterp, type TimedKey, type KeyedCurve,
+} from "./core/math";
+export { compilePropertyPath, isTransformPath, captureVisibility, type PropertyAccessor } from "./sequencer/propertyPath";
+export { keyableProperties, sameKeyValue, type KeyableProperty } from "./sequencer/keyable";
+export { SEQUENCE_VERSION, FOLIAGE_CHANNELS } from "./sequencer/types";
+export { registerSequencePresets, sequencePresetsFor, presetFields, blendPresetValue } from "./sequencer/presetRegistry";
+export type {
+    SequenceData, SequenceSlot, SequenceTrack, SequenceTrackType, SequenceKey, SequenceCurve,
+    SectionBase, PathSection, PathTrack, PathLook, CameraCutSection, CameraCutTrack, PropertySection,
+    PropertyTrack, PropertyValueType, EventKey, EventTrack, SequenceMarker,
+    PresetSection, PresetTrack, FoliageSection, FoliageTrack, FoliageChannel,
+    ScriptSection, ScriptTrack, SequenceScriptContext, AnimationSection, AnimationTrack, AudioSection, AudioTrack,
+    SpawnSection, SpawnTrack, PossessSection, PossessTrack,
+} from "./sequencer/types";
+// Rendering a sequence to video, offline (sequencer/movie/).
+export {
+    renderMovie, type MovieEngine, type MovieRenderOptions, type MovieFrame, type MovieSink, type MovieProgress,
+    type MovieResult, type MovieEndReason, type MovieRunControls,
+} from "./sequencer/movie/renderMovie";
+export { beginMovieEngine, type MovieEngineHandle, type MovieEngineOptions } from "./sequencer/movie/movieEngine";
+export { movieRenderSettings, type MovieQuality } from "./sequencer/movie/movieSettings";
+export {
+    frameRateOf, framesPerSecond, frameStart, frameTimestampUs, frameDurationUs, sampleTime, sampleJitter,
+    shutterFromAngle, frameCountFor, type FrameRate, type SampleSettings,
+} from "./sequencer/movie/movieTiming";
+export { renderNow, setRenderClock } from "./graphics/render/renderClock";
+export {
+    AudioRecorder, AudioMixdown, audioRecorder, buildAudioSchedule, mixAudioLog, keyValueAt,
+    type AudioLog, type AudioLogSound, type AudioOp, type AudioSchedule, type VoicePlan, type VoicePiece,
+    type AudioKey, type MixOptions,
+} from "./audio/movieAudio";
+import { sequenceGlobals as installSequenceGlobals } from "./core/scene/nodes/sequenceNode";
+import { CleoEngine as SequenceEngine } from "./core/engine";
+import { Game as SequenceGame } from "./core/game";
+// Property tracks aimed at 'renderer' or 'game' resolve here: the node module sits below both in the import graph.
+installSequenceGlobals.renderer = () => SequenceEngine.instance?.renderer ?? null;
+installSequenceGlobals.game = () => SequenceGame;
 
 // What a user script's `import { ... } from 'cleo'` resolves to: the barrel's own namespace. Must stay
 // the LAST statement — the self-import only works once every re-export above has been evaluated.

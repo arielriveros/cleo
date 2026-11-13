@@ -1,4 +1,4 @@
-import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, WeatherNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OcclusionVolumeNode, ExposureVolumeNode, GIVolumeNode, VolumetricFogNode, ClothNode } from 'cleo'
+import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, WeatherNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OcclusionVolumeNode, ExposureVolumeNode, GIVolumeNode, VolumetricFogNode, ClothNode, SequenceNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import RigSlot from './RigSlot';
@@ -31,6 +31,7 @@ import WaterVolumeEditor from './WaterVolumeEditor'
 import OcclusionVolumeEditor from './OcclusionVolumeEditor'
 import ExposureVolumeEditor from './ExposureVolumeEditor'
 import GIVolumeEditor from './GIVolumeEditor'
+import SequenceEditor from './SequenceEditor'
 import VolumetricFogEditor from './VolumetricFogEditor'
 import TilemapEditor from './TilemapEditor'
 import LandscapeEditor from './LandscapeEditor'
@@ -39,9 +40,11 @@ import UIEditor from './UIEditor'
 import { isRootNode } from '../useSelectedNode'
 import { useCleoEngine } from '../../EngineContext'
 import { DocScope } from '@cleo/app-kit/ui'
+import { useInspectorLock } from '../inspectorLock'
 
 export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) {
   const { activeTab, editorMode, templateRootId } = useCleoEngine();
+  const lock = useInspectorLock();
   const root = isRootNode(props.node);
   const ro = !!props.readOnly;
   // The template root, and only it. A template's whole point is that its root is the thing you place, and
@@ -74,13 +77,12 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
         <fieldset disabled={ro} className={`${ro ? 'opacity-60' : ''} border-0 m-0 p-0 min-w-0`}>
           {/* Models and decals: the one predicate every material helper uses, so the slot shows exactly
               where linking, save propagation and deletion work. */}
-          { nodeSupportsMaterial(props.node) && <MaterialSlot node={props.node} /> }
+          { nodeSupportsMaterial(props.node) && <fieldset disabled={lock.locked} title={lock.locked ? lock.reason : undefined} className='border-0 m-0 p-0 min-w-0'><MaterialSlot node={props.node} /></fieldset> }
           {/* A node that IS a skinned model, or is the ROOT of an instance holding one — `ownSkinnedModelNodeOf`,
               never a subtree search, so a section is about the selected node rather than anything below it.
               Both render away otherwise. Between them these are the only animation-related sections on a
               model node: the rig owns the clips, the node owns the machine that names them. */}
-          { !root && <RigSlot node={props.node} /> }
-          { !root && <AnimationSlot node={props.node} /> }
+          { !root && <fieldset disabled={lock.locked} title={lock.locked ? lock.reason : undefined} className='border-0 m-0 p-0 min-w-0'><RigSlot node={props.node} /><AnimationSlot node={props.node} /></fieldset> }
           { props.node.nodeType === 'sprite' && <SpriteEditor node={props.node as SpriteNode} /> }
           { props.node.nodeType === 'animatedSprite' && <AnimatedSpriteEditor /> }
           { props.node.nodeType === 'light' && <LightEditor node={props.node as LightNode} /> }
@@ -88,6 +90,7 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'exposureVolume' && <ExposureVolumeEditor key={props.node.id} node={props.node as ExposureVolumeNode} /> }
           { props.node.nodeType === 'giVolume' && <GIVolumeEditor key={props.node.id} node={props.node as GIVolumeNode} /> }
           { props.node.nodeType === 'volumetricFog' && <VolumetricFogEditor key={props.node.id} node={props.node as VolumetricFogNode} /> }
+          { props.node.nodeType === 'sequence' && <SequenceEditor key={props.node.id} node={props.node as SequenceNode} /> }
           {/* Keyed by id so selecting another decal starts from ITS values rather than writing this one's
               state into it for a frame. */}
           { props.node.nodeType === 'decal' && <DecalEditor key={props.node.id} node={props.node as DecalNode} /> }

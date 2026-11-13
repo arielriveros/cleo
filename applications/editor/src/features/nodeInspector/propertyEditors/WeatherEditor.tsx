@@ -15,7 +15,7 @@ const WETNESS_HINT = 'How wet the ground and the plants inside the box are: 0 dr
 const PUDDLES_HINT = 'How much of the wet ground\'s low, flat spots holds standing water: 0 none, 1 every hollow. Water pools in the landscape\'s height maps, and in a noise a few metres across where it has none.'
 const SNOW_HINT = 'How much snow lies inside the box: 0 none, 1 thick. It settles on flat ground (low ground first) and on what faces up on foliage materials, and weighs plants down.'
 const SHELTER_HINT = 'Covered ground and plants stay dry and free of snow, and no rain or snow falls on them: under a roof, an overhang, a cart, anything solid that casts a shadow from straight above. Off: the weather reaches everything in the box.'
-const FALLING_HINT = 'What falls inside the box, drawn as particles round the camera: rain (fast streaks slanting with the wind) or snow (slow fluttering flakes). It falls in from the sky above the box and stops at roofs (Shelter). Falling rain stirs the wet ground: rings ripple in its puddles and drops hit the ground round them.'
+const FALLING_HINT = 'What falls inside the box, drawn as particles round the camera: rain (fast streaks slanting with the wind), snow (slow fluttering flakes), or both together (Snow Share sets how much is snow). It falls in from the sky above the box and stops at roofs (Shelter). Falling rain stirs the wet ground: rings ripple in its puddles and drops hit the ground round them.'
 const RATE_HINT = 'How hard it falls: 0 nothing, 1 a downpour (or a blizzard). Overlapping volumes never double it: the highest rate in reach is spawned, and each place keeps its own share.'
 const SPRITE_HINT = "What each drop or flake looks like. Built-in: the engine's own streaks and flakes. Tileset or Texture: a sprite sheet whose cells each particle picks one of at random (or plays at Frame Rate). A rain cell's TOP is the end that leads as it falls."
 
@@ -30,7 +30,8 @@ export default function WeatherEditor(props: { node: WeatherNode }) {
       size: [...n.size] as Vec3, bounded: n.bounded, blendDistance: n.blendDistance, priority: n.priority, enabled: n.enabled,
       wetness: n.wetness, snow: n.snow, puddles: n.puddles, snowMaterialId: n.snowMaterialId, hasSnowMaterial: !!n.snowMaterial,
       snowTiling: n.snowTiling, snowSlope: n.snowSlope, snowBreakup: n.snowBreakup, shelter: n.shelter,
-      precipitation: n.precipitation, precipitationRate: n.precipitationRate, precipitationSize: n.precipitationSize,
+      precipitation: n.precipitation, precipitationRate: n.precipitationRate, snowShare: n.precipitationSnowShare,
+      precipitationSize: n.precipitationSize,
       precipitationSpeed: n.precipitationSpeed, precipitationWind: n.precipitationWind,
       trailMin: n.precipitationTrailMin, trailMax: n.precipitationTrailMax,
       sprite: n.precipitationSprite ? { ...n.precipitationSprite } as PrecipitationSprite : null as PrecipitationSprite | null,
@@ -51,7 +52,7 @@ export default function WeatherEditor(props: { node: WeatherNode }) {
     eventEmitter.emit('SCENE_CHANGED', { kind: 'environment', node: props.node })
   }
   const set = (patch: Partial<Pick<WeatherNode, 'size' | 'blendDistance' | 'priority' | 'enabled' | 'wetness' | 'snow'
-    | 'puddles' | 'snowTiling' | 'snowSlope' | 'snowBreakup' | 'shelter' | 'precipitation' | 'precipitationRate'
+    | 'puddles' | 'snowTiling' | 'snowSlope' | 'snowBreakup' | 'shelter' | 'precipitation' | 'precipitationRate' | 'precipitationSnowShare'
     | 'precipitationSize' | 'precipitationSpeed' | 'precipitationWind' | 'precipitationSprite'
     | 'precipitationTrailMin' | 'precipitationTrailMax'>>) => {
     Object.assign(props.node, patch)
@@ -136,19 +137,23 @@ export default function WeatherEditor(props: { node: WeatherNode }) {
               <option value='none'>Nothing</option>
               <option value='rain'>Rain</option>
               <option value='snow'>Snow</option>
+              <option value='mixed'>Rain and snow</option>
             </Select>
           </PropertyRow>
           {f.precipitation !== 'none' && <>
             <PropertyRow label='Rate' hint={RATE_HINT}>
               <Slider min={0} max={1} step={0.01} value={f.precipitationRate} readout onChange={precipitationRate => set({ precipitationRate })} />
             </PropertyRow>
-            <PropertyRow label={f.precipitation === 'rain' ? 'Drop Size' : 'Flake Size'} hint="Times the realistic default: a few millimetres across a drop's streak, a centimetre or two a flake.">
+            {f.precipitation === 'mixed' && <PropertyRow label='Snow Share' hint='How much of what falls is snow: 0 all rain, 1 all snow, the rest rain. Swept from 0 to 1 it turns the rain into snow.'>
+              <Slider min={0} max={1} step={0.01} value={f.snowShare} readout onChange={precipitationSnowShare => set({ precipitationSnowShare })} />
+            </PropertyRow>}
+            <PropertyRow label={f.precipitation === 'rain' ? 'Drop Size' : f.precipitation === 'snow' ? 'Flake Size' : 'Drop & Flake Size'} hint="Times the realistic default: a few millimetres across a drop's streak, a centimetre or two a flake.">
               <Slider min={0.25} max={3} step={0.05} value={f.precipitationSize} readout onChange={precipitationSize => set({ precipitationSize })} />
             </PropertyRow>
             <PropertyRow label='Fall Speed' hint='Times the realistic terminal velocity: 8.5 m/s a raindrop, 1 m/s a snowflake.'>
               <Slider min={0.25} max={3} step={0.05} value={f.precipitationSpeed} readout onChange={precipitationSpeed => set({ precipitationSpeed })} />
             </PropertyRow>
-            {f.precipitation === 'rain' && <>
+            {(f.precipitation === 'rain' || f.precipitation === 'mixed') && <>
               <PropertyRow label='Trail Min' hint="The shortest a drop's streak is, as a multiple of the realistic default (1). Each drop draws its length at random between Trail Min and Trail Max.">
                 <Slider min={0.1} max={4} step={0.05} value={f.trailMin} readout onChange={precipitationTrailMin => set({ precipitationTrailMin })} />
               </PropertyRow>

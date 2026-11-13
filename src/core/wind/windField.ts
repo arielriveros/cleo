@@ -21,6 +21,7 @@
  */
 import type { WindNode } from "../scene/nodes/windNode";
 import type { ForceFieldNode } from "../scene/nodes/forceFieldNode";
+import { smoothstep, windPerlin, windPerlinGrad } from "../math";
 
 /** Air speed (m/s) of strength 1 at the crest of a gust: what wind-enabled materials are authored for. */
 export const WIND_REFERENCE_SPEED = 7;
@@ -53,74 +54,32 @@ const [VEER_OX, VEER_OY] = WIND_FIELD_CONSTANTS.VEER_OFFSET;
 const CORE = WIND_FIELD_CONSTANTS.CORE;
 const [EDDY_DX, EDDY_DY] = WIND_FIELD_CONSTANTS.EDDY_DRIFT;
 
-/** The frame's wind time in seconds, advanced by the renderer with the foliage's (see renderer.ts). */
-export const windFieldClock = { time: 0 };
-
-// ---- Noise ------------------------------------------------------------------------------------------
-
-/** PCG hash of a u32 (as particleCommon.wgsl pcgHash). */
-export function windPcg(v: number): number {
-    const state = (Math.imul(v, 747796405) + 2891336453) >>> 0;
-    const word = Math.imul(((state >>> ((state >>> 28) + 4)) ^ state) >>> 0, 277803737) >>> 0;
-    return ((word >>> 22) ^ word) >>> 0;
-}
-
-/** Hash of an integer lattice point. */
-export function windLatticeHash(ix: number, iy: number): number {
-    return windPcg((Math.imul(ix, 1597334677) ^ Math.imul(iy, 3812015801)) >>> 0);
-}
-
-const SQRT1_2 = 0.70710678;
-
-/** One of 8 unit gradients (4 axes, 4 diagonals) from a hash; no trig. Written into `out` [x, y]. */
-function gradient(h: number, out: number[]): number[] {
-    const sx = (h & 1) !== 0 ? 1 : -1, sy = (h & 2) !== 0 ? 1 : -1;
-    if ((h & 4) !== 0) { out[0] = sx * SQRT1_2; out[1] = sy * SQRT1_2; }
-    else if ((h & 8) !== 0) { out[0] = 0; out[1] = sy; }
-    else { out[0] = sx; out[1] = 0; }
-    return out;
-}
-
-const _ga = [0, 0], _gb = [0, 0], _gc = [0, 0], _gd = [0, 0];
-
-/** 2D gradient (Perlin) noise with a quintic fade, roughly -0.7..0.7, 0 on every lattice point. */
-export function windPerlin(x: number, y: number): number {
-    const ix = Math.floor(x), iy = Math.floor(y);
-    const fx = x - ix, fy = y - iy;
-    const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10), uy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
-    const ga = gradient(windLatticeHash(ix, iy), _ga), gb = gradient(windLatticeHash(ix + 1, iy), _gb);
-    const gc = gradient(windLatticeHash(ix, iy + 1), _gc), gd = gradient(windLatticeHash(ix + 1, iy + 1), _gd);
-    const a = ga[0] * fx + ga[1] * fy;
-    const b = gb[0] * (fx - 1) + gb[1] * fy;
-    const c = gc[0] * fx + gc[1] * (fy - 1);
-    const d = gd[0] * (fx - 1) + gd[1] * (fy - 1);
-    const ab = a + (b - a) * ux, cd = c + (d - c) * ux;
-    return ab + (cd - ab) * uy;
-}
+/**
+ * The frame's wind time in seconds, advanced by the renderer with the foliage's (see renderer.ts), and
+ * `gustTravel`: how far the gusts have rolled on that clock, in gust wavelengths (`advanceGustTravel`).
+ */
+export const windFieldClock = { time: 0, gustTravel: 0 };
 
 /**
- * windPerlin and its analytic gradient (Quilez): `out` = [value, d/dx, d/dy]. Exact, so the turbulence
- * curl is divergence-free.
+ * Roll the gusts on by `dt` seconds of `wind` (the scene's WindNode, or none for the defaults): `gustSpeed`
+ * over the gust wavelength, integrated, so a gust speed or size that changes — a preset blending in, a
+ * storm building — moves the gusts on from where they are instead of re-deriving their place from
+ * `speed × time`, which would race them across the field while it changed. The direction is not
+ * integrated: the gusts roll along the wind as it points now (wind presets never turn it).
  */
-export function windPerlinGrad(x: number, y: number, out: number[] = [0, 0, 0]): number[] {
-    const ix = Math.floor(x), iy = Math.floor(y);
-    const fx = x - ix, fy = y - iy;
-    const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10), uy = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
-    const dux = 30 * fx * fx * (fx * (fx - 2) + 1), duy = 30 * fy * fy * (fy * (fy - 2) + 1);
-    const ga = gradient(windLatticeHash(ix, iy), _ga), gb = gradient(windLatticeHash(ix + 1, iy), _gb);
-    const gc = gradient(windLatticeHash(ix, iy + 1), _gc), gd = gradient(windLatticeHash(ix + 1, iy + 1), _gd);
-    const a = ga[0] * fx + ga[1] * fy;
-    const b = gb[0] * (fx - 1) + gb[1] * fy;
-    const c = gc[0] * fx + gc[1] * (fy - 1);
-    const d = gd[0] * (fx - 1) + gd[1] * (fy - 1);
-    const k = a - b - c + d;
-    out[0] = a + (b - a) * ux + (c - a) * uy + k * ux * uy;
-    out[1] = ga[0] + (gb[0] - ga[0]) * ux + (gc[0] - ga[0]) * uy + (ga[0] - gb[0] - gc[0] + gd[0]) * ux * uy
-           + dux * ((b - a) + k * uy);
-    out[2] = ga[1] + (gb[1] - ga[1]) * ux + (gc[1] - ga[1]) * uy + (ga[1] - gb[1] - gc[1] + gd[1]) * ux * uy
-           + duy * ((c - a) + k * ux);
-    return out;
+export function advanceGustTravel(clock: { gustTravel: number }, wind: WindNode | null, dt: number): void {
+    if (!(dt > 0)) return;
+    const speed = wind ? wind.gustSpeed : 4;
+    const lambda = Math.max(wind ? wind.gustScale : 18, 0.5);
+    clock.gustTravel += speed / lambda * dt;
 }
+
+// ---- Noise ------------------------------------------------------------------------------------------
+//
+// The field's noise (windPcg, windLatticeHash, windPerlin, windPerlinGrad) is pure math and lives in
+// core/math.ts, operation for operation the WGSL's; re-exported here, where the tests and the barrel find it.
+
+export { windLatticeHash, windPcg, windPerlin, windPerlinGrad } from "../math";
 
 // ---- The field --------------------------------------------------------------------------------------
 
@@ -134,11 +93,6 @@ export type WindFieldParams = Float32Array | number[];
 export interface WindSample { velocity: [number, number, number]; gust: number; steady: number; }
 
 export function createWindSample(): WindSample { return { velocity: [0, 0, 0], gust: 0, steady: 0 }; }
-
-const smoothstep = (e0: number, e1: number, x: number) => {
-    const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-    return t * t * (3 - 2 * t);
-};
 
 /** The gust at world (x, z), 0..1: two octaves of Perlin scrolled along the wind (GoT). */
 export function windGustAt(x: number, z: number, params: WindFieldParams): number {
@@ -275,7 +229,14 @@ export class WindFieldSnapshot {
     /** Any wind at all: a base wind or a source. */
     public get active(): boolean { return this.baseOn || this.count > 0; }
 
-    public capture(scene: WindFieldSource, time: number): this {
+    /**
+     * `gustTravel` (windFieldClock's, wavelengths) places the gusts by how far they have actually rolled:
+     * the gust speed in the params becomes the one that reaches there at `time`, `travel × λ / time`, so
+     * every reader of the eight floats (this file, windField.wgsl, the particles) scrolls them the same
+     * way. Without it (or with no travel yet, or at time 0) the speed is the wind's own and the gusts sit
+     * at `speed × time`.
+     */
+    public capture(scene: WindFieldSource, time: number, gustTravel?: number): this {
         const wind = scene.wind;
         const p = this.params;
         this.baseOn = !!wind && wind.visible && wind.strength > 0;
@@ -285,6 +246,7 @@ export class WindFieldSnapshot {
         p[3] = wind ? wind.gustScale : 18;
         p[4] = time;
         p[5] = wind ? wind.gustSpeed : 4;
+        if (gustTravel !== undefined && gustTravel > 0 && Number.isFinite(gustTravel) && time > 1e-3) p[5] = gustTravel * Math.max(p[3], 0.5) / time;
         p[6] = wind ? wind.gustiness : WIND_DEFAULT_GUSTINESS;
         p[7] = (wind ? wind.veer : WIND_DEFAULT_VEER) * Math.PI / 180;
         this.fadeStart = wind ? wind.fadeStart : 40;
@@ -309,7 +271,9 @@ const _sample = createWindSample();
  */
 export function sampleSceneWind(scene: WindFieldSource, position: ArrayLike<number>, out: number[] | Float32Array = [0, 0, 0],
                                 time: number = windFieldClock.time): number[] | Float32Array {
-    _scratch.capture(scene, time).sample(position[0], position[1], position[2], _sample);
+    // On the frame's own clock, the gusts are where the renderer rolled them to (`gustTravel`).
+    _scratch.capture(scene, time, time === windFieldClock.time ? windFieldClock.gustTravel : undefined)
+        .sample(position[0], position[1], position[2], _sample);
     out[0] = _sample.velocity[0]; out[1] = _sample.velocity[1]; out[2] = _sample.velocity[2];
     return out;
 }

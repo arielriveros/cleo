@@ -153,6 +153,7 @@ function syncContent(binding: UIBinding): void {
         style.fontWeight = String(node.fontWeight);
         style.textAlign = node.align;
         style.lineHeight = String(node.lineHeight);
+        style.letterSpacing = node.letterSpacing ? `${node.letterSpacing}em` : '';
         // pre-line, not normal: a `\n` in the text is a hard break (a message body, a menu blurb), while
         // runs of spaces still collapse and long lines still wrap.
         style.whiteSpace = node.wrap ? 'pre-line' : 'nowrap';

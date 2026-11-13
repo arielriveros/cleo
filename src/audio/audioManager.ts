@@ -6,6 +6,8 @@ import { Sound } from "./sound";
 import { Mixer } from "./buses";
 import { DEFAULT_SOUND_SETTINGS, parseSoundSettings } from "./soundSettings";
 import type { SoundSettings } from "./soundSettings";
+import { AudioRecorder, audioRecorder, setAudioRecorder } from "./movieAudio";
+import type { AudioLog } from "./movieAudio";
 
 /**
  * The runtime registry of playable samples, and the audio stack's single entry point.
@@ -170,8 +172,37 @@ export class AudioManager {
         vec3.copy(this._listenerUp, up);
         this._listenerSet = true;
 
+        audioRecorder()?.listener(position, forward, up);
         Howler.pos(position[0], position[1], position[2]);
         Howler.orientation(forward[0], forward[1], forward[2], up[0], up[1], up[2]);
+    }
+
+    /**
+     * Start recording a movie's sound (movieAudio.ts): from here every voice is virtual, timed by `clock`
+     * (movie seconds), and logged instead of played; the live output is muted meanwhile. Voices already
+     * sounding are stopped first, since the movie cannot account for them.
+     */
+    public beginRecording(clock: () => number): AudioRecorder {
+        this.endRecording(0);
+        this.stopAll();
+        const recorder = new AudioRecorder(clock, this._mixer.serialize() as AudioLog['buses'], Howler.volume());
+        setAudioRecorder(recorder);
+        // Seeded with where the listener already is: it only logs a move.
+        if (this._listenerSet) recorder.listener(this._listenerPosition, this._listenerForward, this._listenerUp);
+        Howler.mute(true);
+        return recorder;
+    }
+
+    /**
+     * End the recording begun by {@link beginRecording}: its log, closed at `duration` movie seconds and
+     * timed from `origin` (the clock's reading at the movie's first frame; a pre-roll comes before it).
+     */
+    public endRecording(duration: number, origin = 0): AudioLog | null {
+        const recorder = audioRecorder();
+        if (!recorder) return null;
+        setAudioRecorder(null);
+        Howler.mute(false);
+        return recorder.finish(duration, origin);
     }
 
     /** Stop every voice of every sample. What leaving play mode calls. */

@@ -95,7 +95,7 @@ disturb your layout.
 | Centre | **Viewport** (locked) |
 | Left rail (20%) | The *Scene Elements* or *UI Elements* palette (both in a template) above the *Scene* tree |
 | Right rail (25%) | *Properties*, *Scripts*, *Physics*, plus any mode-specific panels |
-| Bottom strip (30%) | *Logger*, *Assets*, and in animation-field mode the *Blend Space* plot |
+| Bottom strip (30%) | *Logger*, *Assets*, the *Sequencer* (Sequencer mode), and in animation-field mode the *Blend Space* plot |
 
 ### Every panel
 
@@ -118,6 +118,7 @@ disturb your layout.
 | **Physics** | Rigid body, trigger, shapes, ragdoll. |
 | **Logger** | The console. |
 | **Assets** | The asset explorer. |
+| **Sequencer** | The timeline of the sequence asset the tab edits: tracks, sections and keys, a scrubbable preview over the open scene. Sequencer mode only. See [Sequencer](sequencer.md). |
 | **Clips** | The animator's clips (animator mode). |
 | **Parameters** | The animator's parameters, events and action slots (animator mode). |
 | **Animator** | The selected state or transition of the animator's graph (animator mode). |

@@ -192,7 +192,7 @@ export const MODULES: readonly ModuleDefinition[] = [
     {
         type: 'wind', stage: 'update', label: 'Wind', unique: true,
         description: 'Pulls velocity toward a wind velocity: one of its own, or the scene’s wind field where each particle is.',
-        defaults: () => ({ source: 'custom', velocity: [2, 0, 0], scale: 1, influence: 1 }),
+        defaults: () => ({ source: 'custom', velocity: [2, 0, 0], scale: 1, fall: [0, 0, 0], influence: 1 }),
         params: [
             { key: 'source', label: 'Wind', kind: 'enum',
               options: [{ value: 'custom', label: 'Custom velocity' }, { value: 'scene', label: 'Scene wind' }],
@@ -200,6 +200,8 @@ export const MODULES: readonly ModuleDefinition[] = [
             { key: 'velocity', label: 'Velocity', kind: 'vec3', unit: 'm/s', when: p => p.source !== 'scene' },
             { key: 'scale', label: 'Scale', kind: 'float', step: 0.05, when: p => p.source === 'scene',
               hint: 'Multiplier on the scene wind: below 1 for heavy embers, above for light dust.' },
+            { key: 'fall', label: 'Still-air velocity', kind: 'vec3', unit: 'm/s', when: p => p.source === 'scene',
+              hint: 'Added to the scene wind: how the particle moves through still air (a raindrop falls at 8.5 m/s, a snowflake at 1).' },
             { key: 'influence', label: 'Coupling', kind: 'float', min: 0, step: 0.05, unit: '/s', hint: 'How fast particles reach the wind speed.' },
         ],
     },
@@ -418,6 +420,22 @@ export interface RenderSettings {
     sort: boolean;
     /** Draw order within the 2D pass, and the tie-break between emitters in 3D. */
     sortingOrder: number;
+    /**
+     * `velocity` alignment: a streak as motion blur, its length the speed times this exposure (seconds; 1/30
+     * for rain), plus the particle's size, times the stretch draw. 0 or absent: `stretch` instead.
+     */
+    streakShutter?: number;
+    /**
+     * Never drawn thinner than this many pixels: a thinner particle is widened to it and its alpha scaled
+     * down by how much thinner it really is, so a far raindrop is a faint line rather than a shimmer. 0 or
+     * absent: off.
+     */
+    minPixelWidth?: number;
+    /**
+     * Lit: `rain` shades the particle as a drop, a tiny lens — the light round it plus a glint when the sun
+     * or a lamp is behind it — rather than a matte card lit half-Lambert. Absent: `standard`.
+     */
+    shading?: 'standard' | 'rain';
 }
 
 export function defaultRenderSettings(): RenderSettings {

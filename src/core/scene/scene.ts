@@ -52,6 +52,7 @@ import { cloneNodeJson, regenerateNodeIds } from "./nodeJson";
 import { getTemplate, templateNames } from "./templates";
 import { followSocket, resolveSocketOwner } from "./socketFollow";
 import { PrecipitationRig } from "./precipitationRig";
+import type { SequenceNode } from "./nodes/sequenceNode";
 
 /** Object-space up, rotated by the camera's world orientation to give the audio listener its up axis. */
 const UP_AXIS: vec3 = vec3.fromValues(0, 1, 0);
@@ -166,6 +167,8 @@ export class Scene {
     /** Callbacks run after everything has moved this frame; see {@link addLateUpdate}. */
     private _lateUpdates: Set<(delta: number, unscaledDelta: number) => void> = new Set();
     private _particleSystems: Set<ParticleSystemNode> = new Set();
+    // Sequence players, found by node type (not by the `kindsOf` mask, whose 31 bits are all taken).
+    private _sequences: Set<SequenceNode> = new Set();
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
     private _exposureVolumes: Set<ExposureVolumeNode> = new Set();
@@ -529,6 +532,27 @@ export class Scene {
                     catch (error) { Logger.error(`Error in think for controller ${controller.name}: ${error}`, 'Script'); }
                 }
                 sceneStats.scriptMs += performance.now() - controlStart;
+            }
+
+            // THE SEQUENCE PASS. Cinematics write their cameras, properties and script fields BEFORE the node
+            // loop: an animator samples inside its model's update and a script's onUpdate reads what the
+            // sequence set, so either would be a frame late if this ran after. Each player refreshes the
+            // world matrices it wrote, so a camera moved here renders this frame.
+            if (this._sequences.size > 0 || this._dirty) {
+                const sequences = this.sequences;
+                if (sequences.size > 0) {
+                    const running = this._hasStarted && !paused;
+                    const editing = CleoEngine.authoringMode;
+                    authoring.derived++;
+                    try {
+                        for (const sequence of sequences) {
+                            try { sequence.advanceSequence(delta, unscaledDelta, running, editing); }
+                            catch (error) { Logger.error(`Error in sequence ${sequence.name}: ${error}`, 'Script'); }
+                        }
+                    } finally {
+                        authoring.derived--;
+                    }
+                }
             }
 
             const loopStart = performance.now();
@@ -903,6 +927,7 @@ export class Scene {
         this._cloths = new Set();
         this._skinnedCloths = new Set();
         this._particleSystems = new Set();
+        this._sequences = new Set();
         this._forceFields = new Set();
         this._waterVolumes = new Set();
         this._exposureVolumes = new Set();
@@ -924,6 +949,7 @@ export class Scene {
             // One lookup by constructor for the whole `instanceof` ladder this loop used to run per node (45 tests
             // x every node, on every structural change: each spawned effect and each removal).
             const kinds = kindsOf(node.constructor as Function);
+            if (kinds === 0 && node.nodeType === 'sequence') { this._sequences.add(node as SequenceNode); continue; }
             if (kinds === 0 && !node.socketAttachment && !(node.drawDistance > 0)) continue;
             if (kinds & K.LIGHT)
                 this._lights.add(node as LightNode);
@@ -1184,6 +1210,16 @@ export class Scene {
      */
     public setActiveCamera(node: CameraNode | null): void {
         this._pinnedCamera = node;
+    }
+
+    /** The camera claimed with {@link setActiveCamera}, or null when the default scan picks one. */
+    public get pinnedCamera(): CameraNode | null { return this._pinnedCamera; }
+
+    /** Every {@link SequenceNode} in the scene. */
+    public get sequences(): Set<SequenceNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._sequences;
     }
 
     public get lights(): Set<LightNode> {

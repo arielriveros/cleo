@@ -37,6 +37,7 @@ If you are new, read [Core concepts](../concepts.md) first, then
 | Page | Covers |
 |---|---|
 | [Animation](animation.md) | Clips, state machines and controllers, layers and bone masks, poses, action slots, blend spaces, foot IK, sockets, events, root motion |
+| [Sequencer](sequencer.md) | Cinematics: sequence assets, Sequencer mode and its auto-key, slots, tracks, the timeline, previewing, export |
 | [AI brains](ai-brains.md) | The `.brain` asset and the Behaviour / Goals / Fuzzy canvases |
 | [AI agents](ai-agents.md) | The Controller node, perception, steering, navmesh baking |
 | [Input](input.md) | Action maps, bindings, processors, rebinding |

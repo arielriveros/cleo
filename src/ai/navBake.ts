@@ -50,7 +50,7 @@
 import { CleoNavMesh } from "./navMesh";
 import type { NavMeshData } from "./navMesh";
 import { Vector3 } from "./yuka";
-import { clamp } from "../core/math";
+import { clamp, finiteOr } from "../core/math";
 import { carveSoup } from "./navSources";
 import type { NavObstacle } from "./navSources";
 
@@ -118,25 +118,21 @@ export const NAV_BAKE_DEFAULTS: NavBakeSettings = {
     stepHeight: 0.3,
 };
 
-function num(v: unknown, fallback: number): number {
-    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-}
-
 /** Every field defaulted and clamped, so a partial or junk record passes. Mirrors `steeringTuning`. */
 export function navBakeSettings(over?: Partial<NavBakeSettings> | null): NavBakeSettings {
     const o = (over ?? {}) as Partial<NavBakeSettings>;
     const d = NAV_BAKE_DEFAULTS;
     return {
-        maxSlope: clamp(num(o.maxSlope, d.maxSlope), 0, 89),
+        maxSlope: clamp(finiteOr(o.maxSlope, d.maxSlope), 0, 89),
         // Never zero: welding to a zero grid is not welding, and Yuka's twin matching needs it.
-        weldTolerance: Math.max(1e-5, num(o.weldTolerance, d.weldTolerance)),
-        minTriangleArea: Math.max(0, num(o.minTriangleArea, d.minTriangleArea)),
-        simplifyTolerance: Math.max(0, num(o.simplifyTolerance, d.simplifyTolerance)),
+        weldTolerance: Math.max(1e-5, finiteOr(o.weldTolerance, d.weldTolerance)),
+        minTriangleArea: Math.max(0, finiteOr(o.minTriangleArea, d.minTriangleArea)),
+        simplifyTolerance: Math.max(0, finiteOr(o.simplifyTolerance, d.simplifyTolerance)),
         mergeRegions: o.mergeRegions === true,
         // Absent in bakes saved before carving existed, which is the `true` default.
         carve: o.carve !== false,
-        agentHeight: clamp(num(o.agentHeight, d.agentHeight), 0.1, 20),
-        stepHeight: clamp(num(o.stepHeight, d.stepHeight), 0, 5),
+        agentHeight: clamp(finiteOr(o.agentHeight, d.agentHeight), 0.1, 20),
+        stepHeight: clamp(finiteOr(o.stepHeight, d.stepHeight), 0, 5),
     };
 }
 

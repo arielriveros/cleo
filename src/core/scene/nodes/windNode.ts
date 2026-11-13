@@ -4,6 +4,7 @@ import { Node } from "./node";
 import { WIND_PRESETS, type WindPreset } from "./windPresets";
 import { applyPreset } from "../../presets";
 import { WIND_DEFAULT_GUSTINESS, WIND_DEFAULT_VEER, sampleSceneWind, windFieldClock } from "../../wind/windField";
+import { clamp01, finiteOr } from "../../math";
 
 /**
  * The scene's wind: a vector field every wind-enabled foliage material, Scene-wind particle and script
@@ -43,8 +44,6 @@ export const WIND_DEFAULTS: Required<WindOptions> = {
     fadeStart: 40, fadeEnd: 70,
 };
 
-const finite = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
-const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 const clampVeer = (v: number) => Math.min(90, Math.max(0, v));
 
 export class WindNode extends Node {
@@ -59,33 +58,33 @@ export class WindNode extends Node {
 
     constructor(name: string, options: WindOptions = {}, id: string = uuidv4()) {
         super(name, 'wind', id);
-        this.direction = finite(options.direction, WIND_DEFAULTS.direction);
-        this._strength = Math.max(0, finite(options.strength, WIND_DEFAULTS.strength));
-        this._gustScale = Math.max(0.5, finite(options.gustScale, WIND_DEFAULTS.gustScale));
-        this._gustSpeed = Math.max(0, finite(options.gustSpeed, WIND_DEFAULTS.gustSpeed));
-        this._gustiness = clamp01(finite(options.gustiness, WIND_DEFAULTS.gustiness));
-        this._veer = clampVeer(finite(options.veer, WIND_DEFAULTS.veer));
-        this._fadeStart = Math.max(0, finite(options.fadeStart, WIND_DEFAULTS.fadeStart));
-        this._fadeEnd = Math.max(this._fadeStart + 1, finite(options.fadeEnd, WIND_DEFAULTS.fadeEnd));
+        this.direction = finiteOr(options.direction, WIND_DEFAULTS.direction);
+        this._strength = Math.max(0, finiteOr(options.strength, WIND_DEFAULTS.strength));
+        this._gustScale = Math.max(0.5, finiteOr(options.gustScale, WIND_DEFAULTS.gustScale));
+        this._gustSpeed = Math.max(0, finiteOr(options.gustSpeed, WIND_DEFAULTS.gustSpeed));
+        this._gustiness = clamp01(finiteOr(options.gustiness, WIND_DEFAULTS.gustiness));
+        this._veer = clampVeer(finiteOr(options.veer, WIND_DEFAULTS.veer));
+        this._fadeStart = Math.max(0, finiteOr(options.fadeStart, WIND_DEFAULTS.fadeStart));
+        this._fadeEnd = Math.max(this._fadeStart + 1, finiteOr(options.fadeEnd, WIND_DEFAULTS.fadeEnd));
     }
 
     public get strength(): number { return this._strength; }
-    public set strength(v: number) { this._strength = Math.max(0, finite(v, this._strength)); }
+    public set strength(v: number) { this._strength = Math.max(0, finiteOr(v, this._strength)); }
     public get gustScale(): number { return this._gustScale; }
-    public set gustScale(v: number) { this._gustScale = Math.max(0.5, finite(v, this._gustScale)); }
+    public set gustScale(v: number) { this._gustScale = Math.max(0.5, finiteOr(v, this._gustScale)); }
     public get gustSpeed(): number { return this._gustSpeed; }
-    public set gustSpeed(v: number) { this._gustSpeed = Math.max(0, finite(v, this._gustSpeed)); }
+    public set gustSpeed(v: number) { this._gustSpeed = Math.max(0, finiteOr(v, this._gustSpeed)); }
     public get gustiness(): number { return this._gustiness; }
-    public set gustiness(v: number) { this._gustiness = clamp01(finite(v, this._gustiness)); }
+    public set gustiness(v: number) { this._gustiness = clamp01(finiteOr(v, this._gustiness)); }
     public get veer(): number { return this._veer; }
-    public set veer(v: number) { this._veer = clampVeer(finite(v, this._veer)); }
+    public set veer(v: number) { this._veer = clampVeer(finiteOr(v, this._veer)); }
     public get fadeStart(): number { return this._fadeStart; }
     public set fadeStart(v: number) {
-        this._fadeStart = Math.max(0, finite(v, this._fadeStart));
+        this._fadeStart = Math.max(0, finiteOr(v, this._fadeStart));
         if (this._fadeEnd <= this._fadeStart) this._fadeEnd = this._fadeStart + 1;
     }
     public get fadeEnd(): number { return this._fadeEnd; }
-    public set fadeEnd(v: number) { this._fadeEnd = Math.max(this._fadeStart + 1, finite(v, this._fadeEnd)); }
+    public set fadeEnd(v: number) { this._fadeEnd = Math.max(this._fadeStart + 1, finiteOr(v, this._fadeEnd)); }
 
     /** Unit wind direction in world XZ. */
     public get directionXZ(): [number, number] {
