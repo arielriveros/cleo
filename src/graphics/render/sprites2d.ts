@@ -119,12 +119,12 @@ export class Sprite2DPasses {
 
         if (tilemaps.length === 0) {
             // Back-to-front so blended sprites composite correctly. Selection outlines come from the
-            // mask pass, so there is no special-casing of the selected sprite here.
-            sprites.sort((a, b) =>
-                vec3.distance(this._view.camera.position, b.worldPosition) -
-                vec3.distance(this._view.camera.position, a.worldPosition));
+            // mask pass, so there is no special-casing of the selected sprite here. Each distance is taken
+            // once, not twice per comparison; the same `vec3.distance` values and a stable sort keep the
+            // order the comparator-only sort gave, ties included.
+            const order = this._sortByDistance(sprites);
             const only = this._begin2DPass();
-            for (const node of sprites) this.renderSprite(node, only);
+            for (const i of order) this.renderSprite(sprites[i], only);
             this._passes.endFullscreenPass(only);
             return;
         }
@@ -202,6 +202,19 @@ export class Sprite2DPasses {
         }
         this._passes.endFullscreenPass(pass);
     }
+
+    /** Indices into `sprites`, farthest from the camera first; stable for equal distances. */
+    private _sortByDistance(sprites: readonly SpriteNode[]): number[] {
+        const n = sprites.length;
+        if (this._sortKeys.length < n) this._sortKeys = new Float64Array(Math.max(64, n + (n >> 1)));
+        const keys = this._sortKeys, order = this._sortOrder, eye = this._view.camera.position;
+        order.length = n;
+        for (let i = 0; i < n; i++) { keys[i] = vec3.distance(eye, sprites[i].worldPosition); order[i] = i; }
+        return order.sort((a, b) => keys[b] - keys[a]);
+    }
+
+    private _sortKeys = new Float64Array(0);
+    private readonly _sortOrder: number[] = [];
 
     /** Open the pass the tiles and sprites share. Loads and stores: this draws over the composited scene. */
     private _begin2DPass(): RenderPassEncoder {
@@ -320,7 +333,7 @@ export class Sprite2DPasses {
         
         // The camera-facing constraint (render/billboard.ts): screen-aligned, or turned about its upright axis
         // to face the camera's position.
-        const spriteMatrix = this.spriteBillboardMatrix(node);
+        const spriteMatrix = this._billboardInto(node, this._spriteMatrix);
 
         // SpriteNode.maxScreenSize: no taller than that many CSS pixels (the editor's viewport icons).
         if (node.maxScreenSize > 0)
@@ -428,8 +441,15 @@ export class Sprite2DPasses {
 
     /** Builds a sprite's world matrix with its camera-facing billboard constraint applied (render/billboard.ts). */
     public spriteBillboardMatrix(node: SpriteNode): mat4 {
+        return this._billboardInto(node, mat4.create());
+    }
+
+    /** {@link spriteBillboardMatrix} into `out`: the per-draw path's pooled matrix. */
+    private _billboardInto(node: SpriteNode, out: mat4): mat4 {
         const cam = this._view.camera;
-        return billboardMatrix(mat4.create(), node.worldTransform, node.worldScale, node.constraints,
+        return billboardMatrix(out, node.worldTransform, node.worldScale, node.constraints,
                                cam.viewMatrix, cam.position, cam.type !== 'orthographic');
     }
+
+    private readonly _spriteMatrix = mat4.create();
 }
