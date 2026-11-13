@@ -277,6 +277,22 @@ describe('animated sprite frame rate', () => {
 });
 
 
+describe('sprite sorting order', () => {
+    it('writes nothing at 0, round-trips any other whole number, and keeps it whole', async () => {
+        const plain = new SpriteNode('s', new Sprite({ tileset: ATLAS() }));
+        expect(plain.sortingOrder).toBe(0);
+        expect('sortingOrder' in ((await plain.serialize()) as any).sprite).toBe(false);
+        const front = new SpriteNode('front', new Sprite({ tileset: ATLAS(), sortingOrder: 3 }));
+        const holder = new Node('h');
+        parseNodeJson(holder, JSON.parse(JSON.stringify(await front.serialize())));
+        expect((holder.children[0] as SpriteNode).sortingOrder).toBe(3);
+        front.sortingOrder = -2.7;
+        expect(front.sortingOrder).toBe(-3);
+        front.sortingOrder = Number.NaN;
+        expect(front.sortingOrder).toBe(0);
+    });
+});
+
 describe('sprite blending and random start', () => {
     const frames = Array.from({ length: 16 }, (_, i) => i);
 

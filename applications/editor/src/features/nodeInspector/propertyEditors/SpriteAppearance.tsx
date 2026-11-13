@@ -3,7 +3,7 @@ import { SpriteNode } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import { useEventBus } from '../../EventBusContext'
 import { vec3ToHex } from '../../../utils/UtilFunctions'
-import { PropertyTable, PropertyRow, Select, Slider, Toggle, ColorInput, Hint } from '@cleo/app-kit/ui'
+import { PropertyTable, PropertyRow, Select, Slider, Toggle, ColorInput, Hint, NumberInput } from '@cleo/app-kit/ui'
 import { AppearanceIcon } from '../sectionIcons'
 import FollowLightRows from './FollowLightRows'
 
@@ -27,6 +27,7 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
   const [exposureWeight, setExposureWeight] = useState(sprite.exposureWeight)
   const [softness, setSoftness] = useState(sprite.softness)
   const [lit, setLit] = useState(sprite.lit)
+  const [sortingOrder, setSortingOrder] = useState(sprite.sortingOrder)
 
   useEffect(() => {
     setTint(vec3ToHex(sprite.tint))
@@ -38,6 +39,7 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
     setExposureWeight(sprite.exposureWeight)
     setSoftness(sprite.softness)
     setLit(sprite.lit)
+    setSortingOrder(sprite.sortingOrder)
   }, [props.node])
 
   const changed = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
@@ -64,6 +66,11 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
               <option value='alpha'>Alpha</option>
               <option value='additive'>Additive</option>
             </Select>
+          </PropertyRow>
+          <PropertyRow label='Sorting order' hint='Higher draws later (on top) whatever the distances. In 2D, offsets the sprite from the entity layer.'>
+            <NumberInput step={1} value={sortingOrder} onChange={(v) => {
+              sprite.sortingOrder = v; setSortingOrder(sprite.sortingOrder); changed()
+            }} />
           </PropertyRow>
           <PropertyRow label='Lit'>
             <Toggle checked={lit} onChange={(c) => { sprite.lit = c; setLit(c); changed() }} />

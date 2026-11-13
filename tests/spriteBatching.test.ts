@@ -134,3 +134,14 @@ describe('StableArgsort', () => {
         }
     });
 });
+
+describe('sprite draw order', () => {
+    it('puts a higher sorting order on top whatever the distances, back to front within one', () => {
+        // How the 3D branch of the 2D pass orders sprites: band = sorting order, depth = -distance.
+        const sorter = new StableArgsort();
+        const distance = [10, 2, 8, 4, 6];
+        const order = [0, 0, 1, 0, -1];
+        const drawn = Array.from(sorter.byBandThenDepth(order, distance.map(d => -d), 5, new Int32Array(5)));
+        expect(drawn).toEqual([4, 0, 3, 1, 2]);
+    });
+});

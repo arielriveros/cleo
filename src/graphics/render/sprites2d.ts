@@ -145,10 +145,10 @@ export class Sprite2DPasses {
         const tilemaps: TilemapNode[] = [];
         for (const node of scene.tilemaps) if (node.visible) tilemaps.push(node);
 
-        // Back-to-front so blended sprites composite correctly. Selection outlines come from the mask
-        // pass, so there is no special-casing of the selected sprite here.
+        // By sorting order (Sprite.sortingOrder), then back-to-front so blended sprites composite correctly.
+        // Selection outlines come from the mask pass, so there is no special-casing of the selected sprite here.
         if (tilemaps.length === 0) {
-            const order = this._sortByDistance();
+            const order = this._sortByOrderThenDistance();
             for (let p = 0; p < this._spriteCount; p++) this._pushItem(KIND_SPRITE, order[p]);
         }
         // Before the pass opens: a chunk whose tiles changed rebuilds its mesh, an upload.
@@ -300,21 +300,30 @@ export class Sprite2DPasses {
         return ((((tex * 2 + hasTexture) * 2 + wire) * 3 + cull) * 3 + blendClass) * 2;
     }
 
-    /** The list's sprites, farthest from the camera first; stable for equal distances. */
-    private _sortByDistance(): Int32Array {
+    /**
+     * The list's sprites by ascending sorting order (higher on top, whatever the distances say, as Unreal's
+     * translucency sort priority), and within one farthest from the camera first; stable for equal distances.
+     */
+    private _sortByOrderThenDistance(): Int32Array {
         const n = this._spriteCount;
         this._growSort(n);
-        const keys = this._sortKeys, eye = this._view.camera.position;
+        const keys = this._sortKeys, orders = this._sortBands, eye = this._view.camera.position;
         // Each distance once, negated so ascending is farthest first: the same `vec3.distance` values in a
-        // stable order are the order the comparator sort `dist(b) - dist(a)` gave, ties included.
-        for (let s = 0; s < n; s++) keys[s] = -vec3.distance(eye, this._spriteNodes[s].worldPosition);
-        return this._argsort.ascending(keys, n, this._sortIndex);
+        // stable order are the order the comparator sort `dist(b) - dist(a)` gave, ties included. With every
+        // sorting order 0 (the default) it is exactly that order.
+        for (let s = 0; s < n; s++) {
+            const node = this._spriteNodes[s];
+            keys[s] = -vec3.distance(eye, node.worldPosition);
+            orders[s] = node.sprite.sortingOrder;
+        }
+        return this._argsort.byBandThenDepth(orders, keys, n, this._sortIndex);
     }
 
     private _growSort(n: number): void {
         if (this._sortKeys.length >= n) return;
         const size = Math.max(64, n + (n >> 1));
         this._sortKeys = new Float64Array(size);
+        this._sortBands = new Float64Array(size);
         this._sortIndex = new Int32Array(size);
     }
 
@@ -330,9 +339,10 @@ export class Sprite2DPasses {
         const entityBand = host.layers[host.entityLayer]?.cfg.order ?? 0;
         for (let s = 0; s < this._spriteCount; s++) {
             const sprite = this._spriteNodes[s];
-            // The sprite's BASE, not its centre: a character's feet are what sorts against a trunk row.
+            // The sprite's BASE, not its centre: a character's feet are what sorts against a trunk row. Its
+            // sorting order offsets its band, as an emitter's does below.
             const base = sprite.worldPosition[1] - sprite.worldScale[1] * 0.5;
-            this._pushUnsorted(KIND_SPRITE, s, entityBand, -base);
+            this._pushUnsorted(KIND_SPRITE, s, entityBand + sprite.sprite.sortingOrder, -base);
         }
         // Particle systems sort as one item by their emitter's Y, like a sprite's base, in the entity
         // band offset by the highest emitter sorting order — so "in front of the player" is authored,
@@ -702,6 +712,7 @@ export class Sprite2DPasses {
     private _itemAdditive = new Uint8Array(0);
     private readonly _argsort = new StableArgsort();
     private _sortKeys = new Float64Array(0);
+    private _sortBands = new Float64Array(0);
     private _sortIndex = new Int32Array(0);
 
     /** Open the pass the tiles and sprites share. Loads and stores: this draws over the composited scene. */

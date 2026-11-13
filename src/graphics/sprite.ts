@@ -2,6 +2,7 @@ import { Geometry } from '../core/geometry';
 import { Mesh } from './mesh';
 import { Material } from './material';
 import { Tileset } from '../graphics/tilemap/tileset';
+import { finiteOr } from '../core/math';
 
 // A sprite is a unit quad textured from ONE TILE of a Tileset, via `Tileset.uvOf`.
 //
@@ -28,11 +29,15 @@ export interface SpriteOptions {
     followLight?: string | null;
     /** How much of the followed light's flicker the sprite takes, 0..1 (default 1). */
     followAmount?: number;
+    /** Draw order among sprites: higher draws later, on top (see `sortingOrder`). Default 0. */
+    sortingOrder?: number;
 }
 
 /** A soft-fade distance: non-negative metres, capped where it stops meaning "near the surface". */
 const softnessOf = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.min(10, Math.max(0, v)) : 0);
 const unitOr1 = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1);
+/** A sorting order: a whole number, 0 for anything that is not a finite one (as a particle emitter's). */
+const orderOf = (v: unknown): number => Math.floor(finiteOr(v, 0));
 
 /** Full-quad UVs, for a sprite with no tileset. Matches what `Tileset.uvOf` returns for a 1x1 set. */
 const FULL_RECT: [number, number, number, number] = [0, 0, 1, 1];
@@ -62,6 +67,7 @@ export class Sprite {
   private _lit: boolean;
   private _followLight: string | null;
   private _followAmount: number;
+  private _sortingOrder: number;
   /** A lit sprite's private material, made on first lit draw (see {@link drawMaterial}). */
   private _litMaterial: Material | null = null;
 
@@ -76,6 +82,7 @@ export class Sprite {
       this._lit = options?.lit === true;
       this._followLight = typeof options?.followLight === 'string' && options.followLight ? options.followLight : null;
       this._followAmount = unitOr1(options?.followAmount);
+      this._sortingOrder = orderOf(options?.sortingOrder);
       this._material = Material.Basic(
           { color: this._tint, opacity: this._opacity, texture: this._tileset?.textureId },
           {
@@ -187,6 +194,15 @@ export class Sprite {
   public set followAmount(value: number) { this._followAmount = unitOr1(value); }
 
   /**
+   * Sorting order, the artist's word on draw order: higher draws later, on top, whatever the distances say.
+   * In 3D, sprites draw by sorting order first and back to front within one; in a 2D scene it offsets the
+   * sprite's band from the tilemap's entity layer, as a particle emitter's sorting order does, so 1 draws
+   * over the next layer up. A whole number; 0 (the default) leaves the order to depth.
+   */
+  public get sortingOrder(): number { return this._sortingOrder; }
+  public set sortingOrder(value: number) { this._sortingOrder = orderOf(value); }
+
+  /**
    * Lit: the sprite takes the scene's light instead of showing its texture as it is -- the sun (and the
    * shadows it casts on the sprite), the sky and ambient light, and the strongest light near it. How, its
    * tileset decides (Tileset.lighting): with six-way lightmaps, the effect relit from the light's direction
@@ -268,6 +284,7 @@ export class Sprite {
           ...(this._softness > 0 ? { softness: this._softness } : {}),
           ...(this._lit ? { lit: true } : {}),
           ...(this._followLight ? { followLight: this._followLight, ...(this._followAmount < 1 ? { followAmount: this._followAmount } : {}) } : {}),
+          ...(this._sortingOrder !== 0 ? { sortingOrder: this._sortingOrder } : {}),
       };
   }
 
@@ -287,6 +304,7 @@ export class Sprite {
           lit: data?.lit === true,
           followLight: data?.followLight ?? null,
           followAmount: data?.followAmount,
+          sortingOrder: data?.sortingOrder,
       });
   }
 }
