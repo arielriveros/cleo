@@ -67,6 +67,10 @@ export interface RenderStats {
     tilemapChunks: number;
     /** Draw calls the 2D pass issued for tiles — one per chunk, or one per depth band when Y-sorted. */
     tilemapDraws: number;
+    /** Sprites the 2D pass and the editor's icon overlay drew (after their screen cull). */
+    spritesDrawn: number;
+    /** Instanced draw calls those sprites went out in: one per batch (render/sprites2d.ts). */
+    spriteDraws: number;
     /** Fullscreen quads drawn this frame (post-processing, lighting, clouds, SSAO, blits). */
     fullscreenPasses: number;
     /** Megapixels rasterized by those fullscreen passes (Σ width×height / 1e6) — the fill-rate figure. */
@@ -140,6 +144,8 @@ export const frameStats: RenderStats = {
     vertices: 0,
     tilemapChunks: 0,
     tilemapDraws: 0,
+    spritesDrawn: 0,
+    spriteDraws: 0,
     fullscreenPasses: 0,
     shadedMpx: 0,
     stateChanges: 0,
@@ -222,6 +228,8 @@ export function resetFrameStats(): void {
     frameStats.particleGpuCreates = 0;
     frameStats.particleGpuReuses = 0;
     frameStats.tilemapDraws = 0;
+    frameStats.spritesDrawn = 0;
+    frameStats.spriteDraws = 0;
     frameStats.fullscreenPasses = 0;
     frameStats.shadedMpx = 0;
     frameStats.stateChanges = 0;

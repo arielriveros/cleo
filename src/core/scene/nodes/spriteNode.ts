@@ -122,6 +122,12 @@ export class SpriteNode extends Node {
      */
     public uvRect(): [number, number, number, number] { return this._sprite.uvRect(); }
 
+    /**
+     * {@link uvRect} into `out`, without allocating: the tile on screen this instant ({@link currentTile}, which
+     * AnimatedSpriteNode overrides), as the batched 2D pass reads it every frame.
+     */
+    public uvRectInto(out: Float32Array): Float32Array { return this._sprite.uvRectInto(this.currentTile, out); }
+
     /** Selection bounds: a small box around the sprite's origin. */
     public getBoundingBox(): { min: vec3, max: vec3 } {
         const position = this.worldPosition;

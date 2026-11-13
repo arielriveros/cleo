@@ -126,3 +126,60 @@ export class SpriteBatchPlanner {
         this._rects = new Float64Array(size * 4);
     }
 }
+
+/**
+ * Stable argsorts without a JavaScript comparator: the same order a stable `Array.prototype.sort` with a
+ * subtracting comparator gives, ties in index order, at the cost of a native numeric sort plus a binary
+ * search per item. For thousands of sprites a comparator sort was the 2D pass's largest single cost.
+ */
+export class StableArgsort {
+    private _sorted = new Float64Array(0);
+    private _used = new Int32Array(0);
+    private _byDepth = new Int32Array(0);
+
+    /** Indices 0..n-1 by ascending `keys[i]`, equal keys in index order, into `out`. NaN sorts last. */
+    public ascending(keys: ArrayLike<number>, n: number, out: Int32Array): Int32Array {
+        this._ensure(n);
+        const sorted = this._sorted, used = this._used;
+        for (let i = 0; i < n; i++) { const k = keys[i]; sorted[i] = k === k ? k : Infinity; }
+        sorted.subarray(0, n).sort();
+        used.fill(0, 0, n);
+        for (let i = 0; i < n; i++) {
+            const k0 = keys[i], k = k0 === k0 ? k0 : Infinity;
+            let lo = 0, hi = n;
+            while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] < k) lo = mid + 1; else hi = mid; }
+            out[lo + used[lo]++] = i;
+        }
+        return out;
+    }
+
+    /**
+     * Indices by ascending `band`, then ascending `depth`, ties in index order: a stable sort with
+     * `(a, b) => (band[a] - band[b]) || (depth[a] - depth[b])`. Depth first, then a stable bucketing by
+     * band, which is the same order by construction.
+     */
+    public byBandThenDepth(band: ArrayLike<number>, depth: ArrayLike<number>, n: number, out: Int32Array): Int32Array {
+        this._ensure(n);
+        const byDepth = this.ascending(depth, n, this._byDepth);
+        const counts = new Map<number, number>();
+        for (let i = 0; i < n; i++) { const b0 = band[i], b = b0 === b0 ? b0 : Infinity; counts.set(b, (counts.get(b) ?? 0) + 1); }
+        const bands = [...counts.keys()].sort((a, b) => a - b);
+        let start = 0;
+        for (const b of bands) { const c = counts.get(b)!; counts.set(b, start); start += c; }
+        for (let p = 0; p < n; p++) {
+            const i = byDepth[p], b0 = band[i], b = b0 === b0 ? b0 : Infinity;
+            const at = counts.get(b)!;
+            out[at] = i;
+            counts.set(b, at + 1);
+        }
+        return out;
+    }
+
+    private _ensure(n: number): void {
+        if (this._sorted.length >= n) return;
+        const size = Math.max(64, n + (n >> 1));
+        this._sorted = new Float64Array(size);
+        this._used = new Int32Array(size);
+        this._byDepth = new Int32Array(size);
+    }
+}

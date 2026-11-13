@@ -24,7 +24,7 @@ const PROGRAMS = ['pbr.wgsl', 'cel.wgsl', 'blinnPhong.wgsl', 'geometryPBR.wgsl',
                   'pbrSkinned.wgsl', 'celSkinned.wgsl', 'blinnPhongSkinned.wgsl', 'geometryPBRSkinned.wgsl',
                   'geometryBlinnPhongSkinned.wgsl', 'basicSkinned.wgsl', 'geometryBasicSkinned.wgsl',
                   'shadowMapSkinned.wgsl', 'shadowMapSkinnedCutout.wgsl', 'shadowMapBasicSkinnedCutout.wgsl',
-                  'occlusionBox.wgsl'];
+                  'occlusionBox.wgsl', 'sprite.wgsl', 'spriteLit.wgsl'];
 
 describe('programs reading the per-object table', () => {
     it.each(PROGRAMS)('%s takes its record through instance_index and has no per-draw transform', (file) => {
@@ -42,4 +42,14 @@ describe('programs reading the per-object table', () => {
         expect(pbr.vertex).toContain('uniform uint naga_vs_first_instance;');
         expect(pbr.vertex).toContain('texelFetch(u_objectData');
     });
+
+    it('hands a sprite batch\'s per-instance look to the fragment stage flat, on WebGL2 too', async () => {
+        // One draw holds many sprites: an instance's record index is the batch's first record plus the
+        // instance, and its tint, opacity, intensity and soft fade must reach every fragment unchanged.
+        const sprite = await translateWgsl(compose('sprite.wgsl'), 'sprite.wgsl') as { vertex: string; fragment: string };
+        expect(sprite.vertex).toContain('uniform uint naga_vs_first_instance;');
+        expect(sprite.vertex).toMatch(/gl_InstanceID/);
+        expect(sprite.vertex).toMatch(/flat out vec4/);
+        expect(sprite.fragment).toMatch(/flat in vec4/);
+    }, 60_000);
 });

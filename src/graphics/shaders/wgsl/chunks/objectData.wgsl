@@ -23,11 +23,17 @@ fn objectMatrixAt(t: u32) -> mat4x4<f32> {
 /** The world matrix of record `i`. */
 fn objectModel(i: u32) -> mat4x4<f32> { return objectMatrixAt(i << OBJECT_RECORD_SHIFT); }
 
-/** (dissolve, camera-hole opt-in 0/1, bone palette texel, reserved) of record `i`. */
+/** (dissolve, camera-hole opt-in 0/1, bone palette texel, reserved; a sprite's soft fade) of record `i`. */
 fn objectParams(i: u32) -> vec4<f32> { return objectTexel((i << OBJECT_RECORD_SHIFT) + 4u); }
 
 /** A Basic material's UV transform: (scale.xy, offset.xy). (1, 1, 0, 0) for every other material. */
 fn objectUvTransform(i: u32) -> vec4<f32> { return objectTexel((i << OBJECT_RECORD_SHIFT) + 5u); }
+
+/** A sprite's (tint r, g, b as authored in sRGB, opacity): objectData.ts `packSpriteRecord`. Zero for a model. */
+fn objectSpriteLook(i: u32) -> vec4<f32> { return objectTexel((i << OBJECT_RECORD_SHIFT) + 6u); }
+
+/** A sprite's (intensity, lit ambient r, g, b). Its soft fade is objectParams().w. Zero for a model. */
+fn objectSpriteExtra(i: u32) -> vec4<f32> { return objectTexel((i << OBJECT_RECORD_SHIFT) + 7u); }
 
 /** Bone `id` of the palette starting at texel `palette`. */
 fn objectBone(palette: u32, id: i32) -> mat4x4<f32> { return objectMatrixAt(palette + u32(id) * 4u); }

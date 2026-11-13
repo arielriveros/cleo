@@ -229,6 +229,15 @@ export class Sprite {
       return this.uvRectOf(this._tileIndex);
   }
 
+  /**
+   * {@link uvRectOf} into `out` without allocating: what the batched 2D pass reads per sprite per frame. The
+   * same float32 values `uvRectOf` copies out of `Tileset.uvOf`.
+   */
+  public uvRectInto(tileIndex: number, out: Float32Array): Float32Array {
+      if (!this._tileset) { out[0] = 0; out[1] = 0; out[2] = 1; out[3] = 1; return out; }
+      return this._tileset.uvOf(tileIndex, out);
+  }
+
   /** `uvRect` for an arbitrary tile — what AnimatedSpriteNode resolves its current frame through. */
   public uvRectOf(tileIndex: number): [number, number, number, number] {
       if (!this._tileset) return [...FULL_RECT] as [number, number, number, number];

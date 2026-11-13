@@ -21,9 +21,10 @@ export const OBJECT_TABLE_WIDTH_SHIFT = 10;
 /**
  * Texels per record — a power of two, so a record never straddles a row and is addressed by a shift:
  *   t0..t3  world matrix, column by column (gl-matrix order: floats 4k..4k+3 are column k)
- *   t4      (dissolve, camera-hole opt-in 0/1, bone palette texel, reserved)
+ *   t4      (dissolve, camera-hole opt-in 0/1, bone palette texel, reserved); a SPRITE's w is its soft fade
  *   t5      Basic UV transform (scale.x, scale.y, offset.x, offset.y); (1, 1, 0, 0) for everything else
- *   t6..t7  reserved
+ *   t6..t7  reserved for models; a sprite's look ({@link packSpriteRecord}):
+ *           t6 (tint r, g, b as authored in sRGB, opacity), t7 (intensity, lit ambient r, g, b)
  */
 export const OBJECT_RECORD_TEXELS = 8;
 /** log2 of {@link OBJECT_RECORD_TEXELS}. */
@@ -62,6 +63,36 @@ export function packObjectRecord(out: Float32Array, offset: number, model: Array
     out[offset + 22] = uvOffsetX;
     out[offset + 23] = uvOffsetY;
     for (let i = 24; i < OBJECT_RECORD_FLOATS; i++) out[offset + i] = 0;
+}
+
+/**
+ * Write one SPRITE record into `out` at float `offset`: what the batched 2D pass draws an instance from.
+ * The model matrix is read from `model[modelOffset..+16]`, so a pass can keep every sprite's matrix in one
+ * pooled array. `uv` is the tile's [u0, v0, u1, v1]; t5 gets it as (scale, offset) exactly as
+ * {@link packObjectRecord} is handed it. Everything that differs from one sprite to the next lives here, so
+ * none of it splits a batch: the shaders read t4.w / t6 / t7 where a single draw used to read uniforms.
+ */
+export function packSpriteRecord(out: Float32Array, offset: number, model: ArrayLike<number>, modelOffset: number,
+                                 dissolve: number, uv: ArrayLike<number>, softness: number,
+                                 tint: ArrayLike<number>, opacity: number, intensity: number,
+                                 ambient: ArrayLike<number> | null): void {
+    for (let i = 0; i < 16; i++) out[offset + i] = model[modelOffset + i];
+    out[offset + 16] = dissolve;
+    out[offset + 17] = 0;
+    out[offset + 18] = 0;
+    out[offset + 19] = softness;
+    out[offset + 20] = uv[2] - uv[0];
+    out[offset + 21] = uv[3] - uv[1];
+    out[offset + 22] = uv[0];
+    out[offset + 23] = uv[1];
+    out[offset + 24] = tint[0];
+    out[offset + 25] = tint[1];
+    out[offset + 26] = tint[2];
+    out[offset + 27] = opacity;
+    out[offset + 28] = intensity;
+    out[offset + 29] = ambient ? ambient[0] : 0;
+    out[offset + 30] = ambient ? ambient[1] : 0;
+    out[offset + 31] = ambient ? ambient[2] : 0;
 }
 
 /** Whether the records at float offsets `a` and `b` of `data` are identical. */

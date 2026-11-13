@@ -101,6 +101,8 @@ export class RenderStats {
             vertices: frameStats.vertices,
             tilemapChunks: frameStats.tilemapChunks,
             tilemapDraws: frameStats.tilemapDraws,
+            spritesDrawn: frameStats.spritesDrawn,
+            spriteDraws: frameStats.spriteDraws,
             fullscreenPasses: frameStats.fullscreenPasses,
             shadedMpx: frameStats.shadedMpx,
             stateChanges: frameStats.stateChanges,

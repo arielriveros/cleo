@@ -300,18 +300,19 @@ export class PassEncoder {
 
     /**
      * Record `count` instances of `mesh` with no per-instance buffer, for a program that derives each
-     * instance from `instance_index` alone (the GI probe overlay): its vertices in slot 0, its active
-     * index level when it has one.
+     * instance from `instance_index` alone (the GI probe overlay, a sprite batch): its vertices in slot 0,
+     * its active index level when it has one. `firstInstance` starts `instance_index` there: a batch reads
+     * the per-object records first..first+count-1 (no instance-rate buffer, so both backends allow it).
      */
-    public recordDrawInstances(pass: RenderPassEncoder, mesh: Mesh, count: number): void {
+    public recordDrawInstances(pass: RenderPassEncoder, mesh: Mesh, count: number, firstInstance: number = 0): void {
         if (count <= 0) return;
         pass.setVertexBuffer(0, mesh.vertexBuffer);
         const indices = mesh.activeIndexBuffer;
         if (indices) {
             pass.setIndexBuffer(indices, mesh.activeIndexFormat);
-            pass.drawIndexed(mesh.activeIndexCount, count);
+            pass.drawIndexed(mesh.activeIndexCount, count, 0, 0, firstInstance);
         } else if (mesh.vertexCount > 0) {
-            pass.draw(mesh.vertexCount, count);
+            pass.draw(mesh.vertexCount, count, 0, firstInstance);
         }
     }
 

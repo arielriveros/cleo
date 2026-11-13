@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SpriteBatchPlanner, type BatchBoundsFn } from '../src/graphics/spriteBatching';
+import { SpriteBatchPlanner, StableArgsort, type BatchBoundsFn } from '../src/graphics/spriteBatching';
 
 /** A scripted layout: per item a key, additive flag and a rectangle (null = unbounded). */
 interface Item { key: number; add?: boolean; rect: [number, number, number, number] | null }
@@ -104,6 +104,33 @@ describe('SpriteBatchPlanner', () => {
             for (let a = 0; a < n; a++)
                 for (let b = a + 1; b < n; b++)
                     if (pos.get(b)! < pos.get(a)!) expect(commute(items[a], items[b]), `trial ${trial}: ${a} <-> ${b}`).toBe(true);
+        }
+    });
+});
+
+describe('StableArgsort', () => {
+    let seed = 99;
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 4294967296);
+
+    it('orders exactly as a stable comparator sort, ties included', () => {
+        const sorter = new StableArgsort();
+        for (let trial = 0; trial < 50; trial++) {
+            const n = 1 + Math.floor(rnd() * 400);
+            const keys = Array.from({ length: n }, () => (rnd() < 0.3 ? Math.floor(rnd() * 4) : rnd() * 10 - 5));
+            if (trial % 5 === 0) keys[0] = -0;
+            const expected = keys.map((_, i) => i).sort((a, b) => keys[a] - keys[b]);
+            expect(Array.from(sorter.ascending(keys, n, new Int32Array(n)))).toEqual(expected);
+        }
+    });
+
+    it('orders by band then depth exactly as the 2D pass\'s comparator did', () => {
+        const sorter = new StableArgsort();
+        for (let trial = 0; trial < 50; trial++) {
+            const n = 1 + Math.floor(rnd() * 400);
+            const band = Array.from({ length: n }, () => Math.floor(rnd() * 5) - 1);
+            const depth = Array.from({ length: n }, () => (rnd() < 0.3 ? 0 : -(rnd() * 20)));
+            const expected = band.map((_, i) => i).sort((a, b) => (band[a] - band[b]) || (depth[a] - depth[b]));
+            expect(Array.from(sorter.byBandThenDepth(band, depth, n, new Int32Array(n)))).toEqual(expected);
         }
     });
 });

@@ -126,7 +126,7 @@ type Sample = {
   moduleReuses: number; pipelinesWarmed: number; recipesRecorded: number;
   textures: number; textureMB: number; gpuMB: number;
   heapUsedMB: number | null; heapLimitMB: number | null;
-  lights: number; sprites: number;
+  lights: number; sprites: number; spritesDrawn: number; spriteDraws: number;
   width: number; height: number; renderWidth: number; renderHeight: number; renderScale: number;
   pipeline: string; backend: string;
 };
@@ -152,7 +152,7 @@ const EMPTY: Sample = {
   asyncCompiles: 0, pendingCompiles: 0, syncCompiles: 0, worstStallMs: 0, worstStallName: '',
   moduleReuses: 0, pipelinesWarmed: 0, recipesRecorded: 0,
   textures: 0, textureMB: 0, gpuMB: 0, heapUsedMB: null, heapLimitMB: null,
-  lights: 0, sprites: 0,
+  lights: 0, sprites: 0, spritesDrawn: 0, spriteDraws: 0,
   width: 0, height: 0, renderWidth: 0, renderHeight: 0, renderScale: 1,
   pipeline: '—', backend: '—',
 };
@@ -383,6 +383,8 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
           heapLimitMB: mem ? mem.jsHeapSizeLimit / MB : null,
           lights: scene?.lights?.size ?? 0,
           sprites: scene?.sprites?.size ?? 0,
+          spritesDrawn: stats?.spritesDrawn ?? 0,
+          spriteDraws: stats?.spriteDraws ?? 0,
           width: stats?.width ?? 0,
           height: stats?.height ?? 0,
           renderWidth: stats?.renderWidth ?? 0,
@@ -806,6 +808,8 @@ export default function PerformancePanel({ physicsThread, playPin }: { physicsTh
       <Collapsable title='Scene' persistKey='performance.scene' defaultOpen={false}><div className='w-full p-2'>
         <Row label='Lights' value={d.lights.toLocaleString()} />
         <Row label='Sprites' value={d.sprites.toLocaleString()} />
+        <Row label='· draws' value={`${d.spriteDraws.toLocaleString()} for ${d.spritesDrawn.toLocaleString()} drawn`}
+             title='Sprites (and editor icons) on screen this frame, and the instanced draw calls they went out in.' />
         <Row label='Resolution' value={`${d.width}×${d.height}`} />
         {d.renderScale < 1 && (
           <Row label='· internal' value={`${d.renderWidth}×${d.renderHeight} (${fmt(d.renderScale * 100, 0)}%)`}

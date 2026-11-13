@@ -238,13 +238,14 @@ export class EditorOverlays {
                 drawWith(node.model.mesh, node.model.material.type, node.worldTransform);
             }
 
-            // Selected sprites and their children (preserving billboard constraints).
+            // Selected sprites and their children (preserving billboard constraints), through the quad the
+            // batched sprite pass draws: a sprite's own mesh is only built for the per-sprite lit path.
             const spriteNodes: any[] = [];
             for (const node of sprites) this._collectAllChildren(node, spriteNodes);
             for (const node of spriteNodes) {
                 if (isEditorOnlyNode(node)) continue;
-                if (!node.initialized || !node.sprite) continue;
-                drawWith(node.sprite.mesh, node.sprite.material.type, this._sprites.spriteBillboardMatrix(node));
+                if (!node.sprite) continue;
+                drawWith(this._sprites.spriteQuad, 'sprite', this._sprites.spriteBillboardMatrix(node));
             }
         }
         this._passes.endFullscreenPass(pass);
@@ -325,8 +326,9 @@ export class EditorOverlays {
                 const depthTested = DEPTH_TEST;
                 const pass = this._beginOverlayPass('overlay.helpers');
                 for (const node of helperNodes) this._drawOverlayNode(pass, node, depthTested);
-                // Icons are billboards and always transparent; `_sprites.renderSprite` handles the constraint.
-                for (const node of icons) this._sprites.renderSprite(node, pass, OVERLAY_BLEND);
+                // Icons are billboards and always transparent, batched like the scene's sprites
+                // (`_sprites.drawOverlaySprites` handles the constraint and the screen-size cap).
+                this._sprites.drawOverlaySprites(icons, pass);
                 this._passes.endFullscreenPass(pass);
             }
 
