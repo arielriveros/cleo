@@ -1,37 +1,39 @@
 import { EyeIcon, EYE_TRIGGER_CLASS, Popover, SectionTitle, Toggle } from '@cleo/app-kit/ui';
-import { useDebugVisibility, DEBUG_CATEGORIES } from './DebugVisibilityContext';
+import { useDebugVisibility, DEBUG_CATEGORIES, debugCategoryApplies } from './DebugVisibilityContext';
 import { useCleoEngine } from './EngineContext';
 import { MODE_SKELETON_OWNER } from './engineContextTypes';
+import { overlayDimensionOf } from '../utils/sceneDimension';
 
 /**
  * Expandable viewport menu (next to the 2D/3D switch) for toggling debug overlays. Each row is one
  * category with independent Editor and Runtime switches; state lives in DebugVisibilityContext. Shown in
  * play mode as well as edit mode, so Runtime toggles can be flipped live during a playtest.
+ *
+ * Only the rows that mean something for the scene on screen: a 2D scene drawn flat has no skeletons, GI
+ * probes, navmesh, foliage or wind to show (`only` on each row, `overlayDimensionOf`).
  */
 export default function DebugVisibilityMenu() {
     const { visibility, setCategory } = useDebugVisibility();
-    const { editorMode } = useCleoEngine();
+    const { editorMode, instance } = useCleoEngine();
     // In a skeleton editor the bones are the subject, not a debug aid: they draw whatever this menu says,
     // so their row reads as locked on rather than offering a switch that would do nothing.
     const skeletonLocked = MODE_SKELETON_OWNER[editorMode];
     // Likewise the game UI in UI mode, where it is what is being edited.
     const isLocked = (key: string) => (skeletonLocked && key === 'skeleton') || (editorMode === 'ui' && key === 'gameUi');
 
-    return (
-        <Popover
-            align='right'
-            title='Debug overlays'
-            triggerClassName={EYE_TRIGGER_CLASS}
-            trigger={<EyeIcon />}
-            className='min-w-[220px]'
-        >
+    // The rows, built each time the menu opens (a function child of the Popover), so they follow the scene
+    // on screen now -- the open scene, a Play scene a script loaded, an asset tab's staging scene -- with no
+    // event to subscribe to for each way that can change.
+    const rows = () => {
+        const dim = overlayDimensionOf(instance?.scene, instance?.renderer);
+        return (
             <div data-cleo-overlay className='p-1'>
                 <div className='grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1'>
                     {/* Explicit keys: the viewport's docs scope follows the mode, but these are documented in one place. */}
                     <SectionTitle title='Overlay' doc='editor/scene-authoring#debug-overlays::Overlay' className='px-1' />
                     <SectionTitle title='Editor' doc='editor/scene-authoring#debug-overlays::Editor' className='text-center' />
                     <SectionTitle title='Runtime' doc='editor/scene-authoring#debug-overlays::Runtime' className='text-center' />
-                    {DEBUG_CATEGORIES.map(cat => {
+                    {DEBUG_CATEGORIES.filter(cat => debugCategoryApplies(cat.key, dim)).map(cat => {
                         const locked = isLocked(cat.key);
                         return (
                         <div key={cat.key} className='contents'>
@@ -57,6 +59,18 @@ export default function DebugVisibilityMenu() {
                     })}
                 </div>
             </div>
+        );
+    };
+
+    return (
+        <Popover
+            align='right'
+            title='Debug overlays'
+            triggerClassName={EYE_TRIGGER_CLASS}
+            trigger={<EyeIcon />}
+            className='min-w-[220px]'
+        >
+            {rows}
         </Popover>
     );
 }

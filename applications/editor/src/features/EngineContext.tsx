@@ -7,7 +7,7 @@ import { PlaybackContext, type PlaybackContextValue } from "./PlaybackContext";
 import {
   DebugVisibilityContext, type DebugVisibilityContextValue,
   type DebugVisibility, type DebugCategory, type DebugChannel,
-  loadDebugVisibility, saveDebugVisibility,
+  loadDebugVisibility, saveDebugVisibility, effectiveDebugVisibility,
 } from "./DebugVisibilityContext";
 import { AssetLibraryContext, type AssetLibraryContextValue } from "./AssetLibraryContext";
 import { DocumentContext, type DocumentContextValue } from "./DocumentContext";
@@ -17,7 +17,7 @@ import { useStableActions } from "@cleo/app-kit/utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
 import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, setMovieRender, engineEventBus } from "cleo";
-import { dimensionLookPatch } from "../utils/sceneDimension";
+import { dimensionLookPatch, overlayDimensionOf } from "../utils/sceneDimension";
 import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, FOLIAGE_STARTER, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener, RenderSettings } from "cleo";
 import NullImage from '../images/null.png';
@@ -5908,6 +5908,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         engineEventBus.emit('RENDER_SETTINGS_CHANGED');
       }
       setViewDimension(dimension);
+      // The overlays the new dimension has no row for go now, and the ones it gains come back.
+      eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED');
     }
     markTabDirty(SCENE_TAB_ID, 'scene-dimension');
   };
@@ -6301,7 +6303,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       reconcileScheduledRef.current = false;
       // (Terrain-)material preview scenes want no editor helper icons (light sprites/gizmos) cluttering the sphere.
       if (editorMode === 'material' || editorMode === 'terrainMaterial') return;
-      const vis = debugVisibilityRef.current;
+      // The switches in force for the scene on screen: a 2D scene drawn flat has none of the 3D-only rows
+      // (GI probes, navmesh, foliage colliders, wind), which the eye menu does not offer there either.
+      const vis = effectiveDebugVisibility(debugVisibilityRef.current,
+        overlayDimensionOf(instanceRef.current?.scene, instanceRef.current?.renderer));
       // The reference grid is editor CHROME -- global renderer state, not a scene node -- so its visibility
       // survives a scene swap and the last writer wins. Assert it on EVERY reconcile from whichever channel
       // is in force. Skipped in options mode, where Engine > Renderer owns its own grid switch.

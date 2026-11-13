@@ -644,6 +644,14 @@ function ensureCamera2DFrame(cam: Camera2DNode) {
   cam.addChild(frame);
 }
 
+/**
+ * The eye-menu row a 2D physics node's box answers to: a character body's or a collider's is its collision
+ * shape (Collision wireframes), an area's is a trigger (Trigger volumes) -- the rows 3D bodies use.
+ */
+export function box2DCategory(node: CharacterBody2DNode | Body2DNode | Area2DNode): 'colliders' | 'triggers' {
+  return node instanceof Area2DNode ? 'triggers' : 'colliders';
+}
+
 // A 2D physics node's box, followed per frame: a character body's stands on its feet (cyan), a collider's is
 // centred on it (red), an area's is centred on it moved by its offset (amber; drawn unmirrored).
 function ensureBox2DFrame(node: CharacterBody2DNode | Body2DNode | Area2DNode) {
@@ -1443,9 +1451,12 @@ export function reconcileEditorHelpers(
         if (child) node.removeChild(child);
       }
     } else if (node instanceof CharacterBody2DNode || node instanceof Body2DNode || node instanceof Area2DNode) {
+      // A 2D body's box is its collision shape and an Area 2D's its trigger, so they follow the rows the 3D
+      // wireframes do -- in a 2D scene, the only collision those two rows have to show.
+      const wanted = show(box2DCategory(node));
       const existing = node.getChildByName(BOX2D_FRAME)[0];
-      if (icons && !existing) ensureBox2DFrame(node);
-      else if (!icons && existing) node.removeChild(existing);
+      if (wanted && !existing) ensureBox2DFrame(node);
+      else if (!wanted && existing) node.removeChild(existing);
     } else if (node instanceof Room2DNode) {
       const existing = node.getChildByName(ROOM_FRAME)[0];
       if (icons && !existing) ensureRoomFrame(node);

@@ -256,11 +256,17 @@ off in Play, or turn navmesh display on *during* Play to see what an agent is wa
   the editor's eyes).
 - **Runtime** — whether it draws in Play. Greyed out for the rows that mean nothing in a running game.
 
+The menu lists only the rows that mean something for the scene on screen. A 2D scene has no skeletons,
+animation blends, navigation meshes, foliage, GI probes or wind, so it shows none of those rows, and they
+draw nothing there whatever they were set to in a 3D scene (which gets its settings back). A 2D scene on the
+**Full 3D** pipeline (**Renderer › 2D Scenes**) draws 3D content, so it shows every row, as do the model,
+animation and template tabs.
+
 | Category | Default (editor) |
 |---|---|
-| Collision wireframes | on |
-| Trigger volumes | on |
-| Editor icons | on — the markers of nodes that draw nothing of their own: lights, sounds, light probes, exposure volumes, decals, particle systems, force fields, navmeshes and cameras |
+| Collision wireframes | on — in 2D, the boxes of Character Body 2Ds and Collider 2Ds |
+| Trigger volumes | on — in 2D, the boxes of Area 2Ds |
+| Editor icons | on — the markers of nodes that draw nothing of their own: lights, sounds, light probes, exposure volumes, decals, particle systems, force fields, navmeshes and cameras, and a 2D world's rooms and Camera 2D frames |
 | Bounding boxes | off |
 | Skeletons | off |
 | Animation blend | off |

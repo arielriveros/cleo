@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
 import { useCleoEngine } from './EngineContext'
 import { usePlayback } from './PlaybackContext'
-import { useDebugVisibility } from './DebugVisibilityContext'
+import { useDebugVisibility, debugCategoryApplies } from './DebugVisibilityContext'
+import { overlayDimensionOf } from '../utils/sceneDimension'
 import { MODE_SKELETON_OWNER } from './engineContextTypes'
 import { ModelNode, AnimatedModel, Vec } from 'cleo'
 import type { Skin } from 'cleo'
@@ -25,7 +26,9 @@ export default function DebugSkeletonOverlay() {
   // The skeleton-editing modes own the overlay while they are up (AnimationSkeletonTool draws it there
   // regardless of the toggle). `setSkeletonOverlay` is a single global slot, so two writers would
   // overwrite each other every frame.
+  // Never in a 2D scene drawn flat: its models are not drawn, so their bones would float over nothing.
   const active = !MODE_SKELETON_OWNER[editorMode] &&
+    debugCategoryApplies('skeleton', overlayDimensionOf(instance?.scene, instance?.renderer)) &&
     (isPlayMode && !isSimulating ? visibility.skeleton.runtime : visibility.skeleton.editor)
 
   useEffect(() => {

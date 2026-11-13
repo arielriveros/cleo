@@ -1,5 +1,6 @@
 import { RENDER_2D_DEFAULTS, RENDER_3D_DEFAULTS } from 'cleo';
 import type { RenderSettings } from 'cleo';
+import type { OverlayDimension } from '../features/DebugVisibilityContext';
 
 /**
  * The render settings a scene's look changes to when its dimension is switched, or null to leave them.
@@ -13,4 +14,17 @@ export function dimensionLookPatch(current: Partial<RenderSettings>, to: '2D' | 
   for (const [key, value] of Object.entries(RENDER_2D_DEFAULTS))
     if ((current as Record<string, unknown>)[key] !== value) return null
   return { ...RENDER_3D_DEFAULTS }
+}
+
+/**
+ * What the viewport's scene draws, for the debug-overlay menu: '2D' only for a 2D scene the renderer draws
+ * through the flat 2D frame. A 2D scene on the Full 3D pipeline (2.5D) draws models, skeletons and GI like
+ * a 3D one, and a staging or template scene is 3D (`Scene.dimension` defaults to it); no scene at all is
+ * '3D' too, which shows every row.
+ */
+export function overlayDimensionOf(
+  scene: { dimension?: '2D' | '3D' } | null | undefined,
+  renderer: { pipeline2D?: 'flat' | 'full' } | null | undefined,
+): OverlayDimension {
+  return scene?.dimension === '2D' && renderer?.pipeline2D !== 'full' ? '2D' : '3D'
 }

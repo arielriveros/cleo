@@ -3,7 +3,8 @@ import { ModelNode } from 'cleo'
 import type { Animator } from 'cleo'
 import { useCleoEngine } from './EngineContext'
 import { usePlayback } from './PlaybackContext'
-import { useDebugVisibility } from './DebugVisibilityContext'
+import { useDebugVisibility, debugCategoryApplies } from './DebugVisibilityContext'
+import { overlayDimensionOf } from '../utils/sceneDimension'
 import FieldDebugReadout from './animation/FieldDebugReadout'
 import { Select, SectionTitle } from '@cleo/app-kit/ui'
 
@@ -27,7 +28,9 @@ export default function DebugAnimationOverlay() {
   const { isPlayMode, isSimulating } = usePlayback()
   const { visibility } = useDebugVisibility()
 
-  const active = isPlayMode && !isSimulating ? visibility.animation.runtime : visibility.animation.editor
+  // A 3D animator's readout: a 2D scene drawn flat has none (its sprites' clips are not blends).
+  const active = debugCategoryApplies('animation', overlayDimensionOf(instance?.scene, instance?.renderer)) &&
+    (isPlayMode && !isSimulating ? visibility.animation.runtime : visibility.animation.editor)
 
   const [targets, setTargets] = useState<{ id: string; name: string; animator: Animator }[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
