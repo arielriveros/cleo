@@ -39,6 +39,8 @@ export { Body2DNode } from "./core/scene/nodes/body2DNode";
 export type { Body2DKind } from "./core/scene/nodes/body2DNode";
 export { Area2DNode } from "./core/scene/nodes/area2DNode";
 export { World2D } from "./physics2d/world2d";
+export { advanceClip, clipLength, frameDuration, normalizedTime as clipNormalizedTime, stepSpriteMachine, parseSpriteAnimationSet, parseSpriteClip, cloneSpriteAnimationSet, createPlayhead } from "./animation/spriteAnimation";
+export type { SpriteAnimationSet, SpriteClip, SpriteFrame, SpriteFrameHitbox, SpriteClipLoop, SpriteStateMachine, SpriteMachineState, SpriteMachineTransition, ClipPlayhead } from "./animation/spriteAnimation";
 export { DEFAULT_PLATFORMER, jumpPhysics } from "./physics2d/platformer";
 export type { PlatformerSettings, PlatformerAbilities } from "./physics2d/platformer";
 export { TILE_NONE, TILE_SOLID, TILE_ONE_WAY, TILE_SLOPE } from "./physics2d/types";
@@ -559,7 +561,7 @@ export type { ScriptCompileOptions, ScriptModuleFactory } from "./core/scripting
 export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime";
 // Typed name fields (clip/sound/socket/template/child): plain strings the inspector offers a picker for.
 export { SOUNDS_GROUP, ownedSoundsGroup } from "./core/scripting/fieldTypes";
-export type { ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, ProjectTriggers } from "./core/scripting/fieldTypes";
+export type { ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, ProjectTriggers, SpriteClipName } from "./core/scripting/fieldTypes";
 export { Game, setGameHost, setMovieRender, type MovieRenderInfo } from "./core/game";
 export { TimeDilation, type DilateOptions } from "./core/timeDilation";
 export { showLoadingOverlay, nextFrame, whenFramesSmooth } from "./core/loadingOverlay";

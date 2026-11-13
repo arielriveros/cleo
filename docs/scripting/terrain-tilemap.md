@@ -276,6 +276,22 @@ hero.pivot = [0.5, 47 / 135]           // the feet, 47 px up a 135 px frame
 hero.flipX = velocityX < 0             // face the way it moves
 ```
 
+A sprite with an animation set plays clips by name, and its state machine picks them on its own:
+
+```ts
+const sprite = this.findNode('Sprite') as AnimatedSpriteNode
+sprite.play('attack')                  // a state of its machine, or a clip on its own
+sprite.fireTrigger('hurt') ; sprite.setParam('stunned', true)
+sprite.clip ; sprite.state ; sprite.isFinished ; sprite.normalizedTime
+sprite.speed = 0.5 ; sprite.paused = true
+
+// On the sprite or its parent (the character):
+onAnimationEvent(event: string, clip: string) { if (event === 'swing') this.sounds.play('Swing') }
+onAnimationFinished(clip: string) { if (clip === 'death') this.respawn() }
+```
+
+A `SpriteClipName` field picks one of the clips (or states) of the sprite the script's node is or holds.
+
 ## The 2D camera and rooms
 
 A `Camera2DNode` follows a node by name and keeps its view inside the `Room2DNode` the node stands in:

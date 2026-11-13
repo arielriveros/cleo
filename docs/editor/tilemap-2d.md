@@ -304,6 +304,26 @@ Both support **billboarding** (**Constraints**: `free`, `spherical`, `cylindrica
   lying parallel to the screen, squashed and leaning. With an orthographic camera it faces the view
   direction.
 
+### Clips
+
+An animated sprite can carry an **animation set** instead of one frame list: a character's named **clips** —
+idle, run, jump, fall, attack, hurt, death — each a list of the tileset's frames with its own frames per
+second, playing **loop**, **once** or **ping-pong**. A frame can stay on screen for its own time, fire
+**events** (a footstep, the moment a sword connects: scripts hear `onAnimationEvent(event, clip)` on the
+sprite and on its parent) and switch **hitboxes** on — an Area 2D of the character, by name, resized for that
+frame; every hitbox the set names is off on the frames that do not list it. A clip can set its own pivot,
+and a once-clip can name the clip that follows it (an attack's recovery into idle).
+
+A set can also carry a **state machine** that picks the clip: states that each play a clip, and transitions
+between them on conditions over parameters (an AND/OR tree, as the 3D animation machine's), after an
+**exit time** if given, from one state or from any. A sprite inside a Character Body 2D gets the body's state
+as parameters every frame — `grounded`, `velocityX`, `velocityY`, `speedX`, `onWall`, `wallSliding`, `dashing`,
+`facing`, and the one-frame triggers `jumped`, `landed`, `dashed` — and scripts add their own (`setParam`,
+`fireTrigger('attack')`).
+
+The **Clips** section lists the set's clips, shows what is playing (and the state that chose it), and
+previews any clip in the viewport.
+
 ### Draw order and batching
 
 Sprites draw in the order above: by sorting order, then by depth — back to front in 3D; on a tilemap's

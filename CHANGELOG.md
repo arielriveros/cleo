@@ -28,6 +28,16 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - *2.5D.* **Renderer › 2D Scenes › Pipeline › Full 3D** draws the whole 3D frame under a 2D scene again,
     for one that mixes models and 3D lights in. In the flat frame 3D models are not drawn and lit sprites
     draw unlit, until 2D lights arrive.
+- **Sprite clips and a sprite state machine.** An animated sprite can carry an **animation set**: a
+  character's named clips (idle, run, attack...), each frame shown for its own time, firing events
+  (`onAnimationEvent(event, clip)` on the sprite and its parent) and switching hitboxes (an Area 2D of the
+  character, resized per frame) on, playing loop, once (`onAnimationFinished`, a follow-on clip) or
+  ping-pong, with its own pivot. An optional **state machine** picks the clip on conditions over
+  parameters, after an exit time, from one state or any: a sprite in a Character Body 2D reads the body
+  every frame (`grounded`, `velocityX/Y`, `speedX`, `onWall`, `wallSliding`, `dashing`, `facing`, and the
+  triggers `jumped`, `landed`, `dashed`), and scripts add their own (`setParam`, `fireTrigger`). Scripts
+  `play(name)`, and a `SpriteClipName` field picks a clip in the inspector. The **Clips** section shows
+  what plays and previews any clip.
 - **2D physics and a platformer controller.** 2D games get physics of their own (`src/physics2d`), reading
   tilemaps' tiles directly and moving characters the moment a tile is painted or erased.
   - *Tiles.* A tile's **Collision** is now a choice: solid, a **one-way platform** (stood on from above,

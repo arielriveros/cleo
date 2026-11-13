@@ -289,6 +289,19 @@ export class Node {
   public onRoomExit(other: Node): void {}
 
   /**
+   * Called when a frame of a sprite clip comes on screen and carries an event (AnimatedSpriteNode clips):
+   * on the sprite and on its parent, so a script on a character hears its sprite's footsteps and sword
+   * hits. (A skinned model's clip events are the Animator's: `animator.onAnimationEvent(listener)`.)
+   *
+   * @param event The event's name, e.g. `'hit'`.
+   * @param clip The clip it is on.
+   */
+  public onAnimationEvent(event: string, clip: string): void {}
+
+  /** Called when a sprite clip that plays once reaches its end: on the sprite and on its parent. */
+  public onAnimationFinished(clip: string): void {}
+
+  /**
    * Called when an input action this node cares about changes phase — pressed, held past its hold
    * time, or released. Actions are authored in the editor's Input panel and named there, so the same
    * handler works on a keyboard, a gamepad and a touch screen.

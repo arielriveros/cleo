@@ -800,6 +800,10 @@ frames: number[] ; frameSource: 'node' | 'tile'
 fps: number ; loop: boolean ; randomStart: boolean   // randomStart: each copy begins on a random frame
 get currentTile: number ; get/set currentFrame: number
 reset(): void
+animationSet: SpriteAnimationSet | null ; animationSetId: string | null   // clips + optional state machine
+play(name, restart?) ; resumeMachine() ; setParam(name, value) ; fireTrigger(name)
+get clip ; state ; isFinished ; normalizedTime ; clipFrame ; clipNames
+speed: number ; paused: boolean
 ```
 
 ---

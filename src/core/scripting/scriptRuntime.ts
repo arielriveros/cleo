@@ -23,6 +23,8 @@ export const SCRIPT_HANDLERS = [
     'onThink',
     // A 2D camera's follow target crossing into a room (Room2DNode), and the room hearing it.
     'onRoomEnter', 'onRoomExit',
+    // A sprite clip's frame events and a once-clip's end (AnimatedSpriteNode), on the sprite and its parent.
+    'onAnimationEvent', 'onAnimationFinished',
 ] as const;
 
 /** Built-in modules: the engine API, registered by src/cleo.ts as 'cleo'. */

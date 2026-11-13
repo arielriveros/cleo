@@ -3,6 +3,7 @@ import { AnimatedSpriteNode, SpriteFrameSource } from 'cleo';
 import Collapsable from '@cleo/app-kit/ui/Collapsable';
 import TilesetSlot, { tilesetAssetOf } from './TilesetSlot';
 import SpriteAppearance from './SpriteAppearance';
+import SpriteClipsSection from './SpriteClipsSection';
 import TileGrid from '../../tileset/TileGrid';
 import { useCleoEngine } from '../../EngineContext';
 import { PropertyTable, PropertyRow, Field, Section, NumberInput, TextInput, Toggle, Select, Hint, Button, DocScope } from '@cleo/app-kit/ui';
@@ -79,6 +80,8 @@ export default function SpriteSheetEditor() {
   return (
     <DocScope page='editor/tilemap-2d'>
       <TilesetSlot node={node} onChange={() => { setTileIndex(node.tileIndex); bump(x => x + 1) }} />
+
+      <SpriteClipsSection node={node} />
 
       <Collapsable title='Animated Sprite' icon={<SpriteIcon />} persistKey='animatedSprite'>
         <div className='w-full p-2'>

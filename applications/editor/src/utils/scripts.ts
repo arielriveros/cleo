@@ -109,8 +109,8 @@ export type ScriptVarSchema = {
 }
 
 /** The kinds of name a `pick` field can hold. Mirrors the engine's ClipName / SoundName / ... types. */
-export type ScriptPickKind = 'clip' | 'sound' | 'socket' | 'template' | 'node' | 'trigger'
-export const SCRIPT_PICK_KINDS: readonly ScriptPickKind[] = ['clip', 'sound', 'socket', 'template', 'node', 'trigger']
+export type ScriptPickKind = 'clip' | 'sound' | 'socket' | 'template' | 'node' | 'trigger' | 'spriteClip'
+export const SCRIPT_PICK_KINDS: readonly ScriptPickKind[] = ['clip', 'sound', 'socket', 'template', 'node', 'trigger', 'spriteClip']
 
 export type ScriptKind = 'class' | 'module'
 
@@ -272,7 +272,7 @@ function parseDefault(raw: string): any {
 /** Engine name types (lower-cased) -> the kind of name they hold. */
 const TS_TO_PICK: Record<string, ScriptPickKind> = {
   clipname: 'clip', soundname: 'sound', socketname: 'socket', templatename: 'template', nodename: 'node',
-  triggername: 'trigger',
+  triggername: 'trigger', spriteclipname: 'spriteClip',
 }
 
 /**

@@ -1,4 +1,4 @@
-import { ModelNode, AnimatedModel, ownedSoundsGroup, isEditorOwnedName, type Node, type AnimationStateMachine } from 'cleo'
+import { ModelNode, AnimatedModel, AnimatedSpriteNode, ownedSoundsGroup, isEditorOwnedName, type Node, type AnimationStateMachine } from 'cleo'
 import { skinnedModelNodeOf } from '../../../utils/models'
 import type { ScriptPickKind } from '../../../utils/scripts'
 import type { AnimationAsset } from '../../../utils/animationAssets'
@@ -145,6 +145,24 @@ function nodeChoices(node: Node): PickChoice[] {
   return out
 }
 
+/**
+ * The clips and machine states of the sprite animation set on `node` or under it (a character body's sprite
+ * child), or beside it: what `AnimatedSpriteNode.play` takes.
+ */
+function spriteClipChoices(node: Node): PickChoice[] {
+  const out: PickChoice[] = []
+  const add = (s: AnimatedSpriteNode) => {
+    const set = s.animationSet
+    if (!set) return
+    for (const c of set.clips) out.push({ value: c.name, group: `Clips of ${s.name}` })
+    for (const st of set.machine?.states ?? []) out.push({ value: st.name, group: `States of ${s.name}` })
+  }
+  const walk = (n: Node) => { if (n instanceof AnimatedSpriteNode) add(n); for (const c of n.children) if (!isHelper(c)) walk(c) }
+  walk(node)
+  if (out.length === 0 && node.parent) walk(node.parent)
+  return out
+}
+
 /** The values a `pick` field of `kind` can take on `node`. Empty when there is nothing to offer. */
 export function pickChoices(kind: ScriptPickKind, node: Node, ctx: PickContext): PickChoice[] {
   switch (kind) {
@@ -154,10 +172,12 @@ export function pickChoices(kind: ScriptPickKind, node: Node, ctx: PickContext):
     case 'template': return unique(ctx.templates.map(t => ({ value: t.name })))
     case 'node': return unique(nodeChoices(node))
     case 'trigger': return unique(triggerChoices(node, ctx))
+    case 'spriteClip': return unique(spriteClipChoices(node))
   }
 }
 
 /** Header text for a field's picker, e.g. "Clips of Player". */
 export const PICK_LABEL: Record<ScriptPickKind, string> = {
   clip: 'clip', sound: 'sound cue', socket: 'socket', template: 'template', node: 'node', trigger: 'animator trigger',
+  spriteClip: 'sprite clip',
 }

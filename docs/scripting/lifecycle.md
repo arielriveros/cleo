@@ -17,6 +17,8 @@ onAction(action: string, state: ActionState): void
 onThink(delta: number): void                      // ControllerNode only
 onRoomEnter(other: Node): void                    // a 2D camera's target entered a room (both sides)
 onRoomExit(other: Node): void
+onAnimationEvent(event: string, clip: string): void // a sprite clip's frame event (sprite and parent)
+onAnimationFinished(clip: string): void           // a once-clip ended (sprite and parent)
 onDespawn(): void
 ```
 
