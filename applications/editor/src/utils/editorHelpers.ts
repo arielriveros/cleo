@@ -30,6 +30,9 @@ import {
   foliageColliderPose,
   Camera2DNode,
   Room2DNode,
+  CharacterBody2DNode,
+  Body2DNode,
+  Area2DNode,
 } from 'cleo';
 import type { FoliageCollision } from 'cleo';
 import type { NavObstacle, TriangleSoup } from 'cleo';
@@ -114,6 +117,8 @@ const EFFECTSHAPE_PREFIX = '__debug__effectshape_';
 /** A 2D room's outline, and a 2D camera's reference frame: always drawn, like the light icons. */
 const ROOM_FRAME = '__editor__RoomFrame';
 const CAMERA2D_FRAME = '__editor__Camera2DFrame';
+/** A 2D body's, collider's or area's box: always drawn with the icons, coloured by kind. */
+const BOX2D_FRAME = '__editor__Box2DFrame';
 
 // Per-scene cache of the last-built shapes signature for each body/trigger id.
 const shapeSignatures = new WeakMap<Scene, Map<string, string>>();
@@ -637,6 +642,26 @@ function ensureCamera2DFrame(cam: Camera2DNode) {
   };
   frame.onUpdate(0, 0);
   cam.addChild(frame);
+}
+
+// A 2D physics node's box, followed per frame: a character body's stands on its feet (cyan), a collider's is
+// centred on it (red), an area's is centred on it moved by its offset (amber; drawn unmirrored).
+function ensureBox2DFrame(node: CharacterBody2DNode | Body2DNode | Area2DNode) {
+  if (node.getChildByName(BOX2D_FRAME).length) return;
+  const color: [number, number, number] = node instanceof CharacterBody2DNode ? [0.35, 0.9, 1]
+    : node instanceof Body2DNode ? [1, 0.35, 0.3] : [1, 0.75, 0.25];
+  const frame = wireModel(BOX2D_FRAME, unitRectLines(), color);
+  frame.onUpdate = () => {
+    const s = node.worldScale;
+    const sx = Math.abs(s[0]) || 1, sy = Math.abs(s[1]) || 1;
+    const w = node.size[0] / sx, h = node.size[1] / sy;
+    const oy = node instanceof CharacterBody2DNode ? h / 2 : node instanceof Area2DNode ? node.offset[1] / sy : 0;
+    const ox = node instanceof Area2DNode ? node.offset[0] / sx : 0;
+    if (Math.abs(frame.scale[0] - w) > 1e-5 || Math.abs(frame.scale[1] - h) > 1e-5) frame.setScale([w, h, 1]);
+    if (Math.abs(frame.position[0] - ox) > 1e-5 || Math.abs(frame.position[1] - oy) > 1e-5) frame.setPosition([ox, oy, 0]);
+  };
+  frame.onUpdate(0, 0);
+  node.addChild(frame);
 }
 
 /** Line pairs for a unit box (half extent 0.5) and for three unit-radius great circles. */
@@ -1417,6 +1442,10 @@ export function reconcileEditorHelpers(
         const child = node.getChildByName(name)[0];
         if (child) node.removeChild(child);
       }
+    } else if (node instanceof CharacterBody2DNode || node instanceof Body2DNode || node instanceof Area2DNode) {
+      const existing = node.getChildByName(BOX2D_FRAME)[0];
+      if (icons && !existing) ensureBox2DFrame(node);
+      else if (!icons && existing) node.removeChild(existing);
     } else if (node instanceof Room2DNode) {
       const existing = node.getChildByName(ROOM_FRAME)[0];
       if (icons && !existing) ensureRoomFrame(node);

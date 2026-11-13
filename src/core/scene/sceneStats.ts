@@ -16,6 +16,8 @@ export interface SceneStats {
     rigMs: number;
     /** Cloth late pass: every ClothNode's simulation step and mesh upload. */
     clothMs: number;
+    /** The 2D physics pass: every 2D body moved, every 2D area's overlaps (src/physics2d). */
+    physics2DMs: number;
     /** UI layout late pass: resolving every UI root's subtree into screen rects. */
     uiMs: number;
     /** Nodes walked this frame. */
@@ -34,6 +36,7 @@ export const sceneStats: SceneStats = {
     animatorMs: 0,
     rigMs: 0,
     clothMs: 0,
+    physics2DMs: 0,
     uiMs: 0,
     nodes: 0,
     uiNodes: 0,
@@ -57,5 +60,6 @@ export function resetSceneStats(): void {
     sceneStats.animatorMs = 0;
     sceneStats.rigMs = 0;
     sceneStats.clothMs = 0;
+    sceneStats.physics2DMs = 0;
     sceneStats.uiMs = 0;
 }

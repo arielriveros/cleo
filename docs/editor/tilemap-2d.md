@@ -43,7 +43,7 @@ tiles (not its animation or auto-tile membership); **Clear** removes everything 
 
 | Field | What it does |
 |---|---|
-| **Solid** | The tile is a collider, on any tilemap layer with parallax 1. |
+| **Collision** | What a body meets on this tile, on any tilemap layer with parallax 1: **None**; **Solid**; **One-way platform** (stood on from above, passed from below and the sides, dropped through with down + jump); a **slope** (45°, or either half of a 26° slope, rising or falling), solid below its line; or a **half block**. [2D character bodies](#2d-physics) read every kind; 3D bodies the solid ones (a slope is given the matching collider outline). A slope flipped on X mirrors. |
 | **Anchor row** | Rows down from this tile that it depth-sorts at: a two-tall tree anchors at its trunk. |
 | **Z bias** | A world-space nudge to the tile's depth sort, for when anchoring alone gets it wrong. |
 | **Span** | The tile's footprint in cells, for a prop larger than one tile. |
@@ -172,11 +172,63 @@ draw behind them and layers above it in front, and on it they order by the map's
 
 ## Collision
 
-Mark tiles **solid** in the tileset, and the tilemap builds colliders for them — merged into as few
-boxes as possible, so a hand-painted floor becomes a handful of colliders rather than hundreds.
-**Collision depth** on the node controls how thick they are in the third axis.
+Give tiles a **collision** in the tileset — solid, a one-way platform, a slope — and the tilemap collides:
+nothing is placed per tile.
 
-Nothing else is needed; there is no per-tile collider to place.
+- **2D character bodies** ([2D physics](#2d-physics)) read the painted tiles directly, every kind of
+  collision, the moment a tile is painted or erased.
+- **3D bodies** on the XY plane collide with colliders the map builds from its solid tiles, merged into as
+  few boxes as possible, so a hand-painted floor becomes a handful of colliders rather than hundreds.
+  **Collision depth** on the node controls how thick they are in the third axis. A map only 2D bodies
+  walk on turns **3D colliders** off and builds none.
+
+## 2D physics
+
+2D games move their characters with the 2D physics, which reads tilemaps' tiles (solid, one-way, slopes)
+and 2D colliders, every frame the game plays.
+
+### Character Body 2D
+
+A **Character Body 2D** (**Sprites ▸ Character Body 2D**) is a character's body, a box standing on its feet at the node's position —
+give its sprite a pivot at the feet and the two line up. It slides along walls, lands on floors and one-way
+platforms, walks up and down slopes and steps (up to its **step height**), and keeps its sprite children
+facing the way it faces (**flip sprites**).
+
+- **Size** — the box's width and height.
+- **Layer** — the 2D layers it is on; an [Area 2D](#area-2d) sees it if the area looks for one of them.
+- **Controller** — **Platformer** (below), or **None**: it falls by its **gravity** and moves by the velocity
+  a script gives it.
+- **Player input** — read the **move**, **jump** and **dash** input actions. Off, a script drives it with the
+  same feel (`move`, `jump`, `dash`): an enemy that walks and jumps like the player.
+
+### Platformer
+
+The platformer controller's feel, tuned the way a designer thinks: **jump height** and **time to apex**
+rather than a gravity and a launch speed (both are shown). The jump is higher the longer jump is held
+(**jump cut** is what is kept when it is let go early), still works for **coyote time** after walking off a
+ledge, and a press within **jump buffer** before landing jumps on landing. **Fall gravity** above 1 falls
+faster than it rose, which reads as weight.
+
+The three abilities a metroidvania hands out are toggles, off until the game turns them on:
+
+- **Double jump** — **air jumps** more jumps before landing, each a share of the full one.
+- **Dash** — a straight burst at **dash speed** for **dash time**, gravity off, once in the air.
+- **Wall jump** — pressing into a wall while falling slides down it no faster than **wall slide speed**;
+  jumping kicks off it at **wall jump speed**.
+
+### Collider 2D
+
+A **Collider 2D** (**Sprites ▸ Collider 2D**) is a box, centred on the node, that bodies collide with like tiles: **solid**, or a
+**one-way platform**. Move the node (a script, a sequence) and it is a moving platform: a body standing on
+it rides along. **Enabled** off and nothing collides with it (a door that opened).
+
+### Area 2D
+
+An **Area 2D** (**Sprites ▸ Area 2D**) is a trigger box, centred on the node and moved by its **offset**, that tells scripts what
+comes in and goes out — `onTriggerEnter(other)` and `onTriggerExit(other)`, on the area and on what came
+in. It sees bodies on the layers it **looks for**, and with **detect areas**, other areas (a sword's hitbox
+seeing an enemy's hurtbox). As the child of a character body it moves with it, its offset mirrored when
+the character faces left. A pickup, a checkpoint, a hazard, a hitbox.
 
 ## Sprites
 

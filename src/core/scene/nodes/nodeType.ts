@@ -10,7 +10,7 @@
 export type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'sprite' | 'animatedSprite' | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'wind' | 'weather' | 'lodGroup' | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
   | 'particleSystem' | 'forceField' | 'waterVolume' | 'occlusionVolume' | 'exposureVolume' | 'volumetricFog' | 'fluidVolume' | 'cloth' | 'giVolume'
   | 'sequence'
-  | 'camera2D' | 'room2D' | 'parallaxLayer'
+  | 'camera2D' | 'room2D' | 'parallaxLayer' | 'characterBody2D' | 'body2D' | 'area2D'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 

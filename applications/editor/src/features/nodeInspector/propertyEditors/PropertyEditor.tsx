@@ -1,4 +1,4 @@
-import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, WeatherNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OcclusionVolumeNode, ExposureVolumeNode, GIVolumeNode, VolumetricFogNode, ClothNode, SequenceNode, Camera2DNode, Room2DNode, ParallaxLayerNode } from 'cleo'
+import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, WeatherNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OcclusionVolumeNode, ExposureVolumeNode, GIVolumeNode, VolumetricFogNode, ClothNode, SequenceNode, Camera2DNode, Room2DNode, ParallaxLayerNode, CharacterBody2DNode, Body2DNode, Area2DNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import RigSlot from './RigSlot';
@@ -35,6 +35,7 @@ import SequenceEditor from './SequenceEditor'
 import VolumetricFogEditor from './VolumetricFogEditor'
 import TilemapEditor from './TilemapEditor'
 import { Camera2DEditor, Room2DEditor, ParallaxLayerEditor } from './Camera2DEditors'
+import { CharacterBody2DEditor, Body2DEditor, Area2DEditor } from './Physics2DEditors'
 import LandscapeEditor from './LandscapeEditor'
 import SceneSettings from './SceneSettings'
 import UIEditor from './UIEditor'
@@ -111,6 +112,9 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'camera2D' && <Camera2DEditor key={props.node.id} node={props.node as Camera2DNode} /> }
           { props.node.nodeType === 'room2D' && <Room2DEditor key={props.node.id} node={props.node as Room2DNode} /> }
           { props.node.nodeType === 'parallaxLayer' && <ParallaxLayerEditor key={props.node.id} node={props.node as ParallaxLayerNode} /> }
+          { props.node.nodeType === 'characterBody2D' && <CharacterBody2DEditor key={props.node.id} node={props.node as CharacterBody2DNode} /> }
+          { props.node.nodeType === 'body2D' && <Body2DEditor key={props.node.id} node={props.node as Body2DNode} /> }
+          { props.node.nodeType === 'area2D' && <Area2DEditor key={props.node.id} node={props.node as Area2DNode} /> }
           { props.node.nodeType === 'landscape' && <LandscapeEditor key={props.node.id} node={props.node as LandscapeNode} /> }
           { props.node.nodeType === 'volumetricClouds' && <VolumetricCloudsEditor node={props.node as VolumetricCloudsNode} /> }
           { props.node.nodeType === 'skyAtmosphere' && <SkyAtmosphereEditor node={props.node as SkyAtmosphereNode} /> }

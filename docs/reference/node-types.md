@@ -13,7 +13,7 @@ type NodeType =
   | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
   | 'particleSystem' | 'forceField' | 'waterVolume' | 'occlusionVolume' | 'exposureVolume' | 'volumetricFog'
   | 'fluidVolume' | 'cloth' | 'giVolume' | 'sequence'
-  | 'camera2D' | 'room2D' | 'parallaxLayer'
+  | 'camera2D' | 'room2D' | 'parallaxLayer' | 'characterBody2D' | 'body2D' | 'area2D'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 ```
@@ -748,6 +748,36 @@ fitView(width: number, height: number)      // called by the renderer each frame
 ```
 
 It moves in the scene's late pass, only while the game plays.
+
+### CharacterBody2DNode — `'characterBody2D'`
+
+A 2D character's body: a box standing on its feet at the node, moved by the 2D physics.
+
+```ts
+size: [number, number] ; layer: number ; stepHeight: number ; flipSprites: boolean
+controller: 'platformer' | 'none' ; playerInput: boolean
+moveAction ; jumpAction ; dashAction: string
+settings: PlatformerSettings ; abilities: { doubleJump, dash, wallJump }
+gravity: number                                    // with no controller
+velocity2D: [number, number]
+get isGrounded ; onWall ; onCeiling ; onSlope ; facing ; isDashing ; isWallSliding
+get justJumped ; justDashed ; justLanded
+move(x, y?) ; jump() ; releaseJump() ; dash() ; teleport(x, y)
+```
+
+### Body2DNode — `'body2D'`
+
+```ts
+size: [number, number] ; kind: 'solid' | 'oneWay' ; enabled: boolean
+bounds(out?): [minX, minY, maxX, maxY]
+```
+
+### Area2DNode — `'area2D'`
+
+```ts
+size: [number, number] ; offset: [number, number] ; layer: number ; mask: number
+detectAreas: boolean ; enabled: boolean
+```
 
 ### Room2DNode — `'room2D'`
 

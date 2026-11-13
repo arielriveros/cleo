@@ -1625,3 +1625,23 @@ export function parallaxSpan(viewCenter: number, halfView: number, origin: numbe
     out.to = (out.max - start) / u;
     return out;
 }
+
+/** Whether the rectangles [minX, minY, maxX, maxY] `a` and `b` overlap; touching edges do not. */
+export function rects2DIntersect(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+    return a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+}
+
+/**
+ * The height of a slope's surface at `t` across it (0 its left edge, 1 its right), from its heights at the
+ * two edges: a straight line, clamped to the edges.
+ */
+export function slopeHeightAt(left: number, right: number, t: number): number {
+    const u = t < 0 ? 0 : t > 1 ? 1 : t;
+    return left + (right - left) * u;
+}
+
+/** `current` moved toward `target` by at most `maxDelta` (never past it). */
+export function moveToward(current: number, target: number, maxDelta: number): number {
+    if (current < target) return Math.min(target, current + maxDelta);
+    return Math.max(target, current - maxDelta);
+}

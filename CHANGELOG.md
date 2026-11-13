@@ -28,6 +28,22 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - *2.5D.* **Renderer › 2D Scenes › Pipeline › Full 3D** draws the whole 3D frame under a 2D scene again,
     for one that mixes models and 3D lights in. In the flat frame 3D models are not drawn and lit sprites
     draw unlit, until 2D lights arrive.
+- **2D physics and a platformer controller.** 2D games get physics of their own (`src/physics2d`), reading
+  tilemaps' tiles directly and moving characters the moment a tile is painted or erased.
+  - *Tiles.* A tile's **Collision** is now a choice: solid, a **one-way platform** (stood on from above,
+    dropped through with down + jump), a 45° or 26° **slope** or a half block (`TileMeta.oneWay`, `slope`).
+  - *Sprites ▸ Character Body 2D.* A character's box, standing on its feet: it slides along walls, walks up
+    and down slopes and steps, and keeps its sprite facing the way it goes. Its **Platformer** controller
+    runs and jumps with the feel a designer tunes (a jump height and the time to reach it, the jump cut,
+    coyote time, a jump buffer), and hands out a metroidvania's abilities as toggles: **double jump**,
+    **dash**, **wall slide and wall jump**. It reads the player's input actions, or a script's `move`,
+    `jump` and `dash`, so an enemy moves with the same feel. A jump peaks at the same height at 30, 60
+    and 144 frames a second.
+  - *Sprites ▸ Collider 2D* is a solid block or one-way platform that carries what stands on it when it
+    moves; *Sprites ▸ Area 2D* is a trigger (`onTriggerEnter` / `onTriggerExit`, layers, area-to-area for
+    hitboxes, its offset mirrored with the character it rides).
+  - *Queries.* `scene.physics2D.raycast(...)` and `overlapsSolid(...)`.
+  - A tilemap only 2D bodies walk on turns **3D colliders** off and builds no 3D boxes.
 - **Camera 2D, rooms and pixel-perfect pixel art.** **Cameras ▸ Camera 2D** is the 2D game camera: sized in
   art pixels (**pixels per unit**, a **reference resolution** it shows at least, **zoom**), it follows a node
   by name with a dead zone, damping and look-ahead, and shakes on demand (`shake()`).

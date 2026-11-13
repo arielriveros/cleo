@@ -109,6 +109,18 @@ export const TilemapIcon = () => (
   <S><rect x="3.5" y="3.5" width="17" height="17" rx="1.5" /><path d="M9 3.5v17M15 3.5v17M3.5 9h17M3.5 15h17" /><rect x="9" y="9" width="6" height="6" fill="currentColor" stroke="none" /></S>
 );
 
+/** A 2D character body: a figure standing in its box. */
+export const CharacterBody2DIcon = () => (
+  <S><rect x="5" y="3" width="14" height="18" rx="1.5" /><circle cx="12" cy="8" r="2" /><path d="M12 10.5v5M9 13h6M10 21l2-5.5 2 5.5" /></S>
+);
+/** A 2D collider: a block with its hatching. */
+export const Collider2DIcon = () => (
+  <S><rect x="3.5" y="8" width="17" height="8" rx="1" /><path d="M7 16l4-8M12 16l4-8M17 16l3.5-7" opacity="0.6" /></S>
+);
+/** A 2D area: a dashed box with a mark in it. */
+export const Area2DIcon = () => (
+  <S><path d="M4 7V4h3M10 4h4M17 4h3v3M20 10v4M20 17v3h-3M14 20h-4M7 20H4v-3M4 14v-4" /><circle cx="12" cy="12" r="2.2" /></S>
+);
 /** A 2D room: a dashed rectangle with a doorway gap on one side, one screen of a world. */
 export const Room2DIcon = () => (
   <S><path d="M10 4H4.5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h15a1 1 0 0 0 1-1v-5M20.5 9V5a1 1 0 0 0-1-1H14" /><path d="M13 12h7M17.5 9.5 20 12l-2.5 2.5" /></S>

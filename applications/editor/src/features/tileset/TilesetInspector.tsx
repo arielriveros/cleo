@@ -4,16 +4,16 @@ import type { WangKind } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import {
   Button, ButtonWithConfirm, ColorInput, DiceIcon, Hint, LinkIcon, PropertyRow, PropertyTable, RestartIcon, SegmentedControl,
-  Slider, TextInput, Toggle, VectorInput, cn, labelClass, valueClass,
+  Select, Slider, TextInput, Toggle, VectorInput, cn, labelClass, valueClass,
 } from '@cleo/app-kit/ui'
 import { TextureSlotFrame, TextureSlotGrid } from '@cleo/app-kit/materials/TextureSlots'
 import { vec3ToHex } from '../../utils/UtilFunctions'
 import { awaitTextureImage } from '../../utils/textureReady'
 import {
   TILESET_LIGHTING_MAPS, clearTileMeta, copyableTileMeta, guessTileSize, leftoverPixels, moveFrame,
-  pasteTileMeta, selectionFieldState, tilesetTextureIds,
+  pasteTileMeta, selectionFieldState, tilesetTextureIds, TILE_COLLISION_PRESETS, tileCollisionPreset, tileCollisionPatch,
 } from '../../utils/tilesets'
-import type { TileMeta, TilesetAsset, TilesetLightingMap } from '../../utils/tilesets'
+import type { TileMeta, TilesetAsset, TilesetLightingMap, TileCollisionPreset } from '../../utils/tilesets'
 import { useTileset } from './TilesetContext'
 import TextureSlotPicker from '../texture/TextureSlotPicker'
 import { TilePreview, TileThumb, useAtlasSrc } from './TileThumb'
@@ -269,10 +269,13 @@ function SelectedTilesCard({ asset }: { asset: TilesetAsset }) {
         </div>
 
         <PropertyTable columns={['32%', '68%']}>
-          <PropertyRow label='Solid'>
+          <PropertyRow label='Collision' hint='What a body meets here: a solid block, a one-way platform (stood on from above, passed from below), or a slope or half block, solid below its line. 2D bodies read all of them; 3D bodies the solid ones.'>
             <div className='flex items-center gap-2'>
-              <Toggle checked={!!primary.solid} onChange={(c) => set({ solid: c })} />
-              <Mixed on={mixed.has('solid')} />
+              <Select className='flex-1' value={tileCollisionPreset(primary)}
+                onChange={(e) => set(tileCollisionPatch(e.target.value as TileCollisionPreset))}>
+                {TILE_COLLISION_PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </Select>
+              <Mixed on={mixed.has('solid') || mixed.has('oneWay') || mixed.has('slope')} />
             </div>
           </PropertyRow>
           <PropertyRow label='Anchor row'>

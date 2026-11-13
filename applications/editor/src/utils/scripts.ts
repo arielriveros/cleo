@@ -22,7 +22,7 @@ export type ScriptBaseType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'cameraRig'
   | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'wind' | 'weather' | 'lodGroup'
   | 'sound' | 'character' | 'controller'
-  | 'camera2D' | 'room2D' | 'parallaxLayer'
+  | 'camera2D' | 'room2D' | 'parallaxLayer' | 'characterBody2D' | 'body2D' | 'area2D'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput'
 
@@ -50,6 +50,9 @@ export const BASE_CLASS: Record<ScriptBaseType, string> = {
   camera2D: 'Camera2DNode',
   room2D: 'Room2DNode',
   parallaxLayer: 'ParallaxLayerNode',
+  characterBody2D: 'CharacterBody2DNode',
+  body2D: 'Body2DNode',
+  area2D: 'Area2DNode',
   // Concrete UI classes, not a single UINode base, so a script gets typed members in Monaco.
   uiRoot: 'UIRootNode',
   uiPanel: 'UIPanelNode',
@@ -70,6 +73,7 @@ export const BASE_TYPE_LABEL: Record<ScriptBaseType, string> = {
   volumetricClouds: 'Volumetric Clouds', skyAtmosphere: 'Sky Atmosphere', skyLight: 'Sky Light', wind: 'Wind', weather: 'Weather',
   lodGroup: 'LOD Group', sound: 'Sound', character: 'Character', controller: 'Controller',
   camera2D: 'Camera 2D', room2D: 'Room', parallaxLayer: 'Parallax Layer',
+  characterBody2D: 'Character Body 2D', body2D: 'Collider 2D', area2D: 'Area 2D',
   uiRoot: 'UI Canvas', uiPanel: 'UI Panel', uiText: 'UI Text', uiImage: 'UI Image',
   uiButton: 'UI Button', uiStack: 'UI Stack', uiSpacer: 'UI Spacer',
   uiProgressBar: 'UI Progress Bar', uiSlider: 'UI Slider', uiToggle: 'UI Toggle',

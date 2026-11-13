@@ -55,6 +55,10 @@ import { PrecipitationRig } from "./precipitationRig";
 import type { SequenceNode } from "./nodes/sequenceNode";
 import type { Camera2DNode } from "./nodes/camera2DNode";
 import type { Room2DNode } from "./nodes/room2DNode";
+import type { CharacterBody2DNode } from "./nodes/characterBody2DNode";
+import type { Body2DNode } from "./nodes/body2DNode";
+import type { Area2DNode } from "./nodes/area2DNode";
+import { World2D } from "../../physics2d/world2d";
 
 /** Object-space up, rotated by the camera's world orientation to give the audio listener its up axis. */
 const UP_AXIS: vec3 = vec3.fromValues(0, 1, 0);
@@ -182,6 +186,11 @@ export class Scene {
     // The 2D cameras (a CameraNode kind, told apart by node type) and the rooms they confine to, likewise.
     private _cameras2D: Set<Camera2DNode> = new Set();
     private _rooms2D: Set<Room2DNode> = new Set();
+    // The 2D physics' bodies, colliders and areas, by node type too; and the world that moves them.
+    private _bodies2D: Set<CharacterBody2DNode> = new Set();
+    private _colliders2D: Set<Body2DNode> = new Set();
+    private _areas2D: Set<Area2DNode> = new Set();
+    private _physics2D: World2D | null = null;
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
     private _exposureVolumes: Set<ExposureVolumeNode> = new Set();
@@ -614,6 +623,18 @@ export class Scene {
 
             sceneStats.nodeLoopMs = performance.now() - loopStart;
 
+            // THE 2D PHYSICS PASS. After every script has said what its body wants (a jump, a steer), before
+            // the cameras follow: 2D character bodies move through the tilemaps and 2D colliders, and 2D
+            // areas report who came and went. Only while the game plays.
+            if ((this._bodies2D.size > 0 || this._areas2D.size > 0) && this._hasStarted && !paused && !CleoEngine.authoringMode) {
+                const physicsStart = performance.now();
+                authoring.derived++;
+                try { this.physics2D.step(delta, this); }
+                catch (error) { Logger.error(`Error in the 2D physics: ${error}`, 'Scene'); }
+                finally { authoring.derived--; }
+                sceneStats.physics2DMs = performance.now() - physicsStart;
+            }
+
             // Camera rigs must run LAST, after every onUpdate: a follow target sorting later in the
             // traversal would not have moved yet, and the rig would trail it by a frame. The extra
             // full-tree transform pass is what makes the targets' world positions current.
@@ -965,6 +986,9 @@ export class Scene {
         this._sequences = new Set();
         this._cameras2D = new Set();
         this._rooms2D = new Set();
+        this._bodies2D = new Set();
+        this._colliders2D = new Set();
+        this._areas2D = new Set();
         this._forceFields = new Set();
         this._waterVolumes = new Set();
         this._exposureVolumes = new Set();
@@ -988,6 +1012,9 @@ export class Scene {
             const kinds = kindsOf(node.constructor as Function);
             if (kinds === 0 && node.nodeType === 'sequence') { this._sequences.add(node as SequenceNode); continue; }
             if (kinds === 0 && node.nodeType === 'room2D') { this._rooms2D.add(node as Room2DNode); continue; }
+            if (kinds === 0 && node.nodeType === 'characterBody2D') { this._bodies2D.add(node as CharacterBody2DNode); continue; }
+            if (kinds === 0 && node.nodeType === 'body2D') { this._colliders2D.add(node as Body2DNode); continue; }
+            if (kinds === 0 && node.nodeType === 'area2D') { this._areas2D.add(node as Area2DNode); continue; }
             if (kinds === 0 && !node.socketAttachment && !(node.drawDistance > 0)) continue;
             if (kinds & K.LIGHT)
                 this._lights.add(node as LightNode);
@@ -1276,6 +1303,40 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._rooms2D;
+    }
+
+    /** Every 2D character body ({@link CharacterBody2DNode}) in the scene. */
+    public get bodies2D(): Set<CharacterBody2DNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._bodies2D;
+    }
+
+    /** Every 2D box collider ({@link Body2DNode}) in the scene. */
+    public get colliders2D(): Set<Body2DNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._colliders2D;
+    }
+
+    /** Every 2D trigger area ({@link Area2DNode}) in the scene. */
+    public get areas2D(): Set<Area2DNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._areas2D;
+    }
+
+    /**
+     * The scene's 2D physics (src/physics2d): what moves its 2D bodies every frame the game plays, and what a
+     * script queries -- `raycast(x, y, dx, dy, maxDistance)`, `overlapsSolid(minX, minY, maxX, maxY)`. Made on
+     * first use; the world it queries is the one the last step built (or a fresh one, made here, before any).
+     */
+    public get physics2D(): World2D {
+        if (!this._physics2D) {
+            this._physics2D = new World2D();
+            this._physics2D.refresh(this);
+        }
+        return this._physics2D;
     }
 
     public get lights(): Set<LightNode> {

@@ -38,6 +38,22 @@ export interface TileMeta {
     /** Relative likelihood when the randomize brush picks from `variantGroup`. */
     weight?: number;
     variantGroup?: number;
+    /**
+     * 2D physics (src/physics2d): a platform stood on from above and passed through from below and the
+     * sides; holding down and jumping drops through it. Its own kind of collision: not `solid`.
+     */
+    oneWay?: boolean;
+    /**
+     * 2D physics: a slope, the floor's height at the tile's left and right edges as fractions of the tile
+     * (0 its bottom, 1 its top): [0, 1] rises to the right at 45 degrees, [0, 0.5] and [0.5, 1] are the two
+     * halves of a 26.5 degree slope, [0.5, 0.5] a half-height block. Below the line is solid. Flipping the
+     * tile on X mirrors it.
+     */
+    slope?: [number, number];
+    /** Free data a script reads off a placed tile (`tilemap.tileAt(...)`): a hazard's damage, a ladder. */
+    props?: Record<string, string | number | boolean>;
+    /** Free labels a script tests for: 'spikes', 'water', 'breakable'. */
+    tags?: string[];
 }
 
 /** A set of tiles that auto-tile against each other. `tiles` maps an edge/corner mask to candidates. */

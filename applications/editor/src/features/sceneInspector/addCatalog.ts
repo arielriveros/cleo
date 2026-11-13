@@ -57,6 +57,9 @@ import {
   Camera2DNode,
   Room2DNode,
   ParallaxLayerNode,
+  CharacterBody2DNode,
+  Body2DNode,
+  Area2DNode,
   LIGHT_UNIT,
   newLightOptions,
 } from 'cleo'
@@ -77,7 +80,7 @@ import {
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon, WeatherIcon,
   SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
-  SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon,
+  SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon, CharacterBody2DIcon, Collider2DIcon, Area2DIcon,
 } from './nodeIcons'
 import { createLandscapeNode } from '../../utils/landscapeSlots'
 import { defaultDecalMaterial } from '../../utils/materials'
@@ -495,6 +498,20 @@ export const ADD_ITEMS: AddItem[] = [
     },
   },
 
+  // The 2D physics: a character body (the platformer controller, player input on), a box collider, and a
+  // trigger area. A 2D scene's own; a 3D scene's bodies are the Gameplay ones.
+  {
+    id: 'characterBody2D', label: 'Character Body 2D', icon: CharacterBody2DIcon, category: 'sprites',
+    create: async () => new CharacterBody2DNode('character body 2D'),
+  },
+  {
+    id: 'body2D', label: 'Collider 2D', icon: Collider2DIcon, category: 'sprites',
+    create: async () => new Body2DNode('collider 2D', [2, 0.5]),
+  },
+  {
+    id: 'area2D', label: 'Area 2D', icon: Area2DIcon, category: 'sprites',
+    create: async () => new Area2DNode('area 2D', [1, 1]),
+  },
   // One screen of a 2D world, which a Camera 2D keeps its view inside: 30 x 17 units, a 480 x 270 view of
   // 16 px tiles.
   {
