@@ -4,7 +4,7 @@ import { join } from 'path';
 import { readExample } from '../tools/exampleKit/readExample.mjs';
 import { COLS, ROWS, GRID, ROOMS, roomBounds } from '../tools/duskwell/level';
 // The whole engine: it registers itself as the scripts' 'cleo' module, so the demo's scripts run headless.
-import { Scene, CleoEngine, ControllerNode } from '../src/cleo';
+import { Scene, CleoEngine, ControllerNode, AISystem, NavGraph2D, parseNavGraph2D, EDGE_JUMP } from '../src/cleo';
 import type { CharacterBody2DNode } from '../src/cleo';
 import { fakeInput } from './helpers/fakeInput';
 import type { FakeInput } from './helpers/fakeInput';
@@ -44,9 +44,14 @@ describe.skipIf(!present)('the Duskwell example project', { timeout: 60_000 }, (
      * The scene, parsed and started the way the player starts it, scripts and all. The player plays it
      * through its Player Controller from scripted buttons (`input`), as a person would from the keyboard.
      */
-    const play = () => {
+    const play = (without: string[] = []) => {
         const scene = new Scene();
         scene.parse(sceneFile(), true);
+        // The navigation service the engine hands every scene it runs (CleoEngine owns it).
+        scene.ai = new AISystem();
+        scene.ai.setScene(scene);
+        // Enemies a test does not want in its way.
+        for (const name of without) { const n = scene.findNode(name); if (n) scene.removeNode(n); }
         scene.start();
         const player = scene.findNode('Player') as CharacterBody2DNode & Record<string, any>;
         return { scene, player };
@@ -202,8 +207,105 @@ describe.skipIf(!present)('the Duskwell example project', { timeout: 60_000 }, (
         }
     });
 
+    it('ships two 2D navigations baked from the map, the walker\'s with the staircase of jumps', () => {
+        const navs = nodes().filter(n => n.type === 'navMesh');
+        expect(navs.map(n => n.name)).toEqual(['Walker Nav', 'Flier Nav']);
+        expect(navs.every(n => n.space === '2D' && n.graph2D && n.bakedSource2D)).toBe(true);
+        const walker = new NavGraph2D(parseNavGraph2D(navs[0].graph2D));
+        const flier = new NavGraph2D(parseNavGraph2D(navs[1].graph2D));
+        expect(walker.movement).toBe('walk');
+        expect(flier.movement).toBe('fly');
+        // The Long Hall's staircase, each +3: floor (2) to plank (5), plank to pillar top (8), pillar to plank (11).
+        const jumps = new Set<string>();
+        for (let e = 0; e < walker.edgeCount; e++) {
+            const { from, to, kind } = walker.edge(e);
+            if (kind !== EDGE_JUMP) continue;
+            jumps.add(`${Math.round(walker.node(from)[1])}>${Math.round(walker.node(to)[1])}`);
+        }
+        for (const step of ['2>5', '5>8', '8>11']) expect(jumps, step).toContain(step);
+        // The guard's patrol rides on the walker's navigation.
+        expect(navs[0].routes.map((r: any) => r.name)).toEqual(['Hall Watch']);
+        expect(navs[0].agent2D.jumpHeight).toBe(named('Ruin Guard 1').characterBody2D.jumpHeight);
+    });
+
+    it('gives every enemy an AI controller running a library brain', () => {
+        const brains = new Map(library('aiBrains').map((b: any) => [b.id, b]));
+        expect([...brains.values()].map((b: any) => b.name).sort()).toEqual(['Bat Brain', 'Guard Brain']);
+        for (const name of ['Bat 1', 'Bat 2', 'Ruin Guard 1']) {
+            const enemy = named(name);
+            const controller = enemy.children[enemy.children.length - 1];
+            expect(controller.type, name).toBe('controller');
+            expect(controller.controlSource, name).toBe('ai');
+            expect(controller.possessedId, name).toBe(enemy.id);
+            expect(controller.perceptionLayers, name).toBe(1);
+            const brain: any = brains.get(controller.brainId);
+            expect(brain, name).toBeTruthy();
+            expect(controller.behavior.states.map((s: any) => s.name)).toEqual(brain.machine.states.map((s: any) => s.name));
+        }
+        expect(manifest().sceneMetas[0].refs.aiBrainIds.sort()).toEqual([...brains.keys()].sort());
+    });
+
+    it('walks the guard along its route until it sees the player', () => {
+        const { scene, player } = play(['Bat 1', 'Bat 2']);
+        player.teleport(5, 4);
+        const guard = scene.findNode('Ruin Guard 1') as CharacterBody2DNode & Record<string, any>;
+        const brain = guard.children.find(c => c instanceof ControllerNode) as ControllerNode;
+        let minX = Infinity, maxX = -Infinity;
+        run(scene, 9, () => { minX = Math.min(minX, guard.position[0]); maxX = Math.max(maxX, guard.position[0]); });
+        expect(brain.behaviorState).toBe('Patrol');
+        expect(minX).toBeLessThan(41.5);
+        expect(maxX).toBeGreaterThan(47.5);
+        expect(guard.position[1]).toBeCloseTo(2, 2);
+    });
+
+    it('chases the player up the staircase by jumping, and walks home when the player is gone', () => {
+        const { scene, player } = play(['Bat 1', 'Bat 2']);
+        const guard = scene.findNode('Ruin Guard 1') as CharacterBody2DNode & Record<string, any>;
+        const brain = guard.children.find(c => c instanceof ControllerNode) as ControllerNode;
+        // The player stands on the pillar top (y 8), at its edge: in sight of the floor once the guard turns
+        // its way (further in, the pillar's corner hides the player from below).
+        player.teleport(50.5, 8);
+        let chased = false, jumped = false, top = 0;
+        run(scene, 12, () => {
+            chased ||= brain.behaviorState === 'Chase';
+            jumped ||= brain.path.actions.includes('jump') && guard.justJumped;
+            top = Math.max(top, guard.isGrounded ? guard.position[1] : 0);
+        });
+        expect(chased).toBe(true);
+        expect(jumped).toBe(true);
+        // Up the plank (5) and onto the pillar (8).
+        expect(top).toBeGreaterThan(7.9);
+        // Gone: the player is far away in the Gate. The guard searches, then goes home and patrols again.
+        player.teleport(5, 4);
+        run(scene, 20);
+        expect(brain.behaviorState).toBe('Patrol');
+        expect(guard.distanceFromHome).toBeLessThan(5);
+        expect(guard.position[1]).toBeCloseTo(2, 2);
+    });
+
+    it('wakes a bat that flies over the pillar, not through it, after the player', () => {
+        const { scene, player } = play(['Ruin Guard 1', 'Bat 2']);
+        const bat = scene.findNode('Bat 1') as CharacterBody2DNode & Record<string, any>;
+        const brain = bat.children.find(c => c instanceof ControllerNode) as ControllerNode;
+        // Seen from the plank, then the player drops behind the pillar.
+        player.teleport(46, 5);
+        run(scene, 2.5);
+        expect(bat.isAwake).toBe(true);
+        player.teleport(58, 2);
+        let inside = false, flew = false, closest = Infinity;
+        run(scene, 6, () => {
+            const x = bat.position[0], y = bat.position[1];
+            inside ||= x > 50.6 && x < 54.4 && y < 7.9;
+            flew ||= brain.path.actions.length > 1 && brain.path.actions.every(a => a === 'fly');
+            closest = Math.min(closest, Math.hypot(x - player.position[0], y - player.position[1]));
+        });
+        expect(flew).toBe(true);
+        expect(inside).toBe(false);
+        expect(closest).toBeLessThan(2.5);
+    });
+
     it('wakes a bat that swoops through the plank to bite, and that the sword combo kills', () => {
-        const { scene, player } = play();
+        const { scene, player } = play(['Ruin Guard 1']);
         run(scene, 0.3);
         // Under the plank Bat 1 hangs over: it has to fly through it to reach the player.
         player.teleport(43, 2);
@@ -227,7 +329,7 @@ describe.skipIf(!present)('the Duskwell example project', { timeout: 60_000 }, (
     });
 
     it('respawns a player who fell out of the world, whole, at the last checkpoint', () => {
-        const { scene, player } = play();
+        const { scene, player } = play(['Ruin Guard 1', 'Bat 1', 'Bat 2']);
         run(scene, 0.3);
         // Light the Long Hall's lamp, then step off the pit's edge.
         player.teleport(40.5, 2);

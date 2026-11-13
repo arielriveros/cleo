@@ -19,8 +19,9 @@ import { fileURLToPath } from 'url'
 import {
     Scene, Node, Tilemap, TilemapNode, Tileset, Sprite, SpriteNode, AnimatedSpriteNode, CharacterBody2DNode,
     Area2DNode, Room2DNode, Camera2DNode, ParallaxLayerNode, UIRootNode, UITextNode, RENDER_2D_DEFAULTS,
-    ControllerNode,
+    ControllerNode, NavMeshNode, World2D, bakeNavGraph2D, navGraph2DSourceHash, parseBehaviorMachine, steeringTuning,
 } from '../../src/cleo'
+import type { NavAgent2D } from '../../src/cleo'
 import type { SpriteAnimationSet, SpriteClip, SpriteFrameHitbox, SpriteStateMachine } from '../../src/cleo'
 import { fromRuntimeTileset } from '../../applications/editor/src/utils/tilesets'
 import type { TilesetAsset } from '../../applications/editor/src/utils/tilesets'
@@ -31,7 +32,8 @@ import { SCENE_REFS_VERSION } from '../../applications/editor/src/utils/referenc
 import { TextureSet, stableId, writeJson, vars } from '../exampleKit/bundle.mjs'
 import { packFormat2 } from '../exampleKit/packFormat2.mjs'
 import { blankImage, blit, decodePng, encodePng } from '../exampleKit/png.mjs'
-import { COLS, ROWS, ROOMS, cellCentre, cellFeet, isRock, markers, roomBounds, GRID } from './level'
+import { COLS, ROWS, ROOMS, cellCentre, cellFeet, isRock, markers, roomBounds, GRID, GUARD_ROUTE, GUARD_ROUTE_NAME } from './level'
+import { BAT_BRAIN, GUARD_BRAIN } from './brains'
 import { DUSK_INPUT_MAP } from './inputMap'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -39,6 +41,8 @@ const ROOT = path.resolve(HERE, '..', '..')
 const ART = path.join(ROOT, 'build', 'platformer')
 const OUT = path.join(ROOT, 'applications', 'editor', 'public', 'examples', 'duskwell')
 const SCRIPTS = path.join(ROOT, 'examples', 'scripts')
+/** The Pixel Platformer set: the ruins' tiles, the props, and the knight the Ruin Guard is drawn from. */
+const PP_ROOT = 'PixelPlatformerSet1v.1.1/'
 const PROJECT = 'Duskwell'
 const CREATED_AT = 1795000000000
 const PPU = 16
@@ -181,9 +185,61 @@ const batSet: SpriteAnimationSet = {
     ],
 }
 
+// --- the Ruin Guard (the Pixel Platformer knight) ------------------------------------------------------
+
+const KNIGHT = PP_ROOT + 'Character/Sprite/'
+const KNIGHT_CLIPS: [string, string[]][] = [
+    ['idle', [1, 2, 3, 4, 5, 6].map(i => `idle-0${i}.png`)],
+    ['run', [1, 2, 3, 4, 5, 6, 7].map(i => `run-0${i}.png`)],
+    ['jump', ['jump-01.png']],
+    ['fall', ['jump-02.png']],
+    ['land', [1, 2, 3].map(i => `jump-landing-0${i}.png`)],
+    ['attack', ['attack-01.png', 'attack-02.png', 'attack-03.png', 'attack-04.png', 'attack-05.png', 'attack-06.png', 'attack-07-continue.png', 'attack-08-continue.png']],
+    ['dead', [1, 2, 3, 4].map(i => `dead-0${i}.png`)],
+]
+const knightTiles = packFrames('knight', 'Ruin Guard', '/Characters/Ruin Guard/Textures', KNIGHT_CLIPS.flatMap(([, files]) => files.map(f => KNIGHT + f)))
+const knightIndex: Record<string, number[]> = {}
+{
+    let i = 0
+    for (const [name, files] of KNIGHT_CLIPS) knightIndex[name] = files.map(() => i++)
+}
+/** The knight's feet: the frame's bottom edge, under its body (x 6..17 of 32). */
+const KNIGHT_PIVOT: [number, number] = [11.75 / 32, 0.5 / 32]
+const blade = (rect: [number, number, number, number]): SpriteFrameHitbox[] => [{ area: 'Blade', rect }]
+const knightMachine: SpriteStateMachine = {
+    entry: 'idle',
+    states: ['idle', 'run', 'jump', 'fall', 'land', 'attack', 'dead'].map(name => ({ name, clip: name })),
+    transitions: [
+        { from: 'idle', to: 'run', condition: { op: 'and', children: [{ param: 'grounded', op: 'true' }, { param: 'speedX', op: 'gt', value: 0.5, hysteresis: 0.3 }] } },
+        { from: 'run', to: 'idle', condition: { param: 'speedX', op: 'lt', value: 0.5, hysteresis: 0.3 } },
+        ...['idle', 'run', 'land'].map(from => ({ from, to: 'jump', condition: { op: 'and' as const, children: [{ param: 'grounded', op: 'false' as const }, { param: 'velocityY', op: 'gt' as const, value: 0 }] } })),
+        ...['idle', 'run', 'jump', 'land'].map(from => ({ from, to: 'fall', condition: { op: 'and' as const, children: [{ param: 'grounded', op: 'false' as const }, { param: 'velocityY', op: 'lt' as const, value: -0.5 }] } })),
+        { from: 'jump', to: 'land', condition: { param: 'landed', op: 'trigger' } },
+        { from: 'fall', to: 'land', condition: { param: 'grounded', op: 'true' } },
+        { from: 'land', to: 'idle', exitTime: 1 },
+        { from: 'attack', to: 'idle', exitTime: 1 },
+    ],
+}
+const knightSet: SpriteAnimationSet = {
+    id: id('sprites:knight'), name: 'Ruin Guard', defaultClip: 'idle', machine: knightMachine,
+    clips: [
+        clipOf('idle', knightIndex.idle, 8, 'loop'),
+        clipOf('run', knightIndex.run, 12, 'loop'),
+        clipOf('jump', knightIndex.jump, 8, 'once'),
+        clipOf('fall', knightIndex.fall, 8, 'loop'),
+        clipOf('land', knightIndex.land, 16, 'once'),
+        // The blade is out on frames 3 and 4: the swing's arc ahead of the knight.
+        clipOf('attack', knightIndex.attack, 12, 'once', {}, {
+            2: { events: ['swing'], hitboxes: blade([0.95, 0.9, 1.4, 1.2]) },
+            3: { hitboxes: blade([0.95, 0.9, 1.4, 1.2]) },
+        }),
+        clipOf('dead', knightIndex.dead, 8, 'once'),
+    ],
+}
+
 // --- props -------------------------------------------------------------------------------------------
 
-const PP = 'PixelPlatformerSet1v.1.1/'
+const PP = PP_ROOT
 const torchTiles = packFrames('torch', 'Torch', '/Props/Torch/Textures', [1, 2, 3, 4].map(i => `${PP}Anim/torch-A-0${i}.png`), { overdrive: 2.6 })
 const lampTiles = packFrames('lamp', 'Lamp', '/Props/Checkpoint/Textures', [1, 2, 3, 4].map(i => `${PP}Anim/light-0${i}.png`), { overdrive: 2 })
 const diamondTiles = packFrames('diamond', 'Diamond', '/Props/Diamond/Textures', [1, 2, 3, 4, 5].map(i => `${PP}Anim/diamond-0${i}.png`), { overdrive: 1.6 })
@@ -318,6 +374,61 @@ function playerController(): ControllerNode {
     return c
 }
 
+/** The 2D agent profile of a body, as its 2D navigation is baked for it. */
+function agentOf(b: CharacterBody2DNode, maxDrop = 10): NavAgent2D {
+    return {
+        movement: b.movement, width: b.size[0], height: b.size[1], walkSpeed: b.walkSpeed, acceleration: b.acceleration,
+        airControl: b.airControl, jumpHeight: b.jumpHeight, jumpTimeToApex: b.jumpTimeToApex,
+        fallGravityMultiplier: b.fallGravityMultiplier, maxFallSpeed: b.maxFallSpeed, stepHeight: b.stepHeight,
+        maxDrop, oneWayPlatforms: b.oneWayPlatforms,
+    }
+}
+
+/** An AI controller running a library brain (its link and the embedded copy that runs), seeing layer 1. */
+function aiController(name: string, brain: { id: string, machine: any }, o: Partial<ControllerNode>): ControllerNode {
+    const c = named(new ControllerNode(name))
+    c.controlSource = 'ai'
+    c.aimSource = 'world'
+    c.driveAimTarget = false
+    c.brain = 'machine'
+    c.targetKey = 'target'
+    c.autoAcquire = true
+    c.perceptionLayers = 1
+    c.brainId = brain.id
+    c.behavior = parseBehaviorMachine(brain.machine)
+    Object.assign(c, o)
+    return c
+}
+
+function buildGuard(i: number, c: number, r: number): CharacterBody2DNode {
+    const [x, y] = cellFeet(c, r)
+    const body = named(new CharacterBody2DNode(`Ruin Guard ${i + 1}`))
+    body.setPosition([x, y, 0])
+    body.size = [0.8, 1.8]
+    body.layer = 2
+    body.walkSpeed = 4.2
+    body.runSpeed = 4.2
+    body.jumpHeight = 3.6
+    body.jumpTimeToApex = 0.4
+    body.stepHeight = 0.45
+    const sprite = named(animated('Sprite', knightTiles, knightSet, [], { pivot: KNIGHT_PIVOT, sortingOrder: 1 }))
+    sprite.sprite.tint = [0.5, 0.45, 0.6]
+    body.addChild(sprite)
+    const edge = named(new Area2DNode('Blade', [1.4, 1.2]))
+    edge.layer = 16
+    edge.mask = 1
+    edge.enabled = false
+    body.addChild(edge)
+    body.addChild(aiController('Guard Brain', GUARD_BRAIN, {
+        perception: { fieldOfView: 120, range: 14, memorySpan: 6, reactionTime: 0.3 },
+        eyeHeight: 1.5,
+        routeName: GUARD_ROUTE_NAME,
+        waypointRadius: 0.4,
+        steering: steeringTuning({ maxSpeed: 4.2, arriveRadius: 0.4, slowRadius: 1, avoidDistance: 0.8 }),
+    }))
+    return body
+}
+
 function buildBat(i: number, c: number, r: number): CharacterBody2DNode {
     const [x, y] = cellCentre(c, r)
     const body = named(new CharacterBody2DNode(`Bat ${i + 1}`))
@@ -327,12 +438,21 @@ function buildBat(i: number, c: number, r: number): CharacterBody2DNode {
     body.movement = 'fly'
     body.flipSprites = false
     body.oneWayPlatforms = false
+    body.walkSpeed = 3.2
+    body.runSpeed = 3.2
+    body.acceleration = 18
     body.addChild(named(animated('Sprite', bat.tileset, batSet, [], { pivot: [0.5, 0.35], sortingOrder: 1 })))
     const bite = named(new Area2DNode('Bite', [0.9, 0.8]))
     bite.offset = [0, 0.5]
     bite.layer = 16
     bite.mask = 1
     body.addChild(bite)
+    body.addChild(aiController('Bat Brain', BAT_BRAIN, {
+        perception: { fieldOfView: 360, range: 12, memorySpan: 4, reactionTime: 0.2 },
+        eyeHeight: 0.5,
+        waypointRadius: 0.5,
+        steering: steeringTuning({ maxSpeed: 3.2, arriveRadius: 0.5, slowRadius: 1.5, avoidDistance: 0 }),
+    }))
     return body
 }
 
@@ -441,6 +561,23 @@ function buildScene(): Scene {
     const enemies = named(new Node('Enemies'))
     world.addChild(enemies)
     markers('B').forEach(([c, r], i) => enemies.addChild(buildBat(i, c, r)))
+    markers('G').forEach(([c, r], i) => enemies.addChild(buildGuard(i, c, r)))
+
+    // The 2D navigation, baked for the enemies: a platform graph the guards chase on (walks, jumps, drops),
+    // and an air grid for the bats. One box over the whole map; the routes the guards patrol ride on it.
+    const navigation = named(new Node('Navigation'))
+    world.addChild(navigation)
+    const guardProfile = buildGuard(0, 0, 0)
+    const batProfile = buildBat(0, 0, 0)
+    for (const [name, profile] of [['Walker Nav', guardProfile], ['Flier Nav', batProfile]] as const) {
+        const nav = named(new NavMeshNode(name))
+        nav.space = '2D'
+        nav.setPosition([COLS / 2, ROWS / 2, 0])
+        nav.size = [COLS, ROWS, 1]
+        nav.agent2D = agentOf(profile)
+        if (profile === guardProfile) nav.routes = [{ name: GUARD_ROUTE_NAME, points: GUARD_ROUTE.map(([c, r]) => [...cellFeet(c, r), 0] as [number, number, number]), loop: true } as any]
+        navigation.addChild(nav)
+    }
 
     const player = buildPlayer()
     world.addChild(player)
@@ -466,6 +603,7 @@ function buildScene(): Scene {
 const SCRIPT_FILES: [string, string, string][] = [
     ['DuskPlayer', 'DuskPlayer.ts', 'characterBody2D'],
     ['DuskBat', 'DuskBat.ts', 'characterBody2D'],
+    ['DuskGuard', 'DuskGuard.ts', 'characterBody2D'],
     ['DuskPickup', 'DuskPickup.ts', 'area2D'],
     ['DuskCheckpoint', 'DuskCheckpoint.ts', 'area2D'],
     ['DuskHud', 'DuskHud.ts', 'uiRoot'],
@@ -517,6 +655,16 @@ async function main() {
     fs.mkdirSync(path.join(OUT, 'scenes'), { recursive: true })
 
     const scene = buildScene()
+    // Bake the 2D navigation from the map as built: what the editor's Bake does, headless.
+    scene.root.updateTransforms(null)
+    const world2D = new World2D()
+    world2D.refresh(scene)
+    for (const nav of scene.navMeshes) {
+        if (nav.space !== '2D') continue
+        const { data, stats } = bakeNavGraph2D(world2D.world, nav.bounds2D(), nav.agent2D)
+        nav.setGraph2D(data, navGraph2DSourceHash(world2D.world, nav.bounds2D(), nav.agent2D))
+        console.log(`${nav.name}: ${stats.nodes} nodes, ${JSON.stringify(stats.edges)}, ${stats.freeCells} free cells, ${stats.ms.toFixed(0)} ms`)
+    }
     const serialized = await scene.serialize(true)
     const root = serialized.scene
     // The pickups' kinds, the scripts and their fields.
@@ -526,6 +674,7 @@ async function main() {
     walk(root, (n) => {
         if (n.name === 'Player' && n.type === 'characterBody2D') withScript(n, 'DuskPlayer')
         else if (n.type === 'characterBody2D' && /^Bat /.test(n.name)) withScript(n, 'DuskBat')
+        else if (n.type === 'characterBody2D' && /^Ruin Guard /.test(n.name)) withScript(n, 'DuskGuard')
         else if (n.type === 'area2D' && /^Checkpoint /.test(n.name)) withScript(n, 'DuskCheckpoint')
         else if (n.type === 'area2D' && pickupKinds.has(n.id)) withScript(n, 'DuskPickup', { kind: pickupKinds.get(n.id), amount: 1 })
         else if (n.type === 'uiRoot' && n.name === 'HUD') withScript(n, 'DuskHud')
@@ -545,6 +694,7 @@ async function main() {
         { ...fromRuntimeTileset(ruins, 'Ruins'), },
         fromRuntimeTileset(warrior.tileset, 'Warrior'),
         fromRuntimeTileset(bat.tileset, 'Bat'),
+        fromRuntimeTileset(knightTiles, 'Ruin Guard'),
         fromRuntimeTileset(torchTiles, 'Torch'),
         fromRuntimeTileset(lampTiles, 'Lamp'),
         fromRuntimeTileset(diamondTiles, 'Diamond'),
@@ -568,13 +718,13 @@ async function main() {
     const libraries: Record<string, unknown[]> = {
         models: [], materials: [], terrainMaterials: [], animationFields: [], animControllers: [], boneMasks: [],
         animations: [], rigs: [], tilesets: tilesetAssets, scripts: scriptAssets, templates: [], particleSystems: [],
-        aiBrains: [],
+        aiBrains: [GUARD_BRAIN, BAT_BRAIN],
     }
     for (const [name, value] of Object.entries(libraries)) writeJson(path.join(OUT, 'libraries', `${name}.json`), value)
     writeJson(path.join(OUT, 'libraries', 'inputMap.json'), DUSK_INPUT_MAP)
 
     const hashes: Record<string, string> = {}
-    for (const [kind, list] of [['tileset', tilesetAssets], ['script', scriptAssets]] as const)
+    for (const [kind, list] of [['tileset', tilesetAssets], ['script', scriptAssets], ['aiBrain', [GUARD_BRAIN, BAT_BRAIN]]] as const)
         for (const asset of list as any[]) hashes[assetHashKey(kind as any, asset.id)] = hashAsset(asset as any)
     writeJson(path.join(OUT, 'scenes', `${SCENE_ID}.json`), {
         scene: root, textures: [], ui: { version: 1, elements: [] },
@@ -590,7 +740,7 @@ async function main() {
             id: SCENE_ID, name: PROJECT, updatedAt: CREATED_AT, dimension: '2D',
             refs: {
                 version: SCENE_REFS_VERSION,
-                materialIds: [], modelIds: [], templateIds: [], terrainMaterialIds: [], aiBrainIds: [], animationFieldIds: [],
+                materialIds: [], modelIds: [], templateIds: [], terrainMaterialIds: [], aiBrainIds: [GUARD_BRAIN.id, BAT_BRAIN.id], animationFieldIds: [],
                 foliageModelIds: [], soundSampleIds: [], audioSourceIds: [], animationIds: [], particleSystemIds: [],
                 tilesetIds: tilesetAssets.map(t => t.id), textureIds: textures.included, scriptIds: scriptAssets.map(s => s.id),
             },
@@ -603,12 +753,16 @@ async function main() {
         entries.push({ path: `${folder}/${name}${(KIND_EXT as any)[kind]}`, kind, assetId, created: CREATED_AT })
     add('/Scenes', PROJECT, 'scene', SCENE_ID)
     const scriptFolder: Record<string, string> = {
-        DuskPlayer: '/Characters/Warrior/Scripts', DuskBat: '/Characters/Bat/Scripts', DuskPickup: '/Props/Scripts',
+        DuskPlayer: '/Characters/Warrior/Scripts', DuskBat: '/Characters/Bat/Scripts', DuskGuard: '/Characters/Ruin Guard/Scripts',
+        DuskPickup: '/Props/Scripts',
         DuskCheckpoint: '/Props/Checkpoint/Scripts', DuskHud: '/UI/Scripts',
     }
     for (const s of scriptAssets) add(scriptFolder[s.name], s.name, 'script', s.id)
+    add('/Characters/Ruin Guard', GUARD_BRAIN.name, 'aiBrain', GUARD_BRAIN.id)
+    add('/Characters/Bat', BAT_BRAIN.name, 'aiBrain', BAT_BRAIN.id)
     const tilesetFolder: Record<string, string> = {
-        Ruins: '/Level', Warrior: '/Characters/Warrior', Bat: '/Characters/Bat', Torch: '/Props/Torch', Lamp: '/Props/Checkpoint',
+        Ruins: '/Level', Warrior: '/Characters/Warrior', Bat: '/Characters/Bat', 'Ruin Guard': '/Characters/Ruin Guard',
+        Torch: '/Props/Torch', Lamp: '/Props/Checkpoint',
         Diamond: '/Props/Diamond',
     }
     for (const t of tilesetAssets) add(tilesetFolder[t.name] ?? '/Level/Backdrop', t.name, 'tileset', t.id)

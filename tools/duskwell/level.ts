@@ -7,6 +7,7 @@
 //   #  rock            =  one-way platform        .  air
 //   P  the player      B  a bat                   D  a diamond
 //   T  a torch         K  a checkpoint lamp       A  the dash relic
+//   G  a Ruin Guard (it patrols GUARD_ROUTE)
 //
 // Built by carving rather than typed cell by cell: start solid, cut each room's air, then add what stands
 // in it. Every marker sits in an air cell; `markers` reads them back with their world positions.
@@ -53,9 +54,11 @@ function build(): string[][] {
     // --- The Long Hall ------------------------------------------------------------------------------
     air(37, 1, 82, 21)                // floor top at row 22: y = 2
     rock(37, 20, 38, 21)              // the step down from the doorway
-    plank(42, 46, 19)                 // y = 5
+    // A staircase of jumps, each +3: floor (y 2), plank (y 5), pillar top (y 8), plank (y 11). The guard
+    // chases the player up it on the 2D navigation; a one-column gap before each makes every step a jump.
+    plank(43, 48, 19)                 // y = 5
     rock(50, 16, 54, 21)              // a pillar, top at y = 8
-    plank(57, 61, 13)                 // y = 11
+    plank(56, 61, 13)                 // y = 11
     rock(70, 10, 75, 10)              // a ledge past the pit, top at y = 14 (a thin shelf)
     plank(68, 72, 7)                  // y = 17, over the ledge
     // The pit: open to the bottom of the map. Six wide: a running jump carries under five, coyote time and
@@ -68,6 +71,7 @@ function build(): string[][] {
     at(46, 11, 'B'); at(67, 12, 'B')
     at(60, 21, 'A')
     at(40, 21, 'K')
+    at(45, 21, 'G')
     return g
 }
 
@@ -90,6 +94,10 @@ export function markers(ch: string): [number, number][] {
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (GRID[r][c] === ch) out.push([c, r])
     return out
 }
+
+/** The Ruin Guard's patrol, as cells it walks between (both on the Long Hall's floor), and its name. */
+export const GUARD_ROUTE_NAME = 'Hall Watch'
+export const GUARD_ROUTE: [number, number][] = [[40, 21], [48, 21]]
 
 /** A room's rectangle in world units: [minX, minY, maxX, maxY]. */
 export function roomBounds(room: RoomSpec): [number, number, number, number] {
