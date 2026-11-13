@@ -3,7 +3,10 @@ import { ShaderManager } from "../../../graphics/systems/shaderManager";
 import { Tileset } from "../../../graphics/tilemap/tileset";
 import { FollowedLight } from "./lightNode";
 import { Logger } from "../../logger";
-import { vec3 } from "gl-matrix";
+import { mat4, vec3 } from "gl-matrix";
+import { billboardMatrix } from "../../../graphics/render/billboard";
+import type { Camera } from "../../camera";
+import { spriteQuadInto } from "../../math";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 
@@ -34,7 +37,7 @@ export class SpriteNode extends Node {
         sprite: Sprite,
         constraints: 'free' | 'spherical' | 'cylindrical' = 'spherical',
         id: string = uuidv4(),
-        nodeType: 'sprite' | 'animatedSprite' = 'sprite'
+        nodeType: 'sprite' | 'animatedSprite' | 'parallaxLayer' = 'sprite'
     ) {
         super(name, nodeType, id);
         this._sprite = sprite;
@@ -109,6 +112,37 @@ export class SpriteNode extends Node {
     /** Draw order among sprites, higher on top: {@link Sprite.sortingOrder}. */
     public get sortingOrder(): number { return this._sprite.sortingOrder; }
     public set sortingOrder(value: number) { this._sprite.sortingOrder = value; }
+    /** The point of the image at the node's origin: {@link Sprite.pivot}. */
+    public get pivot(): [number, number] { return this._sprite.pivot; }
+    public set pivot(value: [number, number]) { this._sprite.pivot = value; }
+    /** Mirror the image left to right: {@link Sprite.flipX}. A character's facing. */
+    public get flipX(): boolean { return this._sprite.flipX; }
+    public set flipX(value: boolean) { this._sprite.flipX = value; }
+    /** Mirror the image top to bottom: {@link Sprite.flipY}. */
+    public get flipY(): boolean { return this._sprite.flipY; }
+    public set flipY(value: boolean) { this._sprite.flipY = value; }
+
+    /**
+     * The matrix the sprite's quad draws with, into `out`: its world transform turned to the camera by its
+     * constraint (render/billboard.ts), then sized to its tile (Sprite.quadSize: pixels over the tileset's
+     * pixels per unit) and moved so its pivot -- mirrored with the image -- sits at the node's origin. What
+     * the draw, the selection outline and the selection bounds all go through. A parallax layer overrides it.
+     */
+    public quadMatrixInto(out: mat4, camera: Camera): mat4 {
+        billboardMatrix(out, this.worldTransform, this.worldScale, this._constraints, camera.viewMatrix, camera.position,
+                        camera.type !== 'orthographic');
+        return this._sizeQuad(out);
+    }
+
+    /** {@link quadMatrixInto}'s size and pivot step, on a matrix already turned to the camera. */
+    protected _sizeQuad(out: mat4): mat4 {
+        const sprite = this._sprite;
+        const size = sprite.quadSize(this.currentTile, _quadSize);
+        const px = sprite.flipX ? 1 - sprite.pivot[0] : sprite.pivot[0];
+        const py = sprite.flipY ? 1 - sprite.pivot[1] : sprite.pivot[1];
+        if (size[0] !== 1 || size[1] !== 1 || px !== 0.5 || py !== 0.5) spriteQuadInto(out, size[0], size[1], px, py);
+        return out;
+    }
 
     /** The tile index on screen this instant. AnimatedSpriteNode overrides it to follow the playing frame. */
     public get currentTile(): number { return this.tileIndex; }
@@ -131,8 +165,28 @@ export class SpriteNode extends Node {
      */
     public uvRectInto(out: Float32Array): Float32Array { return this._sprite.uvRectInto(this.currentTile, out); }
 
-    /** Selection bounds: a small box around the sprite's origin. */
+    /**
+     * Selection bounds. A sprite sized by its tileset (pixels per unit) or pivoted off its centre: the box
+     * round its quad as placed (its own transform; a camera-facing sprite turns, but in 2D it faces the
+     * view anyway). Otherwise a small box around its origin, as it always was.
+     */
     public getBoundingBox(): { min: vec3, max: vec3 } {
+        const sprite = this._sprite;
+        if ((sprite.tileset?.pixelsPerUnit ?? 0) > 0 || sprite.pivot[0] !== 0.5 || sprite.pivot[1] !== 0.5) {
+            const m = this._sizeQuad(mat4.copy(_boundsMatrix, this.worldTransform));
+            const min = vec3.fromValues(Infinity, Infinity, Infinity), max = vec3.fromValues(-Infinity, -Infinity, -Infinity);
+            for (let k = 0; k < 4; k++) {
+                const x = (k & 1) ? 0.5 : -0.5, y = (k & 2) ? 0.5 : -0.5;
+                for (let a = 0; a < 3; a++) {
+                    const v = m[a] * x + m[4 + a] * y + m[12 + a];
+                    if (v < min[a]) min[a] = v;
+                    if (v > max[a]) max[a] = v;
+                }
+            }
+            // A flat quad: some depth, so a ray along the view still meets the box.
+            min[2] -= 0.05; max[2] += 0.05;
+            return { min, max };
+        }
         const position = this.worldPosition;
         const scale = this.worldScale;
         
@@ -152,6 +206,10 @@ export class SpriteNode extends Node {
         return { min, max };
     }
 }
+
+/** Scratch for {@link SpriteNode.quadMatrixInto} and the bounds. */
+const _quadSize: [number, number] = [1, 1];
+const _boundsMatrix = mat4.create();
 
 /** The sprite payload to hand `Sprite.parse`. Legacy saves nest the material one level deeper. */
 export function spritePayload(json: any): any {

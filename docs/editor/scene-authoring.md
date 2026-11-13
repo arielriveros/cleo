@@ -46,7 +46,8 @@ navigation mesh that AI and player characters are built from.
 ### Cameras
 
 **Perspective**, **Orthographic**, **Camera Rig** (which ships with a perspective camera child
-already attached).
+already attached), **Camera 2D** (the 2D game camera: art pixels, follow, rooms; see
+[2D cameras and rooms](tilemap-2d.md#2d-cameras-and-rooms)).
 
 ### Lights
 
@@ -59,7 +60,8 @@ itself (not placeable — it is scene-wide).
 
 ### Sprites
 
-**Static sprite**, **Animated sprite**, **Tilemap** (orthogonal, 1×1 cells, one "Ground" layer).
+**Static sprite**, **Animated sprite**, **Tilemap** (orthogonal, 1×1 cells, one "Ground" layer), **Room** (one
+30 × 17 screen of a 2D world), **Parallax Layer** (a backdrop that moves with part of the camera's travel).
 
 ### Primitive Geometries
 

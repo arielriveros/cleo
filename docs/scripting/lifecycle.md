@@ -15,8 +15,13 @@ onTriggerEnter(other: Node): void                 // either side of a trigger ov
 onTriggerExit(other: Node): void
 onAction(action: string, state: ActionState): void
 onThink(delta: number): void                      // ControllerNode only
+onRoomEnter(other: Node): void                    // a 2D camera's target entered a room (both sides)
+onRoomExit(other: Node): void
 onDespawn(): void
 ```
+
+`onRoomEnter` / `onRoomExit` come from a [Camera 2D](../editor/tilemap-2d.md#2d-cameras-and-rooms): when the
+node it follows walks into a Room, the node hears it with the room, and the room hears it with the node.
 
 UI widgets add `onPress()`, `onValueChanged(value)` and `onSubmit(value)` — see [UI](ui.md).
 

@@ -226,6 +226,8 @@ export function attachScriptFactory(node: Node, factory: ScriptFactory): void {
     node.onDespawn = guard('onDespawn');
     node.onAction = guard('onAction');
     node.onThink = guard('onThink');
+    node.onRoomEnter = guard('onRoomEnter');
+    node.onRoomExit = guard('onRoomExit');
 
     // The UI handlers exist only on the UI classes that declare them, so a legacy script on the wrong
     // node type cannot bind a handler nothing will ever call.

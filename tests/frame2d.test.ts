@@ -84,15 +84,25 @@ describe('the flat 2D frame', () => {
 
     it('draws the 2D pass, the editor chrome and the selection, then the post chain', () => {
         const body = frame();
-        expect(body).toContain('this._frame2D.render(scene)');
+        expect(body).toContain('this._frame2D.render(scene, pixel)');
         expect(body).toContain('this._applyPostProcessing(scene)');
-        expect(body.indexOf('this._frame2D.render(scene)')).toBeLessThan(body.indexOf('this._applyPostProcessing(scene)'));
+        expect(body.indexOf('this._frame2D.render(scene, pixel)')).toBeLessThan(body.indexOf('this._applyPostProcessing(scene)'));
         const scene = methodBody('render', passes());
         expect(scene).toContain('render2DPass(scene)');
         expect(scene).toContain('renderEditorOverlay(scene, helpers, gizmos)');
         expect(scene).toContain('renderSelectionMask([], selected)');
         // The background is cleared with its depth: nothing copied a G-buffer's into it.
         expect(scene).toMatch(/beginFullscreenPass\(this\._targets\.scene\.renderTarget, '2d\.clear', true, bg, true\)/);
+    });
+
+    it('draws a pixel-perfect 2D camera at art resolution through a snapped camera, then scales it up', () => {
+        const pp = methodBody('_renderPixelPerfect', passes());
+        expect(pp).toContain('Math.round(p[0] * ppu) / ppu');
+        expect(pp).toMatch(/this\._view\.camera = snapped;\s*try \{ this\._sprites\.render2DPass\(scene, target\.renderTarget\); \}\s*finally \{ this\._view\.camera = logical; \}/);
+        expect(pp).toContain("'2d.upscale'");
+        expect(pp).toContain("this._fullscreen.bind(pass, 'pixelUpscale', PixelUpscaleProgram, [target.colors[0]])");
+        // Never for a capture, a thumbnail or a movie.
+        expect(frame()).toMatch(/camera2D\.pixelPerfect && !this\._thumbnailMode && !this\._subsystems\.capture\.presentTarget\s*&& !this\._movie\.active && !this\._view\.capturing/);
     });
 
     it('builds the light grid only for lit editor chrome, never for the game', () => {

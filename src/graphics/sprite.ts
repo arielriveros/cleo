@@ -31,6 +31,12 @@ export interface SpriteOptions {
     followAmount?: number;
     /** Draw order among sprites: higher draws later, on top (see `sortingOrder`). Default 0. */
     sortingOrder?: number;
+    /** The point of the image at the node's origin, (0, 0) bottom-left to (1, 1) top-right (see `pivot`). */
+    pivot?: [number, number];
+    /** Mirror the image left to right (see `flipX`). */
+    flipX?: boolean;
+    /** Mirror the image top to bottom (see `flipY`). */
+    flipY?: boolean;
 }
 
 /** A soft-fade distance: non-negative metres, capped where it stops meaning "near the surface". */
@@ -38,6 +44,9 @@ const softnessOf = (v: unknown): number => (typeof v === 'number' && Number.isFi
 const unitOr1 = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1);
 /** A sorting order: a whole number, 0 for anything that is not a finite one (as a particle emitter's). */
 const orderOf = (v: unknown): number => Math.floor(finiteOr(v, 0));
+/** A pivot: two finite numbers, the centre for anything else. Not clamped: a pivot may sit outside the image. */
+const pivotOf = (v: unknown): [number, number] =>
+    Array.isArray(v) && v.length >= 2 ? [finiteOr(v[0], 0.5), finiteOr(v[1], 0.5)] : [0.5, 0.5];
 
 /** Full-quad UVs, for a sprite with no tileset. Matches what `Tileset.uvOf` returns for a 1x1 set. */
 const FULL_RECT: [number, number, number, number] = [0, 0, 1, 1];
@@ -68,6 +77,9 @@ export class Sprite {
   private _followLight: string | null;
   private _followAmount: number;
   private _sortingOrder: number;
+  private _pivot: [number, number];
+  private _flipX: boolean;
+  private _flipY: boolean;
   /** A lit sprite's private material, made on first lit draw (see {@link drawMaterial}). */
   private _litMaterial: Material | null = null;
 
@@ -83,6 +95,9 @@ export class Sprite {
       this._followLight = typeof options?.followLight === 'string' && options.followLight ? options.followLight : null;
       this._followAmount = unitOr1(options?.followAmount);
       this._sortingOrder = orderOf(options?.sortingOrder);
+      this._pivot = pivotOf(options?.pivot);
+      this._flipX = options?.flipX === true;
+      this._flipY = options?.flipY === true;
       this._material = Material.Basic(
           { color: this._tint, opacity: this._opacity, texture: this._tileset?.textureId },
           {
@@ -203,6 +218,34 @@ export class Sprite {
   public set sortingOrder(value: number) { this._sortingOrder = orderOf(value); }
 
   /**
+   * The point of the image that sits at the node's origin: (0, 0) its bottom-left corner, (1, 1) its
+   * top-right, (0.5, 0.5) -- the default -- its centre. A character standing on the ground pivots at its
+   * feet, so its position is where it stands and flipping it turns it about its own body.
+   */
+  public get pivot(): [number, number] { return this._pivot; }
+  public set pivot(value: [number, number]) { this._pivot = pivotOf(value); }
+  /** Mirror the image left to right, about the pivot: a character facing the other way. */
+  public get flipX(): boolean { return this._flipX; }
+  public set flipX(value: boolean) { this._flipX = value === true; }
+  /** Mirror the image top to bottom, about the pivot. */
+  public get flipY(): boolean { return this._flipY; }
+  public set flipY(value: boolean) { this._flipY = value === true; }
+
+  /**
+   * The quad `tileIndex` draws as, in the node's units before its scale, into `out`: its tile's pixel size
+   * over the tileset's pixels per unit, or a unit quad when the tileset has none (the legacy rule: size by
+   * scale).
+   */
+  public quadSize(tileIndex: number, out: [number, number]): [number, number] {
+      const ts = this._tileset;
+      const ppu = ts?.pixelsPerUnit ?? 0;
+      if (!ts || ppu <= 0) { out[0] = 1; out[1] = 1; return out; }
+      ts.sizeOf(tileIndex, out);
+      out[0] /= ppu; out[1] /= ppu;
+      return out;
+  }
+
+  /**
    * Lit: the sprite takes the scene's light instead of showing its texture as it is -- the sun (and the
    * shadows it casts on the sprite), the sky and ambient light, and the strongest light near it. How, its
    * tileset decides (Tileset.lighting): with six-way lightmaps, the effect relit from the light's direction
@@ -285,6 +328,9 @@ export class Sprite {
           ...(this._lit ? { lit: true } : {}),
           ...(this._followLight ? { followLight: this._followLight, ...(this._followAmount < 1 ? { followAmount: this._followAmount } : {}) } : {}),
           ...(this._sortingOrder !== 0 ? { sortingOrder: this._sortingOrder } : {}),
+          ...(this._pivot[0] !== 0.5 || this._pivot[1] !== 0.5 ? { pivot: [this._pivot[0], this._pivot[1]] } : {}),
+          ...(this._flipX ? { flipX: true } : {}),
+          ...(this._flipY ? { flipY: true } : {}),
       };
   }
 
@@ -305,6 +351,9 @@ export class Sprite {
           followLight: data?.followLight ?? null,
           followAmount: data?.followAmount,
           sortingOrder: data?.sortingOrder,
+          pivot: data?.pivot,
+          flipX: data?.flipX === true,
+          flipY: data?.flipY === true,
       });
   }
 }

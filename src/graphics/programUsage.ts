@@ -62,7 +62,7 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     objectVelocity: 'feature', objectVelocitySkinned: 'feature', objectVelocityBasicSkinned: 'feature',
     decalSurface: 'feature', decalResolve: 'feature', decalColor: 'feature',
     fluidVolume: 'feature', fluidVolumeResolve: 'feature', fluidVolumeComposite: 'feature',
-    spriteLit: 'feature', sprite: 'feature',
+    spriteLit: 'feature', sprite: 'feature', pixelUpscale: 'feature',
     particleSim: 'feature', particleBillboard: 'feature', particleMesh: 'feature', particleSort: 'feature',
     basicInstanced: 'editor', probePreview: 'editor', overlayComposite: 'editor', debugView: 'editor',
     shadowDebug: 'editor', overdraw: 'editor', overdrawInstanced: 'editor', grid: 'editor', outline: 'editor', outlinePost: 'editor',
@@ -194,6 +194,9 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
                 for (const n of ['foliageBillboardInstancedWind', 'shadowMapInstancedCutoutWind']) add(n);
             break;
         case 'tilemap': add('tilemap'); break;
+        // A pixel-perfect 2D camera draws its frame at art resolution and scales it up (render/frame2d.ts).
+        case 'camera2D': if (node.camera2D?.pixelPerfect !== false) add('pixelUpscale'); break;
+        case 'parallaxLayer': add('sprite'); break;
         case 'decal': add('decalSurface'); add('decalResolve'); add('decalColor'); break;
         case 'fluidVolume': add('fluidVolume'); add('fluidVolumeResolve'); add('fluidVolumeComposite'); break;
         case 'volumetricFog': add('volumetricFogInject'); add('volumetricFogIntegrate'); add('volumetricFogApply'); break;

@@ -12,7 +12,8 @@ type NodeType =
   | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'wind' | 'weather' | 'lodGroup'
   | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
   | 'particleSystem' | 'forceField' | 'waterVolume' | 'occlusionVolume' | 'exposureVolume' | 'volumetricFog'
-  | 'fluidVolume' | 'cloth' | 'giVolume'
+  | 'fluidVolume' | 'cloth' | 'giVolume' | 'sequence'
+  | 'camera2D' | 'room2D' | 'parallaxLayer'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 ```
@@ -705,9 +706,60 @@ get/set constraints: 'free' | 'spherical' | 'cylindrical'    // billboarding (re
 tileset: string ; tileIndex: number ; tint: vec3 ; opacity: number
 sprite.blend: 'alpha' | 'additive'                           // additive adds light: fire, glows
 sortingOrder: number                                         // higher draws on top; 0 = by depth
+pivot: [number, number]                                      // the image point at the origin: 0,0 bottom-left
+flipX: boolean ; flipY: boolean                              // mirror the image about the pivot
+quadMatrixInto(out: mat4, camera: Camera): mat4              // the quad as drawn: billboarded, sized, pivoted
 uvRect(): [number, number, number, number]
 initializeSprite(): void
 ```
+
+A sprite whose tileset has **pixels per unit** is its tile's pixel size over that many pixels per unit,
+times its scale; without it, a unit quad sized by its scale.
+
+### ParallaxLayerNode — `'parallaxLayer'`
+
+Extends `SpriteNode`: a 2D backdrop that moves with part of the camera's travel and tiles to fill the view.
+
+```ts
+parallax: [number, number]      // share of the camera's travel it moves with: 1 the world, 0 the screen
+repeatX: boolean ; repeatY: boolean   // tile along the axis (the tileset must be the one whole image)
+scroll: [number, number]        // a drift of its own, units per second
+```
+
+Never picked in the viewport.
+
+### Camera2DNode — `'camera2D'`
+
+Extends `CameraNode`: the 2D game camera. Orthographic, sized in art pixels, following a node through rooms.
+
+```ts
+pixelsPerUnit: number                      // art pixels per world unit (16)
+referenceResolution: [number, number]      // the view in art pixels, at least, at zoom 1 (480 x 270)
+zoom: number ; pixelPerfect: boolean       // pixel-perfect: whole screen pixels per art pixel
+followTarget: string                       // the NAME of the node to follow
+followOffset: [number, number] ; deadzone: [number, number]
+damping: number ; lookAhead: number
+confineToRooms: boolean ; roomTransitionSeconds: number
+get room: Room2DNode | null ; get inRoomTransition: boolean
+get layout: { scale, virtualWidth, virtualHeight }   // the last frame's fit
+shake(amplitude: number, seconds?: number, frequency?: number): void
+snapToTarget(): void                        // jump to the target, no damping or slide (after a respawn)
+fitView(width: number, height: number)      // called by the renderer each frame
+```
+
+It moves in the scene's late pass, only while the game plays.
+
+### Room2DNode — `'room2D'`
+
+```ts
+size: [number, number]          // the whole rectangle, world units, centred on the node
+zone: string                    // a free label
+bounds(out?): [minX, minY, maxX, maxY]
+contains(x: number, y: number): boolean
+```
+
+The followed node and the room hear `onRoomEnter(other)` / `onRoomExit(other)` when the node crosses
+into or out of it ([Lifecycle](../scripting/lifecycle.md)).
 
 ### AnimatedSpriteNode — `'animatedSprite'`
 

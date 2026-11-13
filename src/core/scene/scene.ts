@@ -53,6 +53,8 @@ import { getTemplate, templateNames } from "./templates";
 import { followSocket, resolveSocketOwner } from "./socketFollow";
 import { PrecipitationRig } from "./precipitationRig";
 import type { SequenceNode } from "./nodes/sequenceNode";
+import type { Camera2DNode } from "./nodes/camera2DNode";
+import type { Room2DNode } from "./nodes/room2DNode";
 
 /** Object-space up, rotated by the camera's world orientation to give the audio listener its up axis. */
 const UP_AXIS: vec3 = vec3.fromValues(0, 1, 0);
@@ -177,6 +179,9 @@ export class Scene {
     private _particleSystems: Set<ParticleSystemNode> = new Set();
     // Sequence players, found by node type (not by the `kindsOf` mask, whose 31 bits are all taken).
     private _sequences: Set<SequenceNode> = new Set();
+    // The 2D cameras (a CameraNode kind, told apart by node type) and the rooms they confine to, likewise.
+    private _cameras2D: Set<Camera2DNode> = new Set();
+    private _rooms2D: Set<Room2DNode> = new Set();
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
     private _exposureVolumes: Set<ExposureVolumeNode> = new Set();
@@ -619,7 +624,8 @@ export class Scene {
             const followers = this._socketFollowers;
             const cloths = this._cloths;
             const skinnedCloths = this._skinnedCloths;
-            if (rigs.size > 0 || followers.size > 0 || cloths.size > 0 || skinnedCloths.size > 0) {
+            const cameras2D = this._cameras2D;
+            if (rigs.size > 0 || followers.size > 0 || cloths.size > 0 || skinnedCloths.size > 0 || cameras2D.size > 0) {
                 // Counted as transform cost, not rig cost: it is a second full-tree pass.
                 const rigTransformStart = performance.now();
                 this._root.updateTransforms();
@@ -659,6 +665,20 @@ export class Scene {
                     CleoEngine.authoringMode = authoring;
                 }
                 sceneStats.rigMs = performance.now() - rigStart;
+            }
+            // The 2D cameras, beside the rigs and for the same reason: every target has moved and the
+            // transform pass above made its world position current. They move only while the game plays.
+            if (cameras2D.size > 0) {
+                const playing = this._hasStarted && !paused && !CleoEngine.authoringMode;
+                authoring.derived++;
+                try {
+                    for (const cam of cameras2D) {
+                        try { cam.lateUpdate(delta, unscaledDelta, playing, this); }
+                        catch (error) { Logger.error(`Error in 2D camera ${cam.name}: ${error}`, 'Scene'); }
+                    }
+                } finally {
+                    authoring.derived--;
+                }
             }
 
             // Last: everything has moved — scripts, animators, socket followers, cloth, camera rigs — so a
@@ -943,6 +963,8 @@ export class Scene {
         this._skinnedCloths = new Set();
         this._particleSystems = new Set();
         this._sequences = new Set();
+        this._cameras2D = new Set();
+        this._rooms2D = new Set();
         this._forceFields = new Set();
         this._waterVolumes = new Set();
         this._exposureVolumes = new Set();
@@ -965,6 +987,7 @@ export class Scene {
             // x every node, on every structural change: each spawned effect and each removal).
             const kinds = kindsOf(node.constructor as Function);
             if (kinds === 0 && node.nodeType === 'sequence') { this._sequences.add(node as SequenceNode); continue; }
+            if (kinds === 0 && node.nodeType === 'room2D') { this._rooms2D.add(node as Room2DNode); continue; }
             if (kinds === 0 && !node.socketAttachment && !(node.drawDistance > 0)) continue;
             if (kinds & K.LIGHT)
                 this._lights.add(node as LightNode);
@@ -1034,8 +1057,10 @@ export class Scene {
                 // The highest priority (the first found among equals): what `weather` hands a script.
                 if (!this._weather || weather.priority > this._weather.priority) this._weather = weather;
             }
-            if (kinds & K.CAMERA)
+            if (kinds & K.CAMERA) {
                 this._cameras.add(node as CameraNode);
+                if (node.nodeType === 'camera2D') this._cameras2D.add(node as Camera2DNode);
+            }
             // A root is also a UINode and lands in both sets: _uiRoots drives the layout pass, _uiNodes is
             // what the DOM layer and the editor enumerate.
             if (kinds & K.UI_NODE)
@@ -1237,6 +1262,20 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._sequences;
+    }
+
+    /** Every 2D game camera ({@link Camera2DNode}) in the scene. */
+    public get cameras2D(): Set<Camera2DNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._cameras2D;
+    }
+
+    /** Every 2D room ({@link Room2DNode}) in the scene, in traversal order. */
+    public get rooms2D(): Set<Room2DNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._rooms2D;
     }
 
     public get lights(): Set<LightNode> {

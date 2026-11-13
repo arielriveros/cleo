@@ -146,6 +146,14 @@ function AtlasCard({ asset }: { asset: TilesetAsset }) {
           <PropertyRow label='Spacing'>
             <Scrub value={asset.spacing} unit='px' min={0} reset={0} onChange={(v) => patch({ spacing: Math.max(0, v) })} />
           </PropertyRow>
+          <PropertyRow label='Pixels per unit' hint='Art pixels in a world unit: sprites drawn from this tileset are their tile’s pixel size over this (a 16 px tile at 16 is one unit), and new tilemap layers take their cells from it. Off: a sprite is a unit quad sized by its scale.'>
+            <div className='flex items-center gap-1'>
+              <Scrub value={asset.pixelsPerUnit ?? 0} unit='px' min={0} reset={0}
+                onChange={(v) => { const p = Math.max(0, Math.round(v)); patch({ pixelsPerUnit: p > 0 ? p : undefined }) }} />
+              <Button size='sm' className='px-1.5 py-0 text-ui-sm tabular-nums' active={asset.pixelsPerUnit === asset.tileWidth}
+                title='One tile is one world unit' onClick={() => patch({ pixelsPerUnit: asset.tileWidth })}>= tile</Button>
+            </div>
+          </PropertyRow>
           <PropertyRow label='Overdrive'>
             <div className='flex items-center gap-1'>
               <Slider className='flex-1 my-0' min={0} max={OVERDRIVE_TRACK_MAX} step={0.05} hardMax={MAX_TILESET_OVERDRIVE}

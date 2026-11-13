@@ -267,6 +267,31 @@ copies of one sprite do not animate in step, and `sprite.blend = 'additive'` mak
 Sprites reference a **tileset** and a tile index rather than a raw texture, which is what lets one
 atlas back a whole set of sprites.
 
+A sprite whose tileset has **pixels per unit** is sized by it (a tile's pixels over that, times its
+scale). `pivot` places it -- `[0.5, 0]` stands it on its feet -- and `flipX` turns it round:
+
+```ts
+const hero = this.findNode('Player') as AnimatedSpriteNode
+hero.pivot = [0.5, 47 / 135]           // the feet, 47 px up a 135 px frame
+hero.flipX = velocityX < 0             // face the way it moves
+```
+
+## The 2D camera and rooms
+
+A `Camera2DNode` follows a node by name and keeps its view inside the `Room2DNode` the node stands in:
+
+```ts
+const cam = this.findNode('Camera 2D') as Camera2DNode
+cam.followTarget = 'Player'
+cam.shake(0.3, 0.25)                   // world units, seconds
+cam.snapToTarget()                     // after a respawn: no damping, no slide
+
+// On the player (or on a room): a room entered or left.
+onRoomEnter(room: Node) { Logger.info(`Now in ${room.name}`) }
+```
+
+`ParallaxLayerNode` is a sprite backdrop with `parallax`, `repeatX`/`repeatY` and `scroll`.
+
 ## See also
 
 [Terrain (editor)](../editor/terrain.md) · [Tilemaps and 2D (editor)](../editor/tilemap-2d.md) · [Motion and physics](motion-and-physics.md)

@@ -28,6 +28,9 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
   const [softness, setSoftness] = useState(sprite.softness)
   const [lit, setLit] = useState(sprite.lit)
   const [sortingOrder, setSortingOrder] = useState(sprite.sortingOrder)
+  const [pivot, setPivot] = useState<[number, number]>([...sprite.pivot] as [number, number])
+  const [flipX, setFlipX] = useState(sprite.flipX)
+  const [flipY, setFlipY] = useState(sprite.flipY)
 
   useEffect(() => {
     setTint(vec3ToHex(sprite.tint))
@@ -40,7 +43,12 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
     setSoftness(sprite.softness)
     setLit(sprite.lit)
     setSortingOrder(sprite.sortingOrder)
+    setPivot([...sprite.pivot] as [number, number])
+    setFlipX(sprite.flipX)
+    setFlipY(sprite.flipY)
   }, [props.node])
+
+  const setPivotTo = (p: [number, number]) => { sprite.pivot = p; setPivot([...sprite.pivot] as [number, number]); changed() }
 
   const changed = () => eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: props.node })
 
@@ -71,6 +79,22 @@ export default function SpriteAppearance(props: { node: SpriteNode }) {
             <NumberInput step={1} value={sortingOrder} onChange={(v) => {
               sprite.sortingOrder = v; setSortingOrder(sprite.sortingOrder); changed()
             }} />
+          </PropertyRow>
+          <PropertyRow label='Pivot' hint='The point of the image at the node’s position: 0,0 its bottom-left, 1,1 its top-right. A character stands on its feet: about 0.5 across, at the bottom of its body.'>
+            <span className='flex items-center gap-1'>
+              <NumberInput className='w-14' step={0.05} value={pivot[0]} onChange={(v) => setPivotTo([v, pivot[1]])} />
+              <NumberInput className='w-14' step={0.05} value={pivot[1]} onChange={(v) => setPivotTo([pivot[0], v])} />
+              <button type='button' className='text-ui-sm text-muted hover:text-fg px-1' title='Centre: 0.5, 0.5'
+                onClick={() => setPivotTo([0.5, 0.5])}>Centre</button>
+              <button type='button' className='text-ui-sm text-muted hover:text-fg px-1' title='Bottom centre: 0.5, 0'
+                onClick={() => setPivotTo([0.5, 0])}>Base</button>
+            </span>
+          </PropertyRow>
+          <PropertyRow label='Flip X' hint='Mirror the image left to right, about the pivot: a character facing the other way.'>
+            <Toggle checked={flipX} onChange={(c) => { sprite.flipX = c; setFlipX(c); changed() }} />
+          </PropertyRow>
+          <PropertyRow label='Flip Y' hint='Mirror the image top to bottom, about the pivot.'>
+            <Toggle checked={flipY} onChange={(c) => { sprite.flipY = c; setFlipY(c); changed() }} />
           </PropertyRow>
           <PropertyRow label='Lit'>
             <Toggle checked={lit} onChange={(c) => { sprite.lit = c; setLit(c); changed() }} />

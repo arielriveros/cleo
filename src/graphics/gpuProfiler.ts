@@ -140,6 +140,8 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     '2d': '2d',
     // The flat 2D frame's background clear (render/frame2d.ts), before its one 2D pass.
     '2d.clear': '2d',
+    // A pixel-perfect 2D frame's art-resolution target scaled up to the screen (render/frame2d.ts).
+    '2d.upscale': '2d',
     gizmos: 'gizmos',
     outlineMask: 'outlineMask',
     velocity: 'velocity',

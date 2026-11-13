@@ -1500,3 +1500,128 @@ function clipRectResult(behind: number, corners: number, x0: number, y0: number,
 export function rectsOverlap(a: ArrayLike<number>, ai: number, b: ArrayLike<number>, bi: number): boolean {
     return !(a[ai + 2] < b[bi] || b[bi + 2] < a[ai] || a[ai + 3] < b[bi + 1] || b[bi + 3] < a[ai + 1]);
 }
+
+// =================================================================================================
+// 2D: sprite quads, the 2D camera, parallax
+// =================================================================================================
+
+/**
+ * Size and pivot a sprite's unit quad in place: `m` is its world matrix with the quad's corners at
+ * (+-0.5, +-0.5); after this it draws `width` by `height` (in the matrix's own units, before its scale)
+ * with the point `pivot` of the image -- (0, 0) its bottom-left, (1, 1) its top-right, (0.5, 0.5) its
+ * centre -- at the matrix's origin.
+ */
+export function spriteQuadInto(m: { [i: number]: number }, width: number, height: number,
+                               pivotX: number, pivotY: number): void {
+    for (let i = 0; i < 3; i++) { m[i] *= width; m[4 + i] *= height; }
+    const ox = 0.5 - pivotX, oy = 0.5 - pivotY;
+    m[12] += m[0] * ox + m[4] * oy;
+    m[13] += m[1] * ox + m[5] * oy;
+    m[14] += m[2] * ox + m[6] * oy;
+}
+
+/** What a 2D camera shows: its pixel scale and the size of its view in virtual (art) pixels. */
+export interface Camera2DLayout {
+    /** Screen pixels per art pixel. A whole number when pixel-perfect. */
+    scale: number;
+    /** The view in art pixels: the screen size over `scale`. */
+    virtualWidth: number;
+    virtualHeight: number;
+}
+
+/**
+ * A 2D camera's layout on a `viewWidth` x `viewHeight` screen. `fit` is the scale at which the reference
+ * resolution just fits the screen; `zoom` multiplies it. Pixel-perfect rounds the scale DOWN to a whole
+ * number (never below 1), so every art pixel is the same number of screen pixels, and the view shows
+ * however many art pixels that scale leaves room for -- at least the reference resolution at zoom 1.
+ */
+export function camera2DLayout(viewWidth: number, viewHeight: number, refWidth: number, refHeight: number,
+                               zoom: number, pixelPerfect: boolean, out: Camera2DLayout): Camera2DLayout {
+    const vw = Math.max(1, viewWidth), vh = Math.max(1, viewHeight);
+    const fit = Math.min(vw / Math.max(1, refWidth), vh / Math.max(1, refHeight));
+    const z = zoom > 0 && Number.isFinite(zoom) ? zoom : 1;
+    out.scale = pixelPerfect ? Math.max(1, Math.floor(fit * z + 1e-6)) : Math.max(1e-6, fit * z);
+    out.virtualWidth = vw / out.scale;
+    out.virtualHeight = vh / out.scale;
+    return out;
+}
+
+/**
+ * One axis of a dead-zone follow: the camera centre `camera` moves only as far as it takes to keep
+ * `target` within `half` of it.
+ */
+export function deadzoneAxis(camera: number, target: number, half: number): number {
+    const h = Math.max(0, half);
+    if (target > camera + h) return target - h;
+    if (target < camera - h) return target + h;
+    return camera;
+}
+
+/**
+ * One axis of a camera confined to [min, max]: the centre that keeps a view of half-width `halfView`
+ * inside it, or the middle of the range when the range is narrower than the view.
+ */
+export function confineAxis(center: number, halfView: number, min: number, max: number): number {
+    if (!(max > min)) return center;
+    if (max - min <= 2 * halfView) return (min + max) * 0.5;
+    return Math.min(max - halfView, Math.max(min + halfView, center));
+}
+
+/** A critically damped spring's state for {@link smoothDamp}. */
+export interface SmoothDampState { velocity: number; }
+
+/**
+ * Ease `current` toward `target` with a critically damped spring that settles in about `smoothTime`
+ * seconds, frame-rate independent (Game Programming Gems 4, 1.10). `smoothTime` 0 or less snaps.
+ */
+export function smoothDamp(current: number, target: number, state: SmoothDampState, smoothTime: number, dt: number): number {
+    if (!(smoothTime > 0) || !(dt > 0)) { state.velocity = 0; return target; }
+    const omega = 2 / smoothTime;
+    const x = omega * dt;
+    const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    const change = current - target;
+    const temp = (state.velocity + omega * change) * dt;
+    state.velocity = (state.velocity - omega * temp) * exp;
+    let result = target + (change + temp) * exp;
+    // No overshoot past the target.
+    if ((target - current > 0) === (result > target)) { result = target; state.velocity = 0; }
+    return result;
+}
+
+/** `value` on the nearest multiple of `step`; `step` 0 or less leaves it. */
+export function snapToGrid(value: number, step: number): number {
+    return step > 0 ? Math.round(value / step) * step : value;
+}
+
+/** One axis of a parallax layer's quad: where it spans and which part of its image it shows there. */
+export interface ParallaxSpan {
+    /** The quad's extent on the axis, world units. */
+    min: number;
+    max: number;
+    /** The image coordinates at those edges, in repeats of the image: 0 its first edge, 1 its far one. */
+    from: number;
+    to: number;
+}
+
+/**
+ * One axis of a parallax layer (ParallaxLayerNode): an image `unit` wide whose centre sits at `origin`
+ * moved by `parallax` of the camera's travel -- 1 moves with the world, 0 stays with the camera.
+ * Repeating, it covers the view [`viewCenter` +- `halfView`] exactly, with the image coordinates running
+ * on past 1 to tile; otherwise it is the image once, where its centre is.
+ */
+export function parallaxSpan(viewCenter: number, halfView: number, origin: number, unit: number,
+                             parallax: number, repeat: boolean, out: ParallaxSpan): ParallaxSpan {
+    const u = Math.abs(unit) > 1e-9 ? Math.abs(unit) : 1;
+    const anchor = origin + viewCenter * (1 - parallax);
+    const start = anchor - u * 0.5;
+    if (repeat) {
+        out.min = viewCenter - halfView;
+        out.max = viewCenter + halfView;
+    } else {
+        out.min = start;
+        out.max = start + u;
+    }
+    out.from = (out.min - start) / u;
+    out.to = (out.max - start) / u;
+    return out;
+}

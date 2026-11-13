@@ -75,6 +75,7 @@ import { ObjectTable } from './objectTable';
 import { GeometryPass } from './render/geometryPass';
 import { ForwardPass } from './render/forwardPass';
 import { Frame2DPasses } from './render/frame2d';
+import { Camera2DNode } from '../core/scene/nodes/camera2DNode';
 import { EditorOverlays } from './render/editorOverlays';
 import { DebugViews } from './render/debugViews';
 import { Capture } from './render/capture';
@@ -437,7 +438,7 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
             get selectedNodeId() { return renderer._selectedNodeId; },
             get clearColor() { return renderer.clearColor; },
-        }, this._targets, this._passes, this._lighting, this._shadows, this._decals, this._sprites, this._overlays);
+        }, this._view, this._targets, this._passes, this._fullscreen, this._projection, this._lighting, this._shadows, this._decals, this._sprites, this._overlays);
         this._debugViews = new DebugViews({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
@@ -781,6 +782,10 @@ export class Renderer {
         // A 2D scene draws through the flat 2D frame unless its settings ask for the 3D one. Leaving it for
         // the 3D frame drops every temporal history: none of it was kept up while the 2D frames ran.
         const flat = scene.dimension === '2D' && this._pipeline2D === 'flat';
+        // A 2D game camera sizes its projection from the screen, in art pixels: fitted before either frame
+        // builds its matrices from it.
+        const active = scene.activeCamera;
+        if (active instanceof Camera2DNode) active.fitView(this._renderWidth, this._renderHeight);
         if (this._view.flat2D && !flat) this.invalidateTemporalHistory();
         this._view.flat2D = flat;
         try {
@@ -1099,7 +1104,12 @@ export class Renderer {
         // Particles step with no weather and no depth to collide against (no snapshot is taken in 2D).
         this._particlePasses.particleCollideValid = false;
         this._particlePasses.simulateParticles(scene, null);
-        this._frame2D.render(scene);
+        // Pixel-perfect when the game's 2D camera asks for it, and never for a capture, a thumbnail or a movie,
+        // which draw at their own size.
+        const camera2D = scene.activeCamera instanceof Camera2DNode ? scene.activeCamera : null;
+        const pixel = camera2D && camera2D.pixelPerfect && !this._thumbnailMode && !this._subsystems.capture.presentTarget
+            && !this._movie.active && !this._view.capturing ? camera2D : null;
+        this._frame2D.render(scene, pixel);
         this._stats.checkGLErrors('scene2D');
 
         this._applyPostProcessing(scene);

@@ -28,6 +28,23 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - *2.5D.* **Renderer › 2D Scenes › Pipeline › Full 3D** draws the whole 3D frame under a 2D scene again,
     for one that mixes models and 3D lights in. In the flat frame 3D models are not drawn and lit sprites
     draw unlit, until 2D lights arrive.
+- **Camera 2D, rooms and pixel-perfect pixel art.** **Cameras ▸ Camera 2D** is the 2D game camera: sized in
+  art pixels (**pixels per unit**, a **reference resolution** it shows at least, **zoom**), it follows a node
+  by name with a dead zone, damping and look-ahead, and shakes on demand (`shake()`).
+  - *Pixel perfect.* Every art pixel is the same whole number of screen pixels: the 2D frame is drawn at
+    the art resolution through a camera snapped to the pixel grid and scaled up unfiltered, keeping the
+    sub-pixel part of the camera's position, so a slow pan glides. Checked on WebGPU and WebGL2.
+  - *Rooms.* **Sprites ▸ Room** is one screen of a 2D world. The camera keeps its view inside the room
+    its target stands in and slides into the next when the target crosses over; `onRoomEnter` /
+    `onRoomExit` tell the target and the room.
+  - *Parallax layers.* **Sprites ▸ Parallax Layer** is a backdrop that moves with a share of the camera's
+    travel and tiles to fill the view, with a drift of its own.
+- **Sprites sized in pixels, pivoted and flipped.** A tileset's **pixels per unit** sizes every sprite drawn
+  from it by its tile's pixels (a 135 px character frame at 16 is 8.4 units), so tiles and characters
+  share one pixel grid. **Appearance ▸ Pivot** puts a point of the image on the node's position (a
+  character on its feet) and **Flip X / Y** mirror it about that point (`Sprite.pivot`, `flipX`, `flipY`).
+  Tilesets can also be cut into free-form **regions** instead of a grid (`TilesetConfig.regions`).
+  Atlases imported into a 2D scene come in as pixel art: nearest filtering, no mipmaps.
 - **Side-view sprite order on tilemaps.** **Tilemap › Sprite order › Side view** (`Tilemap.entitySort`):
   sprites draw over the entity layer's tiles by sorting order and then scene order, never by height, so in
   a platformer a character jumping past another no longer slips behind it. **By Y**, the default, keeps the
@@ -615,6 +632,9 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Fixes & refactors
 
+- **Opening a scene no longer tilts its 2D view.** The editor remembered the previous scene's view poses
+  for the fresh camera an opened scene brings, so switching from one 2D scene to another could come up with
+  the 3D camera's angle in the 2D view.
 - **Particles over a tilemap draw once.** Under a perspective camera a scene with a visible tilemap drew its
   particles twice (in their own pass and in the 2D pass); under an orthographic one with every tilemap
   hidden it drew them not at all.

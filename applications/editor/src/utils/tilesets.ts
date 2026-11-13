@@ -35,6 +35,10 @@ export type TilesetAsset = {
   sixWayNegativeTextureId?: string
   normalTextureId?: string
   ormTextureId?: string
+  /** Art pixels per world unit (TilesetConfig.pixelsPerUnit): sizes sprites and tilemap cells. Absent = none. */
+  pixelsPerUnit?: number
+  /** Free-form regions [x, y, w, h] instead of the grid (TilesetConfig.regions). Absent = the grid. */
+  regions?: [number, number, number, number][]
   /** Sparse: only the tiles that actually carry metadata. */
   tiles: Record<number, TileMeta>
   terrains: TerrainSet[]
@@ -342,6 +346,8 @@ export function toRuntimeTileset(asset: TilesetAsset): Tileset {
     sixWayNegativeTextureId: asset.sixWayNegativeTextureId,
     normalTextureId: asset.normalTextureId,
     ormTextureId: asset.ormTextureId,
+    pixelsPerUnit: asset.pixelsPerUnit,
+    regions: asset.regions,
   }
   const ts = new Tileset(cfg)
   for (const key of Object.keys(asset.tiles ?? {})) {
@@ -369,6 +375,8 @@ export function fromRuntimeTileset(ts: Tileset, name: string): TilesetAsset {
     columns: json.columns,
     rows: json.rows,
     ...(json.overdrive !== undefined ? { overdrive: json.overdrive } : {}),
+    ...(json.pixelsPerUnit !== undefined ? { pixelsPerUnit: json.pixelsPerUnit } : {}),
+    ...(json.regions !== undefined ? { regions: json.regions } : {}),
     ...Object.fromEntries(TILESET_LIGHTING_MAPS.filter(k => json[k]).map(k => [k, json[k]])),
     tiles: json.tiles,
     terrains: json.terrains,

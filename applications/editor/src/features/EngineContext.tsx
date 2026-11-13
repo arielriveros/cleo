@@ -6044,6 +6044,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // What the scene IS, for the renderer (Scene.dimension): the project's record, which a scene saved
       // before the engine knew its dimension does not carry in its own JSON.
       scene.dimension = dimensionOfScene(sceneId);
+      // The parse put a FRESH editor camera in (ensureEditorCamera), at its 3D default: the poses remembered
+      // for the outgoing scene's views are no longer this camera's. Without this, switching from a 2D scene to
+      // another one filed the fresh camera's 3D pose under '2D', and the incoming scene's 2D view came up
+      // tilted. The fresh pose IS a 3D one, so that is what the next switch remembers it as.
+      viewPoseRef.current = {};
+      previousViewRef.current = '3D';
       // Parsing a scene can replace camera settings/onUpdate handlers; re-apply editor camera controls — with
       // the INCOMING scene's rig, not the outgoing one's. This is what makes the view follow the scene.
       setViewDimension(dimensionOfScene(sceneId));

@@ -21,6 +21,8 @@ export const SCRIPT_HANDLERS = [
     // A ControllerNode's per-frame decision, run in the scene's control pass. Same reason again — it is
     // the one handler that runs OUTSIDE the node loop, so an escape would take the whole frame with it.
     'onThink',
+    // A 2D camera's follow target crossing into a room (Room2DNode), and the room hearing it.
+    'onRoomEnter', 'onRoomExit',
 ] as const;
 
 /** Built-in modules: the engine API, registered by src/cleo.ts as 'cleo'. */

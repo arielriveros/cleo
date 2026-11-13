@@ -30,6 +30,9 @@ export type { ControlSource, AimSource, BlackboardValue } from "./core/scene/nod
 export type { FollowSpace, AimMode } from "./core/scene/nodes/cameraRigNode";
 export { LandscapeNode } from "./core/scene/nodes/landscapeNode";
 export { TilemapNode } from "./core/scene/nodes/tilemapNode";
+export { Camera2DNode } from "./core/scene/nodes/camera2DNode";
+export { Room2DNode } from "./core/scene/nodes/room2DNode";
+export { ParallaxLayerNode } from "./core/scene/nodes/parallaxLayerNode";
 export { LightNode } from "./core/scene/nodes/lightNode";
 export type { LightType, LightBakeSnapshot } from "./core/scene/nodes/lightNode";
 export { LightProbeNode } from "./core/scene/nodes/lightProbeNode";

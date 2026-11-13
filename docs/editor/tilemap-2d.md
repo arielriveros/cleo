@@ -30,6 +30,7 @@ fits in) is dimmed, so a wrong tile size shows at once.
 | **Tile size** | Width and height of one tile, in pixels. The link button keeps them equal (square tiles). The chips set a common size in one click, and **Guess** takes the largest of 64, 32, 16 and 8 that divides the image into at least 4 × 4 tiles, or 16 when none does. |
 | **Margin** | A border around the whole atlas, in pixels, before the first tile. |
 | **Spacing** | The gap between adjacent tiles, in pixels. |
+| **Pixels per unit** | Art pixels in a world unit. Sprites drawn from the tileset take their size from it: a tile's pixel size over this, times the node's scale, so a 16 px tile at 16 is one unit and a 135 px character frame 8.4, and everything drawn from tilesets at the same value shares one pixel grid. **= tile** sets it to the tile width (one tile, one unit: the tilemap's default 1 × 1 cells). Off (0): the old rule, a sprite is a unit square sized by its scale. |
 | **Overdrive** | Brightness past white, in linear light (default 1). A tint can only darken a tile; overdrive makes it brighter than its texture, so fire, lava or magic crosses the bloom threshold and glows. Every sprite and tilemap tile drawn from the tileset gets it, unless a tile has its own. Around 3–4 is a strong glow at the default bloom settings; the slider runs to 8, and a typed value can go to 32. |
 
 ### Selected tiles
@@ -203,7 +204,7 @@ better choice when the same animation is used in several places.
 - **Random start** — each copy starts on a random frame of its own list, so a row of the same sprite
   (torches along a wall) does not flicker in step. It applies when the sprite spawns.
 
-**Appearance** — tint, opacity, blending, sorting order, lit, exposure weight, follow light, soft fade, transparency, which sides draw, and wireframe. A tileset with
+**Appearance** — tint, opacity, blending, sorting order, pivot, flip, lit, exposure weight, follow light, soft fade, transparency, which sides draw, and wireframe. A tileset with
 **overdrive** makes its sprites glow through bloom; the value belongs to the tileset, and the section
 only reports it.
 
@@ -214,6 +215,11 @@ only reports it.
   over the smoke around it. In a 2D scene it offsets the sprite's band from the
   [entity layer](#layers), as a particle emitter's sorting order does: 1 draws over the next layer up.
   0, the default, leaves the order to depth.
+- **Pivot** — the point of the image that sits at the node's position: 0, 0 its bottom-left corner, 1, 1
+  its top-right, 0.5, 0.5 (the default) its centre. **Base** puts it at the bottom centre. A character
+  pivots at its feet: its position is then where it stands, and it turns about its own body. For a sheet
+  with empty space under the feet, the pivot's height is that space over the frame's height.
+- **Flip X**, **Flip Y** — mirror the image about the pivot: a character facing the other way.
 - **Lit** — the sprite takes the scene's light instead of showing its texture as it is: the key light
   (the sun, or the moon) and the shadows it casts on the sprite, the sky and ambient light, and every
   point and spot light that reaches it, per pixel, so smoke over a fire is lit from below by the fire and
@@ -266,10 +272,48 @@ of calls; mixing alpha and additive sprites that overlap splits more of them. Th
 A tilemap uses an analytic picker and **only registers a hit where a tile is actually painted**, so
 clicking a gap selects what is behind it rather than the map.
 
-## 2D cameras and zoom
+## 2D cameras and rooms
 
-2D scenes use an orthographic camera. The wheel zooms, and the viewport's 2D/3D switch changes the
-view without changing the scene's authored dimension.
+In the editor a 2D scene is viewed through an orthographic camera of the editor's own. The wheel zooms,
+and the viewport's 2D/3D switch changes the view without changing the scene's authored dimension.
+
+### Camera 2D
+
+The game sees through a **Camera 2D** (**Cameras ▸ Camera 2D**), which takes over in Play. It is
+orthographic and sized in art pixels:
+
+- **Pixels per unit** — art pixels in a world unit; match the tilesets'.
+- **Reference resolution** — the view in art pixels at **zoom** 1, at least: a 480 × 270 reference on a
+  1920 × 1080 screen is drawn four times over. On a screen between whole multiples the view shows more of
+  the world rather than less.
+- **Pixel perfect** — every art pixel is the same whole number of screen pixels: the 2D frame is drawn at
+  the art resolution and scaled up unfiltered, keeping the part of a pixel the camera has moved, so a
+  slow pan glides instead of stepping a whole art pixel at a time. Off: drawn at the screen's
+  resolution at whatever scale the window gives.
+- **Follow** — the name of the node it follows, with a **follow offset**, a **dead zone** (the box round
+  the view's centre the target moves in before the camera moves), **damping** (about how long the camera
+  takes to catch up) and **look ahead** (how far it leads a moving target).
+- **Confine to rooms** — keep the view inside the room the target stands in, and slide into the next one
+  over **room transition** seconds when it crosses over.
+
+Its frame (the reference resolution at its zoom) is drawn in the editor where it stands.
+
+### Room
+
+A **Room** (**Sprites ▸ Room**) is one screen of a 2D world: a rectangle, **size** wide and high, centred
+on the node, outlined in the editor. While the followed node stands in a room, the camera keeps its view
+inside it, centring the view on a room smaller than the screen. Rooms may touch: walking out of one
+slides the camera into the next, and scripts on the followed node and on the room hear `onRoomEnter` and
+`onRoomExit`. **Zone** is a free label (an area of the world) for a map or a script.
+
+### Parallax Layer
+
+A **Parallax Layer** (**Sprites ▸ Parallax Layer**) is a backdrop sprite that moves with only part of the
+camera's travel: **parallax** 1 moves with the world, 0 stays on screen (a sky), 0.2 is a far range. With
+**repeat X** (and **repeat Y**) it fills the view however far the camera goes; repeating needs a tileset
+whose one tile is the whole image, as a background imported on its own is. **Scroll** drifts it by itself
+(clouds). It sorts like any sprite (negative sorting orders behind the tilemap's layers) and is selected
+from the scene tree, never by a viewport click.
 
 ## The 2D frame
 

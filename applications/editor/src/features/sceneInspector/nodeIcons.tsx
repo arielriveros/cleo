@@ -39,6 +39,10 @@ export const AmbientSoundIcon = () => (
 export const CameraIcon = () => (
   <S><rect x="2.5" y="7" width="12" height="10" rx="2" /><path d="M14.5 11.5 21.5 7.5v9l-7-4z" /></S>
 );
+/** A 2D camera: a screen frame with its pixel grid corner. */
+export const Camera2DIcon = () => (
+  <S><rect x="3" y="5" width="18" height="14" rx="1.6" /><path d="M3 9h4V5M17 19v-4h4" /><path d="M10 12h4" /></S>
+);
 /** A camera on a boom arm, pivoting about its target. */
 export const CameraRigIcon = () => (
   <S><rect x="11" y="4" width="10.5" height="8" rx="1.8" /><path d="M11 8H6.5a3 3 0 0 0-3 3v3" /><circle cx="3.5" cy="18" r="2.8" /></S>
@@ -103,6 +107,15 @@ export const AnimatedSpriteIcon = () => (
 /** Tilemap: a grid with one cell filled — the same shape as the tileset asset icon and the mode button. */
 export const TilemapIcon = () => (
   <S><rect x="3.5" y="3.5" width="17" height="17" rx="1.5" /><path d="M9 3.5v17M15 3.5v17M3.5 9h17M3.5 15h17" /><rect x="9" y="9" width="6" height="6" fill="currentColor" stroke="none" /></S>
+);
+
+/** A 2D room: a dashed rectangle with a doorway gap on one side, one screen of a world. */
+export const Room2DIcon = () => (
+  <S><path d="M10 4H4.5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h15a1 1 0 0 0 1-1v-5M20.5 9V5a1 1 0 0 0-1-1H14" /><path d="M13 12h7M17.5 9.5 20 12l-2.5 2.5" /></S>
+);
+/** A parallax layer: two ranges of hills, the far one smaller. */
+export const ParallaxLayerIcon = () => (
+  <S><path d="M3 15l4.5-5 3 3.2L14 9l7 6" opacity="0.55" /><path d="M3 19l5-4.5 3.5 2.8 3.5-3.3 6 5" /><path d="M3 19h18" /></S>
 );
 
 // --- Environment -----------------------------------------------------------------------------------

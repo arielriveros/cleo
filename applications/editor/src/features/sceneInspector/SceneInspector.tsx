@@ -7,7 +7,7 @@ import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
   CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, ExposureVolumeIcon, GiVolumeIcon, VolumetricFogIcon, SkyboxIcon, SkyLightIcon, CloudsIcon, WindIcon, WeatherIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
-  SequenceIcon,
+  SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon,
 } from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
@@ -33,6 +33,7 @@ const TYPE_ICONS: Record<string, () => JSX.Element> = {
   sound: SoundIcon,
   particleSystem: ParticlesIcon, forceField: ForceFieldIcon, cloth: ClothIcon, waterVolume: WaterVolumeIcon, occlusionVolume: OcclusionVolumeIcon,
   sequence: SequenceIcon,
+  camera2D: Camera2DIcon, room2D: Room2DIcon, parallaxLayer: ParallaxLayerIcon,
 };
 
 

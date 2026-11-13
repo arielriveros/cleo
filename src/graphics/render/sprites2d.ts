@@ -38,7 +38,7 @@ import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
 import { gatherParticleLocalLight } from '../particles/particleLighting';
-import { billboardMatrix } from './billboard';
+
 import type { Material } from '../material';
 
 /**
@@ -401,8 +401,7 @@ export class Sprite2DPasses {
             const sprite = this._spriteNodes[s];
             // The sprite's BASE, not its centre: a character's feet are what sorts against a trunk row. Its
             // sorting order offsets its band, as an emitter's does below.
-            const depth = sideView ? SIDE_VIEW_DEPTH + zSign * sprite.worldPosition[2]
-                : -(sprite.worldPosition[1] - sprite.worldScale[1] * 0.5);
+            const depth = sideView ? SIDE_VIEW_DEPTH + zSign * sprite.worldPosition[2] : -this._baseY(sprite);
             this._pushUnsorted(KIND_SPRITE, s, entityBand + sprite.sprite.sortingOrder, depth);
         }
         // Particle systems sort as one item by their emitter's Y, like a sprite's base, in the entity
@@ -561,7 +560,12 @@ export class Sprite2DPasses {
         const drive = node.overdrive * node.lightFollowScale;
         const intensity = weight < 1 && this._view.exposure > 0 ? drive * Math.pow(this._view.exposure, weight - 1) : drive;
         const ambient = this._spriteLit[s] ? this._litAmbient(node, s) : null;
-        packSpriteRecord(out, offset, this._spriteMatrices, s * 16, dissolveOf(node.effectiveFade), node.uvRectInto(this._uv),
+        // A mirrored sprite reads its tile backwards along the flipped axis (the pivot mirrored with it in the
+        // matrix, SpriteNode.quadMatrixInto): the record's UV scale goes negative and the shader needs no word.
+        const uv = node.uvRectInto(this._uv);
+        if (sprite.flipX) { const u = uv[0]; uv[0] = uv[2]; uv[2] = u; }
+        if (sprite.flipY) { const v = uv[1]; uv[1] = uv[3]; uv[3] = v; }
+        packSpriteRecord(out, offset, this._spriteMatrices, s * 16, dissolveOf(node.effectiveFade), uv,
                          soft, sprite.tint, sprite.opacity, intensity, ambient);
         frameStats.objects++;
         frameStats.spritesDrawn++;
@@ -856,9 +860,21 @@ export class Sprite2DPasses {
     /** {@link spriteBillboardMatrix} into `out`: the per-draw path's pooled matrix. */
     private _billboardInto(node: SpriteNode, out: mat4): mat4 {
         const cam = this._view.camera;
-        return billboardMatrix(out, node.worldTransform, node.worldScale, node.constraints,
-                               cam.viewMatrix, cam.position, cam.type !== 'orthographic');
+        return node.quadMatrixInto(out, cam);
     }
+
+    /**
+     * The world Y of a sprite's BASE, the bottom edge of its image: what a Y-sorted map orders it by. Its
+     * origin less the share of its height below the pivot, so a character pivoted at its feet sorts by
+     * where it stands; a centred unit sprite by its centre less half its scale, as it always did.
+     */
+    private _baseY(node: SpriteNode): number {
+        const sprite = node.sprite;
+        const size = sprite.quadSize(node.currentTile, this._quadSize);
+        const py = sprite.flipY ? 1 - sprite.pivot[1] : sprite.pivot[1];
+        return node.worldPosition[1] - py * size[1] * node.worldScale[1];
+    }
+    private readonly _quadSize: [number, number] = [1, 1];
 
     private readonly _spriteMatrix = mat4.create();
     /** A tile band's model matrix, rewritten per draw. */
