@@ -251,7 +251,7 @@ export class AutoExposure {
 
     /** Is metering driving the exposure this frame? The project's setting AND this host's permission. */
     public meteringActive(): boolean {
-        return this.effExposure.autoExposureEnabled && this.exposureMeteringAllowed;
+        return this.effExposure.autoExposureEnabled && this.exposureMeteringAllowed && !this._view.flat2D;
     }
 
     /** The scene's own exposure settings, with no volume over them. */
@@ -295,6 +295,14 @@ export class AutoExposure {
      * brightnesses, and the whole asset library shifted whenever the scene's exposure moved.
      */
     public resolveExposure(): void {
+        // A flat 2D frame is display-referred: an authored pixel shows as authored, so the exposure is 1,
+        // never metered and never the EV a 3D scene's lights call for. Before the preview test, so a 2D
+        // scene's thumbnail looks like the scene.
+        if (this._view.flat2D) {
+            this._view.exposure = 1;
+            this._lastSceneExposure = 1;
+            return;
+        }
         // A PREVIEW renders at a fixed exposure, not the project's. The preview scenes carry their own
         // studio rig, so the exposure that renders them correctly is a constant — and pinning it is what
         // keeps every thumbnail in the asset library comparable with the others and stable as the scene

@@ -35,6 +35,10 @@ export type TilesetAsset = {
   sixWayNegativeTextureId?: string
   normalTextureId?: string
   ormTextureId?: string
+  /** Art pixels per world unit (TilesetConfig.pixelsPerUnit): sizes sprites and tilemap cells. Absent = none. */
+  pixelsPerUnit?: number
+  /** Free-form regions [x, y, w, h] instead of the grid (TilesetConfig.regions). Absent = the grid. */
+  regions?: [number, number, number, number][]
   /** Sparse: only the tiles that actually carry metadata. */
   tiles: Record<number, TileMeta>
   terrains: TerrainSet[]
@@ -243,9 +247,56 @@ export function clearTileMeta(asset: TilesetAsset, indices: readonly number[]): 
   return { ...asset, tiles }
 }
 
+/**
+ * A tile's collision, as one choice: nothing, a solid block, a one-way platform, or a slope (its floor's
+ * heights at the left and right edges, fractions of the tile). What the Selected tiles card's Collision
+ * menu sets; the 2D physics reads the fields it writes (TileMeta.solid, oneWay, slope).
+ */
+export type TileCollisionPreset = 'none' | 'solid' | 'oneWay' | 'slopeUp' | 'slopeDown' | 'slopeUpLow' | 'slopeUpHigh'
+  | 'slopeDownHigh' | 'slopeDownLow' | 'half'
+
+export const TILE_COLLISION_PRESETS: { value: TileCollisionPreset, label: string, slope?: [number, number] }[] = [
+  { value: 'none', label: 'None' },
+  { value: 'solid', label: 'Solid' },
+  { value: 'oneWay', label: 'One-way platform' },
+  { value: 'slopeUp', label: 'Slope 45° up', slope: [0, 1] },
+  { value: 'slopeDown', label: 'Slope 45° down', slope: [1, 0] },
+  { value: 'slopeUpLow', label: 'Slope 26° up, low half', slope: [0, 0.5] },
+  { value: 'slopeUpHigh', label: 'Slope 26° up, high half', slope: [0.5, 1] },
+  { value: 'slopeDownHigh', label: 'Slope 26° down, high half', slope: [1, 0.5] },
+  { value: 'slopeDownLow', label: 'Slope 26° down, low half', slope: [0.5, 0] },
+  { value: 'half', label: 'Half block', slope: [0.5, 0.5] },
+]
+
+/** Which preset a tile's collision fields make. A slope that matches none reads as the nearest kind, solid. */
+export function tileCollisionPreset(meta: TileMeta | undefined): TileCollisionPreset {
+  if (!meta) return 'none'
+  if (meta.slope) {
+    const p = TILE_COLLISION_PRESETS.find(q => q.slope && q.slope[0] === meta.slope![0] && q.slope[1] === meta.slope![1])
+    return p ? p.value : 'solid'
+  }
+  if (meta.solid) return 'solid'
+  if (meta.oneWay) return 'oneWay'
+  return 'none'
+}
+
+/**
+ * The fields a preset writes, every other collision field cleared. A slope is also given the matching
+ * collider outline (`shape`), so a 3D body walking a 2D map meets the same slope.
+ */
+export function tileCollisionPatch(preset: TileCollisionPreset): Partial<TileMeta> {
+  const p = TILE_COLLISION_PRESETS.find(q => q.value === preset)
+  const clear: Partial<TileMeta> = { solid: undefined, oneWay: undefined, slope: undefined, shape: undefined }
+  if (!p || preset === 'none') return clear
+  if (preset === 'solid') return { ...clear, solid: true }
+  if (preset === 'oneWay') return { ...clear, oneWay: true }
+  const [l, r] = p.slope!
+  return { ...clear, solid: true, slope: [l, r], shape: [0, 0, 1, 0, 1, r, 0, l] }
+}
+
 /** The fields the Selected tiles card edits, in the order it shows them. */
 const EDITED_TILE_FIELDS: (keyof TileMeta)[] = [
-  'solid', 'anchorRow', 'zBias', 'spanX', 'spanY', 'tint', 'opacity', 'overdrive', 'animation',
+  'solid', 'oneWay', 'slope', 'anchorRow', 'zBias', 'spanX', 'spanY', 'tint', 'opacity', 'overdrive', 'animation',
 ]
 
 const sameField = (key: keyof TileMeta, a: unknown, b: unknown): boolean => {
@@ -273,7 +324,7 @@ export function selectionFieldState(asset: TilesetAsset, indices: readonly numbe
  * The fields Copy / Paste carry between tiles: what a tile IS (collision, sorting, look). Animation frames,
  * terrain membership and variant weights name specific tiles and stay where they are.
  */
-export const COPYABLE_TILE_FIELDS = ['solid', 'shape', 'anchorRow', 'zBias', 'spanX', 'spanY', 'tint', 'opacity', 'overdrive'] as const
+export const COPYABLE_TILE_FIELDS = ['solid', 'oneWay', 'slope', 'shape', 'anchorRow', 'zBias', 'spanX', 'spanY', 'tint', 'opacity', 'overdrive'] as const
 export type TileMetaClip = Pick<TileMeta, typeof COPYABLE_TILE_FIELDS[number]>
 
 /** A detached copy of the copyable fields of `meta`. */
@@ -342,6 +393,8 @@ export function toRuntimeTileset(asset: TilesetAsset): Tileset {
     sixWayNegativeTextureId: asset.sixWayNegativeTextureId,
     normalTextureId: asset.normalTextureId,
     ormTextureId: asset.ormTextureId,
+    pixelsPerUnit: asset.pixelsPerUnit,
+    regions: asset.regions,
   }
   const ts = new Tileset(cfg)
   for (const key of Object.keys(asset.tiles ?? {})) {
@@ -369,6 +422,8 @@ export function fromRuntimeTileset(ts: Tileset, name: string): TilesetAsset {
     columns: json.columns,
     rows: json.rows,
     ...(json.overdrive !== undefined ? { overdrive: json.overdrive } : {}),
+    ...(json.pixelsPerUnit !== undefined ? { pixelsPerUnit: json.pixelsPerUnit } : {}),
+    ...(json.regions !== undefined ? { regions: json.regions } : {}),
     ...Object.fromEntries(TILESET_LIGHTING_MAPS.filter(k => json[k]).map(k => [k, json[k]])),
     tiles: json.tiles,
     terrains: json.terrains,

@@ -49,6 +49,7 @@ import FluidVolumeCompositeProgram from '../shaders/wgsl/fluidVolumeComposite.wg
 // A `.wgsl` import is a whole PROGRAM: the loader translates both stages to GLSL ES 300 at build time
 // and carries the WGSL through for WebGPU. The `.vs`/`.fs` imports above are the unconverted ones.
 import ScreenProgram from '../shaders/wgsl/screen.wgsl';
+import PixelUpscaleProgram from '../shaders/wgsl/pixelUpscale.wgsl';
 import PresentProgram from '../shaders/wgsl/present.wgsl';
 import OverlayCompositeProgram from '../shaders/wgsl/overlayComposite.wgsl';
 import DebugViewProgram from '../shaders/wgsl/debugView.wgsl';
@@ -162,7 +163,7 @@ export {
     VolumetricFogInjectProgram, VolumetricFogIntegrateProgram, VolumetricFogApplyProgram,
     GiReduceProgram, GiVisibilityProgram, GiRadianceProgram, GiIntegrateProgram, GiResolveProgram,
     GiAmbientCubeProgram, GiRescaleProgram, GiProbeOverlayProgram, GiStateStampProgram,
-    MovieAccumulateProgram, SpriteProgram,
+    MovieAccumulateProgram, SpriteProgram, PixelUpscaleProgram,
 };
 
 // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
@@ -340,6 +341,8 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['movieAccumulate',              MovieAccumulateProgram],
         // Unlit sprites batched into instanced draws (render/sprites2d.ts). APPENDED.
         ['sprite',                       SpriteProgram],
+        // A pixel-perfect 2D frame scaled up to the screen unfiltered (render/frame2d.ts). APPENDED.
+        ['pixelUpscale',                 PixelUpscaleProgram],
     ];
 }
 

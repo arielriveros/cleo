@@ -38,6 +38,22 @@ export interface TileMeta {
     /** Relative likelihood when the randomize brush picks from `variantGroup`. */
     weight?: number;
     variantGroup?: number;
+    /**
+     * 2D physics (src/physics2d): a platform stood on from above and passed through from below and the
+     * sides; holding down and jumping drops through it. Its own kind of collision: not `solid`.
+     */
+    oneWay?: boolean;
+    /**
+     * 2D physics: a slope, the floor's height at the tile's left and right edges as fractions of the tile
+     * (0 its bottom, 1 its top): [0, 1] rises to the right at 45 degrees, [0, 0.5] and [0.5, 1] are the two
+     * halves of a 26.5 degree slope, [0.5, 0.5] a half-height block. Below the line is solid. Flipping the
+     * tile on X mirrors it.
+     */
+    slope?: [number, number];
+    /** Free data a script reads off a placed tile (`tilemap.tileAt(...)`): a hazard's damage, a ladder. */
+    props?: Record<string, string | number | boolean>;
+    /** Free labels a script tests for: 'spikes', 'water', 'breakable'. */
+    tags?: string[];
 }
 
 /** A set of tiles that auto-tile against each other. `tiles` maps an edge/corner mask to candidates. */
@@ -98,6 +114,18 @@ export interface TilesetConfig {
     sixWayNegativeTextureId?: string | null;
     normalTextureId?: string | null;
     ormTextureId?: string | null;
+    /**
+     * Art pixels per world unit: a sprite drawn from this tileset is its tile's pixel size over this, times
+     * its node's scale (a 16 px tile at 16 is one unit, a 135 px character frame 8.4), and a tilemap layer
+     * takes its cells from it. 0 or absent: the legacy rule, a sprite is a unit quad sized by its scale.
+     */
+    pixelsPerUnit?: number;
+    /**
+     * Free-form REGIONS instead of a grid: rectangles [x, y, width, height] in pixels from the image's
+     * top-left, one tile each, in order -- for a sheet whose pieces are not on a grid (props, a packed
+     * character). Absent or empty: the grid above. Tilemap layers need a grid.
+     */
+    regions?: ReadonlyArray<readonly [number, number, number, number]> | null;
 }
 
 /** How a lit sprite over a tileset shades: see {@link TilesetConfig.sixWayPositiveTextureId}. */
@@ -105,6 +133,18 @@ export type TilesetLighting = 'sixWay' | 'surface' | 'flat';
 
 /** A texture id, or null for none (an empty string included). */
 const idOrNull = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+
+/** Regions as written: whole, non-negative rectangles of at least one pixel, or null for none. */
+function regionsOf(v: unknown): ReadonlyArray<readonly [number, number, number, number]> | null {
+    if (!Array.isArray(v) || v.length === 0) return null;
+    const out: [number, number, number, number][] = [];
+    for (const r of v) {
+        if (!Array.isArray(r) || r.length < 4) continue;
+        const [x, y, w, h] = r.map(n => (typeof n === 'number' && Number.isFinite(n) ? Math.round(n) : 0));
+        out.push([Math.max(0, x), Math.max(0, y), Math.max(1, w), Math.max(1, h)]);
+    }
+    return out.length > 0 ? out : null;
+}
 
 /** The overdrive range authoring accepts. */
 export const MAX_TILESET_OVERDRIVE = 32;
@@ -127,6 +167,8 @@ export class Tileset {
     private readonly _sixWayNegativeTextureId: string | null;
     private readonly _normalTextureId: string | null;
     private readonly _ormTextureId: string | null;
+    private readonly _pixelsPerUnit: number;
+    private readonly _regions: ReadonlyArray<readonly [number, number, number, number]> | null;
     private _meta: Map<number, TileMeta> = new Map();
     private _terrains: TerrainSet[] = [];
     private _variants: VariantSet[] = [];
@@ -147,6 +189,9 @@ export class Tileset {
         this._sixWayNegativeTextureId = idOrNull(cfg.sixWayNegativeTextureId);
         this._normalTextureId = idOrNull(cfg.normalTextureId);
         this._ormTextureId = idOrNull(cfg.ormTextureId);
+        this._pixelsPerUnit = typeof cfg.pixelsPerUnit === 'number' && Number.isFinite(cfg.pixelsPerUnit) && cfg.pixelsPerUnit > 0
+            ? cfg.pixelsPerUnit : 0;
+        this._regions = regionsOf(cfg.regions);
     }
 
     public get id(): string { return this._id; }
@@ -166,6 +211,24 @@ export class Tileset {
     public get sixWayNegativeTextureId(): string | null { return this._sixWayNegativeTextureId; }
     public get normalTextureId(): string | null { return this._normalTextureId; }
     public get ormTextureId(): string | null { return this._ormTextureId; }
+    /** See {@link TilesetConfig.pixelsPerUnit}: 0 for none. */
+    public get pixelsPerUnit(): number { return this._pixelsPerUnit; }
+    /** See {@link TilesetConfig.regions}: null for a grid. */
+    public get regions(): ReadonlyArray<readonly [number, number, number, number]> | null { return this._regions; }
+    /** Whether the tiles are free-form regions rather than a grid. */
+    public get hasRegions(): boolean { return this._regions !== null; }
+
+    /** The pixel size of `tileIndex`: its region's, or the grid's tile size. */
+    public sizeOf(tileIndex: number, out: [number, number] = [0, 0]): [number, number] {
+        const r = this._regions;
+        if (r) {
+            const rect = r[Math.max(0, Math.min(tileIndex, r.length - 1))];
+            out[0] = rect[2]; out[1] = rect[3];
+        } else {
+            out[0] = this._tileWidth; out[1] = this._tileHeight;
+        }
+        return out;
+    }
     /** How a lit sprite shades over this tileset: six-way with both six-way maps, surface with a normal map, else flat. */
     public get lighting(): TilesetLighting {
         if (this._sixWayPositiveTextureId && this._sixWayNegativeTextureId) return 'sixWay';
@@ -182,7 +245,7 @@ export class Tileset {
         const own = this._meta.get(tileIndex)?.overdrive;
         return own === undefined ? this._overdrive : clampOverdrive(own, this._overdrive);
     }
-    public get tileCount(): number { return this._columns * this._rows; }
+    public get tileCount(): number { return this._regions ? this._regions.length : this._columns * this._rows; }
     public get terrains(): TerrainSet[] { return this._terrains; }
     public get variantSets(): VariantSet[] { return this._variants; }
     /** Every tile that carries metadata, as [index, meta] pairs. */
@@ -195,6 +258,15 @@ export class Tileset {
     public uvOf(tileIndex: number, out?: Float32Array): Float32Array {
         const o = out && out.length >= 4 ? out : new Float32Array(4);
         const i = Math.max(0, Math.min(tileIndex, this.tileCount - 1));
+        const r = this._regions;
+        if (r) {
+            const [x, y, w, h] = r[i];
+            o[0] = x / this._imageWidth;
+            o[1] = 1 - (y + h) / this._imageHeight;
+            o[2] = (x + w) / this._imageWidth;
+            o[3] = 1 - y / this._imageHeight;
+            return o;
+        }
         const col = i % this._columns;
         const row = Math.floor(i / this._columns);
         const px = this._margin + col * (this._tileWidth + this._spacing);
@@ -267,6 +339,8 @@ export class Tileset {
             ...(this._sixWayNegativeTextureId ? { sixWayNegativeTextureId: this._sixWayNegativeTextureId } : {}),
             ...(this._normalTextureId ? { normalTextureId: this._normalTextureId } : {}),
             ...(this._ormTextureId ? { ormTextureId: this._ormTextureId } : {}),
+            ...(this._pixelsPerUnit > 0 ? { pixelsPerUnit: this._pixelsPerUnit } : {}),
+            ...(this._regions ? { regions: this._regions.map(r => [r[0], r[1], r[2], r[3]]) } : {}),
             tiles,
             terrains: this._terrains.map(t => ({ ...t, tiles: { ...t.tiles } })),
             variantSets: this._variants.map(v => ({ ...v, tiles: v.tiles.map(t => ({ ...t })) })),
@@ -290,6 +364,8 @@ export class Tileset {
             sixWayNegativeTextureId: json?.sixWayNegativeTextureId,
             normalTextureId: json?.normalTextureId,
             ormTextureId: json?.ormTextureId,
+            pixelsPerUnit: json?.pixelsPerUnit,
+            regions: json?.regions,
         });
         for (const key of Object.keys(json?.tiles ?? {})) {
             const idx = Number(key);

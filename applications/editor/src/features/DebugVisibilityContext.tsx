@@ -24,6 +24,13 @@ export type DebugCategory =
 
 export type DebugChannel = 'editor' | 'runtime';
 
+/**
+ * What the viewport's scene draws, for the menu: '2D' for a 2D scene drawn by the flat 2D frame, '3D'
+ * otherwise -- a 3D scene, a staging scene, or a 2D scene on the Full 3D pipeline, which draws 3D content.
+ * See `overlayDimensionOf` (utils/sceneDimension.ts).
+ */
+export type OverlayDimension = '2D' | '3D';
+
 export interface DebugCategoryState { editor: boolean; runtime: boolean; }
 export type DebugVisibility = Record<DebugCategory, DebugCategoryState>;
 
@@ -32,6 +39,11 @@ export interface DebugCategoryMeta {
   label: string;
   /** False for editor-chrome that has no meaning in the running game (the reference grid). */
   runtimeAvailable: boolean;
+  /**
+   * The one kind of scene the row means something in; absent, both. A row that does not apply is left out
+   * of the menu and treated as off (`effectiveDebugVisibility`), whatever its stored switches say.
+   */
+  only?: OverlayDimension;
 }
 
 /** Menu order + labels; grid last. */
@@ -40,28 +52,29 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   { key: 'triggers', label: 'Trigger volumes', runtimeAvailable: true },
   // Every marker the editor draws for a node that has no look of its own: the billboards of lights,
   // sounds (and a selected spatial sound's falloff sphere), light probes, exposure volumes, decals,
-  // particle systems, force fields and navmeshes, and the camera bodies. Only the icons: a selected
-  // decal's or volume's box is drawn regardless, like the navmesh bake volume, since selecting the node
-  // is the request to see it.
+  // particle systems, force fields and navmeshes, the camera bodies, and a 2D world's room outlines and
+  // Camera 2D frames. Only the icons: a selected decal's or volume's box is drawn regardless, like the
+  // navmesh bake volume, since selecting the node is the request to see it. (A 2D body's box is a
+  // collision wireframe and an Area 2D's a trigger volume, under the two rows above.)
   { key: 'icons', label: 'Editor icons', runtimeAvailable: true },
   { key: 'boundingBoxes', label: 'Bounding boxes', runtimeAvailable: true },
-  { key: 'skeleton', label: 'Skeletons', runtimeAvailable: true },
+  { key: 'skeleton', label: 'Skeletons', runtimeAvailable: true, only: '3D' },
   // Runtime is the point of this one: a blend driven by MEASURED motion reads 0 everywhere in the editor,
   // because the editor has no physics. Play is the only place its inputs are real.
-  { key: 'animation', label: 'Animation blend', runtimeAvailable: true },
+  { key: 'animation', label: 'Animation blend', runtimeAvailable: true, only: '3D' },
   // Worth having at runtime as well as in the editor: a bake can look right standing still and be
   // wrong the moment an agent tries to cross a seam, and the overlay is how you see which.
-  { key: 'navMesh', label: 'Navigation mesh', runtimeAvailable: true },
+  { key: 'navMesh', label: 'Navigation mesh', runtimeAvailable: true, only: '3D' },
   // The colliders foliage props get in Play, drawn on the scattered instances near the camera — the same
   // disc and cap the physics uses — so a trunk collider can be checked against the trunks it stands on.
-  { key: 'foliageColliders', label: 'Foliage colliders', runtimeAvailable: true },
+  { key: 'foliageColliders', label: 'Foliage colliders', runtimeAvailable: true, only: '3D' },
   // Every GI Volume's probes, lit by the light each holds. Renderer chrome (asserted from EngineContext's
   // reconcile, like the grid); a selected volume shows its own probes with this off.
-  { key: 'giProbes', label: 'GI probes', runtimeAvailable: true },
+  { key: 'giProbes', label: 'GI probes', runtimeAvailable: true, only: '3D' },
   // The scene's wind field (utils/windFieldOverlay.ts): arrows of the air round the camera, tracers carried
   // by it, and the Force Fields that move it. Off by default, and shown anyway while the Wind node or such a
   // field is selected, like a selected GI Volume's probes.
-  { key: 'windField', label: 'Wind field', runtimeAvailable: true },
+  { key: 'windField', label: 'Wind field', runtimeAvailable: true, only: '3D' },
   // Not an overlay: whether particle systems SIMULATE while authoring, like Niagara's realtime toggle.
   // Editor only — a playing game always simulates them.
   { key: 'particles', label: 'Preview particles', runtimeAvailable: false },
@@ -72,6 +85,29 @@ export const DEBUG_CATEGORIES: DebugCategoryMeta[] = [
   // reconcile asserts `setGridVisible` from whichever channel is in force, so Play honours this switch.
   { key: 'grid', label: 'Reference grid', runtimeAvailable: true },
 ];
+
+const META = new Map(DEBUG_CATEGORIES.map(m => [m.key, m]));
+
+/** Whether a row means something in a scene that draws as `dim`: shown in the menu, and drawn. */
+export function debugCategoryApplies(key: DebugCategory, dim: OverlayDimension): boolean {
+  const only = META.get(key)?.only;
+  return !only || only === dim;
+}
+
+/**
+ * The switches in force for a scene that draws as `dim`: the stored ones, with every row that does not
+ * apply off in both channels. The stored settings are untouched, so a 3D scene gets them back; and a row
+ * the menu does not show cannot be stuck on (a navmesh left in a scene switched to 2D draws nothing).
+ */
+export function effectiveDebugVisibility(v: DebugVisibility, dim: OverlayDimension): DebugVisibility {
+  let out: DebugVisibility | null = null;
+  for (const { key } of DEBUG_CATEGORIES) {
+    if (debugCategoryApplies(key, dim) || (!v[key].editor && !v[key].runtime)) continue;
+    out ??= { ...v };
+    out[key] = { editor: false, runtime: false };
+  }
+  return out ?? v;
+}
 
 // These categories default to Editor-on; every other overlay defaults off and is opted into. Runtime is
 // off for all.

@@ -6,7 +6,7 @@ import { projectSettingsConfig } from '../options/projectSettings'
 import type { ProjectSettings } from '../options/projectSettings'
 import { buildGameData, bakeTemplates, attachScriptModules } from './buildGameData'
 import { compressTerrainData, compressTilemapData } from './terrainImages'
-import { stripDimensionData } from './stripDimensionData'
+import { stripDimensionData, stampSceneDimension } from './stripDimensionData'
 import { collectPublishedTextureIds, collectPublishedSoundIds, collectGiBakeIds } from '../../utils/references'
 import { collectPrograms } from './collectProgramUsage'
 import { extractNodeState } from '../../utils/projectStorage'
@@ -105,7 +105,11 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     // An UNKNOWN dimension strips nothing: a scene saved before dimension became per-scene has none
     // recorded, and guessing wrong would delete the authoring the game is built around.
     const dimension = meta.id === src.openSceneId ? (src.liveDimension ?? meta.dimension) : meta.dimension
-    if (dimension) stripDimensionData(entry.scene, dimension)
+    if (dimension) {
+      stripDimensionData(entry.scene, dimension)
+      // ...and record it where the player's engine reads it.
+      stampSceneDimension(entry.scene, dimension)
+    }
   }
 
   // Bulk terrain and tilemap data (height field, splat map, tile grids) out of the JSON manifest and into

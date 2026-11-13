@@ -156,6 +156,21 @@ export function moveWorldDirection(out: vec3, intent: Readonly<ControlIntent>): 
 }
 
 /**
+ * Write a 2D move, for a 2D body (CharacterBody2DNode). The 2D intent is in WORLD axes, not a basis:
+ * `move[0]` is +x right, `move[1]` +y up -- a flier climbs with it, a walker holds it down with a jump to
+ * drop through a one-way platform. `basisYaw`, the aim and the look mean nothing to a 2D body.
+ *
+ * A stick or WASD read as `Input.vector('Move')` is already in these axes, which is why the player mapping
+ * ({@link applyPlayerReading}) needs no 2D branch.
+ */
+export function setMove2D(out: ControlIntent, x: number, y: number = 0): ControlIntent {
+    out.basisYaw = 0;
+    out.move[0] = x === 0 ? 0 : x;
+    out.move[1] = y === 0 ? 0 : y;
+    return out;
+}
+
+/**
  * Write a WORLD-space direction as a basis-relative move. The inverse of {@link moveWorldDirection} at
  * `basisYaw = 0`, which is where every steering primitive operates.
  *

@@ -38,7 +38,7 @@ import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
 import { gatherParticleLocalLight } from '../particles/particleLighting';
-import { billboardMatrix } from './billboard';
+
 import type { Material } from '../material';
 
 /**
@@ -97,6 +97,18 @@ const NO_BATCH = -1;
 const RECT_PAD_PX = 2;
 /** A cull mode as a digit of the batch key. */
 const CULL_DIGIT: Record<string, number> = { none: 0, back: 1, front: 2 };
+/**
+ * A side view's sprite depth key (Tilemap.entitySort 'none'): past every tile band's in the entity band, so
+ * sprites draw over that layer's tiles. Far below where float64 loses a Z's worth of precision.
+ */
+const SIDE_VIEW_DEPTH = 1e9;
+
+/** The highest sorting order of a particle system's emitters: where it sorts as one item. */
+function emitterOrder(node: ParticleSystemNode): number {
+    let order = 0;
+    for (const e of node.system.emitters) order = Math.max(order, e.render.sortingOrder);
+    return order;
+}
 
 /** `fresh`, holding `old`'s values: a list buffer grown in place of the old one. */
 function grown<T extends Float32Array | Float64Array | Int32Array | Uint8Array>(old: T, fresh: T): T {
@@ -134,8 +146,9 @@ export class Sprite2DPasses {
      * share a tileset, blend and sides go out as one instanced draw wherever the reordering it takes cannot
      * change a pixel, every per-sprite value riding in the sprite's object-table record.
      */
-    public render2DPass(scene: Scene): void {
-        this._beginList(this._targets.scene.renderTarget);
+    public render2DPass(scene: Scene, target: RenderTarget = this._targets.scene.renderTarget): void {
+        this._passTarget = target;
+        this._beginList(target);
         // Scene content only. The editor's light/sound/probe icons are billboards in `scene.sprites`
         // too, and they belong to the overlay layer — see `EditorOverlays.renderEditorOverlay`. Not one
         // inside an occlusion volume the camera cannot see.
@@ -145,14 +158,26 @@ export class Sprite2DPasses {
         const tilemaps: TilemapNode[] = [];
         for (const node of scene.tilemaps) if (node.visible) tilemaps.push(node);
 
-        // By sorting order (Sprite.sortingOrder), then back-to-front so blended sprites composite correctly.
+        // Whether the scene's particles draw here rather than in their own pass (a 2D scene, or an
+        // orthographic view over tilemaps): then they join the list, sorted with everything else.
+        const particles = this._particlePasses.isFlatParticleScene(scene);
+
         // Selection outlines come from the mask pass, so there is no special-casing of the selected sprite here.
-        if (tilemaps.length === 0) {
+        // Before the pass opens: a chunk whose tiles changed rebuilds its mesh, an upload.
+        if (tilemaps.length > 0) this._collectTilemapItems(scene, tilemaps, particles);
+        else if (scene.dimension === '2D') this._collectFlatItems(scene);
+        else {
+            // A 3D scene: by sorting order (Sprite.sortingOrder), then back-to-front so blended sprites
+            // composite correctly.
             const order = this._sortByOrderThenDistance();
             for (let p = 0; p < this._spriteCount; p++) this._pushItem(KIND_SPRITE, order[p]);
+            // An orthographic view whose tilemaps are all hidden: its particles still draw, after the sprites.
+            if (particles) for (const node of scene.particleSystems) {
+                if (!node.visible || this._sys.visibility.volumeCulled(node)) continue;
+                this._pushItem(KIND_PARTICLES, this._particleNodes.length);
+                this._particleNodes.push(node);
+            }
         }
-        // Before the pass opens: a chunk whose tiles changed rebuilds its mesh, an upload.
-        else this._collectTilemapItems(scene, tilemaps);
 
         // One pass for the whole interleaved list. Every item's pipeline depth-tests without writing
         // depth, so 3D geometry still occludes the 2D layer and the 2D layer never occludes itself.
@@ -230,7 +255,8 @@ export class Sprite2DPasses {
         this._spriteAdditive[s] = additive ? 1 : 0;
         const blendDigit = additive ? BLEND_ADDITIVE : blendClass;
         // A lit sprite (Sprite.lit) draws with its own program and material; the overlay's icons are never lit.
-        const lit = blendClass !== BLEND_OVERLAY && sprite.lit;
+        // Nor is anything in a flat 2D frame yet, which builds no 3D light grid for the lit program to read.
+        const lit = blendClass !== BLEND_OVERLAY && sprite.lit && !this._view.flat2D;
         this._spriteLit[s] = lit ? 1 : 0;
         let key: number;
         if (lit) {
@@ -256,7 +282,7 @@ export class Sprite2DPasses {
         if (this._litGridState < 0) {
             const pipeline = this._pipelines.memoized(this._memo, this, 'spriteLit', SpriteLitProgram, {
                 cullMode: 'none', depthStencil: DEPTH_TEST, blend: DEFAULT_BLEND, vertex: 'model', builtFor: 'sprite',
-                target: this._targets.scene.renderTarget,
+                target: this._passTarget ?? this._targets.scene.renderTarget,
             });
             this._litGridState = this._bindGroups.declaresFrameLighting(pipeline) && !this._host.thumbnailMode
                 && !this._view.capturing ? 1 : 0;
@@ -319,6 +345,35 @@ export class Sprite2DPasses {
         return this._argsort.byBandThenDepth(orders, keys, n, this._sortIndex);
     }
 
+    /**
+     * A 2D scene with no tilemap: its sprites and particle systems by sorting order, then by depth along the
+     * view -- farther first -- and then in scene order. Depth is the world Z (what a 2D scene stacks along),
+     * signed by the way the camera faces it: a camera's view direction is never exactly along Z in floating
+     * point, and a distance or a full view depth would order two sprites at the same Z by how far from the
+     * centre of the screen they stand.
+     */
+    private _collectFlatItems(scene: Scene): void {
+        const sign = this._view.camera.viewMatrix[10] >= 0 ? 1 : -1;
+        for (let s = 0; s < this._spriteCount; s++) {
+            const node = this._spriteNodes[s];
+            this._pushUnsorted(KIND_SPRITE, s, node.sprite.sortingOrder, sign * node.worldPosition[2]);
+        }
+        for (const node of scene.particleSystems) {
+            if (!node.visible || this._sys.visibility.volumeCulled(node)) continue;
+            this._pushUnsorted(KIND_PARTICLES, this._particleNodes.length, emitterOrder(node), sign * node.worldPosition[2]);
+            this._particleNodes.push(node);
+        }
+        this._sortUnsorted();
+    }
+
+    /** The collected list in (band, depth) order, stable, into the draw list. */
+    private _sortUnsorted(): void {
+        const n = this._unsortedCount;
+        this._growSort(n);
+        const order = this._argsort.byBandThenDepth(this._unsortedBand, this._unsortedDepth, n, this._sortIndex);
+        for (let p = 0; p < n; p++) this._pushItem(this._unsortedKind[order[p]], this._unsortedRef[order[p]]);
+    }
+
     private _growSort(n: number): void {
         if (this._sortKeys.length >= n) return;
         const size = Math.max(64, n + (n >> 1));
@@ -331,28 +386,33 @@ export class Sprite2DPasses {
      * A scene with tilemaps: its sprites, particle systems and visible tile chunks (or their depth bands) as
      * one list, in (band, depth) order. Ties keep that insertion order (the sort is stable), as they always did.
      */
-    private _collectTilemapItems(scene: Scene, tilemaps: readonly TilemapNode[]): void {
+    private _collectTilemapItems(scene: Scene, tilemaps: readonly TilemapNode[], particles: boolean): void {
         // Sprites join the first tilemap's entity layer. With several tilemaps in one scene the first
         // one wins rather than the pass guessing — a scene that needs different bands per region should
         // say so by ordering its layers, not by which map happened to be traversed first.
         const host = tilemaps[0].tilemap;
         const entityBand = host.layers[host.entityLayer]?.cfg.order ?? 0;
+        // A side view (Tilemap.entitySort 'none') puts its sprites and particles over the entity layer's
+        // tiles, then in sorting order and Z, then scene order: the depth key past every tile's (a tile
+        // band's is at most its row's -Y, a layer's 0), plus the signed Z as `_collectFlatItems` takes it.
+        const sideView = host.entitySort === 'none';
+        const zSign = this._view.camera.viewMatrix[10] >= 0 ? 1 : -1;
         for (let s = 0; s < this._spriteCount; s++) {
             const sprite = this._spriteNodes[s];
             // The sprite's BASE, not its centre: a character's feet are what sorts against a trunk row. Its
             // sorting order offsets its band, as an emitter's does below.
-            const base = sprite.worldPosition[1] - sprite.worldScale[1] * 0.5;
-            this._pushUnsorted(KIND_SPRITE, s, entityBand + sprite.sprite.sortingOrder, -base);
+            const depth = sideView ? SIDE_VIEW_DEPTH + zSign * sprite.worldPosition[2] : -this._baseY(sprite);
+            this._pushUnsorted(KIND_SPRITE, s, entityBand + sprite.sprite.sortingOrder, depth);
         }
         // Particle systems sort as one item by their emitter's Y, like a sprite's base, in the entity
         // band offset by the highest emitter sorting order — so "in front of the player" is authored,
-        // not an accident of traversal.
-        for (const particles of scene.particleSystems) {
-            if (!particles.visible || this._sys.visibility.volumeCulled(particles)) continue;
-            let order = 0;
-            for (const e of particles.system.emitters) order = Math.max(order, e.render.sortingOrder);
-            this._pushUnsorted(KIND_PARTICLES, this._particleNodes.length, entityBand + order, -particles.worldPosition[1]);
-            this._particleNodes.push(particles);
+        // not an accident of traversal. Only where they draw here: a perspective view over a tilemap
+        // draws them in their own pass, and drew them twice when this took them too.
+        if (particles) for (const node of scene.particleSystems) {
+            if (!node.visible || this._sys.visibility.volumeCulled(node)) continue;
+            const depth = sideView ? SIDE_VIEW_DEPTH + zSign * node.worldPosition[2] : -node.worldPosition[1];
+            this._pushUnsorted(KIND_PARTICLES, this._particleNodes.length, entityBand + emitterOrder(node), depth);
+            this._particleNodes.push(node);
         }
 
         for (const node of tilemaps) {
@@ -390,10 +450,7 @@ export class Sprite2DPasses {
             }
         }
 
-        const n = this._unsortedCount;
-        this._growSort(n);
-        const order = this._argsort.byBandThenDepth(this._unsortedBand, this._unsortedDepth, n, this._sortIndex);
-        for (let p = 0; p < n; p++) this._pushItem(this._unsortedKind[order[p]], this._unsortedRef[order[p]]);
+        this._sortUnsorted();
     }
 
     /** Remember one tile draw (a chunk, or one of its depth bands) and return its slot. */
@@ -477,7 +534,7 @@ export class Sprite2DPasses {
                 this._drawSpriteBatch(pass, ref, record, n, blend, blendClass);
                 record += n;
             } else if (kind === KIND_PARTICLES) {
-                this._particlePasses.particles.draw([this._particleNodes[ref]], this._particlePasses.particleDrawFrame(scene!, pass, this._targets.scene.renderTarget));
+                this._particlePasses.particles.draw([this._particleNodes[ref]], this._particlePasses.particleDrawFrame(scene!, pass, this._passTarget ?? this._targets.scene.renderTarget));
             } else {
                 this._drawTileBand(this._tileNodes[ref], this._tileLayers[ref], this._tileChunks[ref],
                                    this._tileOffsets[ref], this._tileCounts[ref], pass);
@@ -494,7 +551,7 @@ export class Sprite2DPasses {
         // the opaque surface BEHIND it (chunks/spriteForward.wgsl, against the scene's depth snapshot), so a
         // flame set into its torch head or logs melts into them instead of being cut along a line. Off where
         // there is no live snapshot (a thumbnail, the overlay's icons).
-        const soft = blendClass !== BLEND_OVERLAY && !this._host.thumbnailMode ? sprite.softness : 0;
+        const soft = blendClass !== BLEND_OVERLAY && !this._host.thumbnailMode && !this._view.flat2D ? sprite.softness : 0;
         // From the tile on screen: an animated sprite follows its frame's overdrive. A sprite that takes less
         // than the whole exposure (Sprite.exposureWeight) is divided by the rest of it here; the tonemapper
         // multiplies by all. A sprite that burns with a light (Sprite.followLight) swells and dims on the
@@ -503,7 +560,12 @@ export class Sprite2DPasses {
         const drive = node.overdrive * node.lightFollowScale;
         const intensity = weight < 1 && this._view.exposure > 0 ? drive * Math.pow(this._view.exposure, weight - 1) : drive;
         const ambient = this._spriteLit[s] ? this._litAmbient(node, s) : null;
-        packSpriteRecord(out, offset, this._spriteMatrices, s * 16, dissolveOf(node.effectiveFade), node.uvRectInto(this._uv),
+        // A mirrored sprite reads its tile backwards along the flipped axis (the pivot mirrored with it in the
+        // matrix, SpriteNode.quadMatrixInto): the record's UV scale goes negative and the shader needs no word.
+        const uv = node.uvRectInto(this._uv);
+        if (sprite.flipX) { const u = uv[0]; uv[0] = uv[2]; uv[2] = u; }
+        if (sprite.flipY) { const v = uv[1]; uv[1] = uv[3]; uv[3] = v; }
+        packSpriteRecord(out, offset, this._spriteMatrices, s * 16, dissolveOf(node.effectiveFade), uv,
                          soft, sprite.tint, sprite.opacity, intensity, ambient);
         frameStats.objects++;
         frameStats.spritesDrawn++;
@@ -568,7 +630,8 @@ export class Sprite2DPasses {
         this._materials.setDissolve(0, false);
         // The per-batch values go INTO the lead's properties: MaterialSync skips a repeat write by material,
         // so a write past `applyProperties` would leave its memo describing a block it no longer matches.
-        const live = blendClass !== BLEND_OVERLAY && !this._host.thumbnailMode ? 1 : 0;
+        // No live snapshot in a thumbnail, for the overlay's icons, or in a flat 2D frame (which takes none).
+        const live = blendClass !== BLEND_OVERLAY && !this._host.thumbnailMode && !this._view.flat2D ? 1 : 0;
         material.properties.set('depthParams', [cam.near, cam.far, cam.type === 'orthographic' ? 1 : 0, live]);
         const grid = lit && this._litGrid();
         if (lit) this._setBatchLight(lead, material, s, grid);
@@ -715,9 +778,12 @@ export class Sprite2DPasses {
     private _sortBands = new Float64Array(0);
     private _sortIndex = new Int32Array(0);
 
+    /** The target this frame's 2D pass draws into (`render2DPass`). */
+    private _passTarget: RenderTarget | undefined = undefined;
+
     /** Open the pass the tiles and sprites share. Loads and stores: this draws over the composited scene. */
     private _begin2DPass(): RenderPassEncoder {
-        return this._passes.beginFullscreenPass(this._targets.scene.renderTarget, '2d', false, undefined, false);
+        return this._passes.beginFullscreenPass(this._passTarget ?? this._targets.scene.renderTarget, '2d', false, undefined, false);
     }
 
     /** Frustum test for one chunk, in world space. `origin` is the owning node's world position. */
@@ -768,12 +834,11 @@ export class Sprite2DPasses {
         // offset ride in this matrix and ONLY here, never on the node's transform.
         const cam = this._view.camera.position;
         const origin = node.worldPosition;
-        const model = mat4.create();
-        mat4.fromTranslation(model, [
-            origin[0] + cam[0] * (1 - layer.cfg.parallax[0]),
-            origin[1] + cam[1] * (1 - layer.cfg.parallax[1]),
-            origin[2] + layer.cfg.zOffset,
-        ]);
+        const model = this._tileModel;
+        mat4.identity(model);
+        model[12] = origin[0] + cam[0] * (1 - layer.cfg.parallax[0]);
+        model[13] = origin[1] + cam[1] * (1 - layer.cfg.parallax[1]);
+        model[14] = origin[2] + layer.cfg.zOffset;
         this._shaderManager.setUniform('u_model', model);
         this._shaderManager.setUniform('u_preExposure', this._view.drawPreExposure);
 
@@ -795,9 +860,23 @@ export class Sprite2DPasses {
     /** {@link spriteBillboardMatrix} into `out`: the per-draw path's pooled matrix. */
     private _billboardInto(node: SpriteNode, out: mat4): mat4 {
         const cam = this._view.camera;
-        return billboardMatrix(out, node.worldTransform, node.worldScale, node.constraints,
-                               cam.viewMatrix, cam.position, cam.type !== 'orthographic');
+        return node.quadMatrixInto(out, cam);
     }
 
+    /**
+     * The world Y of a sprite's BASE, the bottom edge of its image: what a Y-sorted map orders it by. Its
+     * origin less the share of its height below the pivot, so a character pivoted at its feet sorts by
+     * where it stands; a centred unit sprite by its centre less half its scale, as it always did.
+     */
+    private _baseY(node: SpriteNode): number {
+        const sprite = node.sprite;
+        const size = sprite.quadSize(node.currentTile, this._quadSize);
+        const py = sprite.flipY ? 1 - sprite.pivot[1] : sprite.pivot[1];
+        return node.worldPosition[1] - py * size[1] * node.worldScale[1];
+    }
+    private readonly _quadSize: [number, number] = [1, 1];
+
     private readonly _spriteMatrix = mat4.create();
+    /** A tile band's model matrix, rewritten per draw. */
+    private readonly _tileModel = mat4.create();
 }

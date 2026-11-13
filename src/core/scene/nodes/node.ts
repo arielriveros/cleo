@@ -277,6 +277,31 @@ export class Node {
   public onTriggerExit(other: Node): void {}
 
   /**
+   * Called when the node a 2D camera follows (Camera2DNode.followTarget) walks into a room (Room2DNode): on
+   * that node with the room, AND on the room with the node, so a room can wake its enemies and a player
+   * can mark its map without either knowing the other. Always paired with a later {@link onRoomExit}.
+   *
+   * @param other The room entered, or (on a room) the node that entered it.
+   */
+  public onRoomEnter(other: Node): void {}
+
+  /** Called when what {@link onRoomEnter} reported ends: the followed node left the room. */
+  public onRoomExit(other: Node): void {}
+
+  /**
+   * Called when a frame of a sprite clip comes on screen and carries an event (AnimatedSpriteNode clips):
+   * on the sprite and on its parent, so a script on a character hears its sprite's footsteps and sword
+   * hits. (A skinned model's clip events are the Animator's: `animator.onAnimationEvent(listener)`.)
+   *
+   * @param event The event's name, e.g. `'hit'`.
+   * @param clip The clip it is on.
+   */
+  public onAnimationEvent(event: string, clip: string): void {}
+
+  /** Called when a sprite clip that plays once reaches its end: on the sprite and on its parent. */
+  public onAnimationFinished(clip: string): void {}
+
+  /**
    * Called when an input action this node cares about changes phase — pressed, held past its hold
    * time, or released. Actions are authored in the editor's Input panel and named there, so the same
    * handler works on a keyboard, a gamepad and a touch screen.

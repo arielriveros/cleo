@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { stripDimensionData } from '../src/features/publish/stripDimensionData';
+import { stripDimensionData, stampSceneDimension } from '../src/features/publish/stripDimensionData';
 import { collectPublishedTextureIds } from '../src/utils/references';
 
 // A serialized scene tree in the shape buildGameData emits: a plain root with typed children.
@@ -109,5 +109,25 @@ describe('collectPublishedTextureIds — tilemaps', () => {
   it('tolerates a tilemap with no tilesets at all', () => {
     const kept = new Set<string>();
     expect(() => collectPublishedTextureIds({ type: 'tilemap', tilemap: {}, children: [] }, kept)).not.toThrow();
+  });
+});
+
+describe('stampSceneDimension', () => {
+  // The player's engine reads a scene's dimension off its root (Scene.dimension picks the flat 2D frame),
+  // and a scene saved before the engine knew it carries none: the build writes the project's record.
+  it('records 2D on the scene root', () => {
+    const json = scene();
+    stampSceneDimension(json, '2D');
+    expect(json.dimension).toBe('2D');
+  });
+
+  it('removes it for 3D, which is what an absent field reads as', () => {
+    const json: any = { ...scene(), dimension: '2D' };
+    stampSceneDimension(json, '3D');
+    expect('dimension' in json).toBe(false);
+  });
+
+  it('ignores what is not a scene', () => {
+    expect(() => stampSceneDimension(null, '2D')).not.toThrow();
   });
 });

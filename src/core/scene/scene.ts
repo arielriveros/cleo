@@ -53,6 +53,12 @@ import { getTemplate, templateNames } from "./templates";
 import { followSocket, resolveSocketOwner } from "./socketFollow";
 import { PrecipitationRig } from "./precipitationRig";
 import type { SequenceNode } from "./nodes/sequenceNode";
+import type { Camera2DNode } from "./nodes/camera2DNode";
+import type { Room2DNode } from "./nodes/room2DNode";
+import type { CharacterBody2DNode } from "./nodes/characterBody2DNode";
+import type { Body2DNode } from "./nodes/body2DNode";
+import type { Area2DNode } from "./nodes/area2DNode";
+import { World2D } from "../../physics2d/world2d";
 
 /** Object-space up, rotated by the camera's world orientation to give the audio listener its up axis. */
 const UP_AXIS: vec3 = vec3.fromValues(0, 1, 0);
@@ -97,6 +103,14 @@ interface ScheduledTimer {
 
 /** How long a despawn dissolves by default during play, in seconds. See `Scene.despawnFadeSeconds`. */
 export const DEFAULT_DESPAWN_FADE_SECONDS = 0.8;
+
+/** What a scene is authored as. See `Scene.dimension`. */
+export type SceneDimension = '2D' | '3D';
+
+/** The dimension a serialized scene root (`json.scene`) records: '2D' only when it says so. */
+export function sceneDimensionOf(sceneJson: { dimension?: unknown } | null | undefined): SceneDimension {
+    return sceneJson?.dimension === '2D' ? '2D' : '3D';
+}
 
 /** The node kinds the scene's typed lists are built from, one bit each (see {@link kindsOf}). */
 const K = {
@@ -169,6 +183,14 @@ export class Scene {
     private _particleSystems: Set<ParticleSystemNode> = new Set();
     // Sequence players, found by node type (not by the `kindsOf` mask, whose 31 bits are all taken).
     private _sequences: Set<SequenceNode> = new Set();
+    // The 2D cameras (a CameraNode kind, told apart by node type) and the rooms they confine to, likewise.
+    private _cameras2D: Set<Camera2DNode> = new Set();
+    private _rooms2D: Set<Room2DNode> = new Set();
+    // The 2D physics' bodies, colliders and areas, by node type too; and the world that moves them.
+    private _bodies2D: Set<CharacterBody2DNode> = new Set();
+    private _colliders2D: Set<Body2DNode> = new Set();
+    private _areas2D: Set<Area2DNode> = new Set();
+    private _physics2D: World2D | null = null;
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
     private _exposureVolumes: Set<ExposureVolumeNode> = new Set();
@@ -468,6 +490,13 @@ export class Scene {
      * `Node.remove`). 0 makes every despawn immediate. Serialized with the scene.
      */
     public despawnFadeSeconds: number = DEFAULT_DESPAWN_FADE_SECONDS;
+    /**
+     * What the scene IS: a 2D scene (tilemaps, sprites, an orthographic camera) draws through the renderer's
+     * flat 2D frame instead of the deferred 3D one. The editor keeps it in step with the scene's authored
+     * dimension; the published player reads it from the scene JSON. Serialized only when '2D', so a 3D
+     * scene's JSON is unchanged and anything saved before the field existed reads as 3D.
+     */
+    public dimension: SceneDimension = '3D';
     private readonly _fadingNodes = new Set<Node>();
 
     /** @internal Node bookkeeping for a dissolve in progress. */
@@ -594,6 +623,18 @@ export class Scene {
 
             sceneStats.nodeLoopMs = performance.now() - loopStart;
 
+            // THE 2D PHYSICS PASS. After every script has said what its body wants (a jump, a steer), before
+            // the cameras follow: 2D character bodies move through the tilemaps and 2D colliders, and 2D
+            // areas report who came and went. Only while the game plays.
+            if ((this._bodies2D.size > 0 || this._areas2D.size > 0) && this._hasStarted && !paused && !CleoEngine.authoringMode) {
+                const physicsStart = performance.now();
+                authoring.derived++;
+                try { this.physics2D.step(delta, this); }
+                catch (error) { Logger.error(`Error in the 2D physics: ${error}`, 'Scene'); }
+                finally { authoring.derived--; }
+                sceneStats.physics2DMs = performance.now() - physicsStart;
+            }
+
             // Camera rigs must run LAST, after every onUpdate: a follow target sorting later in the
             // traversal would not have moved yet, and the rig would trail it by a frame. The extra
             // full-tree transform pass is what makes the targets' world positions current.
@@ -604,7 +645,8 @@ export class Scene {
             const followers = this._socketFollowers;
             const cloths = this._cloths;
             const skinnedCloths = this._skinnedCloths;
-            if (rigs.size > 0 || followers.size > 0 || cloths.size > 0 || skinnedCloths.size > 0) {
+            const cameras2D = this._cameras2D;
+            if (rigs.size > 0 || followers.size > 0 || cloths.size > 0 || skinnedCloths.size > 0 || cameras2D.size > 0) {
                 // Counted as transform cost, not rig cost: it is a second full-tree pass.
                 const rigTransformStart = performance.now();
                 this._root.updateTransforms();
@@ -644,6 +686,20 @@ export class Scene {
                     CleoEngine.authoringMode = authoring;
                 }
                 sceneStats.rigMs = performance.now() - rigStart;
+            }
+            // The 2D cameras, beside the rigs and for the same reason: every target has moved and the
+            // transform pass above made its world position current. They move only while the game plays.
+            if (cameras2D.size > 0) {
+                const playing = this._hasStarted && !paused && !CleoEngine.authoringMode;
+                authoring.derived++;
+                try {
+                    for (const cam of cameras2D) {
+                        try { cam.lateUpdate(delta, unscaledDelta, playing, this); }
+                        catch (error) { Logger.error(`Error in 2D camera ${cam.name}: ${error}`, 'Scene'); }
+                    }
+                } finally {
+                    authoring.derived--;
+                }
             }
 
             // Last: everything has moved — scripts, animators, socket followers, cloth, camera rigs — so a
@@ -928,6 +984,11 @@ export class Scene {
         this._skinnedCloths = new Set();
         this._particleSystems = new Set();
         this._sequences = new Set();
+        this._cameras2D = new Set();
+        this._rooms2D = new Set();
+        this._bodies2D = new Set();
+        this._colliders2D = new Set();
+        this._areas2D = new Set();
         this._forceFields = new Set();
         this._waterVolumes = new Set();
         this._exposureVolumes = new Set();
@@ -950,6 +1011,10 @@ export class Scene {
             // x every node, on every structural change: each spawned effect and each removal).
             const kinds = kindsOf(node.constructor as Function);
             if (kinds === 0 && node.nodeType === 'sequence') { this._sequences.add(node as SequenceNode); continue; }
+            if (kinds === 0 && node.nodeType === 'room2D') { this._rooms2D.add(node as Room2DNode); continue; }
+            if (kinds === 0 && node.nodeType === 'characterBody2D') { this._bodies2D.add(node as CharacterBody2DNode); continue; }
+            if (kinds === 0 && node.nodeType === 'body2D') { this._colliders2D.add(node as Body2DNode); continue; }
+            if (kinds === 0 && node.nodeType === 'area2D') { this._areas2D.add(node as Area2DNode); continue; }
             if (kinds === 0 && !node.socketAttachment && !(node.drawDistance > 0)) continue;
             if (kinds & K.LIGHT)
                 this._lights.add(node as LightNode);
@@ -1019,8 +1084,10 @@ export class Scene {
                 // The highest priority (the first found among equals): what `weather` hands a script.
                 if (!this._weather || weather.priority > this._weather.priority) this._weather = weather;
             }
-            if (kinds & K.CAMERA)
+            if (kinds & K.CAMERA) {
                 this._cameras.add(node as CameraNode);
+                if (node.nodeType === 'camera2D') this._cameras2D.add(node as Camera2DNode);
+            }
             // A root is also a UINode and lands in both sets: _uiRoots drives the layout pass, _uiNodes is
             // what the DOM layer and the editor enumerate.
             if (kinds & K.UI_NODE)
@@ -1066,6 +1133,7 @@ export class Scene {
                 output.scene.ambientLight = [this._ambientLight[0], this._ambientLight[1], this._ambientLight[2]];
                 if (this.despawnFadeSeconds !== DEFAULT_DESPAWN_FADE_SECONDS)
                     output.scene.despawnFadeSeconds = this.despawnFadeSeconds;
+                if (this.dimension === '2D') output.scene.dimension = '2D';
                 if (this._environmentMap) {
                     try {
                         output.scene.environmentMap = TextureManager.Instance.serializeCubeMap(this._environmentMap);
@@ -1106,6 +1174,7 @@ export class Scene {
         const fade = json.scene?.despawnFadeSeconds;
         this.despawnFadeSeconds = typeof fade === 'number' && Number.isFinite(fade) ? Math.max(0, fade)
             : DEFAULT_DESPAWN_FADE_SECONDS;
+        this.dimension = sceneDimensionOf(json.scene);
         for (const node of Array.from(this._fadingNodes)) node.cancelFade();
         this._fadingNodes.clear();
 
@@ -1220,6 +1289,54 @@ export class Scene {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._sequences;
+    }
+
+    /** Every 2D game camera ({@link Camera2DNode}) in the scene. */
+    public get cameras2D(): Set<Camera2DNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._cameras2D;
+    }
+
+    /** Every 2D room ({@link Room2DNode}) in the scene, in traversal order. */
+    public get rooms2D(): Set<Room2DNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._rooms2D;
+    }
+
+    /** Every 2D character body ({@link CharacterBody2DNode}) in the scene. */
+    public get bodies2D(): Set<CharacterBody2DNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._bodies2D;
+    }
+
+    /** Every 2D box collider ({@link Body2DNode}) in the scene. */
+    public get colliders2D(): Set<Body2DNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._colliders2D;
+    }
+
+    /** Every 2D trigger area ({@link Area2DNode}) in the scene. */
+    public get areas2D(): Set<Area2DNode> {
+        if (this._dirty)
+            this._breadthFirstTraversal();
+        return this._areas2D;
+    }
+
+    /**
+     * The scene's 2D physics (src/physics2d): what moves its 2D bodies every frame the game plays, and what a
+     * script queries -- `raycast(x, y, dx, dy, maxDistance)`, `overlapsSolid(minX, minY, maxX, maxY)`. Made on
+     * first use; the world it queries is the one the last step built (or a fresh one, made here, before any).
+     */
+    public get physics2D(): World2D {
+        if (!this._physics2D) {
+            this._physics2D = new World2D();
+            this._physics2D.refresh(this);
+        }
+        return this._physics2D;
     }
 
     public get lights(): Set<LightNode> {

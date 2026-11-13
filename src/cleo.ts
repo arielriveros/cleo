@@ -3,8 +3,8 @@ export { CleoEngine } from "./core/engine";
 export type { EngineInitializeOptions } from "./core/engine";
 export { Camera } from "./core/camera";
 export { Geometry } from "./core/geometry";
-export { Scene } from "./core/scene/scene";
-export type { InstantiateOptions } from "./core/scene/scene";
+export { Scene, sceneDimensionOf } from "./core/scene/scene";
+export type { InstantiateOptions, SceneDimension } from "./core/scene/scene";
 export { registerTemplates, clearTemplates, getTemplate, templateNames } from "./core/scene/templates";
 export type { NodeTemplate } from "./core/scene/templates";
 export { parseNodeJson } from "./core/scene/nodes/parseNodeJson";
@@ -25,11 +25,33 @@ export { CameraRigNode } from "./core/scene/nodes/cameraRigNode";
 // character turns intent into motion and never learns where it came from.
 export { CharacterNode } from "./core/scene/nodes/characterNode";
 export { ControllerNode, CONTROL_SOURCES, AIM_SOURCES, BRAIN_KINDS } from "./core/scene/nodes/controllerNode";
+export type { Pawn } from "./core/scene/nodes/controllerNode";
 export type { BrainKind } from "./core/scene/nodes/controllerNode";
 export type { ControlSource, AimSource, BlackboardValue } from "./core/scene/nodes/controllerNode";
 export type { FollowSpace, AimMode } from "./core/scene/nodes/cameraRigNode";
 export { LandscapeNode } from "./core/scene/nodes/landscapeNode";
 export { TilemapNode } from "./core/scene/nodes/tilemapNode";
+export { Camera2DNode } from "./core/scene/nodes/camera2DNode";
+export { Room2DNode } from "./core/scene/nodes/room2DNode";
+export { ParallaxLayerNode } from "./core/scene/nodes/parallaxLayerNode";
+export { CharacterBody2DNode } from "./core/scene/nodes/characterBody2DNode";
+export { Body2DNode } from "./core/scene/nodes/body2DNode";
+export type { Body2DKind } from "./core/scene/nodes/body2DNode";
+export { Area2DNode } from "./core/scene/nodes/area2DNode";
+export { World2D } from "./physics2d/world2d";
+export { advanceClip, clipLength, frameDuration, normalizedTime as clipNormalizedTime, stepSpriteMachine, parseSpriteAnimationSet, parseSpriteClip, cloneSpriteAnimationSet, createPlayhead } from "./animation/spriteAnimation";
+export type { SpriteAnimationSet, SpriteClip, SpriteFrame, SpriteFrameHitbox, SpriteClipLoop, SpriteStateMachine, SpriteMachineState, SpriteMachineTransition, ClipPlayhead } from "./animation/spriteAnimation";
+export {
+    BODY2D_MOVEMENTS, LOCOMOTION_2D_DEFAULTS, jumpPhysics, locomotion2DTuning, stepLocomotion2D, tickLocomotion2D,
+    integrateGravity2D, createLocomotion2DState, createLocomotion2DEvents, createContacts2D,
+} from "./physics2d/locomotion2d";
+export type {
+    Body2DMovement, Locomotion2DTuning, Locomotion2DState, Locomotion2DEvents, Contacts2D,
+} from "./physics2d/locomotion2d";
+export { stepBody2D, MAX_SUBSTEP_2D } from "./physics2d/body2d";
+export type { Body2DSim, Body2DStepHook } from "./physics2d/body2d";
+export { TILE_NONE, TILE_SOLID, TILE_ONE_WAY, TILE_SLOPE } from "./physics2d/types";
+export type { RayHit2D } from "./physics2d/collide2d";
 export { LightNode } from "./core/scene/nodes/lightNode";
 export type { LightType, LightBakeSnapshot } from "./core/scene/nodes/lightNode";
 export { LightProbeNode } from "./core/scene/nodes/lightProbeNode";
@@ -192,7 +214,7 @@ export type { Condition, ConditionGroup, ConditionNode, ConditionOp, ConditionCo
 // `CharacterNode` consumes it, so neither half knows about the other.
 export {
     INTENT_REQUESTS, createIntent, clearIntent, raiseRequest, isRequested, consumeRequest, decayRequests,
-    moveWorldDirection, setMoveWorld, applyPlayerReading,
+    moveWorldDirection, setMoveWorld, setMove2D, applyPlayerReading,
 } from "./core/control/intent";
 export type { ControlIntent, IntentRequest, PlayerReading, Vec2 as ControlVec2 } from "./core/control/intent";
 export {
@@ -203,7 +225,7 @@ export type {
 } from "./core/control/locomotion";
 export {
     STEERING_DEFAULTS, steeringTuning, createSteeringState, seek, flee, arrive, pursue, followTarget,
-    wander, separate, align, cohere, avoidObstacles, blendSteering, intentFromDesired,
+    wander, separate, align, cohere, avoidObstacles, blendSteering, intentFromDesired, intentFromDesired2D,
 } from "./core/control/steering";
 export type {
     SteeringTuning, SteeringState, ProbeHit, FlockNeighbour,
@@ -211,7 +233,7 @@ export type {
 // The behaviour state machine: patrol -> chase -> attack as authored data. Reuses core/conditions.ts,
 // which is what keeps it small enough to be worth having.
 export {
-    AI_GOALS, BEHAVIOR_SENSES, BEHAVIOR_PARAM_TYPES, EMPTY_BEHAVIOR, createBehaviorRuntime, entryState,
+    AI_GOALS, BEHAVIOR_SENSES, BEHAVIOR_SENSE_TYPES, BEHAVIOR_PARAM_TYPES, EMPTY_BEHAVIOR, createBehaviorRuntime, entryState,
     stateNamed, stepBehavior, parseBehaviorMachine, parseBehaviorState, parseBehaviorTransition,
     parseBehaviorParameter, isDefaultBehaviorMachine,
 } from "./core/control/behavior";
@@ -271,9 +293,19 @@ export type { NavBakeInput, NavBakeSettings, NavBakeResult, TriangleSoup } from 
 export {
     REPATH_DEFAULTS, advancePath, clearNavPath, createNavPath, createRepathState, currentWaypoint,
     followPath, hasPath, insetCorners, markRepathed, onFinalWaypoint, remainingDistance, repathPolicy,
-    setNavPath, shouldRepath,
+    setNavPath, shouldRepath, NAV_ACTIONS,
 } from "./ai/navPath";
-export type { NavPath, RepathPolicy, RepathState } from "./ai/navPath";
+export type { NavPath, NavAction, RepathPolicy, RepathState } from "./ai/navPath";
+// 2D navigation: a platform graph (walks, jumps, drops) or an air grid, baked from the 2D collision world.
+export {
+    NavGraph2D, bakeNavGraph2D, serializeNavGraph2D, parseNavGraph2D, navGraph2DSourceHash, EMPTY_NAV_GRAPH_2D,
+    EDGE_WALK, EDGE_JUMP, EDGE_DROP, EDGE_DROP_THROUGH, EDGE_FLY,
+} from "./ai/navGraph2D";
+export type { NavGraph2DData, NavBakeStats2D, NavBounds2D } from "./ai/navGraph2D";
+export {
+    NAV_AGENT_2D_DEFAULTS, navAgent2D, followPath2D, simulatePath2D, createFollow2DState, createFollow2DOut,
+} from "./ai/navFollow2D";
+export type { NavAgent2D, Follow2DState, Follow2DOut, LegResult } from "./ai/navFollow2D";
 export { HistoryManager } from "./core/history";
 export type { HistoryEntry, HistoryOptions } from "./core/history";
 export { Mesh } from "./graphics/mesh";
@@ -286,8 +318,8 @@ export { customSeedTemplate, customSeedUniforms, tryCompileCustom, assembleCusto
 export type { ShaderDialect, WgslTranslator } from "./graphics/systems/customShaders";
 export { webgpuAvailableInBrowser, WEBGPU_IMPLEMENTED } from "./graphics/rhi/backendSelect";
 export type { BackendKind } from "./graphics/rhi/device";
-export { Renderer } from "./graphics/renderer";
-export type { SkeletonOverlay, RenderSettings, QualityPreset, ToneMapper } from "./graphics/renderer";
+export { Renderer, RENDER_2D_DEFAULTS, RENDER_3D_DEFAULTS } from "./graphics/renderer";
+export type { SkeletonOverlay, RenderSettings, QualityPreset, ToneMapper, Pipeline2D } from "./graphics/renderer";
 export { Skybox } from "./graphics/skybox";
 export { Texture } from "./graphics/texture";
 // The editor authors these: a texture asset's settings compile down to a TextureConfig.
@@ -513,6 +545,7 @@ export type { OctahedralImpostorInfo } from "./terrain/octahedralImpostor";
 export { FoliageColliderField, DEFAULT_FOLIAGE_COLLIDERS, foliageColliderPose } from "./terrain/foliageColliders";
 export type { FoliageColliderSettings } from "./terrain/foliageColliders";
 export { Tilemap, DEFAULT_FILL_LIMIT } from "./graphics/tilemap/tilemap";
+export type { EntitySort } from "./graphics/tilemap/tilemap";
 export type { TileEdit, TileOrientation } from "./graphics/tilemap/tilemap";
 export { TilemapLayer, defaultLayerConfig } from "./graphics/tilemap/tilemapLayer";
 export type { TilemapLayerConfig, LayerBounds } from "./graphics/tilemap/tilemapLayer";
@@ -545,7 +578,7 @@ export type { ScriptCompileOptions, ScriptModuleFactory } from "./core/scripting
 export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime";
 // Typed name fields (clip/sound/socket/template/child): plain strings the inspector offers a picker for.
 export { SOUNDS_GROUP, ownedSoundsGroup } from "./core/scripting/fieldTypes";
-export type { ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, ProjectTriggers } from "./core/scripting/fieldTypes";
+export type { ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, ProjectTriggers, SpriteClipName } from "./core/scripting/fieldTypes";
 export { Game, setGameHost, setMovieRender, type MovieRenderInfo } from "./core/game";
 export { TimeDilation, type DilateOptions } from "./core/timeDilation";
 export { showLoadingOverlay, nextFrame, whenFramesSmooth } from "./core/loadingOverlay";

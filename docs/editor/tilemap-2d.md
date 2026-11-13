@@ -3,7 +3,8 @@
 A 2D game in Cleo is a scene authored as **2D**: you get the Tilemap editor instead of Landscape, a
 unified Y-sorted 2D draw pass, and sprites instead of meshes.
 
-Set the dimension in [Scene settings](scene-authoring.md#scene-settings).
+Set the dimension in [Scene settings](scene-authoring.md#scene-settings). The
+[Duskwell example](duskwell-example.md) is a small metroidvania made with everything on this page.
 
 ## Tilesets
 
@@ -30,6 +31,7 @@ fits in) is dimmed, so a wrong tile size shows at once.
 | **Tile size** | Width and height of one tile, in pixels. The link button keeps them equal (square tiles). The chips set a common size in one click, and **Guess** takes the largest of 64, 32, 16 and 8 that divides the image into at least 4 × 4 tiles, or 16 when none does. |
 | **Margin** | A border around the whole atlas, in pixels, before the first tile. |
 | **Spacing** | The gap between adjacent tiles, in pixels. |
+| **Pixels per unit** | Art pixels in a world unit. Sprites drawn from the tileset take their size from it: a tile's pixel size over this, times the node's scale, so a 16 px tile at 16 is one unit and a 135 px character frame 8.4, and everything drawn from tilesets at the same value shares one pixel grid. **= tile** sets it to the tile width (one tile, one unit: the tilemap's default 1 × 1 cells). Off (0): the old rule, a sprite is a unit square sized by its scale. |
 | **Overdrive** | Brightness past white, in linear light (default 1). A tint can only darken a tile; overdrive makes it brighter than its texture, so fire, lava or magic crosses the bloom threshold and glows. Every sprite and tilemap tile drawn from the tileset gets it, unless a tile has its own. Around 3–4 is a strong glow at the default bloom settings; the slider runs to 8, and a typed value can go to 32. |
 
 ### Selected tiles
@@ -42,7 +44,7 @@ tiles (not its animation or auto-tile membership); **Clear** removes everything 
 
 | Field | What it does |
 |---|---|
-| **Solid** | The tile is a collider, on any tilemap layer with parallax 1. |
+| **Collision** | What a body meets on this tile, on any tilemap layer with parallax 1: **None**; **Solid**; **One-way platform** (stood on from above, passed from below and the sides, dropped through with down + jump); a **slope** (45°, or either half of a 26° slope, rising or falling), solid below its line; or a **half block**. [2D character bodies](#2d-physics) read every kind; 3D bodies the solid ones (a slope is given the matching collider outline). A slope flipped on X mirrors. |
 | **Anchor row** | Rows down from this tile that it depth-sorts at: a two-tall tree anchors at its trunk. |
 | **Z bias** | A world-space nudge to the tile's depth sort, for when anchoring alone gets it wrong. |
 | **Span** | The tile's footprint in cells, for a prop larger than one tile. |
@@ -125,8 +127,13 @@ Add one from **Sprites ▸ Tilemap** — orthogonal, 1×1 cells, one "Ground" la
 
 **Tilemap** — the node's inspector section: the grid kind — **orthogonal, isometric or hexagonal**,
 with an orientation, offset and side length for hexagons — the cell width and height, the
-[entity layer](#layers) sprites sort against, and the [collision depth](#collision). Painting and the
-layer stack are in [Tilemap mode](#painting).
+[entity layer](#layers) sprites sort against, the **sprite order** on it, and the
+[collision depth](#collision). Painting and the layer stack are in [Tilemap mode](#painting).
+
+- **Sprite order** — **By Y** (the default) suits a top-down map: a sprite sorts by the height of its base,
+  so a character lower on screen draws in front, and against a Y-sorted layer's tile rows. **Side view**
+  suits a platformer: sprites draw over the entity layer's tiles, by [sorting order](#sprites) and then
+  scene order, never by height, so a character jumping past another never slips behind it.
 
 Tilemaps are chunked and effectively infinite: you can paint outward as far as you like without
 declaring a size up front.
@@ -160,16 +167,80 @@ Each layer has its own tileset and its own place in the draw order. Use them to 
 detail, props and anything the player walks behind. Painting always targets the active layer, the
 one selected in the **Layers** panel; **+ Layer** adds one above.
 
-One layer can be marked the **entity layer**, which is the one gameplay treats as containing
-objects rather than scenery.
+One layer is the map's **entity layer**: the draw band sprites and particle systems join. Layers below it
+draw behind them and layers above it in front, and on it they order by the map's
+[sprite order](#tilemaps).
 
 ## Collision
 
-Mark tiles **solid** in the tileset, and the tilemap builds colliders for them — merged into as few
-boxes as possible, so a hand-painted floor becomes a handful of colliders rather than hundreds.
-**Collision depth** on the node controls how thick they are in the third axis.
+Give tiles a **collision** in the tileset — solid, a one-way platform, a slope — and the tilemap collides:
+nothing is placed per tile.
 
-Nothing else is needed; there is no per-tile collider to place.
+- **2D character bodies** ([2D physics](#2d-physics)) read the painted tiles directly, every kind of
+  collision, the moment a tile is painted or erased.
+- **3D bodies** on the XY plane collide with colliders the map builds from its solid tiles, merged into as
+  few boxes as possible, so a hand-painted floor becomes a handful of colliders rather than hundreds.
+  **Collision depth** on the node controls how thick they are in the third axis. A map only 2D bodies
+  walk on turns **3D colliders** off and builds none.
+
+## 2D physics
+
+2D games move their characters with the 2D physics, which reads tilemaps' tiles (solid, one-way, slopes)
+and 2D colliders, every frame the game plays.
+
+### Character Body 2D
+
+A **Character Body 2D** (**Sprites ▸ Character Body 2D**) is a character's body, the 2D twin of a
+[Character](ai-agents.md): a box standing on its feet at the node's position — give its sprite a pivot at the
+feet and the two line up. It slides along walls, lands on floors and one-way platforms, walks up and down
+slopes and steps (up to its **step height**), and keeps its sprite children facing the way it faces
+(**flip sprites**).
+
+It walks or flies, runs and jumps because something drives it: a **Controller** possesses it, as a 3D
+Character's does, reading the player's input actions or deciding as an AI. Undriven it falls and keeps
+whatever velocity a script gives it.
+
+- **Size** — the box's width and height.
+- **Layer** — the 2D layers it is on; an [Area 2D](#area-2d) sees it if the area looks for one of them.
+- **One-way platforms** — on, one-way platforms hold it up; off, it passes through them both ways, as a bat
+  or a ghost does.
+- **Driven by** — the controller possessing it, or **Add Player Controller** (reads **Move** and **Jump**)
+  and **Add AI Controller**, which add one as its last child.
+- **Movement** — **Walk**, on the ground under gravity, or **Fly**, on both axes with no gravity; its
+  **walk speed**, **run speed** (while the controller sprints), **acceleration**, and for a walker its
+  **deceleration** and **air control** (the share of steering it keeps in the air).
+- **Jump** — **jump height** and **time to apex**, the way a designer thinks, rather than a gravity and a
+  launch speed (both are shown); **fall gravity** above 1 falls faster than it rose, which reads as weight;
+  **coyote time** still jumps just after walking off a ledge, and a press within **jump buffer** before
+  landing jumps on landing. Down and jump on a one-way platform drops through it.
+- **Advanced** — **gravity scale**, which scripts change at run time, and **drive without a controller**.
+
+### Driving a 2D body
+
+The body owns walking and jumping; a game's own moves are its script's, the way the 3D examples add a roll
+or a lunge over a Character's walking. A dash, a double jump, a wall slide and wall jump, a jump that is
+shorter when the button is let go — Duskwell's warrior has all of them, in `examples/scripts/DuskPlayer.ts`.
+
+They go in the script's `onMove2D(dt, substep)`, which runs every physics substep (1/120 s or shorter),
+before the engine steers, so a move comes out the same at any frame rate. The script reads the body
+(`isGrounded`, `onWall`, `canJump`, `jumpRequested`) and writes `velocity2D`; `consumeJump()` takes a jump
+press for its own jump. Return `true` to own the substep: the engine's steering and jump skip it while
+gravity (times **gravity scale**) and collision still run — a dash returns `true` with gravity scale 0.
+See [Characters and controllers](../scripting/characters-and-controllers.md).
+
+### Collider 2D
+
+A **Collider 2D** (**Sprites ▸ Collider 2D**) is a box, centred on the node, that bodies collide with like tiles: **solid**, or a
+**one-way platform**. Move the node (a script, a sequence) and it is a moving platform: a body standing on
+it rides along. **Enabled** off and nothing collides with it (a door that opened).
+
+### Area 2D
+
+An **Area 2D** (**Sprites ▸ Area 2D**) is a trigger box, centred on the node and moved by its **offset**, that tells scripts what
+comes in and goes out — `onTriggerEnter(other)` and `onTriggerExit(other)`, on the area and on what came
+in. It sees bodies on the layers it **looks for**, and with **detect areas**, other areas (a sword's hitbox
+seeing an enemy's hurtbox). As the child of a character body it moves with it, its offset mirrored when
+the character faces left. A pickup, a checkpoint, a hazard, a hitbox.
 
 ## Sprites
 
@@ -197,7 +268,7 @@ better choice when the same animation is used in several places.
 - **Random start** — each copy starts on a random frame of its own list, so a row of the same sprite
   (torches along a wall) does not flicker in step. It applies when the sprite spawns.
 
-**Appearance** — tint, opacity, blending, sorting order, lit, exposure weight, follow light, soft fade, transparency, which sides draw, and wireframe. A tileset with
+**Appearance** — tint, opacity, blending, sorting order, pivot, flip, lit, exposure weight, follow light, soft fade, transparency, which sides draw, and wireframe. A tileset with
 **overdrive** makes its sprites glow through bloom; the value belongs to the tileset, and the section
 only reports it.
 
@@ -208,6 +279,11 @@ only reports it.
   over the smoke around it. In a 2D scene it offsets the sprite's band from the
   [entity layer](#layers), as a particle emitter's sorting order does: 1 draws over the next layer up.
   0, the default, leaves the order to depth.
+- **Pivot** — the point of the image that sits at the node's position: 0, 0 its bottom-left corner, 1, 1
+  its top-right, 0.5, 0.5 (the default) its centre. **Base** puts it at the bottom centre. A character
+  pivots at its feet: its position is then where it stands, and it turns about its own body. For a sheet
+  with empty space under the feet, the pivot's height is that space over the frame's height.
+- **Flip X**, **Flip Y** — mirror the image about the pivot: a character facing the other way.
 - **Lit** — the sprite takes the scene's light instead of showing its texture as it is: the key light
   (the sun, or the moon) and the shadows it casts on the sprite, the sky and ambient light, and every
   point and spot light that reaches it, per pixel, so smoke over a fire is lit from below by the fire and
@@ -240,10 +316,31 @@ Both support **billboarding** (**Constraints**: `free`, `spherical`, `cylindrica
   lying parallel to the screen, squashed and leaning. With an orthographic camera it faces the view
   direction.
 
+### Clips
+
+An animated sprite can carry an **animation set** instead of one frame list: a character's named **clips** —
+idle, run, jump, fall, attack, hurt, death — each a list of the tileset's frames with its own frames per
+second, playing **loop**, **once** or **ping-pong**. A frame can stay on screen for its own time, fire
+**events** (a footstep, the moment a sword connects: scripts hear `onAnimationEvent(event, clip)` on the
+sprite and on its parent) and switch **hitboxes** on — an Area 2D of the character, by name, resized for that
+frame; every hitbox the set names is off on the frames that do not list it. A clip can set its own pivot,
+and a once-clip can name the clip that follows it (an attack's recovery into idle).
+
+A set can also carry a **state machine** that picks the clip: states that each play a clip, and transitions
+between them on conditions over parameters (an AND/OR tree, as the 3D animation machine's), after an
+**exit time** if given, from one state or from any. A sprite inside a Character Body 2D gets the body's state
+as parameters every frame — `grounded`, `velocityX`, `velocityY`, `speedX`, `onWall`, `facing`, `isJumping`,
+and the one-frame triggers `jumped`, `landed` — and scripts add their own (`setParam('dashing', true)`,
+`fireTrigger('attack')`).
+
+The **Clips** section lists the set's clips, shows what is playing (and the state that chose it), and
+previews any clip in the viewport.
+
 ### Draw order and batching
 
-Sprites draw in the order above: by sorting order, then by depth (back to front in 3D, by the base's Y in
-a 2D scene). They do not cost a draw call each: sprites that share a **tileset**, a **blending**, the same
+Sprites draw in the order above: by sorting order, then by depth — back to front in 3D; on a tilemap's
+entity layer, by the base's Y or in scene order, as its [sprite order](#tilemaps) says; in a 2D scene
+without a tilemap, by Z and then scene order. They do not cost a draw call each: sprites that share a **tileset**, a **blending**, the same
 **sides** and **wireframe** setting, and whether they are **Lit**, go out together as one draw, and so do
 the editor's icons. Everything else (tint, opacity, the tile or animation frame, exposure weight, follow
 light, soft fade, a lit sprite's light) is the sprite's own and never splits a draw.
@@ -259,10 +356,70 @@ of calls; mixing alpha and additive sprites that overlap splits more of them. Th
 A tilemap uses an analytic picker and **only registers a hit where a tile is actually painted**, so
 clicking a gap selects what is behind it rather than the map.
 
-## 2D cameras and zoom
+## 2D cameras and rooms
 
-2D scenes use an orthographic camera. The wheel zooms, and the viewport's 2D/3D switch changes the
-view without changing the scene's authored dimension.
+In the editor a 2D scene is viewed through an orthographic camera of the editor's own. The wheel zooms,
+and the viewport's 2D/3D switch changes the view without changing the scene's authored dimension.
+
+### Camera 2D
+
+The game sees through a **Camera 2D** (**Cameras ▸ Camera 2D**), which takes over in Play. It is
+orthographic and sized in art pixels:
+
+- **Pixels per unit** — art pixels in a world unit; match the tilesets'.
+- **Reference resolution** — the view in art pixels at **zoom** 1, at least: a 480 × 270 reference on a
+  1920 × 1080 screen is drawn four times over. On a screen between whole multiples the view shows more of
+  the world rather than less.
+- **Pixel perfect** — every art pixel is the same whole number of screen pixels: the 2D frame is drawn at
+  the art resolution and scaled up unfiltered, keeping the part of a pixel the camera has moved, so a
+  slow pan glides instead of stepping a whole art pixel at a time. Off: drawn at the screen's
+  resolution at whatever scale the window gives.
+- **Follow** — the name of the node it follows, with a **follow offset**, a **dead zone** (the box round
+  the view's centre the target moves in before the camera moves), **damping** (about how long the camera
+  takes to catch up) and **look ahead** (how far it leads a moving target).
+- **Confine to rooms** — keep the view inside the room the target stands in, and slide into the next one
+  over **room transition** seconds when it crosses over.
+
+Its frame (the reference resolution at its zoom) is drawn in the editor where it stands.
+
+### Room
+
+A **Room** (**Sprites ▸ Room**) is one screen of a 2D world: a rectangle, **size** wide and high, centred
+on the node, outlined in the editor. While the followed node stands in a room, the camera keeps its view
+inside it, centring the view on a room smaller than the screen. Rooms may touch: walking out of one
+slides the camera into the next, and scripts on the followed node and on the room hear `onRoomEnter` and
+`onRoomExit`. Out of every room — falling down a pit, jumping past a room's top — the view stays in the
+last one; only a jump far away (a teleport) frees it. **Zone** is a free label (an area of the world) for a
+map or a script.
+
+### Parallax Layer
+
+A **Parallax Layer** (**Sprites ▸ Parallax Layer**) is a backdrop sprite that moves with only part of the
+camera's travel: **parallax** 1 moves with the world, 0 stays on screen (a sky), 0.2 is a far range. With
+**repeat X** (and **repeat Y**) it fills the view however far the camera goes; repeating needs a tileset
+whose one tile is the whole image, as a background imported on its own is. **Scroll** drifts it by itself
+(clouds). It sorts like any sprite (negative sorting orders behind the tilemap's layers) and is selected
+from the scene tree, never by a viewport click.
+
+## The 2D frame
+
+A 2D scene draws through the renderer's **flat 2D frame**: the background, then one sorted and batched
+pass of tilemap layers, sprites and particles, then bloom and the rest of the post chain. None of the 3D
+frame runs — no shadows, lighting pass, sky, fog, ambient occlusion, reflections, temporal antialiasing,
+motion blur or exposure meter — so a 2D game spends its frame on its own art. The exposure is fixed at
+1, so a pixel shows as it was drawn.
+
+Two things follow from that:
+
+- **3D content is not drawn** in a 2D scene: models, 3D lights' light, the sky. A scene that mixes them in
+  (2.5D) sets [Renderer › 2D Scenes › Pipeline](rendering.md#2d-scenes) to **Full 3D**, which draws the
+  whole 3D frame under the 2D content, as every 2D scene drew before.
+- **Lit sprites draw unlit** for now: 2D lights come with their own lighting.
+
+Switching a scene to 2D also gives it the **2D look**: no tone curve (Renderer › Tone and post ›
+Tone mapper **None**), and bloom only from what is driven past white — a tileset's or sprite's
+[overdrive](#atlas) — rather than the soft share of everything a 3D image gets. Switching back to 3D
+restores the 3D look, unless the 2D one was retuned.
 
 ## Switching dimension
 

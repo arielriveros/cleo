@@ -54,6 +54,12 @@ import {
   WaterVolumeNode,
   OcclusionVolumeNode,
   SequenceNode,
+  Camera2DNode,
+  Room2DNode,
+  ParallaxLayerNode,
+  CharacterBody2DNode,
+  Body2DNode,
+  Area2DNode,
   LIGHT_UNIT,
   newLightOptions,
 } from 'cleo'
@@ -74,7 +80,7 @@ import {
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon, WeatherIcon,
   SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
-  SequenceIcon,
+  SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon, CharacterBody2DIcon, Collider2DIcon, Area2DIcon,
 } from './nodeIcons'
 import { createLandscapeNode } from '../../utils/landscapeSlots'
 import { defaultDecalMaterial } from '../../utils/materials'
@@ -172,6 +178,15 @@ export const ADD_ITEMS: AddItem[] = [
       const cameraNode = new CameraNode('camera', new Camera({ type: 'orthographic' }));
       cameraNode.active = true;
       return cameraNode;
+    },
+  },
+  // The 2D game camera: orthographic, sized in art pixels, following a node through rooms.
+  {
+    id: 'camera2D', label: 'Camera 2D', icon: Camera2DIcon, category: 'cameras',
+    create: async () => {
+      const node = new Camera2DNode('camera 2D');
+      node.active = true;
+      return node;
     },
   },
   // Shipped with its camera child already attached: a rig with no camera does nothing.
@@ -480,6 +495,37 @@ export const ADD_ITEMS: AddItem[] = [
       const tilemap = new Tilemap({ kind: 'orthogonal', cellWidth: 1, cellHeight: 1 });
       tilemap.addLayer({ name: 'Ground' });
       return new TilemapNode('tilemap', tilemap);
+    },
+  },
+
+  // The 2D physics: a character body (the platformer controller, player input on), a box collider, and a
+  // trigger area. A 2D scene's own; a 3D scene's bodies are the Gameplay ones.
+  {
+    id: 'characterBody2D', label: 'Character Body 2D', icon: CharacterBody2DIcon, category: 'sprites',
+    create: async () => new CharacterBody2DNode('character body 2D'),
+  },
+  {
+    id: 'body2D', label: 'Collider 2D', icon: Collider2DIcon, category: 'sprites',
+    create: async () => new Body2DNode('collider 2D', [2, 0.5]),
+  },
+  {
+    id: 'area2D', label: 'Area 2D', icon: Area2DIcon, category: 'sprites',
+    create: async () => new Area2DNode('area 2D', [1, 1]),
+  },
+  // One screen of a 2D world, which a Camera 2D keeps its view inside: 30 x 17 units, a 480 x 270 view of
+  // 16 px tiles.
+  {
+    id: 'room2D', label: 'Room', icon: Room2DIcon, category: 'sprites',
+    create: async () => new Room2DNode('room', [30, 17]),
+  },
+  // A backdrop that moves with part of the camera's travel and tiles sideways. No image yet: one is
+  // assigned in the inspector, as a sprite's.
+  {
+    id: 'parallaxLayer', label: 'Parallax Layer', icon: ParallaxLayerIcon, category: 'sprites',
+    create: async () => {
+      const node = new ParallaxLayerNode('parallax layer', new Sprite({ sortingOrder: -10 }));
+      node.setPosition([0, 0, -1]);
+      return node;
     },
   },
 

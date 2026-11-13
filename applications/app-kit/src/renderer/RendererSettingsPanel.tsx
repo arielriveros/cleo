@@ -174,6 +174,7 @@ export default function RendererSettingsPanel() {
   const [shelterRes, setShelterRes] = useState<number>(() => renderer?.weatherShelterResolution ?? 1024);
   const [precipDensity, setPrecipDensity] = useState<number>(() => renderer?.precipitationDensity ?? 1);
   const [toneMapper, setToneMapper] = useState<string>(() => renderer?.toneMapper ?? 'agx');
+  const [pipeline2D, setPipeline2D] = useState<'flat' | 'full'>(() => renderer?.pipeline2D ?? 'flat');
   const [lutId, setLutId] = useState<string | null>(() => renderer?.colorGradingLut ?? null);
   const [dofEnabled, setDofEnabled] = useState<boolean>(() => renderer?.dofEnabled ?? false);
   const [dofFocus, setDofFocus] = useState<number>(() => renderer?.dofFocusDistance ?? 10);
@@ -282,6 +283,7 @@ export default function RendererSettingsPanel() {
   // panel rewrites bloom, SSAO, motion blur and render scale in one move.
   const syncFromRenderer = useCallback(() => {
     if (!renderer) return;
+    setPipeline2D(renderer.pipeline2D);
     setDebugViewState(renderer.debugView);
     setDebugValidity(renderer.debugValidity);
     setEv100(renderer.ev100);
@@ -467,6 +469,22 @@ export default function RendererSettingsPanel() {
       <div className='w-full'>
       <Collapsable title='Graphics API' persistKey='renderer.graphics-api'><div className='w-full p-2'>
         <BackendSelector />
+      </div></Collapsable>
+
+      {/* How a 2D scene draws: the flat 2D frame (none of the 3D passes), or the whole 3D frame under it
+          for a 2.5D scene that mixes models and 3D lights in. A 3D scene ignores it. */}
+      <Collapsable title='2D Scenes' persistKey='renderer.2d-scenes' defaultOpen={false}><div className='w-full p-2'>
+        <div className='flex items-center gap-1 my-1 text-ui'>
+          <span className={cn(labelClass, LABEL_W, 'shrink-0')}>Pipeline</span>
+          <SegmentedControl
+            value={pipeline2D}
+            onChange={(mode) => { renderer.pipeline2D = mode; setPipeline2D(mode); touch(); }}
+            options={[
+              { value: 'flat', label: 'Flat 2D', title: 'The dedicated 2D frame: tiles, sprites and particles in one sorted pass, exposure 1, no 3D passes.' },
+              { value: 'full', label: 'Full 3D', title: 'The whole 3D frame under the 2D content: models, 3D lights, shadows and the sky draw too.' },
+            ]}
+          />
+        </div>
       </div></Collapsable>
 
       <Collapsable title='Channels' persistKey='renderer.channels' defaultOpen={false}><div className='w-full p-2'>

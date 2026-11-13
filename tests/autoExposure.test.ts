@@ -242,7 +242,8 @@ describe('the authored exposure is kept apart from the metered one', () => {
         const body = methodBody('resolveExposure');
         expect(body).toContain('if (!this._effAutoWas) {');
         expect(body).toContain(': this.baseExposure;');
-        expect(RENDERER).toContain('return this.effExposure.autoExposureEnabled && this.exposureMeteringAllowed;');
+        // ...and never in a flat 2D frame, which is display-referred at an exposure of 1 (render/frame2d.ts).
+        expect(RENDERER).toContain('return this.effExposure.autoExposureEnabled && this.exposureMeteringAllowed && !this._view.flat2D;');
     });
 });
 

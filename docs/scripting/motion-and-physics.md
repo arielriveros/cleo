@@ -348,6 +348,35 @@ hit wakes either.
 
 `Game.gravity` is the same value, reachable without going through the scene.
 
+## 2D physics
+
+A 2D game's characters are `CharacterBody2DNode`s, moved by the scene's 2D physics through tilemaps' tiles
+and `Body2DNode` colliders every frame the game plays (see [Tilemaps and 2D](../editor/tilemap-2d.md#2d-physics)).
+
+```ts
+const body = this as unknown as CharacterBody2DNode   // a script on the body
+body.isGrounded ; body.onWall ; body.onCeiling ; body.onSlope   // onWall: -1 left, 1 right, 0
+body.facing                                          // -1 left, 1 right
+body.canJump ; body.jumpRequested ; body.consumeJump()
+body.isJumping ; body.justJumped ; body.justLanded    // this frame
+body.velocity2D                                      // [x, y] units per second
+body.gravityScale ; body.maxFallSpeed                // writable at run time
+body.teleport(x, y)                                  // at once, at rest
+
+// A Controller drives it (Player or AI); a script patches the intent, in world axes:
+setMove2D(body.drive(), -1, 0)
+```
+
+A game's own moves — a dash, a double jump, a wall jump — go in the body script's `onMove2D(dt, substep)`,
+run every physics substep; see [2D pawns](characters-and-controllers.md#2d-pawns).
+
+Areas (`Area2DNode`) report `onTriggerEnter` / `onTriggerExit` as 3D triggers do. Queries:
+
+```ts
+scene.physics2D.raycast(x, y, dx, dy, maxDistance)   // { x, y, distance, owner } | null
+scene.physics2D.overlapsSolid(minX, minY, maxX, maxY)
+```
+
 ## Wind
 
 The scene's wind is a field: `windAt` reads the air velocity (m/s) anywhere — the Wind node's gusting,

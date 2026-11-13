@@ -540,7 +540,7 @@ export class ParticleRenderer {
         }
         const compute = device.capabilities.hasCompute;
 
-        const flat2D = scene.activeCamera?.camera.type === 'orthographic' && scene.tilemaps.size > 0;
+        const flat2D = scene.dimension === '2D' || (scene.activeCamera?.camera.type === 'orthographic' && scene.tilemaps.size > 0);
         this._prepareFrameUniforms(frame);
         try {
             for (const node of systems) {

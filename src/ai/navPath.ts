@@ -42,7 +42,18 @@ export interface NavPath {
     points: vec3[];
     /** Index of the waypoint currently being steered toward. */
     index: number;
+    /**
+     * How the leg ARRIVING at each waypoint is travelled, parallel to `points`: a 3D path walks every leg;
+     * a 2D platform path also jumps, drops off a ledge, drops through a one-way platform, or flies.
+     */
+    actions: NavAction[];
+    /** The share of walk speed each leg is taken at (a short hop wants less), parallel to `points`. */
+    throttles: number[];
 }
+
+/** How a path leg is travelled. */
+export const NAV_ACTIONS = ['walk', 'jump', 'drop', 'dropThrough', 'fly'] as const;
+export type NavAction = typeof NAV_ACTIONS[number];
 
 const _tmp = vec3.create();
 
@@ -53,13 +64,23 @@ function planar(out: vec3, v: vec3, up: vec3): vec3 {
 }
 
 export function createNavPath(): NavPath {
-    return { points: [], index: 0 };
+    return { points: [], index: 0, actions: [], throttles: [] };
 }
 
-/** Replace the route. Copies, so the caller may reuse its own array. */
-export function setNavPath(path: NavPath, points: readonly vec3[]): NavPath {
+/**
+ * Replace the route. Copies, so the caller may reuse its own arrays. With no actions every leg is walked
+ * (a 3D path); throttles default to full speed.
+ */
+export function setNavPath(path: NavPath, points: readonly vec3[], actions?: readonly NavAction[],
+                           throttles?: readonly number[]): NavPath {
     path.points.length = 0;
-    for (const p of points) path.points.push(vec3.clone(p));
+    path.actions.length = 0;
+    path.throttles.length = 0;
+    for (let i = 0; i < points.length; i++) {
+        path.points.push(vec3.clone(points[i]));
+        path.actions.push(actions?.[i] ?? 'walk');
+        path.throttles.push(throttles?.[i] ?? 1);
+    }
     path.index = 0;
     return path;
 }
@@ -117,6 +138,8 @@ export function insetCorners(path: NavPath, radius: number, up: vec3): NavPath {
 
 export function clearNavPath(path: NavPath): NavPath {
     path.points.length = 0;
+    path.actions.length = 0;
+    path.throttles.length = 0;
     path.index = 0;
     return path;
 }

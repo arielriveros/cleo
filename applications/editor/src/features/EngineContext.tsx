@@ -7,7 +7,7 @@ import { PlaybackContext, type PlaybackContextValue } from "./PlaybackContext";
 import {
   DebugVisibilityContext, type DebugVisibilityContextValue,
   type DebugVisibility, type DebugCategory, type DebugChannel,
-  loadDebugVisibility, saveDebugVisibility,
+  loadDebugVisibility, saveDebugVisibility, effectiveDebugVisibility,
 } from "./DebugVisibilityContext";
 import { AssetLibraryContext, type AssetLibraryContextValue } from "./AssetLibraryContext";
 import { DocumentContext, type DocumentContextValue } from "./DocumentContext";
@@ -16,7 +16,8 @@ import { EditorSessionsContext, type EditorSessionsContextValue } from "./Editor
 import { useStableActions } from "@cleo/app-kit/utils/useStableActions";
 import { describeChange, logDirtyMark, logDirtyClear, logDirtySkip } from "../utils/dirtyDebug";
 import { isEditorOwnedChange } from "../utils/editorOwned";
-import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, setMovieRender } from "cleo";
+import { resetScriptModules, addScriptModuleSources, nextFrame, ForceFieldNode, setMovieRender, engineEventBus } from "cleo";
+import { dimensionLookPatch, overlayDimensionOf } from "../utils/sceneDimension";
 import { CleoEngine, Scene, InputSystem, DEFAULT_INPUT_MAP, parseInputMap, cloneInputMap, Model, Geometry, Material, CustomMaterial, TerrainMaterial, FOLIAGE_STARTER, Terrain, allTerrainFoliageRules, Node, ModelNode, CameraNode, AnimatedModel, TextureManager, AudioManager, Logger, Loader, buildBoneMapping, mappingReport, retargetAnimation, describeRetarget, setGameHost, registerTemplates, disposeModelSubtree, foliageRuleKey, assetGraph, assetKey, markEditorOwned, isEditorOwnedName, LandscapeNode } from "cleo";
 import type { SceneChange, TerrainFoliageRule, InputMap, LoadProgressListener, RenderSettings } from "cleo";
 import NullImage from '../images/null.png';
@@ -5895,8 +5896,21 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       ...m,
       scenes: m.scenes.map(s => s.id === sceneId ? { ...s, dimension } : s),
     }));
-    // Changing what the scene IS also changes what you look through, but only for the scene on screen.
-    if (sceneId === openSceneIdRef.current) setViewDimension(dimension);
+    // Changing what the scene IS also changes what you look through, but only for the scene on screen --
+    // and how the renderer draws it (Scene.dimension picks the flat 2D frame), which it saves with.
+    if (sceneId === openSceneIdRef.current) {
+      editorSceneRef.current.dimension = dimension;
+      // ...and its look: the 2D one (authored pixels as drawn) on the way in, the 3D one back if untouched.
+      const renderer = instanceRef.current?.renderer;
+      const look = renderer ? dimensionLookPatch(renderer.getRenderSettings(), dimension) : null;
+      if (renderer && look) {
+        renderer.applyRenderSettings(look);
+        engineEventBus.emit('RENDER_SETTINGS_CHANGED');
+      }
+      setViewDimension(dimension);
+      // The overlays the new dimension has no row for go now, and the ones it gains come back.
+      eventEmitter.current.emit('DEBUG_VISIBILITY_CHANGED');
+    }
     markTabDirty(SCENE_TAB_ID, 'scene-dimension');
   };
 
@@ -6029,6 +6043,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       clearTabDirty(SCENE_TAB_ID);
       eventEmitter.current.emit('TEXTURES_CHANGED');
       eventEmitter.current.emit('SCENE_CHANGED');
+      // What the scene IS, for the renderer (Scene.dimension): the project's record, which a scene saved
+      // before the engine knew its dimension does not carry in its own JSON.
+      scene.dimension = dimensionOfScene(sceneId);
+      // The parse put a FRESH editor camera in (ensureEditorCamera), at its 3D default: the poses remembered
+      // for the outgoing scene's views are no longer this camera's. Without this, switching from a 2D scene to
+      // another one filed the fresh camera's 3D pose under '2D', and the incoming scene's 2D view came up
+      // tilted. The fresh pose IS a 3D one, so that is what the next switch remembers it as.
+      viewPoseRef.current = {};
+      previousViewRef.current = '3D';
       // Parsing a scene can replace camera settings/onUpdate handlers; re-apply editor camera controls — with
       // the INCOMING scene's rig, not the outgoing one's. This is what makes the view follow the scene.
       setViewDimension(dimensionOfScene(sceneId));
@@ -6136,6 +6159,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     setMainSceneIdState(meta.mainSceneId);
     setOpenSceneIdState(meta.openSceneId);
     openSceneIdRef.current = meta.openSceneId;
+    // The open scene's dimension, for the renderer (Scene.dimension), from the project's record.
+    editorSceneRef.current.dimension = dimensionOfScene(meta.openSceneId);
     scenesLoadedRef.current = true;
     sceneStep.done(meta.scenes.find(s => s.id === meta!.openSceneId)?.name ?? '');
   };
@@ -6278,7 +6303,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       reconcileScheduledRef.current = false;
       // (Terrain-)material preview scenes want no editor helper icons (light sprites/gizmos) cluttering the sphere.
       if (editorMode === 'material' || editorMode === 'terrainMaterial') return;
-      const vis = debugVisibilityRef.current;
+      // The switches in force for the scene on screen: a 2D scene drawn flat has none of the 3D-only rows
+      // (GI probes, navmesh, foliage colliders, wind), which the eye menu does not offer there either.
+      const vis = effectiveDebugVisibility(debugVisibilityRef.current,
+        overlayDimensionOf(instanceRef.current?.scene, instanceRef.current?.renderer));
       // The reference grid is editor CHROME -- global renderer state, not a scene node -- so its visibility
       // survives a scene swap and the last writer wins. Assert it on EVERY reconcile from whichever channel
       // is in force. Skipped in options mode, where Engine > Renderer owns its own grid switch.
@@ -6659,6 +6687,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     registerTemplates(gd.templates);
     addScriptModuleSources(gd.modules); // adds what is new; an already-evaluated module keeps its state
     scene.parse(gd, true); // gd injects scripts into nodes → compiled here
+    // From the project's record: a scene saved before the engine knew its dimension does not carry it.
+    scene.dimension = dimensionOfScene(id);
     return { scene, render: data.config?.render ?? null };
   };
 

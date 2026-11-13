@@ -3,6 +3,7 @@
 // only flagged stale from here, which keeps the model testable and worker-safe.
 
 // Aliased because `Material` is not imported here but the physics one reads better named for what it is.
+import { TILE_NONE, TILE_SOLID, TILE_ONE_WAY, TILE_SLOPE } from '../../physics2d/types';
 import { PhysicsBody } from '../../physics/physicsBody';
 import type { PhysicsSystem } from '../../physics/physicsSystem';
 import { vec3 } from 'gl-matrix';
@@ -38,6 +39,9 @@ export interface TileOrientation {
     rot90?: boolean;
 }
 
+/** How sprites order inside a tilemap's entity band. See `Tilemap.entitySort`. */
+export type EntitySort = 'y' | 'none';
+
 /** Ceiling on cells a single bucket fill may touch. The map is infinite; a mis-click must not be. */
 export const DEFAULT_FILL_LIMIT = 100000;
 
@@ -55,6 +59,19 @@ export class Tilemap {
      * tiles and nothing else.
      */
     public entityLayer: number = 0;
+    /**
+     * How sprites order inside the entity layer's band. 'y' (the default, a top-down map): by the Y of their
+     * base, so a character lower on screen draws in front, and against a Y-sorted layer's tile rows. 'none'
+     * (a side view): on top of the entity layer's tiles, by sorting order and then scene order, never by
+     * height, so a character jumping past another does not slip behind it.
+     */
+    public entitySort: EntitySort = 'y';
+    /**
+     * Build 3D physics colliders from the solid tiles (the default), for 3D bodies on the XY plane. Off for a
+     * map only 2D character bodies walk on: they read its cells directly (src/physics2d), and the 3D boxes
+     * would be built and rebuilt for nothing.
+     */
+    public colliders3D: boolean = true;
     /** Half-extent along Z given to generated colliders, so a body on the XY plane actually hits them. */
     public collisionDepth: number = 0.5;
 
@@ -196,6 +213,37 @@ export class Tilemap {
             if (this.tilesetOf(i)?.isSolid(index)) return true;
         }
         return false;
+    }
+
+    /**
+     * What cell (col, row) is to the 2D physics (src/physics2d): solid, a one-way platform, a slope (its
+     * floor heights at the left and right edges written into `slope`), or nothing -- across every layer that
+     * collides, solid winning over a slope over a one-way platform. A collision layer's tiles are solid; a
+     * tile is otherwise what its tileset says (TileMeta.slope, oneWay, solid). A slope flipped on X is
+     * mirrored; one flipped on Y (a ceiling slope) is taken as solid.
+     */
+    public collision2DAt(col: number, row: number, slope: [number, number]): number {
+        let best: number = TILE_NONE;
+        for (let i = 0; i < this._layers.length; i++) {
+            const layer = this._layers[i];
+            if (!this._layerCollides(layer)) continue;
+            const packed = layer.get(col, row);
+            const index = cellTile(packed);
+            if (index < 0) continue;
+            if (layer.cfg.collision) return TILE_SOLID;
+            const meta = this.tilesetOf(i)?.metaOf(index);
+            if (!meta) continue;
+            if (meta.slope && !cellFlipY(packed)) {
+                if (best !== TILE_SLOPE) {
+                    const flip = cellFlipX(packed);
+                    slope[0] = flip ? meta.slope[1] : meta.slope[0];
+                    slope[1] = flip ? meta.slope[0] : meta.slope[1];
+                    best = TILE_SLOPE;
+                }
+            } else if (meta.slope || meta.solid) return TILE_SOLID;
+            else if (meta.oneWay && best === TILE_NONE) best = TILE_ONE_WAY;
+        }
+        return best;
     }
 
     public solidAtWorld(x: number, y: number): boolean {
@@ -440,6 +488,20 @@ export class Tilemap {
             this._rebuildDirtyBodies();
     }
 
+    /**
+     * Take this map's 3D colliders out of the world, keeping everything else (it still draws, and 2D bodies
+     * still walk on it): what `colliders3D` off means. They come back with the next `ensureRegistered`.
+     */
+    public removeColliders(physics?: PhysicsSystem): void {
+        if (!this._registered && this._bodies.size === 0) return;
+        const p = physics || this._physics;
+        for (const bodies of this._bodies.values())
+            for (const body of bodies) { if (p) p.removeBody(body); }
+        this._bodies.clear();
+        this._dirtyBodies.clear();
+        this._registered = false;
+    }
+
     /** Static bodies currently in the world for this tilemap. Surfaced in the physics HUD. */
     public get colliderCount(): number {
         let n = 0;
@@ -613,6 +675,8 @@ export class Tilemap {
         return {
             grid: { ...this._grid },
             entityLayer: this.entityLayer,
+            ...(this.entitySort !== 'y' ? { entitySort: this.entitySort } : {}),
+            ...(this.colliders3D ? {} : { colliders3D: false }),
             collisionDepth: this.collisionDepth,
             layers: this._layers.map(l => l.serialize()),
             tilesets,
@@ -622,6 +686,8 @@ export class Tilemap {
     public static deserialize(json: any): Tilemap {
         const tm = new Tilemap(json?.grid ?? { kind: 'orthogonal', cellWidth: 1, cellHeight: 1 });
         tm.entityLayer = json?.entityLayer ?? 0;
+        tm.entitySort = json?.entitySort === 'none' ? 'none' : 'y';
+        tm.colliders3D = json?.colliders3D !== false;
         tm.collisionDepth = json?.collisionDepth ?? 0.5;
         for (const tj of json?.tilesets ?? []) {
             const ts = Tileset.parse(tj);

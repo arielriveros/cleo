@@ -88,7 +88,7 @@ export class ParticlePasses {
         out.length = 0;
         for (const node of scene.particleSystems) out.push(node);
         const precipitation = scene.precipitation.systems;
-        if (precipitation.length > 0 && !this._host.thumbnailMode && !this._view.capturing && !this._isFlatParticleScene(scene))
+        if (precipitation.length > 0 && !this._host.thumbnailMode && !this._view.capturing && !this.isFlatParticleScene(scene))
             for (const node of precipitation) out.push(node);
         return out;
     }
@@ -121,15 +121,18 @@ export class ParticlePasses {
      * drawing it last costs nothing in correctness.
      */
     public renderParticles(scene: Scene, emitters: 'all' | 'nonAdditive' | 'additive' = 'all'): void {
-        if (this._isFlatParticleScene(scene)) return;
+        if (this.isFlatParticleScene(scene)) return;
         const systems = this.frameSystems(scene);
         if (systems.length === 0) return;
         this._drawParticleNodes(scene, systems, this._targets.scene.renderTarget, emitters);
     }
 
-    /** A 2D scene: an orthographic camera over tilemaps. Its particles join the Y-sorted 2D pass. */
-    private _isFlatParticleScene(scene: Scene): boolean {
-        return this._view.camera.type === 'orthographic' && scene.tilemaps.size > 0;
+    /**
+     * A 2D scene: one authored as 2D (`Scene.dimension`), or an orthographic camera over tilemaps. Its
+     * particles join the sorted 2D pass (render/sprites2d.ts) instead of drawing here.
+     */
+    public isFlatParticleScene(scene: Scene): boolean {
+        return scene.dimension === '2D' || (this._view.camera.type === 'orthographic' && scene.tilemaps.size > 0);
     }
 
     private _drawParticleNodes(scene: Scene, nodes: Iterable<ParticleSystemNode>, target: RenderTarget,
@@ -164,7 +167,8 @@ export class ParticlePasses {
             cameraPosition: camera.position,
             near: camera.near, far: camera.far,
             orthographic: camera.type === 'orthographic',
-            depth: this._host.thumbnailMode ? null : this._temporal.depthSource(),
+            // No snapshot in a thumbnail or a flat 2D frame (which takes none): no soft fade against it.
+            depth: this._host.thumbnailMode || this._view.flat2D ? null : this._temporal.depthSource(),
             width: this._host.renderWidth, height: this._host.renderHeight,
             ambient, sunDirection, sunColor, localLights,
             // The light probes' fill at an effect, as surfaces there get it (render/probeLighting.ts).

@@ -120,8 +120,20 @@ export const BEHAVIOR_SENSES = [
     // How many other agents are inside the flock radius. "Am I alone" is a question a machine wants
     // to ask, and it is the one thing about a group only the controller can answer.
     'neighborCount',
+    // What is just ahead of the pawn, the way it faces: a wall it would walk into, a drop it would walk
+    // off, and whether the target is in front of it at all. A platformer guard turns at both; a 3D one
+    // asks them too. Probed on read.
+    'wallAhead', 'ledgeAhead', 'targetInFront',
 ] as const;
 export type BehaviorSense = typeof BEHAVIOR_SENSES[number];
+
+/** What each sense reads as, for a picker that offers it as a number or a yes/no. */
+export const BEHAVIOR_SENSE_TYPES: Readonly<Record<BehaviorSense, 'number' | 'boolean'>> = {
+    distanceToTarget: 'number', angleToTarget: 'number', hasTarget: 'boolean', targetVisible: 'boolean',
+    stateTime: 'number', planarDistanceToTarget: 'number', heightToTarget: 'number', hasPath: 'boolean',
+    pathRemaining: 'number', targetInSight: 'boolean', timeSinceSeen: 'number', lastKnownDistance: 'number',
+    neighborCount: 'number', wallAhead: 'boolean', ledgeAhead: 'boolean', targetInFront: 'boolean',
+};
 
 export const BEHAVIOR_PARAM_TYPES = ['number', 'boolean', 'trigger'] as const;
 export type BehaviorParameterType = typeof BEHAVIOR_PARAM_TYPES[number];

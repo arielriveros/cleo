@@ -24,6 +24,8 @@ export type SoundName = string & { readonly __pick?: "sound" };
 export type SocketName = string & { readonly __pick?: "socket" };
 /** The name of a template in the project, as `scene.instantiate(name)` takes it. */
 export type TemplateName = string & { readonly __pick?: "template" };
+/** A clip (or state) of the sprite animation set of the sprite this node is or belongs to (AnimatedSpriteNode.play). */
+export type SpriteClipName = string & { readonly __pick?: "spriteClip" };
 /** The name of a node inside or beside this one (a child, or a sibling such as the next move in a combo). */
 export type NodeName = string & { readonly __pick?: "node" };
 /**

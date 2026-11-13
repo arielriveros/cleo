@@ -62,7 +62,7 @@ export const PROGRAM_CLASS: Readonly<Record<string, 'core' | 'feature' | 'editor
     objectVelocity: 'feature', objectVelocitySkinned: 'feature', objectVelocityBasicSkinned: 'feature',
     decalSurface: 'feature', decalResolve: 'feature', decalColor: 'feature',
     fluidVolume: 'feature', fluidVolumeResolve: 'feature', fluidVolumeComposite: 'feature',
-    spriteLit: 'feature', sprite: 'feature',
+    spriteLit: 'feature', sprite: 'feature', pixelUpscale: 'feature',
     particleSim: 'feature', particleBillboard: 'feature', particleMesh: 'feature', particleSort: 'feature',
     basicInstanced: 'editor', probePreview: 'editor', overlayComposite: 'editor', debugView: 'editor',
     shadowDebug: 'editor', overdraw: 'editor', overdrawInstanced: 'editor', grid: 'editor', outline: 'editor', outlinePost: 'editor',
@@ -169,8 +169,10 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
             const type = node.sprite?.material?.type;
             add(FORWARD[type] ?? 'basic');
             if (type === 'pbr' || type === 'blinn_phong') add(`${type}Geometry`);
-            // A lit sprite draws with its own program (Sprite.lit); an unlit one with the batched one.
-            add(node.sprite?.lit === true ? 'spriteLit' : 'sprite');
+            // Every sprite can draw through the batched program: an unlit one always, a lit one in a flat 2D
+            // frame (Scene.dimension), which has no 3D lights for it. A lit one in 3D takes its own (Sprite.lit).
+            add('sprite');
+            if (node.sprite?.lit === true) add('spriteLit');
             break;
         }
         case 'landscape':
@@ -192,6 +194,9 @@ export function usageFromSceneJson(node: any, use: ProgramUsage, shadows = true)
                 for (const n of ['foliageBillboardInstancedWind', 'shadowMapInstancedCutoutWind']) add(n);
             break;
         case 'tilemap': add('tilemap'); break;
+        // A pixel-perfect 2D camera draws its frame at art resolution and scales it up (render/frame2d.ts).
+        case 'camera2D': if (node.camera2D?.pixelPerfect !== false) add('pixelUpscale'); break;
+        case 'parallaxLayer': add('sprite'); break;
         case 'decal': add('decalSurface'); add('decalResolve'); add('decalColor'); break;
         case 'fluidVolume': add('fluidVolume'); add('fluidVolumeResolve'); add('fluidVolumeComposite'); break;
         case 'volumetricFog': add('volumetricFogInject'); add('volumetricFogIntegrate'); add('volumetricFogApply'); break;

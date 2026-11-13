@@ -267,6 +267,47 @@ copies of one sprite do not animate in step, and `sprite.blend = 'additive'` mak
 Sprites reference a **tileset** and a tile index rather than a raw texture, which is what lets one
 atlas back a whole set of sprites.
 
+A sprite whose tileset has **pixels per unit** is sized by it (a tile's pixels over that, times its
+scale). `pivot` places it -- `[0.5, 0]` stands it on its feet -- and `flipX` turns it round:
+
+```ts
+const hero = this.findNode('Player') as AnimatedSpriteNode
+hero.pivot = [0.5, 47 / 135]           // the feet, 47 px up a 135 px frame
+hero.flipX = velocityX < 0             // face the way it moves
+```
+
+A sprite with an animation set plays clips by name, and its state machine picks them on its own:
+
+```ts
+const sprite = this.findNode('Sprite') as AnimatedSpriteNode
+sprite.play('attack')                  // a state of its machine, or a clip on its own
+sprite.fireTrigger('hurt') ; sprite.setParam('stunned', true)
+sprite.clip ; sprite.state ; sprite.isFinished ; sprite.normalizedTime
+sprite.speed = 0.5 ; sprite.paused = true
+
+// On the sprite or its parent (the character):
+onAnimationEvent(event: string, clip: string) { if (event === 'swing') this.sounds.play('Swing') }
+onAnimationFinished(clip: string) { if (clip === 'death') this.respawn() }
+```
+
+A `SpriteClipName` field picks one of the clips (or states) of the sprite the script's node is or holds.
+
+## The 2D camera and rooms
+
+A `Camera2DNode` follows a node by name and keeps its view inside the `Room2DNode` the node stands in:
+
+```ts
+const cam = this.findNode('Camera 2D') as Camera2DNode
+cam.followTarget = 'Player'
+cam.shake(0.3, 0.25)                   // world units, seconds
+cam.snapToTarget()                     // after a respawn: no damping, no slide
+
+// On the player (or on a room): a room entered or left.
+onRoomEnter(room: Node) { Logger.info(`Now in ${room.name}`) }
+```
+
+`ParallaxLayerNode` is a sprite backdrop with `parallax`, `repeatX`/`repeatY` and `scroll`.
+
 ## See also
 
 [Terrain (editor)](../editor/terrain.md) · [Tilemaps and 2D (editor)](../editor/tilemap-2d.md) · [Motion and physics](motion-and-physics.md)

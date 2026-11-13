@@ -12,7 +12,8 @@ type NodeType =
   | 'landscape' | 'tilemap' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'wind' | 'weather' | 'lodGroup'
   | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
   | 'particleSystem' | 'forceField' | 'waterVolume' | 'occlusionVolume' | 'exposureVolume' | 'volumetricFog'
-  | 'fluidVolume' | 'cloth' | 'giVolume'
+  | 'fluidVolume' | 'cloth' | 'giVolume' | 'sequence'
+  | 'camera2D' | 'room2D' | 'parallaxLayer' | 'characterBody2D' | 'body2D' | 'area2D'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 ```
@@ -211,9 +212,17 @@ get data: NavMeshData ; setData(d): this ; get isBaked: boolean
 get mesh: CleoNavMesh | null
 route(name: string): NavRoute | null
 routePoints(name: string): vec3[]
+
+// 2D space: a platform graph or an air grid instead of a navmesh
+space: '3D' | '2D'
+agent2D: NavAgent2D                      // the profile the 2D graph is baked for
+bakedSource2D: string | null             // the fingerprint of what the 2D bake read
+setGraph2D(data, source?): this ; get graph2DData ; get graph2D: NavGraph2D | null
+get movement2D: 'walk' | 'fly' ; bounds2D(): [minX, minY, maxX, maxY]
 ```
 
-`getBoundingBox()` is overridden to return the world AABB of the **oriented** box.
+`getBoundingBox()` is overridden to return the world AABB of the **oriented** box. In 2D space, `mesh`
+is null and `bounded` needs only a width and a height.
 
 ---
 
@@ -705,9 +714,94 @@ get/set constraints: 'free' | 'spherical' | 'cylindrical'    // billboarding (re
 tileset: string ; tileIndex: number ; tint: vec3 ; opacity: number
 sprite.blend: 'alpha' | 'additive'                           // additive adds light: fire, glows
 sortingOrder: number                                         // higher draws on top; 0 = by depth
+pivot: [number, number]                                      // the image point at the origin: 0,0 bottom-left
+flipX: boolean ; flipY: boolean                              // mirror the image about the pivot
+quadMatrixInto(out: mat4, camera: Camera): mat4              // the quad as drawn: billboarded, sized, pivoted
 uvRect(): [number, number, number, number]
 initializeSprite(): void
 ```
+
+A sprite whose tileset has **pixels per unit** is its tile's pixel size over that many pixels per unit,
+times its scale; without it, a unit quad sized by its scale.
+
+### ParallaxLayerNode — `'parallaxLayer'`
+
+Extends `SpriteNode`: a 2D backdrop that moves with part of the camera's travel and tiles to fill the view.
+
+```ts
+parallax: [number, number]      // share of the camera's travel it moves with: 1 the world, 0 the screen
+repeatX: boolean ; repeatY: boolean   // tile along the axis (the tileset must be the one whole image)
+scroll: [number, number]        // a drift of its own, units per second
+```
+
+Never picked in the viewport.
+
+### Camera2DNode — `'camera2D'`
+
+Extends `CameraNode`: the 2D game camera. Orthographic, sized in art pixels, following a node through rooms.
+
+```ts
+pixelsPerUnit: number                      // art pixels per world unit (16)
+referenceResolution: [number, number]      // the view in art pixels, at least, at zoom 1 (480 x 270)
+zoom: number ; pixelPerfect: boolean       // pixel-perfect: whole screen pixels per art pixel
+followTarget: string                       // the NAME of the node to follow
+followOffset: [number, number] ; deadzone: [number, number]
+damping: number ; lookAhead: number
+confineToRooms: boolean ; roomTransitionSeconds: number
+get room: Room2DNode | null ; get inRoomTransition: boolean
+get layout: { scale, virtualWidth, virtualHeight }   // the last frame's fit
+shake(amplitude: number, seconds?: number, frequency?: number): void
+snapToTarget(): void                        // jump to the target, no damping or slide (after a respawn)
+fitView(width: number, height: number)      // called by the renderer each frame
+```
+
+It moves in the scene's late pass, only while the game plays.
+
+### CharacterBody2DNode — `'characterBody2D'`
+
+A 2D character's body: a box standing on its feet at the node, moved by the 2D physics.
+
+```ts
+size: [number, number] ; layer: number ; stepHeight: number ; flipSprites: boolean
+oneWayPlatforms: boolean                           // off: passes through one-way platforms (a flier)
+movement: 'walk' | 'fly'
+walkSpeed ; runSpeed ; acceleration ; deceleration ; airControl: number
+jumpHeight ; jumpTimeToApex ; fallGravityMultiplier ; maxFallSpeed: number
+coyoteSeconds ; jumpBufferSeconds ; gravityScale: number ; driveWhenUnpossessed: boolean
+velocity2D: [number, number] ; isJumping: boolean
+drive(): ControlIntent                             // world axes: move[0] +x, move[1] +y
+get controller: ControllerNode | null              // the one possessing it
+get isGrounded ; onWall ; onCeiling ; onSlope ; facing ; canJump ; jumpRequested
+get justJumped ; justLanded ; justDroppedThrough ; gravity ; jumpSpeed
+consumeJump(): boolean ; teleport(x, y)
+onMove2D(dt, substep): boolean | void              // a script's moves, every physics substep
+```
+
+### Body2DNode — `'body2D'`
+
+```ts
+size: [number, number] ; kind: 'solid' | 'oneWay' ; enabled: boolean
+bounds(out?): [minX, minY, maxX, maxY]
+```
+
+### Area2DNode — `'area2D'`
+
+```ts
+size: [number, number] ; offset: [number, number] ; layer: number ; mask: number
+detectAreas: boolean ; enabled: boolean
+```
+
+### Room2DNode — `'room2D'`
+
+```ts
+size: [number, number]          // the whole rectangle, world units, centred on the node
+zone: string                    // a free label
+bounds(out?): [minX, minY, maxX, maxY]
+contains(x: number, y: number): boolean
+```
+
+The followed node and the room hear `onRoomEnter(other)` / `onRoomExit(other)` when the node crosses
+into or out of it ([Lifecycle](../scripting/lifecycle.md)).
 
 ### AnimatedSpriteNode — `'animatedSprite'`
 
@@ -718,6 +812,10 @@ frames: number[] ; frameSource: 'node' | 'tile'
 fps: number ; loop: boolean ; randomStart: boolean   // randomStart: each copy begins on a random frame
 get currentTile: number ; get/set currentFrame: number
 reset(): void
+animationSet: SpriteAnimationSet | null ; animationSetId: string | null   // clips + optional state machine
+play(name, restart?) ; resumeMachine() ; setParam(name, value) ; fireTrigger(name)
+get clip ; state ; isFinished ; normalizedTime ; clipFrame ; clipNames
+speed: number ; paused: boolean
 ```
 
 ---

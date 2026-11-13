@@ -39,6 +39,10 @@ export const AmbientSoundIcon = () => (
 export const CameraIcon = () => (
   <S><rect x="2.5" y="7" width="12" height="10" rx="2" /><path d="M14.5 11.5 21.5 7.5v9l-7-4z" /></S>
 );
+/** A 2D camera: a screen frame with its pixel grid corner. */
+export const Camera2DIcon = () => (
+  <S><rect x="3" y="5" width="18" height="14" rx="1.6" /><path d="M3 9h4V5M17 19v-4h4" /><path d="M10 12h4" /></S>
+);
 /** A camera on a boom arm, pivoting about its target. */
 export const CameraRigIcon = () => (
   <S><rect x="11" y="4" width="10.5" height="8" rx="1.8" /><path d="M11 8H6.5a3 3 0 0 0-3 3v3" /><circle cx="3.5" cy="18" r="2.8" /></S>
@@ -103,6 +107,27 @@ export const AnimatedSpriteIcon = () => (
 /** Tilemap: a grid with one cell filled — the same shape as the tileset asset icon and the mode button. */
 export const TilemapIcon = () => (
   <S><rect x="3.5" y="3.5" width="17" height="17" rx="1.5" /><path d="M9 3.5v17M15 3.5v17M3.5 9h17M3.5 15h17" /><rect x="9" y="9" width="6" height="6" fill="currentColor" stroke="none" /></S>
+);
+
+/** A 2D character body: a figure standing in its box. */
+export const CharacterBody2DIcon = () => (
+  <S><rect x="5" y="3" width="14" height="18" rx="1.5" /><circle cx="12" cy="8" r="2" /><path d="M12 10.5v5M9 13h6M10 21l2-5.5 2 5.5" /></S>
+);
+/** A 2D collider: a block with its hatching. */
+export const Collider2DIcon = () => (
+  <S><rect x="3.5" y="8" width="17" height="8" rx="1" /><path d="M7 16l4-8M12 16l4-8M17 16l3.5-7" opacity="0.6" /></S>
+);
+/** A 2D area: a dashed box with a mark in it. */
+export const Area2DIcon = () => (
+  <S><path d="M4 7V4h3M10 4h4M17 4h3v3M20 10v4M20 17v3h-3M14 20h-4M7 20H4v-3M4 14v-4" /><circle cx="12" cy="12" r="2.2" /></S>
+);
+/** A 2D room: a dashed rectangle with a doorway gap on one side, one screen of a world. */
+export const Room2DIcon = () => (
+  <S><path d="M10 4H4.5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h15a1 1 0 0 0 1-1v-5M20.5 9V5a1 1 0 0 0-1-1H14" /><path d="M13 12h7M17.5 9.5 20 12l-2.5 2.5" /></S>
+);
+/** A parallax layer: two ranges of hills, the far one smaller. */
+export const ParallaxLayerIcon = () => (
+  <S><path d="M3 15l4.5-5 3 3.2L14 9l7 6" opacity="0.55" /><path d="M3 19l5-4.5 3.5 2.8 3.5-3.3 6 5" /><path d="M3 19h18" /></S>
 );
 
 // --- Environment -----------------------------------------------------------------------------------

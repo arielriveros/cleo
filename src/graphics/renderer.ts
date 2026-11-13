@@ -47,7 +47,7 @@ import { FullscreenPasses } from './render/fullscreenPasses';
 import { MaterialBinder } from './render/materialBinder';
 import { ViewProjection } from './render/viewProjection';
 import { QUALITY_TIERS, FXAA_SEARCH_STEPS, clampFinite } from './render/settingsTypes';
-import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
+import type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay, Pipeline2D } from './render/settingsTypes';
 import { TemporalPasses } from './render/temporal';
 import { AutoExposure } from './render/autoExposure';
 import { PostEffects } from './render/postEffects';
@@ -74,6 +74,8 @@ import { ModelDraw } from './render/modelDraw';
 import { ObjectTable } from './objectTable';
 import { GeometryPass } from './render/geometryPass';
 import { ForwardPass } from './render/forwardPass';
+import { Frame2DPasses } from './render/frame2d';
+import { Camera2DNode } from '../core/scene/nodes/camera2DNode';
 import { EditorOverlays } from './render/editorOverlays';
 import { DebugViews } from './render/debugViews';
 import { Capture } from './render/capture';
@@ -85,8 +87,8 @@ import { RenderStats } from './render/stats';
 import type { RenderSubsystems } from './render/subsystems';
 import { ProgramRegistry } from './render/programRegistry';
 import { renderNow, renderClockOverridden } from './render/renderClock';
-export { QUALITY_TIERS } from './render/settingsTypes';
-export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay } from './render/settingsTypes';
+export { QUALITY_TIERS, RENDER_2D_DEFAULTS, RENDER_3D_DEFAULTS } from './render/settingsTypes';
+export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay, Pipeline2D } from './render/settingsTypes';
 import { describeCapabilities } from './rhi/device';
 import type { BackendKind, DeviceCapabilities, Device } from './rhi/device';
 import { createDevice } from './rhi/createDevice';
@@ -198,6 +200,10 @@ export class Renderer {
     private readonly _geometry: GeometryPass;
     /** Forward drawing: the deferred overlay, the forward pipeline's scene, queues and the per-model draw (render/forwardPass.ts). */
     private readonly _forward: ForwardPass;
+    /** The flat 2D frame's scene half: background, the sorted 2D pass, editor chrome (render/frame2d.ts). */
+    private readonly _frame2D: Frame2DPasses;
+    /** How a 2D scene is drawn (RenderSettings.pipeline2D). */
+    private _pipeline2D: Pipeline2D = 'flat';
     /** Editor chrome: the overlay layer, grid, helpers, gizmos, skeleton overlay and selection mask (render/editorOverlays.ts). */
     private readonly _overlays: EditorOverlays;
     /** The debug channels: G-buffer, lighting and shadow views, overdraw heat map, validity overlay (render/debugViews.ts). */
@@ -428,6 +434,11 @@ export class Renderer {
             get selectedNodeId() { return renderer._selectedNodeId; },
             get gi() { return renderer._gi; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._post, this._decals, this._sprites, this._fullscreen, this._modelDraw);
+        this._frame2D = new Frame2DPasses({
+            get thumbnailMode() { return renderer._thumbnailMode; },
+            get selectedNodeId() { return renderer._selectedNodeId; },
+            get clearColor() { return renderer.clearColor; },
+        }, this._view, this._targets, this._passes, this._fullscreen, this._projection, this._lighting, this._shadows, this._decals, this._sprites, this._overlays);
         this._debugViews = new DebugViews({
             get renderHeight() { return renderer._renderHeight; },
             get renderWidth() { return renderer._renderWidth; },
@@ -768,8 +779,18 @@ export class Renderer {
         this._materials.sync.beginFrame();
         this._programs.compileQueue.poll();
         this._passes.frameEncoder = device.createCommandEncoder('frame');
+        // A 2D scene draws through the flat 2D frame unless its settings ask for the 3D one. Leaving it for
+        // the 3D frame drops every temporal history: none of it was kept up while the 2D frames ran.
+        const flat = scene.dimension === '2D' && this._pipeline2D === 'flat';
+        // A 2D game camera sizes its projection from the screen, in art pixels: fitted before either frame
+        // builds its matrices from it.
+        const active = scene.activeCamera;
+        if (active instanceof Camera2DNode) active.fitView(this._renderWidth, this._renderHeight);
+        if (this._view.flat2D && !flat) this.invalidateTemporalHistory();
+        this._view.flat2D = flat;
         try {
-            this._renderFrame(scene);
+            if (flat) this._renderFrame2D(scene);
+            else this._renderFrame(scene);
         } finally {
             // `finally`, because `_renderFrame` can throw: an encoder left open would leak every pass
             // recorded into it and the next frame would start on a stale one.
@@ -1030,6 +1051,76 @@ export class Renderer {
         gpuProfiler.endFrame();
         cpuProfiler.endFrame();
 
+        this._view.frameIndex++;
+        frameStats.frameMs = performance.now() - _statsT0;
+    }
+
+    /**
+     * The flat 2D frame: a 2D scene (`Scene.dimension`) with none of the 3D frame. No shadows, light grid,
+     * G-buffer, deferred lighting, sky, clouds, fog, decals, TAA, velocity, motion blur, exposure meter,
+     * screen-space passes, probes, GI or occlusion: the background, one sorted and batched 2D pass (tiles,
+     * sprites, particles; render/sprites2d.ts), the editor's chrome, and the post chain at exposure 1.
+     *
+     * The matrices are set up exactly as the 3D frame sets them, unjittered (nothing resolves a TAA
+     * jitter here; a movie's sample jitter still applies), so every pass that reads them -- the grid, the
+     * sprite rectangles, the particles -- sees what it sees in 3D.
+     */
+    private _renderFrame2D(scene: Scene): void {
+        if (!scene.activeCamera) return;
+        this._view.camera = scene.activeCamera.camera;
+        this._view.camera.resize(this._renderWidth, this._renderHeight);
+        this._view.scene = scene;
+        // Display-referred: pre-exposure 1 (and the exposure 1, `AutoExposure.resolveExposure`).
+        this._autoExposure.beginFrame(true);
+        // The render clock, for what runs on it in 2D: light flicker, particle wind, custom materials' time.
+        this._foliage.advanceWindTime();
+        this._foliage.prepareWindField(scene);
+        lightFlickerClock.time = this._view.windTime;
+
+        this._passes.scope('prepare.view');
+        this._view.taaJitterActive = false;
+        this._projection.updateJitter();
+        const view = this._view.camera.viewMatrix;
+        const proj = this._view.camera.projectionMatrix;
+        mat4.multiply(this._view.viewProj, proj, view);
+        this._visibility.frustum.setFromViewProjection(this._view.viewProj);
+        if (this._view.movieJitter) mat4.multiply(this._jitteredCameraProj, this._projection.jitterMatrix, proj);
+        else mat4.copy(this._jitteredCameraProj, proj);
+        mat4.multiply(this._jitteredViewProj, this._jitteredCameraProj, view);
+        mat4.invert(this._view.invViewProj, this._jitteredViewProj);
+        this._projection.uvConsuming(this._view.invViewProj, this._view.invViewProj);
+        mat4.invert(this._view.invViewProjStable, this._view.viewProj);
+        this._projection.uvConsuming(this._view.invViewProjStable, this._view.invViewProjStable);
+        // No occlusion is decided here; clearing the volumes keeps a 3D frame's verdicts from hiding sprites.
+        this._visibility.updateOcclusionVolumes(scene);
+        this._temporal.motionBlurWillRun = false;
+        this._temporal.velocityProducedThisFrame = false;
+        this._overlays.overlayDrawn = false;
+        this._passes.endScope();
+
+        resetFrameStats();
+        const _statsT0 = performance.now();
+
+        // Particles step with no weather and no depth to collide against (no snapshot is taken in 2D).
+        this._particlePasses.particleCollideValid = false;
+        this._particlePasses.simulateParticles(scene, null);
+        // Pixel-perfect when the game's 2D camera asks for it, and never for a capture, a thumbnail or a movie,
+        // which draw at their own size.
+        const camera2D = scene.activeCamera instanceof Camera2DNode ? scene.activeCamera : null;
+        const pixel = camera2D && camera2D.pixelPerfect && !this._thumbnailMode && !this._subsystems.capture.presentTarget
+            && !this._movie.active && !this._view.capturing ? camera2D : null;
+        this._frame2D.render(scene, pixel);
+        this._stats.checkGLErrors('scene2D');
+
+        this._applyPostProcessing(scene);
+        this._stats.checkGLErrors('post');
+
+        // No previous view a 3D pass could reproject through: the next 3D frame starts its histories afresh.
+        this._view.hasPrevViewProj = false;
+
+        this._passes.scope('frameEnd');
+        gpuProfiler.endFrame();
+        cpuProfiler.endFrame();
         this._view.frameIndex++;
         frameStats.frameMs = performance.now() - _statsT0;
     }
@@ -1688,7 +1779,7 @@ export class Renderer {
                 // In place: the shafts are composited ADDITIVELY into the buffer they are read against,
                 // so this neither consumes nor produces a chain stage. `readWrites` is what tells the
                 // pool it may not lend that buffer to anything live at the same moment.
-                if (!this._passEnabled['godRays'] || !scene.skyAtmosphere?.godRaysEnabled) continue;
+                if (!this._passEnabled['godRays'] || !scene.skyAtmosphere?.godRaysEnabled || this._view.flat2D) continue;
                 const inPlace = src;
                 // Half res, and its own resource rather than a standing buffer. It used to borrow
                 // `_blur_FBOs[0]` under the argument that bloom "runs after god rays and overwrites
@@ -1740,7 +1831,8 @@ export class Renderer {
             if (entry.effect === 'depthOfField') {
                 // `_temporal.depthSource()` is only filled outside thumbnail mode, but the whole chain is
                 // bypassed for `_capture.presentTarget` before this runs, so there is no stale-depth path here.
-                if (!this._post.dofEnabled || this._post.dofMaxBlur <= 0 || !this._passEnabled['dof.coc']) continue;
+                // Not in a flat 2D frame, which takes no depth snapshot to focus by.
+                if (!this._post.dofEnabled || this._post.dofMaxBlur <= 0 || !this._passEnabled['dof.coc'] || this._view.flat2D) continue;
                 const from = src, to = flip();
                 const half = { kind: 'scaled' as const, scale: 0.5 };
                 const coc = graph.declare({ ...hdr, name: 'dof.coc', size: half, lifetime: 'transient' });
@@ -1809,7 +1901,7 @@ export class Renderer {
         // After FXAA and everything else, so the shift is measured on exactly what the resolve shows.
         this._post.localExposure.beginFrame();
         if (this._post.localExposure.enabled && this._post.localExposure.strength > 0 && this._passEnabled['localExposure']
-            && this._debugViews.debugView === 'final' && this._view.camera.type !== 'orthographic') {
+            && this._debugViews.debugView === 'final' && this._view.camera.type !== 'orthographic' && !this._view.flat2D) {
             const from = src;
             graph.addPass({
                 id: 'localExposure', scope: 'localExposure', reads: [from],
@@ -1824,7 +1916,8 @@ export class Renderer {
             execute: ctx => {
                 // A movie folds the frame into its sample mean and resolves into its own target.
                 if (this._movie.active) { this._movie.present(ctx.read(result)); return; }
-                if (this._debugViews.debugView !== 'final') {
+                // A flat 2D frame fills none of the internal buffers a debug channel shows: always the image.
+                if (this._debugViews.debugView !== 'final' && !this._view.flat2D) {
                     // Editor Renderer-mode: blit one internal buffer instead of the composited image.
                     // Overdraw has no buffer of its own until it is asked for, so accumulate it first.
                     if (this._debugViews.debugView === 'overdraw') this._debugViews.overdrawPass(scene);
@@ -2010,6 +2103,10 @@ export class Renderer {
 
     public get saturation(): number { return this._post.saturation; }
     public set saturation(v: number) { this._post.saturation = Math.max(0, v); }
+
+    /** How a 2D scene is drawn: the flat 2D frame, or the full 3D one under it (RenderSettings.pipeline2D). */
+    public get pipeline2D(): Pipeline2D { return this._pipeline2D; }
+    public set pipeline2D(mode: Pipeline2D) { this._pipeline2D = mode === 'full' ? 'full' : 'flat'; }
 
     public get toneMapper(): ToneMapper { return this._post.toneMapper; }
     public set toneMapper(m: ToneMapper) { this._post.toneMapper = m; }
@@ -2742,6 +2839,7 @@ export class Renderer {
             filmGrainColored: this._post.filmGrainColored,
             saturation: this._post.saturation,
             toneMapper: this._post.toneMapper,
+            pipeline2D: this._pipeline2D,
             colorGradingLut: this._post.colorGradingLut,
             colorGradingIntensity: this._post.colorGradingIntensity,
             ssaoEnabled: this._ssil.ssaoEnabled,
@@ -2899,6 +2997,7 @@ export class Renderer {
         // (`Game.setRenderSettings`, the player's boot, `applyGameData`) hands over a whole
         // `config.render` blob rather than a patch.
         this.toneMapper = s.toneMapper ?? 'agx';
+        if (s.pipeline2D !== undefined) this.pipeline2D = s.pipeline2D;
         if (s.colorGradingLut !== undefined) this.colorGradingLut = s.colorGradingLut;
         if (s.colorGradingIntensity !== undefined) this.colorGradingIntensity = s.colorGradingIntensity;
         if (s.ssaoEnabled !== undefined) this.ssaoEnabled = s.ssaoEnabled;

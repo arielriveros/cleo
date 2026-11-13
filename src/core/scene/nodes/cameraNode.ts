@@ -6,6 +6,7 @@ import { unwrapScriptNode } from "./nodeScripting";
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
+import type { NodeType } from "./nodeType";
 
 /** See {@link CameraNode.seeThrough}. */
 export interface CameraSeeThrough {
@@ -59,8 +60,8 @@ export class CameraNode extends Node {
      */
     public readonly seeThrough: CameraSeeThrough = { active: false, pivot: vec3.create(), radius: 1, strength: 0.85 };
 
-    constructor(name: string, camera: Camera, id: string = uuidv4()) {
-        super(name, 'camera', id);
+    constructor(name: string, camera: Camera, id: string = uuidv4(), nodeType: NodeType = 'camera') {
+        super(name, nodeType, id);
         this._camera = camera;
         this._active = true;
     }

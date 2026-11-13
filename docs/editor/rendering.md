@@ -23,6 +23,14 @@ next editor reload: a graphics context cannot change API underneath the buffers,
 programs already built on it. It belongs to this machine, not to the scene or the project. The API
 in use is marked *running*; a WebGPU request that could not be met says why and runs on WebGL 2.
 
+### 2D Scenes
+
+How a 2D scene draws. Saved with the scene; a 3D scene ignores it.
+
+| Field | What it does |
+|---|---|
+| **Pipeline** | **Flat 2D** (the default): the [flat 2D frame](tilemap-2d.md#the-2d-frame) — tiles, sprites and particles in one sorted pass, then the post chain at an exposure of 1, with none of the 3D passes. **Full 3D**: the whole 3D frame under the 2D content, for a 2.5D scene that mixes models, 3D lights and a sky into its sprites. |
+
 ### Channels
 
 Blit one internal buffer instead of the final composite. This is the fastest way to answer "why does

@@ -1,4 +1,4 @@
-import { TextureManager, Logger } from 'cleo'
+import { TextureManager, Logger, CleoEngine } from 'cleo'
 
 // Bringing an atlas image in from disk.
 // A tileset STORES the atlas's pixel dimensions and never re-derives them (the published player has no
@@ -28,7 +28,12 @@ function uniqueTextureId(filename: string): string {
  * Register an image file as a texture and report its real pixel size. Null when the file cannot be decoded.
  * Emits `TEXTURES_CHANGED` on success so the Assets explorer indexes the new texture.
  */
-export async function importAtlasImage(file: File, emit: (event: string) => void): Promise<ImportedAtlas | null> {
+export async function importAtlasImage(file: File, emit: (event: string) => void,
+                                       options: { pixelArt?: boolean } = {}): Promise<ImportedAtlas | null> {
+  // Pixel art keeps its pixels: nearest filtering and no mips, so a tile neither blurs when scaled up nor
+  // bleeds its neighbours in from a smaller mip. The default follows the scene being edited: a 2D one's art
+  // is pixel art far more often than not. The atlas's texture settings change it afterwards.
+  const pixelArt = options.pixelArt ?? CleoEngine.instance?.scene?.dimension === '2D'
   // `addTextureFromData` retains no source of its own, and the editor's texture store skips a texture with
   // no source bytes — the atlas would draw this session and be missing after a reload.
   const bytes = new Uint8Array(await file.arrayBuffer())
@@ -50,7 +55,9 @@ export async function importAtlasImage(file: File, emit: (event: string) => void
           return
         }
         const textureId = uniqueTextureId(file.name)
-        TextureManager.Instance.addTextureFromData(image, { wrapping: 'repeat' }, textureId, { bytes, mime })
+        TextureManager.Instance.addTextureFromData(image,
+          pixelArt ? { wrapping: 'repeat', mipMap: false, minFilter: 'nearest', magFilter: 'nearest' } : { wrapping: 'repeat' },
+          textureId, { bytes, mime })
         emit('TEXTURES_CHANGED')
         resolve({ textureId, width: image.naturalWidth, height: image.naturalHeight })
       }

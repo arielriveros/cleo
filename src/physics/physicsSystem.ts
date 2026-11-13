@@ -481,6 +481,8 @@ export class PhysicsSystem {
       for (const node of this._scene.tilemaps) {
         if (node.markForRemoval) { node.tilemap.dispose(this); continue; }
         node.tilemap.setOrigin(node.worldPosition);
+        // A map only 2D bodies walk on (src/physics2d reads its cells directly) builds no 3D colliders.
+        if (!node.tilemap.colliders3D) { node.tilemap.removeColliders(this); continue; }
         node.tilemap.ensureRegistered(this);
         tilemapColliders += node.tilemap.colliderCount;
       }

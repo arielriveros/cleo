@@ -65,10 +65,20 @@ describe('generated starters', () => {
         expect(source).toContain('drive()');
     });
 
+    it('gives a Character Body 2D starter that drives through the intent, its own moves in onMove2D', () => {
+        // The engine walks and jumps a 2D body; a game's dash or double jump goes in the per-substep hook.
+        const source = defaultScriptClass('Hero', 'characterBody2D');
+        expect(source).toContain('extends CharacterBody2DNode');
+        expect(source).toContain('onMove2D(dt: number, substep: number): boolean');
+        expect(source).toContain('drive()');
+        expect(source).toContain('consumeJump()');
+        expect(source).not.toMatch(/onUpdate[^}]*velocity2D/);
+    });
+
     it('exposes each starter\'s public fields to the inspector', () => {
         // `parseScriptVariables` only understands literal-initialized number/string/boolean/vec3 fields.
         // A starter whose example field it cannot read would show an empty Variables list.
-        for (const type of ['character', 'controller'] as ScriptBaseType[]) {
+        for (const type of ['character', 'controller', 'characterBody2D'] as ScriptBaseType[]) {
             const variables = parseScriptVariables(defaultScriptClass('X', type));
             expect(variables.length, type).toBeGreaterThan(0);
             for (const v of variables) expect(v.type, `${type}.${v.name}`).toBeTruthy();

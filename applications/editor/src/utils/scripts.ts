@@ -22,6 +22,7 @@ export type ScriptBaseType =
   | 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'camera' | 'cameraRig'
   | 'sprite' | 'animatedSprite' | 'landscape' | 'volumetricClouds' | 'skyAtmosphere' | 'skyLight' | 'wind' | 'weather' | 'lodGroup'
   | 'sound' | 'character' | 'controller'
+  | 'camera2D' | 'room2D' | 'parallaxLayer' | 'characterBody2D' | 'body2D' | 'area2D'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput'
 
@@ -46,6 +47,12 @@ export const BASE_CLASS: Record<ScriptBaseType, string> = {
   sound: 'SoundNode',
   character: 'CharacterNode',
   controller: 'ControllerNode',
+  camera2D: 'Camera2DNode',
+  room2D: 'Room2DNode',
+  parallaxLayer: 'ParallaxLayerNode',
+  characterBody2D: 'CharacterBody2DNode',
+  body2D: 'Body2DNode',
+  area2D: 'Area2DNode',
   // Concrete UI classes, not a single UINode base, so a script gets typed members in Monaco.
   uiRoot: 'UIRootNode',
   uiPanel: 'UIPanelNode',
@@ -65,6 +72,8 @@ export const BASE_TYPE_LABEL: Record<ScriptBaseType, string> = {
   camera: 'Camera', cameraRig: 'Camera Rig', sprite: 'Sprite', animatedSprite: 'Animated Sprite', landscape: 'Landscape',
   volumetricClouds: 'Volumetric Clouds', skyAtmosphere: 'Sky Atmosphere', skyLight: 'Sky Light', wind: 'Wind', weather: 'Weather',
   lodGroup: 'LOD Group', sound: 'Sound', character: 'Character', controller: 'Controller',
+  camera2D: 'Camera 2D', room2D: 'Room', parallaxLayer: 'Parallax Layer',
+  characterBody2D: 'Character Body 2D', body2D: 'Collider 2D', area2D: 'Area 2D',
   uiRoot: 'UI Canvas', uiPanel: 'UI Panel', uiText: 'UI Text', uiImage: 'UI Image',
   uiButton: 'UI Button', uiStack: 'UI Stack', uiSpacer: 'UI Spacer',
   uiProgressBar: 'UI Progress Bar', uiSlider: 'UI Slider', uiToggle: 'UI Toggle',
@@ -100,8 +109,8 @@ export type ScriptVarSchema = {
 }
 
 /** The kinds of name a `pick` field can hold. Mirrors the engine's ClipName / SoundName / ... types. */
-export type ScriptPickKind = 'clip' | 'sound' | 'socket' | 'template' | 'node' | 'trigger'
-export const SCRIPT_PICK_KINDS: readonly ScriptPickKind[] = ['clip', 'sound', 'socket', 'template', 'node', 'trigger']
+export type ScriptPickKind = 'clip' | 'sound' | 'socket' | 'template' | 'node' | 'trigger' | 'spriteClip'
+export const SCRIPT_PICK_KINDS: readonly ScriptPickKind[] = ['clip', 'sound', 'socket', 'template', 'node', 'trigger', 'spriteClip']
 
 export type ScriptKind = 'class' | 'module'
 
@@ -263,7 +272,7 @@ function parseDefault(raw: string): any {
 /** Engine name types (lower-cased) -> the kind of name they hold. */
 const TS_TO_PICK: Record<string, ScriptPickKind> = {
   clipname: 'clip', soundname: 'sound', socketname: 'socket', templatename: 'template', nodename: 'node',
-  triggername: 'trigger',
+  triggername: 'trigger', spriteclipname: 'spriteClip',
 }
 
 /**
@@ -476,6 +485,40 @@ export default class ${className} extends ${base} {
     // Face where you are going. Set speedScale below 1 to approach gently.
     intent.aimYaw = 0
     intent.speedScale = 1
+  }
+}
+`,
+  characterBody2D: (className, base) => `import { Input, Logger, ${base} } from 'cleo'
+
+// ${className} runs on a Character Body 2D -- a 2D pawn whose walking, flying and jumping the ENGINE owns,
+// driven by a Controller (Player: Move and Jump; AI: a brain) exactly as a 3D Character is.
+//
+// To influence movement, tune the body in the inspector, or patch this frame's intent:
+//
+//   this.drive().speedScale = 0.5     // half speed, whatever is driving
+//
+// A game's OWN moves -- a dash, a double jump, a wall jump -- go in onMove2D, which runs every physics
+// substep (1/120 s or shorter) before the engine steers, so they come out the same at any frame rate.
+// Return true from it to own the substep: the engine's steering and jump skip it, your velocity2D stands.
+export default class ${className} extends ${base} {
+  public hasDoubleJump: boolean = true
+  public airJumps: number = 1
+
+  private _airJumpsLeft: number = 0
+
+  onUpdate(delta: number, time: number) {
+    if (this.justLanded) Logger.log(this.name + ' landed', 'Script')
+  }
+
+  onMove2D(dt: number, substep: number): boolean {
+    if (this.isGrounded) this._airJumpsLeft = this.hasDoubleJump ? this.airJumps : 0
+    // A jump pressed in the air, where the engine's own jump cannot launch: the double jump.
+    if (this.jumpRequested && !this.canJump && this._airJumpsLeft > 0) {
+      this.consumeJump()
+      this._airJumpsLeft--
+      this.velocity2D[1] = this.jumpSpeed * 0.9
+    }
+    return false
   }
 }
 `,

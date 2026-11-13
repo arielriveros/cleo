@@ -28,6 +28,11 @@ import {
   WaterVolumeNode,
   OcclusionVolumeNode,
   foliageColliderPose,
+  Camera2DNode,
+  Room2DNode,
+  CharacterBody2DNode,
+  Body2DNode,
+  Area2DNode,
 } from 'cleo';
 import type { FoliageCollision } from 'cleo';
 import type { NavObstacle, TriangleSoup } from 'cleo';
@@ -109,6 +114,11 @@ const DECAL_ICON = '__editor__DecalHelper';
 const DECALBOX_PREFIX = '__debug__decalbox_';
 const EFFECT_ICON = '__editor__EffectIcon';
 const EFFECTSHAPE_PREFIX = '__debug__effectshape_';
+/** A 2D room's outline, and a 2D camera's reference frame: always drawn, like the light icons. */
+const ROOM_FRAME = '__editor__RoomFrame';
+const CAMERA2D_FRAME = '__editor__Camera2DFrame';
+/** A 2D body's, collider's or area's box: always drawn with the icons, coloured by kind. */
+const BOX2D_FRAME = '__editor__Box2DFrame';
 
 // Per-scene cache of the last-built shapes signature for each body/trigger id.
 const shapeSignatures = new WeakMap<Scene, Map<string, string>>();
@@ -592,6 +602,74 @@ function ensureEffectIcon(node: ParticleSystemNode | ForceFieldNode) {
   icon.setUniformScale(0.5);
   icon.maxScreenSize = ICON_MAX_PX;
   node.addChild(icon);
+}
+
+/** Line pairs for a unit square on the XY plane (half extent 0.5), with a tick at its top-left corner. */
+function unitRectLines(): { positions: [number, number, number][]; indices: number[] } {
+  return {
+    positions: [[-0.5, -0.5, 0], [0.5, -0.5, 0], [0.5, 0.5, 0], [-0.5, 0.5, 0]],
+    indices: [0, 1, 1, 2, 2, 3, 3, 0],
+  };
+}
+
+// A 2D room's outline: the rectangle a Camera 2D keeps its view inside, green, followed per frame so a
+// Size edit in the inspector shows at once. Always drawn, not only when selected: the rooms ARE the map's
+// layout. Rooms have no rotation or scale of their own (Room2DNode.size is the whole rectangle).
+function ensureRoomFrame(room: Room2DNode) {
+  if (room.getChildByName(ROOM_FRAME).length) return;
+  const frame = wireModel(ROOM_FRAME, unitRectLines(), [0.45, 0.9, 0.55]);
+  frame.onUpdate = () => {
+    const s = room.worldScale;
+    const sx = room.size[0] / (Math.abs(s[0]) || 1), sy = room.size[1] / (Math.abs(s[1]) || 1);
+    if (Math.abs(frame.scale[0] - sx) > 1e-5 || Math.abs(frame.scale[1] - sy) > 1e-5) frame.setScale([sx, sy, 1]);
+  };
+  frame.onUpdate(0, 0);
+  room.addChild(frame);
+}
+
+// A 2D game camera's reference frame: the view it shows at zoom 1, its reference resolution in world units,
+// on the XY plane under the camera (which sits in front of it looking down -Z, turned 180 degrees about Y,
+// so its local +Z is the world's -Z). Followed per frame, like the room's.
+function ensureCamera2DFrame(cam: Camera2DNode) {
+  if (cam.getChildByName(CAMERA2D_FRAME).length) return;
+  const frame = wireModel(CAMERA2D_FRAME, unitRectLines(), [0.95, 0.85, 0.35]);
+  frame.onUpdate = () => {
+    const ppu = Math.max(1e-6, cam.pixelsPerUnit), z = Math.max(0.05, cam.zoom);
+    const sx = cam.referenceResolution[0] / ppu / z, sy = cam.referenceResolution[1] / ppu / z;
+    if (Math.abs(frame.scale[0] - sx) > 1e-5 || Math.abs(frame.scale[1] - sy) > 1e-5) frame.setScale([sx, sy, 1]);
+    const depth = cam.worldPosition[2];
+    if (Math.abs(frame.position[2] - depth) > 1e-5) frame.setPosition([0, 0, depth]);
+  };
+  frame.onUpdate(0, 0);
+  cam.addChild(frame);
+}
+
+/**
+ * The eye-menu row a 2D physics node's box answers to: a character body's or a collider's is its collision
+ * shape (Collision wireframes), an area's is a trigger (Trigger volumes) -- the rows 3D bodies use.
+ */
+export function box2DCategory(node: CharacterBody2DNode | Body2DNode | Area2DNode): 'colliders' | 'triggers' {
+  return node instanceof Area2DNode ? 'triggers' : 'colliders';
+}
+
+// A 2D physics node's box, followed per frame: a character body's stands on its feet (cyan), a collider's is
+// centred on it (red), an area's is centred on it moved by its offset (amber; drawn unmirrored).
+function ensureBox2DFrame(node: CharacterBody2DNode | Body2DNode | Area2DNode) {
+  if (node.getChildByName(BOX2D_FRAME).length) return;
+  const color: [number, number, number] = node instanceof CharacterBody2DNode ? [0.35, 0.9, 1]
+    : node instanceof Body2DNode ? [1, 0.35, 0.3] : [1, 0.75, 0.25];
+  const frame = wireModel(BOX2D_FRAME, unitRectLines(), color);
+  frame.onUpdate = () => {
+    const s = node.worldScale;
+    const sx = Math.abs(s[0]) || 1, sy = Math.abs(s[1]) || 1;
+    const w = node.size[0] / sx, h = node.size[1] / sy;
+    const oy = node instanceof CharacterBody2DNode ? h / 2 : node instanceof Area2DNode ? node.offset[1] / sy : 0;
+    const ox = node instanceof Area2DNode ? node.offset[0] / sx : 0;
+    if (Math.abs(frame.scale[0] - w) > 1e-5 || Math.abs(frame.scale[1] - h) > 1e-5) frame.setScale([w, h, 1]);
+    if (Math.abs(frame.position[0] - ox) > 1e-5 || Math.abs(frame.position[1] - oy) > 1e-5) frame.setPosition([ox, oy, 0]);
+  };
+  frame.onUpdate(0, 0);
+  node.addChild(frame);
 }
 
 /** Line pairs for a unit box (half extent 0.5) and for three unit-radius great circles. */
@@ -1372,6 +1450,23 @@ export function reconcileEditorHelpers(
         const child = node.getChildByName(name)[0];
         if (child) node.removeChild(child);
       }
+    } else if (node instanceof CharacterBody2DNode || node instanceof Body2DNode || node instanceof Area2DNode) {
+      // A 2D body's box is its collision shape and an Area 2D's its trigger, so they follow the rows the 3D
+      // wireframes do -- in a 2D scene, the only collision those two rows have to show.
+      const wanted = show(box2DCategory(node));
+      const existing = node.getChildByName(BOX2D_FRAME)[0];
+      if (wanted && !existing) ensureBox2DFrame(node);
+      else if (!wanted && existing) node.removeChild(existing);
+    } else if (node instanceof Room2DNode) {
+      const existing = node.getChildByName(ROOM_FRAME)[0];
+      if (icons && !existing) ensureRoomFrame(node);
+      else if (!icons && existing) node.removeChild(existing);
+    } else if (node instanceof Camera2DNode) {
+      // Its reference frame rather than the 3D frustum gizmo: what a 2D camera shows is a rectangle.
+      const existing = node.getChildByName(CAMERA2D_FRAME)[0];
+      const shouldHave = icons && node !== viewCamera;
+      if (shouldHave && !existing) ensureCamera2DFrame(node);
+      else if (!shouldHave && existing) node.removeChild(existing);
     } else if (node instanceof CameraNode) {
       // Reconcile both ways so a hijacked/active camera's stale gizmo is cleaned up too.
       const existing = node.getChildByName(CAMERA_GIZMO)[0];
