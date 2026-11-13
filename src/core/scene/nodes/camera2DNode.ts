@@ -220,8 +220,17 @@ export class Camera2DNode extends CameraNode {
     }
 
     private _roomAt(scene: Camera2DSceneView, x: number, y: number): Room2DNode | null {
-        if (this._room && this._room.scene && this._room.contains(x, y)) return this._room;
+        const last = this._room;
+        if (last && last.scene && last.contains(x, y)) return last;
         for (const room of scene.rooms2D) if (room.visible !== false && room.contains(x, y)) return room;
+        // In no room -- falling down a pit, jumping past the top: the view stays in the last one, unless
+        // the target went far from it (a teleport to a part of the world no room covers).
+        if (last && last.scene && last.visible !== false) {
+            const b = last.bounds();
+            const [hw, hh] = this._halfView();
+            const gx = Math.max(b[0] - x, 0, x - b[2]), gy = Math.max(b[1] - y, 0, y - b[3]);
+            if (gx <= hw * 2 && gy <= hh * 2) return last;
+        }
         return null;
     }
 

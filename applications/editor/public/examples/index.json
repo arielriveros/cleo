@@ -6,9 +6,9 @@
       "name": "Valley",
       "description": "A 2 km mountain valley to fly through, with a day and night cycle: landscape layers for ground, rock, snow, forest floor, roads and trails; meadow grass, spruce forest, oaks about the hamlet and bushes made with the Foliage Creator; a torch-lit hamlet with enterable houses, a windmill, a campfire, a pond with floating crates, mist and god rays, all lit by baked GI volumes and light probes. Play opens a menu: a cinematic tour of the valley (made with the sequencer) or a free camera to fly.",
       "order": 0,
-      "bytes": 125672458,
+      "bytes": 136561115,
       "sceneCount": 1,
-      "textureCount": 131,
+      "textureCount": 170,
       "createdAt": 1790000000000
     },
     {
@@ -30,6 +30,16 @@
       "sceneCount": 1,
       "textureCount": 149,
       "createdAt": 1794173811120
+    },
+    {
+      "slug": "duskwell",
+      "name": "Duskwell",
+      "description": "A small 2D metroidvania on the flat 2D renderer: a warrior with a three-hit combo, bats that wake as you pass, two rooms the camera slides between, one-way platforms, checkpoints, diamonds, and the dash relic that carries you over the pit. Pixel-perfect at 480 x 270, with parallax backdrops and glowing torches.",
+      "order": 3,
+      "bytes": 440634,
+      "sceneCount": 1,
+      "textureCount": 11,
+      "createdAt": 1795000000000
     }
   ]
 }

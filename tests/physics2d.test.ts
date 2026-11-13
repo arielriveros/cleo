@@ -326,6 +326,34 @@ describe('the 2D physics pass', () => {
         expect(player.isGrounded).toBe(true);
     });
 
+    it('passes a flier through one-way platforms, and round-trips the switch', () => {
+        const scene = new Scene();
+        const plank = new Body2DNode('Plank', [4, 0.5]);
+        plank.kind = 'oneWay';
+        scene.addNode(plank);
+        const walker = new CharacterBody2DNode('Walker');
+        const bat = new CharacterBody2DNode('Bat');
+        bat.oneWayPlatforms = false;
+        for (const [i, body] of [walker, bat].entries()) {
+            body.playerInput = false;
+            body.controller = 'none';
+            body.size = [0.5, 0.5];
+            body.setPosition([i - 0.5, 1, 0]);
+            scene.addNode(body);
+        }
+        scene.start();
+        run(scene, 0.6);
+        expect(walker.position[1]).toBeCloseTo(0.25, 4);
+        expect(bat.position[1]).toBeLessThan(-1);
+        const back = (CharacterBody2DNode as any).parse;
+        const json = (bat as any)._serializePayload();
+        expect(json.characterBody2D.oneWayPlatforms).toBe(false);
+        expect((walker as any)._serializePayload().characterBody2D.oneWayPlatforms).toBeUndefined();
+        const root = new Scene().root;
+        back(root, { name: 'Bat', type: 'characterBody2D', ...json });
+        expect((root.children[0] as CharacterBody2DNode).oneWayPlatforms).toBe(false);
+    });
+
     it('tells an area and what came in, and out', () => {
         const { scene, player } = level();
         const zone = new Area2DNode('Checkpoint', [2, 2]);

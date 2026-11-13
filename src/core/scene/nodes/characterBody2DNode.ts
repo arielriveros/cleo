@@ -46,6 +46,8 @@ export class CharacterBody2DNode extends Node {
     public stepHeight: number = 0.5;
     /** Keep its sprite children facing the way it faces (Sprite.flipX). */
     public flipSprites: boolean = true;
+    /** One-way platforms hold it up. Off, it passes through them both ways, as a flier does. */
+    public oneWayPlatforms: boolean = true;
 
     /**
      * Velocity, units per second (x right, y up). The controller writes it; with no controller, a script
@@ -120,6 +122,7 @@ export class CharacterBody2DNode extends Node {
                 settings: { ...this.settings, wallJumpSpeed: [...this.settings.wallJumpSpeed] },
                 abilities: { ...this.abilities },
                 gravity: this.gravity, stepHeight: this.stepHeight, flipSprites: this.flipSprites,
+                ...(this.oneWayPlatforms ? {} : { oneWayPlatforms: false }),
             },
         };
     }
@@ -147,6 +150,7 @@ export class CharacterBody2DNode extends Node {
         node.gravity = num(d.gravity, 40);
         node.stepHeight = Math.max(0, num(d.stepHeight, 0.5));
         node.flipSprites = d.flipSprites !== false;
+        node.oneWayPlatforms = d.oneWayPlatforms !== false;
         Node.finishParse(node, parent, json);
     }
 }

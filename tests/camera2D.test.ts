@@ -137,6 +137,22 @@ describe('Camera2DNode', () => {
         expect(camera.room?.name).toBe('Right');
     });
 
+    it('keeps the last room while the target falls out of every room, and lets go of a far teleport', () => {
+        const { scene, camera, player } = world();
+        player.setPosition([2, 0, 0]);
+        step(scene, 0.1);
+        // Down a pit, below the room's floor: the view stays confined to the room.
+        player.setPosition([2, -14, 0]);
+        step(scene, 0.1);
+        expect(camera.room?.name).toBe('Left');
+        expect(camera.position[1]).toBeGreaterThan(-0.1);
+        // Far from any room: the camera follows freely.
+        player.setPosition([2, -100, 0]);
+        step(scene, 0.1);
+        expect(camera.room).toBeNull();
+        expect(camera.position[1]).toBeCloseTo(-100, 4);
+    });
+
     it('tells the target and the rooms when the target crosses over', () => {
         const { scene, player, left, right } = world();
         const heard: string[] = [];

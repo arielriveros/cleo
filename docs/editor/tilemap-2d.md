@@ -3,7 +3,8 @@
 A 2D game in Cleo is a scene authored as **2D**: you get the Tilemap editor instead of Landscape, a
 unified Y-sorted 2D draw pass, and sprites instead of meshes.
 
-Set the dimension in [Scene settings](scene-authoring.md#scene-settings).
+Set the dimension in [Scene settings](scene-authoring.md#scene-settings). The
+[Duskwell example](duskwell-example.md) is a small metroidvania made with everything on this page.
 
 ## Tilesets
 
@@ -198,6 +199,8 @@ facing the way it faces (**flip sprites**).
 - **Layer** — the 2D layers it is on; an [Area 2D](#area-2d) sees it if the area looks for one of them.
 - **Controller** — **Platformer** (below), or **None**: it falls by its **gravity** and moves by the velocity
   a script gives it.
+- **One-way platforms** — on, one-way platforms hold it up; off, it passes through them both ways, as a bat
+  or a ghost does.
 - **Player input** — read the **move**, **jump** and **dash** input actions. Off, a script drives it with the
   same feel (`move`, `jump`, `dash`): an enemy that walks and jumps like the player.
 
@@ -376,7 +379,9 @@ A **Room** (**Sprites ▸ Room**) is one screen of a 2D world: a rectangle, **si
 on the node, outlined in the editor. While the followed node stands in a room, the camera keeps its view
 inside it, centring the view on a room smaller than the screen. Rooms may touch: walking out of one
 slides the camera into the next, and scripts on the followed node and on the room hear `onRoomEnter` and
-`onRoomExit`. **Zone** is a free label (an area of the world) for a map or a script.
+`onRoomExit`. Out of every room — falling down a pit, jumping past a room's top — the view stays in the
+last one; only a jump far away (a teleport) frees it. **Zone** is a free label (an area of the world) for a
+map or a script.
 
 ### Parallax Layer
 

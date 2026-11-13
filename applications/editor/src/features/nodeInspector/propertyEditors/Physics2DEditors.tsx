@@ -92,6 +92,9 @@ export function CharacterBody2DEditor(props: { node: CharacterBody2DNode }) {
             <PropertyRow label='Flip sprites' hint='Mirror its sprite children to face the way it faces.'>
               <Toggle checked={n.flipSprites} onChange={(c) => { n.flipSprites = c; changed() }} />
             </PropertyRow>
+            <PropertyRow label='One-way platforms' hint='One-way platforms hold it up. Off: it passes through them both ways, as a flier does.'>
+              <Toggle checked={n.oneWayPlatforms} onChange={(c) => { n.oneWayPlatforms = c; changed() }} />
+            </PropertyRow>
             {n.controller === 'none' && (
               <PropertyRow label='Gravity' hint='Fall acceleration, units per second squared.'>
                 <NumberInput step={1} value={n.gravity} onChange={(v) => { n.gravity = v; changed() }} />

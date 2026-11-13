@@ -755,6 +755,7 @@ A 2D character's body: a box standing on its feet at the node, moved by the 2D p
 
 ```ts
 size: [number, number] ; layer: number ; stepHeight: number ; flipSprites: boolean
+oneWayPlatforms: boolean                           // off: passes through one-way platforms (a flier)
 controller: 'platformer' | 'none' ; playerInput: boolean
 moveAction ; jumpAction ; dashAction: string
 settings: PlatformerSettings ; abilities: { doubleJump, dash, wallJump }

@@ -137,7 +137,7 @@ export class World2D {
             // gravity, so the arc of a jump does not depend on the frame rate.
             const fall = (vyStart + vy) * 0.5;
             moveAndSlide(this._world, shape, vx * h, fall * h, {
-                dropThrough: state.dropLeft > 0,
+                dropThrough: state.dropLeft > 0 || !body.oneWayPlatforms,
                 stepUp: body.stepHeight,
                 snapDown: body.stepHeight,
                 grounded: contacts.grounded && vy <= 0,
