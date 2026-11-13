@@ -137,7 +137,7 @@ export type BodyDescription = {
 export const EDITOR_CLEAR_COLOR: [number, number, number, number] = [0.68, 0.80, 0.90, 1.0];
 export const LEGACY_CLEAR_COLOR = [0.65, 0.65, 0.71];
 
-export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'options' | 'material' | 'terrainMaterial' | 'stateMachine' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig' | 'particleSystem';
+export type EditorMode = 'scene' | 'landscape' | 'tilemap' | 'ui' | 'template' | 'options' | 'material' | 'terrainMaterial' | 'stateMachine' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig' | 'particleSystem' | 'sequence';
 
 /**
  * Whether a mode paints the 3D viewport, or replaces it with a full-panel editor of its own; the
@@ -166,6 +166,7 @@ export const MODE_RENDERS_VIEWPORT: Record<EditorMode, boolean> = {
   texture: false,        // TextureTabView fills the panel
   soundSample: false,    // SoundTabView fills the panel
   particleSystem: true,  // the effect plays in a staging scene over a ground plane
+  sequence: true,        // the open scene itself, previewed at the playhead
 };
 
 /**
@@ -195,6 +196,7 @@ export const MODE_SHOWS_SCENE_HELPERS: Record<EditorMode, boolean> = {
   texture: false,
   soundSample: false,
   particleSystem: false, // a staging scene: its lights and ground are the editor's
+  sequence: true,        // the open scene, authored: its lights and cameras are what gets keyed
 };
 
 /**
@@ -225,6 +227,7 @@ export const MODE_SKELETON_OWNER: Record<EditorMode, boolean> = {
   texture: false,
   soundSample: false,
   particleSystem: false,
+  sequence: false,
 };
 // The gizmo types live with the gizmo math in the app-kit; re-exported so editor code keeps one import.
 export type { GizmoMode, GizmoSpace } from '@cleo/app-kit/gizmo/types';
@@ -233,7 +236,7 @@ export type SavingState = 'idle' | 'saving' | 'saved' | 'error';
 // Browser-style editor tabs. `editorMode` is derived from the active tab (see EngineProvider). The scene
 // tab hosts the open scene asset; the library tabs each own a live edit session (a throwaway Scene in
 // tabRuntimeRef), except 'script' and 'tileset', which own no 3D scene and get no tabRuntimeRef entry.
-export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'stateMachine' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig' | 'particleSystem';
+export type TabKind = 'scene' | 'template' | 'material' | 'terrainMaterial' | 'stateMachine' | 'animation' | 'animationField' | 'model' | 'script' | 'tileset' | 'texture' | 'soundSample' | 'aiBrain' | 'rig' | 'particleSystem' | 'sequence';
 
 /**
  * The editor mode a library tab puts the editor into. Exhaustive, like `MODE_RENDERS_VIEWPORT` above — a
@@ -258,6 +261,7 @@ export const TAB_EDITOR_MODE: Record<Exclude<TabKind, 'scene'>, EditorMode> = {
   texture: 'texture',
   soundSample: 'soundSample',
   particleSystem: 'particleSystem',
+  sequence: 'sequence',
 };
 
 /**
@@ -289,6 +293,9 @@ export const TAB_METERS_EXPOSURE: Record<TabKind, boolean> = {
   soundSample: false,    // no viewport at all
   rig: false,            // a preview character under a fixed studio rig, like every other asset preview
   particleSystem: false, // a staging scene under the preview rig, like the material and field previews
+  // A Sequencer tab shows the open scene itself (it has no session scene of its own), and what it keys —
+  // lights, the hour, exposure — must be judged at the scene's own exposure.
+  sequence: true,
 };
 
 /**
@@ -326,6 +333,8 @@ export const TAB_RUNS_POST_PROCESSING: Record<TabKind, boolean> = {
   // The one asset preview that DOES wear the chain: an additive effect's look is mostly its bloom, and an
   // HDR spark judged without it reads as a flat dot. Exposure stays authored (see TAB_METERS_EXPOSURE).
   particleSystem: true,
+  // The open scene, wearing its own look: a cinematic is judged as it will play.
+  sequence: true,
 };
 
 /**
@@ -358,6 +367,7 @@ export const TAB_ASSET_KIND: Record<TabKind, AssetKind | null> = {
   soundSample: 'soundSample',
   rig: 'rig',
   particleSystem: 'particleSystem',
+  sequence: 'sequence',
 };
 
 /**
@@ -384,6 +394,7 @@ export const KIND_LABEL: Record<TabKind, string> = {
   texture: 'Texture',
   soundSample: 'Sound',
   particleSystem: 'Particle System',
+  sequence: 'Sequence',
 };
 
 // Reactive per-mesh-tab edit state (the tab's Scene itself lives in tabRuntimeRef). levelIds[i] is the
@@ -421,6 +432,12 @@ export interface EditorTab {
   textureId?: string | null; // texture tabs: the edited texture asset id (also its TextureManager id)
   soundId?: string | null; // sound tabs: the edited sample asset id (also its AudioManager id)
   particleSystemId?: string | null; // particle tabs: the edited `.vfx` asset id
+  /**
+   * Sequencer tabs: the edited `.sequence` asset id. The tab has no session scene: it shows the open scene.
+   * `sequenceContextNodeId` is the Sequence node it was opened from, whose bindings its preview borrows.
+   */
+  sequenceId?: string | null;
+  sequenceContextNodeId?: string | null;
   /**
    * Animator tabs: the skeleton whose Character Animation workspace this tab belongs to. Stamped when the
    * tab opens, since a character's machine reaches its skeleton only through a live node. The other

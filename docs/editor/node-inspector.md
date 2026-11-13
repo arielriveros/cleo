@@ -148,6 +148,10 @@ without changing how the sky and ambient light it.
 **Cubemap Preview** — what the probe last captured, unwrapped into a 2 : 1 panorama. **Bake Probe**
 captures again.
 
+**Follow the sun** — relight the probe each time the scene's sun has turned this many degrees (0 = only when
+baked), so its reflections and fill keep up with a moving sun, a sequence keying it or a day cycle, with no
+script. A relight lights the captured scene again over a few frames; it never captures it again.
+
 **Box Projection** — parallax-correct the reflections against the box: a surface inside it reflects what
 the probe saw where its reflected ray leaves the box, so a room's walls land where they are on a polished
 or wet floor. For rooms and corridors; leave it off for open ground, whose horizon is far away. Bounded
@@ -156,7 +160,7 @@ probes only.
 A bake captures the probe's scene once, as a G-buffer, a few dozen objects a frame, and then lights it:
 the sun's shadow from a map of the probe's own (a probe in a room, or under a cliff, sees shade where
 there is shade), the lights set to **Bake**, the sky. A **relight** lights that captured scene again
-without drawing it — what a time of day asks for as the sun moves, a few frames per probe and no frame
+without drawing it — what **Follow the sun** does as the sun moves, a few frames per probe and no frame
 over about 2 ms. One probe is worked on at a time, a step a frame, those never baked first and then the
 nearest, and a probe keeps lighting and reflecting with its previous bake until the new one is complete.
 
@@ -543,20 +547,18 @@ or from a brain. See [AI agents](ai-agents.md#the-controller-inspector).
 
 #### Sequence
 
-A Sequence node plays a cinematic: tracks laid out on a timeline that move a camera along a path, cut
+A Sequence node plays a cinematic: a `.sequence` asset's tracks that move a camera along a path, cut
 between cameras, animate properties of other nodes (a UI fade, the time of day, a light) and call script
-methods at given moments. The sequence names its actors by slot rather than by node, and this section
-binds each slot to a node in the scene, so one sequence can drive different actors. Play it from a script
-with `Game.playSequence('Name')` or `node.play()`; while it plays it owns what it drives, and `stop()` puts
-all of it back. **Open in Sequencer** shows its timeline in the [Sequencer](sequencer.md). See
-[Sequences](../scripting/scene-and-game.md#sequences).
+methods at given moments. The node keeps its own copy of the sequence (a published game needs no library),
+refreshed whenever the asset is saved. Play it from a script with `Game.playSequence('Name')` or
+`node.play()`; while it plays it owns what it drives, and `stop()` puts all of it back. See
+[Sequencer](sequencer.md) and [Sequences](../scripting/scene-and-game.md#sequences).
 
 | Field | |
 |---|---|
-| **Sequence** | The sequence this node carries, and how long it runs. |
-| **Length** | Its duration in seconds and its number of tracks. |
+| **Timeline** | The sequence asset it plays, its length and tracks. **✎** opens it in Sequencer mode, **✕** unlinks it (the copy keeps playing). Unlinked: pick one, drop one from the Assets tab, or **Edit in Sequencer** to make the copy an asset. |
 | **Autoplay** | Start playing on the first frame of Play or of the published game. Never while editing. |
-| **Slot rows** | One per slot: the node that slot drives. An unbound slot looks for the node its path names. |
+| **Slot rows** | One per slot: this scene's node for it, overriding the node the sequence was authored against (shown in brackets), which in turn wins over the slot's name path. |
 
 ### 2D
 

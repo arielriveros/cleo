@@ -3,6 +3,7 @@ import { useCleoEngine } from '../../EngineContext'
 import { AiBrainAsset } from '../../../utils/aiBrains'
 import { Select, Button, Hint, SectionTitle, cn, valueClass } from '@cleo/app-kit/ui'
 import { useAssetDrop } from '../../../utils/useAssetDrop'
+import { useInspectorLock } from '../inspectorLock'
 
 /**
  * The brain reference control on a Controller — what this agent decides with.
@@ -21,6 +22,7 @@ export default function AiBrainSlot(props: { node: ControllerNode; onChange?: ()
   const {
     aiBrains, enterAiBrainEditor, extractBrainFromController, linkBrainToController, eventEmitter,
   } = useCleoEngine()
+  const lock = useInspectorLock()
 
   const linkedId = props.node.brainId
   const asset = linkedId ? aiBrains.find(b => b.id === linkedId) : undefined
@@ -58,6 +60,7 @@ export default function AiBrainSlot(props: { node: ControllerNode; onChange?: ()
   const hasInlineBrain = props.node.behavior.states.length > 0 || props.node.goals.goals.length > 0
 
   return (
+    <fieldset disabled={lock.locked} title={lock.locked ? lock.reason : undefined} className='border-0 m-0 p-0 min-w-0 w-full'>
     <div className='w-full' {...dropProps}>
       <SectionTitle title='Brain' className='mt-3 mb-1' />
       {asset ? (
@@ -110,5 +113,6 @@ export default function AiBrainSlot(props: { node: ControllerNode; onChange?: ()
         </div>
       )}
     </div>
+    </fieldset>
   )
 }

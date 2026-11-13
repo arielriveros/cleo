@@ -573,7 +573,8 @@ export {
     evaluateKeyedNumber, evaluateKeyedVector, evaluateKeyedStep, keyedCurveWidth, rampWeight, hermite, Spline3,
     type Vec3Tuple, type KeyInterp, type TimedKey, type KeyedCurve,
 } from "./core/math";
-export { compilePropertyPath, type PropertyAccessor } from "./sequencer/propertyPath";
+export { compilePropertyPath, isTransformPath, captureVisibility, type PropertyAccessor } from "./sequencer/propertyPath";
+export { keyableProperties, sameKeyValue, type KeyableProperty } from "./sequencer/keyable";
 export { SEQUENCE_VERSION, FOLIAGE_CHANNELS } from "./sequencer/types";
 export { registerSequencePresets, sequencePresetsFor, presetFields, blendPresetValue } from "./sequencer/presetRegistry";
 export type {

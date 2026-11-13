@@ -14,6 +14,7 @@ import { captureAnimationState, restoreAnimationState, applyIkRig, applySockets,
 import { disposeModelSubtree, ModelNode } from 'cleo'
 import { reembedMachine } from './animationControllers'
 import { reembedParticleSystems } from './particleSystems'
+import { reembedSequences, sequenceNodesOf } from './sequenceAssets'
 
 // Pull-based cross-scene propagation: re-resolves every asset link a stored scene carries (__materialId /
 // __modelId / __templateId, terrain layer.materialId, foliage rule.modelId) against the CURRENT libraries,
@@ -375,6 +376,15 @@ export function resyncScene(
       if (node.particleSystemId && !known.has(node.particleSystemId)) { node.particleSystemId = null; changed = true }
     }
     if (reembedParticleSystems(scene, libs.particleSystems)) changed = true
+  }
+
+  // --- Sequences: the same pull-side refresh of each linked Sequence node's timeline ---
+  if (libs.sequences) {
+    const known = new Set(libs.sequences.map(q => q.id))
+    for (const node of sequenceNodesOf(scene)) {
+      if (node.sequenceId && !known.has(node.sequenceId)) { node.sequenceId = null; changed = true }
+    }
+    if (reembedSequences(scene, libs.sequences)) changed = true
   }
 
   // --- Sprites: the same refresh, one embedded tileset each ---

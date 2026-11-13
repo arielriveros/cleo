@@ -13,7 +13,11 @@ import { Game, Input, InputSystem, Node, SequenceNode, UIButtonNode, UIRootNode 
  *
  * Up/Down (or the mouse) picks, Enter / Space / A confirms. Pause (P, Escape or Start) comes back here from
  * either mode: from the cinematic it stops the tour, which puts back everything the tour changed (the
- * camera, the time of day). The tour coming to its end returns here too.
+ * camera, the sun). The tour coming to its end returns here too.
+ *
+ * The valley's day is the `Day Cycle` sequence (it plays by itself from the start, looping): under the menu
+ * and through Free mode. The tour keys the sun itself, so the day is paused while it plays, and picks up again
+ * where it was once the tour has put the sun back.
  *
  * It listens in a LATE UPDATE (`scene.addLateUpdate`), which runs every frame whatever the game is doing,
  * so the menu answers while the tour has the camera.
@@ -21,6 +25,8 @@ import { Game, Input, InputSystem, Node, SequenceNode, UIButtonNode, UIRootNode 
 export default class ValleyStartMenuNode extends UIRootNode {
   /** The Sequence node the Cinematic button plays. */
   public tourName: string = 'Valley Tour'
+  /** The Sequence node that runs the valley's day (paused while the tour has the sun). */
+  public dayName: string = 'Day Cycle'
   /** Real seconds after the menu opens during which a confirm is ignored (the press that opened it). */
   public openGuard: number = 0.25
   public isOpen: boolean = false
@@ -28,6 +34,7 @@ export default class ValleyStartMenuNode extends UIRootNode {
   public mode: string = 'menu'
 
   private _tour: SequenceNode = null
+  private _day: SequenceNode = null
   private _buttons: UIButtonNode[] = []
   private _selected: number = 0
   private _navLast: number = 0
@@ -38,6 +45,7 @@ export default class ValleyStartMenuNode extends UIRootNode {
 
   onStart() {
     this._tour = this.findNode(this.tourName) as SequenceNode
+    this._day = this.findNode(this.dayName) as SequenceNode
     const cinematic = this._find('Cinematic') as UIButtonNode
     const free = this._find('Free') as UIButtonNode
     this._buttons = [cinematic, free].filter(b => !!b)
@@ -70,7 +78,14 @@ export default class ValleyStartMenuNode extends UIRootNode {
   public playCinematic(): void {
     if (!this._tour) return
     this._close('cinematic')
+    this._day?.pause()
     this._tour.play()
+  }
+
+  /** The tour is over (or left): its sun goes back to the day's, and the day goes on. */
+  private _stopTour(): void {
+    this._tour?.stop()
+    if (this._day?.isPaused) this._day.resume()
   }
 
   /** Fly the free camera. */
@@ -89,7 +104,7 @@ export default class ValleyStartMenuNode extends UIRootNode {
 
   /** The tour ran to its end: put the valley back as it was and offer the choice again. */
   private _tourEnded(): void {
-    this._tour?.stop()
+    this._stopTour()
     this.open()
   }
 
@@ -97,7 +112,7 @@ export default class ValleyStartMenuNode extends UIRootNode {
     this._clock += unscaled
     if (!this.isOpen) {
       if (!Input.started('Pause')) return
-      if (this.mode === 'cinematic') this._tour?.stop()
+      if (this.mode === 'cinematic') this._stopTour()
       this.open()
       return
     }

@@ -344,7 +344,8 @@ export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: b
   if (mode !== 'animation') for (const id of CLIP_PANELS) hidden.add(id);
   if (mode !== 'particleSystem') for (const id of PARTICLE_PANELS) hidden.add(id);
   if (mode !== 'rig') for (const id of RIG_PANELS) hidden.add(id);
-  if (mode !== 'scene' && mode !== 'template') for (const id of SEQUENCER_PANELS) hidden.add(id);
+  // The Sequencer edits a `.sequence` asset in its own tab, over the open scene: Sequencer mode alone shows it.
+  if (mode !== 'sequence') for (const id of SEQUENCER_PANELS) hidden.add(id);
 
   const hide = (...ids: readonly string[]) => { for (const id of ids) hidden.add(id); };
 
@@ -355,6 +356,12 @@ export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: b
       hide('uiAdd');
       break;
     case 'template':
+      break;
+    // Sequencer mode is Scene mode on the open scene with every property change keyed. What cannot be a key —
+    // adding nodes, scripts, physics — is not offered: the tree and Properties stay, the Add palettes,
+    // Scripts and Physics go.
+    case 'sequence':
+      hide(...ADD_PANELS, 'scripts', 'physics');
       break;
     // A screen rect has no rigid body.
     case 'ui':
@@ -456,6 +463,8 @@ export default function DockLayout() {
     const want = editorMode === 'animationField' ? 'animFieldPlot'
       : editorMode === 'animation' ? 'clipTimeline'
       : editorMode === 'particleSystem' ? 'particleTransport'
+      // The timeline is Sequencer mode's work surface.
+      : editorMode === 'sequence' ? 'sequencer'
       : bottomTabRef.current;
     const panel = dock.getPanel(want);
     // Read the group directly rather than activeBottomTab(), which only knows the two persisted ids.
@@ -634,8 +643,10 @@ export default function DockLayout() {
     return () => { eventEmitter.off('RESET_DOCK_LAYOUT', onReset); };
   }, [api, eventEmitter, editorMode, applyRestriction, restoreBottomTab, withProgrammaticLayout]);
 
+  // `data-editor-mode` lets the dock's skin tint a mode's chrome: Sequencer mode's headers turn orange, so it is
+  // never mistaken for Scene mode, which it otherwise looks just like (app-kit styles/dockview.css).
   return (
-    <div className="flex-1 min-h-0 relative">
+    <div className="flex-1 min-h-0 relative" data-editor-mode={editorMode}>
       <DockviewReact
         components={dockComponents}
         defaultTabComponent={PanelTab}

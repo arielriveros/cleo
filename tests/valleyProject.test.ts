@@ -238,7 +238,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(nodes().filter(n => n.type === 'uiRoot').map(n => n.name).sort()).toEqual(['Cinematic Overlay', 'Start Menu']);
         // The libraries hold what the scenery uses and nothing of the game (split.ts prunes them).
         for (const s of library('scripts')) expect(s.source, s.name).not.toMatch(/class Souls\w*Node/);
-        expect(library('scripts').map((s: any) => s.name).sort()).toEqual(['Day and Night', 'Fire Light', 'Fly Camera', 'Splash', 'Start Menu', 'Tour Director', 'Windmill Sails']);
+        expect(library('scripts').map((s: any) => s.name).sort()).toEqual(['Fire Light', 'Fly Camera', 'Splash', 'Start Menu', 'Tour Director', 'Windmill Sails']);
         // The standing Torch went with the torches the hamlet's light poles replaced (hamletDressing.ts).
         expect(library('templates').map((t: any) => t.name).sort()).toEqual(['Wall Torch', 'Water Splash', 'Water Step']);
         for (const lib of ['animations', 'animControllers', 'animationFields', 'rigs', 'aiBrains', 'boneMasks'])
@@ -249,7 +249,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
 
     it('references only assets it ships', async () => {
         const { walkRefs, edgesOfAsset } = await import('../applications/editor/src/utils/assetEdges');
-        const KINDS = { materials: 'material', terrainMaterials: 'terrainMaterial', templates: 'template', models: 'model', tilesets: 'tileset', particleSystems: 'particleSystem' };
+        const KINDS = { materials: 'material', terrainMaterials: 'terrainMaterial', templates: 'template', models: 'model', tilesets: 'tileset', particleSystems: 'particleSystem', sequences: 'sequence' };
         const ids = new Set<string>([
             ...read('textures', 'index.json').map((t: any) => `texture:${t.id}`),
             ...Object.entries({ ...KINDS, scripts: 'script' }).flatMap(([lib, kind]) => (library(lib) ?? []).map((a: any) => `${kind}:${a.id}`)),
@@ -513,9 +513,38 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
     });
 
     it('relights its probes as the sun moves, not re-captures them', () => {
-        const script = readFileSync(join(__dirname, '..', 'examples', 'scripts', 'ValleyDayNight.ts'), 'utf8');
-        expect(script).toMatch(/probe\.relight \?\? probe\.bake/);
-        expect(script).toMatch(/public probeDegrees: number = 4/);
+        // Each probe follows the sun on its own (LightProbeNode.relightDegrees): no script relights them.
+        const probes = nodes().filter(n => n.type === 'lightProbe');
+        expect(probes.length).toBeGreaterThan(0);
+        for (const p of probes) expect(p.relightDegrees, p.name).toBe(4);
+    });
+
+    it('keys its day, never scripts it: a looping Day Cycle sequence, and no time-of-day node', async () => {
+        expect(nodes().some(n => n.name === 'Time of Day')).toBe(false);
+        expect(library('scripts').some((s: any) => /DayNight|hour/.test(s.name))).toBe(false);
+        const day = nodes().find(n => n.type === 'sequence' && n.name === 'Day Cycle');
+        expect(day).toBeDefined();
+        expect(day.autoplay).toBe(true);
+        const asset = library('sequences').find((q: any) => q.id === day.sequenceId);
+        expect(asset.name).toBe('Day Cycle');
+        expect(day.sequence).toEqual(asset.sequence);
+        expect(day.sequence.loop).toBe(true);
+        expect(day.sequence.duration).toBe(24 * 60);
+        // The sun itself is keyed, and so are what follow it; every slot is bound.
+        const paths = day.sequence.tracks.map((t: any) => `${t.slot}.${t.path}`);
+        for (const p of ['sun.rotation', 'sun.light.color', 'sun.light.intensity', 'skyLight.intensity', 'sky.fogDensity', 'sky.godRayExposure'])
+            expect(paths, p).toContain(p);
+        const byId = new Map(nodes().map(n => [n.id, n]));
+        for (const slot of day.sequence.slots) expect(byId.has(day.bindings[slot.id]), slot.name).toBe(true);
+        expect(byId.get(day.bindings.sun).name).toBe('Sun');
+        // The menu pauses it while the tour has the sun.
+        const menu = library('scripts').find((s: any) => s.name === 'Start Menu');
+        expect(menu.source).toContain(`public dayName: string = '${day.name}'`);
+        expect(menu.source).toContain('this._day?.pause()');
+        // Noon is high in the south, midnight under the horizon.
+        const { sunElevation } = await import('../tools/valley/cinematic/dayPath');
+        expect(sunElevation(12)).toBeGreaterThan(50);
+        expect(sunElevation(0)).toBeLessThan(-20);
     });
 
     it('burns the campfire on the 2.7 s bonfire loop, already alight', () => {
@@ -676,7 +705,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
 
     // ---- the start menu and the cinematic tour (tools/valley/cinematic.ts) ----------------------------
 
-    const tourNode = () => nodes().find(n => n.type === 'sequence');
+    const tourNode = () => nodes().find(n => n.type === 'sequence' && n.name === 'Valley Tour');
 
     it('opens on a start menu offering the cinematic tour or the free camera', () => {
         const menu = nodes().find(n => n.type === 'uiRoot' && n.name === 'Start Menu');
@@ -695,9 +724,6 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             expect(ui.actions.some((a: any) => a.name === action), action).toBe(true);
             expect(script.source, action).toContain(`'${action}'`);
         }
-        // The day clock can be held by the tour.
-        const clock = nodes().find(n => n.name === 'Time of Day');
-        expect(clock.script).toContain('public running: boolean = true');
     });
 
     it('lights the storm from the director and splashes the pond from a spawn track', async () => {
@@ -747,10 +773,26 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(camera.type).toBe('camera');
         expect(camera.active).toBe(false);
         expect(camera.camera.far).toBeGreaterThanOrEqual(2000);
-        expect(byId.get(tourNode().bindings.clock).name).toBe('Time of Day');
+        // The day is keyed on the sun itself, not through a clock node.
+        expect(byId.get(tourNode().bindings.sun).name).toBe('Sun');
+        expect(seq.slots.some((s: any) => s.name === 'Time of Day')).toBe(false);
+        expect(seq.tracks.filter((t: any) => t.slot === 'sun').map((t: any) => t.path).sort()).toEqual(['light.color', 'light.intensity', 'rotation']);
         // The sequence parses whole: nothing dropped as malformed.
         const { parseSequence } = await import('../src/sequencer/parse');
         expect(parseSequence(seq).tracks.length).toBe(seq.tracks.length);
+    });
+
+    it('keeps the tour as a sequence asset the Valley Tour node links and plays a copy of', () => {
+        const tour = tourNode();
+        const asset = library('sequences').find((q: any) => q.id === tour.sequenceId);
+        expect(asset, 'the node links a library sequence').toBeDefined();
+        expect(asset.name).toBe('Valley Tour');
+        // The copy the node plays is the asset's, so opening the scene re-embeds nothing.
+        expect(tour.sequence).toEqual(asset.sequence);
+        // In the Assets tab beside the tour's scripts, and in the scene's references.
+        const entry = read('vfs.json').entries.find((e: any) => e.assetId === asset.id);
+        expect(entry).toMatchObject({ path: '/Cinematic/Valley Tour.sequence', kind: 'sequence' });
+        expect(manifest().sceneMetas.find((m: any) => m.name === 'Valley').refs.sequenceIds).toContain(asset.id);
     });
 
     it('flies the tour past every part of the valley, clear of the ground and inside the Long House', async () => {
@@ -826,9 +868,12 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const layerNames = new Set(landscape().terrain.foliage.map((l: any) => l.name));
         for (const name of [...GRASS_LAYERS, ...TREE_LAYERS]) expect(layerNames.has(name), name).toBe(true);
         expect(bound('landscape').type).toBe('landscape');
-        // The pond's calm and the day clock's overcast are fields their nodes have.
+        // The pond's calm is a field its node has; the overcast greys the sun's own keyed colour at the storm.
         expect(bound('pond').model.material.properties.waveStrength).toBeGreaterThan(0.08);
-        expect(bound('clock').script).toContain('public overcast: number = 0');
+        const sunColor = (seq.tracks.find(t => t.id === 'sun-color') as any).sections[0].curve.keys;
+        const colorAt = (t: number) => { let v = sunColor[0].v; for (const k of sunColor) if (k.t <= t) v = k.v; return v as number[]; };
+        const warmth = (c: number[]) => c[0] - c[2];
+        expect(warmth(colorAt(when('storm', 20)))).toBeLessThan(warmth(colorAt(when('valley', 5))));
         // It ends on the Cleo logo and wordmark: a texture the project ships, and the loading screen's font.
         const logo = bound('logo'), wordmark = bound('wordmark');
         expect(logo.type).toBe('uiImage');

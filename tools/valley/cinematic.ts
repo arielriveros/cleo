@@ -6,12 +6,19 @@
 //
 //   Cinematic
 //     Cinematic Camera    a plain camera, inactive until the tour cuts to it
-//     Valley Tour         a Sequence node playing tools/valley/cinematic/valley-tour.sequence.json, its director
+//     Valley Tour         a Sequence node playing the `Valley Tour.sequence` asset (/Cinematic), made from
+//                         tools/valley/cinematic/valley-tour.sequence.json; its director
 //                         examples/scripts/ValleyTourDirector.ts (the storm's lightning)
 //     Lightning           the point light the director flashes, unbaked and unshadowed
 //     Cinematic Overlay   letterbox bars, a fade to black, a title and a caption the tour animates, and the
 //                         Cleo logo and wordmark it ends on (the logo a texture of its own, /Cinematic/Textures)
 //     Start Menu          "Cinematic demo" or "Free mode" (examples/scripts/ValleyStartMenu.ts)
+//
+// The valley's day is keyed, never scripted: the tour keys the sun, the sky's fill, the mist, the god rays and
+// the fog volumes itself (cinematic/dayPath.ts), and a `Day Cycle` Sequence node at the root (the
+// `Day Cycle.sequence` asset, a whole day in 24 minutes, looping) plays them from the start of Play: under the
+// menu and through Free mode, paused while the tour has the sun. The old `Time of Day` node and its
+// ValleyDayNight script are removed, and the light probes follow the sun on their own (`relightDegrees`).
 //
 // and, beside the Wind at the root, the `Weather` the tour's Act III keys: one unbounded volume falling
 // rain and snow together ('mixed'), with the library's Snow material, all at 0 (dry, nothing falling) until
@@ -29,8 +36,9 @@ import { parseInputMap } from '../../src/input/actionMap'
 import { parseSequence } from '../../src/sequencer/parse'
 import { FLY_INPUT_MAP } from './flyInputMap.mjs'
 import { buildTour } from './cinematic/tour'
+import { buildDayCycle, daySlots, type DayAuthored } from './cinematic/dayPath'
 import { terrainHeightSampler } from './cinematic/terrainHeight'
-import { ROOT, VALLEY_SCENE, id, log, child, refreshValleyScripts, attach } from './bundleOps'
+import { ROOT, VALLEY_SCENE, id, log, child, nodes, refreshValleyScripts, attach } from './bundleOps'
 
 export const TOUR_FILE = path.join(ROOT, 'tools', 'valley', 'cinematic', 'valley-tour.sequence.json')
 
@@ -42,6 +50,13 @@ const WORDMARK_FONT = 'Consolas, monaco, monospace'
 const LOGO_FILE = path.join(ROOT, 'applications', 'editor', 'public', 'brand', 'logo.png')
 const LOGO_TEXTURE = id('texture:cleo-logo')
 const LOGO_FOLDER = '/Cinematic/Textures'
+/** The tour as a library asset, `/Cinematic/Valley Tour.sequence`, which the Valley Tour node links and embeds. */
+export const TOUR_ASSET = id('sequence:valley-tour')
+const TOUR_FOLDER = '/Cinematic'
+/** Free mode's day, `/Cinematic/Day Cycle.sequence`, played by the `Day Cycle` node at the root. */
+export const DAY_ASSET = id('sequence:day-cycle')
+/** Degrees the sun may turn before a light probe relights itself (what the old time-of-day script did by hand). */
+export const PROBE_RELIGHT_DEGREES = 4
 const DIM = [0.72, 0.69, 0.62, 1]
 const GOLD = [0.92, 0.78, 0.46, 1]
 const SERIF = 'Georgia, "Times New Roman", serif'
@@ -110,6 +125,69 @@ function logoTexture(bundle: any) {
   }
 }
 
+/**
+ * The tour as a `.sequence` library asset, its Assets entry and the scene's reference to it. The Valley Tour node
+ * links it (`sequenceId`) and plays its own copy, as the editor's Sequence nodes do. Idempotent.
+ */
+function sequenceAsset(bundle: any, assetId: string, data: any) {
+  const asset = { id: assetId, name: data.name, sequence: data }
+  const list: any[] = (bundle.libraries.sequences ??= [])
+  const at = list.findIndex(q => q.id === assetId)
+  if (at >= 0) list[at] = asset
+  else list.push(asset)
+  bundle.vfs.entries = bundle.vfs.entries.filter((e: any) => e.assetId !== assetId)
+  bundle.vfs.entries.push({ path: `${TOUR_FOLDER}/${data.name}.sequence`, kind: 'sequence', assetId, created: bundle.manifest.createdAt })
+  if (!bundle.vfs.folders.includes(TOUR_FOLDER)) bundle.vfs.folders.push(TOUR_FOLDER)
+  for (const meta of bundle.manifest.sceneMetas) {
+    if (meta.id !== VALLEY_SCENE) continue
+    const refs = (meta.refs ??= {})
+    refs.sequenceIds = [...new Set([...(refs.sequenceIds ?? []), assetId])]
+  }
+}
+
+/** A node's name path from the scene root ("Fog Volumes/Pond Mist"). */
+function namePath(root: any, target: any): string | null {
+  const walk = (n: any, trail: string[]): string | null => {
+    for (const c of n.children ?? []) {
+      const here = [...trail, c.name]
+      if (c === target) return here.join('/')
+      const deeper = walk(c, here)
+      if (deeper) return deeper
+    }
+    return null
+  }
+  return walk(root, [])
+}
+
+const slotIdOf = (name: string) => name.replace(/[^A-Za-z0-9]+(.)?/g, (_m, c: string | undefined) => (c ? c.toUpperCase() : '')).replace(/^./, c => c.toLowerCase())
+
+/** What the scene holds by day, which the day's keys move away from: read off the scene as authored. */
+export function dayAuthored(root: any): DayAuthored {
+  const sky = root.children.find((c: any) => c.type === 'skyAtmosphere')?.atmosphere
+  const skyLight = root.children.find((c: any) => c.type === 'skyLight')?.skyLight
+  if (!sky) throw new Error('the Valley has no sky atmosphere for the day to light')
+  const fogVolumes = [...nodes(root)].filter((n: any) => n.type === 'volumetricFog').map((n: any) => ({
+    slot: `fog${slotIdOf(n.name).replace(/^./, (c: string) => c.toUpperCase())}`, name: n.name,
+    path: namePath(root, n) ?? n.name, density: n.volumetricFog?.density ?? 0.02,
+  }))
+  return {
+    skyLight: skyLight?.intensity ?? 1,
+    fog: { density: sky.fogDensity ?? 0, falloff: sky.fogHeightFalloff ?? 0, opacity: sky.fogMaxOpacity ?? 1 },
+    godRays: sky.godRayExposure ?? 0,
+    fogVolumes,
+  }
+}
+
+/** A day's slots bound to this scene's nodes by id, as an editor-made Sequence node would be. */
+function dayBindings(root: any, day: DayAuthored): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const slot of daySlots(day)) {
+    const node = [...nodes(root)].find((n: any) => namePath(root, n) === slot.path)
+    if (node) out[slot.id] = node.id
+  }
+  return out
+}
+
 function startMenu() {
   const card = panel('menu:card', 'Card', rect([0.5, 0.5], [0.5, 0.5], [-380, -230], [380, 230]), [0.05, 0.045, 0.04, 0.92], { radius: 10 }, [
     text('menu:title', 'Title', 'The Valley', rect([0, 0], [1, 0], [0, 30], [0, 104]), { size: 60, tint: GOLD }),
@@ -133,7 +211,7 @@ export function tourSequence(bundle: any, regenerate = false): any {
   const root = bundle.scenes[VALLEY_SCENE].scene
   const heightAt = terrainHeightSampler(root)
   const pond = child(child(root, 'Water'), 'Pond Water')
-  const tour = parseSequence(buildTour(heightAt, { pondLevel: pond?.position?.[1] }))
+  const tour = parseSequence(buildTour(heightAt, { pondLevel: pond?.position?.[1], day: dayAuthored(root) }))
   fs.writeFileSync(TOUR_FILE, JSON.stringify(tour, null, 2) + '\n')
   log(`cinematic: tour written to ${path.relative(ROOT, TOUR_FILE)}`)
   return tour
@@ -164,9 +242,20 @@ export function applyCinematic(bundle: any, options: { regenerate?: boolean } = 
   const data = bundle.scenes[VALLEY_SCENE]
   if (!data) throw new Error('no Valley scene')
   const root = data.scene
-  const clock = child(root, 'Time of Day')
   const fly = child(root, 'Fly Camera')
-  if (!clock || !fly) throw new Error('the Valley has no Time of Day / Fly Camera to build the cinematic around')
+  if (!fly) throw new Error('the Valley has no Fly Camera to build the cinematic around')
+  const day = dayAuthored(root)
+
+  // The day is keyed now (Day Cycle, below): the time-of-day node and its script go, and the probes relight
+  // themselves as the sun turns.
+  const oldClock = root.children.findIndex((c: any) => c.name === 'Time of Day')
+  if (oldClock >= 0) root.children.splice(oldClock, 1)
+  const oldScript = id('script:ValleyDayNight')
+  bundle.libraries.scripts = bundle.libraries.scripts.filter((s: any) => s.id !== oldScript)
+  bundle.vfs.entries = bundle.vfs.entries.filter((e: any) => e.assetId !== oldScript)
+  for (const meta of bundle.manifest.sceneMetas)
+    if (meta.refs?.scriptIds) meta.refs.scriptIds = meta.refs.scriptIds.filter((s: string) => s !== oldScript)
+  for (const n of nodes(root)) if (n.type === 'lightProbe') n.relightDegrees = PROBE_RELIGHT_DEGREES
   const clouds = root.children.find((c: any) => c.type === 'volumetricClouds')
   const wind = root.children.find((c: any) => c.type === 'wind')
   const landscape = root.children.find((c: any) => c.type === 'landscape')
@@ -181,11 +270,14 @@ export function applyCinematic(bundle: any, options: { regenerate?: boolean } = 
   // Time x2 runs the wind, the clouds and the water at x2 too.
   data.config.render.effectsFollowTimeScale = true
 
-  refreshValleyScripts(bundle, ['ValleyStartMenu', 'ValleyDayNight', 'ValleyTourDirector'])
+  refreshValleyScripts(bundle, ['ValleyStartMenu', 'ValleyTourDirector'])
   logoTexture(bundle)
   const menuScript = bundle.libraries.scripts.find((s: any) => s.id === id('script:ValleyStartMenu'))
   const directorScript = bundle.libraries.scripts.find((s: any) => s.id === id('script:ValleyTourDirector'))
   const tour = tourSequence(bundle, options.regenerate)
+  sequenceAsset(bundle, TOUR_ASSET, tour)
+  const dayCycle = parseSequence(buildDayCycle(day))
+  sequenceAsset(bundle, DAY_ASSET, dayCycle)
 
   // A plain camera (a rig would overwrite it every frame), shaped like the fly camera's, switched off.
   const flyCam = fly.children.find((c: any) => c.type === 'camera')
@@ -199,15 +291,16 @@ export function applyCinematic(bundle: any, options: { regenerate?: boolean } = 
 
   const over = overlay()
   const menu = startMenu()
-  attach(menu, menuScript, { tourName: 'Valley Tour' })
+  attach(menu, menuScript, { tourName: 'Valley Tour', dayName: 'Day Cycle' })
   const ui = (n: any, name: string): any => n.name === name ? n : (n.children ?? []).map((c: any) => ui(c, name)).find(Boolean)
 
   const sequence = {
     id: id('cinematic:tour'), name: 'Valley Tour', type: 'sequence',
     position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: [], variables: {}, spawnOnStart: true,
-    sequence: tour,
+    sequence: tour, sequenceId: TOUR_ASSET,
     bindings: {
-      camera: camera.id, clock: clock.id,
+      ...dayBindings(root, day),
+      camera: camera.id,
       barTop: ui(over, 'Letterbox Top').id, barBottom: ui(over, 'Letterbox Bottom').id, fade: ui(over, 'Fade').id,
       title: ui(over, 'Title').id, caption: ui(over, 'Caption').id,
       logo: ui(over, 'Logo').id, wordmark: ui(over, 'Wordmark').id,
@@ -235,8 +328,19 @@ export function applyCinematic(bundle: any, options: { regenerate?: boolean } = 
   if (at >= 0) root.children[at] = group
   else root.children.push(group)
 
+  // Free mode's day: plays from the first frame of Play, under the menu and through Free mode (the menu pauses
+  // it while the tour has the sun). Where the Time of Day node was, after the Weather.
+  const dayNode = {
+    id: id('day-cycle'), name: 'Day Cycle', type: 'sequence',
+    position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], children: [], variables: {}, spawnOnStart: true,
+    sequence: dayCycle, sequenceId: DAY_ASSET, bindings: dayBindings(root, day), autoplay: true,
+  }
+  const dayAt = root.children.findIndex((c: any) => c.id === dayNode.id)
+  if (dayAt >= 0) root.children[dayAt] = dayNode
+  else root.children.splice(Math.max(0, root.children.indexOf(weather) + 1), 0, dayNode)
+
   // The menu's own map beside the fly camera's (flyInputMap.mjs).
   bundle.libraries.inputMap = parseInputMap(FLY_INPUT_MAP)
-  log(`cinematic: ${tour.tracks.length} tracks, ${tour.duration} s; start menu and overlay ${at >= 0 ? 'replaced' : 'added'}`)
+  log(`cinematic: ${tour.tracks.length} tracks, ${tour.duration} s; day cycle ${dayCycle.tracks.length} tracks, ${dayCycle.duration} s; start menu and overlay ${at >= 0 ? 'replaced' : 'added'}`)
   return bundle
 }

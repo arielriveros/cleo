@@ -67,6 +67,13 @@ body { font-size: var(--text-ui); }
      so an indigo UI row would read as "selected" at a glance in the one place that must stay unambiguous. */
   --node-ui: 110 214 235;  /* #6ed6eb  UI element rows in the scene tree */
 
+  /* Sequencer mode's chrome. A Sequencer tab looks just like Scene mode (same scene, tree and inspector) but
+     every change there is a key, not an edit, so its panel headers turn light orange (dockview.css). */
+  --sequence-tint:        253 186 116; /* #fdba74  header strip */
+  --sequence-tint-mid:    254 215 170; /* #fed7aa  a group's shown tab */
+  --sequence-tint-strong: 255 237 213; /* #ffedd5  the focused group's shown tab */
+  --sequence-tint-fg:      67  20   7; /* #431407  header text on it */
+
   /* Axis colors (vector inputs) */
   --axis-x: 255 125 125;   /* #ff7d7d */
   --axis-y: 125 255 125;   /* #7dff7d */

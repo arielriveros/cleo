@@ -101,6 +101,9 @@ export function walkRefs(obj: any, out: EdgeSpec[]): void {
     // A particle node's link to the `.vfx` asset it copied. Same shape as `brainId`: the `system` beside
     // it is the embedded copy, walked on for the sprite textures and mesh models its emitters draw.
     if (key === 'particleSystemId') { push(out, 'particleSystem', val, key); continue }
+    // A Sequence node's link to the `.sequence` asset it copied. The `sequence` beside it is the embedded
+    // copy; its slots name scene NODES (`nodeId`), never assets.
+    if (key === 'sequenceId') { push(out, 'sequence', val, key); continue }
     // A node machine's link to the animation controller it was instantiated from. The machine around it
     // is the embedded copy, walked on for the references it holds itself.
     if (key === 'controllerId') { push(out, 'animController', val, key); continue }
@@ -213,6 +216,9 @@ export function edgesOfAsset(kind: AssetKind, asset: any): EdgeSpec[] {
     // ORM map) and at most one model.
     // Read through the engine's own reader rather than walkRefs, so the graph and the engine agree on what
     // an emitter actually uses (a disabled emitter still counts — it is one toggle from drawing).
+    // A timeline names scene nodes through its slots and templates by name in its spawn tracks: no asset ids.
+    case 'sequence':
+      break
     case 'particleSystem': {
       const refs = particleSystemReferences(asset.system ?? { emitters: [] })
       for (const id of refs.textures) push(out, 'texture', id, 'render.textureId')
@@ -347,6 +353,7 @@ export function edgesOfScene(refs: SceneRefs | null | undefined): EdgeSpec[] {
   each(refs.tilesetIds, 'tileset', SCENE_LINK_FIELD.tileset)
   each(refs.aiBrainIds, 'aiBrain', SCENE_LINK_FIELD.aiBrain)
   each(refs.particleSystemIds, 'particleSystem', SCENE_LINK_FIELD.particleSystem)
+  each(refs.sequenceIds, 'sequence', SCENE_LINK_FIELD.sequence)
   each(refs.textureIds, 'texture', SCENE_LINK_FIELD.texture)
   each(refs.scriptIds, 'script', SCENE_LINK_FIELD.script)
   each(refs.animationFieldIds, 'animationField', SCENE_LINK_FIELD.animationField)
@@ -381,6 +388,7 @@ const SCENE_LINK_FIELD: Record<AssetKind, string> = {
   tileset: 'tilesetId',
   aiBrain: 'brainId',
   particleSystem: 'particleSystemId',
+  sequence: 'sequenceId',
   animationField: 'state.fieldId',
   animController: 'stateMachine.controllerId',
   boneMask: 'layer.maskId',

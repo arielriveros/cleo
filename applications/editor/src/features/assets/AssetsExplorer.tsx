@@ -60,7 +60,7 @@ export default function AssetsExplorer({ active = true }: { active?: boolean }) 
 function AssetsExplorerHost({ active }: { active: boolean }) {
   const {
     enterMaterialEditor, enterFoliageMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor, createScriptModule, createTilesetFromImage, importAnimationFiles,
-    enterAiBrainEditor, enterParticleSystemEditor, addAnimController,
+    enterAiBrainEditor, enterParticleSystemEditor, enterSequenceEditor, addAnimController,
     importModelFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter, scriptAssets,
   } = useCleoEngine()
   const { vfs, libs, pathIndexRef, folderKindsRef, landingFolderRef, depsRef } = useVfs()
@@ -317,6 +317,8 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
     // Minted from `buildParticleSystemAsset`'s default effect (one soft rising emitter) and opened at once,
     // so there is something on screen to start shaping rather than an empty stack.
     { label: 'Particle System', icon: <img src={iconFor('particleSystem')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterParticleSystemEditor(), title: 'Create a GPU particle effect: emitters, their module stacks and renderers' },
+    // Opened at once in its Sequencer tab, over the open scene: the first change to a node there keys it.
+    { label: 'Sequence', icon: <img src={iconFor('sequence')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => enterSequenceEditor(), title: 'Create a cinematic timeline, opened in Sequencer mode over the open scene' },
     // The three animation-authoring kinds are created empty and rig-less, straight into the library; the
     // reconcile files them under the landing folder like any asset created outside the explorer.
     { label: 'Animator', icon: <img src={iconFor('animController')} className='w-3.5 h-3.5' alt='' draggable={false} />, run: () => addAnimController(buildControllerAsset('New Animator')), title: 'Create a shareable animator: the graph that decides which clip a character plays' },

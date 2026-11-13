@@ -17,6 +17,7 @@
 
 import { Spline3, evaluateKeyedNumber } from '../../../src/core/math'
 import type { SequenceData, SequenceKey, SequenceTrack } from '../../../src/sequencer/types'
+import { dayTracks, daySlots, type DayAuthored } from './dayPath'
 
 /** A height above the ground (`h`) or an absolute one (`y`), at x/z. */
 type At = { x: number, z: number, h?: number, y?: number }
@@ -190,7 +191,7 @@ export const SECTIONS: { name: string, x: number, z: number }[] = [
   { name: 'Side road', x: 30, z: -26 }, { name: 'Gate notch', x: 0, z: -130 },
 ]
 
-// ---- the overlay and the clock ---------------------------------------------------------------------------
+// ---- the overlay and the day -----------------------------------------------------------------------------
 
 /** Keys over a section, from absolute (sequence) times. */
 const keysFrom = (start: number, keys: [number, SequenceKey['v'], SequenceKey['interp']?][]): SequenceKey[] =>
@@ -229,6 +230,8 @@ const CAPTIONS = (): [number, number, string][] => [
 /**
  * The hour of day across the tour: Act I at ten; Act II from a quarter past one, the interior running on to
  * 15:45 so the ridge's shadow takes the sunlit patch, then, behind a fade, the night; a new day for Act III.
+ * Not keyed as such: dayPath.ts turns the hour (with OVERCAST_KEYS) into keys on the sun, the sky's fill, the
+ * mist, the god rays and the fog volumes.
  */
 const HOUR_KEYS = (): [number, number, SequenceKey['interp']][] => [
   [0, 10, 'constant'], [when('approach'), 13.25, 'linear'], [when('interior'), 13.65, 'linear'],
@@ -260,7 +263,7 @@ const FADE_KEYS = (): [number, number, SequenceKey['interp']][] => [
 // stopping and melting into a wet valley, and a clear day again, all at time x2. The clouds and the wind blend
 // from preset to preset (Preset tracks: each blend starts where the last one ended); the Weather node's rain,
 // snow, wetness and puddles are keyed (one 'mixed' volume: its snow share turns the rain into snow); and the
-// Time of Day's `overcast` greys the light, thickens the mist and dims the sky's fill with the clouds.
+// overcast (OVERCAST_KEYS, into the day's keys) greys the light, thickens the mist and dims the sky's fill.
 
 type Keys = [number, number, SequenceKey['interp']?][]
 /** Keys that ease linearly through every point: `[time, value]` pairs on the tour's clock. */
@@ -302,7 +305,7 @@ const WEATHER_KEYS = (): Record<string, Keys> => ({
   snow: ramp([[0, 0.001], [when('snow', 8), 0.001], [when('snow', 38), 0.8], [when('melt', 2), 0.8], [when('melt', 24), 0.001]]),
 })
 
-/** How overcast the Time of Day draws the light: with the clouds, a storm's at the storm. */
+/** How overcast the day's light is: with the clouds, a storm's at the storm. */
 const OVERCAST_KEYS = (): Keys => ramp([
   [0, 0], [when('cloudy', 5), 0], [when('cloudy', 38), 0.5], [when('drizzle', 14), 0.7], [when('storm'), 0.7], [when('storm', 15), 1],
   [when('snow', 20), 0.8], [when('melt', 26), 0.5], [when('clearing', 2), 0.5], [when('clearing', 26), 0],
@@ -399,7 +402,11 @@ function cameraPoints(shot: Shot, heightAt: HeightAt): number[][] {
   return pts
 }
 
-export function buildTour(terrainAt: HeightAt, options: { pondLevel?: number } = {}): SequenceData {
+/**
+ * The tour. `day` is what the scene holds by day (its sky's fill, mist, god rays and fog volumes), which the day's
+ * keys move away from and back to.
+ */
+export function buildTour(terrainAt: HeightAt, options: { pondLevel?: number; day: DayAuthored }): SequenceData {
   const heightAt = groundWith(terrainAt)
   const pondLevel = options.pondLevel ?? terrainAt(44, 22)
   const pathSections = SHOTS.map(shot => {
@@ -451,8 +458,14 @@ export function buildTour(terrainAt: HeightAt, options: { pondLevel?: number } =
   const tracks: SequenceTrack[] = [
     { id: 'camera', name: 'Camera', type: 'path', slot: 'camera', sections: pathSections } as any,
     { id: 'cut', name: 'Camera cut', type: 'cameraCut', sections: [{ id: 'cut:all', start: 0, end: D, slot: 'camera' }] },
-    property('clock-running', 'clock', 'running', 'bool', [{ t: 0, v: false }]),
-    property('clock-hour', 'clock', 'hour', 'number', keysFrom(0, HOUR_KEYS())),
+    // The day: the sun, its colour and lux, the sky's fill, the mist, the god rays and the fog volumes, keyed
+    // from the hour and the overcast every second (a hold where both hold), then thinned.
+    ...dayTracks({
+      duration: D, step: 1, authored: options.day,
+      breaks: [...HOUR_KEYS(), ...OVERCAST_KEYS()].map(k => k[0]),
+      hourAt: t => evaluateKeyedNumber({ keys: keysFrom(0, HOUR_KEYS()) }, t),
+      overcastAt: t => evaluateKeyedNumber({ keys: keysFrom(0, OVERCAST_KEYS()) }, t),
+    }),
     // Act III runs at twice the game speed: the weather's changes, the rain and the clouds in half the time.
     { id: 'time-scale', name: 'Time scale', type: 'property', target: 'game', path: 'timeScale', valueType: 'number',
       sections: [{ id: 'time-scale:weather', start: when('night-crane'), end: when('pond'), whenFinished: 'restore',
@@ -474,7 +487,6 @@ export function buildTour(terrainAt: HeightAt, options: { pondLevel?: number } =
     presets('wind-presets', 'Wind', 'wind', WIND_PRESETS()),
     ...Object.entries(WEATHER_KEYS()).map(([path, keys]) =>
       property(`weather-${path}`, 'weather', path, 'number', keysFrom(0, keys))),
-    property('clock-overcast', 'clock', 'overcast', 'number', keysFrom(0, OVERCAST_KEYS())),
     // The foliage shot: the grass thins out and fills in again, then the forest's draw distance closes in to
     // the nearest trees and opens out again, and the trees' shadows reach only as far.
     foliage('foliage-grass', 'Grass density', GRASS_LAYERS, { density: { keys: keysFrom(0, GRASS_DENSITY) } }),
@@ -504,7 +516,6 @@ export function buildTour(terrainAt: HeightAt, options: { pondLevel?: number } =
     version: 1, name: 'Valley Tour', duration: D, fps: 30, clock: 'game', loop: false,
     slots: [
       { id: 'camera', name: 'Camera', nodeType: 'camera', path: 'Cinematic/Cinematic Camera' },
-      { id: 'clock', name: 'Time of Day', path: 'Time of Day' },
       { id: 'barTop', name: 'Letterbox top', nodeType: 'uiPanel' },
       { id: 'barBottom', name: 'Letterbox bottom', nodeType: 'uiPanel' },
       { id: 'fade', name: 'Fade', nodeType: 'uiPanel' },
@@ -517,6 +528,7 @@ export function buildTour(terrainAt: HeightAt, options: { pondLevel?: number } =
       { id: 'weather', name: 'Weather', nodeType: 'weather', path: 'Weather' },
       { id: 'landscape', name: 'Landscape', nodeType: 'landscape', path: 'Landscape' },
       { id: 'pond', name: 'Pond', nodeType: 'model', path: 'Water/Pond Water' },
+      ...daySlots(options.day),
     ],
     tracks,
     markers: [

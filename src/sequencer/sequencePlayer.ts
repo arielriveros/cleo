@@ -4,7 +4,7 @@ import {
     aimFromDirection, clamp01, evaluateKeyedNumber, evaluateKeyedStep, evaluateKeyedVector, rampWeight, smoothstep,
     Spline3, type Vec3Tuple,
 } from '../core/math';
-import { compilePropertyPath, snapshotValue, type PropertyAccessor } from './propertyPath';
+import { captureVisibility, compilePropertyPath, isTransformPath, snapshotValue, type PropertyAccessor } from './propertyPath';
 import { blendPresetValue, presetFields, sequencePresetsFor } from './presetRegistry';
 import type {
     AnimationTrack, AudioTrack, CameraCutTrack, EventKey, EventTrack, FoliageTrack, PathSection, PathTrack, PossessTrack,
@@ -382,6 +382,9 @@ export class SequencePlayer {
         }
         const accessor = state.accessor;
 
+        // A node's own transform moves its world matrix: report it, so the host refreshes it this frame (and
+        // again when the original is put back). Renderer and game targets are not nodes.
+        const moves = !track.target && isTransformPath(track.path) && typeof (root as any).updateTransforms === 'function';
         if (!this._restores.has(key)) {
             const original = snapshotValue(accessor.get());
             if (original === undefined) {
@@ -392,7 +395,12 @@ export class SequencePlayer {
                 return;
             }
             this._originals.set(key, original);
-            this._restores.set(key, () => { accessor.set(snapshotValue(original)); });
+            // `visible` recurses into the children, so its original is every descendant's own flag.
+            const putBack = !track.target && track.path === 'visible' ? captureVisibility(root) : null;
+            this._restores.set(key, () => {
+                if (putBack) putBack(); else accessor.set(snapshotValue(original));
+                if (moves) this._touched.add(root);
+            });
         }
 
         const sections = 'hold' in res ? [res.hold] : res.active;
@@ -416,6 +424,7 @@ export class SequencePlayer {
             }
         }
         accessor.set(value);
+        if (moves) this._touched.add(root);
     }
 
     // ---- presets -------------------------------------------------------------------------------------

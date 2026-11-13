@@ -3,7 +3,7 @@
 The editor is always in exactly one mode. The mode decides what the viewport is for and which panels
 are visible.
 
-There are **18**. Five are chosen from the top bar; the rest you enter by **opening an asset**, which
+There are **19**. Five are chosen from the top bar; the rest you enter by **opening an asset**, which
 also opens a document tab for it.
 
 ## Modes you choose
@@ -34,6 +34,7 @@ Landscape and Tilemap share one slot, chosen by the scene's authored dimension â
 | **Blend Space** | Opening a `.blendspace` (part of the [Character Animation workspace](animation.md)) | Authoring a 1D or 2D blend space. |
 | **AI Brain** | Opening a `.brain` | Behaviour, goal and fuzzy graphs. *(unreleased)* |
 | **Particle System** | Opening a `.vfx` | Emitters and their module stacks, previewed live. *(unreleased)* |
+| **Sequencer** | Opening a `.sequence` | A cinematic's timeline over the open scene: every change to a node is a key. *(unreleased)* |
 | **Script** | Opening a `.script` | The code editor. |
 | **Tileset** | Opening a `.tileset` | Atlas slicing and per-tile metadata. |
 | **Texture** | Opening a `.tex` | Sampling settings, drawn as they apply. |
@@ -57,6 +58,7 @@ Landscape and Tilemap share one slot, chosen by the scene's authored dimension â
 | `rig` | Character + skeleton | Scene panel becomes **Skeleton**; Properties, titled *Skeleton*, with **Ragdoll** and **Bone Masks** tabs beside it |
 | `aiBrain` | *(full-panel graph)* | The graph canvas fills the viewport area. Properties (titled *Brain*), Logger, Assets |
 | `particleSystem` | The effect over a ground plane | Properties (titled *Particle System*) holds the emitter stack; **Particle Preview** transport at the bottom. No tree, no gizmo |
+| `sequence` | The open scene, at the playhead | Tree (select only), Properties (with **Keys**), the **Sequencer** at the bottom, Logger, Assets. **No Add palettes, no Scripts, no Physics.** Orange panel headers |
 | `script` | *(full-panel editor)* | The code editor. Logger and Assets only |
 | `tileset` | *(full-panel editor)* | The slicing grid. Properties, titled *Tileset* |
 | `texture` | *(full-panel editor)* | The image as its settings say. Properties, titled *Texture* |
@@ -93,6 +95,11 @@ See [AI brains](ai-brains.md).
 20 m ground plane that writes depth â€” so emitters using depth collision have a floor to bounce off.
 Nothing in that staging scene is saved; the tab saves the asset, and saving pushes the new effect into
 every open scene whose Particle System nodes link it.
+
+**Sequencer mode** *(unreleased)* is the one asset mode with no scene of its own: it shows the scene the scene
+tab has open, and the [Sequencer](sequencer.md) keys every change you make to a node there instead of
+changing the scene. Its panel headers are light orange so it is never mistaken for Scene mode. The scene
+tab always shows the scene as authored.
 
 **Options mode** deliberately shows almost nothing else. They are for judging a change against
 a live scene, so the scene gets the space.

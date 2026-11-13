@@ -7,6 +7,7 @@ import { probeBakeWarning, rebakeStale, useProbeBakeStatus } from '../../../util
 
 const BOUNDS_HINT = 'Set all three sizes above 0 and the probe only lights meshes/pixels inside its box volume, which moves and rotates with the node; the IBL feathers out over the blend distance. Any size at 0 leaves the probe unbounded: it affects the whole scene (legacy behavior).';
 const BOX_PROJECTION_HINT = 'Parallax-correct the reflections against the box: a surface inside it reflects what the probe saw where the reflected ray leaves the box, so a room\'s walls land where they are on a polished floor. For rooms and corridors; leave it off for open ground, whose horizon is far away. Bounded probes only.';
+const FOLLOW_SUN_HINT = 'Relight the probe each time the sun has turned this many degrees, so its reflections and fill follow a moving sun (a sequence keying it, a day cycle). A relight lights the captured scene again over a few frames; it never re-captures. 0 = only when baked.';
 const AFFECTS_HINT = 'What the probe gives surfaces inside its volume. Lighting is the light it bounces onto them; Reflections is what they mirror. Turn Lighting off to keep the area lit by the sky light and ambient (or another probe) while still reflecting this probe\'s surroundings. No re-bake needed.';
 import { useEventBus } from '../../EventBusContext';
 import { useCleoEngine } from '../../EngineContext';
@@ -26,6 +27,7 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     affectsLighting: props.node.affectsLighting,
     affectsReflections: props.node.affectsReflections,
     boxProjection: props.node.boxProjection,
+    relightDegrees: props.node.relightDegrees,
   });
 
   useEffect(() => {
@@ -41,6 +43,7 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
       affectsLighting: props.node.affectsLighting,
       affectsReflections: props.node.affectsReflections,
       boxProjection: props.node.boxProjection,
+      relightDegrees: props.node.relightDegrees,
     });
   }, [props.node]);
 
@@ -54,6 +57,7 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
     props.node.affectsLighting = state.affectsLighting;
     props.node.affectsReflections = state.affectsReflections;
     props.node.boxProjection = state.boxProjection;
+    props.node.relightDegrees = state.relightDegrees;
   }, [state, props.node]);
 
   const eventEmitter = useEventBus();
@@ -155,6 +159,9 @@ export default function LightProbeEditor(props: { node: LightProbeNode }) {
           )}
           <PropertyRow label='Intensity'>
             <Slider min={0} max={3} step={0.05} value={state.intensity} onChange={(v) => update({ intensity: v })} />
+          </PropertyRow>
+          <PropertyRow label='Follow the sun (°)' hint={FOLLOW_SUN_HINT}>
+            <NumberInput min={0} max={90} step={0.5} value={state.relightDegrees} onChange={(v) => update({ relightDegrees: v })} />
           </PropertyRow>
           <PropertyRow label='Affects' labelClassName='align-top pt-1.5' hint={AFFECTS_HINT}>
             <div className='flex flex-col items-start gap-1'>

@@ -35,7 +35,6 @@ export const log = (...a: any[]) => console.log(`[${((Date.now() - t0) / 1000).t
 export const VALLEY_SCRIPTS: [string, string, string, string][] = [
   ['ValleyWindmill', 'Windmill Sails', 'node', ''],
   ['ValleyFireLight', 'Fire Light', 'node', ''],
-  ['ValleyDayNight', 'Day and Night', 'node', ''],
   ['ValleyFlyCamera', 'Fly Camera', 'cameraRig', '/Environment/Scripts'],
   ['ValleyFx', 'Splash', 'node', ''],
   ['ValleyStartMenu', 'Start Menu', 'uiRoot', '/Cinematic/Scripts'],
@@ -149,7 +148,7 @@ const LIB_KIND: Record<string, string> = {
   materials: 'material', terrainMaterials: 'terrainMaterial', templates: 'template', models: 'model', scripts: 'script',
   animationFields: 'animationField', animations: 'animation', rigs: 'rig', tilesets: 'tileset', aiBrains: 'aiBrain',
   particleSystems: 'particleSystem', animControllers: 'animController', boneMasks: 'boneMask', poseAssets: 'pose',
-  audioSources: 'audioSource', soundSamples: 'soundSample',
+  audioSources: 'audioSource', soundSamples: 'soundSample', sequences: 'sequence',
 }
 /** Kinds a script or a node field may name by NAME (a template to spawn, a clip to play, a sound). */
 const NAMED_KINDS = new Set(['template', 'particleSystem', 'soundSample', 'animation', 'tileset', 'aiBrain', 'animController', 'boneMask', 'animationField'])
@@ -159,6 +158,7 @@ const REF_FIELDS: Record<string, string> = {
   terrainMaterialIds: 'terrainMaterial', tilesetIds: 'tileset', aiBrainIds: 'aiBrain', particleSystemIds: 'particleSystem',
   textureIds: 'texture', scriptIds: 'script', animationFieldIds: 'animationField', animControllerIds: 'animController',
   boneMaskIds: 'boneMask', poseAssetIds: 'pose', animationIds: 'animation', soundSampleIds: 'soundSample', audioSourceIds: 'audioSource',
+  sequenceIds: 'sequence',
 }
 /** Keys whose strings name the thing itself, not something it uses. */
 const SELF_KEYS = new Set(['id', 'name', 'type', 'nodeType', 'kind', 'baseType', 'path'])

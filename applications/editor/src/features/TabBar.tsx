@@ -60,7 +60,7 @@ export default function TabBar() {
         onDragEnd={() => setDragId(null)}
         onClick={() => setActiveTab(target)}
         title={tooltip}
-        className={`group flex items-center gap-1 h-[26px] my-[2px] px-2 rounded-t-[6px] cursor-pointer select-none max-w-[200px] border border-b-0 ${active ? 'bg-selected border-fg text-fg' : 'bg-control border-surface-raised text-muted hover:bg-control-hover'} ${isPlayMode ? 'opacity-60 pointer-events-none' : ''}`}
+        className={`group flex items-center gap-1 h-[26px] my-[2px] px-2 rounded-t-[6px] cursor-pointer select-none max-w-[200px] border border-b-0 ${active ? 'bg-selected border-fg text-fg' : 'bg-control border-surface-raised text-muted hover:bg-control-hover'} ${lead.kind === 'sequence' ? 'border-t-2 border-t-sequence' : ''} ${isPlayMode ? 'opacity-60 pointer-events-none' : ''}`}
       >
         <img src={iconFor(isWs ? 'animation' : tabAssetKind(lead.kind))} className='w-3.5 h-3.5 shrink-0' alt='' draggable={false} />
         <span className='truncate text-ui'>{title}{isWs && <span className='text-muted'> · Animation</span>}</span>

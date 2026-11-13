@@ -481,6 +481,7 @@ export function patchSlot(seq: SequenceData, slotId: string, patch: Partial<Sequ
     Object.assign(s, patch)
     if (!s.path) delete s.path
     if (!s.nodeType) delete s.nodeType
+    if (!s.nodeId) delete s.nodeId
   })
 }
 

@@ -30,6 +30,12 @@ export interface SequenceSlot {
     /** The node type the slot expects ('camera', 'node', ...): a hint for the editor's pickers. */
     nodeType?: string;
     /**
+     * The node this slot was bound to where the sequence was authored (the Sequencer's own binding, by node
+     * id). Used when the playing SequenceNode has no binding for the slot; a scene without that node falls
+     * back to `path`.
+     */
+    nodeId?: string;
+    /**
      * Fallback when the SequenceNode has no binding for this slot: a node NAME path from the scene root
      * ("Buildings/Long House", or just "Time of Day"). Lets a sequence find well-known nodes by itself.
      */

@@ -13,11 +13,6 @@
       "path": "Cinematic/Cinematic Camera"
     },
     {
-      "id": "clock",
-      "name": "Time of Day",
-      "path": "Time of Day"
-    },
-    {
       "id": "barTop",
       "name": "Letterbox top",
       "nodeType": "uiPanel"
@@ -81,6 +76,30 @@
       "name": "Pond",
       "nodeType": "model",
       "path": "Water/Pond Water"
+    },
+    {
+      "id": "sun",
+      "name": "Sun",
+      "nodeType": "light",
+      "path": "Sun"
+    },
+    {
+      "id": "skyLight",
+      "name": "Sky Light",
+      "nodeType": "skyLight",
+      "path": "Sky Light"
+    },
+    {
+      "id": "sky",
+      "name": "Sky",
+      "nodeType": "skyAtmosphere",
+      "path": "sky atmosphere"
+    },
+    {
+      "id": "fogPondMist",
+      "name": "Pond Mist",
+      "nodeType": "volumetricFog",
+      "path": "Fog Volumes/Pond Mist"
     }
   ],
   "tracks": [
@@ -1280,21 +1299,396 @@
       ]
     },
     {
-      "id": "clock-running",
+      "id": "sun-rotation",
+      "name": "Sun",
       "type": "property",
-      "path": "running",
-      "valueType": "bool",
-      "slot": "clock",
+      "path": "rotation",
+      "valueType": "vector",
+      "slot": "sun",
       "sections": [
         {
-          "id": "clock-running:all",
+          "id": "sun-rotation:all",
           "start": 0,
           "end": 405,
           "curve": {
             "keys": [
               {
                 "t": 0,
-                "v": false
+                "v": [
+                  46.54018,
+                  -134.28596,
+                  0
+                ],
+                "interp": "constant"
+              },
+              {
+                "t": 52,
+                "v": [
+                  51.46209,
+                  149.46336,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 62,
+                "v": [
+                  49.04165,
+                  141.02549,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 67,
+                "v": [
+                  46.44837,
+                  134.06397,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 72,
+                "v": [
+                  43.54442,
+                  127.70814,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 78,
+                "v": [
+                  39.73475,
+                  120.7906,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 85,
+                "v": [
+                  34.95168,
+                  113.53666,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 90,
+                "v": [
+                  31.37073,
+                  108.78881,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 91,
+                "v": [
+                  30.64165,
+                  107.87554,
+                  0
+                ],
+                "interp": "constant"
+              },
+              {
+                "t": 92,
+                "v": [
+                  -17.5256,
+                  55.01797,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 98,
+                "v": [
+                  -22.67251,
+                  46.8518,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 104,
+                "v": [
+                  -27.14332,
+                  37.94057,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 109,
+                "v": [
+                  -30.22738,
+                  29.90268,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 114,
+                "v": [
+                  -32.61715,
+                  21.32933,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 116,
+                "v": [
+                  -33.35661,
+                  17.76762,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 123.9467,
+                "v": [
+                  -34.55058,
+                  9.33896,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 129.9067,
+                "v": [
+                  -34.95729,
+                  2.88422,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 130.9,
+                "v": [
+                  -34.98331,
+                  1.80307,
+                  0
+                ],
+                "interp": "constant"
+              },
+              {
+                "t": 131,
+                "v": [
+                  12.33819,
+                  -88.12907,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 136,
+                "v": [
+                  17.63909,
+                  -93.4558,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 152,
+                "v": [
+                  26.03567,
+                  -102.42682,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 164,
+                "v": [
+                  32.14748,
+                  -109.77999,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 174,
+                "v": [
+                  37.02284,
+                  -116.52529,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 176,
+                "v": [
+                  37.96585,
+                  -117.95846,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 193,
+                "v": [
+                  42.23347,
+                  -125.17919,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 208,
+                "v": [
+                  45.68214,
+                  -132.26753,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 222,
+                "v": [
+                  48.55238,
+                  -139.5862,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 236,
+                "v": [
+                  51.00093,
+                  -147.64053,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 250,
+                "v": [
+                  52.93708,
+                  -156.42717,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 265,
+                "v": [
+                  54.34242,
+                  -166.54492,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 279,
+                "v": [
+                  54.95405,
+                  -176.42556,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 293,
+                "v": [
+                  54.85134,
+                  -186.42372,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 308,
+                "v": [
+                  53.95671,
+                  -196.89613,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 323,
+                "v": [
+                  52.31018,
+                  -206.79133,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 337,
+                "v": [
+                  50.18048,
+                  -215.32189,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 351,
+                "v": [
+                  47.57115,
+                  -223.11012,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 356,
+                "v": [
+                  46.54018,
+                  -225.71404,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 364,
+                "v": [
+                  43.25781,
+                  -232.86016,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 373,
+                "v": [
+                  39.19723,
+                  -240.09142,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 383,
+                "v": [
+                  34.34655,
+                  -247.29986,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 394,
+                "v": [
+                  28.72401,
+                  -254.4551,
+                  0
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 405,
+                "v": [
+                  22.90939,
+                  -261.02493,
+                  0
+                ],
+                "interp": "linear"
               }
             ]
           }
@@ -1302,76 +1696,1024 @@
       ]
     },
     {
-      "id": "clock-hour",
+      "id": "sun-color",
+      "name": "Sun colour",
       "type": "property",
-      "path": "hour",
-      "valueType": "number",
-      "slot": "clock",
+      "path": "light.color",
+      "valueType": "vector",
+      "slot": "sun",
       "sections": [
         {
-          "id": "clock-hour:all",
+          "id": "sun-color:all",
           "start": 0,
           "end": 405,
           "curve": {
             "keys": [
               {
                 "t": 0,
-                "v": 10,
+                "v": [
+                  1,
+                  0.92419,
+                  0.85934
+                ],
                 "interp": "constant"
               },
               {
                 "t": 52,
-                "v": 13.25,
+                "v": [
+                  1,
+                  0.92419,
+                  0.85934
+                ],
                 "interp": "linear"
               },
               {
-                "t": 62,
-                "v": 13.65,
+                "t": 87,
+                "v": [
+                  1,
+                  0.92309,
+                  0.85747
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 90,
+                "v": [
+                  1,
+                  0.9177,
+                  0.84824
+                ],
                 "interp": "linear"
               },
               {
                 "t": 91,
-                "v": 15.75,
+                "v": [
+                  1,
+                  0.91494,
+                  0.84349
+                ],
                 "interp": "constant"
               },
               {
                 "t": 92,
-                "v": 20.5,
+                "v": [
+                  1,
+                  0.55577,
+                  0.1063
+                ],
                 "interp": "linear"
               },
               {
-                "t": 116,
-                "v": 23,
+                "t": 129.9067,
+                "v": [
+                  1,
+                  0.55577,
+                  0.1063
+                ],
                 "interp": "linear"
               },
               {
                 "t": 130.9,
-                "v": 23.9,
+                "v": [
+                  1,
+                  0.55577,
+                  0.1063
+                ],
                 "interp": "constant"
               },
               {
                 "t": 131,
-                "v": 6.5,
+                "v": [
+                  1,
+                  0.7204,
+                  0.48347
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 135,
+                "v": [
+                  1,
+                  0.78306,
+                  0.60614
+                ],
                 "interp": "linear"
               },
               {
                 "t": 136,
-                "v": 7,
+                "v": [
+                  1,
+                  0.79747,
+                  0.6333
+                ],
                 "interp": "linear"
               },
               {
-                "t": 176,
-                "v": 9,
+                "t": 142,
+                "v": [
+                  1,
+                  0.83916,
+                  0.71001
+                ],
                 "interp": "linear"
               },
               {
-                "t": 356,
-                "v": 14,
+                "t": 147,
+                "v": [
+                  1,
+                  0.87578,
+                  0.77537
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 153,
+                "v": [
+                  1,
+                  0.90843,
+                  0.83228
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 160,
+                "v": [
+                  1,
+                  0.93369,
+                  0.87554
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 168,
+                "v": [
+                  1,
+                  0.94912,
+                  0.90165
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 192,
+                "v": [
+                  1,
+                  0.96633,
+                  0.93052
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 207,
+                "v": [
+                  1,
+                  0.96747,
+                  0.93242
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 222,
+                "v": [
+                  1,
+                  0.98288,
+                  0.95805
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 289,
+                "v": [
+                  1,
+                  0.96719,
+                  0.93197
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 327,
+                "v": [
+                  1,
+                  0.95474,
+                  0.91112
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 353,
+                "v": [
+                  1,
+                  0.92419,
+                  0.85934
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 385,
+                "v": [
+                  1,
+                  0.92279,
+                  0.85696
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 392,
+                "v": [
+                  1,
+                  0.91099,
+                  0.83671
+                ],
+                "interp": "linear"
+              },
+              {
+                "t": 399,
+                "v": [
+                  1,
+                  0.88779,
+                  0.79645
+                ],
                 "interp": "linear"
               },
               {
                 "t": 405,
-                "v": 16.5,
+                "v": [
+                  1,
+                  0.85936,
+                  0.74627
+                ],
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sun-lux",
+      "name": "Sun lux",
+      "type": "property",
+      "path": "light.intensity",
+      "valueType": "number",
+      "slot": "sun",
+      "sections": [
+        {
+          "id": "sun-lux:all",
+          "start": 0,
+          "end": 405,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 79600,
+                "interp": "constant"
+              },
+              {
+                "t": 52,
+                "v": 79600,
+                "interp": "linear"
+              },
+              {
+                "t": 90,
+                "v": 79600,
+                "interp": "linear"
+              },
+              {
+                "t": 91,
+                "v": 79600,
+                "interp": "constant"
+              },
+              {
+                "t": 92,
+                "v": 79600,
+                "interp": "linear"
+              },
+              {
+                "t": 129.9067,
+                "v": 79600,
+                "interp": "linear"
+              },
+              {
+                "t": 130.9,
+                "v": 79600,
+                "interp": "constant"
+              },
+              {
+                "t": 131,
+                "v": 51199.06635385,
+                "interp": "linear"
+              },
+              {
+                "t": 135,
+                "v": 64895.31871058,
+                "interp": "linear"
+              },
+              {
+                "t": 136,
+                "v": 67952.9955325,
+                "interp": "linear"
+              },
+              {
+                "t": 141,
+                "v": 74393.79889372,
+                "interp": "linear"
+              },
+              {
+                "t": 146,
+                "v": 78496.20886903,
+                "interp": "linear"
+              },
+              {
+                "t": 151,
+                "v": 79600,
+                "interp": "linear"
+              },
+              {
+                "t": 403,
+                "v": 79327.55807311,
+                "interp": "linear"
+              },
+              {
+                "t": 405,
+                "v": 78496.20886903,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sky-light",
+      "name": "Sky fill",
+      "type": "property",
+      "path": "intensity",
+      "valueType": "number",
+      "slot": "skyLight",
+      "sections": [
+        {
+          "id": "sky-light:all",
+          "start": 0,
+          "end": 405,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 1,
+                "interp": "constant"
+              },
+              {
+                "t": 52,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 90,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 91,
+                "v": 1,
+                "interp": "constant"
+              },
+              {
+                "t": 92,
+                "v": 0.4,
+                "interp": "linear"
+              },
+              {
+                "t": 129.9067,
+                "v": 0.4,
+                "interp": "linear"
+              },
+              {
+                "t": 130.9,
+                "v": 0.4,
+                "interp": "constant"
+              },
+              {
+                "t": 131,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 142,
+                "v": 0.9947,
+                "interp": "linear"
+              },
+              {
+                "t": 180,
+                "v": 0.79875,
+                "interp": "linear"
+              },
+              {
+                "t": 191,
+                "v": 0.755,
+                "interp": "linear"
+              },
+              {
+                "t": 206,
+                "v": 0.755,
+                "interp": "linear"
+              },
+              {
+                "t": 221,
+                "v": 0.65,
+                "interp": "linear"
+              },
+              {
+                "t": 281,
+                "v": 0.73141,
+                "interp": "linear"
+              },
+              {
+                "t": 324,
+                "v": 0.825,
+                "interp": "linear"
+              },
+              {
+                "t": 328,
+                "v": 0.825,
+                "interp": "linear"
+              },
+              {
+                "t": 352,
+                "v": 1,
+                "interp": "linear"
+              },
+              {
+                "t": 405,
+                "v": 1,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sky-fog-density",
+      "name": "Mist density",
+      "type": "property",
+      "path": "fogDensity",
+      "valueType": "number",
+      "slot": "sky",
+      "sections": [
+        {
+          "id": "sky-fog-density:all",
+          "start": 0,
+          "end": 405,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0.0004,
+                "interp": "constant"
+              },
+              {
+                "t": 52,
+                "v": 0.0004,
+                "interp": "linear"
+              },
+              {
+                "t": 90,
+                "v": 0.0004,
+                "interp": "linear"
+              },
+              {
+                "t": 91,
+                "v": 0.0004,
+                "interp": "constant"
+              },
+              {
+                "t": 92,
+                "v": 0.000528,
+                "interp": "linear"
+              },
+              {
+                "t": 129.9067,
+                "v": 0.000528,
+                "interp": "linear"
+              },
+              {
+                "t": 130.9,
+                "v": 0.000528,
+                "interp": "constant"
+              },
+              {
+                "t": 131,
+                "v": 0.00051787,
+                "interp": "linear"
+              },
+              {
+                "t": 132,
+                "v": 0.00041667,
+                "interp": "linear"
+              },
+              {
+                "t": 133,
+                "v": 0.0004,
+                "interp": "linear"
+              },
+              {
+                "t": 141,
+                "v": 0.0004,
+                "interp": "linear"
+              },
+              {
+                "t": 179,
+                "v": 0.00067,
+                "interp": "linear"
+              },
+              {
+                "t": 191,
+                "v": 0.000736,
+                "interp": "linear"
+              },
+              {
+                "t": 206,
+                "v": 0.000736,
+                "interp": "linear"
+              },
+              {
+                "t": 221,
+                "v": 0.00088,
+                "interp": "linear"
+              },
+              {
+                "t": 282,
+                "v": 0.00076522,
+                "interp": "linear"
+              },
+              {
+                "t": 324,
+                "v": 0.00064,
+                "interp": "linear"
+              },
+              {
+                "t": 328,
+                "v": 0.00064,
+                "interp": "linear"
+              },
+              {
+                "t": 352,
+                "v": 0.0004,
+                "interp": "linear"
+              },
+              {
+                "t": 405,
+                "v": 0.0004,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sky-fog-falloff",
+      "name": "Mist falloff",
+      "type": "property",
+      "path": "fogHeightFalloff",
+      "valueType": "number",
+      "slot": "sky",
+      "sections": [
+        {
+          "id": "sky-fog-falloff:all",
+          "start": 0,
+          "end": 405,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0,
+                "interp": "constant"
+              },
+              {
+                "t": 52,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 90,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 91,
+                "v": 0,
+                "interp": "constant"
+              },
+              {
+                "t": 92,
+                "v": 0.004,
+                "interp": "linear"
+              },
+              {
+                "t": 129.9067,
+                "v": 0.004,
+                "interp": "linear"
+              },
+              {
+                "t": 130.9,
+                "v": 0.004,
+                "interp": "constant"
+              },
+              {
+                "t": 131,
+                "v": 0.00368,
+                "interp": "linear"
+              },
+              {
+                "t": 132,
+                "v": 0.00052,
+                "interp": "linear"
+              },
+              {
+                "t": 142,
+                "v": 0.00023,
+                "interp": "linear"
+              },
+              {
+                "t": 190,
+                "v": 0.0105,
+                "interp": "linear"
+              },
+              {
+                "t": 207,
+                "v": 0.0108,
+                "interp": "linear"
+              },
+              {
+                "t": 222,
+                "v": 0.01495,
+                "interp": "linear"
+              },
+              {
+                "t": 290,
+                "v": 0.01063,
+                "interp": "linear"
+              },
+              {
+                "t": 330,
+                "v": 0.00687,
+                "interp": "linear"
+              },
+              {
+                "t": 353,
+                "v": 0,
+                "interp": "linear"
+              },
+              {
+                "t": 405,
+                "v": 0,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sky-fog-opacity",
+      "name": "Mist opacity",
+      "type": "property",
+      "path": "fogMaxOpacity",
+      "valueType": "number",
+      "slot": "sky",
+      "sections": [
+        {
+          "id": "sky-fog-opacity:all",
+          "start": 0,
+          "end": 405,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0.5,
+                "interp": "constant"
+              },
+              {
+                "t": 52,
+                "v": 0.5,
+                "interp": "linear"
+              },
+              {
+                "t": 90,
+                "v": 0.5,
+                "interp": "linear"
+              },
+              {
+                "t": 91,
+                "v": 0.5,
+                "interp": "constant"
+              },
+              {
+                "t": 92,
+                "v": 0.508,
+                "interp": "linear"
+              },
+              {
+                "t": 129.9067,
+                "v": 0.508,
+                "interp": "linear"
+              },
+              {
+                "t": 130.9,
+                "v": 0.508,
+                "interp": "constant"
+              },
+              {
+                "t": 131,
+                "v": 0.50737,
+                "interp": "linear"
+              },
+              {
+                "t": 133,
+                "v": 0.5,
+                "interp": "linear"
+              },
+              {
+                "t": 199,
+                "v": 0.521,
+                "interp": "linear"
+              },
+              {
+                "t": 228,
+                "v": 0.52924,
+                "interp": "linear"
+              },
+              {
+                "t": 334,
+                "v": 0.51125,
+                "interp": "linear"
+              },
+              {
+                "t": 358,
+                "v": 0.5,
+                "interp": "linear"
+              },
+              {
+                "t": 405,
+                "v": 0.5,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sky-god-rays",
+      "name": "God rays",
+      "type": "property",
+      "path": "godRayExposure",
+      "valueType": "number",
+      "slot": "sky",
+      "sections": [
+        {
+          "id": "sky-god-rays:all",
+          "start": 0,
+          "end": 405,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0.18,
+                "interp": "constant"
+              },
+              {
+                "t": 52,
+                "v": 0.18,
+                "interp": "linear"
+              },
+              {
+                "t": 90,
+                "v": 0.18,
+                "interp": "linear"
+              },
+              {
+                "t": 91,
+                "v": 0.18,
+                "interp": "constant"
+              },
+              {
+                "t": 92,
+                "v": 0.108,
+                "interp": "linear"
+              },
+              {
+                "t": 129.9067,
+                "v": 0.108,
+                "interp": "linear"
+              },
+              {
+                "t": 130.9,
+                "v": 0.108,
+                "interp": "constant"
+              },
+              {
+                "t": 131,
+                "v": 0.37961,
+                "interp": "linear"
+              },
+              {
+                "t": 136,
+                "v": 0.3039,
+                "interp": "linear"
+              },
+              {
+                "t": 141,
+                "v": 0.26464,
+                "interp": "linear"
+              },
+              {
+                "t": 147,
+                "v": 0.2058,
+                "interp": "linear"
+              },
+              {
+                "t": 152,
+                "v": 0.16909,
+                "interp": "linear"
+              },
+              {
+                "t": 157,
+                "v": 0.1447,
+                "interp": "linear"
+              },
+              {
+                "t": 179,
+                "v": 0.09394,
+                "interp": "linear"
+              },
+              {
+                "t": 191,
+                "v": 0.0729,
+                "interp": "linear"
+              },
+              {
+                "t": 206,
+                "v": 0.0729,
+                "interp": "linear"
+              },
+              {
+                "t": 221,
+                "v": 0.027,
+                "interp": "linear"
+              },
+              {
+                "t": 280,
+                "v": 0.06159,
+                "interp": "linear"
+              },
+              {
+                "t": 324,
+                "v": 0.1035,
+                "interp": "linear"
+              },
+              {
+                "t": 328,
+                "v": 0.1035,
+                "interp": "linear"
+              },
+              {
+                "t": 352,
+                "v": 0.18,
+                "interp": "linear"
+              },
+              {
+                "t": 394,
+                "v": 0.1819,
+                "interp": "linear"
+              },
+              {
+                "t": 399,
+                "v": 0.19649,
+                "interp": "linear"
+              },
+              {
+                "t": 405,
+                "v": 0.22932,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "fog-fogPondMist",
+      "name": "Fog density",
+      "type": "property",
+      "path": "density",
+      "valueType": "number",
+      "slot": "fogPondMist",
+      "sections": [
+        {
+          "id": "fog-fogPondMist:all",
+          "start": 0,
+          "end": 405,
+          "curve": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0.018,
+                "interp": "constant"
+              },
+              {
+                "t": 52,
+                "v": 0.018,
+                "interp": "linear"
+              },
+              {
+                "t": 90,
+                "v": 0.018,
+                "interp": "linear"
+              },
+              {
+                "t": 91,
+                "v": 0.018,
+                "interp": "constant"
+              },
+              {
+                "t": 92,
+                "v": 0.054,
+                "interp": "linear"
+              },
+              {
+                "t": 129.9067,
+                "v": 0.054,
+                "interp": "linear"
+              },
+              {
+                "t": 130.9,
+                "v": 0.054,
+                "interp": "constant"
+              },
+              {
+                "t": 131,
+                "v": 0.02065211,
+                "interp": "linear"
+              },
+              {
+                "t": 132,
+                "v": 0.01837502,
+                "interp": "linear"
+              },
+              {
+                "t": 133,
+                "v": 0.018,
+                "interp": "linear"
+              },
+              {
+                "t": 141,
+                "v": 0.018,
+                "interp": "linear"
+              },
+              {
+                "t": 180,
+                "v": 0.02835,
+                "interp": "linear"
+              },
+              {
+                "t": 191,
+                "v": 0.0306,
+                "interp": "linear"
+              },
+              {
+                "t": 206,
+                "v": 0.0306,
+                "interp": "linear"
+              },
+              {
+                "t": 221,
+                "v": 0.036,
+                "interp": "linear"
+              },
+              {
+                "t": 283,
+                "v": 0.03157826,
+                "interp": "linear"
+              },
+              {
+                "t": 324,
+                "v": 0.027,
+                "interp": "linear"
+              },
+              {
+                "t": 328,
+                "v": 0.027,
+                "interp": "linear"
+              },
+              {
+                "t": 352,
+                "v": 0.018,
+                "interp": "linear"
+              },
+              {
+                "t": 405,
+                "v": 0.018,
                 "interp": "linear"
               }
             ]
@@ -2511,74 +3853,6 @@
               {
                 "t": 320,
                 "v": 0.001,
-                "interp": "linear"
-              }
-            ]
-          }
-        }
-      ]
-    },
-    {
-      "id": "clock-overcast",
-      "type": "property",
-      "path": "overcast",
-      "valueType": "number",
-      "slot": "clock",
-      "sections": [
-        {
-          "id": "clock-overcast:all",
-          "start": 0,
-          "end": 405,
-          "curve": {
-            "keys": [
-              {
-                "t": 0,
-                "v": 0,
-                "interp": "linear"
-              },
-              {
-                "t": 141,
-                "v": 0,
-                "interp": "linear"
-              },
-              {
-                "t": 174,
-                "v": 0.5,
-                "interp": "linear"
-              },
-              {
-                "t": 190,
-                "v": 0.7,
-                "interp": "linear"
-              },
-              {
-                "t": 206,
-                "v": 0.7,
-                "interp": "linear"
-              },
-              {
-                "t": 221,
-                "v": 1,
-                "interp": "linear"
-              },
-              {
-                "t": 276,
-                "v": 0.8,
-                "interp": "linear"
-              },
-              {
-                "t": 322,
-                "v": 0.5,
-                "interp": "linear"
-              },
-              {
-                "t": 328,
-                "v": 0.5,
-                "interp": "linear"
-              },
-              {
-                "t": 352,
-                "v": 0,
                 "interp": "linear"
               }
             ]

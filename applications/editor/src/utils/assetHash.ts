@@ -8,6 +8,7 @@ import type { RigAsset } from './rigAssets'
 import type { TilesetAsset } from './tilesets'
 import type { AiBrainAsset } from './aiBrains'
 import type { ParticleSystemAsset } from './particleSystems'
+import type { SequenceAsset } from './sequenceAssets'
 import type { AnimControllerAsset } from './animationControllers'
 import type { BoneMaskAsset } from './boneMasks'
 import type { PoseAsset } from './poseAssets'
@@ -176,6 +177,8 @@ export interface AssetLibs {
    * not part of the node tree a resync rebuilds.
    */
   particleSystems?: ParticleSystemAsset[]
+  /** Sequences, embedded by value into SequenceNodes. Carried and not hashed, exactly like particle systems. */
+  sequences?: SequenceAsset[]
 }
 
 /** The hash-map key for an asset of a given kind. Kept in one place so save and resync agree. */

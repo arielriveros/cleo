@@ -1,19 +1,67 @@
 # Sequencer *(unreleased)*
 
-A **Sequence** node plays a cinematic: a timeline of tracks that fly a camera along a path, cut between
-cameras, animate properties of other nodes, play clips and sounds, spawn templates, hand characters to
-controllers and call script methods at given moments or over spans of time. The **Sequencer** panel in the
-bottom strip edits the timeline of the selected Sequence node and previews it in the scene.
+A **sequence** is a cinematic: a timeline of tracks that fly a camera along a path, cut between cameras,
+animate properties of other nodes, play clips and sounds, spawn templates, hand characters to controllers and
+call script methods at given moments or over spans of time. It is an asset (`.sequence`), and a **Sequence**
+node plays it in a scene.
 
-Add a sequence from **Add ▸ Gameplay ▸ Sequence**, or with **Add Sequence** in the empty Sequencer. Select
-it to show its timeline; **Open in Sequencer** on its inspector card brings the panel forward.
+## Sequence assets
+
+Create one from the Assets tab's **+ Add ▾ Sequence**: it opens in Sequencer mode at once. To play it in a
+scene, drop it from the Assets tab into the viewport, which adds a Sequence node playing it, or drop it on a
+Sequence node's **Timeline** slot.
+
+A Sequence node keeps its own copy of the sequence it plays, the way a Particle System node keeps its effect:
+a published game needs no sequence library. Saving the asset updates every node in the open scene that plays
+it (the scene is then marked unsaved), and a scene opened or published later picks up the saved version.
+Deleting the asset leaves each node playing the copy it has; only the link goes.
+
+On the node's card, **✎** opens the asset in Sequencer mode, **✕** unlinks it, and an unlinked node's **Edit in
+Sequencer** turns its copy into an asset first.
+
+## Sequencer mode
+
+Opening a sequence asset (double-click it in the Assets tab, or **✎** on a Sequence node) opens it in a tab of
+its own, in **Sequencer mode**. The mode works on the scene you have open, live: the same viewport, the same
+scene tree and the same node inspector as Scene mode, with the **Sequencer** panel along the bottom. Its panel
+headers are light orange, so it is never mistaken for Scene mode.
+
+**Every change you make to a node there is a key**, at the playhead. Move a cube with the gizmo at 2 s and
+the sequence gets a key at 2 s with the new position, plus a key at 0 s with where the cube was: it now moves
+from one to the other over those two seconds. The same goes for any property the inspector shows (a light's
+intensity, a camera's field of view, a script field) and for the scene tree's visibility eye. The scene itself
+does not change: go back to the scene tab and the cube is where you left it.
+
+The first key of a property makes its track, on a slot bound to the node (the slot is made too, named after
+the node). Later keys land on that track: on the section under the playhead, or on the nearest section,
+stretched to reach the key. A turn past 180° keys the shortest way round from where it was.
+
+What can't be a key isn't offered in Sequencer mode: the Add palettes, Scripts and Physics panels are gone,
+the scene tree only selects (no rename, move or delete), asset slots (materials, effects, brains, sounds) are
+disabled, and nothing can be dropped into the scene. A position or rotation a Path track already drives can't
+be keyed either; move the path's points instead.
+
+### Keys
+
+The **Keys** card heads the inspector in Sequencer mode. It lists what the sequence animates on the selected
+node, with a filled diamond where there is a key at the playhead, the value the node shows now, jumps to the
+previous and next key, and **✕** to delete the key at the playhead. **Key property…** keys the current value of
+any property the sequence can drive, including ones no inspector field shows.
+
+A key inside a section's ease, or under another section, is noted: there the frame blends, so it shows less
+than the value keyed.
+
+**Save** (Ctrl+S) writes the asset. Each Sequencer tab keeps its own unsaved changes while you work in other
+tabs, and **Undo** in a Sequencer tab undoes its keys and edits, one step each. **Play** from a Sequencer tab
+plays the scene with the sequence as you have it, saved or not.
 
 ## Slots, tracks and sections
 
-A sequence never names a node directly. It names **slots** ("Camera", "Time of Day"), and the Sequence
-node binds each slot to a node in the scene, on its inspector card or in the slot's details. A slot with no
-binding looks for the node its fallback path names. So one sequence can drive other actors, and a copied
-subtree's sequence drives the copies.
+A sequence never names a node directly. It names **slots** ("Camera", "Sun"). A slot is bound to the
+node it was authored against (in the slot's details, by dropping a node from the scene tree on the outliner,
+or by keying it), and falls back to the node its name path finds in another scene. A Sequence node can bind a
+slot to another node of its scene on its inspector card, which wins over both: so one sequence can drive other
+actors.
 
 | Track | What it does |
 |---|---|
@@ -50,7 +98,7 @@ for Possess.
   - **Export** and **Import**.
 - **Outliner:** one group per slot with its tracks under it, then the sequence's own tracks. Right-click a
   slot or a track for its actions. Drop a node from the scene tree onto the outliner to add a slot bound
-  to it.
+  to it (or to select its slot, when it has one).
 - **Lanes:**
   - drag a section to move it, its edges to trim it, and the white corners at its top to set its ease
     in and ease out;
@@ -83,17 +131,19 @@ Every edit is one undo step; a drag records once, when you let go.
 
 ## Previewing
 
-Scrubbing or playing shows the sequence in the scene you are editing: the camera on its path, the
-properties at their values. The **previewing** tag in the toolbar means the scene currently differs from what you
-authored. **Stop** puts it back. So do saving, Play, Simulate, switching tabs or 2D/3D, opening another
-scene, selecting another node and grabbing a gizmo, so a preview is never saved.
+Scrubbing or playing shows the sequence in the open scene: the camera on its path, the properties at their
+values, the inspector reading them at the playhead. It is only a preview: the scene tab shows the scene as
+authored, and saving, Play, Simulate and switching tabs or 2D/3D put the scene back before anything reads it.
+**Stop** goes back to the start.
 
 The viewport keeps the editor camera while you preview. **Pilot** looks through the shot's camera
 instead, and puts the editor camera back where it was when you turn it off.
 
-Scripts do not run while you edit, so a property track on a script field changes only the field: the
-Valley's time-of-day track moves `hour`, and the sun follows it only in Play. UI the sequence animates
-(a letterbox, a fade) shows in the viewport with the **Game UI** overlay on.
+Scripts do not run while you edit, so a property track on a script field changes only the field, and what
+the script makes of it shows only in Play. Key the nodes themselves instead: the Valley's day keys the Sun's
+rotation, colour and lux, the Sky Light, the sky's mist and god rays and the fog volumes, so scrubbing moves
+the sun and light probes set to **Follow the sun** relight as it turns. UI the sequence animates (a
+letterbox, a fade) shows in the viewport with the **Game UI** overlay on.
 
 For the same reason a script track calls nothing while you preview, and a spawn track spawns nothing (the
 scene being edited is not a game's): both are authored here and do their work in Play. The editor also keeps
@@ -219,9 +269,10 @@ export default class IntroDirector extends SequenceNode {
 
 ## Export and import
 
-**Export** saves the sequence as `<name>.sequence.json`, and **Import** replaces it with one. The Valley's
-tour is kept in that format in `tools/valley/cinematic/valley-tour.sequence.json`, so a tour retimed here
-exports straight over it, and `tools/valley/applyCinematic.ts` puts it into the example.
+**Export** saves the sequence as `<name>.sequence.json`, and **Import** replaces the asset's timeline with one
+(an undoable edit, saved with the asset). The Valley's tour is kept in that format in
+`tools/valley/cinematic/valley-tour.sequence.json`, so a tour retimed here exports straight over it, and
+`tools/valley/applyCinematic.ts` puts it into the example as the `Valley Tour.sequence` asset.
 
 ## See also
 

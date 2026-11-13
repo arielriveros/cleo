@@ -47,6 +47,7 @@ export interface SequencePlayOptions {
 export class SequenceNode extends Node {
     private _data: SequenceData;
     private _bindings: Record<string, string>;
+    private _sequenceId: string | null;
     /** Start playing the first frame the game runs (never while editing). */
     public autoplay: boolean;
     /**
@@ -73,12 +74,14 @@ export class SequenceNode extends Node {
     private _finished: Promise<SequenceEndReason> = Promise.resolve('finished');
     private _resolveFinished: ((reason: SequenceEndReason) => void) | null = null;
 
-    constructor(name: string, options: { sequence?: SequenceData; bindings?: Record<string, string>; autoplay?: boolean } = {},
-                id: string = uuidv4()) {
+    constructor(name: string, options: {
+        sequence?: SequenceData; bindings?: Record<string, string>; autoplay?: boolean; sequenceId?: string | null;
+    } = {}, id: string = uuidv4()) {
         super(name, 'sequence', id);
         this._data = options.sequence ?? emptySequence(name);
         this._bindings = { ...(options.bindings ?? {}) };
         this.autoplay = options.autoplay === true;
+        this._sequenceId = options.sequenceId ?? null;
     }
 
     // ---- data ----------------------------------------------------------------------------------------
@@ -89,6 +92,19 @@ export class SequenceNode extends Node {
         this._data = parseSequence(data);
         this._player?.setSequence(this._data);
         this._slotCache.clear();
+    }
+
+    /**
+     * The library `.sequence` asset this node's copy mirrors, or null. The copy above is what plays (a
+     * published game needs no library); the editor refreshes it from the asset when the asset is saved and
+     * when a scene is opened or published. Like a particle system's `particleSystemId`.
+     */
+    public get sequenceId(): string | null { return this._sequenceId; }
+    public set sequenceId(value: string | null) {
+        if (value === this._sequenceId) return;
+        const prev = this._sequenceId;
+        this._sequenceId = value;
+        this._notifyChange('component', 'sequenceId', prev, value);
     }
 
     /** Slot id → node id. */
@@ -196,7 +212,10 @@ export class SequenceNode extends Node {
      * means the editor is editing, where autoplay never fires.
      */
     public advanceSequence(delta: number, unscaledDelta: number, running: boolean, authoring: boolean): void {
-        if (this.autoplay && !this._autoplayed && running && !authoring) {
+        // Autoplay is a runtime rule, like spawnOnStart: never in a scene that has them off (an editor's), even in
+        // the frames before the editor's authoring flag is up (a scene still loading) — a sequence played there
+        // would write its first frame into the scene being authored.
+        if (this.autoplay && !this._autoplayed && running && !authoring && this.scene?.spawnRulesEnabled !== false) {
             this._autoplayed = true;
             this.play();
             return;
@@ -265,7 +284,10 @@ export class SequenceNode extends Node {
         return this._data.slots.find(s => s.id === idOrName) ?? this._data.slots.find(s => s.name === idOrName);
     }
 
-    /** The node bound to a slot: a playback override, the authored binding, or the slot's fallback path. */
+    /**
+     * The node bound to a slot: a playback override, this node's binding, the node the sequence was authored
+     * against (`slot.nodeId`), or the slot's fallback path.
+     */
     public resolveSlot(slotId: string): Node | null {
         const override = this._overrides.get(slotId);
         if (override) return override.scene ? override : null;
@@ -278,7 +300,8 @@ export class SequenceNode extends Node {
         if (id) node = scene.getNodeById(id) ?? null;
         if (!node) {
             const slot = this._data.slots.find(s => s.id === slotId);
-            if (slot?.path) node = resolveNodePath(scene.root, slot.path);
+            if (slot?.nodeId) node = scene.getNodeById(slot.nodeId) ?? null;
+            if (!node && slot?.path) node = resolveNodePath(scene.root, slot.path);
         }
         if (node) this._slotCache.set(slotId, node); else this._slotCache.delete(slotId);
         return node;
@@ -328,6 +351,7 @@ export class SequenceNode extends Node {
             sequence: structuredClone(this._data),
             bindings: { ...this._bindings },
             ...(this.autoplay ? { autoplay: true } : {}),
+            ...(this._sequenceId ? { sequenceId: this._sequenceId } : {}),
         };
     }
 
@@ -337,6 +361,7 @@ export class SequenceNode extends Node {
             for (const [slot, id] of Object.entries(json.bindings)) if (typeof id === 'string') bindings[slot] = id;
         const node = new SequenceNode(json.name, {
             sequence: parseSequence(json.sequence), bindings, autoplay: json.autoplay === true,
+            sequenceId: typeof json.sequenceId === 'string' && json.sequenceId ? json.sequenceId : null,
         }, json.id);
         Node.finishParse(node, parent, json);
     }

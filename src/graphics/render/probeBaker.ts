@@ -11,7 +11,7 @@ import { Framebuffer } from '../framebuffer';
 import { device } from '../rhi/deviceHandle';
 import { Texture } from '../texture';
 import { PrefilterOctProgram } from './programs';
-import { nextProbeJob, probeJobSteps } from './probeJobs';
+import { nextProbeJob, probeJobSteps, probesToRelightForSun } from './probeJobs';
 import type { ProbeJobKind, ProbeJobStep } from './probeJobs';
 import { REFLECTION_MIPS, ReflectionAtlas } from './reflectionAtlas';
 import { SkyPasses } from './sky';
@@ -123,9 +123,17 @@ export class ProbeBaker {
     }
 
     /** Run ONE step of probe work for `scene`. Called once a frame, before any pass. */
+    /** The sun direction each sun-following probe was last lit with (LightProbeNode.relightDegrees). */
+    private readonly _litWithSun = new WeakMap<LightProbeNode, [number, number, number]>();
+
     public update(scene: Scene): void {
         if (this._view.capturing) return;
         this._sync(scene);
+        // Probes that follow the sun relight once it has turned far enough: whatever turned it (a sequence, a
+        // script), reflections and fill keep up with no code of their own.
+        let sun: ArrayLike<number> | null = null;
+        for (const light of scene.lights) if (light.type === 'directional') { sun = light.worldForward; break; }
+        for (const probe of probesToRelightForSun(scene.lightProbes, sun, this._litWithSun)) probe.relight();
         let job = this._job;
         if (job && (job.scene !== scene || !scene.lightProbes.has(job.probe))) {
             this._abort(job);

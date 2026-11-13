@@ -74,7 +74,7 @@ export async function applyBundleReplace(bundle: BundleData, targetProjectId?: s
     ['materials', libs.materials], ['terrainMaterials', libs.terrainMaterials], ['templates', libs.templates],
     ['scripts', libs.scripts ?? []], ['animationFields', libs.animationFields ?? []], ['animations', libs.animations ?? []],
     ['rigs', libs.rigs ?? []], ['tilesets', libs.tilesets ?? []], ['aiBrains', libs.aiBrains ?? []],
-    ['particleSystems', libs.particleSystems ?? []], ['animControllers', libs.animControllers ?? []],
+    ['particleSystems', libs.particleSystems ?? []], ['sequences', libs.sequences ?? []], ['animControllers', libs.animControllers ?? []],
     ['boneMasks', libs.boneMasks ?? []], ['poseAssets', libs.poseAssets ?? []],
     ['audioSources', libs.audioSources ?? []], ['soundSamples', libs.soundSamples ?? []],
   ]
@@ -186,7 +186,7 @@ export async function applyBundleAsNewProject(
 
 /** Read the local state a merge needs to detect id/path/name collisions. */
 async function readLocalState(): Promise<LocalState> {
-  const [materials, terrainMaterials, templates, models, scripts, animationFields, animations, rigs, tilesets, aiBrains, animControllers, boneMasks, poseAssets, vfs, meta, storedTex, audioSources, soundSamples, storedAudio, particleSystems] = await Promise.all([
+  const [materials, terrainMaterials, templates, models, scripts, animationFields, animations, rigs, tilesets, aiBrains, animControllers, boneMasks, poseAssets, vfs, meta, storedTex, audioSources, soundSamples, storedAudio, particleSystems, sequences] = await Promise.all([
     idbGet<any[]>(libKey('materials')),
     idbGet<any[]>(libKey('terrainMaterials')),
     idbGet<any[]>(libKey('templates')),
@@ -207,6 +207,7 @@ async function readLocalState(): Promise<LocalState> {
     idbGet<any[]>(libKey('soundSamples')),
     getAllAudio(),
     idbGet<any[]>(libKey('particleSystems')),
+    idbGet<any[]>(libKey('sequences')),
   ])
   const textures = new Map<string, { size: number; mime: string }>()
   for (const t of storedTex) textures.set(t.id, { size: t.blob.size, mime: t.mime })
@@ -224,6 +225,7 @@ async function readLocalState(): Promise<LocalState> {
     tilesetIds: new Set((tilesets ?? []).map(t => t.id)),
     aiBrainIds: new Set((aiBrains ?? []).map(b => b.id)),
     particleSystemIds: new Set((particleSystems ?? []).map(p => p.id)),
+    sequenceIds: new Set((sequences ?? []).map(q => q.id)),
     animControllerIds: new Set((animControllers ?? []).map(c => c.id)),
     boneMaskIds: new Set((boneMasks ?? []).map(m => m.id)),
     poseAssetIds: new Set((poseAssets ?? []).map(p => p.id)),
@@ -259,7 +261,7 @@ export async function applyBundleMerge(bundle: BundleData, alreadyConfirmed = fa
     ['materials', plan.materials], ['terrainMaterials', plan.terrainMaterials], ['templates', plan.templates],
     ['scripts', plan.scripts], ['animationFields', plan.animationFields], ['animations', plan.animations],
     ['rigs', plan.rigs], ['tilesets', plan.tilesets], ['aiBrains', plan.aiBrains],
-    ['particleSystems', plan.particleSystems], ['animControllers', plan.animControllers],
+    ['particleSystems', plan.particleSystems], ['sequences', plan.sequences], ['animControllers', plan.animControllers],
     ['boneMasks', plan.boneMasks], ['poseAssets', plan.poseAssets],
     ['audioSources', plan.audioSources], ['soundSamples', plan.soundSamples],
   ]

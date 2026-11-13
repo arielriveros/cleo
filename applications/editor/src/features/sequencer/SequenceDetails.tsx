@@ -13,6 +13,7 @@ import { useAssetLibrary } from '../AssetLibraryContext'
 import * as E from './sequenceEdits'
 import { animatorNodeOf, clipNamesOf, newSectionInit, pawnSlotsFor } from './slotTargets'
 import type { SequencePreview } from './useSequencePreview'
+import { namePathOf } from './SequenceEditorContext'
 
 // The Sequencer's right-hand column: the selected section, key, event, track, slot or marker, editable, or the
 // sequence's own settings when nothing is selected. Continuous edits (typing a number, dragging a vector) show
@@ -36,6 +37,8 @@ interface Props {
   sel: Selection
   setSel: (s: Selection) => void
   commit: Commit
+  /** Show a sequence without recording it (a stream of edits not yet settled). */
+  live: (next: SequenceData) => void
   preview: SequencePreview
   scene: Scene
 }
@@ -44,8 +47,7 @@ interface Props {
  * Edits that arrive in a stream (each keystroke, each drag step): applied live, recorded as one step 400 ms
  * after the last one, against the sequence as it was before the first.
  */
-function useSettledCommit(node: SequenceNode, commit: Commit, preview: SequencePreview) {
-  const { withoutDirty } = useCleoEngine()
+function useSettledCommit(seq: SequenceData, commit: Commit, live: (next: SequenceData) => void) {
   const pending = useRef<{ before: SequenceData; next: SequenceData; label: string; timer: number } | null>(null)
   const flush = () => {
     const p = pending.current
@@ -56,10 +58,9 @@ function useSettledCommit(node: SequenceNode, commit: Commit, preview: SequenceP
   }
   useEffect(() => flush, []) // eslint-disable-line react-hooks/exhaustive-deps
   return (label: string, next: SequenceData) => {
-    if (!pending.current) pending.current = { before: node.sequence, next, label, timer: 0 }
+    if (!pending.current) pending.current = { before: seq, next, label, timer: 0 }
     else { pending.current.next = next; window.clearTimeout(pending.current.timer) }
-    withoutDirty(() => { node.sequence = next })
-    preview.refresh()
+    live(next)
     pending.current.timer = window.setTimeout(flush, 400)
   }
 }
@@ -215,8 +216,8 @@ function ValueInput({ type, value, onChange }: { type: string; value: SequenceKe
   return <NumberInput value={typeof value === 'number' ? value : 0} step={0.01} onChange={v => onChange(v)} />
 }
 
-export default function SequenceDetails({ node, seq, sel, setSel, commit, preview, scene }: Props) {
-  const settle = useSettledCommit(node, commit, preview)
+export default function SequenceDetails({ node, seq, sel, setSel, commit, live, preview, scene }: Props) {
+  const settle = useSettledCommit(seq, commit, live)
   const [, force] = useState(0)
   const { templates } = useAssetLibrary()
   const templateNames = templates.map(t => t.name)
@@ -256,9 +257,16 @@ export default function SequenceDetails({ node, seq, sel, setSel, commit, previe
         <PropertyTable columns={['40%', '60%']}>
           <PropertyRow label='Name'><TextInput value={slot.name} onChange={v => settle('Rename slot', E.patchSlot(seq, slot.id, { name: v }))} /></PropertyRow>
           <PropertyRow label='Node'>
-            <NodeRefInput value={node.bindings[slot.id] ?? null} scene={scene} filter={n => n !== node}
+            {/* The sequence's own binding (`nodeId`), with the node's name path as the fallback another scene
+                finds it by. A Sequence node's per-scene overrides are on its card, in the scene tab. */}
+            <NodeRefInput value={slot.nodeId ?? null} scene={scene} filter={n => n !== node && !n.isEditorOwned}
               placeholder={slot.path ? `(finds "${slot.path}")` : '(unbound)'}
-              onChange={id => { node.bind(slot.id, id); preview.refresh(); force(x => x + 1) }} />
+              onChange={id => {
+                const bound = id ? scene.getNodeById(id) : null
+                void commit('Bind slot', E.patchSlot(seq, slot.id, bound
+                  ? { nodeId: bound.id, path: namePathOf(bound, scene.root), nodeType: slot.nodeType ?? bound.nodeType }
+                  : { nodeId: undefined }))
+              }} />
           </PropertyRow>
           <PropertyRow label='Fallback path'>
             <TextInput value={slot.path ?? ''} placeholder='Parent/Child' onChange={v => settle('Slot path', E.patchSlot(seq, slot.id, { path: v }))} />

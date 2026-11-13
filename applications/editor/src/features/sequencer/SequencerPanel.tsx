@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { isTextEntryEvent, SequenceNode } from 'cleo'
+import { isTextEntryEvent } from 'cleo'
 import type { SequenceData, SequenceSlot, SequenceTrack } from 'cleo'
 import {
   Button, ContextMenu, MenuItem, Popover, LoopIcon, PauseIcon, PilotIcon, PlayIcon, SnapIcon, StepBackIcon,
@@ -10,16 +10,17 @@ import { promptDialog } from '@cleo/app-kit/feedback/dialogStore'
 import { toast } from '@cleo/app-kit/feedback/toastStore'
 import { useCleoEngine } from '../EngineContext'
 import { useAssetLibrary } from '../AssetLibraryContext'
-import { useHistory } from '../HistoryContext'
 import { settableProps } from '../agentBridge/inspect'
 import { SequenceIcon } from '../sceneInspector/nodeIcons'
 import * as E from './sequenceEdits'
 import { downloadSequence, pickSequenceFile } from './sequenceFile'
-import { useSequencePreview } from './useSequencePreview'
+import { namePathOf, useSequenceEditor } from './SequenceEditorContext'
 import { newSectionInit, slotTrackOffers } from './slotTargets'
 import SequenceDetails, { type Selection } from './SequenceDetails'
 
-// The Sequencer: the selected Sequence node's timeline, docked in the bottom strip.
+// The Sequencer: the timeline of the `.sequence` asset the active Sequencer tab edits, docked in the bottom strip
+// of Sequencer mode (the only mode that shows it). The working copy, its preview over the open scene and the
+// auto-key that turns property changes into keys live in SequenceEditorProvider.
 //
 //   toolbar   transport (start, frame back, play, frame forward, end, loop), the time, snap, zoom, Pilot,
 //             + Track, export and import
@@ -28,9 +29,8 @@ import SequenceDetails, { type Selection } from './SequenceDetails'
 //             markers on the ruler; the ruler scrubs
 //   details   whatever is selected, editable
 //
-// Every edit goes through `commit`: a new SequenceData assigned to the node inside a history transaction, so
-// it is one undo step and the node's snapshot never aliases the live data (see sequenceEdits.ts). A drag
-// shows live and records once, on release.
+// Every edit goes through `commit`: a new SequenceData made the tab's working copy and pushed onto its undo
+// stack as one step (see sequenceEdits.ts). A drag shows live and records once, on release.
 
 const OUTLINER_W = 210
 const RULER_H = 24
@@ -98,11 +98,10 @@ function sectionText(seq: SequenceData, t: SequenceTrack, s: any): string {
 }
 
 export default function SequencerPanel({ active }: { active: boolean }) {
-  const { editorScene, selectedNode, eventEmitter, withoutDirty } = useCleoEngine()
+  const { editorScene, eventEmitter } = useCleoEngine()
   const { templates } = useAssetLibrary()
   const templateNames = useMemo(() => templates.map(t => t.name), [templates])
-  const history = useHistory()
-  const [targetId, setTargetId] = useState<string | null>(null)
+  const ed = useSequenceEditor()
   const [, setVersion] = useState(0)
   const bump = useCallback(() => setVersion(v => v + 1), [])
   const [sel, setSel] = useState<Selection>(null)
@@ -117,62 +116,23 @@ export default function SequencerPanel({ active }: { active: boolean }) {
   const [view, setView] = useState({ left: 0, width: 800 })
   useEffect(() => { try { localStorage.setItem(ZOOM_KEY, String(pxPerSec)) } catch { /* quota */ } }, [pxPerSec])
 
-  // Follow the selection onto a Sequence node; stay on the last one while something else is selected.
-  useEffect(() => {
-    if (!selectedNode) return
-    const n = editorScene.getNodeById(selectedNode)
-    if (n instanceof SequenceNode && n.id !== targetId) { setTargetId(n.id); setSel(null) }
-  }, [selectedNode, editorScene, targetId])
+  // The preview host: the editor-owned Sequence node playing the working copy in the open scene. It resolves
+  // the slots (through the borrowed bindings, each slot's own node and its path).
+  const node = ed.host
+  const seq = ed.seq
+  const preview = ed.preview
+  const commit = ed.commit
+  const live = ed.live
+  const targetId = ed.tabId
 
-  // Resolved BY ID every render: an undo re-creates the node from its snapshot.
-  const found = targetId ? editorScene.getNodeById(targetId) : null
-  const node = found instanceof SequenceNode ? found : null
-  const seq = node?.sequence ?? null
-  const preview = useSequencePreview(node, editorScene, withoutDirty)
-
-  // Re-read on any change to the node (an inspector edit, an undo) and on structure (a bound node renamed).
+  // Re-read on structure (a bound node renamed or removed), which changes what the outliner shows.
   useEffect(() => {
-    const on = (e: any) => { if (!e || e.kind === 'structure' || e.kind === 'name' || e.node?.id === targetId) bump() }
+    const on = (e: any) => { if (!e || e.kind === 'structure' || e.kind === 'name') bump() }
     eventEmitter.on('SCENE_CHANGED', on)
     return () => { eventEmitter.off('SCENE_CHANGED', on) }
-  }, [eventEmitter, targetId, bump])
-
-  // Hand the scene back before anything else edits it: selecting another node (its inspector would read
-  // previewed values, and its undo baseline capture them) or grabbing a gizmo.
-  useEffect(() => {
-    const onSelect = (id: string | null) => { if (id !== targetId) preview.stop() }
-    const onDrag = () => preview.stop()
-    eventEmitter.on('SELECT_NODE', onSelect)
-    eventEmitter.on('GIZMO_DRAG_START', onDrag)
-    return () => { eventEmitter.off('SELECT_NODE', onSelect); eventEmitter.off('GIZMO_DRAG_START', onDrag) }
-  }, [eventEmitter, targetId, preview])
-
-  // ---- editing ----------------------------------------------------------------------------------------
-
-  /** Record `next` as one undo step labelled `label`. `before`, when a drag already showed `next` live. */
-  const commit = useCallback(async (label: string, next: SequenceData, before?: SequenceData) => {
-    const id = targetId
-    const n0 = id ? editorScene.getNodeById(id) : null
-    if (!(n0 instanceof SequenceNode)) return
-    if (before) withoutDirty(() => { n0.sequence = before })
-    await history.transaction(`Sequence: ${label}`, async track => {
-      const n = editorScene.getNodeById(id!)
-      if (!(n instanceof SequenceNode)) return
-      await track(n)
-      n.sequence = next
-      eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: n })
-    })
-    bump()
-    preview.refresh()
-  }, [targetId, editorScene, withoutDirty, history, eventEmitter, bump, preview])
-
-  /** Show `next` without recording it (a drag in progress). */
-  const live = useCallback((next: SequenceData) => {
-    if (!node) return
-    withoutDirty(() => { node.sequence = next })
-    bump()
-    preview.refresh()
-  }, [node, withoutDirty, bump, preview])
+  }, [eventEmitter, bump])
+  // A new tab, a new timeline: nothing of the old one stays selected.
+  useEffect(() => { setSel(null) }, [targetId])
 
   // ---- rows ---------------------------------------------------------------------------------------------
 
@@ -263,6 +223,8 @@ export default function SequencerPanel({ active }: { active: boolean }) {
   const scrubFrom = (e: React.PointerEvent) => {
     if (!seq) return
     e.preventDefault()
+    // A field still being typed in keys at the time it was started, not where the ruler is about to go.
+    ed.settleEdits()
     preview.pause()
     const go = (clientX: number) => {
       const t = tAt(clientX)
@@ -428,7 +390,7 @@ export default function SequencerPanel({ active }: { active: boolean }) {
   }
 
   const frame = 1 / fps
-  const step = (dt: number) => { preview.pause(); preview.seek(Math.round((preview.timeRef.current + dt) * fps) / fps) }
+  const step = (dt: number) => { ed.settleEdits(); preview.pause(); preview.seek(Math.round((preview.timeRef.current + dt) * fps) / fps) }
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!active || !seq || isTextEntryEvent(e.nativeEvent) || e.altKey || e.metaKey) return
@@ -478,15 +440,19 @@ export default function SequencerPanel({ active }: { active: boolean }) {
   const addSlot = async (nodeId?: string) => {
     if (!seq || !node) return
     const bound = nodeId ? editorScene.getNodeById(nodeId) : null
+    if (bound) {
+      // Already a slot's node: select that slot instead of a second one for the same node.
+      const existing = seq.slots.find(s => node.resolveSlot(s.id) === bound)
+      if (existing) { setSel({ kind: 'slot', slotId: existing.id }); return }
+    }
     const name = bound?.name ?? await promptDialog({ title: 'Add slot', defaultValue: 'Actor', confirmLabel: 'Add' })
     if (!name) return
     const id = E.slotIdFor(seq, name)
-    const next = E.addSlot(seq, { id, name, ...(bound ? { nodeType: bound.nodeType } : {}) })
+    // The binding is the sequence's own (`nodeId`, with the name path as the fallback another scene can use).
+    const next = E.addSlot(seq, {
+      id, name, ...(bound ? { nodeType: bound.nodeType, nodeId: bound.id, path: namePathOf(bound, editorScene.root) } : {}),
+    })
     await commit('Add slot', next)
-    if (bound) {
-      const n = editorScene.getNodeById(node.id)
-      if (n instanceof SequenceNode) { n.bind(id, bound.id); eventEmitter.emit('SCENE_CHANGED', { kind: 'component', node: n }) }
-    }
     setSel({ kind: 'slot', slotId: id })
   }
 
@@ -495,14 +461,6 @@ export default function SequencerPanel({ active }: { active: boolean }) {
     if (!id) return
     e.preventDefault()
     void addSlot(id)
-  }
-
-  const createSequence = async () => {
-    const n = new SequenceNode('sequence')
-    editorScene.addNode(n)
-    eventEmitter.emit('SCENE_CHANGED', { kind: 'structure', node: n })
-    eventEmitter.emit('SELECT_NODE', n.id)
-    setTargetId(n.id)
   }
 
   const importFile = async () => {
@@ -518,17 +476,10 @@ export default function SequencerPanel({ active }: { active: boolean }) {
   // ---- render ------------------------------------------------------------------------------------------
 
   if (!node || !seq) {
-    const sequences = [...editorScene.sequences]
     return (
       <div className='flex h-full items-center justify-center gap-3 text-ui-sm text-muted'>
         <span className='h-4 w-4'><SequenceIcon /></span>
-        {sequences.length > 0 ? (
-          <>
-            <span>Select a Sequence node to edit its timeline:</span>
-            {sequences.map(s => <Button key={s.id} size='sm' onClick={() => { setTargetId(s.id); eventEmitter.emit('SELECT_NODE', s.id) }}>{s.name}</Button>)}
-          </>
-        ) : <span>No Sequence in this scene.</span>}
-        <Button size='sm' onClick={createSequence}>Add Sequence</Button>
+        <span>{targetId ? 'Opening the sequence over the open scene…' : 'Open a sequence asset to edit its timeline here.'}</span>
       </div>
     )
   }
@@ -544,18 +495,18 @@ export default function SequencerPanel({ active }: { active: boolean }) {
     <div className='flex h-full min-h-0 flex-col outline-none' tabIndex={0} onKeyDown={onKeyDown}>
       {/* Toolbar */}
       <div className='flex shrink-0 items-center gap-1 border-b border-border px-2 py-1'>
-        <span className='mr-1 max-w-[160px] truncate text-ui-sm text-fg' title={node.name}>{node.name}</span>
+        <span className='mr-1 max-w-[160px] truncate text-ui-sm text-fg' title={ed.asset?.name ?? seq.name}>{ed.asset?.name ?? seq.name}</span>
         {transportButton('To the start (Home)', <ToStartIcon />, () => { preview.pause(); preview.seek(0) })}
         {transportButton('Back one frame (,)', <StepBackIcon />, () => step(-frame))}
         {transportButton(preview.playing ? 'Pause (Space)' : 'Play the preview (Space)', preview.playing ? <PauseIcon /> : <PlayIcon />, preview.toggle)}
         {transportButton('Forward one frame (.)', <StepForwardIcon />, () => step(frame))}
         {transportButton('To the end (End)', <ToEndIcon />, () => { preview.pause(); preview.seek(duration) })}
-        {transportButton('Stop and put the scene back as authored', <StopIcon />, preview.stop)}
+        {transportButton('To the start, and stop playing', <StopIcon />, () => { preview.pause(); preview.seek(0) })}
         {transportButton('Loop the preview', <LoopIcon />, () => preview.setLoop(!preview.loop), preview.loop)}
         <span className='ml-1 w-[150px] text-ui-xs tabular-nums text-muted'>
           {formatTimecode(preview.time, fps)} / {formatTimecode(duration, fps)}
         </span>
-        {preview.applied && <span className='text-ui-xs text-warning' title='The scene shows the sequence at the playhead. Stop puts it back; saving and Play do too.'>previewing</span>}
+        <span className='whitespace-nowrap text-ui-xs text-sequence' title='Every property change made to a node now is keyed at the playhead. The scene tab shows the scene as authored.'>keying at {formatTimecode(preview.time, fps)}</span>
         <div className='flex-1' />
         {transportButton('Pilot: look through the shot camera', <PilotIcon />, () => preview.setPilot(!preview.pilot), preview.pilot)}
         {transportButton('Snap to frames, edges, keys and markers', <SnapIcon />, () => setSnap(!snap), snap)}
@@ -733,7 +684,7 @@ export default function SequencerPanel({ active }: { active: boolean }) {
 
         {/* Details */}
         <div className='w-[300px] shrink-0 overflow-y-auto border-l border-border'>
-          <SequenceDetails node={node} seq={seq} sel={sel} setSel={setSel} commit={commit} preview={preview} scene={editorScene} />
+          <SequenceDetails node={node} seq={seq} sel={sel} setSel={setSel} commit={commit} live={live} preview={preview} scene={editorScene} />
         </div>
       </div>
 

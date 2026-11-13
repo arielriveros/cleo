@@ -64,6 +64,7 @@ export const MODE_DOC_PAGE: Record<EditorMode, string> = {
   aiBrain: 'editor/ai-brains',
   rig: 'editor/animation',
   particleSystem: 'editor/particles',
+  sequence: 'editor/sequencer',
 };
 
 const PANEL_DOC_PAGE: Record<string, string> = {

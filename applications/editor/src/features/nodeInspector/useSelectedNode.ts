@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Node } from 'cleo'
 import { useCleoEngine } from '../EngineContext'
 import { isWithinTemplateInstance } from '../../utils/templates'
+import { useSequenceRevision } from '../sequencer/SequenceEditorContext'
 
 /** How often the Inspector re-reads live values while a Simulate session runs. */
 const LIVE_REFRESH_MS = 250
@@ -31,13 +32,15 @@ export function useSelectedNode(): { node: Node | null, readOnly: boolean, simul
  */
 export function useLiveTick(): number {
   const { isSimulating } = useCleoEngine()
+  // In Sequencer mode the preview moves values the same way, on every seek.
+  const sequenceRevision = useSequenceRevision()
   const [tick, setTick] = useState(0)
   useEffect(() => {
     if (!isSimulating) return
     const id = window.setInterval(() => setTick(t => t + 1), LIVE_REFRESH_MS)
     return () => window.clearInterval(id)
   }, [isSimulating])
-  return isSimulating ? tick : 0
+  return isSimulating ? tick : sequenceRevision
 }
 
 export function isRootNode(node: Node): boolean {

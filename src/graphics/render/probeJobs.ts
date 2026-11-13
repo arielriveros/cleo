@@ -74,3 +74,32 @@ export function nextProbeJob(probes: Iterable<LightProbeNode>, camera: ArrayLike
     }
     return best;
 }
+
+/** What `probesToRelightForSun` needs of a probe. */
+export interface SunFollowingProbe {
+    readonly relightDegrees: number;
+    readonly hasBakedMaps: boolean;
+}
+
+/**
+ * The probes the sun has turned far enough for to relight themselves (`LightProbeNode.relightDegrees`), given
+ * the direction the sun now travels in and the one each probe was last lit with (`litWith`, updated here).
+ * A probe seen for the first time, or not yet baked, only records the direction: its bake lights it anyway.
+ */
+export function probesToRelightForSun<P extends SunFollowingProbe>(probes: Iterable<P>, sunDir: ArrayLike<number> | null,
+                                                                    litWith: WeakMap<P, [number, number, number]>): P[] {
+    if (!sunDir) return [];
+    const len = Math.hypot(sunDir[0], sunDir[1], sunDir[2]) || 1;
+    const d: [number, number, number] = [sunDir[0] / len, sunDir[1] / len, sunDir[2] / len];
+    const out: P[] = [];
+    for (const probe of probes) {
+        if (!(probe.relightDegrees > 0)) continue;
+        const last = litWith.get(probe);
+        if (!last || !probe.hasBakedMaps) { litWith.set(probe, d); continue; }
+        const cos = Math.min(1, Math.max(-1, last[0] * d[0] + last[1] * d[1] + last[2] * d[2]));
+        if (Math.acos(cos) * 180 / Math.PI <= probe.relightDegrees) continue;
+        litWith.set(probe, d);
+        out.push(probe);
+    }
+    return out;
+}

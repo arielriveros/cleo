@@ -118,7 +118,8 @@ function toValley(bundle: any) {
       collisionEnabled: false, collisionMode: 'retract', collisionIgnoreIds: [],
     }
     attach(rig, fly, {})
-    root.children.splice(root.children.findIndex((c: any) => c.name === 'Time of Day') + 1, 0, rig)
+    // After the day (the old Time of Day node, or the Day Cycle that replaced it), else at the top.
+    root.children.splice(root.children.findIndex((c: any) => c.name === 'Time of Day' || c.name === 'Day Cycle') + 1, 0, rig)
   }
 
   // The player's arm was the depth of field's focus; a free camera has none.

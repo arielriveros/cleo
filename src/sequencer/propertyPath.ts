@@ -40,6 +40,40 @@ const TRANSFORM_SETTERS: Record<string, string> = {
     position: 'setPosition', rotation: 'setRotation', scale: 'setScale',
 };
 
+/**
+ * Single-segment paths read through another getter: a node's `visible` folds in the renderer's LOD and
+ * draw-distance culls, so what was authored (and what a key should hold) is `authoredVisible`.
+ */
+const READ_ALIASES: Record<string, string> = { visible: 'authoredVisible' };
+
+/** Whether `path` is a node's own transform (`position`, `rotation`, `scale`): writing it moves the world matrix. */
+export function isTransformPath(path: string): boolean {
+    return path in TRANSFORM_SETTERS;
+}
+
+interface VisibilityNode { authoredVisible: boolean; visible: boolean; children: readonly VisibilityNode[] }
+
+const isVisibilityNode = (v: unknown): v is VisibilityNode =>
+    !!v && typeof v === 'object' && typeof (v as any).authoredVisible === 'boolean' && Array.isArray((v as any).children);
+
+/**
+ * How to put a `visible` write back exactly. The setter recurses into every descendant, so restoring the
+ * root's flag alone would show children the scene had hidden: capture each node's own flag, and restore
+ * them parent first so every child's own flag lands last. Null when `root` is not a node.
+ */
+export function captureVisibility(root: unknown): (() => void) | null {
+    if (!isVisibilityNode(root)) return null;
+    const flags: [VisibilityNode, boolean][] = [];
+    const walk = (n: VisibilityNode) => {
+        flags.push([n, n.authoredVisible]);
+        for (const c of n.children) if (isVisibilityNode(c)) walk(c);
+    };
+    walk(root);
+    return () => {
+        for (const [n, v] of flags) if (n.authoredVisible !== v || n === root) n.visible = v;
+    };
+}
+
 /** Copy a value so a captured "before" cannot be mutated by later writes into the same array. */
 export function snapshotValue(v: unknown): unknown {
     if (ArrayBuffer.isView(v) && !(v instanceof DataView)) return Array.from(v as unknown as ArrayLike<number>);
@@ -62,12 +96,14 @@ export function compilePropertyPath(root: object, path: string): PropertyAccesso
     };
     const key = parts[parts.length - 1];
     const transformSetter = parts.length === 1 ? TRANSFORM_SETTERS[key] : undefined;
+    const readAlias = parts.length === 1 ? READ_ALIASES[key] : undefined;
 
     return {
         path,
         get(): unknown {
             const c = containerOf();
             if (c === undefined) return undefined;
+            if (readAlias && readAlias in c) return c[readAlias];
             return step(c, key);
         },
         set(value: unknown): boolean {

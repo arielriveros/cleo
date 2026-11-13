@@ -494,15 +494,29 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     **possess** track has a controller possess a pawn for the section. `AnimationActionHandle.seek` and
     `time`, and `SoundNode.play({ offset })`, `seek`, `playhead`, `duration`, `gain`, `playbackRate` are
     new to scripts too.
-  - *Slots.* A sequence names its actors by slot, and the node binds each slot to a node in the scene,
-    so one sequence can drive other actors. The bindings follow a copied or spawned subtree.
+  - *Sequences are assets.* A `.sequence` (Assets ▸ **+ Add ▾ Sequence**) is played by a Sequence node,
+    which keeps a copy of it the way a Particle System node keeps its effect: saving the asset updates the
+    nodes playing it, a scene opened or published later picks it up, and a published game ships no library.
+    Drop one in the viewport to add a node playing it, or on a node's **Timeline** slot.
+  - *Slots.* A sequence names its actors by slot. A slot is bound to the node it was authored against, falls
+    back to that node's name path in another scene, and a Sequence node can rebind it to a node of its own
+    scene, so one sequence can drive other actors.
   - *It owns what it drives.* Every target is captured the first time the sequence writes it and
     `stop()` puts all of it back. A section eases in over the value it found, and holds or restores its
     target when the timeline leaves it.
   - *Scripts.* `Game.playSequence(name, { bindings })` and `node.play()`, `pause`, `resume`, `seek`,
     `skip`, `stop`, `finished`, `onFinished`, `onEvent`. Sequences run before every `onUpdate`, so a camera
     they move renders that frame. Player contract 28.
-  - *The Sequencer panel* in the bottom strip edits the selected sequence like a video editor: a ruler that
+  - *Sequencer mode.* Opening a sequence opens it in a tab of its own over the scene you have open: the same
+    viewport, scene tree and node inspector as Scene mode, light orange panel headers, and the Sequencer
+    along the bottom (the only mode that shows it). Every change you make to a node there, in the inspector,
+    with the gizmo or on the tree's eye, is a key at the playhead: the first one of a property also keys
+    where it was at 0 s, so a cube moved at 2 s glides there from the start. The scene itself never changes,
+    and what can't be a key (adding, deleting, moving or renaming nodes, linking assets) isn't offered there.
+    A **Keys** card lists what is animated on the selected node, with jumps between its keys, and **Key
+    property…** keys any property the sequence can drive. Each tab keeps its unsaved keys across tab
+    switches, undoes them one by one, and Play plays them unsaved.
+  - *The Sequencer panel* edits the tab's sequence like a video editor: a ruler that
     scrubs, slots and their tracks, sections to drag, trim and ease, keys and events to retime, a razor (S),
     markers (M), Ctrl+D to duplicate, Space and J/K/L to play. The details column edits what is selected:
     a path's points (or **Add from viewport**), its look target and timing, a property's keys (**Key current
@@ -510,10 +524,10 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     start and speed, a sound's offset and volume keys, a spawn's template, placement and slot, a slot's
     binding. A razor keeps a clip or a sound where it was on the timeline. Every edit is one undo step, and
     a drag records once.
-  - *Previewing in the editor.* Scrubbing shows the sequence in the scene being edited, with the viewport
-    kept on the editor camera; **Pilot** looks through the shot's camera. Saving, Play, Simulate, a tab or
-    2D/3D switch, selecting another node and grabbing a gizmo all put the scene back first, so a preview is
-    never saved. **Export** / **Import** read and write `.sequence.json`.
+  - *Previewing in the editor.* Scrubbing shows the sequence in the open scene, with the viewport kept on
+    the editor camera and the inspector reading the playhead; **Pilot** looks through the shot's camera.
+    Saving, Play, Simulate and a tab or 2D/3D switch put the scene back first, so a preview is never saved.
+    **Export** / **Import** read and write `.sequence.json`.
 - **The Valley opens on a start menu: a cinematic tour, or Free mode.** The tour is a 405 s sequence over
   every part of the valley.
   - *Act I.* The campfire, the main road, the hamlet, the Old House and the Granary in 30 s. Then the
@@ -532,8 +546,15 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     again.
   - *Act IV.* Splashes on the pond (a spawn track), the pond calming to a mirror, then the whole valley
     from above, and the Cleo logo and wordmark on the final black.
+  - *Its day is keyed, not scripted.* The tour keys the sun's path, colour and lux, the sky's fill, the mist,
+    the god rays and the pond's mist directly, so scrubbing it in Sequencer mode moves the sun. Under the menu
+    and in Free mode a looping **Day Cycle** sequence runs a whole day in 24 minutes, paused while the tour
+    plays. The Time of Day node and its script are gone.
   - Escape or P comes back to the menu from either mode. `tools/valley/applyCinematic.ts` applies it to the
-    shipped example from the checked-in `valley-tour.sequence.json` (the shot list is `cinematic/tour.ts`).
+    shipped example from the checked-in `valley-tour.sequence.json` (the shot list is `cinematic/tour.ts`),
+    as the `/Cinematic/Valley Tour.sequence` asset its Sequence node plays.
+- **Light probes can follow the sun.** A probe's **Follow the sun** (`relightDegrees`) relights it each time the
+  scene's sun has turned that far, whatever turns it, so reflections keep up with a keyed or cycling day.
 - **Effects can follow the game's speed.** **Follow Time Scale** (Renderer ▸ Weather) runs the wind, the
   clouds' drift, fog, flicker, water ripples and custom materials' `u_time` at `Game.timeScale`, so a
   sped-up day plays as a time-lapse. Off by default.

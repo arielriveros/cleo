@@ -245,6 +245,7 @@ export function parseSequence(json: any): SequenceData {
         .map((s: any): SequenceSlot => ({
             id: s.id, name: str(s.name, s.id),
             ...(typeof s.nodeType === 'string' ? { nodeType: s.nodeType } : {}),
+            ...(typeof s.nodeId === 'string' && s.nodeId ? { nodeId: s.nodeId } : {}),
             ...(typeof s.path === 'string' ? { path: s.path } : {}),
         }));
     seq.tracks = (Array.isArray(json.tracks) ? json.tracks : []).map(parseTrack).filter(Boolean) as SequenceTrack[];

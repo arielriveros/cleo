@@ -55,13 +55,16 @@ import { AnimationFieldAsset, firstSkinnedModelNode, modelAssetIsSkinned, reembe
 import { TilesetAsset, reembedTilesets, detachTileset, normalizeTilesetAsset } from "../utils/tilesets";
 import { AiBrainAsset, AiBrainKind, buildAiBrainAsset, reembedBrains, detachBrain } from "../utils/aiBrains";
 import { ParticleSystemAsset, buildParticleSystemAsset, reembedParticleSystems, detachParticleSystem } from "../utils/particleSystems";
+import { SequenceAsset, buildSequenceAsset, detachSequence, reembedSequences } from "../utils/sequenceAssets";
+import { applySequenceWorkingCopies } from "./sequencer/workingCopies";
+import { sequenceKeyingActive } from "./sequencer/previewRegistry";
 import type { AnimControllerAsset } from "../utils/animationControllers";
 import { instantiateController, reembedMachine, pickControllerForRig, machineIsEmpty, buildControllerAsset } from "../utils/animationControllers";
 import { machinesInNodeJson, projectTypesDeclaration, triggerNamesOf } from "../utils/projectTriggers";
 import { setProjectTypes } from "@cleo/app-kit/code/projectTypes";
 import type { BoneMaskAsset } from "../utils/boneMasks";
 import type { PoseAsset } from "../utils/poseAssets";
-import type { ControllerNode, ParticleSystemNode } from "cleo";
+import type { ControllerNode, ParticleSystemNode, SequenceNode } from "cleo";
 import type { ImageAsset } from "../utils/images";
 import type { AudioSourceAsset } from "../utils/audioSources";
 import type { SoundSampleAsset } from "../utils/soundSamples";
@@ -133,6 +136,7 @@ import { usePendingDecisions } from './hooks/usePendingDecisions';
 import { useTilesetEditor } from './hooks/useTilesetEditor';
 import { useAiBrainEditor } from './hooks/useAiBrainEditor';
 import { useParticleSystemEditor } from './hooks/useParticleSystemEditor';
+import { useSequenceEditor } from './hooks/useSequenceEditor';
 import { useTextureEditor } from './hooks/useTextureEditor';
 import { useSoundEditor } from './hooks/useSoundEditor';
 import { useAnimationFieldEditor } from './hooks/useAnimationFieldEditor';
@@ -440,6 +444,24 @@ const EngineContext = createContext<{
   linkParticleSystemToNode: (node: ParticleSystemNode, id: string | null) => void;
   /** Copy a node's embedded effect into a new library asset and link it. */
   extractParticleSystemFromNode: (node: ParticleSystemNode, name?: string) => ParticleSystemAsset;
+  // Sequence assets (`.sequence`: a cinematic timeline, embedded into SequenceNodes)
+  sequences: SequenceAsset[];
+  addSequence: (q: SequenceAsset) => void;
+  /** Drops the library entry, unlinks every node in every live scene (they keep their copy) and closes its tabs. */
+  removeSequence: (id: string) => void;
+  updateSequence: (id: string, q: SequenceAsset) => void;
+  /** The sequence the active tab edits, or null when the active tab is not a Sequencer tab. */
+  editingSequenceId: string | null;
+  /** Open (or focus) a sequence's Sequencer tab, minting a new asset when called with no id. */
+  enterSequenceEditor: (id?: string | null, options?: { contextNodeId?: string | null; adoptTabId?: string }) => void;
+  /** Persist an edited sequence and push it into every node in every live scene that links it. */
+  saveSequence: (asset: SequenceAsset) => number;
+  /** Copy a library sequence onto a node and record the link, or pass null to unlink keeping the copy. */
+  linkSequenceToNode: (node: SequenceNode, id: string | null) => void;
+  /** Copy a node's embedded sequence into a new library asset and link it. */
+  extractSequenceFromNode: (node: SequenceNode, name?: string) => SequenceAsset;
+  /** SequenceEditorProvider hands its saver back here, so Ctrl+S and Save All can reach any Sequencer tab. */
+  registerSequenceApply: (reg: { save: (tabId: string) => boolean } | null) => void;
   // Animation controller assets (a shared state machine: parameters, layers, slots)
   animControllers: AnimControllerAsset[];
   addAnimController: (c: AnimControllerAsset) => void;
@@ -761,6 +783,16 @@ const EngineContext = createContext<{
     saveParticleSystem: () => {},
     linkParticleSystemToNode: () => {},
     extractParticleSystemFromNode: () => buildParticleSystemAsset(),
+    sequences: [],
+    addSequence: () => {},
+    removeSequence: () => {},
+    updateSequence: () => {},
+    editingSequenceId: null,
+    enterSequenceEditor: () => {},
+    saveSequence: () => 0,
+    linkSequenceToNode: () => {},
+    extractSequenceFromNode: () => buildSequenceAsset(),
+    registerSequenceApply: () => {},
     animControllers: [],
     addAnimController: () => {},
     removeAnimController: () => {},
@@ -978,6 +1010,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const tabRuntimeRef = useRef<Map<string, { scene: Scene; rootId: string; sourceScene?: Scene; sourceNodeId?: string; sourceTabId?: string; tm?: TerrainMaterial; helperTerrain?: Terrain; baseAtOpen?: Template; editNode?: ModelNode; previewSphere?: ModelNode; previewModelId?: string; skinnedId?: string }>>(new Map());
   const activeTabIdRef = useRef<string>(SCENE_TAB_ID);
   const activeTabKindRef = useRef<TabKind>('scene');
+  /** The tab kind `applyActiveTab` last put the engine behind (unlike activeTabKindRef, which follows state). */
+  const appliedTabKindRef = useRef<TabKind | null>(null);
   const dirtyArmedRef = useRef(false); // suppress false-dirty from the helper reconciler right after open
   // Propagation (the sync*Instances family) edits live scenes and so emits SCENE_CHANGED, which mark()
   // would blame on the ACTIVE tab. Hold this while propagating.
@@ -1683,6 +1717,37 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (open) removeTabById(open.id);
   };
 
+  // SEQUENCES. The particle arrangement again: a SequenceNode keeps a full copy of the timeline it plays, so
+  // this library is the authoring source of truth and the copies are refreshed from it on SAVE (see
+  // saveSequence / reembedSequences) and when a scene is opened or published (resyncScene).
+  const [sequences, setSequences] = useState<SequenceAsset[]>([]);
+  const sequencesLoadedRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await idbGet<SequenceAsset[]>(libKey('sequences'));
+        if (list && list.length) setSequences(prev => prev.length ? prev : list);
+      } catch (e) { console.warn('Failed to load sequences:', e); }
+      finally { sequencesLoadedRef.current = true; }
+    })();
+  }, []);
+  usePersistedLibrary(libKey('sequences'), sequences, sequencesLoadedRef);
+
+  const sequencesRef = useRef<SequenceAsset[]>([]);
+  sequencesRef.current = sequences;
+
+  const addSequence = (q: SequenceAsset) => setSequences(prev => [...prev, q]);
+  const updateSequence = (id: string, q: SequenceAsset) => setSequences(prev => prev.map(x => x.id === id ? q : x));
+  const removeSequence = (id: string) => {
+    setSequences(prev => prev.filter(x => x.id !== id));
+    sequencesRef.current = sequencesRef.current.filter(x => x.id !== id);
+    // The LINK only: every node keeps the timeline it copied and goes on playing it.
+    let changed = false;
+    for (const scene of liveScenes()) if (detachSequence(scene, id)) changed = true;
+    if (changed) eventEmitter.current.emit('SCENE_CHANGED');
+    for (const open of tabsRef.current.filter(t => t.kind === 'sequence' && t.sequenceId === id)) removeTabById(open.id);
+  };
+
   // Animation controllers, bone masks and pose assets: plain JSON records, persisted like the brains. A
   // ModelNode embeds a resolved copy of what it uses (controllerId / maskId / poseRef record the source),
   // so deleting a library entry leaves every character playing what it already copied.
@@ -2157,7 +2222,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     if (assetsLoaded) return;
     const flags = [templatesLoadedRef, materialsLoadedRef, terrainMaterialsLoadedRef, modelsLoadedRef, scriptAssetsLoadedRef,
       animationFieldsLoadedRef, animationsLoadedRef, rigsLoadedRef, scenesLoadedRef, imagesLoadedRef, texturesLoadedRef,
-      audioSourcesLoadedRef, soundSamplesLoadedRef, aiBrainsLoadedRef, particleSystemsLoadedRef, animControllersLoadedRef,
+      audioSourcesLoadedRef, soundSamplesLoadedRef, aiBrainsLoadedRef, particleSystemsLoadedRef, sequencesLoadedRef, animControllersLoadedRef,
       boneMasksLoadedRef, poseAssetsLoadedRef];
     const step = bootLoadRef.current.step('libraries').start();
     const timer = window.setInterval(() => {
@@ -2317,6 +2382,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         case 'tileset': return libs.tilesets.some(t => t.id === id);
         case 'aiBrain': return libs.aiBrains.some(b => b.id === id);
         case 'particleSystem': return particleSystemsRef.current.some(p => p.id === id);
+        case 'sequence': return sequencesRef.current.some(q => q.id === id);
         case 'texture': return texturesRef.current.some(t => t.id === id);
         case 'soundSample': return soundSamplesRef.current.some(x => x.id === id);
         case 'rig': return rigsRef.current.some(r => r.id === id);
@@ -2512,6 +2578,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   const editingSoundId = activeTab.kind === 'soundSample' ? (activeTab.soundId ?? null) : null;
   const editingAiBrainId = activeTab.kind === 'aiBrain' ? (activeTab.aiBrainId ?? null) : null;
   const editingParticleSystemId = activeTab.kind === 'particleSystem' ? (activeTab.particleSystemId ?? null) : null;
+  const editingSequenceId = activeTab.kind === 'sequence' ? (activeTab.sequenceId ?? null) : null;
 
   // Non-reactive mirrors of the tab list, the mesh sessions and the asset libraries. The save + propagation
   // paths read these rather than the render-scoped state: Save All walks tabs sequentially with an await
@@ -2566,6 +2633,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     terrainMaterials: terrainMaterialsRef.current, scripts: scriptAssetsRef.current,
     tilesets: tilesetsRef.current, aiBrains: aiBrainsRef.current, animations: animationsRef.current,
     particleSystems: particleSystemsRef.current,
+    sequences: sequencesRef.current,
     rigs: rigsRef.current,
     animControllers: animControllersRef.current, boneMasks: boneMasksRef.current, poseAssets: poseAssetsRef.current,
     animationFields: animationFieldsRef.current,
@@ -3466,6 +3534,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       case 'texture': return !!tab.textureId && texturesRef.current.some(t => t.id === tab.textureId);
       // And for a sound tab: a waveform and a settings panel over the record.
       case 'soundSample': return !!tab.soundId && soundSamplesRef.current.some(x => x.id === tab.soundId);
+      // A Sequencer tab shows the OPEN scene: it has no session to build, only an asset that must exist.
+      case 'sequence': return !!tab.sequenceId && sequencesRef.current.some(q => q.id === tab.sequenceId);
       default: return true;
     }
     // A script tab is a pure code editor and never gets a runtime entry, so it can only be judged by whether
@@ -4844,6 +4914,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addParticleSystem, updateParticleSystem,
   });
 
+  // ---- Sequencer (sequence assets) --------------------------------------------------------------------
+  const { enterSequenceEditor, linkSequenceToNode, extractSequenceFromNode, saveSequence } = useSequenceEditor({
+    instanceRef, sequencesRef, tabRuntimeRef, editorSceneRef, eventEmitter,
+    tabsRef, setTabs, setActiveTab, commitTab, markTabDirty, clearTabDirty, addSequence, updateSequence,
+  });
+
   // ---- Texture editor --------------------------------------------------------------------------------
   const { enterSoundEditor, saveSoundSample, previewSoundSettings } = useSoundEditor({
     soundSamplesRef, tabsRef, setTabs, updateSoundSample, setActiveTab, commitTab, clearTabDirty,
@@ -5525,6 +5601,12 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // two frames later, once the editor-helper reconciler's opening pass has settled.
     dirtyArmedRef.current = false;
     activeTabKindRef.current = tab.kind;
+    // A Sequencer tab shows the OPEN scene (it has no runtime): going between it and the scene tab keeps the
+    // same scene, so it keeps the selection and the view too.
+    const previousKind = appliedTabKindRef.current;
+    appliedTabKindRef.current = tab.kind;
+    const showsOpenScene = (k: TabKind | null) => k === 'scene' || k === 'sequence';
+    const sameScene = showsOpenScene(previousKind) && showsOpenScene(tab.kind);
     const runtime = tab.kind !== 'scene' ? tabRuntimeRef.current.get(tab.id) : undefined;
     instance.setScene(runtime ? runtime.scene : editorSceneRef.current);
     // Hide the editor ground grid in (terrain-)material tabs so the preview sphere + its thumbnail stay clean.
@@ -5544,11 +5626,15 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // material tabs are skipped: their preview camera uses a self-contained orbit rig
     // (createMaterialPreviewScene) that the free-fly CHANGE_DIMENSION handler must not overwrite.
     if (tab.kind !== 'material' && tab.kind !== 'terrainMaterial')
-      setViewDimension(tab.kind === 'scene' ? viewDimensionRef.current : '3D');
+      setViewDimension(showsOpenScene(tab.kind) ? viewDimensionRef.current : '3D');
     eventEmitter.current.emit('TEXTURES_CHANGED');
     eventEmitter.current.emit('SCENE_CHANGED');
     // Animation tabs select via the skeleton tree (SELECT_JOINT), not the mesh, so start with none.
-    eventEmitter.current.emit('SELECT_NODE', (runtime && tab.kind !== 'stateMachine' && tab.kind !== 'animation') ? runtime.rootId : null);
+    if (!sameScene)
+      eventEmitter.current.emit('SELECT_NODE', (runtime && tab.kind !== 'stateMachine' && tab.kind !== 'animation') ? runtime.rootId : null);
+    // Last: everything above stops Sequencer previews (the tab switch, the 2D/3D re-rig), so a Sequencer tab
+    // applies its preview only once the tab is fully in place.
+    eventEmitter.current.emit('TAB_APPLIED', tab.id);
   };
   applyActiveTabRef.current = applyActiveTab;
 
@@ -5584,6 +5670,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // on the payload at emit time, which is the only correct source for a removal and for a plain child of
       // an owned group. Their property events never get this far, because the engine does not emit them.
       if (isEditorOwnedChange(e)) return logDirtySkip('editor-owned', e);
+      // In a Sequencer tab every property change becomes a key of the sequence (the auto-key marks that tab),
+      // never an edit of the scene on screen; the few that cannot be keyed are handled there too.
+      // (Should its preview not be up, the change went straight into the scene: the scene tab is the one it dirtied.)
+      if (activeTabKindRef.current === 'sequence') {
+        if (sequenceKeyingActive()) return logDirtySkip('sequence-tab', e);
+        markTabDirty(SCENE_TAB_ID, describeChange(e));
+        return;
+      }
       // An engine event names the scene its node was in, and only a change to the scene on screen can be
       // an edit of the active tab. `null` is a subtree still being built. A parse attaches every node
       // before its parent, so a preview character, a thumbnail or a foliage prototype emits a burst of
@@ -5697,7 +5791,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   // ---- Saving: one action per tab, plus Save All ------------------------------------------------
   const {
     registerAnimationApply, registerTilesetApply, registerTextureApply, registerSoundApply,
-    registerAiBrainApply, registerParticleSystemApply, registerRigApply, saveTabById, runSave,
+    registerAiBrainApply, registerParticleSystemApply, registerRigApply, registerSequenceApply, saveTabById, runSave,
     saveActiveTab, saveAll, saveProjectToStorage,
   } = useSaving({
     tabsRef, dirtyTabsRef, activeTabIdRef, setSavingState,
@@ -6265,7 +6359,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (!instanceRef.current) return;
       // Only the Main tab's view is remembered; asset tabs render transiently in 3D and must not
       // overwrite the rig the scene tab goes back to.
-      if (activeTabKindRef.current === 'scene') viewDimensionRef.current = dimension;
+      if (activeTabKindRef.current === 'scene' || activeTabKindRef.current === 'sequence') viewDimensionRef.current = dimension;
 
       if (!instanceRef.current.scene) {
         setTimeout(() => {
@@ -6284,7 +6378,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       // you left; taken unconditionally so the boot emit records the starting 3D pose too. Scene tab only:
       // applyActiveTab installs the incoming tab's scene BEFORE it asks for a rig.
       let remembered: typeof viewPoseRef.current['2D'] | undefined;
-      if (activeTabKindRef.current === 'scene') {
+      if (activeTabKindRef.current === 'scene' || activeTabKindRef.current === 'sequence') {
         const cam = cameraNode.camera;
         viewPoseRef.current[previousViewRef.current] = {
           position: [cameraNode.position[0], cameraNode.position[1], cameraNode.position[2]],
@@ -6659,7 +6753,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       const leaving = tabsRef.current.find(t => t.id === activeTabIdRef.current);
       // Play reads the open scene and the asset LIBRARIES, never a tab's edit session, so unsaved work in
       // the tab being left is genuinely not in the build. Say so rather than silently saving it.
-      if (leaving && leaving.kind !== 'scene' && dirtyTabsRef.current[leaving.id])
+      // A Sequencer tab is the exception: its working copy is what Play is for (see applySequenceWorkingCopies).
+      if (leaving && leaving.kind !== 'scene' && leaving.kind !== 'sequence' && dirtyTabsRef.current[leaving.id])
         Logger.info(`Playing the scene — unsaved changes in "${leaving.title}" are not included`, 'Editor');
       setMainMode('scene');
       setActiveTab(SCENE_TAB_ID);
@@ -6669,6 +6764,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     }
 
     reembedSceneFields(editorSceneRef.current);
+    // Linked Sequence nodes play the library's timeline (a scene-tab undo can have put an older copy back).
+    if (reembedSequences(editorSceneRef.current, sequencesRef.current)) markTabDirty(SCENE_TAB_ID, 'sequence-reembed');
     playEntrySceneIdRef.current = openSceneIdRef.current;
     currentPlaySceneIdRef.current = openSceneIdRef.current;
     playRenderRef.current = instance.renderer.getRenderSettings();
@@ -6676,6 +6773,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // module state leaks from one session into the next.
     resetScriptModules();
     const newScene = await buildPlayScene();
+    // ...and in the play scene only, the open Sequencer tabs' unsaved working copies.
+    applySequenceWorkingCopies(newScene);
     isSimulatingRef.current = simulate;
     if (simulate) carryEditorCamera(editorSceneRef.current, newScene);
     instance.setScene(newScene);
@@ -6833,6 +6932,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     addTileset, removeTileset, updateTileset,
     addAiBrain, removeAiBrain, updateAiBrain,
     addParticleSystem, removeParticleSystem, updateParticleSystem,
+    addSequence, removeSequence, updateSequence,
     addAnimController, removeAnimController, updateAnimController,
     addBoneMask, removeBoneMask, updateBoneMask,
     addPoseAsset, removePoseAsset, updatePoseAsset,
@@ -6843,10 +6943,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   });
   const assetLibraryValue = useMemo<AssetLibraryContextValue>(() => ({
     templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains,
-    particleSystems, animControllers, boneMasks, poseAssets,
+    particleSystems, sequences, animControllers, boneMasks, poseAssets,
     images, textures, audioSources, soundSamples, assetsLoaded, ...libraryActions,
   }), [templates, materials, terrainMaterials, models, scriptAssets, animationFields, animations, rigs, tilesets, aiBrains,
-       particleSystems, animControllers, boneMasks, poseAssets,
+       particleSystems, sequences, animControllers, boneMasks, poseAssets,
        images, textures, audioSources, soundSamples, assetsLoaded, libraryActions]);
 
   const documentActions = useStableActions({
@@ -6898,6 +6998,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     enterAiBrainEditor, saveAiBrain, extractBrainFromController, linkBrainToController, registerAiBrainApply,
     enterParticleSystemEditor, saveParticleSystem, linkParticleSystemToNode, extractParticleSystemFromNode,
     registerParticleSystemApply,
+    enterSequenceEditor, saveSequence, linkSequenceToNode, extractSequenceFromNode, registerSequenceApply,
     enterRigEditor, setRigPreviewModel, rigPreviewModelId, saveRig, modelsOnRig, registerRigApply,
     openAnimController, createAnimatorForRig,
     enterClipEditor, setClipPreviewModel, clipPreviewModelId, modelsForClip,
@@ -6911,6 +7012,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editingSoundId,
     editingAiBrainId,
     editingParticleSystemId,
+    editingSequenceId,
     editingRigId,
     editingAnimationId,
     modelSession: activeTab.kind === 'model' ? (modelSessions[activeTab.id] ?? null) : null,
@@ -6924,7 +7026,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     editingTemplateName, editingTemplateVariant, templateRootId, editingMaterialName,
     editingTerrainMaterialName, editingTerrainMaterialNode,
     stateMachineTargetId, stateMachineSourceId, stateMachineSourceScene, pendingAnimationImport, pendingRigPick,
-    editingAnimationFieldId, animationFieldTargetId, editingSoundId, editingAiBrainId, editingParticleSystemId, editingRigId,
+    editingAnimationFieldId, animationFieldTargetId, editingSoundId, editingAiBrainId, editingParticleSystemId, editingSequenceId, editingRigId,
     editingAnimationId,
     activeTab, modelSessions, pendingModelImport, sessionActions,
   ]);
@@ -7095,6 +7197,16 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       linkParticleSystemToNode,
       extractParticleSystemFromNode,
       registerParticleSystemApply,
+      sequences,
+      addSequence,
+      removeSequence,
+      updateSequence,
+      editingSequenceId,
+      enterSequenceEditor,
+      saveSequence,
+      linkSequenceToNode,
+      extractSequenceFromNode,
+      registerSequenceApply,
       animControllers,
       addAnimController,
       removeAnimController,
