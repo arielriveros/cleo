@@ -17,6 +17,8 @@ export const BOOT_STEPS = [
  * same file the pre-bundle splash in index.html shows. Under the Creator's base, so /creator/brand/logo.png.
  */
 export const LOGO = `${import.meta.env.BASE_URL}brand/logo.png`;
+/** The logo's pixelated copy, brand/logo-pixel.png, which the loading logo fills from. */
+export const LOGO_PIXELS = `${import.meta.env.BASE_URL}brand/logo-pixel.png`;
 
 let boot: LoadHandle | null = null;
 

@@ -6,7 +6,7 @@ import { Button, SegmentedControl } from '@cleo/app-kit/ui';
 import { webgpuAvailableInBrowser, type BackendKind } from 'cleo';
 import { readBackendPreference, writeBackendPreference } from '@cleo/app-kit/renderer/backendPreference';
 import { CreatorEngineProvider, useCreatorEngine } from './CreatorEngine';
-import { bootLoad, booting, finishIfSettled, LOGO } from './bootLoad';
+import { bootLoad, booting, finishIfSettled, LOGO, LOGO_PIXELS } from './bootLoad';
 
 import { APPS, CreatorShellContext, appLabel, type AppId, type Tool } from './shell';
 import { Home } from './Home';
@@ -136,7 +136,7 @@ function Shell() {
         {error && <div className='p-4 text-danger-fg'>The engine could not start: {error}</div>}
         {toolError && <div className='p-4 text-danger-fg'>{appLabel(tool)} could not load: {toolError}</div>}
         {tool === 'home' ? <Home /> : instance && Component && <Component key={tool} />}
-        <LoadingScreen variant='overlay' subtitle='Creator' logo={LOGO} />
+        <LoadingScreen variant='overlay' subtitle='Creator' logo={LOGO} logoPixels={LOGO_PIXELS} />
       </div>
     </div>
     </CreatorShellContext.Provider>

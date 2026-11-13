@@ -18,17 +18,23 @@
         .cleo-boot small { display: block; margin-top: 8px; text-align: center; font-size: 10px;
                            letter-spacing: 0.3em; text-transform: uppercase; color: #9aa4b2; }
         .cleo-boot p { margin: -16px 0 0; font-size: 12px; color: #8a8aa0; }
-        /* The logo as an indeterminate loading bar: app-kit feedback/logoLoader.css in its sweep mode,
-           which the React loading screen then takes over with real progress. Keep the two alike. */
+        /* The logo as an indeterminate loading bar: app-kit feedback/logoLoader.css in its sweep mode, a
+           pixelated band of light (brand/logo-pixel.png) crossing the dimmed logo, which the React loading
+           screen then takes over with real progress. Keep the two alike. The sweep runs on .logo, so every
+           layer reads the same inherited --cleo-sweep. */
         @property --cleo-sweep { syntax: '<percentage>'; inherits: true; initial-value: -25%; }
-        .cleo-boot .logo { position: relative; isolation: isolate; width: 180px; margin-bottom: -8px; }
+        .cleo-boot .logo { position: relative; isolation: isolate; width: 180px; margin-bottom: -8px;
+                           animation: cleo-boot-sweep 1.4s ease-in-out infinite; }
         .cleo-boot .logo img { display: block; width: 100%; height: auto; }
-        .cleo-boot .logo .dim { position: relative; opacity: 0.3; }
+        .cleo-boot .logo .dim { position: relative; opacity: 0.3;
+            -webkit-mask-image: linear-gradient(90deg, #000 calc(var(--cleo-sweep) - 25%), transparent var(--cleo-sweep), #000 calc(var(--cleo-sweep) + 25%));
+                    mask-image: linear-gradient(90deg, #000 calc(var(--cleo-sweep) - 25%), transparent var(--cleo-sweep), #000 calc(var(--cleo-sweep) + 25%)); }
+        .cleo-boot .logo .px { height: 100%; image-rendering: pixelated; }
         .cleo-boot .logo .glow { position: absolute; inset: 0; transform: scale(1.05); filter: blur(12px); opacity: 0.85; }
         .cleo-boot .logo .glow i { position: absolute; inset: 0; background: linear-gradient(90deg, #326acc, #8fb4ff);
                                    -webkit-mask: url(/brand/logo.png) center / contain no-repeat;
                                            mask: url(/brand/logo.png) center / contain no-repeat; }
-        .cleo-boot .logo .window { position: absolute; inset: 0; animation: cleo-boot-sweep 1.4s ease-in-out infinite;
+        .cleo-boot .logo .window { position: absolute; inset: 0;
             -webkit-mask-image: linear-gradient(90deg, transparent calc(var(--cleo-sweep) - 25%), #000 var(--cleo-sweep), transparent calc(var(--cleo-sweep) + 25%));
                     mask-image: linear-gradient(90deg, transparent calc(var(--cleo-sweep) - 25%), #000 var(--cleo-sweep), transparent calc(var(--cleo-sweep) + 25%)); }
         @keyframes cleo-boot-sweep { from { --cleo-sweep: -25%; } to { --cleo-sweep: 125%; } }
@@ -42,7 +48,7 @@
             <div class="logo" aria-hidden="true">
                 <div class="glow"><div class="window"><i></i></div></div>
                 <img class="dim" src="/brand/logo.png" width="404" height="365" alt="">
-                <div class="window"><img src="/brand/logo.png" alt=""></div>
+                <div class="window"><img class="px" src="/brand/logo-pixel.png" alt=""></div>
             </div>
             <div><h1>CLEO ENGINE</h1><small>Creator</small></div>
             <p>Loading Cleo Creator…</p>
