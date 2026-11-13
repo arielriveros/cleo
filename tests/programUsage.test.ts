@@ -56,10 +56,11 @@ describe('programsFor', () => {
                                   dofEnabled: false, autoExposureEnabled: false, lensFlareIntensity: 0,
                                   chromaticAberrationStrength: 0, filmGrainIntensity: 0, vignetteStrength: 0.35 }, use);
         const list = programsFor(use);
-        // Static PBR geometry, one shadow filter, the deferred resolve; the campfire's smoke a lit sprite.
+        // Static PBR geometry, one shadow filter, the deferred resolve; the campfire's smoke a lit sprite, its
+        // flames batched unlit sprites.
         for (const name of ['pbrGeometry~flat', 'deferredLighting~pcf',
                             'screen', 'present', 'skyAtmosphere', 'volumetricClouds', 'particleBillboard', 'ssil', 'vignette',
-                            'spriteLit', 'ssr', 'localExposureLum', 'volumetricFogInject', 'volumetricFogApply'])
+                            'spriteLit', 'sprite', 'ssr', 'localExposureLum', 'volumetricFogInject', 'volumetricFogApply'])
             expect(list, name).toContain(name);
         // Particles as stripped variants.
         expect(list.some(n => /^particleSim~s\d+$/.test(n))).toBe(true);

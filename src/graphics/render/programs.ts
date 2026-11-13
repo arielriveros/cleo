@@ -131,6 +131,8 @@ import PrefilterOctProgram from '../shaders/wgsl/prefilterOct.wgsl';
 import BRDFProgram from '../shaders/wgsl/brdf.wgsl';
 // A movie's sample accumulation (render/movieCapture.ts).
 import MovieAccumulateProgram from '../shaders/wgsl/movieAccumulate.wgsl';
+// Unlit sprites, many to a draw (render/sprites2d.ts).
+import SpriteProgram from '../shaders/wgsl/sprite.wgsl';
 
 export {
     BasicProgram, BasicInstancedProgram, BasicSkinnedProgram, BlinnPhongProgram,
@@ -160,7 +162,7 @@ export {
     VolumetricFogInjectProgram, VolumetricFogIntegrateProgram, VolumetricFogApplyProgram,
     GiReduceProgram, GiVisibilityProgram, GiRadianceProgram, GiIntegrateProgram, GiResolveProgram,
     GiAmbientCubeProgram, GiRescaleProgram, GiProbeOverlayProgram, GiStateStampProgram,
-    MovieAccumulateProgram,
+    MovieAccumulateProgram, SpriteProgram,
 };
 
 // Every program the renderer registers, by the name `ShaderManager` knows it as. Built through
@@ -336,6 +338,8 @@ export function programTable(): ReadonlyArray<readonly [string, Omit<ShaderProgr
         ['giStateStamp',                 GiStateStampProgram],
         // A movie frame's samples, averaged before the display resolve (render/movieCapture.ts). APPENDED.
         ['movieAccumulate',              MovieAccumulateProgram],
+        // Unlit sprites batched into instanced draws (render/sprites2d.ts). APPENDED.
+        ['sprite',                       SpriteProgram],
     ];
 }
 
@@ -379,6 +383,8 @@ export const FORWARD_PROGRAMS: Record<string, { resources: readonly ShaderResour
     basicInstanced: BasicInstancedProgram,
     // A lit sprite's private material (Sprite.drawMaterial); drawn by the 2D pass alone.
     spriteLit: SpriteLitProgram,
+    // Every unlit sprite and editor icon, batched (render/sprites2d.ts).
+    sprite: SpriteProgram,
 };
 
 /** WGSL reflection for the geometry programs, by the name `GeometryPass._geometryShaderFor` picks at draw time. */

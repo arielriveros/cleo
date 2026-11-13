@@ -197,12 +197,17 @@ better choice when the same animation is used in several places.
 - **Random start** — each copy starts on a random frame of its own list, so a row of the same sprite
   (torches along a wall) does not flicker in step. It applies when the sprite spawns.
 
-**Appearance** — tint, opacity, blending, lit, exposure weight, follow light, soft fade, transparency, which sides draw, and wireframe. A tileset with
+**Appearance** — tint, opacity, blending, sorting order, lit, exposure weight, follow light, soft fade, transparency, which sides draw, and wireframe. A tileset with
 **overdrive** makes its sprites glow through bloom; the value belongs to the tileset, and the section
 only reports it.
 
 - **Blending** — **Alpha** draws the sprite over what is behind it. **Additive** adds it as light, for
   fire and glows: black parts vanish and overlapping sprites brighten each other.
+- **Sorting order** — a whole number; higher draws later, on top, whatever the distances say. In a 3D
+  scene sprites draw by sorting order first and back to front within one, so a muzzle flash at 1 stays
+  over the smoke around it. In a 2D scene it offsets the sprite's band from the
+  [entity layer](#layers), as a particle emitter's sorting order does: 1 draws over the next layer up.
+  0, the default, leaves the order to depth.
 - **Lit** — the sprite takes the scene's light instead of showing its texture as it is: the key light
   (the sun, or the moon) and the shadows it casts on the sprite, the sky and ambient light, and every
   point and spot light that reaches it, per pixel, so smoke over a fire is lit from below by the fire and
@@ -234,6 +239,20 @@ Both support **billboarding** (**Constraints**: `free`, `spherical`, `cylindrica
   position. A flame, a tree card or a smoke column at the edge of a wide view faces the eye, rather than
   lying parallel to the screen, squashed and leaning. With an orthographic camera it faces the view
   direction.
+
+### Draw order and batching
+
+Sprites draw in the order above: by sorting order, then by depth (back to front in 3D, by the base's Y in
+a 2D scene). They do not cost a draw call each: sprites that share a **tileset**, a **blending**, the same
+**sides** and **wireframe** setting, and whether they are **Lit**, go out together as one draw, and so do
+the editor's icons. Everything else (tint, opacity, the tile or animation frame, exposure weight, follow
+light, soft fade, a lit sprite's light) is the sprite's own and never splits a draw.
+
+The order is kept exactly. A sprite joins an earlier draw only where that cannot change a pixel: two
+additive sprites can trade places (adding light is order-free), and so can two that do not overlap on
+screen. Packing the sprites a scene uses into one tileset is what lets thousands of them draw in a handful
+of calls; mixing alpha and additive sprites that overlap splits more of them. The Performance panel's
+**Scene** section shows the sprites drawn and the draws they went out in.
 
 ## Picking in the viewport
 

@@ -256,6 +256,9 @@ anim.loop = true
 anim.reset()
 ```
 
+`sprite.sortingOrder = 1` draws a sprite over the others whatever their distance (a whole number, 0 by
+default); in a 2D scene it moves the sprite up a band from the tilemap's entity layer.
+
 `frameSource` chooses whether the frame list comes from the node (`'node'`) or from the tile's own
 animation metadata in the tileset (`'tile'`). `randomStart` starts each copy on a random frame, so many
 copies of one sprite do not animate in step, and `sprite.blend = 'additive'` makes a sprite add light

@@ -130,6 +130,31 @@ export class ObjectTable {
         return first * OBJECT_RECORD_TEXELS;
     }
 
+    /**
+     * Claim `count` CONTIGUOUS records and return the first: one instanced draw of `count` reads exactly
+     * these, `instance_index` = first + i. Never shared and never deduplicated, unlike {@link ensure}, and no
+     * later `ensure` shares into them. The caller fills them in {@link staging} at
+     * `record * OBJECT_RECORD_FLOATS` (objectData.ts `packSpriteRecord`) BEFORE anything else appends, then
+     * calls {@link flush}. The table grows to fit the whole run first, so a run never straddles two textures.
+     */
+    public appendRun(count: number): number {
+        this._sync();
+        if (!this._texture) this._grow(INITIAL_ROWS);
+        const recordsPerRow = OBJECT_TABLE_WIDTH / OBJECT_RECORD_TEXELS;
+        if (this._count + count > this._rows * recordsPerRow) {
+            let rows = this._rows * 2;
+            while (this._count + count > rows * recordsPerRow) rows *= 2;
+            this._grow(rows);
+        }
+        const first = this._count;
+        this._count += Math.max(0, count);
+        this._shareFloor = this._count;
+        return first;
+    }
+
+    /** The CPU copy of the records, for filling a run from {@link appendRun}. Replaced when the table grows. */
+    public get staging(): Float32Array { return this._staging; }
+
     /** {@link ensure}, then upload what is pending: what a draw path that prepared nothing calls. */
     public rowFor(owner: object, model: ArrayLike<number>, dissolve: number, holeOptIn: boolean, palette = 0,
                   uvScaleX = 1, uvScaleY = 1, uvOffsetX = 0, uvOffsetY = 0): number {

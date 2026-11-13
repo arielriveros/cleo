@@ -111,7 +111,10 @@ describe('lit sprite light radius', () => {
     it('floors only the six-way and flat modes in the shader; a surface keeps the true distance', async () => {
         const { readFileSync } = await import('node:fs');
         const src = readFileSync('src/graphics/shaders/wgsl/spriteLit.wgsl', 'utf8');
-        expect(src).toMatch(/lightRadius: f32,\s*\};/);
-        expect(src).toContain('select(cl.light.sourceRadius, max(cl.light.sourceRadius, u_material.lightRadius), mode != 2)');
+        // Per instance since sprites batch: the vertex stage takes spriteLightRadius's formula from the
+        // instance's own matrix, and the fragment floors the local lights by it.
+        expect(src).toContain('0.5 * min(length(model[0].xyz), length(model[1].xyz))');
+        expect(src).toContain('spriteLightRadius = in.params.x;');
+        expect(src).toContain('select(cl.light.sourceRadius, max(cl.light.sourceRadius, spriteLightRadius), mode != 2)');
     });
 });

@@ -3,6 +3,7 @@ import { mat4, quat, vec3 } from 'gl-matrix';
 import {
     clamp, damp, dampTime, dampVec3Time, dampAngleDeg, deltaAngleDeg,
     eulerFromQuatDeg, decomposeTRS, noise1, fbm1, wrapDegrees, wrapSpan, deltaWrapped, dampWrapped, closestOnTriangle,
+    quadClipRect, boxClipRect, rectsOverlap, CLIP_RECT_BOUNDED, CLIP_RECT_UNBOUNDED, CLIP_RECT_CULLED,
 } from '../src/core/math';
 
 describe('damp', () => {
@@ -309,5 +310,42 @@ describe('closestOnTriangle', () => {
             expect(d).toBeLessThanOrEqual(brute + 1e-9);
             expect(brute - d).toBeLessThan(0.08);
         }
+    });
+});
+
+describe('clip rectangles', () => {
+    const out = new Float64Array(8);
+
+    it('projects a placed quad through an orthographic view, padded', () => {
+        const vp = mat4.ortho(mat4.create(), -10, 10, -10, 10, -100, 100);
+        const m = mat4.fromRotationTranslationScale(mat4.create(), [0, 0, 0, 1], [2, 4, 0], [2, 4, 1]);
+        expect(quadClipRect(m, vp, 0.01, 0.02, out, 4)).toBe(CLIP_RECT_BOUNDED);
+        expect(Array.from(out.subarray(4, 8)).map(v => +v.toFixed(6))).toEqual([0.09, 0.18, 0.31, 0.62]);
+    });
+
+    it('is unbounded with a corner behind the eye and culled when wholly behind or off screen', () => {
+        const proj = mat4.perspective(mat4.create(), Math.PI / 3, 1, 0.1, 100);
+        const view = mat4.lookAt(mat4.create(), [0, 0, 0], [0, 0, -1], [0, 1, 0]);
+        const vp = mat4.multiply(mat4.create(), proj, view);
+        // A quad in the eye's plane, rotated to lie along the view axis: one edge in front, one behind.
+        const across = mat4.fromRotationTranslationScale(mat4.create(), quat.setAxisAngle(quat.create(), [0, 1, 0], Math.PI / 2), [0, 0, 0], [4, 1, 1]);
+        expect(quadClipRect(across, vp, 0, 0, out)).toBe(CLIP_RECT_UNBOUNDED);
+        expect(quadClipRect(mat4.fromTranslation(mat4.create(), [0, 0, 5]), vp, 0, 0, out)).toBe(CLIP_RECT_CULLED);
+        expect(quadClipRect(mat4.fromTranslation(mat4.create(), [50, 0, -5]), vp, 0, 0, out)).toBe(CLIP_RECT_CULLED);
+        expect(quadClipRect(mat4.fromTranslation(mat4.create(), [0, 0, -5]), vp, 0, 0, out)).toBe(CLIP_RECT_BOUNDED);
+    });
+
+    it('bounds a box by its eight corners', () => {
+        const vp = mat4.ortho(mat4.create(), -10, 10, -10, 10, -100, 100);
+        expect(boxClipRect(-5, -5, -1, 5, 0, 1, vp, 0, 0, out)).toBe(CLIP_RECT_BOUNDED);
+        expect(Array.from(out.subarray(0, 4)).map(v => +v.toFixed(6))).toEqual([-0.5, -0.5, 0.5, 0]);
+        expect(boxClipRect(20, 20, 0, 30, 30, 0, vp, 0, 0, out)).toBe(CLIP_RECT_CULLED);
+    });
+
+    it('overlaps when rectangles share any point', () => {
+        const r = [0, 0, 1, 1, 1, 0, 2, 1, 1.5, 2, 3, 3];
+        expect(rectsOverlap(r, 0, r, 4)).toBe(true);    // touching edges
+        expect(rectsOverlap(r, 0, r, 8)).toBe(false);
+        expect(rectsOverlap(r, 4, r, 8)).toBe(false);
     });
 });

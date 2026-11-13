@@ -34,6 +34,15 @@ export interface DepthBand {
     sortY: number;
     indexOffset: number;
     indexCount: number;
+    /**
+     * The map-local rectangle the slice's tiles cover (a multi-cell tile's whole span included). The 2D pass
+     * moves it like the chunk's model matrix and projects it, so a sprite that cannot touch these tiles may
+     * be drawn on the other side of them in the same batch.
+     */
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
 }
 
 /** One animated cell's place in the vertex buffer, so its UVs can be rewritten without a full rebuild. */
@@ -102,7 +111,8 @@ export class TileMesh {
             const row = chunk.cy * CHUNK_SIZE + lr;
 
             if (!band || (ySorted && depths[oi] !== band.sortY)) {
-                band = { sortY: depths[oi], indexOffset: idx, indexCount: 0 };
+                band = { sortY: depths[oi], indexOffset: idx, indexCount: 0,
+                         minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
                 this._bands.push(band);
             }
 
@@ -157,6 +167,10 @@ export class TileMesh {
             scratchIndices[idx++] = vert; scratchIndices[idx++] = vert + 1; scratchIndices[idx++] = vert + 2;
             scratchIndices[idx++] = vert; scratchIndices[idx++] = vert + 2; scratchIndices[idx++] = vert + 3;
             band.indexCount += 6;
+            if (left < band.minX) band.minX = left;
+            if (right > band.maxX) band.maxX = right;
+            if (bottom < band.minY) band.minY = bottom;
+            if (top > band.maxY) band.maxY = top;
             vert += 4;
         }
 

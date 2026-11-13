@@ -1428,3 +1428,75 @@ export function boxesOverlap(ca: Vec3Tuple, ha: Vec3Tuple, axesA: Vec3Tuple[], c
     }
     return true;
 }
+
+// =================================================================================================
+// Screen-space rectangles (draw-order batching)
+// =================================================================================================
+
+/** {@link quadClipRect} / {@link boxClipRect}: the rectangle was written. */
+export const CLIP_RECT_BOUNDED = 0;
+/** A corner is on or behind the eye plane: the projection is not a rectangle, so take it to cover the screen. */
+export const CLIP_RECT_UNBOUNDED = 1;
+/** Nothing of it can reach the screen: wholly behind the eye, or wholly past one side of the view. */
+export const CLIP_RECT_CULLED = 2;
+
+/**
+ * The clip-space (NDC) rectangle a placed unit quad covers: the corners `m x (+-0.5, +-0.5, 0, 1)` (the quad
+ * `Geometry.Quad()` builds) through `viewProj`, padded by `padX` / `padY` NDC units, written into
+ * `out[offset..offset+3]` as [x0, y0, x1, y1]. Returns one of the `CLIP_RECT_*` codes; `out` is written only
+ * for {@link CLIP_RECT_BOUNDED}.
+ *
+ * Conservative by construction: a padded box round the four projected corners covers the quad they span, so
+ * two rectangles that do not overlap are two draws that cannot touch the same pixel.
+ */
+export function quadClipRect(m: ArrayLike<number>, viewProj: ArrayLike<number>, padX: number, padY: number,
+                             out: { [i: number]: number }, offset = 0): number {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, behind = 0;
+    for (let k = 0; k < 4; k++) {
+        const qx = (k & 1) ? 0.5 : -0.5, qy = (k & 2) ? 0.5 : -0.5;
+        const wx = m[0] * qx + m[4] * qy + m[12], wy = m[1] * qx + m[5] * qy + m[13];
+        const wz = m[2] * qx + m[6] * qy + m[14], ww = m[3] * qx + m[7] * qy + m[15];
+        const cw = viewProj[3] * wx + viewProj[7] * wy + viewProj[11] * wz + viewProj[15] * ww;
+        if (cw <= 1e-6) { behind++; continue; }
+        const nx = (viewProj[0] * wx + viewProj[4] * wy + viewProj[8] * wz + viewProj[12] * ww) / cw;
+        const ny = (viewProj[1] * wx + viewProj[5] * wy + viewProj[9] * wz + viewProj[13] * ww) / cw;
+        if (nx < x0) x0 = nx;
+        if (nx > x1) x1 = nx;
+        if (ny < y0) y0 = ny;
+        if (ny > y1) y1 = ny;
+    }
+    return clipRectResult(behind, 4, x0 - padX, y0 - padY, x1 + padX, y1 + padY, out, offset);
+}
+
+/** {@link quadClipRect} for a world-space axis-aligned box, by its eight corners: a tilemap chunk or depth band. */
+export function boxClipRect(minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number,
+                            viewProj: ArrayLike<number>, padX: number, padY: number,
+                            out: { [i: number]: number }, offset = 0): number {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, behind = 0;
+    for (let k = 0; k < 8; k++) {
+        const wx = (k & 1) ? maxX : minX, wy = (k & 2) ? maxY : minY, wz = (k & 4) ? maxZ : minZ;
+        const cw = viewProj[3] * wx + viewProj[7] * wy + viewProj[11] * wz + viewProj[15];
+        if (cw <= 1e-6) { behind++; continue; }
+        const nx = (viewProj[0] * wx + viewProj[4] * wy + viewProj[8] * wz + viewProj[12]) / cw;
+        const ny = (viewProj[1] * wx + viewProj[5] * wy + viewProj[9] * wz + viewProj[13]) / cw;
+        if (nx < x0) x0 = nx;
+        if (nx > x1) x1 = nx;
+        if (ny < y0) y0 = ny;
+        if (ny > y1) y1 = ny;
+    }
+    return clipRectResult(behind, 8, x0 - padX, y0 - padY, x1 + padX, y1 + padY, out, offset);
+}
+
+function clipRectResult(behind: number, corners: number, x0: number, y0: number, x1: number, y1: number,
+                        out: { [i: number]: number }, offset: number): number {
+    if (behind === corners) return CLIP_RECT_CULLED;
+    if (behind > 0) return CLIP_RECT_UNBOUNDED;
+    if (x1 < -1 || x0 > 1 || y1 < -1 || y0 > 1) return CLIP_RECT_CULLED;
+    out[offset] = x0; out[offset + 1] = y0; out[offset + 2] = x1; out[offset + 3] = y1;
+    return CLIP_RECT_BOUNDED;
+}
+
+/** Whether the rectangles [x0, y0, x1, y1] at `a[ai]` and `b[bi]` share any point (touching counts). */
+export function rectsOverlap(a: ArrayLike<number>, ai: number, b: ArrayLike<number>, bi: number): boolean {
+    return !(a[ai + 2] < b[bi] || b[bi + 2] < a[ai] || a[ai + 3] < b[bi + 1] || b[bi + 3] < a[ai + 1]);
+}

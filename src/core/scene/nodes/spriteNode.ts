@@ -106,6 +106,9 @@ export class SpriteNode extends Node {
     public set tint(tint: [number, number, number]) { this._sprite.tint = tint; }
     public get opacity(): number { return this._sprite.opacity; }
     public set opacity(opacity: number) { this._sprite.opacity = opacity; }
+    /** Draw order among sprites, higher on top: {@link Sprite.sortingOrder}. */
+    public get sortingOrder(): number { return this._sprite.sortingOrder; }
+    public set sortingOrder(value: number) { this._sprite.sortingOrder = value; }
 
     /** The tile index on screen this instant. AnimatedSpriteNode overrides it to follow the playing frame. */
     public get currentTile(): number { return this.tileIndex; }
@@ -121,6 +124,12 @@ export class SpriteNode extends Node {
      * Overridden by AnimatedSpriteNode to follow the playing frame.
      */
     public uvRect(): [number, number, number, number] { return this._sprite.uvRect(); }
+
+    /**
+     * {@link uvRect} into `out`, without allocating: the tile on screen this instant ({@link currentTile}, which
+     * AnimatedSpriteNode overrides), as the batched 2D pass reads it every frame.
+     */
+    public uvRectInto(out: Float32Array): Float32Array { return this._sprite.uvRectInto(this.currentTile, out); }
 
     /** Selection bounds: a small box around the sprite's origin. */
     public getBoundingBox(): { min: vec3, max: vec3 } {
