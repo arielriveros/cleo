@@ -94,6 +94,14 @@ Defaults: `fieldOfView: 120` (the **full** cone, in degrees; 360 is omniscient w
 Candidates are **every other `CharacterNode` in the scene**. Range and cone are rejected first, so a
 line-of-sight raycast is only spent on candidates actually in front.
 
+**In 2D** (a controller possessing a `CharacterBody2DNode`), the candidates are every other 2D body on a
+layer the controller looks for — `perceptionLayers`, a bit mask, all layers by default — seen at the
+middle of its box. The eyes are `eyeHeight` above the pawn's feet and the cone opens the way the body
+faces (a 2D body flips rather than turns), reaching up and down as far as its field of view does: a guard
+with a 120 degree cone does not see straight up. Line of sight is the 2D world's ray, which solid tiles and
+2D colliders block and one-way platforms do not. A guard on layer 2 with `perceptionLayers` 1 sees the
+player (layer 1) and never its fellow enemies.
+
 > **Gate on `noticed`, not `visible`.** `visible` is raw line of sight; `noticed` is what survives
 > the reaction delay. An agent gating on `visible` sees you instantly, the moment you clear a
 > corner.
@@ -173,6 +181,15 @@ your world queries come from.
 > measured turn-rate table in [AI goals](../reference/animation-builtins.md#ai-goals--ai_goals).
 > Chasing has no such feedback loop, so a shambling agent wants two rates — slow while wandering,
 > fast while pursuing.
+
+### Steering a 2D body
+
+A 2D pawn steers in the picture plane. A **walker** moves along X only — a target overhead is walked
+under, not flown at — and a **flier** moves in XY. `wander` makes a walker **pace**: on along its way,
+turning at a wall or a drop. With `avoidDistance` above 0 a walker handles its own obstacles: it jumps a
+wall lower than its jump height, stops at a taller one, and stops at a drop ahead unless its target is
+below it (then walking off is the way there); a flier fans its whiskers across the picture plane and
+deflects off what they find.
 
 ## Flocking
 

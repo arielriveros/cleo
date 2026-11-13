@@ -30,6 +30,12 @@ import {
 } from "../../../ai/navPath";
 import type { NavPath, RepathPolicy, RepathState } from "../../../ai/navPath";
 import { Perception, perceptionTuning } from "../../../ai/perception";
+import {
+    AXIS_Y, AXIS_Z, angleToTarget2D, facingYaw2D, fanProbes2D, paceDirection, probeLedge2D, probeWall2D, wallHeight2D,
+} from "../../control/control2D";
+import type { Ground2DFn, Ray2DFn } from "../../control/control2D";
+import { intentFromDesired2D } from "../../control/steering";
+import { raiseRequest } from "../../control/intent";
 import { yawFromDirection } from "../../../ai/interop";
 import type { LineOfSightTest, PerceptionCandidate, PerceptionTuning } from "../../../ai/perception";
 import { EMPTY_FUZZY_MODEL, FuzzyBrain, isDefaultFuzzyModel, parseFuzzyModel } from "../../../ai/fuzzy";
@@ -210,6 +216,14 @@ export class ControllerNode extends Node {
     public autoAcquire: boolean = true;
 
     /**
+     * The 2D layers (bits) of the bodies a 2D pawn sees: a guard on enemy layer 2 that looks for layer 1
+     * sees the player and never its fellow bats. Every layer by default. A 3D pawn's candidates are every
+     * other Character, as before.
+     */
+    public perceptionLayers: number = ControllerNode.ALL_LAYERS;
+    public static readonly ALL_LAYERS = 0xffff;
+
+    /**
      * How close counts as having reached an intermediate waypoint. Too small and an agent circles a
      * corner it has already rounded; too large and it cuts across geometry the route went around.
      */
@@ -313,6 +327,11 @@ export class ControllerNode extends Node {
     /** Bound once: a fresh closure per frame per agent is the kind of garbage that shows up in a HUD. */
     private readonly _lineOfSight: LineOfSightTest = (from, to, hit) => this._testLineOfSight(from, to, hit);
     private readonly _desired: vec3 = vec3.create();
+    /** The 2D candidates' positions, reused per frame (the middle of each body's box). */
+    private readonly _candidatePositions: vec3[] = [];
+    /** A side-view walker's pacing direction for `wander`, and a jump its obstacle handling asked for. */
+    private _paceDir: number = 1;
+    private _wantJump: boolean = false;
     private readonly _selfPos: vec3 = vec3.create();
     private readonly _targetPos: vec3 = vec3.create();
     private readonly _targetVel: vec3 = vec3.create();
@@ -522,8 +541,7 @@ export class ControllerNode extends Node {
                 applyPlayerReading(this._intent, this._reading, basisYaw, pawn.jumpBufferSeconds);
                 break;
             case 'ai':
-                if (pawn instanceof CharacterNode) this._steer(pawn, delta);
-                else clearIntent(this._intent);
+                this._steer(pawn, delta);
                 break;
             case 'none':
                 clearIntent(this._intent);
@@ -570,7 +588,8 @@ export class ControllerNode extends Node {
      */
     public perceive(delta: number): void {
         const pawn = this._resolvePossessed();
-        if (!pawn || this.controlSource !== 'ai' || !(pawn instanceof CharacterNode)) return;
+        if (!pawn || this.controlSource !== 'ai') return;
+        if (pawn instanceof CharacterBody2DNode) { this._perceive2D(pawn, delta); return; }
 
         // Every other pawn in the scene. A player and every NPC is a Character, so this is both the
         // set an agent cares about and a bounded one — as opposed to "every node", which is neither.
@@ -602,6 +621,56 @@ export class ControllerNode extends Node {
     }
 
     /**
+     * The 2D eyes: every other 2D body on a layer this controller looks for (`perceptionLayers`), seen at
+     * the middle of its box, from the pawn's feet plus `eyeHeight`, across the picture plane the way the body
+     * faces. Line of sight is the 2D world's ray, which solid tiles and colliders block and one-way
+     * platforms do not.
+     */
+    private _perceive2D(pawn: CharacterBody2DNode, delta: number): void {
+        this._candidates.length = 0;
+        this._candidateIds.clear();
+        const bodies = this._scene?.bodies2D;
+        let n = 0;
+        if (bodies) {
+            for (const other of bodies) {
+                if (other === pawn || other.markForRemoval || !other.visible || !(other.layer & this.perceptionLayers)) continue;
+                const p = other.worldPosition;
+                const at = this._candidatePositions[n] ??= vec3.create();
+                vec3.set(at, p[0], p[1] + other.size[1] * 0.5, 0);
+                n++;
+                this._candidates.push({ id: other.id, position: at });
+                this._candidateIds.add(other.id);
+            }
+        }
+        const feet = pawn.worldPosition;
+        vec3.set(this._eye, feet[0], feet[1] + this.eyeHeight, 0);
+        this._perception.step(this._eye, facingYaw2D(pawn.facing), this._candidates, this.perception, delta,
+            this._scene?.physics2D ? this._lineOfSight2D : null, 'xy');
+        if (this.autoAcquire) this._acquire(pawn);
+    }
+
+    /** The 2D line of sight: blocked when the 2D world's ray stops short of the candidate. */
+    private readonly _lineOfSight2D: LineOfSightTest = (from, to, hit) => {
+        const world = this._scene?.physics2D;
+        if (!world) return false;
+        const dx = to[0] - from[0], dy = to[1] - from[1];
+        const reach = Math.hypot(dx, dy);
+        if (!(reach > 1e-6)) return false;
+        const found = world.raycast(from[0], from[1], dx, dy, reach);
+        if (!found || found.distance >= reach - 1e-3) return false;
+        vec3.set(hit, found.x, found.y, 0);
+        return true;
+    };
+
+    /** The 2D world as the control2D probes want it. */
+    private readonly _ray2D: Ray2DFn = (x, y, dx, dy, max) => {
+        const hit = this._scene?.physics2D?.raycast(x, y, dx, dy, max);
+        return hit ? { distance: hit.distance, normal: hit.normal } : null;
+    };
+    private readonly _ground2D: Ground2DFn = (x, halfWidth, fromY, depth) =>
+        this._scene?.physics2D?.groundBelow(x, halfWidth, fromY, depth) ?? -Infinity;
+
+    /**
      * Adopt the nearest NOTICED character as this controller's target.
      *
      * Nearest rather than first, because "first" is traversal order and would make a guard prefer
@@ -609,7 +678,7 @@ export class ControllerNode extends Node {
      * in sight AND nothing is still remembered, so a lost target survives long enough to be chased —
      * that is what memory span is for.
      */
-    private _acquire(pawn: CharacterNode): void {
+    private _acquire(pawn: Pawn): void {
         let bestId: string | null = null;
         let bestDistance = Infinity;
         for (const sighting of this._perception.sightings) {
@@ -697,7 +766,7 @@ export class ControllerNode extends Node {
      * exactly the record a player's actions produce — so the character cannot tell the two apart, and an
      * NPC inherits the locomotion, slope handling and animation the player character already has.
      */
-    private _steer(pawn: CharacterNode, delta: number): void {
+    private _steer(pawn: Pawn, delta: number): void {
         clearIntent(this._intent);
 
         // Before the machine, which may read a fuzzy output as one of its parameters -- and before
@@ -735,8 +804,12 @@ export class ControllerNode extends Node {
         }
 
         const up = this._resolveUp();
+        const body2D = pawn instanceof CharacterBody2DNode ? pawn : null;
+        const flier = body2D?.movement === 'fly';
         const self = pawn.worldPosition;
-        vec3.set(this._selfPos, self[0], self[1], self[2]);
+        // A 2D pawn lives in the picture plane: z flattened, and a flier steers by the middle of its box.
+        if (body2D) vec3.set(this._selfPos, self[0], self[1] + (flier ? body2D.size[1] * 0.5 : 0), 0);
+        else vec3.set(this._selfPos, self[0], self[1], self[2]);
         const tuning = this.steering;
 
         const target = this._resolveTarget(targetKey);
@@ -753,12 +826,19 @@ export class ControllerNode extends Node {
         if (target) {
             const p = target.worldPosition;
             vec3.set(this._targetPos, p[0], p[1], p[2]);
-            const v = (target as CharacterNode).velocity;
-            vec3.set(this._targetVel, v?.[0] ?? 0, v?.[1] ?? 0, v?.[2] ?? 0);
+            if (target instanceof CharacterBody2DNode) {
+                // A 2D target's own velocity, and its middle for a flier to fly at (a walker goes to its feet).
+                if (flier) this._targetPos[1] += target.size[1] * 0.5;
+                vec3.set(this._targetVel, target.velocity2D[0], target.velocity2D[1], 0);
+            } else {
+                const v = (target as CharacterNode).velocity;
+                vec3.set(this._targetVel, v?.[0] ?? 0, v?.[1] ?? 0, v?.[2] ?? 0);
+            }
         } else {
             vec3.set(this._targetPos, this.goalPoint[0], this.goalPoint[1], this.goalPoint[2]);
             vec3.set(this._targetVel, 0, 0, 0);
         }
+        if (body2D) { this._targetPos[2] = 0; this._targetVel[2] = 0; }
 
         // A goal that names a thing and has none holds still rather than walking to the world origin,
         // which is what falling back to an unset `goalPoint` would otherwise do.
@@ -778,7 +858,15 @@ export class ControllerNode extends Node {
                     followTarget(this._desired, this._selfPos, this._targetPos, this._targetVel, tuning, up);
                     break;
                 case 'wander': {
-                    const forward = pawn.worldForward;
+                    if (body2D && !flier) {
+                        // A side-view walker wanders by pacing: on along its way, turned at a wall or a drop.
+                        this._paceDir = paceDirection(this._paceDir,
+                            probeWall2D(this._ray2D, self[0], self[1], this._paceDir, body2D.size[0] / 2, body2D.size[1], 0.4),
+                            probeLedge2D(this._ground2D, self[0], self[1], this._paceDir, body2D.size[0] / 2, 0.2, body2D.stepHeight + 0.3));
+                        vec3.set(this._desired, this._paceDir * tuning.maxSpeed, 0, 0);
+                        break;
+                    }
+                    const forward = body2D ? [body2D.facing, 0, 0] : pawn.worldForward;
                     wander(this._desired, vec3.set(this._targetVel, forward[0], forward[1], forward[2]),
                         this._steeringState, tuning, delta, up);
                     break;
@@ -787,9 +875,17 @@ export class ControllerNode extends Node {
             }
         }
 
+        if (body2D) {
+            this._avoid2D(body2D, tuning, up);
+            intentFromDesired2D(this._intent, this._desired, tuning.maxSpeed, up);
+            if (this._wantJump) raiseRequest(this._intent, 'jump', body2D.jumpBufferSeconds);
+            this._intent.speedScale *= stateScale;
+            return;
+        }
+
         // Deflect around whatever is ahead. Gated on `avoidDistance > 0`, so the rays are not fired at all
         // unless avoidance was asked for — see `_probeObstacles`.
-        if (tuning.avoidDistance > 0 && vec3.length(this._desired) > 1e-6) {
+        if (tuning.avoidDistance > 0 && vec3.length(this._desired) > 1e-6 && pawn instanceof CharacterNode) {
             this._probeObstacles(pawn);
             avoidObstacles(this._desired, this._desired, this._probes, tuning, up);
         }
@@ -801,6 +897,39 @@ export class ControllerNode extends Node {
     }
 
     /**
+     * A 2D pawn's obstacle handling, gated on `avoidDistance > 0` like the 3D whiskers. A flier fans rays
+     * ahead in the picture plane and deflects off what they find. A walker cannot steer round a wall, so
+     * it JUMPS one lower than its jump height and stops at a taller one, and it stops at a drop ahead --
+     * unless the goal is below it, when walking off is the way there.
+     */
+    private _avoid2D(body: CharacterBody2DNode, tuning: SteeringTuning, up: vec3): void {
+        this._wantJump = false;
+        if (!(tuning.avoidDistance > 0) || vec3.length(this._desired) <= 1e-6) return;
+        const p = body.worldPosition;
+        const halfWidth = body.size[0] / 2;
+        if (body.movement === 'fly') {
+            fanProbes2D(this._ray2D, p[0], p[1] + body.size[1] * 0.5, this._desired[0], this._desired[1],
+                this.whiskerCount, this.whiskerSpread, tuning.avoidDistance, this._probes);
+            avoidObstacles(this._desired, this._desired, this._probes, tuning, up);
+            return;
+        }
+        const dx = this._desired[0];
+        if (Math.abs(dx) <= 1e-6) return;
+        const dir = dx < 0 ? -1 : 1;
+        const reach = Math.max(0.3, tuning.avoidDistance);
+        if (probeWall2D(this._ray2D, p[0], p[1], dir, halfWidth, body.size[1], reach)) {
+            const limit = Math.max(0, body.jumpHeight - 0.15);
+            if (wallHeight2D(this._ray2D, p[0], p[1], dir, halfWidth, reach, limit) <= limit) {
+                if (body.isGrounded) this._wantJump = true;
+            } else this._desired[0] = 0;
+            return;
+        }
+        const goalBelow = this._targetPos[1] < p[1] - 0.5;
+        if (body.isGrounded && !goalBelow
+            && probeLedge2D(this._ground2D, p[0], p[1], dir, halfWidth, 0.15, body.stepHeight + 0.3)) this._desired[0] = 0;
+    }
+
+    /**
      * Walk a route to the current destination, recomputing it only when the policy says to.
      *
      * Falls back to a straight-line `seek` whenever navigation cannot answer — no navmesh in the
@@ -808,7 +937,7 @@ export class ControllerNode extends Node {
      * switching a goal from `seek` to `path` safe on a scene nobody has baked yet: it behaves exactly
      * as it did before, rather than standing still for a reason nothing explains.
      */
-    private _steerPath(pawn: CharacterNode, tuning: SteeringTuning, up: vec3, delta: number): void {
+    private _steerPath(pawn: Pawn, tuning: SteeringTuning, up: vec3, delta: number): void {
         const source = this._resolveNavMesh();
         if (!source?.mesh) {
             clearNavPath(this._path);
@@ -865,7 +994,7 @@ export class ControllerNode extends Node {
      * agents that is noise, and the alternative — one fused loop — makes three simple pure functions
      * into one that cannot be tested apart.
      */
-    private _steerFlock(pawn: CharacterNode, tuning: SteeringTuning, up: vec3): void {
+    private _steerFlock(pawn: Pawn, tuning: SteeringTuning, up: vec3): void {
         this._gatherNeighbours(pawn);
         if (this._neighbourCount === 0) {
             // Alone. Holding still is the honest answer: a flock of one has no group to move with, and
@@ -892,9 +1021,10 @@ export class ControllerNode extends Node {
      * Velocity is the MEASURED one, not the commanded one: an agent jammed against a wall is being
      * told to run and is not moving, and letting that vote would turn the whole flock into the wall.
      */
-    private _gatherNeighbours(pawn: CharacterNode): void {
+    private _gatherNeighbours(pawn: Pawn): void {
         this._neighbourCount = 0;
         const radius = Math.max(0, this.flockRadius);
+        if (pawn instanceof CharacterBody2DNode) { this._gatherNeighbours2D(pawn, radius); return; }
         const characters = this._scene?.characters;
         if (radius <= 0 || !characters) return;
 
@@ -923,6 +1053,30 @@ export class ControllerNode extends Node {
         this._neighbourPositions.length = this._neighbourCount;
     }
 
+    /** The 2D flock: the other 2D bodies within the radius in the picture plane, with their own velocity. */
+    private _gatherNeighbours2D(pawn: CharacterBody2DNode, radius: number): void {
+        const bodies = this._scene?.bodies2D;
+        if (radius > 0 && bodies) {
+            const here = pawn.worldPosition;
+            for (const other of bodies) {
+                if (other === pawn || other.markForRemoval || !other.visible) continue;
+                const there = other.worldPosition;
+                if (Math.hypot(there[0] - here[0], there[1] - here[1]) > radius) continue;
+                const index = this._neighbourCount++;
+                let entry = this._neighbours[index];
+                if (!entry) {
+                    entry = { position: vec3.create(), velocity: vec3.create() };
+                    this._neighbours[index] = entry;
+                    this._neighbourPositions[index] = entry.position;
+                }
+                vec3.set(entry.position, there[0], there[1], 0);
+                vec3.set(entry.velocity, other.velocity2D[0], other.velocity2D[1], 0);
+            }
+        }
+        this._neighbours.length = this._neighbourCount;
+        this._neighbourPositions.length = this._neighbourCount;
+    }
+
     /**
      * How many agents are inside the flock radius. Backs the `neighborCount` sense.
      *
@@ -932,7 +1086,7 @@ export class ControllerNode extends Node {
      */
     public get neighborCount(): number {
         const pawn = this._resolvePossessed();
-        if (pawn instanceof CharacterNode) this._gatherNeighbours(pawn);
+        if (pawn) this._gatherNeighbours(pawn);
         return this._neighbourCount;
     }
 
@@ -946,7 +1100,7 @@ export class ControllerNode extends Node {
      * With nothing remembered it holds still rather than walking to the world origin -- the same rule
      * every other goal that names a thing follows.
      */
-    private _steerInvestigate(pawn: CharacterNode, tuning: SteeringTuning, up: vec3, delta: number): void {
+    private _steerInvestigate(pawn: Pawn, tuning: SteeringTuning, up: vec3, delta: number): void {
         const remembered = this.lastKnownPosition;
         if (!remembered) { vec3.set(this._desired, 0, 0, 0); return; }
         vec3.copy(this._targetPos, remembered);
@@ -961,7 +1115,7 @@ export class ControllerNode extends Node {
      * between them would be asking the navmesh to improve on an author's decision. Reaching the last
      * one wraps to the first, which is what makes a patrol a patrol.
      */
-    private _steerPatrol(pawn: CharacterNode, tuning: SteeringTuning, up: vec3): void {
+    private _steerPatrol(pawn: Pawn, tuning: SteeringTuning, up: vec3): void {
         const source = this._resolveNavMesh();
         const points = this.routeName && source ? source.routePoints(this.routeName) : [];
         if (points.length === 0) {
@@ -1009,7 +1163,7 @@ export class ControllerNode extends Node {
      * The context is built once and reused: it closes over the pawn, and a fresh object per frame per
      * agent is the kind of garbage that shows up in a frame-time HUD rather than in a profile.
      */
-    private _stepGoals(pawn: CharacterNode, delta: number): {
+    private _stepGoals(pawn: Pawn, delta: number): {
         goal: AiGoal; targetKey?: string; speedScale: number;
     } | null {
         if (this.goals !== this._goalSource) {
@@ -1021,7 +1175,7 @@ export class ControllerNode extends Node {
 
         if (!this._goalContext) {
             this._goalContext = {
-                read: (source) => this._readSource(source, this._possessed instanceof CharacterNode ? this._possessed : pawn),
+                read: (source) => this._readSource(source, this._possessed ?? pawn),
                 met: (condition) => !!condition
                     && conditionNodeMet(this._behaviorRuntime.ctx, condition),
                 drive: (goal, targetKey, speedScale) => {
@@ -1050,7 +1204,7 @@ export class ControllerNode extends Node {
      * Parameters are refreshed first, modelled on `Animator._refreshVariableParams`: a machine reading a
      * stale value would transition on last frame's world.
      */
-    private _stepBehavior(pawn: CharacterNode, delta: number): BehaviorState | null {
+    private _stepBehavior(pawn: Pawn, delta: number): BehaviorState | null {
         if (this.behavior.states.length === 0) return null;
         this._refreshBehaviorParams(pawn);
         const stepped = stepBehavior(this.behavior, this._behaviorRuntime, delta);
@@ -1068,7 +1222,7 @@ export class ControllerNode extends Node {
      * then a motion builtin on the pawn, then a numeric blackboard entry. A variable named after
      * nothing is simply never fed, and its rules see the bottom of its range.
      */
-    private _refreshFuzzy(pawn: CharacterNode): void {
+    private _refreshFuzzy(pawn: Pawn): void {
         if (this.fuzzy !== this._fuzzySource) {
             this._fuzzySource = this.fuzzy;
             this._fuzzyBrain = isDefaultFuzzyModel(this.fuzzy) ? null : FuzzyBrain.from(this.fuzzy);
@@ -1114,7 +1268,7 @@ export class ControllerNode extends Node {
      * rather than being handed a 0 it cannot distinguish from a real one.
      */
     private _readSourceOrUndefined(
-        source: BehaviorParameterSource, pawn: CharacterNode,
+        source: BehaviorParameterSource, pawn: Pawn,
     ): number | boolean | undefined {
         switch (source.kind) {
             case 'const':
@@ -1147,12 +1301,12 @@ export class ControllerNode extends Node {
     }
 
     /** The same read, with 0 for "nothing to say" — what a desirability curve wants. */
-    private _readSource(source: BehaviorParameterSource, pawn: CharacterNode): number | boolean {
+    private _readSource(source: BehaviorParameterSource, pawn: Pawn): number | boolean {
         return this._readSourceOrUndefined(source, pawn) ?? 0;
     }
 
     /** Fill the machine's parameter table for this frame. */
-    private _refreshBehaviorParams(pawn: CharacterNode): void {
+    private _refreshBehaviorParams(pawn: Pawn): void {
         const values = this._behaviorRuntime.ctx.values;
         for (const p of this.behavior.parameters) {
             const read = this._readSourceOrUndefined(p.source, pawn);
@@ -1166,7 +1320,7 @@ export class ControllerNode extends Node {
     }
 
     /** The handful of things only the controller knows, because they are about the GOAL not the pawn. */
-    private _sense(name: string, pawn: CharacterNode): number | boolean {
+    private _sense(name: string, pawn: Pawn): number | boolean {
         if (name === 'stateTime') return this._behaviorRuntime.stateTime;
         if (name === 'hasPath') return hasPath(this._path);
         if (name === 'pathRemaining') return this.pathRemaining;
@@ -1187,12 +1341,20 @@ export class ControllerNode extends Node {
                 vec3.set(this._selfPos, here[0], here[1], here[2]), sighting.lastKnownPosition);
         }
 
+        // What is ahead of the pawn, whether or not it has a target.
+        if (name === 'wallAhead' || name === 'ledgeAhead') return this._senseAhead(name, pawn);
+
         const target = this._resolveTarget(this.targetKey);
         if (name === 'hasTarget') return target !== null;
-        if (!target) return name === 'targetVisible' ? false : 0;
+        if (!target) return name === 'targetVisible' || name === 'targetInFront' ? false : 0;
+        if (pawn instanceof CharacterBody2DNode) return this._sense2D(name, pawn, target);
 
         const from = pawn.worldPosition;
         const to = target.worldPosition;
+        if (name === 'targetInFront') {
+            const forward = pawn.worldForward;
+            return (to[0] - from[0]) * forward[0] + (to[2] - from[2]) * forward[2] > 0;
+        }
         if (name === 'distanceToTarget') return Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
         if (name === 'planarDistanceToTarget') return Math.hypot(to[0] - from[0], to[2] - from[2]);
         // Positive when the target is above. World Y, which is the navigable up (`isNavigableUp`).
@@ -1220,6 +1382,65 @@ export class ControllerNode extends Node {
         return 0;
     }
 
+    /**
+     * The target senses in a 2D scene's picture plane: the straight distance in XY, the ground-plane
+     * distance |dx| and the height dy, the angle from the way the body faces (0 ahead, +90 up), and a line of
+     * sight through the 2D world. A 2D target is measured at its feet, as a 3D one is.
+     */
+    private _sense2D(name: string, pawn: CharacterBody2DNode, target: Node): number | boolean {
+        const from = pawn.worldPosition;
+        const to = target.worldPosition;
+        const dx = to[0] - from[0], dy = to[1] - from[1];
+        if (name === 'distanceToTarget') return Math.hypot(dx, dy);
+        if (name === 'planarDistanceToTarget') return Math.abs(dx);
+        if (name === 'heightToTarget') return dy;
+        if (name === 'angleToTarget') return angleToTarget2D(dx, dy, pawn.facing);
+        if (name === 'targetInFront') return dx * pawn.facing > 0;
+        if (name === 'targetVisible') {
+            const world = this._scene?.physics2D;
+            if (!world) return true;
+            const eyeY = from[1] + this.eyeHeight;
+            const toY = to[1] + (target instanceof CharacterBody2DNode ? target.size[1] * 0.5 : 0);
+            const reach = Math.hypot(dx, toY - eyeY);
+            if (!(reach > 1e-6)) return true;
+            const hit = world.raycast(from[0], eyeY, dx, toY - eyeY, reach);
+            return !hit || hit.distance >= reach - 1e-3;
+        }
+        return 0;
+    }
+
+    /**
+     * A wall the pawn would walk into, or a drop it would walk off, just ahead the way it faces: the 2D
+     * world's probes for a 2D body, the physics ray for a 3D Character (from the hips, as the whiskers).
+     */
+    private _senseAhead(name: 'wallAhead' | 'ledgeAhead', pawn: Pawn): boolean {
+        if (pawn instanceof CharacterBody2DNode) {
+            const p = pawn.worldPosition;
+            const half = pawn.size[0] / 2;
+            return name === 'wallAhead'
+                ? probeWall2D(this._ray2D, p[0], p[1], pawn.facing, half, pawn.size[1], 0.5)
+                : probeLedge2D(this._ground2D, p[0], p[1], pawn.facing, half, 0.2, pawn.stepHeight + 0.3);
+        }
+        const physics = this._scene?.physics;
+        if (!physics) return false;
+        const feet = pawn.worldPosition;
+        const forward = pawn.worldForward;
+        const up = this._resolveUp();
+        const lift = Math.min(1, Math.max(0.4, this.eyeHeight * 0.5));
+        const ignore = pawn.body ? [pawn.body] : undefined;
+        try {
+            if (name === 'wallAhead') {
+                const from: [number, number, number] = [feet[0] + up[0] * lift, feet[1] + up[1] * lift, feet[2] + up[2] * lift];
+                const hit = physics.raycast(from, [from[0] + forward[0], from[1], from[2] + forward[2]], { ignore });
+                if (!hit) return false;
+                const n = hit.normal;
+                return n[0] * up[0] + n[1] * up[1] + n[2] * up[2] < WALKABLE_NORMAL_UP;
+            }
+            const ahead: [number, number, number] = [feet[0] + forward[0] * 0.6, feet[1] + lift, feet[2] + forward[2] * 0.6];
+            return !physics.raycast(ahead, [ahead[0], ahead[1] - lift - 1.5, ahead[2]], { ignore });
+        } catch { return false; }
+    }
+
     /** The node a blackboard key names, or null. */
     private _resolveTarget(key: string): Node | null {
         const value = this._blackboard.get(key);
@@ -1228,6 +1449,9 @@ export class ControllerNode extends Node {
     }
 
     private _resolveUp(): vec3 {
+        // A 2D pawn steers in the picture plane: a walker along X (flattened by +Y), a flier in XY (by +Z).
+        const pawn = this._possessed;
+        if (pawn instanceof CharacterBody2DNode) return vec3.copy(this._steerUp, pawn.movement === 'fly' ? AXIS_Z : AXIS_Y);
         const up = this._scene?.physics?.up;
         return up ? vec3.set(this._steerUp, up[0], up[1], up[2]) : vec3.set(this._steerUp, 0, 1, 0);
     }
@@ -1378,6 +1602,7 @@ export class ControllerNode extends Node {
             perception: { ...this.perception },
             eyeHeight: this.eyeHeight,
             autoAcquire: this.autoAcquire,
+            ...(this.perceptionLayers !== ControllerNode.ALL_LAYERS ? { perceptionLayers: this.perceptionLayers } : {}),
             repath: { ...this.repath },
             waypointRadius: this.waypointRadius,
             whiskerCount: this.whiskerCount,
@@ -1437,6 +1662,8 @@ export class ControllerNode extends Node {
             ? Math.max(0, json.eyeHeight) : node.eyeHeight;
         // Absent means true, so a controller written before perception existed still acquires.
         node.autoAcquire = json.autoAcquire !== false;
+        if (typeof json.perceptionLayers === 'number' && Number.isFinite(json.perceptionLayers))
+            node.perceptionLayers = json.perceptionLayers | 0;
         // Tolerant readers throughout, so a controller saved before navigation existed reads as one
         // with the defaults rather than failing the whole scene.
         node.repath = repathPolicy(json.repath);

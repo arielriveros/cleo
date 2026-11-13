@@ -100,6 +100,14 @@ export interface PerceptionCandidate {
  */
 export type LineOfSightTest = (from: vec3, to: vec3, hit: vec3) => boolean;
 
+/**
+ * The plane an agent looks across. `xz` is the 3D ground plane. `xy` is a 2D scene's picture plane: its
+ * positions (x, y) are laid flat onto the cone's ground plane as (x, 0, y) and back, so a side-view
+ * guard's cone opens left or right (a facing yaw of ±90) and reaches up and down as far as its field of
+ * view does. Line-of-sight tests and remembered positions stay in the scene's own XY coordinates.
+ */
+export type PerceptionPlane = 'xz' | 'xy';
+
 /** What perception knows about one candidate, as plain data a behaviour machine can read. */
 export interface Sighting {
     id: string;
@@ -126,6 +134,8 @@ export interface Sighting {
  */
 class CallbackObstacle extends GameEntity {
     public test: LineOfSightTest | null = null;
+    /** The plane the observer looks across: in `xy` the test is handed, and answers in, picture-plane XY. */
+    public plane: PerceptionPlane = 'xz';
 
     private readonly _from = vec3.create();
     private readonly _to = vec3.create();
@@ -141,10 +151,14 @@ class CallbackObstacle extends GameEntity {
             ray.origin.y + ray.direction.y * this.reach,
             ray.origin.z + ray.direction.z * this.reach);
 
+        if (this.plane === 'xy') {
+            vec3.set(this._from, this._from[0], this._from[2], 0);
+            vec3.set(this._to, this._to[0], this._to[2], 0);
+        }
         if (!this.test(this._from, this._to, this._hit)) return null;
         intersectionPoint.x = this._hit[0];
-        intersectionPoint.y = this._hit[1];
-        intersectionPoint.z = this._hit[2];
+        intersectionPoint.y = this.plane === 'xy' ? 0 : this._hit[1];
+        intersectionPoint.z = this.plane === 'xy' ? this._hit[1] : this._hit[2];
         return intersectionPoint;
     }
 
@@ -168,6 +182,7 @@ export class Perception {
     private readonly _entities = new Map<string, GameEntity>();
 
     private _time = 0;
+    private _plane: PerceptionPlane = 'xz';
     private readonly _sightings = new Map<string, Sighting>();
     private readonly _point = new Vector3();
     private readonly _from = vec3.create();
@@ -209,10 +224,14 @@ export class Perception {
         tuning: PerceptionTuning,
         dt: number,
         los: LineOfSightTest | null,
+        plane: PerceptionPlane = 'xz',
     ): void {
         this._time += Number.isFinite(dt) && dt > 0 ? dt : 0;
+        this._plane = plane;
+        this._obstacle.plane = plane;
+        const flat = plane === 'xy';
 
-        toYuka(this._owner.position, observerPosition);
+        toYukaPlane(this._owner.position, observerPosition, flat);
         yawToYukaRotation(this._owner.rotation, observerYaw);
         // Degrees in, radians out, and it is the FULL cone: Yuka halves it internally.
         this._vision.fieldOfView = tuning.fieldOfView * DEG2RAD;
@@ -220,13 +239,13 @@ export class Perception {
         this._memory.memorySpan = tuning.memorySpan;
         this._obstacle.test = los;
 
-        vec3.set(this._from, observerPosition[0], observerPosition[1], observerPosition[2]);
+        vec3.set(this._from, this._owner.position.x, this._owner.position.y, this._owner.position.z);
 
         const seen = new Set<string>();
         for (const candidate of candidates) {
             seen.add(candidate.id);
             const entity = this._entityFor(candidate.id);
-            toYuka(this._point, candidate.position);
+            toYukaPlane(this._point, candidate.position, flat);
 
             // The obstacle needs to know how far to probe; Yuka normalizes the ray and keeps the
             // distance to itself. Into scratch, not a fresh array -- this runs per candidate per frame.
@@ -293,8 +312,10 @@ export class Perception {
             ? Math.max(0, this._time - record.timeLastSensed)
             : Infinity;
         if (Number.isFinite(record.timeLastSensed)) {
-            vec3.set(sighting.lastKnownPosition,
-                record.lastSensedPosition.x, record.lastSensedPosition.y, record.lastSensedPosition.z);
+            const p = record.lastSensedPosition;
+            // Back out of the cone's frame: in the picture plane the laid-flat z is the scene's y.
+            if (this._plane === 'xy') vec3.set(sighting.lastKnownPosition, p.x, p.z, 0);
+            else vec3.set(sighting.lastKnownPosition, p.x, p.y, p.z);
         }
     }
 
@@ -313,4 +334,13 @@ export class Perception {
         }
         return entity;
     }
+}
+
+/** A scene position in the cone's frame: as is in 3D, laid flat ((x, y) to (x, 0, y)) in the picture plane. */
+function toYukaPlane(out: Vector3, v: Vec3Like, flat: boolean): Vector3 {
+    if (!flat) return toYuka(out, v);
+    out.x = v[0];
+    out.y = 0;
+    out.z = v[1];
+    return out;
 }

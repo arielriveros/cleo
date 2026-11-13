@@ -75,6 +75,15 @@ Selected with `{ kind: 'sense' }`.
 | `timeSinceSeen` | `0` while visible, `Infinity` if never seen. |
 | `lastKnownDistance` | Distance to where the target was last seen. |
 | `neighborCount` | Agents inside the flock radius. |
+| `wallAhead` | A wall just ahead, the way the pawn faces (not a slope it could walk up). |
+| `ledgeAhead` | The ground ends just ahead: a drop the pawn would walk off. One-way platforms count as ground. |
+| `targetInFront` | The target is in front of the pawn rather than behind it. |
+
+In a **2D** scene (a controller driving a Character Body 2D) the same senses are measured side-on, in the
+picture plane: `distanceToTarget` is the XY distance, `planarDistanceToTarget` is the horizontal |dx|,
+`heightToTarget` the vertical dy, `angleToTarget` is from the way the body faces (0 ahead, +90 straight up,
+±180 behind), and `targetVisible` / `targetInSight` look through the 2D world, where solid tiles and
+colliders block sight and one-way platforms do not.
 
 > Prefer `pathRemaining` over `distanceToTarget` for anything about approach. A straight line says a
 > wall is one metre away when the way around it is thirty.

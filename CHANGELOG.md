@@ -34,6 +34,16 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   A 2D scene on the Full 3D pipeline keeps every row. In 2D, **Collision wireframes** now switches the boxes
   of Character Body 2Ds and Collider 2Ds and **Trigger volumes** those of Area 2Ds, which were under
   **Editor icons**.
+- **AI in 2D games.** An AI Controller now drives a Character Body 2D as it drives a 3D Character.
+  - *Perception* looks across the picture plane: the cone opens the way the body faces, reaching up and down
+    as far as its field of view does, solid tiles and colliders block the line of sight and one-way
+    platforms do not, and a controller's **perception layers** pick which 2D bodies it sees (a guard sees
+    the player, not its fellow bats).
+  - *Steering* moves a walker along X and a flier in XY. `wander` makes a walker pace between walls and
+    drops; with obstacle avoidance on, a walker jumps a wall lower than its jump height and stops at a
+    drop unless its target is below; a flier's whiskers fan across the picture plane.
+  - *Senses* are measured side-on (the horizontal distance, the height, the angle from the way it faces),
+    and three new ones work in 2D and 3D: `wallAhead`, `ledgeAhead`, `targetInFront`.
 - **Duskwell, a 2D metroidvania example.** A new example project in the gallery, built on the flat 2D frame,
   the 2D physics and the sprite clips from the art in `build/platformer`: a warrior with a three-hit sword
   combo (a press during a swing, or just after it, chains the next), bats that wake as you pass and swoop,

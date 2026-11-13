@@ -21,7 +21,7 @@
 
 import { vec3 } from "gl-matrix";
 import { clamp, noise1, finiteOr } from "../math";
-import { setMoveWorld } from "./intent";
+import { setMove2D, setMoveWorld } from "./intent";
 import type { ControlIntent } from "./intent";
 
 export interface SteeringTuning {
@@ -365,6 +365,27 @@ export function blendSteering(
         vec3.scaleAndAdd(out, out, part.force, part.weight);
     }
     return vec3.length(out) > maxSpeed ? withLength(out, out, maxSpeed) : out;
+}
+
+/**
+ * The 2D bridge: a desired velocity becomes the intent a 2D body (CharacterBody2DNode) consumes, in WORLD
+ * axes -- `move[0]` +x, `move[1]` +y. Flattened by `up` first, so a walker (up +Y) gets a move along X only
+ * and a flier (up +Z) one in the XY plane; `speedScale` carries the throttle, as in 3D.
+ */
+export function intentFromDesired2D(
+    out: ControlIntent, desired: vec3, maxSpeed: number, up: vec3,
+): ControlIntent {
+    planar(_tmp, desired, up);
+    const speed = vec3.length(_tmp);
+    if (speed <= 1e-9) {
+        setMove2D(out, 0, 0);
+        out.speedScale = 0;
+        return out;
+    }
+    withLength(_tmp, _tmp, 1);
+    setMove2D(out, _tmp[0], _tmp[1]);
+    out.speedScale = maxSpeed > 1e-6 ? Math.min(1, speed / maxSpeed) : 1;
+    return out;
 }
 
 /**

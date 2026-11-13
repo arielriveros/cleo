@@ -225,7 +225,7 @@ export type {
 } from "./core/control/locomotion";
 export {
     STEERING_DEFAULTS, steeringTuning, createSteeringState, seek, flee, arrive, pursue, followTarget,
-    wander, separate, align, cohere, avoidObstacles, blendSteering, intentFromDesired,
+    wander, separate, align, cohere, avoidObstacles, blendSteering, intentFromDesired, intentFromDesired2D,
 } from "./core/control/steering";
 export type {
     SteeringTuning, SteeringState, ProbeHit, FlockNeighbour,
@@ -233,7 +233,7 @@ export type {
 // The behaviour state machine: patrol -> chase -> attack as authored data. Reuses core/conditions.ts,
 // which is what keeps it small enough to be worth having.
 export {
-    AI_GOALS, BEHAVIOR_SENSES, BEHAVIOR_PARAM_TYPES, EMPTY_BEHAVIOR, createBehaviorRuntime, entryState,
+    AI_GOALS, BEHAVIOR_SENSES, BEHAVIOR_SENSE_TYPES, BEHAVIOR_PARAM_TYPES, EMPTY_BEHAVIOR, createBehaviorRuntime, entryState,
     stateNamed, stepBehavior, parseBehaviorMachine, parseBehaviorState, parseBehaviorTransition,
     parseBehaviorParameter, isDefaultBehaviorMachine,
 } from "./core/control/behavior";
