@@ -1009,8 +1009,8 @@ describe('the running 180° turn', () => {
         a.enter(a.fired[0]);                       // the animator's pass, later that frame
         /** The clip time at each turn of the node. */
         const turnedAt: number[] = [];
-        const setRotation = p.setRotation.bind(p);
-        p.setRotation = (r: number[]) => { turnedAt.push(a.time); setRotation(r); };
+        const setWorldYaw = p.setWorldYaw.bind(p);
+        p.setWorldYaw = (yaw: number) => { turnedAt.push(a.time); return setWorldYaw(yaw); };
         let frames = 0;
         while (p.actionState === 'runTurn' && frames++ < 120) {
             // The player's frame first (breadth-first: it is the model's ancestor), then the animator's.
@@ -1031,8 +1031,8 @@ describe('the running 180° turn', () => {
         a.enter(a.fired[0]); p._trackAction(1 / 60);
         a.time = 0.4; p._stateTime = 0.35;         // past halfway
         let turned = false;
-        const setRotation = p.setRotation.bind(p);
-        p.setRotation = (r: number[]) => { turned = true; setRotation(r); };
+        const setWorldYaw = p.setWorldYaw.bind(p);
+        p.setWorldYaw = (yaw: number) => { turned = true; return setWorldYaw(yaw); };
         p._enter('roll');
         expect(turned).toBe(true);                 // drawn facing the new way already
         expect(a.fired).toContain('Cut');          // so whatever follows must not blend from the turned pose

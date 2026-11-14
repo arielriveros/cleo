@@ -1586,6 +1586,22 @@ export class Node {
     if (this._body) this._body.setQuaternion(this._offsetRotation(quat.normalize(Node._wq, world)));
     return this;
   }
+
+  /**
+   * Stands the node upright facing the WORLD heading `degrees`, whatever its parent's rotation. The heading
+   * is the engine's yaw: 0 faces +Z, 90 faces +X, i.e. `atan2(forward.x, forward.z)` in degrees.
+   *
+   * Use it, not `setRotation([0, yaw, 0])`, for a heading worked out in world space (toward a point, along
+   * the stick, {@link worldPlanarAngle}). `setRotation` is local: a Character's parent is its Collider,
+   * which carries a placed copy's turn (and root motion's), so a local write of a world heading faces off
+   * by the Collider's own yaw -- turned half round, exactly backwards. Turns a physics body like
+   * {@link setWorldQuaternion}.
+   */
+  public setWorldYaw(degrees: number): Node {
+    const half = degrees * Math.PI / 360;
+    return this.setWorldQuaternion(quat.set(Node._worldYawQ, 0, Math.sin(half), 0, Math.cos(half)));
+  }
+  private static _worldYawQ = quat.create();
   private static _wv = vec3.create();
   private static _wm = mat4.create();
   private static _wq = quat.create();

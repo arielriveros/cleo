@@ -798,7 +798,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     if (this._runTurnDone) return
     this._runTurnDone = true
     if (turned) {
-      this.setRotation([0, this._runTurnYaw, 0])
+      this.setWorldYaw(this._runTurnYaw)
       if (this._actEntered && this._isPlaying(this._actTrigger) && !this._turnClipEnded()) this._stopActions(true)
       // The run pose stays held while the measured speed catches up with the body's (see _settleRunPin).
       this._runPinSettle = 0
@@ -941,7 +941,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
       // afterwards. 'none' from this very frame: the locked strafe's 'aim' facing set earlier in it would
       // otherwise start pulling the body back toward the enemy before the roll's first step.
       this.facingMode = 'none'
-      this.setRotation([0, Math.atan2(dir[0], dir[2]) * 180 / Math.PI, 0])
+      this.setWorldYaw(Math.atan2(dir[0], dir[2]) * 180 / Math.PI)
       this._enter('roll')
       this._rollLength = 0
       const info = this._oneShot(this.rollTrigger)
@@ -1227,7 +1227,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     if (diff > 180) diff -= 360
     else if (diff < -180) diff += 360
     const step = Math.max(-maxDegrees, Math.min(maxDegrees, diff))
-    this.setRotation([0, have + step, 0])
+    this.setWorldYaw(have + step)
   }
 
   private _forward(sign: number): number[] {

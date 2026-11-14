@@ -38,8 +38,10 @@ export default class SoulsSceneDoorNode extends Node {
       const player = this.findNode('Player') as any
       if (!player) return
       const me = this.worldPosition, f = this.worldForward
-      player.setPosition?.([me[0] + f[0] * this.arrivalDistance, me[1] + 0.05, me[2] + f[2] * this.arrivalDistance])
-      player.setRotation?.([0, Math.atan2(f[0], f[2]) * 180 / Math.PI, 0])
+      // The whole body, Collider and all, facing out of the door: a world heading, so the Collider's own turn
+      // does not add to it.
+      player.teleport?.([me[0] + f[0] * this.arrivalDistance, me[1] + 0.05, me[2] + f[2] * this.arrivalDistance],
+        Math.atan2(f[0], f[2]) * 180 / Math.PI)
     })
   }
 

@@ -28,6 +28,7 @@ setQuaternion(q: quat): Node
 
 setWorldPosition(p: vec3): Node         // world space: solves the local position under the parent
 setWorldQuaternion(q: quat): Node       // world space; also turns a physics body
+setWorldYaw(deg: number): Node          // upright, facing a WORLD heading (0 = +Z, 90 = +X)
 
 setScale(s: vec3): Node ; setUniformScale(n: number): Node
 setXScale(v: number): Node ; setYScale(v) ; setZScale(v)

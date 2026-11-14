@@ -292,7 +292,6 @@ export default class FpsGameManagerNode extends Node {
     node.deaths = victim.deaths
     this._snapshots.set(node, snap)
     this.register(node)
-    node.setWorldPosition?.(at)
   }
 
   private _yawOf(n: Node): number {

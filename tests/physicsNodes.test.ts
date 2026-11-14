@@ -252,4 +252,31 @@ describe('a Character in a Collider', () => {
         player.velocity = [2, player.velocity[1], 0] as any;
         expect(collider.ownBody!.velocity.x).toBeCloseTo(2, 5);
     });
+
+    // A placed copy's turn is its root's, the Collider's, so a Character's local rotation is relative to it.
+    // A world heading written as a local yaw (setRotation([0, yaw, 0])) faced the Dungeon's player, whose
+    // Collider is turned 180, exactly backwards on every roll and attack.
+    it('faces a world heading whichever way its Collider is turned', () => {
+        const root = new Node('root');
+        parseNodeJson(root, {
+            type: 'collider', name: 'Player Collider', id: 'pc', position: [0, 1, 0], rotation: [0, 180, 0], scale: [1, 1, 1],
+            collider: { mass: 70, angularConstraints: [0, 0, 0], shapes: [] },
+            children: [{ type: 'character', name: 'Player', id: 'player', ...IDENT, children: [] }],
+        });
+        const collider = root.getChildByName('Player Collider')[0] as ColliderNode;
+        const player = collider.getChildByName('Player')[0] as CharacterNode;
+        const heading = () => { root.updateTransforms(); const f = player.worldForward; return [f[0], f[1], f[2]].map(v => Math.round(v * 1e4) / 1e4 + 0); };
+        expect(heading()).toEqual([0, 0, -1]);
+
+        player.setWorldYaw(90);
+        expect(heading()).toEqual([1, 0, 0]);
+        player.setWorldYaw(0);
+        expect(heading()).toEqual([0, 0, 1]);
+
+        // teleport's yaw is a world heading too, and it moves the Collider, not the Character inside it.
+        player.teleport([5, 2, -3], -90);
+        expect(heading()).toEqual([-1, 0, 0]);
+        expect(Array.from(collider.worldPosition)).toEqual([5, 2, -3]);
+        expect(Array.from(player.position)).toEqual([0, 0, 0]);
+    });
 });
