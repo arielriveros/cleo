@@ -819,6 +819,7 @@ export class Renderer {
         if (!scene.activeCamera) return;
         this._view.camera = scene.activeCamera.camera;
         this._view.camera.resize(this._renderWidth, this._renderHeight);
+        this._updateLodEye();
         this._materials.updateCameraHole(scene);
         // Kept for per-draw lookups (forward light-probe selection) that don't receive the scene.
         this._view.scene = scene;
@@ -1611,6 +1612,22 @@ export class Renderer {
         // The cascades now hold the last preview's fit: the editing view redraws every layer next frame.
         if (refit) this._shadows.requestFullUpdate();
         this._blitPanes(layout);
+    }
+
+    /**
+     * Where this frame measures detail from (FrameView.lodEye): the camera, or for an orthographic camera
+     * `Camera.detailDistance` ahead of it, the depth of what it frames.
+     */
+    private _updateLodEye(): void {
+        const camera = this._view.camera, eye = this._view.lodEye, p = camera.position;
+        vec3.copy(eye, p);
+        const ahead = camera.type === 'orthographic' ? camera.detailDistance : 0;
+        if (!(ahead > 0)) return;
+        // Forward is the negated third row of the view matrix (it is the inverse rotation).
+        const v = camera.viewMatrix;
+        eye[0] = p[0] - v[2] * ahead;
+        eye[1] = p[1] - v[6] * ahead;
+        eye[2] = p[2] - v[10] * ahead;
     }
 
     /** Swap the frame view to a preview camera for `body`, and back, with everything it must not keep. */

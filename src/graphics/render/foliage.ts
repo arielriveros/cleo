@@ -196,9 +196,8 @@ export class FoliagePasses {
      * hysteresis reads.
      */
     private _prepareFoliage(scene: Scene): void {
-        const camPos = this._view.camera.position;
-        // The eye every LOD decision below is measured from, kept for the preview panes that inherit them.
-        vec3.copy(this._lodEye, camPos);
+        // The detail eye (FrameView.lodEye): the camera, or the depth an orthographic one frames.
+        const camPos = this._view.lodEye;
         // The GPU path for the main view only, once a frame: its per-bucket parameters go up with
         // `writeBuffer`, which a second cull in the same unsubmitted frame would overwrite under the first.
         const gpu = this.foliageGpuCulling && FoliageGpuCuller.supported && this._sys.visibility.frustumCulling
@@ -345,8 +344,6 @@ export class FoliagePasses {
 
     // --- Preview panes (render/viewLayout.ts) ------------------------------------------------------
 
-    /** The eye `_prepareFoliage` last measured LOD from: the editing view's. Previews inherit its choices. */
-    private readonly _lodEye = vec3.create();
     /** Per layer: the cells a preview pane draws, bucketed like `layer.buckets`. */
     private readonly _previewBuckets = new WeakMap<FoliageLayer, FoliageCell[][]>();
     /** Per layer: their packed batches, apart from the editing view's so its recorded draws stay intact. */
@@ -374,7 +371,8 @@ export class FoliagePasses {
                 for (const cell of layer.cells) {
                     if (!cell.visible) continue;
                     if (visibility.frustumCulling && !visibility.frustum.intersectsAABB(cell.min, cell.max)) continue;
-                    this._placeCell(buckets, bands, billboardBucket, this._lodEye, cell);
+                    // The editing view's detail eye: a preview frame leaves `lodEye` as that view set it.
+                    this._placeCell(buckets, bands, billboardBucket, this._view.lodEye, cell);
                 }
                 let lists = this._previewBatches.get(layer);
                 if (!lists) { lists = []; this._previewBatches.set(layer, lists); }
@@ -415,7 +413,7 @@ export class FoliagePasses {
             });
         }
         layer.gpuBatches = this._foliageGpu.cull(this._passes.acquireEncoder('foliage.cull'), layer, buckets,
-                                                 this._sys.visibility.frustum.planes, this._view.camera.position);
+                                                 this._sys.visibility.frustum.planes, this._view.lodEye);
         layer.gpuCulled = true;
     }
 
@@ -587,7 +585,7 @@ export class FoliagePasses {
         if (entry.frame === this._view.frameIndex) return entry;
         entry.frame = this._view.frameIndex;
 
-        const camPos = this._view.camera.position;
+        const camPos = this._view.lodEye;
         const cullDistance = foliageEffectiveCull(layer, this.foliageCullDistance);
         const maxD2 = cullDistance > 0 ? cullDistance * cullDistance : Infinity;
         // The shadow distance, with its own hysteresis band (appear inside it, vanish 10% past it).
@@ -941,7 +939,7 @@ export class FoliagePasses {
         const field = this.windField;
         const windOn = field.active;
         const p = field.params;
-        const cam = this._view.camera.position;
+        const cam = this._view.lodEye;
         const [g, t, r, sh, c, f] = this._windVec;
         g[0] = p[0]; g[1] = p[1]; g[2] = p[2]; g[3] = p[3];
         t[0] = this._view.windTime; t[1] = this._view.windTimePrev; t[2] = p[5]; t[3] = w.fadeEnd;
@@ -1001,8 +999,8 @@ export class FoliagePasses {
         const [b, c, f] = this._lodVec;
         if (band) { b[0] = band.inStart; b[1] = band.inEnd; b[2] = band.outStart; b[3] = band.outEnd; }
         else { b[0] = b[1] = b[2] = b[3] = 0; }
-        // A preview pane dissolves by the editing view's distances, which chose its buckets.
-        const cam = this._view.preview ? this._lodEye : this._view.camera.position;
+        // Measured from the detail eye, which chose the buckets: a preview pane's is the editing view's.
+        const cam = this._view.lodEye;
         c[0] = cam[0]; c[1] = cam[1]; c[2] = cam[2];
         c[3] = !band ? 0 : layer.kind === 'billboard' ? 2 : 1;
         // A different dither phase every frame, so TAA resolves the screen-door into a smooth blend.

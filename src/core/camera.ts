@@ -35,6 +35,14 @@ export class Camera {
   /** The field of view viewmodel nodes are drawn at, degrees (0: the camera's own). See Node.viewmodel. */
   public viewmodelFov: number = 0;
   /**
+   * For an orthographic camera, how far ahead of it the renderer measures detail from: LOD levels, draw
+   * distances, which foliage is admitted and how it dissolves (runtime, not serialized). An orthographic
+   * view has no depth on screen, so a camera standing well back from what it frames -- the editor's Top or
+   * Front pane -- would otherwise see everything at its coarsest, or culled. 0: from the camera itself.
+   * Ignored for a perspective camera.
+   */
+  public detailDistance: number = 0;
+  /**
    * The share of its true distance a viewmodel node is drawn at along each view ray, 0.05..1 (runtime, not
    * serialized). A script lowers it while a wall is close in front, so the weapon stays clear of the wall at
    * the same size on the screen.

@@ -1,4 +1,4 @@
-import { mat4 } from 'gl-matrix';
+import { mat4, vec3 } from 'gl-matrix';
 import type { Camera } from '../../core/camera';
 import type { Scene } from '../../core/scene/scene';
 
@@ -23,6 +23,12 @@ export interface FrameView {
      * subsystem that keeps per-camera state checks this and leaves the editing view's state alone.
      */
     preview: boolean;
+    /**
+     * The point this frame measures detail from (LOD, draw distance, foliage admission and dissolve): the
+     * camera, or for an orthographic one `Camera.detailDistance` ahead of it. Set by the frame for the
+     * editing view only, so a preview pane inherits the editing view's detail choices along with it.
+     */
+    lodEye: vec3;
     // True only while the probe capture renders into cube faces. Inverting Y reverses triangle winding,
     // so `_pipelineFor` must flip `frontFace` too or every solid renders inside out.
     cubeFace: boolean;
@@ -116,6 +122,7 @@ export function createFrameView(): FrameView {
         frameIndex: 0,
         capturing: false,
         preview: false,
+        lodEye: vec3.create(),
         cubeFace: false,
         taaJitterActive: false,
         movieJitter: null,

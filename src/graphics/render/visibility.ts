@@ -147,7 +147,7 @@ export class Visibility {
      * scene updates before it renders. Uses the same cached bounding sphere the frustum cull does.
      */
     public stampAnimationView(scene: Scene): void {
-        const eye = this._view.camera.position;
+        const eye = this._view.lodEye;
         for (const node of scene.models) {
             if (!node.animator) continue;
             const s = node.getBoundingSphere();
@@ -605,14 +605,14 @@ export class Visibility {
             step1: this.terrainLodStep1,
             step2: this.terrainLodStep2,
         };
-        for (const landscape of scene.landscapes) landscape.updateLod(this._view.camera.position, settings);
+        for (const landscape of scene.landscapes) landscape.updateLod(this._view.lodEye, settings);
     }
 
     // Distance-based model LOD: every LodGroupNode picks its visible level subtree, or hides past its
     // cull distance; every node with a drawDistance hides its subtree past it (×0.9 hysteresis on the
     // way back, like the LOD groups). Visibility flags are rewritten only on a transition.
     public updateModelLOD(scene: Scene): void {
-        const eye = this._view.camera.position;
+        const eye = this._view.lodEye;
         for (const group of scene.lodGroups) group.updateLod(eye);
         for (const node of scene.drawDistanceNodes) node.updateDrawCull(eye);
     }
