@@ -13,6 +13,7 @@ import type {
 import { consumeRequest, createIntent, decayRequests } from "../../control/intent";
 import type { ControlIntent } from "../../control/intent";
 import type { ControllerNode } from "./controllerNode";
+import type { RigidBody } from "../../../physics/body";
 import { finiteOr } from "../../math";
 
 /**
@@ -45,6 +46,16 @@ import { finiteOr } from "../../math";
  * `onUpdate`), then do the engine's own work.
  */
 export class CharacterNode extends Node {
+    /**
+     * The body that moves this character: its Collider's (the Collider it stands in, holding its capsule).
+     * A Character authors no shape of its own, so every body-derived reading on it -- `velocity`,
+     * `isGrounded`, `groundNormal`, the measured motion -- and every write to `velocity` go to that body.
+     */
+    public override get body(): RigidBody | null {
+        for (let n = this.parent; n; n = n.parent) if (n.nodeType === 'collider') return n.ownBody;
+        return this._body;
+    }
+
     // ----- animator outputs ----------------------------------------------------------------------
     //
     // THESE THREE MUST STAY PLAIN FIELDS, never getter/setter pairs.
@@ -198,8 +209,8 @@ export class CharacterNode extends Node {
             if (!this._warnedNoBody) {
                 this._warnedNoBody = true;
                 Logger.warn(
-                    `Character '${this._name}' has no rigid body, so it cannot move. Add one in the ` +
-                    `Physics panel (a capsule collider with friction 0 suits a character).`, 'Scene');
+                    `Character '${this._name}' is not in a Collider, so it cannot move. Put it under a ` +
+                    `Collider with a capsule shape (friction 0 suits a character).`, 'Scene');
             }
             return;
         }
@@ -257,7 +268,7 @@ export class CharacterNode extends Node {
             this._warnedConstrained = true;
             Logger.warn(
                 `Character '${this._name}' has linearConstraints [${factor.x}, ${factor.y}, ${factor.z}] — ` +
-                `a 0 locks that axis and blocks movement along it. Set it to [1, 1, 1] in the Physics panel.`,
+                `a 0 locks that axis and blocks movement along it. Set it to [1, 1, 1] on its Collider.`,
                 'Scene');
         }
 

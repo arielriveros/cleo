@@ -189,6 +189,10 @@ export class PhysicsBody {
     /** Moved by the simulation (not static, not kinematic). */
     public get isDynamic(): boolean { return this._desc.type ? this._desc.type === 'dynamic' : this._desc.mass > 0; }
     public get isTrigger(): boolean { return !!this._desc.sensor; }
+    /** A character's body (see PhysicsBodyOptions.character). */
+    public get isCharacter(): boolean {
+        return ((this._desc.userData ?? 0) & BODY_CHARACTER) !== 0 || this._owner?.nodeType === 'character';
+    }
     /** Per world axis, 1 = free, 0 = locked (see PhysicsBodyOptions). */
     public get linearFactor(): { x: number; y: number; z: number } { return xyz(this._desc.linearFactor); }
     public get angularFactor(): { x: number; y: number; z: number } { return xyz(this._desc.angularFactor); }

@@ -10,7 +10,7 @@ import { assetHashKey, hashAsset, ASSET_HASH_VERSION } from '../src/utils/assetH
 // copy being rebuilt from its asset. Before, the rebuild knew only the asset and dropped it: a Torch
 // template whose sprite sat under its torch model lost the sprite on every placed copy on the next open.
 
-const maps = () => ({ scripts: new Map<string, string>(), bodies: new Map(), triggers: new Map() })
+const maps = () => ({ scripts: new Map<string, string>() })
 
 function tree(): Node {
   const root = new Node('Torch')
@@ -72,7 +72,7 @@ describe('scene resync keeps nodes added inside a placed model', () => {
           children: [{ id: 't-tip', name: 'Tip', type: 'node', children: [{ id: 't-fire', name: 'Fire', type: 'node', children: [] }] }],
         }],
       },
-      scripts: {}, bodies: {}, triggers: {},
+      scripts: {},
     } as any
     const scene = new Scene()
     try {

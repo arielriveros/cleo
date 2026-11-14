@@ -69,7 +69,7 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, narr
 const LOGO = `${import.meta.env.BASE_URL}brand/logo.png`;
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, startSimulate, stopPlay, pausePlay, buildWindowPlayData, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings, createScene, selectedNode, isPlayMode } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, startPlay, startSimulate, stopPlay, pausePlay, buildWindowPlayData, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings, createScene, selectedNode, isPlayMode } = useCleoEngine();
   const history = useHistory();
   // View ▸ Frame Selected, and the F key (installed here, once).
   const { canFrame, frameSelected } = useFrameSelected(true);
@@ -211,7 +211,7 @@ export default function MenuBar() {
         // switch scenes at runtime via Game.loadScene.
         data = await buildMultiSceneGameData({
           mainSceneId, openSceneId, scenes: sceneList,
-          liveScene: editorScene, liveScripts: scripts, liveBodies: bodies, liveTriggers: triggers,
+          liveScene: editorScene, liveScripts: scripts,
           // `rigs` is load-bearing: publish flattens each shipped animation's rig back into `sourceSkin`,
           // and without the table here every animation carrying only a `rigId` ships unretargetable.
           // Controllers, masks, poses and fields re-embed state machines in every scene that ships (see

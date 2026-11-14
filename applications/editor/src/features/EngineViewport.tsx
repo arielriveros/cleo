@@ -43,7 +43,7 @@ const GIZMO_HIDDEN_MODES: EditorMode[] = ['landscape', 'tilemap', 'options', 'ma
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, editorMode, viewDimension, setViewDimension, isSceneReady,
-            templateRootId, modelEditTargetId, templates, models, materials, animations, scripts, bodies, triggers,
+            templateRootId, modelEditTargetId, templates, models, materials, animations, scripts,
             animationFieldTargetId, adoptRigController, inspectedScene, sequences, linkSequenceToNode,
             mainScene, openSceneId } = useCleoEngine();
     const { selectedNode, isGizmoDragging, gizmoMode, setGizmoMode, gizmoSpace, setGizmoSpace } = useSelection();
@@ -386,7 +386,7 @@ export default function EngineViewport() {
             e.preventDefault();
             const item = findAddItem(newNodeId);
             if (!item) return;
-            addItemTo(item, dropParent, { editorScene, eventEmitter, triggers })
+            addItemTo(item, dropParent, { editorScene, eventEmitter })
                 .then(node => {
                     // Sky/clouds fill the scene — a world position is meaningless for them.
                     if (point && item.placeable !== false) placeAt(node, point, dropParent);
@@ -451,7 +451,7 @@ export default function EngineViewport() {
         const template = templates.find(t => t.id === templateId);
         if (!template) return;
         try {
-            const newId = instantiateTemplate(template, dropParent, { scripts, bodies, triggers }, materials);
+            const newId = instantiateTemplate(template, dropParent, { scripts }, materials);
             const node = editorScene.getNodeById(newId);
             if (node && point) placeAt(node, point, dropParent);
             eventEmitter.emit('TEXTURES_CHANGED');

@@ -11,10 +11,10 @@ const SRC = join(__dirname, '..', 'src')
 const read = (...p: string[]) => readFileSync(join(SRC, ...p), 'utf-8').replace(/\r\n/g, '\n')
 
 describe('Sequencer mode', () => {
-  it('is the only mode that shows the Sequencer, and it hides the Add palettes, Scripts and Physics', () => {
+  it('is the only mode that shows the Sequencer, and it hides the Add palettes and Scripts', () => {
     const dock = read('features', 'layout', 'DockLayout.tsx')
     expect(dock).toContain("if (mode !== 'sequence') for (const id of SEQUENCER_PANELS) hidden.add(id)")
-    expect(dock).toMatch(/case 'sequence':\s+hide\(\.\.\.ADD_PANELS, 'scripts', 'physics'\);/)
+    expect(dock).toMatch(/case 'sequence':\s+hide\(\.\.\.ADD_PANELS, 'scripts'\);/)
     // Opens on the timeline, and puts the mode on the dock for the orange skin.
     expect(dock).toContain(": editorMode === 'sequence' ? 'sequencer'")
     expect(dock).toContain('data-editor-mode={editorMode}')

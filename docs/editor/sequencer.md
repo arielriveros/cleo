@@ -36,7 +36,7 @@ The first key of a property makes its track, on a slot bound to the node (the sl
 the node). Later keys land on that track: on the section under the playhead, or on the nearest section,
 stretched to reach the key. A turn past 180° keys the shortest way round from where it was.
 
-What can't be a key isn't offered in Sequencer mode: the Add palettes, Scripts and Physics panels are gone,
+What can't be a key isn't offered in Sequencer mode: the Add palettes and the Scripts panel are gone,
 the scene tree only selects (no rename, move or delete), asset slots (materials, effects, brains, sounds) are
 disabled, and nothing can be dropped into the scene. A position or rotation a Path track already drives can't
 be keyed either; move the path's points instead.

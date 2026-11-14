@@ -32,7 +32,8 @@ import {
   Room2DNode,
   CharacterBody2DNode,
   Body2DNode,
-  Area2DNode,
+  ColliderNode,
+  TriggerNode,
 } from 'cleo';
 import type { FoliageCollision } from 'cleo';
 import type { NavObstacle, TriangleSoup } from 'cleo';
@@ -42,7 +43,7 @@ import { boundedBox, navPreviewSignature, planNavOverlays } from './navOverlayPl
 import type { NavOverlayBox, NavOverlayPlan } from './navOverlayPlan';
 import { decalBoxFrame, decalBoxLines, planDecalBox } from './decalOverlayPlan';
 import type { DecalOverlayFrame } from './decalOverlayPlan';
-import type { BodyDescription, ShapeDescription } from '../features/EngineContext';
+import type { ShapeDescription } from '../features/EngineContext';
 import type { DebugVisibility, DebugChannel, DebugCategory } from '../features/DebugVisibilityContext';
 import { shapeScaleFactors } from '../features/gizmo/collisionGizmoMath';
 import { selectedCollisionShape, type CollisionChannel } from '../features/gizmo/collisionSelection';
@@ -129,24 +130,27 @@ const sigMapFor = (scene: Scene): Map<string, string> => {
 };
 
 /**
- * Every mesh vertex of `root` *and its descendants*, in root-local space — the space collider shapes
- * are authored in. Editor helpers and gizmos are skipped.
+ * Every mesh vertex of `root` *and its descendants*, in the local space of `frame` (root's own by
+ * default) — the space collider shapes are authored in. Editor helpers and gizmos are skipped, and so
+ * are nested Colliders.
  * `includeSkinned` must be false for a hull: a skinned bind pose does not follow the animation.
  */
-function collectMeshPositions(root: Node, includeSkinned: boolean): number[][] {
+function collectMeshPositions(root: Node, includeSkinned: boolean, frame: Node = root): number[][] {
   const out: number[][] = [];
-  const rootInv = Vec.mat4.invert(Vec.mat4.create(), root.worldTransform);
+  const rootInv = Vec.mat4.invert(Vec.mat4.create(), frame.worldTransform);
   if (!rootInv) return out;
 
   const visit = (node: Node) => {
     if (isEditorOwnedName(node.name) || (node as any).isGizmo) return;
+    // A Collider inside this one is a body of its own (a door in a wall), and fits its own shapes.
+    if (node !== root && node instanceof ColliderNode) return;
     if (node instanceof ModelNode) {
       const model = node.model;
       const skinned = model instanceof AnimatedModel && model.hasSkin;
       const positions = skinned && !includeSkinned ? null : model.geometry?.positions;
       if (positions && positions.length) {
         // Geometry stores positions flat: component c of vertex i is positions[i * 3 + c].
-        if (node === root) {
+        if (node === frame) {
           for (let i = 0; i < positions.length; i += 3)
             out.push([positions[i], positions[i + 1], positions[i + 2]]);
         } else {
@@ -165,15 +169,45 @@ function collectMeshPositions(root: Node, includeSkinned: boolean): number[][] {
   return out;
 }
 
-/** Every mesh vertex under `root`, skinned meshes included, in root-local space: what a fitted primitive covers. */
-export function meshPositions(root: Node): number[][] {
-  return collectMeshPositions(root, true);
+/**
+ * Every mesh vertex under `root`, skinned meshes included, in `frame`'s local space (root's by default):
+ * what a fitted primitive covers.
+ */
+export function meshPositions(root: Node, frame: Node = root): number[][] {
+  return collectMeshPositions(root, true, frame);
 }
 
 /** Vertices to hull, or null when there is nothing usable. Skinned meshes are excluded — see above. */
-export function collectHullPositions(root: Node): number[][] | null {
-  const out = collectMeshPositions(root, false);
+export function collectHullPositions(root: Node, frame: Node = root): number[][] | null {
+  const out = collectMeshPositions(root, false, frame);
   return out.length >= 4 ? out : null;
+}
+
+/**
+ * What a Collider's or a Trigger's shapes are fitted to: the meshes under it. A Trigger with none of its
+ * own fits the node it is under (a trigger on a door: the door), still in its own space.
+ */
+export function shapeFitSource(owner: Node): Node {
+  if (!(owner instanceof TriggerNode) || !owner.parent || hasFitMesh(owner, true)) return owner;
+  return owner.parent;
+}
+
+/**
+ * Whether `root`'s subtree has a mesh to fit a shape to (a hull needs four vertices), on the walk
+ * {@link collectMeshPositions} takes -- without gathering a single vertex.
+ */
+export function hasFitMesh(root: Node, includeSkinned: boolean): boolean {
+  const visit = (node: Node): boolean => {
+    if (isEditorOwnedName(node.name) || (node as any).isGizmo) return false;
+    if (node !== root && node instanceof ColliderNode) return false;
+    if (node instanceof ModelNode) {
+      const model = node.model;
+      const skinned = model instanceof AnimatedModel && model.hasSkin;
+      if ((includeSkinned || !skinned) && (model.geometry?.positions?.length ?? 0) >= 12) return true;
+    }
+    return node.children.some(visit);
+  };
+  return visit(root);
 }
 
 /** Fraction of vertices a fitted capsule's radius must cover. See `boundsFromPoints`. */
@@ -207,8 +241,8 @@ export function boundsFromPoints(points: number[][]): { center: Vec.vec3; half: 
  * root-local (pre-scale) units; `setShapes` applies the owner's world scale on top.
  * Null when the subtree has no mesh, so the caller keeps its default.
  */
-export function meshBounds(root: Node): { center: Vec.vec3; half: Vec.vec3; radius: number } | null {
-  return boundsFromPoints(collectMeshPositions(root, true));
+export function meshBounds(root: Node, frame: Node = root): { center: Vec.vec3; half: Vec.vec3; radius: number } | null {
+  return boundsFromPoints(collectMeshPositions(root, true, frame));
 }
 
 /**
@@ -646,15 +680,15 @@ function ensureCamera2DFrame(cam: Camera2DNode) {
 
 /**
  * The eye-menu row a 2D physics node's box answers to: a character body's or a collider's is its collision
- * shape (Collision wireframes), an area's is a trigger (Trigger volumes) -- the rows 3D bodies use.
+ * shape (Collision wireframes), a trigger's is a trigger (Trigger volumes) -- the rows 3D bodies use.
  */
-export function box2DCategory(node: CharacterBody2DNode | Body2DNode | Area2DNode): 'colliders' | 'triggers' {
-  return node instanceof Area2DNode ? 'triggers' : 'colliders';
+export function box2DCategory(node: CharacterBody2DNode | Body2DNode | TriggerNode): 'colliders' | 'triggers' {
+  return node instanceof TriggerNode ? 'triggers' : 'colliders';
 }
 
 // A 2D physics node's box, followed per frame: a character body's stands on its feet (cyan), a collider's is
-// centred on it (red), an area's is centred on it moved by its offset (amber; drawn unmirrored).
-function ensureBox2DFrame(node: CharacterBody2DNode | Body2DNode | Area2DNode) {
+// centred on it (red), a trigger's is centred on it moved by its offset (amber; drawn unmirrored).
+function ensureBox2DFrame(node: CharacterBody2DNode | Body2DNode | TriggerNode) {
   if (node.getChildByName(BOX2D_FRAME).length) return;
   const color: [number, number, number] = node instanceof CharacterBody2DNode ? [0.35, 0.9, 1]
     : node instanceof Body2DNode ? [1, 0.35, 0.3] : [1, 0.75, 0.25];
@@ -663,8 +697,8 @@ function ensureBox2DFrame(node: CharacterBody2DNode | Body2DNode | Area2DNode) {
     const s = node.worldScale;
     const sx = Math.abs(s[0]) || 1, sy = Math.abs(s[1]) || 1;
     const w = node.size[0] / sx, h = node.size[1] / sy;
-    const oy = node instanceof CharacterBody2DNode ? h / 2 : node instanceof Area2DNode ? node.offset[1] / sy : 0;
-    const ox = node instanceof Area2DNode ? node.offset[0] / sx : 0;
+    const oy = node instanceof CharacterBody2DNode ? h / 2 : node instanceof TriggerNode ? node.offset[1] / sy : 0;
+    const ox = node instanceof TriggerNode ? node.offset[0] / sx : 0;
     if (Math.abs(frame.scale[0] - w) > 1e-5 || Math.abs(frame.scale[1] - h) > 1e-5) frame.setScale([w, h, 1]);
     if (Math.abs(frame.position[0] - ox) > 1e-5 || Math.abs(frame.position[1] - oy) > 1e-5) frame.setPosition([ox, oy, 0]);
   };
@@ -870,12 +904,12 @@ const HULL_VERSION = 5;
  * Rebuild any convex shape not stamped with HULL_VERSION from its node's current geometry. When the
  * geometry is gone the shape is still stamped, so the rebuild is not retried on every reconcile.
  */
-function migrateConvexShapes(scene: Scene, shapeLists: Map<string, { shapes: ShapeDescription[] }>) {
-  for (const [id, entry] of shapeLists) {
+function migrateConvexShapes(owners: readonly (ColliderNode | TriggerNode)[]) {
+  for (const target of owners) {
+    const entry = target as { shapes: ShapeDescription[] };
     if (!entry.shapes.some((s) => s.type === 'convex' && s.v !== HULL_VERSION)) continue;
-    const target = scene.getNodeById(id);
-    if (!target) continue;
 
+    // The hull is of what the collider carries: the meshes under it, in its own space.
     const positions = collectHullPositions(target);
     entry.shapes = entry.shapes.map((s) => {
       if (s.type !== 'convex' || s.v === HULL_VERSION) return s;
@@ -884,7 +918,6 @@ function migrateConvexShapes(scene: Scene, shapeLists: Map<string, { shapes: Sha
         ? { ...s, vertices: hull.vertices, faces: hull.faces, offset: hull.center, v: HULL_VERSION }
         : { ...s, v: HULL_VERSION };
     });
-    shapeLists.set(id, entry);
   }
 }
 
@@ -1200,10 +1233,10 @@ export function invalidateNavSoup(scene: Scene | null | undefined) {
 const EMPTY_SOUP = { positions: new Float32Array(0) } as unknown as TriangleSoup;
 const EMPTY_GATHER = { soup: EMPTY_SOUP, obstacles: [] as NavObstacle[] };
 
-function navSoupFor(scene: Scene, bodies: Map<string, BodyDescription>): { soup: TriangleSoup; obstacles: NavObstacle[] } {
+function navSoupFor(scene: Scene): { soup: TriangleSoup; obstacles: NavObstacle[] } {
   let gathered = navSoupCache.get(scene);
   if (!gathered) {
-    const { soup, obstacles } = gatherNavSoup(scene.root, { bodies });
+    const { soup, obstacles } = gatherNavSoup(scene.root);
     gathered = { soup, obstacles };
     navSoupCache.set(scene, gathered);
   }
@@ -1367,8 +1400,6 @@ function ensureNavPreview(scene: Scene, navMesh: NavMeshNode, plan: NavOverlayPl
 
 export function reconcileEditorHelpers(
   scene: Scene,
-  bodies: Map<string, BodyDescription>,
-  triggers: Map<string, { shapes: ShapeDescription[] }>,
   visibility?: DebugVisibility,
   channel: DebugChannel = 'editor',
   /**
@@ -1379,7 +1410,7 @@ export function reconcileEditorHelpers(
   selectedId: string | null = null,
   options: {
     /**
-     * Draw the triggers physics is testing right now (liveTriggerOverlay.ts) instead of the authored map:
+     * Draw the triggers physics is testing right now (liveTriggerOverlay.ts) instead of the Trigger nodes:
      * what Play and Simulate want, where most triggers are made by scripts and switched many times a second.
      */
     liveTriggers?: boolean;
@@ -1389,10 +1420,18 @@ export function reconcileEditorHelpers(
   const show = (cat: DebugCategory): boolean =>
     visibility ? visibility[cat][channel] : channel === 'editor';
 
-  migrateConvexShapes(scene, bodies);
-  migrateConvexShapes(scene, triggers);
-
   const nodes = Array.from(scene.nodes);
+  // The scene's own colliders and 3D triggers: what the red and green wireframes draw. A 2D scene's
+  // triggers are boxes (ensureBox2DFrame), not shapes.
+  const colliders: ColliderNode[] = [];
+  const triggers3D: TriggerNode[] = [];
+  for (const node of nodes) {
+    if (isEditorOwnedName(node.name)) continue;
+    if (node instanceof ColliderNode) colliders.push(node);
+    else if (node instanceof TriggerNode && !node.is2D) triggers3D.push(node);
+  }
+  migrateConvexShapes(colliders);
+  migrateConvexShapes(triggers3D);
   // The camera the editor views through must not draw its own frustum; it would stick to the viewport.
   const viewCamera = scene.activeCamera;
 
@@ -1450,8 +1489,8 @@ export function reconcileEditorHelpers(
         const child = node.getChildByName(name)[0];
         if (child) node.removeChild(child);
       }
-    } else if (node instanceof CharacterBody2DNode || node instanceof Body2DNode || node instanceof Area2DNode) {
-      // A 2D body's box is its collision shape and an Area 2D's its trigger, so they follow the rows the 3D
+    } else if (node instanceof CharacterBody2DNode || node instanceof Body2DNode || (node instanceof TriggerNode && node.is2D)) {
+      // A 2D body's box is its collision shape and a 2D trigger's its trigger, so they follow the rows the 3D
       // wireframes do -- in a 2D scene, the only collision those two rows have to show.
       const wanted = show(box2DCategory(node));
       const existing = node.getChildByName(BOX2D_FRAME)[0];
@@ -1476,18 +1515,17 @@ export function reconcileEditorHelpers(
     }
   }
 
-  // 4. Rigid-body wireframes (red), following the target's local transform.
+  // 4. Collider wireframes (red), following each Collider's world transform.
   if (show('colliders')) {
-    for (const [id, body] of bodies) {
-      const target = scene.getNodeById(id);
-      if (!target) continue;
-      // The group carries only the body's transform; `applyShapeTransform` folds the owner's scale in.
-      ensureShapeGroup(scene, target, `${BODY_PREFIX}${id}`, 'body', body.shapes, () => bodies.get(id)?.shapes, [1, 0, 0], (debug) => {
-        debug.setPosition(target.position);
-        debug.setRotation(target.rotation);
+    for (const collider of colliders) {
+      // The group carries only the collider's transform; `applyShapeTransform` folds its scale in.
+      const shapes = () => collider.shapes as ShapeDescription[];
+      ensureShapeGroup(scene, collider, `${BODY_PREFIX}${collider.id}`, 'body', shapes(), shapes, [1, 0, 0], (debug) => {
+        debug.setPosition(collider.worldPosition);
+        debug.setQuaternion(collider.worldQuaternion);
       });
     }
-    // Terrain heightfield collision shapes (also red) live in scene.landscapes, not the bodies map.
+    // Terrain heightfield collision shapes (also red) live in scene.landscapes, not in Collider nodes.
     for (const landscape of scene.landscapes) {
       if ((landscape as any).markForRemoval) continue;
       ensureTerrainDebug(scene, landscape);
@@ -1518,7 +1556,7 @@ export function reconcileEditorHelpers(
     // The soup only when the plan will use it: re-gathering the whole level's colliders for an UNSELECTED
     // navmesh — on every structural change, which in play mode is every spawned effect — was pure waste.
     const selected = navMesh.id === selectedId;
-    const gathered = selected ? navSoupFor(scene, bodies) : EMPTY_GATHER;
+    const gathered = selected ? navSoupFor(scene) : EMPTY_GATHER;
     const plan = planNavOverlays(navMesh, gathered.soup, selected, gathered.obstacles);
     if (plan.box) ensureNavVolumeBox(scene, navMesh, plan.box);
     ensureNavPreview(scene, navMesh, plan);
@@ -1543,18 +1581,17 @@ export function reconcileEditorHelpers(
   const windWanted = windOverlayWanted(!!visibility?.windField?.[channel], selected ?? null, scene);
   if (windWanted) ensureWindFieldOverlay(scene);
 
-  // 5. Trigger wireframes (green), following the target's world transform. While the game runs, the live
+  // 5. Trigger wireframes (green), following each Trigger's world transform. While the game runs, the live
   // overlay draws every trigger in the physics world instead — the authored ones included.
   const physics = (scene as any).physics as LiveTriggerSource | undefined;
   const live = !!options.liveTriggers && !!physics;
   if (show('triggers') && live) ensureLiveTriggerOverlay(scene, physics!, buildMergedShapeWire);
   else if (show('triggers')) {
-    for (const [id, trigger] of triggers) {
-      const target = scene.getNodeById(id);
-      if (!target) continue;
-      ensureShapeGroup(scene, target, `${TRIGGER_PREFIX}${id}`, 'trigger', trigger.shapes, () => triggers.get(id)?.shapes, [0, 1, 0], (debug) => {
-        debug.setPosition(target.worldPosition);
-        debug.setQuaternion(target.worldQuaternion);
+    for (const trigger of triggers3D) {
+      const shapes = () => trigger.shapes as ShapeDescription[];
+      ensureShapeGroup(scene, trigger, `${TRIGGER_PREFIX}${trigger.id}`, 'trigger', shapes(), shapes, [0, 1, 0], (debug) => {
+        debug.setPosition(trigger.worldPosition);
+        debug.setQuaternion(trigger.worldQuaternion);
       });
     }
   }
@@ -1576,10 +1613,12 @@ export function reconcileEditorHelpers(
     const drop = () => { scene.removeNode(node); cache.delete(node.name); };
     if (node.name.startsWith(BODY_PREFIX)) {
       const id = node.name.slice(BODY_PREFIX.length);
-      if (!show('colliders') || !bodies.has(id) || !scene.getNodeById(id)) drop();
+      const owner = scene.getNodeById(id);
+      if (!show('colliders') || !(owner instanceof ColliderNode) || owner.markForRemoval) drop();
     } else if (node.name.startsWith(TRIGGER_PREFIX)) {
       const id = node.name.slice(TRIGGER_PREFIX.length);
-      if (!show('triggers') || live || !triggers.has(id) || !scene.getNodeById(id)) drop();
+      const owner = scene.getNodeById(id);
+      if (!show('triggers') || live || !(owner instanceof TriggerNode) || owner.is2D || owner.markForRemoval) drop();
     } else if (node.name === LIVE_TRIGGERS) {
       if (!show('triggers') || !live) { dropLiveTriggerOverlay(scene); cache.delete(node.name); }
     } else if (node.name === WIND_FIELD_OVERLAY) {

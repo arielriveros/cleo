@@ -49,25 +49,25 @@ Everything in the scene is an ordinary node you can select and change:
 - **Player** — a **Character Body 2D** the engine walks and jumps, driven by its last child, a **Player
   Controller** reading Move and Jump, as a 3D Character is. Its **Sprite** carries the warrior's animation set
   (idle, run, jump, fall, three attacks, hurt, death) and a state machine that picks the movement clips from
-  the body on its own; its **Sword** is an Area 2D the attack frames switch on and size. The `DuskPlayer`
+  the body on its own; its **Sword** is a Trigger the attack frames switch on and size. The `DuskPlayer`
   script is the game's own moves: the double jump, the dash, the wall slide and wall jump (each off until its
   pickup), the jump cut, and the combo, health, the hit, death and the respawn.
 - **Enemies** — Character Bodies 2D, each driven by its last child, an **AI Controller** that runs an AI
   Brain asset (open them in the AI tab) and sees only the player's layer (its **perception layers**):
   - The **Ruin Guard** walks, on its **Guard Brain**: Patrol (the route **Hall Watch**), Chase (`path` to the
     player), Attack, Hurt, Search (`investigate`), Return (`path` home) and Dead. `DuskGuard` swings — the
-    attack clip's frames switch its **Blade** Area 2D on — staggers, dies, and publishes the facts the
+    attack clip's frames switch its **Blade** Trigger on — staggers, dies, and publishes the facts the
     brain reads: `attackReady`, `isAttacking`, `isHurt`, `isDead`, `targetDead`, `distanceFromHome`.
   - Each **bat** flies and passes through one-way platforms, on its **Bat Brain**: Sleep, Wake, Chase,
     Swoop, Hurt, Roost and Dead. `DuskBat` wakes it, owns the swoop's motion (`onMove2D`), and publishes
-    `isAwake`, `swoopReady`, `isSwooping`, `isHurt`, `isDead`, `distanceFromHome`. Its **Bite** is an
-    Area 2D the player's script reads `contactDamage` from.
+    `isAwake`, `swoopReady`, `isSwooping`, `isHurt`, `isDead`, `distanceFromHome`. Its **Bite** is a
+    Trigger the player's script reads `contactDamage` from.
 - **Navigation** — two **Nav Meshes** in **2D** space over the whole map, baked from it: **Walker Nav**, a
   platform graph for the guard's body (its walks, the jumps up the plank and pillar, the drops and the
   drop-throughs), which also holds the guard's route; and **Flier Nav**, an air grid for a bat's. Each
   controller plans on the one that matches its body's movement, with no wiring. Change the map and bake
   again. See [Navigation in 2D](../scripting/ai.md#navigation-in-2d).
-- **Pickups** and **Checkpoints** — Area 2Ds with `DuskPickup` (its `kind`: `diamond`, `heart`, `dash`,
+- **Pickups** and **Checkpoints** — Triggers with `DuskPickup` (its `kind`: `diamond`, `heart`, `dash`,
   `doubleJump` or `wallJump`) and `DuskCheckpoint`.
 - **HUD** — a UI root with three texts that `DuskHud` writes each frame.
 

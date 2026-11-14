@@ -15,8 +15,6 @@ function emptySources() {
     return {
         scene: new Scene(),
         scripts: new Map<string, string>(),
-        bodies: new Map<string, any>(),
-        triggers: new Map<string, any>(),
         useCache: true,
     };
 }

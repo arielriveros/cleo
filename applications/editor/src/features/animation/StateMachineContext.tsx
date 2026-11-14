@@ -222,7 +222,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
     editorScene, stateMachineTargetId, stateMachineSourceScene, stateMachineSourceId,
     commitAnimationStateMachine, importAnimationFiles, importSkeletonNames,
     renameAnimationClip, removeAnimationClip, closeTab, activeTabId, eventEmitter,
-    scriptAssets, markTabDirty, clearTabDirty, registerAnimationApply, bodies, editSharedClip,
+    scriptAssets, markTabDirty, clearTabDirty, registerAnimationApply, editSharedClip,
     adoptModelAsset, resolveModelAssetId,
   } = useCleoEngine()
   const { animations, animationFields, boneMasks, poseAssets, animControllers, addAnimController, updateAnimController, models } = useAssetLibrary()
@@ -239,8 +239,7 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   const [graphView, setGraphView] = useState(true)
   const [simulate, setSimulate] = useState(false)
   const [, force] = useState(0)
-  // Bumped when physics changes, to invalidate accessVars below: `bodies` is a ref-backed Map whose identity
-  // never changes, so it is worthless as a memo dependency.
+  // Bumped when physics changes (a Collider added or removed above the character), to invalidate accessVars.
   const [bodiesRev, setBodiesRev] = useState(0)
   useEffect(() => {
     const onPhysics = () => setBodiesRev(x => x + 1)
@@ -249,13 +248,10 @@ export function StateMachineProvider({ children }: { children: ReactNode }) {
   }, [eventEmitter])
 
   const clips = target ? target.model.animations.map(a => a.name) : []
-  // `bodies` is the authored physics side map, and must be passed: no node in the EDITOR scene has a live
-  // rigid body, so it is the only record of which node is the thing that moves.
   const accessVars = useMemo<AccessibleVariable[]>(
     () => accessibleNodeVariables(
-      stateMachineSourceScene?.getNodeById(stateMachineSourceId ?? '') ?? null, stateMachineSourceScene, scriptAssets,
-      new Set(bodies.keys())),
-    [stateMachineSourceScene, stateMachineSourceId, stateMachineTargetId, scriptAssets, bodies, bodiesRev])
+      stateMachineSourceScene?.getNodeById(stateMachineSourceId ?? '') ?? null, stateMachineSourceScene, scriptAssets),
+    [stateMachineSourceScene, stateMachineSourceId, stateMachineTargetId, scriptAssets, bodiesRev])
 
   // Un-applied working copies, per animation tab. Only ONE session is live at a time, so this cache is what
   // keeps un-applied edits alive across a tab switch.

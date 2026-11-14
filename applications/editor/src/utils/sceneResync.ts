@@ -30,8 +30,6 @@ import { reembedSequences, sequenceNodesOf } from './sequenceAssets'
 
 export type ResyncMaps = {
   scripts: Map<string, string>
-  bodies: Map<string, any>
-  triggers: Map<string, { shapes: any[] }>
 }
 
 function collectSubtreeIds(node: Node, out: string[] = []): string[] {
@@ -115,16 +113,13 @@ export function reinstantiate(
   const variables = new Map(inst.variables)
   // Where every node of the old copy sat, so references to it from elsewhere can follow the rebuild.
   const oldIds = idsByPath(inst)
-  // The placement's own collider. A model asset carries no physics, so a body on the placed copy's root
-  // (the Valley's houses: walls and roof boxes) is per-placement state like the transform — and it lives
-  // in the side maps keyed by the OLD id, which the cleanup below deletes. Dropping it left a rebuilt copy
-  // with no collision at all.
-  const rootBody = maps.bodies.get(inst.id)
-  const rootTrigger = maps.triggers.get(inst.id)
+  // A placement's own collider is not rebuilt: a model asset carries no physics, so a placed copy that
+  // collides (the Valley's houses: walls and roof boxes) stands in a Collider, which is outside `inst`.
+  // A Trigger the user put inside the copy is a foreign child, and is carried over below.
   // Out of the old tree BEFORE its map entries are dropped and its GPU buffers freed: these survive.
   const foreign = assetShape ? detachForeignChildren(inst, assetShape) : []
   // Drop the old subtree's out-of-band data so map entries do not leak.
-  for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id) }
+  for (const id of collectSubtreeIds(inst)) maps.scripts.delete(id)
   // removeChild detaches synchronously; Node.remove() only marks and its deferred sweep mis-splices.
   parent.removeChild(inst)
   // …and free the GPU buffers behind it. removeChild only detaches, so a resync that rebuilt every
@@ -141,9 +136,6 @@ export function reinstantiate(
       newNode.setVariable(name, v.value, v.type, v.access)
     }
     restoreAnimationState(newNode, animation)
-    // Only where the rebuild brought none of its own: a template instance's body comes from the template.
-    if (rootBody && !maps.bodies.has(newNode.id)) maps.bodies.set(newNode.id, rootBody)
-    if (rootTrigger && !maps.triggers.has(newNode.id)) maps.triggers.set(newNode.id, rootTrigger)
     reattachForeignChildren(newNode, foreign)
     // Same path, new id: anything outside that pointed into the old copy points into the new one.
     const moved = new Map<string, string>()

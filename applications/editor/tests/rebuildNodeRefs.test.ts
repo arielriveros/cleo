@@ -9,7 +9,7 @@ import { assetHashKey, hashAsset, ASSET_HASH_VERSION } from '../src/utils/assetH
 // subtree — the Valley Player's camera rig following the character model nested beside it — used to keep
 // the old id: the rig logged "follows a node that no longer exists" on every open and stopped following.
 
-const maps = () => ({ scripts: new Map<string, string>(), bodies: new Map(), triggers: new Map() })
+const maps = () => ({ scripts: new Map<string, string>() })
 
 describe('retargetNodeRefs', () => {
   it('rewrites live reference fields through the id map, and leaves the rest alone', () => {
@@ -45,7 +45,7 @@ describe('a model rebuilt on open keeps what follows it', () => {
           },
         ],
       },
-      scripts: {}, bodies: {}, triggers: {},
+      scripts: {},
     } as any
     const scene = new Scene()
     try {

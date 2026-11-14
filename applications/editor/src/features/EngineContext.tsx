@@ -92,6 +92,7 @@ import { installPhysicsWorker } from "../workers/physicsWorkerHost";
 import { detectMissingTextures } from "../utils/textureRefs";
 import { buildGameData } from "./publish/buildGameData";
 import { applyGameData, extractNodeState, ProjectPrefs } from "../utils/projectStorage";
+import { migrateScenePhysics, migrateTemplatePhysics } from "../utils/physicsMigration";
 import { migrateLegacyUI } from "../utils/uiMigration";
 import {
   ProjectMeta, SceneMeta, SceneRefs, SceneAssetData, loadProjectMeta, saveProjectMeta, loadSceneData, saveSceneData,
@@ -153,7 +154,7 @@ import {
 } from './engineContextTypes';
 import type {
   PendingModelImportView, ModelImportDecision, PendingAnimationImportView, PendingRigPickView,
-  AnimationImportDecision, BodyDescription, ShapeDescription, EditorMode, GizmoMode, GizmoSpace,
+  AnimationImportDecision, EditorMode, GizmoMode, GizmoSpace,
   SavingState, TabKind, ModelEditSession, EditorTab, TerrainBrushState, TilemapBrushState,
 } from './engineContextTypes';
 import { currentOrNoop } from './loading/bootLoad';
@@ -167,7 +168,7 @@ export {
 } from './engineContextTypes';
 export type {
   PendingModelImportView, ModelImportDecision, RetargetBoneOption, PendingAnimationImportView,
-  PendingRigPickView, AnimationImportDecision, BodyDescription, ShapeDescription,
+  PendingRigPickView, AnimationImportDecision, ShapeDescription,
   EditorMode, GizmoMode, GizmoSpace, SavingState, TabKind, ModelEditSession, EditorTab,
   TerrainBrushState, TilemapTool, TilemapBrushState,
 } from './engineContextTypes';
@@ -295,8 +296,6 @@ const EngineContext = createContext<{
   terrainBrush: React.MutableRefObject<TerrainBrushState>;
   tilemapBrush: React.MutableRefObject<TilemapBrushState>;
   scripts: Map<string, string>;
-  bodies: Map<string, BodyDescription>;
-  triggers: Map<string, { shapes: ShapeDescription[]; }>;
   startPlay: () => void;
   /** Play without possession: physics, AI and scripts run, viewed through the editor camera. */
   startSimulate: () => void;
@@ -710,8 +709,6 @@ const EngineContext = createContext<{
     terrainBrush: { current: { activeLandscapeId: null } },
     tilemapBrush: { current: { tool: 'brush', activeTilemapId: null, activeLayer: 0, stamp: { w: 1, h: 1, tiles: [0] }, orient: { flipX: false, flipY: false, rot90: false }, variantSetId: null, terrainId: null } },
     scripts: new Map(),
-    bodies: new Map(),
-    triggers: new Map(),
     startPlay: () => {},
     startSimulate: () => {},
     startMovieSession: async () => null,
@@ -1094,8 +1091,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   /** Cancels the Play-mode Escape subscription. Null while not playing. */
   const escapeSubRef = useRef<(() => void) | null>(null);
   const scriptsRef = useRef(new Map<string, string>());
-  const bodiesRef = useRef(new Map<string, BodyDescription>());
-  const triggersRef = useRef(new Map<string, { shapes: ShapeDescription[] }>());
   const startedRef = useRef(false);
 
   // Debug-overlay visibility (collider wireframes, light icons, …), per Editor/Runtime channel. The
@@ -1128,6 +1123,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
             try { await idbSet(libKey('templates'), list); localStorage.removeItem(KEYS.templates); } catch { /* keep legacy copy if migration write fails */ }
           }
         }
+        // Rigid bodies and triggers saved beside a template's tree become Collider and Trigger nodes in it.
+        // The converted library is saved back by the persistence below.
+        if (list && list.length) list = migrateTemplatePhysics(list) ?? list;
         // Don't clobber templates the user may have added before the async load resolved.
         if (list && list.length) setTemplates(prev => prev.length ? prev : list!);
       } catch (e) { console.warn('Failed to load templates:', e); }
@@ -2636,7 +2634,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
   registerRigResolver((rigId: string) => rigsRef.current.find(r => r.id === rigId) ?? null);
   registerPoseAssetResolver(() => poseAssetsRef.current);
 
-  const engineMaps = () => ({ scripts: scriptsRef.current, bodies: bodiesRef.current, triggers: triggersRef.current });
+  const engineMaps = () => ({ scripts: scriptsRef.current });
 
   /**
    * Every Scene alive in the editor: the open scene, plus each asset tab's throwaway edit scene. Scenes that
@@ -2699,7 +2697,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       rootId = instantiateTemplate(t, scene.root, engineMaps(), materialsRef.current);
       // instantiateTemplate re-resolves __materialId but never __modelId, so refresh the clips from the
       // asset. Patched in place, not re-instantiated: a rebuild regenerates node ids, and instantiateTemplate
-      // has just re-keyed template.scripts/bodies/triggers onto the ids it created.
+      // has just re-keyed template.scripts onto the ids it created.
       const templateRoot = scene.getNodeById(rootId);
       if (templateRoot) {
         withoutDirty(() => {
@@ -4116,12 +4114,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // What the user added inside this copy (a sprite on the tip, a light) is not the asset's: carried
         // over to the rebuilt copy rather than thrown away with it. See foreignChildren.ts.
         const foreign = detachForeignChildren(inst, modelInstanceShape(asset, modelsRef.current));
-        // The copy's own collider: a model asset carries no physics, so a body on the placed root is
-        // per-placement state, keyed by the id the cleanup below drops (see reinstantiate in sceneResync.ts).
-        const rootBody = maps.bodies.get(inst.id);
-        const rootTrigger = maps.triggers.get(inst.id);
+        // The copy's own collider is the Collider it stands in, outside `inst`: a model asset carries no
+        // physics (see reinstantiate in sceneResync.ts).
         // Drop the old subtree's out-of-band data so map entries don't leak.
-        for (const id of collectSubtreeIds(inst)) { maps.scripts.delete(id); maps.bodies.delete(id); maps.triggers.delete(id); }
+        for (const id of collectSubtreeIds(inst)) maps.scripts.delete(id);
         // Detach synchronously with removeChild, not remove(): remove() only marks, and its deferred sweep
         // mis-splices unrelated root children (see reinstantiate in sceneResync.ts).
         parent.removeChild(inst);
@@ -4135,8 +4131,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
           newNode.setPosition(pos).setRotation(rot).setScale(scl);
           newNode.spawnOnStart = spawnOnStart;
           restoreAnimationState(newNode, animation);
-          if (rootBody) maps.bodies.set(newId, rootBody);
-          if (rootTrigger) maps.triggers.set(newId, rootTrigger);
           reattachForeignChildren(newNode, foreign);
           // A LOD-wrapped asset keeps its root transform on the wrapper's child 0, so the edit already
           // arrives through the child and applying it here as well would double it.
@@ -5752,8 +5746,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         scene: editorSceneRef.current,
         scripts: scriptsRef.current,
         scriptAssets: scriptAssetsRef.current,
-        bodies: bodiesRef.current,
-        triggers: triggersRef.current,
         settings: instanceRef.current?.renderer.getRenderSettings(),
         // Texture payloads live in the texture store; scene blobs never embed them.
         useCache: true,
@@ -5839,8 +5831,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     return buildGameData({
       scene: tmp,
       scripts: new Map(),
-      bodies: new Map(),
-      triggers: new Map(),
       useCache: true,
     });
   };
@@ -6019,8 +6009,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
       // Tear down per-scene editor state.
       scriptsRef.current.clear();
-      bodiesRef.current.clear();
-      triggersRef.current.clear();
       setSelectedNode(null);
       eventEmitter.current.emit('SELECT_NODE', null);
       load.step('teardown').done();
@@ -6033,7 +6021,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       load.step('parse').start();
       await yieldToPaint();
       scene.environmentMap = null; // parse only sets it when the JSON has one — don't leak the old scene's
-      applyGameData(data, { ...engineMaps(), scene, renderer: instanceRef.current?.renderer });
+      applyGameData(data, { ...engineMaps(), scene, renderer: instanceRef.current?.renderer, templates: templatesRef.current });
       ensureEditorCamera(scene);
       load.step('parse').done(`${scene.nodes.size.toLocaleString()} nodes`);
       load.step('resync').start();
@@ -6150,7 +6138,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // The parse is synchronous: let the splash show this step before it starts.
         sceneStep.start(meta.scenes.find(s => s.id === targetId)?.name ?? '');
         await yieldToPaint();
-        applyGameData(data, { ...engineMaps(), scene: editorSceneRef.current, renderer: instanceRef.current?.renderer });
+        applyGameData(data, { ...engineMaps(), scene: editorSceneRef.current, renderer: instanceRef.current?.renderer, templates: templatesRef.current });
         ensureEditorCamera(editorSceneRef.current);
         // Stash the hashes for the deferred initial resync — the libraries have not been read yet, so it
         // cannot happen here. See the initial-resync effect.
@@ -6337,19 +6325,19 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       suppressReconcileRef.current = true;
       try {
         if (isPlayMode) {
-          // Runtime channel: helpers are rebuilt onto the throwaway play scene (which shares node ids with
-          // the editor scene, so the bodies/triggers maps still resolve). Still __debug__-named, so still
-          // stripped from any real publish. No withoutDirty — play mode never marks the tab dirty.
+          // Runtime channel: helpers are rebuilt onto the throwaway play scene, from its own Collider and
+          // Trigger nodes. Still __debug__-named, so still stripped from any real publish. No withoutDirty —
+          // play mode never marks the tab dirty.
           // Simulate is watched through the editor's eyes, so it wears the Editor channel's overlays.
           const playScene = instanceRef.current?.scene;
-          // Triggers come from the physics world, not the authored map: a game makes most of its own
+          // Triggers come from the physics world, not the authored nodes: a game makes most of its own
           // (hitboxes, hurtboxes on spawned enemies) and switches them many times a second.
-          if (playScene) reconcileEditorHelpers(playScene, bodiesRef.current, triggersRef.current, vis,
+          if (playScene) reconcileEditorHelpers(playScene, vis,
             isSimulating ? 'editor' : 'runtime', selectedNodeRef.current, { liveTriggers: true });
         } else if (activeScene) {
           // withoutDirty as well as suppressReconcileRef: the latter only stops the reconciler re-triggering
           // ITSELF, while the helpers it splices in emit SCENE_CHANGED like any other node edit.
-          withoutDirty(() => reconcileEditorHelpers(activeScene, bodiesRef.current, triggersRef.current, vis, 'editor', selectedNodeRef.current));
+          withoutDirty(() => reconcileEditorHelpers(activeScene, vis, 'editor', selectedNodeRef.current));
         }
       } finally { suppressReconcileRef.current = false; }
     };
@@ -6652,8 +6640,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       scriptAssets: scriptAssetsRef.current,
       // Script modules: stamps each node's script path and ships every module the scripts import.
       scriptPaths: scriptPathsRef.current,
-      bodies: bodiesRef.current,
-      triggers: triggersRef.current,
       templates: templatesRef.current,
       materials: materialsRef.current,
       // Play mode has no top-level animation table for a player to resolve, so the shared clips are
@@ -6692,13 +6678,14 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // A scene never opened in this session still carries its UI as the legacy blob — same reason the
     // publish path migrates here: without it, loading that scene at runtime gives it no HUD, silently.
     migrateLegacyUI(clone.scene, clone.ui);
-    const maps = { scripts: new Map<string, string>(), bodies: new Map<string, any>(), triggers: new Map<string, any>() };
+    const maps = { scripts: new Map<string, string>() };
+    clone.scene = migrateScenePhysics(clone.scene, templatesRef.current);
     extractNodeState(clone.scene, maps);
     const tmp = new Scene();
     tmp.parse({ scene: clone.scene, textures: [] }, true);
     resyncScene(tmp, maps, currentLibs(), data.assetHashes, data.assetHashVersion);
     await stage(0.5, 'Preparing scripts and models');
-    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, bodies: maps.bodies, triggers: maps.triggers, scriptAssets: scriptAssetsRef.current, scriptPaths: scriptPathsRef.current, templates: templatesRef.current, materials: materialsRef.current, models: modelsRef.current, animations: animationsRef.current, useCache: true });
+    const gd = await buildGameData({ scene: tmp, scripts: maps.scripts, scriptAssets: scriptAssetsRef.current, scriptPaths: scriptPathsRef.current, templates: templatesRef.current, materials: materialsRef.current, models: modelsRef.current, animations: animationsRef.current, useCache: true });
     // `tmp` existed only to be resynced and serialized; `gd` is plain JSON, so its GPU meshes and bus
     // subscription can go now.
     tmp.dispose();
@@ -6812,7 +6799,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     const scenes = listed.some(s => s.id === openId) ? listed : [...listed, { id: openId, name: 'Scene' } as SceneMeta];
     const data = await buildMultiSceneGameData({
       mainSceneId: openId, openSceneId: openId, scenes,
-      liveScene: scene, liveScripts: scriptsRef.current, liveBodies: bodiesRef.current, liveTriggers: triggersRef.current,
+      liveScene: scene, liveScripts: scriptsRef.current,
       libs: currentLibs(), scriptAssets: scriptAssetsRef.current, scriptPaths: scriptPathsRef.current,
       liveDimension: dimensionOfScene(openId),
       settings: instance.renderer.getRenderSettings(),
@@ -7214,8 +7201,6 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       tilemapBrush,
       isDirtySuppressed,
       scripts: scriptsRef.current,
-      bodies: bodiesRef.current,
-      triggers: triggersRef.current,
       startPlay,
       startSimulate,
       startMovieSession,

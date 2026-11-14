@@ -135,9 +135,11 @@ export function vfsPathOfRel(rel: string): string {
 /* Base type inference                                                         */
 /* -------------------------------------------------------------------------- */
 
-const CLASS_TO_BASE_TYPE: Record<string, ScriptBaseType> = Object.fromEntries(
-  Object.entries(BASE_CLASS).map(([type, cls]) => [cls, type as ScriptBaseType]),
-) as Record<string, ScriptBaseType>
+const CLASS_TO_BASE_TYPE: Record<string, ScriptBaseType> = {
+  ...Object.fromEntries(Object.entries(BASE_CLASS).map(([type, cls]) => [cls, type as ScriptBaseType])),
+  // The engine's deprecated alias of TriggerNode.
+  Area2DNode: 'trigger',
+} as Record<string, ScriptBaseType>
 
 /**
  * Which node type a source file's class extends, for a file that appeared on disk with no asset behind it.

@@ -4,10 +4,10 @@ import { boundsFromPoints } from '../../../utils/editorHelpers';
 import { MIN_SHAPE_SIZE, shapeLocalQuat } from '../../gizmo/collisionGizmoMath';
 
 /**
- * The shape list's edits as pure functions over descriptors: what the Physics panel's row actions do, kept
+ * The shape list's edits as pure functions over descriptors: what a Collider's or Trigger's row actions do, kept
  * apart from React so each can be tested on its own. Every function returns new arrays and objects and
- * never mutates its input — the panel writes the result straight into the shared bodies/triggers map, and
- * an undo entry keeps the old array, so sharing a nested `offset` between the two would let a later edit
+ * never mutates its input — the inspector writes the result straight into the node's `shapes`, and
+ * an undo snapshot keeps the old array, so sharing a nested `offset` between the two would let a later edit
  * reach back into history.
  */
 

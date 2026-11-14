@@ -10,11 +10,11 @@ import { stripDimensionData, stampSceneDimension } from './stripDimensionData'
 import { collectPublishedTextureIds, collectPublishedSoundIds, collectGiBakeIds } from '../../utils/references'
 import { collectPrograms } from './collectProgramUsage'
 import { extractNodeState } from '../../utils/projectStorage'
+import { migrateScenePhysics } from '../../utils/physicsMigration'
 import { resyncScene } from '../../utils/sceneResync'
 import { loadSceneData } from '../../utils/sceneStorage'
 import type { SceneMeta } from '../../utils/sceneStorage'
 import type { AssetLibs } from '../../utils/assetHash'
-import type { BodyDescription, ShapeDescription } from '../EngineContext'
 import { migrateLegacyUI } from '../../utils/uiMigration'
 import type { ScriptAsset } from '../../utils/scripts'
 import { deepClone } from '@cleo/app-kit/utils/deepClone'
@@ -34,8 +34,6 @@ export interface MultiSceneSources {
   // The live, currently-open scene + its editor maps (so unsaved edits publish, as single-scene did).
   liveScene: Scene
   liveScripts: Map<string, string>
-  liveBodies: Map<string, BodyDescription>
-  liveTriggers: Map<string, { shapes: ShapeDescription[] }>
   libs: AssetLibs
   scriptAssets?: ScriptAsset[]
   /** Script asset id -> VFS path: turns on script modules (see GameDataSources.scriptPaths). */
@@ -64,8 +62,6 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
         scene: src.liveScene,
         scripts: src.liveScripts,
         scriptAssets: src.scriptAssets,
-        bodies: src.liveBodies,
-        triggers: src.liveTriggers,
         useCache: true, // textures are embedded once below, not per scene
       })
       scenes[meta.id] = { name: meta.name, scene: gd.scene, ...(src.settings ? { render: src.settings } : {}) }
@@ -80,7 +76,9 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
     // A scene never opened in this build still carries its UI as the legacy blob; without this it
     // publishes and runs with no HUD.
     migrateLegacyUI(clone.scene, clone.ui)
-    const maps = { scripts: new Map<string, string>(), bodies: new Map<string, any>(), triggers: new Map<string, any>() }
+    const maps = { scripts: new Map<string, string>() }
+    // Its legacy bodies and triggers as Collider and Trigger nodes, as opening it would make them.
+    clone.scene = migrateScenePhysics(clone.scene, src.libs.templates)
     extractNodeState(clone.scene, maps)
     const tmp = new Scene()
     tmp.parse({ scene: clone.scene, textures: [] }, true) // useCache: textures already live in TextureManager
@@ -89,8 +87,6 @@ export async function buildMultiSceneGameData(src: MultiSceneSources): Promise<a
       scene: tmp,
       scripts: maps.scripts,
       scriptAssets: src.scriptAssets,
-      bodies: maps.bodies,
-      triggers: maps.triggers,
       useCache: true,
     })
     scenes[meta.id] = { name: meta.name, scene: gd.scene, ...(data.config?.render ? { render: data.config.render } : {}) }

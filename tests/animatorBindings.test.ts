@@ -33,6 +33,7 @@ function makeRig(opts: { speed?: number; withBody?: boolean; knownIds?: Record<s
         id: 'bodied-old-id',
         name: 'Player',
         body: opts.withBody === false ? null : {},
+        get ownBody() { return this.body; },
         parent: null,
         position: vec3.create(),
         planarSpeed: opts.speed ?? 0,
@@ -40,10 +41,10 @@ function makeRig(opts: { speed?: number; withBody?: boolean; knownIds?: Record<s
         getVariable: () => undefined,
     };
     const holder: any = {
-        id: 'holder', name: 'Holder', body: null, parent: bodied, position: vec3.create(),
+        id: 'holder', name: 'Holder', body: null, ownBody: null, parent: bodied, position: vec3.create(),
     };
     const modelNode: any = {
-        id: 'model', name: 'Model', body: null, parent: holder, position: vec3.create(),
+        id: 'model', name: 'Model', body: null, ownBody: null, parent: holder, position: vec3.create(),
         worldTransform: mat4.create(),
         // A stale id resolves to nothing — which is exactly the state a re-created node leaves behind.
         scene: { getNodeById: (id: string) => opts.knownIds?.[id] ?? null },
@@ -248,7 +249,7 @@ describe('the reference forms that already worked', () => {
     // An id that DOES resolve keeps working untouched — the repair only engages on a miss, so no saved
     // machine changes meaning.
     it('still reads through a node id that resolves', () => {
-        const other: any = { id: 'other', name: 'Other', planarSpeed: 9, body: null, parent: null };
+        const other: any = { id: 'other', name: 'Other', planarSpeed: 9, body: null, ownBody: null, parent: null };
         const { animator } = makeRig({ knownIds: { other } });
         animator.setStateMachine(machine('other'));
         step(animator, 0.2);

@@ -635,9 +635,8 @@ describe.skipIf(!present)('the Dungeon example project', () => {
             expect(base, `${v.name}'s base`).toBeDefined();
             expect(templates().indexOf(base), `${v.name} listed before its base`).toBeLessThan(templates().indexOf(v));
             const m = materializeVariant(base, v.id, v.variant.diff);
+            // Its Colliders and Triggers are nodes of that tree, so this covers its physics too.
             expect(JSON.stringify(m.nodeJson) === JSON.stringify(v.nodeJson), `${v.name} nodeJson`).toBe(true);
-            expect(m.bodies).toEqual(v.bodies);
-            expect(m.triggers).toEqual(v.triggers);
             // Patches to INHERITED nodes stay small: a tint or a scale, never the mannequin's mesh or skin.
             // (Nodes the variant adds — a sword's blade boxes — are its own content and carry their own.)
             expect(JSON.stringify(v.variant.diff.nodes), `${v.name}'s patches copy geometry`).not.toMatch(/"positions"|"skin"/);

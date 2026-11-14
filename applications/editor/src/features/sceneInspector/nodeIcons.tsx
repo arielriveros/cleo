@@ -13,6 +13,10 @@ import { Glyph as S } from './iconBase';
 export const EmptyIcon = () => (
   <S><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" /><path d="M12 3v4M12 17v4M3 12h4M17 12h4" /></S>
 );
+/** Collider: an isometric box drawn as its wire edges, hatched -- a solid body of shapes. */
+export const ColliderIcon = () => (
+  <S><path d="M12 3 20.5 7.5v9L12 21 3.5 16.5v-9Z" /><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" /><path d="M6 12.5l3 1.6M6 15.5l3 1.6" opacity="0.6" /></S>
+);
 /** Trigger volume: a dashed box — a region that is present but not solid. */
 export const TriggerIcon = () => (
   <S><rect x="4" y="4" width="16" height="16" rx="2" strokeDasharray="3.4 2.6" /><circle cx="12" cy="12" r="2.6" /></S>
@@ -117,7 +121,7 @@ export const CharacterBody2DIcon = () => (
 export const Collider2DIcon = () => (
   <S><rect x="3.5" y="8" width="17" height="8" rx="1" /><path d="M7 16l4-8M12 16l4-8M17 16l3.5-7" opacity="0.6" /></S>
 );
-/** A 2D area: a dashed box with a mark in it. */
+/** A 2D area: a dashed box with a mark in it. Unused since an Area 2D loads as a Trigger (TriggerIcon). */
 export const Area2DIcon = () => (
   <S><path d="M4 7V4h3M10 4h4M17 4h3v3M20 10v4M20 17v3h-3M14 20h-4M7 20H4v-3M4 14v-4" /><circle cx="12" cy="12" r="2.2" /></S>
 );

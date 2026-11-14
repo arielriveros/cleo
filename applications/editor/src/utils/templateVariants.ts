@@ -4,7 +4,7 @@ import { isBinaryPayload } from './binaryPayload'
 // a structured diff against its base, keyed by node NAME PATH — and inherits everything else, so an edit
 // to the base flows into every variant that did not override it.
 //
-// A variant ALSO stores the materialized result (`nodeJson`, `scripts`, `bodies`, `triggers`, `textureIds`)
+// A variant ALSO stores the materialized result (`nodeJson`, `scripts`, `textureIds`)
 // exactly like a plain template. Everything downstream — instantiate, the scene resync, hashing, bake and
 // publish — reads only that, so none of it knows variants exist. The diff is consulted only to rebuild
 // the materialized copy when the base changes, and to tell inherited values from overridden ones.
@@ -27,14 +27,18 @@ export interface NodePatch {
 export interface AddedSubtree { parent: string; index: number; node: any }
 
 export interface TemplateDiff {
-  version: 1
+  /** 2 since rigid bodies and triggers are nodes (Collider, Trigger): their changes are node patches. */
+  version: 1 | 2
   nodes: Record<string, NodePatch>
   added: AddedSubtree[]
   /** Base paths the variant drops (top-most only: a removed node takes its subtree). */
   removed: string[]
-  /** Out-of-band per-node data the variant sets (a value) or drops (null), by path. */
-  bodies: Record<string, unknown>
-  triggers: Record<string, unknown>
+  /**
+   * LEGACY (version 1), read-only: the bodies and triggers the variant set (a value) or dropped (null), by
+   * path. The editor folds them into node changes when the library loads (physicsMigration.ts).
+   */
+  bodies?: Record<string, unknown>
+  triggers?: Record<string, unknown>
   /** Inline script sources (nodes without a shared script asset), by path. */
   scripts: Record<string, string | null>
 }
@@ -46,12 +50,10 @@ export interface VariantSource {
   nodeJson: any
   textureIds?: string[]
   scripts: Record<string, string>
-  bodies: Record<string, any>
-  triggers: Record<string, any>
   variant?: { baseTemplateId: string; diff: TemplateDiff }
 }
 
-export type Materialized = Pick<VariantSource, 'nodeJson' | 'scripts' | 'bodies' | 'triggers' | 'textureIds'>
+export type Materialized = Pick<VariantSource, 'nodeJson' | 'scripts' | 'textureIds'>
 
 // Node-reference keys, as in the engine's nodeJson.ts. A reference to a node INSIDE the template is
 // compared and stored as a path, since ids differ between a base and its variant.
@@ -63,7 +65,7 @@ const SKIP_KEYS = new Set(['id', '__sourceId', 'children'])
 const SCRIPT_ID_VAR = '__scriptId'
 
 export function emptyDiff(): TemplateDiff {
-  return { version: 1, nodes: {}, added: [], removed: [], bodies: {}, triggers: {}, scripts: {} }
+  return { version: 2, nodes: {}, added: [], removed: [], scripts: {} }
 }
 
 // ── path walking ─────────────────────────────────────────────────────────────────────────────────────
@@ -287,15 +289,10 @@ export function diffTemplate(base: VariantSource, candidate: VariantSource): Tem
     diff.removed.push(path)
   }
 
-  // Out-of-band data, by path. Added nodes contribute whatever they carry.
+  // Inline script sources, by path. Added nodes contribute whatever they carry.
   for (const [path, c] of cMap) {
     const cid = c.node?.id
     const bid = inherited(path) ? bMap.get(path)!.node?.id : undefined
-    for (const kind of ['bodies', 'triggers'] as const) {
-      const cv = cid ? (candidate[kind] ?? {})[cid] : undefined
-      const bv = bid ? (base[kind] ?? {})[bid] : undefined
-      if (!deepEqual(cv ?? null, bv ?? null)) diff[kind][path] = cv === undefined ? null : cloneJson(cv)
-    }
     // A node on a shared script asset takes its source from the asset; only inline sources diff.
     if (scriptIdOf(c.node)) continue
     const cs = cid ? (candidate.scripts ?? {})[cid] : undefined
@@ -359,15 +356,9 @@ export function materializeVariant(base: VariantSource, variantId: string, diff:
   for (const e of finalMap.values()) refIn(e.node, pathToId)
 
   const scripts: Record<string, string> = {}
-  const bodies: Record<string, any> = {}
-  const triggers: Record<string, any> = {}
   for (const [path, e] of finalMap) {
     const id = pathToId.get(path)!
     const bid = baseIdAt.get(path)
-    for (const [kind, out] of [['bodies', bodies], ['triggers', triggers]] as const) {
-      const value = path in diff[kind] ? diff[kind][path] : (bid ? (base[kind] ?? {})[bid] : undefined)
-      if (value !== undefined && value !== null) out[id] = cloneJson(value)
-    }
     let source = path in diff.scripts ? diff.scripts[path] : (bid ? (base.scripts ?? {})[bid] : undefined)
     // A cached source belongs to the base's script asset; a variant that swapped the asset must not keep it.
     if (!(path in diff.scripts) && bid && scriptIdOf(e.node) !== baseScriptId.get(bid))
@@ -377,7 +368,7 @@ export function materializeVariant(base: VariantSource, variantId: string, diff:
 
   const textures = new Set<string>()
   collectTextureIds(root, textures)
-  return { nodeJson: root, scripts, bodies, triggers, textureIds: [...textures] }
+  return { nodeJson: root, scripts, textureIds: [...textures] }
 }
 
 // ── library operations ───────────────────────────────────────────────────────────────────────────────
@@ -448,22 +439,20 @@ export function baseNodeAt(base: VariantSource, diff: TemplateDiff, path: string
 }
 
 /**
- * The diff with `path`'s own changes dropped — its patch and its out-of-band data (body, trigger, inline
- * script) — so that node goes back to inheriting everything from the base. Added and removed nodes are
+ * The diff with `path`'s own changes dropped — its patch and its inline script — so that node goes back
+ * to inheriting everything from the base. Added and removed nodes are
  * structure, not values, and stay. With no `path`, every node's changes go. The root's NAME always stays.
  */
 export function revertInDiff(diff: TemplateDiff, path?: string): TemplateDiff {
   const out: TemplateDiff = cloneJson(diff)
   const drop = (p: string) => {
     delete out.nodes[p]
-    delete out.bodies[p]
-    delete out.triggers[p]
     delete out.scripts[p]
   }
   // The variant keeps being called what it is called, whatever is reverted.
   const name = (diff.nodes['']?.merge as any)?.name
   if (path !== undefined) drop(path)
-  else for (const p of new Set([...Object.keys(out.nodes), ...Object.keys(out.bodies), ...Object.keys(out.triggers), ...Object.keys(out.scripts)])) drop(p)
+  else for (const p of new Set([...Object.keys(out.nodes), ...Object.keys(out.scripts)])) drop(p)
   if (typeof name === 'string' && (path === undefined || path === '')) out.nodes[''] = { merge: { name } }
   return out
 }
@@ -474,7 +463,7 @@ export function hasOwnChanges(diff: TemplateDiff, path: string): boolean {
   const merge = { ...(patch?.merge ?? {}) }
   if (path === '') delete (merge as any).name
   return Object.keys(merge).length > 0 || !!patch?.unset?.length
-    || path in diff.bodies || path in diff.triggers || path in diff.scripts
+    || path in diff.scripts
 }
 
 /**

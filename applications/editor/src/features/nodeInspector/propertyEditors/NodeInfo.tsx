@@ -121,7 +121,7 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
       // None of the offered items reads its AddContext (only Trigger and the two skies do, and all three
       // are outside the convertible set), so a throwaway trigger map is honest here.
       const prepared = await prepareNodeTypeChange(props.node, option.nodeType,
-        item ? () => item.create({ editorScene: scene, eventEmitter, triggers: new Map() }) : null);
+        item ? () => item.create({ editorScene: scene, eventEmitter }) : null);
       if (!prepared) return;
       const { before, after } = prepared;
 

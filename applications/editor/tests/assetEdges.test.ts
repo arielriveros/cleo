@@ -349,8 +349,8 @@ describe('edgesOfAsset', () => {
 
   describe('template variant', () => {
     it('points at the template it is based on', () => {
-      const asset = { id: 'v', name: 'Sword', nodeJson: { name: 'Sword' }, scripts: {}, bodies: {}, triggers: {},
-        variant: { baseTemplateId: 'tpl-weapon', diff: { version: 1, nodes: {}, added: [], removed: [], bodies: {}, triggers: {}, scripts: {} } } }
+      const asset = { id: 'v', name: 'Sword', nodeJson: { name: 'Sword' }, scripts: {},
+        variant: { baseTemplateId: 'tpl-weapon', diff: { version: 2, nodes: {}, added: [], removed: [], scripts: {} } } }
       expect(shape(edgesOfAsset('template', asset))).toContain('template:tpl-weapon@baseTemplateId')
     })
   })

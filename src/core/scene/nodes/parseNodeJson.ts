@@ -36,7 +36,9 @@ import { ParallaxLayerNode } from "./parallaxLayerNode";
 import { CharacterBody2DNode } from "./characterBody2DNode";
 import { migrateLegacyBody2DJson } from "./body2DLegacy";
 import { Body2DNode } from "./body2DNode";
-import { Area2DNode } from "./area2DNode";
+import { ColliderNode } from "./colliderNode";
+import { TriggerNode } from "./triggerNode";
+import { migrateLegacyPhysicsJson } from "./physicsLegacy";
 import { UIRootNode } from "./ui/uiRoot";
 import { UIPanelNode, UIStackNode, UISpacerNode } from "./ui/uiContainers";
 import { UITextNode, UIImageNode } from "./ui/uiContent";
@@ -50,6 +52,8 @@ import { UIButtonNode, UIProgressBarNode, UISliderNode, UIToggleNode, UITextInpu
  * imports it back, which is why the `setChildParser` wiring below lives here.
  */
 export function parseNodeJson(parent: Node, json: any): void {
+  // Physics saved as node properties (a `body`, a `trigger`, an Area 2D) becomes Collider and Trigger nodes.
+  json = migrateLegacyPhysicsJson(json);
   switch (json?.type) {
     case 'model': ModelNode.parse(parent, json); break;
     case 'light': LightNode.parse(parent, json); break;
@@ -88,7 +92,8 @@ export function parseNodeJson(parent: Node, json: any): void {
     case 'parallaxLayer': ParallaxLayerNode.parse(parent, json); break;
     case 'characterBody2D': CharacterBody2DNode.parse(parent, migrateLegacyBody2DJson(json)); break;
     case 'body2D': Body2DNode.parse(parent, json); break;
-    case 'area2D': Area2DNode.parse(parent, json); break;
+    case 'collider': ColliderNode.parse(parent, json); break;
+    case 'trigger': TriggerNode.parse(parent, json); break;
     case 'uiRoot': UIRootNode.parse(parent, json); break;
     case 'uiPanel': UIPanelNode.parse(parent, json); break;
     case 'uiText': UITextNode.parse(parent, json); break;

@@ -20,7 +20,7 @@ export default function TemplateVariantNotice() {
   const bases = templates.filter(t => !excluded.has(t.id)).sort((a, b) => a.name.localeCompare(b.name))
   const nodeChanged = !!origin && origin.baseNode !== 'added' && hasOwnChanges(diff, origin.path)
   const anyChanged = Object.keys(diff.nodes).some(p => hasOwnChanges(diff, p))
-    || Object.keys(diff.bodies).length + Object.keys(diff.triggers).length + Object.keys(diff.scripts).length > 0
+    || Object.keys(diff.scripts).length > 0
   return (
     <div className='bg-primary/10'>
     <div className='text-ui-sm text-primary px-2 py-1 flex items-start gap-2'>

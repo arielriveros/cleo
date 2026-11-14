@@ -9,7 +9,7 @@ import {
 import { SCRIPT_ID_VAR, type ScriptAsset } from '../src/utils/scripts'
 import { cascadeFrom, createVariant, saveVariant } from '../src/utils/templateVariants'
 
-const maps = () => ({ scripts: new Map<string, string>(), bodies: new Map(), triggers: new Map() })
+const maps = () => ({ scripts: new Map<string, string>() })
 const libs = (templates: Template[]) =>
   ({ materials: [], models: [], templates, terrainMaterials: [], scripts: [], tilesets: [], aiBrains: [] }) as any
 
@@ -25,7 +25,7 @@ function messageTemplate(title = 'Default', rate = 1): Template {
         { name: 'Light', nodeType: 'node', id: 't-l2', children: [] },
       ],
     },
-    scripts: {}, bodies: {}, triggers: {},
+    scripts: {},
   }
 }
 

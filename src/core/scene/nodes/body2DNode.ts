@@ -7,15 +7,39 @@ export type Body2DKind = 'solid' | 'oneWay';
 
 /**
  * A box collider of the 2D world: a solid block or a one-way platform, centred on the node, that 2D
- * character bodies (CharacterBody2DNode) collide with like tiles. Move the node -- a script, a sequence --
- * and it is a moving platform: a body standing on it is carried along. World-aligned whatever the node's
- * rotation; `size` is the whole box.
+ * character bodies (CharacterBody2DNode) collide with like tiles. World-aligned whatever the node's
+ * rotation; `size` is the whole box. Everything under it moves with it.
+ *
+ * Mass 0 (the default): it stays where it is put. Move the node -- a script, a sequence -- and it is a
+ * moving platform: a body standing on it is carried along.
+ * Mass above 0: it falls (`gravityScale` times the 2D world's gravity) and lands on the tilemaps' solid
+ * and one-way tiles and on other colliders, pushed by nothing but what a script gives its `velocity2D`.
+ *
+ * Its `layer` is the collision layers it is in, its `mask` the layers it collides with: two colliders
+ * collide when each one's mask holds a layer of the other. Tilemaps are on layer 1. A Trigger looking for
+ * its layer sees it.
  */
 export class Body2DNode extends Node {
     public size: [number, number] = [2, 0.5];
     public kind: Body2DKind = 'solid';
     /** Off: nothing collides with it (a door that has opened). */
     public enabled: boolean = true;
+    /** 0: static or moved by hand. Above 0: falls and lands (see the class comment). */
+    public mass: number = 0;
+    /** How strongly the 2D world's gravity pulls it, when it has mass. */
+    public gravityScale: number = 1;
+    /** The collision layers it is in (bits). */
+    public layer: number = 1;
+    /** The layers it collides with (bits); -1 = all. */
+    public mask: number = -1;
+
+    /** Its velocity, world units per second, while it has mass. A script may set it (a thrown crate). */
+    public velocity2D: [number, number] = [0, 0];
+    /** Whether it rested on something at the last 2D physics step. */
+    public grounded: boolean = false;
+
+    /** Whether it moves under gravity (it has mass). */
+    public get isDynamic(): boolean { return this.mass > 0; }
 
     /** @internal Where it was at the last 2D physics step: its motion since carries what stands on it. */
     public lastX: number = NaN;
@@ -40,7 +64,14 @@ export class Body2DNode extends Node {
     }
 
     protected _serializePayload(): any {
-        return { body2D: { size: [this.size[0], this.size[1]], kind: this.kind, ...(this.enabled ? {} : { enabled: false }) } };
+        return { body2D: {
+            size: [this.size[0], this.size[1]], kind: this.kind,
+            ...(this.enabled ? {} : { enabled: false }),
+            ...(this.mass > 0 ? { mass: this.mass } : {}),
+            ...(this.gravityScale !== 1 ? { gravityScale: this.gravityScale } : {}),
+            ...(this.layer !== 1 ? { layer: this.layer } : {}),
+            ...(this.mask !== -1 ? { mask: this.mask } : {}),
+        } };
     }
 
     public static parse(parent: Node, json: any) {
@@ -49,6 +80,11 @@ export class Body2DNode extends Node {
         const node = new Body2DNode(json.name, size, json.id);
         node.kind = d.kind === 'oneWay' ? 'oneWay' : 'solid';
         node.enabled = d.enabled !== false;
+        const num = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
+        node.mass = Math.max(0, num(d.mass, 0));
+        node.gravityScale = num(d.gravityScale, 1);
+        node.layer = Math.trunc(num(d.layer, 1));
+        node.mask = Math.trunc(num(d.mask, -1));
         Node.finishParse(node, parent, json);
     }
 }

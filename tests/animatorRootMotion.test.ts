@@ -47,6 +47,7 @@ interface DuckNode {
     setWorldQuaternion(q: quat): void;
     parent: DuckNode | null;
     body: { setQuaternion(q: quat): void; q: quat } | null;
+    ownBody: { setQuaternion(q: quat): void; q: quat } | null;
     currentSpeed: number;
 }
 
@@ -66,6 +67,8 @@ function makeNode(opts?: { parent?: DuckNode | null; withBody?: boolean }): Duck
         setWorldQuaternion(q) { quat.copy(quaternion, q); body?.setQuaternion(q); },
         parent: opts?.parent ?? null,
         body,
+        // The body's owner (Animator._nearestBodiedNode walks owners, as the engine's Node.ownBody).
+        ownBody: body,
         currentSpeed: 0,
     };
 }

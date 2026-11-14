@@ -61,7 +61,7 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
   const {
     enterMaterialEditor, enterFoliageMaterialEditor, enterTerrainMaterialEditor, enterTemplateEditor, enterScriptEditor, createScriptModule, createTilesetFromImage, importAnimationFiles,
     enterAiBrainEditor, enterParticleSystemEditor, enterSequenceEditor, addAnimController,
-    importModelFiles, addTemplate, createScene, editorScene, scripts, bodies, triggers, eventEmitter, scriptAssets,
+    importModelFiles, addTemplate, createScene, editorScene, scripts, eventEmitter, scriptAssets,
   } = useCleoEngine()
   const { vfs, libs, pathIndexRef, folderKindsRef, landingFolderRef, depsRef } = useVfs()
   // The tree's root reads "<project> Files" rather than SVAR's "My files".
@@ -209,7 +209,7 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
       })
       if (!proceed) return
       try {
-        const template = await buildTemplateFromNode(node, { scripts, bodies, triggers }, scriptAssets)
+        const template = await buildTemplateFromNode(node, { scripts }, scriptAssets)
         addTemplate(template)
         Logger.info(`Template "${template.name}" created`, 'Editor')
       } catch (err) {
@@ -225,7 +225,7 @@ function AssetsExplorerHost({ active }: { active: boolean }) {
       el.removeEventListener('dragleave', onDragLeave, true)
       el.removeEventListener('drop', onDrop, true)
     }
-  }, [runImport, editorScene, scripts, bodies, triggers, addTemplate, scriptAssets])
+  }, [runImport, editorScene, scripts, addTemplate, scriptAssets])
 
   // Hovering a script card highlights every node icon in the scene tree that references it. Delegated over
   // the SVAR DOM: cards are `.wx-item[data-id]` / `.wx-row[data-id]` and data-id is the VFS path

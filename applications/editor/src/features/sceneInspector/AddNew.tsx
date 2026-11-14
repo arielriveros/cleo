@@ -36,7 +36,7 @@ function AddCell({ item, locked, onAdd }: { item: AddItem, locked: boolean, onAd
 }
 
 export default function AddNew({ scope = 'scene' }: { scope?: AddScope }) {
-  const { editorScene, selectedNode, editorMode, eventEmitter, triggers } = useCleoEngine();
+  const { editorScene, selectedNode, editorMode, eventEmitter } = useCleoEngine();
 
   // The palette's OWN scope decides its categories, not the editor mode; the hosting panel picks the half.
   const categories = useMemo(
@@ -67,7 +67,7 @@ export default function AddNew({ scope = 'scene' }: { scope?: AddScope }) {
   const selectedNodeObj = editorScene && selectedNode ? editorScene.getNodeById(selectedNode) : null;
   const locked = editorMode === 'scene' && isWithinTemplateInstance(selectedNodeObj);
 
-  const ctx: AddContext = { editorScene, eventEmitter, triggers };
+  const ctx: AddContext = { editorScene, eventEmitter };
 
   // Clicking parents onto the selection; with no selection the fallback is the scene root, which is only a
   // routing hop since `addItemTo` retargets a UI element to (or creates) a UI root anyway.

@@ -186,7 +186,8 @@ nothing is placed per tile.
 ## 2D physics
 
 2D games move their characters with the 2D physics, which reads tilemaps' tiles (solid, one-way, slopes)
-and 2D colliders, every frame the game plays.
+and 2D colliders, every frame the game plays. Collider 2Ds and Triggers are in the Add catalog's
+[Simulation](scene-authoring.md#simulation) category; a Character Body 2D is in Sprites.
 
 ### Character Body 2D
 
@@ -201,7 +202,7 @@ Character's does, reading the player's input actions or deciding as an AI. Undri
 whatever velocity a script gives it.
 
 - **Size** — the box's width and height.
-- **Layer** — the 2D layers it is on; an [Area 2D](#area-2d) sees it if the area looks for one of them.
+- **Layer** — the 2D layers it is on; a [Trigger](#trigger-2d) sees it if the trigger looks for one of them.
 - **One-way platforms** — on, one-way platforms hold it up; off, it passes through them both ways, as a bat
   or a ghost does.
 - **Driven by** — the controller possessing it, or **Add Player Controller** (reads **Move** and **Jump**)
@@ -230,17 +231,31 @@ See [Characters and controllers](../scripting/characters-and-controllers.md).
 
 ### Collider 2D
 
-A **Collider 2D** (**Sprites ▸ Collider 2D**) is a box, centred on the node, that bodies collide with like tiles: **solid**, or a
-**one-way platform**. Move the node (a script, a sequence) and it is a moving platform: a body standing on
-it rides along. **Enabled** off and nothing collides with it (a door that opened).
+A **Collider 2D** (**Simulation ▸ Collider 2D**) is a box, centred on the node, that bodies collide with like
+tiles: **solid**, or a **one-way platform**. **Enabled** off and nothing collides with it (a door that
+opened). Everything under it moves with it.
 
-### Area 2D
+- **Mass** `0` (the default): it stays where it is put. Move the node (a script, a sequence) and it is a
+  moving platform: a body standing on it rides along.
+- **Mass** above `0`: it falls, **gravity scale** times the 2D world's gravity, and lands on the tilemaps'
+  solid and one-way tiles and on other Collider 2Ds — a crate knocked off a ledge, a boulder. It slides to
+  a stop on the ground. A script can give it a velocity (`velocity2D`) to throw it; `grounded` says
+  whether it rests on something.
+- **Layer** and **Collides with** — the layers it is on and the layers it lands on. Two Collider 2Ds
+  collide when each one's **Collides with** holds a layer of the other. Tilemaps are on layer 1: leave it
+  out and the collider falls through the tiles.
 
-An **Area 2D** (**Sprites ▸ Area 2D**) is a trigger box, centred on the node and moved by its **offset**, that tells scripts what
-comes in and goes out — `onTriggerEnter(other)` and `onTriggerExit(other)`, on the area and on what came
-in. It sees bodies on the layers it **looks for**, and with **detect areas**, other areas (a sword's hitbox
-seeing an enemy's hurtbox). As the child of a character body it moves with it, its offset mirrored when
-the character faces left. A pickup, a checkpoint, a hazard, a hitbox.
+### Trigger 2D
+
+A **Trigger** (**Simulation ▸ Trigger**) in a 2D scene is a trigger box, centred on the node and moved by its
+**offset**, that tells scripts what comes in and goes out — `onTriggerEnter(other)` and
+`onTriggerExit(other)`, on the trigger and on what came in. It sees Character Body 2Ds and Collider 2Ds on
+the layers it **detects**, and with **detect triggers**, other triggers (a sword's hitbox seeing an enemy's
+hurtbox). As the child of a character body it moves with it, its offset mirrored when the character faces
+left. A pickup, a checkpoint, a hazard, a hitbox, a pressure plate a crate lands on.
+
+The same node in a 3D scene is a 3D [Trigger](physics.md#trigger) of shapes. A scene saved with Area 2Ds
+loads them as Triggers.
 
 ## Sprites
 
@@ -322,7 +337,7 @@ An animated sprite can carry an **animation set** instead of one frame list: a c
 idle, run, jump, fall, attack, hurt, death — each a list of the tileset's frames with its own frames per
 second, playing **loop**, **once** or **ping-pong**. A frame can stay on screen for its own time, fire
 **events** (a footstep, the moment a sword connects: scripts hear `onAnimationEvent(event, clip)` on the
-sprite and on its parent) and switch **hitboxes** on — an Area 2D of the character, by name, resized for that
+sprite and on its parent) and switch **hitboxes** on — a Trigger of the character, by name, resized for that
 frame; every hitbox the set names is off on the frames that do not list it. A clip can set its own pivot,
 and a once-clip can name the clip that follows it (an attack's recovery into idle).
 

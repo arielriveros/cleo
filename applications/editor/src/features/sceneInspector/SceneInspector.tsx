@@ -241,7 +241,7 @@ const DropCursor = ({ top, left, indent }: { top: number; left: number; indent: 
 export default function SceneInspector() {
   // `inspectedScene` is the running play scene while Simulating, so the tree shows the live simulation (spawns,
   // despawns, renames). Every structural edit below stays gated on isPlayMode, which Simulate keeps true.
-  const { inspectedScene: editorScene, isSimulating, eventEmitter, triggers, isPlayMode, editorMode, templateRootId,
+  const { inspectedScene: editorScene, isSimulating, eventEmitter, isPlayMode, editorMode, templateRootId,
           attachScriptToNode, activeTab, sceneList, openSceneId, selectedNode, instance } = useCleoEngine()
   const [ nodes, setNodes ] = useState<NodeDescription | null>(null);
   const [ filter, setFilter ] = useState('');
@@ -475,7 +475,7 @@ export default function SceneInspector() {
       Logger.warn('Cannot add a node inside a template instance', 'Editor');
       return;
     }
-    addItemTo(item, parent, { editorScene, eventEmitter, triggers }).catch(err => console.error(err));
+    addItemTo(item, parent, { editorScene, eventEmitter }).catch(err => console.error(err));
   };
 
   // Edit ▸ Delete in the menu bar: the same as the Delete key below, through the tree, so it is undoable

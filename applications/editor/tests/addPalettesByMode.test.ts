@@ -12,7 +12,7 @@ describe('the Add palettes follow the mode', () => {
   })
 
   it('shows only UI Elements in UI mode', () => {
-    expect(DOCK()).toMatch(/case 'ui':\s+hide\('physics', 'sceneAdd'\);\s+break;/)
+    expect(DOCK()).toMatch(/case 'ui':\s+hide\('sceneAdd'\);\s+break;/)
   })
 
   it('shows both while editing a template', () => {
@@ -20,6 +20,6 @@ describe('the Add palettes follow the mode', () => {
   })
 
   it('keeps UI Elements out of the landscape and tilemap scene sub-modes', () => {
-    expect(DOCK()).toMatch(/case 'landscape':\s+case 'tilemap':\s+hide\('uiAdd', 'scripts', 'physics'\);/)
+    expect(DOCK()).toMatch(/case 'landscape':\s+case 'tilemap':\s+hide\('uiAdd', 'scripts'\);/)
   })
 })

@@ -84,7 +84,7 @@ describe('an unpossessed character', () => {
         scene.start();
         scene.update(1 / 60, 0, false);
         scene.update(1 / 60, 0, false);
-        expect(warnings.filter(w => w.includes('no rigid body'))).toHaveLength(1);
+        expect(warnings.filter(w => w.includes('is not in a Collider'))).toHaveLength(1);
     });
 });
 

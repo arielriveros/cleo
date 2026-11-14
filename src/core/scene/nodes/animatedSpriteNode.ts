@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
 import { SpriteNode, spritePayload } from "./spriteNode";
 import { CharacterBody2DNode } from "./characterBody2DNode";
-import { Area2DNode } from "./area2DNode";
+import { TriggerNode } from "./triggerNode";
 import { createConditionContext } from "../../conditions";
 import type { ConditionContext } from "../../conditions";
 import {
@@ -310,7 +310,7 @@ export class AnimatedSpriteNode extends SpriteNode {
         this._hitboxesPending = false;
         for (const name of this._hitboxNames) {
             const area = owner.getChildByName(name)[0];
-            if (!(area instanceof Area2DNode)) continue;
+            if (!(area instanceof TriggerNode)) continue;
             const live = frame?.hitboxes?.find(h => h.area === name);
             area.enabled = !!live;
             if (live?.rect) { area.offset = [live.rect[0], live.rect[1]]; area.size = [live.rect[2], live.rect[3]]; }

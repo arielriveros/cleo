@@ -3,7 +3,7 @@ import type { Scene, ColliderPart } from 'cleo';
 import type { ShapeDescription } from '../features/EngineContext';
 
 // The trigger volumes physics is actually testing, drawn live while the game plays (Play and Simulate,
-// eye menu ▸ Triggers). The authored-map wireframes (editorHelpers section 5) only know the triggers an
+// eye menu ▸ Triggers). The Trigger-node wireframes (editorHelpers section 5) only know the triggers an
 // author placed in the editor; a combat game makes most of its triggers at runtime — a weapon's hitbox
 // that exists between two animation events, a hurtbox on every spawned enemy, a zone a script attaches —
 // and switches them on and off many times a second. So this reads the physics system instead:

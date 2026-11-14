@@ -5,7 +5,10 @@ import {
 } from '../src/utils/templateVariants'
 import { hashAsset } from '../src/utils/assetHash'
 
-/** A weapon-like base: root with script fields, a Mesh child with geometry + material, two Light children. */
+/**
+ * A weapon-like base: root with script fields, a Mesh child with geometry + material, two Light children, a
+ * camera rig, and its rigid body: a Collider child (a body is a node, so its changes are node patches).
+ */
 function weaponBase(over: Partial<{ damage: number; colour: number[] }> = {}): VariantSource {
   return {
     id: 'tpl-weapon', name: 'Weapon',
@@ -23,18 +26,20 @@ function weaponBase(over: Partial<{ damage: number; colour: number[] }> = {}): V
         { id: 'w-l1', name: 'Light', type: 'light', intensity: 1, children: [] },
         { id: 'w-l2', name: 'Light', type: 'light', intensity: 2, children: [] },
         { id: 'w-cam', name: 'Rig', type: 'cameraRig', followId: 'w-mesh', children: [] },
+        { id: 'w-body', name: 'Body', type: 'collider', collider: { mass: 1, shapes: [] }, children: [] },
       ],
     },
     textureIds: ['tex-a'],
     scripts: { 'w-l1': 'inline light script' },
-    bodies: { 'w-root': { mass: 1 } },
-    triggers: {},
   }
 }
 
+/** The Body collider's settings in a template tree. */
+const bodyOf = (nodeJson: any) => nodeJson.children.find((c: any) => c.name === 'Body').collider
+
 /** Turn a materialized variant into an "edited tab" candidate: same content, a copy we can mutate. */
 function editable(t: VariantSource): VariantSource {
-  return { ...t, nodeJson: structuredCloneLike(t.nodeJson), scripts: { ...t.scripts }, bodies: { ...t.bodies }, triggers: { ...t.triggers } }
+  return { ...t, nodeJson: structuredCloneLike(t.nodeJson), scripts: { ...t.scripts } }
 }
 function structuredCloneLike(v: any): any {
   if (v === null || typeof v !== 'object') return v
@@ -49,8 +54,8 @@ describe('diffTemplate', () => {
     expect(d.nodes).toEqual({})
     expect(d.added).toEqual([])
     expect(d.removed).toEqual([])
-    expect(d.bodies).toEqual({})
     expect(d.scripts).toEqual({})
+    expect(d.version).toBe(2)
   })
 
   it('records only the changed leaves — a material tweak never copies the geometry', () => {
@@ -71,7 +76,7 @@ describe('diffTemplate', () => {
     expect(d.nodes['']).toEqual({ unset: [['scriptVars', 'staminaMul']] })
     expect(d.removed).toEqual(['Light#1'])
     expect(d.added).toHaveLength(1)                          // the Fx child travels inside Move
-    expect(d.added[0]).toMatchObject({ parent: '', index: 3, node: { name: 'Move', children: [{ name: 'Fx' }] } })
+    expect(d.added[0]).toMatchObject({ parent: '', index: 4, node: { name: 'Move', children: [{ name: 'Fx' }] } })
     expect(d.added[0].node.id).toBeUndefined()
   })
 
@@ -83,15 +88,14 @@ describe('diffTemplate', () => {
     expect(d.added.map(a => a.node.name)).toContain('Mesh')
   })
 
-  it('carries bodies and inline scripts by path', () => {
+  it('carries a collider change as a patch of its node, and inline scripts by path', () => {
     const cand = weaponBase()
-    cand.bodies = { 'w-root': { mass: 3 } }
-    cand.triggers = { 'w-mesh': { shapes: [] } }
+    bodyOf(cand.nodeJson).mass = 3
     cand.scripts = {}
     const d = diffTemplate(weaponBase(), cand)
-    expect(d.bodies).toEqual({ '': { mass: 3 } })
-    expect(d.triggers).toEqual({ Mesh: { shapes: [] } })
+    expect(d.nodes['Body']).toEqual({ merge: { collider: { mass: 3 } } })
     expect(d.scripts).toEqual({ Light: null })
+    expect(d.bodies).toBeUndefined()
   })
 })
 
@@ -107,10 +111,11 @@ describe('materializeVariant', () => {
     expect(a.nodeJson.children[0].model.geometry.positions).toBeInstanceOf(Float32Array)
   })
 
-  it('re-keys bodies, scripts and in-template references onto the new ids', () => {
+  it('re-keys scripts and in-template references onto the new ids', () => {
     const m = materializeVariant(weaponBase(), 'v', diffTemplate(weaponBase(), weaponBase()))
     const map = jsonPathMap(m.nodeJson)
-    expect(m.bodies).toEqual({ [map.get('')!.node.id]: { mass: 1 } })
+    expect(map.get('Body')!.node.id).toBe(derivedNodeId('v', 'Body'))
+    expect(bodyOf(m.nodeJson)).toEqual({ mass: 1, shapes: [] })
     expect(m.scripts).toEqual({ [map.get('Light')!.node.id]: 'inline light script' })
     expect(map.get('Rig')!.node.followId).toBe(map.get('Mesh')!.node.id)
     expect(m.textureIds).toEqual(['tex-a'])
@@ -123,11 +128,11 @@ describe('materializeVariant', () => {
     edited.nodeJson.children[0].model.material.color = [0, 1, 0]
     edited.nodeJson.children.splice(1, 1)
     edited.nodeJson.children.push({ id: 'n', name: 'Move', type: 'node', scriptVars: { clip: 'L1' }, children: [] })
-    edited.bodies = { [edited.nodeJson.id]: { mass: 2 } }
+    bodyOf(edited.nodeJson).mass = 2
     const saved = saveVariant(variant, edited, weaponBase(), weaponBase())
     const strip = (j: any): any => ({ ...j, id: undefined, children: (j.children ?? []).map(strip) })
     expect(strip(saved.nodeJson)).toEqual(strip(edited.nodeJson))
-    expect(Object.values(saved.bodies)).toEqual([{ mass: 2 }])
+    expect(bodyOf(saved.nodeJson).mass).toBe(2)
   })
 
   it('a base edit flows into the variant, and the variant\'s own overrides survive it', () => {
@@ -224,14 +229,14 @@ describe('variant chains', () => {
 })
 
 describe('reverting a variant to its base', () => {
-  /** A Sword variant with a damage change, a recoloured Mesh, a body change and an added Move. */
+  /** A Sword variant with a damage change, a recoloured Mesh, a heavier Body and an added Move. */
   function sword() {
     const v0 = createVariant(weaponBase(), 'Sword', 'v')
     const edited = editable(v0 as VariantSource)
     edited.nodeJson.scriptVars.damage = 140
     edited.nodeJson.children[0].model.material.color = [1, 0, 0]
     edited.nodeJson.children.push({ id: 'n', name: 'Move', type: 'node', children: [] })
-    edited.bodies = { [edited.nodeJson.id]: { mass: 9 } }
+    bodyOf(edited.nodeJson).mass = 9
     return saveVariant(v0, edited, weaponBase(), weaponBase())
   }
 
@@ -247,12 +252,15 @@ describe('reverting a variant to its base', () => {
     expect(v.variant!.diff.nodes['Mesh']).toBeDefined()                // the input is untouched
   })
 
-  it('reverting the root drops its values and body but not its name', () => {
+  it('reverting the root drops its values but not its name, and leaves its Body alone', () => {
     const diff = revertInDiff(sword().variant!.diff, '')
     const m = materializeVariant(weaponBase(), 'v', diff)
     expect(m.nodeJson.name).toBe('Sword')
-    expect(Object.values(m.bodies)).toEqual([{ mass: 1 }])
+    expect(m.nodeJson.scriptVars.damage).toBe(100)
+    expect(bodyOf(m.nodeJson).mass).toBe(9)
     expect(hasOwnChanges(diff, '')).toBe(false)
+    // The Body is a node of its own: reverting it puts the base's mass back.
+    expect(bodyOf(materializeVariant(weaponBase(), 'v', revertInDiff(diff, 'Body')).nodeJson).mass).toBe(1)
   })
 
   it('reverting everything keeps the name and the structure', () => {
@@ -262,7 +270,7 @@ describe('reverting a variant to its base', () => {
     expect(m.nodeJson.scriptVars.damage).toBe(100)
     expect(m.nodeJson.children[0].model.material.color).toEqual([1, 1, 1])
     expect(m.nodeJson.children.map((c: any) => c.name)).toContain('Move')
-    expect(Object.values(m.bodies)).toEqual([{ mass: 1 }])
+    expect(bodyOf(m.nodeJson).mass).toBe(1)
     for (const p of Object.keys(diff.nodes)) expect(hasOwnChanges(diff, p)).toBe(false)
   })
 

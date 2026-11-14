@@ -1,10 +1,9 @@
 import { mat4, vec3 } from 'gl-matrix'
 import {
-  LandscapeNode, Node, clipSoupToVolume, foliageNavObstacles, heightfieldSoup, isEditorOwnedName, mergeSoups,
+  ColliderNode, LandscapeNode, Node, clipSoupToVolume, foliageNavObstacles, heightfieldSoup, isEditorOwnedName, mergeSoups,
   navObstacleFor, navSourceForShape, tessellateSources,
 } from 'cleo'
 import type { NavObstacle, NavSource, TriangleSoup } from 'cleo'
-import type { BodyDescription } from '../features/engineContextTypes'
 
 /**
  * Turning the scene the author is looking at into the triangle soup `bakeNavMesh` wants.
@@ -52,8 +51,6 @@ function rigidWorldMatrix(node: Node): mat4 {
 }
 
 export interface NavBakeGatherOptions {
-  /** Colliders, keyed by node id — the editor's authoring-time physics. */
-  bodies: Map<string, BodyDescription>
   /** Sample every Nth terrain vertex. 1 is full detail, which an XZ-planar navmesh cannot use. */
   terrainStep?: number
   /** Include terrain heightfields. */
@@ -98,10 +95,15 @@ function foliageObstaclesOf(node: LandscapeNode, volume: mat4 | null): NavObstac
   return out
 }
 
-/** The opt-out an author sets on a node -- a gate that opens -- to keep it from carving the floor. */
-function isNavObstacle(node: Node, body: BodyDescription): boolean {
-  if (body.mass > 0 || body.simulatePhysics === false) return false
-  return node.getVariable('navObstacle') !== false
+/**
+ * Whether a static Collider carves the floor. The opt-out (a gate that opens) is the `navObstacle`
+ * variable set false, on the Collider or on a node directly under it -- where a body converted from
+ * the old form keeps its node's variables.
+ */
+function isNavObstacle(collider: ColliderNode): boolean {
+  if (collider.mass > 0 || collider.simulatePhysics === false) return false
+  if (collider.getVariable('navObstacle') === false) return false
+  return !collider.children.some(c => c.getVariable('navObstacle') === false)
 }
 
 /**
@@ -111,8 +113,8 @@ function isNavObstacle(node: Node, body: BodyDescription): boolean {
  * spawns partway through a level is still geometry an agent has to path around, and a navmesh baked
  * without it routes straight through the doorway it will later block.
  */
-export function gatherNavSoup(root: Node, options: NavBakeGatherOptions): NavBakeGatherResult {
-  const { bodies, includeTerrain = true, terrainStep = 2, volume = null } = options
+export function gatherNavSoup(root: Node, options: NavBakeGatherOptions = {}): NavBakeGatherResult {
+  const { includeTerrain = true, terrainStep = 2, volume = null } = options
   const sources: NavSource[] = []
   const soups: TriangleSoup[] = []
   const obstacles: NavObstacle[] = []
@@ -125,13 +127,12 @@ export function gatherNavSoup(root: Node, options: NavBakeGatherOptions): NavBak
     // By NAME (`isEditorOwnedName`), not `Node.isEditorOwned`: that also honours an explicit flag and
     // inherits it, and a flag-owned preview holder must not take the terrain and meshes under it along.
     if (!isEditorOwnedName(node.name)) {
-      const body = bodies.get(node.id)
-      if (body && body.shapes.length > 0) {
+      if (node instanceof ColliderNode && node.shapes.length > 0) {
         const world = rigidWorldMatrix(node)
         const scale = node.worldScale
-        const carves = isNavObstacle(node, body)
+        const carves = isNavObstacle(node)
         let contributed = false
-        for (const shape of body.shapes) {
+        for (const shape of node.shapes as any[]) {
           const source = navSourceForShape(shape, world, scale)
           if (!source) continue
           // A sphere or capsule is solid but has no floor: an obstacle, never a contributor.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Scene, CharacterBody2DNode, Body2DNode, Area2DNode } from 'cleo';
+import { Scene, CharacterBody2DNode, Body2DNode, TriggerNode } from 'cleo';
 import {
     DEBUG_CATEGORIES, debugCategoryApplies, defaultDebugVisibility, effectiveDebugVisibility,
 } from '../src/features/DebugVisibilityContext';
@@ -55,10 +55,10 @@ describe('debug overlay rows by dimension', () => {
 // The reconcile that builds the boxes makes GPU line buffers, so it cannot run here; it draws a 2D body's
 // box when `show(box2DCategory(node))` holds, and this pins which row that is.
 describe('2D physics boxes in the eye menu', () => {
-    it('files bodies and colliders under Collision wireframes, areas under Trigger volumes', () => {
+    it('files bodies and colliders under Collision wireframes, triggers under Trigger volumes', () => {
         const body = new CharacterBody2DNode('Hero');
         const wall = new Body2DNode('Ledge', [2, 0.5]);
-        const area = new Area2DNode('Pickup', [1, 1]);
+        const area = new TriggerNode('Pickup');
         expect([box2DCategory(body), box2DCategory(wall), box2DCategory(area)]).toEqual(['colliders', 'colliders', 'triggers']);
     });
 });

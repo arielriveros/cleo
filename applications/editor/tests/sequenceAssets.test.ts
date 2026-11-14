@@ -87,7 +87,7 @@ describe('scenes record and refresh their links', () => {
     const stale = new SequenceNode('A', { sequence: timeline(3), sequenceId: asset.id })
     const orphan = new SequenceNode('B', { sequence: timeline(4), sequenceId: 'deleted' })
     const scene = sceneWith(stale, orphan)
-    const maps = { scripts: new Map(), bodies: new Map(), triggers: new Map() }
+    const maps = { scripts: new Map() }
     const changed = resyncScene(scene, maps, { materials: [], models: [], templates: [], terrainMaterials: [], scripts: [], sequences: [asset] }, undefined)
     expect(changed).toBe(true)
     expect(stale.sequence.duration).toBe(30)

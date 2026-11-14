@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CharacterBody2DNode, Body2DNode, Area2DNode, ControllerNode, LOCOMOTION_2D_DEFAULTS, jumpPhysics } from 'cleo'
+import { CharacterBody2DNode, Body2DNode, ControllerNode, LOCOMOTION_2D_DEFAULTS, jumpPhysics } from 'cleo'
 import type { Body2DMovement } from 'cleo'
 import Collapsable from '@cleo/app-kit/ui/Collapsable'
 import {
@@ -11,8 +11,8 @@ import { CharacterIcon, PhysicsIcon } from '../sectionIcons'
 import { LayerBits, PairInput } from './ui2D'
 
 // The inspectors of the 2D physics nodes (src/physics2d): a character body (its generic walking, flying and
-// jumping, and who drives it), a box collider, and a trigger area. Documented with the rest of 2D
-// (docs/editor/tilemap-2d.md).
+// jumping, and who drives it) and a box collider. A 2D trigger is a Trigger node in a 2D scene (TriggerEditor).
+// Documented with the rest of 2D (docs/editor/tilemap-2d.md).
 
 function useNodeEdit(node: unknown): () => void {
   const eventEmitter = useEventBus()
@@ -187,45 +187,28 @@ export function Body2DEditor(props: { node: Body2DNode }) {
                 <option value='oneWay'>One-way platform</option>
               </Select>
             </PropertyRow>
-            <PropertyRow label='Enabled'>
-              <Toggle checked={n.enabled} onChange={(c) => { n.enabled = c; changed() }} />
+            <PropertyRow label='Mass' hint='0: it stays where it is put, or where a script moves it. Above 0 it falls onto the tilemaps and other colliders.'>
+              <NumberInput step={0.1} min={0} value={n.mass} onChange={(v) => { n.mass = Math.max(0, v); changed() }} />
             </PropertyRow>
-          </PropertyTable>
-          <Hint className='mt-1'>Move it and it carries what stands on it: a moving platform, a lift.</Hint>
-        </div>
-      </Collapsable>
-    </DocScope>
-  )
-}
-
-export function Area2DEditor(props: { node: Area2DNode }) {
-  const n = props.node
-  const changed = useNodeEdit(n)
-  return (
-    <DocScope page='editor/tilemap-2d'>
-      <Collapsable title='Area 2D' icon={<PhysicsIcon />} persistKey='node.area2D' defaultOpen>
-        <div className='w-full p-2'>
-          <PropertyTable columns={['45%', '55%']}>
-            <PropertyRow label='Size'>
-              <PairInput min={0} value={n.size} onChange={(v) => { n.size = v; changed() }} />
-            </PropertyRow>
-            <PropertyRow label='Offset' hint='From the node, mirrored when the character it rides on faces left.'>
-              <PairInput value={n.offset} onChange={(v) => { n.offset = v; changed() }} />
-            </PropertyRow>
-            <PropertyRow label='Layer' hint='The layers it is on, which another area must look for to see it.'>
+            {n.mass > 0 &&
+              <PropertyRow label='Gravity scale' hint='How strongly gravity pulls it, times the 2D world’s.'>
+                <NumberInput step={0.1} value={n.gravityScale} onChange={(v) => { n.gravityScale = v; changed() }} />
+              </PropertyRow>}
+            <PropertyRow label='Layer' hint='The layers it is on. A trigger sees it when it looks for one of them.'>
               <LayerBits value={n.layer} onChange={(v) => { n.layer = v; changed() }} />
             </PropertyRow>
-            <PropertyRow label='Looks for' hint='The layers it sees bodies and areas on.'>
+            <PropertyRow label='Collides with' hint='The layers it lands on and stops at. Tilemaps are on layer 1.'>
               <LayerBits value={n.mask} onChange={(v) => { n.mask = v; changed() }} />
-            </PropertyRow>
-            <PropertyRow label='Detect areas' hint='Also see other areas: a sword’s hitbox seeing a hurtbox.'>
-              <Toggle checked={n.detectAreas} onChange={(c) => { n.detectAreas = c; changed() }} />
             </PropertyRow>
             <PropertyRow label='Enabled'>
               <Toggle checked={n.enabled} onChange={(c) => { n.enabled = c; changed() }} />
             </PropertyRow>
           </PropertyTable>
-          <Hint className='mt-1'>Scripts hear onTriggerEnter / onTriggerExit, on the area and on what came in.</Hint>
+          <Hint className='mt-1'>
+            {n.mass > 0
+              ? 'It falls, and what is under it falls with it.'
+              : 'Move it and it carries what stands on it: a moving platform, a lift.'}
+          </Hint>
         </div>
       </Collapsable>
     </DocScope>

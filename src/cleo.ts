@@ -37,7 +37,12 @@ export { ParallaxLayerNode } from "./core/scene/nodes/parallaxLayerNode";
 export { CharacterBody2DNode } from "./core/scene/nodes/characterBody2DNode";
 export { Body2DNode } from "./core/scene/nodes/body2DNode";
 export type { Body2DKind } from "./core/scene/nodes/body2DNode";
-export { Area2DNode } from "./core/scene/nodes/area2DNode";
+export { ColliderNode, ALL_LAYERS } from "./core/scene/nodes/colliderNode";
+export type { ColliderShape } from "./core/scene/nodes/colliderNode";
+export { TriggerNode } from "./core/scene/nodes/triggerNode";
+/** @deprecated A 2D trigger is a {@link TriggerNode} in a 2D scene; Area 2D nodes load as Trigger nodes. */
+export { TriggerNode as Area2DNode } from "./core/scene/nodes/triggerNode";
+export { migrateLegacyPhysicsJson, migrateLegacyPhysicsTree, hasLegacyPhysics, legacyColliderId, legacyTriggerId } from "./core/scene/nodes/physicsLegacy";
 export { World2D } from "./physics2d/world2d";
 export { advanceClip, clipLength, frameDuration, normalizedTime as clipNormalizedTime, stepSpriteMachine, parseSpriteAnimationSet, parseSpriteClip, cloneSpriteAnimationSet, createPlayhead } from "./animation/spriteAnimation";
 export type { SpriteAnimationSet, SpriteClip, SpriteFrame, SpriteFrameHitbox, SpriteClipLoop, SpriteStateMachine, SpriteMachineState, SpriteMachineTransition, ClipPlayhead } from "./animation/spriteAnimation";

@@ -9,7 +9,7 @@ export const INSTRUCTIONS = `Cleo MCP drives a RUNNING Cleo editor (a TypeScript
 Fewest calls
 - Act directly: scene_tree when you need to know what exists (its header names the selection), node_get for one node's props and world bounds. No status call needed first; tools say when no editor is connected.
 - scene_edit does a whole build in one call (each call = ONE undo step). A create op takes everything update does, so make whole objects at once, and add capture to see them:
-  {"ops":[{"op":"create","type":"cube","as":"$c","position":[0,0.5,0],"material":{"baseColor":[0.8,0.1,0.1]},"body":{"mass":1}}],"capture":{"focus":"$c"}}
+  {"ops":[{"op":"create","type":"collider","as":"$b","position":[0,2,0],"props":{"mass":1}},{"op":"create","type":"cube","parent":"$b","material":{"baseColor":[0.8,0.1,0.1]}},{"op":"update","node":"$b","shapes":"fit"}],"capture":{"focus":"$b"}}
 - Scripts: script_write (with attach) returns compile and type errors; then play_control {"action":"simulate","runSeconds":2,"capture":true,"stopAfter":true} runs it, returns new logs (early on the first error) and shows it.
 - Big outputs cost time: use scene_tree root/depth/name filters rather than the whole scene.
 - scene_save only when asked to keep the work. history undoes whole calls.
@@ -27,7 +27,7 @@ Engine conventions
     onUpdate(delta: number, time: number) { this.rotateY(this.speed * delta) }
   }
   Handlers: onStart, onUpdate(delta, time), onCollision(other), onTriggerEnter(other), onTriggerExit(other), onSpawn, onDespawn. Import everything from 'cleo' (Input, Logger, Game, Vec...); there is no global object. Other scripts are imported by their asset path ('@/Shared/Math').
-- Physics: a node collides only once it has a body. mass 0 = static; a moving player body usually locks rotation: angularConstraints [0,0,0]. Move a body-driven node through this.velocity, not setPosition. Triggers detect overlap without collision.
+- Physics: a Collider node is the rigid body, its shapes are what collides, and everything under it moves with it (mass 0 = static; with mass it falls, its children too). A Character goes under a Collider holding its capsule, which usually locks rotation: angularConstraints [0,0,0]. Move a body through its velocity, not setPosition. A Trigger node detects overlap without collision; collision and trigger events fire on the Collider or Trigger itself. layer/mask filter what collides.
 - Animation one-shots play by action NAME (animator.playAction('Attack')); scripts never play clips directly.
 - Prefer existing templates and models (asset_list) over primitives when they fit.
 

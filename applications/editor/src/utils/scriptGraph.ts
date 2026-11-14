@@ -65,9 +65,11 @@ export function buildScriptGraphCtx(paths: ReadonlyMap<string, string>, assets: 
 /* Inheritance                                                                 */
 /* -------------------------------------------------------------------------- */
 
-const ENGINE_BASE: Record<string, ScriptBaseType> = Object.fromEntries(
-  (Object.entries(BASE_CLASS) as [ScriptBaseType, string][]).map(([type, cls]) => [cls, type]),
-)
+const ENGINE_BASE: Record<string, ScriptBaseType> = {
+  ...Object.fromEntries((Object.entries(BASE_CLASS) as [ScriptBaseType, string][]).map(([type, cls]) => [cls, type])),
+  // The engine's deprecated alias of TriggerNode: a script extending it is a Trigger script.
+  Area2DNode: 'trigger',
+}
 
 function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, '')

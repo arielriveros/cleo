@@ -160,7 +160,7 @@ const BUILTIN_HINTS: Record<string, string> = {
   isFalling: 'True while off the ground AND losing height. Ask this rather than “not isGrounded”, which is also true on the way up.',
   airTime: 'Seconds airborne continuously; 0 while grounded. Lets airtime rather than clip length drive a fall animation.',
   groundedTime: 'Seconds grounded continuously; 0 while airborne. Use it to stop a landing state firing again mid-run.',
-  groundDistance: 'Distance from the collider to the ground below, or −1 when unknown. Needs a Ground Probe on the body (Physics panel).',
+  groundDistance: 'Distance from the collider to the ground below, or −1 when unknown. Needs a Ground Probe on the body (its Collider).',
   slopeAngle: 'Tilt of the ground under the node, degrees from level. Reads 0 while airborne.',
 }
 
@@ -199,8 +199,6 @@ export function accessibleNodeVariables(
   sourceNode: Node | null,
   sourceScene: Scene | null,
   scriptAssets: ScriptAsset[] = [],
-  /** Ids of nodes the project has authored a rigid body for — the editor's `bodies` map. See below. */
-  bodiedIds?: Set<string>,
 ): AccessibleVariable[] {
   const out: AccessibleVariable[] = []
   if (!sourceNode) return out
@@ -228,8 +226,8 @@ export function accessibleNodeVariables(
 
   /**
    * Engine-measured values, offered for Self, Parent and the nearest ancestor with a body — motion built-ins
-   * read 0 on a bodyless node. Self and Parent are UNCONDITIONAL: the editor never calls `setBody`, so
-   * `bodiedIds` (the authored side map's key set) is the only usable body test here.
+   * read 0 on a bodyless node. Self and Parent are UNCONDITIONAL: the editor scene builds no bodies, so the
+   * Collider node is the only usable body test here.
    */
   const builtins = (nodeRef: string, label: string) => {
     for (const [name, def] of Object.entries(NODE_BUILTINS)) {
@@ -241,10 +239,10 @@ export function accessibleNodeVariables(
   }
 
   /**
-   * The nearest ancestor (or self) with a rigid body. Checks the authored set and the live body, so it
-   * resolves both while authoring and at runtime.
+   * The nearest ancestor (or self) with a rigid body: a Collider, or a node with a live body of its own (a
+   * script's setBody), so it resolves both while authoring and at runtime.
    */
-  const hasBody = (n: Node) => !!n.body || !!bodiedIds?.has(n.id)
+  const hasBody = (n: Node) => n.nodeType === 'collider' || !!n.ownBody
   const bodiedAncestor = (): Node | null => {
     let n: Node | null = sourceNode
     while (n) {

@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { mat4, vec3 } from 'gl-matrix';
-import { Node, Raycaster, isTextEntryEvent, markEditorOwned, uiProjectToScreen } from 'cleo';
+import { ColliderNode, Node, Raycaster, TriggerNode, isTextEntryEvent, markEditorOwned, uiProjectToScreen } from 'cleo';
 import { useCleoEngine } from '../EngineContext';
-import { useHistory } from '../HistoryContext';
 import { usePlayback } from '../PlaybackContext';
 import { useSelection } from '../SelectionContext';
 import { useDebugVisibility } from '../DebugVisibilityContext';
@@ -24,11 +23,11 @@ import {
 import { shapeRowTitle } from '../nodeInspector/physicsEditors/shapeListOps';
 
 /**
- * Collision shapes, edited where they are: the in-viewport half of the Physics panel.
+ * Collision shapes, edited where they are: the in-viewport half of a Collider's or a Trigger's inspector.
  *
- * Every shape of the selected node shows a small dot at its centre, red for the body's and green for the
- * trigger's. Clicking one (or a row in the Physics panel) SELECTS that shape, and the viewport goes into
- * shape edit for it:
+ * Every shape of the selected Collider shows a small dot at its centre, red, and of the selected Trigger
+ * green. Clicking one (or a row in the inspector) SELECTS that shape, and the viewport goes into shape
+ * edit for it:
  *
  *   - square size handles sit on both faces of every axis the shape can be sized along. Dragging one
  *     moves that face alone — the opposite one stays put and the offset follows — Alt grows both sides
@@ -37,8 +36,8 @@ import { shapeRowTitle } from '../nodeInspector/physicsEditors/shapeListOps';
  *     same trick SocketGizmo uses, while the node's own gizmo steps aside (EngineViewport);
  *   - Escape, or any node selection, goes back to editing the node.
  *
- * Every drag is one undo step and writes the same bodies/triggers maps the panel reads, so the two stay in
- * step. Nothing here re-renders per frame: one rAF loop places the DOM handles imperatively, and the
+ * Every drag writes the node's own `shapes`, which the inspector reads, so the two stay in step; its end
+ * is one scene change, which the history records as one undo step. Nothing here re-renders per frame: one rAF loop places the DOM handles imperatively, and the
  * component only re-renders when the shape list's makeup (count, types) or the selection changes.
  */
 
@@ -74,14 +73,19 @@ const PROXY_NAME = '__editor__collisionShapeProxy';
 
 const ownerPose = (node: Node): OwnerPose => ({ position: node.worldPosition, quaternion: node.worldQuaternion, scale: node.worldScale });
 
+/** The shapes `node` authors on `channel`: a Collider's are the body's, a 3D Trigger's the trigger's. */
+function shapesOf(node: Node | null | undefined, channel: CollisionChannel): ShapeDescription[] | undefined {
+  if (channel === 'body') return node instanceof ColliderNode ? node.shapes as ShapeDescription[] : undefined;
+  return node instanceof TriggerNode && !node.is2D ? node.shapes as ShapeDescription[] : undefined;
+}
+
 /** "body:0;trigger:0" -> the makeup the DOM depends on: which shapes exist and of what type. */
-function makeup(bodyShapes: ShapeDescription[] | undefined, triggerShapes: ShapeDescription[] | undefined): string {
-  return `${(bodyShapes ?? []).map(s => s.type).join(',')}|${(triggerShapes ?? []).map(s => s.type).join(',')}`;
+function makeup(node: Node | null | undefined): string {
+  return `${(shapesOf(node, 'body') ?? []).map(s => s.type).join(',')}|${(shapesOf(node, 'trigger') ?? []).map(s => s.type).join(',')}`;
 }
 
 export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
-  const { instance, editorScene, bodies, triggers, eventEmitter, withoutDirty, editorMode } = useCleoEngine();
-  const { push } = useHistory();
+  const { instance, editorScene, eventEmitter, withoutDirty, editorMode } = useCleoEngine();
   const { isPlayMode } = usePlayback();
   const { gizmoMode } = useSelection();
   const { visibility } = useDebugVisibility();
@@ -90,12 +94,14 @@ export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
 
   const node = selectedNodeId && editorScene && selectedNodeId !== editorScene.root?.id
     ? editorScene.getNodeById(selectedNodeId) ?? null : null;
-  // A placed template instance is read-only in Scene mode, exactly as the Physics panel is.
+  // A placed template instance is read-only in Scene mode, exactly as its inspector is.
   const readOnly = editorMode === 'scene' && !!node && isWithinTemplateInstance(node);
   const active = !!node && !isPlayMode && !readOnly;
   const showChannel: Record<CollisionChannel, boolean> = { body: visibility.colliders.editor, trigger: visibility.triggers.editor };
 
-  const listOf = (channel: CollisionChannel, id: string) => (channel === 'body' ? bodies : triggers).get(id)?.shapes;
+  // Through a ref: the loop and the listeners are bound once, and resolve the node when they run.
+  const sceneRef = useRef(editorScene); sceneRef.current = editorScene;
+  const listOf = (channel: CollisionChannel, id: string) => shapesOf(sceneRef.current?.getNodeById(id), channel);
   const entries = active ? (['body', 'trigger'] as const).flatMap(channel => !showChannel[channel] ? [] :
     (listOf(channel, node!.id) ?? []).map((shape, index) => ({ channel, index, shape }))) : [];
   const selected = selection && node && selection.nodeId === node.id
@@ -144,7 +150,7 @@ export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
   useEffect(() => {
     const check = () => {
       const n = nodeRef.current;
-      const next = n ? makeup(bodies.get(n.id)?.shapes, triggers.get(n.id)?.shapes) : '';
+      const next = n ? makeup(sceneRef.current?.getNodeById(n.id)) : '';
       if (next !== makeupRef.current) { makeupRef.current = next; rerender(x => x + 1); }
     };
     check();
@@ -154,7 +160,7 @@ export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
       eventEmitter.off('PHYSICS_CHANGED', check);
       eventEmitter.off(COLLISION_SHAPES_EDITED, check);
     };
-  }, [eventEmitter, bodies, triggers, selectedNodeId]);
+  }, [eventEmitter, selectedNodeId]);
 
   useEffect(() => {
     const onStart = () => { gizmoBusyRef.current = true; };
@@ -165,13 +171,12 @@ export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
   }, [eventEmitter]);
 
   // ------------------------------------------------------------------------------------------------
-  // Writing the maps
+  // Writing the node's shapes
   // ------------------------------------------------------------------------------------------------
 
   const writeShapes = (nodeId: string, channel: CollisionChannel, shapes: ShapeDescription[]) => {
-    const map = (channel === 'body' ? bodies : triggers) as Map<string, { shapes: ShapeDescription[] }>;
-    const record = map.get(nodeId);
-    if (record) map.set(nodeId, { ...record, shapes });
+    const target = sceneRef.current?.getNodeById(nodeId);
+    if (shapesOf(target, channel)) (target as ColliderNode | TriggerNode).shapes = shapes as any;
   };
   const replaceShape = (nodeId: string, channel: CollisionChannel, index: number, shape: ShapeDescription) => {
     const list = listOf(channel, nodeId);
@@ -180,21 +185,16 @@ export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
     writeShapes(nodeId, channel, next);
     eventEmitter.emit(COLLISION_SHAPES_EDITED);
   };
-  /** One undo step for a finished gesture, and the full announcement (helpers, nav soup, dirty flag). */
-  const commitGesture = (nodeId: string, channel: CollisionChannel, before: ShapeDescription[], label: string) => {
-    const target = editorScene?.getNodeById(nodeId);
+  /**
+   * A finished gesture, announced in full (helpers, nav soup, dirty flag). The scene change is what the
+   * history records: the node's snapshot from before the drag against the one after, one undo step.
+   */
+  const commitGesture = (nodeId: string, channel: CollisionChannel, before: ShapeDescription[], _label: string) => {
+    const target = sceneRef.current?.getNodeById(nodeId);
     const after = listOf(channel, nodeId);
-    const announce = () => {
-      eventEmitter.emit('PHYSICS_CHANGED');
-      if (target) eventEmitter.emit('SCENE_CHANGED', { kind: 'physics', node: target });
-    };
-    if (!after || JSON.stringify(after) === JSON.stringify(before)) { eventEmitter.emit('PHYSICS_CHANGED'); return; }
-    push({
-      label: `${label} ${channel === 'body' ? 'body' : 'trigger'} shape`,
-      undo: () => { writeShapes(nodeId, channel, before); announce(); },
-      redo: () => { writeShapes(nodeId, channel, after); announce(); },
-    });
-    announce();
+    eventEmitter.emit('PHYSICS_CHANGED');
+    if (!after || JSON.stringify(after) === JSON.stringify(before)) return;
+    if (target) eventEmitter.emit('SCENE_CHANGED', { kind: 'physics', node: target });
   };
 
   // ------------------------------------------------------------------------------------------------
@@ -282,7 +282,7 @@ export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [instance, bodies, triggers]);
+  }, [instance]);
 
   // ------------------------------------------------------------------------------------------------
   // Size-handle drags
@@ -411,7 +411,7 @@ export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [bodies, triggers]);
+  }, []);
 
   const onProxyChange = (_id: string, patch: TransformPatch) => {
     const proxy = proxyRef.current;
@@ -468,7 +468,7 @@ export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
     };
     eventEmitter.on(COLLISION_SHAPE_FRAME, onFrame);
     return () => { eventEmitter.off(COLLISION_SHAPE_FRAME, onFrame); };
-  }, [eventEmitter, editorScene, instance, bodies, triggers]);
+  }, [eventEmitter, editorScene, instance]);
 
   // ------------------------------------------------------------------------------------------------
 

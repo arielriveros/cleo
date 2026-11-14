@@ -379,11 +379,15 @@ export class PhysicsSystem {
       authoring.derived++;
       try {
       for (const node of nodes) {
-        if ((!node.body && !node.trigger) || !node.hasStarted) continue;
+        // A node's OWN body: a Character's `body` is its Collider's, which that collider syncs itself.
+        // A Collider or Trigger node built in code (never parsed into a running scene) builds it now.
+        if (node.wantsPhysicsBuild) node.buildPhysics();
+        const ownBody = node.ownBody;
+        if ((!ownBody && !node.trigger) || !node.hasStarted) continue;
 
         // BOTH, when a node has both: a solid door or gate with an interaction zone around it. This used to
         // be `node.body || node.trigger`, which silently left such a node's trigger out of the world.
-        for (const bodyToAdd of [node.body, node.trigger]) {
+        for (const bodyToAdd of [ownBody, node.trigger]) {
           if (!bodyToAdd) continue;
           if (node.markForRemoval) {
             // Removing the body is what stops the callbacks: the 'collide' listener registered in
@@ -394,16 +398,16 @@ export class PhysicsSystem {
           }
         }
 
-        if (node.body) {
+        if (ownBody) {
           // Where the NODE sits, not where the body's centre of mass does: with an offset collider the
           // two differ by RigidBody's centre-of-mass offset (see RigidBody.recenterMass).
-          const pos = node.body.position.toArray();
-          const asleep = node.body.isSleeping;
+          const pos = ownBody.position.toArray();
+          const asleep = ownBody.isSleeping;
 
           // Must sample after world.step() and before Scene.update runs every script's onUpdate, so a script
           // reading node.currentSpeed sees the step that just happened rather than last frame's.
-          let motion = this._motion.get(node.body);
-          if (!motion) { motion = createMotionRecord(); this._motion.set(node.body, motion); }
+          let motion = this._motion.get(ownBody);
+          if (!motion) { motion = createMotionRecord(); this._motion.set(ownBody, motion); }
           // Over the time actually simulated: a frame whose worker step has not come back moved nothing, and
           // sampling it would read as a stop.
           if (stepDt > 0) sampleMotion(
@@ -411,25 +415,25 @@ export class PhysicsSystem {
             // about an offset centre of mass would otherwise read as movement.
             motion, [pos[0], pos[1], pos[2]], stepDt, this.up,
             // Facing comes from the BODY, not the node: the node has not been written yet this frame.
-            bodyForward(node.body, this._forwardScratch),
-            this._motionConfigFor(node.body),
+            bodyForward(ownBody, this._forwardScratch),
+            this._motionConfigFor(ownBody),
           );
 
-          if (node.body.mass > 0 && worker) {
+          if (ownBody.mass > 0 && worker) {
             // DYNAMIC, WORKER: the node is drawn where its body is at THIS frame's time — the worker's step
             // interpolated (see WorkerExecutor.visualPose) — while the body keeps the latest simulated pose.
             // Written without pushing into the body; the node remembers the gap instead, so a script that
             // then moves or turns it moves the body by the same amount (see Node._showSimulatedPose).
-            const q = node.body.quaternion, simRotation = this._simRotation;
+            const q = ownBody.quaternion, simRotation = this._simRotation;
             simRotation[0] = q.x; simRotation[1] = q.y; simRotation[2] = q.z; simRotation[3] = q.w;
-            if (worker.visualPose(node.body.handle, this._visualPose)) {
-              this._world.colliderFrameToOrigin(node.body.handle, this._visualPose, this._visualOrigin);
+            if (worker.visualPose(ownBody.handle, this._visualPose)) {
+              this._world.colliderFrameToOrigin(ownBody.handle, this._visualPose, this._visualOrigin);
               node._showSimulatedPose(this._visualOrigin, this._visualRotation, pos, simRotation);
             } else if (!asleep || node._drawnApart) {
               // Its own pose: nothing to interpolate. Once more after it falls asleep, to settle where it is.
               node._showSimulatedPose(pos, simRotation, pos, simRotation);
             }
-          } else if (node.body.mass > 0) {
+          } else if (ownBody.mass > 0) {
             // DYNAMIC: physics owns the world pose, and the node's local one is rebased from it under
             // whatever parent it has. A moving parent does not drag the body (as in Unity or Godot).
             // A sleeping body did not move: writing its pose back would only dirty the node's transform (and
@@ -437,14 +441,14 @@ export class PhysicsSystem {
             node._clearSimulatedPose();
             if (!asleep) {
               node.setWorldPosition(pos);
-              const quat = node.body.quaternion;
+              const quat = ownBody.quaternion;
               node.setWorldQuaternion([quat.x, quat.y, quat.z, quat.w]);
             }
-          } else if (this._followVersion.get(node.body) !== node.transformVersion) {
+          } else if (this._followVersion.get(ownBody) !== node.transformVersion) {
             // STATIC: the body follows its node, so colliders in a moved group (or on a moving platform)
             // stay where they are drawn. Only when the node actually moved, which is rare.
-            this._followVersion.set(node.body, node.transformVersion);
-            node.body.setTransform(node.worldPosition, node.worldQuaternion);
+            this._followVersion.set(ownBody, node.transformVersion);
+            ownBody.setTransform(node.worldPosition, node.worldQuaternion);
           }
         }
 
@@ -844,7 +848,7 @@ export class PhysicsSystem {
     const gravity = Math.hypot(g[0], g[1], g[2]);
     const dt = substep > 0 ? substep : PhysicsSystem.MAX_SUBSTEP;
     const time = this._world.time;
-    const isCharacter = (b: PhysicsBody) => (b as any).owner?.nodeType === 'character';
+    const isCharacter = (b: PhysicsBody) => b.isCharacter;
     for (const volume of volumes) {
       if (!volume.enabled) continue;
       const spec = volume.buoyancyVolume(time);

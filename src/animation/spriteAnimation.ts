@@ -10,9 +10,9 @@ import type { ConditionContext, ConditionNode } from '../core/conditions';
 // running) and from triggers a script raises (attack, hurt). Pure data and pure steps: the node that plays
 // them is AnimatedSpriteNode.
 
-/** A hitbox a frame switches on: an Area2D near the sprite, by name, optionally resized for the frame. */
+/** A hitbox a frame switches on: a 2D Trigger near the sprite, by name, optionally resized for the frame. */
 export interface SpriteFrameHitbox {
-    /** The Area2DNode's name, in the character the sprite belongs to. */
+    /** The Trigger node's name, in the character the sprite belongs to. */
     area: string;
     /** Offset and size for this frame, world units, from the character's position (mirrored when it faces left). */
     rect?: [number, number, number, number];
