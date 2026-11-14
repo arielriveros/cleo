@@ -55,6 +55,7 @@ import { useCleoEngine, MODE_RENDERS_VIEWPORT } from '../EngineContext';
 import { TextInput, cn, labelClass } from '@cleo/app-kit/ui';
 import { DocHover } from '@cleo/app-kit/ui/DocTooltip';
 import { DocScope, useDocEntry } from '@cleo/app-kit/docs/DocScope';
+import { useDocTargetRef } from '@cleo/app-kit/docs/docTargets';
 import { PANEL_TAB_DOC_PAGE, PANEL_TAB_DOC_SECTION, panelDocPage } from './panelTitles';
 
 // The wrapper must stay `relative` so UIOverlay/StateGraph/LoadingScreen (absolute inset-0) and the
@@ -329,8 +330,10 @@ function ProjectOptionsDockPanel(_: IDockviewPanelProps) { return <OptionsDockFr
 export function PanelTab(props: IDockviewPanelHeaderProps) {
   const title = props.api.title ?? '';
   const entry = useDocEntry(undefined, `${PANEL_TAB_DOC_PAGE}#${PANEL_TAB_DOC_SECTION}::${title}`);
+  // The whole tab answers What's This? / F1, its padding included, not only the title text.
+  const targetRef = useDocTargetRef<HTMLDivElement>(entry);
   return (
-    <div className="flex items-center h-full px-2 text-ui whitespace-nowrap select-none">
+    <div ref={targetRef} className="flex items-center h-full px-2 text-ui whitespace-nowrap select-none">
       <DocHover entry={entry}>{title}</DocHover>
     </div>
   );

@@ -71,6 +71,8 @@ module.exports = {
       },
       fontFamily: {
         mono: 'var(--font-mono)',
+        // The docs viewer's prose (theme.css --font-doc); the chrome stays on --font-ui.
+        doc: 'var(--font-doc)',
       },
       // The apps' type scale as utilities (`text-ui-sm`), so a size is a ROLE rather than a pixel
       // count — `text-[11px]` scattered through the panels is what let sizes drift. Must stay in step
@@ -84,6 +86,11 @@ module.exports = {
         // other moves nothing; the smaller ones replace bare text-[Npx] values, which carry none.
         'ui': ['var(--text-ui)', '1rem'],
         'ui-lg': ['var(--text-ui-lg)', '1.25rem'],
+        // Reading sizes: the docs viewer's headings (and nothing in the panels).
+        'doc': ['var(--text-doc)', '1.65'],
+        'ui-xl': ['var(--text-ui-xl)', '1.4rem'],
+        'ui-2xl': ['var(--text-ui-2xl)', '1.6rem'],
+        'ui-3xl': ['var(--text-ui-3xl)', '1.9rem'],
       },
       boxShadow: {
         'panel': '0 1px 1px rgba(0,0,0,0.15), 0 6px 12px rgba(0,0,0,0.25)'

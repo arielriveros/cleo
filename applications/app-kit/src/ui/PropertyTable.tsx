@@ -4,6 +4,7 @@ import { labelClass, valueClass } from './typography';
 import { DocHover } from './DocTooltip';
 import { useDocEntry } from '../docs/DocScope';
 import { reportShadowedHint } from '../docs/docIndex';
+import { useDocTargetRef } from '../docs/docTargets';
 
 export interface PropertyTableProps {
   /** Column widths, e.g. `['25%', '75%']` or `[25, 75]`. Defaults to a 40/60 split. */
@@ -57,8 +58,10 @@ export function PropertyRow({
 }: PropertyRowProps) {
   const entry = useDocEntry(label, doc, 'field');
   if (entry && hint) reportShadowedHint(String(label), hint, `${entry.page}: ${entry.label}`);
+  // The whole row answers What's This? / F1, the value cell included.
+  const targetRef = useDocTargetRef<HTMLTableRowElement>(entry);
   return (
-    <tr className={cn(divider && 'border-b border-border', className)}>
+    <tr ref={targetRef} className={cn(divider && 'border-b border-border', className)}>
       <td className={cn(labelClass, 'py-1 pr-2', labelClassName)}>
         <DocHover entry={entry} fallback={hint} affordance='field'>{label}</DocHover>
       </td>

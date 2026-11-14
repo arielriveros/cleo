@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from './cn';
 import { DocHover } from './DocTooltip';
 import { useDocEntry } from '../docs/DocScope';
+import { useDocTargetRef } from '../docs/docTargets';
 
 export interface ToggleProps {
   checked: boolean;
@@ -22,8 +23,11 @@ export interface ToggleProps {
 /** Pill on/off switch (primary when on). The whole control — track + optional label — is one button. */
 export function Toggle({ checked, onChange, label, disabled, className, title, doc }: ToggleProps) {
   const entry = useDocEntry(label, doc, 'field');
+  // The whole switch answers What's This? / F1, track included.
+  const targetRef = useDocTargetRef<HTMLButtonElement>(entry);
   return (
     <button
+      ref={targetRef}
       type='button'
       role='switch'
       aria-checked={checked}

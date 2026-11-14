@@ -3,6 +3,7 @@ import DialogHost from '@cleo/app-kit/feedback/DialogHost';
 import ToastStack from '@cleo/app-kit/feedback/ToastStack';
 import LoadingScreen from '@cleo/app-kit/feedback/LoadingScreen';
 import { attachLogStore } from '@cleo/app-kit/feedback/logStore';
+import { DocsViewerHost } from '@cleo/app-kit/docs/viewer/DocsViewerHost';
 import '@cleo/app-kit/styles/theme.css';
 import './docsSource';
 import App from './app/App';
@@ -14,4 +15,11 @@ attachLogStore();
 bootLoad();
 
 const root = document.getElementById('root');
-if (root) ReactDOM.createRoot(root).render(<><App /><LoadingScreen variant='fullscreen' subtitle='Creator' logo={LOGO} logoPixels={LOGO_PIXELS} /><DialogHost /><ToastStack /></>);
+if (root) ReactDOM.createRoot(root).render(<>
+  <App />
+  <LoadingScreen variant='fullscreen' subtitle='Creator' logo={LOGO} logoPixels={LOGO_PIXELS} />
+  <DialogHost />
+  <ToastStack />
+  {/* Help > Documentation, F1 and What's This?, on every page including Home. */}
+  <DocsViewerHost home='creator/index' storageKey='cleo_creator_docs_window' />
+</>);

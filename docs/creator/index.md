@@ -33,7 +33,7 @@ then the menus, the graphics backend in use, and the open tool's name.
 | **Edit** | **Undo** and **Redo**, greyed: the Creator keeps no undo history yet. |
 | **View** | **Frame** (**F**), **Reset Layout** (the tool's default panels), and the graphics backend: **WebGL 2** or **WebGPU**. Switching reloads; every tool keeps its document, so nothing is lost. WebGPU runs erosion and the fluid solver on the GPU. |
 | **Project** | **Open Cleo Editor**: the Editor window that opened this one, or a new one. |
-| **Help** | **Keyboard Shortcuts…** (the table below) and **About Cleo Creator…**. |
+| **Help** | **Documentation** (F1): these docs in a floating window; **What's This?** (Shift+F1): click any part of the Creator to open its docs; **Keyboard Shortcuts…** (the table below) and **About Cleo Creator…**. They work as in the Editor: see [Help and the docs](../editor/interface.md#help-and-the-docs). |
 
 ### Keyboard shortcuts
 
@@ -45,6 +45,8 @@ then the menus, the graphics backend in use, and the open tool's name.
 | **X** | FX: switch the gizmo between local and world axes |
 | **Delete** or **Backspace** | FX: remove the selected body |
 | **Esc** | FX: clear the selection |
+| **F1** | Open the docs for what the pointer is over |
+| **Shift + F1** | What's This?: click any part of the Creator to open its docs |
 
 None of them fire while a text field has the keyboard.
 

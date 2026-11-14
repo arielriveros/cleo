@@ -4,6 +4,7 @@ import { labelClass, valueClass } from './typography';
 import { clamp } from '../utils/math';
 import { DocHover } from './DocTooltip';
 import { useDocEntry } from '../docs/DocScope';
+import { useDocTargetRef } from '../docs/docTargets';
 
 /**
  * The track fill for a 0..1 position: up to the thumb's centre, which travels from 7px to 100% - 7px
@@ -74,6 +75,8 @@ export function Slider({
   const [editing, setEditing] = useState(false);
   const typedMax = Math.max(max, hardMax ?? max);
   const entry = useDocEntry(label, doc, 'field');
+  // The whole row answers What's This? / F1, the track and readout included.
+  const targetRef = useDocTargetRef<HTMLLabelElement>(entry);
   const pct = max > min ? clamp(((value - min) / (max - min)) * 100, 0, 100) : 0;
   const text = typeof readout === 'function' ? readout(value) : sliderReadout(value, step);
 
@@ -84,7 +87,7 @@ export function Slider({
   };
 
   return (
-    <label className={cn('flex items-center gap-2 my-1', valueClass, className)} title={entry ? undefined : title}>
+    <label ref={targetRef} className={cn('flex items-center gap-2 my-1', valueClass, className)} title={entry ? undefined : title}>
       {label !== undefined && (
         <DocHover entry={entry} fallback={title ?? (typeof label === 'string' ? label : undefined)}
           affordance='field' className={cn(labelClass, 'w-[70px] shrink-0 truncate', labelClassName)}>

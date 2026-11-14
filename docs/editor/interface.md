@@ -34,7 +34,7 @@ screen's pixel scan across it, and its tooltip names the open project.
 | **Edit** | **Undo** and **Redo** (named after what they undo), **Delete** the selected node. |
 | **View** | **Frame Selected** (F) and **Reset Layout**. |
 | **Project** | **Import Project…** (a project `.zip`), **Export Project** (the whole project to a `.zip`), and **Publish ▸** Web (HTML), Desktop (Electron) or Desktop installer. See [Projects](projects.md) and [Publishing](publishing.md). |
-| **Help** | **Keyboard Shortcuts…** (the table below) and **About Cleo Engine…** (the version). |
+| **Help** | **Documentation** (F1), **What's This?** (Shift+F1), **Keyboard Shortcuts…** (the table below) and **About Cleo Engine…** (the version). See [Help and the docs](#help-and-the-docs). |
 
 Click a menu to open it; while one is open, pointing at another opens that one instead. The arrow keys move
 through the menus and their items, Enter chooses, Esc closes.
@@ -65,6 +65,42 @@ After the menus come, when there is something to say:
 
 **Right** — the [mode selector](modes.md), then **Claude**, which opens the [Claude panel](ai-agent-link.md).
 
+## Help and the docs
+
+These pages are built into the editor: the hover cards, the docs window and What's This? all read them,
+so what you read here is what the editor says.
+
+Pointing at a title, a tab or a field for a moment shows its **hover card**: the name, the first sentence
+of its description here, and where it sits in the docs. **F1** while a card shows opens the whole entry.
+
+### Documentation
+
+**Help ▸ Documentation** (F1) opens these docs in a window that floats over the editor without blocking
+it, so a page can stay open beside the panel it describes.
+
+| Part | Does |
+|---|---|
+| **Contents** | The sidebar: every page, grouped as the [docs index](../README.md) lists them, and the open page's sections under it. The sidebar button hides it. |
+| **Search** | The box at the top of the sidebar finds page titles, sections and every documented term; ↑ / ↓ and Enter pick a result. Ctrl+F jumps to it. |
+| **Back / Forward** | Step through the pages and entries you opened (Alt+← / Alt+→). |
+| **Start page** | The docs index. |
+| **Links** | A link to another page opens it here; a web link opens in your browser. Images show as their caption. |
+
+Drag the header to move the window and an edge to resize it; it reopens where you left it. Esc closes it.
+
+**F1** opens the docs for whatever the pointer is over: the hover card's entry when one shows, otherwise
+the entry, section or panel page that What's This? would pick. Over nothing documented it reopens the
+last page.
+
+### What's This?
+
+**Help ▸ What's This?** (Shift+F1) turns the pointer into a help cursor: whatever it is over is outlined
+with the docs entry it would open, and a click opens that entry in the docs window.
+
+The click only picks: it does not press the button or select the node under it. A solid outline is the
+element's own entry; a dashed one is the section or panel it sits in, when it has none of its own. Esc
+or a right-click leaves without opening anything.
+
 ## Document tabs
 
 A browser-style strip. One fixed **scene tab** — unclosable, movable, titled with the open scene —
@@ -89,6 +125,8 @@ returns you to whatever the scene tab was doing.
 | **W** / **E** / **R** | Move / Rotate / Scale gizmo |
 | **X** | Switch the gizmo between local and world axes (the viewport's globe and box buttons) |
 | **F** | Frame the selected node in the view being edited |
+| **F1** | Open the docs for what the pointer is over (see [Documentation](#documentation)) |
+| **Shift + F1** | What's This?: click any part of the editor to open its docs |
 
 Save is captured before anything else sees it, so it works while you are typing in the code editor.
 Undo is *not*, so text fields and the code editor keep their own undo history — which is what you
