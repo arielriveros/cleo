@@ -1513,15 +1513,17 @@ export class Renderer {
         for (let i = count; i < this._paneTargets.length; i++) this._paneTargets[i]?.destroy();
         this._paneTargets.length = Math.min(this._paneTargets.length, count);
         this._paneHasImage.length = this._paneTargets.length;
+        this._paneDrawnAt.length = Math.min(this._paneDrawnAt.length, count);
         this._paneDirty.length = count;
         this.markViewsDirty();
     }
 
     /**
-     * Redraw preview pane `index` (every pane when omitted) at the next frame. The editor calls this when
-     * the scene changes; a pane that redraws only on change also redraws when its own camera moves or its
-     * size changes, and once a second regardless (`PANE_TRICKLE_MS`), which catches what nothing signals:
-     * a shader that finished compiling, a texture that streamed in.
+     * Redraw preview pane `index` (every pane when omitted) soon. The editor calls this when the scene
+     * changes; a pane that redraws only on change also redraws when its own camera moves or its size
+     * changes, and once a second regardless (`PANE_TRICKLE_MS`), which catches what nothing signals: a
+     * shader that finished compiling, a texture that streamed in. At most one such pane redraws per frame
+     * (see `_renderPreviews`).
      */
     public markViewsDirty(index?: number): void {
         if (index === undefined) this._paneDirty.fill(true);
@@ -1537,8 +1539,8 @@ export class Renderer {
     /** Each preview pane's camera matrix as last drawn, to tell when it moved. */
     private readonly _paneViewProj: mat4[] = [];
     private readonly _paneScratch = mat4.create();
-    /** When on-change panes last redrew regardless. */
-    private _paneTrickleAt = -Infinity;
+    /** When each preview pane last redrew (render clock), for the trickle and the round-robin. */
+    private readonly _paneDrawnAt: number[] = [];
     private static readonly PANE_TRICKLE_MS = 1000;
     /** The pane target the preview being drawn resolves into; null outside a preview. */
     private _previewTarget: Framebuffer | null = null;
@@ -1580,15 +1582,18 @@ export class Renderer {
         const layout = this._layout;
         if (!this._panesLive || !layout || this._thumbnailMode || this._movie.active || this._view.capturing) return;
         const now = renderNow();
-        const trickle = now - this._paneTrickleAt >= Renderer.PANE_TRICKLE_MS;
-        if (trickle) this._paneTrickleAt = now;
-        let refit = false;
+        // Realtime panes redraw every frame. Of the others, at most ONE a frame: the one that has waited
+        // longest of those that are dirty or past the trickle. So a gizmo drag that dirties every preview
+        // each frame costs the editing view plus one preview, the previews taking turns, rather than all of
+        // them at once; and the trickle never lands three previews on one frame.
+        let onChange = -1, onChangeAge = -1;
+        const draw: number[] = [];
         for (let i = 0; i < layout.panes.length; i++) {
             if (i === layout.primary) continue;
             const node = layout.panes[i].camera;
             const rect = this._paneRects[i];
             if (!node || !rect) continue;
-            const target = this._ensurePaneTarget(i, rect.w, rect.h);
+            this._ensurePaneTarget(i, rect.w, rect.h);
             const camera = node.camera;
             camera.resize(this._renderWidth, this._renderHeight);
             mat4.multiply(this._paneScratch, camera.projectionMatrix, camera.viewMatrix);
@@ -1597,7 +1602,15 @@ export class Renderer {
                 mat4.copy(seen, this._paneScratch);
                 this._paneDirty[i] = true;
             }
-            if (!layout.panes[i].realtime && !this._paneDirty[i] && !trickle && this._paneHasImage[i]) continue;
+            if (layout.panes[i].realtime) { draw.push(i); continue; }
+            const age = now - (this._paneDrawnAt[i] ?? -Infinity);
+            const due = this._paneDirty[i] || !this._paneHasImage[i] || age >= Renderer.PANE_TRICKLE_MS;
+            if (due && age > onChangeAge) { onChange = i; onChangeAge = age; }
+        }
+        if (onChange >= 0) draw.push(onChange);
+        for (const i of draw) {
+            const camera = layout.panes[i].camera!.camera;
+            const target = this._paneTargets[i]!;
             this._paneDirty[i] = false;
             // Submit what the frame recorded so far before the preview writes a single buffer. On WebGPU
             // `writeBuffer`/`writeTexture` land on the queue when called, ahead of every draw still in the
@@ -1607,8 +1620,9 @@ export class Renderer {
             this._passes.flushFrameEncoder(true);
             this._withPreviewState(camera, target, () => this._renderPreviewView(scene, shadowLight));
             this._paneHasImage[i] = true;
-            refit = true;
+            this._paneDrawnAt[i] = now;
         }
+        const refit = draw.length > 0;
         // The cascades now hold the last preview's fit: the editing view redraws every layer next frame.
         if (refit) this._shadows.requestFullUpdate();
         this._blitPanes(layout);

@@ -13,7 +13,7 @@ struct GridUniforms {
     u_viewProj: mat4x4<f32>,      // project the world hit -> frag depth
     u_viewPos: vec3<f32>,         // camera world position (distance fade)
     u_fadeFar: f32,               // world-space radius where the grid fully fades out
-    u_plane: i32,                 // 0 = XZ ground plane (3D), 1 = XY front plane (2D)
+    u_plane: i32,                 // 0 = XZ ground plane (3D), 1 = XY front plane (2D), 2 = YZ side plane
 };
 @group(1) @binding(0) var<uniform> u_grid: GridUniforms;
 
@@ -54,16 +54,19 @@ fn fs_main(in: VertexOutput) -> GridOut {
     let ro = nW.xyz / nW.w;
     let rd = fW.xyz / fW.w - ro;
 
-    // 2. Intersect the grid plane (Y=0 for XZ, Z=0 for XY).
+    // 2. Intersect the grid plane (Y=0 for XZ, Z=0 for XY, X=0 for YZ).
     var denom = rd.z;
     var orig = ro.z;
     if (u_grid.u_plane == 0) { denom = rd.y; orig = ro.y; }
+    if (u_grid.u_plane == 2) { denom = rd.x; orig = ro.x; }
     if (abs(denom) < 1e-6) { discard; }          // ray parallel to the plane
     let t = -orig / denom;
     if (t < 0.0 || t > 1.0) { discard; }         // behind the camera or beyond far
     let hit = ro + t * rd;
     var coord = hit.xy;
     if (u_grid.u_plane == 0) { coord = hit.xz; }
+    // The side plane as (z, y): coord.y == 0 is then the Z axis and coord.x == 0 the Y axis.
+    if (u_grid.u_plane == 2) { coord = hit.zy; }
 
     // 3. Adaptive multi-level lines. Coverage = pixels spanned by one cell; each level fades based on
     //    how many pixels its cells occupy so density stays readable.
@@ -91,10 +94,14 @@ fn fs_main(in: VertexOutput) -> GridOut {
     //    coord.x == 0 is the in-plane depth/vertical axis -> Z (ground, blue) or Y (front, green).
     let xAxis = axisLine(coord.x);
     let yAxis = axisLine(coord.y);
-    if (yAxis > 0.0) { col = vec3<f32>(0.55, 0.18, 0.18); a = max(a, yAxis); }   // X = red (dimmed)
+    if (yAxis > 0.0) {
+        if (u_grid.u_plane == 2) { col = vec3<f32>(0.18, 0.30, 0.60); }         // Z = blue (side plane)
+        else { col = vec3<f32>(0.55, 0.18, 0.18); }                             // X = red (dimmed)
+        a = max(a, yAxis);
+    }
     if (xAxis > 0.0) {
         if (u_grid.u_plane == 0) { col = vec3<f32>(0.18, 0.30, 0.60); }         // Z = blue (3D ground)
-        else { col = vec3<f32>(0.20, 0.55, 0.24); }                             // Y = green (2D front)
+        else { col = vec3<f32>(0.20, 0.55, 0.24); }                             // Y = green (2D front, side)
         a = max(a, xAxis);
     }
 
