@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  DEFAULT_PANE_PRESETS, MAX_PANES, defaultPaneState, layoutGrid, paneCount, panesAllowed, sanitizePaneState,
+  DEFAULT_PANE_PRESETS, MAX_PANES, PANE_CULLING_KEYS, anyCulling, defaultPaneState, layoutGrid, noPaneCulling,
+  paneCount, panesAllowed, sanitizePaneState,
 } from '../src/features/viewportPanes/paneState';
 import { lookRotation } from '../src/features/viewportPanes/paneCameras';
 
@@ -44,6 +45,18 @@ describe('sanitizePaneState', () => {
     expect(s.focused).toBe(3);
     expect(s.panes.map(p => p.preset)).toEqual(['perspective', 'bottom', 'back', 'left']);
     expect(s.panes[1].realtime).toBe(true);
+  });
+
+  it('starts every pane with the culling view off, and keeps only boolean switches', () => {
+    expect(defaultPaneState().panes.every(p => !anyCulling(p.culling))).toBe(true);
+    const s = sanitizePaneState({
+      panes: [{}, { culling: { frustum: true, occlusion: 'yes', lights: true, bogus: true } }, { culling: 7 }],
+    });
+    expect(s.panes[1].culling).toEqual({ frustum: true, occlusion: false, foliage: false, lights: true });
+    expect(s.panes[2].culling).toEqual(noPaneCulling());
+    expect(Object.keys(s.panes[1].culling).sort()).toEqual([...PANE_CULLING_KEYS].sort());
+    // A round trip through storage keeps them.
+    expect(sanitizePaneState(JSON.parse(JSON.stringify(s))).panes[1].culling.lights).toBe(true);
   });
 
   it('never makes pane 0 anything but the perspective main camera', () => {

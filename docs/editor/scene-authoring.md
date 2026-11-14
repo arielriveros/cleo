@@ -160,8 +160,9 @@ back. The node's own Move, Rotate and Scale gizmo stays up alongside, and each d
 
 ### Split viewport
 
-The layout switch in the viewport's top-right chrome (beside 2D/3D) divides the viewport into **2 Side by
-Side**, **2 Stacked** or **2 x 2** panes, all the same size. **Single** puts it back to one view.
+The layout button in the viewport's top-right chrome (beside 2D/3D) divides the viewport. Its icon shows
+the current split; its menu holds the four: one view, two side by side, two stacked, or four (2 x 2), all
+the same size. The split viewport's buttons are icons: hover one for its name.
 
 - **One pane is edited at a time.** Clicking a pane, dragging in it or scrolling over it makes it the
   editing pane, outlined in the accent colour. Selection, the gizmos, drag-drop and camera navigation all
@@ -170,18 +171,44 @@ Side**, **2 Stacked** or **2 x 2** panes, all the same size. **Single** puts it 
   shadows, sky and the eye menu's overlays, but not the gizmos, and they skip what builds up over frames:
   TAA (they use FXAA), motion blur, volumetric clouds and fog, screen-space reflections and the bounce
   light's accumulation. They use the editing pane's exposure, level of detail and nearby foliage.
-- **What a pane looks through:** the top-left pane is always the editor camera (the one the 2D/3D switch,
-  Simulate and the Sequencer use). Every other pane has a menu: **Perspective**, a free camera navigated
-  like the main view, or an orthographic **Top**, **Bottom**, **Front**, **Back**, **Left** or **Right**
-  view. In an orthographic pane, drag with either button to pan (the scene stays under the cursor) and
-  scroll to zoom.
+- **What a pane looks through:** each pane's header starts with its camera. The top-left pane is always
+  the editor camera (the one the 2D/3D switch, Simulate and the Sequencer use). Every other pane's camera
+  button opens a menu: **Perspective** (a wireframe cube), a free camera navigated like the main view, or
+  an orthographic **Top**, **Bottom**, **Front**, **Back**, **Left** or **Right** view, drawn as a cube with
+  the face it looks at filled. In an orthographic pane, drag with either button to pan (the scene stays
+  under the cursor) and scroll to zoom.
 - **Realtime:** a preview redraws when the scene, the selection or its camera changes, and once a second
-  regardless. Turn on **Realtime** to redraw it every frame (animation, particles and wind keep moving
-  there), at the cost of a full extra scene pass each frame.
+  regardless. The pulse button turns on **Realtime**, which redraws it every frame (animation, particles and
+  wind keep moving there), at the cost of a full extra scene pass each frame.
+- **Culling view:** the last button of a preview's header (a view frustum) shows the editing pane's
+  culling in that pane; see below.
 
-The layout, the editing pane, each pane's camera and where it was left are kept per project. The viewport
-goes back to one view in Play and Simulate, in the 2D view, and in every mode but Scene, and splits again
-when you return.
+The layout, the editing pane, each pane's camera, its switches and where it was left are kept per project.
+The viewport goes back to one view in Play and Simulate, in the 2D view, and in every mode but Scene, and
+splits again when you return.
+
+#### Culling view
+
+Shows, in a preview pane, what the camera of the pane being edited leaves out, so you can watch from above
+or from the side what it skips drawing. Each switch leaves that kind of culling out of the preview and
+draws what was culled as a tinted wireframe instead: amber for what is outside the edited camera's view,
+violet for what something hid from it. The pane being edited has nothing to show (it is the one being
+culled for), so its menu is off. The preview follows the edited camera as it moves, a pane at a time.
+
+- **Frustum** — leaves out the models (landscape chunks included), decals and particle systems outside
+  the edited camera's view, and outlines that camera's view frustum, out to a kilometre.
+- **Occlusion** — leaves out the models the edited view's occlusion culling hid: behind a landscape,
+  under a GPU occlusion query, or inside an occlusion volume it cannot see. Nothing shows with
+  occlusion culling off in Render settings.
+- **Foliage** — draws exactly the plants the edited view drew, rather than every plant in range of it, and
+  outlines each foliage cell it left undrawn. WebGPU culls plants one by one and the preview shows that;
+  the cells are outlined as boxes on either backend.
+- **Lights** — leaves out the lights the edited view's light grid dropped (their whole reach hidden, or
+  past the grid's depth), so they light nothing here either, and draws each one's reach: a sphere, or a
+  spotlight's cone.
+
+Draw distance and level of detail already follow the edited camera in every preview. A culled model is
+outlined by its own wireframe; a landscape chunk, a skinned model or a very dense mesh by its box.
 
 **Dropping into the viewport:** a dropped template, model or node is placed at the first thing it
 hits — terrain, then the tilemap plane, then geometry, then the ground plane, and failing all of

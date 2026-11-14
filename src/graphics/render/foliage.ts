@@ -28,6 +28,7 @@ import type { BindGroupCache } from './bindGroups';
 import type { MaterialBinder } from './materialBinder';
 import type { ViewProjection } from './viewProjection';
 import { renderNow, renderClockOverridden } from './renderClock';
+import { CULL_OCCLUDED, CULL_OUTSIDE } from './cullGhosts';
 import { ShaderManager } from '../systems/shaderManager';
 import { ModelDraw } from './modelDraw';
 import type { RenderSubsystems } from './subsystems';
@@ -233,6 +234,8 @@ export class FoliagePasses {
                 // drawn, so nothing pops); only on-screen arrivals spend the budget — which is what keeps
                 // turning around from revealing trees that trickle in a few cells per frame.
                 const pending: { cell: FoliageCell; d2: number; onScreen: boolean }[] = [];
+                // Why each cell in range is not drawn, for the split viewport's culling view.
+                const why = this._cullReasonsOf(layer);
                 // Was ANY cell of this layer already up? If not, this is the layer's first sight — a
                 // scene load, the camera reaching a new landscape, or a rebuild after a brush stroke —
                 // and everything is admitted at once rather than faded in over a second.
@@ -255,11 +258,13 @@ export class FoliagePasses {
                     }
                     // Off screen also when an occluder hides it: an occluded cell is ADMITTED like an
                     // off-screen one (so it appears at once when revealed) and simply not drawn.
-                    let onScreen = !this._sys.visibility.frustumCulling || this._sys.visibility.frustum.intersectsAABB(cell.min, cell.max);
+                    const inFrustum = !this._sys.visibility.frustumCulling || this._sys.visibility.frustum.intersectsAABB(cell.min, cell.max);
+                    let onScreen = inFrustum;
                     if (onScreen && this._sys.visibility.cellOccluded(cell.min, cell.max)) {
                         onScreen = false;
                         frameStats.occludedCells++;
                     }
+                    if (!onScreen) why[cell.index] = inFrustum ? CULL_OCCLUDED : CULL_OUTSIDE;
                     // `visible` means ADMITTED: in range, whether or not it is on screen this frame.
                     if (!wasVisible && this._foliageAdmitPerFrame > 0) {
                         pending.push({ cell, d2, onScreen });
@@ -349,6 +354,39 @@ export class FoliagePasses {
     /** Per layer: their packed batches, apart from the editing view's so its recorded draws stay intact. */
     private readonly _previewBatches = new WeakMap<FoliageLayer, FoliageBatch[][]>();
     private static readonly _NO_BUCKETS: FoliageCell[][] = [];
+    /**
+     * Per layer, per cell (`cell.index`): why the editing view did not draw an admitted cell this frame
+     * (visibility.ts `CULL_OUTSIDE`/`CULL_OCCLUDED`), 0 where it did or never looked. Written by
+     * `_prepareFoliage`, read by the culling view's ghosts.
+     */
+    private readonly _cullReasons = new WeakMap<FoliageLayer, Uint8Array>();
+
+    private _cullReasonsOf(layer: FoliageLayer): Uint8Array {
+        let why = this._cullReasons.get(layer);
+        if (!why || why.length !== layer.cells.length) {
+            why = new Uint8Array(layer.cells.length);
+            this._cullReasons.set(layer, why);
+        } else {
+            why.fill(0);
+        }
+        return why;
+    }
+
+    /** {@link _cullReasons} for `layer`, or null before the editing view first prepared it. */
+    public cellCullReasons(layer: FoliageLayer): Uint8Array | null {
+        const why = this._cullReasons.get(layer);
+        return why && why.length === layer.cells.length ? why : null;
+    }
+
+    /**
+     * A preview pane showing the editing view's foliage culling (FrameView.previewCulling): it draws that
+     * view's own batches, exactly the plants it kept (per instance on the GPU path, per cell otherwise),
+     * rather than re-culling the admitted cells for its own frustum. Those batches are untouched until the
+     * editing view's next frame, and the frame encoder that culled them was submitted before the preview.
+     */
+    private _mirrorsEditing(): boolean {
+        return this._view.preview && !!this._view.previewCulling?.foliage;
+    }
 
     /**
      * A preview pane's plants, before its passes open: the cells the EDITING view admitted (its draw
@@ -358,6 +396,8 @@ export class FoliagePasses {
      * nothing the editing view keeps: no `cell.visible`, `cell.lod`, `sortEye` or `layer.buckets`.
      */
     public preparePreview(scene: Scene): void {
+        // Drawing the editing view's own batches: nothing to cull or pack.
+        if (this._mirrorsEditing()) return;
         const visibility = this._sys.visibility;
         for (const landscape of scene.landscapes) {
             if (!landscape.visible) continue;
@@ -388,7 +428,8 @@ export class FoliagePasses {
 
     /** The cells a colour pass draws of `layer`: the editing view's buckets, or a preview's. */
     private _bucketsOf(layer: FoliageLayer): FoliageCell[][] {
-        return this._view.preview ? (this._previewBuckets.get(layer) ?? FoliagePasses._NO_BUCKETS) : layer.buckets;
+        return this._view.preview && !this._mirrorsEditing()
+            ? (this._previewBuckets.get(layer) ?? FoliagePasses._NO_BUCKETS) : layer.buckets;
     }
 
     /**
@@ -1474,7 +1515,7 @@ export class FoliagePasses {
      * frame can never repack a segment the main view's draws were recorded against.
      */
     public colourChunks(layer: FoliageLayer, slot: number): FoliageBatch[] | undefined {
-        if (this._view.preview) return this._previewBatches.get(layer)?.[slot];
+        if (this._view.preview && !this._mirrorsEditing()) return this._previewBatches.get(layer)?.[slot];
         return layer.gpuCulled ? layer.gpuBatches[slot] : layer.batches[slot];
     }
 }

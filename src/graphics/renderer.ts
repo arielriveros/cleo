@@ -87,7 +87,7 @@ import { RenderStats } from './render/stats';
 import type { RenderSubsystems } from './render/subsystems';
 import { ProgramRegistry } from './render/programRegistry';
 import { renderNow, renderClockOverridden } from './render/renderClock';
-import { isSplitLayout, paneRects, paneViewport, type PaneRect, type ViewLayout } from './render/viewLayout';
+import { anyPaneCulling, isSplitLayout, paneRects, paneViewport, type PaneCulling, type PaneRect, type ViewLayout } from './render/viewLayout';
 import type { RenderPassEncoder } from './rhi/device';
 export { QUALITY_TIERS, RENDER_2D_DEFAULTS, RENDER_3D_DEFAULTS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay, Pipeline2D } from './render/settingsTypes';
@@ -436,7 +436,7 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
             get selectedNodeId() { return renderer._selectedNodeId; },
             get gi() { return renderer._gi; },
-        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._post, this._decals, this._sprites, this._fullscreen, this._modelDraw);
+        }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._post, this._decals, this._sprites, this._fullscreen, this._modelDraw, this._subsystems);
         this._frame2D = new Frame2DPasses({
             get thumbnailMode() { return renderer._thumbnailMode; },
             get selectedNodeId() { return renderer._selectedNodeId; },
@@ -1502,8 +1502,12 @@ export class Renderer {
      */
     public setViewLayout(layout: ViewLayout | null): void {
         const next = isSplitLayout(layout)
-            ? { ...layout, panes: layout.panes.map(p => ({ camera: p.camera, realtime: p.realtime })) }
+            ? { ...layout, panes: layout.panes.map(p => ({
+                camera: p.camera, realtime: p.realtime, ...(p.culling ? { culling: { ...p.culling } } : {}),
+            })) }
             : null;
+        // The culling view's ghost meshes are only kept while some pane shows it.
+        if (!next?.panes.some(p => anyPaneCulling(p.culling))) this._overlays.releaseCullGhosts();
         const prev = this._layout;
         if (!prev !== !next || (prev && next && (prev.cols !== next.cols || prev.rows !== next.rows)))
             this._paneSizeDirty = true;
@@ -1546,6 +1550,14 @@ export class Renderer {
     private _previewTarget: Framebuffer | null = null;
     /** A preview's own post chain buffers (see `_applyPostProcessing`). */
     private readonly _previewPostPool = new FramebufferPool();
+    /** The editing view's culling matrix as last seen, and how many frames it has held still since. */
+    private readonly _editingCullSeen = mat4.create();
+    private _editingStillFrames = 0;
+    /**
+     * Frames a culling view keeps redrawing after the editing camera stops: GPU occlusion verdicts come
+     * back a frame or more after the view that asked for them.
+     */
+    private static readonly CULL_SETTLE_FRAMES = 3;
     /** The editing view's matrices, kept across a preview. */
     private readonly _previewSaved = {
         viewProj: mat4.create(), invViewProj: mat4.create(), invStable: mat4.create(),
@@ -1582,6 +1594,19 @@ export class Renderer {
         const layout = this._layout;
         if (!this._panesLive || !layout || this._thumbnailMode || this._movie.active || this._view.capturing) return;
         const now = renderNow();
+        // The editing view's frustum, kept for the culling view: each preview builds its own into
+        // `visibility.frustum`. `viewProj` is still the editing view's (unjittered) here.
+        this._visibility.editingFrustum.setFromViewProjection(this._view.viewProj);
+        this._visibility.editingCamera = this._view.camera;
+        // A pane showing the editing view's culling changes whenever the editing camera moves, and for a
+        // few frames after it stops, while the occlusion queries it asked for come back.
+        if (!mat4.exactEquals(this._editingCullSeen, this._view.viewProj)) {
+            mat4.copy(this._editingCullSeen, this._view.viewProj);
+            this._editingStillFrames = 0;
+        } else if (this._editingStillFrames < Renderer.CULL_SETTLE_FRAMES) {
+            this._editingStillFrames++;
+        }
+        const cullingMoves = this._editingStillFrames < Renderer.CULL_SETTLE_FRAMES;
         // Realtime panes redraw every frame. Of the others, at most ONE a frame: the one that has waited
         // longest of those that are dirty or past the trickle. So a gizmo drag that dirties every preview
         // each frame costs the editing view plus one preview, the previews taking turns, rather than all of
@@ -1602,6 +1627,7 @@ export class Renderer {
                 mat4.copy(seen, this._paneScratch);
                 this._paneDirty[i] = true;
             }
+            if (cullingMoves && anyPaneCulling(layout.panes[i].culling)) this._paneDirty[i] = true;
             if (layout.panes[i].realtime) { draw.push(i); continue; }
             const age = now - (this._paneDrawnAt[i] ?? -Infinity);
             const due = this._paneDirty[i] || !this._paneHasImage[i] || age >= Renderer.PANE_TRICKLE_MS;
@@ -1618,7 +1644,8 @@ export class Renderer {
             // editing view's under its own recorded draws, and a buffer grown here would be destroyed
             // while those draws still reference it.
             this._passes.flushFrameEncoder(true);
-            this._withPreviewState(camera, target, () => this._renderPreviewView(scene, shadowLight));
+            this._withPreviewState(camera, target, layout.panes[i].culling ?? null,
+                () => this._renderPreviewView(scene, shadowLight));
             this._paneHasImage[i] = true;
             this._paneDrawnAt[i] = now;
         }
@@ -1644,8 +1671,11 @@ export class Renderer {
         eye[2] = p[2] - v[10] * ahead;
     }
 
-    /** Swap the frame view to a preview camera for `body`, and back, with everything it must not keep. */
-    private _withPreviewState(camera: Camera, target: Framebuffer, body: () => void): void {
+    /**
+     * Swap the frame view to a preview camera for `body`, and back, with everything it must not keep.
+     * `culling` is what of the editing view's culling the preview shows (FrameView.previewCulling).
+     */
+    private _withPreviewState(camera: Camera, target: Framebuffer, culling: PaneCulling | null, body: () => void): void {
         const view = this._view, saved = this._previewSaved;
         const editingCamera = view.camera;
         const hadPrev = view.hasPrevViewProj, jitter = view.taaJitterActive;
@@ -1655,6 +1685,7 @@ export class Renderer {
         mat4.copy(saved.jitteredCam, this._jitteredCameraProj);
         mat4.copy(saved.jitteredView, this._jitteredViewProj);
         view.preview = true;
+        view.previewCulling = anyPaneCulling(culling) ? culling : null;
         view.camera = camera;
         view.hasPrevViewProj = false;
         view.taaJitterActive = false;
@@ -1663,6 +1694,7 @@ export class Renderer {
             body();
         } finally {
             view.preview = false;
+            view.previewCulling = null;
             view.camera = editingCamera;
             view.hasPrevViewProj = hadPrev;
             view.taaJitterActive = jitter;

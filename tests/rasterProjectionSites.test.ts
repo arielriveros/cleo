@@ -89,6 +89,9 @@ describe('the camera projection reaches every pass through one wrapper', () => {
             '_drawSkeletonOverlay',
             // The editor's GI probe spheres, in the overlay layer like the skeleton.
             'drawProbeOverlay',
+            // The split viewport's culling ghosts, in a preview pane's overlay layer: a preview never
+            // jitters (no TAA phase), and the overlay is after the resolve anyway.
+            '_drawCullGhosts',
             '_drawTileBand',
             // A helper with a coplanar depth nudge reaches `_rasterProjection` through this thin wrapper
             // (ModelDraw.beginModel calls it only when the nudge is non-zero); every other overlay draw goes

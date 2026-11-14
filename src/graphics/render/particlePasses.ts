@@ -173,7 +173,10 @@ export class ParticlePasses {
             ambient, sunDirection, sunColor, localLights,
             // The light probes' fill at an effect, as surfaces there get it (render/probeLighting.ts).
             ambientAt: position => this._sys.lighting.probeAmbientAt(scene, position as vec3, ambient, this._probeAmbient),
-            visible: this._sys.visibility.frustumCulling ? (min, max) => this._sys.visibility.frustum.intersectsAABB(min, max) : undefined,
+            // In a preview showing the editing view's culling, also what that view's frustum dropped.
+            visible: this._sys.visibility.frustumCulling
+                ? (min, max) => this._sys.visibility.frustum.intersectsAABB(min, max) && !this._sys.visibility.previewDropsBox(min, max)
+                : undefined,
             hidden: this._hiddenByVolume,
             lodDistanceScale: this.particleLodDistanceScale,
             // A preview pane draws what the editing view measured (render/viewLayout.ts).
@@ -255,7 +258,8 @@ export class ParticlePasses {
         return light;
     }
 
-    private readonly _hiddenByVolume = (node: ParticleSystemNode) => this._sys.visibility.volumeCulled(node);
+    private readonly _hiddenByVolume = (node: ParticleSystemNode) =>
+        this._sys.visibility.volumeCulled(node) || this._sys.visibility.previewVolumeDrops(node);
     private readonly _particleViewProj: mat4 = mat4.create();
     private readonly _particleLights: ParticleLocalLight[] = [];
     /** Scratch for `ambientAt`: read by the particle renderer before its next call. */

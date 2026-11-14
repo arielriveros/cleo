@@ -501,7 +501,7 @@ export default function EngineViewport() {
                         value={dimension}
                         onChange={(e) => setViewDimension(e.target.value as '2D' | '3D')}
                         title='Viewport camera — view only. The scene’s 2D/3D type is in its settings.'
-                        className='bg-surface-raised/80 hover:bg-surface-raised text-ui px-1.5 border-border-subtle cursor-pointer'
+                        className='bg-surface-raised/80 hover:bg-surface-raised text-ui-xs h-[25px] py-0 px-1.5 border-border-subtle cursor-pointer'
                     >
                         <option value='3D'>3D</option>
                         <option value='2D'>2D</option>

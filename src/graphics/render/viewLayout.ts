@@ -15,12 +15,35 @@ export interface PaneRect {
     h: number;
 }
 
+/**
+ * What of the PRIMARY view's culling a preview pane shows (the split viewport's culling view): with a
+ * switch on, the preview leaves out what the primary view culled that way and draws it as a tinted ghost
+ * instead, so one pane shows what another's camera drops. Ignored for the primary pane itself.
+ */
+export interface PaneCulling {
+    /** Nodes outside the primary camera's frustum; the frustum itself is outlined. */
+    frustum: boolean;
+    /** Nodes hidden by occluders, GPU occlusion queries or occlusion volumes. */
+    occlusion: boolean;
+    /** Plants: the preview draws the primary view's own foliage batches; dropped cells are ghosted. */
+    foliage: boolean;
+    /** Lights the primary view left out of its light grid; they light nothing in the preview either. */
+    lights: boolean;
+}
+
+/** Whether `culling` asks for anything at all. */
+export function anyPaneCulling(culling: PaneCulling | null | undefined): culling is PaneCulling {
+    return !!culling && (culling.frustum || culling.occlusion || culling.foliage || culling.lights);
+}
+
 /** One pane of a {@link ViewLayout}. */
 export interface ViewPane {
     /** The pane's camera. Ignored for the primary pane, which is always `scene.activeCamera`. */
     camera: CameraNode | null;
     /** Re-render every frame. Otherwise only when something marked the pane dirty. */
     realtime: boolean;
+    /** The primary view's culling, shown in this pane while it is a preview. Absent: none. */
+    culling?: PaneCulling;
 }
 
 /** How the canvas is split. `panes` is row-major, `cols * rows` long. */

@@ -26,6 +26,11 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     and level of detail, so they cost no extra GPU memory.
   - *Redrawn on change.* A preview redraws when the scene or its camera changes; **Realtime** redraws it
     every frame. The layout and every pane's camera are kept per project.
+  - *Culling view.* A preview pane can show what the edited camera culls: switches for Frustum, Occlusion,
+    Foliage and Lights leave that culling out of the preview and draw what was culled as a tinted
+    wireframe, amber outside the view and violet occluded, with the edited camera's frustum outlined.
+  - *Icon chrome.* The layout, camera and Realtime controls are icons with tooltips, each pane's header
+    one joined strip.
   - *Agent framing.* When the agent frames a node for a capture in an orthographic pane (or the 2D view),
     the view keeps its direction, centres the node and zooms to fit it, rather than being turned off its
     axis.

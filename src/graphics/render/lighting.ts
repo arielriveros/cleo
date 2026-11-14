@@ -32,6 +32,7 @@ import type { Visibility } from './visibility';
 import type { SsilPasses } from './ssil';
 import { ShaderManager } from '../systems/shaderManager';
 import type { RenderSubsystems } from './subsystems';
+import { CULL_OCCLUDED, CULL_OUTSIDE, type CullVerdict } from './cullGhosts';
 
 /** The material shader keys that receive per-frame forward lighting/shadow/env uploads. Custom
  *  forward materials are appended at runtime via `customForwardTypes()`. */
@@ -141,6 +142,43 @@ export class LightingPasses {
 
     /** Scratch for a spot light's cone sphere. */
     public readonly coneSphere = { center: new Float32Array(3), radius: 0 };
+
+    /**
+     * Per light, why the EDITING view's light grid left it out this frame: an occlusion volume or query
+     * hid its whole reach, or its reach lies outside the grid's depth range. Taken by that view's
+     * `buildLightGrid` and read by a preview showing its light culling (the split viewport's culling
+     * view), which drops the same lights and ghosts them (EditorOverlays `_drawCullGhosts`).
+     */
+    public readonly editingLightCull = new Map<LightNode, CullVerdict>();
+    /** Whether this `buildLightGrid` is the editing view's own, and so the one `editingLightCull` records. */
+    private _recordsEditing = false;
+    /** Whether this `buildLightGrid` is a preview's that drops what `editingLightCull` names. */
+    private _dropsEditing = false;
+    /** The editing camera's view, near and grid far, for `_lightReach`'s depth test. */
+    private _gridView: ArrayLike<number> | null = null;
+    private _gridNear = 0;
+    private _gridFar = 0;
+
+    /**
+     * The radius a light's record reaches clusters with: `r`, or 0 when it is `hidden` -- or, in a preview
+     * showing the editing view's light culling, when that view left it out. The editing view's own build
+     * notes here why it left each light out.
+     */
+    private _lightReach(node: LightNode, center: ArrayLike<number>, r: number, hidden: boolean): number {
+        if (this._recordsEditing) {
+            let why: CullVerdict = hidden ? CULL_OCCLUDED : 0;
+            const v = this._gridView;
+            if (!why && v) {
+                // Its depth along the view; the grid holds only what reaches [near, far] (clusters.ts).
+                const depth = -(v[2] * center[0] + v[6] * center[1] + v[10] * center[2] + v[14]);
+                if (depth + r <= this._gridNear || depth - r >= this._gridFar) why = CULL_OUTSIDE;
+            }
+            if (why) this.editingLightCull.set(node, why);
+        } else if (this._dropsEditing && this.editingLightCull.has(node)) {
+            return 0;
+        }
+        return hidden ? 0 : r;
+    }
     public specularOcclusionEnabled: boolean = true;
     public horizonOcclusionEnabled: boolean = true;
 
@@ -609,6 +647,17 @@ export class LightingPasses {
     public buildLightGrid(scene: Scene): void {
         const camera = this._view.camera;
         const lights = scene.lights;
+        // The editing view's own build records what it leaves out; a preview showing its light culling
+        // drops the same lights (the split viewport's culling view). Never a capture's or a cube face's.
+        this._recordsEditing = !this._view.preview && !this._view.capturing && !this._view.cubeFace;
+        this._dropsEditing = this._view.preview && !!this._view.previewCulling?.lights;
+        if (this._recordsEditing) {
+            this.editingLightCull.clear();
+            // An orthographic grid is one cluster holding everything: no depth range to fall outside.
+            this._gridView = camera.type === 'orthographic' ? null : camera.viewMatrix;
+            this._gridNear = camera.near;
+            this._gridFar = Math.min(camera.far, this.clusterDistance);
+        }
 
         // Collect the punctual lights, in the order Scene numbered them — `node.index` IS the record
         // index, so the two loops below must walk the same sequence.
@@ -629,7 +678,7 @@ export class LightingPasses {
                 // sphere anyway (the smallest sphere round a hemisphere is the sphere).
                 const r = area.range + 0.5 * Math.hypot(area.width, area.height);
                 const hidden = this._visibility.volumeCulled(node) || this._visibility.lightOccluded(node, center, r);
-                this._setClusterLight(count, center, hidden ? 0 : r);
+                this._setClusterLight(count, center, this._lightReach(node, center, r, hidden));
             } else if (node.type === 'spotlight') {
                 const spot = node.light as Spotlight;
                 // The CONE's bounding sphere, not the range sphere. A narrow spot fills a fiftieth of
@@ -643,7 +692,7 @@ export class LightingPasses {
                 const r = this.coneSphere.radius;
                 // So is a light inside an occlusion volume the camera cannot see.
                 const hidden = this._visibility.volumeCulled(node) || this._visibility.lightOccluded(node, center, r);
-                this._setClusterLight(count, center, hidden ? 0 : r);
+                this._setClusterLight(count, center, this._lightReach(node, center, r, hidden));
             } else {
                 const point = node.light as PointLight;
                 const p = node.worldPosition;
@@ -651,7 +700,7 @@ export class LightingPasses {
                 // The windowed falloff reaches EXACTLY zero at `range`, which is what makes this a
                 // cull rather than an approximation. See `distanceAttenuation`.
                 const hidden = this._visibility.volumeCulled(node) || this._visibility.lightOccluded(node, center, point.range);
-                this._setClusterLight(count, center, hidden ? 0 : point.range);
+                this._setClusterLight(count, center, this._lightReach(node, center, point.range, hidden));
             }
             count++;
         }
@@ -737,6 +786,7 @@ export class LightingPasses {
         // Pre-exposed: the light texture is shared by the deferred pass, every forward program and every
         // custom material, so it is scaled here, once, rather than in any of them.
         const k = this._view.preExposure;
+        const dropsEditing = this._view.preview && !!this._view.previewCulling?.lights;
         for (const node of scene.lights) {
             if (node.type === 'directional' || node.index < 0) continue;
             if (i >= MAX_LIGHTS) break;
@@ -744,7 +794,10 @@ export class LightingPasses {
             // fixed) but at no intensity: the orthographic grid's one cluster holds every record whatever
             // its radius, so radius 0 alone would not put it out there. For a probe bake, a light not set
             // to bake is out the same way, and the rest are taken steady: the flicker is live, the bake not.
-            const off = bakeOnly ? !node.bake : this._visibility.volumeCulled(node);
+            // A preview showing the editing view's light culling puts out what that view left out, so its
+            // orthographic grid (one cluster, every record) drops them too.
+            const off = bakeOnly ? !node.bake
+                : this._visibility.volumeCulled(node) || (dropsEditing && this.editingLightCull.has(node));
 
             if (node.type === 'area') {
                 const area = node.light as AreaLight;

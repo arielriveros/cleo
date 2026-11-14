@@ -1,6 +1,7 @@
 import { mat4, vec3 } from 'gl-matrix';
 import type { Camera } from '../../core/camera';
 import type { Scene } from '../../core/scene/scene';
+import type { PaneCulling } from './viewLayout';
 
 /**
  * The renderer's per-frame view state, one object shared by reference between `Renderer` and the
@@ -23,6 +24,11 @@ export interface FrameView {
      * subsystem that keeps per-camera state checks this and leaves the editing view's state alone.
      */
     preview: boolean;
+    /**
+     * While a preview renders, what of the editing view's culling it shows (render/viewLayout.ts
+     * `PaneCulling`), or null. Visibility, foliage and the light grid read it; null outside a preview.
+     */
+    previewCulling: PaneCulling | null;
     /**
      * The point this frame measures detail from (LOD, draw distance, foliage admission and dissolve): the
      * camera, or for an orthographic one `Camera.detailDistance` ahead of it. Set by the frame for the
@@ -122,6 +128,7 @@ export function createFrameView(): FrameView {
         frameIndex: 0,
         capturing: false,
         preview: false,
+        previewCulling: null,
         lodEye: vec3.create(),
         cubeFace: false,
         taaJitterActive: false,

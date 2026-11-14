@@ -103,6 +103,8 @@ export class DecalPasses {
             if (this._sys.visibility.frustumCulling) {
                 const s = decal.getBoundingSphere();
                 if (!this._sys.visibility.frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) continue;
+                // A preview showing the editing view's culling leaves out the decals that view culled.
+                if (this._sys.visibility.previewDrops(decal, s.center, s.radius)) continue;
             }
             let drawn = false;
             if (isEditorOnlyNode(decal)) {

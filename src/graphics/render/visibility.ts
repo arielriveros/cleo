@@ -33,6 +33,7 @@ import type { ViewProjection } from './viewProjection';
 import { ShaderManager } from '../systems/shaderManager';
 import type { RenderSubsystems } from './subsystems';
 import { renderNow } from './renderClock';
+import { CULL_OCCLUDED, CULL_OUTSIDE, type CullVerdict } from './cullGhosts';
 
 /** Built frames in a row that hid nothing before occlusion backs off, and how often it probes then. */
 const OCCLUSION_IDLE_FRAMES = 30;
@@ -67,6 +68,13 @@ export class Visibility {
     // Per-object camera frustum culling for the main color passes. Rebuilt each frame from _view.viewProj.
     public frustum: Frustum = new Frustum();
     public frustumCulling: boolean = true;
+    /**
+     * The EDITING view's frustum, set before the preview panes render (Renderer `_renderPreviews`) while
+     * each preview rebuilds `frustum` for its own camera. The culling view tests against it.
+     */
+    public readonly editingFrustum: Frustum = new Frustum();
+    /** The editing view's camera, beside `editingFrustum`: the culling view outlines its frustum. */
+    public editingCamera: Camera | null = null;
 
     /** See RenderSettings.occlusionCulling. */
     public occlusionMode: OcclusionMode = 'all';
@@ -175,9 +183,61 @@ export class Visibility {
         if (node.viewmodel) return false;
         const s = node.getBoundingSphere();
         if (!this.frustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) return true;
+        // A preview showing the editing view's culling leaves out what that view culled (and the editor
+        // overlay draws it as a ghost instead, EditorOverlays `_drawCullGhosts`).
+        const shown = this._view.previewCulling;
+        if (shown && (shown.frustum || shown.occlusion)) {
+            const verdict = this.editingVerdict(node);
+            if ((verdict === CULL_OUTSIDE && shown.frustum) || (verdict === CULL_OCCLUDED && shown.occlusion)) return true;
+        }
         // Before the occlusion tests: a node its volume hides is never offered for a query of its own.
         if (this.volumeCulled(node)) return true;
         return this._nodeOccluded(node, s);
+    }
+
+    /**
+     * Why the EDITING view culled `node` this frame: outside its frustum, or hidden by an occlusion volume,
+     * the CPU occluders or a GPU query; 0 if it drew it. For the split viewport's culling view, read while a
+     * preview renders, after the editing view decided all of it in the same frame: `editingFrustum` is that
+     * view's, the occlusion memo is cleared only by the next `buildOcclusion`, and the volumes' answer
+     * holds until the next `updateOcclusionVolumes`. A viewmodel and the selected node are never culled,
+     * as in the editing view. Pure, like {@link outsideFrustum}.
+     */
+    public editingVerdict(node: ModelNode): CullVerdict {
+        if (!this.frustumCulling || node.viewmodel) return 0;
+        if (this._host.selectedNodeId && node.id === this._host.selectedNodeId) return 0;
+        const s = node.getBoundingSphere();
+        if (!this.editingFrustum.intersectsSphere(s.center[0], s.center[1], s.center[2], s.radius)) return CULL_OUTSIDE;
+        if (this.editingVolumeHidden(node) || this._occludedMemo.get(node) === true) return CULL_OCCLUDED;
+        return 0;
+    }
+
+    /** Whether the editing view's occlusion volumes hid `node` this frame, asked from any view. */
+    public editingVolumeHidden(node: object): boolean {
+        return this._volumesActive && this.volumes.hidden.has(node);
+    }
+
+    /**
+     * In a preview showing the editing view's frustum or occlusion culling, whether that view culled a
+     * thing at `center`/`radius` (a decal, a particle system's box as a sphere), or `node` by its volume.
+     * False outside such a preview.
+     */
+    public previewDrops(node: object, center: ArrayLike<number>, radius: number): boolean {
+        const shown = this._view.previewCulling;
+        if (!shown || !this.frustumCulling) return false;
+        if (shown.frustum && !this.editingFrustum.intersectsSphere(center[0], center[1], center[2], radius)) return true;
+        return shown.occlusion && this.editingVolumeHidden(node);
+    }
+
+    /** {@link previewDrops} for an axis-aligned box, by the editing frustum only. */
+    public previewDropsBox(min: ArrayLike<number>, max: ArrayLike<number>): boolean {
+        const shown = this._view.previewCulling;
+        return !!shown?.frustum && this.frustumCulling && !this.editingFrustum.intersectsAABB(min, max);
+    }
+
+    /** {@link previewDrops} by the editing view's occlusion volumes only. */
+    public previewVolumeDrops(node: object): boolean {
+        return !!this._view.previewCulling?.occlusion && this.editingVolumeHidden(node);
     }
 
     /**

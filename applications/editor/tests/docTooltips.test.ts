@@ -6,6 +6,7 @@ import {
 } from '@cleo/app-kit/docs/parseDocs';
 import { MODE_DOC_PAGE, MODE_PANEL_TITLES, PANEL_TAB_DOC_PAGE, PANEL_TAB_DOC_SECTION, PANEL_TITLES } from '../src/features/layout/panelTitles';
 import { EDITOR_SRC, loadDocIndex, resolveSite, scanSource } from './support/docCoverage';
+import { PANE_CULLING_KEYS, paneCullingDoc } from '../src/features/viewportPanes/paneState';
 
 /**
  * The editor's title tooltips are not written in the editor: each Collapsable / Section / modal / dock
@@ -193,6 +194,10 @@ describe('the real docs describe every editor title', () => {
     const modes = [...source.matchAll(/<Segment\b[^>]*\bmode='([^']+)'/g)].map(m => m[1]);
     expect(modes.length).toBeGreaterThan(3);
     expect(modes.filter(m => !resolveDocKey(index, [], `editor/modes#modes-you-choose::${m}`))).toEqual([]);
+  });
+
+  it('every switch of the split viewport culling view has its docs entry', () => {
+    expect(PANE_CULLING_KEYS.filter(k => !resolveDocKey(index, [], paneCullingDoc(k)))).toEqual([]);
   });
 
   it('every dock tab title has a row in the "Every panel" table', () => {

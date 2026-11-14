@@ -12,10 +12,10 @@ export type PaneLayout = 'single' | 'columns' | 'rows' | 'grid';
 export type PanePreset = 'perspective' | 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right';
 
 export const PANE_LAYOUTS: readonly { id: PaneLayout; label: string }[] = [
-  { id: 'single', label: 'Single' },
-  { id: 'columns', label: '2 Side by Side' },
-  { id: 'rows', label: '2 Stacked' },
-  { id: 'grid', label: '2 x 2' },
+  { id: 'single', label: 'Single view' },
+  { id: 'columns', label: 'Two side by side' },
+  { id: 'rows', label: 'Two stacked' },
+  { id: 'grid', label: 'Four, 2 x 2' },
 ];
 
 export const PANE_PRESETS: readonly { id: PanePreset; label: string }[] = [
@@ -47,11 +47,45 @@ export function paneCount(layout: PaneLayout): number {
   return cols * rows;
 }
 
+/**
+ * What of the editing pane's culling a preview pane shows (the renderer's `PaneCulling`): with a switch on,
+ * the pane leaves out what the edited camera culled that way and draws it as a tinted ghost instead.
+ */
+export interface PaneCulling {
+  frustum: boolean;
+  occlusion: boolean;
+  foliage: boolean;
+  lights: boolean;
+}
+
+export type PaneCullingKey = keyof PaneCulling;
+
+/** The culling view's switches, in menu order. */
+export const PANE_CULLING_KEYS: readonly PaneCullingKey[] = ['frustum', 'occlusion', 'foliage', 'lights'];
+
+/** Each switch's row in the culling menu; also its term under "Culling view" in docs/editor/scene-authoring.md. */
+export const PANE_CULLING_LABELS: Record<PaneCullingKey, string> = {
+  frustum: 'Frustum',
+  occlusion: 'Occlusion',
+  foliage: 'Foliage',
+  lights: 'Lights',
+};
+
+/** The docs entry a culling switch's row shows on hover. */
+export const paneCullingDoc = (key: PaneCullingKey): string => `editor/scene-authoring#culling-view::${PANE_CULLING_LABELS[key]}`;
+
+export const noPaneCulling = (): PaneCulling => ({ frustum: false, occlusion: false, foliage: false, lights: false });
+
+/** Whether any of a pane's culling switches is on. */
+export const anyCulling = (c: PaneCulling): boolean => PANE_CULLING_KEYS.some(k => c[k]);
+
 /** One pane's settings. */
 export interface PaneSettings {
   preset: PanePreset;
   /** Redraw every frame while not the editing pane; otherwise only when something changes. */
   realtime: boolean;
+  /** The editing pane's culling, shown here while this pane is a preview. */
+  culling: PaneCulling;
 }
 
 /** Where a pane's camera was left. `ortho` is the half-height of an orthographic view. */
@@ -80,7 +114,7 @@ export function defaultPaneState(): PaneState {
     version: 1,
     layout: 'single',
     focused: 0,
-    panes: DEFAULT_PANE_PRESETS.map(preset => ({ preset, realtime: false })),
+    panes: DEFAULT_PANE_PRESETS.map(preset => ({ preset, realtime: false, culling: noPaneCulling() })),
     poses: {},
   };
 }
@@ -112,6 +146,10 @@ export function sanitizePaneState(raw: unknown): PaneState {
       // Pane 0 is the main camera, which the 2D/3D switch rigs: it stays perspective.
       if (i > 0 && isPreset(p.preset)) out.panes[i].preset = p.preset;
       if (typeof p.realtime === 'boolean') out.panes[i].realtime = p.realtime;
+      const culling = p.culling as Record<string, unknown> | undefined;
+      if (culling && typeof culling === 'object') {
+        for (const key of PANE_CULLING_KEYS) if (typeof culling[key] === 'boolean') out.panes[i].culling[key] = culling[key] as boolean;
+      }
     }
   }
   const count = paneCount(out.layout);

@@ -14,8 +14,8 @@ import type { CameraNode, CleoEngine, Scene } from 'cleo';
 import { stepViewCamera3D, stepViewCameraOrtho } from '@cleo/app-kit/engine/viewCamera';
 import { viewCameraPrefs } from '../EngineContext';
 import {
-  MAX_PANES, layoutGrid, loadPaneState, paneCount, savePaneState,
-  type PaneLayout, type PanePose, type PanePreset, type PaneState,
+  MAX_PANES, PANE_CULLING_KEYS, layoutGrid, loadPaneState, paneCount, savePaneState,
+  type PaneCullingKey, type PaneLayout, type PanePose, type PanePreset, type PaneState,
 } from './paneState';
 import {
   applyPose, applyPreset, createPaneCamera, findCamera, isOrthoPreset, isPaneCamera, mainCamera, orthoHalf,
@@ -32,6 +32,8 @@ export interface ViewportPanes {
   setLayout(layout: PaneLayout): void;
   setPreset(index: number, preset: PanePreset): void;
   setRealtime(index: number, realtime: boolean): void;
+  /** Turn one of a pane's culling-view switches on or off (`PaneCulling`). */
+  setCulling(index: number, key: PaneCullingKey, on: boolean): void;
   /** Make the pane under a client point the editing pane (a drop lands where it is aimed). */
   focusPaneAt(clientX: number, clientY: number): void;
 }
@@ -177,11 +179,13 @@ export function useViewportPanes({ instance, viewportRef, mainScene, sceneKey, a
     if (scene.activeCamera !== cams[focused]) scene.setActiveCamera(cams[focused]);
 
     const { cols, rows } = layoutGrid(st.layout);
-    const key = `${cols}x${rows}|${focused}|${cams.map(c => c.id).join(',')}|${st.panes.slice(0, count).map(p => (p.realtime ? 1 : 0)).join('')}`;
+    const flags = (p: PaneState['panes'][number]) =>
+      `${p.realtime ? 1 : 0}${PANE_CULLING_KEYS.map(k => (p.culling[k] ? 1 : 0)).join('')}`;
+    const key = `${cols}x${rows}|${focused}|${cams.map(c => c.id).join(',')}|${st.panes.slice(0, count).map(flags).join(',')}`;
     if (key !== appliedKey.current) {
       renderer.setViewLayout({
         cols, rows, primary: focused,
-        panes: cams.map((camera, i) => ({ camera, realtime: st.panes[i].realtime })),
+        panes: cams.map((camera, i) => ({ camera, realtime: st.panes[i].realtime, culling: { ...st.panes[i].culling } })),
       });
       appliedKey.current = key;
     }
@@ -293,6 +297,11 @@ export function useViewportPanes({ instance, viewportRef, mainScene, sceneKey, a
     setRealtime: (index, realtime) => {
       const st = stateRef.current;
       commit({ ...st, panes: st.panes.map((p, i) => (i === index ? { ...p, realtime } : p)) });
+    },
+    setCulling: (index, key, on) => {
+      const st = stateRef.current;
+      commit({ ...st, panes: st.panes.map((p, i) => (i === index ? { ...p, culling: { ...p.culling, [key]: on } } : p)) });
+      instanceRef.current?.renderer.markViewsDirty(index);
     },
     focusPaneAt: (clientX, clientY) => {
       const index = paneAt(clientX, clientY);

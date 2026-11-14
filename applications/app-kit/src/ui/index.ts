@@ -8,7 +8,7 @@ export { labelClass, valueClass, hintClass, sectionTitleClass, hintAffordance } 
 export { Button, buttonVariants, ButtonWithConfirm } from './Button';
 export type { ButtonProps, ButtonWithConfirmProps } from './Button';
 
-export { SegmentedControl } from './SegmentedControl';
+export { SegmentedControl, JOINED_GROUP_CLASS, JOINED_DIVIDER_CLASS } from './SegmentedControl';
 export type { SegmentedControlProps, SegmentedOption } from './SegmentedControl';
 
 export { NumberInput, OptionalNumberInput, TextInput, Select, controlClass } from './inputs';

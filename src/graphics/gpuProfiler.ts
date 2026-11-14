@@ -218,6 +218,7 @@ export const PASS_LABEL_TO_SCOPE: Readonly<Record<string, RenderPass>> = {
     // composite past the end of the post chain. Both report under the one scope.
     'overlay.helpers': 'overlay',
     'overlay.giProbes': 'overlay',
+    'overlay.cullGhosts': 'overlay',
     'overlay.composite': 'overlay',
     // A split viewport's preview panes, put back on the canvas after the editing view's present.
     paneBlit: 'present',

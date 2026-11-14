@@ -30,6 +30,14 @@ import type { FullscreenPasses } from './fullscreenPasses';
 import type { GiSystem } from './gi/giSystem';
 import type { GIVolumeNode } from '../../core/scene/nodes/giVolumeNode';
 import type { Camera } from '../../core/camera';
+import type { LightNode } from '../../core/scene/nodes/lightNode';
+import type { AreaLight, PointLight, Spotlight } from '../lighting';
+import type { RenderSubsystems } from './subsystems';
+import {
+    CULL_OCCLUDED, CULL_OUTSIDE, FRUSTUM_EDGES, GHOST_MESH_TRIANGLE_LIMIT, GHOST_OCCLUDED_COLOR, GHOST_OPACITY,
+    GHOST_OUTSIDE_COLOR, boxMatrix, coneMatrix, edgeIndices, frustumCorners, segmentMatrix, sphereMatrix,
+    unitBoxLines, unitConeLines, unitSegmentLines, unitSphereLines, type CullVerdict, type LineGeometry,
+} from './cullGhosts';
 
 /** What EditorOverlays reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface EditorOverlaysHost {
@@ -60,7 +68,8 @@ export class EditorOverlays {
                 private readonly _decals: DecalPasses,
                 private readonly _sprites: Sprite2DPasses,
                 private readonly _fullscreen: FullscreenPasses,
-                private readonly _modelDraw: ModelDraw) {}
+                private readonly _modelDraw: ModelDraw,
+                private readonly _sys: RenderSubsystems) {}
 
     // Set per frame by the first pass that opens the overlay layer (`_targets.overlay`): nothing drawn
     // means no clear and no composite, and a published build, which has no editor nodes, pays nothing.
@@ -345,6 +354,11 @@ export class EditorOverlays {
                 }
             }
 
+            // What the editing view culled, in a preview showing its culling (the split viewport's
+            // culling view): occluded by the preview's scene like the helpers, under the gizmos.
+            if (this._view.preview && this._view.previewCulling && this._passes.beginPass('overlay'))
+                this._drawCullGhosts(scene);
+
             // Gizmos on top (also draws the editor skeleton overlay when set). Not a preview pane's: its
             // handles are sized for the editing view's camera, and only that view edits.
             const gizmos = this._view.preview ? EditorOverlays._NO_GIZMOS : gizmoNodes;
@@ -356,6 +370,206 @@ export class EditorOverlays {
     }
 
     private static readonly _NO_GIZMOS: ModelNode[] = [];
+
+    // --- The culling view's ghosts (render/cullGhosts.ts) -------------------------------------------
+
+    /** Unit line meshes, position only: a box, a segment, a sphere's three circles, a cone. */
+    private _ghostBox: Mesh | null = null;
+    private _ghostSegment: Mesh | null = null;
+    private _ghostSphere: Mesh | null = null;
+    private _ghostCone: Mesh | null = null;
+    /** Per mesh geometry, its edges as a line mesh, and what it was built from. */
+    private readonly _ghostEdges = new Map<Geometry, { mesh: Mesh; indices: unknown; vertexCount: number }>();
+    /** Edge meshes replaced while a recorded draw may still use them, and the frame they were retired in. */
+    private readonly _ghostRetired: { mesh: Mesh; frame: number }[] = [];
+    /** This call's ghosts, per line mesh and per verdict (outside, occluded): 16 floats per instance. */
+    private readonly _ghostSets = new Map<Mesh, [number[], number[]]>();
+    /** Every set's matrices end to end, and the ONE buffer they go up in (each draw binds its own range). */
+    private _ghostMatrices = new Float32Array(16 * 64);
+    private _ghostInstances: RhiBuffer | null = null;
+    private readonly _ghostScratch = new Float32Array(16);
+
+    /** Free the ghosts' edge meshes: no pane shows the culling view any more. */
+    public releaseCullGhosts(): void {
+        for (const entry of this._ghostEdges.values()) entry.mesh.dispose();
+        this._ghostEdges.clear();
+        for (const r of this._ghostRetired) r.mesh.dispose();
+        this._ghostRetired.length = 0;
+        this._ghostSets.clear();
+    }
+
+    private static _lineMesh(g: LineGeometry): Mesh {
+        const positions = new Float32Array(g.positions.length * 3);
+        g.positions.forEach((p, i) => positions.set(p, i * 3));
+        return new Mesh().create(positions, g.positions.length, Uint32Array.from(g.indices));
+    }
+
+    /**
+     * A model's wireframe for its ghost: its triangles' edges, built once per geometry. Null where a box
+     * says more: a landscape chunk (a dense grid), a skinned mesh (its edges would be the bind pose) or a
+     * mesh over `GHOST_MESH_TRIANGLE_LIMIT` triangles.
+     */
+    private _ghostEdgeMesh(node: ModelNode): Mesh | null {
+        const model = node.model;
+        if (!model || node.isTerrainChunk || model.mesh.isAnimated) return null;
+        const geometry = model.geometry;
+        const indices = geometry.indices;
+        if (!indices || indices.length < 3 || indices.length / 3 > GHOST_MESH_TRIANGLE_LIMIT) return null;
+        const cached = this._ghostEdges.get(geometry);
+        if (cached && cached.indices === indices && cached.vertexCount === geometry.vertexCount) return cached.mesh;
+        // A draw recorded this frame may still reference the old mesh: retire it rather than free it now.
+        if (cached) this._ghostRetired.push({ mesh: cached.mesh, frame: this._view.frameIndex });
+        const mesh = new Mesh().create(geometry.getData(['position']), geometry.vertexCount, edgeIndices(indices));
+        this._ghostEdges.set(geometry, { mesh, indices, vertexCount: geometry.vertexCount });
+        return mesh;
+    }
+
+    private _ghost(mesh: Mesh, verdict: CullVerdict, matrix: ArrayLike<number>): void {
+        let sets = this._ghostSets.get(mesh);
+        if (!sets) { sets = [[], []]; this._ghostSets.set(mesh, sets); }
+        const list = sets[verdict === CULL_OCCLUDED ? 1 : 0];
+        for (let i = 0; i < 16; i++) list.push(matrix[i]);
+    }
+
+    /**
+     * The split viewport's culling view, in a preview pane: what the EDITING view culled this frame, as
+     * tinted line ghosts over this preview's scene (FrameView.previewCulling says which kinds). Amber is
+     * outside that view (its frustum, or its light grid's depth range), violet hidden by an occluder, an
+     * occlusion query or an occlusion volume.
+     * - Frustum / Occlusion: each culled model as its wireframe (a box for landscape chunks, skinned and
+     *   very dense meshes); with Frustum, the editing camera's frustum too.
+     * - Foliage: each admitted cell that view left undrawn, as its box.
+     * - Lights: each light it left out of its grid, as its reach: a sphere, or a spotlight's cone.
+     * Only what this preview's own frustum sees. Depth-tested against the preview's scene, never written.
+     */
+    private _drawCullGhosts(scene: Scene): void {
+        const shown = this._view.previewCulling;
+        if (!shown) return;
+        const visibility = this._sys.visibility;
+        const frustum = visibility.frustum;
+        const own = visibility.frustumCulling;
+        for (let i = this._ghostRetired.length - 1; i >= 0; i--) {
+            if (this._ghostRetired[i].frame >= this._view.frameIndex) continue;
+            this._ghostRetired[i].mesh.dispose();
+            this._ghostRetired.splice(i, 1);
+        }
+        const box = this._ghostBox ??= EditorOverlays._lineMesh(unitBoxLines());
+        const segment = this._ghostSegment ??= EditorOverlays._lineMesh(unitSegmentLines());
+        this._ghostSphere ??= EditorOverlays._lineMesh(unitSphereLines());
+        this._ghostCone ??= EditorOverlays._lineMesh(unitConeLines());
+        for (const sets of this._ghostSets.values()) { sets[0].length = 0; sets[1].length = 0; }
+        const m = this._ghostScratch;
+
+        if (shown.frustum || shown.occlusion) {
+            for (const node of scene.models) {
+                if (!node.visible || !node.initialized || !node.model || isEditorOnlyNode(node)) continue;
+                const verdict = visibility.editingVerdict(node);
+                if (!verdict || (verdict === CULL_OUTSIDE ? !shown.frustum : !shown.occlusion)) continue;
+                const b = node.getBoundingBox();
+                if (own && !frustum.intersectsAABB(b.min, b.max)) continue;
+                const edges = this._ghostEdgeMesh(node);
+                if (edges) this._ghost(edges, verdict, node.worldTransform);
+                else { boxMatrix(m, 0, b.min, b.max); this._ghost(box, verdict, m); }
+            }
+        }
+        const editing = visibility.editingCamera;
+        if (shown.frustum && editing) {
+            const corners = frustumCorners(editing);
+            for (let e = 0; e < FRUSTUM_EDGES.length; e += 2) {
+                const a = FRUSTUM_EDGES[e] * 3, b = FRUSTUM_EDGES[e + 1] * 3;
+                segmentMatrix(m, 0, corners.subarray(a, a + 3), corners.subarray(b, b + 3));
+                this._ghost(segment, CULL_OUTSIDE, m);
+            }
+        }
+        if (shown.foliage) {
+            for (const landscape of scene.landscapes) {
+                if (!landscape.visible) continue;
+                for (const layer of landscape.terrain.foliage) {
+                    const why = this._sys.foliage.cellCullReasons(layer);
+                    if (!why) continue;
+                    for (const cell of layer.cells) {
+                        const verdict = why[cell.index] as CullVerdict;
+                        if (!verdict || !cell.visible) continue;
+                        if (own && !frustum.intersectsAABB(cell.min, cell.max)) continue;
+                        boxMatrix(m, 0, cell.min, cell.max);
+                        this._ghost(box, verdict, m);
+                    }
+                }
+            }
+        }
+        if (shown.lights) {
+            for (const [node, verdict] of this._sys.lighting.editingLightCull) this._ghostLight(node, verdict, m);
+        }
+
+        // Every set's matrices into one buffer, each draw bound at its own offset: two draws of one pass
+        // must never read one buffer rewritten between them (on WebGPU the write lands before either).
+        let floats = 0;
+        for (const sets of this._ghostSets.values()) floats += sets[0].length + sets[1].length;
+        if (floats === 0) return;
+        if (this._ghostMatrices.length < floats) this._ghostMatrices = new Float32Array(Math.max(floats, this._ghostMatrices.length * 2));
+        const all = this._ghostMatrices;
+        let at = 0;
+        for (const sets of this._ghostSets.values()) for (const list of sets) { all.set(list, at); at += list.length; }
+        this._ghostInstances = device.reallocateBuffer(
+            this._ghostInstances ?? device.createBuffer({ label: 'renderer.cullGhostInstances', size: 0,
+                                                          usage: BufferUsage.VERTEX | BufferUsage.COPY_DST }),
+            all.subarray(0, floats));
+
+        const pass = this._beginOverlayPass('overlay.cullGhosts');
+        this._shaderManager.bind('basicInstanced');
+        // Position-only line meshes, so `shadowMap`'s single-attribute layout (see `_drawSkeletonOverlay`).
+        const pipeline = this._pipelines.get('basicInstanced', BasicInstancedProgram, {
+            cullMode: 'none', depthStencil: DEPTH_TEST, blend: OVERLAY_BLEND, topology: 'line-list',
+            vertex: 'model+instance', builtFor: 'shadowMap',
+        });
+        pass.setPipeline(pipeline);
+        this._shaderManager.setUniform('u_view', this._view.camera.viewMatrix);
+        this._shaderManager.setUniform('u_projection', this._projection.rasterProjection(this._view.camera.projectionMatrix));
+        let offset = 0;
+        for (const [mesh, sets] of this._ghostSets) {
+            for (let k = 0; k < 2; k++) {
+                const list = sets[k];
+                if (list.length === 0) continue;
+                // By hand, as the skeleton overlay does: uniforms are sticky across basic draws.
+                this._materials.sync.invalidate(this._shaderManager.bound);
+                this._shaderManager.setUniform('u_material.color', k === 1 ? GHOST_OCCLUDED_COLOR : GHOST_OUTSIDE_COLOR);
+                this._shaderManager.setUniform('u_material.hasTexture', false);
+                this._shaderManager.setUniform('u_material.opacity', GHOST_OPACITY);
+                this._shaderManager.setUniform('u_material.intensity', 1.0);
+                this._shaderManager.setUniform('u_material.hasMaskMap', false);
+                this._shaderManager.setUniform('u_material.alphaCutoff', 0.0);
+                pass.setBindGroup(0, this._bindGroups.fallbackGroup(pipeline));
+                this._passes.recordInstancedDraw(pass, mesh, this._ghostInstances!, list.length / 16, offset * 4);
+                offset += list.length;
+            }
+        }
+        this._passes.endFullscreenPass(pass);
+    }
+
+    /** One light the editing view's grid left out, as its reach, when this preview's frustum sees it. */
+    private _ghostLight(node: LightNode, verdict: CullVerdict, m: Float32Array): void {
+        if (!node.visible) return;
+        const frustum = this._sys.visibility.frustum, own = this._sys.visibility.frustumCulling;
+        const p = node.worldPosition;
+        if (node.type === 'spotlight') {
+            const spot = node.light as Spotlight;
+            const reach = spot.range, radius = reach * Math.tan(Math.min(89, spot.outerCutOff) * Math.PI / 180);
+            if (own && !frustum.intersectsSphere(p[0], p[1], p[2], Math.hypot(reach, radius))) return;
+            coneMatrix(m, 0, p, node.worldForward, reach, radius);
+            this._ghost(this._ghostCone!, verdict, m);
+            return;
+        }
+        let r: number;
+        if (node.type === 'area') {
+            const area = node.light as AreaLight;
+            r = area.range + 0.5 * Math.hypot(area.width, area.height);
+        } else {
+            r = (node.light as PointLight).range;
+        }
+        if (!(r > 0) || (own && !frustum.intersectsSphere(p[0], p[1], p[2], r))) return;
+        sphereMatrix(m, 0, p, r);
+        this._ghost(this._ghostSphere!, verdict, m);
+    }
 
     /**
      * The plane the grid lies in for `camera`: the editor's choice (`gridPlane`) for a perspective view; for

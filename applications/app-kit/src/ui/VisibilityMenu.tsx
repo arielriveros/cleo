@@ -1,3 +1,4 @@
+import type React from 'react';
 import { Popover } from './Popover';
 import { DocHover } from './DocTooltip';
 import { Toggle } from './Toggle';
@@ -31,11 +32,22 @@ export interface VisibilityMenuProps {
   items: VisibilityItem[];
   /** The popover's title. */
   title?: string;
+  /** The trigger's glyph; the eye by default. */
+  trigger?: React.ReactNode;
+  /** The trigger button's classes; the eye menu's frame by default. */
+  triggerClassName?: string;
+  /** Which side the panel lines up with; the right by default (the viewport's top-right cluster). */
+  align?: 'left' | 'right';
+  disabled?: boolean;
+  /** Shown under the rows (a legend, a note). */
+  footer?: React.ReactNode;
 }
 
-export function VisibilityMenu({ items, title = 'Show in viewport' }: VisibilityMenuProps) {
+export function VisibilityMenu({ items, title = 'Show in viewport', trigger, triggerClassName = EYE_TRIGGER_CLASS,
+                                 align = 'right', disabled, footer }: VisibilityMenuProps) {
   return (
-    <Popover align='right' title={title} triggerClassName={EYE_TRIGGER_CLASS} trigger={<EyeIcon />} className='min-w-[200px]'>
+    <Popover align={align} title={title} triggerClassName={triggerClassName} trigger={trigger ?? <EyeIcon />}
+             disabled={disabled} className='min-w-[200px]'>
       <div data-cleo-overlay className='p-1'>
         <div className='grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1'>
           {items.map(item => (
@@ -47,6 +59,7 @@ export function VisibilityMenu({ items, title = 'Show in viewport' }: Visibility
             </div>
           ))}
         </div>
+        {footer}
       </div>
     </Popover>
   );
