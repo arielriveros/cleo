@@ -2,21 +2,11 @@
 // foreground) is parsed as a bare 6-digit hex with no '#' and no alpha, so those go through hex() below
 // rather than token(). Never call defineCleoThemes before an editor mounts: it reads computed styles.
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api';
-import { clamp } from '../utils/math';
-
-/** Same CSS custom property token() reads, as 6 hex digits (channels, no separators/prefix). */
-function channelsHex(name: string): string {
-  const channels = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  if (!channels) return 'e5e7eb'; // same fallback as token(), hex form
-  return channels
-    .split(/\s+/)
-    .map((c) => clamp(Number(c) || 0, 0, 255).toString(16).padStart(2, '0'))
-    .join('');
-}
+import { tokenHex } from '../utils/cssTokens';
 
 /** For `rules[].foreground` (Monaco's token colors): parsed as a bare 6-digit hex, no '#', no rgb(). */
 function hex(name: string): string {
-  return channelsHex(name);
+  return tokenHex(name).slice(1);
 }
 
 /**
@@ -24,12 +14,7 @@ function hex(name: string): string {
  * with Color.fromHex, which accepts hex only and silently falls back to pure red (#ff0000) for anything
  * else — including token()'s `rgb(r g b)` strings. token() is for DOM widgets only.
  */
-function colorHex(name: string, alpha = 1): string {
-  const h = channelsHex(name);
-  if (alpha >= 1) return `#${h}`;
-  const a = Math.round(clamp(alpha, 0, 1) * 255).toString(16).padStart(2, '0');
-  return `#${h}${a}`;
-}
+const colorHex = tokenHex;
 
 interface MonacoPalette {
   colors: Record<string, string>;

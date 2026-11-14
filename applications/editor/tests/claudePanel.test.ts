@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { terminalKeyAction } from '../src/features/agentChat/terminalStore'
+import { sessionTitle, terminalKeyAction } from '../src/features/agentChat/terminalStore'
 
 // The Claude panel's terminal (Claude Code hosted by the agent host) keeps the editor's copy and paste habits
 // without taking keys the program needs: Ctrl+C is its interrupt unless there is something selected to copy.
@@ -20,5 +20,23 @@ describe('Claude Code terminal keys', () => {
     expect(terminalKeyAction(key('v', { altKey: true }), false)).toBe('pass') // Claude Code's image paste
     expect(terminalKeyAction(key('Escape'), false)).toBe('pass')
     expect(terminalKeyAction(key('c', { ctrlKey: true }, 'keyup'), true)).toBe('pass')
+  })
+})
+
+// The header shows what the session is about, from the title Claude Code gives its terminal.
+describe('Claude Code session title', () => {
+  it('drops the state glyph in front of the summary', () => {
+    expect(sessionTitle('✳ Build a cube player')).toBe('Build a cube player')
+    expect(sessionTitle('⠂ Fix the door script')).toBe('Fix the door script')
+    expect(sessionTitle('3D scene review')).toBe('3D scene review')
+  })
+
+  it('names no task until Claude Code has one', () => {
+    expect(sessionTitle('✳ Claude Code')).toBeNull()
+    expect(sessionTitle('claude')).toBeNull()
+    expect(sessionTitle('')).toBeNull()
+    // What the Windows console host titles it with before Claude Code starts.
+    expect(sessionTitle('C:\\users\\me\\.local\\bin\\claude.exe')).toBeNull()
+    expect(sessionTitle('/usr/local/bin/claude')).toBeNull()
   })
 })

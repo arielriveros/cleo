@@ -61,8 +61,11 @@ same Claude Code you would run in a terminal yourself, with the Cleo tools alrea
   running: the screen comes back as it was. It stops 15 minutes after the last editor window closes.
   While the panel is closed, though, the editor is not linked: Claude's requests to the editor fail
   until you open the panel again.
-- **New session** (+ in the header) ends the running session and starts a fresh one. When Claude Code
-  exits, **New session** and **Continue last** (its most recent conversation) start it again.
+- **The header** names what the session is about, once Claude Code has given it a title, and its dot is
+  green while Claude Code runs. Hover over the title for the version and where it started. **New session**
+  (+) ends the running session and starts a fresh one; **Stop** ends it and keeps the conversation. When
+  Claude Code exits, **New session** and **Continue last** (its most recent conversation) start it again.
+- **Text size.** Ctrl+wheel over the terminal makes its text bigger or smaller; the panel remembers it.
 
 ## The Agent chip
 

@@ -39,6 +39,12 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     never write over an object link. `execute_js` no longer asks before every run (the Agent chip's
     **Allow code execution** is the switch).
 
+- **A cleaner Claude panel.** Claude Code's terminal draws on the GPU, so its frames and logo are solid
+  rather than striped, in the editor's colours with an IDE terminal's palette and a little room at the
+  edges. The header names what the session is about and has **New session** and **Stop** as one strip;
+  hovering the title tells the version and where it started. Ctrl+wheel zooms the terminal's text, and the
+  waiting and not-installed screens are proper cards.
+
 - **Physics as nodes.** A rigid body and a trigger are nodes now, in the Add catalog's new **Simulation**
   category beside Water Volume, Wind, Weather and Cloth.
   - *Collider:* the rigid body — mass, surface, constraints, simulation range — and its shapes. Everything

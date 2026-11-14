@@ -31,7 +31,16 @@ export interface TerminalState {
  */
 export type TerminalLink = 'idle' | 'outdated' | 'attaching' | 'ready'
 
-export interface TerminalSnapshot { link: TerminalLink; term: TerminalState | null }
+export interface TerminalSnapshot {
+  link: TerminalLink
+  term: TerminalState | null
+  /**
+   * What the session is about, from the title Claude Code gives its terminal (a short summary of the task
+   * once it has one), or null while it has none: the panel's header shows it, as an IDE shows a chat's title.
+   * Kept by the page, so a reload forgets it until Claude Code next sets one.
+   */
+  title: string | null
+}
 
 /** Where output goes: the editor's one terminal. */
 export interface TerminalSink {
@@ -42,7 +51,7 @@ export interface TerminalSink {
   configure(state: TerminalState): void
 }
 
-let state: TerminalSnapshot = { link: 'idle', term: null }
+let state: TerminalSnapshot = { link: 'idle', term: null, title: null }
 const listeners = new Set<() => void>()
 let sink: TerminalSink | null = null
 let attachedLink = -1
@@ -113,7 +122,13 @@ export const terminalActions = {
   },
   start(resume = false) {
     const size = sink?.size() ?? { cols: 100, rows: 30 }
+    if (state.title !== null) set({ title: null })
     agentBridge.sendTerm('start', { cols: size.cols, rows: size.rows, resume })
+  },
+  /** The terminal's title changed (an OSC sequence in Claude Code's output). */
+  setTitle(raw: string) {
+    const title = sessionTitle(raw)
+    if (title !== state.title) set({ title })
   },
   input(data: string) {
     if (state.term?.running) agentBridge.sendTerm('input', { data })
@@ -130,6 +145,18 @@ export const terminalActions = {
     })
     terminalActions.stop()
   },
+}
+
+/**
+ * A session title from a terminal title, or null when it names no task. Claude Code titles its terminal
+ * "✳ Claude Code" until it knows what the session is about, then with a short summary, behind a glyph that
+ * shows its state. Before that the console host titles it with the program's path.
+ */
+export function sessionTitle(raw: string): string | null {
+  const text = raw.replace(/^[^\p{L}\p{N}]+/u, '').trim()
+  if (!text || /^claude( code)?$/i.test(text)) return null
+  if (/[\\/]/.test(text) && /\.(exe|cmd|bat)$|[\\/]claude$/i.test(text)) return null
+  return text
 }
 
 /**
