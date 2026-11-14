@@ -25,7 +25,9 @@ the Editor alone; to open the Creator from them, run `npm run creator:serve` alo
 ## Menu bar
 
 Laid out like the Editor's: the Cleo logo (**home**; pointing at it runs the splash screen's pixel scan),
-then the menus, the graphics backend in use, and the open tool's name.
+then the menus, the graphics backend in use, and the open tool's name. In the desktop app on Windows and
+Linux it is also the window's title bar, with **Minimize**, **Maximize** and **Close** at its right end, as
+in the [Editor](../editor/interface.md#menu-bar).
 
 | Menu | Holds |
 |---|---|

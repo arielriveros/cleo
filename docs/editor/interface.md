@@ -65,6 +65,15 @@ After the menus come, when there is something to say:
 
 **Right** — the [mode selector](modes.md), then **Claude**, which opens the [Claude panel](ai-agent-link.md).
 
+In the desktop app on Windows and Linux the menu bar is also the window's title bar, and **Minimize**,
+**Maximize** (**Restore** while maximized) and **Close** come last.
+- *Move the window* by dragging the bar anywhere but its buttons and menus. Let go at the top of the screen
+  to maximize; drag a maximized window to restore it under the pointer.
+- *Double-click* the bar to maximize or restore.
+- *Close* asks about unsaved work, as closing the window always has.
+
+On macOS the window keeps its own title bar.
+
 ## Help and the docs
 
 These pages are built into the editor: the hover cards, the docs window and What's This? all read them,

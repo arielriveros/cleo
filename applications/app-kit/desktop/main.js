@@ -8,6 +8,7 @@ const { GAME_MAIN_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, WEB_HEADERS, gamePack
 const scriptWorkspace = require('./scriptWorkspace');
 const movieFiles = require('./movieFiles');
 const playWindow = require('./playWindow');
+const windowControls = require('./windowControls');
 
 const isDev = process.env.CLEO_DEV === '1';
 
@@ -130,6 +131,9 @@ ipcMain.on('shell:unload-response', (event, allow) => {
 // on macOS Cmd+C/V/X/Z only reach text inputs and Monaco through Edit-menu roles. So the shell installs
 // a minimal menu carrying exactly those, and every window hides the bar (`setMenuBarVisibility(false)`
 // keeps the accelerators live on Windows/Linux; macOS has no per-window bar to hide).
+//
+// The OS frame goes too, on Windows and Linux: the editor's menu bar is the window's title bar, with its
+// own minimize, maximize and close buttons (windowControls.js).
 
 function installAppMenu() {
   const isMac = process.platform === 'darwin';
@@ -169,22 +173,27 @@ function openCreatorWindows(win) {
     if (parsed.origin === appOrigin()) {
       return {
         action: 'allow',
-        overrideBrowserWindowOptions: {
+        overrideBrowserWindowOptions: windowControls.withFrame({
           width: 1600, height: 900, backgroundColor: '#252525', autoHideMenuBar: true,
           icon: parsed.pathname.startsWith('/creator') ? CREATOR_ICON : APP_ICON,
           webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
-        },
+        }),
       };
     }
     if (/^https?:$/.test(parsed.protocol)) shell.openExternal(url);
     return { action: 'deny' };
   });
   // The Creator window can open the editor's links too.
-  win.webContents.on('did-create-window', (child) => { child.setMenuBarVisibility(false); openCreatorWindows(child); });
+  win.webContents.on('did-create-window', (child) => {
+    child.setMenuBarVisibility(false);
+    windowControls.track(child);
+    openCreatorWindows(child);
+  });
 }
 
 function createWindow() {
-  const win = new BrowserWindow({
+  // Frameless on Windows and Linux: the menu bar is the title bar (windowControls.js).
+  const win = new BrowserWindow(windowControls.withFrame({
     width: 1600,
     height: 900,
     backgroundColor: '#252525',
@@ -194,8 +203,9 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-  });
+  }));
   win.setMenuBarVisibility(false);
+  windowControls.track(win);
   openCreatorWindows(win);
 
   // Optional: forward renderer console + failed loads to the terminal (CLEO_LOG_CONSOLE=1).
@@ -453,6 +463,13 @@ scriptWorkspace.registerIpc({ ipcMain, BrowserWindow, pickDirectory });
 // The editor's Render Movie streams its file (or folder of frames) through here; see movieFiles.js.
 
 movieFiles.registerIpc({ ipcMain, BrowserWindow, dialog, pickDirectory });
+
+// --- Window controls IPC -----------------------------------------------------------------------
+//
+// The menu bar's minimize, maximize / restore and close buttons, and dragging the window by the bar, in the
+// frameless app windows; see windowControls.js.
+
+windowControls.registerIpc({ ipcMain, BrowserWindow, screen });
 
 // --- Play window IPC ---------------------------------------------------------------------------
 //

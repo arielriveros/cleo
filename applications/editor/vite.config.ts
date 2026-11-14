@@ -12,12 +12,17 @@ const ENGINE_ROOT = path.resolve(__dirname, '../..')
 
 /** The Creator's dev server, proxied at /creator/ (see `server.proxy`). */
 const CREATOR_PORT = process.env.CLEO_CREATOR_PORT ?? 8081
-/** What /creator/ answers while that server is not running. */
+/**
+ * What /creator/ answers while that server is not running. It has its own Close: in the desktop app the
+ * window has no OS frame (the Creator's menu bar is its title bar), and this page has no menu bar.
+ */
 const CREATOR_NOT_RUNNING = `<!doctype html><meta charset="utf-8"><title>Cleo Creator</title>
 <body style="margin:0;height:100vh;display:grid;place-items:center;background:#1e1e1e;color:#ddd;font:14px system-ui,sans-serif">
 <div style="max-width:32rem;line-height:1.5"><h2 style="margin:0 0 .5rem">Cleo Creator is not running</h2>
 <p>Its dev server (port ${CREATOR_PORT}) is started separately. From the repo root run
-<code>npm run creator:serve</code>, then reload this window.</p></div>`
+<code>npm run creator:serve</code>, then reload this window.</p>
+<button onclick="window.cleoDesktop && window.cleoDesktop.window ? window.cleoDesktop.window.close() : window.close()"
+ style="font:inherit;color:inherit;background:#333;border:1px solid #555;border-radius:4px;padding:.25rem .75rem;cursor:pointer">Close this window</button></div>`
 
 // The shared engine config (../vite.config.ts) contributes the shader plugin and the `cleo` ->
 // ../src/cleo.ts alias, so the dev server, this build, the player build and both test suites resolve and

@@ -20,6 +20,7 @@
       "scriptWorkspace.js",
       "movieFiles.js",
       "playWindow.js",
+      "windowControls.js",
       "playDebugger.js",
       "icons/**"
     ],

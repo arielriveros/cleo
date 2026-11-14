@@ -24,6 +24,25 @@ contextBridge.exposeInMainWorld('cleoDesktop', {
     respondToUnload: (allow) => ipcRenderer.send('shell:unload-response', !!allow),
   },
 
+  // The title bar's buttons, in a window with no OS frame (windowControls.js): the menu bar stands in for it.
+  // Only there -- main.js passes the flag to a frameless window, so on macOS, which keeps its frame, this is
+  // absent and the menu bar draws no buttons. `onState` reports maximized / fullscreen so the middle button
+  // can show Restore; it returns an unsubscribe, and the raw listener never escapes here. `dragStart` /
+  // `dragEnd` bracket a press on the bar: in between, the main process moves the window with the cursor.
+  window: process.argv.includes('--cleo-frameless') ? {
+    dragStart: () => ipcRenderer.invoke('window:drag-start'),
+    dragEnd: () => ipcRenderer.invoke('window:drag-end'),
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
+    close: () => ipcRenderer.invoke('window:close'),
+    getState: () => ipcRenderer.invoke('window:state'),
+    onState: (cb) => {
+      const listener = (_event, state) => cb(state);
+      ipcRenderer.on('window:state-changed', listener);
+      return () => ipcRenderer.removeListener('window:state-changed', listener);
+    },
+  } : undefined,
+
   // Movie output (the Sequencer's Render Movie): a save dialog and a file written at byte offsets, or a folder of
   // numbered frames. Paths come only from the dialogs in movieFiles.js.
   movie: {

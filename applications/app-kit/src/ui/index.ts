@@ -10,6 +10,7 @@ export type { ButtonProps, ButtonWithConfirmProps } from './Button';
 
 export { SegmentedControl, JOINED_GROUP_CLASS, JOINED_DIVIDER_CLASS } from './SegmentedControl';
 export type { SegmentedControlProps, SegmentedOption } from './SegmentedControl';
+export { WindowControls, BareTitleBar, useTitleBarDrag, TITLEBAR_CONTROL } from './WindowControls';
 
 export { NumberInput, OptionalNumberInput, TextInput, Select, controlClass } from './inputs';
 export type { NumberInputProps, OptionalNumberInputProps, TextInputProps, SelectProps } from './inputs';

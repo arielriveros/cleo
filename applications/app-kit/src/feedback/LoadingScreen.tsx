@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { loadFraction, stepFraction, useLoad, type LoadState, type LoadStepState } from './loadingStore'
 import { queueSlots, slotOpacity, type QueueSlot } from './loadQueue'
 import LogoLoader from './LogoLoader'
+import { BareTitleBar } from '../ui/WindowControls'
 import './loadingQueue.css'
 
 // The Cleo loading screen, shared by every app, in one column with no card: the app's logo, which fills
@@ -108,6 +109,9 @@ export function LoadingView({ load, subtitle, versionLabel, logo, logoPixels }: 
   return (
     <div className={`${position} flex flex-col items-center justify-center bg-bg text-fg select-none`} role='progressbar'
          aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={load.title}>
+      {/* Covering the window covers its menu bar, which in the desktop app is the title bar: keep the window
+          movable and closable while it loads. */}
+      {load.variant === 'fullscreen' && <BareTitleBar />}
       <div className='flex w-[340px] max-w-[90%] flex-col items-center gap-5'>
         <div className='flex flex-col items-center gap-2'>
           {logo && <LogoLoader src={logo} pixels={logoPixels} progress={fraction} className='mb-3 w-[180px]' />}
