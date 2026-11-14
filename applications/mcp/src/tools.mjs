@@ -303,7 +303,7 @@ export function toolDefinitions(bridge, opts = {}) {
         description: 'A screenshot of the editor viewport as rendered (during Play: the game view). Optionally frame a node first '
             + '(moves the EDITOR camera, not the game camera). Changing tools take `capture` too, which saves this call.',
         inputSchema: {
-            focus: ref.optional().describe('Frame this node first.'),
+            focus: ref.optional().describe('Frame this node first. An orthographic view keeps its direction and zooms to fit.'),
             yaw: z.number().optional().describe('Orbit angle in degrees around it (0 = looking along +Z, default 35).'),
             pitch: z.number().optional().describe('Degrees above the horizon (default 25).'),
             maxSize: z.number().int().min(128).max(2048).optional().describe('Longest side in pixels (default 1024).'),

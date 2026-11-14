@@ -26,6 +26,9 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
     and level of detail, so they cost no extra GPU memory.
   - *Redrawn on change.* A preview redraws when the scene or its camera changes; **Realtime** redraws it
     every frame. The layout and every pane's camera are kept per project.
+  - *Agent framing.* When the agent frames a node for a capture in an orthographic pane (or the 2D view),
+    the view keeps its direction, centres the node and zooms to fit it, rather than being turned off its
+    axis.
 
 - **Play in window.** The ▾ beside Play picks where the game runs: **Play in editor**, in the viewport as
   before, or **Play in window**, in a window and a renderer process of its own. A script stuck in a loop or
