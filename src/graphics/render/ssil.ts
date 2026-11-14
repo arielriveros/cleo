@@ -201,7 +201,8 @@ export class SsilPasses {
         // disocclusion test, which rides in the radiance copy's alpha — so without a fresh copy the
         // history is restarted, not trusted.
         let accumulated = false;
-        if (this._passes.beginPass('ssao.temporal')) {
+        // Not in a preview pane, which keeps no history and must not stamp the editing view's.
+        if (!this._view.preview && this._passes.beginPass('ssao.temporal')) {
             const historyValid = radianceFresh && this._ssilFresh(this.ssilHistoryFrame);
             const src = this.ssilHistory.read;
             const dst = this.ssilHistory.write;

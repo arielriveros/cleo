@@ -62,15 +62,44 @@ export function stepViewCamera2D(node: CameraNode, delta: number, prefs: ViewCam
   }
   node.addX(nudge[0] * movement * 10);
   node.addY(nudge[1] * movement * 10);
-  const wheel = input.value('EditorCamera/Zoom');
-  if (Math.abs(wheel) > 0) {
-    // Wheel up (deltaY < 0) SHRINKS the ortho extents -- shows less world, zooms in -- matching the 3D
-    // rig's dolly and every other wheel in the apps.
-    const factor = Math.max(0.1, 1 + wheel * 0.001); // avoid inverting the frustum on a fast scroll
-    const cam = node.camera;
-    cam.top = clampExtent(cam.top * factor);
-    cam.bottom = clampExtent(cam.bottom * factor);
-    cam.left = clampExtent(cam.left * factor);
-    cam.right = clampExtent(cam.right * factor);
+  zoomOrthoExtents(node, input.value('EditorCamera/Zoom'));
+}
+
+/**
+ * Scale an orthographic camera's extents by a wheel reading. Wheel up (deltaY < 0) SHRINKS them -- shows
+ * less world, zooms in -- matching the 3D rig's dolly and every other wheel in the apps.
+ */
+export function zoomOrthoExtents(node: CameraNode, wheel: number): void {
+  if (!(Math.abs(wheel) > 0)) return;
+  const factor = Math.max(0.1, 1 + wheel * 0.001); // avoid inverting the frustum on a fast scroll
+  const cam = node.camera;
+  cam.top = clampExtent(cam.top * factor);
+  cam.bottom = clampExtent(cam.bottom * factor);
+  cam.left = clampExtent(cam.left * factor);
+  cam.right = clampExtent(cam.right * factor);
+}
+
+/**
+ * One frame of navigation on an orthographic camera looking along ANY axis -- the editor's Top, Front,
+ * Right... panes. Drag with either button to pan in the view plane, the scene staying under the cursor
+ * (one pointer pixel is one pixel of the view, `viewHeightPx` tall); WASD nudges half a view a second;
+ * the wheel zooms the extents. Unlike {@link stepViewCamera2D}, which pans in world X/Y, this pans along
+ * the camera's own right and up, so it works for a camera looking down as well as one looking along Z.
+ */
+export function stepViewCameraOrtho(node: CameraNode, delta: number, prefs: ViewCameraPrefs, viewHeightPx: number): void {
+  const input = InputSystem.instance;
+  const cam = node.camera;
+  const span = Math.abs(cam.top - cam.bottom);
+  const unitsPerPixel = span / Math.max(1, viewHeightPx);
+  const pan = input.vector('EditorCamera/Pan2D');
+  if (pan[0] !== 0 || pan[1] !== 0) {
+    // Grab the scene: dragging right moves the camera left, dragging down moves it up.
+    node.addRight(-pan[0] * unitsPerPixel);
+    node.addUp(pan[1] * unitsPerPixel);
   }
+  const nudge = input.vector('EditorCamera/Fly');
+  const step = span * 0.5 * delta * prefs.flySpeed;
+  if (nudge[0] !== 0) node.addRight(nudge[0] * step);
+  if (nudge[1] !== 0) node.addUp(nudge[1] * step);
+  zoomOrthoExtents(node, input.value('EditorCamera/Zoom'));
 }

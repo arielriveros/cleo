@@ -11,6 +11,8 @@ export const LS_KEYS = {
   dockLayout: 'cleo_dock_layout_v5',
   dockBottomTab: 'cleo_dock_bottom_tab',
   editorTabs: 'cleo_editor_tabs_v1',
+  /** The split viewport: layout, focused pane, each pane's camera and pose (features/viewportPanes). */
+  viewportPanes: 'cleo_viewport_panes_v1',
 } as const;
 
 /** The names above, for the migration that moves an existing install's keys under its Default Project. */

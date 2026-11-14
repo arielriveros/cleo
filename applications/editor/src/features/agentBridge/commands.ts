@@ -181,7 +181,12 @@ async function takeCapture(getHost: GetHost, spec: CaptureSpec, opts: { aliases?
     // moved in this same call would be framed where it was. Bring them up to date first.
     scene.root.updateTransforms(null)
     frameNode(camera, node, spec.yaw ?? 35, spec.pitch ?? 25)
-    note = ` Framed ${nodePath(node, scene.root)} (the editor camera moved).`
+    // An orthographic view (a split viewport's Top or Front pane, the 2D view) is framed along its own axis.
+    const ortho = camera.camera.type === 'orthographic'
+    const angles = ortho && (spec.yaw !== undefined || spec.pitch !== undefined) ? '; yaw and pitch apply only to a perspective view' : ''
+    note = ortho
+      ? ` Framed ${nodePath(node, scene.root)} (the orthographic editor view kept its direction and zoomed to fit${angles}).`
+      : ` Framed ${nodePath(node, scene.root)} (the editor camera moved).`
   }
   const shot = await captureViewport(engine.renderer, {
     maxSize: spec.maxSize ?? opts.defaultMax, format: spec.format ?? 'jpeg', skipFrames: spec.focus ? 12 : opts.settle ?? 0,

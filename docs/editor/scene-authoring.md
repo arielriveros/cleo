@@ -141,7 +141,8 @@ actually painted.
 Selection is disabled in the modes where it would not mean anything: landscape, tilemap, UI,
 renderer, input, material, terrain material, animation and blend space.
 
-**Gizmos:** the floating top-right chrome has **Move / Rotate / Scale**, the debug overlay eye menu,
+**Gizmos:** the floating top-right chrome has **Move / Rotate / Scale**, the debug overlay eye menu, the
+[split viewport](#split-viewport) layout,
 and a **2D/3D view switch**. Selecting one of a node's collision shapes turns Move and Rotate onto that
 shape and adds its size handles — see [Editing shapes in the viewport](physics.md#editing-shapes-in-the-viewport).
 
@@ -156,6 +157,31 @@ back. The node's own Move, Rotate and Scale gizmo stays up alongside, and each d
 > The 2D/3D switch in the viewport is **view-only**. The scene's authored dimension is a different
 > setting, in Scene settings, and it is the one that decides whether you get Landscape or Tilemap
 > mode and what a build keeps.
+
+### Split viewport
+
+The layout switch in the viewport's top-right chrome (beside 2D/3D) divides the viewport into **2 Side by
+Side**, **2 Stacked** or **2 x 2** panes, all the same size. **Single** puts it back to one view.
+
+- **One pane is edited at a time.** Clicking a pane, dragging in it or scrolling over it makes it the
+  editing pane, outlined in the accent colour. Selection, the gizmos, drag-drop and camera navigation all
+  work through that pane's camera; the others keep their view.
+- **The other panes are previews** of the same scene through their own camera. They show the lighting,
+  shadows, sky and the eye menu's overlays, but not the gizmos, and they skip what builds up over frames:
+  TAA (they use FXAA), motion blur, volumetric clouds and fog, screen-space reflections and the bounce
+  light's accumulation. They use the editing pane's exposure, level of detail and nearby foliage.
+- **What a pane looks through:** the top-left pane is always the editor camera (the one the 2D/3D switch,
+  Simulate and the Sequencer use). Every other pane has a menu: **Perspective**, a free camera navigated
+  like the main view, or an orthographic **Top**, **Bottom**, **Front**, **Back**, **Left** or **Right**
+  view. In an orthographic pane, drag with either button to pan (the scene stays under the cursor) and
+  scroll to zoom.
+- **Realtime:** a preview redraws when the scene, the selection or its camera changes, and once a second
+  regardless. Turn on **Realtime** to redraw it every frame (animation, particles and wind keep moving
+  there), at the cost of a full extra scene pass each frame.
+
+The layout, the editing pane, each pane's camera and where it was left are kept per project. The viewport
+goes back to one view in Play and Simulate, in the 2D view, and in every mode but Scene, and splits again
+when you return.
 
 **Dropping into the viewport:** a dropped template, model or node is placed at the first thing it
 hits — terrain, then the tilemap plane, then geometry, then the ground plane, and failing all of

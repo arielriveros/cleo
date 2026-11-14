@@ -29,6 +29,7 @@ import { ShaderManager } from '../systems/shaderManager';
 import type { FullscreenPasses } from './fullscreenPasses';
 import type { GiSystem } from './gi/giSystem';
 import type { GIVolumeNode } from '../../core/scene/nodes/giVolumeNode';
+import type { Camera } from '../../core/camera';
 
 /** What EditorOverlays reads from the renderer that owns it: its own state, not another subsystem's. */
 export interface EditorOverlaysHost {
@@ -114,7 +115,7 @@ export class EditorOverlays {
         this._shaderManager.setUniform('u_invViewProj', this._view.invViewProjStable);
         this._shaderManager.setUniform('u_viewProj', this._view.viewProj);
         this._shaderManager.setUniform('u_viewPos', this._view.camera.position);
-        this._shaderManager.setUniform('u_plane', this.gridPlane);
+        this._shaderManager.setUniform('u_plane', this._gridPlaneFor(this._view.camera));
 
         // Fade radius scales with zoom so the grid always reads as infinite. In perspective
         // that tracks the camera's distance to the plane; in ortho it tracks the frustum extent.
@@ -154,8 +155,9 @@ export class EditorOverlays {
      * The shader encodes to sRGB and nothing else. No exposure, no tone curve, no LUT: see the note
      * at the graph node in `_buildPostGraph`.
      */
-    public overlayCompositePass(): void {
-        const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'overlay.composite', false);
+    public overlayCompositePass(target?: RenderTarget): void {
+        // Into the canvas, or a preview pane's own image (Renderer `_renderPreviews`).
+        const pass = this._passes.beginFullscreenPass(target ?? this._passes.screenTarget(), 'overlay.composite', false);
         this._fullscreen.bind(pass, 'overlayComposite', OverlayCompositeProgram, [this._targets.overlay.colors[0]], OVERLAY_COMPOSITE_BLEND);
         this._passes.drawFullscreenAndEnd(pass);
     }
@@ -343,12 +345,30 @@ export class EditorOverlays {
                 }
             }
 
-            // Gizmos on top (also draws the editor skeleton overlay when set).
-            if ((gizmoNodes.length > 0 || this.skeletonOverlay) && this._passes.beginPass('gizmos'))
-                this._renderGizmos(gizmoNodes);
+            // Gizmos on top (also draws the editor skeleton overlay when set). Not a preview pane's: its
+            // handles are sized for the editing view's camera, and only that view edits.
+            const gizmos = this._view.preview ? EditorOverlays._NO_GIZMOS : gizmoNodes;
+            if ((gizmos.length > 0 || this.skeletonOverlay) && this._passes.beginPass('gizmos'))
+                this._renderGizmos(gizmos);
         } finally {
             this._view.drawPreExposure = sceneDrawPreExposure;
         }
+    }
+
+    private static readonly _NO_GIZMOS: ModelNode[] = [];
+
+    /**
+     * The plane the grid lies in for `camera`: the editor's choice (`gridPlane`) for a perspective view; for
+     * an orthographic one, the plane across its view axis -- the ground under a Top view, the front plane
+     * facing a Front view, the side plane facing a Left or Right one (the split viewport's panes). The 2D
+     * view looks along Z and so gets the front plane it always had.
+     */
+    private _gridPlaneFor(camera: Camera): 0 | 1 | 2 {
+        if (camera.type !== 'orthographic') return this.gridPlane;
+        const v = camera.viewMatrix;
+        const x = Math.abs(v[2]), y = Math.abs(v[6]), z = Math.abs(v[10]);
+        if (y >= x && y >= z) return 0;
+        return z >= x ? 1 : 2;
     }
 
     /** The GI Volumes whose probes show: all of them with the menu's switch on, else the selected one. */

@@ -34,13 +34,18 @@ import { captureViewport, releaseViewport } from "@cleo/app-kit/utils/pointerCap
 import { GizmoMode, GizmoSpace, MODE_RENDERS_VIEWPORT, EditorMode } from "./EngineContext";
 import { useSelection } from "./SelectionContext";
 import { usePlayback } from "./PlaybackContext";
+import { viewRectOf } from "@cleo/app-kit/engine/viewRect";
+import { useViewportPanes } from "./viewportPanes/useViewportPanes";
+import { PaneFrames, PaneLayoutSelect } from "./viewportPanes/ViewportPanes";
+import { panesAllowed } from "./viewportPanes/paneState";
 
 const GIZMO_HIDDEN_MODES: EditorMode[] = ['landscape', 'tilemap', 'options', 'material', 'terrainMaterial', 'particleSystem'];
 
 export default function EngineViewport() {
     const { instance, editorScene, eventEmitter, editorMode, viewDimension, setViewDimension, isSceneReady,
             templateRootId, modelEditTargetId, templates, models, materials, animations, scripts, bodies, triggers,
-            animationFieldTargetId, adoptRigController, inspectedScene, sequences, linkSequenceToNode } = useCleoEngine();
+            animationFieldTargetId, adoptRigController, inspectedScene, sequences, linkSequenceToNode,
+            mainScene, openSceneId } = useCleoEngine();
     const { selectedNode, isGizmoDragging, gizmoMode, setGizmoMode, gizmoSpace, setGizmoSpace } = useSelection();
     const { isPlayMode, isSimulating } = usePlayback();
     const { graphView, setGraphView } = useStateMachine();
@@ -82,6 +87,14 @@ export default function EngineViewport() {
  
     // Canvas hosting and resize-tracking are the app-kit's, shared with every app that embeds the engine.
     useEngineViewport(viewportRef, instance);
+
+    // The split viewport (features/viewportPanes): an editing pane and preview panes over the open scene, in
+    // the scene tab's scene mode, viewed in 3D, outside Play. The pane pointed at becomes the editing pane
+    // before any handler below sees the event, so they all work through it as they always have.
+    const panes = useViewportPanes({
+        instance, viewportRef, mainScene, sceneKey: openSceneId, eventEmitter,
+        allowed: panesAllowed({ editorMode, isPlayMode, viewDimension, isSceneReady }),
+    });
 
     useEffect(() => {
         if (!viewportRef.current || !instance) return;
@@ -190,7 +203,8 @@ export default function EngineViewport() {
                     return;
                 }
 
-                const rect = viewportRef.current!.getBoundingClientRect();
+                // The view the active camera draws into: the editing pane of a split viewport.
+                const rect = viewRectOf(instance, viewportRef.current)!;
                 const x = event.clientX - rect.left;
                 const y = event.clientY - rect.top;
                 
@@ -289,7 +303,7 @@ export default function EngineViewport() {
     const dropPointAt = (clientX: number, clientY: number): Vec.vec3 | null => {
         const cam = instance?.scene?.activeCamera?.camera;
         if (!cam || !viewportRef.current) return null;
-        const rect = viewportRef.current.getBoundingClientRect();
+        const rect = viewRectOf(instance, viewportRef.current)!;
         const ray = Raycaster.screenToRay(clientX - rect.left, clientY - rect.top, rect.width, rect.height, cam);
 
         for (const landscape of Array.from(editorScene.landscapes) as any[]) {
@@ -363,6 +377,8 @@ export default function EngineViewport() {
             Logger.warn('LOD previews are read-only: switch to LOD 0 to add to this model', 'Editor');
             return;
         }
+        // A drop lands in the pane it is aimed at: that pane becomes the editing one first.
+        panes.focusPaneAt(e.clientX, e.clientY);
         const point = dropPointAt(e.clientX, e.clientY);
 
         const newNodeId = e.dataTransfer.getData(NEW_NODE_MIME);
@@ -451,6 +467,8 @@ export default function EngineViewport() {
              onContextMenu={(e) => e.preventDefault()}>
             {/* Logger.debug(...) toasts, bottom-left, in every editor mode. Self-expires after 10s. */}
             <DebugOverlay />
+            {/* A frame and a header over each pane while the viewport is split. Renders nothing otherwise. */}
+            {overRender && <PaneFrames panes={panes} />}
             {/* Drives the renderer's skeleton overlay from every skinned model in the scene when the
                 Skeletons debug toggle is on (self-gates off in animation mode, where AnimationSkeletonTool
                 owns the overlay). Renders nothing itself. */}
@@ -475,6 +493,8 @@ export default function EngineViewport() {
                 {showGizmoTools && <>
                     <GizmoModeControls mode={gizmoMode} space={gizmoSpace} onMode={setGizmoMode} onSpace={setGizmoSpace} />
                 </>}
+                {/* Splitting is a scene-mode, 3D-view thing; elsewhere the saved layout waits. */}
+                {editorMode === 'scene' && !isPlayMode && viewDimension === '3D' && <PaneLayoutSelect panes={panes} />}
                 {editorMode !== 'template' && editorMode !== 'material' && editorMode !== 'terrainMaterial' && editorMode !== 'options' && !isPlayMode && (
                     <Select
                         data-cleo-overlay

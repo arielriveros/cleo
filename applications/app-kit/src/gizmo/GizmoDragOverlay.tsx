@@ -21,6 +21,12 @@ export interface GizmoOverlayView {
     viewProj: ReadonlyMat4;
     width: number;
     height: number;
+    /**
+     * Where that `width` x `height` view starts inside the overlay's positioned parent (the viewport
+     * panel), in CSS pixels: the editing pane of a split viewport. Default 0, the whole viewport.
+     */
+    left?: number;
+    top?: number;
 }
 
 export interface GizmoOverlayHandle {
@@ -46,6 +52,7 @@ const LABEL_CLASS =
     'bg-surface-raised/95 px-1.5 py-0.5 text-ui-xs font-medium tabular-nums shadow-lg select-none';
 
 const GizmoDragOverlay = forwardRef<GizmoOverlayHandle>((_props, ref) => {
+    const rootRef = useRef<HTMLDivElement>(null);
     const svgRef = useRef<SVGSVGElement>(null);
     const labelsRef = useRef<HTMLDivElement>(null);
     const polylines = useRef<SVGPolylineElement[]>([]);
@@ -56,6 +63,16 @@ const GizmoDragOverlay = forwardRef<GizmoOverlayHandle>((_props, ref) => {
             const svg = svgRef.current;
             const labelHost = labelsRef.current;
             if (!svg || !labelHost) return;
+            // Over the view it is drawn for: the editing pane of a split viewport, else the whole viewport.
+            const root = rootRef.current;
+            if (root && view) {
+                root.style.left = `${view.left ?? 0}px`;
+                root.style.top = `${view.top ?? 0}px`;
+                root.style.right = 'auto';
+                root.style.bottom = 'auto';
+                root.style.width = `${view.width}px`;
+                root.style.height = `${view.height}px`;
+            }
 
             let usedLines = 0;
             let usedLabels = 0;
@@ -106,7 +123,7 @@ const GizmoDragOverlay = forwardRef<GizmoOverlayHandle>((_props, ref) => {
     }), []);
 
     return (
-        <div data-cleo-overlay className='pointer-events-none absolute inset-0 z-20 overflow-hidden'>
+        <div ref={rootRef} data-cleo-overlay className='pointer-events-none absolute inset-0 z-20 overflow-hidden'>
             <svg ref={svgRef} className='absolute inset-0 h-full w-full' />
             <div ref={labelsRef} className='absolute left-0 top-0' />
         </div>

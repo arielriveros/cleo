@@ -4,6 +4,7 @@ import { useCleoEngine } from '../EngineContext';
 import UILayer from './UILayer';
 import UIEditorTools from './UIEditorTools';
 import { useDebugVisibility } from '../DebugVisibilityContext';
+import { usePaneView } from '../viewportPanes/paneView';
 
 /**
  * The editor's wrapper around the shared {@link UILayer}. Everything editor-only must stay here, so the
@@ -62,8 +63,16 @@ export default function UIEditorLayer() {
     // mounted either way, so the UI viewport keeps being measured.
     const showUi = isPlayMode || editorMode === 'ui' || visibility.gameUi.editor;
 
+    // In a split viewport the game UI lays out over the editing pane, the view its camera draws: the box
+    // measured above is then the pane's, which is what `setUIViewport` must be told.
+    const panes = usePaneView();
+    const pane = panes.active ? panes.boxes[panes.focused] : undefined;
+    const paneStyle = pane
+        ? { left: pane.left, top: pane.top, width: pane.width, height: pane.height, right: 'auto', bottom: 'auto' }
+        : undefined;
+
     return (
-        <div ref={viewportRef} className='absolute inset-0 pointer-events-none'>
+        <div ref={viewportRef} className='absolute inset-0 pointer-events-none' style={paneStyle}>
             {showUi && <UILayer
                 getScene={getScene}
                 interactive={isPlayMode}

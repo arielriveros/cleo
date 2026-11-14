@@ -239,7 +239,8 @@ export class MaterialBinder {
     public updateCameraHole(scene: Scene): void {
         const see = scene.activeCamera?.seeThrough;
         // Not in the editor's own views, not in captures and thumbnails: only the game camera has a player.
-        if (!see || !see.active || see.strength <= 0 || see.radius <= 0 || this._view.capturing || this._host.thumbnailMode()) {
+        if (!see || !see.active || see.strength <= 0 || see.radius <= 0 || this._view.capturing || this._view.preview
+            || this._host.thumbnailMode()) {
             this._camHoleStrength = 0;
             return;
         }

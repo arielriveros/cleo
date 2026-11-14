@@ -87,6 +87,8 @@ import { RenderStats } from './render/stats';
 import type { RenderSubsystems } from './render/subsystems';
 import { ProgramRegistry } from './render/programRegistry';
 import { renderNow, renderClockOverridden } from './render/renderClock';
+import { isSplitLayout, paneRects, paneViewport, type PaneRect, type ViewLayout } from './render/viewLayout';
+import type { RenderPassEncoder } from './rhi/device';
 export { QUALITY_TIERS, RENDER_2D_DEFAULTS, RENDER_3D_DEFAULTS } from './render/settingsTypes';
 export type { DebugView, OcclusionMode, QualityPreset, ToneMapper, RenderSettings, QualityTier, TaaHistoryFilter, FxaaQuality, SkeletonOverlay, Pipeline2D } from './render/settingsTypes';
 import { describeCapabilities } from './rhi/device';
@@ -370,7 +372,7 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._bindGroups, this._fullscreen, this._projection, this._particlePasses, this._subsystems);
         this._sprites = new Sprite2DPasses({
-            get canvas() { return renderer._canvas; },
+            get viewCssHeight() { return renderer._viewCssHeight; },
             get thumbnailMode() { return renderer._thumbnailMode; },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._particlePasses, this._subsystems);
         this._foliage = new FoliagePasses({
@@ -426,7 +428,8 @@ export class Renderer {
             get thumbnailMode() { return renderer._thumbnailMode; },
             meterScene: () => renderer._meterScene(),
             renderVolumetricFog: (scene: Scene) => {
-                if (renderer._passes.beginPass('volumetricFog')) renderer._fog.render(scene);
+                // Not in a preview pane: the froxels ping-pong a history the editing view owns.
+                if (!renderer._view.preview && renderer._passes.beginPass('volumetricFog')) renderer._fog.render(scene);
             },
         }, this._view, this._targets, this._passes, this._pipelines, this._bindGroups, this._materials, this._projection, this._temporal, this._clouds, this._decals, this._fluids, this._particlePasses, this._sprites, this._visibility, this._radiance, this._lighting, this._sky, this._modelDraw, this._subsystems);
         this._overlays = new EditorOverlays({
@@ -782,6 +785,18 @@ export class Renderer {
         // A 2D scene draws through the flat 2D frame unless its settings ask for the 3D one. Leaving it for
         // the 3D frame drops every temporal history: none of it was kept up while the 2D frames ran.
         const flat = scene.dimension === '2D' && this._pipeline2D === 'flat';
+        // A split layout applies to the 3D frame only; the flat 2D one always fills the canvas. Entering or
+        // leaving the split, or reshaping it, changes the internal size every view renders at.
+        const panesLive = this._layout !== null && !flat;
+        if (panesLive !== this._panesLive) {
+            this._panesLive = panesLive;
+            this._paneSizeDirty = true;
+        }
+        if (this._paneSizeDirty && !this._capture.presentTarget && !this._movie.active) {
+            this._paneSizeDirty = false;
+            this._resizeBuffers(this._renderWidth, this._renderHeight);
+        }
+        this._passes.beginScreenFrame(this._panesLive && this._layout ? this._paneRects[this._layout.primary] : null);
         // A 2D game camera sizes its projection from the screen, in art pixels: fitted before either frame
         // builds its matrices from it.
         const active = scene.activeCamera;
@@ -804,6 +819,7 @@ export class Renderer {
         if (!scene.activeCamera) return;
         this._view.camera = scene.activeCamera.camera;
         this._view.camera.resize(this._renderWidth, this._renderHeight);
+        this._updateLodEye();
         this._materials.updateCameraHole(scene);
         // Kept for per-draw lookups (forward light-probe selection) that don't receive the scene.
         this._view.scene = scene;
@@ -1039,6 +1055,10 @@ export class Renderer {
         // overwrite the snapshot with this frame's value.
         this._temporal.capturePrevTransforms(scene);
 
+        // The preview panes of a split viewport, after everything the editing view stamps for its next frame
+        // and before the frame counter moves, so every "written last frame" check it makes still sees its own.
+        this._renderPreviews(scene, shadowLight);
+
         // Sacrificial trailing scope: whichever query is LAST in a frame absorbs the driver's
         // end-of-frame drain, which would otherwise be charged to `present`.
         this._passes.scope('frameEnd');
@@ -1254,8 +1274,9 @@ export class Renderer {
         //     Perspective cameras only: an orthographic view reflects along parallel rays the march does
         //     not model, and the 2D scenes that use one have nothing glossy to reflect in.
         this._ssr.ssrProducedThisFrame = false;
+        //     Nor in a preview pane: it reflects last frame's light, which a preview does not have.
         if (this._ssr.ssrEnabled && gBufferHasGeometry && this._view.camera.type !== 'orthographic'
-            && this._passes.beginPass('ssr'))
+            && !this._view.preview && this._passes.beginPass('ssr'))
             this._ssr.ssrProducedThisFrame = this._ssr.ssrPass();
         // 1d. GI Volumes: the volumes' irradiance at every pixel, the most specific indirect diffuse.
         this._gi.producedThisFrame = false;
@@ -1438,15 +1459,309 @@ export class Renderer {
     // Size the render path is currently targeting: the offscreen square while capturing a thumbnail,
     // the canvas otherwise. Everything in the frame (camera aspect, texel sizes) must read these rather
     // than the canvas, or a capture would be framed for the viewport it is deliberately bypassing.
+    // In a split layout, one pane: every view of the frame renders at the pane's size.
     private get _renderWidth(): number {
         if (this._capture.presentTarget) return this._capture.presentTarget.width;
         if (this._movie.active) return this._movie.width;
+        if (this._panesLive) return Math.max(1, Math.round(this._paneRects[0].w * this._renderScale));
         return Math.max(1, Math.round(this._canvas.width * this._renderScale));
     }
     private get _renderHeight(): number {
         if (this._capture.presentTarget) return this._capture.presentTarget.height;
         if (this._movie.active) return this._movie.height;
+        if (this._panesLive) return Math.max(1, Math.round(this._paneRects[0].h * this._renderScale));
         return Math.max(1, Math.round(this._canvas.height * this._renderScale));
+    }
+
+    /**
+     * The CSS height of the view being drawn — the pane in a split layout, else the canvas — which sprite
+     * size caps (the editor's icons) measure against. Canvas pixels are CSS pixels (`resize`).
+     */
+    private get _viewCssHeight(): number {
+        return this._panesLive ? this._paneRects[0].h : this._canvas.clientHeight;
+    }
+
+    // --- Split viewport (render/viewLayout.ts) ----------------------------------------------------
+
+    /** The split the editor asked for, or null for one view filling the canvas. */
+    private _layout: ViewLayout | null = null;
+    /** Its panes in canvas pixels, recomputed with the canvas size. */
+    private _paneRects: PaneRect[] = [];
+    /**
+     * Whether the split applies to the frame being drawn: a layout is set and the frame is not the flat
+     * 2D one, which always fills the canvas. Decided at the top of `render()`.
+     */
+    private _panesLive = false;
+    /** The internal size must follow a split change: re-check it at the next `render()`. */
+    private _paneSizeDirty = false;
+
+    /**
+     * Split the canvas into panes (see render/viewLayout.ts), or `null` for one view filling it. The
+     * primary pane always shows `scene.activeCamera` with the full frame; the editor moves focus by
+     * pinning another camera and naming its pane primary. A layout of one pane is the same as null.
+     */
+    public setViewLayout(layout: ViewLayout | null): void {
+        const next = isSplitLayout(layout)
+            ? { ...layout, panes: layout.panes.map(p => ({ camera: p.camera, realtime: p.realtime })) }
+            : null;
+        const prev = this._layout;
+        if (!prev !== !next || (prev && next && (prev.cols !== next.cols || prev.rows !== next.rows)))
+            this._paneSizeDirty = true;
+        this._layout = next;
+        this._layoutPaneRects();
+        const count = next ? next.panes.length : 0;
+        for (let i = count; i < this._paneTargets.length; i++) this._paneTargets[i]?.destroy();
+        this._paneTargets.length = Math.min(this._paneTargets.length, count);
+        this._paneHasImage.length = this._paneTargets.length;
+        this._paneDrawnAt.length = Math.min(this._paneDrawnAt.length, count);
+        this._paneDirty.length = count;
+        this.markViewsDirty();
+    }
+
+    /**
+     * Redraw preview pane `index` (every pane when omitted) soon. The editor calls this when the scene
+     * changes; a pane that redraws only on change also redraws when its own camera moves or its size
+     * changes, and once a second regardless (`PANE_TRICKLE_MS`), which catches what nothing signals: a
+     * shader that finished compiling, a texture that streamed in. At most one such pane redraws per frame
+     * (see `_renderPreviews`).
+     */
+    public markViewsDirty(index?: number): void {
+        if (index === undefined) this._paneDirty.fill(true);
+        else if (index >= 0 && index < this._paneDirty.length) this._paneDirty[index] = true;
+    }
+
+    /** Each preview pane's last image, in its own 8-bit target at the pane's size (see `_blitPanes`). */
+    private readonly _paneTargets: (Framebuffer | null)[] = [];
+    /** Whether each pane target holds an image yet: a fresh one is uninitialized memory. */
+    private readonly _paneHasImage: boolean[] = [];
+    /** Which preview panes redraw at their next chance. */
+    private readonly _paneDirty: boolean[] = [];
+    /** Each preview pane's camera matrix as last drawn, to tell when it moved. */
+    private readonly _paneViewProj: mat4[] = [];
+    private readonly _paneScratch = mat4.create();
+    /** When each preview pane last redrew (render clock), for the trickle and the round-robin. */
+    private readonly _paneDrawnAt: number[] = [];
+    private static readonly PANE_TRICKLE_MS = 1000;
+    /** The pane target the preview being drawn resolves into; null outside a preview. */
+    private _previewTarget: Framebuffer | null = null;
+    /** A preview's own post chain buffers (see `_applyPostProcessing`). */
+    private readonly _previewPostPool = new FramebufferPool();
+    /** The editing view's matrices, kept across a preview. */
+    private readonly _previewSaved = {
+        viewProj: mat4.create(), invViewProj: mat4.create(), invStable: mat4.create(),
+        jitteredCam: mat4.create(), jitteredView: mat4.create(),
+    };
+
+    private _ensurePaneTarget(index: number, width: number, height: number): Framebuffer {
+        let fbo = this._paneTargets[index];
+        if (!fbo) {
+            fbo = new Framebuffer({ colorTextureOptions: { mipMap: false }, depth: false });
+            this._paneTargets[index] = fbo;
+        }
+        if (fbo.width !== width || fbo.height !== height) {
+            fbo.create(width, height);
+            this._paneHasImage[index] = false;
+            this._paneDirty[index] = true;
+        }
+        return fbo;
+    }
+
+    /**
+     * The preview panes of a split layout (render/viewLayout.ts): the scene again through each pane's own
+     * camera, in the same frame, after the editing view has drawn and presented. A preview reuses the
+     * frame's screen-sized targets (every pane renders at the same size) and resolves into its pane's own
+     * image, which `_blitPanes` puts on the canvas every frame — so a pane that redraws only on change
+     * keeps showing its last image in between.
+     *
+     * A preview keeps no temporal history and touches none: it runs with `FrameView.preview` set, which
+     * every subsystem with per-camera state checks (no TAA phase, motion blur, clouds, volumetric fog,
+     * fluids, SSR or SSIL accumulation; no metering; the editing view's exposure, LOD and foliage choices).
+     * The cascades are refit for each preview camera and redrawn whole at the editing view's next frame.
+     */
+    private _renderPreviews(scene: Scene, shadowLight: LightNode | null): void {
+        const layout = this._layout;
+        if (!this._panesLive || !layout || this._thumbnailMode || this._movie.active || this._view.capturing) return;
+        const now = renderNow();
+        // Realtime panes redraw every frame. Of the others, at most ONE a frame: the one that has waited
+        // longest of those that are dirty or past the trickle. So a gizmo drag that dirties every preview
+        // each frame costs the editing view plus one preview, the previews taking turns, rather than all of
+        // them at once; and the trickle never lands three previews on one frame.
+        let onChange = -1, onChangeAge = -1;
+        const draw: number[] = [];
+        for (let i = 0; i < layout.panes.length; i++) {
+            if (i === layout.primary) continue;
+            const node = layout.panes[i].camera;
+            const rect = this._paneRects[i];
+            if (!node || !rect) continue;
+            this._ensurePaneTarget(i, rect.w, rect.h);
+            const camera = node.camera;
+            camera.resize(this._renderWidth, this._renderHeight);
+            mat4.multiply(this._paneScratch, camera.projectionMatrix, camera.viewMatrix);
+            const seen = this._paneViewProj[i] ??= mat4.create();
+            if (!mat4.exactEquals(seen, this._paneScratch)) {
+                mat4.copy(seen, this._paneScratch);
+                this._paneDirty[i] = true;
+            }
+            if (layout.panes[i].realtime) { draw.push(i); continue; }
+            const age = now - (this._paneDrawnAt[i] ?? -Infinity);
+            const due = this._paneDirty[i] || !this._paneHasImage[i] || age >= Renderer.PANE_TRICKLE_MS;
+            if (due && age > onChangeAge) { onChange = i; onChangeAge = age; }
+        }
+        if (onChange >= 0) draw.push(onChange);
+        for (const i of draw) {
+            const camera = layout.panes[i].camera!.camera;
+            const target = this._paneTargets[i]!;
+            this._paneDirty[i] = false;
+            // Submit what the frame recorded so far before the preview writes a single buffer. On WebGPU
+            // `writeBuffer`/`writeTexture` land on the queue when called, ahead of every draw still in the
+            // encoder: the preview's light grid, instance buffers and overlay instances would replace the
+            // editing view's under its own recorded draws, and a buffer grown here would be destroyed
+            // while those draws still reference it.
+            this._passes.flushFrameEncoder(true);
+            this._withPreviewState(camera, target, () => this._renderPreviewView(scene, shadowLight));
+            this._paneHasImage[i] = true;
+            this._paneDrawnAt[i] = now;
+        }
+        const refit = draw.length > 0;
+        // The cascades now hold the last preview's fit: the editing view redraws every layer next frame.
+        if (refit) this._shadows.requestFullUpdate();
+        this._blitPanes(layout);
+    }
+
+    /**
+     * Where this frame measures detail from (FrameView.lodEye): the camera, or for an orthographic camera
+     * `Camera.detailDistance` ahead of it, the depth of what it frames.
+     */
+    private _updateLodEye(): void {
+        const camera = this._view.camera, eye = this._view.lodEye, p = camera.position;
+        vec3.copy(eye, p);
+        const ahead = camera.type === 'orthographic' ? camera.detailDistance : 0;
+        if (!(ahead > 0)) return;
+        // Forward is the negated third row of the view matrix (it is the inverse rotation).
+        const v = camera.viewMatrix;
+        eye[0] = p[0] - v[2] * ahead;
+        eye[1] = p[1] - v[6] * ahead;
+        eye[2] = p[2] - v[10] * ahead;
+    }
+
+    /** Swap the frame view to a preview camera for `body`, and back, with everything it must not keep. */
+    private _withPreviewState(camera: Camera, target: Framebuffer, body: () => void): void {
+        const view = this._view, saved = this._previewSaved;
+        const editingCamera = view.camera;
+        const hadPrev = view.hasPrevViewProj, jitter = view.taaJitterActive;
+        mat4.copy(saved.viewProj, view.viewProj);
+        mat4.copy(saved.invViewProj, view.invViewProj);
+        mat4.copy(saved.invStable, view.invViewProjStable);
+        mat4.copy(saved.jitteredCam, this._jitteredCameraProj);
+        mat4.copy(saved.jitteredView, this._jitteredViewProj);
+        view.preview = true;
+        view.camera = camera;
+        view.hasPrevViewProj = false;
+        view.taaJitterActive = false;
+        this._previewTarget = target;
+        try {
+            body();
+        } finally {
+            view.preview = false;
+            view.camera = editingCamera;
+            view.hasPrevViewProj = hadPrev;
+            view.taaJitterActive = jitter;
+            mat4.copy(view.viewProj, saved.viewProj);
+            mat4.copy(view.invViewProj, saved.invViewProj);
+            mat4.copy(view.invViewProjStable, saved.invStable);
+            mat4.copy(this._jitteredCameraProj, saved.jitteredCam);
+            mat4.copy(this._jitteredViewProj, saved.jitteredView);
+            this._previewTarget = null;
+            this._projection.updateJitter();
+        }
+    }
+
+    /** One preview pane, under `_withPreviewState`: the 3D frame's per-camera half, with nothing temporal. */
+    private _renderPreviewView(scene: Scene, shadowLight: LightNode | null): void {
+        const camera = this._view.camera;
+        camera.resize(this._renderWidth, this._renderHeight);
+        // No TAA phase (`taaJitterActive` is off), so the jitter is the identity and the raster matrices
+        // are the camera's own.
+        this._projection.updateJitter();
+        const view = camera.viewMatrix, proj = camera.projectionMatrix;
+        mat4.multiply(this._view.viewProj, proj, view);
+        this._visibility.frustum.setFromViewProjection(this._view.viewProj);
+        mat4.copy(this._jitteredCameraProj, proj);
+        mat4.multiply(this._jitteredViewProj, this._jitteredCameraProj, view);
+        mat4.invert(this._view.invViewProj, this._jitteredViewProj);
+        this._projection.uvConsuming(this._view.invViewProj, this._view.invViewProj);
+        mat4.invert(this._view.invViewProjStable, this._view.viewProj);
+        this._projection.uvConsuming(this._view.invViewProjStable, this._view.invViewProjStable);
+
+        // The editing view's per-pass flags, reset for this view: no camera hole, no velocity or blur, and
+        // an overlay buffer this view clears on its own first draw.
+        this._materials.updateCameraHole(scene);
+        this._temporal.motionBlurWillRun = false;
+        this._temporal.velocityProducedThisFrame = false;
+        this._overlays.overlayDrawn = false;
+
+        // The plants the editing view admitted, as this frustum sees them, packed before any pass opens.
+        this._foliage.preparePreview(scene);
+        // The cascades, refit around this camera: the lighting pass picks a layer by THIS view's depth.
+        if (this._shadows.shadowsActive && shadowLight && this._passes.beginPass('shadows.cascades')) {
+            this._shadows.requestFullUpdate();
+            this._shadows.renderCascades(scene, shadowLight);
+        }
+        this._passes.scope('lightGrid');
+        this._lighting.buildLightGrid(scene);
+        this._passes.endScope();
+        this._decals.collectDecals(scene);
+        this._decals.decalReceiverPass(scene);
+        if (this._deferred) this._renderDeferred(scene, shadowLight);
+        else this._renderForward(scene, shadowLight);
+        this._applyPostProcessing(scene);
+    }
+
+    /**
+     * Every preview pane's last image onto its rectangle of the canvas, every frame, after the editing
+     * view's present (which cleared the canvas). The swap chain keeps nothing from the frame before, so a
+     * pane that did not redraw is put back from its own target.
+     */
+    private _blitPanes(layout: ViewLayout): void {
+        let pass: RenderPassEncoder | null = null;
+        let height = 0;
+        for (let i = 0; i < layout.panes.length; i++) {
+            if (i === layout.primary || !this._paneHasImage[i]) continue;
+            const target = this._paneTargets[i], rect = this._paneRects[i];
+            if (!target || !rect) continue;
+            if (!pass) {
+                const screen = this._passes.screenTarget();
+                height = screen.height;
+                pass = this._passes.beginFullscreenPass(screen, 'paneBlit', false);
+            }
+            pass.setViewport(...paneViewport(rect, height, device.capabilities.conventions.originTopLeft));
+            this._fullscreen.bind(pass, 'screen', ScreenProgram, [target.colors[0]]);
+            this._passes.drawFullscreen(pass);
+        }
+        if (pass) this._passes.endFullscreenPass(pass);
+    }
+
+    /** The current split, or null. A copy. */
+    public get viewLayout(): ViewLayout | null {
+        return this._layout ? { ...this._layout, panes: this._layout.panes.map(p => ({ ...p })) } : null;
+    }
+
+    /** The primary (editing) pane of the current split, in canvas pixels; null without a split. */
+    public get editingPaneRect(): PaneRect | null {
+        const rect = this._layout ? this._paneRects[this._layout.primary] : undefined;
+        return rect ? { ...rect } : null;
+    }
+
+    /** Pane `index` of the current split, in canvas (= CSS) pixels from the canvas's top left; null without one. */
+    public paneRect(index: number): PaneRect | null {
+        const rect = this._layout ? this._paneRects[index] : undefined;
+        return rect ? { ...rect } : null;
+    }
+
+    private _layoutPaneRects(): void {
+        this._paneRects = this._layout
+            ? paneRects(this._canvas.width, this._canvas.height, this._layout.cols, this._layout.rows)
+            : [];
     }
 
     /** The viewport element had no area at the last `resize()`; see there and in `render`. */
@@ -1541,6 +1856,7 @@ export class Renderer {
         if (this._viewportEmpty) return;
         this._canvas.width = width;
         this._canvas.height = height;
+        this._layoutPaneRects();
 
         if (!this._deviceReady) return;
         // Re-establish the surface configuration. Not needed for the resize itself — the swap chain
@@ -1591,6 +1907,9 @@ export class Renderer {
         // next compile asks for the new one. Releasing here rather than reallocating keeps the "a
         // resize hands back uninitialized memory" contract above true of the chain buffers too.
         this._postPool.destroy();
+        this._previewPostPool.destroy();
+        // Every pane's image is now framed for the old size; redraw them all.
+        this.markViewsDirty();
     }
 
     public set viewport(viewport: HTMLElement) {
@@ -1632,8 +1951,10 @@ export class Renderer {
 
     private _applyPostProcessing(scene: Scene): void {
         // BEFORE the thumbnail branch below, so an offscreen capture gets the authored exposure rather
-        // than the scene's last metered one. See `_autoExposure.resolveExposure`.
-        this._autoExposure.resolveExposure();
+        // than the scene's last metered one. See `_autoExposure.resolveExposure`. Not for a preview pane:
+        // it shows the editing view's exposure, and resolving at its eye would re-read the exposure
+        // volumes there and could re-seed the adaptation.
+        if (!this._view.preview) this._autoExposure.resolveExposure();
 
         // Thumbnail capture resolves straight into the offscreen target and stops — no post chain at
         // all. Those passes hard-write alpha=1, which would destroy the transparency below.
@@ -1664,10 +1985,13 @@ export class Renderer {
         // its own `_passEnabled` entry in `_buildPostGraph`, because skipping a pass that was going to
         // write the next chain buffer leaves the stage after it reading one nothing filled. The two
         // gates agree by construction; `tests/postEffectDefaults` is what keeps them agreeing.
-        graph.execute(this._postPool, scope => this._passes.beginPass(scope as RenderPass));
+        // A preview pane runs its chain from a pool of its own: sharing the editing view's would reshape
+        // its slots every frame, and trimming it could destroy buffers that view's commands still use.
+        const pool = this._view.preview ? this._previewPostPool : this._postPool;
+        graph.execute(pool, scope => this._passes.beginPass(scope as RenderPass));
         // Whatever the chain stopped asking for is released rather than left resident — the point of
         // pooling these instead of allocating one buffer per effect up front.
-        this._postPool.trim(graph.slots.length);
+        pool.trim(graph.slots.length);
     }
 
     /**
@@ -1732,21 +2056,26 @@ export class Renderer {
         // Clamped: a backgrounded tab or a shader compile can produce a multi-second gap, and letting
         // that through would snap the exposure in one frame instead of easing. Not under a movie's clock,
         // whose step is exact (renderClock.ts).
-        const nowMs = renderNow();
-        const exposureCap = renderClockOverridden() ? Infinity : 0.25;
-        const dt = Math.min(exposureCap, Math.max(0, (nowMs - this._autoExposure.lastExposureMs) / 1000));
-        this._autoExposure.lastExposureMs = nowMs;
-        // The meter itself ran during the scene render (`_meterScene`, before the transparents); this node
-        // only eases the exposure toward its last reading, so it touches no chain resource at all.
-        if (this._autoExposure.meteringActive() && this._passEnabled['exposure'])
-            graph.addPass({ id: 'exposure', scope: 'exposure', execute: () => this._autoExposure.exposurePass(dt) });
+        // Not in a preview pane, which shows the editing view's exposure: easing again would advance the
+        // adaptation twice a frame, and its clock would hand the editing view's next ease a zero step.
+        if (!this._view.preview) {
+            const nowMs = renderNow();
+            const exposureCap = renderClockOverridden() ? Infinity : 0.25;
+            const dt = Math.min(exposureCap, Math.max(0, (nowMs - this._autoExposure.lastExposureMs) / 1000));
+            this._autoExposure.lastExposureMs = nowMs;
+            // The meter itself ran during the scene render (`_meterScene`, before the transparents); this node
+            // only eases the exposure toward its last reading, so it touches no chain resource at all.
+            if (this._autoExposure.meteringActive() && this._passEnabled['exposure'])
+                graph.addPass({ id: 'exposure', scope: 'exposure', execute: () => this._autoExposure.exposurePass(dt) });
+        }
 
         // --- the reorderable middle ---------------------------------------------------------------
         // Skipped whole on a preview surface: `src` never advances, so the head the scene was composed
         // into is what `present` resolves, and no effect buffer is ever asked for — the pool allocates
         // nothing rather than allocating and then not drawing into it.
-        const materials = this._postProcessingAllowed ? (scene.activeCamera?.screenMaterials ?? []) : [];
-        const chain = this._postProcessingAllowed
+        // Skipped in a preview pane too: the chain is the ACTIVE camera's, and its DoF keeps a focus memo.
+        const materials = this._postProcessingAllowed && !this._view.preview ? (scene.activeCamera?.screenMaterials ?? []) : [];
+        const chain = this._postProcessingAllowed && !this._view.preview
             ? resolvePostChain(scene.activeCamera?.postChain, materials.length) : [];
         for (const entry of chain) {
             if (!entry.enabled) continue;
@@ -1888,7 +2217,9 @@ export class Renderer {
         // Last, so it smooths the edges whatever the chain did to them (DoF, bloom, grain), and on the
         // final scene image only: the overlay is composited after the present, so the grid and gizmos
         // keep their crisp lines.
-        if (this._post.fxaaEnabled && this._passEnabled['fxaa'] && this._debugViews.debugView === 'final') {
+        // Always in a preview pane, which has no TAA to antialias it, and never a debug channel.
+        if ((this._post.fxaaEnabled || this._view.preview) && this._passEnabled['fxaa']
+            && (this._debugViews.debugView === 'final' || this._view.preview)) {
             const from = src, to = flip();
             graph.addPass({
                 id: 'fxaa', scope: 'fxaa', reads: [from], writes: [to],
@@ -1901,7 +2232,8 @@ export class Renderer {
         // After FXAA and everything else, so the shift is measured on exactly what the resolve shows.
         this._post.localExposure.beginFrame();
         if (this._post.localExposure.enabled && this._post.localExposure.strength > 0 && this._passEnabled['localExposure']
-            && this._debugViews.debugView === 'final' && this._view.camera.type !== 'orthographic' && !this._view.flat2D) {
+            && (this._debugViews.debugView === 'final' || this._view.preview)
+            && this._view.camera.type !== 'orthographic' && !this._view.flat2D) {
             const from = src;
             graph.addPass({
                 id: 'localExposure', scope: 'localExposure', reads: [from],
@@ -1911,13 +2243,16 @@ export class Renderer {
 
         // --- tail: the single display resolve -----------------------------------------------------
         const result = src;
+        // A preview pane resolves into its own image, which `_blitPanes` puts on the canvas.
+        const paneTarget = this._previewTarget?.renderTarget;
         graph.addPass({
             id: 'present', scope: 'present', reads: [result],
             execute: ctx => {
                 // A movie folds the frame into its sample mean and resolves into its own target.
                 if (this._movie.active) { this._movie.present(ctx.read(result)); return; }
                 // A flat 2D frame fills none of the internal buffers a debug channel shows: always the image.
-                if (this._debugViews.debugView !== 'final' && !this._view.flat2D) {
+                // A preview pane always shows the image too: the channels are the editing view's tool.
+                if (!paneTarget && this._debugViews.debugView !== 'final' && !this._view.flat2D) {
                     // Editor Renderer-mode: blit one internal buffer instead of the composited image.
                     // Overdraw has no buffer of its own until it is asked for, so accumulate it first.
                     if (this._debugViews.debugView === 'overdraw') this._debugViews.overdrawPass(scene);
@@ -1925,8 +2260,8 @@ export class Renderer {
                     return;
                 }
                 // Composite the selection outline over the final image on the way to the screen.
-                if (this._post.outlineActive) { this._post.outlinePass(ctx.read(result)); return; }
-                this._post.presentPass(ctx.read(result));
+                if (this._post.outlineActive) { this._post.outlinePass(ctx.read(result), paneTarget); return; }
+                this._post.presentPass(ctx.read(result), paneTarget);
             },
         });
 
@@ -1953,9 +2288,9 @@ export class Renderer {
         // NOT on `_passEnabled['overlay']`, deliberately. That switch turns off the helper DRAWS; the
         // composite is the only way anything already in the buffer reaches the screen, so gating it
         // there would make one profiler toggle silently hide the grid and the gizmos too.
-        if (this._overlays.overlayDrawn && this._debugViews.debugView === 'final' && !this._movie.active)
+        if (this._overlays.overlayDrawn && (this._debugViews.debugView === 'final' || paneTarget) && !this._movie.active)
             graph.addPass({ id: 'overlay', scope: 'overlay',
-                            execute: () => this._overlays.overlayCompositePass() });
+                            execute: () => this._overlays.overlayCompositePass(paneTarget) });
 
         return graph.compile(this._renderWidth, this._renderHeight);
     }
@@ -2386,7 +2721,8 @@ export class Renderer {
      * scene's camera to whatever the capture was looking at.
      */
     private _meterScene(): void {
-        if (this._thumbnailMode || this._subsystems.capture.presentTarget) return;
+        // Nor a preview pane, which borrows the editing view's exposure.
+        if (this._thumbnailMode || this._subsystems.capture.presentTarget || this._view.preview) return;
         if (!this._autoExposure.meteringActive()) return;
         if (!this._passes.beginPass('exposure')) return;
         this._autoExposure.meterPass();

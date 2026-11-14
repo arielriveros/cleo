@@ -336,10 +336,11 @@ export class PostEffects {
 
     // Screen-space selection outline: draws a border just outside the silhouette mask over the
     // final composited image. Renders to whatever framebuffer is currently bound (the screen).
-    public outlinePass(source: Framebuffer): void {
+    public outlinePass(source: Framebuffer, target?: RenderTarget): void {
         // The clear moves in here with the pass: the caller used to unbind the scene FBO and clear the
-        // screen by hand, which is the same thing said twice and only one of them portable.
-        const pass = this._passes.beginFullscreenPass(this._passes.screenTarget(), 'outline', true);
+        // screen by hand, which is the same thing said twice and only one of them portable. Into the
+        // canvas, or a preview pane's own image (Renderer `_renderPreviews`).
+        const pass = this._passes.beginFullscreenPass(target ?? this._passes.screenTarget(), 'outline', true);
         const lut = this.colorLut.volumeFor(this.colorGradingLut);
         this._fullscreen.bind(pass, 'outlinePost', OutlinePostProgram, [
             source.colors[0], this.outlineMaskFBO.colors[0], lut, this.localExposure.texture,
