@@ -360,6 +360,23 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         }
     });
 
+    // A placed copy's turn is on its root, the Collider, so a Character's LOCAL rotation is relative to it: the
+    // player's Collider is turned 180, and a world heading written as setRotation([0, yaw, 0]) rolled and swung
+    // exactly backwards. Characters turn with setWorldYaw (or the intent's aim) and move with teleport.
+    it('turns its characters to world headings, never a local yaw under their Collider', () => {
+        const characterClass = /export default class \w+ extends (SoulsCharacterNode|SoulsEnemyNode|CharacterNode)\b/;
+        const files = readdirSync(SCRIPTS).filter(f => f.endsWith('.ts')).map(f => ({ f, src: readFileSync(join(SCRIPTS, f), 'utf8') }));
+        const characters = files.filter(({ src }) => characterClass.test(src));
+        expect(characters.map(c => c.f)).toEqual(expect.arrayContaining(['SoulsCharacter.ts', 'SoulsPlayer.ts', 'SoulsEnemy.ts']));
+        for (const { f, src } of characters) {
+            expect(src, f).not.toMatch(/\bthis\.setRotation\(/);
+            expect(src, f).not.toMatch(/\bthis\.setPosition\(/);
+        }
+        // What places the player from outside goes through the body too.
+        for (const { f, src } of files.filter(({ src }) => /findNode\('Player'\)/.test(src)))
+            expect(src, f).not.toMatch(/player\.set(Rotation|Position)\?*\.?\(/);
+    });
+
     it('links every enemy brain to its type’s AI graph asset, and runs exactly that graph', () => {
         const brains = new Map<string, any>(library('aiBrains').map((b: any) => [b.id, b]));
         expect(brains.size).toBe(5); // the base Enemy + four types

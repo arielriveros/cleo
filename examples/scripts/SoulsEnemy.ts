@@ -677,7 +677,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     let diff = (want - have) % 360
     if (diff > 180) diff -= 360
     else if (diff < -180) diff += 360
-    this.setRotation([0, have + Math.max(-maxDegrees, Math.min(maxDegrees, diff)), 0])
+    this.setWorldYaw(have + Math.max(-maxDegrees, Math.min(maxDegrees, diff)))
   }
 
   private _setBar(show: boolean): void {

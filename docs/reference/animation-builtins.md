@@ -23,7 +23,7 @@ They are all also readable from script as plain properties — see
 | `planarSpeed` | number | | Speed perpendicular to gravity. **This is what a locomotion blend wants** — it ignores falling, so a jump never reads as a sprint. |
 | `verticalSpeed` | number | ✔ | Positive rising. |
 | `planarAngle` | number | ✔ | Direction of travel relative to **facing**, in degrees. `0` ahead, `−90` right, `+90` left, `±180` back. |
-| `worldPlanarAngle` | number | ✔ | Absolute heading. Assignable straight into `setRotation([0, a, 0])`. |
+| `worldPlanarAngle` | number | ✔ | Absolute heading. Assignable straight into `setWorldYaw(a)`. |
 | `forwardSpeed` | number | ✔ | Signed component along facing. |
 | `lateralSpeed` | number | ✔ | Signed sideways component. **Positive is LEFT.** |
 | `planarAcceleration` | number | ✔ | Rate of change of planar speed. |

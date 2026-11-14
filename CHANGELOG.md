@@ -24,7 +24,8 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - *Trigger:* a sensor. In a 3D scene its shapes, in a 2D scene a box; Area 2D is gone, and old ones load
     as Triggers. Its events fire on the Trigger and on what came in, and nothing bubbles up the tree.
   - *Characters* stand in a Collider that holds their capsule. `teleport()` moves the whole body, and
-    `node.character` finds the Character a Collider holds.
+    `node.character` finds the Character a Collider holds. A placed copy's turn is on its Collider, so a
+    Character's rotation is local to it: turn one to a world heading with the new `setWorldYaw()`.
   - *A Collider 2D with mass* falls onto tilemaps and other colliders, and carries what is under it.
   - *The Physics tab is gone.* Collider and Trigger settings are in Properties, and Ragdoll is a section of
     a skinned model's Properties.

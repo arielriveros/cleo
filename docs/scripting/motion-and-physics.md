@@ -48,6 +48,11 @@ enough to make it bounce.
 > To place a node in world space, use `setWorldPosition(p)` and `setWorldQuaternion(q)` (the latter
 > also turns the body). A static body follows its node when a parent moves; a dynamic one is moved
 > by physics and its node follows it.
+>
+> A Character's parent is its Collider, and a placed copy's turn is on that Collider. So a heading
+> worked out in world space (toward a target, along the stick) goes through `setWorldYaw(yaw)`:
+> `setRotation([0, yaw, 0])` would add the Collider's own turn, and a copy placed facing the other way
+> would roll and swing backwards.
 
 ### Shapes
 
@@ -115,7 +120,7 @@ zero), and all are available to animation and AI parameters as
 | `verticalSpeed` | number | Signed; positive rising. |
 | `currentDirection` / `planarDirection` | vec3 | Hold their last value while still. |
 | `planarAngle` | number | Travel direction relative to **facing**, degrees. |
-| `worldPlanarAngle` | number | Absolute heading; assignable to `setRotation([0, a, 0])`. |
+| `worldPlanarAngle` | number | Absolute heading; assignable to `setWorldYaw(a)`. |
 | `forwardSpeed` / `lateralSpeed` | number | The only **signed** speeds. Positive lateral is **left**. |
 | `planarAcceleration` | number | Signed rate of change. |
 | `isAccelerating` / `isDecelerating` | boolean | |

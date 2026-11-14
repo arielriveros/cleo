@@ -68,7 +68,8 @@ export class CharacterNode extends Node {
         const own = this.worldPosition, at = mover.worldPosition;
         mover.setWorldPosition([position[0] + at[0] - own[0], position[1] + at[1] - own[1], position[2] + at[2] - own[2]]);
         if (this.body) this.velocity = vec3.create();
-        if (yawDegrees !== undefined) this.setRotation(vec3.fromValues(0, yawDegrees, 0));
+        // A world heading: under a turned Collider (a placed copy's turn) a local yaw would face off by it.
+        if (yawDegrees !== undefined) this.setWorldYaw(yawDegrees);
         mover.updateTransforms(mover.parent ? mover.parent.worldTransform : null);
         return this;
     }

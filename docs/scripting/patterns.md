@@ -235,6 +235,9 @@ Every trap in these docs, in one place.
 - **Never write `velocity` on a `CharacterNode`.** Locomotion writes it every frame.
 - **Move a character through its Collider.** `teleport()` moves the Collider, which is what physics
   moves; `setPosition` on the Character only slides it inside its capsule.
+- **Turn a character to a world heading with `setWorldYaw`.** Its rotation is local to its Collider, which
+  carries a placed copy's turn: `setRotation([0, yaw, 0])` faces off by that turn, backwards for a copy
+  turned 180.
 - **An offset collider moves the centre of mass.** Call `recenterMass()`.
 - **Use a capsule, not a box, for characters** on terrain.
 - **Set character friction to 0.** The default 0.3 eats 26% of commanded speed.
