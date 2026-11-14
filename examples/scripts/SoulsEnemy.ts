@@ -173,6 +173,7 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
   protected _phaseSeconds: number = 0
 
   onStart() {
+    this.hearCollider()
     this.setVariable('isEnemy', true, 'boolean', 'public')
     this._gm = this.findNode('GameManager')
     this._player = this.findNode('Player')
@@ -637,7 +638,8 @@ export default class SoulsEnemyNode extends SoulsCharacterNode {
     gm?.onEnemyKilled?.(this)
     if (this.useRagdoll && this.deathSeconds > 0) this.after(this.deathSeconds, () => this._ragdoll())
     // Dissolves rather than vanishing, like a foliage LOD change (Node.remove), over `corpseFadeSeconds`.
-    this.after(this.corpseSeconds, () => this.remove({ fade: this.corpseFadeSeconds }))
+    // The Collider goes with it: it is the enemy's body, and the root its template places.
+    this.after(this.corpseSeconds, () => (this.collider ?? this).remove({ fade: this.corpseFadeSeconds }))
   }
 
   private _ragdoll(): void {

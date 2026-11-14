@@ -195,8 +195,22 @@ export const ADD_ITEMS: AddItem[] = [
   // (it is usually the actor you just built), while a Controller is the thing you add to drive it —
   // and one controller may be re-pointed at different pawns over a game.
   {
+    // A Character authors no shape: it stands in a Collider holding its capsule, which is what physics
+    // moves. Both come together, set up the way a walking character wants (mass 1, no friction, no
+    // tipping; see docs/editor/physics.md#character-setup).
     id: 'character', label: 'Character', icon: CharacterAddIcon, category: 'gameplay',
-    create: async () => new CharacterNode('character'),
+    create: async () => {
+      const collider = new ColliderNode('character collider');
+      collider.mass = 1;
+      collider.friction = 0;
+      collider.linearDamping = 0;
+      collider.angularConstraints = [0, 0, 0];
+      collider.groundProbeDistance = 0.12;
+      collider.simulationMode = 'always';
+      collider.shapes = [{ type: 'capsule', radius: 0.3, height: 1.8, numSegments: 16, offset: [0, 0.9, 0], rotation: [0, 0, 0] }];
+      collider.addChild(new CharacterNode('character'));
+      return collider;
+    },
   },
   {
     id: 'controller', label: 'Controller', icon: ControllerAddIcon, category: 'gameplay',
@@ -632,6 +646,7 @@ function resolveUIParent(item: AddItem, parent: Node, ctx: AddContext, created: 
 export async function addItemTo(item: AddItem, parent: Node, ctx: AddContext): Promise<Node> {
   const node = await item.create(ctx);
   resolveUIParent(item, parent, ctx, node).addChild(node); // Node.addChild emits SCENE_CHANGED itself
-  ctx.eventEmitter.emit('SELECT_NODE', node.id);
+  // A Character comes in its Collider: the Character is what you go on to set up.
+  ctx.eventEmitter.emit('SELECT_NODE', (node.character ?? node).id);
   return node;
 }

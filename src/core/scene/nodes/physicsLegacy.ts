@@ -1,10 +1,18 @@
 // Loading physics saved before colliders and triggers became nodes (player contract 37). A rigid body and a
 // trigger used to be properties of any node -- a `body` and a `trigger` block in its JSON -- and a 2D
 // trigger was an Area 2D node. They are node types now: a Collider IS the body and carries what is under
-// it, a Trigger is the sensor. So a node with a `body` is wrapped in a new Collider that takes its place
-// (and its transform), the node going under it unmoved; a node with a `trigger` gets a Trigger child; an
-// Area 2D becomes a Trigger. The new nodes' ids are derived from the old node's, so a project converts to
-// the same ids on every load until it is saved.
+// it, a Trigger is the sensor. So:
+//
+//  - a plain node (an empty holder: a wall's box, a zone, a hurtbox, a scripted prop's root) BECOMES the
+//    Collider, or with only a trigger the Trigger: same name, id, transform, variables and script, so a
+//    script on it still hears its own collisions and triggers;
+//  - any other node (a model, a character, a placed model's root) is wrapped in a new Collider that takes
+//    its place and its transform, the node going under it unmoved; and a trigger on it, or a trigger beside
+//    a body, becomes a Trigger child;
+//  - an Area 2D becomes a Trigger.
+//
+// New nodes' ids are derived from the old node's, so a project converts to the same ids on every load until
+// it is saved.
 //
 // A pure JSON transform, so parseNodeJson (and the editor, on load) can call it with no import cycle.
 
@@ -26,6 +34,17 @@ const isLegacyBody = (b: unknown): b is Record<string, any> => !!b && typeof b =
 // `trigger` is also an animation transition's field elsewhere (a string): only a volume's object counts.
 const isLegacyTrigger = (t: unknown): t is Record<string, any> => !!t && typeof t === 'object' && !Array.isArray(t);
 
+/**
+ * Whether a node with physics becomes the Collider or Trigger itself (see the module comment): a plain node
+ * that is not a placed model's root. A placed model is rebuilt from its asset, which knows nothing of
+ * physics, so its collider has to stand outside it (`__modelId`, and `__meshId` before it, mark one).
+ */
+function becomesItself(json: any): boolean {
+    if (json.type !== undefined && json.type !== 'node') return false;
+    const vars = json.variables;
+    return !(vars && typeof vars === 'object' && (vars.__modelId || vars.__meshId));
+}
+
 /** A legacy 3D trigger block as a Trigger node's `sensor` settings. */
 function sensorFromTrigger(t: Record<string, any>): any {
     return {
@@ -36,6 +55,14 @@ function sensorFromTrigger(t: Record<string, any>): any {
         continuous: t.continuous === true,
         enabled: t.enabled !== false,
     };
+}
+
+/** A legacy body block as a Collider node's `collider` settings. */
+const colliderFromBody = (body: Record<string, any>): any => ({ ...body, shapes: Array.isArray(body.shapes) ? body.shapes : [] });
+
+/** Whether `converted` is the Collider that `legacy` was wrapped in, rather than `legacy` itself converted. */
+export function isLegacyWrapper(legacy: any, converted: any): boolean {
+    return !!converted && converted.type === 'collider' && typeof legacy?.id === 'string' && converted.id === legacyColliderId(legacy.id);
 }
 
 /**
@@ -70,11 +97,20 @@ export function migrateLegacyPhysicsJson(json: any): any {
     const id = typeof json.id === 'string' ? json.id : String(json.id ?? '');
     const children: any[] = Array.isArray(node.children) ? [...node.children] : [];
 
+    if (becomesItself(json)) {
+        // Only a trigger: the node is the Trigger.
+        if (!isLegacyBody(body)) return { ...node, type: 'trigger', sensor: sensorFromTrigger(trigger!) };
+    }
+
     if (isLegacyTrigger(trigger)) {
         children.push({
             type: 'trigger', name: `${name} Trigger`, id: legacyTriggerId(id), ...IDENTITY, children: [],
             sensor: sensorFromTrigger(trigger),
         });
+    }
+    if (becomesItself(json)) {
+        // A body (and maybe a trigger, its child now): the node is the Collider.
+        return { ...node, type: 'collider', collider: colliderFromBody(body!), children };
     }
     const inner = { ...node, children };
     if (!isLegacyBody(body)) return inner;
@@ -90,7 +126,7 @@ export function migrateLegacyPhysicsJson(json: any): any {
         rotation: rotation ?? [0, 0, 0],
         scale: scale ?? [1, 1, 1],
         ...(spawnOnStart === false ? { spawnOnStart: false } : {}),
-        collider: { ...body, shapes: Array.isArray(body.shapes) ? body.shapes : [] },
+        collider: colliderFromBody(body),
         children: [{ ...kept, ...IDENTITY }],
     };
 }

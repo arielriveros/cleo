@@ -1,4 +1,4 @@
-import { AnimatedSpriteNode, Area2DNode, CharacterBody2DNode, ControllerNode, Node } from 'cleo'
+import { AnimatedSpriteNode, CharacterBody2DNode, ControllerNode, Node, TriggerNode } from 'cleo'
 
 /**
  * Duskwell -- a bat. Attach to a flying Character Body 2D (no gravity, through one-way platforms) whose
@@ -23,7 +23,7 @@ export default class DuskBat extends CharacterBody2DNode {
   public artFacesLeft: boolean = false
 
   private _sprite: AnimatedSpriteNode = null
-  private _bite: Area2DNode = null
+  private _bite: TriggerNode = null
   private _brain: ControllerNode = null
   private _player: Node = null
   private _home: [number, number] = [0, 0]
@@ -39,7 +39,7 @@ export default class DuskBat extends CharacterBody2DNode {
 
   onStart() {
     this._sprite = this.getChildByName('Sprite')[0] as AnimatedSpriteNode
-    this._bite = this.getChildByName('Bite')[0] as Area2DNode
+    this._bite = this.getChildByName('Bite')[0] as TriggerNode
     this._brain = this.children.find(c => c instanceof ControllerNode) as ControllerNode ?? null
     this._player = this.findNode('Player') ?? null
     this.movement = 'fly'

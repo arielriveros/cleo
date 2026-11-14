@@ -39,7 +39,7 @@ describe('converting physics saved as node properties', () => {
 
     it('gives a node with a trigger a Trigger child, and both when it has both', () => {
         const out = migrateLegacyPhysicsJson({
-            type: 'node', name: 'Gate', id: 'g', ...IDENT, children: [],
+            type: 'model', name: 'Gate', id: 'g', ...IDENT, children: [],
             body: { mass: 0, shapes: [box(4, 3, 0.5)] },
             trigger: { shapes: [sphere(2)], group: 4, mask: 8, detectTriggers: true, enabled: false },
         });
@@ -49,6 +49,30 @@ describe('converting physics saved as node properties', () => {
         const t = gate.children[0];
         expect(t).toMatchObject({ type: 'trigger', name: 'Gate Trigger', id: legacyTriggerId('g'), ...IDENT });
         expect(t.sensor).toEqual({ shapes: [sphere(2)], layer: 4, mask: 8, detectTriggers: true, continuous: false, enabled: false });
+    });
+
+    it('turns a plain node into the Collider or the Trigger itself, so its script hears its own events', () => {
+        const script = { __scriptId: { type: 'string', value: 'lever' } };
+        const gate = migrateLegacyPhysicsJson({
+            type: 'node', name: 'Gate', id: 'g', position: [1, 0, 0], rotation: [0, 90, 0], scale: [1, 1, 1],
+            variables: script, children: [{ type: 'model', name: 'Mesh', id: 'm', ...IDENT, children: [] }],
+            body: { mass: 0, shapes: [box(4, 3, 0.5)] }, trigger: { shapes: [sphere(2)] },
+        });
+        expect(gate).toMatchObject({ type: 'collider', name: 'Gate', id: 'g', position: [1, 0, 0], rotation: [0, 90, 0], variables: script });
+        expect(gate.collider.shapes).toEqual([box(4, 3, 0.5)]);
+        expect(gate.children.map((c: any) => `${c.name} [${c.type}]`)).toEqual(['Mesh [model]', 'Gate Trigger [trigger]']);
+
+        const zone = migrateLegacyPhysicsJson({ type: 'node', name: 'Zone', id: 'z', ...IDENT, variables: script, children: [], trigger: { shapes: [sphere(2)] } });
+        expect(zone).toMatchObject({ type: 'trigger', name: 'Zone', id: 'z', variables: script });
+        expect(zone.trigger).toBeUndefined();
+
+        // A placed model's root is rebuilt from its asset, so its collider stands outside it.
+        const placed = migrateLegacyPhysicsJson({
+            type: 'node', name: 'House', id: 'h', ...IDENT, variables: { __modelId: { type: 'string', value: 'house' } }, children: [],
+            body: { mass: 0, shapes: [box(4, 3, 4)] },
+        });
+        expect(placed).toMatchObject({ type: 'collider', name: 'House Collider', id: legacyColliderId('h') });
+        expect(placed.children[0]).toMatchObject({ type: 'node', name: 'House', id: 'h' });
     });
 
     it('turns an Area 2D into a Trigger, and leaves an animation transition\'s trigger alone', () => {
@@ -141,6 +165,22 @@ describe('a Collider node', () => {
         const body = (running.root.getChildByName('Crate Collider')[0] as ColliderNode).ownBody!;
         expect(body.mass).toBe(1);
         expect([body.collisionFilterGroup, body.collisionFilterMask]).toEqual([1, -1]);
+    });
+
+    it('builds no body when the scene that authors steps its physics, even for one made in code', () => {
+        // The editor steps its scene's physics while you edit (previews); a Collider in it must stay bodiless.
+        const root = new Node('root');
+        const made = new ColliderNode('Made');
+        made.mass = 1;
+        made.shapes = [box(1, 1, 1)];
+        root.addChild(made);
+        const p = world(root);
+        (p as any)._scene.spawnRulesEnabled = false;
+        run(p, 0.2);
+        expect(made.ownBody).toBeNull();
+        (p as any)._scene.spawnRulesEnabled = true;
+        run(p, 0.1);
+        expect(made.ownBody).not.toBeNull();
     });
 
     it('round-trips its settings', async () => {

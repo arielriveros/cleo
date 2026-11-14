@@ -16,6 +16,21 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Physics as nodes.** A rigid body and a trigger are nodes now, in the Add catalog's new **Simulation**
+  category beside Water Volume, Wind, Weather and Cloth.
+  - *Collider:* the rigid body — mass, surface, constraints, simulation range — and its shapes. Everything
+    under it moves with it: give a Collider mass and the crate model inside falls with it. **Layer** and
+    **Collides with** decide which pairs collide.
+  - *Trigger:* a sensor. In a 3D scene its shapes, in a 2D scene a box; Area 2D is gone, and old ones load
+    as Triggers. Its events fire on the Trigger and on what came in, and nothing bubbles up the tree.
+  - *Characters* stand in a Collider that holds their capsule. `teleport()` moves the whole body, and
+    `node.character` finds the Character a Collider holds.
+  - *A Collider 2D with mass* falls onto tilemaps and other colliders, and carries what is under it.
+  - *The Physics tab is gone.* Collider and Trigger settings are in Properties, and Ragdoll is a section of
+    a skinned model's Properties.
+  - *Old projects convert as they load.* An empty node with a body becomes the Collider itself; anything
+    else is wrapped in `<name> Collider`; templates and their variants convert too. The examples ship
+    converted.
 - **Menu bar.** The editor and Cleo Creator share one menu bar: the Cleo logo, then **File**, **Edit**,
   **View**, **Project** and **Help**, each with its commands' icons and shortcuts.
   - *Editor.* File holds Save, Save All and New Scene. Edit holds Undo, Redo and Delete. View holds the new

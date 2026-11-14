@@ -31,6 +31,12 @@ const allNodes = (root: any): any[] => {
     walk(root);
     return out;
 };
+/**
+ * The Character a tree stands for: its root, or the Character its root Collider holds (as Node.character).
+ * A character template's root, and a placed copy's, is the Collider the character stands in.
+ */
+const characterOf = (root: any): any =>
+    root?.type === 'character' ? root : root?.type === 'collider' ? root.children?.find((c: any) => c.type === 'character') : undefined;
 const scriptSources = () => readdirSync(SCRIPTS).filter(f => f.startsWith('Souls') && f.endsWith('.ts'))
     .map(f => readFileSync(join(SCRIPTS, f), 'utf8'));
 
@@ -54,6 +60,12 @@ describe.skipIf(!present)('the Dungeon example project', () => {
     const everyNode = (): any[] => nodes ??= [...allNodes(scene().scene), ...templates().flatMap((t: any) => allNodes(t.nodeJson))];
     const scriptOf = (n: any) => library('scripts').find((s: any) => s.id === n.variables?.__scriptId?.value);
     const withScript = (file: string) => everyNode().filter(n => scriptOf(n)?.source?.includes(`export default class ${file}Node`));
+    // Each node's parent, over the scene and every template: what Node.collider walks up through.
+    let parents: Map<any, any> | null = null;
+    const parentOf = (n: any) => (parents ??= new Map([scene().scene, ...templates().map((t: any) => t.nodeJson)]
+        .flatMap((root: any) => allNodes(root)).flatMap((p: any) => (p.children ?? []).map((c: any) => [c, p] as [any, any])))).get(n);
+    /** The Collider a node moves with: itself, or its nearest Collider ancestor (as Node.collider). */
+    const colliderOf = (n: any) => { for (let a = n; a; a = parentOf(a)) if (a.type === 'collider') return a; return undefined; };
 
     // ---------------------------------------------------------------------------------------------
 
@@ -119,8 +131,8 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         const menu = under('BonfireMenu');
         for (const w of ['Row_Vigor', 'Row_Endurance', 'Row_Strength', 'Row_Dexterity', 'Confirm', 'Leave', 'Derived', 'LevelText', 'SoulsText'])
             expect(menu.has(w), w).toBe(true);
-        const warden = templates().find((t: any) => t.name === 'Hollow Warden');
-        const bossBar = new Set(allNodes(warden.nodeJson.children.find((c: any) => c.name === 'BossBar')).map((n: any) => n.name));
+        const warden = characterOf(templates().find((t: any) => t.name === 'Hollow Warden').nodeJson);
+        const bossBar = new Set(allNodes(warden.children.find((c: any) => c.name === 'BossBar')).map((n: any) => n.name));
         for (const w of ['Bar', 'BossName', 'BossHealth', 'BossLag']) expect(bossBar.has(w), w).toBe(true);
     });
 
@@ -130,13 +142,17 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         const root = scene().scene;
         const uiAtRoot = root.children.filter((c: any) => c.type?.startsWith('ui'));
         expect(uiAtRoot.map((c: any) => c.name)).toEqual([]);
-        const player = root.children.find((c: any) => c.name === 'Player');
+        // The player stands in its Collider at the scene root; its UI is the character's own.
+        const player = root.children.map(characterOf).find((c: any) => c?.name === 'Player');
         expect(player.children.map((c: any) => c.name)).toEqual(expect.arrayContaining(['HUD', 'BonfireMenu', 'LockReticle']));
         expect(player.children.at(-1).type).toBe('controller');
         expect(root.children.find((c: any) => c.name === 'GameManager').children.map((c: any) => c.name)).toContain('Banner');
-        for (const t of templates().filter((t: any) => t.variant && valueOf(t.nodeJson, 'team') === 'enemy')) {
-            const kids = t.nodeJson.children.map((c: any) => c.name);
-            const isBoss = valueOf(t.nodeJson, 'isBoss') === true;
+        const enemyTypes = templates().filter((t: any) => t.variant && characterOf(t.nodeJson) && valueOf(characterOf(t.nodeJson), 'team') === 'enemy');
+        expect(enemyTypes.length).toBeGreaterThanOrEqual(4);
+        for (const t of enemyTypes) {
+            const enemy = characterOf(t.nodeJson);
+            const kids = enemy.children.map((c: any) => c.name);
+            const isBoss = valueOf(enemy, 'isBoss') === true;
             expect(kids, t.name).toContain(isBoss ? 'BossBar' : 'HealthBar');
             expect(kids, t.name).not.toContain(isBoss ? 'HealthBar' : 'BossBar');
         }
@@ -168,10 +184,12 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         }
         const fileOf = (source: string) => /export\s+default\s+class\s+(\w+)Node\b/.exec(source)?.[1];
 
-        // Walk each tree (the scene, every template) with parents, so a node's owner can be found.
+        // Walk each tree (the scene, every template) with parents, so a node's owner can be found. An owner
+        // that is a template's character goes by the template's name: under a variant's Collider the character
+        // keeps its base's name (every enemy type's is 'Enemy').
         let checked = 0;
         const owners = new Set<string>();
-        const check = (root: any) => {
+        const check = (root: any, template?: any) => {
             const walk = (n: any, chain: any[]) => {
                 const asset = scriptOf(n);
                 if (asset) {
@@ -188,19 +206,19 @@ describe.skipIf(!present)('the Dungeon example project', () => {
                         expect(have.has(cue), `${n.name} plays "${cue}", but ${owner?.name ?? 'nothing above it'} has no such SoundNode in its Sounds`).toBe(true);
                         checked++;
                     }
-                    if (cues.length && owner) owners.add(owner.name);
+                    if (cues.length && owner) owners.add(template && owner === characterOf(template.nodeJson) ? template.name : owner.name);
                 }
                 for (const c of n.children ?? []) walk(c, [n, ...chain]);
             };
             walk(root, []);
         };
         check(scene().scene);
-        for (const t of templates()) check(t.nodeJson);
+        for (const t of templates()) check(t.nodeJson, t);
         expect(checked).toBeGreaterThan(30);
         for (const name of ['GameManager', 'Player', 'Hollow', 'Hollow Warden', 'Longsword', 'Magic Bolt', 'Lever', 'Gate', 'Fog Gate', 'Pickup'])
             expect(owners.has(name), `${name} owns no sounds`).toBe(true);
         // An enemy attack's own cue (Cast, Boss Leap) is played by its enemy, from the enemy's Sounds.
-        const warden = templates().find((t: any) => t.name === 'Hollow Warden').nodeJson;
+        const warden = characterOf(templates().find((t: any) => t.name === 'Hollow Warden').nodeJson);
         const wardenSounds = warden.children.find((c: any) => c.name === 'Sounds').children.map((c: any) => c.name);
         expect(wardenSounds).toEqual(expect.arrayContaining(['Boss Leap', 'Cast', 'Boss Roar']));
     });
@@ -330,11 +348,16 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         }
     });
 
-    it('gives every character a capsule body (inline in the scene, side-mapped in templates)', () => {
-        const player = allNodes(scene().scene).find(n => n.name === 'Player');
-        expect(player.body.shapes[0].type).toBe('capsule');
-        for (const t of templates().filter((t: any) => t.nodeJson.type === 'character'))
-            expect(t.bodies[t.nodeJson.id]?.shapes[0].type, t.name).toBe('capsule');
+    it('stands every character in a capsule Collider (in the scene, and in each template\'s tree)', () => {
+        const characters = everyNode().filter(n => n.type === 'character');
+        // The player (placed, and its template), the base enemy and the four types.
+        expect(characters.length).toBeGreaterThanOrEqual(7);
+        for (const c of characters) expect(colliderOf(c)?.collider?.shapes?.[0]?.type, c.name).toBe('capsule');
+        // A character template's root is that Collider, the character right under it.
+        for (const t of templates().filter((t: any) => allNodes(t.nodeJson).some(n => n.type === 'character'))) {
+            expect(t.nodeJson.type, t.name).toBe('collider');
+            expect(characterOf(t.nodeJson), t.name).toBeDefined();
+        }
     });
 
     it('links every enemy brain to its type’s AI graph asset, and runs exactly that graph', () => {
@@ -587,7 +610,7 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         expect(valueOf(player, 'weaponTemplates')).toEqual(['Longsword', 'Greatsword']);
     });
 
-    it('gives every fighter and breakable ONE hurtbox trigger, in its team layer, apart from its body', () => {
+    it('gives every fighter and breakable ONE hurtbox Trigger, in its team layer, apart from its Collider', () => {
         const inScene = allNodes(scene().scene);
         // Whatever a blade can damage carries a `team` (SoulsCharacter and its subclasses, SoulsBreakable).
         const fighters = everyNode().filter(n => field(scriptOf(n), 'team'));
@@ -597,14 +620,16 @@ describe.skipIf(!present)('the Dungeon example project', () => {
             if (!template && !inScene.includes(f)) continue;
             const boxes = (f.children ?? []).filter((c: any) => c.name === 'Hurtbox');
             expect(boxes.length, `${f.name} has ${boxes.length} Hurtbox children`).toBe(1);
-            const trigger = template ? template.triggers?.[boxes[0].id] : boxes[0].trigger;
-            expect(trigger?.shapes?.length, `${f.name}'s Hurtbox has no trigger`).toBe(1);
+            expect(boxes[0].type, `${f.name}'s Hurtbox is not a Trigger`).toBe('trigger');
+            const sensor = boxes[0].sensor;
+            expect(sensor?.shapes?.length, `${f.name}'s Hurtbox has no shape`).toBe(1);
             const team = valueOf(f, 'team');
-            expect(trigger.group, `${f.name}'s hurtbox layer`).toBe(team === 'player' ? LAYER.PLAYER_HURTBOX : LAYER.ENEMY_HURTBOX);
-            expect(trigger.mask, `${f.name}'s hurtbox detects`).toBe(LAYER.HITBOX);
-            expect(trigger.detectTriggers).toBe(true);
-            // Never the body itself: the hurtbox switches off for i-frames while the body keeps colliding.
-            expect(f.body ?? template?.bodies?.[f.id], `${f.name} has no body of its own`).toBeTruthy();
+            expect(sensor.layer, `${f.name}'s hurtbox layer`).toBe(team === 'player' ? LAYER.PLAYER_HURTBOX : LAYER.ENEMY_HURTBOX);
+            expect(sensor.mask, `${f.name}'s hurtbox detects`).toBe(LAYER.HITBOX);
+            expect(sensor.detectTriggers).toBe(true);
+            // Never the body itself: the hurtbox switches off for i-frames while the body keeps colliding. The
+            // body is the Collider the fighter is (a barrel) or stands in (a character).
+            expect(colliderOf(f)?.collider?.shapes?.length, `${f.name} has no body of its own`).toBeGreaterThan(0);
             checked++;
         }
         // The player (template + placed copy), the base enemy, four enemy types and the barrel.
@@ -615,14 +640,15 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         const types = library('scripts').filter((s: any) => /extends SoulsEnemyNode/.test(s.source));
         expect(types.map((s: any) => s.name).sort()).toEqual(['Elite Knight', 'Hollow', 'Hollow Sorcerer', 'Hollow Warden']);
         for (const type of types) {
-            const t = templates().find((x: any) => scriptOf(x.nodeJson)?.id === type.id);
+            // The script runs on the type's character, under the template's root Collider.
+            const t = templates().find((x: any) => scriptOf(characterOf(x.nodeJson) ?? x.nodeJson)?.id === type.id);
             expect(t?.name, type.name).toBe(type.name);
             expect(templates().find((b: any) => b.id === t.variant?.baseTemplateId)?.name).toBe('Enemy');
             expect(field(type, 'maxHp').default, type.name).toBeGreaterThan(100);
-            expect(t.nodeJson.scriptVars ?? {}, `${type.name} sets stats on the node instead of its script`).toEqual({});
+            expect(characterOf(t.nodeJson).scriptVars ?? {}, `${type.name} sets stats on the node instead of its script`).toEqual({});
         }
-        const warden = templates().find((t: any) => t.name === 'Hollow Warden');
-        const kids = warden.nodeJson.children.map((c: any) => c.name);
+        const warden = characterOf(templates().find((t: any) => t.name === 'Hollow Warden').nodeJson);
+        const kids = warden.children.map((c: any) => c.name);
         expect(kids).toContain('PhaseAura');
         expect(kids).not.toContain('HealthBar');
     });
@@ -651,18 +677,23 @@ describe.skipIf(!present)('the Dungeon example project', () => {
         }
     });
 
-    it('gives every interactable a trigger zone (inline in the scene, side-mapped in templates)', () => {
+    it('gives every interactable a trigger zone: itself a Trigger, or a Trigger right under it (in the scene and the templates)', () => {
         const interactable = /public (interact|canInteract)\(/;
         const files = ['SoulsBonfire', 'SoulsPickup', 'SoulsMessage', 'SoulsLever', 'SoulsDoor', 'SoulsFogGate', 'SoulsBloodstain'];
         for (const f of files) expect(readFileSync(join(SCRIPTS, `${f}.ts`), 'utf8')).toMatch(interactable);
         const inScene = allNodes(scene().scene);
         for (const f of files) {
+            let checked = 0;
             for (const n of withScript(f)) {
                 const template = templates().find((t: any) => allNodes(t.nodeJson).includes(n));
-                const trigger = template ? template.triggers?.[n.id] : n.trigger;
                 if (!template && !inScene.includes(n)) continue;
-                expect(trigger?.shapes?.length, `${n.name} (${f}) has no trigger zone`).toBeGreaterThan(0);
+                // SoulsPlayer's interactableOf walks up from the zone it entered to the nearest node that can be
+                // interacted with: a message or a pickup is its own Trigger, a bonfire's or a gate's is its child.
+                const zones = [n, ...(n.children ?? [])].filter((z: any) => z.type === 'trigger');
+                expect(zones.some((z: any) => z.sensor?.shapes?.length > 0), `${n.name} (${f}) has no trigger zone`).toBe(true);
+                checked++;
             }
+            expect(checked, `nothing runs ${f}`).toBeGreaterThan(0);
         }
     });
 
@@ -854,7 +885,12 @@ describe.skipIf(!present)('the Dungeon example project', () => {
             expect(n, name).toBeDefined();
             expect(JSON.parse(n.variables.__overrides.value)[''].name).toBe(name);
         }
-        expect(named('Player')).toBeDefined();
+        // The player's copy is the Collider it stands in; the 'Player' under it, the node every script finds, is
+        // named by the template itself, so a rebuild keeps that name with no override at all.
+        const player = named('Player Collider');
+        expect(player).toBeDefined();
+        expect(characterOf(player)?.name).toBe('Player');
+        expect(characterOf(templateOf(player).nodeJson)?.name).toBe('Player');
     });
 
     it('records the asset hashes the editor computes, so opening the scene rebuilds nothing', () => {

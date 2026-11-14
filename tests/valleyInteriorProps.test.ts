@@ -96,12 +96,16 @@ describe.skipIf(!present)('the furniture in the Valley\'s houses', { timeout: 12
     const materials = new Map<string, any>(bundle.libraries.materials.map((m: any) => [m.id, m]));
     const textures = new Map<string, any>(bundle.textures.map((t: any) => [t.id, t]));
 
-    /** Per house: its lodGroup, level 0's triangles in its frame, and each piece's vertices in that frame. */
+    /**
+     * Per house: the Collider that places it (its frame: the house's lodGroup sits under it unmoved), the lodGroup,
+     * level 0's triangles in its frame, and each piece's vertices in that frame.
+     */
     const houses = LAYOUT.map(layout => {
-        const lod = buildings.children.find((b: any) => b.name === layout.house);
+        const house = buildings.children.find((b: any) => b.type === 'collider' && b.children?.[0]?.name === layout.house);
+        const lod = house?.children[0];
         const group = furniture?.children.find((g: any) => g.name === layout.group);
         const out: number[] = [];
-        for (const n of allNodes(lod.children[0])) {
+        for (const n of allNodes(lod?.children[0] ?? {})) {
             if (n.type !== 'model') continue;
             const { positions: P, indices: I } = n.model.geometry;
             for (let i = 0; i < I.length; i++) out.push(P[I[i] * 3], P[I[i] * 3 + 1], P[I[i] * 3 + 2]);
@@ -121,7 +125,7 @@ describe.skipIf(!present)('the furniture in the Valley\'s houses', { timeout: 12
             for (let i = 0; i < verts.length; i++) { min[i % 3] = Math.min(min[i % 3], verts[i]); max[i % 3] = Math.max(max[i % 3], verts[i]); }
             return { node: piece, verts, min, max };
         });
-        return { layout, lod, group, tris: Float64Array.from(out), pieces };
+        return { layout, house, lod, group, tris: Float64Array.from(out), pieces };
     });
 
     it('stands a group per house where the house stands, beside the buildings, its pieces linked copies of library models', () => {
@@ -129,8 +133,11 @@ describe.skipIf(!present)('the furniture in the Valley\'s houses', { timeout: 12
         expect(root.children.indexOf(furniture)).toBe(root.children.indexOf(buildings) + 1);
         expect(furniture.children.map((g: any) => g.name)).toEqual(LAYOUT.map(l => l.group));
         const refs = manifest.sceneMetas.find((m: any) => m.id === manifest.mainSceneId).refs;
-        for (const { layout, lod, group, pieces } of houses) {
-            expect([group.position, group.rotation, group.scale], layout.group).toEqual([lod.position, lod.rotation, [1, 1, 1]]);
+        for (const { layout, house, lod, group, pieces } of houses) {
+            // The house's frame is its Collider's: the lodGroup under it does not move.
+            expect(house, layout.house).toBeDefined();
+            expect([lod.type, lod.position, lod.rotation, lod.scale], layout.house).toEqual(['lodGroup', [0, 0, 0], [0, 0, 0], [1, 1, 1]]);
+            expect([group.position, group.rotation, group.scale], layout.group).toEqual([house.position, house.rotation, [1, 1, 1]]);
             expect(pieces.map((p: any) => p.node.name), layout.group).toEqual(layout.pieces.map(p => p.name));
             for (const { node } of pieces) {
                 const what = `${layout.house} / ${node.name}`;
@@ -141,7 +148,7 @@ describe.skipIf(!present)('the furniture in the Valley\'s houses', { timeout: 12
                 expect(node.drawDistance, what).toBe(FURNITURE_DRAW_DISTANCE);
                 expect([node.scale, node.rotation[0], node.rotation[2]], what).toEqual([[1, 1, 1], 0, 0]);
                 for (const n of allNodes(node)) {
-                    expect(n.body ?? null, what).toBeNull();
+                    expect(['collider', 'trigger'], what).not.toContain(n.type);
                     expect(n.script ?? null, what).toBeNull();
                 }
                 const parts = allNodes(node).filter(n => n.type === 'model');
@@ -188,11 +195,11 @@ describe.skipIf(!present)('the furniture in the Valley\'s houses', { timeout: 12
     });
 
     it('stands every piece on its house\'s floor, inside its walls and clear of the other pieces', () => {
-        for (const { layout, lod, tris, pieces } of houses) {
+        for (const { layout, house, tris, pieces } of houses) {
             // The house's interior exposure box, in the house's frame: every piece inside it.
             const room = allNodes(root).find(n => n.type === 'exposureVolume' && n.name === `${layout.house} Interior Exposure`);
-            expect(room.rotation).toEqual(lod.rotation);
-            const centre = vec3.transformMat4(vec3.create(), room.position, mat4.invert(mat4.create(), trs(lod)));
+            expect(room.rotation).toEqual(house.rotation);
+            const centre = vec3.transformMat4(vec3.create(), room.position, mat4.invert(mat4.create(), trs(house)));
             const half = room.exposureVolume.size.map((s: number) => s / 2);
             for (const { node, verts, min, max } of pieces) {
                 const what = `${layout.house} / ${node.name}`;
@@ -315,10 +322,10 @@ describe.skipIf(!present)('the furniture in the Valley\'s houses', { timeout: 12
         expect(root.children.indexOf(candles)).toBe(root.children.indexOf(furniture) + 1);
         const fireLight = bundle.libraries.scripts.find((s: any) => s.name === 'Fire Light');
         expect(models.get(CANDLE_MODEL)?.name).toBe('Candle');
-        for (const { layout, lod, pieces } of houses) {
+        for (const { layout, house, pieces } of houses) {
             const group = candles.children.find((g: any) => g.name === `${layout.house} Candles`);
-            expect(group.position).toEqual(lod.position);
-            expect(group.rotation).toEqual(lod.rotation);
+            expect(group.position).toEqual(house.position);
+            expect(group.rotation).toEqual(house.rotation);
             const spots = CANDLES[layout.house];
             expect(group.children.length).toBe(spots.reduce((n, s) => n + s.at.length, 0));
             let k = 0;

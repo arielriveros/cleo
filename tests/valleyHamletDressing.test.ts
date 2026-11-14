@@ -79,17 +79,22 @@ describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_0
     const heightAt = terrainHeightSampler(root);
     const road = catmullRom(ROADS.find((r: any) => r.key === 'main').points, 0.5) as number[][];
 
+    // Each pole and the well stand in a static Collider that places them (and is their body); the linked copy of
+    // the library model -- a placed model's root, rebuilt from its asset -- sits under it, unmoved.
+    const copyOf = (placement: any) => placement?.children?.[0];
     const group = root.children.find((c: any) => c.name === 'Light Poles');
-    const well = root.children.find((c: any) => c.name === 'Well');
+    const well = root.children.find((c: any) => c.type === 'collider' && copyOf(c)?.name === 'Well');
     const poles: any[] = group?.children ?? [];
-    const roadPoles = poles.filter(p => p.name.startsWith('Light Pole'));
-    const squarePoles = poles.filter(p => p.name.startsWith('Square Light Pole'));
+    const roadPoles = poles.filter(p => copyOf(p)?.name.startsWith('Light Pole'));
+    const squarePoles = poles.filter(p => copyOf(p)?.name.startsWith('Square Light Pole'));
     const placed = [...poles, ...(well ? [well] : [])].map(node => ({ node, ...worldVertices(node) }));
 
     /** The houses' level 0, in the world, without the ground skirt the Old House's source came with: it lies under the landscape. */
     const houseTriangles = (() => {
         const out: number[] = [];
-        for (const lod of root.children.find((c: any) => c.name === 'Buildings').children) {
+        // Each building is a Collider placing its lodGroup; level 0 is the lodGroup's first child.
+        for (const building of root.children.find((c: any) => c.name === 'Buildings').children) {
+            const lod = copyOf(building);
             const walk = (n: any, parent: mat4) => {
                 const m = mat4.multiply(mat4.create(), parent, trs(n));
                 if (n.type === 'model' && n.model?.geometry) {
@@ -103,7 +108,7 @@ describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_0
                 }
                 for (const c of n.children ?? []) walk(c, m);
             };
-            walk(lod.children[0], trs(lod));
+            walk(lod.children[0], mat4.multiply(mat4.create(), trs(building), trs(lod)));
         }
         return Float64Array.from(out);
     })();
@@ -122,13 +127,17 @@ describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_0
         expect(squarePoles).toHaveLength(SQUARE_POLES.length);
     });
 
-    it('stands each pole upright on the landscape, a linked copy of the library pole with a body and a draw distance', () => {
+    it('stands each pole upright on the landscape, a linked copy of the library pole in a Collider, with a draw distance', () => {
         const pole = models.get(modelIdOf('light-pole'));
         expect(pole?.name).toBe('Light Pole');
         for (const { node, verts } of placed.filter(p => p.node !== well)) {
             const [x, y, z] = node.position;
-            expect(node.variables.__modelId.value, node.name).toBe(pole.id);
-            expect(node.variables.__modelBaseTRS.value, node.name).toBe('[0,0,0,0,0,0,1,1,1]');
+            const copy = copyOf(node);
+            expect(node.type, node.name).toBe('collider');
+            expect(node.children, node.name).toHaveLength(1);
+            expect(copy.variables.__modelId.value, node.name).toBe(pole.id);
+            expect(copy.variables.__modelBaseTRS.value, node.name).toBe('[0,0,0,0,0,0,1,1,1]');
+            expect([copy.position, copy.rotation, copy.scale], copy.name).toEqual([[0, 0, 0], [0, 0, 0], [1, 1, 1]]);
             expect([node.scale, node.rotation[0], node.rotation[2]], node.name).toEqual([[1, 1, 1], 0, 0]);
             // Its base on the surface at its post.
             expect(Math.abs(y - heightAt(x, z)), `${node.name}: base over the ground`).toBeLessThan(0.05);
@@ -140,9 +149,9 @@ describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_0
                 expect(verts[i + 1], `${node.name}: a brace's foot at (${verts[i].toFixed(2)}, ${verts[i + 2].toFixed(2)})`).toBeLessThan(heightAt(verts[i], verts[i + 2]));
             }
             expect(feet, node.name).toBeGreaterThan(0);
-            expect(node.drawDistance, node.name).toBe(LIGHT_POLE_DRAW_DISTANCE);
-            expect(node.body?.mass, node.name).toBe(0);
-            expect(node.body.shapes.some((s: any) => s.type === 'cylinder'), node.name).toBe(true);
+            expect(copy.drawDistance, node.name).toBe(LIGHT_POLE_DRAW_DISTANCE);
+            expect(node.collider?.mass, node.name).toBe(0);
+            expect(node.collider.shapes.some((s: any) => s.type === 'cylinder'), node.name).toBe(true);
             const parts = allNodes(node).filter(n => n.type === 'model');
             expect(parts, node.name).toHaveLength(1);
             expect(parts[0].model.material, node.name).toEqual(materials.get(parts[0].variables.__materialId.value).material);
@@ -203,7 +212,9 @@ describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_0
 
     it('carries the Valley\'s fire in each lantern: a flame, embers and a bright light, lit by the Fire Light script', () => {
         const script = bundle.libraries.scripts.find((s: any) => s.name === 'Fire Light');
-        for (const node of poles) {
+        for (const placement of poles) {
+            // The lantern's fire is the linked copy's (in the pole's frame: the copy sits unmoved in its Collider).
+            const node = copyOf(placement);
             expect(node.variables.__scriptId?.value, node.name).toBe(script.id);
             expect(node.script, node.name).toBe(script.source);
             const parts = Object.fromEntries(['Flame', 'Embers', 'Light'].map(name => [name, node.children.filter((c: any) => c.name === name)]));
@@ -237,12 +248,15 @@ describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_0
         }
     });
 
-    it('stands the well on the ground at the hamlet\'s centre, a linked copy with a body', () => {
+    it('stands the well on the ground at the hamlet\'s centre, a linked copy in a Collider', () => {
         expect(well).toBeDefined();
         expect(root.children.indexOf(well)).toBe(root.children.indexOf(group) + 1);
         const asset = models.get(modelIdOf('well'));
         expect(asset?.name).toBe('Well');
-        expect(well.variables.__modelId.value).toBe(asset.id);
+        const copy = copyOf(well);
+        expect(well.children).toHaveLength(1);
+        expect(copy.variables.__modelId.value).toBe(asset.id);
+        expect([copy.position, copy.rotation, copy.scale]).toEqual([[0, 0, 0], [0, 0, 0], [1, 1, 1]]);
         expect(Math.hypot(well.position[0] - HAMLET.x, well.position[2] - HAMLET.z)).toBeLessThan(0.01);
         expect(Math.abs(well.position[1] - heightAt(HAMLET.x, HAMLET.z))).toBeLessThan(0.05);
         const { min, max } = placed.find(p => p.node === well)!;
@@ -252,9 +266,9 @@ describe.skipIf(!present)('the hamlet\'s well and light poles', { timeout: 180_0
         expect(max[0] - min[0]).toBeLessThan(2.5);
         expect(max[1] - min[1]).toBeGreaterThan(2.2);
         expect(max[1] - min[1]).toBeLessThan(3.2);
-        expect(well.drawDistance).toBe(WELL_DRAW_DISTANCE);
-        expect(well.body?.mass).toBe(0);
-        expect(well.body.shapes.length).toBeGreaterThan(0);
+        expect(copy.drawDistance).toBe(WELL_DRAW_DISTANCE);
+        expect(well.collider?.mass).toBe(0);
+        expect(well.collider.shapes.length).toBeGreaterThan(0);
         const parts = allNodes(well).filter(n => n.type === 'model');
         expect(parts.map(p => p.name)).toEqual(['Well', 'Well Roof', 'Well Bucket', 'Well Rope']);
         for (const part of parts) expect(part.model.material).toEqual(materials.get(part.variables.__materialId.value).material);

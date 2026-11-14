@@ -1896,6 +1896,18 @@ export class Node {
   }
 
   /**
+   * The Character this node stands for: itself when it is one, or the Character a Collider holds directly
+   * (a character's root, as a template places it or a raycast hits it, is its Collider). `null` otherwise.
+   * `scene.instantiate('Hollow')?.character` is the enemy itself.
+   */
+  public get character(): Node | null {
+    if (this.nodeType === 'character') return this;
+    if (this.nodeType !== 'collider') return null;
+    for (const c of this._children) if (c.nodeType === 'character') return c;
+    return null;
+  }
+
+  /**
    * True when this node's rigid body is resting on something solid in the CURRENT gravity direction —
    * "down" is the world's gravity vector, not -Y, so inverted or sideways gravity behaves correctly and
    * nothing is grounded under zero gravity. Answered from physics contacts; always false without a body.

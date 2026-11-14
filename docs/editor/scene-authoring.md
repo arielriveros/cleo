@@ -33,7 +33,7 @@ player characters are built from. Colliders and triggers are in [Simulation](#si
 | Entry | What you get |
 |---|---|
 | **Empty** | A bare node: a transform, children, somewhere to hang a script. |
-| **Character** | A pawn. It moves through the [Collider](physics.md#collider) it stands in. *(unreleased)* |
+| **Character** | A pawn, standing in a [Collider](physics.md#character-setup) that holds its capsule (mass 1, no friction, no tipping). The Character is what gets selected. *(unreleased)* |
 | **Controller** | A driver that possesses a character. *(unreleased)* |
 | **Nav Mesh** | A navmesh node with a default `20 × 10 × 20` bake box. *(unreleased)* |
 | **Sequence** | Plays a cinematic: a `.sequence` asset's camera paths, cuts, property animation and script calls, edited in [Sequencer mode](sequencer.md). *(unreleased)* |

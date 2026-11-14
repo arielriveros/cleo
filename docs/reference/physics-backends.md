@@ -54,7 +54,7 @@ is given and starts from it.
 - `physics.addJoint(a, b, { kind: 'fixed' | 'ball' | 'hinge' | 'coneTwist', ... })` joins two bodies in the
   world and returns the joint for `physics.removeJoint`.
 
-`RigidBody` (`node.setBody`) and `Trigger` (`node.setTrigger`) are engine bodies, and so are terrain
+`RigidBody` (a Collider node's, or `node.setBody`) and `Trigger` (a Trigger node's, or `node.setTrigger`) are engine bodies, and so are terrain
 heightfields, foliage and tilemap colliders, ragdoll bones and `physics.addGroundPlane()`. What changed for
 scripts when node bodies stopped being cannon's:
 

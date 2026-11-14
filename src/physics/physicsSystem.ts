@@ -374,14 +374,17 @@ export class PhysicsSystem {
 
       const writeBackStart = performance.now();
       const nodes = this._scene.nodes;
+      const spawnRules = this._scene.spawnRulesEnabled !== false;
       const worker = this._executor.kind === 'worker' ? this._executor as WorkerExecutor : null;
       // A body moving its node is simulation, never an edit (see authoring.derived).
       authoring.derived++;
       try {
       for (const node of nodes) {
         // A node's OWN body: a Character's `body` is its Collider's, which that collider syncs itself.
-        // A Collider or Trigger node built in code (never parsed into a running scene) builds it now.
-        if (node.wantsPhysicsBuild) node.buildPhysics();
+        // A Collider or Trigger node built in code (never parsed into a running scene) builds it now -- in a
+        // scene that runs. One that authors (spawn rules off: the editor's) steps physics for its previews,
+        // and must never give a Collider it is editing a body.
+        if (node.wantsPhysicsBuild && spawnRules) node.buildPhysics();
         const ownBody = node.ownBody;
         if ((!ownBody && !node.trigger) || !node.hasStarted) continue;
 

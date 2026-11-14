@@ -598,7 +598,8 @@ export default class FpsBotNode extends FpsCombatantNode {
     const info = this._animator?.triggerInfo?.(`Die${index}`)
     const seconds = info?.seconds && info.seconds > 0 ? info.seconds : 3
     this.after(seconds * this.ragdollAt, () => this._ragdoll(dir))
-    this.after(this.corpseSeconds, () => this.remove({ fade: 1.2 }))
+    // The Collider goes with it: it is the bot's body, and the root its template places.
+    this.after(this.corpseSeconds, () => (this.collider ?? this).remove({ fade: 1.2 }))
     // The death sound is the `death` marker on the death clip.
   }
 

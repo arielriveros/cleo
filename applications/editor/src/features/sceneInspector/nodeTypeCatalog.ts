@@ -2,7 +2,7 @@ import type React from 'react'
 import type { NodeType } from 'cleo'
 import {
   EmptyIcon, ModelIcon, DirectionalLightIcon, LightProbeIcon, CameraIcon, CameraRigIcon,
-  CharacterAddIcon, ControllerAddIcon, NavMeshIcon, SpriteIcon, AnimatedSpriteIcon, SoundIcon,
+  CharacterAddIcon, ControllerAddIcon, NavMeshIcon, SpriteIcon, AnimatedSpriteIcon, SoundIcon, ColliderIcon, TriggerIcon,
 } from './nodeIcons'
 
 // The node types a node can be CONVERTED into, indexed by node type.
@@ -39,6 +39,9 @@ export const CONVERTIBLE_NODE_TYPES: NodeTypeOption[] = [
   { nodeType: 'node', label: 'Empty', icon: EmptyIcon, defaultFrom: null },
   { nodeType: 'model', label: 'Model', icon: ModelIcon, defaultFrom: 'cube' },
   { nodeType: 'character', label: 'Character', icon: CharacterAddIcon, defaultFrom: 'character' },
+  // A template whose root is the body: a crate, a door, an enemy's Collider.
+  { nodeType: 'collider', label: 'Collider', icon: ColliderIcon, defaultFrom: 'collider' },
+  { nodeType: 'trigger', label: 'Trigger', icon: TriggerIcon, defaultFrom: 'trigger' },
   { nodeType: 'controller', label: 'Controller', icon: ControllerAddIcon, defaultFrom: 'controller' },
   { nodeType: 'camera', label: 'Camera', icon: CameraIcon, defaultFrom: 'perspectiveCamera' },
   { nodeType: 'cameraRig', label: 'Camera Rig', icon: CameraRigIcon, defaultFrom: 'cameraRig' },

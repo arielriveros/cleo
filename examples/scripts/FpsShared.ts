@@ -188,7 +188,8 @@ export function rotationOntoNormal(normal: ArrayLike<number>): number[] {
 
 /** The combatant (a node with `receiveHit` and the `fpsCombatant` variable) that owns `node`, or null. */
 export function combatantOf(node: Node | null | undefined): any {
-  for (let n: any = node; n; n = n.parent) if (n.getVariable?.('fpsCombatant')) return n
+  // A raycast reports a fighter's body, which is its Collider: the fighter is the Character in it.
+  for (let n: any = node?.character ?? node; n; n = n.parent) if (n.getVariable?.('fpsCombatant')) return n
   return null
 }
 

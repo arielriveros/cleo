@@ -21,6 +21,9 @@ const allNodes = (root: any): any[] => {
     walk(root);
     return out;
 };
+/** The Character a tree stands for: its root, or the Character its root Collider holds (as Node.character). */
+const characterOf = (root: any): any =>
+    root?.type === 'character' ? root : root?.type === 'collider' ? root.children?.find((c: any) => c.type === 'character') : undefined;
 
 describe.skipIf(!present)('the Dungeon example project', { timeout: 60_000 }, () => {
     const manifest = () => read('manifest.json');
@@ -57,16 +60,19 @@ describe.skipIf(!present)('the Dungeon example project', { timeout: 60_000 }, ()
     });
 
     it('ships no cloth simulation', () => {
-        const player = library('templates').find((t: any) => t.name === 'Player');
-        const knight = player.nodeJson.children.find((c: any) => c.name === 'Knight');
+        // The Player template's root is its Collider; the Knight is the character's model, under it.
+        const player = characterOf(library('templates').find((t: any) => t.name === 'Player').nodeJson);
+        const knight = player.children.find((c: any) => c.name === 'Knight');
         expect(knight.model.skinnedCloth).toBeUndefined();
     });
 
-    it('gives every enemy type a draw distance on its root, the base template and each variant alike', () => {
-        const enemies = library('templates').filter((t: any) => t.nodeJson?.type === 'character' && t.name !== 'Player');
+    it('gives every enemy type a draw distance on its character, the base template and each variant alike', () => {
+        // A character template's root is the Collider it stands in; the character under it is what draws, and
+        // its draw distance hides everything under it.
+        const enemies = library('templates').filter((t: any) => t.nodeJson?.type === 'collider' && characterOf(t.nodeJson) && t.name !== 'Player');
         expect(enemies.length).toBeGreaterThanOrEqual(3);
-        for (const t of enemies) expect(t.nodeJson.drawDistance, t.name).toBe(60);
-        expect(library('templates').find((t: any) => t.name === 'Player').nodeJson.drawDistance).toBeUndefined();
+        for (const t of enemies) expect(characterOf(t.nodeJson).drawDistance, t.name).toBe(60);
+        expect(characterOf(library('templates').find((t: any) => t.name === 'Player').nodeJson).drawDistance).toBeUndefined();
     });
 
     it('lays its rubble in moss rock, a plain PBR surface', () => {
@@ -186,8 +192,8 @@ describe.skipIf(!present)('the Dungeon example project', { timeout: 60_000 }, ()
 
     it('gives the dungeon box colliders over its floors, walls, ramps and steps', () => {
         const all = nodes();
-        const bodies = allNodes(all.find(n => n.name === 'Collision')).filter(n => n.body);
-        const shapes = bodies.flatMap(n => n.body.shapes);
+        const bodies = allNodes(all.find(n => n.name === 'Collision')).filter(n => n.type === 'collider');
+        const shapes = bodies.flatMap(n => n.collider.shapes);
         // Merged hard (dungeon/collision.mjs: tolerances, pillars one box, diagonals one turned box): it
         // was over 3000 boxes before.
         expect(shapes.length).toBeGreaterThan(1000);
@@ -198,7 +204,7 @@ describe.skipIf(!present)('the Dungeon example project', { timeout: 60_000 }, ()
         expect(ramps.length).toBeGreaterThanOrEqual(2);
         for (const r of ramps) expect(Math.abs(r.rotation[0])).toBeLessThan(45);
         // Walls and pillars are what swings bounce off; floors are walked on, never carved out of the navmesh.
-        // The pillars' bodies are see-through to the player camera, like the pillars; the walls' are not.
+        // The pillars' colliders are see-through to the player camera, like the pillars; the walls' are not.
         for (const n of bodies) {
             if (n.name.startsWith('Walls') || n.name.startsWith('Pillars')) expect(n.variables.blocksSwings?.value, n.name).toBe(true);
             else expect(n.variables.navObstacle?.value, n.name).toBe(false);
@@ -296,8 +302,13 @@ describe.skipIf(!present)('the Dungeon example project', { timeout: 60_000 }, ()
         const barrel = templates.find((t: any) => t.name === 'Breakable Barrel');
         const debris = templates.find((t: any) => t.name === 'Barrel Debris');
         expect(barrel.nodeJson.scriptVars.debrisTemplate ?? 'Barrel Debris').toBe(debris.name);
-        expect(barrel.bodies[barrel.nodeJson.id].mass).toBe(0);
-        expect(barrel.triggers[barrel.nodeJson.id].shapes.length).toBe(1);
+        // The barrel is a static Collider; the zone that notices a roll is a Trigger of its own under it, beside
+        // the Hurtbox a blade hits (SoulsBreakable hears every Trigger child but the Hurtbox).
+        expect(barrel.nodeJson.type).toBe('collider');
+        expect(barrel.nodeJson.collider.mass).toBe(0);
+        const zones = barrel.nodeJson.children.filter((c: any) => c.type === 'trigger' && c.name !== 'Hurtbox');
+        expect(zones).toHaveLength(1);
+        expect(zones[0].sensor.shapes.length).toBe(1);
         expect(debris.nodeJson.children).toHaveLength(17);
         for (const p of debris.nodeJson.children) {
             expect(Math.hypot(p.position[0], p.position[2]), p.name).toBeLessThan(0.5);

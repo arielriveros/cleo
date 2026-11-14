@@ -90,10 +90,17 @@ landscape's `null`). A script that should hear its body's hits goes on the Colli
 
 ### Projects from before
 
-A project saved when a body was a property of any node converts as it loads: a node with a body is
-wrapped in a new Collider named `<name> Collider`, which takes the node's place and transform, and a node
-with a trigger gets a `<name> Trigger` child. The node itself keeps its name, scripts and children. Save
-the scene to keep the converted form.
+A project saved when a body was a property of any node converts as it loads:
+
+- an **empty node** with a body becomes the Collider itself, and one with only a trigger the Trigger: same
+  name, script and children, so its script still hears its own collisions and triggers;
+- **any other node** with a body (a model, a character, a placed model) is wrapped in a new Collider named
+  `<name> Collider`, which takes its place and transform; the node keeps its name, scripts and children;
+- a trigger beside a body, or on a node that is not empty, becomes a `<name> Trigger` child;
+- an Area 2D becomes a Trigger.
+
+A placed template's root that is wrapped hands its link to the template to the Collider. Save the scene
+to keep the converted form.
 
 ## Trigger
 
@@ -215,7 +222,12 @@ Player Collider      Collider: capsule, mass 1, friction 0, angular constraints 
    └─ Controller
 ```
 
-A Character that is not in a Collider cannot move, and the Console says so.
+A Character that is not in a Collider cannot move, and the Console says so. **Add ▸ Gameplay ▸ Character**
+makes both, set up as below.
+
+From a script, `teleport(position, yaw)` moves a character's whole body (its Collider). A character
+template's root is its Collider, so `scene.instantiate('Hollow')` returns the Collider and `.character` is
+the Character in it.
 
 The measured recommendation for the Collider, from the [third-person example](../../examples/scripts/README.md):
 

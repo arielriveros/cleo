@@ -1,12 +1,12 @@
-import { hasLegacyPhysics, migrateLegacyPhysicsTree } from 'cleo'
+import { hasLegacyPhysics, isLegacyWrapper, migrateLegacyPhysicsTree } from 'cleo'
 import { TEMPLATE_ID_VAR, type Template } from './templates'
 import { OVERRIDES_VAR, type TemplateOverrides } from './templateOverrides'
 import { cloneJson, diffTemplate, jsonPathMap, materializeVariant } from './templateVariants'
 
 // The editor's half of loading physics saved before colliders and triggers were nodes (player contract
-// 37). The engine converts a node's JSON as it parses it (physicsLegacy.ts): a node with a `body` is
-// wrapped in a Collider, one with a `trigger` gets a Trigger child. That is all a scene needs, except
-// for two things only the editor knows about:
+// 37). The engine converts a node's JSON as it parses it (physicsLegacy.ts): a plain node becomes the
+// Collider or Trigger itself, any other is wrapped in a Collider or given a Trigger child. That is all a
+// scene needs, except for two things only the editor knows about:
 //
 //  - TEMPLATES kept their bodies and triggers beside the tree, in id-keyed `bodies` / `triggers` maps,
 //    and a variant's diff had sections for them. They are folded into the tree and converted, and a
@@ -22,11 +22,21 @@ export function subtreeHasLegacyPhysics(json: any): boolean {
   return Array.isArray(json.children) && json.children.some(subtreeHasLegacyPhysics)
 }
 
+/**
+ * The node a template's root Collider holds, when it holds exactly one (a wrapped character or model), or
+ * undefined. By shape, not by id: a variant re-materialized after its conversion has fresh, derived ids.
+ */
+function wrappedNode(root: any): any | undefined {
+  if (root?.type !== 'collider' || !Array.isArray(root.children) || root.children.length !== 1) return undefined
+  const inner = root.children[0]
+  if (!inner || inner.type === 'collider' || inner.type === 'trigger') return undefined
+  return inner
+}
+
 /** The name of the node a converted template's Collider root wraps: an instance's root node, under it. */
 function wrappedRootName(template: Template | undefined): string | undefined {
-  const root = template?.nodeJson
-  if (root?.type !== 'collider' || !Array.isArray(root.children) || !root.children.length) return undefined
-  return typeof root.children[0]?.name === 'string' ? root.children[0].name : undefined
+  const inner = wrappedNode(template?.nodeJson)
+  return typeof inner?.name === 'string' ? inner.name : undefined
 }
 
 /**
@@ -35,7 +45,7 @@ function wrappedRootName(template: Template | undefined): string | undefined {
  * the Collider; overrides recorded for a node that now sits deeper follow it there.
  */
 function adoptInstance(before: any, after: any, innerName: string | undefined): any {
-  const wrapped = after.type === 'collider' && before.type !== 'collider'
+  const wrapped = isLegacyWrapper(before, after)
   const inner = wrapped ? after.children[0] : after
   const vars = inner.variables ?? {}
   const overridesVar = vars[OVERRIDES_VAR]
@@ -57,8 +67,9 @@ function adoptInstance(before: any, after: any, innerName: string | undefined): 
       const oldIdAt = new Map([...jsonPathMap(before)].map(([p, e]) => [p, e.node?.id as string | undefined]))
       const next: TemplateOverrides = {}
       for (const [path, o] of Object.entries(old ?? {})) {
-        // The root's name is the instance's name: the instance is the Collider now, and keeps it.
-        if (path === '' && typeof o.name === 'string') next[''] = { ...next[''], name: o.name }
+        // The root's name is the instance's name. Wrapped, the root is the Collider now, named after it as any
+        // wrapper is; the node under it takes its template's name, which is what scripts look it up by.
+        if (path === '' && typeof o.name === 'string') next[''] = { ...next[''], name: wrapped ? `${o.name} Collider` : o.name }
         if (!o.fields) continue
         const id = oldIdAt.get(path)
         const to = (id && newPathById.get(id)) ?? path
@@ -72,6 +83,8 @@ function adoptInstance(before: any, after: any, innerName: string | undefined): 
     if (remapped !== undefined) inner.variables = { ...vars, [OVERRIDES_VAR]: { ...overridesVar, value: remapped } }
     return after
   }
+  // The node under the Collider takes the name its template gives it, as a rebuild from the template would.
+  if (innerName !== undefined) inner.name = innerName
   const { [TEMPLATE_ID_VAR]: mark, [OVERRIDES_VAR]: _overrides, ...rest } = vars
   inner.variables = rest
   after.variables = {
@@ -101,7 +114,7 @@ export function migrateScenePhysics(json: any, templates: readonly Template[] = 
     // includes the node itself when it was wrapped: its conversion is a no-op the second time.
     const out = migrateLegacyPhysicsTree({ ...node, children: [] })
     const kids: any[] = Array.isArray(node.children) ? node.children.map(visit) : []
-    if (out.type === 'collider' && node.type !== 'collider') {
+    if (isLegacyWrapper(node, out)) {
       const inner = out.children[0]
       // The Trigger child the conversion may have given the node goes after its own children.
       out.children = [{ ...inner, children: [...kids, ...(inner.children ?? [])] }, ...out.children.slice(1)]
@@ -182,8 +195,7 @@ export function migrateTemplatePhysics(templates: readonly Template[]): Template
         // under it) stays inherited rather than reading as removed and added. The variant's own name is
         // the Collider's.
         const baseInner = wrappedRootName(base)
-        if (baseInner !== undefined && tree.type === 'collider' && t.nodeJson?.type !== 'collider' && tree.children?.[0])
-          tree.children[0].name = baseInner
+        if (baseInner !== undefined && isLegacyWrapper(t.nodeJson, tree)) tree.children[0].name = baseInner
         const diff = diffTemplate(base, { ...rest, nodeJson: tree })
         out = { ...rest, ...materializeVariant(base, t.id, diff), variant: { baseTemplateId: base.id, diff } }
       }

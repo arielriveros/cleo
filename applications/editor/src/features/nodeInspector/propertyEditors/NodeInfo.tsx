@@ -118,10 +118,9 @@ export default function NodeInfo(props: {node: Node, readOnly?: boolean, allowTy
     const nodeId = props.node.id;
     try {
       const item = option.defaultFrom ? findAddItem(option.defaultFrom) : undefined;
-      // None of the offered items reads its AddContext (only Trigger and the two skies do, and all three
-      // are outside the convertible set), so a throwaway trigger map is honest here.
+      // The Character item makes a Collider holding the Character: the payload is the Character's.
       const prepared = await prepareNodeTypeChange(props.node, option.nodeType,
-        item ? () => item.create({ editorScene: scene, eventEmitter }) : null);
+        item ? async () => { const made = await item.create({ editorScene: scene, eventEmitter }); return made.character ?? made; } : null);
       if (!prepared) return;
       const { before, after } = prepared;
 

@@ -56,6 +56,23 @@ export class CharacterNode extends Node {
         return this._body;
     }
 
+    /**
+     * Put the character at the WORLD point `position`, standing still, facing `yawDegrees` when given: a
+     * respawn, a fast travel. What moves is its Collider, which is what physics moves -- moving the
+     * Character itself would only slide it inside its capsule.
+     */
+    public teleport(position: ArrayLike<number>, yawDegrees?: number): this {
+        const collider = this.collider;
+        const mover = collider && collider !== this ? collider : this;
+        // The Character's own offset in its Collider stays: the Collider goes where that puts the Character.
+        const own = this.worldPosition, at = mover.worldPosition;
+        mover.setWorldPosition([position[0] + at[0] - own[0], position[1] + at[1] - own[1], position[2] + at[2] - own[2]]);
+        if (this.body) this.velocity = vec3.create();
+        if (yawDegrees !== undefined) this.setRotation(vec3.fromValues(0, yawDegrees, 0));
+        mover.updateTransforms(mover.parent ? mover.parent.worldTransform : null);
+        return this;
+    }
+
     // ----- animator outputs ----------------------------------------------------------------------
     //
     // THESE THREE MUST STAY PLAIN FIELDS, never getter/setter pairs.
@@ -206,7 +223,9 @@ export class CharacterNode extends Node {
 
         const body = this.body;
         if (!body) {
-            if (!this._warnedNoBody) {
+            // In a Collider with no body built yet -- a scene being authored builds none -- there is nothing
+            // to move and nothing wrong.
+            if (!this._warnedNoBody && !this.collider) {
                 this._warnedNoBody = true;
                 Logger.warn(
                     `Character '${this._name}' is not in a Collider, so it cannot move. Put it under a ` +
