@@ -2,6 +2,8 @@
 
 The programs built on the Cleo engine (`../src`). This folder is an npm workspace root: run `npm ci`
 here once (or `npm run apps:install` at the repository root) and every app shares one `node_modules`.
+`npm run install:all` at the repository root installs everything: the engine, this workspace, the desktop shell
+(`app-kit/desktop/`) and the agent server (`mcp/`), each of which is its own npm project.
 
 | Folder | What it is | Run |
 | --- | --- | --- |

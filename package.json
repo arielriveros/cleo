@@ -27,6 +27,8 @@
     "naga:build": "node tools/naga-wasm/build.mjs",
     "brand:icons": "node tools/brandIcons.mjs",
     "apps:install": "cd applications && npm ci",
+    "mcp:install": "cd applications/mcp && npm install",
+    "install:all": "npm install && npm run apps:install && npm run desktop:install && npm run mcp:install",
     "creator": "cd applications/creator && npm run start",
     "creator:serve": "cd applications/creator && npm run dev",
     "creator:dev": "concurrently \"npm run watch:types\" \"npm run creator\"",
