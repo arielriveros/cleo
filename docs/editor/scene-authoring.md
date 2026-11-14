@@ -15,6 +15,24 @@ A virtualized tree with per-type icons. You can:
 
 Selecting the tree's **root** shows [Scene settings](#scene-settings) instead of a node inspector.
 
+### Graph view
+
+The button beside **Filter nodes** switches the panel between the tree and a **graph view**: the same
+hierarchy drawn top-down as cards, a parent above its children. A run of children that have no children
+of their own stacks into one column, so a root with forty leaves stays narrow enough for the side panel.
+The panel remembers which view you last used.
+
+Everything the tree does works in the graph too:
+
+- the **filter**, which shows each match and its ancestors in both views;
+- **selection**, kept in step with the viewport. Ctrl/⌘-click adds to it, and the **arrow keys** move to the nearest card in that direction;
+- **rename** (double-click or F2) and **delete** (Delete or Edit ▸ Delete);
+- the **eye**, **script** and **template** buttons, and **collapse** with the chevron. A collapsed card shows how many nodes it hides, and collapsing a node in one view also collapses it in the other;
+- **drag to re-parent or re-order**. Dropping on the middle of a card makes the node its last child. Dropping on its edge places the node before or after it: the left or right edge of side-by-side cards, the top or bottom edge of stacked ones;
+- drops of **new nodes and scripts** onto a card, and **dragging a card out** onto the Assets panel or a node field.
+
+Drag the empty canvas to pan, scroll to zoom, and use the corner buttons to zoom or fit the whole graph.
+
 ## The Add catalog
 
 Two palettes: **Scene Elements** in scene mode (and while painting a landscape or a tilemap), **UI
