@@ -190,7 +190,7 @@ project that uses it keeps it, in `/Creator/Removed`; otherwise it is removed.
 ## Storage
 
 Assets live in the project's own storage, namespaced per project, not as files on disk. To get them
-out, **Export** the project; to work on scripts in a real editor, use the
+out, export the project (**Project ▸ Export Project**); to work on scripts in a real editor, use the
 [VS Code workspace](scripting-workflow.md#editing-in-vs-code).
 
 ## See also

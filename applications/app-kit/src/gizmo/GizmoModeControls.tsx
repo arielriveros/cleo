@@ -22,6 +22,19 @@ export const ScaleIcon = () => (
   </svg>
 );
 
+// The axes the gizmo works in: the world's (a globe) or the node's own (a box with its own axes).
+export const WorldIcon = () => (
+  <svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'>
+    <circle cx='12' cy='12' r='8.5' /><path d='M3.5 12h17' /><path d='M12 3.5c-2.6 2.4-3.8 5.2-3.8 8.5s1.2 6.1 3.8 8.5c2.6-2.4 3.8-5.2 3.8-8.5S14.6 5.9 12 3.5Z' />
+  </svg>
+);
+export const LocalIcon = () => (
+  <svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' strokeWidth='1.8' strokeLinecap='round' strokeLinejoin='round'>
+    <path d='M12 3.5 19.5 7.75v8.5L12 20.5 4.5 16.25v-8.5Z' strokeOpacity='0.55' />
+    <path d='M12 12V4.8M12 12l6.2 3.6M12 12l-6.2 3.6' />
+  </svg>
+);
+
 export interface GizmoModeControlsProps {
   mode: GizmoMode;
   space: GizmoSpace;
@@ -46,8 +59,8 @@ export function GizmoModeControls({ mode, space, onMode, onSpace }: GizmoModeCon
     <SegmentedControl<GizmoSpace>
       size='sm'
       options={[
-        { value: 'world', label: 'W', title: 'World axes (X)', disabled: mode === 'scale' },
-        { value: 'local', label: 'L', title: "The node's own axes (X)", disabled: mode === 'scale' },
+        { value: 'world', label: <WorldIcon />, title: 'World axes (X)', disabled: mode === 'scale' },
+        { value: 'local', label: <LocalIcon />, title: "The node's own axes (X)", disabled: mode === 'scale' },
       ]}
       value={effectiveGizmoSpace(mode, space)}
       onChange={onSpace} />

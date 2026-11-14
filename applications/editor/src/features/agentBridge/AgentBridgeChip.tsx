@@ -3,9 +3,11 @@ import { Button } from '@cleo/app-kit/ui/Button'
 import { Toggle } from '@cleo/app-kit/ui/Toggle'
 import { cn } from '@cleo/app-kit/ui/cn'
 import { agentBridge } from './bridgeClient'
+import { panelStore } from '../agentChat/panelStore'
+import { terminalStore } from '../agentChat/terminalStore'
 
-// The agent link in the menu bar. Shown only when there is something to say: a Cleo MCP server is running
-// (connected, waiting, or turned off here), never for the many sessions that never start one.
+// The agent link in the menu bar. Shown only while the Claude panel is open and has started -- its
+// terminal attached to the agent host -- since the link itself runs only then (AgentBridgeHost.tsx).
 
 const DOT: Record<string, string> = {
   connected: 'bg-success',
@@ -25,6 +27,8 @@ const LABEL: Record<string, string> = {
 
 export default function AgentBridgeChip() {
   const status = useSyncExternalStore(agentBridge.subscribe, agentBridge.getSnapshot)
+  const panelOpen = useSyncExternalStore(panelStore.subscribe, () => panelStore.getSnapshot().open)
+  const terminalReady = useSyncExternalStore(terminalStore.subscribe, () => terminalStore.getSnapshot().link === 'ready')
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -35,7 +39,7 @@ export default function AgentBridgeChip() {
     return () => window.removeEventListener('mousedown', onDown)
   }, [open])
 
-  if (!agentBridge.supported) return null
+  if (!agentBridge.supported || !panelOpen || !terminalReady) return null
   if (status.state === 'searching' || (!status.available && status.state !== 'connected' && status.state !== 'connecting')) return null
 
   const busy = !!status.activity

@@ -14,7 +14,7 @@ import {
 } from '@cleo/app-kit/creatorLibrary';
 import { promptDialog } from '@cleo/app-kit/feedback/dialogStore';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
-import { Button, cn } from '@cleo/app-kit/ui';
+import { cn } from '@cleo/app-kit/ui';
 import type { ExportFile } from './generator';
 import { subscribeOpen, takeOpen } from './creatorOpen';
 
@@ -239,29 +239,20 @@ export function useCreatorAsset<D>(kind: CreatorAssetKind, doc: D, setDoc: (d: D
 }
 
 /**
- * The toolbar's asset chip. On Scratch: Save as asset…. On a saved asset: its name (click to rename), a dot
- * that is green once the last change reached the library, and ✕ back to Scratch. Everything else -- open,
- * duplicate, move, delete -- is the Assets explorer's.
+ * The toolbar's asset chip: which document this is -- Scratch, or a saved asset's name with a dot that is
+ * green once the last change reached the library. Status only: saving, renaming and closing it are the
+ * menu bar's File menu (App.tsx); open, duplicate, move and delete are the Assets explorer's.
  */
-export function AssetBar<D>({ state }: { state: CreatorAssetState<D> }) {
+export function AssetStatus<D>({ state }: { state: CreatorAssetState<D> }) {
   const { active, syncedRevision } = state;
   if (!active) {
-    return (
-      <div className='flex items-center gap-1'>
-        <span className='text-ui-sm text-dim px-1' title='Not shared: this document lives in the browser until it is saved as an asset'>Scratch</span>
-        <Button size='sm' onClick={() => void state.saveAs()} title='Name this as an asset: it appears in the editor under /Creator and follows every change.'>Save as asset…</Button>
-      </div>
-    );
+    return <span className='text-ui-sm text-dim px-1' title='Not shared: this document lives in the browser until it is saved as an asset (File ▸ Save as Asset…)'>Scratch</span>;
   }
   return (
-    <div className='flex items-center gap-0.5'>
-      <button type='button' onClick={() => void state.rename()} title={`${active.name} · click to rename · ${syncedRevision ? `synced (revision ${syncedRevision})` : 'saving…'}`}
-              className='flex items-center gap-1.5 max-w-[220px] rounded border border-border bg-surface-raised/60 px-2 py-0.5 text-ui-sm text-fg hover:bg-surface-raised'>
-        <span className={cn('inline-block h-2 w-2 shrink-0 rounded-full', syncedRevision ? 'bg-success' : 'bg-warning')} />
-        <span className='truncate'>{active.name}</span>
-      </button>
-      <Button size='icon' variant='ghost' title='Back to Scratch: stop editing this asset (it stays in the library, in Assets)'
-              onClick={() => void state.open(null)}>✕</Button>
-    </div>
+    <span title={`${active.name} · ${syncedRevision ? `synced (revision ${syncedRevision})` : 'saving…'}`}
+          className='flex items-center gap-1.5 max-w-[220px] rounded border border-border bg-surface-raised/60 px-2 py-0.5 text-ui-sm text-fg'>
+      <span className={cn('inline-block h-2 w-2 shrink-0 rounded-full', syncedRevision ? 'bg-success' : 'bg-warning')} />
+      <span className='truncate'>{active.name}</span>
+    </span>
   );
 }

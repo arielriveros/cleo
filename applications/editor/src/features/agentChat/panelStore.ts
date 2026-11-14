@@ -4,7 +4,8 @@ import { agentBridge } from '../agentBridge/bridgeClient'
 // (applications/mcp/src/host.mjs), which runs Claude Code for it. What runs IN the panel is terminalStore.
 //
 // Opening the panel makes sure the host runs: the dev server starts it (POST /__cleo/agent-host/start,
-// app-kit/vite.preset.ts), and the bridge then connects to it. A link to something that cannot host Claude
+// app-kit/vite.preset.ts), and the bridge then connects to it.
+// The bridge runs only while the panel is open: AgentBridgeHost starts it on open and stops it on close. A link to something that cannot host Claude
 // Code (an older host, a standalone MCP server) goes through the same start, which replaces it.
 
 export type PanelLink = 'idle' | 'starting' | 'connecting' | 'ready' | 'error'
@@ -72,6 +73,9 @@ export function ensureHost(): Promise<void> {
       if (!res.ok || !body.ok) throw new Error(body.error || `The dev server answered ${res.status}.`)
       // A link to an older or standalone server would block the host's: drop it and connect afresh.
       if (agentBridge.getSnapshot().state === 'connected') agentBridge.disconnect()
+      // Only while the panel is still open: the link to the agent host lives as long as the panel does
+      // (agentBridge/AgentBridgeHost.tsx), and a panel closed while the host started stays unlinked.
+      if (!state.open) { set({ link: 'idle' }); return }
       agentBridge.connect()
       set({ link: 'connecting' })
     } catch (err) {

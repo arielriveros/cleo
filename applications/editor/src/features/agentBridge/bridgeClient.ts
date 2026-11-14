@@ -154,11 +154,14 @@ class AgentBridgeClient {
     this.schedule(0)
   }
 
+  /** Close the link and stop looking for a host: the Claude panel closed (AgentBridgeHost), or the editor did. */
   stop() {
     this.running = false
     if (this.timer !== null) { window.clearTimeout(this.timer); this.timer = null }
-    this.socket?.close(1000, 'editor closed the link')
+    const s = this.socket
     this.socket = null
+    s?.close(1000, 'editor closed the link')
+    if (this.status.state !== 'off' || this.status.server) this.set({ state: 'off', server: null, capabilities: [] })
   }
 
   /** The chip's Connect: turn the link on and (re)connect now, taking over from another tab if need be. */

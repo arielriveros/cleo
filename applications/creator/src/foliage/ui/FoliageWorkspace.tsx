@@ -4,7 +4,7 @@ import { toast } from '@cleo/app-kit/feedback/toastStore';
 import { useCreatorEngine } from '../../app/CreatorEngine';
 import { CreatorWorkspace, ViewportOverlay } from '../../app/workspace';
 import { downloadAll } from '../../core/download';
-import { AssetBar, createCreatorAsset, useCreatorAsset } from '../../core/useCreatorAsset';
+import { createCreatorAsset, useCreatorAsset } from '../../core/useCreatorAsset';
 import { useStageCapture } from '../../core/stageCapture';
 import type { CreatorFile } from '@cleo/app-kit/creatorLibrary';
 import type { ExportFile } from '../../core/generator';
@@ -315,7 +315,7 @@ export function FoliageWorkspace() {
     <FoliageContext.Provider value={value}>
       <CreatorWorkspace
         id='foliage' page='creator/foliage'
-        asset={<AssetBar state={asset} />}
+        assetState={asset}
         toolbar={<>
           <SegmentedControl<FoliageKind> size='sm' value={doc.kind} options={kindOptions}
                                          onChange={k => setDoc({ ...doc, kind: k, name: doc.name === doc.kind ? k : doc.name })} />

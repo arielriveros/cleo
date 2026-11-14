@@ -31,6 +31,7 @@ describe('letter shortcuts leave typing alone', () => {
     ['features', 'models', 'ClothBrush.tsx'],
     ['features', 'tilemap', 'TilemapBrush.tsx'],
     ['features', 'sequencer', 'SequencerPanel.tsx'],
+    ['features', 'viewport', 'useFrameSelected.ts'],
   ]
 
   it('every handler asks the one shared predicate, which knows about the code editor', () => {

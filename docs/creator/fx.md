@@ -466,8 +466,8 @@ A pool's **Edge hold** is about its capillary length: blood about 2 mm, mercury 
 ## Bake
 
 The **Bake** tab turns the effect into textures. **Bake flipbook** runs its own simulation from the
-start (warm-up, capture, loop blend), so the live preview keeps going beside it; **Export flipbook**
-in the toolbar writes the files. The **Output** menu picks which baked atlas the player and the atlas view show. **Bake presets**
+start (warm-up, capture, loop blend), so the live preview keeps going beside it; **File ▸ Export flipbook**
+writes the files. The **Output** menu picks which baked atlas the player and the atlas view show. **Bake presets**
 set up the whole tab: Game-ready (8 × 8 frames of 128 px), Hero (8 × 8 of 256 px, relightable), Mobile
 (4 × 4 of 64 px), Explosion one-shot and Liquid splash (24 frames from the release, and the floor decal).
 

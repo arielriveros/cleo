@@ -9,7 +9,7 @@ and even dock layouts are namespaced per project.
 On a fresh install, or when no project can be opened, you get a full-screen **launcher** to create or
 pick a project. It shows the engine version.
 
-**Projects** — the top bar's **Projects** opens the same browser over the editor, with the open
+**Projects** — the Cleo logo at the left end of the menu bar opens the same browser over the editor, with the open
 project named beside its title. Each project has its own scenes, assets, scripts and layout; nothing
 is shared between them.
 
@@ -45,7 +45,7 @@ three scenes and two calls.
 
 ## Export
 
-**Export** writes the whole project to a single `.zip`: every scene, all libraries, the folder
+**Project ▸ Export Project** writes the whole project to a single `.zip`: every scene, all libraries, the folder
 layout, preferences and every texture and audio payload. It is assembled off the main thread, so the
 editor stays responsive.
 
@@ -54,7 +54,7 @@ else.
 
 ## Import
 
-**Import** reads a project `.zip` and offers three outcomes:
+**Project ▸ Import Project…** reads a project `.zip` and offers three outcomes:
 
 | Outcome | Effect |
 |---|---|

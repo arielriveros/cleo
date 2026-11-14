@@ -115,7 +115,7 @@ how a published build presents itself, and the input map.
 
 The project's name and main scene, and how a published build presents itself.
 
-- **Name** — the project's name in the projects list and the menu bar.
+- **Name** — the project's name in the projects list and on the menu bar's logo button.
 - **Main scene** — the scene a published game starts in. Scenes load each other from scripts after
   that.
 

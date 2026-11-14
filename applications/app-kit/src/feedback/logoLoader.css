@@ -76,7 +76,8 @@
   position: absolute;
   inset: 0;
   transform: scale(1.05);
-  filter: blur(12px);
+  /* A variable, so a small logo (LogoMark in a menu bar) can keep its halo to its own size. */
+  filter: blur(var(--cleo-glow-blur, 12px));
   animation: cleo-logo-breathe 2.4s ease-in-out infinite;
 }
 
@@ -112,6 +113,30 @@
 .cleo-logo-loader.cleo-logo-sweep .cleo-logo-glow i {
   background-image: linear-gradient(90deg, rgb(var(--primary)), #8fb4ff);
   background-size: 100% 100%;
+}
+
+/* LogoMark: the logo as a button's face. Sharp and fully lit at rest, with the sweep's masks in place but
+   the band parked off the left edge (--cleo-sweep's initial -25%); .cleo-logo-scanning runs the sweep's
+   clock ONCE, so the pixelated band crosses the logo a single time. Its halo is scaled to its size. */
+.cleo-logo-loader.cleo-logo-mark {
+  animation: none;
+  --cleo-glow-blur: 3px;
+}
+
+.cleo-logo-loader.cleo-logo-mark .cleo-logo-rest {
+  opacity: 1;
+}
+
+.cleo-logo-loader.cleo-logo-mark .cleo-logo-glow {
+  opacity: 0;
+}
+
+.cleo-logo-loader.cleo-logo-mark.cleo-logo-scanning {
+  animation: cleo-logo-sweep 0.9s ease-in-out 1;
+}
+
+.cleo-logo-loader.cleo-logo-mark.cleo-logo-scanning .cleo-logo-glow {
+  opacity: 0.9;
 }
 
 @keyframes cleo-logo-sweep {

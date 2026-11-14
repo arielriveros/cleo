@@ -6,9 +6,8 @@ The shell: a menu bar, a strip of document tabs, and a dockable workspace of pan
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ Projects  Save  Save All  Import  Export  VSCode  Publish ▾          │
-│              ◀ Play Pause Stop ▶       [ Scene | Landscape | UI |    │
-│                                          Options ]  ↶ ↷  ⟲           │
+│ (logo) File Edit View Project Help   ▶ ▾ ◎ ❚❚ ■   [ Scene | Landscape │
+│                                                   | UI | Options ] Claude │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Main Scene ● │ Rock.model │ Stone.mat │ Player.script │ ✕            │
 ├───────────────┬──────────────────────────────────┬───────────────────┤
@@ -24,17 +23,34 @@ The shell: a menu bar, a strip of document tabs, and a dockable workspace of pan
 
 ## Menu bar
 
-**Left group**
+**Left** — the Cleo logo, then the menus.
 
-| Control | Does |
+The **Cleo logo** opens the project browser ([Projects](projects.md)); pointing at it runs the splash
+screen's pixel scan across it, and its tooltip names the open project.
+
+| Menu | Holds |
 |---|---|
-| **Projects** | Opens the project browser. Shows the current project's name. |
-| **Save** | Saves the active tab. The label reports state: *Saving…*, *Saved*, *Failed*. |
-| **Save All (n)** | Saves every tab with unsaved changes. |
-| **Import** | Imports a project `.zip`. |
-| **Export** | Exports the whole project to a `.zip`. |
+| **File** | **Save** (Ctrl+S) the active tab, **Save All** (Ctrl+Shift+S) every tab with unsaved changes, **New Scene**. |
+| **Edit** | **Undo** and **Redo** (named after what they undo), **Delete** the selected node. |
+| **View** | **Frame Selected** (F) and **Reset Layout**. |
+| **Project** | **Import Project…** (a project `.zip`), **Export Project** (the whole project to a `.zip`), and **Publish ▸** Web (HTML), Desktop (Electron) or Desktop installer. See [Projects](projects.md) and [Publishing](publishing.md). |
+| **Help** | **Keyboard Shortcuts…** (the table below) and **About Cleo Engine…** (the version). |
+
+Click a menu to open it; while one is open, pointing at another opens that one instead. The arrow keys move
+through the menus and their items, Enter chooses, Esc closes.
+
+**Frame Selected** brings the selected node to the middle of the view being edited (in a
+[split viewport](scene-authoring.md#split-viewport), the pane being edited). The camera keeps the way it
+looks and moves along it until the node fills the view; an orthographic view slides across and zooms
+instead. It moves the editor camera only, so it does nothing during Play.
+
+After the menus come, when there is something to say:
+
+| Item | Shows |
+|---|---|
+| **Status** | What Save, Save All or Publish did last: *Saving…*, *Saved*, *Save failed*, *Publishing web build…*. |
 | **Script sync chip** | Appears only when the VS Code workspace needs attention (sync paused or in error). Its setup lives in [Options ▸ Editor ▸ Scripts](options.md#editor). |
-| **Publish ▾** | Web (HTML), Desktop (Electron), Desktop installer. See [Publishing](publishing.md). |
+| **Agent chip** | Appears once the Claude panel is open and has started. See [The AI agent link](ai-agent-link.md). |
 
 **Centre** — the transport.
 
@@ -47,7 +63,7 @@ The shell: a menu bar, a strip of document tabs, and a dockable workspace of pan
 | **Stop** | Ends the game. A game window closes. |
 | **Restart** | Only while a game runs in its window: rebuilds it from what the editor holds now and reloads the window. |
 
-**Right** — the [mode selector](modes.md), then **Undo** / **Redo** and **Reset Layout**.
+**Right** — the [mode selector](modes.md), then **Claude**, which opens the [Claude panel](ai-agent-link.md).
 
 ## Document tabs
 
@@ -71,7 +87,8 @@ returns you to whatever the scene tab was doing.
 | **Ctrl/Cmd + Z** | Undo |
 | **Ctrl + Shift + Z** or **Ctrl + Y** | Redo |
 | **W** / **E** / **R** | Move / Rotate / Scale gizmo |
-| **X** | Switch the gizmo between local and world axes |
+| **X** | Switch the gizmo between local and world axes (the viewport's globe and box buttons) |
+| **F** | Frame the selected node in the view being edited |
 
 Save is captured before anything else sees it, so it works while you are typing in the code editor.
 Undo is *not*, so text fields and the code editor keep their own undo history — which is what you
@@ -95,7 +112,7 @@ you cannot accidentally bury it under something else.
 from the one in Scene mode. Play mode is never persisted, so hiding everything to play does not
 disturb your layout.
 
-**Reset Layout** clears every stored arrangement and rebuilds the default.
+**View ▸ Reset Layout** clears every stored arrangement and rebuilds the default.
 
 ### The default layout
 

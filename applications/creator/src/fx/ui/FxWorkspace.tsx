@@ -7,7 +7,7 @@ import { CreatorWorkspace, PanelBody, PanelHeader, SchemaSections, ViewportOverl
 import { sectionPresets } from './sectionPresets';
 import { downloadAll } from '../../core/download';
 import { useGeneration } from '../../core/useGeneration';
-import { AssetBar, useCreatorAsset } from '../../core/useCreatorAsset';
+import { useCreatorAsset } from '../../core/useCreatorAsset';
 import { useStageCapture } from '../../core/stageCapture';
 import { fluidDims } from '../fluidCpu';
 import { gpuBackend } from '../fluidGpu';
@@ -356,14 +356,12 @@ export function FxWorkspace() {
             <Toggle checked={gpu} onChange={setUseGpu} /> GPU solver {hasCompute ? '' : '(unavailable)'}
           </label>
         </>}
-        asset={<div className='flex items-center gap-2'>
-          <AssetBar state={asset} />
-          {asset.active && (
-            <label className='flex items-center gap-1 text-muted' title='Re-bake the saved asset when edits pause, so the editor follows. Off: bake by hand in the Bake tab.'>
-              <Toggle checked={autoBake} onChange={setAutoBake} /> Auto-bake
-            </label>
-          )}
-        </div>}
+        assetState={asset}
+        asset={asset.active && (
+          <label className='flex items-center gap-1 text-muted' title='Re-bake the saved asset when edits pause, so the editor follows. Off: bake by hand in the Bake tab.'>
+            <Toggle checked={autoBake} onChange={setAutoBake} /> Auto-bake
+          </label>
+        )}
         toolbarStatus={status}
         primaryAction={{ label: 'Export flipbook', disabled: !output || bake.status.running, onClick: exportFiles,
                          title: output ? 'The baked tileset and its sidecar' : 'Bake the flipbook first, in the Bake tab' }}

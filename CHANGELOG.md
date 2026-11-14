@@ -16,6 +16,20 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Menu bar.** The editor and Cleo Creator share one menu bar: the Cleo logo, then **File**, **Edit**,
+  **View**, **Project** and **Help**, each with its commands' icons and shortcuts.
+  - *Editor.* File holds Save, Save All and New Scene. Edit holds Undo, Redo and Delete. View holds the new
+    **Frame Selected** (**F**: the selected node to the middle of the view being edited, the camera keeping
+    its direction) and Reset Layout. Project holds Import, Export and Publish ▸. Help holds Keyboard
+    Shortcuts and About. Those buttons left the bar; a status note says what Save and Publish did.
+  - *The logo* opens the projects in the editor and goes home in the Creator; pointing at it runs the
+    splash screen's pixel scan.
+  - *Creator.* File holds the asset's Save as / Rename / Close and the app's export. View holds Frame,
+    Reset Layout and the WebGL 2 / WebGPU switch. Project opens the editor.
+  - *Agent link.* The editor talks to the agent host only while the Claude panel is open, so the Agent
+    chip no longer comes and goes before you open it.
+  - *Gizmo axes.* World and local show as a globe and a box rather than W and L.
+
 - **Split viewport.** The viewport divides into two side-by-side, two stacked or four panes, each looking
   through its own camera: the editor camera, a free perspective camera, or an orthographic Top, Bottom,
   Front, Back, Left or Right view.

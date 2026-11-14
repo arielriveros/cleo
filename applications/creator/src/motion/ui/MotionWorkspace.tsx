@@ -8,7 +8,7 @@ import {
 import { useCreatorEngine } from '../../app/CreatorEngine';
 import { CreatorWorkspace, ListRow, PanelBody, PanelHeader, ViewportOverlay } from '../../app/workspace';
 import { downloadAll } from '../../core/download';
-import { AssetBar, useCreatorAsset, writeCreatorAsset } from '../../core/useCreatorAsset';
+import { useCreatorAsset, writeCreatorAsset } from '../../core/useCreatorAsset';
 import { useStageCapture } from '../../core/stageCapture';
 import { useGeneration } from '../../core/useGeneration';
 import { frameBox, installOrbitCamera } from '../../fx/ui/fxPreview';
@@ -469,7 +469,7 @@ export function MotionWorkspace() {
     <MotionCtx.Provider value={value}>
       <CreatorWorkspace
         id='motion' page='creator/motion'
-        asset={<AssetBar state={asset} />}
+        assetState={asset}
         toolbar={<>
           <Select className='w-40' value={doc.characterId ?? ''} title='The character to animate: the mannequin, or one added with Assets ▸ + Add ▸ Rigged character…'
                   onChange={e => chooseSubject(e.target.value || null)}>

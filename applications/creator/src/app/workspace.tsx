@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import type { DockviewApi, IDockviewPanelProps } from 'dockview-react';
 import { isTextEntryEvent } from 'cleo';
-import { DockShell } from '@cleo/app-kit/layout/DockShell';
+import { DockShell, lockAnchorPanel } from '@cleo/app-kit/layout/DockShell';
 import ConsolePanel from '@cleo/app-kit/feedback/ConsolePanel';
 import { ViewportHost } from '@cleo/app-kit/engine/ViewportHost';
 import { ParamForm } from '@cleo/app-kit/params/ParamForm';
@@ -13,10 +13,13 @@ import {
 import type { GenerationStatus } from '../core/useGeneration';
 import { GenerationBar } from './StatusBar';
 import { AssetsPanel } from './AssetsPanel';
+import { creatorMenu } from './menuStore';
+import { AssetStatus, type CreatorAssetState } from '../core/useCreatorAsset';
 
 // The one layout every Creator mode is built from, so World, FX and Foliage read the same:
 //
-//   toolbar      mode tools on the left · the saved asset's chip · status text · the primary output action on the right
+//   toolbar      mode tools on the left · the saved asset's chip · status text (the asset's commands and the
+//                primary output action are the menu bar's File menu, App.tsx)
 //   left dock    what is being built (layers, scene, poses), 280 px; a mode with nothing to list has none
 //   viewport     the live 3D preview: a stats readout top-left; the Stage menu, mode controls and Frame top-right;
 //                a playback bar bottom-centre for a mode that simulates
@@ -47,10 +50,17 @@ export interface CreatorWorkspaceProps {
   /** Docs page the workspace's titles resolve against. */
   page: string;
   toolbar: ReactNode;
-  /** The saved-asset controls (core/useCreatorAsset AssetBar), right of the mode's tools. */
+  /**
+   * The mode's saved asset (core/useCreatorAsset): its chip shows right of the mode's tools, and the menu
+   * bar's File menu saves, renames and closes it.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  assetState?: CreatorAssetState<any>;
+  /** Controls that go with the saved asset, beside its chip (FX's Auto-bake). */
   asset?: ReactNode;
   /** Dim text before the primary action (what is running, which backend). */
   toolbarStatus?: ReactNode;
+  /** The mode's output (Download .glb, Export flipbook...): File's last item in the menu bar. */
   primaryAction?: PrimaryAction;
   left?: WorkspacePanel;
   /** The first is active; the Parameters panel by convention. */
@@ -80,7 +90,7 @@ function PanelSlot({ id }: { id: string }) {
 }
 
 export function CreatorWorkspace(props: CreatorWorkspaceProps) {
-  const { id, page, toolbar, asset, toolbarStatus, primaryAction, left, right, bottom = [], viewport, viewportRef, generation } = props;
+  const { id, page, toolbar, assetState, asset, toolbarStatus, primaryAction, left, right, bottom = [], viewport, viewportRef, generation } = props;
 
   const renderers: Record<string, () => ReactNode> = {
     viewport: () => <ViewportHost viewportRef={viewportRef}>{viewport}</ViewportHost>,
@@ -114,6 +124,24 @@ export function CreatorWorkspace(props: CreatorWorkspaceProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shape]);
 
+  // View ▸ Reset Layout: the default arrangement again (the change saves itself, like any other).
+  const dockApi = useRef<DockviewApi | null>(null);
+  const onDockReady = useCallback((api: DockviewApi) => { dockApi.current = api; }, []);
+  const resetLayout = useCallback(() => {
+    const api = dockApi.current;
+    if (!api) return;
+    api.clear();
+    buildDefault(api);
+    lockAnchorPanel(api, 'viewport');
+  }, [buildDefault]);
+
+  // What the menu bar offers for this mode (App.tsx): re-published every render, so it always holds the
+  // asset's and the action's current state; cleared when the mode closes.
+  useLayoutEffect(() => {
+    creatorMenu.set({ asset: assetState, primaryAction, onFrame: props.onFrame, resetLayout });
+  });
+  useEffect(() => () => creatorMenu.set(null), []);
+
   // F frames, plus the mode's own keys. Not while typing into a field.
   const keys = useRef<Record<string, () => void>>({});
   keys.current = { ...(props.hotkeys ?? {}), ...(props.onFrame ? { f: props.onFrame } : {}) };
@@ -135,17 +163,17 @@ export function CreatorWorkspace(props: CreatorWorkspaceProps) {
         <div className='flex flex-col h-full'>
           <div className='toolbar'>
             {toolbar}
-            {asset && <div className='border-l border-border pl-2 ml-1'>{asset}</div>}
+            {(assetState || asset) && (
+              <div className='flex items-center gap-2 border-l border-border pl-2 ml-1'>
+                {assetState && <AssetStatus state={assetState} />}
+                {asset}
+              </div>
+            )}
             <div className='flex-1' />
             {toolbarStatus && <span className='text-dim'>{toolbarStatus}</span>}
-            {primaryAction && (
-              <Button size='sm' variant='primary' title={primaryAction.title} disabled={primaryAction.disabled} onClick={primaryAction.onClick}>
-                {primaryAction.label}
-              </Button>
-            )}
           </div>
           <div className='flex-1 min-h-0'>
-            <DockShell components={components} storageKey={`cleo_creator_${id}_layout`} version={LAYOUT_VERSION} buildDefault={buildDefault} anchorPanel='viewport' />
+            <DockShell components={components} storageKey={`cleo_creator_${id}_layout`} version={LAYOUT_VERSION} buildDefault={buildDefault} anchorPanel='viewport' onReady={onDockReady} />
           </div>
           <GenerationBar status={generation.status} onCancel={generation.onCancel} idle={generation.idle} />
         </div>

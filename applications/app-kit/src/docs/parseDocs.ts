@@ -409,6 +409,17 @@ function entriesUnder(page: DocPage, anchor: string | undefined): DocEntry[] | n
 }
 
 /**
+ * The table rows of one section of a page, in order: what a docs table lists (a Help ▸ Keyboard Shortcuts
+ * dialog shows the shortcuts table this way, so the list is the docs). Empty when the page or the
+ * section is missing.
+ */
+export function sectionRows(index: DocIndex, pageId: string, anchor: string): DocEntry[] {
+  const page = index.pages.get(pageId);
+  if (!page) return [];
+  return (entriesUnder(page, anchor) ?? []).filter(e => e.kind === 'row' && e.body.trim() !== '');
+}
+
+/**
  * Find the entry for a title (or a field label) through a scope chain, innermost frame first.
  *
  * - `title`: each frame's section, then that frame's whole page, then the next frame out.

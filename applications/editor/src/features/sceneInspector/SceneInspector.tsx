@@ -478,6 +478,19 @@ export default function SceneInspector() {
     addItemTo(item, parent, { editorScene, eventEmitter, triggers }).catch(err => console.error(err));
   };
 
+  // Edit ▸ Delete in the menu bar: the same as the Delete key below, through the tree, so it is undoable
+  // and honours the same locks.
+  useEffect(() => {
+    const onDeleteSelected = () => {
+      const tree = treeRef.current;
+      if (!tree || tree.isEditing || structureLocked) return;
+      const ids = Array.from(tree.selectedIds);
+      if (ids.length) void tree.delete(ids);
+    };
+    eventEmitter.on('DELETE_SELECTED', onDeleteSelected);
+    return () => { eventEmitter.off('DELETE_SELECTED', onDeleteSelected); };
+  }, [eventEmitter, structureLocked]);
+
   // Delete and F2, on top of react-arborist's own keymap. Capture phase and stopping propagation, because
   // react-arborist treats any unrecognised key as type-ahead. Ignored while a field has focus.
   const handleKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (event) => {

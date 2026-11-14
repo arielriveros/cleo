@@ -18,6 +18,10 @@ export { FileButton } from './FileButton';
 export type { FileButtonProps } from './FileButton';
 
 export { MenuItem } from './MenuItem';
+export { AppMenuBar, isSelectable, nextSelectable } from './AppMenuBar';
+export type { AppMenuBarProps, MenuEntry, MenuSpec } from './AppMenuBar';
+export { LogoButton } from './LogoButton';
+export { AboutDialog, ShortcutsDialog } from './HelpDialogs';
 export type { MenuItemProps } from './MenuItem';
 export { ContextMenu } from './ContextMenu';
 export type { ContextMenuProps } from './ContextMenu';

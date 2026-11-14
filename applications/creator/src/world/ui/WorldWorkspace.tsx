@@ -7,7 +7,7 @@ import { CreatorWorkspace, ListRow, PanelBody, PanelHeader, StageSection, Viewpo
 import { downloadAll, downloadFile } from '../../core/download';
 import type { ExportFile, GenerateContext } from '../../core/generator';
 import { useGeneration } from '../../core/useGeneration';
-import { AssetBar, useCreatorAsset } from '../../core/useCreatorAsset';
+import { useCreatorAsset } from '../../core/useCreatorAsset';
 import { useStageCapture } from '../../core/stageCapture';
 import { writeZip } from '../../core/zip';
 import { worldExportHash } from '../exportWorld';
@@ -280,7 +280,7 @@ export function WorldWorkspace() {
     <WorldContext.Provider value={value}>
       <CreatorWorkspace
         id='world' page='creator/world'
-        asset={<AssetBar state={asset} />}
+        assetState={asset}
         toolbar={(
           <Button size='sm' title='A new seed: the same landforms, different detail'
                   onClick={() => setDoc({ ...doc, settings: { ...doc.settings, seed: (doc.settings.seed * 48271 + 11) % 99991 } })}>New seed</Button>

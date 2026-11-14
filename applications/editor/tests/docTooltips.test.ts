@@ -7,6 +7,7 @@ import {
 import { MODE_DOC_PAGE, MODE_PANEL_TITLES, PANEL_TAB_DOC_PAGE, PANEL_TAB_DOC_SECTION, PANEL_TITLES } from '../src/features/layout/panelTitles';
 import { EDITOR_SRC, loadDocIndex, resolveSite, scanSource } from './support/docCoverage';
 import { PANE_CULLING_KEYS, paneCullingDoc } from '../src/features/viewportPanes/paneState';
+import { sectionRows } from '@cleo/app-kit/docs/parseDocs';
 
 /**
  * The editor's title tooltips are not written in the editor: each Collapsable / Section / modal / dock
@@ -194,6 +195,15 @@ describe('the real docs describe every editor title', () => {
     const modes = [...source.matchAll(/<Segment\b[^>]*\bmode='([^']+)'/g)].map(m => m[1]);
     expect(modes.length).toBeGreaterThan(3);
     expect(modes.filter(m => !resolveDocKey(index, [], `editor/modes#modes-you-choose::${m}`))).toEqual([]);
+  });
+
+  it('Help ▸ Keyboard Shortcuts lists the shortcuts tables of the editor and the Creator', () => {
+    const editor = sectionRows(index, 'editor/interface', 'keyboard-shortcuts').map(r => r.label);
+    expect(editor).toContain('Ctrl/Cmd + S');
+    expect(editor).toContain('F');
+    const creator = sectionRows(index, 'creator/index', 'keyboard-shortcuts').map(r => r.label);
+    expect(creator).toContain('F');
+    expect(creator.length).toBeGreaterThan(3);
   });
 
   it('every switch of the split viewport culling view has its docs entry', () => {

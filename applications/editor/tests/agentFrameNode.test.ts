@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { Camera, CameraNode, Scene, type Node } from 'cleo'
 import { vec3 } from 'gl-matrix'
 import { frameNode, frameOrtho } from '../src/features/agentBridge/capture'
+import { frameKeepingView } from '../src/features/viewport/frameNode'
 
 // Framing a node for the agent's captures (agentBridge/capture.ts) in an orthographic view: a split
 // viewport's Top or Front pane, or the 2D view, keeps the axis it looks along and zooms to fit.
@@ -84,5 +85,33 @@ describe('frameNode', () => {
     frameNode(node, boxNode([-1, -1, -1], [1, 1, 1]), 35, 25)
     expect(node.rotation[0]).toBeCloseTo(25, 4)
     expect(node.rotation[1]).toBeCloseTo(35, 4)
+  })
+})
+
+describe('frameKeepingView (View ▸ Frame Selected)', () => {
+  const boxNode = (min: number[], max: number[]) =>
+    ({ getBoundingBox: () => ({ min, max }), children: [], worldPosition: [0, 0, 0] }) as unknown as Node
+
+  it('moves a perspective camera along its own view until the node fits, never turning it', () => {
+    const { node, scene } = orthoCamera([20, 30, 0], [7, 8, 9])
+    node.camera.type = 'perspective'
+    frameKeepingView(node, boxNode([9, -1, 4], [11, 1, 6]))
+    close(node.rotation, [20, 30, 0])
+    scene.root.updateTransforms(null)
+    // The node's centre (10, 0, 5) is straight ahead of the camera now.
+    const p = node.worldPosition, f = node.worldForward
+    const to = [10 - p[0], 0 - p[1], 5 - p[2]]
+    const d = Math.hypot(to[0], to[1], to[2])
+    close(to.map(v => v / d), [f[0], f[1], f[2]])
+    // Far enough back to fit the 1.73 m radius in the 60 degree view, with the margin.
+    expect(d).toBeCloseTo((Math.sqrt(3) / Math.sin(Math.PI / 6)) * 1.15, 3)
+  })
+
+  it('slides and zooms an orthographic camera, as the agent framing does', () => {
+    const { node } = orthoCamera([90, 0, 0], [0, 100, 0], { up: [0, 0, 1], detail: 100 })
+    frameKeepingView(node, boxNode([4, 0, -2], [6, 2, 2]))
+    close(node.rotation, [90, 0, 0])
+    close(node.position, [5, 101, 0])
+    expect(node.camera.top).toBeCloseTo(2 * 1.15, 5)
   })
 })

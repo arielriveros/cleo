@@ -207,7 +207,7 @@ The **Motion** tab holds what shapes the whole clip.
 - **Variation rate** — how fast the variation drifts.
 - **Seed** — picks another take of the variation.
 
-**Clip** — its **Frames per second**. **Download .anim** (toolbar) writes `<name>.anim.json`, which holds
+**Clip** — its **Frames per second**. **File ▸ Download .anim** writes `<name>.anim.json`, which holds
 the clip and the skeleton it was made on, and a `.motion.json` sidecar that regenerates it, both named
 after the asset (`untitled` on Scratch). **Assets ▸ Import** reads a `.motion.json` back as a new motion,
 to edit it again.
@@ -244,7 +244,7 @@ on the stage.
 
 ## In the Editor
 
-**Save as asset** keeps the motion in the shared library. Every change then reaches each project's
+**File ▸ Save as Asset…** keeps the motion in the shared library. Every change then reaches each project's
 `/Creator/Motion` folder as an animation asset on the mannequin's rig. The rig is reused when the project
 already has it, and added when it does not. The clip is linked to the rig, so every model on that rig, or
 retargeted from it, lists the clip. Use it from an animator state, an action slot or a blend space like any

@@ -57,13 +57,20 @@ same Claude Code you would run in a terminal yourself, with the Cleo tools alrea
   own interrupt. Ctrl+V pastes. Every other key, such as Esc, goes to Claude Code.
 - **It keeps running.** Closing the panel, switching tabs or reloading the editor leaves the session
   running: the screen comes back as it was. It stops 15 minutes after the last editor window closes.
+  While the panel is closed, though, the editor is not linked: Claude's requests to the editor fail
+  until you open the panel again.
 - **New session** (+ in the header) ends the running session and starts a fresh one. When Claude Code
   exits, **New session** and **Continue last** (its most recent conversation) start it again.
 
 ## The Agent chip
 
-**Agent** sits in the menu bar while the agent host (or a Cleo MCP server) is running on this machine. Its dot shows the state
-of the link:
+The editor links to agents only while the Claude panel is open. Until you open it, the editor makes no
+call to the agent host at all, and closing the panel unlinks it. That holds for any agent: Claude Code
+running in a terminal or an IDE with the Cleo MCP server also reaches the editor only while the panel is
+open.
+
+**Agent** sits in the menu bar once the panel is open and has started. Its dot shows the state of the
+link:
 
 | State | Meaning |
 |---|---|

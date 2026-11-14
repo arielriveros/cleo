@@ -1,6 +1,6 @@
 # Publishing
 
-**Publish ▾** in the top bar turns the project into a playable build.
+**Project ▸ Publish** in the menu bar turns the project into a playable build.
 
 ## Targets
 

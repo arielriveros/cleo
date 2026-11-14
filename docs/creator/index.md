@@ -6,8 +6,8 @@ same app-kit (`applications/app-kit`): the same panels, docking, console, toolti
 settings.
 
 It opens on its **home page**, which lists four tools as cards, the way the Editor's project launcher lists
-projects. Click one to open it. While a tool is open, the top bar shows its name and a **Home** button
-that goes back to the home page. A reload keeps the tool that was open; a new window starts at home.
+projects. Click one to open it. While a tool is open, the menu bar shows its name, and the Cleo logo at its
+left end goes back to the home page. A reload keeps the tool that was open; a new window starts at home.
 
 | Tool | Makes | Exports |
 |---|---|---|
@@ -22,13 +22,38 @@ share one asset library (see [Saved assets](#saved-assets)). `npm run creator:de
 port 8081. The desktop app opens it as a second window. `npm run editor:dev` and `npm run desktop:dev` start
 the Editor alone; to open the Creator from them, run `npm run creator:serve` alongside.
 
+## Menu bar
+
+Laid out like the Editor's: the Cleo logo (**home**; pointing at it runs the splash screen's pixel scan),
+then the menus, the graphics backend in use, and the open tool's name.
+
+| Menu | Holds |
+|---|---|
+| **File** | **Save as Asset…** on Scratch, or **Rename Asset…** on a saved one; **Close Asset** (back to Scratch); the tool's output: **Generate & export**, **Export flipbook**, **Download .glb** or **Download .anim**. See [Saved assets](#saved-assets). |
+| **Edit** | **Undo** and **Redo**, greyed: the Creator keeps no undo history yet. |
+| **View** | **Frame** (**F**), **Reset Layout** (the tool's default panels), and the graphics backend: **WebGL 2** or **WebGPU**. Switching reloads; every tool keeps its document, so nothing is lost. WebGPU runs erosion and the fluid solver on the GPU. |
+| **Project** | **Open Cleo Editor**: the Editor window that opened this one, or a new one. |
+| **Help** | **Keyboard Shortcuts…** (the table below) and **About Cleo Creator…**. |
+
+### Keyboard shortcuts
+
+| Shortcut | Does |
+|---|---|
+| **F** | Frame the asset, in every tool |
+| **Space** | FX: play or pause the simulation. Motion: play or pause the clip |
+| **W** / **E** / **R** | FX: move / rotate / scale gizmo |
+| **X** | FX: switch the gizmo between local and world axes |
+| **Delete** or **Backspace** | FX: remove the selected body |
+| **Esc** | FX: clear the selection |
+
+None of them fire while a text field has the keyboard.
+
 ## Layout
 
 Every tool is laid out the same way, so what you learn in one carries to the others:
 
 - **Toolbar** — the tool's own controls on the left (kind, seed, the subject), then the
-  [asset chip](#saved-assets), what is running on the right, and the tool's one output action at the far
-  right: **Generate & export**, **Export flipbook**, **Download .glb** or **Download .anim**.
+  [asset chip](#saved-assets) and what is running. The tool's output action is **File**'s last item.
 - **Left dock** — what is being built: the World's layers, the FX scene, the Motion's poses. Foliage has
   none.
 - **Viewport** — the live preview. Numbers top-left; the **Stage** menu, the tool's controls and
@@ -54,8 +79,8 @@ sections below (Foliage's light, wind and weather).
 
 ## Saved assets
 
-Each tool works on **Scratch** — its working document, kept in the browser — until **Save as asset…**
-gives it a name. A saved asset is shared with the Editor: it appears in **every project** under
+Each tool works on **Scratch** — its working document, kept in the browser — until **File ▸ Save as
+Asset…** gives it a name. A saved asset is shared with the Editor: it appears in **every project** under
 `/Creator/<Foliage|FX|World|Motion|Poses>/<name>`, and from then on every change you make here reaches the
 Editor by itself, within a second or two. Nothing to export or import. The asset's name is the one name
 there is: it is what the Editor calls the asset, and it names the files a Foliage or Motion download
@@ -69,9 +94,9 @@ writes (`untitled` on Scratch).
 | **Motion** | Each re-bake (about a second after an edit), and when a library pose it uses changes. | An animation asset on its subject's rig. See [the Motion Creator](motion.md#in-the-editor). |
 | **Pose** | As it is edited in the Motion Creator's Pose tab. | A Pose asset on its subject's rig. |
 
-The toolbar's **asset chip** shows the asset being edited: click its name to rename it; its dot turns
-green once the last change is saved; **✕** goes back to Scratch, which stops publishing (the asset stays in
-the library) and keeps the document to go on from. Everything else is the **Assets** tab's: open an asset
+The toolbar's **asset chip** shows the asset being edited; its dot turns green once the last change is
+saved. **File ▸ Rename Asset…** renames it, and **File ▸ Close Asset** goes back to Scratch, which stops
+publishing (the asset stays in the library) and keeps the document to go on from. Everything else is the **Assets** tab's: open an asset
 there to edit it, and duplicate, move or delete it there. A Foliage asset also keeps the texture images
 you loaded in its Materials tab, so reopening it restores them.
 

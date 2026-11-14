@@ -18,13 +18,18 @@ import ImportBundleModal from "./dialogs/ImportBundleModal";
 import { startTask } from "@cleo/app-kit/feedback/progressStore";
 import Topbar from "@cleo/app-kit/ui/Topbar";
 import ModeSelector from "./ModeSelector";
-import UndoButtons from "./UndoButtons";
-import { Button, MenuItem, buttonVariants, cn, useDocEntry, useDocTooltip } from "@cleo/app-kit/ui";
+import { UndoGlyph, RedoGlyph } from "./UndoButtons";
+import { useHistory } from "./HistoryContext";
+import { AboutDialog, AppMenuBar, Button, LogoButton, MenuItem, ShortcutsDialog, cn, type MenuSpec } from "@cleo/app-kit/ui";
 import {
   SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
-  SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon, ProjectsIcon,
+  SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon,
   PlayGlyph, SimulateGlyph, PauseGlyph, StopGlyph, RestartGlyph, PlayWindowIcon, PlayEditorIcon,
+  FrameIcon, DeleteIcon, KeyboardIcon, InfoIcon, WebIcon, DesktopIcon, InstallerIcon,
 } from "./topbarIcons";
+import { iconFor } from "./assets/assetKinds";
+import { useFrameSelected } from "./viewport/useFrameSelected";
+import { VERSION_LABEL } from "../version";
 import { useWindowPlay, windowPlay } from "./playWindow/windowPlay";
 import { usePlayTarget, writePlayTarget } from "./playWindow/playTarget";
 import ProjectsModal from "./projects/ProjectsModal";
@@ -60,21 +65,16 @@ function Transport({ title, disabled, active, accent, activeClass, onClick, narr
   );
 }
 
-/**
- * A top-bar control's hover card: its row in the docs' Menu bar table (or a line of the page), with the
- * plain `title` as the fallback when the docs have no entry for it.
- */
-function useBarDoc(doc: string, title: string) {
-  const entry = useDocEntry(undefined, doc);
-  const tip = useDocTooltip(entry);
-  return {
-    props: { ref: tip.ref, ...tip.hoverProps, title: entry ? undefined : title, 'aria-describedby': tip.describedBy },
-    card: tip.card,
-  };
-}
+/** The editor's logo (public/brand, tools/brandIcons.mjs), on the menu bar's projects button. */
+const LOGO = `${import.meta.env.BASE_URL}brand/logo.png`;
 
 export default function MenuBar() {
-  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, startSimulate, stopPlay, pausePlay, buildWindowPlayData, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings } = useCleoEngine();
+  const { instance, editorScene, scripts, scriptAssets, bodies, triggers, startPlay, startSimulate, stopPlay, pausePlay, buildWindowPlayData, editorMode, saveActiveTab, saveAll, dirtyTabs, activeTab, savingState, eventEmitter: eventEmitter, sceneList, mainSceneId, openSceneId, materials, terrainMaterials, templates, models, animationFields, animations, rigs, tilesets, aiBrains, particleSystems, sequences, animControllers, boneMasks, poseAssets, audioSources, soundSamples, sceneDimension, inputMap, scriptPaths, projectSettings, createScene, selectedNode, isPlayMode } = useCleoEngine();
+  const history = useHistory();
+  // View ▸ Frame Selected, and the F key (installed here, once).
+  const { canFrame, frameSelected } = useFrameSelected(true);
+  const importInput = useRef<HTMLInputElement>(null);
+  const [helpDialog, setHelpDialog] = useState<'shortcuts' | 'about' | null>(null);
   const { vfs } = useVfs();
   // A parsed bundle awaiting the user's Replace/Merge choice (ImportBundleModal).
   const [pendingBundle, setPendingBundle] = useState<BundleData | null>(null);
@@ -86,10 +86,6 @@ export default function MenuBar() {
   const libEdit = editorMode === 'template' || editorMode === 'material' || editorMode === 'terrainMaterial'
     || editorMode === 'model' || editorMode === 'script';
   const saving = savingState === 'saving';
-  // Save carries its own status: the icon and the color say what happened, the label says it in words.
-  const saveLabel = savingState === 'saving' ? 'Saving…' : savingState === 'saved' ? 'Saved' : savingState === 'error' ? 'Failed' : 'Save';
-  const saveIcon = savingState === 'saving' ? <SpinnerIcon /> : savingState === 'saved' ? <CheckIcon /> : savingState === 'error' ? <AlertIcon /> : <SaveIcon />;
-  const saveVariant = savingState === 'saved' ? 'success' : savingState === 'error' ? 'danger' : 'default';
   // Save targets whatever the active tab edits; Save All sweeps the rest. An animation tab has no asset —
   // "saving" it applies the machine onto the source node, which is what its own Apply State Machine button does.
   const activeDirty = !!dirtyTabs[activeTab.id];
@@ -104,9 +100,7 @@ export default function MenuBar() {
   const [showProjects, setShowProjects] = useState(false);
   // The open project's name: re-read when the projects modal closes, pushed on a rename from Options.
   const projectName = useProjectName(showProjects);
-  const [showPublish, setShowPublish] = useState(false);
-  const [publishing, setPublishing] = useState(false);
-  const publishRef = useRef<HTMLDivElement>(null);
+  const [publishing, setPublishing] = useState<string | null>(null);
   const desktop = isDesktop();
   // Play in window: where Play runs (per machine), and the window session when there is one.
   const playTarget = usePlayTarget();
@@ -187,17 +181,7 @@ export default function MenuBar() {
   };
   const bundleName = (b: NonNullable<typeof pendingBundle>) => b.manifest.projectName || 'project';
 
-  // Close the Publish dropdown when clicking outside it.
-  useEffect(() => {
-    if (!showPublish) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (publishRef.current && !publishRef.current.contains(e.target as Node)) setShowPublish(false);
-    };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [showPublish]);
-
-  // ...and the Play target menu.
+  // Close the Play target menu when clicking outside it.
   useEffect(() => {
     if (!showTargets) return;
     const onDocClick = (e: MouseEvent) => {
@@ -214,8 +198,7 @@ export default function MenuBar() {
     title: string,
     ship: (data: any) => Promise<string>,
   ) => {
-    setShowPublish(false);
-    setPublishing(true);
+    setPublishing(title);
     const task = startTask({ title, steps: ['Serializing scene', 'Building & writing files'] });
     try {
       if (!editorScene) throw new Error('No scene to publish');
@@ -271,7 +254,7 @@ export default function MenuBar() {
       Logger.error(`Publish failed: ${e?.message || e}`, 'Publish');
     } finally {
       task.finish();
-      setPublishing(false);
+      setPublishing(null);
     }
   };
 
@@ -322,62 +305,96 @@ export default function MenuBar() {
     : windowSession.status === 'failed' ? 'Failed'
     : '';
 
-  const projectsDoc = useBarDoc('editor/interface#menu-bar::Projects', 'Switch, create or delete projects');
-  const saveAllDoc = useBarDoc('editor/interface#menu-bar::Save All', 'Save every asset with unsaved changes');
-  const importDoc = useBarDoc('editor/interface#menu-bar::Import', 'Import a project .zip — replace or merge the whole workspace');
-  const exportDoc = useBarDoc('editor/interface#menu-bar::Export', 'Export the whole project (scenes + assets + textures) to a .zip');
-  const publishDoc = useBarDoc('editor/interface#menu-bar::Publish', 'Publish an optimized build of your game');
-  const resetDoc = useBarDoc('editor/interface#the-dockable-workspace::Reset Layout', 'Restore the default panel layout');
+  // What the old Save / Publish buttons said on their face, now that they live in the menus: the last
+  // save's outcome and a publish under way. Status only; the menus hold the commands.
+  const status = publishing ? { icon: <SpinnerIcon />, text: `${publishing}…`, tone: 'text-muted' }
+    : savingState === 'saving' ? { icon: <SpinnerIcon />, text: 'Saving…', tone: 'text-muted' }
+    : savingState === 'saved' ? { icon: <CheckIcon />, text: 'Saved', tone: 'text-success-fg' }
+    : savingState === 'error' ? { icon: <AlertIcon />, text: 'Save failed', tone: 'text-danger-fg' }
+    : null;
+
+  const stopped = playState === 'stopped';
+  const menus: MenuSpec[] = [
+    {
+      id: 'file', label: 'File', items: [
+        { kind: 'item', label: 'Save', icon: <SaveIcon />, shortcut: 'Ctrl+S', title: saveTitle,
+          disabled: saving || !activeDirty, onSelect: () => void saveActiveTab() },
+        { kind: 'item', label: `Save All${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`, icon: <SaveIcon />, shortcut: 'Ctrl+Shift+S',
+          title: 'Save every asset with unsaved changes', disabled: saving || dirtyCount === 0, onSelect: () => void saveAll() },
+        { kind: 'separator' },
+        { kind: 'item', label: 'New Scene', icon: <img src={iconFor('scene')} className='h-3.5 w-3.5' alt='' draggable={false} />,
+          title: 'Create a new scene asset', disabled: !stopped, onSelect: () => void createScene() },
+      ],
+    },
+    {
+      id: 'edit', label: 'Edit', items: [
+        { kind: 'item', label: history.canUndo && history.undoLabel ? `Undo ${history.undoLabel}` : 'Undo', icon: <UndoGlyph />,
+          shortcut: 'Ctrl+Z', disabled: !history.canUndo || isPlayMode, onSelect: history.undo },
+        { kind: 'item', label: history.canRedo && history.redoLabel ? `Redo ${history.redoLabel}` : 'Redo', icon: <RedoGlyph />,
+          shortcut: 'Ctrl+Shift+Z', disabled: !history.canRedo || isPlayMode, onSelect: history.redo },
+        { kind: 'separator' },
+        { kind: 'item', label: 'Delete', icon: <DeleteIcon />, shortcut: 'Del', title: 'Delete the selected node',
+          disabled: !selectedNode || isPlayMode, onSelect: () => eventEmitter.emit('DELETE_SELECTED') },
+      ],
+    },
+    {
+      id: 'view', label: 'View', items: [
+        { kind: 'item', label: 'Frame Selected', icon: <FrameIcon />, shortcut: 'F',
+          title: 'Bring the selected node to the middle of the view being edited, keeping the camera\'s direction',
+          disabled: !canFrame, onSelect: frameSelected },
+        { kind: 'separator' },
+        { kind: 'item', label: 'Reset Layout', icon: <LayoutIcon />, title: 'Restore the default panel layout',
+          disabled: !stopped, onSelect: () => eventEmitter.emit('RESET_DOCK_LAYOUT') },
+      ],
+    },
+    {
+      id: 'project', label: 'Project', items: [
+        { kind: 'item', label: 'Import Project…', icon: <ImportIcon />, title: 'Import a project .zip: a new project, or replace or merge this one',
+          disabled: libEdit, onSelect: () => importInput.current?.click() },
+        { kind: 'item', label: 'Export Project', icon: <ExportIcon />, title: 'Export the whole project (scenes, assets, textures) to a .zip',
+          disabled: libEdit, onSelect: () => void onExport() },
+        { kind: 'separator' },
+        { kind: 'submenu', label: 'Publish', icon: <PublishIcon />, title: 'Publish an optimized build of your game',
+          disabled: !!publishing || libEdit, items: [
+            { kind: 'item', label: 'Web (HTML)', icon: <WebIcon />,
+              title: desktop ? 'Write index.html + game.js + game.bin to a folder' : 'Download a .zip of the game',
+              onSelect: () => void onPublishWeb() },
+            { kind: 'item', label: 'Desktop (Electron)', icon: <DesktopIcon />, disabled: !desktop,
+              title: desktop ? 'Runnable Electron game folder' : 'Only available in the desktop app',
+              onSelect: () => void onPublishDesktop(false) },
+            ...(desktop ? [{ kind: 'item' as const, label: 'Desktop installer', icon: <InstallerIcon />,
+              title: 'Package a native installer (electron-builder)', onSelect: () => void onPublishDesktop(true) }] : []),
+          ] },
+      ],
+    },
+    {
+      id: 'help', label: 'Help', items: [
+        { kind: 'item', label: 'Keyboard Shortcuts…', icon: <KeyboardIcon />, onSelect: () => setHelpDialog('shortcuts') },
+        { kind: 'item', label: 'About Cleo Engine…', icon: <InfoIcon />, onSelect: () => setHelpDialog('about') },
+      ],
+    },
+  ];
 
   return (
     <Topbar>
-      <div className='flex items-center gap-1.5 h-full px-1.5'>
-        {/* Outermost scope first, so the row reads Projects → Save → Import/Export → Publish. Never gated by
-            the active tab: which project you are in is not an editing mode. */}
-        <Button
-          variant='subtle' size='sm' className='h-[25px] max-w-[180px]'
-          {...projectsDoc.props}
-          onClick={() => setShowProjects(true)}
-        >
-          <ProjectsIcon /> <span className='truncate'>{projectName || 'Projects'}</span>
-        </Button>
-        {projectsDoc.card}
+      <div className='flex items-center gap-1 h-full px-1.5 min-w-0'>
+        {/* The projects: switch, create or delete them. Never gated by the active tab: which project you
+            are in is not an editing mode. */}
+        <LogoButton src={LOGO} title={`Projects${projectName ? ` (${projectName})` : ''}: switch, create or delete projects`}
+                    onClick={() => setShowProjects(true)} />
         {showProjects && <ProjectsModal onClose={() => setShowProjects(false)} />}
-        <Button
-          variant={saveVariant} size='sm' className='h-[25px] w-[86px]'
-          disabled={saving || !activeDirty}
-          title={saveTitle}
-          onClick={() => void saveActiveTab()}
-        >
-          {saveIcon} {saveLabel}
-        </Button>
-        <Button
-          variant='subtle' size='sm' className='h-[25px]'
-          disabled={saving || dirtyCount === 0}
-          {...saveAllDoc.props}
-          onClick={() => void saveAll()}
-        >
-          <SaveIcon /> Save All{dirtyCount > 0 && ` (${dirtyCount})`}
-        </Button>
-        {saveAllDoc.card}
-        {/* A file input needs a <label> to trigger it, so it borrows the Button styles rather than being one. */}
-        <label
-          htmlFor='load-project-file'
-          {...importDoc.props}
-          className={cn(buttonVariants({ variant: 'subtle', size: 'sm' }), 'h-[25px] cursor-pointer', libEdit && 'opacity-60 pointer-events-none')}
-        >
-          <ImportIcon /> Import
-        </label>
-        {importDoc.card}
-        <input className="hidden" type='file' accept='.zip' id='load-project-file' name='file' onChange={(e) => { onImport(e.target.files); e.currentTarget.value = ''; }} />
-        <Button variant='subtle' size='sm' className='h-[25px]' disabled={libEdit} {...exportDoc.props} onClick={onExport}>
-          <ExportIcon /> Export
-        </Button>
-        {exportDoc.card}
+        <AppMenuBar menus={menus} />
+        {/* Read by Project ▸ Import Project…: a file picker needs an input to open. */}
+        <input ref={importInput} className="hidden" type='file' accept='.zip' id='load-project-file' name='file' onChange={(e) => { onImport(e.target.files); e.currentTarget.value = ''; }} />
+        {status && (
+          <span className={cn('flex items-center gap-1 px-1.5 text-ui-xs whitespace-nowrap', status.tone)} role='status'>
+            {status.icon}{status.text}
+          </span>
+        )}
         {/* The script workspace appears here only when it needs attention (paused sync, error, conflict);
             setting it up and its everyday status live in Options ▸ Editor ▸ Scripts. */}
         <WorkspaceStatusChip />
-        {/* The AI agent link (Cleo MCP server), shown only while a server is running on this machine. */}
+        {/* The AI agent link, shown only while the Claude panel is open and started (agentBridge). */}
         <AgentBridgeChip />
         {/* The bundle is dropped only once the import commits. New project and Merge ask about
             unsaved work first (see bundleImport), and a declined confirm leaves this modal up so the
@@ -396,37 +413,13 @@ export default function MenuBar() {
               'Merging into this project', () => applyBundleMerge(pendingBundle, true)); }}
           />
         )}
-        <div className='relative inline-block' ref={publishRef}>
-          <Button
-            variant='primary' size='sm' className='h-[25px]'
-            disabled={publishing || libEdit}
-            {...publishDoc.props}
-            onClick={() => setShowPublish(v => !v)}
-          >
-            {publishing ? <SpinnerIcon /> : <PublishIcon />}
-            {publishing ? 'Publishing…' : 'Publish'}
-            {!publishing && <ChevronDownIcon />}
-          </Button>
-          {publishDoc.card}
-          {showPublish && (
-            <div className='absolute left-[5px] top-[29px] z-50 w-[240px] bg-surface-raised border border-control-hover rounded shadow-lg p-1 text-fg text-ui'>
-              <MenuItem className='py-1.5' onClick={onPublishWeb}
-                hint={desktop ? 'Write index.html + game.js + game.bin to a folder' : 'Download a .zip of the game'}>
-                <span className='font-semibold'>Web (HTML)</span>
-              </MenuItem>
-              <MenuItem className='py-1.5' disabled={!desktop} onClick={() => onPublishDesktop(false)}
-                hint={desktop ? 'Runnable Electron game folder' : 'Only available in the desktop app'}>
-                <span className='font-semibold'>Desktop (Electron)</span>
-              </MenuItem>
-              {desktop && (
-                <MenuItem className='py-1.5' onClick={() => onPublishDesktop(true)}
-                  hint='Package a native installer (electron-builder)'>
-                  <span className='font-semibold'>Desktop installer</span>
-                </MenuItem>
-              )}
-            </div>
-          )}
-        </div>
+        {helpDialog === 'shortcuts' && (
+          <ShortcutsDialog page='editor/interface' anchor='keyboard-shortcuts' onClose={() => setHelpDialog(null)} />
+        )}
+        {helpDialog === 'about' && (
+          <AboutDialog appName='Cleo Engine' version={VERSION_LABEL} logo={LOGO}
+                       lines={['The Cleo editor, with Cleo Creator.']} onClose={() => setHelpDialog(null)} />
+        )}
       </div>
       <div className='relative flex items-center h-full gap-1.5' ref={targetsRef}>
         <div className='flex items-center rounded overflow-hidden border border-control-hover my-[2px]'>
@@ -526,16 +519,6 @@ export default function MenuBar() {
       </div>
       <ModeSelector />
       <div className='flex items-center h-full px-1.5 gap-1.5'>
-        <UndoButtons />
-        <Button
-          variant='subtle' size='sm' className='h-[25px]'
-          disabled={playState !== 'stopped'}
-          {...resetDoc.props}
-          onClick={() => eventEmitter.emit('RESET_DOCK_LAYOUT')}
-        >
-          <LayoutIcon /> Reset Layout
-        </Button>
-        {resetDoc.card}
         {/* Opens the Claude panel (Claude Code in a terminal) docked at the right edge (agentChat/AgentChatPanel). */}
         <AgentChatToggle />
       </div>

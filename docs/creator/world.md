@@ -3,7 +3,7 @@
 Build a landscape from a stack of landform layers, erode it, texture it with a stack of rule-placed
 surfaces, and export it in the formats every engine reads. Nothing is baked: every change re-evaluates
 what it affects. The live preview runs on a real engine landscape in the viewport (257² or 513², see
-[Preview quality](#preview-quality)) and on the **Map**; **Generate & export** (toolbar) runs the full
+[Preview quality](#preview-quality)) and on the **Map**; **File ▸ Generate & export** runs the full
 resolution. **Layers** is the left dock; **Parameters** (world settings, lakes and the selected layer,
 pass or surface, with the world presets in its header) and **Export** are the right dock.
 

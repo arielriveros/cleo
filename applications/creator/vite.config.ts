@@ -4,6 +4,7 @@ import path from 'node:path'
 import engineConfig from '../../vite.config'
 import { appKitAlias, crossOriginIsolationPlugin, nagaAssetsPlugin } from '../app-kit/vite.preset'
 import { floorSetsPlugin } from './vite.floors'
+import { buildVersionDefines } from '../editor/buildVersion'
 
 const ENGINE_ROOT = path.resolve(__dirname, '../..')
 
@@ -17,6 +18,8 @@ const ENGINE_ROOT = path.resolve(__dirname, '../..')
 // self-contained dist/ instead.
 export default defineConfig(({ mode }) => mergeConfig(engineConfig, {
   base: '/creator/',
+  // The product version, as the editor reads it (src/version.ts): Help ▸ About shows it.
+  define: buildVersionDefines(),
   resolve: { alias: appKitAlias },
   // The same isolation as the editor, whose origin this is served on (see crossOriginIsolation).
   // The stage floors' PBR sets (build/terrain_textures): served in dev, copied into the build.

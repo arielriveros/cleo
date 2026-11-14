@@ -18,7 +18,7 @@ gives each level's triangles and the level on screen.
 The layout is the Creator's own (see [the Creator](index.md#layout)), without a left dock. The **right**
 dock holds **Parameters** (the shape, with **Presets ▾** at its top), **Materials** (every material the
 asset carries, in the Editor's material sections), **LOD** (the level ladder) and **Export** (texture sizes
-and the embedded textures). **Download .glb** in the toolbar writes the files, named after the saved asset
+and the embedded textures). **File ▸ Download .glb** writes the files, named after the saved asset
 (`untitled` while on Scratch).
 
 Every asset is a pure function of its parameters and **Seed**. Random choices are keyed by what they
@@ -29,7 +29,7 @@ decide (this branch, this leaf), so changing one slider moves only what it touch
 The toolbar's **Seed** is the current plant's seed. **▾** beside it lists the seeds tried this session:
 click one to go back to it. **New seed** gives another plant from the same parameters.
 
-A plant worth keeping is kept as a library asset: **Save as asset…** in the toolbar, then open it again
+A plant worth keeping is kept as a library asset: **File ▸ Save as Asset…**, then open it again
 from **Assets**. (Variants saved in the browser by an older Creator moved into Assets ▸ `/Foliage` the
 first time it opened.)
 

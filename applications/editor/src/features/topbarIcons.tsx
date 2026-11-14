@@ -25,6 +25,18 @@ export const AlertIcon = () => (<S><path d='M12 3l9 16H3Z' /><path d='M12 10v4' 
 export const LayoutIcon = () => (<S><rect x='3' y='4' width='18' height='16' rx='1.5' /><path d='M9 4v16M9 12h12' /></S>);
 // Stacked folders — the project browser.
 export const ProjectsIcon = () => (<S><path d='M3 8V6a1 1 0 0 1 1-1h4l2 2h6a1 1 0 0 1 1 1v1' /><path d='M2.5 10h17l-1.6 8.2a1 1 0 0 1-1 .8H5.1a1 1 0 0 1-1-.8Z' /></S>);
+// Corner brackets round a dot — View ▸ Frame Selected.
+export const FrameIcon = () => (<S><path d='M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4' /><circle cx='12' cy='12' r='2.5' /></S>);
+// A bin — Edit ▸ Delete.
+export const DeleteIcon = () => (<S><path d='M4 7h16' /><path d='M9 7V4.5h6V7' /><path d='M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12' /><path d='M10 11v5M14 11v5' /></S>);
+// A keyboard — Help ▸ Keyboard Shortcuts.
+export const KeyboardIcon = () => (<S><rect x='2.5' y='6' width='19' height='12' rx='1.5' /><path d='M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7.5 14h9' /></S>);
+// An i in a circle — Help ▸ About.
+export const InfoIcon = () => (<S><circle cx='12' cy='12' r='9' /><path d='M12 11v5' /><path d='M12 8h.01' /></S>);
+// Publish targets: a globe for the web, a monitor for the desktop, a box for the installer.
+export const WebIcon = () => (<S><circle cx='12' cy='12' r='9' /><path d='M3 12h18' /><path d='M12 3c-2.8 2.6-4 5.6-4 9s1.2 6.4 4 9c2.8-2.6 4-5.6 4-9s-1.2-6.4-4-9Z' /></S>);
+export const DesktopIcon = () => (<S><rect x='3' y='4' width='18' height='12' rx='1.5' /><path d='M9 20h6M12 16v4' /></S>);
+export const InstallerIcon = () => (<S><path d='M4 8.5 12 4l8 4.5v7L12 20l-8-4.5Z' /><path d='M4 8.5 12 13l8-4.5M12 13v7' /></S>);
 
 // Playback: filled marks (fill = currentColor) so they read as solid controls at 25px, unlike the
 // stroke-only chrome around them.
