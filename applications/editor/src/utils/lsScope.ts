@@ -13,6 +13,8 @@ export const LS_KEYS = {
   editorTabs: 'cleo_editor_tabs_v1',
   /** The split viewport: layout, focused pane, each pane's camera and pose (features/viewportPanes). */
   viewportPanes: 'cleo_viewport_panes_v1',
+  /** Script breakpoints (features/scriptDebugger/breakpoints.ts). */
+  scriptBreakpoints: 'cleo_script_breakpoints_v1',
 } as const;
 
 /** The names above, for the migration that moves an existing install's keys under its Default Project. */

@@ -1,6 +1,7 @@
 import { Node } from "./node";
 import type { Scene } from "../scene";
 import { Logger } from "../../logger";
+import { logScriptError } from "../../scripting/scriptErrors";
 import { bindDataAccessors, canAccessVariable } from "./nodeVariables";
 import { createScriptImporter, resolveScriptModule, ScriptFactory, SCRIPT_HANDLERS } from "../../scripting/scriptRuntime";
 
@@ -209,9 +210,9 @@ export function attachScriptFactory(node: Node, factory: ScriptFactory): void {
                 const mapped = args.map(arg => (arg instanceof Node ? wrapNode(unwrapScriptNode(arg), node) : arg));
                 const result = fn.apply(context, [context, ...mapped]);
                 if (result && typeof result.then === 'function')
-                    result.catch((e: any) => Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'));
+                    result.catch((e: any) => logScriptError(`Error in ${name} for node ${node.name}`, e, 'Script'));
             }
-            catch (e) { Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'); }
+            catch (e) { logScriptError(`Error in ${name} for node ${node.name}`, e, 'Script'); }
         };
     };
 
@@ -256,12 +257,12 @@ function attachClassScript(node: Node, Ctor: new (...args: any[]) => any): void 
         try {
             const result = fn.apply(node, args); // engine calls with the handler's own args; self is `this`
             if (result && typeof result.then === 'function') {
-                result.catch((e: any) => Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'));
+                result.catch((e: any) => logScriptError(`Error in ${name} for node ${node.name}`, e, 'Script'));
                 return undefined;
             }
             return result;
         }
-        catch (e) { Logger.error(`Error in ${name} for node ${node.name}: ${e}`, 'Script'); }
+        catch (e) { logScriptError(`Error in ${name} for node ${node.name}`, e, 'Script'); }
         return undefined;
     };
 

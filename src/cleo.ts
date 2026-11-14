@@ -581,6 +581,11 @@ export {
 } from "./core/scripting/scriptRuntime";
 export type { ScriptCompileOptions, ScriptModuleFactory } from "./core/scripting/scriptRuntime";
 export type { ScriptModule, ScriptFactory } from "./core/scripting/scriptRuntime";
+// Where a script runs as the browser and the debugger see it (cleo-script:///Player/Hero.ts), and script errors
+// that keep that location.
+export { scriptSourceUrl, inlineScriptUrl, isScriptUrl, moduleIdOfScriptUrl, scriptLocationOf, scriptLocationLabel } from "./core/scripting/scriptUrls";
+export type { ScriptSourceLocation } from "./core/scripting/scriptUrls";
+export { logScriptError } from "./core/scripting/scriptErrors";
 // Typed name fields (clip/sound/socket/template/child): plain strings the inspector offers a picker for.
 export { SOUNDS_GROUP, ownedSoundsGroup } from "./core/scripting/fieldTypes";
 export type { ClipName, SoundName, SocketName, TemplateName, NodeName, TriggerName, ProjectTriggers, SpriteClipName } from "./core/scripting/fieldTypes";

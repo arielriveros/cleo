@@ -119,6 +119,9 @@ import { ProjectSettings, DEFAULT_PROJECT_SETTINGS, parseProjectSettings, applyE
 import { getEditorPrefs, editorPrefsStore } from "./options/editorPrefs";
 import { setGizmoSnapSteps } from "@cleo/app-kit/gizmo/gizmoDrag";
 import { openScriptExternally } from "./options/scriptOpener";
+import { requestScriptReveal, setScriptLineOpener } from "./nodeInspector/scriptEditor/scriptReveal";
+import { clearRuntimeErrors } from "./nodeInspector/scriptEditor/runtimeErrors";
+import { setScriptSourceProvider } from "./scriptDebugger/debugSession";
 import { isDesktop } from "./publish/publishClient";
 import { assetIdOfTab, loadTabState, saveTabState, MAIN_MODES, MainMode } from "../utils/tabState";
 import { activeProjectAllowsLegacyImport, touchProject } from "../utils/projects";
@@ -2194,6 +2197,54 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     scriptTabSourceRef.current.set(id, asset?.source ?? scriptTabSourceRef.current.get(id) ?? '');
     commitTab({ id: tabId, kind: 'script', title: asset?.name ?? 'Script', scriptId: id }, adoptTabId);
   };
+
+  // "Open this script at that line" for callers outside this provider — the Console's links to a script
+  // error, the script debugger (scriptReveal.ts). The tab's editor applies the line once it is mounted.
+  // Through a ref: the opener is registered once, the tab state it reads changes every render.
+  const openScriptAtRef = useRef<(scriptId: string, line: number, inEditor: boolean) => void>(() => {});
+  openScriptAtRef.current = (scriptId, line, inEditor) => {
+    if (!scriptAssetsRef.current.some(a => a.id === scriptId)) return;
+    if (!inEditor && getEditorPrefs().scriptOpenWith === 'vscode' && isDesktop()) {
+      void (async () => {
+        if (await openScriptExternally(scriptId, line)) return;
+        requestScriptReveal(scriptId, line);
+        openScriptTab(scriptId);
+      })();
+      return;
+    }
+    requestScriptReveal(scriptId, line);
+    openScriptTab(scriptId);
+  };
+  useEffect(() => {
+    setScriptLineOpener((scriptId, line, inEditor) => openScriptAtRef.current(scriptId, line, inEditor));
+    return () => setScriptLineOpener(null);
+  }, []);
+
+  // The script debugger's view of the scripts (scriptDebugger/debugSession.ts): what a build packs (the
+  // SAVED sources), and what each script reads now — so a breakpoint in a script edited since the game was
+  // built can wait for Restart instead of landing on the wrong line of the code that runs.
+  useEffect(() => {
+    const ctx = () => buildScriptGraphCtx(scriptPathsRef.current, scriptAssetsRef.current);
+    setScriptSourceProvider({
+      saved() {
+        const graph = ctx();
+        const out = new Map<string, string>();
+        for (const asset of scriptAssetsRef.current) {
+          const moduleId = graph.pathOf(asset.id);
+          if (moduleId) out.set(moduleId, asset.source);
+        }
+        return out;
+      },
+      current(moduleId) {
+        const asset = ctx().assetAt(moduleId);
+        if (!asset) return undefined;
+        const open = tabsRef.current.some(t => t.kind === 'script' && t.scriptId === asset.id);
+        return (open ? scriptTabSourceRef.current.get(asset.id) : undefined) ?? asset.source;
+      },
+      assetIdOf: moduleId => ctx().assetAt(moduleId)?.id,
+    });
+    return () => setScriptSourceProvider(null);
+  }, []);
 
   /** A new script MODULE — shared code other scripts import, never attached to a node — opened at once. */
   const createScriptModule = () => {
@@ -6868,6 +6919,8 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     // A fresh session evaluates every script module afresh: edits made since the last Play apply, and no
     // module state leaks from one session into the next.
     resetScriptModules();
+    // The script editor's error marks are about the last run.
+    clearRuntimeErrors();
     const newScene = await buildPlayScene();
     // ...and in the play scene only, the open Sequencer tabs' unsaved working copies.
     applySequenceWorkingCopies(newScene);

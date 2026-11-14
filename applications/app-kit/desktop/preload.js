@@ -38,11 +38,18 @@ contextBridge.exposeInMainWorld('cleoDesktop', {
 
   // Play in window: the game in a window -- and a renderer process -- of its own, which the main process
   // creates (playWindow.js) from a session id; the URL is built there. `onEvent` reports the window's
-  // process, its closing and a crash. Returns an unsubscribe -- the raw listener never escapes here.
+  // process, its closing and a crash, and the script debugger's protocol events. Returns an unsubscribe --
+  // the raw listener never escapes here.
   play: {
     open: (options) => ipcRenderer.invoke('play:open', options),
     close: (sessionId) => ipcRenderer.invoke('play:close', sessionId),
     focus: (sessionId) => ipcRenderer.invoke('play:focus', sessionId),
+    // The script debugger (playDebugger.js): one allowlisted DevTools-protocol command to the game window,
+    // attaching again after the session was lost, and bringing this editor window forward when the game
+    // stops at a breakpoint.
+    debug: (sessionId, method, params) => ipcRenderer.invoke('play:debug', sessionId, method, params),
+    debugAttach: (sessionId, options) => ipcRenderer.invoke('play:debug-attach', sessionId, options),
+    raiseEditor: () => ipcRenderer.invoke('play:raise-editor'),
     onEvent: (cb) => {
       const listener = (_event, payload) => cb(payload);
       ipcRenderer.on('play:event', listener);
@@ -59,7 +66,7 @@ contextBridge.exposeInMainWorld('cleoDesktop', {
     close: (root) => ipcRenderer.invoke('scripts:close', root),
     apply: (root, batch) => ipcRenderer.invoke('scripts:apply', root, batch),
     writeScaffold: (root, files) => ipcRenderer.invoke('scripts:write-scaffold', root, files),
-    launch: (root, rel, command) => ipcRenderer.invoke('scripts:launch', root, rel, command),
+    launch: (root, rel, command, line) => ipcRenderer.invoke('scripts:launch', root, rel, command, line),
     exists: (root) => ipcRenderer.invoke('scripts:exists', root),
     /** Subscribe to workspace changes. Returns an unsubscribe -- the raw listener never escapes here. */
     onChange: (cb) => {

@@ -12,6 +12,7 @@ import { LS_KEYS, lsKey } from '../../utils/lsScope';
 import { cleoDockTheme as cleoTheme, lockAnchorPanel } from '@cleo/app-kit/layout/DockShell';
 import { setOptionsPage } from '@cleo/app-kit/ui/OptionsShell';
 import { useEditorPrefs } from '../options/editorPrefs';
+import { scriptDebugger } from '../scriptDebugger/debugSession';
 
 // Per-project. Both live keys resolve through lsScope, so deleting a project takes them with it.
 const dockLayoutKey = () => lsKey(LS_KEYS.dockLayout);
@@ -52,7 +53,8 @@ const OLD_DOCK_LAYOUT_KEYS = [
 // nowhere for it.
 // 25: the Physics tab went: a rigid body and a trigger are nodes (Collider, Trigger), edited in
 // Properties, and a ragdoll is its model's. A tree stored at 24 names a panel that no longer exists.
-const LAYOUT_VERSION = 25;
+// 26: the script Debugger arrived in the bottom strip beside Logger; a tree stored at 25 has nowhere for it.
+const LAYOUT_VERSION = 26;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -65,7 +67,7 @@ type LayoutStore = { version: typeof LAYOUT_VERSION; layouts: Partial<Record<Edi
  * survives a restricted mode's discarded arrangement, the buildDefaultLayout fallback, and a reload.
  */
 const bottomTabKey = () => lsKey(LS_KEYS.dockBottomTab);
-const BOTTOM_PANELS = ['logger', 'assets', 'sequencer'] as const;
+const BOTTOM_PANELS = ['logger', 'assets', 'sequencer', 'debugger'] as const;
 type BottomPanel = (typeof BOTTOM_PANELS)[number];
 
 function loadBottomTab(): BottomPanel {
@@ -140,7 +142,7 @@ const SEQUENCER_PANELS = ['sequencer'] as const;
 
 
 const CHROME_PANELS = [
-  'scene', 'properties', 'scripts', 'logger', 'assets',
+  'scene', 'properties', 'scripts', 'logger', 'assets', 'debugger',
   ...STATE_MACHINE_PANELS, ...ANIMATION_FIELD_PANELS, ...CLIP_PANELS, ...PARTICLE_PANELS, ...TILEMAP_PANELS, ...LANDSCAPE_PANELS,
   ...RIG_PANELS, ...ADD_PANELS, ...SEQUENCER_PANELS,
 ] as const;
@@ -220,6 +222,11 @@ function buildDefaultLayout(api: DockviewApi) {
     id: 'assets', component: 'assets', title: 'Assets', renderer: 'always',
     position: { referencePanel: 'logger', direction: 'within' },
   });
+  // The script debugger: where a game playing in a window is stopped, its stack and variables.
+  const debuggerPanel = api.addPanel({
+    id: 'debugger', component: 'debugger', title: PANEL_TITLES['debugger'],
+    position: { referencePanel: 'logger', direction: 'within' },
+  });
   // The blend-space plot belongs with Logger/Assets, not on the right rail: it is a work surface. Also
   // renderer:'always', so its transport keeps driving the animator while another bottom tab is up.
   api.addPanel({
@@ -246,7 +253,7 @@ function buildDefaultLayout(api: DockviewApi) {
   // Honour the remembered bottom tab; this is also the fallback when restoring a stashed layout fails.
   // animationField mode overrides this in restoreBottomTab, which runs after every layout build.
   const remembered = loadBottomTab();
-  (remembered === 'assets' ? assets : remembered === 'sequencer' ? sequencer : logger).api.setActive();
+  (remembered === 'assets' ? assets : remembered === 'sequencer' ? sequencer : remembered === 'debugger' ? debuggerPanel : logger).api.setActive();
   assertViewportLock(api);
 }
 
@@ -596,7 +603,7 @@ export default function DockLayout() {
     if (!api) return;
     const onFocus = (tab: unknown) => {
       // A programmatic focus is still the tab the user ends up on, so it becomes the remembered one.
-      const id: BottomPanel = tab === 'Logger' ? 'logger' : tab === 'Sequencer' ? 'sequencer' : 'assets';
+      const id: BottomPanel = tab === 'Logger' ? 'logger' : tab === 'Sequencer' ? 'sequencer' : tab === 'Debugger' ? 'debugger' : 'assets';
       bottomTabRef.current = id;
       try { localStorage.setItem(bottomTabKey(), id); } catch { /* ignore */ }
       api.getPanel(id)?.api.setActive();
@@ -604,6 +611,19 @@ export default function DockLayout() {
     eventEmitter.on('FOCUS_BOTTOM_TAB', onFocus);
     return () => { eventEmitter.off('FOCUS_BOTTOM_TAB', onFocus); };
   }, [api, eventEmitter]);
+
+  // The game stopped (a breakpoint, an exception, Pause): bring up the Debugger tab with its stack and
+  // variables. Not for a step — whatever tab the user moved to while stepping stays.
+  useEffect(() => {
+    if (!api) return;
+    const debug = scriptDebugger();
+    let was = debug.getSnapshot().paused;
+    return debug.subscribe(() => {
+      const paused = debug.getSnapshot().paused;
+      if (paused && !was && paused.reason !== 'step') api.getPanel('debugger')?.api.setActive();
+      was = paused;
+    });
+  }, [api]);
 
   // A double-clicked mask or pose opens in the rig editor: bring up the tab that edits it. Which item is
   // focused inside that tab is RigContext's `focus`, which outlives the panel being mounted.

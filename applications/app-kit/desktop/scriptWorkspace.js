@@ -353,21 +353,24 @@ function trySpawn(command, args) {
 }
 
 /**
- * Open the workspace in the user's editor, with the file selected when one is named.
+ * Open the workspace in the user's editor, with the file selected when one is named -- at `line` (1-based)
+ * when one is given, as a Console link to a script error asks for.
  * Falls back to the vscode:// URL handler, then to the OS file manager, so the button always does
  * something even when `code` is not on PATH.
  */
-async function launch(root, rel, command) {
+async function launch(root, rel, command, line) {
   // Required lazily so everything above stays runnable (and unit-testable) outside Electron.
   const { shell } = require('electron');
   const cmd = command && SAFE_COMMAND.test(command) ? command : 'code';
   const abs = rel ? safeJoin(root, rel) : root;
-  const args = rel ? [root, '-g', abs] : [root];
+  // `-g file:line` -- the suffix only ever a positive integer, so it cannot change what is opened.
+  const at = rel && Number.isInteger(line) && line > 0 ? `:${line}` : '';
+  const args = rel ? [root, '-g', `${abs}${at}`] : [root];
 
   if (await trySpawn(cmd, args)) return { ok: true, via: cmd };
 
   try {
-    await shell.openExternal(`vscode://file/${abs.replace(/\\/g, '/')}`);
+    await shell.openExternal(`vscode://file/${abs.replace(/\\/g, '/')}${at}`);
     return { ok: true, via: 'vscode' };
   } catch { /* no protocol handler registered */ }
 
@@ -416,7 +419,7 @@ function registerIpc({ ipcMain, BrowserWindow, pickDirectory }) {
   ipcMain.handle('scripts:close', guard((_e, root) => closeWorkspace(root)));
   ipcMain.handle('scripts:apply', guard((_e, root, batch) => apply(root, batch)));
   ipcMain.handle('scripts:write-scaffold', guard((_e, root, files) => writeScaffold(root, files)));
-  ipcMain.handle('scripts:launch', guard((_e, root, rel, command) => launch(root, rel, command)));
+  ipcMain.handle('scripts:launch', guard((_e, root, rel, command, line) => launch(root, rel, command, line)));
   ipcMain.handle('scripts:exists', guard(async (_e, root) => ({ ok: true, exists: fs.existsSync(root) })));
 }
 

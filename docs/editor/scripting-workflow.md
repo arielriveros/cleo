@@ -144,6 +144,12 @@ how you write them changes.
 An instantiated copy of a scripted node resolves its script through the id it was copied *from*,
 which is why spawning template instances works in a published game.
 
+## Debugging
+
+A script error in the Console links to its line, and the script editor marks the lines that failed in
+the last run. In the desktop app you can set breakpoints in the script editor's margin and step through a
+game that plays in a window: see [Debugging scripts](debugging.md).
+
 ## Testing behaviour
 
 The editor has no test runner, but the engine's own suite runs against the same public API your
@@ -153,4 +159,4 @@ the game.
 
 ## See also
 
-[Getting started (scripting)](../scripting/getting-started.md) · [Patterns](../scripting/patterns.md) · [Assets](assets.md)
+[Getting started (scripting)](../scripting/getting-started.md) · [Patterns](../scripting/patterns.md) · [Debugging scripts](debugging.md) · [Assets](assets.md)

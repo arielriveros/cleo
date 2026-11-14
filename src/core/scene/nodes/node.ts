@@ -10,6 +10,7 @@ import { engineEventBus, authoring } from "../../eventBus";
 import { isEditorOwnedName } from "../editorOwnership";
 import { Shape } from "../../../physics/shape";
 import { Logger } from "../../logger";
+import { logScriptError } from "../../scripting/scriptErrors";
 import { compileScript, resolveNodeScript } from "../../scripting/scriptRuntime";
 import { NodeType } from "./nodeType";
 import type { NodeVariable, NodeVariableType, NodeVariableAccess } from "./nodeVariables";
@@ -438,7 +439,7 @@ export class Node {
       // Before onDespawn, and before `scene` is cleared below: a pending this.after/this.every must not
       // fire against a node no longer in the tree.
       node.scene?.cancelTimers(node);
-      try { node.onDespawn(); } catch (e) { Logger.error(`Error in onDespawn for node ${node.name}: ${e}`); }
+      try { node.onDespawn(); } catch (e) { logScriptError(`Error in onDespawn for node ${node.name}`, e, 'Runtime'); }
     }
     // Looked up AFTER onDespawn, never before it: a handler may remove or insert a sibling, and a slot read
     // earlier would then splice out whichever node now sits there. It may even detach this node itself.
@@ -664,7 +665,7 @@ export class Node {
     this._despawnFading = { elapsed: 0, duration, then };
     Node._fadingCount++;
     scene.registerFading(this);
-    try { this.onFadeStart(); } catch (e) { Logger.error(`Error in onFadeStart for node ${this.name}: ${e}`); }
+    try { this.onFadeStart(); } catch (e) { logScriptError(`Error in onFadeStart for node ${this.name}`, e, 'Runtime'); }
     return true;
   }
 
@@ -746,7 +747,7 @@ export class Node {
         node._body.angularVelocity.set(0, 0, 0);
       }
       node._spawnNotified = true;
-      try { node.onSpawn(); } catch (e) { Logger.error(`Error in onSpawn for node ${node.name}: ${e}`); }
+      try { node.onSpawn(); } catch (e) { logScriptError(`Error in onSpawn for node ${node.name}`, e, 'Runtime'); }
     }
 
     // onStart is once per node lifetime, so a node returning from despawn does not get it again.
@@ -756,7 +757,7 @@ export class Node {
         try {
           node._hasStarted = true;
           node.onStart();
-        } catch (e) { Logger.error(`Error in onStart function for node ${node.name}: ${e}`); }
+        } catch (e) { logScriptError(`Error in onStart function for node ${node.name}`, e, 'Runtime'); }
       }
     }
 
@@ -784,7 +785,7 @@ export class Node {
 
       // Before onDespawn: a pending this.after/this.every must not fire against a node that is going away.
       n._scene?.cancelTimers(n);
-      try { n.onDespawn(); } catch (e) { Logger.error(`Error in onDespawn function for node ${n.name}: ${e}`); }
+      try { n.onDespawn(); } catch (e) { logScriptError(`Error in onDespawn function for node ${n.name}`, e, 'Runtime'); }
 
       // PhysicsSystem walks scene.nodes, which no longer contains this node once the flag is cleared below,
       // so this is the last chance to take its body and trigger out of the world.
@@ -839,7 +840,7 @@ export class Node {
     this._forEachInSubtree(n => {
       if (n._hasConstructed) return;
       n._hasConstructed = true;
-      try { n.onConstruct(); } catch (e) { Logger.error(`Error in onConstruct for node ${n.name}: ${e}`); }
+      try { n.onConstruct(); } catch (e) { logScriptError(`Error in onConstruct for node ${n.name}`, e, 'Runtime'); }
     });
   }
 
@@ -848,7 +849,7 @@ export class Node {
     this._forEachInSubtree(n => {
       if (!n._spawned || n._spawnNotified) return;
       n._spawnNotified = true;
-      try { n.onSpawn(); } catch (e) { Logger.error(`Error in onSpawn for node ${n.name}: ${e}`); }
+      try { n.onSpawn(); } catch (e) { logScriptError(`Error in onSpawn for node ${n.name}`, e, 'Runtime'); }
     });
   }
 
@@ -897,7 +898,7 @@ export class Node {
       for (const child of this._children)
         child.start();
     } catch (error) {
-      Logger.error(`Error in onStart function for node ${this._name}: ${error}`);
+      logScriptError(`Error in onStart function for node ${this._name}`, error, 'Runtime');
     }
   }
 
@@ -913,7 +914,7 @@ export class Node {
         this.onUpdate(delta, time);
       }
     } catch (error) {
-      Logger.error(`Error in onUpdate function for node ${this._name}: ${error}`);
+      logScriptError(`Error in onUpdate function for node ${this._name}`, error, 'Runtime');
     }
   }
 
@@ -972,7 +973,7 @@ export class Node {
     try {
       attachScriptFactory(node, compileScript(script, { path }));
     } catch (error) {
-      Logger.error(`Error parsing script for node ${node.name}: ${error}`, 'Script');
+      logScriptError(`Error parsing script for node ${node.name}`, error, 'Script');
     }
   }
 
@@ -1082,7 +1083,7 @@ export class Node {
       const factory = resolveNodeScript(json.__sourceId ?? json.id);
       if (factory) {
         try { attachScriptFactory(node, factory); }
-        catch (e) { Logger.error(`Failed to attach script for node ${node.name}: ${e}`, 'Script'); }
+        catch (e) { logScriptError(`Failed to attach script for node ${node.name}`, e, 'Script'); }
       }
     }
 

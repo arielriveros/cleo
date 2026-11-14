@@ -1,6 +1,6 @@
 import { rects2DIntersect } from '../core/math';
 import { decayRequests } from '../core/control/intent';
-import { Logger } from '../core/logger';
+import { logScriptError } from '../core/scripting/scriptErrors';
 import { Node } from '../core/scene/nodes/node';
 import { SpriteNode } from '../core/scene/nodes/spriteNode';
 import { CharacterBody2DNode } from '../core/scene/nodes/characterBody2DNode';
@@ -212,7 +212,7 @@ export class World2D {
         const body = this._hookBody!, tuning = this._hookTuning!;
         let owned = false;
         try { owned = body.onMove2D(dt, substep) === true; }
-        catch (e) { Logger.error(`Error in onMove2D for node ${body.name}: ${e}`, 'Script'); }
+        catch (e) { logScriptError(`Error in onMove2D for node ${body.name}`, e, 'Script'); }
         tuning.maxFallSpeed = Math.max(0, Number.isFinite(body.maxFallSpeed) ? body.maxFallSpeed : tuning.maxFallSpeed);
         tuning.gravityScale = Math.max(0, Number.isFinite(body.gravityScale) ? body.gravityScale : tuning.gravityScale);
         tuning.movement = body.movement === 'fly' ? 'fly' : 'walk';

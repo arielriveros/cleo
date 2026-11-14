@@ -5,9 +5,38 @@ import { buildScriptGraphCtx, importSpecifierOf, scriptRoleLabel } from '../../.
 import { useScriptWorkspace } from '../../scriptWorkspace/ScriptWorkspaceContext'
 import { NOT_DESKTOP_REASON } from '../../scriptWorkspace/desktopScripts'
 import { Button } from '@cleo/app-kit/ui/Button'
+import { useBreakpoints } from '../../scriptDebugger/breakpoints'
+import { useScriptDebugger } from '../../scriptDebugger/debugSession'
+import { usePlayTarget, writePlayTarget } from '../../playWindow/playTarget'
 
 // Monaco (and monaco-editor itself) is heavy, so it downloads only when a Script tab is actually opened.
 const MonacoScriptEditor = React.lazy(() => import('./MonacoScriptEditor'))
+
+/**
+ * What the script debugger has to say about this script, in the tab's header: that its breakpoints will
+ * not stop a game playing in the editor (with the switch to Play in window), or that the game running now
+ * was built before this script's latest edits.
+ */
+function DebugHint({ moduleId }: { moduleId: string }) {
+  const breakpoints = useBreakpoints()
+  const target = usePlayTarget()
+  const debug = useScriptDebugger()
+  if (debug.phase !== 'off' && debug.staleModules.includes(moduleId)) {
+    return (
+      <span className='shrink-0 rounded px-1.5 text-ui-sm text-warning bg-warning/10'
+        title='The game running now was built from this script as it was before. Breakpoints you add or move here apply after you save and Restart.'>
+        Changed since the game started: save and Restart to debug it
+      </span>
+    )
+  }
+  if (target !== 'editor' || debug.phase !== 'off' || !breakpoints.some(b => b.moduleId === moduleId && b.enabled)) return null
+  return (
+    <span className='shrink-0 flex items-center gap-1 text-ui-sm text-dim'>
+      Breakpoints stop the game only when it plays in a window
+      <Button size='sm' variant='subtle' className='h-[18px] px-1.5' onClick={() => writePlayTarget('window')}>Play in window</Button>
+    </span>
+  )
+}
 
 // The dedicated Script editor tab body. Edits go to the tab's working buffer (setScriptTabSource marks it
 // dirty); the MenuBar's Save Script commits them to the asset. Rendered when editorMode === 'script'.
@@ -45,6 +74,7 @@ export default function ScriptTabView() {
             <span className='truncate'>import from '{importAs}'</span>
           </Button>
         )}
+        {moduleId && <DebugHint moduleId={moduleId} />}
         <span className='ml-auto text-ui-sm text-dim truncate'>
           {asset && scriptKindOfAsset(asset) === 'module'
             ? 'Save Script (top bar) applies changes to every script importing it'

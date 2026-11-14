@@ -127,6 +127,7 @@ returns you to whatever the scene tab was doing.
 | **F** | Frame the selected node in the view being edited |
 | **F1** | Open the docs for what the pointer is over (see [Documentation](#documentation)) |
 | **Shift + F1** | What's This?: click any part of the editor to open its docs |
+| **F8** / **F10** / **F11** / **Shift + F11** | Continue or pause, step over, step into, step out, while a game is being debugged (see [Debugging scripts](debugging.md)) |
 
 Save is captured before anything else sees it, so it works while you are typing in the code editor.
 Undo is *not*, so text fields and the code editor keep their own undo history — which is what you
@@ -159,7 +160,7 @@ disturb your layout.
 | Centre | **Viewport** (locked) |
 | Left rail (20%) | The *Scene Elements* or *UI Elements* palette (both in a template) above the *Scene* tree |
 | Right rail (25%) | *Properties*, *Scripts*, plus any mode-specific panels |
-| Bottom strip (30%) | *Logger*, *Assets*, the *Sequencer* (Sequencer mode), and in animation-field mode the *Blend Space* plot |
+| Bottom strip (30%) | *Logger*, *Assets*, the *Debugger*, the *Sequencer* (Sequencer mode), and in animation-field mode the *Blend Space* plot |
 
 ### Every panel
 
@@ -181,6 +182,7 @@ disturb your layout.
 | **Scripts** | Script slot and per-node script variables. |
 | **Logger** | The console. |
 | **Assets** | The asset explorer. |
+| **Debugger** | Stop, step and continue a game playing in a window; its call stack, variables and every breakpoint. Desktop app. See [Debugging scripts](debugging.md). |
 | **Sequencer** | The timeline of the sequence asset the tab edits: tracks, sections and keys, a scrubbable preview over the open scene. Sequencer mode only. See [Sequencer](sequencer.md). |
 | **Clips** | The animator's clips (animator mode). |
 | **Parameters** | The animator's parameters, events and action slots (animator mode). |
@@ -258,6 +260,8 @@ crash stays in that window, and the editor keeps working.
   before its sound can start.
 - The window has none of the editor's live panels: no scene tree or Inspector on the running game, and no
   Performance panel.
+- In the desktop app its scripts can be debugged from the editor: breakpoints, stepping and variables.
+  See [Debugging scripts](debugging.md).
 
 ## See also
 

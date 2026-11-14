@@ -1,7 +1,7 @@
 import { vec3 } from "gl-matrix";
 import { v4 as uuidv4 } from 'uuid';
 import { Node } from "./node";
-import { Logger } from "../../logger";
+import { logScriptError } from "../../scripting/scriptErrors";
 import { authoring } from "../../eventBus";
 import { unwrapScriptNode } from "./nodeScripting";
 import { parseSequence, emptySequence } from "../../../sequencer/parse";
@@ -274,7 +274,7 @@ export class SequenceNode extends Node {
         resolve?.(reason);
         for (const listener of Array.from(this._endListeners)) {
             try { listener(reason); }
-            catch (e) { Logger.error(`Sequence '${this.name}': a finished listener threw: ${e}`, 'Script'); }
+            catch (e) { logScriptError(`Sequence '${this.name}': a finished listener threw`, e, 'Script'); }
         }
     }
 

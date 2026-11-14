@@ -16,6 +16,23 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Debugging scripts.** A game playing in a window can be stopped at a line of a script and stepped through,
+  while the editor stays live. See *Debugging scripts* in the editor docs.
+  - *Breakpoints.* Click in the script editor's margin to set one. Right-click it for a conditional breakpoint
+    or a logpoint (`hit {other.name}`), which logs to the Console and never stops. Breakpoints follow their
+    line as you edit, and wait for a Restart in a script changed since the game started.
+  - *The Debugger panel.* Continue, Pause and stepping (F8, F10, F11, Shift+F11), the call stack with the
+    node each script runs on, the variables of each frame, an Evaluate box, and every breakpoint. Values
+    show when you hover a name in the stopped script.
+  - *Stop on exceptions* (on by default) stops where a script throws, with **Don't stop here again** for an
+    error that repeats every frame. Stepping and Pause skip engine code.
+  - Desktop app only: the editor drives the game window's debugger through the app. In a browser, press F12
+    in the game window instead; scripts are listed there by name.
+- **Script errors point at their line.** Scripts run under their own names (`cleo-script:///Player/Hero.ts`)
+  with the author's line numbers, so a stack, the browser's developer tools and the debugger all read
+  `Hero.ts:42`. A script error in the Console links to its line (in VS Code too, if you open scripts there),
+  and the script editor marks the lines that failed in the last run. The AI agent's log reader shows the
+  line as well.
 - **The agent link catches up with the editor, and tests what it builds** (cleo-mcp 0.6).
   - *All or nothing.* A `scene_edit` call whose op fails changes nothing, and every op's fields are checked
     before any runs: a retired or misspelt field (`body`, `postion`) is refused by name, with what replaced it.
@@ -97,6 +114,11 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
   - *Agent link.* The editor talks to the agent host only while the Claude panel is open, so the Agent
     chip no longer comes and goes before you open it.
   - *Gizmo axes.* World and local show as a globe and a box rather than W and L.
+  - *Desktop title bar.* In the desktop app on Windows and Linux the menu bar is the window's title bar, in
+    the editor and in Cleo Creator: the OS frame is gone, and **Minimize**, **Maximize** / **Restore** and
+    **Close** sit at the bar's right end. Dragging the bar anywhere but its buttons moves the window,
+    double-clicking it maximizes, and letting go at the top of the screen maximizes too. Close still asks
+    about unsaved work. macOS keeps its own frame.
 
 - **Split viewport.** The viewport divides into two side-by-side, two stacked or four panes, each looking
   through its own camera: the editor camera, a free perspective camera, or an orthographic Top, Bottom,

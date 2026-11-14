@@ -6,7 +6,7 @@
 // in the play-session store, but with the Logger on, its rows forwarded to the editor's Console, and the
 // scripts compiled from source. The editor drives it over the play channel (features/playWindow/protocol.ts).
 
-import { AudioManager, CleoEngine } from 'cleo';
+import { AudioManager, CleoEngine, Logger, scriptLocationOf } from 'cleo';
 import { readBackendPreference } from '@cleo/app-kit/renderer/backendPreference';
 import { bootPlayer, hideLoadingWhenSmooth, setLoadingText, showError, type PlayerHandle } from './boot';
 import { createPhysicsWorker } from '../workers/physicsWorkerHost';
@@ -56,11 +56,28 @@ CleoEngine.eventEmitter.on('LOG_CLEAR', () => queue({ op: 'clear' }));
 
 // Uncaught failures, as the editor's own console store takes them (they bypass the Logger).
 window.addEventListener('error', (e: ErrorEvent) => {
-  queue({ op: 'add', entry: encodeLogEntry({ id: `uncaught-${uncaught++}`, method: 'error', data: [e.error ?? e.message], scope: 'Uncaught', timestamp: Date.now() }) });
+  queue({ op: 'add', entry: encodeLogEntry({ id: `uncaught-${uncaught++}`, method: 'error', data: [e.error ?? e.message], scope: 'Uncaught', timestamp: Date.now(), source: scriptLocationOf(e.error) ?? undefined }) });
 });
 window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
-  queue({ op: 'add', entry: encodeLogEntry({ id: `uncaught-${uncaught++}`, method: 'error', data: ['Unhandled promise rejection:', e.reason], scope: 'Uncaught', timestamp: Date.now() }) });
+  queue({ op: 'add', entry: encodeLogEntry({ id: `uncaught-${uncaught++}`, method: 'error', data: ['Unhandled promise rejection:', e.reason], scope: 'Uncaught', timestamp: Date.now(), source: scriptLocationOf(e.reason) ?? undefined }) });
 });
+
+// ---- The script debugger's hooks -------------------------------------------------------------------
+//
+// Called from outside by the editor's debugger, over the DevTools protocol (scriptDebugger/
+// debugController.ts) — never over the channel, which a page stopped at a breakpoint does not hear.
+
+(globalThis as any).__cleoDebug = {
+  // Stopped at a breakpoint the frame is frozen, but the music would play on over it.
+  paused() { AudioManager.Instance.suspend(); },
+  resumed() { if (!handle?.engine.isPaused) AudioManager.Instance.resume(); },
+};
+
+// A logpoint (scriptDebugger/logpoints.ts): its line's own row, linked back to the line.
+(globalThis as any).__cleoLogpoint = (url: unknown, line: unknown, ...parts: unknown[]) => {
+  const source = typeof url === 'string' && Number.isFinite(line) ? { url, line: Number(line) } : undefined;
+  Logger.print('info', parts, 'Logpoint', source ? { source } : undefined);
+};
 
 // ---- Boot ------------------------------------------------------------------------------------------
 

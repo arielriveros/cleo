@@ -49,7 +49,8 @@ type ScriptWorkspaceValue = {
   /** Stop syncing and forget the folder (the files on disk are left alone). */
   disconnect: () => Promise<void>
   /** Open the workspace in the external editor, optionally selecting one script's file. True on success. */
-  openInEditor: (scriptId?: string) => Promise<boolean>
+  /** `line` (1-based) puts the cursor there. */
+  openInEditor: (scriptId?: string, line?: number) => Promise<boolean>
   /** Rewrite every file from the library, discarding whatever is on disk. Resolves a paused workspace. */
   resync: () => Promise<void>
   /** Apply the deletions a paused changeset was holding back. */
@@ -417,7 +418,7 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     })
   }, [adoptExternalScriptSource])
 
-  const openInEditor = useCallback(async (scriptId?: string): Promise<boolean> => {
+  const openInEditor = useCallback(async (scriptId?: string, line?: number): Promise<boolean> => {
     const bridge = getScriptsBridge()
     const root = rootRef.current
     if (!bridge || !root) return false
@@ -426,7 +427,7 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
     const rel = scriptId ? agreedRef.current.get(scriptId)?.rel : undefined
     // The command from Options ▸ Editor ▸ Scripts; a per-project override on the record still wins.
     const saved = await scriptWorkspaceOf(activeProjectId())
-    const res = await bridge.launch(root, rel, saved.command ?? getEditorPrefs().externalEditorCommand)
+    const res = await bridge.launch(root, rel, saved.command ?? getEditorPrefs().externalEditorCommand, rel ? line : undefined)
     if (!res.ok) Logger.error(`Could not open the script workspace: ${res.error}`, 'Editor')
     return !!res.ok
   }, [push])
@@ -436,9 +437,9 @@ export function ScriptWorkspaceProvider({ children }: { children: React.ReactNod
   // built-in editor.
   useEffect(() => {
     if (!available) { setExternalScriptOpener(null); return }
-    setExternalScriptOpener(async (scriptId) => {
+    setExternalScriptOpener(async (scriptId, line) => {
       if (!rootRef.current && !(await setup())) return false
-      return openInEditor(scriptId)
+      return openInEditor(scriptId, line)
     })
     return () => setExternalScriptOpener(null)
   }, [available, setup, openInEditor])

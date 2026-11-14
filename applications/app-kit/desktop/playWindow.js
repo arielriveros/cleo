@@ -10,10 +10,12 @@
 //     same-origin web APIs, so it needs nothing from the shell.
 //
 // The URL is built here from the session id, never taken from the renderer. The editor keeps the session's
-// lifecycle; this only creates, focuses and closes windows, and reports what happens to them.
+// lifecycle; this only creates, focuses and closes windows, and reports what happens to them -- and, when
+// the editor asks for it, holds the script debugger's protocol session on the window (playDebugger.js).
 
 const path = require('path');
 const fs = require('fs');
+const { attachDebugger } = require('./playDebugger');
 
 /** What the editor's newSessionId() makes (hex), with room to spare. Anything else is refused. */
 const SESSION_ID = /^[0-9a-f]{8,64}$/i;
@@ -47,7 +49,10 @@ function centredBounds(area, width, height) {
 }
 
 function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, icon }) {
-  /** sessionId -> { win, ownerId }: the play windows open now, and which editor window asked for each. */
+  /**
+   * sessionId -> { win, ownerId, debug, debugOptions }: the play windows open now, which editor window asked
+   * for each, and the script debugger's session on it (null until attached, or when not asked for).
+   */
   const windows = new Map();
 
   const boundsFile = () => path.join(app.getPath('userData'), 'play-window.json');
@@ -67,6 +72,8 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
   }
 
   function destroy(entry) {
+    // First: detaching resumes a page stopped at a breakpoint, which a window being torn down must not be.
+    if (entry.debug) { entry.debug.detach(); entry.debug = null; }
     remember(entry.win);
     if (!entry.win.isDestroyed()) entry.win.destroy();
   }
@@ -83,6 +90,9 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     const width = clampInt(options.width, MIN_WIDTH, 7680, 1280);
     const height = clampInt(options.height, MIN_HEIGHT, 4320, 720);
     const title = String(options.title || 'Cleo Game').slice(0, 120);
+    // The script debugger, when the editor has one to drive the game with.
+    const debugOptions = options.debug && typeof options.debug === 'object'
+      ? { pauseOnExceptions: !!options.debug.pauseOnExceptions } : null;
     const saved = fitSavedBounds(readSavedBounds(), screen.getAllDisplays().map(d => d.workArea));
     const ownerWindow = BrowserWindow.fromWebContents(owner);
     const area = (ownerWindow ? screen.getDisplayMatching(ownerWindow.getBounds()) : screen.getPrimaryDisplay()).workArea;
@@ -120,6 +130,15 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     });
     contents.on('will-navigate', (e, url) => { if (!url.startsWith(page)) e.preventDefault(); });
 
+    // On the first COMMITTED navigation, not before loadURL: a session attached earlier talks to the
+    // about:blank renderer the navigation throws away, and every command but Debugger.enable is lost. Scripts
+    // only run once the editor sends the game its data, well after this. A reload (Restart) keeps the session.
+    contents.once('did-navigate', () => {
+      const entry = windows.get(sessionId);
+      if (!debugOptions || !entry || entry.win !== win || contents.isDestroyed()) return;
+      entry.debug = attachDebugger(contents, payload => send(owner, { sessionId, ...payload }), debugOptions);
+    });
+
     contents.on('dom-ready', () => {
       if (contents.isDestroyed()) return;
       send(owner, { sessionId, type: 'process', pid: contents.getOSProcessId(), editorPid: owner.isDestroyed() ? 0 : owner.getOSProcessId() });
@@ -133,7 +152,7 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
       send(owner, { sessionId, type: 'closed' });
     });
 
-    windows.set(sessionId, { win, ownerId });
+    windows.set(sessionId, { win, ownerId, debug: null, debugOptions });
     win.loadURL(`${page}?session=${sessionId}`);
     return { ok: true };
   });
@@ -150,6 +169,41 @@ function registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, ic
     if (entry.win.isMinimized()) entry.win.restore();
     entry.win.show();
     entry.win.focus();
+    return { ok: true };
+  });
+
+  // The script debugger: one protocol command from the editor that opened the window, allowlisted in
+  // playDebugger.js. Answers { ok, result } or { ok: false, error } -- never a rejection across IPC.
+  ipcMain.handle('play:debug', async (event, sessionId, method, params) => {
+    const entry = windows.get(String(sessionId));
+    if (!entry || entry.ownerId !== event.sender.id) return { ok: false, error: 'No such game window' };
+    if (!entry.debug || !entry.debug.attached) return { ok: false, error: 'The debugger is not attached' };
+    try {
+      return { ok: true, result: await entry.debug.send(String(method), params && typeof params === 'object' ? params : {}) };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message ? e.message : e) };
+    }
+  });
+
+  // Attach again after the session was lost. Takes the editor's current exception toggle.
+  ipcMain.handle('play:debug-attach', (event, sessionId, options) => {
+    const entry = windows.get(String(sessionId));
+    if (!entry || entry.ownerId !== event.sender.id || entry.win.isDestroyed()) return { ok: false, error: 'No such game window' };
+    if (entry.debug && entry.debug.attached) return { ok: true };
+    const owner = event.sender;
+    entry.debugOptions = { pauseOnExceptions: !!(options && options.pauseOnExceptions) };
+    entry.debug = attachDebugger(entry.win.webContents, payload => send(owner, { sessionId: String(sessionId), ...payload }), entry.debugOptions);
+    return { ok: !!entry.debug };
+  });
+
+  // Bring the editor window that asks forward: the game stopped at a breakpoint while the player was in the
+  // game window, and the place it stopped is shown in the editor.
+  ipcMain.handle('play:raise-editor', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return { ok: false };
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
     return { ok: true };
   });
 

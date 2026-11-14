@@ -41,6 +41,26 @@ export interface WindowSize { width: number; height: number; title: string }
 /** Builds the game data (EngineContext.buildWindowPlayData). */
 export type BuildGame = () => Promise<any>;
 
+/**
+ * The script debugger's part in a session (scriptDebugger/debugSession.ts). It drives the game window over
+ * the DevTools protocol from outside, so it needs to know when a session starts, builds, boots and ends;
+ * and while it holds the game stopped at a breakpoint it must hold back the commands that would be lost
+ * (a page stopped in the debugger drops the channel's messages).
+ */
+export interface WindowPlayDebugHooks {
+  /** A session's window is opening. */
+  started(sessionId: string): void;
+  /** A build finished: what is about to be packed is the editor's state as of now. */
+  built(sessionId: string): void;
+  /** Resolves when the game may boot (the debugger is attached, its breakpoints are in); capped by the hook. */
+  ready(sessionId: string): Promise<void>;
+  /** A game page said hello: a first load, or the reload after Restart. */
+  hello(sessionId: string): void;
+  /** Run `send` once the game can hear it. `reloads`: the command reloads the page (Restart). */
+  whenRunning(send: () => void, reloads: boolean): void;
+  ended(sessionId: string): void;
+}
+
 export interface WindowPlayEnv {
   newSessionId(): string;
   /** Open the play channel; `onMessage` gets every message on it, ours or not. */
@@ -70,6 +90,8 @@ export interface WindowPlayEnv {
   now(): number;
   setTimeout(fn: () => void, ms: number): unknown;
   clearTimeout(handle: unknown): void;
+  /** The script debugger, where there is one (the desktop app). */
+  debug?: WindowPlayDebugHooks;
 }
 
 /**
@@ -159,6 +181,7 @@ export class WindowPlayController {
       this.fail('The game window could not be opened.');
       return;
     }
+    this.env.debug?.started(id);
     if (this.env.popupsCanBeBlocked) {
       session.helloTimer = this.env.setTimeout(() => {
         if (this.session === session && !session.heard)
@@ -179,8 +202,18 @@ export class WindowPlayController {
     void this.runBuild(session, true);
   }
 
-  pause(): void { this.send({ type: 'pause' }); }
-  resume(): void { this.send({ type: 'resume' }); }
+  pause(): void { this.command({ type: 'pause' }); }
+  resume(): void { this.command({ type: 'resume' }); }
+
+  /** Ask the game for its state again: after the debugger let it go, whatever it said meanwhile was lost. */
+  ping(): void { this.send({ type: 'ping' }); }
+
+  /** A command the game must hear: held while the debugger has it stopped (see WindowPlayDebugHooks). */
+  private command(command: EditorCommand, reloads = false): void {
+    const debug = this.env.debug;
+    if (debug) debug.whenRunning(() => this.send(command), reloads);
+    else this.send(command);
+  }
 
   /** End the session: the window closes and its bytes are dropped. */
   stop(): void {
@@ -213,16 +246,22 @@ export class WindowPlayController {
         const t0 = this.env.now();
         const data = await build();
         if (this.session !== session) return;
+        this.env.debug?.built(session.id);
         const t1 = this.env.now();
         const bytes = await this.env.pack(data, session.id);
         if (this.session !== session) return;
         // Where a slow start goes: the build (every scene, the textures they use) or the pack.
         this.env.log(`Built the game in ${Math.round(t1 - t0)} ms, packed ${(bytes / 1048576).toFixed(1)} MB in ${Math.round(this.env.now() - t1)} ms`);
       } while (session.rebuildAgain);
+      // A first boot waits for the debugger to be in, so a breakpoint in onStart is there when it runs.
+      if (!restart && this.env.debug) {
+        await this.env.debug.ready(session.id);
+        if (this.session !== session) return;
+      }
       session.packed = true;
       if (restart) {
         this.set({ rebuilding: false, status: 'starting' });
-        this.send({ type: 'restart' });
+        this.command({ type: 'restart' }, true);
       } else {
         if (this.snapshot.status === 'building') this.set({ status: 'starting' });
         this.send({ type: 'data-ready' });
@@ -248,6 +287,7 @@ export class WindowPlayController {
         if (session.helloTimer !== null) { this.env.clearTimeout(session.helloTimer); session.helloTimer = null; }
         if (session.goneTimer !== null) { this.env.clearTimeout(session.goneTimer); session.goneTimer = null; }
         this.watch(session);
+        this.env.debug?.hello(session.id);
         // A page that came up after `data-ready` went out (or a reload) still finds the bytes itself; this
         // is the belt to that brace.
         if (session.packed) this.send({ type: 'data-ready' });
@@ -313,6 +353,7 @@ export class WindowPlayController {
       scope: `Game/${entry.scope}`,
       timestamp: entry.timestamp,
       ...(entry.flushKey !== undefined ? { flushKey: `game:${sessionId}:${entry.flushKey}` } : {}),
+      ...(entry.source ? { source: entry.source } : {}),
     };
   }
 
@@ -338,6 +379,7 @@ export class WindowPlayController {
   }
 
   private teardown(session: Session): void {
+    this.env.debug?.ended(session.id);
     if (session.helloTimer !== null) this.env.clearTimeout(session.helloTimer);
     if (session.goneTimer !== null) this.env.clearTimeout(session.goneTimer);
     session.releaseOwner?.();

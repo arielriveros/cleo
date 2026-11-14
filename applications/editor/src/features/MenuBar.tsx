@@ -33,6 +33,8 @@ import { iconFor } from "./assets/assetKinds";
 import { useFrameSelected } from "./viewport/useFrameSelected";
 import { VERSION_LABEL } from "../version";
 import { useWindowPlay, windowPlay } from "./playWindow/windowPlay";
+import { scriptDebugger, useScriptDebugger } from "./scriptDebugger/debugSession";
+import { scriptLocationLabel, scriptSourceUrl } from "cleo";
 import { usePlayTarget, writePlayTarget } from "./playWindow/playTarget";
 import ProjectsModal from "./projects/ProjectsModal";
 import { useProjectName } from "./projects/useProjectName";
@@ -113,6 +115,7 @@ export default function MenuBar() {
   // Play in window: where Play runs (per machine), and the window session when there is one.
   const playTarget = usePlayTarget();
   const windowSession = useWindowPlay();
+  const debugSession = useScriptDebugger();
   const [showTargets, setShowTargets] = useState(false);
   const targetsRef = useRef<HTMLDivElement>(null);
 
@@ -283,7 +286,11 @@ export default function MenuBar() {
     width: projectSettings.publish.width, height: projectSettings.publish.height,
     title: projectSettings.publish.title.trim() || projectName.trim() || 'Cleo Game',
   });
+  // Stopped in the script debugger (a breakpoint, an exception): Play continues it.
+  const debugStopped = windowActive && debugSession.phase === 'paused';
+  const debugFrame = debugSession.paused?.frames[debugSession.selectedFrame];
   const onPlay = () => {
+    if (debugStopped) { scriptDebugger().resume(); return; }
     if (windowActive) {
       if (windowSession.status === 'paused') windowPlay().resume();
       else windowPlay().start(buildWindowPlayData, windowSize());
@@ -309,7 +316,8 @@ export default function MenuBar() {
   const targetDisabled = windowActive || inEditorSession;
   const windowBusy = windowSession.status === 'building' || windowSession.status === 'starting' || windowSession.rebuilding;
   const windowLabel =
-    windowSession.rebuilding ? 'Rebuilding…'
+    debugStopped ? `Stopped · ${debugFrame?.moduleId ? scriptLocationLabel({ url: scriptSourceUrl(debugFrame.moduleId), line: debugFrame.line }) : 'engine code'}`
+    : windowSession.rebuilding ? 'Rebuilding…'
     : windowSession.status === 'building' ? 'Building…'
     : windowSession.status === 'starting' ? 'Starting…'
     : windowSession.status === 'paused' ? `Paused${windowSession.scene ? ` · ${windowSession.scene}` : ''}`
@@ -450,7 +458,8 @@ export default function MenuBar() {
           <div className={cn('flex border-r border-control-hover', playLit ? 'bg-success' : 'bg-control', playDisabled && 'opacity-40')}>
             <Transport
               paired className='w-[22px] justify-end'
-              title={windowActive
+              title={debugStopped ? 'Continue — the game is stopped in the script debugger (F8)'
+                : windowActive
                 ? (windowSession.status === 'paused' ? 'Resume the game in its window' : 'Bring the game window forward')
                 : playTarget === 'window' && playState === 'stopped' ? 'Play in window — the game runs in a window and a process of its own' : 'Play'}
               disabled={playDisabled}
@@ -483,7 +492,7 @@ export default function MenuBar() {
           </Transport>
           <Transport
             title='Pause'
-            disabled={windowActive ? windowSession.status !== 'running' : (playState === 'paused' || playState === 'stopped')}
+            disabled={windowActive ? (windowSession.status !== 'running' || debugStopped) : (playState === 'paused' || playState === 'stopped')}
             active={windowActive ? windowSession.status === 'paused' : playState === 'paused'}
             activeClass='bg-selected hover:bg-selected text-fg'
             accent='hover:text-fg' onClick={() => onPause()}
@@ -515,11 +524,18 @@ export default function MenuBar() {
           <button
             type='button'
             className={cn('h-[25px] max-w-[220px] truncate rounded px-1.5 text-ui-xs flex items-center gap-1',
-              windowSession.status === 'failed' ? 'text-danger-fg hover:bg-control' : 'text-muted hover:text-fg hover:bg-control')}
+              windowSession.status === 'failed' ? 'text-danger-fg hover:bg-control'
+                : debugStopped ? 'text-warning hover:bg-control'
+                : 'text-muted hover:text-fg hover:bg-control')}
             title={windowSession.status === 'failed'
               ? `${windowSession.error ?? 'The game window failed.'} Click to dismiss.`
+              : debugStopped ? 'The game is stopped in the script debugger. Click to show the line.'
               : 'The game is running in its own window. Click to bring it forward.'}
-            onClick={() => windowSession.status === 'failed' ? windowPlay().stop() : windowPlay().start(buildWindowPlayData, windowSize())}
+            onClick={() => {
+              if (windowSession.status === 'failed') windowPlay().stop();
+              else if (debugStopped) scriptDebugger().selectFrame(debugSession.selectedFrame);
+              else windowPlay().start(buildWindowPlayData, windowSize());
+            }}
           >
             {windowBusy && <SpinnerIcon />}
             <span className='truncate'>{windowLabel}</span>

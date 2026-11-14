@@ -1,5 +1,6 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { Logger } from '../core/logger';
+import { logScriptError } from '../core/scripting/scriptErrors';
 import {
     aimFromDirection, clamp01, evaluateKeyedNumber, evaluateKeyedStep, evaluateKeyedVector, rampWeight, smoothstep,
     Spline3, type Vec3Tuple,
@@ -150,7 +151,7 @@ export class SequencePlayer {
                     case 'possess': this._evalPossess(track, time, fireFrom); break;
                 }
             } catch (e) {
-                Logger.error(`Sequence '${this._seq.name}': track ${track.name ?? track.id} failed: ${e}`, 'Script');
+                logScriptError(`Sequence '${this._seq.name}': track ${track.name ?? track.id} failed`, e, 'Script');
             }
         }
         return this._touched;
@@ -166,7 +167,7 @@ export class SequencePlayer {
         this._restores.clear();
         this._originals.clear();
         for (const restore of restores) {
-            try { restore(); } catch (e) { Logger.error(`Sequence '${this._seq.name}': restore failed: ${e}`, 'Script'); }
+            try { restore(); } catch (e) { logScriptError(`Sequence '${this._seq.name}': restore failed`, e, 'Script'); }
         }
         for (const s of this._states.values()) { s.influencing = false; s.cutCamera = null; s.cutTouched = undefined; }
         this._shotCamera = null;
@@ -640,7 +641,7 @@ export class SequencePlayer {
             resume: () => this._host.releaseHold?.(s.id),
         };
         try { fn.call(target, ctx); }
-        catch (e) { Logger.error(`Sequence '${this._seq.name}': ${s.method}() (${phase}) threw: ${e}`, 'Script'); }
+        catch (e) { logScriptError(`Sequence '${this._seq.name}': ${s.method}() (${phase}) threw`, e, 'Script'); }
     }
 
     // ---- animation -----------------------------------------------------------------------------------
@@ -817,13 +818,13 @@ export class SequencePlayer {
             const fn = target?.[key.method];
             if (typeof fn === 'function') {
                 try { fn.apply(target, key.args ?? []); }
-                catch (e) { Logger.error(`Sequence '${this._seq.name}': ${key.method}() at ${key.t}s threw: ${e}`, 'Script'); }
+                catch (e) { logScriptError(`Sequence '${this._seq.name}': ${key.method}() at ${key.t}s threw`, e, 'Script'); }
             } else {
                 Logger.warn(`Sequence '${this._seq.name}': no method '${key.method}' on ${key.slot ?? 'the director'} (event at ${key.t}s).`, 'Script');
             }
         }
         for (const listener of this._listeners) {
-            try { listener(name, key); } catch (e) { Logger.error(`Sequence '${this._seq.name}': an event listener threw: ${e}`, 'Script'); }
+            try { listener(name, key); } catch (e) { logScriptError(`Sequence '${this._seq.name}': an event listener threw`, e, 'Script'); }
         }
     }
 }

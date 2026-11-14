@@ -45,6 +45,8 @@ import TemplateInstanceNotice from '../nodeInspector/TemplateInstanceNotice';
 import TemplateVariantNotice from '../nodeInspector/TemplateVariantNotice';
 import { useSelectedNode } from '../nodeInspector/useSelectedNode';
 import ConsolePanel from '@cleo/app-kit/feedback/ConsolePanel';
+import { ScriptSourceLinksProvider } from '../logger/ScriptSourceLinks';
+import DebuggerPanel from '../scriptDebugger/DebuggerPanel';
 import EngineOptionsPanel from '../options/EngineOptionsPanel';
 import EditorOptionsPanel from '../options/EditorOptionsPanel';
 import ProjectOptionsPanel, { INPUT_PAGE_ID } from '../options/ProjectOptionsPanel';
@@ -199,11 +201,23 @@ function SimulationNotice() {
   );
 }
 
-// The console owns its own scrolling (stick-to-bottom), so the wrapper must not add a second one.
+// The console owns its own scrolling (stick-to-bottom), so the wrapper must not add a second one. Rows
+// with a script location link to it (a script error opens the script at its line).
 function LoggerPanel(_: IDockviewPanelProps) {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden">
-      <ConsolePanel />
+      <ScriptSourceLinksProvider>
+        <ConsolePanel />
+      </ScriptSourceLinksProvider>
+    </div>
+  );
+}
+
+// The script debugger (scriptDebugger/): a game playing in a window, stopped at a breakpoint.
+function DebuggerDockPanel(_: IDockviewPanelProps) {
+  return (
+    <div className="flex flex-col h-full w-full overflow-hidden">
+      <DebuggerPanel />
     </div>
   );
 }
@@ -345,6 +359,7 @@ const panelComponents = {
   scripts: ScriptsPanel,
   logger: LoggerPanel,
   assets: AssetsPanel,
+  debugger: DebuggerDockPanel,
   animClips: AnimClipsPanel,
   animVariables: AnimVariablesPanel,
   animStateMachine: AnimStateMachinePanel,

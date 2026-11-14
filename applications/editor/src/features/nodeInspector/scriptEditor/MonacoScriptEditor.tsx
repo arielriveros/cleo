@@ -1,10 +1,16 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type * as Monaco from 'monaco-editor/esm/vs/editor/editor.api'
 import { ensureMonaco } from '@cleo/app-kit/code/monacoSetup'
 import { useCodeTheme } from '@cleo/app-kit/code/codeThemeStore'
 import CodeEditorHeader from './CodeEditorHeader'
 import { subscribe, getRevision, externalSourceOf } from '../../scriptWorkspace/externalSourceStore'
 import { syncScriptModels, scriptModelFor } from './scriptModels'
+import { subscribeScriptReveal, getScriptRevealSeq, takeScriptReveal } from './scriptReveal'
+import { subscribeRuntimeErrors, getRuntimeErrorsRevision, runtimeErrorsFor } from './runtimeErrors'
+import { attachScriptDebugging } from '../../scriptDebugger/monacoDebug'
+import { BreakpointMenu, type BreakpointMenuTarget } from '../../scriptDebugger/BreakpointMenu'
+import { scriptDebugger } from '../../scriptDebugger/debugSession'
+import '../../scriptDebugger/scriptDebugger.css'
 import type { ScriptAsset } from '../../../utils/scripts'
 
 // The Monaco code editor for a Script asset (the dedicated Script tab). A class-based script is a normal TS
@@ -36,6 +42,11 @@ export default function MonacoScriptEditor(props: {
   // While an external edit is being written into the model the content listener must not report it back
   // out as a user edit, which would re-dirty the tab being reconciled.
   const applyingExternalRef = useRef(false)
+  // The script's module id (its path), read by the debugger's margin when it needs it: a rename in the
+  // explorer changes it while the tab stays open.
+  const moduleIdRef = useRef<string | undefined>(undefined)
+  moduleIdRef.current = props.pathOf?.(props.scriptId)
+  const [breakpointMenu, setBreakpointMenu] = useState<BreakpointMenuTarget | null>(null)
 
   // Created once: ScriptTabView re-keys this component per script, so there is one editor+model per script.
   useEffect(() => {
@@ -69,7 +80,15 @@ export default function MonacoScriptEditor(props: {
       if (!readOnlyRef.current && !applyingExternalRef.current) onChangeRef.current(model.getValue())
     })
 
+    // Breakpoints in the margin, the line a stopped game is on, values under the mouse (scriptDebugger/).
+    const debugging = attachScriptDebugging(editor, monaco, {
+      moduleId: () => moduleIdRef.current,
+      onGutterMenu: (line, at) => { const id = moduleIdRef.current; if (id) setBreakpointMenu({ moduleId: id, line, at }) },
+      onTextChanged: () => scriptDebugger().sourcesChanged(),
+    })
+
     return () => {
+      debugging.dispose()
       sub.dispose()
       editor.dispose()
       editorRef.current = null
@@ -105,6 +124,52 @@ export default function MonacoScriptEditor(props: {
     }
   }, [externalRevision, props.scriptId])
 
+  // "Show line N" — a Console link to a script error, the debugger stopping here. Applied on mount (the tab
+  // was opened for it) and whenever another request for this script arrives while it is open.
+  const revealSeq = useSyncExternalStore(subscribeScriptReveal, getScriptRevealSeq, getScriptRevealSeq)
+  useEffect(() => {
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+    const model = editor?.getModel()
+    if (!editor || !monaco || !model) return
+    const reveal = takeScriptReveal(props.scriptId)
+    if (!reveal) return
+    const line = Math.min(reveal.line, model.getLineCount())
+    editor.revealLineInCenter(line)
+    editor.setPosition({ lineNumber: line, column: model.getLineFirstNonWhitespaceColumn(line) || 1 })
+    editor.focus()
+    // A brief highlight, so the eye finds the line the view jumped to.
+    const flash = editor.createDecorationsCollection([{
+      range: new monaco.Range(line, 1, line, 1),
+      options: { isWholeLine: true, className: 'cleo-line-flash' },
+    }])
+    const timer = setTimeout(() => flash.clear(), 1500)
+    return () => { clearTimeout(timer); flash.clear() }
+  }, [revealSeq, props.scriptId])
+
+  // The lines where this script failed in the last run (runtimeErrors.ts), as error markers across the
+  // whole line: a script error's column is approximate (types are stripped without padding).
+  const errorsRevision = useSyncExternalStore(subscribeRuntimeErrors, getRuntimeErrorsRevision, getRuntimeErrorsRevision)
+  const moduleId = props.pathOf?.(props.scriptId)
+  useEffect(() => {
+    const monaco = monacoRef.current
+    const model = editorRef.current?.getModel()
+    if (!monaco || !model) return
+    const lines = model.getLineCount()
+    const markers = runtimeErrorsFor(moduleId).filter(e => e.line <= lines).map(e => ({
+      severity: monaco.MarkerSeverity.Error,
+      message: e.count > 1 ? `${e.message} (${e.count} times in the last run)` : e.message,
+      source: 'Last run',
+      startLineNumber: e.line,
+      startColumn: model.getLineFirstNonWhitespaceColumn(e.line) || 1,
+      endLineNumber: e.line,
+      endColumn: model.getLineMaxColumn(e.line),
+    }))
+    monaco.editor.setModelMarkers(model, 'cleo-runtime', markers)
+    // The marks belong to this tab; a shared model outlives it.
+    return () => { if (!model.isDisposed()) monaco.editor.setModelMarkers(model, 'cleo-runtime', []) }
+  }, [errorsRevision, moduleId])
+
   useEffect(() => { editorRef.current?.updateOptions({ readOnly: !!props.readOnly }) }, [props.readOnly])
   useEffect(() => { monacoRef.current?.editor.setTheme(theme === 'light' ? 'cleo-light' : 'cleo-dark') }, [theme])
 
@@ -112,6 +177,7 @@ export default function MonacoScriptEditor(props: {
     <div className='flex flex-col h-full'>
       <CodeEditorHeader />
       <div ref={containerRef} className='flex-1 min-h-0 w-full' aria-label='Script editor' />
+      <BreakpointMenu target={breakpointMenu} onClose={() => setBreakpointMenu(null)} />
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { Logger } from "../core/logger";
+import { logScriptError } from "../core/scripting/scriptErrors";
 import { Scene } from "../core/scene/scene";
 import { Node } from "../core/scene/nodes/node";
 import { ModelNode } from "../core/scene/nodes/modelNode";
@@ -694,7 +695,7 @@ export class PhysicsSystem {
         const self = this._bodyOf(a), other = this._bodyOf(b);
         if (!self || !other) return;
         try { self._emitCollide(other); }
-        catch (e) { Logger.error(`Error in a collision listener on ${self.name}: ${e}`, 'Script'); }
+        catch (e) { logScriptError(`Error in a collision listener on ${self.name}`, e, 'Script'); }
       } else {
         this._onContact(this._bodyOf(a) ?? null, this._bodyOf(b) ?? null, kind === PhysicsEventKind.SensorBegin);
       }
@@ -767,7 +768,7 @@ export class PhysicsSystem {
     if (na instanceof Node && nb instanceof Node && na !== nb) {
       for (const [self, other] of [[na, nb], [nb, na]] as [Node, Node][]) {
         try { self[hook](other); }
-        catch (e) { Logger.error(`Error in ${hook} for node ${self.name}: ${e}`, 'Script'); }
+        catch (e) { logScriptError(`Error in ${hook} for node ${self.name}`, e, 'Script'); }
       }
     }
     // Each Trigger side: its overlap count (the overlay's highlight) and its own listeners, which also hear
@@ -784,7 +785,7 @@ export class PhysicsSystem {
         point: point ? [point[0], point[1], point[2]] : null, fraction,
       };
       try { self._emitContact(contact); }
-      catch (e) { Logger.error(`Error in a trigger contact listener on ${self.name}: ${e}`, 'Script'); }
+      catch (e) { logScriptError(`Error in a trigger contact listener on ${self.name}`, e, 'Script'); }
     }
   }
 
@@ -1342,7 +1343,7 @@ export class PhysicsSystem {
       this._activatedThisFrame = false;
       this._executor.endFrame(deltaTime, nextTimeScale);
     } catch (e) {
-      Logger.error(`Physics: ${e}`);
+      logScriptError(`Physics`, e, 'Runtime');
     }
   }
 

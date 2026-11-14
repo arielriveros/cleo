@@ -73,6 +73,7 @@ After that the two halves are independent, and you can read either first:
 | [Audio](editor/audio.md) | Sound samples, emitters, buses, effects |
 | [Rendering](editor/rendering.md) | Every render setting, debug channels, the performance HUD |
 | [Scripting workflow](editor/scripting-workflow.md) | Script assets, the code editor, editing in VS Code |
+| [Debugging scripts](editor/debugging.md) | Script errors that link to their line; breakpoints, stepping and variables for a game playing in a window |
 | [Publishing](editor/publishing.md) | Exporting a playable game |
 
 ## The scripting guide

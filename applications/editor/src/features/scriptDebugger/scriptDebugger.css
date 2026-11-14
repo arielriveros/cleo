@@ -1,0 +1,82 @@
+/* The script debugger in Monaco's glyph margin and text (monacoDebug.ts). Shapes, not glyph characters:
+   the editor draws no emoji or icon fonts. Colours from the editor's tokens (app-kit/src/styles/theme.css). */
+
+.monaco-editor .cleo-bp {
+  cursor: pointer;
+}
+.monaco-editor .cleo-bp::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: rgb(var(--danger));
+  box-sizing: border-box;
+}
+/* Disabled, off, or waiting for a Restart: hollow. */
+.monaco-editor .cleo-bp.cleo-bp-off::before {
+  background: transparent;
+  border: 2px solid rgb(var(--danger) / 0.8);
+}
+/* A logpoint logs and never stops: a diamond. */
+.monaco-editor .cleo-bp.cleo-bp-log::before {
+  border-radius: 1px;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  transform: rotate(45deg);
+  background: rgb(var(--warning));
+}
+.monaco-editor .cleo-bp.cleo-bp-log.cleo-bp-off::before {
+  background: transparent;
+  border: 2px solid rgb(var(--warning) / 0.8);
+}
+/* A condition: a bar across the dot. */
+.monaco-editor .cleo-bp.cleo-bp-cond::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 2px;
+  margin: -1px 0 0 -3px;
+  background: rgb(var(--surface-raised));
+}
+/* Where a click would put one. */
+.monaco-editor .cleo-bp.cleo-bp-hint::before {
+  background: rgb(var(--danger) / 0.35);
+}
+
+/* The line the game is stopped on, and the lines further up its call stack in this script. */
+.monaco-editor .cleo-debug-line {
+  background: rgb(var(--warning) / 0.22);
+}
+.monaco-editor .cleo-debug-line-outer {
+  background: rgb(var(--warning) / 0.08);
+}
+.monaco-editor .cleo-debug-arrow::before,
+.monaco-editor .cleo-debug-arrow-outer::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: -6px 0 0 -4px;
+  border-style: solid;
+  border-width: 6px 0 6px 9px;
+  border-color: transparent transparent transparent rgb(var(--warning));
+}
+.monaco-editor .cleo-debug-arrow-outer::before {
+  border-left-color: rgb(var(--warning) / 0.45);
+}
+
+/* A line the view jumped to (a Console link, a stop): a highlight that fades. */
+.monaco-editor .cleo-line-flash {
+  animation: cleo-line-flash 1.5s ease-out forwards;
+}
+@keyframes cleo-line-flash {
+  from { background: rgb(var(--highlight) / 0.35); }
+  to { background: transparent; }
+}

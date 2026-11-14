@@ -23,7 +23,8 @@ export type ScriptsBridge = {
   close(root: string): Promise<{ ok: boolean }>
   apply(root: string, batch: ScriptBatch): Promise<{ ok: boolean; error?: string }>
   writeScaffold(root: string, files: { rel: string; content: string }[]): Promise<{ ok: boolean; error?: string }>
-  launch(root: string, rel?: string, command?: string): Promise<{ ok: boolean; via?: string; error?: string }>
+  /** `line` (1-based) puts the cursor there (`code -g file:line`). */
+  launch(root: string, rel?: string, command?: string, line?: number): Promise<{ ok: boolean; via?: string; error?: string }>
   exists(root: string): Promise<{ ok: boolean; exists?: boolean }>
   onChange(cb: (payload: { root: string; change: ExternalChange }) => void): () => void
 }

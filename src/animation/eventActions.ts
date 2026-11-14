@@ -1,6 +1,7 @@
 import { mat4, quat, vec3 } from 'gl-matrix';
 import { eulerFromQuatDeg, finiteOr } from '../core/math';
 import { Logger } from '../core/logger';
+import { logScriptError } from '../core/scripting/scriptErrors';
 import type { Node } from '../core/scene/nodes/node';
 import type { Scene } from '../core/scene/scene';
 
@@ -303,7 +304,7 @@ export function runEventActions(owner: Node, actions: readonly EventAction[]): v
                 flasher.flash(target, action.intensity, action.seconds, action.falloff ?? 2);
             }
         } catch (e) {
-            Logger.error(`Event action "${action.kind}" on ${owner.name}: ${e}`, 'Animation');
+            logScriptError(`Event action "${action.kind}" on ${owner.name}`, e, 'Animation');
         }
     }
 }

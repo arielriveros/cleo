@@ -229,10 +229,11 @@ describe('node scripts', () => {
         ].join('\n');
         const body = buildFactoryBody(src);
         const lines = body.split('\n');
-        // Source line N is body line N (index N): the header, every export getter included, takes the
-        // place of the `"use strict"` line the body always started with.
-        expect(lines[6]).toContain(`throw new Error('line6')`);
-        expect(buildFactoryBody(src, { mode: 'module' }).split('\n')[6]).toContain(`throw new Error('line6')`);
+        // Source line N is body line N (index N-1): the header, every export getter included, is prepended
+        // to the author's first line instead of taking a line of its own.
+        expect(lines[5]).toContain(`throw new Error('line6')`);
+        expect(lines[0]).toMatch(/^"use strict";.*__cleoMod/);
+        expect(buildFactoryBody(src, { mode: 'module' }).split('\n')[5]).toContain(`throw new Error('line6')`);
     });
 
     it('gives a shared module a cleo whose getData sees public variables only', () => {
@@ -260,6 +261,10 @@ describe('published builds', () => {
     });
 
     it('compiles a module standalone with a devtools source name', () => {
-        expect(compileScriptModule('export const x = 1', '/Shared/My Math').toString()).toContain('cleo-script:///Shared/My%20Math.ts');
+        // The name is the script's `//# sourceURL`, outside the function itself: read it off a stack.
+        const factory = compileScriptModule(`export const x = 1\nthrow new Error('named')`, '/Shared/My Math');
+        let stack = '';
+        try { factory.call(undefined, (() => ({})) as any, {}); } catch (e: any) { stack = String(e.stack); }
+        expect(stack).toContain('cleo-script:///Shared/My%20Math.ts:2');
     });
 });

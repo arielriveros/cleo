@@ -1,6 +1,6 @@
 // In-memory console store, outside React: producers append to a buffer and at most one snapshot is
 // published per animation frame. Nothing is persisted; the buffer dies with the tab.
-import { CleoEngine, Logger } from 'cleo';
+import { CleoEngine, Logger, scriptLocationOf } from 'cleo';
 import type { LogEntry, LogMethod } from 'cleo';
 
 export const MAX_LOGS = 500;
@@ -82,6 +82,12 @@ function searchText(data: any[]): string {
   return data.map(preview).join(' ').slice(0, 300).toLowerCase();
 }
 
+/** An uncaught error thrown in a user script points at its line, as a Logger script error does. */
+function sourceOf(error: unknown): Pick<LogEntry, 'source'> {
+  const source = scriptLocationOf(error);
+  return source ? { source } : {};
+}
+
 let attached = false;
 
 /** Idempotent — StrictMode and HMR can import this module more than once. */
@@ -108,6 +114,7 @@ export function attachLogStore() {
       data: [e.error ?? e.message],
       scope: 'Uncaught',
       timestamp: Date.now(),
+      ...sourceOf(e.error),
     });
   });
   window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
@@ -117,6 +124,7 @@ export function attachLogStore() {
       data: ['Unhandled promise rejection:', e.reason],
       scope: 'Uncaught',
       timestamp: Date.now(),
+      ...sourceOf(e.reason),
     });
   });
 

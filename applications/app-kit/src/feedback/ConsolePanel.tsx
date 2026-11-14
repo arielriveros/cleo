@@ -1,9 +1,9 @@
 // DevTools-style console panel. console-feed renders the message content; the row chrome, filtering and
 // scrolling are ours.
-import React, { useDeferredValue, useMemo, useRef, useState, useCallback, useLayoutEffect, useSyncExternalStore } from 'react';
+import React, { createContext, useContext, useDeferredValue, useMemo, useRef, useState, useCallback, useLayoutEffect, useSyncExternalStore } from 'react';
 import { Console } from 'console-feed';
 import type { ComponentOverrides } from 'console-feed';
-import type { LogMethod } from 'cleo';
+import type { LogMethod, ScriptSourceLocation } from 'cleo';
 import { Button, Toggle, Popover, TextInput, cn } from '../ui';
 import { logStore, MAX_LOGS, ConsoleEntry } from './logStore';
 import { getConsoleStyles } from './consoleTheme';
@@ -40,12 +40,28 @@ function scopeHue(scope: string) {
   return hash;
 }
 
+/**
+ * How a row with a script location (a script error, a logpoint) links to it. The app that hosts the panel
+ * provides it — the editor opens the script at the line; without a provider rows show no link.
+ */
+export interface ConsoleSourceLinks {
+  /** What the link says (`Hero.ts:42`), or null when the location is not one this app can open. */
+  label(source: ScriptSourceLocation): string | null;
+  open(source: ScriptSourceLocation): void;
+}
+
+/** A context, not a prop: the row component must keep one identity (see COMPONENTS). */
+export const ConsoleSourceContext = createContext<ConsoleSourceLinks | null>(null);
+
 // Replaces console-feed's <Message> wrapper: the parsed content (`node`) is rendered inside our own row
 // so the timestamp and scope chip get a gutter and colours come from the editor's tokens.
 // `content-visibility` lets the browser skip offscreen rows entirely.
 const Row: NonNullable<ComponentOverrides['Message']> = ({ log, node, children: _content, ...rest }) => {
   const entry = log as unknown as ConsoleEntry; // console-feed's Message type doesn't know about scope/search
   const hue = scopeHue(entry.scope);
+  const links = useContext(ConsoleSourceContext);
+  const source = entry.source;
+  const label = source && links ? links.label(source) : null;
   return (
     <div
       {...rest} // console-feed passes data-method
@@ -66,6 +82,16 @@ const Row: NonNullable<ComponentOverrides['Message']> = ({ log, node, children: 
         {entry.scope}
       </span>
       <div className='flex-1 min-w-0'>{node}</div>
+      {label && source && links && (
+        <button
+          type='button'
+          className='shrink-0 text-dim hover:text-fg hover:underline underline-offset-2 cursor-pointer'
+          title={`Open ${label}`}
+          onClick={() => links.open(source)}
+        >
+          {label}
+        </button>
+      )}
     </div>
   );
 };

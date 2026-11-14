@@ -104,8 +104,100 @@ describe('the desktop play window', () => {
   });
 
   it('parses — none of the desktop files is loadable outside Electron, so nothing else would catch a typo', () => {
-    for (const file of ['main.js', 'preload.js', 'playWindow.js']) {
+    for (const file of ['main.js', 'preload.js', 'playWindow.js', 'playDebugger.js']) {
       expect(() => execFileSync(process.execPath, ['--check', join(DESKTOP, file)])).not.toThrow();
     }
+  });
+});
+
+/**
+ * The script debugger's relay (playDebugger.js): the editor drives the game window over the DevTools
+ * protocol through the main process, which only it can do. The same three-file agreement as above, plus
+ * what the relay lets through in each direction.
+ */
+describe('the script debugger relay', () => {
+  const DEBUGGER = read(DESKTOP, 'playDebugger.js');
+  const dbg = createRequire(import.meta.url)(join(DESKTOP, 'playDebugger.js'));
+  const DEBUG_INVOKED = ['play:debug', 'play:debug-attach', 'play:raise-editor'];
+
+  it('handles in main exactly what the preload invokes, and the editor reads it', () => {
+    for (const channel of DEBUG_INVOKED) {
+      expect(PRELOAD, `preload.js never invokes ${channel}`).toContain(`ipcRenderer.invoke('${channel}'`);
+      expect(PLAY, `playWindow.js never handles ${channel}`).toContain(`ipcMain.handle('${channel}'`);
+    }
+    for (const method of ['debug', 'debugAttach', 'raiseEditor']) {
+      expect(PRELOAD).toMatch(new RegExp(`\\b${method}\\s*:`));
+      expect(BRIDGE, `desktopPlay.ts does not require ${method}`).toContain(`play.${method}`);
+    }
+    // Every event type the relay pushes is one the editor routes (and none of them reads as a crash).
+    for (const type of ['debug', 'debug-attached', 'debug-detached']) {
+      expect(DEBUGGER).toContain(`type: '${type}'`);
+      expect(WEB).toContain(`case '${type}'`);
+    }
+    expect(PKG.build.files).toContain('playDebugger.js');
+  });
+
+  it('attaches on the first committed navigation, and detaches before a window is destroyed', () => {
+    expect(PLAY).toMatch(/contents\.once\('did-navigate'[\s\S]*?attachDebugger\(/);
+    const destroy = PLAY.slice(PLAY.indexOf('function destroy('), PLAY.indexOf("ipcMain.handle('play:open'"));
+    expect(destroy.indexOf('debug.detach()')).toBeGreaterThan(-1);
+    expect(destroy.indexOf('debug.detach()')).toBeLessThan(destroy.indexOf('.destroy()'));
+  });
+
+  it('lets through only the commands the debugger uses', () => {
+    for (const method of ['Debugger.setBreakpointByUrl', 'Debugger.resume', 'Debugger.stepOver', 'Debugger.evaluateOnCallFrame', 'Runtime.getProperties'])
+      expect(dbg.ALLOWED.has(method), method).toBe(true);
+    for (const method of ['Page.navigate', 'Runtime.enable', 'Network.enable', 'Target.createTarget', 'Browser.close', 'DOM.setOuterHTML'])
+      expect(dbg.ALLOWED.has(method), method).toBe(false);
+  });
+
+  it('passes on only user scripts\' parse events, trimmed, and the stop events', () => {
+    expect(dbg.forwardEvent('Debugger.scriptParsed', { scriptId: '3', url: 'http://localhost:8080/src/core/engine.ts', hash: 'x' })).toBeNull();
+    expect(dbg.forwardEvent('Debugger.scriptParsed', { scriptId: '4', url: '', hash: 'x' })).toBeNull();
+    expect(dbg.forwardEvent('Debugger.scriptParsed', { scriptId: '5', url: 'cleo-script:///Player/Hero.ts', hash: 'h', startLine: 0, endLine: 40, executionContextAuxData: { big: true } }))
+      .toEqual({ method: 'Debugger.scriptParsed', params: { scriptId: '5', url: 'cleo-script:///Player/Hero.ts', hash: 'h', startLine: 0, endLine: 40 } });
+    expect(dbg.forwardEvent('Debugger.scriptParsed', { scriptId: '6', url: 'cleo-inline:///0a1b2c3d.ts' })?.params.url).toBe('cleo-inline:///0a1b2c3d.ts');
+    for (const method of ['Debugger.paused', 'Debugger.resumed', 'Debugger.breakpointResolved'])
+      expect(dbg.forwardEvent(method, { a: 1 })?.method).toBe(method);
+    expect(dbg.forwardEvent('Runtime.consoleAPICalled', {})).toBeNull();
+    expect(dbg.forwardEvent('Network.requestWillBeSent', {})).toBeNull();
+  });
+
+  it('ignores engine code and stops on every exception thrown through a script', () => {
+    const [pattern] = dbg.IGNORE_PATTERNS.map((p: string) => new RegExp(p));
+    expect(pattern.test('http://localhost:8080/src/core/engine.ts')).toBe(true);
+    expect(pattern.test('app://editor/assets/play-123.js')).toBe(true);
+    expect(pattern.test('cleo-script:///Player/Hero.ts')).toBe(false);
+    expect(pattern.test('cleo-inline:///0a1b2c3d.ts')).toBe(false);
+    expect(dbg.exceptionState(true)).toBe('all');
+    expect(dbg.exceptionState(false)).toBe('none');
+  });
+
+  it('refuses a command it does not allow before it reaches the page, and anything once detached', async () => {
+    const sent: string[] = [];
+    let onDetach: ((e: unknown, reason: string) => void) | null = null;
+    const contents = {
+      isDestroyed: () => false,
+      debugger: {
+        attached: false,
+        isAttached() { return this.attached; },
+        attach() { this.attached = true; },
+        detach() { this.attached = false; },
+        on(event: string, fn: any) { if (event === 'detach') onDetach = fn; },
+        removeListener() {},
+        sendCommand: async (method: string) => { sent.push(method); return {}; },
+      },
+    };
+    const events: any[] = [];
+    const session = dbg.attachDebugger(contents, (e: any) => events.push(e), { pauseOnExceptions: true });
+    await new Promise(r => setTimeout(r, 0));
+    expect(sent).toEqual(['Debugger.enable', 'Debugger.setBlackboxPatterns', 'Debugger.setPauseOnExceptions']);
+    expect(events).toEqual([{ type: 'debug-attached' }]);
+    await expect(session.send('Page.navigate', {})).rejects.toThrow(/Not a debugger command/);
+    await session.send('Debugger.resume');
+    expect(sent.at(-1)).toBe('Debugger.resume');
+    onDetach!(null, 'target closed');
+    expect(events.at(-1)).toEqual({ type: 'debug-detached', reason: 'target closed' });
+    await expect(session.send('Debugger.resume')).rejects.toThrow(/not attached/);
   });
 });

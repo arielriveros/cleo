@@ -35,6 +35,8 @@ export interface RemoteLogEntry {
   scope: string;
   timestamp: number;
   flushKey?: string;
+  /** The script line the row is about (Logger's `source`): plain data, so it crosses as-is. */
+  source?: { url: string; line: number; column?: number };
 }
 
 export type RemoteLogOp =
@@ -126,7 +128,8 @@ export function encodeLogValue(value: unknown): unknown {
   }
 }
 
-export function encodeLogEntry(entry: { id: string; method: RemoteLogEntry['method']; data: unknown[]; scope: string; timestamp: number; flushKey?: string }): RemoteLogEntry {
+export function encodeLogEntry(entry: { id: string; method: RemoteLogEntry['method']; data: unknown[]; scope: string; timestamp: number; flushKey?: string; source?: RemoteLogEntry['source'] }): RemoteLogEntry {
+  const source = entry.source;
   return {
     id: entry.id,
     method: entry.method,
@@ -134,5 +137,8 @@ export function encodeLogEntry(entry: { id: string; method: RemoteLogEntry['meth
     scope: entry.scope,
     timestamp: entry.timestamp,
     ...(entry.flushKey !== undefined ? { flushKey: entry.flushKey } : {}),
+    ...(source && typeof source.url === 'string' && Number.isFinite(source.line)
+      ? { source: { url: source.url, line: source.line, ...(Number.isFinite(source.column) ? { column: source.column } : {}) } }
+      : {}),
   };
 }

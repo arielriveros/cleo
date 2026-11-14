@@ -1,12 +1,14 @@
 // The user-script contract: which modules a script may import, how its source is rewritten into
-// something `new Function` accepts, and which handlers it can export. Scripts are authored as
-// TypeScript ES modules but never loaded as modules — buildFactoryBody() strips the types with Sucrase
+// a function body the engine evaluates (compileFactory), and which handlers it can export. Scripts are
+// authored as TypeScript ES modules but never loaded as modules — buildFactoryBody() strips the types with Sucrase
 // (purely syntactic, line-preserving) and transformScript() rewrites every `import` into a call to
 // `__cleoImport`, the wrapper's only parameter and invisible to the script author.
 //
 // Must import nothing from the engine: node.ts depends on this, so any engine import closes a cycle.
+// (scriptUrls.ts is a leaf of its own.)
 // The engine's public API reaches scripts through registerScriptModule(), which src/cleo.ts calls.
 import { transform } from 'sucrase';
+import { scriptSourceUrl, inlineScriptUrl } from './scriptUrls';
 
 export type ScriptModule = Record<string, any>;
 
@@ -713,14 +715,16 @@ export interface ScriptCompileOptions {
 }
 
 /**
- * The body of a script factory, shared by the two paths that run scripts: the engine evals it through
- * `new Function('__cleoImport', '__cleoExports', body)` (compileScript / compileScriptModule), and the
- * publisher emits it as source inside `function(__cleoImport, __cleoExports) {...}`.
+ * The body of a script factory, shared by the two paths that run scripts: the engine evals it inside
+ * `(function (__cleoImport, __cleoExports) {` + body (compileFactory, for compileScript /
+ * compileScriptModule), and the publisher emits it as source inside `function(__cleoImport, __cleoExports) {...}`.
  *
- * Line-preserving: the header (strict mode plus every export getter) is line 1, exactly where the old
- * `"use strict"` was, and the node-mode return is appended AFTER the author's last line — so a runtime
- * error's line number still points at the author's source. The wrapper must stay a plain `function`: a
- * legacy script assigns its handlers to `this`.
+ * Line-preserving: the header (strict mode plus every export getter) is PREPENDED to the author's line 1,
+ * on the same line, and the node-mode return is appended AFTER the author's last line — so body line N is
+ * the author's line N. compileFactory puts the wrapper's `{` on that same first line, which makes a
+ * runtime error's line number, a debugger location and a breakpoint the author's own line with no mapping
+ * (columns on line 1 are shifted by the header). The wrapper must stay a plain `function`: a legacy script
+ * assigns its handlers to `this`.
  */
 export function buildFactoryBody(source: string, options: ScriptCompileOptions = {}): string {
     const mode = options.mode ?? 'node';
@@ -729,7 +733,9 @@ export function buildFactoryBody(source: string, options: ScriptCompileOptions =
     // `export declare`, and turns `export enum` into `export var`.
     const js = transform(source, { transforms: ['typescript'], preserveDynamicImport: true }).code;
     const { code, st } = runTransform(js, options.path);
-    let body = `${headerLine(st, mode)}\n${code}`;
+    // Every header statement ends in `;`, so whatever the author's first line starts with, it stays a
+    // separate statement.
+    let body = `${headerLine(st, mode)} ${code}`;
     if (mode === 'node') {
         const fallback = st.firstClass ? `__cleoExports[${JSON.stringify(st.firstClass)}]` : 'undefined';
         body += `\n;return __cleoExports.default !== undefined ? __cleoExports.default : ${fallback};`;
@@ -772,6 +778,31 @@ export function scriptCompileCount(): number { return compileCount; }
 /** Forget every cached compile — after the compiler's own behaviour changed (tests, hot reload). */
 export function clearScriptCompileCache(): void { compiled.clear(); }
 
+/**
+ * Builds the factory for one script and evaluates it as a script of its own, named `url`.
+ *
+ * Indirect eval rather than `new Function`: `new Function` puts two lines of its own in front of the body
+ * (`function anonymous(…\n) {\n`), so every stack frame and debugger location was three lines below the
+ * author's. Here the wrapper's `{`, the header and the author's line 1 share the first line, so line N is
+ * line N. The `sourceURL` names the script in stacks, devtools and Cleo's debugger (scriptUrls.ts). A
+ * compile error carries `cleoLocation`, its position in the author's source, for the log.
+ */
+function compileFactory(source: string, url: string, options: ScriptCompileOptions): Function {
+    let body: string;
+    try {
+        body = buildFactoryBody(source, options);
+    } catch (e: any) {
+        const loc = e && typeof e === 'object' ? e.loc : undefined;
+        if (loc && Number.isFinite(loc.line))
+            e.cleoLocation = { url, line: Number(loc.line), ...(Number.isFinite(loc.column) ? { column: Number(loc.column) + 1 } : {}) };
+        throw e;
+    }
+    // The wrapper is sloppy global code, the function itself strict (the header's "use strict"), exactly
+    // as with `new Function`; nothing of the engine's module scope is visible to it.
+    const indirectEval = eval;
+    return indirectEval(`(function (__cleoImport, __cleoExports) {${body}\n})\n//# sourceURL=${url}`);
+}
+
 /** Compiles a node's script to its factory. Throws on a syntax error or on unsupported module syntax. */
 export function compileScript(source: string, options: { path?: string } = {}): ScriptFactory {
     const key = `${options.path ?? ''}::${source}`;
@@ -782,8 +813,8 @@ export function compileScript(source: string, options: { path?: string } = {}): 
         compiled.set(key, hit);
         return hit;
     }
-    // eslint-disable-next-line no-new-func
-    const factory = new Function('__cleoImport', '__cleoExports', buildFactoryBody(source, { path: options.path, mode: 'node' })) as ScriptFactory;
+    const url = options.path ? scriptSourceUrl(options.path) : inlineScriptUrl(source);
+    const factory = compileFactory(source, url, { path: options.path, mode: 'node' }) as ScriptFactory;
     compileCount++;
     compiled.set(key, factory);
     if (compiled.size > COMPILED_LIMIT) compiled.delete(compiled.keys().next().value as string);
@@ -792,9 +823,7 @@ export function compileScript(source: string, options: { path?: string } = {}): 
 
 /** Compiles a shared module. `id` is its canonical project path; it names the file in devtools stacks. */
 export function compileScriptModule(source: string, id: string): ScriptModuleFactory {
-    const body = `${buildFactoryBody(source, { path: id, mode: 'module' })}\n//# sourceURL=cleo-script://${id.replace(/\s/g, '%20')}.ts`;
-    // eslint-disable-next-line no-new-func
-    return new Function('__cleoImport', '__cleoExports', body) as ScriptModuleFactory;
+    return compileFactory(source, scriptSourceUrl(id), { path: id, mode: 'module' }) as ScriptModuleFactory;
 }
 
 let scriptProvider: ((nodeId: string) => ScriptFactory | undefined) | null = null;

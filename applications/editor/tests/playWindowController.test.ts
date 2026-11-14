@@ -305,3 +305,57 @@ describe('Play in window on the web', () => {
     expect(c.getSnapshot().active).toBe(false);
   });
 });
+
+describe('Play in window with the script debugger', () => {
+  function withDebug() {
+    const f = fakeEnv();
+    const calls: string[] = [];
+    let release: () => void = () => {};
+    let held: (() => void) | null = null;
+    f.env.debug = {
+      started: id => calls.push(`started ${id}`),
+      built: id => calls.push(`built ${id}`),
+      ready: () => new Promise<void>(resolve => { calls.push('ready?'); release = resolve; }),
+      hello: id => calls.push(`hello ${id}`),
+      whenRunning: (send, reloads) => { calls.push(`whenRunning${reloads ? ' (reloads)' : ''}`); held = send; },
+      ended: id => calls.push(`ended ${id}`),
+    };
+    const c = new WindowPlayController(f.env);
+    return { f, c, calls, release: () => release(), runHeld: () => { held?.(); held = null; } };
+  }
+
+  it('lets the first boot wait until the debugger has its breakpoints in', async () => {
+    const { f, c, calls, release } = withDebug();
+    c.start(async () => ({}), size);
+    await flush(); await flush();
+    expect(calls).toEqual(['started aaaabbbbccccdddd', 'built aaaabbbbccccdddd', 'ready?']);
+    // A page that says hello meanwhile is not told to boot yet either.
+    f.deliver({ type: 'hello', state: { phase: 'waiting' } });
+    expect(types(f)).toEqual([]);
+    release();
+    await flush();
+    expect(types(f)).toEqual(['data-ready']);
+  });
+
+  it('holds Pause and Restart for the debugger (a stopped game drops them), and says when it ends', async () => {
+    const { f, c, calls, release, runHeld } = withDebug();
+    c.start(async () => ({}), size);
+    await flush(); await flush();
+    release();
+    await flush();
+    c.pause();
+    expect(calls.at(-1)).toBe('whenRunning');
+    expect(types(f)).toEqual(['data-ready']);
+    runHeld();
+    expect(f.sent.at(-1)?.type).toBe('pause');
+    c.restart(async () => ({}));
+    await flush(); await flush();
+    expect(calls.at(-1)).toBe('whenRunning (reloads)');
+    runHeld();
+    expect(f.sent.at(-1)?.type).toBe('restart');
+    c.ping();
+    expect(f.sent.at(-1)?.type).toBe('ping');
+    c.stop();
+    expect(calls.at(-1)).toBe('ended aaaabbbbccccdddd');
+  });
+});

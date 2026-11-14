@@ -1,4 +1,4 @@
-import { CleoEngine, Logger, type LogEntry } from 'cleo'
+import { CleoEngine, Logger, scriptLocationLabel, scriptLocationOf, type LogEntry } from 'cleo'
 import { elide } from './inspect'
 
 // The console as the agent reads it: every Logger entry plus the page's uncaught errors (the same two
@@ -26,8 +26,10 @@ function format(value: unknown): string {
   } catch { return Object.prototype.toString.call(value) }
 }
 
-function push(level: LogEntry['method'], scope: string, data: unknown[], time = Date.now()) {
-  buffer.push({ seq: ++seq, level, scope, time, text: data.map(format).join(' ').slice(0, 4000) })
+function push(level: LogEntry['method'], scope: string, data: unknown[], time = Date.now(), source?: LogEntry['source'] | null) {
+  // A script error says which line, as the Console's link does: `(Hero.ts:42)`.
+  const where = source ? ` (${scriptLocationLabel(source)})` : ''
+  buffer.push({ seq: ++seq, level, scope, time, text: (data.map(format).join(' ') + where).slice(0, 4000) })
   if (buffer.length > MAX) buffer.splice(0, buffer.length - MAX)
 }
 
@@ -35,11 +37,11 @@ function push(level: LogEntry['method'], scope: string, data: unknown[], time = 
 export function attachAgentLogs() {
   if (attached) return
   attached = true
-  for (const e of Logger.logs) push(e.method, e.scope, e.data, e.timestamp)
-  CleoEngine.eventEmitter.on('LOG', (e: LogEntry) => push(e.method, e.scope, e.data, e.timestamp))
+  for (const e of Logger.logs) push(e.method, e.scope, e.data, e.timestamp, e.source)
+  CleoEngine.eventEmitter.on('LOG', (e: LogEntry) => push(e.method, e.scope, e.data, e.timestamp, e.source))
   // A flushed row (a progress line redrawn in place) arrives as an update; only its latest text matters.
-  CleoEngine.eventEmitter.on('LOG_UPDATE', (e: LogEntry) => push(e.method, e.scope, e.data, e.timestamp))
-  window.addEventListener('error', ev => push('error', 'Uncaught', [ev.error ?? ev.message]))
+  CleoEngine.eventEmitter.on('LOG_UPDATE', (e: LogEntry) => push(e.method, e.scope, e.data, e.timestamp, e.source))
+  window.addEventListener('error', ev => push('error', 'Uncaught', [ev.error ?? ev.message], Date.now(), scriptLocationOf(ev.error)))
   window.addEventListener('unhandledrejection', ev => push('error', 'Uncaught', ['Unhandled promise rejection:', ev.reason]))
 }
 

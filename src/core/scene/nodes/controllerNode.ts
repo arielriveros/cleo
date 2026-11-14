@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Logger } from "../../logger";
+import { logScriptError } from "../../scripting/scriptErrors";
 import { authoring } from "../../eventBus";
 import { Node } from "./node";
 import { isEditorOwnedName } from "../editorOwnership";
@@ -565,7 +566,7 @@ export class ControllerNode extends Node {
         // Last, so a script patches an intent that is otherwise complete rather than fighting the source.
         if (this.onThink !== Node.prototype.onThink) {
             try { this.onThink(delta); }
-            catch (e) { Logger.error(`Error in onThink function for node ${this._name}: ${e}`, 'Script'); }
+            catch (e) { logScriptError(`Error in onThink function for node ${this._name}`, e, 'Script'); }
         }
     }
 

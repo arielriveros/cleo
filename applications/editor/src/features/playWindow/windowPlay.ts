@@ -6,9 +6,12 @@ import { CleoEngine, Logger } from 'cleo';
 import { toast } from '@cleo/app-kit/feedback/toastStore';
 import { WindowPlayController, type WindowPlayEnv, type WindowPlaySnapshot } from './playWindowController';
 import { PLAY_CHANNEL, SESSION_PARAM, gameLockName, newSessionId, ownerLockName } from './protocol';
-import { desktopPlay } from './desktopPlay';
+import { desktopDebug, desktopPlay } from './desktopPlay';
 import { deletePlaySession, purgeStalePlaySessions } from './sessionStore';
 import { playPackJob } from '../../workers/workerClient';
+import { scriptDebugger, setGamePing } from '../scriptDebugger/debugSession';
+import { getDebugPrefs } from '../scriptDebugger/debugPrefs';
+import { clearRuntimeErrors } from '../nodeInspector/scriptEditor/runtimeErrors';
 
 /** The URL of the game page for a session, on this origin (web only: the desktop shell builds its own). */
 export function playPageUrl(sessionId: string, base: string): string {
@@ -17,6 +20,8 @@ export function playPageUrl(sessionId: string, base: string): string {
 
 function browserEnv(): WindowPlayEnv {
   const desktop = desktopPlay();
+  // The script debugger drives the game window from the main process, so only where the shell relays it.
+  const debug = desktop && desktopDebug() ? scriptDebugger() : null;
   // A desktop shell too old to have a play window: never fall back to `window.open` there — the shell's
   // window-open handler would hand the game the editor's preload, file-system IPC and all.
   const oldShell = !desktop && typeof (window as any).cleoDesktop === 'object';
@@ -32,7 +37,8 @@ function browserEnv(): WindowPlayEnv {
     },
     openWindow(sessionId, size) {
       if (desktop) {
-        void desktop.open({ sessionId, ...size }).then(
+        const options = debug ? { debug: { pauseOnExceptions: getDebugPrefs().pauseOnExceptions } } : {};
+        void desktop.open({ sessionId, ...size, ...options }).then(
           result => { if (!result.ok) windowEvents?.(sessionId, 'crashed', result.error ?? 'the window did not open'); },
           error => windowEvents?.(sessionId, 'crashed', String(error?.message ?? error)),
         );
@@ -68,10 +74,17 @@ function browserEnv(): WindowPlayEnv {
     onWindowEvent(cb) {
       windowEvents = cb;
       const off = desktop?.onEvent(event => {
-        if (event.type === 'process')
-          Logger.info(`The game window runs in renderer process ${event.pid} (the editor's is ${event.editorPid})`, 'Play');
-        else if (event.type === 'closed') cb(event.sessionId, 'closed');
-        else cb(event.sessionId, 'crashed', event.reason);
+        switch (event.type) {
+          case 'process':
+            Logger.info(`The game window runs in renderer process ${event.pid} (the editor's is ${event.editorPid})`, 'Play');
+            break;
+          case 'closed': cb(event.sessionId, 'closed'); break;
+          case 'crashed': cb(event.sessionId, 'crashed', event.reason); break;
+          // The script debugger's session on the window.
+          case 'debug': debug?.onProtocolEvent(event.sessionId, event.method, event.params); break;
+          case 'debug-attached': debug?.onAttached(event.sessionId); break;
+          case 'debug-detached': debug?.onDetached(event.sessionId, event.reason); break;
+        }
       });
       return () => { windowEvents = null; off?.(); };
     },
@@ -90,6 +103,22 @@ function browserEnv(): WindowPlayEnv {
     now: () => performance.now(),
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    debug: {
+      started(sessionId) {
+        // The script editor's error marks are about the last run.
+        clearRuntimeErrors();
+        debug?.started(sessionId);
+      },
+      built(sessionId) { debug?.built(sessionId); },
+      ready: sessionId => debug ? debug.ready(sessionId) : Promise.resolve(),
+      hello(sessionId) {
+        // A page after Restart is a new run too.
+        clearRuntimeErrors();
+        debug?.hello(sessionId);
+      },
+      whenRunning(send, reloads) { if (debug) debug.whenRunning(send, reloads); else send(); },
+      ended(sessionId) { debug?.ended(sessionId); },
+    },
   };
 }
 
@@ -99,6 +128,8 @@ let controller: WindowPlayController | null = null;
 export function windowPlay(): WindowPlayController {
   if (controller) return controller;
   controller = new WindowPlayController(browserEnv());
+  const c = controller;
+  setGamePing(() => c.ping());
   // The editor closing or reloading takes its game window along. The owner lock does the same on its own
   // when the page dies without running this (a crash), so this is the fast path, not the only one.
   window.addEventListener('pagehide', () => controller?.stopForUnload());

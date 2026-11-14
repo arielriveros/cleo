@@ -42,6 +42,7 @@ import type { ActionChange } from "../../input/resolveActions";
 import { mat4, vec3 } from "gl-matrix";
 import { DEFAULT_SCENE_AMBIENT_LUX, legacyAmbientFromSceneJson, MAX_LIGHTS } from "../../graphics/lighting";
 import { Logger } from '../logger'
+import { logScriptError } from '../scripting/scriptErrors'
 import type { PhysicsSystem } from "../../physics/physicsSystem";
 import { sceneStats, resetSceneStats, SceneStats } from "./sceneStats";
 import { resetAIStats } from "../../ai/aiStats";
@@ -76,7 +77,7 @@ function dispatchActions(node: Node, actions: readonly ActionChange[]): void {
     if (node.onAction === Node.prototype.onAction) return;
     for (const change of actions) {
         try { node.onAction(change.action, change.state); }
-        catch (error) { Logger.error(`Error in onAction function for node ${node.name}: ${error}`, 'Script'); }
+        catch (error) { logScriptError(`Error in onAction function for node ${node.name}`, error, 'Script'); }
     }
 }
 
@@ -542,7 +543,7 @@ export class Scene {
                 const perceptionStart = performance.now();
                 for (const controller of this.controllers) {
                     try { controller.perceive(delta); }
-                    catch (error) { Logger.error(`Error in perceive for controller ${controller.name}: ${error}`, 'Script'); }
+                    catch (error) { logScriptError(`Error in perceive for controller ${controller.name}`, error, 'Script'); }
                 }
                 sceneStats.scriptMs += performance.now() - perceptionStart;
             }
@@ -559,7 +560,7 @@ export class Scene {
                 for (const controller of this.controllers) {
                     // Guarded per controller, like dispatchActions: one bad brain must not take the frame.
                     try { controller.think(delta); }
-                    catch (error) { Logger.error(`Error in think for controller ${controller.name}: ${error}`, 'Script'); }
+                    catch (error) { logScriptError(`Error in think for controller ${controller.name}`, error, 'Script'); }
                 }
                 sceneStats.scriptMs += performance.now() - controlStart;
             }
@@ -577,7 +578,7 @@ export class Scene {
                     try {
                         for (const sequence of sequences) {
                             try { sequence.advanceSequence(delta, unscaledDelta, running, editing); }
-                            catch (error) { Logger.error(`Error in sequence ${sequence.name}: ${error}`, 'Script'); }
+                            catch (error) { logScriptError(`Error in sequence ${sequence.name}`, error, 'Script'); }
                         }
                     } finally {
                         authoring.derived--;
@@ -632,7 +633,7 @@ export class Scene {
                 const physicsStart = performance.now();
                 authoring.derived++;
                 try { this.physics2D.step(delta, this); }
-                catch (error) { Logger.error(`Error in the 2D physics: ${error}`, 'Scene'); }
+                catch (error) { logScriptError(`Error in the 2D physics`, error, 'Scene'); }
                 finally { authoring.derived--; }
                 sceneStats.physics2DMs = performance.now() - physicsStart;
             }
@@ -697,7 +698,7 @@ export class Scene {
                 try {
                     for (const cam of cameras2D) {
                         try { cam.lateUpdate(delta, unscaledDelta, playing, this); }
-                        catch (error) { Logger.error(`Error in 2D camera ${cam.name}: ${error}`, 'Scene'); }
+                        catch (error) { logScriptError(`Error in 2D camera ${cam.name}`, error, 'Scene'); }
                     }
                 } finally {
                     authoring.derived--;
@@ -711,7 +712,7 @@ export class Scene {
                 try {
                     for (const fn of this._lateUpdates) {
                         try { fn(delta, unscaledDelta); }
-                        catch (e) { Logger.error(`Error in a late update: ${e}`); }
+                        catch (e) { logScriptError(`Error in a late update`, e, 'Runtime'); }
                     }
                 } finally {
                     authoring.derived--;
@@ -722,7 +723,7 @@ export class Scene {
             if (this._hasStarted && !paused) {
                 authoring.derived++;
                 try { this.precipitation.update(delta, time); }
-                catch (e) { Logger.error(`Error in the precipitation: ${e}`); }
+                catch (e) { logScriptError(`Error in the precipitation`, e, 'Runtime'); }
                 finally { authoring.derived--; }
             }
 
@@ -912,7 +913,7 @@ export class Scene {
             if (timer.remaining > 0) { surviving.push(timer); continue; }
 
             try { timer.cb(); }
-            catch (e) { Logger.error(`Error in a scheduled timer for node ${timer.node.name}: ${e}`, 'Script'); }
+            catch (e) { logScriptError(`Error in a scheduled timer for node ${timer.node.name}`, e, 'Script'); }
 
             // The callback may have cancelled its own repeat (or the node may have despawned from
             // inside it) — re-check before deciding whether it keeps its slot.

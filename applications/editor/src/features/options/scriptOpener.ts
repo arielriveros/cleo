@@ -2,7 +2,8 @@
 // workspace provider) and the workspace that can actually hand a file to VSCode (which sits inside the
 // engine context). The workspace registers its opener here; the engine context asks through it.
 
-type ExternalOpener = (scriptId: string) => Promise<boolean>;
+/** `line` (1-based): put the cursor there, for a Console link to a script error. */
+type ExternalOpener = (scriptId: string, line?: number) => Promise<boolean>;
 
 let opener: ExternalOpener | null = null;
 
@@ -16,8 +17,8 @@ export function setExternalScriptOpener(fn: ExternalOpener | null): void {
  * cancelled picking a workspace folder, or the launch failed — so the caller falls back to the built-in
  * editor rather than leaving the user with nothing opened.
  */
-export async function openScriptExternally(scriptId: string): Promise<boolean> {
+export async function openScriptExternally(scriptId: string, line?: number): Promise<boolean> {
   if (!opener) return false;
-  try { return await opener(scriptId); }
+  try { return await opener(scriptId, line); }
   catch { return false; }
 }
