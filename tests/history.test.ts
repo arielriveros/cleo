@@ -237,4 +237,36 @@ describe('HistoryManager', () => {
         h.push(c.set(1));
         expect(other).toBe(1);
     });
+    it('rollbackBatch undoes a half-done batch newest first and leaves no step', () => {
+        const h = new HistoryManager();
+        const c = counter();
+        h.push(c.set(1));
+        h.beginBatch('agent edit');
+        h.push(c.set(2, 'a'));
+        h.push(c.set(3, 'b'));
+        h.rollbackBatch();
+        expect(c.state.value).toBe(1);
+        expect(c.state.log).toEqual(['undo b', 'undo a']);
+        expect(h.batching).toBe(false);
+        expect(h.undoLabel).toBe('set 1');
+        expect(h.canRedo).toBe(false);
+        // The undos ran with recording off, and the closing endBatch of the caller is a no-op.
+        h.endBatch();
+        expect(h.depth).toBe(1);
+    });
+    it('pushFirst puts an entry under the rest of the batch: undone last, redone first', () => {
+        const h = new HistoryManager();
+        const order: string[] = [];
+        const entry = (name: string): HistoryEntry => ({
+            label: name, time: 0, undo: () => { order.push(`undo ${name}`); }, redo: () => { order.push(`redo ${name}`); },
+        });
+        h.beginBatch('build');
+        h.push(entry('node'));
+        h.pushFirst(entry('asset'));
+        h.push(entry('field'));
+        h.endBatch();
+        h.undo();
+        h.redo();
+        expect(order).toEqual(['undo field', 'undo node', 'undo asset', 'redo asset', 'redo node', 'redo field']);
+    });
 });

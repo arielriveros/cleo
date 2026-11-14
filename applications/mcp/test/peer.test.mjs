@@ -51,3 +51,20 @@ test('a peer with no editor behind the host gets the how-to-connect message', as
         await peer.close();
     } finally { await bridge.close(); }
 });
+
+test('a cancelled call reaches the editor as a cancel frame, through the host', async () => {
+    const bridge = await host();
+    try {
+        const cancels = [];
+        const ws = await editor(bridge.port, () => new Promise(() => {})); // never answers
+        ws.on('message', raw => { const msg = JSON.parse(String(raw)); if (msg.type === 'cancel') cancels.push(msg.id); });
+        const peer = new PeerBridge({ resolveHost: async () => ({ port: bridge.port, token: TOKEN }) });
+        const ac = new AbortController();
+        const call = peer.call('play.control', { action: 'play', runSeconds: 30 }, { signal: ac.signal, timeoutMs: 60_000 });
+        setTimeout(() => ac.abort(), 100);
+        await assert.rejects(call, /cancelled/);
+        for (let i = 0; i < 50 && !cancels.length; i++) await new Promise(r => setTimeout(r, 20));
+        assert.equal(cancels.length, 1, 'the editor was told to stop the call');
+        await peer.close();
+    } finally { await bridge.close(); }
+});

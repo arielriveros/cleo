@@ -29,12 +29,14 @@ test('tools/list advertises the catalog with its metadata and descriptions intac
     try {
         const { tools } = await client.listTools();
         const byName = Object.fromEntries(tools.map(t => [t.name, t]));
-        assert.equal(tools.length, 15);
-        assert.equal(byName.editor_status._meta?.['anthropic/alwaysLoad'], true);
-        assert.equal(byName.scene_edit._meta?.['anthropic/alwaysLoad'], true);
-        assert.equal(byName.asset_list._meta?.['anthropic/alwaysLoad'], undefined);
-        assert.equal(byName.execute_js._meta?.['anthropic/requiresUserInteraction'], true);
+        assert.equal(tools.length, 16);
+        // Every tool loads with the session: no tool-search turn before a first use.
+        for (const t of tools) assert.equal(t._meta?.['anthropic/alwaysLoad'], true, t.name);
+        // execute_js runs without a per-call prompt; the editor's Allow code execution switch gates it.
+        assert.equal(byName.execute_js._meta?.['anthropic/requiresUserInteraction'], undefined);
         assert.equal(byName.scene_tree.annotations?.readOnlyHint, true);
+        // Strict inputs: a field a tool does not take is refused, never dropped.
+        assert.equal(byName.scene_save.inputSchema.additionalProperties, false);
         assert.equal(byName.execute_js.annotations?.destructiveHint, true);
         // Property descriptions survive the schema conversion (zod >= 4.2 with SDK v2).
         assert.match(String(byName.scene_tree.inputSchema.properties?.depth?.description), /Levels below root/);
@@ -59,5 +61,14 @@ test('the docs are served as resources', async () => {
         assert.ok(doc, 'a docs resource is listed');
         const read = await client.readResource({ uri: doc.uri });
         assert.ok(String(read.contents[0]?.text ?? '').length > 0);
+    } finally { await client.close(); }
+});
+
+test('a misspelt or retired argument is refused by the server, never silently dropped', async () => {
+    const client = await connect();
+    try {
+        const res = await client.callTool({ name: 'scene_tree', arguments: { depth: 2, deepth: 3 } });
+        assert.equal(res.isError, true);
+        assert.match(res.content[0].text, /deepth/);
     } finally { await client.close(); }
 });

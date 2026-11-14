@@ -11,7 +11,7 @@ There are two ways in:
 - **External agents** such as Claude Code in any terminal or IDE, or Claude Desktop, through the stdio MCP
   server.
 
-Status: **proof of concept** (`feature/agent-mcp`). Dev builds of the editor only.
+Status: cleo-mcp 0.6. Dev builds of the editor only.
 
 ## Quick start
 
@@ -86,8 +86,9 @@ The editor's Vite dev server serves it to its own pages at `GET /__cleo/agent-br
 - A browser Origin must be a local editor origin or the desktop app's `app://editor`.
 - The first frame must carry the token from the discovery file. This closes the holes behind
   CVE-2025-52882 and CVE-2025-49596.
-- `execute_js` is marked `anthropic/requiresUserInteraction`, so Claude Code asks before every run, whatever
-  its permission mode. The editor can refuse it entirely (Agent chip, then **Allow code execution**).
+- `execute_js` runs without a per-call prompt in the hosted session (the Cleo tools are allowed there), and
+  under an external session's own permission rules. The editor can refuse it entirely (Agent chip, then
+  **Allow code execution**).
 
 **Leftovers from earlier versions.** An in-editor API-key chat was removed. If you used it,
 `~/.cleo/agent-host.json` (its saved API key) and `~/.cleo/agent/` (its working folders) are no longer read
@@ -95,36 +96,53 @@ and are safe to delete.
 
 ## Tools
 
-The tools marked **core** load with the session (`_meta["anthropic/alwaysLoad"]`), so Claude Code calls them
-without a tool-search turn first; the rest load on demand. Node refs everywhere: `"/A/B"` path, `"#id"`, a
-unique name, `"$alias"` from an earlier create in the same call, or `"@selected"` (the editor's selection).
+Every tool loads with the session (`_meta["anthropic/alwaysLoad"]`): the whole catalog is about 6k tokens,
+less than the tool-search turn a deferred tool costs on its first use. Inputs are strict: a field a tool
+does not take is refused by name, never dropped. Node refs everywhere: `"/A/B"` path, `"#id"`, a unique
+name, `"$alias"` from an earlier create in the same call, or `"@selected"` (the editor's selection).
 
 | Tool | What it does |
 | --- | --- |
-| `editor_status` (core) | Project, scenes, active tab, play state, unsaved work, selection. |
-| `scene_tree` (core) | Outline of the scene, or a type/name search returning paths and ids; the header names the selection. |
-| `node_get` (core) | One node: transform, world bounds, script fields, body, trigger, material, and its **settable props**. |
-| `scene_edit` (core) | A batch of ops as one undo step: `create` (from the Add catalog, a template or a model, taking every field `update` does: material, body, script, script fields, props), `update`, `delete`, `move`, `attachScript`, `detachScript`, `select`. A material can be a PBR spec inline. `capture` returns a screenshot of the result. |
-| `script_write` (core) / `script_read` | Create or replace a class script and attach it; returns the runtime-compile and TypeScript diagnostics. |
-| `material_write` | Create or update a PBR material and assign it; `capture` too. |
-| `asset_list` | Templates, models, materials, scripts, clips, brains, particles, sounds, textures, tilesets. |
-| `view_capture` (core) | Screenshot of the viewport (the game view during Play), optionally framing a node first. |
-| `play_control` (core) | Play, Simulate, pause, stop. Runs for N seconds (returning early on the first error) with the new log lines; `capture` and `stopAfter` make a test run one call. |
-| `logs_read` | Console entries after a cursor; repeated lines collapsed. |
-| `history` | Undo or redo whole steps. |
+| `editor_status` | Project, scenes, active tab and its kind, the scene's dimension (2D/3D), play state (and a game in its own window), the viewport's split, unsaved work, selection. |
+| `scene_tree` | Outline of the scene, or a type/name search returning paths and ids; the header names the selection and the dimension. `with` adds world position, size or id to each line. |
+| `node_get` | One node or several (`nodes`), with `fields` to pick parts: transform, world bounds, children, script fields, shapes, material (type, properties, textures by name), linked assets (tileset, sprite clips, sequence, effect, tilemap layers), variables, and its **settable props**. |
+| `scene_edit` | A batch of ops as one undo step, **all or nothing** (`atomic: false` keeps the ops before a failure): `create` (from the Add catalog, a template or a model, taking every field `update` does: material, shapes, script, script fields, props, asset links), `update`, `delete`, `move`, `attachScript`, `detachScript`, `select`, and for templates `makeTemplate`, `unpack`, `revertOverrides`, `makeVariant`. Every op's fields are checked before any op runs. `capture` returns a screenshot of the result. |
+| `script_write` / `script_read` | Create or replace a class script, or patch it with exact `edits`, and attach it; returns the runtime-compile and TypeScript diagnostics. One undo step, the asset included. |
+| `material_write` | Create or update a material, PBR, cel, foliage or unlit, with texture slots by texture name and any other property by name; answers with every property. Updates reach everything using it. One undo step. |
+| `asset_list` | Templates, models, materials, landscape materials, scripts, clips, animation fields, controllers, rigs, brains, particles, sequences, sounds, textures, tilesets; `ids` adds ids. |
+| `view_capture` | Screenshot of the viewport (the game view during Play): the editing pane of a split view (`pane: "all"` for every pane), optionally framing a node, from up to four angles in one image (`views: "quad"`). |
+| `play_control` | Play, Simulate, `run` (keep a running game going), pause, stop. A run lasts N seconds (returning early on the first error) with the new log lines; `input` presses keys, mouse buttons and project actions in the game, `watch` samples nodes as numbers (position, yaw, velocity, grounded, animation state, named props); `capture` and `stopAfter` make a test one call. A game in its own window is stopped or paused from here. |
+| `workspace` | Scenes and tabs: list, open, create, rename, set main, duplicate, switch 2D/3D; open an asset in its tab (a template or model tab is then what `scene_edit` edits), switch and close tabs. Leaving unsaved work takes `unsaved: "save"` or `"discard"`. |
+| `logs_read` | Console entries after a cursor; repeated lines collapsed. A window game's logs (`Game/<scope>`) match their plain scope. |
+| `history` | Undo or redo whole steps (not during Play). |
 | `scene_save` | Save the active tab. |
-| `execute_js` | Escape hatch: async JavaScript in the editor page. The user approves every run. |
-| `engine_api` (core) | The scripting API and docs as small lookups, answered by the server itself (no editor needed): a word search, a class with every member, one member's signatures and doc, or one docs section. |
+| `execute_js` | Escape hatch: async JavaScript in the editor page; `await track(node)` before changing a node makes the change undoable. |
+| `engine_api` | The scripting API and docs as small lookups, answered by the server itself (no editor needed): a word search, a class with every member, one member's signatures and doc, or one docs section. |
 
-So *"add a red cube and show me"* is one `scene_edit` (a create op with `material`, `as`, and `capture`), and
+So *"add a red cube and show me"* is one `scene_edit` (a create op with `material`, `as`, and `capture`),
 *"make the selected node spin"* is `script_write` with `attach: ["@selected"]` plus one `play_control`
-`{action: "simulate", capture: true, stopAfter: true}`.
+`{action: "simulate", capture: true, stopAfter: true}`, and *"prove the player walks forward"* is one
+`play_control {action: "play", input: [{at: 0.2, key: "KeyW", hold: 1.5}], watch: ["/Player"], stopAfter: true}`
+answered with the distance it moved.
 
 **Speed.** The editor runs changes one at a time (two history transactions at once would merge their undo
 steps), but pure reads (`status`, `scene.tree`, `node.get`, `asset.list`, `logs.read`, `script.read`) skip
 that queue, so a look at the scene never waits behind a capture, a Play run or a type check. The script type
 checker loads in the background after the first call. Results are compact JSON and cut at 40,000 characters,
 under Claude Code's 50,000-character limit, past which a result is spilled to a file.
+
+**Cancelling.** A call the client cancels (Esc in Claude Code) is cancelled through the whole chain: the
+stdio server passes the request's abort signal to its link, a peer sends `{type:'cancel', id}` to the host,
+the host to the editor, and the editor stops the command (a play run lets go of its keys and stops the
+game; a change still queued never starts).
+
+**Precision.** `scene_edit` checks every op's fields before running any, then runs them in one transaction
+that is rolled back whole if an op fails (`HistoryContext.transaction(..., {atomic: true})`,
+`HistoryManager.rollbackBatch`). Asset-library changes are undo entries of the same step, pushed under the
+node changes (`pushFirst`), so undo removes a new material only once no node uses it. `props` never write
+over an object or an empty link (a sprite's tileset has its own `assets` field), and a miss names the
+nearest property. The Add types and asset kinds the schemas list live in `src/catalog.mjs`, which the
+editor suite checks against the real catalog (`applications/editor/tests/agentCatalog.test.ts`).
 
 **Engine API lookup** (`src/engineApi.mjs`). `engine_api` answers from the engine's own type declarations
 (`dist/**/*.d.ts`, written by `npm run build`): exactly what `import { ... } from 'cleo'` gives a script and
@@ -142,11 +160,17 @@ Resources: `cleo://docs/...` (all of `docs/`) and `cleo://examples/scripts/...`.
 ## Testing
 
 ```sh
-npm test                    # bridge security, peer relay, the stdio server through the SDK v2 client, the catalog's size budget, hosted terminal (node:test, real sockets, a real pty)
-node scripts/smoke.mjs      # end to end through the host against a running editor: inline material + capture, @selected, reads during a script write, a one-call test run, undo (--keep leaves the result)
+npm test                    # bridge security, peer relay and cancel, the stdio server through the SDK v2 client (strict inputs), the catalog's size budget, hosted terminal (node:test, real sockets, a real pty)
+node scripts/smoke.mjs      # end to end through the host against a running editor (its Claude panel open): an atomic failure, a quad capture, a cel material, a script patched, a WASD run checked by its numbers, a cancelled run, makeTemplate, undo of all of it (--keep leaves the result, --workspace also makes a scene)
 ```
 
-The editor half is tested by `applications/editor/tests/agentBridge.test.ts` and `claudePanel.test.ts`.
+The editor half is tested by `applications/editor/tests/agentBridge.test.ts` (refs, props, materials, op
+fields), `agentPlayInput.test.ts` (input plans, traces, script patches, pane crops), `agentCatalog.test.ts`
+(the catalog against the editor), `agentFrameNode.test.ts` and `claudePanel.test.ts`.
+
+To run the smoke test beside a session you are using, give it its own host and editor: start an editor dev
+server and the smoke script with `CLEO_AGENT_BRIDGE_FILE` and `CLEO_MCP_PORT` pointing elsewhere (and
+`CLEO_CLAUDE_PATH` at a stand-in, so the panel does not start a real Claude Code).
 
 ## Environment
 
@@ -160,14 +184,17 @@ The editor half is tested by `applications/editor/tests/agentBridge.test.ts` and
 | `CLEO_MCP_STANDALONE` | (off) | `1`: the stdio server owns the editor link itself, with no host. |
 | `CLEO_MCP_ALLOWED_ORIGINS` | (none) | Extra exact origins allowed to connect, comma-separated. |
 
-## Known limits (proof of concept)
+## Known limits
 
 - **Dev builds only.** The packaged desktop app has no discovery route or host start yet.
 - **One editor per host, newest wins.** A second tab takes the link and the first shows "Agent (other
   tab)".
-- **Not undoable:** asset-library changes (new scripts, materials), and property changes made by
-  `execute_js`.
-- **Missing:** input injection during Play, scene open/create, imports.
+- **Not undoable:** property changes `execute_js` makes without `track`, a new or duplicated scene, a
+  scene rename or main-scene change.
+- **Input:** keys, mouse buttons, movement and wheel, and project actions through their key or mouse
+  binding. No gamepad, and no pointer lock (a browser grants it only to a real click).
+- **Window play** is outside the agent's reach except stop and pause: the game runs in another process.
+- **Missing:** imports, tilemap painting, custom (shader) materials and screen materials, bakes.
 - **One hosted Claude Code at a time**, per host. It runs in the engine checkout, not in a folder of the
   project (projects live in IndexedDB).
 - **Protocol version.** The stdio server is on MCP SDK v2 (`@modelcontextprotocol/server`); `serveStdio`

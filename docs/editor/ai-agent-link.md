@@ -5,10 +5,12 @@
 An AI agent such as Claude Code or Claude Desktop can work in the editor alongside you. It can:
 
 - build scenes, add nodes and change their properties
+- make templates (prefabs) and variants, and place them
 - write scripts and attach them to nodes
-- make materials
-- take screenshots of the viewport
-- play the game and read its console
+- make materials: PBR, cel, foliage or unlit, with textures from the project
+- open and create scenes, and open assets in their tabs
+- take screenshots of the viewport, from up to four angles at once
+- play the game, press its keys, and read back how things moved and what the console said
 
 **Claude** at the right end of the menu bar opens the Claude panel at the right edge of the editor: your own
 Claude Code, running in a terminal inside the panel. It signs in with your Claude account, so it runs on
@@ -47,8 +49,8 @@ same Claude Code you would run in a terminal yourself, with the Cleo tools alrea
   instead.)
 - **First start.** It starts in the engine folder and asks once whether you trust that folder.
 - **Using it.** Type to Claude as in any terminal. Its changes to the project show up in the viewport as
-  they happen, and each request is one undo step. The Cleo tools run without asking each time (Ctrl+Z
-  undoes any of it); running its own JavaScript in the editor still asks every time.
+  they happen, and each request is one undo step. The Cleo tools run without asking each time, its own
+  JavaScript in the editor included (Ctrl+Z undoes any of it; the Agent chip can turn the JavaScript off).
 - **This, here.** Claude can work on whatever you have selected: *"make this spin"* means the selected
   node. It can also show you what it did: it takes screenshots of the viewport as part of its changes.
 - **It knows the engine.** Before writing a script, Claude looks up the engine API it needs (classes,
@@ -82,20 +84,29 @@ link:
 The chip's menu shows how many commands have run and the last one. It also has two controls:
 
 - **Allow code execution** lets the agent run its own JavaScript inside the editor, for jobs no other tool
-  covers. Turn it off to refuse those requests. Claude Code also asks you before each run.
+  covers. Turn it off to refuse those requests. Claude Code does not ask before each run: this switch is
+  the control.
 - **Disconnect** stops the link until you connect again.
 
 ## What to expect
 
 - **Edits land on your undo stack.** Each request the agent makes is one step, labelled with what it did,
-  so Ctrl+Z reverts the whole request. Asset-library changes, such as a new script or material, are not
-  undoable this way. Delete those from the explorer.
+  so Ctrl+Z reverts the whole request, including the scripts, materials and templates it made or changed.
+  A request that fails part-way changes nothing at all. Opening another scene starts that scene's undo
+  history fresh, as it does for you; a new scene stays in the project.
 - **Nothing is saved until someone saves.** The agent's edits mark the tab unsaved like yours do. The
   agent saves only when asked.
-- **Play stays separate.** While the game runs, the agent can watch it, capture it and read its logs, but
-  it cannot edit the scene. Stop discards anything changed during play, as it does for you.
+- **Play stays separate.** While the game runs, the agent can watch it, capture it, read its logs and
+  press keys and mouse buttons in it (a test of a player controller), but it cannot edit the scene. Stop
+  discards anything changed during play, as it does for you. The agent always plays in the editor: a game
+  you started in its own window (Play target **Window**) it can only stop or pause.
+- **Mouse look under pointer lock cannot be pressed for.** A browser grants pointer lock only to a real
+  click, so an agent tests looking around through a drag binding (a mouse button held while moving).
+- **Preview tabs are not edited.** In a material, animation, script or other asset tab, the agent's scene
+  edits are refused: it switches back to the scene tab, or opens a template or model in its own tab.
 - **Screenshots can move the editor camera.** When the agent frames a node to look at it, your view moves
-  there too.
+  there too. A sheet of four angles puts the camera back afterwards. In a split viewport, a screenshot shows
+  the editing pane.
 - **Keep the editor tab visible.** Browsers pause rendering in hidden tabs, so the agent's screenshots
   fail until the tab is back in front.
 

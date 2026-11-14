@@ -32,6 +32,11 @@ type HistoryContextValue = {
   redo: () => void
   /** Push a hand-built entry onto the active tab's stack (tilemap strokes use this). */
   push: (entry: Omit<HistoryEntry, 'time'>) => void
+  /**
+   * Like push, but inside an open batch (a transaction) the entry undoes LAST and redoes first: an asset the
+   * batch's new nodes link (HistoryManager.pushFirst).
+   */
+  pushFirst: (entry: Omit<HistoryEntry, 'time'>) => void
   /** Group everything pushed until endBatch into one step. Re-entrant. */
   beginBatch: (label: string) => void
   endBatch: () => void
@@ -44,8 +49,12 @@ type HistoryContextValue = {
    * `track(node)` — awaited BEFORE the node is changed — snapshots the node explicitly; the after-image is
    * taken when `fn` resolves. Structure changes (add/remove/reparent) still record their exact inverses
    * into the same step, and `push` entries made meanwhile (bodies, triggers) join it too.
+   *
+   * `atomic`: when `fn` throws, everything it did is put back (its structure changes undone newest first,
+   * then the tracked nodes restored) and no step is left; the error is rethrown. Asset-library changes are
+   * covered only when `fn` pushed undo entries for them.
    */
-  transaction: <T>(label: string, fn: (track: (node: Node) => Promise<void>) => Promise<T>) => Promise<T>
+  transaction: <T>(label: string, fn: (track: (node: Node) => Promise<void>) => Promise<T>, opts?: { atomic?: boolean }) => Promise<T>
 }
 
 const HistoryContext = createContext<HistoryContextValue | null>(null)
@@ -284,7 +293,7 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
   }, [tabs])
 
   const transaction = useCallback(async <T,>(
-    label: string, fn: (track: (node: Node) => Promise<void>) => Promise<T>,
+    label: string, fn: (track: (node: Node) => Promise<void>) => Promise<T>, opts?: { atomic?: boolean },
   ): Promise<T> => {
     const trackInto = async (into: Map<string, any>, node: Node) => {
       if (into.has(node.id) || !canSnapshot(node, sceneRef.current)) return
@@ -301,8 +310,23 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
     const tracked = new Map<string, any>()
     txRef.current = { tracked }
     manager.beginBatch(label)
+    let result: T
     try {
-      const result = await fn(node => trackInto(tracked, node))
+      result = await fn(node => trackInto(tracked, node))
+    } catch (err) {
+      if (opts?.atomic) {
+        // Structure first (a node deleted by the failed call comes back), then each tracked node goes back
+        // to its before-image. Both with recording off: putting things back is not an edit.
+        manager.rollbackBatch()
+        manager.silently(() => {
+          for (const [, before] of tracked) if (before) restore(before)
+        })
+      }
+      txRef.current = null
+      manager.endBatch()
+      throw err
+    }
+    try {
       for (const [id, before] of tracked) {
         if (!before) continue
         const node = sceneRef.current.getNodeById(id)
@@ -329,6 +353,7 @@ export function HistoryProvider({ children }: { children: React.ReactNode }) {
     undo: () => { closeInteraction(); active.undo() },
     redo: () => { closeInteraction(); active.redo() },
     push: (entry) => active.push({ ...entry, time: Date.now() }),
+    pushFirst: (entry) => active.pushFirst({ ...entry, time: Date.now() }),
     beginBatch: (label) => active.beginBatch(label),
     endBatch: () => active.endBatch(),
     silently: (fn) => active.silently(fn),

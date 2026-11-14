@@ -62,7 +62,8 @@ describe('Sequencer mode', () => {
     const inspector = read('features', 'nodeInspector', 'propertyEditors', 'PropertyEditor.tsx')
     expect(inspector).toContain('<fieldset disabled={lock.locked}')
     expect(read('utils', 'useAssetDrop.ts')).toContain('const locked = useContext(AssetDropLockContext);')
-    expect(read('features', 'agentBridge', 'commands.ts')).toContain("if (h.engine.editorMode === 'sequence')")
+    // The agent's edits go through editScene, which refuses a Sequencer tab (and every other preview tab).
+    expect(read('features', 'agentBridge', 'bridgeHost.ts')).toContain("if (tab?.kind === 'sequence')")
   })
 
   it('saves every Sequencer tab from one saver, before the scene', () => {

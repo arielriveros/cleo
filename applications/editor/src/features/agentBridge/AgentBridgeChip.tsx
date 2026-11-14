@@ -74,7 +74,7 @@ export default function AgentBridgeChip() {
                 onChange={on => agentBridge.setExecuteAllowed(on)}
                 label='Allow code execution'
                 doc={false}
-                title='Lets the agent run JavaScript inside the editor (the execute_js tool). Its client still asks you before each run.'
+                title='Lets the agent run JavaScript inside the editor (the execute_js tool) without asking each time. Turn it off to refuse those requests.'
               />
               <div className='flex gap-1.5 mt-3'>
                 <Button size='sm' variant='ghost' onClick={() => { agentBridge.disconnect(); setOpen(false) }}>Disconnect</Button>

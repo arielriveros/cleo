@@ -47,12 +47,20 @@ export function logCursor(): number { return seq }
 
 const RANK: Record<string, number> = { debug: 0, log: 1, info: 1, warn: 2, error: 3 }
 
+/**
+ * Whether an entry's scope is the one asked for. A game playing in its own window logs here too, re-scoped
+ * `Game/<scope>` (playWindowController), so "Script" also finds that game's script errors.
+ */
+export function scopeMatches(entryScope: string, wanted: string): boolean {
+  const s = entryScope.toLowerCase(), w = wanted.toLowerCase()
+  return s === w || s === `game/${w}`
+}
+
 export function readLogs(opts: { since?: number; level?: 'all' | 'warn' | 'error'; scope?: string; limit?: number }): AgentLogEntry[] {
   const min = opts.level === 'error' ? 3 : opts.level === 'warn' ? 2 : 0
-  const scope = opts.scope?.toLowerCase()
   const hits = buffer.filter(e => (opts.since === undefined || e.seq > opts.since)
     && (RANK[e.level] ?? 1) >= min
-    && (!scope || e.scope.toLowerCase() === scope))
+    && (!opts.scope || scopeMatches(e.scope, opts.scope)))
   return hits.slice(-(opts.limit ?? 60))
 }
 

@@ -47,8 +47,8 @@ export const TERMINAL_PROMPT = 'You are running in a terminal panel inside the C
 
 /**
  * The hosted session runs the Cleo tools without asking (an ordinary CLI permission flag): each change is one
- * undo step in the editor the user is watching. execute_js still asks every time: it is marked
- * `anthropic/requiresUserInteraction`, which no allow rule overrides.
+ * undo step in the editor the user is watching. execute_js included: the editor's Allow code execution switch
+ * (the Agent chip) is what gates it.
  */
 export const ALLOWED_TOOLS = 'mcp__cleo__*';
 

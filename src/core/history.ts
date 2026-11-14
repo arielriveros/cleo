@@ -103,10 +103,32 @@ export class HistoryManager {
         });
     }
 
+    /**
+     * Push an entry that the open batch undoes LAST and redoes FIRST: what the batch's other entries stand
+     * on, such as an asset its new nodes link. Undone after them, it finds nothing that still uses it;
+     * redone before them, it is there when they come back. Outside a batch it is a plain {@link push}.
+     */
+    public pushFirst(entry: HistoryEntry): void {
+        if (this._silent > 0) return;
+        if (this._batchDepth > 0) { this._batch.unshift(entry); return; }
+        this.push(entry);
+    }
+
     /** Discard whatever the open batch has collected without pushing it. */
     public abortBatch(): void {
         this._batchDepth = 0;
         this._batch = [];
+    }
+
+    /**
+     * Undo what the open batch has collected, newest first and with recording off, then discard it: a
+     * batch that failed half-way leaves neither its changes nor an undo step behind. Closes the batch at
+     * every depth, like {@link abortBatch}.
+     */
+    public rollbackBatch(): void {
+        const entries = this._batch;
+        this.abortBatch();
+        this.silently(() => { for (let i = entries.length - 1; i >= 0; i--) entries[i].undo(); });
     }
 
     /**

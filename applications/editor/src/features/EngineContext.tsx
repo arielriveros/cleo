@@ -334,6 +334,13 @@ const EngineContext = createContext<{
   addMaterial: (m: MaterialAsset) => void;
   removeMaterial: (id: string) => void;
   updateMaterial: (id: string, m: MaterialAsset) => void;
+  /**
+   * Push a material asset, as it now is, to everything that uses it, the way a material tab's save does:
+   * linked submeshes and camera screen passes in every live scene, foliage rules, landscape-material
+   * slots, weather snow and generated LOD levels. Other scenes are not marked dirty (they store the link).
+   * `exceptTabId` skips one tab's scene (the material tab doing the saving).
+   */
+  propagateMaterialAsset: (asset: MaterialAsset, exceptTabId?: string) => void;
   terrainMaterials: TerrainMaterialAsset[];
   addTerrainMaterial: (m: TerrainMaterialAsset) => void;
   removeTerrainMaterial: (id: string) => void;
@@ -727,6 +734,7 @@ const EngineContext = createContext<{
     addMaterial: () => {},
     removeMaterial: () => {},
     updateMaterial: () => {},
+    propagateMaterialAsset: () => {},
     terrainMaterials: [],
     addTerrainMaterial: () => {},
     removeTerrainMaterial: () => {},
@@ -5377,24 +5385,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       if (tab.materialId) {
         const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail, tab.materialId);
         updateMaterial(tab.materialId, asset);
-        // Eager mirror: the ref only catches up on the next render, and every propagation below resolves
-        // against it — foliage rules and LOD levels were rebuilt from the material as it was BEFORE this
-        // save, so the edit never reached them.
-        materialsRef.current = materialsRef.current.map(m => (m.id === tab.materialId ? asset : m));
-        // Propagation edits other scenes and must not mark them dirty: they store the link (__materialId)
-        // and resyncScene re-resolves it on open. Dirtying here would keep Save All from ever going clean.
-        withoutDirty(() => {
-          syncMaterialInstances(tab.materialId!, asset, tab.id); // push edits to placed references
-          // Foliage prototypes bake their material inline and hang off no node, so the walk above
-          // cannot reach them; this re-derives every scattered rule whose model links this material.
-          syncFoliageRulesForMaterial(tab.materialId!, tab.id);
-          // …and the landscape-material slots that embed a copy of it.
-          syncTerrainMaterialSlots(tab.materialId!, asset, tab.id);
-          // …and the weather volumes that draw their snow with it.
-          syncWeatherSnowMaterials(tab.materialId!, asset, tab.id);
-        });
-        // …and the generated LOD levels derived from it — after their texture twins exist.
-        void refreshLodLevelsForMaterial(tab.materialId, asset, tab.id);
+        propagateMaterialAsset(asset, tab.id);
       } else {
         const asset = buildMaterialAsset(sphere.model.material, tab.title, thumbnail);
         addMaterial(asset); // asset carries a fresh id
@@ -5405,6 +5396,29 @@ export function EngineProvider(props: { children: React.ReactNode }) {
     } catch (e) {
       Logger.error('Failed to save material: ' + e, 'Editor');
     }
+  };
+
+  const propagateMaterialAsset = (asset: MaterialAsset, exceptTabId?: string) => {
+    // Eager mirror: the ref only catches up on the next render, and every propagation below resolves
+    // against it — foliage rules and LOD levels were rebuilt from the material as it was BEFORE this
+    // save, so the edit never reached them.
+    materialsRef.current = materialsRef.current.some(m => m.id === asset.id)
+      ? materialsRef.current.map(m => (m.id === asset.id ? asset : m))
+      : [...materialsRef.current, asset];
+    // Propagation edits other scenes and must not mark them dirty: they store the link (__materialId)
+    // and resyncScene re-resolves it on open. Dirtying here would keep Save All from ever going clean.
+    withoutDirty(() => {
+      syncMaterialInstances(asset.id, asset, exceptTabId); // push edits to placed references
+      // Foliage prototypes bake their material inline and hang off no node, so the walk above
+      // cannot reach them; this re-derives every scattered rule whose model links this material.
+      syncFoliageRulesForMaterial(asset.id, exceptTabId);
+      // …and the landscape-material slots that embed a copy of it.
+      syncTerrainMaterialSlots(asset.id, asset, exceptTabId);
+      // …and the weather volumes that draw their snow with it.
+      syncWeatherSnowMaterials(asset.id, asset, exceptTabId);
+    });
+    // …and the generated LOD levels derived from it — after their texture twins exist.
+    void refreshLodLevelsForMaterial(asset.id, asset, exceptTabId);
   };
 
   // Rename the active material tab (bound to the name field in the material-mode inspector).
@@ -7221,6 +7235,7 @@ export function EngineProvider(props: { children: React.ReactNode }) {
       addMaterial,
       removeMaterial,
       updateMaterial,
+      propagateMaterialAsset,
       terrainMaterials,
       addTerrainMaterial,
       removeTerrainMaterial,

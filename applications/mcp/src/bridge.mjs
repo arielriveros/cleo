@@ -9,6 +9,7 @@
 //   server -> editor   {type:'welcome', server:{name, version}}
 //   server -> editor   {type:'call', id, method, params}
 //   editor -> server   {type:'result', id, ok:true, result} | {type:'result', id, ok:false, error:{message}}
+//   server -> editor   {type:'cancel', id}                     (the agent gave up on call `id`: stop it)
 //   editor -> server   {type:'status', client:{...}}           (project switched, play state, ...)
 //   editor -> server   {type:'term', op, ...}                  (Claude Code hosted in the editor; terminal.mjs)
 //   server -> editor   {type:'term-event', event}
@@ -17,6 +18,7 @@
 // Claude Code session launches -- connect as peers ({type:'hello', role:'peer', token}) and send
 // {type:'call', id, method, params, timeoutMs}; the host runs each through its one editor link and answers
 // {type:'result', ...}. So any number of agents share the editor without fighting over its single socket.
+// A peer's {type:'cancel', id} cancels its call, and the host passes the cancel on to the editor.
 //
 // Security (the holes behind CVE-2025-52882 / CVE-2025-49596 were exactly an unauthenticated localhost
 // socket): bound to 127.0.0.1 only; the Host header must name the loopback address (DNS rebinding); a
@@ -150,25 +152,39 @@ export class EditorBridge extends EventEmitter {
     }
 
     /**
-     * Run `method` in the editor and resolve with what it returns.
+     * Run `method` in the editor and resolve with what it returns. `signal` cancels it: the call rejects
+     * at once and the editor is told to stop the work (a play run stops, a queued change never starts).
      * @param {string} method
      * @param {unknown} params
-     * @param {{ timeoutMs?: number, waitForEditorMs?: number }} [opts]
+     * @param {{ timeoutMs?: number, waitForEditorMs?: number, signal?: AbortSignal }} [opts]
      */
     async call(method, params, opts = {}) {
+        if (opts.signal?.aborted) throw new BridgeError('cancelled', `"${method}" was cancelled.`);
         if (!this.connected && !(await this.waitForEditor(opts.waitForEditorMs ?? 4000))) {
             throw new BridgeError('not_connected', NOT_CONNECTED);
         }
         const socket = /** @type {import('ws').WebSocket} */ (this.socket);
         const id = this.nextId++;
         const timeoutMs = opts.timeoutMs ?? 30000;
+        const signal = opts.signal;
         return new Promise((resolve, reject) => {
+            const onAbort = () => {
+                const entry = this.pending.get(id);
+                if (!entry) return;
+                this.pending.delete(id);
+                clearTimeout(entry.timer);
+                if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'cancel', id }));
+                reject(new BridgeError('cancelled', `"${method}" was cancelled; the editor was told to stop it.`));
+            };
+            const settle = (/** @type {(v: any) => void} */ fn) => (/** @type {any} */ v) => { signal?.removeEventListener('abort', onAbort); fn(v); };
             const timer = setTimeout(() => {
                 this.pending.delete(id);
+                signal?.removeEventListener('abort', onAbort);
                 reject(new BridgeError('timeout', `The editor did not answer "${method}" within ${Math.round(timeoutMs / 1000)} s. `
                     + 'It may be busy (a long import or bake), or its tab may be hidden and throttled.'));
             }, timeoutMs);
-            this.pending.set(id, { resolve, reject, timer, method });
+            this.pending.set(id, { resolve: settle(resolve), reject: settle(reject), timer, method });
+            signal?.addEventListener('abort', onAbort, { once: true });
             socket.send(JSON.stringify({ type: 'call', id, method, params: params ?? {} }));
         });
     }
@@ -256,16 +272,26 @@ export class EditorBridge extends EventEmitter {
         ws.send(JSON.stringify({ type: 'welcome', server: this.serverInfo, role: 'host' }));
         this.log(`peer connected: ${hello.client?.name ?? 'unnamed'} (${this.peers.size} now)`);
         this.emit('peer-connected');
+        /** This peer's calls still running, by ITS id: a cancel from it aborts the one it names. */
+        /** @type {Map<number, AbortController>} */
+        const running = new Map();
         ws.on('message', raw => {
             let msg;
             try { msg = JSON.parse(String(raw)); } catch { return; }
+            if (msg?.type === 'cancel' && typeof msg.id === 'number') { running.get(msg.id)?.abort(); return; }
             if (msg?.type !== 'call' || typeof msg.id !== 'number') return;
             const reply = (/** @type {object} */ body) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'result', id: msg.id, ...body })); };
-            this.call(String(msg.method), msg.params, { timeoutMs: msg.timeoutMs, waitForEditorMs: msg.waitForEditorMs })
+            const controller = new AbortController();
+            running.set(msg.id, controller);
+            this.call(String(msg.method), msg.params, { timeoutMs: msg.timeoutMs, waitForEditorMs: msg.waitForEditorMs, signal: controller.signal })
                 .then(result => reply({ ok: true, result }),
-                    err => reply({ ok: false, error: { code: err?.code ?? 'editor_error', message: err?.message ?? String(err) } }));
+                    err => reply({ ok: false, error: { code: err?.code ?? 'editor_error', message: err?.message ?? String(err) } }))
+                .finally(() => running.delete(msg.id));
         });
         ws.on('close', () => {
+            // The peer's session is gone: what it was waiting for no longer has anyone to report to.
+            for (const c of running.values()) c.abort();
+            running.clear();
             this.peers.delete(ws);
             this.log(`peer disconnected (${this.peers.size} left)`);
             this.emit('peer-disconnected');

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { LightNode, Node, PointLight, Scene } from 'cleo'
+import { Camera2DNode, CharacterBody2DNode, LightNode, Material, Node, PointLight, Scene, Sprite, SpriteNode } from 'cleo'
 import { NodeRefError, nodePath, resolveNodeRef, userChildren } from '../src/features/agentBridge/nodeRefs'
-import { applyProp, elide, outline, settableProps, simpleValue } from '../src/features/agentBridge/inspect'
-import { formatLogs, type AgentLogEntry } from '../src/features/agentBridge/agentLogs'
+import { applyProp, editDistance, elide, nearestNames, outline, settableProps, simpleValue } from '../src/features/agentBridge/inspect'
+import { formatLogs, scopeMatches, type AgentLogEntry } from '../src/features/agentBridge/agentLogs'
+import { applySpec, buildChecked, materialKind, materialTextures } from '../src/features/agentBridge/materials'
+import { checkOpFields } from '../src/features/agentBridge/sceneEdit'
 
 // The agent bridge's pure half: how an agent names nodes, what it is shown of them, and how its property
 // writes are checked. The command layer above it needs the live editor; this is what can be pinned here.
@@ -149,5 +151,93 @@ describe('properties', () => {
     expect(simpleValue(new Float32Array(100))).toBeUndefined()
     expect(elide({ positions: new Float32Array(3000), img: 'data:image/png;base64,' + 'A'.repeat(4096) }))
       .toEqual({ positions: '<Float32Array x3000>', img: '<data URL, 4 KB>' })
+  })
+})
+
+describe('properties an agent must not break', () => {
+  it('never writes a value over an object link, and says what to use instead', () => {
+    const sprite = new SpriteNode('Hero', new Sprite(), 'free')
+    expect(sprite.tileset).toBeNull()
+    expect(() => applyProp(sprite, 'tileset', 'Grass')).toThrow(/assets: \{"tileset"/)
+    expect(sprite.tileset).toBeNull()
+  })
+
+  it('keeps strings strings, and refuses an object for a plain value', () => {
+    const cam = new Camera2DNode('Cam')
+    applyProp(cam, 'followTarget', 'Player')
+    expect(cam.followTarget).toBe('Player')
+    expect(() => applyProp(cam, 'followTarget', 3)).toThrow(/is a string/)
+  })
+
+  it('suggests the nearest property names for a miss', () => {
+    const light = new LightNode('Lamp', new PointLight({ intensity: 800 } as any))
+    expect(() => applyProp(light, 'light.intensty', 1)).toThrow(/Did you mean: light\.intensity/)
+    expect(nearestNames('colr', ['color', 'scale', 'colour'])).toEqual(['color', 'colour'])
+    expect(editDistance('Kitten', 'sitting')).toBe(3)
+  })
+
+  it('leaves out runtime readouts and the nested objects rebuilt each frame', () => {
+    const body = new CharacterBody2DNode('P')
+    const props = settableProps(body, 400)
+    expect(Object.keys(props).some(k => k.startsWith('intent.') || k.startsWith('tuning.'))).toBe(false)
+    expect(props).not.toHaveProperty('wantsPhysicsBuild')
+    expect(props).not.toHaveProperty('isJumping')
+    const cam = settableProps(new Camera2DNode('Cam'), 400)
+    expect(Object.keys(cam).some(k => k.startsWith('camera.'))).toBe(false)
+    expect(cam).toHaveProperty('pixelsPerUnit')
+  })
+
+  it('outlines with every id on request', () => {
+    const { s, player } = scene()
+    expect(outline(s, { root: s.root, depth: 1, limit: 100, ids: true }).text).toContain(`Player [node] #${player.id}`)
+  })
+
+  it('finds a window game\'s logs under the scope asked for', () => {
+    expect(scopeMatches('Game/Script', 'Script')).toBe(true)
+    expect(scopeMatches('Script', 'script')).toBe(true)
+    expect(scopeMatches('Editor', 'Script')).toBe(false)
+  })
+})
+
+describe('agent materials', () => {
+  it('writes a spec into any shading model, by that model\'s own keys', () => {
+    const pbr = Material.PBR().serialize()
+    applySpec(pbr, { baseColor: [1, 0, 0], roughness: 0.4, emissive: [0, 0, 1] }, [])
+    expect(pbr.baseColor).toEqual([1, 0, 0])
+    expect(pbr.emissiveFactor).toEqual([0, 0, 1])
+    const cel = Material.Cel().serialize()
+    applySpec(cel, { baseColor: [0, 1, 0], props: { bands: 4 } }, [])
+    expect(cel.diffuse).toEqual([0, 1, 0])
+    expect(buildChecked(cel, { props: { bands: 4 } }).stored.bands).toBe(4)
+    expect(() => applySpec(Material.Cel().serialize(), { metallic: 1 }, [])).toThrow(/cel material has no metallic.*shininess/)
+  })
+
+  it('fills texture slots by texture name, and names the slots a model has', () => {
+    const textures = [{ id: 'tex-1', name: 'Bricks' }] as any
+    const pbr = Material.PBR().serialize()
+    applySpec(pbr, { textures: { baseColor: 'Bricks', metallicRoughness: 'Bricks' } }, textures)
+    const { stored } = buildChecked(pbr, {})
+    expect(stored.textures.baseColorTexture).toBe('tex-1')
+    expect(materialTextures(stored, textures)).toEqual({ baseColor: 'Bricks', metallicRoughness: 'Bricks' })
+    expect(() => applySpec(Material.Cel().serialize(), { textures: { occlusion: 'Bricks' } }, textures)).toThrow(/Slots: base, ramp/)
+    expect(() => applySpec(Material.PBR().serialize(), { textures: { baseColor: 'Stone' } }, textures)).toThrow(/No texture named "Stone"/)
+  })
+
+  it('refuses a property the model does not store, with the near names', () => {
+    const pbr = Material.PBR().serialize()
+    applySpec(pbr, { props: { roughnes: 0.2 } }, [])
+    expect(() => buildChecked(pbr, { props: { roughnes: 0.2 } })).toThrow(/"roughnes" is not a property of a pbr material\. Did you mean: roughness/)
+    expect(materialKind(Material.Basic({}).serialize())).toBe('unlit')
+    expect(materialKind(Material.Foliage().serialize())).toBe('foliage')
+  })
+})
+
+describe('scene_edit op fields', () => {
+  it('names a stray field, what replaced a retired one, and what the op takes', () => {
+    expect(() => checkOpFields({ op: 'create', type: 'cube', body: { mass: 1 } })).toThrow(/"body" is gone: a rigid body is a Collider node/)
+    expect(() => checkOpFields({ op: 'update', node: 'A', postion: [0, 0, 0] })).toThrow(/Did you mean "position"/)
+    expect(() => checkOpFields({ op: 'delete' })).toThrow(/delete needs node/)
+    expect(() => checkOpFields({ op: 'explode', node: 'A' })).toThrow(/Unknown op "explode"/)
+    expect(() => checkOpFields({ op: 'makeTemplate', node: 'A', name: 'Crate', replace: false })).not.toThrow()
   })
 })

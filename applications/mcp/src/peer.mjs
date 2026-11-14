@@ -68,16 +68,33 @@ export class PeerBridge {
 
     /**
      * @param {string} method @param {unknown} params
-     * @param {{ timeoutMs?: number, waitForEditorMs?: number }} [opts]
+     * @param {{ timeoutMs?: number, waitForEditorMs?: number, signal?: AbortSignal }} [opts]
+     *   `signal` cancels the call: it rejects at once, and the host is told, which tells the editor.
      */
     async call(method, params, opts = {}) {
+        if (opts.signal?.aborted) throw new BridgeError('cancelled', `"${method}" was cancelled.`);
         const ws = await this._link();
         const id = this.nextId++;
         const timeoutMs = opts.timeoutMs ?? 30000;
+        const signal = opts.signal;
         return new Promise((resolve, reject) => {
+            const onAbort = () => {
+                const p = this.pending.get(id);
+                if (!p) return;
+                this.pending.delete(id);
+                clearTimeout(p.timer);
+                if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'cancel', id }));
+                reject(new BridgeError('cancelled', `"${method}" was cancelled; the editor was told to stop it.`));
+            };
+            const settle = (/** @type {(v: any) => void} */ fn) => (/** @type {any} */ v) => { signal?.removeEventListener('abort', onAbort); fn(v); };
             // A little longer than the host's own timeout, so its (more specific) message wins the race.
-            const timer = setTimeout(() => { this.pending.delete(id); reject(new BridgeError('timeout', `No answer to "${method}" from the agent host.`)); }, timeoutMs + 5000);
-            this.pending.set(id, { resolve, reject, timer });
+            const timer = setTimeout(() => {
+                this.pending.delete(id);
+                signal?.removeEventListener('abort', onAbort);
+                reject(new BridgeError('timeout', `No answer to "${method}" from the agent host.`));
+            }, timeoutMs + 5000);
+            this.pending.set(id, { resolve: settle(resolve), reject: settle(reject), timer });
+            signal?.addEventListener('abort', onAbort, { once: true });
             ws.send(JSON.stringify({ type: 'call', id, method, params: params ?? {}, timeoutMs, waitForEditorMs: opts.waitForEditorMs }));
         });
     }

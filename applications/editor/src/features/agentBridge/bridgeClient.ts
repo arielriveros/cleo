@@ -16,7 +16,8 @@ export interface CommandResult {
   images?: { data: string; mimeType: string }[]
   isError?: boolean
 }
-export type CommandHandler = (method: string, params: any) => Promise<CommandResult>
+/** `signal` aborts when the agent cancels the call (the server sends a `cancel` frame for it). */
+export type CommandHandler = (method: string, params: any, signal: AbortSignal) => Promise<CommandResult>
 
 export type BridgeState =
   /** Turned off by the user (or a production build). */
@@ -83,6 +84,8 @@ class AgentBridgeClient {
   private concurrent = new Set<string>()
   /** What is running now, oldest first: the chip shows the newest. */
   private inflight: BridgeActivity[] = []
+  /** Each call not yet answered, queued or running, by id: a `cancel` frame aborts it. */
+  private controllers = new Map<number, AbortController>()
   private termListeners = new Set<(event: any) => void>()
   private running = false
   /** A token this tab must not retry: refused, or handed over to another tab. */
@@ -233,12 +236,18 @@ class AgentBridgeClient {
         for (const cb of [...this.termListeners]) cb(msg.event)
       } else if (msg?.type === 'call' && typeof msg.id === 'number') {
         this.dispatch(socket, msg.id, String(msg.method), msg.params)
+      } else if (msg?.type === 'cancel' && typeof msg.id === 'number') {
+        // The agent gave up on the call (Esc): a queued one never starts, a running one stops where it is.
+        this.controllers.get(msg.id)?.abort()
       }
     }
     socket.onerror = () => { /* onclose follows and decides */ }
     socket.onclose = ev => {
       if (this.socket !== socket) return
       this.socket = null
+      // Nobody is left to answer: stop what the old link's calls were doing.
+      for (const c of this.controllers.values()) c.abort()
+      this.controllers.clear()
       if (ev.code === BAD_TOKEN) { this.parkedToken = found.token; this.set({ state: 'rejected', server: null, capabilities: [] }) }
       else if (ev.code === REPLACED) { this.parkedToken = found.token; this.set({ state: 'standby', server: null, capabilities: [] }) }
       else this.set({ state: this.enabled ? 'searching' : 'off', server: null, capabilities: [] })
@@ -252,24 +261,34 @@ class AgentBridgeClient {
    * skip the line, so a look at the scene never waits behind a capture, a Play run or a cold type check.
    */
   private dispatch(socket: WebSocket, id: number, method: string, params: unknown) {
-    if (this.concurrent.has(method)) { void this.run(socket, id, method, params); return }
-    this.queue = this.queue.then(() => this.run(socket, id, method, params))
+    const controller = new AbortController()
+    this.controllers.set(id, controller)
+    if (this.concurrent.has(method)) { void this.run(socket, id, method, params, controller.signal); return }
+    this.queue = this.queue.then(() => this.run(socket, id, method, params, controller.signal))
   }
 
-  private async run(socket: WebSocket, id: number, method: string, params: unknown) {
+  private async run(socket: WebSocket, id: number, method: string, params: unknown, signal: AbortSignal) {
+    // Cancelled while it waited its turn: answered without running, so the queue behind it moves on.
+    if (signal.aborted) {
+      this.controllers.delete(id)
+      if (socket.readyState === WebSocket.OPEN)
+        socket.send(JSON.stringify({ type: 'result', id, ok: false, error: { code: 'cancelled', message: `"${method}" was cancelled before it ran.` } }))
+      return
+    }
     const activity = { method, startedAt: Date.now() }
     this.inflight.push(activity)
     this.set({ activity })
     let reply: object
     try {
       if (!this.handler) throw new Error('The editor is still starting up; try again in a moment.')
-      reply = { type: 'result', id, ok: true, result: await this.handler(method, params) }
+      reply = { type: 'result', id, ok: true, result: await this.handler(method, params, signal) }
       this.set({ lastError: null })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       reply = { type: 'result', id, ok: false, error: { message } }
       this.set({ lastError: message })
     }
+    this.controllers.delete(id)
     this.inflight.splice(this.inflight.indexOf(activity), 1)
     this.set({ activity: this.inflight.at(-1) ?? null, calls: this.status.calls + 1, lastMethod: method })
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(reply))

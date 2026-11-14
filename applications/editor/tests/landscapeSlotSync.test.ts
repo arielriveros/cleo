@@ -46,7 +46,9 @@ describe('slot material propagation', () => {
 
   it('runs on every material save, alongside the node and foliage syncs', () => {
     const ctx = readFileSync(join(__dirname, '..', 'src', 'features', 'EngineContext.tsx'), 'utf8')
-    expect(ctx).toMatch(/syncFoliageRulesForMaterial\(tab\.materialId!, tab\.id\);[\s\S]{0,200}syncTerrainMaterialSlots\(tab\.materialId!, asset, tab\.id\)/)
+    // The save hands the asset to propagateMaterialAsset, which the agent's material writes use too.
+    expect(ctx).toMatch(/updateMaterial\(tab\.materialId, asset\);\s*propagateMaterialAsset\(asset, tab\.id\)/)
+    expect(ctx).toMatch(/syncFoliageRulesForMaterial\(asset\.id, exceptTabId\);[\s\S]{0,200}syncTerrainMaterialSlots\(asset\.id, asset, exceptTabId\)/)
     // Inside withoutDirty with the others: propagation must not mark other tabs unsaved.
     expect(ctx).toMatch(/withoutDirty\(\(\) => \{[\s\S]{0,700}syncTerrainMaterialSlots\(/)
   })

@@ -28,7 +28,7 @@ export default function AgentBridgeHost() {
   useEffect(() => {
     attachAgentLogs()
     agentBridge.setHost(
-      (method, params) => runCommand(method, params, () => hostRef.current),
+      (method, params, signal) => runCommand(method, params, () => hostRef.current, signal),
       async () => ({
         app: 'cleo-editor',
         version: APP_VERSION,

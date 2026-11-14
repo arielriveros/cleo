@@ -16,6 +16,29 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **The agent link catches up with the editor, and tests what it builds** (cleo-mcp 0.6).
+  - *All or nothing.* A `scene_edit` call whose op fails changes nothing, and every op's fields are checked
+    before any runs: a retired or misspelt field (`body`, `postion`) is refused by name, with what replaced it.
+  - *Undo covers the libraries.* The scripts, materials and templates an agent makes or changes undo with
+    the request that made them.
+  - *Input during Play.* `play_control` presses keys, mouse buttons and project actions in the running game
+    and samples nodes as numbers, so "prove the player walks" is one call answered with the distance it
+    moved. A run keeps going with `run`, and Esc in Claude Code stops it.
+  - *Scenes and tabs.* A new `workspace` tool opens and makes scenes, switches 2D/3D, and opens assets in
+    their tabs; in a template or model tab, `scene_edit` edits that asset.
+  - *Templates.* `makeTemplate` turns a built object into a template (and places it again in the same
+    call), with `makeVariant`, `revertOverrides` and `unpack`; renaming a placed copy is kept as its override.
+  - *Materials.* PBR, cel, foliage or unlit, with texture slots by texture name; an existing material keeps
+    its type, and a change reaches everything using it, as a material tab's save does.
+  - *Precise views.* A screenshot shows a split viewport's editing pane, and four angles of a node fit in
+    one image. `node_get` reads several nodes and only the parts asked for; `scene_tree` can list world
+    positions; scripts can be patched with exact edits.
+  - *Up to date.* The Add types include Camera 2D, Room, Parallax Layer, Character Body 2D, Area Light, GI
+    Volume and Sequence (a test now keeps them in step); 2D scenes are reported and explained; a game in its
+    own window is seen, stopped and paused; edits in a preview tab are refused instead of lost; `props`
+    never write over an object link. `execute_js` no longer asks before every run (the Agent chip's
+    **Allow code execution** is the switch).
+
 - **Physics as nodes.** A rigid body and a trigger are nodes now, in the Add catalog's new **Simulation**
   category beside Water Volume, Wind, Weather and Cloth.
   - *Collider:* the rigid body — mass, surface, constraints, simulation range — and its shapes. Everything
