@@ -46,20 +46,26 @@ interface TransportProps {
   accent: string;     // hover color when idle
   activeClass: string; // fill when this is the current state
   onClick: () => void;
-  /** A narrow segment: the Play target's chevron. */
-  narrow?: boolean;
+  /**
+   * One half of a pair drawn as a single segment, `[ Play ▾ ]`: no divider, fill or dimming of its own.
+   * The pair's frame draws those for both halves, and the two still click apart.
+   */
+  paired?: boolean;
+  /** Extra classes: a paired half's width and where its mark sits. */
+  className?: string;
   children: React.ReactNode;
 }
-function Transport({ title, disabled, active, accent, activeClass, onClick, narrow, children }: TransportProps) {
+function Transport({ title, disabled, active, accent, activeClass, onClick, paired, className, children }: TransportProps) {
   return (
     <Button
       title={title}
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        narrow ? 'w-[16px]' : 'w-[30px]',
-        'h-[25px] p-0 rounded-none border-0 border-r border-control-hover last:border-r-0 disabled:opacity-40',
+        'w-[30px] h-[25px] p-0 rounded-none border-0 border-r border-control-hover last:border-r-0 disabled:opacity-40',
+        paired && 'bg-transparent border-r-0 disabled:opacity-100 disabled:hover:bg-transparent',
         active ? activeClass : cn('text-muted', accent),
+        className,
       )}
     >
       {children}
@@ -297,6 +303,10 @@ export default function MenuBar() {
   const onRestart = () => windowPlay().restart(buildWindowPlayData);
 
   const inEditorSession = playState !== 'stopped';
+  // Play's own state, which its segment (Play and the target chevron) draws for both halves.
+  const playLit = windowActive ? windowSession.status === 'running' : playState === 'playing';
+  const playDisabled = windowActive ? false : (playState === 'playing' || sessionKind === 'simulate');
+  const targetDisabled = windowActive || inEditorSession;
   const windowBusy = windowSession.status === 'building' || windowSession.status === 'starting' || windowSession.rebuilding;
   const windowLabel =
     windowSession.rebuilding ? 'Rebuilding…'
@@ -433,26 +443,34 @@ export default function MenuBar() {
           {/* Never gated by the active tab. Play runs the game scene from anywhere: startPlay switches to
               the scene tab itself, and Stop returns to the tab you pressed it from. Play in window builds
               from the scene tab's scene whichever tab is in front, and never leaves it. */}
-          <Transport
-            title={windowActive
-              ? (windowSession.status === 'paused' ? 'Resume the game in its window' : 'Bring the game window forward')
-              : playTarget === 'window' && playState === 'stopped' ? 'Play in window — the game runs in a window and a process of its own' : 'Play'}
-            disabled={windowActive ? false : (playState === 'playing' || sessionKind === 'simulate')}
-            active={windowActive ? windowSession.status === 'running' : playState === 'playing'}
-            activeClass='bg-success hover:bg-success text-fg'
-            accent='hover:text-success' onClick={() => onPlay()}
-          >
-            {windowActive || (playTarget === 'window' && playState === 'stopped') ? <PlayWindowIcon /> : <PlayGlyph />}
-          </Transport>
-          {/* Where Play runs. Fixed while a game runs, either way. */}
-          <Transport
-            narrow title='Where Play runs: in the editor, or in a window of its own'
-            disabled={windowActive || inEditorSession}
-            active={showTargets} activeClass='bg-control text-fg'
-            accent='hover:text-fg' onClick={() => setShowTargets(v => !v)}
-          >
-            <ChevronDownIcon />
-          </Transport>
+          {/* Play and where it runs share one segment, [ Play ▾ | … ]: the chevron sits against the play
+              mark, with no divider. They are still two buttons, so the mark plays and the chevron opens the
+              menu. The frame carries Play's fill and dimming for both, so a running game lights the whole
+              segment; a chevron that is fixed while Play is not dims only its own mark. */}
+          <div className={cn('flex border-r border-control-hover', playLit ? 'bg-success' : 'bg-control', playDisabled && 'opacity-40')}>
+            <Transport
+              paired className='w-[22px] justify-end'
+              title={windowActive
+                ? (windowSession.status === 'paused' ? 'Resume the game in its window' : 'Bring the game window forward')
+                : playTarget === 'window' && playState === 'stopped' ? 'Play in window — the game runs in a window and a process of its own' : 'Play'}
+              disabled={playDisabled}
+              active={playLit}
+              activeClass='bg-success hover:bg-success text-fg'
+              accent='hover:text-success' onClick={() => onPlay()}
+            >
+              {windowActive || (playTarget === 'window' && playState === 'stopped') ? <PlayWindowIcon /> : <PlayGlyph />}
+            </Transport>
+            {/* Where Play runs. Fixed while a game runs, either way. */}
+            <Transport
+              paired className={cn('w-[14px] justify-end [&>svg]:-ml-[2px]', !playDisabled && 'disabled:text-dim')}
+              title='Where Play runs: in the editor, or in a window of its own'
+              disabled={targetDisabled}
+              active={showTargets} activeClass='bg-control-hover text-fg'
+              accent='hover:text-fg' onClick={() => setShowTargets(v => !v)}
+            >
+              <ChevronDownIcon />
+            </Transport>
+          </div>
           {/* Play without possession: physics, AI and scripts run on a throwaway copy, watched through the
               editor camera. Stop puts the scene back exactly as it was. */}
           <Transport

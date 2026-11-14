@@ -2,8 +2,9 @@ import { SegmentedControl } from '../ui';
 import { effectiveGizmoSpace } from './gizmoMath';
 import type { GizmoMode, GizmoSpace } from './types';
 
-// The floating gizmo controls every Cleo viewport shows top-right: move / rotate / scale as icons, and the
-// world / local axes toggle. The editor's EngineViewport and Cleo Creator's FX viewport both draw this one.
+// The floating gizmo controls every Cleo viewport shows top-right, as two joined strips: move / rotate /
+// scale as icons, then the world / local axes toggle. The editor's EngineViewport and Cleo Creator's FX
+// viewport both draw this one.
 
 // Compact glyphs (stroke currentColor) for the gizmo-mode toggle.
 export const MoveIcon = () => (
@@ -45,7 +46,7 @@ export interface GizmoModeControlsProps {
 export function GizmoModeControls({ mode, space, onMode, onSpace }: GizmoModeControlsProps) {
   return <>
     <SegmentedControl<GizmoMode>
-      size='sm'
+      joined size='sm'
       options={[
         { value: 'position', label: <MoveIcon />, title: 'Move (W)' },
         { value: 'rotation', label: <RotateIcon />, title: 'Rotate (E)' },
@@ -57,7 +58,7 @@ export function GizmoModeControls({ mode, space, onMode, onSpace }: GizmoModeCon
         TRS transform can hold — so the toggle greys out rather than lying. The stored preference is
         untouched and comes back with move or rotate. */}
     <SegmentedControl<GizmoSpace>
-      size='sm'
+      joined size='sm'
       options={[
         { value: 'world', label: <WorldIcon />, title: 'World axes (X)', disabled: mode === 'scale' },
         { value: 'local', label: <LocalIcon />, title: "The node's own axes (X)", disabled: mode === 'scale' },
