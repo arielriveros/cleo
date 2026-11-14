@@ -37,6 +37,14 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
     const landscape = () => nodes().find(n => n.type === 'landscape');
     const terrain = () => landscape().terrain;
     const library = (name: string) => read('libraries', `${name}.json`);
+    /** The Buildings group's buildings: each a Collider placing it, its linked copy (a lodGroup) the one node under it. */
+    const buildings = () => nodes().find(n => n.name === 'Buildings').children.map((collider: any) => {
+        expect(collider.type, collider.name).toBe('collider');
+        expect(collider.children.map((c: any) => c.type), collider.name).toEqual(['lodGroup']);
+        return { collider, lod: collider.children[0] };
+    });
+    /** The Collider a prop of the scene stands in: the one holding the node named `name`. */
+    const colliderHolding = (name: string) => nodes().find(n => n.type === 'collider' && n.children?.some((c: any) => c.name === name));
 
     let grid: Float32Array | null = null;
     const heights = (): Float32Array => {
@@ -350,7 +358,8 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         expect(Math.abs(y - heightAt(x, z))).toBeLessThan(0.1);
         expect(fire.variables.__scriptId).toBeUndefined();
         expect(fire.variables.__templateId).toBeUndefined();
-        expect(fire.trigger).toBeUndefined();
+        // No zone to rest at: it is no Trigger, and holds none.
+        expect(allNodes(fire).filter((n: any) => n.type === 'trigger')).toEqual([]);
         expect(fire.children.map((c: any) => c.name)).toEqual(['Model', 'Fire']);
         const light = fire.children.find((c: any) => c.name === 'Fire');
         expect(light.scriptVars.lit).toBe(true);
@@ -359,40 +368,44 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
 
     it('places each building as a linked copy, the houses enterable, nothing floating', () => {
         const models = library('models');
-        const buildings = nodes().find(n => n.name === 'Buildings').children;
-        expect(buildings.map((b: any) => b.name).sort()).toEqual(['Granary', 'Long House', 'Old House', 'Windmill']);
-        for (const b of buildings) {
-            expect(models.some((m: any) => m.id === b.variables.__modelId.value), b.name).toBe(true);
-            expect(b.body.mass).toBe(0);
+        // Each building stands in a static Collider that places it; the linked copy (a placed model's root,
+        // rebuilt from its asset) sits under it unmoved.
+        const placed = buildings();
+        expect(placed.map(({ lod }) => lod.name).sort()).toEqual(['Granary', 'Long House', 'Old House', 'Windmill']);
+        for (const { collider: b, lod } of placed) {
+            const name = lod.name;
+            expect(models.some((m: any) => m.id === lod.variables.__modelId.value), name).toBe(true);
+            expect([lod.position, lod.rotation, lod.scale], name).toEqual([[0, 0, 0], [0, 0, 0], [1, 1, 1]]);
+            expect(b.collider.mass).toBe(0);
             // The two houses are walled in boxes with their doorways open, under one hull for the roof
             // (houses.mjs) — a few dozen shapes, not hundreds; the granary and the windmill keep a hull
             // over their whole body.
-            const enterable = b.name === 'Old House' || b.name === 'Long House';
+            const enterable = name === 'Old House' || name === 'Long House';
             if (enterable) {
-                const shapes = b.body.shapes;
-                expect(shapes.length, b.name).toBeGreaterThan(10);
-                expect(shapes.length, b.name).toBeLessThan(200);
-                expect(shapes.filter((s: any) => s.type === 'convex'), b.name).toHaveLength(1);
-                expect(shapes.filter((s: any) => s.type !== 'convex').every((s: any) => s.type === 'box'), b.name).toBe(true);
+                const shapes = b.collider.shapes;
+                expect(shapes.length, name).toBeGreaterThan(10);
+                expect(shapes.length, name).toBeLessThan(200);
+                expect(shapes.filter((s: any) => s.type === 'convex'), name).toHaveLength(1);
+                expect(shapes.filter((s: any) => s.type !== 'convex').every((s: any) => s.type === 'box'), name).toBe(true);
             } else {
-                expect(b.body.shapes[0].type).toBe('convex');
+                expect(b.collider.shapes[0].type).toBe('convex');
             }
             // The base goes at the LOWEST ground under the footprint, so it never floats over the centre —
             // and inside a house the ground is raised to its raised floor (a third of a metre or so up).
             const lift = heightAt(b.position[0], b.position[2]) - b.position[1];
             if (enterable) {
-                expect(lift, b.name).toBeGreaterThan(0.2);
-                expect(lift, b.name).toBeLessThan(0.6);
-            } else expect(lift, b.name).toBeGreaterThanOrEqual(0);
+                expect(lift, name).toBeGreaterThan(0.2);
+                expect(lift, name).toBeLessThan(0.6);
+            } else expect(lift, name).toBeGreaterThanOrEqual(0);
         }
-        const sails = allNodes(buildings.find((b: any) => b.name === 'Windmill')).find(n => n.name === 'Sails');
+        const sails = allNodes(placed.find(({ lod }) => lod.name === 'Windmill')!.lod).find(n => n.name === 'Sails');
         expect(sails.script).toContain('class ValleyWindmillNode');
     });
 
     it('places the buildings as LOD groups whose levels are the asset’s, decimated (lods.mjs)', () => {
         const models = library('models');
         const tris = (n: any) => allNodes(n).reduce((t, x) => t + (x.type === 'model' ? x.model.geometry.indices.length / 3 : 0), 0);
-        for (const b of nodes().find(n => n.name === 'Buildings').children) {
+        for (const { lod: b } of buildings()) {
             const asset = models.find((m: any) => m.id === b.variables.__modelId.value);
             // The wrapper instantiateModelAsset builds: lodGroup, one child per level, no cull for landmarks.
             expect(b.type, b.name).toBe('lodGroup');
@@ -648,17 +661,18 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
 
     it('drops props of different densities into the pond, above the water', () => {
         const water = nodes().find(n => n.name === 'Pond Water');
-        const named = (name: string) => nodes().find(n => n.name === name);
+        // Each prop is a model in a Collider of its own, which places it (its scale too) and carries its mass.
+        const named = (name: string) => colliderHolding(name);
         const density = (n: any) => {
             const [sx, sy, sz] = n.scale;
-            const shape = n.body.shapes[0];
+            const shape = n.collider.shapes[0];
             const vol = shape.type === 'box' ? sx * sy * sz : Math.PI * (0.5 * sx) * (0.5 * sz) * sy;
-            return n.body.mass / vol;
+            return n.collider.mass / vol;
         };
         for (const name of ['Floating Crate', 'Floating Log', 'Floating Barrel', 'Iron Chest']) {
             const n = named(name);
             expect(n, name).toBeDefined();
-            expect(n.body.mass, name).toBeGreaterThan(0);
+            expect(n.collider.mass, name).toBeGreaterThan(0);
             expect(n.position[1], name).toBeGreaterThan(water.position[1]);
         }
         expect(density(named('Floating Crate'))).toBeLessThan(500);
@@ -890,10 +904,11 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
         const { Spline3, closestOnTriangle } = await import('../src/core/math');
         const { mat4, quat, vec3 } = await import('gl-matrix');
         const { INTERIOR_SHOTS } = await import('../tools/valley/cinematic/tour');
-        // World-space triangles of each building's most detailed level, composed down its node chain.
+        // World-space triangles of each building's most detailed level, composed down its node chain (its
+        // Collider, the lodGroup under it, the level).
         const local = (n: any) => mat4.fromRotationTranslationScale(mat4.create(),
             quat.fromEuler(quat.create(), ...((n.rotation ?? [0, 0, 0]) as [number, number, number])), n.position ?? [0, 0, 0], n.scale ?? [1, 1, 1]);
-        const buildings = nodes().find(n => n.name === 'Buildings').children.map((lod: any) => {
+        const houses = buildings().map(({ collider, lod }) => {
             const tris: Float64Array[] = [];
             const walk = (n: any, parent: any) => {
                 const world = mat4.multiply(mat4.create(), parent, local(n));
@@ -907,12 +922,12 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
                 }
                 for (const c of n.children ?? []) walk(c, world);
             };
-            walk(lod.children[0], local(lod));
+            walk(lod.children[0], mat4.multiply(mat4.create(), local(collider), local(lod)));
             const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
             for (const t of tris) for (let k = 0; k < 9; k++) { min[k % 3] = Math.min(min[k % 3], t[k]); max[k % 3] = Math.max(max[k % 3], t[k]); }
             return { name: lod.name, tris, min, max };
         });
-        expect(buildings.map((b: any) => b.name).sort()).toEqual(['Granary', 'Long House', 'Old House', 'Windmill']);
+        expect(houses.map((b: any) => b.name).sort()).toEqual(['Granary', 'Long House', 'Old House', 'Windmill']);
         /** Distance from p to the nearest triangle, or `cap` when none is nearer. */
         const clearance = (p: number[], tris: Float64Array[], cap: number) => {
             let best = cap;
@@ -932,7 +947,7 @@ describe.skipIf(!present)('the Valley example project', { timeout: 60_000 }, () 
             const inside = INTERIOR_SHOTS.includes(section.id), need = inside ? 1.0 : 1.5;
             for (let i = 0; i <= 400; i++) {
                 const p = spline.pointAt(i / 400);
-                for (const b of buildings) {
+                for (const b of houses) {
                     if ([0, 1, 2].some(c => p[c] < b.min[c] - need || p[c] > b.max[c] + need)) continue;
                     const d = clearance(p, b.tris, need + 0.01);
                     expect(d, `${section.id} at ${p.map((v: number) => v.toFixed(2))} from the ${b.name}`).toBeGreaterThan(need);

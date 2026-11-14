@@ -5,7 +5,7 @@ import { SkyIcon } from '../nodeInspector/sectionIcons'
 import {
   CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, ExposureVolumeIcon, GiVolumeIcon, VolumetricFogIcon, SkyboxIcon, SkyLightIcon, CloudsIcon, WindIcon, WeatherIcon,
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
-  SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon, CharacterBody2DIcon, Collider2DIcon, Area2DIcon,
+  SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon, CharacterBody2DIcon, Collider2DIcon, ColliderIcon, TriggerIcon,
 } from './nodeIcons'
 import { Glyph } from './iconBase';
 import { UI_ICONS } from './uiIcons';
@@ -29,7 +29,7 @@ const TYPE_ICONS: Record<string, () => JSX.Element> = {
   sequence: SequenceIcon,
   camera2D: Camera2DIcon, room2D: Room2DIcon, parallaxLayer: ParallaxLayerIcon,
   characterBody2D: CharacterBody2DIcon, body2D: Collider2DIcon,
-  area2D: Area2DIcon,
+  collider: ColliderIcon, trigger: TriggerIcon,
 };
 
 /** The glyph a node type is drawn with, UI elements included; undefined for a type with none (a plain node). */

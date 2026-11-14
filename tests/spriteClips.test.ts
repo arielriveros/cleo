@@ -4,7 +4,8 @@ import { Scene } from '../src/core/scene/scene';
 import { Node } from '../src/core/scene/nodes/node';
 import { AnimatedSpriteNode } from '../src/core/scene/nodes/animatedSpriteNode';
 import { CharacterBody2DNode } from '../src/core/scene/nodes/characterBody2DNode';
-import { Area2DNode } from '../src/core/scene/nodes/area2DNode';
+import { TriggerNode } from '../src/core/scene/nodes/triggerNode';
+
 import { Sprite } from '../src/graphics/sprite';
 import { Tileset } from '../src/graphics/tilemap/tileset';
 import { createConditionContext } from '../src/core/conditions';
@@ -12,6 +13,13 @@ import {
     advanceClip, clipLength, createPlayhead, normalizedTime, parseSpriteAnimationSet, stepSpriteMachine,
 } from '../src/animation/spriteAnimation';
 import type { SpriteAnimationSet, SpriteClip } from '../src/animation/spriteAnimation';
+/** A 2D trigger (a Trigger node in a 2D scene) `size` across. */
+function area2D(name: string, size: [number, number]): TriggerNode {
+    const t = new TriggerNode(name);
+    t.size = size;
+    t.mask = 1;
+    return t;
+}
 
 // Sprite clips: named clips with per-frame times, events and hitboxes, ping-pong and once, and the state
 // machine that picks them from a 2D body's state and from triggers.
@@ -120,9 +128,10 @@ const SET: SpriteAnimationSet = {
 
 function warrior(withMachine = false) {
     const scene = new Scene();
+    scene.dimension = '2D';
     const ts = new Tileset({ id: 'w', textureId: 'w.png', imageWidth: 30, imageHeight: 30, tileWidth: 1, tileHeight: 1, columns: 30, rows: 30 });
     const body = new CharacterBody2DNode('Warrior');
-    const sword = new Area2DNode('Sword', [0.5, 0.5]);
+    const sword = area2D('Sword', [0.5, 0.5]);
     body.addChild(sword);
     const sprite = new AnimatedSpriteNode('Sprite', new Sprite({ tileset: ts }), { constraints: 'free' });
     const set: SpriteAnimationSet = withMachine ? {

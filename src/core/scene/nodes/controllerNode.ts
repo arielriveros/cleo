@@ -719,9 +719,11 @@ export class ControllerNode extends Node {
         try {
             const result = physics.raycast(from, to, { ignore: pawn?.body ? [pawn.body] : undefined });
             if (!result) return false;
-            // A hit ON the target is not an obstruction. Characters carry bodies, so without this an
-            // agent can never see another agent.
-            if (result.node && this._candidateIds.has(result.node.id)) return false;
+            // A hit ON the target is not an obstruction. Characters stand in colliders, so without this an
+            // agent can never see another agent: the body's node is the Collider, the candidate under it.
+            const hitNode = result.node;
+            if (hitNode && (this._candidateIds.has(hitNode.id)
+                || (hitNode.nodeType === 'collider' && hitNode.children.some(c => this._candidateIds.has(c.id))))) return false;
             vec3.set(hit, result.point[0], result.point[1], result.point[2]);
             return true;
         } catch {
@@ -1496,7 +1498,8 @@ export class ControllerNode extends Node {
                 const hit = physics.raycast(
                     [from[0], from[1], from[2]], [to[0], to[1], to[2]],
                     { ignore: pawn.body ? [pawn.body] : undefined });
-                return !hit || hit.node === target;
+                // A body's node is its Collider: the target counts when the hit is the collider it stands in.
+                return !hit || hit.node === target || (!!hit.node && hit.node === target.collider);
             } catch { return true; }
         }
         return 0;

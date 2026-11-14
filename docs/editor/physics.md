@@ -1,15 +1,21 @@
 # Physics
 
-The **Physics** panel, on any selected node. Three collapsible sections: Rigid Body, Trigger, and
-Ragdoll — plus the shape list they share.
+Physics in a scene is made of nodes, both in the Add catalog's [Simulation](scene-authoring.md#simulation)
+category and edited in Properties:
+
+- a **Collider** is a rigid body: its shapes are what collides, and everything under it moves with it;
+- a **Trigger** is a sensor: it detects what comes in and goes out, and stops nothing.
+
+A skinned model's **Ragdoll** is a section of that model's own Properties.
 
 The runtime side is in [Motion and physics](../scripting/motion-and-physics.md).
 
-## Rigid body
+## Collider
 
-What makes the node solid: a body the physics solver moves (or holds still, at mass `0`), and the
-shapes it collides with. Any node can have one, at any depth in the scene tree (only the scene root
-itself cannot).
+What makes something solid: a body the physics solver moves (or holds still, at mass `0`), and the
+shapes it collides with. Put what it is made of under it. A crate is a Collider with the crate's model
+as its child; give the Collider mass and the crate falls, its model with it. A whole house can stand in
+one Collider holding its wall boxes.
 
 | Setting | Meaning |
 |---|---|
@@ -23,18 +29,23 @@ itself cannot).
 | **Motion smoothing** | Filters the measured speed that feeds animation blends. |
 | **Simulation** | How far from the camera the body keeps simulating before it freezes in place: **Project range** (the range in Options ▸ Engine ▸ Runtime), **Always** (never frozen) or **Custom range** (its own, in metres). See [Simulation range](#simulation-range). |
 | **Sleep when resting** | Sleeps once the body stops moving, until it is hit, pushed or a script sets its velocity. Off by default. |
+| **Layer** | The collision layers it is on (bits 1–16). Default layer 1. |
+| **Collides with** | The layers it collides with. Default all. See [Layers](#layers). |
 | **Linear constraints** | Per-axis toggles. |
 | **Angular constraints** | Per-axis toggles. |
 
 Two independent channels is the useful part: a decorative bush can be non-colliding for gameplay yet
 still push the camera out of itself.
 
-> **A body under a parent.** A body lives in world space, and its node may sit anywhere in the tree:
-> - A **static** body (mass `0`) follows its node. Move or turn the group it is in and the collider
+> **What is under a Collider, and what it is under.** A body lives in world space, and a Collider may sit
+> anywhere in the tree:
+> - Everything under it moves with it. A Collider inside another one is a body of its own: a door in a
+>   wall, a crate on a cart.
+> - A **static** Collider (mass `0`) follows its parent. Move or turn the group it is in and the collider
 >   moves with it, as a door on a moving platform should.
-> - A **dynamic** body is moved by physics in world space; its node's local pose is worked out from
->   that under whatever parent it has. Moving the parent afterwards does not drag a falling crate along,
->   as in other engines.
+> - A **dynamic** Collider is moved by physics in world space; its local pose is worked out from that
+>   under whatever parent it has. Moving the parent afterwards does not drag a falling crate along, as
+>   in other engines.
 > - A non-uniformly scaled ancestor is not supported: physics shapes cannot be sheared.
 
 > **A locked linear axis silently kills movement along it.** This is the usual cause of "movement is
@@ -64,18 +75,50 @@ camera: the game camera in Play, the editor camera in Simulate.
 
 The Performance panel's **· dynamic** row shows how many bodies are active, frozen and resting.
 
+### Layers
+
+Two Colliders collide only when each one's **Collides with** holds a layer the other is on: `(A.layer &
+B.mask) && (B.layer & A.mask)`. Put the player's projectiles on layer 2 and leave layer 2 out of the
+player's own **Collides with**, and the player never shoots itself. A Trigger's **Layer** and **Detects**
+work the same way.
+
+### Events
+
+`onCollision(other)` fires on the **Collider** itself, with the other Collider (or the Trigger, or a
+landscape's `null`). A script that should hear its body's hits goes on the Collider, or reads
+`this.collider` from a node under it. Nothing bubbles up or down the tree.
+
+### Projects from before
+
+A project saved when a body was a property of any node converts as it loads:
+
+- an **empty node** with a body becomes the Collider itself, and one with only a trigger the Trigger: same
+  name, script and children, so its script still hears its own collisions and triggers;
+- **any other node** with a body (a model, a character, a placed model) is wrapped in a new Collider named
+  `<name> Collider`, which takes its place and transform; the node keeps its name, scripts and children;
+- a trigger beside a body, or on a node that is not empty, becomes a `<name> Trigger` child;
+- an Area 2D becomes a Trigger.
+
+A placed template's root that is wrapped hands its link to the template to the Collider. Save the scene
+to keep the converted form.
+
 ## Trigger
 
-A trigger detects overlap without responding to collision. Add one, give it shapes, and the node's
-`onTriggerEnter(other)` / `onTriggerExit(other)` fire as things come and go (on both nodes of the
-overlap), and `onTrigger(other)` on first contact. A node can have a body and a trigger at once.
+A Trigger node detects overlap without responding to collision. Give it shapes, and its
+`onTriggerEnter(other)` / `onTriggerExit(other)` fire as things come and go (on the Trigger, and on the
+Collider or Trigger that came in), and `onTrigger(other)` on first contact. Under a Collider, a Trigger
+rides with it: a character's hurtbox.
+
+In a **2D scene** the same node is a 2D trigger: a box (**Size** and **Offset**, mirrored when the
+character it rides on faces left) that sees 2D bodies, Collider 2Ds and other triggers on the layers it
+looks for. See [2D physics](tilemap-2d.md).
 
 By default a trigger detects moving bodies (characters, props). Turn on **Detect triggers** and it also
-detects other trigger volumes: a weapon's hitbox entering a character's hurtbox, both triggers.
+detects other triggers: a weapon's hitbox entering a character's hurtbox, both triggers.
 
 | Setting | What it does |
 |---|---|
-| **Enabled** | Whether the trigger detects anything. A disabled trigger keeps its shapes but physics, overlap queries and the overlay ignore it; switching it on costs nothing. Scripts switch it with `node.trigger.enabled`. |
+| **Enabled** | Whether the trigger detects anything. A disabled trigger keeps its shapes but physics, overlap queries and the overlay ignore it; switching it on costs nothing. Scripts switch it with `trigger.enabled`. |
 | **Detect triggers** | Also detect other trigger volumes. Only one side of a pair has to have it on. Plain zones leave it off. |
 | **Continuous** | Test the volume along its path from last frame to this one against other triggers, so a fast mover (a blade) cannot skip past a thin target between two frames. Needs **Detect triggers** on one side. |
 | **Layer** | The collision layers this trigger is in (bits 1–16). |
@@ -91,9 +134,10 @@ overlaps something. A disabled trigger disappears on the frame it is switched of
 
 ## Shapes
 
-Both bodies and triggers take a list of shapes; each has its own offset and rotation. **Add** puts a
-box, sphere, capsule, cylinder or plane on the list, and **Add Convex Hull** fits one to the mesh at the
-chosen **Hull Definition**.
+A Collider and a 3D Trigger take a list of shapes; each has its own offset and rotation, in the node's
+own space. **Add** puts a box, sphere, capsule, cylinder or plane on the list, fitted to the meshes
+under the node, and **Add Convex Hull** fits one to them at the chosen **Hull Definition**. A Trigger
+with no mesh under it fits the node it is under.
 
 | Shape | Notes |
 |---|---|
@@ -113,9 +157,8 @@ camera to it, ✕ removes it, and the **⋯** menu holds the rest:
 |---|---|
 | **Duplicate** | A copy right after it, selected. |
 | **Move up / Move down** | Reorders the list. Only the order you read it in changes. |
-| **Fit to mesh** | Re-sizes the shape to the node's mesh along the shape's *own* axes, keeping its rotation, so a box turned to lie along a beam fits the beam. Not for planes or hulls. |
+| **Fit to mesh** | Re-sizes the shape to the meshes under the node along the shape's *own* axes, keeping its rotation, so a box turned to lie along a beam fits the beam. Not for planes or hulls. |
 | **Convert to …** | The same space as another primitive: a box becomes the sphere around it, a cylinder the capsule of its radius and length. Offset and rotation are kept. |
-| **Copy to trigger / Copy to rigid body** | Appends a copy to the other list. A trigger is added if the node has none; a body has to exist already. |
 
 Sizes never go below 1 mm and segment counts below three. Every edit in the list is one undo step,
 including a whole drag of a number field.
@@ -125,8 +168,8 @@ have to type dimensions, and selects it, so its handles are up straight away.
 
 ### Editing shapes in the viewport
 
-With a node selected, each of its shapes shows a small dot at its centre: red for the body's, green for
-the trigger's. Click a dot, or a row's title in the panel, to select that shape. Its wireframe turns
+With a Collider or a Trigger selected, each of its shapes shows a small dot at its centre: red on a
+Collider, green on a Trigger. Click a dot, or a row's title in its inspector, to select that shape. Its wireframe turns
 orange, the node's other shapes fade, and the viewport edits the shape instead of the node:
 
 - **Square handles** sit on both faces of every axis the shape can be sized along: all six faces of a
@@ -140,7 +183,7 @@ orange, the node's other shapes fade, and the viewport edits the shape instead o
 - **Escape** during a drag puts the shape back as it was. With no drag, Escape, clicking elsewhere, or
   selecting any node goes back to editing the node.
 
-Each drag is one undo step, and the panel shows the new values as you drag. Handles follow the
+Each drag is one undo step, and the inspector shows the new values as you drag. Handles follow the
 node's scale and rotation exactly as the physics does. On a non-uniformly scaled node, that means a
 sphere grows with the largest axis, and a capsule or cylinder grows radially with the larger of X and Z.
 
@@ -168,11 +211,29 @@ be moved and rotated but not sized: a hull's size is its Definition, and a plane
 
 ## Character setup
 
-The measured recommendation, from the [third-person example](../../examples/scripts/README.md):
+A Character has no shape of its own: it stands in a Collider, which holds its capsule and is what
+moves. The Character's locomotion drives that Collider's body, and its `velocity`, `isGrounded` and the
+rest read it:
+
+```
+Player Collider      Collider: capsule, mass 1, friction 0, angular constraints off
+└─ Player            Character
+   ├─ Knight         the model
+   └─ Controller
+```
+
+A Character that is not in a Collider cannot move, and the Console says so. **Add ▸ Gameplay ▸ Character**
+makes both, set up as below.
+
+From a script, `teleport(position, yaw)` moves a character's whole body (its Collider). A character
+template's root is its Collider, so `scene.instantiate('Hollow')` returns the Collider and `.character` is
+the Character in it.
+
+The measured recommendation for the Collider, from the [third-person example](../../examples/scripts/README.md):
 
 | | |
 |---|---|
-| Collider | **Capsule** |
+| Shape | **Capsule** |
 | Mass | `1` |
 | **Friction** | **`0`** |
 | Linear damping | `0` – `0.05` |
@@ -217,7 +278,7 @@ separate panel — a banner, a flag, a cape — add a [Cloth](node-inspector.md#
 
 How a skinned model falls when a script turns it into a ragdoll, with
 `scene.physics.startRagdoll(modelNode, options)` — the usual substitute for, or ending to, a death
-animation. The section appears on skinned models only.
+animation. It is a section of a skinned model's Properties.
 
 **Source** — which of three ragdolls the character falls with, decided by its rig. The fields below it
 change with the source, and **Edit ragdoll in rig** opens the rig whenever the model has one.

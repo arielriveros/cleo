@@ -5,7 +5,7 @@ import type EventEmitter from '@cleo/app-kit/utils/eventEmitter';
  * Which collision shape is being edited: one shape of one channel (body or trigger) of one node.
  *
  * A module-level value rather than React state, because three places read it that do not share a tree:
- * the Physics panel (row highlight), the viewport handles (`CollisionGizmo`) and the per-frame wireframe
+ * the Collider and Trigger inspectors (row highlight), the viewport handles (`CollisionGizmo`) and the per-frame wireframe
  * tint in `editorHelpers`, which runs inside the engine's update and has no React at all. Every write goes
  * through {@link setCollisionShapeSelection}, which also emits {@link COLLISION_SHAPE_SELECT} so the
  * React readers re-render.
@@ -25,8 +25,8 @@ export interface CollisionShapeRef {
 
 export const COLLISION_SHAPE_SELECT = 'COLLISION_SHAPE_SELECT';
 /**
- * A shape list changed mid-gesture without a `PHYSICS_CHANGED`: the viewport handles write the maps on
- * every pointer move and only announce the full change when the drag ends, so the panel listens to this
+ * A shape list changed mid-gesture without a `PHYSICS_CHANGED`: the viewport handles write the shapes on
+ * every pointer move and only announce the full change when the drag ends, so the inspector listens to this
  * to keep its fields live without a helper reconcile per move.
  */
 export const COLLISION_SHAPES_EDITED = 'COLLISION_SHAPES_EDITED';

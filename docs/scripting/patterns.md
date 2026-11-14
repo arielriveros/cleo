@@ -233,8 +233,8 @@ Every trap in these docs, in one place.
 - **`turnRequest` has the opposite sign to `moveDir`** — it is a clip selector, not an angle.
 - **`isGrounded` has a ~0.1 s grace.** Not "am I falling"; never gate movement *speed* on it.
 - **Never write `velocity` on a `CharacterNode`.** Locomotion writes it every frame.
-- **A bodied node must sit at the scene root.** `setBody` uses the world position, `setPosition`
-  writes the local one.
+- **Move a character through its Collider.** `teleport()` moves the Collider, which is what physics
+  moves; `setPosition` on the Character only slides it inside its capsule.
 - **An offset collider moves the centre of mass.** Call `recenterMass()`.
 - **Use a capsule, not a box, for characters** on terrain.
 - **Set character friction to 0.** The default 0.3 eats 26% of commanded speed.

@@ -150,6 +150,18 @@ export default class SoulsCharacterNode extends CharacterNode {
     this._updateWading()
   }
 
+  /**
+   * A node hears only its own trigger events, and the body that walks into a zone is the character's
+   * Collider, not the character: route the Collider's here, so `onTriggerEnter` / `onTriggerExit` (and a
+   * subclass's) hear the zones the character enters. Called from the subclasses' onStart.
+   */
+  protected hearCollider(): void {
+    const collider = this.collider
+    if (!collider || collider === this) return
+    collider.onTriggerEnter = (other: Node) => this.onTriggerEnter(other)
+    collider.onTriggerExit = (other: Node) => this.onTriggerExit(other)
+  }
+
   /** Hooks for subclasses: wading begins, wading ends. */
   protected onEnterWater(): void {}
   protected onLeaveWater(): void {}

@@ -235,7 +235,7 @@ children, as in 3D:
 ```
 Player              <- CharacterBody2DNode (its script: the game's moves)
 ├── Sprite          <- AnimatedSpriteNode, its state machine reading the body
-├── Sword           <- Area2DNode
+├── Sword           <- TriggerNode (a 2D trigger in a 2D scene)
 └── Player Controller  <- ControllerNode, Source: Player, possessing Player
 ```
 

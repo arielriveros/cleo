@@ -2,14 +2,14 @@ import * as cleo from 'cleo'
 import { Material, compileScript, type Node, type Scene } from 'cleo'
 import type { useCleoEngine } from '../EngineContext'
 import type { useHistory } from '../HistoryContext'
-import type { BodyDescription, ShapeDescription } from '../engineContextTypes'
+import type { ShapeDescription } from '../engineContextTypes'
 import { ADD_ITEMS, addItemTo, findAddItem } from '../sceneInspector/addCatalog'
 import { instantiateTemplate, isWithinTemplateInstance, TEMPLATE_ID_VAR } from '../../utils/templates'
 import { instantiateModelAsset, MODEL_ID_VAR } from '../../utils/models'
 import { applyMaterialAsset, buildMaterialAsset, getMaterialIdOf, MATERIAL_ID_VAR } from '../../utils/materials'
 import { applyScriptAsset, BASE_CLASS, buildScriptAsset, getScriptIdOf, unlinkScript, type ScriptAsset } from '../../utils/scripts'
 import { buildScriptGraphCtx, deriveBaseType, moduleIdOfVfsPath } from '../../utils/scriptGraph'
-import { meshPositions } from '../../utils/editorHelpers'
+import { meshPositions, shapeFitSource } from '../../utils/editorHelpers'
 import { renderMaterialAssetThumbnail } from '../../utils/modelThumbnails'
 import { fitShapeToPoints } from '../nodeInspector/physicsEditors/shapeListOps'
 import { APP_VERSION } from '../../version'
@@ -210,15 +210,14 @@ async function withCapture(result: CommandResult, capture: unknown, getHost: Get
 
 /** Name tags for the outline: what the scene tree's icons say. */
 function flagsFor(h: BridgeHost) {
-  const { scriptAssets, scripts, bodies, triggers, templates, models, materials } = h.engine
+  const { scriptAssets, scripts, templates, models, materials } = h.engine
   return (n: Node): string[] => {
     const out: string[] = []
     const sid = getScriptIdOf(n)
     if (sid) out.push(`script=${scriptAssets.find(a => a.id === sid)?.name ?? '?'}`)
     else if (scripts.has(n.id)) out.push('script=(inline)')
-    const body = bodies.get(n.id)
-    if (body) out.push(body.mass > 0 ? `body(mass=${body.mass})` : 'body(static)')
-    if (triggers.has(n.id)) out.push('trigger')
+    // A collider's type is in the outline already; whether it falls is not.
+    if (n instanceof cleo.ColliderNode) out.push(n.mass > 0 ? `mass=${n.mass}` : 'static')
     const tid = n.getVariable(TEMPLATE_ID_VAR)
     if (typeof tid === 'string') out.push(`template=${templates.find(t => t.id === tid)?.name ?? '?'}`)
     const mid = n.getVariable(MODEL_ID_VAR)
@@ -250,14 +249,7 @@ function toSafe(v: unknown, root: Node | null, depth = 0, seen = new WeakSet<obj
   return out
 }
 
-// --- physics records -----------------------------------------------------------------------------------
-
-/** What the Physics panel's "Add body" starts from (PhysicsEditor NEW_BODY). */
-const NEW_BODY: BodyDescription = {
-  mass: 0, linearDamping: 0, angularDamping: 0, linearConstraints: [1, 1, 1], angularConstraints: [1, 1, 1],
-  friction: 0.3, restitution: 0, simulatePhysics: true, cameraCollision: true, groundProbeDistance: 0,
-  simulationMode: 'project', simulationRange: 0, canSleep: false, shapes: [],
-}
+// --- collider and trigger shapes ----------------------------------------------------------------------
 
 function normalizeShape(s: any): ShapeDescription {
   const base = { offset: [0, 0, 0], rotation: [0, 0, 0], ...s }
@@ -271,39 +263,27 @@ function normalizeShape(s: any): ShapeDescription {
   }
 }
 
-/** A box around the node's own mesh, the way the panel's Fit does it; a 1 m box when it has none. */
-function fittedBox(node: Node): ShapeDescription {
+/**
+ * A box around the meshes under a collider or trigger, the way the inspector's Fit does it (a trigger with
+ * none of its own fits the node it is under); a 1 m box when there are none.
+ */
+function fittedBox(owner: Node): ShapeDescription {
   const box = normalizeShape({ type: 'box' })
-  const points = meshPositions(node)
+  const points = meshPositions(shapeFitSource(owner), owner)
   return points.length ? fitShapeToPoints(box, points) : box
 }
 
-function writePhysics(h: BridgeHost, node: Node, channel: 'body' | 'trigger', value: Record<string, any> | null, label: string): string {
-  const map = (channel === 'body' ? h.engine.bodies : h.engine.triggers) as Map<string, any>
-  const emitter = h.engine.eventEmitter
-  const before = map.get(node.id) ?? null
-  let next: any = null
-  if (value) {
-    next = { ...(before ?? (channel === 'body' ? NEW_BODY : { shapes: [] })), ...value }
-    next.shapes = Array.isArray(value.shapes) && value.shapes.length
-      ? value.shapes.map(normalizeShape)
-      : (before?.shapes?.length ? before.shapes : [fittedBox(node)])
-  }
-  const write = (record: any) => {
-    if (record) map.set(node.id, record); else map.delete(node.id)
-    emitter.emit('PHYSICS_CHANGED')
-    emitter.emit('SCENE_CHANGED', { kind: 'physics', node })
-  }
-  write(next)
-  // Bodies and triggers live outside node.serialize(), so the snapshot cannot undo them: a step of its own,
-  // which the open transaction folds into the call's single undo step.
-  h.history.push({ label, undo: () => write(before), redo: () => write(next) })
-  return next ? `${channel} (${next.shapes.map((s: ShapeDescription) => s.type).join(', ')})` : `${channel} removed`
+/** An op's `shapes` checked: a list of shapes, or 'fit' for one box fitted to what is under the node. */
+function opShapes(node: Node, value: unknown): ShapeDescription[] | 'fit' {
+  if (!(node instanceof cleo.ColliderNode) && !(node instanceof cleo.TriggerNode))
+    throw new Error(`"${node.name}" is a ${node.nodeType}: only a collider or a trigger has shapes. Create one (type collider or trigger) and put the node under it.`)
+  if (value === 'fit') return 'fit'
+  if (!Array.isArray(value)) throw new Error('shapes is a list of shapes, or "fit".')
+  return value.map(normalizeShape)
 }
 
 /**
- * Undo for the per-node `scripts` map (resolved source by node id), which lives outside node.serialize like
- * bodies do. Call before changing a node's script link; the returned function records the change after it.
+ * Undo for the per-node `scripts` map (resolved source by node id), which lives outside node.serialize. Call before changing a node's script link; the returned function records the change after it.
  * Without it, undoing an attach would leave the source behind and the node would run it as an inline script.
  */
 function scriptsMapStep(h: BridgeHost, nodeId: string, label: string): () => void {
@@ -334,7 +314,7 @@ interface EditCtx {
 function refOf(ctx: EditCtx, ref: string): Node { return resolveNodeRef(ctx.scene, ref, ctx.aliases, ctx.selectedId) }
 
 /** The fields create and update both take: what a node is and has. */
-const NODE_FIELDS = ['name', 'position', 'rotation', 'scale', 'visible', 'props', 'scriptFields', 'material', 'body', 'trigger']
+const NODE_FIELDS = ['name', 'position', 'rotation', 'scale', 'visible', 'props', 'scriptFields', 'material', 'shapes']
 
 /** Which fields each op takes. The tool schema is one flat object, so the check that a field fits its op is here. */
 const OP_FIELDS: Record<string, ReadonlySet<string>> = {
@@ -390,7 +370,7 @@ async function applyFields(ctx: EditCtx, node: Node, op: any, fresh: boolean): P
       if (!fields.has(k)) throw new Error(`Script "${scriptAsset.name}" has no public field "${k}". Fields: ${[...fields].join(', ') || 'none'}.`)
   }
   const material = op.material ? opMaterial(ctx, node, op.material) : undefined
-  for (const rec of [op.body, op.trigger]) for (const s of rec?.shapes ?? []) normalizeShape(s)
+  const shapes = op.shapes !== undefined && op.shapes !== null ? opShapes(node, op.shapes) : undefined
 
   if (!fresh) await ctx.track(node)
   const did: string[] = []
@@ -429,8 +409,17 @@ async function applyFields(ctx: EditCtx, node: Node, op: any, fresh: boolean): P
     emitter.emit('SCENE_CHANGED', { kind: 'material', node })
     did.push(`material=${asset.name}`)
   }
-  if (op.body !== undefined) did.push(writePhysics(h, node, 'body', op.body, ctx.label))
-  if (op.trigger !== undefined) did.push(writePhysics(h, node, 'trigger', op.trigger, ctx.label))
+  if (shapes) {
+    // The node's own field, so the call's snapshot undoes it with the rest.
+    const owner = node as cleo.ColliderNode | cleo.TriggerNode
+    owner.shapes = (shapes === 'fit' ? [fittedBox(node)] : shapes) as any
+    emitter.emit('PHYSICS_CHANGED')
+    emitter.emit('SCENE_CHANGED', { kind: 'physics', node })
+    did.push(`shapes(${owner.shapes.map((s: any) => s.type).join(', ')})`)
+  } else if (op.props && (node instanceof cleo.ColliderNode || node instanceof cleo.TriggerNode)) {
+    // A collider's mass, layers or surface: the helpers and the nav soup read them.
+    emitter.emit('PHYSICS_CHANGED')
+  }
   return did
 }
 
@@ -477,12 +466,12 @@ async function opCreate(ctx: EditCtx, op: any): Promise<string> {
   if (op.type) {
     const item = findAddItem(op.type)
     if (!item) throw new Error(`Unknown type "${op.type}". Types: ${ADD_ITEMS.map(i => i.id).join(', ')}.`)
-    node = await addItemTo(item, parent, { editorScene: scene, eventEmitter: h.engine.eventEmitter, triggers: h.engine.triggers })
+    node = await addItemTo(item, parent, { editorScene: scene, eventEmitter: h.engine.eventEmitter })
     what = op.type
   } else if (op.template) {
     const t = byName(h.engine.templates, op.template)
     if (!t) throw notFound('template', op.template, h.engine.templates)
-    const id = instantiateTemplate(t, parent, { scripts: h.engine.scripts, bodies: h.engine.bodies, triggers: h.engine.triggers }, h.engine.materials)
+    const id = instantiateTemplate(t, parent, { scripts: h.engine.scripts }, h.engine.materials)
     node = scene.getNodeById(id)
     h.engine.eventEmitter.emit('TEXTURES_CHANGED')
     what = `template ${t.name}`
@@ -497,7 +486,7 @@ async function opCreate(ctx: EditCtx, op: any): Promise<string> {
   }
   if (!node) throw new Error(`Creating ${what} produced no node.`)
   if (op.as) ctx.aliases.set(op.as, node)
-  // The new node takes the same fields an update does, so a whole object (material, body, script and its
+  // The new node takes the same fields an update does, so a whole object (material, shapes, script and its
   // fields) is one op. The script goes first: scriptFields need it attached.
   const extra: string[] = []
   try {
@@ -651,8 +640,8 @@ const commands: Record<string, Command> = {
       script: asset
         ? { name: asset.name, extends: BASE_CLASS[asset.baseType] ?? asset.baseType, fields: Object.fromEntries(asset.variables.filter(v => !v.hidden).map(v => [v.name, simpleValue((node as any)[v.name]) ?? toSafe((node as any)[v.name], scene.root)])) }
         : (h.engine.scripts.has(node.id) ? { inline: true } : null),
-      body: h.engine.bodies.has(node.id) ? elide(h.engine.bodies.get(node.id)) : null,
-      trigger: h.engine.triggers.has(node.id) ? elide(h.engine.triggers.get(node.id)) : null,
+      // A collider's or a trigger's shapes; its other settings are in props.
+      shapes: node instanceof cleo.ColliderNode || node instanceof cleo.TriggerNode ? elide(node.shapes) : null,
       material: matId ? (h.engine.materials.find(m => m.id === matId)?.name ?? matId) : null,
       variables,
       props: settableProps(node),

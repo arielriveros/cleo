@@ -46,9 +46,9 @@ Landscape and Tilemap share one slot, chosen by the scene's authored dimension �
 |---|---|---|
 | `scene` | 3D/2D scene | Everything: tree, **Scene Elements**, Properties, Scripts, Physics, Logger, Assets |
 | `template` | The template's own scene | Same as Scene, with the tree rooted at the template root, and **both** Add palettes |
-| `landscape` | Scene + brush | Tree, Properties, **Scene Elements**, plus a floating brush card. **No Scripts, no Physics** |
-| `tilemap` | Scene + tools | Tree, Properties, **Tiles**, **Layers**, plus a floating tool card. No Scripts, no Physics |
-| `ui` | Scene + DOM overlay | Everything except **Physics** — a screen rectangle has no rigid body — with **UI Elements** in place of Scene Elements |
+| `landscape` | Scene + brush | Tree, Properties, **Scene Elements**, plus a floating brush card. **No Scripts** |
+| `tilemap` | Scene + tools | Tree, Properties, **Tiles**, **Layers**, plus a floating tool card. No Scripts |
+| `ui` | Scene + DOM overlay | Everything, with **UI Elements** in place of Scene Elements |
 | `options` | Live render | **Only** the Engine, Editor and Project panels |
 | `material` | Preview sphere | Properties, titled *Material*. No tree, no Add palettes |
 | `terrainMaterial` | Preview sphere | Properties, titled *Landscape Material* |

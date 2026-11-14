@@ -2,7 +2,6 @@ import type { Scene, RenderSettings, NodeTemplate, InputMap } from 'cleo';
 import { Logger, isDefaultInputMap, isEditorOwnedName } from 'cleo';
 import { projectSettingsConfig } from '../options/projectSettings';
 import type { ProjectSettings } from '../options/projectSettings';
-import type { BodyDescription, ShapeDescription } from '../EngineContext';
 import { fanOutScripts, SCRIPT_ID_VAR, type ScriptAsset } from '../../utils/scripts';
 import { buildScriptGraphCtx, importClosure } from '../../utils/scriptGraph';
 import type { Template } from '../../utils/templates';
@@ -16,8 +15,6 @@ import type { AnimationAsset } from '../../utils/animationAssets';
 export interface GameDataSources {
   scene: Scene;
   scripts: Map<string, string>;
-  bodies: Map<string, BodyDescription>;
-  triggers: Map<string, { shapes: ShapeDescription[] }>;
   // The shared script asset library: resolves each node's __scriptId link to the asset's source (into
   // `scripts`) and injects the node's native script-field values as `scriptVars`.
   scriptAssets?: ScriptAsset[];
@@ -96,31 +93,24 @@ export function injectScriptVars(scene: any, scriptVars: Map<string, Record<stri
   iterate(scene.children ?? []);
 }
 
-// Re-attach physics bodies and triggers (editor-side maps keyed by node id) onto the serialized tree.
-export function injectBodies(
-  scene: any,
-  bodies: Map<string, BodyDescription>,
-  triggers: Map<string, { shapes: ShapeDescription[] }>,
-): void {
-  // The root too: a scene root never has a body, but a TEMPLATE root often does, and templates are baked
-  // through this same function.
+/**
+ * Put a LEGACY template's id-keyed bodies and triggers back on its nodes, for the runtime to convert as
+ * it parses them. The editor converts its library on load (physicsMigration.ts), so only a template
+ * that has not been through it yet still has any.
+ */
+function inlineLegacyPhysics(root: any, bodies: Record<string, any> = {}, triggers: Record<string, any> = {}): void {
+  if (!Object.keys(bodies).length && !Object.keys(triggers).length) return;
   const apply = (node: any) => {
-    const b = bodies.get(node.id);
-    if (b) node.body = b;
-    const t = triggers.get(node.id);
-    if (t) node.trigger = t;
+    if (bodies[node.id]) node.body = bodies[node.id];
+    if (triggers[node.id]) node.trigger = triggers[node.id];
+    (node.children ?? []).forEach(apply);
   };
-  const iterate = (children: any[]) => (children ?? []).forEach((child: any) => {
-    apply(child);
-    iterate(child.children ?? []);
-  });
-  apply(scene);
-  iterate(scene.children ?? []);
+  apply(root);
 }
 
 /**
  * Bake the template library into the self-contained form the runtime registry takes: one JSON blob per
- * template, materials re-resolved and scripts/bodies/triggers inlined into the nodes themselves.
+ * template, materials re-resolved and scripts inlined into the nodes themselves.
  * Node ids inside a baked template stay as-is: they key the published build's script registry, and
  * `Scene.instantiate` records the original as `__sourceId` when it renumbers a copy.
  */
@@ -143,11 +133,7 @@ export function bakeTemplates(templates: Template[], materials?: MaterialAsset[]
     const scripts = new Map(Object.entries(template.scripts ?? {}));
     resolveSharedScripts(node, scripts);
     injectScripts(node, scripts);
-    injectBodies(
-      node,
-      new Map(Object.entries(template.bodies ?? {})),
-      new Map(Object.entries(template.triggers ?? {})),
-    );
+    inlineLegacyPhysics(node, template.bodies, template.triggers);
     return { id: template.id, name: template.name, node };
   });
 }
@@ -259,7 +245,6 @@ export async function buildGameData(sources: GameDataSources): Promise<any> {
   clearDebuggingNodes(json.scene);
   injectScripts(json.scene, sources.scripts);
   injectScriptVars(json.scene, scriptVars);
-  injectBodies(json.scene, sources.bodies, sources.triggers);
   // Every template in the library is baked in, not just the placed ones: a script may instantiate any of
   // them by name. Their geometry is interned against the scene's in packGameBin.
   if (sources.templates?.length)

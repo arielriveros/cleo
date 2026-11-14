@@ -270,6 +270,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
   private _nearby: Node[] = []
 
   onStart() {
+    this.hearCollider()
     this.setVariable('isPlayer', true, 'boolean', 'public')
     this._gm = this.findNode('GameManager')
     this._model = this._findModel()
@@ -416,9 +417,8 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     this._stopActions()
     this.isDead = false
     this.restoreAll()
-    this.setPosition([at[0], at[1], at[2]])
-    this.setRotation([0, yaw, 0])
-    this.velocity = [0, 0, 0]
+    // The whole body, Collider and all, standing still.
+    this.teleport(at, yaw)
     this.lastSafePosition = [at[0], at[1], at[2]]
     this._bufferAction = ''
     this._enter('free')
@@ -450,8 +450,7 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
    * with i-frames. The gate turns its own collider off for the duration.
    */
   public walkThroughFog(start: ArrayLike<number>, yaw: number, distance: number, seconds: number): void {
-    this.setPosition([start[0], start[1], start[2]])
-    this.setRotation([0, yaw, 0])
+    this.teleport(start, yaw)
     this._motionDir = [Math.sin(yaw * Math.PI / 180), 0, Math.cos(yaw * Math.PI / 180)]
     this._fogSpeed = distance / Math.max(0.1, seconds)
     this._enter('fog')
@@ -1137,17 +1136,20 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
 
   /**
    * Entering an interactable's trigger zone makes it a candidate; leaving takes it off. The zones are
-   * authored as each interactable's `trigger` volume — no distance is measured in script.
+   * authored as Trigger nodes: the interactable itself (a message), or one inside it (a bonfire's) — no
+   * distance is measured in script. Heard through the Collider (see hearCollider).
    */
   onTriggerEnter(other: Node) {
     super.onTriggerEnter(other)   // water zones (SoulsCharacter)
-    if (other && (other as any).interact && !this._nearby.includes(other)) this._nearby.push(other)
+    const target = interactableOf(other)
+    if (target && !this._nearby.includes(target)) this._nearby.push(target)
     ;(this._gm as any)?.onPlayerEnteredZone?.(other)
   }
 
   onTriggerExit(other: Node) {
     super.onTriggerExit(other)
-    this._nearby = this._nearby.filter(n => n !== other)
+    const target = interactableOf(other)
+    this._nearby = this._nearby.filter(n => n !== target)
     ;(this._gm as any)?.onPlayerLeftZone?.(other)
   }
 
@@ -1268,4 +1270,10 @@ export default class SoulsPlayerNode extends SoulsCharacterNode {
     return walk(this)
   }
 
+}
+
+/** What a trigger zone belongs to: the nearest node at or above it that can be interacted with, or null. */
+function interactableOf(zone: Node): Node | null {
+  for (let n: Node = zone; n; n = n.parent) if (typeof (n as any).interact === 'function') return n
+  return null
 }

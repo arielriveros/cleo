@@ -6,9 +6,11 @@
 // walking a scene -- but over scene JSON instead of live nodes.
 //
 // Rules shared with the editor (applications/editor/src/utils/navBakeSources.ts):
-//   - colliders, not render meshes;
+//   - Collider nodes, not render meshes (and a node's `body`, as a generator that writes the form from before
+//     colliders were nodes still emits it);
 //   - every static solid is also an obstacle, except dynamic bodies (mass > 0), ghosts
-//     (`simulatePhysics: false`) and nodes whose variable `navObstacle` is false (gates that open);
+//     (`simulatePhysics: false`) and colliders whose variable `navObstacle` is false (gates that open), on
+//     the Collider or on a node directly under it;
 //   - triggers are not bodies and contribute nothing.
 
 import path from 'path'
@@ -48,11 +50,13 @@ export function headlessNavBaker(root) {
       const scale = mat4.getScaling(vec3.create(), matrix)
       const world = { matrix, rotation }
 
-      const body = n.body
+      const body = n.type === 'collider' ? n.collider : n.body
       if (body && Array.isArray(body.shapes) && body.shapes.length > 0) {
         const position = mat4.getTranslation(vec3.create(), matrix)
         const rigid = mat4.fromRotationTranslation(mat4.create(), rotation, position)
-        const carves = !(body.mass > 0) && body.simulatePhysics !== false && n.variables?.navObstacle?.value !== false
+        const optedOut = n.variables?.navObstacle?.value === false
+          || (n.type === 'collider' && (n.children ?? []).some(c => c.variables?.navObstacle?.value === false))
+        const carves = !(body.mass > 0) && body.simulatePhysics !== false && !optedOut
         for (const shape of body.shapes) {
           const source = sources.navSourceForShape(shape, rigid, scale)
           if (!source) continue

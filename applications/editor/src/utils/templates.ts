@@ -16,8 +16,13 @@ export type Template = {
   /** Legacy: textures embedded as base64 ([{ id, data, config }]). Still read; never written. */
   textures?: any[]
   scripts: Record<string, string>     // originalNodeId -> script source
-  bodies: Record<string, any>         // originalNodeId -> BodyDescription
-  triggers: Record<string, any>       // originalNodeId -> { shapes }
+  /**
+   * LEGACY, read-only: the rigid bodies and triggers of a template saved before they were nodes
+   * (originalNodeId -> description). `migrateTemplatePhysics` folds them into Collider and Trigger nodes
+   * when the library loads; never written.
+   */
+  bodies?: Record<string, any>
+  triggers?: Record<string, any>
   /**
    * Present on a VARIANT: the template it is based on and what it changes (templateVariants.ts). The
    * fields above stay the MATERIALIZED result, so nothing that instantiates or publishes reads this.
@@ -27,8 +32,6 @@ export type Template = {
 
 type EngineMaps = {
   scripts: Map<string, string>
-  bodies: Map<string, any>
-  triggers: Map<string, any>
 }
 
 // Node variable name used to link a placed instance back to its source template.
@@ -50,7 +53,7 @@ export function isWithinTemplateInstance(node: Node | null | undefined): boolean
 }
 
 /**
- * Build a Template capturing a node's subtree + its assets and out-of-band script/body/trigger data.
+ * Build a Template capturing a node's subtree + its assets and out-of-band script sources.
  *
  * `scriptAssets` lets it capture class-script FIELD VALUES too. They live as native properties on the
  * nodes and `serialize()` does not see them, so without the library a template saved from the editor
@@ -66,19 +69,15 @@ export async function buildTemplateFromNode(node: Node, maps: EngineMaps, script
 
   const ids = collectIds(nodeJson)
   const scripts: Record<string, string> = {}
-  const bodies: Record<string, any> = {}
-  const triggers: Record<string, any> = {}
   for (const id of ids) {
     const s = maps.scripts.get(id); if (s) scripts[id] = s
-    const b = maps.bodies.get(id); if (b) bodies[id] = b
-    const t = maps.triggers.get(id); if (t) triggers[id] = t
   }
 
   // Only the texture IDS; the payloads live once in the texture store (textureStore.ts).
   const texIds = new Set<string>()
   collectTextureIds(nodeJson, texIds)
 
-  return { id: cryptoRandomId(), name: node.name, nodeJson, textureIds: [...texIds], scripts, bodies, triggers }
+  return { id: cryptoRandomId(), name: node.name, nodeJson, textureIds: [...texIds], scripts }
 }
 
 // Walk the live subtree and its serialized twin together (serialize keeps child order), writing each
@@ -122,8 +121,6 @@ export function instantiateTemplate(template: Template, parent: Node, maps: Engi
   // Re-key out-of-band data onto the new ids.
   for (const [oldId, newId] of idMap) {
     if (template.scripts[oldId]) maps.scripts.set(newId, template.scripts[oldId])
-    if (template.bodies[oldId]) maps.bodies.set(newId, template.bodies[oldId])
-    if (template.triggers[oldId]) maps.triggers.set(newId, template.triggers[oldId])
   }
   // A source carried INLINE on a node (a bundle authored by a generator does this) goes to the map too,
   // exactly as a scene's does on load (extractNodeState). Left on the node, the parse would compile it

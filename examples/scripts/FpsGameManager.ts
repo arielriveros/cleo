@@ -1,6 +1,6 @@
 import { Game, Logger, Node } from 'cleo'
 import type { TemplateName } from 'cleo'
-import { GAME_TYPES, GAME_TYPE_ALIASES, distance3, fps, findByVariable, planarDistance } from '@/FPS/Scripts/FpsShared'
+import { GAME_TYPES, GAME_TYPE_ALIASES, combatantOf, distance3, fps, findByVariable, planarDistance } from '@/FPS/Scripts/FpsShared'
 
 /**
  * FPS example — the match. Put ONE of these (the "FPS Game Manager" template) at the scene root and the
@@ -133,7 +133,9 @@ export default class FpsGameManagerNode extends Node {
     for (let i = 0; i < need; i++) {
       const spawn = this._spawns.length ? this._spawns[(this._usedSpawns.size + i) % this._spawns.length] : null
       const at = spawn ? spawn.worldPosition : [i * 2, 0, 0]
-      const bot = (this.scene as any).instantiate(templates[i % templates.length], { position: [at[0], at[1] + 0.05, at[2]], ...(parent ? { parent } : {}) })
+      // A fighter template's root is its Collider; the fighter is the Character in it.
+      const root = (this.scene as any).instantiate(templates[i % templates.length], { position: [at[0], at[1] + 0.05, at[2]], ...(parent ? { parent } : {}) })
+      const bot = root?.character ?? root
       if (bot) {
         made++
         // Each keeps the template it came from when it dies, and a number so the feed can tell them apart.
@@ -275,9 +277,10 @@ export default class FpsGameManagerNode extends Node {
     const snap = this._snapshots.get(victim)
     this._snapshots.delete(victim)
     const at = spawn ? Array.from(spawn.worldPosition as ArrayLike<number>) : Array.from(victim.worldPosition as ArrayLike<number>)
-    const node: any = this.scene?.instantiate(victim.respawnTemplate as string, {
+    const root: any = this.scene?.instantiate(victim.respawnTemplate as string, {
       position: at, rotation: [0, spawn ? this._yawOf(spawn) : 0, 0],
     })
+    const node: any = root?.character ?? root
     if (!node) return
     if (snap) {
       node.team = snap.team
@@ -300,8 +303,8 @@ export default class FpsGameManagerNode extends Node {
   private _place(f: any, spawn: Node | null): void {
     if (!spawn) return
     const at = spawn.worldPosition
-    f.setWorldPosition([at[0], at[1] + 0.05, at[2]])
-    f.setRotation([0, this._yawOf(spawn), 0])
+    // The whole body, Collider and all.
+    f.teleport([at[0], at[1] + 0.05, at[2]], this._yawOf(spawn))
     f.teleported?.(this._yawOf(spawn))
   }
 
@@ -384,7 +387,7 @@ export default class FpsGameManagerNode extends Node {
     const eye = [threat[0], threat[1] + 1.55, threat[2]]
     const hidden = (p: number[]) => {
       const target = [p[0], p[1] + 1.0, p[2]]
-      const hit = physics.raycast(eye, target, { reject: (owner: any) => !!owner?.getVariable?.('fpsCombatant') })
+      const hit = physics.raycast(eye, target, { reject: (owner: any) => !!combatantOf(owner) })
       return !!hit && distance3(hit.point, target) > 0.35
     }
     const candidates: number[][] = []

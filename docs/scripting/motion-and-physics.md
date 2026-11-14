@@ -5,7 +5,19 @@ actually did.
 
 ## Giving a node a body
 
-Usually you do this in the editor's Physics panel ([guide](../editor/physics.md)). From script:
+In a scene a body is a **Collider** node: its shapes are what collides, and everything under it moves with
+it. A **Trigger** node is a sensor. Both are made in the editor ([guide](../editor/physics.md)), and a
+Character has no shape of its own: it stands in a Collider, and its `body`, `velocity` and `isGrounded`
+are that Collider's.
+
+```ts
+get collider: Node | null      // the Collider this node moves with: itself, or its nearest ancestor
+get character: Node | null     // the Character a Collider holds (a character template's root is its Collider)
+character.teleport(position, yawDegrees?)   // moves the Collider: a respawn, a fast travel
+```
+
+At run time a script can still give any node a body or a trigger of its own: debris, a dropped weapon, a
+blade's hitbox.
 
 ```ts
 setBody(
@@ -153,7 +165,7 @@ get slopeAngle: number        // degrees
 ## Collisions and triggers
 
 ```ts
-onCollision(other: Node): void      // requires a body on BOTH nodes; delivered after the physics step
+onCollision(other: Node): void      // on a Collider, with the other body's node; after the physics step
 onTrigger(other: Node): void        // first contact with THIS node's trigger
 onTriggerEnter(other: Node): void   // a trigger overlap began — called on BOTH nodes
 onTriggerExit(other: Node): void    // ...and ended (also when either side is removed or despawned)
@@ -162,21 +174,37 @@ onTriggerExit(other: Node): void    // ...and ended (also when either side is re
 `onTrigger` fires once when something first touches the trigger; it does not repeat while the
 overlap lasts and has no exit. For presence — "is the player standing in this zone?" — use
 `onTriggerEnter` / `onTriggerExit`. They are reported once per frame after physics, always come in
-pairs, and are called on **both** nodes of the overlap: the zone's node hears about the body that came
-in, and the body's node hears about the zone it walked into. So a player can keep a list of the zones it
-is standing in without any zone having a script:
+pairs, and are called on **both** nodes of the overlap: the Trigger hears about the body that came in,
+and the body's node hears about the zone it walked into.
+
+**Events fire on the node that owns the body or the trigger, and nowhere else.** A character's body is
+its Collider, so the Collider hears the zones it walks into and the character does not, unless its script
+listens there. Nothing bubbles up or down the tree. So a player can keep a list of the zones it is
+standing in, without any zone having a script:
 
 ```ts
 export default class PlayerNode extends CharacterNode {
   private _nearby: Node[] = []
+  onStart() {
+    // The body that walks into a zone is this character's Collider: hear its events here.
+    const c = this.collider
+    if (c && c !== this) {
+      c.onTriggerEnter = (other: Node) => this.onTriggerEnter(other)
+      c.onTriggerExit = (other: Node) => this.onTriggerExit(other)
+    }
+  }
   onTriggerEnter(other: Node) { if ((other as any).interact) this._nearby.push(other) }
   onTriggerExit(other: Node)  { this._nearby = this._nearby.filter(n => n !== other) }
 }
 ```
 
+The other way round, a zone's `other` is the body that came in: for a character, its Collider. Read the
+character with `other.character`.
+
 A trigger is a static volume: it detects bodies with mass (characters, props that move), never another
 static body or the terrain. It detects other TRIGGERS only when it asks to (`detectTriggers`, on either
-side of the pair). A node may carry a body AND a trigger — a solid door with an interaction zone around it.
+side of the pair). A Collider can hold a Trigger — a solid door with an interaction zone around it — and
+the zone's events fire on the Trigger.
 
 ### Triggers that detect triggers: hitboxes and hurtboxes
 
@@ -218,7 +246,8 @@ export default class PickupNode extends Node {
 
   onTrigger(other: Node) {
     if (this._taken) return              // walking back and forth must not double-count
-    if (!other.getVariable('isPlayer')) return
+    // What came in is a body: the player's Collider, which holds the player.
+    if (!other.character?.getVariable('isPlayer')) return
     this._taken = true
     const director = this.findNode('GameManager') as any
     director?.addScore(this.score)
@@ -370,7 +399,10 @@ setMove2D(body.drive(), -1, 0)
 A game's own moves — a dash, a double jump, a wall jump — go in the body script's `onMove2D(dt, substep)`,
 run every physics substep; see [2D pawns](characters-and-controllers.md#2d-pawns).
 
-Areas (`Area2DNode`) report `onTriggerEnter` / `onTriggerExit` as 3D triggers do. Queries:
+A `TriggerNode` in a 2D scene is a 2D trigger box (`size`, `offset`): it reports `onTriggerEnter` /
+`onTriggerExit` as 3D triggers do, for character bodies and `Body2DNode` colliders on the layers it
+detects. A `Body2DNode` with `mass` falls onto the tilemaps (layer 1) and other colliders; its `velocity2D`
+and `grounded` read and steer that. Queries:
 
 ```ts
 scene.physics2D.raycast(x, y, dx, dy, maxDistance)   // { x, y, distance, owner } | null
@@ -433,9 +465,11 @@ of by clips. This is the usual stand-in for a death animation when you do not ha
 The shipped third-person character documents this in detail
 ([README](../../examples/scripts/README.md)); the headline numbers:
 
+The character stands in a Collider, which holds these:
+
 | Setting | Value | Why |
 |---|---|---|
-| Collider | **Capsule** | A box's flat bottom catches on heightfield triangle edges and hops: measured on *perfectly flat* terrain, a box bounced 101 mm at 5 u/s and was grounded on 18 frames out of 240. A capsule bounced 2.5 mm and was grounded 240/240. |
+| Shape | **Capsule** | A box's flat bottom catches on heightfield triangle edges and hops: measured on *perfectly flat* terrain, a box bounced 101 mm at 5 u/s and was grounded on 18 frames out of 240. A capsule bounced 2.5 mm and was grounded 240/240. |
 | Friction | **0** | A script sets its own speed, so surface grip only fights it. The default 0.3 eats **26%** of commanded speed, and uphill/downhill differ by **31%**. |
 | Mass | 1 | |
 | Linear damping | 0 – 0.05 | |

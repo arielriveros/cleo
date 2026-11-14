@@ -56,7 +56,7 @@ interface BakeReport {
 }
 
 export default function NavMeshEditor(props: { node: NavMeshNode }) {
-  const { eventEmitter, editorScene, bodies } = useCleoEngine()
+  const { eventEmitter, editorScene } = useCleoEngine()
   const [state, setState] = useState<NavState>(() => readNode(props.node))
   const [report, setReport] = useState<BakeReport | null>(null)
   const [baking, setBaking] = useState(false)
@@ -90,7 +90,6 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
       try {
         const started = performance.now()
         const gathered = gatherNavSoup(editorScene.root, {
-          bodies,
           includeTerrain: state.includeTerrain,
           terrainStep: state.terrainStep,
           // Null when unbounded, which gathers the whole scene exactly as before.
@@ -136,7 +135,7 @@ export default function NavMeshEditor(props: { node: NavMeshNode }) {
    */
   const fitToScene = () => {
     const soup = gatherNavSoup(editorScene.root, {
-      bodies, includeTerrain: state.includeTerrain, terrainStep: state.terrainStep,
+      includeTerrain: state.includeTerrain, terrainStep: state.terrainStep,
     }).soup
     if (soup.positions.length < 9) return
 

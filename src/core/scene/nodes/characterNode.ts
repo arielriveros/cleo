@@ -13,6 +13,7 @@ import type {
 import { consumeRequest, createIntent, decayRequests } from "../../control/intent";
 import type { ControlIntent } from "../../control/intent";
 import type { ControllerNode } from "./controllerNode";
+import type { RigidBody } from "../../../physics/body";
 import { finiteOr } from "../../math";
 
 /**
@@ -45,6 +46,33 @@ import { finiteOr } from "../../math";
  * `onUpdate`), then do the engine's own work.
  */
 export class CharacterNode extends Node {
+    /**
+     * The body that moves this character: its Collider's (the Collider it stands in, holding its capsule).
+     * A Character authors no shape of its own, so every body-derived reading on it -- `velocity`,
+     * `isGrounded`, `groundNormal`, the measured motion -- and every write to `velocity` go to that body.
+     */
+    public override get body(): RigidBody | null {
+        for (let n = this.parent; n; n = n.parent) if (n.nodeType === 'collider') return n.ownBody;
+        return this._body;
+    }
+
+    /**
+     * Put the character at the WORLD point `position`, standing still, facing `yawDegrees` when given: a
+     * respawn, a fast travel. What moves is its Collider, which is what physics moves -- moving the
+     * Character itself would only slide it inside its capsule.
+     */
+    public teleport(position: ArrayLike<number>, yawDegrees?: number): this {
+        const collider = this.collider;
+        const mover = collider && collider !== this ? collider : this;
+        // The Character's own offset in its Collider stays: the Collider goes where that puts the Character.
+        const own = this.worldPosition, at = mover.worldPosition;
+        mover.setWorldPosition([position[0] + at[0] - own[0], position[1] + at[1] - own[1], position[2] + at[2] - own[2]]);
+        if (this.body) this.velocity = vec3.create();
+        if (yawDegrees !== undefined) this.setRotation(vec3.fromValues(0, yawDegrees, 0));
+        mover.updateTransforms(mover.parent ? mover.parent.worldTransform : null);
+        return this;
+    }
+
     // ----- animator outputs ----------------------------------------------------------------------
     //
     // THESE THREE MUST STAY PLAIN FIELDS, never getter/setter pairs.
@@ -195,11 +223,13 @@ export class CharacterNode extends Node {
 
         const body = this.body;
         if (!body) {
-            if (!this._warnedNoBody) {
+            // In a Collider with no body built yet -- a scene being authored builds none -- there is nothing
+            // to move and nothing wrong.
+            if (!this._warnedNoBody && !this.collider) {
                 this._warnedNoBody = true;
                 Logger.warn(
-                    `Character '${this._name}' has no rigid body, so it cannot move. Add one in the ` +
-                    `Physics panel (a capsule collider with friction 0 suits a character).`, 'Scene');
+                    `Character '${this._name}' is not in a Collider, so it cannot move. Put it under a ` +
+                    `Collider with a capsule shape (friction 0 suits a character).`, 'Scene');
             }
             return;
         }
@@ -257,7 +287,7 @@ export class CharacterNode extends Node {
             this._warnedConstrained = true;
             Logger.warn(
                 `Character '${this._name}' has linearConstraints [${factor.x}, ${factor.y}, ${factor.z}] — ` +
-                `a 0 locks that axis and blocks movement along it. Set it to [1, 1, 1] in the Physics panel.`,
+                `a 0 locks that axis and blocks movement along it. Set it to [1, 1, 1] on its Collider.`,
                 'Scene');
         }
 

@@ -1,11 +1,11 @@
-import { AnimatedSpriteNode, Area2DNode, Node } from 'cleo'
+import { AnimatedSpriteNode, Node, TriggerNode } from 'cleo'
 
 /**
  * Duskwell -- a checkpoint: a lamp the player lights by walking past it. Attach to an Area 2D that sees the
  * player's layer; its `Lamp` child is the sprite, dim until lit. Lighting it heals the player and makes it
  * where the player comes back after a death.
  */
-export default class DuskCheckpoint extends Area2DNode {
+export default class DuskCheckpoint extends TriggerNode {
   public litTint: number[] = [1, 1, 1]
   public unlitTint: number[] = [0.35, 0.35, 0.45]
   public healTo: number = 99

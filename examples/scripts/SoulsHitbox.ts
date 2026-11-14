@@ -214,9 +214,12 @@ export function setHurtboxEnabled(owner: Node, on: boolean): void {
   if (trigger && trigger.enabled !== on) trigger.enabled = on
 }
 
-/** The character (or breakable) a hurtbox belongs to: the nearest node at or above it that takes hits. */
+/**
+ * The character (or breakable) a hurtbox belongs to: the nearest node at or above it that takes hits. A
+ * character's Collider (what a ray or a sweep reports for its body) stands for the character in it.
+ */
 export function characterOf(node: Node): Node | null {
-  for (let n: Node = node; n; n = n.parent) if (typeof (n as any).receiveHit === 'function') return n
+  for (let n: Node = node?.character ?? node; n; n = n.parent) if (typeof (n as any).receiveHit === 'function') return n
   return null
 }
 
@@ -258,10 +261,14 @@ export function isHurtbox(node: Node, attacker: Node, kind: 'player' | 'enemy'):
   return n.team === kind && typeof n.receiveHit === 'function'
 }
 
-/** Whether a body stops a swing: solid, and its node opted in with the `blocksSwings` variable. */
+/**
+ * Whether a body stops a swing: solid, and its node opted in with the `blocksSwings` variable. The body's
+ * node is a Collider; the variable may also be on a node directly in it (a placed model wrapped in one).
+ */
 export function blocksSwings(node: Node, body: any): boolean {
   if (!node || !body || body.isTrigger || body.collisionResponse === false) return false
-  return !!(node as any).getVariable?.('blocksSwings')
+  const flagged = (n: Node) => !!(n as any).getVariable?.('blocksSwings')
+  return flagged(node) || (node.nodeType === 'collider' && node.children.some(flagged))
 }
 
 /**

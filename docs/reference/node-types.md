@@ -13,7 +13,8 @@ type NodeType =
   | 'cameraRig' | 'sound' | 'character' | 'controller' | 'navMesh' | 'decal'
   | 'particleSystem' | 'forceField' | 'waterVolume' | 'occlusionVolume' | 'exposureVolume' | 'volumetricFog'
   | 'fluidVolume' | 'cloth' | 'giVolume' | 'sequence'
-  | 'camera2D' | 'room2D' | 'parallaxLayer' | 'characterBody2D' | 'body2D' | 'area2D'
+  | 'camera2D' | 'room2D' | 'parallaxLayer' | 'characterBody2D' | 'body2D'
+  | 'collider' | 'trigger'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 ```
@@ -25,8 +26,51 @@ eleven types whose layout is resolved by the scene's UI pass.
 
 ## Node — `'node'`
 
-The base class, shown as **Empty** in the editor. A transform, children, optionally a body, a
-trigger, variables and a script. Everything else on this page extends it.
+The base class, shown as **Empty** in the editor. A transform, children, variables and a script
+(and, given by a script at run time, a body or a trigger of its own). Everything else on this page
+extends it.
+
+---
+
+## Physics
+
+### ColliderNode — `'collider'`
+
+A rigid body. Everything under it moves with it; a Character stands in one, which holds its capsule.
+
+```ts
+mass: number                     // 0 = static
+linearDamping: number ; angularDamping: number
+linearConstraints: [x, y, z] ; angularConstraints: [x, y, z]   // 1 free, 0 locked
+friction: number ; restitution: number
+simulatePhysics: boolean ; cameraCollision: boolean
+groundProbeDistance: number ; motionSmoothing: number
+simulationMode: 'project' | 'always' | 'custom' ; simulationRange: number ; canSleep: boolean
+layer: number ; mask: number     // bits; mask -1 = every layer
+shapes: ColliderShape[]          // in the node's own units, scaled by its world scale
+get body: RigidBody | null       // built when the scene runs, never while authoring
+```
+
+Two Colliders collide when each one's `mask` holds a layer of the other. `onCollision(other)` fires on
+the Collider.
+
+### TriggerNode — `'trigger'`
+
+A sensor. In a 3D scene, its `shapes`; in a 2D scene, a box (`size`, `offset`).
+
+```ts
+shapes: ColliderShape[]                        // 3D
+size: [number, number] ; offset: [number, number]   // 2D
+layer: number ; mask: number                   // what it is on, what it detects
+detectTriggers: boolean ; continuous: boolean
+get/set enabled: boolean
+get is2D: boolean                              // the scene it is in is 2D
+get trigger: Trigger | null                    // the 3D sensor, built when the scene runs
+touching: Set<Node>                            // 2D: what is inside
+```
+
+`onTriggerEnter(other)` / `onTriggerExit(other)` fire on the Trigger and on what came in. `Area2DNode` is a
+deprecated alias of it: an Area 2D loads as a Trigger.
 
 Full API: [Node API](../scripting/node-api.md), [Lifecycle](../scripting/lifecycle.md),
 [Motion and physics](../scripting/motion-and-physics.md).
@@ -781,15 +825,13 @@ onMove2D(dt, substep): boolean | void              // a script's moves, every ph
 
 ```ts
 size: [number, number] ; kind: 'solid' | 'oneWay' ; enabled: boolean
+mass: number ; gravityScale: number        // mass > 0: it falls and lands
+layer: number ; mask: number               // tilemaps are on layer 1
+velocity2D: [number, number] ; grounded: boolean ; get isDynamic: boolean
 bounds(out?): [minX, minY, maxX, maxY]
 ```
 
-### Area2DNode — `'area2D'`
-
-```ts
-size: [number, number] ; offset: [number, number] ; layer: number ; mask: number
-detectAreas: boolean ; enabled: boolean
-```
+A 2D trigger is a [TriggerNode](#triggernode--trigger) in a 2D scene.
 
 ### Room2DNode — `'room2D'`
 

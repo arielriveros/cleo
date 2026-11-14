@@ -1,4 +1,4 @@
-import { Area2DNode, Node } from 'cleo'
+import { Node, TriggerNode } from 'cleo'
 
 /**
  * Duskwell -- something lying in the world for the player to take. Attach to an Area 2D that sees the
@@ -10,7 +10,7 @@ import { Area2DNode, Node } from 'cleo'
  *
  * The player decides what a kind does (DuskPlayer.collect); this only hands it over and goes.
  */
-export default class DuskPickup extends Area2DNode {
+export default class DuskPickup extends TriggerNode {
   public kind: string = 'diamond'
   public amount: number = 1
   public bobHeight: number = 0.12

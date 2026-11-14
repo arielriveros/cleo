@@ -45,14 +45,13 @@ not placeable.
 
 ### Gameplay
 
-The nodes a game's logic hangs on: empty holders and trigger volumes, and the pawn, driver and
-navigation mesh that AI and player characters are built from.
+The nodes a game's logic hangs on: empty holders, and the pawn, driver and navigation mesh that AI and
+player characters are built from. Colliders and triggers are in [Simulation](#simulation).
 
 | Entry | What you get |
 |---|---|
 | **Empty** | A bare node: a transform, children, somewhere to hang a script. |
-| **Trigger** | An empty node with a 1 m sphere trigger volume. |
-| **Character** | A pawn. *(unreleased)* |
+| **Character** | A pawn, standing in a [Collider](physics.md#character-setup) that holds its capsule (mass 1, no friction, no tipping). The Character is what gets selected. *(unreleased)* |
 | **Controller** | A driver that possesses a character. *(unreleased)* |
 | **Nav Mesh** | A navmesh node with a default `20 × 10 × 20` bake box. *(unreleased)* |
 | **Sequence** | Plays a cinematic: a `.sequence` asset's camera paths, cuts, property animation and script calls, edited in [Sequencer mode](sequencer.md). *(unreleased)* |
@@ -79,7 +78,9 @@ itself (not placeable — it is scene-wide).
 ### Sprites
 
 **Static sprite**, **Animated sprite**, **Tilemap** (orthogonal, 1×1 cells, one "Ground" layer), **Room** (one
-30 × 17 screen of a 2D world), **Parallax Layer** (a backdrop that moves with part of the camera's travel).
+30 × 17 screen of a 2D world), **Parallax Layer** (a backdrop that moves with part of the camera's travel),
+**Character Body 2D** (a 2D character's box and locomotion). A 2D scene's colliders and triggers are in
+[Simulation](#simulation).
 
 ### Primitive Geometries
 
@@ -93,8 +94,8 @@ level layout.
 
 ### Environment
 
-The world around the level: the sky, its light and clouds, the terrain, the wind, water, and the
-volumes that tune how the scene is lit and culled.
+The world around the level: the sky, its light and clouds, the terrain, and the volumes that tune how
+the scene is lit and culled. The wind, the weather and water are in [Simulation](#simulation).
 
 | Entry | Notes |
 |---|---|
@@ -103,11 +104,8 @@ volumes that tune how the scene is lit and culled.
 | **Light Probe** | Default `10 × 10 × 10` influence volume. |
 | **Exposure Volume** | A `10 × 10 × 10` box with its own exposure while the camera is inside. Overrides nothing until a field or preset is picked. |
 | **Volumetric Fog** | A `20 × 6 × 20` box of mist the sun, torches and sky light scatter into. Size it with the face handles; the presets set the medium. |
-| **Weather** | A `40 × 20 × 40` box of rain or snow on the landscape and the plants inside it, and falling through it if you ask (**Falling**). Size it with the face handles; the presets set the weather. |
 | **Clouds (volumetric)** | Not placeable. |
 | **Landscape** | Not placeable. `size 200`, `resolution 129`, `chunkQuads 32`. |
-| **Wind** | Not placeable: one wind for the whole scene. Plants sway only where their material asks for it. |
-| **Water Volume** | A `10 × 2 × 10` box of water: what is inside floats, and what moves through it ripples the surface. |
 | **Occlusion Volume** | A `4 × 3 × 4` box whose contents are skipped while you cannot see it. Fit it inside a room's walls. |
 
 Skybox and Sky Atmosphere are mutually exclusive: they are two answers to the same question.
@@ -122,7 +120,6 @@ effects, and the force fields that push particles around.
 | **Decal** | A `2 × 1 × 2` box that projects straight down, with a default PBR material. *(unreleased)* |
 | **Particle System** | Starts with the default effect (soft rising puffs) so it is visibly doing something; **Create asset** on its slot turns that into a reusable `.vfx`. *(unreleased)* |
 | **Force Field** | A spherical vortex that pushes the particles of emitters with the Force Fields module. *(unreleased)* |
-| **Cloth** | A banner, 0.9 × 1.2 m, held along its top edge. Under a character, set **Ride On** to make it a cape. *(unreleased)* |
 
 > **A freshly added primitive does not take a decal's colour.** Every primitive and complex geometry
 > starts with the Blinn-Phong default material, which is shaded forward. A decal's colour, normal
@@ -130,6 +127,21 @@ effects, and the force fields that push particles around.
 > custom materials. Give the mesh a PBR material and the decal appears on it. The full list of
 > limits is in
 > [Node types](../reference/node-types.md#decalnode--decal-unreleased).
+
+### Simulation
+
+What the physics, the wind and the weather move: the bodies and sensors of both a 3D and a 2D scene,
+and the volumes and cloth they act on.
+
+| Entry | Notes |
+|---|---|
+| **Collider** | A [rigid body](physics.md#collider): a static 1 m box until you give it mass and fit its shapes. What you put under it moves with it, so a crate's model is its child, and a [Character](physics.md#character-setup) stands in one holding its capsule. |
+| **Collider 2D** | A 2D box: static, or falling onto the tilemaps and other colliders when it has mass. See [2D physics](tilemap-2d.md). |
+| **Trigger** | A sensor: a 1 m sphere in a 3D scene, a 1 × 1 box in a 2D one. The same node acts as either, by the scene it is in. See [Trigger](physics.md#trigger). |
+| **Water Volume** | A `10 × 2 × 10` box of water: what is inside floats, and what moves through it ripples the surface. |
+| **Wind** | Not placeable: one wind for the whole scene. Plants sway only where their material asks for it. |
+| **Weather** | A `40 × 20 × 40` box of rain or snow on the landscape and the plants inside it, and falling through it if you ask (**Falling**). Size it with the face handles; the presets set the weather. |
+| **Cloth** | A banner, 0.9 × 1.2 m, held along its top edge. Under a character, set **Ride On** to make it a cape. *(unreleased)* |
 
 ### UI — Layout
 
@@ -310,9 +322,8 @@ a slider is one undo step rather than sixty.
 The undo button's tooltip names the change kind: Transform, Rename, Visibility, Variable, Physics,
 Script, Material, Texture, Light, Camera, Environment, Component.
 
-Rigid bodies and triggers are not part of a node's snapshot, so the Physics panel and the viewport's
-collision handles record their own steps: one per edit, per drag of a field, or per handle drag, named
-for what it did ("Resize body shape", "Add trigger shape").
+Colliders and Triggers are nodes, so their edits, in the inspector or with the viewport's collision
+handles, are steps like any other node's: one per edit, per drag of a field, or per handle drag.
 
 A tilemap stroke is pushed as one entry, so **Ctrl+Z undoes a whole stroke**.
 
@@ -336,7 +347,7 @@ animation and template tabs.
 | Category | Default (editor) |
 |---|---|
 | Collision wireframes | on — in 2D, the boxes of Character Body 2Ds and Collider 2Ds |
-| Trigger volumes | on — in 2D, the boxes of Area 2Ds |
+| Trigger volumes | on — in 2D, the boxes of Triggers |
 | Editor icons | on — the markers of nodes that draw nothing of their own: lights, sounds, light probes, exposure volumes, decals, particle systems, force fields, navmeshes and cameras, and a 2D world's rooms and Camera 2D frames |
 | Bounding boxes | off |
 | Skeletons | off |

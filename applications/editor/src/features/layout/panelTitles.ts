@@ -6,7 +6,7 @@ import type { EditorMode } from '../engineContextTypes';
 // The Scene panel hosts the mode-specific tree, so its tab label follows the mode.
 export const PANEL_TITLES: Record<string, string> = {
   viewport: 'Viewport', scene: 'Scene', sceneAdd: 'Scene Elements', uiAdd: 'UI Elements', properties: 'Properties',
-  scripts: 'Scripts', physics: 'Physics', logger: 'Logger', assets: 'Assets',
+  scripts: 'Scripts', logger: 'Logger', assets: 'Assets',
   animClips: 'Clips', animVariables: 'Parameters', animStateMachine: 'Animator',
   animField: 'Blend Space Settings', animFieldPlot: 'Blend Space',
   clipInspector: 'Clip', clipTimeline: 'Timeline',
@@ -69,7 +69,7 @@ export const MODE_DOC_PAGE: Record<EditorMode, string> = {
 
 const PANEL_DOC_PAGE: Record<string, string> = {
   sceneAdd: 'editor/scene-authoring', uiAdd: 'editor/scene-authoring',
-  scripts: 'editor/scripting-workflow', physics: 'editor/physics',
+  scripts: 'editor/scripting-workflow',
   logger: 'editor/interface', assets: 'editor/assets',
   animClips: 'editor/animation', animVariables: 'editor/animation', animStateMachine: 'editor/animation',
   animField: 'editor/animation', animFieldPlot: 'editor/animation',
@@ -77,7 +77,7 @@ const PANEL_DOC_PAGE: Record<string, string> = {
   particleTransport: 'editor/particles',
   tilePalette: 'editor/tilemap-2d', tilemapLayers: 'editor/tilemap-2d',
   landscapeTools: 'editor/terrain', landscapeLayers: 'editor/terrain',
-  // The ragdoll is documented with the rest of the ragdoll, in Physics.
+  // The ragdoll is documented with the rest of physics.
   rigRagdoll: 'editor/physics', rigBoneMasks: 'editor/animation',
   optionsEngine: 'editor/options', optionsEditor: 'editor/options', optionsProject: 'editor/options',
   sequencer: 'editor/sequencer',

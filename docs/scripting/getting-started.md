@@ -171,7 +171,7 @@ class sits on the node you just looked up.
 | `onSpawn()` | Once per life — at scene start, or every `spawn()`. |
 | `onStart()` | Once per node lifetime, after variables are restored. May be `async`. |
 | `onUpdate(delta, time)` | Every frame while running and unpaused. |
-| `onCollision(other)` | Needs a body on **both** nodes. |
+| `onCollision(other)` | On a Collider, when its body touches another. |
 | `onTrigger(other)` | Needs a trigger on this node. Fires on first contact. |
 | `onTriggerEnter(other)` / `onTriggerExit(other)` | A trigger overlap began / ended. Called on both nodes, once per frame after physics. |
 | `onAction(action, state)` | Just before this frame's `onUpdate`. |

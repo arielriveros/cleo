@@ -1,4 +1,4 @@
-import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, WeatherNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OcclusionVolumeNode, ExposureVolumeNode, GIVolumeNode, VolumetricFogNode, ClothNode, SequenceNode, Camera2DNode, Room2DNode, ParallaxLayerNode, CharacterBody2DNode, Body2DNode, Area2DNode } from 'cleo'
+import { Node, SkyboxNode, LightNode, LightProbeNode, DecalNode, CameraNode, CameraRigNode, SpriteNode, TilemapNode, LandscapeNode, VolumetricCloudsNode, SkyAtmosphereNode, UINode, UIRootNode, isUINodeType, SkyLightNode, WindNode, WeatherNode, SoundNode, CharacterNode, ControllerNode, NavMeshNode, ParticleSystemNode, ForceFieldNode, WaterVolumeNode, OcclusionVolumeNode, ExposureVolumeNode, GIVolumeNode, VolumetricFogNode, ClothNode, SequenceNode, Camera2DNode, Room2DNode, ParallaxLayerNode, CharacterBody2DNode, Body2DNode, ColliderNode, TriggerNode, ModelNode } from 'cleo'
 import MaterialSlot from './MaterialSlot'
 import AnimationSlot from './AnimationSlot'
 import RigSlot from './RigSlot';
@@ -35,7 +35,9 @@ import SequenceEditor from './SequenceEditor'
 import VolumetricFogEditor from './VolumetricFogEditor'
 import TilemapEditor from './TilemapEditor'
 import { Camera2DEditor, Room2DEditor, ParallaxLayerEditor } from './Camera2DEditors'
-import { CharacterBody2DEditor, Body2DEditor, Area2DEditor } from './Physics2DEditors'
+import { CharacterBody2DEditor, Body2DEditor } from './Physics2DEditors'
+import { ColliderEditor, TriggerEditor } from '../physicsEditors/ColliderEditor'
+import RagdollEditor, { isRagdollModel } from '../physicsEditors/RagdollEditor'
 import LandscapeEditor from './LandscapeEditor'
 import SceneSettings from './SceneSettings'
 import UIEditor from './UIEditor'
@@ -114,7 +116,10 @@ export default function PropertyEditor(props: {node: Node, readOnly?: boolean}) 
           { props.node.nodeType === 'parallaxLayer' && <ParallaxLayerEditor key={props.node.id} node={props.node as ParallaxLayerNode} /> }
           { props.node.nodeType === 'characterBody2D' && <CharacterBody2DEditor key={props.node.id} node={props.node as CharacterBody2DNode} /> }
           { props.node.nodeType === 'body2D' && <Body2DEditor key={props.node.id} node={props.node as Body2DNode} /> }
-          { props.node.nodeType === 'area2D' && <Area2DEditor key={props.node.id} node={props.node as Area2DNode} /> }
+          { props.node.nodeType === 'collider' && <ColliderEditor key={props.node.id} node={props.node as ColliderNode} /> }
+          { props.node.nodeType === 'trigger' && <TriggerEditor key={props.node.id} node={props.node as TriggerNode} /> }
+          {/* How a skinned character falls when it goes limp: the model's own, so it is in its Properties. */}
+          { !root && isRagdollModel(props.node) && <RagdollEditor key={props.node.id} node={props.node as ModelNode} /> }
           { props.node.nodeType === 'landscape' && <LandscapeEditor key={props.node.id} node={props.node as LandscapeNode} /> }
           { props.node.nodeType === 'volumetricClouds' && <VolumetricCloudsEditor node={props.node as VolumetricCloudsNode} /> }
           { props.node.nodeType === 'skyAtmosphere' && <SkyAtmosphereEditor node={props.node as SkyAtmosphereNode} /> }

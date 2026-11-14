@@ -59,12 +59,12 @@ import {
   ParallaxLayerNode,
   CharacterBody2DNode,
   Body2DNode,
-  Area2DNode,
+  ColliderNode,
+  TriggerNode,
   LIGHT_UNIT,
   newLightOptions,
 } from 'cleo'
 import type EventEmitter from '@cleo/app-kit/utils/eventEmitter'
-import type { ShapeDescription } from '../EngineContext'
 import {
   CanvasIcon, WorldUIIcon, PanelIcon, StackIcon, SpacerIcon, TextIcon, ImageIcon,
   ButtonIcon, ProgressIcon, SliderIcon, ToggleIcon, TextInputIcon,
@@ -80,7 +80,7 @@ import {
   SpriteIcon, AnimatedSpriteIcon, TilemapIcon, NavMeshIcon,
   SkyboxIcon, SkyAtmosphereIcon, SkyLightIcon, CloudsIcon, LandscapeIcon, WindIcon, WeatherIcon,
   SoundIcon, AmbientSoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
-  SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon, CharacterBody2DIcon, Collider2DIcon, Area2DIcon,
+  SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon, CharacterBody2DIcon, Collider2DIcon, ColliderIcon,
 } from './nodeIcons'
 import { createLandscapeNode } from '../../utils/landscapeSlots'
 import { defaultDecalMaterial } from '../../utils/materials'
@@ -91,7 +91,7 @@ import { defaultDecalMaterial } from '../../utils/materials'
 export const NEW_NODE_MIME = 'text/cleo-new-node';
 
 export type AddCategory = 'gameplay' | 'cameras' | 'lights' | 'audio' | 'sprites' | 'primitives' | 'complex'
-  | 'environment' | 'effects' | 'uiLayout' | 'uiCore' | 'uiWidgets';
+  | 'environment' | 'effects' | 'simulation' | 'uiLayout' | 'uiCore' | 'uiWidgets';
 
 // `doc` is the category's heading in the Add catalog docs, which is what its hover card shows. Literal
 // keys, so the docs coverage test can check each one resolves.
@@ -106,6 +106,7 @@ export const ADD_CATEGORIES: { value: AddCategory, label: string, doc: string }[
   { value: 'complex', label: 'Complex Geometries', doc: 'editor/scene-authoring#complex-geometries' },
   { value: 'environment', label: 'Environment', doc: 'editor/scene-authoring#environment' },
   { value: 'effects', label: 'Effects', doc: 'editor/scene-authoring#effects' },
+  { value: 'simulation', label: 'Simulation', doc: 'editor/scene-authoring#simulation' },
   // UI categories: the UI Elements palette's half (see AddNew), which shows in UI mode and in a template.
   { value: 'uiLayout', label: 'Layout', doc: 'editor/scene-authoring#ui--layout' },
   { value: 'uiCore', label: 'Elements', doc: 'editor/scene-authoring#ui--elements' },
@@ -118,7 +119,6 @@ export const UI_CATEGORIES: readonly AddCategory[] = ['uiLayout', 'uiCore', 'uiW
 export interface AddContext {
   editorScene: Scene;
   eventEmitter: EventEmitter;
-  triggers: Map<string, { shapes: ShapeDescription[] }>;
 }
 
 export interface AddItem {
@@ -151,16 +151,6 @@ export const ADD_ITEMS: AddItem[] = [
   {
     id: 'empty', label: 'Empty', icon: EmptyIcon, category: 'gameplay',
     create: async () => new Node('node'),
-  },
-  {
-    id: 'trigger', label: 'Trigger', icon: TriggerIcon, category: 'gameplay',
-    // Just an empty node with a trigger; the editor-helper reconciler draws its debug wireframe.
-    create: async (ctx) => {
-      const triggerNode = new Node('trigger');
-      ctx.triggers.set(triggerNode.id, { shapes: [{ type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }] });
-      ctx.eventEmitter.emit('PHYSICS_CHANGED');
-      return triggerNode;
-    },
   },
 
   // The reconciler adds the frustum gizmo (__debug__CameraModel) from the CameraNode itself.
@@ -205,8 +195,22 @@ export const ADD_ITEMS: AddItem[] = [
   // (it is usually the actor you just built), while a Controller is the thing you add to drive it —
   // and one controller may be re-pointed at different pawns over a game.
   {
+    // A Character authors no shape: it stands in a Collider holding its capsule, which is what physics
+    // moves. Both come together, set up the way a walking character wants (mass 1, no friction, no
+    // tipping; see docs/editor/physics.md#character-setup).
     id: 'character', label: 'Character', icon: CharacterAddIcon, category: 'gameplay',
-    create: async () => new CharacterNode('character'),
+    create: async () => {
+      const collider = new ColliderNode('character collider');
+      collider.mass = 1;
+      collider.friction = 0;
+      collider.linearDamping = 0;
+      collider.angularConstraints = [0, 0, 0];
+      collider.groundProbeDistance = 0.12;
+      collider.simulationMode = 'always';
+      collider.shapes = [{ type: 'capsule', radius: 0.3, height: 1.8, numSegments: 16, offset: [0, 0.9, 0], rotation: [0, 0, 0] }];
+      collider.addChild(new CharacterNode('character'));
+      return collider;
+    },
   },
   {
     id: 'controller', label: 'Controller', icon: ControllerAddIcon, category: 'gameplay',
@@ -333,7 +337,7 @@ export const ADD_ITEMS: AddItem[] = [
 
   // Complex geometries: parametric level-blockout pieces, authored at unit size with an identity transform
   // as solid single-sided shells, so scaling the node is how one is fitted to a space. Bare ModelNodes:
-  // the Physics panel fits a collider on demand.
+  // put one under a Collider and fit its shapes to make it solid.
   {
     id: 'ramp', label: 'Ramp', icon: RampIcon, category: 'complex',
     create: async () => new ModelNode('ramp', new Model(Geometry.Ramp(1, 1, 1), Material.Default({}))),
@@ -427,12 +431,6 @@ export const ADD_ITEMS: AddItem[] = [
     create: async () => new ParticleSystemNode('particles'),
   },
   {
-    // A box of water: everything dynamic inside floats by its mass (buoyancy), and what moves through
-    // it ripples and splashes the surface it is pointed at. Placeable: it is a volume.
-    id: 'waterVolume', label: 'Water Volume', icon: WaterVolumeIcon, category: 'environment',
-    create: async () => new WaterVolumeNode('water volume', { size: [10, 2, 10] }),
-  },
-  {
     // An occlusion volume: what lies wholly inside the box is not rendered while the box cannot be seen
     // (graphics/occlusion/occlusionVolumes.ts). Fitted to a room's interior, inside its walls, it skips
     // the room's contents whenever you cannot see into it. Placeable: it is a volume.
@@ -442,11 +440,6 @@ export const ADD_ITEMS: AddItem[] = [
   {
     id: 'forceField', label: 'Force Field', icon: ForceFieldIcon, category: 'effects',
     create: async () => new ForceFieldNode('force field', { kind: 'vortex', shape: 'sphere' }),
-  },
-  {
-    // A banner held along its top edge. Under a character it becomes a cape (Ride On: Chest).
-    id: 'cloth', label: 'Cloth', icon: ClothIcon, category: 'effects',
-    create: async () => new ClothNode('cloth'),
   },
   // Two menu entries, ONE node class, exactly like the three lights above: ambient and spatial differ in
   // how a sound is heard, not in what it is, so the mode lives in the node's payload.
@@ -464,17 +457,6 @@ export const ADD_ITEMS: AddItem[] = [
     // Scene-wide, so unplaceable — unlike a light probe, which has a volume.
     id: 'skyLight', label: 'Sky Light', icon: SkyLightIcon, category: 'lights', placeable: false,
     create: async () => new SkyLightNode('sky light'),
-  },
-  {
-    // Scene-wide, so unplaceable. Plants only sway where their material asks for it.
-    id: 'wind', label: 'Wind', icon: WindIcon, category: 'environment', placeable: false,
-    create: async () => new WindNode('wind'),
-  },
-  {
-    // Placeable, like the fog: a box of rain or snow centred on the node, adjusted with the box gizmo's face
-    // handles. The landscape and foliage materials inside it answer it.
-    id: 'weather', label: 'Weather', icon: WeatherIcon, category: 'environment',
-    create: async () => new WeatherNode('weather', { size: [40, 20, 40] }),
   },
   {
     id: 'volumetricClouds', label: 'Clouds', icon: CloudsIcon, category: 'environment', placeable: false,
@@ -498,19 +480,61 @@ export const ADD_ITEMS: AddItem[] = [
     },
   },
 
-  // The 2D physics: a character body (the platformer controller, player input on), a box collider, and a
-  // trigger area. A 2D scene's own; a 3D scene's bodies are the Gameplay ones.
+  // A 2D character body (walk or fly locomotion, driven by a Controller). Its colliders and triggers are
+  // the Simulation category's.
   {
     id: 'characterBody2D', label: 'Character Body 2D', icon: CharacterBody2DIcon, category: 'sprites',
     create: async () => new CharacterBody2DNode('character body 2D'),
   },
+
+  // --- Simulation: what the physics, the wind and the weather move ---------------------------------------
   {
-    id: 'body2D', label: 'Collider 2D', icon: Collider2DIcon, category: 'sprites',
+    // A rigid body: a static 1 m box until it is given mass and its shapes are fitted. What goes under it
+    // moves with it, so a crate's model is its child, and a Character stands in one holding its capsule.
+    id: 'collider', label: 'Collider', icon: ColliderIcon, category: 'simulation',
+    create: async () => {
+      const collider = new ColliderNode('collider');
+      collider.shapes = [{ type: 'box', width: 1, height: 1, depth: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }];
+      return collider;
+    },
+  },
+  {
+    // A 2D box collider: static, or falling with mass onto the tilemaps and other colliders.
+    id: 'body2D', label: 'Collider 2D', icon: Collider2DIcon, category: 'simulation',
     create: async () => new Body2DNode('collider 2D', [2, 0.5]),
   },
   {
-    id: 'area2D', label: 'Area 2D', icon: Area2DIcon, category: 'sprites',
-    create: async () => new Area2DNode('area 2D', [1, 1]),
+    // A sensor: a 1 m sphere in a 3D scene, a 1 x 1 box in a 2D one (the node is the same; the scene's
+    // dimension decides which it acts as).
+    id: 'trigger', label: 'Trigger', icon: TriggerIcon, category: 'simulation',
+    create: async () => {
+      const trigger = new TriggerNode('trigger');
+      trigger.shapes = [{ type: 'sphere', radius: 1, offset: [0, 0, 0], rotation: [0, 0, 0] }];
+      trigger.size = [1, 1];
+      return trigger;
+    },
+  },
+  {
+    // A box of water: everything dynamic inside floats by its mass (buoyancy), and what moves through
+    // it ripples and splashes the surface it is pointed at. Placeable: it is a volume.
+    id: 'waterVolume', label: 'Water Volume', icon: WaterVolumeIcon, category: 'simulation',
+    create: async () => new WaterVolumeNode('water volume', { size: [10, 2, 10] }),
+  },
+  {
+    // Scene-wide, so unplaceable. Plants only sway where their material asks for it.
+    id: 'wind', label: 'Wind', icon: WindIcon, category: 'simulation', placeable: false,
+    create: async () => new WindNode('wind'),
+  },
+  {
+    // Placeable, like the fog: a box of rain or snow centred on the node, adjusted with the box gizmo's face
+    // handles. The landscape and foliage materials inside it answer it.
+    id: 'weather', label: 'Weather', icon: WeatherIcon, category: 'simulation',
+    create: async () => new WeatherNode('weather', { size: [40, 20, 40] }),
+  },
+  {
+    // A banner held along its top edge. Under a character it becomes a cape (Ride On: Chest).
+    id: 'cloth', label: 'Cloth', icon: ClothIcon, category: 'simulation',
+    create: async () => new ClothNode('cloth'),
   },
   // One screen of a 2D world, which a Camera 2D keeps its view inside: 30 x 17 units, a 480 x 270 view of
   // 16 px tiles.
@@ -622,6 +646,7 @@ function resolveUIParent(item: AddItem, parent: Node, ctx: AddContext, created: 
 export async function addItemTo(item: AddItem, parent: Node, ctx: AddContext): Promise<Node> {
   const node = await item.create(ctx);
   resolveUIParent(item, parent, ctx, node).addChild(node); // Node.addChild emits SCENE_CHANGED itself
-  ctx.eventEmitter.emit('SELECT_NODE', node.id);
+  // A Character comes in its Collider: the Character is what you go on to set up.
+  ctx.eventEmitter.emit('SELECT_NODE', (node.character ?? node).id);
   return node;
 }

@@ -4,7 +4,8 @@ import { Scene } from '../src/core/scene/scene';
 import { Node } from '../src/core/scene/nodes/node';
 import { CharacterBody2DNode } from '../src/core/scene/nodes/characterBody2DNode';
 import { Body2DNode } from '../src/core/scene/nodes/body2DNode';
-import { Area2DNode } from '../src/core/scene/nodes/area2DNode';
+import { TriggerNode } from '../src/core/scene/nodes/triggerNode';
+
 import { TilemapNode } from '../src/core/scene/nodes/tilemapNode';
 import { Tilemap } from '../src/graphics/tilemap/tilemap';
 import { Tileset } from '../src/graphics/tilemap/tileset';
@@ -16,6 +17,14 @@ import { parseNodeJson } from '../src/core/scene/nodes/parseNodeJson';
 import { ControllerNode } from '../src/core/scene/nodes/controllerNode';
 import { TILE_NONE, TILE_ONE_WAY, TILE_SLOPE, TILE_SOLID } from '../src/physics2d/types';
 import type { CollisionWorld2D, Grid2D } from '../src/physics2d/types';
+
+/** A 2D trigger (a Trigger node in a 2D scene) `size` across. */
+function area2D(name: string, size: [number, number]): TriggerNode {
+    const t = new TriggerNode(name);
+    t.size = size;
+    t.mask = 1;
+    return t;
+}
 
 // The 2D physics: move-and-slide through tiles (solid, one-way, slopes) and boxes, and the scene's 2D pass
 // that moves bodies by their generic locomotion (and their scripts' onMove2D) and reports area overlaps.
@@ -179,6 +188,7 @@ afterEach(() => { CleoEngine.authoringMode = authoring; });
 /** A scene with a flat 1x1-cell floor from x = -20 to 20 at y = 0, and a body a test drives directly. */
 function level() {
     const scene = new Scene();
+    scene.dimension = '2D';
     const ts = new Tileset({ id: 'ts', textureId: 'ts.png', imageWidth: 16, imageHeight: 16, tileWidth: 16, tileHeight: 16, columns: 1, rows: 1 });
     ts.setMeta(0, { solid: true });
     const map = new Tilemap({ kind: 'orthogonal', cellWidth: 1, cellHeight: 1 });
@@ -330,7 +340,7 @@ describe('the 2D physics pass', () => {
 
     it('tells an area and what came in, and out', () => {
         const { scene, player } = level();
-        const zone = new Area2DNode('Checkpoint', [2, 2]);
+        const zone = area2D('Checkpoint', [2, 2]);
         zone.setPosition([5, 1, 0]);
         scene.addNode(zone);
         const heard: string[] = [];
@@ -345,12 +355,12 @@ describe('the 2D physics pass', () => {
 
     it('lets areas see areas, mirrors a facing body\'s child area, and filters by layer', () => {
         const { scene, player } = level();
-        const sword = new Area2DNode('Sword', [1, 1]);
+        const sword = area2D('Sword', [1, 1]);
         sword.offset = [1, 1];
         sword.detectAreas = true;
         sword.mask = 2;
         player.addChild(sword);
-        const enemyHurt = new Area2DNode('Hurtbox', [0.6, 1.6]);
+        const enemyHurt = area2D('Hurtbox', [0.6, 1.6]);
         enemyHurt.layer = 2;
         enemyHurt.setPosition([-1.2, 1, 0]);
         scene.addNode(enemyHurt);

@@ -45,7 +45,8 @@ export default class SoulsEnemySpawnNode extends Node {
   /** Remove whatever this spawn made before, and make a fresh one. */
   public respawnEnemy(): void {
     if (this._live && this.scene?.getNodeById(this._live.id)) {
-      try { this._live.remove() } catch { /* already gone */ }
+      // Its Collider, which the template placed and which carries the rest.
+      try { (this._live.collider ?? this._live).remove() } catch { /* already gone */ }
     }
     this._live = null
     if (!(this.spawnables ?? []).includes(this.templateName))
@@ -53,7 +54,9 @@ export default class SoulsEnemySpawnNode extends Node {
     const p = this.worldPosition
     const f = this.worldForward
     const yaw = Math.atan2(f[0], f[2]) * 180 / Math.PI
-    const enemy = this.scene?.instantiate(this.templateName, { position: [p[0], p[1], p[2]], rotation: [0, yaw, 0] })
+    // An enemy template's root is its Collider; the enemy is the Character in it.
+    const root = this.scene?.instantiate(this.templateName, { position: [p[0], p[1], p[2]], rotation: [0, yaw, 0] })
+    const enemy = root?.character ?? root
     if (!enemy) {
       Logger.warn('Hollow Keep: spawn "' + this.name + '" found no template "' + this.templateName + '".', 'Script')
       return

@@ -39,12 +39,24 @@ export default class SoulsBreakableNode extends Node {
     return true
   }
 
+  onStart() {
+    // The roll zone is a Trigger of its own under the barrel (the Hurtbox is SoulsHitbox's): hear it here.
+    for (const zone of this.children) {
+      if (zone.nodeType !== 'trigger' || zone.name === 'Hurtbox') continue
+      zone.onTriggerEnter = (other: Node) => this.onTriggerEnter(other)
+      zone.onTriggerExit = (other: Node) => this.onTriggerExit(other)
+    }
+  }
+
   onTriggerEnter(other: Node) {
-    if (other && !this._inside.includes(other)) this._inside.push(other)
+    // What came in is a body: a character's is its Collider, and the character is what rolls.
+    const who = other?.character ?? other
+    if (who && !this._inside.includes(who)) this._inside.push(who)
   }
 
   onTriggerExit(other: Node) {
-    this._inside = this._inside.filter(n => n !== other)
+    const who = other?.character ?? other
+    this._inside = this._inside.filter(n => n !== who)
   }
 
   onUpdate() {

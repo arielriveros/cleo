@@ -3049,7 +3049,8 @@ export class Animator {
     private _nearestBodiedNode(): Node | null {
         let n: Node | null = this._node;
         while (n) {
-            if (n.body) return n;
+            // The body's OWNER (a Character reads its Collider's body but is not what moves it).
+            if (n.ownBody) return n;
             n = n.parent;
         }
         return null;

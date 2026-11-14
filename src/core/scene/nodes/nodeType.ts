@@ -11,6 +11,7 @@ export type NodeType = 'node' | 'model' | 'light' | 'lightProbe' | 'skybox' | 'c
   | 'particleSystem' | 'forceField' | 'waterVolume' | 'occlusionVolume' | 'exposureVolume' | 'volumetricFog' | 'fluidVolume' | 'cloth' | 'giVolume'
   | 'sequence'
   | 'camera2D' | 'room2D' | 'parallaxLayer' | 'characterBody2D' | 'body2D' | 'area2D'
+  | 'collider' | 'trigger'
   | 'uiRoot' | 'uiPanel' | 'uiText' | 'uiImage' | 'uiButton' | 'uiStack' | 'uiSpacer'
   | 'uiProgressBar' | 'uiSlider' | 'uiToggle' | 'uiTextInput';
 

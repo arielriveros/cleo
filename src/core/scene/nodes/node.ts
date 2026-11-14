@@ -983,6 +983,63 @@ export class Node {
    * **Attaches the node — never call `addChild` after it**, or the load fires a spurious detach +
    * reparent pair per node. `tests/nodeParse.test.ts` pins that at zero.
    */
+  /**
+   * @internal Attach `shapes` (collider descriptions, as a Collider or Trigger node authors them) to `target`.
+   * Shape dimensions and offsets are authored in the node's local units, so its world scale is applied here;
+   * rotations are scale-invariant and pass through untouched.
+   */
+  public static attachShapes(node: Node, shapes: readonly any[] | undefined, target: RigidBody | Trigger): void {
+    if (!Array.isArray(shapes)) return;
+    const scale = node.worldScale;
+    const scaledOffset = (offset: number[] | undefined) => vec3.fromValues(
+      (offset?.[0] ?? 0) * scale[0], (offset?.[1] ?? 0) * scale[1], (offset?.[2] ?? 0) * scale[2]
+    );
+
+    for (const shape of shapes) {
+      const offset = scaledOffset(shape.offset);
+      const rotation = vec3.fromValues(shape.rotation?.[0] ?? 0, shape.rotation?.[1] ?? 0, shape.rotation?.[2] ?? 0);
+
+      switch (shape.type) {
+        case 'box':
+          target.attachShape(Shape.Box(shape.width, shape.height, shape.depth, scale), offset, rotation);
+          break;
+        case 'sphere':
+          target.attachShape(Shape.Sphere(shape.radius, scale), offset, rotation);
+          break;
+        case 'plane':
+          target.attachShape(Shape.Plane(), offset, rotation);
+          break;
+        case 'cylinder':
+          target.attachShape(Shape.Cylinder(shape.radius, shape.radius, shape.height, shape.numSegments, scale), offset, rotation);
+          break;
+        case 'capsule':
+          // One capsule (a backend without capsules splits it itself, along the capsule's own rotation).
+          for (const part of Shape.Capsule(shape.radius, shape.height, shape.numSegments, scale))
+            target.attachShape(part.shape, offset, rotation);
+          break;
+        case 'convex': {
+          // A degenerate hull would feed NaN axes to cannon's SAT, so fall back to its bounding box.
+          const hull = Shape.ConvexHull(shape.vertices, shape.faces, scale);
+          if (hull) { target.attachShape(hull, offset, rotation); break; }
+
+          const min = [Infinity, Infinity, Infinity];
+          const max = [-Infinity, -Infinity, -Infinity];
+          for (const v of shape.vertices as number[][])
+            for (let i = 0; i < 3; i++) { min[i] = Math.min(min[i], v[i]); max[i] = Math.max(max[i], v[i]); }
+
+          Logger.warn(`Convex hull on node ${node.name} is degenerate; falling back to its bounding box.`);
+          target.attachShape(
+            Shape.Box(max[0] - min[0], max[1] - min[1], max[2] - min[2], scale),
+            offset, rotation
+          );
+          break;
+        }
+        default:
+          Logger.error(`Shape type ${shape.type} not supported`, 'Physics');
+      }
+    }
+  }
+
   protected static finishParse(node: Node, parent: Node, json: any) {
     // Apply the serialized transform before anything that derives from it: the rigid body is created at
     // the node's world position/orientation, collider shapes are sized by its world scale, and children
@@ -1029,59 +1086,6 @@ export class Node {
       }
     }
 
-    // Shape dimensions and offsets are authored in node-local units, so the node's world scale is applied
-    // here. Rotations are scale-invariant and pass through untouched.
-    const setShapes = (shapes: any, target: RigidBody | Trigger) => {
-      const scale = node.worldScale;
-      const scaledOffset = (offset: number[]) => vec3.fromValues(
-        offset[0] * scale[0], offset[1] * scale[1], offset[2] * scale[2]
-      );
-
-      for (const shape of shapes) {
-        const offset = scaledOffset(shape.offset);
-        const rotation = vec3.fromValues(shape.rotation[0], shape.rotation[1], shape.rotation[2]);
-
-        switch (shape.type) {
-          case 'box':
-            target.attachShape(Shape.Box(shape.width, shape.height, shape.depth, scale), offset, rotation);
-            break;
-          case 'sphere':
-            target.attachShape(Shape.Sphere(shape.radius, scale), offset, rotation);
-            break;
-          case 'plane':
-            target.attachShape(Shape.Plane(), offset, rotation);
-            break;
-          case 'cylinder':
-            target.attachShape(Shape.Cylinder(shape.radius, shape.radius, shape.height, shape.numSegments, scale), offset, rotation);
-            break;
-          case 'capsule':
-            // One capsule (a backend without capsules splits it itself, along the capsule's own rotation).
-            for (const part of Shape.Capsule(shape.radius, shape.height, shape.numSegments, scale))
-              target.attachShape(part.shape, offset, rotation);
-            break;
-          case 'convex': {
-            // A degenerate hull would feed NaN axes to cannon's SAT, so fall back to its bounding box.
-            const hull = Shape.ConvexHull(shape.vertices, shape.faces, scale);
-            if (hull) { target.attachShape(hull, offset, rotation); break; }
-
-            const min = [Infinity, Infinity, Infinity];
-            const max = [-Infinity, -Infinity, -Infinity];
-            for (const v of shape.vertices as number[][])
-              for (let i = 0; i < 3; i++) { min[i] = Math.min(min[i], v[i]); max[i] = Math.max(max[i], v[i]); }
-
-            Logger.warn(`Convex hull on node ${node.name} is degenerate; falling back to its bounding box.`);
-            target.attachShape(
-              Shape.Box(max[0] - min[0], max[1] - min[1], max[2] - min[2], scale),
-              offset, rotation
-            );
-            break;
-          }
-          default:
-            Logger.error(`Shape type ${shape.type} not supported`, 'Physics');
-        }
-      }
-    }
-
     if (json.body) {
       // setBody/setTrigger return the body they just created, so the shapes go straight onto that rather
       // than re-reading node._body, which is typed nullable.
@@ -1107,7 +1111,7 @@ export class Node {
         json.body.simulationRange,
         json.body.canSleep
       );
-      setShapes(json.body.shapes, body);
+      Node.attachShapes(node, json.body.shapes, body);
       // AFTER every shape is attached: cannon has no centre of mass (`body.position` is it), so an
       // offset collider would otherwise leave the mass at the node origin and the geometry hanging off
       // it — which makes the body rotate until it lines up with whatever it is standing on.
@@ -1119,7 +1123,7 @@ export class Node {
     if (json.trigger) {
       // Every option is optional in the JSON: absent ones keep a plain trigger's behaviour.
       const t = json.trigger;
-      setShapes(t.shapes, node.setTrigger({
+      Node.attachShapes(node, t.shapes, node.setTrigger({
         enabled: t.enabled, group: t.group, mask: t.mask, detectTriggers: t.detectTriggers, continuous: t.continuous,
       }));
     }
@@ -1864,8 +1868,44 @@ export class Node {
     this._notifyChange('transform', 'scale');
   }
 
-  /** This node's rigid body, or `null` if it has none. See {@link setBody}. */
+  /**
+   * The rigid body that moves this node, or `null`. A Collider node's own body (or one {@link setBody}
+   * made); a Character's is its Collider's (CharacterNode overrides this), so `velocity`, `isGrounded`
+   * and the measured motion below read the collider it stands in.
+   */
   public get body(): RigidBody | null { return this._body; }
+
+  /** @internal The body this node itself owns ({@link setBody}, or a Collider node's), never a parent's. */
+  public get ownBody(): RigidBody | null { return this._body; }
+
+  /**
+   * @internal Set by a Collider or Trigger node until its body is built (ColliderNode.buildPhysics): at parse
+   * into a running scene, else at the first physics step that meets it.
+   */
+  public wantsPhysicsBuild: boolean = false;
+  /** @internal Build the body this node describes (a Collider's, a Trigger's). Nothing on a plain node. */
+  public buildPhysics(): void { this.wantsPhysicsBuild = false; }
+
+  /**
+   * The Collider this node moves with: itself when it is one, else its nearest Collider ancestor, else
+   * `null`. Move or push that to move a character: `this.node.collider?.setPosition(spawnPoint)`.
+   */
+  public get collider(): Node | null {
+    for (let n: Node | null = this; n; n = n._parent) if (n.nodeType === 'collider') return n;
+    return null;
+  }
+
+  /**
+   * The Character this node stands for: itself when it is one, or the Character a Collider holds directly
+   * (a character's root, as a template places it or a raycast hits it, is its Collider). `null` otherwise.
+   * `scene.instantiate('Hollow')?.character` is the enemy itself.
+   */
+  public get character(): Node | null {
+    if (this.nodeType === 'character') return this;
+    if (this.nodeType !== 'collider') return null;
+    for (const c of this._children) if (c.nodeType === 'character') return c;
+    return null;
+  }
 
   /**
    * True when this node's rigid body is resting on something solid in the CURRENT gravity direction —
@@ -1878,8 +1918,8 @@ export class Node {
    * true briefly after walking off a ledge — use {@link isFalling} to ask about falling.
    */
   public get isGrounded(): boolean {
-    if (!this._body) return false;
-    return this._scene?.physics?.isGrounded(this._body) ?? false;
+    if (!this.body) return false;
+    return this._scene?.physics?.isGrounded(this.body) ?? false;
   }
 
   /**
@@ -1892,8 +1932,8 @@ export class Node {
    */
   public get groundNormal(): vec3 {
     const up = vec3.fromValues(0, 1, 0);
-    if (!this._body) return up;
-    return this._scene?.physics?.groundNormal(this._body) ?? up;
+    if (!this.body) return up;
+    return this._scene?.physics?.groundNormal(this.body) ?? up;
   }
 
   /**
@@ -1906,16 +1946,16 @@ export class Node {
    * A fresh vector each read. Assigning to a node with no body does nothing.
    */
   public get velocity(): vec3 {
-    if (!this._body) return vec3.create();
-    const v = this._body.velocity;
+    if (!this.body) return vec3.create();
+    const v = this.body.velocity;
     return vec3.fromValues(v.x, v.y, v.z);
   }
   public set velocity(value: vec3) {
     // cannon owns the Vec3 and reads it in place every step, so it is mutated rather than replaced.
-    if (!this._body) return;
-    this._body.velocity.set(value[0], value[1], value[2]);
+    if (!this.body) return;
+    this.body.velocity.set(value[0], value[1], value[2]);
     // A resting body asleep would ignore the new velocity: cannon only wakes on forces, impulses and hits.
-    this._body.wakeForMotion();
+    this.body.wakeForMotion();
   }
 
   /**
@@ -1926,12 +1966,12 @@ export class Node {
    * written to it — {@link turnRate} is what the node actually did. A fresh vector each read.
    */
   public get angularVelocity(): vec3 {
-    if (!this._body) return vec3.create();
-    const a = this._body.angularVelocity;
+    if (!this.body) return vec3.create();
+    const a = this.body.angularVelocity;
     return vec3.fromValues(a.x, a.y, a.z);
   }
   public set angularVelocity(value: vec3) {
-    this._body?.angularVelocity.set(value[0], value[1], value[2]);
+    this.body?.angularVelocity.set(value[0], value[1], value[2]);
   }
 
   // ---- Measured motion -------------------------------------------------------------------------------
@@ -1947,8 +1987,8 @@ export class Node {
 
   /** The physics motion record for this node's body, or null. */
   private get _motion(): MotionRecord | null {
-    if (!this._body) return null;
-    return this._scene?.physics?.motionOf(this._body) ?? null;
+    if (!this.body) return null;
+    return this._scene?.physics?.motionOf(this.body) ?? null;
   }
 
   /** World "up" — gravity reversed. Everything planar below is measured against it, not against +Y. */
@@ -2154,8 +2194,8 @@ export class Node {
 
   /** Magnitude of this node's angular velocity, in radians/second. Commanded (solver state), not measured. */
   public get angularSpeed(): number {
-    if (!this._body) return 0;
-    const a = this._body.angularVelocity;
+    if (!this.body) return 0;
+    const a = this.body.angularVelocity;
     return Math.hypot(a.x, a.y, a.z);
   }
 
@@ -2171,14 +2211,14 @@ export class Node {
 
   /** Seconds this node has been continuously airborne (past the grounded grace); 0 while grounded. */
   public get airTime(): number {
-    if (!this._body) return 0;
-    return this._scene?.physics?.airborneTimes(this._body).airTime ?? 0;
+    if (!this.body) return 0;
+    return this._scene?.physics?.airborneTimes(this.body).airTime ?? 0;
   }
 
   /** Seconds this node has been continuously grounded; 0 while airborne. */
   public get groundedTime(): number {
-    if (!this._body) return 0;
-    return this._scene?.physics?.airborneTimes(this._body).groundedTime ?? 0;
+    if (!this.body) return 0;
+    return this._scene?.physics?.airborneTimes(this.body).groundedTime ?? 0;
   }
 
   /**
@@ -2188,8 +2228,8 @@ export class Node {
    * landing", not "how high up". `-1`, never 0, for unknown: 0 means resting on the ground.
    */
   public get groundDistance(): number {
-    if (!this._body) return -1;
-    return this._scene?.physics?.groundDistance(this._body) ?? -1;
+    if (!this.body) return -1;
+    return this._scene?.physics?.groundDistance(this.body) ?? -1;
   }
 
   /**
@@ -2205,7 +2245,7 @@ export class Node {
 
   /** Motion thresholds in force for this node's body, defaulted when it set none. */
   private get _motionThresholds(): MotionConfig {
-    const tau = this._body?.motionSmoothing ?? 0;
+    const tau = this.body?.motionSmoothing ?? 0;
     return motionConfig(tau > 0 ? { tau } : null);
   }
 
@@ -2266,20 +2306,30 @@ export class Node {
     simulationRange?: number,
     canSleep?: boolean
   ): RigidBody {
-    // Built at the WORLD pose (below), so a node under a moved or turned parent starts where it is drawn.
-    this._bodyOffset = null;
-    this._body = new RigidBody({
+    return this._createBody({
       mass,
       linearDamping,
       angularDamping,
-      // Valid during parse: _commonParse applies the JSON transform before creating the body.
-      position: this.worldPosition,
-      quaternion: this.worldQuaternion,
       linearConstraints, angularConstraints,
       friction, restitution,
       simulatePhysics, cameraCollision,
       groundProbeDistance, motionSmoothing,
       simulationMode, simulationRange, canSleep
+    });
+  }
+
+  /**
+   * @internal Make this node's rigid body from `config` (setBody's arguments, plus a Collider node's
+   * layer, mask and character flag), at its WORLD pose, wired to {@link onCollision}.
+   */
+  protected _createBody(config: ConstructorParameters<typeof RigidBody>[0]): RigidBody {
+    // Built at the WORLD pose, so a node under a moved or turned parent starts where it is drawn.
+    this._bodyOffset = null;
+    this._body = new RigidBody({
+      ...config,
+      // Valid during parse: finishParse applies the JSON transform before creating the body.
+      position: this.worldPosition,
+      quaternion: this.worldQuaternion,
     }, this);
 
     this._body.onCollide(other => {

@@ -57,7 +57,7 @@ import type { Camera2DNode } from "./nodes/camera2DNode";
 import type { Room2DNode } from "./nodes/room2DNode";
 import type { CharacterBody2DNode } from "./nodes/characterBody2DNode";
 import type { Body2DNode } from "./nodes/body2DNode";
-import type { Area2DNode } from "./nodes/area2DNode";
+import type { TriggerNode } from "./nodes/triggerNode";
 import { World2D } from "../../physics2d/world2d";
 
 /** Object-space up, rotated by the camera's world orientation to give the audio listener its up axis. */
@@ -189,7 +189,8 @@ export class Scene {
     // The 2D physics' bodies, colliders and areas, by node type too; and the world that moves them.
     private _bodies2D: Set<CharacterBody2DNode> = new Set();
     private _colliders2D: Set<Body2DNode> = new Set();
-    private _areas2D: Set<Area2DNode> = new Set();
+    // A 2D scene's Trigger nodes (a 3D scene's are sensors in the 3D physics world).
+    private _areas2D: Set<TriggerNode> = new Set();
     private _physics2D: World2D | null = null;
     private _forceFields: Set<ForceFieldNode> = new Set();
     private _waterVolumes: Set<WaterVolumeNode> = new Set();
@@ -624,9 +625,10 @@ export class Scene {
             sceneStats.nodeLoopMs = performance.now() - loopStart;
 
             // THE 2D PHYSICS PASS. After every script has said what its body wants (a jump, a steer), before
-            // the cameras follow: 2D character bodies move through the tilemaps and 2D colliders, and 2D
-            // areas report who came and went. Only while the game plays.
-            if ((this._bodies2D.size > 0 || this._areas2D.size > 0) && this._hasStarted && !paused && !CleoEngine.authoringMode) {
+            // the cameras follow: 2D colliders with mass fall, 2D character bodies move through the tilemaps
+            // and 2D colliders, and 2D triggers report who came and went. Only while the game plays.
+            if ((this._bodies2D.size > 0 || this._areas2D.size > 0 || this._colliders2D.size > 0)
+                && this._hasStarted && !paused && !CleoEngine.authoringMode) {
                 const physicsStart = performance.now();
                 authoring.derived++;
                 try { this.physics2D.step(delta, this); }
@@ -1014,7 +1016,8 @@ export class Scene {
             if (kinds === 0 && node.nodeType === 'room2D') { this._rooms2D.add(node as Room2DNode); continue; }
             if (kinds === 0 && node.nodeType === 'characterBody2D') { this._bodies2D.add(node as CharacterBody2DNode); continue; }
             if (kinds === 0 && node.nodeType === 'body2D') { this._colliders2D.add(node as Body2DNode); continue; }
-            if (kinds === 0 && node.nodeType === 'area2D') { this._areas2D.add(node as Area2DNode); continue; }
+            // Not `continue`d: a trigger can ride a socket (a hitbox in a hand) like any other node.
+            if (kinds === 0 && node.nodeType === 'trigger' && this.dimension === '2D') this._areas2D.add(node as TriggerNode);
             if (kinds === 0 && !node.socketAttachment && !(node.drawDistance > 0)) continue;
             if (kinds & K.LIGHT)
                 this._lights.add(node as LightNode);
@@ -1163,6 +1166,8 @@ export class Scene {
         this._pinnedCamera = null;
         let newScene = new Node('root');
         newScene.scene = this;
+        // Before the tree: a Trigger builds a 3D sensor or none (a 2D scene's are the 2D world's) as it parses.
+        this.dimension = sceneDimensionOf(json.scene);
         Node.parse(newScene, json.scene);
 
         // Absent means a pre-photometric save: recover the fill from the directional light that
@@ -1319,8 +1324,8 @@ export class Scene {
         return this._colliders2D;
     }
 
-    /** Every 2D trigger area ({@link Area2DNode}) in the scene. */
-    public get areas2D(): Set<Area2DNode> {
+    /** Every 2D trigger (a {@link TriggerNode} in a 2D scene). */
+    public get areas2D(): Set<TriggerNode> {
         if (this._dirty)
             this._breadthFirstTraversal();
         return this._areas2D;

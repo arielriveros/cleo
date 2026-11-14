@@ -108,6 +108,8 @@ export default class SoulsBloodSplatNode extends Node {
 
 /** A character, or anything inside one (a ragdolled limb): blood lands on the floor, not on a body. */
 function isCharacterPart(owner: Node): boolean {
+  // A character's body is its Collider, which holds the character.
+  if (owner?.character) return true
   for (let n: Node = owner; n; n = n.parent) if (n.nodeType === 'character') return true
   return false
 }

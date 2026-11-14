@@ -22,6 +22,9 @@ const allNodes = (root: any): any[] => {
     walk(root);
     return out;
 };
+/** The Character a tree stands for: its root, or the Character its root Collider holds (as Node.character). */
+const characterOf = (root: any): any =>
+    root?.type === 'character' ? root : root?.type === 'collider' ? root.children?.find((c: any) => c.type === 'character') : undefined;
 
 /** A copy with every model node a plain node: a model builds GPU buffers, and there is no device here. */
 const withoutModels = (n: any): any => ({
@@ -224,9 +227,21 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
         expect(nodes.filter(n => n.name?.startsWith('Spawn ') && n.type === 'node').length).toBeGreaterThanOrEqual(12);
         for (const t of library('templates')) {
             if (!/^FPS (Bot|Vanguard|Raider|Swat)$/.test(t.name)) continue;
-            expect(t.nodeJson.scriptVars.respawnTemplate, t.name).toBe(t.name);
+            // A fighter template's root is its Collider; the bot is the Character in it.
+            expect(t.nodeJson.type, t.name).toBe('collider');
+            expect(characterOf(t.nodeJson)?.scriptVars?.respawnTemplate, t.name).toBe(t.name);
         }
-        for (const n of nodes) if (/^FPS (Bot|Vanguard|Raider|Swat)$/.test(n.name) && n.scriptVars?.respawnTemplate) expect(n.scriptVars.respawnTemplate).toBe(n.name);
+        // A placed fighter is its Collider, the template's root; the bot in it respawns as that template.
+        const templateName = new Map(library('templates').map((t: any) => [t.id, t.name]));
+        let placed = 0;
+        for (const n of nodes) {
+            const tid = n.variables?.__templateId?.value;
+            const bot = n.type === 'collider' ? characterOf(n) : null;
+            if (!tid || !bot?.scriptVars?.respawnTemplate) continue;
+            expect(bot.scriptVars.respawnTemplate, n.name).toBe(templateName.get(tid));
+            placed++;
+        }
+        expect(placed).toBeGreaterThanOrEqual(3);
     });
 
     it('holds the warehouse annex: its model, colliders, lights, volumes and a baked, linked navmesh', () => {
@@ -240,7 +255,7 @@ describe.skipIf(!present)('the Firing Line example project', { timeout: 120_000 
         expect(inside.filter(n => n.type === 'exposureVolume').length).toBeGreaterThanOrEqual(3);
         for (const e of inside.filter(n => n.type === 'exposureVolume')) expect(e.exposureVolume.overrides.exposureMinEV, e.name).toBeLessThan(8);
         expect(inside.filter(n => n.type === 'light').length).toBeGreaterThanOrEqual(8);
-        expect(inside.filter(n => n.body?.shapes?.length && n.body.mass === 0).length).toBeGreaterThanOrEqual(25);
+        expect(inside.filter(n => n.type === 'collider' && n.collider?.shapes?.length && n.collider.mass === 0).length).toBeGreaterThanOrEqual(25);
         const models = library('models').map((m: any) => m.name);
         for (const m of ['abandoned_warehouse', 'cement_bags_low-poly', 'propane_and_gas_tanks', 'utility_shelves']) expect(models, m).toContain(m);
         const nav = nodes.find(n => n.type === 'navMesh');

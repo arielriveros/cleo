@@ -74,62 +74,7 @@ export type AnimationImportDecision = {
 };
 
 export type { ShapeDescription } from '@cleo/app-kit/gizmo/shapeDescription';
-import type { ShapeDescription } from '@cleo/app-kit/gizmo/shapeDescription';
 
-/**
- * A node's trigger volume as the editor stores it (and as scene JSON carries it). The options mirror the
- * engine's `TriggerOptions`; absent ones keep a plain zone's behaviour — enabled, layer 1, detects every
- * layer, moving bodies only.
- */
-export type TriggerDescription = {
-  shapes: ShapeDescription[];
-  enabled?: boolean;
-  /** Collision layers it is in, as a bit mask. */
-  group?: number;
-  /** Layers it detects, as a bit mask (-1: all). */
-  mask?: number;
-  /** Also detect other triggers. */
-  detectTriggers?: boolean;
-  /** Test its path between frames against other triggers. */
-  continuous?: boolean;
-};
-
-export type BodyDescription = {
-  mass: number;
-  linearDamping: number;
-  angularDamping: number;
-  linearConstraints: [number, number, number];
-  angularConstraints: [number, number, number];
-  /**
-   * Surface properties; absent = the engine defaults, 0.3 friction / 0 restitution.
-   * Two bodies combine with min(friction) and max(restitution), so the deliberately-set value wins.
-   */
-  friction?: number;
-  restitution?: number;
-  /**
-   * Two independent channels; absent means `true` for both. `simulatePhysics: false` leaves a ghost the
-   * solver ignores but a camera probe still sees; `cameraCollision: false` is the reverse.
-   */
-  simulatePhysics?: boolean;
-  cameraCollision?: boolean;
-  /**
-   * Meters below the collider's feet that still count as grounded. Absent/0 = off, grounding from solver
-   * contacts only. ~0.1–0.2 stops `isGrounded` flickering under a resting body.
-   */
-  groundProbeDistance?: number;
-  /** Time constant for this body's MEASURED motion, in seconds. 0/absent = the engine default (~0.09s). */
-  motionSmoothing?: number;
-  /**
-   * Where the body's simulation range comes from: the project's (absent / 'project'), nowhere ('always':
-   * never frozen), or `simulationRange` ('custom'). Out of range the body is frozen in place.
-   */
-  simulationMode?: 'project' | 'always' | 'custom';
-  /** Metres from the camera past which a 'custom' body freezes. 0 = unlimited. */
-  simulationRange?: number;
-  /** Sleep once at rest until hit, pushed or moved. Absent = false. */
-  canSleep?: boolean;
-  shapes: ShapeDescription[];
-}
 
 
 

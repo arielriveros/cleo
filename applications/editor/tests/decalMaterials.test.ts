@@ -176,7 +176,7 @@ describe('resyncScene: a stored scene picks up its decals\' materials', () => {
   // pins that it really does reach a decal, and that a deleted asset leaves a projectable material behind.
   const libs = (materials: MaterialAsset[]) =>
     ({ materials, models: [], templates: [], terrainMaterials: [], scripts: [], tilesets: [], aiBrains: [] }) as any
-  const maps = () => ({ scripts: new Map(), bodies: new Map(), triggers: new Map() })
+  const maps = () => ({ scripts: new Map() })
 
   const sceneWithLinkedDecal = () => {
     const scene = new Scene()

@@ -33,7 +33,9 @@ Selecting the scene **root** shows [Scene settings](scene-authoring.md#scene-set
 | **Animation** | Nodes that are, or contain, a skinned model | Which animator it runs — **its own** or a [shared one](animation.md#shared-animators); **Edit Animation** into the workspace; and, on a shared animator, **Clip overrides (this character only)**. |
 | **Socket** | Any non-UI node, when a character with sockets is in reach or the node is already attached | Pins the node to a bone [socket](animation.md#sockets) on a character's skeleton — the sword in the hand: a target (**Nearest character above**, or a specific character) and a socket. |
 | **Scripts** | Any node | Not in Properties: the separate **Scripts** panel, with the script slot and that node's values for the script's fields. See [Scripting workflow](scripting-workflow.md#the-scripts-panel). |
-| **Physics** | Any node | Not in Properties: the separate **Physics** panel, with the rigid body, trigger and ragdoll. See [Physics](physics.md). |
+| **Collider** | Collider nodes | The rigid body: mass, surface, layers, constraints, and its shapes. See [Collider](physics.md#collider). |
+| **Trigger** | Trigger nodes | The sensor: its layers and shapes in a 3D scene, its box in a 2D one. See [Trigger](physics.md#trigger). |
+| **Ragdoll** | Skinned models | How the character falls when it goes limp. See [Ragdoll](physics.md#ragdoll). |
 
 > The Model and Animation sections appear only on the node that actually has the mesh, or on the
 > root of a placed model instance. They no longer appear on cameras, spatial sounds or any ancestor
@@ -78,7 +80,7 @@ rather than moving the camera itself. Its groups:
   Obstruction** switches it on; **Response** picks how:
   - **Retract** pulls the camera in. It tests physics collider shapes, terrain included: the same
     solids the character collides with. A body blocks it only while its **Camera Collision** channel is
-    on (Physics panel); trigger volumes, the follow and look-at targets and the rig's own character are
+    on (on its Collider); trigger volumes, the follow and look-at targets and the rig's own character are
     always ignored.
   - **Dither** dithers away the part of each see-through obstruction that blocks the view, inside a
     hole around the camera-to-player line, instead of pulling in for it. Only nodes with **See-through to

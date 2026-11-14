@@ -41,7 +41,6 @@ import TilePalette from '../tilemap/TilePalette';
 import TilemapLayersPanel from '../tilemap/TilemapLayersPanel';
 import LandscapeToolsPanel from '../landscape/LandscapeToolsPanel';
 import LandscapeLayersPanel from '../landscape/LandscapeLayersPanel';
-import PhysicsEditor from '../nodeInspector/physicsEditors/PhysicsEditor';
 import TemplateInstanceNotice from '../nodeInspector/TemplateInstanceNotice';
 import TemplateVariantNotice from '../nodeInspector/TemplateVariantNotice';
 import { useSelectedNode } from '../nodeInspector/useSelectedNode';
@@ -200,19 +199,6 @@ function SimulationNotice() {
   );
 }
 
-function PhysicsPanel(_: IDockviewPanelProps) {
-  const { node, readOnly, simulating } = useSelectedNode();
-  return (
-    <SidePanel>
-      {simulating ? <SimulationNotice /> : readOnly && <TemplateInstanceNotice />}
-      {node &&
-        <fieldset disabled={readOnly} className={`${readOnly ? 'opacity-60' : ''} border-0 m-0 p-0 min-w-0`}>
-          <PhysicsEditor node={node} />
-        </fieldset>}
-    </SidePanel>
-  );
-}
-
 // The console owns its own scrolling (stick-to-bottom), so the wrapper must not add a second one.
 function LoggerPanel(_: IDockviewPanelProps) {
   return (
@@ -357,7 +343,6 @@ const panelComponents = {
   uiAdd: UIAddPanel,
   properties: PropertiesPanel,
   scripts: ScriptsPanel,
-  physics: PhysicsPanel,
   logger: LoggerPanel,
   assets: AssetsPanel,
   animClips: AnimClipsPanel,

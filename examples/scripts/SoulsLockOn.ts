@@ -235,8 +235,9 @@ export default class SoulsLockOnNode extends CameraRigNode {
     const from = this.worldPosition
     const to = this._lockPoint(enemy).worldPosition
     const hit = physics.raycast([from[0], from[1], from[2]], [to[0], to[1], to[2]], {
-      reject: (owner: Node) => !!owner && (owner.nodeType === 'character'
-        || !!owner.getVariable?.('isEnemy') || !!owner.getVariable?.('isPlayer')),
+      // A character's body is its Collider: it stands for the character.
+      reject: (owner: Node) => { const o = owner?.character ?? owner; return !!o && (o.nodeType === 'character'
+        || !!o.getVariable?.('isEnemy') || !!o.getVariable?.('isPlayer')) },
     })
     return !hit
   }

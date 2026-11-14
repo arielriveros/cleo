@@ -18,7 +18,7 @@ const asset = {
 } as unknown as ScriptAsset
 
 const libs = { materials: [], models: [], templates: [], terrainMaterials: [], scripts: [asset], tilesets: [], aiBrains: [] } as any
-const maps = () => ({ scripts: new Map<string, string>(), bodies: new Map(), triggers: new Map() })
+const maps = () => ({ scripts: new Map<string, string>() })
 
 describe('opening a scene whose script did not change', () => {
   it('seeds the fields a node never set, and leaves the ones it did alone', () => {

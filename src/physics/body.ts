@@ -53,6 +53,17 @@ interface RigidBodyConfig {
      * default — a script that writes `body.velocity` directly will not wake it (Node.velocity does).
      */
     canSleep?: boolean;
+    /**
+     * The collision layers it is in, and the ones it collides with, as bit masks (a Collider node's Layer
+     * and Mask). Two bodies collide when each one's mask holds a layer of the other. Default 1 and all.
+     */
+    group?: number;
+    mask?: number;
+    /**
+     * A character's body (water leaves it alone unless a volume asks; the physics worker treats it as one).
+     * Default: whether the owner is a Character node. A Collider node says so when a Character stands in it.
+     */
+    character?: boolean;
 }
 
 export class RigidBody extends PhysicsBody {
@@ -93,7 +104,9 @@ export class RigidBody extends PhysicsBody {
       friction, restitution,
       collisionResponse: config?.simulatePhysics ?? true,
       cameraCollision: config?.cameraCollision ?? true,
-      character: owner?.nodeType === 'character',
+      group: config?.group,
+      mask: config?.mask,
+      character: config?.character ?? owner?.nodeType === 'character',
     });
     this.friction = friction;
     this.restitution = restitution;

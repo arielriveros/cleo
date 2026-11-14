@@ -50,7 +50,9 @@ const OLD_DOCK_LAYOUT_KEYS = [
 // at 22 is still read; only its Options tree is dropped, which rebuilds that one mode at the new size.
 // 24: the Sequencer arrived in the bottom strip of the scene and template modes; a tree stored at 23 has
 // nowhere for it.
-const LAYOUT_VERSION = 24;
+// 25: the Physics tab went: a rigid body and a trigger are nodes (Collider, Trigger), edited in
+// Properties, and a ragdoll is its model's. A tree stored at 24 names a panel that no longer exists.
+const LAYOUT_VERSION = 25;
 
 /**
  * One saved arrangement per editor mode. There is deliberately no key for play: play is a restriction
@@ -138,7 +140,7 @@ const SEQUENCER_PANELS = ['sequencer'] as const;
 
 
 const CHROME_PANELS = [
-  'scene', 'properties', 'scripts', 'physics', 'logger', 'assets',
+  'scene', 'properties', 'scripts', 'logger', 'assets',
   ...STATE_MACHINE_PANELS, ...ANIMATION_FIELD_PANELS, ...CLIP_PANELS, ...PARTICLE_PANELS, ...TILEMAP_PANELS, ...LANDSCAPE_PANELS,
   ...RIG_PANELS, ...ADD_PANELS, ...SEQUENCER_PANELS,
 ] as const;
@@ -148,7 +150,7 @@ const CHROME_PANELS = [
 // it still work. Returns false when the panel is missing, which marks a restored layout as corrupt.
 const assertViewportLock = (api: DockviewApi): boolean => lockAnchorPanel(api, 'viewport');
 
-// Scene/UI tabbed 20vw left, Properties/Scripts/Physics tabbed 25vw right, Logger/Assets in a 30vh strip
+// Scene/UI tabbed 20vw left, Properties/Scripts tabbed 25vw right, Logger/Assets in a 30vh strip
 // under the viewport only. Every panel can be dragged out of its group and re-docked.
 function buildDefaultLayout(api: DockviewApi) {
   api.clear();
@@ -178,10 +180,6 @@ function buildDefaultLayout(api: DockviewApi) {
   });
   api.addPanel({
     id: 'scripts', component: 'scripts', title: 'Scripts',
-    position: { referencePanel: 'properties', direction: 'within' },
-  });
-  api.addPanel({
-    id: 'physics', component: 'physics', title: 'Physics',
     position: { referencePanel: 'properties', direction: 'within' },
   });
   // The animation panels share the Properties tab strip; they are hidden everywhere but the one mode that
@@ -275,7 +273,7 @@ function loadLayouts(): LayoutStore['layouts'] {
     if (!raw) return {};
     const saved = JSON.parse(raw) as LayoutStore;
     if (!saved?.layouts) return {};
-    // See LAYOUT_VERSION 24: a stored tree cannot gain the Sequencer, so older arrangements are dropped.
+    // See LAYOUT_VERSION: a stored tree cannot gain or lose a panel, so older arrangements are dropped.
     if (saved.version !== LAYOUT_VERSION) return {};
     return saved.layouts;
   } catch {
@@ -358,45 +356,43 @@ export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: b
     case 'template':
       break;
     // Sequencer mode is Scene mode on the open scene with every property change keyed. What cannot be a key —
-    // adding nodes, scripts, physics — is not offered: the tree and Properties stay, the Add palettes,
-    // Scripts and Physics go.
+    // adding nodes, scripts — is not offered: the tree and Properties stay, the Add palettes and Scripts go.
     case 'sequence':
-      hide(...ADD_PANELS, 'scripts', 'physics');
+      hide(...ADD_PANELS, 'scripts');
       break;
-    // A screen rect has no rigid body.
     case 'ui':
-      hide('physics', 'sceneAdd');
+      hide('sceneAdd');
       break;
     // Landscape and tilemap keep the tree and Properties: a terrain's size and heightmap live there. They are
     // scene sub-modes, so they keep Scene Elements and leave UI Elements to UI mode.
     case 'landscape':
     case 'tilemap':
-      hide('uiAdd', 'scripts', 'physics');
+      hide('uiAdd', 'scripts');
       break;
     // A model tab edits one thing, so there is no tree to browse: the model node stays selected (the
     // SELECT_NODE coercion in EngineContext) and Properties hosts both its inspector and its transform.
     case 'model':
-      hide(...ADD_PANELS, 'scene', 'scripts', 'physics');
+      hide(...ADD_PANELS, 'scene', 'scripts');
       break;
     // A rig is authored the way a skeleton is: the Scene panel becomes its bone tree (see panelTitle) and
     // Properties hosts the rig's own inspector. Unlike `animation` it keeps Properties, which is where its
     // clips, retarget table and IK live.
     case 'rig':
-      hide(...ADD_PANELS, 'scripts', 'physics');
+      hide(...ADD_PANELS, 'scripts');
       break;
     // The state machine brings its own three panels; the Scene panel becomes the skeleton tree.
     case 'stateMachine':
-      hide(...ADD_PANELS, 'scripts', 'physics', 'properties');
+      hide(...ADD_PANELS, 'scripts', 'properties');
       break;
     // The Clip Player: the Scene panel is the bone tree, `clipInspector` holds the clip list and root
     // motion, and `clipTimeline` runs along the bottom. Properties would show the preview character's node,
     // which is not what is being edited.
     case 'animation':
-      hide(...ADD_PANELS, 'scripts', 'physics', 'properties');
+      hide(...ADD_PANELS, 'scripts', 'properties');
       break;
     // A field tab previews one model and edits one asset: its own panel is the only inspector that applies.
     case 'animationField':
-      hide(...ADD_PANELS, 'scene', 'scripts', 'physics', 'properties');
+      hide(...ADD_PANELS, 'scene', 'scripts', 'properties');
       break;
     // Asset editors: Properties hosts the asset's own inspector, and there is no scene to browse.
     case 'material':
@@ -405,16 +401,16 @@ export function hiddenPanelIds(mode: EditorMode, playing: boolean, simulating: b
     case 'texture':
     case 'soundSample':
     case 'aiBrain':
-      hide(...ADD_PANELS, 'scene', 'scripts', 'physics');
+      hide(...ADD_PANELS, 'scene', 'scripts');
       break;
     // A particle tab previews ONE editor-owned node: there is no tree worth browsing, and Properties hosts
     // the emitter/module stack (see PropertiesPanel) rather than a node inspector.
     case 'particleSystem':
-      hide(...ADD_PANELS, 'scene', 'scripts', 'physics');
+      hide(...ADD_PANELS, 'scene', 'scripts');
       break;
     // A script tab is a pure code editor rendered over the viewport.
     case 'script':
-      hide(...ADD_PANELS, 'scene', 'properties', 'scripts', 'physics');
+      hide(...ADD_PANELS, 'scene', 'properties', 'scripts');
       break;
   }
 

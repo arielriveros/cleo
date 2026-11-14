@@ -13,7 +13,7 @@ The shell: a menu bar, a strip of document tabs, and a dockable workspace of pan
 ├───────────────┬──────────────────────────────────┬───────────────────┤
 │ Scene         │                                  │ Properties        │
 │ Elements      │            Viewport              │ Scripts           │
-│ UI Elements   │                                  │ Physics           │
+│ UI Elements   │                                  │                   │
 │───────────────│                                  │                   │
 │ Scene tree    │                                  │                   │
 ├───────────────┴──────────────────────────────────┴───────────────────┤
@@ -158,7 +158,7 @@ disturb your layout.
 |---|---|
 | Centre | **Viewport** (locked) |
 | Left rail (20%) | The *Scene Elements* or *UI Elements* palette (both in a template) above the *Scene* tree |
-| Right rail (25%) | *Properties*, *Scripts*, *Physics*, plus any mode-specific panels |
+| Right rail (25%) | *Properties*, *Scripts*, plus any mode-specific panels |
 | Bottom strip (30%) | *Logger*, *Assets*, the *Sequencer* (Sequencer mode), and in animation-field mode the *Blend Space* plot |
 
 ### Every panel
@@ -179,7 +179,6 @@ disturb your layout.
 | **Sound** | Properties while a sound sample is open: loudness, loop points, fades, bus and effects. |
 | **Skeleton** | The bone tree in place of the Scene tree while you edit an animator, a clip or a rig; in a rig tab, Properties too, where the rig's clips, retargeting, sockets and poses live. |
 | **Scripts** | Script slot and per-node script variables. |
-| **Physics** | Rigid body, trigger, shapes, ragdoll. |
 | **Logger** | The console. |
 | **Assets** | The asset explorer. |
 | **Sequencer** | The timeline of the sequence asset the tab edits: tracks, sections and keys, a scrubbable preview over the open scene. Sequencer mode only. See [Sequencer](sequencer.md). |

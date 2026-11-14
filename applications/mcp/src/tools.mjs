@@ -87,7 +87,7 @@ const pbr = {
 };
 
 /** Add-catalog ids a create op takes as `type`. */
-const TYPES = 'empty, trigger, character, controller, navMesh, perspectiveCamera, orthographicCamera, cameraRig, directionalLight, '
+const TYPES = 'empty, collider, trigger, body2D, character, controller, navMesh, perspectiveCamera, orthographicCamera, cameraRig, directionalLight, '
     + 'pointLight, spotlight, skyLight, cube, sphere, capsule, cylinder, cone, torus, pyramid, quad, plane, circle, triangle, ramp, '
     + 'cornerRamp, stairs, spiralStairs, arch, tube, hollowBox, skybox, skyAtmosphere, lightProbe, exposureVolume, volumetricFog, '
     + 'waterVolume, occlusionVolume, wind, weather, volumetricClouds, landscape, decal, particleSystem, forceField, cloth, spatialSound, '
@@ -162,7 +162,7 @@ export function toolDefinitions(bridge, opts = {}) {
     relay('scene_tree', 'scene.tree', {
         title: 'Scene tree',
         description: 'The open scene (during Play, the running game) as an outline: one line per node with its name, [type] and '
-            + 'flags (script=, body, trigger, material=, hidden, template=, model=); indentation is nesting. The header names '
+            + 'flags (script=, mass=/static, material=, hidden, template=, model=); indentation is nesting. The header names '
             + 'the selection and unsaved state. `root`/`depth` zoom into a subtree; `type`/`name` search the whole scene and '
             + 'return full paths.',
         inputSchema: {
@@ -179,7 +179,7 @@ export function toolDefinitions(bridge, opts = {}) {
     relay('node_get', 'node.get', {
         title: 'Get node',
         description: 'One node: path, id, type, transform (metres, Euler degrees), world position and world bounds (center, '
-            + 'size, min, max of it and its children), children, script and its field values, body, trigger, variables, '
+            + 'size, min, max of it and its children), children, script and its field values, shapes, variables, '
             + 'material, and `props`: its settable properties with current values, by the names scene_edit `props` takes '
             + '(dotted paths reach into objects, e.g. "light.intensity"). `json: true` adds the serialized node.',
         inputSchema: {
@@ -209,18 +209,16 @@ export function toolDefinitions(bridge, opts = {}) {
         scriptFields: z.record(z.string(), z.any()).optional().describe('The attached script\'s public fields.'),
         material: z.union([z.string(), z.object({ name: z.string().optional(), ...pbr })]).optional()
             .describe('Asset name, or a PBR spec (linear RGB) making one named after the node.'),
-        body: z.record(z.string(), z.any()).nullable().optional().describe('Rigid body merged over the current one; null removes. '
-            + 'mass (0 = static), friction, restitution, linearDamping, angularDamping, linearConstraints/angularConstraints '
-            + '[x,y,z] 1 free 0 locked, shapes [{type: box|sphere|capsule|cylinder, width/height/depth or radius/height, offset}] '
-            + '(default: a box fitted to the mesh).'),
-        trigger: z.record(z.string(), z.any()).nullable().optional().describe('{shapes, enabled?}; null removes. '
-            + 'Scripts get onTriggerEnter/Exit.'),
+        shapes: z.union([z.literal('fit'), z.array(z.record(z.string(), z.any()))]).optional().describe('collider/trigger '
+            + 'only: [{type: box|sphere|capsule|cylinder, width/height/depth or radius/height, offset}], or "fit" (a box '
+            + 'around the meshes under it). A collider is the rigid body: what is under it moves with it; props mass (0 = '
+            + 'static), friction, layer, mask. A trigger fires onTriggerEnter/Exit on itself.'),
     });
 
     relay('scene_edit', 'scene.edit', {
         title: 'Edit scene',
         description: 'Change the open scene: a list of ops applied in order as ONE undo step, stopping at the first failure. '
-            + 'create (a catalog type, template or model, and every field update takes: material, body, script, scriptFields, '
+            + 'create (a catalog type, template or model, and every field update takes: material, shapes, script, scriptFields, '
             + 'props), update, delete, move, attachScript, detachScript, select. Node refs: "/A/B" path, "#id", unique name, '
             + '"$alias" from an earlier create, "@selected". Batch a whole build in one call, and add `capture` to see the '
             + 'result. Returns each op\'s result with created paths and ids. Refused during Play.',
@@ -363,8 +361,8 @@ export function toolDefinitions(bridge, opts = {}) {
         title: 'Execute JavaScript in the editor',
         description: 'Escape hatch: run an async JavaScript function body inside the editor page, for anything the other tools do '
             + 'not cover. In scope: `cleo` (the whole engine module: Node, Material, Logger, Input...), `engine` (the CleoEngine), '
-            + '`scene` (the open scene, or the play scene during Play), `editor` (the editor context: libraries, scripts/bodies/'
-            + 'triggers maps, actions), `find(ref)` (resolve a node ref), `log(...args)`. `return` a JSON-serialisable value. '
+            + '`scene` (the open scene, or the play scene during Play), `editor` (the editor context: libraries, the scripts '
+            + 'map, actions), `find(ref)` (resolve a node ref), `log(...args)`. `return` a JSON-serialisable value. '
             + 'Structure changes (add/remove) made here are undoable as one step; property changes are not. Plain JavaScript, not '
             + 'TypeScript. The user approves every run, so prefer the dedicated tools when they fit.',
         inputSchema: {

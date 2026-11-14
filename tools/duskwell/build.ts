@@ -18,7 +18,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import {
     Scene, Node, Tilemap, TilemapNode, Tileset, Sprite, SpriteNode, AnimatedSpriteNode, CharacterBody2DNode,
-    Area2DNode, Room2DNode, Camera2DNode, ParallaxLayerNode, UIRootNode, UITextNode, RENDER_2D_DEFAULTS,
+    TriggerNode, Room2DNode, Camera2DNode, ParallaxLayerNode, UIRootNode, UITextNode, RENDER_2D_DEFAULTS,
     ControllerNode, NavMeshNode, World2D, bakeNavGraph2D, navGraph2DSourceHash, parseBehaviorMachine, steeringTuning,
 } from '../../src/cleo'
 import type { NavAgent2D } from '../../src/cleo'
@@ -350,7 +350,7 @@ function buildPlayer(): CharacterBody2DNode {
     // DuskPlayer's own (its 0.2 s dash, 4.4 units, clears the Long Hall's pit with a jump; a jump alone does not).
     const sprite = named(animated('Sprite', warrior.tileset, warriorSet, [], { pivot: WARRIOR_PIVOT, sortingOrder: 2 }))
     player.addChild(sprite)
-    const blade = named(new Area2DNode('Sword', [2.8, 2]))
+    const blade = named(trigger2D('Sword', [2.8, 2]))
     blade.layer = 4
     blade.mask = 2
     blade.enabled = false
@@ -414,7 +414,7 @@ function buildGuard(i: number, c: number, r: number): CharacterBody2DNode {
     const sprite = named(animated('Sprite', knightTiles, knightSet, [], { pivot: KNIGHT_PIVOT, sortingOrder: 1 }))
     sprite.sprite.tint = [0.5, 0.45, 0.6]
     body.addChild(sprite)
-    const edge = named(new Area2DNode('Blade', [1.4, 1.2]))
+    const edge = named(trigger2D('Blade', [1.4, 1.2]))
     edge.layer = 16
     edge.mask = 1
     edge.enabled = false
@@ -442,7 +442,7 @@ function buildBat(i: number, c: number, r: number): CharacterBody2DNode {
     body.runSpeed = 3.2
     body.acceleration = 18
     body.addChild(named(animated('Sprite', bat.tileset, batSet, [], { pivot: [0.5, 0.35], sortingOrder: 1 })))
-    const bite = named(new Area2DNode('Bite', [0.9, 0.8]))
+    const bite = named(trigger2D('Bite', [0.9, 0.8]))
     bite.offset = [0, 0.5]
     bite.layer = 16
     bite.mask = 1
@@ -463,9 +463,16 @@ function buildTorch(i: number, c: number, r: number): AnimatedSpriteNode {
     return torch
 }
 
-function buildPickup(name: string, kind: string, c: number, r: number, tileset: Tileset, scale = 1, tint?: [number, number, number]): Area2DNode {
+/** A 2D trigger box (a Trigger node, which a 2D scene treats as one): a hitbox, a pickup, a checkpoint. */
+function trigger2D(name: string, size: [number, number]): TriggerNode {
+    const trigger = new TriggerNode(name)
+    trigger.size = size
+    return trigger
+}
+
+function buildPickup(name: string, kind: string, c: number, r: number, tileset: Tileset, scale = 1, tint?: [number, number, number]): TriggerNode {
     const [x, y] = cellCentre(c, r)
-    const area = named(new Area2DNode(name, [0.9, 0.9]))
+    const area = named(trigger2D(name, [0.9, 0.9]))
     area.setPosition([x, y, 0])
     area.layer = 8
     area.mask = 1
@@ -477,9 +484,9 @@ function buildPickup(name: string, kind: string, c: number, r: number, tileset: 
     return area
 }
 
-function buildCheckpoint(i: number, c: number, r: number): Area2DNode {
+function buildCheckpoint(i: number, c: number, r: number): TriggerNode {
     const [x, y] = cellFeet(c, r)
-    const area = named(new Area2DNode(`Checkpoint ${i + 1}`, [1.2, 3]))
+    const area = named(trigger2D(`Checkpoint ${i + 1}`, [1.2, 3]))
     area.setPosition([x, y + 1.5, 0])
     area.layer = 8
     area.mask = 1
@@ -604,8 +611,8 @@ const SCRIPT_FILES: [string, string, string][] = [
     ['DuskPlayer', 'DuskPlayer.ts', 'characterBody2D'],
     ['DuskBat', 'DuskBat.ts', 'characterBody2D'],
     ['DuskGuard', 'DuskGuard.ts', 'characterBody2D'],
-    ['DuskPickup', 'DuskPickup.ts', 'area2D'],
-    ['DuskCheckpoint', 'DuskCheckpoint.ts', 'area2D'],
+    ['DuskPickup', 'DuskPickup.ts', 'trigger'],
+    ['DuskCheckpoint', 'DuskCheckpoint.ts', 'trigger'],
     ['DuskHud', 'DuskHud.ts', 'uiRoot'],
 ]
 const scriptAssets = SCRIPT_FILES.map(([name, file, baseType]) => {
@@ -675,8 +682,8 @@ async function main() {
         if (n.name === 'Player' && n.type === 'characterBody2D') withScript(n, 'DuskPlayer')
         else if (n.type === 'characterBody2D' && /^Bat /.test(n.name)) withScript(n, 'DuskBat')
         else if (n.type === 'characterBody2D' && /^Ruin Guard /.test(n.name)) withScript(n, 'DuskGuard')
-        else if (n.type === 'area2D' && /^Checkpoint /.test(n.name)) withScript(n, 'DuskCheckpoint')
-        else if (n.type === 'area2D' && pickupKinds.has(n.id)) withScript(n, 'DuskPickup', { kind: pickupKinds.get(n.id), amount: 1 })
+        else if (n.type === 'trigger' && /^Checkpoint /.test(n.name)) withScript(n, 'DuskCheckpoint')
+        else if (n.type === 'trigger' && pickupKinds.has(n.id)) withScript(n, 'DuskPickup', { kind: pickupKinds.get(n.id), amount: 1 })
         else if (n.type === 'uiRoot' && n.name === 'HUD') withScript(n, 'DuskHud')
     })
     root.id = id('node:root')
