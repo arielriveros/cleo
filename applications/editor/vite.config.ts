@@ -85,5 +85,14 @@ export default mergeConfig(engineConfig, defineConfig({
     emptyOutDir: true,
     // The engine compiles into one large chunk; the default 500 kB warning is pure noise here.
     chunkSizeWarningLimit: 8_000,
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        // Play in window: the game page the editor opens in a window (and a process) of its own. Built with
+        // the editor, not with the published player (vite.player.config.ts), so it can never be a build
+        // behind the engine the editor runs, and it loads any physics backend as the editor does.
+        play: path.resolve(__dirname, 'play.html'),
+      },
+    },
   },
 }))

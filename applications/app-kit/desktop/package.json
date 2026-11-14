@@ -19,6 +19,7 @@
       "gameTemplates.js",
       "scriptWorkspace.js",
       "movieFiles.js",
+      "playWindow.js",
       "icons/**"
     ],
     "extraResources": [

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, protocol, net, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, protocol, net, shell, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -7,6 +7,7 @@ const { pathToFileURL } = require('url');
 const { GAME_MAIN_JS, GAME_PRELOAD_JS, GAME_INSTALLER_NSH, WEB_HEADERS, gamePackageJson, gameReadme } = require('./gameTemplates');
 const scriptWorkspace = require('./scriptWorkspace');
 const movieFiles = require('./movieFiles');
+const playWindow = require('./playWindow');
 
 const isDev = process.env.CLEO_DEV === '1';
 
@@ -71,6 +72,11 @@ function registerAppProtocol() {
     // Resolve within root and block path traversal outside it.
     const filePath = path.join(root, pathname);
     if (!filePath.startsWith(root + path.sep)) return new Response('Forbidden', { status: 403 });
+    // A missing file is a 404, as the dev server answers it. net.fetch of a file:// URL that is not there
+    // REJECTS, which the page sees as a network failure (net::ERR_UNEXPECTED) rather than an absent file --
+    // and the editor probes for optional files (an example's libraries/projectSettings.json), so that broke
+    // opening an example in the packaged app.
+    if (!fs.existsSync(filePath)) return isolated(new Response('Not found', { status: 404 }));
     return isolated(await net.fetch(pathToFileURL(filePath).toString()));
   });
 }
@@ -234,7 +240,16 @@ function createWindow() {
     awaitingAnswer.delete(rendererId);
     closeAttempts.delete(rendererId);
     clearedToUnload.delete(rendererId);
+    // Its game window goes with it (Play in window).
+    play.closeOwnedBy(rendererId);
   });
+  // ...and so it does when the editor's page goes away under it: a reload (only once the unload guard let it
+  // through -- a navigation starts after `beforeunload`), or a crash. The editor's own pagehide does the same,
+  // and so does the game page once the editor's session lock frees; this one needs no page to be alive.
+  win.webContents.on('did-start-navigation', (details) => {
+    if (details && details.isMainFrame && !details.isSameDocument) play.closeOwnedBy(rendererId);
+  });
+  win.webContents.on('render-process-gone', () => play.closeOwnedBy(rendererId));
 
   // Dev: the editor's Vite dev server. Prod: the built editor bundle over app://.
   // `desktop:dev` starts Vite and Electron side by side, so on a cold start the window can open before the
@@ -438,3 +453,10 @@ scriptWorkspace.registerIpc({ ipcMain, BrowserWindow, pickDirectory });
 // The editor's Render Movie streams its file (or folder of frames) through here; see movieFiles.js.
 
 movieFiles.registerIpc({ ipcMain, BrowserWindow, dialog, pickDirectory });
+
+// --- Play window IPC ---------------------------------------------------------------------------
+//
+// Play ▸ Play in window: the game in a window, and a renderer process, of its own; see playWindow.js.
+// Registered before any window exists (this runs at load), so `play` is there for createWindow's handlers.
+
+const play = playWindow.registerIpc({ ipcMain, BrowserWindow, app, screen, shell, appOrigin, icon: APP_ICON });

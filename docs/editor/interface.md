@@ -36,7 +36,16 @@ The shell: a menu bar, a strip of document tabs, and a dockable workspace of pan
 | **Script sync chip** | Appears only when the VS Code workspace needs attention (sync paused or in error). Its setup lives in [Options ▸ Editor ▸ Scripts](options.md#editor). |
 | **Publish ▾** | Web (HTML), Desktop (Electron), Desktop installer. See [Publishing](publishing.md). |
 
-**Centre** — the **Play / Pause / Stop** transport.
+**Centre** — the transport.
+
+| Control | Does |
+|---|---|
+| **Play** | Runs the game, where the Play target says. While a game runs in its window, Play brings that window forward (or resumes it when paused). |
+| **Play target** | The ▾ beside Play: **Play in editor** (in the viewport) or **Play in window** (a window of its own). Remembered on this machine. See [Play in window](#play-in-window). |
+| **Simulate** | Runs physics, AI and scripts on a copy of the scene, watched through the editor camera. Always in the editor. |
+| **Pause** | Freezes the game, in the editor or in its window. |
+| **Stop** | Ends the game. A game window closes. |
+| **Restart** | Only while a game runs in its window: rebuilds it from what the editor holds now and reloads the window. |
 
 **Right** — the [mode selector](modes.md), then **Undo** / **Redo** and **Reset Layout**.
 
@@ -174,6 +183,27 @@ Layout are disabled. The debug overlay menu stays available, so you can flip run
 mid-game.
 
 Changes made while playing are **not kept**.
+
+### Play in window
+
+With the Play target set to **Play in window**, Play opens the game in a window of its own, which runs
+in its **own process**, apart from the editor's. A script that stops at a breakpoint, a long hang, or a
+crash stays in that window, and the editor keeps working.
+
+- The window opens at once and shows its loading screen while the editor builds the game. The build is
+  the one [Publish](publishing.md) makes: every scene, the open one first, with the textures, sounds,
+  clips and templates they use. Scripts are not packed into a separate file; the window compiles them
+  from source, as Play in editor does.
+- **The editor stays editable.** Nothing locks, the Console stays up, and the game's log lines arrive in
+  it under `Game/…` scopes. Edits do not reach the running game. Press **Restart** to rebuild from what
+  the editor holds now. The old game keeps running until the new one is ready, then the window reloads.
+- **Stop**, or closing the window, ends the game. Closing or reloading the editor closes its game window.
+- In-editor Play, Simulate and Render Movie wait until the window's game has ended.
+- In the desktop app the window is created by the app itself and has no access to the editor's files.
+  In a browser it is a pop-up: allow pop-ups for the editor's site, and click inside the window once
+  before its sound can start.
+- The window has none of the editor's live panels: no scene tree or Inspector on the running game, and no
+  Performance panel.
 
 ## See also
 

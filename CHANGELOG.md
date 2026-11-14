@@ -16,6 +16,18 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Play in window.** The ▾ beside Play picks where the game runs: **Play in editor**, in the viewport as
+  before, or **Play in window**, in a window and a renderer process of its own. A script stuck in a loop or
+  stopped at a breakpoint stays in there; the editor keeps working.
+  - *Built as Publish builds it.* Every scene, the open one first, with the textures, sounds, clips and
+    templates they use, packed off the main thread. Scripts stay source and are compiled in the window, as
+    Play in editor does, and the open Sequencer tabs' unsaved timelines go in too.
+  - *The editor stays editable.* Nothing locks, and the game's log lines arrive in the Console under `Game/…`
+    scopes. **Restart** rebuilds from what the editor holds now while the old game keeps running, then
+    reloads the window. Stop, closing the window, or closing or reloading the editor ends it.
+  - *Desktop and web.* The desktop app creates the window itself, with no access to the editor's files. In a
+    browser it is a pop-up; a blocked one is reported.
+
 - **The flat 2D frame.** A 2D scene now draws through a frame of its own: the background, one sorted and
   batched pass of tilemap layers, sprites and particles, then bloom and the post chain, at a fixed exposure
   of 1 so a pixel shows as it was drawn. None of the 3D frame runs under it any more (shadows, the lighting
@@ -701,6 +713,10 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Fixes & refactors
 
+- **Published games keep their retarget corrections.** The packer dropped the rig retarget corrections the
+  player reads, so every published character played its corrected clips uncorrected.
+- **Examples open in the desktop app.** Its file server failed on a file that is not there instead of
+  answering "not found", so an example that has no project settings file did not open.
 - **Opening a scene no longer tilts its 2D view.** The editor remembered the previous scene's view poses
   for the fresh camera an opened scene brings, so switching from one 2D scene to another could come up with
   the 3D camera's angle in the 2D view.

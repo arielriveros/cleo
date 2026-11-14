@@ -118,6 +118,9 @@ describe('no native browser dialogs in the editor', () => {
     for (const file of sourceFiles(SRC)) {
       const rel = path.relative(SRC, file).split(path.sep).join('/');
       if (rel === 'features/unloadGuard.ts') continue;
+      // The game pages are not the editor: the published player and Play in window's play.html hold no
+      // unsaved work and install no unload guard, and the play window reloads itself for a Restart.
+      if (rel.startsWith('player/')) continue;
       readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
         const code = codeOf(line);
         if (/\blocation\s*\.\s*(reload\s*\(|href\s*=|assign\s*\(|replace\s*\()/.test(code))
