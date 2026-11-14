@@ -8,7 +8,7 @@ Terms used throughout the documentation and in the editor's own labels.
 | **Action slot** | A named place on an animation state machine that a script plays one-shot clips into with `animator.playAction`, over whatever the machine is doing. Optionally masked and placed above a given layer. Unreal's montage slot. See [Animation](../editor/animation.md#action-slots). |
 | **AI brain** | A `.brain` asset holding either a behaviour machine or a goal graph, plus the fuzzy model both read. See [AI brains](../editor/ai-brains.md). |
 | **Animator** | The graph that decides which clip a character plays: states, transitions, parameters, layers, action slots. A shared one is stored as `.animator`. |
-| **Animation controller** | A `.controller` asset: an animation state machine — parameters, layers, action slots — shared by any number of characters, each with optional clip overrides. Not the *Controller* node. See [Animation](../editor/animation.md#animation-controllers). |
+| **Animation controller** | A `.controller` asset: an animation state machine — parameters, layers, action slots — shared by any number of characters, each with optional clip overrides. Not the *Controller* node. See [Shared animators](../editor/animation.md#shared-animators). |
 | **Asset** | Reusable content stored in the project library rather than inside a scene. 18 kinds. |
 | **Bake** | To precompute something and store the result: a navmesh from colliders, a sky cubemap from a sun direction, an impostor from a mesh, a light probe from its surroundings. |
 | **Behaviour machine** | A state machine whose states are AI goals and whose transitions are gated by condition trees. |

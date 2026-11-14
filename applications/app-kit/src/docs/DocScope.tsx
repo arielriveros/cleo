@@ -6,7 +6,8 @@ import { frameOf, resolveDocKey, resolveTerm, type DocEntry, type DocFrame } fro
 // <DocScope>; every Collapsable / Section then narrows the scope to its own entry for what sits inside
 // it, so a nested "Options" resolves under the material editor and a "Resolution" row under Shadows.
 
-const DocFramesContext = createContext<DocFrame[]>([]);
+/** Exported only for What's This (docTargets.ts), which reads the scope of a clicked element. */
+export const DocFramesContext = createContext<DocFrame[]>([]);
 
 export interface DocScopeProps {
   /** Page id under docs/ without `.md`, e.g. `editor/physics`. */

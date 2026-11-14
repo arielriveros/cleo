@@ -3,15 +3,28 @@ import { createPortal } from 'react-dom';
 import { cn } from './cn';
 import { placeAnchored } from './anchoredPosition';
 import { hintAffordance } from './typography';
+import { BookIcon } from './icons';
 import { getDocIndex } from '../docs/docIndex';
 import { breadcrumb, plainText, type DocEntry } from '../docs/parseDocs';
+import { isInspecting, registerDocTarget, setActiveCardEntry, getActiveCardEntry, subscribeInspecting } from '../docs/docTargets';
 
-// The hover card that shows a title's (or a field's) entry from the official docs: the term, its
-// description with inline markup kept, any extra table columns, and where in the docs it lives. The text
-// is never written here — it is whatever docs/**/*.md says today (features/docs).
+// The hover card that shows a title's (or a field's) entry from the official docs: the term, a one-line
+// summary of its description with inline markup kept, any short extra table columns, and where in the
+// docs it lives. The text is never written here — it is whatever docs/**/*.md says today (features/docs).
+// The whole entry is one key away: F1 while the card shows opens it in the docs viewer.
 
 const OPEN_DELAY_MS = 350;
 const MAX_BODY_CHARS = 600;
+/** A card's summary: the first sentence, cut to this when that sentence alone runs longer. */
+const SUMMARY_CHARS = 200;
+/** A first sentence shorter than this takes the next one along, if both still fit the summary. */
+const SHORT_SENTENCE = 60;
+/** Table columns beside the description (Default, Range…) show only while they stay this short. */
+const META_CHARS = 48;
+const MAX_META = 2;
+
+/** Sentence boundaries: end punctuation, then whitespace, then something that starts a sentence. */
+const SENTENCE_BREAK = /(?<=[.!?])\s+(?=[A-Z*`[(])/;
 
 /** Bold, italic, code spans and links (shown as accent text — the card is not interactive). */
 export function renderInline(md: string): React.ReactNode[] {
@@ -36,7 +49,7 @@ export function renderInline(md: string): React.ReactNode[] {
 /** Whole sentences up to the cap, so a long section intro still reads as a summary, not a cut-off. */
 export function capBody(md: string, max = MAX_BODY_CHARS): string {
   if (md.length <= max) return md;
-  const sentences = md.split(/(?<=[.!?])\s+(?=[A-Z*`[(])/);
+  const sentences = md.split(SENTENCE_BREAK);
   let out = '';
   for (const s of sentences) {
     if (out && out.length + s.length + 1 > max) break;
@@ -48,6 +61,32 @@ export function capBody(md: string, max = MAX_BODY_CHARS): string {
     return plain.slice(0, plain.lastIndexOf(' ', max)) + ' …';
   }
   return out === md ? out : `${out} …`;
+}
+
+/**
+ * A card's one-line description: the entry's first sentence (two, when the first is a fragment like
+ * "Off by default."), with inline markup kept. A first sentence over `max` falls back to plain text cut
+ * at a word, so the cut cannot split a markup span.
+ */
+export function summarize(md: string, max = SUMMARY_CHARS): string {
+  const text = md.trim();
+  const sentences = text.split(SENTENCE_BREAK);
+  let out = sentences[0] ?? '';
+  if (out.length > max) {
+    const plain = plainText(out);
+    if (plain.length <= max) return plain;
+    const cut = plain.lastIndexOf(' ', max);
+    return `${plain.slice(0, cut > 0 ? cut : max).replace(/[,;:—–-]+$/, '')} …`;
+  }
+  if (out.length < SHORT_SENTENCE && sentences.length > 1 && out.length + 1 + sentences[1].length <= max) {
+    out = `${out} ${sentences[1]}`;
+  }
+  return out;
+}
+
+/** The table columns worth a line on the card: short ones only, at most two. */
+export function cardMeta(entry: DocEntry): DocEntry['meta'] {
+  return entry.meta.filter(m => plainText(m.value).length <= META_CHARS).slice(0, MAX_META);
 }
 
 export interface DocTooltipHandle {
@@ -77,6 +116,9 @@ export function useDocTooltip(entry: DocEntry | null): DocTooltipHandle {
   // A press closes the card; it stays closed until the pointer leaves, or a click would re-open it.
   const pressed = useRef(false);
   const id = useId();
+  // The trigger is registered for What's This? / F1 with the entry it shows NOW, not the first one.
+  const entryRef = useRef(entry);
+  entryRef.current = entry;
 
   const clear = () => { if (timer.current !== undefined) { window.clearTimeout(timer.current); timer.current = undefined; } };
   const hide = useCallback(() => { clear(); setOpen(false); }, []);
@@ -84,7 +126,7 @@ export function useDocTooltip(entry: DocEntry | null): DocTooltipHandle {
 
   const hoverProps = {
     onPointerEnter: (e: React.PointerEvent) => {
-      if (!entry || e.pointerType === 'touch' || pressed.current) return;
+      if (!entry || e.pointerType === 'touch' || pressed.current || isInspecting()) return;
       clear();
       timer.current = window.setTimeout(() => setOpen(true), OPEN_DELAY_MS);
     },
@@ -117,30 +159,50 @@ export function useDocTooltip(entry: DocEntry | null): DocTooltipHandle {
   useEffect(() => clear, []);
   useEffect(() => { if (!entry) setOpen(false); }, [entry]);
 
+  // While the card shows, F1 opens its entry; What's This? starting closes it.
+  useEffect(() => {
+    if (!open || !entry) return;
+    setActiveCardEntry(entry);
+    const unsubscribe = subscribeInspecting(() => { if (isInspecting()) hide(); });
+    return () => {
+      unsubscribe();
+      if (getActiveCardEntry() === entry) setActiveCardEntry(null);
+    };
+  }, [open, entry, hide]);
+
   const card = open && entry ? createPortal(
     <div
       ref={panelRef}
       id={id}
       role='tooltip'
       style={{ position: 'fixed', top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? 'visible' : 'hidden' }}
-      className='z-[1100] pointer-events-none w-max max-w-[320px] rounded-md border border-border bg-surface-raised shadow-lg px-2.5 py-2 text-ui-sm leading-snug text-muted whitespace-normal normal-case tracking-normal font-normal text-left'
+      className='z-[1100] pointer-events-none w-max max-w-[280px] rounded-md border border-border bg-surface-raised shadow-lg px-2.5 py-2 text-ui-sm leading-snug text-muted whitespace-normal normal-case tracking-normal font-normal text-left'
     >
       <div className='text-ui font-semibold text-fg mb-1'>{entry.label}</div>
-      <div>{renderInline(capBody(entry.body))}</div>
-      {entry.meta.length > 0 && (
+      <div>{renderInline(summarize(entry.body))}</div>
+      {cardMeta(entry).length > 0 && (
         <div className='mt-1.5 space-y-0.5'>
-          {entry.meta.map(m => (
+          {cardMeta(entry).map(m => (
             <div key={m.label}><span className='text-dim'>{m.label}: </span>{renderInline(m.value)}</div>
           ))}
         </div>
       )}
-      <div className='mt-1.5 pt-1 border-t border-border-subtle text-ui-xs text-dim'>{breadcrumb(getDocIndex(), entry)}</div>
+      <div className='mt-1.5 pt-1 border-t border-border-subtle flex items-center gap-2 text-ui-xs text-dim'>
+        <span className='min-w-0 flex-1'>{breadcrumb(getDocIndex(), entry)}</span>
+        <span className='shrink-0 inline-flex items-center gap-1 text-muted'>
+          <span className='w-3 h-3'><BookIcon /></span>
+          <kbd className='font-mono text-ui-2xs px-1 rounded border border-border bg-surface-sunken'>F1</kbd>
+        </span>
+      </div>
     </div>,
     document.body,
   ) : null;
 
   return {
-    ref: useCallback((el: HTMLElement | null) => { triggerRef.current = el; }, []),
+    ref: useCallback((el: HTMLElement | null) => {
+      triggerRef.current = el;
+      if (el) registerDocTarget(el, () => entryRef.current);
+    }, []),
     hoverProps,
     show,
     hide,

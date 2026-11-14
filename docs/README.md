@@ -140,14 +140,25 @@ A title finds its text by name, on the page that documents the panel it sits in:
 | Written as | Card shows |
 |---|---|
 | A heading (`### Shadows`) | The first plain paragraph under it |
-| A table row whose first cell is bold (`\| **Model** \| … \| … \|`) | The last column; the other columns as extra lines |
+| A table row whose first cell is bold (`\| **Model** \| … \| … \|`) | The last column; short other columns as extra lines |
 | `**Term** — text`, in a paragraph, a bullet or a numbered item | The text after the dash |
 | `**Label:** text` | The text after the label |
+
+A card shows only the **first sentence** of that text (two, when the first is a fragment such as "Off by
+default."), so write the first sentence to stand on its own. The rest is one key away: **F1** on a card
+opens the whole entry in the editor's docs window.
 
 So when a doc names a piece of the editor, use its on-screen title exactly. Case, punctuation, `&`
 versus "and", and a count such as "(3)" do not matter. A field label inside a section finds a bold row
 or `**Term** —` line within that section's heading the same way, and falls back to the editor's own
 hint when there is none. Blockquote notes, code blocks and the "See also" line are never used.
+
+The same pages are what **Help ▸ Documentation** shows, inside the editor and Cleo Creator (see
+[Help and the docs](editor/interface.md#help-and-the-docs)). The window lists pages in the order this
+index links them, follows relative `.md` links (anchors included) between pages, sends web links to the
+browser, and shows each image as its caption: the media are not bundled with the apps, so an image's alt
+text should read as a full caption. A link that leaves `docs/` (an example script, the changelog) shows
+as plain text there.
 
 Renaming a term that names a title leaves that title without a card. `applications/editor/tests/docTooltips.test.ts`
 catches it, and `npx vite-node tools/docAudit.ts --misses` (run in `editor/`) lists every title with

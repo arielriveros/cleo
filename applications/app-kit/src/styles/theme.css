@@ -91,8 +91,25 @@ body { font-size: var(--text-ui); }
   --text-ui-xs:       10px;  /* hints, badges, axis letters */
   --text-ui-lg:       13px;  /* Collapsable section headers */
   --text-ui-2xs:      9px;   /* the tightest badges: type dots, access glyph labels */
+  --text-doc:         14px;  /* docs viewer: body text */
+  --text-ui-xl:       15px;  /* docs viewer: h3 */
+  --text-ui-2xl:      18px;  /* docs viewer: h2 */
+  --text-ui-3xl:      22px;  /* docs viewer: page title */
   --weight-ui:        400;
   --weight-ui-strong: 600;   /* section headers */
+
+  /* The docs viewer's prose. A proportional face for long reading; code, tables' code spans and the
+     window chrome stay on the UI's monospace. Point it at var(--font-mono) to read the docs in it too. */
+  --font-doc: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+
+  /* Code-block highlighting in the docs viewer (docs/viewer/highlight.ts) -- the script editor's dark
+     theme, so a snippet in the docs reads like the same snippet in Monaco. */
+  --code-keyword:  197 134 192;  /* #c586c0 */
+  --code-string:   206 145 120;  /* #ce9178 */
+  --code-number:   181 206 168;  /* #b5cea8 */
+  --code-comment:  106 153  85;  /* #6a9955 */
+  --code-type:      78 201 176;  /* #4ec9b0 */
+  --code-function: 220 220 170;  /* #dcdcaa */
 }
 
 @layer base {
@@ -164,6 +181,23 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: none;
 
 /* Focus styles */
 :focus-visible { outline: 2px solid rgb(var(--primary)); outline-offset: 2px; }
+
+/* Docs viewer (docs/viewer): highlighted code tokens, and the fade that marks the entry a link, F1 or
+   What's This? jumped to. */
+.cleo-code-keyword  { color: rgb(var(--code-keyword)); }
+.cleo-code-string   { color: rgb(var(--code-string)); }
+.cleo-code-number   { color: rgb(var(--code-number)); }
+.cleo-code-comment  { color: rgb(var(--code-comment)); font-style: italic; }
+.cleo-code-type     { color: rgb(var(--code-type)); }
+.cleo-code-function { color: rgb(var(--code-function)); }
+@keyframes cleo-docs-flash {
+  0%, 35% { background-color: rgb(var(--selected) / 0.28); box-shadow: 0 0 0 4px rgb(var(--selected) / 0.28); }
+  100%    { background-color: transparent; box-shadow: 0 0 0 4px transparent; }
+}
+.cleo-docs-flash { animation: cleo-docs-flash 1.8s ease-out; border-radius: 4px; }
+
+/* Help > What's This?: every element shows the help cursor while the mode waits for a click. */
+html.cleo-whats-this, html.cleo-whats-this * { cursor: help !important; }
 
 /* Alpha checkerboard behind the texture viewer. Two offset conic gradients rather than an image, so it
    scales with the zoom control's own container and needs no asset. Tinted from the surface tokens so it

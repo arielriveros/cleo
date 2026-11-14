@@ -16,6 +16,19 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Docs inside the apps.** The editor and Cleo Creator read their own documentation now.
+  - *Help ▸ Documentation* (**F1**) opens the docs in a floating window that leaves the app usable: a
+    contents sidebar in the README's order, search over titles, sections and every documented term,
+    back / forward, links between pages, styled tables, callouts and highlighted code. Images show as
+    their captions; the media are not bundled.
+  - *Help ▸ What's This?* (**Shift+F1**) outlines whatever the pointer is over with the docs entry it would
+    open; a click opens it, without pressing the button under it. Elements with no entry of their own
+    open their section or panel page.
+  - *Hover cards are one sentence.* A card shows the first sentence of its entry and an **F1** hint; F1
+    while it shows opens the whole entry, scrolled to and marked.
+  - *Docs checks.* A test renders every page and pins that every tooltip entry can be jumped to and that
+    every link between pages lands on a real heading (it found one that did not).
+
 - **Menu bar.** The editor and Cleo Creator share one menu bar: the Cleo logo, then **File**, **Edit**,
   **View**, **Project** and **Help**, each with its commands' icons and shortcuts.
   - *Editor.* File holds Save, Save All and New Scene. Edit holds Undo, Redo and Delete. View holds the new

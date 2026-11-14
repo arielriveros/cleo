@@ -5,7 +5,12 @@ import { extendTailwindMerge } from 'tailwind-merge';
 // `text-ui-sm` is an unknown `text-*` class, which it treats as a text COLOUR: `cn('text-ui-sm',
 // 'text-muted')` would keep only the colour and lose the size.
 const twMerge = extendTailwindMerge({
-  extend: { classGroups: { 'font-size': [{ text: ['ui-2xs', 'ui-xs', 'ui-sm', 'ui', 'ui-lg'] }] } },
+  extend: {
+    classGroups: {
+      'font-size': [{ text: ['ui-2xs', 'ui-xs', 'ui-sm', 'ui', 'ui-lg', 'doc', 'ui-xl', 'ui-2xl', 'ui-3xl'] }],
+      'font-family': [{ font: ['doc'] }],
+    },
+  },
 });
 
 /**

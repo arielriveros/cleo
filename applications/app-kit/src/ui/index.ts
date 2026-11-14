@@ -37,7 +37,8 @@ export { Slider, sliderFill } from './Slider';
 
 export {
   Glyph, DiceIcon, BoltIcon, LinkIcon, PlayIcon, PauseIcon, RestartIcon, StopIcon, LoopIcon, StepBackIcon,
-  StepForwardIcon, ToStartIcon, ToEndIcon, PilotIcon, SnapIcon, FilmIcon,
+  StepForwardIcon, ToStartIcon, ToEndIcon, PilotIcon, SnapIcon, FilmIcon, BookIcon, WhatsThisIcon,
+  ChevronLeftIcon, ChevronRightIcon, SidebarIcon, HomeIcon, CloseIcon, CopyIcon, SearchIcon, ImageIcon, HashIcon,
 } from './icons';
 export type { SliderProps } from './Slider';
 

@@ -20,7 +20,9 @@ import Topbar from "@cleo/app-kit/ui/Topbar";
 import ModeSelector from "./ModeSelector";
 import { UndoGlyph, RedoGlyph } from "./UndoButtons";
 import { useHistory } from "./HistoryContext";
-import { AboutDialog, AppMenuBar, Button, LogoButton, MenuItem, ShortcutsDialog, cn, type MenuSpec } from "@cleo/app-kit/ui";
+import { AboutDialog, AppMenuBar, BookIcon, Button, LogoButton, MenuItem, ShortcutsDialog, WhatsThisIcon, cn, type MenuSpec } from "@cleo/app-kit/ui";
+import { openDocumentation } from "@cleo/app-kit/docs/viewer/DocsViewerHost";
+import { startWhatsThis } from "@cleo/app-kit/docs/whatsThis";
 import {
   SaveIcon, ImportIcon, ExportIcon, PublishIcon, ChevronDownIcon,
   SpinnerIcon, CheckIcon, AlertIcon, LayoutIcon,
@@ -369,6 +371,11 @@ export default function MenuBar() {
     },
     {
       id: 'help', label: 'Help', items: [
+        { kind: 'item', label: 'Documentation', icon: <span className='inline-block w-3.5 h-3.5'><BookIcon /></span>, shortcut: 'F1',
+          onSelect: openDocumentation },
+        { kind: 'item', label: "What's This?", icon: <span className='inline-block w-3.5 h-3.5'><WhatsThisIcon /></span>, shortcut: 'Shift+F1',
+          onSelect: startWhatsThis },
+        { kind: 'separator' },
         { kind: 'item', label: 'Keyboard Shortcuts…', icon: <KeyboardIcon />, onSelect: () => setHelpDialog('shortcuts') },
         { kind: 'item', label: 'About Cleo Engine…', icon: <InfoIcon />, onSelect: () => setHelpDialog('about') },
       ],

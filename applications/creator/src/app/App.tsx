@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState, useSyncExternalStore, type ComponentType 
 import Topbar from '@cleo/app-kit/ui/Topbar';
 import LoadingScreen from '@cleo/app-kit/feedback/LoadingScreen';
 import { beginLoad } from '@cleo/app-kit/feedback/loadingStore';
-import { AboutDialog, AppMenuBar, LogoButton, ShortcutsDialog, type MenuSpec } from '@cleo/app-kit/ui';
+import { AboutDialog, AppMenuBar, BookIcon, LogoButton, ShortcutsDialog, WhatsThisIcon, type MenuSpec } from '@cleo/app-kit/ui';
+import { openDocumentation } from '@cleo/app-kit/docs/viewer/DocsViewerHost';
+import { startWhatsThis } from '@cleo/app-kit/docs/whatsThis';
 import { webgpuAvailableInBrowser, type BackendKind } from 'cleo';
 import { readBackendPreference, writeBackendPreference } from '@cleo/app-kit/renderer/backendPreference';
 import { CreatorEngineProvider, useCreatorEngine } from './CreatorEngine';
@@ -162,6 +164,11 @@ function CreatorMenus({ tool }: { tool: Tool }) {
     },
     {
       id: 'help', label: 'Help', items: [
+        { kind: 'item', label: 'Documentation', icon: <span className='inline-block w-3.5 h-3.5'><BookIcon /></span>, shortcut: 'F1',
+          onSelect: openDocumentation },
+        { kind: 'item', label: "What's This?", icon: <span className='inline-block w-3.5 h-3.5'><WhatsThisIcon /></span>, shortcut: 'Shift+F1',
+          onSelect: startWhatsThis },
+        { kind: 'separator' },
         { kind: 'item', label: 'Keyboard Shortcuts…', icon: glyph('M2.5 6h19v12h-19Z M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M7.5 14h9'),
           onSelect: () => setDialog('shortcuts') },
         { kind: 'item', label: 'About Cleo Creator…', icon: glyph('M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z M12 11v5 M12 8h.01'),

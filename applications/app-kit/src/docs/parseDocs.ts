@@ -22,6 +22,8 @@ export interface DocHeading {
   pseudo: boolean;
   /** Index of the enclosing heading in `DocPage.headings`, -1 for the page title. */
   parent: number;
+  /** 1-based source line of the heading (of the bold line, for a pseudo-heading). */
+  line: number;
 }
 
 export interface DocMeta { label: string; value: string }
@@ -46,6 +48,11 @@ export interface DocEntry {
   meta: DocMeta[];
   /** The heading this entry lives under; for a heading entry, that heading itself. */
   heading: number;
+  /**
+   * 1-based source line the entry is written on: a heading entry's heading, a row's table row, a term's
+   * paragraph or list item. The docs viewer scrolls to it.
+   */
+  line: number;
 }
 
 export interface DocPage {
@@ -73,6 +80,8 @@ export function plainText(md: string): string {
     .replace(/`([^`]*)`/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/(^|[^\w*])\*([^*\s][^*]*)\*(?!\w)/g, '$1$2')
+    // Again: bold around italics (`**Shared: *name***`) only unwraps once the italics are gone.
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -155,11 +164,12 @@ const MENTION = /^\*\*([^*]+)\*\*\s+(?![—:])\S/;
 // ---------------------------------------------------------------------------------------------------
 // Parsing
 
+// `line` is where the block starts (1-based); a table also keeps each row's line.
 type Block =
-  | { type: 'heading'; level: number; md: string }
-  | { type: 'para'; md: string }
-  | { type: 'item'; md: string }
-  | { type: 'table'; rows: string[][] };
+  | { type: 'heading'; level: number; md: string; line: number }
+  | { type: 'para'; md: string; line: number }
+  | { type: 'item'; md: string; line: number }
+  | { type: 'table'; rows: string[][]; rowLines: number[]; line: number };
 
 function toBlocks(markdown: string): Block[] {
   const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
@@ -167,44 +177,50 @@ function toBlocks(markdown: string): Block[] {
   let para: string[] | null = null;
   let item: string[] | null = null;
   let table: string[][] | null = null;
+  let rowLines: number[] = [];
+  let start = 0;
   let fence = false;
 
   const flush = () => {
-    if (para) blocks.push({ type: 'para', md: para.join(' ') });
-    if (item) blocks.push({ type: 'item', md: item.join(' ') });
-    if (table) blocks.push({ type: 'table', rows: table });
+    if (para) blocks.push({ type: 'para', md: para.join(' '), line: start });
+    if (item) blocks.push({ type: 'item', md: item.join(' '), line: start });
+    if (table) blocks.push({ type: 'table', rows: table, rowLines, line: start });
     para = item = table = null;
   };
 
-  for (const raw of lines) {
+  for (let n = 0; n < lines.length; n++) {
+    const raw = lines[n];
+    const lineNo = n + 1;
     const line = raw.replace(/\s+$/, '');
     if (/^\s*(```|~~~)/.test(line)) { flush(); fence = !fence; continue; }
     if (fence) continue;
     if (!line.trim()) { flush(); continue; }
 
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (heading) { flush(); blocks.push({ type: 'heading', level: heading[1].length, md: heading[2].trim() }); continue; }
+    if (heading) { flush(); blocks.push({ type: 'heading', level: heading[1].length, md: heading[2].trim(), line: lineNo }); continue; }
 
     // Blockquote notes are asides, not definitions (and a `> ###` inside one is not a section).
     if (/^\s*>/.test(line)) { flush(); continue; }
     if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { flush(); continue; }
 
     if (/^\s*\|/.test(line)) {
-      if (!table) { flush(); table = []; }
+      if (!table) { flush(); table = []; rowLines = []; start = lineNo; }
       const cells = splitRow(line.trim());
       // The `|---|---|` separator row.
       if (cells.every(c => /^:?-{2,}:?$/.test(c))) continue;
       table.push(cells);
+      rowLines.push(lineNo);
       continue;
     }
 
     const bullet = /^\s{0,3}(?:[-*+]|\d+[.)])\s+(.*)$/.exec(line);
-    if (bullet) { flush(); item = [bullet[1]]; continue; }
+    if (bullet) { flush(); item = [bullet[1]]; start = lineNo; continue; }
     // A wrapped continuation of the current list item (indented) or paragraph.
     if (item && /^\s+\S/.test(raw)) { item.push(line.trim()); continue; }
     if (item) { flush(); }
     if (table) { flush(); }
-    (para ??= []).push(line.trim());
+    if (!para) { para = []; start = lineNo; }
+    para.push(line.trim());
   }
   flush();
   return blocks;
@@ -270,10 +286,10 @@ export function parsePage(id: string, markdown: string): DocPage {
     return anchor;
   };
 
-  const add = (kind: DocEntryKind, label: string, terms: string[], body: string, heading: number, meta: DocMeta[] = [], parts: string[] = []) => {
+  const add = (kind: DocEntryKind, label: string, terms: string[], body: string, heading: number, line: number, meta: DocMeta[] = [], parts: string[] = []) => {
     const { keys, looseKeys, partKeys } = keysOf(terms, parts);
     if (!keys.length) return;
-    page.entries.push({ page: id, kind, label, keys, looseKeys, partKeys, body, meta, heading });
+    page.entries.push({ page: id, kind, label, keys, looseKeys, partKeys, body, meta, heading, line });
   };
 
   for (const block of blocks) {
@@ -290,7 +306,7 @@ export function parsePage(id: string, markdown: string): DocPage {
 
       let parent = current;
       while (parent >= 0 && page.headings[parent].level >= block.level) parent = page.headings[parent].parent;
-      page.headings.push({ level: block.level, text, anchor: uniqueAnchor(slugify(block.md), false), pseudo: false, parent });
+      page.headings.push({ level: block.level, text, anchor: uniqueAnchor(slugify(block.md), false), pseudo: false, parent, line: block.line });
       current = page.headings.length - 1;
       pseudo = -1;
       awaitingBody = current;
@@ -301,7 +317,8 @@ export function parsePage(id: string, markdown: string): DocPage {
     if (block.type === 'table') {
       const [header, ...rows] = block.rows;
       if (!header || header.length < 2) continue;
-      for (const cells of rows) {
+      for (let r = 0; r < rows.length; r++) {
+        const cells = rows[r];
         if (!cells[0]?.startsWith('**')) continue;
         const { terms, parts } = boldTerms(cells[0]);
         if (!terms.length) continue;
@@ -312,7 +329,7 @@ export function parsePage(id: string, markdown: string): DocPage {
           if (i === bodyIndex || !cells[i] || !header[i]) continue;
           meta.push({ label: plainText(header[i]), value: cells[i] });
         }
-        add('row', plainText(cells[0]), terms, body, under(), meta, parts);
+        add('row', plainText(cells[0]), terms, body, under(), block.rowLines[r + 1], meta, parts);
       }
       continue;
     }
@@ -322,19 +339,19 @@ export function parsePage(id: string, markdown: string): DocPage {
     if (block.type === 'para' && /^\*\*[^*]{1,48}\*\*$/.test(block.md.trim()) && !/\.\*\*$/.test(block.md.trim())) {
       const md = block.md.trim().slice(2, -2);
       const base = current >= 0 ? page.headings[current].level : 1;
-      page.headings.push({ level: base + 1, text: plainText(md), anchor: uniqueAnchor(slugify(md), true), pseudo: true, parent: current });
+      page.headings.push({ level: base + 1, text: plainText(md), anchor: uniqueAnchor(slugify(md), true), pseudo: true, parent: current, line: block.line });
       pseudo = page.headings.length - 1;
       awaitingBody = pseudo;
       continue;
     }
 
     const definitions = definitionsIn(block.md);
-    for (const d of definitions) add(d.kind, d.label, d.terms, d.body, under(), [], d.parts);
+    for (const d of definitions) add(d.kind, d.label, d.terms, d.body, under(), block.line, [], d.parts);
 
     // A heading's body is its first plain paragraph: not a list item, and not itself a definition.
     if (awaitingBody >= 0 && block.type === 'para' && (definitions.length === 0 || definitions[0].kind === 'mention')) {
       const h = page.headings[awaitingBody];
-      add('heading', h.text, [h.text], block.md.trim(), awaitingBody);
+      add('heading', h.text, [h.text], block.md.trim(), awaitingBody, h.line);
       awaitingBody = -1;
     }
   }
@@ -488,6 +505,51 @@ export function resolveDocKey(index: DocIndex, frames: DocFrame[], doc: string, 
   if (!anchor) return page.entries.find(e => e.kind === 'heading' && e.body.trim()) ?? null;
   const h = headingIndex(page, anchor);
   return page.entries.find(e => e.kind === 'heading' && e.heading === h && e.body.trim()) ?? null;
+}
+
+/** The source line of a heading on a page (a DocScope section), for the viewer to scroll to. */
+export function headingLine(index: DocIndex, pageId: string, anchor: string): number | undefined {
+  const page = index.pages.get(pageId);
+  if (!page) return undefined;
+  const h = headingIndex(page, anchor);
+  return h >= 0 ? page.headings[h].line : undefined;
+}
+
+/** Where a link in a docs page points: another bundled page, the web, or a file outside docs/. */
+export type DocLink =
+  | { kind: 'page'; page: string; anchor?: string }
+  | { kind: 'external'; href: string }
+  | { kind: 'outside'; path: string };
+
+/**
+ * Resolve a link written in page `fromPage` (`editor/rendering`): `#anchor` stays on the page,
+ * `../reference/x.md#a` becomes `{ page: 'reference/x', anchor: 'a' }`, a URL with a scheme is external,
+ * and a relative path that climbs out of docs/ (or is not a `.md` page) is `outside`. Whether the page
+ * exists is the caller's question.
+ */
+export function resolveDocLink(fromPage: string, href: string): DocLink {
+  const link = href.trim();
+  if (/^[a-z][a-z0-9+.-]*:/i.test(link)) return { kind: 'external', href: link };
+  const hashAt = link.indexOf('#');
+  const path = hashAt >= 0 ? link.slice(0, hashAt) : link;
+  const rawAnchor = hashAt >= 0 ? link.slice(hashAt + 1) : '';
+  let anchor: string | undefined;
+  try { anchor = rawAnchor ? decodeURIComponent(rawAnchor) : undefined; } catch { anchor = rawAnchor; }
+  if (!path) return { kind: 'page', page: fromPage, anchor };
+
+  const parts = fromPage.split('/').slice(0, -1);
+  for (const seg of path.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      if (!parts.length) return { kind: 'outside', path: link };
+      parts.pop();
+      continue;
+    }
+    parts.push(seg);
+  }
+  const joined = parts.join('/');
+  if (!/\.md$/i.test(joined)) return { kind: 'outside', path: link };
+  return { kind: 'page', page: joined.replace(/\.md$/i, ''), anchor };
 }
 
 /** The frame a resolved entry opens for what sits inside its section. */

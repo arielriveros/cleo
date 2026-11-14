@@ -1,4 +1,4 @@
-import { parseDocs, pageIdFromPath, type DocIndex } from './parseDocs';
+import { parseDocs, pageIdFromPath, resolveDocLink, type DocIndex } from './parseDocs';
 
 // The parsed docs, as a tiny external store: parsed on first use, re-parsed when a page changes under
 // the dev server, and versioned so useSyncExternalStore re-renders every open tooltip after an edit.
@@ -9,7 +9,9 @@ import { parseDocs, pageIdFromPath, type DocIndex } from './parseDocs';
 // an edited page show up in the open tooltips without a reload.
 
 let files: Record<string, string> = {};
+let sources: Record<string, string> | null = null;
 let index: DocIndex | null = null;
+let order: string[] | null = null;
 let version = 0;
 const listeners = new Set<() => void>();
 
@@ -19,8 +21,40 @@ function byPageId(raw: Record<string, string>): Record<string, string> {
   return out;
 }
 
+function getSources(): Record<string, string> {
+  return (sources ??= byPageId(files));
+}
+
 export function getDocIndex(): DocIndex {
-  return (index ??= parseDocs(byPageId(files)));
+  return (index ??= parseDocs(getSources()));
+}
+
+/** A page's markdown, as bundled (`editor/rendering`), or undefined when the app does not carry it. */
+export function getDocSource(pageId: string): string | undefined {
+  return getSources()[pageId];
+}
+
+/**
+ * Every bundled page id in reading order: the order docs/README.md (the table of contents) first links
+ * to them, then any page it never links, alphabetically. The docs viewer's sidebar follows it, so
+ * reordering the README reorders the sidebar.
+ */
+export function pageOrder(): string[] {
+  if (order) return order;
+  const all = getSources();
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (id: string) => { if (id in all && !seen.has(id)) { seen.add(id); out.push(id); } };
+  const readme = all.README;
+  if (readme !== undefined) {
+    push('README');
+    for (const m of readme.matchAll(/\]\(([^)\s]+)\)/g)) {
+      const link = resolveDocLink('README', m[1]);
+      if (link.kind === 'page') push(link.page);
+    }
+  }
+  for (const id of Object.keys(all).sort()) push(id);
+  return (order = out);
 }
 
 export function getDocsVersion(): number {
@@ -38,7 +72,9 @@ export function subscribeDocs(listener: () => void): () => void {
  */
 export function registerDocSources(raw: Record<string, string>): void {
   files = raw;
+  sources = null;
   index = null;
+  order = null;
   version++;
   for (const l of listeners) l();
 }
