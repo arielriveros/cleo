@@ -3,12 +3,6 @@ import { NodeRendererProps, Tree, TreeApi } from 'react-arborist'
 import { useCleoEngine } from '../EngineContext'
 import { CleoEngine, Logger, Node, isEditorOwnedName, isUINodeType } from 'cleo';
 import type { SceneChange } from 'cleo';
-import { SkyIcon } from '../nodeInspector/sectionIcons'
-import {
-  CameraIcon, CameraRigIcon, CharacterAddIcon, ControllerAddIcon, NavMeshIcon, ModelIcon, LightIcon, LightProbeIcon, ExposureVolumeIcon, GiVolumeIcon, VolumetricFogIcon, SkyboxIcon, SkyLightIcon, CloudsIcon, WindIcon, WeatherIcon,
-  SpriteIcon, AnimatedSpriteIcon, TilemapIcon, LandscapeIcon, VisibleIcon, HiddenIcon, SoundIcon, DecalIcon, ParticlesIcon, ForceFieldIcon, WaterVolumeIcon, OcclusionVolumeIcon, ClothIcon,
-  SequenceIcon, Camera2DIcon, Room2DIcon, ParallaxLayerIcon, CharacterBody2DIcon, Collider2DIcon, Area2DIcon,
-} from './nodeIcons'
 import { NEW_NODE_MIME, addItemTo, findAddItem } from './addCatalog';
 import { TEMPLATE_ID_VAR, isWithinTemplateInstance } from '../../utils/templates';
 import { setNameOverride } from '../../utils/templateOverrides';
@@ -17,26 +11,17 @@ import { validateNodeName } from '../../utils/nodeNames';
 import { useElementSize } from '@cleo/app-kit/utils/useElementSize';
 import { useScopedDndManager } from '../../utils/treeDnd';
 import { useTreeFocusGuard } from '../../utils/treeFocusGuard';
-import { hoveredScriptStore, useHoveredScript } from './hoveredScriptStore';
-import { TextInput } from '@cleo/app-kit/ui';
-import { UI_ICONS } from './uiIcons';
+import { Button, TextInput } from '@cleo/app-kit/ui';
+import { filterSceneTree, nameMatches, type NodeDescription } from './sceneGraphLayout';
+import { Chevron, GraphViewIcon, NodeControls, RenameField, typeIconFor } from './sceneNodeParts';
+import SceneGraphView, { type GraphMove } from './SceneGraphView';
 
-/** Glyph per node type, as a table rather than a chain of per-type conditionals in the row. */
-const TYPE_ICONS: Record<string, () => JSX.Element> = {
-  camera: CameraIcon, cameraRig: CameraRigIcon, model: ModelIcon,
-  character: CharacterAddIcon, controller: ControllerAddIcon, navMesh: NavMeshIcon,
-  sprite: SpriteIcon, animatedSprite: AnimatedSpriteIcon, tilemap: TilemapIcon,
-  light: LightIcon, lightProbe: LightProbeIcon, exposureVolume: ExposureVolumeIcon, giVolume: GiVolumeIcon, volumetricFog: VolumetricFogIcon, decal: DecalIcon,
-  skybox: SkyboxIcon, volumetricClouds: CloudsIcon, skyAtmosphere: SkyIcon, skyLight: SkyLightIcon, wind: WindIcon, weather: WeatherIcon,
-  landscape: LandscapeIcon,
-  // One glyph for both modes: the tree shows what a node IS, and ambient vs spatial is a property of it.
-  sound: SoundIcon,
-  particleSystem: ParticlesIcon, forceField: ForceFieldIcon, cloth: ClothIcon, waterVolume: WaterVolumeIcon, occlusionVolume: OcclusionVolumeIcon,
-  sequence: SequenceIcon,
-  camera2D: Camera2DIcon, room2D: Room2DIcon, parallaxLayer: ParallaxLayerIcon,
-  characterBody2D: CharacterBody2DIcon, body2D: Collider2DIcon, area2D: Area2DIcon,
+/** The panel's two views of one hierarchy. The choice is kept across sessions. */
+type SceneView = 'tree' | 'graph';
+const VIEW_KEY = 'cleo_scene_tree_view';
+const readView = (): SceneView => {
+  try { return localStorage.getItem(VIEW_KEY) === 'graph' ? 'graph' : 'tree'; } catch { return 'tree'; }
 };
-
 
 const ROW_HEIGHT = 24;
 const INDENT = 12;
@@ -45,32 +30,6 @@ const CHEVRON = 16; // the disclosure column; guides are centred on it
 
 /** The one MIME the tree accepts besides new nodes. Node-to-node moves are react-arborist's job now. */
 const SCRIPT_MIME = 'text/cleo-script';
-
-interface NodeDescription {
-  id: string;
-  name: string;
-  type: string;
-  visible: boolean;
-  spawnOnStart: boolean;
-  templateId?: string;
-  scriptId?: string;
-  children: NodeDescription[];
-}
-
-const PenIcon = () => (
-  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 20h9" />
-    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
-  </svg>
-);
-
-// A code-brackets glyph marking a node that carries a script. `</>` reads as "script/code" at 14px.
-const ScriptIcon = () => (
-  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M8 6 3 12l5 6" />
-    <path d="M16 6l5 6-5 6" />
-  </svg>
-);
 
 /**
  * Nodes the tree never shows: debug/editor helpers and the chunks a landscape subdivides itself into.
@@ -90,15 +49,6 @@ const isAncestorOf = (maybeAncestor: Node, node: Node): boolean => {
   return false;
 };
 
-/** Disclosure arrow: one rotating chevron rather than two glyphs. */
-const Chevron = ({ open }: { open: boolean }) => (
-  <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="3.2"
-       strokeLinecap="round" strokeLinejoin="round"
-       className={`transition-transform duration-100 ${open ? 'rotate-90' : ''}`}>
-    <path d="m9 6 6 6-6 6" />
-  </svg>
-);
-
 /**
  * The faint vertical rules tying a child to its parent: one per level, absolutely positioned and centred
  * on that level's ancestor chevron. Drawn inside the row rather than as padding, so hover and selection
@@ -113,24 +63,9 @@ const IndentGuides = ({ level }: { level: number }) => (
   </>
 );
 
-/** The inline rename field. Enter commits through onRename; Escape and blur abandon the edit. */
+/** The tree's rename field: arborist's own submit/reset. */
 function RenameInput({ node }: { node: NodeRendererProps<NodeDescription>['node'] }) {
-  const input = useRef<HTMLInputElement | null>(null);
-  return (
-    <input
-      ref={input}
-      autoFocus
-      defaultValue={node.data.name}
-      onFocus={(e) => e.currentTarget.select()}
-      onClick={(e) => e.stopPropagation()}
-      onBlur={() => node.reset()}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === 'Escape') node.reset();
-        if (e.key === 'Enter') node.submit(input.current?.value ?? '');
-      }}
-      className='type-value bg-scrim/40 text-fg rounded px-1 outline-none ring-1 ring-primary/60 w-full min-w-0' />
-  );
+  return <RenameField initial={node.data.name} onSubmit={(name) => node.submit(name)} onCancel={() => node.reset()} />;
 }
 
 /**
@@ -139,32 +74,18 @@ function RenameInput({ node }: { node: NodeRendererProps<NodeDescription>['node'
  * add its own gutter and paint the guides behind a fill that runs the full width.
  */
 function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) {
-  // The inspected scene: the running simulation while Simulating, the edited scene otherwise.
-  const { inspectedScene: editorScene, isPlayMode, enterTemplateEditor, enterScriptEditor } = useCleoEngine();
   const data = node.data;
-  const hoveredScript = useHoveredScript();
   const selected = node.isSelected;
-  // A template-instance row shows no script glyph: its script is authored in the template, reached through
-  // the edit-template button. Elsewhere the glyph is highlighted while its script is the one hovered anywhere.
-  const showScript = !!data.scriptId && !data.templateId;
-  const scriptHot = !!data.scriptId && data.scriptId === hoveredScript;
   // UI elements are tinted so a HUD subtree is distinguishable from world geometry. A SELECTED row drops
   // the tint for the standard indigo fill and white text: selection must never be ambiguous.
   const isUI = isUINodeType(data.type);
-  const TypeIcon = isUI ? UI_ICONS[data.type] : TYPE_ICONS[data.type];
+  const TypeIcon = typeIconFor(data.type);
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
     // react-dnd carries moves within the tree; these are for targets outside it (the Assets explorer,
     // node-reference fields). The dedicated MIME tells a scene node from other text/plain drags.
     event.dataTransfer.setData('text/cleo-node', data.id);
     event.dataTransfer.setData('text/plain', data.id);
-  };
-
-  const toggleVisibility = (event: React.MouseEvent) => {
-    event.stopPropagation();
-    if (isPlayMode) return; // Don't allow visibility changes during play mode
-    const target = editorScene?.getNodeById(data.id);
-    if (target) target.visible = !target.visible;
   };
 
   return (
@@ -191,39 +112,7 @@ function SceneNodeRow({ node, dragHandle }: NodeRendererProps<NodeDescription>) 
         { TypeIcon && <span className='inline-flex w-4 h-4 mr-1.5 align-middle items-center justify-center'><TypeIcon /></span> }
         { node.isEditing ? <RenameInput node={node} /> : <span className='truncate'>{data.name}</span> }
       </div>
-      {/* The row's own controls. They fade in with the row rather than sitting there permanently, so a deep
-          hierarchy reads as names first and buttons second. */}
-      <div className='flex flex-row items-center shrink-0 gap-1 pl-1'>
-        { showScript &&
-          <button
-            title='Edit script'
-            onClick={(e) => { e.stopPropagation(); enterScriptEditor(data.scriptId); }}
-            onMouseEnter={() => hoveredScriptStore.set(data.scriptId ?? null)}
-            onMouseLeave={() => hoveredScriptStore.set(null)}
-            className={`inline-flex items-center justify-center w-4 h-4 transition-colors ${
-              scriptHot ? 'text-highlight' : 'text-muted hover:text-highlight'}`}>
-            <ScriptIcon />
-          </button>
-        }
-        { data.templateId &&
-          <button
-            title='Edit template'
-            onClick={(e) => { e.stopPropagation(); enterTemplateEditor(data.templateId); }}
-            className='inline-flex items-center justify-center w-4 h-4 text-muted hover:text-highlight transition-colors'>
-            <PenIcon />
-          </button>
-        }
-        {/* A button rather than the <img onClick> this used to be: it is a control, so it should be
-            focusable and activate on Enter like the script and template buttons beside it. */}
-        <button
-          type='button'
-          onClick={toggleVisibility}
-          title={data.visible ? 'Hide' : 'Show'}
-          className={`inline-flex items-center justify-center w-4 h-4 transition-opacity ${
-            data.visible ? 'opacity-0 group-hover:opacity-60 hover:!opacity-100 focus-visible:opacity-100' : 'opacity-70 hover:opacity-100'}`}>
-          {data.visible ? <VisibleIcon /> : <HiddenIcon />}
-        </button>
-      </div>
+      <NodeControls data={data} />
     </div>
   );
 }
@@ -245,6 +134,14 @@ export default function SceneInspector() {
           attachScriptToNode, activeTab, sceneList, openSceneId, selectedNode, instance } = useCleoEngine()
   const [ nodes, setNodes ] = useState<NodeDescription | null>(null);
   const [ filter, setFilter ] = useState('');
+  const filtering = filter.trim() !== '';
+  const [ view, setViewState ] = useState<SceneView>(readView);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const setView = (next: SceneView) => {
+    setViewState(next);
+    try { localStorage.setItem(VIEW_KEY, next); } catch { /* ignore */ }
+  };
   const treeRef = useRef<TreeApi<NodeDescription> | undefined>(undefined);
   // react-arborist is virtualized, so it needs real pixel dimensions; the same element also scopes its
   // drag-and-drop backend, which would otherwise disable every native drop in the editor (see treeDnd).
@@ -310,6 +207,40 @@ export default function SceneInspector() {
 
   const rootId = nodes?.id;
   const data = useMemo(() => (nodes ? [nodes] : []), [nodes]);
+  // The Graph view filters here; the tree filters itself through `searchTerm` with the same test.
+  const graphRoot = useMemo(() => (view === 'graph' && nodes ? filterSceneTree(nodes, filter) : null), [view, nodes, filter]);
+
+  // --- collapse, shared by both views ---------------------------------------------------------------
+
+  // Which nodes are collapsed, so closing a subtree in one view holds in the other. The tree reads it once,
+  // when it mounts (it remounts on every switch), and reports each toggle back.
+  //
+  // Under a filter react-arborist keeps a SEPARATE open map, everything open, dropped when the filter
+  // clears; the graph does the same with `filteredCollapsed`.
+  const [ collapsed, setCollapsed ] = useState<ReadonlySet<string>>(() => new Set());
+  const [ filteredCollapsed, setFilteredCollapsed ] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => { if (!filtering) setFilteredCollapsed(prev => (prev.size ? new Set() : prev)); }, [filtering]);
+  const treeOpenState = useMemo(() => Object.fromEntries([...collapsed].map(id => [id, false])), [collapsed]);
+
+  const handleTreeToggle = (id: string) => {
+    const tree = treeRef.current;
+    if (!tree || tree.isFiltered) return;
+    const open = tree.isOpen(id);
+    setCollapsed(prev => {
+      if (prev.has(id) !== open) return prev;
+      const next = new Set(prev);
+      if (open) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleGraphCollapse = (id: string) => {
+    (filtering ? setFilteredCollapsed : setCollapsed)(prev => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  };
 
   // --- selection ------------------------------------------------------------------------------------
 
@@ -336,19 +267,69 @@ export default function SceneInspector() {
     // a selection made before it mounted would never reach it.
   }, [selectedNode, nodes, dndManager, size.height]);
 
-  const handleSelect = (selection: { id: string }[]) => {
+  // The Graph view's selection. Held here, not in the view, so Delete, F2 and Edit ▸ Delete reach it.
+  const [ graphSelected, setGraphSelected ] = useState<ReadonlySet<string>>(() => new Set(selectedNode ? [selectedNode] : []));
+  const graphSelectedRef = useRef(graphSelected);
+  graphSelectedRef.current = graphSelected;
+  const [ graphEditingId, setGraphEditingId ] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (view !== 'graph') return;
+    if (!selectedNode) { setGraphSelected(prev => (prev.size ? new Set() : prev)); return; }
+    if (graphSelectedRef.current.has(selectedNode)) return; // the graph's own click, echoed back
+    setGraphSelected(new Set([selectedNode]));
+    // Selected elsewhere (the viewport): open the subtree it sits in, as the tree's scrollTo does.
+    const ancestors = new Set<string>();
+    for (let p = editorScene?.getNodeById(selectedNode)?.parent; p; p = p.parent) ancestors.add(p.id);
+    const reveal = (prev: ReadonlySet<string>) =>
+      ([...prev].some(id => ancestors.has(id)) ? new Set([...prev].filter(id => !ancestors.has(id))) : prev);
+    setCollapsed(reveal);
+    setFilteredCollapsed(reveal);
+  }, [view, selectedNode, editorScene]);
+
+  const selectNode = (id: string | null) => {
     // No selection during Play (the panels are hidden anyway); Simulate selects to inspect the live node.
     if (isPlayMode && !isSimulating) return;
-    const id = selection.length ? selection[selection.length - 1].id : null;
     if (id === selectedRef.current) return; // the echo of the sync above, or a rebuild re-reporting the same row
     eventEmitter.emit('SELECT_NODE', id);
+  };
+
+  // react-arborist clears its selection as it mounts (its provider deselects whenever no `selection` prop
+  // is given) and reports that through onSelect. Switching back from the Graph view remounts the tree, and
+  // that report would clear the editor's selection. So an empty report during the mounting commit is
+  // dropped: the ref callback flags a NEW tree api, the provider's effect runs next (children first), and
+  // this panel's own effect, last in the commit, lowers the flag again.
+  // Compared against the last api seen, not treeRef: arborist re-runs its imperative handle on every one of
+  // its own renders, so the callback sees null and then the SAME api again, with no commit of this panel
+  // to lower the flag after it.
+  const treeMountingRef = useRef(false);
+  const lastTreeApiRef = useRef<TreeApi<NodeDescription> | null>(null);
+  const setTreeApi = useCallback((api: TreeApi<NodeDescription> | null | undefined) => {
+    if (api && api !== lastTreeApiRef.current) {
+      lastTreeApiRef.current = api;
+      treeMountingRef.current = true;
+    }
+    treeRef.current = api ?? undefined;
+  }, []);
+  useEffect(() => { treeMountingRef.current = false; });
+
+  const handleSelect = (selection: { id: string }[]) => {
+    if (treeMountingRef.current && !selection.length) return;
+    selectNode(selection.length ? selection[selection.length - 1].id : null);
+  };
+
+  const handleGraphSelect = (ids: string[], primary: string | null) => {
+    setGraphSelected(new Set(ids));
+    selectNode(primary);
   };
 
   // --- moving nodes ---------------------------------------------------------------------------------
 
   // Rows stay draggable even when they cannot be re-parented (a node with a body, the root): the same
   // gesture drops a node onto the Assets explorer to save it as a template. What a move may do is here.
-  const handleMove = ({ dragIds, parentId, index }: { dragIds: string[]; parentId: string | null; index: number }) => {
+  // `index` counts the parent's VISIBLE children with the dragged rows still in place, as react-arborist
+  // reports it; 'append' lands them after the last child.
+  const moveNodes = (dragIds: string[], parentId: string | null, index: number | 'append') => {
     if (isPlayMode || structureLocked) return;
     const parent = parentId ? editorScene?.getNodeById(parentId) : undefined;
     if (!parent) return; // a drop past the root row would make a sibling of the scene root
@@ -372,19 +353,33 @@ export default function SceneInspector() {
     }
     if (!moving.length) return;
 
-    // react-arborist counts `index` among the parent's VISIBLE children with the dragged rows still in
-    // place; addChild indexes the real children array, which also holds terrain chunks and editor helpers.
-    // Anchoring on the sibling the rows land in front of translates between the two, and the -1 accounts
-    // for addChild detaching the node before it splices it back in.
-    // A drop ON a row is also reported as index 0, so the two cases are told apart by the cursor shown.
+    // `index` counts the parent's VISIBLE children; addChild indexes the real children array, which also
+    // holds terrain chunks and editor helpers. Anchoring on the sibling the rows land in front of
+    // translates between the two, and the -1 accounts for addChild detaching the node before it splices
+    // it back in.
     const siblings = shownChildren(parent);
-    const anchor = treeRef.current?.cursorOverFolder ? undefined : siblings[index];
+    const anchor = index === 'append' ? undefined : siblings[index];
     let engineIndex = anchor ? parent.children.indexOf(anchor) : parent.children.length;
     for (const node of moving) {
       const from = node.parent === parent ? parent.children.indexOf(node) : -1;
       parent.addChild(node, from >= 0 && from < engineIndex ? engineIndex - 1 : engineIndex);
       engineIndex = parent.children.indexOf(node) + 1;
     }
+  };
+
+  // A drop ON a row is also reported as index 0, so the two cases are told apart by the cursor shown.
+  const handleMove = ({ dragIds, parentId, index }: { dragIds: string[]; parentId: string | null; index: number }) =>
+    moveNodes(dragIds, parentId, treeRef.current?.cursorOverFolder ? 'append' : index);
+
+  // The graph names the card it was dropped on and which side: as that card's last child, or as the
+  // sibling just before or after it.
+  const handleGraphMove = ({ dragIds, targetId, zone }: GraphMove) => {
+    if (zone === 'inside') { moveNodes(dragIds, targetId, 'append'); return; }
+    const target = editorScene?.getNodeById(targetId);
+    const parent = target?.parent;
+    if (!target || !parent) return;
+    const index = shownChildren(parent).indexOf(target);
+    moveNodes(dragIds, parent.id, zone === 'before' ? index : index + 1);
   };
 
   // --- rename / delete ------------------------------------------------------------------------------
@@ -422,6 +417,11 @@ export default function SceneInspector() {
       editorScene.removeNode(node);
     }
   };
+  const handleDeleteRef = useRef(handleDelete);
+  handleDeleteRef.current = handleDelete;
+
+  // The graph's rename gate: the tree's `disableEdit`, inverted.
+  const canEditNode = (id: string) => !(isPlayMode || structureLocked || id === rootId);
 
   // --- drops from outside the tree ------------------------------------------------------------------
 
@@ -482,6 +482,11 @@ export default function SceneInspector() {
   // and honours the same locks.
   useEffect(() => {
     const onDeleteSelected = () => {
+      if (viewRef.current === 'graph') {
+        const ids = [...graphSelectedRef.current];
+        if (ids.length && !structureLocked) handleDeleteRef.current({ ids });
+        return;
+      }
       const tree = treeRef.current;
       if (!tree || tree.isEditing || structureLocked) return;
       const ids = Array.from(tree.selectedIds);
@@ -494,6 +499,20 @@ export default function SceneInspector() {
   // Delete and F2, on top of react-arborist's own keymap. Capture phase and stopping propagation, because
   // react-arborist treats any unrecognised key as type-ahead. Ignored while a field has focus.
   const handleKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (event) => {
+    if (view === 'graph') {
+      if (graphEditingId || (event.target as HTMLElement).closest('input')) return;
+      if (event.key !== 'Delete' && event.key !== 'F2') return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (structureLocked) return;
+      if (event.key === 'Delete') {
+        const ids = [...graphSelected];
+        if (ids.length) handleDelete({ ids });
+        return;
+      }
+      if (selectedNode && graphSelected.has(selectedNode) && canEditNode(selectedNode)) setGraphEditingId(selectedNode);
+      return;
+    }
     const tree = treeRef.current;
     if (!tree || tree.isEditing) return;
     if ((event.target as HTMLElement).closest('input')) return;
@@ -519,38 +538,68 @@ export default function SceneInspector() {
           Select a node to key it. Drag one onto the Sequencer to give it a slot.
         </div>
       )}
-      <div className='shrink-0 px-[5px] py-1'>
+      <div className='shrink-0 flex items-center gap-1 px-[5px] py-1'>
         <TextInput
           value={filter} placeholder='Filter nodes'
           onChange={setFilter}
-          className='bg-fg/[0.06] border-transparent focus-visible:border-transparent placeholder:text-dim rounded-md px-2 py-[3px] focus:bg-fg/[0.1] transition-colors' />
+          className='flex-1 min-w-0 bg-fg/[0.06] border-transparent focus-visible:border-transparent placeholder:text-dim rounded-md px-2 py-[3px] focus:bg-fg/[0.1] transition-colors' />
+        <Button
+          variant='ghost' size='icon'
+          active={view === 'graph'} aria-pressed={view === 'graph'}
+          onClick={() => setView(view === 'graph' ? 'tree' : 'graph')}
+          title={view === 'graph' ? 'Back to the tree view' : 'Graph view: the hierarchy as a top-down node graph'}
+          className='shrink-0 w-[24px] h-[24px] p-[4px] rounded-md'>
+          <GraphViewIcon />
+        </Button>
       </div>
-      <div ref={viewportRef} className='flex-1 min-h-0'>
-        { dndManager && size.height > 0 &&
-          <Tree<NodeDescription>
-            ref={treeRef}
-            data={data}
-            dndManager={dndManager}
-            width={size.width}
-            height={size.height}
-            rowHeight={ROW_HEIGHT}
-            indent={INDENT}
-            openByDefault
-            selectionFollowsFocus
-            searchTerm={filter}
-            searchMatch={(node, term) => node.data.name.toLowerCase().includes(term.toLowerCase())}
-            onSelect={handleSelect}
-            onMove={handleMove}
-            onRename={handleRename}
-            onDelete={handleDelete}
-            disableEdit={(d) => isPlayMode || structureLocked || d.id === rootId}
-            disableDrop={({ parentNode }) => isPlayMode || structureLocked || !!parentNode.data.templateId || !editorScene?.getNodeById(parentNode.id)}
-            renderCursor={DropCursor}
-            className='outline-none'>
-            {SceneNodeRow}
-          </Tree>
-        }
-      </div>
+      {/* The graph is deliberately NOT inside viewportRef: the tree's react-dnd backend is scoped to that
+          element, and it would cancel the graph's native drops (see treeDnd). */}
+      { view === 'graph'
+        ? <div className='flex-1 min-h-0'>
+            <SceneGraphView
+              root={graphRoot}
+              filter={filter}
+              collapsed={filtering ? filteredCollapsed : collapsed}
+              onToggleCollapse={toggleGraphCollapse}
+              selectedIds={graphSelected}
+              primaryId={selectedNode ?? null}
+              onSelect={handleGraphSelect}
+              editingId={graphEditingId}
+              onStartRename={setGraphEditingId}
+              onRename={(id, name) => { setGraphEditingId(null); handleRename({ id, name }); }}
+              onCancelRename={() => setGraphEditingId(null)}
+              canEdit={canEditNode}
+              canMove={!isPlayMode && !structureLocked}
+              onMove={handleGraphMove} />
+          </div>
+        : <div ref={viewportRef} className='flex-1 min-h-0'>
+            { dndManager && size.height > 0 &&
+              <Tree<NodeDescription>
+                ref={setTreeApi}
+                data={data}
+                dndManager={dndManager}
+                width={size.width}
+                height={size.height}
+                rowHeight={ROW_HEIGHT}
+                indent={INDENT}
+                openByDefault
+                initialOpenState={treeOpenState}
+                onToggle={handleTreeToggle}
+                selectionFollowsFocus
+                searchTerm={filter}
+                searchMatch={(node, term) => nameMatches(node.data.name, term)}
+                onSelect={handleSelect}
+                onMove={handleMove}
+                onRename={handleRename}
+                onDelete={handleDelete}
+                disableEdit={(d) => isPlayMode || structureLocked || d.id === rootId}
+                disableDrop={({ parentNode }) => isPlayMode || structureLocked || !!parentNode.data.templateId || !editorScene?.getNodeById(parentNode.id)}
+                renderCursor={DropCursor}
+                className='outline-none'>
+                {SceneNodeRow}
+              </Tree>
+            }
+          </div> }
     </div>
   )
 }

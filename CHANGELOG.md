@@ -16,6 +16,15 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Scene graph view.** The Scene panel can draw the hierarchy as a top-down graph: the button beside
+  **Filter nodes** switches between the tree and the graph, and the panel remembers which you used.
+  - *Narrow by design.* Children that have no children of their own stack into one column under their
+    parent, so a wide scene still fits the side panel.
+  - *Everything the tree does.* The filter, selection kept in step with the viewport (arrow keys move to
+    the nearest card), rename, delete, the eye, script and template buttons, collapse (shared with the
+    tree), drag to re-parent or re-order, script and new-node drops, and dragging a card out to the
+    Assets panel or a node field.
+
 - **Docs inside the apps.** The editor and Cleo Creator read their own documentation now.
   - *Help ▸ Documentation* (**F1**) opens the docs in a floating window that leaves the app usable: a
     contents sidebar in the README's order, search over titles, sections and every documented term,
