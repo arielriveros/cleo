@@ -919,7 +919,7 @@ function createEditorScene(): Scene {
 }
 
 /** The editor's camera preferences, as the shared view camera reads them. Read per frame, so a change applies at once. */
-function viewCameraPrefs(): ViewCameraPrefs {
+export function viewCameraPrefs(): ViewCameraPrefs {
   const prefs = getEditorPrefs();
   return { flySpeed: prefs.cameraFlySpeed, lookSensitivity: prefs.cameraLookSensitivity };
 }
@@ -6419,7 +6419,11 @@ export function EngineProvider(props: { children: React.ReactNode }) {
 
       // `const`, not `let`: it is never reassigned, and const is what lets the null-guard below narrow
       // it inside the onUpdate closures too (a captured `let` could be reassigned, so TS re-widens it).
-      const cameraNode = instanceRef.current.scene.activeCamera;
+      // The scene's own editor camera rather than whichever is pinned: in a split viewport the pinned
+      // camera can be a preview pane's (features/viewportPanes), which keeps a rig of its own.
+      const rigScene = instanceRef.current.scene;
+      const cameraNode = rigScene.getNodesByName('__editor__Camera').find((n): n is CameraNode => n instanceof CameraNode)
+        ?? rigScene.activeCamera;
       // Scene.activeCamera is undefined when no camera is active — nothing to reconfigure.
       if (!cameraNode) return;
 
@@ -6452,7 +6456,10 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         else cameraNode.setZ(10).setRotation([0, 180, 0]);
         // Navigation is the app-kit's shared view camera; the EditorCamera map it reads is turned OFF
         // during a gizmo drag and during Play, so a held key cancels rather than freezing mid-motion.
-        cameraNode.onUpdate = (delta) => stepViewCamera2D(cameraNode, delta, viewCameraPrefs());
+        // Only while it is the camera being viewed through: a split viewport navigates its focused pane.
+        cameraNode.onUpdate = (delta) => {
+          if (instanceRef.current?.scene?.activeCamera === cameraNode) stepViewCamera2D(cameraNode, delta, viewCameraPrefs());
+        };
 
         // Orient the infinite grid onto the front (XY) plane for 2D.
         instanceRef.current.renderer.setGridPlane('xy');
@@ -6462,7 +6469,9 @@ export function EngineProvider(props: { children: React.ReactNode }) {
         // Unlike 2D there is no default pose to fall back to — a first switch to 3D keeps whatever the
         // scene set up. Only a remembered pose moves the camera.
         if (remembered) cameraNode.setPosition(remembered.position).setRotation(remembered.rotation);
-        cameraNode.onUpdate = (delta) => stepViewCamera3D(cameraNode, delta, viewCameraPrefs());
+        cameraNode.onUpdate = (delta) => {
+          if (instanceRef.current?.scene?.activeCamera === cameraNode) stepViewCamera3D(cameraNode, delta, viewCameraPrefs());
+        };
 
         // Orient the infinite grid onto the ground (XZ) plane for 3D.
         instanceRef.current.renderer.setGridPlane('xz');

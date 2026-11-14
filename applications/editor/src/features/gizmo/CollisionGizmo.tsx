@@ -9,6 +9,7 @@ import { useDebugVisibility } from '../DebugVisibilityContext';
 import type { ShapeDescription } from '../engineContextTypes';
 import { isWithinTemplateInstance } from '../../utils/templates';
 import { closestPointOnAxisToRay } from '@cleo/app-kit/gizmo/gizmoMath';
+import { fitOverlayToView, viewRectOf } from '@cleo/app-kit/engine/viewRect';
 import { snapSteps, type TransformPatch, type GizmoOverlayModel } from '@cleo/app-kit/gizmo/gizmoDrag';
 import TransformGizmo from './TransformGizmo';
 import GizmoDragOverlay, { type GizmoOverlayHandle } from './GizmoDragOverlay';
@@ -200,9 +201,10 @@ export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
   // View helpers
   // ------------------------------------------------------------------------------------------------
 
+  // The rectangle the active camera draws into: the editing pane of a split viewport, else the viewport.
   const view = () => {
     const cam = instance?.scene?.activeCamera?.camera;
-    const rect = viewportRef.current?.getBoundingClientRect();
+    const rect = viewRectOf(instance, viewportRef.current);
     if (!cam || !rect) return null;
     return { cam, rect, viewProj: mat4.multiply(mat4.create(), cam.projectionMatrix, cam.viewMatrix) };
   };
@@ -229,6 +231,7 @@ export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
         return;
       }
       root.style.display = '';
+      fitOverlayToView(root, viewportRef.current, v.rect);
       const owner = ownerPose(target);
       const camPos = v.cam.position;
 
@@ -270,7 +273,9 @@ export default function CollisionGizmo({ selectedNodeId, viewportRef }: Props) {
           lines: [{ points: [opposite, point], color, dashed: true }],
           labels: [{ at: point, text: dimensionReadout(shape, drag.handle, owner.scale), color }],
         };
-        overlayRef.current?.draw(model, { viewProj: v.viewProj, width: v.rect.width, height: v.rect.height });
+        const host = viewportRef.current?.getBoundingClientRect();
+        overlayRef.current?.draw(model, { viewProj: v.viewProj, width: v.rect.width, height: v.rect.height,
+                                          left: host ? v.rect.left - host.left : 0, top: host ? v.rect.top - host.top : 0 });
       } else {
         overlayRef.current?.draw(null, null);
       }

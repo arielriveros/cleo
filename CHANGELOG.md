@@ -16,6 +16,17 @@ in a hand. Turn-in-place picks the right clip when the camera swings behind.
 
 ### Features
 
+- **Split viewport.** The viewport divides into two side-by-side, two stacked or four panes, each looking
+  through its own camera: the editor camera, a free perspective camera, or an orthographic Top, Bottom,
+  Front, Back, Left or Right view.
+  - *One editing pane.* The pane you click is the one you edit; selection, gizmos, drag-drop and navigation
+    work through it, rendered exactly as a single viewport is.
+  - *Preview panes.* The others draw the same scene in the same frame, lit and shadowed, with the overlays
+    and without the gizmos. They skip what builds up over frames and borrow the editing pane's exposure
+    and level of detail, so they cost no extra GPU memory.
+  - *Redrawn on change.* A preview redraws when the scene or its camera changes; **Realtime** redraws it
+    every frame. The layout and every pane's camera are kept per project.
+
 - **Play in window.** The ▾ beside Play picks where the game runs: **Play in editor**, in the viewport as
   before, or **Play in window**, in a window and a renderer process of its own. A script stuck in a loop or
   stopped at a breakpoint stays in there; the editor keeps working.

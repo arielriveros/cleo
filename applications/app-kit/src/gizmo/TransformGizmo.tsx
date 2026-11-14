@@ -16,6 +16,7 @@ import {
     type GizmoOverlayModel,
 } from './gizmoDrag';
 import GizmoDragOverlay, { type GizmoOverlayHandle } from './GizmoDragOverlay';
+import { viewRectOf } from '../engine/viewRect';
 
 /** What the gizmo announces drags on: `GIZMO_DRAG_START` / `GIZMO_DRAG_END`. */
 export interface GizmoBus { emit(event: string, ...args: any[]): unknown }
@@ -136,9 +137,10 @@ export default function TransformGizmoView({
         return { origin, axes, scale, toCamera };
     };
 
+    // The rectangle the active camera draws into: the editing pane of a split viewport, else the viewport.
     const viewContext = (cursor: { x: number; y: number }, delta: { x: number; y: number }): DragViewContext | null => {
         const cam = instance?.scene?.activeCamera?.camera;
-        const rect = viewportRef.current?.getBoundingClientRect();
+        const rect = viewRectOf(instance, viewportRef.current);
         if (!cam || !rect) return null;
         return {
             viewProj: mat4.multiply(mat4.create(), cam.projectionMatrix, cam.viewMatrix),
@@ -151,13 +153,13 @@ export default function TransformGizmoView({
 
     const rayAt = (cursor: { x: number; y: number }) => {
         const cam = instance?.scene?.activeCamera?.camera;
-        const rect = viewportRef.current?.getBoundingClientRect();
+        const rect = viewRectOf(instance, viewportRef.current);
         if (!cam || !rect) return null;
         return Raycaster.screenToRay(cursor.x, cursor.y, rect.width, rect.height, cam);
     };
 
     const cursorFromEvent = (event: MouseEvent) => {
-        const rect = viewportRef.current!.getBoundingClientRect();
+        const rect = viewRectOf(instance, viewportRef.current) ?? viewportRef.current!.getBoundingClientRect();
         return { x: event.clientX - rect.left, y: event.clientY - rect.top };
     };
 
@@ -221,13 +223,16 @@ export default function TransformGizmoView({
             tintHandles(handles, hoverRef.current, drag?.handle ?? null);
             thickenHandles(handles, hoverRef.current, drag?.handle ?? null);
 
-            const rect = viewportRef.current?.getBoundingClientRect();
+            const rect = viewRectOf(instance, viewportRef.current);
             const cam = instance.scene?.activeCamera?.camera;
             if (drag && rect && cam) {
+                const host = viewportRef.current?.getBoundingClientRect();
                 overlayRef.current?.draw(overlayModelRef.current, {
                     viewProj: mat4.multiply(mat4.create(), cam.projectionMatrix, cam.viewMatrix),
                     width: rect.width,
                     height: rect.height,
+                    left: host ? rect.left - host.left : 0,
+                    top: host ? rect.top - host.top : 0,
                 });
             } else {
                 overlayRef.current?.draw(null, null);
